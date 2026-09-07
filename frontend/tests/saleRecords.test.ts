@@ -132,6 +132,17 @@ runTest('a field present on only one side still gets a row', () => {
   assert.equal(reason?.changed, true)
 })
 
+runTest('return status uses the localized status field contract', () => {
+  const rows = saleRecordFieldRows({
+    id: 'return-bulk:op:1',
+    before: { return_status: 'completed' },
+    after: { return_status: 'cancelled' },
+  })
+  assert.equal(rows[0]?.field, 'return_status')
+  assert.equal(rows[0]?.labelKey, 'status')
+  assert.equal(rows[0]?.format, 'status')
+})
+
 runTest('the default list is unfiltered, and clearing the filter means all again', () => {
   assert.equal(filterSaleRecords(RECORDS, new Set()).length, RECORDS.length, 'an empty selection means ALL, never none')
   assert.deepEqual(

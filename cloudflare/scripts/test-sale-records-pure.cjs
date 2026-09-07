@@ -81,6 +81,9 @@ const {
   bulkRecord,
   ledgerRecord,
   orderSaleRecords,
+  reconstructSaleCreation,
+  returnAuditRecord,
+  returnBulkEventRecord,
   saleCreatedRecord,
   saleRecordsCountBinds,
   SALE_RECORDS_SELF_COUNT,
@@ -253,7 +256,7 @@ runTest('settling a credit sale is its own kind, and cancelling is not just "sta
   assert.strictEqual(plain.kind, 'status_changed')
 })
 
-runTest('sale creation includes products and original tender amounts', () => {
+runTest('sale creation includes products and original tender amounts when no later writer changed them', () => {
   const created = saleCreatedRecord(SALE)
   assert.deepStrictEqual(created.after.products, [
     { product: 'Serum', quantity: 1, unit_price_usd: 12.5, line_total_usd: 12.5 },
@@ -261,6 +264,45 @@ runTest('sale creation includes products and original tender amounts', () => {
   assert.strictEqual(created.after.payment_method, 'Cash')
   assert.strictEqual(created.after.amount_paid_usd, 12.5)
   assert.deepStrictEqual(created.after.payment_details, [{ method: 'Cash', amount_usd: 12.5, amount_khr: 0 }])
+})
+
+runTest('sale creation reconstructs immutable originals instead of restating the current mutable row', () => {
+  const current = {
+    ...SALE,
+    sale_status: 'completed',
+    total_usd: 15.5,
+    payment_method: 'Cash',
+    payment_details: JSON.stringify([{ method: 'Cash', amount_usd: 15.5 }]),
+    amount_paid_usd: 15.5,
+    items: [{ product_name: 'Serum', quantity: 2, applied_price_usd: 7.75, total_usd: 15.5 }],
+  }
+  const settlement = {
+    id: 700, action: 'sale_settlement', user_name: 'modifier-b', created_at: '2026-09-06 12:30:00',
+    details: JSON.stringify({
+      before: { sale_status: 'awaiting_payment', payment_method: null, payment_details: null, amount_paid_usd: 0, amount_paid_khr: 0 },
+      after: { sale_status: 'completed', payment_method: 'Cash', payment_details: current.payment_details, amount_paid_usd: 15.5, amount_paid_khr: 0 },
+    }),
+  }
+  const original = reconstructSaleCreation({ sale: current, ledger: LEDGER, audit: [settlement], bulk: [] })
+  const record = saleCreatedRecord(original)
+  assert.strictEqual(record.actor_username, 'sokha', 'creator A remains the creation actor')
+  assert.strictEqual(record.after.sale_status, 'awaiting_payment')
+  assert.strictEqual(record.after.total_usd, 12)
+  assert.strictEqual(record.after.payment_method, null)
+  assert.strictEqual(record.after.amount_paid_usd, 0)
+  assert.strictEqual(record.after.products, null, 'changed lines are explicitly unknown, never current rows called original')
+})
+
+runTest('durable mutation receipt preserves the original tender after audit retention', () => {
+  const current = { ...SALE, sale_status: 'completed', payment_method: 'Card', amount_paid_usd: 20 }
+  const mutations = [{
+    created_at: '2026-09-06 12:00:00',
+    before_json: JSON.stringify({ sale_status: 'awaiting_payment', payment_method: null, payment_details: null, amount_paid_usd: 0 }),
+  }]
+  const record = saleCreatedRecord(reconstructSaleCreation({ sale: current, mutations }))
+  assert.strictEqual(record.after.sale_status, 'awaiting_payment')
+  assert.strictEqual(record.after.payment_method, null)
+  assert.strictEqual(record.after.amount_paid_usd, 0)
 })
 
 runTest('a payment correction is one rich record, not a status-only duplicate', () => {
@@ -338,29 +380,30 @@ runTest('the add-items undo applier writes BOTH a ledger row and an audit row, a
   assert.ok(settlement && settlement.kind === 'undone', 'sale.settlement replays stay in the list')
 })
 
-runTest('a return is a change to the SALE row, so it is a record on the sale', () => {
-  // routes/returns.ts:1658 and :2558 and lib/returnBulkAction.ts:253 all write
-  // sales.sale_status = 'returned' / 'partial_return' (and back). None of them
-  // writes an entity 'sale' audit row -- returns.ts:2563 audits entity 'return'
-  // -- so without a returns source the one change the shop cares about most is
-  // missing from the sale's own history.
+runTest('return creation and later update are separate events with their actual actors', () => {
   const returns = [{
     id: 5, return_number: 'R-0005', status: 'completed', return_scope: 'customer',
-    total_refund_usd: 3, cashier_name: 'dara',
+    total_refund_usd: 3, cashier_name: 'creator-a',
     created_at: '2026-09-06 14:00:00', updated_at: '2026-09-06 14:00:00', is_current: 1,
   }]
-  const sale = { ...SALE, sale_status: 'partial_return', status_before_return: 'completed' }
-  const records = buildSaleRecords({ sale, ledger: [], audit: [], bulk: [], returns })
+  const returnAudit = [{
+    audit_id: 801, return_id: 5, action: 'create', user_name: 'creator-a',
+    created_at: '2026-09-06 14:00:00', return_number: 'R-0005', details: JSON.stringify({ reason: 'Wrong shade' }),
+  }, {
+    audit_id: 802, return_id: 5, action: 'update', user_name: 'modifier-b',
+    created_at: '2026-09-06 15:00:00', return_number: 'R-0005', details: JSON.stringify({ reason: 'Changed quantity' }),
+  }]
+  const records = buildSaleRecords({ sale: SALE, ledger: [], audit: [], bulk: [], returns, returnAudit })
   const changes = records.filter((r) => r.source === 'return')
-  assert.strictEqual(changes.length, 1, 'exactly one record per customer-scope return')
-  assert.strictEqual(changes[0].id, 'return:5')
+  assert.strictEqual(changes.length, 2, 'creation and edit are separate acts')
+  assert.strictEqual(changes[0].id, 'return-audit:801')
   assert.strictEqual(changes[0].kind, 'status_changed')
-  assert.strictEqual(changes[0].actor_username, 'dara')
+  assert.strictEqual(changes[0].actor_username, 'creator-a')
   assert.strictEqual(changes[0].subject, 'R-0005', 'the subject is the return the reader must open next')
-  assert.strictEqual(changes[0].summary, 'Partial return')
-  assert.deepStrictEqual(changes[0].before, { sale_status: 'completed' })
-  assert.strictEqual(changes[0].after.sale_status, 'partial_return')
-  assert.strictEqual(changes[0].after.refund_usd, 3)
+  assert.deepStrictEqual(changes[0].after, { return_status: 'completed', reason: 'Wrong shade' })
+  assert.strictEqual(changes[1].actor_username, 'modifier-b')
+  assert.strictEqual(changes[1].at, '2026-09-06 15:00:00')
+  assert.deepStrictEqual(changes[1].after, { reason: 'Changed quantity' })
 })
 
 runTest('a supplier-scope return never touched sales.sale_status, so it is not a sale record', () => {
@@ -381,20 +424,29 @@ runTest('a supplier-scope return never touched sales.sale_status, so it is not a
   }]
   const records = buildSaleRecords({ sale: SALE, ledger: [], audit: [], bulk: [], returns })
   const kept = records.filter((r) => r.source === 'return')
-  assert.deepStrictEqual(kept.map((r) => r.id), ['return:8'], 'the supplier one is dropped, the customer one is not')
+  assert.deepStrictEqual(kept.map((r) => r.id), ['return-legacy:8'], 'the supplier one is dropped, the customer one is not')
+  assert.strictEqual(kept[0].after, null, 'legacy current state is not presented as an original snapshot')
 })
 
-runTest('a cancelled return is stamped when it was cancelled, and says the sale came back', () => {
-  const returns = [{
-    id: 7, return_number: 'R-0007', status: 'cancelled', return_scope: 'customer',
-    total_refund_usd: 3, cashier_name: 'sokha',
-    created_at: '2026-09-06 14:00:00', updated_at: '2026-09-06 16:30:00', is_current: 0,
-  }]
-  const records = buildSaleRecords({ sale: SALE, ledger: [], audit: [], bulk: [], returns })
-  const record = records.find((r) => r.source === 'return')
-  assert.strictEqual(record.summary, 'Return cancelled')
-  // created_at would place the reversal two and a half hours before it happened.
-  assert.strictEqual(record.at, '2026-09-06 16:30:00')
+runTest('return bulk cancel, undo and redo keep exact direction, actor and time', () => {
+  const base = {
+    operation_id: 'return-op', return_id: 7, return_number: 'R-0007',
+    request_json: JSON.stringify({ field: 'status', source: 'completed', target: 'cancelled' }),
+    receipt_json: JSON.stringify({ items: [{ id: 7, before: 'completed', after: 'cancelled', changed: true }] }),
+  }
+  const cancel = returnBulkEventRecord({ ...base, audit_id: 810, action: 'return_fields_bulk', user_name: 'modifier-b', created_at: '2026-09-06 16:30:00' })
+  const undo = returnBulkEventRecord({ ...base, audit_id: 811, action: 'action_undo', user_name: 'manager-c', created_at: '2026-09-06 17:00:00' })
+  const redo = returnBulkEventRecord({ ...base, audit_id: 812, action: 'action_redo', user_name: 'manager-d', created_at: '2026-09-06 17:30:00' })
+  assert.strictEqual(cancel.actor_username, 'modifier-b')
+  assert.deepStrictEqual(cancel.before, { return_status: 'completed' })
+  assert.deepStrictEqual(cancel.after, { return_status: 'cancelled' })
+  assert.strictEqual(undo.actor_username, 'manager-c')
+  assert.strictEqual(undo.via, 'undo')
+  assert.deepStrictEqual(undo.before, { return_status: 'cancelled' })
+  assert.deepStrictEqual(undo.after, { return_status: 'completed' })
+  assert.strictEqual(redo.actor_username, 'manager-d')
+  assert.strictEqual(redo.via, 'redo')
+  assert.strictEqual(redo.at, '2026-09-06 17:30:00')
 })
 
 runTest("a bulk action finds THIS sale's own before/after inside the operation receipt", () => {
@@ -461,6 +513,10 @@ function setup(withCostKind) {
       receipt_json TEXT NOT NULL, UNIQUE(actor_id, request_id));
     CREATE TABLE sale_bulk_members (operation_id TEXT NOT NULL, sale_id INTEGER NOT NULL, revision INTEGER NOT NULL,
       movement_fingerprint TEXT NOT NULL, PRIMARY KEY(operation_id, sale_id));
+    CREATE TABLE return_bulk_operations (id TEXT PRIMARY KEY, request_json TEXT NOT NULL, receipt_json TEXT NOT NULL,
+      history_id INTEGER);
+    CREATE TABLE return_bulk_members (operation_id TEXT NOT NULL, return_id INTEGER NOT NULL, sale_id INTEGER,
+      PRIMARY KEY(operation_id, return_id));
     CREATE TABLE returns (id INTEGER PRIMARY KEY AUTOINCREMENT, return_number TEXT, sale_id INTEGER,
       cashier_name TEXT, status TEXT DEFAULT 'completed', return_scope TEXT DEFAULT 'customer',
       total_refund_usd REAL DEFAULT 0, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -520,6 +576,23 @@ const RETURNS = [
     created_at: '2026-09-06 15:00:00', updated_at: '2026-09-06 15:00:00', is_current: 0,
   },
 ]
+const RETURN_AUDIT = [{
+  audit_id: 701, return_id: 5, action: 'create', user_name: 'creator-a',
+  created_at: '2026-09-06 14:00:00', return_number: 'R-0005', details: JSON.stringify({ reason: 'Wrong shade' }),
+}, {
+  audit_id: 702, return_id: 5, action: 'update', user_name: 'modifier-b',
+  created_at: '2026-09-06 15:30:00', return_number: 'R-0005', details: JSON.stringify({ reason: 'Changed quantity' }),
+}]
+const RETURN_BULK_BASE = {
+  operation_id: 'return-op', return_id: 5, return_number: 'R-0005',
+  request_json: JSON.stringify({ field: 'status', source: 'completed', target: 'cancelled' }),
+  receipt_json: JSON.stringify({ items: [{ id: 5, before: 'completed', after: 'cancelled', changed: true }] }),
+}
+const RETURN_BULK_EVENTS = [
+  { ...RETURN_BULK_BASE, audit_id: 703, action: 'return_fields_bulk', user_name: 'modifier-b', created_at: '2026-09-06 16:00:00' },
+  { ...RETURN_BULK_BASE, audit_id: 704, action: 'action_undo', user_name: 'manager-c', created_at: '2026-09-06 16:30:00' },
+  { ...RETURN_BULK_BASE, audit_id: 705, action: 'action_redo', user_name: 'manager-d', created_at: '2026-09-06 17:00:00' },
+]
 // The sale as the database holds it once the return has landed.
 const SALE_RETURNED = { ...SALE, sale_status: 'partial_return', status_before_return: 'completed' }
 
@@ -553,6 +626,18 @@ function seedRecords(sqlite) {
       r: row.total_refund_usd, at: row.created_at, up: row.updated_at,
     })
   }
+  for (const row of RETURN_AUDIT) {
+    sqlite.prepare("INSERT INTO audit_logs (id, user_name, action, entity, entity_id, details, created_at) VALUES (@id,@u,@a,'return',@returnId,@d,@at)")
+      .run({ id: row.audit_id, u: row.user_name, a: row.action, returnId: String(row.return_id), d: row.details, at: row.created_at })
+  }
+  sqlite.prepare("INSERT INTO return_bulk_operations (id, request_json, receipt_json, history_id) VALUES ('return-op',@req,@receipt,91)")
+    .run({ req: RETURN_BULK_BASE.request_json, receipt: RETURN_BULK_BASE.receipt_json })
+  sqlite.prepare("INSERT INTO return_bulk_members (operation_id, return_id, sale_id) VALUES ('return-op',5,77)").run()
+  sqlite.prepare("INSERT INTO action_history (id, scope, entity, entity_id, label, created_by_name, created_at) VALUES (91,'returns','return','return-op','return cancelled','modifier-b','2026-09-06 16:00:00')").run()
+  for (const row of RETURN_BULK_EVENTS.filter((event) => event.action !== 'return_fields_bulk')) {
+    sqlite.prepare("INSERT INTO audit_logs (id, user_name, action, entity, entity_id, details, created_at) VALUES (@id,@u,@a,'return','return-op','{}',@at)")
+      .run({ id: row.audit_id, u: row.user_name, a: row.action, at: row.created_at })
+  }
   // A return on the OTHER sale: sale 78's count must move by exactly one, and
   // sale 77's must not move at all.
   sqlite.prepare("INSERT INTO returns (id, return_number, sale_id, cashier_name, status, return_scope, total_refund_usd, created_at, updated_at) VALUES (9,'R-0009',78,'sokha','completed','customer',1,'2026-09-06 19:30:00','2026-09-06 19:30:00')").run()
@@ -574,7 +659,7 @@ runTest('the list-row count equals the number of lines the float shows, for both
   const ids = [77, 78]
   const placeholders = ids.map(() => '?').join(',')
   const sql = buildSaleRecordsCountSql(placeholders)
-  assert.strictEqual(SALE_RECORDS_COUNT_BINDS_PER_ID, 4, 'the chunker has to know how many lists each id is bound into')
+  assert.strictEqual(SALE_RECORDS_COUNT_BINDS_PER_ID, 6, 'the chunker has to know how many lists each id is bound into')
   const rows = sqlite.prepare(sql).all(...saleRecordsCountBinds(ids))
   const counts = new Map(rows.map((row) => [Number(row.sale_id), Number(row.n)]))
 
@@ -587,11 +672,11 @@ runTest('the list-row count equals the number of lines the float shows, for both
   // other -- and this is the assertion that makes them one number.
   const detail77 = buildSaleRecords({
     sale: SALE_RETURNED, ledger: [...LEDGER, UNDO_LEDGER, REDO_LEDGER], audit: [...AUDIT, UNDO_AUDIT, REDO_AUDIT],
-    bulk: BULK, returns: RETURNS,
+    bulk: BULK, returns: RETURNS, returnAudit: RETURN_AUDIT, returnBulk: RETURN_BULK_EVENTS,
   })
   assert.strictEqual(count77, detail77.length, 'the row badge and the float must agree')
-  assert.strictEqual(count77, 10,
-    '5 ledger + 2 audit (the amend twin and both add-items twins suppressed) + 1 bulk + 1 customer return + the sale itself')
+  assert.strictEqual(count77, 14,
+    '5 ledger + 2 sale audit + 1 sale bulk + 2 individual return acts + 3 return bulk/replays + the sale itself')
   assert.strictEqual(count78, 3, "sale 78's own creation, the one audit row about it, and its return")
 
   // The discriminating half, three ways -- each is a suppression a plausible
@@ -601,10 +686,11 @@ runTest('the list-row count equals the number of lines the float shows, for both
   assert.strictEqual(detail77.filter((r) => r.source === 'audit').length, 2, 'but only two of them are records')
   const naiveReturns = sqlite.prepare('SELECT COUNT(*) n FROM returns WHERE sale_id=77').get().n
   assert.strictEqual(naiveReturns, 2, 'two returns exist on sale 77')
-  assert.strictEqual(detail77.filter((r) => r.source === 'return').length, 1, 'but the supplier one never moved the sale')
+  assert.strictEqual(detail77.filter((r) => r.source === 'return').length, 5,
+    'the customer return has create/edit/cancel/undo/redo events; the supplier return remains absent')
   assert.strictEqual(
-    detail77.filter((r) => r.via === 'undo' || r.via === 'redo').length, 2,
-    'the add-items undo and its redo are their ledger rows, once each',
+    detail77.filter((r) => r.via === 'undo' || r.via === 'redo').length, 4,
+    'sale line and return status undo/redo are each represented once',
   )
   sqlite.close()
 })
@@ -634,11 +720,11 @@ runTest('the audit half of the count binds the sale id as TEXT, which is why the
   // matches NOTHING in audit_logs, so the badge silently drops every status
   // change and every customer swap.
   const sql = buildSaleRecordsCountSql('?')
-  const numberBound = sqlite.prepare(sql).all(77, 77, 77, 77)
+  const numberBound = sqlite.prepare(sql).all(77, 77, 77, 77, 77, 77)
   const viaHelper = sqlite.prepare(sql).all(...saleRecordsCountBinds([77]))
   const sum = (rows) => rows.reduce((total, row) => total + Number(row.n), 0)
-  assert.strictEqual(sum(numberBound), 7, 'number-bound: the two audit records vanish')
-  assert.strictEqual(sum(viaHelper), 9, 'text-bound: 5 ledger + 2 audit + 1 bulk + 1 customer return')
+  assert.strictEqual(sum(numberBound), 11, 'number-bound: only the two sale audit records vanish')
+  assert.strictEqual(sum(viaHelper), 13, 'text-bound: every non-creation event is counted')
   sqlite.close()
 })
 
@@ -695,18 +781,23 @@ runTest('the Worker route is actually wired to this module', () => {
   assert.match(ROUTES, /from '\.\.\/lib\/saleRecords'/, 'routes/sales.ts must read the records union from the pure module')
   assert.match(ROUTES, /app\.get\('\/:id\/records'/, 'GET /api/sales/:id/records must exist')
   assert.match(ROUTES, /buildSaleRecordsCountSql/, 'the list must carry records_count from the shared count SQL')
-  // The fifth read. A returns source the route never queries is a source that
-  // exists only in the tests.
+  // Return row, individual audit, and grouped audit/receipt are all needed:
+  // creator A on the row cannot stand in for modifier B.
   assert.match(ROUTES, /FROM returns r\s+WHERE r\.sale_id = \?/,
     'the route must read the returns that rewrote this sale status')
   assert.match(ROUTES, /returns: returnRows/, 'and hand them to the union')
+  assert.match(ROUTES, /returnAudit: returnAuditRows/)
+  assert.match(ROUTES, /returnBulk: returnBulkRows/)
+  assert.match(ROUTES, /JOIN return_bulk_operations/)
+  assert.match(ROUTES, /FROM sale_mutation_receipts/,
+    'permanent mutation before-snapshots survive audit retention for creation reconstruction')
   assert.match(ROUTES, /status_before_return/, "the returns source's before comes from the sale row")
   // The customer-scope filter, in the route AND in the count SQL: a supplier
   // return never moved sales.sale_status, and counting it would put a number on
   // the row that the float cannot account for.
   assert.match(ROUTES, /COALESCE\(r\.return_scope,'customer'\) = 'customer'/)
   assert.match(buildSaleRecordsCountSql('?'), /COALESCE\(return_scope, 'customer'\) = 'customer'/)
-  assert.match(buildSaleRecordsCountSql('?'), /json_extract\(a\.details, '\$\.applier'\) = 'sale\.add_items'/,
+  assert.match(buildSaleRecordsCountSql('?'), /json_extract\(a\.details, '\$\.applier'\)[^\n]*= 'sale\.add_items'/,
     'the count SQL must drop the add-items undo twin the classifier drops')
 })
 
@@ -714,12 +805,14 @@ runTest('the records route is gated on READING a sale, not on amending one', () 
   const body = routeBody("app.get('/:id/records'")
   assert.match(body, /canReadSales\(/, 'a view-tier bookkeeper who can see the sale can see how it got that way')
   assert.ok(!/getActionTier|hasPermission\(/.test(body), 'gating this on the amend action would hide the trail from the people who reconcile the books')
-  // All four sources, or the union is a union of three.
+  // Every durable source needed by the union and creation reconstruction.
   assert.match(body, /FROM sale_amendments/)
   assert.match(body, /FROM audit_logs/)
   assert.match(body, /FROM sale_items WHERE sale_id = \?/, 'sale creation must include the products actually recorded')
-  assert.match(body, /payment_method, payment_details, amount_paid_usd, amount_paid_khr/, 'sale creation must include its original tender')
+  assert.match(body, /payment_method, payment_details, amount_paid_usd, amount_paid_khr/)
+  assert.match(body, /FROM sale_mutation_receipts/, 'current tender alone must not be called original')
   assert.match(body, /FROM sale_bulk_members/)
+  assert.match(body, /JOIN return_bulk_operations/)
   assert.match(body, /buildSaleRecords\(/)
   // The TEXT bind, in the route as well as in the count SQL.
   assert.match(body, /String\(saleId\)/, "audit_logs.entity_id is TEXT; binding the number matches nothing")
@@ -728,7 +821,7 @@ runTest('the records route is gated on READING a sale, not on amending one', () 
 runTest('the list badge is one statement per chunk, not one query per sale', () => {
   const list = ROUTES.slice(ROUTES.indexOf('const recordsBySale'), ROUTES.indexOf('records_count:'))
   assert.match(list, /chunkForBinding\(saleIds, 0, SALE_RECORDS_COUNT_BINDS_PER_ID\)/,
-    'each id is bound into three IN lists, so the chunker must be told that cost')
+    'the chunker must account for every repeated id list in the count union')
   assert.ok(!/for \(const sale of sales\)/.test(list), 'a per-sale loop over the database is the N+1 this exists to avoid')
   assert.match(ROUTES, /records_count: \(recordsBySale\.get\(sale\.id\) \|\| 0\) \+ SALE_RECORDS_SELF_COUNT/,
     'the badge adds the sale\'s own creation, which no table records')
