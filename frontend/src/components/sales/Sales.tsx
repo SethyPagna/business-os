@@ -27,7 +27,7 @@ import { pruneSelectionToVisibleIds } from '../../utils/rowSelection.ts'
 import { createLongPressState, type LongPressState } from '../../utils/longPress.ts'
 import { buildTimeActionSections, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.ts'
 import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
-import { buildBulkSaleCancelInput, getSales as fetchSales, getSalesStats as fetchSalesStats, getSalesStatsStrip, updateSalesBulkField, updateSalesBulkStatus, type BulkSaleStatusItem, type BulkSaleStatusPayload, type BulkSaleUpdatePayload } from '../../api/salesTransport.ts'
+import { buildBulkSaleCancelInput, getSales as fetchSales, getSalesStats as fetchSalesStats, getSalesStatsStrip, updateSalesBulkField, updateSalesBulkStatus, type BulkSaleStatusItem, type BulkSaleStatusPayload, type BulkSaleUpdatePayload, type SaleAmendmentRequest } from '../../api/salesTransport.ts'
 import { getCustomers, getDeliveryContacts } from '../../api/contactReadTransport.ts'
 import { getFeesReport } from '../../api/feesTransport.ts'
 import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
@@ -194,21 +194,15 @@ interface SaleItemAddition {
   applied_price_usd?: number
 }
 
-// S4-30: what the detail view asks the server to change, and the ledger rows
-// it reads back. The request shape is the one salesTransport.amendSale sends;
-// the row shape is migration 0115's, shared with utils/saleAmendments.ts so
-// the renderer and the caller cannot drift.
-interface SaleAmendmentRequest {
-  kind: 'line_quantity_increased' | 'line_quantity_decreased' | 'line_removed' | 'line_replaced' | 'delivery_fee_changed'
-  sale_item_id?: number
-  quantity?: number
-  delivery_fee_usd?: number
-  replacement?: { product_id: number; quantity: number; applied_price_usd?: number; branch_id?: number | null }
-  notes?: string
-  client_request_id: string
-  expected_exchange_rate: number
-  expected_updated_at?: string
-}
+// S4-30: what the detail view asks the server to change is
+// `SaleAmendmentRequest`, IMPORTED from api/salesTransport.ts above rather than
+// re-declared here. It used to be re-declared, verbatim, and that is what broke
+// the build on 4e58891f: adding one member to the `kind` union means editing
+// every hand-copy of it, and that commit found two of the three. A wire type
+// has exactly one home -- the module that puts it on the wire. The ledger ROW
+// shape is migration 0115's and lives in utils/saleAmendments.ts, for the same
+// reason. tests/saleAmendmentKindParity.test.ts now fails if any copy of the
+// union drifts from the canonical one, or from the Worker's accepted kinds.
 
 type SaleMutationReview = { client_request_id: string; expected_exchange_rate: number; expected_updated_at?: string }
 type SaleMutationUiResult = boolean | { exchangeRateChanged: number } | { mutationError: string }
