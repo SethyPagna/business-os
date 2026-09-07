@@ -1005,7 +1005,12 @@ body.lang-km .compact-analytics-legend {
   text-transform:uppercase;
 }
 .dark .dense-data-table .dense-day-row td { background:#202024; color:#a1a1aa; }
-.dense-cell-truncate { display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* -webkit-touch-callout: press-and-hold on a clipped one of these opens the
+   reveal panel (textAffordances.ts's touchstart gate), and iOS would
+   otherwise raise its own selection callout on top of it. The controller
+   already suppresses the Android/desktop context menu from JS; this is the
+   half only CSS can do. */
+.dense-cell-truncate { display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; -webkit-touch-callout:none; }
 .dense-id { font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; font-size:.68rem; letter-spacing:-.025em; }
 
 /* Text affordances -- the ONE float shared by the copy gesture and the

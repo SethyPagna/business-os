@@ -218,6 +218,13 @@ for (const token of ['.text-affordance-float', '.text-affordance-value', '.text-
   assert.ok(css.includes(token), `main.css must style ${token}`)
 }
 assert.ok(css.includes('.text-affordance-float[hidden]'), 'the closed panel must beat the display:flex rule explicitly')
+// Press-and-hold on a clipped dense cell is now this panel's gesture on
+// touch, so iOS must not raise its own selection callout over it -- the same
+// suppression the copy trigger already carries.
+for (const trigger of ['[data-copy-value]', '.dense-cell-truncate']) {
+  const rule = css.split('\n').find((line) => line.startsWith(`${trigger} {`)) || ''
+  assert.match(rule, /-webkit-touch-callout:\s*none/, `${trigger} must suppress the iOS long-press callout`)
+}
 assert.match(css, /\.dark \.text-affordance-float/, 'the float must be themed in dark mode')
 assert.match(controller, /document\.body\.appendChild\(host\)/, 'one body-level host, created by the controller itself')
 
