@@ -245,7 +245,10 @@ await runTest('every shared-Modal call site declares unsavedChanges -- no silent
   const modal = readFileSync(new URL('../src/components/shared/Modal.tsx', import.meta.url), 'utf8')
   // \r tolerated: this repo checks out CRLF (see progress.md's 1755bd6b note).
   assert.match(modal, /\n[ \t]*unsavedChanges: UnsavedChangesDeclaration\r?\n/, 'Modal.unsavedChanges must stay REQUIRED (no `?`)')
-  assert.match(modal, /onClick=\{closeGuard\.requestClose\}/, 'the ✕ must go through the guard, not straight to onClose')
+  assert.match(modal, /const requestClose = closeDisabled \? \(\) => \{\} : closeGuard\.requestClose/, 'the close lock may suppress dismissal but must otherwise delegate to the guard')
+  assert.match(modal, /onClick=\{requestClose\}/, 'the ✕ must use the locked guard path, not call onClose')
+  assert.match(modal, /disabled=\{closeDisabled\}/, 'the ✕ must communicate the in-flight close lock')
+  assert.match(modal, /<ModalCloseContext\.Provider value=\{requestClose\}>/, 'footer Cancel must use the same locked guard path')
 })
 
 await runTest('prompt minimize is capability-gated and never inferred from dirty work', () => {

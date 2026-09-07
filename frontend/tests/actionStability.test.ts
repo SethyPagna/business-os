@@ -242,11 +242,10 @@ await runTest('product form image upload and save keep synchronous guards', () =
   assert.match(source, /if \(!canManageImages \|\| imageUploading \|\| imageUploadInFlightRef\.current\) return/)
   assert.match(source, /imageUploadInFlightRef\.current = true/)
   assert.match(source, /finally \{[\s\S]*imageUploadInFlightRef\.current = false[\s\S]*setImageUploading\(false\)/)
-  // Guard now also blocks while an image is still uploading (Part 241
-  // save-button race fix, ProductForm.tsx) -- accept either the original
-  // two-condition guard or that extended form so this assertion doesn't
-  // regress if a future session drops the extra condition again.
-  assert.match(source, /if \(saving \|\| saveInFlightRef\.current(?: \|\| imageUploading)?\) return/)
+  // Both React state and the synchronous ref must block save while upload is
+  // opening the picker or posting bytes. The ref closes the same-tick gap
+  // before imageUploading has rendered.
+  assert.match(source, /if \(saving \|\| saveInFlightRef\.current \|\| imageUploading \|\| imageUploadInFlightRef\.current\) return/)
   assert.match(source, /saveInFlightRef\.current = true[\s\S]*const payload(?:: ProductSavePayload)? = \{/)
   assert.match(source, /finally \{[\s\S]*saveInFlightRef\.current = false[\s\S]*setSaving\(false\)/)
   assert.match(source, /const PRODUCT_FORM_IMAGE_UPLOAD_TIMEOUT_MS = 30000/)
