@@ -176,6 +176,10 @@ function saleData(overrides = {}) {
     [1, (sqlite) => sqlite.prepare(`UPDATE product_batches SET is_active = 0 WHERE id = 20`).run()],
     [2, (sqlite) => sqlite.prepare(`UPDATE product_batches SET lot_code = 'LOT-RENAMED' WHERE id = 20`).run()],
     [3, (sqlite) => sqlite.prepare(`DELETE FROM branch_batch_stock WHERE batch_id = 20 AND branch_id = 1`).run()],
+    [4, (sqlite) => {
+      sqlite.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, is_active, batch_number) VALUES (21, 10, 'lot-a-duplicate', ' lot-a ', 1, 2)`).run()
+      sqlite.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (21, 1, 1)`).run()
+    }],
   ]) {
     const invalidBatch = setup()
     mutate(invalidBatch.sqlite)
@@ -205,6 +209,47 @@ function saleData(overrides = {}) {
   assert.equal(racedBatch.sqlite.prepare('SELECT COUNT(*) n FROM import_sales_commits').get().n, 0)
   assert.equal(racedBatch.sqlite.prepare('SELECT stock_quantity FROM products WHERE id = 10').get().stock_quantity, 5)
   assert.equal(racedBatch.sqlite.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id = 20 AND branch_id = 1').get().quantity, 5)
+
+  const racedDuplicateBatch = setup()
+  racedDuplicateBatch.setBeforeBatch(() => {
+    racedDuplicateBatch.sqlite.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, is_active, batch_number) VALUES (21, 10, 'lot-a-duplicate', ' lot-a ', 1, 2)`).run()
+    racedDuplicateBatch.sqlite.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (21, 1, 1)`).run()
+  })
+  await assert.rejects(
+    () => subject.applyHistoricalSaleImport(racedDuplicateBatch.db, { jobId: 'job-raced-batch-duplicate', rowNumber: 5, data: saleData(), nowIso: input.nowIso, actor }),
+    /changed before the atomic write/,
+  )
+  assert.equal(racedDuplicateBatch.sqlite.prepare('SELECT COUNT(*) n FROM sales').get().n, 0)
+  assert.equal(racedDuplicateBatch.sqlite.prepare('SELECT COUNT(*) n FROM sale_items').get().n, 0)
+  assert.equal(racedDuplicateBatch.sqlite.prepare('SELECT COUNT(*) n FROM import_sales_commits').get().n, 0)
+
+  // The selected Shop and the uniqueness of the active Shop identity are
+  // equally authoritative at commit time. Exercise both batch-bearing and
+  // batch-free receipts so this guard cannot accidentally depend on lot rows.
+  const noBatchSale = saleData({ items: [{ ...saleData().items[0], batch_id: null, batch_label: null }] })
+  for (const [label, mutate, data] of [
+    ['deactivated', (sqlite) => sqlite.prepare(`UPDATE branches SET is_active = 0 WHERE id = 1`).run(), saleData()],
+    ['renamed', (sqlite) => sqlite.prepare(`UPDATE branches SET name = 'Former Shop' WHERE id = 1`).run(), noBatchSale],
+    ['deleted', (sqlite) => sqlite.prepare(`DELETE FROM branches WHERE id = 1`).run(), noBatchSale],
+    ['duplicated', (sqlite) => sqlite.prepare(`INSERT INTO branches (id, name, is_active) VALUES (3, ' shop ', 1)`).run(), noBatchSale],
+  ]) {
+    const racedBranch = setup()
+    racedBranch.setBeforeBatch(() => mutate(racedBranch.sqlite))
+    await assert.rejects(
+      () => subject.applyHistoricalSaleImport(racedBranch.db, {
+        jobId: `job-raced-branch-${label}`,
+        rowNumber: 6,
+        data,
+        nowIso: input.nowIso,
+        actor,
+      }),
+      /Shop branch or batch\/lot reference changed before the atomic write/,
+    )
+    assert.equal(racedBranch.sqlite.prepare('SELECT COUNT(*) n FROM sales').get().n, 0, `${label}: sale must not persist`)
+    assert.equal(racedBranch.sqlite.prepare('SELECT COUNT(*) n FROM sale_items').get().n, 0, `${label}: items must not persist`)
+    assert.equal(racedBranch.sqlite.prepare('SELECT COUNT(*) n FROM import_sales_commits').get().n, 0, `${label}: marker must not persist`)
+    assert.equal(racedBranch.sqlite.prepare('SELECT stock_quantity FROM products WHERE id = 10').get().stock_quantity, 5, `${label}: stock must not change`)
+  }
 
   const returned = setup()
   const returnedData = saleData({ sale_status: 'partial_return', items: [{ ...saleData().items[0], returned_quantity: 1 }] })
