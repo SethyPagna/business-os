@@ -87,7 +87,10 @@ function buildAccounts(rawDb) {
   const passwordPolicy = loadReal('lib/passwordPolicy.ts')
   const contactOptions = loadReal('lib/contactOptions.ts')
   const membershipNumber = loadReal('lib/membershipNumber.ts')
-  const contactDuplicates = loadReal('lib/contactDuplicates.ts', { './contactOptions': contactOptions })
+  const contactDuplicates = loadReal('lib/contactDuplicates.ts', {
+    './contactOptions': contactOptions,
+    './phone': phone,
+  })
   return loadReal('lib/portalAccounts.ts', {
     './db': dbModule,
     './membershipNumber': membershipNumber,

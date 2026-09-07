@@ -74,7 +74,10 @@ const contactOptions = loadReal('lib/contactOptions.ts')
 // The ONE membership-number minter (house `LC-#####` format, gap-filling).
 // portalAccounts no longer generates its own id, so this must be the REAL module.
 const membershipNumber = loadReal('lib/membershipNumber.ts')
-const contactDuplicates = loadReal('lib/contactDuplicates.ts', { './contactOptions': contactOptions })
+const contactDuplicates = loadReal('lib/contactDuplicates.ts', {
+  './contactOptions': contactOptions,
+  './phone': phone,
+})
 const { canonicalizePhone } = phone
 const { getPortalLockoutState, recordPortalFailure, clearPortalLockout } = loadReal('lib/portalAuthLockout.ts', { './db': dbModule })
 const { signupPortalAccount, signinPortalAccount } = loadReal('lib/portalAccounts.ts', {
