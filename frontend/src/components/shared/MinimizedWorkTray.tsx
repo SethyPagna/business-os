@@ -2,7 +2,7 @@ import { useSyncExternalStore } from 'react'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import {
-  dispatchRestore, getMinimizedWork, removeMinimizedWork, subscribeMinimizedWork,
+  canRestoreMinimizedWork, dispatchRestore, getMinimizedWork, removeMinimizedWork, subscribeMinimizedWork,
   type MinimizedWorkEntry, type MinimizedWorkKind,
 } from '../../utils/minimizedWork.ts'
 import { clearWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
@@ -27,11 +27,17 @@ const LEGACY_DRAFT_BASE_BY_KIND: Record<MinimizedWorkKind, string | null> = {
   product_detail: null,
 }
 
-const useApp = useAppHook as unknown as () => { navigateTo: (pageId: string) => void; t: (key: string) => string; language: string }
+const useApp = useAppHook as unknown as () => {
+  can: (permissionKey: string, actionKey: string) => boolean
+  language: string
+  navigateTo: (pageId: string) => void
+  notify: (message: string, type?: string) => void
+  t: (key: string) => string
+}
 
 export default function MinimizedWorkTray({ variant }: { variant: 'mobile' | 'desktop' }) {
   const entries = useSyncExternalStore(subscribeMinimizedWork, getMinimizedWork, getMinimizedWork)
-  const { navigateTo, t, language } = useApp()
+  const { can, navigateTo, notify, t, language } = useApp()
   const tr = (key: string, fallbackEn: string, fallbackKm: string): string => {
     const translated = t(key)
     if (translated && translated !== key) return translated
@@ -40,6 +46,10 @@ export default function MinimizedWorkTray({ variant }: { variant: 'mobile' | 'de
   if (!entries.length) return null
 
   const restore = (entry: MinimizedWorkEntry) => {
+    if (!canRestoreMinimizedWork(entry, can)) {
+      notify(tr('permission_denied', 'You no longer have permission for this action.', 'អ្នកលែងមានសិទ្ធិសម្រាប់សកម្មភាពនេះទៀតហើយ។'), 'error')
+      return
+    }
     navigateTo(entry.pageId)
     dispatchRestore(entry)
   }

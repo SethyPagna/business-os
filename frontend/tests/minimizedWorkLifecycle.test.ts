@@ -33,6 +33,7 @@ if (typeof globalThis.CustomEvent === 'undefined') {
 const { STORAGE_KEYS } = await import('../src/constants.ts')
 const {
   RESTORE_WORK_EVENT,
+  canRestoreMinimizedWork,
   consumePendingRestore,
   dispatchRestore,
   getMinimizedWork,
@@ -79,6 +80,12 @@ assert.equal(getMinimizedWork()[0]?.kind, 'fast_stockin')
 signIn(11, 'shop-a')
 assert.equal(getMinimizedWork()[0]?.key, 'receive-batch-401')
 
+const parkedReceive = getMinimizedWork()[0]!
+parkedReceive.requiredPermission = { permissionKey: 'inventory', actionKey: 'adjust' }
+assert.equal(canRestoreMinimizedWork(parkedReceive, () => false), false, 'revoked permission blocks restore')
+assert.equal(getMinimizedWork()[0]?.key, 'receive-batch-401', 'a denied restore leaves the chip and exact draft parked')
+assert.equal(canRestoreMinimizedWork(parkedReceive, (permission, action) => permission === 'inventory' && action === 'adjust'), true)
+
 // Restore removes the chip, dispatches its declarative payload, and remains a
 // one-shot pending restore for a host that mounts after navigation.
 const receiveEntry = getMinimizedWork()[0]!
@@ -103,8 +110,16 @@ removeMinimizedWork('session')
 assert.deepEqual(getMinimizedWork(), [])
 
 const traySource = readFileSync(new URL('../src/components/shared/MinimizedWorkTray.tsx', import.meta.url), 'utf8')
+const receiveSource = readFileSync(new URL('../src/components/inventory/ReceiveBatchModal.tsx', import.meta.url), 'utf8')
+const branchesSource = readFileSync(new URL('../src/components/branches/Branches.tsx', import.meta.url), 'utf8')
 assert.match(traySource, /entry\.draftKey \|\| \(legacyDraftBase \? scopedWorkDraftKey\(legacyDraftBase\) : null\)/)
 assert.match(traySource, /aria-label=\{tr\('minimized_dismiss_hint', 'Dismiss and discard this draft'/)
 assert.match(traySource, /receive_batch: null/, 'per-product receive drafts must never use a family-wide fallback clear')
+assert.match(traySource, /if \(!canRestoreMinimizedWork\(entry, can\)\) \{[\s\S]*?return[\s\S]*?\}\s*navigateTo\(entry\.pageId\)/, 'permission must be rechecked before navigation and dispatch')
+assert.match(receiveSource, /writeWorkDraft\(draftKey, currentDraft\(\)\)[\s\S]*?onMinimize\(\{[\s\S]*?draftKey,[\s\S]*?\}\)[\s\S]*?onClose\(\)/, 'receive minimize must persist before parking and unmounting')
+assert.match(receiveSource, /useCloseGuard\(\{ workKey: product \? `receive-batch-\$\{product\.id\}` : '' \}, onClose, preserveAndMinimize\)/, 'receive X, Cancel and backdrop must retain the shared guard while its prompt can preserve')
+assert.match(receiveSource, /<MinimizeButton disabled=\{saving\} tr=\{tr\} onMinimize=\{preserveAndMinimize\} \/>/, 'receive must show the shared minus beside Close')
+assert.match(branchesSource, /if \(!canReceiveStock\) return false[\s\S]*?setReceiveTarget/, 'the host must recheck current permission before reopening')
+assert.match(branchesSource, /requiredPermission: \{ permissionKey: 'inventory', actionKey: 'adjust' \}/, 'the parked entry must carry the existing action grant')
 
 console.log('PASS minimized work is actor-scoped, exact-draft, one-shot and accessible')

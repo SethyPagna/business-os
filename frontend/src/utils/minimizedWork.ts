@@ -20,6 +20,11 @@ export type MinimizedWorkKind =
   | 'create_products_session'
   | 'product_detail'
 
+export type MinimizedWorkPermission = {
+  permissionKey: string
+  actionKey: string
+}
+
 export type MinimizedWorkEntry = {
   /** Unique key -- re-minimizing the same flow replaces its chip. */
   key: string
@@ -35,6 +40,10 @@ export type MinimizedWorkEntry = {
    * key lets chip dismissal discard one per-product/session draft without
    * clearing a sibling flow owned by the same user. */
   draftKey?: string
+  /** Re-check the action grant when the chip is restored. Permissions can
+   * change while a local draft is parked; the chip remains available, but it
+   * must not reopen an action the current operator can no longer perform. */
+  requiredPermission?: MinimizedWorkPermission
   minimizedAt: number
 }
 
@@ -113,6 +122,14 @@ export function dispatchRestore(entry: MinimizedWorkEntry): void {
   pendingRestore = entry
   pendingRestoreScope = storeKey
   window.dispatchEvent(new CustomEvent(RESTORE_WORK_EVENT, { detail: { kind: entry.kind, payload: entry.payload || {} } }))
+}
+
+export function canRestoreMinimizedWork(
+  entry: MinimizedWorkEntry,
+  can: (permissionKey: string, actionKey: string) => boolean,
+): boolean {
+  const required = entry.requiredPermission
+  return !required || can(required.permissionKey, required.actionKey)
 }
 
 export function consumePendingRestore(kind: MinimizedWorkKind): MinimizedWorkEntry | null {
