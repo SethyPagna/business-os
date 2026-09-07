@@ -119,6 +119,13 @@ const secondary = source('components/catalog/CatalogSecondaryTabs.tsx')
 assert.doesNotMatch(secondary, /<iframe[^>]*src={mapEmbedUrl}/, 'the map embed loads Google without being asked')
 assert.match(secondary, /<PortalEmbedConsent/, 'the map must go through the embed consent gate')
 
+// The standing storefront notice ends on "YOUR PRIVACY IS OUR PRIORITY"; an
+// assurance with no policy behind it is exactly the unsupported claim the
+// Law on Consumer Protection reaches, so the sentence must carry the link.
+const noPayment = source('components/catalog/PortalNoPaymentNotice.tsx')
+assert.match(noPayment, /<LegalInlineLink page="privacy"/, 'the privacy promise has no privacy policy behind it')
+assert.match(noPayment, /LEGAL_PAGE_TITLE_KEY.privacy/, 'the link label must come from the legal pack, not a hardcoded string')
+
 // 5. Khmer is really Khmer
 const KHMER = /[ក-៿]/
 for (const key of enKeys) {
