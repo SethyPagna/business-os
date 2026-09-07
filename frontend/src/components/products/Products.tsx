@@ -133,7 +133,8 @@ import { buildAvailabilityFilterSection } from '../shared/AvailabilityFilterOpti
 import { buildSearchModeFilterSection } from '../shared/SearchModeFilterOptions.tsx'
 import { buildAutoMergedFilterSection } from './AutoMergedFilterOptions.tsx'
 import { buildCreatedDateFilterSection } from './CreatedDateFilterOptions.tsx'
-import { RESTORE_WORK_EVENT, consumePendingRestore, markRestoreHandled, minimizeWork } from '../../utils/minimizedWork.ts'
+import { RESTORE_WORK_EVENT, canRestoreMinimizedWork, consumePendingRestore, markRestoreHandled, minimizeWork, reparkDeniedRestore, type MinimizedWorkEntry, type MinimizedWorkKind } from '../../utils/minimizedWork.ts'
+import { scopedWorkDraftKey } from '../../utils/workDrafts.ts'
 import { buildIssuesFilterSection } from '../shared/IssuesFilterOptions.tsx'
 import { buildPromotionsFilterSection } from '../shared/PromotionsFilterOptions.ts'
 import type { PromotionRule } from '../../utils/promotionRules.ts'
@@ -834,20 +835,36 @@ function ProductsFullEditor() {
   // closed the modal without resetting it, and the next Add/Edit that
   // didn't pass a tab opened on the stale Stock section.
   const [formInitialTab, setFormInitialTab] = useState<ProductFormTab>('basic')
-  // F3 slice 2: a minimized add-product chip restores here -- create mode,
-  // slice 1's draft repopulates the form.
+  // Minimized create flows restore here. Each modal's scoped draft repopulates
+  // its own state, while this host rechecks the current action grant before it
+  // reopens a write surface.
   useEffect(() => {
-    const open = () => { setSelected(null); setFormInitialTab('basic'); setModal('form') }
-    if (consumePendingRestore('add_product')) open()
+    const open = (kind: MinimizedWorkKind) => {
+      setSelected(null)
+      setFormInitialTab('basic')
+      setModal(kind === 'create_products_session' ? 'create_session' : 'form')
+    }
+    const restore = (kind: 'add_product' | 'create_products_session', entry: MinimizedWorkEntry | null | undefined) => {
+      if (!canAddProduct || (entry && !canRestoreMinimizedWork(entry, can))) {
+        notify(tr('permission_denied', 'You no longer have permission for this action.', 'អ្នកលែងមានសិទ្ធិសម្រាប់សកម្មភាពនេះទៀតហើយ។'), 'error')
+        return
+      }
+      open(kind)
+    }
+    for (const kind of ['add_product', 'create_products_session'] as const) {
+      const pending = consumePendingRestore(kind)
+      if (pending) restore(kind, pending)
+    }
     const onRestore = (event: Event) => {
-      if ((event as CustomEvent).detail?.kind !== 'add_product') return
-      markRestoreHandled('add_product')
-      open()
+      const detail = (event as CustomEvent).detail
+      const kind = detail?.kind
+      if (kind !== 'add_product' && kind !== 'create_products_session') return
+      markRestoreHandled(kind)
+      restore(kind, detail.entry as MinimizedWorkEntry | undefined)
     }
     window.addEventListener(RESTORE_WORK_EVENT, onRestore)
     return () => window.removeEventListener(RESTORE_WORK_EVENT, onRestore)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [can, canAddProduct, notify])
   const [detailProduct,setDetailProduct]= useState<ProductRecord | null>(null)
   const [adjustStockProduct, setAdjustStockProduct] = useState<ProductRecord | null>(null)
   // `toModalProduct(selected)` used to be called inline in the ProductForm
@@ -1189,6 +1206,43 @@ function ProductsFullEditor() {
       ? payload.filter((row) => wanted.has(Number((row as { id?: unknown })?.id)))
       : []
   }, [])
+
+  useEffect(() => {
+    let disposed = false
+    const restoreEdit = async (entry: MinimizedWorkEntry | null | undefined) => {
+      if (!entry || entry.kind !== 'edit_product') return
+      const productId = Number(entry.payload?.productId || 0)
+      if (!productId || !can('products', 'edit') || !canRestoreMinimizedWork(entry, can)) {
+        reparkDeniedRestore(entry)
+        notify(tr('permission_denied', 'You no longer have permission for this action.', 'អ្នកលែងមានសិទ្ធិសម្រាប់សកម្មភាពនេះទៀតហើយ។'), 'error')
+        return
+      }
+      try {
+        const current = (await fetchProductsByIds([productId]))[0]
+        if (disposed || !current) throw new Error('Product is no longer available')
+        setSelected(current)
+        setFormInitialTab('basic')
+        setModal('form')
+        markRestoreHandled('edit_product')
+      } catch (error) {
+        reparkDeniedRestore(entry)
+        if (!disposed) notify(error instanceof Error ? error.message : String(error), 'error')
+      }
+    }
+
+    const pending = consumePendingRestore('edit_product')
+    if (pending) void restoreEdit(pending)
+    const onRestore = (event: Event) => {
+      const detail = (event as CustomEvent).detail
+      if (detail?.kind !== 'edit_product') return
+      void restoreEdit(detail.entry as MinimizedWorkEntry | undefined)
+    }
+    window.addEventListener(RESTORE_WORK_EVENT, onRestore)
+    return () => {
+      disposed = true
+      window.removeEventListener(RESTORE_WORK_EVENT, onRestore)
+    }
+  }, [can, fetchProductsByIds, notify, tr])
 
   const loadAuxOptions = useCallback(async (label = 'Product auxiliary options') => {
     if (auxOptionsLoadedRef.current) return
@@ -4802,6 +4856,20 @@ function ProductsFullEditor() {
             onPrepareProduct={prepareProductForSession}
             onCreateProduct={createProductForSession}
             onClose={()=>{setModal(null);setSelected(null);setFormInitialTab('basic')}}
+            onMinimize={canAddProduct ? (label: string) => {
+              const draftKey = scopedWorkDraftKey('create_products_session')
+              minimizeWork({
+                key: 'create-products-session',
+                kind: 'create_products_session',
+                pageId: 'products',
+                label,
+                payload: { draftKey },
+                draftKey,
+                requiredPermission: { permissionKey: 'products', actionKey: 'add' },
+              })
+              setModal(null); setSelected(null); setFormInitialTab('basic')
+              notify(tr('minimized_to_chip', 'Minimized. Pick it back up from the chip — nothing was lost.', 'បានបង្រួម។ បន្តវាឡើងវិញពីស្លាក — គ្មានអ្វីបាត់បង់ទេ។'), 'info')
+            } : undefined}
             onDone={() => { void load(true) }}
             notify={notify}
             t={t}
@@ -4830,11 +4898,36 @@ function ProductsFullEditor() {
             onClose={()=>{setModal(null);setSelected(null);setFormInitialTab('basic')}}
             // S4-20: minimizing is silent otherwise -- the form just
             // vanishes, which reads as lost work. Say where it went.
-            onMinimize={!modalProduct ? (label: string) => {
-              minimizeWork({ key: 'add-product', kind: 'add_product', pageId: 'products', label })
+            onMinimize={(label: string, detail?: { draftKey: string; productId: EntityId | null }) => {
+              if (modalProduct) {
+                const productId = Number(detail?.productId || modalProduct.id || 0)
+                const draftKey = String(detail?.draftKey || '')
+                if (!productId || !draftKey) {
+                  notify(tr('unable_to_minimize', 'Unable to minimize this edit.', 'មិនអាចបង្រួមការកែប្រែនេះបានទេ។'), 'error')
+                  return
+                }
+                minimizeWork({
+                  key: `edit-product-${productId}`,
+                  kind: 'edit_product',
+                  pageId: 'products',
+                  label,
+                  payload: { productId },
+                  draftKey,
+                  requiredPermission: { permissionKey: 'products', actionKey: 'edit' },
+                })
+              } else {
+                minimizeWork({
+                  key: 'add-product',
+                  kind: 'add_product',
+                  pageId: 'products',
+                  label,
+                  draftKey: detail?.draftKey || scopedWorkDraftKey('product_new_standalone-create'),
+                  requiredPermission: { permissionKey: 'products', actionKey: 'add' },
+                })
+              }
               setModal(null); setSelected(null); setFormInitialTab('basic')
               notify(tr('minimized_to_chip', 'Minimized. Pick it back up from the chip — nothing was lost.', 'បានបង្រួម។ បន្តវាឡើងវិញពីស្លាក — គ្មានអ្វីបាត់បង់ទេ។'), 'info')
-            } : undefined}
+            }}
             onDelete={selected ? () => { const target = selected; setModal(null); setSelected(null); setFormInitialTab('basic'); handleDelete(target) } : undefined}
             t={t}
             usdSymbol={usdSymbol}
