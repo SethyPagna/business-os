@@ -7,6 +7,7 @@ import {
   localizePortalConfig,
   localizePortalFaqText,
 } from '../src/components/catalog/portalContentI18n.ts'
+import { FAQ_STARTER_TEXT } from '../src/components/catalog/faqStarterText.ts'
 
 type LocalizedFaqItem = { question: string; answer: string }
 type LocalizedPortalConfig = {
@@ -106,32 +107,30 @@ for (const language of firstPartyLanguages) {
   }
 }
 
-// New starter FAQ items (delivery, payment, store hours, authenticity,
-// promotions) added alongside this test -- exercise both the zh-CN exact
-// dictionary path and the vocabulary-substitution fallback path every
-// other first-party language relies on for these five new items.
-const newStarterFaq = [
-  {
-    question: 'Do you offer delivery, or is it pickup only?',
-    answer: 'We support delivery in select areas along with in-store pickup. Message the store on Facebook, Instagram, or Telegram with your location so we can confirm delivery options and timing.',
-  },
-  {
-    question: 'What payment methods do you accept?',
-    answer: 'We accept cash and common mobile payment options in store. For delivery or online orders, contact us directly to confirm which payment method works best for your order.',
-  },
-  {
-    question: 'What are your store hours?',
-    answer: 'Store hours can vary by branch and public holidays. Please check the branch details on this page or contact us directly for the most current opening hours.',
-  },
-  {
-    question: 'Do you guarantee that products sold here are 100% authentic?',
-    answer: 'Yes. Leang Beauty only sells authentic products sourced through official channels. If you ever have a concern about a specific item, contact the store directly and we can confirm sourcing details.',
-  },
-  {
-    question: 'Where can I see current promotions and discounts?',
-    answer: 'Check the Promotions section on this page for current offers. New discounts and bundles are added there as they become available, so it is worth checking back regularly.',
-  },
-]
+// The five starter FAQ items added after the original set (delivery,
+// payment, store hours, authenticity, promotions) exercise both the zh-CN
+// exact-dictionary path and the vocabulary-substitution fallback every other
+// first-party language relies on.
+//
+// These are READ FROM THE SHIPPED DEFAULTS, never re-typed here. The block
+// used to be a hand-copied duplicate of the strings in CatalogPage.tsx,
+// which meant the guard went on passing against wording the storefront had
+// stopped using -- it was still asserting the retired "100% authentic"
+// guarantee after that claim was rewritten. Importing the source of truth is
+// what makes this test able to notice (N45).
+const newStarterFaq = FAQ_STARTER_TEXT.filter(([index]) => ['21', '22', '23', '24', '25'].includes(index))
+  .map(([, question, answer]) => ({ question, answer }))
+assert.equal(newStarterFaq.length, 5, 'the five later starter FAQ items must still exist in faqStarterText.ts')
+
+// No default FAQ answer may make a claim the shop cannot be asked to prove.
+// "100% authentic", "guarantee", "certified" and the like are the app
+// speaking for the merchant, and a consumer-protection complaint does not
+// care that a template wrote it.
+const UNSUPPORTED_CLAIM = /(100%|guarantee[ds]?|certified|clinically proven|cures?|guaranteed authentic)/i
+for (const [index, question, answer] of FAQ_STARTER_TEXT) {
+  assert.doesNotMatch(question, UNSUPPORTED_CLAIM, `starter FAQ ${index} question makes an unsupported claim`)
+  assert.doesNotMatch(answer, UNSUPPORTED_CLAIM, `starter FAQ ${index} answer makes an unsupported claim`)
+}
 const newStarterFaqLeakPattern = /\b(delivery|payment|store hours|authentic|promotions|discounts)\b/i
 
 const zhCnLocalized = newStarterFaq.map((item) => ({
