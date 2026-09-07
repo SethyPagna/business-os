@@ -24,15 +24,25 @@ export const CONTACT_MERGE_MAX_BINDS_PER_STATEMENT = 80
 
 const SAFE_COLUMN = /^[a-z][a-z0-9_]*$/
 
+function contactMergeValueIsBlank(column: string, value: unknown): boolean {
+  if (value === null || value === undefined || value === '') return true
+  // Historic membership identities are byte-sensitive when present, but an
+  // all-whitespace value carries no identity and must not block an exact
+  // nonblank loser value from being preserved on the keeper.
+  return column === 'membership_number' && typeof value === 'string' && value.trim() === ''
+}
+
 export function contactMergeHasDistinctMemberships(
   keeper: Record<string, unknown>,
   merged: Record<string, unknown>,
 ): boolean {
-  const keeperMembership = String(keeper.membership_number ?? '')
-  const mergedMembership = String(merged.membership_number ?? '')
+  const keeperMembership = keeper.membership_number
+  const mergedMembership = merged.membership_number
   // Preserve exact legacy identity. Case, punctuation, and historic prefixes
   // can be meaningful; a merge may not normalize either value away.
-  return !!keeperMembership.trim() && !!mergedMembership.trim() && keeperMembership !== mergedMembership
+  return !contactMergeValueIsBlank('membership_number', keeperMembership)
+    && !contactMergeValueIsBlank('membership_number', mergedMembership)
+    && keeperMembership !== mergedMembership
 }
 
 function contactSnapshotGuard(
@@ -110,8 +120,8 @@ export function buildContactMergePlan(input: {
     if (!SAFE_COLUMN.test(column)) throw new Error('contact_merge_invalid_column')
     const keeperValue = keeper[column]
     const mergedValue = merged[column]
-    const keeperBlank = keeperValue === null || keeperValue === undefined || keeperValue === ''
-    const mergedHasValue = mergedValue !== null && mergedValue !== undefined && mergedValue !== ''
+    const keeperBlank = contactMergeValueIsBlank(column, keeperValue)
+    const mergedHasValue = !contactMergeValueIsBlank(column, mergedValue)
     if (keeperBlank && mergedHasValue) backfill[column] = mergedValue
   }
   const finalKeeper = { ...keeper, ...backfill }
