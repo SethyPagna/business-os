@@ -2594,7 +2594,7 @@
   "merge_duplicates_partial_resume": "Processing stopped safely before another group started. Review the refreshed preview and choose Merge again to continue.",
   "merge_duplicates_partial_busy": "The database became busy after completed groups were saved. Review the refreshed preview and choose Merge again to continue.",
   "merge_duplicates_preview_title": "What will actually happen",
-  "merge_duplicates_quantity_kept": "The oldest row in each duplicate group (lowest id) is kept as the \"canonical\" product; every other row in the group is merged into it.",
+  "merge_duplicates_quantity_kept": "The kept product is chosen in a fixed order. For leading-zero barcode duplicates, the row with the fewest extra leading zeros is preferred. Next, the row with the highest current stock is preferred; remaining ties keep the lowest ID. Every other row in the group is merged into it.",
   "merge_duplicates_quantity_summed": "Per branch, quantities are ADDED together, never overwritten or picked. If both the kept row and a duplicate already had stock at the same branch, the result is the sum of both (e.g. 5 + 3 = 8) -- not one replacing the other.",
   "merge_duplicates_quantity_title": "What happens to quantity",
   "merge_duplicates_quantity_zero_skip": "A branch where the duplicate had zero quantity is skipped entirely -- no empty stock row or empty movement record is created for it.",

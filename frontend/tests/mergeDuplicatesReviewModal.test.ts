@@ -30,5 +30,9 @@ const transportSource = readFileSync(join(here, '..', 'src', 'api', 'productWrit
 assert.match(modalSource, /onLoadPreview\(request\.signal\)/)
 assert.match(modalSource, /previewRequestsRef\.current\?\.cancel\(\)/)
 assert.match(transportSource, /MERGE_DUPLICATES_PREVIEW_TIMEOUT_MS, \{ signal: options\.signal \}/)
+assert.doesNotMatch(modalSource, /oldest row in each duplicate group/i)
+assert.match(modalSource, /fewest extra leading zeros/)
+assert.match(modalSource, /highest current stock/)
+assert.match(modalSource, /remaining ties keep the lowest ID/)
 
 console.log('PASS merge duplicate preview has a scoped timeout, aborts on close/retry, and ignores stale completion')
