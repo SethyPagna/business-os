@@ -340,10 +340,13 @@ runTest('public product discovery uses a sticky unified search, responsive brand
   assert.doesNotMatch(catalogProductsSectionSource, /max-h-\[min\(18rem,calc\(100vh-32rem\)\)\]/,
     'the desktop letter grid and its inner scroller are retired')
   assert.match(paginationSource, /import PaginationControls from '\.\.\/shared\/PaginationControls'/,
-    'storefront paging should use the same current Back/Next/page-size control as the rest of the app')
-  assert.match(paginationSource, /pageSizeOptions=\{CATALOG_PAGE_SIZE_OPTIONS\}/)
-  assert.match(paginationSource, /editablePageSizeInput=\{false\}/,
-    'items-per-page should stay bounded to the storefront API presets')
+    'storefront paging should use the same current Back/Next control as the rest of the app')
+  assert.match(paginationSource, /export const CATALOG_DEFAULT_PAGE_SIZE = 50/,
+    'the fixed storefront page size remains aligned with the server response contract')
+  assert.doesNotMatch(paginationSource, /\bonPageSizeChange\s*=|\bpageSizeOptions\s*=|\beditablePageSizeInput\s*=/,
+    'the centred public pager must not grow a shopper-facing page-size control')
+  assert.match(paginationSource, /layout="centered"/,
+    'public paging remains one centred Back/page/Next control')
 })
 
 runTest('public product details keep every prepared section visible when its data is empty', () => {
