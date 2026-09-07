@@ -5,15 +5,23 @@
 // Three properties, all of which have failed in this repo before and none of
 // which a screenshot would catch:
 //
-//   1. The class exists once, in styles/main.css, and declares every part of
-//      "scrolls, cleanly, on a phone": overflow-x, nowrap, hidden scrollbar in
-//      both engines, native momentum, no overscroll chaining.
-//   2. It does NOT pin touch-action. A name cell sits inside a vertically
-//      scrolling list; `touch-action: pan-x` (which the neighbouring
-//      .compact-action-row does use, correctly, for a horizontal toolbar)
-//      would make a vertical swipe that happens to start on a product name do
-//      nothing at all. This is the "smooth ios pwa and android pwa" half and
-//      it is invisible on a desktop mouse.
+//   1. The behaviour is declared ONCE for the whole stylesheet. "One line,
+//      scrolls horizontally, no ellipsis" was declared twice -- the older
+//      .detail-scroll-text and this lane's .scroll-x-clean repeated all eight
+//      properties and differed only in whether the scrollbar is painted -- so
+//      the two could drift apart silently. They now share one base rule and
+//      each adds only its scrollbar policy, and this file goes red if a third
+//      copy appears.
+//   2. touch-action is an OPEN QUESTION, recorded rather than guessed. Every
+//      one of these cells sits under .page-scroll or .modal-scroll, both of
+//      which pin `touch-action: pan-y`, and BOTH established horizontal
+//      utilities answer with `touch-action: pan-x` -- .compact-action-row (a
+//      toolbar) and .detail-scroll-text (the closer sibling: a scrolling TEXT
+//      cell). .scroll-x-clean sets none, because unlike those two its cells
+//      fill most of a LIST row and pinning the axis could make a vertical
+//      swipe that starts on a product name do nothing at all. That is a
+//      real-device call (iOS PWA / Android PWA), so this file asserts neither
+//      value; it pins that the question is written down beside the rule.
 //   3. EVERY product-name cell uses that one class -- the Products desktop
 //      row and mobile card, both group titles, Inventory / Branches >
 //      Products desktop and mobile rows, the image-only view, and the
@@ -40,12 +48,21 @@ function runTest(name: string, fn: () => void) {
   }
 }
 
-function block(source: string, selector: string): string {
-  const at = source.indexOf(`\n${selector} {`)
-  assert.ok(at > 0, `no CSS rule for selector: ${selector}`)
-  const open = source.indexOf('{', at)
-  const close = source.indexOf('}', open)
-  return source.slice(open + 1, close)
+// Every leaf rule in the stylesheet: selector list + declaration body.
+// Comments are stripped first so a brace inside prose cannot desync the scan,
+// and the regex only matches blocks with no nested block, so an @layer or
+// @media wrapper is walked through rather than captured.
+const CSS_RULES: Array<{ selectors: string[]; body: string }> = [
+  ...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g),
+].map((m) => ({ selectors: m[1].split(',').map((s) => s.trim()).filter(Boolean), body: m[2] }))
+
+// The declarations that apply to `selector`, joined across every rule whose
+// selector list names it exactly (so a base rule and its modifier both count,
+// and `.scroll-x-clean::-webkit-scrollbar` does not).
+function block(selector: string): string {
+  const hits = CSS_RULES.filter((rule) => rule.selectors.includes(selector))
+  assert.ok(hits.length > 0, `no CSS rule for selector: ${selector}`)
+  return hits.map((rule) => rule.body).join('\n')
 }
 
 // The class string that OWNS a marker: the nearest class-carrying opener
@@ -78,25 +95,53 @@ function classNear(source: string, marker: string): string {
 // 1. The shared class
 // ---------------------------------------------------------------------------
 
-runTest('.scroll-x-clean scrolls horizontally with no visible scrollbar', () => {
-  const rule = block(css, '.scroll-x-clean')
-  assert.match(rule, /overflow-x:\s*auto/, 'must scroll horizontally')
-  assert.match(rule, /white-space:\s*nowrap/, 'the name must stay on one line')
-  assert.match(rule, /min-width:\s*0/, 'must be able to shrink inside a flex/table cell')
-  assert.match(rule, /text-overflow:\s*clip/, 'a scrolling name must not also grow an ellipsis')
-  assert.match(rule, /scrollbar-width:\s*none/, 'Firefox/standards scrollbar hidden')
-  assert.match(rule, /-webkit-overflow-scrolling:\s*touch/, 'iOS momentum scrolling')
-  assert.match(rule, /overscroll-behavior-inline:\s*contain/, 'a horizontal fling must not chain out to the page')
-  const bar = block(css, '.scroll-x-clean::-webkit-scrollbar')
-  assert.match(bar, /display:\s*none/, 'WebKit/Blink scrollbar hidden -- this is the iOS and Android PWA case')
+runTest('ONE rule declares "one line, scrolls, no ellipsis" -- no second copy of it', () => {
+  const utilities = CSS_RULES.filter((rule) =>
+    /overflow-x:\s*auto/.test(rule.body)
+    && /white-space:\s*nowrap/.test(rule.body)
+    && /text-overflow:\s*clip/.test(rule.body))
+  assert.equal(
+    utilities.length,
+    1,
+    `main.css must declare that behaviour exactly once; found ${utilities.length}: `
+      + utilities.map((rule) => rule.selectors.join(', ')).join('  |  '),
+  )
+  const [base] = utilities
+  assert.ok(base.selectors.includes('.scroll-x-clean'), `the product-name class must be on the shared base rule, not a copy of it (selectors: ${base.selectors.join(', ')})`)
+  assert.ok(base.selectors.includes('.detail-scroll-text'), `the pre-existing detail-value class must share it (selectors: ${base.selectors.join(', ')})`)
+  assert.match(base.body, /min-width:\s*0/, 'must be able to shrink inside a flex/table cell')
+  assert.match(base.body, /-webkit-overflow-scrolling:\s*touch/, 'iOS momentum scrolling')
+  assert.match(base.body, /overscroll-behavior-inline:\s*contain/, 'a horizontal fling must not chain out to the page')
+  assert.doesNotMatch(base.body, /touch-action/, 'the shared base must not settle the open question for both classes at once -- see the next test')
 })
 
-runTest('.scroll-x-clean does NOT pin touch-action, so vertical list scrolling survives', () => {
-  const rule = block(css, '.scroll-x-clean')
-  assert.doesNotMatch(rule, /touch-action/, 'pinning the axis would break a vertical swipe that starts on a product name')
-  // Positive control: the class this one is modelled on DOES pin it, so the
-  // assertion above is checking a real distinction and not a typo.
-  assert.match(block(css, '.compact-action-row'), /touch-action:\s*pan-x/, 'positive control: the horizontal toolbar class still pins pan-x')
+runTest('.scroll-x-clean hides the bar in both engines; .detail-scroll-text keeps its hairline', () => {
+  const clean = block('.scroll-x-clean')
+  assert.match(clean, /scrollbar-width:\s*none/, 'Firefox/standards scrollbar hidden')
+  assert.match(clean, /-ms-overflow-style:\s*none/, 'legacy Edge/IE scrollbar hidden')
+  assert.match(block('.scroll-x-clean::-webkit-scrollbar'), /display:\s*none/, 'WebKit/Blink scrollbar hidden -- this is the iOS and Android PWA case')
+  // The one difference between the two names, and the only reason both exist.
+  assert.match(block('.detail-scroll-text'), /scrollbar-width:\s*thin/, 'detail values keep the bar they shipped with')
+  assert.match(block('.detail-scroll-text::-webkit-scrollbar'), /height:\s*3px/, 'and its hairline height')
+})
+
+runTest('touch-action on .scroll-x-clean is an OPEN QUESTION, recorded rather than guessed', () => {
+  // Every converted cell sits under one of these two, and both pin the axis.
+  assert.match(block('.page-scroll'), /touch-action:\s*pan-y/, 'the page scroller pins pan-y')
+  assert.match(block('.modal-scroll'), /touch-action:\s*pan-y/, 'the modal scroller pins pan-y')
+  // Both established horizontal utilities answer that with pan-x -- not just
+  // the toolbar, but the closer sibling, a scrolling TEXT cell.
+  assert.match(block('.compact-action-row'), /touch-action:\s*pan-x/, 'precedent 1: the horizontal toolbar pins pan-x')
+  assert.match(block('.detail-scroll-text'), /touch-action:\s*pan-x/, 'precedent 2: the detail-value text cell pins pan-x too')
+  // So the omission on .scroll-x-clean is not a settled design. This test
+  // asserts NEITHER value -- it pins that the question is written down beside
+  // the rule, so the next writer settles it on a device instead of
+  // rediscovering it. Remove this only together with a device result.
+  assert.match(
+    css,
+    /OPEN QUESTION -- touch-action[\s\S]{0,1400}real-device question/,
+    'the unsettled axis question must stay recorded in main.css beside the rule',
+  )
 })
 
 runTest('Khmer names keep their ink inside the scrolling box', () => {
@@ -246,7 +291,6 @@ runTest('the scroll behaviour lives in ONE place, not per file', () => {
     assert.doesNotMatch(source, /\[-webkit-overflow-scrolling/, `${file}: per-file momentum-scroll arbitrary value`)
     assert.doesNotMatch(source, /::-webkit-scrollbar/, `${file}: per-file scrollbar CSS`)
   }
-  assert.equal((css.match(/^\.scroll-x-clean \{/gm) || []).length, 1, '.scroll-x-clean must be declared exactly once')
 })
 
 // ---------------------------------------------------------------------------

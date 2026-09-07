@@ -680,11 +680,41 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
     min-height: 0;
   }
 
-  /* Detail values must remain fully readable. Keep long identifiers and
-     metadata on one line with direct horizontal touch scrolling instead of
-     replacing their tail with an ellipsis. This is deliberately opt-in so
-     compact navigation/action labels can still use ordinary truncation. */
-  .detail-scroll-text {
+  /* One-line scrolling text -- ONE base rule, two scrollbar policies --------
+     Detail values and product names must stay fully readable: keep them on one
+     line with direct horizontal touch scrolling instead of replacing their
+     tail with an ellipsis. Deliberately opt-in, so compact navigation/action
+     labels can still use ordinary truncation.
+
+     This is the ONLY rule in this file that declares that behaviour.
+     `.detail-scroll-text` (identifiers, metadata, modal titles) and
+     `.scroll-x-clean` (the N36 product-name cells) differ in exactly one
+     thing -- whether the bar is painted -- because the owner asked for the
+     name cells to be "clean no need show the scroll bar" (Sep 6 2026) while
+     the detail rows have shown a hairline bar since they shipped. That single
+     difference is all each name adds below; declaring the other eight
+     properties twice is what made the two drift apart.
+
+     Position matters: the base sits in the components layer, i.e. BEFORE
+     @tailwind utilities, so a Tailwind utility on the same element still
+     wins at equal specificity -- which is what lets the transfer-history
+     <td> keep its own `max-w-[16rem]` cap while its name scrolls inside it.
+
+     OPEN QUESTION -- touch-action. Every cell using either class sits under
+     an ancestor that pins the axis: `.page-scroll` and `.modal-scroll` both
+     declare `touch-action: pan-y`. Both established horizontal utilities here
+     answer that with `touch-action: pan-x` -- `.detail-scroll-text` below and
+     `.compact-action-row` further down -- and both keep it unchanged.
+     `.scroll-x-clean` deliberately does not set it yet: unlike a detail row
+     or a toolbar, its cells fill most of a LIST row, and pinning pan-x there
+     could make a vertical swipe that happens to start on a product name do
+     nothing at all. Which behaviour is right is a real-device question (iOS
+     PWA and Android PWA: drag a long name sideways, then swipe the list
+     vertically from the same spot). It is recorded here rather than guessed,
+     and tests/productNameScrollCells.test.ts pins the question instead of
+     asserting an answer. */
+  .detail-scroll-text,
+  .scroll-x-clean {
     display: block;
     min-width: 0;
     max-width: 100%;
@@ -694,10 +724,18 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
     text-overflow: clip;
     -webkit-overflow-scrolling: touch;
     overscroll-behavior-inline: contain;
-    scrollbar-width: thin;
-    touch-action: pan-x;
   }
+  /* hairline bar */
+  .detail-scroll-text { scrollbar-width: thin; touch-action: pan-x; }
   .detail-scroll-text::-webkit-scrollbar { height: 3px; }
+  /* no bar at all -- the owner's N36 ruling */
+  .scroll-x-clean { scrollbar-width: none; -ms-overflow-style: none; }
+  .scroll-x-clean::-webkit-scrollbar { width: 0; height: 0; display: none; }
+  /* A Khmer cluster carries ~1.6em of ink and `overflow-y: hidden` cannot be
+     given an overflow-clip-margin, so without this floor every coeng subscript
+     in a scrolling name would be sheared off. */
+  body.lang-km .scroll-x-clean,
+  .scroll-x-clean.khmer-text { line-height: var(--km-line-height, 1.6); }
 
   /* Portalled dialogs must fit the actually visible iOS viewport and stay
      clear of notches/home indicators. This also keeps footer buttons from
@@ -942,36 +980,13 @@ body.lang-km .compact-analytics-legend {
    compact one line", and "for product names, make it horizontal scroll
    instead of pushing rows ... clean no need show the scroll bar".
 
-   .scroll-x-clean is ONE class for every product-name cell (Products desktop
-   table row, Products mobile card, both group titles in ProductsListSurface,
-   Inventory / Branches > Products desktop + mobile rows, ProductsImageOnly).
-   Deliberately NO `touch-action: pan-x` -- unlike .compact-action-row above,
-   a name cell sits inside a vertically scrolling LIST, and pinning the axis
-   would make a vertical swipe that happens to start on a product name do
-   nothing at all. Default `touch-action` lets the browser pick the axis from
-   the gesture, which is what "smooth ios pwa and android pwa" means here.
-   overscroll-behavior-inline stops a horizontal fling chaining out to the
-   page/PWA back-swipe. */
-.scroll-x-clean {
-  display: block;
-  min-width: 0;
-  max-width: 100%;
-  overflow-x: auto;
-  overflow-y: hidden;
-  white-space: nowrap;
-  text-overflow: clip;
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior-inline: contain;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-.scroll-x-clean::-webkit-scrollbar { width: 0; height: 0; display: none; }
-/* A Khmer cluster carries ~1.6em of ink and `overflow-y: hidden` cannot be
-   given an overflow-clip-margin, so without this floor every coeng subscript
-   in a scrolling name would be sheared off -- the same defect the dense-table
-   block below restates this floor for. */
-body.lang-km .scroll-x-clean,
-.scroll-x-clean.khmer-text { line-height: var(--km-line-height, 1.6); }
+   The name half of that ask is `.scroll-x-clean`, ONE class for every
+   product-name cell (Products desktop table row and mobile card, both group
+   titles in ProductsListSurface, Inventory / Branches > Products rows and
+   group titles, ProductsImageOnly, the Branches stock cards and group titles,
+   Products > Conflicts, both stock-in pickers and the transfer picker). It is
+   declared in the components layer above, sharing one base rule with
+   `.detail-scroll-text`; only the price strip below lives here. */
 
 /* .price-strip -- selling | wholesale | cost | qty+unit on ONE line.
    Arithmetic for the reported wrap, at 375px on the Products mobile card:
