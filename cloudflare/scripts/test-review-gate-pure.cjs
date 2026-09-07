@@ -169,7 +169,8 @@ const businessDateWindow = loadReal('lib/businessDateWindow.ts')
 // own require() (which can't resolve a bare .ts file).
 const searchMatch = loadReal('lib/searchMatch.ts')
 const branchWrites = loadReal('lib/branchWrites.ts', { './db': { toDbBool } })
-const branchRoleGuards = loadReal('lib/branchRoleGuards.ts', { './branchRoles': loadReal('lib/branchRoles.ts') })
+const branchRoles = loadReal('lib/branchRoles.ts')
+const branchRoleGuards = loadReal('lib/branchRoleGuards.ts', { './branchRoles': branchRoles })
 const productWrites = loadReal('lib/productWrites.ts', {
   ...dbStub,
   './media': { sanitizeMediaList: (list) => (Array.isArray(list) ? list : []) },
@@ -202,6 +203,7 @@ const feesRoute = loadReal('routes/fees.ts', {
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', CURRENT_USER); return next() } },
   '../lib/permissions': permissions,
   '../lib/reviewGate': reviewGate,
+  '../lib/branchRoles': branchRoles,
   // fee_date is a TYPED date now, read day-first through the shared kernel,
   // so routes/fees.ts imports batchCode.ts too -- the same real transpiled
   // module loaded above, not a stub, so the order under test is the real one.
