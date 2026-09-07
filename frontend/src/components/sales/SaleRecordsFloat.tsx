@@ -35,6 +35,7 @@ import FilterMenu from '../shared/FilterMenu.tsx'
 import { getSaleRecords } from '../../api/salesTransport.ts'
 import { fmtDateTime24 } from '../../utils/formatters.ts'
 import { getStatusLabel } from './StatusBadge.tsx'
+import { formatSaleRecordValueLines } from './saleRecordValue.ts'
 import {
   SALE_RECORD_KIND_KEYS,
   filterSaleRecords,
@@ -144,7 +145,7 @@ export default function SaleRecordsFloat({ sale, onClose, t, fmtUSD }: SaleRecor
     return label(key, KIND_FALLBACKS[key] || key)
   }
 
-  const renderValue = (row: SaleRecordFieldRow, value: unknown): string => {
+  const renderValue = (row: SaleRecordFieldRow, value: unknown) => {
     if (value === null || value === undefined || value === '') return label('not_recorded', 'Not recorded')
     if (row.format === 'money') {
       const parsed = Number(value)
@@ -152,8 +153,13 @@ export default function SaleRecordsFloat({ sale, onClose, t, fmtUSD }: SaleRecor
     }
     if (row.format === 'status') return getStatusLabel(value, t)
     if (row.format === 'quantity') return String(value)
-    if (typeof value === 'object') return JSON.stringify(value)
-    return String(value)
+    const lines = formatSaleRecordValueLines(row.field, value, fmtUSD)
+    if (lines.length === 0) return label('not_recorded', 'Not recorded')
+    return (
+      <span className="inline-flex max-w-full flex-col items-end gap-0.5">
+        {lines.map((line, index) => <span key={`${index}:${line}`} className="max-w-full break-words">{line}</span>)}
+      </span>
+    )
   }
 
   const toggleKind = (kind: string): void => {
