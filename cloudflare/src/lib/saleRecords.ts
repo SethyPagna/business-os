@@ -287,11 +287,10 @@ function rememberEarlierBefore(
  * original value. Legacy rows may have outlived the audit entry that recorded
  * a status or payment change, so mutable fields without surviving evidence are
  * explicitly unknown rather than inferred from today's row. The total remains
- * safe when there is no permanent amendment ledger entry.
- * Product lines are safe only while no line amendment exists. Once a line was
- * added/removed/changed, the ledger does not retain enough price detail to
- * recreate the original array, so `products: null` says unknown instead of
- * presenting today's lines as the original basket.
+ * safe when there is no permanent amendment ledger entry. Product lines read
+ * from sale_items are never creation evidence: product rename/merge syncing
+ * rewrites their names without a sale amendment. Until an immutable creation
+ * snapshot exists, `products: null` is the only honest answer.
  */
 export function reconstructSaleCreation(input: {
   sale: SaleRecordSaleRow
@@ -366,9 +365,7 @@ export function reconstructSaleCreation(input: {
   for (const field of CREATION_SNAPSHOT_FIELDS) {
     if (known[field]) reconstructed[field] = known[field]!.value
   }
-  if ((input.ledger || []).some((row) => String(row.kind || '').startsWith('line_'))) {
-    reconstructed.items = undefined
-  }
+  reconstructed.items = undefined
   return reconstructed
 }
 
