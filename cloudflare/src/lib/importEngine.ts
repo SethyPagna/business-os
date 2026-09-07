@@ -71,7 +71,7 @@ import {
 import { parseImportNumericValue, normalizeImportMoney } from './importNumbers'
 import { createMembershipNumberAllocator, membershipGlob } from './membershipNumber'
 import { buildImportedContactState, contactDisplayAddress } from './contactOptions'
-import { collectContactPhones, formatContactOptionPhones, formatPhoneP8, normalizeContactName } from './contactDuplicates'
+import { collectContactPhones, contactDuplicateWriteGuardStatement, formatContactOptionPhones, formatPhoneP8, normalizeContactName } from './contactDuplicates'
 import { canonicalizePhone } from './phone'
 import { bumpVersion } from './cache'
 import { broadcast } from '../durable-objects/broadcastHub'
@@ -220,6 +220,10 @@ export type ImportRowResult = {
   // update + branch_stock quantity REPLACE), so old imports and every
   // other row shape keep writing exactly as before.
   plannedMode?: 'merge_stock' | 'override_add' | 'override_replace'
+  // Contacts-only write snapshot. Apply reclassifies each chunk immediately
+  // before writing, then verifies this exact value in the same D1 batch as
+  // the UPDATE so a concurrent manual edit cannot be overwritten.
+  expectedUpdatedAt?: string | null
 }
 
 // Shared by the synchronous approval/retry routes and every asynchronous
@@ -2362,6 +2366,7 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
         warnings: matchWarnings,
         changes: diffFields(match as unknown as Record<string, unknown>, merged),
         data: merged,
+        expectedUpdatedAt: str(match.updated_at) || null,
       })
       continue
     }
@@ -6043,13 +6048,24 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
           : ['name', 'phone', 'address', 'notes', 'area', 'gender']
       for (const r of actionable) {
         const d = r.data as Record<string, unknown>
+        const group: Array<{ sql: string; params: Record<string, unknown> }> = []
+        const duplicateGuard = contactDuplicateWriteGuardStatement(table, {
+          id: r.action === 'update' ? r.existingId : null,
+          phones: collectContactPhones(d, table === 'delivery_contacts' ? 'area' : 'address'),
+        })
+        if (duplicateGuard) group.push(duplicateGuard)
         if (r.action === 'update' && r.existingId) {
           // A saved import review may predate a customer edit. Never replace identity.
+          group.push({
+            sql: `SELECT CASE WHEN EXISTS (SELECT 1 FROM "${table}" WHERE id=@id AND updated_at IS @expectedUpdatedAt)
+              THEN 1 ELSE json('CONTACT_IMPORT_STALE_WRITE_GUARD') END AS contact_import_stale_guard`,
+            params: { id: r.existingId, expectedUpdatedAt: r.expectedUpdatedAt ?? null },
+          })
           const assignments = columns.filter((c) => c !== 'membership_number').map((c) => `"${c}"=@${c}`).join(', ')
-          statements.push({ sql: `UPDATE "${table}" SET ${assignments}, updated_at=@updated_at WHERE id=@id`, params: { ...d, id: r.existingId, updated_at: nowIso } })
+          group.push({ sql: `UPDATE "${table}" SET ${assignments}, updated_at=@updated_at WHERE id=@id`, params: { ...d, id: r.existingId, updated_at: nowIso } })
         } else {
           const cols = [...columns, 'created_at', 'updated_at']
-          statements.push({
+          group.push({
             sql: `INSERT INTO "${table}" (${cols.map((c) => `"${c}"`).join(', ')}) VALUES (${cols.map((c) => `@${c}`).join(', ')})`,
             // `created_at` on a new row honors an imported date (all three
             // contact tables -- see classifyContacts' own shared
@@ -6065,6 +6081,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
             params: { ...d, created_at: (d.created_at as string | null | undefined) || nowIso, updated_at: nowIso },
           })
         }
+        guardedGroups.push(group)
       }
     } else if (job.type === 'inventory') {
       for (const r of actionable) {

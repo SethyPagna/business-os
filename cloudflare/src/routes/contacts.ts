@@ -13,10 +13,12 @@ import {
   dismissDuplicateCluster,
   undismissDuplicateCluster,
   collectContactPhones,
+  contactDuplicateWriteGuardStatement,
   formatPhoneP8,
   formatContactOptionPhones,
   type ContactDuplicateMatch,
   type ContactDuplicateTable,
+  type ContactDuplicateAllowedMatch,
 } from '../lib/contactDuplicates'
 import { contactDisplayAddress, type ContactOptionMode } from '../lib/contactOptions'
 import { canonicalizePhone } from '../lib/phone'
@@ -276,15 +278,34 @@ async function checkContactDuplicateBlock(
   config: ContactConfig,
   subject: { id?: number | string | null; name: string; phone: unknown; address: unknown },
   confirmDuplicate: boolean,
-): Promise<{ body: Record<string, unknown>; status: number } | null> {
+): Promise<{ block: { body: Record<string, unknown>; status: number } | null; allowedExactMatches: ContactDuplicateAllowedMatch[]; phones: string[] }> {
   const db = getDb(env)
   const phones = collectContactPhones({ phone: subject.phone, address: subject.address }, config.optionMode)
   const matches = await findContactDuplicates(db, config.table, { id: subject.id, name: subject.name, phones }, config.optionMode)
   const phoneConflict = matches.find((m) => m.severity === 'phone_conflict')
-  if (phoneConflict) return duplicateErrorResponse(config.entity, phoneConflict)
+  if (phoneConflict) return { block: duplicateErrorResponse(config.entity, phoneConflict), allowedExactMatches: [], phones }
   const exactMatch = matches.find((m) => m.severity === 'exact_match')
-  if (exactMatch && !confirmDuplicate) return duplicateErrorResponse(config.entity, exactMatch)
-  return null
+  if (exactMatch && !confirmDuplicate) return { block: duplicateErrorResponse(config.entity, exactMatch), allowedExactMatches: [], phones }
+  return {
+    block: null,
+    allowedExactMatches: confirmDuplicate
+      ? matches.filter((match) => match.severity === 'exact_match').map((match) => ({ id: match.id, name: match.name }))
+      : [],
+    phones,
+  }
+}
+
+async function duplicateBlockAfterGuardFailure(
+  env: Env,
+  config: ContactConfig,
+  subject: { id?: number | string | null; name: string; phones: string[] },
+  allowedExactMatches: ContactDuplicateAllowedMatch[],
+): Promise<{ body: Record<string, unknown>; status: number } | null> {
+  const matches = await findContactDuplicates(getDb(env), config.table, subject, config.optionMode)
+  const allowed = new Set(allowedExactMatches.map((match) => `${match.id}\u0000${match.name}`))
+  const unexpected = matches.find((match) => match.severity === 'phone_conflict'
+    || (match.severity === 'exact_match' && !allowed.has(`${match.id}\u0000${match.name}`)))
+  return unexpected ? duplicateErrorResponse(config.entity, unexpected) : null
 }
 
 function conflictResult(error: unknown) {
@@ -993,8 +1014,9 @@ function registerContactRoutes(config: ContactConfig) {
       payload.phone_normalized = canonicalizePhone(payload.phone)
     }
 
-    const duplicateBlock = await checkContactDuplicateBlock(c.env, config, { name, phone: payload.phone, address: payload.address }, body.confirmDuplicate === true)
-    if (duplicateBlock) return c.json(duplicateBlock.body, duplicateBlock.status as 400 | 409)
+    const duplicateDecision = await checkContactDuplicateBlock(c.env, config, { name, phone: payload.phone, address: payload.address }, body.confirmDuplicate === true)
+    if (duplicateDecision.block) return c.json(duplicateDecision.block.body, duplicateDecision.block.status as 400 | 409)
+    const duplicateGuard = contactDuplicateWriteGuardStatement(config.table, { phones: duplicateDecision.phones }, duplicateDecision.allowedExactMatches)
 
     // Customers only. A number staff typed in wins (after a reuse check);
     // a blank one is minted from the house LC- sequence. The mint is deferred
@@ -1033,17 +1055,29 @@ function registerContactRoutes(config: ContactConfig) {
 
     const runContactInsert = async () => {
       const columns = Object.keys(payload)
-      return db.prepare(`
-        INSERT INTO ${config.table} (${columns.join(', ')}, updated_at)
-        VALUES (${columns.map((col) => `@${col}`).join(', ')}, CURRENT_TIMESTAMP)
-      `).run(payload)
+      const insert = {
+        sql: `INSERT INTO ${config.table} (${columns.join(', ')}, updated_at)
+          VALUES (${columns.map((col) => `@${col}`).join(', ')}, CURRENT_TIMESTAMP)`,
+        params: payload,
+      }
+      if (!duplicateGuard) return db.prepare(insert.sql).run(insert.params)
+      const results = await db.batch([duplicateGuard, insert])
+      const meta = results[1]?.meta
+      return { changes: Number(meta?.changes ?? 0), lastInsertRowid: Number(meta?.last_row_id ?? 0) }
     }
-    const result = mintMembership
-      ? await withMintedMembershipNumber(db, async (membershipNumber) => {
-        payload.membership_number = membershipNumber
-        return runContactInsert()
-      })
-      : await runContactInsert()
+    let result: { changes: number; lastInsertRowid: number }
+    try {
+      result = mintMembership
+        ? await withMintedMembershipNumber(db, async (membershipNumber) => {
+          payload.membership_number = membershipNumber
+          return runContactInsert()
+        })
+        : await runContactInsert()
+    } catch (error) {
+      const duplicateBlock = await duplicateBlockAfterGuardFailure(c.env, config, { name, phones: duplicateDecision.phones }, duplicateDecision.allowedExactMatches)
+      if (duplicateBlock) return c.json(duplicateBlock.body, duplicateBlock.status as 400 | 409)
+      throw error
+    }
     const id = result.lastInsertRowid
     await audit(c.env, user?.id ?? null, actorSnapshot(user), 'create', config.entity, id, { name })
     await bumpVersion(c.env, config.table)
@@ -1093,8 +1127,9 @@ function registerContactRoutes(config: ContactConfig) {
 
     const current = await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get<Record<string, unknown>>({ id })
     if (!current) return c.json({ error: `${config.entity} not found` }, 404)
+    const expectedUpdatedAt = getExpectedUpdatedAt(body)
     try {
-      assertUpdatedAtMatch(config.entity, current, getExpectedUpdatedAt(body))
+      assertUpdatedAtMatch(config.entity, current, expectedUpdatedAt)
     } catch (error) {
       const result = conflictResult(error)
       if (result) return c.json(result.body, result.status)
@@ -1170,8 +1205,9 @@ function registerContactRoutes(config: ContactConfig) {
     // to check the phones already on `current`, not an empty set.
     const effectivePhone = Object.prototype.hasOwnProperty.call(payload, 'phone') ? payload.phone : current.phone
     const effectiveAddress = Object.prototype.hasOwnProperty.call(payload, 'address') ? payload.address : current.address
-    const duplicateBlock = await checkContactDuplicateBlock(c.env, config, { id, name, phone: effectivePhone, address: effectiveAddress }, body.confirmDuplicate === true)
-    if (duplicateBlock) return c.json(duplicateBlock.body, duplicateBlock.status as 400 | 409)
+    const duplicateDecision = await checkContactDuplicateBlock(c.env, config, { id, name, phone: effectivePhone, address: effectiveAddress }, body.confirmDuplicate === true)
+    if (duplicateDecision.block) return c.json(duplicateDecision.block.body, duplicateDecision.block.status as 400 | 409)
+    const duplicateGuard = contactDuplicateWriteGuardStatement(config.table, { id, phones: duplicateDecision.phones }, duplicateDecision.allowedExactMatches)
 
     // Customers only, same deferred-mint shape as the POST route above: a
     // number staff typed in wins (after a reuse check); a blank one on a
@@ -1208,14 +1244,24 @@ function registerContactRoutes(config: ContactConfig) {
       && Object.prototype.hasOwnProperty.call(payload, 'address')
       && String(current.address || '') !== String(payload.address || '')
     const statements: Array<{ sql: string; params: Record<string, unknown> }> = []
-    const columns = Object.keys(payload)
-    if (columns.length) {
+    if (duplicateGuard) statements.push(duplicateGuard)
+    if (expectedUpdatedAt) {
       statements.push({
+        sql: `SELECT CASE WHEN EXISTS (SELECT 1 FROM ${config.table} WHERE id = @id AND updated_at IS @expectedUpdatedAt)
+          THEN 1 ELSE json('CONTACT_STALE_WRITE_GUARD') END AS contact_stale_guard`,
+        params: { id, expectedUpdatedAt },
+      })
+    }
+    const columns = Object.keys(payload)
+    let contactUpdate: { sql: string; params: Record<string, unknown> } | null = null
+    if (columns.length) {
+      contactUpdate = {
         sql: `UPDATE ${config.table}
           SET ${columns.map((col) => `${col} = @${col}`).join(', ')}, updated_at = CURRENT_TIMESTAMP
           WHERE id = @id`,
         params: { ...payload, id },
-      })
+      }
+      statements.push(contactUpdate)
     }
 
     if ((nameChanged && snapshotCarry) || phoneChanged || addressChanged) {
@@ -1259,15 +1305,29 @@ function registerContactRoutes(config: ContactConfig) {
     // runs: withMintedMembershipNumber re-mints and calls back on a lost
     // UNIQUE race, and the retry must write the NEW number, not the one it
     // just lost. Same one retry story as the POST route above.
-    const contactUpdate = columns.length ? statements[0] : null
-    if (mintMembership) {
-      await withMintedMembershipNumber(db, async (membershipNumber) => {
-        payload.membership_number = membershipNumber
-        if (contactUpdate) contactUpdate.params = { ...payload, id }
-        if (statements.length) await db.batch(statements)
-      })
-    } else if (statements.length) {
-      await db.batch(statements)
+    try {
+      if (mintMembership) {
+        await withMintedMembershipNumber(db, async (membershipNumber) => {
+          payload.membership_number = membershipNumber
+          if (contactUpdate) contactUpdate.params = { ...payload, id }
+          if (statements.length) await db.batch(statements)
+        })
+      } else if (statements.length) {
+        await db.batch(statements)
+      }
+    } catch (error) {
+      const duplicateBlock = await duplicateBlockAfterGuardFailure(c.env, config, { id, name, phones: duplicateDecision.phones }, duplicateDecision.allowedExactMatches)
+      if (duplicateBlock) return c.json(duplicateBlock.body, duplicateBlock.status as 400 | 409)
+      if (expectedUpdatedAt) {
+        const fresh = await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get<Record<string, unknown>>({ id })
+        try {
+          assertUpdatedAtMatch(config.entity, fresh, expectedUpdatedAt)
+        } catch (conflictError) {
+          const result = conflictResult(conflictError)
+          if (result) return c.json(result.body, result.status)
+        }
+      }
+      throw error
     }
     if (config.table === 'suppliers' && nameChanged && snapshotCarry) {
       await audit(c.env, user?.id ?? null, actorSnapshot(user), 'rename', 'supplier_cascade', id, {
@@ -2159,12 +2219,27 @@ app.post('/customers/link-conflicts/resolve-missing', async (c) => {
     targetId = target.id
   } else {
     const storedPhone = formatPhoneP8(phone)
-    const duplicateBlock = await checkContactDuplicateBlock(c.env, CUSTOMERS, { name: name || storedPhone, phone: storedPhone, address: null }, false)
-    if (duplicateBlock) return c.json(duplicateBlock.body, duplicateBlock.status as 400 | 409)
-    const inserted = await withMintedMembershipNumber(db, (membership) => db.prepare(`
-      INSERT INTO customers (name, phone, phone_normalized, membership_number, created_at, updated_at)
-      VALUES (@name, @phone, @phoneNormalized, @membership, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-    `).run({ name: name || storedPhone, phone: storedPhone || null, phoneNormalized: canonicalizePhone(storedPhone), membership }))
+    const duplicateDecision = await checkContactDuplicateBlock(c.env, CUSTOMERS, { name: name || storedPhone, phone: storedPhone, address: null }, false)
+    if (duplicateDecision.block) return c.json(duplicateDecision.block.body, duplicateDecision.block.status as 400 | 409)
+    const duplicateGuard = contactDuplicateWriteGuardStatement('customers', { phones: duplicateDecision.phones })
+    let inserted: { changes: number; lastInsertRowid: number }
+    try {
+      inserted = await withMintedMembershipNumber(db, async (membership) => {
+        const insert = {
+          sql: `INSERT INTO customers (name, phone, phone_normalized, membership_number, created_at, updated_at)
+            VALUES (@name, @phone, @phoneNormalized, @membership, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+          params: { name: name || storedPhone, phone: storedPhone || null, phoneNormalized: canonicalizePhone(storedPhone), membership },
+        }
+        if (!duplicateGuard) return db.prepare(insert.sql).run(insert.params)
+        const results = await db.batch([duplicateGuard, insert])
+        const meta = results[1]?.meta
+        return { changes: Number(meta?.changes ?? 0), lastInsertRowid: Number(meta?.last_row_id ?? 0) }
+      })
+    } catch (error) {
+      const duplicateBlock = await duplicateBlockAfterGuardFailure(c.env, CUSTOMERS, { name: name || storedPhone, phones: duplicateDecision.phones }, [])
+      if (duplicateBlock) return c.json(duplicateBlock.body, duplicateBlock.status as 400 | 409)
+      throw error
+    }
     targetId = Number((inserted as { lastInsertRowid?: number | bigint }).lastInsertRowid ?? (inserted as { meta?: { last_row_id?: number } })?.meta?.last_row_id)
     created = true
   }

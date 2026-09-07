@@ -144,15 +144,27 @@ async function main() {
   const applyBody = engineSource.slice(engineSource.indexOf('{', applyStart) + 1, applyEnd)
   const code = ts.transpileModule(applyBody, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
   const statements = []
-  new Function('job', 'actionable', 'statements', 'nowIso', code)(
-    { type: 'customers' }, [{ action: 'update', existingId: 1, data: { name: 'Member updated', phone: '012 345 678', phone_normalized: '012345678', address: null, notes: null, email: null, membership_number: 'REPLACE2', gender: null } }], statements, '2026-09-05 12:00:00',
+  const guardedGroups = []
+  new Function('job', 'actionable', 'statements', 'guardedGroups', 'nowIso', 'contactDuplicateWriteGuardStatement', 'collectContactPhones', code)(
+    { type: 'customers' }, [{ action: 'update', existingId: 1, expectedUpdatedAt: updated[0].expectedUpdatedAt, data: { name: 'Member updated', phone: '012 345 678', phone_normalized: '012345678', address: null, notes: null, email: null, membership_number: 'REPLACE2', gender: null } }], statements, guardedGroups, '2026-09-05 12:00:00', contactDuplicates.contactDuplicateWriteGuardStatement, contactDuplicates.collectContactPhones,
   )
   for (const statement of statements) await db.prepare(statement.sql).run(statement.params)
+  for (const group of guardedGroups) for (const statement of group) await db.prepare(statement.sql).run(statement.params)
   const applied = await db.prepare('SELECT name,phone,phone_normalized,membership_number FROM customers WHERE id=1').get()
   assert.equal(applied.name, 'Member updated')
   assert.equal(applied.phone, '012 345 678')
   assert.equal(applied.phone_normalized, '012345678', 'contact import apply keeps the canonical customer phone key fresh')
   assert.equal(applied.membership_number, ' legacy-Id ', 'apply cannot rewrite identity from a stale review')
+
+  raw.prepare("INSERT INTO customers (id,name,updated_at) VALUES (9901,'Import Before','2026-09-08 00:00:00')").run()
+  const staleImport = await imports.classifyContacts(db, 'customers', [{ name: 'Import Before', notes: 'stale overwrite' }])
+  const staleGroups = []
+  new Function('job', 'actionable', 'statements', 'guardedGroups', 'nowIso', 'contactDuplicateWriteGuardStatement', 'collectContactPhones', code)(
+    { type: 'customers' }, staleImport, [], staleGroups, '2026-09-08 00:00:02', contactDuplicates.contactDuplicateWriteGuardStatement, contactDuplicates.collectContactPhones,
+  )
+  raw.prepare("UPDATE customers SET name='Import Concurrent', updated_at='2026-09-08 00:00:01' WHERE id=9901").run()
+  await assert.rejects(() => db.batch(staleGroups[0]), /malformed JSON/, 'a contact import update aborts if its freshly classified row changes before apply')
+  assert.equal(raw.prepare('SELECT name FROM customers WHERE id=9901').get().name, 'Import Concurrent', 'the guarded import never overwrites the concurrent edit')
 
   // --- undo/redo of a hard delete must not dead-end on a gap-fill race
   // (verifier finding, 2026-09-06): bulkDeleteEngine.ts hard-deletes
@@ -246,6 +258,29 @@ ${collisionCode}
   const interloperNumber = (await db.prepare("SELECT membership_number FROM customers WHERE name='Interloper'").get()).membership_number
   assert.notEqual(secondNumber, interloperNumber, 'the retry took the next free number, not the one it lost')
 
-  console.log('PASS membership routes: auth, exact scope, redaction, public 403; LC- gap-fill minting over customers+portal_accounts, bounded retries, imports, preservation, undo/redo restore-vs-manual-add collision handling, and PUT-path mint retry')
+  // A phone owner arriving after the read check but before the write is
+  // refused by the guard in the same batch as the INSERT.
+  membershipBatchCalls = 0
+  onMembershipBatch = () => {
+    raw.prepare("INSERT INTO customers (name,phone,phone_normalized,membership_number) VALUES ('Concurrent Owner','088 765 432','088765432','LC-09991')").run()
+  }
+  const racedCreate = await contactsWrite.request('/customers', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-test-permissions': '{"contacts":true}' },
+    body: JSON.stringify({ name: 'New Person', phone: '+855 88 765 432', membership_number: 'LC-09992' }),
+  }, {}, { waitUntil: () => {}, passThroughOnException: () => {} })
+  assert.equal(racedCreate.status, 409, 'a canonical phone claimed between precheck and INSERT is refused')
+  assert.equal(raw.prepare("SELECT COUNT(*) AS n FROM customers WHERE name='New Person'").get().n, 0, 'the guarded INSERT did not partially commit')
+
+  // updated_at is also rechecked in the write batch. A concurrent edit wins;
+  // this request gets the normal write-conflict response and cannot overwrite it.
+  raw.prepare("INSERT INTO customers (id,name,updated_at) VALUES (9900002,'Before Race','2026-09-08 01:00:00')").run()
+  onMembershipBatch = () => raw.prepare("UPDATE customers SET name='Concurrent Edit', updated_at='2026-09-08 01:00:01' WHERE id=9900002").run()
+  const stalePut = await putCustomer(9900002, { name: 'Stale Edit', expectedUpdatedAt: '2026-09-08 01:00:00', __rename_cascade: 'record_only' })
+  assert.equal(stalePut.status, 409, 'a contact changed between precheck and batch returns a write conflict')
+  assert.equal((await stalePut.json()).code, 'write_conflict')
+  assert.equal(raw.prepare('SELECT name FROM customers WHERE id=9900002').get().name, 'Concurrent Edit', 'the concurrent value survives the refused stale update')
+
+  console.log('PASS membership/contact routes: auth, identity preservation, mint retry, atomic canonical-phone guard, and stale-update refusal')
 }
 main().catch(error => { console.error(error); process.exitCode = 1 })

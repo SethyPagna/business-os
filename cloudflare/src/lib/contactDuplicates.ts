@@ -46,6 +46,10 @@ export type ContactDuplicateCandidateRow = {
 
 export type ContactDuplicateTable = 'customers' | 'suppliers' | 'delivery_contacts'
 
+export type ContactDuplicateAllowedMatch = { id: number; name: string }
+
+export type ContactDuplicateGuardStatement = { sql: string; params: Record<string, unknown> }
+
 // Only customers carry membership_number (0001's schema; suppliers/
 // delivery_contacts have never had the column -- production-verified).
 // Selecting it unconditionally made EVERY manual supplier and
@@ -56,6 +60,15 @@ export type ContactDuplicateTable = 'customers' | 'suppliers' | 'delivery_contac
 // rows simply carry none.
 function candidateColumns(table: ContactDuplicateTable): string {
   return table === 'customers' ? 'id, name, phone, address, membership_number' : 'id, name, phone, address'
+}
+
+function phoneDigitsSql(column: string): string {
+  return `replace(replace(replace(replace(replace(replace(replace(COALESCE(${column}, ''), ' ', ''), '-', ''), '(', ''), ')', ''), '.', ''), '+', ''), '/', '')`
+}
+
+function canonicalPhoneSql(column: string): string {
+  const digits = phoneDigitsSql(column)
+  return `(CASE WHEN substr(${digits}, 1, 3) = '855' AND length(${digits}) IN (11, 12) THEN '0' || substr(${digits}, 4) ELSE ${digits} END)`
 }
 
 export function normalizeContactName(value: unknown): string {
@@ -182,20 +195,15 @@ export async function findContactDuplicates(
   // column and each structured Contact Option. customers.phone_normalized is
   // indexed and checked first, while the expression also catches historical
   // supplier/delivery rows and imported customer rows whose key is stale.
-  const digitsSql = (column: string) => `replace(replace(replace(replace(replace(replace(replace(COALESCE(${column}, ''), ' ', ''), '-', ''), '(', ''), ')', ''), '.', ''), '+', ''), '/', '')`
-  const canonicalSql = (column: string) => {
-    const digits = digitsSql(column)
-    return `(CASE WHEN substr(${digits}, 1, 3) = '855' AND length(${digits}) IN (11, 12) THEN '0' || substr(${digits}, 4) ELSE ${digits} END)`
-  }
   const phoneConditions: string[] = []
   phones.forEach((phone, index) => {
     params[`phone${index}`] = phone
     if (table === 'customers') phoneConditions.push(`phone_normalized = @phone${index}`)
-    phoneConditions.push(`${canonicalSql('phone')} = @phone${index}`)
+    phoneConditions.push(`${canonicalPhoneSql('phone')} = @phone${index}`)
     phoneConditions.push(`EXISTS (
       SELECT 1
       FROM json_each(CASE WHEN json_valid(address) THEN CASE WHEN json_type(address) = 'array' THEN address ELSE '[]' END ELSE '[]' END) AS option
-      WHERE ${canonicalSql("json_extract(option.value, '$.phone')")} = @phone${index}
+      WHERE ${canonicalPhoneSql("json_extract(option.value, '$.phone')")} = @phone${index}
     )`)
   })
   const excludeSql = subject.id != null && subject.id !== '' ? 'AND id != @excludeId' : ''
@@ -214,6 +222,49 @@ export async function findContactDuplicates(
   const rows = [...new Map([...phoneRows, ...nameRows].map((row) => [Number(row.id), row])).values()]
 
   return classifyContactDuplicates({ name: subject.name, phones }, rows, mode)
+}
+
+// Re-check canonical phone ownership inside the same D1 batch as the write.
+// `allowedExactMatches` is the exact id+name snapshot a staff member already
+// acknowledged with confirmDuplicate. A newly-created owner or a renamed
+// acknowledged row is not covered by that earlier confirmation.
+export function contactDuplicateWriteGuardStatement(
+  table: ContactDuplicateTable,
+  subject: { id?: number | string | null; phones: string[] },
+  allowedExactMatches: ContactDuplicateAllowedMatch[] = [],
+): ContactDuplicateGuardStatement | null {
+  const phones = [...new Set(subject.phones.map(normalizePhone).filter((phone): phone is string => !!phone))]
+  if (!phones.length) return null
+  const phoneMatch = `(
+    ${table === 'customers' ? `candidate.phone_normalized IN (SELECT CAST(value AS TEXT) FROM json_each(@phones)) OR` : ''}
+    ${canonicalPhoneSql('candidate.phone')} IN (SELECT CAST(value AS TEXT) FROM json_each(@phones))
+    OR EXISTS (
+      SELECT 1 FROM json_each(CASE WHEN json_valid(candidate.address) AND json_type(candidate.address) = 'array' THEN candidate.address ELSE '[]' END) AS option
+      WHERE ${canonicalPhoneSql("json_extract(option.value, '$.phone')")} IN (SELECT CAST(value AS TEXT) FROM json_each(@phones))
+    )
+  )`
+  return {
+    // A conflicting candidate is inserted with its own primary key, which
+    // raises a deterministic UNIQUE constraint and rolls the whole D1 batch
+    // back. A clear check selects zero rows and performs no write. Using a
+    // real constraint avoids the generic D1 retry path used for transient
+    // infrastructure errors.
+    sql: `INSERT INTO ${table} (id, name)
+      SELECT candidate.id, candidate.name FROM ${table} AS candidate
+      WHERE candidate.id != COALESCE(@excludeId, -1)
+        AND ${phoneMatch}
+        AND NOT EXISTS (
+          SELECT 1 FROM json_each(@allowedExactMatches) AS allowed
+          WHERE CAST(json_extract(allowed.value, '$.id') AS INTEGER) = candidate.id
+            AND json_extract(allowed.value, '$.name') IS candidate.name
+        )
+      LIMIT 1`,
+    params: {
+      phones: JSON.stringify(phones),
+      excludeId: subject.id == null || subject.id === '' ? null : Number(subject.id),
+      allowedExactMatches: JSON.stringify(allowedExactMatches),
+    },
+  }
 }
 
 export type ContactDuplicateClusterEntry = { id: number; name: string | null; phone: string | null; membershipNumber: string | null }
