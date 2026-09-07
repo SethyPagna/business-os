@@ -164,7 +164,7 @@ const BulkAddStockModal = lazyRetry(() => import('./forms/BulkAddStockModal'), '
 const VariantFormModal = lazyRetry(() => import('./forms/VariantFormModal'), 'products-variant-form-modal')
 const ProductForm = lazyRetry(() => import('./forms/ProductForm'), 'products-product-form')
 const CreateProductsSessionModal = lazyRetry(() => import('./CreateProductsSessionModal'), 'products-create-products-session-modal')
-type CreateProductsSessionMinimizeDetails = import('./CreateProductsSessionModal').CreateProductsSessionMinimizeDetails
+type CreateProductsSessionMinimizeDetails = import('../../utils/createProductsSession.ts').CreateProductsSessionMinimizeDetails
 const StockAdjustModal = lazyRetry(() => import('./forms/StockAdjustModal'), 'products-stock-adjust-modal')
 const ProductDetailModal = lazyRetry(() => import('./surfaces/ProductDetailModal'), 'products-product-detail-modal')
 // Reused as-is from Inventory's own batches surface (see ManageBatchesModal.tsx)

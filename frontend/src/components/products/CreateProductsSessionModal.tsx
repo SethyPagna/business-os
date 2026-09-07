@@ -29,12 +29,14 @@ import { stockReceiptGateCode, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_
 import InfoHint from '../shared/InfoHint.tsx'
 import {
   canStartCreateProductsSession,
+  createProductsSessionPermissionRequirements,
   createProductsSessionDefaults,
   emptyCreateProductsHeader,
   findSessionProductDuplicate,
   isCreateProductsHeaderDirty,
   summarizeCreateProductsSession,
   type CreateProductsHeader,
+  type CreateProductsSessionMinimizeDetails,
   type CreateProductsSessionDraft,
   type CreateProductsSessionRow,
 } from '../../utils/createProductsSession.ts'
@@ -51,37 +53,6 @@ const ProductForm = lazyRetry(() => import('./forms/ProductForm'), 'create-produ
 
 type Translate = (key: string) => string
 type AddProductsMode = 'new' | 'existing'
-export type CreateProductsSessionPermissionRequirement = {
-  permissionKey: 'products' | 'inventory'
-  actionKey: 'add' | 'adjust'
-}
-
-export type CreateProductsSessionMinimizeDetails = {
-  draftKey: string
-  mode: AddProductsMode
-  requiredPermissions: CreateProductsSessionPermissionRequirement[]
-}
-
-export function createProductsSessionPermissionRequirements(
-  rows: Array<{ kind: 'receive' | 'create_receive' | 'created_zero'; status: 'queued' | 'saved'; quantity: number }>,
-  mode: AddProductsMode,
-): CreateProductsSessionPermissionRequirement[] {
-  const queued = rows.filter((row) => row.status === 'queued')
-  const required: CreateProductsSessionPermissionRequirement[] = []
-  if (queued.some((row) => row.kind === 'create_receive' || row.kind === 'created_zero')) {
-    required.push({ permissionKey: 'products', actionKey: 'add' })
-  }
-  if (queued.some((row) => row.kind === 'receive' || (row.kind === 'create_receive' && row.quantity > 0))) {
-    required.push({ permissionKey: 'inventory', actionKey: 'adjust' })
-  }
-  if (!required.length) {
-    required.push(mode === 'new'
-      ? { permissionKey: 'products', actionKey: 'add' }
-      : { permissionKey: 'inventory', actionKey: 'adjust' })
-  }
-  return required
-}
-
 const STOCK_SESSION_MAX_LINES = 25
 const STOCK_SESSION_MAX_BYTES = 64 * 1024
 
