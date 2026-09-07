@@ -37,7 +37,7 @@ class FakeHono {
 }
 
 function countedAdapter(d1) {
-  const counters = { reads: 0, writes: 0, batches: 0, readBatches: 0, statementsInBatches: 0 }
+  const counters = { reads: 0, writes: 0, batches: 0, readBatches: 0, statementsInBatches: 0, batchStatementCounts: [] }
   const adapter = {
     prepare(sql) {
       const statement = d1.prepare(sql)
@@ -54,6 +54,7 @@ function countedAdapter(d1) {
     batch(statements) {
       counters.batches += 1
       counters.statementsInBatches += statements.length
+      counters.batchStatementCounts.push(statements.length)
       const readOnly = statements.every((statement) => /^\s*(?:SELECT|WITH|PRAGMA)\b/i.test(statement.sql))
       if (readOnly) {
         counters.readBatches += 1
@@ -75,6 +76,7 @@ function loadRealModules(adapter) {
     './productDetailRule': detail, './sqlBinding': sqlBinding, './db': {},
   })
   const economics = loadTs('lib/productMerge.ts')
+  const snapshot = loadTs('lib/productMergeSnapshot.ts', { './db': {} })
   const actor = loadTs('lib/actorSnapshot.ts')
   const never = () => { throw new Error('unrelated undo branch invoked') }
   const undo = loadTs('lib/undoAppliers.ts', {
@@ -95,6 +97,7 @@ function loadRealModules(adapter) {
   const route = loadTs('routes/products.ts', {
     hono: { Hono: FakeHono }, '../lib/db': { getDb: () => adapter }, '../lib/audit': { audit: async () => {} },
     '../lib/productDetailRule': detail, '../lib/productIdentity': identity, '../lib/productMerge': economics,
+    '../lib/productMergeSnapshot': snapshot,
     '../lib/undoAppliers': undo, '../lib/sqlBinding': sqlBinding, '../lib/actorSnapshot': actor,
   })
   return { identity, economics, undo, route }
@@ -117,22 +120,20 @@ async function main() {
   d1.db.exec('COMMIT')
 
   const { adapter, counters } = countedAdapter(d1)
-  const { identity, economics, route } = loadRealModules(adapter)
+  const { identity, route } = loadRealModules(adapter)
   const scanStarted = performance.now()
   const groups = await identity.findDuplicateProductGroups(adapter)
   const scanMs = performance.now() - scanStarted
   assert.equal(groups.length, 1600)
   assert.equal(groups.reduce((sum, group) => sum + group.duplicates.length, 0), 1600)
 
+  const beforeFolds = { ...counters, batchStatementCounts: [...counters.batchStatementCounts] }
   const runStarted = performance.now()
   for (const group of groups.slice(0, 25)) {
-    const ids = [group.canonical.id, group.duplicates[0].id]
-    const rows = await adapter.prepare(`SELECT id,cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,wholesale_price_usd,wholesale_price_khr FROM products WHERE id IN (?,?)`).all(ids)
-    const merged = economics.resolveProductMergeEconomics(rows)
     const operationId = `benchmark-${group.canonical.id}`
     const result = await route.foldDuplicateProductInto(
       {}, adapter, { id: 9, username: 'benchmark' }, group.canonical, group.duplicates[0], new Map(),
-      'local 1600-pair benchmark', 'merge', merged, { operationId },
+      'local 1600-pair benchmark', 'merge', undefined, { operationId },
     )
     assert.equal(result.undoReady, true)
   }
@@ -142,9 +143,25 @@ async function main() {
   assert.equal(d1.db.prepare('SELECT COUNT(*) AS n FROM action_history').get().n, 25)
   assert.equal(d1.db.prepare('SELECT COUNT(*) AS n FROM undo_snapshots').get().n, 25)
   assert.ok(runMs < 30000, `a 25-case local chunk took ${runMs.toFixed(1)}ms`)
+  const foldReads = counters.reads - beforeFolds.reads
+  const foldWrites = counters.writes - beforeFolds.writes
+  const foldBatches = counters.batches - beforeFolds.batches
+  const foldAdapterCalls = foldReads + foldWrites + foldBatches
+  assert.ok(foldAdapterCalls <= 25 * 6, `trivial folds exceeded six D1 adapter calls each: ${foldAdapterCalls}`)
+  assert.equal(foldReads, 25 * 2, 'each fold performs only the two dependent history/fingerprint-ready reads')
+  assert.equal(foldBatches, 25 * 4, 'each fold batches snapshot, writes, fingerprint and history finalization')
+  const foldBatchSizes = counters.batchStatementCounts.slice(beforeFolds.batchStatementCounts.length)
+  assert.deepEqual(
+    [...new Set(foldBatchSizes)].sort((a, b) => a - b),
+    [3, 8, 10, 20],
+    'the no-stock fold has bounded snapshot/write/fingerprint/finalize statement groups',
+  )
+  const { batchStatementCounts: _batchStatementCounts, ...reportedCounters } = counters
 
   console.log(JSON.stringify({
-    candidates: 1600, chunk: 25, scanMs: Number(scanMs.toFixed(1)), runMs: Number(runMs.toFixed(1)), ...counters,
+    candidates: 1600, chunk: 25, scanMs: Number(scanMs.toFixed(1)), runMs: Number(runMs.toFixed(1)),
+    foldAdapterCalls, foldCallsPerCase: foldAdapterCalls / 25, foldBatchSizes: [20, 10, 8, 3],
+    ...reportedCounters,
   }))
   console.log('test-product-merge-bulk-benchmark: all checks passed')
 }
