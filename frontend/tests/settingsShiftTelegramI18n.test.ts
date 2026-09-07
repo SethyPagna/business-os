@@ -1,0 +1,151 @@
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+// i18n:4 / i18n:5 -- Settings.tsx shipped two mini-sections as hardcoded
+// English literals instead of t() lookups:
+//
+//   - Shift registration (gated on canEditSettings, not isAdmin -- reachable
+//     by any full-settings role): title/description, the sr-only "Shift
+//     scope" legend, the per-account/shop-wide labels+hints, and "Exempt
+//     administrators" + its sentence. The shift_scope_per_account /
+//     shift_scope_shop_wide keys already existed translated but were never
+//     called.
+//   - Telegram automation (isAdmin-gated -- that gate is not an i18n
+//     exemption): title/description, the enable toggle, the chat-ID label +
+//     placeholder, and the bot-token label + status text.
+//
+// A Khmer-language shop with either role sees raw English for all of this.
+// This test fails on 6e3abfea (the literals are still inline, the keys don't
+// exist / aren't wired) and passes once each string routes through t(key)
+// with a real, non-English Khmer translation in both packs.
+
+const ROOT = new URL('../', import.meta.url)
+const rootPath = fileURLToPath(ROOT)
+
+const src = fs.readFileSync(
+  path.join(rootPath, 'src/components/utils-settings/Settings.tsx'),
+  'utf8',
+)
+const en = JSON.parse(fs.readFileSync(path.join(rootPath, 'src/lang/en.json'), 'utf8')) as Record<string, unknown>
+const km = JSON.parse(fs.readFileSync(path.join(rootPath, 'src/lang/km.json'), 'utf8')) as Record<string, unknown>
+
+// --- Shift registration mini-section --------------------------------------
+
+const shiftHardcodedLiterals = [
+  'title="Shift registration"',
+  'description="Configure who must register the cash drawer each business day."',
+  '>Shift registration<',
+  '>Choose whether each account opens its own shift or one shared branch shift covers the whole shop.<',
+  '<legend className="sr-only">Shift scope</legend>',
+  "['per_account', 'Per account', 'Each staff account opens and closes its own daily shift.']",
+  "['shop_wide', 'Shop-wide', 'One staff member opens the branch shift and any staff member can close it.']",
+  '>Exempt administrators<',
+  '>Administrators can enter POS without opening a shift. Turn this off when administrators also operate a cash drawer.<',
+]
+for (const literal of shiftHardcodedLiterals) {
+  assert.ok(!src.includes(literal), `Settings.tsx still hardcodes shift-registration text: ${JSON.stringify(literal)}`)
+}
+
+const shiftKeys = [
+  'settings_shift_registration_title',
+  'settings_shift_registration_desc',
+  'settings_shift_scope_legend',
+  'settings_shift_scope_desc',
+  'shift_scope_per_account',
+  'shift_scope_per_account_hint',
+  'shift_scope_shop_wide',
+  'shift_scope_shop_wide_hint',
+  'settings_shift_exempt_admins',
+  'settings_shift_exempt_admins_desc',
+]
+
+// --- Telegram automation mini-section --------------------------------------
+
+const telegramHardcodedLiterals = [
+  'title="Telegram automation"',
+  'description="Send business activity to one owner/manager Telegram chat. Every category is on by default; turn off any category you do not want."',
+  '>Enable Telegram automation<',
+  '>Turns every selected Telegram message on or off.<',
+  '>Telegram chat ID<',
+  'placeholder="Example: -1001234567890"',
+  '>Bot token<',
+  "telegramStatus?.configured ? 'Configured securely on the server.' : 'Not configured on the server yet.'",
+  "['telegram_sales_enabled', 'Sales & new receipts', 'Receipt number, status, totals, items, customer, and branch']",
+  "['telegram_status_enabled', 'Receipt status changes', 'Payment, delivery, completion, and cancellation changes']",
+  "['telegram_fees_enabled', 'Fees', 'New fee type, amount, date, label, and note']",
+  "['telegram_stock_in_enabled', 'Stock in', 'Product, quantity, branch, reason, and lot']",
+  "['telegram_stock_out_enabled', 'Stock out', 'Product, quantity, branch, and reason']",
+  "telegramAction === 'test' ? 'Sending test...' : 'Send test message'",
+  "telegramAction === 'summary' ? 'Sending summary...' : \"Send today's summary\"",
+  'Save the chat ID and switches first.',
+  '<span className="font-medium">Owner / manager commands:</span>',
+  '</code>, and <code>/help</code>',
+  "? 'Telegram test message sent and commands connected.' : \"Today's Telegram summary was sent.\"",
+  ": 'Telegram action failed'",
+]
+for (const literal of telegramHardcodedLiterals) {
+  assert.ok(!src.includes(literal), `Settings.tsx still hardcodes Telegram-automation text: ${JSON.stringify(literal)}`)
+}
+
+const telegramKeys = [
+  'telegram_automation_title',
+  'telegram_automation_desc',
+  'telegram_automation_enable',
+  'telegram_automation_enable_desc',
+  'telegram_chat_id_label',
+  'telegram_chat_id_placeholder',
+  'telegram_bot_token_label',
+  'telegram_bot_token_configured',
+  'telegram_bot_token_not_configured',
+  'telegram_cat_sales',
+  'telegram_cat_sales_desc',
+  'telegram_cat_status',
+  'telegram_cat_status_desc',
+  'telegram_cat_fees_desc',
+  'telegram_cat_stock_in_desc',
+  'telegram_cat_stock_out_desc',
+  'telegram_sending_test',
+  'telegram_send_test',
+  'telegram_sending_summary',
+  'telegram_send_today_summary',
+  'telegram_help_paragraph',
+  'telegram_help_commands_label',
+  'telegram_help_commands_desc',
+  'telegram_help_commands_and',
+  'telegram_help_commands_note',
+  'telegram_test_sent',
+  'telegram_summary_sent',
+  'telegram_action_failed',
+]
+
+for (const key of [...shiftKeys, ...telegramKeys]) {
+  assert.ok(
+    src.includes(`t('${key}')`) || src.includes(`t("${key}")`),
+    `Settings.tsx must call t('${key}')`,
+  )
+  const enVal = en[key]
+  const kmVal = km[key]
+  assert.ok(typeof enVal === 'string' && enVal.length > 0, `en.json missing non-empty '${key}'`)
+  assert.ok(typeof kmVal === 'string' && kmVal.length > 0, `km.json missing non-empty '${key}'`)
+  assert.notEqual(kmVal, enVal, `km.json '${key}' looks untranslated (identical to the English value)`)
+}
+
+// The stock-in category description must use the canonical glossary term for
+// "received date" (ថ្ងៃចូល), not a rival spelling of "lot/batch" (ឡូត/ឡុត/បាច់)
+// -- khmerRetailVocabulary.test.ts pins the same rule project-wide; this
+// assertion pins it specifically for this key so a future edit here cannot
+// regress it silently.
+assert.ok(
+  (km['telegram_cat_stock_in_desc'] as string).includes('ថ្ងៃចូល'),
+  "km.json 'telegram_cat_stock_in_desc' must use the canonical term ថ្ងៃចូល (received date)",
+)
+assert.ok(
+  !(km['telegram_cat_stock_in_desc'] as string).includes('ឡូត'),
+  "km.json 'telegram_cat_stock_in_desc' must not use the rival spelling ឡូត",
+)
+
+console.log(
+  'PASS Settings.tsx shift-registration and Telegram-automation mini-sections route through t() with real Khmer text (i18n:4, i18n:5)',
+)

@@ -1023,9 +1023,9 @@ export default function Settings() {
       if (action === 'test') await sendTelegramTest()
       else await sendTelegramTodaySummary()
       setTelegramStatus(await getTelegramStatus().catch(() => telegramStatus))
-      notify(action === 'test' ? 'Telegram test message sent and commands connected.' : "Today's Telegram summary was sent.", 'success')
+      notify(action === 'test' ? (t('telegram_test_sent') || 'Telegram test message sent and commands connected.') : (t('telegram_summary_sent') || "Today's Telegram summary was sent."), 'success')
     } catch (error) {
-      notify(error instanceof Error ? error.message : 'Telegram action failed', 'error')
+      notify(error instanceof Error ? error.message : (t('telegram_action_failed') || 'Telegram action failed'), 'error')
     } finally {
       setTelegramAction(null)
     }
@@ -1263,15 +1263,15 @@ export default function Settings() {
         ) : null}
 
         {canEditSettings && showSettingsSection('business') ? (
-          <SettingsSection title="Shift registration" description="Configure who must register the cash drawer each business day.">
+          <SettingsSection title={t('settings_shift_registration_title') || 'Shift registration'} description={t('settings_shift_registration_desc') || 'Configure who must register the cash drawer each business day.'}>
           <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-800/70">
-            <div className="text-sm font-semibold text-gray-800 dark:text-gray-100">Shift registration</div>
-            <p className="mt-1 text-xs leading-relaxed text-gray-500 dark:text-gray-400">Choose whether each account opens its own shift or one shared branch shift covers the whole shop.</p>
+            <div className="text-sm font-semibold text-gray-800 dark:text-gray-100">{t('settings_shift_registration_title') || 'Shift registration'}</div>
+            <p className="mt-1 text-xs leading-relaxed text-gray-500 dark:text-gray-400">{t('settings_shift_scope_desc') || 'Choose whether each account opens its own shift or one shared branch shift covers the whole shop.'}</p>
             <fieldset className="mt-3 grid gap-2 sm:grid-cols-2">
-              <legend className="sr-only">Shift scope</legend>
+              <legend className="sr-only">{t('settings_shift_scope_legend') || 'Shift scope'}</legend>
               {([
-                ['per_account', 'Per account', 'Each staff account opens and closes its own daily shift.'],
-                ['shop_wide', 'Shop-wide', 'One staff member opens the branch shift and any staff member can close it.'],
+                ['per_account', t('shift_scope_per_account') || 'Per account', t('shift_scope_per_account_hint') || 'Each staff account opens and closes its own daily shift.'],
+                ['shop_wide', t('shift_scope_shop_wide') || 'Shop-wide', t('shift_scope_shop_wide_hint') || 'One staff member opens the branch shift and any staff member can close it.'],
               ] as const).map(([value, label, hint]) => (
                 <label key={value} className={`flex cursor-pointer gap-2 rounded-lg border p-3 ${String(form.shift_scope_mode || 'per_account') === value ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/30' : 'border-gray-200 bg-white dark:border-zinc-700 dark:bg-zinc-900'}`}>
                   <input type="radio" name="shift_scope_mode" value={value} checked={String(form.shift_scope_mode || 'per_account') === value} onChange={() => setValue('shift_scope_mode', value)} />
@@ -1280,7 +1280,7 @@ export default function Settings() {
               ))}
             </fieldset>
             <label className="mt-3 flex items-start justify-between gap-3 rounded-lg border border-gray-200 bg-white p-3 dark:border-zinc-700 dark:bg-zinc-900">
-              <span><span className="block text-sm font-medium text-gray-800 dark:text-gray-100">Exempt administrators</span><span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">Administrators can enter POS without opening a shift. Turn this off when administrators also operate a cash drawer.</span></span>
+              <span><span className="block text-sm font-medium text-gray-800 dark:text-gray-100">{t('settings_shift_exempt_admins') || 'Exempt administrators'}</span><span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">{t('settings_shift_exempt_admins_desc') || 'Administrators can enter POS without opening a shift. Turn this off when administrators also operate a cash drawer.'}</span></span>
               <input type="checkbox" checked={String(form.shift_admin_exempt ?? 'true') !== 'false'} onChange={(event) => setValue('shift_admin_exempt', event.target.checked ? 'true' : 'false')} />
             </label>
           </div>
@@ -2120,14 +2120,14 @@ export default function Settings() {
 
         {isAdmin && showSettingsSection('security') ? (
           <SettingsSection
-            title="Telegram automation"
-            description="Send business activity to one owner/manager Telegram chat. Every category is on by default; turn off any category you do not want."
+            title={t('telegram_automation_title') || 'Telegram automation'}
+            description={t('telegram_automation_desc') || 'Send business activity to one owner/manager Telegram chat. Every category is on by default; turn off any category you do not want.'}
           >
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 sm:col-span-2 dark:border-gray-700 dark:bg-gray-800/70">
                 <div className="pr-3">
-                  <div className="text-sm font-medium text-gray-800 dark:text-gray-100">Enable Telegram automation</div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">Turns every selected Telegram message on or off.</div>
+                  <div className="text-sm font-medium text-gray-800 dark:text-gray-100">{t('telegram_automation_enable') || 'Enable Telegram automation'}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">{t('telegram_automation_enable_desc') || 'Turns every selected Telegram message on or off.'}</div>
                 </div>
                 <input
                   type="checkbox"
@@ -2136,29 +2136,29 @@ export default function Settings() {
                 />
               </label>
               <div>
-                <label htmlFor="settings-telegram-chat-id" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Telegram chat ID</label>
+                <label htmlFor="settings-telegram-chat-id" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('telegram_chat_id_label') || 'Telegram chat ID'}</label>
                 <input
                   id="settings-telegram-chat-id"
                   name="telegram_chat_id"
                   className="input w-full"
                   autoComplete="off"
-                  placeholder="Example: -1001234567890"
+                  placeholder={t('telegram_chat_id_placeholder') || 'Example: -1001234567890'}
                   value={form.telegram_chat_id || ''}
                   onChange={(event) => setValue('telegram_chat_id', event.target.value)}
                 />
               </div>
               <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/70">
-                <div className="text-sm font-medium text-gray-800 dark:text-gray-100">Bot token</div>
+                <div className="text-sm font-medium text-gray-800 dark:text-gray-100">{t('telegram_bot_token_label') || 'Bot token'}</div>
                 <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  {telegramStatus?.configured ? 'Configured securely on the server.' : 'Not configured on the server yet.'}
+                  {telegramStatus?.configured ? (t('telegram_bot_token_configured') || 'Configured securely on the server.') : (t('telegram_bot_token_not_configured') || 'Not configured on the server yet.')}
                 </div>
               </div>
               {[
-                ['telegram_sales_enabled', 'Sales & new receipts', 'Receipt number, status, totals, items, customer, and branch'],
-                ['telegram_status_enabled', 'Receipt status changes', 'Payment, delivery, completion, and cancellation changes'],
-                ['telegram_fees_enabled', 'Fees', 'New fee type, amount, date, label, and note'],
-                ['telegram_stock_in_enabled', 'Stock in', 'Product, quantity, branch, reason, and lot'],
-                ['telegram_stock_out_enabled', 'Stock out', 'Product, quantity, branch, and reason'],
+                ['telegram_sales_enabled', t('telegram_cat_sales') || 'Sales & new receipts', t('telegram_cat_sales_desc') || 'Receipt number, status, totals, items, customer, and branch'],
+                ['telegram_status_enabled', t('telegram_cat_status') || 'Receipt status changes', t('telegram_cat_status_desc') || 'Payment, delivery, completion, and cancellation changes'],
+                ['telegram_fees_enabled', t('fees') || 'Fees', t('telegram_cat_fees_desc') || 'New fee type, amount, date, label, and note'],
+                ['telegram_stock_in_enabled', t('stock_in') || 'Stock in', t('telegram_cat_stock_in_desc') || 'Product, quantity, branch, reason, and lot'],
+                ['telegram_stock_out_enabled', t('stock_out') || 'Stock out', t('telegram_cat_stock_out_desc') || 'Product, quantity, branch, and reason'],
               ].map(([key, label, description]) => (
                 <label key={key} className="flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/70">
                   <div className="pr-3">
@@ -2174,17 +2174,17 @@ export default function Settings() {
               ))}
               <div className="sm:col-span-2 flex flex-wrap gap-2 pt-1">
                 <button type="button" className="btn-secondary text-sm" onClick={() => void runTelegramAction('test')} disabled={!canEditSettings || telegramAction !== null}>
-                  {telegramAction === 'test' ? 'Sending test...' : 'Send test message'}
+                  {telegramAction === 'test' ? (t('telegram_sending_test') || 'Sending test...') : (t('telegram_send_test') || 'Send test message')}
                 </button>
                 <button type="button" className="btn-secondary text-sm" onClick={() => void runTelegramAction('summary')} disabled={!canEditSettings || telegramAction !== null}>
-                  {telegramAction === 'summary' ? 'Sending summary...' : "Send today's summary"}
+                  {telegramAction === 'summary' ? (t('telegram_sending_summary') || 'Sending summary...') : (t('telegram_send_today_summary') || "Send today's summary")}
                 </button>
               </div>
               <p className="sm:col-span-2 text-xs text-gray-500 dark:text-gray-400">
-                Save the chat ID and switches first. The bot token is a server secret, so it is never displayed in the app. Start a chat with the bot or add it to the target group before sending a test.
+                {t('telegram_help_paragraph')}
               </p>
               <div className="sm:col-span-2 rounded-xl bg-gray-50 px-3 py-2 text-xs text-gray-600 dark:bg-gray-800/70 dark:text-gray-300">
-                <span className="font-medium">Owner / manager commands:</span> this same Telegram chat can use <code>/today</code>, <code>/sales</code>, <code>/fees</code>, <code>/inventory</code>, <code>/stock</code>, and <code>/help</code>. Keep this chat private to owners/managers; sending a test message automatically connects commands.
+                <span className="font-medium">{t('telegram_help_commands_label')}</span> {t('telegram_help_commands_desc')} <code>/today</code>, <code>/sales</code>, <code>/fees</code>, <code>/inventory</code>, <code>/stock</code>, {t('telegram_help_commands_and')} <code>/help</code>. {t('telegram_help_commands_note')}
               </div>
             </div>
           </SettingsSection>
