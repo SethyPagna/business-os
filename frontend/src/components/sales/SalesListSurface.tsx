@@ -67,9 +67,16 @@ interface SalesListSurfaceProps {
   isSelectionScopePartiallySelected: (ids: number[]) => boolean
   loading: boolean
   revenue: number
-  /** Count of sales that contribute to `revenue` (cancelled + awaiting-payment
-   * excluded) — the reconciled headline count shown in the footer. */
+  /** Count of sales that contribute to `revenue` — every sale in the window
+   * except a cancelled one, matching the kernel's `recognizedExpr`. A credit
+   * sale is IN, because it is inside `revenue` too. This contract used to
+   * claim the credit cohort was left out, which described neither
+   * `isRevenueCountedSale` nor GET /api/sales/stats. */
   revenueCount: number
+  /** How much of `revenue` is still owed: the credit annotation (owner,
+   * Sep 6 2026). Printed POSITIVE beside the revenue, never with a minus and
+   * never as a deduction — these rows are already inside `revenue`. */
+  creditUsd: number
   /** Predicate: does this sale count toward the money shown? Used to make the
    * day-group header counts money-counting too, so they sum to the footer. */
   isCountedSale: (sale: SaleRecord) => boolean
@@ -109,6 +116,7 @@ export default function SalesListSurface({
   loading,
   revenue,
   revenueCount,
+  creditUsd,
   isCountedSale,
   salesSections,
   selectAllRef,
@@ -334,6 +342,9 @@ export default function SalesListSurface({
         </div>
         <div className="border-t border-gray-100 px-4 py-2 text-xs text-gray-400 dark:border-gray-700">
           {revenueCount} {t('sales')} | {fmtUSD(revenue)}
+          {/* The credit rides BESIDE the revenue, positive and unsigned: it is
+              part of the figure to its left, not something to take off it. */}
+          {creditUsd > 0 ? <> · {t('rpt_pending_credit') || 'Credit'} {fmtUSD(creditUsd)}</> : null}
         </div>
       </div>
 

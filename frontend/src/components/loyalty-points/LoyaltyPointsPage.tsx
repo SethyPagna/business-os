@@ -146,7 +146,7 @@ const COPY: Record<'en' | 'km', LocaleCopy> = {
     behaviorTitle: 'How points move',
     behavior1: 'Completed sales earn points based on the active earning basis.',
     behavior2: 'Partial and full returns deduct points from the refunded value.',
-    behavior3: 'Awaiting payment and cancelled sales do not count until completed.',
+    behavior3: 'Credit sales and cancelled sales do not earn points until they are completed.',
     behavior4: 'Staff can attach a customer later in Sales when an anonymous purchase needs points added afterward.',
     attachHint: 'Use Sales > sale details > attach customer when a past anonymous sale should start counting for membership.',
     pointsPreview: 'Current policy preview',
@@ -209,7 +209,7 @@ const COPY: Record<'en' | 'km', LocaleCopy> = {
     behaviorTitle: 'របៀបផ្លាស់ប្តូរពិន្ទុ',
     behavior1: 'ការលក់ដែលបានបញ្ចប់ទើបគិតពិន្ទុតាមគោលការណ៍ដែលបានជ្រើស។',
     behavior2: 'Partial return និង full return កាត់ពិន្ទុតាមតម្លៃ Refund។',
-    behavior3: 'ការលក់ awaiting payment និង cancelled មិនរាប់ចូលរហូតដល់ completed។',
+    behavior3: 'ការលក់ជាឥណទាន និងការលក់ដែលបានលុបចោល មិនទទួលបានពិន្ទុ រហូតដល់បញ្ចប់។',
     behavior4: 'បុគ្គលិកអាចភ្ជាប់អតិថិជនបន្ថែមនៅ Sales ប្រសិនបើការលក់ចាស់ត្រូវបន្ថែមពិន្ទុពេលក្រោយ។',
     attachHint: 'ប្រើ Sales > sale details > attach customer នៅពេលត្រូវភ្ជាប់សមាជិកទៅការលក់អនាមិកចាស់។',
     pointsPreview: 'ការមើលជាមុននៃច្បាប់បច្ចុប្បន្ន',
@@ -811,7 +811,7 @@ export default function LoyaltyPointsPage() {
                   <ul className="mt-3 space-y-2 text-sm text-gray-600 dark:text-gray-300">
                     <li>{copy('behavior1', 'Completed sales earn points based on the active earning basis.')}</li>
                     <li>{copy('behavior2', 'Partial and full returns deduct points from the refunded value.')}</li>
-                    <li>{copy('behavior3', 'Awaiting payment and cancelled sales do not count until completed.')}</li>
+                    <li>{copy('behavior3', 'Credit sales and cancelled sales do not earn points until they are completed.')}</li>
                     <li>{copy('behavior4', 'Staff can attach a customer later in Sales when an anonymous purchase needs points added afterward.')}</li>
                   </ul>
                   <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">{copy('attachHint', 'Use Sales > sale details > attach customer when a past anonymous sale should start counting for membership.')}</p>

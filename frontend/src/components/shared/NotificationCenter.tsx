@@ -209,8 +209,8 @@ const SECTION_SUMMARY_COPY: Record<string, LocalizedCopy> = {
     km: ({ outCount, lowCount }) => [outCount ? `${outCount} អស់ស្តុក` : null, lowCount ? `${lowCount} ស្តុកទាប` : null].filter(Boolean).join(' • '),
   },
   notification_sales_summary: {
-    en: ({ awaitingPaymentCount, awaitingDeliveryCount }) => [awaitingPaymentCount ? `${awaitingPaymentCount} awaiting payment` : null, awaitingDeliveryCount ? `${awaitingDeliveryCount} awaiting delivery` : null].filter(Boolean).join(' • '),
-    km: ({ awaitingPaymentCount, awaitingDeliveryCount }) => [awaitingPaymentCount ? `${awaitingPaymentCount} កំពុងរង់ចាំបង់ប្រាក់` : null, awaitingDeliveryCount ? `${awaitingDeliveryCount} កំពុងរង់ចាំដឹកជញ្ជូន` : null].filter(Boolean).join(' • '),
+    en: ({ awaitingPaymentCount, awaitingDeliveryCount }) => [awaitingPaymentCount ? `${awaitingPaymentCount} credit` : null, awaitingDeliveryCount ? `${awaitingDeliveryCount} awaiting delivery` : null].filter(Boolean).join(' • '),
+    km: ({ awaitingPaymentCount, awaitingDeliveryCount }) => [awaitingPaymentCount ? `${awaitingPaymentCount} ឥណទាន` : null, awaitingDeliveryCount ? `${awaitingDeliveryCount} កំពុងរង់ចាំដឹកជញ្ជូន` : null].filter(Boolean).join(' • '),
   },
   notification_loyalty_summary: {
     en: ({ count, threshold }) => `${count} customer${count === 1 ? '' : 's'} reached ${threshold}+ points`,
@@ -240,9 +240,13 @@ const ITEM_META_COPY: Record<string, LocalizedCopy> = {
     en: ({ quantity }) => `Low stock (${quantity})`,
     km: ({ quantity }) => `ស្តុកទាប (${quantity})`,
   },
+  // ONE WORD (owner, Sep 6 2026): this row is the customer-credit cohort, so
+  // it reads Credit here exactly as the status chip, the Sales footer and the
+  // report block do. The amount rides POSITIVE — it is money already inside
+  // revenue and still owed, never a deduction.
   notification_sales_awaiting_payment: {
-    en: ({ totalUsd }) => `Awaiting payment • $${totalUsd}`,
-    km: ({ totalUsd }) => `រង់ចាំបង់ប្រាក់ • $${totalUsd}`,
+    en: ({ totalUsd }) => `Credit • $${totalUsd}`,
+    km: ({ totalUsd }) => `ឥណទាន • $${totalUsd}`,
   },
   notification_sales_awaiting_delivery: {
     en: ({ totalUsd }) => `Awaiting delivery • $${totalUsd}`,

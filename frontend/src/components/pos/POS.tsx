@@ -126,7 +126,7 @@ type PosSaleStatus = 'completed' | 'awaiting_payment' | 'awaiting_delivery'
 
 const POS_STATUS_LABELS: Record<PosSaleStatus, string> = {
   completed: 'Completed',
-  awaiting_payment: 'Awaiting Payment',
+  awaiting_payment: 'Credit',
   awaiting_delivery: 'Awaiting Delivery',
 }
 
@@ -3792,7 +3792,7 @@ export default function POS() {
                   // being true when awaiting_payment started holding stock.
                   // Both lang packs already said "stock held" and needed no
                   // change; only this hardcoded English copy was stale.
-                  `${getPosStatusLabel('awaiting_payment', t)}: ${t('pos_status_awaiting_payment_desc') || 'Order placed, payment pending - stock held'}`,
+                  `${getPosStatusLabel('awaiting_payment', t)}: ${t('pos_status_awaiting_payment_desc') || 'Sold on credit - stock held'}`,
                   `${getPosStatusLabel('awaiting_delivery', t)}: ${t('pos_status_awaiting_delivery_desc') || 'Paid, not yet delivered - stock deducted'}`,
                 ].join('\n\n')}
               />
@@ -3817,7 +3817,7 @@ export default function POS() {
               <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">{t('pos_status_choose_desc')||'Choose how this sale is being processed. This will appear in Sales history.'}</p>
               {([
                 ['completed',         getPosStatusLabel('completed',         t), t('pos_status_completed_desc')||'Payment received - stock deducted now'],
-                ['awaiting_payment',  getPosStatusLabel('awaiting_payment',  t), t('pos_status_awaiting_payment_desc')||'Order placed, payment pending - stock held'],
+                ['awaiting_payment',  getPosStatusLabel('awaiting_payment',  t), t('pos_status_awaiting_payment_desc')||'Sold on credit - stock held'],
                 ['awaiting_delivery', getPosStatusLabel('awaiting_delivery', t), t('pos_status_awaiting_delivery_desc')||'Paid, not yet delivered - stock deducted'],
               ] as const).map(([status, label, desc]) => (
                 <button key={status}
