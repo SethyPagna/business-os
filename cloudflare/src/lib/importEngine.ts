@@ -2961,10 +2961,13 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
   const batches = await db
     .prepare(`SELECT id, variant_product_id, lot_code, expiry_date FROM product_batches WHERE is_active = 1`)
     .all<{ id: number; variant_product_id: number; lot_code: string | null; expiry_date: string | null }>()
-  const batchByProductAndLot = new Map<string, { id: number; expiry_date: string | null }>()
+  const batchesByProductAndLot = new Map<string, Array<{ id: number; expiry_date: string | null }>>()
   for (const batch of batches) {
     if (!str(batch.lot_code)) continue
-    batchByProductAndLot.set(`${batch.variant_product_id}\u0001${lower(batch.lot_code)}`, { id: batch.id, expiry_date: batch.expiry_date })
+    const key = `${batch.variant_product_id}\u0001${lower(batch.lot_code)}`
+    const matches = batchesByProductAndLot.get(key) || []
+    matches.push({ id: batch.id, expiry_date: batch.expiry_date })
+    batchesByProductAndLot.set(key, matches)
   }
 
   // `rows` may be the whole file (loadAndClassify's bounded/synchronous
@@ -3162,9 +3165,13 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
       }
 
       const batchLabel = str(row.batch_label || row.lot_code)
-      const batchMatch = batchLabel ? batchByProductAndLot.get(`${product.id}\u0001${lower(batchLabel)}`) : null
-      if (batchLabel && !batchMatch) {
+      const batchMatches = batchLabel ? batchesByProductAndLot.get(`${product.id}\u0001${lower(batchLabel)}`) || [] : []
+      const batchMatch = batchMatches.length === 1 ? batchMatches[0] : null
+      if (batchLabel && batchMatches.length !== 1) {
         error = `Batch/lot "${batchLabel}" was not found for product "${product.name || sku || barcode}". The receipt was refused so the requested batch identity is not discarded.`
+        if (batchMatches.length > 1) {
+          error = `Batch/lot "${batchLabel}" is ambiguous for product "${product.name || sku || barcode}". The receipt was refused so no batch is selected by database row order.`
+        }
         break
       }
 

@@ -1842,6 +1842,20 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     const blank = await classifySales(db, [row({ receipt_number: 'R-8d', sku: 'SKU-1', quantity: 1, sale_status: 'returned' }, 1)], null)
     assert.strictEqual(blank[0].action, 'create', 'a genuinely blank lot remains an allowed unallocated historical line')
     assert.strictEqual(blank[0].data.items[0].batch_id, null)
+
+    const ambiguousBatches = [
+      ...defaultBatches,
+      { id: 10, variant_product_id: 1, lot_code: ' lot-a ', expiry_date: '2028-01-01' },
+    ]
+    for (const orderedBatches of [ambiguousBatches, [...ambiguousBatches].reverse()]) {
+      const ambiguousBatch = await classifySales(
+        makeFakeDb({ batches: orderedBatches }),
+        [row({ receipt_number: 'R-8e', sku: 'SKU-1', quantity: 1, batch_label: 'LOT-A' }, 1)],
+        null,
+      )
+      assert.strictEqual(ambiguousBatch[0].action, 'error', 'normalized duplicate lots must never select by database row order')
+      assert.match(ambiguousBatch[0].message, /ambiguous/)
+    }
   }
 
   // 4a-ambiguity) Exact names are not unique in legacy data. The database
