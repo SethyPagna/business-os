@@ -1,5 +1,6 @@
 import { sanitizeMediaList, sanitizeMediaPath } from './media'
 import type { D1Compat } from './db'
+import { buildInClause, chunkForBinding } from './sqlBinding'
 
 export type ProductImageState = {
   image_path?: unknown
@@ -35,10 +36,10 @@ export async function resolveProductImageFields(db: D1Compat, body: Record<strin
 
   const candidates = [...new Set(supplied.flatMap((path) => [path, decodedUploadPathCandidate(path)]))]
   const assetPaths = new Set<string>()
-  for (let offset = 0; offset < candidates.length; offset += 90) {
-    const chunk = candidates.slice(offset, offset + 90)
-    const rows = await db.prepare(`SELECT public_path FROM file_assets WHERE public_path IN (${chunk.map(() => '?').join(',')})`)
-      .all<{ public_path: string }>(chunk)
+  for (const chunk of chunkForBinding(candidates)) {
+    const clause = buildInClause('path', chunk)
+    const rows = await db.prepare(`SELECT public_path FROM file_assets WHERE public_path IN (${clause.sql})`)
+      .all<{ public_path: string }>(clause.params)
     for (const row of rows) assetPaths.add(String(row.public_path))
   }
   const resolved = new Map<string, string>()
