@@ -3321,7 +3321,7 @@ type DuplicatePreviewCatalog = {
 }
 
 const MERGE_DUPLICATES_MULTI_PREFLIGHT_MAX_PRODUCT_IDS = 600
-const MERGE_DUPLICATES_MULTI_PREFLIGHT_STATEMENTS_PER_CHUNK = 15
+const MERGE_DUPLICATES_MULTI_PREFLIGHT_STATEMENTS_PER_CHUNK = 16
 
 function multiClusterComplexLinkPlan(
   groups: Awaited<ReturnType<typeof findDuplicateProductGroups>>,
@@ -3335,6 +3335,7 @@ function multiClusterComplexLinkPlan(
     return [
       { sql: `SELECT DISTINCT product_id FROM branch_stock WHERE product_id IN (${sql})`, params },
       { sql: `SELECT DISTINCT product_id FROM product_images WHERE product_id IN (${sql})`, params },
+      { sql: `SELECT id AS product_id FROM products WHERE id IN (${sql}) AND NULLIF(TRIM(image_path),'') IS NOT NULL`, params },
       { sql: `SELECT DISTINCT variant_product_id AS product_id FROM product_batches WHERE variant_product_id IN (${sql})`, params },
       ...MERGE_REPARENT_TABLES.map(({ table, column }) => ({
         sql: `SELECT DISTINCT ${column} AS product_id FROM ${table} WHERE ${column} IN (${sql})`,
