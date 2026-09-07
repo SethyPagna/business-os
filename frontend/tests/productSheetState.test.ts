@@ -157,6 +157,35 @@ await runTest('the branch pills and the stock summary share one ordering', () =>
   assert.equal(stocking.branchSummary, oddly.branchSummary, 'the order is a property of the branches, not of the intent')
 })
 
+// The comment that sits ON the rendered summary row used to spell the
+// opposite order to the one shipped ("Warehouse: n" first, above a line that
+// prints Shop first). A file that documents the reverse of what it renders
+// is the next reader's wrong answer, so the wording is pinned to the
+// derivation rather than left to drift.
+await runTest('the summary comment spells the order the summary actually renders', () => {
+  const sheet = src('components', 'pos', 'ProductDetailSheet.tsx')
+  assert.doesNotMatch(
+    sheet,
+    /"Warehouse: n · Shop: n"/,
+    "the retired comment claimed the warehouse leads the summary; the shipped order is selling-branch first",
+  )
+  assert.match(sheet, /"Shop: n · Warehouse: n"/, "the comment must name the shipped order")
+  assert.match(
+    sheet,
+    /compareBranchesForDisplay/,
+    "and point at the one comparator that decides it, so the rule has a single home",
+  )
+  // Coupled to the derivation, so a future flip of the comparator turns BOTH
+  // the comment pin and the ordering test red rather than only one of them.
+  const state = deriveProductSheetState({
+    product: { id: 86, name: 'Both', branch_stock: branchStock(4, 9) },
+    variants: [],
+    groupProduct: false,
+    intent: 'sell',
+  })
+  assert.equal(state.branchSummary, 'Shop: 4 · Warehouse: 9')
+})
+
 
 // SHAPE D (the "RECON residue" shape): branch_stock says 28 at the shop and
 // the lot ledger is empty. The old sheet mixed the two -- it took the number

@@ -2358,9 +2358,17 @@ export default function POS() {
     // warehouse lines with nothing between them and a checkout 400; and a
     // product held ONLY at the warehouse -- the normal state of something
     // waiting to be transferred -- resolved there through the fallback.
-    // Both come back blocked now, and the sheet is opened instead: it shows
-    // the warehouse pill greyed WITH its quantity and says why, which is the
-    // answer the cashier actually needs.
+    // Both come back blocked now, and the sheet is opened instead.
+    //
+    // The override branch is trusted here on purpose, and it is only safe
+    // because the sheet that supplies it refuses first: productSheetState
+    // blocks the pick with `warehouse_branch` whenever the branch it
+    // resolved cannot sell, so no Add button on the sheet can hand this
+    // function a warehouse id. That refusal is what makes the sentence
+    // above true -- the sheet shows the warehouse pill greyed WITH its
+    // quantity, never in the chosen/blue state, and prints the rule on the
+    // dead button. Until then the pill answered the tap but the Add button
+    // beside it did not, which is the half this comment used to promise.
     const saleBranch = overrideBranchId != null && Number.isFinite(overrideBranchId)
       ? { branchId: overrideBranchId, blocked: false }
       : resolveSaleBranch(product as never, { activeBranchFilterId: primaryBranchFilterId, defaultBranchId })

@@ -745,12 +745,17 @@ export default function ProductDetailSheet({
               the one on screen, which is what "display shows different data than the
               actual stock in the options" was describing. */}
           <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{t('label_stock') || 'Stock'}</span><span className={`font-bold ${displayedStock <= 0 ? 'text-red-600' : displayedStock <= effectiveLowStockThreshold(lowStockConfig, product.low_stock_threshold) ? 'text-yellow-600' : 'text-green-600'}`}>{displayedStock} {product.unit}</span></div>
-          {/* "Warehouse: n · Shop: n", ALWAYS -- grouped or standalone, in
-              stock or out. The Stock row above is one branch-resolved
-              number, so on its own it never said whether the rest of the
-              units were at the other branch or nowhere. This used to render
-              only for a standalone product that was already at zero, i.e.
-              it disappeared exactly when the cashier could act on it. */}
+          {/* "Shop: n · Warehouse: n", ALWAYS -- grouped or standalone, in
+              stock or out. The order is the strip's own: selling branch
+              first, the stock-only warehouse last (compareBranchesForDisplay
+              in productSheetState.ts), so this line and the pills above it
+              read the same list the same way round and a greyed,
+              unselectable option never holds the first slot.
+              The Stock row above is one branch-resolved number, so on its
+              own it never said whether the rest of the units were at the
+              other branch or nowhere. This used to render only for a
+              standalone product that was already at zero, i.e. it
+              disappeared exactly when the cashier could act on it. */}
           {branchOptions.length ? (
             <div className="flex gap-3"><span className="w-24 flex-shrink-0" /><span className="text-xs text-gray-400">{sheetState.branchSummary}</span></div>
           ) : null}
