@@ -794,27 +794,52 @@ export async function finalizeAtomicMergeHistory(
   env: Env,
   operationId: string,
   reversal: MergeReversal,
-): Promise<{ snapshotId: number; actionHistoryId: number; fingerprintReady: boolean }> {
-  const db = getDb(env)
-  const history = await db.prepare(`
-    SELECT id, reversible, status, CAST(json_extract(undo_payload,'$.snapshot_id') AS INTEGER) AS snapshot_id
-    FROM action_history
-    WHERE json_extract(undo_payload,'$.operation_id')=@operationId
-      AND json_extract(undo_payload,'$.applier')='product.merge'
-    ORDER BY id DESC LIMIT 1
-  `).get<{ id: number; reversible: number; status: string; snapshot_id: number }>({ operationId })
-  const snapshotId = Number(history?.snapshot_id)
-  const actionHistoryId = Number(history?.id)
-  if (!Number.isSafeInteger(snapshotId) || snapshotId <= 0 || !Number.isSafeInteger(actionHistoryId) || actionHistoryId <= 0) {
-    throw new Error('The atomic merge committed without a resolvable history record.')
-  }
+  dbOverride?: ReturnType<typeof getDb>,
+): Promise<{
+  operationId: string
+  committed: true
+  snapshotId: number | null
+  actionHistoryId: number | null
+  historyResolved: boolean
+  fingerprintReady: boolean
+}> {
+  let resolvedSnapshotId: number | null = null
+  let resolvedActionHistoryId: number | null = null
+  const pending = () => ({
+    operationId,
+    committed: true as const,
+    snapshotId: resolvedSnapshotId,
+    actionHistoryId: resolvedActionHistoryId,
+    historyResolved: resolvedSnapshotId != null && resolvedActionHistoryId != null,
+    fingerprintReady: false,
+  })
   try {
+    // The graph mutation, snapshot, history and audit were committed in the
+    // caller's preceding atomic batch. Every operation below is reconciliation
+    // of that durable fact and therefore must never turn a committed case into
+    // a reported failure. Reuse the caller's counted adapter when supplied so
+    // these reads and the final batch remain inside its request budget.
+    const db = dbOverride ?? getDb(env)
+    const history = await db.prepare(`
+      SELECT id, reversible, status, CAST(json_extract(undo_payload,'$.snapshot_id') AS INTEGER) AS snapshot_id
+      FROM action_history
+      WHERE json_extract(undo_payload,'$.operation_id')=@operationId
+        AND json_extract(undo_payload,'$.applier')='product.merge'
+      ORDER BY id DESC LIMIT 1
+    `).get<{ id: number; reversible: number; status: string; snapshot_id: number }>({ operationId })
+    const snapshotId = Number(history?.snapshot_id)
+    const actionHistoryId = Number(history?.id)
+    if (!Number.isSafeInteger(snapshotId) || snapshotId <= 0 || !Number.isSafeInteger(actionHistoryId) || actionHistoryId <= 0) {
+      return pending()
+    }
+    resolvedSnapshotId = snapshotId
+    resolvedActionHistoryId = actionHistoryId
     const ready = await db.prepare(`
       SELECT CAST(json_extract(payload_json,'$.fingerprintPending') AS INTEGER) AS pending
       FROM undo_snapshots WHERE id=@snapshotId AND kind='product.merge' AND status='applied'
     `).get<{ pending: number | null }>({ snapshotId })
     if (Number(ready?.pending) === 0 && Number(history?.reversible) === 1 && history?.status === 'undoable') {
-      return { snapshotId, actionHistoryId, fingerprintReady: true }
+      return { operationId, committed: true, snapshotId, actionHistoryId, historyResolved: true, fingerprintReady: true }
     }
     const mergedStateFingerprint = await mergeStateFingerprint(db, [reversal])
     const stored = { ...reversal, operationId, fingerprintPending: false, mergedStateFingerprint }
@@ -840,12 +865,12 @@ export async function finalizeAtomicMergeHistory(
         params: { snapshotId, historyId: actionHistoryId },
       },
     ])
-    return { snapshotId, actionHistoryId, fingerprintReady: true }
+    return { operationId, committed: true, snapshotId, actionHistoryId, historyResolved: true, fingerprintReady: true }
   } catch {
     // The merge and its audit are already durable. Keep the history visibly
     // non-reversible while the explicit pending flag makes undo fail closed;
     // never advertise an Undo control before its fingerprint is complete.
-    return { snapshotId, actionHistoryId, fingerprintReady: false }
+    return pending()
   }
 }
 
