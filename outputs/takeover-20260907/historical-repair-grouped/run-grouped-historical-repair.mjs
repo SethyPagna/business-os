@@ -18,11 +18,11 @@ const operatorDir = dirname(fileURLToPath(import.meta.url))
 const root = resolve(operatorDir, '../../..')
 const operatorConfigPath = join(operatorDir, 'operator-wrangler.toml')
 
-// These two values must be replaced in a separately reviewed commit after the
-// post-UI-merge census builds the final manifest. Null makes every write mode
-// fail before a remote binding is opened.
-export const REVIEWED_MANIFEST_SHA256 = null
-export const REVIEWED_SOURCE_LINEAGE_COMMIT = null
+// The accounting data review and independent operator review approved this
+// exact manifest and source lineage. Any other manifest fails before a remote
+// binding is opened.
+export const REVIEWED_MANIFEST_SHA256 = 'dcef2e38be7ccd7eb7c2cc4524a122a6b10770202cdb78e1cf787af2a2444e1d'
+export const REVIEWED_SOURCE_LINEAGE_COMMIT = '02eecbe3833bbcee112b4af424a7582dcbb11b22'
 
 const expectedOperatorConfig = `name = "business-os-grouped-historical-repair-operator"
 main = "run-grouped-historical-repair.mjs"

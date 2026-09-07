@@ -10,18 +10,13 @@ The approved transaction model has 44 independently atomic data groups:
 
 The first fee group also records the immutable plan-start audit. Every group audit stores the overall manifest hash, the group hash, exact pre/post full-row hashes, fixed maintenance attribution, and verified Cloudflare token identity. Audit records are append-only within this workflow.
 
-## Current execution gate
+## Reviewed execution pins
 
-`run-grouped-historical-repair.mjs` intentionally contains null reviewed-manifest and source-lineage pins. Review mode works locally, but apply and recovery modes fail before operator identity verification or remote binding startup. After the active UI merge checkpoint is stable, the execution owner must:
+`run-grouped-historical-repair.mjs` pins reviewed manifest `dcef2e38be7ccd7eb7c2cc4524a122a6b10770202cdb78e1cf787af2a2444e1d` and source lineage `02eecbe3833bbcee112b4af424a7582dcbb11b22`. Every other manifest fails before operator identity verification or remote binding startup. Accounting review confirmed the exact ID census, 65-column Sales schema, null target creation snapshots, full pre/post hashes, and unchanged target fields after the eight completed UI merge groups.
 
-1. Export two fresh full rows reads for the exact fee, Sales, and sale-item targets.
-2. Verify the 65-column Sales schema and `creation_snapshot_json = NULL` for every target.
-3. Reconcile changed Sales or sale-item product fields against the authenticated merge audit/actions. Changed rows without that proof block the repair.
-4. Generate a new grouped manifest with `build-grouped-repair-bundle.mjs`.
-5. Independently review the manifest, source lineage, exact ID census, pre/post hashes, groups, and recovery behavior.
-6. Pin that exact manifest SHA-256 and source commit in the runner in a separate reviewed commit.
+Immediately before execution, the execution owner must verify that the current production schema still matches the reviewed schema hash and that no migration is running concurrently. The operator then checks the pinned manifest, exact command confirmations, Cloudflare operator identity, and fresh full-row state. Any target drift or audit mismatch blocks that group atomically.
 
-The builder requires two reads for every table and rejects any difference. Its output contains IDs and hashes, not complete row contents. It will not overwrite an existing output directory.
+The builder used two reads for every table and rejected any difference. Its output contains IDs and hashes, not complete row contents. It cannot overwrite an existing output directory.
 
 ## Resume and ambiguity rules
 
@@ -37,6 +32,8 @@ If the binding response is ambiguous, the operator reads that exact group again.
 ## Recovery
 
 Recovery is explicit per group and additionally requires `--confirm-recovery`. The recovery batch requires the exact post-state and exactly one apply audit with the reviewed payload, appends a recovery audit, and restores only the reviewed branch fields. It does not delete the original audit. The related Sales and sale-item group recovers atomically.
+
+The related group updates 22 Sales rows and 56 sale-item rows. Migration 0120 revision triggers therefore advance `sale_write_revisions` 78 times on apply and another 78 times if that group is recovered. Those monotonic increments intentionally invalidate stale compare-and-swap inputs and undo snapshots. Recovery must not reset, decrement, or otherwise rewrite revision counters.
 
 Time Travel remains the database-wide disaster-recovery mechanism. Per-group logical recovery is preferable for a verified partial execution because it avoids reverting unrelated business writes.
 

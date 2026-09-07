@@ -24,7 +24,12 @@ import {
   without,
 } from './grouped-repair-core.mjs'
 import { buildFromFiles, schemaColumnsFromSql } from './build-grouped-repair-bundle.mjs'
-import { redactErrorMessage, runOperator } from './run-grouped-historical-repair.mjs'
+import {
+  REVIEWED_MANIFEST_SHA256,
+  REVIEWED_SOURCE_LINEAGE_COMMIT,
+  redactErrorMessage,
+  runOperator,
+} from './run-grouped-historical-repair.mjs'
 
 const require = createRequire(resolve('cloudflare/package.json'))
 const Database = require('better-sqlite3')
@@ -140,6 +145,8 @@ try {
   assert(schemaColumnsFromSql(tableSql('sales')).length === 65, 'schema parser did not preserve all 65 Sales columns')
   const manifest = buildFromFiles(builderArgs)
   validateManifest(manifest)
+  assert(REVIEWED_MANIFEST_SHA256 === 'dcef2e38be7ccd7eb7c2cc4524a122a6b10770202cdb78e1cf787af2a2444e1d', 'reviewed production manifest pin changed')
+  assert(REVIEWED_SOURCE_LINEAGE_COMMIT === '02eecbe3833bbcee112b4af424a7582dcbb11b22', 'reviewed source-lineage pin changed')
   assert(manifest.groups.length === 44 && manifest.groups.filter((group) => group.kind === 'fees').length === 43, 'builder did not create 43 fee groups plus one related group')
   assert(manifest.schema_columns.sales.at(-1) === 'creation_snapshot_json', 'manifest did not pin Sales column 65')
   assert(!JSON.stringify(manifest).includes('fee-1'), 'manifest leaked full source row text instead of hashes and IDs')
@@ -153,8 +160,8 @@ try {
 
   let reviewOpenedRemote = false
   const review = await runOperator({ manifest: manifestPath }, { getPlatformProxy: async () => { reviewOpenedRemote = true; throw new Error('must not open') } })
-  assert(review.status === 'review_only' && !reviewOpenedRemote && review.production_write === false, 'review mode opened a remote binding')
-  let unpinnedOpenedRemote = false
+  assert(review.status === 'review_only' && review.manifest_pin_present && review.lineage_pin_present && !reviewOpenedRemote && review.production_write === false, 'review mode did not report pins or opened a remote binding')
+  let nonReviewedOpenedRemote = false
   await expectReject(() => runOperator({
     manifest: manifestPath,
     'apply-all': true,
@@ -162,8 +169,8 @@ try {
     'confirm-run-id': manifest.execution.run_id,
     'confirm-manifest-sha256': manifest.content_sha256,
     'confirm-bookmark': manifest.execution.time_travel_bookmark,
-  }, { getPlatformProxy: async () => { unpinnedOpenedRemote = true; throw new Error('must not open') } }), /no reviewed manifest pin/, 'unreviewed manifest did not fail closed')
-  assert(!unpinnedOpenedRemote, 'unreviewed apply opened a binding')
+  }, { getPlatformProxy: async () => { nonReviewedOpenedRemote = true; throw new Error('must not open') } }), /reviewed operator pin/, 'manifest outside the reviewed pin did not fail closed')
+  assert(!nonReviewedOpenedRemote, 'manifest outside the reviewed pin opened a binding')
 
   pristine.close()
   pristine = null
@@ -352,7 +359,7 @@ try {
     groups: manifest.groups.length,
     full_apply_batches: fullBinding.state.batchCalls,
     atomic_shapes: { first_fee: 4, remaining_fee: 3, related: 5, completion: 46 },
-    checks: ['builder_double_read_and_65_columns', 'review_and_unpinned_fail_closed', 'all_groups_and_idempotent_resume', 'fee_atomic_rollback', 'ambiguous_commit_reconciliation_and_pause', 'target_drift_refusal', 'unrelated_row_concurrency', 'exact_audit_payload_and_duplicate_refusal', 'atomic_audit_interleaving_guards', 'group_recovery', 'terminal_completion_refusal', 'related_sales_items_atomicity', 'completion_full_row_drift', 'sqlite_expression_depth_100', 'token_redaction'],
+    checks: ['builder_double_read_and_65_columns', 'reviewed_manifest_and_lineage_pins', 'non_reviewed_manifest_fails_closed', 'all_groups_and_idempotent_resume', 'fee_atomic_rollback', 'ambiguous_commit_reconciliation_and_pause', 'target_drift_refusal', 'unrelated_row_concurrency', 'exact_audit_payload_and_duplicate_refusal', 'atomic_audit_interleaving_guards', 'group_recovery', 'terminal_completion_refusal', 'related_sales_items_atomicity', 'completion_full_row_drift', 'sqlite_expression_depth_100', 'token_redaction'],
     remote_binding_opened: false,
     production_write: false,
   }, null, 2)}\n`)
