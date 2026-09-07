@@ -139,6 +139,12 @@ const broadcastStub = {
 
 // Real, pure -- loaded first since everything else depends on it.
 const permissions = loadReal('lib/permissions.ts')
+const media = loadReal('lib/media.ts')
+const sqlBinding = loadReal('lib/sqlBinding.ts')
+const productImagePermission = loadReal('lib/productImagePermission.ts', {
+  './media': media,
+  './sqlBinding': sqlBinding,
+})
 const pendingActions = loadReal('lib/pendingActions.ts', { ...dbStub, '../index': {} })
 // N13: the shared actor / branch kernels these routes now import.
 const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
@@ -192,6 +198,8 @@ const reviewApply = loadReal('lib/reviewApply.ts', {
   './productWrites': productWrites,
   './branchWrites': branchWrites,
   './branchRoleGuards': branchRoleGuards,
+  './permissions': permissions,
+  './productImagePermission': productImagePermission,
   './cache': { bumpVersion: async () => {} },
   '../index': {},
 })
@@ -226,6 +234,7 @@ const reviewQueueRoute = loadReal('routes/reviewQueue.ts', {
   ...broadcastStub,
   '../lib/pendingActions': pendingActions,
   '../lib/reviewApply': reviewApply,
+  '../lib/productImagePermission': productImagePermission,
 })
 
 const feesApp = feesRoute.default
