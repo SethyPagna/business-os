@@ -1,6 +1,6 @@
 import type { Dispatch, SetStateAction } from 'react'
 import QuickAddModal from './QuickAddModal'
-import { formatPhoneInputElement, handlePhoneInputKeyDown } from '../../utils/phoneInput.ts'
+import { formatPhoneInputElement, handlePhoneInputBeforeInput, handlePhoneInputKeyDown } from '../../utils/phoneInput.ts'
 
 type Translator = (key: string) => string
 type PosCopy = (en: string, km?: string) => string
@@ -69,7 +69,7 @@ export default function POSQuickAddModals({
               <input id="pos-quick-customer-phone" name="pos_quick_customer_phone" className="input" value={newCustomerForm.phone} onChange={(event) => {
                 const phone = formatPhoneInputElement(event.currentTarget)
                 setNewCustomerForm((form) => ({ ...form, phone }))
-              }} onKeyDown={(event) => handlePhoneInputKeyDown(event, (phone) => setNewCustomerForm((form) => ({ ...form, phone })))} autoComplete="tel" inputMode="tel" />
+              }} onKeyDown={(event) => handlePhoneInputKeyDown(event, (phone) => setNewCustomerForm((form) => ({ ...form, phone })))} onBeforeInput={(event) => handlePhoneInputBeforeInput(event, (phone) => setNewCustomerForm((form) => ({ ...form, phone })))} autoComplete="tel" inputMode="tel" />
             </div>
             <div>
               <label htmlFor="pos-quick-customer-address" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{t('address')}</label>
@@ -97,7 +97,7 @@ export default function POSQuickAddModals({
               <input id="pos-quick-delivery-phone" name="pos_quick_delivery_phone" className="input" value={newDeliveryForm.phone} onChange={(event) => {
                 const phone = formatPhoneInputElement(event.currentTarget)
                 setNewDeliveryForm((form) => ({ ...form, phone }))
-              }} onKeyDown={(event) => handlePhoneInputKeyDown(event, (phone) => setNewDeliveryForm((form) => ({ ...form, phone })))} placeholder="012 345 678" autoComplete="tel" inputMode="tel" />
+              }} onKeyDown={(event) => handlePhoneInputKeyDown(event, (phone) => setNewDeliveryForm((form) => ({ ...form, phone })))} onBeforeInput={(event) => handlePhoneInputBeforeInput(event, (phone) => setNewDeliveryForm((form) => ({ ...form, phone })))} placeholder="012 345 678" autoComplete="tel" inputMode="tel" />
             </div>
             <div>
               <label htmlFor="pos-quick-delivery-area" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Area / Zone</label>
