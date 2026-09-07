@@ -54,12 +54,16 @@ class CapturingHono {
 }
 
 function makeAdapter(d1, hooks = {}) {
-  const state = { finalized: 0, statements: 0 }
+  const state = { durableCases: 0, finalized: 0, statements: 0 }
   return {
     state,
     prepare(sql) {
       const prepared = d1.prepare(sql)
       const maybeThrow = () => {
+        if (hooks.failHistoryLookupAfterCommitted && state.durableCases >= hooks.failHistoryLookupAfterCommitted
+          && /FROM action_history[\s\S]*operation_id/i.test(sql)) {
+          throw new Error('D1_ERROR: D1 DB is overloaded. Requests queued for too long.')
+        }
         if (hooks.failAfterFinalized && state.finalized >= hooks.failAfterFinalized
           && /SELECT id, name, barcode,[\s\S]*FROM products WHERE id = @id/i.test(sql)) {
           throw new Error('D1_ERROR: D1 DB is overloaded. Requests queued for too long.')
@@ -88,6 +92,7 @@ function makeAdapter(d1, hooks = {}) {
         }))
       }
       const result = await d1.batch(statements)
+      if (statements.some((entry) => /INSERT INTO undo_snapshots/i.test(entry.sql))) state.durableCases += 1
       if (statements.some((entry) => /UPDATE action_history SET reversible=1,status='undoable'/i.test(entry.sql))) {
         state.finalized += 1
         hooks.afterFinalize?.(state.finalized)
@@ -210,6 +215,8 @@ async function oversizedFirstClusterIsRefusedWhole() {
   const result = await invoke(loadMergeHandler(makeAdapter(d1)))
   assert.equal(result.status, 200)
   assert.equal(result.body.mergedProducts, 0)
+  assert.equal(result.body.complete, true, 'a run that evaluated every case completes while reporting deliberate refusals')
+  assert.equal(result.body.stalled, false)
   assert.equal(result.body.refusals.length, 4)
   assert.ok(result.body.refusals.every((refusal) => refusal.code === 'cluster_exceeds_atomic_limit'))
   assert.equal(d1.db.prepare("SELECT COUNT(*) AS n FROM products WHERE is_active=0").get().n, 0)
@@ -217,9 +224,42 @@ async function oversizedFirstClusterIsRefusedWhole() {
   assert.equal(d1.db.prepare('SELECT COUNT(*) AS n FROM undo_snapshots').get().n, 0)
 }
 
+async function postCommitHistoryLookupFailureRemainsReported() {
+  const d1 = seedGroups([1])
+  const result = await invoke(loadMergeHandler(makeAdapter(d1, { failHistoryLookupAfterCommitted: 1 })))
+  assert.equal(result.status, 200)
+  assert.equal(result.body.complete, true)
+  assert.equal(result.body.mergedProducts, 1, 'the already committed case remains in the response')
+  assert.equal(result.body.processedCaseKeys.length, 1)
+  assert.equal(result.body.mergeOperationIds.length, 1)
+  assert.deepEqual(result.body.undoPendingOperationIds, result.body.mergeOperationIds)
+  assert.equal(result.body.actionHistoryIds.length, 0, 'an unresolved numeric id must not be invented')
+  assert.equal(result.body.undoPendingCount, 1)
+  assert.equal(d1.db.prepare("SELECT COUNT(*) AS n FROM products WHERE is_active=0").get().n, 1)
+  assert.equal(d1.db.prepare("SELECT COUNT(*) AS n FROM action_history WHERE status='recorded' AND reversible=0").get().n, 1)
+  assert.equal(d1.db.prepare("SELECT COUNT(*) AS n FROM undo_snapshots WHERE status='applied'").get().n, 1)
+}
+
+async function oversizedWritePlanRefusesBeforeMutation() {
+  const d1 = seedGroups([1])
+  const insertStock = d1.db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,1)')
+  for (let branchId = 1; branchId <= 101; branchId += 1) insertStock.run(1, branchId)
+  for (let branchId = 1; branchId <= 100; branchId += 1) insertStock.run(2, branchId)
+  const result = await invoke(loadMergeHandler(makeAdapter(d1)))
+  assert.equal(result.status, 200)
+  assert.equal(result.body.complete, true)
+  assert.equal(result.body.mergedProducts, 0)
+  assert.equal(result.body.refusals[0]?.code, 'merge_case_exceeds_safe_limit')
+  assert.equal(d1.db.prepare('SELECT is_active FROM products WHERE id=2').get().is_active, 1)
+  assert.equal(d1.db.prepare('SELECT cost_price_usd FROM products WHERE id=1').get().cost_price_usd, 4)
+  assert.equal(d1.db.prepare('SELECT COUNT(*) AS n FROM action_history').get().n, 0)
+}
+
 ;(async () => {
   await overloadAfterEight()
   await budgetStopsBetweenWholeGroups()
   await oversizedFirstClusterIsRefusedWhole()
+  await postCommitHistoryLookupFailureRemainsReported()
+  await oversizedWritePlanRefusesBeforeMutation()
   console.log('PASS merge route reports committed partial work and stops only between complete clusters')
 })().catch((error) => { console.error(error); process.exitCode = 1 })
