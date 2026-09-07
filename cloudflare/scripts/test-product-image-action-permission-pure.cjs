@@ -38,7 +38,8 @@ function loadTs(relativePath, stubs = {}) {
 }
 
 const media = loadTs('lib/media.ts')
-const imagePermission = loadTs('lib/productImagePermission.ts', { './media': media })
+const sqlBinding = loadTs('lib/sqlBinding.ts')
+const imagePermission = loadTs('lib/productImagePermission.ts', { './media': media, './sqlBinding': sqlBinding })
 const permissions = loadTs('lib/permissions.ts')
 
 function permissiveModule() {
@@ -81,7 +82,7 @@ function loadProductsRoute(state) {
       return {
         async all(params = []) {
           if (/SELECT public_path FROM file_assets/i.test(sql)) {
-            return [...state.assetPaths].filter((public_path) => params.includes(public_path)).map((public_path) => ({ public_path }))
+            return [...state.assetPaths].filter((public_path) => Object.values(params).includes(public_path)).map((public_path) => ({ public_path }))
           }
           if (/FROM product_images/i.test(sql)) return state.currentGallery.map((image_path) => ({ image_path }))
           return []
@@ -201,6 +202,19 @@ async function main() {
     assert.deepEqual(state.updated[0], { description: 'new' })
     assert.equal(state.synced.length, 0)
     console.log('PASS unchanged full-form images are omitted and products:edit still succeeds')
+  }
+
+  {
+    const state = freshState(role({ products: true, 'products:image': false }), [])
+    state.current.image_path = '/uploads/orphan.png'
+    state.currentGallery = ['/uploads/orphan.png']
+    const response = await request(state, '/77', 'PUT', {
+      description: 'new', image_path: '/uploads/orphan.png', image_gallery: ['/uploads/orphan.png'],
+    })
+    assert.equal(response.status, 200, await response.clone().text())
+    assert.deepEqual(state.updated[0], { description: 'new' })
+    assert.equal(state.synced.length, 0)
+    console.log('PASS unchanged orphan image values do not block an authorized non-image edit')
   }
 
   {

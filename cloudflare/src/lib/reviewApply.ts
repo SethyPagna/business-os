@@ -24,7 +24,7 @@ import { bumpVersion } from './cache'
 import { insertRow, updateRow, defaultBranchId, syncProductImageGallery, seedBranchStockForNewProduct, seedInitialBatchForNewProduct } from './productWrites'
 import { branchUpdateStatements } from './branchWrites'
 import { getActionTier } from './permissions'
-import { omitUnchangedProductImageFields, productImageFieldsChanged, resolveProductImageFields } from './productImagePermission'
+import { omitUnchangedProductImageFields, productImageFieldsChanged, productImageFieldsChangedResolved, resolveProductImageFields } from './productImagePermission'
 import type { SessionUser } from './auth'
 import type { PendingActionRow } from './pendingActions'
 import type { Env } from '../index'
@@ -172,15 +172,18 @@ registerApplier('products', 'update', 'product', async (env, row, reviewer) => {
   const id = row.entity_id
   if (id == null) throw new Error('Pending product update is missing its entity id')
   const body = JSON.parse(row.payload_json || '{}') as Record<string, unknown>
-  await resolveProductImageFields(getDb(env), body)
   const submittedImageFields = Object.prototype.hasOwnProperty.call(body, 'image_path')
     || Object.prototype.hasOwnProperty.call(body, 'image_gallery')
   if (submittedImageFields) {
     const current = await currentProductImages(env, id)
     if (!current) return
-    const changesImages = productImageFieldsChanged(body, current)
-    if (changesImages) await assertPendingProductImagePermission(env, row)
-    else omitUnchangedProductImageFields(body)
+    const changesImages = await productImageFieldsChangedResolved(getDb(env), body, current)
+    if (changesImages) {
+      await assertPendingProductImagePermission(env, row)
+      await resolveProductImageFields(getDb(env), body)
+    } else {
+      omitUnchangedProductImageFields(body)
+    }
   }
   const changes = await updateRow(env, 'products', id, body)
   if (!changes && !('image_gallery' in body)) return
