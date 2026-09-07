@@ -288,7 +288,9 @@ function duplicateErrorResponse(
       status: 409,
       body: {
         error: `Phone "${match.matchedPhone}" is already registered to "${match.name}". Each phone number can only belong to one ${entityLabel}.`,
-        code: 'phone_conflict',
+        // A new code keeps an older cached POS from silently selecting this
+        // candidate. The current UI reads severity + allowedActions instead.
+        code: 'contact_duplicate_decision_required',
         duplicate,
         matches,
         duplicateReview: review,
@@ -300,7 +302,10 @@ function duplicateErrorResponse(
     status: 409,
     body: {
       error: `A ${entityLabel} named "${match.name}" already uses this phone number. Review the existing record before creating a separate contact.`,
-      code: 'possible_duplicate',
+      // Older cached POS builds auto-retried `possible_duplicate` with a bare
+      // boolean. This explicit-decision code makes them stop with an error
+      // instead of retrying forever while the new UI presents the choices.
+      code: 'contact_duplicate_decision_required',
       duplicate,
       matches,
       duplicateReview: review,

@@ -130,6 +130,9 @@ async function main() {
     assert.match(route, /duplicate_candidate_fingerprint: duplicateDecision\.decision\.fingerprint/)
     assert.doesNotMatch(route, /body\.confirmDuplicate/)
     assert.match(route, /const duplicate = \{ \.\.\.match, matches, duplicateReview: review, allowedActions \}/)
+    assert.match(route, /code: 'contact_duplicate_decision_required'/)
+    assert.doesNotMatch(route, /code: 'possible_duplicate'/)
+    assert.doesNotMatch(route, /code: 'phone_conflict'/)
   })
 
   console.log(`\n${passed} check(s) passed.`)
