@@ -30,6 +30,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { TARGET_FIELDS } from '../src/components/products/import/datedStockReconciliationMapping.ts'
+import { fmtDateOnly } from '../src/utils/formatters.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const frontend = path.join(here, '..')
@@ -274,6 +275,30 @@ runTest('both packs carry every TARGET_FIELDS tKey/hintKey, really translated', 
       assert.match(km[key], /[ក-៿]/, `km.json ${key} carries no Khmer script`)
     }
   }
+})
+
+// --- 6. the plan table's Date column reads dd/mm/yyyy, not ISO -----------
+
+// The Worker returns plan.movementsToCreate[].date as an ISO 'YYYY-MM-DD'
+// string (lib/datedStockCountImport.ts, datedStockCountResolve.ts); the
+// Confirm Import table rendered it bare, so a day-first operator read an
+// ISO date on a live review screen.
+
+runTest('the plan table imports fmtDateOnly', () => {
+  assert.match(dated, /import \{ fmtDateOnly \} from '\.\.\/\.\.\/\.\.\/utils\/formatters\.ts'/)
+})
+
+runTest('the plan table\'s Date cell formats through fmtDateOnly, not the bare ISO field', () => {
+  const start = dated.indexOf('plan.movementsToCreate.map')
+  assert.ok(start >= 0, 'the plan table exists')
+  const end = dated.indexOf('</table>', start)
+  const block = dated.slice(start, end)
+  assert.match(block, /fmtDateOnly\(m\.date\)/, 'the Date cell must format through fmtDateOnly')
+  assert.doesNotMatch(block, /\{m\.date\}/, 'the Date cell still renders the bare ISO string')
+})
+
+runTest('fmtDateOnly actually converts an ISO date to dd/mm/yyyy', () => {
+  assert.equal(fmtDateOnly('2026-09-03'), '03/09/2026')
 })
 
 if (failed > 0) {

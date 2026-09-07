@@ -28,6 +28,7 @@ import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2.js'
 import Modal from '../../shared/Modal'
 import AppSelect, { type AppSelectOption } from '../../shared/AppSelect.tsx'
+import { fmtDateOnly } from '../../../utils/formatters.ts'
 import { openCSVDialog } from '../../../api/browserDialogs.ts'
 import { parseCsvRows } from '../../../utils/csvImport.ts'
 import {
@@ -593,7 +594,7 @@ export default function DatedStockReconciliationModal({ onClose, onDone, t, prod
                   <tr key={i} className="border-t border-gray-100 dark:border-gray-800">
                     <td className="px-2 py-1.5 text-slate-700 dark:text-slate-200">{m.productName}</td>
                     <td className="px-2 py-1.5 text-slate-600 dark:text-slate-300">{m.branchName}</td>
-                    <td className="px-2 py-1.5 text-slate-600 dark:text-slate-300">{m.date}</td>
+                    <td className="px-2 py-1.5 text-slate-600 dark:text-slate-300">{fmtDateOnly(m.date)}</td>
                     <td className={`px-2 py-1.5 font-medium ${m.movementType === 'add' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
                       {m.movementType === 'add' ? '+' : '-'}{m.quantity}
                     </td>
