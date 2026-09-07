@@ -16,6 +16,13 @@ type LightboxLabels = {
   next?: string
   imageCount?: string
   dotsLabel?: string
+  // F11: the close (X) button's accessible name. This component has no
+  // translation hook of its own -- it renders inside both the admin app
+  // (AppContext) and the public catalog/portal (its own `copy()` idiom,
+  // see public_surface_rules), so -- exactly like prev/next/dotsLabel
+  // above -- the caller supplies the translated string and this component
+  // only owns the English fallback.
+  close?: string
 }
 
 type ImageGalleryLightboxProps = {
@@ -65,6 +72,7 @@ export default function ImageGalleryLightbox({
     next: labels.next || 'Next',
     imageCount: labels.imageCount || '{current}/{total}',
     dotsLabel: labels.dotsLabel || 'Image {current} of {total}',
+    close: labels.close || 'Close',
   }
 
   // Zoom/pan state for the CURRENT image only -- deliberately not part of
@@ -313,7 +321,7 @@ export default function ImageGalleryLightbox({
             type="button"
             className="rounded-full border border-white/20 bg-slate-950/45 p-2 text-white shadow-sm transition hover:bg-slate-950/65"
             onClick={() => onClose?.()}
-            aria-label="Close"
+            aria-label={copy.close}
           >
             <X className="h-5 w-5" />
           </button>

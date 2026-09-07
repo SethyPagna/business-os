@@ -5,6 +5,7 @@ import { apiFetch, cacheInvalidate, route } from './http.ts'
 import { getLocalDb } from './lazyLocalDb.ts'
 import { mirrorTable, routeMirrored } from './localMirrors.ts'
 import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
+import { contactDisplayAddress } from '../components/contacts/contactOptionUtils.ts'
 
 type SalePayload = ExpectedUpdatedAtPayload
 type ResultRecord = Record<string, unknown>
@@ -163,7 +164,11 @@ export async function attachSaleCustomer(
       customer_name: result?.customer?.name || null,
       customer_membership_number: result?.customer?.membership_number || null,
       customer_phone: result?.customer?.phone || null,
-      customer_address: result?.customer?.address || null,
+      // N21: the response carries the customer's RAW address column (the
+      // Contact Options JSON); the server stored the display address on the
+      // sale. Mirror what the server stored, or the sale detail shows the JSON
+      // again the moment this device reads its local copy offline.
+      customer_address: contactDisplayAddress(result?.customer?.address) || null,
       updated_at: getResultTimestamp(result),
     }).catch(() => {})
     return result
@@ -172,7 +177,7 @@ export async function attachSaleCustomer(
       customer_id: payload?.customer_id || null,
       customer_name: payload?.customer_name || '',
       customer_phone: payload?.customer_phone || '',
-      customer_address: payload?.customer_address || '',
+      customer_address: contactDisplayAddress(payload?.customer_address) || '',
     })
   }
 }
@@ -194,6 +199,14 @@ export type SaleItemAddition = {
  * stock and changes what the customer owes against a row whose current state
  * only the server knows. A replay from an outbox minutes later could deduct
  * units a different sale has since taken.
+ *
+ * N18: `review.client_request_id` is CHECKED here rather than assumed. The
+ * Worker rejects a body without one, and the caller's id must be the STABLE
+ * per-user-action id (SaleDetailModal's addRequestIdRef) -- minting one here
+ * would make every retry a fresh request and re-add the same lines. So a
+ * caller that lost the id fails locally, immediately and by name, instead of
+ * spending a round trip to earn an opaque 400. (This is the guard; the actual
+ * loss was api/methods.ts's registry wrapper dropping the fourth argument.)
  */
 export async function addSaleItems(
   id: number | string,
@@ -201,6 +214,9 @@ export async function addSaleItems(
   notes = '',
   review: { client_request_id: string; expected_exchange_rate: number; expected_updated_at?: string },
 ): Promise<unknown> {
+  if (!String(review?.client_request_id || '').trim()) {
+    throw new Error("addSaleItems needs the caller's stable client_request_id; it must never be generated per request.")
+  }
   const body = await withExpectedUpdatedAt('sales', id, {
     ...getDevicePayload(),
     items,
@@ -228,10 +244,11 @@ export async function addSaleItems(
 }
 
 export interface SaleAmendmentRequest {
-  kind: 'line_quantity_increased' | 'line_quantity_decreased' | 'line_removed' | 'line_replaced' | 'delivery_fee_changed'
+  kind: 'line_quantity_increased' | 'line_quantity_decreased' | 'line_removed' | 'line_replaced' | 'delivery_fee_changed' | 'delivery_actual_cost_changed'
   sale_item_id?: number
   quantity?: number
   delivery_fee_usd?: number
+  delivery_actual_cost_usd?: number | string | null
   replacement?: { product_id: number; quantity: number; applied_price_usd?: number; branch_id?: number | null }
   notes?: string
   client_request_id: string
@@ -248,8 +265,15 @@ export interface SaleAmendmentRequest {
  * deliberately NOT queued offline -- it moves stock in BOTH directions against
  * a row whose current state only the server knows, and a replay from an outbox
  * minutes later could hand back units another sale has since taken.
+ *
+ * Carries the same client_request_id guard as addSaleItems, for the same
+ * reason: POST /amendments refuses a body without one (routes/sales.ts), and
+ * the id must be the caller's stable per-action id, never a per-request mint.
  */
 export async function amendSale(id: number | string, request: SaleAmendmentRequest): Promise<unknown> {
+  if (!String(request?.client_request_id || '').trim()) {
+    throw new Error("amendSale needs the caller's stable client_request_id; it must never be generated per request.")
+  }
   const body = await withExpectedUpdatedAt('sales', id, {
     ...getDevicePayload(),
     ...request,
@@ -266,6 +290,8 @@ export async function amendSale(id: number | string, request: SaleAmendmentReque
       subtotal_usd: result?.subtotalUsd,
       total_usd: result?.totalUsd,
       total_khr: result?.totalKhr,
+      delivery_actual_cost_usd: result?.deliveryActualCostUsd,
+      delivery_actual_cost_khr: result?.deliveryActualCostKhr,
       updated_at: getResultTimestamp(result),
     }).catch(() => {})
     return result

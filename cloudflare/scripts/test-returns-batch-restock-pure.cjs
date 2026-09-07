@@ -97,6 +97,9 @@ const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
 const returnsRoute = loadReal('routes/returns.ts', {
   '../lib/branchRoleGuards': loadReal('lib/branchRoleGuards.ts', { './branchRoles': loadReal('lib/branchRoles.ts') }),
   '../lib/actorSnapshot': actorSnapshotKernel,
+  // N21: the display-address kernel, REAL. A stub resolves every address to
+  // undefined and would make the assertion below agree with itself.
+  '../lib/contactOptions': loadReal('lib/contactOptions.ts'),
   '../lib/db': { getDb: () => db },
   // routes/returns.ts buckets return dates in UTC+7 through the pure
   // businessDateWindow helpers; provide the real module so its date SQL resolves.
@@ -785,6 +788,54 @@ async function main() {
     })
     assert.strictEqual(accepted.status, 200, JSON.stringify(accepted.json))
     assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id = @batchId AND branch_id = 1').get({ batchId: batch.batchId }).quantity, lotBefore - 1, 'the edit reversed 2 and re-applied 1 into the same lot')
+  })
+
+  // N21 -- a Replace return mints a NEW sale and copies the SOURCE sale's
+  // customer snapshot onto it. customers.address holds the Contact Options
+  // JSON, and every sale written before the address fix snapshotted that
+  // column raw, so a return taken today against one of those rows minted a
+  // brand new sale carrying "[{...}]" into the Sales list and onto its
+  // receipt. Discriminating: restore `saleMeta.customer_address || null` in
+  // routes/returns.ts and the first assertion below stores the JSON string.
+  await check('N21: the replacement sale carries the DISPLAY address, not the source options JSON', async () => {
+    seed()
+    rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (2, 1, 10)').run()
+    rawDb.prepare('UPDATE products SET stock_quantity = 10 WHERE id = 2').run()
+    // The source sale must really have sold the returned line, so the route
+    // takes the sale_id branch that reads saleMeta -- the whole point here.
+    rawDb.prepare('INSERT INTO sale_items (id, sale_id, product_id, quantity) VALUES (1, 1, 1, 2)').run()
+    // The exact shape customers.address holds, as serializeContactOptions writes it.
+    const optionsJson = JSON.stringify([
+      { label: 'Default', name: null, phone: '012345678', email: null, address: 'St 271, Phnom Penh', area: null },
+    ])
+    rawDb.prepare('UPDATE sales SET customer_id = 7, customer_name = @name, customer_phone = @phone, customer_address = @address WHERE id = 1')
+      .run({ name: 'Sok Dara', phone: '012345678', address: optionsJson })
+    const { status, json } = await req('POST', '/', {
+      sale_id: 1,
+      items: [{ product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1, applied_price_usd: 10 }],
+      replacement_items: [{ product_id: 2, quantity: 1, branch_id: 1, applied_price_usd: 25 }],
+      reason: 'Damaged on arrival',
+    })
+    assert.strictEqual(status, 200, JSON.stringify(json))
+    const replacement = rawDb.prepare('SELECT customer_address, customer_name FROM sales WHERE id = ?').get([json.replacementSaleId])
+    assert.strictEqual(replacement.customer_name, 'Sok Dara', 'sanity: the source sale customer really was carried over')
+    assert.strictEqual(
+      replacement.customer_address,
+      'St 271, Phnom Penh',
+      'the replacement sale must store the display address, never the options JSON',
+    )
+    // And a plainly typed address -- including a numeric house number that
+    // happens to parse as JSON -- is not swallowed on the way through.
+    rawDb.prepare("UPDATE sales SET customer_address = '271' WHERE id = 1").run()
+    const plain = await req('POST', '/', {
+      sale_id: 1,
+      items: [{ product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1, applied_price_usd: 10 }],
+      replacement_items: [{ product_id: 2, quantity: 1, branch_id: 1, applied_price_usd: 25 }],
+      reason: 'Damaged on arrival',
+    })
+    assert.strictEqual(plain.status, 200, JSON.stringify(plain.json))
+    const plainRow = rawDb.prepare('SELECT customer_address FROM sales WHERE id = ?').get([plain.json.replacementSaleId])
+    assert.strictEqual(plainRow.customer_address, '271', 'a numeric house number is an address, not swallowed JSON')
   })
 
   console.log(`\n${passed} check(s) passed.`)

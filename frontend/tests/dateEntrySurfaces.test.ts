@@ -38,7 +38,6 @@ const SURFACES: Array<{ file: string; what: string }> = [
   { file: 'components/inventory/ManageBatchesModal.tsx', what: 'batch date (the lot code) and expiry' },
   { file: 'components/inventory/FastStockInModal.tsx', what: 'fast stock-in received date, expiry, credit due' },
   { file: 'components/inventory/InventoryStockModals.tsx', what: 'the add / remove / set stock dialog received date' },
-  { file: 'components/products/forms/BranchStockAdjuster.tsx', what: 'per-branch add-stock received date' },
   { file: 'components/products/forms/BulkAddStockModal.tsx', what: 'bulk add-stock received date' },
   { file: 'components/products/forms/ProductForm.tsx', what: 'product expiry date' },
   { file: 'components/products/StockInSessionsSection.tsx', what: 'stock-in session received date and credit due date' },

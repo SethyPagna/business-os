@@ -252,7 +252,7 @@ runTest('the stock-in receipt gate agrees, case for case, with the server kernel
     assert.ok(km[key], `km.json is missing ${key}`)
     assert.notEqual(en[key], km[key], `${key} must be really translated`)
   }
-  for (const key of ['stock_receipt_free_goods', 'stock_receipt_free_goods_hint', 'stock_set_down_hint']) {
+  for (const key of ['stock_receipt_free_goods', 'stock_receipt_free_goods_hint', 'stock_set_down_hint', 'stock_set_up_hint']) {
     assert.ok(en[key] && km[key], `both packs need ${key}`)
     assert.notEqual(en[key], km[key], `${key} must be really translated`)
   }
@@ -267,7 +267,6 @@ runTest('nothing invents a receipt cost any more', () => {
   // -- an escaping slip there produces a pattern that matches anything and a
   // test that can never fail.
   const noFabrication: Array<[string, string]> = [
-    ['components/products/forms/BranchStockAdjuster.tsx', 'unitCostUsd: product.cost_price_usd || 0'],
     ['components/products/forms/BulkAddStockModal.tsx', 'unitCostUsd: product.purchase_price_usd || 0'],
     ['components/products/helpers/productWriteHelpers.ts', 'unitCostUsd: options.unitCostUsd ?? ('],
     ['components/products/CreateProductsSessionModal.tsx', "cost_price_usd === '' ? 0"],
@@ -281,7 +280,6 @@ runTest('nothing invents a receipt cost any more', () => {
     'components/inventory/Inventory.tsx',
     'components/inventory/FastStockInModal.tsx',
     'components/products/forms/BulkAddStockModal.tsx',
-    'components/products/forms/BranchStockAdjuster.tsx',
     'components/inventory/ReceiveBatchModal.tsx',
     // Both of its line paths: the new product built through ProductForm and
     // the existing product queued from the picker.
@@ -298,7 +296,6 @@ runTest('nothing invents a receipt cost any more', () => {
   for (const [path, marker] of [
     ['components/inventory/Inventory.tsx', 'lotAttributionDeferred'],
     ['components/products/forms/StockAdjustModal.tsx', 'lotAttributionDeferred'],
-    ['components/products/forms/BranchStockAdjuster.tsx', 'lotAttributionDeferred'],
     ['components/inventory/ReceiveBatchModal.tsx', 'lotSupplierName'],
     ['components/products/CreateProductsSessionModal.tsx', 'lotSupplierName'],
   ] as Array<[string, string]>) {
@@ -313,6 +310,31 @@ runTest('nothing invents a receipt cost any more', () => {
   assert.match(products, /attribution: 'correction'/, 'the snapshot-restore path must declare itself a correction')
   const inventory2 = source('components/inventory/Inventory.tsx')
   assert.match(inventory2, /attribution: 'correction'/, 'undo must declare itself a correction rather than carrying a fake supplier')
+})
+
+// N14-D, ported from a since-deleted unmounted per-product-row adjust form
+// onto the ONE live surface every branch adjust actually renders through
+// (Inventory.tsx and StockAdjustModal.tsx both submit through this shared
+// modal). The Δ line already explained a set-DOWN with stock_set_down_hint
+// (isSetDown); a set that RAISES stock is just as much a departure from a
+// plain quantity edit -- the receipt fields (supplier + cost) appear right
+// below it -- so the operator needs the mirror-image "why", not silence.
+runTest('a set that RAISES stock explains itself at the Δ line, same as a set that lowers it', () => {
+  const modals = source('components/inventory/InventoryStockModals.tsx')
+  const match = modals.match(/adjustForm\.type === 'set' && setDifference != null \? \(([\s\S]*?)\n {16}\) : null\}/)
+  assert.ok(match, 'the Δ line block must exist')
+  const deltaBlock = match![1]
+  assert.match(deltaBlock, /isSetDown \? \(/, 'the set-down hint must still be there')
+  assert.match(deltaBlock, /stock_set_down_hint/)
+  assert.match(deltaBlock, /isStockIn \? \(/, 'a set that raises stock must get its own hint at the same Δ line, gated on the SAME predicate the supplier/cost fields render on')
+  assert.match(deltaBlock, /stock_set_up_hint/, 'the up-hint uses the key both packs already carry')
+
+  const en = JSON.parse(readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8')) as Record<string, string>
+  const km = JSON.parse(readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8')) as Record<string, string>
+  for (const key of ['stock_set_up_hint', 'stock_set_down_hint']) {
+    assert.ok(en[key] && km[key], `both packs need ${key}`)
+    assert.notEqual(en[key], km[key], `${key} must be really translated`)
+  }
 })
 
 runTest('a hidden batch picker chose nothing: a set-down lot cannot ride a set-up (N14-E)', () => {

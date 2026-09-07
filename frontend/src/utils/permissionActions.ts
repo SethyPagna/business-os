@@ -229,13 +229,14 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     // the stock movement is immediate.
     { key: 'add_items', tKey: 'perm_act_sales_add_items', label: 'Add items to a recorded sale', review: 'block' },
     // S4-30: POST /:id/amendments -> 403 unless FULL (sales.ts). Amending
-    // changes a recorded sale's contents or its delivery fee, moves stock in
+    // changes a recorded sale's contents, customer fee, or actual courier cost
+    // and may move stock in either direction
     // BOTH directions, and changes what the customer owes. It is deliberately
     // separate from `add_items`: a shop may well want a senior cashier who can
     // add a forgotten item but cannot take one back off a paid sale. Like
     // add_items it can never be queued for review -- the stock movement is
     // immediate.
-    { key: 'amend', tKey: 'perm_act_sales_amend', label: 'Amend a recorded sale (change quantities, remove or replace lines, correct the delivery fee)', review: 'block' },
+    { key: 'amend', tKey: 'perm_act_sales_amend', label: 'Amend a recorded sale (change quantities, remove or replace lines, correct delivery fee or actual courier cost)', review: 'block' },
   ],
 
   promotions: [

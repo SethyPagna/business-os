@@ -99,6 +99,8 @@ const {
   planLineQuantityDecrease,
   guardDeliveryFeeAmendment,
   planDeliveryFeeChange,
+  guardDeliveryActualCostAmendment,
+  planDeliveryActualCostChange,
   recomputeSaleMoneyAfterAmendment,
   amendedSaleKeepsReceiptNumber,
   amendmentEntryStatement,
@@ -116,6 +118,10 @@ const {
 // ---------------------------------------------------------------------------
 const MIGRATION_0115 = fs.readFileSync(
   path.join(__dirname, '..', 'migrations', '0115_sale_amendments.sql'),
+  'utf8',
+)
+const MIGRATION_0129 = fs.readFileSync(
+  path.join(__dirname, '..', 'migrations', '0129_sale_actual_delivery_cost_amendment.sql'),
   'utf8',
 )
 
@@ -145,9 +151,13 @@ function setup() {
       delivery_fee_usd REAL DEFAULT 0, delivery_fee_khr REAL DEFAULT 0, delivery_fee_paid_by TEXT DEFAULT 'customer',
       total_usd REAL, total_khr REAL, amount_paid_usd REAL DEFAULT 0, amount_paid_khr REAL DEFAULT 0,
       change_usd REAL DEFAULT 0, change_khr REAL DEFAULT 0, stock_skipped INTEGER DEFAULT 0,
+      delivery_actual_cost_usd REAL, delivery_actual_cost_khr REAL,
       created_at TEXT, updated_at TEXT);
+    CREATE TABLE system_flags (key TEXT PRIMARY KEY, value TEXT);
+    CREATE TABLE sale_write_revisions (sale_id INTEGER PRIMARY KEY, revision INTEGER NOT NULL DEFAULT 0);
   `)
   sqlite.exec(MIGRATION_0115)
+  sqlite.exec(MIGRATION_0129)
   const apply = (statements) => {
     const run = sqlite.transaction(() => statements.map(({ sql, params }) => sqlite.prepare(sql).run(params || {})))
     return run()
@@ -178,6 +188,8 @@ function seedSale(sqlite, overrides = {}) {
     discount_usd: 0,
     is_delivery: 1,
     delivery_fee_usd: 1.5,
+    delivery_actual_cost_usd: null,
+    delivery_actual_cost_khr: null,
     total_usd: 7.5,
     amount_paid_usd: 7.5,
     stock_skipped: 0,
@@ -185,9 +197,11 @@ function seedSale(sqlite, overrides = {}) {
     ...overrides,
   }
   sqlite.prepare(`INSERT INTO sales (id, receipt_number, sale_status, branch_id, exchange_rate, subtotal_usd,
-    tax_usd, discount_usd, is_delivery, delivery_fee_usd, total_usd, amount_paid_usd, stock_skipped, created_at)
+    tax_usd, discount_usd, is_delivery, delivery_fee_usd, total_usd, amount_paid_usd, stock_skipped,
+    delivery_actual_cost_usd, delivery_actual_cost_khr, created_at)
     VALUES (@id, @receipt_number, @sale_status, @branch_id, @exchange_rate, @subtotal_usd,
-    @tax_usd, @discount_usd, @is_delivery, @delivery_fee_usd, @total_usd, @amount_paid_usd, @stock_skipped, @created_at)`).run(sale)
+    @tax_usd, @discount_usd, @is_delivery, @delivery_fee_usd, @total_usd, @amount_paid_usd, @stock_skipped,
+    @delivery_actual_cost_usd, @delivery_actual_cost_khr, @created_at)`).run(sale)
   sqlite.prepare(`INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity, applied_price_usd,
     cost_price_usd, cost_price_khr, total_usd, total_khr, branch_id)
     VALUES (1, 77, 10, 'Serum', 2, 3, 1.5, 6000, 6, 24600, 1)`).run()
@@ -637,6 +651,37 @@ console.log('PASS 10 -- the edit window, its default, its setting, the admin byp
 }
 console.log('PASS 11/12 -- the delivery fee nets to one number on the receipt and shows both in the ledger; discounts frozen, tax untouched by a fee-only change')
 
+// ---- 11b: actual courier cost is editable, report-only, and separately logged
+{
+  const { sqlite, apply } = setup()
+  seedShelf(sqlite)
+  const sale = seedSale(sqlite, { delivery_actual_cost_usd: 2, delivery_actual_cost_khr: 8200, total_usd: 7.5, amount_paid_usd: 7.5 })
+  const stored = sqlite.prepare('SELECT * FROM sales WHERE id = 77').get()
+  assert.strictEqual(guardDeliveryActualCostAmendment(stored).ok, true)
+  assert.strictEqual(guardDeliveryActualCostAmendment({ ...stored, is_delivery: 0 }).ok, false)
+  const plan = planDeliveryActualCostChange({ saleId: 77, sale: stored, newCostUsd: 2.5, exchangeRate: 4100 })
+  assert.strictEqual(plan.costBeforeUsd, 2)
+  assert.strictEqual(plan.costAfterUsd, 2.5)
+  assert.strictEqual(plan.costDeltaUsd, 0.5)
+  apply([
+    ...plan.statements,
+    amendmentEntryStatement(ENTRY({
+      kind: 'delivery_actual_cost_changed',
+      amountBeforeUsd: plan.costBeforeUsd, amountAfterUsd: plan.costAfterUsd,
+      totalBeforeUsd: 7.5, totalAfterUsd: 7.5,
+    })),
+  ])
+  assert.strictEqual(num(sqlite, 'SELECT delivery_actual_cost_usd FROM sales WHERE id = 77'), 2.5)
+  assert.strictEqual(num(sqlite, 'SELECT delivery_actual_cost_khr FROM sales WHERE id = 77'), 10250)
+  assert.strictEqual(num(sqlite, 'SELECT total_usd FROM sales WHERE id = 77'), 7.5, 'actual courier cost never changes what the customer owes')
+  const entry = sqlite.prepare("SELECT * FROM sale_amendments WHERE kind = 'delivery_actual_cost_changed'").get()
+  assert.strictEqual(entry.amount_before_usd, 2)
+  assert.strictEqual(entry.amount_after_usd, 2.5)
+  assert.strictEqual(entry.amount_delta_usd, 0.5)
+  assert.strictEqual(entry.total_before_usd, entry.total_after_usd)
+}
+console.log('PASS 11b -- actual courier cost changes the reporting fields only and leaves a separate immutable before/after ledger row')
+
 // ---- 13: an oversell aborts the whole batch --------------------------------
 {
   const { sqlite, apply } = setup()
@@ -658,7 +703,7 @@ console.log('PASS 13 -- an oversell aborts the batch, nothing half-applies, no l
 // ---- 14: summarizeAmendments -----------------------------------------------
 {
   assert.deepStrictEqual([...AMENDMENT_KINDS], [
-    'line_added', 'line_quantity_increased', 'line_quantity_decreased', 'line_removed', 'delivery_fee_changed',
+    'line_added', 'line_quantity_increased', 'line_quantity_decreased', 'line_removed', 'delivery_fee_changed', 'delivery_actual_cost_changed',
   ])
   assert.strictEqual(reversingKind('line_added'), 'line_removed')
   assert.strictEqual(reversingKind('line_removed'), 'line_added')
