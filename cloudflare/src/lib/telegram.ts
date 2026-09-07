@@ -7,6 +7,7 @@ import {
   bi, label, labeled, localizeTelegramHeading, localizeTelegramLine, localizeTelegramValue,
   parseReportDate, telegramCommandReference, telegramUnauthorizedReply,
 } from './telegramLang'
+import type { TelegramLabelKey } from './telegramLang'
 import {
   getSalesGroupedTotals, getSalesTotals,
   recognizedExpr, shiftWindowWhere, type SalesFilters,
@@ -600,13 +601,10 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
   const endedAt = shift.closed_at || shift.cancelled_at
   const lines = [
     reportTitle('🧑‍💼', 'Shift', 'វេន', shift.business_date),
-    labeled('shop', cleanLine(shopName || 'Business OS', 80)),
-    labeled('cashier', localizeTelegramValue(cleanLine(shift.user_name || 'No cashier', 60))),
-  ]
-  if (shift.branch_name) lines.push(labeled('branch', cleanLine(shift.branch_name, 60)))
-  lines.push(
     labeled('shift', cleanLine(shift.shift_code, 40)),
     labeled('from', formatBusinessDateTime(shift.opened_at, nowMs)),
+  ]
+  lines.push(
     // An open shift reports up to NOW and says so, rather than printing a
     // closing time that has not happened. A shift left running overnight is
     // the honest record -- migration 0116 refuses to close one on a timer --
@@ -615,6 +613,8 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
     open
       ? `${label('to')}: ${formatBusinessDateTime(new Date(nowMs).toISOString(), nowMs)} — ${bi('still open', 'នៅបើកនៅឡើយ')}`
       : `${labeled('to', formatBusinessDateTime(endedAt, nowMs))}${cancelled ? ` — ${bi('cancelled', 'បានបោះបង់')}` : ''}`,
+    labeled('shop', cleanLine(shopName || 'Business OS', 80)),
+    labeled('cashier', localizeTelegramValue(cleanLine(shift.user_name || 'No cashier', 60))),
   )
   if (cancelled) {
     if (shift.closed_at) lines.push(`${bi('Cancelled at', 'បោះបង់នៅ')}: ${formatBusinessDateTime(shift.cancelled_at, nowMs)}`)
@@ -632,22 +632,20 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
   lines.push(RULE, labeled('sales', usd(figures.revenueUsd)), labeled('profit', usd(figures.profitUsd)))
   if (expenses.header) lines.push(expenses.header)
   if (figures.deliveryFeeUsd) lines.push(labeled('deliveryFee', usd(figures.deliveryFeeUsd)))
-  // Always positive, always the word "credit" -- never "$-n", never
+  // Always positive, always labelled "Not Paid" -- never "$-n", never
   // subtracted from anything above it (see the owner's separate ruling).
   if (figures.creditUsd) lines.push(labeled('credit', usd(figures.creditUsd)))
 
   lines.push(RULE, labeled('invoices', figures.invoices))
-  if (figures.cancelled) lines.push(labeled('cancelled', figures.cancelled))
-  if (figures.edited) lines.push(labeled('edited', figures.edited))
 
-  // The owner's specific gap: registered cash, open vs end, both currencies,
+  // The owner's specific gap: registered opening and closing cash, both currencies,
   // as one small block. A factual readout -- it is not compared to anything
   // here, and an open shift (no count taken yet) shows only the open half.
   lines.push(RULE, labeled('cashOpen', registeredMoney(shift.opening_float_usd, shift.opening_float_khr)))
   if (shift.closed_at) lines.push(labeled('cashEnd', registeredMoney(shift.closing_counted_usd, shift.closing_counted_khr)))
 
-  // Expenses split into exactly two plain lines, at most one refunds line,
-  // and one informational difference line -- none of it an
+  // Expenses split into exactly two plain lines and one informational
+  // difference line -- none of it an
   // expected-must-match check. The reconciliation is still computed (ONE
   // shared definition, lib/shiftReconciliation.ts) but only to answer the
   // single question "does the count differ from what it should be", not to
@@ -661,17 +659,29 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
     counted: { usd: shift.closing_counted_usd, khr: shift.closing_counted_khr },
     reviewCodes: !figures.cash || figures.cash.needsReview ? ['tender_incomplete'] : [],
   })
-  const cashKnown = !recon.needs_review
   const context: string[] = [...expenses.components]
-  if (figures.refundUsd) context.push(labeled('refunds', usd(figures.refundUsd)))
   // The closing count only exists once the employee has ended the shift by
   // hand, so an open shift shows no difference against a count that was
   // never taken -- that would read as a missing-cash alarm on every open till.
   if (shift.closed_at) {
     const signed = (n: number, format: (value: number) => string) => `${n < 0 ? '−' : n > 0 ? '+' : ''}${format(Math.abs(n))}`
-    context.push(labeled('difference', cashKnown && recon.difference.usd != null && recon.difference.khr != null
-      ? `${signed(recon.difference.usd, usd)} · ${signed(recon.difference.khr, riel)}`
-      : '—'))
+    const difference = recon.difference.usd == null && recon.difference.khr == null
+      ? '—'
+      : `${recon.difference.usd == null ? '—' : signed(recon.difference.usd, usd)} · ${recon.difference.khr == null ? '—' : signed(recon.difference.khr, riel)}`
+    context.push(labeled('difference', difference))
+    if (recon.needs_review) {
+      const reviewLabels: Partial<Record<string, TelegramLabelKey>> = {
+        tender_incomplete: 'reviewTender',
+        change_ambiguous: 'reviewChange',
+        sale_limit_reached: 'reviewLimit',
+        cash_method_unresolved: 'reviewCashMethod',
+      }
+      const reasons = recon.review_codes
+        .map((code) => reviewLabels[code])
+        .filter((key): key is TelegramLabelKey => !!key)
+        .map((key) => label(key))
+      context.push(labeled('cashReview', reasons.length ? reasons.join(' · ') : '—'))
+    }
   }
   if (context.length) lines.push(RULE, ...context)
 

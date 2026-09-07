@@ -123,12 +123,11 @@ check('no line is a sentence -- the longest is a label and a figure',
 // ---- 2. the exact lines ----------------------------------------------------
 assert.deepEqual(lines, [
   '🧑‍💼 Shift / វេន — 06/09/2026',
-  'Shop / ហាង: Sunrise Mart',
-  'Cashier / អ្នកគិតប្រាក់: Za',
-  'Branch / សាខា: Shop',
-  'Shift / វេន: S-0906-01',
+  'ID / លេខសម្គាល់: S-0906-01',
   'From / ពី: 06/09/2026 08:15',
   'To / ទៅ: 06/09/2026 20:02',
+  'Shop / ហាង: Sunrise Mart',
+  'Cashier / អ្នកគិតប្រាក់: Za',
   RULE,
   // The header block: the owner's five totals, in one fixed order, shared
   // with the day summary.
@@ -141,28 +140,25 @@ assert.deepEqual(lines, [
   'Not Paid / ប្រាក់ជំពាក់: $38.00',
   RULE,
   'Invoices / វិក្កយបត្រ: 24',
-  'Cancelled / បានបោះបង់: 1',
-  'Edited / បានកែ: 2',
   RULE,
-  // The gap the owner named: registered cash, open vs end, both currencies.
+  // The gap the owner named: registered opening and closing cash, both currencies.
   'Opening cash / សាច់ប្រាក់ដើមវេន: $50.00 · 100,000៛',
-  'Counted cash / សាច់ប្រាក់បានរាប់: $182.50 · 240,000៛',
+  'Closing cash / សាច់ប្រាក់បិទវេន: $182.50 · 240,000៛',
   RULE,
-  // Expenses as exactly two plain lines, ONE refunds line, and ONE
-  // informational difference line.
+  // Expenses as exactly two plain lines and ONE informational difference.
   'Delivery cost / ថ្លៃដើមដឹកជញ្ជូន: $7.50',
   'Other expenses / ចំណាយផ្សេងទៀត: $9.50 · 20,000៛',
-  'Refunds / ការសងប្រាក់: $15.00',
   'Difference / ភាពខុសគ្នា: +$4.50 · 0៛',
 ], report)
-check('the exact line set renders, with registered cash open vs end in both currencies', true)
+check('the exact owner sequence renders, with registered opening and closing cash in both currencies', true)
 
 // The header Expenses total IS the two lines beneath it, not a third figure:
 // 9.50 + 7.50 = 17.00.
 check('the header Expenses total is exactly its two component lines',
   Math.round((figures.otherExpenseUsd + figures.deliveryCostUsd) * 100) / 100 === 17)
-// One refunds line, not a per-return list.
-check('there is exactly one refunds line', lines.filter((line) => line.startsWith('Refunds')).length === 1)
+// Refunds still affect the shared reconciliation but are not repeated as a
+// separate row in the owner's compact sequence.
+check('refunds are not repeated outside the shared Difference figure', lines.filter((line) => line.startsWith('Refunds')).length === 0)
 // One difference line, and it is a fact, not a verdict.
 const difference = lines.filter((line) => line.startsWith('Difference'))
 check('there is exactly one difference line and it never calls the till short',
@@ -175,7 +171,7 @@ const openShift = { ...shift, closed_at: null, closing_counted_usd: null, closin
 const openReport = telegram.formatShiftReport('Sunrise Mart', openShift, figures, NOW)
 check('an open shift shows the opening count and no difference against a count nobody took',
   openReport.includes('Opening cash / សាច់ប្រាក់ដើមវេន: $50.00 · 100,000៛')
-  && !openReport.includes('Counted cash')
+  && !openReport.includes('Closing cash')
   && !openReport.includes('Difference'), openReport)
 check('and it says it is still open rather than inventing a closing time',
   openReport.includes('still open'), openReport)
