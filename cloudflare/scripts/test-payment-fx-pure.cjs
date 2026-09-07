@@ -13,6 +13,10 @@ const actual = new Set(['actorSnapshot','movementBranchName',
   'paymentMethodRegistry','paymentSettlement','saleSettlementAction','saleLineAddition','saleAmendments',
   'nativeSaleChange',
   'receiptNumber','clientTimestamp',
+  // N21: routes/sales.ts resolves the display address through this kernel on
+  // every write. A stub makes contactDisplayAddress undefined and the route
+  // 500s, so it is loaded for real -- it has no imports of its own.
+  'contactOptions',
   // The selling-branch guard and the two canonical branch roles it reads:
   // real modules, so POST /sales here rejects a warehouse line exactly as
   // the Worker does rather than silently resolving to an empty stub.

@@ -21,7 +21,6 @@ function read(rel: string): string {
 const picker = read('components/shared/SupplierPickerField.tsx')
 const receiveModal = read('components/inventory/ReceiveBatchModal.tsx')
 const inventoryModals = read('components/inventory/InventoryStockModals.tsx')
-const branchAdjuster = read('components/products/forms/BranchStockAdjuster.tsx')
 const bulkModal = read('components/products/forms/BulkAddStockModal.tsx')
 const inventoryPage = read('components/inventory/Inventory.tsx')
 const transport = read('api/batchesTransport.ts')
@@ -32,13 +31,12 @@ const transport = read('api/batchesTransport.ts')
 for (const [name, src] of [
   ['ReceiveBatchModal', receiveModal],
   ['InventoryStockModals', inventoryModals],
-  ['BranchStockAdjuster', branchAdjuster],
   ['BulkAddStockModal', bulkModal],
 ] as const) {
   assert.match(src, /import SupplierPickerField from ['"].*shared\/SupplierPickerField/, `${name} imports the shared picker`)
   assert.match(src, /<SupplierPickerField/, `${name} renders the shared picker`)
 }
-ok('all four manual add surfaces render the ONE shared SupplierPickerField (cross-surface rule)')
+ok('all three manual add surfaces render the ONE shared SupplierPickerField (cross-surface rule) -- InventoryStockModals is the one live surface every per-branch add/remove/set adjust form (Inventory.tsx and StockAdjustModal.tsx) actually renders through')
 
 // --- The picker itself: typing always breaks the contact link (an id may
 // only ever come from an explicit pick), and picks land on mousedown so
@@ -96,18 +94,6 @@ assert.match(inventoryPage, /supplierId: isStockIn && adjustForm\.supplier_id !=
 assert.match(inventoryPage, /supplierName: isStockIn && String\(adjustForm\.supplier_name \|\| ''\)\.trim\(\) !== ''/, 'Inventory.tsx name likewise stock-in only')
 assert.match(inventoryPage, /const isStockIn = isStockInSubmission\(adjustForm\.type, qty, previousQuantity\)/, 'Inventory.tsx derives that from the shared rule, not its own copy')
 ok('Inventory adjust: form cleared on attributed lots, wire is stock-in only')
-
-// N14-D widened "adds only" to "stock-ins only" here for the same reason
-// S4-16 widened it on Inventory.tsx: routes/inventory.ts converts a `set` above
-// the branch's on-hand figure into an add, so it attributes a lot exactly as an
-// add does. This assertion used to pin `row.type === 'add'` -- the very
-// expression that made a raising set unsubmittable (its supplier picker never
-// rendered and its typed name never reached the wire), so the pin was holding
-// the defect in place. tests/branchStockAdjusterSetRaise.test.ts owns the full
-// render/wire pairing; this line keeps the cross-surface rule stated here too.
-assert.match(branchAdjuster, /supplierId: rowIsStockIn\(row\) && row\.supplierId != null \? row\.supplierId : undefined/, 'BranchStockAdjuster sends supplier on every stock-in row, not adds only')
-assert.match(branchAdjuster, /onChange\(\{ supplierId: null, supplierName: '' \}\)/, 'BranchStockAdjuster clears the row when its lot is attributed')
-ok('BranchStockAdjuster: per-row honesty (stock-ins only, attributed lots cleared)')
 
 // N14-D widened "adds only" here too, and for the same reason S4-16 widened
 // it on Inventory.tsx: routes/inventory.ts converts a 'set' that RAISES a

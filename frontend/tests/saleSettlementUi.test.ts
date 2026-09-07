@@ -19,6 +19,28 @@ const editorSource = read('../src/components/sales/SaleSettlementEditor.tsx')
 const salesSource = read('../src/components/sales/Sales.tsx')
 const historySource = read('../src/utils/actionHistory.ts')
 const workflowSource = read('../src/components/sales/SaleStatusWorkflow.tsx')
+const paymentSettlementSource = read('../../cloudflare/src/lib/paymentSettlement.ts')
+
+// MAX_SETTLEMENT_ROWS gates what the editor will let a review submit;
+// MAX_SETTLEMENT_TENDER_ROWS (paymentSettlement.ts, enforced at
+// input.paymentDetailsRaw.length > MAX_SETTLEMENT_TENDER_ROWS) is what the
+// Worker actually rejects. Nothing compared the two constants, so either
+// file could drift its cap alone -- the editor blocking a review the server
+// would in fact accept, or letting through one the server refuses -- with
+// no test noticing. Same extract-and-assert-equal pattern as
+// feeLabelClamp.test.ts:62-63.
+function extractNumericConst(source: string, name: string): number {
+  const re = new RegExp(`const ${name} = (\\d+)`)
+  const match = source.match(re)
+  assert.ok(match, `${name} not found -- source may have changed`)
+  return Number(match![1])
+}
+
+assert.equal(
+  extractNumericConst(editorSource, 'MAX_SETTLEMENT_ROWS'),
+  extractNumericConst(paymentSettlementSource, 'MAX_SETTLEMENT_TENDER_ROWS'),
+  'the editor review cap and the server enforcement cap must be the same number',
+)
 
 assert.deepEqual(
   configuredSettlementMethods([' Cash ', 'ABA Bank', 'aba bank', 'Pi Pay', 'Transfer', 'Wing']),

@@ -6,16 +6,15 @@ import { withLoaderTimeout } from '../../../utils/loaders.ts'
 import AppSelect, { type AppSelectOption } from '../../shared/AppSelect.tsx'
 import DateEntryInput from '../../shared/DateEntryInput.tsx'
 import { getInventoryReasons, saveInventoryReasons } from '../../../api/methods.ts'
-// Same saved-reason catalog + "Manage reasons" flow BranchStockAdjuster.tsx
-// (product edit page's per-branch adjuster) and Inventory's own "Adjust
-// stock" modal already use -- this bulk modal was the one place still
+// Same saved-reason catalog + "Manage reasons" flow Inventory's own "Adjust
+// stock" modal already uses -- this bulk modal was the one place still
 // hardcoding `Bulk ${action} stock` as the reason with no way to pick or
 // type a real one. Batch selection is deliberately NOT a per-product
 // picker here (see the note above the batch-behavior panel below) -- a
 // bulk change can span many different products, each with its own
 // distinct batch list at the chosen branch, so a single picker doesn't
-// generalize the way it does for BranchStockAdjuster's one-product,
-// multi-branch rows. Instead this reuses the wire contract's own
+// generalize the way it does for a one-product, multi-branch adjust form.
+// Instead this reuses the wire contract's own
 // auto-routing (routes/inventory.ts's /adjust already treats `batchId`
 // as optional: omitted on 'add' creates a fresh batch per product,
 // omitted on 'remove' FIFO-drains oldest batches first) and makes that
@@ -217,8 +216,8 @@ export default function BulkAddStockModal({ productIds, products, branches, user
     move: inventoryReasons.filter((item) => item?.type === 'move'),
   }), [inventoryReasons])
   // Same saveReasonCatalog/addSavedReason/renameSavedReason/deleteSavedReason
-  // pattern as BranchStockAdjuster.tsx / Inventory.tsx -- one shared catalog,
-  // edited from wherever a reason picker appears.
+  // pattern as Inventory.tsx -- one shared catalog, edited from wherever a
+  // reason picker appears.
   const saveReasonCatalog = useCallback(async (nextItems: InventoryReason[]) => {
     setSavingReasons(true)
     try {
@@ -273,8 +272,8 @@ export default function BulkAddStockModal({ productIds, products, branches, user
   const handleSave = () => {
     if (saving) return
     if (parseQuantity(qty, action) === null) { setMsg('Enter a valid quantity'); return }
-    // Same rule BranchStockAdjuster.tsx/Inventory.tsx already enforce for
-    // every other stock-adjustment surface -- routes/inventory.ts's /adjust
+    // Same rule Inventory.tsx already enforces for every other
+    // stock-adjustment surface -- routes/inventory.ts's /adjust
     // requires `reason` server-side too, this just fails fast client-side with
     // a clear message instead of a per-product server error.
     if (!reason.trim()) { setMsg(t('adjust_reason_required') || 'A reason is required for this stock adjustment.'); return }
@@ -454,8 +453,8 @@ export default function BulkAddStockModal({ productIds, products, branches, user
         <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">{t('adjust_stock_bulk_desc') || 'This will apply the same change to each selected product.'}</p>
         <div className="space-y-4">
           {/* Same border-2 / blue-50+blue-700 segmented style as
-              InventoryStockModals.tsx, BranchStockAdjuster.tsx, and the
-              Products.tsx inline bulk panel that opens this modal --
+              InventoryStockModals.tsx and the Products.tsx inline bulk
+              panel that opens this modal --
               continues whatever choice was already made there instead of
               only ever offering "add" here. */}
           <div>

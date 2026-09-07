@@ -79,8 +79,8 @@ export function buildStockInSessionListQuery(searchValue = ''): { groupedSql: st
            COUNT(DISTINCT COALESCE(CAST(m.user_id AS TEXT), '') || ':' || COALESCE(m.user_name, '')) AS user_state_count,
            COUNT(DISTINCT COALESCE(CAST(b.supplier_id AS TEXT), '') || ':' || lower(trim(COALESCE(b.supplier_name, '')))) AS supplier_state_count,
            COUNT(*) AS line_count, SUM(ABS(COALESCE(m.quantity, 0))) AS quantity,
-           SUM(CASE WHEN COALESCE(m.total_cost_usd, 0) > 0 THEN m.total_cost_usd ELSE 0 END) AS movement_cost_usd,
-           SUM(CASE WHEN COALESCE(m.total_cost_usd, 0) > 0 THEN 0 ELSE 1 END) AS lines_without_movement_cost,
+           SUM(CASE WHEN m.total_cost_usd IS NOT NULL THEN m.total_cost_usd ELSE 0 END) AS movement_cost_usd,
+           SUM(CASE WHEN m.total_cost_usd IS NOT NULL THEN 0 ELSE 1 END) AS lines_without_movement_cost,
            COUNT(DISTINCT COALESCE(b.payment_status, '')) AS payment_state_count,
            MAX(b.payment_status) AS payment_status, MAX(b.credit_due_date) AS credit_due_date
     ${STOCK_IN_SESSION_FROM_SQL}

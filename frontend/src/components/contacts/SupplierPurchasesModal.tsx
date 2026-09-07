@@ -175,7 +175,13 @@ export default function SupplierPurchasesModal({ supplierId, supplierName, fetch
             />
           </>
         )}
-        <button type="button" className="btn-primary w-full" onClick={onClose}>{t('close') || 'Close'}</button>
+        {/* No footer Close. The shared Modal already renders the header ✕ that
+            calls this same onClose, and a read-only report has no action of
+            its own for a footer to hold -- so a full-width Close there was a
+            second close affordance dressed as the panel's primary action. Its
+            sibling, CustomerPurchasesReportModal, never had one. (An import
+            wizard's footer Close is a different shape: it is the cancel half
+            of a real action row, beside Import.) */}
       </div>
     </Modal>
   )

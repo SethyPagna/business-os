@@ -2,8 +2,9 @@ import { useCallback, useEffect, useState } from 'react'
 import Modal from '../shared/Modal'
 import { useApp } from '../../AppContext'
 import { fmtDateTime24, parseServerTimestampMs } from '../../utils/formatters.ts'
-import { closeShift, fetchCurrentShift, openShift, parseShiftCount, type Shift, type ShiftState } from '../../api/shiftTransport.ts'
+import { closeShift, fetchCurrentShift, openShift, shiftCountOrZero, shiftCountPairBlocker, type Shift, type ShiftState } from '../../api/shiftTransport.ts'
 import ShiftCashBreakdown from '../shifts/ShiftCashBreakdown.tsx'
+import ShiftCountPair, { ShiftSubmitRow, shiftCountBlockerKey } from '../shifts/ShiftCountFields.tsx'
 
 /**
  * S4R4-5 -- the cash-drawer shift gate for POS.
@@ -23,6 +24,14 @@ import ShiftCashBreakdown from '../shifts/ShiftCashBreakdown.tsx'
  *    requirement -- a closable prompt is one the till never registers. Modal's
  *    onClose is wired to a no-op rather than removed, so the component keeps
  *    the shared chrome and does not grow its own.
+ *
+ * And one thing it stopped doing on 2026-09-06: refusing silently. The Start
+ * and End buttons used to be `disabled` until BOTH currencies were typed, with
+ * nothing on screen saying so (owner: "it did not allow to continue when
+ * save ... i had to enter the usd as well as khmer riel"). A blank count is
+ * now recorded as 0 -- the field's placeholder and the hint under the pair say
+ * so -- the action is allowed once either field has a value, and whenever it
+ * cannot proceed the reason is printed beside the button (ShiftSubmitRow).
  *
  * The gate renders its children (if any) regardless. It overlays the prompt
  * rather than replacing POS, so a cashier can still see the screen they are
@@ -178,19 +187,69 @@ function formatShiftDuration(openedAt: string | null | undefined, endMs: number,
   return `${Math.floor(minutes / 60)} ${t('shift_hours_short')} ${minutes % 60} ${t('shift_minutes_short')}`
 }
 
+type ShiftFact = { label: string; value: React.ReactNode }
+
 /**
- * One labelled row of the shift's own facts.
+ * The shift's own facts as a compact strip: two columns of label-over-value
+ * cells on an ivory ground, so the clock, the duration and the drawer figures
+ * are read at a glance instead of as a list of sentences.
  *
  * `leading-relaxed` is not decoration: Khmer stacks diacritics above and below
  * the base glyph, and a line box sized to Latin text clips them -- these
- * labels are Khmer for half the shop.
+ * labels are Khmer for half the shop. Two columns hold at 375px because the
+ * longest value is a 16-character date-time; money pairs may wrap to a second
+ * line inside their cell, which is what `break-words` is for.
  */
-function ShiftFactRow({ label, value }: { label: string; value: React.ReactNode }) {
+function ShiftFactStrip({ facts, accent = false }: { facts: Array<ShiftFact | null | false>; accent?: boolean }) {
+  const shown = facts.filter((fact): fact is ShiftFact => !!fact)
   return (
-    <div className="flex items-baseline justify-between gap-3 leading-relaxed">
-      <span className="text-xs text-gray-500 dark:text-gray-400">{label}</span>
-      <span className="text-xs font-medium text-gray-800 dark:text-gray-100 text-right">{value}</span>
-    </div>
+    <dl className={`grid grid-cols-2 gap-x-3 gap-y-2 rounded-lg border px-3 py-2 ${
+      accent
+        ? 'border-[color-mix(in_srgb,var(--ui-accent,#9c7a3c)_35%,transparent)] bg-[color-mix(in_srgb,var(--ui-accent,#9c7a3c)_10%,transparent)]'
+        : 'border-black/10 bg-stone-50 dark:border-white/10 dark:bg-zinc-800/60'
+    }`}
+    >
+      {shown.map((fact) => (
+        <div key={fact.label} className="min-w-0 leading-relaxed">
+          <dt className="text-[11px] text-gray-500 dark:text-gray-400">{fact.label}</dt>
+          <dd className="break-words text-[13px] font-medium tabular-nums text-zinc-800 dark:text-zinc-100">{fact.value}</dd>
+        </div>
+      ))}
+    </dl>
+  )
+}
+
+// The admin density: 32px controls, 13px text. 36px under 640px for touch.
+const DENSE_BUTTON = 'btn-primary min-h-0 h-9 px-3 py-0 text-[13px] sm:h-8'
+const DENSE_TEXT_INPUT = 'h-10 text-base sm:h-8 sm:text-[13px] w-full rounded-lg border border-gray-300 bg-white px-2.5 text-zinc-900 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100'
+
+/**
+ * The optional note, folded behind one small affordance until it is wanted.
+ * Most shifts carry no note, and an always-open text field is a third box
+ * competing with the two that matter. Once the note has text it stays open,
+ * so a typed note is never hidden behind its own toggle.
+ */
+function NoteFold({ note, onChange, disabled }: { note: string; onChange: (value: string) => void; disabled: boolean }) {
+  const { t } = useApp() as ShiftGateContext
+  const [opened, setOpened] = useState(false)
+  if (!opened && note.trim() === '') {
+    return (
+      <button
+        type="button" onClick={() => setOpened(true)} disabled={disabled}
+        className="text-xs font-medium text-[color:var(--ui-accent,#9c7a3c)] hover:underline disabled:opacity-50"
+      >
+        + {t('shift_add_note')}
+      </button>
+    )
+  }
+  return (
+    <label className="block">
+      <span className="block text-xs font-medium leading-relaxed text-zinc-700 dark:text-zinc-200">{t('note')}</span>
+      <input
+        type="text" className={`mt-1 ${DENSE_TEXT_INPUT}`} autoFocus={opened}
+        value={note} onChange={(event) => onChange(event.target.value)} disabled={disabled}
+      />
+    </label>
   )
 }
 
@@ -205,12 +264,15 @@ export default function ShiftGate({ children, branchId = null, branchName = null
   const [floatKhr, setFloatKhr] = useState('')
   const [note, setNote] = useState('')
 
+  // Null once either field holds a valid count; otherwise the reason that is
+  // printed beside the Start button. Blank fields are 0 at submit.
+  const startBlocker = shiftCountPairBlocker(floatUsd, floatKhr)
 
   const submitOpen = async () => {
     if (busy) return
-    const openingFloatUsd = parseShiftCount(floatUsd)
-    const openingFloatKhr = parseShiftCount(floatKhr)
-    if (openingFloatUsd == null || openingFloatKhr == null) return
+    const openingFloatUsd = shiftCountOrZero(floatUsd)
+    const openingFloatKhr = shiftCountOrZero(floatKhr)
+    if (openingFloatUsd == null || openingFloatKhr == null || startBlocker) return
     setBusy(true)
     try {
       const next = await openShift({
@@ -250,8 +312,8 @@ export default function ShiftGate({ children, branchId = null, branchName = null
           onClose={() => { /* intentionally not dismissible -- see the file comment */ }}
           unsavedChanges={{ dirty: floatUsd.trim() !== '' || floatKhr.trim() !== '' || note.trim() !== '' }}
         >
-          <div className="space-y-4">
-            <p className="text-sm leading-relaxed text-gray-600 dark:text-gray-300">
+          <div className="space-y-3">
+            <p className="text-xs leading-relaxed text-zinc-600 dark:text-zinc-300">
               {t('shift_register_hint')}
             </p>
 
@@ -261,52 +323,31 @@ export default function ShiftGate({ children, branchId = null, branchName = null
                 lets an employee opening the till at 08:02 notice a device
                 whose clock says 23:40 BEFORE the whole day is filed under
                 yesterday. */}
-            <div className="rounded border border-gray-200 dark:border-gray-700 px-3 py-2 space-y-1">
-              <ShiftFactRow label={t('shift_starts_at')} value={fmtDateTime24(now)} />
-            </div>
+            <ShiftFactStrip facts={[
+              { label: t('shift_starts_at'), value: fmtDateTime24(now) },
+              branchName ? { label: t('branch'), value: branchName } : null,
+            ]}
+            />
 
-            <div className="grid grid-cols-2 gap-3">
-              <label className="block">
-                <span className="block text-xs font-medium mb-1">{t('shift_float_usd')}</span>
-                <input
-                  type="number" inputMode="decimal" min="0" step="0.01"
-                  className="w-full rounded border px-2 py-1.5 text-sm"
-                  required
-                  value={floatUsd} onChange={(e) => setFloatUsd(e.target.value)} autoFocus
-                />
-              </label>
-              <label className="block">
-                <span className="block text-xs font-medium mb-1">{t('shift_float_khr')}</span>
-                <input
-                  type="number" inputMode="numeric" min="0" step="100"
-                  className="w-full rounded border px-2 py-1.5 text-sm"
-                  required
-                  value={floatKhr} onChange={(e) => setFloatKhr(e.target.value)}
-                />
-              </label>
-            </div>
             {/* Both currencies are counted and stored separately, never
-                converted -- the drawer holds each and the shop counts each. */}
+                converted -- the drawer holds each and the shop counts each.
+                A blank one is 0, and the pair says so. */}
+            <ShiftCountPair
+              dense autoFocus disabled={busy}
+              label={t('shift_opening_cash')} usdLabel={t('shift_float_usd')} khrLabel={t('shift_float_khr')}
+              usd={floatUsd} khr={floatKhr} onUsd={setFloatUsd} onKhr={setFloatKhr}
+            />
 
-            <label className="block">
-              <span className="block text-xs font-medium mb-1">{t('note')}</span>
-              <input
-                type="text" className="w-full rounded border px-2 py-1.5 text-sm"
-                value={note} onChange={(e) => setNote(e.target.value)}
-              />
-            </label>
+            <NoteFold note={note} onChange={setNote} disabled={busy} />
 
             {/* Save sits at the end of the panel, matching the standing
                 buttons-at-the-bottom rule. There is no Cancel: the prompt is
-                not dismissible. */}
-            <div className="flex justify-end pt-1">
-              <button
-                type="button" disabled={busy || parseShiftCount(floatUsd) == null || parseShiftCount(floatKhr) == null} onClick={() => void submitOpen()}
-                className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-              >
-                {busy ? t('saving_label') : t('shift_start')}
-              </button>
-            </div>
+                not dismissible. When Start cannot proceed, the row says why. */}
+            <ShiftSubmitRow
+              reason={startBlocker ? t(shiftCountBlockerKey(startBlocker)) : null}
+              busy={busy} label={t('shift_start')} onClick={() => void submitOpen()}
+              buttonClassName={DENSE_BUTTON}
+            />
           </div>
         </Modal>
       )}
@@ -350,12 +391,13 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
   const now = useWallClock(open && !closed)
   const shift = closed || state?.shift || null
   const canCloseCurrent = state?.is_open === true && state.shift?.capabilities.can_close === true
+  const endBlocker = shiftCountPairBlocker(countedUsd, countedKhr)
 
   const submitClose = async () => {
     if (busy) return
-    const closingCountedUsd = parseShiftCount(countedUsd)
-    const closingCountedKhr = parseShiftCount(countedKhr)
-    if (closingCountedUsd == null || closingCountedKhr == null) return
+    const closingCountedUsd = shiftCountOrZero(countedUsd)
+    const closingCountedKhr = shiftCountOrZero(countedKhr)
+    if (closingCountedUsd == null || closingCountedKhr == null || endBlocker) return
     setBusy(true)
     try {
       const next = await closeShift({
@@ -391,6 +433,13 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
   }
 
   const money = (usd: unknown, khr: unknown) => `${fmtUSD(usd)} · ${fmtKHR(khr)}`
+  // What the cashier has typed so far, blanks as 0 -- shown beside the
+  // server's EXPECTED figure so the two are compared before the close is
+  // written. The difference itself is NOT computed here: that is the server's
+  // one reconciliation, and it appears on the summary once the close returns.
+  const typedDrawer = endBlocker === 'invalid'
+    ? '—'
+    : money(shiftCountOrZero(countedUsd) ?? 0, shiftCountOrZero(countedKhr) ?? 0)
 
   // No open shift AND no summary to show: this control has nothing to do.
   if (!canCloseCurrent && !closed) return null
@@ -415,8 +464,8 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
           // so dismissing the summary must not raise a discard prompt.
           unsavedChanges={{ dirty: !closed && (countedUsd.trim() !== '' || countedKhr.trim() !== '' || note.trim() !== '') }}
         >
-          <div className="space-y-4">
-            <p className="text-sm leading-relaxed text-gray-600 dark:text-gray-300">
+          <div className="space-y-3">
+            <p className="text-xs leading-relaxed text-zinc-600 dark:text-zinc-300">
               {closed ? t('shift_summary_hint') : t('shift_end_hint')}
             </p>
 
@@ -426,34 +475,21 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
               // under, after the close as the times it WAS. The operator is
               // reconciling against the opening float, and making them
               // remember it invites a wrong count.
-              <div className="rounded border border-gray-200 dark:border-gray-700 px-3 py-2 space-y-1">
-                {shift.shift_code && <ShiftFactRow label={t('shift_code')} value={shift.shift_code} />}
-                <ShiftFactRow label={t('shift_opened_at')} value={fmtDateTime24(shift.opened_at)} />
-                <ShiftFactRow
-                  // Before the close this is the clock, labelled as the moment
-                  // about to be stamped; after it, the moment that was.
-                  label={closed ? t('shift_closed_at') : t('shift_ends_at')}
-                  value={fmtDateTime24(closed?.closed_at || now)}
-                />
-                <ShiftFactRow
-                  label={closed ? t('shift_duration') : t('shift_open_for')}
-                  value={formatShiftDuration(shift.opened_at, parseServerTimestampMs(closed?.closed_at) || now, t)}
-                />
-                <ShiftFactRow
-                  label={t('shift_opened_with')}
-                  value={money(shift.opening_float_usd, shift.opening_float_khr)}
-                />
-                {closed && (
-                  // The after half of the before/after: what was counted into
-                  // the drawer against what it opened with, on the same row
-                  // shape so the two are read as one comparison.
-                  <ShiftFactRow
-                    label={t('shift_counted_close')}
-                    value={money(closed.closing_counted_usd, closed.closing_counted_khr)}
-                  />
-                )}
-                {closed?.closing_note && <ShiftFactRow label={t('note')} value={closed.closing_note} />}
-              </div>
+              <ShiftFactStrip facts={[
+                !!shift.shift_code && { label: t('shift_code'), value: shift.shift_code },
+                { label: t('shift_opened_at'), value: fmtDateTime24(shift.opened_at) },
+                // Before the close this is the clock, labelled as the moment
+                // about to be stamped; after it, the moment that was.
+                { label: closed ? t('shift_closed_at') : t('shift_ends_at'), value: fmtDateTime24(closed?.closed_at || now) },
+                { label: closed ? t('shift_duration') : t('shift_open_for'), value: formatShiftDuration(shift.opened_at, parseServerTimestampMs(closed?.closed_at) || now, t) },
+                { label: t('shift_opened_with'), value: money(shift.opening_float_usd, shift.opening_float_khr) },
+                // The after half of the before/after: what was counted into
+                // the drawer against what it opened with, on the same cell
+                // shape so the two are read as one comparison.
+                !!closed && { label: t('shift_counted_close'), value: money(closed.closing_counted_usd, closed.closing_counted_khr) },
+                !!closed?.closing_note && { label: t('note'), value: closed.closing_note },
+              ]}
+              />
             )}
 
             {/* What the drawer SHOULD hold, from the server's one
@@ -461,55 +497,39 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
                 against a number instead of guessing, and after it so the
                 difference is stated rather than left to be worked out. */}
             {shift?.reconciliation && (
-              <div className="rounded border border-gray-200 px-3 py-2 dark:border-gray-700">
+              <div className="rounded-lg border border-black/10 px-3 py-2 dark:border-white/10">
                 <ShiftCashBreakdown reconciliation={shift.reconciliation} />
               </div>
             )}
 
             {!closed && (
               <>
-                <div className="grid grid-cols-2 gap-3">
-                  <label className="block">
-                    <span className="block text-xs font-medium mb-1 leading-relaxed">{t('shift_counted_usd')}</span>
-                    <input
-                      type="number" inputMode="decimal" min="0" step="0.01"
-                      className="w-full rounded border px-2 py-1.5 text-sm"
-                      required
-                      value={countedUsd} onChange={(e) => setCountedUsd(e.target.value)} autoFocus
-                    />
-                  </label>
-                  <label className="block">
-                    <span className="block text-xs font-medium mb-1 leading-relaxed">{t('shift_counted_khr')}</span>
-                    <input
-                      type="number" inputMode="numeric" min="0" step="100"
-                      className="w-full rounded border px-2 py-1.5 text-sm"
-                      required
-                      value={countedKhr} onChange={(e) => setCountedKhr(e.target.value)}
-                    />
-                  </label>
-                </div>
-                <label className="block">
-                  <span className="block text-xs font-medium mb-1 leading-relaxed">{t('note')}</span>
-                  <input
-                    type="text" className="w-full rounded border px-2 py-1.5 text-sm"
-                    value={note} onChange={(e) => setNote(e.target.value)}
+                <ShiftCountPair
+                  dense autoFocus disabled={busy}
+                  label={t('shift_counted_cash')} usdLabel={t('shift_counted_usd')} khrLabel={t('shift_counted_khr')}
+                  usd={countedUsd} khr={countedKhr} onUsd={setCountedUsd} onKhr={setCountedKhr}
+                />
+                {shift?.reconciliation && (
+                  <ShiftFactStrip accent facts={[
+                    { label: t('shift_drawer_total_typed'), value: typedDrawer },
+                    { label: t('shift_recon_expected'), value: money(shift.reconciliation.expected.usd, shift.reconciliation.expected.khr) },
+                  ]}
                   />
-                </label>
+                )}
+                <NoteFold note={note} onChange={setNote} disabled={busy} />
               </>
             )}
 
             {!closed && (
               // One close affordance on this modal: the header X. The footer
               // carries only the button that writes, so "end the shift" and
-              // "put this away" can never be confused for one another.
-              <div className="flex justify-end pt-1">
-                <button
-                  type="button" disabled={busy || parseShiftCount(countedUsd) == null || parseShiftCount(countedKhr) == null} onClick={() => void submitClose()}
-                  className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-                >
-                  {busy ? t('saving_label') : t('shift_end')}
-                </button>
-              </div>
+              // "put this away" can never be confused for one another. When
+              // End cannot proceed, the same row says why.
+              <ShiftSubmitRow
+                reason={endBlocker ? t(shiftCountBlockerKey(endBlocker)) : null}
+                busy={busy} label={t('shift_end')} onClick={() => void submitClose()}
+                buttonClassName={DENSE_BUTTON}
+              />
             )}
           </div>
         </Modal>

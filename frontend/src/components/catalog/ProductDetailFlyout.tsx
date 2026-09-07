@@ -172,7 +172,7 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={onClose}>
       <div
-        className="flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:max-h-[88vh] sm:max-w-3xl sm:rounded-2xl dark:bg-neutral-900"
+        className="flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl pb-[env(safe-area-inset-bottom)] sm:max-h-[88vh] sm:max-w-3xl sm:rounded-2xl sm:pb-0 dark:bg-neutral-900"
         onClick={(event) => event.stopPropagation()}
         role="dialog"
         aria-modal="true"
@@ -330,15 +330,8 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
           </div>
         </div>
 
-        <div className="flex items-center gap-3 border-t border-slate-200 p-4 dark:border-neutral-800">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-full border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
-          >
-            {copy('close', 'Close')}
-          </button>
-          {onAddToBucket ? (
+        {onAddToBucket ? (
+          <div className="flex items-center gap-3 border-t border-slate-200 p-4 dark:border-neutral-800">
             <button
               type="button"
               onClick={() => onAddToBucket(product, view.pricePresentation?.primaryText)}
@@ -352,8 +345,8 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
                 </span>
               ) : null}
             </button>
-          ) : null}
-        </div>
+          </div>
+        ) : null}
       </div>
 
       {/* Images on their own, away from the rest of the page. Rendered
@@ -373,6 +366,7 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
               next: copy('nextImage', 'Next image'),
               imageCount: copy('imageCount', '{current}/{total}'),
               dotsLabel: copy('dotsLabel', 'Image {current} of {total}'),
+              close: copy('close', 'Close'),
             }}
           />
         ) : null}
