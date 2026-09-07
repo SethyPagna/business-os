@@ -6067,7 +6067,7 @@
   "portal_legal_kind_local": "Local storage",
   "portal_legal_kind_both": "Local and session storage",
   "portal_legal_store_session_p": "Keeps you signed in. Set only when you sign in, cannot be read by scripts, and is limited to this site.",
-  "portal_legal_store_session_l": "About 13 months, pushed back each time you visit. Signing out deletes it.",
+  "portal_legal_store_session_l": "Up to about 13 months. It may renew after sustained account use; signing out deletes it.",
   "portal_legal_store_googtrans_p": "Remembers the external translation language. Written only if you choose one of those languages.",
   "portal_legal_store_googtrans_l": "Until you return to the original language",
   "portal_legal_store_bucket_p": "Your list of products, so it survives a page reload.",
@@ -6128,5 +6128,9 @@
   "merge_duplicates_stop": "Stop and keep completed cases",
   "merge_duplicates_undo_unavailable": "Merges were committed, but Undo is unavailable for {count} case(s) because their recovery records did not finish saving.",
   "portal_legal_map_consent_revoke": "Unload map and forget this choice",
-  "create_products_session_duplicate": "Duplicate: You added this item already."
+  "create_products_session_duplicate": "Duplicate: You added this item already.",
+  "branch_not_found": "Branch not found",
+  "dismiss_notification": "Dismiss notification",
+  "permission_denied": "You no longer have permission for this action.",
+  "unable_to_minimize": "Unable to minimize this edit."
 }
