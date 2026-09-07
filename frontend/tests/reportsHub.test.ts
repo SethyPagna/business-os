@@ -197,6 +197,8 @@ test('buildIncomeStatement: the profit bridge names every term and never uses th
   assert.equal(net.expenses.hintKey, 'rpt_hint_expenses_line')
   assert.equal(net.net_result.usd, 150, 'net result = total profit - expenses')
   assert.equal(net.net_result.kind, 'total')
+  assert.equal(gross.gross_profit.tone, 'positive', 'positive gross profit is rendered green')
+  assert.equal(net.net_result.tone, 'positive', 'positive final profit is rendered green')
   // The mode no longer decides whether the gross-profit-to-total-profit step
   // EXISTS -- hiding it behind an off-by-default option is what made that step
   // invisible. It only moves which total the summary leads with.
@@ -434,7 +436,7 @@ test('normalizeTotals carries the voided-receipt count the kernel reports', () =
   assert.equal(summed.revenue_usd, 510, 'and it did not disturb the money columns')
 })
 
-test('buildIncomeStatement: Not Paid is one consolidated memo below business totals', () => {
+test('buildIncomeStatement: Credit is one positive memo below business totals', () => {
   const opts = { profitMode: 'net' as const, khrToUsd, expenses: { usd: 10, khr: 40000 } }
   const base = lineMap(buildIncomeStatement({ sales: normalizeTotals(adminTotals), ...opts }))
   // Move EVERY pending input to an unmistakable number. Not one realised line
@@ -459,6 +461,7 @@ test('buildIncomeStatement: Not Paid is one consolidated memo below business tot
     assert.equal(m[key].usd, base[key].usd, `${key} is untouched by the unpaid cohort`)
   }
   assert.equal(base.pending_revenue.kind, 'memo')
+  assert.equal(base.pending_revenue.fallback, 'Credit')
   assert.equal(base.pending_revenue.usd, 40)
   assert.equal(base.net_sales.usd - base.refunds.usd, base.revenue.usd)
 
@@ -466,6 +469,7 @@ test('buildIncomeStatement: Not Paid is one consolidated memo below business tot
   const groups = skewed.map((l) => l.group)
   const firstPending = groups.indexOf('pending')
   assert.ok(firstPending > 0, 'the block exists')
+  assert.equal(groups.filter((group) => group === 'pending').length, 1, 'Credit appears as exactly one memo row')
   assert.ok(groups.slice(firstPending).every((g) => g === 'pending'), 'nothing realised follows the unpaid block')
   assert.ok(groups.lastIndexOf('profit') < firstPending, 'the final realised total precedes it')
   assert.equal(STATEMENT_GROUPS[STATEMENT_GROUPS.length - 1], 'pending', 'and the render order the three surfaces share agrees')
@@ -546,7 +550,7 @@ test('views: permissions gate the picker, the stored view survives only while al
   assert.equal(resolveReportView('bogus', all), 'overview')
   assert.equal(resolveReportView('sales', { sales: false, returns: false, fees: false }), null, 'nothing readable -> null (the hub shows its EmptyState)')
   for (const v of REPORT_VIEWS) {
-    assert.equal(v.supportsTime, true, `${v.id} honors continuous endpoint times`)
+    assert.equal(v.supportsTime, v.id !== 'shift', `${v.id} exposes only filters its endpoint understands`)
     if (v.groupedBy) assert.ok(v.area === 'sales', `${v.id} grouped views are sales-gated`)
   }
   const ids = REPORT_VIEWS.map((v) => v.id)
@@ -776,11 +780,25 @@ test('Khmer keeps a line box tall enough that truncating cells cannot shear it',
   // surface override has to as well or it never lands.
   assert.ok(/\.text-xs[\s\S]{0,80}line-height:[^;]+!important/.test(kmBlocks), 'the .text-xs override can actually win')
   // A taller line box needs a taller row, or the row clips instead of the cell.
-  assert.match(kmBlocks, /--ui-row-h:\s*38px/, 'Khmer rows grow to fit the taller line box')
+  // The row used to be pinned at a flat 38px, chosen for 12px Khmer type. Since
+  // the owner asked for larger Khmer in reports (Sep 6) the type itself moves
+  // with `--ui-km-boost`, so a flat row height would go straight back to
+  // clipping the moment the boost or the desktop tier raises the size. The row
+  // is derived from the same multiplier instead -- 43.2px at boost 1.2,
+  // comfortably past the old floor, and it tracks any future change to either.
+  assert.match(kmBlocks, /--ui-row-h:\s*calc\(36px \* var\(--ui-km-boost, 1\)\)/, 'Khmer rows grow with the boosted type instead of a frozen height')
+  assert.doesNotMatch(kmBlocks, /--ui-row-h:\s*\d+px/, 'no frozen Khmer row height may come back')
+  const kmBoost = Number((kmBlocks.match(/--ui-km-boost:\s*([\d.]+)/) || [])[1])
+  assert.ok(36 * kmBoost >= 38, `the derived Khmer row (${36 * kmBoost}px) must not fall below the 38px floor the flat value guarded`)
   // The fold is portalled to document.body, i.e. OUTSIDE [data-reports-hub],
   // so it needs its own hook or the menu keeps clipping.
   assert.ok(css.includes('[data-reports-fold]'), 'the portalled fold is covered too')
-  assert.ok(read('src/components/sales/reports/ReportOptionsFold.tsx').includes('data-reports-fold'), 'the fold carries that hook')
+  // The shared Fold stays unchanged; report callers opt in with a class on
+  // the panel root and retain the data hook on the body.
+  const optionsFold = read('src/components/sales/reports/ReportOptionsFold.tsx')
+  assert.match(optionsFold, /className="reports-fold-panel"/, 'the fold panel root receives the report type scope')
+  assert.match(optionsFold, /data-reports-fold=""/, 'the fold body retains the explicit clip-relief hook')
+  assert.ok(css.includes('.reports-fold-panel'), 'the panel class receives the same Khmer boost and line-height floor')
   // Scoped, not global: the app-wide fix is a separate board item.
   assert.ok(!/^body\.lang-km\s*[,{]/m.test(kmBlocks.replace(/\[data-reports-(hub|fold)\]/g, 'X')), 'the Khmer fix stays scoped to this surface')
 })
@@ -833,12 +851,32 @@ test('the awaiting-payment block is set apart in the warning tint on every surfa
   assert.ok(css.includes("tr[data-statement-group='pending']"), 'the excel style tints the block by group')
   const sheet = read('src/components/sales/reports/ReceiptSheet.tsx')
   assert.ok(/highlight\?: boolean/.test(sheet), 'the receipt style takes a highlight flag')
-  assert.ok(sheet.includes('bg-[var(--ui-warn-soft)]'), 'and paints it in the warning tint')
+  // The tint moved off a Tailwind utility and onto a data attribute on Sep 6,
+  // because the receipt block became a `.report-segment` -- and a background
+  // utility (0-1-0) ties with `.report-segment` (0-1-0), which ships in a
+  // lazily loaded chunk that lands AFTER the utility sheet and would have
+  // painted the tint out. The requirement is unchanged and now decided by
+  // specificity rather than by bundling order:
+  assert.ok(sheet.includes("'data-segment-highlight': block.highlight ? 'true' : undefined"), 'the highlighted block is marked on the element')
+  assert.match(css, /\.report-segment\[data-segment-highlight='true'\]\s*\{[^}]*background:\s*var\(--ui-warn-soft\)/, 'and painted in the warning tint by a rule that outranks the segment background')
+  assert.doesNotMatch(css, /\n\.report-segment\s*\{[^}]*background:\s*var\(--ui-warn-soft\)/, 'the base segment is not itself the warn colour')
   // Khmer: the tinted box buys its separation with PADDING. A box that hugs
   // the Latin metric shears the tops and tails of a Khmer cluster.
-  const hl = sheet.slice(sheet.indexOf('block.highlight'), sheet.indexOf('block.highlight') + 200)
-  assert.ok(/px-[\d.]+ py-[\d.]+/.test(hl), 'the tinted box is padded')
-  assert.ok(!/leading-|line-height/.test(hl), 'and never shortens the line box')
+  //
+  // Since Sep 6 that padding comes from the shared `.report-segment` shell
+  // every receipt card sits in (owner: borders on all four sides of every
+  // segment), so the highlight only RECOLOURS a box that is already padded.
+  // The requirement is unchanged; the guard follows the padding to where it
+  // now lives instead of pinning a utility class that has moved.
+  assert.ok(/'report-segment',/.test(sheet), 'every receipt block, highlighted or not, sits in the padded segment shell')
+  assert.match(css, /\.report-segment\s*\{[^}]*padding:\s*\d+px/, 'and that shell is what supplies the padding')
+  // The 'never shortens the line box' guard used to read a 200-char window of
+  // ReceiptSheet.tsx after 'block.highlight ?'. Once the block's classes moved
+  // into the `cls` variable that window held no class string at all, so the
+  // guard was dead -- it passed on any source. The contract did not move, only
+  // its home: the line box now belongs to the shared shell and its tint rule.
+  assert.doesNotMatch(css, /\.report-segment\s*\{[^}]*line-height/, 'the segment shell must not pin a line-height that shears Khmer ink')
+  assert.doesNotMatch(css, /\.report-segment\[data-segment-highlight='true'\]\s*\{[^}]*line-height/, 'nor may the highlight tint shorten the block it recolours')
 
   // Parity: the group order, the group label and the tint predicate all come
   // from the model, so a new group cannot appear on one surface and not the

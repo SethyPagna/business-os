@@ -2,9 +2,14 @@ import { useCallback, useEffect, useState } from 'react'
 import Modal from '../shared/Modal'
 import { useApp } from '../../AppContext'
 import { fmtDateTime24, parseServerTimestampMs } from '../../utils/formatters.ts'
-import { closeShift, fetchCurrentShift, openShift, shiftCountOrZero, shiftCountPairBlocker, type Shift, type ShiftState } from '../../api/shiftTransport.ts'
+import { closeShift, fetchCurrentShift, openShift, shiftClosingCounts, shiftCountOrZero, shiftCountPairBlocker, type Shift, type ShiftState } from '../../api/shiftTransport.ts'
 import ShiftCashBreakdown from '../shifts/ShiftCashBreakdown.tsx'
 import ShiftCountPair, { ShiftSubmitRow, shiftCountBlockerKey } from '../shifts/ShiftCountFields.tsx'
+import { shiftCountedPairText } from '../shifts/shiftReportModel.ts'
+
+function closingCountInvalid(value: string): boolean {
+  return value.trim() !== '' && shiftCountOrZero(value) == null
+}
 
 /**
  * S4R4-5 -- the cash-drawer shift gate for POS.
@@ -391,19 +396,20 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
   const now = useWallClock(open && !closed)
   const shift = closed || state?.shift || null
   const canCloseCurrent = state?.is_open === true && state.shift?.capabilities.can_close === true
-  const endBlocker = shiftCountPairBlocker(countedUsd, countedKhr)
+  const endBlocker = closingCountInvalid(countedUsd) || closingCountInvalid(countedKhr) ? 'invalid' as const : null
 
   const submitClose = async () => {
     if (busy) return
-    const closingCountedUsd = shiftCountOrZero(countedUsd)
-    const closingCountedKhr = shiftCountOrZero(countedKhr)
-    if (closingCountedUsd == null || closingCountedKhr == null || endBlocker) return
+    const counts = shiftClosingCounts(countedUsd, countedKhr)
+    if (endBlocker) return
     setBusy(true)
     try {
       const next = await closeShift({
         branchId,
-        closingCountedUsd,
-        closingCountedKhr,
+        // The accounting transport accepts null as "not counted". Casts keep
+        // this component compatible with the pre-integration type surface.
+        closingCountedUsd: counts.usd as number,
+        closingCountedKhr: counts.khr as number,
         closingNote: note.trim() || null,
       })
       publish(next)
@@ -433,13 +439,14 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
   }
 
   const money = (usd: unknown, khr: unknown) => `${fmtUSD(usd)} · ${fmtKHR(khr)}`
-  // What the cashier has typed so far, blanks as 0 -- shown beside the
+  // What the cashier has typed so far, preserving two blanks as unknown -- shown beside the
   // server's EXPECTED figure so the two are compared before the close is
   // written. The difference itself is NOT computed here: that is the server's
   // one reconciliation, and it appears on the summary once the close returns.
+  const typedCounts = shiftClosingCounts(countedUsd, countedKhr)
   const typedDrawer = endBlocker === 'invalid'
     ? '—'
-    : money(shiftCountOrZero(countedUsd) ?? 0, shiftCountOrZero(countedKhr) ?? 0)
+    : shiftCountedPairText(typedCounts.usd, typedCounts.khr, fmtUSD, fmtKHR)
 
   // No open shift AND no summary to show: this control has nothing to do.
   if (!canCloseCurrent && !closed) return null
@@ -486,7 +493,7 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
                 // The after half of the before/after: what was counted into
                 // the drawer against what it opened with, on the same cell
                 // shape so the two are read as one comparison.
-                !!closed && { label: t('shift_counted_close'), value: money(closed.closing_counted_usd, closed.closing_counted_khr) },
+                !!closed && { label: t('shift_counted_close'), value: shiftCountedPairText(closed.closing_counted_usd, closed.closing_counted_khr, fmtUSD, fmtKHR) },
                 !!closed?.closing_note && { label: t('note'), value: closed.closing_note },
               ]}
               />
@@ -507,6 +514,7 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
                 <ShiftCountPair
                   dense autoFocus disabled={busy}
                   label={t('shift_counted_cash')} usdLabel={t('shift_counted_usd')} khrLabel={t('shift_counted_khr')}
+                  hint={t('shift_registered_cash_hint')}
                   usd={countedUsd} khr={countedKhr} onUsd={setCountedUsd} onKhr={setCountedKhr}
                 />
                 {shift?.reconciliation && (

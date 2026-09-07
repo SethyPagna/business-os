@@ -37,13 +37,14 @@ type PairProps = {
   disabled?: boolean
   autoFocus?: boolean
   dense?: boolean
+  hint?: string
   className?: string
 }
 
 const DENSE_INPUT = 'h-10 text-base sm:h-8 sm:text-[13px] w-full rounded-lg border border-gray-300 bg-white pl-2.5 pr-12 text-zinc-900 tabular-nums placeholder:text-gray-400 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100'
 const FORM_INPUT = 'input pr-12 tabular-nums'
 
-export default function ShiftCountPair({ label, usd, khr, onUsd, onKhr, usdLabel, khrLabel, disabled = false, autoFocus = false, dense = false, className = '' }: PairProps) {
+export default function ShiftCountPair({ label, usd, khr, onUsd, onKhr, usdLabel, khrLabel, disabled = false, autoFocus = false, dense = false, hint, className = '' }: PairProps) {
   const { t } = useApp() as ShiftGateContext
   const inputClass = dense ? DENSE_INPUT : FORM_INPUT
   const suffixClass = 'pointer-events-none absolute inset-y-0 right-2.5 flex items-center text-[11px] font-semibold tracking-wide text-[color:var(--ui-accent,#9c7a3c)]'
@@ -70,7 +71,7 @@ export default function ShiftCountPair({ label, usd, khr, onUsd, onKhr, usdLabel
           <span className={suffixClass} aria-hidden="true">KHR</span>
         </span>
       </div>
-      <p className="mt-1 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">{t('shift_blank_count_hint')}</p>
+      <p className="mt-1 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">{hint ?? t('shift_blank_count_hint')}</p>
     </div>
   )
 }

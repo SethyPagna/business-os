@@ -17,7 +17,9 @@ import {
   fetchShiftHistory,
   listShifts,
   orderShiftRows,
+  parseShiftCount,
   reopenShift,
+  shiftClosingCounts,
   shiftCountOrZero,
   shiftCountPairBlocker,
   shiftLocalDateTimeToIso,
@@ -33,6 +35,10 @@ type Props = {
   label?: ReactNode
   buttonClassName?: string
   notify?: (message: string, tone?: string) => void
+}
+
+function closingCountInvalid(value: string): boolean {
+  return value.trim() !== '' && parseShiftCount(value) == null
 }
 
 type EditDraft = {
@@ -271,15 +277,11 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
 
   const saveEdit = async () => {
     if (!selected || !edit || !edit.reason.trim() || !edit.openedAt || saving) return
-    // Blank counts are 0 (the shared shiftCountOrZero rule); only an invalid
-    // entry stays null and stops the save -- and the row beside the button
-    // has already said which.
     const openingFloatUsd = shiftCountOrZero(edit.openingUsd)
     const openingFloatKhr = shiftCountOrZero(edit.openingKhr)
-    const closingCountedUsd = edit.closedAt ? shiftCountOrZero(edit.closingUsd) : null
-    const closingCountedKhr = edit.closedAt ? shiftCountOrZero(edit.closingKhr) : null
+    const closing = edit.closedAt ? shiftClosingCounts(edit.closingUsd, edit.closingKhr) : { usd: null, khr: null }
     if (openingFloatUsd == null || openingFloatKhr == null
-      || (edit.closedAt && (closingCountedUsd == null || closingCountedKhr == null))) return
+      || (edit.closedAt && (closingCountInvalid(edit.closingUsd) || closingCountInvalid(edit.closingKhr)))) return
     setSaving(true)
     try {
       const result = await amendShift(selected.id, {
@@ -290,8 +292,8 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
         openingFloatKhr,
         openingNote: edit.openingNote.trim() || null,
         closedAt: edit.closedAt ? shiftLocalDateTimeToIso(edit.closedAt) : null,
-        closingCountedUsd,
-        closingCountedKhr,
+        closingCountedUsd: closing.usd,
+        closingCountedKhr: closing.khr,
         closingNote: edit.closedAt ? edit.closingNote.trim() || null : null,
       })
       replaceRow(result.shift)
@@ -306,16 +308,17 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
 
   const saveClose = async () => {
     if (!selected || !close.closedAt || saving) return
-    const closingCountedUsd = shiftCountOrZero(close.closingUsd)
-    const closingCountedKhr = shiftCountOrZero(close.closingKhr)
-    if (closingCountedUsd == null || closingCountedKhr == null) return
+    const closing = shiftClosingCounts(close.closingUsd, close.closingKhr)
+    if (closingCountInvalid(close.closingUsd) || closingCountInvalid(close.closingKhr)) return
     setSaving(true)
     try {
       const result = await closeShiftById(selected.id, {
         expectedRevision: selected.revision,
         closedAt: shiftLocalDateTimeToIso(close.closedAt),
-        closingCountedUsd,
-        closingCountedKhr,
+        // The accounting transport accepts null as "not counted". Casts
+        // preserve compatibility with the pre-integration transport type.
+        closingCountedUsd: closing.usd as number,
+        closingCountedKhr: closing.khr as number,
         closingNote: close.closingNote.trim() || null,
       })
       if (result.shift) replaceRow(result.shift)
@@ -379,16 +382,16 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
   // rule is the shared one (either currency is enough, blank is 0); the other
   // reasons are the form's own required fields, in the order they appear.
   const editCountBlocker = edit
-    ? shiftCountPairBlocker(edit.openingUsd, edit.openingKhr) || (edit.closedAt ? shiftCountPairBlocker(edit.closingUsd, edit.closingKhr) : null)
+    ? shiftCountPairBlocker(edit.openingUsd, edit.openingKhr)
     : null
   const editReason = !edit ? null
     : !edit.openedAt ? t('shift_opened_at_required')
       : editCountBlocker ? t(shiftCountBlockerKey(editCountBlocker))
+        : edit.closedAt && (closingCountInvalid(edit.closingUsd) || closingCountInvalid(edit.closingKhr)) ? t(shiftCountBlockerKey('invalid'))
         : !edit.reason.trim() ? t('shift_reason_required')
           : null
-  const closeCountBlocker = shiftCountPairBlocker(close.closingUsd, close.closingKhr)
   const closeReason = !close.closedAt ? t('shift_close_time_required')
-    : closeCountBlocker ? t(shiftCountBlockerKey(closeCountBlocker))
+    : closingCountInvalid(close.closingUsd) || closingCountInvalid(close.closingKhr) ? t(shiftCountBlockerKey('invalid'))
       : null
   const reopenCountBlocker = shiftCountPairBlocker(reopen.openingUsd, reopen.openingKhr)
   const reopenReason = !reopen.reason.trim() ? t('shift_reopen_reason')
@@ -440,7 +443,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
                         <div className="text-xs"><span className="block">{t('shift_opened_at')}</span><DateTimeEntryInput className="mt-1" value={edit.openedAt} onChange={(next) => setEdit({ ...edit, openedAt: next })} t={t} dateAriaLabel={`${t('shift_opened_at')} · ${t('date')}`} timeAriaLabel={`${t('shift_opened_at')} · ${t('time')}`} /></div>
                         <div className="text-xs"><span className="block">{t('shift_closed_at')}</span><DateTimeEntryInput className="mt-1" value={edit.closedAt} disabled={!selected.closed_at} onChange={(next) => setEdit({ ...edit, closedAt: next })} t={t} dateAriaLabel={`${t('shift_closed_at')} · ${t('date')}`} timeAriaLabel={`${t('shift_closed_at')} · ${t('time')}`} /></div>
                         <ShiftCountPair className="sm:col-span-2" label={t('shift_opening_cash')} usdLabel={t('shift_float_usd')} khrLabel={t('shift_float_khr')} usd={edit.openingUsd} khr={edit.openingKhr} onUsd={(value) => setEdit({ ...edit, openingUsd: value })} onKhr={(value) => setEdit({ ...edit, openingKhr: value })} />
-                        <ShiftCountPair className="sm:col-span-2" label={t('shift_counted_cash')} usdLabel={t('shift_counted_usd')} khrLabel={t('shift_counted_khr')} usd={edit.closingUsd} khr={edit.closingKhr} disabled={!edit.closedAt} onUsd={(value) => setEdit({ ...edit, closingUsd: value })} onKhr={(value) => setEdit({ ...edit, closingKhr: value })} />
+                        <ShiftCountPair className="sm:col-span-2" label={t('shift_counted_cash')} usdLabel={t('shift_counted_usd')} khrLabel={t('shift_counted_khr')} hint={t('shift_registered_cash_hint')} usd={edit.closingUsd} khr={edit.closingKhr} disabled={!edit.closedAt} onUsd={(value) => setEdit({ ...edit, closingUsd: value })} onKhr={(value) => setEdit({ ...edit, closingKhr: value })} />
                         <label className="text-xs sm:col-span-2">{t('shift_opening_note')}<input className="input mt-1" value={edit.openingNote} onChange={(event) => setEdit({ ...edit, openingNote: event.target.value })} /></label>
                         <label className="text-xs sm:col-span-2">{t('shift_closing_note')}<input className="input mt-1" value={edit.closingNote} disabled={!edit.closedAt} onChange={(event) => setEdit({ ...edit, closingNote: event.target.value })} /></label>
                         <label className="text-xs font-semibold sm:col-span-2">{t('shift_reason_required')}<textarea className="input mt-1 min-h-20" required value={edit.reason} onChange={(event) => setEdit({ ...edit, reason: event.target.value })} /></label>
@@ -454,7 +457,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
                       <div><h3 className="text-sm font-semibold">{t('shift_close_title')}</h3><p className="mt-1 text-xs leading-relaxed text-gray-600 dark:text-gray-300">{t('shift_close_time_hint')}</p></div>
                       <fieldset disabled={saving} className="grid min-w-0 gap-3 sm:grid-cols-2 [&_input]:min-w-0 [&_input]:max-w-full">
                         <div className="text-xs font-semibold sm:col-span-2"><span className="block">{t('shift_close_time_required')}</span><DateTimeEntryInput className="mt-1" value={close.closedAt} onChange={(next) => setClose({ ...close, closedAt: next })} t={t} dateAriaLabel={`${t('shift_close_time_required')} · ${t('date')}`} timeAriaLabel={`${t('shift_close_time_required')} · ${t('time')}`} /></div>
-                        <ShiftCountPair className="sm:col-span-2" label={t('shift_counted_cash')} usdLabel={t('shift_counted_usd')} khrLabel={t('shift_counted_khr')} usd={close.closingUsd} khr={close.closingKhr} onUsd={(value) => setClose({ ...close, closingUsd: value })} onKhr={(value) => setClose({ ...close, closingKhr: value })} />
+                        <ShiftCountPair className="sm:col-span-2" label={t('shift_counted_cash')} usdLabel={t('shift_counted_usd')} khrLabel={t('shift_counted_khr')} hint={t('shift_registered_cash_hint')} usd={close.closingUsd} khr={close.closingKhr} onUsd={(value) => setClose({ ...close, closingUsd: value })} onKhr={(value) => setClose({ ...close, closingKhr: value })} />
                         <label className="text-xs sm:col-span-2">{t('shift_closing_note')}<input className="input mt-1" value={close.closingNote} onChange={(event) => setClose({ ...close, closingNote: event.target.value })} /></label>
                       </fieldset>
                       <ShiftSubmitRow reason={closeReason} busy={saving} label={t('shift_action_close')} onClick={() => void saveClose()} secondary={cancelAction} buttonClassName="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white" />

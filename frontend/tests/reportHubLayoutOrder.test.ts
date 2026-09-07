@@ -12,8 +12,7 @@ const read = (rel: string) => fs.readFileSync(path.join(rootPath, rel), 'utf8')
 const hub = read('src/components/sales/ReportsHub.tsx')
 const render = hub.slice(hub.lastIndexOf('  return ('))
 
-// Order on the page: controls, then the report body, then the two shift
-// blocks -- which still exist, unchanged (shiftManagement pins their props).
+// Order on the page: controls, then exactly one selected report body.
 const at = (needle: string) => {
   const i = render.indexOf(needle)
   assert.ok(i >= 0, `render block contains ${needle}`)
@@ -21,11 +20,9 @@ const at = (needle: string) => {
 }
 const controls = at('className="reports-mobile-controls"')
 const body = at('{body}')
-const shift = at('<CurrentShiftSummary showHistory={false} />')
-const history = at('<ShiftHistoryPanel compact limit={50} />')
 assert.ok(controls < body, 'controls come before the report')
-assert.ok(body < shift && shift < history, 'the shift summary and shift history sit below the report')
-assert.equal((hub.match(/<CurrentShiftSummary showHistory=\{false\} \/>/g) || []).length, 1, 'one shift summary mount')
+assert.match(hub, /view\.id === 'shift' \? <ShiftReport/, 'Shift is selectable through the same report switch')
+assert.doesNotMatch(hub, /CurrentShiftSummary|ShiftHistoryPanel/, 'no shift overview is appended beneath every report')
 
 // Compact tier: Show folds the card; the folded line is a handle that
 // unfolds it, names the view and the range, and keeps the Filters button

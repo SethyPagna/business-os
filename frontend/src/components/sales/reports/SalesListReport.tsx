@@ -144,7 +144,7 @@ export default function SalesListReport(p: ReportViewProps) {
       { key: 'delivery_usd', label: tr('delivery', 'Delivery'), kind: 'money', value: (r) => r.delivery_usd, defaultVisible: false },
       { key: 'refund_usd', label: tr('refunds', 'Refunds'), kind: 'money', value: (r) => r.refund_usd },
       { key: 'net_revenue_usd', label: tr('revenue', 'Revenue'), kind: 'money', value: (r) => r.net_revenue_usd, emphasis: options.basis === 'revenue' },
-      { key: 'pending_revenue_usd', label: tr('rpt_pending_credit', 'Not Paid'), kind: 'money', value: (r) => r.pending_revenue_usd, defaultVisible: false },
+      { key: 'pending_revenue_usd', label: tr('rpt_pending_credit', 'Credit'), kind: 'money', value: (r) => r.pending_revenue_usd, defaultVisible: false },
       { key: 'collected_total_usd', label: tr('collected_total', 'Collected total'), kind: 'money', value: (r) => r.collected_total_usd, defaultVisible: options.basis === 'collected', emphasis: options.basis === 'collected' },
       showProfit ? { key: 'cost_usd', label: tr('cost', 'Cost'), kind: 'money', value: (r) => r.cost_usd ?? null, defaultVisible: false } : null,
       showProfit ? { key: 'gross_profit_usd', label: tr('rpt_gross_profit', 'Gross profit'), kind: 'money', value: (r) => r.gross_profit_usd ?? null } : null,
@@ -163,7 +163,7 @@ export default function SalesListReport(p: ReportViewProps) {
         countLabel(rows.length, REPORT_NOUNS.sale, tr, paged.hasMore),
         `${basisLabel} ${fmtMoney(basisOf(totals))}`,
         totals.refund_usd ? `${tr('refunds', 'Refunds')} ${fmtMoney(totals.refund_usd)}` : null,
-        totals.pending_revenue_usd ? `${tr('rpt_pending_credit', 'Not Paid')} ${fmtMoney(totals.pending_revenue_usd)}` : null,
+        totals.pending_revenue_usd ? `${tr('rpt_pending_credit', 'Credit')} ${fmtMoney(totals.pending_revenue_usd)}` : null,
         showProfit ? `${tr('rpt_gross_profit', 'Gross profit')} ${fmtMoney(num(totals.gross_profit_usd))} (${fmtPct(pct(num(totals.gross_profit_usd), basisOf(totals)))})` : null,
       ])
     : ''
@@ -188,7 +188,7 @@ export default function SalesListReport(p: ReportViewProps) {
       { key: 'member_disc', label: tr('rpt_membership_discounts', 'Membership discounts'), value: fmtMoney(r.membership_discount_usd), kind: 'sub' as const },
       { key: 'refund', label: tr('refunds', 'Refunds'), value: fmtMoney(r.refund_usd), kind: 'sub' as const },
       { key: 'revenue', label: tr('revenue', 'Revenue'), value: fmtMoney(r.net_revenue_usd), kind: 'total' as const },
-      ...(r.pending_revenue_usd ? [{ key: 'pending', label: tr('rpt_pending_credit', 'Not Paid'), value: fmtMoney(r.pending_revenue_usd), kind: 'info' as const }] : []),
+      ...(r.pending_revenue_usd ? [{ key: 'pending', label: tr('rpt_pending_credit', 'Credit'), value: fmtMoney(r.pending_revenue_usd), kind: 'info' as const }] : []),
       { key: 'tax', label: tr('tax', 'Tax'), value: fmtMoney(r.tax_usd), kind: 'add' as const },
       { key: 'delivery', label: tr('rpt_delivery_charged', 'Delivery charged'), value: fmtMoney(r.delivery_usd), kind: 'add' as const },
       { key: 'collected', label: tr('collected_total', 'Collected total'), value: fmtMoney(r.collected_total_usd), kind: 'total' as const },
@@ -207,7 +207,7 @@ export default function SalesListReport(p: ReportViewProps) {
     <ReportFrame
       title={tr(view.labelKey, view.fallback)}
       count={rows.length ? `${fmtInt(rows.length)}${paged.hasMore ? '+' : ''}` : undefined}
-      hint={{ label: tr(view.labelKey, view.fallback), text: tr('rpt_hint_sales_list', 'One row per receipt, newest first, 250 at a time. Revenue per receipt = net sale minus its refunds (recognized sales only; cancelled and unpaid rows show 0).') }}
+      hint={{ label: tr(view.labelKey, view.fallback), text: tr('rpt_hint_sales_list', 'One row per receipt, newest first, 250 at a time. Revenue per receipt = net sale minus its refunds; Credit is recognized and only cancelled rows show 0.') }}
       actions={<OverflowMenu label={tr('export', 'Export')} items={exportMenuItems(tr, exportCsv, exportPrint, { csv: <Download className="h-3.5 w-3.5" />, print: <Printer className="h-3.5 w-3.5" /> })} />}
       summary={summary}
       error={paged.error}
@@ -243,7 +243,7 @@ export default function SalesListReport(p: ReportViewProps) {
           ) : null
         }
       />
-      <Fold open={!!openRow} onClose={() => setOpenRow(null)} anchorRef={anchorRef} title={openRow ? `${tr('receipt', 'Receipt')} ${openRow.receipt_number}` : ''}>
+      <Fold className="reports-fold-panel" open={!!openRow} onClose={() => setOpenRow(null)} anchorRef={anchorRef} title={openRow ? `${tr('receipt', 'Receipt')} ${openRow.receipt_number}` : ''}>
         <div className="p-2">
           {openRow ? (
             <ReceiptSheet

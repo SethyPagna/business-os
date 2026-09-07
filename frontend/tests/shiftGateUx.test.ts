@@ -24,7 +24,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { closeShift, openShift, shiftCountOrZero, shiftCountPairBlocker } from '../src/api/shiftTransport.ts'
+import { openShift, shiftCountOrZero, shiftCountPairBlocker } from '../src/api/shiftTransport.ts'
 import {
   __resetApiHealthForTests,
   __resetApiWriteDedupeForTests,
@@ -81,22 +81,25 @@ const bothNullDisabled = /disabled=\{[^}\n]*parseShiftCount\([^)]*\) == null[^}\
 ok(!bothNullDisabled.test(gate), 'ShiftGate has no button disabled on both counts being non-null')
 ok(!bothNullDisabled.test(modal), 'ShiftHistoryModal has no button disabled on both counts being non-null')
 ok(!/parseShiftCount\(/.test(gate), 'ShiftGate no longer treats a blank count as unparseable')
-ok(!/parseShiftCount\(/.test(modal), 'ShiftHistoryModal no longer treats a blank count as unparseable')
+ok(/shiftClosingCounts\(edit\.closingUsd, edit\.closingKhr\)/.test(modal),
+  'ShiftHistoryModal uses the shared independent parser for closing counts')
 
-// ---- 4. Blank maps to 0 AT SUBMIT, on every surface ------------------------
+// ---- 4. Opening blanks map to 0; two closing blanks remain unknown ----------
 const registerBody = gate.slice(gate.indexOf('const submitOpen'), gate.indexOf('const needsRegistration'))
 ok(/shiftCountOrZero\(floatUsd\)/.test(registerBody) && /shiftCountOrZero\(floatKhr\)/.test(registerBody),
   'the register step submits each blank float as 0')
 const closeBody = gate.slice(gate.indexOf('const submitClose'), gate.indexOf('const dismiss'))
-ok(/shiftCountOrZero\(countedUsd\)/.test(closeBody) && /shiftCountOrZero\(countedKhr\)/.test(closeBody),
-  'the POS close step submits each blank count as 0')
-for (const draft of ['edit.openingUsd', 'edit.openingKhr', 'edit.closingUsd', 'edit.closingKhr', 'close.closingUsd', 'close.closingKhr', 'reopen.openingUsd', 'reopen.openingKhr']) {
+ok(/const counts = shiftClosingCounts\(countedUsd, countedKhr\)/.test(closeBody),
+  'the POS close step preserves two blanks as an unknown report count')
+for (const draft of ['edit.openingUsd', 'edit.openingKhr', 'reopen.openingUsd', 'reopen.openingKhr']) {
   ok(modal.includes(`shiftCountOrZero(${draft})`), `the Shifts popup submits a blank ${draft} as 0`)
 }
+ok(modal.includes('shiftClosingCounts(edit.closingUsd, edit.closingKhr)'), 'the Shifts popup applies the shared close-count rule when amending')
+ok(modal.includes('shiftClosingCounts(close.closingUsd, close.closingKhr)'), 'the Shifts popup applies the shared close-count rule when closing')
 ok(!/Number\((?:float|counted|edit|close|reopen)[^)]+\) \|\| 0/.test(gate + modal),
   'no surface coerces an INVALID count to 0 -- only a blank one becomes 0, through the shared helper')
 
-// Executed: a 0 actually travels through the transport as 0, not null.
+// Executed: an opening blank still travels through the transport as 0.
 const originalFetch = globalThis.fetch
 const originalServerUrl = getSyncServerUrl()
 const posted: Array<{ url: string; body: Record<string, unknown> }> = []
@@ -114,11 +117,8 @@ try {
   await openShift({ branchId: 2, branchName: 'shop', openingFloatUsd: shiftCountOrZero('50') as number, openingFloatKhr: shiftCountOrZero('') as number })
   assert.equal(posted[posted.length - 1].body.opening_float_usd, 50)
   assert.equal(posted[posted.length - 1].body.opening_float_khr, 0)
-  await closeShift({ branchId: 2, closingCountedUsd: shiftCountOrZero('') as number, closingCountedKhr: shiftCountOrZero('120000') as number })
-  assert.equal(posted[posted.length - 1].body.closing_counted_usd, 0)
-  assert.equal(posted[posted.length - 1].body.closing_counted_khr, 120_000)
-  checks += 4
-  console.log('  ok - open and close post the blank side as 0 and the typed side untouched')
+  checks += 2
+  console.log('  ok - opening posts the blank side as 0 and the typed side untouched')
 } finally {
   globalThis.fetch = originalFetch
   setSyncServerUrl(originalServerUrl)
@@ -131,6 +131,9 @@ ok(/export default function ShiftCountPair\(/.test(fields) || /export function S
   'the two-currency count pair is one shared component')
 ok((fields.match(/placeholder="0"/g) || []).length >= 2, 'both count inputs show 0 as the placeholder')
 ok(/t\('shift_blank_count_hint'\)/.test(fields), 'the shared pair carries the one-line blank-is-0 hint')
+ok((gate.match(/hint=\{t\('shift_registered_cash_hint'\)\}/g) || []).length >= 1
+  && (modal.match(/hint=\{t\('shift_registered_cash_hint'\)\}/g) || []).length >= 2,
+  'close forms explain that registered counts are report-only')
 ok(/export function ShiftSubmitRow\(/.test(fields), 'the reason-next-to-button footer is shared too')
 const submitRow = fields.slice(fields.indexOf('export function ShiftSubmitRow('))
 ok(/shift_count_needed/.test(fields) && /shift_count_invalid/.test(fields), 'the two blockers are translated through the pack')

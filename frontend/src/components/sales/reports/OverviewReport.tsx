@@ -1,11 +1,11 @@
 // Overview ("All") -- the one-page income statement for the selected range:
 //
-//   Gross sales - discounts -> NET SALES - unpaid credit - refunds -> REVENUE
+//   Gross sales - discounts -> NET SALES - refunds -> REVENUE
 //   REVENUE + tax/delivery -> COLLECTED TOTAL
 //   REVENUE - COGS + delivery collected - delivery paid -> GROSS PROFIT
 //                  - operating expenses -> TOTAL PROFIT
 //   Delivery: charged / actually paid / waived / net   (memo, no operator)
-//   Awaiting payment (theoretical)                     (yellow, below the total)
+//   Credit (positive memo already included above)      (yellow, below the total)
 //
 // with the previous period beside it when "Compare" is on, and the breakdown
 // folds (payments, couriers, returns by reason, expenses by type) under it.
@@ -79,12 +79,8 @@ interface OverviewResponse {
 }
 type Breakdown = 'payments' | 'couriers' | 'reasons' | 'types'
 
-// The awaiting-payment block is highlighted and sits last. Its figures are
-// theoretical: the owner ruled (Sep 4 2026, on the shift report) that unpaid
-// money goes BELOW the final total and is labelled as unpaid, never mixed into
-// the realised arithmetic. buildIncomeStatement emits it last and
-// isTheoreticalGroup() -- in the model, so the two per-row statement folds tint
-// the same block -- says how it looks.
+// Credit is already part of revenue and profit. Its highlighted memo sits last
+// so the amount still owed is visible once without becoming another arithmetic term.
 
 export default function OverviewReport(p: ReportViewProps) {
   const { tr, t, fmtMoney, options, style, filters, view } = p
@@ -129,9 +125,7 @@ export default function OverviewReport(p: ReportViewProps) {
         expenses ? `${tr('fees', 'Expenses')} ${fmtMoney(num(expenses.amount_usd), num(expenses.amount_khr))}` : null,
         profitLine ? `${tr('rpt_gross_profit', 'Total Profit')} ${fmtMoney(profitLine.usd)} (${fmtPct(pct(profitLine.usd, basis))})` : null,
         netLine ? `${tr('rpt_total_profit', 'Final Profit')} ${fmtMoney(netLine.usd)}` : null,
-        // The unpaid figures ride the summary too, always named as unpaid and
-        // always after the realised ones -- never folded into any of them.
-        sales.pending_revenue_usd ? `${tr('rpt_pending_credit', 'Not Paid')} ${fmtMoney(sales.pending_revenue_usd)}` : null,
+        sales.pending_revenue_usd ? `${tr('rpt_pending_credit', 'Credit')} ${fmtMoney(sales.pending_revenue_usd)}` : null,
       ])
     : !sales && (returns || expenses)
       ? joinSummary([
@@ -193,7 +187,7 @@ export default function OverviewReport(p: ReportViewProps) {
     { key: 'payment_method', label: tr('payment_method', 'Payment method'), primary: true, value: (r) => r.payment_method || tr('unknown', 'Unknown') },
     { key: 'tx_count', label: tr('sales', 'Sales'), kind: 'int', value: (r) => r.tx_count },
     { key: 'revenue_usd', label: tr('revenue', 'Revenue'), kind: 'money', value: (r) => r.revenue_usd, emphasis: true },
-    { key: 'pending_revenue_usd', label: tr('rpt_pending_credit', 'Not Paid'), kind: 'money', value: (r) => r.pending_revenue_usd, defaultVisible: false },
+    { key: 'pending_revenue_usd', label: tr('rpt_pending_credit', 'Credit'), kind: 'money', value: (r) => r.pending_revenue_usd, defaultVisible: false },
     { key: 'collected_usd', label: tr('collected_total', 'Collected total'), kind: 'money', value: (r) => r.collected_usd },
     { key: 'share', label: tr('rpt_share', 'Share'), kind: 'pct', value: (r) => pct(r.revenue_usd, payments.reduce((s, p) => s + p.revenue_usd, 0)), defaultVisible: false },
   ]
@@ -224,10 +218,10 @@ export default function OverviewReport(p: ReportViewProps) {
   // column reads as the statement and the inner one as "how it was made up".
   // The group caption rows are gone for the arithmetic groups (their totals
   // name them); the two memo groups keep a caption because nothing else
-  // introduces them, and the Not Paid block keeps its warning tint, which is
-  // load-bearing (S4R3-6): a theoretical figure must never read as realised.
+  // introduces them. The Credit row keeps a tint so it reads as a memo rather
+  // than another subtraction or total.
   const cols = compare ? 5 : 3
-  const captioned = (g: StatementGroup) => g === 'delivery' || g === 'pending'
+  const captioned = (g: StatementGroup) => g === 'delivery'
   const statementBody = state.loading && !data ? (
     <Skeleton rows={8} variant={style === 'receipt' ? 'text' : 'table'} />
   ) : lines.length === 0 ? null : style === 'receipt' ? (
@@ -235,7 +229,7 @@ export default function OverviewReport(p: ReportViewProps) {
       centered={!p.compact}
       blocks={STATEMENT_GROUPS.filter((g) => lines.some((l) => l.group === g)).map<ReceiptBlock>((g) => ({
         key: g,
-        title: groupLabel(g),
+        title: g === 'pending' ? undefined : groupLabel(g),
         highlight: isTheoreticalGroup(g),
         lines: lines
           .filter((l) => l.group === g)
@@ -244,7 +238,7 @@ export default function OverviewReport(p: ReportViewProps) {
             // The data note wins the slot: "no cost recorded on 812 lines"
             // outranks a percentage change on a figure that is not measured.
             const note = noteText(l) || (ch && ch.pct != null ? formatSignedPct(ch.pct) : undefined)
-            return { key: l.key, label: lineLabel(l), value: fmtMoney(l.usd, l.khr), kind: receiptLineKind(l.kind), note }
+            return { key: l.key, label: lineLabel(l), value: fmtMoney(l.usd, l.khr), kind: receiptLineKind(l.kind), note, tone: l.tone }
           }),
       }))}
     />
@@ -304,7 +298,11 @@ export default function OverviewReport(p: ReportViewProps) {
                         {note ? <div className="max-w-[16rem] whitespace-normal text-[length:var(--ui-size-meta)] text-[var(--ui-ink-3)]">({note})</div> : null}
                       </td>
                       <td className="text-right whitespace-nowrap text-[var(--ui-ink-2)]">{total ? '' : amount}</td>
-                      <td className="text-right whitespace-nowrap">
+                      <td className={[
+                        'text-right whitespace-nowrap',
+                        l.tone === 'positive' ? 'text-green-700 dark:text-green-400' : '',
+                        l.tone === 'negative' ? 'text-red-600 dark:text-red-400' : '',
+                      ].join(' ').trim()}>
                         {total ? (
                           l.headline
                             ? <span className="inline-block rounded-[var(--ui-radius-sm)] bg-[var(--ui-ink)] px-1.5 py-0.5 text-[var(--ui-surface)]">{amount}</span>
@@ -354,7 +352,7 @@ export default function OverviewReport(p: ReportViewProps) {
           ))}
         </div>
       ) : null}
-      <Fold open={open != null} onClose={() => setOpen(null)} anchorRef={anchorRef} size="lg" title={chips.find((c) => c.id === open)?.label || ''}>
+      <Fold className="reports-fold-panel" open={open != null} onClose={() => setOpen(null)} anchorRef={anchorRef} size="lg" title={chips.find((c) => c.id === open)?.label || ''}>
         <div className="p-2">
           {open === 'payments' ? <ReportTable surfaceKey="reports-overview-payments" columns={paymentColumns} rows={payments} rowKey={(r) => r.key} style={style} fmtMoney={fmtMoney} labels={labels} /> : null}
           {open === 'couriers' ? <ReportTable surfaceKey="reports-overview-couriers" columns={courierColumns} rows={couriers} rowKey={(r) => String(r.delivery_contact_id ?? r.delivery_contact_name)} style={style} fmtMoney={fmtMoney} labels={labels} /> : null}

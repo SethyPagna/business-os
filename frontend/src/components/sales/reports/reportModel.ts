@@ -11,6 +11,7 @@ import { actualUsdValue } from '../../../utils/financialPrecision.ts'
 export type ReportArea = 'sales' | 'returns' | 'fees'
 export type ReportViewId =
   | 'overview'
+  | 'shift'
   | 'periods'
   | 'sales'
   | 'products'
@@ -70,6 +71,7 @@ export interface ReportViewDef {
 
 export const REPORT_VIEWS: readonly ReportViewDef[] = [
   { id: 'overview', area: 'any', group: 'summary', labelKey: 'rpt_overview', fallback: 'Overview (all)', supportsTime: true, supportsSearch: false, supportsSaleFilters: true },
+  { id: 'shift', area: 'sales', group: 'summary', labelKey: 'shift_report', fallback: 'Shift Report', supportsTime: false, supportsSearch: false, supportsSaleFilters: false },
   { id: 'periods', area: 'sales', group: 'summary', labelKey: 'rpt_periods', fallback: 'By period', supportsTime: true, supportsSearch: false, supportsSaleFilters: true },
   { id: 'sales', area: 'sales', group: 'sales', labelKey: 'rpt_sales_list', fallback: 'Each receipt', supportsTime: true, supportsSearch: true, supportsSaleFilters: true },
   { id: 'products', area: 'sales', group: 'sales', labelKey: 'products', fallback: 'Products', groupedBy: 'product', supportsTime: true, supportsSearch: true, supportsSaleFilters: true },
@@ -538,6 +540,8 @@ export interface StatementLine {
    * invisible -- it only decides which total the summary leads with.
    */
   headline?: boolean
+  /** Semantic money treatment for totals; text remains explicit for color-independent reading. */
+  tone?: 'positive' | 'negative'
 }
 
 export interface StatementInput {
@@ -694,24 +698,26 @@ export function buildIncomeStatement(input: StatementInput): StatementLine[] {
   if (revenueRounding.usd !== 0) lines.push(revenueRounding)
   lines.push(
     line('revenue', 'revenue', 'Revenue', 'total', 'revenue', ['rpt_hint_revenue', 'Net sales of all non-cancelled sales minus refunds. Tax and delivery are excluded.']),
-    line('collected_total', 'collected_total', 'Collected total', 'total', 'collected', ['rpt_hint_collected', 'Cash actually collected; Not Paid sales are excluded.']),
+    line('collected_total', 'collected_total', 'Collected total', 'total', 'collected', ['rpt_hint_collected', 'Cash actually collected; Credit sales are excluded.']),
   )
   if (hasProfit(sales)) {
     lines.push(
       line('revenue_carried', 'rpt_revenue_carried', 'Revenue (from above)', 'total', 'profit', ['rpt_hint_revenue_carried', 'The revenue line repeated, so the first input of the profit calculation is on screen beside the figures taken off it.']),
       line('cogs', 'cogs', 'Cost of goods sold', 'sub', 'profit', ['rpt_hint_cogs', 'Cost snapshots of the items sold, less the cost of goods a return put back on the sellable shelf. Lines without a snapshot count as 0 and are flagged.'], cogsNote(sales)),
-      line('delivery_collected', 'rpt_delivery_collected', 'Delivery fees charged', 'add', 'profit', ['rpt_hint_delivery_collected', 'Customer-billed delivery fees, including Not Paid sales. This is revenue, not cash received. Waived fees are excluded.']),
+      line('delivery_collected', 'rpt_delivery_collected', 'Delivery fees charged', 'add', 'profit', ['rpt_hint_delivery_collected', 'Customer-billed delivery fees, including Credit sales. This is revenue, not cash received. Waived fees are excluded.']),
       line('delivery_paid', 'rpt_delivery_paid', 'Delivery paid to couriers', 'sub', 'profit', ['rpt_hint_delivery_paid', 'The courier money actually paid out and recorded on recognized sales. This is the real delivery cost, not a residual.'], deliveryCoverageNote(sales)),
     )
     const rounding = line('profit_rounding', 'rpt_rounding', 'Rounding', 'add', 'profit', ['rpt_hint_rounding', 'Each figure above is rounded to the cent on its own, so the chain can land a cent from the total. Shown rather than absorbed into a line.'])
     if (rounding.usd !== 0) lines.push(rounding)
-    lines.push({ ...line('gross_profit', 'rpt_gross_profit', 'Total Profit', 'total', 'profit', ['rpt_hint_gross_profit', 'Revenue minus cost of goods sold, plus delivery fees charged, minus courier costs. Includes Not Paid sales.']), headline: profitMode === 'gross' })
+    const totalProfit = line('gross_profit', 'rpt_gross_profit', 'Total Profit', 'total', 'profit', ['rpt_hint_gross_profit', 'Revenue minus cost of goods sold, plus delivery fees charged, minus courier costs. Includes Credit sales.'])
+    lines.push({ ...totalProfit, headline: profitMode === 'gross', tone: totalProfit.usd > 0 ? 'positive' : totalProfit.usd < 0 ? 'negative' : undefined })
     // Expenses and the net result are no longer gated on the profit mode --
     // only on whether the caller may read expenses at all. `expenses` is null
     // exactly when the server withheld the block.
     if (expenses) {
       const expUsd = round2(expenses.usd + num(khrToUsd(expenses.khr)))
       const prevExpUsd = prev && prevExpenses ? round2(prevExpenses.usd + num(khrToUsd(prevExpenses.khr))) : null
+      const netResultUsd = round2(num(cur.gross_profit) - expUsd)
       lines.push({
         key: 'expenses',
         labelKey: 'rpt_operating_expenses',
@@ -727,11 +733,12 @@ export function buildIncomeStatement(input: StatementInput): StatementLine[] {
         key: 'net_result',
         labelKey: 'rpt_total_profit',
         fallback: 'Final Profit',
-        usd: round2(num(cur.gross_profit) - expUsd),
+        usd: netResultUsd,
         prevUsd: prev && prevExpUsd != null ? round2(num(prev.gross_profit) - prevExpUsd) : null,
         kind: 'total',
         group: 'profit',
         headline: profitMode === 'net',
+        tone: netResultUsd > 0 ? 'positive' : netResultUsd < 0 ? 'negative' : undefined,
         hintKey: 'rpt_hint_net_result',
         hintFallback: 'Gross profit minus every recorded expense in the range. This is the bottom line.',
       })
@@ -787,23 +794,18 @@ function deliveryReconciliationLines(t: ReportTotals, line: LineFactory): Statem
     line('delivery_charged', 'rpt_delivery_charged', 'Charged to customers', 'memo', 'delivery', ['rpt_hint_delivery_charged', 'Delivery fees billed to customers on every delivery in the range. A fee the shop absorbed is not counted here.']),
     line('delivery_actual_cost', 'rpt_delivery_cost', 'Actual cost', 'memo', 'delivery', ['rpt_hint_delivery_actual', 'The courier money actually paid out, recorded on the sale. Never printed on a receipt; reported here so actual cost can be compared with what was charged.'], deliveryCoverageNote(t)),
     line('delivery_absorbed', 'rpt_store_delivery', 'Store-paid delivery', 'memo', 'delivery', ['rpt_hint_delivery_absorbed', 'Delivery the shop absorbed instead of charging. Revenue given away, not cash paid out, so it is reported here and never subtracted from profit.']),
-    line('delivery_net', 'rpt_delivery_net', 'Delivery contribution', 'memo', 'delivery', ['rpt_hint_delivery_net', 'Delivery fees charged minus recorded courier costs, including Not Paid sales. This is the delivery contribution to profit.']),
+    line('delivery_net', 'rpt_delivery_net', 'Delivery contribution', 'memo', 'delivery', ['rpt_hint_delivery_net', 'Delivery fees charged minus recorded courier costs, including Credit sales. This is the delivery contribution to profit.']),
   ]
 }
 
 /**
- * The theoretical block: what the period WOULD be worth once the outstanding
- * sales are paid. Same waterfall, same bases, kept strictly apart.
- *
- * BINDING (user ruling, Sep 4 2026, carried over from the shift report where
- * unpaid credit was deliberately moved BELOW the final total and relabelled):
- * unpaid money stays out of the realised arithmetic. These lines are emitted
- * LAST so no realised total can precede them, they carry their own group, and
- * nothing above reads any of them.
+ * Credit is already included in sales, revenue, COGS and profit. This single
+ * positive memo reports the outstanding subset once without subtracting it
+ * again or repeating the retired debt label.
  */
 function pendingLines(t: ReportTotals, line: LineFactory): StatementLine[] {
   if (num(t.pending_tx_count) <= 0 && t.pending_revenue_usd === 0) return []
-  return [line('pending_revenue', 'rpt_pending_credit', 'Not Paid', 'memo', 'pending', ['rpt_hint_pending', 'Included in sales, revenue, and profit, but excluded from collected cash.'])]
+  return [line('pending_revenue', 'rpt_pending_credit', 'Credit', 'memo', 'pending', ['rpt_hint_pending', 'Included in sales, revenue, and profit, but excluded from collected cash.'])]
 }
 
 /**
@@ -820,7 +822,7 @@ export function statementGroupLabel(group: StatementGroup, tr: (key: string, fal
   if (group === 'revenue') return tr('revenue', 'Revenue')
   if (group === 'collected') return tr('rpt_collected_group', 'Collected')
   if (group === 'delivery') return tr('rpt_delivery_breakdown', 'Delivery: charged vs paid')
-  if (group === 'pending') return tr('rpt_pending_credit', 'Not Paid')
+  if (group === 'pending') return tr('rpt_pending_credit', 'Credit')
   return tr('profit', 'Profit')
 }
 
