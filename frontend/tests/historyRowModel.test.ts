@@ -116,10 +116,14 @@ const sc = stockChanges.replace(/\r\n/g, '\n')
 
 // (a) Desktop table: the product cell is exactly two stacked single-line
 // cells -- the name, then the barcode on its own muted `dense-id` line.
+// O3 (Sep 6 2026): the NAME line is now the shared TruncatedText rather than a
+// span with a `title`. A title tooltip is not an affordance -- nothing marks
+// the "…" as openable and a tap cannot reach it -- and the owner's rule is
+// that ellipsised text is revealable. The barcode keeps its own muted line.
 assert.match(
   sc,
-  /<td>\n\s*<span className="block dense-cell-truncate font-semibold[^"]*"[^>]*>\{row\.product_name\}<\/span>\n\s*<span className="block dense-cell-truncate dense-id[^"]*"[^>]*>\{model\.barcode\}<\/span>\n\s*<\/td>/,
-  'the desktop product cell must render two stacked `block dense-cell-truncate` spans, the second carrying `dense-id` for the barcode',
+  /<TruncatedText text=\{row\.product_name\} className="font-semibold[^"]*" \/>\n\s*<span className="block dense-cell-truncate dense-id[^"]*"[^>]*>\{model\.barcode\}<\/span>\n\s*<\/td>/,
+  'the desktop product cell must render the name through TruncatedText and the barcode on its own `dense-id` line under it',
 )
 
 // (b) ...and the barcode is never emitted on the same line as the name, which

@@ -3,7 +3,7 @@ import { getDb, type D1Compat } from '../lib/db'
 import { localDateAtOrAfter, localDateAtOrBefore } from '../lib/businessDateWindow'
 import { attachBatchCounts } from '../lib/productBatches'
 import { paginateProductFamilies } from '../lib/familyPagination'
-import { recognizedExpr } from '../lib/salesAnalytics'
+import { buildProductSalesLedgerSql } from '../lib/productSalesLedger'
 import { getFamilyStockStats } from '../lib/familyStockStats'
 import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
 import { requireAuth, type SessionUser } from '../lib/auth'
@@ -17,7 +17,7 @@ import { buildIssueStateClauses, buildLikeAliasClause, runFuzzyFallbackMatch, to
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/productSearchQuery'
 import { receiveBatchStock, removeStockFromBatch, removeStockAcrossBatches, InsufficientBatchStockError, readFifoLotAvailability, allocateAcrossLots, decrementBatchStockStrictStatement, incrementBatchStockStatement } from '../lib/productBatches'
 import { applyMovementRevert, type RevertMovementRow } from '../lib/stockRevert'
-import { normalizeToIsoDate } from '../lib/batchCode'
+import { normalizeTypedDate } from '../lib/batchCode'
 import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, stockReceiptGateCode, stockReceiptGateMessage } from '../lib/stockReceiptGate'
 import { parseDatedStockCountEntries, buildDatedStockCountPlan } from '../lib/datedStockCountRoute'
 import { applyDatedStockCountPlan } from '../lib/datedStockCountApply'
@@ -28,6 +28,9 @@ import { transferDirectionError } from '../lib/branchRoleGuards'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { RESOLVED_BRANCH_NAME_COLUMN, movementBranchNameSql, withResolvedBranchName } from '../lib/movementBranchName'
+import { RESOLVED_ACTOR_NAME_COLUMN, movementActorNameSql, withResolvedActorName } from '../lib/movementActorName'
+import { movementReferenceSelectSql } from '../lib/movementReference'
+import { movementSearchHaystackSql } from '../lib/movementSearch'
 
 // Inventory routes, ported from backend/src/routes/inventory.ts.
 //
@@ -202,72 +205,42 @@ export async function attachInventoryProductMetrics(
   if (startDate) params.startDate = startDate
   if (endDate) params.endDate = endDate
 
-  const saleScope = [
-    recognizedExpr('s.'),
-    branchScoped ? 'si.branch_id = @branchId' : '',
+  const saleClauses = [
     startDate ? localDateAtOrAfter('s.created_at') : '',
     endDate ? localDateAtOrBefore('s.created_at') : '',
-  ].filter(Boolean).join(' AND ')
-  const returnScope = [
-    "COALESCE(r.status, 'completed') != 'cancelled'",
-    "COALESCE(r.return_scope, 'customer') = 'customer'",
-    branchScoped ? 'COALESCE(ri.branch_id, r.branch_id) = @branchId' : '',
-    startDate ? localDateAtOrAfter('r.created_at') : '',
-    endDate ? localDateAtOrBefore('r.created_at') : '',
-  ].filter(Boolean).join(' AND ')
+  ].filter(Boolean)
   const stockQuantitySql = branchScoped ? 'COALESCE(bs.quantity, 0)' : 'COALESCE(p.stock_quantity, 0)'
   const stockJoinSql = branchScoped
     ? 'LEFT JOIN branch_stock bs ON bs.product_id = ids.product_id AND bs.branch_id = @branchId'
     : ''
 
-  // Keep this arithmetic aligned with GET /summary: line revenue less its
-  // proportional store + membership discounts, then customer returns; COGS
-  // is reduced only when returned units actually go back to stock.
+  // The sales-minus-returns arithmetic is lib/productSalesLedger.ts's, not this
+  // file's. It used to be hand-copied here and at the three sites further down,
+  // and all four had drifted off the salesAnalytics scoping rules in the same
+  // four ways -- which is how this list could style a NEGATIVE profit while the
+  // detail pane opened from the very same row clamped the same numbers to 0.
+  // See that module's header for each defect, and for the per-(sale, product)
+  // invariants that now make `revenue_usd >= 0` and `cogs_usd >= 0` true by
+  // construction instead of by display floor.
   const rows = await db.prepare(`
     WITH requested_ids(product_id) AS (
       SELECT DISTINCT CAST(value AS INTEGER)
       FROM json_each(@productIdsJson)
     ),
-    sold AS (
-      SELECT si.product_id,
-             SUM(si.quantity) AS qty_sold,
-             SUM(si.total_usd - CASE WHEN COALESCE(s.subtotal_usd, 0) > 0 THEN (si.total_usd / s.subtotal_usd) * (COALESCE(s.discount_usd, 0) + COALESCE(s.membership_discount_usd, 0)) ELSE 0 END) AS revenue_usd,
-             SUM(si.total_khr - CASE WHEN COALESCE(s.subtotal_khr, 0) > 0 THEN (si.total_khr / s.subtotal_khr) * (COALESCE(s.discount_khr, 0) + COALESCE(s.membership_discount_khr, 0)) ELSE 0 END) AS revenue_khr,
-             SUM(si.cost_price_usd * si.quantity) AS cogs_usd,
-             SUM(si.cost_price_khr * si.quantity) AS cogs_khr
-      FROM sale_items si
-      JOIN requested_ids ids ON ids.product_id = si.product_id
-      JOIN sales s ON s.id = si.sale_id
-      WHERE ${saleScope}
-      GROUP BY si.product_id
-    ),
-    returned AS (
-      SELECT ri.product_id,
-             SUM(ri.quantity) AS qty_returned,
-             SUM(ri.total_usd) AS refund_usd,
-             SUM(ri.total_khr) AS refund_khr,
-             SUM(CASE WHEN ri.return_to_stock = 1 THEN ri.cost_price_usd * ri.quantity ELSE 0 END) AS cogs_returned_usd,
-             SUM(CASE WHEN ri.return_to_stock = 1 THEN ri.cost_price_khr * ri.quantity ELSE 0 END) AS cogs_returned_khr
-      FROM return_items ri
-      JOIN requested_ids ids ON ids.product_id = ri.product_id
-      JOIN returns r ON r.id = ri.return_id
-      WHERE ${returnScope}
-      GROUP BY ri.product_id
-    )
+    ledger AS (${buildProductSalesLedgerSql({ requestedIds: true, branchScoped, saleClauses })})
     SELECT ids.product_id,
            ${stockQuantitySql} AS display_quantity,
            ${stockQuantitySql} * COALESCE(NULLIF(p.purchase_price_usd, 0), p.cost_price_usd, 0) AS stock_value_usd,
            ${stockQuantitySql} * COALESCE(NULLIF(p.purchase_price_khr, 0), p.cost_price_khr, 0) AS stock_value_khr,
-           COALESCE(sold.qty_sold, 0) - COALESCE(returned.qty_returned, 0) AS qty_sold,
-           COALESCE(sold.revenue_usd, 0) - COALESCE(returned.refund_usd, 0) AS revenue_usd,
-           COALESCE(sold.revenue_khr, 0) - COALESCE(returned.refund_khr, 0) AS revenue_khr,
-           COALESCE(sold.cogs_usd, 0) - COALESCE(returned.cogs_returned_usd, 0) AS cogs_usd,
-           COALESCE(sold.cogs_khr, 0) - COALESCE(returned.cogs_returned_khr, 0) AS cogs_khr
+           COALESCE(ledger.qty_sold, 0) AS qty_sold,
+           COALESCE(ledger.revenue_usd, 0) AS revenue_usd,
+           COALESCE(ledger.revenue_khr, 0) AS revenue_khr,
+           COALESCE(ledger.cogs_usd, 0) AS cogs_usd,
+           COALESCE(ledger.cogs_khr, 0) AS cogs_khr
     FROM requested_ids ids
     JOIN products p ON p.id = ids.product_id
     ${stockJoinSql}
-    LEFT JOIN sold ON sold.product_id = ids.product_id
-    LEFT JOIN returned ON returned.product_id = ids.product_id
+    LEFT JOIN ledger ON ledger.product_id = ids.product_id
   `).all<InventoryProductMetricRow>(params)
 
   const metricsById = new Map((rows || []).map((row) => [Number(row.product_id), row]))
@@ -285,6 +258,29 @@ export async function attachInventoryProductMetrics(
       revenue_khr: num(metric.revenue_khr),
       cogs_usd: cogsUsd,
       cogs_khr: num(metric.cogs_khr),
+      // Both operands are non-negative by construction (productSalesLedger.ts),
+      // so this is identical to inventory/ProductDetailModal.tsx's
+      // `Math.max(0, revenue) - Math.max(0, cogs)`. The pane clamps FOUR cells
+      // of this row, not one -- qty_sold, revenue_usd and cogs_usd each with
+      // `Math.max(0, ...)`, and the profit built on the last two -- and the
+      // list renders all four raw, so agreement needs the ledger to guarantee
+      // all four. It does, and for the branch-scoped read it takes an
+      // APPORTIONMENT rather than a cap to get there: a customer return names
+      // no sale LINE, so subtracting it whole at every branch the sale touched
+      // is what reported "Net sold -2" here beside "0" in the pane. Each
+      // return group is now split across the sale's branch lines -- each column
+      // against its own denominator, units by the unit share and money by the
+      // share of the VALUE a branch recognised -- so the branch rows add back
+      // up to the unfiltered figure instead of each reversing the whole,
+      // wherever a reversal fits inside the sale it names (the ledger header
+      // states the two over-refund cases where both sides clamp separately).
+      // Units are allocated by largest remainder on top of that, because this
+      // route's qty_sold is rendered by the list with no formatting at all.
+      // The per-(sale, product) caps stay behind all of it as a residual guard
+      // for what no scoping rule can fix -- a return line taking back more
+      // than the sale recognised for the product at all. A negative
+      // PROFIT survives only where it is true -- the product was sold below
+      // cost -- and is not floored, here or in the sales kernel.
       profit_usd: revenueUsd - cogsUsd,
     })
   }
@@ -620,7 +616,14 @@ app.get('/bootstrap', async (c) => {
       params: {},
       qtyExpr: 'COALESCE(p.stock_quantity, 0)',
     }),
-    db.prepare('SELECT * FROM inventory_movements ORDER BY created_at DESC, id DESC LIMIT 50').all({}),
+    // N13: the bootstrap's movement preview is the SAME ledger rows the
+    // /movements drill serves, so it resolves branch / actor / receipt
+    // through the same shared expressions instead of showing a blank branch
+    // and a full name on its first 50 rows.
+    db.prepare(`SELECT *, ${movementBranchNameSql('inventory_movements')} AS ${RESOLVED_BRANCH_NAME_COLUMN},
+      ${movementActorNameSql('inventory_movements')} AS ${RESOLVED_ACTOR_NAME_COLUMN},
+      ${movementReferenceSelectSql('inventory_movements')}
+      FROM inventory_movements ORDER BY created_at DESC, id DESC LIMIT 50`).all<Record<string, unknown>>({}),
     db.prepare("SELECT DISTINCT trim(brand) AS value FROM products WHERE is_active = 1 AND trim(COALESCE(brand, '')) <> '' ORDER BY lower(trim(brand)) ASC").all<{ value: string }>({}),
     // Previously missing -- same gap as getInventoryProductMetadata's own
     // brands-only query, just this route's separate first-load copy of it.
@@ -651,7 +654,10 @@ app.get('/bootstrap', async (c) => {
       stock_value_usd: familyStats.stock_value_usd,
       stock_value_khr: familyStats.stock_value_khr,
     },
-    movements: { items: movements || [], total: (movements || []).length, page: 1, pageSize: 50 },
+    movements: {
+      items: (movements || []).map((row) => withResolvedActorName(withResolvedBranchName(row))),
+      total: (movements || []).length, page: 1, pageSize: 50,
+    },
     filters: { brands: (brands || []).map((row) => row.value), categories: (categories || []).map((row) => row.value) },
     branches: branchRows || [],
   })
@@ -683,22 +689,22 @@ app.get('/summary', async (c) => {
         COALESCE(bs.quantity, 0) AS display_quantity,
         COALESCE(bs.quantity * COALESCE(NULLIF(p.purchase_price_usd, 0), p.cost_price_usd, 0), 0) AS stock_value_usd,
         COALESCE(bs.quantity * COALESCE(NULLIF(p.purchase_price_khr, 0), p.cost_price_khr, 0), 0) AS stock_value_khr,
-        COALESCE(si.qty_sold, 0) - COALESCE(ret.qty_returned, 0) AS qty_sold,
-        COALESCE(si.store_discount_usd, 0) AS store_discount_usd,
-        COALESCE(si.store_discount_khr, 0) AS store_discount_khr,
-        COALESCE(si.membership_discount_usd, 0) AS membership_discount_usd,
-        COALESCE(si.membership_discount_khr, 0) AS membership_discount_khr,
-        COALESCE(si.revenue_usd, 0) - COALESCE(ret.refund_usd, 0) AS revenue_usd,
-        COALESCE(si.revenue_khr, 0) - COALESCE(ret.refund_khr, 0) AS revenue_khr,
-        COALESCE(si.cogs_usd, 0) - COALESCE(ret.cogs_returned_usd, 0) AS cogs_usd,
-        COALESCE(si.cogs_khr, 0) - COALESCE(ret.cogs_returned_khr, 0) AS cogs_khr,
+        COALESCE(fin.qty_sold, 0) AS qty_sold,
+        COALESCE(fin.store_discount_usd, 0) AS store_discount_usd,
+        COALESCE(fin.store_discount_khr, 0) AS store_discount_khr,
+        COALESCE(fin.membership_discount_usd, 0) AS membership_discount_usd,
+        COALESCE(fin.membership_discount_khr, 0) AS membership_discount_khr,
+        COALESCE(fin.revenue_usd, 0) AS revenue_usd,
+        COALESCE(fin.revenue_khr, 0) AS revenue_khr,
+        COALESCE(fin.cogs_usd, 0) AS cogs_usd,
+        COALESCE(fin.cogs_khr, 0) AS cogs_khr,
         COALESCE(bsj.branch_stock_json, '[]') AS branch_stock_json
       FROM products p
       LEFT JOIN branch_stock bs ON bs.product_id = p.id AND bs.branch_id = @branchId
       -- Pre-aggregated once, not a per-row correlated subquery (this used to
       -- run once per product -- 10,271 times on the unfiltered path -- to
-      -- build one product's branch_stock array; same shape as the si/ret
-      -- joins right below, which already aggregate before joining).
+      -- build one product's branch_stock array; same shape as the financial
+      -- join right below, which already aggregates before joining).
       LEFT JOIN (
         SELECT bs2.product_id,
                json_group_array(json_object('branch_id', bs2.branch_id, 'branch_name', b2.name, 'quantity', bs2.quantity)) AS branch_stock_json
@@ -706,37 +712,8 @@ app.get('/summary', async (c) => {
         JOIN branches b2 ON b2.id = bs2.branch_id
         GROUP BY bs2.product_id
       ) bsj ON bsj.product_id = p.id
-      LEFT JOIN (
-        SELECT si.product_id, si.branch_id,
-               SUM(si.quantity) AS qty_sold,
-               SUM(CASE WHEN COALESCE(s.subtotal_usd, 0) > 0 THEN (si.total_usd / s.subtotal_usd) * COALESCE(s.discount_usd, 0) ELSE 0 END) AS store_discount_usd,
-               SUM(CASE WHEN COALESCE(s.subtotal_khr, 0) > 0 THEN (si.total_khr / s.subtotal_khr) * COALESCE(s.discount_khr, 0) ELSE 0 END) AS store_discount_khr,
-               SUM(CASE WHEN COALESCE(s.subtotal_usd, 0) > 0 THEN (si.total_usd / s.subtotal_usd) * COALESCE(s.membership_discount_usd, 0) ELSE 0 END) AS membership_discount_usd,
-               SUM(CASE WHEN COALESCE(s.subtotal_khr, 0) > 0 THEN (si.total_khr / s.subtotal_khr) * COALESCE(s.membership_discount_khr, 0) ELSE 0 END) AS membership_discount_khr,
-               SUM(si.total_usd - CASE WHEN COALESCE(s.subtotal_usd, 0) > 0 THEN (si.total_usd / s.subtotal_usd) * (COALESCE(s.discount_usd, 0) + COALESCE(s.membership_discount_usd, 0)) ELSE 0 END) AS revenue_usd,
-               SUM(si.total_khr - CASE WHEN COALESCE(s.subtotal_khr, 0) > 0 THEN (si.total_khr / s.subtotal_khr) * (COALESCE(s.discount_khr, 0) + COALESCE(s.membership_discount_khr, 0)) ELSE 0 END) AS revenue_khr,
-               SUM(si.cost_price_usd * si.quantity) AS cogs_usd,
-               SUM(si.cost_price_khr * si.quantity) AS cogs_khr
-        FROM sale_items si
-        JOIN sales s ON s.id = si.sale_id
-        WHERE si.branch_id = @branchId
-          AND ${recognizedExpr('s.')}
-        GROUP BY si.product_id, si.branch_id
-      ) si ON si.product_id = p.id
-      LEFT JOIN (
-        SELECT ri.product_id,
-               SUM(ri.quantity) AS qty_returned,
-               SUM(ri.total_usd) AS refund_usd,
-               SUM(ri.total_khr) AS refund_khr,
-               SUM(CASE WHEN ri.return_to_stock = 1 THEN ri.cost_price_usd * ri.quantity ELSE 0 END) AS cogs_returned_usd,
-               SUM(CASE WHEN ri.return_to_stock = 1 THEN ri.cost_price_khr * ri.quantity ELSE 0 END) AS cogs_returned_khr
-        FROM return_items ri
-        JOIN returns r ON r.id = ri.return_id
-        WHERE COALESCE(ri.branch_id, r.branch_id) = @branchId
-          AND COALESCE(r.status, 'completed') != 'cancelled'
-          AND COALESCE(r.return_scope, 'customer') = 'customer'
-        GROUP BY ri.product_id
-      ) ret ON ret.product_id = p.id
+      -- One financial join, one implementation (lib/productSalesLedger.ts).
+      LEFT JOIN (${buildProductSalesLedgerSql({ branchScoped: true })}) fin ON fin.product_id = p.id
       WHERE p.is_active = 1
       ORDER BY lower(p.name) ASC
     `).all<Record<string, unknown>>({ branchId })
@@ -767,15 +744,15 @@ app.get('/summary', async (c) => {
       p.stock_quantity AS display_quantity,
       COALESCE(p.stock_quantity * COALESCE(NULLIF(p.purchase_price_usd, 0), p.cost_price_usd, 0), 0) AS stock_value_usd,
       COALESCE(p.stock_quantity * COALESCE(NULLIF(p.purchase_price_khr, 0), p.cost_price_khr, 0), 0) AS stock_value_khr,
-      COALESCE(si.qty_sold, 0) - COALESCE(ret.qty_returned, 0) AS qty_sold,
-      COALESCE(si.store_discount_usd, 0) AS store_discount_usd,
-      COALESCE(si.store_discount_khr, 0) AS store_discount_khr,
-      COALESCE(si.membership_discount_usd, 0) AS membership_discount_usd,
-      COALESCE(si.membership_discount_khr, 0) AS membership_discount_khr,
-      COALESCE(si.revenue_usd, 0) - COALESCE(ret.refund_usd, 0) AS revenue_usd,
-      COALESCE(si.revenue_khr, 0) - COALESCE(ret.refund_khr, 0) AS revenue_khr,
-      COALESCE(si.cogs_usd, 0) - COALESCE(ret.cogs_returned_usd, 0) AS cogs_usd,
-      COALESCE(si.cogs_khr, 0) - COALESCE(ret.cogs_returned_khr, 0) AS cogs_khr,
+      COALESCE(fin.qty_sold, 0) AS qty_sold,
+      COALESCE(fin.store_discount_usd, 0) AS store_discount_usd,
+      COALESCE(fin.store_discount_khr, 0) AS store_discount_khr,
+      COALESCE(fin.membership_discount_usd, 0) AS membership_discount_usd,
+      COALESCE(fin.membership_discount_khr, 0) AS membership_discount_khr,
+      COALESCE(fin.revenue_usd, 0) AS revenue_usd,
+      COALESCE(fin.revenue_khr, 0) AS revenue_khr,
+      COALESCE(fin.cogs_usd, 0) AS cogs_usd,
+      COALESCE(fin.cogs_khr, 0) AS cogs_khr,
       COALESCE(bsj.branch_stock_json, '[]') AS branch_stock_json
     FROM products p
     -- Pre-aggregated once, not a per-row correlated subquery -- see the
@@ -787,35 +764,8 @@ app.get('/summary', async (c) => {
       JOIN branches b2 ON b2.id = bs2.branch_id
       GROUP BY bs2.product_id
     ) bsj ON bsj.product_id = p.id
-    LEFT JOIN (
-      SELECT si.product_id,
-             SUM(si.quantity) AS qty_sold,
-             SUM(CASE WHEN COALESCE(s.subtotal_usd, 0) > 0 THEN (si.total_usd / s.subtotal_usd) * COALESCE(s.discount_usd, 0) ELSE 0 END) AS store_discount_usd,
-             SUM(CASE WHEN COALESCE(s.subtotal_khr, 0) > 0 THEN (si.total_khr / s.subtotal_khr) * COALESCE(s.discount_khr, 0) ELSE 0 END) AS store_discount_khr,
-             SUM(CASE WHEN COALESCE(s.subtotal_usd, 0) > 0 THEN (si.total_usd / s.subtotal_usd) * COALESCE(s.membership_discount_usd, 0) ELSE 0 END) AS membership_discount_usd,
-             SUM(CASE WHEN COALESCE(s.subtotal_khr, 0) > 0 THEN (si.total_khr / s.subtotal_khr) * COALESCE(s.membership_discount_khr, 0) ELSE 0 END) AS membership_discount_khr,
-             SUM(si.total_usd - CASE WHEN COALESCE(s.subtotal_usd, 0) > 0 THEN (si.total_usd / s.subtotal_usd) * (COALESCE(s.discount_usd, 0) + COALESCE(s.membership_discount_usd, 0)) ELSE 0 END) AS revenue_usd,
-             SUM(si.total_khr - CASE WHEN COALESCE(s.subtotal_khr, 0) > 0 THEN (si.total_khr / s.subtotal_khr) * (COALESCE(s.discount_khr, 0) + COALESCE(s.membership_discount_khr, 0)) ELSE 0 END) AS revenue_khr,
-             SUM(si.cost_price_usd * si.quantity) AS cogs_usd,
-             SUM(si.cost_price_khr * si.quantity) AS cogs_khr
-      FROM sale_items si
-      JOIN sales s ON s.id = si.sale_id
-      WHERE ${recognizedExpr('s.')}
-      GROUP BY si.product_id
-    ) si ON si.product_id = p.id
-    LEFT JOIN (
-      SELECT ri.product_id,
-             SUM(ri.quantity) AS qty_returned,
-             SUM(ri.total_usd) AS refund_usd,
-             SUM(ri.total_khr) AS refund_khr,
-             SUM(CASE WHEN ri.return_to_stock = 1 THEN ri.cost_price_usd * ri.quantity ELSE 0 END) AS cogs_returned_usd,
-             SUM(CASE WHEN ri.return_to_stock = 1 THEN ri.cost_price_khr * ri.quantity ELSE 0 END) AS cogs_returned_khr
-      FROM return_items ri
-      JOIN returns r ON r.id = ri.return_id
-      WHERE COALESCE(r.status, 'completed') != 'cancelled'
-        AND COALESCE(r.return_scope, 'customer') = 'customer'
-      GROUP BY ri.product_id
-    ) ret ON ret.product_id = p.id
+    -- One financial join, one implementation (lib/productSalesLedger.ts).
+    LEFT JOIN (${buildProductSalesLedgerSql()}) fin ON fin.product_id = p.id
     WHERE p.is_active = 1
     ORDER BY lower(p.name) ASC
   `).all<Record<string, unknown>>({})
@@ -836,42 +786,15 @@ app.get('/summary', async (c) => {
 // Sales-minus-returns financial join, scoped to a branch when the caller
 // filtered by one (mirrors appendInventoryProductFilters's own branch
 // scoping so the two join consistently on the same @branchId param).
-// Ported from backend/src/routes/inventory.ts's buildInventoryFinancialJoinSql.
+//
+// The arithmetic itself is lib/productSalesLedger.ts's -- this used to be a
+// fourth hand-copied copy of it. The join is exposed as `fin`, which carries
+// BOTH readings of the same population: net-of-returns (revenue_usd/cogs_usd),
+// and gross-of-returns (gross_revenue_usd/gross_cogs_usd) for the stat cards,
+// which the owner keeps gross with refunds reported separately (Z10).
 function buildInventoryFinancialJoinSql(branchScoped: boolean): string {
-  const saleBranchClause = branchScoped ? 'AND si.branch_id = @branchId' : ''
-  const returnBranchClause = branchScoped ? 'AND COALESCE(ri.branch_id, r.branch_id) = @branchId' : ''
   return `
-    LEFT JOIN (
-      SELECT si.product_id,
-             SUM(si.quantity) AS qty_sold,
-             SUM(CASE WHEN COALESCE(s.subtotal_usd, 0) > 0 THEN (si.total_usd / s.subtotal_usd) * COALESCE(s.discount_usd, 0) ELSE 0 END) AS store_discount_usd,
-             SUM(CASE WHEN COALESCE(s.subtotal_khr, 0) > 0 THEN (si.total_khr / s.subtotal_khr) * COALESCE(s.discount_khr, 0) ELSE 0 END) AS store_discount_khr,
-             SUM(CASE WHEN COALESCE(s.subtotal_usd, 0) > 0 THEN (si.total_usd / s.subtotal_usd) * COALESCE(s.membership_discount_usd, 0) ELSE 0 END) AS membership_discount_usd,
-             SUM(CASE WHEN COALESCE(s.subtotal_khr, 0) > 0 THEN (si.total_khr / s.subtotal_khr) * COALESCE(s.membership_discount_khr, 0) ELSE 0 END) AS membership_discount_khr,
-             SUM(si.total_usd - CASE WHEN COALESCE(s.subtotal_usd, 0) > 0 THEN (si.total_usd / s.subtotal_usd) * (COALESCE(s.discount_usd, 0) + COALESCE(s.membership_discount_usd, 0)) ELSE 0 END) AS revenue_usd,
-             SUM(si.total_khr - CASE WHEN COALESCE(s.subtotal_khr, 0) > 0 THEN (si.total_khr / s.subtotal_khr) * (COALESCE(s.discount_khr, 0) + COALESCE(s.membership_discount_khr, 0)) ELSE 0 END) AS revenue_khr,
-             SUM(si.cost_price_usd * si.quantity) AS cogs_usd,
-             SUM(si.cost_price_khr * si.quantity) AS cogs_khr
-      FROM sale_items si
-      JOIN sales s ON s.id = si.sale_id
-      WHERE ${recognizedExpr('s.')}
-        ${saleBranchClause}
-      GROUP BY si.product_id
-    ) si ON si.product_id = p.id
-    LEFT JOIN (
-      SELECT ri.product_id,
-             SUM(ri.quantity) AS qty_returned,
-             SUM(ri.total_usd) AS refund_usd,
-             SUM(ri.total_khr) AS refund_khr,
-             SUM(CASE WHEN ri.return_to_stock = 1 THEN ri.cost_price_usd * ri.quantity ELSE 0 END) AS cogs_returned_usd,
-             SUM(CASE WHEN ri.return_to_stock = 1 THEN ri.cost_price_khr * ri.quantity ELSE 0 END) AS cogs_returned_khr
-      FROM return_items ri
-      JOIN returns r ON r.id = ri.return_id
-      WHERE COALESCE(r.status, 'completed') != 'cancelled'
-        AND COALESCE(r.return_scope, 'customer') = 'customer'
-        ${returnBranchClause}
-      GROUP BY ri.product_id
-    ) ret ON ret.product_id = p.id
+    LEFT JOIN (${buildProductSalesLedgerSql({ branchScoped })}) fin ON fin.product_id = p.id
   `
 }
 
@@ -911,11 +834,11 @@ app.get('/stats', async (c) => {
     getFamilyStockStats({ db, lowStock, joinSql, whereSql, params, qtyExpr: stockExpr }),
     db.prepare(`
       SELECT
-        COALESCE(SUM(COALESCE(si.qty_sold, 0) - COALESCE(ret.qty_returned, 0)), 0) AS net_sold_qty,
-        COALESCE(SUM(COALESCE(si.store_discount_usd, 0)), 0) AS store_discount_usd,
-        COALESCE(SUM(COALESCE(si.store_discount_khr, 0)), 0) AS store_discount_khr,
-        COALESCE(SUM(COALESCE(si.membership_discount_usd, 0)), 0) AS membership_discount_usd,
-        COALESCE(SUM(COALESCE(si.membership_discount_khr, 0)), 0) AS membership_discount_khr,
+        COALESCE(SUM(COALESCE(fin.qty_sold, 0)), 0) AS net_sold_qty,
+        COALESCE(SUM(COALESCE(fin.store_discount_usd, 0)), 0) AS store_discount_usd,
+        COALESCE(SUM(COALESCE(fin.store_discount_khr, 0)), 0) AS store_discount_khr,
+        COALESCE(SUM(COALESCE(fin.membership_discount_usd, 0)), 0) AS membership_discount_usd,
+        COALESCE(SUM(COALESCE(fin.membership_discount_khr, 0)), 0) AS membership_discount_khr,
         -- Z10 (user, Aug 29 -- "follow dashboard, keeps them separate"):
         -- Revenue and COGS are GROSS here (before refunds / returned COGS),
         -- exactly like the Dashboard's salesAnalytics kernel (revenue_usd =
@@ -924,10 +847,14 @@ app.get('/stats', async (c) => {
         -- Branch "Revenue" now agrees with the Dashboard's for the same set of
         -- sales instead of being quietly net-of-refunds. net_sold_qty keeps
         -- its return subtraction -- it is a units metric, not revenue.
-        COALESCE(SUM(COALESCE(si.revenue_usd, 0)), 0) AS revenue_usd,
-        COALESCE(SUM(COALESCE(si.revenue_khr, 0)), 0) AS revenue_khr,
-        COALESCE(SUM(COALESCE(si.cogs_usd, 0)), 0) AS cogs_usd,
-        COALESCE(SUM(COALESCE(si.cogs_khr, 0)), 0) AS cogs_khr
+        --
+        -- gross_* comes off the SAME ledger as the net columns the product
+        -- list shows, so "gross" and "net" are two readings of one population
+        -- rather than two hand-copied joins that can drift apart.
+        COALESCE(SUM(COALESCE(fin.gross_revenue_usd, 0)), 0) AS revenue_usd,
+        COALESCE(SUM(COALESCE(fin.gross_revenue_khr, 0)), 0) AS revenue_khr,
+        COALESCE(SUM(COALESCE(fin.gross_cogs_usd, 0)), 0) AS cogs_usd,
+        COALESCE(SUM(COALESCE(fin.gross_cogs_khr, 0)), 0) AS cogs_khr
       FROM products p
       ${joinSql}
       ${financialJoinSql}
@@ -1020,11 +947,12 @@ app.get('/movements', async (c) => {
     // scattered INSERT sites and no shared writer, and movement text is a
     // denormalized copy of product names (measured ~0 Latin diacritics in Part
     // 484), so the practical loss is nil and the crash risk is what mattered.
-    const movementHaystack = `(
-      COALESCE(product_name, '') || ' ' || COALESCE(branch_name, '') || ' ' ||
-      COALESCE(user_name, '') || ' ' || COALESCE(movement_type, '') || ' ' ||
-      COALESCE(reason, '')
-    )`
+    //
+    // N13 (round 2): the haystack itself lives in lib/movementSearch.ts and is
+    // built from the SAME branch and actor expressions the SELECT below renders
+    // -- searching the raw snapshots asked about values that are nowhere on the
+    // screen. Same shallow shape, same alreadyNormalizedCols=true contract.
+    const movementHaystack = movementSearchHaystackSql('inventory_movements')
     const termClauses = terms.map((term, index) => buildLikeAliasClause(term, [movementHaystack], params, `search${index}`, true))
     where.push(`(${termClauses.join(` ${mode} `)})`)
   }
@@ -1053,14 +981,22 @@ app.get('/movements', async (c) => {
   // shared expression. It is aliased rather than named branch_name because
   // `SELECT *` already emits that column, and folded back onto branch_name in
   // JS so every consumer still sees one field.
+  // N13: the ACTOR is resolved the same way and for the same reason -- older
+  // rows snapshot the full name, and every history surface names the account
+  // username. Same aliased-then-folded shape as the branch.
+  // N13: and the RECORD the row belongs to -- reference_id alone identifies
+  // nothing to a person, so the receipt it names is resolved here too. These
+  // two are new column names, so they need no fold.
   const items = await db.prepare(`
-    SELECT *, ${movementBranchNameSql('inventory_movements')} AS ${RESOLVED_BRANCH_NAME_COLUMN}
+    SELECT *, ${movementBranchNameSql('inventory_movements')} AS ${RESOLVED_BRANCH_NAME_COLUMN},
+      ${movementActorNameSql('inventory_movements')} AS ${RESOLVED_ACTOR_NAME_COLUMN},
+      ${movementReferenceSelectSql('inventory_movements')}
     FROM inventory_movements
     ${whereSql}
     ORDER BY created_at DESC, id DESC
     LIMIT @pageSize OFFSET @offset
   `).all<Record<string, unknown>>({ ...params, pageSize, offset })
-  return c.json({ items: (items || []).map(withResolvedBranchName), total: total?.count || 0, page, pageSize, totalPages: Math.max(1, Math.ceil((total?.count || 0) / pageSize)) })
+  return c.json({ items: (items || []).map((row) => withResolvedActorName(withResolvedBranchName(row))), total: total?.count || 0, page, pageSize, totalPages: Math.max(1, Math.ceil((total?.count || 0) / pageSize)) })
 })
 
 // ---- Reasons (saved as JSON in settings, matching the Docker backend) ----
@@ -1439,8 +1375,8 @@ app.post('/adjust', async (c) => {
   // Absent stays null (the kernel then uses today); a supplied but
   // unreadable date is refused rather than silently becoming today's.
   const rawReceivedDate = body.receivedDate != null && String(body.receivedDate).trim() !== '' ? String(body.receivedDate).trim() : null
-  const receivedDate = rawReceivedDate ? normalizeToIsoDate(rawReceivedDate) : null
-  if (rawReceivedDate && !receivedDate) return c.json({ error: 'Received date must be a readable date (mm/dd/yyyy)' }, 400)
+  const receivedDate = rawReceivedDate ? normalizeTypedDate(rawReceivedDate) : null
+  if (rawReceivedDate && !receivedDate) return c.json({ error: 'Received date must be a readable date (dd/mm/yyyy)' }, 400)
   // D5a: supplier attribution for the lot this add creates or fills.
   // camelCase keys like the rest of THIS route's body (receivedDate,
   // batchId...); coerced with the same rules as POST /api/batches so the

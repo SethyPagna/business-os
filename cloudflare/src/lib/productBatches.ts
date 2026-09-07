@@ -32,7 +32,7 @@
 //   the standard expiry-tracked-inventory rule referenced in
 //   routes/inventory.ts's disclosure comment.
 import type { D1Compat } from './db'
-import { dateToBatchCode, normalizeToIsoDate } from './batchCode'
+import { dateToBatchCode, normalizeTypedDate } from './batchCode'
 import { buildInClause, selectInChunks } from './sqlBinding'
 
 export type ProductBatchRow = {
@@ -165,7 +165,7 @@ export function planReceiveBatchStock(input: ReceiveBatchPlanInput): ReceiveBatc
   }
   const branchId = Number(input.branchId)
   if (!Number.isSafeInteger(branchId) || branchId <= 0) throw new Error('A valid branch is required')
-  const receivedAt = normalizeToIsoDate(input.receivedDate) || new Date().toISOString().slice(0, 10)
+  const receivedAt = normalizeTypedDate(input.receivedDate) || new Date().toISOString().slice(0, 10)
   const lotCode = dateToBatchCode(receivedAt) as string
   const batchKey = lotCode
   const unitCostUsd = unitCostForReceipt(input.unitCostUsd)
@@ -362,9 +362,12 @@ export async function receiveBatchStock(db: D1Compat, input: {
   branchId: number
   quantity: number
   expiryDate?: string | null
-  // Read as mm/dd/yyyy (see batchCode.ts's normalizeToIsoDate) or this
+  // Read day-first, dd/mm/yyyy (batchCode.ts's normalizeTypedDate), or this
   // app's own ISO date shape; blank/omitted defaults to today, same as
-  // every other receive-stock date field in this app.
+  // every other receive-stock date field in this app. Every caller is a
+  // field a person typed into -- Inventory Adjust, Receive Batch, fast
+  // stock-in -- and all of them render the day-first DateEntryInput, so a
+  // month-first read here would contradict the screen that produced it.
   receivedDate?: string | null
   notes?: string | null
   // Explicit existing batch chosen by the person (Inventory's add-stock

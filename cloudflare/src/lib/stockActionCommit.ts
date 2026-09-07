@@ -1,6 +1,38 @@
 import type { D1Compat } from './db'
 import { dateToBatchCode, normalizeToIsoDate } from './batchCode'
 import { normalizeSearchText } from './searchMatch'
+import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, stockReceiptGateCode, stockReceiptGateMessage, type StockReceiptGateInput } from './stockReceiptGate'
+
+/**
+ * The FOURTH receipt wire (N14-D).
+ *
+ * routes/inventory.ts POST /adjust, routes/batches.ts and lib/stockSession.ts
+ * each run stockReceiptGateCode before they write a receipt. This file did
+ * not, and it INSERTs a product_batches row carrying supplier_id,
+ * supplier_name and unit_cost_usd -- so a stock-action import could mint the
+ * one receipt every interactive surface refuses: no supplier, no cost, and a
+ * lot whose blank cost then reads as free goods nobody declared. A gate on
+ * three of the four wires is not a gate.
+ *
+ * Exported because the import dispatcher must ask the SAME question before it
+ * creates a product for a row it is about to refuse: one kernel, four call
+ * sites, not a second implementation.
+ */
+export function unifiedStockReceiptRefusal(
+  input: Pick<StockReceiptGateInput, 'supplierName' | 'lotSupplierName' | 'lotAttributionDeferred' | 'unitCostUsd' | 'freeGoods'>,
+): string | null {
+  return stockReceiptGateMessage(stockReceiptGateCode({
+    isStockIn: true,
+    supplierName: input.supplierName,
+    lotSupplierName: input.lotSupplierName,
+    lotAttributionDeferred: input.lotAttributionDeferred,
+    unitCostUsd: input.unitCostUsd,
+    freeGoods: input.freeGoods,
+    // An import row is always a new receipt. 'correction' is the undo/restore
+    // exemption and no import can claim it.
+    attribution: 'receipt',
+  }))
+}
 
 export interface UnifiedStockAddInput {
   jobId: string
@@ -15,11 +47,27 @@ export interface UnifiedStockAddInput {
   sellingPriceUsd?: number | null
   wholesalePriceUsd?: number | null
   costPriceUsd?: number | null
+  /**
+   * The sheet's OWN cost_price cell, with no catalog fallback. The gate must
+   * be asked about what the operator actually typed on this row, never a
+   * value costPriceUsd inherited from an existing product's catalog cost --
+   * that inheritance feeds the product-price columns, not the receipt gate.
+   * Import callers (importEngine.ts) always pass this explicitly, including
+   * an explicit `null` when the sheet's cost column was blank. A caller that
+   * builds one receipt cost with no sheet/catalog distinction (a direct
+   * unit-level caller with no import sheet behind it) may omit the field
+   * entirely, in which case the gate falls back to costPriceUsd itself,
+   * unchanged from before this field existed.
+   */
+  sheetCostPriceUsd?: number | null
   /** Supplier this batch was bought from (migration 0062). Stored on batch
    *  creation; an existing batch's blank supplier is backfilled, but a
    *  supplier already recorded on the lot is never overwritten. */
   supplierName?: string | null
   supplierId?: number | null
+  /** The operator's explicit "these goods were free" declaration (N14-D),
+   *  threaded from the sheet's optional free_goods column. */
+  freeGoods?: boolean | null
 }
 
 export interface UnifiedStockCommitResult {
@@ -90,8 +138,19 @@ function normalizedBatchLabel(value: unknown): string {
   return String(value || '').trim().replace(/[\u0000-\u001f]/g, '').slice(0, 120).toLowerCase().replace(/\s+/g, ' ')
 }
 
-function batchIdentity(date: string, label: string | null | undefined): { batchKey: string; lotCode: string; receivedAt: string } {
-  const receivedAt = normalizeToIsoDate(date)
+/**
+ * Exported so the import dispatcher can compute the SAME lot key this writer
+ * keys its idempotency/attribution reads on (productId + batchKey) -- it
+ * needs that key to serialize concurrent add rows that would otherwise race
+ * each other's first-read-of-lot_supplier_name (see importEngine.ts's
+ * pendingLotKeys). One identity rule, not a second hand-copy of it.
+ */
+export function batchIdentity(date: string, label: string | null | undefined): { batchKey: string; lotCode: string; receivedAt: string } {
+  // `date` is already ISO by the time it reaches here (stockActionImport.ts
+  // normalised the sheet cell under its own column's order), so this is a
+  // re-read, not a fresh parse -- the order is stated anyway so the call
+  // cannot silently change meaning if the default ever moves.
+  const receivedAt = normalizeToIsoDate(date, 'month-first')
   if (!receivedAt) throw new Error('Stock action date is invalid')
   const datedCode = dateToBatchCode(receivedAt)
   const explicit = String(label || '').trim().replace(/[\u0000-\u001f]/g, '').slice(0, 120)
@@ -182,23 +241,53 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
   // next batch_number are independent scalars, so read them together. Across
   // a 20k+ row migration this saves a full D1 latency per unit (collapses the
   // separate existing-check and MAX(batch_number) reads into one).
+  // lot_supplier_name rides along for the gate below: this add may top up a
+  // lot that is ALREADY attributed, and first attribution sticks (the UPDATE
+  // further down only COALESCE-fills a blank). Demanding the sheet retype a
+  // supplier the writer cannot change would refuse a complete receipt.
   const pre = await db.prepare(`
     SELECT
       (SELECT status FROM import_stock_action_commits WHERE job_id = @jobId AND action_key = @actionKey) AS status,
-      (SELECT COALESCE(MAX(batch_number), 0) + 1 FROM product_batches WHERE variant_product_id = @productId) AS next_batch
-  `).get<{ status: string | null; next_batch: number }>({ jobId, actionKey, productId })
+      (SELECT COALESCE(MAX(batch_number), 0) + 1 FROM product_batches WHERE variant_product_id = @productId) AS next_batch,
+      (SELECT supplier_name FROM product_batches WHERE variant_product_id = @productId AND batch_key = @batchKey) AS lot_supplier_name
+  `).get<{ status: string | null; next_batch: number; lot_supplier_name: string | null }>({ jobId, actionKey, productId, batchKey })
+  // A redelivery of a row that already landed stays idempotent: the gate runs
+  // on receipts this call would WRITE, never on one the ledger already holds.
   if (pre?.status === 'applied') return { actionKey, applied: true, alreadyApplied: true }
   const batchNumber = Math.max(1, Number(pre?.next_batch || 1))
   const guard = pendingGuard()
   const supplierName = String(input.supplierName || '').trim().replace(/\s{2,}/g, ' ').slice(0, 120) || null
   const supplierId = Number.isSafeInteger(Number(input.supplierId)) && Number(input.supplierId) > 0 ? Number(input.supplierId) : null
+  // The same refusal, with the same words, that POST /adjust, POST /api/batches
+  // and the stock-in session return. Thrown before the first write, so a
+  // refused row leaves no pending commit, no lot and no movement behind --
+  // applyStockActionsJob records the message on the row and the operator sees
+  // it in the finished report.
+  const freeGoods = input.freeGoods === true
+  // The GATE must see what the sheet's own cost_price cell said, never a
+  // value costPriceUsd inherited from an existing product's catalog cost --
+  // that inheritance exists to keep the product-price columns filled, not to
+  // manufacture a receipt cost the operator never typed (sibling:F13
+  // verifier round 2). A caller with no sheet/catalog distinction (no
+  // sheetCostPriceUsd key at all) keeps today's behavior unchanged.
+  const sheetCostPriceUsd = 'sheetCostPriceUsd' in input ? input.sheetCostPriceUsd : input.costPriceUsd
+  const refusal = unifiedStockReceiptRefusal({
+    supplierName,
+    lotSupplierName: pre?.lot_supplier_name ?? null,
+    unitCostUsd: sheetCostPriceUsd,
+    freeGoods,
+  })
+  if (refusal) throw new Error(refusal)
   const params = {
     jobId, actionKey, rowNumber, productId, productName, branchId, branchName,
     quantity, batchKey, lotCode, receivedAt, batchNumber, supplierName, supplierId,
     sellingPriceUsd: optionalMoney(input.sellingPriceUsd),
     wholesalePriceUsd: optionalMoney(input.wholesalePriceUsd),
     costPriceUsd: optionalMoney(input.costPriceUsd),
-    reason: `Unified stock import ${jobId}, row ${rowNumber}`,
+    // The declaration is stamped into the words, not just the zero -- the
+    // same appendReceiptNotes routes/batches.ts:218 uses for the interactive
+    // wire, so a $0.00 accepted receipt reads as free goods on this wire too.
+    reason: appendReceiptNotes(`Unified stock import ${jobId}, row ${rowNumber}`, freeGoods ? [FREE_GOODS_REASON_NOTE] : []),
   }
 
   await db.batch([
@@ -347,7 +436,8 @@ export async function applyUnifiedStockSale(db: D1Compat, input: UnifiedStockSal
   if (!saleGroupKey) throw new Error('Sale group is required')
   if (!Array.isArray(input.lines) || input.lines.length === 0) throw new Error('Sale group has no lines')
   if (input.lines.length > MAX_SALE_LINES) throw new Error(`Sale group exceeds the ${MAX_SALE_LINES}-line safety limit`)
-  const soldAt = normalizeToIsoDate(input.date)
+  // Same: an already-ISO date carried through from the import rows.
+  const soldAt = normalizeToIsoDate(input.date, 'month-first')
   if (!soldAt) throw new Error('Sale date is invalid')
 
   const groupHash = await sha256Hex(saleGroupKey)

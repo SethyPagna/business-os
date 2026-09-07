@@ -1,3 +1,7 @@
+// N13: a stock-in session names its actor from the same movement rows the
+// Stock Change ledger reads, so it resolves the account username the same
+// way -- one rule, one implementation (lib/movementActorName.ts).
+import { movementActorNameSql } from './movementActorName'
 // The movement types that mean "goods were received". 'add' is the canonical
 // one -- POST /api/inventory/adjust, POST /api/batches and (since this change)
 // the unified stock-in session all write it, and it is the only receipt string
@@ -22,13 +26,13 @@ export const STOCK_IN_SESSION_KEY_SQL = `CASE
        COALESCE(CAST(b.supplier_id AS TEXT), lower(trim(COALESCE(b.supplier_name, ''))))
 END`
 
-// Who did it: the account USERNAME, resolved live from the id. The movement's
-// own user_name column is a DISPLAY-NAME snapshot taken at write time, so it
-// shows the wrong thing twice over -- the wrong field, and a stale copy of it
-// after a rename. The account id is the source of truth; the snapshot stays as
-// the fallback for a movement whose user row no longer exists (or that never
-// had a user_id, as legacy imports do).
-const SESSION_ACTOR_SQL = `COALESCE((SELECT u.username FROM users u WHERE u.id = m.user_id), m.user_name)`
+// Who did it: the account USERNAME, resolved live from the id, because a
+// movement's own user_name column is a DISPLAY-NAME snapshot taken at write
+// time -- the wrong field, and a stale copy of it after a rename. This file
+// used to carry a private SESSION_ACTOR_SQL saying exactly that; the shared
+// movementActorNameSql() expression is reused by the Stock Change
+// ledger, GET /movements and the inventory bootstrap, so the four surfaces
+// cannot answer "who" four ways.
 
 // The product columns a receipt line shows, read once for both line sources.
 const PRODUCT_COLUMNS_SQL = `p.barcode, p.sku, p.unit, p.brand, p.category, p.tag_label,
@@ -82,7 +86,7 @@ function sessionLineRowsSql(where: { movement: string; zero: string }): string {
            -- as missing made the receipt claim a cost it does not know
            -- (a7ff72f7). Keep the test on NULL, never on > 0.
            CASE WHEN m.total_cost_usd IS NOT NULL THEN 0 ELSE 1 END AS cost_missing,
-           m.reason, m.reference_id, m.user_id, ${SESSION_ACTOR_SQL} AS user_name, m.created_at, m.batch_id,
+           m.reason, m.reference_id, m.user_id, ${movementActorNameSql('m')} AS user_name, m.created_at, m.batch_id,
            b.lot_code AS batch_lot_code, b.received_at AS batch_received_at,
            b.supplier_id AS batch_supplier_id, b.supplier_name AS batch_supplier_name,
            b.payment_status AS batch_payment_status, b.credit_due_date AS batch_credit_due_date,

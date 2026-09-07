@@ -86,6 +86,9 @@ const salesAnalytics = loadReal('lib/salesAnalytics.ts', {
   './db': { getDb: () => db },
   './businessDateWindow': businessDateWindow,
 })
+// routes/inventory.ts's per-product revenue/COGS SQL moved into this shared
+// ledger (audit sibling:F14); the REAL module, so the route builds real SQL.
+const productSalesLedger = loadReal('lib/productSalesLedger.ts', { './salesAnalytics': salesAnalytics })
 // routes/batches.ts imports the shared optimistic-locking helpers; without
 // this override the transpiled module's './conflictControl' require resolves
 // against scripts/ and the whole test file dies at load time.
@@ -105,6 +108,15 @@ const lowStockStub = { ...lowStockRule, loadLowStockConfig: async () => lowStock
 const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
 // N13: the shared actor / branch kernels these routes now import.
 const movementBranchNameKernel = loadReal('lib/movementBranchName.ts')
+// N13: and the actor / receipt kernels the movement readers now import.
+const movementActorNameKernel = loadReal('lib/movementActorName.ts')
+const movementReferenceKernel = loadReal('lib/movementReference.ts')
+// N13 (round 2): the /movements search haystack is built from those same two
+// expressions, so the route imports the haystack kernel too.
+const movementSearchKernel = loadReal('lib/movementSearch.ts', {
+  './movementActorName': movementActorNameKernel,
+  './movementBranchName': movementBranchNameKernel,
+})
 const inventoryRoute = loadReal('routes/inventory.ts', {
   // REAL, not stubbed: POST /inventory/transfer now refuses a shop -> warehouse
   // move through this guard, so the fixtures here run through the rejection
@@ -112,11 +124,15 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/branchRoleGuards': loadReal('lib/branchRoleGuards.ts', { './branchRoles': loadReal('lib/branchRoles.ts') }),
   '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/movementBranchName': movementBranchNameKernel,
+  '../lib/movementActorName': movementActorNameKernel,
+  '../lib/movementReference': movementReferenceKernel,
+  '../lib/movementSearch': movementSearchKernel,
   '../lib/db': { getDb: () => db },
   // routes/inventory.ts buckets movement dates in UTC+7 through the pure
   // businessDateWindow helpers; provide the real module so its date SQL resolves.
   '../lib/businessDateWindow': businessDateWindow,
   '../lib/salesAnalytics': salesAnalytics,
+  '../lib/productSalesLedger': productSalesLedger,
   '../lib/productBatches': productBatches,
   '../lib/batchCode': batchCode,
   '../lib/stockReceiptGate': stockReceiptGate,

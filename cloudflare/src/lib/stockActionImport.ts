@@ -23,6 +23,11 @@ export const UNIFIED_STOCK_COLUMNS = [
   // same product may carry different suppliers across batches — supplier
   // is stored on the BATCH the add creates (migration 0062).
   'supplier',
+  // Optional (N14-D): the operator's explicit "these goods were free"
+  // declaration. Without it, a $0.00 cost_price on an add row is refused --
+  // the gate's free_goods_required message used to point the operator at a
+  // control this sheet had no column for.
+  'free_goods',
 ] as const
 
 export interface UnifiedStockCatalogProduct {
@@ -59,9 +64,21 @@ export interface UnifiedStockResolvedRow {
   sellingPriceUsd: number | null
   wholesalePriceUsd: number | null
   costPriceUsd: number | null
+  /**
+   * The sheet's OWN cost_price cell, with no catalog fallback (unlike
+   * costPriceUsd, which inherits an existing product's cost_price_usd so the
+   * product-price columns stay filled). The receipt gate must see what the
+   * operator actually typed on THIS row -- an existing product's catalog
+   * cost is not a cost this receipt states, and feeding it to the gate let a
+   * sheet with a supplier column but no cost_price column mint a real
+   * receipt cost the operator never typed (sibling:F13 verifier round 2).
+   */
+  sheetCostPriceUsd: number | null
   batchLabel: string | null
   /** As-entered supplier for this row's batch; '' when the column is absent/blank. */
   supplier: string
+  /** The sheet's optional free_goods column, parsed to a boolean (N14-D). */
+  freeGoods: boolean
   branchRefs: Array<{ slot: 'shop' | 'warehouse'; branchId: number; branchName: string; pending: boolean; value: number }>
   plan: StockActionPlan | null
   conflicts: string[]
@@ -74,6 +91,14 @@ function text(value: unknown): string {
 
 function key(value: unknown): string {
   return text(value).toLowerCase().replace(/\s+/g, ' ')
+}
+
+/** The sheet's free_goods cell, read the way a spreadsheet checkbox column
+ *  is actually typed -- '1'/'true'/'yes'/'y', case-insensitive; anything
+ *  else (blank included) is "not declared free". */
+function parseFreeGoodsFlag(value: unknown): boolean {
+  const normalized = text(value).toLowerCase()
+  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'y'
 }
 
 function optionalNumber(value: unknown, field: string): { value: number | null; error: string | null } {
@@ -173,7 +198,12 @@ export function resolveUnifiedStockImportRows(
     const rowNumber = Number(raw._rowNumber) > 0 ? Number(raw._rowNumber) : index + 2
     const name = text(raw.name)
     const barcode = text(raw.barcode)
-    const date = normalizeToIsoDate(text(raw.date)) || ''
+    // The sheet's bare `date` header names no format, so it keeps the only
+    // meaning it has ever had -- month-first -- and says so explicitly rather
+    // than leaning on a default. This is a FILE the shop already owns, not a
+    // field anyone types into the app; see unifiedStockImport.ts for the
+    // client-side mirror of the same ruling.
+    const date = normalizeToIsoDate(text(raw.date), 'month-first') || ''
     const action = text(raw.action)
     const shop = optionalNumber(raw.shop, 'shop quantity')
     const warehouse = optionalNumber(raw.warehouse, 'warehouse quantity')
@@ -190,7 +220,7 @@ export function resolveUnifiedStockImportRows(
     const cost = optionalMoney(raw.cost_price, 'cost price')
     const errors = [shop.error, warehouse.error, selling.error, wholesale.error, cost.error].filter((value): value is string => !!value)
     if (!name && !barcode) errors.push('Name or barcode is required.')
-    if (!date) errors.push('Date must be mm/dd/yyyy or yyyy-mm-dd.')
+    if (!date) errors.push('Date must be mm/dd/yyyy (month first, as this column has always been) or yyyy-mm-dd.')
     if (shop.value == null && warehouse.value == null) errors.push('Enter a shop or warehouse quantity.')
 
     const batchLabel = text(raw.batch)
@@ -239,8 +269,10 @@ export function resolveUnifiedStockImportRows(
       sellingPriceUsd: selling.value ?? matched.product?.selling_price_usd ?? null,
       wholesalePriceUsd: wholesale.value ?? matched.product?.wholesale_price_usd ?? null,
       costPriceUsd: cost.value ?? matched.product?.cost_price_usd ?? null,
+      sheetCostPriceUsd: cost.value,
       batchLabel: batchLabel || null,
       supplier: text(raw.supplier).replace(/\s{2,}/g, ' ').slice(0, 120),
+      freeGoods: parseFreeGoodsFlag(raw.free_goods),
       branchRefs,
       plan: null,
       conflicts,

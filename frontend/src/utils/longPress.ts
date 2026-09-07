@@ -13,6 +13,13 @@
 // in a single `useRef` at the page component's top level, see
 // Products.tsx) and passes that row's slot in here; everything below
 // just reads/writes plain fields on it, no hooks involved.
+// The one hold duration in the app. Exported because more than one
+// surface now depends on it meaning the same thing -- the Products row's
+// select-mode hold and the shared copy float's press-and-hold are the same
+// gesture on the same element, so they cannot disagree about how long a
+// hold is.
+export const LONG_PRESS_THRESHOLD_MS = 500
+
 export interface LongPressState {
   timerId: number | null
   startX: number
@@ -25,10 +32,14 @@ export interface LongPressState {
   // drag/scroll that was neither a tap nor a hold. Cleared on the next
   // `start()` and consumed (reset to false) by `end()`.
   cancelled: boolean
+  // The element where this press began. Passed back with the short-click
+  // callback so a row can distinguish a copy trigger from the rest of its
+  // surface without changing the gesture detector's ownership.
+  target: EventTarget | null
 }
 
 export function createLongPressState(): LongPressState {
-  return { timerId: null, startX: 0, startY: 0, fired: false, cancelled: false }
+  return { timerId: null, startX: 0, startY: 0, fired: false, cancelled: false, target: null }
 }
 
 // Guards against the "ghost click" that follows a fired long-press.
@@ -80,7 +91,7 @@ export interface LongPressHandlers {
 
 interface LongPressOptions {
   onLongPress: () => void
-  onClick?: () => void
+  onClick?: (target: EventTarget | null) => void
   thresholdMs?: number
   moveTolerancePx?: number
   // Skip the whole gesture -- e.g. selection mode is already active, so
@@ -109,7 +120,7 @@ interface LongPressOptions {
 // same, while giving an ordinary tap enough slack to register.
 export function createLongPressHandlers(
   state: LongPressState,
-  { onLongPress, onClick, thresholdMs = 500, moveTolerancePx = 18, disabled = false }: LongPressOptions,
+  { onLongPress, onClick, thresholdMs = LONG_PRESS_THRESHOLD_MS, moveTolerancePx = 18, disabled = false }: LongPressOptions,
 ): LongPressHandlers {
   const clearTimer = () => {
     if (state.timerId != null) {
@@ -118,12 +129,13 @@ export function createLongPressHandlers(
     }
   }
 
-  const start = (x: number, y: number) => {
+  const start = (x: number, y: number, target: EventTarget | null) => {
     if (disabled) return
     state.fired = false
     state.cancelled = false
     state.startX = x
     state.startY = y
+    state.target = target
     clearTimer()
     state.timerId = window.setTimeout(() => {
       state.fired = true
@@ -133,6 +145,8 @@ export function createLongPressHandlers(
 
   const end = () => {
     clearTimer()
+    const target = state.target
+    state.target = null
     if (state.fired) {
       // Long-press already fired -- this release is just the follow-up
       // mouseup/touchend, not a separate click.
@@ -145,7 +159,7 @@ export function createLongPressHandlers(
       state.cancelled = false
       return
     }
-    if (!disabled) onClick?.()
+    if (!disabled) onClick?.(target)
   }
 
   const cancel = () => {
@@ -161,12 +175,12 @@ export function createLongPressHandlers(
   }
 
   return {
-    onMouseDown: (event) => start(event.clientX, event.clientY),
+    onMouseDown: (event) => start(event.clientX, event.clientY, event.target),
     onMouseUp: () => end(),
     onMouseLeave: () => cancel(),
     onTouchStart: (event) => {
       const touch = event.touches[0]
-      if (touch) start(touch.clientX, touch.clientY)
+      if (touch) start(touch.clientX, touch.clientY, event.target)
     },
     onTouchEnd: () => end(),
     onTouchMove: (event) => {

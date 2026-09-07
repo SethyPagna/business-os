@@ -5,6 +5,7 @@ import X from 'lucide-react/dist/esm/icons/x.js'
 import SlidersHorizontal from 'lucide-react/dist/esm/icons/sliders-horizontal.js'
 import ArrowRightLeft from 'lucide-react/dist/esm/icons/arrow-right-left.js'
 import Layers from 'lucide-react/dist/esm/icons/layers.js'
+import { useCopyFloat } from '../shared/CopyFloat.tsx'
 import { calculateProductDiscount } from '../../utils/pricing.ts'
 import { buildBatchPreview, getVisibleProductBatches } from '../../utils/productBatches.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
@@ -82,6 +83,10 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
   // added this component's first hook below `if (!p) return null`, which was
   // unreachable from every current call site but a latent violation.
   const lowStockConfig = useLowStockConfig()
+  // Same four copyable product fields as the Products-side detail modal
+  // (name, brand, supplier, barcode), same shared float. Declared with the
+  // other hooks, above the early return.
+  const copy = useCopyFloat(T)
   if (!p) return null
 
   const costPriceUsd = Number(p.purchase_price_usd || p.cost_price_usd || 0)
@@ -133,7 +138,7 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
       <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
         <div className="flex flex-shrink-0 items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
           <div className="min-w-0 flex-1">
-            <div className="break-words font-bold text-gray-900 dark:text-white">{p.name}</div>
+            <div className="break-words font-bold text-gray-900 dark:text-white" {...copy(p.name)}>{p.name}</div>
             <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
               {p.sku ? <span className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-xs text-gray-400 dark:bg-gray-700">{p.sku}</span> : null}
               {p.category ? <span className="text-xs text-blue-600 dark:text-blue-400">{p.category}</span> : null}
@@ -142,8 +147,8 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
                   same text-xs sizing as the rest of this line, so they reuse
                   this row's existing wrap space instead of costing a new
                   row's worth of vertical space every time. */}
-              {p.brand ? <span className="text-xs text-gray-400">&middot; {p.brand}</span> : null}
-              {p.barcode ? <span className="shrink-0 whitespace-nowrap font-mono text-xs text-gray-400">&middot; {p.barcode}</span> : null}
+              {p.brand ? <span className="text-xs text-gray-400" {...copy(p.brand)}>&middot; {p.brand}</span> : null}
+              {p.barcode ? <span className="shrink-0 whitespace-nowrap font-mono text-xs text-gray-400" {...copy(p.barcode)}>&middot; {p.barcode}</span> : null}
             </div>
           </div>
           <button type="button" onClick={onClose} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600" aria-label={T('close', 'Close')}><X className="h-4 w-4" /></button>
@@ -230,17 +235,19 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
           </div>
 
           <div className="grid gap-2 sm:grid-cols-2 sm:gap-x-4">
-            {[
+            {([
               // Brand + barcode now live in the header row next to the
               // category/unit line -- kept out of this list to avoid
               // showing them twice.
-              [T('label_sku', 'SKU'), p.sku],
-              [T('label_supplier', 'Supplier'), p.supplier],
-              [T('label_description', 'Description'), p.description],
-            ].filter(([, value]) => value).map(([label, value]) => (
-              <div key={label} className="flex gap-2 text-sm">
-                <span className="w-20 flex-shrink-0 pt-0.5 text-[11px] text-gray-400">{label}</span>
-                <span className="break-all text-gray-700 dark:text-gray-300">{value}</span>
+              { label: T('label_sku', 'SKU'), value: p.sku },
+              // Supplier is the one row here that is a copyable product
+              // field; SKU is an identifier and description is prose.
+              { label: T('label_supplier', 'Supplier'), value: p.supplier, copyable: true },
+              { label: T('label_description', 'Description'), value: p.description },
+            ] as Array<{ label: string; value?: string; copyable?: boolean }>).filter((row) => row.value).map((row) => (
+              <div key={row.label} className="flex gap-2 text-sm">
+                <span className="w-20 flex-shrink-0 pt-0.5 text-[11px] text-gray-400">{row.label}</span>
+                <span className="break-all text-gray-700 dark:text-gray-300" {...(row.copyable ? copy(row.value) : {})}>{row.value}</span>
               </div>
             ))}
           </div>

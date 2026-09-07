@@ -138,6 +138,29 @@ export default function InventoryProductsSurface({
       {k !== null && k !== 0 ? <span className="block text-[11px] font-normal text-slate-400">{fmtKHR(k)}</span> : null}
     </span>
   }
+  // Net sold, Revenue, COGS and Profit are the server's figures, rendered as
+  // they come. All FOUR used to disagree with the detail pane opened from this
+  // very row -- ProductDetailModal.tsx clamps qty_sold, revenue_usd and
+  // cogs_usd with Math.max(0, ...) and derives Profit from the clamped pair,
+  // over the SAME row object -- because the Worker's four hand-copied
+  // sales-minus-returns joins could emit a negative revenue or COGS, and
+  // because the per-product ledger that replaced them subtracted a whole
+  // customer return at every branch the sale touched (a sale split across
+  // branches reported "Net sold -2" here beside "0" in the pane).
+  // cloudflare/src/lib/productSalesLedger.ts now apportions each return over
+  // the sale's branch lines -- each column against its own denominator, and
+  // units by largest remainder because Net sold below is rendered with no
+  // formatting at all -- and makes qty_sold >= 0, revenue_usd >= 0 and
+  // cogs_usd >= 0 true by construction. So all four clamps are no-ops and the
+  // two surfaces agree cell for cell. That agreement is about the four cells,
+  // not about the branch arithmetic behind them: the ledger's own header is
+  // where the branch slices are shown to add back up to the unfiltered row,
+  // and where the over-refund cases that no scoping rule reaches are named.
+  //
+  // A negative reaching this line therefore means one thing: the product was
+  // genuinely sold below cost. That is real and stays visible (yellow). Do NOT
+  // add a floor here -- a wrong negative is a ledger defect to root-cause, and
+  // flooring it would hide the next one the way the pane's clamps hid these.
   const profitTone = (value: number | null) => (value !== null && value < 0 ? 'text-yellow-600' : 'text-blue-600 dark:text-blue-400')
   const costTone = 'text-red-700 dark:text-red-400'
   const priceTone = 'text-green-700 dark:text-green-400'
@@ -197,12 +220,27 @@ export default function InventoryProductsSurface({
               <Fragment key={group.key}>
                 {group.items.length > 1 ? (
                   <tr className="border-t border-slate-200 bg-slate-50/80 dark:border-slate-700 dark:bg-slate-800/50">
-                    <td colSpan={columnCount} className="px-3 py-1.5 font-semibold text-slate-600 dark:text-slate-300"><button type="button" className="min-h-11 text-left" aria-expanded={!collapsed.has(group.key)} onClick={() => toggle(group.key)}>{collapsed.has(group.key) ? '▸' : '▾'} {group.label} <span className="ml-1 font-normal text-slate-400">{group.items.length}</span></button></td>
+                    {/* N36: the group title IS a product name (groupInventoryProducts
+                        sets `label: group.name`), so it scrolls like every other
+                        name cell. It needs the inner span rather than the class on
+                        the button, because this table is neither table-fixed nor
+                        colgroup'd: a nowrap block inside `colSpan={columnCount}`
+                        would push the whole 680px-min table wider. As a FLEX item
+                        the .scroll-x-clean span's `min-width: 0` lets it shrink
+                        below its text, so the row keeps its width and the name
+                        scrolls inside it. */}
+                    <td colSpan={columnCount} className="px-3 py-1.5 font-semibold text-slate-600 dark:text-slate-300"><button type="button" className="flex min-h-11 w-full items-center gap-1 text-left" aria-expanded={!collapsed.has(group.key)} onClick={() => toggle(group.key)}><span className="shrink-0">{collapsed.has(group.key) ? '▸' : '▾'}</span><span className="scroll-x-clean">{group.label}</span><span className="ml-1 shrink-0 font-normal text-slate-400">{group.items.length}</span></button></td>
                   </tr>
                 ) : null}
                 {!collapsed.has(group.key) && group.rows.map((product) => (
                   <tr key={String(product.id)} className="border-t border-slate-100 hover:bg-blue-50/60 dark:border-slate-800 dark:hover:bg-blue-900/10" onClick={() => { if (product.__mergedProductIds?.length <= 1) onOpenDetail(product) }}>
-                    <td className="max-w-[18rem] px-3 py-1.5"><div className="truncate font-medium text-slate-800 dark:text-slate-100">{product.name || '—'}</div><div className="truncate text-[10px] text-slate-400">{[product.brand, product.category].filter(Boolean).join(' · ')}</div></td>
+                    {/* N36: the product NAME scrolls horizontally inside the cell
+                        (.scroll-x-clean, the one shared class in styles/main.css)
+                        instead of ending in an unreadable ellipsis -- same rule as
+                        the Products page and its group titles. The brand/category
+                        line under it is derived metadata, not the name, and keeps
+                        ordinary truncation. */}
+                    <td className="max-w-[18rem] px-3 py-1.5"><div className="scroll-x-clean font-medium text-slate-800 dark:text-slate-100">{product.name || '—'}</div><div className="truncate text-[10px] text-slate-400">{[product.brand, product.category].filter(Boolean).join(' · ')}</div></td>
                     <td className="px-3 py-1.5 font-mono text-slate-500">{product.barcode || '—'}</td>
                     <td className="px-3 py-1.5 text-right font-semibold">{quantity(product)}</td>
                     <td className="min-w-28 px-3 py-1.5 text-[11px]">{branchLines(product)}</td>
@@ -227,9 +265,14 @@ export default function InventoryProductsSurface({
           : error ? <div className="card p-6 text-center text-sm text-red-600">{error}</div>
             : groups.length === 0 ? <div className="card p-6 text-center text-sm text-gray-400">{t('no_data') || 'No data'}</div>
               : groups.map((group) => <div key={group.key} className="min-w-0 space-y-1">
-                {group.items.length > 1 ? <button type="button" className="min-h-11 w-full break-words text-left text-sm font-semibold" aria-expanded={!collapsed.has(group.key)} onClick={() => toggle(group.key)}>{collapsed.has(group.key) ? '▸' : '▾'} {group.label} ({group.items.length})</button> : null}
+                {/* N36: same group-title rule as this surface's desktop table
+                    above -- the label is the product name, so it scrolls in place
+                    instead of wrapping to a second row. min-h-11 stays: it is the
+                    44px touch target, not a wrapping affordance. */}
+                {group.items.length > 1 ? <button type="button" className="min-h-11 w-full scroll-x-clean text-left text-sm font-semibold" aria-expanded={!collapsed.has(group.key)} onClick={() => toggle(group.key)}>{collapsed.has(group.key) ? '▸' : '▾'} {group.label} ({group.items.length})</button> : null}
                 {!collapsed.has(group.key) && group.rows.map((product) => <div key={String(product.id)} className="card min-w-0 p-2 text-sm">
-                  <div className="flex min-w-0 items-start justify-between gap-2"><span className="min-w-0 break-words font-medium">{product.name || '—'}</span><strong>{quantity(product)}</strong></div>
+                  {/* N36: same shared class as this surface's desktop row above. */}
+                  <div className="flex min-w-0 items-start justify-between gap-2"><span className="scroll-x-clean font-medium">{product.name || '—'}</span><strong>{quantity(product)}</strong></div>
                   {/* Barcode only -- the SKU half of this line went with the column. */}
                   <p className="break-all text-[11px] text-slate-500">{product.barcode || '—'}</p>
                   <div className="my-1 text-xs">{branchLines(product)}</div>
