@@ -285,7 +285,7 @@ app.patch('/:id', async (c) => {
     // convention is day-first. Ambiguous 03/09/2026 must therefore remain
     // September 3, matching the frontend lineage date shown to the user.
     const iso = normalizeTypedDate(body.received_at) || (body.received_at ? null : new Date().toISOString().slice(0, 10))
-    if (body.received_at && !iso) return c.json({ error: 'received_at is not a valid date' }, 400)
+    if (body.received_at && !iso) return c.json({ error: 'received_at is not a valid date (use dd/mm/yyyy)' }, 400)
     const resolvedIso = iso || new Date().toISOString().slice(0, 10)
     const code = dateToBatchCode(resolvedIso) as string
     updates.push('received_at = @received_at', 'batch_key = @batch_key', 'lot_code = @lot_code')

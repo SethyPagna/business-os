@@ -30,5 +30,7 @@ assert.doesNotMatch(
   /if \(body\.received_at !== undefined\) \{[\s\S]{0,300}normalizeToIsoDate\(body\.received_at/,
   'the lineage edit gate must not call the import-oriented parser for typed dates',
 )
+assert.match(route, /received_at is not a valid date \(use dd\/mm\/yyyy\)/,
+  'invalid typed dates must name the accepted day-first order')
 
 console.log('PASS batch received-date edits preserve shared typed day-first lineage')
