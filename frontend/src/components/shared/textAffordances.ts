@@ -230,6 +230,23 @@ let pressElement: HTMLElement | null = null
 // Which affordance armed the live press -- a copy field, or a clipped cell
 // whose only reveal on a touch screen is the hold.
 let pressKind: AffordanceKind = 'copy'
+// The element a touch gesture just fired on, and how long the browser's
+// replayed mouse events for it stay attributable to that gesture.
+//
+// Every tap and hold on a touch screen is followed by a synthetic
+// mousedown/mouseup/click on the same element -- that is how a page written
+// for a mouse works on a phone at all. For a TAP that replay is harmless
+// (the row opens the same record twice, idempotently) and it is left alone.
+// For a gesture this controller CLAIMED it is not: the row's own detector
+// never saw the touchstart, so the compat mousedown starts a press on the
+// row and the compat mouseup ends it -- synthesising "open this record"
+// behind the panel the hold just produced, while that same mousedown
+// dismisses the panel on its way past.
+let gestureElement: HTMLElement | null = null
+let gestureUntil = 0
+// Browsers replay the compat pair within ~300ms of touchend; 700ms leaves
+// room for a slow frame without swallowing a deliberate press that follows.
+export const GESTURE_REPLAY_MS = 700
 
 const textFor = (element: HTMLElement, kind: AffordanceKind): string => (
   kind === 'copy'
@@ -336,6 +353,25 @@ const cancelHover = (): void => {
   hoverTimer = null
 }
 
+const armGestureReplay = (element: HTMLElement | null): void => {
+  gestureElement = element
+  gestureUntil = Date.now() + GESTURE_REPLAY_MS
+}
+
+const clearGestureReplay = (): void => {
+  gestureElement = null
+  gestureUntil = 0
+}
+
+// Is this mouse event the browser replaying a touch gesture this controller
+// already answered? Time-boxed AND element-scoped, so a press anywhere else
+// -- or on the same element once the window has passed -- behaves normally.
+const isGestureReplay = (node: EventTarget | null): boolean => {
+  if (!gestureElement) return false
+  if (Date.now() > gestureUntil) { clearGestureReplay(); return false }
+  return node instanceof Node && gestureElement.contains(node)
+}
+
 const apply = (intent: FloatIntent<HTMLElement>): void => {
   // Any deliberate intent supersedes a hover that has not opened yet, so a
   // pending dwell can never re-open the panel a click just closed.
@@ -428,6 +464,14 @@ export function ensureTextAffordances(next?: Partial<AffordanceLabels>): void {
   // view now covers. Declining the click means declining the reveal.
   document.addEventListener('click', (event) => {
     if (insideFloat(event.target)) return
+    // The last of the three events a touch gesture leaves behind. Swallow it
+    // and spend the window: whatever comes next is a real pointer again.
+    if (isGestureReplay(event.target)) {
+      cancelHover()
+      clearGestureReplay()
+      event.stopPropagation()
+      return
+    }
     const found = targetFrom(event.target)
     if (!found || !eligible(found)) { cancelHover(); return }
     if (!claimsClick(found.kind, insideClickableSurface(found.element))) { cancelHover(); return }
@@ -481,6 +525,10 @@ export function ensureTextAffordances(next?: Partial<AffordanceLabels>): void {
     // the press next. Only `apply()` used to disarm the dwell, and the paths
     // below that hand the press back to the surface never call it.
     cancelHover()
+    // Not a pointer at all: the browser replaying the gesture already
+    // answered. It must neither dismiss the panel that gesture opened nor
+    // start a press on the row underneath.
+    if (isGestureReplay(event.target)) { event.stopPropagation(); return }
     const found = targetFrom(event.target)
     // ONE ownership rule, at every entry point -- the press included.
     //
@@ -511,10 +559,17 @@ export function ensureTextAffordances(next?: Partial<AffordanceLabels>): void {
       return
     }
     pressElement = null
-    if (state && !pressWillOpenFloat(found)) apply({ type: 'dismiss' })
+    // A panel a GESTURE opened survives a press on its own element -- the
+    // element is the panel's subject, and re-pressing it is not "click
+    // elsewhere". A hover-opened reveal still dies on the press (that is what
+    // keeps it from hanging over the record a tap opens), which is why this
+    // reads the reason rather than only the element.
+    const gestureHolds = !!state && state.reason === 'gesture' && !!found && state.element === found.element
+    if (state && !gestureHolds && !pressWillOpenFloat(found)) apply({ type: 'dismiss' })
   }, true)
 
   document.addEventListener('mouseup', (event) => {
+    if (isGestureReplay(event.target)) { event.stopPropagation(); return }
     if (!pressElement) return
     event.stopPropagation()
     // A release before the threshold cancels the pending hold; the `click`
@@ -594,7 +649,14 @@ export function ensureTextAffordances(next?: Partial<AffordanceLabels>): void {
     // release is ours); tap -> the row opens the record (the release is
     // theirs); scroll -> nothing at all (the release is ours, and dropped).
     const cancelled = pressState.cancelled
-    if (pressState.fired || cancelled) event.stopPropagation()
+    if (pressState.fired || cancelled) {
+      event.stopPropagation()
+      // The row's detector never saw this press start, so the compat
+      // mousedown/mouseup the browser is about to replay would start and end
+      // one FOR it -- opening the record behind the panel. They belong to the
+      // gesture that produced them.
+      armGestureReplay(pressElement)
+    }
     press.onTouchEnd()
     pressElement = null
   }, true)

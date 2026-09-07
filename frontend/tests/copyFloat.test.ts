@@ -415,6 +415,54 @@ assert.equal(gestureOn(plainTwin, scroll), 0, 'control: a scroll opens nothing t
 await wait(LONG_PRESS_THRESHOLD_MS + 80)
 assert.equal(host.hidden, true, 'none of those four gestures was a hold, so no panel opened')
 
+// (d) THE COMPATIBILITY MOUSE EVENTS A TOUCH LEAVES BEHIND.
+//
+// Every tap and hold on a touch screen is followed by a synthetic
+// mousedown/mouseup/click on the same element -- that is how a page written
+// for a mouse works on a phone at all. The controller swallows touchstart
+// for the hold, so the row's detector never starts one; the compat
+// mousedown then STARTED one on the row and the compat mouseup ended it,
+// synthesising "open this product" behind the panel the hold had just
+// opened -- while that same compat mousedown, seeing a copy field whose
+// press it does not own, dismissed the panel on its way past. One hold: no
+// panel, and the record opened.
+//
+// A gesture's own element keeps its panel, and the release the browser
+// replays afterwards belongs to the gesture that produced it, not to the row.
+let compatOpened = 0
+const compatDetector = createLongPressState()
+const compatGestures = createLongPressHandlers(compatDetector, {
+  onLongPress: () => { /* select mode -- not what this counts */ },
+  onClick: () => { compatOpened += 1 },
+})
+type RowMouse = Parameters<typeof compatGestures.onMouseDown>[0]
+const deliverMouse = (event: { type: string; stopped: boolean }): void => {
+  if (event.stopped) return
+  if (event.type === 'mousedown') compatGestures.onMouseDown(event as unknown as RowMouse)
+  else if (event.type === 'mouseup') compatGestures.onMouseUp()
+}
+
+const compatPill = dom.el('span', { [COPY_ATTR]: 'Chan Sophea Supply Co.' })
+buildClickableRow(dom, compatPill)
+dom.fire('touchstart', { target: compatPill, touches: [{ clientX: 22, clientY: 60 }] })
+await wait(LONG_PRESS_THRESHOLD_MS + 80)
+assert.equal(host.hidden, false, 'the hold opens the copy panel')
+dom.fire('touchend', { target: compatPill })
+deliverMouse(dom.fire('mousedown', { target: compatPill, clientX: 22, clientY: 60 }))
+deliverMouse(dom.fire('mouseup', { target: compatPill }))
+dom.fire('click', { target: compatPill })
+assert.equal(host.hidden, false, 'the compat mouse events must not dismiss the panel the hold just opened')
+assert.equal(String(host.childNodes[0]?.textContent || ''), 'Chan Sophea Supply Co.')
+assert.equal(compatOpened, 0, 'and must not open the record behind it')
+dom.fire('keydown', { key: 'Escape' })
+assert.equal(host.hidden, true)
+
+// ...and the guard is spent, not sticky: an ordinary pointer press on the
+// same pill afterwards is the row's again, exactly as it was before.
+deliverMouse(dom.fire('mousedown', { target: compatPill, clientX: 22, clientY: 60 }))
+deliverMouse(dom.fire('mouseup', { target: compatPill }))
+assert.equal(compatOpened, 1, 'a later pointer press on the same pill still opens the record')
+
 dom.restore()
 
 console.log('PASS product name/brand/supplier/barcode copy through one shared float')

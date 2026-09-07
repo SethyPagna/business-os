@@ -35,7 +35,7 @@ import {
   nextFloatState,
   placeFloat,
 } from '../src/components/shared/textAffordances.ts'
-import { LONG_PRESS_THRESHOLD_MS } from '../src/utils/longPress.ts'
+import { LONG_PRESS_THRESHOLD_MS, createLongPressHandlers, createLongPressState } from '../src/utils/longPress.ts'
 import { buildClickableRow, installAffordanceDom, wait, type StubElement } from './affordanceDomStub.ts'
 
 const read = (path: string): string => readFileSync(new URL(`../src/${path}`, import.meta.url), 'utf8')
@@ -168,8 +168,11 @@ assert.equal((controller.match(/claimsClick\(found\.kind, insideClickableSurface
 // A press the surface owns must also CLOSE a panel hover already opened --
 // otherwise the detail view that press opens comes up underneath a float
 // still floating on the z-1200 layer, pointing at a cell it has covered.
-// Mouse and touch share the one rule.
-assert.equal((controller.match(/if \(state && !pressWillOpenFloat\(found\)\) apply\(\{ type: 'dismiss' \}\)/g) || []).length, 2,
+// Mouse and touch share the one rule; the mouse path carries one documented
+// exception (a panel the gesture itself opened on THIS element survives its
+// own replayed press -- see 5d), which is why this counts the shared
+// predicate rather than one literal line.
+assert.equal((controller.match(/!pressWillOpenFloat\(found\)\) apply\(\{ type: 'dismiss' \}\)/g) || []).length, 2,
   'mousedown and touchstart must both drop a panel the surface is about to cover')
 
 // Hover replaces a native `title` tooltip, which waits before it appears;
@@ -403,6 +406,66 @@ const fitsStart = dom.fire('touchstart', { target: fitsCell, touches: [{ clientX
 assert.equal(fitsStart.stopped, false, 'control: an un-clipped cell keeps the row every touch it had')
 await wait(LONG_PRESS_THRESHOLD_MS + 80)
 assert.equal(host.hidden, true, 'control: and holding it reveals nothing, because nothing is hidden')
+
+/* ---------------------------------------------------------------- *
+ * 5d. The compatibility mouse events that follow the reveal hold.
+ *
+ * 5b pins that a TAP's synthetic mousedown/mouseup/click reach the row --
+ * that is how the record opens. A HOLD's do not: the controller swallowed
+ * touchstart to arm the reveal, so the row's detector never started a
+ * press, and the compat mousedown/mouseup then started and ended one for
+ * it -- opening the record behind the panel the hold had just produced,
+ * while the same compat mousedown dismissed that panel on its way past.
+ *
+ * The two are told apart by WHY the panel is open: a hover-opened reveal
+ * still dies on a press (5b relies on it), a gesture-opened one on its own
+ * element does not.
+ * ---------------------------------------------------------------- */
+
+let revealOpened = 0
+const revealDetector = createLongPressState()
+const revealGestures = createLongPressHandlers(revealDetector, {
+  onLongPress: () => { /* select mode -- not what this counts */ },
+  onClick: () => { revealOpened += 1 },
+})
+type RowMouse = Parameters<typeof revealGestures.onMouseDown>[0]
+const deliverMouse = (event: { type: string; stopped: boolean }): void => {
+  if (event.stopped) return
+  if (event.type === 'mousedown') revealGestures.onMouseDown(event as unknown as RowMouse)
+  else if (event.type === 'mouseup') revealGestures.onMouseUp()
+}
+
+const compatCell = dom.el(
+  'span',
+  { class: 'dense-cell-truncate', title: 'Stock-in #20260903-101500, 12 cartons, Warehouse' },
+  { scrollWidth: 300, clientWidth: 90 },
+)
+buildClickableRow(dom, compatCell)
+dom.fire('touchstart', { target: compatCell, touches: [{ clientX: 40, clientY: 120 }] })
+await wait(LONG_PRESS_THRESHOLD_MS + 80)
+assert.equal(host.hidden, false, 'the hold reveals the clipped cell')
+dom.fire('touchend', { target: compatCell })
+deliverMouse(dom.fire('mousedown', { target: compatCell, clientX: 40, clientY: 120 }))
+deliverMouse(dom.fire('mouseup', { target: compatCell }))
+dom.fire('click', { target: compatCell })
+assert.equal(host.hidden, false, 'the compat mouse events must not dismiss the reveal the hold just opened')
+assert.equal(
+  String(host.childNodes[0]?.textContent || ''),
+  'Stock-in #20260903-101500, 12 cartons, Warehouse',
+)
+assert.equal(revealOpened, 0, 'and must not open the record behind it')
+dom.fire('keydown', { key: 'Escape' })
+assert.equal(host.hidden, true)
+
+// The hover-opened reveal still dies on a press, and that press still
+// belongs to the row -- 5b's tap depends on both.
+dom.fire('mouseover', { target: compatCell })
+await wait(HOVER_OPEN_DELAY_MS + 60)
+assert.equal(host.hidden, false, 'control: a dwell still opens it')
+deliverMouse(dom.fire('mousedown', { target: compatCell, clientX: 40, clientY: 120 }))
+deliverMouse(dom.fire('mouseup', { target: compatCell }))
+assert.equal(host.hidden, true, 'control: a hover-opened reveal closes on the press, as before')
+assert.equal(revealOpened, 1, 'control: and that press opened the record')
 
 dom.restore()
 
