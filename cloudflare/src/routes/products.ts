@@ -23,6 +23,7 @@ import { compareCosts, normalizeProductGroupName } from '../lib/productDetailRul
 import type { CostVerdict, MergedCostOutlier } from '../lib/productDetailRule'
 import { buildAtomicMergeHistoryStatements, finalizeAtomicMergeHistory, registerMergeFold, recordSupplierBackfillSnapshot, MERGE_REPARENT_TABLES, type MergeReversal, type MergeStockDisposition } from '../lib/undoAppliers'
 import { createProductMergeClusterPlan, MERGE_COST_FIELDS, MERGE_PRICE_FIELDS, parseProductMergeClusterPlan, productMergeCaseKey, productMergeCasAssertion, productMergeNumericError, productMergePlanKeeperMatches, productMergePlanSourceMemberMatches, resolveProductMergeClusterPlanEconomics, resolveProductMergeEconomics, type ProductMergeClusterPlan, type ProductMergeEconomics, type ProductMergeNumericIssue } from '../lib/productMerge'
+import { readProductMergeCaseSnapshot, readProductMergeDependentLotSnapshots } from '../lib/productMergeSnapshot'
 import { attachBatchCounts } from '../lib/productBatches'
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
@@ -2772,33 +2773,23 @@ export async function foldDuplicateProductInto(
   // Snapshot the keeper's current batch set at call time; a group caller
   // folding several duplicates commits each fold before the next call, so
   // a later duplicate sees (and folds into) batches an earlier one moved.
-  const canonicalBatchRows = await db
-    .prepare('SELECT id, batch_key, batch_number FROM product_batches WHERE variant_product_id = @id')
-    .all<{ id: number; batch_key: string; batch_number: number | null }>({ id: canonicalId })
+  const snapshot = await readProductMergeCaseSnapshot(db, canonicalId, dup.id, MERGE_REPARENT_TABLES)
+  const canonicalBatchRows = snapshot.canonicalBatchRows
   const canonicalBatchIdByKey = new Map<string, number>(canonicalBatchRows.map((b) => [b.batch_key, b.id]))
   let nextCanonicalBatchNumber = canonicalBatchRows.reduce((max, b) => Math.max(max, Number(b.batch_number) || 0), 0) + 1
 
-  const stockRows = await db
-    .prepare('SELECT branch_id, quantity, rfid_confirmed_qty FROM branch_stock WHERE product_id = @id')
-    .all<{ branch_id: number; quantity: number; rfid_confirmed_qty: number | null }>({ id: dup.id })
+  const stockRows = snapshot.duplicateStockRows
   // Keeper's branch_stock BEFORE the fold, captured so undo can restore it
   // exactly. The fold adds the dup's per-branch quantity into the keeper (and
   // may create a keeper row for a branch it had none in), so subtracting on
   // undo alone could leave a phantom zero row -- restoring the captured
   // before-image instead is exact.
-  const canonicalStockBefore = await db
-    .prepare('SELECT branch_id, quantity FROM branch_stock WHERE product_id = @id')
-    .all<{ branch_id: number; quantity: number }>({ id: canonicalId })
+  const canonicalStockBefore = snapshot.canonicalStockBefore
   // Keeper's image_path BEFORE the fold: the fold adopts the dup's image only
   // when the keeper had none, so undo restores this captured value verbatim.
-  const canonicalBefore = await db
-    .prepare(`SELECT id, name, barcode, image_path, is_active, updated_at, selling_price_usd, selling_price_khr, wholesale_price_usd, wholesale_price_khr, cost_price_usd, cost_price_khr
-              FROM products WHERE id = @id`)
-    .get<{ id: number; name: string | null; barcode: string | null; image_path: string | null; is_active: number; updated_at: string | null; selling_price_usd: number | null; selling_price_khr: number | null; wholesale_price_usd: number | null; wholesale_price_khr: number | null; cost_price_usd: number | null; cost_price_khr: number | null }>({ id: canonicalId })
-  const dupPricing = await db
-    .prepare(`SELECT id, name, barcode, is_active, updated_at, selling_price_usd, selling_price_khr, wholesale_price_usd, wholesale_price_khr, cost_price_usd, cost_price_khr
-              FROM products WHERE id = @id`)
-    .get<{ id: number; name: string | null; barcode: string | null; is_active: number; updated_at: string | null; selling_price_usd: number | null; selling_price_khr: number | null; wholesale_price_usd: number | null; wholesale_price_khr: number | null; cost_price_usd: number | null; cost_price_khr: number | null }>({ id: dup.id })
+  type MergeProductPricingRow = { id: number; name: string | null; barcode: string | null; image_path?: string | null; is_active: number; updated_at: string | null; selling_price_usd: number | null; selling_price_khr: number | null; wholesale_price_usd: number | null; wholesale_price_khr: number | null; cost_price_usd: number | null; cost_price_khr: number | null }
+  const canonicalBefore = snapshot.canonicalProduct as MergeProductPricingRow | undefined
+  const dupPricing = snapshot.duplicateProduct as MergeProductPricingRow | undefined
   if (!canonicalBefore || !dupPricing || !productsShareExactIdentity(canonicalBefore, dupPricing)) {
     throw new Error('merge_identity_conflict')
   }
@@ -2848,9 +2839,7 @@ export async function foldDuplicateProductInto(
   ] as Array<[string, number]>)
     .map(([field, to]) => ({ field, from: Number((canonicalBefore as Record<string, number | null> | null)?.[field]) || 0, to: Number(to) || 0 }))
     .filter((change) => Math.round(change.from * 100) !== Math.round(change.to * 100))
-  const dupBatchRows = await db
-    .prepare('SELECT id, batch_key, batch_number FROM product_batches WHERE variant_product_id = @id')
-    .all<{ id: number; batch_key: string; batch_number: number | null }>({ id: dup.id })
+  const dupBatchRows = snapshot.duplicateBatchRows
   // Images were the one thing this merge silently threw away: branch_stock,
   // inventory_movements and product_batches were all carried over, but the
   // duplicate's gallery (product_images) and its image_path were left
@@ -2858,12 +2847,8 @@ export async function foldDuplicateProductInto(
   // duplicate carried and the canonical didn't simply vanished from the
   // catalog. That breaks the standing rule that images follow a product
   // through a rename or a regroup.
-  const dupImageRows = await db
-    .prepare('SELECT image_path, sort_order FROM product_images WHERE product_id = @id ORDER BY sort_order ASC, id ASC')
-    .all<{ image_path: string; sort_order: number | null }>({ id: dup.id })
-  const canonicalImageRows = await db
-    .prepare('SELECT image_path FROM product_images WHERE product_id = @id')
-    .all<{ image_path: string }>({ id: canonicalId })
+  const dupImageRows = snapshot.duplicateImageRows
+  const canonicalImageRows = snapshot.canonicalImageRows
   const canonicalImagePaths = new Set(canonicalImageRows.map((r) => String(r.image_path)))
   let nextCanonicalImageOrder = canonicalImageRows.length
 
@@ -3015,6 +3000,7 @@ export async function foldDuplicateProductInto(
   // than collapsing into one anonymous total.
   const writtenOffLotDetail: Array<{ batchId: number; batchNumber: number | null; branchId: number; quantity: number }> = []
   let batchesWrittenOffThisDup = 0
+  const dependentLotSnapshots = await readProductMergeDependentLotSnapshots(db, snapshot, stockDisposition)
   for (const batchRow of dupBatchRows) {
     if (writeOffStock) {
       // REMOVE: the lot belonged to the row being discarded, so it does not
@@ -3024,9 +3010,9 @@ export async function foldDuplicateProductInto(
       // point at its id. batch_number is left exactly as it was -- this path
       // writes no batch_number at all, so it cannot introduce a TEXT value into
       // that INTEGER column the way the RECON import once did.
-      const dupBatchStockRows = await db
-        .prepare('SELECT branch_id, quantity FROM branch_batch_stock WHERE batch_id = @id')
-        .all<{ branch_id: number; quantity: number }>({ id: batchRow.id })
+      const lotSnapshot = dependentLotSnapshots.get(Number(batchRow.id))
+      if (!lotSnapshot) throw new Error('merge_snapshot_incomplete')
+      const dupBatchStockRows = lotSnapshot.duplicateStockRows
       statements.push({ sql: 'DELETE FROM branch_batch_stock WHERE batch_id = @id', params: { id: batchRow.id } })
       statements.push({ sql: 'UPDATE product_batches SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: batchRow.id } })
       writtenOffBatches.push({
@@ -3046,12 +3032,10 @@ export async function foldDuplicateProductInto(
     }
     const existingCanonicalBatchId = canonicalBatchIdByKey.get(batchRow.batch_key)
     if (existingCanonicalBatchId) {
-      const dupBatchStockRows = await db
-        .prepare('SELECT branch_id, quantity FROM branch_batch_stock WHERE batch_id = @id')
-        .all<{ branch_id: number; quantity: number }>({ id: batchRow.id })
-      const keeperBatchStockBefore = await db
-        .prepare('SELECT branch_id, quantity FROM branch_batch_stock WHERE batch_id = @id')
-        .all<{ branch_id: number; quantity: number }>({ id: existingCanonicalBatchId })
+      const lotSnapshot = dependentLotSnapshots.get(Number(batchRow.id))
+      if (!lotSnapshot) throw new Error('merge_snapshot_incomplete')
+      const dupBatchStockRows = lotSnapshot.duplicateStockRows
+      const keeperBatchStockBefore = lotSnapshot.keeperStockBefore
       for (const bbs of dupBatchStockRows) {
         const qty = Number(bbs.quantity) || 0
         if (!qty) continue
@@ -3068,8 +3052,8 @@ export async function foldDuplicateProductInto(
         keeperBatchId: existingCanonicalBatchId,
         dupStockBefore: dupBatchStockRows.map((r) => ({ branch_id: r.branch_id, quantity: Number(r.quantity) || 0 })),
         keeperStockBefore: keeperBatchStockBefore.map((r) => ({ branch_id: r.branch_id, quantity: Number(r.quantity) || 0 })),
-        saleAllocationIds: (await db.prepare('SELECT id FROM sale_item_batch_allocations WHERE batch_id = @id').all<{ id: number }>({ id: batchRow.id })).map((r) => Number(r.id)),
-        returnAllocationIds: (await db.prepare('SELECT id FROM return_item_batch_allocations WHERE batch_id = @id').all<{ id: number }>({ id: batchRow.id })).map((r) => Number(r.id)),
+        saleAllocationIds: lotSnapshot.saleAllocationIds,
+        returnAllocationIds: lotSnapshot.returnAllocationIds,
       })
       statements.push({ sql: 'UPDATE sale_item_batch_allocations SET batch_id = @keeperBatchId WHERE batch_id = @dupBatchId', params: { keeperBatchId: existingCanonicalBatchId, dupBatchId: batchRow.id } })
       statements.push({ sql: 'UPDATE return_item_batch_allocations SET batch_id = @keeperBatchId WHERE batch_id = @dupBatchId', params: { keeperBatchId: existingCanonicalBatchId, dupBatchId: batchRow.id } })
@@ -3103,15 +3087,8 @@ export async function foldDuplicateProductInto(
   // exclusions documented there). Returns in particular used to be missed:
   // return_items.product_id kept pointing at a deactivated row, so a refund of
   // a merged-away twin vanished from the survivor's history.
-  const reparentedByTable: Array<{ table: string; column: string; ids: number[] }> = []
-  for (const { table, column } of MERGE_REPARENT_TABLES) {
-    // sql-bound-params: `table`/`column` are compile-time constants from
-    // MERGE_REPARENT_TABLES, never request input.
-    const ids = (await db
-      .prepare(`SELECT id FROM ${table} WHERE ${column} = @id`)
-      .all<{ id: number }>({ id: dup.id })).map((r) => Number(r.id))
-    if (!ids.length) continue
-    reparentedByTable.push({ table, column, ids })
+  const reparentedByTable = snapshot.reparentedByTable
+  for (const { table, column, ids } of reparentedByTable) {
     statements.push({
       sql: `UPDATE ${table} SET ${column} = @canonicalId WHERE ${column} = @dupId`,
       params: { canonicalId, dupId: dup.id },
@@ -3129,9 +3106,7 @@ export async function foldDuplicateProductInto(
   // previous array is captured verbatim so undo restores the exact string.
   // The table is small by design (promotionRulesSql.ts reads it whole), so this
   // is one unfiltered SELECT rather than a LIKE guess at JSON contents.
-  const promotionRuleRows = await db
-    .prepare('SELECT id, product_ids FROM promotion_rules')
-    .all<{ id: number; product_ids: string | null }>({})
+  const promotionRuleRows = snapshot.promotionRuleRows
   const promotionRulesBefore: Array<{ id: number; product_ids: string }> = []
   for (const rule of promotionRuleRows) {
     const raw = String(rule.product_ids ?? '')
@@ -3164,9 +3139,7 @@ export async function foldDuplicateProductInto(
   // children onto the keeper -- except the keeper itself, which cannot become
   // its own parent: if the keeper WAS a child of the discarded row, that link is
   // cleared instead (and captured, so undo restores it).
-  const childProductRows = await db
-    .prepare('SELECT id FROM products WHERE parent_id = @id')
-    .all<{ id: number }>({ id: dup.id })
+  const childProductRows = snapshot.childProductRows
   const reparentedChildProductIds = childProductRows
     .map((row) => Number(row.id))
     .filter((childId) => Number.isFinite(childId) && childId !== canonicalId)
