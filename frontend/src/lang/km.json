@@ -6127,5 +6127,6 @@
   "merge_duplicates_preview_blocked_groups": "ក្រុម {count} ត្រូវបានដាក់ឱ្យនៅដាច់ដោយឡែក ហើយនឹងនៅដដែល។",
   "merge_duplicates_stop": "បញ្ឈប់ ហើយរក្សាករណីដែលបានបញ្ចប់",
   "merge_duplicates_undo_unavailable": "ការបញ្ចូលគ្នាត្រូវបានរក្សាទុក ប៉ុន្តែមិនអាចមិនធ្វើវិញបានសម្រាប់ {count} ករណី ព្រោះកំណត់ត្រាស្ដារឡើងវិញមិនទាន់រក្សាទុករួច។",
-  "portal_legal_map_consent_revoke": "បិទផែនទី និងលុបជម្រើសនេះពីឧបករណ៍"
+  "portal_legal_map_consent_revoke": "បិទផែនទី និងលុបជម្រើសនេះពីឧបករណ៍",
+  "create_products_session_duplicate": "ស្ទួន៖ អ្នកបានបន្ថែមទំនិញនេះរួចហើយ។"
 }

@@ -6127,5 +6127,6 @@
   "merge_duplicates_preview_blocked_groups": "{count} group(s) are quarantined and will remain unchanged.",
   "merge_duplicates_stop": "Stop and keep completed cases",
   "merge_duplicates_undo_unavailable": "Merges were committed, but Undo is unavailable for {count} case(s) because their recovery records did not finish saving.",
-  "portal_legal_map_consent_revoke": "Unload map and forget this choice"
+  "portal_legal_map_consent_revoke": "Unload map and forget this choice",
+  "create_products_session_duplicate": "Duplicate: You added this item already."
 }
