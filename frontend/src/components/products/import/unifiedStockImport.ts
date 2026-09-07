@@ -216,6 +216,12 @@ export function parseUnifiedStockRows(
       const isCreateAction = SHEET_CREATE_ACTION.test(action)
       const gate = stockReceiptGateCode({
         isStockIn: true,
+        // A CREATE row's own supplier cell decides supplier_required, same
+        // as every other surface: an actual value here must pass, and only
+        // a genuinely blank cell is certain to be refused. Before this, the
+        // check never read the cell at all, so a CREATE row with a filled
+        // supplier was wrongly flagged supplier_required client-side.
+        supplierName: clean(read('supplier')),
         lotAttributionDeferred: !isCreateAction,
         unitCostUsd: costPrice,
         freeGoods,

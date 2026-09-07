@@ -100,6 +100,13 @@ const createNoSupplier = parseUnifiedStockRows([
   { name: 'Brand New', barcode: '9', shop: '2', date: '08/27/2026', action: 'create', cost_price: '5' },
 ])
 assert.deepEqual(createNoSupplier.issues.map((issue) => issue.gateCode), ['supplier_required'])
+// A CREATE row's supplier cell must actually be read: before this, the gate
+// call never passed supplierName at all, so an explicit CREATE with the
+// supplier column FILLED was still wrongly flagged supplier_required.
+const createWithSupplier = parseUnifiedStockRows([
+  { name: 'Brand New', barcode: '9', shop: '2', date: '08/27/2026', action: 'create', cost_price: '5', supplier: 'Bong Long' },
+])
+assert.deepEqual(createWithSupplier.issues.map((issue) => issue.gateCode), [], 'a filled supplier column must clear the create-row gate')
 // 'new' is the same action, mirroring the resolver's CREATE_ACTION_RE.
 assert.deepEqual(
   parseUnifiedStockRows([{ name: 'Brand New', barcode: '9', shop: '2', date: '08/27/2026', action: 'new', cost_price: '5' }])
