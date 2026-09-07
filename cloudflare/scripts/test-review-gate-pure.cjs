@@ -169,6 +169,7 @@ const businessDateWindow = loadReal('lib/businessDateWindow.ts')
 // own require() (which can't resolve a bare .ts file).
 const searchMatch = loadReal('lib/searchMatch.ts')
 const branchWrites = loadReal('lib/branchWrites.ts', { './db': { toDbBool } })
+const branchRoleGuards = loadReal('lib/branchRoleGuards.ts', { './branchRoles': loadReal('lib/branchRoles.ts') })
 const productWrites = loadReal('lib/productWrites.ts', {
   ...dbStub,
   './media': { sanitizeMediaList: (list) => (Array.isArray(list) ? list : []) },
@@ -189,6 +190,7 @@ const reviewApply = loadReal('lib/reviewApply.ts', {
   './pendingActions': pendingActions,
   './productWrites': productWrites,
   './branchWrites': branchWrites,
+  './branchRoleGuards': branchRoleGuards,
   './cache': { bumpVersion: async () => {} },
   '../index': {},
 })
