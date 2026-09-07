@@ -6132,5 +6132,10 @@
   "branch_not_found": "Branch not found",
   "dismiss_notification": "Dismiss notification",
   "permission_denied": "You no longer have permission for this action.",
-  "unable_to_minimize": "Unable to minimize this edit."
+  "unable_to_minimize": "Unable to minimize this edit.",
+  "record_kind_delivery_added": "Delivery added",
+  "add_delivery": "Add delivery",
+  "add_delivery_title": "Add delivery to this sale?",
+  "choose_delivery_driver": "Choose a driver",
+  "delivery_driver_required": "Choose a delivery driver for this sale."
 }
