@@ -106,8 +106,8 @@ function ruleWriteError(input: ReturnType<typeof normalizeRuleWrite>, body: Rule
   // A window the operator TYPED but the parser could not read must fail
   // loudly, not silently store an open-ended rule (Golden Rule: no silent
   // partial writes).
-  if (String(body.starts_at || '').trim() && !input.starts_at) return 'Start date is not a real date (use mm/dd/yyyy)'
-  if (String(body.ends_at || '').trim() && !input.ends_at) return 'End date is not a real date (use mm/dd/yyyy)'
+  if (String(body.starts_at || '').trim() && !input.starts_at) return 'Start date is not a real date (use dd/mm/yyyy)'
+  if (String(body.ends_at || '').trim() && !input.ends_at) return 'End date is not a real date (use dd/mm/yyyy)'
   return null
 }
 
