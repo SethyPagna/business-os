@@ -1046,7 +1046,7 @@ export default function Dashboard() {
     // (products/inventory/sales) usually did trigger a refresh moments
     // before. Listing it explicitly closes that gap instead of relying on
     // a sibling channel happening to still be "in flight".
-    if (ch === 'sales' || ch === 'products' || ch === 'returns' || ch === 'inventory' || ch === 'dashboard') {
+    if (ch === 'sales' || ch === 'products' || ch === 'returns' || ch === 'inventory' || ch === 'dashboard' || ch === 'settings') {
       const refreshId = beginTrackedRequest(refreshRequestRef)
       setSilentRefresh(true)
       Promise.allSettled([

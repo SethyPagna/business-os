@@ -1586,7 +1586,7 @@ export default function POS() {
   useEffect(() => {
     if (!isActive || !syncChannel) return
     const { channel } = syncChannel
-    if (channel === 'products' || channel === 'branches' || channel === 'categories') {
+    if (channel === 'products' || channel === 'branches' || channel === 'categories' || channel === 'settings') {
       filterMetaLoadedRef.current = false
       setFilterMetaReady(false)
       invalidateTrackedRequest(filterMetaRequestRef)
@@ -1595,7 +1595,7 @@ export default function POS() {
         setCategoryOptionsReady(Boolean(filterOpen))
         invalidateTrackedRequest(categoryOptionsRequestRef)
       }
-      void loadCatalogData('POS sync catalog', { forceMetadata: channel === 'branches' })
+      void loadCatalogData('POS sync catalog', { forceMetadata: channel === 'branches' || channel === 'settings' })
     }
     if (channel === 'inventory' || channel === 'sales' || channel === 'returns') {
       // Stock moved on another device/till (adjustment, transfer, sale, or
