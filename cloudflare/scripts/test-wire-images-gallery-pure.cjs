@@ -162,6 +162,9 @@ const productsRoute = loadReal('routes/products.ts', {
   '../lib/media': media,
   '../lib/sqlBinding': sqlBinding,
   '../lib/productWrites': productWrites,
+  // Product merge economics has dedicated route/kernel tests. Gallery wiring
+  // never invokes it, but the identity lane imports it from products.ts.
+  '../lib/productMerge': {},
   '../lib/productIdentity': { findDuplicateProductGroups: async () => [] },
   '../lib/productBatches': { attachBatchCounts: async () => {} },
   '../lib/searchMatch': searchMatch,

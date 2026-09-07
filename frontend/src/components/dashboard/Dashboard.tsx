@@ -24,6 +24,7 @@ import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import DollarSign from 'lucide-react/dist/esm/icons/dollar-sign.js'
 import FileText from 'lucide-react/dist/esm/icons/file-text.js'
 import { getDashboardSaleStatusLabel, getDashboardSaleStatusTone } from './dashboardSaleStatus.ts'
+import { finishDashboardStockAlertRequest, invalidateDashboardStockAlertRequest } from './dashboardStockAlertRequests.ts'
 
 const ImportReportModal = lazyRetry(() => import('../shared/ImportReportModal'), 'ImportReportModal')
 const ExportChoiceDialog = lazyRetry(() => import('../shared/ExportChoiceDialog'), 'dashboard-export-choices')
@@ -730,6 +731,15 @@ export default function Dashboard() {
   const filterStorageKeyRef = useRef(dashboardFilterStorageKey)
   const dashboardExportModulePromiseRef = useRef<Promise<DashboardExportModule> | null>(null)
 
+  const invalidateStockAlertPageRequests = useCallback(() => {
+    invalidateDashboardStockAlertRequest(lowStockRequestRef, lowStockLoadInFlightRef)
+    invalidateDashboardStockAlertRequest(outOfStockRequestRef, outOfStockLoadInFlightRef)
+    setLowStockLoadingMore(false)
+    setOutOfStockLoadingMore(false)
+    setLowStockHasMore(false)
+    setOutOfStockHasMore(false)
+  }, [])
+
   const loadDashboardExportModule = useCallback(() => {
     if (!dashboardExportModulePromiseRef.current) {
       dashboardExportModulePromiseRef.current = import('./dashboardExport.ts')
@@ -814,6 +824,10 @@ export default function Dashboard() {
     label = 'Dashboard summary',
     markLoading = false,
   }: { label?: string; markLoading?: boolean } = {}) => {
+    // The summary is page 1 for both family-alert lists. Invalidate an old
+    // page request before fetching a new filter/refresh summary so its late
+    // response cannot append rows or advance the new cursor.
+    invalidateStockAlertPageRequests()
     const requestId = beginTrackedRequest(summaryRequestRef)
     if (markLoading) setLoading(true)
     try {
@@ -846,7 +860,7 @@ export default function Dashboard() {
         setLoading(false)
       }
     }
-  }, [getCurrentDashboardRange])
+  }, [getCurrentDashboardRange, invalidateStockAlertPageRequests])
 
   const loadStockAlertPage = useCallback(async (state: DashboardStockAlertState, page: number) => {
     const requestRef = state === 'low' ? lowStockRequestRef : outOfStockRequestRef
@@ -887,8 +901,7 @@ export default function Dashboard() {
       setLoadError(getErrorMessage(error, 'Could not load more stock alerts.'))
       return null
     } finally {
-      inFlightRef.current = false
-      if (isTrackedRequestCurrent(requestRef, requestId)) setLoadingMore(false)
+      if (finishDashboardStockAlertRequest(requestRef, requestId, inFlightRef)) setLoadingMore(false)
     }
   }, [])
 
@@ -975,11 +988,8 @@ export default function Dashboard() {
   }, [isActive, loadSummary]) // eslint-disable-line
 
   useEffect(() => {
+    invalidateStockAlertPageRequests()
     if (!isActive) {
-      invalidateTrackedRequest(lowStockRequestRef)
-      invalidateTrackedRequest(outOfStockRequestRef)
-      lowStockLoadInFlightRef.current = false
-      outOfStockLoadInFlightRef.current = false
       setLowStockRows([])
       setOutOfStockRows([])
       setLowStockPage(0)
@@ -1007,7 +1017,7 @@ export default function Dashboard() {
     setOutOfStockLoadError('')
     if (lowStockListRef.current) lowStockListRef.current.scrollTop = 0
     if (outOfStockListRef.current) outOfStockListRef.current.scrollTop = 0
-  }, [isActive, summary?.low_stock, summary?.low_stock_count, summary?.low_stock_preview_truncated, summary?.out_of_stock, summary?.out_of_stock_count, summary?.out_of_stock_preview_truncated])
+  }, [invalidateStockAlertPageRequests, isActive, summary?.low_stock, summary?.low_stock_count, summary?.low_stock_preview_truncated, summary?.out_of_stock, summary?.out_of_stock_count, summary?.out_of_stock_preview_truncated])
 
   useEffect(() => {
     if (!isActive) {
@@ -1054,7 +1064,8 @@ export default function Dashboard() {
     invalidateTrackedRequest(summaryRequestRef)
     invalidateTrackedRequest(analyticsRequestRef)
     invalidateTrackedRequest(refreshRequestRef)
-  }, [])
+    invalidateStockAlertPageRequests()
+  }, [invalidateStockAlertPageRequests])
 
   // "Recent imports" card -- a lightweight, independent fetch of the last
   // few import files/jobs (any type), regardless of whether they had any
@@ -1135,7 +1146,6 @@ export default function Dashboard() {
     return () => { cancelled = true }
   }, [isActive, syncChannel?.channel, syncChannel?.ts])
 
-  const profit    = (summary?.cost_out || 0) - (summary?.cost_in || 0)
   const summaryReady = isDashboardSummaryPayload(summary)
   const analyticsReady = isDashboardAnalyticsPayload(analytics)
   const summaryUnavailable = !loading && !summaryReady

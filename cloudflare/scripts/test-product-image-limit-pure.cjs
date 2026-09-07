@@ -86,6 +86,10 @@ assert.doesNotMatch(formSource, /Math\.min\(5, existingCount/)
 assert.doesNotMatch(formSource, /next\.length < 5/)
 assert.match(formSource, /Math\.min\(imageLimit, existingCount/)
 assert.match(formSource, /next\.length < imageLimit/)
-assert.match(formSource, /image_gallery: imageList\.slice\(0, ADMIN_MAX_PRODUCT_GALLERY_IMAGES\)/)
+assert.match(
+  formSource,
+  /image_gallery: imageList\.map\(\(path\) => canonicalizePersistedMediaPath\(path\)\)\.filter\(Boolean\)\.slice\(0, ADMIN_MAX_PRODUCT_GALLERY_IMAGES\)/,
+  'the editor persists canonical library paths before applying the administrator gallery cap',
+)
 
 console.log('PASS product galleries reject over-limit writes: normal=3, admin=5; no silent slicing or hidden client five-image bypass')

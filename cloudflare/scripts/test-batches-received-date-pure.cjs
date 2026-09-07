@@ -14,21 +14,21 @@ function loadBatchCode() {
   return moduleObj.exports
 }
 
-const { dateToBatchCode, normalizeToIsoDate } = loadBatchCode()
+const { dateToBatchCode, normalizeTypedDate } = loadBatchCode()
 const route = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'batches.ts'), 'utf8')
 
-assert.equal(normalizeToIsoDate('03/09/2026', 'day-first'), '2026-09-03')
-assert.equal(dateToBatchCode(normalizeToIsoDate('03/09/2026', 'day-first')), '09032026')
-assert.equal(normalizeToIsoDate('2026-09-03', 'day-first'), '2026-09-03', 'ISO input remains unambiguous')
+assert.equal(normalizeTypedDate('03/09/2026'), '2026-09-03')
+assert.equal(dateToBatchCode(normalizeTypedDate('03/09/2026')), '09032026')
+assert.equal(normalizeTypedDate('2026-09-03'), '2026-09-03', 'ISO input remains unambiguous')
 assert.match(
   route,
-  /normalizeToIsoDate\(body\.received_at, 'day-first'\)/,
-  'the operator-facing batch received-date editor must use explicit day-first parsing',
+  /normalizeTypedDate\(body\.received_at\)/,
+  'the operator-facing batch received-date editor must use the shared typed-date parser',
 )
 assert.doesNotMatch(
   route,
-  /if \(body\.received_at !== undefined\) \{[\s\S]{0,300}normalizeToIsoDate\(body\.received_at\)(?!,)/,
-  'the lineage edit gate must not fall back to the parser default for ambiguous dates',
+  /if \(body\.received_at !== undefined\) \{[\s\S]{0,300}normalizeToIsoDate\(body\.received_at/,
+  'the lineage edit gate must not call the import-oriented parser for typed dates',
 )
 
-console.log('PASS batch received-date edits preserve explicit day-first lineage')
+console.log('PASS batch received-date edits preserve shared typed day-first lineage')

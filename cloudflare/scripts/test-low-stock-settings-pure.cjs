@@ -330,7 +330,6 @@ async function main() {
   const SERVER_LOW_STOCK_CONSUMERS = [
     ['lib/familyStockStats.ts', 'Dashboard tile, Inventory stats, Branches stats'],
     ['lib/telegram.ts', '/stock, /lowstock and /inventory bot replies'],
-    ['routes/compat.ts', "Dashboard's low-stock card and drill list"],
     ['routes/inventory.ts', "Inventory's stockState=low filter"],
     ['routes/products.ts', "Products' stockState=low/healthy filters"],
     ['routes/branches.ts', "Branches' per-branch stockState filter"],
@@ -359,6 +358,18 @@ async function main() {
         `${relPath} (${surface}) still hardcodes the old fallback of 10`,
       )
     }
+  })
+
+  await check('the Dashboard delegates its badge and drill list to the shared family-stock rule', () => {
+    const compat = readCf('routes/compat.ts')
+    assert.match(compat, /from '\.\.\/lib\/familyStockStats'/,
+      'routes/compat.ts must import the family stock helper that consumes lowStockThresholdSql')
+    assert.match(compat, /getFamilyStockStats\(/,
+      'the Dashboard badge must use familyStockStats rather than a local threshold expression')
+    assert.match(compat, /getFamilyStockAlertPage\(/,
+      'the Dashboard drill list must use the same family-aware threshold path as its badge')
+    assert.doesNotMatch(compat, /low_stock_threshold,\s*10\)/,
+      'the Dashboard route must not restore the old literal threshold while delegating')
   })
 
   await check('the two shapes that alerts-off would otherwise break stay stated', () => {
