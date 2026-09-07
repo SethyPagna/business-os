@@ -140,6 +140,9 @@ import { getPossiblySameProducts, dismissProductDuplicateCluster } from '../../a
 import { useMergeStockChoice } from './useMergeStockChoice.tsx'
 import { buildExactDuplicateIndex, extractDuplicateClusters, findRowDuplicateInfo, type ExactDuplicateInfo } from '../../utils/exactDuplicateProducts.ts'
 import DuplicateResolverControl from './DuplicateResolverControl.tsx'
+// The section chips below are the same chrome HubSectionNav renders, styled
+// from the same stylesheet (see the row's `bos-nav-chrome` class).
+import '../navigation/nav-chrome.css'
 
 const ManageCategoriesModal = lazyRetry(() => import('./lookups/ManageCategoriesModal'), 'products-manage-categories-modal')
 // Part 241: the restricted image-only view, split out so the wrapper
@@ -3816,7 +3819,7 @@ function ProductsFullEditor() {
             never offer different sections. */}
         {layeredSectionNav || productSectionTabs.length <= 1 ? null : (
           <div className="w-full min-w-0 max-w-full sm:w-auto sm:flex-1" role="group" aria-label={tr('product_sections', 'Product sections')}>
-            <div className="hub-section-pills flex max-w-full flex-wrap gap-1 rounded-xl bg-gray-100 p-1 dark:bg-gray-800 md:inline-flex">
+            <div className="bos-nav-chrome hub-section-pills flex max-w-full flex-wrap gap-1 rounded-xl p-1 md:inline-flex">
               {productSectionTabs.map((section) => {
                 const isActive = activeProductSection === section.id
                 return (
@@ -3825,7 +3828,7 @@ function ProductsFullEditor() {
                     type="button"
                     onClick={() => setActiveProductSection(section.id as typeof activeProductSection)}
                     aria-pressed={isActive}
-                    className={`hub-section-pill inline-flex min-h-11 min-w-0 flex-1 basis-[calc(50%_-_0.25rem)] items-center justify-center break-words rounded-lg px-2.5 py-2 text-center text-sm font-medium leading-snug transition-colors md:h-8 md:min-h-0 md:flex-none md:basis-auto md:whitespace-nowrap md:py-0 ${isActive ? 'bg-white text-primary-600 shadow dark:bg-gray-900' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'}`}
+                    className="hub-section-pill inline-flex min-h-11 min-w-0 flex-1 basis-[calc(50%_-_0.25rem)] items-center justify-center break-words rounded-lg px-2.5 py-2 text-center text-[13px] font-semibold leading-snug transition-colors md:h-8 md:min-h-0 md:flex-none md:basis-auto md:whitespace-nowrap md:py-0"
                   >
                     {tr(section.key, section.label)}
                   </button>
@@ -3912,11 +3915,11 @@ function ProductsFullEditor() {
                     </button>
                   )}
                   items={[
-                    { label: tr('add_stock', 'Add Stock'), onClick: () => ledgerActions?.openAdjust('add'), color: 'blue', icon: <Boxes className="h-4 w-4 shrink-0" /> },
-                    { label: tr('remove_stock', 'Remove Stock'), onClick: () => ledgerActions?.openAdjust('remove') },
-                    { label: tr('adjust_quantity', 'Adjust Quantity'), onClick: () => ledgerActions?.openAdjust('set') },
-                    'divider',
-                    { label: tr('fast_stockin_title', 'Fast stock-in'), onClick: () => ledgerActions?.openFastStockIn(), color: 'blue' },
+                    // N27: one way to change stock -- the fast flow, opened in
+                    // the chosen mode (add / remove / set).
+                    { label: tr('add_stock', 'Add Stock'), onClick: () => ledgerActions?.openFastStockIn('add'), color: 'blue', icon: <Boxes className="h-4 w-4 shrink-0" /> },
+                    { label: tr('remove_stock', 'Remove Stock'), onClick: () => ledgerActions?.openFastStockIn('remove') },
+                    { label: tr('adjust_quantity', 'Adjust Quantity'), onClick: () => ledgerActions?.openFastStockIn('set') },
                   ] as PortalMenuItem[]}
                 />
               ) : null
@@ -4100,18 +4103,21 @@ function ProductsFullEditor() {
           previously a border-t continuation of the sticky card above it). */}
       {hasSelected && bulkEditMode === 'info' && (
         <div className="mb-2 rounded-xl border border-primary-200 bg-white px-4 py-3 dark:border-primary-700 dark:bg-zinc-800">
-          <p className="text-xs text-gray-500 mb-2">Update basic info for <strong>{selectedVisibleCount}</strong> products</p>
+          <p className="text-xs text-gray-500 mb-2">{(() => {
+            const [pre, post] = tr('bulk_edit_update_info_for_count', 'Update basic info for {count} products').split('{count}')
+            return <>{pre}<strong>{selectedVisibleCount}</strong>{post}</>
+          })()}</p>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            <div><label className="text-xs text-gray-500 block mb-1">Category</label>
+            <div><label className="text-xs text-gray-500 block mb-1">{tr('category', 'Category')}</label>
               <AppSelect
                 value={bulkEditForm.category || ''}
                 onChange={(nextValue) => setBulkEditForm(f => ({ ...f, category: nextValue }))}
-                ariaLabel="Category"
+                ariaLabel={tr('category', 'Category')}
                 className="w-full"
                 buttonClassName="min-h-8 w-full rounded-xl py-1 text-xs"
                 optionClassName="text-xs"
                 options={[
-                  { value: '', label: 'Keep current' },
+                  { value: '', label: tr('keep_current', 'Keep current') },
                   ...categories
                     .map(c => String(c.name || '').trim())
                     .filter(Boolean)
@@ -4119,16 +4125,16 @@ function ProductsFullEditor() {
                 ]}
               />
             </div>
-            <div><label className="text-xs text-gray-500 block mb-1">Unit</label>
+            <div><label className="text-xs text-gray-500 block mb-1">{tr('unit', 'Unit')}</label>
               <AppSelect
                 value={bulkEditForm.unit || ''}
                 onChange={(nextValue) => setBulkEditForm(f => ({ ...f, unit: nextValue }))}
-                ariaLabel="Unit"
+                ariaLabel={tr('unit', 'Unit')}
                 className="w-full"
                 buttonClassName="min-h-8 w-full rounded-xl py-1 text-xs"
                 optionClassName="text-xs"
                 options={[
-                  { value: '', label: 'Keep current' },
+                  { value: '', label: tr('keep_current', 'Keep current') },
                   ...units
                     .map(u => String(u.name || '').trim())
                     .filter(Boolean)
@@ -4136,54 +4142,56 @@ function ProductsFullEditor() {
                 ]}
               />
             </div>
-            <div><label className="text-xs text-gray-500 block mb-1">Supplier</label>
-              <input className="input text-xs py-1" value={bulkEditForm.supplier||''} onChange={e=>setBulkEditForm(f=>({...f,supplier:e.target.value}))} placeholder="Leave blank to keep" />
+            <div><label className="text-xs text-gray-500 block mb-1">{tr('supplier', 'Supplier')}</label>
+              <input className="input text-xs py-1" value={bulkEditForm.supplier||''} onChange={e=>setBulkEditForm(f=>({...f,supplier:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} />
             </div>
             <div><label className="text-xs text-gray-500 block mb-1">{t('brand')||'Brand'}</label>
-              <input className="input text-xs py-1" value={bulkEditForm.brand||''} onChange={e=>setBulkEditForm(f=>({...f,brand:e.target.value}))} placeholder="Leave blank to keep" />
+              <input className="input text-xs py-1" value={bulkEditForm.brand||''} onChange={e=>setBulkEditForm(f=>({...f,brand:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} />
             </div>
             <div className="flex gap-2 items-center mt-1">
-              <label className="text-xs text-gray-500">Low Stock Threshold</label>
-              <input className="input text-xs py-1 w-20" type="number" min="0" value={bulkEditForm.low_stock_threshold??''} onChange={e=>setBulkEditForm(f=>({...f,low_stock_threshold:e.target.value}))} placeholder="Keep" />
+              <label className="text-xs text-gray-500">{tr('low_stock_threshold', 'Low Stock Threshold')}</label>
+              <input className="input text-xs py-1 w-20" type="number" min="0" value={bulkEditForm.low_stock_threshold??''} onChange={e=>setBulkEditForm(f=>({...f,low_stock_threshold:e.target.value}))} placeholder={tr('keep', 'Keep')} />
             </div>
           </div>
           <button disabled={bulkActionBusy} className="btn-primary mt-3 px-4 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-60" onClick={async () => {
             const { buildProductBulkInfoUpdates } = await loadProductWriteHelpers()
             await runBulkProductUpdates(buildProductBulkInfoUpdates(bulkEditForm))
-          }}>Apply to {selectedVisibleCount} products</button>
+          }}>{tr('bulk_edit_apply_to_count', 'Apply to {count} products').replace('{count}', String(selectedVisibleCount))}</button>
         </div>
       )}
 
       {hasSelected && bulkEditMode === 'pricing' && (
         <div className="mb-2 rounded-xl border border-primary-200 bg-white px-4 py-3 dark:border-primary-700 dark:bg-zinc-800">
-          <p className="text-xs text-gray-500 mb-2">Update pricing for <strong>{selectedVisibleCount}</strong> products</p>
+          <p className="text-xs text-gray-500 mb-2">{(() => {
+            const [pre, post] = tr('bulk_edit_update_pricing_for_count', 'Update pricing for {count} products').split('{count}')
+            return <>{pre}<strong>{selectedVisibleCount}</strong>{post}</>
+          })()}</p>
           <div className="grid grid-cols-2 gap-2">
-            <div><label className="text-xs text-gray-500 block mb-1">Selling Price (USD)</label>
-              <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.selling_price_usd??''} onChange={e=>setBulkEditForm(f=>({...f,selling_price_usd:e.target.value}))} placeholder="Leave blank to keep" /></div>
-            <div><label className="text-xs text-gray-500 block mb-1">Selling Price (KHR)</label>
-              <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.selling_price_khr??''} onChange={e=>setBulkEditForm(f=>({...f,selling_price_khr:e.target.value}))} placeholder="Leave blank to keep" /></div>
+            <div><label className="text-xs text-gray-500 block mb-1">{tr('selling_price_usd', 'Selling Price (USD)')}</label>
+              <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.selling_price_usd??''} onChange={e=>setBulkEditForm(f=>({...f,selling_price_usd:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} /></div>
+            <div><label className="text-xs text-gray-500 block mb-1">{tr('selling_price_khr', 'Selling Price (KHR)')}</label>
+              <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.selling_price_khr??''} onChange={e=>setBulkEditForm(f=>({...f,selling_price_khr:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} /></div>
             {/* Was the "VIP Price" pair writing special_price_usd/khr. The
                 2026-09-04 ruling deleted that tier, so these now edit the
                 wholesale price -- the same numbers, since migration 0111 moved
                 them across. Labels come from the wholesale_price_*_full keys
-                that already exist in both packs (the neighbouring rows here are
-                still hardcoded English; not touching those is deliberate, they
-                are not this change). buildProductBulkPricingUpdates already
-                accepts wholesale_price_* so the write path needs nothing new. */}
+                that already exist in both packs. buildProductBulkPricingUpdates
+                already accepts wholesale_price_* so the write path needs
+                nothing new. */}
             <div><label className="text-xs text-gray-500 block mb-1">{tr('wholesale_price_usd_full', 'Wholesale (USD)', 'តម្លៃបោះដុំ (USD)')}</label>
-              <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.wholesale_price_usd??''} onChange={e=>setBulkEditForm(f=>({...f,wholesale_price_usd:e.target.value}))} placeholder="Leave blank to keep" /></div>
+              <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.wholesale_price_usd??''} onChange={e=>setBulkEditForm(f=>({...f,wholesale_price_usd:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} /></div>
             <div><label className="text-xs text-gray-500 block mb-1">{tr('wholesale_price_khr_full', 'Wholesale (KHR)', 'តម្លៃបោះដុំ (KHR)')}</label>
-              <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.wholesale_price_khr??''} onChange={e=>setBulkEditForm(f=>({...f,wholesale_price_khr:e.target.value}))} placeholder="Leave blank to keep" /></div>
-            <div><label className="text-xs text-gray-500 block mb-1">Purchase Price (USD)</label>
-              <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.purchase_price_usd??''} onChange={e=>setBulkEditForm(f=>({...f,purchase_price_usd:e.target.value}))} placeholder="Leave blank to keep" /></div>
-            <div><label className="text-xs text-gray-500 block mb-1">Purchase Price (KHR)</label>
-              <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.purchase_price_khr??''} onChange={e=>setBulkEditForm(f=>({...f,purchase_price_khr:e.target.value}))} placeholder="Leave blank to keep" /></div>
+              <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.wholesale_price_khr??''} onChange={e=>setBulkEditForm(f=>({...f,wholesale_price_khr:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} /></div>
+            <div><label className="text-xs text-gray-500 block mb-1">{tr('purchase_price_usd', 'Purchase Price (USD)')}</label>
+              <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.purchase_price_usd??''} onChange={e=>setBulkEditForm(f=>({...f,purchase_price_usd:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} /></div>
+            <div><label className="text-xs text-gray-500 block mb-1">{tr('purchase_price_khr', 'Purchase Price (KHR)')}</label>
+              <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.purchase_price_khr??''} onChange={e=>setBulkEditForm(f=>({...f,purchase_price_khr:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} /></div>
           </div>
-          <p className="text-xs text-gray-400 mt-1">KHR prices will auto-calculate at current exchange rate</p>
+          <p className="text-xs text-gray-400 mt-1">{tr('bulk_price_khr_auto_note', 'KHR prices will auto-calculate at current exchange rate')}</p>
           <button disabled={bulkActionBusy} className="btn-primary mt-3 px-4 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-60" onClick={async () => {
             const { buildProductBulkPricingUpdates } = await loadProductWriteHelpers()
             await runBulkProductUpdates(buildProductBulkPricingUpdates(bulkEditForm))
-          }}>Apply to {selectedVisibleCount} products</button>
+          }}>{tr('bulk_edit_apply_to_count', 'Apply to {count} products').replace('{count}', String(selectedVisibleCount))}</button>
 
           {/* Relative adjustment, kept in the same panel as the absolute
               "set every price to X" fields above but visually separated,
@@ -4290,14 +4298,16 @@ function ProductsFullEditor() {
 
       {hasSelected && bulkEditMode === 'stock' && (
         <div className="mb-2 rounded-xl border border-primary-200 bg-white px-4 py-3 dark:border-primary-700 dark:bg-zinc-800">
-          <p className="text-xs text-gray-500 mb-2">Adjust stock for <strong>{selectedVisibleCount}</strong> products</p>
+          <p className="text-xs text-gray-500 mb-2">{(() => {
+            const [pre, post] = tr('bulk_edit_adjust_stock_for_count', 'Adjust stock for {count} products').split('{count}')
+            return <>{pre}<strong>{selectedVisibleCount}</strong>{post}</>
+          })()}</p>
           <div className="flex gap-3 flex-wrap items-end">
-            <div><label className="text-xs text-gray-500 block mb-1">Quantity</label>
+            <div><label className="text-xs text-gray-500 block mb-1">{tr('quantity', 'Quantity')}</label>
               <input className="input text-xs py-1 w-24" type="number" min="0" value={bulkEditForm.qty??1} onChange={e=>setBulkEditForm(f=>({...f,qty:e.target.value}))} />
               {/* Same 1/5/10/20 quick-pick chips as InventoryStockModals.tsx's
-                  Adjust modal and BranchStockAdjuster.tsx's per-branch rows --
-                  this bulk panel was the one remaining Add/Remove/Set stock
-                  flow still missing them. */}
+                  Adjust modal -- this bulk panel was the one remaining
+                  Add/Remove/Set stock flow still missing them. */}
               <div className="mt-1 flex flex-wrap gap-1">
                 {[1, 5, 10, 20].map((n) => (
                   <button
@@ -4311,10 +4321,9 @@ function ProductsFullEditor() {
                 ))}
               </div>
             </div>
-            <div><label className="text-xs text-gray-500 block mb-1">Action</label>
+            <div><label className="text-xs text-gray-500 block mb-1">{tr('action', 'Action')}</label>
               {/* Same border-2 / primary-50+primary-700 selected-state styling
-                  as Inventory's Adjust-stock modal and the product edit
-                  page's BranchStockAdjuster -- was previously a solid
+                  as Inventory's Adjust-stock modal -- was previously a solid
                   blue-600 fill, its own separate look for the same
                   three-way choice. Recolored brass/primary Aug 24 2026. */}
               <div className="flex gap-1">
@@ -4324,31 +4333,34 @@ function ProductsFullEditor() {
               </div>
             </div>
           </div>
-          <button disabled={bulkActionBusy} className="btn-primary mt-3 px-4 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-60" onClick={handleBulkAddStock}>Apply to {selectedVisibleCount} products</button>
+          <button disabled={bulkActionBusy} className="btn-primary mt-3 px-4 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-60" onClick={handleBulkAddStock}>{tr('bulk_edit_apply_to_count', 'Apply to {count} products').replace('{count}', String(selectedVisibleCount))}</button>
         </div>
       )}
 
       {hasSelected && bulkEditMode === 'branch' && (
         <div className="mb-2 rounded-xl border border-primary-200 bg-white px-4 py-3 dark:border-primary-700 dark:bg-zinc-800">
-          <p className="text-xs text-gray-500 mb-2">Move stock to a branch for <strong>{selectedVisibleCount}</strong> products</p>
+          <p className="text-xs text-gray-500 mb-2">{(() => {
+            const [pre, post] = tr('bulk_edit_move_stock_to_branch_for_count', 'Move stock to a branch for {count} products').split('{count}')
+            return <>{pre}<strong>{selectedVisibleCount}</strong>{post}</>
+          })()}</p>
           <div className="flex gap-2 flex-wrap items-end">
-            <div><label className="text-xs text-gray-500 block mb-1">Target Branch</label>
+            <div><label className="text-xs text-gray-500 block mb-1">{tr('target_branch', 'Target Branch')}</label>
               <AppSelect
                 value={bulkEditForm.branchId || ''}
                 onChange={(nextValue) => setBulkEditForm(f => ({ ...f, branchId: nextValue }))}
-                ariaLabel="Target Branch"
+                ariaLabel={tr('target_branch', 'Target Branch')}
                 className="w-full min-w-[10rem]"
                 buttonClassName="min-h-8 w-full rounded-xl py-1 text-xs"
                 optionClassName="text-xs"
                 options={[
-                  { value: '', label: 'Select branch' },
+                  { value: '', label: tr('select_branch', 'Select branch') },
                   ...branches
                     .filter(b => b.id != null && b.name)
                     .map(b => ({ value: b.id as string | number, label: String(b.name) })),
                 ]}
               />
             </div>
-            <button disabled={bulkActionBusy} className="btn-primary px-4 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-60" onClick={() => { if (bulkEditForm.branchId) { handleBulkChangeBranch(bulkEditForm.branchId) } else notify('Select a branch first','error') }}>Move Stock</button>
+            <button disabled={bulkActionBusy} className="btn-primary px-4 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-60" onClick={() => { if (bulkEditForm.branchId) { handleBulkChangeBranch(bulkEditForm.branchId) } else notify(tr('select_branch_first', 'Select a branch first'),'error') }}>{tr('move_stock', 'Move Stock')}</button>
           </div>
         </div>
       )}
@@ -4530,6 +4542,7 @@ function ProductsFullEditor() {
               next: t('next') || 'Next',
               imageCount: '{current}/{total}',
               dotsLabel: 'Image {current} of {total}',
+              close: t('close') || 'Close',
             }}
           />
         </Suspense>

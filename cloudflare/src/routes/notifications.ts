@@ -95,6 +95,15 @@ type NotificationItem = {
   // page's Devices tab. Frontend-only concern (NotificationCenter passes
   // it through to navigateTo) -- omit when the page has no sub-tabs.
   anchor?: string
+  // Localised meta. NotificationCenter.tsx has carried an ITEM_META_COPY map
+  // (en + km renderers, keyed by these names) since it was written, and this
+  // Worker had never sent a `metaKey`, so `displayMeta` always fell through to
+  // the raw English `meta` below: the map was unreachable and a Khmer user
+  // read English. The credit rows below send it, so the ONE WORD ruling
+  // (owner, Sep 6 2026) actually reaches the screen in both languages;
+  // `meta` stays as the fallback for a client older than the key.
+  metaKey?: string
+  metaParams?: Record<string, string | number>
 }
 
 type NotificationSection = {
@@ -104,6 +113,9 @@ type NotificationSection = {
   count: number
   summary: string
   items: NotificationItem[]
+  // Localised summary, same contract as NotificationItem.metaKey above.
+  summaryKey?: string
+  summaryParams?: Record<string, string | number>
   // Settings key this section's on/off switch reads and writes (see
   // Settings.tsx's Notifications block and NotificationCenter.tsx's
   // toggleSectionPreference). Sections that can't actually be muted --
@@ -322,11 +334,16 @@ async function buildSalesSection(env: Env): Promise<NotificationSection | null> 
   if (!awaitingPayment.length && !awaitingDelivery.length) return null
 
   const items: NotificationItem[] = [
+    // ONE WORD (owner, Sep 6 2026): the awaiting_payment cohort is CREDIT
+    // everywhere a user reads it. The amount is positive -- it is revenue the
+    // shop has already recognised and is still owed, never a deduction.
     ...awaitingPayment.map((sale) => ({
       id: `pay-${sale.id}`,
       tone: 'warning' as const,
       label: sale.receipt_number || `Sale #${sale.id}`,
-      meta: `Awaiting payment${SUMMARY_SEPARATOR}$${Number(sale.total_usd || 0).toFixed(2)}`,
+      meta: `Credit${SUMMARY_SEPARATOR}$${Number(sale.total_usd || 0).toFixed(2)}`,
+      metaKey: 'notification_sales_awaiting_payment',
+      metaParams: { totalUsd: Number(sale.total_usd || 0).toFixed(2) },
       kind: 'sales_awaiting_payment',
       pageId: 'sales',
     })),
@@ -346,9 +363,11 @@ async function buildSalesSection(env: Env): Promise<NotificationSection | null> 
     pageId: 'sales',
     count: awaitingPayment.length + awaitingDelivery.length,
     summary: joinSummary([
-      awaitingPayment.length ? `${awaitingPayment.length} awaiting payment` : null,
+      awaitingPayment.length ? `${awaitingPayment.length} credit` : null,
       awaitingDelivery.length ? `${awaitingDelivery.length} awaiting delivery` : null,
     ]),
+    summaryKey: 'notification_sales_summary',
+    summaryParams: { awaitingPaymentCount: awaitingPayment.length, awaitingDeliveryCount: awaitingDelivery.length },
     items,
     enabledKey: 'notifications_sales_enabled',
   }

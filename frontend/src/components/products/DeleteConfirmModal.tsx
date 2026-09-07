@@ -4,7 +4,7 @@ import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import Modal from '../shared/Modal'
 import { getInventoryReasons, saveInventoryReasons } from '../../api/methods.ts'
 // Same saved-reason catalog + "Manage reasons" component Inventory's own
-// Adjust-stock modal and BranchStockAdjuster.tsx already use -- per the
+// Adjust-stock modal already uses -- per the
 // user's own framing, delete's reason field is "basically same as
 // inventory page products adjust stock... just different page but same
 // purpose and function", so this reuses the catalog (type: 'delete'
@@ -63,7 +63,7 @@ export default function DeleteConfirmModal({
   // Delete now requires a reason, drawn from the same saved-reason catalog
   // Inventory's Adjust-stock modal uses (inventory_saved_reasons), just
   // filtered to type: 'delete' -- same chip-picker + free-text + "Manage
-  // reasons" pattern as BranchStockAdjuster.tsx, not a separate one-off UI.
+  // reasons" pattern that modal uses, not a separate one-off UI.
   const [reason, setReason] = useState('')
   const [inventoryReasons, setInventoryReasons] = useState<InventoryReason[]>([])
   const [reasonManager, setReasonManager] = useState<ReasonManagerState>({ open: false, type: 'delete' })
@@ -87,8 +87,8 @@ export default function DeleteConfirmModal({
   // Only the 'delete' slice is rendered as picker chips here, but the full
   // catalog (all types) is what gets saved back -- otherwise saving from
   // this modal would silently wipe out every Inventory-side adjust/
-  // transfer/move reason, same shared-array trap Inventory.tsx/
-  // BranchStockAdjuster.tsx's own save already guards against.
+  // transfer/move reason, same shared-array trap Inventory.tsx's own
+  // save already guards against.
   const reasonsByType = useMemo(() => ({ delete: deleteReasons }), [deleteReasons])
 
   const saveReasonCatalog = useCallback(async (nextItems: InventoryReason[]) => {

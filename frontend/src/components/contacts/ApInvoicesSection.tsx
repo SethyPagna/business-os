@@ -140,6 +140,16 @@ export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
 
   return (
     <div className="space-y-3 p-3">
+      {/* The filter + date row pins while the invoice rows scroll under it --
+          the app-wide convention (user, Aug 31: "the search bar row and the
+          date both can be pinned and stick ... for all sections and pages"),
+          the same `sticky top-2` treatment the Customers/Suppliers/Delivery
+          search rows already use one level up in this same page scroll.
+          The wrapper sits OUTSIDE the overflow-x-auto row on purpose: a box
+          that scrolls horizontally cannot itself be the sticky element. The
+          negative margins let the blurred background span the section's own
+          p-3 padding instead of leaving a bright gutter beside it. */}
+      <div className="sticky top-2 z-30 -mx-3 -mt-3 bg-gray-50/95 px-3 pb-2 pt-3 backdrop-blur dark:bg-gray-900/95">
       {/* Part 567: filters kept to a single scrollable line (user: "the
           filters options one row") rather than wrapping. */}
       <div className="flex flex-nowrap items-center gap-2 overflow-x-auto">
@@ -194,6 +204,7 @@ export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
             {tr('clear', 'Clear')}
           </button>
         ) : null}
+      </div>
       </div>
 
       {error ? (

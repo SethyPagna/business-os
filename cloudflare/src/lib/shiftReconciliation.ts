@@ -51,7 +51,7 @@
  */
 import { getDb } from './db'
 import { resolveStoredNativeSaleChange } from './nativeSaleChange'
-import { deliveryActualCostExpr, shiftWindowWhere, type SalesFilters } from './salesAnalytics'
+import { deliveryActualCostExpr, getSalesTotals, shiftWindowWhere, type SalesFilters } from './salesAnalytics'
 import {
   hasConfiguredCashMethod, isCashPaymentMethod, parseConfiguredMethods, parsePaymentMethodKinds,
   PAYMENT_METHOD_KINDS_SETTING, type PaymentMethodKindMap,
@@ -271,18 +271,18 @@ async function readCashConfig(env: Env): Promise<ShiftCashOptions> {
 }
 
 /**
- * Expenses paid out of THIS drawer: recorded inside the window, and by the
- * same employee only under per-account policy. `created_at` shares sales'
- * timestamp shape; `fee_date` is a bare day and could not tell two shifts on
- * one date apart. A fee with NO branch counts against the open drawer (owner
- * ruling) -- it was paid out of the one till that was running.
+ * Which `fees` rows were paid out of THIS drawer: recorded inside the window,
+ * and by the same employee only under per-account policy. `created_at` shares
+ * sales' timestamp shape; `fee_date` is a bare day and could not tell two
+ * shifts on one date apart. A fee with NO branch counts against the open
+ * drawer (owner ruling) -- it was paid out of the one till that was running.
+ *
+ * ONE expression, because the expense TOTAL and the delivery/other SPLIT must
+ * select over exactly the same rows. A split whose halves came from a second,
+ * slightly different clause would stop summing to the total the drawer was
+ * reconciled against, and the shift report would foot against nothing.
  */
-export async function shiftExpenses(
-  env: Env,
-  shift: ShiftReconciliationSession,
-  nowMs: number,
-  options: { overflowLabel?: string } = {},
-) {
+function shiftFeeWhere(shift: ShiftReconciliationSession, nowMs: number) {
   const { clauses, params } = shiftWindowWhere('fees', shiftFilters(shift, nowMs))
   // fees has no cashier_id -- the equivalent column is created_by. Drop the
   // clause the sales table owns and add the fees one.
@@ -296,6 +296,17 @@ export async function shiftExpenses(
     feeClauses.push('(fees.branch_id = @branchId OR fees.branch_id IS NULL)')
     params.branchId = shift.branch_id
   }
+  return { clauses: feeClauses, params }
+}
+
+/** Every expense paid out of this drawer, with its labelled detail rows. */
+export async function shiftExpenses(
+  env: Env,
+  shift: ShiftReconciliationSession,
+  nowMs: number,
+  options: { overflowLabel?: string } = {},
+) {
+  const { clauses: feeClauses, params } = shiftFeeWhere(shift, nowMs)
   const rows = await getDb(env).prepare(`
     SELECT COALESCE(NULLIF(TRIM(label), ''), fee_type, 'Expense') AS label,
       COALESCE(SUM(amount_usd), 0) AS usd, COALESCE(SUM(amount_khr), 0) AS khr,
@@ -394,5 +405,145 @@ export async function loadShiftReconciliation(
     courier,
     counted: { usd: shift.closing_counted_usd ?? null, khr: shift.closing_counted_khr ?? null },
     reviewCodes: cash.reviewCodes,
+  })
+}
+
+// ---- the shift REPORT figures ---------------------------------------------
+//
+// Owner ruling (Sep 6 2026): "the registration is just a more detailed
+// breakdown for shift to keep track how much is spent ... and the actual
+// calculations is without this ... just the COGS, profit, sales, expenses,
+// delivery etc."
+//
+// So the shift report has TWO halves and they never mix:
+//
+//   * the REGISTRATION -- opening float and closing count, per currency, at
+//     open and at end. Recorded, printed, reconciled against, and read by
+//     nothing else in the system. `opening`/`closing` below are that half;
+//     they are carried here so the report renders one block instead of
+//     digging two of the four numbers out of the shift row and two out of the
+//     drawer reconciliation.
+//   * the BUSINESS FIGURES -- sales, COGS, profit, delivery and expenses.
+//     Every one of them comes from the sales kernel (getSalesTotals, the same
+//     helper the Reports hub reads) or from the `fees` table. NONE of them is
+//     derived from an opening float or a counted drawer, which is what makes
+//     the registration report-only: change the count and not one figure below
+//     moves.
+//
+// USD is the kernel's basis for sales/COGS/profit/credit/delivery fees, so
+// those stay single-currency. Expenses are recorded natively in both and are
+// carried as pairs, like every other fee surface.
+
+export type ShiftFigures = {
+  /** Registered cash at OPEN, per currency. Report-only. */
+  opening: ShiftMoney
+  /** Registered cash at END, per currency; null where nobody counted. */
+  closing: ShiftCount
+  sales_usd: number
+  cogs_usd: number
+  profit_usd: number
+  /** What customers were charged for delivery. */
+  delivery_fee_usd: number
+  /**
+   * Unpaid (credit) sales in the window. A POSITIVE amount owed, never a
+   * deduction: it is already inside sales/profit above (owner ruling, Sep 6
+   * 2026) and the report prints it as a note, not as a subtraction.
+   */
+  credit_usd: number
+  /** One refunds total. The report shows no per-return breakdown. */
+  refunds_usd: number
+  /**
+   * The two halves of the window's expenses, per currency:
+   * delivery_cost = courier payouts + fees typed 'delivery';
+   * other_expenses = every remaining fee.
+   * Their sum is exactly `reconciliation.expenses + reconciliation.courier`,
+   * so the split can never quietly stop footing against the drawer.
+   */
+  delivery_cost: ShiftMoney
+  other_expenses: ShiftMoney
+}
+
+export type ShiftFiguresInput = {
+  opening: Partial<ShiftMoney> | null | undefined
+  counted: Partial<ShiftCount> | null | undefined
+  totals: {
+    revenue_usd?: unknown; cost_usd?: unknown; profit_usd?: unknown
+    delivery_usd?: unknown; pending_revenue_usd?: unknown; refund_usd?: unknown
+  } | null | undefined
+  /** Every fee in the window. */
+  expenses: Partial<ShiftMoney> | null | undefined
+  /** The subset of those fees typed 'delivery'. */
+  deliveryFees: Partial<ShiftMoney> | null | undefined
+  /** Courier payouts read off the sales rows, already guarded against a fee. */
+  courier: Partial<ShiftMoney> | null | undefined
+}
+
+/** The whole report arithmetic, pure. Every caller goes through this. */
+export function composeShiftFigures(input: ShiftFiguresInput): ShiftFigures {
+  const expenses = money(input.expenses)
+  const deliveryFees = money(input.deliveryFees)
+  const courier = money(input.courier)
+  const totals = input.totals ?? {}
+  return {
+    opening: money(input.opening),
+    closing: countOf(input.counted),
+    sales_usd: round2(finite(totals.revenue_usd)),
+    cogs_usd: round2(finite(totals.cost_usd)),
+    profit_usd: round2(finite(totals.profit_usd)),
+    delivery_fee_usd: round2(finite(totals.delivery_usd)),
+    // Never negative: an amount owed cannot be less than nothing, and a
+    // negative here would be a data defect printed as a business fact.
+    credit_usd: Math.max(0, round2(finite(totals.pending_revenue_usd))),
+    refunds_usd: round2(finite(totals.refund_usd)),
+    delivery_cost: {
+      usd: round2(deliveryFees.usd + courier.usd),
+      khr: roundKhr(deliveryFees.khr + courier.khr),
+    },
+    other_expenses: {
+      usd: round2(expenses.usd - deliveryFees.usd),
+      khr: roundKhr(expenses.khr - deliveryFees.khr),
+    },
+  }
+}
+
+/** The fees typed 'delivery' -- the delivery half of the same expense set. */
+export async function shiftDeliveryFeeExpenses(
+  env: Env,
+  shift: ShiftReconciliationSession,
+  nowMs: number,
+): Promise<ShiftMoney> {
+  const { clauses, params } = shiftFeeWhere(shift, nowMs)
+  clauses.push("COALESCE(fees.fee_type, '') = 'delivery'")
+  const row = await getDb(env).prepare(`SELECT COALESCE(SUM(amount_usd), 0) AS usd,
+      COALESCE(SUM(amount_khr), 0) AS khr FROM fees WHERE ${clauses.join(' AND ')}`)
+    .get<{ usd: number; khr: number }>(params)
+  return { usd: round2(Number(row?.usd || 0)), khr: roundKhr(Number(row?.khr || 0)) }
+}
+
+/**
+ * The report figures for one shift, read from D1.
+ *
+ * `getSalesTotals` is consumed, never re-implemented: the shift report and the
+ * Reports hub have to be reconcilable, and a second profit formula here is
+ * exactly how they would stop being.
+ */
+export async function loadShiftFigures(
+  env: Env,
+  shift: ShiftReconciliationSession,
+  nowMs: number = Date.now(),
+): Promise<ShiftFigures> {
+  const [totals, expenses, deliveryFees, courier] = await Promise.all([
+    getSalesTotals(env, shiftFilters(shift, nowMs)),
+    shiftExpenses(env, shift, nowMs),
+    shiftDeliveryFeeExpenses(env, shift, nowMs),
+    shiftCourierPayouts(env, shift, nowMs),
+  ])
+  return composeShiftFigures({
+    opening: { usd: shift.opening_float_usd, khr: shift.opening_float_khr },
+    counted: { usd: shift.closing_counted_usd ?? null, khr: shift.closing_counted_khr ?? null },
+    totals,
+    expenses,
+    deliveryFees,
+    courier,
   })
 }

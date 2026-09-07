@@ -77,6 +77,24 @@ async function main() {
     '../lib/permissions': permissions,
     '../lib/audit': { audit: async () => { throw new Error('lifecycle audit must be in the D1 batch') } },
     '../lib/telegram': { sendTelegramShiftReport: async (_env, shiftId) => { sent.push(shiftId); return true } },
+    // routes/shifts.ts gained `import { loadShiftReconciliation } from
+    // '../lib/shiftReconciliation'` in 08dcaebe and this fixture's override map
+    // was never extended, so every run since died at LOAD time with
+    // MODULE_NOT_FOUND: only overridden requests get transpiled, and plain
+    // require() cannot read a .ts file.
+    //
+    // That is a STALE FIXTURE, not a route regression. The shipped Worker
+    // bundles the module, `npx tsc --noEmit` resolves it, and
+    // test-shift-close-always-pure.cjs drives this same routes/shifts.ts green
+    // by supplying exactly this override.
+    //
+    // The reconciliation arithmetic is asserted where it belongs
+    // (test-shift-reconciliation-pure.cjs). Here it is a MARKER, so if the
+    // wiring breaks again it fails as an assertion on the close response rather
+    // than passing over a silent stub.
+    '../lib/shiftReconciliation': {
+      loadShiftReconciliation: async () => ({ marker: 'lifecycle-fixture' }),
+    },
   })
   const app = route.default || route
   const call = (method, url, body) => app.fetch(new Request(`http://test${url}`, {
@@ -103,6 +121,11 @@ async function main() {
   const rootClose = rootCloseA.status === 200 ? rootCloseA : rootCloseB
   const closedRoot = (await rootClose.json()).shift
   assert.equal(closedRoot.capabilities.can_reopen, true)
+  // The close response carries the shared reconciliation (the marker above), so
+  // the override is load-bearing rather than a stub nobody would notice going
+  // missing again.
+  assert.deepEqual(closedRoot.reconciliation, { marker: 'lifecycle-fixture' },
+    'the close response carries the shared shift reconciliation')
   assert.equal(sent.filter((id) => id === rootShift.id).length, 2,
     'root has one opening and one winning close notification')
   const parentBeforeReopen = sqlite.prepare('SELECT * FROM shift_sessions WHERE id=?').get(rootShift.id)
@@ -297,10 +320,19 @@ async function main() {
     'historic unresolved shifts remain visible outside the closed-row limit')
   assert.equal(boundedRows[0].closed_at, null, 'unresolved shifts are ordered before bounded closed rows')
 
-  const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  // The day AFTER THE ROOT'S OWN business date, not after the UTC calendar day.
+  // business_date is the Phnom Penh (UTC+07) business day the route wrote, so
+  // between 17:00 and 24:00 UTC -- 00:00 to 07:00 in the shop -- the old
+  // `Date.now() + 24h` slice produced the date the root already occupies and
+  // this insert died on idx_shift_sessions_account_day. The assertion is about
+  // the NEXT business day, so derive it from the business day.
+  const tomorrow = new Date(`${rootShift.business_date}T00:00:00.000Z`)
+  tomorrow.setUTCDate(tomorrow.getUTCDate() + 1)
+  const nextBusinessDate = tomorrow.toISOString().slice(0, 10)
+  assert.notEqual(nextBusinessDate, rootShift.business_date)
   assert.doesNotThrow(() => sqlite.prepare(`INSERT INTO shift_sessions
     (shift_code,scope_mode,user_id,user_name,branch_id,branch_name,business_date,opened_at)
-    VALUES ('NEXT-DAY','per_account',7,'Owner',1,'Shop',?,?)`).run(tomorrow, `${tomorrow}T01:00:00.000Z`),
+    VALUES ('NEXT-DAY','per_account',7,'Owner',1,'Shop',?,?)`).run(nextBusinessDate, `${nextBusinessDate}T01:00:00.000Z`),
   'a new root remains valid on the next business day')
   assert.throws(() => sqlite.prepare(`INSERT INTO shift_sessions
     (shift_code,scope_mode,user_id,user_name,branch_id,branch_name,business_date,opened_at)
