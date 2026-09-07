@@ -136,13 +136,15 @@ async function main() {
   }
   const permissions = { hasPermission: (_, key) => key === 'backup' ? backup : restore, isAdminControlUser: () => admin }
   const guard = { admitRequestBody, smallBodyAccess, SMALL_BODY_BYTES: small, PORTAL_SCREENSHOT_BODY_BYTES: large, MIGRATION_FINALIZE_BODY_BYTES: repairLimit }
+  const portalImagePrivacy = load('lib/portalImagePrivacy.ts')
   const portal = load('routes/portal.ts', {
     '../lib/requestBodyGuard': guard, '../lib/auth': auth,
     '../lib/portalAbuseKey': { portalAbuseKey: async () => 'unit-portal-abuse-key' },
+    '../lib/portalImagePrivacy': portalImagePrivacy,
     '../lib/portalSession': {
       createPortalSession: async () => ({ token: '', expiresAt: '' }),
       setPortalCookie: () => {}, clearPortalCookie: () => {}, revokePortalSession: async () => {},
-      getPortalAccount: async () => null,
+      getPortalAccountState: async () => ({ status: 'unauthenticated', account: null }),
     },
     '../lib/rateLimit': { getClientIp: () => 'unit', checkRateLimit: async () => { calls.rate++; return { allowed, retryAfterSeconds: 1 } } },
     '../lib/db': { getDb: () => ({ prepare: (sql) => {
