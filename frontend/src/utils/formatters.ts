@@ -226,6 +226,50 @@ export function fmtClock24(raw: TimestampInput): string {
 }
 
 /**
+ * Day-first rendering for a CALLER-CHOSEN option set -- the escape hatch for
+ * the handful of surfaces that need their own timezone, their own field list
+ * or a zone label, and so cannot use fmtDate/fmtDateTime24 above.
+ *
+ * It exists because those surfaces used to call
+ * `date.toLocaleString('en-US', { month: '2-digit', day: '2-digit', ... })`
+ * directly, and en-US puts the MONTH first. The audit log, the backup list and
+ * the Settings timezone preview each printed 09/03/2026 for the day every
+ * other screen in the app called 03/09/2026 -- one instant, two orders, and
+ * for any day <= 12 nothing about the string reveals which is which.
+ *
+ * The locale stays 'en-US' and only its field VALUES are read; the ORDER is
+ * assembled here. No Intl locale is reliably day-first AND 24-hour AND
+ * slash-separated across engines, and pinning one that happens to be today
+ * would silently follow that locale's future CLDR changes.
+ *
+ * An option set whose date fields are NOT all numeric (a month name, a
+ * weekday, time-only) is handed straight to Intl: there is no day/month order
+ * to fix when the fields are not interchangeable digits.
+ *
+ * fmtDate/fmtTime/fmtDateTime24 keep their own bodies on purpose -- each pins
+ * one exact separator ("dd/mm/yyyy, HH:mm" vs "dd/mm/yyyy HH:mm") that their
+ * callers and tests depend on, and routing them through a general assembler
+ * would put those apart-by-a-comma shapes at the mercy of one shared branch.
+ */
+export function fmtDayFirst(value: Date, options: Intl.DateTimeFormatOptions = {}): string {
+  // hour12:false renders midnight as "24:00" on some engines; h23 does not.
+  const resolved: Intl.DateTimeFormatOptions = { ...options }
+  if (resolved.hour && resolved.hour12 === false && !resolved.hourCycle) {
+    delete resolved.hour12
+    resolved.hourCycle = 'h23'
+  }
+  const formatter = new Intl.DateTimeFormat('en-US', resolved)
+  const numeric = (field: unknown) => field === 'numeric' || field === '2-digit'
+  if (!numeric(resolved.month) || !numeric(resolved.day)) return formatter.format(value)
+  const parts = formatter.formatToParts(value)
+  const get = (type: string) => parts.find((part) => part.type === type)?.value || ''
+  const datePart = [get('day'), get('month'), get('year')].filter(Boolean).join('/')
+  const timePart = [get('hour'), get('minute'), get('second')].filter(Boolean).join(':')
+  const zonePart = get('timeZoneName')
+  return [[datePart, timePart].filter(Boolean).join(', '), zonePart].filter(Boolean).join(' ')
+}
+
+/**
  * Display label for a captured IANA timezone. Asia/Bangkok and
  * Asia/Phnom_Penh share the identical UTC+07:00 wall clock (no DST), and
  * devices in Cambodia routinely report Asia/Bangkok -- the business is in

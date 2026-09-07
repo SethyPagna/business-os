@@ -93,6 +93,9 @@ const salesAnalytics = loadReal('lib/salesAnalytics.ts', {
   './db': { getDb: () => db },
   './businessDateWindow': businessDateWindow,
 })
+// routes/inventory.ts's per-product revenue/COGS SQL moved into this shared
+// ledger (audit sibling:F14); the REAL module, so the route builds real SQL.
+const productSalesLedger = loadReal('lib/productSalesLedger.ts', { './salesAnalytics': salesAnalytics })
 // routes/batches.ts imports the shared optimistic-locking helpers; without
 // this override the transpiled module's './conflictControl' require resolves
 // against scripts/ and the whole test file dies at load time.
@@ -114,6 +117,15 @@ const lowStockStub = { ...lowStockRule, loadLowStockConfig: async () => lowStock
 const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
 // N13: the shared actor / branch kernels these routes now import.
 const movementBranchNameKernel = loadReal('lib/movementBranchName.ts')
+// N13: and the actor / receipt kernels the movement readers now import.
+const movementActorNameKernel = loadReal('lib/movementActorName.ts')
+const movementReferenceKernel = loadReal('lib/movementReference.ts')
+// N13 (round 2): the /movements search haystack is built from those same two
+// expressions, so the route imports the haystack kernel too.
+const movementSearchKernel = loadReal('lib/movementSearch.ts', {
+  './movementActorName': movementActorNameKernel,
+  './movementBranchName': movementBranchNameKernel,
+})
 const inventoryRoute = loadReal('routes/inventory.ts', {
   // REAL, not stubbed: POST /inventory/transfer now refuses a shop -> warehouse
   // move through this guard, so the fixtures here run through the rejection
@@ -121,11 +133,15 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/branchRoleGuards': loadReal('lib/branchRoleGuards.ts', { './branchRoles': loadReal('lib/branchRoles.ts') }),
   '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/movementBranchName': movementBranchNameKernel,
+  '../lib/movementActorName': movementActorNameKernel,
+  '../lib/movementReference': movementReferenceKernel,
+  '../lib/movementSearch': movementSearchKernel,
   '../lib/db': { getDb: () => db },
   // routes/inventory.ts buckets movement dates in UTC+7 through the pure
   // businessDateWindow helpers; provide the real module so its date SQL resolves.
   '../lib/businessDateWindow': businessDateWindow,
   '../lib/salesAnalytics': salesAnalytics,
+  '../lib/productSalesLedger': productSalesLedger,
   '../lib/productBatches': productBatches,
   '../lib/batchCode': batchCode,
   '../lib/stockReceiptGate': stockReceiptGate,
@@ -253,10 +269,10 @@ async function main() {
     assert.strictEqual(total.stock_quantity, 5, 'denormalized product total moved too')
   })
 
-  await check('a second add with the SAME date (mm/dd/yyyy form) tops up that lot instead of creating a twin', async () => {
+  await check('a second add with the SAME date (typed dd/mm/yyyy form) tops up that lot instead of creating a twin', async () => {
     const { status, json } = await req('POST', '/adjust', {
       productId: 1, type: 'add', supplierName: 'Fixture Supplier', unitCostUsd: 2, quantity: 3, reason: 'Late stock-in, same receipt', branchId: 1,
-      batchId: 'new', receivedDate: '03/15/2025',
+      batchId: 'new', receivedDate: '15/03/2025',
     })
     assert.strictEqual(status, 200, JSON.stringify(json))
     const rows = batchRows()
@@ -292,6 +308,41 @@ async function main() {
     assert.strictEqual(aggAfter, aggBefore, 'no stock moved')
   })
 
+  // S4-33 / a2 datefmt (Sep 6 2026). The owner: "i asked to change already
+  // dd/mm/yyyy. this is the rule moving forward." This endpoint is fed by
+  // InventoryStockModals' DateEntryInput, which is day-first, but the route
+  // used to re-read a slash date MONTH-first -- so the one date the screen
+  // and the server disagree about was stored wrong with nothing to show it.
+  //
+  // 03/09/2026 is the discriminating input: both fields are <= 12, so BOTH
+  // readings produce a real date and only the stored value tells them apart.
+  // Day-first = 3 September. Month-first = 9 March.
+  await check('a typed slash date is read the way the field that produced it writes: day first', async () => {
+    seed()
+    const { status, json } = await req('POST', '/adjust', {
+      productId: 1, type: 'add', supplierName: 'Fixture Supplier', unitCostUsd: 2, quantity: 1, reason: 'Day-first receipt', branchId: 1,
+      batchId: 'new', receivedDate: '03/09/2026',
+    })
+    assert.strictEqual(status, 200, JSON.stringify(json))
+    const rows = batchRows()
+    assert.strictEqual(rows[0].received_at, '2026-09-03', '03/09/2026 is 3 September, not 9 March')
+    assert.strictEqual(rows[0].lot_code, '09032026', 'the lot IDENTIFIER stays MMDDYYYY, cut from the day-first date')
+  })
+
+  // Positive control: without this, the assertion above would also pass on a
+  // parser that accepted BOTH orders and happened to try day-first first.
+  // One order is accepted and the other must fail loudly -- 15 cannot be a
+  // month, so the old month-first form is now simply not a date here.
+  await check('the month-first form this endpoint used to accept is now refused, not silently re-read', async () => {
+    seed()
+    const rowsBefore = batchRows()
+    const { status } = await req('POST', '/adjust', {
+      productId: 1, type: 'add', supplierName: 'Fixture Supplier', unitCostUsd: 2, quantity: 1, reason: 'Month-first receipt', branchId: 1,
+      batchId: 'new', receivedDate: '03/15/2025',
+    })
+    assert.strictEqual(status, 400, 'exactly one order is accepted; the other fails loudly rather than guessing')
+    assert.deepStrictEqual(batchRows(), rowsBefore, 'nothing was written')
+  })
   await check('an add with NO receivedDate keeps the existing default: today (UTC day), pinned', async () => {
     seed()
     const { status, json } = await req('POST', '/adjust', {

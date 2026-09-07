@@ -36,9 +36,13 @@ fs.copyFileSync(path.join(cloudflareRoot, 'src', 'lib', 'businessDateWindow.ts')
 // N13: and ./movementBranchName, which resolves a movement row's branch
 // through branch_id when the row carries no branch_name snapshot.
 fs.copyFileSync(path.join(cloudflareRoot, 'src', 'lib', 'movementBranchName.ts'), path.join(tmpDir, 'movementBranchName.ts'))
+// N13: and the actor / receipt resolutions the same SELECT list now carries;
+// stockInSessionsQuery came with the session lane's receipt-type list.
+fs.copyFileSync(path.join(cloudflareRoot, 'src', 'lib', 'movementActorName.ts'), path.join(tmpDir, 'movementActorName.ts'))
+fs.copyFileSync(path.join(cloudflareRoot, 'src', 'lib', 'movementReference.ts'), path.join(tmpDir, 'movementReference.ts'))
 fs.copyFileSync(path.join(cloudflareRoot, 'src', 'lib', 'stockInSessionsQuery.ts'), path.join(tmpDir, 'stockInSessionsQuery.ts'))
 execSync(
-  `npx tsc "${path.join(tmpDir, 'stockLedgerQuery.ts')}" "${path.join(tmpDir, 'businessDateWindow.ts')}" "${path.join(tmpDir, 'movementBranchName.ts')}" "${path.join(tmpDir, 'stockInSessionsQuery.ts')}" --outDir "${tmpDir}" --module commonjs --target es2022 --strict --skipLibCheck${ignoreConfigFlag}`,
+  `npx tsc "${path.join(tmpDir, 'stockLedgerQuery.ts')}" "${path.join(tmpDir, 'businessDateWindow.ts')}" "${path.join(tmpDir, 'movementBranchName.ts')}" "${path.join(tmpDir, 'movementActorName.ts')}" "${path.join(tmpDir, 'movementReference.ts')}" "${path.join(tmpDir, 'stockInSessionsQuery.ts')}" --outDir "${tmpDir}" --module commonjs --target es2022 --strict --skipLibCheck${ignoreConfigFlag}`,
   { cwd: cloudflareRoot, stdio: 'pipe' },
 )
 const kernel = require(path.join(tmpDir, 'stockLedgerQuery.js'))

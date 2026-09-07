@@ -1,4 +1,9 @@
 import { formatPriceNumber } from '../../utils/pricing.ts'
+// N13: the movement CSV names the RECORD a group belongs to, through the same
+// two functions the drill header above it uses. A spreadsheet that carries
+// Branch / Reason / User but not the receipt cannot be matched back to a sale,
+// which is the owner's "did not show details for sales" one surface along.
+import { formatHistoryReference, historyGroupReference } from '../../utils/historyRowModel.ts'
 
 type AnyRecord = Record<string, any>
 
@@ -25,6 +30,13 @@ function priceCsv(value: unknown): string {
   return formatPriceNumber(value || 0)
 }
 
+// Every header in this file is English (Date, Activity, Branch, Reason, User),
+// so the receipt is composed with the English words too. The COMPOSITION is
+// still the shared one -- what differs between a CSV cell and the drill header
+// is only which dictionary the caller hands it, exactly as
+// formatHistoryReference's contract intends.
+const MOVEMENT_EXPORT_REFERENCE_WORDS = { sale: 'Sale', return: 'Return' }
+
 function buildMovementRows(groups: AnyRecord[]): AnyRecord[] {
   return groups.map((group) => ({
     Date: group.latest_at || '',
@@ -34,6 +46,11 @@ function buildMovementRows(groups: AnyRecord[]): AnyRecord[] {
     Qty: group.totalQuantity || 0,
     Total_Cost_USD: priceCsv(group.totalCostUsd || 0),
     Branch: group.branchSummary || '',
+    // The record the group belongs to -- "Sale 20260901-193100" -- and the raw
+    // reference_id only for the groups that name no record (stock-in session
+    // tokens, 'revert:<id>'), which is what the drill header falls back to.
+    Receipt: formatHistoryReference(historyGroupReference(group.items), MOVEMENT_EXPORT_REFERENCE_WORDS)
+      || String(group.reference_id || ''),
     Reason: group.reasonSummary || '',
     User: group.userSummary || '',
   }))

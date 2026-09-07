@@ -12,7 +12,10 @@ import { translateMovementType } from './movementGroups'
 // N13: branch / actor / reason are rendered through the one shared history
 // row model, so this drill and the Stock Change ledger cannot disagree about
 // the same movement row (an absent value said nothing here and '—' there).
-import { historyActor, historyField } from '../../utils/historyRowModel.ts'
+// The same model now answers a fourth question -- WHICH RECORD the row
+// belongs to -- so "Sale 20260901-193100" reads identically here and in the
+// Stock Change ledger instead of this drill printing a bare reference id.
+import { formatHistoryReference, historyActor, historyField, historyGroupReference } from '../../utils/historyRowModel.ts'
 
 type Translator = (key: string) => string | undefined
 type TranslationWithFallback = (key: string, fallback?: string, altFallback?: string) => string
@@ -52,6 +55,10 @@ type MovementRecord = {
   reason?: string
   quantity?: number
   total_cost_usd?: number
+  // N13: resolved server-side; the client never derives which table a
+  // reference_id points at (cloudflare/src/lib/movementReference.ts).
+  reference_kind?: 'sale' | 'return' | null
+  reference_label?: string | null
 }
 
 type MovementGroup = {
@@ -237,7 +244,27 @@ export default function InventoryMovementsSurface({
     return (
       <>
         <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-500 dark:text-gray-400">
-          <span>{t('reference') || 'Reference'}: <span className="text-gray-700 dark:text-gray-200">{String(group.reference_id || '—')}</span></span>
+          {/* N13: a reference id identifies nothing to a person. When the
+              Worker resolved the record it names, show THAT -- the receipt --
+              and keep the raw id only for the rows that have no receipt
+              (stock-in session tokens, reverts). */}
+          {(() => {
+            // Read across the WHOLE group, not the visible page: an ambiguous
+            // movement type resolves per product (a row whose product is in
+            // neither the sale nor the return is left unlabelled), so the row
+            // that names the record can be on page 2. That pick is shared with
+            // the /movements CSV export (utils/historyRowModel.ts's
+            // historyGroupReference), so the header and the spreadsheet column
+            // can never name different rows of the same group.
+            const reference = historyGroupReference(group.items)
+            const receipt = formatHistoryReference(reference, {
+              sale: t('sale') || 'Sale',
+              return: t('return') || 'Return',
+            })
+            return receipt
+              ? <span>{t('receipt') || 'Receipt'}: <span className="text-gray-700 dark:text-gray-200">{receipt}</span></span>
+              : <span>{t('reference') || 'Reference'}: <span className="text-gray-700 dark:text-gray-200">{String(group.reference_id || '—')}</span></span>
+          })()}
           <span>{t('recorded_at') || 'Recorded at'}: <span className="text-gray-700 dark:text-gray-200">{fmtTime(group.created_at)}</span></span>
           {group.reasonSummary ? (
             <span className="min-w-0 max-w-full truncate" title={group.reasonSummary}>{t('reason') || 'Reason'}: <span className="text-gray-700 dark:text-gray-200">{group.reasonSummary}</span></span>

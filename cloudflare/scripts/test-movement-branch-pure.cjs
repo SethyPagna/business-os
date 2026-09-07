@@ -32,10 +32,14 @@ function ok(cond, label) {
 }
 
 // ---- compile the real modules ---------------------------------------------
-// stockLedgerQuery imports its receipt-type vocabulary from stockInSessionsQuery
-// (since 57cb3d29); the harness must copy that module too or tsc fails on the
-// import before a single check runs.
-const MODULES = ['stockLedgerQuery.ts', 'businessDateWindow.ts', 'movementBranchName.ts', 'stockInSessionsQuery.ts']
+// movementActorName / movementReference are the ledger's sibling read-time
+// resolutions; they are here only so the isolated compile of the kernel
+// resolves, and this file still tests the BRANCH. stockInSessionsQuery joined
+// them when the session lane (c438eee0) moved the receipt-type list there.
+const MODULES = [
+  'stockLedgerQuery.ts', 'businessDateWindow.ts', 'movementBranchName.ts',
+  'movementActorName.ts', 'movementReference.ts', 'stockInSessionsQuery.ts',
+]
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'movement-branch-'))
 for (const file of MODULES) {
   fs.copyFileSync(path.join(cloudflareRoot, 'src', 'lib', file), path.join(tmpDir, file))
@@ -124,7 +128,9 @@ ok(true, 'the helper column never reaches the client -- consumers see one branch
 // response that drops the value would pass every assertion above.
 const routeSrc = fs.readFileSync(path.join(cloudflareRoot, 'src', 'routes', 'inventory.ts'), 'utf8')
 assert.ok(/movementBranchNameSql\('inventory_movements'\)/.test(routeSrc), 'the /movements query does not resolve the branch name')
-assert.ok(/\.map\(withResolvedBranchName\)/.test(routeSrc), 'the /movements response does not fold the resolved branch back onto branch_name')
+// N13: the fold is now composed with the actor's (withResolvedActorName), so
+// this looks for the CALL rather than for a bare `.map(withResolvedBranchName)`.
+assert.ok(/withResolvedBranchName\(row\)|\.map\(withResolvedBranchName\)/.test(routeSrc), 'the /movements response does not fold the resolved branch back onto branch_name')
 ok(true, 'GET /api/inventory/movements resolves and folds the branch name')
 
 console.log('\nOK ' + checks + ' checks')

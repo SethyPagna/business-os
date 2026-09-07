@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { buildMovementGroups, getMovementGroupPage, movementColorClass, movementColorClassForRecord, normalizeMovementTimestamp } from '../src/components/inventory/movementGroups.ts'
+import { formatHistoryReference, historyGroupReference } from '../src/utils/historyRowModel.ts'
 
 let failed = 0
 
@@ -94,6 +95,37 @@ await runTest('movementColorClassForRecord: derives the sign from movement_type 
   assert.match(saleRecord, /rose/)
   assert.match(purchaseRecord, /emerald/)
   assert.match(noOpSetRecord, /slate/)
+})
+
+// N13: the drill header and the /movements CSV both name the record a GROUP
+// belongs to, and both read it off group.items. That only works if the group
+// build carries the server's resolved reference_kind / reference_label onto the
+// items -- if it dropped them the way it flattens most fields onto the group,
+// the export would read undefined and print an empty Receipt column with no
+// error anywhere. So the fields are asserted through the real group build.
+await runTest('grouped movements keep the resolved reference on their items, and the shared pick reads across the whole group', () => {
+  const groups = buildMovementGroups([
+    // Same action, one reference: an ambiguous 'return' row whose product is in
+    // NEITHER record (left unlabelled server-side) leads the group, and the row
+    // that names the receipt follows it.
+    { id: 1, movement_type: 'return', reference_id: 77, product_id: 9, quantity: 1, created_at: '2026-09-01 19:31:00', reference_kind: null, reference_label: null },
+    { id: 2, movement_type: 'return', reference_id: 77, product_id: 4, quantity: 2, created_at: '2026-09-01 19:31:00', reference_kind: 'return', reference_label: 'RET-20260902-0007' },
+  ])
+  assert.equal(groups.length, 1)
+  assert.equal(groups[0].items.length, 2)
+  assert.equal(groups[0].items[1].reference_label, 'RET-20260902-0007', 'the group build must carry the resolved receipt onto the item')
+  assert.deepEqual(
+    historyGroupReference(groups[0].items),
+    { kind: 'return', label: 'RET-20260902-0007' },
+    'the shared pick must find the naming row anywhere in the group, not only first',
+  )
+  assert.equal(
+    formatHistoryReference(historyGroupReference(groups[0].items), { sale: 'Sale', return: 'Return' }),
+    'Return RET-20260902-0007',
+  )
+  // A group that names no record stays honest -- no invented receipt.
+  const bare = buildMovementGroups([{ id: 3, movement_type: 'add', quantity: 5, created_at: '2026-09-01 08:00:00' }])
+  assert.deepEqual(historyGroupReference(bare[0].items), { kind: null, label: '' })
 })
 
 if (failed > 0) {

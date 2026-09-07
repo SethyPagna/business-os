@@ -763,7 +763,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
                   <div className="absolute inset-x-0 top-full z-10 mt-1 max-h-48 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-600 dark:bg-gray-800">
                     {candidateGroups.map((group) => (
                       <button key={group.key} type="button" onClick={() => setSelectedGroup(group)} className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-700">
-                        <span className="min-w-0 truncate text-gray-800 dark:text-gray-200">{group.name}</span>
+                        <span className="scroll-x-clean text-gray-800 dark:text-gray-200">{group.name}</span>
                         <span className="flex-shrink-0 text-[10px] text-gray-400">{group.sellableItems.length || group.items.length} {tr('options', 'options')} · {group.stockTotal}</span>
                       </button>
                     ))}

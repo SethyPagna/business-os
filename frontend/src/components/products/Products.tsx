@@ -36,6 +36,8 @@ import type { WireImageChange, WireImagesPreview } from './WireImagesReviewModal
 import DeleteConfirmModal from './DeleteConfirmModal'
 import { summarizeDeleteImpact } from '../../utils/deleteImpactSummary'
 import ProductsHeaderActions from './surfaces/HeaderActions'
+import { useCopyFloat } from '../shared/CopyFloat.tsx'
+import { COPY_SELECTOR, deferCopySurfaceAction } from '../shared/textAffordances.ts'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
 import type { PortalMenuItem } from '../shared/PortalMenu'
 import { primaryToolbarButtonClassName } from '../shared/toolbarButtonStyles'
@@ -337,6 +339,27 @@ type ProductApiResponse = Record<string, unknown> & {
   success?: boolean
 }
 
+type MergeDuplicateRequestOptions = { requestId?: string; signal?: AbortSignal }
+
+type MergeDuplicateProductsResult = ProductApiResponse & {
+  complete?: boolean
+  stalled?: boolean
+  madeProgress?: boolean
+  mergedGroups?: number
+  mergedProducts?: number
+  remainingProductsBefore?: number
+  remainingProducts?: number
+  maxAdditionalRequests?: number
+  processedCaseKeys?: string[]
+  refusals?: Array<{
+    caseKey?: string
+    mergedId?: number
+    mergedName?: string | null
+    code?: string
+    error?: string
+  }>
+}
+
 type ProductSearchResponse = {
   filters?: Partial<ProductFilterMeta>
   initials?: unknown[]
@@ -364,7 +387,7 @@ type ProductApi = {
   getProductFilters: (query?: Record<string, unknown>) => Promise<Partial<ProductFilterMeta> | undefined>
   getProductsByIds: (ids: number[], options?: Record<string, unknown>) => Promise<ProductRecord[]>
   getUnits: () => Promise<LookupRecord[]>
-  mergeDuplicates: () => Promise<ProductApiResponse | undefined>
+  mergeDuplicates: (options?: MergeDuplicateRequestOptions) => Promise<ProductApiResponse | undefined>
   previewMergeDuplicates: () => Promise<ProductApiResponse | undefined>
   previewZeroQuantityCandidates: (thresholdDays?: number) => Promise<ProductApiResponse | undefined>
   deleteZeroQuantityProducts: (ids: number[]) => Promise<ProductApiResponse | undefined>
@@ -487,7 +510,11 @@ const productApi: ProductApi = {
     return []
   },
   getUnits: async () => (await (await loadLookupModule()).getUnits()) as LookupRecord[],
-  mergeDuplicates: async () => toProductApiResponse(await (await loadProductWriteModule()).mergeDuplicateProducts()),
+  mergeDuplicates: async (options) => {
+    const module = await loadProductWriteModule()
+    const merge = module.mergeDuplicateProducts as (request?: MergeDuplicateRequestOptions) => Promise<unknown>
+    return toProductApiResponse(await merge(options))
+  },
   previewMergeDuplicates: async () => toProductApiResponse(await (await loadProductWriteModule()).previewMergeDuplicateProducts()),
   previewZeroQuantityCandidates: async (thresholdDays) => toProductApiResponse(await (await loadProductWriteModule()).previewZeroQuantityCandidates(thresholdDays)),
   deleteZeroQuantityProducts: async (ids) => toProductApiResponse(await (await loadProductWriteModule()).deleteZeroQuantityProducts(ids)),
@@ -841,6 +868,7 @@ function ProductsFullEditor() {
   const [bulkActionBusy, setBulkActionBusy] = useState(false)
   const [mergeDuplicatesBusy, setMergeDuplicatesBusy] = useState(false)
   const [mergeDuplicatesReviewOpen, setMergeDuplicatesReviewOpen] = useState(false)
+  const mergeDuplicatesAbortRef = useRef<AbortController | null>(null)
   // Exact-duplicate (same real barcode + same name) flagging for the list
   // rows -- user spec item #3. Single source of truth is the server sweep
   // the Duplicates review tab already uses (see utils/exactDuplicateProducts).
@@ -1797,6 +1825,8 @@ function ProductsFullEditor() {
       error?: string
       groupCount?: number
       duplicateProductCount?: number
+      mergeableDuplicateProductCount?: number
+      blockedGroupCount?: number
       groups?: MergeDuplicatesPreviewGroup[]
       costRefusalCount?: number
     } | undefined
@@ -1804,6 +1834,8 @@ function ProductsFullEditor() {
     return {
       groupCount: Number(result?.groupCount || 0),
       duplicateProductCount: Number(result?.duplicateProductCount || 0),
+      mergeableDuplicateProductCount: Number(result?.mergeableDuplicateProductCount || 0),
+      blockedGroupCount: Number(result?.blockedGroupCount || 0),
       groups: Array.isArray(result?.groups) ? result.groups : [],
       // Passed straight through: the groups carry costBefore/costAfter and
       // their own costRefusals, and this is the run-wide total. Dropping them
@@ -1814,15 +1846,51 @@ function ProductsFullEditor() {
 
   const handleMergeDuplicates = async () => {
     if (mergeDuplicatesBusy) return
+    const controller = new AbortController()
+    mergeDuplicatesAbortRef.current = controller
+    const requestId = `product-merge_${globalThis.crypto?.randomUUID?.() || `${Date.now()}_${Math.random().toString(36).slice(2)}`}`
     setMergeDuplicatesBusy(true)
+    let calls = 0
+    let callCeiling = 1
+    let mergedGroups = 0
+    let mergedProducts = 0
+    const processedCaseKeys = new Set<string>()
+    const refusalsByCase = new Map<string, NonNullable<MergeDuplicateProductsResult['refusals']>[number]>()
+    let completed = false
     try {
-      const result = await productApi.mergeDuplicates() as {
-        success?: boolean; mergedGroups?: number; mergedProducts?: number; error?: string
-        refusals?: Array<{ mergedId?: number; mergedName?: string | null; code?: string; error?: string }>
-      } | undefined
-      if (result?.success === false) throw new Error(result.error || 'Failed to merge duplicate products')
-      const mergedGroups = Number(result?.mergedGroups || 0)
-      const mergedProducts = Number(result?.mergedProducts || 0)
+      while (calls < callCeiling) {
+        const result = await productApi.mergeDuplicates({ requestId, signal: controller.signal }) as MergeDuplicateProductsResult | undefined
+        calls += 1
+        if (result?.success === false) throw new Error(result.error || 'Failed to merge duplicate products')
+        mergedGroups += Number(result?.mergedGroups || 0)
+        mergedProducts += Number(result?.mergedProducts || 0)
+        for (const key of Array.isArray(result?.processedCaseKeys) ? result.processedCaseKeys : []) {
+          if (key) processedCaseKeys.add(String(key))
+        }
+        for (const refusal of Array.isArray(result?.refusals) ? result.refusals : []) {
+          const key = String(refusal?.caseKey || `${refusal?.mergedId || 'unknown'}:${refusal?.code || refusal?.error || 'refused'}`)
+          refusalsByCase.set(key, refusal)
+        }
+        if (result?.complete) {
+          completed = true
+          break
+        }
+
+        const remainingBefore = Number(result?.remainingProductsBefore)
+        const remaining = Number(result?.remainingProducts)
+        const madeProgress = result?.madeProgress === true
+        if (result?.stalled || !madeProgress || !Number.isFinite(remainingBefore)
+          || !Number.isFinite(remaining) || remaining >= remainingBefore) {
+          throw new Error(result?.error || 'Duplicate merge stopped because the catalog did not make progress. Review the remaining products and retry.')
+        }
+        const additional = Math.max(0, Math.floor(Number(result?.maxAdditionalRequests || 0)))
+        callCeiling = calls + additional
+        if (additional === 0) {
+          throw new Error('Duplicate merge stopped before the remaining products were processed. Retry to continue safely.')
+        }
+      }
+      if (!completed) throw new Error('Duplicate merge reached its safe request limit. Retry to continue with the remaining products.')
+
       // What the run deliberately did NOT do. A refusal is a DECISION -- two
       // costs too far apart to be one cost, or a stock-in session that can
       // still be undone -- and reporting plain success over it tells the
@@ -1830,7 +1898,7 @@ function ProductsFullEditor() {
       // Same shape the Conflicts tab's bulk merge already reports: the count,
       // plus the first refusal's own sentence, which is the half that says
       // what to do about it.
-      const refusals = Array.isArray(result?.refusals) ? result.refusals : []
+      const refusals = Array.from(refusalsByCase.values())
       const firstRefusal = refusals.find((r) => r?.error)?.error || ''
       const refusalNote = refusals.length
         ? [
@@ -1851,12 +1919,27 @@ function ProductsFullEditor() {
           ].filter(Boolean).join('. '),
           refusals.length ? 'info' : undefined,
         )
-        await load(true)
       }
-    } catch (e) {
-      notify(getErrorMessage(e, 'Failed'), 'error')
-    } finally {
+      await load(true)
       setMergeDuplicatesReviewOpen(false)
+    } catch (e) {
+      // A request can commit its atomic cases before a timeout or cancellation
+      // reaches the client. Reload in every started-run failure path; retrying
+      // re-scans only active cases under the same server contract.
+      if (calls > 0 || controller.signal.aborted) await load(true)
+      if (!controller.signal.aborted) {
+        const partialSummary = mergedGroups > 0
+          ? (t('merged_duplicate_products_summary') || 'Merged {products} duplicate product(s) into {groups} row(s)')
+            .replace('{products}', String(mergedProducts))
+            .replace('{groups}', String(mergedGroups))
+          : ''
+        notify([
+          partialSummary,
+          getErrorMessage(e, 'Failed'),
+        ].filter(Boolean).join('. '), 'error')
+      }
+    } finally {
+      if (mergeDuplicatesAbortRef.current === controller) mergeDuplicatesAbortRef.current = null
       setMergeDuplicatesBusy(false)
     }
   }
@@ -2149,6 +2232,13 @@ function ProductsFullEditor() {
     (product: Record<string, unknown>): string => buildProductBranchSummaryLabel(product, branchNameById),
     [branchNameById],
   )
+  // Copy affordance for the product NAME, BRAND, SUPPLIER and BARCODE.
+  // Called once here, not per row: the rows are drawn by a callback inside
+  // ProductsListSurface's .map(), where a hook call would be a Rules-of-
+  // Hooks violation (the same reason utils/longPress.ts is not a hook).
+  // What it hands back is a plain attribute spread, so it can be applied
+  // to a value that is already inside a laid-out row without wrapping it.
+  const copy = useCopyFloat(tr)
   const renderMetaPill = useCallback((item: { className?: string; color?: string; key: string; label?: unknown } | null) => {
     if (!item?.label) return null
     const label = String(item.label)
@@ -3247,7 +3337,15 @@ function ProductsFullEditor() {
     const longPress = createLongPressHandlers(rowLongPressState, {
       disabled: selectionModeActive,
       onLongPress: () => toggleSelectionScope(rowScopeIds, true),
-      onClick: () => { if (!dupInfo) setDetailProduct(p) },
+      onClick: (target) => {
+        if (dupInfo) return
+        const copyTarget = (target as Element | null)?.closest?.(COPY_SELECTOR)
+        if (copyTarget) {
+          deferCopySurfaceAction(copyTarget, () => setDetailProduct(p))
+          return
+        }
+        setDetailProduct(p)
+      },
     })
     // The native `click` that follows this same press-release still
     // fires once selectionModeActive flips true and swaps this element's
@@ -3255,14 +3353,28 @@ function ProductsFullEditor() {
     // that one ghost click instead of letting it immediately toggle the
     // row back off. See utils/longPress.ts's own comment on
     // consumeLongPressClick for the full mechanism.
-    const handleRowClick = () => {
+    const handleRowClick = (event: ReactMouseEvent) => {
       if (consumeLongPressClick(rowLongPressState)) return
+      const copyTarget = (event.target as Element | null)?.closest?.(COPY_SELECTOR)
+      if (copyTarget) {
+        deferCopySurfaceAction(copyTarget, () => toggleSelectionScope(rowScopeIds, !rowSelected))
+        return
+      }
       toggleSelectionScope(rowScopeIds, !rowSelected)
     }
     return (
       <tr
         key={productId}
         data-product-jump-id={productId}
+        // The row's own click IS the surface here: it opens the product, or
+        // toggles selection once select mode is live. `data-clickable` is how
+        // this app already declares that (the dense tables in Stock Changes,
+        // Stock-in Sessions, Returns and Fees all carry it), and the shared
+        // text-affordance controller reads it to decide whether a copyable
+        // value inside the row may take that click. It may not. Declaration
+        // only: the CSS keyed on this attribute is scoped to
+        // `.dense-data-table`, which this table is not.
+        data-clickable="true"
         className={`table-row cursor-pointer select-none ${rowSelected ? 'bg-primary-50 dark:bg-primary-900/20' : ''}`}
         onClick={selectionModeActive ? handleRowClick : undefined}
         {...(selectionModeActive ? {} : longPress)}
@@ -3333,12 +3445,27 @@ function ProductsFullEditor() {
           <div className="flex min-h-10 flex-col justify-center">
             {compactMeta.length ? (
               <div className="mb-1 flex max-w-[18rem] flex-wrap gap-1 lg:max-w-none lg:flex-nowrap lg:overflow-hidden">
-                {compactMeta.map((item) => renderMetaPill(item ? {
-                  key: String(item.key),
-                  label: String(item.label || ''),
-                  color: typeof item.color === 'string' ? item.color : undefined,
-                  className: typeof item.className === 'string' ? item.className : undefined,
-                } : null))}
+                {compactMeta.map((item) => {
+                  const pill = renderMetaPill(item ? {
+                    key: String(item.key),
+                    label: String(item.label || ''),
+                    color: typeof item.color === 'string' ? item.color : undefined,
+                    className: typeof item.className === 'string' ? item.className : undefined,
+                  } : null)
+                  // Barcode and brand are two of the four copyable product
+                  // fields. renderMetaPill stringifies its label, so the
+                  // affordance cannot go inside the pill -- this is the same
+                  // wrapper ProductRowParts uses for the supplier pill: an
+                  // inline-flex span with no box of its own, so the meta line
+                  // lays out exactly as it did.
+                  const metaKey = String(item?.key || '')
+                  if (!pill || (metaKey !== 'barcode' && metaKey !== 'brand')) return pill
+                  return (
+                    <span key={`${metaKey}-copy`} className={`inline-flex min-w-0 ${metaKey === 'barcode' ? 'shrink-0' : 'max-w-full'}`} {...copy(item?.label)}>
+                      {pill}
+                    </span>
+                  )
+                })}
               </div>
             ) : null}
             <div className="flex min-w-0 items-center gap-1.5">
@@ -3349,7 +3476,14 @@ function ProductsFullEditor() {
                   row rather than one step below it -- per the Aug 19 2026
                   ask. Child rows under a group keep font-medium, same as
                   before. */}
-              <div {...getKhmerTextProps(productName, `min-w-0 break-words text-gray-900 dark:text-white ${indented ? 'font-medium' : 'font-semibold'}`)}>{productName}</div>
+              {/* N36 (owner, Sep 6 2026): "for product names, make it
+                  horizontal scroll instead of pushing rows". A long name used
+                  to wrap and grow the row's height, which is what made the
+                  table ragged; it now stays on its own line and scrolls
+                  inside its cell. .scroll-x-clean is the ONE shared class for
+                  every product-name cell on every surface (styles/main.css)
+                  -- no per-file scroll CSS. */}
+              <div {...getKhmerTextProps(productName, `scroll-x-clean text-gray-900 dark:text-white ${indented ? 'font-medium' : 'font-semibold'}`)} {...copy(productName)}>{productName}</div>
             </div>
             {dupInfo ? (
               <DuplicateResolverControl
@@ -3425,7 +3559,7 @@ function ProductsFullEditor() {
         </td>
       </tr>
     )
-  }, [branchFilter, branchNameById, catMap, exchangeRate, fmtKHR, fmtUSD, getBranchQty, getBranchSummaryLabel, getBrandColor, getLongPressState, isSelectionScopeFullySelected, isSelectionScopePartiallySelected, openLightbox, promotionRules, renderMetaPill, renderUnitChip, selectionModeActive, t, toggleSelectionScope, tr, exactDuplicateIndex, dupResolverBusyKey, canMergeDuplicates, handleDuplicateKeepThis, handleDuplicateKeepBoth])
+  }, [branchFilter, branchNameById, catMap, copy, exchangeRate, fmtKHR, fmtUSD, getBranchQty, getBranchSummaryLabel, getBrandColor, getLongPressState, isSelectionScopeFullySelected, isSelectionScopePartiallySelected, openLightbox, promotionRules, renderMetaPill, renderUnitChip, selectionModeActive, t, toggleSelectionScope, tr, exactDuplicateIndex, dupResolverBusyKey, canMergeDuplicates, handleDuplicateKeepThis, handleDuplicateKeepBoth])
 
   const renderMobileProductCard = useCallback((p: ProductRecord, { indented = false }: { indented?: boolean } = {}) => {
     const productId = p.id ?? 0
@@ -3475,13 +3609,26 @@ function ProductsFullEditor() {
     const longPress = createLongPressHandlers(rowLongPressState, {
       disabled: selectionModeActive,
       onLongPress: () => toggleSelectionScope(rowScopeIds, true),
-      onClick: () => { if (!dupInfo) setDetailProduct(p) },
+      onClick: (target) => {
+        if (dupInfo) return
+        const copyTarget = (target as Element | null)?.closest?.(COPY_SELECTOR)
+        if (copyTarget) {
+          deferCopySurfaceAction(copyTarget, () => setDetailProduct(p))
+          return
+        }
+        setDetailProduct(p)
+      },
     })
     // Same ghost-click guard as renderDesktopProductRow -- see its
     // comment and utils/longPress.ts's consumeLongPressClick for why
     // this is needed, not just belt-and-suspenders.
-    const handleRowClick = () => {
+    const handleRowClick = (event: ReactMouseEvent) => {
       if (consumeLongPressClick(rowLongPressState)) return
+      const copyTarget = (event.target as Element | null)?.closest?.(COPY_SELECTOR)
+      if (copyTarget) {
+        deferCopySurfaceAction(copyTarget, () => toggleSelectionScope(rowScopeIds, !rowSelected))
+        return
+      }
       toggleSelectionScope(rowScopeIds, !rowSelected)
     }
 
@@ -3489,6 +3636,8 @@ function ProductsFullEditor() {
       <div
         key={productId}
         data-product-jump-id={productId}
+        // Same declaration as renderDesktopProductRow -- see its comment.
+        data-clickable="true"
         className={rowClassName}
         onClick={selectionModeActive ? handleRowClick : undefined}
         {...(selectionModeActive ? {} : longPress)}
@@ -3549,10 +3698,17 @@ function ProductsFullEditor() {
           <div className="flex-1 min-w-0">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0 flex-1">
-                {/* Product names are content, not a label: let them use a
-                    second (or later) row on small cards instead of clipping
-                    them or requiring a horizontal drag to read them. */}
-                <div {...getKhmerTextProps(productName, 'break-words text-sm font-semibold text-gray-900 dark:text-white')}>
+                {/* Product names are content, not a label, so they are never
+                    clipped to an ellipsis. They no longer take a second row
+                    either: N36 (owner, Sep 6 2026) -- "for product names,
+                    make it horizontal scroll instead of pushing rows ... make
+                    sure it is smooth ios pwa and android pwa ... clean no need
+                    show the scroll bar". This SUPERSEDES the earlier "let them
+                    use a second row on small cards" rule. .scroll-x-clean is
+                    the one shared class (styles/main.css); it deliberately
+                    leaves touch-action alone so a vertical swipe starting on a
+                    name still scrolls the list. */}
+                <div {...getKhmerTextProps(productName, 'scroll-x-clean text-sm font-semibold text-gray-900 dark:text-white')} {...copy(productName)}>
                   {productName}
                 </div>
               </div>
@@ -3584,6 +3740,7 @@ function ProductsFullEditor() {
               {barcode ? (
                 <span
                   className="inline-flex shrink-0 whitespace-nowrap rounded-full bg-slate-100 px-1 py-0.5 font-mono text-[10px] tracking-tight text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                  {...copy(barcode)}
                   title={barcode}
                 >
                   {barcode}
@@ -3596,6 +3753,7 @@ function ProductsFullEditor() {
                     background: getBrandColor(brandName),
                     color: getContrastingTextColor(getBrandColor(brandName)),
                   } : undefined}
+                  {...copy(brandName)}
                   title={brandName}
                 >
                   {brandName}
@@ -3620,10 +3778,18 @@ function ProductsFullEditor() {
                 keeps its bigger weight so it still reads first; special/
                 discount figures ride beside it; then cost (red) and the
                 status-colored qty+unit, "|"-separated like before.
-                flex-wrap stays purely as overflow protection for genuinely
-                too-narrow cards -- the default render is one line. */}
-            <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs">
-              <span className="whitespace-nowrap font-semibold text-green-700 dark:text-green-400">{fmtUSD(sellingUsd)}</span>
+
+                N36 (owner, Sep 6 2026): "the qty unit is being pushed to next
+                row if selling price, wholesale price, cost price is fully
+                there. 2 digits, if 3 even worse ... keep it visible compact
+                one line." flex-wrap WAS the overflow protection, and at 375px
+                with three full prices it is what fires -- see the width
+                arithmetic on `.price-strip` in styles/main.css. The row is
+                now nowrap and pays for it in divider blanks and one step of
+                digit size (tabular-nums, tighter tracking) rather than in a
+                second line; no value is dropped or hidden. */}
+            <div className="price-strip mt-1">
+              <span className="font-semibold text-green-700 dark:text-green-400">{fmtUSD(sellingUsd)}</span>
               {wholesaleUsd > 0 ? (
                 // The wholesale price (wholesale_price_usd). This used to read
                 // special_price_usd and be labelled "VIP"; the 2026-09-04
@@ -3638,24 +3804,24 @@ function ProductsFullEditor() {
                 // beside it, matching the cost/qty dividers on this same row
                 // (user, Aug 31). The desktop table row keeps its own labelling.
                 <>
-                  <span className="text-gray-300 dark:text-gray-600">|</span>
-                  <span className="whitespace-nowrap font-medium text-primary-700 dark:text-primary-400">
+                  <span className="price-strip-divider text-gray-300 dark:text-gray-600">|</span>
+                  <span className="font-medium text-primary-700 dark:text-primary-400">
                     {fmtUSD(wholesaleUsd)}
                   </span>
                 </>
               ) : null}
               {promotion.active ? (
-                <span className="whitespace-nowrap font-medium text-rose-600 dark:text-rose-300">
+                <span className="font-medium text-rose-600 dark:text-rose-300">
                   {String(p.discount_label || tr('discounts', 'Discounts'))} {fmtUSD(promotion.applied_price_usd)}
                 </span>
               ) : null}
-              <span className="text-gray-300 dark:text-gray-600">|</span>
-              <span className="whitespace-nowrap text-red-600">{fmtUSD(costUsd)}</span>
-              <span className="text-gray-300 dark:text-gray-600">|</span>
+              <span className="price-strip-divider text-gray-300 dark:text-gray-600">|</span>
+              <span className="text-red-600">{fmtUSD(costUsd)}</span>
+              <span className="price-strip-divider text-gray-300 dark:text-gray-600">|</span>
               {/* Colored by stock status (red/yellow/green) instead of the
                   separate "In"/"Low"/"Out" badge this row used to show up
                   in its header line -- see stockStatusTextClass above. */}
-              <span className={withKhmerTextClass(unitName, `inline-flex min-w-0 max-w-full items-center whitespace-nowrap font-medium ${stockStatusTextClass}`)}>{String(qty || 0)}{renderUnitChip(unitName)}</span>
+              <span className={withKhmerTextClass(unitName, `price-strip-qty inline-flex items-center font-medium ${stockStatusTextClass}`)}>{String(qty || 0)}{renderUnitChip(unitName)}</span>
             </div>
             <ProductBatchPreview product={p} branchId={branchFilter} tr={tr} compact />
             {/* Description is intentionally NOT shown on the small-screen list
@@ -3676,7 +3842,7 @@ function ProductsFullEditor() {
         </div>
       </div>
     )
-  }, [branchFilter, catMap, exchangeRate, fmtUSD, getBranchQty, getBrandColor, getLongPressState, isSelectionScopeFullySelected, isSelectionScopePartiallySelected, openLightbox, promotionRules, renderUnitChip, selectionModeActive, t, toggleSelectionScope, tr, exactDuplicateIndex, dupResolverBusyKey, canMergeDuplicates, handleDuplicateKeepThis, handleDuplicateKeepBoth])
+  }, [branchFilter, catMap, copy, exchangeRate, fmtUSD, getBranchQty, getBrandColor, getLongPressState, isSelectionScopeFullySelected, isSelectionScopePartiallySelected, openLightbox, promotionRules, renderUnitChip, selectionModeActive, t, toggleSelectionScope, tr, exactDuplicateIndex, dupResolverBusyKey, canMergeDuplicates, handleDuplicateKeepThis, handleDuplicateKeepBoth])
 
   // One unified thumbnail for a whole name-group (see the `indented`
   // branches just above, which omit each row's own image once a group
@@ -4727,7 +4893,12 @@ function ProductsFullEditor() {
       {mergeDuplicatesReviewOpen && (
         <MergeDuplicatesReviewModal
           t={t}
-          onClose={() => { if (!mergeDuplicatesBusy) setMergeDuplicatesReviewOpen(false) }}
+          onClose={() => {
+            const active = mergeDuplicatesAbortRef.current
+            active?.abort()
+            setMergeDuplicatesReviewOpen(false)
+            if (active) void load(true)
+          }}
           onConfirm={handleMergeDuplicates}
           onLoadPreview={loadMergeDuplicatesPreview}
           working={mergeDuplicatesBusy}

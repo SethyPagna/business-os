@@ -59,26 +59,26 @@ export const ALLOWLIST: AllowEntry[] = [
   {
     file: 'components/products/Products.tsx',
     names: ['branchFilter', 'brandFilter', 'catFilter', 'groupFilter', 'stockFilter', 'supplierFilter'],
-    line: 1259,
+    line: 1260,
     reason:
       'Filter-metadata effect. Re-runs INDIRECTLY: filterMetaScope (a useMemo over all '
-      + 'six filters, :1236) changes -> the effect at :1244 resets filterMetaLoadedRef and '
-      + 'filterMetaReady -> load()\'s loading cycle re-triggers :1250 -> this effect runs '
+      + 'six filters, :1237) changes -> the effect at :1245 resets filterMetaLoadedRef and '
+      + 'filterMetaReady -> load()\'s loading cycle re-triggers :1251 -> this effect runs '
       + 'again with a fresh closure. Verified 2026-09-03; RE-VERIFIED 2026-09-06 at the '
-      + 'repinned line -- the three sites above were read again and the chain is unchanged. '
+      + 'integrated product-row/text-affordance line -- the sites above were read again and the chain is unchanged. '
       + 'No path found where a filter changes without load() running. FRAGILE: it depends '
       + 'on `loading` cycling, so if that chain is ever refactored this entry must be '
-      + 're-verified, not trusted. (Repinned from :1196: the site had drifted 60 lines, '
-      + 'exactly the DRIFT budget, so the next line added anywhere above it -- here a CSS '
-      + 'import -- tipped it to STALE. A pin at its true line is the point.)',
+      + 're-verified, not trusted.',
   },
   {
     file: 'components/products/Products.tsx',
     names: ['stockFilter'],
-    line: 2168,
+    line: 2228,
     reason:
       'False-positive class 3. `stockFilter:` here is an OBJECT KEY -- the value read is '
-      + 'effectiveStockState, which IS in the deps. Nothing to fix.',
+      + 'effectiveStockState, which IS in the deps. Nothing to fix. Re-verified and '
+      + 'repinned 2026-09-06 (the `filtered` useMemo); the old pin had drifted to the '
+      + 'edge of DRIFT, one inserted line from reporting itself stale.',
   },
 ]
 

@@ -13,7 +13,8 @@ import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { dateToBatchCode } from '../../utils/batchCode.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
-import { buildHistoryRowModel } from '../../utils/historyRowModel.ts'
+import TruncatedText from '../shared/TruncatedText.tsx'
+import { buildHistoryRowModel, formatHistoryReference } from '../../utils/historyRowModel.ts'
 
 type DayMovement = {
   id?: number | string
@@ -23,6 +24,10 @@ type DayMovement = {
   branch_name?: string | null
   user_name?: string | null
   created_at?: string | null
+  // N13: which record the row belongs to, resolved by the Worker on the same
+  // /api/inventory/movements response this day drill already reads.
+  reference_kind?: 'sale' | 'return' | null
+  reference_label?: string | null
 }
 
 // Everyday use shows the batch DATE only; the day view is where the TIMES
@@ -303,6 +308,14 @@ export default function ManageBatchesModal({
                   const inbound = type === 'add'
                   const time = movementTime(movement.created_at)
                   const model = buildHistoryRowModel(movement)
+                  // N13 (round 2): a sale row here named nothing either. The
+                  // receipt leads the fact line -- same composition, same
+                  // wording as every other reader of a movement row.
+                  const receipt = formatHistoryReference(model.reference, {
+                    sale: tr('sale', 'Sale', 'ការលក់'),
+                    return: tr('return', 'Return', 'ការប្រគល់មកវិញ'),
+                  })
+                  const factLine = [receipt, model.reason, model.branch, model.actor].filter(Boolean).join(' · ')
                   return (
                     <div key={movement.id ?? index} className="flex items-center gap-2 rounded-lg border border-gray-100 px-2.5 py-1.5 text-xs dark:border-gray-700">
                       <span className="w-12 flex-shrink-0 font-mono text-gray-500 dark:text-gray-400">
@@ -316,11 +329,13 @@ export default function ManageBatchesModal({
                       </span>
                       {/* N13: this printed `reason || branch_name`, so one cell
                           silently meant two different things and you could not
-                          tell which. Same three facts, same order, same shared
-                          placeholder as every other history surface. */}
-                      <span className="min-w-0 flex-1 truncate text-gray-400" title={`${model.reason} · ${model.branch} · ${model.actor}`}>
-                        {`${model.reason} · ${model.branch} · ${model.actor}`}
-                      </span>
+                          tell which. Same facts, same order, same shared
+                          placeholder as every other history surface -- with the
+                          receipt in front when the row names a record.
+                          Through TruncatedText, like the ledger's own receipt
+                          line: the line now LEADS with a receipt id, and a
+                          `title` on a clipped span is unreachable by tap. */}
+                      <TruncatedText text={factLine} className="min-w-0 flex-1 text-gray-400" />
                     </div>
                   )
                 })}

@@ -23,6 +23,13 @@ import { localDateAtOrAfter, localDateAtOrBefore, localTimeRangeClause } from '.
 // the ledger rendered their Branch column empty. Resolved through the id here
 // (snapshot-first) -- see lib/movementBranchName.ts for why it is read-side.
 import { movementBranchNameSql } from './movementBranchName'
+// N13: the acting account's USERNAME, resolved through user_id for the rows
+// whose snapshot predates the username rule -- see lib/movementActorName.ts.
+import { movementActorNameSql } from './movementActorName'
+// N13: the receipt (sales.receipt_number / returns.return_number) that the
+// row's reference_id names -- see lib/movementReference.ts for the type
+// mapping and why the ambiguous types resolve by product membership.
+import { movementReferenceSelectSql } from './movementReference'
 import { STOCK_RECEIPT_MOVEMENT_TYPES } from './stockInSessionsQuery'
 
 export const LEDGER_OUT_TYPES = [
@@ -175,7 +182,8 @@ export function buildStockLedgerQuery(filters: StockLedgerFilters = {}): StockLe
       m.branch_id, ${movementBranchNameSql('m')} AS branch_name, m.movement_type, ABS(COALESCE(m.quantity, 0)) AS quantity,
       CASE WHEN m.movement_type IN (${OUT_LIST}) THEN -ABS(COALESCE(m.quantity, 0)) ELSE ABS(COALESCE(m.quantity, 0)) END AS signed_quantity,
       m.unit_cost_usd, m.unit_cost_khr, m.total_cost_usd, m.total_cost_khr,
-      m.reason, m.reference_id, m.user_name, m.created_at,
+      m.reason, m.reference_id, ${movementActorNameSql('m')} AS user_name, m.created_at,
+      ${movementReferenceSelectSql('m')},
       m.batch_id, b.lot_code AS batch_lot_code, b.received_at AS batch_received_at,
       b.supplier_id AS batch_supplier_id, b.supplier_name AS batch_supplier_name,
       b.payment_status AS batch_payment_status, b.credit_due_date AS batch_credit_due_date,

@@ -4,7 +4,12 @@ import { translateMovementType } from './movementGroups'
 // N13: the same row model the Stock Change ledger and the movement drill
 // use. This preview used to DROP the branch span and silently omit the
 // actor and reason when they were absent, so one movement read three ways.
-import { buildHistoryRowModel } from '../../utils/historyRowModel.ts'
+// The same model also answers WHICH RECORD a movement belongs to, so a sale
+// row here names its receipt exactly as the Stock Change ledger and the
+// movement drill do -- this line used to read "13:22 · james · " with nothing
+// on it identifying the sale.
+import { buildHistoryRowModel, formatHistoryReference } from '../../utils/historyRowModel.ts'
+import TruncatedText from '../shared/TruncatedText.tsx'
 
 type TranslateFn = (key: string) => string | undefined
 type TimeFormatter = (value: unknown) => string
@@ -83,6 +88,15 @@ export default function ProductHistoryPreviewModal({ state, onClose, onRetry, on
             const qty = Number(movement.quantity || 0)
             const signed = qty > 0 ? `+${qty}` : String(qty)
             const model = buildHistoryRowModel(movement)
+            // The receipt sits between the actor and the free-text reason,
+            // the same order the ledger's Reason cell uses; a row with no
+            // record (add / remove / transfer) drops the segment entirely
+            // rather than printing an empty one.
+            const receipt = formatHistoryReference(model.reference, {
+              sale: T('sale', 'Sale'),
+              return: T('return', 'Return'),
+            })
+            const factLine = [fmtTime(movement.created_at), model.actor, receipt, model.reason].filter(Boolean).join(' · ')
             return (
               <div
                 key={String(movement.id ?? index)}
@@ -95,9 +109,10 @@ export default function ProductHistoryPreviewModal({ state, onClose, onRetry, on
                     </span>
                     <span className="truncate text-gray-500 dark:text-gray-400" title={model.branch}>{model.branch}</span>
                   </div>
-                  <div className="mt-0.5 truncate text-[11px] text-gray-400">
-                    {`${fmtTime(movement.created_at)} · ${model.actor} · ${model.reason}`}
-                  </div>
+                  {/* Through TruncatedText, like the ledger's own receipt
+                      line: this line now carries a receipt id, and a `title`
+                      on a clipped span is unreachable by tap. */}
+                  <TruncatedText text={factLine} className="mt-0.5 text-[11px] text-gray-400" />
                 </div>
                 <div className={`flex-shrink-0 text-sm font-bold ${qty > 0 ? 'text-green-600' : qty < 0 ? 'text-red-600' : 'text-gray-500'}`}>
                   {signed} {product?.unit || ''}

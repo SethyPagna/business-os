@@ -54,15 +54,21 @@ const BATCH_DATE_COLUMNS: ReadonlyArray<{ header: string; order: SlashDateOrder 
 
 /**
  * The received-date cell of one import row, together with the reading order
- * its own header dictates. Empty `raw` means "no date given" -- callers
- * default that to today, exactly as before.
+ * its own header dictates and the NAME of the header it came from. Empty
+ * `raw` means "no date given" -- callers default that to today, exactly as
+ * before, and get an empty `header` with it.
+ *
+ * The header name is returned, not just the order, because the messages this
+ * feeds are read by someone looking at their own spreadsheet: "not a readable
+ * date" leaves them guessing which of their columns was read and which way
+ * round. See importEngine.ts's unreadable_batch_date warning.
  */
-export function readBatchDateCell(row: Record<string, unknown>): { raw: string; order: SlashDateOrder } {
+export function readBatchDateCell(row: Record<string, unknown>): { raw: string; order: SlashDateOrder; header: string } {
   for (const { header, order } of BATCH_DATE_COLUMNS) {
     const value = String(row?.[header] ?? '').trim()
-    if (value) return { raw: value, order }
+    if (value) return { raw: value, order, header }
   }
-  return { raw: '', order: 'month-first' }
+  return { raw: '', order: 'month-first', header: '' }
 }
 
 function isValidCalendarDate(year: number, month: number, day: number): boolean {
@@ -78,9 +84,10 @@ function isValidCalendarDate(year: number, month: number, day: number): boolean 
 // timestamp) or a slash/dash-separated string a human typed into a CSV cell.
 // Returns null for anything that isn't a real calendar date.
 //
-// `order` defaults to 'month-first' so every pre-existing call site keeps
-// the exact meaning it had before Sep 4 2026. Only a caller that KNOWS it is
-// reading a day-first column passes the other value -- see readBatchDateCell.
+// `order` defaults to 'month-first' so every pre-existing SPREADSHEET call
+// site keeps the exact meaning it had before Sep 4 2026. A caller that knows
+// its order says so: readBatchDateCell for a column header, and
+// normalizeTypedDate below for anything a person typed into the app itself.
 export function normalizeToIsoDate(value: string | null | undefined, order: SlashDateOrder = 'month-first'): string | null {
   const raw = String(value ?? '').trim()
   if (!raw) return null
@@ -110,6 +117,29 @@ export function normalizeToIsoDate(value: string | null | undefined, order: Slas
   }
 
   return null
+}
+
+/**
+ * The order a PERSON typed it in, inside this app's own UI: DAY-FIRST.
+ *
+ * Owner, Sep 6 2026: "i asked to change already dd/mm/yyyy. this is the rule
+ * moving forward." Every field staff type a date into renders DateEntryInput,
+ * whose mask and parser are day-first (frontend/src/utils/dateEntry.ts), and
+ * every date the app prints back is day-first too. A Worker route that re-read
+ * that same slash string month-first would store what the screen called
+ * 3 September (03/09/2026) as 9 March -- wrong by months, with nothing on
+ * screen to show it, for every day <= 12.
+ *
+ * So the two readings carry two NAMES instead of one silent default:
+ *   normalizeTypedDate(v)        -- a value a person typed into the UI.
+ *   normalizeToIsoDate(v, order) -- a CSV cell, whose order its own column
+ *                                   header decides (readBatchDateCell).
+ * A route must not reach for the bare default: that default belongs to
+ * spreadsheet columns that name no format and must keep the only meaning they
+ * have ever had.
+ */
+export function normalizeTypedDate(value: string | null | undefined): string | null {
+  return normalizeToIsoDate(value, 'day-first')
 }
 
 // MMDDYYYY -- e.g. "08282026" for the 28th of August 2026. Format history,

@@ -105,11 +105,26 @@ assert.match(login, /min-w-0 break-words text-center text-2xl/, 'long business n
 assert.match(mainCss, /\.auth-frame \{[\s\S]*min-width: 0;[\s\S]*max-width: 100%;/)
 assert.match(mainCss, /\.auth-card \.input \{[\s\S]*min-width: 0;[\s\S]*max-width: 100%;[\s\S]*box-sizing: border-box;/)
 
-for (const file of ['components/shared/InfoHint.tsx', 'components/shared/TruncatedText.tsx']) {
+for (const file of ['components/shared/InfoHint.tsx']) {
   const source = read(file)
   assert.match(source, /createPortal\([\s\S]*document\.body/, `${file}: explanatory content must portal to the viewport layer`)
   assert.match(source, /fixed z-\[1200\]/, `${file}: explanatory content must render above z-[1050] modals and z-[1100] notifications`)
 }
+
+// TruncatedText's reveal keeps exactly the same two properties -- a
+// body-level layer, above z-[1050] modals -- but no longer portals them
+// itself: the panel is one shared body-level host built by the delegated
+// controller (textAffordances.ts) so that `.dense-cell-truncate` cells on
+// surfaces which import nothing from it are served too, and it is styled in
+// main.css because it is plain DOM rather than a React subtree. Assert the
+// property where it now lives instead of pinning the component that used to
+// own it.
+const truncatedText = read('components/shared/TruncatedText.tsx')
+assert.match(truncatedText, /ensureTextAffordances\(\)/, 'TruncatedText must mount the shared reveal controller')
+const affordances = read('components/shared/textAffordances.ts')
+assert.match(affordances, /document\.body\.appendChild\(host\)/, 'the reveal panel must live on the body layer')
+assert.match(read('styles/main.css'), /\.text-affordance-float \{[\s\S]*position:fixed;[\s\S]*z-index:1200;/,
+  'the reveal panel must render above z-[1050] modals and z-[1100] notifications')
 
 // The rename-cascade prompt is awaited by saves that run INSIDE a z-[1050]
 // shared Modal; below that layer it is invisible and the save never resolves.

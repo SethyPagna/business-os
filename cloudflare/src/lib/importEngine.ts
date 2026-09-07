@@ -78,7 +78,7 @@ import { dateToBatchCode, normalizeToIsoDate, readBatchDateCell } from './batchC
 import { normalizeSearchText, compactSearchText } from './searchMatch'
 import { classifyUnifiedStockActions, type StockActionImportResult } from './stockActionCatalog'
 import { countUnifiedStockConfirmationRows, sealUnifiedStockAnalyzeConflicts } from './stockActionSeal'
-import { applyUnifiedStockAdd, applyUnifiedStockSale, ensureUnifiedStockProduct, type UnifiedStockSaleLine } from './stockActionCommit'
+import { applyUnifiedStockAdd, applyUnifiedStockSale, batchIdentity, ensureUnifiedStockProduct, unifiedStockReceiptRefusal, type UnifiedStockSaleLine } from './stockActionCommit'
 import { parseStockAction, saleGroupKeyFor } from './stockActionResolver'
 import { applyHistoricalSaleImport, MAX_HISTORICAL_SALE_LINES } from './salesImportCommit'
 import { getUnifiedStockMode, type UnifiedStockResolvedRow } from './stockActionImport'
@@ -1480,8 +1480,17 @@ export async function classifyProducts(
     // lexicographic garbage. Migration 0077 repairs the stored rows; this
     // keeps new ones ISO. An unreadable non-blank cell falls back to today
     // WITH a visible warning below, never silently.
-    const { raw: rawReceivedDate, order: receivedDateOrder } = readBatchDateCell(row as Record<string, unknown>)
-    data.received_date = normalizeToIsoDate(rawReceivedDate, receivedDateOrder) || todayIso()
+    const { raw: rawReceivedDate, order: receivedDateOrder, header: receivedDateHeader } = readBatchDateCell(row as Record<string, unknown>)
+    // ONE read of the cell, whose result the unreadable-date warning below
+    // is derived from. It used to be read TWICE -- here with the header's
+    // own order and again in the warning guard with normalizeToIsoDate's
+    // bare (month-first) default -- so every readable day-first cell whose
+    // day was > 12 (25/12/2026 under the template's own batch(dd/mm/yyyy)
+    // header) was stored correctly AND reported "unreadable, received as
+    // today". Both halves of that message were false. A single parse cannot
+    // disagree with itself.
+    const parsedReceivedDate = normalizeToIsoDate(rawReceivedDate, receivedDateOrder)
+    data.received_date = parsedReceivedDate || todayIso()
     // The stored/displayed batch code is always derived from
     // received_date directly above, never from a separately-typed label
     // -- "lot code can be removed... batch column is just a translated
@@ -1519,8 +1528,13 @@ export async function classifyProducts(
       const displayValue = str(rawStockValue).replace(/^'/, '')
       rowWarnings.push({ kind: 'negative_stock', message: `Stock quantity "${displayValue}" is negative; imported as 0 (negative stock isn't supported).` })
     }
-    if (rawReceivedDate && !normalizeToIsoDate(rawReceivedDate)) {
-      rowWarnings.push({ kind: 'unreadable_batch_date', message: `Received date "${rawReceivedDate}" is not a readable mm/dd/yyyy date; the stock was received as today instead.` })
+    if (rawReceivedDate && !parsedReceivedDate) {
+      // Name the header AND the order it dictates: "not a readable date" on
+      // its own leaves the operator guessing which way round their own
+      // column is read, and a fixed "mm/dd/yyyy" was a lie under the
+      // day-first header the template ships.
+      const expected = receivedDateOrder === 'day-first' ? 'dd/mm/yyyy' : 'mm/dd/yyyy'
+      rowWarnings.push({ kind: 'unreadable_batch_date', message: `Received date "${rawReceivedDate}" is not a readable date for the ${receivedDateHeader} column, which is read ${expected}; the stock was received as today instead.` })
     }
     // Only set image_path when this row actually resolved one, and only
     // then if the row didn't explicitly ask to keep whatever the existing
@@ -4372,6 +4386,25 @@ async function dispatchStockActionSingle(
   const plan = resolved.plan!
   if (plan.kind === 'noop') { r.action = 'skip'; return }
   const branchNameById = new Map(resolved.branchRefs.map((ref) => [ref.branchId, ref.branchName]))
+  const supplierName = String(resolved.supplier || '').trim() || null
+  // applyUnifiedStockAdd is the wire and runs the gate for every add; this
+  // asks the SAME question early for one case only -- a CREATE that also
+  // receives stock. Refused inside the writer, that row would already have
+  // inserted its product, and the re-import that follows the fix carries a
+  // new job id, so the orphan becomes a duplicate rather than being reused.
+  // A create has no lot yet, so nothing can be inherited and both halves of
+  // the gate apply in full. A create whose branch columns are an explicit 0
+  // writes no receipt at all, so there is nothing here for a supplier or a
+  // cost to describe and the gate must not touch it.
+  const receivesStock = plan.branchActions.some((a) => a.direction === 'add' && a.quantity > 0)
+  if (plan.kind === 'create' && receivesStock) {
+    // sheetCostPriceUsd, not costPriceUsd: a create has no catalog row to
+    // inherit a cost from anyway, but the gate must ask the same question
+    // applyUnifiedStockAdd asks below -- what the sheet's own cell said, not
+    // what a fallback happened to backfill (sibling:F13 verifier round 2).
+    const refusal = unifiedStockReceiptRefusal({ supplierName, unitCostUsd: resolved.sheetCostPriceUsd, freeGoods: resolved.freeGoods })
+    if (refusal) throw new Error(refusal)
+  }
   let productId = resolved.productId ?? 0
   if (plan.kind === 'create') {
     const ensured = await ensureUnifiedStockProduct(db, {
@@ -4390,7 +4423,6 @@ async function dispatchStockActionSingle(
   // A create is an add that also inserts the product; both dispatch the
   // row's positive per-branch quantities through the same atomic writer.
   const adds = plan.branchActions.filter((a) => a.direction === 'add' && a.quantity > 0)
-  const supplierName = String(resolved.supplier || '').trim() || null
   const supplierId = supplierName ? await resolveSupplierId(supplierName) : null
   for (const add of adds) {
     await applyUnifiedStockAdd(db, {
@@ -4406,8 +4438,10 @@ async function dispatchStockActionSingle(
       sellingPriceUsd: resolved.sellingPriceUsd,
       wholesalePriceUsd: resolved.wholesalePriceUsd,
       costPriceUsd: resolved.costPriceUsd,
+      sheetCostPriceUsd: resolved.sheetCostPriceUsd,
       supplierName,
       supplierId,
+      freeGoods: resolved.freeGoods,
     })
   }
 }
@@ -4753,6 +4787,26 @@ async function applyStockActionsContinuation(
   let after = stock.dispatchAfterRow
   let moreRows = true
   const pendingAdds: Array<Promise<void>> = []
+  // Two add rows sharing one lot (same product + batchIdentity) must never be
+  // IN FLIGHT together: applyUnifiedStockAdd's gate reads the lot's current
+  // supplier once, at the top of its own call, before either write lands --
+  // so two concurrent adds into the SAME lot, one supplied and one blank,
+  // race that read and accept or refuse depending on which promise's INSERT
+  // happens to land first. Tracking the lot keys already dispatched in this
+  // flush window and forcing a flush before a repeat lets each lot's adds
+  // still run serially (correct) while unrelated lots keep the concurrency
+  // this queue exists for.
+  const pendingLotKeys = new Set<string>()
+  const addLotKey = (resolved: UnifiedStockResolvedRow): string => {
+    try {
+      return `${resolved.productId}:${batchIdentity(resolved.date, resolved.batchLabel).batchKey}`
+    } catch {
+      // An unparsable date/label fails inside applyUnifiedStockAdd itself
+      // (caught by runSingle below); give it a key nothing else can share so
+      // it neither blocks nor is blocked by a sibling row.
+      return `invalid:${resolved.rowNumber}`
+    }
+  }
   const runSingle = async (r: StockActionImportResult) => {
     try {
       await dispatchStockActionSingle(db, jobId, r, resolveSupplierId)
@@ -4768,6 +4822,7 @@ async function applyStockActionsContinuation(
   const flushAdds = async () => {
     if (!pendingAdds.length) return
     await Promise.all(pendingAdds.splice(0, pendingAdds.length))
+    pendingLotKeys.clear()
   }
 
   outer: while (unitsDispatched < STOCK_ACTION_MAX_UNITS) {
@@ -4825,6 +4880,13 @@ async function applyStockActionsContinuation(
       // Single unit: create / add / noop.
       unitsDispatched += 1
       if (plan.kind === 'add') {
+        const lotKey = addLotKey(resolved)
+        // A second row of an already-in-flight lot must wait for the first
+        // to land -- flush everything pending rather than pick out just the
+        // one conflicting promise, since Promise.all is already the unit of
+        // ordering this queue uses.
+        if (pendingLotKeys.has(lotKey)) await flushAdds()
+        pendingLotKeys.add(lotKey)
         pendingAdds.push(runSingle(r))
         if (pendingAdds.length >= STOCK_ACTION_ADD_CONCURRENCY) await flushAdds()
       } else {

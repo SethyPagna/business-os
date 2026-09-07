@@ -144,7 +144,9 @@ export async function resolveDatedStockCountRows(
   // at all. Rows that fail here never reach the DB lookups below.
   const candidates: (RawDatedCountRow & { normalizedDate: string })[] = []
   for (const row of rows) {
-    const normalizedDate = normalizeToIsoDate(row.date) || (ISO_DATE_RE.test(String(row.date ?? '')) ? String(row.date) : '')
+    // A hand-mapped spreadsheet column ("any common date format"), not a
+    // field typed into the app -- month-first, stated rather than defaulted.
+    const normalizedDate = normalizeToIsoDate(row.date, 'month-first') || (ISO_DATE_RE.test(String(row.date ?? '')) ? String(row.date) : '')
     if (!normalizedDate) { unresolved.push({ rowNumber: row.rowNumber, reason: 'invalid_date', raw: row, suggestedActions: [] }); continue }
     if (!Number.isFinite(row.count) || row.count < 0) { unresolved.push({ rowNumber: row.rowNumber, reason: 'invalid_count', raw: row, suggestedActions: [] }); continue }
     if (!lower(row.branchName)) { unresolved.push({ rowNumber: row.rowNumber, reason: 'missing_branch', raw: row, suggestedActions: [] }); continue }

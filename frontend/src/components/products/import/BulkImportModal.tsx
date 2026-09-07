@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { Suspense, useMemo, useRef, useState } from 'react'
 import type { ComponentType } from 'react'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
@@ -27,6 +27,7 @@ import { withLoaderTimeout } from '../../../utils/loaders.ts'
 import { parseImportFile } from '../../../utils/spreadsheetImport.ts'
 import { parseCsvRows } from '../../../utils/csvImport.ts'
 import { useApp as useAppHook } from '../../../app/AppContextCore.tsx'
+import { lazyRetry } from '../../../utils/lazyImport.ts'
 import { detectLikelyDatedReconciliation, type ImportModeDetectionResult } from './importModeDetection.ts'
 import { REPLACE_COLUMN_GROUPS } from './productReplaceColumnGroups.ts'
 import { MAX_PRODUCT_GALLERY_IMAGES } from '../helpers/productGalleryHelpers.ts'
@@ -34,7 +35,18 @@ import ProductImportModeTabs, { ProductImportOptionCard, type ProductImportTopMo
 import ProductServerImportReviewScreen from './ProductServerImportReviewScreen'
 
 type NotifyFn = (message: string, tone?: 'info' | 'success' | 'warning' | 'error') => void
-const useApp = useAppHook as () => { notify: NotifyFn; hasPermission: (key: string) => boolean }
+const useApp = useAppHook as () => { notify: NotifyFn; hasPermission: (key: string) => boolean; can: (permissionKey: string, actionKey: string) => boolean }
+
+// The destination the dated-stock-count suggestion banner names. Until the
+// import-review audit it named it and went nowhere: the button was wired to
+// onClose alone, so DatedStockReconciliationModal had no importer anywhere
+// in the frontend and the live Worker routes behind it
+// (routes/inventory.ts POST /dated-stock-count/resolve,
+// /resolve/apply-decisions, /preview, /apply) had no client at all.
+// Lazy, like every other modal this size: it is a 600-line flow only the
+// dated-count file shape ever reaches, so it must not ride along in the
+// products-bulk-import chunk that every ordinary import downloads.
+const DatedStockReconciliationModal = lazyRetry(() => import('./DatedStockReconciliationModal'), 'products-dated-stock-reconciliation')
 
 const IMAGE_CONFLICT_OPTIONS = [
   { value: 'keep_existing', label: 'Keep existing images' },
@@ -256,6 +268,11 @@ type BulkImportModalProps = {
   t?: (key: string) => string
   topMode?: Exclude<ProductImportTopMode, 'stock_actions'>
   onTopModeChange?: (mode: ProductImportTopMode) => void
+  // Only forwarded: the Dated Reconciliation flow this modal can hand off
+  // to labels its unresolved rows' candidate products by name. Without the
+  // list it can only show "#123". Products.tsx already passes it to
+  // ImportModeWizard; the wizard had declared it and dropped it.
+  products?: { id?: EntityId; name?: string | null }[]
 }
 type ProductImportError = Error & {
   code?: string
@@ -1097,8 +1114,8 @@ function getBrowserImageEntries(imageFiles: ImageFileMap = {}): BrowserImageEntr
     }))
 }
 
-export default function BulkImportModal({ onClose, onDone, t, topMode = 'general', onTopModeChange }: BulkImportModalProps) {
-  const { notify, hasPermission } = useApp()
+export default function BulkImportModal({ onClose, onDone, t, topMode = 'general', onTopModeChange, products = [] }: BulkImportModalProps) {
+  const { notify, hasPermission, can } = useApp()
   // Server-side gate lives in routes/importJobs.ts (requires the
   // 'destructive_delete' permission, not just ordinary products-import
   // access, for BOTH destructive modes -- replace_all and replace_columns
@@ -1107,6 +1124,17 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
   // replacement for it: someone without this permission would otherwise
   // see a mode they can pick but always get a 403 on.
   const canReplaceAll = hasPermission('destructive_delete')
+  // Same shape, mirroring routes/inventory.ts's own guard exactly: every
+  // dated-stock-count route (resolve, resolve/apply-decisions, preview,
+  // apply -- inventory.ts:1851/1881/1903/1919) calls
+  // getActionTier(user, 'inventory', 'stock_count') !== 'full' and 403s
+  // below Full Access. permissionActions.ts:136 declares stock_count with
+  // review:'block', so can() is true only at the 'full' tier -- the exact
+  // condition the Worker enforces. Disabled, not hidden, per this file's
+  // own precedent at the replace-mode notice below: the operator should
+  // see the destination named and know why it's blocked, not wonder where
+  // it went.
+  const canDatedStockCount = can('inventory', 'stock_count')
   const mode: ImportMode = topMode === 'images' ? 'images' : 'products'
   const [step, setStep] = useState(1)
   const [showColumnsInfo, setShowColumnsInfo] = useState(false)
@@ -1138,6 +1166,15 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
   // alongside every other per-file analysis state in analyzePickedCsv.
   const [datedReconciliationSignal, setDatedReconciliationSignal] = useState<ImportModeDetectionResult | null>(null)
   const [dismissedDatedSignal, setDismissedDatedSignal] = useState(false)
+  // Taking the suggestion swaps this modal for the Dated Reconciliation
+  // importer (swapped, not stacked -- the pattern ImportModeWizard and
+  // ContactImportModal already use), so one dialog is on screen at a time
+  // and its own Back still means "back inside that flow". Backing out of
+  // it returns here with this file's analysis intact; once it has actually
+  // applied a reconciliation there is nothing to come back to, so its
+  // close finishes the whole import instead.
+  const [datedReconciliationOpen, setDatedReconciliationOpen] = useState(false)
+  const [datedReconciliationApplied, setDatedReconciliationApplied] = useState(false)
   const [analysisProgress, setAnalysisProgress] = useState<ImportProgress | null>(null)
   const [decisions, setDecisions] = useState<Record<RowIndex, ImportDecision>>({})
   const [imageDecisions, setImageDecisions] = useState<Record<RowIndex, string>>({})
@@ -2393,6 +2430,31 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
 
   const cancelledImportRecovery = currentJob && ['cancelled', 'cancelling'].includes(String(currentJob.status || '').toLowerCase())
 
+  // The suggestion banner's destination. This component stays mounted, so
+  // backing out of the reconciliation importer lands back on this file's
+  // own analysis rather than an empty upload screen.
+  if (datedReconciliationOpen) {
+    return (
+      <Suspense fallback={null}>
+        <DatedStockReconciliationModal
+          t={(key: string, fallback?: string) => T(key, fallback ?? key)}
+          products={products}
+          onClose={() => {
+            setDatedReconciliationOpen(false)
+            if (datedReconciliationApplied) onClose()
+          }}
+          onDone={() => {
+            setDatedReconciliationApplied(true)
+            // The reconciliation reports its own applied counts on its done
+            // screen; the parent only uses this callback to refresh the
+            // product list behind the modal, so no count is invented here.
+            void signalDone({ imported: 0, updated: 0, message: T('dated_stock_reconciliation_title', 'Dated Stock Reconciliation') })
+          }}
+        />
+      </Suspense>
+    )
+  }
+
   return (
     <Modal title={mode === 'products' ? T('csv_template_title', 'Products + CSV') : T('csv_images_only', 'Images Only')} onClose={onClose} wide draggable unsavedChanges={{ dirty: Boolean(csvData) }}>
       {step === 1 && onTopModeChange ? <ProductImportModeTabs value={topMode} onChange={onTopModeChange} /> : null}
@@ -2482,10 +2544,10 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
       {/* Item 10a: suggest (never auto-switch) Dated Stock Reconciliation
           when this "Add / Update Products" file's own shape looks like a
           dated snapshot -- see importModeDetection.ts for the signal and
-          why it stops at a dismissible suggestion. Cancelling here (not a
-          silent redirect) keeps the deliberate "mode is locked once you're
-          past the wizard" design DatedStockReconciliationModal's own header
-          comment documents. */}
+          why it stops at a dismissible suggestion. Taking the suggestion is
+          an explicit click, so the "mode is locked once you're past the
+          wizard" design DatedStockReconciliationModal's own header comment
+          documents still holds: nothing switches on the file's behalf. */}
       {datedReconciliationSignal && !dismissedDatedSignal && step === 1 ? (
         <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 p-3 text-xs text-blue-800 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-100">
           <div className="flex items-start gap-2">
@@ -2495,18 +2557,19 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
               <div className="mt-1">
                 {T(
                   'dated_reconciliation_suggestion_body',
-                  `${datedReconciliationSignal.repeatedGroupCount} product${datedReconciliationSignal.repeatedGroupCount === 1 ? '' : 's'} in this file` +
-                  (datedReconciliationSignal.sampleProductName ? ` (e.g. "${datedReconciliationSignal.sampleProductName}")` : '') +
-                  ' appear on more than one date at the same branch. If you\'re recording repeated stock counts over time, the Dated Stock Reconciliation import handles that better -- it works out what changed between counts instead of overwriting stock in place.',
-                )}
+                  'These {count} products (e.g. "{name}") appear on more than one date at the same branch. If you\'re recording repeated stock counts over time, the Dated Stock Reconciliation import handles that better -- it works out what changed between counts instead of overwriting stock in place.',
+                )
+                  .replace('{count}', String(datedReconciliationSignal.repeatedGroupCount))
+                  .replace('{name}', datedReconciliationSignal.sampleProductName ?? '')}
               </div>
               <div className="mt-2 flex flex-wrap gap-2">
                 <button
                   type="button"
-                  onClick={onClose}
-                  className="rounded-lg bg-blue-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-blue-700"
+                  disabled={!canDatedStockCount}
+                  onClick={() => { if (canDatedStockCount) setDatedReconciliationOpen(true) }}
+                  className="rounded-lg bg-blue-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-blue-600"
                 >
-                  {T('dated_reconciliation_suggestion_switch', 'Cancel this import & choose Dated Reconciliation')}
+                  {T('dated_reconciliation_suggestion_switch', 'Open the Dated Reconciliation import')}
                 </button>
                 <button
                   type="button"
@@ -2516,6 +2579,11 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
                   {T('dated_reconciliation_suggestion_dismiss', 'No, this file is correct')}
                 </button>
               </div>
+              {!canDatedStockCount ? (
+                <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+                  {T('dated_reconciliation_permission_required', 'The Dated Stock Reconciliation import needs Full Access to Inventory. Ask an administrator for access.')}
+                </p>
+              ) : null}
             </div>
           </div>
         </div>
@@ -2998,7 +3066,13 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
               </button>
             </div>
           ) : null}
-          <button type="button" className="btn-primary w-full" onClick={onClose}>{T('close', 'Close')}</button>
+          {/* No terminal Close here: the shared Modal already renders the
+              one close affordance (its header X), and a full-width
+              btn-primary Close at the bottom of the result screen was a
+              second one competing with it -- and on a phone it was the
+              most prominent control on the screen, outranking the "Wire
+              images" and error-download actions the operator may still
+              need to use. */}
         </div>
       ) : null}
 

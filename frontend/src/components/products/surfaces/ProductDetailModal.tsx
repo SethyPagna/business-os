@@ -7,6 +7,7 @@ import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import { useState, Suspense, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { ProductImg, ProductImagePlaceholder } from '../shared/primitives'
+import { useCopyFloat } from '../../shared/CopyFloat.tsx'
 import { getContrastingTextColor } from '../../../utils/color.ts'
 import { calculateProductDiscount } from '../../../utils/pricing.ts'
 import { getVisibleProductBatches } from '../../../utils/productBatches.ts'
@@ -131,6 +132,9 @@ export default function ProductDetailModal({
     const translated = typeof t === 'function' ? t(key) : ''
     return translated && translated !== key ? translated : fallback
   }
+  // Name, brand, supplier and barcode all copy through the one shared
+  // float: double-click on a pointer device, press-and-hold on touch.
+  const copy = useCopyFloat(T)
   const productName = String(p.name || '')
   const purchaseUsd = Number(p.purchase_price_usd || p.cost_price_usd || 0)
   const purchaseKhr = Number(p.purchase_price_khr || p.cost_price_khr || 0)
@@ -177,11 +181,6 @@ export default function ProductDetailModal({
   const batchCount = visibleBatches.length || Number((p as { batch_count?: unknown }).batch_count || 0)
   // (The old "Batch: latest received date" row and its computation were
   // removed Aug 30 -- see the note where it rendered.)
-  const copyBarcode = () => {
-    if (!p.barcode || typeof navigator === 'undefined' || !navigator.clipboard) return
-    void navigator.clipboard.writeText(String(p.barcode)).catch(() => {})
-  }
-
   // Label column tightens to 4rem on phones (then 5rem from sm) and the gap
   // gap-3 to gap-2 -- per the Aug 19 2026 ask to tighten these value/label
   // pairs so each row takes less horizontal space, freeing room in the
@@ -245,7 +244,7 @@ export default function ProductDetailModal({
               )}
             </div>
             <div className="min-w-0">
-              <div className="break-words font-bold text-gray-900 dark:text-white">{productName}</div>
+              <div className="break-words font-bold text-gray-900 dark:text-white" {...copy(productName)}>{productName}</div>
               {/* Category/brand/SKU stay compact but expose their complete
                   values through horizontal touch scrolling. */}
               <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-gray-500 dark:text-gray-400">
@@ -258,7 +257,7 @@ export default function ProductDetailModal({
                     barcode or SKU. */}
                 {p.sku ? <span className="detail-scroll-text max-w-[100px] font-mono" title={p.sku}>{p.sku}</span> : null}
                 {p.category ? <span className="detail-scroll-text max-w-[110px]" title={p.category}>{p.sku ? '· ' : ''}{p.category}</span> : null}
-                {p.brand ? <span className="detail-scroll-text max-w-[110px]" title={p.brand}>&middot; {p.brand}</span> : null}
+                {p.brand ? <span className="detail-scroll-text max-w-[110px]" {...copy(p.brand)} title={p.brand}>&middot; {p.brand}</span> : null}
               </div>
             </div>
           </div>
@@ -283,9 +282,9 @@ export default function ProductDetailModal({
               {/* Left mini-section: the compact identity + stock facts. */}
               <div className="min-w-0 space-y-2.5 sm:pr-5">
                 <div className="grid grid-cols-1 gap-y-1.5">
-                  {p.barcode ? <Row label={T('barcode', 'Barcode')}><button type="button" className="whitespace-nowrap text-left font-mono underline-offset-2 hover:text-blue-600 hover:underline" onClick={copyBarcode} title={T('copy_barcode', 'Copy barcode')}>{p.barcode}</button></Row> : null}
+                  {p.barcode ? <Row label={T('barcode', 'Barcode')}><span className="whitespace-nowrap font-mono" {...copy(p.barcode)}>{p.barcode}</span></Row> : null}
                   {p.sku ? <Row label={T('sku', 'SKU')}><span className="font-mono">{p.sku}</span></Row> : null}
-                  {p.supplier ? <Row label={T('label_supplier', 'Supplier')}>{p.supplier}</Row> : null}
+                  {p.supplier ? <Row label={T('label_supplier', 'Supplier')}><span {...copy(p.supplier)}>{p.supplier}</span></Row> : null}
                   {/* Stock + Status moved to the right column after Margin
                       (Aug 30 ask) -- identity facts stay here. */}
                   {expiryDate ? (

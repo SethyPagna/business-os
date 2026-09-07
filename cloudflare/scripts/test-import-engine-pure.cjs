@@ -1107,6 +1107,45 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     assert.strictEqual(results[0].data.lot_code, '03102026', 'the old `date` column should still be read as a date fallback')
   }
 
+  // Sep 6 2026 (a2 datefmt): the warning guard used to RE-READ the cell with
+  // normalizeToIsoDate's bare default (month-first) instead of the order its
+  // own header dictates, so a row read correctly at line 1484 was still
+  // reported unreadable a few lines later. `batch(dd/mm/yyyy)` is the header
+  // the downloaded template ships, so this fired on the default path. 25 is
+  // the discriminating day: month-first cannot read it at all, day-first can.
+  {
+    const db = makeFakeProductsDb([])
+    const results = await classifyProducts(db, [row({ name: 'Day First Column', selling_price_usd: '10', 'batch(dd/mm/yyyy)': '25/12/2026' }, 1)], 'job-dayfirst-ok', null, noImages)
+    assert.strictEqual(results[0].data.received_date, '2026-12-25', 'the day-first header is read day-first')
+    assert.strictEqual(results[0].data.lot_code, '12252026', 'the lot code identifier stays MMDDYYYY')
+    assert.ok(
+      !(results[0].warnings || []).some((w) => w.kind === 'unreadable_batch_date'),
+      "a cell the column's own order reads cleanly must not be reported unreadable (and it was NOT received as today)",
+    )
+  }
+
+  // Positive control for the assertion above: a guard that was simply deleted
+  // would also stop warning. A cell that is unreadable under its OWN order
+  // must still warn, and the message must name that order.
+  {
+    const db = makeFakeProductsDb([])
+    const results = await classifyProducts(db, [row({ name: 'Unreadable Day First', selling_price_usd: '10', 'batch(dd/mm/yyyy)': '31/31/2026' }, 1)], 'job-dayfirst-bad', null, noImages)
+    const warning = (results[0].warnings || []).find((w) => w.kind === 'unreadable_batch_date')
+    assert.ok(warning, 'a genuinely unreadable cell still warns')
+    assert.ok(warning.message.includes('batch(dd/mm/yyyy)'), `the warning names the header it read: ${warning.message}`)
+  }
+
+  // The mirror case, which is why the order cannot simply be flipped: under
+  // the month-first header the SAME 25/12/2026 really is unreadable. One
+  // cell, two headers, two opposite verdicts.
+  {
+    const db = makeFakeProductsDb([])
+    const results = await classifyProducts(db, [row({ name: 'Month First Column', selling_price_usd: '10', 'batch(mm/dd/yyyy)': '25/12/2026' }, 1)], 'job-monthfirst-bad', null, noImages)
+    const warning = (results[0].warnings || []).find((w) => w.kind === 'unreadable_batch_date')
+    assert.ok(warning, 'month-first cannot read 25 as a month, so this one really is unreadable')
+    assert.ok(warning.message.includes('batch(mm/dd/yyyy)'), `the warning names the header it read: ${warning.message}`)
+  }
+
   // A blank/missing column still means "received now" -- unchanged
   // behavior, just confirming the new column name didn't break the
   // existing default.

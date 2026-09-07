@@ -2,7 +2,7 @@ import { getDb, type D1Compat } from './db'
 import type { Env } from '../index'
 import type { SessionUser } from './auth'
 import { getActionTier, isAdminControlUser } from './permissions'
-import { dateToBatchCode, normalizeToIsoDate } from './batchCode'
+import { dateToBatchCode, normalizeTypedDate } from './batchCode'
 import { identityBarcodeKey, normalizeProductGroupName } from './productDetailRule'
 import { identityBarcodeKeySql } from './productIdentity'
 import { planReceiveBatchStock, type StockWriteStatement } from './productBatches'
@@ -164,8 +164,10 @@ function date(value: unknown, field: string, nullable = true): string | null {
     if (nullable) return null
     fail(`${field} is required.`, 400, 'invalid_request')
   }
-  const normalized = normalizeToIsoDate(String(value))
-  if (!normalized) fail(`${field} must be a valid date.`, 400, 'invalid_request')
+  // A stock-in session's dates are typed into DateEntryInput, so they are
+  // read the way that field writes them: day-first.
+  const normalized = normalizeTypedDate(String(value))
+  if (!normalized) fail(`${field} must be a valid date (dd/mm/yyyy).`, 400, 'invalid_request')
   return normalized
 }
 

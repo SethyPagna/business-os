@@ -39,7 +39,8 @@ const batchCode = compile('batchCode.ts')
 const sqlBinding = compile('sqlBinding.ts')
 const searchMatch = compile('searchMatch.ts')
 const productBatches = compile('productBatches.ts', { './db': {}, './batchCode': batchCode, './sqlBinding': sqlBinding })
-const stockActionCommit = compile('stockActionCommit.ts', { './db': {}, './batchCode': batchCode, './searchMatch': searchMatch })
+const stockReceiptGate = compile('stockReceiptGate.ts')
+const stockActionCommit = compile('stockActionCommit.ts', { './db': {}, './batchCode': batchCode, './searchMatch': searchMatch, './stockReceiptGate': stockReceiptGate })
 
 const migrationsDir = path.join(__dirname, '..', 'migrations')
 const migrationFiles = fs.readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort()
@@ -141,9 +142,12 @@ const GROUPS_SQL = (where) => `
   {
     const { sqlite, db } = freshDb()
     sqlite.prepare(`INSERT INTO products (id, name, is_active) VALUES (10, 'Serum', 1)`).run()
+    // Supplier + cost are on every row because N14-D's receipt gate now runs
+    // on this wire too (test-stock-receipt-gate-pure.cjs owns that rule).
     const input = {
       jobId: 'job-1', rowNumber: 2, productId: 10, productName: 'Serum',
       branchId: 2, branchName: 'Warehouse', quantity: 3, date: '08/19/2026', batchLabel: '',
+      supplierName: 'Bong Long', costPriceUsd: 5,
     }
     await stockActionCommit.applyUnifiedStockAdd(db, input)
     let row = sqlite.prepare('SELECT received_branch_id FROM product_batches').get()
@@ -174,6 +178,7 @@ const GROUPS_SQL = (where) => `
     const base = {
       jobId: 'job-cost', productId: 10, productName: 'Serum',
       branchId: 2, branchName: 'Shop', date: '08/19/2026', batchLabel: '',
+      supplierName: 'Bong Long',
     }
     // 4 units at $10, then 6 more of the SAME product on the SAME day at $30.
     await stockActionCommit.applyUnifiedStockAdd(db, { ...base, rowNumber: 2, quantity: 4, costPriceUsd: 10 })
@@ -185,13 +190,21 @@ const GROUPS_SQL = (where) => `
     assert.strictEqual(row.money, 4 * 10 + 6 * 30, 'received_cost_usd is each receipt at its OWN cost')
     assert.notStrictEqual(row.money, row.qty * row.unit, 'and is NOT quantity x the first unit cost -- the bug')
 
-    // A receipt with no recorded price contributes nothing rather than
-    // borrowing the lot's existing cost: 21,286 of the migrated rows had a
-    // quantity and only 6,966 had a price.
-    await stockActionCommit.applyUnifiedStockAdd(db, { ...base, rowNumber: 4, quantity: 5 })
+    // A receipt with no recorded price never borrows the lot's existing cost.
+    // 0080 achieved that by contributing 0; N14-D's gate now goes further and
+    // REFUSES the priceless receipt on this wire, the same as on POST /adjust,
+    // POST /api/batches and the stock-in session -- so the lot is untouched
+    // rather than gaining units whose money nobody can ever state. (The
+    // 21,286-row/6,966-price migration this comment used to cite was applied
+    // long before the gate; a re-import of that shape must now carry costs.)
+    await assert.rejects(
+      () => stockActionCommit.applyUnifiedStockAdd(db, { ...base, rowNumber: 4, quantity: 5 }),
+      /must carry its unit cost/,
+      'a priceless import receipt is refused, not written as an unpriceable unit',
+    )
     row = sqlite.prepare('SELECT received_quantity AS qty, received_cost_usd AS money FROM product_batches').get()
-    assert.strictEqual(row.qty, 15, 'the unpriced receipt still counts as units')
-    assert.strictEqual(row.money, 220, 'but adds no money it never recorded')
+    assert.strictEqual(row.qty, 10, 'the refused receipt added no units')
+    assert.strictEqual(row.money, 220, 'and no money it never recorded')
 
     // The manual receive path (Inventory / Receive Stock) follows the same
     // rule -- one model, not two.
