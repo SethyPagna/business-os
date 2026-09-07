@@ -132,7 +132,15 @@ export class StockSessionError extends Error {
 export function canReplayStockSessionPayload(user: SessionUser, payload: Record<string, unknown>): boolean {
   if (payload.requires_inventory_adjust !== 0 && getActionTier(user, 'inventory', 'adjust') !== 'full') return false
   if (Number(payload.requires_product_add) === 1 && getActionTier(user, 'products', 'add') !== 'full') return false
+  if (Number(payload.requires_product_image) === 1 && getActionTier(user, 'products', 'image') !== 'full') return false
   return true
+}
+
+function stockSessionChangesProductImages(request: StockSessionRequest): boolean {
+  return request.items.some((line) => line.kind === 'create_receive' && (
+    Boolean(String(line.product?.image_path || '').trim())
+    || ((line.product?.image_gallery as string[] | undefined) || []).length > 0
+  ))
 }
 
 function fail(message: string, status: 400 | 403 | 404 | 409 = 409, code = 'stock_session_rejected', details?: Row): never {
@@ -485,6 +493,7 @@ function parseStoredReceipt(row: Row, replayed: boolean): StockSessionReceipt {
 export async function commitStockSession(env: Env, user: SessionUser, raw: unknown): Promise<StockSessionReceipt> {
   const request = parseRequest(raw, isAdminControlUser(user) ? ADMIN_MAX_IMAGES_PER_PRODUCT : MAX_IMAGES_PER_PRODUCT)
   const requiresInventoryAdjust = request.items.some((line) => line.quantity > 0)
+  const requiresProductImage = stockSessionChangesProductImages(request)
   if (requiresInventoryAdjust) {
     const inventoryTier = getActionTier(user, 'inventory', 'adjust')
     if (inventoryTier !== 'full') fail(
@@ -494,6 +503,9 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
   }
   if (request.items.some((line) => line.kind === 'create_receive') && getActionTier(user, 'products', 'add') !== 'full') {
     fail('create_receive requires full product-add permission.', 403, 'permission_denied')
+  }
+  if (requiresProductImage && getActionTier(user, 'products', 'image') !== 'full') {
+    fail('create_receive with images requires full product-image permission.', 403, 'permission_denied')
   }
   const db = getDb(env)
   const submittedCanonical = JSON.stringify(request)
@@ -727,8 +739,8 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
   statements.push({ sql: 'INSERT INTO undo_snapshots(kind,payload_json,created_by_id,created_by_name) VALUES(@kind,@payload,@actor,@name)', params: { kind: STOCK_SESSION_KIND, payload: JSON.stringify(snapshot), actor: user.id, name: actorSnapshot(user) } })
   statements.push({ sql: 'UPDATE stock_session_operations SET snapshot_id=last_insert_rowid() WHERE id=@id', params: { id: operationId } })
   statements.push({ sql: `INSERT INTO action_history(scope,entity,entity_id,label,reversible,status,undo_payload,redo_payload,created_by_id,created_by_name)
-    SELECT 'global','stock_session',id,@label,1,'undoable',json_object('applier',@kind,'snapshot_id',snapshot_id,'operation_id',id,'generation',0,'requires_product_add',@creates,'requires_inventory_adjust',@adjusts,'snapshot_version',2),json_object('applier',@kind,'snapshot_id',snapshot_id,'operation_id',id,'generation',0,'requires_product_add',@creates,'requires_inventory_adjust',@adjusts,'snapshot_version',2),@actor,@name
-    FROM stock_session_operations WHERE id=@id`, params: { id: operationId, label: `${request.items.length} stock-in line${request.items.length === 1 ? '' : 's'}`, kind: STOCK_SESSION_KIND, actor: user.id, name: actorSnapshot(user), creates: createLines.length ? 1 : 0, adjusts: requiresInventoryAdjust ? 1 : 0 } })
+    SELECT 'global','stock_session',id,@label,1,'undoable',json_object('applier',@kind,'snapshot_id',snapshot_id,'operation_id',id,'generation',0,'requires_product_add',@creates,'requires_product_image',@images,'requires_inventory_adjust',@adjusts,'snapshot_version',2),json_object('applier',@kind,'snapshot_id',snapshot_id,'operation_id',id,'generation',0,'requires_product_add',@creates,'requires_product_image',@images,'requires_inventory_adjust',@adjusts,'snapshot_version',2),@actor,@name
+    FROM stock_session_operations WHERE id=@id`, params: { id: operationId, label: `${request.items.length} stock-in line${request.items.length === 1 ? '' : 's'}`, kind: STOCK_SESSION_KIND, actor: user.id, name: actorSnapshot(user), creates: createLines.length ? 1 : 0, images: requiresProductImage ? 1 : 0, adjusts: requiresInventoryAdjust ? 1 : 0 } })
   statements.push({ sql: 'UPDATE stock_session_operations SET history_id=last_insert_rowid() WHERE id=@id', params: { id: operationId } })
 
   for (const line of request.items) {
@@ -915,6 +927,7 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
   const request = snapshot.request as StockSessionRequest
   if (request.items.some(line => line.quantity > 0) && getActionTier(user, 'inventory', 'adjust') !== 'full') fail('Inventory adjust permission is required.', 403)
   if (request.items.some(line => line.kind === 'create_receive') && getActionTier(user, 'products', 'add') !== 'full') fail('Product add permission is required to reverse this session.', 403)
+  if (stockSessionChangesProductImages(request) && getActionTier(user, 'products', 'image') !== 'full') fail('Product image permission is required to reverse this session.', 403)
   const targetStatus = direction === 'undo' ? 'redoable' : 'undoable'
   const expectedStatus = direction === 'undo' ? 'undoable' : 'redoable'
   if (Number(op.generation) === generation + 1 && op.status === targetStatus) return
