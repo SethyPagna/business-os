@@ -48,8 +48,15 @@ function loadUndoAppliers(d1) {
   })
   const actorModule = { exports: {} }
   new Function('exports', 'require', 'module', actorOut)(actorModule.exports, require, actorModule)
+  const { outputText: productMergeOut } = ts.transpileModule(fs.readFileSync(path.join(LIB_DIR, 'productMerge.ts'), 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+    fileName: 'productMerge.ts',
+  })
+  const productMergeModule = { exports: {} }
+  new Function('exports', 'require', 'module', productMergeOut)(productMergeModule.exports, require, productMergeModule)
   const stubs = {
     './actorSnapshot': actorModule.exports,
+    './productMerge': productMergeModule.exports,
     // Bulk status replay is outside this suite; fail if it is invoked.
     './saleBulkStatus': {
       replaySaleBulkStatus: () => { throw new Error('Unexpected bulk status replay in test-supplier-backfill-undo-pure.cjs') },
