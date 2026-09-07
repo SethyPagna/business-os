@@ -164,6 +164,7 @@ const BulkAddStockModal = lazyRetry(() => import('./forms/BulkAddStockModal'), '
 const VariantFormModal = lazyRetry(() => import('./forms/VariantFormModal'), 'products-variant-form-modal')
 const ProductForm = lazyRetry(() => import('./forms/ProductForm'), 'products-product-form')
 const CreateProductsSessionModal = lazyRetry(() => import('./CreateProductsSessionModal'), 'products-create-products-session-modal')
+type CreateProductsSessionMinimizeDetails = import('./CreateProductsSessionModal').CreateProductsSessionMinimizeDetails
 const StockAdjustModal = lazyRetry(() => import('./forms/StockAdjustModal'), 'products-stock-adjust-modal')
 const ProductDetailModal = lazyRetry(() => import('./surfaces/ProductDetailModal'), 'products-product-detail-modal')
 // Reused as-is from Inventory's own batches surface (see ManageBatchesModal.tsx)
@@ -839,17 +840,31 @@ function ProductsFullEditor() {
   // its own state, while this host rechecks the current action grant before it
   // reopens a write surface.
   useEffect(() => {
-    const open = (kind: MinimizedWorkKind) => {
+    const open = (kind: MinimizedWorkKind, mode?: 'new' | 'existing') => {
       setSelected(null)
       setFormInitialTab('basic')
+      if (kind === 'create_products_session' && mode) setCreateSessionInitialMode(mode)
       setModal(kind === 'create_products_session' ? 'create_session' : 'form')
     }
     const restore = (kind: 'add_product' | 'create_products_session', entry: MinimizedWorkEntry | null | undefined) => {
-      if (!canAddProduct || (entry && !canRestoreMinimizedWork(entry, can))) {
+      const payload = entry?.payload
+      const sessionMode = payload?.mode === 'new' || payload?.mode === 'existing' ? payload.mode : undefined
+      const rawSessionRequirements = Array.isArray(payload?.requiredPermissions) ? payload.requiredPermissions : []
+      const sessionRequirements = rawSessionRequirements.filter((required): required is { permissionKey: 'products' | 'inventory'; actionKey: 'add' | 'adjust' } => (
+        !!required && typeof required === 'object'
+        && ((required.permissionKey === 'products' && required.actionKey === 'add')
+          || (required.permissionKey === 'inventory' && required.actionKey === 'adjust'))
+      ))
+      const allowed = kind === 'add_product'
+        ? canAddProduct
+        : Boolean(entry && sessionMode && sessionRequirements.length === rawSessionRequirements.length && sessionRequirements.length
+          && sessionRequirements.every((required) => can(required.permissionKey, required.actionKey)))
+      if (!allowed || (entry && !canRestoreMinimizedWork(entry, can))) {
+        if (entry) reparkDeniedRestore(entry)
         notify(tr('permission_denied', 'You no longer have permission for this action.', 'អ្នកលែងមានសិទ្ធិសម្រាប់សកម្មភាពនេះទៀតហើយ។'), 'error')
         return
       }
-      open(kind)
+      open(kind, sessionMode)
     }
     for (const kind of ['add_product', 'create_products_session'] as const) {
       const pending = consumePendingRestore(kind)
@@ -4856,16 +4871,20 @@ function ProductsFullEditor() {
             onPrepareProduct={prepareProductForSession}
             onCreateProduct={createProductForSession}
             onClose={()=>{setModal(null);setSelected(null);setFormInitialTab('basic')}}
-            onMinimize={canAddProduct ? (label: string) => {
-              const draftKey = scopedWorkDraftKey('create_products_session')
+            onMinimize={(canAddProduct || canAdjustInventoryStock) ? (label: string, details: CreateProductsSessionMinimizeDetails) => {
+              const requiredPermission = details.requiredPermissions[0]
               minimizeWork({
                 key: 'create-products-session',
                 kind: 'create_products_session',
                 pageId: 'products',
                 label,
-                payload: { draftKey },
-                draftKey,
-                requiredPermission: { permissionKey: 'products', actionKey: 'add' },
+                payload: {
+                  draftKey: details.draftKey,
+                  mode: details.mode,
+                  requiredPermissions: details.requiredPermissions,
+                },
+                draftKey: details.draftKey,
+                requiredPermission,
               })
               setModal(null); setSelected(null); setFormInitialTab('basic')
               notify(tr('minimized_to_chip', 'Minimized. Pick it back up from the chip — nothing was lost.', 'បានបង្រួម។ បន្តវាឡើងវិញពីស្លាក — គ្មានអ្វីបាត់បង់ទេ។'), 'info')
