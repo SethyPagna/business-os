@@ -215,9 +215,9 @@ assert.ok(credit.includes('Delivery service: $1.00 (shop paid)'))
 // REDESIGNED Sep 6 2026. An unsettled sale states the amount ONCE, under the
 // owner's word for it -- not as a Total, a Net Total and a "Paid: unpaid"
 // spelling out the same $2.00 three times over.
-assert.ok(credit.includes('Credit: $2.00'), credit.join('\n'))
+assert.ok(credit.includes('Not Paid: $2.00'), credit.join('\n'))
 assert.ok(!credit.some((line) => /^(Total|Net Total|Paid):/.test(line)), credit.join('\n'))
-assert.ok(!credit.join('\n').includes('unpaid'), 'the word "unpaid" is gone; the line says Credit')
+assert.ok(!credit.join('\n').includes('Credit'), 'the superseded Credit label is gone; the line says Not Paid')
 assert.ok(!credit.some((line) => /^(Customer|Tel|Discount|Change|Delivery driver):/.test(line)))
 
 // The payer as it is ACTUALLY stored. `delivery_fee_paid_by` defaults to

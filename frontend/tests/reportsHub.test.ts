@@ -436,7 +436,7 @@ test('normalizeTotals carries the voided-receipt count the kernel reports', () =
   assert.equal(summed.revenue_usd, 510, 'and it did not disturb the money columns')
 })
 
-test('buildIncomeStatement: Credit is one positive memo below business totals', () => {
+test('buildIncomeStatement: Not Paid is one positive memo below business totals', () => {
   const opts = { profitMode: 'net' as const, khrToUsd, expenses: { usd: 10, khr: 40000 } }
   const base = lineMap(buildIncomeStatement({ sales: normalizeTotals(adminTotals), ...opts }))
   // Move EVERY pending input to an unmistakable number. Not one realised line
@@ -461,7 +461,7 @@ test('buildIncomeStatement: Credit is one positive memo below business totals', 
     assert.equal(m[key].usd, base[key].usd, `${key} is untouched by the unpaid cohort`)
   }
   assert.equal(base.pending_revenue.kind, 'memo')
-  assert.equal(base.pending_revenue.fallback, 'Credit')
+  assert.equal(base.pending_revenue.fallback, 'Not Paid')
   assert.equal(base.pending_revenue.usd, 40)
   assert.equal(base.net_sales.usd - base.refunds.usd, base.revenue.usd)
 
@@ -469,7 +469,7 @@ test('buildIncomeStatement: Credit is one positive memo below business totals', 
   const groups = skewed.map((l) => l.group)
   const firstPending = groups.indexOf('pending')
   assert.ok(firstPending > 0, 'the block exists')
-  assert.equal(groups.filter((group) => group === 'pending').length, 1, 'Credit appears as exactly one memo row')
+  assert.equal(groups.filter((group) => group === 'pending').length, 1, 'Not Paid appears as exactly one memo row')
   assert.ok(groups.slice(firstPending).every((g) => g === 'pending'), 'nothing realised follows the unpaid block')
   assert.ok(groups.lastIndexOf('profit') < firstPending, 'the final realised total precedes it')
   assert.equal(STATEMENT_GROUPS[STATEMENT_GROUPS.length - 1], 'pending', 'and the render order the three surfaces share agrees')
