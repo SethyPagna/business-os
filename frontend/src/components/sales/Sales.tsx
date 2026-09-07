@@ -27,7 +27,7 @@ import { pruneSelectionToVisibleIds } from '../../utils/rowSelection.ts'
 import { createLongPressState, type LongPressState } from '../../utils/longPress.ts'
 import { buildTimeActionSections, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.ts'
 import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
-import { buildBulkSaleCancelInput, getSales as fetchSales, getSalesStats as fetchSalesStats, getSalesStatsStrip, updateSalesBulkField, updateSalesBulkStatus, type BulkSaleStatusItem, type BulkSaleStatusPayload, type BulkSaleUpdatePayload, type SaleAmendmentRequest } from '../../api/salesTransport.ts'
+import { buildBulkSaleCancelInput, getSales as fetchSales, getSalesStats as fetchSalesStats, getSalesStatsStrip, SALES_LIST_REQUEST_TIMEOUT_MS, updateSalesBulkField, updateSalesBulkStatus, type BulkSaleStatusItem, type BulkSaleStatusPayload, type BulkSaleUpdatePayload, type SaleAmendmentRequest } from '../../api/salesTransport.ts'
 import { getCustomers, getDeliveryContacts } from '../../api/contactReadTransport.ts'
 import { getFeesReport } from '../../api/feesTransport.ts'
 import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
@@ -437,6 +437,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   const loadRequestRef = useRef(0)
   const salesStatsRequestRef = useRef(0)
   const loadPromiseRef = useRef<Promise<void> | null>(null)
+  const loadAbortRef = useRef<AbortController | null>(null)
   // A filter/search change can arrive while the initial Sales request is
   // still in flight. Returning that older promise without scheduling the
   // newer query leaves the new text visible but only re-filters the stale
@@ -540,6 +541,8 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       return loadPromiseRef.current
     }
     const requestId = beginTrackedRequest(loadRequestRef)
+    const controller = new AbortController()
+    loadAbortRef.current = controller
     const promise = (async () => {
       if (!silent && aliveRef.current) {
         setLoading(true)
@@ -563,7 +566,11 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
           sortBy: salesSortSpec.field,
           sortDir: salesSortSpec.direction,
         }
-        const result = await withLoaderTimeout(() => fetchSales(params), 'Sales', 20000)
+        const result = await withLoaderTimeout(
+          () => fetchSales(params, { signal: controller.signal }),
+          'Sales',
+          SALES_LIST_REQUEST_TIMEOUT_MS,
+        )
         if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
         const rows = normalizeSaleRows(result)
         if (rows.length || Array.isArray(result)) {
@@ -580,6 +587,11 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
           setLoadError(translateOr('sales_refresh_failed', 'Sales could not refresh right now. Showing the latest loaded data.'))
         }
       } finally {
+        // Ends a retry that is still in flight when the one page-level
+        // deadline wins. apiFetch forwards this signal to the real fetch, so
+        // a timed-out request cannot keep running and later refill the cache.
+        controller.abort()
+        if (loadAbortRef.current === controller) loadAbortRef.current = null
         clearLoadWatchdog()
         if (!silent && aliveRef.current && isTrackedRequestCurrent(loadRequestRef, requestId)) {
           setLoading(false)
@@ -730,6 +742,8 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     if (!isActive) {
       setHistoryReady(false)
       clearLoadWatchdog()
+      loadAbortRef.current?.abort()
+      loadAbortRef.current = null
       invalidateTrackedRequest(loadRequestRef)
       invalidateTrackedRequest(salesStatsRequestRef)
       loadPromiseRef.current = null
@@ -784,6 +798,8 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   useEffect(() => () => {
     aliveRef.current = false
     clearLoadWatchdog()
+    loadAbortRef.current?.abort()
+    loadAbortRef.current = null
     invalidateTrackedRequest(loadRequestRef)
     invalidateTrackedRequest(salesStatsRequestRef)
     loadPromiseRef.current = null
