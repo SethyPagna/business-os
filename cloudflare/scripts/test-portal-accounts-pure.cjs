@@ -76,7 +76,11 @@ const contactOptions = loadReal('lib/contactOptions.ts')
 const membershipNumber = loadReal('lib/membershipNumber.ts')
 const contactDuplicates = loadReal('lib/contactDuplicates.ts', { './contactOptions': contactOptions })
 const { canonicalizePhone } = phone
-const { getPortalLockoutState, recordPortalFailure, clearPortalLockout } = loadReal('lib/portalAuthLockout.ts', { './db': dbModule })
+// The lockout stores a ONE-WAY key, not the phone number it counts
+// (lib/portalAbuseKey.ts). The real module is loaded here so the cap in this
+// suite is counted exactly the way production counts it.
+const abuseKey = loadReal('lib/portalAbuseKey.ts')
+const { getPortalLockoutState, recordPortalFailure, clearPortalLockout } = loadReal('lib/portalAuthLockout.ts', { './db': dbModule, './portalAbuseKey': abuseKey })
 const { signupPortalAccount, signinPortalAccount } = loadReal('lib/portalAccounts.ts', {
   './db': dbModule,
   './membershipNumber': membershipNumber,

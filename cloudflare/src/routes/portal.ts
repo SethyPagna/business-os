@@ -8,6 +8,7 @@ import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission } from '../lib/permissions'
 import { audit } from '../lib/audit'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
+import { portalAbuseKey } from '../lib/portalAbuseKey'
 import { buildUniqueStoredName } from '../lib/fileAssets'
 import { sanitizeMediaList } from '../lib/media'
 import { detectBufferKind } from '../lib/uploadSecurity'
@@ -813,10 +814,13 @@ function hasAiProfilePreference(profile: Record<string, unknown> = {}): boolean 
 // Lightweight visitor fingerprint for AI per-visitor throttling/fairness
 // only -- not used for auth or logging identity. Ported from backend/src/
 // routes/portal.ts's getVisitorFingerprint (req.ip -> Workers' CF-Connecting-IP).
-function getVisitorFingerprint(c: { req: { header: (name: string) => string | undefined } }, request: Request): string {
+// The IP and user-agent are combined and then made one-way before they
+// leave this function: the throttle counts equal keys, and the row it
+// writes has no reason to hold a readable address (N45).
+async function getVisitorFingerprint(env: Env, c: { req: { header: (name: string) => string | undefined } }, request: Request): Promise<string> {
   const ip = getClientIp(request).slice(0, 120)
   const ua = (c.req.header('user-agent') || '').trim().slice(0, 240)
-  return `${ip}|${ua || 'unknown-agent'}`
+  return (await portalAbuseKey(env, 'ai_visitor', `${ip}|${ua || 'unknown-agent'}`)) || 'anonymous'
 }
 
 function collectRecommendationCitations(recommendations: Array<{ citations?: unknown[] }> = []) {
@@ -901,8 +905,7 @@ async function loadPortalAiCatalog(env: Env, showOutOfStockProducts: boolean) {
 // instead of an in-memory Map).
 app.post('/ai/chat', async (c) => {
   try {
-    const clientIp = getClientIp(c.req.raw)
-    const ipCheck = await checkRateLimit(c.env, 'portal:ai_chat:ip', clientIp, 20, 60 * 1000)
+    const ipCheck = await checkRateLimit(c.env, 'portal:ai_chat:ip', await portalAbuseKey(c.env, 'ip', getClientIp(c.req.raw)), 20, 60 * 1000)
     if (!ipCheck.allowed) {
       c.header('Retry-After', String(ipCheck.retryAfterSeconds))
       return c.json({ error: `Too many requests. Try again in ${ipCheck.retryAfterSeconds} seconds.` }, 429)
@@ -934,7 +937,7 @@ app.post('/ai/chat', async (c) => {
       profile,
       question,
       products,
-      visitorFingerprint: getVisitorFingerprint(c, c.req.raw),
+      visitorFingerprint: await getVisitorFingerprint(c.env, c, c.req.raw),
     })
 
     const citations = collectRecommendationCitations(response.recommendations)
@@ -1287,7 +1290,7 @@ async function loadAccountProfile(env: Env, accountId: number): Promise<{ member
 
 app.post('/auth/signup', async (c) => {
   const ip = getClientIp(c.req.raw)
-  const ipWindow = await checkRateLimit(c.env, 'portal:signup:ip', ip, 30, 15 * 60 * 1000)
+  const ipWindow = await checkRateLimit(c.env, 'portal:signup:ip', await portalAbuseKey(c.env, 'ip', ip), 30, 15 * 60 * 1000)
   if (!ipWindow.allowed) {
     c.header('Retry-After', String(ipWindow.retryAfterSeconds))
     return c.json({ error: `Too many attempts. Try again in ${ipWindow.retryAfterSeconds} seconds.`, code: 'rate_limited' }, 429)
@@ -1318,7 +1321,7 @@ app.post('/auth/signup', async (c) => {
 app.post('/auth/signin', async (c) => {
   const ip = getClientIp(c.req.raw)
   const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
-  const ipWindow = await checkRateLimit(c.env, 'portal:signin:ip', ip, 40, 15 * 60 * 1000)
+  const ipWindow = await checkRateLimit(c.env, 'portal:signin:ip', await portalAbuseKey(c.env, 'ip', ip), 40, 15 * 60 * 1000)
   if (!ipWindow.allowed) {
     c.header('Retry-After', String(ipWindow.retryAfterSeconds))
     return c.json({ error: `Too many attempts. Try again in ${ipWindow.retryAfterSeconds} seconds.`, code: 'rate_limited' }, 429)
@@ -1438,7 +1441,7 @@ app.post('/submissions', async (c) => {
   // between the open internet and an image-hosting write was counting. It
   // now needs a real session, and the customer comes from that session's
   // account, never from the body (N45).
-  const rate = await checkRateLimit(c.env, 'portal:submissions', getClientIp(c.req.raw), 12, 15 * 60 * 1000)
+  const rate = await checkRateLimit(c.env, 'portal:submissions', await portalAbuseKey(c.env, 'ip', getClientIp(c.req.raw)), 12, 15 * 60 * 1000)
   if (!rate.allowed) {
     c.header('Retry-After', String(rate.retryAfterSeconds))
     return c.json({ error: `Too many requests. Try again in ${rate.retryAfterSeconds} seconds.` }, 429)

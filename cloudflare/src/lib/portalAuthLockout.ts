@@ -1,4 +1,5 @@
 import { getDb } from './db'
+import { portalAbuseKey } from './portalAbuseKey'
 import type { Env } from '../index'
 
 // Flat per-flow lockout for the storefront auth surface. The user's rule is
@@ -25,15 +26,19 @@ export type PortalLockoutState = {
   retryAfterSeconds: number
 }
 
-function normKey(scope: PortalLockoutScope, key: string): { scope: string; key: string } {
-  return { scope, key: String(key || '').trim().toLowerCase() }
+// The stored key is one-way (lib/portalAbuseKey.ts). For signin it would
+// otherwise be the account's canonical phone number in plain text, next to a
+// failure count -- a list of who is being targeted. Counting only needs
+// equality, so a digest does the same work and keeps none of it (N45).
+async function normKey(env: Env, scope: PortalLockoutScope, key: string): Promise<{ scope: string; key: string }> {
+  return { scope, key: await portalAbuseKey(env, `lockout:${scope}`, key) }
 }
 
 // Read-only — call BEFORE any DB probe so a locked key never even reaches the
 // account lookup (this is also what keeps signup/signin from being a free
 // enumeration oracle once someone is rate-limited).
 export async function getPortalLockoutState(env: Env, scope: PortalLockoutScope, key: string): Promise<PortalLockoutState> {
-  const k = normKey(scope, key)
+  const k = await normKey(env, scope, key)
   if (!k.key) return { locked: false, failedCount: 0, retryAfterSeconds: 0 }
   const row = await getDb(env).prepare(
     'SELECT failed_count, locked_until FROM portal_auth_lockouts WHERE scope = @scope AND key = @key',
@@ -48,7 +53,7 @@ export async function getPortalLockoutState(env: Env, scope: PortalLockoutScope,
 // for COOLDOWN_SECONDS; an expired lock starts counting fresh from this
 // failure so the cooldown is a reset, not a permanent brick.
 export async function recordPortalFailure(env: Env, scope: PortalLockoutScope, key: string): Promise<PortalLockoutState> {
-  const k = normKey(scope, key)
+  const k = await normKey(env, scope, key)
   if (!k.key) return { locked: false, failedCount: 0, retryAfterSeconds: 0 }
   const db = getDb(env)
   const existing = await db.prepare(
@@ -79,7 +84,7 @@ export async function recordPortalFailure(env: Env, scope: PortalLockoutScope, k
 
 // Call on success — clears the counter for that key.
 export async function clearPortalLockout(env: Env, scope: PortalLockoutScope, key: string): Promise<void> {
-  const k = normKey(scope, key)
+  const k = await normKey(env, scope, key)
   if (!k.key) return
   await getDb(env).prepare('DELETE FROM portal_auth_lockouts WHERE scope = @scope AND key = @key').run(k)
 }
