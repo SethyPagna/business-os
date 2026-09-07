@@ -265,6 +265,18 @@ function verifyPlanLookupMigrationPreservesRows() {
     LIMIT 9`).all(fixtureGroups[0][0], 999999)
   assert.ok(keeperLookupPlan.some((row) => /SEARCH undo_snapshots USING INDEX idx_undo_product_merge_plan_keeper/i.test(row.detail)),
     `keeper lookup did not use its expression index: ${JSON.stringify(keeperLookupPlan)}`)
+  const exactPlanLookup = d1.db.prepare(`EXPLAIN QUERY PLAN
+    SELECT id FROM undo_snapshots INDEXED BY idx_undo_product_merge_plan_keeper
+    WHERE kind='product.merge' AND status='applied' AND json_valid(payload_json)=1
+      AND CASE WHEN json_valid(payload_json)
+        THEN CAST(json_extract(payload_json,'$.bulkClusterPlan.keeperId') AS INTEGER)
+        ELSE NULL END=?
+      AND CASE WHEN json_valid(payload_json)
+        THEN json_extract(payload_json,'$.bulkClusterPlan.identityKey')
+        ELSE NULL END=?
+    LIMIT 9`).all(fixtureGroups[0][0], bulkClusterPlan.identityKey)
+  assert.ok(exactPlanLookup.some((row) => /SEARCH undo_snapshots USING INDEX idx_undo_product_merge_plan_keeper \(<expr>=\? AND <expr>=\?\)/i.test(row.detail)),
+    `POST plan lookup did not search keeper plus identity: ${JSON.stringify(exactPlanLookup)}`)
   const adapter = countingAdapter(d1)
   const handler = loadPreviewRoute(adapter)
 

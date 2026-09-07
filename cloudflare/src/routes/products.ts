@@ -3331,6 +3331,9 @@ const MERGE_PLAN_HISTORY_MAX_BYTES_TOTAL = 256 * 1_024
 const MERGE_PLAN_KEEPER_INDEX_SQL = `CASE WHEN json_valid(payload_json)
   THEN CAST(json_extract(payload_json,'$.bulkClusterPlan.keeperId') AS INTEGER)
   ELSE NULL END`
+const MERGE_PLAN_IDENTITY_INDEX_SQL = `CASE WHEN json_valid(payload_json)
+  THEN json_extract(payload_json,'$.bulkClusterPlan.identityKey')
+  ELSE NULL END`
 
 function multiClusterComplexLinkPlan(
   groups: Awaited<ReturnType<typeof findDuplicateProductGroups>>,
@@ -3644,24 +3647,43 @@ async function readAppliedBulkClusterPlan(
   keeperId: number,
   identityKey: string,
   activeDuplicateIds: readonly number[],
-): Promise<ProductMergeClusterPlan | null> {
-  if (!activeDuplicateIds.length) return null
-  const rows = await db.prepare(`
-    SELECT payload_json
-    FROM undo_snapshots INDEXED BY idx_undo_product_merge_plan_keeper
-    WHERE kind='product.merge' AND status='applied' AND json_valid(payload_json)=1
-      AND ${MERGE_PLAN_KEEPER_INDEX_SQL}=@keeperId
-      AND json_extract(payload_json,'$.bulkClusterPlan.identityKey')=@identityKey
-    ORDER BY id DESC
-    LIMIT 50
-  `).all<{ payload_json: string }>({ keeperId, identityKey })
+): Promise<{ plan: ProductMergeClusterPlan | null; unavailable: boolean }> {
+  if (!activeDuplicateIds.length) return { plan: null, unavailable: false }
+  const [planResult, invalidHistoryResult] = await db.batch([
+    {
+      sql: `SELECT id,
+          length(CAST(json_extract(payload_json,'$.bulkClusterPlan') AS BLOB)) AS plan_bytes,
+          CASE WHEN length(CAST(json_extract(payload_json,'$.bulkClusterPlan') AS BLOB)) <= ${MERGE_PLAN_HISTORY_MAX_PLAN_BYTES}
+            THEN json_extract(payload_json,'$.bulkClusterPlan') ELSE NULL END AS plan_json
+        FROM undo_snapshots INDEXED BY idx_undo_product_merge_plan_keeper
+        WHERE kind='product.merge' AND status='applied' AND json_valid(payload_json)=1
+          AND ${MERGE_PLAN_KEEPER_INDEX_SQL}=@keeperId
+          AND ${MERGE_PLAN_IDENTITY_INDEX_SQL}=@identityKey
+        ORDER BY id DESC
+        LIMIT ${MERGE_PLAN_HISTORY_MAX_ROWS_PER_KEEPER_CHUNK + 1}`,
+      params: { keeperId, identityKey },
+    },
+    {
+      sql: `SELECT 1 AS invalid_json
+        FROM undo_snapshots INDEXED BY idx_undo_product_merge_invalid_json
+        WHERE kind='product.merge' AND status='applied' AND json_valid(payload_json)=0
+        LIMIT 1`,
+      params: {},
+    },
+  ])
+  if ((invalidHistoryResult.results || []).length) return { plan: null, unavailable: true }
+  const rows = (planResult.results || []) as Array<{ plan_bytes?: unknown; plan_json?: unknown }>
+  if (rows.length > MERGE_PLAN_HISTORY_MAX_ROWS_PER_KEEPER_CHUNK) return { plan: null, unavailable: true }
   const candidates: ProductMergeClusterPlan[] = []
   for (const row of rows) try {
-    const payload = JSON.parse(String(row.payload_json || '{}')) as { bulkClusterPlan?: unknown }
-    const plan = parseProductMergeClusterPlan(payload.bulkClusterPlan)
-    if (plan) candidates.push(plan)
-  } catch {}
-  return selectAppliedBulkClusterPlan(candidates, keeperId, identityKey, activeDuplicateIds)
+    const planBytes = Number(row.plan_bytes)
+    if (!Number.isFinite(planBytes) || planBytes < 0 || planBytes > MERGE_PLAN_HISTORY_MAX_PLAN_BYTES
+      || typeof row.plan_json !== 'string') return { plan: null, unavailable: true }
+    const plan = parseProductMergeClusterPlan(JSON.parse(row.plan_json))
+    if (!plan) return { plan: null, unavailable: true }
+    candidates.push(plan)
+  } catch { return { plan: null, unavailable: true } }
+  return { plan: selectAppliedBulkClusterPlan(candidates, keeperId, identityKey, activeDuplicateIds), unavailable: false }
 }
 
 function selectAppliedBulkClusterPlan(
@@ -3884,7 +3906,16 @@ app.post('/merge-duplicates', async (c) => {
       continue
     }
     const identityKey = JSON.stringify([normalizeProductGroupName(canonicalName), identityBarcodeKey(group.canonical.barcode)])
-    const persistedPlan = await readAppliedBulkClusterPlan(db, canonicalId, identityKey, group.duplicates.map((dup) => dup.id))
+    const persistedPlanLookup = await readAppliedBulkClusterPlan(db, canonicalId, identityKey, group.duplicates.map((dup) => dup.id))
+    if (persistedPlanLookup.unavailable) {
+      for (const dup of group.duplicates) refusals.push({
+        caseKey: productMergeCaseKey(canonicalId, dup.id), keeperId: canonicalId,
+        mergedId: dup.id, mergedName: dup.name, code: 'merge_plan_history_unavailable',
+        error: 'Saved merge-plan history could not be read within its safety limit. This whole group remains unchanged until the history is repaired or reconciled.',
+      })
+      continue
+    }
+    const persistedPlan = persistedPlanLookup.plan
     let clusterPlan: ProductMergeClusterPlan
     if (persistedPlan) {
       const currentById = new Map(moneyRows.map((row) => [Number(row.id), row]))

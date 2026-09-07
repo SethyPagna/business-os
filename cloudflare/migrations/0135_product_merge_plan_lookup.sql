@@ -24,6 +24,9 @@ ON undo_snapshots(
   CASE WHEN json_valid(payload_json)
     THEN CAST(json_extract(payload_json, '$.bulkClusterPlan.keeperId') AS INTEGER)
     ELSE NULL END,
+  CASE WHEN json_valid(payload_json)
+    THEN json_extract(payload_json, '$.bulkClusterPlan.identityKey')
+    ELSE NULL END,
   id DESC
 )
 WHERE kind = 'product.merge' AND status = 'applied' AND json_valid(payload_json) = 1;
