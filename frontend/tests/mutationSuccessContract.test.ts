@@ -51,11 +51,12 @@ for (const rel of GUARDED_FILES) {
   })
 }
 
-runTest('the transfer + branch-delete fixes are present (positive assertion)', () => {
+runTest('transfer success remains explicit and branch management is edit-only', () => {
   const transfer = readFileSync(new URL('../src/components/branches/TransferModal.tsx', import.meta.url), 'utf8')
   assert.match(transfer, /res\?\.success !== false/, 'the transfer handlers must accept a flag-less success')
   const branches = readFileSync(new URL('../src/components/branches/Branches.tsx', import.meta.url), 'utf8')
-  assert.match(branches, /res\?\.success === false/, 'branch delete must only fail on an explicit success:false')
+  assert.match(branches, /res\?\.success === false/, 'branch metadata edit must only fail on explicit success:false')
+  assert.doesNotMatch(branches, /branchApi\.(createBranch|deleteBranch)\(/, 'the UI must not call fixed-identity create/delete routes')
 })
 
 runTest('sale status mutations preserve normal notes and omit settlement notes', () => {
