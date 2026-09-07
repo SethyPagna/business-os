@@ -1265,6 +1265,16 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     const stripReturns = stripData?.returns || {}
     const txCount = Number(totals.tx_count) || 0
     const revenueUsd = Number(totals.revenue_usd) || 0
+    // The analytics wire keeps gross_sales_usd on its legacy post-item-
+    // discount basis. Restore the recognized item discount exactly once at
+    // this presentation boundary so Gross, Discounts and Revenue foot.
+    const itemDiscountUsd = Number(totals.item_discount_usd) || 0
+    const recognizedGrossUsd = (Number(totals.gross_sales_usd) || 0) + itemDiscountUsd
+    const explicitTotalDiscountUsd = Number(totals.total_discount_usd)
+    const invoiceDiscountUsd = Number(totals.discount_usd) || 0
+    const totalDiscountUsd = Number.isFinite(explicitTotalDiscountUsd)
+      ? explicitTotalDiscountUsd
+      : itemDiscountUsd + invoiceDiscountUsd
     const returnCount = Number(stripReturns.count) || 0
     const refundUsd = Number(stripReturns.refund_usd) || 0
     const cogsUsd = Number(totals.cost_usd) || 0
@@ -1306,7 +1316,9 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
 
 ${buildEquation({ key: 'revenue', fallback: 'Revenue', usd: revenueUsd }, revenueTerms(formulaTotals), fmtUSD, translateOr)}`,
         details: [
-          { label: translateOr('stats_gross', 'Gross sales'), value: fmtUSD(Number(totals.gross_sales_usd) || 0) },
+          { label: translateOr('stats_gross', 'Gross sales'), value: fmtUSD(recognizedGrossUsd) },
+          { label: translateOr('discounts_total', 'Total discounts'), value: fmtUSD(totalDiscountUsd), tone: totalDiscountUsd > 0 ? ('warn' as const) : undefined },
+          { label: t('revenue') || 'Revenue', value: fmtUSD(revenueUsd) },
           { label: translateOr('stats_store_discount', 'Store discount'), value: fmtUSD(Number(totals.store_discount_usd) || 0), tone: 'warn' as const },
           { label: translateOr('stats_member_discount', 'Member discount'), value: fmtUSD(Number(totals.membership_discount_usd) || 0), tone: 'warn' as const },
           // The refund term of the revenue identity: refunds attributed back
