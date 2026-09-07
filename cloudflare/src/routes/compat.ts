@@ -6,7 +6,7 @@ import { getSystemJob, listCloudflareBackups, listSystemJobs, storeSystemJob } f
 import { buildDriveOauthStartUrl, completeDriveOauth, consumeDriveOauthState, disconnectDrive, driveSyncStatus, updateDrivePreferences } from '../lib/googleDrive'
 import { enqueueDriveRestoreStageJob, enqueueDriveSyncJob } from '../lib/driveSyncQueue'
 import { hasPermission, hasAnyPermission, isAdminControlUser, getPermissionTier } from '../lib/permissions'
-import { audit } from '../lib/audit'
+import { audit, buildAuditLogRetentionDeleteSql } from '../lib/audit'
 import { buildAuditLogFilters } from '../lib/auditLogQuery'
 import { putObject, getObject, deleteObject } from '../lib/r2'
 import { getGoogleLoginPublicConfig } from '../lib/googleOauth'
@@ -683,7 +683,7 @@ app.delete('/system/audit-logs/retention', requireAuth, async (c) => {
   const db = getDb(c.env)
   let deleted = 0
   for (;;) {
-    const result = await db.prepare('DELETE FROM audit_logs WHERE id IN (SELECT id FROM audit_logs WHERE created_at < @cutoff LIMIT 5000)').run({ cutoff })
+    const result = await db.prepare(buildAuditLogRetentionDeleteSql()).run({ cutoff })
     const n = (result as any)?.meta?.changes ?? (result as any)?.changes ?? 0
     deleted += n
     if (n < 5000) break

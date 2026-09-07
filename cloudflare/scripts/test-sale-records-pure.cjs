@@ -457,6 +457,7 @@ runTest('return bulk cancel, undo and redo keep exact direction, actor and time'
     operation_id: 'return-op', return_id: 7, return_number: 'R-0007',
     request_json: JSON.stringify({ field: 'status', source: 'completed', target: 'cancelled' }),
     receipt_json: JSON.stringify({ items: [{ id: 7, before: 'completed', after: 'cancelled', changed: true }] }),
+    details: JSON.stringify({ kind: 'return.fields.bulk' }),
   }
   const cancel = returnBulkEventRecord({ ...base, audit_id: 810, action: 'return_fields_bulk', user_name: 'modifier-b', created_at: '2026-09-06 16:30:00' })
   const undo = returnBulkEventRecord({ ...base, audit_id: 811, action: 'action_undo', user_name: 'manager-c', created_at: '2026-09-06 17:00:00' })
@@ -471,6 +472,41 @@ runTest('return bulk cancel, undo and redo keep exact direction, actor and time'
   assert.strictEqual(redo.actor_username, 'manager-d')
   assert.strictEqual(redo.via, 'redo')
   assert.strictEqual(redo.at, '2026-09-06 17:30:00')
+})
+
+runTest('return bulk generation exposes pruned replay history without inventing actor or time', () => {
+  const base = {
+    operation_id: 'return-op-pruned', return_id: 7, return_number: 'R-0007', generation: 2,
+    request_json: JSON.stringify({ field: 'status', source: 'completed', target: 'cancelled' }),
+    receipt_json: JSON.stringify({ items: [{ id: 7, before: 'completed', after: 'cancelled', changed: true }] }),
+    details: JSON.stringify({ kind: 'return.fields.bulk' }),
+  }
+  const original = { ...base, audit_id: 'history:90', action: 'return_fields_bulk', user_name: 'modifier-b', created_at: '2026-06-01 16:30:00' }
+  const fullyPruned = buildSaleRecords({ sale: SALE, returnBulk: [original] }).filter((record) => record.source === 'return')
+  assert.deepStrictEqual(fullyPruned.map((record) => record.via), [null, 'undo', 'redo'])
+  assert.strictEqual(fullyPruned[1].actor_username, null)
+  assert.strictEqual(fullyPruned[1].at, null)
+  assert.strictEqual(fullyPruned[1].provenance_unknown, true)
+  assert.match(fullyPruned[1].summary, /actor and time unavailable/)
+  assert.strictEqual(fullyPruned[2].actor_username, null)
+  assert.deepStrictEqual(fullyPruned[2].after, { return_status: 'cancelled' })
+
+  const survivingRedo = {
+    ...base, audit_id: 'audit:92', action: 'action_redo', user_name: 'manager-d', created_at: '2026-09-06 17:30:00',
+  }
+  const unrelatedCollision = {
+    ...base, audit_id: 'audit:unrelated', action: 'action_undo', user_name: 'intruder', created_at: '2026-09-06 17:00:00',
+    details: JSON.stringify({ kind: 'something.else' }),
+  }
+  const partiallyPruned = buildSaleRecords({ sale: SALE, returnBulk: [original, unrelatedCollision, survivingRedo] })
+    .filter((record) => record.source === 'return')
+  assert.deepStrictEqual(partiallyPruned.map((record) => record.via), [null, 'undo', 'redo'],
+    'the unknown oldest replay stays between the original act and the surviving suffix')
+  assert.strictEqual(partiallyPruned[1].actor_username, null)
+  assert.strictEqual(partiallyPruned[2].actor_username, 'manager-d')
+  assert.strictEqual(partiallyPruned[2].at, '2026-09-06 17:30:00')
+  assert.ok(!partiallyPruned.some((record) => record.actor_username === 'intruder'),
+    'an unrelated replay audit with a colliding operation id is not a sale record')
 })
 
 runTest("a bulk action finds THIS sale's own before/after inside the operation receipt", () => {
@@ -538,7 +574,7 @@ function setup(withCostKind) {
     CREATE TABLE sale_bulk_members (operation_id TEXT NOT NULL, sale_id INTEGER NOT NULL, revision INTEGER NOT NULL,
       movement_fingerprint TEXT NOT NULL, PRIMARY KEY(operation_id, sale_id));
     CREATE TABLE return_bulk_operations (id TEXT PRIMARY KEY, request_json TEXT NOT NULL, receipt_json TEXT NOT NULL,
-      history_id INTEGER);
+      history_id INTEGER, generation INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE return_bulk_members (operation_id TEXT NOT NULL, return_id INTEGER NOT NULL, sale_id INTEGER,
       PRIMARY KEY(operation_id, return_id));
     CREATE TABLE returns (id INTEGER PRIMARY KEY AUTOINCREMENT, return_number TEXT, sale_id INTEGER,
@@ -608,9 +644,10 @@ const RETURN_AUDIT = [{
   created_at: '2026-09-06 15:30:00', return_number: 'R-0005', details: JSON.stringify({ reason: 'Changed quantity' }),
 }]
 const RETURN_BULK_BASE = {
-  operation_id: 'return-op', return_id: 5, return_number: 'R-0005',
+  operation_id: 'return-op', return_id: 5, return_number: 'R-0005', generation: 2,
   request_json: JSON.stringify({ field: 'status', source: 'completed', target: 'cancelled' }),
   receipt_json: JSON.stringify({ items: [{ id: 5, before: 'completed', after: 'cancelled', changed: true }] }),
+  details: JSON.stringify({ kind: 'return.fields.bulk' }),
 }
 const RETURN_BULK_EVENTS = [
   { ...RETURN_BULK_BASE, audit_id: 703, action: 'return_fields_bulk', user_name: 'modifier-b', created_at: '2026-09-06 16:00:00' },
@@ -654,13 +691,13 @@ function seedRecords(sqlite) {
     sqlite.prepare("INSERT INTO audit_logs (id, user_name, action, entity, entity_id, details, created_at) VALUES (@id,@u,@a,'return',@returnId,@d,@at)")
       .run({ id: row.audit_id, u: row.user_name, a: row.action, returnId: String(row.return_id), d: row.details, at: row.created_at })
   }
-  sqlite.prepare("INSERT INTO return_bulk_operations (id, request_json, receipt_json, history_id) VALUES ('return-op',@req,@receipt,91)")
+  sqlite.prepare("INSERT INTO return_bulk_operations (id, request_json, receipt_json, history_id, generation) VALUES ('return-op',@req,@receipt,91,2)")
     .run({ req: RETURN_BULK_BASE.request_json, receipt: RETURN_BULK_BASE.receipt_json })
   sqlite.prepare("INSERT INTO return_bulk_members (operation_id, return_id, sale_id) VALUES ('return-op',5,77)").run()
   sqlite.prepare("INSERT INTO action_history (id, scope, entity, entity_id, label, created_by_name, created_at) VALUES (91,'returns','return','return-op','return cancelled','modifier-b','2026-09-06 16:00:00')").run()
   for (const row of RETURN_BULK_EVENTS.filter((event) => event.action !== 'return_fields_bulk')) {
-    sqlite.prepare("INSERT INTO audit_logs (id, user_name, action, entity, entity_id, details, created_at) VALUES (@id,@u,@a,'return','return-op','{}',@at)")
-      .run({ id: row.audit_id, u: row.user_name, a: row.action, at: row.created_at })
+    sqlite.prepare("INSERT INTO audit_logs (id, user_name, action, entity, entity_id, details, created_at) VALUES (@id,@u,@a,'return','return-op',@details,@at)")
+      .run({ id: row.audit_id, u: row.user_name, a: row.action, details: row.details, at: row.created_at })
   }
   // A return on the OTHER sale: sale 78's count must move by exactly one, and
   // sale 77's must not move at all.
@@ -715,6 +752,20 @@ runTest('the list-row count equals the number of lines the float shows, for both
   assert.strictEqual(
     detail77.filter((r) => r.via === 'undo' || r.via === 'redo').length, 4,
     'sale line and return status undo/redo are each represented once',
+  )
+
+  sqlite.prepare("DELETE FROM audit_logs WHERE entity='return' AND entity_id='return-op' AND action IN ('action_undo','action_redo')").run()
+  const afterPrune = sqlite.prepare(sql).all(...saleRecordsCountBinds(ids))
+  const afterPruneCount77 = Number(afterPrune.find((row) => Number(row.sale_id) === 77)?.n || 0) + SALE_RECORDS_SELF_COUNT
+  const detailAfterPrune = buildSaleRecords({
+    sale: SALE_RETURNED, ledger: [...LEDGER, UNDO_LEDGER, REDO_LEDGER], audit: [...AUDIT, UNDO_AUDIT, REDO_AUDIT],
+    bulk: BULK, returns: RETURNS, returnAudit: RETURN_AUDIT, returnBulk: [RETURN_BULK_EVENTS[0]],
+  })
+  assert.strictEqual(afterPruneCount77, 14, 'durable generation keeps the badge count after replay audit pruning')
+  assert.strictEqual(detailAfterPrune.length, afterPruneCount77, 'synthesized unknown replay rows keep detail/count parity')
+  assert.deepStrictEqual(
+    detailAfterPrune.filter((record) => record.source === 'return' && record.via).map((record) => record.via),
+    ['undo', 'redo'],
   )
   sqlite.close()
 })
@@ -813,6 +864,10 @@ runTest('the Worker route is actually wired to this module', () => {
   assert.match(ROUTES, /returnAudit: returnAuditRows/)
   assert.match(ROUTES, /returnBulk: returnBulkRows/)
   assert.match(ROUTES, /JOIN return_bulk_operations/)
+  assert.match(ROUTES, /r\.return_number, o\.generation/,
+    'detail must carry durable replay generation even after audit retention')
+  assert.match(ROUTES, /json_extract\(a\.details, '\$\.kind'\) = 'return\.fields\.bulk'/,
+    'detail accepts only the replay audit family counted by durable generation')
   assert.match(ROUTES, /FROM sale_mutation_receipts/,
     'permanent mutation before-snapshots survive audit retention for creation reconstruction')
   assert.match(ROUTES, /status_before_return/, "the returns source's before comes from the sale row")
