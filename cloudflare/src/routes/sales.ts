@@ -2694,28 +2694,30 @@ app.get('/:id/records', async (c) => {
   // one audit row per act. Joining both is what gives this sale's return the
   // exact before/after pair and the actor of this particular replay.
   const returnBulkRows = await db.prepare(`
-    SELECT 'history:' || h.id AS audit_id, o.id AS operation_id, m.return_id,
-      'return_fields_bulk' AS action, o.request_json, o.receipt_json, NULL AS details,
-      h.created_by_name AS user_name, h.created_at, r.return_number, o.generation
-    FROM return_bulk_members m
-    JOIN return_bulk_operations o ON o.id = m.operation_id
-    JOIN returns r ON r.id = m.return_id
-    JOIN action_history h ON h.id = o.history_id
-    WHERE m.sale_id = ?
-      AND COALESCE(r.return_scope,'customer') = 'customer'
-    UNION ALL
-    SELECT 'audit:' || a.id AS audit_id, o.id AS operation_id, m.return_id,
-      a.action, o.request_json, o.receipt_json, a.details, a.user_name, a.created_at,
-      r.return_number, o.generation
-    FROM return_bulk_members m
-    JOIN return_bulk_operations o ON o.id = m.operation_id
-    JOIN returns r ON r.id = m.return_id
-    JOIN audit_logs a ON a.entity = 'return' AND a.entity_id = o.id
-    WHERE m.sale_id = ?
-      AND COALESCE(r.return_scope,'customer') = 'customer'
-      AND a.action IN ('action_undo','action_redo')
-      AND json_valid(a.details)
-      AND json_extract(a.details, '$.kind') = 'return.fields.bulk'
+    SELECT * FROM (
+      SELECT 'history:' || h.id AS audit_id, o.id AS operation_id, m.return_id,
+        'return_fields_bulk' AS action, o.request_json, o.receipt_json, NULL AS details,
+        h.created_by_name AS user_name, h.created_at, r.return_number, o.generation
+      FROM return_bulk_members m
+      JOIN return_bulk_operations o ON o.id = m.operation_id
+      JOIN returns r ON r.id = m.return_id
+      JOIN action_history h ON h.id = o.history_id
+      WHERE m.sale_id = ?
+        AND COALESCE(r.return_scope,'customer') = 'customer'
+      UNION ALL
+      SELECT 'audit:' || a.id AS audit_id, o.id AS operation_id, m.return_id,
+        a.action, o.request_json, o.receipt_json, a.details, a.user_name, a.created_at,
+        r.return_number, o.generation
+      FROM return_bulk_members m
+      JOIN return_bulk_operations o ON o.id = m.operation_id
+      JOIN returns r ON r.id = m.return_id
+      JOIN audit_logs a ON a.entity = 'return' AND a.entity_id = o.id
+      WHERE m.sale_id = ?
+        AND COALESCE(r.return_scope,'customer') = 'customer'
+        AND a.action IN ('action_undo','action_redo')
+        AND json_valid(a.details)
+        AND json_extract(a.details, '$.kind') = 'return.fields.bulk'
+    ) ordered_return_bulk
     ORDER BY created_at ASC, audit_id ASC
   `).all<SaleRecordReturnBulkEventRow>([saleId, saleId])
 

@@ -720,7 +720,8 @@ runTest('the list-row count equals the number of lines the float shows, for both
   const ids = [77, 78]
   const placeholders = ids.map(() => '?').join(',')
   const sql = buildSaleRecordsCountSql(placeholders)
-  assert.strictEqual(SALE_RECORDS_COUNT_BINDS_PER_ID, 6, 'the chunker has to know how many lists each id is bound into')
+  assert.strictEqual(SALE_RECORDS_COUNT_BINDS_PER_ID, 1, 'the sales driver binds each id once')
+  assert.doesNotMatch(sql, /\bUNION\b/i, 'D1 rejects the former six-arm compound SELECT; counts must use scalar sources')
   const rows = sqlite.prepare(sql).all(...saleRecordsCountBinds(ids))
   const counts = new Map(rows.map((row) => [Number(row.sale_id), Number(row.n)]))
 
@@ -787,19 +788,17 @@ runTest('the applier this module suppresses is spelled the way undoAppliers.ts s
     'sale.add_items undo must still write its own amendment row')
 })
 
-runTest('the audit half of the count binds the sale id as TEXT, which is why the binds are built in one place', () => {
+runTest('the scalar count driver casts each sale id for the TEXT audit key', () => {
   const sqlite = setup(true)
   seedRecords(sqlite)
-  // audit_logs.entity_id is TEXT; sale_amendments.sale_id is INTEGER. Binding
-  // the same JavaScript number into both lists -- the obvious implementation --
-  // matches NOTHING in audit_logs, so the badge silently drops every status
-  // change and every customer swap.
+  // audit_logs.entity_id is TEXT while sales.id is INTEGER. The correlated
+  // audit term must cast the driver id rather than asking the caller to bind a
+  // second differently typed copy.
   const sql = buildSaleRecordsCountSql('?')
-  const numberBound = sqlite.prepare(sql).all(77, 77, 77, 77, 77, 77)
   const viaHelper = sqlite.prepare(sql).all(...saleRecordsCountBinds([77]))
   const sum = (rows) => rows.reduce((total, row) => total + Number(row.n), 0)
-  assert.strictEqual(sum(numberBound), 11, 'number-bound: only the two sale audit records vanish')
-  assert.strictEqual(sum(viaHelper), 13, 'text-bound: every non-creation event is counted')
+  assert.match(sql, /a\.entity_id = CAST\(s\.id AS TEXT\)/)
+  assert.strictEqual(sum(viaHelper), 13, 'every non-creation event is counted from one numeric sale bind')
   sqlite.close()
 })
 
@@ -863,6 +862,8 @@ runTest('the Worker route is actually wired to this module', () => {
   assert.match(ROUTES, /returns: returnRows/, 'and hand them to the union')
   assert.match(ROUTES, /returnAudit: returnAuditRows/)
   assert.match(ROUTES, /returnBulk: returnBulkRows/)
+  assert.match(ROUTES, /SELECT \* FROM \([\s\S]*?\) ordered_return_bulk\s+ORDER BY created_at ASC, audit_id ASC/,
+    'the return replay UNION must be wrapped before ordering by its output aliases on D1')
   assert.match(ROUTES, /JOIN return_bulk_operations/)
   assert.match(ROUTES, /r\.return_number, o\.generation/,
     'detail must carry durable replay generation even after audit retention')

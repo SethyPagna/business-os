@@ -963,8 +963,10 @@ export function buildSaleRecords(input: {
 // The list-row count.
 //
 // The Sales list shows "Records n" on every row, so this must never be a query
-// per sale. It is ONE statement over the whole page: four grouped counts
-// UNIONed and re-summed, plus the +1 every sale gets for its own creation.
+// per sale. It is ONE statement over the whole page. Each source is a
+// correlated scalar count so the query stays below D1's compound-SELECT term
+// limit; the earlier six-arm UNION failed every Sales list request on D1.
+// The caller adds the +1 every sale gets for its own creation.
 //
 // The audit half applies BOTH suppressions the detail read applies -- an
 // `action: 'amend'` row is the ledger entry's twin, and so is the
@@ -989,13 +991,10 @@ export const SALE_RECORDS_SELF_COUNT = 1
 
 export function buildSaleRecordsCountSql(placeholders: string): string {
   return `
-    SELECT sale_id, SUM(n) AS n FROM (
-      SELECT sale_id AS sale_id, COUNT(*) AS n
-        FROM sale_amendments WHERE sale_id IN (${placeholders}) GROUP BY sale_id
-      UNION ALL
-      SELECT CAST(a.entity_id AS INTEGER) AS sale_id, COUNT(*) AS n
-        FROM audit_logs a
-        WHERE a.entity = 'sale' AND a.entity_id IN (${placeholders})
+    SELECT s.id AS sale_id,
+      (SELECT COUNT(*) FROM sale_amendments sa WHERE sa.sale_id = s.id)
+      + (SELECT COUNT(*) FROM audit_logs a
+        WHERE a.entity = 'sale' AND a.entity_id = CAST(s.id AS TEXT)
           AND COALESCE(CASE WHEN json_valid(a.details) THEN json_extract(a.details, '$.action') END, '') <> 'amend'
           AND NOT (a.action IN ('action_undo','action_redo')
                    AND CASE WHEN json_valid(a.details) THEN json_extract(a.details, '$.applier') END = 'sale.add_items')
@@ -1015,36 +1014,28 @@ export function buildSaleRecordsCountSql(placeholders: string): string {
                   AND COALESCE(CASE WHEN json_valid(explicit.details) THEN json_extract(explicit.details, '$.after.sale_status') END, '') = COALESCE(CASE WHEN json_valid(a.details) THEN json_extract(a.details, '$.newStatus') END, ''))
               )
           ))
-        GROUP BY a.entity_id
-      UNION ALL
-      SELECT sale_id AS sale_id, COUNT(*) AS n
-        FROM sale_bulk_members WHERE sale_id IN (${placeholders}) GROUP BY sale_id
-      UNION ALL
-      SELECT sale_id AS sale_id, COUNT(*) AS n
-        FROM returns
-        WHERE sale_id IN (${placeholders})
+      )
+      + (SELECT COUNT(*) FROM sale_bulk_members sbm WHERE sbm.sale_id = s.id)
+      + (SELECT COUNT(*) FROM returns
+        WHERE sale_id = s.id
           AND COALESCE(return_scope, 'customer') = 'customer'
           AND NOT EXISTS (
             SELECT 1 FROM audit_logs ra
             WHERE ra.entity = 'return' AND ra.entity_id = CAST(returns.id AS TEXT)
               AND ra.action = 'create'
           )
-        GROUP BY sale_id
-      UNION ALL
-      SELECT r.sale_id AS sale_id, COUNT(*) AS n
-        FROM audit_logs ra
+      )
+      + (SELECT COUNT(*) FROM audit_logs ra
         JOIN returns r ON ra.entity = 'return' AND ra.entity_id = CAST(r.id AS TEXT)
-        WHERE r.sale_id IN (${placeholders})
+        WHERE r.sale_id = s.id
           AND COALESCE(r.return_scope, 'customer') = 'customer'
           AND ra.action IN ('create','update')
-        GROUP BY r.sale_id
-      UNION ALL
-      SELECT m.sale_id AS sale_id,
-        SUM(1 + MAX(0, COALESCE(ro.generation, 0))) AS n
+      )
+      + COALESCE((SELECT SUM(1 + MAX(0, COALESCE(ro.generation, 0)))
         FROM return_bulk_members m
         JOIN return_bulk_operations ro ON ro.id = m.operation_id
         JOIN action_history rh ON rh.id = ro.history_id
-        WHERE m.sale_id IN (${placeholders})
+        WHERE m.sale_id = s.id
           AND json_valid(ro.request_json)
           AND json_extract(ro.request_json, '$.field') = 'status'
           AND json_valid(ro.receipt_json)
@@ -1055,21 +1046,19 @@ export function buildSaleRecordsCountSql(placeholders: string): string {
               AND json_type(item.value, '$.before') IS NOT NULL
               AND json_type(item.value, '$.after') IS NOT NULL
           )
-        GROUP BY m.sale_id
-    )
-    GROUP BY sale_id
+      ), 0) AS n
+    FROM sales s
+    WHERE s.id IN (${placeholders})
   `
 }
 
 /** How many `IN (...)` lists buildSaleRecordsCountSql binds each id into. */
-export const SALE_RECORDS_COUNT_BINDS_PER_ID = 6
+export const SALE_RECORDS_COUNT_BINDS_PER_ID = 1
 
 /**
- * The bind list for buildSaleRecordsCountSql, in statement order: the ledger's
- * INTEGER ids, then the audit table's TEXT ids, then the bulk table's INTEGER
- * ids, then the returns table's INTEGER ids. See the note above for why the
- * second list is stringified.
+ * The bind list for buildSaleRecordsCountSql. The sales driver is bound once;
+ * correlated subqueries compare audit entity ids with CAST(s.id AS TEXT).
  */
 export function saleRecordsCountBinds(ids: Array<number | string>): Array<number | string> {
-  return [...ids, ...ids.map((id) => String(id)), ...ids, ...ids, ...ids, ...ids]
+  return [...ids]
 }
