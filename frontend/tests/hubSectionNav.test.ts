@@ -173,7 +173,11 @@ await runTest('Review & Logs participates in shared section navigation', () => {
   const source = fs.readFileSync(new URL('../src/components/review/ReviewLogsPage.tsx', import.meta.url), 'utf8')
   assert.match(source, /<HubSectionNav/)
   assert.match(source, /useHubSection<ReviewLogsSection>/)
-  assert.match(source, /desktopNavigation=/, 'its original desktop switcher remains available only on desktop')
+  // Review's forked desktop switcher is retired (N35). While it existed,
+  // HubSectionNav returned it verbatim at md+ and the shared row never
+  // rendered, so Review alone kept the grey well / white active chip / per-hue
+  // active ink the owner reported. It now reaches the same row as every hub.
+  assert.doesNotMatch(source, /desktopNavigation=/, 'no forked desktop switcher: Review uses the shared row at every width')
 })
 
 await runTest('preference immediately notifies every consumer and survives blocked storage', () => {
