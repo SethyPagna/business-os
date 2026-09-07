@@ -50,12 +50,23 @@
 //     * the two cross-kernel source guards, which name rules base has not
 //       got.
 //
-//   RED ON 690086ff, GREEN AT BASE -- the keyspace regression this lane
-//   introduced and then closed, which is exactly why the check must stay:
+//   RED ON A LATER COMMIT OF THIS LANE, GREEN AT BASE -- keyspace
+//   regressions this lane introduced and then closed, which is exactly why
+//   these checks must stay. Neither discriminates against base (base derives
+//   no equivalent key at all, so it passes both vacuously); each names the
+//   commit it actually caught:
 //     * 'the derived UPC-E spelling never leaks into the padding keyspace'.
-//       Base has no derived key at all, so it cannot leak; 690086ff carried
-//       the derived spelling zero-stripped and made the ordinary 7-digit
-//       code '1234565' the same article as '012345000065'.
+//       Red on 690086ff, which carried the derived spelling zero-stripped
+//       and made the ordinary 7-digit code '1234565' the same article as
+//       '012345000065'.
+//     * 'the literal spellings the Worker probes agree with what the JS fold
+//       matches'. Red on ece45a28, where barcodeKeyPlan padded BOTH halves of
+//       the pair, so the Worker emitted '00000001234565' and '000001234565'
+//       as literal index probes for a UPC-A scan. Those are ordinary padded
+//       spellings of that same unrelated '1234565', and barcodeKeysMatch says
+//       so -- this is the one check that holds the SQL builder and the JS
+//       kernel to the same answer, which matters because the Worker matches
+//       on the spellings it emits, not on what barcodeKeysMatch would say.
 //
 //   ALREADY TRUE AT BASE -- fences, not discriminators. Kept because the
 //   UPC-E rule above is exactly the kind of change that could break them:

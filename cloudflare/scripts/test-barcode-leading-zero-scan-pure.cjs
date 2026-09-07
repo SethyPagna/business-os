@@ -33,7 +33,7 @@
 //
 // WHAT ACTUALLY DISCRIMINATES, measured by replaying this file against the
 // base 01f0c93c copies of lib/searchMatch.ts + lib/productSearchQuery.ts,
-// not asserted. Six of the twenty-three checks are red at base:
+// not asserted. Six of the twenty-six checks are red at base:
 //   * indexed path: UPC-E scan finds the UPC-A row, and vice versa (2)
 //   * compat path: stored bare, scanned WITH a leading zero -> found (1)
 //     -- the ONE padding direction base got wrong, per A above; the other
@@ -42,12 +42,24 @@
 //   * compat path: UPC-E, both directions (2)
 //   * kernel: barcodeKeysMatch folds the UPC-E/UPC-A pair both ways (1)
 //
-// One check is red on 690086ff and GREEN at base, which is why it stays:
+// THREE more checks are GREEN at base and were red on a LATER commit of this
+// same lane. They are regression pins on the fold itself, not on the reported
+// bug, and each names the commit it caught:
 //   * '<path>: the derived UPC-E spelling never leaks into the padding
-//     keyspace'. Base derives no equivalent at all, so it cannot leak;
-//     690086ff carried the derived spelling through normalizeBarcodeKey and
-//     made row 301's ordinary 7-digit code '1234565' the same article as
-//     '012345000065'.
+//     keyspace' (2, one per path). Base derives no equivalent at all, so it
+//     cannot leak; 690086ff carried the derived spelling through
+//     normalizeBarcodeKey and made row 301's ordinary 7-digit code '1234565'
+//     the same article as '012345000065'.
+//   * '<path>: a padded spelling of an unrelated internal code is not the
+//     UPC-E half of this pair' (2, one per path). Red at ece45a28, where
+//     barcodeKeyPlan padded BOTH halves of the pair: the UPC-E half emitted
+//     '00000001234565' and '000001234565' as literal index probes, which are
+//     ordinary spellings of that same unrelated code '1234565'. Base emits no
+//     equivalents at all, so it passes for the same reason it passes the
+//     check above -- vacuously.
+//   * the bound-parameter budget. Green at base (no pair, no extra params),
+//     red at 77ac1a98 at 36 params and again at ece45a28's 24 once the tight
+//     bound moved to 20.
 //
 // The remaining checks were already true at base. They are fences, not
 // discriminators, and are kept because the UPC-E rule is exactly the kind
