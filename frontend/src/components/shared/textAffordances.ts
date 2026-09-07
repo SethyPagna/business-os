@@ -57,6 +57,12 @@ export const TITLE_PARK_ATTR = 'data-affordance-title'
 // Marks a `title` this controller wrote (the copy hint), so it can be
 // replaced or withdrawn without ever touching a tooltip a surface owns.
 export const HINT_OWNED_ATTR = 'data-affordance-hint'
+// Where a tooltip the SURFACE owns is stashed while the hint borrows the
+// `title` slot from it. Distinct from TITLE_PARK_ATTR, which is the open
+// panel's own parking: the two can be live at the same time on one element
+// (a foreign title, replaced by the hint, then parked by an open panel), and
+// collapsing them into one slot would restore the wrong string.
+export const HINT_PARK_ATTR = 'data-affordance-hint-title'
 // A cell opts in either explicitly (TruncatedText, and anything that wants
 // the reveal without the dense-table styling) or by already carrying the
 // dense-table truncation contract plus the `title` it was relying on --
@@ -456,14 +462,33 @@ const syncCopyHint = (element: HTMLElement): void => {
   // on purpose, and restoreTitle puts back exactly what was there.
   if (state?.element === element) return
   const promise = pressWillOpenFloat({ element, kind: 'copy' }) ? labels.hint : ''
+  const owned = element.getAttribute(HINT_OWNED_ATTR) != null
   if (promise) {
-    // Marked as ours, so the removal below can never take a `title` some
+    // The hint BORROWS the `title` slot, it does not take it. A surface may
+    // already have put a tooltip there for its own reasons (the Products
+    // mobile card titles its barcode and brand chips with the full value),
+    // and overwriting that with no way back would silently delete somebody
+    // else's affordance the first time a pointer crossed the element.
+    if (!owned) {
+      const foreign = element.getAttribute('title')
+      if (foreign != null) element.setAttribute(HINT_PARK_ATTR, foreign)
+      else element.removeAttribute(HINT_PARK_ATTR)
+    }
+    // Marked as ours, so the withdrawal below can never take a `title` some
     // other surface put there, and so a language switch replaces the old
     // hint instead of leaving it (the text changes, the marker does not).
     if (element.getAttribute('title') !== promise) element.setAttribute('title', promise)
     element.setAttribute(HINT_OWNED_ATTR, '1')
-  } else if (element.getAttribute(HINT_OWNED_ATTR) != null) {
-    element.removeAttribute('title')
+  } else if (owned) {
+    // Give back exactly what was there -- the surface's own tooltip if it
+    // had one, and nothing at all if it did not.
+    const borrowed = element.getAttribute(HINT_PARK_ATTR)
+    if (borrowed != null) {
+      element.setAttribute('title', borrowed)
+      element.removeAttribute(HINT_PARK_ATTR)
+    } else {
+      element.removeAttribute('title')
+    }
     element.removeAttribute(HINT_OWNED_ATTR)
   }
 }

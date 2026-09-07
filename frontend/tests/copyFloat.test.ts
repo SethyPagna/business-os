@@ -18,6 +18,8 @@ import { readFileSync } from 'node:fs'
 import {
   COPY_ATTR,
   COPY_SELECTOR,
+  HINT_OWNED_ATTR,
+  HINT_PARK_ATTR,
   REVEAL_SELECTOR,
   claimsClick,
   ensureTextAffordances,
@@ -315,6 +317,37 @@ buildClickableRow(dom, ownTitlePill)
 dom.fire('mouseover', { target: ownTitlePill })
 assert.equal(ownTitlePill.getAttribute('title'), 'Supplier on the last stock-in',
   'a title the surface owns survives a hover over a copy field')
+
+// ...and where the hint IS attached -- nothing clickable underneath, so the
+// pointer gestures really are the trigger's -- it BORROWS the title slot
+// rather than taking it. The assertion above only exercises the branch where
+// the hint is skipped, so a bare setAttribute of the hint looked entirely
+// safe for a whole round while it was silently deleting the surface's own
+// tooltip on the first pointer crossing. The Products mobile card titles its
+// barcode and brand chips with the full value; both are copy triggers.
+const borrowed = dom.el('span', { [COPY_ATTR]: '8850999000111', title: '8850999000111 (full barcode)' })
+const borrowedBlock = buildPlainBlock(dom, borrowed)
+dom.fire('mouseover', { target: borrowed })
+assert.equal(borrowed.getAttribute('title'), en.copy_hint,
+  'with nothing underneath, the hint takes the title slot for as long as it is true')
+// Now the same element stops owning the pointer -- the surface underneath
+// declares its own click, exactly as the Products row does -- so the hint is
+// withdrawn. What comes back must be the surface's tooltip, not nothing.
+borrowedBlock.setAttribute('data-clickable', 'true')
+dom.fire('mouseover', { target: borrowed })
+assert.equal(borrowed.getAttribute('title'), '8850999000111 (full barcode)',
+  'withdrawing the hint gives the surface its own tooltip back')
+assert.equal(borrowed.getAttribute(HINT_OWNED_ATTR), null, 'and the controller stops claiming it')
+assert.equal(borrowed.getAttribute(HINT_PARK_ATTR), null, 'and clears the slot it borrowed through')
+// A trigger that had NO tooltip of its own still ends with none.
+const unborrowed = dom.el('span', { [COPY_ATTR]: 'Chan Sophea Supply Co.' })
+const unborrowedBlock = buildPlainBlock(dom, unborrowed)
+dom.fire('mouseover', { target: unborrowed })
+assert.equal(unborrowed.getAttribute('title'), en.copy_hint, 'control: the hint is attached here too')
+unborrowedBlock.setAttribute('data-clickable', 'true')
+dom.fire('mouseover', { target: unborrowed })
+assert.equal(unborrowed.getAttribute('title'), null,
+  'control: withdrawing it from a trigger that owned no tooltip leaves none behind')
 
 // The two product detail modals: nothing underneath wants the click, so a
 // plain click keeps opening the panel there.
