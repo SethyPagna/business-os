@@ -1821,8 +1821,6 @@ export default function PublicCatalogPage() {
         if (event.button === 1 && event.target instanceof Element && event.target.closest('img, video, [data-protected-media="true"]')) event.preventDefault()
       }}
     >
-    {bucketFab}
-    {contactFab}
     {contactPopover}
     {bucketDrawer}
     {accountDrawer}
@@ -1877,6 +1875,14 @@ export default function PublicCatalogPage() {
       changeTranslateTarget={setTranslateTarget}
       allPublicTranslateOptions={ALL_PUBLIC_TRANSLATE_OPTIONS}
     />
+    {/* WCAG 2.4.1/2.4.3: both floating action buttons are position:fixed, so
+        their DOM position never changes where they paint -- but it does decide
+        where they land in the tab order. Mounted above <CatalogPreviewSurface>
+        they were the FIRST TWO tab stops on the public route, which pushed the
+        skip link (rendered inside the surface) to third and defeated the whole
+        point of it. Mounted after the content they follow it instead. */}
+    {bucketFab}
+    {contactFab}
     </div>
   )
 }

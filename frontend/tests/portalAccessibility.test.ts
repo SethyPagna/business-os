@@ -506,6 +506,37 @@ runTest('the storefront offers a skip-to-content link', () => {
   assert.match(css, /\.portal-skip-link:focus/, 'and visible once it is')
 })
 
+runTest('the skip link is the FIRST tab stop, not just present somewhere', () => {
+  // A skip link that is not the first focusable node is not a skip link. The
+  // presence assertion above was green on a tree where Tab landed on the
+  // bucket FAB, then the contact FAB, and only then on the skip link -- both
+  // FABs were mounted above <CatalogPreviewSurface>, which is where the
+  // anchor lives. They are position:fixed, so DOM order decides nothing but
+  // the tab order; the fix is to mount them after the page content.
+  const publicPage = read('PublicCatalogPage.tsx')
+  const surfaceAt = publicPage.indexOf('<CatalogPreviewSurface')
+  const bucketAt = publicPage.indexOf('{bucketFab}')
+  const contactAt = publicPage.indexOf('{contactFab}')
+  assert.ok(surfaceAt > 0, 'the storefront must mount <CatalogPreviewSurface>')
+  assert.ok(bucketAt > 0 && contactAt > 0, 'both floating action buttons must be mounted')
+  assert.ok(bucketAt > surfaceAt, 'the bucket FAB must be mounted AFTER the content it floats over, or it takes the first tab stop')
+  assert.ok(contactAt > surfaceAt, 'the contact FAB must be mounted AFTER the content it floats over')
+  // ...and nothing focusable may precede the anchor inside the surface itself.
+  const surface = read('CatalogPreviewSurface.tsx')
+  const skipAt = surface.indexOf('className="portal-skip-link"')
+  assert.ok(skipAt > 0, 'the surface must render the skip link')
+  const firstButtonAt = surface.indexOf('<button')
+  assert.ok(
+    firstButtonAt === -1 || firstButtonAt > skipAt,
+    `a <button> is rendered at ${firstButtonAt} before the skip link at ${skipAt}`,
+  )
+  const firstAnchorAt = surface.indexOf('<a ')
+  assert.ok(
+    firstAnchorAt === -1 || firstAnchorAt >= skipAt - 40,
+    'the skip link must be the first anchor in the surface',
+  )
+})
+
 runTest('pinch zoom is not disabled', () => {
   // WCAG 1.4.4: the app shipped `maximum-scale=1, user-scalable=no`, which
   // stops a low-vision visitor enlarging the storefront at all.
