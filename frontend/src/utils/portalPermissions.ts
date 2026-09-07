@@ -50,7 +50,8 @@ export function portalBucketForKey(key: string): PortalBucket | null {
 // grant would wrongly have its branding fields dropped. Keep in sync with
 // settings.ts's BUSINESS_IDENTITY_KEYS / SALES_POLICY_KEYS.
 const BUSINESS_IDENTITY_KEYS = new Set<string>([
-  'business_name', 'business_phone', 'business_address', 'business_email', 'tax_id', 'business_website',
+  'business_name', 'business_legal_name', 'business_registration_number',
+  'business_phone', 'business_address', 'business_email', 'tax_id', 'business_website',
   'ui_app_favicon_image', 'ui_app_favicon_fit', 'ui_app_favicon_zoom', 'ui_app_favicon_position_x', 'ui_app_favicon_position_y',
 ])
 const SALES_POLICY_KEYS = new Set<string>([

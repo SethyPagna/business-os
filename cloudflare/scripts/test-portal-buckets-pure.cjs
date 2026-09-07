@@ -16,8 +16,14 @@ const check = (label, fn) => { fn(); passed++; console.log(`PASS ${label}`) }
 const PORTAL_POSTS_KEYS = new Set(['customer_portal_promo_items', 'customer_portal_promotions_title', 'customer_portal_promotions_intro', 'customer_portal_show_promotions'])
 const PORTAL_FAQ_KEYS = new Set(['customer_portal_faq_items', 'customer_portal_faq_title', 'customer_portal_show_faq'])
 const PORTAL_ABOUT_KEYS = new Set(['customer_portal_about_title', 'customer_portal_about_content', 'customer_portal_about_blocks', 'customer_portal_show_about'])
+const BUSINESS_IDENTITY_KEYS = new Set([
+  'business_name', 'business_legal_name', 'business_registration_number',
+  'business_phone', 'business_address', 'business_email', 'tax_id', 'business_website',
+  'ui_app_favicon_image', 'ui_app_favicon_fit', 'ui_app_favicon_zoom', 'ui_app_favicon_position_x', 'ui_app_favicon_position_y',
+])
 
 function bucketFor(key) {
+  if (BUSINESS_IDENTITY_KEYS.has(key)) return 'business_identity'
   if (PORTAL_POSTS_KEYS.has(key)) return 'portal_posts'
   if (PORTAL_FAQ_KEYS.has(key)) return 'portal_faq'
   if (PORTAL_ABOUT_KEYS.has(key)) return 'portal_about'
@@ -37,7 +43,16 @@ check('each area maps to its own bucket', () => {
   assert.equal(bucketFor('customer_portal_about_blocks'), 'portal_about')
   assert.equal(bucketFor('customer_portal_logo_image'), 'customer_portal') // config catch-all
   assert.equal(bucketFor('customer_portal_points_per_usd'), 'customer_portal') // loyalty = config
-  assert.equal(bucketFor('business_name'), null) // not a portal key
+  assert.equal(bucketFor('business_name'), 'business_identity')
+})
+
+check('registered seller identity requires identity or full settings access', () => {
+  for (const key of ['business_legal_name', 'business_registration_number']) {
+    assert.equal(canWrite(key, new Set(['business_identity'])), true)
+    assert.equal(canWrite(key, new Set(['settings'])), true)
+    assert.equal(canWrite(key, new Set(['customer_portal'])), false)
+    assert.equal(canWrite(key, new Set()), false)
+  }
 })
 
 check('a posts-only grant writes posts but NOT faq/about/config', () => {
@@ -83,8 +98,18 @@ check('settings.ts + portalPermissions.ts PORTAL_*_KEYS are identical', () => {
     assert.deepEqual(extractSet(be, name), [...({ PORTAL_POSTS_KEYS, PORTAL_FAQ_KEYS, PORTAL_ABOUT_KEYS })[name]].sort(), `${name} drifted from this test`)
   }
 })
+check('settings.ts + portalPermissions.ts business identity keys are identical', () => {
+  const be = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'settings.ts'), 'utf8')
+  const fe = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'src', 'utils', 'portalPermissions.ts'), 'utf8')
+  assert.deepEqual(extractSet(be, 'BUSINESS_IDENTITY_KEYS'), extractSet(fe, 'BUSINESS_IDENTITY_KEYS'))
+  assert.deepEqual(extractSet(be, 'BUSINESS_IDENTITY_KEYS'), [...BUSINESS_IDENTITY_KEYS].sort())
+})
 check('settings.ts settingsBucketPermissionFor returns the portal buckets', () => {
   const be = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'settings.ts'), 'utf8')
+  assert.match(be, /app\.use\('\*', requireAuth\)/)
+  assert.match(be, /if \(BUSINESS_IDENTITY_KEYS\.has\(key\)\) return 'business_identity'/)
+  assert.match(be, /isRegisteredBusinessIdentityKey\(key\) && typeof body\[key\] !== 'string'/)
+  assert.match(be, /body\[key\] = \(body\[key\] as string\)\.trim\(\)/)
   assert.match(be, /if \(PORTAL_POSTS_KEYS\.has\(key\)\) return 'portal_posts'/)
   assert.match(be, /if \(PORTAL_FAQ_KEYS\.has\(key\)\) return 'portal_faq'/)
   assert.match(be, /if \(PORTAL_ABOUT_KEYS\.has\(key\)\) return 'portal_about'/)
