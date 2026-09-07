@@ -25,6 +25,20 @@ export type HistoricalSaleCommitResult = { alreadyApplied: boolean; clientReques
 
 const pendingGuard = `(SELECT status FROM import_sales_commits WHERE job_id = @job_id AND group_key = @group_key) = 'pending'`
 
+const currentBatchReferencesGuard = `NOT EXISTS (
+  SELECT 1
+  FROM json_each(@batch_refs_json) expected
+  LEFT JOIN product_batches pb
+    ON pb.id = CAST(json_extract(expected.value, '$.batch_id') AS INTEGER)
+  LEFT JOIN branch_batch_stock bbs
+    ON bbs.batch_id = pb.id AND bbs.branch_id = @branch_id
+  WHERE pb.id IS NULL
+     OR pb.variant_product_id != CAST(json_extract(expected.value, '$.product_id') AS INTEGER)
+     OR COALESCE(pb.is_active, 0) != 1
+     OR lower(trim(COALESCE(pb.lot_code, ''))) != lower(trim(CAST(json_extract(expected.value, '$.batch_label') AS TEXT)))
+     OR bbs.batch_id IS NULL
+)`
+
 /** Commit one reviewed historical receipt as an indivisible, retry-safe unit. */
 export async function applyHistoricalSaleImport(
   db: D1Compat,
@@ -65,12 +79,56 @@ export async function applyHistoricalSaleImport(
     throw new Error(WAREHOUSE_NOT_SELLABLE_ERROR)
   }
   const saleBranch = await db.prepare(`
-    SELECT id, name, is_active FROM branches WHERE id = @branchId LIMIT 1
-  `).get<{ id: number; name: string | null; is_active: number | null }>({ branchId: saleHeaderBranchId })
-  if (!saleBranch || Number(saleBranch.is_active ?? 0) !== 1 || !branchCanSell(saleBranch.name)) {
+    SELECT id, name, is_active,
+      (SELECT COUNT(*) FROM branches active_shop
+       WHERE active_shop.is_active = 1 AND lower(trim(active_shop.name)) = 'shop') AS active_shop_count
+    FROM branches WHERE id = @branchId LIMIT 1
+  `).get<{ id: number; name: string | null; is_active: number | null; active_shop_count: number }>({ branchId: saleHeaderBranchId })
+  if (!saleBranch || Number(saleBranch.is_active ?? 0) !== 1 || !branchCanSell(saleBranch.name) || Number(saleBranch.active_shop_count) !== 1) {
     throw new Error(WAREHOUSE_NOT_SELLABLE_ERROR)
   }
   const normalizedItems: Array<Record<string, unknown>> = d.items.map((item) => ({ ...item, branch_id: saleHeaderBranchId }))
+
+  // Classification is a preview and may be separated from queue apply by
+  // minutes. Seal every explicit lot identity again at the writer boundary:
+  // the batch must still be active, belong to this product, retain the exact
+  // normalized label, and be allocated at the Shop branch. A blank batch is
+  // still a valid unallocated historical line; a half-specified identity is
+  // never silently converted to one.
+  const batchReferences = normalizedItems.flatMap((item) => {
+    const batchId = Number(item.batch_id)
+    const batchLabel = String(item.batch_label ?? '').trim()
+    if ((!Number.isSafeInteger(batchId) || batchId <= 0) && !batchLabel) return []
+    if (!Number.isSafeInteger(batchId) || batchId <= 0 || !batchLabel) {
+      throw new Error(`Sale on row ${rowNumber} has an incomplete batch/lot identity`)
+    }
+    const productId = Number(item.product_id)
+    if (!Number.isSafeInteger(productId) || productId <= 0) {
+      throw new Error(`Sale on row ${rowNumber} has an invalid product for batch/lot "${batchLabel}"`)
+    }
+    return [{ batch_id: batchId, product_id: productId, batch_label: batchLabel }]
+  })
+  const uniqueBatchReferences = [...new Map(batchReferences.map((reference) => [
+    `${reference.batch_id}\u0001${reference.product_id}\u0001${reference.batch_label.trim().toLowerCase()}`,
+    reference,
+  ])).values()]
+  const batchRefsJson = JSON.stringify(uniqueBatchReferences)
+  const invalidBatchReferences = await db.prepare(`
+    SELECT COUNT(*) AS n
+    FROM json_each(@batch_refs_json) expected
+    LEFT JOIN product_batches pb
+      ON pb.id = CAST(json_extract(expected.value, '$.batch_id') AS INTEGER)
+    LEFT JOIN branch_batch_stock bbs
+      ON bbs.batch_id = pb.id AND bbs.branch_id = @branch_id
+    WHERE pb.id IS NULL
+       OR pb.variant_product_id != CAST(json_extract(expected.value, '$.product_id') AS INTEGER)
+       OR COALESCE(pb.is_active, 0) != 1
+       OR lower(trim(COALESCE(pb.lot_code, ''))) != lower(trim(CAST(json_extract(expected.value, '$.batch_label') AS TEXT)))
+       OR bbs.batch_id IS NULL
+  `).get<{ n: number }>({ batch_refs_json: batchRefsJson, branch_id: saleHeaderBranchId })
+  if (Number(invalidBatchReferences?.n || 0) > 0) {
+    throw new Error(`Sale on row ${rowNumber} references a batch/lot that is missing, inactive, assigned to another product, renamed, or unavailable at the Shop`)
+  }
 
   // A sales CSV's receipt_number column carries whatever the source system
   // called the order -- very often the old system's `NNNNNN@YYYY-MM-DD`
@@ -116,10 +174,19 @@ export async function applyHistoricalSaleImport(
     deliveryActualCostUsd: d.delivery_actual_cost_usd,
   })
 
-  const common = { job_id: jobId, group_key: groupKey, row_number: rowNumber, client_request_id: clientRequestId }
+  const common = {
+    job_id: jobId,
+    group_key: groupKey,
+    row_number: rowNumber,
+    client_request_id: clientRequestId,
+    batch_refs_json: batchRefsJson,
+    branch_id: saleHeaderBranchId,
+  }
+  const writeGuard = `(${pendingGuard}) AND (${currentBatchReferencesGuard})`
   const statements: Array<{ sql: string; params: Record<string, unknown> }> = [{
     sql: `INSERT OR IGNORE INTO import_sales_commits (job_id, group_key, row_number, status)
-          VALUES (@job_id, @group_key, @row_number, 'pending')`,
+          SELECT @job_id, @group_key, @row_number, 'pending'
+          WHERE ${currentBatchReferencesGuard}`,
     params: common,
   }, {
     sql: `INSERT INTO sales (
@@ -147,7 +214,7 @@ export async function applyHistoricalSaleImport(
             @delivery_actual_cost_usd, @delivery_actual_cost_khr,
             @loyalty_accrual, @sale_status, @items_json, @created_at, @client_request_id,
             @legacy_receipt_number, @creation_snapshot_json
-          WHERE ${pendingGuard}`,
+          WHERE ${writeGuard}`,
     // Imported sales default to NOT earning loyalty points -- the balance is
     // computed by summing sales, so migrated old-system receipts would
     // otherwise inflate every matched customer's balance (migration 0061).
@@ -185,7 +252,7 @@ export async function applyHistoricalSaleImport(
               @product_discount_type, @product_discount_label, @product_discount_usd, @product_discount_khr,
               @manual_discount_type, @manual_discount_value, @manual_discount_usd, @manual_discount_khr,
               @branch_id, @batch_id, @batch_label, @batch_expiry_date, @returned_quantity
-            WHERE ${pendingGuard}`,
+            WHERE ${writeGuard}`,
       params: { ...common, ...item, branch_id: saleHeaderBranchId },
     })
 
@@ -200,20 +267,20 @@ export async function applyHistoricalSaleImport(
     }
     statements.push({
       sql: `UPDATE products SET stock_quantity = stock_quantity + @returned_quantity, updated_at = @updated_at
-            WHERE id = @product_id AND ${pendingGuard}`,
+            WHERE id = @product_id AND ${writeGuard}`,
       params: stockParams,
     })
     if (item.branch_id) {
       statements.push({
         sql: `INSERT INTO branch_stock (product_id, branch_id, quantity)
-              SELECT @product_id, @branch_id, @returned_quantity WHERE ${pendingGuard}
+              SELECT @product_id, @branch_id, @returned_quantity WHERE ${writeGuard}
               ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = branch_stock.quantity + excluded.quantity`,
         params: stockParams,
       })
       if (item.batch_id) {
         statements.push({
           sql: `INSERT INTO branch_batch_stock (batch_id, branch_id, quantity)
-                SELECT @batch_id, @branch_id, @returned_quantity WHERE ${pendingGuard}
+                SELECT @batch_id, @branch_id, @returned_quantity WHERE ${writeGuard}
                 ON CONFLICT(batch_id, branch_id) DO UPDATE SET
                   quantity = branch_batch_stock.quantity + excluded.quantity,
                   updated_at = CURRENT_TIMESTAMP`,
@@ -227,14 +294,15 @@ export async function applyHistoricalSaleImport(
       sql: `INSERT INTO inventory_movements
               (product_id, product_name, branch_id, movement_type, quantity, reason, created_at, batch_id)
             SELECT @product_id, @product_name, @branch_id, 'return', @returned_quantity, @reason, @updated_at, @batch_id
-            WHERE ${pendingGuard}`,
+            WHERE ${writeGuard}`,
       params: stockParams,
     })
   }
 
   statements.push({
     sql: `UPDATE import_sales_commits SET status = 'applied', applied_at = CURRENT_TIMESTAMP
-          WHERE job_id = @job_id AND group_key = @group_key AND status = 'pending'`,
+          WHERE job_id = @job_id AND group_key = @group_key AND status = 'pending'
+            AND ${currentBatchReferencesGuard}`,
     params: common,
   })
   await db.batch(statements)
@@ -242,6 +310,6 @@ export async function applyHistoricalSaleImport(
   const committed = await db.prepare(`
     SELECT status FROM import_sales_commits WHERE job_id = @job_id AND group_key = @group_key
   `).get<{ status: string }>({ job_id: jobId, group_key: groupKey })
-  if (committed?.status !== 'applied') throw new Error('Historical sale did not commit')
+  if (committed?.status !== 'applied') throw new Error('Historical sale did not commit because its batch/lot reference changed before the atomic write')
   return { alreadyApplied: false, clientRequestId }
 }

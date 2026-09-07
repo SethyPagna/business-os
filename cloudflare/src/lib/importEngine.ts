@@ -2863,8 +2863,12 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
   }
 
   const branches = await db.prepare(`SELECT id, name, is_active FROM branches`).all<{ id: number; name: string; is_active?: number | null }>()
-  const branchByName = new Map<string, (typeof branches)[number]>()
-  for (const branch of branches) branchByName.set(lower(branch.name), branch)
+  const branchByName = new Map<string, Array<(typeof branches)[number]>>()
+  for (const branch of branches) {
+    if (Number(branch.is_active ?? 1) !== 1) continue
+    const key = lower(branch.name)
+    branchByName.set(key, [...(branchByName.get(key) || []), branch])
+  }
   const activeShopBranches = branches.filter((branch) => Number(branch.is_active ?? 1) === 1 && branchCanSell(branch.name))
 
   // Track F parity: routes/sales.ts POST / (manual checkout) resolves and
@@ -3011,8 +3015,9 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
     // A legacy file may omit the branch column entirely. It can safely use
     // the one active canonical Shop; any explicit value is authoritative and
     // must match that same Shop rather than being guessed or auto-created.
+    const namedBranchMatches = branchName ? branchByName.get(lower(branchName)) || [] : []
     const matchedBranch = branchName
-      ? branchByName.get(lower(branchName)) ?? null
+      ? namedBranchMatches.length === 1 ? namedBranchMatches[0] : null
       : activeShopBranches.length === 1 ? activeShopBranches[0] : null
     const matchedBranchId = matchedBranch?.id ?? null
     // Historical receipts are still real sales: every line must belong to

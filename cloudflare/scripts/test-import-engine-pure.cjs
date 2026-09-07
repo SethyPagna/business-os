@@ -1905,6 +1905,11 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     const inactive = await classifySales(inactiveDb, [row({ receipt_number: 'R-9d', sku: 'SKU-1', quantity: 1, branch: 'Shop' }, 1)], null)
     assert.strictEqual(inactive[0].action, 'error')
 
+    const duplicateShopDb = makeFakeDb({ branches: [{ id: 5, name: 'Shop', is_active: 1 }, { id: 7, name: ' shop ', is_active: 1 }] })
+    const duplicateShop = await classifySales(duplicateShopDb, [row({ receipt_number: 'R-9-duplicate', sku: 'SKU-1', quantity: 1, branch: 'Shop' }, 1)], null)
+    assert.strictEqual(duplicateShop[0].action, 'error', 'two active Shop rows are ambiguous; load order must not select one')
+    assert.strictEqual(duplicateShop[0].data.branch_id, undefined)
+
     const blankBranch = await classifySales(db, [row({ receipt_number: 'R-9e', sku: 'SKU-1', quantity: 1 }, 1)], null)
     assert.strictEqual(blankBranch[0].action, 'create')
     assert.strictEqual(blankBranch[0].data.branch_id, 5)
