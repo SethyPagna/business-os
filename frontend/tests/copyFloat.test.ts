@@ -25,8 +25,8 @@ import {
   nextFloatState,
   resolveAffordanceTarget,
 } from '../src/components/shared/textAffordances.ts'
-import { LONG_PRESS_THRESHOLD_MS } from '../src/utils/longPress.ts'
-import { buildClickableRow, buildPlainBlock, installAffordanceDom, wait } from './affordanceDomStub.ts'
+import { LONG_PRESS_THRESHOLD_MS, createLongPressHandlers, createLongPressState } from '../src/utils/longPress.ts'
+import { buildClickableRow, buildPlainBlock, installAffordanceDom, wait, type StubElement } from './affordanceDomStub.ts'
 
 const read = (path: string): string => readFileSync(new URL(`../src/${path}`, import.meta.url), 'utf8')
 const controller = read('components/shared/textAffordances.ts')
@@ -353,6 +353,67 @@ const rowTouch = dom.fire('touchstart', { target: plainCell, touches: [{ clientX
 assert.equal(rowTouch.stopped, false, "the row keeps every touch this lane's affordance does not own")
 await wait(LONG_PRESS_THRESHOLD_MS + 80)
 assert.equal(host.hidden, true, 'and no panel opens for it')
+
+// (c) THE CONTRACT, driven against the row's OWN detector.
+//
+// The assertions above read `event.stopped`, which is only half the story:
+// the events the controller does NOT stop still have to add up to the right
+// gesture once the row's handlers see them. Products.tsx spreads
+// utils/longPress.ts on the mobile card outside selection mode, so "open
+// this product" is synthesised by that detector from touchstart/touchmove/
+// touchend -- not by an onClick.
+//
+// The bug that hid behind `stopped`: the controller swallowed touchstart on
+// a copy field but let touchmove through. The row's detector, which never
+// saw the start, still ran checkMove against its zeroed startX/startY, read
+// the first 1px of finger jitter as a drag past the 18px tolerance, and
+// cancelled -- so the release it did see fired nothing. A tap on a supplier
+// pill, a brand chip or a product name simply did not open the product.
+//
+// So: build the real detector, hand it exactly the events the controller
+// left alone, and count.
+let opened = 0
+const rowDetector = createLongPressState()
+const rowGestures = createLongPressHandlers(rowDetector, {
+  onLongPress: () => { /* select mode -- not what this counts */ },
+  onClick: () => { opened += 1 },
+})
+type RowTouch = Parameters<typeof rowGestures.onTouchStart>[0]
+const deliver = (event: { type: string; stopped: boolean }): void => {
+  if (event.stopped) return
+  if (event.type === 'touchstart') rowGestures.onTouchStart(event as unknown as RowTouch)
+  else if (event.type === 'touchmove') rowGestures.onTouchMove(event as unknown as RowTouch)
+  else if (event.type === 'touchend') rowGestures.onTouchEnd()
+}
+const gestureOn = (cell: StubElement, moveTo: { clientX: number; clientY: number }): number => {
+  const before = opened
+  deliver(dom.fire('touchstart', { target: cell, touches: [{ clientX: 30, clientY: 90 }] }))
+  deliver(dom.fire('touchmove', { target: cell, touches: [moveTo] }))
+  deliver(dom.fire('touchend', { target: cell }))
+  return opened - before
+}
+
+const jitter = { clientX: 31, clientY: 90 }
+const scroll = { clientX: 30, clientY: 290 }
+
+const tapCell = dom.el('span', { [COPY_ATTR]: 'Sok Heng Trading' })
+const scrollRow = buildClickableRow(dom, tapCell)
+const plainTwin = dom.el('span')
+const twinCell = dom.el('td')
+twinCell.append(plainTwin)
+scrollRow.append(twinCell)
+
+assert.equal(gestureOn(tapCell, jitter), 1, 'a TAP on a copy field opens the record, exactly once')
+assert.equal(gestureOn(tapCell, scroll), 0, 'a SCROLL that started on a copy field opens nothing')
+// Positive control: an ordinary cell in the same row, through the same
+// harness. A tap opens the record; a scroll opens nothing -- longPress.ts
+// cancels a press that wandered, which is what keeps a flick through a list
+// from opening whatever was under the finger. The copy field must read the
+// SAME on both, which is the whole point: it adds a gesture, it removes none.
+assert.equal(gestureOn(plainTwin, jitter), 1, 'control: a tap on a plain cell opens the record')
+assert.equal(gestureOn(plainTwin, scroll), 0, 'control: a scroll opens nothing there either')
+await wait(LONG_PRESS_THRESHOLD_MS + 80)
+assert.equal(host.hidden, true, 'none of those four gestures was a hold, so no panel opened')
 
 dom.restore()
 

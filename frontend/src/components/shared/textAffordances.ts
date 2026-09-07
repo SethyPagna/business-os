@@ -521,7 +521,18 @@ export function ensureTextAffordances(next?: Partial<AffordanceLabels>): void {
   }, true)
 
   document.addEventListener('touchmove', (event) => {
-    if (pressElement) press.onTouchMove(event as unknown as TouchArg)
+    if (!pressElement) return
+    // The move has to be swallowed for exactly the same reason the start
+    // was. A detector that never saw the touchstart still has its start
+    // point at (0, 0), and utils/longPress.ts's checkMove measures the
+    // finger against THAT: the first pixel of tap jitter reads as a drag
+    // hundreds of pixels past the 18px tolerance, so the row cancels its own
+    // press and the release that follows fires nothing. Tapping a supplier
+    // pill, a brand chip or a product name simply did not open the product.
+    // Mirror the swallow: whoever did not get the start does not get the
+    // moves either.
+    event.stopPropagation()
+    press.onTouchMove(event as unknown as TouchArg)
   }, true)
 
   document.addEventListener('touchend', (event) => {
@@ -531,7 +542,18 @@ export function ensureTextAffordances(next?: Partial<AffordanceLabels>): void {
     // mobile card synthesises "open this product" from touchend (its onClick
     // is undefined outside selection mode), so swallowing every release
     // would make tapping a copyable value on that card do nothing at all.
-    if (pressState.fired) event.stopPropagation()
+    // ...and a SCROLL that happened to start on a copy field is nobody's
+    // tap: swallowing the start and the moves means the row's detector would
+    // see a bare touchend from a press it never began and synthesise a
+    // record-opening click out of a flick through the list. onTouchEnd()
+    // CONSUMES the cancelled flag, so the answer has to be read before it
+    // runs.
+    //
+    // Net contract on touch, all three gestures: hold -> the copy panel (the
+    // release is ours); tap -> the row opens the record (the release is
+    // theirs); scroll -> nothing at all (the release is ours, and dropped).
+    const cancelled = pressState.cancelled
+    if (pressState.fired || cancelled) event.stopPropagation()
     press.onTouchEnd()
     pressElement = null
   }, true)
