@@ -30,6 +30,8 @@ import CopyableId from '../shared/CopyableId.tsx'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
 import Undo2 from 'lucide-react/dist/esm/icons/undo-2.js'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
+import { minimizeWork } from '../../utils/minimizedWork.ts'
+import { scopedWorkDraftKey } from '../../utils/workDrafts.ts'
 import { fmtDate, fmtClock24, fmtDateTime24 } from '../../utils/formatters'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { buildHistoryRowModel, formatHistoryReference, historyExportField, historyField } from '../../utils/historyRowModel.ts'
@@ -1208,6 +1210,16 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
             notify={(message: string, kind?: string) => app.notify(message, kind)}
             onClose={() => setFastStockInOpen(false)}
             onDone={() => { void load() }}
+            onMinimize={(label: string) => {
+              minimizeWork({
+                key: 'fast-stockin',
+                kind: 'fast_stockin',
+                pageId: 'branches',
+                label,
+                draftKey: scopedWorkDraftKey('fast_stockin'),
+              })
+              app.notify(tr(t, 'minimized_to_chip', 'Minimized. Pick it back up from the chip — nothing was lost.'), 'info')
+            }}
           />
         </Suspense>
       ) : null}
