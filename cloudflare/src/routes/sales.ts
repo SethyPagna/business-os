@@ -2659,7 +2659,10 @@ app.post('/:id/amendments', async (c) => {
     if (costUsd !== null && (!Number.isFinite(costUsd) || costUsd < 0)) {
       return c.json({ error: 'An actual delivery cost must be blank or zero or more.' }, 400)
     }
-    const costPlan = planDeliveryActualCostChange({ saleId, sale, newCostUsd: costUsd, exchangeRate })
+    // `stamp` is what makes the row and the response agree on updated_at --
+    // see planDeliveryActualCostChange. This path writes no money statement,
+    // so nothing downstream will correct the column for it.
+    const costPlan = planDeliveryActualCostChange({ saleId, sale, newCostUsd: costUsd, exchangeRate, stamp: mutationStamp })
     if (costPlan.costDeltaUsd === 0 && costPlan.costBeforeUsd === costPlan.costAfterUsd) {
       return c.json({ error: 'That is already the actual delivery cost on this sale.' }, 400)
     }
