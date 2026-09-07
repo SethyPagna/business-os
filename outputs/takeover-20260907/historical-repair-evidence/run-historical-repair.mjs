@@ -13,6 +13,7 @@ const frozenManifestPath = join(evidenceDir, 'repair-manifest.json')
 const expectedAccountId = '743e5b727d139e85ed11679097f6f99e'
 const expectedDatabaseId = '49795be9-eabe-43f1-8e16-b86faed60cb1'
 const expectedPlanId = 'historical-shop-branch-metadata-20260907'
+const expectedManifestSha256 = '315b0a7bd1c8255613bc7259596c3720118c4dfc6757a1500422263b68528d5e'
 const expectedActor = Object.freeze({
   kind: 'service',
   user_id: null,
@@ -169,14 +170,17 @@ function expectedStatements(manifest, batch) {
   }))
 }
 
-function validateBundle(bundleDir, kind = 'repair') {
+function validateBundle(bundleDir, kind = 'repair', dependencies = {}) {
   assert(kind === 'repair' || kind === 'recovery', '--kind must be repair or recovery')
   const directory = resolve(bundleDir || '')
   assert(bundleDir && existsSync(directory), '--bundle must name an existing generated bundle directory')
   const executionManifest = readJson(join(directory, 'execution-manifest.json'))
-  const frozenManifest = readJson(frozenManifestPath)
+  const frozenManifest = readJson(dependencies.frozenManifestPath || frozenManifestPath)
+  assert(frozenManifest.content_sha256 === expectedManifestSha256, 'frozen manifest does not carry the pinned reviewed SHA-256')
+  assert(fingerprint(without(frozenManifest, 'content_sha256')) === expectedManifestSha256, 'frozen manifest content differs from the pinned reviewed plan')
   assert(executionManifest.plan_id === expectedPlanId, 'execution manifest plan ID mismatch')
-  assert(executionManifest.content_sha256 === frozenManifest.content_sha256, 'execution manifest does not match the reviewed frozen manifest')
+  const executionFrozenManifest = without(without(executionManifest, 'execution'), 'execution_bundle_sha256')
+  assert(stableJson(executionFrozenManifest) === stableJson(frozenManifest), 'execution manifest static plan does not match the pinned reviewed manifest')
   assert(fingerprint(without(executionManifest, 'execution_bundle_sha256')) === executionManifest.execution_bundle_sha256, 'execution manifest fingerprint mismatch')
   const execution = executionManifest.execution
   assert(execution?.actor_key === 'codex-maintenance-owner-authorized', 'execution manifest service actor key is not allowlisted')

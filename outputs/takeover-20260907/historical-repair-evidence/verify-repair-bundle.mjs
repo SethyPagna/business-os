@@ -190,6 +190,44 @@ try {
   try { validateBundle(tamperedDir, 'repair') } catch (error) { tamperRejected = /compiled historical repair plan/.test(String(error.message)) }
   assert(tamperRejected, 'self-consistent rehashed D1 batch that changed an update was accepted')
 
+  const manifestTamperedDir = join(work, 'manifest-tampered-bundle')
+  cpSync(bundleDir, manifestTamperedDir, { recursive: true })
+  const manifestTamperedFrozenPath = join(work, 'manifest-tampered-frozen.json')
+  const manifestTamperedFrozen = readJson(join(evidenceDir, 'repair-manifest.json'))
+  const originalFeeIds = [...manifestTamperedFrozen.batching.fee_chunks[0].ids]
+  const changedFeeIds = [5000, ...originalFeeIds.slice(1)]
+  manifestTamperedFrozen.batching.fee_chunks[0].ids = changedFeeIds
+  manifestTamperedFrozen.content_sha256 = fingerprint(Object.fromEntries(Object.entries(manifestTamperedFrozen).filter(([key]) => key !== 'content_sha256')))
+  writeFileSync(manifestTamperedFrozenPath, JSON.stringify(manifestTamperedFrozen, null, 2))
+  const manifestTamperedExecution = readJson(join(manifestTamperedDir, 'execution-manifest.json'))
+  const originalManifestSha256 = manifestTamperedExecution.content_sha256
+  const preservedExecution = manifestTamperedExecution.execution
+  const rebuiltExecution = { ...manifestTamperedFrozen, execution: preservedExecution }
+  const manifestTamperedBatch = readJson(join(manifestTamperedDir, 'd1-batch.json'))
+  const originalIdsSql = originalFeeIds.join(',')
+  const changedIdsSql = changedFeeIds.join(',')
+  manifestTamperedBatch.manifest_sha256 = manifestTamperedFrozen.content_sha256
+  manifestTamperedBatch.statements = manifestTamperedBatch.statements.map((statement) => ({
+    ...statement,
+    sql: statement.sql
+      .replaceAll(originalIdsSql, changedIdsSql)
+      .replaceAll(originalManifestSha256, manifestTamperedFrozen.content_sha256),
+  }))
+  manifestTamperedBatch.statements_sha256 = fingerprint(manifestTamperedBatch.statements)
+  manifestTamperedBatch.content_sha256 = fingerprint(Object.fromEntries(Object.entries(manifestTamperedBatch).filter(([key]) => key !== 'content_sha256')))
+  rebuiltExecution.execution = {
+    ...preservedExecution,
+    d1_batch_sha256: manifestTamperedBatch.content_sha256,
+    d1_statements_sha256: manifestTamperedBatch.statements_sha256,
+  }
+  rebuiltExecution.execution_bundle_sha256 = fingerprint(rebuiltExecution)
+  writeFileSync(join(manifestTamperedDir, 'execution-manifest.json'), JSON.stringify(rebuiltExecution, null, 2))
+  writeFileSync(join(manifestTamperedDir, 'd1-batch.json'), JSON.stringify(manifestTamperedBatch, null, 2))
+  let frozenManifestTamperRejected = false
+  try { validateBundle(manifestTamperedDir, 'repair', { frozenManifestPath: manifestTamperedFrozenPath }) }
+  catch (error) { frozenManifestTamperRejected = /pinned reviewed SHA-256|pinned reviewed plan/.test(String(error.message)) }
+  assert(frozenManifestTamperRejected, 'self-consistent changed-ID frozen manifest and rehashed execution bundle were accepted')
+
   const secretSentinel = 'must-never-appear-in-errors'
   let tokenFailureSafe = false
   try {
@@ -263,6 +301,7 @@ try {
     two_read_hash_mismatch_rejected: mismatchRejected,
     arbitrary_actor_rejected: arbitraryActorRejected,
     batch_tamper_rejected: tamperRejected,
+    frozen_manifest_tamper_rejected: frozenManifestTamperRejected,
     bad_confirmation_rejected_before_binding: confirmationRejectedBeforeBinding,
     token_error_redacted: tokenFailureSafe,
     operator: { status: operatorResult.status, batch_calls: batchCalls, disposed },
