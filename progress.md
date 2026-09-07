@@ -1,5 +1,10 @@
 # progress.md — business-os
 
+> **Current owner task register:** [every request, addition, status and owner](docs/fleet/2026-09-07-owner-task-register.md).
+> Latest priority addition: a sale originally without delivery must allow later
+> driver, customer fee and actual cost entry (F32, sales + independent review).
+> Functional deployment remains first; broad UI work stays recorded and deferred.
+
 > **Owner additions recorded September 7:** next verified checkpoint deployment
 > requested; keep new GitHub commits scoped to individual fixes. Added same-session
 > duplicate feedback, sale-row eye removal, branch-vs-total stock alert parity and

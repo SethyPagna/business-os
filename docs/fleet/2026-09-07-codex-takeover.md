@@ -1,5 +1,7 @@
 # September 7 Codex takeover
 
+Current request/status index: [owner task register](2026-09-07-owner-task-register.md).
+
 Status: implementation and integration in progress. No deployment or production
 mutation has been performed by this takeover.
 
@@ -155,8 +157,9 @@ privacy findings remain assigned to the portal owner before release.
 
 ## Not done
 
-The combined candidate still requires final certification and the remaining portal
-privacy repairs. Historical corrections and bulk product changes have not been applied. No guarantee
+The combined candidate still requires final certification, queued import authority
+enforcement and the newly reported no-delivery sale correction. Portal privacy
+repairs are locally verified. Historical corrections and bulk product changes have not been applied. No guarantee
 of legal compliance or immunity from claims is made; policies must reflect actual
 operations and applicable law, with missing business facts explicitly recorded.
 
