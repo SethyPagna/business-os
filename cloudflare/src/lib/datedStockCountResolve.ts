@@ -39,6 +39,7 @@
 import type { D1Compat } from './db'
 import { buildInClause, selectInChunks } from './sqlBinding'
 import { normalizeToIsoDate } from './batchCode'
+import { identityBarcodeKey, identityBarcodeKeySql } from './productIdentity'
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
@@ -178,7 +179,13 @@ export async function resolveDatedStockCountRows(
   // ---- Product resolution: sku -> barcode -> exact name, same priority
   // order as importEngine.ts's classifyProducts ----
   const skus = [...new Set(candidates.map((r) => lower(r.sku)).filter(Boolean))]
-  const barcodes = [...new Set(candidates.map((r) => lower(r.barcode)).filter(Boolean))]
+  // FOLDED barcode keys, not raw lowercased text. A dated count sheet
+  // carrying '0748485110011' for the row this catalog stores as
+  // '748485110011' is the SAME article -- the owner's leading-zero rule --
+  // and plain equality left it unresolved for a human to reconcile by hand.
+  // identityBarcodeKey/identityBarcodeKeySql are the one fold importEngine,
+  // stockSession and the merge guard already share.
+  const barcodes = [...new Set(candidates.map((r) => identityBarcodeKey(r.barcode)).filter(Boolean))]
   const names = [...new Set(candidates.map((r) => lower(r.productName)).filter(Boolean))]
 
   // Each of these lists is one column of an uploaded spreadsheet, so all
@@ -197,10 +204,10 @@ export async function resolveDatedStockCountRows(
   if (barcodes.length) {
     const productRows = await selectInChunks(barcodes, 0, (chunk) => {
       const { sql, params } = buildInClause('b', chunk)
-      return db.prepare(`SELECT id, barcode FROM products WHERE lower(barcode) IN (${sql})`).all<{ id: number; barcode: string }>(params)
+      return db.prepare(`SELECT id, barcode FROM products WHERE ${identityBarcodeKeySql('barcode')} IN (${sql})`).all<{ id: number; barcode: string }>(params)
     })
     for (const p of productRows) {
-      const key = lower(p.barcode)
+      const key = identityBarcodeKey(p.barcode)
       const bucket = byBarcode.get(key)
       if (bucket) bucket.push(Number(p.id))
       else byBarcode.set(key, [Number(p.id)])
@@ -229,7 +236,7 @@ export async function resolveDatedStockCountRows(
     if (branchId == null) { unresolved.push({ rowNumber: row.rowNumber, reason: 'missing_identifier', raw: row, suggestedActions: [] }); continue }
 
     const skuKey = lower(row.sku)
-    const barcodeKey = lower(row.barcode)
+    const barcodeKey = identityBarcodeKey(row.barcode)
     const nameKey = lower(row.productName)
 
     let productId: number | null = skuKey ? bySku.get(skuKey) ?? null : null

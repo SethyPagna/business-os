@@ -30,6 +30,7 @@ import {
   createProductsSessionDefaults,
   emptyCreateProductsHeader,
   isCreateProductsHeaderDirty,
+  isSameQueuedProduct,
   summarizeCreateProductsSession,
   type CreateProductsHeader,
   type CreateProductsSessionDraft,
@@ -541,8 +542,11 @@ export default function CreateProductsSessionModal({
     const receiptSupplier = String(payload.supplier ?? header.supplierName ?? '').trim()
     const receiptGate = stockReceiptGateCode({ isStockIn: quantity > 0, supplierName: receiptSupplier, unitCostUsd: costText, freeGoods })
     if (receiptGate) throw new Error(tr(STOCK_RECEIPT_GATE_KEYS[receiptGate], STOCK_RECEIPT_GATE_FALLBACKS[receiptGate]))
-    const queuedTwin = rows.find((row) => row.kind === 'create_receive' && row.name.trim().toLowerCase() === name.toLowerCase()
-      && row.barcode.trim() === barcode && Math.round(row.unitCostUsd * 10000) === Math.round((Number.isFinite(cost) ? cost : 0) * 10000))
+    // Name + FOLDED barcode + cost. The barcode fold is what stops the same
+    // article queued once as '0748485110011' and once as '748485110011'
+    // becoming two catalog rows (utils/createProductsSession.ts).
+    const queuedTwin = rows.find((row) => row.kind === 'create_receive'
+      && isSameQueuedProduct(row, { name, barcode, unitCostUsd: cost }))
     if (queuedTwin) throw new Error(tr('create_match_twin_title', 'Product already exists'))
     setSaving(true)
     try {
@@ -607,8 +611,7 @@ export default function CreateProductsSessionModal({
     })
     if (editGate) throw new Error(tr(STOCK_RECEIPT_GATE_KEYS[editGate], STOCK_RECEIPT_GATE_FALLBACKS[editGate]))
     const queuedTwin = rows.find((row) => row.lineId !== lineId && row.kind === 'create_receive'
-      && row.name.trim().toLowerCase() === name.toLowerCase() && row.barcode.trim() === barcode
-      && Math.round(row.unitCostUsd * 10000) === Math.round(cost * 10000))
+      && isSameQueuedProduct(row, { name, barcode, unitCostUsd: cost }))
     if (queuedTwin) throw new Error(tr('create_match_twin_title', 'Product already exists'))
     setSaving(true)
     try {
