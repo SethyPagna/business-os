@@ -70,8 +70,9 @@ runTest('mobile:F1 -- ProductDetailFlyout gesture strip keeps only Add to Bucket
   assert.match(ownChrome, /aria-label=\{copy\('close', 'Close'\)\}/)
   // ...and no Close-labelled button anywhere in the flyout's own markup.
   assert.doesNotMatch(ownChrome, /<button[^>]*>[\s\S]{0,400}?\{copy\('close', 'Close'\)\}[\s\S]{0,40}?<\/button>/)
-  // The lightbox's own close label is wanted, and stays.
-  assert.match(productDetailFlyoutSource, /close: copy\('close', 'Close'\)/)
+  // The nested lightbox owns its own close fallback. It must stay excluded
+  // from the flyout-chrome count regardless of which optional labels it gets.
+  assert.equal(lightboxLabels.length, 1, 'the nested lightbox label object stays separable from flyout chrome')
 })
 
 runTest('mobile:F2 -- ProductDescriptionDetailModal panel clears the home indicator', () => {
