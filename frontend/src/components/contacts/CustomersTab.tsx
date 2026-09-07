@@ -10,6 +10,8 @@ import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Download from 'lucide-react/dist/esm/icons/download.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import Phone from 'lucide-react/dist/esm/icons/phone.js'
+import List from 'lucide-react/dist/esm/icons/list.js'
+import Receipt from 'lucide-react/dist/esm/icons/receipt.js'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
 import { DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import type { PortalMenuItem } from '../shared/PortalMenu'
@@ -58,6 +60,14 @@ type CustomerPayload = Partial<CustomerRow> & {
   // contacts.ts's CUSTOMERS.columns comment for the full reasoning.
   created_at?: string | null
   __rename_cascade?: 'carry' | 'record_only'
+  // Set on every create call that replays a snapshot verbatim (redo of a
+  // create, undo of a delete -- single or bulk): tells contacts.ts's POST
+  // route that a colliding membership_number is a gap-fill race (the slot
+  // this customer used to own may have been re-minted to someone else in
+  // the undo window), not a manual-entry typo, so it should mint a fresh
+  // number instead of the flat 400 a normal Add Customer submit still gets.
+  // See membershipNumber.ts's header for the full decision.
+  isUndoRestore?: boolean
 }
 
 interface CustomerMutationResult {
@@ -234,7 +244,19 @@ const ContactImportModal = lazyRetry(() => import('./ContactImportModal'), 'cust
 const CustomerFormModal = lazyRetry(() => import('./CustomerFormModal'), 'customers-form-modal')
 const CustomerPurchasesReportModal = lazyRetry(() => import('./CustomerPurchasesReportModal'), 'customers-purchases-report')
 const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'customers-export-options')
+// The customer accounts-receivable ledger (migration 0094) -- the customer-side
+// mirror of the supplier AP ledger, and the customer half of
+// docs/DATA-VISIBILITY-AND-CREDIT-AUDIT.md's "who owes the shop" view. It was
+// written, tested and inventoried but never mounted, so nothing in the app
+// could reach it. Its own lazy chunk, fetched only when the Invoices section
+// is opened, the same way SuppliersTab mounts SupplierInvoicesSection.
+const ArInvoicesSection = lazyRetry(() => import('./ArInvoicesSection'), 'customers-ar-invoices')
 const CUSTOMER_MUTATION_TIMEOUT_MS = 12000
+
+// Top-level section of the Customers tab: the customer directory (rows) OR the
+// receivables ledger -- one shown at a time, never stacked in the same scroll,
+// matching the Suppliers tab's Directory / Invoices chips.
+type CustomerSection = 'directory' | 'invoices'
 
 function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabProps) {
   const { can, user } = useApp()
@@ -259,6 +281,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
   const saveInFlightRef = useRef(false)
   const deleteInFlightRef = useRef(false)
   const bulkDeleteInFlightRef = useRef(false)
+  const [section, setSection] = useState<CustomerSection>('directory')
   const [customers, setCustomers] = useState<CustomerRow[]>([])
   const [search, setSearch] = useState('')
   const appliedInitialSearchRef = useRef<string | undefined>(undefined)
@@ -521,6 +544,12 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
     userId: user?.id,
     userName: user?.name,
     __rename_cascade: 'carry',
+    // Every caller of buildCustomerPayload replays an original snapshot
+    // (undo/redo, not a fresh manual entry) -- see the type's own comment.
+    // Harmless on the update call sites (PUT ignores it); on the create
+    // call sites it lets a gap-fill race on the replayed membership_number
+    // fall back to a fresh mint instead of a dead-end 400.
+    isUndoRestore: true,
   }), [user?.id, user?.name])
 
   const runCustomerMutation = useCallback(async (loader: () => unknown | Promise<unknown>, label: string): Promise<CustomerMutationResult> => (
@@ -804,6 +833,10 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
                 notes: snapshot.notes || '',
                 userId: user?.id,
                 userName: user?.name,
+                // See CustomerPayload's isUndoRestore comment: this replays
+                // each deleted customer's own membership_number verbatim, so
+                // a gap-fill race on that freed slot must re-mint, not 400.
+                isUndoRestore: true,
               }), 'Restore deleted customers')
               return { restoredId: Number(result?.id || result?.data?.id || 0) }
             })
@@ -832,8 +865,43 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
     }
   }
 
+  const sectionChips: Array<{ key: CustomerSection; label: string; icon: typeof List }> = [
+    { key: 'directory', label: tr(t, 'customer_directory', 'Directory'), icon: List },
+    { key: 'invoices', label: tr(t, 'invoices', 'Invoices'), icon: Receipt },
+  ]
+
   return (
     <div className="flex flex-col gap-3">
+      {/* Top-level section chips: the customer Directory (rows) OR the
+          receivables ledger, one shown at a time -- the same compact one-row
+          chip shape the Suppliers tab uses for Directory / Invoices, so the
+          two contact tabs read the same way. */}
+      <div className="flex items-center gap-2 overflow-x-auto">
+        <div className="inline-flex flex-nowrap rounded-xl bg-gray-100 p-0.5 dark:bg-gray-800">
+          {sectionChips.map((chip) => {
+            const Icon = chip.icon
+            const isActive = section === chip.key
+            return (
+              <button
+                key={chip.key}
+                type="button"
+                onClick={() => setSection(chip.key)}
+                aria-pressed={isActive}
+                className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${isActive ? 'bg-white text-blue-600 shadow dark:bg-gray-900 dark:text-blue-400' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
+              >
+                <Icon className="h-3.5 w-3.5" /> {chip.label}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {section === 'invoices' ? (
+        <Suspense fallback={<div className="py-6 text-center text-sm text-gray-400">{tr(t, 'loading', 'Loading...')}</div>}>
+          <ArInvoicesSection t={t} />
+        </Suspense>
+      ) : (
+      <>
       {/* Manage (Import + Export folded into one dropdown, same pattern
           Products.tsx uses) / History / Add Customer -- History before
           Manage per the ordering used on Products. Used to be four equal-
@@ -1191,6 +1259,8 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
           )
         }}
       />
+      </>
+      )}
 
       {modal === 'form' ? (
         <Suspense fallback={null}>
