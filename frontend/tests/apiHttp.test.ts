@@ -990,12 +990,22 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.match(productReadTransportSource, /readCachedQueryResult\(cacheKey\)/)
   assert.match(productReadTransportSource, /requireLiveServerWrite\('products:lookup:replace'\)/)
   assert.doesNotMatch(productReadTransportSource, /requireLiveServerWrite\([^)]*,\s*apiFetch/)
-  assert.match(productWriteTransportSource, /export async function createProduct/)
-  assert.match(productWriteTransportSource, /ensureSupplierExists\(body\.supplier\)/)
-  assert.match(productWriteTransportSource, /withExpectedUpdatedAt\('products', id/)
+  assert.match(
+    productWriteTransportSource,
+    /export async function createProduct\(payload: ProductPayload = \{\}\)[\s\S]*const body = ensureClientRequestId\(\{ \.\.\.getDevicePayload\(\), \.\.\.\(payload \|\| \{\}\) \}, 'product'\)[\s\S]*apiFetch\('POST', '\/api\/products', body\)/,
+    'product create sends the caller payload directly to the product route',
+  )
+  assert.match(
+    productWriteTransportSource,
+    /export async function updateProduct\(id: string \| number, payload: ProductPayload = \{\}\)[\s\S]*const body = await withExpectedUpdatedAt\('products', id, \{ \.\.\.getDevicePayload\(\), \.\.\.\(payload \|\| \{\}\) \}\)[\s\S]*apiFetch\('PUT', `\/api\/products\/\$\{encodeId\(id\)\}`, body\)/,
+    'product update preserves the caller payload and concurrency metadata on the product route',
+  )
+  assert.doesNotMatch(productWriteTransportSource, /ensureSupplierExists|apiFetch\('POST', '\/api\/suppliers'/,
+    'product writes never create a hidden supplier contact')
   assert.match(productWriteTransportSource, /apiFetch\('POST', '\/api\/products\/variant'/)
   assert.match(productWriteTransportSource, /apiFetch\('POST', '\/api\/products\/bulk-import'/)
-  assert.match(productWriteTransportSource, /cacheInvalidate\('suppliers'\)/)
+  assert.doesNotMatch(productWriteTransportSource, /cacheInvalidate\('suppliers'\)/,
+    'product writes do not pretend that a supplier contact was created')
   assert.match(
     actorQuerySource,
     /export function appendActorQuery\(path: string, extra: ActorQueryParams = \{\}\): string[\s\S]*for \(const key of Object\.keys\(extra \|\| \{\}\)\)[\s\S]*const queryString = query\.toString\(\)[\s\S]*return `\$\{path\}\$\{path\.includes\('\?'\) \? '&' : '\?'\}\$\{queryString\}`/,
