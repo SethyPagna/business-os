@@ -113,10 +113,50 @@ check('the suggestions are built from the lookup that already ran -- no second r
     /buildProductNameSuggestions\(createMatches, \{ excludeId: product\?\.id \}\)/,
     'the picklist reuses createMatches, the same rows that feed the identity hint',
   )
+  // The rule is "the picklist triggers no read of its own", and the read it
+  // must not duplicate is the create-mode live-match effect. Counting the
+  // whole file said the same thing only while that effect was the file's only
+  // catalog search; the N34 link-over lane then added a SECOND one -- the
+  // edit-time "does this save move the row onto another product?" pre-check,
+  // which runs once on save, in edit mode, and never feeds a suggestion list.
+  // So the count is taken where the rule actually lives: inside the effect.
+  const effectAt = form.indexOf('if (!shouldSearchProductMatches(name, barcode))')
+  assert.ok(effectAt > 0, 'the create-mode live-match effect must still be the one gate')
+  const effectEnd = form.indexOf('}, [isCreateMode, form.name, form.barcode])', effectAt)
+  assert.ok(effectEnd > effectAt, 'the live-match effect must still close on its own dependency list')
+  const effect = form.slice(effectAt, effectEnd)
   assert.equal(
-    (form.match(/searchProductsForMatch\(/g) || []).length,
+    (effect.match(/searchProductsForMatch\(/g) || []).length,
     1,
-    'exactly one existing-product search in this form',
+    'exactly one existing-product search feeds the suggestions',
+  )
+  // ...and every other search in the file is the identity pre-check, reached
+  // only from resolveIdentityMove. If a third one ever appears outside both,
+  // this fails and the next person has to say which list it feeds.
+  const identityAt = form.indexOf('async function resolveIdentityMove(')
+  assert.ok(identityAt > 0, 'the identity pre-check must still be a named function, not an inline read')
+  const outside = form.slice(0, effectAt) + form.slice(effectEnd, identityAt)
+  assert.equal(
+    (outside.match(/searchProductsForMatch\(/g) || []).length,
+    0,
+    'no catalog search outside the live-match effect and the identity pre-check',
+  )
+  // POSITIVE CONTROL: the shape this check exists to catch -- the picklist
+  // doing a read of its own beside the live match. The same slice-and-count
+  // must answer 2 on it, or the assertion above is passing on a probe that
+  // cannot fail.
+  const PICKLIST_DID_ITS_OWN_READ = [
+    'if (!shouldSearchProductMatches(name, barcode)) { setCreateMatches([]); return }',
+    '  const payload = await searchProductsForMatch({ query, pageSize: 10 })',
+    '  const list = await searchProductsForMatch({ query, pageSize: 10 })',
+    '}, [isCreateMode, form.name, form.barcode])',
+  ].join('\n')
+  const controlAt = PICKLIST_DID_ITS_OWN_READ.indexOf('if (!shouldSearchProductMatches(name, barcode))')
+  const controlEnd = PICKLIST_DID_ITS_OWN_READ.indexOf('}, [isCreateMode, form.name, form.barcode])', controlAt)
+  assert.equal(
+    (PICKLIST_DID_ITS_OWN_READ.slice(controlAt, controlEnd).match(/searchProductsForMatch\(/g) || []).length,
+    2,
+    'control: two reads inside the effect must be counted as two',
   )
 })
 
