@@ -174,8 +174,15 @@ const businessDateWindow = loadReal('lib/businessDateWindow.ts')
 // treatment as batchCode.ts above, not left to fall through to node's
 // own require() (which can't resolve a bare .ts file).
 const searchMatch = loadReal('lib/searchMatch.ts')
-const branchWrites = loadReal('lib/branchWrites.ts', { './db': { toDbBool } })
 const branchRoles = loadReal('lib/branchRoles.ts')
+const canonicalBranchIdentity = loadReal('lib/canonicalBranchIdentity.ts', {
+  './db': { toDbBool },
+  './branchRoles': branchRoles,
+})
+const branchWrites = loadReal('lib/branchWrites.ts', {
+  './db': { toDbBool },
+  './canonicalBranchIdentity': canonicalBranchIdentity,
+})
 const branchRoleGuards = loadReal('lib/branchRoleGuards.ts', { './branchRoles': branchRoles })
 const productWrites = loadReal('lib/productWrites.ts', {
   ...dbStub,
@@ -197,6 +204,7 @@ const reviewApply = loadReal('lib/reviewApply.ts', {
   './pendingActions': pendingActions,
   './productWrites': productWrites,
   './branchWrites': branchWrites,
+  './canonicalBranchIdentity': canonicalBranchIdentity,
   './branchRoleGuards': branchRoleGuards,
   './permissions': permissions,
   './productImagePermission': productImagePermission,
@@ -456,25 +464,43 @@ async function main() {
     assert.strictEqual(items[0].label, 'Damaged')
   })
 
-  await check('branches/create/branch applier: is_default/is_active use the same toDbBool coercion as the direct-write route -- regression for the bug found this session (chat), where a plain `value ? 1 : 0` disagreed with toDbBool on a string "false"/"0" payload', async () => {
-    // A payload shape that only shows up from a direct API call or a form
-    // that (unlike today's BranchForm.tsx, which only ever sends real 0/1)
-    // serializes booleans as strings -- exactly the input toDbBool exists
-    // to normalize, and the input plain JS truthiness gets backwards.
-    const insertResult = db.prepare(`
-      INSERT INTO pending_actions (section, action_type, entity_type, entity_id, payload_json, status)
-      VALUES ('branches', 'create', 'branch', NULL, @payload, 'open')
-    `).run({ payload: JSON.stringify({ name: 'Test Branch', is_default: 'false', is_active: 'false' }) })
-    const pendingId = insertResult.lastInsertRowid
+  await check('historical branch create/delete/identity actions stay open and cannot bypass the fixed pair', async () => {
+    const shopId = db.prepare(`INSERT INTO branches (name, location, is_default, is_active) VALUES ('Shop', 'before', 1, 1)`).run().lastInsertRowid
+    const attempts = [
+      { action: 'create', entityId: null, payload: { name: 'Test Branch' } },
+      { action: 'delete', entityId: shopId, payload: { id: shopId } },
+      { action: 'update', entityId: shopId, payload: { name: 'Depot', location: 'forbidden' } },
+      { action: 'update', entityId: shopId, payload: { name: 'Shop', is_active: 0, location: 'forbidden' } },
+    ]
+    for (const attempt of attempts) {
+      const inserted = db.prepare(`
+        INSERT INTO pending_actions (section, action_type, entity_type, entity_id, payload_json, status)
+        VALUES ('branches', @action, 'branch', @entityId, @payload, 'open')
+      `).run({ action: attempt.action, entityId: attempt.entityId, payload: JSON.stringify(attempt.payload) })
+      const { status, json } = await req(reviewApp, REVIEWER_USER, 'POST', `/${inserted.lastInsertRowid}/approve`)
+      assert.strictEqual(status, 500, JSON.stringify(json))
+      assert.strictEqual(json.error, canonicalBranchIdentity.CANONICAL_BRANCH_IDENTITY_ERROR)
+      assert.strictEqual(db.prepare('SELECT status FROM pending_actions WHERE id=@id').get({ id: inserted.lastInsertRowid }).status, 'open')
+    }
+    assert.strictEqual(db.prepare(`SELECT COUNT(*) AS count FROM branches WHERE name='Test Branch'`).get().count, 0)
+    assert.deepStrictEqual({ ...db.prepare('SELECT name,location,is_active FROM branches WHERE id=@id').get({ id: shopId }) }, {
+      name: 'Shop', location: 'before', is_active: 1,
+    })
+  })
 
-    const { status, json } = await req(reviewApp, REVIEWER_USER, 'POST', `/${pendingId}/approve`)
+  await check('a queued canonical metadata edit is still approvable', async () => {
+    const shop = db.prepare(`SELECT id FROM branches WHERE lower(trim(name))='shop' ORDER BY id DESC LIMIT 1`).get()
+    assert.ok(shop)
+    const inserted = db.prepare(`
+      INSERT INTO pending_actions (section, action_type, entity_type, entity_id, payload_json, status)
+      VALUES ('branches', 'update', 'branch', @entityId, @payload, 'open')
+    `).run({ entityId: shop.id, payload: JSON.stringify({ name: 'Shop', is_active: 1, location: 'approved metadata' }) })
+    const { status, json } = await req(reviewApp, REVIEWER_USER, 'POST', `/${inserted.lastInsertRowid}/approve`)
     assert.strictEqual(status, 200, JSON.stringify(json))
     assert.strictEqual(json.data.status, 'approved')
-
-    const created = await db.prepare(`SELECT is_default, is_active FROM branches WHERE name = 'Test Branch'`).get()
-    assert.ok(created, 'approving a pending branch create must actually insert the row')
-    assert.strictEqual(created.is_default, 0, 'a string "false" payload must resolve to 0, not to JS\'s own truthiness (a non-empty string is always truthy)')
-    assert.strictEqual(created.is_active, 0, 'same coercion for is_active')
+    assert.deepStrictEqual({ ...db.prepare('SELECT name,location,is_active FROM branches WHERE id=@id').get({ id: shop.id }) }, {
+      name: 'Shop', location: 'approved metadata', is_active: 1,
+    })
   })
 
   console.log(`\n${passed} check(s) passed.`)

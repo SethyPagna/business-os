@@ -50,8 +50,15 @@ function toDbBool(value, fallback = 1) {
   return ['1', 'true', 'yes', 'on'].includes(normalized) ? 1 : 0
 }
 
+const branchRoles = loadModule('lib/branchRoles.ts', require)
+const canonicalBranchIdentity = loadModule('lib/canonicalBranchIdentity.ts', (id) => {
+  if (id === './db') return { toDbBool }
+  if (id === './branchRoles') return branchRoles
+  return require(id)
+})
 const branchWrites = loadModule('lib/branchWrites.ts', (id) => {
   if (id === './db') return { toDbBool }
+  if (id === './canonicalBranchIdentity') return canonicalBranchIdentity
   return require(id)
 })
 const { branchUpdateStatements } = branchWrites
@@ -197,7 +204,7 @@ async function check(name, fn) {
 function freshDb() {
   const db = new Database(':memory:')
   db.exec(`CREATE TABLE branches (
-    id INTEGER PRIMARY KEY, name TEXT, location TEXT, phone TEXT, manager TEXT,
+    id INTEGER PRIMARY KEY, name TEXT NOT NULL, location TEXT, phone TEXT, manager TEXT,
     notes TEXT, is_default INTEGER DEFAULT 0, is_active INTEGER DEFAULT 1,
     updated_at TEXT
   )`)
@@ -290,56 +297,74 @@ function runStatements(db, statements) {
 // --- checks ----------------------------------------------------------------
 
 async function main() {
-await check('branchUpdateStatements restores prior field values (an undo of an edit)', () => {
+await check('branchUpdateStatements applies canonical metadata without changing identity', () => {
   const db = freshDb()
-  db.prepare(`INSERT INTO branches (id, name, location, phone, manager, notes, is_default, is_active) VALUES (2, 'Shop RENAMED', 'New Loc', '070', 'Bob', 'edited', 0, 1)`).run()
-  // undo_payload carries the PRE-edit snapshot.
+  db.prepare(`INSERT INTO branches (id, name, location, phone, manager, notes, is_default, is_active) VALUES (2, 'Shop', 'New Loc', '070', 'Bob', 'edited', 0, 1)`).run()
+  const current = db.prepare('SELECT id,name,is_active FROM branches WHERE id=2').get()
   const undoFields = { name: 'Shop', location: 'Old Loc', phone: '012', manager: 'Alice', notes: 'orig', is_default: 0, is_active: 1 }
-  runStatements(db, branchUpdateStatements(2, undoFields))
+  runStatements(db, branchUpdateStatements(2, undoFields, current))
   assert.deepStrictEqual(readBranch(db, 2), { name: 'Shop', location: 'Old Loc', phone: '012', manager: 'Alice', notes: 'orig', is_default: 0, is_active: 1 })
 })
 
-await check('branchUpdateStatements keeps every id-linked branch-name snapshot canonical', () => {
-  const db = freshDb()
-  db.prepare(`INSERT INTO branches (id, name, is_active) VALUES (2, 'Old Shop', 1)`).run()
-  for (const table of ['sales', 'inventory_movements', 'returns', 'stock_row_moves']) {
-    db.prepare(`INSERT INTO ${table} (branch_id, branch_name) VALUES (2, 'Old Shop')`).run()
-  }
-  runStatements(db, branchUpdateStatements(2, { name: 'Shop', is_active: 1 }))
-  for (const table of ['sales', 'inventory_movements', 'returns', 'stock_row_moves']) {
-    assert.strictEqual(db.prepare(`SELECT branch_name FROM ${table} WHERE branch_id=2`).get().branch_name, 'Shop')
-  }
+await check('branchUpdateStatements refuses saved identity changes and legacy conversion', () => {
+  const shop = { id: 2, name: 'Shop', is_active: 1 }
+  assert.throws(() => branchUpdateStatements(2, { name: 'Shop RENAMED' }, shop), canonicalBranchIdentity.CanonicalBranchIdentityError)
+  assert.throws(() => branchUpdateStatements(2, { is_active: 0 }, shop), canonicalBranchIdentity.CanonicalBranchIdentityError)
+  assert.throws(
+    () => branchUpdateStatements(3, { name: 'Shop', is_active: 1 }, { id: 3, name: 'Old Shop', is_active: 1 }),
+    canonicalBranchIdentity.CanonicalBranchIdentityError,
+  )
 })
 
-await check('branchUpdateStatements reapplies later values (a redo) and clears other defaults only when is_default is set', () => {
+await check('branchUpdateStatements changes the default only among canonical rows', () => {
   const db = freshDb()
   db.prepare(`INSERT INTO branches (id, name, is_default, is_active) VALUES (1, 'Warehouse', 1, 1)`).run()
   db.prepare(`INSERT INTO branches (id, name, is_default, is_active) VALUES (2, 'Shop', 0, 1)`).run()
-  // Redo makes branch 2 the default: the reset statement must be present and
-  // demote branch 1.
-  const redoStatements = branchUpdateStatements(2, { name: 'Shop', is_default: true, is_active: 1 })
+  db.prepare(`INSERT INTO branches (id, name, is_default, is_active) VALUES (3, 'Legacy Depot', 1, 1)`).run()
+  const current = db.prepare('SELECT id,name,is_active FROM branches WHERE id=2').get()
+  const redoStatements = branchUpdateStatements(2, { name: 'Shop', is_default: true, is_active: 1 }, current)
   assert.ok(redoStatements.some((s) => /UPDATE branches SET is_default = 0/.test(s.sql)), 'expected the clear-other-defaults statement')
   runStatements(db, redoStatements)
   assert.strictEqual(readBranch(db, 1).is_default, 0)
   assert.strictEqual(readBranch(db, 2).is_default, 1)
+  assert.strictEqual(readBranch(db, 3).is_default, 1, 'legacy branch is not rewritten')
 
-  // A non-default edit must NOT emit the reset statement (it would demote the
-  // real default branch for an unrelated edit).
-  const plain = branchUpdateStatements(2, { name: 'Shop', is_default: 0, is_active: 1 })
+  const plain = branchUpdateStatements(2, { name: 'Shop', is_default: 0, is_active: 1 }, current)
   assert.ok(!plain.some((s) => /UPDATE branches SET is_default = 0/.test(s.sql)), 'a non-default edit must not clear defaults')
 })
 
-await check('the real branch.update applier updates the target row through the D1 wrapper', async () => {
+await check('the real branch.update applier updates canonical metadata through the D1 wrapper', async () => {
   const db = freshDb()
-  db.prepare(`INSERT INTO branches (id, name, location, is_default, is_active) VALUES (2, 'Shop RENAMED', 'x', 0, 1)`).run()
+  db.prepare(`INSERT INTO branches (id, name, location, is_default, is_active) VALUES (2, 'Shop', 'x', 0, 1)`).run()
   sharedDb = db
-  const applier = resolveUndoApplier({ applier: 'branch.update', id: 2, fields: { name: 'Shop', location: 'Old Loc', is_default: 0, is_active: 1 } })
+  const payload = { applier: 'branch.update', id: 2, fields: { name: 'Shop', location: 'Old Loc', is_default: 0, is_active: 1 } }
+  const applier = resolveUndoApplier(payload)
   assert.ok(applier && applier.name === 'branch.update')
-  await applier.run({ applier: 'branch.update', id: 2, fields: { name: 'Shop', location: 'Old Loc', is_default: 0, is_active: 1 } }, { env: {}, user: { id: 9, name: 'Admin' }, direction: 'undo' })
+  await applier.run(payload, { env: {}, user: { id: 9, name: 'Admin' }, direction: 'undo' })
   assert.deepStrictEqual(readBranch(db, 2), { name: 'Shop', location: 'Old Loc', phone: null, manager: null, notes: null, is_default: 0, is_active: 1 })
 })
 
-await check('the branch.update applier throws (and changes nothing) when the branch is gone or the id is missing', async () => {
+await check('the branch.update applier rejects historical identity changes and an identity race atomically', async () => {
+  const db = freshDb()
+  db.prepare(`INSERT INTO branches (id, name, location, is_default, is_active) VALUES (2, 'Shop', 'before', 0, 1)`).run()
+  sharedDb = db
+  const applier = resolveUndoApplier({ applier: 'branch.update', id: 2 })
+  await assert.rejects(
+    () => applier.run({ applier: 'branch.update', id: 2, fields: { name: 'Depot', location: 'forbidden' } }, { env: {}, user: null, direction: 'undo' }),
+    /fixed to Shop and Warehouse/,
+  )
+  assert.equal(readBranch(db, 2).location, 'before')
+
+  beforeAtomicBatch = (sqlite) => sqlite.prepare("UPDATE branches SET name='Changed elsewhere' WHERE id=2").run()
+  await assert.rejects(
+    () => applier.run({ applier: 'branch.update', id: 2, fields: { name: 'Shop', location: 'raced' } }, { env: {}, user: null, direction: 'redo' }),
+    /NOT NULL/,
+  )
+  assert.equal(readBranch(db, 2).location, 'before')
+  assert.equal(readBranch(db, 2).name, 'Changed elsewhere')
+})
+
+await check('the branch.update applier throws when the branch is gone or the id is missing', async () => {
   const db = freshDb()
   sharedDb = db
   const applier = resolveUndoApplier({ applier: 'branch.update', id: 999, fields: { name: 'Ghost' } })
