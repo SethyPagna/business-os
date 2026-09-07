@@ -70,10 +70,11 @@
 //                    only the return's effect ON THE SALE -- its status.
 //   reprints         Printing changes nothing.
 //   cache/version    Not a change to the sale.
-//   audit rows older than the retention window (lib/audit.ts, 21 days by
-//                    default) are GONE from the database; nothing here can
-//                    invent them. That is exactly why this lane put the
-//                    delivery actual cost in the permanent ledger instead.
+//   ordinary audit rows older than the retention window (lib/audit.ts, 21
+//                    days by default) are gone. Return-bulk replay rows are
+//                    exempt because they are the only actor/time evidence;
+//                    generation still exposes already-pruned replay acts as
+//                    explicitly unknown rather than silently erasing them.
 
 import { parseSqliteTimestampMs } from './saleAmendments'
 
@@ -124,6 +125,8 @@ export interface SaleRecord {
   subject: string | null
   /** A one-line English fallback. The client renders its own localized line. */
   summary: string
+  /** True only when durable generation proves an event but actor/time were already pruned. */
+  provenance_unknown?: boolean
   /** Field-keyed state before and after. Same keys on both sides, always. */
   before: Record<string, unknown> | null
   after: Record<string, unknown> | null
@@ -719,9 +722,12 @@ export interface SaleRecordReturnBulkEventRow {
   action?: string | null
   request_json?: unknown
   receipt_json?: unknown
+  details?: unknown
   user_name?: string | null
   created_at?: string | null
   return_number?: string | null
+  /** Total replay count retained on return_bulk_operations. */
+  generation?: number | null
 }
 
 /** True when this return is one of the ones that move sales.sale_status. */
@@ -784,6 +790,10 @@ export function returnBulkEventRecord(row: SaleRecordReturnBulkEventRow): SaleRe
   if (!entry || entry.changed === false || entry.before === undefined || entry.after === undefined) return null
   const action = String(row.action || '')
   if (!['return_fields_bulk', 'action_undo', 'action_redo'].includes(action)) return null
+  if (action === 'action_undo' || action === 'action_redo') {
+    const details = parseDetails(row.details)
+    if (text(details?.kind) !== 'return.fields.bulk') return null
+  }
   const reversed = action === 'action_undo'
   const beforeStatus = text(reversed ? entry.after : entry.before)
   const afterStatus = text(reversed ? entry.before : entry.after)
@@ -842,6 +852,11 @@ export function buildSaleRecords(input: {
   mutations?: SaleRecordMutationRow[]
 }): SaleRecord[] {
   const records: SaleRecord[] = [saleCreatedRecord(reconstructSaleCreation(input))]
+  const missingReturnBulkReplays: Array<{
+    original: SaleRecord | null
+    firstSurviving: SaleRecord | null
+    records: SaleRecord[]
+  }> = []
   for (const row of input.ledger || []) records.push(ledgerRecord(row))
   const explicitTransitions = (input.audit || []).flatMap((row) => {
     const action = String(row.action || '')
@@ -886,14 +901,62 @@ export function buildSaleRecords(input: {
       if (String(row.action || '') === 'create') creationAuditedReturnIds.add(String(row.return_id))
     }
   }
+  const returnBulkGroups = new Map<string, SaleRecordReturnBulkEventRow[]>()
   for (const row of input.returnBulk || []) {
-    const record = returnBulkEventRecord(row)
-    if (record) records.push(record)
+    const key = `${row.operation_id}:${row.return_id}`
+    const group = returnBulkGroups.get(key) || []
+    group.push(row)
+    returnBulkGroups.set(key, group)
+  }
+  for (const rows of returnBulkGroups.values()) {
+    const emitted = rows
+      .map((row) => ({ row, record: returnBulkEventRecord(row) }))
+      .filter((entry): entry is { row: SaleRecordReturnBulkEventRow; record: SaleRecord } => entry.record !== null)
+    for (const entry of emitted) records.push(entry.record)
+
+    const generation = Math.max(0, ...rows.map((row) => Math.floor(numberOrNull(row.generation) || 0)))
+    const surviving = emitted.filter((entry) => ['action_undo', 'action_redo'].includes(String(entry.row.action || '')))
+    const missingCount = Math.max(0, generation - surviving.length)
+    const base = rows.find((row) => String(row.action || '') === 'return_fields_bulk') || rows[0]
+    if (!base || missingCount === 0) continue
+    const unknown: SaleRecord[] = []
+    for (let replay = 1; replay <= missingCount; replay += 1) {
+      const record = returnBulkEventRecord({
+        ...base,
+        audit_id: `missing:${replay}`,
+        action: replay % 2 === 1 ? 'action_undo' : 'action_redo',
+        details: { kind: 'return.fields.bulk' },
+        user_name: null,
+        created_at: null,
+      })
+      if (record) {
+        record.summary = `${record.summary}; replay actor and time unavailable`
+        record.provenance_unknown = true
+        unknown.push(record)
+      }
+    }
+    missingReturnBulkReplays.push({
+      original: emitted.find((entry) => String(entry.row.action || '') === 'return_fields_bulk')?.record || null,
+      firstSurviving: surviving[0]?.record || null,
+      records: unknown,
+    })
   }
   for (const row of input.returns || []) {
     if (returnTouchesSale(row) && !creationAuditedReturnIds.has(String(row.id))) records.push(legacyReturnRecord(row))
   }
-  return orderSaleRecords(records)
+  const ordered = orderSaleRecords(records)
+  for (const missing of missingReturnBulkReplays) {
+    const firstSurvivingIndex = missing.firstSurviving ? ordered.indexOf(missing.firstSurviving) : -1
+    const originalIndex = missing.original ? ordered.indexOf(missing.original) : -1
+    // Retention removes oldest rows first, so missing events form the known
+    // prefix between the original act and the surviving replay suffix. Their
+    // actor/time stay null; adjacency records only this proven sequence.
+    const insertAt = firstSurvivingIndex >= 0 ? firstSurvivingIndex
+      : originalIndex >= 0 ? originalIndex + 1
+      : ordered.length
+    ordered.splice(insertAt, 0, ...missing.records)
+  }
+  return ordered
 }
 
 // ---------------------------------------------------------------------------
@@ -977,11 +1040,7 @@ export function buildSaleRecordsCountSql(placeholders: string): string {
         GROUP BY r.sale_id
       UNION ALL
       SELECT m.sale_id AS sale_id,
-        SUM(1 + (
-          SELECT COUNT(*) FROM audit_logs replay
-          WHERE replay.entity = 'return' AND replay.entity_id = ro.id
-            AND replay.action IN ('action_undo','action_redo')
-        )) AS n
+        SUM(1 + MAX(0, COALESCE(ro.generation, 0))) AS n
         FROM return_bulk_members m
         JOIN return_bulk_operations ro ON ro.id = m.operation_id
         JOIN action_history rh ON rh.id = ro.history_id
