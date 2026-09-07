@@ -96,7 +96,11 @@ runTest('the centred branch centres the pill and orders it back / page / count /
   const branch = centeredBranch()
   assert.match(branch, /flex w-full justify-center/, 'the pager row must centre itself')
   const backAt = branch.indexOf('aria-label={backLabel}')
-  const pageAt = branch.indexOf('aria-label={pageLabel}')
+  // The FIELD's label, not the first `aria-label={pageLabel}` in the branch:
+  // the <nav> landmark wrapping the pill is named from the same string and
+  // sits before Back, so an unanchored search reads the landmark's name as
+  // the page number's position and reports the row out of order.
+  const pageAt = branch.indexOf('aria-label={pageLabel}', backAt)
   const countAt = branch.indexOf('<span className={countClass}>')
   const nextAt = branch.indexOf('aria-label={nextLabel}')
   assert.ok(backAt > 0 && pageAt > backAt, 'the page number must follow Back')

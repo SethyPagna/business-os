@@ -235,8 +235,25 @@ export default function PaginationControls({
     // to mean what it means. The result count is unaffected -- it is the
     // Filters summary line, not this row.
     if (totalPages <= 1) return null
+    // A LANDMARK, not a bare div. This row is the storefront's whole
+    // navigation between pages of the catalogue, and as a `<div>` it appeared
+    // in no landmark list, so the one control a screen-reader user most needs
+    // to jump to was the one they had to hunt for.
+    //
+    // The name is composed from `page`, which every one of the 17 portal
+    // language packs already translates (portalLanguagePacks.ts), rather than
+    // from a `pagination` key added for this row alone: the storefront's
+    // `copy()` resolves through those packs, so a new key would be English in
+    // 15 languages and would duplicate a string that already exists.
+    //
+    // And it SAYS where it went. Pressing Next swapped the grid silently: the
+    // focus stays on Next, whose accessible name does not change, so nothing
+    // was announced at all. The polite live region carries the page and the
+    // total. Both mounts (above and below the grid) carry one, because either
+    // one can be the pager being operated; a reader on a page with both will
+    // hear the move once per region.
     return (
-      <div className={`flex w-full justify-center ${className}`}>
+      <nav className={`flex w-full justify-center ${className}`} aria-label={pageLabel}>
         <div className="inline-flex max-w-full items-center rounded-full border border-slate-300 bg-white text-xs font-semibold text-slate-800 shadow-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100">
           <button
             type="button"
@@ -280,7 +297,8 @@ export default function PaginationControls({
             <ChevronRight className="h-4 w-4" strokeWidth={2.5} />
           </button>
         </div>
-      </div>
+        <span className="sr-only" aria-live="polite">{pageLabel} {safePage} {ofLabel} {totalPages}</span>
+      </nav>
     )
   }
 
