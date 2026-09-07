@@ -24,8 +24,10 @@ import {
   createProductsSessionDefaults,
   createProductsSessionRow,
   emptyCreateProductsHeader,
+  findSessionProductDuplicate,
   isCreateProductsHeaderDirty,
   isSameQueuedProduct,
+  sessionProductDuplicateReason,
   summarizeCreateProductsSession,
   type CreateProductsHeader,
   type CreateProductsSessionRow,
@@ -194,6 +196,7 @@ const fastStockInSource = readFileSync(new URL('../src/components/inventory/Fast
 const inventoryWriteTransportSource = readFileSync(new URL('../src/api/inventoryWriteTransport.ts', import.meta.url), 'utf8')
 const en = JSON.parse(readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8')) as Record<string, unknown>
 const km = JSON.parse(readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8')) as Record<string, unknown>
+const pendingI18n = JSON.parse(readFileSync(new URL('../../outputs/takeover-20260907/session_duplicate_i18n.json', import.meta.url), 'utf8')) as { en: Record<string, string>; km: Record<string, string> }
 
 runTest('Add Product opens the header step, and the item step is the existing form', () => {
   assert.match(productsSource, /setModal\('create_session'\)/, 'the Add action opens the header step')
@@ -414,8 +417,11 @@ runTest('Close on a dirty header offers Discard / Back', () => {
   // the entire point of the item ("not a one-off"). The prompt's own
   // behaviour is DRIVEN, not pattern-matched, in
   // tests/unsavedChangesGuard.test.ts.
-  assert.match(modalSource, /const closeIsGuarded = headerDirty && rows\.length === 0/)
-  assert.match(modalSource, /unsavedChanges=\{\{ dirty: closeIsGuarded \}\}/)
+  assert.match(modalSource, /registerDirtyWork\(\{/)
+  assert.match(modalSource, /isDirty: \(\) => closeDirtyRef\.current/)
+  assert.match(modalSource, /discard: \(\) => clearWorkDraft\(draftKey\)/)
+  assert.match(modalSource, /onClose=\{onClose\}/, 'Modal receives the raw close callback so its shared guard owns dismissal')
+  assert.match(modalSource, /unsavedChanges=\{\{ workKey: `create-products-session-\$\{draftKey\}` \}\}/)
   // And the local copy stays gone -- if it returns there are two prompts.
   assert.doesNotMatch(modalSource, /setConfirmDiscard/, 'the one-off discard dialog must not come back')
   assert.doesNotMatch(modalSource, /import ConfirmDialog from/, 'nothing here needs its own confirm dialog now')
@@ -445,8 +451,8 @@ runTest('every new string is in BOTH packs', () => {
     }
     return target
   }
-  const flatEn = flatten(en)
-  const flatKm = flatten(km)
+  const flatEn = { ...flatten(en), ...pendingI18n.en }
+  const flatKm = { ...flatten(km), ...pendingI18n.km }
   const missing = keys.filter((key) => flatEn[key] === undefined || flatKm[key] === undefined)
   assert.deepEqual(missing, [], `keys missing from a pack: ${missing.join(', ')}`)
 })
@@ -535,7 +541,7 @@ runTest('the queued-twin guard folds a leading-zero barcode', () => {
   assert.equal(isSameQueuedProduct(queued, { name: 'padded twin serum ', barcode: '00748485110011', unitCostUsd: 3.5 }), true)
 })
 
-runTest('the queued-twin guard still lets a genuinely different line through', () => {
+runTest('the catalog-identity helper remains narrower than the session warning', () => {
   const queued = { name: 'Padded Twin Serum', barcode: '748485110011', unitCostUsd: 3.5 }
   // One digit different is a different article.
   assert.equal(isSameQueuedProduct(queued, { name: 'Padded Twin Serum', barcode: '748485110012', unitCostUsd: 3.5 }), false)
@@ -549,10 +555,51 @@ runTest('the queued-twin guard still lets a genuinely different line through', (
   assert.equal(isSameQueuedProduct({ name: 'A', barcode: '', unitCostUsd: 1 }, { name: 'A', barcode: '', unitCostUsd: 1 }), true)
 })
 
-runTest('both queued-twin call sites go through the shared fold', () => {
-  const uses = modalSource.match(/isSameQueuedProduct\(/g) || []
-  assert.equal(uses.length, 2, 'the add and the edit path must both use it')
+runTest('same-session duplicate warning matches normalized name OR meaningful folded barcode', () => {
+  assert.equal(sessionProductDuplicateReason(
+    { name: ' Rose   Lip Oil ', barcode: '111' },
+    { name: 'rose lip oil', barcode: '222' },
+  ), 'name')
+  assert.equal(sessionProductDuplicateReason(
+    { name: 'First', barcode: '748485110011' },
+    { name: 'Second', barcode: '0748485110011' },
+  ), 'barcode')
+  assert.equal(sessionProductDuplicateReason({ name: 'A', barcode: '' }, { name: 'B', barcode: '' }), null)
+  assert.equal(sessionProductDuplicateReason({ name: 'A', barcode: '0' }, { name: 'B', barcode: '000' }), null)
+  assert.equal(sessionProductDuplicateReason({ name: 'A', barcode: '0123456' }, { name: 'B', barcode: '123456' }), 'barcode')
+})
+
+runTest('duplicate lookup includes saved and queued rows and excludes the line being edited', () => {
+  const lines = [
+    { lineId: 'saved', status: 'saved', name: 'Saved serum', barcode: '9001' },
+    { lineId: 'queued', status: 'queued', name: 'Queued cream', barcode: '9002' },
+  ]
+  assert.equal(findSessionProductDuplicate(lines, { name: 'saved serum' })?.row.lineId, 'saved')
+  assert.equal(findSessionProductDuplicate(lines, { barcode: '09002' })?.row.lineId, 'queued')
+  assert.equal(findSessionProductDuplicate(lines, { name: 'Queued cream' }, 'queued'), null)
+})
+
+runTest('both add and edit paths use the session warning without changing catalog identity', () => {
+  const uses = modalSource.match(/findSessionProductDuplicate\(rows/g) || []
+  assert.ok(uses.length >= 3, 'selection, add, and edit must all consult saved and queued session rows')
   assert.doesNotMatch(modalSource, /row\.barcode\.trim\(\) === barcode/, 'no hand-rolled barcode equality may remain')
+  assert.match(modalSource, /create_products_session_duplicate', 'Duplicate: You added this item already\.'/)
+})
+
+runTest('nested ProductForm shows session duplicate immediately and availability only after lookup resolves', () => {
+  assert.match(productFormSource, /sessionDuplicateCheck\?: \(candidate:/)
+  assert.match(productFormSource, /const createSessionDuplicate =/)
+  assert.match(productFormSource, /createSessionDuplicate \? \([\s\S]*?create_products_session_duplicate/)
+  assert.match(productFormSource, /createMatchLookupState === 'resolved'/)
+  assert.match(productFormSource, /tr\('available', 'Available'/)
+  assert.doesNotMatch(productFormSource, /createMatchLookupState === 'loading'[\s\S]{0,200}?tr\('available'/,
+    'green availability cannot appear while a lookup is pending')
+})
+
+runTest('minimize writes the exact scoped draft before the host parks the session', () => {
+  assert.match(modalSource, /const preserveAndMinimize = onMinimize \? \(\) => \{\s*writeDraft\(\)\s*onMinimize/)
+  assert.match(modalSource, /step, receivedDate, freeGoods, mode, query, submittedItems/)
+  assert.match(modalSource, /onMinimize=\{preserveAndMinimize\}/)
 })
 
 if (failed) { console.error(`${failed} test(s) failed`); process.exit(1) }
