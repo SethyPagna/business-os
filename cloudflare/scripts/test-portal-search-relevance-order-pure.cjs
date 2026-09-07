@@ -127,6 +127,9 @@ const portalRoute = loadReal('routes/portal.ts', {
   '../lib/rateLimit': { checkRateLimit: async () => ({ allowed: true }), getClientIp: () => '127.0.0.1' },
   '../lib/portalAbuseKey': loadReal('lib/portalAbuseKey.ts'),
   '../lib/safeLinkUrl': loadReal('lib/safeLinkUrl.ts'),
+  ...(fs.existsSync(path.join(__dirname, '..', 'src', 'lib', 'portalImagePrivacy.ts'))
+    ? { '../lib/portalImagePrivacy': loadReal('lib/portalImagePrivacy.ts') }
+    : {}),
   '../lib/portalAccounts': { signupPortalAccount: async () => ({ ok: false }), signinPortalAccount: async () => ({ ok: false }) },
   '../lib/portalSession': { createPortalSession: async () => ({ token: '', expiresAt: '' }), setPortalCookie: () => {}, clearPortalCookie: () => {}, revokePortalSession: async () => {}, getPortalAccount: async () => null },
   '../lib/portalAuthLockout': { getPortalLockoutState: async () => ({ locked: false, failedCount: 0, retryAfterSeconds: 0 }), recordPortalFailure: async () => ({ locked: false, failedCount: 0, retryAfterSeconds: 0 }), clearPortalLockout: async () => {} },
