@@ -24,7 +24,7 @@ import { bumpVersion } from './cache'
 import { insertRow, updateRow, defaultBranchId, syncProductImageGallery, seedBranchStockForNewProduct, seedInitialBatchForNewProduct } from './productWrites'
 import { branchUpdateStatements } from './branchWrites'
 import { getActionTier } from './permissions'
-import { omitUnchangedProductImageFields, productImageFieldsChanged } from './productImagePermission'
+import { omitUnchangedProductImageFields, productImageFieldsChanged, resolveProductImageFields } from './productImagePermission'
 import type { SessionUser } from './auth'
 import type { PendingActionRow } from './pendingActions'
 import type { Env } from '../index'
@@ -127,6 +127,7 @@ registerApplier('fees', 'delete', 'fee', async (env, row, reviewer) => {
 // request body the requester originally sent, unchanged since queueing.
 registerApplier('products', 'create', 'product', async (env, row, reviewer) => {
   const body = JSON.parse(row.payload_json || '{}') as Record<string, unknown>
+  await resolveProductImageFields(getDb(env), body)
   const name = String(body.name || '').trim()
   if (!name) throw new Error('Pending product create is missing a name')
   const changesImages = productImageFieldsChanged(body)
@@ -171,6 +172,7 @@ registerApplier('products', 'update', 'product', async (env, row, reviewer) => {
   const id = row.entity_id
   if (id == null) throw new Error('Pending product update is missing its entity id')
   const body = JSON.parse(row.payload_json || '{}') as Record<string, unknown>
+  await resolveProductImageFields(getDb(env), body)
   const submittedImageFields = Object.prototype.hasOwnProperty.call(body, 'image_path')
     || Object.prototype.hasOwnProperty.call(body, 'image_gallery')
   if (submittedImageFields) {
