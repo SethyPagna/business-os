@@ -4,6 +4,7 @@ import { lazyRetry } from '../../utils/lazyImport.ts'
 import { fmtTime } from '../../utils/formatters.ts'
 import { usePullToRefresh } from '../shared/usePullToRefresh.ts'
 import PullToRefreshIndicator from '../shared/PullToRefreshIndicator.tsx'
+import TruncatedText from '../shared/TruncatedText.tsx'
 import Bot from 'lucide-react/dist/esm/icons/bot.js'
 import HelpCircle from 'lucide-react/dist/esm/icons/help-circle.js'
 import Mail from 'lucide-react/dist/esm/icons/mail.js'
@@ -46,6 +47,7 @@ import { resolveCatalogAssetUrl } from './catalogAssetUrls'
 import { usePortalBucket, usePortalWishlist, formatPortalBucketText, downloadPortalBucketFile } from './portalBucket.ts'
 import { usePortalAccount } from './portalAccount.ts'
 import PortalNoPaymentNotice from './PortalNoPaymentNotice.tsx'
+import PortalFooter from './legal/LegalPages.tsx'
 import { getPortalLanguageText } from './portalLanguagePacks.ts'
 import { ADMIN_MAX_PRODUCT_GALLERY_IMAGES } from '../products/helpers/productGalleryHelpers.ts'
 import {
@@ -122,6 +124,8 @@ type PortalConfig = LooseRecord & {
   aiProviderId?: string | number | null
   aiTitle?: string
   businessAddress?: string
+  businessLegalName?: string
+  businessRegistrationNumber?: string
   businessCover?: string
   businessEmail?: string
   businessFavicon?: string
@@ -129,6 +133,8 @@ type PortalConfig = LooseRecord & {
   businessName?: string
   businessPhone?: string
   businessTagline?: string
+  publicationReady?: boolean
+  publicationMissing?: string[]
   contactLinkLabels?: Record<string, string>
   contactLinks?: Record<string, string>
   exchangeRate?: string | number
@@ -199,7 +205,7 @@ type PortalConfig = LooseRecord & {
 type GalleryViewState = { open: boolean; title: string; items: string[]; index: number }
 type PortalImageViewState = { open: boolean; title: string; images: string[]; index: number }
 type FilePickerState = { open: boolean; target?: unknown; mediaType: string; title: string }
-type SubmissionDraft = { platform: string; note: string; screenshots: string[] }
+type SubmissionDraft = { platform: string; note: string; screenshots: string[]; rightsConsent: boolean; privacyConsent: boolean }
 type PortalTab = { key: string; label: string; icon: LucideIcon }
 type CatalogApi = {
   getPortalBootstrap?: () => Promise<unknown>
@@ -626,7 +632,7 @@ export default function PublicCatalogPage() {
   const [membershipData, setMembershipData] = useState<LooseRecord | null>(null)
   const [membershipError, setMembershipError] = useState('')
   const [membershipLoading, setMembershipLoading] = useState(false)
-  const [submissionDraft, setSubmissionDraft] = useState<SubmissionDraft>({ platform: 'Facebook', note: '', screenshots: [] })
+  const [submissionDraft, setSubmissionDraft] = useState<SubmissionDraft>({ platform: 'Facebook', note: '', screenshots: [], rightsConsent: false, privacyConsent: false })
   const [submissionSaving, setSubmissionSaving] = useState(false)
   const [assistantProfile, setAssistantProfile] = useState({ brand: '', skinType: '', shoppingFor: '', goal: '', concerns: '' })
   const [assistantQuestion, setAssistantQuestion] = useState('')
@@ -636,6 +642,8 @@ export default function PublicCatalogPage() {
   const [assistantExpandedProductId, setAssistantExpandedProductId] = useState<string | number | null>(null)
   const [aiUsageSummary, setAiUsageSummary] = useState<LooseRecord | null>(null)
   const [assistantRequestPolicy, setAssistantRequestPolicy] = useState<LooseRecord | null>(null)
+  const [assistantDisclosure, setAssistantDisclosure] = useState<LooseRecord | null>(null)
+  const [assistantDataUseConsent, setAssistantDataUseConsent] = useState(false)
   const [translateTarget, setTranslateTarget] = useState(() => readStoredTranslateTarget('en'))
   const [translateApplyState, setTranslateApplyState] = useState<'idle' | 'applied' | 'failed'>('idle')
   const [translateApplyMessage, setTranslateApplyMessage] = useState('')
@@ -670,6 +678,47 @@ export default function PublicCatalogPage() {
   const [reloadToken, setReloadToken] = useState(0)
   const publicPageRootRef = useRef<HTMLDivElement | null>(null)
 
+  // The `data-public-portal` document marker, which NOTHING was setting on
+  // the live storefront.
+  //
+  // There are two storefront entries. index.tsx picks PublicCatalogRoot ->
+  // this component whenever isPublicCatalogPath() is true, which is every
+  // path on the customer host -- that is the shipped shop. App.tsx's
+  // PublicCatalogView -> `<CatalogPage publicView />` is the other one, and
+  // CatalogPage carries its own effect for this attribute. This file never
+  // renders CatalogPage (it mounts CatalogPreviewSurface directly), so on the
+  // entry customers actually load, html/body never got the marker at all.
+  //
+  // Everything keyed off it was therefore inert on the real shop: the
+  // `overflow-y: auto` + `height: auto` unlock in main.css, and in
+  // public-portal.css the Google-Translate banner suppression plus the
+  // `body { top: 0 !important; position: static !important }` that undoes the
+  // banner's downward shove of the whole document, and the
+  // `.portal-contact-value` wrapping. (The media-protection and coarse-
+  // pointer tap-target rules survived only because they carry a second
+  // `[data-public-media-protection='true']` selector, which this page's root
+  // div does set.)
+  //
+  // Previous values are captured and restored rather than blindly removed, so
+  // a StrictMode double-mount -- or any future route that renders this page
+  // under a shell that already set the marker -- cannot leave the document
+  // stripped of it.
+  useEffect(() => {
+    if (typeof document === 'undefined') return undefined
+    const html = document.documentElement
+    const body = document.body
+    const previousHtmlMarker = html.getAttribute('data-public-portal')
+    const previousBodyMarker = body.getAttribute('data-public-portal')
+    html.setAttribute('data-public-portal', 'true')
+    body.setAttribute('data-public-portal', 'true')
+    return () => {
+      if (previousHtmlMarker === null) html.removeAttribute('data-public-portal')
+      else html.setAttribute('data-public-portal', previousHtmlMarker)
+      if (previousBodyMarker === null) body.removeAttribute('data-public-portal')
+      else body.setAttribute('data-public-portal', previousBodyMarker)
+    }
+  }, [])
+
   // Drives the scroll-to-top/bottom buttons in CatalogPreviewSurface. This
   // used to be hardcoded to `false` here, which silently disabled the
   // feature on the real public portal (it only ever worked in the admin's
@@ -703,6 +752,17 @@ export default function PublicCatalogPage() {
   }, [])
 
   const copy: CopyFunction = (key, fallback = '', fallbackKm = fallback) => {
+    // This lane's assistive-technology names (portal_a11y_*) are flat keys in
+    // src/lang/en.json + km.json, not portalEditor.* ones, so they have to be
+    // looked up directly -- prefixed they resolve to nothing and the pack
+    // entries would be dead weight. `t` follows the APP's language, so an
+    // explicit Khmer choice for the storefront wins over it.
+    if (key.startsWith('portal_a11y_')) {
+      if (translateTarget === 'km' && fallbackKm) return fallbackKm
+      const packed = typeof t === 'function' ? t(key) : ''
+      if (packed && packed !== key) return packed
+      return fallback
+    }
     // Real fix: this used to only ever check the admin app's own EN/KM
     // translator (`t`) and a hardcoded Khmer fallback, so picking any of
     // the other 17 languages in the dropdown changed nothing on screen.
@@ -727,6 +787,22 @@ export default function PublicCatalogPage() {
   const externalTranslateTarget = translateWidgetEnabled && !isFirstPartyTranslateChoice(normalizedTranslateTarget)
     ? normalizedTranslateTarget
     : null
+
+  // WCAG 3.1.1: the language selector changed every string on screen but
+  // never what the DOCUMENT claimed to be written in, so a screen reader
+  // kept reading a Khmer storefront with English pronunciation (and a
+  // translation tool kept offering to translate it into the language it was
+  // already showing). 'original' means the merchant's own catalog language.
+  const portalDocumentLanguage = normalizedTranslateTarget === 'original'
+    ? configuredPortalLanguage
+    : normalizedTranslateTarget
+
+  useEffect(() => {
+    if (typeof document === 'undefined' || !portalDocumentLanguage) return undefined
+    const previous = document.documentElement.lang
+    document.documentElement.lang = portalDocumentLanguage
+    return () => { document.documentElement.lang = previous }
+  }, [portalDocumentLanguage])
 
   // Widget isn't "ready" while an external translation is pending setup.
   useEffect(() => {
@@ -1108,16 +1184,20 @@ export default function PublicCatalogPage() {
     })
   }
   const handleSubmitShareProof = () => {
-    if (!membershipData?.customer?.membership_number && !membershipNumber.trim()) {
-      setMembershipError(copy('membershipRequired', 'Enter a membership number first.'))
+    if (!portalAccount.account) {
+      setMembershipError(copy('submissionSignInRequired', 'Sign in before sending a screenshot.', 'សូមចូលគណនីមុនពេលផ្ញើរូបថតអេក្រង់។'))
+      return
+    }
+    if (!submissionDraft.rightsConsent || !submissionDraft.privacyConsent) {
+      setMembershipError(copy('submissionConsentRequired', 'Confirm both consent statements before sending.', 'សូមបញ្ជាក់សេចក្ដីយល់ព្រមទាំងពីរមុនពេលផ្ញើ។'))
       return
     }
     setSubmissionSaving(true)
-    const payload = { membershipNumber: membershipData?.customer?.membership_number || membershipNumber.trim(), ...submissionDraft }
+    setMembershipError('')
+    const payload = { ...submissionDraft, consentLocale: String(displayConfig.language || 'en') }
     withLoaderTimeout(() => getCatalogApi().createPortalSubmission?.(payload) || Promise.reject(new Error('Submission API unavailable')), 'Share submission', PUBLIC_PORTAL_SUBMISSION_TIMEOUT_MS)
       .then(() => {
-        setSubmissionDraft({ platform: 'Facebook', note: '', screenshots: [] })
-        return handleMembershipLookup()
+        setSubmissionDraft({ platform: 'Facebook', note: '', screenshots: [], rightsConsent: false, privacyConsent: false })
       })
       .catch((error) => setMembershipError(getErrorMessage(error, 'Submission failed')))
       .finally(() => setSubmissionSaving(false))
@@ -1133,9 +1213,13 @@ export default function PublicCatalogPage() {
       setAssistantError(copy('assistantQuestionRequired', 'Ask a question first.'))
       return
     }
+    if (!assistantDataUseConsent) {
+      setAssistantError(copy('assistantConsentRequired', 'Confirm the AI data-use notice before sending your question.', 'សូមបញ្ជាក់ការជូនដំណឹងអំពីការប្រើប្រាស់ទិន្នន័យ AI មុនពេលផ្ញើសំណួរ។'))
+      return
+    }
     setAssistantLoading(true)
     setAssistantError('')
-    withLoaderTimeout(() => getCatalogApi().askPortalAi?.({ question, profile: assistantProfile }) || Promise.reject(new Error('AI assistant API unavailable')), 'AI assistant', PUBLIC_PORTAL_AI_TIMEOUT_MS)
+    withLoaderTimeout(() => getCatalogApi().askPortalAi?.({ question, profile: assistantProfile, dataUseConsent: true }) || Promise.reject(new Error('AI assistant API unavailable')), 'AI assistant', PUBLIC_PORTAL_AI_TIMEOUT_MS)
       .then((result) => setAssistantResponse((result || null) as LooseRecord | null))
       .catch((error) => setAssistantError(getErrorMessage(error, 'AI assistant failed')))
       .finally(() => setAssistantLoading(false))
@@ -1149,6 +1233,7 @@ export default function PublicCatalogPage() {
         const data = (result || {}) as LooseRecord
         setAiUsageSummary((data.usage || data.usageSummary || null) as LooseRecord | null)
         setAssistantRequestPolicy((data.policy || data.requestPolicy || null) as LooseRecord | null)
+        setAssistantDisclosure({ provider: data.provider || '', dataUseNotice: data.dataUseNotice || '' })
       })
       .catch(() => {})
   }, [activeTab, displayConfig.aiEnabled])
@@ -1241,7 +1326,6 @@ export default function PublicCatalogPage() {
         productPage={productPage}
         productPageSize={productPageSize}
         setProductPage={setProductPage}
-        setProductPageSize={setProductPageSize}
         initialOptions={productInitials}
         initialFilter={productInitial}
         setInitialFilter={setProductInitial}
@@ -1353,6 +1437,10 @@ export default function PublicCatalogPage() {
         assistantResponse={assistantResponse}
         assistantExpandedProductId={assistantExpandedProductId}
         setAssistantExpandedProductId={setAssistantExpandedProductId}
+        assistantDisclosure={assistantDisclosure}
+        assistantDataUseConsent={assistantDataUseConsent}
+        setAssistantDataUseConsent={setAssistantDataUseConsent}
+        accountSignedIn={!!portalAccount.account}
       />
     </Suspense>
   ) : null
@@ -1398,13 +1486,13 @@ export default function PublicCatalogPage() {
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 dark:border-neutral-800">
           <div>
             <div className="text-sm font-semibold text-slate-900 dark:text-neutral-100">{copy('bucketTitle', 'My List')}</div>
-            <div className="text-xs text-slate-400 dark:text-neutral-500">{copy('bucketHint', 'No payment here -- just a shortlist to show our team.')}</div>
+            <div className="text-xs text-slate-500 dark:text-neutral-400">{copy('bucketHint', 'No payment here -- just a shortlist to show our team.')}</div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
             {contactChannels.length > 0 ? (
               <button
                 type="button"
-                className={`rounded-full p-1.5 transition ${bucketContactOpen ? 'bg-slate-100 text-slate-700 dark:bg-neutral-800 dark:text-neutral-100' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-100'}`}
+                className={`rounded-full p-1.5 transition ${bucketContactOpen ? 'bg-slate-100 text-slate-700 dark:bg-neutral-800 dark:text-neutral-100' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-100'}`}
                 onClick={() => setBucketContactOpen((current) => !current)}
                 aria-label={copy('contactUs', 'Contact us')}
                 title={copy('contactUs', 'Contact us')}
@@ -1415,7 +1503,7 @@ export default function PublicCatalogPage() {
             ) : null}
             <button
               type="button"
-              className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+              className="rounded-full p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
               onClick={closeBucketDrawer}
               aria-label={copy('close', 'Close')}
             >
@@ -1437,7 +1525,7 @@ export default function PublicCatalogPage() {
         */}
         {bucketContactOpen && contactChannels.length > 0 ? (
           <div className="border-b border-slate-100 bg-slate-50/60 px-5 py-3 dark:border-neutral-800 dark:bg-neutral-800/30">
-            <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-neutral-500">
+            <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-neutral-400">
               {copy('contactUs', 'Contact us')}
             </div>
             <div className="space-y-1">
@@ -1468,7 +1556,7 @@ export default function PublicCatalogPage() {
 
         <div className="max-h-[50vh] overflow-y-auto px-5 py-3">
           {bucket.items.length === 0 ? (
-            <div className="py-10 text-center text-sm text-slate-400 dark:text-neutral-500">
+            <div className="py-10 text-center text-sm text-slate-500 dark:text-neutral-400">
               {copy('bucketEmpty', 'Your list is empty. Tap "Add" on products you like.')}
             </div>
           ) : (
@@ -1476,8 +1564,8 @@ export default function PublicCatalogPage() {
               {bucket.items.map((item) => (
                 <li key={item.id} className="flex items-start justify-between gap-3 border-b border-slate-50 pb-3 last:border-0 dark:border-neutral-800/60">
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium text-slate-900 dark:text-neutral-100">{item.name}</div>
-                    {item.priceText ? <div className="text-xs text-slate-400 dark:text-neutral-500">{item.priceText}</div> : null}
+                    <TruncatedText text={item.name} className="text-sm font-medium text-slate-900 dark:text-neutral-100" />
+                    {item.priceText ? <div className="text-xs text-slate-500 dark:text-neutral-400">{item.priceText}</div> : null}
                   </div>
                   <div className="flex shrink-0 items-center gap-1.5">
                     <button
@@ -1533,11 +1621,11 @@ export default function PublicCatalogPage() {
               </button>
             </div>
             {bucketCopyState === 'failed' ? (
-              <div className="text-center text-xs text-rose-500">{copy('bucketCopyFailed', 'Could not copy automatically -- try Download instead.')}</div>
+              <div className="text-center text-xs text-rose-700 dark:text-rose-300">{copy('bucketCopyFailed', 'Could not copy automatically -- try Download instead.')}</div>
             ) : null}
             <button
               type="button"
-              className="w-full text-center text-xs font-medium text-slate-400 hover:text-rose-500 dark:text-neutral-500"
+              className="w-full text-center text-xs font-medium text-slate-500 hover:text-rose-700 dark:text-neutral-400 dark:hover:text-rose-300"
               onClick={bucket.clear}
             >
               {copy('clearBucket', 'Clear all')}
@@ -1568,14 +1656,14 @@ export default function PublicCatalogPage() {
           </div>
           <button
             type="button"
-            className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+            className="rounded-full p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
             onClick={() => setAccountOpen(false)}
             aria-label={copy('close', 'Close')}
           >
             <X className="h-5 w-5" />
           </button>
         </div>
-        <div className="max-h-[70vh] overflow-y-auto px-5 py-4">
+        <div className="max-h-[70vh] overflow-y-auto overscroll-contain px-5 py-4">
           <Suspense fallback={<div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-500 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-400">{copy('loadingPortal', 'Loading customer portal...')}</div>}>
             <CatalogAccountSection
               copy={copy}
@@ -1587,6 +1675,7 @@ export default function PublicCatalogPage() {
               signUp={portalAccount.signUp}
               signOut={portalAccount.signOut}
               clearError={portalAccount.clearError}
+              consentLocale={String(displayConfig.language || 'en')}
               cartCount={bucket.count}
               wishlistCount={wishlist.count}
             />
@@ -1615,7 +1704,7 @@ export default function PublicCatalogPage() {
           </div>
           <button
             type="button"
-            className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+            className="rounded-full p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
             onClick={() => setWishlistOpen(false)}
             aria-label={copy('close', 'Close')}
           >
@@ -1624,7 +1713,7 @@ export default function PublicCatalogPage() {
         </div>
         <div className="max-h-[60vh] overflow-y-auto px-5 py-3">
           {wishlist.items.length === 0 ? (
-            <div className="py-10 text-center text-sm text-slate-400 dark:text-neutral-500">
+            <div className="py-10 text-center text-sm text-slate-500 dark:text-neutral-400">
               {copy('wishlistEmpty', 'Your wishlist is empty. Tap the heart on products you love.', 'បញ្ជីចង់បានរបស់អ្នកនៅទទេ។ ចុចរូបបេះដូងលើផលិតផលដែលអ្នកចូលចិត្ត។')}
             </div>
           ) : (
@@ -1634,8 +1723,8 @@ export default function PublicCatalogPage() {
                 return (
                   <li key={item.id} className="flex items-start justify-between gap-3 border-b border-slate-50 pb-3 last:border-0 dark:border-neutral-800/60">
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium text-slate-900 dark:text-neutral-100">{item.name}</div>
-                      {item.priceText ? <div className="text-xs text-slate-400 dark:text-neutral-500">{item.priceText}</div> : null}
+                      <TruncatedText text={item.name} className="text-sm font-medium text-slate-900 dark:text-neutral-100" />
+                      {item.priceText ? <div className="text-xs text-slate-500 dark:text-neutral-400">{item.priceText}</div> : null}
                     </div>
                     <div className="flex shrink-0 items-center gap-1.5">
                       <button
@@ -1665,7 +1754,7 @@ export default function PublicCatalogPage() {
           <div className="border-t border-slate-100 px-5 py-4 dark:border-neutral-800">
             <button
               type="button"
-              className="w-full text-center text-xs font-medium text-slate-400 transition hover:text-rose-500 dark:text-neutral-500"
+              className="w-full text-center text-xs font-medium text-slate-500 transition hover:text-rose-700 dark:text-neutral-400 dark:hover:text-rose-300"
               onClick={wishlist.clear}
             >
               {copy('clearWishlist', 'Clear all', 'សម្អាតទាំងអស់')}
@@ -1744,12 +1833,12 @@ export default function PublicCatalogPage() {
         onClick={(event) => event.stopPropagation()}
       >
         <div className="mb-2 flex items-center justify-between">
-          <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-neutral-500">
+          <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-neutral-400">
             {copy('contactUs', 'Contact us')}
           </div>
           <button
             type="button"
-            className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+            className="rounded-full p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
             onClick={() => setContactOpen(false)}
             aria-label={copy('close', 'Close')}
           >
@@ -1827,6 +1916,7 @@ export default function PublicCatalogPage() {
       catalogSection={activeTab === 'products' ? catalogSection : null}
       secondaryTabSection={secondaryTabSection}
       promotionsSection={promotionsSection}
+      footer={<PortalFooter copy={copy} businessName={displayConfig.businessName} legalName={displayConfig.businessLegalName} registrationNumber={displayConfig.businessRegistrationNumber} address={displayConfig.businessAddress} phone={displayConfig.businessPhone} email={displayConfig.businessEmail} />}
       productDetailView={productDetailView}
       closeProductDetailView={closeProductDetailView}
       productDetailShopName={displayConfig.businessName || displayConfig.title || ''}

@@ -1,5 +1,4 @@
 import { Hono } from 'hono'
-import { enqueueImageNormalization } from '../lib/imageAudit'
 import { getDb } from '../lib/db'
 import { buildInClause, inlineIntegerIds, selectInChunks } from '../lib/sqlBinding'
 import { cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
@@ -8,9 +7,12 @@ import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission } from '../lib/permissions'
 import { audit } from '../lib/audit'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
+import { portalAbuseKey } from '../lib/portalAbuseKey'
+import { normalizeSafeLinkUrl } from '../lib/safeLinkUrl'
 import { buildUniqueStoredName } from '../lib/fileAssets'
 import { sanitizeMediaList } from '../lib/media'
 import { detectBufferKind } from '../lib/uploadSecurity'
+import { serveObject } from '../lib/r2'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { generatePortalAiResponse } from '../lib/portalAi'
 import { ADMIN_MAX_IMAGES_PER_PRODUCT } from '../lib/importImageMatch'
@@ -181,12 +183,23 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     : 'usd'
   const pointsPerUsd = toNumber(settings.customer_portal_points_per_usd, 1)
   const derivedPointsPerKhr = pointsPerUsd > 0 && exchangeRate > 0 ? pointsPerUsd / exchangeRate : 0
+  const publicationMissing = getPortalPublicationMissingFields(settings)
 
   return {
     businessName: settings.business_name || 'Business OS',
     businessPhone: settings.business_phone || '',
     businessEmail: settings.business_email || '',
     businessAddress: settings.business_address || '',
+    // N45: the registered identity an online seller has to display (Cambodia's
+    // 2019 e-commerce law) and that the privacy/terms/cookie templates fill in.
+    // Separate from businessName, which is the display/brand name.
+    businessLegalName: settings.business_legal_name || '',
+    businessRegistrationNumber: settings.business_registration_number || '',
+    // Public catalogue data is withheld until the operator can identify the
+    // seller and give customers both a physical and electronic contact point.
+    // The display name is deliberately not accepted as a registered identity.
+    publicationReady: publicationMissing.length === 0,
+    publicationMissing,
     businessTagline: settings.customer_portal_business_tagline || '',
     businessLogo: settings.customer_portal_logo_image || '',
     businessFavicon: settings.customer_portal_favicon_image || '',
@@ -337,11 +350,30 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     redeemValueKhr: normalizeRedeemValueKhr(settings.customer_portal_redeem_value_khr, exchangeRate),
     membershipInfoText: settings.customer_portal_membership_info_text
       || 'Membership points are reviewed and applied by staff during checkout. Redemption uses whole units only.',
-    submissionEnabled: normalizeBoolean(settings.customer_portal_submission_enabled, true),
+    // N45: OFF until the merchant turns it on. This flag gates a route that
+    // accepts customer photographs; a feature that collects personal data
+    // must not be live on every install merely because nobody said no. The
+    // stored setting still wins in both directions, so an install that has
+    // already switched it on is unaffected -- only the ABSENT setting's
+    // meaning changes.
+    submissionEnabled: normalizeBoolean(settings.customer_portal_submission_enabled, false),
     submissionRewardPoints: Math.max(0, Math.floor(toNumber(settings.customer_portal_submission_reward_points, 5))),
     submissionInstructions: settings.customer_portal_submission_instructions
       || 'Share the business on social media, then upload screenshots here for staff review.',
   }
+}
+
+export type PortalPublicationField = 'business_legal_name' | 'business_registration_number' | 'business_address' | 'business_phone' | 'business_email'
+
+export function getPortalPublicationMissingFields(settings: SettingsMap): PortalPublicationField[] {
+  const required: PortalPublicationField[] = [
+    'business_legal_name',
+    'business_registration_number',
+    'business_address',
+    'business_phone',
+    'business_email',
+  ]
+  return required.filter((key) => !String(settings[key] || '').trim())
 }
 
 // Root cause of "brand/category filter showing irrelevant/empty options":
@@ -703,13 +735,14 @@ app.get('/bootstrap', async (c) => {
   const version = await portalCacheVersion(c)
   return c.json(await cachedJsonResponse(portalCacheRequest(c.req.raw, c.req.query(), c.req.path), c.executionCtx, version, PORTAL_CATALOG_TTL_SECONDS, async () => {
     const settings = await loadSettingsMap(c.env)
+    const config = buildPortalConfig(settings, c.env)
     const showOutOfStockProducts = normalizeBoolean(settings.customer_portal_show_out_of_stock_products, true)
     const [meta, catalog] = await Promise.all([
       buildPortalMeta(c.env, showOutOfStockProducts),
       buildPortalCatalog(c.env, showOutOfStockProducts),
     ])
     return {
-      config: buildPortalConfig(settings, c.env),
+      config,
       meta,
       catalog,
       products: catalog.items,
@@ -759,13 +792,13 @@ app.get('/ai/status', async (c) => {
   const db = getDb(c.env)
   const provider = config.aiProviderId
     ? await db.prepare(`
-        SELECT id, name, requests_per_minute FROM ai_provider_configs
+        SELECT id, name, provider, requests_per_minute FROM ai_provider_configs
         WHERE id = ? AND enabled = 1 AND provider_type = 'chat'
-      `).get<{ id: number; name: string; requests_per_minute: number }>([config.aiProviderId])
+      `).get<{ id: number; name: string; provider: string; requests_per_minute: number }>([config.aiProviderId])
     : await db.prepare(`
-        SELECT id, name, requests_per_minute FROM ai_provider_configs
+        SELECT id, name, provider, requests_per_minute FROM ai_provider_configs
         WHERE enabled = 1 AND provider_type = 'chat' ORDER BY priority ASC LIMIT 1
-      `).get<{ id: number; name: string; requests_per_minute: number }>()
+      `).get<{ id: number; name: string; provider: string; requests_per_minute: number }>()
 
   // Public availability only: whether the assistant is on, plus its title
   // and disclaimer. The backing provider row's identity (id/name) and config
@@ -774,9 +807,13 @@ app.get('/ai/status', async (c) => {
   // for response-shape stability with the client's existing handling.
   return c.json({
     success: true,
-    enabled: !!config.aiEnabled && !!provider,
+    enabled: !!config.publicationReady && !!config.aiEnabled && !!provider,
     title: config.aiTitle,
     disclaimer: config.aiDisclaimer,
+    provider: provider?.provider || '',
+    dataUseNotice: provider
+      ? 'Your question and optional shopping preferences are sent to this AI provider and may be processed outside Cambodia.'
+      : '',
     usage: { providers: [] },
   })
 })
@@ -801,10 +838,8 @@ function hasAiProfilePreference(profile: Record<string, unknown> = {}): boolean 
 // Lightweight visitor fingerprint for AI per-visitor throttling/fairness
 // only -- not used for auth or logging identity. Ported from backend/src/
 // routes/portal.ts's getVisitorFingerprint (req.ip -> Workers' CF-Connecting-IP).
-function getVisitorFingerprint(c: { req: { header: (name: string) => string | undefined } }, request: Request): string {
-  const ip = getClientIp(request).slice(0, 120)
-  const ua = (c.req.header('user-agent') || '').trim().slice(0, 240)
-  return `${ip}|${ua || 'unknown-agent'}`
+async function getVisitorFingerprint(env: Env, request: Request): Promise<string | null> {
+  return portalAbuseKey(env, 'portal:ai:visitor', getClientIp(request).slice(0, 120))
 }
 
 function collectRecommendationCitations(recommendations: Array<{ citations?: unknown[] }> = []) {
@@ -889,8 +924,12 @@ async function loadPortalAiCatalog(env: Env, showOutOfStockProducts: boolean) {
 // instead of an in-memory Map).
 app.post('/ai/chat', async (c) => {
   try {
-    const clientIp = getClientIp(c.req.raw)
-    const ipCheck = await checkRateLimit(c.env, 'portal:ai_chat:ip', clientIp, 20, 60 * 1000)
+    const clientKey = await portalAbuseKey(c.env, 'portal:ai_chat:ip', getClientIp(c.req.raw))
+    const visitorFingerprint = await getVisitorFingerprint(c.env, c.req.raw)
+    if (!clientKey || !visitorFingerprint) {
+      return c.json({ error: 'Portal privacy protection is not configured.', code: 'portal_privacy_unavailable' }, 503)
+    }
+    const ipCheck = await checkRateLimit(c.env, 'portal:ai_chat:ip', clientKey, 20, 60 * 1000)
     if (!ipCheck.allowed) {
       c.header('Retry-After', String(ipCheck.retryAfterSeconds))
       return c.json({ error: `Too many requests. Try again in ${ipCheck.retryAfterSeconds} seconds.` }, 429)
@@ -898,6 +937,9 @@ app.post('/ai/chat', async (c) => {
 
     const settings = await loadSettingsMap(c.env)
     const config = buildPortalConfig(settings, c.env)
+    if (!config.publicationReady) {
+      return c.json({ error: 'The storefront is not ready for publication', code: 'portal_publication_not_ready' }, 503)
+    }
     if (!config.aiEnabled) {
       return c.json({ error: 'Portal AI is currently disabled' }, 403)
     }
@@ -905,6 +947,9 @@ app.post('/ai/chat', async (c) => {
     const rejection = await admitRequestBody(c, SMALL_BODY_BYTES)
     if (rejection) return rejection
     const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
+    if (body.dataUseConsent !== true) {
+      return c.json({ error: 'Confirm the AI data-use notice before sending a request', code: 'ai_data_use_consent_required' }, 400)
+    }
     const question = String(body?.question || '').trim().slice(0, 2000)
     const profile = sanitizeAiProfile(body?.profile)
     if (!question && !hasAiProfilePreference(profile)) {
@@ -922,7 +967,7 @@ app.post('/ai/chat', async (c) => {
       profile,
       question,
       products,
-      visitorFingerprint: getVisitorFingerprint(c, c.req.raw),
+      visitorFingerprint,
     })
 
     const citations = collectRecommendationCitations(response.recommendations)
@@ -1000,7 +1045,13 @@ app.get('/promotions', async (c) => {
       AND (p.ends_at IS NULL OR p.ends_at >= @now)
     ORDER BY p.sort_order ASC, p.id ASC
   `).all({ now: nowIso })
-  return c.json({ items: rows })
+  const items = (Array.isArray(rows) ? rows : []).map((row) => ({
+    ...row,
+    // Legacy rows may predate the admin write guard. Refuse an unsafe value
+    // again at the public boundary so it never reaches a visitor as a target.
+    link_url: normalizeSafeLinkUrl((row as Record<string, unknown>).link_url),
+  }))
+  return c.json({ items })
 })
 
 // ---- Customer membership lookup + share-submission workflow ----
@@ -1097,7 +1148,17 @@ function normalizePortalSubmissionRows(rows: Array<Record<string, unknown>>): Su
     } catch (_) {
       screenshots = []
     }
-    return { ...(entry as SubmissionRow), screenshots }
+    // A private key is not a URL. The reviewer gets a link to the staff-only
+    // route instead, positional so the key itself never leaves the Worker;
+    // rows written before N45 still hold '/uploads/...' paths and pass
+    // through unchanged so the existing queue keeps rendering.
+    const id = entry.id
+    const resolved = screenshots.map((entry_, index) => (
+      String(entry_ || '').startsWith(PORTAL_SUBMISSION_PREFIX)
+        ? `/api/portal/submissions/${id}/screenshot/${index}`
+        : String(entry_ || '')
+    ))
+    return { ...(entry as SubmissionRow), screenshots: resolved }
   })
 }
 
@@ -1130,7 +1191,12 @@ function sanitizeScreenshots(value: unknown): string[] {
     if (safe.length >= 8) break
     const normalized = String(entry || '').trim()
     if (!normalized || normalized.length > 2_000_000) continue
-    if (normalized.startsWith('/uploads/') || DATA_IMAGE_RE.test(normalized)) safe.push(normalized)
+    // Inline images ONLY (N45). This used to also wave through any string
+    // starting '/uploads/', which let a submitter attach an object they did
+    // not upload -- any catalogue asset, or another customer's screenshot --
+    // to their own submission. The storefront has only ever sent data URLs
+    // (readImageFilesAsDataUrls), so nothing legitimate used that branch.
+    if (DATA_IMAGE_RE.test(normalized)) safe.push(normalized)
   }
   return safe
 }
@@ -1154,9 +1220,21 @@ function dataUrlToBytes(dataUrl: string): { bytes: Uint8Array; mimeType: string 
   }
 }
 
-// Persists any inline data-URL screenshots to R2 (same bucket/prefix as
-// lib/fileAssets.ts's uploads) and returns public paths; already-stored
-// `/uploads/...` paths pass through unchanged.
+// Customer screenshots are personal data: they carry the submitter's own
+// social profile and, routinely, other people's names and faces. They used
+// to be written to `uploads/`, which index.ts's GET /uploads/* serves to
+// anyone with the link, unauthenticated, under a one-year immutable cache
+// header -- a public image host for other people's photographs, with no
+// delete path anywhere in the codebase.
+//
+// They now go under a prefix nothing public serves. The only way back out is
+// GET /submissions/:id/screenshot/:index below, which is staff-only; the
+// value stored in screenshots_json is the R2 KEY, never a URL, so a leaked
+// database row is not by itself a link to the image (N45).
+export const PORTAL_SUBMISSION_PREFIX = 'private/portal-submissions/'
+
+// Persists inline data-URL screenshots to R2 under that private prefix and
+// returns their object keys.
 async function materializePortalScreenshots(env: Env, screenshots: string[]): Promise<string[]> {
   const resolved: string[] = []
   for (const entry of screenshots) {
@@ -1166,10 +1244,10 @@ async function materializePortalScreenshots(env: Env, screenshots: string[]): Pr
       // This is the one upload path in the app that previously skipped
       // magic-byte validation (see lib/uploadSecurity.ts) -- every other
       // upload route (files.ts, products.ts, users.ts, importJobs.ts)
-      // already checks that the file's real bytes match its claimed type,
-      // but this one is also the only *unauthenticated* upload path
-      // (anyone can submit a "screenshot" with a membership number,
-      // no login), so it's the highest-value place to close the gap.
+      // already checks that the file's real bytes match its claimed type.
+      // It was ALSO the only unauthenticated upload path until N45 put a
+      // portal session in front of it; the byte check stays regardless,
+      // because a signed-in stranger is still a stranger.
       // sanitizeScreenshots already restricted the claimed mime type to
       // image/(png|jpeg|webp|gif) via DATA_IMAGE_RE -- this confirms the
       // decoded bytes actually are that kind of file, not just labeled as
@@ -1177,14 +1255,16 @@ async function materializePortalScreenshots(env: Env, screenshots: string[]): Pr
       // publicly at /uploads/*.
       if (detectBufferKind(decoded.bytes) !== 'image') continue
       const storedName = buildUniqueStoredName(`portal-submission-${Date.now()}.jpg`)
-      const objectKey = `uploads/${storedName}`
+      const objectKey = `${PORTAL_SUBMISSION_PREFIX}${storedName}`
       await env.ASSETS.put(objectKey, decoded.bytes, { httpMetadata: { contentType: decoded.mimeType } })
-      // K3: same on-upload normalization every other image entry point gets.
-      await enqueueImageNormalization(env, objectKey)
-      resolved.push(`/uploads/${storedName}`)
+      // Keep customer-submitted evidence in the configured private R2 bucket.
+      // The shared image-normalization queue can fall back to Cloudinary, so
+      // these consented screenshots deliberately do not enter that pipeline.
+      resolved.push(objectKey)
       continue
     }
-    resolved.push(entry)
+    // Anything that is not an inline image was already dropped by
+    // sanitizeScreenshots; nothing else may become a stored screenshot.
   }
   return resolved
 }
@@ -1243,27 +1323,32 @@ async function loadAccountProfile(env: Env, accountId: number): Promise<{ member
 
 app.post('/auth/signup', async (c) => {
   const ip = getClientIp(c.req.raw)
-  const ipWindow = await checkRateLimit(c.env, 'portal:signup:ip', ip, 30, 15 * 60 * 1000)
+  const ipKey = await portalAbuseKey(c.env, 'portal:signup:ip', ip)
+  if (!ipKey) return c.json({ error: 'Portal privacy protection is not configured.', code: 'portal_privacy_unavailable' }, 503)
+  const ipWindow = await checkRateLimit(c.env, 'portal:signup:ip', ipKey, 30, 15 * 60 * 1000)
   if (!ipWindow.allowed) {
     c.header('Retry-After', String(ipWindow.retryAfterSeconds))
     return c.json({ error: `Too many attempts. Try again in ${ipWindow.retryAfterSeconds} seconds.`, code: 'rate_limited' }, 429)
   }
-  const lock = await getPortalLockoutState(c.env, 'signup', ip)
+  const lock = await getPortalLockoutState(c.env, 'signup', ipKey)
   if (lock.locked) {
     c.header('Retry-After', String(lock.retryAfterSeconds))
     return c.json({ error: `Too many sign-up attempts. Please wait about ${Math.ceil(lock.retryAfterSeconds / 60)} minutes, or contact us.`, code: 'locked' }, 429)
   }
 
   const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
-  const result = await signupPortalAccount(c.env, { name: body.name, phone: body.phone, membershipId: body.membershipId, password: body.password })
+  // consent is the visitor's agreement to the Terms and the Privacy Policy.
+  // The checkbox on the storefront is the prompt; this endpoint is public and
+  // unauthenticated, so the rule itself lives in signupPortalAccount.
+  const result = await signupPortalAccount(c.env, { name: body.name, phone: body.phone, membershipId: body.membershipId, password: body.password, consent: body.consent, consentLocale: body.consentLocale })
   if (!result.ok) {
     // Only phone/membership-id probing counts toward the 10-fail cap; a benign
     // form error (missing field, short password) is retryable without locking.
-    if (result.abuse) await recordPortalFailure(c.env, 'signup', ip)
-    return c.json({ error: result.error, code: result.code }, result.status as 400 | 409)
+    if (result.abuse) await recordPortalFailure(c.env, 'signup', ipKey)
+    return c.json({ error: result.error, code: result.code }, result.status as 400 | 409 | 503)
   }
-  await clearPortalLockout(c.env, 'signup', ip)
-  const session = await createPortalSession(c.env, result.accountId, { userAgent: c.req.header('user-agent'), ip })
+  await clearPortalLockout(c.env, 'signup', ipKey)
+  const session = await createPortalSession(c.env, result.accountId)
   setPortalCookie(c, session.token, session.expiresAt)
   return c.json({ ok: true, account: { membershipId: result.membershipId, name: result.name, email: null } })
 })
@@ -1271,7 +1356,9 @@ app.post('/auth/signup', async (c) => {
 app.post('/auth/signin', async (c) => {
   const ip = getClientIp(c.req.raw)
   const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
-  const ipWindow = await checkRateLimit(c.env, 'portal:signin:ip', ip, 40, 15 * 60 * 1000)
+  const ipKey = await portalAbuseKey(c.env, 'portal:signin:ip', ip)
+  if (!ipKey) return c.json({ error: 'Portal privacy protection is not configured.', code: 'portal_privacy_unavailable' }, 503)
+  const ipWindow = await checkRateLimit(c.env, 'portal:signin:ip', ipKey, 40, 15 * 60 * 1000)
   if (!ipWindow.allowed) {
     c.header('Retry-After', String(ipWindow.retryAfterSeconds))
     return c.json({ error: `Too many attempts. Try again in ${ipWindow.retryAfterSeconds} seconds.`, code: 'rate_limited' }, 429)
@@ -1279,20 +1366,24 @@ app.post('/auth/signin', async (c) => {
   // Flat 10-fail cap keyed on the canonical phone (so one targeted account
   // can't be hammered from rotating IPs), falling back to IP when no phone is
   // supplied at all.
-  const phoneKey = canonicalizePhone(body.phone) || `nophone:${ip}`
+  const canonicalPhone = canonicalizePhone(body.phone)
+  const phoneKey = canonicalPhone
+    ? await portalAbuseKey(c.env, 'portal:signin:phone', canonicalPhone)
+    : ipKey
+  if (!phoneKey) return c.json({ error: 'Portal privacy protection is not configured.', code: 'portal_privacy_unavailable' }, 503)
   const lock = await getPortalLockoutState(c.env, 'signin', phoneKey)
   if (lock.locked) {
     c.header('Retry-After', String(lock.retryAfterSeconds))
     return c.json({ error: `Too many sign-in attempts. Please wait about ${Math.ceil(lock.retryAfterSeconds / 60)} minutes, or reset your password.`, code: 'locked' }, 429)
   }
 
-  const result = await signinPortalAccount(c.env, { identifier: body.identifier, phone: body.phone, password: body.password })
+  const result = await signinPortalAccount(c.env, { identifier: body.identifier, phone: body.phone, password: body.password, consent: body.consent, consentLocale: body.consentLocale })
   if (!result.ok) {
     await recordPortalFailure(c.env, 'signin', phoneKey)
-    return c.json({ error: result.error, code: result.code }, result.status as 401)
+    return c.json({ error: result.error, code: result.code }, result.status as 401 | 428 | 503)
   }
   await clearPortalLockout(c.env, 'signin', phoneKey)
-  const session = await createPortalSession(c.env, result.accountId, { userAgent: c.req.header('user-agent'), ip })
+  const session = await createPortalSession(c.env, result.accountId)
   setPortalCookie(c, session.token, session.expiresAt)
   const profile = await loadAccountProfile(c.env, result.accountId)
   return c.json({ ok: true, account: profile })
@@ -1351,7 +1442,9 @@ app.put('/account/wishlist', async (c) => {
 // The account system replaces it; the storefront shows a privacy message in
 // its place, and this endpoint refuses so the data path can't be reached
 // directly either. findCustomerByMembership is retained — /submissions still
-// uses it — but nothing here returns customer rows anymore.
+// resolves a SIGNED-IN account's own customer row through it (N45; the
+// membership number comes from the session, never from a request body) — but
+// nothing here returns customer rows anymore.
 app.get('/membership/:membershipNumber', async (c) => {
   return c.json({
     error: 'This feature is not built into the account structure for privacy and security purposes.',
@@ -1359,28 +1452,121 @@ app.get('/membership/:membershipNumber', async (c) => {
   }, 403)
 })
 
+// How many screenshots one customer may submit per rolling 24 hours. The
+// per-IP window above bounds a flood from one machine; this bounds the
+// storage one ACCOUNT can consume however many machines it uses. Three is a
+// generous reading of the feature (share a post, prove it once).
+export const PORTAL_SUBMISSION_DAILY_CAP = 3
+const PORTAL_SUBMISSION_CAP_WINDOW_MS = 24 * 60 * 60 * 1000
+export const PORTAL_SUBMISSION_CONSENT_VERSION = 'portal-submission-2026-09-07'
+
+let submissionConsentColumnsReady: boolean | null = null
+async function portalSubmissionConsentSchemaReady(env: Env): Promise<boolean> {
+  if (submissionConsentColumnsReady === true) return true
+  try {
+    const rows = await getDb(env).prepare('PRAGMA table_info("customer_share_submissions")').all<{ name?: string }>()
+    const names = new Set((Array.isArray(rows) ? rows : []).map((row) => String(row?.name || '')))
+    const ready = ['rights_consent_version', 'privacy_consent_version', 'consent_at', 'consent_locale']
+      .every((name) => names.has(name))
+    submissionConsentColumnsReady = ready
+    return ready
+  } catch {
+    submissionConsentColumnsReady = false
+    return false
+  }
+}
+
+// Resolve the CRM customer a signed-in portal account speaks for. The link
+// is the account row itself -- contact_id when the signup folded a contact,
+// otherwise the membership id the account was issued -- so the caller never
+// gets to name a customer.
+async function resolveSubmissionCustomer(env: Env, account: { contact_id: number | null; membership_id: string }) {
+  if (account.contact_id) {
+    const row = await getDb(env).prepare(
+      'SELECT id, name, membership_number FROM customers WHERE id = @id LIMIT 1',
+    ).get<{ id: number; name: string | null; membership_number: string | null }>({ id: account.contact_id })
+    if (row) return row
+  }
+  const byMembership = await findCustomerByMembership(env, account.membership_id || '')
+  return byMembership ? { id: byMembership.id, name: byMembership.name, membership_number: byMembership.membership_number } : null
+}
+
 app.post('/submissions', async (c) => {
-  const rate = await checkRateLimit(c.env, 'portal:submissions', getClientIp(c.req.raw), 12, 15 * 60 * 1000)
+  // Was: an UNAUTHENTICATED endpoint that accepted a membership number from
+  // the request body, looked it up, and wrote whatever images came with it.
+  // Membership numbers are a gap-filling LC-##### sequence (lib/
+  // membershipNumber.ts) -- guessable in order -- so the only thing standing
+  // between the open internet and an image-hosting write was counting. It
+  // now needs a real session, and the customer comes from that session's
+  // account, never from the body (N45).
+  const submissionKey = await portalAbuseKey(c.env, 'portal:submissions:ip', getClientIp(c.req.raw))
+  if (!submissionKey) return c.json({ error: 'Portal privacy protection is not configured.', code: 'portal_privacy_unavailable' }, 503)
+  const rate = await checkRateLimit(c.env, 'portal:submissions', submissionKey, 12, 15 * 60 * 1000)
   if (!rate.allowed) {
     c.header('Retry-After', String(rate.retryAfterSeconds))
     return c.json({ error: `Too many requests. Try again in ${rate.retryAfterSeconds} seconds.` }, 429)
   }
 
+  // Order is deliberate. The feature switch and the byte ceiling are
+  // cheap and answer the same for everyone (/config already publishes
+  // whether submissions are on), so they run before anything that costs a
+  // database round-trip; the session check is what actually gates the write.
   const settings = await loadSettingsMap(c.env)
   const config = buildPortalConfig(settings, c.env)
+  if (!config.publicationReady) {
+    return c.json({ error: 'The storefront is not ready for publication', code: 'portal_publication_not_ready' }, 503)
+  }
   if (!config.submissionEnabled) return c.json({ error: 'Customer submissions are currently disabled' }, 403)
 
   const rejection = await admitRequestBody(c, PORTAL_SCREENSHOT_BODY_BYTES)
   if (rejection) return rejection
-  const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
-  const membershipNumber = String(body.membershipNumber || '').trim()
-  if (!membershipNumber) return c.json({ error: 'Membership number is required' }, 400)
 
-  const customer = await findCustomerByMembership(c.env, membershipNumber)
-  if (!customer) return c.json({ error: 'Membership not found' }, 404)
+  const account = await getPortalAccount(c)
+  if (!account) {
+    return c.json({ error: 'Please sign in to your account before sharing a screenshot.', code: 'portal_unauthenticated' }, 401)
+  }
+
+  const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
+  if (body.rightsConsent !== true || body.privacyConsent !== true) {
+    return c.json({
+      error: 'Please confirm both the content-rights and privacy statements before submitting.',
+      code: 'submission_consent_required',
+    }, 400)
+  }
+  if (!(await portalSubmissionConsentSchemaReady(c.env))) {
+    return c.json({
+      error: 'Submission consent storage is not ready. Please try again later.',
+      code: 'submission_consent_storage_unavailable',
+    }, 503)
+  }
 
   const screenshots = sanitizeScreenshots(body.screenshots)
   if (!screenshots.length) return c.json({ error: 'At least one screenshot is required' }, 400)
+
+  const customer = await resolveSubmissionCustomer(c.env, account)
+  if (!customer) {
+    // A signed-in account whose CRM row cannot be resolved (an unfolded
+    // signup, a merged/deleted contact). Do not claim success when no durable
+    // submission can be written; the account owner gets an actionable error.
+    return c.json({
+      error: 'Your account is not linked to a customer record yet. Please contact the store before submitting.',
+      code: 'submission_account_unlinked',
+    }, 409)
+  }
+
+  const db = getDb(c.env)
+  const cutoff = new Date(Date.now() - PORTAL_SUBMISSION_CAP_WINDOW_MS).toISOString().slice(0, 19).replace('T', ' ')
+  const recent = await db.prepare(
+    'SELECT COUNT(*) AS n FROM customer_share_submissions WHERE customer_id = @cid AND created_at >= @cutoff',
+  ).get<{ n: number }>({ cid: customer.id, cutoff })
+  if (Number(recent?.n || 0) >= PORTAL_SUBMISSION_DAILY_CAP) {
+    c.header('Retry-After', String(Math.ceil(PORTAL_SUBMISSION_CAP_WINDOW_MS / 1000)))
+    return c.json({
+      error: `You can share up to ${PORTAL_SUBMISSION_DAILY_CAP} screenshots a day. Please try again tomorrow.`,
+      code: 'submission_daily_cap',
+    }, 429)
+  }
+
   const persistedScreenshots = await materializePortalScreenshots(c.env, screenshots)
   if (!persistedScreenshots.length) {
     return c.json({ error: 'Screenshot upload failed validation. Please upload a real image file.' }, 400)
@@ -1389,19 +1575,30 @@ app.post('/submissions', async (c) => {
   const platform = String(body.platform || '').trim().slice(0, 120)
   const note = String(body.note || '').trim().slice(0, 4000)
 
-  const db = getDb(c.env)
-  const result = await db.prepare(`
-    INSERT INTO customer_share_submissions (
-      customer_id, membership_number, customer_name, platform, note, screenshots_json, status
-    ) VALUES (@customerId, @membershipNumber, @customerName, @platform, @note, @screenshotsJson, 'pending')
-  `).run({
-    customerId: customer.id || null,
-    membershipNumber: customer.membership_number || membershipNumber,
-    customerName: customer.name || '',
-    platform: platform || null,
-    note: note || null,
-    screenshotsJson: JSON.stringify(persistedScreenshots),
-  })
+  let result: Awaited<ReturnType<ReturnType<typeof db.prepare>['run']>>
+  try {
+    result = await db.prepare(`
+      INSERT INTO customer_share_submissions (
+        customer_id, membership_number, customer_name, platform, note, screenshots_json, status,
+        rights_consent_version, privacy_consent_version, consent_at, consent_locale
+      ) VALUES (
+        @customerId, @membershipNumber, @customerName, @platform, @note, @screenshotsJson, 'pending',
+        @consentVersion, @consentVersion, CURRENT_TIMESTAMP, @consentLocale
+      )
+    `).run({
+      customerId: customer.id,
+      membershipNumber: customer.membership_number || account.membership_id,
+      customerName: customer.name || '',
+      platform: platform || null,
+      note: note || null,
+      screenshotsJson: JSON.stringify(persistedScreenshots),
+      consentVersion: PORTAL_SUBMISSION_CONSENT_VERSION,
+      consentLocale: String(body.consentLocale || 'und').slice(0, 16),
+    })
+  } catch (error) {
+    await c.env.ASSETS.delete(persistedScreenshots).catch(() => undefined)
+    throw error
+  }
 
   c.executionCtx.waitUntil(broadcast(c.env, 'portalSubmissions', { action: 'create', id: result.lastInsertRowid }))
   return c.json({ success: true, id: result.lastInsertRowid })
@@ -1427,6 +1624,37 @@ app.get('/submissions/review', requireAuth, async (c) => {
       created_at DESC
   `).all()
   return c.json(normalizePortalSubmissionRows(rows as unknown as Array<Record<string, unknown>>))
+})
+
+// The ONLY way a stored submission screenshot leaves the Worker. Staff-only,
+// positional (the reviewer never learns the object key), and explicitly
+// uncacheable -- the default in lib/r2.ts is a year of immutable public
+// caching, which is right for a catalogue image and wrong for a photograph
+// of somebody's phone screen (N45).
+app.get('/submissions/:id/screenshot/:index', requireAuth, async (c) => {
+  if (!canManagePortalSubmissions(c.get('user'))) return c.json({ error: 'Forbidden' }, 403)
+  const id = Number(c.req.param('id'))
+  const index = Number(c.req.param('index'))
+  if (!Number.isInteger(id) || id <= 0 || !Number.isInteger(index) || index < 0) {
+    return c.json({ error: 'Not found' }, 404)
+  }
+  const row = await getDb(c.env).prepare(
+    'SELECT screenshots_json FROM customer_share_submissions WHERE id = @id LIMIT 1',
+  ).get<{ screenshots_json: string | null }>({ id })
+  if (!row) return c.json({ error: 'Not found' }, 404)
+  let keys: unknown[] = []
+  try { keys = JSON.parse(String(row.screenshots_json || '[]')) } catch { keys = [] }
+  const key = String(Array.isArray(keys) ? keys[index] ?? '' : '')
+  // Only keys this route wrote are servable. A legacy `/uploads/...` value is
+  // already public through index.ts and must not gain a second door here,
+  // and the prefix check is what stops a crafted row addressing any other
+  // object in the bucket.
+  if (!key.startsWith(PORTAL_SUBMISSION_PREFIX)) return c.json({ error: 'Not found' }, 404)
+  const response = await serveObject(c.env.ASSETS, key, c.req.raw)
+  const headers = new Headers(response.headers)
+  headers.set('cache-control', 'private, no-store')
+  headers.set('x-content-type-options', 'nosniff')
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers })
 })
 
 app.patch('/submissions/:id/review', requireAuth, async (c) => {
@@ -1656,7 +1884,7 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
   // 20, matching CATALOG_DEFAULT_PAGE_SIZE on the storefront -- a request
   // that omits pageSize must get the same page the client would have asked
   // for, or the first load differs from every later one.
-  const pageSize = Math.min(100, Math.max(1, Number.parseInt(query.pageSize || '20', 10) || 20))
+  const pageSize = Math.min(100, Math.max(1, Number.parseInt(query.pageSize || '50', 10) || 50))
   const offset = (page - 1) * pageSize
 
   // Targeted key lookup (not the full loadSettingsMap scan) since this runs

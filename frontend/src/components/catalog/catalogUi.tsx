@@ -84,7 +84,7 @@ export function StatusPill({ status, copy }: StatusPillProps) {
 
   return (
     <span className={`inline-flex items-center gap-1.5 rounded-full bg-white/95 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide shadow-sm backdrop-blur dark:bg-neutral-900/90 ${statusClass(status)}`}>
-      <span className={`h-1.5 w-1.5 rounded-full ${statusDotClass(status)}`} />
+      <span className={`h-1.5 w-1.5 rounded-full ${statusDotClass(status)}`} aria-hidden="true" />
       {copy(labelKey, fallback)}
     </span>
   )

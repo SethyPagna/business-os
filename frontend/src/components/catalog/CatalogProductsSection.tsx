@@ -27,8 +27,11 @@ import { buildPortalHighlightBadges, buildPortalPricePresentation, resolvePortal
 import { isProductPromoted, type PromotionRule } from '../../utils/promotionRules.ts'
 import { aggregateInitialOptions, getInitialKey } from '../../utils/initials.ts'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
+import { PORTAL_MERCHANT_COLOR_DEFAULTS, ensureAccessibleSurface } from './portalContrast.ts'
 
-type CopyFn = (key: string, fallback?: string) => string
+// Same three-argument translator as everywhere else on the portal; the two
+// arity declarations silently dropped the Khmer fallback at the type level.
+type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
 type ReplaceVarsFn = (template: string, values: Record<string, string | number>) => string
 type StringListSetter = Dispatch<SetStateAction<string[]>>
 type InitialFilterSetter = Dispatch<SetStateAction<string>>
@@ -99,7 +102,6 @@ type CatalogProductsSectionProps = {
   productPage?: number | string | null
   productPageSize?: number | string | null
   setProductPage?: (page: number) => void
-  setProductPageSize?: (pageSize: number) => void
   initialOptions?: InitialOption[]
   initialFilter?: string
   setInitialFilter?: InitialFilterSetter
@@ -205,7 +207,6 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
     productPage,
     productPageSize,
     setProductPage,
-    setProductPageSize,
     initialOptions: serverInitialOptions,
     initialFilter: controlledInitialFilter,
     setInitialFilter: setControlledInitialFilter,
@@ -254,14 +255,13 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
     onToggleWishlist,
   } = props
   const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(CATALOG_DEFAULT_PAGE_SIZE)
+  const pageSize = CATALOG_DEFAULT_PAGE_SIZE
   const [localInitialFilter, setLocalInitialFilter] = useState('all')
   const filterPanelRef = useRef<HTMLDivElement | null>(null)
   const effectivePage = serverPaged ? Number(productPage || 1) : page
   const effectivePageSize = serverPaged ? Number(productPageSize || CATALOG_DEFAULT_PAGE_SIZE) : pageSize
   const effectiveInitialFilter = serverPaged ? (controlledInitialFilter || 'all') : localInitialFilter
   const updatePage = serverPaged ? setProductPage : setPage
-  const updatePageSize = serverPaged ? setProductPageSize : setPageSize
   const updateInitialFilter = serverPaged ? setControlledInitialFilter : setLocalInitialFilter
 
   useEffect(() => {
@@ -302,8 +302,15 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
   // the per-page chooser lives inside the pill, with the storefront's page
   // size held in component state rather than in the URL, so a shopper on
   // 100/page who narrowed to 12 products had no way back short of reloading
-  // the site. The pill renders whenever there is anything to show; on one
-  // page its arrows are simply disabled.
+  // the site.
+  //
+  // The chooser has since left the pill for the Filters panel, so a
+  // single-page result no longer needs a pager to reach it -- and the pill
+  // stopped rendering on one page. That rule is NOT re-implemented here:
+  // this stays "is there anything to page", and the `centered` layout returns
+  // null on totalPages <= 1 itself (PaginationControls). One rule, one place;
+  // duplicating the count gate here is exactly how the two mounts came to
+  // disagree in the first place.
   const showPager = pagerState(effectivePage, totalProducts, effectivePageSize, CATALOG_DEFAULT_PAGE_SIZE).visible
   const visiblePromotionItems = useMemo(
     () => Array.isArray(promotionItems)
@@ -386,6 +393,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
             <span className="block truncate">{copy('category', 'Category')}</span>
           </div>
           <PortalFilterCombobox
+            copy={copy}
             label={copy('category', 'Category')}
             allLabel={copy('all', 'All')}
             searchPlaceholder={copy('searchCategories', 'Search categories...')}
@@ -405,6 +413,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
             <span className="block truncate">{copy('brand', 'Brand')}</span>
           </div>
           <PortalFilterCombobox
+            copy={copy}
             label={copy('brand', 'Brand')}
             allLabel={copy('all', 'All')}
             searchPlaceholder={copy('searchBrands', 'Search brands...')}
@@ -425,6 +434,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
               <span className="block truncate">{copy('branch', 'Branch')}</span>
             </div>
             <PortalFilterCombobox
+              copy={copy}
               label={copy('branch', 'Branch')}
               allLabel={copy('allBranches', 'All branches')}
               searchPlaceholder={copy('searchBranches', 'Search branches...')}
@@ -470,6 +480,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
           </div>
         </div>
       ) : null}
+
     </>
   )
 
@@ -521,13 +532,18 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
       <div className="mb-5 space-y-3">
         <div className="sticky top-16 z-20 -mx-1 space-y-2 rounded-[22px] border border-slate-200 bg-white/96 p-2 shadow-[0_8px_24px_rgba(15,23,42,0.08)] backdrop-blur dark:border-neutral-700 dark:bg-neutral-900/96 sm:top-20">
           <div className="flex items-center gap-2">
-          <label className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm transition focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100 dark:border-neutral-700 dark:bg-neutral-950 dark:focus-within:border-amber-400 dark:focus-within:ring-amber-500/15">
-            <Search className="h-4 w-4 shrink-0 text-blue-600 dark:text-amber-300" />
+          {/* The wrapping <label> held only the magnifier icon, so it gave the
+              field no accessible name at all: a reader announced a bare "edit
+              text". A placeholder is not a name -- it disappears the moment
+              anything is typed, and several readers ignore it outright. */}
+          <label htmlFor="portal-product-search" className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm transition focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100 dark:border-neutral-700 dark:bg-neutral-950 dark:focus-within:border-amber-400 dark:focus-within:ring-amber-500/15">
+            <Search className="h-4 w-4 shrink-0 text-blue-600 dark:text-amber-300" aria-hidden="true" />
+            <span className="sr-only">{copy('searchPlaceholder', 'Search products')}</span>
             <input
               id="portal-product-search"
               name="product_search"
               autoComplete="off"
-              className="min-w-0 flex-1 bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400 dark:text-neutral-100"
+              className="min-w-0 flex-1 bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-500 dark:text-neutral-100 dark:placeholder:text-neutral-400"
               placeholder={copy('searchPlaceholder', 'Search products')}
               value={search}
               onChange={(event) => setSearch(event.target.value)}
@@ -614,7 +630,13 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
       {previewConfig.showPromotions !== false && visiblePromotionItems.length ? (
         <div className="mb-5 space-y-3">
           <div className="flex flex-col gap-1 px-1">
-            <div className="text-lg font-semibold text-slate-900 dark:text-neutral-100">{promotionsTitle || copy('promotionsSectionFallback', 'Featured offers')}</div>
+            {/* WCAG 1.3.1 / 2.4.10: the promotions group announced itself as a
+                heading only by being bigger, while each promotion card below
+                it really was an <h3>. A reader jumping by heading therefore
+                landed on the offers with nothing above them saying what the
+                run of offers was. Group is h3 under the section's h2; the
+                cards drop to h4 so the levels stay in order. */}
+            <h3 className="text-lg font-semibold text-slate-900 dark:text-neutral-100">{promotionsTitle || copy('promotionsSectionFallback', 'Featured offers')}</h3>
             <div className="text-sm text-slate-500 dark:text-neutral-400">{promotionsIntro || copy('promotionsSectionHint', 'Our latest offers and announcements.')}</div>
           </div>
           <div className="grid gap-4 lg:grid-cols-2">
@@ -629,7 +651,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                         </span>
                       ) : null}
                       <div className="space-y-2">
-                        {item.title ? <h3 className="text-2xl font-semibold leading-tight">{item.title}</h3> : null}
+                        {item.title ? <h4 className="text-2xl font-semibold leading-tight">{item.title}</h4> : null}
                         {item.subtitle ? <div className="text-sm font-medium text-rose-50/95">{item.subtitle}</div> : null}
                         {item.body ? <p className="text-sm leading-6 text-rose-50/90">{item.body}</p> : null}
                       </div>
@@ -659,9 +681,14 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                     <button
                       type="button"
                       className="relative min-h-[220px] overflow-hidden bg-slate-100 dark:bg-neutral-800"
+                      // Without this the control is a picture inside a button
+                      // and nothing else: the image is redundant with the
+                      // heading beside it (so alt-hidden), which left the
+                      // button itself unnamed.
+                      aria-label={`${copy('viewImages', 'View images')}${item.title ? `: ${item.title}` : ''}`}
                       onClick={() => openPortalImage?.(item.title || promotionsTitle || copy('products', 'Products'), [item.mediaUrl || ''])}
                     >
-                      <img src={item.mediaUrl} alt={item.title || item.subtitle || promotionsTitle || copy('products', 'Products')} className="h-full w-full object-cover" />
+                      <img src={item.mediaUrl} alt={item.title || item.subtitle || promotionsTitle || ''} aria-hidden={item.title || item.subtitle || promotionsTitle ? undefined : true} className="h-full w-full object-cover" />
                     </button>
                   ) : null}
                 </div>
@@ -677,11 +704,15 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
         </div>
       ) : null}
 
-      {/* Back / page / total / Next / per-page, centred, above the grid --
-          and the identical mount below it. `back` and `next` have to be in
-          this map: PaginationControls treats any truthy return as the label,
-          so the map's `|| key` fallback was printing the raw lowercase keys
-          "back" and "next" as the button captions in every language. */}
+      {/* Back / page / total / Next, centred, above the grid -- and the
+          identical mount below it. `back` and `next` have to be in this map:
+          PaginationControls treats any truthy return as the label, so the
+          map's `|| key` fallback was printing the raw lowercase keys "back"
+          and "next" as the button captions in every language.
+
+          No per-page entry any more, in the map or on the row: the owner
+          struck that control off this row and it is a Filters field now
+          (renderFilterFields above), which localises its own label. */}
       {showPager ? (
         <CatalogPaginationControls
           className="mb-4"
@@ -694,13 +725,8 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
             of: copy('of', 'of'),
             back: copy('back', 'Back'),
             next: copy('next', 'Next'),
-            per_page: copy('perPage', 'per page'),
           })[key] || key}
           onPageChange={updatePage}
-          onPageSizeChange={(size) => {
-            updatePageSize?.(size)
-            updatePage?.(1)
-          }}
         />
       ) : null}
 
@@ -760,17 +786,23 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                 className={`group overflow-hidden bg-transparent transition duration-200 ${openProductDetail ? 'cursor-pointer' : ''}`}
                 onClick={() => openProductDetail?.(product)}
               >
-                <div
-                className={`relative aspect-square overflow-hidden rounded-2xl bg-slate-100 dark:bg-neutral-800 ${gallery.length ? 'cursor-zoom-in' : ''}`}
-                onClick={(event) => {
-                  event.stopPropagation()
-                  if (gallery.length) openProductGallery(product, 0)
-                }}
-              >
+                {/* Opening the gallery was a click on a bare <div>: no tab
+                    stop, no name, no key handler, so the photos were
+                    unreachable without a mouse. Making this WRAPPER the
+                    button fixed that and broke something quieter: the
+                    promotion badges and the stock pill are absolutely
+                    positioned inside it, so they became content of a control
+                    -- and a control with an aria-label has its contents
+                    overridden, which is how "20% off" and "Low stock" stopped
+                    being announced at all. The opener is now its own
+                    transparent overlay button, a SIBLING of the badge layers
+                    instead of their parent, so the badges stay ordinary text
+                    in the card and the control names only itself. */}
+                <div className="relative aspect-square overflow-hidden rounded-2xl bg-slate-100 dark:bg-neutral-800">
                 {primaryImage ? (
-                  <CatalogProductImage src={primaryImage} alt={product.name || copy('products', 'Products')} className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]" />
+                  <CatalogProductImage src={primaryImage} alt={[product.name, product.brand].filter(Boolean).join(' - ')} className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]" />
                 ) : (
-                  <div className="flex h-full items-center justify-center text-slate-300">
+                  <div className="flex h-full items-center justify-center text-slate-300" aria-hidden="true">
                     <ShoppingBag className="h-10 w-10" />
                   </div>
                 )}
@@ -780,8 +812,16 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                       (() => {
                         const BadgeIcon = getBadgeIcon(badge)
                         const badgeColor = typeof badge.color === 'string' ? badge.color : ''
-                        const customStyle = badgeColor && badge.key === 'promotion'
-                          ? { backgroundColor: badgeColor, color: '#fff' }
+                        // The promotion badge colour is merchant-typed, so
+                        // the old hardcoded white ink was a coin flip -- a
+                        // pale campaign colour left the label invisible. Take
+                        // the ink from the colour and nudge the fill only as
+                        // far as 4.5:1 needs.
+                        const badgeSurface = badgeColor && badge.key === 'promotion'
+                          ? ensureAccessibleSurface(badgeColor, 'text', PORTAL_MERCHANT_COLOR_DEFAULTS.promotionBadge)
+                          : null
+                        const customStyle = badgeSurface
+                          ? { backgroundColor: badgeSurface.background, color: badgeSurface.color }
                           : undefined
                         return (
                           <span
@@ -807,11 +847,27 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                     {replaceVars(copy('imageCount', '{current}/{total}'), { current: 1, total: gallery.length })}
                   </span>
                 ) : null}
+                {/* Last child, so it sits above the badge layers for the
+                    pointer and covers the whole photo; transparent, so it
+                    changes nothing visually. Being a real <button> gives it
+                    the tab stop, Enter/Space and the focus ring for free. */}
+                {gallery.length ? (
+                  <button
+                    type="button"
+                    data-gallery-open="true"
+                    className="absolute inset-0 h-full w-full cursor-zoom-in bg-transparent"
+                    aria-label={`${copy('viewImages', 'View images')}: ${product.name}`}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      openProductGallery(product, 0)
+                    }}
+                  />
+                ) : null}
               </div>
 
               <div className={`space-y-1 ${compactCatalogCards ? 'pt-2.5' : 'pt-3'}`}>
                 {metadataChips.length ? (
-                  <div className="flex flex-wrap items-center gap-1 text-[10px] uppercase tracking-wide text-slate-400 dark:text-neutral-500">
+                  <div className="flex flex-wrap items-center gap-1 text-[10px] uppercase tracking-wide text-slate-500 dark:text-neutral-400">
                     {metadataChips.map((chip) => (
                       <span key={`${product.id}-${chip}`} {...getKhmerTextProps(chip, '')}>
                         {chip}
@@ -819,9 +875,25 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                     ))}
                   </div>
                 ) : null}
-                <div {...getKhmerTextProps(product.name, `${compactCatalogCards ? 'text-[13px]' : 'text-[15px]'} font-medium leading-snug text-slate-900 dark:text-neutral-100`)}>
-                  {product.name}
-                </div>
+                {/* The whole card is clickable for a pointer, but it cannot
+                    become role="button": it already contains the wishlist and
+                    add-to-list buttons, and a button may not contain buttons.
+                    The product NAME is the keyboard-reachable control that
+                    opens the sheet -- named by the product, as a reader
+                    announces it. */}
+                {openProductDetail ? (
+                  <button
+                    type="button"
+                    onClick={(event) => { event.stopPropagation(); openProductDetail(product) }}
+                    {...getKhmerTextProps(product.name, `block w-full text-left ${compactCatalogCards ? 'text-[13px]' : 'text-[15px]'} font-medium leading-snug text-slate-900 dark:text-neutral-100`)}
+                  >
+                    {product.name}
+                  </button>
+                ) : (
+                  <div {...getKhmerTextProps(product.name, `${compactCatalogCards ? 'text-[13px]' : 'text-[15px]'} font-medium leading-snug text-slate-900 dark:text-neutral-100`)}>
+                    {product.name}
+                  </div>
+                )}
                 {showDescription ? (
                   <p {...getKhmerTextProps(product.description || copy('noDescription', 'No description available.'), `${compactCatalogCards ? 'line-clamp-2 min-h-[2.2rem] text-[11px] leading-[1.15rem]' : 'line-clamp-2 min-h-[2.6rem] text-xs leading-5'} text-slate-500 dark:text-neutral-400`)}>
                     {product.description || copy('noDescription', 'No description available.')}
@@ -841,7 +913,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                     <div className={`font-semibold text-slate-900 dark:text-neutral-100 ${compactCatalogCards ? 'text-xs' : 'text-sm'}`}>
                       {pricePresentation?.primaryText}
                       {showDiscountDetails && promotion?.active && pricePresentation?.originalText ? (
-                        <span className="ml-2 text-[11px] font-normal text-slate-400 line-through dark:text-neutral-500">
+                        <span className="ml-2 text-[11px] font-normal text-slate-500 line-through dark:text-neutral-400">
                           {pricePresentation.originalText}
                         </span>
                       ) : null}
@@ -856,7 +928,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                       return (
                         <button
                           type="button"
-                          className={`inline-flex shrink-0 items-center justify-center rounded-full p-1.5 transition ${saved ? 'text-rose-500' : 'text-slate-400 hover:text-rose-400 dark:text-neutral-500'}`}
+                          className={`inline-flex shrink-0 items-center justify-center rounded-full p-1.5 transition ${saved ? 'text-rose-600 dark:text-rose-400' : 'text-slate-500 hover:text-rose-700 dark:text-neutral-400 dark:hover:text-rose-300'}`}
                           onClick={(event) => {
                             event.stopPropagation()
                             onToggleWishlist(product, previewConfig.showPrices ? pricePresentation?.primaryText : undefined)
@@ -924,13 +996,8 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
             of: copy('of', 'of'),
             back: copy('back', 'Back'),
             next: copy('next', 'Next'),
-            per_page: copy('perPage', 'per page'),
           })[key] || key}
           onPageChange={updatePage}
-          onPageSizeChange={(size) => {
-            updatePageSize?.(size)
-            updatePage?.(1)
-          }}
         />
       ) : null}
 
