@@ -325,9 +325,8 @@ runTest('legacy mutable creation fields are unknown when no durable before snaps
   assert.strictEqual(record.after.change_usd, null)
   assert.strictEqual(record.after.change_khr, null)
   assert.strictEqual(record.after.total_usd, 12.5, 'total remains known without an amendment')
-  assert.deepStrictEqual(record.after.products, [
-    { product: 'Serum', quantity: 1, unit_price_usd: 12.5, line_total_usd: 12.5 },
-  ], 'product lines remain known without a line amendment')
+  assert.strictEqual(record.after.products, null,
+    'current sale-item names can be rewritten by product rename/merge sync and must not be called the creation basket')
 })
 
 runTest('a payment correction is one rich record, not a status-only duplicate', () => {
@@ -833,7 +832,8 @@ runTest('the records route is gated on READING a sale, not on amending one', () 
   // Every durable source needed by the union and creation reconstruction.
   assert.match(body, /FROM sale_amendments/)
   assert.match(body, /FROM audit_logs/)
-  assert.match(body, /FROM sale_items WHERE sale_id = \?/, 'sale creation must include the products actually recorded')
+  assert.doesNotMatch(body, /SELECT product_name, quantity, applied_price_usd, total_usd\s+FROM sale_items/,
+    'mutable sale-item names are not evidence of the creation basket')
   assert.match(body, /payment_method, payment_details, amount_paid_usd, amount_paid_khr/)
   assert.match(body, /FROM sale_mutation_receipts/, 'current tender alone must not be called original')
   assert.match(body, /FROM sale_bulk_members/)

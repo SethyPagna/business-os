@@ -2625,11 +2625,6 @@ app.get('/:id/records', async (c) => {
   `).get<SaleRecordSaleRow>([saleId])
   if (!sale) return c.json({ error: 'Sale not found' }, 404)
 
-  sale.items = await db.prepare(`
-    SELECT product_name, quantity, applied_price_usd, total_usd
-    FROM sale_items WHERE sale_id = ? ORDER BY id ASC
-  `).all<{ product_name?: unknown; quantity?: unknown; applied_price_usd?: unknown; total_usd?: unknown }>([saleId])
-
   const ledger = await db.prepare(`
     SELECT id, kind, group_id, product_name,
       quantity_before, quantity_after, amount_before_usd, amount_after_usd,
