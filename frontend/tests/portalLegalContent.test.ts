@@ -86,6 +86,8 @@ for (const key of [...rendered].sort()) {
 }
 assert.equal(legalText('fr', 'portal_legal_privacy_title'), PORTAL_LEGAL_EN.portal_legal_privacy_title)
 assert.equal(legalText('en', 'portal_legal_not_a_key'), '')
+assert.match(PORTAL_LEGAL_EN.portal_legal_store_session_l, /may renew/i, 'the cookie row must describe conditional session renewal')
+assert.doesNotMatch(PORTAL_LEGAL_EN.portal_legal_store_session_l, /each time|every visit/i, 'the policy overstates how often the server slides a session')
 
 // The cookie table must enumerate the storage this storefront really writes.
 const storageNames = LEGAL_STORAGE_ROWS.map((row) => row.name)
