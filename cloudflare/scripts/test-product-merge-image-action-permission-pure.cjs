@@ -8,6 +8,7 @@ const Module = require('node:module')
 const path = require('node:path')
 const ts = require('typescript')
 const { Hono } = require('hono')
+const Database = require('better-sqlite3')
 
 const srcRoot = path.join(__dirname, '..', 'src')
 
@@ -195,6 +196,25 @@ async function main() {
     const { db, helpers } = loadProductsRoute(state)
     assert.equal(await helpers.productMergeChangesImages(db, [{ keeper, discarded: duplicate }]), false)
     console.log('PASS different primary values alone do not block when the keeper stays unchanged')
+  }
+  {
+    const keeper = product(1, '/uploads/keeper.png')
+    const duplicate = product(2)
+    const state = freshState([{ canonical: keeper, duplicates: [duplicate] }])
+    const { helpers } = loadProductsRoute(state)
+    const guard = helpers.productMergeNoImageEffectAssertion(1, 2)
+    const sqlite = new Database(':memory:')
+    sqlite.exec('CREATE TABLE products(id INTEGER PRIMARY KEY,image_path TEXT); CREATE TABLE product_images(product_id INTEGER,image_path TEXT)')
+    sqlite.prepare('INSERT INTO products(id,image_path) VALUES(?,?)').run(1, keeper.image_path)
+    sqlite.prepare('INSERT INTO products(id,image_path) VALUES(?,?)').run(2, duplicate.image_path)
+    sqlite.prepare('INSERT INTO product_images(product_id,image_path) VALUES(?,?)').run(2, '/uploads/concurrent.png')
+    assert.throws(() => sqlite.prepare(guard.sql).get(guard.params), /malformed JSON/)
+    const source = fs.readFileSync(path.join(srcRoot, 'routes', 'products.ts'), 'utf8')
+    const guardedImageBlock = source.slice(source.indexOf('if (canChangeProductImages)'), source.indexOf("statements.push({ sql: 'UPDATE products SET is_active", source.indexOf('if (canChangeProductImages)')))
+    assert.match(guardedImageBlock, /INSERT INTO product_images/)
+    assert.match(guardedImageBlock, /DELETE FROM product_images/)
+    assert.match(guardedImageBlock, /UPDATE products SET image_path/)
+    console.log('PASS atomic no-image guard rejects a gallery attached after preflight')
   }
 }
 
