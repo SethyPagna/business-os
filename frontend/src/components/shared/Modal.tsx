@@ -27,6 +27,8 @@ type ModalProps = {
   // what allows the unsaved prompt to show a minimize control; dirty/workKey
   // declarations alone never imply that navigation can preserve a draft.
   onMinimize?: DraftPreservingMinimize
+  /** Blocks every dismissal affordance while a child operation must finish. */
+  closeDisabled?: boolean
   wide?: boolean
   size?: ModalSize
   // Lets the operator drag the modal window around by its header -- added
@@ -54,13 +56,14 @@ type ModalProps = {
   unsavedChanges: UnsavedChangesDeclaration
 }
 
-export default function Modal({ title, onClose, children, wide, size, draggable, headerExtra, onMinimize, layer = 'default', unsavedChanges }: ModalProps) {
+export default function Modal({ title, onClose, children, wide, size, draggable, headerExtra, onMinimize, closeDisabled = false, layer = 'default', unsavedChanges }: ModalProps) {
   const { t } = useApp()
   const tr = (key: string, fallback: string): string => {
     const value = t(key)
     return value && value !== key ? value : fallback
   }
   const closeGuard = useCloseGuard(unsavedChanges, onClose, onMinimize)
+  const requestClose = closeDisabled ? () => {} : closeGuard.requestClose
   const widthClass =
     size === 'sm' ? 'max-w-lg' :
     size === 'lg' ? 'max-w-3xl' :
@@ -175,19 +178,20 @@ export default function Modal({ title, onClose, children, wide, size, draggable,
           {headerExtra}
           <button
             type="button"
-            onClick={closeGuard.requestClose}
+            onClick={requestClose}
+            disabled={closeDisabled}
             aria-label={tr('close', 'Close')}
             /* Z5: the ✕ was text-gray-400 (~2.5:1 on white, fails WCAG AA);
                gray-600/gray-300 gives a legible close affordance in both
                themes. */
-            className="text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
+            className="text-gray-600 hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-40 dark:text-gray-300 dark:hover:text-white w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
           ><X className="h-4 w-4" /></button>
           </div>
         </div>
         {/* The guarded close is published to the content so a Cancel button
             inside the modal goes through the SAME check as the ✕ -- see
             modalCloseContext.ts. */}
-        <ModalCloseContext.Provider value={closeGuard.requestClose}>
+        <ModalCloseContext.Provider value={requestClose}>
           <div className="modal-scroll p-3 sm:p-4">{children}</div>
         </ModalCloseContext.Provider>
       </div>
