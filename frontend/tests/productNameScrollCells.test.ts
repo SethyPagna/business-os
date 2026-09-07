@@ -173,56 +173,69 @@ runTest('no product-name cell still wraps or ellipsises instead of scrolling', (
 })
 
 // ---------------------------------------------------------------------------
-// 2b. The four cells that are deliberately NOT converted
+// 2b. The name cells that are deliberately NOT converted
 // ---------------------------------------------------------------------------
 // The ask's own enumerating grep --
 //   git grep -n "dense-cell-truncate\|line-clamp" -- \
 //     frontend/src/components/products frontend/src/components/inventory
-// -- also returns product-name cells on two Products SUB PAGES that this lane
-// does not convert: Stock Change and Stock-in sessions, both rendered from
-// Products.tsx a couple of dozen lines from the Conflicts tab that IS in
-// NAME_CELLS above. Silence about them is indistinguishable from an oversight,
-// so the exclusion is stated here and goes red if anything moves.
+// -- and a plain sweep for product-name bindings also reach cells this lane
+// leaves alone. Silence about them is indistinguishable from an oversight, so
+// each one is named here with its reason and goes red if anything moves.
 //
-// Two independent reasons, and either one alone is sufficient:
+// Two independent grounds, and either alone is sufficient:
 //
-//   1. They are dense six-column HISTORY/ledger rows, governed by a different
-//      convention that tests/historyRowModel.test.ts already pins: "a
-//      truncated Stock Change cell has no tooltip to reveal it" -- every
+//   1. DENSE LEDGER (Stock Change). tests/historyRowModel.test.ts pins "all 8
+//      truncated Stock Change cells reveal their value on hover" -- every
 //      `dense-cell-truncate` there MUST carry a title=. Converting the cell to
-//      .scroll-x-clean drops the truncation the tooltip rule keys on, and the
-//      reveal affordance in a dense ledger is the tooltip, not a swipe.
-//   2. Both files belong to OTHER running lanes (ledger2 owns
-//      StockChangeSection, stockin owns StockInSessionsSection), so they are
-//      not this lane's to rewrite.
+//      .scroll-x-clean drops the truncation that rule keys on, and in a dense
+//      six-column ledger the reveal affordance is the tooltip, not a swipe.
+//   2. OWNER RULING N26, shipped on the integration tip and now in production:
+//      "stock in sessions when clicked on did not show the products full name,
+//      got cut by elipses" -> on the three stock-in line surfaces the name
+//      WRAPS in full with the barcode under it, and
+//      tests/stockInSessionProductNames.test.ts asserts the exact wrapping
+//      markup. Scrolling is the N36 remedy for a name that would otherwise be
+//      CUT; where the owner has already ruled the name must wrap, N36 does not
+//      override N26. (These are also other lanes' files: ledger2 owns
+//      StockChangeSection, stockin owns the three stock-in surfaces.)
 //
-// The shape asserted per cell: a desktop cell truncates AND titles itself; a
-// mobile twin wraps (break-words), which has no ellipsis and therefore no dead
-// end. Neither may quietly acquire the scrolling class instead.
-const EXCLUDED_CELLS: Array<{ file: string; expect: Array<'truncate+title' | 'wrap'> }> = [
-  { file: 'components/products/StockChangeSection.tsx', expect: ['wrap', 'truncate+title'] },
-  { file: 'components/products/StockInSessionsSection.tsx', expect: ['truncate+title', 'wrap'] },
+// Shapes asserted: 'truncate+title' = clips AND reveals on hover;
+// 'wrap' = wraps to a second line, which has no ellipsis and so no dead end.
+// Neither may quietly acquire the scrolling class instead.
+const EXCLUDED_CELLS: Array<{
+  label: string
+  file: string
+  marker: string
+  shape: 'truncate+title' | 'wrap'
+  title?: string
+}> = [
+  // 1. dense ledger
+  { label: 'Stock Change mobile card', file: 'components/products/StockChangeSection.tsx', marker: 'text-[13px] font-semibold leading-4 text-gray-800', shape: 'wrap' },
+  { label: 'Stock Change desktop row', file: 'components/products/StockChangeSection.tsx', marker: 'block dense-cell-truncate font-semibold', shape: 'truncate+title', title: 'title={row.product_name}' },
+  // 2. owner ruling N26 -- these WRAP on purpose, barcode underneath
+  { label: 'Stock-in sessions receipt row', file: 'components/products/StockInSessionsSection.tsx', marker: 'break-words font-semibold">{row.product_name}', shape: 'wrap' },
+  { label: 'Stock-in sessions mobile card', file: 'components/products/StockInSessionsSection.tsx', marker: 'block break-words text-[13px] font-medium leading-4', shape: 'wrap' },
+  { label: 'Fast stock-in received queue', file: 'components/inventory/FastStockInModal.tsx', marker: '{line.productName}', shape: 'wrap' },
+  { label: 'Add-products saved list', file: 'components/products/CreateProductsSessionModal.tsx', marker: "{row.status === 'saved' ? '✅' : '•'} {row.name}", shape: 'wrap' },
 ]
 
-runTest('the dense history name cells stay OUT of the scroll conversion, on purpose', () => {
-  for (const { file, expect } of EXCLUDED_CELLS) {
+runTest('the ledger and stock-in name cells stay OUT of the scroll conversion, on purpose', () => {
+  for (const { label, file, marker, shape, title } of EXCLUDED_CELLS) {
     const source = read(file)
-    const tags = [...source.matchAll(/<span\b[^>]*>\{row\.product_name\}/g)].map((m) => m[0])
-    assert.equal(
-      tags.length,
-      expect.length,
-      `${file}: expected ${expect.length} product-name cells, found ${tags.length} -- the exclusion list is stale`,
+    const owner = classNear(source, marker)
+    const where = `${label} (${file}, ${shape}): classes are "${owner}"`
+    assert.doesNotMatch(
+      owner,
+      /\bscroll-x-clean\b/,
+      `${where}\n  -- converting this cell needs its own region_exceptions entry plus a check that historyRowModel.test.ts and stockInSessionProductNames.test.ts stay green`,
     )
-    tags.forEach((tag, i) => {
-      const where = `${file} cell ${i + 1} (${expect[i]}): ${tag}`
-      assert.doesNotMatch(tag, /\bscroll-x-clean\b/, `${where}\n  -- converting this cell needs its own region_exceptions entry and a check that historyRowModel.test.ts stays green`)
-      if (expect[i] === 'truncate+title') {
-        assert.match(tag, /\bdense-cell-truncate\b/, `${where}\n  -- the dense ledger row's clipping is what historyRowModel.test.ts keys its tooltip rule on`)
-        assert.match(tag, /\btitle=/, `${where}\n  -- a clipped ledger value with no tooltip is a dead-end ellipsis`)
-      } else {
-        assert.match(tag, /\bbreak-words\b/, `${where}\n  -- the mobile twin wraps instead of clipping, so it has no ellipsis to reveal`)
-      }
-    })
+    if (shape === 'truncate+title') {
+      assert.match(owner, /\bdense-cell-truncate\b/, `${where}\n  -- the dense ledger row's clipping is what historyRowModel.test.ts keys its tooltip rule on`)
+      const tail = source.slice(source.indexOf(marker), source.indexOf(marker) + 240)
+      assert.ok(title && tail.includes(title), `${where}\n  -- a clipped ledger value with no tooltip is a dead-end ellipsis`)
+    } else {
+      assert.match(owner, /\bbreak-words\b/, `${where}\n  -- this cell wraps by ruling; losing the wrap is a behaviour change, not a class tidy-up`)
+    }
   }
 })
 
