@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { createProductsSessionPermissionRequirements } from '../src/components/products/CreateProductsSessionModal.tsx'
+import { createProductsSessionPermissionRequirements } from '../src/utils/createProductsSession.ts'
 
 const create = { kind: 'create_receive' as const, status: 'queued' as const, quantity: 0 }
 const createWithStock = { kind: 'create_receive' as const, status: 'queued' as const, quantity: 2 }

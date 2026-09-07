@@ -65,6 +65,37 @@ export type CreateProductsSessionDraft = {
   receivedDate?: string
 }
 
+export type CreateProductsSessionPermissionRequirement = {
+  permissionKey: 'products' | 'inventory'
+  actionKey: 'add' | 'adjust'
+}
+
+export type CreateProductsSessionMinimizeDetails = {
+  draftKey: string
+  mode: 'new' | 'existing'
+  requiredPermissions: CreateProductsSessionPermissionRequirement[]
+}
+
+export function createProductsSessionPermissionRequirements(
+  rows: Array<{ kind: 'receive' | 'create_receive' | 'created_zero'; status: 'queued' | 'saved'; quantity: number }>,
+  mode: 'new' | 'existing',
+): CreateProductsSessionPermissionRequirement[] {
+  const queued = rows.filter((row) => row.status === 'queued')
+  const required: CreateProductsSessionPermissionRequirement[] = []
+  if (queued.some((row) => row.kind === 'create_receive' || row.kind === 'created_zero')) {
+    required.push({ permissionKey: 'products', actionKey: 'add' })
+  }
+  if (queued.some((row) => row.kind === 'receive' || (row.kind === 'create_receive' && row.quantity > 0))) {
+    required.push({ permissionKey: 'inventory', actionKey: 'adjust' })
+  }
+  if (!required.length) {
+    required.push(mode === 'new'
+      ? { permissionKey: 'products', actionKey: 'add' }
+      : { permissionKey: 'inventory', actionKey: 'adjust' })
+  }
+  return required
+}
+
 export type CreateProductsSessionLabels = {
   multipleBrands: string
   multipleSuppliers: string
