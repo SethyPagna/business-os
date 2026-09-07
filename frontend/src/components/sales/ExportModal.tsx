@@ -237,8 +237,8 @@ export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
           </div>
         </div>
 
-        <div>
-          <label className="mb-2 block text-sm font-semibold text-gray-700 dark:text-gray-300">{tr('report_period', 'Report Period')}</label>
+        <fieldset className="min-w-0">
+          <legend className="mb-2 block text-sm font-semibold text-gray-700 dark:text-gray-300">{tr('report_period', 'Report Period')}</legend>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             {([
               ['daily', tr('period_daily', 'Daily')],
@@ -264,12 +264,12 @@ export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
           {period === 'custom' ? (
             <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
-                <label className="mb-1 block text-xs text-gray-500">{tr('start_date', 'Start Date')}</label>
-                <DateEntryInput className="text-sm" t={t} ariaLabel={tr('start_date', 'Start Date')} value={startDate} onChange={(iso) => setStartDate(iso)} />
+                <label htmlFor="sales-export-start-date" className="mb-1 block text-xs text-gray-500">{tr('start_date', 'Start Date')}</label>
+                <DateEntryInput id="sales-export-start-date" className="text-sm" t={t} ariaLabel={tr('start_date', 'Start Date')} value={startDate} onChange={(iso) => setStartDate(iso)} />
               </div>
               <div>
-                <label className="mb-1 block text-xs text-gray-500">{tr('end_date', 'End Date')}</label>
-                <DateEntryInput className="text-sm" t={t} ariaLabel={tr('end_date', 'End Date')} value={endDate} onChange={(iso) => setEndDate(iso)} />
+                <label htmlFor="sales-export-end-date" className="mb-1 block text-xs text-gray-500">{tr('end_date', 'End Date')}</label>
+                <DateEntryInput id="sales-export-end-date" className="text-sm" t={t} ariaLabel={tr('end_date', 'End Date')} value={endDate} onChange={(iso) => setEndDate(iso)} />
               </div>
             </div>
           ) : (
@@ -278,7 +278,7 @@ export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
               {previewDates.start} to {previewDates.end}
             </div>
           )}
-        </div>
+        </fieldset>
 
         <div className="flex flex-col gap-2 sm:flex-row">
           <button type="button" onClick={handlePreview} disabled={loading} className="btn-secondary flex-1 text-sm disabled:opacity-50">
