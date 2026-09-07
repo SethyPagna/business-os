@@ -19,6 +19,10 @@ import ConfirmDialog, { ConfirmDialogLayerContext, type ConfirmReviewItem } from
 import { useMergeStockChoice } from '../useMergeStockChoice.tsx'
 import { getRenameImpact, renameBrandEverywhere } from '../../../api/renameCascadeTransport.ts'
 import { classifyCreateMatches, type CreateMatchVerdict, type CreateMatchCandidate } from '../helpers/productCreateMatch.ts'
+// The answers the create-match dialog can give. 'keep_separate' is the N34 one:
+// it is the ONLY answer the Worker's create door accepts on an exact twin, and
+// until it existed here the door advertised it to nobody.
+type CreateVerdictAnswer = 'back' | 'group' | 'new' | 'keep_separate'
 import { resolveProductIdentityEdit } from '../../../utils/productDetailRule.ts'
 import {
   identityCollisionFrom, identityEditMovesOnto, withKeepSeparateDecision, type IdentityMatch,
@@ -886,7 +890,11 @@ export default function ProductForm({
   // under the virtual group title; there is no stored parent/child link.
   const [createMatches, setCreateMatches] = useState<CreateMatchCandidate[]>([])
   const [createVerdictOpen, setCreateVerdictOpen] = useState(false)
-  const createVerdictResolveRef = useRef<((choice: 'back' | 'group' | 'new') => void) | null>(null)
+  const createVerdictResolveRef = useRef<((choice: CreateVerdictAnswer) => void) | null>(null)
+  // N34. The answer that says "these really are two different articles, write it"
+  // -- remembered per typed identity, because the acknowledgement ref below
+  // skips the dialog on a second Save and the decision must survive that skip.
+  const createKeepSeparateAckRef = useRef('')
   const createMatchSeqRef = useRef(0)
   const createMatchAckRef = useRef('')
   const createVerdict: CreateMatchVerdict = useMemo(
@@ -930,11 +938,11 @@ export default function ProductForm({
   // would drift and the ✕ would silently stop guarding.
   const dirtyWorkKey = `product-form-${draftKey}`
 
-  const askCreateVerdict = () => new Promise<'back' | 'group' | 'new'>((resolve) => {
+  const askCreateVerdict = () => new Promise<CreateVerdictAnswer>((resolve) => {
     createVerdictResolveRef.current = resolve
     setCreateVerdictOpen(true)
   })
-  const resolveCreateVerdict = (choice: 'back' | 'group' | 'new') => {
+  const resolveCreateVerdict = (choice: CreateVerdictAnswer) => {
     setCreateVerdictOpen(false)
     const resolve = createVerdictResolveRef.current
     createVerdictResolveRef.current = null
@@ -1191,6 +1199,7 @@ export default function ProductForm({
     // automatically from the name only. No parent/group IDs are written.
     // 'new' keeps a different typed name where that is actually possible;
     // 'back' returns to editing.
+    let keepSeparate = false
     if (isCreateMode && createVerdict.kind) {
       const ackKey = `${String(form.name || '').trim().toLowerCase()}|${String(form.barcode || '').trim()}`
       if (createMatchAckRef.current !== ackKey) {
@@ -1200,8 +1209,14 @@ export default function ProductForm({
           setField('name', createVerdict.canonicalName)
           form.name = createVerdict.canonicalName
         }
+        // N34: an exact twin is the one verdict the Worker refuses, and the
+        // refusal accepts exactly one answer. Remember it against the typed
+        // identity so a second Save (which skips this dialog) still carries it,
+        // and so changing the name or barcode afterwards revokes it.
+        if (choice === 'keep_separate') createKeepSeparateAckRef.current = ackKey
         createMatchAckRef.current = ackKey
       }
+      keepSeparate = createKeepSeparateAckRef.current === ackKey
     }
     // N34, THE EDIT-SIDE PROMPT. Everything above is the CREATE-mode identity
     // question -- the only one this form has ever asked. An EDIT that renames
@@ -1213,7 +1228,6 @@ export default function ProductForm({
     // differently. It costs nothing on an ordinary save: changesIdentity is
     // false whenever the name group and the folded barcode stay put, so a
     // price, cost or image edit never reaches the search below.
-    let keepSeparate = false
     if (isEditMode && product?.id) {
       const decided = await resolveIdentityMove(
         { id: Number(product.id), name: initialForm.name, barcode: initialForm.barcode },
@@ -1333,14 +1347,19 @@ export default function ProductForm({
       // now names EVERY colliding row and the answers this door accepts, so the
       // same three-way prompt is offered rather than a bare alert.
       const collision = identityCollisionFrom(error)
-      if (collision && product?.id) {
+      // The create door reaches this too: its collision is refused by the same
+      // guard, with the same structured body, and answered by keep-separate.
+      // Gating this on product?.id (as it was) meant the whole prompt was edit-
+      // only, so a create whose twin the client had not searched up dead-ended
+      // on the raw message with no answer at all.
+      if (collision) {
         const choice = await askIdentityLinkOver({
           subjectName: String(form.name || ''),
           matches: collision.matches,
           canLinkOver: collision.canLinkOver,
           canKeepSeparate: collision.canKeepSeparate,
         })
-        if (choice === 'link_over' && collision.canLinkOver) {
+        if (choice === 'link_over' && collision.canLinkOver && product?.id) {
           try {
             const outcome = await mergeWithChoice(
               { id: collision.matches[0].id, name: collision.matches[0].name },
@@ -2161,6 +2180,11 @@ export default function ProductForm({
                       ? tr('create_match_name_body', 'A product with this exact name already exists. Saving adds another ordinary row under the same automatic group title.', 'ផលិតផលដែលមានឈ្មោះដូចគ្នាបេះបិទមានរួចហើយ។ ការរក្សាទុកនឹងបន្ថែមជួរផលិតផលធម្មតាមួយទៀតក្រោមចំណងជើងក្រុមស្វ័យប្រវត្តិដូចគ្នា។')
                       : tr('create_match_barcode_body', 'This barcode already belongs to "{name}". Use that same name to wrap this row under the same automatic group title, or keep your different name as a separate product.', 'បាកូដនេះជារបស់ "{name}" រួចហើយ។ ប្រើឈ្មោះដូចគ្នា ដើម្បីឲ្យជួរនេះត្រូវបានរុំក្រោមចំណងជើងក្រុមស្វ័យប្រវត្តិដូចគ្នា ឬរក្សាឈ្មោះផ្សេងរបស់អ្នកជាផលិតផលដាច់ដោយឡែក។').replace('{name}', createVerdict.canonicalName)}
                 </p>
+                {createVerdict.allowKeepSeparate ? (
+                  <p className="text-xs">
+                    {tr('create_match_keep_separate_note', 'If these really are two different articles, create it anyway — the pair is then listed in Conflicts, where you can still merge them either way.', 'បើទាំងនេះជាផលិតផលខុសគ្នាមែន សូមបង្កើតចុះ — គូនេះនឹងបង្ហាញក្នុងទិន្នន័យជាន់គ្នា ដែលអ្នកនៅតែអាចបញ្ចូលគ្នាបាន។')}
+                  </p>
+                ) : null}
                 {createVerdict.priceMatches ? (
                   <p className="text-xs">
                     {tr('create_match_price_advisory', 'The selling price also matches an existing row — worth a second look before creating.', 'តម្លៃលក់ក៏ត្រូវគ្នានឹងជួរដែលមានស្រាប់ដែរ — គួរពិនិត្យម្តងទៀតមុនបង្កើត។')}
@@ -2193,6 +2217,15 @@ export default function ProductForm({
                   onClick={() => resolveCreateVerdict('group')}
                 >
                   {tr('create_match_group_button', 'Use name "{name}" and group automatically', 'ប្រើឈ្មោះ "{name}" ហើយដាក់ជាក្រុមដោយស្វ័យប្រវត្តិ').replace('{name}', createVerdict.canonicalName)}
+                </button>
+              ) : null}
+              {createVerdict.allowKeepSeparate ? (
+                <button
+                  type="button"
+                  className="rounded-lg border border-amber-300 px-4 py-2 text-sm font-medium text-amber-800 hover:bg-amber-50 dark:border-amber-900/50 dark:text-amber-300 dark:hover:bg-amber-950/30"
+                  onClick={() => resolveCreateVerdict('keep_separate')}
+                >
+                  {tr('create_match_keep_separate_button', 'Different products — create anyway', 'ផលិតផលខុសគ្នា — បង្កើតចុះ')}
                 </button>
               ) : null}
               {createVerdict.allowProceedAsNew ? (

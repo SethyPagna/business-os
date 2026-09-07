@@ -46,6 +46,7 @@ import {
 } from '../src/components/products/helpers/identityLinkOver.ts'
 // The bulk edit path composes its payload through these two builders and
 // nothing else; section 5 pins that they can never carry an identity field.
+import { classifyCreateMatches } from '../src/components/products/helpers/productCreateMatch.ts'
 import {
   buildProductBulkInfoUpdates,
   buildProductBulkPricingUpdates,
@@ -303,6 +304,87 @@ check('a bulk payload moves no identity, whatever the row is', () => {
       CANDIDATES,
     ),
     [],
+  )
+})
+
+
+// --- 6. THE CREATE DOOR's answer, which nothing could give ----------------
+// The Worker's create-door refusal advertises two resolutions, 'open_existing'
+// and 'keep_separate'. Only the second is expressible on the save, and until
+// this round NOTHING sent it: withKeepSeparateDecision was called from the edit
+// path only, the exact-twin dialog offered a single button (Go back), and the
+// 409 fallback that could have offered the answer was gated on product?.id --
+// i.e. edit mode. So the operator with a genuinely different article that
+// happens to share a name and a folded barcode with an existing row could not
+// enter it at all, on any screen, while the server sat there accepting an
+// answer no client could give.
+//
+// Both halves are pinned: the verdict that offers the answer, and the two
+// places the answer is actually sent from.
+check('DISCRIMINATING: only the EXACT TWIN offers keep-separate, because only it is refused', () => {
+  const catalog = [
+    { id: 11, name: 'MAC Lipstick', barcode: '0601', selling_price_usd: 12 },
+    { id: 12, name: 'Other Thing', barcode: '77777777', selling_price_usd: 5 },
+  ]
+  // Same name + folded-equal barcode: the Worker 409s this, and keep-separate
+  // is the one answer it takes.
+  const twin = classifyCreateMatches({ name: 'mac  lipstick', barcode: '601' }, catalog)
+  assert.equal(twin.kind, 'exact_twin')
+  assert.equal(
+    twin.allowKeepSeparate, true,
+    'the one refused verdict must offer the one answer the refusal accepts, or the create door is a dead end',
+  )
+  assert.equal(twin.allowProceedAsNew, false, 'and it is NOT the same answer as "keep your different name"')
+  // The other two verdicts are not refused at all, so there is nothing to
+  // decide; offering the decision there would send a wire field the guard would
+  // never have asked for.
+  assert.equal(classifyCreateMatches({ name: 'MAC Lipstick', barcode: '999' }, catalog).kind, 'name_match')
+  assert.equal(classifyCreateMatches({ name: 'MAC Lipstick', barcode: '999' }, catalog).allowKeepSeparate, false)
+  assert.equal(classifyCreateMatches({ name: 'Something New', barcode: '0601' }, catalog).kind, 'barcode_match')
+  assert.equal(classifyCreateMatches({ name: 'Something New', barcode: '0601' }, catalog).allowKeepSeparate, false)
+  assert.equal(classifyCreateMatches({ name: 'Brand New', barcode: '123123123' }, catalog).allowKeepSeparate, false)
+})
+
+check('DISCRIMINATING: the create door can actually SEND it -- dialog answer and 409 fallback', () => {
+  const form = fs.readFileSync(path.join(repoRoot, 'frontend', 'src', 'components', 'products', 'forms', 'ProductForm.tsx'), 'utf8')
+  // (a) the dialog offers the answer...
+  assert.match(
+    form, /resolveCreateVerdict\('keep_separate'\)/,
+    'the exact-twin dialog must offer the answer; with only "Go back" the Worker advertises a resolution no client can give',
+  )
+  // ...and the save carries it. The create gate must set keepSeparate from a
+  // remembered decision, not from the edit branch's variable: the dialog is
+  // skipped on a second Save of the same typed identity (createMatchAckRef), and
+  // a decision that did not survive that skip would 409 the retry.
+  assert.match(form, /createKeepSeparateAckRef\.current = ackKey/, 'the create-mode answer must be remembered against the typed identity')
+  assert.match(form, /keepSeparate = createKeepSeparateAckRef\.current === ackKey/, 'and read back on the save that follows')
+  // (b) the 409 fallback is no longer edit-only.
+  assert.ok(
+    !/if \(collision && product\?\.id\) \{/.test(form),
+    'gating the whole link-over prompt on product?.id makes it edit-only, and the create door dead-ends on the raw refusal text',
+  )
+  assert.match(form, /if \(collision\) \{/, 'the fallback runs on both doors')
+  // ...but the MERGE half of it still requires a saved row: there is nothing to
+  // fold on create, and offering it would try to merge a row that does not exist.
+  assert.match(
+    form, /choice === 'link_over' && collision\.canLinkOver && product\?\.id/,
+    'link-over must still require a saved row',
+  )
+  // POSITIVE CONTROL: the pre-fix shape fails both probes, so they discriminate.
+  const PRE_FIX = "      if (collision && product?.id) {\n        const choice = await askIdentityLinkOver({"
+  assert.equal(/resolveCreateVerdict\('keep_separate'\)/.test(PRE_FIX), false)
+  assert.equal(/if \(collision\) \{/.test(PRE_FIX), false)
+})
+
+check('the variant door -- the third create door -- answers through the same helper', () => {
+  const variant = fs.readFileSync(
+    path.join(repoRoot, 'frontend', 'src', 'components', 'products', 'forms', 'VariantFormModal.tsx'), 'utf8',
+  )
+  assert.match(variant, /identityCollisionFrom\(error\)/, 'the variant door must read the structured refusal, not just print it')
+  assert.match(variant, /withKeepSeparateDecision\(payload\)/, 'and be able to send the one answer its guard accepts')
+  assert.match(
+    variant, /choice !== 'keep_separate' \|\| !collision\.canKeepSeparate/,
+    'nothing is retried without an explicit answer -- a re-send on any other outcome would write over an identity nobody approved',
   )
 })
 

@@ -47,6 +47,14 @@ export interface CreateMatchVerdict {
   // A same-name row is automatically grouped by name, so presenting
   // "separate" there would promise behavior the UI cannot produce.
   allowProceedAsNew: boolean
+  // N34. The EXACT TWIN is the only verdict the Worker actually refuses (409
+  // duplicate_product), and the only one whose refusal accepts an answer:
+  // __identity_decision = keep_separate, "these really are two different
+  // articles". Without this flag the form offered exact_twin one button, Go
+  // back, while the Worker advertised an answer no client could give.
+  // False for the other two verdicts on purpose: neither is refused at all, so
+  // there is nothing to decide and sending a decision would be noise.
+  allowKeepSeparate: boolean
 }
 
 const norm = (value: unknown) => String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' ')
@@ -71,6 +79,7 @@ export function classifyCreateMatches(
     priceMatches: false,
     beforeAfter: { group: '', asNew: '' },
     allowProceedAsNew: true,
+    allowKeepSeparate: false,
   }
   if (!typedName && !typedBarcode) return none
 
@@ -91,6 +100,8 @@ export function classifyCreateMatches(
         asNew: '',
       },
       allowProceedAsNew: false,
+      // The one refused verdict: the operator may still answer it.
+      allowKeepSeparate: true,
     }
   }
 
@@ -109,6 +120,7 @@ export function classifyCreateMatches(
       },
       // Same normalized name always wraps under the same group title.
       allowProceedAsNew: false,
+      allowKeepSeparate: false,
     }
   }
 
@@ -126,6 +138,7 @@ export function classifyCreateMatches(
         asNew: `Keep your different name → a separate product row shares barcode ${normBarcode(match.barcode)}`,
       },
       allowProceedAsNew: true,
+      allowKeepSeparate: false,
     }
   }
 

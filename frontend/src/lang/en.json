@@ -400,6 +400,8 @@
   "create_match_name_hint": "This name already exists ({n} rows) — saving adds this as a new row of that group.",
   "create_match_name_title": "Name already exists",
   "create_match_new_button": "Create as a separate product",
+  "create_match_keep_separate_button": "Different products — create anyway",
+  "create_match_keep_separate_note": "If these really are two different articles, create it anyway — the pair is then listed in Conflicts, where you can still merge them either way.",
   "create_match_new_label": "As new:",
   "create_match_price_advisory": "The selling price also matches an existing row — worth a second look before creating.",
   "create_match_price_hint": "same price too",
