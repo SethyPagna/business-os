@@ -1844,6 +1844,44 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     assert.strictEqual(blank[0].data.items[0].batch_id, null)
   }
 
+  // 4a-ambiguity) Exact names are not unique in legacy data. The database
+  // may return either row first, so classification must expose a stable,
+  // sorted candidate list and refuse until the reviewer pins one id.
+  {
+    const classifyContactsForAmbiguity = moduleObj.exports.classifyContacts
+    const makeContactDb = (records) => ({
+      prepare: (sql) => ({ all: async () => String(sql).includes('portal_accounts') ? [] : records }),
+    })
+    const contactDecisions = (decisionsByRowNumber) => JSON.stringify({ decisionsByRowNumber })
+    const legacyDuplicates = [
+      { id: 32, name: 'Shared Legacy Name', phone: '012000032', membership_number: 'LC-00032' },
+      { id: 31, name: 'Shared Legacy Name', phone: '012000031', membership_number: 'LC-00031' },
+    ]
+    const undecided = await classifyContactsForAmbiguity(makeContactDb(legacyDuplicates), 'customers', [row({ name: 'Shared Legacy Name' }, 1)], null)
+    assert.strictEqual(undecided[0].action, 'error', 'multiple exact-name rows are never resolved by load order')
+    assert.deepStrictEqual(undecided[0].contactMatchCandidates.map((candidate) => candidate.id), [31, 32], 'candidate ids are deterministic')
+    assert.strictEqual(undecided[0].contactMatchTargetInvalid, true)
+
+    const selected = await classifyContactsForAmbiguity(
+      makeContactDb(legacyDuplicates),
+      'customers',
+      [row({ name: 'Shared Legacy Name' }, 1)],
+      contactDecisions({ '1': { action: 'apply', target_existing_id: 31 } }),
+    )
+    assert.strictEqual(selected[0].action, 'update')
+    assert.strictEqual(selected[0].existingId, 31, 'the explicit reviewed target, not array order, owns the update')
+
+    const drifted = await classifyContactsForAmbiguity(
+      makeContactDb([{ ...legacyDuplicates[1], name: 'Renamed after review' }, legacyDuplicates[0]]),
+      'customers',
+      [row({ name: 'Shared Legacy Name' }, 1)],
+      contactDecisions({ '1': { action: 'apply', target_existing_id: 31 } }),
+    )
+    assert.strictEqual(drifted[0].action, 'error', 'a selected id that left the live candidate set is refused')
+    assert.strictEqual(drifted[0].contactMatchTargetInvalid, true)
+    assert.match(drifted[0].message, /no longer a current match/)
+  }
+
   // 9) only the active canonical Shop can carry a historical sale. Unknown,
   // Warehouse, and inactive Shop names refuse before apply has any opportunity
   // to create/backfill a branch or mutate stock. A legacy blank branch safely

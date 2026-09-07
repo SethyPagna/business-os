@@ -486,7 +486,32 @@ app.patch('/:id/decisions', async (c) => {
   }
 
   const body = await c.req.json().catch(() => ({}))
-  const incoming = body?.decisions || body?.rows || {}
+  const rawIncoming = body?.decisions || body?.rows || {}
+  if (!rawIncoming || typeof rawIncoming !== 'object' || Array.isArray(rawIncoming)) {
+    return c.json({ success: false, error: 'Import decisions must be an object keyed by row number.' }, 400)
+  }
+  let incoming = rawIncoming as Record<string, any>
+  if (['customers', 'suppliers', 'delivery_contacts'].includes(String(job.type || ''))) {
+    const validated: Record<string, any> = {}
+    for (const [rowNumber, value] of Object.entries(incoming)) {
+      const numericRow = Number(rowNumber)
+      if (!Number.isSafeInteger(numericRow) || numericRow <= 0 || !value || typeof value !== 'object' || Array.isArray(value)) {
+        return c.json({ success: false, error: `Invalid contact import decision for row ${rowNumber}.` }, 400)
+      }
+      const decision = value as Record<string, unknown>
+      if (!['apply', 'skip', 'force_create'].includes(String(decision.action || ''))) {
+        return c.json({ success: false, error: `Invalid contact import action for row ${rowNumber}.` }, 400)
+      }
+      if (decision.target_existing_id != null) {
+        const targetId = Number(decision.target_existing_id)
+        if (decision.action !== 'apply' || !Number.isSafeInteger(targetId) || targetId <= 0) {
+          return c.json({ success: false, error: `Invalid contact merge target for row ${rowNumber}.` }, 400)
+        }
+      }
+      validated[rowNumber] = decision
+    }
+    incoming = validated
+  }
   const db = getDb(c.env)
   const policy = safeJsonParse<Record<string, any>>(job.policy_json as string, {})
   const current = policy.decisionsByRowNumber && typeof policy.decisionsByRowNumber === 'object' ? policy.decisionsByRowNumber : {}
