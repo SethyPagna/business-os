@@ -534,7 +534,7 @@ async function run() {
     assert.match(productsSrc, /const adjustmentMovementIds =/)
     assert.match(productsSrc, /registerMergeFold\(foldDuplicateProductInto\)/)
     assert.match(productsSrc, /buildAtomicMergeHistoryStatements\(user, reversal, atomicHistory\.operationId, auditDetails\)/)
-    assert.match(productsSrc, /await finalizeAtomicMergeHistory\(env, atomicHistory\.operationId, reversal\)/)
+    assert.match(productsSrc, /await finalizeAtomicMergeHistory\(env, atomicHistory\.operationId, reversal, db\)/)
     assert.match(appliersSrc, /VALUES\('products','product',@entityId,@label,@undoLabel,@redoLabel,0,'recorded'/)
     assert.match(appliersSrc, /UPDATE action_history SET reversible=1,status='undoable'/)
   })
