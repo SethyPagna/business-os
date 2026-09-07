@@ -173,8 +173,15 @@ export default function PortalFooter({
     setActivePage(page)
     if (typeof window === 'undefined') return
     try {
-      window.history.pushState({ legal: page }, '', legalHref(page, window.location.search, window.location.pathname))
-      pushedRef.current = true
+      const href = legalHref(page, window.location.search, window.location.pathname)
+      if (activePage) {
+        // Moving between documents inside the same reader must not add
+        // another Back step. Close should leave the reader in one action.
+        window.history.replaceState({ legal: page }, '', href)
+      } else {
+        window.history.pushState({ legal: page }, '', href)
+        pushedRef.current = true
+      }
     } catch {
       // History blocked (rare sandboxes): the reader still opens, the URL
       // simply does not change.
