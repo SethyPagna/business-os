@@ -159,6 +159,12 @@ row(205, 'In Store Eight Digit', '20123458')
 // keyspace instead of its own, scanning the 12-digit UPC-A drags this row in
 // as an exact-barcode hit. It is a different article and must never appear.
 row(301, 'Internal Seven Digit Item', '1234565')
+// The SAME control, stored zero-padded. A padded spelling of an unrelated
+// short internal code is NOT the UPC-E half of this pair: every zero-padding
+// of a UPC-E is a spelling some ordinary internal code legitimately owns, so
+// the pair may only ever probe the BARE printed 8 digits.
+row(302, 'Internal Seven Digit Item Padded', '00000001234565')
+row(303, 'Internal Seven Digit Item 12wide', '000001234565')
 
 // Mirrors how routes/products.ts consumes buildProductSearchQuery.
 function search(rawQuery, { useSearchIndex = true } = {}) {
@@ -232,6 +238,18 @@ for (const pathName of ['indexed', 'compat']) {
     assert.ok(!hits.includes(301),
       `scan ${UPCA} dragged in the unrelated 7-digit code 1234565 via its derived UPC-E`)
   })
+
+  // ...and no PADDED spelling of that same unrelated code either. Padding a
+  // UPC-E up is not a spelling of the pair: 00000001234565 and 000001234565
+  // are ordinary internal codes, and only the bare printed 8 digits belong
+  // to the pair.
+  check(`${pathName}: a padded spelling of an unrelated internal code is not the UPC-E half of this pair`, () => {
+    const hits = find(UPCA)
+    assert.ok(!hits.includes(302),
+      `scan ${UPCA} dragged in 00000001234565 -- a padded spelling of the unrelated internal code 1234565, not the UPC-E half of this pair`)
+    assert.ok(!hits.includes(303),
+      `scan ${UPCA} dragged in 000001234565 -- a padded spelling of the unrelated internal code 1234565, not the UPC-E half of this pair`)
+  })
 }
 
 // --- the bound-parameter budget the UPC pair must live inside ----------
@@ -266,11 +284,14 @@ check('budget: a UPC-pair scan stays far inside D1\'s bound-parameter ceiling', 
       // is one disjunct among many in that same statement.
       assert.ok(count <= 40,
         `scan ${code} (useSearchIndex:${useSearchIndex}) bound ${count} parameters; D1's ceiling is 100 total (scripts/test-d1-bound-params-repro.cjs:28) and the barcode clause may not eat 40 of them`)
-      // The regression bound that actually bites: on 77ac1a98, before the
-      // GTIN-14 cap, '01234565' bound 36 here. Anything back over 28 means
-      // the pair's padded spellings went uncapped again.
-      assert.ok(count <= 28,
-        `scan ${code} (useSearchIndex:${useSearchIndex}) bound ${count} parameters; the UPC-pair spellings are meant to stop at GTIN-14, and 36 is what the uncapped default cost (D1's ceiling: scripts/test-d1-bound-params-repro.cjs:28)`)
+      // The regression bound that actually bites. The widest of these six
+      // cases is the UPC-E scan on the indexed path, and it walked down: 36
+      // on 77ac1a98 (barcodeEqualityCandidates uncapped at 18), 24 once the
+      // GTIN-14 cap landed, 18 once the UPC-E half stopped being padded at
+      // all. Anything back over 20 means one of those two narrowings was
+      // undone.
+      assert.ok(count <= 20,
+        `scan ${code} (useSearchIndex:${useSearchIndex}) bound ${count} parameters; the pair is meant to pad only its UPC-A half and only to GTIN-14 -- 24 is what padding both halves cost and 36 is what the uncapped default cost (D1's ceiling: scripts/test-d1-bound-params-repro.cjs:28)`)
     }
   }
 })

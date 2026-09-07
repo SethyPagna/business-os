@@ -1493,15 +1493,23 @@ export interface BarcodeKeyPlan {
 // the barcode clause is only one disjunct of a WHERE that also binds the
 // branch filter, the status filters and the pagination window.
 //
-// A namespaced UPC pair is by far the widest case, because BOTH halves emit
-// padded spellings: the 8-digit UPC-E and the 12-digit UPC-A it expands to.
-// At barcodeEqualityCandidates' default maxLength of 18 that cost 31 bound
-// values on the clause and 36 across the whole product-search builder for a
-// single UPC-E scan. GTIN-14 is the only padding this catalog is documented
-// to carry (see barcodeEqualityCandidates below), and a value stored padded
-// wider than that still matches through the ltrim() catch-all rather than
-// through this literal probe, so the probe stops at 14: 19 on the clause,
-// 24 on the builder.
+// A namespaced UPC pair used to be the widest case, because BOTH halves emit
+// padded spellings. At barcodeEqualityCandidates' default maxLength of 18
+// that cost 31 bound values on the clause and 36 across the whole
+// product-search builder for a single UPC-E scan.
+//
+// Two things narrowed it, and the second is a correctness rule, not a budget
+// one. GTIN-14 is the only padding this catalog is documented to carry (see
+// barcodeEqualityCandidates below), and a value stored padded wider than that
+// still matches through the ltrim() catch-all rather than through this
+// literal probe -- so the probe stops at 14. And only the UPC-A half is
+// padded at all: see barcodeKeyPlan, where the UPC-E half contributes its
+// bare printed 8 digits alone because every zero-padding of a UPC-E is a
+// spelling an unrelated short internal code legitimately owns.
+//
+// What a UPC-E scan therefore generates today: 1 UPC-E literal + 3 UPC-A
+// literals (12/13/14) as equivalents, plus the padding keyspace of the scan
+// itself -- 12 bound values on the clause, 17 across the builder.
 export const MAX_STORED_GTIN_WIDTH = 14
 
 export function barcodeKeyPlan(keys: readonly string[]): BarcodeKeyPlan {
@@ -1509,11 +1517,23 @@ export function barcodeKeyPlan(keys: readonly string[]): BarcodeKeyPlan {
   const equivalentLiterals: string[] = []
   for (const key of keys) {
     if (UPC_PAIR_KEY_PREFIX.test(key)) {
-      // PADDED spellings only, never contracted ones. barcodeEqualityCandidates
-      // pads a value up, so '01234565' yields '001234565' and wider but never
-      // the bare '1234565' another product may legitimately own -- which is
-      // the whole reason the pair is namespaced rather than zero-stripped.
-      for (const form of barcodeEqualityCandidates(key.slice(key.indexOf(':') + 1), MAX_STORED_GTIN_WIDTH)) {
+      // The two halves of the pair are NOT symmetric, and generating the same
+      // spellings for both is what let an unrelated code in.
+      //
+      //   * a 'upca:' key is padded up to MAX_STORED_GTIN_WIDTH. 12, EAN-13
+      //     and GTIN-14 are all legitimate spellings of the SAME article, so
+      //     probing them is probing this article at the widths the catalog
+      //     may have stored it at.
+      //   * a 'upce:' key contributes ONLY the bare 8 digits actually printed
+      //     in the symbol. Every zero-padding of a UPC-E is a spelling an
+      //     unrelated short internal code legitimately owns: '01234565' padded
+      //     to 14 is '00000001234565', which reads as ordinary internal code
+      //     '1234565' stored padded, and to 12 is '000001234565', which is
+      //     itself a valid UPC-A. Padding this half therefore does not widen
+      //     the pair, it invents identities -- so it is not done.
+      const value = key.slice(key.indexOf(':') + 1)
+      const forms = key.startsWith('upca:') ? barcodeEqualityCandidates(value, MAX_STORED_GTIN_WIDTH) : [value]
+      for (const form of forms) {
         if (!equivalentLiterals.includes(form)) equivalentLiterals.push(form)
       }
     } else if (key && !normKeys.includes(key)) normKeys.push(key)

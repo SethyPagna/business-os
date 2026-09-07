@@ -83,6 +83,7 @@ import {
   searchTermBarcodeKey,
   searchTermBarcodeKeys,
 } from '../src/utils/searchMatch.ts'
+import { barcodeKeyPlan as workerBarcodeKeyPlan, barcodeSearchKeys as workerBarcodeSearchKeys } from '../../cloudflare/src/lib/searchMatch.ts'
 
 let passed = 0
 function check(name: string, fn: () => void) {
@@ -514,6 +515,31 @@ check('the Returns replacement search narrows the list and stops there', () => {
     'the exact-barcode auto-pick is back in the Returns replacement search')
   assert.ok(!AUTO_PICK_SETTER.test(body) && !AUTO_PICK_CALL.test(body),
     'the replacement search picks a row for the operator')
+})
+
+// The JS kernel and the SQL the Worker builds are two implementations of one
+// rule, and only the JS half is exercised by the checks above. This is the
+// place they are made to agree on the case that actually went wrong: the
+// Worker does not compare strings, it emits LITERAL spellings for an index
+// probe, so a spelling it emits is a row it will match REGARDLESS of what
+// barcodeKeysMatch would have said about that row.
+check('the literal spellings the Worker probes agree with what the JS fold matches', () => {
+  // Every padded spelling of the UPC-E half is a code some unrelated short
+  // internal item legitimately owns, and the JS fold already says so.
+  assert.ok(!barcodeKeysMatch(UPCA, '00000001234565'), 'JS: a GTIN-14 padding of 1234565 is its own article')
+  assert.ok(!barcodeKeysMatch(UPCA, '000001234565'), 'JS: a 12-wide padding of 1234565 is its own article')
+  // So the Worker may not probe those spellings either. It probes the BARE
+  // printed UPC-E and the UPC-A at the widths one article is really stored
+  // at (12 / EAN-13 / GTIN-14).
+  const plan = workerBarcodeKeyPlan(workerBarcodeSearchKeys(UPCA))
+  const probed = [...plan.equivalentLiterals, ...plan.paddingLiterals]
+  for (const spelling of ['00000001234565', '000001234565', '0000001234565', '001234565']) {
+    assert.ok(!probed.includes(spelling),
+      `the Worker probes ${spelling}, a padded spelling of the unrelated internal code 1234565, which the JS fold rejects`)
+  }
+  assert.ok(plan.equivalentLiterals.includes(UPCE), 'the bare printed UPC-E must still be probed')
+  assert.ok(plan.equivalentLiterals.includes(UPCA), 'the UPC-A itself must still be probed')
+  assert.ok(plan.equivalentLiterals.includes('00' + UPCA), 'the UPC-A at GTIN-14 must still be probed')
 })
 
 check('the frontend and Worker barcode kernels state the same rule', () => {
