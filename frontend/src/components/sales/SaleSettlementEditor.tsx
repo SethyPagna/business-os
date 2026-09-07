@@ -11,6 +11,7 @@ type Props = {
   saving: boolean
   error: string
   recordedIssue: 'malformed' | 'mismatch' | 'allocation' | null
+  allowRecordedEdits?: boolean
   translate: (key: string, english: string, khmer?: string) => string
   fmtUSD: (value: number | string) => string
   fmtKHR: (value: number | string) => string
@@ -19,13 +20,13 @@ type Props = {
 
 export const MAX_SETTLEMENT_ROWS = 12
 
-export default function SaleSettlementEditor({ rows, configuredMethods, exchangeRate, totalUsd, saving, error, recordedIssue, translate, fmtUSD, fmtKHR, onChange }: Props) {
+export default function SaleSettlementEditor({ rows, configuredMethods, exchangeRate, totalUsd, saving, error, recordedIssue, allowRecordedEdits = false, translate, fmtUSD, fmtKHR, onChange }: Props) {
   const totals = settlementTotals(rows, exchangeRate)
   const remaining = Math.max(0, totalUsd - totals.paidEquivalentUsd)
   const change = Math.max(0, totals.paidEquivalentUsd - totalUsd)
   const balance = remaining > 0 ? remaining : change
   const balanceText = balance > 0 && balance < 0.01 ? `${balance.toFixed(4)} USD` : fmtUSD(balance)
-  const rowIssue = settlementRowsIssue(rows, configuredMethods)
+  const rowIssue = settlementRowsIssue(rows, configuredMethods, allowRecordedEdits)
   const rateText = exchangeRate.toLocaleString(undefined, { maximumFractionDigits: 4 })
   const rowsLimitMessage = translate('sale_settlement_rows_limit', 'This sale has {count} recorded payment rows. Settlement supports at most {max}; no recorded rows were removed. Repair the record before completing it.', 'ការលក់នេះមានបន្ទាត់ការទូទាត់ដែលបានកត់ត្រា {count}។ ការបញ្ចប់ការទូទាត់គាំទ្រអតិបរមា {max} បន្ទាត់ ហើយមិនបានដកបន្ទាត់ដែលបានកត់ត្រាណាមួយទេ។ សូមកែទិន្នន័យ មុនបញ្ចប់។')
     .replace('{count}', String(rows.length))
@@ -54,7 +55,9 @@ export default function SaleSettlementEditor({ rows, configuredMethods, exchange
         {translate('record_payment', 'Record payment', 'កត់ត្រាការទូទាត់')}
       </div>
       <p className="mt-1 text-xs leading-relaxed text-gray-500 dark:text-gray-400">
-        {translate('sale_settlement_rate_hint', 'Current rate: 1 USD = {rate} KHR. Recorded USD and KHR amounts stay in their original currency.', 'អត្រាបច្ចុប្បន្ន៖ 1 USD = {rate} រៀល។ ចំនួន USD និង KHR ដែលបានកត់ត្រា នៅតែរក្សារូបិយប័ណ្ណដើម។').replace('{rate}', rateText)}
+        {(allowRecordedEdits
+          ? translate('sale_payment_correction_hint', 'Correct the recorded tender method or amount. This creates an audited correction receipt.', 'កែវិធី ឬចំនួនទឹកប្រាក់ដែលបានកត់ត្រា។ វានឹងបង្កើតបង្កាន់ដៃកែតម្រូវដែលមានកំណត់ត្រា។')
+          : translate('sale_settlement_rate_hint', 'Current rate: 1 USD = {rate} KHR. Recorded USD and KHR amounts stay in their original currency.', 'អត្រាបច្ចុប្បន្ន៖ 1 USD = {rate} រៀល។ ចំនួន USD និង KHR ដែលបានកត់ត្រា នៅតែរក្សារូបិយប័ណ្ណដើម។')).replace('{rate}', rateText)}
       </p>
 
       <div className="mt-3 flex flex-wrap gap-2" aria-label={translate('payment_methods', 'Payment methods', 'វិធីទូទាត់')}>
@@ -87,7 +90,7 @@ export default function SaleSettlementEditor({ rows, configuredMethods, exchange
                 type="button"
                 className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-red-500 hover:bg-red-50 disabled:opacity-40 dark:hover:bg-red-900/20"
                 aria-label={`${translate('remove', 'Remove', 'ដក')} ${row.method}`}
-                disabled={saving || rows.length === 1 || row.id.startsWith('recorded-')}
+                disabled={saving || (!allowRecordedEdits && (rows.length === 1 || row.id.startsWith('recorded-')))}
                 onClick={() => onChange(rows.filter((entry) => entry.id !== row.id))}
               >
                 <Trash2 className="h-4 w-4" aria-hidden="true" />
@@ -100,10 +103,10 @@ export default function SaleSettlementEditor({ rows, configuredMethods, exchange
                   className="input mt-1 h-11 w-full text-sm"
                   type="number"
                   min="0"
-                  step={row.id.startsWith('recorded-') ? 'any' : '0.01'}
+                  step={row.id.startsWith('recorded-') && !allowRecordedEdits ? 'any' : '0.01'}
                   inputMode="decimal"
                   aria-label={`${row.method} USD ${index + 1}`}
-                  disabled={saving || row.id.startsWith('recorded-')}
+                  disabled={saving || (row.id.startsWith('recorded-') && !allowRecordedEdits)}
                   value={row.usd}
                   onChange={(event) => patchRow(row.id, { usd: event.target.value })}
                 />
@@ -117,7 +120,7 @@ export default function SaleSettlementEditor({ rows, configuredMethods, exchange
                   step="1"
                   inputMode="numeric"
                   aria-label={`${row.method} KHR ${index + 1}`}
-                  disabled={saving || row.id.startsWith('recorded-')}
+                  disabled={saving || (row.id.startsWith('recorded-') && !allowRecordedEdits)}
                   value={row.khr}
                   onChange={(event) => patchRow(row.id, { khr: event.target.value })}
                 />

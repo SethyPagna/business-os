@@ -2,6 +2,7 @@ import { Fragment, type RefObject } from 'react'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import Eye from 'lucide-react/dist/esm/icons/eye.js'
+import History from 'lucide-react/dist/esm/icons/history.js'
 import Printer from 'lucide-react/dist/esm/icons/printer.js'
 import StatusBadge from './StatusBadge.tsx'
 import { consumeLongPressClick, createLongPressHandlers, type LongPressState } from '../../utils/longPress.ts'
@@ -9,6 +10,7 @@ import ColumnChooser from '../shared/ColumnChooser.tsx'
 import { useColumnPreferences } from '../shared/useColumnPreferences.ts'
 import { resolveDriverLabel } from '../../utils/salesDriverLabel.ts'
 import { SALES_COLUMNS_SURFACE_KEY, SALES_OPTIONAL_COLUMNS } from './salesListColumns.ts'
+import { saleRecordsCount } from '../../utils/saleRecords.ts'
 
 type TranslateFn = (key: string) => string
 type MoneyFormatter = (value: number | string) => string
@@ -38,6 +40,13 @@ interface SaleRecord {
   // linked driver's live name in GET /sales) -- see utils/salesDriverLabel.ts.
   linked_driver_name?: string | null
   delivery_contact_name?: string | null
+  // N41: how many RECORDS this sale has -- every change anybody ever made to
+  // it, unioned server-side from the amendment ledger, audit_logs, the bulk
+  // operation receipts and the sale's own creation. GET /api/sales delivers it
+  // with the page (one statement per chunk, never a query per row). Never 0
+  // for a real sale: being rung up is itself the first record, so a missing
+  // value means "the server did not say", not "nothing ever happened".
+  records_count?: number | string | null
 }
 
 interface SalesGroup {
@@ -67,9 +76,16 @@ interface SalesListSurfaceProps {
   isSelectionScopePartiallySelected: (ids: number[]) => boolean
   loading: boolean
   revenue: number
-  /** Count of sales that contribute to `revenue` (cancelled + awaiting-payment
-   * excluded) — the reconciled headline count shown in the footer. */
+  /** Count of sales that contribute to `revenue` — every sale in the window
+   * except a cancelled one, matching the kernel's `recognizedExpr`. A credit
+   * sale is IN, because it is inside `revenue` too. This contract used to
+   * claim the credit cohort was left out, which described neither
+   * `isRevenueCountedSale` nor GET /api/sales/stats. */
   revenueCount: number
+  /** How much of `revenue` is still owed: the credit annotation (owner,
+   * Sep 6 2026). Printed POSITIVE beside the revenue, never with a minus and
+   * never as a deduction — these rows are already inside `revenue`. */
+  creditUsd: number
   /** Predicate: does this sale count toward the money shown? Used to make the
    * day-group header counts money-counting too, so they sum to the footer. */
   isCountedSale: (sale: SaleRecord) => boolean
@@ -82,6 +98,10 @@ interface SalesListSurfaceProps {
   // desktop column-header checkbox is the select-all control.
   selectionModeActive: boolean
   getSaleLongPressState: (rowId: number) => LongPressState
+  // N41: open the sale's Records float. Omitted for a viewer who may not read
+  // sales history -- the line is then not rendered at all, rather than shown
+  // and refused.
+  openSaleRecords?: (sale: SaleRecord) => void
   setDetailSale: (sale: SaleRecord) => void
   setSelectedSale: (sale: SaleRecord) => void
   showSalesActionGroups: boolean
@@ -94,6 +114,37 @@ interface SalesListSurfaceProps {
 
 function getSaleItems(sale: SaleRecord): SaleItem[] {
   return Array.isArray(sale.items) ? sale.items : []
+}
+
+/**
+ * N41, the owner's ask verbatim: "i want a row at the bottom of sales each sale
+ * rows. one line called Records with total records when press it pops up a
+ * float with who made changes in this sales record".
+ *
+ * ONE implementation, rendered by both layouts -- the desktop table row and the
+ * phone card. Two copies of a one-line control is how a surface ends up with
+ * the count on one breakpoint and not the other; here the parity is structural
+ * rather than remembered.
+ *
+ * A missing count prints an em dash rather than 0. Zero would be a claim
+ * ("nothing ever happened to this sale") that is never true -- being rung up is
+ * itself the first record -- so an older cached page must not make it.
+ */
+function SaleRecordsLine({ sale, t, onOpen }: { sale: SaleRecord; t: TranslateFn; onOpen?: (sale: SaleRecord) => void }) {
+  if (!onOpen) return null
+  const count = saleRecordsCount(sale)
+  return (
+    <button
+      type="button"
+      onClick={(event) => { event.stopPropagation(); onOpen(sale) }}
+      className="inline-flex items-center gap-1 rounded px-1 py-0.5 text-[11px] font-medium text-slate-500 hover:bg-slate-100 hover:text-blue-600 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-blue-400"
+      title={t('records_open') || 'Show who changed this sale'}
+    >
+      <History className="h-3 w-3" />
+      <span>{t('sale_records') || 'Records'}</span>
+      <span className="tabular-nums">· {count === null ? '—' : count}</span>
+    </button>
+  )
 }
 
 export default function SalesListSurface({
@@ -109,12 +160,14 @@ export default function SalesListSurface({
   loading,
   revenue,
   revenueCount,
+  creditUsd,
   isCountedSale,
   salesSections,
   selectAllRef,
   selectedIds,
   selectionModeActive,
   getSaleLongPressState,
+  openSaleRecords,
   setDetailSale,
   setSelectedSale,
   showSalesActionGroups,
@@ -274,8 +327,8 @@ export default function SalesListSurface({
                             toggleSelected(sale.id)
                           }
                           return (
+                            <Fragment key={sale.id}>
                             <tr
-                              key={sale.id}
                               className={`table-row cursor-pointer select-none hover:bg-blue-50 dark:hover:bg-blue-900/10 ${rowSelected ? 'bg-blue-50 dark:bg-blue-900/20' : ''} ${status === 'cancelled' ? 'opacity-60' : ''}`}
                               onClick={selectionModeActive ? handleRowClick : undefined}
                               {...(selectionModeActive ? {} : longPress)}
@@ -322,6 +375,24 @@ export default function SalesListSurface({
                               </td>
                               <td className="hidden lg:table-cell" />
                             </tr>
+                            {/* The Records line the owner asked for, as its own
+                                row UNDER the sale's row -- a table section may
+                                only contain rows, so a bare div here would be
+                                hoisted out of the table box by the browser.
+                                It carries no row-click and no long-press: the
+                                only thing on it opens the float. */}
+                            {openSaleRecords ? (
+                              <tr
+                                className={`${rowSelected ? 'bg-blue-50 dark:bg-blue-900/20' : ''} ${status === 'cancelled' ? 'opacity-60' : ''}`}
+                                onClick={(event) => event.stopPropagation()}
+                              >
+                                <td className={`${selectCellPad} pb-1.5`} />
+                                <td colSpan={columnCount - 1} className="px-3 pb-1.5 pt-0">
+                                  <SaleRecordsLine sale={sale} t={t} onOpen={openSaleRecords} />
+                                </td>
+                              </tr>
+                            ) : null}
+                            </Fragment>
                           )
                         })}
                       </Fragment>
@@ -334,6 +405,9 @@ export default function SalesListSurface({
         </div>
         <div className="border-t border-gray-100 px-4 py-2 text-xs text-gray-400 dark:border-gray-700">
           {revenueCount} {t('sales')} | {fmtUSD(revenue)}
+          {/* The credit rides BESIDE the revenue, positive and unsigned: it is
+              part of the figure to its left, not something to take off it. */}
+          {creditUsd > 0 ? <> · {t('rpt_pending_credit') || 'Credit'} {fmtUSD(creditUsd)}</> : null}
         </div>
       </div>
 
@@ -508,6 +582,15 @@ export default function SalesListSurface({
                             </button>
                           </div>
                         </div>
+                        {/* Same one line, at the bottom of the card -- the
+                            phone mirror of the row underneath the desktop
+                            row, rendered by the same component so the two
+                            breakpoints cannot drift apart. */}
+                        {openSaleRecords ? (
+                          <div className="mt-1.5 border-t border-gray-100 pt-1 dark:border-gray-700">
+                            <SaleRecordsLine sale={sale} t={t} onOpen={openSaleRecords} />
+                          </div>
+                        ) : null}
                       </div>
                     )
                   })}

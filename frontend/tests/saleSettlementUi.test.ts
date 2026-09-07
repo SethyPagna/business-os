@@ -88,6 +88,11 @@ assert.equal(settlementRowsIssue([{ id: 'x', method: 'Cash', usd: '1.005', khr: 
 assert.equal(settlementRowsIssue([{ id: 'recorded-x', method: 'Retired', usd: '1.005', khr: '' }], ['Cash']), null, 'an existing legacy 4dp inactive tender remains unchanged')
 assert.equal(settlementRowsIssue([{ id: 'recorded-khr', method: 'Retired', usd: '', khr: '4100.1234' }], ['Cash']), null, 'an existing legacy 4dp KHR tender remains unchanged')
 assert.equal(settlementRowsIssue([{ id: 'recorded-khr', method: 'Retired', usd: '', khr: '4100.12345' }], ['Cash']), 'amount', 'recorded KHR beyond legacy 4dp is invalid')
+assert.equal(settlementRowsIssue([{ id: 'recorded-x', method: 'Retired', usd: '1.005', khr: '' }], ['Cash'], true), 'method', 'a correction must replace retired tender methods')
+assert.equal(settlementRowsIssue([{ id: 'recorded-x', method: 'Cash', usd: '1.005', khr: '' }], ['Cash'], true), 'amount', 'a corrected USD tender must use cents')
+assert.deepEqual(buildSettlementPayload([{ id: 'recorded-x', method: 'Cash', usd: '1.235', khr: '4100.4' }], ['Cash'], true), {
+  payment_details: [{ method: 'Cash', amount_usd: 1.24, amount_khr: 4100 }],
+}, 'payment correction submits a new cent/integer tender snapshot rather than preserving malformed legacy precision')
 assert.equal(settlementRowsIssue([{ id: 'x', method: 'Cash', usd: '', khr: '1.5' }], ['Cash']), 'amount')
 assert.equal(settlementRowsIssue([{ id: 'x', method: 'Unknown', usd: '1', khr: '' }], ['Cash']), 'method')
 
@@ -132,7 +137,9 @@ assert.match(editorSource, /min-h-11/, 'method targets remain at least 44px tall
 assert.match(editorSource, /h-11 w-11/, 'row removal remains a 44px touch target')
 assert.match(editorSource, /grid-cols-1[\s\S]*sm:grid-cols-2/, 'USD and KHR controls stay legible at 320px')
 assert.match(editorSource, /disabled=\{saving \|\|/, 'editor controls lock while the settlement request runs')
-assert.match(editorSource, /row\.id\.startsWith\('recorded-'\)/, 'recorded tender rows are visibly read-only')
+assert.match(editorSource, /!allowRecordedEdits && \(rows\.length === 1 \|\| row\.id\.startsWith\('recorded-'\)\)/, 'ordinary recorded tender rows remain protected from deletion')
+assert.match(editorSource, /row\.id\.startsWith\('recorded-'\) && !allowRecordedEdits/, 'ordinary recorded amounts remain read-only while correction mode enables them')
+assert.match(editorSource, /sale_payment_correction_hint/, 'correction mode explains that it creates an audited correction receipt')
 assert.doesNotMatch(editorSource, /Math\.round\(exchangeRate\)/, 'the reviewed quote display must not drop a noninteger server rate')
 assert.match(editorSource, /exchangeRate\.toLocaleString\(undefined, \{ maximumFractionDigits: 4 \}\)/, 'the normalized server rate remains visible to four decimal places')
 assert.match(editorSource, /sale_settlement_rows_limit/, 'legacy records above the server row limit have a localized review message')
@@ -143,6 +150,9 @@ assert.match(workflowSource, /disabled=\{saving \|\| confirmDisabled \|\| select
 assert.match(modalSource, /client_request_id:\s*settlementRequestIdRef\.current/, 'retries reuse one reviewed request id')
 assert.match(modalSource, /expected_exchange_rate:\s*settlementSession\.exchangeRate/, 'the server guards the reviewed exchange-rate quote')
 assert.match(modalSource, /expected_updated_at:\s*settlementSession\.expectedUpdatedAt/, 'the reviewed sale revision is frozen with the tender')
+assert.match(modalSource, /replace_existing_payment:\s*paymentCorrection/, 'the Worker receives an explicit replacement flag only for a reopened completed sale')
+assert.match(modalSource, /allowRecordedEdits=\{paymentCorrection\}/, 'recorded tender editing is scoped to server-authorized correction mode')
+assert.match(modalSource, /payment_correction_allowed/, 'the list response controls correction eligibility; the client does not infer it from history')
 assert.match(modalSource, /exchangeRateChanged[\s\S]*?sale_settlement_rate_changed/, 'a stale quote refreshes the preview and requires another confirmation')
 assert.match(modalSource, /showNotes=\{!needsPaymentEntry\}/, 'settlement hides the unsupported notes control while normal status reviews retain it')
 assert.match(workflowSource, /showNotes \? <div>[\s\S]*?sale-status-notes/, 'the workflow conditionally renders its existing notes draft')

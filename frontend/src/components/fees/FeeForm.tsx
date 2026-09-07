@@ -9,6 +9,7 @@ import DateEntryInput from '../shared/DateEntryInput.tsx'
 import { normalizePriceValue } from '../../utils/pricing.ts'
 import { getFeeLabels, type FeeLabelSuggestion, type FeeRecord, type FeeType } from '../../api/feesTransport.ts'
 import { todayStr } from '../../utils/dateHelpers.ts'
+import { branchCanSell } from '../../utils/branchRoles.ts'
 
 // Add/edit form for a single fee record.
 //
@@ -35,6 +36,8 @@ type SaleSearchRow = {
   customer_name?: string | null
   total_usd?: number | null
   created_at?: string | null
+  branch_id?: number | string | null
+  branch_name?: string | null
 }
 
 function formatSaleOptionLabel(sale: SaleSearchRow): string {
@@ -230,7 +233,7 @@ export default function FeeForm({ fee, labelSuggestions = [], onSave, onClose }:
         .then((result) => {
           if (saleSearchSeq.current !== seq) return
           const rows = (Array.isArray(result) ? result : (result as { sales?: unknown[] })?.sales || []) as SaleSearchRow[]
-          setSaleResults(rows)
+          setSaleResults(rows.filter((sale) => sale.branch_id != null && branchCanSell(sale.branch_name)))
         })
         .catch(() => { if (saleSearchSeq.current === seq) setSaleResults([]) })
         .finally(() => { if (saleSearchSeq.current === seq) setSaleSearching(false) })
@@ -241,6 +244,7 @@ export default function FeeForm({ fee, labelSuggestions = [], onSave, onClose }:
   const pickSale = (sale: SaleSearchRow) => {
     setSelectedSale(sale)
     set('sale_id', String(sale.id))
+    if (sale.branch_id != null) set('branch_id', String(sale.branch_id))
     setSaleQuery('')
     setSaleResults([])
     setSaleDropdownOpen(false)
@@ -259,12 +263,16 @@ export default function FeeForm({ fee, labelSuggestions = [], onSave, onClose }:
       .then((mod) => mod.getBranches())
       .then((rows) => {
         if (cancelled) return
-        setBranches(((rows || []) as FeeBranchOption[]).filter((row) => row.is_active !== false))
+        const shops = ((rows || []) as FeeBranchOption[])
+          .filter((row) => row.is_active !== false && branchCanSell(row.name))
+        setBranches(shops)
+        if (!fee && shops.length === 1) {
+          setForm((current) => current.branch_id ? current : { ...current, branch_id: String(shops[0].id) })
+        }
       })
       .catch(() => {
-        // Branch is optional on a fee record -- if the list fails to load,
-        // fall back to no branch options rather than blocking the form;
-        // an existing fee's already-set branch still round-trips via id.
+        // The Worker remains the authority and refuses a save without the
+        // active Shop. Keep the form open if the lookup fails.
         if (!cancelled) setBranches([])
       })
     return () => { cancelled = true }
@@ -281,20 +289,14 @@ export default function FeeForm({ fee, labelSuggestions = [], onSave, onClose }:
   const amountsInvalid = amountUsd <= 0 && amountKhr <= 0
   const dateInvalid = !form.fee_date.trim()
 
-  // Keep the fee's already-set branch selectable even if it's since been
-  // deactivated -- same "don't silently drop an existing value" reasoning
-  // as NewSupplierReturnModal.tsx's branch handling.
   const branchOptions = (() => {
     const options = branches.map((b) => ({ value: String(b.id), label: b.name || String(b.id) }))
-    if (fee?.branch_id != null && !options.some((opt) => opt.value === String(fee.branch_id))) {
-      options.push({ value: String(fee.branch_id), label: fee.branch_name || `#${fee.branch_id}` })
-    }
-    return [{ value: '', label: t('no_branch') || 'No branch' }, ...options]
+    return [{ value: '', label: t('select_branch') || 'Select Shop' }, ...options]
   })()
 
   const handleSave = async () => {
     setTouched(true)
-    if (amountsInvalid || dateInvalid) return
+    if (amountsInvalid || dateInvalid || !form.branch_id.trim()) return
     const saleId = form.sale_id.trim() ? Number(form.sale_id.trim()) : null
     const branchId = form.branch_id.trim() ? Number(form.branch_id.trim()) : null
     try {
@@ -424,43 +426,79 @@ export default function FeeForm({ fee, labelSuggestions = [], onSave, onClose }:
         </p>
       ) : null}
 
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label htmlFor="fee-date" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-            {t('fee_date') || 'Date'} *
-          </label>
-          {/* Typed, not a native picker (Sep 3) -- an expense date is keyed
-              as digits like every other date in the app. The form's own
-              touched/dateInvalid gate still runs on the committed value. */}
-          <DateEntryInput
-            id="fee-date"
-            t={t}
-            ariaLabel={t('fee_date') || 'Date'}
-            value={form.fee_date}
-            onChange={(iso) => { set('fee_date', iso); setTouched(true) }}
-            onInvalidChange={(invalid) => { if (invalid) setTouched(true) }}
-          />
-        </div>
-        <div>
-          <label htmlFor="fee-sale-id" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-            {t('fee_matched_sale_id') || 'Matched Sale ID (optional)'}
-          </label>
-          <input
-            id="fee-sale-id"
-            className="input"
-            type="number"
-            min="1"
-            inputMode="numeric"
-            value={form.sale_id}
-            onChange={(event) => set('sale_id', event.target.value)}
-            placeholder={t('fee_sale_id_placeholder') || 'e.g. 1042'}
-          />
-        </div>
+      <div>
+        <label htmlFor="fee-sale-search" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+          {t('fee_matched_sale_id') || 'Linked sale (optional)'}
+        </label>
+        {selectedSale ? (
+          <div className="flex min-h-11 items-center justify-between gap-3 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm dark:border-emerald-700 dark:bg-emerald-950/30">
+            <div className="min-w-0">
+              <div className="truncate font-semibold text-emerald-900 dark:text-emerald-100">{formatSaleOptionLabel(selectedSale)}</div>
+              <div className="text-xs text-emerald-700 dark:text-emerald-300">Sale ID #{selectedSale.id}{selectedSale.branch_name ? ` · ${selectedSale.branch_name}` : ''}</div>
+            </div>
+            <button
+              type="button"
+              className="min-h-11 shrink-0 rounded-lg px-3 text-sm font-medium text-emerald-800 hover:bg-emerald-100 dark:text-emerald-200 dark:hover:bg-emerald-900/40"
+              onClick={clearSale}
+            >
+              {t('remove') || 'Remove'}
+            </button>
+          </div>
+        ) : (
+          <div className="relative">
+            <SearchInput
+              id="fee-sale-search"
+              value={saleQuery}
+              onChange={(value) => { setSaleQuery(value); setSaleDropdownOpen(true) }}
+              onFocus={() => setSaleDropdownOpen(true)}
+              onBlur={() => window.setTimeout(() => setSaleDropdownOpen(false), 120)}
+              placeholder={t('fee_sale_search_placeholder') || 'Search receipt, customer, phone, product, SKU or barcode'}
+              ariaLabel={t('fee_sale_search_placeholder') || 'Search for a sale to link'}
+              className="w-full"
+            />
+            {saleDropdownOpen && saleQuery.trim() ? (
+              <div className="absolute z-30 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white p-1 shadow-xl dark:border-gray-700 dark:bg-gray-900" role="listbox">
+                {saleSearching || saleResolving ? (
+                  <div className="px-3 py-2 text-sm text-gray-500">{t('loading') || 'Loading...'}</div>
+                ) : saleResults.length ? saleResults.map((sale) => (
+                  <button
+                    key={sale.id}
+                    type="button"
+                    role="option"
+                    aria-selected="false"
+                    className="min-h-11 w-full rounded-md px-3 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-800"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => pickSale(sale)}
+                  >
+                    <span className="block font-medium">{formatSaleOptionLabel(sale)}</span>
+                    <span className="block text-xs text-gray-500">Sale ID #{sale.id}{sale.branch_name ? ` · ${sale.branch_name}` : ''}</span>
+                  </button>
+                )) : (
+                  <div className="px-3 py-2 text-sm text-gray-500">{t('no_results') || 'No Shop sales found'}</div>
+                )}
+              </div>
+            ) : null}
+          </div>
+        )}
+      </div>
+
+      <div>
+        <label htmlFor="fee-date" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+          {t('fee_date') || 'Date'} *
+        </label>
+        <DateEntryInput
+          id="fee-date"
+          t={t}
+          ariaLabel={t('fee_date') || 'Date'}
+          value={form.fee_date}
+          onChange={(iso) => { set('fee_date', iso); setTouched(true) }}
+          onInvalidChange={(invalid) => { if (invalid) setTouched(true) }}
+        />
       </div>
 
       <div>
         <label htmlFor="fee-branch" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-          {t('branch') || 'Branch'}
+          {t('branch') || 'Shop'} *
         </label>
         <AppSelect
           id="fee-branch"
@@ -470,6 +508,9 @@ export default function FeeForm({ fee, labelSuggestions = [], onSave, onClose }:
           options={branchOptions}
           onChange={(value) => set('branch_id', value as string)}
         />
+        {touched && !form.branch_id.trim() ? (
+          <p className="mt-1 text-xs text-red-500">{t('select_branch') || 'Select the Shop branch.'}</p>
+        ) : null}
       </div>
 
       <div>

@@ -110,17 +110,17 @@ runTest('is_default is NOT the discriminator', () => {
 // 2. The guards
 // ---------------------------------------------------------------------------
 
-runTest('a sale line at the warehouse is refused; shop and other branches are not', () => {
+runTest('a sale line is accepted only at the exact Shop', () => {
   assert.equal(guards.firstUnsellableBranch([{ id: 1, name: 'Shop' }]), null)
-  assert.equal(guards.firstUnsellableBranch([{ id: 3, name: 'Depot' }]), null)
-  assert.equal(guards.firstUnsellableBranch([{ id: 1, name: 'Shop' }, { id: 3, name: 'Depot' }]), null)
+  assert.equal(guards.firstUnsellableBranch([{ id: 3, name: 'Depot' }])?.id, 3)
+  assert.equal(guards.firstUnsellableBranch([{ id: 1, name: 'Shop' }, { id: 3, name: 'Depot' }])?.id, 3)
   // A cart whose lines resolved to more than one branch is refused on the
   // warehouse line even when the sale's own branch is the shop -- this is
   // exactly the mixed case a per-line branch_id makes possible.
   assert.equal(guards.firstUnsellableBranch([{ id: 1, name: 'Shop' }, { id: 2, name: '  WAREHOUSE ' }])?.id, 2)
   assert.equal(guards.firstUnsellableBranch([])?.id, undefined)
   assert.equal(guards.firstUnsellableBranch([]), null)
-  assert.equal(guards.firstUnsellableBranch([{ id: 9, name: null }]), null, 'an unnamed branch is not evidence of a stock-only one')
+  assert.equal(guards.firstUnsellableBranch([{ id: 9, name: null }])?.id, 9, 'an unnamed branch is never guessed to be the Shop')
 })
 
 runTest('transfers run warehouse -> shop, and nothing else that names those two', () => {
@@ -174,10 +174,21 @@ runTest('every path that writes a sale line asks the guard first', () => {
   // later without one.
   assert.equal((salesSource.match(/firstUnsellableBranch\(/g) || []).length, 3)
   assert.equal((returnsSource.match(/firstUnsellableBranch\(/g) || []).length, 1)
-  for (const source of [salesSource, returnsSource]) {
-    assert.match(source, /WAREHOUSE_NOT_SELLABLE_ERROR \}, 400\)/)
-    assert.match(source, /from '\.\.\/lib\/branchRoleGuards'/)
-  }
+  assert.match(salesSource, /SHOP_ONLY_SALE_ERROR \}, 400\)/)
+  assert.match(salesSource, /from '\.\.\/lib\/branchRoleGuards'/)
+  assert.match(returnsSource, /WAREHOUSE_NOT_SELLABLE_ERROR \}, 400\)/)
+  assert.match(returnsSource, /from '\.\.\/lib\/branchRoleGuards'/)
+})
+
+runTest('sale writers require one real active Shop header and identical line branches', () => {
+  assert.match(salesSource, /saleBranchRows\.length !== saleBranchIds\.length/)
+  assert.match(salesSource, /lineBranchId !== saleHeaderBranchId/)
+  assert.match(salesSource, /addedBranchRows\.length !== addedBranchIds\.length/)
+  assert.match(salesSource, /Number\(line\.branch_id\) !== saleHeaderBranchId/)
+  assert.match(salesSource, /branchId !== saleHeaderBranchId/)
+  assert.match(salesSource, /COALESCE\(is_active,1\)=1/)
+  assert.match(salesSource, /firstUnsellableBranch\(\[amendmentBranch\]\)/)
+  assert.match(salesSource, /branchCanSell\(cancellationBranch\.name\)/, 'automatic cancellation expenses inherit a verified Shop sale link')
 })
 
 runTest('the guard runs before the write, not after it', () => {

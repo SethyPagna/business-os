@@ -137,4 +137,19 @@ check('normalizeFeeLabel caps at 6 words / 60 chars (sentences cannot be saved)'
   assert.strictEqual(normalizeFeeLabel('ទឹកភ្លើង'), 'ទឹកភ្លើង')
 })
 
+check('manual expenses require an active exact Shop and linked expenses derive the branch from a real sale', () => {
+  assert.match(source, /if \(requestedBranchId == null\) throw new Error\('BRANCH_REQUIRED'\)/)
+  assert.match(source, /Number\(branch\.is_active \?\? 0\) !== 1 \|\| !branchCanSell\(branch\.name\)/)
+  assert.match(source, /FROM sales s LEFT JOIN branches b ON b\.id=s\.branch_id/)
+  assert.match(source, /requestedBranchId !== saleBranchId\) throw new Error\('SALE_BRANCH_MISMATCH'\)/)
+  assert.match(source, /return \{ saleId, branchId: saleBranchId \}/)
+  assert.equal((source.match(/await resolveFeeLink\(/g) || []).length, 2, 'create and edit must enforce the same link contract')
+})
+
+check('fee audit payloads preserve before and after rows with their sale and Shop links', () => {
+  assert.match(source, /after: fee,\n\s*sale_id: saleId,\n\s*branch_id: branchId/)
+  assert.match(source, /before: existing,\n\s*after: fee,\n\s*sale_id: saleId,\n\s*branch_id: branchId/)
+  assert.match(source, /'delete', 'fee', id, \{ before: existing, after: null \}/)
+})
+
 console.log(`\n${passed} check(s) passed.`)
