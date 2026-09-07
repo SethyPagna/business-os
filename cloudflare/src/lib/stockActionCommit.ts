@@ -2,6 +2,7 @@ import type { D1Compat } from './db'
 import { dateToBatchCode, normalizeToIsoDate } from './batchCode'
 import { normalizeSearchText } from './searchMatch'
 import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, stockReceiptGateCode, stockReceiptGateMessage, type StockReceiptGateInput } from './stockReceiptGate'
+import { firstUnsellableBranch, WAREHOUSE_NOT_SELLABLE_ERROR } from './branchRoleGuards'
 
 /**
  * The FOURTH receipt wire (N14-D).
@@ -471,6 +472,23 @@ export async function applyUnifiedStockSale(db: D1Compat, input: UnifiedStockSal
       allocations: [],
     }
   })
+
+  // The import payload carries a branch label for review, but the permission
+  // boundary is the current branch row. Read every referenced branch once,
+  // reject a missing id, and run the same branchCanSell-backed guard as POS
+  // before constructing any write statement. An already-applied replay has
+  // returned above, so this only gates a new generated sale.
+  const branchIds = [...new Set(lines.map((line) => line.branchId))]
+  const branchParams = Object.fromEntries(branchIds.map((branchId, index) => [`branchId${index}`, branchId]))
+  const branchRows = await db.prepare(`
+    SELECT id, name FROM branches
+    WHERE id IN (${branchIds.map((_, index) => `@branchId${index}`).join(', ')})
+  `).all<{ id: number; name: string | null }>(branchParams)
+  if (branchRows.length !== branchIds.length) throw new Error('Sale branch does not exist')
+  const unsellableBranch = firstUnsellableBranch(branchRows)
+  if (unsellableBranch) throw new Error(WAREHOUSE_NOT_SELLABLE_ERROR)
+  const branchNameById = new Map(branchRows.map((branch) => [Number(branch.id), String(branch.name || '').trim()]))
+  for (const line of lines) line.branchName = branchNameById.get(line.branchId) || line.branchName
 
   // Read each product/branch once, then reserve its available lots in memory
   // in row order. The live quantities are asserted again *inside* db.batch;
