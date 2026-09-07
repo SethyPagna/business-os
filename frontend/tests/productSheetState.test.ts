@@ -328,11 +328,11 @@ await runTest('the warehouse never wins on quantity, nor by being the default br
   assert.deepEqual(resolveSaleBranch(product, { defaultBranchId: 2 }), { branchId: 2, blocked: false })
 })
 
-await runTest('a branch the payload does not name is left alone', () => {
+await runTest('only the canonical Shop may receive a sale line', () => {
   const product = { id: 64, name: 'Third branch', branch_stock: [{ branch_id: 7, branch_name: 'Kiosk', quantity: 3 }] }
-  assert.equal(branchAllowsSale(product, 7), true, 'an unrecognised name is not evidence of a stock-only branch')
-  assert.equal(branchAllowsSale(product, 999), true, 'an id the payload never mentions is not blocked')
-  assert.deepEqual(resolveSaleBranch(product, { activeBranchFilterId: 7 }), { branchId: 7, blocked: false })
+  assert.equal(branchAllowsSale(product, 7), false, 'an unrecognised branch must be transferred into the canonical Shop before sale')
+  assert.equal(branchAllowsSale(product, 999), false, 'a missing branch name must be refused rather than guessed')
+  assert.deepEqual(resolveSaleBranch(product, { activeBranchFilterId: 7 }), { branchId: null, blocked: true })
   // Nothing anywhere is not the same as stock in the wrong place.
   const empty = { id: 65, name: 'Nothing anywhere', branch_stock: branchStock(0, 0) }
   assert.deepEqual(resolveSaleBranch(empty, {}), { branchId: null, blocked: false })

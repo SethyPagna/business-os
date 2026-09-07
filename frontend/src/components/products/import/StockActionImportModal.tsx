@@ -35,7 +35,7 @@ import {
 // Per-code rendering for the receipt-gate issues this screen's pre-check
 // raises (N14-D): every sibling gate surface (FastStockInModal,
 // ReceiveBatchModal, Inventory.tsx, StockAdjustModal, CreateProductsSessionModal,
-// BulkAddStockModal, BranchStockAdjuster) shows the REFUSAL'S OWN reason, not
+// BulkAddStockModal and the per-product adjust form) shows the REFUSAL'S OWN reason, not
 // one generic sentence for every code. STOCK_RECEIPT_GATE_CODES fixes the
 // render order so the amber lines are stable across re-parses.
 import { STOCK_RECEIPT_GATE_CODES, STOCK_RECEIPT_GATE_KEYS, STOCK_RECEIPT_GATE_FALLBACKS, type StockReceiptGateCode } from '../../../utils/stockReceiptFields.ts'
@@ -260,7 +260,7 @@ export default function StockActionImportModal({ onClose, onDone, t, notify, top
             // renders the REFUSAL'S OWN reason, same as every sibling gate
             // surface (FastStockInModal, ReceiveBatchModal, Inventory.tsx,
             // StockAdjustModal, CreateProductsSessionModal, BulkAddStockModal,
-            // BranchStockAdjuster) -- never one sentence standing in for all
+            // per-product adjust form) -- never one sentence standing in for all
             // four codes.
             const message = code === 'cost_required'
               ? tr(

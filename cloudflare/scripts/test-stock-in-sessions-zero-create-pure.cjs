@@ -44,6 +44,7 @@ const { loadAll } = require('./harness/load_migrations.cjs')
 const root = path.join(__dirname, '..')
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'stock-in-sessions-zero-'))
 fs.copyFileSync(path.join(root, 'src', 'lib', 'stockInSessionsQuery.ts'), path.join(tmp, 'stockInSessionsQuery.ts'))
+fs.copyFileSync(path.join(root, 'src', 'lib', 'movementActorName.ts'), path.join(tmp, 'movementActorName.ts'))
 const version = execSync('npx tsc --version', { cwd: root, encoding: 'utf8' }).trim()
 const ignore = /^Version\s+(?:[6-9]|\d{2,})\./.test(version) ? ' --ignoreConfig' : ''
 execSync(`npx tsc "${path.join(tmp, 'stockInSessionsQuery.ts')}" --outDir "${tmp}" --module commonjs --target es2022 --strict --skipLibCheck${ignore}`, { cwd: root })
