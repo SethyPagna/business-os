@@ -32,6 +32,13 @@ import {
   UNIFIED_STOCK_HEADERS,
   type UnifiedStockMode,
 } from './unifiedStockImport.ts'
+// Per-code rendering for the receipt-gate issues this screen's pre-check
+// raises (N14-D): every sibling gate surface (FastStockInModal,
+// ReceiveBatchModal, Inventory.tsx, StockAdjustModal, CreateProductsSessionModal,
+// BulkAddStockModal, BranchStockAdjuster) shows the REFUSAL'S OWN reason, not
+// one generic sentence for every code. STOCK_RECEIPT_GATE_CODES fixes the
+// render order so the amber lines are stable across re-parses.
+import { STOCK_RECEIPT_GATE_CODES, STOCK_RECEIPT_GATE_KEYS, STOCK_RECEIPT_GATE_FALLBACKS, type StockReceiptGateCode } from '../../../utils/stockReceiptFields.ts'
 import { unwrapImportJob } from './stockActionImportModel.ts'
 import ProductImportModeTabs, { ProductImportOptionCard, type ProductImportTopMode } from './ProductImportModeTabs'
 
@@ -70,10 +77,12 @@ export default function StockActionImportModal({ onClose, onDone, t, notify, top
   const [fileName, setFileName] = useState('')
   const [rowCount, setRowCount] = useState(0)
   const [issueCount, setIssueCount] = useState(0)
-  // Rows the stock-in receipt gate will refuse (N14-D). Counted apart from the
-  // generic issues because the remedy is its own -- fill the cost column --
-  // and it can be done before the file is ever uploaded.
-  const [gateCount, setGateCount] = useState(0)
+  // Rows the stock-in receipt gate will refuse (N14-D), tallied PER CODE --
+  // not a single scalar count -- because a supplier_required row and a
+  // free_goods_required row need different remedies, and one generic amber
+  // line was showing the cost-column fix for both (verifier round 2). Each
+  // present code renders its own line before the file is ever uploaded.
+  const [gateCounts, setGateCounts] = useState<Partial<Record<StockReceiptGateCode, number>>>({})
   // Reconcile mode's own unconditional warning (N14-D): the per-row gate
   // above is DIRECT-only because a reconcile number is a counted total, not a
   // change -- but a sheet with no cost_price column at all guarantees every
@@ -98,21 +107,27 @@ export default function StockActionImportModal({ onClose, onDone, t, notify, top
   // counts must follow the operator's current choice rather than whichever
   // mode happened to be selected when the file was picked.
   useEffect(() => {
-    if (!csvText.trim()) { setRowCount(0); setIssueCount(0); setGateCount(0); setReconcileNoCostColumn(false); return }
+    if (!csvText.trim()) { setRowCount(0); setIssueCount(0); setGateCounts({}); setReconcileNoCostColumn(false); return }
     try {
       const result = parseUnifiedStockRows(parseCsvRows(csvText) as Record<string, unknown>[], mode)
       setRowCount(result.rows.length)
-      // The two amber lines PARTITION the issues: a missing cost has its own
-      // remedy (fill one column) and its own line, so counting it in "rows
-      // need attention" as well would report the same rows twice and make a
-      // one-column fix look like two problems.
-      setIssueCount(result.issues.filter((issue) => issue.code !== 'receipt_gate').length)
-      setGateCount(result.issues.filter((issue) => issue.code === 'receipt_gate').length)
+      // The amber lines PARTITION the issues: a gate refusal has its own
+      // remedy and its own line, so counting it in "rows need attention" as
+      // well would report the same rows twice and make a one-column fix
+      // look like two problems.
+      const gateIssues = result.issues.filter((issue) => issue.code === 'receipt_gate')
+      setIssueCount(result.issues.length - gateIssues.length)
+      const counts: Partial<Record<StockReceiptGateCode, number>> = {}
+      for (const issue of gateIssues) {
+        if (!issue.gateCode) continue
+        counts[issue.gateCode] = (counts[issue.gateCode] || 0) + 1
+      }
+      setGateCounts(counts)
       setReconcileNoCostColumn(mode === 'reconcile' && result.rows.length > 0 && result.headerMap.cost_price == null)
     } catch (err) {
       setRowCount(0)
       setIssueCount(0)
-      setGateCount(0)
+      setGateCounts({})
       setReconcileNoCostColumn(false)
       setError(err instanceof Error ? err.message : tr('stock_import_read_failed', 'Could not read that file.', 'មិនអាចអានឯកសារនោះបានទេ។'))
     }
@@ -237,18 +252,34 @@ export default function StockActionImportModal({ onClose, onDone, t, notify, top
           />
           <input ref={fileInputRef} type="file" accept=".csv,.tsv,.xlsx,.xls,.xlsm" className="hidden" onChange={handlePick} />
 
-          {gateCount > 0 ? (
-            <div className="inline-flex items-start gap-1 text-xs text-amber-600 dark:text-amber-400">
-              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              <span>
-                {tr(
+          {STOCK_RECEIPT_GATE_CODES.map((code) => {
+            const count = gateCounts[code] || 0
+            if (!count) return null
+            // 'cost_required' keeps its own established, more specific
+            // sentence (naming the exact column to fill); every other code
+            // renders the REFUSAL'S OWN reason, same as every sibling gate
+            // surface (FastStockInModal, ReceiveBatchModal, Inventory.tsx,
+            // StockAdjustModal, CreateProductsSessionModal, BulkAddStockModal,
+            // BranchStockAdjuster) -- never one sentence standing in for all
+            // four codes.
+            const message = code === 'cost_required'
+              ? tr(
                   'stock_import_receipt_gate_note',
                   '{count} row(s) add stock with no cost in the file — fill the cost column so each stock-in records what you paid.',
                   '{count} ជួរដេកបន្ថែមស្តុកដោយគ្មានថ្លៃដើមក្នុងឯកសារ — សូមបំពេញជួរឈរថ្លៃដើម ដើម្បីឲ្យស្តុកចូលនីមួយៗកត់ត្រាថ្លៃដែលអ្នកបានបង់។',
-                ).replace('{count}', String(gateCount))}
-              </span>
-            </div>
-          ) : null}
+                ).replace('{count}', String(count))
+              : tr(
+                  'stock_import_gate_code_note',
+                  '{count} row(s): {reason}',
+                  '{count} ជួរដេក៖ {reason}',
+                ).replace('{count}', String(count)).replace('{reason}', tr(STOCK_RECEIPT_GATE_KEYS[code], STOCK_RECEIPT_GATE_FALLBACKS[code]))
+            return (
+              <div key={code} className="inline-flex items-start gap-1 text-xs text-amber-600 dark:text-amber-400">
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>{message}</span>
+              </div>
+            )
+          })}
 
           {reconcileNoCostColumn ? (
             <div className="inline-flex items-start gap-1 text-xs text-amber-600 dark:text-amber-400">

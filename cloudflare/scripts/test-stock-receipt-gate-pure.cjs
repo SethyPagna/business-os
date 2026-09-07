@@ -161,4 +161,21 @@ assert.ok(!createModal.includes("cost_price_usd === '' ? 0"),
   'the Add/Create products session must not turn a blank cost into a free receipt before posting')
 assert.ok(createModal.includes('stockReceiptGateCode('), 'both of its line paths run the same kernel the Worker runs')
 
+// The unified stock-action import's own review screen. It raises a
+// 'receipt_gate' issue per row carrying the kernel's own code (gateCode), but
+// until sibling:F13's verifier round 2 that code was a zombie field: the
+// renderer showed ONE sentence ('fill the cost column') for every code,
+// including supplier_required and free_goods_required rows whose cost column
+// IS filled and whose real remedy is a different column entirely. Every
+// sibling gate surface (FastStockInModal, ReceiveBatchModal, Inventory.tsx,
+// StockAdjustModal, CreateProductsSessionModal, BulkAddStockModal,
+// BranchStockAdjuster) shows the refusal's OWN reason; this import review
+// must too.
+const stockActionImportModal = fs.readFileSync(
+  path.join(root, '..', 'frontend', 'src', 'components', 'products', 'import', 'StockActionImportModal.tsx'),
+  'utf8',
+)
+assert.match(stockActionImportModal, /STOCK_RECEIPT_GATE_KEYS/,
+  'the stock-action import review must translate each receipt-gate issue through its OWN code, not one sentence for every refusal')
+
 console.log(`PASS stock-in receipt gate: ${table.cases.length} shared cases, supplier+cost required, $0 only as declared free goods, corrections exempt, and all FOUR receipt wires enforced`)
