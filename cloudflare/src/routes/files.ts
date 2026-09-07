@@ -3,7 +3,7 @@ import { enqueueImageNormalization } from '../lib/imageAudit'
 import { optimizeImage, IMAGE_MAX_BYTES } from '../lib/imagePipeline'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
-import { hasPermission, getPermissionTier } from '../lib/permissions'
+import { hasPermission, getActionTier, getPermissionTier } from '../lib/permissions'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { getMediaType, buildUniqueStoredName, normalizePhysicalStorageSummary, sanitizeOriginalFileName } from '../lib/fileAssets'
 import { logicalLibraryName } from '../lib/libraryLogicalAssets'
@@ -410,6 +410,18 @@ app.post('/:id/rewire', async (c) => {
   const fromPath = String(source.public_path || '')
   const toPath = String(target.public_path || '')
   if (!fromPath || !toPath) return c.json({ error: 'Both files need a stored path.' }, 400)
+
+  const productReferences = await db.prepare(`
+    SELECT
+      EXISTS(SELECT 1 FROM products WHERE image_path = @path) AS has_cover,
+      EXISTS(SELECT 1 FROM product_images WHERE image_path = @path) AS has_gallery
+  `).get<{ has_cover: number; has_gallery: number }>({ path: fromPath })
+  const rewiresProductImages = Boolean(productReferences?.has_cover || productReferences?.has_gallery)
+  const canChangeProductImages = getActionTier(user, 'products', 'image') === 'full'
+    || hasPermission(user, 'products_image_only')
+  if (rewiresProductImages && !canChangeProductImages) {
+    return c.json({ error: 'You do not have permission to change product images.' }, 403)
+  }
 
   // A product whose gallery ALREADY holds the target image must not end up
   // with two identical rows -- drop the would-be duplicates first, then
