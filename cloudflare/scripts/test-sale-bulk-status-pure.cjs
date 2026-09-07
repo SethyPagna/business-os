@@ -7,7 +7,7 @@ const Database = require('better-sqlite3')
 const root = path.join(__dirname, '..')
 let user = { id: 1, name: 'Admin', username: 'admin', role_code: 'admin', permissions: { all: true } }
 const cache = new Map()
-const actual = new Set(['actorSnapshot','movementBranchName','db','permissions','saleBulkStatus','saleBulkUpdate','saleTransitions','saleTotals','sqlBinding','productBatches','batchCode','salesStatus','undoAppliers','branchWrites','conflictControl','searchMatch'])
+const actual = new Set(['actorSnapshot','movementBranchName','db','permissions','saleBulkStatus','saleBulkUpdate','saleTransitions','saleTotals','sqlBinding','productBatches','batchCode','salesStatus','undoAppliers','branchWrites','branchRoles','conflictControl','searchMatch'])
 function load(rel) {
   if (cache.has(rel)) return cache.get(rel).exports
   const mod = { exports: {} }; cache.set(rel,mod)
@@ -140,6 +140,7 @@ async function run() {
   assert.equal(withFees.status,200,JSON.stringify(withFees))
   const feeRows=f.sql.prepare('SELECT f.* FROM fees f JOIN sales s ON s.cancel_fee_id=f.id WHERE s.id IN (1,2) ORDER BY f.sale_id').all()
   assert.equal(feeRows.length,2)
+  assert.deepEqual(feeRows.map(row=>[row.sale_id,row.branch_id]),[[1,1],[2,1]])
   assert.ok(feeRows.every(row=>row.id<0))
   assert.deepEqual(f.sql.prepare('SELECT cancel_fee_id FROM sales ORDER BY id').all().map(row=>row.cancel_fee_id),feeRows.map(row=>row.id))
   assert.equal((await replay(f,withFees.body.actionHistoryId)).status,200)
@@ -151,6 +152,30 @@ async function run() {
   assert.equal((await replay(f,withFees.body.actionHistoryId,'undo',2)).status,409)
   assert.equal(snapshot(f),editedFeeState)
   console.log('PASS per-sale cancellation answers and fees are atomic, exactly replayable, and guarded against later fee edits')
+
+  f=fixture();seed(f,1)
+  f.sql.exec('UPDATE sales SET branch_id=2 WHERE id=1; UPDATE sale_items SET branch_id=2 WHERE sale_id=1')
+  const warehouseFee=request(f,'cancelled','request-warehouse-fee')
+  delete warehouseFee.cancel_reason
+  warehouseFee.items[0].cancel={reason:'mistake',fee_usd:1}
+  const warehouseFeeCount=f.sql.prepare('SELECT COUNT(*) n FROM fees').get().n
+  const warehouseRejected=await f.call(sales,'/bulk-status',warehouseFee)
+  assert.equal(warehouseRejected.status,400,JSON.stringify(warehouseRejected))
+  assert.match(warehouseRejected.body.error,/active Shop/)
+  assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM fees').get().n,warehouseFeeCount)
+  assert.equal(f.sql.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status,'awaiting_payment')
+
+  f=fixture();seed(f,1)
+  const racedShopFee=request(f,'cancelled','request-shop-fee-race')
+  delete racedShopFee.cancel_reason
+  racedShopFee.items[0].cancel={reason:'mistake',fee_usd:1}
+  const racedShopFeeCount=f.sql.prepare('SELECT COUNT(*) n FROM fees').get().n
+  f.barrier(()=>f.sql.prepare("UPDATE branches SET name='Depot' WHERE id=1").run())
+  const racedShopRejected=await f.call(sales,'/bulk-status',racedShopFee)
+  assert.notEqual(racedShopRejected.status,200,JSON.stringify(racedShopRejected))
+  assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM fees').get().n,racedShopFeeCount)
+  assert.equal(f.sql.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status,'awaiting_payment')
+  console.log('PASS bulk cancellation expenses require an unchanged active Shop sale link before and inside the atomic batch')
 
   f=fixture();seed(f,1)
   const beforeSingleFee=snapshot(f)

@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import {
   revenueTerms, profitTerms, equationResidual, equationCloses, buildEquation,
-  isRevenueCountedSale, saleListRevenueUsd,
+  isRevenueCountedSale, saleListRevenueUsd, isCreditSale, saleListCreditUsd,
   type FormulaTerm, type StatsFormulaTotals,
 } from '../src/utils/statsFormulas.ts'
 
@@ -282,6 +282,15 @@ test('footer count: only cancelled is excluded, matching /stats revenue_count', 
   // The old predicate dropped the awaiting-payment sale from the count too, so
   // the footer read "4 sales" beside a revenue that had 5 sales in it.
   assert.equal(LIST_ROWS.filter(isRevenueCountedSale).length, 5)
+})
+
+test('Credit is a positive awaiting-payment subset of recognized revenue', () => {
+  assert.deepEqual(LIST_ROWS.filter(isCreditSale).map((sale) => sale.id), [4])
+  assert.equal(saleListCreditUsd(LIST_ROWS), 180, 'credit uses the same nonnegative net-sales basis as the server pending figure')
+  assert.equal(saleListCreditUsd([
+    { sale_status: 'awaiting_payment', subtotal_usd: 10, discount_usd: 30, refund_usd: 0 },
+    { sale_status: 'cancelled', subtotal_usd: 50, discount_usd: 0, refund_usd: 0 },
+  ]), 0, 'bad net inputs and cancelled rows cannot print negative credit')
 })
 
 test('footer fallback: a zero-subtotal receipt with a refund contributes 0, never a minus', () => {

@@ -20,10 +20,10 @@ import { bumpVersion, cachedJsonResponse, getVersionWithFallback } from '../lib/
 // every sale writer rather than done in the POS component.
 import { mergePaymentMethods, parseConfiguredMethods, saleMethodsUsed } from '../lib/paymentMethodRegistry'
 import { planSaleSettlement, SettlementValidationError } from '../lib/paymentSettlement'
-// The warehouse holds stock and never sells. Every sale-side picker refuses
-// it in the UI; these are the same rule where it cannot be bypassed -- an
-// offline queue replayed later, a direct API caller, or a stale client.
-import { firstUnsellableBranch, WAREHOUSE_NOT_SELLABLE_ERROR } from '../lib/branchRoleGuards'
+// Sales are Shop-only. The same predicate runs in the UI and here where an
+// offline replay, direct API caller, or stale client cannot bypass it.
+import { firstUnsellableBranch } from '../lib/branchRoleGuards'
+import { branchCanSell } from '../lib/branchRoles'
 import {
   SALE_SETTLEMENT_ACTION_KIND,
   buildSaleSettlementAfterState,
@@ -81,8 +81,21 @@ import {
   type LineAllocation,
   type TaxSettings,
 } from '../lib/saleAmendments'
+import { DELIVERY_AMOUNT_ERROR_MESSAGES, deliveryAmountChanged, parseDeliveryAmountUsd } from '../lib/deliveryAmounts'
 import { applySaleBulkStatus, bulkAssertion, notifyBulkStatus, SaleBulkError, saleRevisionGuard } from '../lib/saleBulkStatus'
 import { applySaleBulkUpdate, notifySaleBulkUpdate } from '../lib/saleBulkUpdate'
+import {
+  buildSaleRecords,
+  buildSaleRecordsCountSql,
+  saleRecordsCountBinds,
+  type SaleRecordReturnRow,
+  SALE_RECORDS_COUNT_BINDS_PER_ID,
+  SALE_RECORDS_SELF_COUNT,
+  type SaleRecordAuditRow,
+  type SaleRecordBulkRow,
+  type SaleRecordLedgerRow,
+  type SaleRecordSaleRow,
+} from '../lib/saleRecords'
 import { VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES } from '../lib/salesStatus'
 import { consumeDamagedLot, restoreDamagedLot, DamagedLotShortfallError, DAMAGE_OUT_MOVEMENT, DAMAGE_IN_MOVEMENT } from '../lib/returnsStock'
 import {
@@ -109,6 +122,27 @@ import type { Env } from '../index'
 import { actorId, actorSnapshot } from '../lib/actorSnapshot'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
+const SHOP_ONLY_SALE_ERROR = 'Sales can only be recorded at the Shop. Transfer Warehouse stock to the Shop first.'
+
+async function saleAllowsPaymentCorrection(db: ReturnType<typeof getDb>, saleId: number): Promise<boolean> {
+  const latest = await db.prepare(`
+    SELECT action, details FROM audit_logs
+    WHERE (entity='sale' OR table_name='sale')
+      AND CAST(COALESCE(entity_id,record_id) AS TEXT)=CAST(@saleId AS TEXT)
+      AND (
+        action='sale_settlement'
+        OR action='sale_payment_correction_opened'
+        OR (
+          action='update'
+          AND json_valid(details)=1
+          AND json_extract(details,'$.newStatus')='awaiting_payment'
+          AND json_extract(details,'$.oldStatus') IN ('completed','awaiting_delivery')
+        )
+      )
+    ORDER BY id DESC LIMIT 1
+  `).get<{ action: string; details: string | null }>({ saleId: String(saleId) })
+  return latest?.action === 'update' || latest?.action === 'sale_payment_correction_opened'
+}
 app.use('*', requireAuth)
 
 const SALES_READ_CACHE_TTL_SECONDS = 20
@@ -352,6 +386,10 @@ app.post('/', async (c) => {
   const shouldDeductStock = STOCK_DEDUCTED_STATUSES.has(saleStatus)
 
   // ---- 1. Normalize + validate input shape (no DB access yet) ----
+  const saleHeaderBranchId = Number(body.branch_id)
+  if (!Number.isSafeInteger(saleHeaderBranchId) || saleHeaderBranchId <= 0) {
+    return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
+  }
   const normalized: NormalizedItem[] = []
   for (let index = 0; index < body.items.length; index += 1) {
     const item = body.items[index]
@@ -363,25 +401,29 @@ app.post('/', async (c) => {
     if (!Number.isFinite(quantity) || quantity <= 0) {
       return c.json({ error: `Sale item #${index + 1} has an invalid quantity` }, 400)
     }
+    const lineBranchId = Number(item.branch_id ?? saleHeaderBranchId)
+    if (!Number.isSafeInteger(lineBranchId) || lineBranchId <= 0 || lineBranchId !== saleHeaderBranchId) {
+      return c.json({ error: 'The sale header and every line must use the same Shop branch.' }, 400)
+    }
     normalized.push({
       ...item,
       product_id: productId,
       quantity,
-      branch_id: Number(item.branch_id || body.branch_id) || null,
+      branch_id: lineBranchId,
     })
   }
 
   // ---- 1b. The selling branch ----
   // A line may name its own branch, so this checks the DISTINCT set the cart
   // actually resolved to rather than trusting body.branch_id alone.
-  const saleBranchIds = [...new Set(normalized.map((item) => item.branch_id).filter((id): id is number => !!id))]
-  if (saleBranchIds.length) {
-    const saleBranchRows = await selectInChunks(saleBranchIds, 0, (chunk) => db
-      .prepare(`SELECT id, name FROM branches WHERE id IN (${chunk.map(() => '?').join(',')})`)
-      .all<{ id: number; name: string }>(chunk))
-    if (firstUnsellableBranch(saleBranchRows)) {
-      return c.json({ error: WAREHOUSE_NOT_SELLABLE_ERROR }, 400)
-    }
+  const saleBranchIds = [saleHeaderBranchId]
+  const saleBranchRows = await selectInChunks(saleBranchIds, 0, (chunk) => db
+    .prepare(`SELECT id, name, is_active FROM branches WHERE id IN (${chunk.map(() => '?').join(',')})`)
+    .all<{ id: number; name: string | null; is_active: number | null }>(chunk))
+  if (saleBranchRows.length !== saleBranchIds.length
+    || saleBranchRows.some((branch) => Number(branch.is_active ?? 1) !== 1)
+    || firstUnsellableBranch(saleBranchRows)) {
+    return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
   }
 
   // ---- 2. Read current prices + stock (plain reads, before any writes) ----
@@ -1236,6 +1278,7 @@ app.patch('/:id/status', async (c) => {
     amount_paid_khr?: number | string
     client_request_id?: string
     expected_exchange_rate?: number | string
+    replace_existing_payment?: boolean
     // S4-2: admin-only "Don't touch stock" -- change the status and move
     // NO stock (see lib/saleTransitions.ts's planSaleStockTransition for
     // why, and why it is sticky once set).
@@ -1277,6 +1320,7 @@ app.patch('/:id/status', async (c) => {
     sale_status: saleStatus,
     payment_details: body.payment_details,
     expected_exchange_rate: body.expected_exchange_rate,
+    replace_existing_payment: body.replace_existing_payment === true,
   }) : null
   const settlementDigest = settlementCanonical ? await saleMutationDigest(JSON.parse(settlementCanonical)) : null
   if (settlementRequestId && settlementDigest) {
@@ -1492,11 +1536,19 @@ app.patch('/:id/status', async (c) => {
   let settlementOperationId: string | null = null
   let settlementHistoryIndex = -1
   let settlementLineStatements: Array<{ sql: string; params: Record<string, unknown> }> = []
+  let paymentCorrection = false
   if (paymentFieldsSent) {
     const isDeferredPaymentSettle = oldStatus === 'awaiting_payment'
       && (saleStatus === 'completed' || saleStatus === 'awaiting_delivery')
     if (!isDeferredPaymentSettle) {
       return c.json({ error: 'Payment can only be recorded when completing an awaiting-payment sale.' }, 400)
+    }
+    const paymentCorrectionRequested = body.replace_existing_payment === true
+    if (paymentCorrectionRequested) {
+      paymentCorrection = await saleAllowsPaymentCorrection(db, Number(id))
+      if (!paymentCorrection) {
+        return c.json({ error: 'Recorded payment can only be replaced after a completed sale is moved back to Awaiting payment.', code: 'payment_correction_not_allowed' }, 409)
+      }
     }
     if ((body.notes !== undefined && !emptySettlementNote) || skipStockRequested) {
       return c.json({ error: 'Settle payment separately from notes or stock overrides.' }, 400)
@@ -1518,10 +1570,10 @@ app.patch('/:id/status', async (c) => {
       settlementPlan = planSaleSettlement({
         configuredMethodsRaw: settingMap.pos_payment_methods,
         paymentDetailsRaw: body.payment_details,
-        existingPaidUsd: sale.amount_paid_usd,
-        existingPaidKhr: sale.amount_paid_khr,
-        existingPaymentDetailsRaw: sale.payment_details,
-        existingPaymentMethodRaw: sale.payment_method,
+        existingPaidUsd: paymentCorrection ? 0 : sale.amount_paid_usd,
+        existingPaidKhr: paymentCorrection ? 0 : sale.amount_paid_khr,
+        existingPaymentDetailsRaw: paymentCorrection ? null : sale.payment_details,
+        existingPaymentMethodRaw: paymentCorrection ? null : sale.payment_method,
         totalUsd: sale.total_usd,
         exchangeRate: latestRate,
         changeExchangeRateRaw: settingMap.change_exchange_rate,
@@ -1576,6 +1628,7 @@ app.patch('/:id/status', async (c) => {
       change_is_actual: after.change_is_actual,
       change_exchange_rate: after.change_exchange_rate,
       actionKind: SALE_SETTLEMENT_ACTION_KIND,
+      paymentCorrection,
       operationId: settlementOperationId,
       currentReplayGeneration: 0,
     }
@@ -1627,6 +1680,16 @@ app.patch('/:id/status', async (c) => {
   // exactly. last_insert_rowid() is consumed by the immediately following
   // sale UPDATE in this one D1 batch.
   if (saleStatus === 'cancelled' && (cancelFeeUsd > 0 || cancelFeeKhr > 0)) {
+    const cancellationBranchId = Number(sale.branch_id)
+    if (!Number.isSafeInteger(cancellationBranchId) || cancellationBranchId <= 0) {
+      return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
+    }
+    const cancellationBranch = await db.prepare(
+      'SELECT id,name FROM branches WHERE id=@id AND COALESCE(is_active,1)=1 LIMIT 1',
+    ).get<{ id: number; name: string | null }>({ id: cancellationBranchId })
+    if (!cancellationBranch || !branchCanSell(cancellationBranch.name)) {
+      return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
+    }
     statements.push({
       sql: `INSERT INTO fees (fee_type, label, amount_usd, amount_khr, fee_date, sale_id, branch_id, notes, created_by, created_by_name)
             VALUES ('expense', @label, @amount_usd, @amount_khr, date('now'), @sale_id, @branch_id, @notes, @created_by, @created_by_name)`,
@@ -1635,7 +1698,7 @@ app.patch('/:id/status', async (c) => {
         amount_usd: cancelFeeUsd,
         amount_khr: cancelFeeKhr,
         sale_id: Number(id),
-        branch_id: sale.branch_id ?? null,
+        branch_id: cancellationBranchId,
         notes: cancelFeeNote || `Fee lost to cancellation (${cancelReasonLabel(cancelReason!)})`,
         created_by: user?.id ?? null,
         created_by_name: actorSnapshot(user),
@@ -1644,6 +1707,22 @@ app.patch('/:id/status', async (c) => {
     updates.push('cancel_fee_id = last_insert_rowid()')
   }
   statements.push({ sql: `UPDATE sales SET ${updates.join(', ')} WHERE id = @id`, params: updateParams })
+  if (saleStatus === 'awaiting_payment' && (oldStatus === 'completed' || oldStatus === 'awaiting_delivery')) {
+    statements.push({
+      sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
+            VALUES(@actor,@actorName,'sale_payment_correction_opened','sale',@saleId,@details,'sale',@saleId,@details)`,
+      params: {
+        actor: user.id,
+        actorName: actorSnapshot(user),
+        saleId: String(id),
+        details: JSON.stringify({
+          oldStatus,
+          newStatus: saleStatus,
+          reason: 'completed_sale_reopened_for_payment_correction',
+        }),
+      },
+    })
+  }
   statements.push(...settlementLineStatements)
   statements.push(...plan.statements)
 
@@ -1694,9 +1773,9 @@ app.patch('/:id/status', async (c) => {
             )`,
       params: {
         saleId: String(id),
-        label: `Settled sale ${sale.receipt_number || `#${id}`}`,
-        undoLabel: `Undo settlement of sale ${sale.receipt_number || `#${id}`}`,
-        redoLabel: `Redo settlement of sale ${sale.receipt_number || `#${id}`}`,
+        label: `${paymentCorrection ? 'Corrected payment for' : 'Settled'} sale ${sale.receipt_number || `#${id}`}`,
+        undoLabel: `Undo ${paymentCorrection ? 'payment correction for' : 'settlement of'} sale ${sale.receipt_number || `#${id}`}`,
+        redoLabel: `Redo ${paymentCorrection ? 'payment correction for' : 'settlement of'} sale ${sale.receipt_number || `#${id}`}`,
         payload: historyPayload,
         actor: user.id,
         actorName: actorSnapshot(user),
@@ -1734,6 +1813,7 @@ app.patch('/:id/status', async (c) => {
         saleId: String(id),
         details: JSON.stringify({
           operationId: settlementOperationId,
+          paymentCorrection,
           before: settlementSnapshot.before,
           after: settlementSnapshot.after,
         }),
@@ -2078,6 +2158,10 @@ app.post('/:id/items', async (c) => {
     batchLabel: string | null
     batchExpiryDate: string | null
   }> = []
+  const saleHeaderBranchId = Number(sale.branch_id)
+  if (!Number.isSafeInteger(saleHeaderBranchId) || saleHeaderBranchId <= 0) {
+    return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
+  }
   for (let index = 0; index < rawItems.length; index += 1) {
     const item = rawItems[index] || {}
     const productId = Number(item.product_id || item.id)
@@ -2089,13 +2173,17 @@ app.post('/:id/items', async (c) => {
       return c.json({ error: `Added item #${index + 1} has an invalid quantity` }, 400)
     }
     const rawPrice = Number(item.applied_price_usd)
+    const lineBranchId = Number(item.branch_id ?? saleHeaderBranchId)
+    if (!Number.isSafeInteger(lineBranchId) || lineBranchId <= 0 || lineBranchId !== saleHeaderBranchId) {
+      return c.json({ error: 'The sale header and every added line must use the same Shop branch.' }, 400)
+    }
     requested.push({
       productId,
       quantity,
       // A line inherits the sale's branch unless it names its own, exactly
       // as a checkout line does -- the stock has to come off the shelf the
       // sale was rung up at.
-      branchId: Number(item.branch_id || sale.branch_id) || null,
+      branchId: lineBranchId,
       appliedPriceUsd: Number.isFinite(rawPrice) && rawPrice >= 0 && item.applied_price_usd !== undefined && item.applied_price_usd !== null
         ? rawPrice
         : null,
@@ -2107,14 +2195,14 @@ app.post('/:id/items', async (c) => {
 
   // Added lines are sold exactly like checkout lines, so they answer to the
   // same selling-branch rule.
-  const addedBranchIds = [...new Set(requested.map((item) => item.branchId).filter((id): id is number => !!id))]
-  if (addedBranchIds.length) {
-    const addedBranchRows = await selectInChunks(addedBranchIds, 0, (chunk) => db
-      .prepare(`SELECT id, name FROM branches WHERE id IN (${chunk.map(() => '?').join(',')})`)
-      .all<{ id: number; name: string }>(chunk))
-    if (firstUnsellableBranch(addedBranchRows)) {
-      return c.json({ error: WAREHOUSE_NOT_SELLABLE_ERROR }, 400)
-    }
+  const addedBranchIds = [saleHeaderBranchId]
+  const addedBranchRows = await selectInChunks(addedBranchIds, 0, (chunk) => db
+    .prepare(`SELECT id, name, is_active FROM branches WHERE id IN (${chunk.map(() => '?').join(',')})`)
+    .all<{ id: number; name: string | null; is_active: number | null }>(chunk))
+  if (addedBranchRows.length !== addedBranchIds.length
+    || addedBranchRows.some((branch) => Number(branch.is_active ?? 1) !== 1)
+    || firstUnsellableBranch(addedBranchRows)) {
+    return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
   }
 
   // ---- Current prices/costs, chunked for D1's parameter ceiling ----
@@ -2495,6 +2583,98 @@ app.get('/:id/amendments', async (c) => {
 })
 
 // ---------------------------------------------------------------------------
+// GET /api/sales/:id/records -- every change anybody ever made to this sale, as
+// ONE list (N41).
+//
+// The owner, Sep 6 2026: "one line called Records with total records when press
+// it pops up a float with who made changes in this sales record".
+//
+// This is NOT GET /:id/amendments with a different name. That endpoint reads
+// one table and answers "how was this sale corrected". A sale is changed by
+// five writers that each record themselves somewhere else -- the amendment
+// ledger, audit_logs, the bulk-operation receipt, the returns that rewrite
+// sales.sale_status, and the act of ringing the sale up at all -- and a reader
+// who only sees the ledger is told nothing about the sale that was cancelled in
+// a bulk action or refunded this morning, which is precisely the change they
+// came to ask about. lib/saleRecords.ts holds the meaning and every
+// classification rule; this route holds only the five reads.
+//
+// Read-gated exactly like /:id/amendments: whoever may view the sale may see
+// how it got that way. Hiding the trail from the people who reconcile the books
+// would defeat the feature.
+// ---------------------------------------------------------------------------
+app.get('/:id/records', async (c) => {
+  const db = getDb(c.env)
+  if (!canReadSales(c.get('user'))) {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
+  const saleId = Number(c.req.param('id'))
+  if (!Number.isFinite(saleId) || saleId <= 0) return c.json({ error: 'Sale not found' }, 404)
+
+  // status_before_return is what the sale was BEFORE a return moved it, and it
+  // is the only "before" the returns source can honestly report.
+  const sale = await db.prepare(`
+    SELECT id, receipt_number, sale_status, status_before_return, cashier_name, total_usd, created_at
+    FROM sales WHERE id = ?
+  `).get<SaleRecordSaleRow>([saleId])
+  if (!sale) return c.json({ error: 'Sale not found' }, 404)
+
+  const ledger = await db.prepare(`
+    SELECT id, kind, group_id, product_name,
+      quantity_before, quantity_after, amount_before_usd, amount_after_usd,
+      total_before_usd, total_after_usd, units_moved, stock_skipped, via,
+      note, user_name, created_at
+    FROM sale_amendments WHERE sale_id = ? ORDER BY id ASC
+  `).all<SaleRecordLedgerRow>([saleId])
+
+  // entity_id is a TEXT column; binding the integer id matches nothing. Same
+  // trap the count query documents, and the reason both sides go through
+  // saleRecordsCountBinds / this explicit String().
+  const auditRows = await db.prepare(`
+    SELECT id, action, details, user_name, created_at
+    FROM audit_logs WHERE entity = 'sale' AND entity_id = ? ORDER BY id ASC
+  `).all<SaleRecordAuditRow>([String(saleId)])
+
+  // The bulk gap: a bulk status change or field update writes ONE audit row
+  // keyed by the OPERATION id, so the query above cannot see it. Membership in
+  // sale_bulk_members is what says this sale actually moved (both bulk writers
+  // insert a member only when `changed`), and the operation's action_history
+  // row is the only place its timestamp and actor live -- sale_bulk_members has
+  // neither column.
+  const bulk = await db.prepare(`
+    SELECT o.id AS operation_id, o.request_json, o.receipt_json, o.history_id,
+      h.created_at AS created_at, h.created_by_name AS created_by_name, h.label AS label
+    FROM sale_bulk_members m
+    JOIN sale_bulk_operations o ON o.id = m.operation_id
+    LEFT JOIN action_history h ON h.id = o.history_id
+    WHERE m.sale_id = ?
+  `).all<SaleRecordBulkRow>([saleId])
+
+  // The returns gap: routes/returns.ts:1658, :2558 and lib/returnBulkAction.ts
+  // :253 rewrite sales.sale_status while auditing entity 'return', so neither
+  // of the reads above can see the change. `is_current` marks the newest live
+  // return -- the only one whose outcome still matches the status column,
+  // because each writer overwrote the previous answer.
+  const returnRows = await db.prepare(`
+    SELECT r.id, r.return_number, r.status, r.return_scope, r.total_refund_usd,
+      r.cashier_name, r.created_at, r.updated_at,
+      CASE WHEN COALESCE(r.status,'completed') <> 'cancelled'
+        AND NOT EXISTS (
+          SELECT 1 FROM returns r2
+          WHERE r2.sale_id = r.sale_id AND r2.id > r.id
+            AND COALESCE(r2.status,'completed') <> 'cancelled'
+            AND COALESCE(r2.return_scope,'customer') = 'customer'
+        ) THEN 1 ELSE 0 END AS is_current
+    FROM returns r
+    WHERE r.sale_id = ? AND COALESCE(r.return_scope,'customer') = 'customer'
+    ORDER BY r.id ASC
+  `).all<SaleRecordReturnRow>([saleId])
+
+  const records = buildSaleRecords({ sale, ledger, audit: auditRows, bulk, returns: returnRows })
+  return c.json({ saleId, records, count: records.length })
+})
+
+// ---------------------------------------------------------------------------
 // POST /api/sales/:id/amendments -- change a recorded sale (S4-30).
 //
 // The shop owner's ask: "sometimes we input wrong delivery cost, or customers
@@ -2582,6 +2762,18 @@ app.post('/:id/amendments', async (c) => {
   }>([c.req.param('id')])
   if (!sale) return c.json({ error: 'Sale not found' }, 404)
 
+  const saleHeaderBranchId = Number(sale.branch_id)
+  if (!Number.isSafeInteger(saleHeaderBranchId) || saleHeaderBranchId <= 0) {
+    return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
+  }
+  const amendmentBranch = await db.prepare('SELECT id, name, is_active FROM branches WHERE id = ?')
+    .get<{ id: number; name: string | null; is_active: number | null }>([saleHeaderBranchId])
+  if (!amendmentBranch
+    || Number(amendmentBranch.is_active ?? 1) !== 1
+    || firstUnsellableBranch([amendmentBranch])) {
+    return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
+  }
+
   try {
     assertUpdatedAtMatch('sale', sale, getExpectedUpdatedAt(body))
   } catch (error) {
@@ -2652,15 +2844,26 @@ app.post('/:id/amendments', async (c) => {
   if (kind === 'delivery_actual_cost_changed') {
     const costGuard = guardDeliveryActualCostAmendment(sale)
     if (!costGuard.ok) return c.json({ error: costGuard.error }, 400)
-    const rawCost = body.delivery_actual_cost_usd
-    const costUsd = rawCost === null || rawCost === undefined || String(rawCost).trim() === ''
-      ? null
-      : Number(rawCost)
-    if (costUsd !== null && (!Number.isFinite(costUsd) || costUsd < 0)) {
-      return c.json({ error: 'An actual delivery cost must be blank or zero or more.' }, 400)
+    // One rule, one implementation: lib/deliveryAmounts.ts is the acceptance
+    // test for BOTH delivery money fields and is mirrored in the browser
+    // (utils/deliveryAmounts.ts, pinned by tests/deliveryAmountParity.test.ts),
+    // so a form that accepts a number this route refuses cannot exist. Blank
+    // is the one refusal this field forgives: clearing the box is how a cost
+    // recorded by mistake goes back to "not recorded", which is a different
+    // fact from "the courier was free".
+    const costParsed = parseDeliveryAmountUsd(body.delivery_actual_cost_usd)
+    if (!costParsed.ok && costParsed.code !== 'blank') {
+      return c.json({ error: DELIVERY_AMOUNT_ERROR_MESSAGES[costParsed.code] }, 400)
     }
-    const costPlan = planDeliveryActualCostChange({ saleId, sale, newCostUsd: costUsd, exchangeRate })
-    if (costPlan.costDeltaUsd === 0 && costPlan.costBeforeUsd === costPlan.costAfterUsd) {
+    const costUsd = costParsed.ok ? costParsed.usd : null
+    const costPlan = planDeliveryActualCostChange({
+      saleId,
+      sale,
+      newCostUsd: costUsd,
+      exchangeRate,
+      stamp: mutationStamp,
+    })
+    if (!deliveryAmountChanged(costPlan.costBeforeUsd, costPlan.costAfterUsd)) {
       return c.json({ error: 'That is already the actual delivery cost on this sale.' }, 400)
     }
     const money = {
@@ -2737,11 +2940,16 @@ app.post('/:id/amendments', async (c) => {
   if (kind === 'delivery_fee_changed') {
     const feeGuard = guardDeliveryFeeAmendment(sale)
     if (!feeGuard.ok) return c.json({ error: feeGuard.error }, 400)
-    const rawFee = Number(body.delivery_fee_usd)
-    if (!Number.isFinite(rawFee) || rawFee < 0) {
-      return c.json({ error: 'A delivery fee must be zero or more.' }, 400)
+    // Same one rule as the courier cost above -- lib/deliveryAmounts.ts -- but
+    // blank is NOT forgiven here: the fee is part of what the customer owes,
+    // so "no value" would have to mean zero, and silently charging zero
+    // because a box was empty is not a decision this route may make for
+    // somebody.
+    const feeParsed = parseDeliveryAmountUsd(body.delivery_fee_usd)
+    if (!feeParsed.ok) {
+      return c.json({ error: DELIVERY_AMOUNT_ERROR_MESSAGES[feeParsed.code] }, 400)
     }
-    const feePlan = planDeliveryFeeChange({ saleId, sale, newFeeUsd: rawFee, exchangeRate })
+    const feePlan = planDeliveryFeeChange({ saleId, sale, newFeeUsd: feeParsed.usd, exchangeRate })
     if (feePlan.feeDeltaUsd === 0) {
       return c.json({ error: 'That is already the delivery fee on this sale.' }, 400)
     }
@@ -2835,6 +3043,9 @@ app.post('/:id/amendments', async (c) => {
     FROM sale_items WHERE id = ? AND sale_id = ?
   `).get<{ id: number; product_id: number | null; product_name: string | null; quantity: number; applied_price_usd: number; cost_price_usd: number; cost_price_khr: number; branch_id: number | null }>([lineId, saleId])
   if (!line) return c.json({ error: 'That line is not on this sale.' }, 404)
+  if (Number(line.branch_id) !== saleHeaderBranchId) {
+    return c.json({ error: 'The sale header and every amended line must use the same Shop branch.' }, 400)
+  }
 
   // Draw order (id ASC) -- the decrease walk relies on it to hand units back
   // to the lots they came from, last-drawn first.
@@ -2931,13 +3142,9 @@ app.post('/:id/amendments', async (c) => {
       .get<{ id: number; name: string; selling_price_usd: number; cost_price_usd: number; cost_price_khr: number }>([productId])
     if (!product) return c.json({ error: `Product #${productId} no longer exists.` }, 400)
 
-    const branchId = Number(replacement.branch_id || line.branch_id || sale.branch_id) || null
-    if (branchId) {
-      const replacementBranch = await db.prepare('SELECT id, name FROM branches WHERE id = ?')
-        .get<{ id: number; name: string }>([branchId])
-      if (replacementBranch && firstUnsellableBranch([replacementBranch])) {
-        return c.json({ error: WAREHOUSE_NOT_SELLABLE_ERROR }, 400)
-      }
+    const branchId = Number(replacement.branch_id ?? saleHeaderBranchId)
+    if (!Number.isSafeInteger(branchId) || branchId <= 0 || branchId !== saleHeaderBranchId) {
+      return c.json({ error: 'The sale header and replacement line must use the same Shop branch.' }, 400)
     }
     const rawPrice = Number(replacement.applied_price_usd)
     const unitPriceUsd = Number.isFinite(rawPrice) && rawPrice >= 0 ? rawPrice : Number(product.selling_price_usd) || 0
@@ -3595,7 +3802,25 @@ app.get('/', async (c) => {
 
     const sales = await db.prepare(`
       SELECT s.*, c.membership_number AS customer_membership_number,
-        dc.name AS linked_driver_name, dc.phone AS linked_driver_phone
+        dc.name AS linked_driver_name, dc.phone AS linked_driver_phone,
+        CASE WHEN COALESCE(s.sale_status,'completed')='awaiting_payment'
+          AND COALESCE((
+            SELECT CASE WHEN a.action IN ('update','sale_payment_correction_opened') THEN 1 ELSE 0 END
+            FROM audit_logs a
+            WHERE (a.entity='sale' OR a.table_name='sale')
+              AND CAST(COALESCE(a.entity_id,a.record_id) AS TEXT)=CAST(s.id AS TEXT)
+              AND (
+                a.action='sale_settlement'
+                OR a.action='sale_payment_correction_opened'
+                OR (
+                  a.action='update'
+                  AND json_valid(a.details)=1
+                  AND json_extract(a.details,'$.newStatus')='awaiting_payment'
+                  AND json_extract(a.details,'$.oldStatus') IN ('completed','awaiting_delivery')
+                )
+              )
+            ORDER BY a.id DESC LIMIT 1
+          ),0)=1 THEN 1 ELSE 0 END AS payment_correction_allowed
       FROM sales s
       LEFT JOIN customers c ON c.id = s.customer_id
       LEFT JOIN delivery_contacts dc ON dc.id = s.delivery_contact_id AND COALESCE(s.is_delivery, 0) <> 0
@@ -3652,6 +3877,19 @@ app.get('/', async (c) => {
     `).all<{ sale_id: number; return_count: number; refund_usd: number; refund_khr: number }>(chunk))
     const refundsBySale = new Map(refundRows.map((r) => [r.sale_id, r]))
 
+    // "Records n" on every row. ONE statement per chunk over three tables
+    // rather than a query per sale -- a 500-row page would otherwise fire 500
+    // reads. chunkForBinding is told the real cost (each id is bound into
+    // three IN lists, not one) so a full page cannot trip D1's 100-parameter
+    // ceiling the way GET /api/products once did.
+    const recordsBySale = new Map<number, number>()
+    for (const chunk of chunkForBinding(saleIds, 0, SALE_RECORDS_COUNT_BINDS_PER_ID)) {
+      const placeholders = chunk.map(() => '?').join(',')
+      const countRows = await db.prepare(buildSaleRecordsCountSql(placeholders))
+        .all<{ sale_id: number; n: number }>(saleRecordsCountBinds(chunk))
+      for (const row of countRows) recordsBySale.set(Number(row.sale_id), Number(row.n) || 0)
+    }
+
     return sales.map((sale) => {
       const { linked_driver_name, linked_driver_phone, ...snapshot } = sale
       const refund = refundsBySale.get(sale.id)
@@ -3665,6 +3903,9 @@ app.get('/', async (c) => {
         refund_usd: refundUsd,
         refund_khr: refundKhr,
         return_count: refund?.return_count || 0,
+        // Never 0: a sale always has at least the fact that it happened, and
+        // that is the record every later one is relative to.
+        records_count: (recordsBySale.get(sale.id) || 0) + SALE_RECORDS_SELF_COUNT,
         total_discount_usd: (sale.discount_usd || 0) + (sale.membership_discount_usd || 0),
         total_discount_khr: (sale.discount_khr || 0) + (sale.membership_discount_khr || 0),
         net_total_usd: (sale.total_usd || 0) - refundUsd,
@@ -3682,8 +3923,8 @@ app.get('/', async (c) => {
 // a small/default view, silently wrong (and silently *smaller* than
 // reality, with no indication anything was cut off) once a filtered date
 // range or search matched more rows than the cap. This computes the same
-// "net_total_usd (fallback total_usd), excluding cancelled/awaiting_payment"
-// revenue definition Sales.tsx already uses per-row, but as a single SQL
+// recognized-sale revenue definition (all statuses except cancelled) that
+// Sales.tsx already uses per-row, but as a single SQL
 // aggregate over every matching row, not just the page that was fetched.
 app.get('/stats', async (c) => {
   const query = c.req.query()
@@ -3759,8 +4000,9 @@ app.get('/stats', async (c) => {
   // Revenue basis = NET SALES (subtotal net of both discounts), minus customer
   // refunds -- the canonical definition (user directive Sep 1 2026). Tax and
   // delivery fees are pass-through, NOT revenue, so total_usd (which folds tax
-  // in) is not the base here. Awaiting-payment (unpaid credit) uses the same net
-  // basis but is reported separately as pending, never folded into revenue.
+  // in) is not the base here. Credit is included because recognizedExpr
+  // excludes only cancelled sales. pending_revenue_usd is a positive subset
+  // shown beside revenue, never subtracted from it.
   //
   // This header used to spell that definition out a SECOND time and carry a
   // comment claiming it matched salesAnalytics.ts byte for byte. It stopped

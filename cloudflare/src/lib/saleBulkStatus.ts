@@ -8,6 +8,7 @@ import { allocateReturnedQuantities, guardSaleStatusTransition, heldQuantity, no
 import { bumpVersion } from './cache';
 import { broadcast } from '../durable-objects/broadcastHub';
 import { actorSnapshot } from './actorSnapshot';
+import { branchCanSell } from './branchRoles';
 export const BULK_STATUS_KIND = 'sale.status.bulk';
 export const BULK_STATUS_LIMIT = 25;
 export const BULK_STATUS_MOVEMENT_LIMIT = 256;
@@ -276,7 +277,7 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
         return JSON.parse(String(previous.receipt_json));
     }
     const ids = request.items.map(i => i.id);
-    const sales = await rowsIn<Row>(db, ids, m => `SELECT s.id,s.receipt_number,s.branch_id,s.sale_status,s.updated_at,s.stock_skipped,s.notes,s.cancel_reason,s.cancel_note,s.cancelled_at,s.cancelled_by_name,s.status_before_cancel,s.cancel_fee_id,COALESCE(v.revision,0) AS write_revision,${saleMovementFingerprint('s.id')} AS movement_fingerprint FROM sales s LEFT JOIN sale_write_revisions v ON v.sale_id=s.id WHERE s.id IN (${m})`);
+    const sales = await rowsIn<Row>(db, ids, m => `SELECT s.id,s.receipt_number,s.branch_id,b.name AS branch_name,b.is_active AS branch_active,s.sale_status,s.updated_at,s.stock_skipped,s.notes,s.cancel_reason,s.cancel_note,s.cancelled_at,s.cancelled_by_name,s.status_before_cancel,s.cancel_fee_id,COALESCE(v.revision,0) AS write_revision,${saleMovementFingerprint('s.id')} AS movement_fingerprint FROM sales s LEFT JOIN branches b ON b.id=s.branch_id LEFT JOIN sale_write_revisions v ON v.sale_id=s.id WHERE s.id IN (${m})`);
     const sourceMatchedIds: number[] = [];
     for (const expected of request.items) {
         const sale = sales.find(s => s.id === expected.id);
@@ -327,6 +328,14 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
         if (changed && request.notes !== undefined)
             after.notes = request.notes;
         const itemCancel = expected.cancel;
+        const createsCancellationFee = changed && request.target_status === 'cancelled' && !!itemCancel
+            && (Number(itemCancel.fee_usd) > 0 || Number(itemCancel.fee_khr) > 0);
+        if (createsCancellationFee) {
+            const branchId = Number(sale.branch_id);
+            if (!Number.isSafeInteger(branchId) || branchId <= 0 || Number(sale.branch_active ?? 0) !== 1 || !branchCanSell(sale.branch_name))
+                throw new SaleBulkError('Cancellation expenses require a sale recorded at the active Shop.', 400);
+            guards.push(bulkAssertion("EXISTS(SELECT 1 FROM sales s JOIN branches b ON b.id=s.branch_id WHERE s.id=@id AND s.branch_id=@branch AND b.is_active=1 AND lower(trim(b.name))='shop')", { id: expected.id, branch: branchId }));
+        }
         const cancelReason = itemCancel?.reason || request.cancel_reason;
         const cancelNote = itemCancel?.note || request.cancel_note;
         if (request.target_status === 'cancelled' && changed) {
@@ -350,7 +359,7 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
         }
         const skipped = (changed && !!request.skip_stock) || Number(sale.stock_skipped) === 1;
         const member: Member = { id: expected.id, receipt: String(sale.receipt_number || expected.id), before, after, changed, skipped, items: own, returned: [...returned], stock: [], batches: [], allocations: [], fee: null, createdFee: null };
-        if (changed && request.target_status === 'cancelled' && itemCancel && (Number(itemCancel.fee_usd) > 0 || Number(itemCancel.fee_khr) > 0)) {
+        if (createsCancellationFee && itemCancel) {
             const random = crypto.getRandomValues(new Uint32Array(2));
             // Explicit negative ids do not advance fees' AUTOINCREMENT
             // sequence. The 52-bit random space plus the in-batch NOT EXISTS

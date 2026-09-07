@@ -7,7 +7,7 @@ import Download from 'lucide-react/dist/esm/icons/download.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import { fmtClock24 } from '../../utils/formatters'
-import { buildEquation, revenueTerms, profitTerms, isRevenueCountedSale, saleListRevenueUsd } from '../../utils/statsFormulas'
+import { buildEquation, revenueTerms, profitTerms, isRevenueCountedSale, saleListRevenueUsd, saleListCreditUsd } from '../../utils/statsFormulas'
 import { getSaleReturnBlockReason } from '../../utils/saleReturnGuard.ts'
 import type { SaleAmendmentRow } from '../../utils/saleAmendments.ts'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
@@ -27,12 +27,12 @@ import { pruneSelectionToVisibleIds } from '../../utils/rowSelection.ts'
 import { createLongPressState, type LongPressState } from '../../utils/longPress.ts'
 import { buildTimeActionSections, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.ts'
 import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
-import { buildBulkSaleCancelInput, getSales as fetchSales, getSalesStats as fetchSalesStats, getSalesStatsStrip, updateSalesBulkField, updateSalesBulkStatus, type BulkSaleStatusItem, type BulkSaleStatusPayload, type BulkSaleUpdatePayload } from '../../api/salesTransport.ts'
+import { buildBulkSaleCancelInput, getSales as fetchSales, getSalesStats as fetchSalesStats, getSalesStatsStrip, updateSalesBulkField, updateSalesBulkStatus, type BulkSaleStatusItem, type BulkSaleStatusPayload, type BulkSaleUpdatePayload, type SaleAmendmentRequest } from '../../api/salesTransport.ts'
 import { getCustomers, getDeliveryContacts } from '../../api/contactReadTransport.ts'
 import { getFeesReport } from '../../api/feesTransport.ts'
 import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
-import CurrentShiftSummary from '../shifts/CurrentShiftSummary.tsx'
+import ShiftHistoryModal from '../shifts/ShiftHistoryModal.tsx'
 import { EMPTY_DATE_TIME_RANGE, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
 import { getUsers as fetchUsers } from '../../api/userReadTransport.ts'
 import {
@@ -44,6 +44,7 @@ import {
 import { lazyRetry } from '../../utils/lazyImport.ts'
 const Receipt = lazyRetry(() => import('../receipt/Receipt'), 'sales-receipt')
 const SaleDetailModal = lazyRetry(() => import('./SaleDetailModal'), 'sales-sale-detail-modal')
+const SaleRecordsFloat = lazyRetry(() => import('./SaleRecordsFloat'), 'sales-sale-records-float')
 const CancelSaleModal = lazyRetry(() => import('./CancelSaleModal'), 'sales-cancel-sale-modal')
 // S4-2: the confirmation every sale status change now goes through -- it
 // states the old status, the new one and what happens to stock, and carries
@@ -195,21 +196,12 @@ interface SaleItemAddition {
 }
 
 // S4-30: what the detail view asks the server to change, and the ledger rows
-// it reads back. The request shape is the one salesTransport.amendSale sends;
-// the row shape is migration 0115's, shared with utils/saleAmendments.ts so
-// the renderer and the caller cannot drift.
-interface SaleAmendmentRequest {
-  kind: 'line_quantity_increased' | 'line_quantity_decreased' | 'line_removed' | 'line_replaced' | 'delivery_fee_changed' | 'delivery_actual_cost_changed'
-  sale_item_id?: number
-  quantity?: number
-  delivery_fee_usd?: number
-  delivery_actual_cost_usd?: number | string | null
-  replacement?: { product_id: number; quantity: number; applied_price_usd?: number; branch_id?: number | null }
-  notes?: string
-  client_request_id: string
-  expected_exchange_rate: number
-  expected_updated_at?: string
-}
+// it reads back. The request shape is the one salesTransport.amendSale sends,
+// and it is now IMPORTED from there rather than restated here. It used to be a
+// third hand-kept copy, and when the actual-courier-cost kind was added to the
+// transport and to the modal this copy was the one left behind -- so the page
+// that passes the callback stopped compiling against the modal that receives
+// it. A shape declared once cannot be updated in two places out of three.
 
 type SaleMutationReview = { client_request_id: string; expected_exchange_rate: number; expected_updated_at?: string }
 type SaleMutationUiResult = boolean | { exchangeRateChanged: number } | { mutationError: string }
@@ -367,6 +359,10 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // a legacy row carries no receipt number.
   const [returnForSale, setReturnForSale] = useState<SaleRecord | null>(null)
   const [detailSale, setDetailSale] = useState<SaleRecord | null>(null)
+  // N41: the sale whose Records float is open. Its own state rather than a
+  // mode of detailSale -- the list row's Records line opens it WITHOUT opening
+  // the detail modal, which is the whole point of putting the line on the row.
+  const [recordsSale, setRecordsSale] = useState<SaleRecord | null>(null)
   const [showExport, setShowExport] = useState(false)
   const [showImport, setShowImport] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -1295,7 +1291,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         label: t('sales') || 'Sales',
         value: String(txCount),
         sub: txCount > 0 ? `${translateOr('stats_avg_sale', 'avg')} ${fmtUSD(Number(totals.avg_order_usd) || 0)}` : undefined,
-        hint: translateOr('stats_sales_hint', 'Every non-cancelled sale in the range. Sales still awaiting payment ARE counted in the money figures — the goods left the shop; what is still owed is reported separately as Not Paid. Only cancelled sales contribute nothing. The breakdown counts every status.'),
+        hint: translateOr('stats_sales_hint', 'Every non-cancelled sale in the range. Credit is included in revenue and profit; the amount still owed is shown separately as a positive Credit figure.'),
         details: byStatus.map((row) => ({
           label: getStatusLabel(String(row.sale_status || 'completed'), t),
           value: `${Number(row.count) || 0} · ${fmtUSD(Number(row.total_usd) || 0)}`,
@@ -1341,7 +1337,7 @@ ${buildEquation({ key: 'revenue', fallback: 'Revenue', usd: revenueUsd }, revenu
         value: fmtUSD(profitUsd),
         tone: profitUsd < 0 ? ('crit' as const) : ('ok' as const),
         sub: revenueUsd > 0 ? `${((profitUsd / revenueUsd) * 100).toFixed(1)}% ${translateOr('profit_margin_short', 'margin')}` : undefined,
-        hint: `${translateOr('stats_profit_hint', 'Gross profit = revenue − COGS + delivery fees charged − courier cost (including Not Paid).', 'ប្រាក់ចំណេញដុល = ចំណូល − ថ្លៃដើមទំនិញ + ថ្លៃដឹកជញ្ជូនគិតពីអតិថិជន − ថ្លៃអ្នកដឹកជញ្ជូន (រួមទាំងមិនទាន់បង់)។')}
+        hint: `${translateOr('stats_profit_hint', 'Gross profit = revenue − COGS + delivery fees charged − courier cost (credit sales included).', 'ប្រាក់ចំណេញដុល = ចំណូល − ថ្លៃដើមទំនិញ + ថ្លៃដឹកជញ្ជូនគិតពីអតិថិជន − ថ្លៃអ្នកដឹកជញ្ជូន (រួមទាំងការលក់ជាឥណទាន)។')}
 
 ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd }, profitTerms(formulaTotals), fmtUSD, translateOr)}`,
         details: [
@@ -1407,7 +1403,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
   // A sale "counts" toward the headline figures only when it contributes to
   // the money shown (user, Aug 31: "count only what the money counts"), and
   // what the money counts is the kernel's rule, not a second opinion: ONLY a
-  // cancelled sale is out. Unpaid credit (awaiting_payment) is INSIDE revenue
+  // cancelled sale is out. Credit (awaiting_payment) is INSIDE revenue
   // and reported additionally as pending — clause 4 of the scoping rule in
   // cloudflare/src/lib/salesAnalytics.ts, lineage commit fd7c49ba — so it is
   // inside this count too, which is what GET /api/sales/stats returns as
@@ -1431,6 +1427,12 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
   // only 6 of those 12 produced the $67.47.
   const revenueCount = salesStats?.revenue_count
     ?? filtered.filter(isCountedSale).length
+
+  // Credit is already inside revenue; this positive figure simply identifies
+  // how much of the shown revenue remains owed.
+  const creditUsd = salesStats
+    ? salesStats.pending_revenue_usd
+    : saleListCreditUsd(filtered)
 
   const toggleSelected = (saleId: number | string) => {
     const numericId = Number(saleId)
@@ -1853,7 +1855,6 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
 
   return (
     <div className={`${embedded ? '' : 'page-scroll '}flex flex-col px-3 pb-3 pt-0 sm:px-6 sm:pb-6 sm:pt-0`}>
-      <CurrentShiftSummary className="mt-3 mb-3" />
       {/* Import/Manage/History action row. The Sales daily/reports view moved
           out to its own top-level Reports hub section (ReportsHub.tsx), so
           Sales now shows only the receipts list. Import/Export each take an
@@ -1897,6 +1898,10 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
         // longer relocates them (user, Aug 31).
         rangeActions={(
           <>
+            <ShiftHistoryModal
+              label={translateOr('shift', 'Shift')}
+              buttonClassName="btn-secondary inline-flex h-11 min-w-11 items-center justify-center px-2.5 py-0 text-xs md:h-8 md:min-w-0"
+            />
             {canExportSales ? (
               <SectionExportAction>
                 <LazyPortalMenu
@@ -2054,12 +2059,17 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
         loading={loading}
         revenue={revenue}
         revenueCount={revenueCount}
+        creditUsd={creditUsd}
         isCountedSale={isCountedSale as SalesListSurfaceProps['isCountedSale']}
         salesSections={salesSections as SalesListSurfaceProps['salesSections']}
         selectAllRef={selectAllRef as SalesListSurfaceProps['selectAllRef']}
         selectedIds={selectedIds}
         selectionModeActive={selectionModeActive}
         getSaleLongPressState={getSaleLongPressState}
+        // Not gated by a write permission: the Worker gates GET /records on
+        // READING a sale, so whoever can see this list can see how a row on it
+        // got that way. Same rule as the amendment history in the detail modal.
+        openSaleRecords={(sale) => setRecordsSale(sale as SaleRecord)}
         setDetailSale={(sale) => setDetailSale(sale as SaleRecord)}
         setSelectedSale={(sale) => setSelectedSale(sale as SaleRecord)}
         showSalesActionGroups={showSalesActionGroups}
@@ -2112,6 +2122,17 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
             t={t}
             fmtUSD={fmtUSD}
             fmtKHR={fmtKHR}
+          />
+        </Suspense>
+      ) : null}
+
+      {recordsSale ? (
+        <Suspense fallback={null}>
+          <SaleRecordsFloat
+            sale={recordsSale}
+            onClose={() => setRecordsSale(null)}
+            t={t}
+            fmtUSD={fmtUSD}
           />
         </Suspense>
       ) : null}

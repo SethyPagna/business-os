@@ -365,7 +365,11 @@ runTest('every amend control on the items table sits in one aligned column', () 
   assert.equal(en.amend_line, 'Edit', 'the English pack must say Edit')
   assert.ok(km.amend_line && km.amend_line !== 'Edit', 'the Khmer pack must carry its own word for Edit')
   // The fee editor opens from that column and renders as a full-width row.
-  const feeAt = saleDetail.indexOf('canAmendThisSale && feeEditing')
+  // N41 renamed the gate: `canAmendDeliveryMoney` is `canAmendThisSale` AND the
+  // sale's own is_delivery flag, which is the exact test the Worker's
+  // guardDeliveryFeeAmendment applies. Both delivery money editors share it, so
+  // neither can offer a control whose save the route is certain to refuse.
+  const feeAt = saleDetail.indexOf('canAmendDeliveryMoney && feeEditing')
   assert.ok(feeAt >= 0, 'the fee editor must be gated on the Edit control being open')
   assert.match(saleDetail.slice(feeAt, feeAt + 320), /<tr className=[\s\S]*?<td colSpan=\{5\}/, 'the fee editor must be a spanning table row')
 })
@@ -411,12 +415,55 @@ runTest('the sale detail shows what a receipt shows, and stops there', () => {
     ['sale.device_name', 'Device is device telemetry; no receipt prints it'],
     ["translateOr('payment_currency'", 'Payment currency is not a receipt line'],
     ["t('points_redeemed')", 'points are the mechanism behind the membership discount printed above them'],
-    ["translateOr('delivery_actual_cost'", 'what the shop paid the driver is not part of what the customer owes'],
-    ['deliveryActualCostUsd', 'the local it was computed from is dead too'],
   ]
   for (const [needle, why] of gone) {
     assert.ok(!saleDetail.includes(needle), `the sale detail put "${needle}" back -- ${why}`)
   }
+
+  // ---- The actual courier cost: TWO owner rulings, both of them live -------
+  //
+  // Sep 4 2026 (S4-24) took it out of the money summary: "no need so much break
+  // downs and difference". It is what the shop PAID the driver, never part of
+  // what the customer owes, and printed under Change it invited the reader to
+  // subtract it from a total it was never inside. That summary is shaped like
+  // the receipt, and the receipt does not print it.
+  //
+  // Sep 6 2026 (N41): "i see the delivery fees it should show options to change
+  // delivery actual cost and the delivery fees. both." So it is shown, and is
+  // editable.
+  //
+  // These do not conflict; they name a PLACE. This assertion used to be a
+  // whole-file "the string must not appear", which read the second ruling as a
+  // violation of the first. It is now scoped: forbidden in the receipt-shaped
+  // <tfoot>, required in the staff-only driver block above it. Deleting the
+  // lock instead would have thrown away the Sep-4 ruling to satisfy the Sep-6
+  // one -- and the row would be back under Change within a month.
+  const totalsFoot = saleDetail.slice(saleDetail.indexOf('<tfoot'), saleDetail.indexOf('</tfoot>'))
+  for (const [needle, why] of [
+    ["'delivery_actual_cost'", 'the courier cost is not a receipt line'],
+    ['actualCostUsd', 'nor is the figure it is rendered from'],
+    ['actualCostEditing', 'nor its editor'],
+  ] as Array<[string, string]>) {
+    assert.ok(!totalsFoot.includes(needle), `the money summary took "${needle}" back -- ${why}`)
+  }
+  const costAt = saleDetail.indexOf("translateOr('delivery_actual_cost'")
+  const driverPhoneAt = saleDetail.indexOf("translateOr('driver_phone'")
+  assert.ok(costAt >= 0, 'the courier cost row must exist -- the owner asked to see and edit it (N41)')
+  assert.ok(driverPhoneAt >= 0 && costAt > driverPhoneAt, 'the courier cost belongs with the driver it was paid to')
+  assert.ok(costAt < saleDetail.indexOf('<tfoot'), 'the courier cost must sit ABOVE the receipt-shaped totals, not inside them')
+  // Shown AND editable, which is the whole of the Sep-6 ask. The editor is the
+  // second half: a read-only row would satisfy the string search and none of
+  // the request.
+  assert.ok(saleDetail.includes('stageActualDeliveryCostAmendment'), 'the courier cost must be editable (N41)')
+  assert.ok(
+    saleDetail.slice(costAt, saleDetail.indexOf('<tfoot')).includes('stageActualDeliveryCostAmendment'),
+    'the courier-cost editor must open from the courier-cost row, not from somewhere else',
+  )
+  // It is shop-internal. It must never reach a customer-facing surface.
+  assert.ok(
+    !read('src/components/receipt/Receipt.tsx').includes('delivery_actual_cost'),
+    'the printed receipt must never show what the shop paid the driver',
+  )
 
   // What the user named as must-keep, kept.
   for (const [needle, why] of [
