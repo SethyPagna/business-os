@@ -96,16 +96,20 @@ function database() {
 function assertOpeningPresenceMigration() {
   const sqlite = new Database(':memory:')
   sqlite.exec(fs.readFileSync(path.join(root, 'migrations', '0116_shift_sessions.sql'), 'utf8'))
-  sqlite.prepare(`INSERT INTO shift_sessions
+  const insertLegacy = sqlite.prepare(`INSERT INTO shift_sessions
     (shift_code,user_id,business_date,opened_at,opening_float_usd,opening_float_khr)
-    VALUES ('legacy',7,'2026-09-06','2026-09-06T01:00:00.000Z',12.5,40000)`).run()
+    VALUES (?,?,?,?,?,?)`)
+  insertLegacy.run('legacy-nonzero', 7, '2026-09-06', '2026-09-06T01:00:00.000Z', 12.5, 40000)
+  insertLegacy.run('legacy-mixed-zero', 8, '2026-09-06', '2026-09-06T02:00:00.000Z', 8, 0)
   sqlite.exec(fs.readFileSync(path.join(root, 'migrations', '0132_shift_opening_count_presence.sql'), 'utf8'))
-  const row = sqlite.prepare(`SELECT opening_float_usd,opening_float_khr,
-    opening_float_usd_registered,opening_float_khr_registered FROM shift_sessions`).get()
-  assert.deepEqual(row, {
-    opening_float_usd: 12.5, opening_float_khr: 40000,
-    opening_float_usd_registered: 1, opening_float_khr_registered: 1,
-  }, 'migration treats every existing recorded opening amount as registered')
+  const rows = sqlite.prepare(`SELECT shift_code,opening_float_usd,opening_float_khr,
+    opening_float_usd_registered,opening_float_khr_registered FROM shift_sessions ORDER BY id`).all()
+  assert.deepEqual(rows, [
+    { shift_code: 'legacy-nonzero', opening_float_usd: 12.5, opening_float_khr: 40000,
+      opening_float_usd_registered: 1, opening_float_khr_registered: 1 },
+    { shift_code: 'legacy-mixed-zero', opening_float_usd: 8, opening_float_khr: 0,
+      opening_float_usd_registered: 1, opening_float_khr_registered: 0 },
+  ], 'migration preserves raw legacy amounts, registers nonzero, and leaves ambiguous historical zero unknown')
   assert.throws(() => sqlite.prepare('UPDATE shift_sessions SET opening_float_usd_registered=2').run(), /CHECK/)
   sqlite.close()
 }
