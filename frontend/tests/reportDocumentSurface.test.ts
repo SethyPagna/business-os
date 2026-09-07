@@ -558,6 +558,98 @@ for (const scope of boostScopes) {
   assert.ok(clipReliefScopes.has(scope), `a scope that boosts Khmer must also relieve its clip site -- \`${scope}\` has no \`.truncate { padding-block }\` rule (relieved: ${[...clipReliefScopes].join(' | ') || 'none'})`)
 }
 
+// ...and the boost REACHES only what carries one of those two hooks. Every
+// other popover this surface portals to document.body leaves both scopes.
+//
+// VERIFIER DEFECT (undisclosed coverage gap). `Fold` was given an opt-in
+// `surface` flag so its panel root carries `data-reports-fold`; four other
+// components mounted inside the report portal their popup to document.body
+// with NEITHER attribute on it, so their Khmer renders at the app-wide
+// compacted size beside boosted report text:
+//
+//   AppSelect      the hub's view / range pickers   (ReportsHub.tsx:26)
+//   ColumnChooser  the table column checklist       (ReportTable.tsx:210,:245)
+//   InfoHint       the section-header help bubble   (ReportFrame.tsx:34)
+//   PortalMenu     OverflowMenu's action menu       (kit/OverflowMenu.tsx)
+//
+// That is a deliberate, disclosed gap (lane not_done): all four are chrome
+// -- a checklist, a tooltip, a dropdown, an action menu -- not the document
+// the owner asked to enlarge, and each is a whole-app primitive whose other
+// callers would have to be considered. What must NOT happen is the set
+// growing in silence, so the set is DERIVED from the imports rather than
+// asserted as four names: walk the reports surface's own imports, follow a
+// barrel only for the names actually imported through it (or every kit
+// component would count as "mounted"), and classify each file that calls
+// `createPortal(..., document.body)` by whether it carries a surface hook.
+const resolveImport = (from: string, spec: string): string | null => {
+  const base = path.resolve(path.dirname(from), spec)
+  for (const candidate of [base, `${base}.tsx`, `${base}.ts`, path.join(base, 'index.ts'), path.join(base, 'index.tsx')]) {
+    if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate
+  }
+  return null
+}
+const relPath = (abs: string) => path.relative(root, abs).split(path.sep).join('/')
+const sourceOf = (abs: string) => fs.readFileSync(abs, 'utf8').replace(/\r\n/g, '\n')
+// The import head may not contain a quote: `import './x.css'` has no head at
+// all, and a greedy pairing would hand that statement the NEXT import's names.
+const mountedBy = (file: string): string[] => {
+  const out: string[] = []
+  for (const statement of sourceOf(file).matchAll(/import\s+([^'"]*?)\s*from\s*'(\.[^']+)'/g)) {
+    const target = resolveImport(file, statement[2])
+    if (!target) continue
+    if (!/index\.tsx?$/.test(target)) { out.push(target); continue }
+    const barrel = sourceOf(target).split('\n')
+    for (const name of [...statement[1].matchAll(/[{,]\s*(?:type\s+)?([A-Za-z0-9_]+)/g)].map((m) => m[1])) {
+      for (const line of barrel) {
+        if (!new RegExp(`\\b${name}\\b`).test(line)) continue
+        const via = /from '(\.[^']+)'/.exec(line)
+        const reExported = via && resolveImport(target, via[1])
+        if (reExported) out.push(reExported)
+      }
+    }
+  }
+  return out
+}
+const reportsDir = path.join(root, 'src/components/sales/reports')
+const mounted = new Set<string>([
+  path.join(root, 'src/components/sales/ReportsHub.tsx'),
+  ...fs.readdirSync(reportsDir).filter((f) => f.endsWith('.tsx')).map((f) => path.join(reportsDir, f)),
+])
+for (let frontier = [...mounted]; frontier.length; ) {
+  const next: string[] = []
+  for (const file of frontier) for (const target of mountedBy(file)) {
+    if (mounted.has(target)) continue
+    const rel = relPath(target)
+    // The reports region plus the shared primitives it mounts. Other feature
+    // areas (a shift-history modal opened FROM the report, say) are their own
+    // surface and are out of scope here.
+    if (!rel.startsWith('src/components/shared/') && !rel.startsWith('src/components/sales/reports/')) continue
+    mounted.add(target)
+    next.push(target)
+  }
+  frontier = next
+}
+const portalled = [...mounted]
+  .filter((f) => /createPortal\(/.test(sourceOf(f)) && /document\.body/.test(sourceOf(f)))
+  .map(relPath)
+  .sort()
+const boostedPortals = portalled.filter((f) => /data-reports-(hub|fold)/.test(read(f)))
+assert.deepEqual(
+  boostedPortals,
+  ['src/components/shared/kit/Fold.tsx'],
+  'the fold is the one portalled component that opts into the report surface',
+)
+assert.deepEqual(
+  portalled.filter((f) => !boostedPortals.includes(f)),
+  [
+    'src/components/shared/AppSelect.tsx',
+    'src/components/shared/ColumnChooser.tsx',
+    'src/components/shared/InfoHint.tsx',
+    'src/components/shared/PortalMenu.tsx',
+  ],
+  'these four popovers portal out of both boosted scopes -- a DISCLOSED gap (lane not_done). A new name here means a new portal was mounted inside the report and its Khmer silently reverted to the app-wide compacted size: either give it the `surface` opt-in Fold uses, or disclose it too',
+)
+
 // The receipt sheet's two hard-coded pixel sizes were the one place Khmer
 // could not follow the boost (10px/11px inside a 1.62em box is unreadable).
 assert.doesNotMatch(sheetCode, /text-\[11px\]/, 'the block meta size follows the surface token, so Khmer scales it')
