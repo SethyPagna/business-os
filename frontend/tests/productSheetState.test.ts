@@ -383,7 +383,7 @@ await runTest('the six POS add-to-cart buttons refuse a branch that cannot sell'
   // rule. Coupled deliberately -- strip the flag off the buttons and the
   // count assertion above goes red in this same test.
   const pos = src('components', 'pos', 'POS.tsx')
-  const justification = pos.split('const saleBranch =')[0].split('The override branch is trusted')[1] ?? ''
+  const justification = pos.split('const saleBranch =')[0].split('const overrideBranchId =')[1] ?? ''
   assert.ok(justification, 'the override-trust comment must still sit above the branch resolution')
   assert.match(
     justification,
@@ -779,6 +779,49 @@ await runTest('every sale-side option-sheet mount declares the sale intent', () 
     /intent=/,
     'if POS ever passes intent explicitly, pin that instead of the default',
   )
+})
+
+// Defence in depth on the LAST gate before a cart line exists. addToCart took
+// the sheet's branch id verbatim -- `{ branchId: overrideBranchId, blocked:
+// false }` -- so the warehouse rule on that path was entirely a property of
+// the caller. The six add buttons above now refuse first, and they are the
+// only producers of that argument (POS.tsx has exactly two addToCart callers:
+// the card's quick add, which passes no override and goes through
+// resolveSaleBranch, and the sheet through onAddToCart; ProductOptionSheet
+// hands its hosts a no-op onAddToCart, so no non-POS host adds to a cart at
+// all). But "safe because nobody currently misuses it" is what the previous
+// round's comment promised and could not keep, so the id is checked here on
+// the SAME predicate rather than trusted.
+await runTest('the cart re-asks the branch rule of the id the sheet hands it', () => {
+  const pos = src('components', 'pos', 'POS.tsx')
+  const decision = pos.split('const saleBranch =')[1]?.split('if (saleBranch.blocked)')[0] ?? ''
+  assert.ok(decision, 'addToCart must still resolve a sale branch before building the line')
+  assert.doesNotMatch(
+    decision,
+    /blocked: false/,
+    'an override branch may not be declared unblocked without being asked',
+  )
+  assert.match(
+    decision,
+    /branchAllowsSale\(product as never, overrideBranchId\)/,
+    'the override is checked on the one predicate the sheet greys the pill with',
+  )
+  assert.match(pos, /import \{ branchAllowsSale, resolveSaleBranch \} from '\.\/productSheetState\.ts'/)
+
+  // The predicate itself, on the shape the override would carry: the sheet
+  // resolved the warehouse (a warehouse-only product), so the id travelling
+  // to addToCart IS a warehouse id.
+  const warehouseOnly = {
+    id: 92,
+    name: 'Awaiting transfer',
+    branch_stock: [{ branch_id: 1, branch_name: 'Warehouse', quantity: 12 }],
+  }
+  assert.equal(branchAllowsSale(warehouseOnly, 1), false, 'a warehouse id is refused however it arrived')
+  assert.equal(branchAllowsSale({ ...warehouseOnly, branch_stock: [{ branch_id: 2, branch_name: 'Shop', quantity: 4 }] }, 2), true)
+  // An id the payload does not name is left alone -- an unrecognised branch
+  // is not evidence of a stock-only one, and blocking it would refuse sales
+  // at any third branch.
+  assert.equal(branchAllowsSale(warehouseOnly, 7), true)
 })
 
 // ---------------------------------------------------------------------------

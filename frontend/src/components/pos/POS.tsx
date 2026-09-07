@@ -81,7 +81,7 @@ import { toggleMultiValue, toggleMultiValues, matchesMulti, parseMultiValues } f
 import { buildProductBrandOptions } from '../products/helpers/productDisplayHelpers.ts'
 import { buildProductSupplierOptions } from '../products/helpers/productSupplierOptions.ts'
 import { getTrackedBatchProductIds } from '../../api/batchesTransport.ts'
-import { resolveSaleBranch } from './productSheetState.ts'
+import { branchAllowsSale, resolveSaleBranch } from './productSheetState.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import { contactDisplayAddress } from '../contacts/contactOptionUtils.ts'
 import type { BatchSelection } from '../../api/batchesTransport.ts'
@@ -2360,23 +2360,24 @@ export default function POS() {
     // waiting to be transferred -- resolved there through the fallback.
     // Both come back blocked now, and the sheet is opened instead.
     //
-    // The override branch is trusted here on purpose, and it is only safe
-    // because the sheet that supplies it refuses first: productSheetState
-    // blocks the pick with `warehouse_branch` whenever the branch it
-    // resolved cannot sell, and EVERY control on the sheet that can reach
-    // this function reads that one flag -- renderPickButton on the hosts
-    // that pass onPick, and here on the POS, which passes none, the six
-    // price buttons through `saleBlockedAtBranch`. The sheet shows the
-    // warehouse pill greyed WITH its quantity, never in the chosen/blue
-    // state, and prints the rule on the dead button beside it.
+    // The override branch keeps its WHICH-branch authority -- the sheet
+    // resolved it, and re-deriving a different one here is what booked lines
+    // against a branch the cashier never saw -- but not its MAY-IT-SELL
+    // authority. Those are two questions, and this used to answer the second
+    // one by assertion (`blocked: false`), which made the warehouse rule on
+    // this path a property of the caller rather than of the till.
     //
-    // That last half is new. While the flag stopped at the pick button the
-    // POS never rendered, only the pill answered the tap: the "Selling $x"
-    // button beside it stayed live and booked the line at the very branch
-    // the pill had just refused, and this comment promised a refusal that
-    // no POS control performed.
+    // The sheet does refuse first, on every control that can reach here:
+    // renderPickButton on the hosts that pass onPick, and on the POS, which
+    // passes none, the six price buttons through `saleBlockedAtBranch`. That
+    // was the missing half -- while the flag stopped at the pick button the
+    // POS never renders, only the greyed pill answered the tap and the
+    // "Selling $x" button beside it booked the line at the very branch the
+    // pill had just refused. But a caller-side guarantee is exactly what the
+    // previous comment here promised and could not keep, so the id is asked
+    // the same predicate the pill is greyed with instead of trusted.
     const saleBranch = overrideBranchId != null && Number.isFinite(overrideBranchId)
-      ? { branchId: overrideBranchId, blocked: false }
+      ? { branchId: overrideBranchId, blocked: !branchAllowsSale(product as never, overrideBranchId) }
       : resolveSaleBranch(product as never, { activeBranchFilterId: primaryBranchFilterId, defaultBranchId })
     if (saleBranch.blocked) {
       notify(t('pos_warehouse_not_sellable') || 'Warehouse Sale Disabled, Please transfer to Shop First', 'error')
