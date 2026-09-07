@@ -239,7 +239,13 @@ const saleLines = assertAllBilingual(telegram.formatSaleTelegramLines({
   subtotalUsd: 1, discountUsd: 0.2, totalUsd: 0.8, totalKhr: 0, paidUsd: 0, paidKhr: 0,
 }), 'sale receipt summary')
 assert.ok(saleLines.includes('Status / ស្ថានភាព: awaiting payment / រង់ចាំការទូទាត់'), 'sale status value is translated too')
-assert.ok(saleLines.includes('Paid / បានបង់: unpaid / មិនទាន់បង់'), 'the unpaid marker is translated')
+// REDESIGNED Sep 6 2026. The unsettled sale used to end on
+// `Paid / បានបង់: unpaid / មិនទាន់បង់` -- a label saying "paid", a value
+// saying "not paid", and the amount owed nowhere on the line. It now names
+// the owner's word and the positive figure, in both languages.
+assert.ok(saleLines.includes('Credit / ឥណទាន: $0.80'), `the unsettled amount is one positive Credit line:\n${saleLines.join('\n')}`)
+assert.ok(!saleLines.some((line) => line.startsWith('Paid')), 'no Paid line survives on a wholly unpaid sale')
+assert.ok(!saleLines.join('\n').includes('មិនទាន់បង់'), 'and no "unpaid" marker either')
 assert.ok(saleLines.some((line) => line.startsWith('• Coca Cola 330ml')), 'the product name is left exactly as entered')
 assert.ok(!saleLines.some((line) => line.startsWith('• Coca Cola 330ml') && KHMER.test(line)), 'an item bullet must not be rewritten')
 
@@ -307,8 +313,19 @@ for (const doc of lang.TELEGRAM_COMMANDS) {
   assert.ok(reference.includes(`${doc.icon} ${doc.command}`), `${doc.command} is missing from the reference`)
   assert.ok(reference.includes(doc.en), `${doc.command} has no English description`)
   assert.ok(reference.includes(doc.km), `${doc.command} has no Khmer description`)
-  assert.ok(reference.includes(`▸ ${doc.example}`), `${doc.command} has no example`)
   assert.ok(KHMER.test(doc.km) && !KHMER.test(doc.en), `${doc.command} descriptions are in the wrong scripts`)
+  // SHORTENED Sep 6 2026: a dated command carries the `[date]` marker on its
+  // own usage line. The per-command `▸ /report 09/01/2026` example line is
+  // gone -- seven of them said the same thing the one footer date line says.
+  assert.ok(!doc.example, `${doc.command} still carries a per-command example`)
+}
+assert.ok(!reference.includes('▸'), 'no example lines survive in the reference')
+// Two lines per command (usage + Khmer), one rule for the whole block, a
+// two-line header and a four-line footer: 7 * 2 + 3 + 5 = 22, against the 45
+// the owner called "so long".
+assert.ok(reference.split('\n').length <= 24, `the reference must stay at a glance; it is ${reference.split('\n').length} lines`)
+for (const doc of lang.TELEGRAM_COMMANDS) {
+  assert.ok(reference.includes(`${doc.icon} ${doc.command}${doc.dated ? ' [date]' : ''} — ${doc.en}`), `${doc.command} has no usage line`)
 }
 assert.ok(reference.includes('dd/mm/yyyy'), 'the reference states the project date convention')
 // The refusal inverted on Sep 4 2026 rather than loosening: exactly ONE
@@ -433,6 +450,83 @@ const lastSent = () => sent[sent.length - 1].body.text
     assert.ok(KHMER.test(lastSent()), `${command} answers bilingually`)
   }
 
+  // --- the two stock replies -------------------------------------------------
+  // `/inventory` and `/stock` were the two replies the Sep 6 2026 redesign
+  // never touched. `/inventory` put two figures on one line
+  // ("Low stock: N · Out of stock: N") and ended with a
+  // `▸ /stock — the product list` pointer -- exactly the kind of line the
+  // redesign deleted from the command reference and forbids there. Both are
+  // driven here over a stub that actually HAS stock, so there are figures on
+  // the lines to count.
+  const inventoryRows = [
+    { name: 'Coca-Cola 330ml', stock_quantity: 0, low_threshold: 5, out_of_stock_threshold: 0 },
+    { name: 'Rice 5kg', stock_quantity: 3, low_threshold: 5, out_of_stock_threshold: 0 },
+  ]
+  const stockedDb = {
+    prepare(sql) {
+      return {
+        all: async () => (/FROM settings/.test(sql) ? settingsRows : /FROM products/.test(sql) ? inventoryRows : []),
+        get: async () => (/FROM products/.test(sql) ? { products: 1240, units: 8630, out_of_stock: 3, low_stock: 12 } : { count: 0, usd: 0, khr: 0, quantity: 0 }),
+      }
+    },
+  }
+  const stocked = loadReal('lib/telegram.ts', {
+    './lowStockSettings': lowStockStub,
+    './db': { getDb: () => stockedDb },
+    './businessDateWindow': businessDateWindow,
+    './telegramLang': lang,
+    './saleTotals': saleTotals,
+    './nativeSaleChange': nativeSaleChange,
+    './salesAnalytics': stubAnalytics,
+    './shiftReconciliation': reconciliationFor(() => stockedDb, stubAnalytics),
+  })
+  const RULE = '━'.repeat(18)
+  await stocked.handleTelegramWebhook(env, { message: { text: '/inventory', chat: { id: -100111 } } })
+  const inventoryReply = lastSent()
+  await stocked.handleTelegramWebhook(env, { message: { text: '/stock', chat: { id: -100111 } } })
+  const stockReply = lastSent()
+
+  assert.deepEqual(inventoryReply.split('\n'), [
+    '🏷️ Inventory / ស្តុក',
+    RULE,
+    'Active products / ផលិតផលសកម្ម: 1,240',
+    'Units on hand / ឯកតាក្នុងស្តុក: 8,630',
+    RULE,
+    'Low stock / ស្តុកទាប: 12',
+    'Out of stock / អស់ស្តុក: 3',
+  ], `/inventory does not have the shared header shape:\n${inventoryReply}`)
+  assert.deepEqual(stockReply.split('\n'), [
+    '📦 Low stock / ស្តុកទាប',
+    RULE,
+    'Products / ផលិតផល: 2',
+    RULE,
+    '• OUT / អស់ស្តុក — Coca-Cola 330ml — 0 (⚠ 5)',
+    '• LOW / ស្តុកទាប — Rice 5kg — 3 (⚠ 5)',
+  ], `/stock does not have the shared header shape:\n${stockReply}`)
+
+  // ONE FIGURE PER LINE, the rule the redesign applied to the other five
+  // reports. A labelled line is `English / ខ្មែរ: value`; product bullets are
+  // a list, not a labelled figure, so they are not counted.
+  for (const [command, reply] of [['/inventory', inventoryReply], ['/stock', stockReply]]) {
+    for (const line of reply.split('\n')) {
+      if (line.startsWith('•') || !line.includes(': ') || !line.slice(0, line.indexOf(': ')).includes(SEP)) continue
+      const value = line.slice(line.indexOf(': ') + 2)
+      const figures = value.replace(/,/g, '').match(/\d+(?:\.\d+)?/g) || []
+      assert.equal(figures.length, 1, `${command} puts ${figures.length} figures on one line: "${line}"`)
+    }
+  }
+
+  // A shop with nothing low says so through the ABSENCE of the second block,
+  // the same way every other report drops a zero line.
+  await wired.handleTelegramWebhook(env, { message: { text: '/inventory', chat: { id: -100111 } } })
+  assert.deepEqual(lastSent().split('\n'), [
+    '🏷️ Inventory / ស្តុក',
+    RULE,
+    'Active products / ផលិតផលសកម្ម: 0',
+    'Units on hand / ឯកតាក្នុងស្តុក: 0',
+  ], `a shop with nothing low still printed a zero block:\n${lastSent()}`)
+  console.log('PASS stock replies: the shared header shape, one figure per line, no pointer line')
+
   const quiet = sent.length
   await wired.handleTelegramWebhook(env, { message: { text: 'good morning', chat: { id: -100999 } } })
   await wired.handleTelegramWebhook(env, { message: { text: '/report', chat: {} } })
@@ -440,6 +534,30 @@ const lastSent = () => sent[sent.length - 1].body.text
   assert.equal(sent.length, quiet, 'plain chatter, a chat-less update and an empty update send nothing')
 
   assert.ok(sent.every((call) => call.url.startsWith('https://api.telegram.org/bot<redacted>/')), 'every send went through the one Telegram endpoint')
+  // The connection test is an outbound message too, and it was carrying the
+  // last explanatory sentence the bot sends: "Every notification category is
+  // on by default; turn any off in Settings" -- told to a reader who is
+  // standing in Settings, having just pressed the button in it. One
+  // confirmation line, a blank, and the command reference is the whole
+  // message now.
+  await stocked.sendTelegramTest({ ...env, BUSINESS_OS_ADMIN_URL: 'https://admin.example.com' })
+  const testMessage = sent[sent.length - 2].body.text
+  assert.deepEqual(testMessage.split('\n').slice(0, 3), [
+    `✅ ${'Business OS alerts and commands are connected.'}${SEP}ការជូនដំណឹង និងពាក្យបញ្ជា Business OS បានភ្ជាប់រួចរាល់។`,
+    '',
+    '🤖 Business OS — Reports',
+  ], testMessage)
+  assert.ok(!/on by default|turn any off/i.test(testMessage), `the connection test still explains itself:\n${testMessage}`)
+  assert.ok(testMessage.endsWith(lang.telegramCommandReference()), 'the connection test still carries the command reference')
+  console.log('PASS connection test: one confirmation line and the reference, no explanation')
+
+  // NO POINTER LINES ANYWHERE. The redesign deleted `▸ /report 09/01/2026`
+  // from the command reference on the grounds that a message should not spend
+  // a line telling the reader to send another message; the same rule holds
+  // for every reply this bot composes, not only for the reference.
+  for (const call of sent) {
+    assert.ok(!String(call.body.text || '').includes('▸'), `a reply still carries a pointer line:\n${call.body.text}`)
+  }
   console.log(`PASS commands: ${sent.length} composed replies, allow-list enforced, nothing sent for non-commands`)
 
   // Business day, business date shape.

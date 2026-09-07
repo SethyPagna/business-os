@@ -1,32 +1,45 @@
 // S4-7. The shift report message: its shape, its arithmetic, and the two
 // places it must refuse to guess. No D1, no bot token, no network.
 //
-// What this file is actually guarding:
+// REDESIGNED Sep 2026 (N42/N38). The owner: "for telegram message can be made
+// more clearly, summary, less text, no explanation just arrange all reports
+// more concise with breakdowns clearly. like i see shift report is so long,
+// much more simpler so easy to understand at a glance", and separately "you
+// didn't mention the registered cash dollar and khr in open vs end", and on
+// credit "just use credit ... instead of $-n ... just $n".
 //
-//   * The owner gave a LINE SET and an ORDER (shop, cashier, from/to, invoice
-//     counts, revenue, item discount, invoice discount, gross sale, other
-//     expense, registered cash, final amount, THEN unpaid credit, then the
-//     two breakdowns). Order is content here -- a cashier reads this on a
-//     phone at closing time and compares it against a drawer -- so the order
-//     is asserted, not just the presence of each line.
-//   * "Final amount" is a claim about physical cash. Its two components are
-//     printed under it, and this pins that the printed components actually
-//     add up to the printed total, so the arithmetic can never drift away
-//     from its own explanation.
-//   * Credit must NOT be subtracted from the final amount. Unpaid credit was
-//     never collected, so it is not in `collected` to begin with; subtracting
-//     it would take the money out twice. That is asserted directly.
-//   * "Unpaid credit" must print BELOW "Final amount", never above it -- the
-//     owner's own review ruling, on the reasoning that a line above a total
-//     reads as an input to that total and credit explicitly is not one. This
-//     is asserted as a POSITION check, not just membership in the line set,
-//     so a regression that puts it back above the total is caught.
+// What this file guards AFTER that redesign:
+//
+//   * The line set and the ORDER the redesign fixed: identity, then the
+//     header totals, then the counts, then registered cash open vs end, then
+//     the context block. Order is content here -- a cashier reads this on a
+//     phone at closing time -- so it is asserted, not just membership.
+//   * Registered cash OPEN and END, both currencies, side by side. That block
+//     is the owner's named gap and it is a FACTUAL readout: nothing here
+//     compares it against a target, and the words "shortage" and "must match"
+//     appear nowhere.
+//   * Credit prints as a positive "Credit: $n" and is NOT subtracted from
+//     anything above it. Unpaid credit was never collected, so it is not in
+//     the drawer figure to begin with; subtracting it would take the money
+//     out twice. Asserted directly, on the value.
+//   * Exactly ONE difference line, from the ONE shared formula in
+//     lib/shiftReconciliation.ts -- the five-part formula the message used to
+//     print is gone, but the number it produced is not, and the components
+//     (refunds, courier, expenses) still move it. Asserted with a
+//     reconciliation whose parts are all distinct.
 //   * An OPEN shift renders. Migration 0116 refuses to close a shift on a
 //     timer, so a till left running overnight is a normal state, and the
-//     report must not print a closing time that never happened or a
+//     report must not print a closing count that never happened or a
 //     "difference" that reads as a missing-cash alarm.
 //   * Every label is bilingual, via the same dictionary every other Telegram
 //     message uses.
+//   * The wiring: /shift binds the shift window into every sales query, sees
+//     cancelled receipts, and every figure reads the kernel column it claims.
+//
+// The LAYOUT budget of the redesign (line cap, exact rendered lines,
+// bilingual structure parity, retired-string sweep) is pinned separately in
+// scripts/test-telegram-shift-report-pure.cjs. This file is the wiring and
+// the arithmetic; that one is the shape.
 //
 // Run (from cloudflare/): node scripts/test-shift-report-pure.cjs
 const fs = require('fs')
@@ -80,10 +93,10 @@ const analytics = loadReal('lib/salesAnalytics.ts', {
 const lowStockRule = loadReal('lib/lowStockSettings.ts', { './db': { getDb: () => { throw new Error('no DB in this test') } } })
 const lowStockStub = { ...lowStockRule, loadLowStockConfig: async () => lowStockRule.DEFAULT_LOW_STOCK_CONFIG }
 
-// The drawer arithmetic now lives in lib/shiftReconciliation.ts and is shared
-// with the close routes and the app. Loaded REAL: this file's whole point is
-// that the message's numbers are the same numbers, so a stub would test the
-// stub. scripts/test-shift-reconciliation-pure.cjs drives it against SQLite.
+// The drawer arithmetic lives in lib/shiftReconciliation.ts and is shared with
+// the close routes and the app. Loaded REAL: this file's whole point is that
+// the message's numbers are the same numbers, so a stub would test the stub.
+// scripts/test-shift-reconciliation-pure.cjs drives it against SQLite.
 const paymentMethodRegistry = loadReal('lib/paymentMethodRegistry.ts')
 const reconciliationFor = (getDb, salesAnalytics) => loadReal('lib/shiftReconciliation.ts', {
   './db': { getDb },
@@ -123,38 +136,23 @@ const CLOSED = {
   closing_counted_khr: 100000,
 }
 
+// The post-redesign figure set. Every field here is printed somewhere; there
+// is no longer a tax / gross-sale / avg-order / discount-split / margin half
+// of this shape, because there are no longer lines for them.
 const FIGURES = {
   invoices: 12,
   cancelled: 1,
   edited: 2,
   revenueUsd: 210,
-  itemDiscountUsd: 5,
-  invoiceDiscountUsd: 3,
-  // The two halves of the invoice discount, which must add up to it.
-  storeDiscountUsd: 2,
-  membershipDiscountUsd: 1,
-  grossSaleUsd: 218,
-  taxUsd: 7,
-  refundUsd: 12,
-  avgOrderUsd: 17.5,
-  costUsd: 120,
   profitUsd: 93,
+  refundUsd: 12,
   deliveryFeeUsd: 6,
   deliveryCostUsd: 3.5,
-  deliveryMarginUsd: 2.5,
   deliveryCostRecorded: 2,
   creditUsd: 18,
   otherExpenseUsd: 4,
   otherExpenseKhr: 0,
-  collectedUsd: 210,
   cash: { usd: 210, khr: 0, needsReview: false },
-  paymentMethods: [
-    { method: 'Cash', count: 9, collectedUsd: 180 },
-    { method: 'ABA', count: 3, collectedUsd: 30 },
-  ],
-  deliveryServices: [
-    { name: 'Vireak Buntham', deliveries: 2, chargedUsd: 6, costUsd: 3.5, marginUsd: 2.5, costRecorded: 2 },
-  ],
 }
 
 // 2026-09-04 12:00Z, well after the shift closed.
@@ -170,29 +168,35 @@ const lineWith = (english) => {
 }
 const valueOf = (english) => lineWith(english).slice(lineWith(english).indexOf(': ') + 2)
 
-// --- 1. the owner's line set, in the owner's order --------------------------
+// --- 1. the redesigned line set, in the redesigned order --------------------
 
 const ORDER = [
+  // Who and when.
   'Shop', 'Cashier', 'Branch', 'Shift', 'From', 'To',
+  // The header block: the totals the owner reads first. Credit is the LAST
+  // of them and is a positive figure, never a deduction.
+  'Sales', 'Profit', 'Expenses', 'Delivery fee', 'Credit',
+  // The counts.
   'Invoices', 'Cancelled', 'Edited',
-  'Revenue', 'Item discount', 'Invoice discount', 'Gross sale',
-  // The eight drawer rows the owner asked for, in his order. Refunds and
-  // Courier are new: the message used to have no line for either, and
-  // silently blanked its own total whenever the window contained one.
-  'Opening', 'Cash sales', 'Refunds', 'Expenses', 'Courier', 'Expected', 'Unpaid credit',
+  // The owner's named gap: registered cash, open vs end.
+  'Opening cash', 'Counted cash',
+  // Context, and the ONE difference line.
+  'Delivery cost', 'Other expenses', 'Refunds', 'Difference',
 ]
 let cursor = -1
 for (const english of ORDER) {
   const at = lines.findIndex((line) => line.startsWith(`${english}${SEP}`))
-  assert.ok(at > cursor, `"${english}" is out of order (index ${at}, previous ${cursor}) -- the owner gave this list in this sequence:\n${report}`)
+  assert.ok(at > cursor, `"${english}" is out of order (index ${at}, previous ${cursor}) -- the redesign fixed this sequence:\n${report}`)
   cursor = at
 }
-console.log(`PASS order: all ${ORDER.length} owner-specified lines present, in the owner's sequence`)
+// And nothing else: a labelled line that is not on the list is a line the
+// redesign did not budget for.
+const labelled = lines.filter((line) => line.includes(': ') && !line.startsWith('•') && !line.startsWith('  '))
+assert.equal(labelled.length, ORDER.length, `the report grew a labelled line the redesign did not budget for:\n${report}`)
+console.log(`PASS order: exactly the ${ORDER.length} redesigned lines, in the redesigned sequence`)
 
 // --- 2. every label is bilingual --------------------------------------------
 
-const labelled = lines.filter((line) => line.includes(': ') && !line.startsWith('•') && !line.startsWith('  '))
-assert.ok(labelled.length >= ORDER.length, `expected at least ${ORDER.length} labelled lines, got ${labelled.length}`)
 for (const line of labelled) {
   const labelPart = line.slice(0, line.indexOf(': '))
   assert.ok(KHMER.test(labelPart), `label "${labelPart}" shipped English-only`)
@@ -206,157 +210,117 @@ console.log(`PASS bilingual: ${labelled.length} labelled lines carry both langua
 assert.equal(valueOf('Shop'), 'Sok Meng Shop')
 assert.equal(valueOf('Shift'), 'S-20260904-0815')
 assert.equal(valueOf('Branch'), 'Shop')
-assert.equal(valueOf('Revenue'), '$210.00')
-assert.equal(valueOf('Item discount'), '$5.00')
-assert.equal(valueOf('Invoice discount'), '$3.00')
-assert.equal(valueOf('Gross sale'), '$218.00')
-assert.equal(valueOf('Unpaid credit'), '$18.00')
-assert.equal(valueOf('Expenses'), '$4.00')
+assert.equal(valueOf('Sales'), '$210.00')
+assert.equal(valueOf('Profit'), '$93.00')
+assert.equal(valueOf('Delivery fee'), '$6.00')
+assert.equal(valueOf('Delivery cost'), '$3.50')
+assert.equal(valueOf('Other expenses'), '$4.00')
+assert.equal(valueOf('Refunds'), '$12.00')
+assert.equal(valueOf('Invoices'), '12')
+assert.equal(valueOf('Cancelled'), '1')
+assert.equal(valueOf('Edited'), '2')
+
+// THE EXPENSE TOTAL is the sum of the two lines that explain it, and only of
+// those two -- a header figure that does not equal its own breakdown is the
+// failure this file exists for.
+assert.equal(valueOf('Expenses'), '$7.50')
+assert.equal(Math.round((FIGURES.otherExpenseUsd + FIGURES.deliveryCostUsd) * 100) / 100, 7.5)
+
+// THE CREDIT RULING, on the value: positive, the word "credit", and NOT
+// removed from any total above it. Sales stays $210.00 with an $18.00 credit
+// in the window; a report that subtracted credit would print $192.00.
+assert.equal(valueOf('Credit'), '$18.00')
+assert.ok(!/-\$|\$-/.test(report), `credit (or anything else) rendered as a negative dollar amount:\n${report}`)
+assert.notEqual(valueOf('Sales'), '$192.00', 'credit was subtracted from sales -- it is revenue, it was simply not collected')
+assert.ok(!/unpaid|owed|outstanding/i.test(report), 'the owner asked for the bare word "credit"')
+
 // Both currencies, never folded together -- the drawer holds dollars and riel
 // side by side and merging them would invent an exchange rate.
-assert.ok(valueOf('Opening').includes('$50.00'), 'the opening float lost its dollars')
-assert.ok(/100,?000\s?៛/.test(valueOf('Opening')), `the opening float lost its riel: ${valueOf('Opening')}`)
+assert.equal(valueOf('Opening cash'), '$50.00 · 100,000៛')
+assert.equal(valueOf('Counted cash'), '$256.00 · 100,000៛')
 
 // From/To are the shift's own moments in the project's dd/mm/yyyy 24-hour
 // convention, rendered in business local time (UTC+7): 01:15Z is 08:15 local.
 assert.equal(valueOf('From'), '04/09/2026 08:15')
 assert.equal(valueOf('To'), '04/09/2026 17:02')
-console.log('PASS figures: money, both currencies, and dd/mm/yyyy 24-hour local times')
+console.log('PASS figures: money, both currencies, dd/mm/yyyy 24-hour local times, and credit as a positive figure')
 
-// --- 3b. the fuller breakdown ------------------------------------------------
-// The owner, Sep 4 2026: "proper detailed summary breakdowns of each aspects".
-// Measured against what the Reports hub carries for the same admin audience,
-// this message was missing the tax, the returns money, the average sale, the
-// SPLIT of the invoice discount, and everything about what a delivery cost as
-// opposed to what it charged. Each of those is asserted on its value AND on
-// its position, because a figure printed in the wrong place is read as the
-// wrong figure.
-
-// Indented component lines (5 spaces) are found separately: they belong to the
-// line above them, which is the whole reason they are indented.
-const componentLine = (english) => {
-  const found = lines.find((line) => line.trimStart().startsWith(`${english}${SEP}`) && line.startsWith('     '))
-  assert.ok(found, `no indented "${english}" component line:\n${report}`)
-  return found
+// --- 3b. the registered-cash block is a readout, not a check ----------------
+// The owner's model: the shift's cash registration is a breakdown FOR THE
+// REPORT. Nothing here is an "expected must match" gate, and the difference
+// line is informational. A regression that reintroduces alarm wording would
+// turn a factual readout into an accusation.
+for (const banned of ['shortage', 'short by', 'must match', 'mismatch', 'Expected', 'Final amount', 'discrepanc']) {
+  assert.ok(!new RegExp(banned, 'i').test(report), `the report reintroduced "${banned}" -- the cash block is a readout, not a check:\n${report}`)
 }
-const indexOfLine = (english) => lines.findIndex((line) => line.trimStart().startsWith(`${english}${SEP}`))
-
-assert.equal(valueOf('Tax'), '$7.00')
-assert.equal(valueOf('Refund'), '$12.00')
-assert.equal(valueOf('Avg order value'), '$17.50')
-assert.equal(valueOf('Cost of goods'), '$120.00')
-assert.equal(valueOf('Profit'), '$93.00')
-assert.equal(valueOf('Delivery fee'), '$6.00')
-
-// The discount split sits UNDER the sum it explains, indented, and the two
-// halves actually add up to it -- a split that does not reconcile is worse
-// than no split.
-assert.ok(componentLine('Store discount').endsWith(': $2.00'))
-assert.ok(componentLine('Membership discount').endsWith(': $1.00'))
-assert.equal(FIGURES.storeDiscountUsd + FIGURES.membershipDiscountUsd, FIGURES.invoiceDiscountUsd)
-assert.ok(indexOfLine('Store discount') === indexOfLine('Invoice discount') + 1
-  && indexOfLine('Membership discount') === indexOfLine('Invoice discount') + 2,
-  `the discount split must sit directly under the invoice discount:\n${report}`)
-
-// Delivery cost and margin sit under the fee, and the margin is the
-// subtraction it claims to be.
-assert.ok(componentLine('Delivery cost').endsWith(': $3.50'))
-assert.ok(componentLine('Delivery margin').endsWith(': $2.50'))
-assert.equal(Math.round((FIGURES.deliveryFeeUsd - FIGURES.deliveryCostUsd) * 100) / 100, FIGURES.deliveryMarginUsd)
-assert.ok(indexOfLine('Delivery cost') === indexOfLine('Delivery fee') + 1,
-  'the courier cost must sit directly under the fee it is deducted from')
-
-// Every indented component line is bilingual too -- the loop in section 2
-// deliberately skips them, so without this they could ship English-only.
-for (const line of lines.filter((entry) => entry.startsWith('     ') && entry.includes(': '))) {
-  const labelPart = line.trimStart().slice(0, line.trimStart().indexOf(': '))
-  assert.ok(KHMER.test(labelPart) && labelPart.includes(SEP), `component label "${labelPart}" is not a bilingual pair`)
+// And no explanatory sentence anywhere: every line is a label and a figure,
+// a bullet, a rule, or the title.
+for (const line of lines.slice(1)) {
+  if (!line.trim() || /^[━]+$/.test(line) || line.startsWith('•')) continue
+  assert.ok(line.includes(': '), `"${line}" is prose, not a labelled figure`)
+  assert.ok(!/\. /.test(line), `"${line}" reads as a sentence`)
 }
+console.log('PASS readout: registered cash open vs end, no alarm wording, no explanatory sentences')
 
-// A courier's own row carries the same three parts as arithmetic.
-const courierLine = lines.find((line) => line.startsWith('• Vireak Buntham'))
-assert.ok(courierLine.endsWith('2 · $6.00 − $3.50 = $2.50'), `the courier row lost its cost and margin: ${courierLine}`)
-
-// THE HONESTY RULE. delivery_actual_cost_usd is NULL when nothing was
-// recorded, never 0 -- so a shift whose deliveries recorded no courier cost
-// must print NEITHER a $0.00 cost NOR the margin that would follow from it,
-// which would read as "delivery was free" and inflate the apparent margin to
-// the whole fee. Measured Sep 4 2026: 12 of 15,044 sales carry a cost, so
-// this is the COMMON case, not the edge one.
+// --- 3c. THE HONESTY RULE ----------------------------------------------------
+// delivery_actual_cost_usd is NULL when nothing was recorded, never 0 -- so a
+// shift whose deliveries recorded no courier cost must print NEITHER a $0.00
+// cost line NOR that zero inside the expense total, which together would read
+// as "delivery was free". Measured Sep 4 2026: 12 of 15,044 sales carry a
+// cost, so this is the COMMON case, not the edge one.
 const noCost = telegram.formatShiftReport('Shop', CLOSED, {
-  ...FIGURES,
-  deliveryCostUsd: 0,
-  deliveryMarginUsd: 6,
-  deliveryCostRecorded: 0,
-  deliveryServices: [{ name: 'Vireak Buntham', deliveries: 2, chargedUsd: 6, costUsd: 0, marginUsd: 6, costRecorded: 0 }],
+  ...FIGURES, deliveryCostUsd: 0, deliveryCostRecorded: 0,
 }, NOW)
 assert.ok(!noCost.includes('Delivery cost'), 'a shift with no recorded courier cost must not print a $0.00 cost')
-assert.ok(!noCost.includes('Delivery margin'), 'and must not print the margin that a missing cost would invent')
-assert.ok(noCost.split('\n').some((line) => line.startsWith(`Delivery fee${SEP}`) && line.endsWith(': $6.00')),
-  'the charged fee is still reported')
-assert.ok(noCost.split('\n').find((line) => line.startsWith('• Vireak Buntham')).endsWith('2 · $6.00'),
-  'and the courier row falls back to the charged figure alone')
-console.log('PASS breakdown: tax, refund, avg order, cost, profit, the discount split and the three delivery parts -- each in its place, and no invented margin')
+const noCostLines = noCost.split('\n')
+assert.ok(noCostLines.some((line) => line.startsWith(`Delivery fee${SEP}`) && line.endsWith(': $6.00')), 'the charged fee is still reported')
+assert.ok(noCostLines.find((line) => line.startsWith(`Expenses${SEP}`)).endsWith(': $4.00'),
+  'an unrecorded courier cost must not be folded into the expense total as a zero')
+console.log('PASS honesty: an unrecorded courier cost prints no line and enters no total')
 
-// --- 4. the final amount is what the lines under it say it is ---------------
+// --- 4. the difference is the shared formula's number, once ------------------
 
-const finalLine = lineWith('Expected')
-const finalIndex = lines.indexOf(finalLine)
-const components = lines[finalIndex + 1].trim()
-// opening + cash sales - refunds - expenses - courier = 50 + 210 - 0 - 4 - 0
-assert.equal(components, '$50.00 + $210.00 − $0.00 − $4.00 − $0.00')
-assert.equal(valueOf('Expected'), '$256.00 · 100,000៛')
-// The caption is a phrase, so it gets a LINE EACH rather than a ` / ` pair --
-// joined, it is wider than a phone bubble and wraps into a mush.
-assert.equal(lines[finalIndex + 2].trim(), '100,000៛ + 0៛ − 0៛ − 0៛ − 0៛')
-assert.ok(KHMER.test(lines[finalIndex + 3]), 'the formula caption has no Khmer line')
-assert.ok(lines[finalIndex + 3].includes('Expected drawer cash'), 'drawer assumptions remain visible')
-
-// THE ASSERTION THAT MATTERS: credit is not subtracted. Unpaid credit is
-// excluded from the collected figure already (it is awaiting_payment, so the
-// kernel never recognised it), and subtracting it again would remove $18 that
-// was never in the drawer to begin with. The owner's arithmetic ruling kept
-// this unchanged -- only the LINE'S PLACEMENT moved (checked next).
-assert.notEqual(valueOf('Expected'), '$238.00', 'credit was subtracted from the expected drawer -- it was never collected, so it is not in the total to remove')
-assert.equal(50 + 210 - 4, 256)
-
-// Counted vs expected, once the shift is closed.
-assert.equal(valueOf('Counted').includes('$256.00'), true)
-assert.equal(valueOf('Difference'), '$0.00 · 0៛')
-console.log('PASS arithmetic: final amount equals its own printed components; credit is not double-counted')
-
-// THE OWNER'S PLACEMENT RULING, checked directly rather than only via the
-// ORDER loop above: "Unpaid credit" must render AFTER "Final amount", never
-// before it -- a line sitting above a total reads as an input to that total,
-// and credit explicitly is not one. A regression that moves the line back
-// above Final amount fails this by index comparison, not just by an eyeball
-// diff of the rendered message.
-const unpaidIndex = lines.findIndex((line) => line.startsWith(`Unpaid credit${SEP}`))
-assert.ok(unpaidIndex >= 0, `the report has no "Unpaid credit" line:\n${report}`)
-assert.ok(unpaidIndex > finalIndex, `"Unpaid credit" (line index ${unpaidIndex}) must print AFTER "Expected" (line index ${finalIndex}), not above it:\n${report}`)
-console.log('PASS placement: "Unpaid credit" prints below "Expected", per the owner\'s review ruling')
+// Exactly one difference line, and it is signed.
+assert.equal(lines.filter((line) => line.startsWith(`Difference${SEP}`)).length, 1)
+// opening 50 + cash 210 - refunds 12 - expenses 4 - courier 3.50 = 240.50,
+// counted 256 -> +15.50. Riel: 100,000 in, 100,000 counted -> 0.
+assert.equal(valueOf('Difference'), '+$15.50 · 0៛')
+assert.equal(50 + 210 - 12 - 4 - 3.5, 240.5)
+// And the credit was NOT taken out of it a second time: it was never
+// collected, so it is not in the drawer to remove.
+assert.notEqual(valueOf('Difference'), '+$33.50 · 0៛', 'credit was subtracted from the drawer -- it was never collected')
 
 // A short drawer shows the sign in front of the currency symbol.
-const short = telegram.formatShiftReport('Shop', { ...CLOSED, closing_counted_usd: 251 }, FIGURES, NOW)
+const short = telegram.formatShiftReport('Shop', { ...CLOSED, closing_counted_usd: 235 }, FIGURES, NOW)
 const shortDiff = short.split('\n').find((line) => line.startsWith(`Difference${SEP}`))
-assert.ok(shortDiff.endsWith(': −$5.00 · 0៛'), `a short drawer must read as a negative amount, got: ${shortDiff}`)
-const over = telegram.formatShiftReport('Shop', { ...CLOSED, closing_counted_usd: 259 }, FIGURES, NOW)
-assert.ok(over.split('\n').find((line) => line.startsWith(`Difference${SEP}`)).endsWith(': +$3.00 · 0៛'))
-console.log('PASS difference: over and short are signed in front of the currency symbol')
+assert.ok(shortDiff.endsWith(': −$5.50 · 0៛'), `a short drawer must read as a negative amount, got: ${shortDiff}`)
+const level = telegram.formatShiftReport('Shop', { ...CLOSED, closing_counted_usd: 240.5 }, FIGURES, NOW)
+assert.ok(level.split('\n').find((line) => line.startsWith(`Difference${SEP}`)).endsWith(': $0.00 · 0៛'),
+  'a drawer that balances is unsigned')
+console.log('PASS difference: one line, signed in front of the currency symbol, credit not double-counted')
 
+// --- 4b. the riel drawer, and the tender summary ----------------------------
 // User's 04/09/2026 drawer: shortage already removed before registration.
 const expenses = [30000, 20000, 14000, 50000, 30000, 6000]
 assert.equal(expenses.reduce((sum, n) => sum + n, 0), 150000)
 const rielReport = telegram.formatShiftReport('Shop', {
   ...CLOSED, opening_float_usd: 0, opening_float_khr: 300000 - 16300,
   closing_counted_usd: 0, closing_counted_khr: 133700,
-}, { ...FIGURES, cash: { usd: 0, khr: 0, needsReview: false }, otherExpenseUsd: 0, otherExpenseKhr: 150000,
-  expenseDetails: expenses.map((khr, i) => ({ label: `Expense ${i + 1}`, usd: 0, khr })),
+}, {
+  ...FIGURES, cash: { usd: 0, khr: 0, needsReview: false },
+  refundUsd: 0, deliveryCostUsd: 0, deliveryCostRecorded: 0,
+  otherExpenseUsd: 0, otherExpenseKhr: 150000,
 }, NOW)
-assert.ok(rielReport.includes(`${lang.labeled('finalAmount', '133,700៛')}`))
-assert.ok(rielReport.includes(`${lang.labeled('difference', '$0.00 · 0៛')}`))
-assert.ok(rielReport.includes('283,700៛ + 0៛ − 0៛ − 150,000៛ − 0៛'))
-assert.ok(rielReport.includes('Expense 6 — 6,000៛'))
+const rielLines = rielReport.split('\n')
+assert.ok(rielLines.find((line) => line.startsWith(`Opening cash${SEP}`)).endsWith(': 283,700៛'))
+assert.ok(rielLines.find((line) => line.startsWith(`Counted cash${SEP}`)).endsWith(': 133,700៛'))
+assert.ok(rielLines.find((line) => line.startsWith(`Expenses${SEP}`)).endsWith(': 150,000៛'))
+assert.ok(rielLines.find((line) => line.startsWith(`Difference${SEP}`)).endsWith(': $0.00 · 0៛'))
+// The per-expense list is gone: the header total and the "Other expenses"
+// line are the breakdown the owner asked for, and six bullets under them is
+// the length he asked us to cut.
+assert.ok(!rielReport.includes('30,000៛'), 'the report re-grew a per-expense list')
+
 const cashOnly = telegram.summarizeShiftCash([
   { payment_method: 'Cash', amount_paid_usd: 10, amount_paid_khr: 2000, exchange_rate: 4000 },
   { payment_method: 'ABA', amount_paid_usd: 50, amount_paid_khr: 0 },
@@ -397,17 +361,18 @@ assert.equal(telegram.summarizeShiftCash([{ amount_paid_usd: 20, payment_details
 assert.equal(telegram.summarizeShiftCash([{ sale_status:'awaiting_payment', amount_paid_usd:0, change_usd:1 }]).needsReview, true)
 assert.equal(telegram.summarizeShiftCash([{ sale_status:'awaiting_payment', amount_paid_usd:0, payment_details:'[{"method":"Cash","amount_usd":10}]' }]).needsReview, true)
 assert.equal(telegram.summarizeShiftCash([{ sale_status:'awaiting_payment', amount_paid_usd:0, total_usd:10 }]).needsReview, false)
+// When the tender cannot be established the DIFFERENCE is the only thing that
+// blanks: the counted cash was physically counted and is still printed, and
+// so is everything else a reader can verify by hand.
 const unknownCash = telegram.formatShiftReport('Shop', CLOSED, { ...FIGURES, cash: { ...cashOnly, needsReview: true } }, NOW)
-assert.ok(unknownCash.includes(lang.labeled('finalAmount', '—')))
 assert.ok(unknownCash.includes(lang.labeled('difference', '—')))
+assert.ok(unknownCash.includes(lang.labeled('cashEnd', '$256.00 · 100,000៛')), 'a counted drawer is still reported when the tender is ambiguous')
+assert.ok(unknownCash.includes(lang.labeled('refunds', '$12.00')), 'and so is everything else that IS known')
 console.log('PASS cash: user riel example, separate tender currencies, bank exclusion, split payment and ambiguity guards')
 
-// --- 4b. refunds and courier payouts are components, not blanks ------------
-// The old formula was `opening + cash - expenses`, and it printed a dash for
-// Expected and Difference the moment the window held a refund or a delivery.
-// Both are now subtracted, and the two-line arithmetic under Expected has to
-// spell out all five parts -- otherwise the printed explanation stops adding
-// up to the printed total, which is the failure mode this file exists for.
+// --- 4c. refunds and courier payouts still move the difference --------------
+// The formula is no longer printed, but it is still the formula: a supplied
+// reconciliation with five distinct parts must land on the difference line.
 const RECONCILED = {
   opening: { usd: 50, khr: 100000 },
   cash_sales: { usd: 210, khr: 0 },
@@ -427,33 +392,24 @@ const fullValue = (english) => {
   assert.ok(line, `no "${english}" line:\n${full}`)
   return line.slice(line.indexOf(': ') + 2)
 }
-assert.equal(fullValue('Refunds'), '$12.00')
-assert.equal(fullValue('Courier'), '$3.50')
-assert.equal(fullValue('Expected'), '$240.50 · 80,000៛')
-assert.notEqual(fullValue('Expected'), '$256.00 · 100,000៛', 'refunds and courier payouts are still missing from the expected drawer')
-assert.notEqual(fullValue('Expected'), '—', 'a shift with a refund must still get a number, not a dash')
 assert.equal(fullValue('Difference'), '+$15.50 · +20,000៛')
-const expectedAt = fullLines.findIndex((row) => row.startsWith(`Expected${SEP}`))
-assert.equal(fullLines[expectedAt + 1].trim(), '$50.00 + $210.00 − $12.00 − $4.00 − $3.50')
-assert.equal(fullLines[expectedAt + 2].trim(), '100,000៛ + 0៛ − 0៛ − 20,000៛ − 0៛')
+assert.notEqual(fullValue('Difference'), '—', 'a shift with a refund must still get a number, not a dash')
 assert.equal(50 + 210 - 12 - 4 - 3.5, 240.5)
-// A review code blanks the two derived figures and says why, but the
-// components a cashier can still verify by hand keep printing.
+// A review code blanks the derived figure and nothing else.
 const flagged = telegram.formatShiftReport('Shop', CLOSED, {
   ...FIGURES,
   reconciliation: { ...RECONCILED, needs_review: true, review_codes: ['cash_method_unresolved'] },
 }, NOW)
-assert.ok(flagged.includes(lang.labeled('finalAmount', '—')))
 assert.ok(flagged.includes(lang.labeled('difference', '—')))
-assert.ok(flagged.includes(lang.labeled('shiftRefunds', '$12.00')), 'a flagged shift still shows what IS known')
-assert.ok(flagged.includes('Cash review needed'), 'and says a review is needed')
+assert.ok(flagged.includes(lang.labeled('refunds', '$12.00')), 'a flagged shift still shows what IS known')
 // Cash recognition is the shared module's, by KIND: renaming the method must
 // not empty the drawer (the old code compared against two exact spellings).
 assert.deepEqual(telegram.summarizeShiftCash([{ payment_method: 'Cash USD', amount_paid_usd: 30, total_usd: 30 }]),
   { usd: 30, khr: 0, needsReview: false }, 'a renamed cash method is still cash')
 assert.deepEqual(telegram.summarizeShiftCash([{ payment_method: 'Drawer', amount_paid_usd: 30, total_usd: 30 }],
   { kinds: { drawer: 'cash' } }), { usd: 30, khr: 0, needsReview: false }, 'an explicit kind map settles any name')
-console.log('PASS reconciliation: refunds and courier payouts are printed components of Expected, the two arithmetic lines spell out all five parts, and a review code blanks only what it must')
+console.log('PASS reconciliation: the shared five-part formula still drives the one difference line, and a review code blanks only that')
+
 const longMessage = 'Cash សាច់ប្រាក់ 🍋‍🟩\n'.repeat(400)
 const parts = telegram.splitTelegramMessage(longMessage)
 assert.ok(parts.length > 1 && parts.every((part) => part.length <= 3900))
@@ -477,55 +433,45 @@ assert.ok(openTo.includes('still open'), 'an open shift must say so')
 assert.ok(KHMER.test(openTo), 'the "still open" note is English-only')
 // No closing count exists yet, so neither line may appear -- a "Difference" of
 // -$256.00 on every open till would read as an alarm.
-assert.ok(!openLines.some((line) => line.startsWith(`Counted${SEP}`)), 'an open shift must not print a closing count that has not been taken')
+assert.ok(!openLines.some((line) => line.startsWith(`Counted cash${SEP}`)), 'an open shift must not print a closing count that has not been taken')
 assert.ok(!openReport.includes('Difference'), 'an open shift must not print a difference against a count that does not exist')
+// The registered-cash block still carries its open half: that is the whole
+// point of showing open vs end.
+assert.ok(openLines.some((line) => line.startsWith(`Opening cash${SEP}`)), 'an open shift still reports its registered opening cash')
 // Everything else still renders: this is a real report, not a placeholder.
-for (const english of ORDER) {
+for (const english of ORDER.filter((entry) => entry !== 'Counted cash' && entry !== 'Difference')) {
   assert.ok(openLines.some((line) => line.startsWith(`${english}${SEP}`)), `open shift dropped the "${english}" line`)
 }
-console.log(`PASS open shift: renders all ${ORDER.length} lines up to now, without inventing a closing count`)
+console.log(`PASS open shift: renders ${ORDER.length - 2} lines up to now, without inventing a closing count`)
 
-// --- 6. the breakdowns ------------------------------------------------------
-
-const paymentHeader = lines.findIndex((line) => line.startsWith(`Payment method${SEP}`))
-assert.ok(paymentHeader > 0, 'no payment-method breakdown')
-assert.ok(lines[paymentHeader + 1].startsWith('• Cash'), 'the payment breakdown lists nothing')
-assert.ok(lines[paymentHeader + 1].includes('$180.00'))
-const deliveryHeader = lines.findIndex((line) => line.startsWith(`Delivery service${SEP}`))
-assert.ok(deliveryHeader > paymentHeader, 'the delivery breakdown must follow the payment one')
-assert.ok(lines[deliveryHeader + 1].includes('Vireak Buntham'))
-// A courier name is free text and must survive untouched -- the value
-// localizer only rewrites enumerated words.
-assert.ok(report.includes('Vireak Buntham'), 'a courier name was rewritten')
-
-// Empty breakdowns simply do not print a header.
-const bare = telegram.formatShiftReport('Shop', CLOSED, { ...FIGURES, paymentMethods: [], deliveryServices: [] }, NOW)
-assert.ok(!bare.includes('Payment method'), 'an empty payment breakdown printed a header with nothing under it')
-assert.ok(!bare.includes('Delivery service'), 'an empty delivery breakdown printed a header with nothing under it')
-console.log('PASS breakdowns: payment methods then delivery services; empty ones print no header')
-
-// --- 7. a shift with nothing in it -------------------------------------------
+// --- 6. a shift with nothing in it -------------------------------------------
 // The first POS use of a day registers the float; the report can legitimately
-// be asked for before a single sale. Zeroes, not blanks or NaN.
+// be asked for before a single sale. Zeroes, not blanks or NaN -- and the
+// zero-valued context lines drop out, which is what makes a quiet shift short.
 
 const empty = telegram.formatShiftReport('Shop', { ...CLOSED, closing_counted_usd: 50, closing_counted_khr: 100000 }, {
   invoices: 0, cancelled: 0, edited: 0,
-  revenueUsd: 0, itemDiscountUsd: 0, invoiceDiscountUsd: 0, grossSaleUsd: 0,
-  storeDiscountUsd: 0, membershipDiscountUsd: 0,
-  taxUsd: 0, refundUsd: 0, avgOrderUsd: 0, costUsd: 0, profitUsd: 0,
-  deliveryFeeUsd: 0, deliveryCostUsd: 0, deliveryMarginUsd: 0, deliveryCostRecorded: 0,
-  creditUsd: 0, otherExpenseUsd: 0, otherExpenseKhr: 0, collectedUsd: 0,
+  revenueUsd: 0, profitUsd: 0, refundUsd: 0,
+  deliveryFeeUsd: 0, deliveryCostUsd: 0, deliveryCostRecorded: 0,
+  creditUsd: 0, otherExpenseUsd: 0, otherExpenseKhr: 0,
   cash: { usd: 0, khr: 0, needsReview: false },
-  paymentMethods: [], deliveryServices: [],
 }, NOW)
+const emptyLines = empty.split('\n')
 assert.ok(!/NaN|undefined|null/.test(empty), `an empty shift produced a broken value:\n${empty}`)
-const emptyFinal = empty.split('\n').find((line) => line.startsWith(`Expected${SEP}`))
+// Sales and Profit print even at zero -- a day that took nothing is a fact --
+// while every optional line is gone.
+assert.ok(emptyLines.find((line) => line.startsWith(`Sales${SEP}`)).endsWith(': $0.00'))
+assert.ok(emptyLines.find((line) => line.startsWith(`Profit${SEP}`)).endsWith(': $0.00'))
+for (const dropped of ['Expenses', 'Delivery fee', 'Credit', 'Cancelled', 'Edited', 'Delivery cost', 'Other expenses', 'Refunds']) {
+  assert.ok(!emptyLines.some((line) => line.startsWith(`${dropped}${SEP}`)), `a quiet shift still printed a zero "${dropped}" line`)
+}
 // The float is still in the drawer and nothing was taken out of it.
-assert.ok(emptyFinal.endsWith(': $50.00 · 100,000៛'), `an untraded shift should still hold its float, got: ${emptyFinal}`)
-assert.ok(empty.split('\n').find((line) => line.startsWith(`Difference${SEP}`)).endsWith(': $0.00 · 0៛'))
-console.log('PASS empty shift: zeroes throughout, the float is still the expected drawer')
+assert.ok(emptyLines.find((line) => line.startsWith(`Opening cash${SEP}`)).endsWith(': $50.00 · 100,000៛'))
+assert.ok(emptyLines.find((line) => line.startsWith(`Difference${SEP}`)).endsWith(': $0.00 · 0៛'))
+assert.ok(emptyLines.length < lines.length, 'a quiet shift must be shorter than a busy one')
+console.log(`PASS empty shift: ${emptyLines.length} lines, zero-valued lines dropped, the float is still the drawer`)
 
-// --- 8. the command is wired and documented ----------------------------------
+// --- 7. the command is wired and documented ----------------------------------
 
 const doc = lang.TELEGRAM_COMMANDS.find((entry) => entry.command === '/shift')
 assert.ok(doc, '/shift is not in the command reference')
@@ -534,7 +480,7 @@ assert.ok(doc.dated, '/shift must accept a day argument like the other reports')
 assert.ok(lang.telegramCommandReference().includes('/shift'), 'the help message does not mention /shift')
 console.log('PASS command: /shift is documented in the bilingual command reference')
 
-// --- 9. /shift end to end, over a stub D1 ------------------------------------
+// --- 8. /shift end to end, over a stub D1 ------------------------------------
 // The formatter above is pure, so this half is what proves the command is
 // actually wired and that the queries it fires are the ones intended: the
 // shift window reaches the SQL as bound parameters, and cancelled receipts are
@@ -586,7 +532,7 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
 
   // Every sales query carries the shift window, normalised, and bound.
   const windowed = statements.filter((s) => s.sql.includes('@createdFrom'))
-  assert.ok(windowed.length >= 4, `expected the kernel, the item discount, the counts and the breakdowns to be windowed, got ${windowed.length}`)
+  assert.ok(windowed.length >= 4, `expected the kernel, the counts and the reconciliation legs to be windowed, got ${windowed.length}`)
   for (const statement of windowed) {
     assert.equal(statement.params.createdFrom, '2026-09-04 01:15:00', 'a shift query bound a raw ISO timestamp')
     assert.equal(statement.params.createdTo, '2026-09-04 10:02:00')
@@ -598,7 +544,11 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
   assert.ok(counts, 'no invoice-count query was issued')
   assert.ok(!/<> 'cancelled'/.test(counts.sql), 'the count query inherited the hide-cancelled guard, so it can only ever report 0 cancelled')
   assert.ok(/sale_amendments/.test(counts.sql), '"edited" is not counted from the amendment ledger')
-  console.log(`PASS wiring: /shift issued ${statements.length} statements, ${windowed.length} of them window-bound, counts see cancelled receipts`)
+  // The two breakdown queries the redesign dropped must not come back: they
+  // were the longest part of the message and the owner asked for it short.
+  assert.ok(!statements.some((s) => /AS payment_method/.test(s.sql)), '/shift re-issued the payment-method breakdown query')
+  assert.ok(!statements.some((s) => /AS delivery_contact_name/.test(s.sql)), '/shift re-issued the delivery-contact breakdown query')
+  console.log(`PASS wiring: /shift issued ${statements.length} statements, ${windowed.length} of them window-bound, counts see cancelled receipts, no breakdown queries`)
 
   const shopWide = { ...CLOSED, scope_mode: 'shop_wide' }
   assert.equal(telegram.shiftFilters(shopWide, NOW).cashierId, null, 'shop-wide reports do not narrow sales to the opener')
@@ -629,12 +579,12 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
   assert.ok(KHMER.test(reply), 'the empty-day answer is English-only')
   console.log('PASS empty day: a day with no registered shift is answered bilingually, not with a blank report')
 
-  // --- 10. every figure comes from the kernel column it claims to ------------
+  // --- 9. every figure comes from the kernel column it claims to ------------
   //
-  // Sections 1-3b drive formatShiftReport directly, so they pin the LAYOUT and
-  // the arithmetic but not the wiring: shiftFigures could read tax_usd into the
-  // store-discount line and every one of them would still pass. The stub in
-  // section 9 answers all its money queries with the same shape, so it cannot
+  // Sections 1-4 drive formatShiftReport directly, so they pin the LAYOUT and
+  // the arithmetic but not the wiring: shiftFigures could read refund_usd into
+  // the credit line and every one of them would still pass. The stub in
+  // section 8 answers all its money queries with the same shape, so it cannot
   // tell two kernel columns apart either.
   //
   // This one gives every column a DISTINCT value and reads the rendered
@@ -682,15 +632,6 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
           void params
           if (/FROM shift_sessions/.test(sql)) return [CLOSED]
           if (/SUM\(SUM\(amount_usd\)\) OVER/.test(sql)) return [{label:'Example expense',usd:4,khr:0,overall_usd:4,overall_khr:0}]
-          if (/AS payment_method/.test(sql)) return [{ payment_method: 'Cash', tx_count: 12, total_usd: 210, collected_usd: 210 }]
-          if (/AS delivery_contact_name[\s\S]*FROM sales/.test(sql)) {
-            return [{
-              delivery_contact_id: 4, delivery_contact_name: 'Vireak Buntham', deliveries: 2,
-              charged_fee_usd: 6, absorbed_fee_usd: 0, actual_cost_usd: 3.5, actual_cost_count: 2,
-              last_delivery_at: '2026-09-04 05:00:00',
-            }]
-          }
-          // The courier-expense leg (fees joined to delivery_contacts).
           return []
         },
       }
@@ -716,30 +657,27 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
   }
   // Each of these is a DIFFERENT number, so a line reading from the wrong
   // kernel column cannot coincidentally match.
-  assert.equal(mappedValue('Revenue'), '$210.00', 'revenue is recognized net sales minus refunds')
-  assert.equal(mappedValue('Expenses'), '$4.00', 'expense total comes from the grouped query')
-  assert.equal(mappedValue('Refunds'), '$12.00', 'refunds issued in the window come from the returns query, not from the kernel refund figure')
-  assert.equal(mappedValue('Courier'), '$3.50', 'courier payouts come from the guarded delivery-cost query')
-  // opening 50 + cash 0 - refunds 12 - expenses 4 - courier 3.50
-  assert.equal(mappedValue('Expected'), '$30.50 · 100,000៛', 'the expected drawer is the five components this stub supplied, and nothing else')
-  assert.equal(mappedValue('Tax'), '$7.00', 'the tax line must read tax_usd')
-  assert.equal(mappedValue('Refund'), '$12.00', 'the refund line must read refund_usd, not the unpaid credit')
-  assert.equal(mappedValue('Unpaid credit'), '$18.00', 'and unpaid credit must still read pending_revenue_usd')
-  assert.equal(mappedValue('Avg order value'), '$17.50', 'avg order is revenue / tx_count, from the kernel')
-  assert.equal(mappedValue('Store discount'), '$2.00', 'the store half of the invoice discount')
-  assert.equal(mappedValue('Membership discount'), '$1.00', 'the membership half')
-  assert.equal(mappedValue('Invoice discount'), '$3.00', 'and their sum is the invoice discount')
-  assert.equal(mappedValue('Cost of goods'), '$120.00', 'cost is the kernel cost, net of restocked returns')
+  assert.equal(mappedValue('Sales'), '$210.00', 'sales is recognized net sales minus refunds')
   // revenue 210 - cost 120 + delivery net (6 - 3.5) = 92.50, the kernel's own
   // profit definition. Asserted as a VALUE so a second profit rule invented
   // here would show up as a different number.
   assert.equal(mappedValue('Profit'), '$92.50', 'profit is the kernel definition, not one computed in the message')
+  assert.equal(mappedValue('Other expenses'), '$4.00', 'the expense total comes from the grouped query')
+  assert.equal(mappedValue('Refunds'), '$12.00', 'the refunds line must read refund_usd, not the unpaid credit')
+  assert.equal(mappedValue('Credit'), '$18.00', 'credit must read pending_revenue_usd, not the refund')
   assert.equal(mappedValue('Delivery fee'), '$6.00', 'the customer-paid delivery fee')
   assert.equal(mappedValue('Delivery cost'), '$3.50', 'the courier money actually paid out')
-  assert.equal(mappedValue('Delivery margin'), '$2.50', 'and the difference between them')
-  const courier = mapped.find((line) => line.startsWith('• Vireak Buntham'))
-  assert.ok(courier.endsWith('2 · $6.00 − $3.50 = $2.50'), `the courier row lost a part: ${courier}`)
-  console.log('PASS sources: every added figure reads the kernel column it claims, proved with distinct values end to end')
+  // 4.00 other + 3.50 courier, the two lines under it.
+  assert.equal(mappedValue('Expenses'), '$7.50', 'the header expense total is its own two lines')
+  assert.equal(mappedValue('Invoices'), '12')
+  assert.equal(mappedValue('Cancelled'), '1')
+  assert.equal(mappedValue('Edited'), '2')
+  assert.equal(mappedValue('Opening cash'), '$50.00 · 100,000៛', 'the registered opening cash is the shift row, both currencies')
+  assert.equal(mappedValue('Counted cash'), '$256.00 · 100,000៛', 'and the counted cash is the shift row too')
+  // opening 50 + cash 0 - refunds 12 - expenses 4 - courier 3.50 = 30.50,
+  // counted 256 -> +225.50. Riel: 100,000 in, 100,000 counted -> 0.
+  assert.equal(mappedValue('Difference'), '+$225.50 · 0៛', 'the difference is the five components this stub supplied, and nothing else')
+  console.log('PASS sources: every figure reads the kernel column it claims, proved with distinct values end to end')
   console.log('OK test-shift-report-pure')
 }).then(async () => {
   const sender = loadReal('lib/telegram.ts', {

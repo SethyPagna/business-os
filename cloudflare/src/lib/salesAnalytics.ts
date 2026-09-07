@@ -15,14 +15,18 @@
 //                                 + customer-paid delivery_fee_usd
 //   sales.delivery_fee_usd     = delivery fee, only meaningful when
 //                                 is_delivery=1; delivery_fee_paid_by is
-//                                 'customer' (customer pays it, on top of
-//                                 total_usd) or 'store' (store absorbs it --
-//                                 a real cost, not collected from anyone)
+//                                 'customer' (the customer is charged) or
+//                                 'store' (the store waives that charge). The
+//                                 courier payout is recorded separately in
+//                                 delivery_actual_cost_usd.
 //   sale_items.cost_price_usd * quantity = COGS for that line
 //
 // Definitions used everywhere below (canonical revenue = NET SALES, user
 // directive Sep 1 2026 -- see the "Canonical revenue" block further down):
-//   gross_sales_usd   = SUM(subtotal_usd)                     -- pre-discount, all sales
+//   gross_sales_usd   = SUM(subtotal_usd) over recognized sales. Despite the
+//                       historical field name, subtotal is already net of
+//                       item-level product/manual discounts; invoice-level
+//                       store and membership discounts remain separate.
 //   discount_usd      = store_discount_usd + membership_discount_usd
 //   revenue_usd        = SUM over RECOGNIZED sales (every sale that is not
 //                         cancelled -- see recognizedExpr) of (subtotal -
@@ -33,9 +37,10 @@
 //                         (unpaid credit) cohort. It is a SUBSET of
 //                         revenue_usd, reported so the unpaid part is visible
 //                         -- never a complement, and never added to revenue.
-//   collected_total_usd = revenue_usd + tax_usd + delivery_usd  -- secondary
-//                         "total collected": what actually changed hands with
-//                         the customer (delivery_usd = customer-paid only)
+//   collected_total_usd = collected sale value + collected tax and delivery,
+//                         minus refunds paid out. This cash-oriented secondary
+//                         figure excludes awaiting-payment credit even though
+//                         that credit is recognized in revenue and profit.
 //   returned_cost_usd  = SUM(return_items.cost_price_usd * quantity) for lines
 //                         that went back on the SELLABLE shelf (stock_action
 //                         'restock'), on non-cancelled customer returns
@@ -260,12 +265,12 @@ export interface SalesTotals {
   tax_usd: number
   delivery_usd: number
   store_delivery_usd: number
-  // P6: the courier money actually paid out (staff-only surface; NULL rows
-  // don't count -- delivery_actual_cost_count says how many sales carried
-  // one, vs delivery_sale_count deliveries total, so a partial record is
-  // visible instead of read as profit). Display-only: deliberately NOT
-  // folded into profit_usd (standing rule: existing calculations don't
-  // change without an explicit ask).
+  // P6: courier money actually paid out (staff-only surface; NULL rows don't
+  // count -- delivery_actual_cost_count says how many sales carried one, vs
+  // delivery_sale_count deliveries total, so a partial record is visible
+  // instead of read as free delivery). This descriptive total can include a
+  // caller's explicit status scope; profit uses the matched recognized subset
+  // in recognized_delivery_cost_usd.
   delivery_actual_cost_usd: number
   delivery_actual_cost_count: number
   delivery_sale_count: number
@@ -301,16 +306,11 @@ export interface SalesTotals {
   recognized_delivery_usd: number
   recognized_delivery_cost_usd: number
   // ---- the awaiting-payment cohort, measured the same way (S4R3-6) --------
-  // "What this period would be worth once the outstanding sales are paid."
+  // These fields isolate the unpaid-credit contribution already recognized
+  // inside revenue, COGS, profit, and delivery. They are positive diagnostic
+  // subsets for display beside the statement; callers must never add or
+  // subtract them from the headline figures.
   //
-  // pending_revenue_usd has existed since the Sep-1 canonical-revenue ruling;
-  // these give it the rest of the picture the owner asked for -- unpaid
-  // discounts, unpaid COGS, unpaid delivery, unpaid profit -- on exactly the
-  // bases their realised twins use, so the two blocks are comparable.
-  //
-  // BINDING (user ruling, Sep 4 2026): no realised figure absorbs any of
-  // these. They are reported beside the statement and rendered BELOW its final
-  // total, the same discipline the shift report applies to unpaid credit.
   // pending_cost_usd / pending_profit_usd are admin-only money and are gated
   // with cost_usd / profit_usd by routes/reports.ts's gateTotals.
   pending_tx_count: number
@@ -320,11 +320,10 @@ export interface SalesTotals {
   pending_delivery_usd: number
   pending_delivery_cost_usd: number
   // Gross cost of goods on the awaiting cohort. A customer return against a
-  // sale that has not been paid for is NOT netted off here (realised cost_usd
+  // sale that has not been paid for is NOT netted off here (recognized cost_usd
   // does net its restocked returns): before payment such a sale is cancelled
   // rather than returned, and if one ever exists it overstates pending COGS,
-  // i.e. UNDER-states pending profit -- the conservative direction for a
-  // figure that is explicitly theoretical.
+  // i.e. UNDER-states the credit subset's profit contribution.
   pending_cost_usd: number
   pending_profit_usd: number
   // The awaiting cohort's own line-level discount, the pending twin of
@@ -367,8 +366,9 @@ export interface SalesTotals {
   // INSIDE revenue_usd (clause 4 of the scoping rule) and isolated here so the
   // unpaid part is visible; never add the two together.
   pending_revenue_usd: number
-  // Secondary "total collected" figure (Option 3): recognized revenue plus the
-  // tax and customer-paid delivery fee actually taken in. Never the headline.
+  // Secondary cash figure: collected sale value, tax, and customer-paid
+  // delivery, less refunds paid out. Awaiting-payment credit stays out even
+  // though it is inside revenue/profit. Never the headline.
   collected_total_usd: number
   cost_usd: number
   profit_usd: number
@@ -739,7 +739,8 @@ async function salesLevelTotals(env: Env, f: SalesFilters) {
            COALESCE(SUM(delivery_actual_cost_usd), 0) AS delivery_actual_cost_usd,
            COALESCE(SUM(CASE WHEN delivery_actual_cost_usd IS NOT NULL THEN 1 ELSE 0 END), 0) AS delivery_actual_cost_count,
            COALESCE(SUM(CASE WHEN COALESCE(is_delivery, 0) = 1 THEN 1 ELSE 0 END), 0) AS delivery_sale_count,
-           -- Canonical net-sales revenue components (recognized = not cancelled/awaiting):
+           -- Canonical net-sales revenue components (recognized = not cancelled;
+           -- awaiting_payment credit is included and also isolated below):
            ${RECOGNIZED_LEVEL_COLUMNS}
     FROM sales
     ${CUSTOMER_REFUND_JOIN}sales.id
@@ -1001,11 +1002,11 @@ export function deriveTotals(level: Record<string, number>, costUsd: number, ret
   // absorbed fee is NOT subtracted here -- see correction (a) in the header.
   const deliveryNetUsd = recognizedDeliveryUsd - recognizedDeliveryCostUsd
   const profitUsd = revenueUsd - netCostUsd + deliveryNetUsd
-  // ---- the theoretical (awaiting-payment) cohort, S4R3-6 -------------------
-  // Same shape as the realised figures above and computed with the same
-  // formula, so "what this period would be worth once the outstanding sales
-  // are paid" is directly comparable with what it is worth today. Nothing
-  // here is added into revenueUsd, collectedTotalUsd, netCostUsd or profitUsd.
+  // ---- the awaiting-payment subset, S4R3-6 --------------------------------
+  // Same shape as the recognized figures above and computed with the same
+  // formula. It is already inside revenueUsd, netCostUsd and profitUsd and is
+  // returned only to show how much of those results is unpaid. It remains out
+  // of collectedTotalUsd, and callers must not add or subtract it again.
   const pendingCostUsd = num(options.costUsd)
   const pendingDeliveryUsd = num(level.pending_delivery_usd)
   const pendingDeliveryCostUsd = num(level.pending_delivery_cost_usd)
@@ -1209,8 +1210,8 @@ export interface DeliveryContactTotalsRow {
 
 // One receipt inside a day's drill. revenue_usd is computed the SAME way the
 // kernel defines revenue -- net sale (subtotal minus both discounts) minus this
-// sale's own customer refunds, and 0 for a non-recognized (awaiting_payment /
-// cancelled) sale -- so these rows sum to the day's revenue_usd. The
+// sale's own customer refunds, and 0 only for a cancelled sale. Awaiting-payment
+// credit remains recognized, so these rows sum to the day's revenue_usd. The
 // single-source rule applied per row: the per-sale breakdown can never disagree
 // with the day total above it.
 export interface SalesDayRow {
@@ -1539,7 +1540,7 @@ export async function getSalesDayReport(
              COALESCE(NULLIF(TRIM(payment_method), ''), 'Unknown') AS payment_method,
              COALESCE(sale_status, 'completed') AS sale_status,
              -- Canonical net-sales revenue, per sale: recognized sales only
-             -- (awaiting_payment / cancelled contribute 0), net of THIS sale's
+             -- (cancelled contributes 0; awaiting_payment remains positive), net of THIS sale's
              -- own customer refunds -- identical basis to deriveTotals, so
              -- SUM(revenue_usd) over the day == totals.revenue_usd.
              ROUND(CASE WHEN ${recognizedExpr('')} THEN ${netSaleExpr('')} - ${netRefundExpr('', 'rf.')} ELSE 0 END, 2) AS revenue_usd,
