@@ -47,7 +47,7 @@ interface BranchFormState {
 }
 
 interface BranchFormProps {
-  branch?: BranchRecord | null
+  branch: BranchRecord
   onSave: (form: BranchFormState) => Promise<void> | void
   onClose: () => void
 }
@@ -56,7 +56,7 @@ const useApp = useAppHook as () => {
   t: (key: string) => string | undefined
 }
 
-function initialBranchForm(branch?: BranchRecord | null): BranchFormState {
+function initialBranchForm(branch: BranchRecord): BranchFormState {
   return {
     name: branch?.name || '',
     location: branch?.location || '',
@@ -71,7 +71,9 @@ function initialBranchForm(branch?: BranchRecord | null): BranchFormState {
 function restoreBranchForm(base: BranchFormState, draft?: Partial<BranchFormState> | null): BranchFormState {
   if (!draft || typeof draft !== 'object') return base
   return {
-    name: typeof draft.name === 'string' ? draft.name : base.name,
+    // Identity fields are fixed. Old saved drafts may still contain editable
+    // name/active values, so discard those fields while restoring metadata.
+    name: base.name,
     location: typeof draft.location === 'string' ? draft.location : base.location,
     phone: typeof draft.phone === 'string' ? draft.phone : base.phone,
     manager: typeof draft.manager === 'string' ? draft.manager : base.manager,
@@ -79,19 +81,17 @@ function restoreBranchForm(base: BranchFormState, draft?: Partial<BranchFormStat
     is_default: typeof draft.is_default === 'boolean' || draft.is_default === 0 || draft.is_default === 1
       ? draft.is_default
       : base.is_default,
-    is_active: typeof draft.is_active === 'boolean' || draft.is_active === 0 || draft.is_active === 1
-      ? draft.is_active
-      : base.is_active,
+    is_active: base.is_active,
   }
 }
 
 export default function BranchForm({ branch, onSave, onClose }: BranchFormProps) {
   const { t } = useApp()
-  const draftKey = scopedWorkDraftKey(branchFormDraftBaseKey(branch?.id))
+  const draftKey = scopedWorkDraftKey(branchFormDraftBaseKey(branch.id))
   const restoredDraftRef = useRef<ReturnType<typeof readWorkDraft<Partial<BranchFormState>>> | undefined>(undefined)
   if (restoredDraftRef.current === undefined) {
     restoredDraftRef.current = readWorkDraft<Partial<BranchFormState>>(draftKey, {
-      notOlderThanMs: branch?.updated_at ? Date.parse(branch.updated_at) || 0 : 0,
+      notOlderThanMs: branch.updated_at ? Date.parse(branch.updated_at) || 0 : 0,
     })
   }
   const [form, setForm] = useState<BranchFormState>(() => restoreBranchForm(
@@ -99,27 +99,26 @@ export default function BranchForm({ branch, onSave, onClose }: BranchFormProps)
     restoredDraftRef.current?.data,
   ))
   const [saving, setSaving] = useState(false)
-  const [nameTouched, setNameTouched] = useState(false)
 
   // S4-21: one declaration, five consumers -- the ✕ on the modal above,
   // the navigation-away guard, beforeunload, the sidebar dot and the
   // app-update gate. `saved` latches so a completed save is not still
   // reported as work at risk while the host unmounts the form.
-  const { dirty } = useFormDirty(form, String(branch?.id ?? 'new'))
+  const { dirty } = useFormDirty(form, String(branch.id))
   const savedRef = useRef(false)
   const dirtyRef = useRef(false)
   dirtyRef.current = (dirty || !!restoredDraftRef.current) && !savedRef.current
   const requestClose = useModalClose(onClose)
   useEffect(() => registerDirtyWork({
-    key: branchFormWorkKey(branch?.id),
+    key: branchFormWorkKey(branch.id),
     pageId: 'branches',
-    label: `${t('branch') || 'Branch'}${branch?.name ? ` — ${branch.name}` : ''}`,
+    label: `${t('branch') || 'Branch'}${branch.name ? ` — ${branch.name}` : ''}`,
     isDirty: () => dirtyRef.current,
     // No save hook: saving runs required-name validation, which would
     // surface an error on a page the operator is trying to leave.
     discard: () => clearWorkDraft(draftKey),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [branch?.id, draftKey])
+  }), [branch.id, branch.name, draftKey, t])
 
   useEffect(() => () => {
     // This cleanup is declared before the writer cleanup so a minimize or
@@ -136,11 +135,7 @@ export default function BranchForm({ branch, onSave, onClose }: BranchFormProps)
     setForm((prev) => ({ ...prev, [key]: value }))
   }
 
-  const nameInvalid = !form.name.trim()
-
   const handleSave = async () => {
-    setNameTouched(true)
-    if (nameInvalid) return
     try {
       setSaving(true)
       await onSave(form)
@@ -174,17 +169,10 @@ export default function BranchForm({ branch, onSave, onClose }: BranchFormProps)
           name="branch_name"
           className="input"
           value={form.name}
-          onBlur={() => setNameTouched(true)}
-          onChange={(event) => set('name', event.target.value)}
-          placeholder={t('branch_name_placeholder') || 'e.g. Main Store, Warehouse A'}
-          autoFocus
-          required
+          readOnly
+          aria-readonly="true"
           autoComplete="organization"
-          aria-invalid={nameTouched && nameInvalid ? 'true' : 'false'}
         />
-        {nameTouched && nameInvalid ? (
-          <p className="mt-1 text-xs text-red-500">{t('branch_required') || 'Branch is required'}</p>
-        ) : null}
       </div>
 
       <div>
@@ -199,6 +187,7 @@ export default function BranchForm({ branch, onSave, onClose }: BranchFormProps)
           onChange={(event) => set('location', event.target.value)}
           placeholder={t('location_placeholder') || 'e.g. 123 Main St, Phnom Penh'}
           autoComplete="street-address"
+          autoFocus
         />
       </div>
 
@@ -263,26 +252,12 @@ export default function BranchForm({ branch, onSave, onClose }: BranchFormProps)
           <div className="text-sm font-medium text-blue-700 dark:text-blue-300">{t('set_default')}</div>
         </label>
 
-        {branch ? (
-          <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-gray-200 p-3 dark:border-gray-600">
-            <input
-              id="branch-active"
-              name="branch_active"
-              aria-label="Set branch active"
-              type="checkbox"
-              checked={!!form.is_active}
-              onChange={(event) => set('is_active', event.target.checked ? 1 : 0)}
-              className="h-4 w-4"
-            />
-            <div className="text-sm font-medium text-gray-700 dark:text-gray-300">{t('active')}</div>
-          </label>
-        ) : null}
       </div>
 
       {/* Sticky footer, same pattern as ProductForm.tsx/FeeForm.tsx's own
           fix. */}
       <div className="sticky bottom-0 -mx-5 -mb-5 flex gap-3 border-t border-gray-200 bg-white px-5 pb-5 pt-4 dark:border-gray-700 dark:bg-gray-800">
-        <button className="btn-primary flex-1" type="submit" disabled={saving || nameInvalid}>
+        <button className="btn-primary flex-1" type="submit" disabled={saving}>
           {saving ? t('saving') : (t('save_branch') || 'Save Branch')}
         </button>
         {/* Cancel is a dismissal too, so it goes through the modal's guard

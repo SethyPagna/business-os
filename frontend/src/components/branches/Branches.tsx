@@ -1,6 +1,5 @@
 import type { ComponentProps, ReactNode } from 'react'
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { consumeLongPressClick, createLongPressHandlers, createLongPressState, type LongPressState } from '../../utils/longPress.ts'
 import { columnsFromRows } from '../../utils/exportOptions.ts'
 import ArrowRightLeft from 'lucide-react/dist/esm/icons/arrow-right-left.js'
 import ArrowRight from 'lucide-react/dist/esm/icons/arrow-right.js'
@@ -13,7 +12,6 @@ import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
 import { historyActor, historyExportField, historyField } from '../../utils/historyRowModel.ts'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Download from 'lucide-react/dist/esm/icons/download.js'
-import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import Warehouse from 'lucide-react/dist/esm/icons/warehouse.js'
 import { useApp as useAppHook, useLowStockConfig, useSync as useSyncHook } from '../../AppContext.tsx'
 import { effectiveLowStockThreshold } from '../../utils/lowStockSettings.ts'
@@ -30,11 +28,12 @@ import MinimizeButton from '../shared/MinimizeButton.tsx'
 import { useIsPageActive } from '../shared/pageActivity'
 import BranchForm, { branchFormDraftBaseKey, branchFormWorkKey } from './BranchForm'
 import { useActionHistory } from '../../utils/actionHistory.ts'
-import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.ts'
+import { cloneHistorySnapshot } from '../../utils/historyHelpers.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { runConcurrentTasks } from '../../utils/bulkOps.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { buildProductGroups } from '../../utils/productGrouping.ts'
+import { branchRoleFromName } from '../../utils/branchRoles.ts'
 import {
   RESTORE_WORK_EVENT,
   consumePendingRestore,
@@ -53,8 +52,6 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
 import {
-  createBranch as createBranchRequest,
-  deleteBranch as deleteBranchRequest,
   getBranches as getBranchesRequest,
   getBranchStock as getBranchStockRequest,
   getTransfers as getTransfersRequest,
@@ -206,8 +203,6 @@ interface BranchApi {
   getTransfers: (params: QueryParams) => Promise<unknown>
   getBranchStock: (branchId: string | number, options: { page: number; pageSize: number; stockState: string; query?: string }) => Promise<BranchStockState>
   updateBranch: (id: string | number, payload: BranchTransportPayload) => Promise<BranchMutationResult>
-  createBranch: (payload: BranchTransportPayload) => Promise<BranchMutationResult>
-  deleteBranch: (id: string | number, userId?: string | number, userName?: string) => Promise<BranchMutationResult>
 }
 
 interface BranchStatTileProps {
@@ -223,11 +218,6 @@ interface StatDetail {
   title: ReactNode
   value: ReactNode
   detail: ReactNode
-}
-
-interface RestoredBranchEntry {
-  originalId: string | number
-  restoredId: number
 }
 
 type ActionHistoryProp = ComponentProps<typeof ActionHistoryBar>['history']
@@ -247,8 +237,6 @@ function getBranchApi(): BranchApi {
     getTransfers: (params) => getTransfersRequest(params),
     getBranchStock: (branchId, options) => getBranchStockRequest(branchId, options) as Promise<BranchStockState>,
     updateBranch: (id, payload) => updateBranchRequest(id, payload) as Promise<BranchMutationResult>,
-    createBranch: (payload) => createBranchRequest(payload) as Promise<BranchMutationResult>,
-    deleteBranch: (id, userId, userName) => deleteBranchRequest(id, userId ?? null, userName ?? null) as Promise<BranchMutationResult>,
   }
 }
 
@@ -341,10 +329,9 @@ export default function Branches({ embedded = false, view, showSectionNavigation
   // Transferring stock moves real quantities against live state, so
   // routes/branches.ts blocks it outright for the Review Required tier
   // (POST /transfer and /transfer-bulk) instead of queueing it -- see
-  // utils/permissionActions.ts. Add/edit/delete DO queue for that tier, so
-  // they stay available; only transfer is withheld.
+  // utils/permissionActions.ts. Canonical branch identity is fixed; only
+  // metadata edits remain available here.
   const canTransferStock = can('branches', 'transfer')
-  const canAddBranch = can('branches', 'add')
   const canEditBranch = can('branches', 'edit')
   // Same grant Inventory's own adjust/receive affordances check, because
   // POST /api/batches sits behind 'inventory' server-side -- a button the
@@ -392,7 +379,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
   const restoreBranchForm = useCallback(async (entry: MinimizedWorkEntry): Promise<boolean> => {
     const branchId = entry.payload?.branchId
     const isEdit = (typeof branchId === 'number' || typeof branchId === 'string') && String(branchId).trim() !== ''
-    if ((isEdit && !canEditBranch) || (!isEdit && !canAddBranch)) {
+    if (!isEdit || !canEditBranch) {
       reparkDeniedRestore(entry)
       notify(tr('access_denied', 'Access denied'), 'warning')
       return false
@@ -415,12 +402,17 @@ export default function Branches({ embedded = false, view, showSectionNavigation
         notify(tr('branch_not_found', 'Branch not found'), 'warning')
         return false
       }
+      if (branchRoleFromName(currentBranch.name) === 'other' || !currentBranch.is_active) {
+        reparkDeniedRestore(entry)
+        notify(tr('access_denied', 'Access denied'), 'warning')
+        return false
+      }
     }
 
     setSelected(currentBranch)
     setModal('form')
     return true
-  }, [branchApi, canAddBranch, canEditBranch, notify, tr])
+  }, [branchApi, canEditBranch, notify, tr])
 
   useEffect(() => {
     const pending = consumePendingRestore('branch_form')
@@ -507,7 +499,6 @@ export default function Branches({ embedded = false, view, showSectionNavigation
       return next
     })
   }, [])
-  const [selectedIds, setSelectedIds] = useState<Set<string | number>>(new Set())
   const [branchStatusFilter, setBranchStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
   const [transferFromFilter, setTransferFromFilter] = useState<string>('all')
   const [transferToFilter, setTransferToFilter] = useState<string>('all')
@@ -525,7 +516,6 @@ export default function Branches({ embedded = false, view, showSectionNavigation
   const [statDetail, setStatDetail] = useState<StatDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [bulkDeleteBusy, setBulkDeleteBusy] = useState(false)
   const [historyReady, setHistoryReady] = useState(false)
   const loadedOnceRef = useRef(false)
   const loadRequestRef = useRef(0)
@@ -533,8 +523,6 @@ export default function Branches({ embedded = false, view, showSectionNavigation
   const loadPromiseRef = useRef<Promise<unknown> | null>(null)
   const loadPromiseModeRef = useRef('')
   const saveInFlightRef = useRef(false)
-  const deleteInFlightRef = useRef(false)
-  const bulkDeleteInFlightRef = useRef(false)
   const actionHistory = useActionHistory({ limit: 3, notify, enabled: historyReady, user })
 
   /**
@@ -754,17 +742,6 @@ export default function Branches({ embedded = false, view, showSectionNavigation
     setTransferToFilter('all')
     setTransferPage(1)
   }, [])
-  const selectedCount = selectedIds.size
-  useEffect(() => {
-    // Drop any selected id that the current status filter has hidden, so a
-    // selection made under one filter (or via select-all) can never reach
-    // bulk-delete for a branch the user isn't currently looking at.
-    const validIds = new Set(visibleBranches.map((branch) => branch.id))
-    setSelectedIds((current) => {
-      const next = new Set([...current].filter((id) => validIds.has(id)))
-      return next.size === current.size ? current : next
-    })
-  }, [visibleBranches])
   const openStatDetail = useCallback((title: ReactNode, value: ReactNode, detail: ReactNode) => {
     setStatDetail({ title, value, detail })
   }, [])
@@ -899,12 +876,13 @@ export default function Branches({ embedded = false, view, showSectionNavigation
   }
 
   /**
-   * 6. CRUD Actions
+   * 6. Canonical branch metadata edits
    */
   const handleSaveBranch = async (form: BranchFormPayload) => {
+    if (!selected) return
     if (!beginSingleAction(saveInFlightRef)) return
     try {
-      const existingSnapshot = selected ? cloneHistorySnapshot(selected) : null
+      const existingSnapshot = cloneHistorySnapshot(selected)
       const payload: BranchTransportPayload = {
         ...form,
         is_default: form.is_default ? 1 : 0,
@@ -912,69 +890,35 @@ export default function Branches({ embedded = false, view, showSectionNavigation
         userId: user?.id,
         userName: user?.name,
       }
-      const res = selected
-        ? await runBranchMutation(() => branchApi.updateBranch(selected.id, payload), 'Update branch')
-        : await runBranchMutation(() => branchApi.createBranch(payload), 'Create branch')
+      const res = await runBranchMutation(() => branchApi.updateBranch(selected.id, payload), 'Update branch')
       if (res?.success === false) {
         notify(res.error || 'Failed to save branch', 'error')
         return
       }
-      let createdBranchId = extractHistoryResultId(res)
-      if (selected && existingSnapshot) {
-        const nextSnapshot = cloneHistorySnapshot({ ...existingSnapshot, ...payload, id: selected.id })
-        actionHistory.pushAction({
-          label: `Edit branch ${existingSnapshot.name || nextSnapshot.name || ''}`.trim(),
-          // Declarative payloads (K1): the server's 'branch.update' applier can
-          // replay a branch edit by itself, so undo/redo survive a page reload
-          // where these closures are gone. undo restores the pre-edit fields,
-          // redo the post-edit fields. When the server applies it (response
-          // applied:true) the hook calls `refresh` instead of the closure, so
-          // there is no redundant/conflicting second write; when it does not
-          // (older server), the closures below run exactly as before.
-          undo_payload: { applier: 'branch.update', id: selected.id, fields: buildBranchPayload(existingSnapshot) },
-          redo_payload: { applier: 'branch.update', id: selected.id, fields: buildBranchPayload(nextSnapshot) },
-          refresh: async () => { await load() },
-          undo: async () => {
-            const result = await runBranchMutation(
-              () => branchApi.updateBranch(existingSnapshot.id, buildBranchPayload(existingSnapshot)),
-              'Undo branch edit',
-            )
-            if (result?.success === false) throw new Error(result.error || 'Failed to restore branch')
-            await load()
-          },
-          redo: async () => {
-            const result = await runBranchMutation(
-              () => branchApi.updateBranch(nextSnapshot.id, buildBranchPayload(nextSnapshot)),
-              'Redo branch edit',
-            )
-            if (result?.success === false) throw new Error(result.error || 'Failed to reapply branch changes')
-            await load()
-          },
-        })
-      } else if (createdBranchId > 0) {
-        const createdSnapshot = cloneHistorySnapshot({ ...payload, id: createdBranchId })
-        actionHistory.pushAction({
-          label: `Add branch ${createdSnapshot.name || ''}`.trim(),
-          undo: async () => {
-            const result = await runBranchMutation(
-              () => branchApi.deleteBranch(createdBranchId, user?.id, user?.name),
-              'Undo branch create',
-            )
-            if (result?.success === false) throw new Error(result?.error || 'Failed to undo branch creation')
-            await load()
-          },
-          redo: async () => {
-            const result = await runBranchMutation(
-              () => branchApi.createBranch(buildBranchPayload(createdSnapshot)),
-              'Redo branch create',
-            )
-            if (result?.success === false) throw new Error(result.error || 'Failed to recreate branch')
-            createdBranchId = extractHistoryResultId(result)
-            await load()
-          },
-        })
-      }
-      notify(selected ? tr('branch_updated', 'Branch updated') : tr('branch_created', 'Branch created'))
+      const nextSnapshot = cloneHistorySnapshot({ ...existingSnapshot, ...payload, id: selected.id })
+      actionHistory.pushAction({
+        label: `Edit branch ${existingSnapshot.name || nextSnapshot.name || ''}`.trim(),
+        undo_payload: { applier: 'branch.update', id: selected.id, fields: buildBranchPayload(existingSnapshot) },
+        redo_payload: { applier: 'branch.update', id: selected.id, fields: buildBranchPayload(nextSnapshot) },
+        refresh: async () => { await load() },
+        undo: async () => {
+          const result = await runBranchMutation(
+            () => branchApi.updateBranch(existingSnapshot.id, buildBranchPayload(existingSnapshot)),
+            'Undo branch edit',
+          )
+          if (result?.success === false) throw new Error(result.error || 'Failed to restore branch')
+          await load()
+        },
+        redo: async () => {
+          const result = await runBranchMutation(
+            () => branchApi.updateBranch(nextSnapshot.id, buildBranchPayload(nextSnapshot)),
+            'Redo branch edit',
+          )
+          if (result?.success === false) throw new Error(result.error || 'Failed to reapply branch changes')
+          await load()
+        },
+      })
+      notify(tr('branch_updated', 'Branch updated'))
       setModal(null)
       setSelected(null)
       await load()
@@ -986,170 +930,20 @@ export default function Branches({ embedded = false, view, showSectionNavigation
   }
 
   const branchDraftKey = scopedWorkDraftKey(branchFormDraftBaseKey(selected?.id))
-  const canMinimizeBranchForm = selected ? canEditBranch : canAddBranch
+  const canMinimizeBranchForm = selected != null && canEditBranch
   const preserveBranchForm = () => {
     flushPendingWorkDraft(branchDraftKey)
-    const isEdit = selected != null
     minimizeWork({
       key: branchFormWorkKey(selected?.id),
       kind: 'branch_form',
       pageId: 'branches',
-      label: isEdit
-        ? `${tr('edit_branch', 'Edit Branch')} — ${selected.name || selected.id}`
-        : tr('add_branch', 'Add Branch'),
-      payload: { branchId: selected?.id ?? null },
+      label: `${tr('edit_branch', 'Edit Branch')} — ${selected?.name || selected?.id}`,
+      payload: { branchId: selected?.id },
       draftKey: branchDraftKey,
-      requiredPermission: { permissionKey: 'branches', actionKey: isEdit ? 'edit' : 'add' },
+      requiredPermission: { permissionKey: 'branches', actionKey: 'edit' },
     })
     setModal(null)
     setSelected(null)
-  }
-
-  const handleDelete = async (branch: BranchRecord) => {
-    if (!beginSingleAction(deleteInFlightRef)) return
-    if (!window.confirm(`Delete branch "${branch.name}"? This cannot be undone.`)) {
-      finishSingleAction(deleteInFlightRef)
-      return
-    }
-    try {
-      const snapshot = cloneHistorySnapshot(branch)
-      const res = await runBranchMutation(
-        () => branchApi.deleteBranch(branch.id, user?.id, user?.name),
-        'Delete branch',
-      )
-      // deleteBranch's direct (non-review) success returns {} with no `success`
-      // flag; a real failure is thrown. Gating on `!res?.success` showed "Cannot
-      // delete branch" on a delete that actually succeeded. Only an explicit
-      // success:false is a failure here.
-      if (res?.success === false) {
-        notify(res?.error || 'Cannot delete branch', 'error')
-        return
-      }
-      let restoredBranchId = 0
-      actionHistory.pushAction({
-        label: `Delete branch ${snapshot.name || ''}`.trim(),
-        undo: async () => {
-          const result = await runBranchMutation(
-            () => branchApi.createBranch(buildBranchPayload(snapshot)),
-            'Undo branch delete',
-          )
-          if (result?.success === false) throw new Error(result.error || 'Failed to restore branch')
-          restoredBranchId = extractHistoryResultId(result)
-          await load()
-        },
-        redo: async () => {
-          const targetId = restoredBranchId || Number(snapshot.id || 0)
-          if (!targetId) return
-          const result = await runBranchMutation(
-            () => branchApi.deleteBranch(targetId, user?.id, user?.name),
-            'Redo branch delete',
-          )
-          if (result?.success === false) throw new Error(result?.error || 'Failed to delete branch again')
-          await load()
-        },
-      })
-      notify(tr('branch_deleted', 'Branch deleted'))
-      await load()
-    } catch (error) {
-      notify(getErrorMessage(error, 'Failed to delete branch'), 'error')
-    } finally {
-      finishSingleAction(deleteInFlightRef)
-    }
-  }
-
-  const handleBulkDelete = async () => {
-    if (!selectedCount) return
-    if (!beginSingleAction(bulkDeleteInFlightRef, { blocked: bulkDeleteBusy })) return
-    const toDelete = branches.filter((branch) => selectedIds.has(branch.id) && !branch.is_default)
-    if (!toDelete.length) {
-      finishSingleAction(bulkDeleteInFlightRef)
-      notify(tr('cannot_delete_default_branch', 'Cannot delete default branch'), 'error')
-      return
-    }
-    if (!window.confirm(`Delete ${toDelete.length} branch(es)? This cannot be undone.`)) {
-      finishSingleAction(bulkDeleteInFlightRef)
-      return
-    }
-
-    setBulkDeleteBusy(true)
-    try {
-      const deletedSnapshots = toDelete.map((branch) => ({ ...branch }))
-      const deleteRun = await runConcurrentTasks<BranchRecord, number>(toDelete, async (branch: BranchRecord) => {
-        const result = await runBranchMutation(
-          () => branchApi.deleteBranch(branch.id, user?.id, user?.name),
-          'Bulk delete branches',
-        )
-        if (result?.success === false) throw new Error(result?.error || 'Failed to delete branch')
-        return Number(branch.id || 0)
-      })
-      const failedIds = deleteRun.failures
-        .map((entry) => Number(entry.item?.id || 0))
-        .filter((id) => Number.isFinite(id) && id > 0)
-      const failed = failedIds.length
-      setSelectedIds(new Set(failedIds))
-      await load()
-      const restoredSnapshots = deletedSnapshots.filter((branch) => !failedIds.includes(Number(branch?.id || 0)))
-      if (restoredSnapshots.length) {
-        let restoredEntries: RestoredBranchEntry[] = []
-        actionHistory.pushAction({
-          label: `Delete ${restoredSnapshots.length} branch${restoredSnapshots.length === 1 ? '' : 'es'}`,
-          undo: async () => {
-            const restoreRun = await runConcurrentTasks<BranchRecord, RestoredBranchEntry>(restoredSnapshots, async (snapshot: BranchRecord) => {
-              const result = await runBranchMutation(() => branchApi.createBranch({
-                name: snapshot.name || '',
-                location: snapshot.location || '',
-                phone: snapshot.phone || '',
-                manager: snapshot.manager || '',
-                notes: snapshot.notes || '',
-                is_default: snapshot.is_default ? 1 : 0,
-                is_active: snapshot.is_active ?? 1,
-                userId: user?.id,
-                userName: user?.name,
-              }), 'Restore deleted branches')
-              if (result?.success === false) throw new Error(result.error || 'Failed to restore branch')
-              return { originalId: snapshot.id, restoredId: Number(result?.id || result?.data?.id || 0) }
-            })
-            if (restoreRun.failures.length) throw (restoreRun.failures[0]?.error || new Error('Failed to restore branch'))
-            restoredEntries = restoreRun.successes.map((entry) => entry.value)
-            await load()
-          },
-          redo: async () => {
-            const idsToDelete = restoredEntries.length
-              ? restoredEntries.map((entry) => Number(entry.restoredId || 0)).filter((id) => id > 0)
-              : restoredSnapshots.map((snapshot) => Number(snapshot.id || 0)).filter((id) => id > 0)
-            const redoRun = await runConcurrentTasks<number, void>(idsToDelete, async (branchId: number) => {
-              const result = await runBranchMutation(
-                () => branchApi.deleteBranch(branchId, user?.id, user?.name),
-                'Redo bulk branch delete',
-              )
-              if (result?.success === false) throw new Error(result?.error || 'Failed to re-delete branch')
-            })
-            if (redoRun.failures.length) throw (redoRun.failures[0]?.error || new Error('Failed to re-delete branch'))
-            await load()
-          },
-        })
-      }
-      if (failed > 0) {
-        notify(tr('bulk_delete_partial_fail', '{n} branch(es) could not be deleted.').replace('{n}', String(failed)), 'error')
-        return
-      }
-      notify(tr('bulk_deleted_count', '{n} branch(es) deleted').replace('{n}', String(toDelete.length)))
-    } finally {
-      finishSingleAction(bulkDeleteInFlightRef)
-      setBulkDeleteBusy(false)
-    }
-  }
-
-  /**
-   * 7. Selection Utilities
-   */
-  const toggleSelect = (id: string | number) => {
-    setSelectedIds((prev) => {
-      const next = new Set<string | number>(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
   }
 
   // H1+X5 (Part 403): per-branch stock export -- the unpaged
@@ -1243,33 +1037,6 @@ export default function Branches({ embedded = false, view, showSectionNavigation
     }
   }, [branchApi, branchDateRange.endDate, branchDateRange.startDate, branchExportLoading, branches, notify, tab, transferFromFilter, transferToFilter, tr])
 
-  // 11.1/11.2 (B6): same selection model as the table pages -- checkboxes
-  // only exist while something is selected, entered by long-pressing a
-  // branch card. Branches is a card list with no column header, so the
-  // select-all checkbox lives on the list-top row that only renders in
-  // select mode (the card list's equivalent of the table header).
-  const selectionModeActive = selectedIds.size > 0
-  const branchLongPressStateByIdRef = useRef<Map<string | number, LongPressState>>(new Map())
-  const getBranchLongPressState = (branchId: string | number): LongPressState => {
-    const existing = branchLongPressStateByIdRef.current.get(branchId)
-    if (existing) return existing
-    const created = createLongPressState()
-    branchLongPressStateByIdRef.current.set(branchId, created)
-    return created
-  }
-
-  const toggleSelectAll = () => {
-    // Scope select-all to the currently *visible* (filtered) branches, not the
-    // full unfiltered list — otherwise selecting-all under an active status
-    // filter silently selects branches the user can't see on screen, and a
-    // subsequent bulk delete removes rows the filter had hidden from view.
-    if (selectedCount === visibleBranches.length && visibleBranches.length > 0) {
-      setSelectedIds(new Set<string | number>())
-      return
-    }
-    setSelectedIds(new Set<string | number>(visibleBranches.map((branch) => branch.id)))
-  }
-
   const branchExportButton = (
     <button
       type="button"
@@ -1337,12 +1104,6 @@ export default function Branches({ embedded = false, view, showSectionNavigation
             rather than a fixed toolbar control. */}
         {!showDateRange ? <div className="flex min-w-0 items-stretch gap-1 overflow-x-auto pt-1">
           <ActionHistoryBar history={actionHistory as unknown as ActionHistoryProp} t={t} className="w-auto shrink-0" showLabel dense />
-          {selectedCount > 0 ? (
-            <button className="btn-danger flex-shrink-0 text-sm" onClick={handleBulkDelete} disabled={bulkDeleteBusy}>
-              <Trash2 className="h-4 w-4" />
-              <span>{tr('delete', 'Delete')} ({selectedCount})</span>
-            </button>
-          ) : null}
           {branchExportButton}
         </div> : null}
         {showDateRange ? (
@@ -1388,15 +1149,6 @@ export default function Branches({ embedded = false, view, showSectionNavigation
               <span>{tr('transfer', 'Transfer')}</span>
             </button>
           ) : null}
-          {tab === 'branches' && canAddBranch ? <button
-            className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-blue-700 bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:border-blue-800 hover:bg-blue-700"
-            onClick={() => { setSelected(null); setModal('form') }}
-            title={tr('add_branch', 'Add Branch')}
-            aria-label={tr('add_branch', 'Add Branch')}
-          >
-            <Plus className="h-4 w-4 shrink-0" />
-            <span>{tr('add_branch', 'Add Branch')}</span>
-          </button> : null}
           <div className="mb-1 ml-auto shrink-0">
             <FilterMenu
               label={tr('filters', 'Filters')}
@@ -1425,30 +1177,6 @@ export default function Branches({ embedded = false, view, showSectionNavigation
                   </div>
                 </div>
               ))}
-            </div>
-          ) : null}
-
-          {/* 11.2 (B6): no standing "Select all (N)" control -- this row only
-              exists in select mode, where its checkbox is the select-all. */}
-          {!loading && visibleBranches.length > 0 && selectionModeActive ? (
-            <div className="flex items-center gap-3 px-2">
-              <input
-                id="branches-select-all"
-                name="branches_select_all"
-                aria-label={t('select_all') || 'Select all'}
-                type="checkbox"
-                className="h-4 w-4 rounded"
-                checked={selectedCount === visibleBranches.length && visibleBranches.length > 0}
-                ref={(element) => {
-                  if (element) {
-                    element.indeterminate = selectedCount > 0 && selectedCount < visibleBranches.length
-                  }
-                }}
-                onChange={toggleSelectAll}
-              />
-              <span className="text-xs text-gray-500 dark:text-gray-400">
-                {`${selectedCount} ${t('selected') || 'Selected'}`}
-              </span>
             </div>
           ) : null}
 
@@ -1481,44 +1209,13 @@ export default function Branches({ embedded = false, view, showSectionNavigation
             const outStockCount = Number(stockSummary.out_of_stock_products ?? 0)
             const totalValue = Number(stockSummary.positive_value_usd ?? stockSummary.total_value_usd ?? 0)
 
-            const cardLongPressState = getBranchLongPressState(branch.id)
-            const cardLongPress = createLongPressHandlers(cardLongPressState, {
-              disabled: selectionModeActive,
-              onLongPress: () => {
-                if (!selectedIds.has(branch.id)) toggleSelect(branch.id)
-              },
-              // No onClick: a plain tap on the card keeps hitting whatever
-              // inner control it landed on (expand, manage, transfer).
-            })
             return (
               <div
                 key={branch.id}
-                className={`card select-none overflow-hidden transition-all ${selectedIds.has(branch.id) ? 'ring-2 ring-blue-400 dark:ring-blue-500' : ''}`}
-                {...(selectionModeActive ? {} : cardLongPress)}
-                // The ghost click that follows a fired long-press would land
-                // on an inner control (e.g. the expand button) -- swallow it
-                // in the capture phase so entering select mode doesn't also
-                // toggle whatever sat under the finger.
-                onClickCapture={(event) => {
-                  if (consumeLongPressClick(cardLongPressState)) {
-                    event.preventDefault()
-                    event.stopPropagation()
-                  }
-                }}
+                className="card overflow-hidden transition-all"
               >
                 <div className="p-3 sm:p-4">
                   <div className="flex items-start gap-2">
-                    {selectionModeActive ? (
-                    <input
-                      id={`branch-select-${branch.id}`}
-                      name={`branch_select_${branch.id}`}
-                      aria-label={`Select branch ${branch.name}`}
-                      type="checkbox"
-                      className="mt-1 h-4 w-4 flex-shrink-0 rounded"
-                      checked={selectedIds.has(branch.id)}
-                      onChange={() => toggleSelect(branch.id)}
-                    />
-                    ) : null}
                     <div className="min-w-0 flex-1">
                       <div className="flex items-start justify-between gap-3">
                         {/* The whole name/details block is now the click
@@ -1568,7 +1265,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
                           >
                             <Warehouse className="h-3.5 w-3.5" />
                           </button>
-                          {canEditBranch ? <button
+                          {canEditBranch && branchRoleFromName(branch.name) !== 'other' && !!branch.is_active ? <button
                             onClick={() => { setSelected(branch); setModal('form') }}
                             className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg border border-slate-200 text-slate-600 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 dark:border-slate-600 dark:text-slate-300 dark:hover:border-blue-500 dark:hover:bg-blue-900/20"
                             title={tr('edit', 'Edit')}
@@ -1576,16 +1273,6 @@ export default function Branches({ embedded = false, view, showSectionNavigation
                           >
                             <Pencil className="h-3.5 w-3.5" />
                           </button> : null}
-                          {!branch.is_default ? (
-                            <button
-                              onClick={() => handleDelete(branch)}
-                              className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg border border-red-200 text-red-600 transition-colors hover:border-red-300 hover:bg-red-50 dark:border-red-900/50 dark:text-red-400 dark:hover:bg-red-900/20"
-                              title={tr('delete', 'Delete')}
-                              aria-label={tr('delete', 'Delete')}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                          ) : null}
                         </div>
                       </div>
 
@@ -1898,9 +1585,9 @@ export default function Branches({ embedded = false, view, showSectionNavigation
         </>
       ) : null}
 
-      {modal === 'form' ? (
+      {modal === 'form' && selected ? (
         <Modal
-          title={selected ? `${tr('edit_branch', 'Edit Branch')}: ${selected.name}` : `+ ${tr('add_branch', 'Add Branch')}`}
+          title={`${tr('edit_branch', 'Edit Branch')}: ${selected.name}`}
           onClose={() => setModal(null)}
           onMinimize={canMinimizeBranchForm ? preserveBranchForm : undefined}
           headerExtra={canMinimizeBranchForm ? <MinimizeButton tr={(key, fallback) => tr(key, fallback)} onMinimize={preserveBranchForm} /> : null}
