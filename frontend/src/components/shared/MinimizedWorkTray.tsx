@@ -47,7 +47,7 @@ export default function MinimizedWorkTray({ variant }: { variant: 'mobile' | 'de
 
   const restore = (entry: MinimizedWorkEntry) => {
     if (!canRestoreMinimizedWork(entry, can)) {
-      notify(tr('permission_denied', 'You no longer have permission for this action.', 'អ្នកលែងមានសិទ្ធិសម្រាប់សកម្មភាពនេះទៀតហើយ។'), 'error')
+      notify(tr('access_denied', 'Access denied', 'គ្មានសិទ្ធិចូលប្រើ'), 'error')
       return
     }
     navigateTo(entry.pageId)
