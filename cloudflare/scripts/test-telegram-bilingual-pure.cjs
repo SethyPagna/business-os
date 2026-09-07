@@ -534,6 +534,23 @@ const lastSent = () => sent[sent.length - 1].body.text
   assert.equal(sent.length, quiet, 'plain chatter, a chat-less update and an empty update send nothing')
 
   assert.ok(sent.every((call) => call.url.startsWith('https://api.telegram.org/bot<redacted>/')), 'every send went through the one Telegram endpoint')
+  // The connection test is an outbound message too, and it was carrying the
+  // last explanatory sentence the bot sends: "Every notification category is
+  // on by default; turn any off in Settings" -- told to a reader who is
+  // standing in Settings, having just pressed the button in it. One
+  // confirmation line, a blank, and the command reference is the whole
+  // message now.
+  await stocked.sendTelegramTest({ ...env, BUSINESS_OS_ADMIN_URL: 'https://admin.example.com' })
+  const testMessage = sent[sent.length - 2].body.text
+  assert.deepEqual(testMessage.split('\n').slice(0, 3), [
+    `✅ ${'Business OS alerts and commands are connected.'}${SEP}ការជូនដំណឹង និងពាក្យបញ្ជា Business OS បានភ្ជាប់រួចរាល់។`,
+    '',
+    '🤖 Business OS — Reports',
+  ], testMessage)
+  assert.ok(!/on by default|turn any off/i.test(testMessage), `the connection test still explains itself:\n${testMessage}`)
+  assert.ok(testMessage.endsWith(lang.telegramCommandReference()), 'the connection test still carries the command reference')
+  console.log('PASS connection test: one confirmation line and the reference, no explanation')
+
   // NO POINTER LINES ANYWHERE. The redesign deleted `▸ /report 09/01/2026`
   // from the command reference on the grounds that a message should not spend
   // a line telling the reader to send another message; the same rule holds

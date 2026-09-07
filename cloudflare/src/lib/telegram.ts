@@ -148,9 +148,13 @@ export async function getTelegramStatus(env: Env): Promise<{ configured: boolean
 export async function sendTelegramTest(env: Env): Promise<void> {
   const config = await getTelegramConfig(env); const problem = configurationProblem(config)
   if (problem) throw new Error(problem)
+  // One confirmation line, then the reference. The sentence that used to sit
+  // between them -- "Every notification category is on by default; turn any
+  // off in Settings" -- explained Settings to a reader who was standing in
+  // Settings, having just pressed the button there. It was the last
+  // explanatory sentence the bot sent.
   await postTelegram(config, [
     `✅ ${bi('Business OS alerts and commands are connected.', 'ការជូនដំណឹង និងពាក្យបញ្ជា Business OS បានភ្ជាប់រួចរាល់។')}`,
-    bi('Every notification category is on by default; turn any off in Settings.', 'គ្រប់ប្រភេទការជូនដំណឹងបើកតាមលំនាំដើម។ អ្នកអាចបិទណាមួយនៅ Settings។'),
     '',
     telegramCommandReference(),
   ].join('\n'))
