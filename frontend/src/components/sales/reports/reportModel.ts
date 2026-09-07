@@ -429,7 +429,9 @@ export function hasProfit(t: ReportTotals | null | undefined): t is ReportTotals
 
 export function basisValue(t: ReportTotals | null | undefined, basis: ReportBasis): number {
   if (!t) return 0
-  if (basis === 'gross') return t.gross_sales_usd
+  // The kernel subtotal already subtracts item discounts. The report's gross
+  // column and statement restore them, so shares and margins use that same base.
+  if (basis === 'gross') return round2(t.gross_sales_usd + num(t.item_discount_usd))
   if (basis === 'collected') return t.collected_total_usd
   return t.revenue_usd
 }
