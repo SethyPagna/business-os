@@ -71,6 +71,14 @@
 // cap then swallows the excess, so the branch rows read $0 and $74 against an
 // unfiltered $50.
 //
+// UNITS carry one more rule on top: their spill is allocated by LARGEST
+// REMAINDER, not proportionally. The Inventory list renders Net sold with no
+// formatting at all, so a proportional split of a 2-unit reversal over a
+// 3-and-2 branch sale would put "1.8" -- and off a less convenient share
+// 1.7999999999999998 -- into a column that counts things. Whole units stay
+// whole while every sold quantity is whole, and the total allocated is the
+// same either way, so the partition below is untouched.
+//
 // What that buys, stated exactly rather than absolutely: the shares of ONE
 // return group sum to 1, so for every column the branch rows add back up to
 // the unfiltered row whenever the sale has a single return group, or every
@@ -266,14 +274,14 @@ export function buildProductSalesLedgerSql(options: ProductSalesLedgerOptions = 
   // ONE return group's share of the branch line `sb`, for ONE column, against
   // that column's OWN denominator:
   //
-  //   * the branch the group names absorbs the reversal first, up to what that
-  //     branch recognised in this column -- MIN(group, named);
-  //   * whatever it cannot absorb spreads over the RESIDUAL capacity of the
-  //     sale's branch lines: what each recognised, less what the step above
-  //     already took from it. Dividing by residual capacity rather than by the
-  //     whole is what keeps the spill off a branch line that is already full,
-  //     where the cap further down would swallow it and the branch rows would
-  //     stop adding up to the unfiltered row;
+  //   * `ownTake` -- the branch the group names absorbs the reversal first, up
+  //     to what that branch recognised in this column: MIN(group, named);
+  //   * `spill` -- whatever it cannot absorb spreads over the RESIDUAL capacity
+  //     of the sale's branch lines: what each recognised, less what the step
+  //     above already took from it. Dividing by residual capacity rather than
+  //     by the whole is what keeps the spill off a branch line that is already
+  //     full, where the cap further down would swallow it and the branch rows
+  //     would stop adding up to the unfiltered row;
   //   * a group naming a branch that sold none of this product on this sale,
   //     or naming none at all, has named = 0, so the whole group spreads
   //     proportionally -- the plain apportionment.
@@ -285,44 +293,96 @@ export function buildProductSalesLedgerSql(options: ProductSalesLedgerOptions = 
   // recognised, which is how a sale of 1 unit at $1 and 1 unit at $99 met a
   // $50 refund and reported $0 at one branch and $74 at the other against an
   // unfiltered $50.
-  const groupShare = (groupCol: string, namedCol: string, branchCol: string, saleCol: string) => {
+  const ownTake = (groupCol: string, namedCol: string) =>
+    `CASE WHEN sb.branch_id = rg.named_branch THEN MIN(${groupCol}, ${namedCol}) ELSE 0 END`
+  const spill = (groupCol: string, namedCol: string, branchCol: string, saleCol: string) => {
     const take = `MIN(${groupCol}, ${namedCol})`
-    const own = `CASE WHEN sb.branch_id = rg.named_branch THEN ${take} ELSE 0 END`
-    return `(${own}) + CASE WHEN (${saleCol} - ${take}) > 0
-               THEN (${groupCol} - ${take}) * ((${branchCol}) - (${own})) / (${saleCol} - ${take})
-               ELSE 0 END`
+    return `CASE WHEN (${saleCol} - ${take}) > 0
+                 THEN (${groupCol} - ${take}) * ((${branchCol}) - (${ownTake(groupCol, namedCol)})) / (${saleCol} - ${take})
+                 ELSE 0 END`
   }
-  const qtyShare = groupShare('rg.qty_returned', 'rg.named_qty', 'sb.qty_sold', 'sb.sale_qty')
+  const groupShare = (groupCol: string, namedCol: string, branchCol: string, saleCol: string) =>
+    `(${ownTake(groupCol, namedCol)}) + ${spill(groupCol, namedCol, branchCol, saleCol)}`
   const refundUsdShare = groupShare('rg.refund_usd', 'rg.named_net_usd', 'sb.net_usd', 'sb.sale_net_usd')
   const refundKhrShare = groupShare('rg.refund_khr', 'rg.named_net_khr', 'sb.net_khr', 'sb.sale_net_khr')
   const cogsUsdShare = groupShare('rg.cogs_returned_usd', 'rg.named_cogs_usd', 'sb.cogs_usd', 'sb.sale_cogs_usd')
   const cogsKhrShare = groupShare('rg.cogs_returned_khr', 'rg.named_cogs_khr', 'sb.cogs_khr', 'sb.sale_cogs_khr')
 
+  // UNITS are the one column that must not come out fractional. Money is money
+  // and is money-formatted; a unit count is rendered raw by the Inventory list
+  // (InventoryProductsSurface.tsx renders `metric(product, 'qty_sold')` with no
+  // formatting at all), so a proportional split of a 2-unit reversal over a
+  // 3-and-2 branch sale would put "Net sold 1.8" -- or, once the share is not a
+  // clean fifth, 1.7999999999999998 -- in a column that counts things.
+  //
+  // So the spill is allocated by LARGEST REMAINDER instead: every branch line
+  // takes the whole part of its share, and the units left over go one each to
+  // the lines with the largest fractional part (branch_id breaking a tie). The
+  // total allocated is unchanged, so the partition still holds, and while every
+  // sale_items.quantity is whole every allocation is whole. `leftover` keeps
+  // its fractional tail for the one case that can produce one -- a sale line
+  // recorded with a fractional quantity -- so even there nothing is lost.
+  // `order_frac` is -1 for a line with no room left for another whole unit, so
+  // the leftovers land where they can actually be absorbed.
+  const qtyOwn = ownTake('rg.qty_returned', 'rg.named_qty')
+  const qtySpill = spill('rg.qty_returned', 'rg.named_qty', 'sb.qty_sold', 'sb.sale_qty')
+  const qtyRem = 'rg.qty_returned - MIN(rg.qty_returned, rg.named_qty)'
+  const qtyBase = `CAST((${qtySpill}) AS INTEGER)`
+  const qtyFrac = `CASE WHEN (sb.qty_sold - (${qtyOwn})) - ${qtyBase} >= 1
+                     THEN (${qtySpill}) - ${qtyBase} ELSE -1 END`
+  const qtyLeftoverWhole = 'CAST(part.leftover AS INTEGER)'
+  const qtyAllocated = `part.own_qty + part.base_qty + CASE
+               WHEN part.order_frac < 0 THEN 0
+               WHEN part.rk <= ${qtyLeftoverWhole} THEN 1
+               WHEN part.rk = ${qtyLeftoverWhole} + 1 THEN part.leftover - ${qtyLeftoverWhole}
+               ELSE 0 END`
+
   const retSql = branchScoped ? `
-      SELECT rg.sale_id AS sale_id, rg.product_id AS product_id, sb.branch_id AS branch_id,
-             SUM(${qtyShare}) AS qty_returned,
-             SUM(${refundUsdShare}) AS refund_usd,
-             SUM(${refundKhrShare}) AS refund_khr,
-             SUM(${cogsUsdShare}) AS cogs_returned_usd,
-             SUM(${cogsKhrShare}) AS cogs_returned_khr
+      SELECT part.sale_id AS sale_id, part.product_id AS product_id, part.branch_id AS branch_id,
+             SUM(${qtyAllocated}) AS qty_returned,
+             SUM(part.refund_usd) AS refund_usd,
+             SUM(part.refund_khr) AS refund_khr,
+             SUM(part.cogs_returned_usd) AS cogs_returned_usd,
+             SUM(part.cogs_returned_khr) AS cogs_returned_khr
       FROM (
-        SELECT g.sale_id AS sale_id, g.product_id AS product_id, g.named_branch AS named_branch,
-               g.qty_returned AS qty_returned, g.refund_usd AS refund_usd, g.refund_khr AS refund_khr,
-               g.cogs_returned_usd AS cogs_returned_usd, g.cogs_returned_khr AS cogs_returned_khr,
-               COALESCE(nb.qty_sold, 0) AS named_qty,
-               COALESCE(nb.net_usd, 0) AS named_net_usd,
-               COALESCE(nb.net_khr, 0) AS named_net_khr,
-               COALESCE(nb.cogs_usd, 0) AS named_cogs_usd,
-               COALESCE(nb.cogs_khr, 0) AS named_cogs_khr
-        FROM (${retGroupsSql}
-        ) g
-        LEFT JOIN (${soldLinesSql(saleScope, true)}
-        ) nb ON nb.sale_id = g.sale_id AND nb.product_id = g.product_id AND nb.branch_id = g.named_branch
-      ) rg
-      JOIN (${soldByBranch}
-      ) sb ON sb.sale_id = rg.sale_id AND sb.product_id = rg.product_id
-      WHERE sb.branch_id = @branchId
-      GROUP BY rg.sale_id, rg.product_id, sb.branch_id` : `
+        SELECT share.sale_id AS sale_id, share.product_id AS product_id, share.branch_id AS branch_id,
+               share.own_qty AS own_qty, share.base_qty AS base_qty, share.order_frac AS order_frac,
+               share.refund_usd AS refund_usd, share.refund_khr AS refund_khr,
+               share.cogs_returned_usd AS cogs_returned_usd, share.cogs_returned_khr AS cogs_returned_khr,
+               share.rem_qty - SUM(share.base_qty) OVER (PARTITION BY share.sale_id, share.product_id, share.named_branch) AS leftover,
+               ROW_NUMBER() OVER (PARTITION BY share.sale_id, share.product_id, share.named_branch
+                                  ORDER BY share.order_frac DESC, share.branch_id) AS rk
+        FROM (
+          SELECT rg.sale_id AS sale_id, rg.product_id AS product_id, sb.branch_id AS branch_id,
+                 rg.named_branch AS named_branch,
+                 (${qtyOwn}) AS own_qty,
+                 (${qtyRem}) AS rem_qty,
+                 ${qtyBase} AS base_qty,
+                 ${qtyFrac} AS order_frac,
+                 ${refundUsdShare} AS refund_usd,
+                 ${refundKhrShare} AS refund_khr,
+                 ${cogsUsdShare} AS cogs_returned_usd,
+                 ${cogsKhrShare} AS cogs_returned_khr
+          FROM (
+            SELECT g.sale_id AS sale_id, g.product_id AS product_id, g.named_branch AS named_branch,
+                   g.qty_returned AS qty_returned, g.refund_usd AS refund_usd, g.refund_khr AS refund_khr,
+                   g.cogs_returned_usd AS cogs_returned_usd, g.cogs_returned_khr AS cogs_returned_khr,
+                   COALESCE(nb.qty_sold, 0) AS named_qty,
+                   COALESCE(nb.net_usd, 0) AS named_net_usd,
+                   COALESCE(nb.net_khr, 0) AS named_net_khr,
+                   COALESCE(nb.cogs_usd, 0) AS named_cogs_usd,
+                   COALESCE(nb.cogs_khr, 0) AS named_cogs_khr
+            FROM (${retGroupsSql}
+            ) g
+            LEFT JOIN (${soldLinesSql(saleScope, true)}
+            ) nb ON nb.sale_id = g.sale_id AND nb.product_id = g.product_id AND nb.branch_id = g.named_branch
+          ) rg
+          JOIN (${soldByBranch}
+          ) sb ON sb.sale_id = rg.sale_id AND sb.product_id = rg.product_id
+        ) share
+      ) part
+      WHERE part.branch_id = @branchId
+      GROUP BY part.sale_id, part.product_id, part.branch_id` : `
       SELECT r.sale_id AS sale_id, ri.product_id AS product_id,
              ${returnMeasures}
       ${returnFrom}

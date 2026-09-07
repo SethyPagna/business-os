@@ -111,6 +111,8 @@ assert.match(workerLedger, /MIN\(sold\.net_usd, COALESCE\(ret\.refund_usd, 0\)\)
   'a reversal is capped at what the sale recognised for that product, so revenue_usd >= 0 by construction')
 assert.match(workerLedger, /MAX\(0, sold\.cogs_usd - COALESCE\(ret\.cogs_returned_usd, 0\)\)/,
   'and returned cost cannot drive COGS below zero')
+assert.match(workerLedger, /ORDER BY share\.order_frac DESC/,
+  'and the unit spill is allocated by largest remainder, so Net sold -- which this list renders with no formatting at all, unlike the money cells -- stays a whole number instead of "1.8"')
 assert.match(workerLedger, /MIN\(sold\.qty_sold, COALESCE\(ret\.qty_returned, 0\)\)/,
   'the UNIT reversal carries the same residual cap as the money, for the one case apportionment cannot reach: a return line taking back more than the sale recognised for the product at all')
 
