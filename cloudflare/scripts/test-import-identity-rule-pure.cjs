@@ -23,6 +23,7 @@ const libDir = path.join(__dirname, '..', 'src', 'lib')
 const REAL = new Set([
   'batchCode', 'importNumbers', 'stockActionResolver', 'stockActionImport',
   'stockActionCatalog', 'stockActionCommit', 'sqlBinding', 'productDetailRule',
+  'branchRoles',
   // productIdentity carries identityBarcodeKeySql -- the ONE SQL spelling of the
   // fold the bounded catalog query uses. Stubbing it would let this test pass
   // over a query that never folds.
@@ -75,9 +76,12 @@ new Function('exports', 'require', 'module', '__filename', '__dirname', transpil
 )
 const { classifyInventory, classifySales, unifyTouchedProductGroups } = engineMod.exports
 const { resolveUnifiedStockImportRows } = loadReal('stockActionImport')
+const { branchCanSell } = loadReal('branchRoles')
 assert.strictEqual(typeof classifyInventory, 'function', 'classifyInventory must be exported')
 assert.strictEqual(typeof classifySales, 'function', 'classifySales must be exported')
 assert.strictEqual(typeof unifyTouchedProductGroups, 'function', 'unifyTouchedProductGroups must be exported')
+assert.strictEqual(branchCanSell('Shop'), true, 'the harness loads the real canonical sale branch helper')
+assert.strictEqual(branchCanSell('Warehouse'), false, 'the real helper keeps imported sales out of Warehouse')
 
 function makeDb() {
   const sqlite = new Database(':memory:')
