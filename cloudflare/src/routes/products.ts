@@ -42,6 +42,7 @@ import {
   buildIssueStateClauses,
 } from '../lib/searchMatch'
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/productSearchQuery'
+import { omitUnchangedProductImageFields, productImageFieldsChanged } from '../lib/productImagePermission'
 import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
@@ -147,6 +148,23 @@ async function validateImageGalleryPayload(
     }
     throw error
   }
+}
+
+async function loadProductImageState(env: Env, productId: string): Promise<{ image_path: string | null; image_gallery: string[] } | null> {
+  const db = getDb(env)
+  const product = await db.prepare('SELECT image_path FROM products WHERE id = @id')
+    .get<{ image_path: string | null }>({ id: productId })
+  if (!product) return null
+  const gallery = await db.prepare(`
+    SELECT image_path FROM product_images
+    WHERE product_id = @id
+    ORDER BY sort_order ASC, id ASC
+  `).all<{ image_path: string }>({ id: productId })
+  return { image_path: product.image_path, image_gallery: gallery.map((row) => row.image_path) }
+}
+
+function imagePermissionDenied(user: SessionUser, changed: boolean, imageOnlyEdit = false): boolean {
+  return changed && !imageOnlyEdit && getActionTier(user, 'products', 'image') === 'none'
 }
 
 // ---------------------------------------------------------------------------
@@ -1569,6 +1587,12 @@ app.post('/', async (c) => {
     }, 409)
   }
 
+  const changesImages = productImageFieldsChanged(body)
+  if (imagePermissionDenied(user, changesImages)) {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
+  if (!changesImages) omitUnchangedProductImageFields(body)
+
   // Review Required tier (progress.md's "Permissions UI redesign" item):
   // unlike Fees (which only queues delete), Products queues every write --
   // add/edit/delete all go to review, nothing applies directly under this
@@ -1758,6 +1782,18 @@ app.put('/:id', async (c) => {
       limit: imageLimitError.limit,
       supplied: imageLimitError.supplied,
     }, 409)
+  }
+
+  const submittedImageFields = Object.prototype.hasOwnProperty.call(body, 'image_path')
+    || Object.prototype.hasOwnProperty.call(body, 'image_gallery')
+  if (submittedImageFields) {
+    const currentImageState = await loadProductImageState(c.env, id)
+    if (!currentImageState) return c.json({ error: 'Product not found' }, 404)
+    const changesImages = productImageFieldsChanged(body, currentImageState)
+    if (imagePermissionDenied(user, changesImages, isImageOnlyEdit)) {
+      return c.json({ error: 'You do not have permission to perform this action' }, 403)
+    }
+    if (!changesImages) omitUnchangedProductImageFields(body)
   }
 
   // Same identity rule as create: an EDIT must not rename/re-barcode a row
@@ -2060,12 +2096,18 @@ app.post('/bulk-delete-jobs/:id/cancel', async (c) => {
 })
 
 app.post('/variant', async (c) => {
-  if (!hasPermission(c.get('user'), 'products')) {
+  const user = c.get('user')
+  if (!hasPermission(user, 'products')) {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
   const name = String(body.name || '').trim()
   if (!name) return c.json({ error: 'Product name is required' }, 400)
+  const changesImages = productImageFieldsChanged({ image_path: body.image_path })
+  if (imagePermissionDenied(user, changesImages)) {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
+  if (!changesImages) omitUnchangedProductImageFields(body)
   const id = await insertRow(c.env, 'products', body, { name, is_active: 1 })
 
   const rawBranchId = Number.parseInt(String(body.branch_id ?? ''), 10)
