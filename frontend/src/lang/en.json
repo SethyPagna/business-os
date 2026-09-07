@@ -647,6 +647,7 @@
   "stock_import_receipt_gate_note": "{count} row(s) add stock with no cost in the file — fill the cost column so each stock-in records what you paid.",
   "stock_import_gate_code_note": "{count} row(s): {reason}",
   "stock_import_reconcile_no_cost_note": "This file has no cost column. In Reconcile mode, any product whose counted total is higher than what is on hand is a stock-in and needs a supplier and unit cost — add the cost_price (and supplier) columns before importing.",
+  "stock_import_no_supplier_column_note": "This file has no supplier column. Rows that create a new lot will be refused without a supplier — add the supplier column before importing.",
   "stock_import_mode": "How to read the numbers",
   "stock_import_mode_direct": "Direct — the number IS the change",
   "stock_import_mode_direct_help": "shop/warehouse are how much to add or sell; the action column says which.",

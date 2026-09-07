@@ -35,9 +35,9 @@ import {
 // Per-code rendering for the receipt-gate issues this screen's pre-check
 // raises (N14-D): every sibling gate surface (FastStockInModal,
 // ReceiveBatchModal, Inventory.tsx, StockAdjustModal, CreateProductsSessionModal,
-// BulkAddStockModal, BranchStockAdjuster) shows the REFUSAL'S OWN reason, not
-// one generic sentence for every code. STOCK_RECEIPT_GATE_CODES fixes the
-// render order so the amber lines are stable across re-parses.
+// BulkAddStockModal) shows the REFUSAL'S OWN reason, not one generic sentence
+// for every code. STOCK_RECEIPT_GATE_CODES fixes the render order so the
+// amber lines are stable across re-parses.
 import { STOCK_RECEIPT_GATE_CODES, STOCK_RECEIPT_GATE_KEYS, STOCK_RECEIPT_GATE_FALLBACKS, type StockReceiptGateCode } from '../../../utils/stockReceiptFields.ts'
 import { unwrapImportJob } from './stockActionImportModel.ts'
 import ProductImportModeTabs, { ProductImportOptionCard, type ProductImportTopMode } from './ProductImportModeTabs'
@@ -92,6 +92,13 @@ export default function StockActionImportModal({ onClose, onDone, t, notify, top
   // Without this the sheet uploads clean and comes back with every increased
   // row failed.
   const [reconcileNoCostColumn, setReconcileNoCostColumn] = useState(false)
+  // A missing supplier column, in EITHER mode: supplier_required is the
+  // gate's FIRST refusal (stockReceiptGate.ts), so a legacy ten-column sheet
+  // (no supplier header at all) hits it on every add/create row before the
+  // operator ever sees the cost-column note above -- and today nothing warns
+  // about it pre-upload (verifier wave 9). Unconditional (not per-row
+  // counted): the fix is one missing header, not N row-level fixes.
+  const [noSupplierColumn, setNoSupplierColumn] = useState(false)
   const [reading, setReading] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -107,7 +114,7 @@ export default function StockActionImportModal({ onClose, onDone, t, notify, top
   // counts must follow the operator's current choice rather than whichever
   // mode happened to be selected when the file was picked.
   useEffect(() => {
-    if (!csvText.trim()) { setRowCount(0); setIssueCount(0); setGateCounts({}); setReconcileNoCostColumn(false); return }
+    if (!csvText.trim()) { setRowCount(0); setIssueCount(0); setGateCounts({}); setReconcileNoCostColumn(false); setNoSupplierColumn(false); return }
     try {
       const result = parseUnifiedStockRows(parseCsvRows(csvText) as Record<string, unknown>[], mode)
       setRowCount(result.rows.length)
@@ -123,12 +130,22 @@ export default function StockActionImportModal({ onClose, onDone, t, notify, top
         counts[issue.gateCode] = (counts[issue.gateCode] || 0) + 1
       }
       setGateCounts(counts)
-      setReconcileNoCostColumn(mode === 'reconcile' && result.rows.length > 0 && result.headerMap.cost_price == null)
+      // Extended (verifier wave 9): a missing SUPPLIER column guarantees the
+      // same "counted increase needs a supplier" refusal as a missing
+      // cost_price column does -- the message already says "(and supplier)",
+      // but the trigger used to fire on cost_price alone.
+      setReconcileNoCostColumn(mode === 'reconcile' && result.rows.length > 0 && (result.headerMap.cost_price == null || result.headerMap.supplier == null))
+      setNoSupplierColumn(
+        result.rows.length > 0 &&
+        result.headerMap.supplier == null &&
+        result.rows.some((row) => (row.shop || 0) > 0 || (row.warehouse || 0) > 0),
+      )
     } catch (err) {
       setRowCount(0)
       setIssueCount(0)
       setGateCounts({})
       setReconcileNoCostColumn(false)
+      setNoSupplierColumn(false)
       setError(err instanceof Error ? err.message : tr('stock_import_read_failed', 'Could not read that file.', 'មិនអាចអានឯកសារនោះបានទេ។'))
     }
     // tr is stable enough for a message string; the parse depends only on these.
@@ -259,9 +276,8 @@ export default function StockActionImportModal({ onClose, onDone, t, notify, top
             // sentence (naming the exact column to fill); every other code
             // renders the REFUSAL'S OWN reason, same as every sibling gate
             // surface (FastStockInModal, ReceiveBatchModal, Inventory.tsx,
-            // StockAdjustModal, CreateProductsSessionModal, BulkAddStockModal,
-            // BranchStockAdjuster) -- never one sentence standing in for all
-            // four codes.
+            // StockAdjustModal, CreateProductsSessionModal, BulkAddStockModal)
+            // -- never one sentence standing in for all four codes.
             const message = code === 'cost_required'
               ? tr(
                   'stock_import_receipt_gate_note',
@@ -289,6 +305,19 @@ export default function StockActionImportModal({ onClose, onDone, t, notify, top
                   'stock_import_reconcile_no_cost_note',
                   'This file has no cost column. In Reconcile mode, any product whose counted total is higher than what is on hand is a stock-in and needs a supplier and unit cost — add the cost_price (and supplier) columns before importing.',
                   'ឯកសារនេះគ្មានជួរឈរថ្លៃដើមទេ។ ក្នុងរបៀបផ្សះផ្សា ផលិតផលណាដែលចំនួនរាប់សរុបខ្ពស់ជាងស្តុកបច្ចុប្បន្នគឺជាការបន្ថែមស្តុក ហើយត្រូវការឈ្មោះអ្នកផ្គត់ផ្គង់ និងថ្លៃដើម — សូមបន្ថែមជួរឈរ cost_price (និងអ្នកផ្គត់ផ្គង់) មុននឹងនាំចូល។',
+                )}
+              </span>
+            </div>
+          ) : null}
+
+          {noSupplierColumn ? (
+            <div className="inline-flex items-start gap-1 text-xs text-amber-600 dark:text-amber-400">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>
+                {tr(
+                  'stock_import_no_supplier_column_note',
+                  'This file has no supplier column. Rows that create a new lot will be refused without a supplier — add the supplier column before importing.',
+                  'ឯកសារនេះគ្មានជួរឈរអ្នកផ្គត់ផ្គង់ទេ។ ជួរដេកដែលបង្កើតឡតថ្មីនឹងត្រូវបានបដិសេធដោយគ្មានអ្នកផ្គត់ផ្គង់ — សូមបន្ថែមជួរឈរអ្នកផ្គត់ផ្គង់មុននឹងនាំចូល។',
                 )}
               </span>
             </div>

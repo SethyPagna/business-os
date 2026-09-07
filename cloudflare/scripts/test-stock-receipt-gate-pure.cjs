@@ -168,14 +168,22 @@ assert.ok(createModal.includes('stockReceiptGateCode('), 'both of its line paths
 // including supplier_required and free_goods_required rows whose cost column
 // IS filled and whose real remedy is a different column entirely. Every
 // sibling gate surface (FastStockInModal, ReceiveBatchModal, Inventory.tsx,
-// StockAdjustModal, CreateProductsSessionModal, BulkAddStockModal,
-// BranchStockAdjuster) shows the refusal's OWN reason; this import review
-// must too.
+// StockAdjustModal, CreateProductsSessionModal, BulkAddStockModal) shows the
+// refusal's OWN reason; this import review must too.
 const stockActionImportModal = fs.readFileSync(
   path.join(root, '..', 'frontend', 'src', 'components', 'products', 'import', 'StockActionImportModal.tsx'),
   'utf8',
 )
 assert.match(stockActionImportModal, /STOCK_RECEIPT_GATE_KEYS/,
   'the stock-action import review must translate each receipt-gate issue through its OWN code, not one sentence for every refusal')
+
+// supplier_required is the gate's FIRST refusal, so a legacy ten-column
+// sheet (no supplier header at all) hits it on every add/create row -- but
+// until sibling:F13's verifier wave 9 nothing warned about the missing
+// column before upload, only the missing cost_price column (reconcile mode
+// only). The review must warn pre-upload when the sheet has no supplier
+// column at all.
+assert.match(stockActionImportModal, /noSupplierColumn/,
+  'the stock-action import review must warn pre-upload when the sheet has no supplier column, the same way it warns about a missing cost column')
 
 console.log(`PASS stock-in receipt gate: ${table.cases.length} shared cases, supplier+cost required, $0 only as declared free goods, corrections exempt, and all FOUR receipt wires enforced`)
