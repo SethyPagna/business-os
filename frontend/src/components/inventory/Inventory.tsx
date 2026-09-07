@@ -50,6 +50,7 @@ import StatsRangeRow from '../shared/StatsRangeRow.tsx'
 import { type DateTimeRange } from '../shared/DateTimeRangePicker'
 import { getSalesStatsStrip } from '../../api/salesTransport.ts'
 import { getReturnsReport } from '../../api/returnsReadTransport.ts'
+import { normalizeDashboardGrossMetrics } from '../../api/dashboardTransport.ts'
 
 // Default quantity the Adjust-stock "Add" form starts with -- see
 // InventoryStockModals.tsx's quick-pick chips (1 / this value / 5 / 10 /
@@ -1807,7 +1808,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   // clamped-looking "page N of N" label. Self-heal it client-side instead.
   const inventoryThresholdFormulaText = tr('inventory_formula_thresholds', 'Low/Out counts are derived from stock thresholds')
   const inventoryStockValueFormulaText = tr('inventory_formula_stock_value', 'Stock value = positive quantity x effective cost for all matching stock, not just the visible page')
-  const inventoryDiscountFormulaText = tr('inventory_formula_discounts', 'Discount totals show store-funded and membership-funded reductions allocated across sold items.')
+  const inventoryDiscountFormulaText = `${tr('discounts_total', 'Total discounts')} = ${tr('rpt_item_discounts', 'Item discounts')} + ${tr('store_discounts', 'Store discounts')} + ${tr('membership_discounts', 'Membership discounts')}`
   const inventoryFeesFormulaText = tr('inventory_formula_fees', 'Fees collected combines sales tax and delivery fees captured on completed sales.')
   const statsValue = (value: ReactNode) => (stockStatsLoaded ? value : '...')
   const inventoryStatLabels = {
@@ -1848,14 +1849,17 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   // returns-report scopes; see loadStatsStrip). Stock-state cards keep
   // reading stockStats -- shelf counts are "as of now", not range-scoped.
   const kernelTotals = (stripKernel?.totals || {}) as Record<string, number>
+  const stripDisplayTotals = normalizeDashboardGrossMetrics(kernelTotals)
   const stripMoney = (value: number): string => (stripLoading ? '···' : fmtUSD(value))
   const stripCount = (value: number): string => (stripLoading ? '···' : String(value))
   const stripRevenue = Number(kernelTotals.revenue_usd) || 0
   const stripCogs = Number(kernelTotals.cost_usd) || 0
   const stripProfit = Number(kernelTotals.profit_usd) || 0
-  const stripGross = Number(kernelTotals.gross_sales_usd) || 0
+  const stripGross = Number(stripDisplayTotals.gross_sales_usd) || 0
+  const stripItemDiscount = Number(kernelTotals.item_discount_usd) || 0
   const stripStoreDiscount = Number(kernelTotals.store_discount_usd) || 0
   const stripMemberDiscount = Number(kernelTotals.membership_discount_usd) || 0
+  const stripTotalDiscount = Number(stripDisplayTotals.total_discount_usd) || 0
   const stripTax = Number(kernelTotals.tax_usd) || 0
   const stripDeliveryFees = Number(kernelTotals.delivery_usd) || 0
   const stripDeliveryCount = Number(kernelTotals.delivery_sale_count) || 0
@@ -1945,17 +1949,16 @@ ${tr('gross_profit', 'Gross profit')} = ${String(inventoryStatLabels.revenue)} �
     {
       key: 'discounts',
       label: String(inventoryStatLabels.discounts),
-      hint: `${tr('inventory_info_discounts', 'Money given away as discounts: shop discounts plus member points redeemed.')}
-
-${inventoryDiscountFormulaText}`,
-      value: stripMoney(stripStoreDiscount + stripMemberDiscount),
-      tone: (stripStoreDiscount + stripMemberDiscount) > 0 ? 'warn' : undefined,
+      hint: inventoryDiscountFormulaText,
+      value: stripMoney(stripTotalDiscount),
+      tone: stripTotalDiscount > 0 ? 'warn' : undefined,
       details: [
+        { label: tr('rpt_item_discounts', 'Item discounts'), value: fmtUSD(stripItemDiscount) },
         { label: tr('store_discounts', 'Store discounts'), value: fmtUSD(stripStoreDiscount) },
         { label: tr('membership_discounts', 'Membership discounts'), value: fmtUSD(stripMemberDiscount) },
-        { label: tr('discounts_total', 'Total discounts'), value: fmtUSD(stripStoreDiscount + stripMemberDiscount) },
+        { label: tr('discounts_total', 'Total discounts'), value: fmtUSD(stripTotalDiscount) },
         // Discount rate = total discounts / gross -- mirrors Dashboard.
-        { label: tr('discount_rate', 'Discount rate'), value: `${stripGross > 0 ? (((stripStoreDiscount + stripMemberDiscount) / stripGross) * 100).toFixed(1) : '0.0'}%` },
+        { label: tr('discount_rate', 'Discount rate'), value: `${stripGross > 0 ? ((stripTotalDiscount / stripGross) * 100).toFixed(1) : '0.0'}%` },
       ],
     },
     {
