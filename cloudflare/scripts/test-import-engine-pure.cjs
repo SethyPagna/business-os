@@ -1405,6 +1405,26 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     assert.strictEqual(results[0].existingId, 13)
   }
 
+  // Incoming secondary phones are identity too: the imported primary can be
+  // blank while an option collides with an existing primary or option.
+  {
+    const option = JSON.stringify([{ label: 'Other', phone: '+855 77 888 999' }])
+    const existingPrimary = await classifyContacts(
+      makeFakeDb([{ id: 130, name: 'Primary Owner', phone: '077 888 999', membership_number: 'LC-00130' }]),
+      'customers',
+      [row({ name: 'Different Person', contact_options: option }, 1)],
+      null,
+    )
+    assert.strictEqual(existingPrimary[0].action, 'error', 'an incoming option phone cannot duplicate an existing primary phone')
+    const existingOption = await classifyContacts(
+      makeFakeDb([{ id: 131, name: 'Option Owner', address: option, membership_number: 'LC-00131' }]),
+      'customers',
+      [row({ name: 'Another Person', contact_options: option }, 1)],
+      null,
+    )
+    assert.strictEqual(existingOption[0].action, 'error', 'an incoming option phone cannot duplicate an existing option phone')
+  }
+
   // 4f) Multiple rows folded into one pending update cannot let the
   // internal canonical key drift from the final phone, even when the
   // reviewer configures a rule for the visible phone field only.
@@ -1474,6 +1494,16 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     const different = await classifyContacts(makeFakeDb(existing), 'suppliers', [row({ name: 'Other Supply', phone: '070 111 222' }, 1)], null)
     assert.strictEqual(different[0].action, 'error')
     assert.strictEqual(different[0].existingId, 21)
+  }
+
+  // Pending creates also reserve every secondary phone, not only the primary.
+  {
+    const results = await classifyContacts(makeFakeDb([]), 'suppliers', [
+      row({ name: 'Option Supplier One', contact_options: JSON.stringify([{ label: 'Other', phone: '070111222' }]) }, 1),
+      row({ name: 'Option Supplier Two', phone: '+855 70 111 222' }, 2),
+    ], null)
+    assert.strictEqual(results[0].action, 'create')
+    assert.strictEqual(results[1].action, 'error', 'a later row cannot reuse an earlier pending create secondary phone')
   }
 
   // 5e) The review override is intentionally name-only. It cannot create a

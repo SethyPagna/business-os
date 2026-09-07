@@ -149,6 +149,15 @@ async function realDbChecks() {
   passed += 1
   console.log('PASS canonical phone prefilter finds raw/spaced/+855 conflicts across all three real tables')
 
+  for (let i = 0; i < 51; i += 1) {
+    rawDb.prepare("INSERT INTO suppliers (name, phone) VALUES ('Crowded Name', @phone)").run({ phone: `088${String(i).padStart(6, '0')}` })
+  }
+  const crowdedOwner = rawDb.prepare("SELECT id FROM suppliers WHERE name='Crowded Name' ORDER BY id DESC LIMIT 1").get()
+  const crowded = await lib.findContactDuplicates(db, 'suppliers', { name: 'Crowded Name', phones: ['088000050'] })
+  assert.ok(crowded.some((match) => match.id === crowdedOwner.id && match.matchedPhone === '088000050'), 'unbounded phone lookup finds the owner beyond the 50-row name suggestion cap')
+  passed += 1
+  console.log('PASS name-only limit cannot crowd a hard phone owner out of duplicate detection')
+
   rawDb.prepare(`UPDATE customers SET address='[{"label":"Other","phone":"+855 77 888 999","address":"Somewhere"}]' WHERE name='Dara'`).run()
   const optionMatches = await lib.findContactDuplicates(db, 'customers', { name: 'Another person', phones: ['077888999'] })
   assert.strictEqual(optionMatches.length, 1)

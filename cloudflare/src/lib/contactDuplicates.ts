@@ -163,15 +163,10 @@ export function classifyContactDuplicates(
   return matches.sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity])
 }
 
-// DB-backed lookup for a single record being created/edited. Prefilters
-// with SQL (exact name match, exact primary-phone match, or a LIKE probe
-// against the serialized Contact Options column -- the same tolerance
-// GET /customers's own search already relies on, see routes/contacts.ts's
-// comment there on why LIKE against that JSON text is fine), then
-// classifies precisely in JS so a LIKE false-positive (e.g. "123" inside
-// a longer unrelated number) can never surface as a real match. Bounded
-// to 50 candidates -- this is a duplicate *check*, not a report; a
-// genuine name/phone collision will be in the first handful of rows.
+// DB-backed lookup for a single record being created/edited. Phone identity
+// is queried separately and without a row limit: a common name can have more
+// than 50 legitimate records, and those name matches must never crowd a hard
+// phone owner out of the result set. Name-only suggestions remain bounded.
 export async function findContactDuplicates(
   db: D1Compat,
   table: ContactDuplicateTable,
@@ -182,12 +177,7 @@ export async function findContactDuplicates(
   const phones = [...new Set(subject.phones.map(normalizePhone).filter((p): p is string => !!p))]
   if (!nameKey && !phones.length) return []
 
-  const conditions: string[] = []
   const params: Record<string, unknown> = {}
-  if (nameKey) {
-    params.nameKey = nameKey
-    conditions.push(`lower(trim(name)) = @nameKey`)
-  }
   // Use the same canonical rule as normalizePhone for accepted phone shapes in the primary
   // column and each structured Contact Option. customers.phone_normalized is
   // indexed and checked first, while the expression also catches historical
@@ -197,24 +187,31 @@ export async function findContactDuplicates(
     const digits = digitsSql(column)
     return `(CASE WHEN substr(${digits}, 1, 3) = '855' AND length(${digits}) IN (11, 12) THEN '0' || substr(${digits}, 4) ELSE ${digits} END)`
   }
+  const phoneConditions: string[] = []
   phones.forEach((phone, index) => {
     params[`phone${index}`] = phone
-    if (table === 'customers') conditions.push(`phone_normalized = @phone${index}`)
-    conditions.push(`${canonicalSql('phone')} = @phone${index}`)
-    conditions.push(`EXISTS (
+    if (table === 'customers') phoneConditions.push(`phone_normalized = @phone${index}`)
+    phoneConditions.push(`${canonicalSql('phone')} = @phone${index}`)
+    phoneConditions.push(`EXISTS (
       SELECT 1
       FROM json_each(CASE WHEN json_valid(address) THEN CASE WHEN json_type(address) = 'array' THEN address ELSE '[]' END ELSE '[]' END) AS option
       WHERE ${canonicalSql("json_extract(option.value, '$.phone')")} = @phone${index}
     )`)
   })
-  if (!conditions.length) return []
-
   const excludeSql = subject.id != null && subject.id !== '' ? 'AND id != @excludeId' : ''
   if (excludeSql) params.excludeId = subject.id
 
-  const rows = await db
-    .prepare(`SELECT ${candidateColumns(table)} FROM ${table} WHERE (${conditions.join(' OR ')}) ${excludeSql} LIMIT 50`)
-    .all<ContactDuplicateCandidateRow>(params)
+  const phoneRows = phoneConditions.length
+    ? await db
+      .prepare(`SELECT ${candidateColumns(table)} FROM ${table} WHERE (${phoneConditions.join(' OR ')}) ${excludeSql}`)
+      .all<ContactDuplicateCandidateRow>(params)
+    : []
+  const nameRows = nameKey
+    ? await db
+      .prepare(`SELECT ${candidateColumns(table)} FROM ${table} WHERE lower(trim(name)) = @nameKey ${excludeSql} ORDER BY id ASC LIMIT 50`)
+      .all<ContactDuplicateCandidateRow>({ ...params, nameKey })
+    : []
+  const rows = [...new Map([...phoneRows, ...nameRows].map((row) => [Number(row.id), row])).values()]
 
   return classifyContactDuplicates({ name: subject.name, phones }, rows, mode)
 }

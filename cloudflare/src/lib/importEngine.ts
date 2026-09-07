@@ -2148,6 +2148,7 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
     const phone = formatPhoneP8(contactState.primary.phone || str(row.phone))
     const address = formatContactOptionPhones(contactState.serialized || str(row.address) || null, contactMode) as string | null
     const phoneKey = canonicalizePhone(phone)
+    const phoneKeys = collectContactPhones({ phone, address }, contactMode)
     if (!name) {
       results.push({ rowNumber: row._rowNumber, action: 'error', identifier: phone || null, existingId: null, message: 'Missing required field: name', changes: {}, data: row })
       continue
@@ -2159,7 +2160,7 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
     const membershipRaw = table === 'customers' ? str(row.membership_number) : ''
     const membershipMatches = table === 'customers' && byMembership && membershipRaw ? byMembership.get(lower(membershipRaw)) || [] : []
     const membershipMatch = membershipMatches.length === 1 ? membershipMatches[0] : null
-    const phoneMatches = phoneKey ? byPhone.get(phoneKey) || [] : []
+    const phoneMatches = [...new Map(phoneKeys.flatMap((key) => byPhone.get(key) || []).map((candidate) => [Number(candidate.id), candidate])).values()]
     const phoneMatch = phoneMatches.find((candidate) => normalizeContactName(candidate.name) === normalizeContactName(name)) || null
     const rawNameMatch = !membershipMatch && !phoneMatch ? byName.get(lower(name)) || null : null
     // A name match is this app's best guess, not a real identifier the way
@@ -2386,7 +2387,7 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
       })
       continue
     }
-    const pendingPhone = phoneKey ? pendingCreateByPhone.get(phoneKey) : null
+    const pendingPhone = phoneKeys.map((key) => pendingCreateByPhone.get(key)).find((candidate) => candidate != null) || null
     if (pendingPhone && normalizeContactName(pendingPhone.name) !== normalizeContactName(name)) {
       const message = `Phone "${phone}" already belongs to a different contact being created earlier in this file (row ${pendingPhone.rowNumber}, "${pendingPhone.name}"). This row was refused.`
       results.push({
