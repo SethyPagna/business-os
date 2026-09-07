@@ -162,17 +162,18 @@ check('the importer can carry the refusal as a per-row warning of its own kind',
   assert.equal(pushes.length, 2, 'and both must actually raise the warning')
 })
 
-check('the merge endpoints report the refusal in the audit entry and the response', () => {
+check('product merge follows the current whole-cluster DISTINCT non-zero mean contract', () => {
   const routeSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'products.ts'), 'utf8')
-  assert.ok(/resolveMergedCostDetail\(\[canonicalBefore \|\| \{\}, dupPricing \|\| \{\}\]\)/.test(routeSrc), 'the fold must use the detail form')
-  assert.ok(/costOutliers: MergedCostOutlier\[\]/.test(routeSrc), 'the fold must return the flag to its callers')
-  assert.ok(/\.\.\.\(costOutliers\.length \? \{ costOutliers \} : \{\}\)/.test(routeSrc), 'the audit entry must record it when it happens')
-  assert.ok(/costOutliers: costOutlierReports/.test(routeSrc), 'the whole-catalog merge response must surface it')
-  // The one-pair review merge spreads the fold's public stats verbatim, so it
-  // carries costOutliers with no extra plumbing -- pin that spread so a future
-  // edit cannot quietly start allow-listing fields and drop it.
-  assert.ok(/const \{ reversal: _reversal[^\n]*\.\.\.publicStats \} = stats/.test(routeSrc))
-  assert.ok(/return c\.json\(\{[\s\S]*?actionHistoryId: undoRecord\.actionHistoryId,[\s\S]*?\.\.\.publicStats,[\s\S]*?\}\)/.test(routeSrc))
+  const productMerge = loadTs('lib/productMerge.ts', {})
+  const economics = productMerge.resolveProductMergeEconomics([
+    { id: 1, cost_price_usd: 2 },
+    { id: 2, cost_price_usd: 200 },
+    { id: 3, cost_price_usd: 200 },
+  ])
+  assert.equal(economics.merged.cost_price_usd, 101, 'merge means distinct valid non-zero source costs across the group')
+  assert.deepEqual(economics.issues, [], 'a wide but valid non-negative cost is data, not a merge refusal')
+  assert.ok(/resolveProductMergeClusterPlanEconomics\(clusterPlan\)/.test(routeSrc), 'bulk merge must resolve the immutable whole-cluster plan')
+  assert.ok(/resolveProductMergeEconomics\(\[canonicalBefore, dupPricing\]\)/.test(routeSrc), 'the reviewed pair route uses the same numeric kernel')
 })
 
 check('the frontend translates the new kind and files it under "needs attention"', () => {
