@@ -23,8 +23,9 @@ type CopyableIdProps = {
   /**
    * Dense variant for a table row rather than a detail panel: the copy button
    * shrinks from 24px to 16px so a ledger row keeps its height. Everything
-   * else -- wrap, select-all, the copied state -- is identical, because those
-   * are the rules, not the sizing.
+   * else -- wrap, select-all, the copied state, and the size of the region
+   * that is actually pressable -- is identical, because those are the rules,
+   * not the sizing.
    */
   compact?: boolean
 }
@@ -101,9 +102,25 @@ export default function CopyableId({
         title={copied ? copiedLabel : copyLabel}
         className={`flex ${compact ? 'h-4 w-4' : 'h-6 w-6'} shrink-0 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-200`}
       >
-        {copied
-          ? <Check className={`${compact ? 'h-3 w-3' : 'h-3.5 w-3.5'} text-emerald-600 dark:text-emerald-400`} />
-          : <Copy className={compact ? 'h-3 w-3' : 'h-3.5 w-3.5'} />}
+        {/*
+          Visual size and TOUCH size are two different rules, and compact only
+          buys the first. The 16px button keeps a dense ledger row at its
+          height on a wide screen -- but the same component renders on the
+          mobile Stock Change card at 375px, where 16px is under every
+          published minimum for a target a finger has to hit (24px in WCAG 2.2
+          AA 2.5.8, 44px in the iOS guidelines). So the icon carries a padding
+          ring cancelled by an equal negative margin: the pressable region --
+          the ring is inside the button, so a press on it is the button's --
+          becomes 12px icon + 2 * 6px = 24px, while the button box, the hover
+          background and every row that contains it stay exactly as they were.
+          Put here rather than at the two ledger call sites so "dense visual,
+          touch-sized target" has ONE implementation for every compact caller.
+        */}
+        <span aria-hidden="true" className={compact ? 'flex -m-1.5 p-1.5' : 'flex'}>
+          {copied
+            ? <Check className={`${compact ? 'h-3 w-3' : 'h-3.5 w-3.5'} text-emerald-600 dark:text-emerald-400`} />
+            : <Copy className={compact ? 'h-3 w-3' : 'h-3.5 w-3.5'} />}
+        </span>
       </button>
       <span aria-live="polite" className="sr-only">{copied ? copiedLabel : ''}</span>
     </div>

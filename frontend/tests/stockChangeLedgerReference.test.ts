@@ -256,6 +256,24 @@ assert.match(
   'copying an id must not also fire the click of the row that contains it',
 )
 assert.match(copyable, /onClick=\{\(event\) => event\.stopPropagation\(\)\}/, 'selecting the id must not open the row either')
+// ...and the compact variant the two ledger rows ask for must still be
+// PRESSABLE. 'compact' shrinks the copy button's visual box to 16px so a dense
+// row keeps its height -- but the mobile card renders that same button at 375px,
+// on a touch surface, where a 16px target is under every published minimum (24px
+// WCAG 2.2 AA, 44px Apple). The fix belongs here rather than at the two call
+// sites, so "dense visual, touch-sized target" is one rule with one
+// implementation: the icon carries a negative-margin padding ring that grows the
+// pressable region to 24px WITHOUT growing the button's box or the row's height.
+assert.match(
+  copyable,
+  /compact \?[^:]*(?:-inset|-m-1)/,
+  'the compact copy button is a 16px touch target: its hit area must be expanded past its visual box',
+)
+assert.match(
+  copyable,
+  /\$\{compact \? 'h-4 w-4' : 'h-6 w-6'\}/,
+  'the expander must not inflate the compact button itself -- the dense row keeps its 16px visual box',
+)
 // The receipt must not go back through a clipping wrapper on either surface.
 assert.ok(
   !/<TruncatedText text=\{referenceText\(row\)\}/.test(sc),
