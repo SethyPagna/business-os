@@ -478,6 +478,9 @@ export async function applyUnifiedStockSale(db: D1Compat, input: UnifiedStockSal
   // reject a missing id, and run the same branchCanSell-backed guard as POS
   // before constructing any write statement. An already-applied replay has
   // returned above, so this only gates a new generated sale.
+  // sql-bound-params: bounded by construction — input.lines is capped by
+  // MAX_SALE_LINES (8), so this branch lookup can never approach D1's 100
+  // parameter ceiling.
   const branchIds = [...new Set(lines.map((line) => line.branchId))]
   const branchParams = Object.fromEntries(branchIds.map((branchId, index) => [`branchId${index}`, branchId]))
   const branchRows = await db.prepare(`
