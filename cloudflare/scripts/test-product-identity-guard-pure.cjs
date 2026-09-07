@@ -249,6 +249,124 @@ const editLookupAt = source.indexOf('findSameProductIdentityProducts(c.env, next
 assert.match(source.slice(editGuardAt, editLookupAt), /if \(changesIdentity\) \{/,
   'edit: the lookup runs ONLY when the edit moves the row onto a different identity')
 assert.match(source, /return pickSameIdentityRows\(rows, barcode\)/, 'the guard compares through the shared fold, not a local one')
+
+// ---- 2b. A GROUP rename carries the SIBLINGS onto the new name too -------
+// The guard above judges ONE row: the one being PUT. A group rename does not
+// move one row -- it carries every sibling in the name group to the
+// destination name (applyRenameCarry). So the fourth door: rename group "Foo"
+// (A barcode 1, B barcode 2) onto the name of group "Bar" (C barcode 2). A's
+// own next identity is "Bar" + 1, which collides with nothing, so the
+// single-row guard says yes -- and the rename then lands B on top of C,
+// minting exactly the twin this whole lane exists to prevent, with nobody
+// ever asked. The siblings must be judged at the DESTINATION name.
+sqlite.prepare(`INSERT INTO products (id, name, barcode, cost_price_usd, cost_price_khr, is_active) VALUES
+  (20, 'Foo', '1', 1, 0, 1),
+  (21, 'Foo', '2', 1, 0, 1),
+  (22, 'Bar', '2', 1, 0, 1)`).run()
+// name_key is written by migration 0010's triggers, which is what the route's
+// group SELECT reads; assert it landed rather than assuming it.
+assert.equal(sqlite.prepare('SELECT name_key FROM products WHERE id = 20').get().name_key, 'foo',
+  'the fixture relies on the shipped name_key trigger, so it must actually have fired')
+
+// The route, reproduced: judge this row, then -- only for a group rename --
+// judge every sibling the rename carries. `walkSiblings: false` is the
+// behaviour at 6e3abfea and at the head before this fix.
+const putRename = (currentId, body, { walkSiblings }) => {
+  const current = sqlite.prepare('SELECT id, name, barcode FROM products WHERE id = ?').get(currentId)
+  const resolved = resolveProductIdentityEdit(current, body)
+  if (resolved.changesIdentity) {
+    const own = run(resolved.nextName, resolved.nextBarcode, currentId)
+    if (own) return { refused: true, via: 'self', candidateIds: [own.id] }
+  }
+  const isNameChange = body.name !== undefined && Boolean(current?.name)
+    && String(current?.name || '') !== resolved.nextName
+  if (!walkSiblings || body.__rename_scope !== 'group' || !isNameChange) {
+    return { refused: false, via: null, candidateIds: [] }
+  }
+  const siblings = sqlite
+    .prepare('SELECT id, barcode FROM products WHERE name_key = ? AND is_active = 1')
+    .all(String(current?.name || '').trim().toLowerCase())
+  const matches = []
+  for (const sibling of siblings) {
+    if (Number(sibling.id) === Number(currentId)) continue
+    for (const match of matchesFor(resolved.nextName, sibling.barcode, Number(sibling.id))) {
+      if (!matches.some((seen) => seen.id === match.id)) matches.push(match)
+    }
+  }
+  return matches.length
+    ? { refused: true, via: 'sibling', candidateIds: matches.map((row) => row.id) }
+    : { refused: false, via: null, candidateIds: [] }
+}
+
+const groupRename = putRename(20, { name: 'Bar', __rename_scope: 'group' }, { walkSiblings: true })
+assert.equal(groupRename.refused, true, 'a group rename onto another group must be refused, not applied silently')
+assert.equal(groupRename.via, 'sibling', 'the collision is on the SIBLING, which is why the single-row guard missed it')
+assert.deepEqual(groupRename.candidateIds, [22], 'and the refusal names the row it would collide with (#22 "Bar" barcode 2)')
+// The negative control that makes the case mean something: the SAME edit
+// without the group flag moves only this row, and "Bar" + barcode 1 is a
+// legitimate new child of the Bar group.
+assert.equal(putRename(20, { name: 'Bar' }, { walkSiblings: true }).refused, false,
+  'only-this-row rename must still pass -- barcode 1 collides with nothing in Bar')
+// ...and a group rename whose siblings collide with nothing is untouched.
+assert.equal(putRename(21, { name: 'Baz', __rename_scope: 'group' }, { walkSiblings: true }).refused, false,
+  'a group rename onto a free name must not be refused')
+// POSITIVE CONTROL: the decision as it stood before this fix. It must ANSWER
+// DIFFERENTLY on the very case above, or the assertion proves nothing.
+assert.equal(putRename(20, { name: 'Bar', __rename_scope: 'group' }, { walkSiblings: false }).refused, false,
+  'control: without the sibling walk the group rename was applied silently, minting the B/C twin')
+
+// The wiring, probed as a function over two inputs. The guard has to sit
+// between the group SELECT and applyRenameCarry -- after it, the twin already
+// exists and a 409 would be a lie about a write that happened.
+const guardsGroupRenameSiblings = (text) => {
+  const at = text.indexOf('renamedProductIds = groupRows.map')
+  if (at < 0) return false
+  const carryAt = text.indexOf('applyRenameCarry(', at)
+  if (carryAt < 0) return false
+  const between = text.slice(at, carryAt)
+  return /findSameProductIdentityProducts\(c\.env, nextName, sibling\.barcode, Number\(sibling\.id\)\)/.test(between)
+    && /identityMatchRefusal\(siblingMatches, 'edit'\)/.test(between)
+    && /readIdentityDecision\(body\)/.test(between)
+}
+assert.equal(guardsGroupRenameSiblings(source), true,
+  'group rename: every sibling the rename carries is judged BEFORE applyRenameCarry writes it')
+// The handler as it stood before this fix, quoted verbatim.
+const PRE_FIX_GROUP_RENAME = [
+    "    const isNameChange = body.name !== undefined",
+    "      && Boolean(current?.name)",
+    "      && String(current?.name || '') !== nextName",
+    '    if (isNameChange) {',
+    '      renamedProductName = nextName',
+    "      if (body.__rename_scope === 'group') {",
+    '        const groupRows = await getDb(c.env)',
+    "          .prepare('SELECT id FROM products WHERE name_key = @nameKey AND is_active = 1')",
+    "          .all<{ id: number }>({ nameKey: String(current?.name || '').trim().toLowerCase() })",
+    '        renamedProductIds = groupRows.map((row) => Number(row.id)).filter(Number.isFinite)',
+    '      } else {',
+    '        renamedProductIds = [Number(id)].filter(Number.isFinite)',
+    '      }',
+    '    }',
+    "    if (body.__rename_scope === 'group' && body.name !== undefined && current?.name) {",
+    "      const fromName = String(current.name || '').trim()",
+    '      if (fromName && fromName.toLowerCase() !== nextName.toLowerCase()) {',
+    "        const carried = await applyRenameCarry(getDb(c.env), 'product_name', fromName, nextName, new Date().toISOString())",
+].join('\n')
+assert.equal(guardsGroupRenameSiblings(PRE_FIX_GROUP_RENAME), false,
+  'control: the pre-fix path went straight from the group SELECT to applyRenameCarry with no identity question')
+// The group SELECT has to carry the barcode, or the sibling lookup has nothing
+// to fold: it is the one column the judgement is made on.
+assert.match(source, /SELECT id, barcode FROM products WHERE name_key = @nameKey AND is_active = 1/,
+  'group rename: the sibling rows are loaded with the barcode the guard folds')
+// And a kept-separate group rename must extend the bookkeeping to the
+// siblings, or the pairs it deliberately created stay hidden in Conflicts.
+const groupGuardAt = source.indexOf('renamedProductIds = groupRows.map')
+const groupGuardBody = source.slice(groupGuardAt, source.indexOf('applyRenameCarry(', groupGuardAt))
+assert.match(groupGuardBody, /keptSeparateFrom = \[\.\.\.new Set\(\[\.\.\.keptSeparateFrom/,
+  'group rename: keep-separate extends the audit set rather than replacing this row\'s')
+assert.match(groupGuardBody, /keptSeparateBarcodes = \[\.\.\.keptSeparateBarcodes, \.\.\.siblingBarcodes/,
+  'group rename: the siblings\' barcodes join the dismissal-retirement keys')
+assert.match(groupGuardBody, /collidingSiblingIds/,
+  'group rename: the refusal says WHICH sibling collides, not just which row it collides with')
 assert.match(source, /code: 'duplicate_product'/, 'refusal carries a machine-readable code')
 // ---- 3. The two answers (N34), and the one that is NOT a default ----
 // This assertion used to read "no override flag: the identity rule is absolute

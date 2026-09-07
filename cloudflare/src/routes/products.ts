@@ -1920,15 +1920,61 @@ app.put('/:id', async (c) => {
     const isNameChange = body.name !== undefined
       && Boolean(current?.name)
       && String(current?.name || '') !== nextName
+    let groupSiblingRows: { id: number; barcode: string | null }[] = []
     if (isNameChange) {
       renamedProductName = nextName
       if (body.__rename_scope === 'group') {
         const groupRows = await getDb(c.env)
-          .prepare('SELECT id FROM products WHERE name_key = @nameKey AND is_active = 1')
-          .all<{ id: number }>({ nameKey: String(current?.name || '').trim().toLowerCase() })
+          .prepare('SELECT id, barcode FROM products WHERE name_key = @nameKey AND is_active = 1')
+          .all<{ id: number; barcode: string | null }>({ nameKey: String(current?.name || '').trim().toLowerCase() })
+        groupSiblingRows = groupRows
         renamedProductIds = groupRows.map((row) => Number(row.id)).filter(Number.isFinite)
       } else {
         renamedProductIds = [Number(id)].filter(Number.isFinite)
+      }
+    }
+    // N34 round 3. The guard above judges the identity of THIS row, and that
+    // is not what a GROUP rename does: it carries every sibling in the name
+    // group to the destination name as well. So renaming group "Foo"
+    // (A barcode 1, B barcode 2) onto the name of group "Bar" (C barcode 2)
+    // walked straight past it -- A's own next identity, "Bar" + 1, collides
+    // with nothing -- and applyRenameCarry below then landed B on top of C,
+    // minting exactly the twin this rule exists to prevent, at the one door
+    // whose entire purpose is moving a whole group, with nobody ever asked.
+    //
+    // Every sibling the rename carries is therefore judged at the DESTINATION
+    // name through the same lookup and the same structured refusal as the
+    // single-row door, BEFORE applyRenameCarry writes anything -- a 409 after
+    // the write would be a lie about a twin that already exists. A
+    // kept-separate answer extends the audit and the dismissal retirement to
+    // cover the siblings, or the pairs this save deliberately created stay
+    // hidden on the one surface where the operator was promised he could
+    // change his mind.
+    if (body.__rename_scope === 'group' && isNameChange && groupSiblingRows.length) {
+      const siblingMatches: IdentityMatchRow[] = []
+      const collidingSiblingIds: number[] = []
+      const siblingBarcodes: unknown[] = []
+      for (const sibling of groupSiblingRows) {
+        if (Number(sibling.id) === Number(id)) continue
+        const rows = await findSameProductIdentityProducts(c.env, nextName, sibling.barcode, Number(sibling.id))
+        if (!rows.length) continue
+        collidingSiblingIds.push(Number(sibling.id))
+        siblingBarcodes.push(sibling.barcode)
+        for (const row of rows) {
+          if (!siblingMatches.some((seen) => seen.id === row.id)) siblingMatches.push(row)
+        }
+      }
+      if (siblingMatches.length) {
+        if (!readIdentityDecision(body)) {
+          return c.json({
+            ...identityMatchRefusal(siblingMatches, 'edit'),
+            collidingSiblingIds,
+            renameScope: 'group',
+          }, 409)
+        }
+        keptSeparateFrom = [...new Set([...keptSeparateFrom, ...siblingMatches.map((row) => row.id)])]
+        keptSeparateBarcodes = [...keptSeparateBarcodes, ...siblingBarcodes, ...siblingMatches.map((row) => row.barcode)]
+        keptSeparateName = nextName
       }
     }
     if (body.__rename_scope === 'group' && body.name !== undefined && current?.name) {
