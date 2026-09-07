@@ -239,9 +239,20 @@ export function resumeWS(): void {
 
 function scheduleReconnect(): void {
   clearReconnectTimer()
-  if (Date.now() < wsSuppressReconnectUntil) return
   if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return
+  const suppressedForMs = wsSuppressReconnectUntil - Date.now()
+  if (suppressedForMs > 0) {
+    // A burst of failed upgrades pauses reconnects so an outage cannot create
+    // a client-side reconnect storm. Keep one wake-up for the end of that
+    // pause; otherwise an already-online foreground tab never reconnects
+    // until a separate focus/visibility/login lifecycle event occurs.
+    wsReconnectTimer = setTimeout(() => {
+      wsReconnectTimer = null
+      connectWS()
+    }, suppressedForMs)
+    return
+  }
   // Exponential backoff with jitter to avoid thundering herds and rapid loops
   reconnectAttempts = Math.min(10, reconnectAttempts + 1)
   const base = SYNC.WS_RECONNECT_DELAY_MS || 2000
@@ -251,7 +262,10 @@ function scheduleReconnect(): void {
   const jitter = Math.floor(delay * (Math.random() * 0.4 - 0.2))
   const finalDelay = Math.max(1000, Math.floor(delay + jitter))
   logWs('debug', 'scheduling reconnect in', finalDelay, 'ms (attempt', reconnectAttempts, ')')
-  wsReconnectTimer = setTimeout(connectWS, finalDelay)
+  wsReconnectTimer = setTimeout(() => {
+    wsReconnectTimer = null
+    connectWS()
+  }, finalDelay)
 }
 
 /** Returns true if the WS is currently OPEN — used by AppContext to initialise
