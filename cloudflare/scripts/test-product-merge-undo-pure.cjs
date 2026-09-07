@@ -63,7 +63,14 @@ function loadUndoAppliers(d1) {
         },
       }
     },
-    batch: (stmts) => d1.batch(stmts),
+    batch: (stmts) => {
+      const readOnly = stmts.every((stmt) => /^\s*(?:SELECT|WITH|PRAGMA)\b/i.test(stmt.sql))
+      if (!readOnly) return d1.batch(stmts)
+      return Promise.resolve(stmts.map((stmt) => ({
+        success: true,
+        results: d1.prepare(stmt.sql).all(stmt.params == null ? {} : stmt.params),
+      })))
+    },
   }
   const stubs = {
     './actorSnapshot': loadRealActorSnapshot(),
@@ -131,6 +138,7 @@ function loadUndoAppliers(d1) {
   } finally {
     Module._load = original
   }
+  mod.exports.__testDbAdapter = dbAdapter
   return mod.exports
 }
 
@@ -270,6 +278,105 @@ function fingerprintMany(d1, productIds, batchIds) {
   }
 }
 
+// Reference implementation of the pre-batching merge fingerprint. Keeping
+// this serial in the test proves that fewer adapter calls do not change the
+// optimistic-CAS bytes, row ordering, or the set of protected rows.
+async function serialMergeStateFingerprint(d1, reversals, reparentTables) {
+  const chunks = (values, size = 80) => {
+    const out = []
+    for (let i = 0; i < values.length; i += size) out.push(values.slice(i, i + size))
+    return out
+  }
+  const intIds = (values) => (Array.isArray(values) ? values : [])
+    .map(Number).filter((value) => Number.isInteger(value) && value > 0)
+  const all = (sql, params = []) => d1.prepare(sql).all(params)
+  const productIds = [...new Set(reversals.flatMap((row) => [Number(row.keeperId), Number(row.dupId)])
+    .filter((id) => Number.isInteger(id) && id > 0))].sort((a, b) => a - b)
+  if (!productIds.length) return ''
+
+  const products = [], branchStock = [], batches = [], movementHeads = []
+  for (const ids of chunks(productIds)) {
+    const placeholders = ids.map(() => '?').join(',')
+    products.push(...all(`SELECT * FROM products WHERE id IN (${placeholders})`, ids))
+    branchStock.push(...all(`SELECT product_id, branch_id, quantity, rfid_confirmed_qty FROM branch_stock WHERE product_id IN (${placeholders})`, ids))
+    batches.push(...all(`SELECT id, variant_product_id, batch_key, batch_number, is_active FROM product_batches WHERE variant_product_id IN (${placeholders})`, ids))
+    movementHeads.push(...all(`SELECT product_id, MAX(id) AS max_id, COUNT(*) AS row_count FROM inventory_movements WHERE product_id IN (${placeholders}) GROUP BY product_id`, ids))
+  }
+  const savedBatchIds = reversals.flatMap((row) => [
+    ...(row.repointedBatches || []).map((batch) => Number(batch.id)),
+    ...(row.foldedBatches || []).flatMap((batch) => [Number(batch.dupBatchId), Number(batch.keeperBatchId)]),
+    ...(row.writtenOffBatches || []).map((batch) => Number(batch.batchId)),
+  ])
+  const batchIds = [...new Set([...batches.map((batch) => Number(batch.id)), ...savedBatchIds]
+    .filter((id) => Number.isInteger(id) && id > 0))].sort((a, b) => a - b)
+  const batchStock = []
+  for (const ids of chunks(batchIds)) {
+    batchStock.push(...all(`SELECT batch_id, branch_id, quantity FROM branch_batch_stock WHERE batch_id IN (${ids.map(() => '?').join(',')})`, ids))
+  }
+  const productImages = [], stockSessions = []
+  for (const ids of chunks(productIds)) {
+    const placeholders = ids.map(() => '?').join(',')
+    productImages.push(...all(`SELECT * FROM product_images WHERE product_id IN (${placeholders})`, ids))
+    stockSessions.push(...all(`SELECT * FROM stock_session_members WHERE product_id IN (${placeholders})`, ids))
+  }
+  const adjustmentRows = []
+  for (const reversal of reversals) {
+    if (reversal.adjustmentMovementMarker) {
+      adjustmentRows.push(...all('SELECT * FROM inventory_movements WHERE product_id=? AND reason LIKE ?', [reversal.keeperId, `%${reversal.adjustmentMovementMarker}%`]))
+    } else {
+      for (const ids of chunks(intIds(reversal.adjustmentMovementIds))) {
+        adjustmentRows.push(...all(`SELECT * FROM inventory_movements WHERE id IN (${ids.map(() => '?').join(',')})`, ids))
+      }
+    }
+  }
+  const linkedRows = {}
+  for (const entry of reparentTables) {
+    const ids = [...new Set(reversals.flatMap((row) => (row.reparentedByTable || [])
+      .filter((saved) => saved.table === entry.table && saved.column === entry.column)
+      .flatMap((saved) => intIds(saved.ids))))]
+    if (!ids.length) continue
+    const rows = []
+    for (const group of chunks(ids)) rows.push(...all(`SELECT * FROM ${entry.table} WHERE id IN (${group.map(() => '?').join(',')})`, group))
+    linkedRows[`${entry.table}.${entry.column}`] = rows
+  }
+  const promotionIds = [...new Set(reversals.flatMap((row) => (row.promotionRulesBefore || []).map((item) => Number(item.id)))
+    .filter((id) => Number.isInteger(id) && id > 0))]
+  const promotionRules = []
+  for (const ids of chunks(promotionIds)) promotionRules.push(...all(`SELECT * FROM promotion_rules WHERE id IN (${ids.map(() => '?').join(',')})`, ids))
+  const childIds = [...new Set(reversals.flatMap((row) => intIds(row.reparentedChildProductIds)))]
+  const childProducts = []
+  for (const ids of chunks(childIds)) childProducts.push(...all(`SELECT id,parent_id,updated_at FROM products WHERE id IN (${ids.map(() => '?').join(',')})`, ids))
+  const allocationIds = {
+    sale: [...new Set(reversals.flatMap((row) => (row.foldedBatches || []).flatMap((batch) => intIds(batch.saleAllocationIds))))],
+    returns: [...new Set(reversals.flatMap((row) => (row.foldedBatches || []).flatMap((batch) => intIds(batch.returnAllocationIds))))],
+  }
+  const saleAllocations = [], returnAllocations = []
+  for (const ids of chunks(allocationIds.sale)) saleAllocations.push(...all(`SELECT * FROM sale_item_batch_allocations WHERE id IN (${ids.map(() => '?').join(',')})`, ids))
+  for (const ids of chunks(allocationIds.returns)) returnAllocations.push(...all(`SELECT * FROM return_item_batch_allocations WHERE id IN (${ids.map(() => '?').join(',')})`, ids))
+
+  const byNumbers = (keys) => (left, right) => {
+    for (const key of keys) {
+      const difference = Number(left[key]) - Number(right[key])
+      if (difference) return difference
+    }
+    return 0
+  }
+  products.sort(byNumbers(['id']))
+  branchStock.sort(byNumbers(['product_id', 'branch_id']))
+  batches.sort(byNumbers(['id']))
+  batchStock.sort(byNumbers(['batch_id', 'branch_id']))
+  movementHeads.sort(byNumbers(['product_id']))
+  adjustmentRows.sort(byNumbers(['id']))
+  productImages.sort(byNumbers(['id']))
+  stockSessions.sort((a, b) => String(a.operation_id).localeCompare(String(b.operation_id)) || Number(a.product_id) - Number(b.product_id))
+  promotionRules.sort(byNumbers(['id']))
+  childProducts.sort(byNumbers(['id']))
+  saleAllocations.sort(byNumbers(['id']))
+  returnAllocations.sort(byNumbers(['id']))
+  for (const rows of Object.values(linkedRows)) rows.sort(byNumbers(['id']))
+  return JSON.stringify({ products, branchStock, batches, batchStock, movementHeads, adjustmentRows, productImages, stockSessions, linkedRows, promotionRules, childProducts, saleAllocations, returnAllocations })
+}
+
 let passed = 0
 async function check(name, fn) { await fn(); passed += 1; console.log(`  ✓ ${name}`) }
 
@@ -321,6 +428,12 @@ async function run() {
   })
 
   const F1 = fingerprint(d1, KEEPER, DUP, BATCH_IDS)
+
+  await check('batched merge fingerprint is byte-equivalent to the serial CAS fingerprint', async () => {
+    const serial = await serialMergeStateFingerprint(d1, [reversal], undo.MERGE_REPARENT_TABLES)
+    const batched = await undo.mergeStateFingerprint(undo.__testDbAdapter, [reversal])
+    assert.equal(batched, serial)
+  })
 
   await check('recordMergeUndoSnapshot stores the snapshot + a small action_history row (real code, 0097 table)', async () => {
     const rec = await undo.recordMergeUndoSnapshot({}, { id: 42, name: 'Merger' }, reversal)

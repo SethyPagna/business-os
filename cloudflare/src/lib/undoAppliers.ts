@@ -362,6 +362,19 @@ function chunk<T>(arr: T[], size: number): T[][] {
 const intIds = (arr: unknown): number[] =>
   (Array.isArray(arr) ? arr : []).map(Number).filter((n) => Number.isInteger(n) && n > 0)
 
+async function runMergeFingerprintReadBatch(
+  db: ReturnType<typeof getDb>,
+  reads: ReadonlyArray<{ key: string; sql: string; params?: unknown[] }>,
+): Promise<Map<string, Array<Record<string, unknown>>>> {
+  if (!reads.length) return new Map()
+  const results = await db.batch(reads.map(({ sql, params }) => ({ sql, params })))
+  if (results.length !== reads.length) throw new Error('Merge fingerprint read batch returned an incomplete result set.')
+  return new Map(reads.map((read, index) => [
+    read.key,
+    Array.isArray(results[index]?.results) ? results[index].results as Array<Record<string, unknown>> : [],
+  ]))
+}
+
 export async function mergeStateFingerprint(db: ReturnType<typeof getDb>, reversals: MergeReversal[]): Promise<string> {
   const productIds = [...new Set(reversals.flatMap((r) => [Number(r.keeperId), Number(r.dupId)]).filter((id) => Number.isInteger(id) && id > 0))].sort((a, b) => a - b)
   if (!productIds.length) return ''
@@ -369,66 +382,103 @@ export async function mergeStateFingerprint(db: ReturnType<typeof getDb>, revers
   const branchStock: Array<Record<string, unknown>> = []
   const batches: Array<Record<string, unknown>> = []
   const movementHeads: Array<Record<string, unknown>> = []
-  for (const ids of chunk(productIds, 80)) {
+  const productImages: Array<Record<string, unknown>> = []
+  const stockSessions: Array<Record<string, unknown>> = []
+  const adjustmentRows: Array<Record<string, unknown>> = []
+  const linkedRows: Record<string, Array<Record<string, unknown>>> = {}
+  const promotionRules: Array<Record<string, unknown>> = []
+  const childProducts: Array<Record<string, unknown>> = []
+  const saleAllocations: Array<Record<string, unknown>> = []
+  const returnAllocations: Array<Record<string, unknown>> = []
+  const reads: Array<{ key: string; sql: string; params?: unknown[] }> = []
+  const productChunks = chunk(productIds, 80)
+  for (const [index, ids] of productChunks.entries()) {
     const placeholders = ids.map(() => '?').join(',')
-    products.push(...await db.prepare(`SELECT * FROM products WHERE id IN (${placeholders})`).all<Record<string, unknown>>(ids))
-    branchStock.push(...await db.prepare(`SELECT product_id, branch_id, quantity, rfid_confirmed_qty FROM branch_stock WHERE product_id IN (${placeholders})`).all<Record<string, unknown>>(ids))
-    batches.push(...await db.prepare(`SELECT id, variant_product_id, batch_key, batch_number, is_active FROM product_batches WHERE variant_product_id IN (${placeholders})`).all<Record<string, unknown>>(ids))
-    movementHeads.push(...await db.prepare(`SELECT product_id, MAX(id) AS max_id, COUNT(*) AS row_count FROM inventory_movements WHERE product_id IN (${placeholders}) GROUP BY product_id`).all<Record<string, unknown>>(ids))
+    reads.push(
+      { key: `products:${index}`, sql: `SELECT * FROM products WHERE id IN (${placeholders})`, params: ids },
+      { key: `branchStock:${index}`, sql: `SELECT product_id, branch_id, quantity, rfid_confirmed_qty FROM branch_stock WHERE product_id IN (${placeholders})`, params: ids },
+      { key: `batches:${index}`, sql: `SELECT id, variant_product_id, batch_key, batch_number, is_active FROM product_batches WHERE variant_product_id IN (${placeholders})`, params: ids },
+      { key: `movementHeads:${index}`, sql: `SELECT product_id, MAX(id) AS max_id, COUNT(*) AS row_count FROM inventory_movements WHERE product_id IN (${placeholders}) GROUP BY product_id`, params: ids },
+      { key: `productImages:${index}`, sql: `SELECT * FROM product_images WHERE product_id IN (${placeholders})`, params: ids },
+      { key: `stockSessions:${index}`, sql: `SELECT * FROM stock_session_members WHERE product_id IN (${placeholders})`, params: ids },
+      {
+        key: `batchStockByProduct:${index}`,
+        sql: `SELECT bbs.batch_id, bbs.branch_id, bbs.quantity
+              FROM branch_batch_stock bbs
+              JOIN product_batches pb ON pb.id=bbs.batch_id
+              WHERE pb.variant_product_id IN (${placeholders})`,
+        params: ids,
+      },
+    )
   }
   const savedBatchIds = reversals.flatMap((r) => [
     ...(r.repointedBatches || []).map((b) => Number(b.id)),
     ...(r.foldedBatches || []).flatMap((b) => [Number(b.dupBatchId), Number(b.keeperBatchId)]),
     ...(r.writtenOffBatches || []).map((b) => Number(b.batchId)),
   ])
-  const batchIds = [...new Set([...batches.map((b) => Number(b.id)), ...savedBatchIds].filter((id) => Number.isInteger(id) && id > 0))].sort((a, b) => a - b)
-  const batchStock: Array<Record<string, unknown>> = []
-  for (const ids of chunk(batchIds, 80)) {
-    batchStock.push(...await db.prepare(`SELECT batch_id, branch_id, quantity FROM branch_batch_stock WHERE batch_id IN (${ids.map(() => '?').join(',')})`).all<Record<string, unknown>>(ids))
+  const uniqueSavedBatchIds = [...new Set(savedBatchIds.filter((id) => Number.isInteger(id) && id > 0))]
+  for (const [index, ids] of chunk(uniqueSavedBatchIds, 80).entries()) {
+    reads.push({ key: `batchStockBySaved:${index}`, sql: `SELECT batch_id, branch_id, quantity FROM branch_batch_stock WHERE batch_id IN (${ids.map(() => '?').join(',')})`, params: ids })
   }
-  const productImages: Array<Record<string, unknown>> = []
-  const stockSessions: Array<Record<string, unknown>> = []
-  for (const ids of chunk(productIds, 80)) {
-    const placeholders = ids.map(() => '?').join(',')
-    productImages.push(...await db.prepare(`SELECT * FROM product_images WHERE product_id IN (${placeholders})`).all<Record<string, unknown>>(ids))
-    stockSessions.push(...await db.prepare(`SELECT * FROM stock_session_members WHERE product_id IN (${placeholders})`).all<Record<string, unknown>>(ids))
-  }
-  const adjustmentRows: Array<Record<string, unknown>> = []
-  for (const reversal of reversals) {
+  for (const [reversalIndex, reversal] of reversals.entries()) {
     if (reversal.adjustmentMovementMarker) {
-      adjustmentRows.push(...await db.prepare(`SELECT * FROM inventory_movements WHERE product_id=? AND reason LIKE ?`)
-        .all<Record<string, unknown>>([reversal.keeperId, `%${reversal.adjustmentMovementMarker}%`]))
+      reads.push({
+        key: `adjustments:${reversalIndex}:marker`,
+        sql: 'SELECT * FROM inventory_movements WHERE product_id=? AND reason LIKE ?',
+        params: [reversal.keeperId, `%${reversal.adjustmentMovementMarker}%`],
+      })
     } else {
-      for (const ids of chunk(intIds(reversal.adjustmentMovementIds), 80)) {
-        adjustmentRows.push(...await db.prepare(`SELECT * FROM inventory_movements WHERE id IN (${ids.map(() => '?').join(',')})`)
-          .all<Record<string, unknown>>(ids))
+      for (const [index, ids] of chunk(intIds(reversal.adjustmentMovementIds), 80).entries()) {
+        reads.push({ key: `adjustments:${reversalIndex}:${index}`, sql: `SELECT * FROM inventory_movements WHERE id IN (${ids.map(() => '?').join(',')})`, params: ids })
       }
     }
   }
-  const linkedRows: Record<string, Array<Record<string, unknown>>> = {}
-  for (const entry of MERGE_REPARENT_TABLES) {
+  for (const [tableIndex, entry] of MERGE_REPARENT_TABLES.entries()) {
     const ids = [...new Set(reversals.flatMap((r) => (r.reparentedByTable || [])
       .filter((saved) => saved.table === entry.table && saved.column === entry.column)
       .flatMap((saved) => intIds(saved.ids))))]
     if (!ids.length) continue
-    const rows: Array<Record<string, unknown>> = []
-    for (const group of chunk(ids, 80)) rows.push(...await db.prepare(`SELECT * FROM ${entry.table} WHERE id IN (${group.map(() => '?').join(',')})`).all<Record<string, unknown>>(group))
-    linkedRows[`${entry.table}.${entry.column}`] = rows
+    linkedRows[`${entry.table}.${entry.column}`] = []
+    for (const [index, group] of chunk(ids, 80).entries()) {
+      reads.push({ key: `linked:${tableIndex}:${index}`, sql: `SELECT * FROM ${entry.table} WHERE id IN (${group.map(() => '?').join(',')})`, params: group })
+    }
   }
   const promotionIds = [...new Set(reversals.flatMap((r) => (r.promotionRulesBefore || []).map((row) => Number(row.id))).filter((id) => Number.isInteger(id) && id > 0))]
-  const promotionRules: Array<Record<string, unknown>> = []
-  for (const ids of chunk(promotionIds, 80)) promotionRules.push(...await db.prepare(`SELECT * FROM promotion_rules WHERE id IN (${ids.map(() => '?').join(',')})`).all<Record<string, unknown>>(ids))
+  for (const [index, ids] of chunk(promotionIds, 80).entries()) reads.push({ key: `promotionRules:${index}`, sql: `SELECT * FROM promotion_rules WHERE id IN (${ids.map(() => '?').join(',')})`, params: ids })
   const childIds = [...new Set(reversals.flatMap((r) => intIds(r.reparentedChildProductIds)))]
-  const childProducts: Array<Record<string, unknown>> = []
-  for (const ids of chunk(childIds, 80)) childProducts.push(...await db.prepare(`SELECT id,parent_id,updated_at FROM products WHERE id IN (${ids.map(() => '?').join(',')})`).all<Record<string, unknown>>(ids))
+  for (const [index, ids] of chunk(childIds, 80).entries()) reads.push({ key: `childProducts:${index}`, sql: `SELECT id,parent_id,updated_at FROM products WHERE id IN (${ids.map(() => '?').join(',')})`, params: ids })
   const allocationIds = {
     sale: [...new Set(reversals.flatMap((r) => (r.foldedBatches || []).flatMap((b) => intIds(b.saleAllocationIds))))],
     returns: [...new Set(reversals.flatMap((r) => (r.foldedBatches || []).flatMap((b) => intIds(b.returnAllocationIds))))],
   }
-  const saleAllocations: Array<Record<string, unknown>> = []
-  const returnAllocations: Array<Record<string, unknown>> = []
-  for (const ids of chunk(allocationIds.sale, 80)) saleAllocations.push(...await db.prepare(`SELECT * FROM sale_item_batch_allocations WHERE id IN (${ids.map(() => '?').join(',')})`).all<Record<string, unknown>>(ids))
-  for (const ids of chunk(allocationIds.returns, 80)) returnAllocations.push(...await db.prepare(`SELECT * FROM return_item_batch_allocations WHERE id IN (${ids.map(() => '?').join(',')})`).all<Record<string, unknown>>(ids))
+  for (const [index, ids] of chunk(allocationIds.sale, 80).entries()) reads.push({ key: `saleAllocations:${index}`, sql: `SELECT * FROM sale_item_batch_allocations WHERE id IN (${ids.map(() => '?').join(',')})`, params: ids })
+  for (const [index, ids] of chunk(allocationIds.returns, 80).entries()) reads.push({ key: `returnAllocations:${index}`, sql: `SELECT * FROM return_item_batch_allocations WHERE id IN (${ids.map(() => '?').join(',')})`, params: ids })
+
+  const resultSets = await runMergeFingerprintReadBatch(db, reads)
+  for (const [key, rows] of resultSets) {
+    if (key.startsWith('products:')) products.push(...rows)
+    else if (key.startsWith('branchStock:')) branchStock.push(...rows)
+    else if (key.startsWith('batches:')) batches.push(...rows)
+    else if (key.startsWith('movementHeads:')) movementHeads.push(...rows)
+    else if (key.startsWith('productImages:')) productImages.push(...rows)
+    else if (key.startsWith('stockSessions:')) stockSessions.push(...rows)
+    else if (key.startsWith('adjustments:')) adjustmentRows.push(...rows)
+    else if (key.startsWith('promotionRules:')) promotionRules.push(...rows)
+    else if (key.startsWith('childProducts:')) childProducts.push(...rows)
+    else if (key.startsWith('saleAllocations:')) saleAllocations.push(...rows)
+    else if (key.startsWith('returnAllocations:')) returnAllocations.push(...rows)
+    else if (key.startsWith('linked:')) {
+      const [, tableIndexText] = key.split(':')
+      const entry = MERGE_REPARENT_TABLES[Number(tableIndexText)]
+      if (entry) linkedRows[`${entry.table}.${entry.column}`]?.push(...rows)
+    }
+  }
+  const batchStockByKey = new Map<string, Record<string, unknown>>()
+  for (const [key, rows] of resultSets) {
+    if (!key.startsWith('batchStockBy')) continue
+    for (const row of rows) batchStockByKey.set(`${Number(row.batch_id)}:${Number(row.branch_id)}`, row)
+  }
+  const batchStock = [...batchStockByKey.values()]
   const byNumbers = (keys: string[]) => (a: Record<string, unknown>, b: Record<string, unknown>) => {
     for (const key of keys) {
       const difference = Number(a[key]) - Number(b[key])
