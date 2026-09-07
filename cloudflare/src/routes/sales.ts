@@ -32,7 +32,7 @@ import {
   saleSettlementStateStatements,
   type SaleSettlementSnapshot,
 } from '../lib/saleSettlementAction'
-import { CUSTOMER_REFUND_JOIN, awaitingExpr, getCustomerSalesTotals, getDeliveryContactTotals, getPaymentMethodBreakdown, getSalesDayReport, getSalesPeriodSeries, getSalesTotals, netRefundExpr, netSaleExpr, recognizedExpr } from '../lib/salesAnalytics'
+import { CUSTOMER_REFUND_JOIN, awaitingExpr, getCustomerSalesTotals, getDeliveryContactTotals, getPaymentMethodBreakdown, getSalesDayReport, getSalesPeriodSeries, getSalesTotals, netRefundExpr, netSaleExpr, recognizedExpr, saleStatusExpr } from '../lib/salesAnalytics'
 import { allocateAcrossLots, decrementBatchStockStatement, decrementBatchStockStrictStatement, readFifoLotAvailabilityForCart, type FifoLotTake } from '../lib/productBatches'
 // S4-24b: adding lines to an EXISTING sale. The rules (which statuses accept
 // a line, how much stock moves, which lots, what happens to the totals) are
@@ -4788,28 +4788,95 @@ app.get('/export', async (c) => {
     maxSaleId: snapshotMaxId,
   })
 
-  // Full-snapshot ranking. This must not be derived from the current detail
-  // page or a product can disappear simply because its receipts are on a later
-  // export page. Top-100 is an explicit ranking output, not a hidden history.
-  const byProduct = await db.prepare(`
-    SELECT si.product_id, si.product_name,
-           COALESCE(SUM(si.quantity), 0) AS qty_sold,
-           COALESCE(SUM(si.total_usd), 0) AS revenue_usd
-    FROM sale_items si
-    JOIN sales s ON s.id = si.sale_id
+  // Full-snapshot product allocation. Sale-level discounts and customer
+  // refunds belong to the receipt, so joining that receipt to several item
+  // rows and summing either the header or the raw lines would duplicate or
+  // omit money. Aggregate each product's lines first, then allocate the ONE
+  // canonical per-sale revenue value by its share of that sale's recorded
+  // line value. `sale_line_totals` is the allocation denominator rather than
+  // the header subtotal: healthy receipts have the same value in both places,
+  // while a damaged historical receipt can still be partitioned without the
+  // product rows inventing or losing part of the canonical header value.
+  type ProductBreakdownRow = {
+    product_id: number | null; product_name: string | null
+    qty_sold: number; revenue_usd: number
+  }
+  const productRows = await db.prepare(`
+    WITH sale_product_lines AS (
+      SELECT si.sale_id, si.product_id, si.product_name,
+             COALESCE(SUM(si.quantity), 0) AS qty_sold,
+             COALESCE(SUM(si.total_usd), 0) AS line_value_usd
+      FROM sale_items si
+      JOIN sales s ON s.id = si.sale_id
+      WHERE ${snapshotWhere.join(' AND ')}
+        AND ${recognizedExpr('s.')}
+      GROUP BY si.sale_id, si.product_id, si.product_name
+    ), sale_line_totals AS (
+      SELECT sale_id, COALESCE(SUM(line_value_usd), 0) AS line_value_usd
+      FROM sale_product_lines
+      GROUP BY sale_id
+    ), product_totals AS (
+    SELECT pl.product_id, pl.product_name,
+           COALESCE(SUM(pl.qty_sold), 0) AS qty_sold,
+           COALESCE(SUM(
+             pl.line_value_usd / lt.line_value_usd
+               * (${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')})
+           ), 0) AS revenue_usd
+    FROM sales s
+    JOIN sale_product_lines pl ON pl.sale_id = s.id
+    JOIN sale_line_totals lt ON lt.sale_id = s.id AND lt.line_value_usd <> 0
+    ${CUSTOMER_REFUND_JOIN}s.id
     WHERE ${snapshotWhere.join(' AND ')}
-      AND COALESCE(s.sale_status, 'completed') <> 'cancelled'
-    GROUP BY si.product_id, si.product_name
+      AND ${recognizedExpr('s.')}
+    GROUP BY pl.product_id, pl.product_name
+    ), unallocated_sales AS (
+    -- A recognized legacy receipt can have no usable line-value denominator.
+    -- Its header revenue remains real and visible in the canonical summary,
+    -- so preserve it explicitly instead of shrinking the product breakdown.
+    SELECT NULL AS product_id, 'Unallocated sales' AS product_name,
+           0 AS qty_sold,
+           COALESCE(SUM(${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')}), 0) AS revenue_usd
+    FROM sales s
+    LEFT JOIN sale_line_totals lt ON lt.sale_id = s.id
+    ${CUSTOMER_REFUND_JOIN}s.id
+    WHERE ${snapshotWhere.join(' AND ')}
+      AND ${recognizedExpr('s.')}
+      AND COALESCE(lt.line_value_usd, 0) = 0
+    HAVING COALESCE(SUM(${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')}), 0) <> 0
+    ), ranked_products AS (
+      SELECT product_id, product_name, qty_sold, revenue_usd,
+             ROW_NUMBER() OVER (
+               ORDER BY revenue_usd DESC, qty_sold DESC,
+                        COALESCE(product_name, ''), COALESCE(product_id, 0)
+             ) AS rank
+      FROM (
+        SELECT * FROM product_totals
+        UNION ALL
+        SELECT * FROM unallocated_sales
+      )
+    )
+    SELECT product_id, product_name, qty_sold, revenue_usd
+    FROM ranked_products
+    WHERE rank <= 99
+    UNION ALL
+    SELECT NULL AS product_id, 'Other products' AS product_name,
+           COALESCE(SUM(qty_sold), 0) AS qty_sold,
+           COALESCE(SUM(revenue_usd), 0) AS revenue_usd
+    FROM ranked_products
+    WHERE rank > 99
+    HAVING COUNT(*) > 0
     ORDER BY revenue_usd DESC, qty_sold DESC
-    LIMIT 100
-  `).all<{ product_id: number | null; product_name: string | null; qty_sold: number; revenue_usd: number }>(snapshotParams)
+  `).all<ProductBreakdownRow>(snapshotParams)
 
   const byStatusRows = await db.prepare(`
-    SELECT COALESCE(s.sale_status, 'completed') AS status, COUNT(*) AS count,
-           COALESCE(SUM(s.total_usd), 0) AS revenue
+    SELECT ${saleStatusExpr('s.')} AS status, COUNT(*) AS count,
+           COALESCE(SUM(CASE WHEN ${recognizedExpr('s.')}
+             THEN ${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')}
+             ELSE 0 END), 0) AS revenue
     FROM sales s
+    ${CUSTOMER_REFUND_JOIN}s.id
     WHERE ${snapshotWhere.join(' AND ')}
-    GROUP BY COALESCE(s.sale_status, 'completed')
+    GROUP BY ${saleStatusExpr('s.')}
   `).all<{ status: string; count: number; revenue: number }>(snapshotParams)
 
   // Canonical SalesTotals.revenue_usd is already NET of customer refunds.
@@ -4836,10 +4903,41 @@ app.get('/export', async (c) => {
     avg_order_usd: salesTotals.avg_order_usd,
   }
 
+  // SQL allocates at full precision. The JSON contract is cents, so rounding
+  // every bucket independently can make the displayed buckets miss the
+  // displayed headline by a cent. Largest-remainder allocation changes no
+  // underlying value: it only decides which buckets receive the residual
+  // cents already present in the rounded canonical total.
+  const reconcileRevenueCents = <T extends Record<string, unknown>>(
+    rows: T[], key: keyof T, targetUsd: number,
+  ): T[] => {
+    if (!rows.length) return rows
+    const parts = rows.map((row, index) => {
+      const rawCents = Number(row[key] || 0) * 100
+      const cents = Math.floor(rawCents)
+      return { row, index, cents, remainder: rawCents - cents }
+    })
+    const residual = Math.round(targetUsd * 100) - parts.reduce((sum, part) => sum + part.cents, 0)
+    const ranked = [...parts].sort((a, b) => residual >= 0
+      ? b.remainder - a.remainder || a.index - b.index
+      : a.remainder - b.remainder || a.index - b.index)
+    const step = residual >= 0 ? 1 : -1
+    for (let i = 0; i < Math.abs(residual); i += 1) ranked[i % ranked.length].cents += step
+    return parts.map((part) => ({ ...part.row, [key]: part.cents / 100 }))
+  }
+  const byStatus = reconcileRevenueCents(
+    byStatusRows.map((row) => ({ status: row.status, count: Number(row.count) || 0, revenue: Number(row.revenue) || 0 })),
+    'revenue', netRevenueUsd,
+  )
+  const byProduct = reconcileRevenueCents(
+    productRows.map((row) => ({ ...row, qty_sold: round2(Number(row.qty_sold) || 0), revenue_usd: Number(row.revenue_usd) || 0 })),
+    'revenue_usd', netRevenueUsd,
+  )
+
   return c.json({
     period, summary,
-    by_status: byStatusRows.map((row) => ({ status: row.status, count: Number(row.count) || 0, revenue: round2(Number(row.revenue) || 0) })),
-    by_product: byProduct.map((row) => ({ ...row, qty_sold: round2(Number(row.qty_sold) || 0), revenue_usd: round2(Number(row.revenue_usd) || 0) })),
+    by_status: byStatus,
+    by_product: byProduct,
     sales: detailRows,
     total_matching: totalMatching,
     snapshot_max_id: snapshotMaxId,
