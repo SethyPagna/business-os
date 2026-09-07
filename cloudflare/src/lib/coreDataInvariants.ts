@@ -228,25 +228,31 @@ export async function ensureCoreDataInvariants(env: Env): Promise<CoreDataInvari
 
   const branchState = await db.prepare(`
     SELECT
+      COUNT(*) AS total_count,
       SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) AS active_count,
       SUM(CASE WHEN is_active = 1 AND is_default = 1 THEN 1 ELSE 0 END) AS default_count
     FROM branches
-  `).get<{ active_count: number | null; default_count: number | null }>()
+  `).get<{ total_count: number; active_count: number | null; default_count: number | null }>()
 
   let branchId: number | null = null
-  if (!Number(branchState?.active_count || 0)) {
-    const insertedBranch = await db.prepare(`
+  if (Number(branchState?.total_count || 0) === 0) {
+    // Factory reset and a genuinely fresh database are the only states that
+    // create branch identities. One conditional statement inserts the whole
+    // pair, so concurrent cold isolates cannot each create another pair.
+    await db.prepare(`
       INSERT INTO branches (name, notes, is_default, is_active, updated_at)
-      VALUES ('Main Store', 'Default branch created during factory reset.', 1, 1, CURRENT_TIMESTAMP)
+      SELECT seed.name, seed.notes, seed.is_default, 1, CURRENT_TIMESTAMP
+      FROM (
+        SELECT 'Shop' AS name, 'Default branch created during setup.' AS notes, 1 AS is_default
+        UNION ALL
+        SELECT 'Warehouse', 'Warehouse branch created during setup.', 0
+      ) AS seed
+      WHERE NOT EXISTS (SELECT 1 FROM branches)
     `).run()
-    branchId = insertedBranch.lastInsertRowid
-  } else if (!Number(branchState?.default_count || 0)) {
-    const firstActive = await db.prepare(`SELECT id FROM branches WHERE is_active = 1 ORDER BY id ASC LIMIT 1`).get<{ id: number }>()
-    if (firstActive?.id) {
-      await db.prepare(`UPDATE branches SET is_default = 0`).run()
-      await db.prepare(`UPDATE branches SET is_default = 1, updated_at = CURRENT_TIMESTAMP WHERE id = @id`).run({ id: firstActive.id })
-      branchId = firstActive.id
-    }
+    const shop = await db.prepare(`
+      SELECT id FROM branches WHERE lower(trim(name)) = 'shop' AND is_active = 1 ORDER BY id ASC LIMIT 1
+    `).get<{ id: number }>()
+    branchId = shop?.id ?? null
   }
 
   const roleDefs: Array<[string, string, number, Record<string, boolean>]> = [
