@@ -82,8 +82,8 @@ runTest('the rule itself: stock moves warehouse -> shop', () => {
   assert.equal(branchCanBeTransferSource('Shop'), false, 'the shop never sends stock away')
   assert.equal(branchCanBeTransferDestination('Shop'), true)
   assert.equal(branchCanBeTransferDestination('Warehouse'), false, 'the warehouse never receives a transfer')
-  assert.equal(branchCanBeTransferSource('Depot'), true)
-  assert.equal(branchCanBeTransferDestination('Depot'), true)
+  assert.equal(branchCanBeTransferSource('Depot'), false)
+  assert.equal(branchCanBeTransferDestination('Depot'), false)
 })
 
 runTest('nothing keys on is_default, or on any column other than the name', () => {
