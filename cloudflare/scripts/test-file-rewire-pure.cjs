@@ -64,14 +64,12 @@ function loadRoute(state) {
         async run() { throw new Error('rewire must use the guarded batch') },
       }
     },
-    async batch() {
+    async batch(statements) {
       state.batches++
-      return [
-        { changes: 0 },
-        { changes: state.gallery ? 1 : 0 },
-        { changes: state.cover ? 1 : 0 },
-        { changes: state.avatar ? 1 : 0 },
-      ]
+      state.batchSql = statements.map((statement) => statement.sql)
+      return statements.map((statement) => ({
+        changes: /UPDATE users/i.test(statement.sql) ? (state.avatar ? 1 : 0) : 0,
+      }))
     },
   }
   const requireAuth = async (c, next) => { c.set('user', c.env.TEST_USER); await next() }
@@ -110,6 +108,7 @@ async function main() {
     const response = await rewire(state, { library: true, products: true, 'products:image': false })
     assert.equal(response.status, 200, await response.clone().text())
     assert.equal(state.batches, 1)
+    assert.equal(state.batchSql.some((sql) => /products|product_images/i.test(sql)), false)
     console.log('PASS avatar-only rewire remains available with Full Library access')
   }
 
