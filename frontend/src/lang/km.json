@@ -6132,5 +6132,10 @@
   "branch_not_found": "រកមិនឃើញសាខា",
   "dismiss_notification": "បិទការជូនដំណឹង",
   "permission_denied": "អ្នកលែងមានសិទ្ធិសម្រាប់សកម្មភាពនេះទៀតហើយ។",
-  "unable_to_minimize": "មិនអាចបង្រួមការកែប្រែនេះបានទេ។"
+  "unable_to_minimize": "មិនអាចបង្រួមការកែប្រែនេះបានទេ។",
+  "record_kind_delivery_added": "បានបន្ថែមការដឹកជញ្ជូន",
+  "add_delivery": "បន្ថែមការដឹកជញ្ជូន",
+  "add_delivery_title": "បន្ថែមការដឹកជញ្ជូនទៅការលក់នេះ?",
+  "choose_delivery_driver": "ជ្រើសរើសអ្នកដឹកជញ្ជូន",
+  "delivery_driver_required": "សូមជ្រើសរើសអ្នកដឹកជញ្ជូនសម្រាប់ការលក់នេះ។"
 }
