@@ -108,7 +108,8 @@ async function main() {
   const beforeOversizedLots = batches.length
   await assert.rejects(
     readProductMergeDependentLotSnapshots(adapter, collisionSnapshot(21), 'merge'),
-    (error) => error?.code === 'merge_read_batch_statement_limit'
+    (error) => String(error).includes('merge_read_batch_statement_limit')
+      && error?.code === 'merge_read_batch_statement_limit'
       && error.statementCount === 84
       && error.maxStatements === 80,
   )
