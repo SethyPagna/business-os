@@ -3507,12 +3507,67 @@ async function readAppliedBulkClusterPlan(
   return null
 }
 
+export const MERGE_DUPLICATES_MAX_PRODUCTS_PER_REQUEST = 25
+export const MERGE_DUPLICATES_REQUEST_BUDGET_MS = 20_000
+export const MERGE_DUPLICATES_REQUEST_STATEMENT_BUDGET = 700
+
+type MergeDuplicateInterruptionCode = 'merge_budget_reached' | 'merge_infrastructure_interrupted'
+
+function createCountedProductMergeDb(db: ReturnType<typeof getDb>): {
+  db: ReturnType<typeof getDb>
+  statementCount: () => number
+} {
+  let statements = 0
+  const counted = Object.create(db) as ReturnType<typeof getDb>
+  counted.prepare = ((sql: string) => {
+    const prepared = db.prepare(sql)
+    return {
+      get: (params?: Parameters<typeof prepared.get>[0]) => { statements += 1; return prepared.get(params) },
+      all: (params?: Parameters<typeof prepared.all>[0]) => { statements += 1; return prepared.all(params) },
+      run: (params?: Parameters<typeof prepared.run>[0]) => { statements += 1; return prepared.run(params) },
+    }
+  }) as typeof counted.prepare
+  counted.batch = (items) => {
+    statements += items.length
+    return db.batch(items)
+  }
+  return { db: counted, statementCount: () => statements }
+}
+
+export function shouldPauseProductMergeBeforeGroup(input: {
+  completedGroups: number
+  completedProducts: number
+  elapsedMs: number
+  statementCount: number
+  nextDuplicateCount: number
+}): boolean {
+  if (input.completedGroups <= 0) return false
+  const averageGroupMs = input.elapsedMs / input.completedGroups
+  const predictedNextGroupMs = Math.max(1_000, averageGroupMs)
+  const observedStatementsPerProduct = input.statementCount / Math.max(1, input.completedProducts)
+  const predictedNextStatements = Math.ceil(Math.max(50, observedStatementsPerProduct) * Math.max(1, input.nextDuplicateCount))
+  return input.elapsedMs + predictedNextGroupMs >= MERGE_DUPLICATES_REQUEST_BUDGET_MS
+    || input.statementCount + predictedNextStatements > MERGE_DUPLICATES_REQUEST_STATEMENT_BUDGET
+}
+
+function isProductMergeInfrastructureError(error: unknown): boolean {
+  return /D1 DB is overloaded|Requests queued for too long|database is locked|network|timeout|timed out|too many requests|busy|reset|ECONNRESET|fetch failed|internal error|D1_ERROR/i
+    .test(error instanceof Error ? error.message : String(error))
+}
+
+function productMergeInterruptionMessage(code: MergeDuplicateInterruptionCode): string {
+  return code === 'merge_budget_reached'
+    ? 'This safe chunk finished before the next duplicate group started. Review the refreshed preview and choose Merge again to continue.'
+    : 'The database became busy after completed groups were saved. Review the refreshed preview and choose Merge again to continue.'
+}
+
 app.post('/merge-duplicates', async (c) => {
   const user = c.get('user')
   if (getActionTier(user, 'products', 'merge_duplicates') !== 'full') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
-  const db = getDb(c.env)
+  const countedDb = createCountedProductMergeDb(getDb(c.env))
+  const db = countedDb.db
   const requestBody: Record<string, unknown> = await c.req.json<Record<string, unknown>>().catch(() => ({}))
   const rawRequestId = String(requestBody.client_request_id || '').trim()
   const requestId = rawRequestId && rawRequestId.length <= 120 ? rawRequestId : null
@@ -3546,6 +3601,9 @@ app.post('/merge-duplicates', async (c) => {
   const actionHistoryIds: number[] = []
   const processedCaseKeys: string[] = []
   let undoPendingCount = 0
+  const requestStartedAt = Date.now()
+  let completedGroupsForBudget = 0
+  let interruptionCode: MergeDuplicateInterruptionCode | null = null
   // Pairs this run REFUSED and left exactly as they were. Same rule as the
   // pair route's 409s, because "merge these two" cannot mean one thing in the
   // review dialog and another in the bulk run: a cost pair too far apart to
@@ -3555,19 +3613,30 @@ app.post('/merge-duplicates', async (c) => {
   // Bounded, resumable work: each request commits at most this many products.
   // The next request simply re-scans the remaining active identities. A whole
   // identity cluster is never split, preserving one global DISTINCT cost mean.
-  const MAX_MERGES_PER_REQUEST = 25
-  for (const group of groups) {
-    if (mergedProductsCount > 0 && mergedProductsCount + group.duplicates.length > MAX_MERGES_PER_REQUEST) break
-    const canonicalId = group.canonical.id
-    const canonicalName = group.canonical.name
-    const mergedIds: number[] = []
-    const mergedNames: (string | null)[] = []
+  mergeGroups: try {
+    for (const group of groups) {
+      if (mergedProductsCount > 0 && mergedProductsCount + group.duplicates.length > MERGE_DUPLICATES_MAX_PRODUCTS_PER_REQUEST) break
+      const elapsedMs = Date.now() - requestStartedAt
+      if (shouldPauseProductMergeBeforeGroup({
+        completedGroups: completedGroupsForBudget,
+        completedProducts: mergedProductsCount,
+        elapsedMs,
+        statementCount: countedDb.statementCount(),
+        nextDuplicateCount: group.duplicates.length,
+      })) {
+        interruptionCode = 'merge_budget_reached'
+        break
+      }
+      const canonicalId = group.canonical.id
+      const canonicalName = group.canonical.name
+      const mergedIds: number[] = []
+      const mergedNames: (string | null)[] = []
 
     // Never split one identity cluster across requests: doing so would feed a
     // previously averaged keeper back into the next mean. A cluster larger
     // than the transaction budget is quarantined for a dedicated manifest
     // workflow instead of issuing an unbounded D1 batch.
-    if (group.duplicates.length > MAX_MERGES_PER_REQUEST) {
+    if (group.duplicates.length > MERGE_DUPLICATES_MAX_PRODUCTS_PER_REQUEST) {
       for (const dup of group.duplicates) {
         refusals.push({
           caseKey: productMergeCaseKey(canonicalId, dup.id),
@@ -3656,6 +3725,14 @@ app.post('/merge-duplicates', async (c) => {
         if (result.actionHistoryId) actionHistoryIds.push(result.actionHistoryId)
         if (!result.undoReady) undoPendingCount += 1
       } catch (error) {
+        if (isProductMergeInfrastructureError(error)) {
+          if (mergedIds.length > 0) {
+            groupSummaries.push({ canonicalId, canonicalName, mergedIds, mergedNames })
+            completedGroupsForBudget += 1
+          }
+          interruptionCode = 'merge_infrastructure_interrupted'
+          break mergeGroups
+        }
         const conflict = /merge_state_conflict|merge_identity_conflict|merge_cluster_plan_conflict/.test(String(error))
         refusals.push({
           caseKey: productMergeCaseKey(canonicalId, dup.id),
@@ -3673,14 +3750,31 @@ app.post('/merge-duplicates', async (c) => {
       mergedProductsCount += 1
     }
 
-    groupSummaries.push({ canonicalId, canonicalName, mergedIds, mergedNames })
-    if (mergedProductsCount >= MAX_MERGES_PER_REQUEST) break
+      groupSummaries.push({ canonicalId, canonicalName, mergedIds, mergedNames })
+      if (mergedIds.length > 0) completedGroupsForBudget += 1
+      if (mergedProductsCount >= MERGE_DUPLICATES_MAX_PRODUCTS_PER_REQUEST) break
+    }
+  } catch (error) {
+    if (mergedProductsCount <= 0) throw error
+    interruptionCode = 'merge_infrastructure_interrupted'
   }
 
-  const remainingGroups = await findDuplicateProductGroups(db)
-  const remainingProducts = remainingGroups.reduce((sum, group) => sum + group.duplicates.length, 0)
-  const madeProgress = remainingProducts < remainingProductsBefore
-  const stalled = remainingProducts > 0 && !madeProgress
+  let remainingGroups: Awaited<ReturnType<typeof findDuplicateProductGroups>> | null = null
+  if (!interruptionCode) {
+    try {
+      remainingGroups = await findDuplicateProductGroups(db)
+    } catch (error) {
+      if (mergedProductsCount <= 0) throw error
+      interruptionCode = 'merge_infrastructure_interrupted'
+    }
+  }
+  const remainingProducts = remainingGroups
+    ? remainingGroups.reduce((sum, group) => sum + group.duplicates.length, 0)
+    : null
+  const madeProgress = remainingProducts == null
+    ? mergedProductsCount > 0
+    : remainingProducts < remainingProductsBefore
+  const stalled = remainingProducts != null && remainingProducts > 0 && !madeProgress
 
   c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
@@ -3688,17 +3782,20 @@ app.post('/merge-duplicates', async (c) => {
   return c.json({
     success: true,
     complete: remainingProducts === 0,
+    interrupted: interruptionCode != null,
+    interruptionCode,
+    error: interruptionCode ? productMergeInterruptionMessage(interruptionCode) : undefined,
     stalled,
     madeProgress,
-    batchLimit: MAX_MERGES_PER_REQUEST,
+    batchLimit: MERGE_DUPLICATES_MAX_PRODUCTS_PER_REQUEST,
     mergedGroups: groupSummaries.filter((group) => group.mergedIds.length > 0).length,
     mergedProducts: mergedProductsCount,
     remainingProductsBefore,
     remainingProducts,
-    remainingGroupCount: remainingGroups.length,
+    remainingGroupCount: remainingGroups?.length ?? null,
     // Because a cluster is never split, the exact conservative request bound
     // is one remaining group per call rather than ceil(products / 25).
-    maxAdditionalRequests: remainingGroups.length,
+    maxAdditionalRequests: remainingGroups?.length ?? null,
     requestId,
     processedCaseKeys,
     groups: groupSummaries,

@@ -9,15 +9,18 @@ type ProductPayload = ExpectedUpdatedAtPayload
 export type MergeDuplicateProductsChunkResult = {
   success: boolean
   complete: boolean
+  interrupted?: boolean
+  interruptionCode?: 'merge_budget_reached' | 'merge_infrastructure_interrupted' | null
+  error?: string
   stalled: boolean
   madeProgress: boolean
   batchLimit: number
   mergedGroups: number
   mergedProducts: number
   remainingProductsBefore: number
-  remainingProducts: number
-  remainingGroupCount: number
-  maxAdditionalRequests: number
+  remainingProducts: number | null
+  remainingGroupCount: number | null
+  maxAdditionalRequests: number | null
   requestId: string | null
   processedCaseKeys: string[]
   actionHistoryIds: number[]
