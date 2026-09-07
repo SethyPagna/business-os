@@ -446,7 +446,10 @@ runTest('the sale detail shows what a receipt shows, and stops there', () => {
   ] as Array<[string, string]>) {
     assert.ok(!totalsFoot.includes(needle), `the money summary took "${needle}" back -- ${why}`)
   }
-  const costAt = saleDetail.indexOf("translateOr('delivery_actual_cost'")
+  // Locate the rendered staff-only row itself. F32 also uses this translation
+  // key in the amendment-history formatter and in the add-delivery review
+  // form, so the first key occurrence no longer says where the row lives.
+  const costAt = saleDetail.indexOf("<DetailRow label={translateOr('delivery_actual_cost'")
   const driverPhoneAt = saleDetail.indexOf("translateOr('driver_phone'")
   assert.ok(costAt >= 0, 'the courier cost row must exist -- the owner asked to see and edit it (N41)')
   assert.ok(driverPhoneAt >= 0 && costAt > driverPhoneAt, 'the courier cost belongs with the driver it was paid to')
