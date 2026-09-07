@@ -184,7 +184,11 @@ async function run() {
       portalSource.indexOf('// 10-fail-per-flow lockout'),
     )
     assert.match(portalSource, /PORTAL_SUBMISSION_PREFIX = 'private\/portal-submissions\/'/)
-    assert.match(portalScreenshotWriter, /await env\.ASSETS\.put\(objectKey, decoded\.bytes/)
+    assert.match(portalSource, /import \{ sanitizePortalImageMetadata \} from '\.\.\/lib\/portalImagePrivacy'/)
+    assert.match(portalScreenshotWriter, /const sanitized = sanitizePortalImageMetadata\(decoded\.bytes\)/)
+    assert.match(portalScreenshotWriter, /if \(!sanitized\) continue/)
+    assert.match(portalScreenshotWriter, /await env\.ASSETS\.put\(objectKey, sanitized\.bytes, \{ httpMetadata: \{ contentType: sanitized\.contentType \} \}\)/)
+    assert.doesNotMatch(portalScreenshotWriter, /ASSETS\.put\(objectKey, decoded\.bytes/)
     assert.doesNotMatch(portalScreenshotWriter, /enqueueImageNormalization\(/)
     assert.match(portalSource, /headers\.set\('cache-control', 'private, no-store'\)/)
   })
