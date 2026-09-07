@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 1,
+  "baseCommit": "1adf2407169062acd62b0c260a196996c5ebf993",
+  "auditMode": "source inventory",
+  "confirmed": {
+    "sharedContract": "A minus is rendered only when a flow supplies an explicit serializer/persist-and-park callback. The registry is actor/org scoped; each entry names its exact draft, restore payload, host page, and current permission requirement.",
+    "coveredOrAssigned": [
+      { "surface": "Standalone add product", "path": "frontend/src/components/products/forms/ProductForm.tsx", "host": "frontend/src/components/products/Products.tsx", "draft": "scoped product_new_standalone-create", "status": "existing coverage; host permission/metadata hardening assigned" },
+      { "surface": "Fast stock-in add/remove/set", "path": "frontend/src/components/inventory/FastStockInModal.tsx", "host": "Inventory.tsx, StockChangeSection.tsx, StockInSessionsSection.tsx", "draft": "scoped fast_stockin", "status": "flush and host parity assigned" },
+      { "surface": "Receive batch", "path": "frontend/src/components/inventory/ReceiveBatchModal.tsx", "host": "frontend/src/components/branches/Branches.tsx", "draft": "scoped receive_<productId>", "status": "implemented in b0f7af67 and ce249c2e" },
+      { "surface": "Create products session", "path": "frontend/src/components/products/CreateProductsSessionModal.tsx", "host": "frontend/src/components/products/Products.tsx", "draft": "scoped create_products_session", "status": "assigned; includes header-only close guard defect" },
+      { "surface": "Edit product", "path": "frontend/src/components/products/forms/ProductForm.tsx", "host": "frontend/src/components/products/Products.tsx", "draft": "scoped product_<productId>, rejects drafts older than server updated_at", "status": "next durable slice" }
+    ],
+    "omittedEditable": {
+      "productAndStock": [
+        { "surface": "Adjust/receive one product", "path": "frontend/src/components/inventory/InventoryStockModals.tsx", "host": "Inventory.tsx and StockAdjustModal.tsx", "draftState": "in-memory only; StockAdjust retains failed attempts only", "permission": "inventory:adjust" },
+        { "surface": "Transfer one product", "path": "frontend/src/components/inventory/InventoryStockModals.tsx", "host": "Inventory.tsx", "draftState": "in-memory only", "permission": "inventory:transfer" },
+        { "surface": "Branch transfer", "path": "frontend/src/components/branches/TransferModal.tsx", "host": "Branches.tsx", "draftState": "in-memory only", "permission": "branches:transfer" },
+        { "surface": "Bulk add/remove/set stock", "path": "frontend/src/components/products/forms/BulkAddStockModal.tsx", "host": "Products.tsx", "draftState": "in-memory; failed rows retained only while mounted", "permission": "inventory:adjust" },
+        { "surface": "Manage batches/lots", "path": "frontend/src/components/inventory/ManageBatchesModal.tsx", "host": "Inventory.tsx", "draftState": "in-memory only", "permission": "inventory:adjust" },
+        { "surface": "Inventory saved reasons", "path": "frontend/src/components/inventory/InventoryReasonManagerModal.tsx", "host": "Inventory.tsx and StockAdjustModal.tsx", "draftState": "in-memory only", "permission": "inventory:edit_reasons" },
+        { "surface": "Add product variant", "path": "frontend/src/components/products/forms/VariantFormModal.tsx", "host": "Products.tsx", "draftState": "in-memory only", "permission": "products:variant" },
+        { "surface": "Manage brands", "path": "frontend/src/components/products/lookups/ManageBrandsModal.tsx", "host": "Products.tsx", "draftState": "in-memory only", "permission": "products:manage_lookups" },
+        { "surface": "Manage categories", "path": "frontend/src/components/products/lookups/ManageCategoriesModal.tsx", "host": "Products.tsx", "draftState": "in-memory only", "permission": "products:manage_lookups" },
+        { "surface": "Manage units", "path": "frontend/src/components/products/lookups/ManageUnitsModal.tsx", "host": "Products.tsx", "draftState": "in-memory only", "permission": "products:manage_lookups" },
+        { "surface": "Edit duplicate-product resolution", "path": "frontend/src/components/products/ProductDuplicatesTab.tsx", "host": "Products.tsx", "draftState": "in-memory only", "permission": "products:merge_duplicates" },
+        { "surface": "Edit stock-in session header", "path": "frontend/src/components/products/StockInSessionsSection.tsx", "host": "Products.tsx", "draftState": "in-memory only", "permission": "inventory:adjust" },
+        { "surface": "Attribute supplier", "path": "frontend/src/components/products/surfaces/AttributeSupplierModal.tsx", "host": "ProductDetailReport.tsx", "draftState": "in-memory only", "permission": "inventory:adjust" }
+      ],
+      "ordinaryEntities": [
+        { "surface": "Add/edit branch", "path": "frontend/src/components/branches/BranchForm.tsx", "host": "Branches.tsx", "draftState": "dirty registry only", "permission": "branches:add or branches:edit" },
+        { "surface": "Add/edit fee", "path": "frontend/src/components/fees/FeeForm.tsx", "host": "FeesPage.tsx", "draftState": "dirty registry only", "permission": "fees:add or fees:edit" },
+        { "surface": "Manage expense labels", "path": "frontend/src/components/fees/ExpenseLabelManagerModal.tsx", "host": "FeesPage.tsx", "draftState": "in-memory only", "permission": "fees edit grant; exact host gate must be retained" },
+        { "surface": "Add/edit customer", "path": "frontend/src/components/contacts/CustomerFormModal.tsx", "host": "CustomersTab.tsx", "draftState": "in-memory only", "permission": "contacts:add or contacts:edit" },
+        { "surface": "Add/edit supplier", "path": "frontend/src/components/contacts/SuppliersTab.tsx", "host": "SuppliersTab.tsx", "draftState": "in-memory only", "permission": "contacts:add or contacts:edit" },
+        { "surface": "Add/edit delivery contact", "path": "frontend/src/components/contacts/DeliveryTab.tsx", "host": "DeliveryTab.tsx", "draftState": "in-memory only", "permission": "contacts:add or contacts:edit" },
+        { "surface": "Resolve contact import rename conflicts", "path": "frontend/src/components/contacts/ContactImportConflictsModal.tsx", "host": "contact tabs", "draftState": "in-memory only", "permission": "contacts:resolve_conflicts" },
+        { "surface": "Promotion rules and product discounts", "path": "frontend/src/components/promotions/PromotionsPage.tsx", "host": "PromotionsPage.tsx", "draftState": "in-memory only", "permission": "promotions:manage" },
+        { "surface": "Announcement strip", "path": "frontend/src/components/catalog/ManagePromotionsModal.tsx", "host": "catalog editor", "draftState": "in-memory only", "permission": "current catalog/settings gate must be traced before implementation" },
+        { "surface": "Return reason presets", "path": "frontend/src/components/returns/ReturnReasonManagerModal.tsx", "host": "Returns.tsx", "draftState": "in-memory only", "permission": "returns current host gate" }
+      ],
+      "transactions": [
+        { "surface": "Create customer return", "path": "frontend/src/components/returns/NewReturnModal.tsx", "host": "Returns.tsx", "draftState": "in-memory only", "permission": "returns:add" },
+        { "surface": "Create supplier return", "path": "frontend/src/components/returns/NewSupplierReturnModal.tsx", "host": "Returns.tsx", "draftState": "in-memory only", "permission": "returns:add" },
+        { "surface": "Edit return", "path": "frontend/src/components/returns/EditReturnModal.tsx", "host": "Returns.tsx", "draftState": "in-memory only", "permission": "returns:edit" },
+        { "surface": "Sale settlement/status/payment fields", "path": "frontend/src/components/sales/SaleDetailModal.tsx", "host": "Sales.tsx", "draftState": "in-memory only", "permission": "sales action-specific gates" },
+        { "surface": "Cancel sale", "path": "frontend/src/components/sales/CancelSaleModal.tsx", "host": "Sales.tsx", "draftState": "in-memory only", "permission": "sales:status" },
+        { "surface": "Bulk cancel sales", "path": "frontend/src/components/sales/BulkSaleCancelModal.tsx", "host": "Sales.tsx", "draftState": "in-memory only", "permission": "sales:status" },
+        { "surface": "Open/close shift cash", "path": "frontend/src/components/pos/ShiftGate.tsx", "host": "POS.tsx", "draftState": "in-memory only", "permission": "current shift gate must be retained" },
+        { "surface": "Edit/close/reopen/cancel shift", "path": "frontend/src/components/shifts/ShiftHistoryModal.tsx", "host": "shift page/POS", "draftState": "in-memory only", "permission": "current shift gate must be retained" }
+      ],
+      "accounts": [
+        { "surface": "Add/edit user", "path": "frontend/src/components/users/Users.tsx", "host": "Users.tsx", "draftState": "in-memory only", "permission": "user-management gate" },
+        { "surface": "Add/edit role", "path": "frontend/src/components/users/Users.tsx", "host": "Users.tsx", "draftState": "in-memory only", "permission": "user-management gate" },
+        { "surface": "Edit profile", "path": "frontend/src/components/users/UserProfileModal.tsx", "host": "account panel", "draftState": "in-memory only", "permission": "self/current admin gate" },
+        { "surface": "Crop avatar", "path": "frontend/src/components/users/UserProfileModal.tsx", "host": "account panel", "draftState": "in-memory only", "permission": "self/current admin gate" },
+        { "surface": "Change password", "path": "frontend/src/components/users/Users.tsx", "host": "Users.tsx", "draftState": "secret input; must remain memory-only", "permission": "user-management gate" },
+        { "surface": "OTP", "path": "frontend/src/components/utils-settings/OtpModal.tsx", "host": "settings/auth flows", "draftState": "secret input; must remain memory-only", "permission": "current authentication gate" }
+      ],
+      "imports": [
+        { "surface": "Product/image CSV import", "path": "frontend/src/components/products/import/BulkImportModal.tsx", "host": "Products.tsx", "draftState": "large CSV/File state in memory", "permission": "products:import" },
+        { "surface": "Dated stock reconciliation", "path": "frontend/src/components/products/import/DatedStockReconciliationModal.tsx", "host": "BulkImportModal.tsx", "draftState": "large CSV state in memory", "permission": "inventory:stock_count" },
+        { "surface": "Stock action import", "path": "frontend/src/components/products/import/StockActionImportModal.tsx", "host": "Products.tsx", "draftState": "large CSV state in memory", "permission": "inventory:import plus existing multi-section gate" },
+        { "surface": "Inventory import", "path": "frontend/src/components/inventory/InventoryImportModal.tsx", "host": "Inventory.tsx", "draftState": "large CSV state in memory", "permission": "inventory:import" },
+        { "surface": "Sales import", "path": "frontend/src/components/sales/SalesImportModal.tsx", "host": "Sales.tsx", "draftState": "large CSV state in memory", "permission": "sales:import" },
+        { "surface": "Contact imports", "path": "frontend/src/components/contacts/ContactImportModal.tsx", "host": "contact tabs", "draftState": "large CSV state in memory", "permission": "contacts:import" }
+      ]
+    },
+    "readOnlyExcluded": "Every Modal declaring unsavedChanges=read-only plus scanners, pickers, details, reports, export/confirm dialogs, histories and previews. These surfaces hold no editable draft and must not receive a minus.",
+    "nextSlices": [
+      "A: finish already durable edit-product, create-session and FastStockIn host parity.",
+      "B: stock mutations with typed per-action/entity drafts, current stock/version refetch, and failed-row-only persistence after partial commits.",
+      "C: ordinary entity forms with scoped create/entity keys and server updated_at floors for edits.",
+      "D: transactional records with current record refetch and backend precondition/permission parity before submit.",
+      "E: imports in scoped IndexedDB with Blob/text quota handling; localStorage is not a safe or large enough store.",
+      "Credentials: do not persist password or OTP values. A separate memory-only shell would be needed before a truthful minimize control can be offered."
+    ]
+  },
+  "inferences": [
+    "A universal Modal minus is unsafe because Modal does not know how to serialize, scope, restore, discard, version-check, or permission-gate a caller's state.",
+    "Large import payloads need IndexedDB or a server upload/job reference; adding them to workDrafts/localStorage risks quota failure and partial preservation.",
+    "Transactional restore must refetch live state because stock, return, sale and shift facts can change while a draft is parked."
+  ],
+  "unknowns": [
+    "Several settings, shift and profile actions use coarse or host-specific gates rather than permissionActions rows; each gate must be traced before its slice.",
+    "Branch records do not expose an updated_at field in the current Branches.tsx type; safe edit restore needs a server version or an explicit conflict strategy.",
+    "Credential minimize UX needs an owner-approved memory-only design because durable local secret storage is prohibited."
+  ]
+}
