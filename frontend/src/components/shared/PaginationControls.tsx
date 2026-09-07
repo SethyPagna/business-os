@@ -182,8 +182,16 @@ export default function PaginationControls({
     //    box that has now gone. The input is sized from its own digit count
     //    instead, so "1" and "108" both sit snug, and the pill's padding is
     //    carried by the elements themselves. Nothing on the row can wrap:
-    //    every child is shrink-0 or min-w-0, and the Back/Next words collapse
-    //    to icons below sm.
+    //    every child is shrink-0 or min-w-0.
+    //
+    // 3. THE WORDS. Back and Next carried `hidden sm:inline`, and Tailwind's
+    //    `sm` is 640px -- so the phone in the owner's screenshot got two bare
+    //    chevrons and no words at all, which is the breakpoint this row
+    //    exists for. The words stay visible at every width. They fit: with
+    //    the page-size control off the row the pill is two ~70px buttons
+    //    around a ~60px page/count group, well inside 375px even with the
+    //    longer Khmer labels, and every child is still shrink-0 /
+    //    whitespace-nowrap so it cannot become two rows.
     //
     // Rows are h-10 (40px) rather than the admin's 32: this is the phone-
     // first shopping surface, and 36px arrows were under the tap-target
@@ -204,7 +212,7 @@ export default function PaginationControls({
             aria-label={backLabel}
           >
             <ChevronLeft className="h-4 w-4" strokeWidth={2.5} />
-            <span className="hidden sm:inline">{backLabel}</span>
+            <span className="whitespace-nowrap">{backLabel}</span>
           </button>
           <div className="inline-flex min-w-0 shrink items-center">
             {editablePageInput ? (
@@ -234,7 +242,7 @@ export default function PaginationControls({
             onClick={() => onPageChange?.(safePage + 1)}
             aria-label={nextLabel}
           >
-            <span className="hidden sm:inline">{nextLabel}</span>
+            <span className="whitespace-nowrap">{nextLabel}</span>
             <ChevronRight className="h-4 w-4" strokeWidth={2.5} />
           </button>
         </div>

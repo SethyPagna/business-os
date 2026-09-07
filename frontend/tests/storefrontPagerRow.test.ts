@@ -134,13 +134,21 @@ runTest('the pill reserves no room for the control that was removed', () => {
   assert.doesNotMatch(branch, /shrink items-center gap-1 px-1/, 'the gap+padding around the page number were the rest of the highlighted space')
 })
 
-runTest('nothing on the row can wrap at 375px', () => {
+runTest('the row reads as words at 375px, and still cannot wrap', () => {
   const branch = centeredBranch()
   assert.doesNotMatch(branch, /flex-wrap/, 'a pill that wraps is two rows, not one')
-  assert.equal((branch.match(/hidden sm:inline">\{(?:back|next)Label\}/g) || []).length, 2,
-    'both words must collapse to their icons below sm')
+  // This case used to REQUIRE `hidden sm:inline` on both labels -- i.e. it
+  // pinned the defect. Tailwind's `sm` is 640px, so the phone the owner
+  // photographed showed two bare chevrons: the widest screen that hides the
+  // words is wider than any phone. The words are visible at every width now.
+  assert.doesNotMatch(branch, /hidden sm:inline">\{(?:back|next)Label\}/, 'the Back/Next words must be visible at 375px, not only from 640px up')
+  assert.doesNotMatch(branch, /\bhidden sm:inline\b/, '...and nothing else on this row may hide below sm either')
+  assert.equal((branch.match(/\{backLabel\}/g) || []).length, 2, 'backLabel is both the visible word and the aria-label')
+  assert.equal((branch.match(/\{nextLabel\}/g) || []).length, 2, 'and so is nextLabel')
   assert.equal((branch.match(/shrink-0/g) || []).length >= 2, true, 'the arrows must not be squeezed')
-  assert.match(branch, /whitespace-nowrap/, 'the count must not break across lines')
+  // Every text run on the row is nowrap, so a longer word (Khmer's Back/Next
+  // are wider than the English) lengthens the pill instead of breaking it.
+  assert.equal((branch.match(/whitespace-nowrap/g) || []).length >= 3, true, 'the count and both labels must be nowrap')
 })
 
 // ---------------------------------------------------------------------------
