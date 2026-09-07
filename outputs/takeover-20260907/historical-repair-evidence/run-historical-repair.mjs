@@ -14,6 +14,7 @@ const expectedAccountId = '743e5b727d139e85ed11679097f6f99e'
 const expectedDatabaseId = '49795be9-eabe-43f1-8e16-b86faed60cb1'
 const expectedPlanId = 'historical-shop-branch-metadata-20260907'
 const expectedManifestSha256 = '315b0a7bd1c8255613bc7259596c3720118c4dfc6757a1500422263b68528d5e'
+const maxGuardPayloadBytes = 800_000
 const expectedActor = Object.freeze({
   kind: 'service',
   user_id: null,
@@ -185,7 +186,7 @@ function validateBundle(bundleDir, kind = 'repair', dependencies = {}) {
   const execution = executionManifest.execution
   const pinnedColumns = frozenManifest.full_row_precondition.expected_columns_from_sealed_production_schema
   for (const table of ['fees', 'sales', 'sale_items']) {
-    assert(stableJson([...(execution?.full_row_columns?.[table] || [])].sort()) === stableJson([...pinnedColumns[table]].sort()), `execution manifest ${table} full-row columns do not match the pinned production schema`)
+    assert(stableJson(execution?.full_row_columns?.[table] || []) === stableJson([...pinnedColumns[table]].sort()), `execution manifest ${table} full-row column order does not match the pinned production schema`)
   }
   assert(execution?.actor_key === 'codex-maintenance-owner-authorized', 'execution manifest service actor key is not allowlisted')
   assert(stableJson(execution.actor) === stableJson(expectedActor), 'execution manifest service actor does not match the fixed maintenance identity')
@@ -269,19 +270,33 @@ const safeIdentifier = (value) => {
 function fullRowGuard(table, rows, columns, label) {
   assert(guardTableAllowlist.has(table), 'full-row guard table is not allowlisted')
   assert(rows.length > 0 && rows.length <= 99, 'full-row guard chunk must contain 1 to 99 rows')
-  assert(columns.includes('id'), 'full-row guard column set lacks id')
+  assert(Array.isArray(columns) && columns.length > 0 && new Set(columns).size === columns.length, 'full-row guard column order is invalid')
+  const idIndex = columns.indexOf('id')
+  assert(idIndex >= 0, 'full-row guard column set lacks id')
   const tableSql = safeIdentifier(table)
-  const comparisons = columns.map((column) => {
+  const expectedKeys = [...columns].sort().join('\n')
+  const positionalRows = rows.map((row) => {
+    assert(row && typeof row === 'object' && !Array.isArray(row), 'full-row guard contains an invalid row')
+    assert(Object.keys(row).sort().join('\n') === expectedKeys, 'full-row guard row columns do not match the pinned production schema')
+    return columns.map((column) => {
+      const value = row[column]
+      assert(value === null || typeof value === 'string' || (typeof value === 'number' && Number.isFinite(value)), 'full-row guard contains a value that cannot be represented without type loss')
+      return value
+    })
+  })
+  const comparisons = columns.map((column, index) => {
     const columnSql = safeIdentifier(column)
-    return `actual.${columnSql} IS json_extract(expected.value, '$.${column}')`
+    return `actual.${columnSql} IS json_extract(expected.value, '$[${index}]')`
   }).join('\n      AND ')
   return {
     label,
     expected_changes: 0,
-    sql: `SELECT CASE WHEN (\n  SELECT COUNT(*)\n  FROM ${tableSql} AS actual\n  JOIN json_each(?) AS expected\n    ON actual."id" IS json_extract(expected.value, '$.id')\n  WHERE ${comparisons}\n) = ${rows.length}\nTHEN 0 ELSE json('historical repair target row drift') END AS full_row_guard;`,
-    params: [JSON.stringify(rows)],
+    sql: `SELECT CASE WHEN (\n  SELECT COUNT(*)\n  FROM ${tableSql} AS actual\n  JOIN json_each(?) AS expected\n    ON actual."id" IS json_extract(expected.value, '$[${idIndex}]')\n  WHERE ${comparisons}\n) = ${rows.length}\nTHEN 0 ELSE json('historical repair target row drift') END AS full_row_guard;`,
+    params: [JSON.stringify(positionalRows)],
   }
 }
+
+const guardPayloadBytes = (guards) => Buffer.byteLength(JSON.stringify(guards.map(({ sql, params }) => ({ sql, params }))))
 
 function buildFullRowGuards(manifest, rows) {
   const columns = manifest.full_row_precondition.expected_columns_from_sealed_production_schema
@@ -300,6 +315,7 @@ function buildFullRowGuards(manifest, rows) {
   guards.push(fullRowGuard('sale_items', rows.sale_items, columns.sale_items, 'full_row_guard_sale_items'))
   assert(guards.length === 45, 'historical repair must produce exactly 45 full-row guards')
   assert(guards.every((guard) => guard.params.length === 1), 'each full-row guard must use exactly one bound JSON parameter')
+  assert(guardPayloadBytes(guards) <= maxGuardPayloadBytes, `full-row guard payload exceeds ${maxGuardPayloadBytes} bytes`)
   return guards
 }
 
@@ -402,6 +418,7 @@ async function runApply(validated, confirmations, dependencies = {}) {
       manifest_sha256: executionManifest.content_sha256,
       batch_sha256: batch.content_sha256,
       guard_statement_count: guards.length,
+      guard_payload_bytes: guardPayloadBytes(guards),
       write_statement_count: batch.statements.length,
       atomic_statement_count: guards.length + batch.statements.length,
       guard_statement_changes: batchResult.guardChanges,
@@ -454,6 +471,8 @@ export {
   buildFullRowGuards,
   executePreparedBatch,
   fingerprint,
+  guardPayloadBytes,
+  maxGuardPayloadBytes,
   parseArgs,
   redactErrorMessage,
   runApply,

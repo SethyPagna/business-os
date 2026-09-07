@@ -7,7 +7,10 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
+  buildFullRowGuards,
   fingerprint,
+  guardPayloadBytes,
+  maxGuardPayloadBytes,
   redactErrorMessage,
   runApply,
   validateBundle,
@@ -273,6 +276,12 @@ try {
     }
   }
   const successfulBinding = makeLocalD1(applySqlite)
+  const guardFixtureRows = Object.fromEntries(['fees', 'sales', 'sale_items'].map((table) => [table, applySqlite.prepare(`SELECT * FROM ${table} ORDER BY id`).all()]))
+  const compactGuards = buildFullRowGuards(generatedManifest, guardFixtureRows)
+  const compactGuardPayloadBytes = guardPayloadBytes(compactGuards)
+  assert(compactGuardPayloadBytes <= maxGuardPayloadBytes, 'positional full-row guard payload exceeded its transport budget')
+  assert(compactGuards.every((guard) => !guard.params[0].includes('"branch_id":')), 'full-row guard payload still repeats column names in every row')
+  assert(compactGuards[0].sql.includes("json_extract(expected.value, '$[0]')"), 'full-row guard does not use the pinned positional id index')
   let disposed = false
   const confirmations = {
     'confirm-reviewed-execution': true,
@@ -302,7 +311,44 @@ try {
   assert(JSON.stringify(successfulBinding.state.statementCounts) === JSON.stringify([91]), 'operator batch did not contain 45 guards followed by 46 writes')
   assert(successfulBinding.state.parameterCounts[0].slice(0, 45).every((count) => count === 1) && successfulBinding.state.parameterCounts[0].slice(45).every((count) => count === 0), 'guard/write parameter layout is not 45 one-parameter guards followed by parameter-free reviewed writes')
   assert(operatorResult.guard_statement_count === 45 && operatorResult.write_statement_count === 46 && operatorResult.atomic_statement_count === 91, 'operator did not report the exact atomic guard/write shape')
+  assert(operatorResult.guard_payload_bytes === compactGuardPayloadBytes, 'operator did not report the measured positional guard payload size')
   assert(operatorResult.guard_statement_changes.every((changes) => changes === 0), 'a successful full-row guard reported a write')
+
+  const reorderedColumnDir = join(work, 'reordered-column-bundle')
+  cpSync(bundleDir, reorderedColumnDir, { recursive: true })
+  const reorderedColumnManifest = readJson(join(reorderedColumnDir, 'execution-manifest.json'))
+  const reorderedFeeColumns = reorderedColumnManifest.execution.full_row_columns.fees
+  ;[reorderedFeeColumns[0], reorderedFeeColumns[1]] = [reorderedFeeColumns[1], reorderedFeeColumns[0]]
+  reorderedColumnManifest.execution_bundle_sha256 = fingerprint(Object.fromEntries(Object.entries(reorderedColumnManifest).filter(([key]) => key !== 'execution_bundle_sha256')))
+  writeFileSync(join(reorderedColumnDir, 'execution-manifest.json'), JSON.stringify(reorderedColumnManifest, null, 2))
+  let reorderedColumnsRejected = false
+  try { validateBundle(reorderedColumnDir, 'repair') }
+  catch (error) { reorderedColumnsRejected = /full-row column order/.test(String(error.message)) }
+  assert(reorderedColumnsRejected, 'self-consistent reordered positional full-row columns were accepted')
+
+  const invalidGuardRows = structuredClone(guardFixtureRows)
+  invalidGuardRows.fees[0].notes = undefined
+  let undefinedValueRejected = false
+  try { buildFullRowGuards(generatedManifest, invalidGuardRows) }
+  catch (error) { undefinedValueRejected = /cannot be represented without type loss/.test(String(error.message)) }
+  assert(undefinedValueRejected, 'undefined guard value was silently converted to JSON null')
+
+  const positionalSemanticsPath = join(work, 'positional-semantics.sqlite')
+  copyFileSync(pristineDatabasePath, positionalSemanticsPath)
+  const positionalSemanticsDb = new Database(positionalSemanticsPath)
+  const firstFeeGuard = compactGuards[0]
+  assert(positionalSemanticsDb.prepare(firstFeeGuard.sql).get(...firstFeeGuard.params).full_row_guard === 0, 'positional guard rejected an unchanged row set containing null values')
+  positionalSemanticsDb.prepare("UPDATE fees SET notes='null' WHERE id=1").run()
+  let nullTextDriftRejected = false
+  try { positionalSemanticsDb.prepare(firstFeeGuard.sql).get(...firstFeeGuard.params) }
+  catch (error) { nullTextDriftRejected = /malformed JSON/.test(String(error.message)) }
+  assert(nullTextDriftRejected, 'positional guard treated SQL NULL and text null as equal')
+  positionalSemanticsDb.prepare("UPDATE fees SET notes=NULL, amount_usd='numeric-text-sentinel' WHERE id=1").run()
+  let numericTypeDriftRejected = false
+  try { positionalSemanticsDb.prepare(firstFeeGuard.sql).get(...firstFeeGuard.params) }
+  catch (error) { numericTypeDriftRejected = /malformed JSON/.test(String(error.message)) }
+  assert(numericTypeDriftRejected, 'positional guard treated a numeric value and text storage as equal')
+  positionalSemanticsDb.close()
 
   const concurrentDatabasePath = join(work, 'operator-concurrent.sqlite')
   copyFileSync(pristineDatabasePath, concurrentDatabasePath)
@@ -385,6 +431,7 @@ try {
     bad_confirmation_rejected_before_binding: confirmationRejectedBeforeBinding,
     token_error_redacted: tokenFailureSafe,
     operator: { status: operatorResult.status, batch_calls: successfulBinding.state.batchCalls, atomic_statements: successfulBinding.state.statementCounts[0], disposed },
+    compact_guard_payload: { bytes: compactGuardPayloadBytes, maximum: maxGuardPayloadBytes, positional: true, reordered_columns_rejected: reorderedColumnsRejected, null_text_drift_rejected: nullTextDriftRejected, numeric_type_drift_rejected: numericTypeDriftRejected },
     concurrent_target_drift: { refused_atomically: concurrentDriftRefused, preserved_non_branch_edit: concurrentAfter.amount_usd, branch_changes: concurrentAfter.branch_changes, audit: concurrentAfter.audit },
     unrelated_concurrent_write: { repair_succeeded: unrelatedResult.status === 'applied_and_verified', preserved: unrelatedPreserved === 1 },
     recovery_operator: { status: recoveryOperatorResult.status, atomic_statements: recoveryOperatorBinding.state.statementCounts[0], disposed: recoveryOperatorDisposed },
