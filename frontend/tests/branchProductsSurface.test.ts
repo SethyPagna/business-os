@@ -86,7 +86,7 @@ test('compact grouped rows expose scoped quantity, barcode, detail popup and can
   // has no such column), so this outlier column and its mobile line go.
   assert.doesNotMatch(surface, /t\('sku'\)/)
   assert.doesNotMatch(surface, /product\.sku/)
-  assert.match(surface, /const columnCount = 12/)
+  assert.match(surface, /const columnCount = 11/)
   assert.match(surface, /t\('barcode'\)/)
   assert.match(surface, /onClick=\{\(\) => onOpenDetail\(row\)\}/)
   assert.match(surface, /onOpenInCatalogue\(product\)/)
@@ -133,7 +133,15 @@ test('actual surface restores existing-data columns, server totals, expand and g
   assert.ok(html.includes('aria-expanded="true"'))
   assert.ok(html.includes('#<!--') || (html.includes('#1') && html.includes('#2')), 'merged actions identify their original records')
   assert.ok(!html.includes('adjust_stock'), 'no permission callback means no adjust action')
-  assert.ok(render(React.createElement(api.default, { ...props, onAdjust: () => {} })).includes('adjust_stock'))
+  const withAdjust = render(React.createElement(api.default, { ...props, onAdjust: () => {} }))
+  assert.ok(withAdjust.includes('adjust_stock'))
+  assert.ok(withAdjust.includes('data-inventory-product-menu'), 'desktop product cell keeps a compact reachable action menu')
+  assert.equal((html.match(/<th /g) || []).length, 11, 'desktop header drops the dedicated Actions column')
+  const dataRows = Array.from(html.matchAll(/<tr class="[^"]*hover:bg-blue[^"]*">([\s\S]*?)<\/tr>/g))
+  assert.equal(dataRows.length, 1, 'the duplicate family renders one merged desktop product row')
+  const firstDataRow = dataRows[0]
+  assert.ok(firstDataRow, 'the merged desktop row is available for cell-count parity')
+  assert.equal((firstDataRow[1].match(/<td /g) || []).length, 11, 'the merged product row aligns with the 11-column header')
 })
 test('real loading/error/empty render paths and absent metrics never fake financial zero', () => {
   assert.ok(render(React.createElement(api.default, { ...props, loading: true })).includes('animate-pulse'))

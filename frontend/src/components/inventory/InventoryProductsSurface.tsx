@@ -123,7 +123,7 @@ export default function InventoryProductsSurface({
   const groups = useMemo(() => groupInventoryProducts(items), [items])
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
   const toggle = (key: string) => setCollapsed((old) => { const next = new Set(old); if (next.has(key)) next.delete(key); else next.add(key); return next })
-  const columnCount = 12
+  const columnCount = 11
   const metric = (product: InventoryProductRow, field: InventoryMetric) => mergedInventoryMetric(product, items, field)
   const quantity = (product: InventoryProductRow) => metric(product, 'display_quantity') ?? scopedProductQuantity(product, branchFilter)
   // Money cell shape copied from the Sales list's amount cell: the USD figure
@@ -167,7 +167,7 @@ export default function InventoryProductsSurface({
   const branchLines = (product: InventoryProductRow) => (product.branch_stock || [])
     .filter((row) => branchFilter === 'all' || String(row.branch_id) === branchFilter)
     .map((row) => <div key={String(row.branch_id)} className="break-words">{row.branch_name || row.branch_id}: <span className="font-semibold">{Number(row.quantity) || 0}</span></div>)
-  const actions = (product: InventoryProductRow) => {
+  const mobileActions = (product: InventoryProductRow) => {
     const ids = new Set((product.__mergedProductIds || [product.id]).map(Number))
     const members = items.filter((row) => ids.has(Number(row.id)))
     const buttons = members.map((row) => <div key={String(row.id)} className="flex flex-wrap items-center gap-2">
@@ -179,6 +179,26 @@ export default function InventoryProductsSurface({
       {members.length > 1 ? <details><summary className="min-h-11 cursor-pointer py-2">{t('view_details') || 'View details'} ({members.length})</summary>{buttons}</details> : buttons}
       <button type="button" className="inline-flex min-h-11 items-center gap-1 text-primary-600" onClick={() => onOpenInCatalogue(product)}>{t('products') || 'Products'} <ExternalLink className="h-3.5 w-3.5" /></button>
     </div>
+  }
+  // Desktop keeps every action in the product cell instead of reserving a
+  // sparse Actions column. Merged rows still expose each original member so
+  // View details and Adjust retain their real-record targets.
+  const productMenu = (product: InventoryProductRow) => {
+    const ids = new Set((product.__mergedProductIds || [product.id]).map(Number))
+    const members = items.filter((row) => ids.has(Number(row.id)))
+    return <details data-inventory-product-menu="" className="relative shrink-0" onClick={(event) => event.stopPropagation()}>
+      <summary className="inline-flex min-h-8 min-w-8 cursor-pointer items-center justify-center rounded-md px-1 text-slate-500 hover:bg-slate-100 hover:text-primary-600 dark:hover:bg-slate-800" aria-label={`${t('actions') || 'Actions'}: ${product.name || t('product') || 'Product'}`}>
+        <span aria-hidden="true">⋯</span><span className="sr-only">{t('actions') || 'Actions'}</span>
+      </summary>
+      <div className="absolute z-10 mt-1 min-w-36 rounded-lg border border-slate-200 bg-white p-1 shadow-lg dark:border-slate-700 dark:bg-slate-900">
+        {members.map((row) => <div key={String(row.id)} className="flex flex-col border-b border-slate-100 py-0.5 last:border-0 dark:border-slate-800">
+          {members.length > 1 ? <span className="px-2 text-[11px] text-slate-500">#{row.id}</span> : null}
+          <button type="button" className="min-h-8 px-2 text-left text-xs text-primary-600 hover:underline" onClick={() => onOpenDetail(row)}>{t('view_details') || 'View details'}</button>
+          {onAdjust ? <button type="button" className="min-h-8 px-2 text-left text-xs text-primary-600 hover:underline" onClick={() => onAdjust(row)}>{t('adjust_stock') || 'Adjust stock'}</button> : null}
+        </div>)}
+        <button type="button" className="inline-flex min-h-8 w-full items-center gap-1 px-2 text-left text-xs text-primary-600 hover:underline" onClick={() => onOpenInCatalogue(product)}>{t('products') || 'Products'} <ExternalLink className="h-3.5 w-3.5" /></button>
+      </div>
+    </details>
   }
   const summaryFields = [['total_products', 'products'], ['in_stock', 'in_stock'], ['low_stock', 'low_stock'], ['out_of_stock', 'out_of_stock'], ['stock_value_usd', 'stock_val']] as const
 
@@ -206,7 +226,6 @@ export default function InventoryProductsSurface({
               <th className="px-3 py-1.5 text-right">{t('revenue') || 'Revenue'}</th>
               <th className="px-3 py-1.5 text-right">{t('cogs') || 'COGS'}</th>
               <th className="px-3 py-1.5 text-right text-blue-600 dark:text-blue-400">{t('profit') || 'Profit'}</th>
-              <th className="px-3 py-1.5 text-right">{t('actions') || 'Actions'}</th>
             </tr>
           </thead>
           <tbody>
@@ -240,7 +259,7 @@ export default function InventoryProductsSurface({
                         the Products page and its group titles. The brand/category
                         line under it is derived metadata, not the name, and keeps
                         ordinary truncation. */}
-                    <td className="max-w-[18rem] px-3 py-1.5"><div className="scroll-x-clean font-medium text-slate-800 dark:text-slate-100">{product.name || '—'}</div><div className="truncate text-[10px] text-slate-400">{[product.brand, product.category].filter(Boolean).join(' · ')}</div></td>
+                    <td className="max-w-[18rem] px-3 py-1.5"><div className="flex min-w-0 items-start gap-1"><div className="min-w-0 flex-1"><div className="scroll-x-clean font-medium text-slate-800 dark:text-slate-100">{product.name || '—'}</div><div className="truncate text-[10px] text-slate-400">{[product.brand, product.category].filter(Boolean).join(' · ')}</div></div>{productMenu(product)}</div></td>
                     <td className="px-3 py-1.5 font-mono text-slate-500">{product.barcode || '—'}</td>
                     <td className="px-3 py-1.5 text-right font-semibold">{quantity(product)}</td>
                     <td className="min-w-28 px-3 py-1.5 text-[11px]">{branchLines(product)}</td>
@@ -251,7 +270,6 @@ export default function InventoryProductsSurface({
                     <td className="px-3 py-1.5">{money(metric(product, 'revenue_usd'), metric(product, 'revenue_khr'))}</td>
                     <td className="px-3 py-1.5">{money(metric(product, 'cogs_usd'), metric(product, 'cogs_khr'))}</td>
                     <td className="px-3 py-1.5">{money(metric(product, 'profit_usd'), null, profitTone(metric(product, 'profit_usd')))}</td>
-                    <td className="px-3 py-1.5">{actions(product)}</td>
                   </tr>
                 ))}
               </Fragment>
@@ -287,7 +305,7 @@ export default function InventoryProductsSurface({
                     <dt>{t('cogs') || 'COGS'}</dt><dd>{money(metric(product, 'cogs_usd'), metric(product, 'cogs_khr'))}</dd>
                     <dt className="text-blue-600 dark:text-blue-400">{t('profit') || 'Profit'}</dt><dd>{money(metric(product, 'profit_usd'), null, profitTone(metric(product, 'profit_usd')))}</dd>
                   </dl>
-                  {actions(product)}
+                  {mobileActions(product)}
                 </div>)}
               </div>)}
       </div>
