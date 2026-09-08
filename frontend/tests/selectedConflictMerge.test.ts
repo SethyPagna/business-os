@@ -78,6 +78,7 @@ const previewCases = [
 assert.equal(selectedConflictChoicesComplete(previewCases, {}), false)
 assert.equal(selectedConflictChoicesComplete(previewCases, { a: 'write_off' }), true)
 assert.equal(selectedConflictChoicesComplete([{ ...previewCases[0], blocked: { code: 'blocked' } }], {}), false, 'a selection with no actionable cases cannot confirm')
+assert.equal(selectedConflictChoicesComplete([previewCases[0], { ...previewCases[1], blocked: { code: 'blocked' } }], { a: 'write_off' }), false, 'one blocked case stops the complete reviewed manifest')
 assert.deepEqual(preserveSelectedConflictChoices(previewCases, previewCases, { a: 'merge' }), { a: 'merge' })
 assert.deepEqual(preserveSelectedConflictChoices(previewCases, [{ ...previewCases[0], merge_id: 9 }], { a: 'merge' }), {}, 'a changed manifest cannot retain a prior stock decision')
 
