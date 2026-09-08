@@ -5,16 +5,16 @@
 // SEPARATE Filters fold, a separate style toggle and a separate overflow
 // menu -- four controls competing with the search box for the one row, which
 // is why the search kept getting squeezed. Everything except search, the date
-// range and the view picker now lives in here, in one menu, in this order:
+// range now lives in here, in one menu, in this order:
 //
+//   View             permission-scoped report picker
 //   Filters          branch / status / payment selects (the caller's nodes)
 //   Display settings Excel vs Receipt style
-//   Basis · Profit · Compare · Currency   the calculation options
+//   Currency         USD (default) / KHR / Both
 //
-// Each option is a single-select chip group; the canonical definition is
-// always the default and labelled as such, so a person can never lose the
-// app-wide revenue definition by accident. Choices persist (localStorage
-// bos:reports:options) through ReportsHub. One Reset clears the whole menu.
+// Revenue basis, gross-profit headline and comparison are canonical and no
+// longer selectable here. Choices persist through ReportsHub. One Reset
+// clears the whole menu, including the explicit display-style choice.
 import type { ReactNode, RefObject } from 'react'
 import Receipt from 'lucide-react/dist/esm/icons/receipt.js'
 import Table2 from 'lucide-react/dist/esm/icons/table-2.js'

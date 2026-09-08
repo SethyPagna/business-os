@@ -41,6 +41,8 @@ assert.match(hub, /reports-desktop-controls report-segment/)
 
 assert.match(options, /className="reports-fold-panel reports-filter-fold"/)
 assert.match(options, /data-reports-fold=""/)
+assert.match(options, /data-reports-filter=""/)
+assert.match(css, /\.reports-filter-trigger\s*\{[^}]*background:\s*var\(--ui-surface\)[^}]*color:\s*var\(--ui-ink\)/, 'the report filter trigger keeps a high-contrast surface')
 assert.match(css, /body\.lang-km \.reports-fold-panel/)
 assert.match(css, /body\.lang-km \[data-reports-fold\]/)
 assert.match(css, /--ui-km-boost:\s*1\.2/)

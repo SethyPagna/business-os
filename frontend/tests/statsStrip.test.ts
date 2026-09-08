@@ -203,13 +203,11 @@ test('secondary controls stay on the Stats-chip row whether the strip is folded 
   assert.ok(!/hidden sm:inline">\{tr\('add_return'/.test(returns), 'the add label never hides on phones')
 })
 
-test('Part 548: the Reports summary lines show Profit on every viewport', () => {
-  // Since the Reports redesign every view renders its figures through the
-  // ReportFrame summary line (N sales | Revenue | Refunds | Gross profit);
-  // nothing in a view may hide a figure below the sm breakpoint.
+test('Part 548: report figures remain visible on every viewport without duplicate Overview prose', () => {
+  // Detail views retain their compact summary. Overview renders the canonical
+  // income-statement rows directly, so a second prose summary cannot drift.
   for (const rel of [
     'src/components/sales/reports/SalesListReport.tsx',
-    'src/components/sales/reports/OverviewReport.tsx',
     'src/components/sales/reports/PeriodReport.tsx',
     'src/components/sales/reports/GroupedReport.tsx',
   ]) {
@@ -217,8 +215,12 @@ test('Part 548: the Reports summary lines show Profit on every viewport', () => 
     assert.match(src, /tr\('rpt_gross_profit',\s*'[^']+'\)/, `${rel} renders the shared profit label in its summary`)
     assert.ok(!/hidden sm:inline/.test(src), `${rel} never hides a figure below the sm breakpoint`)
   }
+  const overview = read('src/components/sales/reports/OverviewReport.tsx')
+  assert.ok(overview.includes('buildIncomeStatement('), 'Overview retains the canonical profit statement')
+  assert.ok(overview.includes('lines.map((l)'), 'Overview renders all permitted statement rows on every viewport')
+  assert.doesNotMatch(overview, /summary=\{|summaryNote=/, 'Overview no longer repeats the statement as prose')
   const frame = read('src/components/sales/reports/ReportFrame.tsx')
-  assert.ok(frame.includes('data-report-summary'), 'the ReportFrame owns the one summary line')
+  assert.ok(frame.includes('data-report-summary'), 'ReportFrame still supports detail-view summaries')
 })
 
 test('Part 549/552: the Reports status/method filters are compact chip-selects', () => {

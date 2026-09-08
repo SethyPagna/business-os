@@ -19,7 +19,6 @@ import Printer from 'lucide-react/dist/esm/icons/printer.js'
 import { getReportOverview } from '../../../api/reportsTransport.ts'
 import { downloadCSV } from '../../../utils/csv.ts'
 import { openPrintExport } from '../../../utils/exportOptions.ts'
-import { fmtDateOnly } from '../../../utils/formatters.ts'
 import InfoHint from '../../shared/InfoHint.tsx'
 import { FEE_TYPE_OPTIONS } from '../../fees/FeeForm.tsx'
 import { Chip, DenseTable, Fold, OverflowMenu, Skeleton } from '../../shared/kit'
@@ -27,21 +26,13 @@ import ReceiptSheet, { type ReceiptBlock } from './ReceiptSheet.tsx'
 import ReportFrame, { useReportData } from './ReportFrame.tsx'
 import ReportTable, { type ReportColumn } from './ReportTable.tsx'
 import {
-  BASIS_LABELS,
-  basisValue,
   buildIncomeStatement,
-  countLabel,
   delta,
-  fmtInt,
-  fmtPct,
   formatSignedPct,
-  hasProfit,
-  joinSummary,
   normalizeTotals,
   num,
   pct,
   receiptLineKind,
-  REPORT_NOUNS,
   reportFileName,
   reportQueryParams,
   STATEMENT_GROUPS,
@@ -109,31 +100,6 @@ export default function OverviewReport(p: ReportViewProps) {
       }),
     [sales, prevSales, expenses, prevExpenses, options.profitMode, p.khrToUsd],
   )
-
-  const basis = basisValue(sales, options.basis)
-  const basisDelta = prevSales ? delta(basis, basisValue(prevSales, options.basis)) : null
-  const profitLine = lines.find((l) => l.key === 'gross_profit') || null
-  const netLine = lines.find((l) => l.key === 'net_result') || null
-  const basisLabel = tr(BASIS_LABELS[options.basis].key, BASIS_LABELS[options.basis].fallback)
-
-  const summary = sales
-    ? joinSummary([
-        countLabel(sales.tx_count, REPORT_NOUNS.sale, tr),
-        `${basisLabel} ${fmtMoney(basis)}${basisDelta && basisDelta.pct != null ? ` (${formatSignedPct(basisDelta.pct)})` : ''}`,
-        sales.refund_usd ? `${tr('refunds', 'Refunds')} ${fmtMoney(sales.refund_usd)}` : null,
-        returns ? countLabel(returns.count, REPORT_NOUNS.return, tr) : null,
-        expenses ? `${tr('fees', 'Expenses')} ${fmtMoney(num(expenses.amount_usd), num(expenses.amount_khr))}` : null,
-        profitLine ? `${tr('rpt_gross_profit', 'Total Profit')} ${fmtMoney(profitLine.usd)} (${fmtPct(pct(profitLine.usd, basis))})` : null,
-        netLine ? `${tr('rpt_total_profit', 'Final Profit')} ${fmtMoney(netLine.usd)}` : null,
-        sales.pending_revenue_usd ? `${tr('rpt_pending_credit', 'Not Paid')} ${fmtMoney(sales.pending_revenue_usd)}` : null,
-      ])
-    : !sales && (returns || expenses)
-      ? joinSummary([
-          returns ? `${countLabel(returns.count, REPORT_NOUNS.return, tr)} ${fmtMoney(num(returns.refund_usd), num(returns.refund_khr))}` : null,
-          expenses ? `${countLabel(expenses.count, REPORT_NOUNS.expense, tr)} ${fmtMoney(num(expenses.amount_usd), num(expenses.amount_khr))}` : null,
-        ])
-      : ''
-  const summaryNote = compare && data?.previous_range ? `${tr('rpt_vs_prev', 'vs')} ${fmtDateOnly(data.previous_range.startDate)} – ${fmtDateOnly(data.previous_range.endDate)}` : undefined
 
   const groupLabel = (g: StatementGroup) => statementGroupLabel(g, tr)
   const lineLabel = (l: StatementLine) => tr(l.labelKey, l.fallback)
@@ -335,23 +301,9 @@ export default function OverviewReport(p: ReportViewProps) {
   )
 
   return (
-    <ReportFrame
-      title={tr(view.labelKey, view.fallback)}
-      hint={{
-        label: tr(view.labelKey, view.fallback),
-        text: tr('rpt_hint_overview', 'Revenue = net sales of recognized sales minus refunds; tax and delivery are excluded. Cost and profit are visible to admins only.'),
-      }}
-      actions={<OverflowMenu label={tr('export', 'Export')} items={exportMenuItems(tr, exportCsv, exportPrint, { csv: <Download className="h-3.5 w-3.5" />, print: <Printer className="h-3.5 w-3.5" /> })} />}
-      summary={summary}
-      summaryNote={summaryNote}
-      error={state.error}
-      onRetry={state.reload}
-      retryLabel={tr('retry', 'Retry')}
-    >
-      <div className="reports-overview-statement">{statementBody}</div>
-      {!state.loading && !state.error && !sales && !returns && !expenses ? <p className="text-[length:var(--ui-size-meta)] text-[var(--ui-ink-3)]">{labels.empty}</p> : null}
+    <>
       {chips.length ? (
-        <div className="flex flex-wrap gap-1 pt-1">
+        <div className="reports-overview-tabs" aria-label={tr('details', 'Details')}>
           {chips.map((c) => (
             <span key={c.id} ref={(el) => { chipRefs.current[c.id] = el }}>
               <Chip selected={open === c.id} count={c.count} onClick={() => openFold(c.id)}>
@@ -361,6 +313,20 @@ export default function OverviewReport(p: ReportViewProps) {
           ))}
         </div>
       ) : null}
+      <ReportFrame
+        title={tr(view.labelKey, view.fallback)}
+        hint={{
+          label: tr(view.labelKey, view.fallback),
+          text: tr('rpt_hint_overview', 'Revenue = net sales of recognized sales minus refunds; tax and delivery are excluded. Cost and profit are visible to admins only.'),
+        }}
+        actions={<OverflowMenu label={tr('export', 'Export')} items={exportMenuItems(tr, exportCsv, exportPrint, { csv: <Download className="h-3.5 w-3.5" />, print: <Printer className="h-3.5 w-3.5" /> })} />}
+        error={state.error}
+        onRetry={state.reload}
+        retryLabel={tr('retry', 'Retry')}
+      >
+        <div className="reports-overview-statement">{statementBody}</div>
+        {!state.loading && !state.error && !sales && !returns && !expenses ? <p className="text-[length:var(--ui-size-meta)] text-[var(--ui-ink-3)]">{labels.empty}</p> : null}
+      </ReportFrame>
       <Fold className="reports-fold-panel" open={open != null} onClose={() => setOpen(null)} anchorRef={anchorRef} size="lg" title={chips.find((c) => c.id === open)?.label || ''}>
         <div className="p-2">
           {open === 'payments' ? <ReportTable surfaceKey="reports-overview-payments" columns={paymentColumns} rows={payments} rowKey={(r) => r.key} style={style} fmtMoney={fmtMoney} labels={labels} /> : null}
@@ -371,6 +337,6 @@ export default function OverviewReport(p: ReportViewProps) {
       </Fold>
       {/* t is threaded for status labels in sibling views; keep the prop contract identical. */}
       <span hidden>{typeof t === 'function' ? '' : null}</span>
-    </ReportFrame>
+    </>
   )
 }

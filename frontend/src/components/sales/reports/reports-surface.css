@@ -251,6 +251,66 @@
   background: var(--ui-warn-soft);
 }
 
+/* The report filter is a compact, spreadsheet-like sheet inside the shared
+   Fold. Its darker grid belongs only to this report surface; the shared Fold
+   and every other caller keep their existing appearance. */
+.reports-filter-fold {
+  max-width: calc(100vw - 16px);
+}
+
+.reports-filter-grid {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--ui-line-2);
+  border-radius: var(--ui-radius);
+  background: var(--ui-line-2);
+}
+
+.reports-filter-group {
+  min-width: 0;
+  padding: 7px 8px;
+  background: var(--ui-surface-2);
+}
+
+.reports-filter-group > div:last-child,
+.reports-filter-group button {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* The trigger stays a high-contrast white surface in light mode even when a
+   count is active. Dark mode follows the scoped surface token. */
+.reports-filter-trigger {
+  border-color: var(--ui-ink-2);
+  background: var(--ui-surface);
+  color: var(--ui-ink);
+}
+
+/* Overview breakdowns are navigation-like buttons directly after the filter
+   controls. Long English/Khmer labels scroll inside this strip rather than
+   widening the document or the report frame. */
+.reports-overview-tabs {
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+  gap: 6px;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  padding: 1px 0 3px;
+  scrollbar-width: thin;
+}
+
+.reports-overview-tabs > span {
+  flex: 0 0 auto;
+}
+
+.reports-overview-tabs button {
+  min-height: 36px;
+  white-space: nowrap;
+}
+
 /* The live-shift block is the one report segment whose BODY is a component
    shared with three non-report callers (FeesPage, Sales, ShiftHistoryModal),
    so ShiftSummary keeps drawing its own rounded gray-200 card and that card
@@ -346,14 +406,14 @@
 }
 
 .reports-mobile-actions {
-  display: grid;
-  grid-template-columns: 44px minmax(0, 1fr);
+  display: flex;
+  justify-content: flex-end;
   gap: 8px;
 }
 
 .reports-mobile-actions > span,
 .reports-mobile-actions > span > button { width: 44px; min-width: 44px; height: 44px; }
-.reports-mobile-show { width: 100%; min-height: 44px; }
+.reports-mobile-show { width: auto; min-width: 5.5rem; min-height: 44px; padding-inline: 16px; }
 
 .reports-desktop-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .reports-desktop-primary { flex-direction: row; flex-wrap: wrap; max-width: 100%; }
