@@ -390,7 +390,7 @@ await check('Inventory rejects same, unknown, inactive, duplicate-role, reasonle
   })
 })
 
-await check('offline replay still dispatches Inventory transfer to the same guarded route with its stable request id', () => {
+await check('offline replay still dispatches Inventory transfer to the same guarded route and forwards its request id', () => {
   const sync = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'sync.ts'), 'utf8')
   const transport = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'src', 'api', 'inventoryWriteTransport.ts'), 'utf8')
   assert.match(sync, /'inventory\.transfer': \{ method: 'POST', path: '\/api\/inventory\/transfer' \}/)

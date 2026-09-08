@@ -14,7 +14,7 @@ import { audit } from '../lib/audit'
 import { formatTransferTelegramLines, sendTelegramEvent } from '../lib/telegram'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { findIdentityMatch, findIdentityMatches, type ProductIdentityRow } from '../lib/productIdentity'
-import { decrementBatchStockStatement, decrementBatchStockStrictStatement, incrementBatchStockStatement, resolveDestinationBatch, readFifoLotAvailability, allocateAcrossLots } from '../lib/productBatches'
+import { decrementBatchStockStrictStatement, incrementBatchStockStatement, resolveDestinationBatch, readFifoLotAvailability, allocateAcrossLots } from '../lib/productBatches'
 import { branchUpdateStatements } from '../lib/branchWrites'
 import {
   CANONICAL_BRANCH_CONFIGURATION_CODE,
@@ -497,7 +497,7 @@ app.post('/transfer', async (c) => {
   }
   if (sourceBatch && destBatchId != null) {
     statements.push(
-      decrementBatchStockStatement(sourceBatch.id, fromBranchId, quantity),
+      decrementBatchStockStrictStatement(sourceBatch.id, fromBranchId, quantity),
       incrementBatchStockStatement(destBatchId, toBranchId, quantity),
     )
   } else if (!sourceBatch) {
@@ -520,9 +520,8 @@ app.post('/transfer', async (c) => {
     // full take -- minting the exact per-lot drift this fix exists to prevent.
     // Strict instead violates branch_batch_stock's CHECK(quantity >= 0) and
     // aborts the whole atomic batch, so the transfer cleanly fails and retries
-    // on fresh availability. (The explicit-batch leg above stays clamped: it
-    // decrements a user-picked lot whose quantity may legitimately trail the
-    // branch total under incomplete attribution.)
+    // on fresh availability. The explicit-batch leg above is strict for the
+    // same reason: its availability check also precedes this atomic batch.
     const sourceLots = await readFifoLotAvailability(db, productId, fromBranchId)
     const { takes } = allocateAcrossLots(sourceLots, quantity)
     for (const take of takes) {
@@ -835,7 +834,7 @@ app.post('/transfer-bulk', async (c) => {
 
     if (sourceBatchForItem && destBatchIdForItem != null) {
       statements.push(
-        decrementBatchStockStatement(sourceBatchForItem.id, fromBranchId, item.quantity),
+        decrementBatchStockStrictStatement(sourceBatchForItem.id, fromBranchId, item.quantity),
         incrementBatchStockStatement(destBatchIdForItem, toBranchId, item.quantity),
       )
     } else if (item.batchId == null) {
