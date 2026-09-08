@@ -88,8 +88,15 @@ import { applyUnifiedStockAdd, applyUnifiedStockSale, batchIdentity, ensureUnifi
 import { parseStockAction, saleGroupKeyFor } from './stockActionResolver'
 import { applyHistoricalSaleImport, MAX_HISTORICAL_SALE_LINES } from './salesImportCommit'
 import { getUnifiedStockMode, type UnifiedStockResolvedRow } from './stockActionImport'
-import { branchCanSell, branchRoleFromName, type BranchRole } from './branchRoles'
+import { branchCanSell } from './branchRoles'
 import { WAREHOUSE_NOT_SELLABLE_ERROR } from './branchRoleGuards'
+import {
+  indexCanonicalImportBranches,
+  resolveCanonicalImportBranch,
+  validateCanonicalImportBranchIds,
+  withCanonicalImportBranchWriteGuard,
+  type CanonicalImportBranchRow,
+} from './importBranchAuthority'
 import {
   normalizeImageMatchKey,
   MAX_IMAGES_PER_PRODUCT,
@@ -517,36 +524,6 @@ function str(value: unknown): string {
 
 function lower(value: unknown): string {
   return str(value).toLowerCase()
-}
-
-type ImportBranchRow = { id: number; name: string; is_default?: number | null; is_active?: number | null }
-
-function indexCanonicalImportBranches(rows: ImportBranchRow[]): {
-  byRole: Map<Exclude<BranchRole, 'other'>, ImportBranchRow[]>
-  uniqueDefault: ImportBranchRow | null
-} {
-  const byRole = new Map<Exclude<BranchRole, 'other'>, ImportBranchRow[]>([['shop', []], ['warehouse', []]])
-  const defaults: ImportBranchRow[] = []
-  for (const row of rows) {
-    if (Number(row.is_active ?? 1) !== 1) continue
-    const role = branchRoleFromName(row.name)
-    if (role === 'other') continue
-    byRole.get(role)!.push(row)
-    if (Number(row.is_default ?? 0) === 1) defaults.push(row)
-  }
-  return { byRole, uniqueDefault: defaults.length === 1 ? defaults[0] : null }
-}
-
-function resolveCanonicalImportBranch(
-  index: ReturnType<typeof indexCanonicalImportBranches>,
-  requestedName: unknown,
-): ImportBranchRow | null {
-  const name = str(requestedName)
-  if (!name) return index.uniqueDefault
-  const role = branchRoleFromName(name)
-  if (role === 'other') return null
-  const matches = index.byRole.get(role) || []
-  return matches.length === 1 ? matches[0] : null
 }
 
 function toBool01(value: unknown, fallback = 1): number {
@@ -2566,7 +2543,7 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
   const products = await db
     .prepare(`SELECT id, sku, barcode, name, stock_quantity, cost_price_usd, cost_price_khr FROM products`)
     .all<{ id: number; sku: string | null; barcode: string | null; name: string | null; stock_quantity: number; cost_price_usd: number | null; cost_price_khr: number | null }>()
-  const branches = await db.prepare(`SELECT id, name, is_default, is_active FROM branches`).all<ImportBranchRow>()
+  const branches = await db.prepare(`SELECT id, name, is_default, is_active FROM branches`).all<CanonicalImportBranchRow>()
   // Identity rule (same shape as classifyProducts): an sku/barcode can be
   // legitimately reused across DIFFERENT-name products, so these maps hold
   // every candidate instead of last-write-wins, and a row that names its
@@ -4263,19 +4240,16 @@ export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?:
 // a branch, fall back to a synthetic Main Branch, or write after its branch
 // identity was deactivated/renamed/duplicated during review.
 export async function validateResolvedImportBranches(db: D1Compat, actionable: ImportRowResult[]): Promise<void> {
-  const rows = await db.prepare(`SELECT id, name, is_default, is_active FROM branches`).all<ImportBranchRow>()
-  const index = indexCanonicalImportBranches(rows)
+  if (!actionable.length) return
+  const branchIds: number[] = []
   for (const result of actionable) {
     const data = result.data as Record<string, unknown>
     if (data.branch_name_pending != null) throw new Error('Import contains an unresolved branch; review it before applying.')
     const branchId = Number(data.branch_id)
-    const row = rows.find((candidate) => Number(candidate.id) === branchId)
-    const role = row ? branchRoleFromName(row.name) : 'other'
-    const matches = role === 'other' ? [] : index.byRole.get(role) || []
-    if (!Number.isSafeInteger(branchId) || branchId <= 0 || !row || Number(row.is_active ?? 0) !== 1 || role === 'other' || matches.length !== 1) {
-      throw new Error('Import branch is missing, inactive, non-canonical, or ambiguous; review the import before applying.')
-    }
+    branchIds.push(branchId)
   }
+  const error = await validateCanonicalImportBranchIds(db, branchIds)
+  if (error) throw new Error(`${error} Review the import before applying.`)
 }
 
 // Same-batch duplicate merge: two brand-new rows in ONE file with no
@@ -4485,38 +4459,44 @@ export async function reconcileDuplicateProductSnapshotRows(db: D1Compat, jobId:
   `).all<DuplicateProductSnapshotGroup>({ id: jobId })
 
   if (!groups.length) return 0
-
-  const branchStatements = groups.map((group) => ({
-    sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@productId, @branchId, @quantity)
-          ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = excluded.quantity`,
-    params: { productId: group.product_id, branchId: group.branch_id, quantity: group.expected_quantity },
-  }))
-  await runD1BatchInChunks(db, branchStatements)
+  const branchIds = groups.map((group) => Number(group.branch_id))
+  const branchAuthorityError = await validateCanonicalImportBranchIds(db, branchIds)
+  if (branchAuthorityError) throw new Error(branchAuthorityError)
+  const guardedDb = withCanonicalImportBranchWriteGuard(db, branchIds)
 
   // Only a product created by this job owns an opening "Received via product
   // import" lot from this write path. Existing-product snapshot updates have
   // intentionally never fabricated/rewritten lots, so keep that contract.
-  const openingLotStatements = groups
-    .filter((group) => group.created_in_job > 0)
-    .map((group) => ({
-      sql: `INSERT INTO branch_batch_stock (batch_id, branch_id, quantity)
-            SELECT id, @branchId, @quantity
-            FROM product_batches
-            WHERE variant_product_id = @productId AND notes = 'Received via product import'
-            ORDER BY id ASC LIMIT 1
-            ON CONFLICT(batch_id, branch_id) DO UPDATE SET quantity = excluded.quantity, updated_at = datetime('now')`,
+  // One corrected product+branch snapshot is one batch: branch stock, its
+  // opening lot when owned by this job, and aggregate product stock cannot
+  // be separated by a concurrent branch rename/deactivation.
+  const correctionGroups = groups.map((group) => {
+    const statements: Array<{ sql: string; params: Record<string, unknown> }> = [{
+      sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@productId, @branchId, @quantity)
+            ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = excluded.quantity`,
       params: { productId: group.product_id, branchId: group.branch_id, quantity: group.expected_quantity },
-    }))
-  if (openingLotStatements.length) await runD1BatchInChunks(db, openingLotStatements)
-
-  const productStatements = [...new Set(groups.map((group) => group.product_id))].map((productId) => ({
-    sql: `UPDATE products
-          SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @productId),
-              updated_at = CURRENT_TIMESTAMP
-          WHERE id = @productId`,
-    params: { productId },
-  }))
-  await runD1BatchInChunks(db, productStatements)
+    }]
+    if (group.created_in_job > 0) {
+      statements.push({
+        sql: `INSERT INTO branch_batch_stock (batch_id, branch_id, quantity)
+              SELECT id, @branchId, @quantity
+              FROM product_batches
+              WHERE variant_product_id = @productId AND notes = 'Received via product import'
+              ORDER BY id ASC LIMIT 1
+              ON CONFLICT(batch_id, branch_id) DO UPDATE SET quantity = excluded.quantity, updated_at = datetime('now')`,
+        params: { productId: group.product_id, branchId: group.branch_id, quantity: group.expected_quantity },
+      })
+    }
+    statements.push({
+      sql: `UPDATE products
+            SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @productId),
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = @productId`,
+      params: { productId: group.product_id },
+    })
+    return statements
+  })
+  await runD1BatchGroupsInChunks(guardedDb, correctionGroups)
   return groups.length
 }
 
@@ -5500,8 +5480,12 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     const productReplaceColumns = productImportMode === 'replace_columns' ? getProductImportReplaceColumns(job.policy_json) : []
 
     const actionable = results.filter((r) => r.action === 'create' || r.action === 'update')
+    let importWriteDb = db
     if (job.type === 'products' || job.type === 'inventory' || job.type === 'sales') {
       await validateResolvedImportBranches(db, actionable)
+      if ((job.type === 'products' || job.type === 'inventory') && actionable.length) {
+        importWriteDb = withCanonicalImportBranchWriteGuard(db, actionable.map((result) => Number((result.data as Record<string, unknown>).branch_id)))
+      }
       // Sales line items are nested one level deeper (data.items[]), each
       // carrying its own copy of the same validated order-level branch_id.
       if (job.type === 'sales') {
@@ -5530,6 +5514,11 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // dedupes) stay in the plain `statements` path, re-runnable as before.
     const GENERIC_APPLY_GUARD_ACTION = 'generic_apply'
     const guardedGroups: Array<Array<{ sql: string; params: Record<string, unknown> }>> = []
+    // Product catalog + stock/batch statements for one imported row must
+    // stay in one D1 batch. Besides preserving the row's own invariants,
+    // this prevents a branch identity change between a product INSERT and
+    // its branch_stock/batch writes from leaving a half-applied row.
+    const productStatementGroups: Array<Array<{ sql: string; params: Record<string, unknown> }>> = []
     const appliedRowGuards = new Set(
       (await db.prepare(`SELECT guard_key FROM import_stock_action_guards WHERE job_id = @id AND action_key = @ak`)
         .all<{ guard_key: string }>({ id: jobId, ak: GENERIC_APPLY_GUARD_ACTION })).map((g) => g.guard_key),
@@ -5720,6 +5709,27 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       for (const r of actionable) {
         const d = r.data as Record<string, unknown> & { branch_id: number | null; branch_id_explicit: number }
         const receiptUnitCostUsd = Number(d.__costPriceUsdProvided) === 1 ? d.cost_price_usd : null
+        let rowWriteGroup: Array<{ sql: string; params: Record<string, unknown> }> = []
+        let rowWriteGroupFinished = false
+        const finishProductRowWriteGroup = () => {
+          if (rowWriteGroupFinished) return
+          rowWriteGroupFinished = true
+          const mergeRecords = autoMergeRecords.filter((record) => record.rowNumber === r.rowNumber)
+          for (const record of mergeRecords) {
+            rowWriteGroup.push({
+              sql: `INSERT INTO import_auto_merges (product_id, import_job_id, row_number, losing_json, created_at)
+                    VALUES (@product_id, @import_job_id, @row_number, @losing_json, @created_at)`,
+              params: { product_id: record.productId, import_job_id: jobId, row_number: record.rowNumber, losing_json: record.losingJson, created_at: nowIso },
+            })
+          }
+          if (mergeRecords.length) {
+            rowWriteGroup.push({
+              sql: 'UPDATE products SET auto_merged_count = COALESCE(auto_merged_count, 0) + @count WHERE id = @id',
+              params: { count: mergeRecords.length, id: mergeRecords[0].productId },
+            })
+          }
+          if (rowWriteGroup.length) productStatementGroups.push(rowWriteGroup)
+        }
         // Populates the same name_normalized/unit_normalized/brand_compact
         // columns lib/productWrites.ts's insertRow/updateRow compute for
         // the manual Add/Edit-product path (see migrations/0037_product_
@@ -5759,10 +5769,11 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
             // column. Contrast with the legacy/default branch further
             // down, which does write branch_stock for an explicit-branch
             // row.
-            statements.push({
+            rowWriteGroup.push({
               sql: `UPDATE products SET name=@name, name_normalized=@name_normalized, sku=@sku, barcode=@barcode, category=@category, categories=@categories, unit=@unit, unit_normalized=@unit_normalized, description=@description, brand=@brand, brands=@brands, brand_compact=@brand_compact, supplier=@supplier, selling_price_usd=@selling_price_usd, selling_price_khr=@selling_price_khr, wholesale_price_usd=@wholesale_price_usd, wholesale_price_khr=@wholesale_price_khr, cost_price_usd=@cost_price_usd, cost_price_khr=@cost_price_khr, low_stock_threshold=@low_stock_threshold, out_of_stock_threshold=@out_of_stock_threshold, discount_enabled=@discount_enabled, discount_type=@discount_type, discount_percent=@discount_percent, discount_amount_usd=@discount_amount_usd, discount_amount_khr=@discount_amount_khr, discount_label=@discount_label, discount_badge_color=@discount_badge_color, discount_starts_at=@discount_starts_at, discount_ends_at=@discount_ends_at, expiry_date=@expiry_date, expiry_alert_days=@expiry_alert_days, is_active=@is_active, updated_at=@updated_at${d.image_path ? ', image_path=@image_path' : ''} WHERE id=@id`,
               params: { ...d, id: r.existingId, updated_at: nowIso },
             })
+            finishProductRowWriteGroup()
             continue
           }
           if (productImportMode === 'replace_columns' && productReplaceColumns.length) {
@@ -5792,11 +5803,12 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
               const setClause = allSetColumns.map((col) => `${col}=@${col}`).join(', ')
               const params: Record<string, unknown> = { id: r.existingId, updated_at: nowIso }
               for (const col of allSetColumns) params[col] = d[col]
-              statements.push({
+              rowWriteGroup.push({
                 sql: `UPDATE products SET ${setClause}, updated_at=@updated_at WHERE id=@id`,
                 params,
               })
             }
+            finishProductRowWriteGroup()
             continue
           }
           // 'merge_stock' means "only touch quantity/batch, leave every
@@ -5813,7 +5825,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
           // syncProductImageGallery -- CSV import still only ever sets the
           // single image_path).
           if (mode !== 'merge_stock') {
-            statements.push({
+            rowWriteGroup.push({
               sql: `UPDATE products SET name=@name, name_normalized=@name_normalized, sku=@sku, barcode=@barcode, category=@category, categories=@categories, unit=@unit, unit_normalized=@unit_normalized, description=@description, brand=@brand, brands=@brands, brand_compact=@brand_compact, supplier=@supplier, selling_price_usd=@selling_price_usd, selling_price_khr=@selling_price_khr, wholesale_price_usd=@wholesale_price_usd, wholesale_price_khr=@wholesale_price_khr, cost_price_usd=@cost_price_usd, cost_price_khr=@cost_price_khr, low_stock_threshold=@low_stock_threshold, out_of_stock_threshold=@out_of_stock_threshold, discount_enabled=@discount_enabled, discount_type=@discount_type, discount_percent=@discount_percent, discount_amount_usd=@discount_amount_usd, discount_amount_khr=@discount_amount_khr, discount_label=@discount_label, discount_badge_color=@discount_badge_color, discount_starts_at=@discount_starts_at, discount_ends_at=@discount_ends_at, expiry_date=@expiry_date, expiry_alert_days=@expiry_alert_days, is_active=@is_active, updated_at=@updated_at${d.image_path ? ', image_path=@image_path' : ''} WHERE id=@id`,
               params: { ...d, id: r.existingId, updated_at: nowIso },
             })
@@ -5841,7 +5853,8 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
             // and an already-guarded row composes nothing on a retried
             // chunk.
             if (d.branch_id_explicit && d.branch_id != null && (d.stock_quantity as number) > 0 && !appliedRowGuards.has(`row:${r.rowNumber}`)) {
-              const group: Array<{ sql: string; params: Record<string, unknown> }> = [rowGuardStatement(r.rowNumber)]
+              const group: Array<{ sql: string; params: Record<string, unknown> }> = [rowGuardStatement(r.rowNumber), ...rowWriteGroup]
+              rowWriteGroup = group
               group.push({
                 sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@id, @branchId, @qty)
                       ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = branch_stock.quantity + excluded.quantity`,
@@ -5943,7 +5956,6 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
                   batchId: matchedBatch?.id ?? nextBatchId,
                 },
               })
-              guardedGroups.push(group)
             }
           } else {
             // Legacy/default: no plannedMode was set (every non-products
@@ -5967,7 +5979,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
             // aggregate is recomputed below from branch_stock after the
             // branch-specific row is written.
             if (d.branch_id_explicit && d.branch_id != null) {
-              statements.push({
+              rowWriteGroup.push({
                 sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@id, @branchId, @qty)
                       ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = excluded.quantity`,
                 params: { id: r.existingId, branchId: d.branch_id, qty: d.stock_quantity },
@@ -5979,7 +5991,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
             // as a later statement in the same D1 batch, so it sees the
             // branch_stock write above -- statements in one batch execute
             // sequentially inside a single SQLite transaction.
-            statements.push({
+            rowWriteGroup.push({
               sql: `UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @id) WHERE id = @id`,
               params: { id: r.existingId },
             })
@@ -5995,7 +6007,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
           // out_of_stock_threshold's 0 or discount_badge_color's
           // '#e11d48'). normalizeProductImportRow pre-fills those three
           // with the same defaults for exactly this reason.
-          statements.push({
+          rowWriteGroup.push({
             sql: `INSERT INTO products (id, name, name_normalized, sku, barcode, category, categories, unit, unit_normalized, description, brand, brands, brand_compact, supplier, selling_price_usd, selling_price_khr, wholesale_price_usd, wholesale_price_khr, cost_price_usd, cost_price_khr, stock_quantity, low_stock_threshold, out_of_stock_threshold, discount_enabled, discount_type, discount_percent, discount_amount_usd, discount_amount_khr, discount_label, discount_badge_color, discount_starts_at, discount_ends_at, expiry_date, expiry_alert_days, is_active, image_path, created_at, updated_at) VALUES (@id, @name, @name_normalized, @sku, @barcode, @category, @categories, @unit, @unit_normalized, @description, @brand, @brands, @brand_compact, @supplier, @selling_price_usd, @selling_price_khr, @wholesale_price_usd, @wholesale_price_khr, @cost_price_usd, @cost_price_khr, @stock_quantity, @low_stock_threshold, @out_of_stock_threshold, @discount_enabled, @discount_type, @discount_percent, @discount_amount_usd, @discount_amount_khr, @discount_label, @discount_badge_color, @discount_starts_at, @discount_ends_at, @expiry_date, @expiry_alert_days, @is_active, @image_path, @created_at, @updated_at)`,
             params: { ...d, id: newId, image_path: d.image_path ?? null, created_at: nowIso, updated_at: nowIso },
           })
@@ -6004,7 +6016,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
           // (resolved in classifyProducts). This is the fix for imported
           // products silently ending up unassigned to any branch.
           if (d.branch_id != null) {
-            statements.push({
+            rowWriteGroup.push({
               sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@id, @branchId, @qty)
                     ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = excluded.quantity`,
               params: { id: newId, branchId: d.branch_id, qty: d.stock_quantity },
@@ -6015,7 +6027,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
             // what protects a *second* file (re-importing the same barcode
             // for a different branch, which the update path turns into)
             // from ever depending on which import ran first.
-            statements.push({
+            rowWriteGroup.push({
               sql: `UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @id) WHERE id = @id`,
               params: { id: newId },
             })
@@ -6042,7 +6054,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
             // aggregate recompute already queued above.
             nextBatchId += 1
             const batchId = nextBatchId
-            statements.push({
+            rowWriteGroup.push({
                 sql: `INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, expiry_date, received_at, is_active, notes, batch_number, unit_cost_usd, received_quantity, received_cost_usd, received_branch_id, created_at, updated_at)
                       VALUES (@batchId, @productId, @batchKey, @lotCode, NULL, @receivedAt, 1, @notes, 1, @unitCostUsd, @qty, (@qty * COALESCE(@unitCostUsd, 0)), @branchId, @createdAt, @createdAt)`,
                 params: {
@@ -6058,7 +6070,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
                   createdAt: nowIso,
                 },
             })
-            statements.push({
+            rowWriteGroup.push({
                 sql: `INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (@batchId, @branchId, @qty)`,
                 params: { batchId, branchId: d.branch_id, qty: d.stock_quantity },
             })
@@ -6079,7 +6091,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
             // guaranteed to mean "applied first" here.
             for (const branchId of allActiveBranchIds) {
               if (branchId === d.branch_id) continue
-              statements.push({
+              rowWriteGroup.push({
                 sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@id, @branchId, 0)
                       ON CONFLICT(product_id, branch_id) DO NOTHING`,
                 params: { id: newId, branchId },
@@ -6087,6 +6099,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
             }
           }
         }
+        finishProductRowWriteGroup()
       }
     } else if (job.type === 'customers' || job.type === 'suppliers' || job.type === 'delivery_contacts') {
       const table = job.type
@@ -6170,34 +6183,14 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       }
     }
 
-    // 9.2: the auto-merge records ride the SAME atomic batch as the writes
-    // they describe -- appended last so each UPDATE lands after its
-    // product's INSERT (statements execute in order).
-    if (autoMergeRecords.length) {
-      const perProduct = new Map<number, number>()
-      for (const record of autoMergeRecords) {
-        perProduct.set(record.productId, (perProduct.get(record.productId) || 0) + 1)
-        statements.push({
-          sql: `INSERT INTO import_auto_merges (product_id, import_job_id, row_number, losing_json, created_at)
-                VALUES (@product_id, @import_job_id, @row_number, @losing_json, @created_at)`,
-          params: { product_id: record.productId, import_job_id: jobId, row_number: record.rowNumber, losing_json: record.losingJson, created_at: nowIso },
-        })
-      }
-      for (const [productId, count] of perProduct) {
-        statements.push({
-          sql: 'UPDATE products SET auto_merged_count = COALESCE(auto_merged_count, 0) + @count WHERE id = @id',
-          params: { count, id: productId },
-        })
-      }
-    }
-
-    if (statements.length) await runD1BatchInChunks(db, statements)
+    if (productStatementGroups.length) await runD1BatchGroupsInChunks(importWriteDb, productStatementGroups)
+    if (statements.length) await runD1BatchInChunks(importWriteDb, statements)
     // The guarded additive groups run AFTER the plain statements (their
     // UPDATEs may reference products the create statements above insert)
     // and through the group-atomic runner, so each row's guard commits in
     // the same db.batch() as its stock writes -- see guardedGroups'
     // declaration comment.
-    if (guardedGroups.length) await runD1BatchGroupsInChunks(db, guardedGroups)
+    if (guardedGroups.length) await runD1BatchGroupsInChunks(importWriteDb, guardedGroups)
     sw.lap('buildAndWriteStatementsMs')
 
     // Each reviewed receipt is one idempotent D1 transaction: header,

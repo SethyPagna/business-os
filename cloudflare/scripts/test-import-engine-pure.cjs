@@ -120,6 +120,19 @@ const branchRolesModuleObj = { exports: {} }
 new Function('exports', 'require', 'module', '__filename', '__dirname', branchRolesOutputText)(
   branchRolesModuleObj.exports, require, branchRolesModuleObj, branchRolesSourcePath, path.dirname(branchRolesSourcePath),
 )
+const importBranchAuthoritySourcePath = path.join(__dirname, '..', 'src', 'lib', 'importBranchAuthority.ts')
+const { outputText: importBranchAuthorityOutputText } = ts.transpileModule(fs.readFileSync(importBranchAuthoritySourcePath, 'utf8'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+  fileName: 'importBranchAuthority.ts',
+})
+const importBranchAuthorityModuleObj = { exports: {} }
+new Function('exports', 'require', 'module', '__filename', '__dirname', importBranchAuthorityOutputText)(
+  importBranchAuthorityModuleObj.exports,
+  (request) => request === './branchRoles' ? branchRolesModuleObj.exports : require(request),
+  importBranchAuthorityModuleObj,
+  importBranchAuthoritySourcePath,
+  path.dirname(importBranchAuthoritySourcePath),
+)
 const branchRoleGuardsSourcePath = path.join(__dirname, '..', 'src', 'lib', 'branchRoleGuards.ts')
 const { outputText: branchRoleGuardsOutputText } = ts.transpileModule(fs.readFileSync(branchRoleGuardsSourcePath, 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
@@ -305,6 +318,7 @@ Module._load = function patchedLoad(request, parent, isMain) {
     return salesStatusModuleObj.exports // real module -- classifySales actually calls into it
   }
   if (request === './branchRoles') return branchRolesModuleObj.exports
+  if (request === './importBranchAuthority') return importBranchAuthorityModuleObj.exports
   if (request === './branchRoleGuards') return branchRoleGuardsModuleObj.exports
   if (request === './productBatches') {
     return productBatchesModuleObj.exports // real module -- sales-import apply path actually calls into it
@@ -803,7 +817,23 @@ console.log('PASS resolveRowImagePath matches explicit filenames and falls back 
   assert.ok(/ON CONFLICT\(product_id, branch_id\) DO UPDATE SET quantity = excluded\.quantity/.test(block), 'the grouped snapshot total should replace that branch count exactly')
   assert.ok(/notes = 'Received via product import'/.test(block), 'new-product opening lots should be synchronized with the grouped snapshot quantity')
   assert.ok(/snapshotGroupsAggregated/.test(source), 'the completed import summary should expose how many duplicate snapshot groups were corrected')
+  assert.ok(/runD1BatchGroupsInChunks\(guardedDb, correctionGroups\)/.test(block), 'each duplicate snapshot correction keeps branch, lot, and aggregate writes in one guarded batch group')
   console.log('PASS duplicate product snapshot rows aggregate their quantities per resolved product+branch, exclude movement modes, sync new opening lots, and report the corrected group count')
+}
+
+// A product row's catalog, stock, batch, and auto-merge evidence writes are
+// built as one group and sent through the canonical branch adapter. Raw
+// statement chunking can split at arbitrary indexes, so routing these writes
+// through it would allow a branch mutation to strand half of one row.
+{
+  const productBlockStart = source.indexOf("if (job.type === 'products') {")
+  const productBlockEnd = source.indexOf("} else if (job.type === 'customers'", productBlockStart)
+  const block = source.slice(productBlockStart, productBlockEnd)
+  assert.ok(/const productStatementGroups/.test(source))
+  assert.ok(/finishProductRowWriteGroup/.test(block))
+  assert.ok(!/\bstatements\.push\(/.test(block), 'product row writes must never return to raw statement chunking')
+  assert.ok(/runD1BatchGroupsInChunks\(importWriteDb, productStatementGroups\)/.test(source), 'whole product rows use group-boundary batching through the branch authority adapter')
+  console.log('PASS product import keeps each row\'s catalog, stock, batch, and merge-evidence writes in one canonical-branch guarded batch')
 }
 
 // -- Everything above this point is synchronous; the new tests below need
@@ -1308,6 +1338,12 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     const blank = await classifyProducts(makeFakeProductsDb([], [{ id: 1, name: 'Shop', is_default: 1, is_active: 1 }]), [baseRow], 'job-branch-default', null, noImages)
     assert.strictEqual(blank[0].action, 'create')
     assert.strictEqual(blank[0].data.branch_id, 1)
+
+    const blankWithDuplicateRole = await classifyProducts(makeFakeProductsDb([], [
+      { id: 1, name: 'Shop', is_default: 1, is_active: 1 },
+      { id: 2, name: ' shop ', is_default: 0, is_active: 1 },
+    ]), [baseRow], 'job-branch-default-ambiguous', null, noImages)
+    assert.strictEqual(blankWithDuplicateRole[0].action, 'error', 'blank input cannot bypass canonical-role uniqueness through the default row')
   }
 
   console.log('PASS classifyProducts reads batch dates, applies the one-owner same-batch receipt exception, blocks ambiguous batch ownership, and resolves only canonical branches')
@@ -1336,6 +1372,12 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
   const blank = await classifyInventory(makeDb([{ id: 1, name: 'Shop', is_default: 1, is_active: 1 }]), input(undefined), 'add')
   assert.strictEqual(blank[0].action, 'create')
   assert.strictEqual(blank[0].data.branch_id, 1)
+
+  const blankWithDuplicateRole = await classifyInventory(makeDb([
+    { id: 1, name: 'Shop', is_default: 1, is_active: 1 },
+    { id: 2, name: ' shop ', is_default: 0, is_active: 1 },
+  ]), input(undefined), 'add')
+  assert.strictEqual(blankWithDuplicateRole[0].action, 'error', 'blank inventory input cannot choose an ambiguous canonical default role')
 
   await validateResolvedImportBranches(makeDb([{ id: 1, name: 'Shop', is_default: 1, is_active: 1 }]), blank)
   await assert.rejects(
