@@ -107,6 +107,11 @@ const productBatches = loadReal('lib/productBatches.ts', {
   './sqlBinding': sqlBinding,
 })
 const permissions = loadReal('lib/permissions.ts')
+const branchRoles = loadReal('lib/branchRoles.ts')
+const canonicalBranchIdentity = loadReal('lib/canonicalBranchIdentity.ts', {
+  './db': loadReal('lib/db.ts'),
+  './branchRoles': branchRoles,
+})
 const businessDateWindow = loadReal('lib/businessDateWindow.ts')
 const salesAnalytics = loadReal('lib/salesAnalytics.ts', {
   './db': { getDb: () => db },
@@ -141,6 +146,7 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   // move through this guard, so the fixtures here run through the rejection
   // instead of opting out of it.
   '../lib/branchRoleGuards': loadReal('lib/branchRoleGuards.ts', { './branchRoles': loadReal('lib/branchRoles.ts') }),
+  '../lib/canonicalBranchIdentity': canonicalBranchIdentity,
   '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/movementBranchName': movementBranchNameKernel,
   '../lib/movementActorName': movementActorNameKernel,
