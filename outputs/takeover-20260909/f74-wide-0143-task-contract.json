@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "run_id": "f74-wide-0143-20260909",
+  "task_id": "f74-wide-sale-record-cascades",
+  "role": "implementation-worker",
+  "objective": "Record every sale-changing customer, delivery-contact, customer-link-repair, missing-customer resolution, and linked payment-method fan-out as an immutable, changed-only Sales Record with durable actor-scoped idempotency and atomic domain/event/audit commits.",
+  "base_sha": "c8d3cfec268506caffc0ff3abf4c1f4c593f7975",
+  "mode": "workspace_write",
+  "ownership": {
+    "include": [
+      "outputs/takeover-20260909/f74-wide-0143-task-contract.json",
+      "cloudflare/migrations/0143_sale_reference_mutation_receipts.sql",
+      "cloudflare/src/lib/saleReferenceMutation.ts",
+      "cloudflare/src/lib/saleRecordEvents.ts",
+      "cloudflare/src/lib/saleRecords.ts",
+      "cloudflare/src/lib/contactMerge.ts",
+      "cloudflare/src/routes/contacts.ts",
+      "cloudflare/src/routes/settings.ts",
+      "cloudflare/src/lib/backup.ts",
+      "cloudflare/src/lib/coreDataInvariants.ts",
+      "cloudflare/src/routes/system.ts",
+      "cloudflare/scripts/test-sale-reference-mutation-pure.cjs",
+      "cloudflare/scripts/test-contact-sale-record-cascades-pure.cjs",
+      "cloudflare/scripts/test-payment-method-sale-record-cascade-pure.cjs",
+      "cloudflare/scripts/test-contact-merge-repoints-pure.cjs",
+      "cloudflare/scripts/test-reference-data-integrity-pure.cjs",
+      "cloudflare/scripts/test-contact-duplicates-pure.cjs",
+      "cloudflare/scripts/test-sale-link-conflict-reopen-pure.cjs",
+      "cloudflare/scripts/test-sale-record-events-pure.cjs",
+      "cloudflare/scripts/test-sale-record-event-helper-pure.cjs",
+      "cloudflare/scripts/test-sale-records-pure.cjs",
+      "cloudflare/scripts/test-backup-coverage-pure.cjs",
+      "cloudflare/scripts/test-backup-replay-coverage-pure.cjs",
+      "cloudflare/scripts/test-backup-legacy-restore-pure.cjs",
+      "cloudflare/scripts/test-reset-products-pure.cjs"
+    ],
+    "exclude": [
+      "frontend",
+      "cloudflare/src/routes/sales.ts",
+      "cloudflare/src/routes/returns.ts",
+      "cloudflare/src/lib/saleBulkStatus.ts",
+      "cloudflare/src/lib/saleBulkUpdate.ts",
+      "cloudflare/src/lib/undoAppliers.ts",
+      "cloudflare/src/lib/contactPicker.ts",
+      "cloudflare/migrations/0140_sale_record_events.sql",
+      "cloudflare/migrations/0141_customers_anonymous_marker.sql",
+      "cloudflare/migrations/0142_return_create_receipts.sql"
+    ]
+  },
+  "worktree": "C:/Users/mrkl6/Downloads/bos-f74-wide-cascades-20260909",
+  "branch": "codex/f74-wide-cascades-20260909",
+  "dependencies": [
+    "Approved exact architecture plan eea88ad0270f14148496baa22cc731224ca34cd6",
+    "Independent plan review outputs/takeover-20260908/f74-wide-writer-plan-review-eea88ad0.json",
+    "Reconciled foundation c8d3cfec includes F65 lifecycle tables, F75 permission and Contacts behavior, and F74 migrations 0140 through 0142",
+    "Paired frontend stable-request and EN/KM rendering work remains separately owned"
+  ],
+  "acceptance_criteria": [
+    "Migration 0143 adds an immutable privacy-bounded sale_reference_mutation_receipts table and safely amends the closed sale_record_events contract without backfill or mutable-profile inference.",
+    "Customer and delivery carry, customer and delivery merge, customer relink, missing-customer resolution, and linked payment-method replacement use stable actor/request/target digests with lookup-before-read replay.",
+    "Every sales-mutating route reuses one exact SQL candidate and event projection across advisory preflight, in-batch count and byte guards, event insertion, and domain mutation.",
+    "One transaction writes changed-only events before domain rows, all essential linked effects and audit, cleans operation guards, and writes the immutable receipt last; any failure leaves zero partial effects.",
+    "Phone and address changes retain only changed_contact_fields metadata; no historical phone or address values enter events or receipts.",
+    "Zero-sale outcomes receive an exact replayable receipt without inventing a sale event; record-only, settings-only, backfill, and supplier-only actions remain event-free.",
+    "Native SQLite and Worker-compatible tests prove 5000 success, 5001 refusal, per-event and aggregate UTF-8 bounds including 8 MiB plus one byte, zero-event COALESCE behavior, and interposed candidate/revision races.",
+    "Sales Records count and detail remain identical for every new source and preserve legacy events unless an exact four-key durable provenance tuple exists.",
+    "Backup, restore, factory reset, sales reset, all-data reset, and products plus includeSales cover the receipt and amended event schema while preserving F65 and F75 additions."
+  ],
+  "verification": [
+    "Validate this task envelope with agent-team/scripts/team-state.mjs validate-task.",
+    "Run the new sale-reference helper, Contacts cascade, payment cascade, and existing Records/count-detail tests against real in-memory SQLite migrations.",
+    "Run exact 5000/5001 and aggregate-byte boundary fixtures and record statement count, wall time, and database growth.",
+    "Run backup coverage, replay coverage, generated FK-on restore, reset-products, and factory-reset focused suites.",
+    "Run cloudflare npm run typecheck and git diff --check.",
+    "Obtain an independent read-only exact-head review before reconciliation."
+  ],
+  "side_effect_policy": "workspace_only",
+  "delegation": {
+    "allowed": false,
+    "max_depth": 0
+  }
+}
