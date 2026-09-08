@@ -180,6 +180,13 @@ export const BACKUP_TABLES = [
   'google_drive_sync_entries',
   'action_history',
   'undo_snapshots',
+  // A global conflict review owns its groups and independent-removal
+  // receipts. Keep these after every referenced product/history/snapshot
+  // parent, then restore each review before its children.
+  'product_conflict_action_reviews',
+  'product_conflict_action_groups',
+  'product_conflict_action_group_members',
+  'product_remove_operations',
   // Selected-conflict run receipts are durable idempotency/continuation state.
   // Restore the parent run before its product/history-linked case children.
   'product_conflict_merge_runs',

@@ -365,6 +365,13 @@ app.post('/reset-data', async (c) => {
 
     if (mode === 'all') {
       statements.push(
+        // Reviewed group/removal actions bind product identity, graph
+        // snapshots and action-history rows. Clear all receipt children
+        // before their parents and before products/history.
+        { sql: 'DELETE FROM product_conflict_action_group_members' },
+        { sql: 'DELETE FROM product_remove_operations' },
+        { sql: 'DELETE FROM product_conflict_action_groups' },
+        { sql: 'DELETE FROM product_conflict_action_reviews' },
         // Durable selected-conflict receipts refer to products and history.
         // Clear case children before parent runs and before either target.
         { sql: 'DELETE FROM product_conflict_merge_run_cases' },

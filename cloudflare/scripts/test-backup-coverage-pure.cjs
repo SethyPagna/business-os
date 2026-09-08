@@ -87,6 +87,21 @@ check('selected-conflict run receipts survive in parent-first dependency order',
   assert.ok(BACKUP_TABLES.indexOf('product_conflict_merge_run_cases') > BACKUP_TABLES.indexOf('action_history'))
 })
 
+check('global conflict action receipts survive in parent-first dependency order', () => {
+  const ordered = [
+    'product_conflict_action_reviews',
+    'product_conflict_action_groups',
+    'product_conflict_action_group_members',
+    'product_remove_operations',
+  ]
+  for (const table of ordered) assert.ok(BACKUP_TABLES.includes(table), `${table} must be backed up`)
+  assert.ok(BACKUP_TABLES.indexOf('product_conflict_action_reviews') > BACKUP_TABLES.indexOf('undo_snapshots'))
+  assert.ok(BACKUP_TABLES.indexOf('product_conflict_action_groups') > BACKUP_TABLES.indexOf('product_conflict_action_reviews'))
+  assert.ok(BACKUP_TABLES.indexOf('product_conflict_action_group_members') > BACKUP_TABLES.indexOf('product_conflict_action_groups'))
+  assert.ok(BACKUP_TABLES.indexOf('product_remove_operations') > BACKUP_TABLES.indexOf('product_conflict_action_reviews'))
+  assert.ok(BACKUP_TABLES.indexOf('product_remove_operations') > BACKUP_TABLES.indexOf('pending_actions'))
+})
+
 check('FK dependency order holds: every child sits after every parent it references', () => {
   const at = (t) => BACKUP_TABLES.indexOf(t)
   const before = (parent, child) => assert.ok(

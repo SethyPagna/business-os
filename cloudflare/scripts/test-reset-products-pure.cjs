@@ -66,6 +66,16 @@ const coreDataInvariants = loadReal('lib/coreDataInvariants.ts', {
 const { PRODUCTS_RESET_TABLES } = coreDataInvariants
 assert.ok(Array.isArray(PRODUCTS_RESET_TABLES) && PRODUCTS_RESET_TABLES.length > 0, 'PRODUCTS_RESET_TABLES must be a real, non-empty exported list')
 
+// This suite exercises the real reset route and its real table lists. Factory
+// reset's post-delete default-data reseed has separate invariant coverage; a
+// small stub keeps this test focused on deletion order without requiring its
+// organization bootstrap fixtures.
+const resetCoreDataInvariants = {
+  ...coreDataInvariants,
+  dropAllCustomTables: async () => [],
+  ensureCoreDataInvariants: async () => ({ adminUserCreated: false, adminPassword: null }),
+}
+
 let deletedObjectKeys = []
 const permissions = loadReal('lib/permissions.ts')
 const media = loadReal('lib/media.ts')
@@ -93,7 +103,7 @@ const systemRoute = loadReal('routes/system.ts', {
   // K4: the orphan-staging endpoint's engine lives in its own lib with its
   // own pure test -- stubbed here, this test is about the reset contract.
   '../lib/importRetention': { cleanOrphanImportStaging: async () => ({ applied: false, tables: {}, r2Keys: 0 }) },
-  '../lib/coreDataInvariants': coreDataInvariants,
+  '../lib/coreDataInvariants': resetCoreDataInvariants,
   '../lib/backup': {
     // Real prerequisite under test: every mode must call one of these
     // BEFORE touching any data, and abort cleanly if it throws. Tracked
@@ -121,6 +131,8 @@ const systemRoute = loadReal('routes/system.ts', {
 // than imported so this test fails if the route quietly starts clearing
 // something new without it being noticed.
 const ALL_RESET_CANDIDATE_TABLES = [
+  'product_conflict_action_group_members', 'product_remove_operations',
+  'product_conflict_action_groups', 'product_conflict_action_reviews',
   'product_conflict_merge_run_cases', 'product_conflict_merge_runs',
   'product_images', 'rfid_tags', 'branch_batch_stock', 'product_batches', 'branch_stock', 'products',
   'inventory_movements', 'stock_row_moves', 'stock_transfers',
@@ -161,6 +173,8 @@ function seed() {
   // Wipe every table this test touches so each check() starts clean,
   // regardless of run order.
   const wipe = [
+    'product_conflict_action_group_members', 'product_remove_operations',
+    'product_conflict_action_groups', 'product_conflict_action_reviews',
     'product_conflict_merge_run_cases', 'product_conflict_merge_runs',
     'stock_session_members', 'stock_session_operations', 'stock_session_guards',
     'return_item_batch_allocations', 'sale_item_batch_allocations', 'return_items', 'returns',
@@ -186,6 +200,25 @@ function seed() {
   rawDbHandle.prepare(`INSERT INTO product_conflict_merge_run_cases(
     run_id,ordinal,case_key,keeper_product_id,merged_product_id,expected_state_digest,operation_id,status
   ) VALUES('reset-conflict-run',0,'leadingzero:reset',1,2,'case-digest','reset-conflict-operation','planned')`).run()
+  rawDbHandle.prepare(`INSERT INTO product_conflict_action_reviews(
+    id,actor_id,request_id,request_digest,manifest_version,resolution_version,draft_digest,
+    status,requested_action_count,requested_group_count,requested_removal_count,
+    actionable_group_count,blocked_group_count,total_member_count,expires_at
+  ) VALUES('reset-action-review',1,'reset-action-request','request-digest',1,2,'draft-digest',
+    'draft',2,1,1,1,0,1,'2099-01-01T00:00:00.000Z')`).run()
+  rawDbHandle.prepare(`INSERT INTO product_conflict_action_groups(
+    review_id,ordinal,group_key,source_group_keys_json,member_ids_json,eligibility_basis,
+    eligibility_value,status,state_digest,detail_json
+  ) VALUES('reset-action-review',0,'name:reset','["name:reset"]','[1]','name',
+    'reset','actionable','group-state','{}')`).run()
+  rawDbHandle.prepare(`INSERT INTO product_conflict_action_group_members(
+    review_id,group_ordinal,member_ordinal,product_id,status,state_digest,snapshot_json
+  ) VALUES('reset-action-review',0,0,1,'reviewed','member-state','{}')`).run()
+  rawDbHandle.prepare(`INSERT INTO product_remove_operations(
+    operation_id,actor_id,requester_id,source,request_id,review_id,action_ordinal,
+    product_id,reason,state_digest,plan_digest,plan_json,status
+  ) VALUES('reset-remove-operation',1,1,'conflict_review','reset-remove-request',
+    'reset-action-review',1,2,'obsolete duplicate','remove-state','remove-plan','{}','reviewed')`).run()
 
   // Sales/returns/movements -- denormalized, must survive with a dangling
   // product_id, per this session's spec.
@@ -261,11 +294,15 @@ async function main() {
     assert.strictEqual(count('branches'), 1, 'branches must be untouched by a products reset')
   })
 
-  await check('mode=sales preserves selected-conflict product receipts', async () => {
+  await check('mode=sales preserves every selected-conflict product receipt', async () => {
     seed()
     await req('POST', '/reset-data', { mode: 'sales' })
     assert.strictEqual(count('product_conflict_merge_runs'), 1)
     assert.strictEqual(count('product_conflict_merge_run_cases'), 1)
+    assert.strictEqual(count('product_conflict_action_reviews'), 1)
+    assert.strictEqual(count('product_conflict_action_groups'), 1)
+    assert.strictEqual(count('product_conflict_action_group_members'), 1)
+    assert.strictEqual(count('product_remove_operations'), 1)
   })
 
   await check('mode=products forces a backup BEFORE deleting anything, and aborts with zero rows changed if the backup fails', async () => {
@@ -429,17 +466,33 @@ async function main() {
     assert.strictEqual(count('file_assets'), 0, 'file_assets should be empty after mode=all, matching the R2 uploads/ wipe it runs alongside')
   })
 
-  await check('mode=all clears selected-conflict cases before their parent runs', async () => {
+  await check('mode=all clears all selected-conflict receipts child-first', async () => {
     seed()
     const { status, json } = await req('POST', '/reset-data', { mode: 'all' })
     assert.strictEqual(status, 200, JSON.stringify(json))
     assert.strictEqual(count('product_conflict_merge_run_cases'), 0)
     assert.strictEqual(count('product_conflict_merge_runs'), 0)
+    assert.strictEqual(count('product_conflict_action_group_members'), 0)
+    assert.strictEqual(count('product_remove_operations'), 0)
+    assert.strictEqual(count('product_conflict_action_groups'), 0)
+    assert.strictEqual(count('product_conflict_action_reviews'), 0)
     const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'system.ts'), 'utf8')
     const casesAt = source.indexOf("DELETE FROM product_conflict_merge_run_cases")
     const runsAt = source.indexOf("DELETE FROM product_conflict_merge_runs")
     const productsAt = source.indexOf("DELETE FROM product_batches", casesAt)
     assert.ok(casesAt > -1 && casesAt < runsAt && runsAt < productsAt, 'mode=all is ordered case children, parent run, then product data')
+    const actionMembersAt = source.indexOf("DELETE FROM product_conflict_action_group_members")
+    const removalsAt = source.indexOf("DELETE FROM product_remove_operations", actionMembersAt)
+    const actionGroupsAt = source.indexOf("DELETE FROM product_conflict_action_groups", actionMembersAt)
+    const actionReviewsAt = source.indexOf("DELETE FROM product_conflict_action_reviews", actionMembersAt)
+    assert.ok(
+      actionMembersAt > -1
+      && actionMembersAt < actionGroupsAt
+      && removalsAt < actionReviewsAt
+      && actionGroupsAt < actionReviewsAt
+      && actionReviewsAt < productsAt,
+      'mode=all clears reviewed action children, then groups/reviews, before product data',
+    )
   })
 
   await check('mode=all clears every current import job ledger so a migration rerun starts clean', async () => {
@@ -464,6 +517,19 @@ async function main() {
     assert.strictEqual(status, 200, JSON.stringify(json))
     assert.strictEqual(json.success, true, JSON.stringify(json))
     for (const table of ALL_IMPORT_RESET_TABLES) assert.strictEqual(count(table), 0, `${table} should be empty after mode=all`)
+  })
+
+  await check('factory reset clears all global conflict receipts before reseeding core data', async () => {
+    seed()
+    const { status, json } = await req('POST', '/factory-reset', {})
+    assert.strictEqual(status, 200, JSON.stringify(json))
+    assert.strictEqual(json.success, true, JSON.stringify(json))
+    for (const table of [
+      'product_conflict_action_group_members',
+      'product_remove_operations',
+      'product_conflict_action_groups',
+      'product_conflict_action_reviews',
+    ]) assert.strictEqual(count(table), 0, `${table} should be empty after factory reset`)
   })
 
   console.log(`\n${passed} PASS, 0 FAIL`)
