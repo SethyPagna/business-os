@@ -39,6 +39,13 @@ const media = loadTs('lib/media.ts')
 const sqlBinding = loadTs('lib/sqlBinding.ts')
 const imagePermission = loadTs('lib/productImagePermission.ts', { './media': media, './sqlBinding': sqlBinding })
 const permissions = loadTs('lib/permissions.ts')
+const dbLib = loadTs('lib/db.ts')
+const branchRoles = loadTs('lib/branchRoles.ts')
+const canonicalBranchIdentity = loadTs('lib/canonicalBranchIdentity.ts', {
+  './db': dbLib,
+  './branchRoles': branchRoles,
+})
+assert.equal(typeof canonicalBranchIdentity.assertCanonicalBranchSetMutationAllowed, 'function')
 
 function role(grants) {
   return {
@@ -98,12 +105,13 @@ function loadReviewApply(state, updateChanges = 1) {
     seedInitialBatchForNewProduct: async () => {},
   }
   return loadTs('lib/reviewApply.ts', {
-    './db': { getDb: () => db, toDbBool: (value) => value ? 1 : 0 },
+    './db': { ...dbLib, getDb: () => db },
     './audit': { audit: async () => { state.audits++ } },
     '../durable-objects/broadcastHub': { broadcast: async () => {} },
     './cache': { bumpVersion: async () => {} },
     './productWrites': productWrites,
     './branchWrites': { branchUpdateStatements: () => [] },
+    './canonicalBranchIdentity': canonicalBranchIdentity,
     './permissions': permissions,
     './productImagePermission': imagePermission,
     './pendingActions': {},
