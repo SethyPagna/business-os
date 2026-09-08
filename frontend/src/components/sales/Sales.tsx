@@ -393,7 +393,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   const [detailSale, setDetailSale] = useState<SaleRecord | null>(null)
   const [saleCustomerPrompt, setSaleCustomerPrompt] = useState<{ sale: SaleRecord; choices: Array<{ id: number; name: string; phone?: string | null; membershipNumber?: string | null }> } | null>(null)
   const [saleCustomerSaving, setSaleCustomerSaving] = useState(false)
-  const [saleCustomerNameForm, setSaleCustomerNameForm] = useState<{ sale: SaleRecord; id: number; name: string; phone: string; membershipNumber: string } | null>(null)
+  const [saleCustomerNameForm, setSaleCustomerNameForm] = useState<{ sale: SaleRecord; id: number; name: string; phone: string; membershipNumber: string; updatedAt: string } | null>(null)
   const [saleCustomerNameSaving, setSaleCustomerNameSaving] = useState(false)
   const [saleCustomerRename, setSaleCustomerRename] = useState<RenameCascadeRequest | null>(null)
   const saleCustomerRenameResolveRef = useRef<((choice: RenameCascadeChoice) => void) | null>(null)
@@ -1875,12 +1875,15 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
       void getCustomers({ ids: [String(customerId)] }).then((result) => {
         const customer = customerRows(result).find((row) => Number(row.id) === customerId)
         if (!customer) throw new Error(translateOr('sale_customer_current_unavailable', 'The current customer is unavailable.'))
+        const updatedAt = String(customer.updated_at || '').trim()
+        if (!updatedAt) throw new Error(translateOr('sale_customer_current_load_failed', 'Unable to load the current customer.'))
         setSaleCustomerNameForm({
           sale: { ...sale },
           id: customerId,
           name: String(customer.name || sale.customer_name || `#${customerId}`),
           phone: String(customer.phone || sale.customer_phone || ''),
           membershipNumber: String(customer.membership_number || sale.customer_membership_number || ''),
+          updatedAt,
         })
       }).catch((error) => notify(getErrorMessage(error, translateOr('sale_customer_current_load_failed', 'Unable to load the current customer.')), 'error'))
       return
@@ -1918,9 +1921,10 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
       }
       savePendingBulkFieldRequest(null)
       await refreshSaleCustomerViews()
-      const targetId = payload.action.kind === 'customer' ? payload.action.target_id : target?.id ?? null
-      const targetChoice = targetId == null ? null : saleCustomerPrompt?.choices.find((choice) => choice.id === targetId) || target
-      setDetailSale((current) => current?.id === sale.id ? { ...current, customer_id: targetId, customer_name: targetChoice?.name || undefined } : current)
+      // The refreshed sale can leave the active search/page after assignment.
+      // Close the old detail instead of combining a new id/name with stale
+      // phone, address, or membership snapshots.
+      setDetailSale(null)
       setSaleCustomerPrompt(null)
       notify(translateOr('sale_bulk_status_result', 'Updated {changed} sales; {unchanged} unchanged.').replace('{changed}', String(result.changedCount)).replace('{unchanged}', String(result.unchangedCount)), 'success')
       return true
@@ -1957,7 +1961,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
     }
     setSaleCustomerNameSaving(true)
     try {
-      const payload: Record<string, unknown> = {}
+      const payload: Record<string, unknown> = { expectedUpdatedAt: form.updatedAt }
       if (nameChanged) {
         payload.name = after
         payload.__rename_cascade = renameChoice === 'carry' ? 'carry' : 'record_only'
