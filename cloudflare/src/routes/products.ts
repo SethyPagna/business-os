@@ -4167,7 +4167,7 @@ type SelectedConflictPreparedCase = {
   discarded: SelectedConflictProductRow
   stateDigest: string
   stateFingerprint: string
-  stateGuard: { sql: string; params: Record<string, unknown> }
+  stateGuards: Array<{ sql: string; params: Record<string, unknown> }>
   needsStockChoice: boolean
   stockImpact: MergeStockImpact
   snapshot: ProductMergeCaseSnapshot
@@ -4203,87 +4203,100 @@ function selectedConflictClusterPredicateSql(clusterType: ProductConflictPreview
   return '0'
 }
 
-function selectedConflictStateFingerprintSql(clusterType: ProductConflictPreviewCase['cluster_type']): string {
-  const reparentRows = MERGE_REPARENT_TABLES.map(({ table, column }) => `
-    SELECT 'reparent:${table}' AS kind, printf('%020d', id) AS row_key,
-           json_object('id', id, 'linked_product_id', ${column}) AS value
-    FROM ${table} WHERE ${column} IN (@keeperId, @mergedId)`).join('\n    UNION ALL')
-  return `
-    SELECT COALESCE(json_group_array(json_object('kind',kind,'key',row_key,'value',json(value))), '[]') AS fingerprint
-    FROM (
-      SELECT 'product' AS kind, printf('%020d', id) AS row_key,
-             json_object('id',id,'name',name,'barcode',barcode,'image_path',image_path,
-               'is_active',is_active,'is_group',COALESCE(is_group,0),'parent_id',parent_id,
-               'stock_quantity',stock_quantity,'updated_at',updated_at,
-               'cost_price_usd',cost_price_usd,'cost_price_khr',cost_price_khr,
-               'selling_price_usd',selling_price_usd,'selling_price_khr',selling_price_khr,
-               'wholesale_price_usd',wholesale_price_usd,'wholesale_price_khr',wholesale_price_khr) AS value
-      FROM products WHERE id IN (@keeperId, @mergedId)
-      UNION ALL
-      SELECT 'cluster_member', printf('%020d', p.id),
-             json_object('id',p.id,'name',p.name,'name_key',p.name_key,'barcode',p.barcode,
-               'is_active',p.is_active,'is_group',COALESCE(p.is_group,0))
-      FROM products p
-      WHERE p.is_active=1 AND COALESCE(p.is_group,0)=0
-        AND (${selectedConflictClusterPredicateSql(clusterType)})
-      UNION ALL
-      SELECT 'branch_stock', printf('%020d:%020d', product_id, branch_id),
-             json_object('product_id',product_id,'branch_id',branch_id,'quantity',quantity,
-               'rfid_confirmed_qty',rfid_confirmed_qty)
-      FROM branch_stock WHERE product_id IN (@keeperId, @mergedId)
-      UNION ALL
-      SELECT 'product_batch', printf('%020d', id),
-             json_object('id',id,'variant_product_id',variant_product_id,'batch_key',batch_key,
-               'batch_number',batch_number,'is_active',is_active,'updated_at',updated_at)
-      FROM product_batches WHERE variant_product_id IN (@keeperId, @mergedId)
-      UNION ALL
-      SELECT 'branch_batch_stock', printf('%020d:%020d', bbs.batch_id, bbs.branch_id),
-             json_object('batch_id',bbs.batch_id,'branch_id',bbs.branch_id,'quantity',bbs.quantity,
-               'updated_at',bbs.updated_at)
-      FROM branch_batch_stock bbs JOIN product_batches pb ON pb.id=bbs.batch_id
-      WHERE pb.variant_product_id IN (@keeperId, @mergedId)
-      UNION ALL
-      SELECT 'product_image', printf('%020d:%020d', product_id, id),
-             json_object('id',id,'product_id',product_id,'image_path',image_path,'sort_order',sort_order)
-      FROM product_images WHERE product_id IN (@keeperId, @mergedId)
-      UNION ALL
-      ${reparentRows}
-      UNION ALL
-      SELECT 'promotion_rule', printf('%020d', pr.id), json_object('id',pr.id,'product_ids',pr.product_ids)
-      FROM promotion_rules pr
-      WHERE json_valid(pr.product_ids) AND EXISTS (
-        SELECT 1 FROM json_each(pr.product_ids) j WHERE CAST(j.value AS INTEGER) IN (@keeperId, @mergedId)
-      )
-      UNION ALL
-      SELECT 'child_product', printf('%020d', id), json_object('id',id,'parent_id',parent_id,'updated_at',updated_at)
-      FROM products WHERE parent_id IN (@keeperId, @mergedId)
-      UNION ALL
-      SELECT 'sale_batch_allocation', printf('%020d', a.id),
-             json_object('id',a.id,'sale_item_id',a.sale_item_id,'batch_id',a.batch_id,'quantity',a.quantity)
-      FROM sale_item_batch_allocations a JOIN product_batches pb ON pb.id=a.batch_id
-      WHERE pb.variant_product_id IN (@keeperId, @mergedId)
-      UNION ALL
-      SELECT 'return_batch_allocation', printf('%020d', a.id),
-             json_object('id',a.id,'return_item_id',a.return_item_id,'batch_id',a.batch_id,'quantity',a.quantity)
-      FROM return_item_batch_allocations a JOIN product_batches pb ON pb.id=a.batch_id
-      WHERE pb.variant_product_id IN (@keeperId, @mergedId)
-      UNION ALL
-      SELECT 'reversible_stock_session', o.id,
-             json_object('operation_id',o.id,'history_id',o.history_id,'history_status',h.status,
-               'member_product_id',m.product_id)
-      FROM stock_session_operations o
-      JOIN action_history h ON h.id=o.history_id
-      JOIN stock_session_members m ON m.operation_id=o.id
-      WHERE h.status IN ('undoable','redoable') AND m.product_id IN (@keeperId,@mergedId)
-      UNION ALL
-      SELECT 'branch', printf('%020d', b.id), json_object('id',b.id,'name',b.name)
-      FROM branches b WHERE b.id IN (
-        SELECT branch_id FROM branch_stock WHERE product_id IN (@keeperId,@mergedId)
-        UNION SELECT bbs.branch_id FROM branch_batch_stock bbs JOIN product_batches pb ON pb.id=bbs.batch_id
-          WHERE pb.variant_product_id IN (@keeperId,@mergedId)
-      )
-      ORDER BY kind, row_key
-    )`
+const SELECTED_CONFLICT_FINGERPRINT_MAX_COMPOUND_TERMS = 5
+const SELECTED_CONFLICT_FINGERPRINT_TERM_COUNT = 12 + MERGE_REPARENT_TABLES.length
+const SELECTED_CONFLICT_FINGERPRINT_STATEMENT_COUNT = Math.ceil(
+  SELECTED_CONFLICT_FINGERPRINT_TERM_COUNT / SELECTED_CONFLICT_FINGERPRINT_MAX_COMPOUND_TERMS,
+)
+
+function selectedConflictStateFingerprintSqlTerms(clusterType: ProductConflictPreviewCase['cluster_type']): string[] {
+  const terms = [
+    `SELECT 'product' AS kind, printf('%020d', id) AS row_key,
+            json_object('id',id,'name',name,'barcode',barcode,'image_path',image_path,
+              'is_active',is_active,'is_group',COALESCE(is_group,0),'parent_id',parent_id,
+              'stock_quantity',stock_quantity,'updated_at',updated_at,
+              'cost_price_usd',cost_price_usd,'cost_price_khr',cost_price_khr,
+              'selling_price_usd',selling_price_usd,'selling_price_khr',selling_price_khr,
+              'wholesale_price_usd',wholesale_price_usd,'wholesale_price_khr',wholesale_price_khr) AS value
+     FROM products WHERE id IN (@keeperId, @mergedId)`,
+    `SELECT 'cluster_member' AS kind, printf('%020d', p.id) AS row_key,
+            json_object('id',p.id,'name',p.name,'name_key',p.name_key,'barcode',p.barcode,
+              'is_active',p.is_active,'is_group',COALESCE(p.is_group,0)) AS value
+     FROM products p
+     WHERE p.is_active=1 AND COALESCE(p.is_group,0)=0
+       AND (${selectedConflictClusterPredicateSql(clusterType)})`,
+    `SELECT 'branch_stock' AS kind, printf('%020d:%020d', product_id, branch_id) AS row_key,
+            json_object('product_id',product_id,'branch_id',branch_id,'quantity',quantity,
+              'rfid_confirmed_qty',rfid_confirmed_qty) AS value
+     FROM branch_stock WHERE product_id IN (@keeperId, @mergedId)`,
+    `SELECT 'product_batch' AS kind, printf('%020d', id) AS row_key,
+            json_object('id',id,'variant_product_id',variant_product_id,'batch_key',batch_key,
+              'batch_number',batch_number,'is_active',is_active,'updated_at',updated_at) AS value
+     FROM product_batches WHERE variant_product_id IN (@keeperId, @mergedId)`,
+    `SELECT 'branch_batch_stock' AS kind, printf('%020d:%020d', bbs.batch_id, bbs.branch_id) AS row_key,
+            json_object('batch_id',bbs.batch_id,'branch_id',bbs.branch_id,'quantity',bbs.quantity,
+              'updated_at',bbs.updated_at) AS value
+     FROM branch_batch_stock bbs JOIN product_batches pb ON pb.id=bbs.batch_id
+     WHERE pb.variant_product_id IN (@keeperId, @mergedId)`,
+    `SELECT 'product_image' AS kind, printf('%020d:%020d', product_id, id) AS row_key,
+            json_object('id',id,'product_id',product_id,'image_path',image_path,'sort_order',sort_order) AS value
+     FROM product_images WHERE product_id IN (@keeperId, @mergedId)`,
+    ...MERGE_REPARENT_TABLES.map(({ table, column }) => `SELECT 'reparent:${table}' AS kind, printf('%020d', id) AS row_key,
+            json_object('id', id, 'linked_product_id', ${column}) AS value
+     FROM ${table} WHERE ${column} IN (@keeperId, @mergedId)`),
+    `SELECT 'promotion_rule' AS kind, printf('%020d', pr.id) AS row_key,
+            json_object('id',pr.id,'product_ids',pr.product_ids) AS value
+     FROM promotion_rules pr
+     WHERE json_valid(pr.product_ids) AND EXISTS (
+       SELECT 1 FROM json_each(pr.product_ids) j WHERE CAST(j.value AS INTEGER) IN (@keeperId, @mergedId)
+     )`,
+    `SELECT 'child_product' AS kind, printf('%020d', id) AS row_key,
+            json_object('id',id,'parent_id',parent_id,'updated_at',updated_at) AS value
+     FROM products WHERE parent_id IN (@keeperId, @mergedId)`,
+    `SELECT 'sale_batch_allocation' AS kind, printf('%020d', a.id) AS row_key,
+            json_object('id',a.id,'sale_item_id',a.sale_item_id,'batch_id',a.batch_id,'quantity',a.quantity) AS value
+     FROM sale_item_batch_allocations a JOIN product_batches pb ON pb.id=a.batch_id
+     WHERE pb.variant_product_id IN (@keeperId, @mergedId)`,
+    `SELECT 'return_batch_allocation' AS kind, printf('%020d', a.id) AS row_key,
+            json_object('id',a.id,'return_item_id',a.return_item_id,'batch_id',a.batch_id,'quantity',a.quantity) AS value
+     FROM return_item_batch_allocations a JOIN product_batches pb ON pb.id=a.batch_id
+     WHERE pb.variant_product_id IN (@keeperId, @mergedId)`,
+    `SELECT 'reversible_stock_session' AS kind, o.id AS row_key,
+            json_object('operation_id',o.id,'history_id',o.history_id,'history_status',h.status,
+              'member_product_id',m.product_id) AS value
+     FROM stock_session_operations o
+     JOIN action_history h ON h.id=o.history_id
+     JOIN stock_session_members m ON m.operation_id=o.id
+     WHERE h.status IN ('undoable','redoable') AND m.product_id IN (@keeperId,@mergedId)`,
+    `SELECT 'branch' AS kind, printf('%020d', b.id) AS row_key,
+            json_object('id',b.id,'name',b.name) AS value
+     FROM branches b WHERE b.id IN (
+       SELECT branch_id FROM branch_stock WHERE product_id IN (@keeperId,@mergedId)
+       UNION SELECT bbs.branch_id FROM branch_batch_stock bbs JOIN product_batches pb ON pb.id=bbs.batch_id
+         WHERE pb.variant_product_id IN (@keeperId,@mergedId)
+     )`,
+  ]
+  if (terms.length !== SELECTED_CONFLICT_FINGERPRINT_TERM_COUNT) {
+    throw new Error('selected_conflict_fingerprint_term_count_invalid')
+  }
+  return terms
+}
+
+// Read every fingerprint source in one transactional batch and carry the same
+// fragments into the atomic write guard. Five compound terms per query match
+// the verified local D1 ceiling while the exact-count invariant
+// makes a future source addition fail closed instead of weakening the guard.
+function selectedConflictStateFingerprintSqlChunks(clusterType: ProductConflictPreviewCase['cluster_type']): string[] {
+  const terms = selectedConflictStateFingerprintSqlTerms(clusterType)
+  const chunks: string[] = []
+  for (let offset = 0; offset < terms.length; offset += SELECTED_CONFLICT_FINGERPRINT_MAX_COMPOUND_TERMS) {
+    chunks.push(`
+      SELECT kind,row_key,value FROM (
+        ${terms.slice(offset, offset + SELECTED_CONFLICT_FINGERPRINT_MAX_COMPOUND_TERMS).join('\n        UNION ALL\n')}
+        ORDER BY 1, 2
+      )`)
+  }
+  return chunks
 }
 
 async function readSelectedConflictFingerprint(
@@ -4293,18 +4306,53 @@ async function readSelectedConflictFingerprint(
   clusterType: ProductConflictPreviewCase['cluster_type'],
   clusterValue: string,
   clusterNameKey: string,
-): Promise<{ fingerprint: string; guard: { sql: string; params: Record<string, unknown> } }> {
-  const query = selectedConflictStateFingerprintSql(clusterType)
+): Promise<{ fingerprint: string; guards: Array<{ sql: string; params: Record<string, unknown> }> }> {
+  const queries = selectedConflictStateFingerprintSqlChunks(clusterType)
   const params = { keeperId, mergedId, clusterValue, clusterNameKey }
-  const row = await db.prepare(query).get<{ fingerprint: string }>(params)
-  const fingerprint = String(row?.fingerprint || '[]')
+  const results = await db.batch(queries.map((sql) => ({ sql, params })))
+  if (results.length !== queries.length) throw new Error('selected_conflict_fingerprint_batch_incomplete')
+  const chunks = results.map((result) => {
+    if (!Array.isArray(result.results)) {
+      throw new Error('selected_conflict_fingerprint_batch_failed')
+    }
+    return result.results.map((raw) => {
+      const row = raw as { kind?: unknown; row_key?: unknown; value?: unknown }
+      if (typeof row.kind !== 'string' || typeof row.row_key !== 'string' || typeof row.value !== 'string') {
+        throw new Error('selected_conflict_fingerprint_row_invalid')
+      }
+      try { JSON.parse(row.value) } catch { throw new Error('selected_conflict_fingerprint_value_invalid') }
+      return { kind: row.kind, key: row.row_key, value: row.value }
+    })
+  })
+  const encoder = new TextEncoder()
+  const compareBinaryText = (left: string, right: string): number => {
+    const leftBytes = encoder.encode(left)
+    const rightBytes = encoder.encode(right)
+    const sharedLength = Math.min(leftBytes.length, rightBytes.length)
+    for (let index = 0; index < sharedLength; index += 1) {
+      if (leftBytes[index] !== rightBytes[index]) return leftBytes[index] - rightBytes[index]
+    }
+    return leftBytes.length - rightBytes.length
+  }
+  const binaryOrder = (left: { kind: string; key: string }, right: { kind: string; key: string }) => (
+    compareBinaryText(left.kind, right.kind) || compareBinaryText(left.key, right.key)
+  )
+  const serialize = (entries: Array<{ kind: string; key: string; value: string }>) => `[${entries
+    .sort(binaryOrder)
+    .map((entry) => `{"kind":${JSON.stringify(entry.kind)},"key":${JSON.stringify(entry.key)},"value":${entry.value}}`)
+    .join(',')}]`
+  const chunkFingerprints = chunks.map((entries) => serialize(entries))
+  const fingerprint = serialize(chunks.flat())
   return {
     fingerprint,
-    guard: {
-      sql: `SELECT CASE WHEN (${query})=@expectedFingerprint
+    guards: queries.map((query, index) => ({
+      sql: `SELECT CASE WHEN (
+              SELECT COALESCE(json_group_array(json_object('kind',kind,'key',row_key,'value',json(value))), '[]')
+              FROM (${query})
+            )=@expectedFingerprint
             THEN 1 ELSE json_extract('', '$') END AS selected_conflict_state_guard`,
-      params: { ...params, expectedFingerprint: fingerprint },
-    },
+      params: { ...params, expectedFingerprint: chunkFingerprints[index] },
+    })),
   }
 }
 
@@ -4328,7 +4376,7 @@ function selectedConflictStatementEstimate(
   canChangeImages: boolean,
 ): number {
   let statements = 1 // product CAS
-  statements += 1 // selected-conflict state fingerprint guard
+  statements += SELECTED_CONFLICT_FINGERPRINT_STATEMENT_COUNT // selected-conflict state fingerprint guards
   for (const row of snapshot.duplicateStockRows) {
     if (!Number(row.quantity)) continue
     statements += stockChoice === 'merge' ? 2 : 1
@@ -4549,7 +4597,7 @@ async function prepareSelectedConflictCase(
     discarded,
     stateDigest,
     stateFingerprint: fingerprint.fingerprint,
-    stateGuard: fingerprint.guard,
+    stateGuards: fingerprint.guards,
     needsStockChoice: mergeStockImpactNeedsChoice(stockImpact),
     stockImpact,
     snapshot,
@@ -4595,7 +4643,7 @@ async function prepareSelectedConflictCases(
 
 type SelectedConflictApplyPreflightCase = Pick<SelectedConflictPreparedCase,
   'ordinal' | 'caseKey' | 'keeper' | 'discarded' | 'stateDigest' | 'needsStockChoice'
-  | 'stateGuard' | 'imageChanges' | 'blockingSession' | 'statementEstimate'>
+  | 'stateGuards' | 'imageChanges' | 'blockingSession' | 'statementEstimate'>
 
 function selectedConflictLightStatementEstimate(
   fingerprint: string,
@@ -4634,7 +4682,7 @@ function selectedConflictLightStatementEstimate(
       mergeBatchStatements += batchStock.filter((row) => Number(row.batch_id) === Number(batch.id) && Number(row.quantity)).length + 4
     }
   }
-  const common = 1 + 1 + 1 // product CAS, selected-state guard, discarded stock clear
+  const common = 1 + SELECTED_CONFLICT_FINGERPRINT_STATEMENT_COUNT + 1 // product CAS, selected-state guards, discarded stock clear
     + (canChangeImages ? mergedImages.length + 2 : 1)
     + 2 // deactivate and economics
     + reparentGroups.size + promotionCount + (childCount ? 2 : 0)
@@ -4718,7 +4766,7 @@ async function prepareSelectedConflictApplyPreflightCases(
       keep_id: keeper.id, merge_id: discarded.id, state: after.fingerprint,
     })
     prepared.push({
-      ordinal, caseKey: requested.case_key, keeper, discarded, stateDigest, stateGuard: after.guard,
+      ordinal, caseKey: requested.case_key, keeper, discarded, stateDigest, stateGuards: after.guards,
       needsStockChoice: mergeStockImpactNeedsChoice(stockImpact), imageChanges, blockingSession,
       statementEstimate: selectedConflictLightStatementEstimate(after.fingerprint, keeper.id, discarded.id, canChangeImages),
     })
@@ -4974,7 +5022,7 @@ app.post('/possible-duplicates/merge-batch', async (c) => {
       return c.json({ success: false, code: imageDenied ? 'image_permission_required' : stockMissing ? 'stock_choice_required' : 'merge_state_conflict', error: refusals[0].error, refusals }, imageDenied ? 403 : stockMissing ? 400 : 409)
     }
     const runId = crypto.randomUUID()
-    const insertStatements: Array<{ sql: string; params?: Record<string, unknown> }> = preflight.prepared.flatMap((item) => [item.stateGuard])
+    const insertStatements: Array<{ sql: string; params?: Record<string, unknown> }> = preflight.prepared.flatMap((item) => item.stateGuards)
     insertStatements.push({
       sql: `INSERT INTO product_conflict_merge_runs
         (id,actor_id,request_id,request_digest,manifest_version,manifest_digest,request_json,status,result_json)
@@ -5108,7 +5156,7 @@ app.post('/possible-duplicates/merge-batch', async (c) => {
           undefined,
           {
             operationId: item.operation_id,
-            preStatements: [prepared.stateGuard],
+            preStatements: prepared.stateGuards,
             additionalStatements: receiptStatements,
             auditContext: {
               selectedConflictRunId: run.id,
