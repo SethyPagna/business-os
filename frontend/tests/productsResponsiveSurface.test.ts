@@ -218,7 +218,7 @@ assert.match(transfer, /sm:max-h-64 sm:overflow-auto/, 'the row list must not ne
 assert.match(transfer, /flex flex-wrap items-center gap-x-3 gap-y-1\.5 px-3 py-2\.5 sm:flex-nowrap/, 'a row must restack rather than squeeze its quantity box away at 375px')
 assert.match(posDetail, /aria-expanded=\{batchChoicesOpen\}/, 'POS batches must be collapsed behind one option button')
 assert.match(posDetail, /batchChoicesOpen \? <><div/, 'POS batch options must render only after the option button is expanded')
-assert.match(posDetail, /setSelectedBatchId\(batch\.id\); setSelectedDamagedLotId\(null\); setBatchChoicesOpen\(false\)/, 'choosing a POS batch must close its options')
+assert.match(posDetail, /setSelectedBatchId\(batch\.id\); setSelectedUnlottedStock\(false\); setSelectedDamagedLotId\(null\); setBatchChoicesOpen\(false\)/, 'choosing a POS batch must clear unrecorded/damaged intent and close its options')
 assert.doesNotMatch(stockChanges, /detailRows/, 'a selected stock change must not load unrelated before/after history into its detail dialog')
 assert.match(stockChanges, /<th data-tone="emerald" className="text-center">/, 'stock change Quantity headers must center over centered values')
 // dense-th-wrap is load-bearing, not decoration: .dense-data-table th is
