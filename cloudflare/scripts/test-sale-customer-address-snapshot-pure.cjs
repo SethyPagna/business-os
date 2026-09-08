@@ -177,6 +177,28 @@ async function run() {
   }])
   assert.deepEqual(directCreation.payment_details, [{ method: 'Cash', amount_usd: 5, amount_khr: 0 }])
 
+  const nameOnly = fixture()
+  const nameOnlySale = await nameOnly.call('/', {
+    items: [{ product_id: 1, quantity: 1, applied_price_usd: 5, branch_id: 1 }],
+    branch_id: 1,
+    customer_name: 'Walk-in Dara',
+    payment_details: [{ method: 'Cash', amount_usd: 5, amount_khr: 0 }],
+    payment_currency: 'USD', amount_paid_usd: 5, amount_paid_khr: 0, exchange_rate: 4200,
+    client_request_id: 'name-only-create-1',
+  }, 'POST')
+  assert.equal(nameOnlySale.status, 200, JSON.stringify(nameOnlySale))
+  const nameOnlyRow = nameOnly.sql.prepare('SELECT customer_id,customer_name,creation_snapshot_json FROM sales WHERE id=?').get(nameOnlySale.body.id)
+  assert.deepEqual(
+    { customer_id: nameOnlyRow.customer_id, customer_name: nameOnlyRow.customer_name },
+    { customer_id: null, customer_name: 'Walk-in Dara' },
+  )
+  assert.deepEqual(
+    JSON.parse(nameOnlyRow.creation_snapshot_json).customer,
+    { id: null, name: 'Walk-in Dara' },
+    'a direct name-only sale must not be recorded as General',
+  )
+  console.log('PASS a name-only direct sale stays distinct from General')
+
   // A plainly typed address is untouched -- the normalization must not eat
   // ordinary input, including a numeric house number that parses as JSON.
   for (const [sent, expected] of [['Phnom Penh, Cambodia', 'Phnom Penh, Cambodia'], ['271', '271'], ['[]', null]]) {

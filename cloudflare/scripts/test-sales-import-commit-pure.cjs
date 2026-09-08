@@ -133,8 +133,8 @@ function saleData(overrides = {}) {
   }])
   assert.equal(creation.sale_at, '2026-08-28T07:30:00.000Z')
   assert.equal(creation.recorded_at, input.nowIso)
-  assert.equal(creation.customer, null, 'an imported General sale is known anonymous')
-  assert.equal(creation.membership, null, 'an imported General sale has known no membership')
+  assert.deepEqual(creation.customer, { id: null, name: 'Dara' }, 'a name-only imported sale is not rewritten as General')
+  assert.equal(creation.membership, null, 'a name-only imported sale has no linked membership')
 
   const member = setup()
   await subject.applyHistoricalSaleImport(member.db, {

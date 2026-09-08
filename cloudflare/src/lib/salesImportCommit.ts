@@ -181,6 +181,7 @@ export async function applyHistoricalSaleImport(
   const legacyReceiptNumber = ownReceipt ? null : suppliedReceipt || null
   const importedCustomerId = Number(d.customer_id)
   const hasImportedCustomer = Number.isSafeInteger(importedCustomerId) && importedCustomerId > 0
+  const hasImportedCustomerName = Boolean(String(d.customer_name ?? '').trim())
   const importedMembershipNumber = String(d.membership_number ?? '').trim()
   const importedMembershipDiscountUsd = Number(d.membership_discount_usd) || 0
   const importedMembershipDiscountKhr = Number(d.membership_discount_khr) || 0
@@ -211,8 +212,8 @@ export async function applyHistoricalSaleImport(
     deliveryContactPhone: d.delivery_contact_phone,
     deliveryFeeUsd: d.delivery_fee_usd,
     deliveryActualCostUsd: d.delivery_actual_cost_usd,
-    customerSnapshot: hasImportedCustomer ? {
-      id: importedCustomerId,
+    customerSnapshot: hasImportedCustomer || hasImportedCustomerName ? {
+      id: hasImportedCustomer ? importedCustomerId : null,
       name: d.customer_name,
     } : null,
     // A matched imported customer does not prove whether membership existed

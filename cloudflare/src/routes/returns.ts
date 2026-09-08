@@ -1290,7 +1290,7 @@ app.post('/', async (c) => {
         changeKhr: 0,
         isDelivery: false,
         deliveryFeeUsd: 0,
-        customerSnapshot: replacementCustomerId ? {
+        customerSnapshot: replacementCustomerId || String(replacementCustomerName ?? '').trim() ? {
           id: replacementCustomerId,
           name: replacementCustomerName,
         } : null,
