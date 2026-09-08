@@ -1,4 +1,15 @@
 
+## Active checkpoint and Khmer review — September 8, 06:04 UTC
+
+Production remains4e576eaa at100%. Small checkpoint73fd7dc1 is in final build/dry-run verification after322/322 frontend files passed. It contains ONLY compact mobile Sales U13–U15, F56 expense concurrency/zero-row handling, F58 loading boundaries and F59 the two approved Khmer labels (ថ្លៃដឹកដើម; ថ្លៃដឹកដើមថ្មី). No schema migration. Five fix-scoped commits preserve provenance.
+
+F46 is held: actual local Worker/browser preview of11 cases failed with D1 compound-SELECT limit before writes. Expense_version_guard owns a bounded query repair; the repeated real D1/browser check remains required. Broader integration gate initially288/294 backend and319/324frontend; five stale backend harnesses and three frontend source contracts repaired, native subtotal rerun3/3passed, two new received-date labels corrected to existing dictated vocabulary. This is not a passing combined release claim. Migration0136 remains local only.
+
+F57 canonical promotion-image references and Library display have a final indexed-query candidate513b57f1, migration0137 local only, independent review pending. F55 offline recovery plan requires signed server scope, safe generation/version separation, correct reset boundaries and legacy reconciliation before implementation. No created_at heuristic or blind replay is approved.
+
+F60 Excel wording review covers6145 source leaf strings:5573 effective UI keys and572 overridden source copies. Four original batches plus705 nested entries are being consolidated. Broader wording is proposal-only; only the two F59 terms are approved for code changes. The workbook will include all82 task entries and current states. Full review/status artifacts are in outputs/khmer-review-20260908.
+
+
 ## Latest verified deployment — September 8, 04:57 UTC
 
 **LIVE: 4e576eaad290d158f4a388ef1652729bb103e720**, Worker c7b6a310-efb9-4106-b8cc-f0a56edf03ae, deployment4adb0e4d-6423-4abb-9d1f-a78f66115362, independently confirmed100% at2026-09-08T04:57:24.418726Z. F53 permission-refresh coalescing/session generation, F54 shared HTTP cache ownership/server precedence, and U05 positive profit headline colors are deployed. Frontend320/320, both types, i18n5384/566sources,1103-module build and300-asset dry-run passed. Backend source/migrations exactly match previous livec2eb; no migration. Nine individual commits preserve author/date/messages; source cutoff599f2b70 differs only by the eight approved private evidence exclusions.
@@ -100,7 +111,7 @@ Every shipped row must eventually record its actual deployment version.
 | F43 | Contact phone entry automatically spaces digits as typed; formatted display and canonical matching must agree. | Deployed da5c8b02; independent PASS including mobile deletion and IME | Progressive spacing, prefixes, paste and caret covered in seven create/edit/quick-add fields. |
 | F44 | Latest owner correction: visible Credit / ឥណទាន becomes Not Paid / ប្រាក់ជំពាក់ everywhere. | Deployed 560bfbcb; live EN/KM verified | Supersedes N39/F13 unpaid-state wording. Internal values/accounting unchanged; distinct Store Credit, supplier credit and overpayment concepts preserved. |
 | F45 | Investigate failed admin WebSocket and reported content.js/VM listener/startTime errors. | Deployed 560bfbcb; independent PASS | Cooldown lacked wake-up and actual logout did not disconnect. Both corrected. content.js listener is extension noise; VM startTime ownership unproven. |
-| F46 | Bulk conflict multi-select processes slowly one by one; present combined before/after review and efficient bounded execution. | Runtime active, isolated next slice / conflict_batch_impl, sales, media | Combined before/after workflow is separate from bounded duplicate merge; backend execution/receipts, combined frontend review and backup/reset integration now assigned. |
+| F46 | Combined selected-conflict review and bounded merge. | Held for actual D1 compound-SELECT repair | Independent SQLite/source checks passed, but real11-case preview fails before writes. Migration0136 not deployed. |
 
 | F47 | Prevent and clearly prompt about existing customers, suppliers and delivery contacts across add/create/edit/quick-add/import/session surfaces; distinguish reuse from intentional creation. | Deployed c2eb9d57 across A/B/C/D; legacy cleanup remains | Explicit reuse/separate choices, phone/name/membership guards, reviewed snapshots, import targets, atomic new-customer signup and no hidden supplier creation. Exact browser passed; unrelated failed saves remain visible. |
 | F48 | Shift difference must show when supported across Telegram, reports and history; Closing cash / សាច់ប្រាក់បិទវេន; Not Paid / ប្រាក់ជំពាក់; use owner's supplied concise report arrangement. | Deployed 4afe9825; independent review passed / sales | Each known currency difference is shown even under review; missing inputs remain unknown. Requested section order and Closing cash labels are pinned. |
@@ -108,7 +119,7 @@ Every shipped row must eventually record its actual deployment version.
 | F50 | Correct unassociated form labels (browser reports four resources). | Deployed 4afe9825; exact four reproduced and fixed / responsive | Sales custom-export flow now has zero unassociated labels in the clean-browser check. Other forms remain separate follow-up candidates. |
 
 | F51 | Enforce owner-confirmed canonical Shop/Warehouse and product/branch/lot identity across every writer; retain daily prompt/report-only cash and Not Paid revenue. | Canonical branch/lot followups deployed c2eb9d57 | CRUD/review/undo/reset and Warehouse→Shop transfer guards, disabled sale-side Warehouse, stale-lot checks, authoritative general/dated/sales imports, and canonical export buckets passed independent and combined checks. Historical unknown identities are not silently repaired. |
-| F52 | Investigate negative revenue/profit and keep canonical calculations accurate. | Audit complete; accounting clarification retained | Canonical revenue is nonnegative and includes Not Paid. No formula defect found in focused audit. Real below-cost/expense losses may produce negative profit; never falsify by clamping. Inconsistent test wording remains a small follow-up. |
+| F52 | Investigate negative revenue/profit accuracy. | Focused formula review complete; historical financial census open | No formula defect established. Preserve genuine losses; never clamp or invent money. |
 
 ## Public portal and legal requests
 
