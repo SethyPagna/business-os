@@ -78,6 +78,7 @@ const subject = compile('saleRecords.ts', {
 })
 
 const {
+  SALE_RECORD_FIELDS,
   SALE_RECORD_KINDS,
   SALE_RECORDS_COUNT_BINDS_PER_ID,
   auditRecord,
@@ -954,6 +955,22 @@ runTest('the ledger kind 0129 ships is the one this module maps, not a name it i
   const mapped = ledgerRecord(LEDGER[2])
   assert.strictEqual(mapped.kind, 'delivery_cost_changed', 'the ledger kind normalizes to the record kind the float labels')
   assert.notStrictEqual(mapped.kind, 'other', 'an unmapped ledger kind lands on other and prints a raw string')
+})
+
+runTest('the public field vocabulary is exact and closed', () => {
+  assert.deepStrictEqual(SALE_RECORD_FIELDS, [
+    'receipt_number', 'sale_status', 'items', 'total_usd', 'payment', 'delivery',
+    'customer', 'membership', 'item', 'quantity', 'removed_items', 'added_items',
+    'delivery_fee_usd', 'actual_delivery_cost_usd', 'is_delivery', 'driver',
+    'payment_method', 'payment_details', 'amount_paid_usd', 'amount_paid_khr',
+    'change_usd', 'change_khr', 'cancel_reason', 'cancel_note',
+  ])
+  const records = buildSaleRecords({ sale: SALE, ledger: LEDGER, audit: AUDIT, bulk: BULK })
+  for (const record of records) {
+    for (const change of record.changes) {
+      assert.ok(SALE_RECORD_FIELDS.includes(change.field), `${change.field} is not a declared field`)
+    }
+  }
 })
 
 runTest('the public contract is changed-only and distinguishes General from unknown history', () => {

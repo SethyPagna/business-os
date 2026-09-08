@@ -82,8 +82,8 @@ import { parseSaleCreationSnapshot, type SaleCreationSnapshotV1 } from './saleCr
 // ---------------------------------------------------------------------------
 // The closed set of kinds. Closed on purpose: the float renders a localized
 // label per kind, so an invented kind would print a raw string in Khmer.
-// Anything a classifier cannot place lands on 'other', which has its own label
-// and shows the raw summary.
+// A genuine historical sale event that cannot be classified narrowly lands on
+// legacy_sale_change; its raw variables never cross the API boundary.
 // ---------------------------------------------------------------------------
 export const SALE_RECORD_KINDS = [
   'sale_created',
@@ -105,6 +105,34 @@ export const SALE_RECORD_KINDS = [
 ] as const
 export type SaleRecordKind = (typeof SALE_RECORD_KINDS)[number]
 
+export const SALE_RECORD_FIELDS = [
+  'receipt_number',
+  'sale_status',
+  'items',
+  'total_usd',
+  'payment',
+  'delivery',
+  'customer',
+  'membership',
+  'item',
+  'quantity',
+  'removed_items',
+  'added_items',
+  'delivery_fee_usd',
+  'actual_delivery_cost_usd',
+  'is_delivery',
+  'driver',
+  'payment_method',
+  'payment_details',
+  'amount_paid_usd',
+  'amount_paid_khr',
+  'change_usd',
+  'change_khr',
+  'cancel_reason',
+  'cancel_note',
+] as const
+export type SaleRecordField = (typeof SALE_RECORD_FIELDS)[number]
+
 export type SaleRecordSource = 'sale' | 'ledger' | 'audit' | 'bulk' | 'return' | 'mutation'
 
 export type SaleRecordValueState =
@@ -113,7 +141,7 @@ export type SaleRecordValueState =
   | { state: 'unknown' }
 
 export interface SaleRecordChange {
-  field: string
+  field: SaleRecordField
   before: SaleRecordValueState
   after: SaleRecordValueState
 }
@@ -1097,7 +1125,7 @@ function compositeState(
 
 function addChange(
   changes: SaleRecordChange[],
-  field: string,
+  field: SaleRecordField,
   before: SaleRecordValueState,
   after: SaleRecordValueState,
   force = false,
@@ -1187,7 +1215,7 @@ function publicRecord(record: SaleRecord): SaleRecord {
     addChange(changes, 'quantity', fieldState(record, 'before', 'quantity'), fieldState(record, 'after', 'quantity'))
     addChange(changes, 'total_usd', fieldState(record, 'before', 'total_usd'), fieldState(record, 'after', 'total_usd'))
   } else if (record.kind === 'items_replaced') {
-    for (const field of ['removed_items', 'added_items', 'total_usd']) {
+    for (const field of ['removed_items', 'added_items', 'total_usd'] as const) {
       addChange(changes, field, fieldState(record, 'before', field), fieldState(record, 'after', field))
     }
   } else if (record.kind === 'delivery_fee_changed') {
@@ -1209,11 +1237,11 @@ function publicRecord(record: SaleRecord): SaleRecord {
   } else if (record.kind === 'membership_changed') {
     addChange(changes, 'membership', compositeState(record, 'before', ['membership_number'], membershipValue), compositeState(record, 'after', ['membership_number'], membershipValue), true)
   } else if (record.kind === 'payment_changed' || record.kind === 'payment_settled') {
-    for (const field of ['payment_method', 'payment_details', 'amount_paid_usd', 'amount_paid_khr', 'change_usd', 'change_khr', 'sale_status']) {
+    for (const field of ['payment_method', 'payment_details', 'amount_paid_usd', 'amount_paid_khr', 'change_usd', 'change_khr', 'sale_status'] as const) {
       addChange(changes, field, fieldState(record, 'before', field), fieldState(record, 'after', field))
     }
   } else if (record.kind === 'cancelled') {
-    for (const field of ['sale_status', 'cancel_reason', 'cancel_note']) {
+    for (const field of ['sale_status', 'cancel_reason', 'cancel_note'] as const) {
       addChange(changes, field, fieldState(record, 'before', field), fieldState(record, 'after', field))
     }
   } else if (record.kind === 'status_changed') {
