@@ -90,21 +90,33 @@ export const SALE_RECORD_KINDS = [
   'status_changed',
   'item_added',
   'item_removed',
-  'item_qty_changed',
-  'item_price_changed',
+  'item_quantity_changed',
+  'items_replaced',
+  'driver_changed',
   'delivery_fee_changed',
   'delivery_cost_changed',
   'delivery_added',
-  'discount_changed',
   'customer_changed',
+  'membership_changed',
+  'payment_changed',
   'payment_settled',
   'cancelled',
-  'undone',
-  'other',
+  'legacy_sale_change',
 ] as const
 export type SaleRecordKind = (typeof SALE_RECORD_KINDS)[number]
 
-export type SaleRecordSource = 'sale' | 'ledger' | 'audit' | 'bulk' | 'return'
+export type SaleRecordSource = 'sale' | 'ledger' | 'audit' | 'bulk' | 'return' | 'mutation'
+
+export type SaleRecordValueState =
+  | { state: 'known_value'; value: unknown }
+  | { state: 'known_none' }
+  | { state: 'unknown' }
+
+export interface SaleRecordChange {
+  field: string
+  before: SaleRecordValueState
+  after: SaleRecordValueState
+}
 
 export interface SaleRecord {
   /**
@@ -129,9 +141,17 @@ export interface SaleRecord {
   summary: string
   /** True only when durable generation proves an event but actor/time were already pruned. */
   provenance_unknown?: boolean
-  /** Field-keyed state before and after. Same keys on both sides, always. */
-  before: Record<string, unknown> | null
-  after: Record<string, unknown> | null
+  /**
+   * Closed, changed-only field list. Null never carries two meanings: a
+   * deliberate absence is known_none and missing historical evidence is
+   * unknown.
+   */
+  changes?: SaleRecordChange[]
+  /** Internal source snapshots. buildSaleRecords strips these from the API. */
+  before?: Record<string, unknown> | null
+  after?: Record<string, unknown> | null
+  unknown_before_fields?: string[]
+  unknown_after_fields?: string[]
 }
 
 /**
@@ -196,6 +216,8 @@ export interface SaleRecordSaleRow {
     applied_price_usd?: unknown
     total_usd?: unknown
   }>
+  /** Reader-only marker produced by reconstructSaleCreation. */
+  creation_unknown_fields?: string[]
 }
 
 /**
@@ -297,6 +319,7 @@ export function saleCreatedRecord(sale: SaleRecordSaleRow): SaleRecord {
       change_usd: numberOrNull(sale.change_usd),
       change_khr: numberOrNull(sale.change_khr),
     },
+    unknown_after_fields: sale.creation_unknown_fields,
   }
 }
 
@@ -326,7 +349,22 @@ type CreationSnapshotField = (typeof CREATION_SNAPSHOT_FIELDS)[number]
 type KnownBefore = { at: number; value: unknown }
 
 export interface SaleRecordMutationRow {
+  id?: string | null
+  mutation_kind?: string | null
+  request_json?: unknown
   before_json?: unknown
+  after_json?: unknown
+  generation?: number | null
+  created_at?: string | null
+  history_created_at?: string | null
+  history_created_by_name?: string | null
+}
+
+export interface SaleRecordMutationReplayRow {
+  operation_id: string
+  audit_id: number | string
+  action?: string | null
+  user_name?: string | null
   created_at?: string | null
 }
 
@@ -430,6 +468,10 @@ export function reconstructSaleCreation(input: {
     if (known[field]) reconstructed[field] = known[field]!.value
   }
   reconstructed.items = undefined
+  reconstructed.creation_unknown_fields = [
+    'products',
+    ...LEGACY_AMBIGUOUS_CREATION_FIELDS.filter((field) => !known[field]),
+  ]
   return reconstructed
 }
 
@@ -440,6 +482,8 @@ export interface SaleRecordLedgerRow {
   id: number
   kind: string | null
   group_id?: string | null
+  sale_item_id?: number | null
+  product_id?: number | null
   product_name?: string | null
   quantity_before?: number | null
   quantity_after?: number | null
@@ -460,8 +504,8 @@ export interface SaleRecordLedgerRow {
 const LEDGER_KIND_TO_RECORD_KIND: Record<string, SaleRecordKind> = {
   line_added: 'item_added',
   line_removed: 'item_removed',
-  line_quantity_increased: 'item_qty_changed',
-  line_quantity_decreased: 'item_qty_changed',
+  line_quantity_increased: 'item_quantity_changed',
+  line_quantity_decreased: 'item_quantity_changed',
   delivery_fee_changed: 'delivery_fee_changed',
   // Codex's 0129 named the LEDGER kind 'delivery_actual_cost_changed'. The
   // RECORD kind is the shorter 'delivery_cost_changed': the float's labels are
@@ -475,7 +519,7 @@ const DELIVERY_SUBJECT = 'delivery'
 
 export function ledgerRecord(row: SaleRecordLedgerRow): SaleRecord {
   const ledgerKind = String(row.kind || '')
-  const kind = LEDGER_KIND_TO_RECORD_KIND[ledgerKind] || 'other'
+  const kind = LEDGER_KIND_TO_RECORD_KIND[ledgerKind] || 'legacy_sale_change'
   if (ledgerKind === 'delivery_added') {
     const before = parseDetails(row.before_json)
     const after = parseDetails(row.after_json)
@@ -613,11 +657,11 @@ export function auditRecord(row: SaleRecordAuditRow): SaleRecord | null {
   if (action === 'action_undo' || action === 'action_redo') {
     return {
       ...base,
-      kind: 'undone',
+      kind: 'legacy_sale_change',
       subject: text(details.applier),
-      summary: `${action === 'action_undo' ? 'Undid' : 'Redid'} ${text(details.applier) || 'an action'}`,
+      summary: 'Earlier sale change',
       before: null,
-      after: { direction: text(details.direction) || (action === 'action_undo' ? 'undo' : 'redo') },
+      after: null,
     }
   }
 
@@ -663,11 +707,11 @@ export function auditRecord(row: SaleRecordAuditRow): SaleRecord | null {
 
   return {
     ...base,
-    kind: 'other',
+    kind: 'legacy_sale_change',
     subject: null,
-    summary: action || 'Changed',
+    summary: 'Earlier sale change',
     before: null,
-    after: Object.keys(details).length ? details : null,
+    after: null,
   }
 }
 
@@ -680,6 +724,63 @@ function parsePaymentDetails(value: unknown): unknown {
   } catch (_) {
     return null
   }
+}
+
+export function mutationRecords(
+  row: SaleRecordMutationRow,
+  replayRows: SaleRecordMutationReplayRow[] = [],
+): SaleRecord[] {
+  if (text(row.mutation_kind) !== 'settlement' || !text(row.id)) return []
+  const before = parseDetails(row.before_json)
+  const after = parseDetails(row.after_json)
+  if (!before || !after) return []
+  const request = parseDetails(row.request_json) || {}
+  const paymentCorrection = request.replace_existing_payment === true
+  const operationId = String(row.id)
+  const originalAt = text(row.history_created_at) || text(row.created_at)
+  const records: SaleRecord[] = [{
+    id: `mutation:${operationId}:0`,
+    source: 'mutation',
+    at: originalAt,
+    at_ms: atMs(originalAt),
+    actor_username: text(row.history_created_by_name),
+    kind: paymentCorrection ? 'payment_changed' : 'payment_settled',
+    via: null,
+    subject: null,
+    summary: paymentCorrection ? 'Payment changed' : 'Payment settled',
+    before,
+    after,
+  }]
+  const generation = Math.max(0, Math.floor(numberOrNull(row.generation) || 0))
+  const surviving = replayRows
+    .filter((event) => event.operation_id === operationId && ['action_undo', 'action_redo'].includes(String(event.action || '')))
+    .sort((left, right) => {
+      const l = atMs(left.created_at) ?? Number.POSITIVE_INFINITY
+      const r = atMs(right.created_at) ?? Number.POSITIVE_INFINITY
+      return l - r || String(left.audit_id).localeCompare(String(right.audit_id))
+    })
+    .slice(-generation)
+  const missing = Math.max(0, generation - surviving.length)
+  for (let sequence = 1; sequence <= generation; sequence += 1) {
+    const direction = sequence % 2 === 1 ? 'undo' : 'redo'
+    const replay = sequence > missing ? surviving[sequence - missing - 1] : undefined
+    const replayAt = text(replay?.created_at)
+    records.push({
+      id: `mutation:${operationId}:${sequence}`,
+      source: 'mutation',
+      at: replayAt,
+      at_ms: atMs(replayAt),
+      actor_username: text(replay?.user_name),
+      kind: paymentCorrection ? 'payment_changed' : 'payment_settled',
+      via: direction,
+      subject: null,
+      summary: direction === 'undo' ? 'Payment change undone' : 'Payment change redone',
+      provenance_unknown: !replay,
+      before: direction === 'undo' ? after : before,
+      after: direction === 'undo' ? before : after,
+    })
+  }
+  return records
 }
 
 // ---------------------------------------------------------------------------
@@ -699,6 +800,15 @@ export interface SaleRecordBulkRow {
   created_at?: string | null
   created_by_name?: string | null
   label?: string | null
+  generation?: number | null
+}
+
+export interface SaleRecordBulkReplayRow {
+  operation_id: string
+  audit_id: number | string
+  action?: string | null
+  user_name?: string | null
+  created_at?: string | null
 }
 
 function bulkMemberEntry(receiptJson: unknown, saleId: number | string): Record<string, unknown> | null {
@@ -733,7 +843,9 @@ export function bulkRecord(row: SaleRecordBulkRow, saleId: number | string): Sal
   const kind: SaleRecordKind = targetStatus
     ? (targetStatus === 'cancelled' ? 'cancelled' : 'status_changed')
     : action === 'customer' ? 'customer_changed'
-    : 'other'
+    : action === 'delivery_contact' ? 'driver_changed'
+    : action === 'payment_method' ? 'payment_changed'
+    : 'legacy_sale_change'
 
   return {
     id: `bulk:${row.operation_id}`,
@@ -825,7 +937,7 @@ export function legacyReturnRecord(row: SaleRecordReturnRow): SaleRecord {
     at,
     at_ms: atMs(at),
     actor_username: text(row.cashier_name),
-    kind: 'other',
+    kind: 'legacy_sale_change',
     via: null,
     subject: label || `#${row.id}`,
     summary: 'Legacy return recorded; original change details unavailable',
@@ -850,7 +962,7 @@ export function returnAuditRecord(row: SaleRecordReturnAuditRow): SaleRecord | n
     at,
     at_ms: atMs(at),
     actor_username: text(row.user_name),
-    kind: action === 'create' ? 'status_changed' : 'other',
+    kind: 'legacy_sale_change',
     via: null,
     subject: label,
     summary: action === 'create' ? 'Return recorded' : 'Return updated',
@@ -901,6 +1013,221 @@ export function returnBulkEventRecord(row: SaleRecordReturnBulkEventRow): SaleRe
 // The union.
 // ---------------------------------------------------------------------------
 
+function state(value: unknown, unknown = false): SaleRecordValueState {
+  if (unknown) return { state: 'unknown' }
+  return value === null || value === undefined
+    ? { state: 'known_none' }
+    : { state: 'known_value', value }
+}
+
+export function bulkRecords(
+  row: SaleRecordBulkRow,
+  saleId: number | string,
+  replayRows: SaleRecordBulkReplayRow[] = [],
+): SaleRecord[] {
+  const original = bulkRecord(row, saleId)
+  const generation = Math.max(0, Math.floor(numberOrNull(row.generation) || 0))
+  const surviving = replayRows
+    .filter((event) => event.operation_id === row.operation_id && ['action_undo', 'action_redo'].includes(String(event.action || '')))
+    .sort((left, right) => (atMs(left.created_at) ?? Number.POSITIVE_INFINITY) - (atMs(right.created_at) ?? Number.POSITIVE_INFINITY))
+    .slice(-generation)
+  const missing = Math.max(0, generation - surviving.length)
+  const records = [original]
+  for (let sequence = 1; sequence <= generation; sequence += 1) {
+    const direction = sequence % 2 === 1 ? 'undo' : 'redo'
+    const replay = sequence > missing ? surviving[sequence - missing - 1] : undefined
+    const replayAt = text(replay?.created_at)
+    records.push({
+      ...original,
+      id: `bulk:${row.operation_id}:${sequence}`,
+      at: replayAt,
+      at_ms: atMs(replayAt),
+      actor_username: text(replay?.user_name),
+      via: direction,
+      summary: direction === 'undo' ? `${original.summary} undone` : `${original.summary} redone`,
+      provenance_unknown: !replay,
+      before: direction === 'undo' ? original.after : original.before,
+      after: direction === 'undo' ? original.before : original.after,
+    })
+  }
+  return records
+}
+
+function statesEqual(left: SaleRecordValueState, right: SaleRecordValueState): boolean {
+  return JSON.stringify(left) === JSON.stringify(right)
+}
+
+function fieldState(record: SaleRecord, side: 'before' | 'after', field: string): SaleRecordValueState {
+  const unknown = (side === 'before' ? record.unknown_before_fields : record.unknown_after_fields) || []
+  const snapshot = record[side]
+  return state(snapshot ? snapshot[field] : null, unknown.includes(field))
+}
+
+function compositeState(
+  record: SaleRecord,
+  side: 'before' | 'after',
+  fields: string[],
+  build: (snapshot: Record<string, unknown>) => unknown,
+): SaleRecordValueState {
+  const unknown = (side === 'before' ? record.unknown_before_fields : record.unknown_after_fields) || []
+  if (fields.some((field) => unknown.includes(field))) return { state: 'unknown' }
+  const snapshot = record[side]
+  if (!snapshot) return { state: 'known_none' }
+  return state(build(snapshot))
+}
+
+function addChange(
+  changes: SaleRecordChange[],
+  field: string,
+  before: SaleRecordValueState,
+  after: SaleRecordValueState,
+  force = false,
+): void {
+  if (force || !statesEqual(before, after)) changes.push({ field, before, after })
+}
+
+function paymentValue(snapshot: Record<string, unknown>): Record<string, unknown> | null {
+  const value = {
+    method: text(snapshot.payment_method),
+    details: parsePaymentDetails(snapshot.payment_details),
+    amount_paid_usd: numberOrNull(snapshot.amount_paid_usd),
+    amount_paid_khr: numberOrNull(snapshot.amount_paid_khr),
+    change_usd: numberOrNull(snapshot.change_usd),
+    change_khr: numberOrNull(snapshot.change_khr),
+  }
+  return Object.values(value).some((entry) => entry !== null) ? value : null
+}
+
+function driverValue(snapshot: Record<string, unknown>): Record<string, unknown> | null {
+  const id = numberOrNull(snapshot.delivery_contact_id)
+  const name = text(snapshot.delivery_contact_name)
+  const phone = text(snapshot.delivery_contact_phone)
+  const address = text(snapshot.delivery_contact_address)
+  return id === null && name === null && phone === null && address === null
+    ? null : { id, name, phone, address }
+}
+
+function customerValue(snapshot: Record<string, unknown>): Record<string, unknown> | null {
+  const id = numberOrNull(snapshot.customer_id)
+  const name = text(snapshot.customer_name)
+  const phone = text(snapshot.customer_phone)
+  const address = text(snapshot.customer_address)
+  return id === null ? null : { id, name, phone, address }
+}
+
+function membershipValue(snapshot: Record<string, unknown>): Record<string, unknown> | null {
+  const number = text(snapshot.membership_number ?? snapshot.customer_membership_number)
+  const discountUsd = numberOrNull(snapshot.membership_discount_usd)
+  const discountKhr = numberOrNull(snapshot.membership_discount_khr)
+  const points = numberOrNull(snapshot.membership_points_redeemed)
+  return number === null && discountUsd === null && discountKhr === null && points === null
+    ? null : { number, discount_usd: discountUsd, discount_khr: discountKhr, points_redeemed: points }
+}
+
+function itemValue(record: SaleRecord, snapshot: Record<string, unknown>): Record<string, unknown> | null {
+  const name = text(snapshot.product_name) || text(record.subject)
+  const productId = numberOrNull(snapshot.product_id)
+  const saleItemId = numberOrNull(snapshot.sale_item_id)
+  const sku = text(snapshot.sku)
+  const unitPrice = numberOrNull(snapshot.unit_price_usd)
+  const lineTotal = numberOrNull(snapshot.line_total_usd)
+  return name === null && productId === null && saleItemId === null
+    ? null : { sale_item_id: saleItemId, product_id: productId, name, sku, unit_price_usd: unitPrice, line_total_usd: lineTotal }
+}
+
+function publicRecord(record: SaleRecord): SaleRecord {
+  const changes: SaleRecordChange[] = []
+  const beforeNone = state(null)
+  const after = record.after || {}
+  if (record.kind === 'sale_created') {
+    for (const field of ['receipt_number', 'sale_status', 'products', 'total_usd'] as const) {
+      const publicField = field === 'products' ? 'items' : field
+      addChange(changes, publicField, beforeNone, fieldState(record, 'after', field), true)
+    }
+    addChange(changes, 'payment', beforeNone, compositeState(record, 'after', [
+      'payment_method', 'payment_details', 'amount_paid_usd', 'amount_paid_khr', 'change_usd', 'change_khr',
+    ], paymentValue), true)
+    const deliveryUnknown = record.unknown_after_fields?.includes('is_delivery')
+    const delivery = deliveryUnknown ? state(null, true)
+      : Number(after.is_delivery) === 0 || after.is_delivery === false ? state(null)
+        : state({
+          is_delivery: true,
+          driver: driverValue(after),
+          delivery_fee_usd: numberOrNull(after.delivery_fee_usd),
+          actual_delivery_cost_usd: numberOrNull(after.delivery_actual_cost_usd),
+        })
+    addChange(changes, 'delivery', beforeNone, delivery, true)
+  } else if (record.kind === 'item_added' || record.kind === 'item_removed' || record.kind === 'item_quantity_changed') {
+    addChange(changes, 'item',
+      compositeState(record, 'before', ['product_name'], (snapshot) => itemValue(record, snapshot)),
+      compositeState(record, 'after', ['product_name'], (snapshot) => itemValue(record, snapshot)), true)
+    addChange(changes, 'quantity', fieldState(record, 'before', 'quantity'), fieldState(record, 'after', 'quantity'))
+    addChange(changes, 'total_usd', fieldState(record, 'before', 'total_usd'), fieldState(record, 'after', 'total_usd'))
+  } else if (record.kind === 'items_replaced') {
+    for (const field of ['removed_items', 'added_items', 'total_usd']) {
+      addChange(changes, field, fieldState(record, 'before', field), fieldState(record, 'after', field))
+    }
+  } else if (record.kind === 'delivery_fee_changed') {
+    addChange(changes, 'delivery_fee_usd', fieldState(record, 'before', 'amount_usd'), fieldState(record, 'after', 'amount_usd'))
+    addChange(changes, 'total_usd', fieldState(record, 'before', 'total_usd'), fieldState(record, 'after', 'total_usd'))
+  } else if (record.kind === 'delivery_cost_changed') {
+    addChange(changes, 'actual_delivery_cost_usd', fieldState(record, 'before', 'amount_usd'), fieldState(record, 'after', 'amount_usd'))
+  } else if (record.kind === 'delivery_added') {
+    addChange(changes, 'is_delivery', fieldState(record, 'before', 'is_delivery'), fieldState(record, 'after', 'is_delivery'))
+    addChange(changes, 'driver', compositeState(record, 'before', ['delivery_contact_id'], driverValue), compositeState(record, 'after', ['delivery_contact_id'], driverValue))
+    addChange(changes, 'delivery_fee_usd', fieldState(record, 'before', 'delivery_fee_usd'), fieldState(record, 'after', 'delivery_fee_usd'))
+    addChange(changes, 'actual_delivery_cost_usd', fieldState(record, 'before', 'delivery_actual_cost_usd'), fieldState(record, 'after', 'delivery_actual_cost_usd'))
+    addChange(changes, 'total_usd', fieldState(record, 'before', 'total_usd'), fieldState(record, 'after', 'total_usd'))
+  } else if (record.kind === 'driver_changed') {
+    addChange(changes, 'driver', compositeState(record, 'before', ['delivery_contact_id'], driverValue), compositeState(record, 'after', ['delivery_contact_id'], driverValue))
+  } else if (record.kind === 'customer_changed') {
+    addChange(changes, 'customer', compositeState(record, 'before', ['customer_id'], customerValue), compositeState(record, 'after', ['customer_id'], customerValue), true)
+    addChange(changes, 'membership', compositeState(record, 'before', ['membership_number'], membershipValue), compositeState(record, 'after', ['membership_number'], membershipValue), true)
+  } else if (record.kind === 'membership_changed') {
+    addChange(changes, 'membership', compositeState(record, 'before', ['membership_number'], membershipValue), compositeState(record, 'after', ['membership_number'], membershipValue), true)
+  } else if (record.kind === 'payment_changed' || record.kind === 'payment_settled') {
+    for (const field of ['payment_method', 'payment_details', 'amount_paid_usd', 'amount_paid_khr', 'change_usd', 'change_khr', 'sale_status']) {
+      addChange(changes, field, fieldState(record, 'before', field), fieldState(record, 'after', field))
+    }
+  } else if (record.kind === 'cancelled') {
+    for (const field of ['sale_status', 'cancel_reason', 'cancel_note']) {
+      addChange(changes, field, fieldState(record, 'before', field), fieldState(record, 'after', field))
+    }
+  } else if (record.kind === 'status_changed') {
+    addChange(changes, 'sale_status', fieldState(record, 'before', 'sale_status'), fieldState(record, 'after', 'sale_status'))
+  }
+  const { before: _before, after: _after, unknown_before_fields: _ub, unknown_after_fields: _ua, ...publicFields } = record
+  return { ...publicFields, changes }
+}
+
+function replacementRecord(rows: SaleRecordLedgerRow[]): SaleRecord {
+  const first = rows[0]
+  const removed = rows.filter((row) => numberOrNull(row.quantity_before)! > numberOrNull(row.quantity_after)!)
+  const added = rows.filter((row) => numberOrNull(row.quantity_after)! > numberOrNull(row.quantity_before)!)
+  const item = (row: SaleRecordLedgerRow) => ({
+    sale_item_id: row.sale_item_id ?? null,
+    product_id: row.product_id ?? null,
+    name: text(row.product_name),
+    sku: null,
+    quantity: Math.max(numberOrNull(row.quantity_before) || 0, numberOrNull(row.quantity_after) || 0),
+    unit_price_usd: null,
+    line_total_usd: null,
+  })
+  return {
+    id: `amendment-group:${first.group_id}:${text(first.via) || 'amend'}`,
+    source: 'ledger',
+    at: text(first.created_at),
+    at_ms: atMs(first.created_at),
+    actor_username: text(first.user_name),
+    kind: 'items_replaced',
+    via: text(first.via) || 'amend',
+    subject: null,
+    summary: 'Items replaced',
+    before: { removed_items: removed.map(item), added_items: null, total_usd: numberOrNull(first.total_before_usd) },
+    after: { removed_items: null, added_items: added.map(item), total_usd: numberOrNull(rows[rows.length - 1].total_after_usd) },
+  }
+}
+
 /**
  * Oldest first, which is how the ledger already reads and how the shop tells
  * the story of an afternoon.
@@ -927,10 +1254,12 @@ export function buildSaleRecords(input: {
   ledger?: SaleRecordLedgerRow[]
   audit?: SaleRecordAuditRow[]
   bulk?: SaleRecordBulkRow[]
+  bulkReplays?: SaleRecordBulkReplayRow[]
   returns?: SaleRecordReturnRow[]
   returnAudit?: SaleRecordReturnAuditRow[]
   returnBulk?: SaleRecordReturnBulkEventRow[]
   mutations?: SaleRecordMutationRow[]
+  mutationReplays?: SaleRecordMutationReplayRow[]
 }): SaleRecord[] {
   const creationSnapshot = parseSaleCreationSnapshot(input.sale.creation_snapshot_json)
   const records: SaleRecord[] = [creationSnapshot
@@ -941,7 +1270,26 @@ export function buildSaleRecords(input: {
     firstSurviving: SaleRecord | null
     records: SaleRecord[]
   }> = []
-  for (const row of input.ledger || []) records.push(ledgerRecord(row))
+  const groupedLedgerIds = new Set<number>()
+  const ledgerGroups = new Map<string, SaleRecordLedgerRow[]>()
+  for (const row of input.ledger || []) {
+    if (!text(row.group_id)) continue
+    const key = `${row.group_id}:${text(row.via) || 'amend'}`
+    const group = ledgerGroups.get(key) || []
+    group.push(row)
+    ledgerGroups.set(key, group)
+  }
+  for (const rows of ledgerGroups.values()) {
+    const hasDecrease = rows.some((row) => (numberOrNull(row.quantity_before) || 0) > (numberOrNull(row.quantity_after) || 0))
+    const hasIncrease = rows.some((row) => (numberOrNull(row.quantity_after) || 0) > (numberOrNull(row.quantity_before) || 0))
+    if (rows.length > 1 && hasDecrease && hasIncrease) {
+      rows.forEach((row) => groupedLedgerIds.add(row.id))
+      records.push(replacementRecord(rows))
+    }
+  }
+  for (const row of input.ledger || []) {
+    if (!groupedLedgerIds.has(row.id)) records.push(ledgerRecord(row))
+  }
   const explicitTransitions = (input.audit || []).flatMap((row) => {
     const action = String(row.action || '')
     const details = parseDetails(row.details) || {}
@@ -961,7 +1309,14 @@ export function buildSaleRecords(input: {
       after: text(after) || '',
     }]
   })
+  const durableSettlementIds = new Set((input.mutations || [])
+    .filter((row) => text(row.mutation_kind) === 'settlement' && text(row.id))
+    .map((row) => String(row.id)))
   for (const row of input.audit || []) {
+    if (String(row.action || '') === 'sale_settlement') {
+      const details = parseDetails(row.details) || {}
+      if (durableSettlementIds.has(String(details.operationId || ''))) continue
+    }
     if (String(row.action || '') === 'update') {
       const details = parseDetails(row.details) || {}
       const transitionAt = atMs(row.created_at)
@@ -976,7 +1331,10 @@ export function buildSaleRecords(input: {
     const record = auditRecord(row)
     if (record) records.push(record)
   }
-  for (const row of input.bulk || []) records.push(bulkRecord(row, input.sale.id))
+  for (const row of input.mutations || []) {
+    records.push(...mutationRecords(row, input.mutationReplays || []))
+  }
+  for (const row of input.bulk || []) records.push(...bulkRecords(row, input.sale.id, input.bulkReplays || []))
   const creationAuditedReturnIds = new Set<string>()
   for (const row of input.returnAudit || []) {
     const record = returnAuditRecord(row)
@@ -1040,7 +1398,7 @@ export function buildSaleRecords(input: {
       : ordered.length
     ordered.splice(insertAt, 0, ...missing.records)
   }
-  return ordered
+  return ordered.map(publicRecord)
 }
 
 // ---------------------------------------------------------------------------
@@ -1076,12 +1434,32 @@ export const SALE_RECORDS_SELF_COUNT = 1
 export function buildSaleRecordsCountSql(placeholders: string): string {
   return `
     SELECT s.id AS sale_id,
-      (SELECT COUNT(*) FROM sale_amendments sa WHERE sa.sale_id = s.id)
+      (SELECT COUNT(*) FROM sale_amendments sa
+        WHERE sa.sale_id = s.id
+          AND NOT (
+            sa.group_id IS NOT NULL
+            AND EXISTS (SELECT 1 FROM sale_amendments dec
+              WHERE dec.sale_id=sa.sale_id AND dec.group_id=sa.group_id
+                AND COALESCE(dec.via,'amend')=COALESCE(sa.via,'amend')
+                AND COALESCE(dec.quantity_before,0)>COALESCE(dec.quantity_after,0))
+            AND EXISTS (SELECT 1 FROM sale_amendments inc
+              WHERE inc.sale_id=sa.sale_id AND inc.group_id=sa.group_id
+                AND COALESCE(inc.via,'amend')=COALESCE(sa.via,'amend')
+                AND COALESCE(inc.quantity_after,0)>COALESCE(inc.quantity_before,0))
+            AND sa.id<>(SELECT MIN(first.id) FROM sale_amendments first
+              WHERE first.sale_id=sa.sale_id AND first.group_id=sa.group_id
+                AND COALESCE(first.via,'amend')=COALESCE(sa.via,'amend'))
+          ))
       + (SELECT COUNT(*) FROM audit_logs a
         WHERE a.entity = 'sale' AND a.entity_id = CAST(s.id AS TEXT)
           AND COALESCE(CASE WHEN json_valid(a.details) THEN json_extract(a.details, '$.action') END, '') <> 'amend'
           AND NOT (a.action IN ('action_undo','action_redo')
                    AND CASE WHEN json_valid(a.details) THEN json_extract(a.details, '$.applier') END = 'sale.add_items')
+          AND NOT (a.action='sale_settlement' AND json_valid(a.details) AND EXISTS (
+            SELECT 1 FROM sale_mutation_receipts smr
+            WHERE smr.sale_id=s.id AND smr.mutation_kind='settlement'
+              AND smr.id=json_extract(a.details,'$.operationId')
+          ))
           AND NOT (a.action = 'update' AND EXISTS (
             SELECT 1 FROM audit_logs explicit
             WHERE explicit.entity = a.entity
@@ -1099,7 +1477,13 @@ export function buildSaleRecordsCountSql(placeholders: string): string {
               )
           ))
       )
-      + (SELECT COUNT(*) FROM sale_bulk_members sbm WHERE sbm.sale_id = s.id)
+      + COALESCE((SELECT SUM(1 + MAX(0, COALESCE(smr.generation,0)))
+        FROM sale_mutation_receipts smr
+        WHERE smr.sale_id=s.id AND smr.mutation_kind='settlement'),0)
+      + COALESCE((SELECT SUM(1 + MAX(0, COALESCE(sbo.generation,0)))
+        FROM sale_bulk_members sbm
+        JOIN sale_bulk_operations sbo ON sbo.id=sbm.operation_id
+        WHERE sbm.sale_id = s.id),0)
       + (SELECT COUNT(*) FROM returns
         WHERE sale_id = s.id
           AND COALESCE(return_scope, 'customer') = 'customer'

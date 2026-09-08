@@ -97,8 +97,10 @@ import {
   SALE_RECORDS_SELF_COUNT,
   type SaleRecordAuditRow,
   type SaleRecordBulkRow,
+  type SaleRecordBulkReplayRow,
   type SaleRecordLedgerRow,
   type SaleRecordMutationRow,
+  type SaleRecordMutationReplayRow,
   type SaleRecordSaleRow,
 } from '../lib/saleRecords'
 import { VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES } from '../lib/salesStatus'
@@ -2841,7 +2843,7 @@ app.get('/:id/records', async (c) => {
   // row is the only place its timestamp and actor live -- sale_bulk_members has
   // neither column.
   const bulk = await db.prepare(`
-    SELECT o.id AS operation_id, o.request_json, o.receipt_json, o.history_id,
+    SELECT o.id AS operation_id, o.request_json, o.receipt_json, o.history_id, o.generation,
       h.created_at AS created_at, h.created_by_name AS created_by_name, h.label AS label
     FROM sale_bulk_members m
     JOIN sale_bulk_operations o ON o.id = m.operation_id
@@ -2849,15 +2851,37 @@ app.get('/:id/records', async (c) => {
     WHERE m.sale_id = ?
   `).all<SaleRecordBulkRow>([saleId])
 
+  const bulkReplays = await db.prepare(`
+    SELECT o.id AS operation_id, a.id AS audit_id, a.action, a.user_name, a.created_at
+    FROM sale_bulk_members m
+    JOIN sale_bulk_operations o ON o.id=m.operation_id
+    JOIN audit_logs a ON a.entity='sale' AND a.entity_id=o.id
+      AND a.action IN ('action_undo','action_redo')
+    WHERE m.sale_id=?
+    ORDER BY a.created_at ASC, a.id ASC
+  `).all<SaleRecordBulkReplayRow>([saleId])
+
   // Monetary mutation receipts are permanent and carry the exact pre-write
   // snapshot. Audit retention must not make a settled sale's current tender
   // masquerade as its creation tender.
   const mutations = await db.prepare(`
-    SELECT before_json, created_at
-    FROM sale_mutation_receipts
-    WHERE sale_id = ?
-    ORDER BY created_at ASC, id ASC
+    SELECT r.id, r.mutation_kind, r.request_json, r.before_json, r.after_json,
+      r.generation, r.created_at, h.created_at AS history_created_at,
+      h.created_by_name AS history_created_by_name
+    FROM sale_mutation_receipts r
+    LEFT JOIN action_history h ON h.id = r.history_id
+    WHERE r.sale_id = ?
+    ORDER BY r.created_at ASC, r.id ASC
   `).all<SaleRecordMutationRow>([saleId])
+
+  const mutationReplays = await db.prepare(`
+    SELECT r.id AS operation_id, a.id AS audit_id, a.action, a.user_name, a.created_at
+    FROM sale_mutation_receipts r
+    JOIN audit_logs a ON a.entity='sale' AND a.entity_id=r.id
+      AND a.action IN ('action_undo','action_redo')
+    WHERE r.sale_id = ?
+    ORDER BY a.created_at ASC, a.id ASC
+  `).all<SaleRecordMutationReplayRow>([saleId])
 
   // The return row supplies immutable creation fallback data when its older
   // audit event has aged out. Current mutable status/refund values are never
@@ -2919,10 +2943,12 @@ app.get('/:id/records', async (c) => {
     ledger,
     audit: auditRows,
     bulk,
+    bulkReplays,
     returns: returnRows,
     returnAudit: returnAuditRows,
     returnBulk: returnBulkRows,
     mutations,
+    mutationReplays,
   })
   return c.json({ saleId, records, count: records.length })
 })

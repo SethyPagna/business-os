@@ -106,6 +106,17 @@ function runTest(name, fn) {
   }
 }
 
+function changed(record, field) {
+  const entry = record.changes.find((candidate) => candidate.field === field)
+  assert.ok(entry, `${record.kind} must include changed field ${field}`)
+  return entry
+}
+
+function known(entry, side = 'after') {
+  assert.strictEqual(entry[side].state, 'known_value')
+  return entry[side].value
+}
+
 // ---------------------------------------------------------------------------
 // The fixture. Sale 77 was rung up at 09:00 (a client ISO stamp), then during
 // the day: the delivery fee was corrected, a line's quantity raised, the actual
@@ -222,7 +233,7 @@ runTest('before/after is money for the delivery kinds and units for a line', () 
   assert.deepStrictEqual(fee.after, { amount_usd: 2, total_usd: 12.5 })
 
   const qty = ledgerRecord(LEDGER[1])
-  assert.strictEqual(qty.kind, 'item_qty_changed')
+  assert.strictEqual(qty.kind, 'item_quantity_changed')
   assert.strictEqual(qty.subject, 'Serum')
   assert.deepStrictEqual(qty.before, { quantity: 1, total_usd: 12.5 })
   assert.deepStrictEqual(qty.after, { quantity: 2, total_usd: 15.5 })
@@ -270,7 +281,7 @@ runTest('adding delivery is one truthful record with driver and complete USD/KHR
 
 runTest('an undo keeps the kind of what it moved and says so through via', () => {
   const undone = ledgerRecord({ ...LEDGER[1], id: 14, via: 'undo', quantity_before: 2, quantity_after: 1 })
-  assert.strictEqual(undone.kind, 'item_qty_changed', 'the reader still needs to know WHICH line moved')
+  assert.strictEqual(undone.kind, 'item_quantity_changed', 'the reader still needs to know WHICH line moved')
   assert.strictEqual(undone.via, 'undo')
 })
 
@@ -409,30 +420,29 @@ runTest('a future immutable creation snapshot wins over every mutable current sa
   assert.equal(created.actor_username, 'importer-now', 'record actor is the applying account, not the source cashier')
   assert.equal(created.subject, '20260828-143000')
   assert.equal(created.via, 'sales_import')
-  assert.deepEqual(created.after, {
-    receipt_number: '20260828-143000',
-    sale_status: 'awaiting_payment',
-    products: [{ product: 'Original Serum', sku: 'OLD-4', quantity: 2, unit_price_usd: 5, line_total_usd: 10 }],
-    total_usd: 12,
-    payment_method: 'Split',
-    payment_details: [{ method: 'Cash', amount_usd: 5, amount_khr: 0 }, { method: 'ABA', amount_usd: 7, amount_khr: 0 }],
-    amount_paid_usd: 12,
-    amount_paid_khr: 0,
-    change_usd: 0,
-    change_khr: 0,
+  assert.equal(created.before, undefined)
+  assert.equal(created.after, undefined)
+  assert.equal(known(changed(created, 'receipt_number')), '20260828-143000')
+  assert.equal(known(changed(created, 'sale_status')), 'awaiting_payment')
+  assert.deepEqual(known(changed(created, 'items')), [{ product: 'Original Serum', sku: 'OLD-4', quantity: 2, unit_price_usd: 5, line_total_usd: 10 }])
+  assert.deepEqual(known(changed(created, 'payment')), {
+    method: 'Split',
+    details: [{ method: 'Cash', amount_usd: 5, amount_khr: 0 }, { method: 'ABA', amount_usd: 7, amount_khr: 0 }],
+    amount_paid_usd: 12, amount_paid_khr: 0, change_usd: 0, change_khr: 0,
+  })
+  assert.deepEqual(known(changed(created, 'delivery')), {
     is_delivery: true,
-    delivery_contact_name: 'Original Driver',
-    delivery_contact_phone: '012-ORIGINAL',
+    driver: { id: null, name: 'Original Driver', phone: '012-ORIGINAL', address: null },
     delivery_fee_usd: 2,
-    delivery_actual_cost_usd: 1.25,
+    actual_delivery_cost_usd: 1.25,
   })
 })
 
 runTest('missing, malformed and unknown-version snapshots retain the honest legacy path', () => {
   for (const raw of [null, '{bad', JSON.stringify({ version: 999, products: [] })]) {
     const record = buildSaleRecords({ sale: { ...SALE, creation_snapshot_json: raw } })[0]
-    assert.equal(record.after.products, null)
-    assert.equal(record.after.payment_method, null)
+    assert.equal(changed(record, 'items').after.state, 'unknown')
+    assert.equal(changed(record, 'payment').after.state, 'unknown')
     assert.equal(record.actor_username, 'sokha')
   }
 })
@@ -455,10 +465,10 @@ runTest('a payment correction is one rich record, not a status-only duplicate', 
   const payments = records.filter((record) => record.kind === 'payment_settled')
   assert.strictEqual(payments.length, 1, 'the matching generic status audit is the explicit settlement twin')
   assert.strictEqual(payments[0].summary, 'Payment corrected')
-  assert.strictEqual(payments[0].before.payment_method, null)
-  assert.strictEqual(payments[0].after.payment_method, 'ABA')
-  assert.strictEqual(payments[0].after.amount_paid_usd, 90)
-  assert.deepStrictEqual(payments[0].after.payment_details, [{ method: 'ABA', amount_usd: 90, amount_khr: 0 }])
+  assert.deepStrictEqual(changed(payments[0], 'payment_method').before, { state: 'known_none' })
+  assert.strictEqual(known(changed(payments[0], 'payment_method')), 'ABA')
+  assert.strictEqual(known(changed(payments[0], 'amount_paid_usd')), 90)
+  assert.deepStrictEqual(known(changed(payments[0], 'payment_details')), [{ method: 'ABA', amount_usd: 90, amount_khr: 0 }])
 })
 
 runTest('a customer swap reports both ids', () => {
@@ -474,8 +484,8 @@ runTest('an undo/redo replay that writes no ledger entry is the one thing kind "
     id: 506, action: 'action_undo', user_name: 'admin', created_at: '2026-09-06 14:00:00',
     details: JSON.stringify({ applier: 'sale.settlement', operationId: 'op-1', direction: 'undo' }),
   })
-  assert.strictEqual(record.kind, 'undone')
-  assert.strictEqual(record.after.direction, 'undo')
+  assert.strictEqual(record.kind, 'legacy_sale_change')
+  assert.deepStrictEqual(record.after, null)
 })
 
 runTest('the add-items undo applier writes BOTH a ledger row and an audit row, and the pair is ONE record', () => {
@@ -509,7 +519,7 @@ runTest('the add-items undo applier writes BOTH a ledger row and an audit row, a
     id: 522, action: 'action_undo', user_name: 'admin', created_at: '2026-09-06 13:05:00',
     details: JSON.stringify({ applier: 'sale.settlement', operationId: 'op-1', direction: 'undo' }),
   })
-  assert.ok(settlement && settlement.kind === 'undone', 'sale.settlement replays stay in the list')
+  assert.ok(settlement && settlement.kind === 'legacy_sale_change', 'legacy sale.settlement replays stay in the list without raw details')
 })
 
 runTest('return creation and later update are separate events with their actual actors', () => {
@@ -529,13 +539,13 @@ runTest('return creation and later update are separate events with their actual 
   const changes = records.filter((r) => r.source === 'return')
   assert.strictEqual(changes.length, 2, 'creation and edit are separate acts')
   assert.strictEqual(changes[0].id, 'return-audit:801')
-  assert.strictEqual(changes[0].kind, 'status_changed')
+  assert.strictEqual(changes[0].kind, 'legacy_sale_change')
   assert.strictEqual(changes[0].actor_username, 'creator-a')
   assert.strictEqual(changes[0].subject, 'R-0005', 'the subject is the return the reader must open next')
-  assert.deepStrictEqual(changes[0].after, { return_status: 'completed', reason: 'Wrong shade' })
+  assert.deepStrictEqual(changes[0].changes, [])
   assert.strictEqual(changes[1].actor_username, 'modifier-b')
   assert.strictEqual(changes[1].at, '2026-09-06 15:00:00')
-  assert.deepStrictEqual(changes[1].after, { reason: 'Changed quantity' })
+  assert.deepStrictEqual(changes[1].changes, [])
 })
 
 runTest('a supplier-scope return never touched sales.sale_status, so it is not a sale record', () => {
@@ -557,7 +567,7 @@ runTest('a supplier-scope return never touched sales.sale_status, so it is not a
   const records = buildSaleRecords({ sale: SALE, ledger: [], audit: [], bulk: [], returns })
   const kept = records.filter((r) => r.source === 'return')
   assert.deepStrictEqual(kept.map((r) => r.id), ['return-legacy:8'], 'the supplier one is dropped, the customer one is not')
-  assert.strictEqual(kept[0].after, null, 'legacy current state is not presented as an original snapshot')
+  assert.deepStrictEqual(kept[0].changes, [], 'legacy current state is not presented as an original snapshot')
 })
 
 runTest('return bulk cancel, undo and redo keep exact direction, actor and time', () => {
@@ -597,7 +607,7 @@ runTest('return bulk generation exposes pruned replay history without inventing 
   assert.strictEqual(fullyPruned[1].provenance_unknown, true)
   assert.match(fullyPruned[1].summary, /actor and time unavailable/)
   assert.strictEqual(fullyPruned[2].actor_username, null)
-  assert.deepStrictEqual(fullyPruned[2].after, { return_status: 'cancelled' })
+  assert.deepStrictEqual(fullyPruned[2].changes, [], 'legacy return replay has no fabricated sale-status detail')
 
   const survivingRedo = {
     ...base, audit_id: 'audit:92', action: 'action_redo', user_name: 'manager-d', created_at: '2026-09-06 17:30:00',
@@ -681,6 +691,8 @@ function setup(withCostKind) {
       receipt_json TEXT NOT NULL, UNIQUE(actor_id, request_id));
     CREATE TABLE sale_bulk_members (operation_id TEXT NOT NULL, sale_id INTEGER NOT NULL, revision INTEGER NOT NULL,
       movement_fingerprint TEXT NOT NULL, PRIMARY KEY(operation_id, sale_id));
+    CREATE TABLE sale_mutation_receipts (id TEXT PRIMARY KEY, sale_id INTEGER NOT NULL,
+      mutation_kind TEXT NOT NULL, generation INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE return_bulk_operations (id TEXT PRIMARY KEY, request_json TEXT NOT NULL, receipt_json TEXT NOT NULL,
       history_id INTEGER, generation INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE return_bulk_members (operation_id TEXT NOT NULL, return_id INTEGER NOT NULL, sale_id INTEGER,
@@ -942,6 +954,69 @@ runTest('the ledger kind 0129 ships is the one this module maps, not a name it i
   const mapped = ledgerRecord(LEDGER[2])
   assert.strictEqual(mapped.kind, 'delivery_cost_changed', 'the ledger kind normalizes to the record kind the float labels')
   assert.notStrictEqual(mapped.kind, 'other', 'an unmapped ledger kind lands on other and prints a raw string')
+})
+
+runTest('the public contract is changed-only and distinguishes General from unknown history', () => {
+  const customer = buildSaleRecords({ sale: SALE, audit: [AUDIT[1]] }).find((record) => record.kind === 'customer_changed')
+  assert.ok(customer)
+  assert.equal(customer.before, undefined)
+  assert.equal(customer.after, undefined)
+  const identity = changed(customer, 'customer')
+  assert.deepStrictEqual(identity.before, { state: 'known_none' }, 'General is a known anonymous assignment')
+  assert.deepStrictEqual(identity.after, { state: 'known_value', value: { id: 9, name: null, phone: null, address: null } })
+  const legacy = buildSaleRecords({ sale: SALE })[0]
+  assert.equal(changed(legacy, 'items').after.state, 'unknown')
+  assert.equal(changed(legacy, 'payment').after.state, 'unknown')
+  assert.ok(legacy.changes.every((entry) => ['receipt_number', 'sale_status', 'items', 'total_usd', 'payment', 'delivery'].includes(entry.field)))
+})
+
+runTest('one grouped replacement is one record with removed and added historical labels', () => {
+  const ledger = [
+    { id: 31, group_id: 'replace-1', kind: 'line_removed', product_id: 4, product_name: 'Old Serum', quantity_before: 2, quantity_after: 0, total_before_usd: 20, total_after_usd: 10, via: 'amend', user_name: 'dara', created_at: '2026-09-06 15:00:00' },
+    { id: 32, group_id: 'replace-1', kind: 'line_added', product_id: 8, product_name: 'New Serum', quantity_before: 0, quantity_after: 1, total_before_usd: 10, total_after_usd: 18, via: 'amend', user_name: 'dara', created_at: '2026-09-06 15:00:00' },
+  ]
+  const records = buildSaleRecords({ sale: SALE, ledger })
+  const replacement = records.find((record) => record.kind === 'items_replaced')
+  assert.ok(replacement)
+  assert.equal(records.filter((record) => record.source === 'ledger').length, 1)
+  assert.equal(known(changed(replacement, 'removed_items'), 'before')[0].name, 'Old Serum')
+  assert.equal(known(changed(replacement, 'added_items'))[0].name, 'New Serum')
+})
+
+runTest('durable settlement receipt emits original plus every replay after audit pruning', () => {
+  const records = buildSaleRecords({
+    sale: SALE,
+    mutations: [{
+      id: 'settle-1', mutation_kind: 'settlement', generation: 2,
+      request_json: JSON.stringify({ replace_existing_payment: false }),
+      before_json: JSON.stringify({ sale_status: 'awaiting_payment', payment_method: null, payment_details: null, amount_paid_usd: 0, amount_paid_khr: 0, change_usd: 0, change_khr: 0 }),
+      after_json: JSON.stringify({ sale_status: 'completed', payment_method: 'ABA', payment_details: [{ method: 'ABA', amount_usd: 12.5, amount_khr: 0 }], amount_paid_usd: 12.5, amount_paid_khr: 0, change_usd: 0, change_khr: 0 }),
+      history_created_at: '2026-09-06 13:00:00', history_created_by_name: 'dara',
+    }],
+  }).filter((record) => record.source === 'mutation')
+  assert.equal(records.length, 3)
+  assert.deepStrictEqual(records.map((record) => record.via), [null, 'undo', 'redo'])
+  assert.deepStrictEqual(records.map((record) => record.actor_username), ['dara', null, null])
+  assert.deepStrictEqual(records.map((record) => record.provenance_unknown || false), [false, true, true])
+  assert.equal(known(changed(records[1], 'payment_method'), 'before'), 'ABA')
+  assert.deepStrictEqual(changed(records[1], 'payment_method').after, { state: 'known_none' })
+})
+
+runTest('durable sale bulk receipt emits exact replay directions and surviving actors', () => {
+  const row = { ...BULK[0], generation: 2 }
+  const records = buildSaleRecords({
+    sale: SALE,
+    bulk: [row],
+    bulkReplays: [
+      { operation_id: 'op-abc', audit_id: 1, action: 'action_undo', user_name: 'owner-a', created_at: '2026-09-06 18:00:00' },
+      { operation_id: 'op-abc', audit_id: 2, action: 'action_redo', user_name: 'owner-b', created_at: '2026-09-06 18:05:00' },
+    ],
+  }).filter((record) => record.source === 'bulk')
+  assert.equal(records.length, 3)
+  assert.deepStrictEqual(records.map((record) => record.via), [null, 'undo', 'redo'])
+  assert.deepStrictEqual(records.map((record) => record.actor_username), ['admin', 'owner-a', 'owner-b'])
+  assert.equal(known(changed(records[1], 'sale_status'), 'before'), 'cancelled')
+  assert.equal(known(changed(records[1], 'sale_status')), 'completed')
 })
 
 // ---------------------------------------------------------------------------
