@@ -39,7 +39,7 @@ test('selected merge partitions candidates before requesting one combined previe
 })
 
 test('N-row selections can open one durable paged review without replacing the legacy pair merge', () => {
-  assert.match(src, /buildSelectedConflictGroupReviewRequest\(targets, createClientRequestId\('product-conflict-group-review'\)\)/)
+  assert.match(src, /buildSelectedConflictGroupReviewRequest\(targets, createClientRequestId\('product-conflict-group-review'\), groupRemovalReasons\)/)
   assert.match(src, /createSelectedConflictGroupReview\(body, \{ signal: request\.signal \}\)/)
   assert.match(src, /setGroupReviewPages\(\[review\]\)/)
   assert.match(src, /getSelectedConflictGroupReviewPage\(current\.review_id, cursor, SELECTED_CONFLICT_GROUP_REVIEW_PAGE_LIMIT/)
@@ -47,9 +47,22 @@ test('N-row selections can open one durable paged review without replacing the l
   assert.match(src, /<SelectedConflictGroupReviewModal/)
   assert.match(src, /selected_conflict_group_review_action/)
   assert.match(src, /selected_conflict_merge_exact_pairs/, 'the existing pair-only write remains separately available')
-  assert.match(src, /disabled\s*\n\s*title=\{t\('selected_conflict_remove_phase_notice'/, 'Remove is a distinct but unavailable action until its own authority, stock clearing, audit, and Undo path exists')
-  assert.match(src, /selected_conflict_remove_unavailable[\s\S]*duplicates_bulk_dismiss_action|duplicates_bulk_dismiss_action[\s\S]*selected_conflict_remove_unavailable/, 'Remove is never mislabeled as the non-destructive Dismiss action')
+  assert.match(src, /Remove independently in the global review[\s\S]*Reason for removing this product/, 'independent removal is explicit and requires its own reason')
+  assert.doesNotMatch(src, /selected_conflict_remove_unavailable/, 'the reviewed removal path is no longer presented as unavailable')
   assert.match(src, /groupReviewRequestRef[\s\S]*batchRequestRef/, 'read-only paging and legacy writes have independent cancellation ownership')
+})
+
+test('global review freezes once, then reuses one apply receipt across bounded continuation', () => {
+  assert.match(src, /buildSelectedConflictGroupFinalizeRequest\(review, groups, groupReviewChoices\)/)
+  assert.match(src, /finalizeSelectedConflictGroupReview\(review\.review_id, body, \{ signal: request\.signal \}\)/)
+  assert.match(src, /setGroupApplyBody\(makeSelectedConflictGroupApplyBody\(finalized\)\)/, 'the server manifest is converted to one stable apply body')
+  assert.match(src, /while \(calls < callCeiling\)[\s\S]*applySelectedConflictGroupReview\(body/, 'continuations reuse the same frozen body')
+  assert.match(src, /if \(!result\.continuation_required\)/, 'the client stops when the backend says no executable continuation remains')
+  assert.match(src, /result\.approval_required[\s\S]*No pending removal was reported as completed/, 'review-tier removals remain visibly pending')
+  assert.match(src, /const code = String\(\(error as \{ code\?: unknown \} \| null\)\?\.code \|\| ''\)[\s\S]*setGroupApplyError\(\{ code, message:/, 'stable backend interruption codes reach the review recovery surface')
+  assert.match(src, /selectedConflictOutcomeIsUnknown\(error\)/, 'ambiguous transport outcomes expose same-receipt resume')
+  assert.match(src, /if \(!groupFinalizeResult\) setGroupReviewChoices/, 'late input cannot mutate the finalized review')
+  assert.doesNotMatch(src.slice(src.indexOf('const executeSelectedGroupApply'), src.indexOf('const refreshSelectedMergeReview')), /deleteProduct|handleApplyDecisions|runSelectedConflictMergeBatch/, 'global independent removals do not use direct delete or legacy pair merge')
 })
 
 test('dismiss remains sequential while merge uses the atomic batch continuation contract', () => {
@@ -81,13 +94,13 @@ test('the bulk bar reuses the contacts panel\'s shared vocabulary (one review pa
   }
 })
 
-test('groups apply only after EVERY row is decided, with exactly one Keep', () => {
-  // Decide-all-then-apply (user, Aug 30): per-row Keep/Remove decisions,
+test('legacy direct groups apply only after EVERY row is decided, with exactly one Keep', () => {
+  // Decide-all-then-apply: per-row Keep/Merge decisions,
   // Apply armed only when the whole group is decided with one keeper.
-  assert.match(src, /const \[decisions, setDecisions\] = useState<Record<number, 'keep' \| 'remove'>>/)
+  assert.match(src, /const \[decisions, setDecisions\] = useState<Record<number, 'keep' \| 'merge'>>/)
   assert.match(src, /const everyDecided = cluster\.products\.every\(\(product\) => decisions\[product\.id\]\)/)
-  assert.match(src, /const canApply = Boolean\(keeper\) && everyDecided && removals\.length > 0/)
-  assert.match(src, /onApplyDecisions\(keeper, removals\)/)
+  assert.match(src, /const canApply = Boolean\(keeper\) && everyDecided && merges\.length > 0/)
+  assert.match(src, /onApplyDecisions\(keeper, merges\)/)
   assert.match(src, /if \(next\[Number\(id\)\] === 'keep'\) delete next\[Number\(id\)\]/, 'picking a new Keep demotes the old keeper to undecided')
 })
 
