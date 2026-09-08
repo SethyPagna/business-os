@@ -1,0 +1,129 @@
+{
+  "schema_version": 1,
+  "task_id": "f74-sales-records-backend",
+  "agent": {
+    "provider": "codex",
+    "role": "implementation_worker",
+    "session_id": "/root/sales_records_backend"
+  },
+  "status": "partial",
+  "summary": "Implemented and independently verified the bounded F74 Sales Records backend: closed changed-only tri-state records, immutable event and return-edit receipt storage, exact count/detail provenance, creation identity snapshots, settlement, bulk sale, bulk return, direct status, direct customer, anonymous-customer, and import integrity paths. The coverage ledger explicitly leaves return creation and wide contact/payment reference cascades unfinished.",
+  "base_sha": "6dbb8a8e3029e220cbec650051a4d7c37a6da2c9",
+  "changes": [
+    "Defined a closed Sales Records API with known_value, known_none, and unknown states; historical labels come from immutable snapshots and raw audit variables never reach the UI contract.",
+    "Added append-only sale_record_events and return_mutation_receipts with bounded validation, provenance uniqueness, backup/reset lifecycle coverage, and ordinary-pruning exclusion.",
+    "Captured exact changed-only records for creation, delivery and item amendments, settlement, sale bulk status/update including Undo/Redo, return bulk parent status, direct status/cancel/uncancel, and guarded direct return edits.",
+    "Captured direct customer identity and membership changes while preserving marked anonymous historical IDs, rejecting anonymous targets, and avoiding phone/address value retention.",
+    "Made historical import customer matching order-independent and fail-closed for invalid, ambiguous, stale, or concurrently duplicated phone/name evidence.",
+    "Recorded the unimplemented return-create and wide contact/payment cascade designs and dependencies in durable contract, plan, and coverage artifacts."
+  ],
+  "commits": [
+    "5e175b21ce3dc120eb941838380c1756bff5b092 feat(sales): add immutable record event ledger",
+    "bf9420811bce37ae9824ddb667872b705af189c8 fix(sales): close record event validation gaps",
+    "b7acd20be73e89ea44a1aa8c6de18af80fb0853e feat(sales): read immutable record events",
+    "892b074eabcb8c41ac36cf9c33988c215b36c16a feat(sales): persist settlement record events",
+    "23af9302a902ea40530ebf67a79be0870148b611 feat(sales): persist bulk record events",
+    "5282f4cd6d05984b7c78becc732dc550cd631329 feat(sales): persist return bulk record events",
+    "5bb03207a5a27c56a0271bed6f06fb207baef93e fix(sales): retain cancellation field history",
+    "25c51789e9127efea900a82df1f106fd9521c2fa feat(returns): add immutable edit receipts",
+    "bd0ab24eb6043b0df10053b00b68252293397dfd feat(returns): persist idempotent edit records",
+    "8512e10543e256cf79bc27b5b35a6ad427c4ba2c feat(sales): capture direct customer records",
+    "aa5a969a3bfe9b33b01d754bda38fad64c4df758 fix(sales): reject ambiguous customer history",
+    "ef640cb93e8434723c4fbfc48f111a8be44211fd fix(contacts): enforce anonymous profile authority atomically",
+    "8bfd5ee0a20c57ad5e0f1ebb39ef16e3b3384c40 docs(sales): order reference receipts last",
+    "4e4259fe7bc9758cc9bd73002faeb216b81d3267 docs(sales): finalize records coverage matrix"
+  ],
+  "evidence": [
+    {
+      "claim": "The immutable record ledger, reader, and bounded existing writers passed independent adversarial review.",
+      "source": "outputs/takeover-20260908/f74-schema-lifecycle-rereview.json; outputs/takeover-20260908/f74-reader-rereview.json; outputs/takeover-20260908/f74-receipt-writers-review.json",
+      "locator": "bf942081, db0c1661, 5282f4cd",
+      "observed": "Schema validation, lifecycle recovery, count/detail parity, settlement, bulk apply, and Undo/Redo all received PASS with no P0-P3 finding."
+    },
+    {
+      "claim": "Direct return edits are idempotent, permission-scoped, and atomic with conditional parent sale-status history.",
+      "source": "outputs/takeover-20260908/f74-return-edit-handler-review.json",
+      "locator": "bd0ab24eb6043b0df10053b00b68252293397dfd",
+      "observed": "Independent runtime review passed exact retry, stale guard, allocation order, rollback, actor/request isolation, changed-only event, lifecycle, and permission cases."
+    },
+    {
+      "claim": "Anonymous identity and historical import repairs reject ambiguous evidence without fabricating a current customer identity.",
+      "source": "outputs/takeover-20260908/f74-customer-anonymous-rereview-aa5a969a.json",
+      "locator": "aa5a969a3bfe9b33b01d754bda38fad64c4df758",
+      "observed": "Independent archived-head rerun passed invalid supplied phone, alternate-format concurrent duplicate, marked-General bulk clear, direct customer, classifier, commit, and Worker typecheck cases."
+    },
+    {
+      "claim": "The durable coverage matrix does not claim the remaining return-create or wide reference mutations are implemented.",
+      "source": "outputs/takeover-20260908/f74-sales-records-coverage-matrix.json",
+      "locator": "not_yet_captured and release_dependencies",
+      "observed": "Return creation, customer carry/merge/relink/resolve-missing, and linked payment-name replacement remain explicitly listed with their required atomic receipt designs."
+    }
+  ],
+  "verification": [
+    {
+      "command": "node scripts/test-sale-records-pure.cjs; node scripts/test-sale-record-event-helper-pure.cjs; node scripts/test-payment-fx-pure.cjs",
+      "scope": "record reader, event schema/helper, and settlement",
+      "exit_code": 0,
+      "expected": "Closed typed changes, exact count/detail parity, and settlement apply/replay remain valid.",
+      "observed": "All focused checks passed."
+    },
+    {
+      "command": "node scripts/test-sale-bulk-status-pure.cjs; node scripts/test-sale-bulk-update-pure.cjs; node scripts/test-returns-bulk-pure.cjs",
+      "scope": "bulk apply, Undo/Redo, exact replay, and return-driven status",
+      "exit_code": 0,
+      "expected": "One event per changed sale with no retry duplicates or stale partial writes.",
+      "observed": "All focused checks passed."
+    },
+    {
+      "command": "node scripts/test-sale-record-events-pure.cjs; node scripts/test-returns-batch-restock-pure.cjs",
+      "scope": "direct return edit receipt and route",
+      "exit_code": 0,
+      "expected": "Exact retry, allocation mapping, parent sale guard, conditional event, permissions, and rollback pass.",
+      "observed": "The independent review reports all 26 native route/receipt checks passed."
+    },
+    {
+      "command": "node scripts/test-sale-customer-direct-pure.cjs; node scripts/test-sale-bulk-update-pure.cjs; node scripts/test-import-engine-pure.cjs; node scripts/test-sales-import-commit-pure.cjs",
+      "scope": "direct/bulk customer changes and import identity integrity",
+      "exit_code": 0,
+      "expected": "Anonymous no-op, invalid phone, duplicate phone, stale match, and exact identity cases pass.",
+      "observed": "All focused checks passed at aa5a969a and remained passing after the marker authority integration."
+    },
+    {
+      "command": "npm run typecheck",
+      "scope": "cloudflare Worker package",
+      "exit_code": 0,
+      "expected": "TypeScript compiles without errors.",
+      "observed": "tsc --noEmit completed successfully."
+    },
+    {
+      "command": "git diff --check; ConvertFrom-Json coverage and contract artifacts",
+      "scope": "committed implementation and durable JSON contracts",
+      "exit_code": 0,
+      "expected": "No whitespace defects and valid JSON.",
+      "observed": "Checks completed successfully."
+    }
+  ],
+  "risks": [
+    "The recursive canonical-phone SQL guard is deliberately fail-closed but has a residual performance cost on large customer tables.",
+    "Direct status and return edit server requirements need the paired frontend stable-request lifecycle in the same release; backend commits alone are not a release candidate.",
+    "Migration 0141 and paired frontend anonymous masking commit 7ba9aa72 are required before the integrated anonymous behavior can ship.",
+    "The customer_contact_changed metadata extension is contract-only and must not be advertised until backend schema/writers and EN/KM rendering are implemented and reviewed."
+  ],
+  "blockers": [
+    "Full F74 coverage is blocked on an atomic return-create batch with a stable create receipt and paired frontend request lifecycle.",
+    "Full F74 coverage is blocked on independently approved, receipt-backed constant-statement event hooks for customer carry/merge/relink/resolve-missing and linked payment-name cascades."
+  ],
+  "not_done": [
+    "Return creation does not yet append a typed parent sale-status event; the unsafe first implementation was reverted after a proven concurrent-create race.",
+    "Customer profile carry, customer/delivery merge, relink, resolve-missing, and linked payment-method rename do not yet append immutable per-sale events.",
+    "The contract-only customer_contact_changed kind and changed_contact_fields metadata are not present in the current event schema or reader.",
+    "No deployment, remote migration, production D1 command, anonymous marker repair, or other production write was performed."
+  ],
+  "handoff": "Integrate through 4e4259fe only with the paired F72/F74 frontend and migration dependencies. Use outputs/takeover-20260908/f74-return-create-event-race-plan.json for return-create redesign and outputs/takeover-20260908/f74-wide-writer-event-hook-plan.json for reference cascades. Preserve the explicit partial status until those writers and EN/KM rendering are independently certified.",
+  "workspace": {
+    "branch": "codex/f74-sales-records-backend-20260908",
+    "worktree": "C:/Users/mrkl6/Downloads/bos-f74-sales-records-backend-20260908",
+    "dirty_before": [],
+    "dirty_after": []
+  }
+}
