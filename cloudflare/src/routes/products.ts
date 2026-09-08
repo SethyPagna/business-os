@@ -5569,8 +5569,8 @@ async function createProductConflictActionReview(
   }, {
     sql: `INSERT INTO product_conflict_action_reviews
       (id,actor_id,request_id,request_digest,manifest_version,resolution_version,draft_digest,status,
-       requested_group_count,actionable_group_count,blocked_group_count,total_member_count,expires_at)
-      VALUES(@id,@actorId,@requestId,@requestDigest,1,2,@draftDigest,'draft',@requested,@actionable,@blocked,@members,@expiresAt)`,
+       requested_action_count,requested_group_count,requested_removal_count,actionable_group_count,blocked_group_count,total_member_count,expires_at)
+      VALUES(@id,@actorId,@requestId,@requestDigest,1,2,@draftDigest,'draft',@requested,@requested,0,@actionable,@blocked,@members,@expiresAt)`,
     params: { id: reviewId, actorId, requestId: request.client_request_id, requestDigest, draftDigest,
       requested: request.merge_groups.length, actionable, blocked: plans.length - actionable, members: ids.length, expiresAt },
   }]
@@ -5621,6 +5621,9 @@ app.post('/possible-duplicates/merge-batch/preview', async (c) => {
     catch (error) {
       const validation = error instanceof ProductConflictMergeValidationError ? error : new ProductConflictMergeValidationError('The selected conflict review request is invalid.')
       return c.json({ success: false, code: validation.code, error: validation.message }, validation.status as 400 | 409 | 413)
+    }
+    if (request.remove_rows.length) {
+      return c.json({ success: false, code: 'phase_not_available', error: 'Independent Remove is not available in this review phase.' }, 409)
     }
     const db = getDb(c.env)
     const requestDigest = await productConflictSha256(request)

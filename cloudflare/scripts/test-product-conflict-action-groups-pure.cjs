@@ -48,8 +48,16 @@ assert.throws(() => groups.parseProductConflictActionPreviewRequest(request({
     group_key: `${String(index).padStart(4, '0')}-${'k'.repeat(165)}`, member_ids: [1, 2],
   })),
 })), /combined group_key payload/, 'collapsed source keys have a bounded total UTF-8 size')
-try { groups.parseProductConflictActionPreviewRequest(request({ remove_rows: [{ product_id: 1 }] })) }
-catch (error) { assert.equal(error.code, 'phase_not_available'); assert.equal(error.status, 409) }
+assert.deepEqual(groups.parseProductConflictActionPreviewRequest(request({ merge_groups: [],
+  remove_rows: [{ product_id: 9, reason: '  Independent duplicate  ' }] })).remove_rows,
+[{ product_id: 9, reason: 'Independent duplicate' }])
+for (const bad of [
+  request({ remove_rows: [{ product_id: 1, reason: 'overlap' }] }),
+  request({ merge_groups: [], remove_rows: [{ product_id: 9, reason: 'one' }, { product_id: 9, reason: 'two' }] }),
+  request({ merge_groups: [], remove_rows: [{ product_id: 9, reason: ' ' }] }),
+]) assert.throws(() => groups.parseProductConflictActionPreviewRequest(bad), /./)
+try { groups.parseProductConflictActionPreviewRequest(request({ remove_rows: [{ product_id: 1, reason: 'overlap' }] })) }
+catch (error) { assert.equal(error.code, 'overlapping_actions'); assert.equal(error.status, 400) }
 
 const row = (id, name, barcode, cost, rest = {}) => ({
   id, name, barcode, category: null, brand: null, unit: 'pcs', image_path: null,

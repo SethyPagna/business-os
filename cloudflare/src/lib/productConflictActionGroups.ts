@@ -20,12 +20,13 @@ export const PRODUCT_CONFLICT_ACTION_MAX_GROUP_KEYS_BYTES = 256 * 1024
 export const PRODUCT_CONFLICT_ACTION_PREVIEW_BODY_BYTES = 4 * 1024 * 1024
 
 export type ProductConflictActionGroupInput = { group_key: string; member_ids: number[] }
+export type ProductConflictActionRemoveInput = { product_id: number; reason: string }
 export type ProductConflictActionPreviewRequest = {
   manifest_version: 1
   resolution_version: 2
   client_request_id: string
   merge_groups: ProductConflictActionGroupInput[]
-  remove_rows: []
+  remove_rows: ProductConflictActionRemoveInput[]
 }
 
 export type ProductConflictActionProductRow = Record<string, unknown> & {
@@ -132,11 +133,8 @@ export function parseProductConflictActionPreviewRequest(value: unknown): Produc
     throw new ProductConflictMergeValidationError('A stable client_request_id is required.')
   }
   if (!Array.isArray(root.remove_rows)) throw new ProductConflictMergeValidationError('request.remove_rows must be an array.')
-  if (root.remove_rows.length) {
-    throw new ProductConflictMergeValidationError('Independent Remove is not available in this review phase.', 'phase_not_available', 409)
-  }
-  if (!Array.isArray(root.merge_groups) || !root.merge_groups.length || root.merge_groups.length > PRODUCT_CONFLICT_ACTION_MAX_GROUPS) {
-    throw new ProductConflictMergeValidationError(`merge_groups must contain 1-${PRODUCT_CONFLICT_ACTION_MAX_GROUPS} entries.`)
+  if (!Array.isArray(root.merge_groups) || root.merge_groups.length > PRODUCT_CONFLICT_ACTION_MAX_GROUPS) {
+    throw new ProductConflictMergeValidationError(`merge_groups must contain at most ${PRODUCT_CONFLICT_ACTION_MAX_GROUPS} entries.`)
   }
   const seenKeys = new Set<string>()
   const uniqueMembers = new Set<number>()
@@ -159,10 +157,31 @@ export function parseProductConflictActionPreviewRequest(value: unknown): Produc
     ids.forEach((id) => uniqueMembers.add(id))
     return { group_key: key, member_ids: [...ids].sort((a, b) => a - b) }
   })
+  const mergeMemberIds = new Set(mergeGroups.flatMap((group) => group.member_ids))
+  const removalIds = new Set<number>()
+  const removeRows = root.remove_rows.map((candidate, index): ProductConflictActionRemoveInput => {
+    const item = asRecord(candidate, `remove_rows[${index}]`)
+    exactKeys(item, ['product_id', 'reason'], `remove_rows[${index}]`)
+    const id = productId(item.product_id, `remove_rows[${index}].product_id`)
+    if (removalIds.has(id)) throw new ProductConflictMergeValidationError('remove_rows product_id values must be unique.')
+    removalIds.add(id)
+    if (mergeMemberIds.has(id)) {
+      throw new ProductConflictMergeValidationError('A product cannot be selected for both Merge and Remove.', 'overlapping_actions')
+    }
+    if (typeof item.reason !== 'string' || !item.reason.trim() || item.reason.trim().length > 500) {
+      throw new ProductConflictMergeValidationError(`remove_rows[${index}].reason must contain 1-500 characters.`)
+    }
+    return { product_id: id, reason: item.reason.trim() }
+  })
+  const canonicalActions = canonicalizeProductConflictActionGroups(mergeGroups).length + removeRows.length
+  if (canonicalActions < 1 || canonicalActions > PRODUCT_CONFLICT_ACTION_MAX_GROUPS) {
+    throw new ProductConflictMergeValidationError(`The review must contain 1-${PRODUCT_CONFLICT_ACTION_MAX_GROUPS} canonical actions.`)
+  }
+  removalIds.forEach((id) => uniqueMembers.add(id))
   if (uniqueMembers.size > PRODUCT_CONFLICT_ACTION_MAX_MEMBERS) {
     throw new ProductConflictMergeValidationError(`At most ${PRODUCT_CONFLICT_ACTION_MAX_MEMBERS} distinct products are allowed.`)
   }
-  return { manifest_version: 1, resolution_version: 2, client_request_id: root.client_request_id, merge_groups: mergeGroups, remove_rows: [] }
+  return { manifest_version: 1, resolution_version: 2, client_request_id: root.client_request_id, merge_groups: mergeGroups, remove_rows: removeRows }
 }
 
 type CanonicalSelection = { group_key: string; source_group_keys: string[]; member_ids: number[]; overlapping: boolean }
