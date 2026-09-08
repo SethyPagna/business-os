@@ -56,13 +56,17 @@ function adapter(d1, controls) {
     batch: async (statements) => {
       statements.forEach(({ sql, params }) => observe(sql, params))
       controls.maxBatchStatements = Math.max(controls.maxBatchStatements, statements.length)
+      if (controls.failNextBatch) {
+        controls.failNextBatch = false
+        return d1.batch([...statements, { sql: 'INSERT INTO missing_atomic_guard(value) VALUES(1)', params: {} }])
+      }
       return d1.batch(statements)
     },
   }
 }
 
 function loadRoute(d1) {
-  const controls = { statements: 0, maxBindings: 0, maxCompoundTerms: 0, maxBatchStatements: 0 }
+  const controls = { statements: 0, maxBindings: 0, maxCompoundTerms: 0, maxBatchStatements: 0, failNextBatch: false }
   const db = adapter(d1, controls)
   const detail = loadTs('lib/productDetailRule.ts')
   const binding = loadTs('lib/sqlBinding.ts')
@@ -191,12 +195,16 @@ async function main() {
     get: () => ({ id: 900, username: 'reviewer' }), json: (payload, status = 200) => ({ status, body: payload }),
   })
   assert.equal(applyDisabled.status, 409); assert.equal(applyDisabled.body.code, 'phase_not_available')
+  controls.failNextBatch = true
+  await assert.rejects(post(app, { ...body, client_request_id: 'atomic_failure_001' }), /missing_atomic_guard/)
+  assert.equal(d1.db.prepare("SELECT COUNT(*) n FROM product_conflict_action_reviews WHERE request_id='atomic_failure_001'").get().n, 0)
+  assert.equal(d1.db.prepare("SELECT COUNT(*) n FROM product_conflict_action_groups WHERE review_id NOT IN (SELECT id FROM product_conflict_action_reviews)").get().n, 0)
   assert.equal((await post(app, body, { id: 1, noMerge: true })).status, 403)
   assert.ok(controls.maxBindings <= 80, `max observed bindings ${controls.maxBindings}`)
   assert.ok(controls.maxCompoundTerms <= 5, `max compound terms ${controls.maxCompoundTerms}`)
   assert.ok(controls.statements <= 700, `request and verification stayed bounded: ${controls.statements}`)
   assert.ok(controls.maxBatchStatements < 100, `atomic receipt batch stayed compact: ${controls.maxBatchStatements}`)
-  console.log(`product conflict action groups sqlite: 31 checks passed; ${controls.statements} statements, ${controls.maxBindings} bindings, ${controls.maxCompoundTerms} compound terms`)
+  console.log(`product conflict action groups sqlite: 34 checks passed; ${controls.statements} statements, ${controls.maxBindings} bindings, ${controls.maxCompoundTerms} compound terms`)
 }
 
 main().catch((error) => { console.error(error); process.exit(1) })
