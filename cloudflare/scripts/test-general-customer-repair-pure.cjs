@@ -17,11 +17,15 @@ const output = ts.transpileModule(fs.readFileSync(sourcePath, 'utf8'), {
 
 let currentCacheToken = 'd2:10'
 let suppressCacheAdvance = false
+let cacheReadFails = false
 const broadcasts = []
 const originalLoad = Module._load
 Module._load = function patchedLoad(request, parent, isMain) {
   if (request === './cache') return {
-    getVersionWithFallback: async () => currentCacheToken,
+    getVersionWithFallback: async () => {
+      if (cacheReadFails) throw new Error('cache read unavailable')
+      return currentCacheToken
+    },
     bumpVersion: async () => {
       if (!suppressCacheAdvance) currentCacheToken = `d2:${Number(currentCacheToken.split(':')[1]) + 1}`
     },
@@ -45,6 +49,7 @@ const actor = { id: 7, name: 'owner-admin' }
 let db
 let nativeBatch
 let beforeBatchHook = null
+let afterBatchHook = null
 let checks = 0
 
 function pass(message) {
@@ -65,7 +70,13 @@ function newDb() {
       beforeBatchHook = null
       await hook()
     }
-    return nativeBatch(statements)
+    const results = await nativeBatch(statements)
+    if (afterBatchHook) {
+      const hook = afterBatchHook
+      afterBatchHook = null
+      await hook()
+    }
+    return results
   }
   seed()
 }
@@ -138,7 +149,7 @@ async function testPreviewPrivacyAndApply() {
   const plan = await repair.prepareGeneralCustomerRepair(db, view.request, actor)
   const before = row('SELECT * FROM customers WHERE id=24969')
   const result = await repair.applyGeneralCustomerRepair(db, plan)
-  assert.deepEqual(result, { outcome: 'applied', changedCustomers: 1 })
+  assert.deepEqual(result, { outcome: 'applied', changedCustomers: 1, verification_pending: false })
   const after = row('SELECT * FROM customers WHERE id=24969')
   assert.equal(after.is_anonymous, 1)
   assert.notEqual(after.updated_at, before.updated_at)
@@ -165,7 +176,9 @@ async function testReplayAndConcurrency() {
   const planA = await repair.prepareGeneralCustomerRepair(db, first.request, actor)
   const planB = await repair.prepareGeneralCustomerRepair(db, first.request, actor)
   assert.equal((await repair.applyGeneralCustomerRepair(db, planA)).outcome, 'applied')
-  assert.deepEqual(await repair.applyGeneralCustomerRepair(db, planB), { outcome: 'already_applied', changedCustomers: 0 })
+  assert.deepEqual(await repair.applyGeneralCustomerRepair(db, planB), {
+    outcome: 'already_applied', changedCustomers: 0, verification_pending: false,
+  })
   const replayPlan = await repair.prepareGeneralCustomerRepair(db, first.request, actor)
   assert.equal(replayPlan.outcome, 'already_applied')
   assert.equal((await repair.applyGeneralCustomerRepair(db, replayPlan)).outcome, 'already_applied')
@@ -249,9 +262,27 @@ async function testInjectedFailureRollsBack() {
   pass('history, audit and final-assertion failures roll back the marker and every receipt')
 }
 
+async function testCommittedResultSurvivesVerificationOutage() {
+  newDb()
+  const plan = await prepared()
+  afterBatchHook = () => {
+    const stablePrepare = db.prepare.bind(db)
+    db.prepare = (sql) => {
+      db.prepare = stablePrepare
+      throw new Error(`post-commit read unavailable: ${sql.slice(0, 12)}`)
+    }
+  }
+  assert.deepEqual(await repair.applyGeneralCustomerRepair(db, plan), {
+    outcome: 'applied', changedCustomers: 1, verification_pending: true,
+  })
+  assert.deepEqual(effects(), { marker: 1, histories: 1, audits: 1, events: 0 })
+  pass('post-commit verification outage reports pending without misreporting the committed mutation')
+}
+
 async function testRefreshHealing() {
   currentCacheToken = 'd2:10'
   suppressCacheAdvance = false
+  cacheReadFails = false
   broadcasts.length = 0
   const before = await repair.readGeneralCustomerRepairCacheToken({})
   assert.deepEqual(await repair.refreshGeneralCustomerRepair({}, before), {
@@ -269,6 +300,12 @@ async function testRefreshHealing() {
   assert.deepEqual(await repair.refreshGeneralCustomerRepair({}, stalled), {
     cache_invalidated: true, refresh_pending: false, broadcast_requested: true,
   })
+  cacheReadFails = true
+  assert.equal(await repair.readGeneralCustomerRepairCacheToken({}), null)
+  assert.deepEqual(await repair.refreshGeneralCustomerRepair({}, null), {
+    cache_invalidated: false, refresh_pending: true, broadcast_requested: true,
+  })
+  cacheReadFails = false
   pass('cache advancement is verified and exact retry heals a pending refresh while always requesting broadcast')
 }
 
@@ -279,6 +316,7 @@ async function main() {
   await testLinkedAuthorityGuards()
   await testValidationAndConflictingStates()
   await testInjectedFailureRollsBack()
+  await testCommittedResultSurvivesVerificationOutage()
   await testRefreshHealing()
   console.log(`general customer repair: ${checks} focused groups passed`)
 }

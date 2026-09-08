@@ -475,10 +475,11 @@ async function verifyApplied(db: Pick<D1Compat, 'prepare'>, plan: PreparedGenera
 export async function applyGeneralCustomerRepair(
   db: Pick<D1Compat, 'prepare' | 'batch'>,
   plan: PreparedGeneralCustomerRepair,
-): Promise<{ outcome: 'applied' | 'already_applied'; changedCustomers: 0 | 1 }> {
+): Promise<{ outcome: 'applied' | 'already_applied'; changedCustomers: 0 | 1; verification_pending: boolean }> {
   if (plan.outcome === 'already_applied') {
-    await verifyApplied(db, plan)
-    return { outcome: 'already_applied', changedCustomers: 0 }
+    let verificationPending = false
+    try { await verifyApplied(db, plan) } catch { verificationPending = true }
+    return { outcome: 'already_applied', changedCustomers: 0, verification_pending: verificationPending }
   }
   try {
     const results = await db.batch(plan.statements)
@@ -486,33 +487,45 @@ export async function applyGeneralCustomerRepair(
     if (changedCustomers !== 1 || resultChanges(results[plan.historyStatementIndex!]) < 1) {
       throw new Error('Unexpected guarded repair result')
     }
-    await verifyApplied(db, plan)
-    return { outcome: 'applied', changedCustomers: 1 }
+    // The last in-batch assertion already proves the committed state. This
+    // second no-store read is operational evidence; a transient read failure
+    // after commit must not be reported as a mutation failure that invites an
+    // operator to guess whether the write happened. Exact replay re-runs it.
+    let verificationPending = false
+    try { await verifyApplied(db, plan) } catch { verificationPending = true }
+    return { outcome: 'applied', changedCustomers: 1, verification_pending: verificationPending }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     if (/general_customer_repair_conflict|malformed JSON/i.test(message)) {
       const current = await readManifest(db)
       const replay = await classifyAlreadyApplied(db, current, plan.request)
-      if (replay) return { outcome: 'already_applied', changedCustomers: 0 }
+      if (replay) return { outcome: 'already_applied', changedCustomers: 0, verification_pending: false }
       conflict()
     }
     throw error
   }
 }
 
-export async function readGeneralCustomerRepairCacheToken(env: Env): Promise<string> {
-  return getVersionWithFallback(env, 'customers')
+export async function readGeneralCustomerRepairCacheToken(env: Env): Promise<string | null> {
+  try {
+    return await getVersionWithFallback(env, 'customers')
+  } catch {
+    return null
+  }
 }
 
-export async function refreshGeneralCustomerRepair(env: Env, beforeToken: string) {
-  await bumpVersion(env, 'customers')
-  const afterToken = await getVersionWithFallback(env, 'customers')
-  await broadcast(env, 'customers', {
-    action: 'update',
-    id: GENERAL_CUSTOMER_REPAIR_TARGET_ID,
-    reason: 'anonymous_marker_repair',
-  })
-  const cacheInvalidated = afterToken !== beforeToken
+export async function refreshGeneralCustomerRepair(env: Env, beforeToken: string | null) {
+  try { await bumpVersion(env, 'customers') } catch { /* reported as refresh_pending below */ }
+  let afterToken: string | null = null
+  try { afterToken = await getVersionWithFallback(env, 'customers') } catch { /* reported below */ }
+  try {
+    await broadcast(env, 'customers', {
+      action: 'update',
+      id: GENERAL_CUSTOMER_REPAIR_TARGET_ID,
+      reason: 'anonymous_marker_repair',
+    })
+  } catch { /* broadcast is best effort; requested remains the honest claim */ }
+  const cacheInvalidated = beforeToken !== null && afterToken !== null && afterToken !== beforeToken
   return {
     cache_invalidated: cacheInvalidated,
     refresh_pending: !cacheInvalidated,
