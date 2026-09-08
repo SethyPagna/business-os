@@ -1,3 +1,10 @@
+
+## Freshness follow-up candidate — September 8
+
+Production remains c2eb9d57/Worker3931ea55,100%. Next isolated release includes F53 permission-refresh coalescing and session-generation isolation (independent review PASS); F54 HTTP invalidation/in-flight ownership and authoritative server-cache precedence (69 focused checks plus512 independent timing schedules); U05 selected positive profit headline stays green in both themes. Source b2299a2b is integrated, not deployed. Existing callbacks that write persistent queryCache/IndexedDB and already-started caller results are outside F54's proven shared-HTTP-cache boundary. No backend source or migration changes in this follow-up.
+
+F46 is NOT in this candidate. Schema/backup/reset are independently approved locally; backend/UI parity still active. Required corrections: actionable-only manifest with blocked cases shown separately, exact same-request manual resume, changed-value markers after re-preview, complete image counts/primary indication. No incomplete F46 runtime or migration0136 is deployed. U13–U15 mobile Sales layouts are active separately.
+
 > **Latest deployed release: c2eb9d57** — independently confirmed Worker 3931ea55-3f66-459e-823d-3339979bd441,100% at 2026-09-08T03:37:12.286363Z. Explicit contact/POS duplicate decisions, disabled Warehouse/stale-lot picker safeguards, canonical branch CRUD/review/undo/reset/transfer guards, general/dated stock-import authority, corrected export breakdowns, bilingual branch setup guidance and matching resolved-error cleanup are live. Backend291/291, frontend319/319, both types, i18n, build and dry-run passed; real local browser and independent reviews passed. No migration. GitHub preserves31 individual commits.
 > **Remaining active:** F46 combined selected-conflict workflow (backend/frontend/backup/reset, migration0136 local only); F53 permission event coalescing; remaining production duplicate merge beyond eight cases (browser access pending); unresolved historical/contact identity evidence and deferred UI. Earlier status paragraphs below are history, not current deployment claims.
 
