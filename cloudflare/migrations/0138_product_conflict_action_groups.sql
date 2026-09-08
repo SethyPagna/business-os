@@ -19,6 +19,8 @@ CREATE TABLE product_conflict_action_reviews (
   manifest_version INTEGER NOT NULL CHECK (manifest_version = 1),
   resolution_version INTEGER NOT NULL CHECK (resolution_version = 2),
   draft_digest TEXT NOT NULL,
+  finalize_digest TEXT,
+  manifest_digest TEXT,
   status TEXT NOT NULL DEFAULT 'draft'
     CHECK (status IN ('draft', 'finalized', 'running', 'completed', 'interrupted', 'expired')),
   requested_group_count INTEGER NOT NULL CHECK (requested_group_count >= 1 AND requested_group_count <= 1600),
@@ -26,6 +28,7 @@ CREATE TABLE product_conflict_action_reviews (
   blocked_group_count INTEGER NOT NULL CHECK (blocked_group_count >= 0),
   total_member_count INTEGER NOT NULL CHECK (total_member_count >= 2 AND total_member_count <= 4000),
   expires_at TEXT NOT NULL,
+  finalized_at TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE (actor_id, request_id)

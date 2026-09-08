@@ -77,6 +77,7 @@ function loadRoute(d1) {
   const binding = loadTs('lib/sqlBinding.ts')
   const identity = loadTs('lib/productIdentity.ts', { './db': {}, './sqlBinding': binding, './productDetailRule': detail })
   const merge = loadTs('lib/productMerge.ts')
+  const searchMatch = loadTs('lib/searchMatch.ts')
   const selected = loadTs('lib/productConflictMergeBatch.ts', {
     './productIdentity': identity, './productDetailRule': detail, './productMerge': merge,
   })
@@ -85,13 +86,14 @@ function loadRoute(d1) {
     './productConflictMergeBatch': selected,
   })
   const permissions = {
-    getActionTier: (user, section, action) => action === 'merge_duplicates' && user.noMerge ? 'none' : 'full',
+    getActionTier: (user, section, action) => (action === 'merge_duplicates' && user.noMerge) || (action === 'image' && user.noImage) ? 'none' : 'full',
     getPermissionTier: () => 'full', hasPermission: () => true, getMergedPermissions: () => ({}), isAdminControlUser: () => true,
   }
   loadTs('routes/products.ts', {
     hono: { Hono: FakeHono }, '../index': {}, '../lib/db': { getDb: () => db }, '../lib/auth': { requireAuth: async () => {} },
     '../lib/productDetailRule': detail, '../lib/sqlBinding': binding, '../lib/productIdentity': identity, '../lib/productMerge': merge,
     '../lib/productConflictMergeBatch': selected, '../lib/productConflictActionGroups': actionGroups, '../lib/permissions': permissions,
+    '../lib/searchMatch': searchMatch,
     '../lib/audit': { audit: async () => {} }, '../lib/cache': { bumpVersion: async () => {}, cachedJsonResponse: async () => null, getVersionWithFallback: async () => '1' },
     '../durable-objects/broadcastHub': { broadcast: async () => {} },
   })
@@ -282,4 +284,6 @@ async function main() {
   console.log(`product conflict action groups sqlite: 69 checks passed; ${controls.statements} statements, ${controls.maxBindings} bindings, ${controls.maxCompoundTerms} compound terms`)
 }
 
-main().catch((error) => { console.error(error); process.exit(1) })
+if (require.main === module) main().catch((error) => { console.error(error); process.exit(1) })
+
+module.exports = { loadRoute, seed, post, get }
