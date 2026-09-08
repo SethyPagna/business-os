@@ -271,7 +271,20 @@ async function main() {
   assert.match(source, /const authority = await assertCurrentImportApplyAuthority\(env, job\)/)
   assert.match(source, /if \(await productImportResultsChangeImages\(db, results, job\.policy_json\)\)/)
   assert.match(source, /stripProductImportImageFields\(results\)/)
-  assert.ok(source.indexOf('assertCurrentImportApplyAuthority(env, job)') < source.indexOf('resolveAndCreateBranches(db, actionable)'), 'authority must run before write composition')
+  const applyStart = source.indexOf('export async function runImportApply')
+  const authorityIndex = source.indexOf('assertCurrentImportApplyAuthority(env, job)', applyStart)
+  const materializeIndex = source.indexOf('ensureSourceRowsMaterialized(env, db, jobId', authorityIndex)
+  const classifyIndex = source.indexOf('const results = job.type ===', materializeIndex)
+  const composeIndex = source.indexOf('const statements: Array<', classifyIndex)
+  assert.ok(
+    applyStart !== -1 && authorityIndex !== -1 && materializeIndex !== -1
+      && classifyIndex !== -1 && composeIndex !== -1
+      && applyStart < authorityIndex
+      && authorityIndex < materializeIndex
+      && authorityIndex < classifyIndex
+      && authorityIndex < composeIndex,
+    'the current actor authority check must precede materialization, classification, and write composition inside runImportApply',
+  )
   console.log('PASS runImportApply wires the current-invocation check and strip before write composition')
 }
 
