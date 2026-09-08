@@ -5,9 +5,10 @@ const assert = require('node:assert/strict')
 const ts = require('typescript')
 const Database = require('better-sqlite3')
 const root = path.join(__dirname, '..')
+const recordContract = JSON.parse(fs.readFileSync(path.join(root, '..', 'outputs', 'takeover-20260908', 'f74-sales-records-backend-contract.json'), 'utf8'))
 let user = { id: 1, name: 'Admin', username: 'admin', role_code: 'admin', permissions: { all: true } }
 const cache = new Map()
-const actual = new Set(['actorSnapshot','movementBranchName','db','permissions','saleBulkStatus','saleBulkUpdate','saleTransitions','sqlBinding','productBatches','batchCode','salesStatus','undoAppliers','branchWrites','conflictControl','searchMatch','paymentMethodRegistry','contactOptions'])
+const actual = new Set(['actorSnapshot','movementBranchName','db','permissions','saleBulkStatus','saleBulkUpdate','saleRecordEvents','saleTransitions','sqlBinding','productBatches','batchCode','salesStatus','undoAppliers','branchWrites','conflictControl','searchMatch','paymentMethodRegistry','contactOptions'])
 function load(rel) {
   if (cache.has(rel)) return cache.get(rel).exports
   const mod = { exports: {} }; cache.set(rel,mod)
@@ -19,6 +20,7 @@ function load(rel) {
     if (name.endsWith('/cache')) return {bumpVersion:async()=>{},getVersionWithFallback:async()=>0}
     if (name.endsWith('/broadcastHub')) return {broadcast:async()=>{}}
     if (name.endsWith('/audit')) return {audit:async()=>{}}
+    if (rel.endsWith('saleRecordEvents.ts') && name === './saleRecords') return { SALE_RECORD_FIELDS: recordContract.fields, SALE_RECORD_KINDS: recordContract.kinds }
     if (name.startsWith('.')) {
       const target=path.posix.normalize(path.posix.join(path.posix.dirname(rel),name))+'.ts'
       if(actual.has(path.posix.basename(name))) return load(target)
@@ -73,7 +75,7 @@ function fixture() {
 }
 function items(f, ids=[1,2,3]) {return ids.map(id=>({id,expected_updated_at:f.sql.prepare('SELECT updated_at FROM sales WHERE id=?').get(id).updated_at}))}
 function request(f,action,key='field-request-0001',ids=[1,2,3]) {return {client_request_id:key,items:items(f,ids),action}}
-function snapshot(f) {return JSON.stringify(['sales','returns','fees','inventory_movements','undo_snapshots','action_history','sale_bulk_operations','sale_bulk_members','sale_write_revisions','audit_logs'].map(t=>[t,f.sql.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all()]))}
+function snapshot(f) {return JSON.stringify(['sales','returns','fees','inventory_movements','undo_snapshots','action_history','sale_bulk_operations','sale_bulk_members','sale_record_events','sale_write_revisions','audit_logs'].map(t=>[t,f.sql.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all()]))}
 async function replay(f,id,direction='undo',generation=0){return f.call(history,`/${id}/${direction}`,{require_applied:true,expected_generation:generation})}
 
 async function run(){
@@ -93,6 +95,11 @@ async function run(){
   assert.equal((await replay(f,paid.body.actionHistoryId)).status,200)
   assert.equal(f.sql.prepare('SELECT payment_method FROM sales WHERE id=1').get().payment_method,'Cash + ABA')
   assert.equal((await replay(f,paid.body.actionHistoryId,'redo',1)).status,200)
+  assert.deepEqual(f.sql.prepare('SELECT generation,kind,via,COUNT(*) n FROM sale_record_events GROUP BY generation,kind,via ORDER BY generation').all(),[
+    {generation:0,kind:'payment_changed',via:'apply',n:2},
+    {generation:1,kind:'payment_changed',via:'undo',n:2},
+    {generation:2,kind:'payment_changed',via:'redo',n:2},
+  ])
   console.log('PASS matching tender labels only, partial amounts/currency unchanged, stale mismatch skipped, idempotency and replay')
 
   f=fixture()
@@ -138,6 +145,11 @@ async function run(){
   const customerReceipt=JSON.parse(f.sql.prepare('SELECT receipt_json FROM sale_bulk_operations WHERE id=?').get(customer.body.operationId).receipt_json)
   assert.equal(customerReceipt.items.find(item=>item.id===1).before.membership_number,'OLD-MEMBER')
   assert.equal(customerReceipt.items.find(item=>item.id===1).after.membership_number,'NEW-MEMBER')
+  const customerEvent=JSON.parse(f.sql.prepare("SELECT changes_json FROM sale_record_events WHERE kind='customer_changed' ORDER BY sale_id LIMIT 1").get().changes_json)
+  assert.deepEqual(customerEvent.map(change=>change.field),['customer','membership'])
+  assert.deepEqual(customerEvent[0].before.value,{id:1,name:'Old'})
+  assert.deepEqual(customerEvent[0].after.value,{id:3,name:'New'})
+  assert.ok(!JSON.stringify(customerEvent).includes('011') && !JSON.stringify(customerEvent).includes('Old road'))
   f.sql.prepare("UPDATE customers SET name='Older' WHERE id=1").run()
   const editedSource=snapshot(f)
   assert.equal((await replay(f,customer.body.actionHistoryId)).status,409)
@@ -164,6 +176,8 @@ async function run(){
   assert.equal(generalReceipt.items[0].before.customer_id,null)
   assert.equal(generalReceipt.items[0].before.membership_number,null)
   assert.equal(generalReceipt.items[0].after.membership_number,'NEW-MEMBER')
+  const generalEvent=JSON.parse(f.sql.prepare("SELECT changes_json FROM sale_record_events WHERE sale_id=3").get().changes_json)
+  assert.deepEqual(generalEvent.find(change=>change.field==='customer').before,{state:'known_none'})
   console.log('PASS General is explicit null and customer membership is a write-time receipt snapshot')
 
   f=fixture()
