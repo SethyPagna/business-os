@@ -743,7 +743,7 @@ export function SelectedConflictGroupReviewModal({
                 if (nextPage < pageIndex + 1) onPreviousPage()
                 else if (canGoNext) onNextPage()
               }}
-              label={tr('selected_conflict_actions', 'actions')}
+              label={tr('actions', 'Actions')}
               t={t}
               layout="centered"
               editablePageInput={false}
