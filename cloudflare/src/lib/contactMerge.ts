@@ -54,7 +54,7 @@ function contactSnapshotGuard(
   const columns = [...new Set([
     ...editableColumns,
     'updated_at',
-    ...(table === 'customers' ? ['phone_normalized'] : []),
+    ...(table === 'customers' ? ['phone_normalized', 'is_anonymous'] : []),
   ])]
   if (columns.some((column) => !SAFE_COLUMN.test(column))) throw new Error('contact_merge_invalid_column')
 
@@ -71,7 +71,9 @@ function contactSnapshotGuard(
     ? `AND NOT (
         EXISTS(SELECT 1 FROM portal_accounts WHERE contact_id = @keepId)
         AND EXISTS(SELECT 1 FROM portal_accounts WHERE contact_id = @mergeId)
-      )`
+      )
+      AND COALESCE((SELECT is_anonymous FROM customers WHERE id = @keepId), 0) = 0
+      AND COALESCE((SELECT is_anonymous FROM customers WHERE id = @mergeId), 0) = 0`
     : ''
 
   return {

@@ -54,6 +54,7 @@ function stubRequire(id) {
   if (id === './sqlBinding') return loadRealLib('sqlBinding')
   // N13: the actor snapshot kernel. Pure, no imports of its own, so it loads
   if (id === './actorSnapshot') return loadRealLib('actorSnapshot')
+  if (id === './anonymousCustomer') return loadRealLib('anonymousCustomer')
   if (id === './db') return { getDb: () => { throw new Error('getDb should not be called by these pure tests') } }
   if (id === './importEngine') return { runD1BatchInChunks: async () => { throw new Error('runD1BatchInChunks should not be called by these pure tests') } }
   if (id === './cache') return { bumpVersion: async () => { throw new Error('bumpVersion should not be called by these pure tests') } }
@@ -96,7 +97,8 @@ const { buildCoreDeleteStatements, ENTITY_CONFIGS } = moduleObj.exports
     const stmt = statements[0]
     const config = ENTITY_CONFIGS[entityType]
     assert.strictEqual(config.deleteMode, 'hard', `${entityType} must be configured as a hard delete -- these tables have no is_active column`)
-    assert.match(stmt.sql, new RegExp(`^DELETE FROM ${config.table} WHERE id IN \\(\\?,\\?\\)$`), `${entityType} must hard-delete (real DELETE), matching contacts.ts's existing single-row DELETE /:id for this table`)
+    const markerGuard = entityType === 'customers' ? ' AND NOT \\(COALESCE\\(is_anonymous, 0\\) = 1\\)' : ''
+    assert.match(stmt.sql, new RegExp(`^DELETE FROM ${config.table} WHERE id IN \\(\\?,\\?\\)${markerGuard}$`), `${entityType} must hard-delete (real DELETE), matching contacts.ts's existing single-row DELETE /:id for this table`)
     assert.deepStrictEqual(stmt.params, [10, 20], 'params are the raw chunk array')
   }
   console.log('PASS buildCoreDeleteStatements hard-deletes customers/suppliers/delivery_contacts via DELETE, matching their existing single-row routes (no is_active column on any of the three)')

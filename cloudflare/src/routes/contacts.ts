@@ -45,6 +45,7 @@ import {
   ANONYMOUS_CUSTOMER_MUTATION_ERROR,
   customerIsAnonymousSql,
   customerIsProfileSql,
+  customerProfileMutationGuardSql,
   isAnonymousCustomer,
 } from '../lib/anonymousCustomer'
 
@@ -137,6 +138,10 @@ const CONTACT_READ_CACHE_TTL_SECONDS = 20
 
 function anonymousCustomerMutationResponse(c: Context) {
   return c.json({ error: ANONYMOUS_CUSTOMER_MUTATION_ERROR, code: ANONYMOUS_CUSTOMER_ERROR_CODE }, 409)
+}
+
+function anonymousCustomerGuardStatement(id: number | string, idParam = 'customerId') {
+  return { sql: customerProfileMutationGuardSql(idParam), params: { [idParam]: id } }
 }
 
 async function anonymousCustomerIds(db: ReturnType<typeof getDb>, ids: Array<number | string>): Promise<Set<number>> {
@@ -682,15 +687,11 @@ function registerContactRoutes(config: ContactConfig) {
       const limit = clampInt(query.limit, CONTACT_PICKER_DEFAULT_LIMIT, 1, CONTACT_PICKER_MAX_LIMIT)
       const version = `${config.table}:${await getVersionWithFallback(c.env, config.table)}`
       const payload = await cachedJsonResponse(c.req.raw, c.executionCtx, version, CONTACT_READ_CACHE_TTL_SECONDS, async () => {
-        const excludedIds = config.table === 'customers'
-          ? await db.prepare(`SELECT id FROM customers WHERE ${customerIsAnonymousSql()}`).all<{ id: number }>()
-          : []
-        const excluded = new Set(excludedIds.map((row) => Number(row.id)))
         const [totalRow, rawItems] = await Promise.all([
           db.prepare(`SELECT COUNT(*) AS count FROM ${config.table} ${config.table === 'customers' ? `WHERE ${customerIsProfileSql()}` : ''}`).get<{ count: number }>({}),
-          db.prepare(buildContactPickerSql(config.table)).all<Record<string, unknown>>({ limit: limit + excluded.size }),
+          db.prepare(buildContactPickerSql(config.table)).all<Record<string, unknown>>({ limit }),
         ])
-        const items = rawItems.filter((row) => !excluded.has(Number(row.id))).slice(0, limit)
+        const items = rawItems.slice(0, limit)
         const total = Number(totalRow?.count || 0)
         return { items: items || [], total, limit, truncated: total > (items || []).length }
       })
@@ -1257,8 +1258,12 @@ function registerContactRoutes(config: ContactConfig) {
       const bytes = new Uint8Array(10)
       crypto.getRandomValues(bytes)
       const tempPassword = [...bytes].map((b) => alphabet[b % alphabet.length]).join('')
-      await db.prepare('UPDATE portal_accounts SET password_hash = @h, updated_at = CURRENT_TIMESTAMP WHERE id = @aid')
-        .run({ h: bcrypt.hashSync(tempPassword, 10), aid: account.id })
+      const update = await db.prepare(`UPDATE portal_accounts
+        SET password_hash = @h, updated_at = CURRENT_TIMESTAMP
+        WHERE id = @aid AND contact_id = @customerId
+          AND EXISTS (SELECT 1 FROM customers WHERE id = @customerId AND ${customerIsProfileSql()})`)
+        .run({ h: bcrypt.hashSync(tempPassword, 10), aid: account.id, customerId: id })
+      if (Number(update.changes || 0) !== 1) return anonymousCustomerMutationResponse(c)
       await revokePortalSessionsForAccount(c.env, account.id)
       await audit(c.env, user?.id ?? null, actorSnapshot(user), 'portal_reset', config.entity, id, {})
       return c.json({ ok: true, temporaryPassword: tempPassword })
@@ -1396,6 +1401,7 @@ function registerContactRoutes(config: ContactConfig) {
       && Object.prototype.hasOwnProperty.call(payload, 'address')
       && String(current.address || '') !== String(payload.address || '')
     const statements: Array<{ sql: string; params: Record<string, unknown> }> = []
+    if (config.table === 'customers') statements.push(anonymousCustomerGuardStatement(id))
     if (duplicateGuard) statements.push(duplicateGuard)
     if (expectedUpdatedAt) {
       statements.push({
@@ -1468,6 +1474,7 @@ function registerContactRoutes(config: ContactConfig) {
         await db.batch(statements)
       }
     } catch (error) {
+      if (config.table === 'customers' && (await anonymousCustomerIds(db, [id])).has(Number(id))) return anonymousCustomerMutationResponse(c)
       const duplicateBlock = await duplicateBlockAfterGuardFailure(c.env, config, { id, name, phones: duplicateDecision.phones }, duplicateDecision.decision)
       if (duplicateBlock) return c.json(duplicateBlock.body, duplicateBlock.status as 400 | 409)
       if (expectedUpdatedAt) {
@@ -1561,7 +1568,19 @@ function registerContactRoutes(config: ContactConfig) {
       throw error
     }
 
-    await db.prepare(`DELETE FROM ${config.table} WHERE id = @id`).run({ id })
+    try {
+      if (config.table === 'customers') {
+        await db.batch([
+          anonymousCustomerGuardStatement(id),
+          { sql: 'DELETE FROM customers WHERE id = @customerId', params: { customerId: id } },
+        ])
+      } else {
+        await db.prepare(`DELETE FROM ${config.table} WHERE id = @id`).run({ id })
+      }
+    } catch (error) {
+      if (config.table === 'customers' && (await anonymousCustomerIds(db, [id])).has(Number(id))) return anonymousCustomerMutationResponse(c)
+      throw error
+    }
     await audit(c.env, user?.id ?? null, actorSnapshot(user), 'delete', config.entity, id, { name: current.name })
     await bumpVersion(c.env, config.table)
     c.executionCtx.waitUntil(broadcast(c.env, config.channel, { action: 'delete', id }))
@@ -2348,10 +2367,21 @@ app.post('/customers/link-conflicts/relink', async (c) => {
   const target = await db.prepare('SELECT id, name, is_anonymous FROM customers WHERE id = ?').get<{ id: number; name: string | null; is_anonymous: number }>([targetId])
   if (!target) return c.json({ error: 'Target customer not found.' }, 404)
   if (isAnonymousCustomer(target)) return anonymousCustomerMutationResponse(c)
-  const result = await db.prepare(`
-    UPDATE sales SET customer_id = @targetId, updated_at = CURRENT_TIMESTAMP
-    WHERE customer_id = @currentId AND ${PHONE_KEY_SQL('customer_phone')} = @phoneKey
-  `).run({ targetId, currentId, phoneKey })
+  let result
+  try {
+    const results = await db.batch([
+      anonymousCustomerGuardStatement(targetId, 'targetId'),
+      {
+        sql: `UPDATE sales SET customer_id = @targetId, updated_at = CURRENT_TIMESTAMP
+          WHERE customer_id = @currentId AND ${PHONE_KEY_SQL('customer_phone')} = @phoneKey`,
+        params: { targetId, currentId, phoneKey },
+      },
+    ])
+    result = results[1]
+  } catch (error) {
+    if ((await anonymousCustomerIds(db, [targetId])).has(targetId)) return anonymousCustomerMutationResponse(c)
+    throw error
+  }
   const changed = Number((result as { meta?: { changes?: number } })?.meta?.changes ?? (result as { changes?: number })?.changes ?? 0)
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'relink_sales', 'customer', targetId, {
     fromCustomerId: currentId, phoneKey, salesRelinked: changed,
@@ -2409,12 +2439,23 @@ app.post('/customers/link-conflicts/resolve-missing', async (c) => {
     created = true
   }
 
-  const result = await db.prepare(`
-    UPDATE sales SET customer_id = @targetId, updated_at = CURRENT_TIMESTAMP
-    WHERE customer_id IS NULL
-      AND lower(trim(COALESCE(customer_name,''))) = lower(@name)
-      AND ${PHONE_KEY_SQL('customer_phone')} = @phoneKey
-  `).run({ targetId, name, phoneKey })
+  let result
+  try {
+    const results = await db.batch([
+      anonymousCustomerGuardStatement(targetId, 'targetId'),
+      {
+        sql: `UPDATE sales SET customer_id = @targetId, updated_at = CURRENT_TIMESTAMP
+          WHERE customer_id IS NULL
+            AND lower(trim(COALESCE(customer_name,''))) = lower(@name)
+            AND ${PHONE_KEY_SQL('customer_phone')} = @phoneKey`,
+        params: { targetId, name, phoneKey },
+      },
+    ])
+    result = results[1]
+  } catch (error) {
+    if ((await anonymousCustomerIds(db, [targetId])).has(targetId)) return anonymousCustomerMutationResponse(c)
+    throw error
+  }
   const changed = Number((result as { meta?: { changes?: number } })?.meta?.changes ?? (result as { changes?: number })?.changes ?? 0)
   await audit(c.env, user?.id ?? null, actorSnapshot(user), created ? 'create_and_link_sales' : 'link_sales', 'customer', targetId, {
     name, phone, salesLinked: changed, createdContact: created,
@@ -2485,12 +2526,24 @@ app.post('/customers/:id/points', async (c) => {
   // created_by_name is a USER_NAME_SNAPSHOTS column (userIdentity.ts), so the
   // rename cascade rewrites it to the account USERNAME. Stamping the full name
   // here would make this row change shape the first time anyone is renamed.
-  const result = await db.prepare(`
-    INSERT INTO loyalty_point_adjustments (customer_id, points, note, created_by_id, created_by_name)
-    VALUES (@customerId, @points, @note, @actorId, @actorName)
-  `).run({ customerId, points: Number(points.toFixed(2)), note, actorId: actor.id, actorName: actorSnapshot(actor) })
+  let result
+  try {
+    const results = await db.batch([
+      anonymousCustomerGuardStatement(customerId),
+      {
+        sql: `INSERT INTO loyalty_point_adjustments (customer_id, points, note, created_by_id, created_by_name)
+          VALUES (@customerId, @points, @note, @actorId, @actorName)`,
+        params: { customerId, points: Number(points.toFixed(2)), note, actorId: actor.id, actorName: actorSnapshot(actor) },
+      },
+    ])
+    result = results[1]
+  } catch (error) {
+    if ((await anonymousCustomerIds(db, [customerId])).has(customerId)) return anonymousCustomerMutationResponse(c)
+    throw error
+  }
+  const adjustmentId = Number(result.meta?.last_row_id ?? 0)
   await audit(c.env, actor.id, actorSnapshot(actor), 'award_points', 'customer', customerId, {
-    adjustmentId: result.lastInsertRowid,
+    adjustmentId,
     customerName: customer.name,
     membershipNumber: customer.membership_number,
     points: Number(points.toFixed(2)),
@@ -2498,7 +2551,7 @@ app.post('/customers/:id/points', async (c) => {
   })
   c.executionCtx.waitUntil(broadcast(c.env, 'customers', { action: 'award_points', id: customerId }))
   c.executionCtx.waitUntil(bumpVersion(c.env, 'customers'))
-  return c.json({ success: true, id: result.lastInsertRowid, customer_id: customerId, points: Number(points.toFixed(2)) }, 201)
+  return c.json({ success: true, id: adjustmentId, customer_id: customerId, points: Number(points.toFixed(2)) }, 201)
 })
 
 // GET /api/customers/points-summary -- was a hardcoded `[]` stub. Exported

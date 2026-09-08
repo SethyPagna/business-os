@@ -35,6 +35,7 @@ import { runD1BatchInChunks } from './importEngine'
 import { bumpVersion } from './cache'
 import { broadcast, type BroadcastChannel } from '../durable-objects/broadcastHub'
 import { actorSnapshot } from './actorSnapshot'
+import { customerIsAnonymousSql } from './anonymousCustomer'
 
 export type BulkDeleteEntityType = 'products' | 'customers' | 'suppliers' | 'delivery_contacts'
 
@@ -77,10 +78,33 @@ export function buildCoreDeleteStatements(config: EntityConfig, chunk: number[])
   return chunkForBinding(chunk).map((slice) => {
     const placeholders = slice.map(() => '?').join(',')
     if (config.deleteMode === 'hard') {
-      return { sql: `DELETE FROM ${config.table} WHERE ${config.idColumn} IN (${placeholders})`, params: slice as unknown as Record<string, unknown> }
+      const profileOnly = config.table === 'customers' ? ` AND NOT (${customerIsAnonymousSql()})` : ''
+      return { sql: `DELETE FROM ${config.table} WHERE ${config.idColumn} IN (${placeholders})${profileOnly}`, params: slice as unknown as Record<string, unknown> }
     }
     return { sql: `UPDATE ${config.table} SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE ${config.idColumn} IN (${placeholders})`, params: slice as unknown as Record<string, unknown> }
   })
+}
+
+export function buildAnonymousCustomerBulkDeleteGuard(ids: number[]): D1Statement {
+  return {
+    sql: `SELECT CASE WHEN NOT EXISTS (
+      SELECT 1 FROM customers
+      WHERE id IN (SELECT CAST(value AS INTEGER) FROM json_each(@customerIds))
+        AND ${customerIsAnonymousSql()}
+    ) THEN 1 ELSE json_extract('anonymous_customer_immutable', '$') END AS anonymous_customer_guard`,
+    params: { customerIds: JSON.stringify(ids) },
+  }
+}
+
+async function loadAnonymousCustomerIds(db: D1Compat, ids: number[]): Promise<Set<number>> {
+  const found = new Set<number>()
+  for (const slice of chunkForBinding(ids)) {
+    const placeholders = slice.map(() => '?').join(',')
+    const rows = await db.prepare(`SELECT id FROM customers WHERE id IN (${placeholders}) AND ${customerIsAnonymousSql()}`)
+      .all<{ id: number }>(slice)
+    for (const row of rows) found.add(Number(row.id))
+  }
+  return found
 }
 
 const NO_EXTRA_STATEMENTS = async () => []
@@ -232,14 +256,30 @@ export async function runBulkDeleteJob(env: Env, jobId: string): Promise<void> {
     }
 
     const chunk = allIds.slice(cursor, cursor + BULK_DELETE_CHUNK_SIZE)
+    let deleteChunk = chunk
+    if (job.entity_type === 'customers') {
+      const protectedIds = await loadAnonymousCustomerIds(db, chunk)
+      if (protectedIds.size) {
+        for (const id of protectedIds) if (!failedIds.includes(id)) failedIds.push(id)
+        deleteChunk = chunk.filter((id) => !protectedIds.has(id))
+      }
+    }
     try {
       // One statement deletes the whole chunk, instead of one DELETE/UPDATE
       // per id -- this is the core of why this is fast at 10k+ scale.
       // Soft (products) vs hard (customers/suppliers/delivery_contacts)
       // decided by config.deleteMode -- see buildCoreDeleteStatement.
-      const deleteStatements = buildCoreDeleteStatements(config, chunk)
-      const extraStatements = await config.buildExtraStatements(db, chunk, job.reason, user)
-      await runD1BatchInChunks(db, [...deleteStatements, ...extraStatements])
+      const deleteStatements = buildCoreDeleteStatements(config, deleteChunk)
+      const extraStatements = await config.buildExtraStatements(db, deleteChunk, job.reason, user)
+      if (job.entity_type === 'customers' && deleteChunk.length) {
+        // The advisory read above lets unrelated profile ids continue when a
+        // queued job contains a marker. This in-transaction assertion closes
+        // the race where a profile is marked after that read but before the
+        // hard delete. Guard and deletes are six statements at most.
+        await db.batch([buildAnonymousCustomerBulkDeleteGuard(deleteChunk), ...deleteStatements, ...extraStatements])
+      } else {
+        await runD1BatchInChunks(db, [...deleteStatements, ...extraStatements])
+      }
 
       // One audit_logs row per deleted id, batched together with everything
       // above rather than going through audit()'s per-call session lookup --
@@ -248,7 +288,7 @@ export async function runBulkDeleteJob(env: Env, jobId: string): Promise<void> {
       // this module exists to avoid; a bulk-delete audit entry is
       // identifiable as a batch via the shared `reason` text and tight
       // created_at clustering even without a device column.
-      const auditStatements: D1Statement[] = chunk.map((id) => ({
+      const auditStatements: D1Statement[] = deleteChunk.map((id) => ({
         sql: `INSERT INTO audit_logs (user_id, user_name, action, entity, entity_id, details, table_name, record_id, new_value)
               VALUES (@userId, @userName, 'delete', @entity, @entityId, @details, @entity, @entityId, NULL)`,
         params: { userId: user.id, userName: actorSnapshot(user), entity: config.auditEntity, entityId: id, details: JSON.stringify({ reason: job.reason, bulkJobId: jobId }) },
@@ -256,14 +296,16 @@ export async function runBulkDeleteJob(env: Env, jobId: string): Promise<void> {
       await runD1BatchInChunks(db, auditStatements)
 
       cursor += chunk.length
-      await db.prepare(`UPDATE bulk_delete_jobs SET processed_count = @cursor, updated_at = CURRENT_TIMESTAMP WHERE id = @id`).run({ id: jobId, cursor })
+      await db.prepare(`UPDATE bulk_delete_jobs
+        SET processed_count = @cursor, failed_count = @failedCount, failed_ids_json = @failedIds, updated_at = CURRENT_TIMESTAMP
+        WHERE id = @id`).run({ id: jobId, cursor, failedCount: failedIds.length, failedIds: JSON.stringify(failedIds) })
     } catch (error) {
       // A whole chunk failing (after runD1BatchInChunks' own per-statement
       // adaptive retry already gave up) is treated as those specific ids
       // failing, not the whole job -- record them and move on to the next
       // chunk rather than abandoning everything already-processed.
       console.error('[bulk-delete] chunk failed', jobId, { cursor, chunkSize: chunk.length }, error)
-      failedIds.push(...chunk)
+      for (const id of deleteChunk) if (!failedIds.includes(id)) failedIds.push(id)
       cursor += chunk.length
       await db.prepare(`
         UPDATE bulk_delete_jobs SET processed_count = @cursor, failed_count = @failedCount, failed_ids_json = @failedIds, last_error = @error, updated_at = CURRENT_TIMESTAMP WHERE id = @id

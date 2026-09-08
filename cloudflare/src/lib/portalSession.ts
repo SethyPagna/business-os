@@ -3,6 +3,7 @@ import { getCookie, setCookie, deleteCookie } from 'hono/cookie'
 import { getDb } from './db'
 import { PORTAL_CONSENT_VERSION } from './portalAccounts'
 import type { Env } from '../index'
+import { customerIsProfileSql } from './anonymousCustomer'
 
 // Customer (storefront) sessions. A deliberate, SEPARATE fork of lib/auth.ts's
 // staff session model — different table (portal_sessions), different cookie
@@ -110,9 +111,11 @@ export async function getPortalAccountState<E extends { Bindings: Env } = { Bind
            a.consent_version, a.consent_at
     FROM portal_sessions s
     JOIN portal_accounts a ON a.id = s.account_id
+    LEFT JOIN customers c ON c.id = a.contact_id
     WHERE s.token_hash = @token_hash
       AND s.revoked_at IS NULL
       AND s.expires_at > @now
+      AND (a.contact_id IS NULL OR (c.id IS NOT NULL AND ${customerIsProfileSql('c')}))
     LIMIT 1
   `).get<PortalAccount & { consent_version: string | null; consent_at: string | null }>({ token_hash: tokenHash, now: nowIso })
   if (!row) return { status: 'unauthenticated', account: null }

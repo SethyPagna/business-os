@@ -26,6 +26,7 @@ import { getPortalLockoutState, recordPortalFailure, clearPortalLockout } from '
 import { canonicalizePhone } from '../lib/phone'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
+import { customerIsProfileSql } from '../lib/anonymousCustomer'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 
@@ -1177,6 +1178,7 @@ async function findCustomerByMembership(env: Env, membershipNumber: string) {
     SELECT id, name, membership_number, phone, email, address, created_at
     FROM customers
     WHERE lower(trim(membership_number)) = lower(trim(@membershipNumber))
+      AND ${customerIsProfileSql()}
     LIMIT 1
   `).get<{ id: number; name: string; membership_number: string; phone: string }>({ membershipNumber })
 }
@@ -1495,7 +1497,7 @@ async function portalSubmissionConsentSchemaReady(env: Env): Promise<boolean> {
 async function resolveSubmissionCustomer(env: Env, account: { contact_id: number | null; membership_id: string }) {
   if (account.contact_id) {
     const row = await getDb(env).prepare(
-      'SELECT id, name, membership_number FROM customers WHERE id = @id LIMIT 1',
+      `SELECT id, name, membership_number FROM customers WHERE id = @id AND ${customerIsProfileSql()} LIMIT 1`,
     ).get<{ id: number; name: string | null; membership_number: string | null }>({ id: account.contact_id })
     if (row) return row
   }

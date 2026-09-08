@@ -180,6 +180,16 @@ check('the picker SQL runs against real SQLite and returns the picker columns', 
   assert.ok(!('company' in rows[0]), 'the picker shape must not ship the company column')
 })
 
+check('the picker filters anonymous markers inside the same bounded SQL read', () => {
+  const db = freshDb()
+  seedCustomers(db)
+  db.prepare('UPDATE customers SET is_anonymous=1 WHERE id=2').run()
+  const rows = db.prepare(buildContactPickerSql('customers')).bind({ limit: CONTACT_PICKER_DEFAULT_LIMIT }).all()
+  assert.deepStrictEqual(rows.map((row) => Number(row.id)).sort((a, b) => a - b), [1, 3, 4, 5])
+  assert.match(buildContactPickerSql('customers'), /WHERE COALESCE\(is_anonymous, 0\) = 0/)
+  assert.ok(rows.every((row) => Number(row.is_anonymous) === 0), 'the mirror receives only authoritative profile rows')
+})
+
 check('suppliers and delivery contacts get their own columns and no sales join', () => {
   const db = freshDb()
   for (const table of ['suppliers', 'delivery_contacts']) {
