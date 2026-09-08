@@ -1303,6 +1303,67 @@ async function main() {
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM return_create_guards').get().n, 0)
   })
 
+  await check('replacement create refuses inactive products and inactive explicit lots before every write', async () => {
+    seed()
+    rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity) VALUES(1,1,1,'Widget',1)").run()
+    rawDb.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(2,1,2)').run()
+    rawDb.prepare('UPDATE products SET stock_quantity=2,is_active=0 WHERE id=2').run()
+    const inactiveProduct = await reqExact('POST', '/', {
+      client_request_id: 'return-create-inactive-product', return_number: 'RET-INACTIVE-PRODUCT', sale_id: 1,
+      reason: 'Exchange', items: [{ sale_item_id: 1, product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1 }],
+      replacement_items: [{ product_id: 2, quantity: 1, branch_id: 1 }],
+    })
+    assert.strictEqual(inactiveProduct.status, 400, JSON.stringify(inactiveProduct.json))
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM returns').get().n, 0)
+    assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id=2 AND branch_id=1').get().quantity, 2)
+
+    seed()
+    rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity) VALUES(1,1,1,'Widget',1)").run()
+    const lot = await productBatches.receiveBatchStock(db, { productId: 2, branchId: 1, quantity: 2, lotCode: 'INACTIVE-LOT' })
+    rawDb.prepare('UPDATE product_batches SET is_active=0 WHERE id=?').run([lot.batchId])
+    const inactiveLot = await reqExact('POST', '/', {
+      client_request_id: 'return-create-inactive-lot', return_number: 'RET-INACTIVE-LOT', sale_id: 1,
+      reason: 'Exchange', items: [{ sale_item_id: 1, product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1 }],
+      replacement_items: [{ product_id: 2, quantity: 1, branch_id: 1, batch_id: lot.batchId }],
+    })
+    assert.strictEqual(inactiveLot.status, 400, JSON.stringify(inactiveLot.json))
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM returns').get().n, 0)
+    assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=? AND branch_id=1').get([lot.batchId]).quantity, 2)
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM return_create_receipts').get().n, 0)
+  })
+
+  await check('replacement create rejects product or lot deactivation races with zero effects', async () => {
+    seed()
+    rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity) VALUES(1,1,1,'Widget',1)").run()
+    rawDb.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(2,1,2)').run()
+    rawDb.prepare('UPDATE products SET stock_quantity=2 WHERE id=2').run()
+    beforeBatchHook = async () => { rawDb.prepare('UPDATE products SET is_active=0 WHERE id=2').run() }
+    const productRace = await reqExact('POST', '/', {
+      client_request_id: 'return-create-product-active-race', return_number: 'RET-PRODUCT-ACTIVE-RACE', sale_id: 1,
+      reason: 'Exchange', items: [{ sale_item_id: 1, product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1 }],
+      replacement_items: [{ product_id: 2, quantity: 1, branch_id: 1 }],
+    })
+    assert.strictEqual(productRace.status, 409, JSON.stringify(productRace.json))
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM returns').get().n, 0)
+    assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id=2 AND branch_id=1').get().quantity, 2)
+
+    seed()
+    rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity) VALUES(1,1,1,'Widget',1)").run()
+    const lot = await productBatches.receiveBatchStock(db, { productId: 2, branchId: 1, quantity: 2, lotCode: 'RACE-LOT' })
+    beforeBatchHook = async () => { rawDb.prepare('UPDATE product_batches SET is_active=0 WHERE id=?').run([lot.batchId]) }
+    const lotRace = await reqExact('POST', '/', {
+      client_request_id: 'return-create-lot-active-race', return_number: 'RET-LOT-ACTIVE-RACE', sale_id: 1,
+      reason: 'Exchange', items: [{ sale_item_id: 1, product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1 }],
+      replacement_items: [{ product_id: 2, quantity: 1, branch_id: 1, batch_id: lot.batchId }],
+    })
+    assert.strictEqual(lotRace.status, 409, JSON.stringify(lotRace.json))
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM returns').get().n, 0)
+    assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=? AND branch_id=1').get([lot.batchId]).quantity, 2)
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM sales').get().n, 1)
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM return_create_receipts').get().n, 0)
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM return_create_guards').get().n, 0)
+  })
+
   await check('return-create receipt freezes the exact response and rejects changed-body reuse after mutable database changes', async () => {
     seed()
     const legacy = await reqExact('POST', '/', {
