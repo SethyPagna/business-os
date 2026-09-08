@@ -311,6 +311,10 @@ export default function ProductDetailSheet({
   // Reset alongside the other step state whenever a different product's
   // sheet opens, same as branch/barcode above.
   const [batches, setBatches] = useState<PickerBatch[]>([])
+  // Separate from the active-lot array: this scalar includes inactive known
+  // lots, which are never rendered as received-date choices but do reduce
+  // the date-less Shop remainder.
+  const [knownPositiveQuantityByProduct, setKnownPositiveQuantityByProduct] = useState<Record<number, number | null>>({})
   const [batchesLoading, setBatchesLoading] = useState(false)
   // Non-empty when the lot lookup FAILED, as opposed to succeeding with no
   // lots. The two must not render the same way -- see the fetch below.
@@ -335,6 +339,7 @@ export default function ProductDetailSheet({
     setBarcodePage(0)
     setSelectedBatchId(null)
     setSelectedUnlottedStock(false)
+    setKnownPositiveQuantityByProduct({})
     setBatchChoicesOpen(false)
     setBatchPage(0)
   }, [product?.id])
@@ -356,6 +361,7 @@ export default function ProductDetailSheet({
     trackedBatchProductIds,
     receivedDateStepHidden: hideReceivedDates,
     batches,
+    knownPositiveBatchQuantityByProduct: knownPositiveQuantityByProduct,
     selectedBatchId,
     selectedUnlottedStock,
     damagedLots,
@@ -465,8 +471,8 @@ export default function ProductDetailSheet({
     .filter((id) => Number.isFinite(id) && id > 0)
   const lotSourceKey = lotSourceProductIds.join(',')
   useEffect(() => {
-    if (!isBatchTracked || lotSourceProductIds.length === 0) { setBatches([]); return }
-    if (resolvedBranchId == null) { setBatches([]); setBatchesLoading(false); return }
+    if (!isBatchTracked || lotSourceProductIds.length === 0) { setBatches([]); setKnownPositiveQuantityByProduct({}); return }
+    if (resolvedBranchId == null) { setBatches([]); setKnownPositiveQuantityByProduct({}); setBatchesLoading(false); return }
     let cancelled = false
     setBatchesLoading(true)
     setBatchesError('')
@@ -476,10 +482,17 @@ export default function ProductDetailSheet({
     // the wrong stock. One failed row fails the whole list, which the error
     // branch below renders as an error and which keeps the sale blocked.
     Promise.all(lotSourceProductIds.map((productId) => getProductBatches(productId, resolvedBranchId)
-      .then((res) => (Array.isArray(res?.batches) ? res.batches : [])
-        .map((batch) => ({ ...batch, __productId: productId } as PickerBatch))))).then((lists) => {
+      .then((res) => ({
+        productId,
+        batches: (Array.isArray(res?.batches) ? res.batches : [])
+          .map((batch) => ({ ...batch, __productId: productId } as PickerBatch)),
+        knownPositiveQuantity: Number.isFinite(Number(res?.known_positive_quantity))
+          ? Math.max(0, Number(res.known_positive_quantity))
+          : null,
+      })))).then((lists) => {
       if (cancelled) return
-      setBatches(lists.flat())
+      setBatches(lists.flatMap((list) => list.batches))
+      setKnownPositiveQuantityByProduct(Object.fromEntries(lists.map((list) => [list.productId, list.knownPositiveQuantity])))
       setBatchesError('')
     }).catch((error: unknown) => {
       // A failed lot fetch is NOT "this product has no lots here". The old
@@ -491,6 +504,7 @@ export default function ProductDetailSheet({
       // refusing the sale.
       if (cancelled) return
       setBatches([])
+      setKnownPositiveQuantityByProduct({})
       setBatchesError(error instanceof Error && error.message ? error.message : 'Could not load lots')
     }).finally(() => { if (!cancelled) setBatchesLoading(false) })
     return () => { cancelled = true }

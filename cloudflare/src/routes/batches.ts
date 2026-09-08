@@ -85,6 +85,21 @@ app.get('/', async (c) => {
   if (!productId || !branchId) return c.json({ error: 'productId and branchId are required' }, 400)
   const onlyAvailable = c.req.query('onlyAvailable') === '1' || c.req.query('onlyAvailable') === 'true'
   const batches = await listBatchesForProduct(db, productId, branchId, { onlyAvailable })
+  // The picker keeps its active-lot array unchanged, but POS also needs the
+  // authoritative total of EVERY positive known lot to decide whether the
+  // branch_stock remainder is truly unrecorded. Inactive lots remain hidden
+  // and unselectable; their existing stock still has provenance and must not
+  // be offered as a date-less sale choice. This read is advisory for the UI;
+  // sales.ts rechecks the same remainder inside its stock write transaction.
+  const knownPositive = await db.prepare(`
+    SELECT COALESCE(SUM(bbs.quantity), 0) AS quantity
+    FROM branch_batch_stock bbs
+    JOIN product_batches pb ON pb.id = bbs.batch_id
+    WHERE pb.variant_product_id = ?
+      AND bbs.branch_id = ?
+      AND bbs.quantity > 0
+  `).get<{ quantity: number }>([productId, branchId])
+  const knownPositiveQuantity = Math.max(0, Number(knownPositive?.quantity) || 0)
   // A reader admitted ONLY via the image-only lot-view grant (K6) sees the
   // lots -- code, expiry, quantity, supplier NAME -- but never the money
   // terms: unit cost and paid/credit state stay with the roles that manage
@@ -93,7 +108,7 @@ app.get('/', async (c) => {
   const payload = moneyBlind
     ? (batches as Array<Record<string, unknown>>).map(({ unit_cost_usd: _c, payment_status: _p, credit_due_date: _d, ...rest }) => rest)
     : batches
-  return c.json({ batches: payload })
+  return c.json({ batches: payload, known_positive_quantity: knownPositiveQuantity })
 })
 
 // POST /api/batches -- receive stock into a batch (creates a new batch, or

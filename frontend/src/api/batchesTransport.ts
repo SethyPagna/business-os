@@ -28,6 +28,14 @@ export type ProductBatch = {
   updated_at?: string | null
 }
 
+export type ProductBatchListResponse = {
+  batches: ProductBatch[]
+  // All positive product_batches at this exact branch, including inactive
+  // rows intentionally omitted from batches. POS uses this only to bound the
+  // explicit-unrecorded remainder; it never makes inactive lots selectable.
+  known_positive_quantity?: number
+}
+
 export type ReceiveBatchPayload = {
   productId: number
   branchId: number
@@ -63,7 +71,7 @@ export type BatchSelection = {
   batchLabel?: string | null
   batchExpiryDate?: string | null
   // A selected Shop remainder whose stock has no received-date record. The
-  // backend validates it against branch_stock minus live positive lot stock.
+  // backend validates it against branch_stock minus every positive known lot.
   unlottedStock?: boolean
   // The lot's own received date, carried so a host that DISPLAYS the picked
   // intake ("Batch 2 · Received: 09/01/2026" on a staged sale line) does not
@@ -105,7 +113,7 @@ export function getTrackedBatchProductIds(branchId?: number | string | null): Pr
 
 // GET /api/batches?productId=&branchId=&onlyAvailable= -- every active
 // batch for one product, FIFO-ordered (soonest expiry first).
-export function getProductBatches(productId: number | string, branchId: number | string, onlyAvailable = false): Promise<{ batches: ProductBatch[] }> {
+export function getProductBatches(productId: number | string, branchId: number | string, onlyAvailable = false): Promise<ProductBatchListResponse> {
   const params = new URLSearchParams({ productId: String(productId), branchId: String(branchId) })
   if (onlyAvailable) params.set('onlyAvailable', '1')
   return route(
