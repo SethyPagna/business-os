@@ -4469,6 +4469,7 @@ async function prepareSelectedConflictCase(
   clustersByKey: Map<string, Array<Awaited<ReturnType<typeof findPossiblySameProductClusters>>[number]>>,
   branchNameById: Map<number, string>,
   canChangeImages: boolean,
+  executionStockChoice?: 'merge' | 'write_off',
 ): Promise<SelectedConflictPreparedCase | SelectedConflictSkippedCase> {
   const requestedIds = [...requested.product_ids].sort((a, b) => a - b)
   const cluster = (clustersByKey.get(requested.case_key) || []).find((candidate) => {
@@ -4513,8 +4514,8 @@ async function prepareSelectedConflictCase(
   }
   const snapshot = await readProductMergeCaseSnapshot(db, keeper.id, discarded.id, MERGE_REPARENT_TABLES)
   const [writeOffLots, mergeLots, blockingSession, imageChanges] = await Promise.all([
-    readProductMergeDependentLotSnapshots(db, snapshot, 'write_off'),
-    readProductMergeDependentLotSnapshots(db, snapshot, 'merge'),
+    executionStockChoice === 'merge' ? Promise.resolve(new Map<number, ProductMergeLotSnapshot>()) : readProductMergeDependentLotSnapshots(db, snapshot, 'write_off'),
+    executionStockChoice === 'write_off' ? Promise.resolve(new Map<number, ProductMergeLotSnapshot>()) : readProductMergeDependentLotSnapshots(db, snapshot, 'merge'),
     mergeBlockedByReversibleStockSession(db, [keeper.id, discarded.id]),
     productMergeChangesImages(db, [{ keeper, discarded }]),
   ])
@@ -4568,6 +4569,7 @@ async function prepareSelectedConflictCases(
   db: ReturnType<typeof getDb>,
   requestedCases: readonly ProductConflictPreviewCase[],
   canChangeImages: boolean,
+  executionStockChoices?: readonly ('merge' | 'write_off')[],
 ): Promise<{ prepared: SelectedConflictPreparedCase[]; skipped: SelectedConflictSkippedCase[] }> {
   const [clusters, branches] = await Promise.all([
     findPossiblySameProductClusters(db),
@@ -4584,9 +4586,142 @@ async function prepareSelectedConflictCases(
   const prepared: SelectedConflictPreparedCase[] = []
   const skipped: SelectedConflictSkippedCase[] = []
   for (const [ordinal, requested] of requestedCases.entries()) {
-    const result = await prepareSelectedConflictCase(db, requested, ordinal, clustersByKey, branchNameById, canChangeImages)
+    const result = await prepareSelectedConflictCase(db, requested, ordinal, clustersByKey, branchNameById, canChangeImages, executionStockChoices?.[ordinal])
     if ('stateDigest' in result) prepared.push(result)
     else skipped.push(result)
+  }
+  return { prepared, skipped }
+}
+
+type SelectedConflictApplyPreflightCase = Pick<SelectedConflictPreparedCase,
+  'ordinal' | 'caseKey' | 'keeper' | 'discarded' | 'stateDigest' | 'needsStockChoice'
+  | 'stateGuard' | 'imageChanges' | 'blockingSession' | 'statementEstimate'>
+
+function selectedConflictLightStatementEstimate(
+  fingerprint: string,
+  keeperId: number,
+  mergedId: number,
+  canChangeImages: boolean,
+): Record<'merge' | 'write_off', number> {
+  let entries: Array<{ kind?: string; value?: Record<string, unknown> }> = []
+  try { entries = JSON.parse(fingerprint) as typeof entries } catch { return { merge: 101, write_off: 101 } }
+  const ofKind = (kind: string) => entries.filter((entry) => entry.kind === kind).map((entry) => entry.value || {})
+  const batches = ofKind('product_batch')
+  const keeperBatches = new Map(batches.filter((row) => Number(row.variant_product_id) === keeperId)
+    .map((row) => [String(row.batch_key), Number(row.id)]))
+  const mergedBatches = batches.filter((row) => Number(row.variant_product_id) === mergedId)
+  const batchStock = ofKind('branch_batch_stock')
+  const branchStock = ofKind('branch_stock').filter((row) => Number(row.product_id) === mergedId && Number(row.quantity))
+  const keeperImagePaths = new Set(ofKind('product_image').filter((row) => Number(row.product_id) === keeperId).map((row) => String(row.image_path || '')).filter(Boolean))
+  const mergedImages = ofKind('product_image').filter((row) => Number(row.product_id) === mergedId
+    && Boolean(String(row.image_path || '')) && !keeperImagePaths.has(String(row.image_path || '')))
+  const reparentGroups = new Map<string, number>()
+  for (const entry of entries) {
+    if (!entry.kind?.startsWith('reparent:') || Number(entry.value?.linked_product_id) !== mergedId) continue
+    reparentGroups.set(entry.kind, (reparentGroups.get(entry.kind) || 0) + 1)
+  }
+  const promotionCount = ofKind('promotion_rule').filter((row) => {
+    try { return (JSON.parse(String(row.product_ids || '[]')) as unknown[]).some((id) => Number(id) === mergedId) } catch { return false }
+  }).length
+  const childCount = ofKind('child_product').filter((row) => Number(row.parent_id) === mergedId).length
+  const collisionBatchIds = new Set<number>()
+  let mergeBatchStatements = 0
+  for (const batch of mergedBatches) {
+    const keeperBatchId = keeperBatches.get(String(batch.batch_key))
+    if (keeperBatchId == null) mergeBatchStatements += 1
+    else {
+      collisionBatchIds.add(Number(batch.id))
+      mergeBatchStatements += batchStock.filter((row) => Number(row.batch_id) === Number(batch.id) && Number(row.quantity)).length + 4
+    }
+  }
+  const common = 1 + 1 + 1 // product CAS, selected-state guard, discarded stock clear
+    + (canChangeImages ? mergedImages.length + 2 : 1)
+    + 2 // deactivate and economics
+    + reparentGroups.size + promotionCount + (childCount ? 2 : 0)
+    + 2 + 2 + 3 // stock caches, receipt transition/guard, atomic history
+  const merge = common + branchStock.length * 2 + mergeBatchStatements
+  const writeOff = common + branchStock.length + mergedBatches.length * 2
+
+  const chunksOf80 = (count: number) => Math.ceil(Math.max(0, count) / 80)
+  const savedBatchIds = new Set<number>([
+    ...mergedBatches.map((row) => Number(row.id)),
+    ...collisionBatchIds,
+    ...[...collisionBatchIds].map((id) => {
+      const batch = mergedBatches.find((row) => Number(row.id) === id)
+      return keeperBatches.get(String(batch?.batch_key)) || 0
+    }),
+  ].filter((id) => id > 0))
+  const reparentFingerprintReads = [...reparentGroups.values()].reduce((sum, count) => sum + chunksOf80(count), 0)
+  const collisionSaleIds = new Set(ofKind('sale_batch_allocation').filter((row) => collisionBatchIds.has(Number(row.batch_id))).map((row) => Number(row.id)))
+  const collisionReturnIds = new Set(ofKind('return_batch_allocation').filter((row) => collisionBatchIds.has(Number(row.batch_id))).map((row) => Number(row.id)))
+  const fingerprintReads = 7 + chunksOf80(savedBatchIds.size) + 1 + reparentFingerprintReads
+    + chunksOf80(promotionCount) + chunksOf80(childCount)
+    + chunksOf80(collisionSaleIds.size) + chunksOf80(collisionReturnIds.size)
+  return fingerprintReads > PRODUCT_MERGE_READ_BATCH_MAX_STATEMENTS ? { merge: 101, write_off: 101 } : { merge, write_off: writeOff }
+}
+
+async function prepareSelectedConflictApplyPreflightCases(
+  db: ReturnType<typeof getDb>,
+  requestedCases: readonly ProductConflictPreviewCase[],
+  canChangeImages: boolean,
+): Promise<{ prepared: SelectedConflictApplyPreflightCase[]; skipped: SelectedConflictSkippedCase[] }> {
+  const clusters = await findPossiblySameProductClusters(db)
+  const clustersByKey = new Map<string, typeof clusters>()
+  for (const cluster of clusters) {
+    const key = productConflictCaseKey(cluster.type, cluster.value)
+    const group = clustersByKey.get(key) || []
+    group.push(cluster)
+    clustersByKey.set(key, group)
+  }
+  const prepared: SelectedConflictApplyPreflightCase[] = []
+  const skipped: SelectedConflictSkippedCase[] = []
+  for (const [ordinal, requested] of requestedCases.entries()) {
+    const requestedIds = [...requested.product_ids].sort((a, b) => a - b)
+    const cluster = (clustersByKey.get(requested.case_key) || []).find((candidate) => {
+      const ids = candidate.products.map((row) => Number(row.id)).sort((a, b) => a - b)
+      return candidate.type === requested.cluster_type && ids.length === 2 && ids.every((id, index) => id === requestedIds[index])
+    })
+    if (!cluster) {
+      skipped.push({ ordinal, case_key: requested.case_key, product_ids: requestedIds, code: 'not_exact_pair', message: 'This conflict no longer contains the reviewed exact two-product set.' })
+      continue
+    }
+    const authoritativeClusterValue = normalizeProductClusterKey(requested.cluster_type, requested.cluster_value)
+    const initialClusterNameKey = normalizeProductGroupName(cluster.products[0]?.name)
+    const before = await readSelectedConflictFingerprint(db, requestedIds[0], requestedIds[1], requested.cluster_type, authoritativeClusterValue, initialClusterNameKey)
+    const { sql, params } = buildInClause('selectedPreflightProduct', requestedIds)
+    const rows = await db.prepare(`SELECT p.id,p.name,p.barcode,p.image_path,p.is_active,COALESCE(p.is_group,0) AS is_group,p.updated_at,
+      p.cost_price_usd,p.cost_price_khr,p.selling_price_usd,p.selling_price_khr,p.wholesale_price_usd,p.wholesale_price_khr,
+      COALESCE(SUM(bs.quantity),0) AS stock_quantity
+      FROM products p LEFT JOIN branch_stock bs ON bs.product_id=p.id WHERE p.id IN (${sql}) GROUP BY p.id ORDER BY p.id`)
+      .all<SelectedConflictProductRow>(params)
+    const eligibility = chooseProductConflictMergePair(rows)
+    if (!eligibility.eligible) {
+      skipped.push({ ordinal, case_key: requested.case_key, product_ids: requestedIds, code: eligibility.code, message: eligibility.message })
+      continue
+    }
+    const keeper = eligibility.keeper as SelectedConflictProductRow
+    const discarded = eligibility.discarded as SelectedConflictProductRow
+    const clusterNameKey = normalizeProductGroupName(keeper.name)
+    const [memberIds, stockImpact, blockingSession, imageChanges] = await Promise.all([
+      readSelectedConflictClusterMemberIds(db, requested.cluster_type, authoritativeClusterValue, clusterNameKey),
+      readMergeStockImpact(db, discarded.id, new Map()),
+      mergeBlockedByReversibleStockSession(db, [keeper.id, discarded.id]),
+      productMergeChangesImages(db, [{ keeper, discarded }]),
+    ])
+    const after = await readSelectedConflictFingerprint(db, keeper.id, discarded.id, requested.cluster_type, authoritativeClusterValue, clusterNameKey)
+    if (memberIds.length !== 2 || memberIds.some((id, index) => id !== requestedIds[index]) || before.fingerprint !== after.fingerprint) {
+      skipped.push({ ordinal, case_key: requested.case_key, product_ids: requestedIds, code: 'merge_state_conflict', message: 'This conflict changed during final validation. Refresh the combined review.' })
+      continue
+    }
+    const stateDigest = await productConflictSha256({
+      version: PRODUCT_CONFLICT_MERGE_MANIFEST_VERSION, case_key: requested.case_key,
+      keep_id: keeper.id, merge_id: discarded.id, state: after.fingerprint,
+    })
+    prepared.push({
+      ordinal, caseKey: requested.case_key, keeper, discarded, stateDigest, stateGuard: after.guard,
+      needsStockChoice: mergeStockImpactNeedsChoice(stockImpact), imageChanges, blockingSession,
+      statementEstimate: selectedConflictLightStatementEstimate(after.fingerprint, keeper.id, discarded.id, canChangeImages),
+    })
   }
   return { prepared, skipped }
 }
@@ -4618,7 +4753,8 @@ type SelectedConflictRunCaseRow = {
   error: string | null
 }
 
-async function selectedConflictManifestDigest(cases: readonly SelectedConflictPreparedCase[]): Promise<string> {
+async function selectedConflictManifestDigest(cases: ReadonlyArray<Pick<SelectedConflictPreparedCase,
+  'caseKey' | 'keeper' | 'discarded' | 'stateDigest'>>): Promise<string> {
   return productConflictSha256({
     manifest_version: PRODUCT_CONFLICT_MERGE_MANIFEST_VERSION,
     cases: cases.map((item, ordinal) => ({
@@ -4632,7 +4768,7 @@ async function selectedConflictManifestDigest(cases: readonly SelectedConflictPr
 }
 
 function selectedConflictBlocked(
-  item: SelectedConflictPreparedCase,
+  item: Pick<SelectedConflictPreparedCase, 'blockingSession' | 'imageChanges' | 'statementEstimate'>,
   canChangeImages: boolean,
 ): { code: string; message: string; operation_id?: string } | null {
   if (item.blockingSession) {
@@ -4785,7 +4921,6 @@ app.post('/possible-duplicates/merge-batch', async (c) => {
   const db = counted.db
   const requestJson = canonicalProductConflictJson(request)
   const requestDigest = await productConflictSha256(request)
-  let preparedFromInitialPreflight: Map<number, SelectedConflictPreparedCase> | null = null
   let run = await db.prepare(`SELECT * FROM product_conflict_merge_runs WHERE actor_id=@actorId AND request_id=@requestId`)
     .get<SelectedConflictRunRow>({ actorId: user.id, requestId: request.client_request_id })
   if (run && run.request_digest !== requestDigest) {
@@ -4798,7 +4933,7 @@ app.post('/possible-duplicates/merge-batch', async (c) => {
       const parsed = parseProductConflictCaseKey(item.case_key)!
       return { case_key: item.case_key, cluster_type: parsed.cluster_type, cluster_value: parsed.cluster_value, product_ids: [item.keep_id, item.merge_id] }
     })
-    const preflight = await prepareSelectedConflictCases(db, previewCases, canChangeImages)
+    const preflight = await prepareSelectedConflictApplyPreflightCases(db, previewCases, canChangeImages)
     const refusals: Array<{ caseKey: string; keeperId: number | null; mergedId: number | null; code: string; error: string }> = preflight.skipped.map((item) => ({
       caseKey: item.case_key,
       keeperId: request.cases[item.ordinal]?.keep_id ?? null,
@@ -4838,8 +4973,6 @@ app.post('/possible-duplicates/merge-batch', async (c) => {
       const stockMissing = refusals.some((item) => item.code === 'stock_choice_required' || item.code === 'stock_choice_not_applicable')
       return c.json({ success: false, code: imageDenied ? 'image_permission_required' : stockMissing ? 'stock_choice_required' : 'merge_state_conflict', error: refusals[0].error, refusals }, imageDenied ? 403 : stockMissing ? 400 : 409)
     }
-    preparedFromInitialPreflight = new Map(preflight.prepared.map((item) => [item.ordinal, item]))
-
     const runId = crypto.randomUUID()
     const insertStatements: Array<{ sql: string; params?: Record<string, unknown> }> = preflight.prepared.flatMap((item) => [item.stateGuard])
     insertStatements.push({
@@ -4895,32 +5028,40 @@ app.post('/possible-duplicates/merge-batch', async (c) => {
     rows = await db.prepare('SELECT * FROM product_conflict_merge_run_cases WHERE run_id=@runId ORDER BY ordinal')
       .all<SelectedConflictRunCaseRow>({ runId: run.id })
     const planned = rows.filter((item) => item.status === 'planned')
-    const previewCases = planned.map((item): ProductConflictPreviewCase => {
-      const parsed = parseProductConflictCaseKey(item.case_key)!
-      return { case_key: item.case_key, cluster_type: parsed.cluster_type, cluster_value: parsed.cluster_value, product_ids: [item.keeper_product_id, item.merged_product_id] }
-    })
-    let current = preparedFromInitialPreflight ?? new Map<number, SelectedConflictPreparedCase>()
-    if (previewCases.length && !preparedFromInitialPreflight) {
-      try {
-        const prepared = await prepareSelectedConflictCases(db, previewCases, canChangeImages)
-        for (const skipped of prepared.skipped) {
-          const item = planned[skipped.ordinal]
-          if (!item) continue
-          await db.prepare(`UPDATE product_conflict_merge_run_cases SET status='refused',refusal_code=@code,error=@error,updated_at=CURRENT_TIMESTAMP
-            WHERE run_id=@runId AND ordinal=@ordinal AND status='planned'`)
-            .run({ code: skipped.code, error: skipped.message, runId: run!.id, ordinal: item.ordinal })
-          interruptionCode = 'merge_state_conflict'
-        }
-        for (const item of prepared.prepared) current.set(planned[item.ordinal].ordinal, item)
-      } catch (error) {
-        if (isProductMergeInfrastructureError(error)) interruptionCode = 'merge_infrastructure_interrupted'
-        else throw error
-      }
-    }
-
     for (const item of planned) {
       if (interruptionCode) break
-      const prepared = current.get(item.ordinal)
+      const finalizationReserve = PRODUCT_MERGE_READ_BATCH_MAX_STATEMENTS + 6
+      const responseReserve = rows.length + 3
+      const preparationReserve = 130
+      if (Date.now() - startedAt + 1_500 >= MERGE_DUPLICATES_REQUEST_BUDGET_MS
+        || counted.statementCount() + preparationReserve + 100 + finalizationReserve + responseReserve > MERGE_DUPLICATES_REQUEST_STATEMENT_BUDGET) {
+        interruptionCode = 'merge_budget_reached'
+        break
+      }
+      const parsed = parseProductConflictCaseKey(item.case_key)!
+      const previewCase: ProductConflictPreviewCase = {
+        case_key: item.case_key,
+        cluster_type: parsed.cluster_type,
+        cluster_value: parsed.cluster_value,
+        product_ids: [item.keeper_product_id, item.merged_product_id],
+      }
+      const selectedChoice: 'merge' | 'write_off' = item.stock_choice ?? 'merge'
+      let prepared: SelectedConflictPreparedCase | undefined
+      try {
+        const current = await prepareSelectedConflictCases(db, [previewCase], canChangeImages, [selectedChoice])
+        if (current.skipped.length) {
+          const skipped = current.skipped[0]
+          await db.prepare(`UPDATE product_conflict_merge_run_cases SET status='refused',refusal_code=@code,error=@error,updated_at=CURRENT_TIMESTAMP
+            WHERE run_id=@runId AND ordinal=@ordinal AND status='planned'`)
+            .run({ code: skipped.code, error: skipped.message, runId: run.id, ordinal: item.ordinal })
+          interruptionCode = 'merge_state_conflict'
+          break
+        }
+        prepared = current.prepared[0]
+      } catch (error) {
+        if (isProductMergeInfrastructureError(error)) { interruptionCode = 'merge_infrastructure_interrupted'; break }
+        throw error
+      }
       if (!prepared || prepared.keeper.id !== item.keeper_product_id || prepared.discarded.id !== item.merged_product_id
         || prepared.stateDigest !== item.expected_state_digest) {
         await db.prepare(`UPDATE product_conflict_merge_run_cases SET status='refused',refusal_code='merge_state_conflict',
@@ -4930,15 +5071,12 @@ app.post('/possible-duplicates/merge-batch', async (c) => {
         interruptionCode = 'merge_state_conflict'
         break
       }
-      const selectedChoice: 'merge' | 'write_off' = item.stock_choice ?? 'merge'
       const estimate = prepared.statementEstimate[selectedChoice]
       // The fold's post-commit history finalizer can consume up to the shared
       // 80-statement fingerprint read ceiling plus its two lookups and three
       // finalize statements. Reserve that work, the branch lookup, receipt
       // status update, and bounded final response reconciliation before the
       // pair starts so the request cannot cross the 700-statement ceiling.
-      const finalizationReserve = PRODUCT_MERGE_READ_BATCH_MAX_STATEMENTS + 6
-      const responseReserve = rows.length + 3
       if (Date.now() - startedAt + 1_500 >= MERGE_DUPLICATES_REQUEST_BUDGET_MS
         || counted.statementCount() + estimate + finalizationReserve + responseReserve > MERGE_DUPLICATES_REQUEST_STATEMENT_BUDGET) {
         interruptionCode = 'merge_budget_reached'
