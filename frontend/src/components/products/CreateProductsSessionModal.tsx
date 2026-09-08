@@ -517,7 +517,16 @@ export default function CreateProductsSessionModal({
     if (submissionLocked) return
     setEditingLineId(null); writeDraft(); setItemFormOpen(true)
   }
-  const closeItemForm = () => { setItemFormOpen(false); setEditingLineId(null) }
+  const closeItemForm = () => {
+    setItemFormOpen(false)
+    setEditingLineId(null)
+    // ProductForm calls this only after it has cleared the exact draft/dirty
+    // entry for the current sequence (or after Discard did the same). Moving
+    // the key forward here prevents the parent from remounting a fresh keyed
+    // form while the successful save continuation is still cleaning the old
+    // one.
+    setItemFormSeq((seq) => seq + 1)
+  }
 
   function openQueuedLine(line: SessionLine) {
     // submittedItems is the exact payload whose outcome may be unknown. It is
@@ -603,7 +612,7 @@ export default function CreateProductsSessionModal({
         }
         setRows((prev) => [row, ...prev])
       }
-      setCommitError(''); setSubmissionErrorCode(''); setItemFormSeq((seq) => seq + 1)
+      setCommitError(''); setSubmissionErrorCode('')
     } catch (error) {
       throw error instanceof Error ? error : new Error(tr('failed', 'Failed'))
     } finally { setSaving(false) }

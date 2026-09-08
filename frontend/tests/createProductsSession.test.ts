@@ -441,6 +441,18 @@ runTest('only a completed session latches clean before onDone and close', () => 
   assert.doesNotMatch(modalSource.slice(itemSaveStart, itemSaveEnd), /sessionCommittedRef\.current = true/, 'saving a nested item only queues session work and must leave the outer session dirty')
 })
 
+runTest('a nested ProductForm advances its key only after its own clean close', () => {
+  const closeStart = modalSource.indexOf('  const closeItemForm = () => {')
+  const closeEnd = modalSource.indexOf('\n  }', closeStart) + 4
+  const closeItemForm = modalSource.slice(closeStart, closeEnd)
+  const saveStart = modalSource.indexOf('  const saveNewItem = async')
+  const saveEnd = modalSource.indexOf('\n  const saveEditedNewLine', saveStart)
+  const saveNewItem = modalSource.slice(saveStart, saveEnd)
+
+  assert.match(closeItemForm, /setItemFormOpen\(false\)[\s\S]*setItemFormSeq\(\(seq\) => seq \+ 1\)/, 'the ProductForm onClose callback must unmount and advance the next key after ProductForm has cleaned its current draft')
+  assert.doesNotMatch(saveNewItem, /setItemFormSeq/, 'the host save callback must not remount the keyed ProductForm before its clean-before-close continuation runs')
+})
+
 runTest('the session survives a reload, like the stock-in session draft does', () => {
   assert.match(modalSource, /scopedWorkDraftKey\('create_products_session'\)/)
   assert.match(modalSource, /scheduleWorkDraftWrite<UnifiedSessionDraft>/)
