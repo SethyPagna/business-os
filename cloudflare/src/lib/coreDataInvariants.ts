@@ -379,6 +379,8 @@ export const FACTORY_RESET_TABLES = [
   // parents, under the atomic reset guard in routes/system.ts.
   'sale_record_events',
   'return_mutation_receipts',
+  'return_create_receipts',
+  'return_create_guards',
   // Durable monetary-mutation members reference their receipts, whose history
   // parent is cleared below. Guards are transient but must not survive reset.
   'sale_mutation_members',
