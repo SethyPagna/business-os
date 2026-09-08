@@ -39,6 +39,8 @@ function executeCommonJs(filePath, output, stubs) {
 
 const permissionsPath = path.join(srcRoot, 'lib', 'permissions.ts')
 const permissions = executeCommonJs(permissionsPath, compileTs(permissionsPath), {})
+const productMergePath = path.join(srcRoot, 'lib', 'productMerge.ts')
+const productMerge = executeCommonJs(productMergePath, compileTs(productMergePath), {})
 
 function permissiveModule() {
   return new Proxy({}, {
@@ -76,6 +78,7 @@ function loadProductsRoute(state) {
     '../lib/auth': { requireAuth },
     '../lib/permissions': permissions,
     '../lib/db': { getDb: () => db },
+    '../lib/productMerge': productMerge,
     '../lib/rateLimit': {
       getClientIp: () => '127.0.0.1',
       checkRateLimit: async () => { state.rateLimitCalls++; return { allowed: true } },
