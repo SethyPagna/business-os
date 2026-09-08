@@ -375,6 +375,10 @@ export function ensureCoreDataInvariantsOnce(env: Env): Promise<CoreDataInvarian
 // by it. Confirmed with an in-memory D1-equivalent test seeded with a
 // non-default org/branch/admin before wiping these tables too.
 export const FACTORY_RESET_TABLES = [
+  // Selected-conflict cases reference their run, products, and action history.
+  // Clear children first so no request receipt survives a factory reset.
+  'product_conflict_merge_run_cases',
+  'product_conflict_merge_runs',
   // Durable monetary-mutation members reference their receipts, whose history
   // parent is cleared below. Guards are transient but must not survive reset.
   'sale_mutation_members',
@@ -462,6 +466,10 @@ export const FACTORY_RESET_TABLES = [
 // collected (image paths) or cleared before 'products' itself, since this
 // D1 schema has no FK/cascade to do it automatically.
 export const PRODUCTS_RESET_TABLES = [
+  // Product-conflict receipts cannot survive product identity reuse. Cases
+  // reference runs and products, so reset them child-first.
+  'product_conflict_merge_run_cases',
+  'product_conflict_merge_runs',
   'stock_session_members',
   'stock_session_operations',
   'stock_session_guards',

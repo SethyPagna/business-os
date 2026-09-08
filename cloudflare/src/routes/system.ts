@@ -365,6 +365,10 @@ app.post('/reset-data', async (c) => {
 
     if (mode === 'all') {
       statements.push(
+        // Durable selected-conflict receipts refer to products and history.
+        // Clear case children before parent runs and before either target.
+        { sql: 'DELETE FROM product_conflict_merge_run_cases' },
+        { sql: 'DELETE FROM product_conflict_merge_runs' },
         { sql: 'DELETE FROM product_batches' },
         { sql: 'DELETE FROM products' },
         { sql: 'DELETE FROM branch_stock' },
