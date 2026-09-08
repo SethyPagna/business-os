@@ -34,7 +34,11 @@ for (const fragment of [
   "'sales:import': false",
   "'sales:export': false",
   "'contacts:financial_history': false",
+  'contacts_suppliers: false',
 ]) assert.match(seededEmployee, new RegExp(fragment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+for (const unrelated of ['dashboard:', 'customer_portal:', 'products:', 'inventory:', 'returns:', 'contacts: \'review\'']) {
+  assert.doesNotMatch(seededEmployee, new RegExp(unrelated.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `fresh runtime Employee seed must not add unrelated ${unrelated}`)
+}
 assert.match(invariants, /if \(code === 'admin'\)/, 'only Admin may be force-reset by core invariants')
 
 console.log('PASS Employee defaults grant individual Sales work and keep bulk, export, import, and contact finance denied')
