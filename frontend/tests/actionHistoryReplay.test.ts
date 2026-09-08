@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import { stripTypeScriptTypes } from 'node:module'
 import { resolveReplayAction } from '../src/utils/actionReplay.ts'
 
 // Locks the K1 double-apply guard (resolveReplayAction): when the Worker has
@@ -22,6 +24,29 @@ async function runTest(name: string, fn: () => void | Promise<void>): Promise<vo
 
 const refresh = () => 'refreshed'
 const action = () => 'mutated'
+
+const actionHistorySource = fs.readFileSync(new URL('../src/utils/actionHistory.ts', import.meta.url), 'utf8')
+const replayRequestHelperSource = actionHistorySource.match(/export function buildServerReplayRequest[\s\S]*?\n}\n/)?.[0]
+assert.ok(replayRequestHelperSource, 'the server replay request helper is present')
+const buildServerReplayRequest = new Function(
+  `${stripTypeScriptTypes(replayRequestHelperSource.replace('export ', ''))}; return buildServerReplayRequest`,
+)() as (payload: Record<string, unknown> | undefined) => Record<string, unknown>
+
+await runTest('generation-guarded server appliers send their exact expected generation', () => {
+  for (const applier of ['product.merge.group', 'product.merge.bulk', 'sale.settlement']) {
+    assert.deepEqual(
+      buildServerReplayRequest({ applier, generation: 0 }),
+      { require_applied: true, expected_generation: 0 },
+      `${applier} keeps generation zero rather than dropping it`,
+    )
+  }
+  assert.match(actionHistorySource, /const replayRequest = buildServerReplayRequest\(payload\)/, 'Undo and Redo share the guarded request builder')
+})
+
+await runTest('unguarded and generation-less server appliers retain the existing request shape', () => {
+  assert.deepEqual(buildServerReplayRequest({ applier: 'product.merge', generation: 7 }), { require_applied: true })
+  assert.deepEqual(buildServerReplayRequest({ applier: 'product.merge.group' }), { require_applied: true })
+})
 
 await runTest('server applied + a refresh callback -> the refresh runs, not the mutating closure', () => {
   const chosen = resolveReplayAction({ serverApplied: true, refresh, action })
