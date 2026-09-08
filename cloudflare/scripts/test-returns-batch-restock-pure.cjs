@@ -128,6 +128,7 @@ let auditCalls = []
 const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
 const saleCreationSnapshotKernel = loadReal('lib/saleCreationSnapshot.ts', { './actorSnapshot': actorSnapshotKernel })
 const branchRolesKernel = loadReal('lib/branchRoles.ts')
+const anonymousCustomerKernel = loadReal('lib/anonymousCustomer.ts')
 const saleRecordsContract = {
   SALE_RECORD_KINDS: ['sale_created', 'status_changed', 'item_added', 'item_removed', 'item_quantity_changed', 'items_replaced', 'driver_changed', 'delivery_fee_changed', 'delivery_cost_changed', 'delivery_added', 'customer_changed', 'membership_changed', 'payment_changed', 'payment_settled', 'cancelled', 'legacy_sale_change'],
   SALE_RECORD_FIELDS: ['receipt_number', 'sale_status', 'items', 'total_usd', 'payment', 'delivery', 'customer', 'membership', 'item', 'quantity', 'removed_items', 'added_items', 'delivery_fee_usd', 'actual_delivery_cost_usd', 'is_delivery', 'driver', 'payment_method', 'payment_details', 'amount_paid_usd', 'amount_paid_khr', 'change_usd', 'change_khr', 'cancel_reason', 'cancel_note'],
@@ -153,7 +154,7 @@ const returnsRoute = loadReal('routes/returns.ts', {
   // N21: the display-address kernel, REAL. A stub resolves every address to
   // undefined and would make the assertion below agree with itself.
   '../lib/contactOptions': loadReal('lib/contactOptions.ts'),
-  '../lib/anonymousCustomer': loadReal('lib/anonymousCustomer.ts'),
+  '../lib/anonymousCustomer': anonymousCustomerKernel,
   '../lib/db': { getDb: () => db },
   // routes/returns.ts buckets return dates in UTC+7 through the pure
   // businessDateWindow helpers; provide the real module so its date SQL resolves.
@@ -1226,6 +1227,80 @@ async function main() {
     assert.strictEqual(plain.status, 200, JSON.stringify(plain.json))
     const plainRow = rawDb.prepare('SELECT customer_address FROM sales WHERE id = ?').get([plain.json.replacementSaleId])
     assert.strictEqual(plainRow.customer_address, '271', 'a numeric house number is an address, not swallowed JSON')
+  })
+
+  await check('replacement sale canonicalizes a marked anonymous source while preserving the return snapshot', async () => {
+    seed()
+    rawDb.prepare("INSERT OR REPLACE INTO customers(id,name,phone,membership_number,is_anonymous) VALUES(7001,'General','', 'LC-07001',1)").run()
+    rawDb.prepare("UPDATE sales SET customer_id=7001,customer_name='General',customer_phone='',customer_address='Walk-in' WHERE id=1").run()
+    rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity) VALUES(1,1,1,'Widget',1)").run()
+    rawDb.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(2,1,2)').run()
+    rawDb.prepare('UPDATE products SET stock_quantity=2 WHERE id=2').run()
+    const created = await reqExact('POST', '/', {
+      client_request_id: 'return-create-anonymous-source', return_number: 'RET-ANON', sale_id: 1,
+      customer_id: 7001, customer_name: 'General', reason: 'Exchange',
+      items: [{ sale_item_id: 1, product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1 }],
+      replacement_items: [{ product_id: 2, quantity: 1, branch_id: 1, applied_price_usd: 10 }],
+    })
+    assert.strictEqual(created.status, 200, JSON.stringify(created.json))
+    const returned = rawDb.prepare('SELECT customer_id,customer_name FROM returns WHERE id=?').get([created.json.id])
+    assert.strictEqual(returned.customer_id, 7001, 'the return keeps the source sale identity as historical evidence')
+    assert.strictEqual(returned.customer_name, 'General')
+    const replacement = rawDb.prepare(`SELECT customer_id,customer_name,customer_phone,customer_address,creation_snapshot_json
+      FROM sales WHERE id=?`).get([created.json.replacementSaleId])
+    assert.strictEqual(replacement.customer_id, null)
+    assert.strictEqual(replacement.customer_name, null)
+    assert.strictEqual(replacement.customer_phone, null)
+    assert.strictEqual(replacement.customer_address, null)
+    assert.strictEqual(JSON.parse(replacement.creation_snapshot_json).customer, null)
+  })
+
+  await check('replacement create freezes the customer marker and membership before its atomic batch', async () => {
+    seed()
+    rawDb.prepare("INSERT OR REPLACE INTO customers(id,name,phone,membership_number,is_anonymous) VALUES(7002,'Real Customer','012345678','LC-07002',0)").run()
+    rawDb.prepare("UPDATE sales SET customer_id=7002,customer_name='Real Customer',customer_phone='012345678' WHERE id=1").run()
+    rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity) VALUES(1,1,1,'Widget',1)").run()
+    rawDb.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(2,1,2)').run()
+    rawDb.prepare('UPDATE products SET stock_quantity=2 WHERE id=2').run()
+    beforeBatchHook = async () => {
+      rawDb.prepare("UPDATE customers SET is_anonymous=1,membership_number='LC-CHANGED' WHERE id=7002").run()
+    }
+    const raced = await reqExact('POST', '/', {
+      client_request_id: 'return-create-customer-marker-race', return_number: 'RET-CUSTOMER-RACE', sale_id: 1,
+      reason: 'Exchange',
+      items: [{ sale_item_id: 1, product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1 }],
+      replacement_items: [{ product_id: 2, quantity: 1, branch_id: 1, applied_price_usd: 10 }],
+    })
+    assert.strictEqual(raced.status, 409, JSON.stringify(raced.json))
+    assert.strictEqual(raced.json.code, 'write_conflict')
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM returns').get().n, 0)
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM sales').get().n, 1)
+    assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id=2 AND branch_id=1').get().quantity, 2)
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM return_create_receipts').get().n, 0)
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM return_create_guards').get().n, 0)
+  })
+
+  await check('replacement create freezes product prices used by its sale snapshot before the atomic batch', async () => {
+    seed()
+    rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity) VALUES(1,1,1,'Widget',1)").run()
+    rawDb.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(2,1,2)').run()
+    rawDb.prepare('UPDATE products SET stock_quantity=2,selling_price_usd=10 WHERE id=2').run()
+    beforeBatchHook = async () => {
+      rawDb.prepare('UPDATE products SET selling_price_usd=99 WHERE id=2').run()
+    }
+    const raced = await reqExact('POST', '/', {
+      client_request_id: 'return-create-product-price-race', return_number: 'RET-PRODUCT-RACE', sale_id: 1,
+      reason: 'Exchange',
+      items: [{ sale_item_id: 1, product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1 }],
+      replacement_items: [{ product_id: 2, quantity: 1, branch_id: 1 }],
+    })
+    assert.strictEqual(raced.status, 409, JSON.stringify(raced.json))
+    assert.strictEqual(raced.json.code, 'write_conflict')
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM returns').get().n, 0)
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM sales').get().n, 1)
+    assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id=2 AND branch_id=1').get().quantity, 2)
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM return_create_receipts').get().n, 0)
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM return_create_guards').get().n, 0)
   })
 
   await check('return-create receipt freezes the exact response and rejects changed-body reuse after mutable database changes', async () => {
