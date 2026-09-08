@@ -25,12 +25,13 @@ const routeSource = readFileSync(new URL('../../cloudflare/src/routes/files.ts',
 const transportSource = readFileSync(new URL('../src/api/fileTransport.ts', import.meta.url), 'utf8')
 const pageSource = readFileSync(new URL('../src/components/files/FilesPage.tsx', import.meta.url), 'utf8')
 
-runTest('8.1: the usage drill-in names every reference kind and stays read-open', () => {
+runTest('8.1/F57: the usage drill-in names every protected reference kind and stays read-open', () => {
   assert.match(routeSource, /app\.get\('\/:id\/usage'/)
   // named rows for each reference kind the counts already summarize
   assert.match(routeSource, /SELECT id, name, barcode FROM products WHERE image_path = @path/)
   assert.match(routeSource, /FROM product_images pi LEFT JOIN products p ON p\.id = pi\.product_id/)
   assert.match(routeSource, /SELECT id, name, username FROM users WHERE avatar_path = @path/)
+  assert.match(routeSource, /SELECT id, title, is_active FROM promotions WHERE image_path = @path/)
   // settings keys are reported (and later skipped by rewire), never guessed
   assert.match(routeSource, /settings: settingKeys/)
 })
@@ -53,20 +54,27 @@ runTest('8.1: rewire is full-access, image-to-image, duplicate-safe, and skips s
 runTest('8.1: the transport surfaces both endpoints without an offline mirage', () => {
   assert.match(transportSource, /export async function getFileUsage/)
   assert.match(transportSource, /File usage is unavailable/)
+  assert.match(transportSource, /promotions\?: Array<\{ id: number; title: string \| null; is_active: number \| null \}>/)
   assert.match(transportSource, /export function rewireFileAsset/)
   assert.match(transportSource, /to_file_id: Number\(toFileId\)/)
 })
 
-runTest('8.1: the details modal shows named usage and gates rewire on Full Access', () => {
+runTest('8.1/F57: the details modal shows promotions as protected, not rewritable, usage', () => {
   // the click-through modal fetches usage on open and renders each kind
   assert.match(pageSource, /filesApi\.getFileUsage\(asset\.id\)/)
   assert.match(pageSource, /Product cover \(/)
   assert.match(pageSource, /Product gallery \(/)
   assert.match(pageSource, /User avatar \(/)
+  assert.match(pageSource, /const promotionReferences = usage\?\.promotions \|\| \[\]/)
+  assert.match(pageSource, /promotionReferences\.length > 0/)
+  assert.match(pageSource, /promotionReferences\.map/)
+  assert.match(pageSource, /Number\(row\.is_active\) === 0/)
+  assert.match(pageSource, /if \(usage\.promotions\) parts\.push/)
   assert.match(pageSource, /rewire skips these/)
   // rewire only for managers, only for images, never against itself
   assert.match(pageSource, /canManage && asset\.media_type === 'image'/)
   assert.match(pageSource, /String\(row\.id\) === String\(asset\.id\)\) return false/)
+  assert.match(pageSource, /const referenceCount = usage \? usage\.covers\.length \+ usage\.gallery\.length \+ usage\.avatars\.length : 0/)
   // the page passes the real gate + refresh through
   assert.match(pageSource, /canManage=\{canManageLibrary\}/)
   assert.match(pageSource, /onRewired=\{\(\) => \{ void loadFiles\(\) \}\}/)

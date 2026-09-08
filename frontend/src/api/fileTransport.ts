@@ -258,13 +258,14 @@ export function deleteFileAsset(id: string | number, payload: Record<string, unk
 // comment), so this never breaks an existing product image, avatar, or
 // portal-setting reference to the file.
 // 8.1 (Part 418): the drill-in behind the list's usage counts -- which
-// products/gallery rows/avatars/settings reference this asset, by name.
+// products/gallery rows/avatars/promotions/settings reference this asset, by name.
 export type FileUsageDetail = {
   id: number
   public_path: string
   covers: Array<{ id: number; name: string | null; barcode: string | null }>
   gallery: Array<{ product_id: number; name: string | null; sort_order: number | null }>
   avatars: Array<{ id: number; name: string | null; username: string | null }>
+  promotions?: Array<{ id: number; title: string | null; is_active: number | null }>
   settings: string[]
 }
 
