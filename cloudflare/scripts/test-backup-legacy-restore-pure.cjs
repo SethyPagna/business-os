@@ -120,7 +120,7 @@ async function main() {
     f.sql.prepare(`INSERT INTO sale_record_events(
       id,sale_id,source_kind,source_id,generation,kind,via,actor_id,actor_username,occurred_at,changes_json
     ) VALUES(?,?,?,?,?,?,?,?,?,?,?)`).run(
-      'record-event-fixture', 1, 'sale_settlement', 'mutation-fixture', 0,
+      '00000000-0000-4000-8000-000000000001', 1, 'sale_settlement', 'mutation-fixture', 0,
       'payment_settled', 'apply', 1, 'synthetic-review', '2026-09-08T00:00:00.000Z',
       JSON.stringify([{ field: 'payment_method', before: { state: 'known_value', value: 'Credit' }, after: { state: 'known_value', value: 'Cash' } }]),
     )
@@ -168,6 +168,20 @@ async function main() {
     const operations = f.sql.prepare('SELECT * FROM sale_bulk_operations ORDER BY request_id').all()
     assert.equal((await bulk.replay(f, operations[0].history_id, 'undo', 0)).status, 200)
     assert.equal((await bulk.replay(f, operations[1].history_id, 'redo', 1)).status, 200)
+    const replayBundleTables = backup.BACKUP_TABLES.filter(table => backup.SALE_REPLAY_RESTORE_BUNDLE.includes(table))
+    const replayBundleBefore = snap(replayBundleTables)
+    const scopedCreated = await backup.createSectionBackup(f.env, ['products', 'sales', 'sale_record_events'], 'manual')
+    const scopedDocument = JSON.parse(f.env.ASSETS._store.get(scopedCreated.key).body)
+    assert.deepEqual(Object.keys(scopedDocument.tables), replayBundleTables,
+      'requesting any Sales replay table widens the generated section backup to the complete restorable bundle')
+    assert.equal((await backup.validateCloudflareBackup(f.env, scopedCreated.key)).restorable, true)
+    f.sql.exec(`INSERT INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore"}')`)
+    await backup.restoreCloudflareBackup(f.env, scopedCreated.key)
+    f.sql.exec("DELETE FROM system_flags WHERE key='maintenance'")
+    assert.deepEqual(snap(replayBundleTables), replayBundleBefore)
+    assert.deepEqual(f.sql.pragma('foreign_key_check'), [])
+    console.log('PASS generated Sales reset backup widens to the complete replay bundle and restores FK-on')
+
     console.log(`PASS actual FK-on streaming full ${backup.BACKUP_TABLES.length}-table roundtrip, Sales Records/sale/Returns/stock/conflict replay tables, and restored-generation undo/redo`)
 
     const pre0127 = structuredClone(document)

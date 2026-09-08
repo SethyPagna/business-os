@@ -229,7 +229,7 @@ function seed() {
   rawDbHandle.prepare('INSERT INTO sales (id, branch_id) VALUES (1, 1)').run()
   rawDbHandle.prepare(`INSERT INTO sale_record_events(
     id,sale_id,source_kind,source_id,generation,kind,via,occurred_at,changes_json
-  ) VALUES('reset-event',1,'sale_status','actor:1:request:reset-fixture',0,'status_changed','apply','2026-09-08T00:00:00.000Z',?)`)
+  ) VALUES('00000000-0000-4000-8000-000000000002',1,'sale_status','actor:1:request:reset-fixture',0,'status_changed','apply','2026-09-08T00:00:00.000Z',?)`)
     .run([JSON.stringify([{ field: 'sale_status', before: { state: 'known_value', value: 'completed' }, after: { state: 'known_value', value: 'returned' } }])])
   rawDbHandle.prepare("INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity, applied_price_usd, batch_id) VALUES (1, 1, 1, 'Eye Shadow Palette', 2, 12.5, 1)").run()
   rawDbHandle.prepare("INSERT INTO returns (id, sale_id, branch_id) VALUES (1, 1, 1)").run()
@@ -331,7 +331,7 @@ async function main() {
   // that misses a table the reset then clears is a backup that cannot undo
   // the reset it was taken for. The route derives both lists from one
   // array precisely so these two can never drift.
-  await check('mode=products backs up EXACTLY the tables it is about to clear -- no table is deleted without being backed up first', async () => {
+  await check('mode=products backs up every table it clears, plus any required restore dependencies', async () => {
     for (const toggles of [{}, { includeMovements: true }, { includeSales: true }, { includeMovements: true, includeSales: true }]) {
       seed()
       const before = new Map()

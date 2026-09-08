@@ -790,12 +790,12 @@ async function writeBackupDocument(
 // cannot safely replace a newer live database. Same manifest format/prefix
 // as a full backup, so it still lists in `listCloudflareBackups`.
 //
-// The caller is responsible for passing EVERY table its reset will delete:
-// a scoped backup that misses one is a backup that cannot undo the reset
-// it was taken for. routes/system.ts derives both lists from the same
-// place for exactly that reason.
+// The caller is responsible for passing EVERY table its reset will delete.
+// When any sales/replay table is requested, the section is widened to the
+// complete restore bundle because those application-level generation links
+// cannot be restored independently. The reset's delete scope remains narrow.
 export async function createSectionBackup(env: Env, tables: readonly string[], source: 'manual' | 'scheduled' = 'manual') {
-  const requested = new Set(tables)
+  const requested = restoreSafeSectionTables(tables)
   const ordered = BACKUP_TABLES.filter((table) => requested.has(table))
   return writeBackupDocument(env, { tables: ordered, includeAssets: false, source })
 }
@@ -1078,7 +1078,7 @@ export type RestoreProgress = { phase: 'deleting' | 'inserting' | 'assets'; tabl
 // Replay snapshots and revision counters have application-level links that
 // SQLite FKs cannot express. Restoring their sales/stock independently can
 // leave a valid-looking undo action pointing at a different generation.
-const SALE_REPLAY_RESTORE_BUNDLE = [
+export const SALE_REPLAY_RESTORE_BUNDLE = [
   'branches', 'suppliers', 'file_assets', 'product_images',
   'products', 'product_batches', 'branch_stock', 'branch_batch_stock', 'damaged_stock_lots',
   'sales', 'sale_items', 'sale_item_batch_allocations', 'returns', 'return_items',
@@ -1089,6 +1089,14 @@ const SALE_REPLAY_RESTORE_BUNDLE = [
   'sale_record_events',
   'stock_session_revisions', 'stock_session_operations', 'stock_session_members',
 ] as const
+
+function restoreSafeSectionTables(tables: readonly string[]): Set<string> {
+  const requested = new Set(tables)
+  if (SALE_REPLAY_RESTORE_BUNDLE.some((table) => requested.has(table))) {
+    for (const table of SALE_REPLAY_RESTORE_BUNDLE) requested.add(table)
+  }
+  return requested
+}
 
 async function restoreDependencyError(env: Env, documentTables: ReadonlySet<string>): Promise<string | null> {
   const liveTables = new Set<string>()
