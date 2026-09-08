@@ -307,11 +307,11 @@ async function run() {
   for(const invalid of [null,[],{...valid,items:[]},{...valid,items:[...valid.items,...valid.items]},{...valid,payment_method:'Cash'},{...valid,cancel_fee_usd:1},{...valid,skip_stock:'true'},{...valid,items:Array.from({length:26},(_,i)=>({...valid.items[0],id:i+1}))}]) {
     const before=snapshot(f);assert.equal((await f.call(sales,'/bulk-status',invalid)).status,400);assert.equal(snapshot(f),before)
   }
-  for(const permissions of [{pos:true},{sales:'view'},{sales:'review'},{sales:true,'sales:status':false}]) {
+  for(const permissions of [{pos:true},{sales:'view'},{sales:'review'},{sales:true,'sales:status':true,'sales:bulk':false}]) {
     user={id:2,name:'Limited',role_code:'user',permissions:JSON.stringify(permissions)}
     assert.equal((await f.call(sales,'/bulk-status',valid)).status,403)
   }
-  user={id:2,name:'Sales',role_code:'user',permissions:JSON.stringify({sales:true})}
+  user={id:2,name:'Sales bulk operator',role_code:'user',permissions:JSON.stringify({sales:true,'sales:bulk':true})}
   assert.equal((await f.call(sales,'/bulk-status',{...valid,skip_stock:true})).status,403)
   const owned=await f.call(sales,'/bulk-status',valid);assert.equal(owned.status,200)
   h=owned.body.actionHistoryId
