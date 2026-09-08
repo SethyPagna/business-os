@@ -61,6 +61,7 @@ import { useCloseGuard } from '../../utils/useCloseGuard.ts'
 import { contactDisplayAddress } from '../contacts/contactOptionUtils.ts'
 import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 import { saleRecordsCount } from '../../utils/saleRecords.ts'
+import { isAnonymousCustomerIdentity } from '../../utils/customerIdentity.ts'
 
 type TranslateFn = (key: string) => string
 type MoneyFormatter = (value: number | string) => string
@@ -90,6 +91,7 @@ interface SaleDetail {
   updated_at?: string | null
   sale_status?: string | null
   customer_membership_number?: string | null
+  customer_is_anonymous?: number | boolean | null
   items?: SaleLineItem[] | string | null
   total_usd?: number | string | null
   total?: number | string | null
@@ -1467,9 +1469,9 @@ export default function SaleDetailModal({
               {onCustomerAction ? <div className="mb-3 flex justify-end"><button type="button" className="btn-secondary text-xs" onClick={() => onCustomerAction(sale)}>{t('sale_customer_edit_entry') || 'Edit customer'}</button></div> : null}
               <DetailRowGroup>
                 <DetailRow label={t('customer_name') || 'Customer'} value={sale.customer_name} />
-                <DetailRow label={t('phone') || 'Phone'} value={sale.customer_phone} />
+                {!isAnonymousCustomerIdentity(sale) ? <DetailRow label={t('phone') || 'Phone'} value={sale.customer_phone} /> : null}
                 <DetailRow label={t('address') || 'Address'} value={customerAddress} />
-                {onAttachMembership ? (
+                {isAnonymousCustomerIdentity(sale) ? null : onAttachMembership ? (
                   <DetailRow label={t('membership') || 'Membership'}>
                     <span data-sale-membership-row="" className="block min-w-0">
                       <span className="flex min-w-0 gap-2">
