@@ -114,7 +114,7 @@ interface FileAsset {
   canDelete?: boolean
   // Breakdown behind usageCount, so the UI can say exactly what's using a
   // locked file ("Used by 2 products") instead of a generic "in use".
-  usage?: { products?: number; gallery?: number; avatars?: number; settings?: number }
+  usage?: { products?: number; gallery?: number; avatars?: number; promotions?: number; settings?: number }
 }
 
 interface FilesResponse {
@@ -339,16 +339,17 @@ function AssetPreview({ asset, onOpenPreview }: AssetPreviewProps) {
 
 // 8.1 (Part 418): clicking an image opens DETAILS -- the full preview plus
 // what is actually USING this asset (named products/gallery rows/avatars/
-// settings keys, the drill-in behind the card's usage counts) and, for
+// promotions/settings keys, the drill-in behind the card's usage counts) and, for
 // Full Access, a rewire flow that repoints every product/avatar reference
 // to another library image. Rename/delete stay on the card.
-function AssetPreviewModal({ asset, onClose, canManage, notify, filesApi, onRewired }: {
+function AssetPreviewModal({ asset, onClose, canManage, notify, filesApi, onRewired, tr }: {
   asset: FileAsset
   onClose: () => void
   canManage: boolean
   notify: NotifyFunction
   filesApi: FilesApi
   onRewired: () => void
+  tr: TranslateWithFallback
 }) {
   const previewUrl = resolvePublicAssetUrl(asset.public_path) || asset.browser_public_path || asset.public_path
   const [usage, setUsage] = useState<FileUsageDetail | null>(null)
@@ -395,6 +396,9 @@ function AssetPreviewModal({ asset, onClose, canManage, notify, filesApi, onRewi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rewireOpen, rewireSearch])
 
+  // Promotion references protect a file but are intentionally not rewired:
+  // the promotion editor owns their replacement flow and its permissions.
+  const promotionReferences = usage?.promotions || []
   const referenceCount = usage ? usage.covers.length + usage.gallery.length + usage.avatars.length : 0
 
   const handleRewire = async () => {
@@ -429,7 +433,7 @@ function AssetPreviewModal({ asset, onClose, canManage, notify, filesApi, onRewi
             <div className="text-xs font-medium text-red-500">{usageError}</div>
           ) : !usage ? (
             <div className="text-xs text-slate-400">Loading usage…</div>
-          ) : referenceCount === 0 && usage.settings.length === 0 ? (
+          ) : referenceCount === 0 && promotionReferences.length === 0 && usage.settings.length === 0 ? (
             <div className="text-xs text-slate-400">Not used anywhere — safe to delete from the card.</div>
           ) : (
             <div className="space-y-2">
@@ -459,6 +463,19 @@ function AssetPreviewModal({ asset, onClose, canManage, notify, filesApi, onRewi
                   <ul className="mt-0.5 space-y-0.5 text-xs text-slate-500 dark:text-slate-400">
                     {usage.avatars.map((row) => (
                       <li key={`avatar-${row.id}`} className="truncate">{row.name || row.username || `user #${row.id}`}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              {promotionReferences.length > 0 ? (
+                <div>
+                  <div className="text-xs font-medium text-slate-600 dark:text-slate-300">{tr('promotions', 'Promotions', 'ប្រូម៉ូសិន')} ({promotionReferences.length})</div>
+                  <ul className="mt-0.5 space-y-0.5 text-xs text-slate-500 dark:text-slate-400">
+                    {promotionReferences.map((row) => (
+                      <li key={`promotion-${row.id}`} className="truncate">
+                        {row.title || `${tr('promotion', 'promotion', 'ប្រូម៉ូសិន')} #${row.id}`}
+                        {' · '}{Number(row.is_active) === 0 ? tr('inactive', 'Inactive', 'អសកម្ម') : tr('active', 'Active', 'សកម្ម')}
+                      </li>
                     ))}
                   </ul>
                 </div>
@@ -1117,6 +1134,7 @@ export default function FilesPage() {
     if (usage.products) parts.push(`${usage.products} product${usage.products === 1 ? '' : 's'}`)
     if (usage.gallery) parts.push(`${usage.gallery} product image${usage.gallery === 1 ? '' : 's'}`)
     if (usage.avatars) parts.push(`${usage.avatars} user avatar${usage.avatars === 1 ? '' : 's'}`)
+    if (usage.promotions) parts.push(`${usage.promotions} ${tr(usage.promotions === 1 ? 'promotion' : 'promotions', usage.promotions === 1 ? 'promotion' : 'promotions', 'ប្រូម៉ូសិន')}`)
     if (usage.settings) parts.push('a business/portal setting')
     if (!parts.length) return tr('file_in_use', 'This file is still in use.')
     return `${tr('used_by', 'Used by')} ${parts.join(', ')}`
@@ -1792,6 +1810,7 @@ export default function FilesPage() {
           notify={notify}
           filesApi={filesApi}
           onRewired={() => { void loadFiles() }}
+          tr={tr}
         />
       ) : null}
 
