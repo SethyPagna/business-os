@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
 const salesSurface = readFileSync(new URL('../src/components/sales/SalesListSurface.tsx', import.meta.url), 'utf8')
+const statusBadge = readFileSync(new URL('../src/components/sales/StatusBadge.tsx', import.meta.url), 'utf8')
 const salesPage = readFileSync(new URL('../src/components/sales/Sales.tsx', import.meta.url), 'utf8')
 const detail = readFileSync(new URL('../src/components/sales/SaleDetailModal.tsx', import.meta.url), 'utf8')
 const reports = readFileSync(new URL('../src/components/sales/ReportsHub.tsx', import.meta.url), 'utf8')
@@ -10,6 +11,8 @@ const customers = readFileSync(new URL('../src/components/contacts/CustomersTab.
 const suppliers = readFileSync(new URL('../src/components/contacts/SuppliersTab.tsx', import.meta.url), 'utf8')
 const delivery = readFileSync(new URL('../src/components/contacts/DeliveryTab.tsx', import.meta.url), 'utf8')
 const promotions = readFileSync(new URL('../src/components/promotions/PromotionsPage.tsx', import.meta.url), 'utf8')
+const en = JSON.parse(readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8'))
+const km = JSON.parse(readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8'))
 
 // N23: the surface key and the column list moved into salesListColumns.ts, and
 // the key was bumped once so a preference written before the Driver column
@@ -39,6 +42,29 @@ assert.match(salesSurface, /border-collapse text-xs/)
 assert.match(salesSurface, /setDetailSale\(sale\)/)
 assert.match(salesSurface, /flex flex-nowrap items-center justify-end/)
 assert.match(salesSurface, /space-y-2 md:hidden/, 'sales mobile cards remain separate from the dense desktop table through tablet widths')
+
+// U17 keeps translations as source data, but removes their decorative prefixes
+// only in the compact status badge. Both English and Khmer retain plain text.
+assert.match(statusBadge, /STATUS_DECORATION_PREFIX = \/\^\[⏳🚚↩️\\s\]\+\/u/)
+assert.match(statusBadge, /getStatusBadgeLabel\(s, t\)/)
+for (const translations of [en, km]) {
+  for (const key of ['status_awaiting_payment', 'status_awaiting_delivery', 'status_partial_return', 'status_returned']) {
+    const label = translations[key].replace(/^[⏳🚚↩️\s]+/u, '').trim()
+    assert.ok(label.length > 0, `${key} has concise visible text`)
+    assert.doesNotMatch(label, /^[⏳🚚↩️]/u, `${key} badge text omits its decorative icon`)
+  }
+}
+assert.match(statusBadge, /awaiting_payment: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900\/40 dark:text-yellow-200'/)
+assert.match(statusBadge, /awaiting_delivery: 'bg-blue-100 text-blue-800 dark:bg-blue-900\/40 dark:text-blue-200'/)
+assert.match(statusBadge, /partial_return: 'bg-blue-100 text-blue-800 dark:bg-blue-900\/40 dark:text-blue-200'/)
+assert.match(statusBadge, /returned: 'bg-blue-200 text-blue-900 dark:bg-blue-900\/60 dark:text-blue-100'/)
+
+// The print action shares the narrow terminal column with the column chooser;
+// mobile keeps its separate card layout below md.
+assert.match(salesSurface, /const columnCount = 8 \+ cols\.visibleCount/)
+assert.doesNotMatch(salesSurface, /t\('actions'\) \|\| 'Actions'/)
+assert.match(salesSurface, /<th className="w-10 px-1 py-2 text-right">\s*<ColumnChooser className="hidden lg:inline-block"/)
+assert.match(salesSurface, /<td className="w-10 px-1 py-1\.5 text-right"[\s\S]*?<Printer className="h-3\.5 w-3\.5"/)
 assert.doesNotMatch(salesPage, /CurrentShiftSummary/, 'the full current-shift block no longer occupies the space above sales stats')
 assert.equal((salesPage.match(/<ShiftHistoryModal/g) || []).length, 1, 'the compact header exposes one Shift action')
 assert.match(salesPage, /rangeActions=\{\([\s\S]*?<ShiftHistoryModal[\s\S]*?<SectionExportAction>/, 'Shift and export stay together in the responsive stats-header actions')
