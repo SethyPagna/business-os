@@ -38,6 +38,18 @@ test('selected merge partitions candidates before requesting one combined previe
   assert.match(src, /<SelectedConflictMergeReviewModal/, 'all eligible pairs share one before/after review')
 })
 
+test('N-row selections can open one durable paged review without replacing the legacy pair merge', () => {
+  assert.match(src, /buildSelectedConflictGroupReviewRequest\(targets, createClientRequestId\('product-conflict-group-review'\)\)/)
+  assert.match(src, /createSelectedConflictGroupReview\(body, \{ signal: request\.signal \}\)/)
+  assert.match(src, /setGroupReviewPages\(\[review\]\)/)
+  assert.match(src, /getSelectedConflictGroupReviewPage\(current\.review_id, cursor, SELECTED_CONFLICT_GROUP_REVIEW_PAGE_LIMIT/)
+  assert.match(src, /next\.draft_digest === current\.draft_digest[\s\S]*next\.page\.cursor !== cursor/, 'a mismatched page cannot be joined to a different or changed review')
+  assert.match(src, /<SelectedConflictGroupReviewModal/)
+  assert.match(src, /selected_conflict_group_review_action/)
+  assert.match(src, /selected_conflict_merge_exact_pairs/, 'the existing pair-only write remains separately available')
+  assert.match(src, /groupReviewRequestRef[\s\S]*batchRequestRef/, 'read-only paging and legacy writes have independent cancellation ownership')
+})
+
 test('dismiss remains sequential while merge uses the atomic batch continuation contract', () => {
   assert.match(src, /bulk_dismissing_progress/)
   assert.match(src, /catch \{\s*\n\s*failed \+= 1/, 'one failed cluster must not abort the rest')
