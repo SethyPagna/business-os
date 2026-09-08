@@ -383,3 +383,13 @@ body[data-public-portal='true'] :focus-visible,
     transform: none !important;
   }
 }
+
+/* Product copy needs an opaque reading surface, including over dark cards. */
+.portal-product-detail-surface {
+  background-color: #fff !important;
+}
+.dark [data-portal-root='true'] .portal-product-detail-surface,
+[data-portal-root='true'].dark .portal-product-detail-surface,
+.dark .portal-product-detail-surface {
+  background-color: #171717 !important;
+}
