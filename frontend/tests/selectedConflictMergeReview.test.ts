@@ -42,7 +42,7 @@ assert.match(source, /export function SelectedConflictGroupReviewModal/, 'the N-
 for (const field of ['barcode', 'category', 'brand', 'unit']) {
   assert.match(source, new RegExp(`field="${field}_source_id"`), `the resolved ${field} must come from an explicit member source`)
 }
-for (const field of ['supplier_name', 'received_at', 'expiry_date', 'lot_code', 'batch_key']) {
+for (const field of ['supplier_name', 'received_at', 'expiry_date', 'lot_code', 'batch_key', 'received_quantity', 'received_cost_usd', 'unit_cost_usd', 'payment_status', 'credit_due_date']) {
   assert.ok(source.includes(field), `member lot history must expose ${field}`)
 }
 assert.match(source, /group\.stock\.rows\.filter\(\(row\) => row\.product_id === member\.id\)/, 'before stock stays attributed to each member')
