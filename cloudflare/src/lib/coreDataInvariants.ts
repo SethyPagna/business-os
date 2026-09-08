@@ -378,6 +378,7 @@ export const FACTORY_RESET_TABLES = [
   // Immutable Sales Records must be cleared before their sales/receipt
   // parents, under the atomic reset guard in routes/system.ts.
   'sale_record_events',
+  'return_mutation_receipts',
   // Durable monetary-mutation members reference their receipts, whose history
   // parent is cleared below. Guards are transient but must not survive reset.
   'sale_mutation_members',
