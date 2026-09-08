@@ -3,8 +3,8 @@
 // mobile, multiple calculation options).
 //
 // One control row drives every view, and since Part 586 it holds exactly
-// four things: the search box · the View picker · the Start→End date/time
-// range · one Filters menu. Everything that used to compete with the search
+// three things: the search box · the Start→End date/time range · one Filters
+// menu. The permission-scoped View picker and everything else that used to compete with the search
 // box for that row -- a separate Filters fold, the Excel/Receipt style
 // toggle, an Options button and an OverflowMenu -- is inside that one menu
 // now (user: "make sure the search is shown, the various options into
@@ -62,16 +62,13 @@ import {
 } from './reports/reportModel.ts'
 import type { DrillPatch, ReportViewProps } from './reports/reportTypes.ts'
 
-type ReportsHubAppUser = { username?: unknown; role_code?: unknown; permissions?: unknown } | null
 type ReportsHubAppContext = {
   t: (key: string) => string | undefined
   fmtUSD: (value: number | string) => string
   fmtKHR: (value: number | string) => string
   khrToUsd: (value: unknown) => number
   usdToKhr: (value: unknown) => number
-  displayCurrency: string
   getPermissionTier: (key: string) => string
-  user: ReportsHubAppUser
   settings?: { pos_payment_methods?: unknown }
 }
 const useApp = useAppHook as unknown as () => ReportsHubAppContext
@@ -116,28 +113,10 @@ export function parsePaymentMethods(raw: unknown): string[] {
 // SalesHubPage still passes the compatibility `embedded` prop. Layout no
 // longer branches on it: the gutter is unconditional in reports-surface.css.
 export default function ReportsHub(_props: { embedded?: boolean } = {}) {
-  const { t, fmtUSD, fmtKHR, khrToUsd, usdToKhr, displayCurrency, getPermissionTier, user, settings } = useApp()
+  const { t, fmtUSD, fmtKHR, khrToUsd, usdToKhr, getPermissionTier, settings } = useApp()
   const trh = useCallback((key: string, fallback: string): string => { const v = t(key); return v && v !== key ? v : fallback }, [t])
   const tStr = useCallback((key: string): string => { const v = t(key); return v == null ? key : v }, [t])
   const compact = useIsCompactViewport()
-
-  // Decorative only -- which hint text the export choice shows and whether
-  // the Options fold offers the profit group. The real admin gate is
-  // server-side (routes/reports.ts strips cost/profit for non-admins); a
-  // stale read here can at most show the wrong HINT, never leak cost data.
-  const isAdminHint = useMemo(() => {
-    const roleCode = String(user?.role_code || '').toLowerCase()
-    const username = String(user?.username || '').toLowerCase()
-    let permissions: Record<string, unknown> = {}
-    try {
-      permissions = typeof user?.permissions === 'string'
-        ? JSON.parse(user.permissions || '{}') as Record<string, unknown>
-        : (user?.permissions && typeof user.permissions === 'object' ? user.permissions as Record<string, unknown> : {})
-    } catch {
-      permissions = {}
-    }
-    return username === 'admin' || roleCode === 'admin' || !!permissions.all
-  }, [user])
 
   const canSales = getPermissionTier('sales') !== 'none'
   const canReturns = getPermissionTier('returns') !== 'none'
@@ -235,8 +214,8 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
   // Display-only money formatter: the raw usd+khr amounts stay the single
   // source of truth; the Currency option only changes how they're shown.
   const fmtMoney = useMemo(
-    () => makeReportMoneyFormatter({ displayCurrency: options.currency === 'setting' ? displayCurrency : options.currency, fmtUSD, fmtKHR, khrToUsd, usdToKhr }),
-    [options.currency, displayCurrency, fmtUSD, fmtKHR, khrToUsd, usdToKhr],
+    () => makeReportMoneyFormatter({ displayCurrency: options.currency, fmtUSD, fmtKHR, khrToUsd, usdToKhr }),
+    [options.currency, fmtUSD, fmtKHR, khrToUsd, usdToKhr],
   )
   const khrToUsdNum = useCallback((khr: number) => Number(khrToUsd(khr)) || 0, [khrToUsd])
 
@@ -284,22 +263,11 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
       options={views.map((v) => ({ value: v.id, label: trh(v.labelKey, v.fallback) }))}
       onChange={(value) => { if (isReportViewId(value)) setViewId(value) }}
       ariaLabel={trh('view', 'View')}
-      buttonClassName={compact ? 'h-7 min-w-0 max-w-[10rem] py-0 px-2 text-[11px]' : 'min-h-10 min-w-[10rem] py-1 px-2 text-sm'}
+      buttonClassName="h-8 w-full min-w-0 py-0 px-2 text-[12px]"
       showChevron
     />
   )
-  // The picker rides the SEARCH slot at every tier, not just when compact.
-  // ControlRow always renders the search slot, so putting it here makes
-  // "the picker is never dropped" structural instead of a per-tier rule --
-  // and on the four views that have no text search it stops ControlRow's
-  // `flex-1` search cell from collapsing to a dead gap that shoved the rest
-  // of the row against the right edge.
-  const searchSlot = (
-    <div className="flex min-w-0 items-center gap-1.5">
-      {searchInput ? <div className="min-w-[9rem] flex-1 sm:max-w-[22rem]">{searchInput}</div> : null}
-      {viewPicker}
-    </div>
-  )
+  const searchSlot = searchInput ? <div className="min-w-[9rem] flex-1 sm:max-w-[22rem]">{searchInput}</div> : null
 
   const filterSelects = (
     <>
@@ -309,10 +277,11 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
     </>
   )
   const hasFilterControls = branches.length > 0 || supportsSaleFilters
-  const optionsAreDefault = JSON.stringify({ ...options, granularity: 'day' }) === JSON.stringify({ ...DEFAULT_REPORT_OPTIONS, granularity: 'day' })
+  const optionsAreDefault = options.currency === DEFAULT_REPORT_OPTIONS.currency
+  const styleIsDefault = styleChoice == null
   // The badge counts everything the menu now owns, so a person can see at a
   // glance that a non-default basis/currency is in force without opening it.
-  const menuCount = activeFilterCount + (optionsAreDefault ? 0 : 1)
+  const menuCount = activeFilterCount + (optionsAreDefault ? 0 : 1) + (styleIsDefault ? 0 : 1)
   const filtersLabel = `${trh('filters', 'Filters')}${menuCount ? ` · ${menuCount}` : ''}`
   const filtersButton = (
     <span ref={(el) => { optionsAnchor.current = el }}>
@@ -320,11 +289,12 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
         <IconButton
           label={filtersLabel}
           icon={<Filter className="h-3.5 w-3.5" />}
-          variant={menuCount ? 'primary' : 'secondary'}
+          variant="secondary"
+          className="reports-filter-trigger"
           onClick={() => setOptionsOpen((o) => !o)}
         />
       ) : (
-        <Button size="sm" variant={menuCount ? 'primary' : 'secondary'} icon={<Filter className="h-3.5 w-3.5" />} onClick={() => setOptionsOpen((o) => !o)}>
+        <Button size="sm" variant="secondary" className="reports-filter-trigger" icon={<Filter className="h-3.5 w-3.5" />} onClick={() => setOptionsOpen((o) => !o)}>
           {filtersLabel}
         </Button>
       )}
@@ -425,7 +395,7 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
       {compact ? (controlsFolded ? foldedControls : (
         <section className="reports-mobile-controls" aria-label={trh('filters', 'Report filters')}>
           {searchInput}
-          <div className="reports-mobile-primary">{viewPicker}{rangePicker}</div>
+          <div className="reports-mobile-primary">{rangePicker}</div>
           {presetControls}
           <div className="reports-mobile-actions">
             {filtersButton}
@@ -449,10 +419,9 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
         anchorRef={optionsAnchor}
         options={options}
         onChange={onOptionsChange}
-        onReset={() => { clearFilters(); setOptions({ ...DEFAULT_REPORT_OPTIONS, granularity: options.granularity }) }}
+        onReset={() => { clearFilters(); setStyleChoice(null); setOptions({ ...DEFAULT_REPORT_OPTIONS, granularity: options.granularity }) }}
         tr={trh}
-        showProfit={isAdminHint}
-        showExpenses={canFees}
+        viewControl={viewPicker}
         filterControls={hasFilterControls ? filterSelects : null}
         style={style}
         onStyleChange={setStyleChoice}

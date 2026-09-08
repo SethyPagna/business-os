@@ -39,7 +39,7 @@ assert.match(segment, /padding:\s*5px 7px/)
 assert.match(frame, /report-segment min-w-0/)
 assert.match(hub, /reports-desktop-controls report-segment/)
 
-assert.match(options, /className="reports-fold-panel"/)
+assert.match(options, /className="reports-fold-panel reports-filter-fold"/)
 assert.match(options, /data-reports-fold=""/)
 assert.match(css, /body\.lang-km \.reports-fold-panel/)
 assert.match(css, /body\.lang-km \[data-reports-fold\]/)

@@ -347,10 +347,10 @@ test('Part 552: report section controls ride the title row; hub tabs fit; branch
   assert.ok(nav.includes('if (layered || visible.length <= 1) return <>{content}</>'), 'default mobile mode enters the stable keyed body directly, without another tile page')
 })
 
-test('Part 553/554: report sections render display-currency money + a CSV export', () => {
+test('Part 553/554: report sections render selected-currency money + a CSV export', () => {
   // Money now flows through the display-currency-aware fmtMoney (Part 554,
   // utils/reportMoney.ts) so a KHR fee never reads as "$0.00" and the
-  // display_currency setting is honored. Each section also offers an Export
+  // selected report currency is honored. Each section also offers an Export
   // action (user: "no actions to choose export etc"). Deeper reportMoney
   // behavior is pinned in tests/reportMoney.test.ts.
   for (const rel of REPORT_VIEW_FILES) {
@@ -359,11 +359,11 @@ test('Part 553/554: report sections render display-currency money + a CSV export
     assert.ok(src.includes('downloadCSV('), `${rel} exports CSV`)
     assert.ok(src.includes('exportMenuItems('), `${rel} offers Export CSV / Print on its title row`)
   }
-  // The hub threads the display-currency fmtMoney into every view (and the
-  // Currency option overrides the app setting for display only).
+  // The hub threads its explicit report-currency fmtMoney into every view.
   const hub = read('src/components/sales/ReportsHub.tsx')
   assert.ok(/const viewProps[\s\S]{0,400}fmtMoney,/.test(hub), 'ReportsHub passes fmtMoney to the views')
-  assert.ok(hub.includes("options.currency === 'setting' ? displayCurrency : options.currency"), 'the Currency option is display-only, layered over the app setting')
+  assert.ok(hub.includes('displayCurrency: options.currency'), 'report currency is display-only and defaults independently to USD')
+  assert.ok(!hub.includes("options.currency === 'setting'"), 'the removed App setting choice cannot remain active invisibly')
 })
 
 test('old bespoke stat surfaces are really gone (no zombie tile grids)', () => {
