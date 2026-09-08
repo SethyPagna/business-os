@@ -449,8 +449,12 @@ export async function mergeStateFingerprint(db: ReturnType<typeof getDb>, revers
     if (reversal.adjustmentMovementMarker) {
       reads.push({
         key: `adjustments:${reversalIndex}:marker`,
-        sql: 'SELECT * FROM inventory_movements WHERE product_id=? AND reason LIKE ?',
-        params: [reversal.keeperId, `%${reversal.adjustmentMovementMarker}%`],
+        sql: `SELECT * FROM inventory_movements
+              WHERE product_id=? AND movement_type='adjustment'
+                AND instr(COALESCE(reason, ''), ?) > 0`,
+        // The merge marker is literal data. D1 rejects some long LIKE patterns,
+        // while instr preserves the intended contains check without wildcard parsing.
+        params: [reversal.keeperId, String(reversal.adjustmentMovementMarker)],
       })
     } else {
       for (const [index, ids] of chunk(intIds(reversal.adjustmentMovementIds), 80).entries()) {
@@ -1098,8 +1102,10 @@ async function applyMergeReversal(env: Env, r: MergeReversal, canChangeProductIm
     for (const grp of chunk(adjIds, 400)) stmts.push({ sql: `DELETE FROM inventory_movements WHERE id IN (${grp.join(',')})` })
   } else if (r.adjustmentMovementMarker) {
     stmts.push({
-      sql: `DELETE FROM inventory_movements WHERE product_id=@keeperId AND movement_type='adjustment' AND reason LIKE @marker`,
-      params: { keeperId, marker: `%${String(r.adjustmentMovementMarker)}%` },
+      sql: `DELETE FROM inventory_movements
+            WHERE product_id=@keeperId AND movement_type='adjustment'
+              AND instr(COALESCE(reason, ''), @marker) > 0`,
+      params: { keeperId, marker: String(r.adjustmentMovementMarker) },
     })
   } else {
     stmts.push({ sql: `DELETE FROM inventory_movements WHERE product_id = @keeperId AND movement_type = 'adjustment' AND reason LIKE @frag`, params: { keeperId, frag: `%(#${dupId}) into this product%` } })
