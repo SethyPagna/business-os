@@ -26,6 +26,7 @@ import {
   createSelectedConflictRequestCoordinator,
   partitionSelectedConflictClusters,
   preserveSelectedConflictChoices,
+  selectedConflictCaseKey,
   selectedConflictOutcomeIsUnknown,
   type ProductConflictCluster,
   type ProductConflictProduct,
@@ -71,7 +72,7 @@ const SEVERITY_LABEL_KEY: Record<Severity, [string, string]> = {
 }
 
 function clusterKey(cluster: Cluster): string {
-  return `${cluster.type}:${cluster.value}`
+  return selectedConflictCaseKey(cluster)
 }
 
 // An EXACT duplicate cluster (user spec item #3): products that share BOTH a
