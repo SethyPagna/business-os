@@ -14,6 +14,7 @@ import { readFileSync } from 'node:fs'
 import {
   branchCanBeTransferDestination,
   branchCanBeTransferSource,
+  branchCanTransferBetween,
   branchCanSell,
   branchRoleFromName,
 } from '../src/utils/branchRoles.ts'
@@ -40,14 +41,16 @@ const asRunnable = workerSource
   .replace(/export type BranchRole[^\n]*\n/, '')
   .replace(/: BranchRole/g, '')
   .replace(/\(name: unknown\)/g, '(name)')
+  .replace(/\(fromName: unknown, toName: unknown\)/g, '(fromName, toName)')
   .replace(/: boolean/g, '')
   .replace(/export function/g, 'function')
 const worker = new Function(`${asRunnable}
-return { branchRoleFromName, branchCanSell, branchCanBeTransferSource, branchCanBeTransferDestination }`)() as {
+return { branchRoleFromName, branchCanSell, branchCanBeTransferSource, branchCanBeTransferDestination, branchCanTransferBetween }`)() as {
   branchRoleFromName: (name: unknown) => string
   branchCanSell: (name: unknown) => boolean
   branchCanBeTransferSource: (name: unknown) => boolean
   branchCanBeTransferDestination: (name: unknown) => boolean
+  branchCanTransferBetween: (fromName: unknown, toName: unknown) => boolean
 }
 
 // Every shape a branch name arrives in: the two canonical names, the casing
@@ -67,6 +70,15 @@ runTest('both packages answer identically for every branch-name shape', () => {
     assert.equal(worker.branchCanBeTransferSource(name), branchCanBeTransferSource(name), `source ${label}`)
     assert.equal(worker.branchCanBeTransferDestination(name), branchCanBeTransferDestination(name), `destination ${label}`)
   }
+  for (const fromName of NAMES) {
+    for (const toName of NAMES) {
+      assert.equal(
+        worker.branchCanTransferBetween(fromName, toName),
+        branchCanTransferBetween(fromName, toName),
+        `pair ${JSON.stringify(fromName)} -> ${JSON.stringify(toName)}`,
+      )
+    }
+  }
 })
 
 runTest('the rule itself: only the exact Shop may sell', () => {
@@ -77,13 +89,18 @@ runTest('the rule itself: only the exact Shop may sell', () => {
   assert.equal(branchCanSell(null), false)
 })
 
-runTest('the rule itself: stock moves warehouse -> shop', () => {
+runTest('the rule itself: stock moves both ways between opposite canonical roles', () => {
   assert.equal(branchCanBeTransferSource('Warehouse'), true)
-  assert.equal(branchCanBeTransferSource('Shop'), false, 'the shop never sends stock away')
+  assert.equal(branchCanBeTransferSource('Shop'), true)
   assert.equal(branchCanBeTransferDestination('Shop'), true)
-  assert.equal(branchCanBeTransferDestination('Warehouse'), false, 'the warehouse never receives a transfer')
+  assert.equal(branchCanBeTransferDestination('Warehouse'), true)
+  assert.equal(branchCanTransferBetween('Warehouse', 'Shop'), true)
+  assert.equal(branchCanTransferBetween('Shop', 'Warehouse'), true)
+  assert.equal(branchCanTransferBetween('Shop', 'Shop'), false, 'same-role endpoints are not a transfer pair')
+  assert.equal(branchCanTransferBetween('Warehouse', 'Warehouse'), false, 'same-role endpoints are not a transfer pair')
   assert.equal(branchCanBeTransferSource('Depot'), false)
   assert.equal(branchCanBeTransferDestination('Depot'), false)
+  assert.equal(branchCanTransferBetween('Depot', 'Shop'), false)
 })
 
 runTest('nothing keys on is_default, or on any column other than the name', () => {
@@ -112,6 +129,18 @@ runTest('the surfaces that enforce the rule reach it through this helper', () =>
   assert.match(transfer, /from '\.\.\/\.\.\/utils\/branchRoles\.ts'/)
   assert.match(transfer, /disabled: !branchCanBeTransferSource\(branch\.name\)/)
   assert.match(transfer, /disabled: !branchCanBeTransferDestination\(branch\.name\)/)
+  assert.match(transfer, /!branchCanTransferBetween\(selectedSourceBranch\?\.name, branch\.name\)/)
+  assert.match(transfer, /requireCanonicalTransferDirection/)
+  const inventory = read('../src/components/inventory/Inventory.tsx')
+  assert.match(inventory, /branchCanTransferBetween\(sourceBranch\?\.name, candidate\?\.name\)/)
+  assert.match(inventory, /disabled: !branchCanBeTransferSource\(branch\.name\)/)
+  assert.match(inventory, /disabled: !branchCanTransferBetween\(selectedSource\?\.name, branch\.name\)/)
+  assert.match(inventory, /if \(!branchCanTransferBetween\(fromBranch\.name, toBranch\.name\)\)/)
+  assert.match(inventory, /fromBranchId: transferForm\.to_branch_id[\s\S]*toBranchId: transferForm\.from_branch_id/, 'Inventory undo must post the exact opposite canonical direction')
+  const inventoryModals = read('../src/components/inventory/InventoryStockModals.tsx')
+  assert.match(inventoryModals, /destinationBranchOptions = transferDestinationBranchOptions \|\| branchWithPlaceholderOptions \|\| \[\]/)
+  assert.match(inventoryModals, /options=\{destinationBranchOptions\}/)
+  assert.match(inventoryModals, /onChange=\{changeTransferSource\}/)
   const sheetState = read('../src/components/pos/productSheetState.ts')
   assert.match(sheetState, /branchCanSell/)
   const guards = read('../../cloudflare/src/lib/branchRoleGuards.ts')

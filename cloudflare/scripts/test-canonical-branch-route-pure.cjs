@@ -82,10 +82,15 @@ const branchGuards = loadModule('lib/branchRoleGuards.ts', (id) => {
 })
 
 const noop = () => null
+const buildInClause = (prefix, values) => ({
+  sql: values.map((_, index) => `@${prefix}${index}`).join(', '),
+  params: Object.fromEntries(values.map((value, index) => [`${prefix}${index}`, value])),
+})
+const selectInChunks = async (values, _reserved, query) => values.length ? query(values) : []
 const branchRoute = loadModule('routes/branches.ts', (id) => {
   if (id === 'hono') return require('hono')
   if (id === '../lib/db') return { getDb: dbCompat }
-  if (id === '../lib/sqlBinding') return { buildInClause: noop, chunkForBinding: noop, selectInChunks: noop }
+  if (id === '../lib/sqlBinding') return { buildInClause, chunkForBinding: (values) => [values], selectInChunks }
   if (id === '../lib/familyPagination') return { paginateProductFamilies: noop }
   if (id === '../lib/familyStockStats') return { getFamilyStockStats: noop }
   if (id === '../lib/lowStockSettings') return { loadLowStockConfig: noop, lowStockThresholdSql: noop }
@@ -115,7 +120,7 @@ const branchRoute = loadModule('routes/branches.ts', (id) => {
     writeConflictResponse: (error) => ({ body: { error: error.message }, status: 409 }),
     WriteConflictError: class WriteConflictError extends Error {},
   }
-  if (id === '../lib/productIdentity') return { findIdentityMatch: noop, findIdentityMatches: noop }
+  if (id === '../lib/productIdentity') return { findIdentityMatch: async () => null, findIdentityMatches: async () => new Map() }
   if (id === '../lib/productBatches') return {
     decrementBatchStockStatement: noop,
     decrementBatchStockStrictStatement: noop,
@@ -158,7 +163,9 @@ function reset() {
     CREATE TABLE products (
       id INTEGER PRIMARY KEY, name TEXT NOT NULL, barcode TEXT,
       cost_price_usd REAL, cost_price_khr REAL,
-      selling_price_usd REAL, selling_price_khr REAL
+      purchase_price_usd REAL, purchase_price_khr REAL,
+      selling_price_usd REAL, selling_price_khr REAL,
+      stock_quantity REAL NOT NULL DEFAULT 0, updated_at TEXT
     );
     CREATE TABLE branch_stock (
       id INTEGER PRIMARY KEY, product_id INTEGER NOT NULL, branch_id INTEGER NOT NULL,
@@ -172,7 +179,7 @@ function reset() {
     INSERT INTO branches(id,name,location,is_default,is_active,updated_at) VALUES
       (1,'Shop','shop old',1,1,'2026-09-08 00:00:00'),
       (2,'Warehouse','warehouse old',0,1,'2026-09-08 00:00:00');
-    INSERT INTO products(id,name) VALUES (10,'Transfer product');
+    INSERT INTO products(id,name,stock_quantity) VALUES (10,'Transfer product',5);
     INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES (10,2,5);
   `)
   currentUser = { id: 7, name: 'Branch editor', tier: 'full' }
@@ -266,6 +273,93 @@ async function main() {
     assert.equal(sqlite.prepare('SELECT is_default FROM branches WHERE id=2').get().is_default, 0, 'default clear rolled back')
     assert.equal(audits.length, 0)
     assert.equal(broadcasts.length, 0)
+  })
+
+  await check('single transfer supports forward, undo, and redo across both canonical directions', async () => {
+    let result = await request('POST', '/transfer', {
+      productId: 10, fromBranchId: 2, toBranchId: 1, quantity: 2, reason: 'restock shop',
+    })
+    assert.equal(result.status, 200, JSON.stringify(result.json))
+    assert.deepStrictEqual(
+      sqlite.prepare('SELECT branch_id,quantity FROM branch_stock WHERE product_id=10 ORDER BY branch_id').all(),
+      [{ branch_id: 1, quantity: 2 }, { branch_id: 2, quantity: 3 }],
+    )
+
+    result = await request('POST', '/transfer', {
+      productId: 10, fromBranchId: 1, toBranchId: 2, quantity: 2, reason: 'Undo: restock shop',
+    })
+    assert.equal(result.status, 200, JSON.stringify(result.json))
+    assert.deepStrictEqual(
+      sqlite.prepare('SELECT branch_id,quantity FROM branch_stock WHERE product_id=10 ORDER BY branch_id').all(),
+      [{ branch_id: 1, quantity: 0 }, { branch_id: 2, quantity: 5 }],
+    )
+
+    result = await request('POST', '/transfer', {
+      productId: 10, fromBranchId: 2, toBranchId: 1, quantity: 2, reason: 'Redo: restock shop',
+    })
+    assert.equal(result.status, 200, JSON.stringify(result.json))
+    assert.equal(sqlite.prepare('SELECT SUM(quantity) AS total FROM branch_stock WHERE product_id=10').get().total, 5)
+    assert.equal(sqlite.prepare('SELECT COUNT(*) AS total FROM stock_transfers').get().total, 3)
+    assert.deepStrictEqual(
+      sqlite.prepare('SELECT movement_type,branch_id,quantity FROM inventory_movements ORDER BY id').all(),
+      [
+        { movement_type: 'transfer_out', branch_id: 2, quantity: 2 },
+        { movement_type: 'transfer_in', branch_id: 1, quantity: 2 },
+        { movement_type: 'transfer_out', branch_id: 1, quantity: 2 },
+        { movement_type: 'transfer_in', branch_id: 2, quantity: 2 },
+        { movement_type: 'transfer_out', branch_id: 2, quantity: 2 },
+        { movement_type: 'transfer_in', branch_id: 1, quantity: 2 },
+      ],
+    )
+    assert.equal(audits.length, 3)
+  })
+
+  await check('bulk transfer supports both canonical directions and conserves stock', async () => {
+    let result = await request('POST', '/transfer-bulk', {
+      fromBranchId: 2, toBranchId: 1, reason: 'bulk to shop', items: [{ productId: 10, quantity: 3 }],
+    })
+    assert.equal(result.status, 200, JSON.stringify(result.json))
+    assert.equal(result.json.transferredCount, 1)
+
+    result = await request('POST', '/transfer-bulk', {
+      fromBranchId: 1, toBranchId: 2, reason: 'bulk back to warehouse', items: [{ productId: 10, quantity: 1 }],
+    })
+    assert.equal(result.status, 200, JSON.stringify(result.json))
+    assert.equal(result.json.transferredCount, 1)
+    assert.deepStrictEqual(
+      sqlite.prepare('SELECT branch_id,quantity FROM branch_stock WHERE product_id=10 ORDER BY branch_id').all(),
+      [{ branch_id: 1, quantity: 2 }, { branch_id: 2, quantity: 3 }],
+    )
+    assert.equal(sqlite.prepare('SELECT SUM(quantity) AS total FROM branch_stock WHERE product_id=10').get().total, 5)
+    assert.equal(sqlite.prepare('SELECT COUNT(*) AS total FROM stock_transfers').get().total, 2)
+    assert.equal(sqlite.prepare('SELECT COUNT(*) AS total FROM inventory_movements').get().total, 4)
+    assert.equal(audits.length, 2)
+  })
+
+  await check('same branch, noncanonical branches, reasons, and lower permissions fail with zero effects', async () => {
+    sqlite.prepare("INSERT INTO branches(id,name,is_active) VALUES (3,'Depot',1)").run()
+    const initialStock = sqlite.prepare('SELECT * FROM branch_stock ORDER BY id').all()
+    const cases = [
+      { body: { productId: 10, fromBranchId: 2, toBranchId: 2, quantity: 1, reason: 'same' }, status: 400 },
+      { body: { productId: 10, fromBranchId: 2, toBranchId: 3, quantity: 1, reason: 'other' }, status: 400 },
+      { body: { productId: 10, fromBranchId: 2, toBranchId: 1, quantity: 1 }, status: 400 },
+    ]
+    for (const item of cases) assert.equal((await request('POST', '/transfer', item.body)).status, item.status)
+
+    currentUser = { id: 8, name: 'Reviewer', tier: 'review' }
+    assert.equal((await request('POST', '/transfer', {
+      productId: 10, fromBranchId: 2, toBranchId: 1, quantity: 1, reason: 'review refused',
+    })).status, 403)
+    currentUser = { id: 9, name: 'Viewer', tier: 'none' }
+    assert.equal((await request('POST', '/transfer-bulk', {
+      fromBranchId: 2, toBranchId: 1, reason: 'none refused', items: [{ productId: 10, quantity: 1 }],
+    })).status, 403)
+
+    assert.deepStrictEqual(sqlite.prepare('SELECT * FROM branch_stock ORDER BY id').all(), initialStock)
+    assert.equal(sqlite.prepare('SELECT COUNT(*) AS total FROM stock_transfers').get().total, 0)
+    assert.equal(sqlite.prepare('SELECT COUNT(*) AS total FROM inventory_movements').get().total, 0)
+    assert.equal(batchCalls, 0)
+    assert.equal(audits.length, 0)
   })
 
   await check('duplicate active canonical rows return 409 before transfer effects', async () => {

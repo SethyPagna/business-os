@@ -145,6 +145,7 @@ async function composeBranchTransferStatements(db, quantity) {
   const lots = await readFifoLotAvailability(wrapDb(db), 1, 1)
   const { takes, uncovered } = allocateAcrossLots(lots, quantity)
   const statements = [
+    identity.canonicalTransferAuthorityGuardStatement(1, 2),
     { sql: 'UPDATE branch_stock SET quantity = quantity - @quantity WHERE product_id = 1 AND branch_id = 1', params: { quantity } },
     {
       sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 2, @quantity)
@@ -236,7 +237,7 @@ await check('a destination-lot clone is guarded against a concurrent ambiguous b
   const db = freshDb()
   const compat = wrapDb(db)
   const source = { lot_code: 'C', expiry_date: '2027-01-01', notes: 'guarded clone' }
-  const guard = identity.canonicalTransferAuthorityGuardStatement(2, 1)
+  const guard = identity.canonicalTransferAuthorityGuardStatement(1, 2)
 
   db.prepare("INSERT INTO branches(id,name,is_active) VALUES (3,' shop ',1)").run()
   await assert.rejects(

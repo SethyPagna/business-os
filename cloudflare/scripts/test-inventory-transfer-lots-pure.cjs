@@ -44,6 +44,77 @@ const productBatches = loadModule('lib/productBatches.ts', (id) => {
   return require(id)
 })
 const { readFifoLotAvailability, allocateAcrossLots, decrementBatchStockStrictStatement, incrementBatchStockStatement } = productBatches
+const roles = loadModule('lib/branchRoles.ts', require)
+const branchGuards = loadModule('lib/branchRoleGuards.ts', (id) => {
+  if (id === './branchRoles') return roles
+  throw new Error(`unexpected branch guard import ${id}`)
+})
+const canonicalIdentity = loadModule('lib/canonicalBranchIdentity.ts', (id) => {
+  if (id === './db') return { toDbBool: (value, fallback = 0) => {
+    if (value == null || value === '') return fallback
+    if (typeof value === 'boolean') return value ? 1 : 0
+    return ['1', 'true', 'yes', 'on'].includes(String(value).trim().toLowerCase()) ? 1 : 0
+  } }
+  if (id === './branchRoles') return roles
+  throw new Error(`unexpected canonical identity import ${id}`)
+})
+
+let routeDb = null
+let routeUser = null
+let routeAudits = []
+let routeWaits = []
+const noop = () => null
+const asyncNoop = async () => null
+const inventoryRoute = loadModule('routes/inventory.ts', (id) => {
+  if (id === 'hono') return require('hono')
+  if (id === '../lib/db') return { getDb: () => wrapDb(routeDb) }
+  if (id === '../lib/auth') return {
+    requireAuth: async (c, next) => {
+      if (!routeUser) return c.json({ error: 'Unauthorized' }, 401)
+      c.set('user', routeUser)
+      return next()
+    },
+  }
+  if (id === '../lib/permissions') return {
+    getPermissionTier: (user) => user?.tier || 'none',
+    getActionTier: (user) => user?.tier || 'none',
+  }
+  if (id === '../lib/audit') return { audit: async (...args) => { routeAudits.push(args) } }
+  if (id === '../lib/reviewGate') return { maybeQueueForReview: asyncNoop }
+  if (id === '../durable-objects/broadcastHub') return { broadcast: asyncNoop }
+  if (id === '../lib/cache') return { bumpVersion: asyncNoop }
+  if (id === '../lib/productBatches') return { ...productBatches, attachBatchCounts: asyncNoop, receiveBatchStock: asyncNoop, removeStockFromBatch: asyncNoop, removeStockAcrossBatches: asyncNoop, InsufficientBatchStockError: class extends Error {} }
+  if (id === '../lib/branchRoleGuards') return branchGuards
+  if (id === '../lib/canonicalBranchIdentity') return canonicalIdentity
+  if (id === '../lib/actorSnapshot') return { actorSnapshot: (user) => user?.name || null }
+  if (id === '../lib/telegram') return { formatStockChangeTelegramLines: noop, formatTransferTelegramLines: noop, sendTelegramEvent: asyncNoop }
+  if (id === '../lib/businessDateWindow') return { localDateAtOrAfter: noop, localDateAtOrBefore: noop }
+  if (id === '../lib/familyPagination') return { paginateProductFamilies: asyncNoop }
+  if (id === '../lib/productSalesLedger') return { buildProductSalesLedgerSql: noop }
+  if (id === '../lib/familyStockStats') return { getFamilyStockStats: asyncNoop }
+  if (id === '../lib/lowStockSettings') return { loadLowStockConfig: asyncNoop, lowStockThresholdSql: noop }
+  if (id === '../lib/productIdentity') return { findIdentityMatch: asyncNoop, identityBarcodeKey: noop }
+  if (id === '../lib/searchMatch') return { buildIssueStateClauses: noop, buildLikeAliasClause: noop, runFuzzyFallbackMatch: asyncNoop, tokenizeSearchTermGroups: noop, tokenizeSearchWords: noop }
+  if (id === '../lib/productSearchQuery') return { buildFamilyRelevanceOrderSql: noop, buildProductSearchQuery: noop }
+  if (id === '../lib/stockRevert') return { applyMovementRevert: asyncNoop }
+  if (id === '../lib/batchCode') return { ...batchCode, normalizeTypedDate: noop }
+  if (id === '../lib/stockReceiptGate') return { appendReceiptNotes: noop, FREE_GOODS_REASON_NOTE: '', stockReceiptGateCode: noop, stockReceiptGateMessage: noop }
+  if (id === '../lib/datedStockCountRoute') return { parseDatedStockCountEntries: noop, buildDatedStockCountPlan: asyncNoop }
+  if (id === '../lib/datedStockCountApply') return { applyDatedStockCountPlan: asyncNoop }
+  if (id === '../lib/datedStockCountResolve') return { parseRawDatedCountRows: noop, resolveDatedStockCountRows: asyncNoop }
+  if (id === '../lib/datedStockCountDecisions') return { applyDatedStockCountDecisions: asyncNoop }
+  if (id === '../lib/movementBranchName') return { RESOLVED_BRANCH_NAME_COLUMN: '', movementBranchNameSql: noop, withResolvedBranchName: noop }
+  if (id === '../lib/movementActorName') return { RESOLVED_ACTOR_NAME_COLUMN: '', movementActorNameSql: noop, withResolvedActorName: noop }
+  if (id === '../lib/movementReference') return { movementReferenceSelectSql: noop }
+  if (id === '../lib/movementSearch') return { movementSearchHaystackSql: noop }
+  if (id === '../index') return {}
+  throw new Error(`unexpected inventory route import ${id}`)
+})
+const inventoryApp = inventoryRoute.default
+inventoryApp.onError((error) => new Response(JSON.stringify({ error: error.message }), {
+  status: 500,
+  headers: { 'Content-Type': 'application/json' },
+}))
 
 // Minimal async D1-compatible wrapper over better-sqlite3 (same shape the
 // other *-pure tests use): @named params, and batch() as one transaction.
@@ -95,7 +166,25 @@ function freshDb() {
       quantity REAL DEFAULT 0 CHECK (quantity >= 0),
       UNIQUE (product_id, branch_id)
     );
+    CREATE TABLE branches (
+      id INTEGER PRIMARY KEY, name TEXT NOT NULL, is_active INTEGER NOT NULL DEFAULT 1
+    );
+    CREATE TABLE products (
+      id INTEGER PRIMARY KEY, name TEXT NOT NULL, stock_quantity REAL NOT NULL DEFAULT 0
+    );
+    CREATE TABLE stock_transfers (
+      id INTEGER PRIMARY KEY, product_id INTEGER, product_name TEXT,
+      from_branch_id INTEGER, to_branch_id INTEGER, quantity REAL, notes TEXT,
+      user_id INTEGER, user_name TEXT, created_at TEXT
+    );
+    CREATE TABLE inventory_movements (
+      id INTEGER PRIMARY KEY, product_id INTEGER, product_name TEXT,
+      branch_id INTEGER, branch_name TEXT, movement_type TEXT, quantity REAL,
+      reason TEXT, user_id INTEGER, user_name TEXT, created_at TEXT, batch_id INTEGER
+    );
   `)
+  db.prepare("INSERT INTO branches(id,name,is_active) VALUES (1,'Shop',1),(2,'Warehouse',1)").run()
+  db.prepare("INSERT INTO products(id,name,stock_quantity) VALUES (1,'Transfer product',12)").run()
   // Product 1 at branch 1: lot A (older, 6 units), lot B (newer, 4 units),
   // branch_stock 12 -- 2 units of legacy stock the lot ledger never tracked.
   db.prepare(`INSERT INTO product_batches (id, variant_product_id, lot_code, received_at, batch_number) VALUES (101, 1, 'A', '2026-08-01', 1)`).run()
@@ -104,6 +193,18 @@ function freshDb() {
   db.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (102, 1, 4)`).run()
   db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 1, 12)`).run()
   return db
+}
+
+async function routeRequest(body) {
+  const response = await inventoryApp.request('/transfer', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }, {}, {
+    waitUntil: (promise) => { routeWaits.push(Promise.resolve(promise)) },
+    passThroughOnException: () => {},
+  })
+  return { status: response.status, json: await response.json().catch(() => null) }
 }
 
 function lotQty(db, batchId, branchId) {
@@ -197,6 +298,105 @@ await check('source lock: the route allocates FIFO, decrements STRICT, and stamp
   assert.ok(/decrementBatchStockStrictStatement\(take\.batchId, fromBranchId, take\.quantity\)/.test(body), 'source lot decrements must be STRICT (unclamped)')
   assert.ok(/incrementBatchStockStatement\(take\.batchId, toBranchId, take\.quantity\)/.test(body), 'destination gains the SAME batch ids')
   assert.ok(/takes\.length === 1 && uncovered === 0 \? takes\[0\]\.batchId : null/.test(body), '0084 blank-honest movement stamping')
+})
+
+await check('the real Inventory transfer handler applies, undoes, and redoes across both canonical directions', async () => {
+  routeDb = freshDb()
+  routeUser = { id: 7, name: 'Stock manager', tier: 'full' }
+  routeAudits = []
+  routeWaits = []
+  const state = () => ({
+    shopStock: stockQty(routeDb, 1),
+    warehouseStock: stockQty(routeDb, 2),
+    shopLots: [lotQty(routeDb, 101, 1), lotQty(routeDb, 102, 1)],
+    warehouseLots: [lotQty(routeDb, 101, 2), lotQty(routeDb, 102, 2)],
+  })
+
+  let result = await routeRequest({ productId: 1, fromBranchId: 1, toBranchId: 2, quantity: 8, reason: 'return to warehouse' })
+  assert.strictEqual(result.status, 200, JSON.stringify(result.json))
+  assert.strictEqual(result.json.success, true)
+  const applied = state()
+  assert.deepStrictEqual(applied, {
+    shopStock: 4, warehouseStock: 8, shopLots: [0, 2], warehouseLots: [6, 2],
+  })
+
+  result = await routeRequest({ productId: 1, fromBranchId: 2, toBranchId: 1, quantity: 8, reason: 'Undo: return to warehouse' })
+  assert.strictEqual(result.status, 200, JSON.stringify(result.json))
+  assert.deepStrictEqual(state(), {
+    shopStock: 12, warehouseStock: 0, shopLots: [6, 4], warehouseLots: [0, 0],
+  })
+
+  result = await routeRequest({ productId: 1, fromBranchId: 1, toBranchId: 2, quantity: 8, reason: 'Redo: return to warehouse' })
+  assert.strictEqual(result.status, 200, JSON.stringify(result.json))
+  assert.deepStrictEqual(state(), applied)
+  assert.strictEqual(routeDb.prepare('SELECT SUM(quantity) AS total FROM branch_stock WHERE product_id=1').get().total, 12)
+  assert.strictEqual(routeDb.prepare('SELECT COUNT(*) AS total FROM stock_transfers').get().total, 3)
+  assert.deepStrictEqual(
+    routeDb.prepare('SELECT movement_type,branch_id,quantity,batch_id FROM inventory_movements ORDER BY id').all(),
+    [
+      { movement_type: 'transfer_out', branch_id: 1, quantity: 8, batch_id: null },
+      { movement_type: 'transfer_in', branch_id: 2, quantity: 8, batch_id: null },
+      { movement_type: 'transfer_out', branch_id: 2, quantity: 8, batch_id: null },
+      { movement_type: 'transfer_in', branch_id: 1, quantity: 8, batch_id: null },
+      { movement_type: 'transfer_out', branch_id: 1, quantity: 8, batch_id: null },
+      { movement_type: 'transfer_in', branch_id: 2, quantity: 8, batch_id: null },
+    ],
+  )
+  assert.strictEqual(routeAudits.length, 3)
+  await Promise.all(routeWaits)
+})
+
+await check('Inventory rejects same, unknown, inactive, duplicate-role, reasonless, and non-Full transfers without effects', async () => {
+  const assertNoEffects = (db) => {
+    assert.strictEqual(stockQty(db, 1), 12)
+    assert.strictEqual(stockQty(db, 2), 0)
+    assert.strictEqual(db.prepare('SELECT COUNT(*) AS total FROM stock_transfers').get().total, 0)
+    assert.strictEqual(db.prepare('SELECT COUNT(*) AS total FROM inventory_movements').get().total, 0)
+  }
+
+  const attempt = async ({ setup, user = { id: 7, name: 'Stock manager', tier: 'full' }, body, status }) => {
+    routeDb = freshDb()
+    routeUser = user
+    routeAudits = []
+    routeWaits = []
+    if (setup) setup(routeDb)
+    const result = await routeRequest(body)
+    assert.strictEqual(result.status, status, JSON.stringify(result.json))
+    assertNoEffects(routeDb)
+    assert.strictEqual(routeAudits.length, 0)
+  }
+
+  await attempt({ body: { productId: 1, fromBranchId: 1, toBranchId: 1, quantity: 1, reason: 'same' }, status: 400 })
+  await attempt({
+    setup: (db) => db.prepare("INSERT INTO branches(id,name,is_active) VALUES (3,'Depot',1)").run(),
+    body: { productId: 1, fromBranchId: 1, toBranchId: 3, quantity: 1, reason: 'other' },
+    status: 400,
+  })
+  await attempt({
+    setup: (db) => db.prepare('UPDATE branches SET is_active=0 WHERE id=2').run(),
+    body: { productId: 1, fromBranchId: 1, toBranchId: 2, quantity: 1, reason: 'inactive' },
+    status: 409,
+  })
+  await attempt({
+    setup: (db) => db.prepare("INSERT INTO branches(id,name,is_active) VALUES (4,' warehouse ',1)").run(),
+    body: { productId: 1, fromBranchId: 1, toBranchId: 2, quantity: 1, reason: 'duplicate' },
+    status: 409,
+  })
+  await attempt({ body: { productId: 1, fromBranchId: 1, toBranchId: 2, quantity: 1 }, status: 400 })
+  await attempt({
+    user: { id: 8, name: 'Reviewer', tier: 'review' },
+    body: { productId: 1, fromBranchId: 1, toBranchId: 2, quantity: 1, reason: 'review refused' },
+    status: 403,
+  })
+})
+
+await check('offline replay still dispatches Inventory transfer to the same guarded route with its stable request id', () => {
+  const sync = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'sync.ts'), 'utf8')
+  const transport = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'src', 'api', 'inventoryWriteTransport.ts'), 'utf8')
+  assert.match(sync, /'inventory\.transfer': \{ method: 'POST', path: '\/api\/inventory\/transfer' \}/)
+  assert.match(sync, /'x-client-request-id': operation\.client_request_id/)
+  assert.match(sync, /client_request_id: operation\.client_request_id/)
+  assert.match(transport, /'inventory:transfer'[\s\S]*'POST'[\s\S]*'\/api\/inventory\/transfer'[\s\S]*ensureClientRequestId\([\s\S]*'transfer'\)/)
 })
 
 }

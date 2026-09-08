@@ -92,7 +92,10 @@ async function main() {
     assert.equal(pair.shop.id, 1)
     assert.equal(pair.warehouse.id, 2)
     assert.equal(identity.isCanonicalTransferSelection(pair, 2, 1), true)
-    assert.equal(identity.isCanonicalTransferSelection(pair, 1, 2), false)
+    assert.equal(identity.isCanonicalTransferSelection(pair, 1, 2), true)
+    assert.equal(identity.isCanonicalTransferSelection(pair, 1, 1), false)
+    assert.equal(identity.isCanonicalTransferSelection(pair, 2, 2), false)
+    assert.equal(identity.isCanonicalTransferSelection(pair, 3, 1), false)
 
     db.prepare("INSERT INTO branches(id,name,is_active) VALUES (4,' shop ',1)").run()
     assert.throws(
@@ -107,31 +110,47 @@ async function main() {
     )
   })
 
-  await check('a concurrent canonical transfer ambiguity rolls back every effect', () => {
+  await check('both transfer directions commit, while canonical ambiguity rolls back every effect', () => {
     const mutations = [
       (db) => db.prepare("INSERT INTO branches(id,name,is_active) VALUES (4,'SHOP',1)").run(),
       (db) => db.prepare('UPDATE branches SET is_active=0 WHERE id=2').run(),
       (db) => db.prepare("UPDATE branches SET name='Dispatch' WHERE id=2").run(),
       (db) => db.prepare('DELETE FROM branches WHERE id=1').run(),
     ]
-    for (const mutate of mutations) {
-      const db = freshDb()
-      identity.resolveCanonicalTransferPair(db.prepare(identity.CANONICAL_TRANSFER_BRANCHES_SQL).all())
-      const statements = [
-        identity.canonicalTransferAuthorityGuardStatement(2, 1),
-        { sql: "INSERT INTO transfer_effects(note) VALUES ('must roll back')" },
-      ]
-      mutate(db)
-      assert.throws(() => runBatch(db, statements), /NOT NULL/)
-      assert.equal(db.prepare('SELECT COUNT(*) AS total FROM transfer_effects').get().total, 0)
+    for (const [fromBranchId, toBranchId] of [[2, 1], [1, 2]]) {
+      for (const mutate of mutations) {
+        const db = freshDb()
+        identity.resolveCanonicalTransferPair(db.prepare(identity.CANONICAL_TRANSFER_BRANCHES_SQL).all())
+        const statements = [
+          identity.canonicalTransferAuthorityGuardStatement(fromBranchId, toBranchId),
+          { sql: "INSERT INTO transfer_effects(note) VALUES ('must roll back')" },
+        ]
+        mutate(db)
+        assert.throws(() => runBatch(db, statements), /NOT NULL/)
+        assert.equal(db.prepare('SELECT COUNT(*) AS total FROM transfer_effects').get().total, 0)
+      }
     }
 
     const db = freshDb()
     runBatch(db, [
       identity.canonicalTransferAuthorityGuardStatement(2, 1),
-      { sql: "INSERT INTO transfer_effects(note) VALUES ('allowed')" },
+      { sql: "INSERT INTO transfer_effects(note) VALUES ('warehouse-to-shop')" },
+      identity.canonicalTransferAuthorityGuardStatement(1, 2),
+      { sql: "INSERT INTO transfer_effects(note) VALUES ('shop-to-warehouse')" },
     ])
-    assert.equal(db.prepare('SELECT COUNT(*) AS total FROM transfer_effects').get().total, 1)
+    assert.deepStrictEqual(
+      db.prepare('SELECT note FROM transfer_effects ORDER BY rowid').all().map((row) => row.note),
+      ['warehouse-to-shop', 'shop-to-warehouse'],
+    )
+
+    for (const [fromBranchId, toBranchId] of [[1, 1], [2, 2], [3, 1], [1, 3]]) {
+      const refused = freshDb()
+      assert.throws(() => runBatch(refused, [
+        identity.canonicalTransferAuthorityGuardStatement(fromBranchId, toBranchId),
+        { sql: "INSERT INTO transfer_effects(note) VALUES ('must not commit')" },
+      ]), /NOT NULL/)
+      assert.equal(refused.prepare('SELECT COUNT(*) AS total FROM transfer_effects').get().total, 0)
+    }
   })
 
   await check('metadata/default edits preserve identity and leave legacy defaults untouched', () => {
