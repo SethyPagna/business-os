@@ -259,6 +259,10 @@ app.get('/', async (c) => {
   const pageSize = Math.min(MAX_FILE_PAGE_SIZE, Math.max(1, Number.parseInt(c.req.query('pageSize') || String(DEFAULT_FILE_PAGE_SIZE), 10) || DEFAULT_FILE_PAGE_SIZE))
   const page = Math.max(1, Number.parseInt(c.req.query('page') || '1', 10) || 1)
   const offset = (page - 1) * pageSize
+  // Storage totals are independent of the current search/page. The assets
+  // page asks for them on initial load and after a file mutation, but not on
+  // every debounced query. Keep the default true for existing callers.
+  const includeMeta = c.req.query('includeStorageMeta') !== 'false'
 
   const where: string[] = []
   const params: Record<string, unknown> = { limit: pageSize, offset }
@@ -304,7 +308,7 @@ app.get('/', async (c) => {
     // Physical storage is intentionally aggregated from file_assets, not
     // logical_assets: one R2 object can be presented under several product
     // names, but its bytes must be counted exactly once.
-    db.prepare(`
+    includeMeta ? db.prepare(`
       SELECT
         COUNT(*) AS file_count,
         COALESCE(SUM(CASE WHEN byte_size > 0 THEN byte_size ELSE 0 END), 0) AS total_bytes,
@@ -313,7 +317,7 @@ app.get('/', async (c) => {
         COALESCE(SUM(CASE WHEN media_type = 'document' THEN 1 ELSE 0 END), 0) AS document_count,
         COALESCE(SUM(CASE WHEN media_type NOT IN ('image', 'video', 'document') OR media_type IS NULL THEN 1 ELSE 0 END), 0) AS other_count
       FROM file_assets
-    `).get<Record<string, unknown>>(),
+    `).get<Record<string, unknown>>() : Promise.resolve(null),
   ])
   const promotionReferences = await loadPromotionImageReferences(db, rawItems.map((row) => String(row.public_path || '')))
 
@@ -351,7 +355,7 @@ app.get('/', async (c) => {
     total: totalRow?.count || 0,
     page,
     pageSize,
-    physicalStorage: normalizePhysicalStorageSummary(physicalStorageRow),
+    ...(includeMeta ? { physicalStorage: normalizePhysicalStorageSummary(physicalStorageRow) } : {}),
   })
 })
 
