@@ -5159,7 +5159,25 @@ async function createProductConflictActionReview(
     rawPlans.push(bounded)
   }
   const plans = []
-  for (const plan of rawPlans) plans.push({ ...plan, state_digest: await productConflictSha256({ version: 2, group: plan }) })
+  let storedDetailBytes = 0
+  for (const plan of rawPlans) {
+    let bounded = plan
+    let stateDigest = await productConflictSha256({ version: 2, group: bounded })
+    let stored = { ...bounded, state_digest: stateDigest }
+    let bytes = new TextEncoder().encode(JSON.stringify(stored)).length
+    if (bytes > PRODUCT_CONFLICT_ACTION_MAX_GROUP_DETAIL_BYTES || storedDetailBytes + bytes > PRODUCT_CONFLICT_ACTION_MAX_REVIEW_DETAIL_BYTES) {
+      bounded = refuseProductConflictActionGroupDetail(plan, plan.lots.detail_row_count,
+        'This group detail is too large for one bounded review. Review it separately.', true)
+      stateDigest = await productConflictSha256({ version: 2, group: bounded })
+      stored = { ...bounded, state_digest: stateDigest }
+      bytes = new TextEncoder().encode(JSON.stringify(stored)).length
+    }
+    if (bytes > PRODUCT_CONFLICT_ACTION_MAX_GROUP_DETAIL_BYTES || storedDetailBytes + bytes > PRODUCT_CONFLICT_ACTION_MAX_REVIEW_DETAIL_BYTES) {
+      throw new ProductConflictMergeValidationError('The selected conflict review metadata exceeds the bounded review size.', 'review_detail_limit', 413)
+    }
+    storedDetailBytes += bytes
+    plans.push(stored)
+  }
   const reviewId = crypto.randomUUID()
   const expiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString()
   const draftDigest = await productConflictSha256({ manifest_version: 1, resolution_version: 2,
