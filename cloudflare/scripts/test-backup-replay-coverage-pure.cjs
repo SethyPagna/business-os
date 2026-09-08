@@ -29,6 +29,17 @@ assert(tables.indexOf('product_conflict_action_reviews') > tables.indexOf('undo_
 assert(tables.indexOf('product_conflict_action_groups') > tables.indexOf('product_conflict_action_reviews'))
 assert(tables.indexOf('product_conflict_action_group_members') > tables.indexOf('product_conflict_action_groups'))
 assert(tables.indexOf('product_remove_operations') > tables.indexOf('product_conflict_action_reviews'))
+const replayBundleList = source.match(/export const SALE_REPLAY_RESTORE_BUNDLE = \[([\s\S]*?)\] as const/)[1]
+const replayBundleTables = [...replayBundleList.matchAll(/'([^']+)'/g)].map(match => match[1])
+for (const table of [
+  'pending_actions',
+  'product_conflict_action_reviews',
+  'product_conflict_action_groups',
+  'product_conflict_action_group_members',
+  'product_remove_operations',
+  'product_conflict_merge_runs',
+  'product_conflict_merge_run_cases',
+]) assert(replayBundleTables.includes(table), `${table} must accompany product-bearing Sales replay backups`)
 const resetSource = fs.readFileSync(path.join(__dirname, '../src/lib/coreDataInvariants.ts'), 'utf8')
 const resetList = resetSource.match(/export const FACTORY_RESET_TABLES = \[([\s\S]*?)\n\]/)[1]
 const resetTables = [...resetList.matchAll(/'([^']+)'/g)].map(match => match[1])

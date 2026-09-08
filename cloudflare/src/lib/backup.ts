@@ -1080,7 +1080,7 @@ export type RestoreProgress = { phase: 'deleting' | 'inserting' | 'assets'; tabl
 // SQLite FKs cannot express. Restoring their sales/stock independently can
 // leave a valid-looking undo action pointing at a different generation.
 export const SALE_REPLAY_RESTORE_BUNDLE = [
-  'branches', 'suppliers', 'file_assets', 'product_images',
+  'pending_actions', 'branches', 'suppliers', 'file_assets', 'product_images',
   'products', 'product_batches', 'branch_stock', 'branch_batch_stock', 'damaged_stock_lots',
   'sales', 'sale_items', 'sale_item_batch_allocations', 'returns', 'return_items',
   'return_item_batch_allocations', 'fees', 'inventory_movements', 'action_history',
@@ -1088,6 +1088,12 @@ export const SALE_REPLAY_RESTORE_BUNDLE = [
   'sale_mutation_receipts', 'sale_mutation_members',
   'return_write_revisions', 'return_bulk_operations', 'return_bulk_members',
   'return_mutation_receipts',
+  // Product identity is part of the Sales replay graph. Include every F65
+  // receipt that references products/history so a scoped Sales backup remains
+  // restorable after reviewed conflict actions exist.
+  'product_conflict_action_reviews', 'product_conflict_action_groups',
+  'product_conflict_action_group_members', 'product_remove_operations',
+  'product_conflict_merge_runs', 'product_conflict_merge_run_cases',
   'sale_record_events',
   'stock_session_revisions', 'stock_session_operations', 'stock_session_members',
 ] as const
