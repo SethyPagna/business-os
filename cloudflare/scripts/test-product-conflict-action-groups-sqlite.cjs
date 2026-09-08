@@ -59,6 +59,10 @@ function adapter(d1, controls) {
       statements.forEach(({ sql, params }) => observe(sql, params))
       controls.maxBatchStatements = Math.max(controls.maxBatchStatements, statements.length)
       const readOnly = statements.every(({ sql }) => /^\s*(?:SELECT|WITH|PRAGMA)\b/i.test(sql))
+      if (!readOnly) {
+        controls.writeBatches += 1
+        if (controls.beforeWriteBatch) controls.beforeWriteBatch(statements, controls.writeBatches)
+      }
       if (!readOnly && controls.beforeNextWriteBatch) {
         const hook = controls.beforeNextWriteBatch
         controls.beforeNextWriteBatch = null
@@ -79,7 +83,7 @@ function adapter(d1, controls) {
 function loadRoute(d1, realMergeRuntime = false) {
   const controls = {
     statements: 0, maxBindings: 0, maxCompoundTerms: 0, maxBatchStatements: 0, failNextBatch: false, beforeNextWriteBatch: null,
-    fullProductDetailReads: 0, fullLotDetailReads: 0,
+    fullProductDetailReads: 0, fullLotDetailReads: 0, writeBatches: 0, beforeWriteBatch: null,
   }
   const db = adapter(d1, controls)
   const detail = loadTs('lib/productDetailRule.ts')
