@@ -166,6 +166,13 @@ export function getCustomers(params: QueryParams = {}): Promise<unknown> {
   })
 }
 
+// Sales must distinguish an explicitly marked walk-in identity from an
+// ordinary linked customer before choosing its editor. Keep this exact-id
+// read separate from picker reads, which intentionally remove anonymous rows.
+export function getCustomerIdentityById(id: number | string): Promise<unknown> {
+  return readContacts(CUSTOMER_READ, { ids: [String(id)] })
+}
+
 export function invalidateCustomerReadCache(): void {
   for (const key of readCache.keys()) {
     if (key === CUSTOMER_READ.routeKey || key.startsWith(`${CUSTOMER_READ.routeKey}:`)) readCache.delete(key)

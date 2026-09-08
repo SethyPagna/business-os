@@ -15,6 +15,19 @@ export function isSelectableCustomerIdentity(customer: CustomerIdentityFields): 
   return !isAnonymousCustomerIdentity(customer)
 }
 
+export type SaleCustomerEditorRoute = 'assignment' | 'load-profile' | 'profile'
+
+export function resolveSaleCustomerEditorRoute(
+  sale: CustomerIdentityFields & { customer_id?: unknown },
+  currentCustomer?: CustomerIdentityFields,
+): SaleCustomerEditorRoute {
+  if (isAnonymousCustomerIdentity(sale)) return 'assignment'
+  const customerId = Number(sale?.customer_id)
+  if (!Number.isSafeInteger(customerId) || customerId <= 0) return 'assignment'
+  if (currentCustomer === undefined) return 'load-profile'
+  return isAnonymousCustomerIdentity(currentCustomer) ? 'assignment' : 'profile'
+}
+
 export function filterSelectableCustomerRows<T extends CustomerIdentityFields>(rows: readonly T[]): T[] {
   return rows.filter(isSelectableCustomerIdentity)
 }
