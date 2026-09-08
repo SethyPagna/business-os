@@ -94,7 +94,7 @@ async function main() {
 
   await check('customer pickers, membership, duplicate review, and points views exclude only marked profiles', () => {
     assert.match(route, /fields \|\| ''\) === 'names'[\s\S]{0,500}customerIsProfileSql\(\)/)
-    assert.match(route, /fields \|\| ''\) === 'picker'[\s\S]{0,1100}customerIsAnonymousSql\(\)[\s\S]{0,600}filter\(\(row\) => !excluded\.has/)
+    assert.match(route, /fields \|\| ''\) === 'picker'[\s\S]{0,1100}buildContactPickerSql\(config\.table\)/)
     assert.match(route, /const baseWhere: string\[\] = \[\][\s\S]{0,180}customerIsProfileSql\(\)/)
     assert.match(route, /customers\/membership\/:membershipNumber[\s\S]{0,500}customerIsProfileSql\(\)/)
     assert.match(route, /excludeAnonymousCustomerDuplicateState\(/)
