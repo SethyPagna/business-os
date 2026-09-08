@@ -39,8 +39,16 @@ class FakeHono {
 }
 
 function adapter(d1, controls) {
+  const enforceCompoundSelectLimit = (sql) => {
+    const terms = 1 + (sql.match(/\bUNION(?:\s+ALL)?\b/gi) || []).length
+    controls.maxObservedCompoundTerms = Math.max(controls.maxObservedCompoundTerms, terms)
+    if (controls.compoundSelectLimit && terms > controls.compoundSelectLimit) {
+      throw new Error(`D1_ERROR: too many terms in compound SELECT (${terms} > ${controls.compoundSelectLimit})`)
+    }
+  }
   return {
     prepare(sql) {
+      enforceCompoundSelectLimit(sql)
       const statement = d1.prepare(sql)
       return {
         get: (params) => {
@@ -57,17 +65,30 @@ function adapter(d1, controls) {
       }
     },
     batch: async (statements) => {
+      statements.forEach(({ sql }) => enforceCompoundSelectLimit(sql))
       if (controls.beforeBatch) await controls.beforeBatch(statements)
       controls.statementCount += statements.length
       const readOnly = statements.every(({ sql }) => /^\s*(?:SELECT|WITH|PRAGMA)\b/i.test(sql))
       if (!readOnly) return d1.batch(statements)
-      return Promise.resolve(statements.map(({ sql, params }) => ({ success: true, results: d1.prepare(sql).all(params || {}) })))
+      const results = statements.map(({ sql, params }) => ({ success: true, results: d1.prepare(sql).all(params || {}) }))
+      if (controls.dropNextReadBatchResult) {
+        controls.dropNextReadBatchResult = false
+        results.pop()
+      }
+      return Promise.resolve(results)
     },
   }
 }
 
 function loadRoute(d1) {
-  const controls = { beforeBatch: null, failNextHistoryFinalize: 0, statementCount: 0 }
+  const controls = {
+    beforeBatch: null,
+    compoundSelectLimit: null,
+    dropNextReadBatchResult: false,
+    failNextHistoryFinalize: 0,
+    maxObservedCompoundTerms: 0,
+    statementCount: 0,
+  }
   const db = adapter(d1, controls)
   const actor = loadTs('lib/actorSnapshot.ts')
   const detail = loadTs('lib/productDetailRule.ts')
@@ -147,6 +168,60 @@ function seedManyPairs(count = 12, lotsPerProduct = 10) {
   return { d1, cases }
 }
 
+function seedProductionPreviewFixture() {
+  const d1 = openDb(loadAll())
+  d1.db.exec("INSERT INTO branches(id,name,is_active) VALUES(1,'Warehouse',1),(2,'Shop',1)")
+  const product = d1.db.prepare(`INSERT INTO products
+    (id,name,sku,barcode,category,unit,selling_price_usd,selling_price_khr,purchase_price_usd,purchase_price_khr,
+      cost_price_usd,cost_price_khr,stock_quantity,low_stock_threshold,is_active,supplier,custom_fields,brand,is_group,
+      name_key,name_normalized,unit_normalized,brand_compact,wholesale_price_usd,wholesale_price_khr)
+    VALUES(@id,@name,@sku,@barcode,'F46 QA','pcs',@sell,@sellKhr,@cost,@costKhr,@cost,@costKhr,@stock,10,1,
+      'F46 local','{}','F46',0,@nameKey,@nameKey,'pcs','f46',@wholesale,@wholesaleKhr)`)
+  const branchStock = d1.db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity,rfid_confirmed_qty) VALUES(?,?,?,0)')
+  const batch = d1.db.prepare(`INSERT INTO product_batches
+    (id,variant_product_id,batch_key,lot_code,expiry_date,received_at,is_active,notes,synthetic,batch_number,
+      unit_cost_usd,received_quantity,received_branch_id,received_cost_usd)
+    VALUES(@id,@productId,@key,@lot,'2027-12-31','2026-09-08',1,'F46 local browser fixture',0,@number,4,@quantity,2,4)`)
+  const batchStock = d1.db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,?,?)')
+  const cases = []
+  for (let pair = 1; pair <= 11; pair += 1) {
+    const keeperId = 2000 + pair * 2 - 1
+    const duplicateId = keeperId + 1
+    const suffix = String(pair).padStart(2, '0')
+    const name = `F46 QA Pair ${suffix}`
+    const nameKey = name.toLowerCase()
+    const barcode = `84600000${String(pair).padStart(4, '0')}`
+    const keeperShop = pair === 11 ? 0 : 5
+    const keeperWarehouse = pair === 11 ? 0 : 2
+    const duplicateShop = pair === 11 ? 0 : 2
+    const duplicateWarehouse = pair === 11 ? 0 : 1
+    product.run({ id: keeperId, name, sku: `F46-K-${suffix}`, barcode, sell: 10 + pair, sellKhr: (10 + pair) * 4100,
+      cost: 4, costKhr: 16400, stock: keeperShop + keeperWarehouse, nameKey, wholesale: 8 + pair, wholesaleKhr: (8 + pair) * 4100 })
+    product.run({ id: duplicateId, name, sku: `F46-D-${suffix}`, barcode, sell: 12 + pair, sellKhr: (12 + pair) * 4100,
+      cost: 4, costKhr: 16400, stock: duplicateShop + duplicateWarehouse, nameKey, wholesale: 9 + pair, wholesaleKhr: (9 + pair) * 4100 })
+    for (const [branchId, quantity] of [[1, keeperWarehouse], [2, keeperShop]]) branchStock.run(keeperId, branchId, quantity)
+    for (const [branchId, quantity] of [[1, duplicateWarehouse], [2, duplicateShop]]) branchStock.run(duplicateId, branchId, quantity)
+    if (pair !== 11) {
+      const batchId = 5000 + pair
+      batch.run({ id: batchId, productId: duplicateId, key: `f46-${suffix}-duplicate-lot`, lot: `F46-LOT-${suffix}`,
+        number: pair, quantity: duplicateShop + duplicateWarehouse })
+      batchStock.run(batchId, 1, duplicateWarehouse)
+      batchStock.run(batchId, 2, duplicateShop)
+    }
+    cases.push({ case_key: `barcode:${barcode}`, cluster_type: 'barcode', cluster_value: barcode, product_ids: [keeperId, duplicateId] })
+  }
+  const blockedName = 'F46 QA Blocked Trio'
+  const blockedNameKey = blockedName.toLowerCase()
+  for (let index = 0; index < 3; index += 1) {
+    const id = 2101 + index
+    product.run({ id, name: blockedName, sku: `F46-B-${index + 1}`, barcode: '846009999999', sell: 20, sellKhr: 82000,
+      cost: 4, costKhr: 16400, stock: 0, nameKey: blockedNameKey, wholesale: 18, wholesaleKhr: 73800 })
+    branchStock.run(id, 1, 0)
+    branchStock.run(id, 2, 0)
+  }
+  return { d1, cases }
+}
+
 async function call(app, path, body, user = { id: 900, username: 'reviewer' }) {
   const waits = []
   const response = await app.posts.get(path)({
@@ -162,6 +237,29 @@ const tableCounts = (d1) => Object.fromEntries(d1.db.prepare(`SELECT name FROM s
   .map(({ name }) => [name, d1.db.prepare(`SELECT COUNT(*) n FROM "${name}"`).get().n]))
 
 async function main() {
+  // Exact local-browser fixture metadata: 11 selected exact pairs among 12
+  // detected clusters (the remaining three-member cluster is client-blocked).
+  // Enforcing local D1's observed five-term compound ceiling makes the former
+  // 22-source fingerprint fail and proves every repaired fragment stays safe.
+  {
+    const { d1: productionFixture, cases } = seedProductionPreviewFixture()
+    const { app: productionApp, controls } = loadRoute(productionFixture)
+    controls.compoundSelectLimit = 5
+    assert.equal(cases.length, 11)
+    assert.equal(productionFixture.db.prepare("SELECT COUNT(*) n FROM (SELECT name_key FROM products GROUP BY name_key)").get().n, 12)
+    const before = tableCounts(productionFixture)
+    const preview = await call(productionApp, '/possible-duplicates/merge-batch/preview', { cases })
+    assert.equal(preview.status, 200)
+    assert.equal(preview.body.cases.length, 11)
+    assert.equal(preview.body.skipped.length, 0)
+    assert.equal(preview.body.cases[0].case_key, 'barcode:846000000001')
+    assert.equal(preview.body.cases[10].case_key, 'barcode:846000000011')
+    assert.equal(preview.body.cases[0].needs_stock_choice, true)
+    assert.equal(preview.body.cases[10].needs_stock_choice, false)
+    assert.equal(controls.maxObservedCompoundTerms, 5)
+    assert.deepEqual(tableCounts(productionFixture), before, '11-case production-shaped preview writes nothing')
+  }
+
   const d1 = seed()
   const { app } = loadRoute(d1)
   const previewBody = { cases: [
@@ -182,6 +280,20 @@ async function main() {
   assert.equal(preview.body.cases[0].before.stock[0].discarded_quantity, 2)
   assert.equal(preview.body.cases[0].after_by_stock_choice.merge.stock[0].quantity, 7)
   assert.equal(preview.body.cases[0].after_by_stock_choice.write_off.stock[0].quantity, 5)
+
+  // A partial D1 read batch cannot be mistaken for an empty fingerprint.
+  // Preview fails closed before producing a manifest or writing any ledger.
+  {
+    const incompleteDb = seed()
+    const { app: incompleteApp, controls } = loadRoute(incompleteDb)
+    const before = tableCounts(incompleteDb)
+    controls.dropNextReadBatchResult = true
+    await assert.rejects(
+      call(incompleteApp, '/possible-duplicates/merge-batch/preview', { cases: [previewBody.cases[0]] }),
+      /selected_conflict_fingerprint_batch_incomplete/,
+    )
+    assert.deepEqual(tableCounts(incompleteDb), before, 'partial fingerprint read writes nothing')
+  }
 
   // Merge permission does not imply image permission. A no-image-effect pair
   // remains allowed, while one discarded primary image blocks the complete
@@ -508,6 +620,8 @@ async function main() {
   {
     const { d1: budget, cases } = seedManyPairs()
     const { app: budgetApp, controls } = loadRoute(budget)
+    controls.compoundSelectLimit = 5
+    assert.equal(cases.length, 12)
     const budgetPreview = await call(budgetApp, '/possible-duplicates/merge-batch/preview', { cases })
     const budgetApply = {
       client_request_id: 'selected_merge_budget_001', manifest_version: 1, manifest_digest: budgetPreview.body.manifest_digest,
@@ -526,6 +640,7 @@ async function main() {
       assert.ok(requests <= 12, 'continuation bound remains finite')
     } while (!result.body.complete)
     assert.equal(result.body.committedCases.length, 12)
+    assert.equal(controls.maxObservedCompoundTerms, 5)
     assert.equal(budget.db.prepare("SELECT COUNT(*) n FROM action_history WHERE entity='product'").get().n, 12)
   }
 
