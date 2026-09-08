@@ -117,7 +117,9 @@ runTest('known zero catalog cost is prefetched and the two read surfaces agree o
 
 runTest('F2: the modal portals, guards mid-save closes, and Done refreshes only after real writes', () => {
   assert.match(modalSource, /return createPortal\(/)
-  assert.match(modalSource, /const closeIfIdle = \(\) => \{\s+if \(saving\) return\s+flushPendingWorkDraft\(fastStockInDraftKey\)\s+if \(successCount > 0\) onDone\(\)\s+onClose\(\)\s+\}/)
+  assert.match(modalSource, /const requestCloseIfIdle = \(\) => \{ if \(!saving\) closeGuard\.requestClose\(\) \}/)
+  assert.match(modalSource, /const closeGuard = useCloseGuard\(\{ dirty: closeDirty \}, discardAndClose, onMinimize \? preserveAndMinimize : undefined\)/)
+  assert.match(modalSource, /if \(successCount > 0\) onDone\(\)\s+onClose\(\)/)
 })
 
 runTest('F2: Inventory launches it from the Manage menu and reloads after', () => {
