@@ -8,8 +8,9 @@
 // `is_default` is NOT that discriminator (it only says which branch a
 // blank picker preselects), so nothing here may key on it.
 //
-// `shop` rings every sale. `warehouse` holds stock and never sells;
-// stock leaves it only through a transfer to the shop. Both halves of
+// `shop` rings every sale. `warehouse` holds stock and never sells.
+// Stock can move between the two canonical roles in either direction,
+// while selling remains Shop-only. Both halves of
 // the app enforce that, so this file has a byte-for-byte twin at
 // cloudflare/src/lib/branchRoles.ts -- keep the two in step (pinned by
 // frontend/tests/branchRoleParity.test.ts).
@@ -30,13 +31,21 @@ export function branchCanSell(name: unknown): boolean {
   return branchRoleFromName(name) === 'shop'
 }
 
-// Transfers move stock only from the canonical Warehouse to the canonical
-// Shop. Unknown and historical branch names remain visible but cannot become
-// new stock-action identities.
+// Either canonical branch can be an endpoint of a transfer. Direction is
+// validated separately so two branches with the same role never become a
+// valid pair. Unknown and historical branch names remain visible but cannot
+// become new stock-action identities.
 export function branchCanBeTransferSource(name: unknown): boolean {
-  return branchRoleFromName(name) === 'warehouse'
+  return branchRoleFromName(name) !== 'other'
 }
 
 export function branchCanBeTransferDestination(name: unknown): boolean {
-  return branchRoleFromName(name) === 'shop'
+  return branchRoleFromName(name) !== 'other'
+}
+
+export function branchCanTransferBetween(fromName: unknown, toName: unknown): boolean {
+  const fromRole = branchRoleFromName(fromName)
+  const toRole = branchRoleFromName(toName)
+  return (fromRole === 'shop' && toRole === 'warehouse')
+    || (fromRole === 'warehouse' && toRole === 'shop')
 }

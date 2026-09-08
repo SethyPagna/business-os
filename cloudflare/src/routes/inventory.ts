@@ -1956,15 +1956,13 @@ app.post('/transfer', async (c) => {
     throw error
   }
 
-  // The direction rule, on the THIRD transfer route. /branches/transfer and
-  // /branches/transfer-bulk already refuse a shop source or a warehouse
-  // destination; this one is what Inventory.tsx's own transfer button calls,
-  // including its undo and redo, so leaving it out meant a shop -> warehouse
-  // move the other two rejected was one button away -- and undo of a
-  // legitimate warehouse -> shop transfer runs the refused direction by
-  // construction. Refused BEFORE the db.batch below, i.e. before any stock
-  // moves. The selected rows and the complete canonical-role set are read
-  // separately so duplicate active identities cannot be hidden by an id lookup.
+  // The direction rule, on the THIRD transfer route. All three transfer
+  // routes accept the two ordered Shop/Warehouse directions and refuse every
+  // same-role or noncanonical pairing. Inventory undo posts the opposite
+  // direction, so it depends on this exact symmetry. Refused BEFORE the
+  // db.batch below, i.e. before any stock moves. The selected rows and the
+  // complete canonical-role set are read separately so duplicate active
+  // identities cannot be hidden by an id lookup.
   const directionError = transferDirectionError(fromBranch?.name, toBranch?.name)
     || (!isCanonicalTransferSelection(canonicalTransferPair, fromBranchId, toBranchId)
       ? TRANSFER_DIRECTION_ERROR

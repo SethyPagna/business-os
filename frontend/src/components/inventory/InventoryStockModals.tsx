@@ -140,7 +140,7 @@ type InventoryStockModalsProps = {
   adjustTargetSelectOptions: AppSelectOption[]
   branchCount: number
   branchSelectOptions: AppSelectOption[]
-  branchWithPlaceholderOptions: AppSelectOption[]
+  branchWithPlaceholderOptions?: AppSelectOption[]
   defaultAddQuantity: number
   fmtKHR: MoneyFormatter
   fmtUSD: MoneyFormatter
@@ -151,6 +151,7 @@ type InventoryStockModalsProps = {
   adjustRestoredDirty?: boolean
   onCloseTransfer: () => void
   onTransfer: () => void
+  onTransferSourceChange?: (branchId: string) => void
   reasonsByType: InventoryReasonGroups
   setAdjustForm: Dispatch<SetStateAction<AdjustForm>>
   setReasonManager: Dispatch<SetStateAction<ReasonManagerState>>
@@ -158,6 +159,7 @@ type InventoryStockModalsProps = {
   t: Translator
   tr: TranslationWithFallback
   transferForm: TransferForm
+  transferDestinationBranchOptions?: AppSelectOption[]
   transferModal: InventoryProduct | null
   transferSaving: boolean
   transferSourceBranchOptions: AppSelectOption[]
@@ -188,6 +190,7 @@ export default function InventoryStockModals({
   adjustRestoredDirty = false,
   onCloseTransfer,
   onTransfer,
+  onTransferSourceChange,
   reasonsByType,
   setAdjustForm,
   setReasonManager,
@@ -195,6 +198,7 @@ export default function InventoryStockModals({
   t,
   tr,
   transferForm,
+  transferDestinationBranchOptions,
   transferModal,
   transferSaving,
   transferSourceBranchOptions,
@@ -203,6 +207,10 @@ export default function InventoryStockModals({
   const addQuantityChoices = [...new Set([1, defaultAddQuantity, 5, 10, 20].filter((n) => n > 0))]
   const requestedSetTotal = Number(adjustForm.quantity)
   const setDifference = Number.isFinite(requestedSetTotal) ? requestedSetTotal - adjustCurrentQuantity : null
+  const changeTransferSource = onTransferSourceChange || ((branchId: string) => {
+    setTransferForm((current) => ({ ...current, from_branch_id: branchId, to_branch_id: '' }))
+  })
+  const destinationBranchOptions = transferDestinationBranchOptions || branchWithPlaceholderOptions || []
 
   // Mandatory batch selection, for EVERY target -- group containers
   // included (D4b). The old "flat rows only" exclusion predated the
@@ -769,7 +777,7 @@ export default function InventoryStockModals({
                 <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('source_branch', 'Source branch')}</span>
                 <AppSelect
                   value={transferForm.from_branch_id}
-                  onChange={(nextValue) => setTransferForm((current) => ({ ...current, from_branch_id: nextValue }))}
+                  onChange={changeTransferSource}
                   ariaLabel={tr('source_branch', 'Source branch')}
                   className="w-full"
                   buttonClassName="h-10 w-full text-sm"
@@ -788,7 +796,7 @@ export default function InventoryStockModals({
                   buttonClassName="h-10 w-full text-sm"
                   menuClassName="min-w-[13rem]"
                   optionClassName="text-sm"
-                  options={branchWithPlaceholderOptions}
+                  options={destinationBranchOptions}
                 />
               </label>
               <label className="block">

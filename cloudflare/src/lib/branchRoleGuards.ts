@@ -4,15 +4,15 @@
 // the rule the pickers enforce in the UI.
 //
 // The two messages are the EXACT English of the pack keys the UI shows
-// (`pos_warehouse_not_sellable`, `transfer_source_warehouse_only` in
+// (`pos_warehouse_not_sellable`, `transfer_canonical_pair_only` in
 // frontend/src/lang/en.json), so a rejection that reaches the client maps
 // back to the same prompt in both languages instead of surfacing a second,
 // server-only wording. That coupling is pinned by
 // scripts/test-selling-branch-guard-pure.cjs.
-import { branchCanBeTransferDestination, branchCanBeTransferSource, branchCanSell } from './branchRoles'
+import { branchCanTransferBetween, branchCanSell } from './branchRoles'
 
 export const WAREHOUSE_NOT_SELLABLE_ERROR = 'Only allow Shop sale. Please transfer to Shop first.'
-export const TRANSFER_DIRECTION_ERROR = 'Transfers move stock from Warehouse to Shop.'
+export const TRANSFER_DIRECTION_ERROR = 'Transfers move stock only between Shop and Warehouse.'
 
 export type BranchNameRow = { id: number; name: string | null }
 
@@ -32,11 +32,10 @@ export function firstUnsellableBranch(rows: readonly BranchNameRow[]): BranchNam
 }
 
 /**
- * Null only for Warehouse -> Shop; every unknown or historical identity is
- * refused with the same client-facing message.
+ * Null only when the source and destination have opposite canonical roles;
+ * every same-role, unknown, or historical identity is refused with the same
+ * client-facing message.
  */
 export function transferDirectionError(fromName: unknown, toName: unknown): string | null {
-  if (!branchCanBeTransferSource(fromName)) return TRANSFER_DIRECTION_ERROR
-  if (!branchCanBeTransferDestination(toName)) return TRANSFER_DIRECTION_ERROR
-  return null
+  return branchCanTransferBetween(fromName, toName) ? null : TRANSFER_DIRECTION_ERROR
 }

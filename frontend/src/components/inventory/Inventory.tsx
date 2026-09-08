@@ -74,6 +74,7 @@ import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.
 import { adjustBranchQuantity, isStockInSubmission, isStockReceiptCreditIncomplete, stockReceiptWire, stockAdjustBatchWire, stockReceiptGateCode, stockAdjustQuantityError, STOCK_ADJUST_QUANTITY_FALLBACKS, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../utils/stockReceiptFields.ts'
 import { isApiVersionMismatchError } from '../../api/http.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
+import { branchCanBeTransferSource, branchCanTransferBetween } from '../../utils/branchRoles.ts'
 import type { QueryParams } from '../../api/query.ts'
 import {
   beginTrackedRequest,
@@ -598,15 +599,14 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     branches.find((branch) => branch.is_default) || branches[0] || null
   ), [branches])
   const defaultTransferDestinationBySourceId = useMemo(() => {
-    const branchIds = (Array.isArray(branches) ? branches : [])
-      .map((branch) => String(branch?.id || ''))
-      .filter(Boolean)
-    const firstBranchId = branchIds[0] || ''
-    const secondBranchId = branchIds[1] || ''
-    return new Map(branchIds.map((branchId) => [
-      branchId,
-      branchId !== firstBranchId ? firstBranchId : secondBranchId,
-    ]))
+    const eligibleBranches = (Array.isArray(branches) ? branches : [])
+      .filter((branch) => branchCanBeTransferSource(branch?.name))
+    return new Map(eligibleBranches.map((sourceBranch) => {
+      const destination = eligibleBranches.find((candidate) => (
+        branchCanTransferBetween(sourceBranch?.name, candidate?.name)
+      ))
+      return [String(sourceBranch?.id || ''), String(destination?.id || '')]
+    }))
   }, [branches])
   const getBranchLabel = useCallback((branchId: InventoryId | null | undefined, fallback = '') => (
     branchesById.get(String(branchId))?.name || fallback || String(branchId || '')
@@ -1083,13 +1083,31 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     { value: '', label: chooseBranchLabel },
     ...branches.map((branch) => {
       const branchQty = Number((transferModal?.branch_stock || []).find((item) => String(item.branch_id) === String(branch.id))?.quantity || 0)
-      return { value: String(branch.id), label: `${branch.name || branch.id} (${branchQty})` }
+      return {
+        value: String(branch.id),
+        label: `${branch.name || branch.id} (${branchQty})`,
+        disabled: !branchCanBeTransferSource(branch.name),
+      }
     }),
   ], [branches, chooseBranchLabel, transferModal])
-  const branchWithPlaceholderOptions = useMemo(() => [
-    { value: '', label: chooseBranchLabel },
-    ...branchSelectOptions,
-  ], [branchSelectOptions, chooseBranchLabel])
+  const transferDestinationBranchOptions = useMemo(() => {
+    const selectedSource = branchesById.get(String(transferForm.from_branch_id))
+    return [
+      { value: '', label: chooseBranchLabel },
+      ...branches.map((branch) => ({
+        value: String(branch.id),
+        label: branch.name || String(branch.id),
+        disabled: !branchCanTransferBetween(selectedSource?.name, branch.name),
+      })),
+    ]
+  }, [branches, branchesById, chooseBranchLabel, transferForm.from_branch_id])
+  const handleTransferSourceChange = useCallback((sourceBranchId: string) => {
+    setTransferForm((current) => ({
+      ...current,
+      from_branch_id: sourceBranchId,
+      to_branch_id: defaultTransferDestinationBySourceId.get(String(sourceBranchId)) || '',
+    }))
+  }, [defaultTransferDestinationBySourceId])
   // The figure every adjust verdict is measured against -- receipt or removal,
   // picker or no picker, which fields the operator is shown. It is the BRANCH
   // the form is adjusting, not the page's branch filter: `getStockQty` answers
@@ -1429,9 +1447,18 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     void ensureInventoryReasonsLoaded()
     const branchStock = Array.isArray(p?.branch_stock) ? p.branch_stock : []
     const firstStockBranch = branchStock.find((item: LegacyInventoryRecord) => Number(item?.quantity || 0) > 0)?.branch_id
-    const defaultSourceId = branchFilter !== 'all'
+    const requestedSourceId = branchFilter !== 'all'
       ? String(branchFilter)
       : String(firstStockBranch || defaultBranch?.id || '')
+    const requestedSource = branchesById.get(requestedSourceId)
+    const firstCanonicalStockBranchId = branchStock.find((item: LegacyInventoryRecord) => {
+      const branch = branchesById.get(String(item?.branch_id))
+      return Number(item?.quantity || 0) > 0 && branchCanBeTransferSource(branch?.name)
+    })?.branch_id
+    const fallbackCanonicalBranch = branches.find((branch) => branchCanBeTransferSource(branch.name))
+    const defaultSourceId = branchCanBeTransferSource(requestedSource?.name)
+      ? requestedSourceId
+      : String(firstCanonicalStockBranchId || fallbackCanonicalBranch?.id || '')
     const defaultDestinationId = String(
       defaultTransferDestinationBySourceId.get(defaultSourceId) || '',
     )
@@ -1552,6 +1579,10 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       notify(tr('select_transfer_branches', 'Choose both source and destination branches.'), 'error')
       return
     }
+    if (!branchCanTransferBetween(fromBranch.name, toBranch.name)) {
+      notify(tr('transfer_canonical_pair_only', 'Transfers move stock only between Shop and Warehouse.'), 'error')
+      return
+    }
     if (!beginSingleAction(transferStockInFlightRef, { blocked: transferSaving })) return
     const confirmation = tr(
       'confirm_transfer_stock_details',
@@ -1577,9 +1608,9 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
         userId: user?.id,
         userName: user?.name || user?.username,
       }), 'Transfer inventory stock')
-      // The direction rule now lives on POST /inventory/transfer too, so a
-      // shop -> warehouse move (including the undo of a legitimate one) comes
-      // back as the pack sentence rather than the server's English.
+      // The direction rule lives on POST /inventory/transfer too. Both
+      // canonical directions are accepted, while a stale noncanonical pair
+      // comes back as the same localized pack sentence used by the pickers.
       if (result?.success === false) throw new Error(localizeBranchRuleError(result?.error, (key) => tr(key, '')) || tr('stock_transfer_failed', 'Stock transfer failed'))
       actionHistory.pushAction({
         label: `${tr('transfer', 'Transfer')}: ${transferModal.name}`,
@@ -2653,7 +2684,6 @@ ${inventoryFeesFormulaText}`,
             adjustTargetSelectOptions={adjustTargetSelectOptions}
             branchCount={branches.length}
             branchSelectOptions={branchSelectOptions}
-            branchWithPlaceholderOptions={branchWithPlaceholderOptions}
             defaultAddQuantity={DEFAULT_ADD_QUANTITY}
             fmtKHR={fmtKHR}
             fmtUSD={fmtUSD}
@@ -2663,6 +2693,7 @@ ${inventoryFeesFormulaText}`,
             onMinimizeAdjust={adjustModal ? preserveAndMinimizeAdjust : undefined}
             onCloseTransfer={() => setTransferModal(null)}
             onTransfer={handleTransferStock}
+            onTransferSourceChange={handleTransferSourceChange}
             reasonsByType={reasonsByType}
             setAdjustForm={setAdjustForm}
             setReasonManager={setReasonManager}
@@ -2670,6 +2701,7 @@ ${inventoryFeesFormulaText}`,
             t={t}
             tr={tr}
             transferForm={transferForm}
+            transferDestinationBranchOptions={transferDestinationBranchOptions}
             transferModal={transferModal}
             transferSaving={transferSaving}
             transferSourceBranchOptions={transferSourceBranchOptions}
