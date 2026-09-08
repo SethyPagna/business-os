@@ -316,6 +316,7 @@ async function run() {
   })
   assert.equal(missingStatusKeyResult.status, 400, JSON.stringify(missingStatusKeyResult))
   assert.equal(missingStatusKeyResult.body.code, 'client_request_id_required')
+  assert.equal(missingStatusKeyResult.body.action, 'refresh_required')
   assert.equal(missingStatusKey.sql.prepare('SELECT COUNT(*) n FROM sale_record_events').get().n, 0)
 
   const directRace = fixture(); seed(directRace)
@@ -343,6 +344,35 @@ async function run() {
   ])
   assert.deepEqual(JSON.parse(cancelledEvent.response_json), cancelledResult.body)
   console.log('PASS direct cancellation records only the changed status, reason, and supplied note with its exact retry response')
+
+  const uncancelled = fixture(); seed(uncancelled)
+  uncancelled.sql.prepare(`UPDATE sales SET sale_status='cancelled',status_before_cancel='completed',
+    cancel_reason='other',cancel_note='Historical note',updated_at='cancel-v1' WHERE id=1`).run()
+  const uncancelledResult = await uncancelled.call('/1/status', {
+    sale_status: 'completed', expected_updated_at: 'cancel-v1', client_request_id: 'direct-uncancel-1',
+  })
+  assert.equal(uncancelledResult.status, 200, JSON.stringify(uncancelledResult))
+  const uncancelEvent = uncancelled.sql.prepare("SELECT kind,changes_json FROM sale_record_events WHERE source_kind='sale_status'").get()
+  assert.equal(uncancelEvent.kind, 'cancelled')
+  assert.deepEqual(JSON.parse(uncancelEvent.changes_json), [
+    { field: 'sale_status', before: { state: 'known_value', value: 'cancelled' }, after: { state: 'known_value', value: 'completed' } },
+    { field: 'cancel_reason', before: { state: 'known_value', value: 'other' }, after: { state: 'known_none' } },
+    { field: 'cancel_note', before: { state: 'known_value', value: 'Historical note' }, after: { state: 'known_none' } },
+  ])
+
+  const staleCancel = fixture(); seed(staleCancel)
+  staleCancel.sql.prepare("UPDATE sales SET cancel_reason='mistake',cancel_note='Stale legacy note' WHERE id=1").run()
+  const staleCancelResult = await staleCancel.call('/1/status', {
+    sale_status: 'cancelled', expected_updated_at: 'sale-v1', client_request_id: 'direct-stale-cancel-1',
+    cancel_reason: 'buyer_refused',
+  })
+  assert.equal(staleCancelResult.status, 200, JSON.stringify(staleCancelResult))
+  assert.deepEqual(JSON.parse(staleCancel.sql.prepare("SELECT changes_json FROM sale_record_events WHERE source_kind='sale_status'").get().changes_json), [
+    { field: 'sale_status', before: { state: 'known_value', value: 'awaiting_payment' }, after: { state: 'known_value', value: 'cancelled' } },
+    { field: 'cancel_reason', before: { state: 'known_value', value: 'mistake' }, after: { state: 'known_value', value: 'buyer_refused' } },
+    { field: 'cancel_note', before: { state: 'known_value', value: 'Stale legacy note' }, after: { state: 'known_none' } },
+  ])
+  console.log('PASS un-cancel and stale legacy cancellation fields retain exact before values and changed-only clears')
 
   const raced = fixture(); seed(raced)
   raced.barrier(() => raced.sql.prepare("UPDATE sales SET notes='concurrent' WHERE id=1").run())

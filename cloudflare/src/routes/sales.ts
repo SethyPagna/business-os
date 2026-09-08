@@ -1581,7 +1581,11 @@ app.patch('/:id/status', async (c) => {
     return c.json({ id: Number(id), sale_status: saleStatus, updated_at: sale.updated_at || null })
   }
   if (!paymentFieldsSent && !statusRequestId) {
-    return c.json({ error: 'client_request_id is required when changing a sale status.', code: 'client_request_id_required' }, 400)
+    return c.json({
+      error: 'Refresh this app before changing a sale status, then try again.',
+      code: 'client_request_id_required',
+      action: 'refresh_required',
+    }, 400)
   }
 
   // Which transitions are legal at all (returns-flow ownership of
@@ -1948,19 +1952,26 @@ app.patch('/:id/status', async (c) => {
       before: { state: 'known_value', value: oldStatus },
       after: { state: 'known_value', value: saleStatus },
     }]
-    if (saleStatus === 'cancelled' && cancelReason) {
-      statusChanges.push({
-        field: 'cancel_reason', before: { state: 'known_none' },
-        after: { state: 'known_value', value: cancelReason },
-      })
-      if (cancelNote) statusChanges.push({
-        field: 'cancel_note', before: { state: 'known_none' },
-        after: { state: 'known_value', value: cancelNote },
-      })
+    const cancellationTransition = oldStatus === 'cancelled' || saleStatus === 'cancelled'
+    if (cancellationTransition) {
+      const cancellationState = (value: unknown): { state: 'known_none' } | { state: 'known_value'; value: string } => {
+        const normalized = value == null ? '' : String(value).trim()
+        return normalized ? { state: 'known_value', value: normalized } : { state: 'known_none' }
+      }
+      const reasonBefore = cancellationState(sale.cancel_reason)
+      const reasonAfter = cancellationState(saleStatus === 'cancelled' ? cancelReason : null)
+      if (JSON.stringify(reasonBefore) !== JSON.stringify(reasonAfter)) {
+        statusChanges.push({ field: 'cancel_reason', before: reasonBefore, after: reasonAfter })
+      }
+      const noteBefore = cancellationState(sale.cancel_note)
+      const noteAfter = cancellationState(saleStatus === 'cancelled' ? cancelNote : null)
+      if (JSON.stringify(noteBefore) !== JSON.stringify(noteAfter)) {
+        statusChanges.push({ field: 'cancel_note', before: noteBefore, after: noteAfter })
+      }
     }
     const statusEvent = buildSaleRecordEventsInsert([{
       saleId: Number(id), sourceKind: 'sale_status', sourceId: statusSourceId,
-      generation: 0, kind: saleStatus === 'cancelled' ? 'cancelled' : 'status_changed', via: 'apply',
+      generation: 0, kind: oldStatus === 'cancelled' || saleStatus === 'cancelled' ? 'cancelled' : 'status_changed', via: 'apply',
       subject: sale.receipt_number == null ? null : String(sale.receipt_number),
       actorId: user.id, actorUsername: actorSnapshot(user), occurredAt: mutationStamp,
       changes: statusChanges, requestDigest: statusDigest, response: directStatusResponse,
