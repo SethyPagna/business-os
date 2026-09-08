@@ -33,7 +33,7 @@ class FakeHono {
   on() { return this } all() { return this } route() { return this } onError() { return this } notFound() { return this }
 }
 
-function loadRoute(nativeDb) {
+function loadRoute(nativeDb, realMergeRuntime = false) {
   const dbLib = loadTs('lib/db.ts')
   const rawCompat = new dbLib.D1Compat(nativeDb)
   const controls = { statements: 0, maxBindings: 0, maxCompoundTerms: 0, maxBatchStatements: 0, fullLotDetailReads: 0 }
@@ -62,19 +62,40 @@ function loadRoute(nativeDb) {
   const binding = loadTs('lib/sqlBinding.ts')
   const identity = loadTs('lib/productIdentity.ts', { './db': {}, './sqlBinding': binding, './productDetailRule': detail })
   const merge = loadTs('lib/productMerge.ts')
+  const searchMatch = loadTs('lib/searchMatch.ts')
   const selected = loadTs('lib/productConflictMergeBatch.ts', { './productIdentity': identity, './productDetailRule': detail, './productMerge': merge })
   const actionGroups = loadTs('lib/productConflictActionGroups.ts', {
     './productIdentity': identity, './productDetailRule': detail, './productMerge': merge, './productConflictMergeBatch': selected,
   })
   const permissions = { getActionTier: () => 'full', getPermissionTier: () => 'full', hasPermission: () => true, getMergedPermissions: () => ({}), isAdminControlUser: () => true }
+  const actor = loadTs('lib/actorSnapshot.ts')
+  const never = () => { throw new Error('unrelated undo branch invoked') }
+  const snapshot = realMergeRuntime ? loadTs('lib/productMergeSnapshot.ts', { './db': {} }) : undefined
+  const undo = realMergeRuntime ? loadTs('lib/undoAppliers.ts', {
+    '../index': {}, './auth': {}, './db': { getDb: () => db }, './audit': { audit: async () => {} },
+    '../durable-objects/broadcastHub': { broadcast: async () => {} }, './branchWrites': { branchUpdateStatements: () => [] },
+    './permissions': permissions, './actorSnapshot': actor, './productMerge': merge,
+    './saleBulkStatus': { replaySaleBulkStatus: never },
+    './saleBulkUpdate': { BULK_UPDATE_KIND: 'sale.fields.bulk', BULK_CUSTOMER_UPDATE_KIND: 'sale.customer.bulk', replaySaleBulkUpdate: never },
+    './returnBulkAction': { RETURN_BULK_ACTION_KIND: 'return.fields.bulk', replayReturnBulkAction: never },
+    './saleSettlementAction': { SALE_SETTLEMENT_ACTION_KIND: 'sale.settlement', replaySaleSettlementAction: never, saleMutationGuard: never },
+    './stockSession': { STOCK_SESSION_KIND: 'stock.session', replayStockSession: never },
+    './saleLineAddition': {
+      buildAllocationStatements: () => [], buildOperationAllocationStatements: () => [], planSaleLineAddition: never,
+      planSaleLineRemoval: never, plannedLineFromRecord: never, saleLineKhrSnapshotStatement: never, saleMoneyUpdateStatement: never,
+    },
+    './saleAmendments': { amendmentEntryStatement: never },
+  }) : undefined
   loadTs('routes/products.ts', {
     hono: { Hono: FakeHono }, '../index': {}, '../lib/db': { getDb: () => db }, '../lib/auth': { requireAuth: async () => {} },
     '../lib/productDetailRule': detail, '../lib/sqlBinding': binding, '../lib/productIdentity': identity, '../lib/productMerge': merge,
     '../lib/productConflictMergeBatch': selected, '../lib/productConflictActionGroups': actionGroups, '../lib/permissions': permissions,
+    '../lib/searchMatch': searchMatch,
+    ...(realMergeRuntime ? { '../lib/undoAppliers': undo, '../lib/productMergeSnapshot': snapshot, '../lib/actorSnapshot': actor } : {}),
     '../lib/audit': { audit: async () => {} }, '../lib/cache': { bumpVersion: async () => {}, cachedJsonResponse: async () => null, getVersionWithFallback: async () => '1' },
     '../durable-objects/broadcastHub': { broadcast: async () => {} },
   })
-  return { app: FakeHono.instance, controls, db: rawCompat }
+  return { app: FakeHono.instance, controls, db: rawCompat, undo }
 }
 
 async function main() {
@@ -87,6 +108,7 @@ async function main() {
     }
     await execSql(`
       CREATE TABLE action_history(id INTEGER PRIMARY KEY);
+      CREATE TABLE undo_snapshots(id INTEGER PRIMARY KEY);
       CREATE TABLE branches(id INTEGER PRIMARY KEY,name TEXT,is_active INTEGER);
       CREATE TABLE products(id INTEGER PRIMARY KEY,name TEXT,barcode TEXT,category TEXT,categories TEXT,brand TEXT,brands TEXT,brand_compact TEXT,
         unit TEXT,unit_normalized TEXT,image_path TEXT,is_active INTEGER,is_group INTEGER,updated_at TEXT,
@@ -156,4 +178,6 @@ async function main() {
   } finally { await mf.dispose() }
 }
 
-main().catch((error) => { console.error(error); process.exit(1) })
+if (require.main === module) main().catch((error) => { console.error(error); process.exit(1) })
+
+module.exports = { loadRoute }

@@ -1,15 +1,13 @@
 -- Durable draft receipts for one global Products > Conflicts action review.
--- Phase one stores review-only N-product merge plans; it performs no product,
--- stock, lot, audit, action-history, or undo mutation.
--- Pre/post release assertions (all results must be unchanged):
---   SELECT COUNT(*) FROM products;
---   SELECT COUNT(*), COALESCE(SUM(quantity), 0) FROM branch_stock;
---   SELECT COUNT(*), COALESCE(SUM(quantity), 0) FROM branch_batch_stock;
---   SELECT COUNT(*) FROM product_batches;
---   SELECT COUNT(*) FROM action_history;
---   SELECT COUNT(*) FROM audit_logs;
--- Recovery: roll back the route while retaining these server-owned drafts.
--- Dropping receipt rows is not a product-data rollback and must not be used as one.
+-- Draft rows are read-only until an actor finalizes and applies a reviewed
+-- manifest. Apply then records one atomic member receipt per destructive fold
+-- and one resumable group history whose children restore exact linked state.
+-- Pre-release assertions: every non-null member undo_snapshot_id resolves to a
+-- product.merge.group.child snapshot; every group action_history_id resolves to
+-- one server-managed product.merge.group action; group/member status partitions
+-- and review counts balance. Recovery: roll back the route while retaining
+-- receipts and snapshots. Never drop receipt rows as a product-data rollback;
+-- use the registered group Undo path for applied members.
 
 CREATE TABLE product_conflict_action_reviews (
   id TEXT PRIMARY KEY,
@@ -42,7 +40,7 @@ CREATE TABLE product_conflict_action_groups (
   member_ids_json TEXT NOT NULL CHECK (json_valid(member_ids_json) AND json_type(member_ids_json) = 'array'),
   eligibility_basis TEXT CHECK (eligibility_basis IS NULL OR eligibility_basis IN ('name', 'barcode')),
   eligibility_value TEXT,
-  status TEXT NOT NULL CHECK (status IN ('actionable', 'blocked', 'ready', 'running', 'partial', 'completed', 'refused')),
+  status TEXT NOT NULL CHECK (status IN ('actionable', 'blocked', 'ready', 'running', 'partial', 'completed', 'refused', 'reversed')),
   blocker_code TEXT,
   blocker_message TEXT,
   state_digest TEXT NOT NULL,
@@ -51,6 +49,7 @@ CREATE TABLE product_conflict_action_groups (
   final_plan_json TEXT CHECK (final_plan_json IS NULL OR json_valid(final_plan_json)),
   operation_id TEXT UNIQUE,
   action_history_id INTEGER REFERENCES action_history(id) ON DELETE SET NULL,
+  reversal_generation INTEGER NOT NULL DEFAULT 0 CHECK (reversal_generation >= 0),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (review_id, ordinal),
@@ -69,11 +68,12 @@ CREATE TABLE product_conflict_action_group_members (
   product_id INTEGER NOT NULL,
   role TEXT NOT NULL DEFAULT 'candidate' CHECK (role IN ('candidate', 'keeper', 'merged')),
   status TEXT NOT NULL DEFAULT 'reviewed'
-    CHECK (status IN ('reviewed', 'planned', 'committed', 'history_pending', 'undo_ready', 'refused')),
+    CHECK (status IN ('reviewed', 'planned', 'committed', 'history_pending', 'undo_ready', 'refused', 'reversed')),
   state_digest TEXT NOT NULL,
   snapshot_json TEXT NOT NULL CHECK (json_valid(snapshot_json) AND json_type(snapshot_json) = 'object'),
   operation_id TEXT UNIQUE,
   action_history_id INTEGER REFERENCES action_history(id) ON DELETE SET NULL,
+  undo_snapshot_id INTEGER REFERENCES undo_snapshots(id) ON DELETE SET NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (review_id, group_ordinal, member_ordinal),

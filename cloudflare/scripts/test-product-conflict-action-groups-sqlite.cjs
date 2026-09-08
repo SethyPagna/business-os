@@ -58,18 +58,27 @@ function adapter(d1, controls) {
     batch: async (statements) => {
       statements.forEach(({ sql, params }) => observe(sql, params))
       controls.maxBatchStatements = Math.max(controls.maxBatchStatements, statements.length)
+      const readOnly = statements.every(({ sql }) => /^\s*(?:SELECT|WITH|PRAGMA)\b/i.test(sql))
+      if (!readOnly && controls.beforeNextWriteBatch) {
+        const hook = controls.beforeNextWriteBatch
+        controls.beforeNextWriteBatch = null
+        hook()
+      }
       if (controls.failNextBatch) {
         controls.failNextBatch = false
         return d1.batch([...statements, { sql: 'INSERT INTO missing_atomic_guard(value) VALUES(1)', params: {} }])
       }
+      if (readOnly) return statements.map((statement) => ({
+        success: true, results: d1.prepare(statement.sql).all(statement.params || {}),
+      }))
       return d1.batch(statements)
     },
   }
 }
 
-function loadRoute(d1) {
+function loadRoute(d1, realMergeRuntime = false) {
   const controls = {
-    statements: 0, maxBindings: 0, maxCompoundTerms: 0, maxBatchStatements: 0, failNextBatch: false,
+    statements: 0, maxBindings: 0, maxCompoundTerms: 0, maxBatchStatements: 0, failNextBatch: false, beforeNextWriteBatch: null,
     fullProductDetailReads: 0, fullLotDetailReads: 0,
   }
   const db = adapter(d1, controls)
@@ -89,15 +98,34 @@ function loadRoute(d1) {
     getActionTier: (user, section, action) => (action === 'merge_duplicates' && user.noMerge) || (action === 'image' && user.noImage) ? 'none' : 'full',
     getPermissionTier: () => 'full', hasPermission: () => true, getMergedPermissions: () => ({}), isAdminControlUser: () => true,
   }
+  const actor = loadTs('lib/actorSnapshot.ts')
+  const never = () => { throw new Error('unrelated undo branch invoked') }
+  const snapshot = realMergeRuntime ? loadTs('lib/productMergeSnapshot.ts', { './db': {} }) : undefined
+  const undo = realMergeRuntime ? loadTs('lib/undoAppliers.ts', {
+    '../index': {}, './auth': {}, './db': { getDb: () => db }, './audit': { audit: async () => {} },
+    '../durable-objects/broadcastHub': { broadcast: async () => {} }, './branchWrites': { branchUpdateStatements: () => [] },
+    './permissions': permissions, './actorSnapshot': actor, './productMerge': merge,
+    './saleBulkStatus': { replaySaleBulkStatus: never },
+    './saleBulkUpdate': { BULK_UPDATE_KIND: 'sale.fields.bulk', BULK_CUSTOMER_UPDATE_KIND: 'sale.customer.bulk', replaySaleBulkUpdate: never },
+    './returnBulkAction': { RETURN_BULK_ACTION_KIND: 'return.fields.bulk', replayReturnBulkAction: never },
+    './saleSettlementAction': { SALE_SETTLEMENT_ACTION_KIND: 'sale.settlement', replaySaleSettlementAction: never, saleMutationGuard: never },
+    './stockSession': { STOCK_SESSION_KIND: 'stock.session', replayStockSession: never },
+    './saleLineAddition': {
+      buildAllocationStatements: () => [], buildOperationAllocationStatements: () => [], planSaleLineAddition: never,
+      planSaleLineRemoval: never, plannedLineFromRecord: never, saleLineKhrSnapshotStatement: never, saleMoneyUpdateStatement: never,
+    },
+    './saleAmendments': { amendmentEntryStatement: never },
+  }) : undefined
   loadTs('routes/products.ts', {
     hono: { Hono: FakeHono }, '../index': {}, '../lib/db': { getDb: () => db }, '../lib/auth': { requireAuth: async () => {} },
     '../lib/productDetailRule': detail, '../lib/sqlBinding': binding, '../lib/productIdentity': identity, '../lib/productMerge': merge,
     '../lib/productConflictMergeBatch': selected, '../lib/productConflictActionGroups': actionGroups, '../lib/permissions': permissions,
     '../lib/searchMatch': searchMatch,
+    ...(realMergeRuntime ? { '../lib/undoAppliers': undo, '../lib/productMergeSnapshot': snapshot, '../lib/actorSnapshot': actor } : {}),
     '../lib/audit': { audit: async () => {} }, '../lib/cache': { bumpVersion: async () => {}, cachedJsonResponse: async () => null, getVersionWithFallback: async () => '1' },
     '../durable-objects/broadcastHub': { broadcast: async () => {} },
   })
-  return { app: FakeHono.instance, controls }
+  return { app: FakeHono.instance, controls, undo }
 }
 
 function seed(groupCount = 801) {
@@ -198,10 +226,10 @@ async function main() {
   const remove = await post(app, { ...body, client_request_id: 'remove_disabled_001', remove_rows: [{ product_id: 10000, reason: 'bad' }] })
   assert.equal(remove.status, 409); assert.equal(remove.body.code, 'phase_not_available')
   const applyDisabled = await app.posts.get('/possible-duplicates/merge-batch')({
-    env: {}, req: { json: async () => ({ resolution_version: 2, review_id: response.body.review_id, manifest_digest: response.body.draft_digest }) },
+    env: {}, req: { json: async () => ({ review_id: response.body.review_id, manifest_digest: response.body.draft_digest, client_request_id: response.body.review_id }) },
     get: () => ({ id: 900, username: 'reviewer' }), json: (payload, status = 200) => ({ status, body: payload }),
   })
-  assert.equal(applyDisabled.status, 409); assert.equal(applyDisabled.body.code, 'phase_not_available')
+  assert.equal(applyDisabled.status, 409); assert.equal(applyDisabled.body.code, 'manifest_conflict')
   controls.failNextBatch = true
   await assert.rejects(post(app, { ...body, client_request_id: 'atomic_failure_001' }), /missing_atomic_guard/)
   assert.equal(d1.db.prepare("SELECT COUNT(*) n FROM product_conflict_action_reviews WHERE request_id='atomic_failure_001'").get().n, 0)
