@@ -22,7 +22,7 @@
     ],
     "identity": {
       "unique": ["source_kind", "source_id", "generation", "sale_id"],
-      "id_formula": "crypto.randomUUID() generated before the atomic batch; id is an opaque row identifier, while the composite unique key is the retry identity",
+      "id_formula": "crypto.randomUUID() generated before the atomic batch and enforced as a lowercase RFC 4122 version-4 UUID by SQL; id is an opaque row identifier, while the composite unique key is the retry identity",
       "rule": "kind is payload under the unique act identity and cannot create a second record for one act. Do not concatenate unescaped tuple parts into id."
     },
     "checks": [
@@ -36,7 +36,8 @@
       "occurred_at is non-empty and at most 40 characters",
       "changes_json is a valid JSON array with 1..12 elements and at most 65536 UTF-8 bytes; the migration measures bytes with length(CAST(changes_json AS BLOB))",
       "request_digest is null or a 64-character lowercase SHA-256 hex string",
-      "response_json is null or a valid JSON object no larger than 65536 UTF-8 bytes, measured with length(CAST(response_json AS BLOB))"
+      "response_json is null or a valid JSON object no larger than 65536 UTF-8 bytes, measured with length(CAST(response_json AS BLOB))",
+      "source_kind and kind are an allowed writer pair, and generation/via are coupled: generation zero is apply; only replay-capable receipt sources permit later generations, with odd generations undo and even generations redo"
     ],
     "index": [
       "sale_id, occurred_at, id",
@@ -55,7 +56,7 @@
       "Require each side to be exactly known_value with value, known_none without value, or unknown without value.",
       "Reject duplicate fields and equal before/after states.",
       "Validate nested customer, membership, driver, item, item-list, payment, and payment-details shapes and scalar bounds. New customer values permit only stable id and display name; phone and address are forbidden. Existing undo receipts may retain their pre-existing private fields internally, but projection into changes_json removes them.",
-      "When response_json is used for direct-request idempotency, permit only the endpoint's fixed success/id/status/timestamp response keys. Never persist a request body, contact details, or arbitrary error payload in response_json.",
+      "When response_json is used for direct-request idempotency, permit only the endpoint's fixed success/id/status/timestamp response keys and their exact scalar types. Never persist a request body, contact details, nested objects, arrays, or arbitrary error payload in response_json.",
       "Require the complete serialized @events array to be at most 131072 UTF-8 bytes.",
       "Serialize only the validated normalized structure; never serialize request bodies or arbitrary audit variables."
     ],
@@ -141,7 +142,7 @@
       "The existing maintenance mode restore bypass permits reverse-order child deletion; event UPDATE remains forbidden."
     ],
     "factory_reset": "Add sale_record_events before sales in FACTORY_RESET_TABLES and wrap that existing atomic batch with the dedicated reset guard statements.",
-    "reset_data": "Add sale_record_events before sales in products+includeSales, sales, and all lists; wrap each existing atomic delete batch with the dedicated reset guard statements. The same exact table set drives both operations: BACKUP_TABLES parent-first order writes the scoped backup, while the reset list uses child-first delete order.",
+    "reset_data": "Add sale_record_events before sales in products+includeSales, sales, and all delete lists; wrap each existing atomic delete batch with the dedicated reset guard statements. The delete scope remains child-first and narrow. createSectionBackup automatically widens any section touching a sales/replay table to the complete SALE_REPLAY_RESTORE_BUNDLE in BACKUP_TABLES parent-first order, so the mandatory recovery artifact passes the same dependency preflight used by restore.",
     "retention": "No ephemeral-retention path references sale_record_events. Ordinary 21-day audit and action-history pruning cannot erase it."
   },
   "permissions_and_audit": {

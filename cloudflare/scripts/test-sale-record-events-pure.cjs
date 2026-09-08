@@ -32,6 +32,7 @@ const valid = (overrides = {}) => ({
 insert.run(valid())
 assert.equal(db.prepare('SELECT COUNT(*) n FROM sale_record_events').get().n, 1)
 for (const [label, overrides] of [
+  ['id', { id: 'not-a-uuid' }],
   ['source', { source_kind: 'other' }],
   ['kind', { kind: 'legacy_sale_change' }],
   ['via', { via: 'amend' }],
@@ -41,7 +42,12 @@ for (const [label, overrides] of [
   ['too many changes', { changes_json: JSON.stringify(Array.from({ length: 13 }, () => JSON.parse(change)[0])) }],
   ['digest', { request_digest: 'G'.repeat(64) }],
   ['response shape', { response_json: '[]' }],
+  ['source kind pair', { kind: 'item_added' }],
+  ['direct replay generation', { generation: 1, via: 'undo' }],
 ]) assert.throws(() => insert.run(valid(overrides)), /constraint|malformed JSON/i, label)
+
+insert.run(valid({ source_kind: 'sale_settlement', source_id: crypto.randomUUID(), kind: 'payment_settled', generation: 1, via: 'undo' }))
+assert.throws(() => insert.run(valid({ source_kind: 'sale_settlement', source_id: crypto.randomUUID(), kind: 'payment_settled', generation: 2, via: 'undo' })), /constraint/i)
 
 const oversized = JSON.stringify([{ field: 'sale_status', before: { state: 'known_value', value: 'ក'.repeat(22000) }, after: { state: 'known_none' } }])
 assert(Buffer.byteLength(oversized, 'utf8') > 65536 && oversized.length < 65536, 'fixture distinguishes UTF-8 bytes from JS characters')

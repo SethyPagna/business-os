@@ -80,6 +80,19 @@ const TEXT_FIELDS = new Set<SaleRecordField>([
   'receipt_number', 'sale_status', 'payment_method', 'cancel_reason', 'cancel_note',
 ])
 const RESPONSE_KEYS = new Set(['success', 'id', 'saleId', 'returnId', 'sale_status', 'status', 'updated_at', 'duplicate'])
+const SOURCE_RULES: Record<SaleRecordSourceKind, {
+  kinds: ReadonlySet<Exclude<SaleRecordKind, 'legacy_sale_change'>>
+  replay: boolean
+}> = {
+  sale_status: { kinds: new Set(['status_changed', 'cancelled']), replay: false },
+  sale_customer: { kinds: new Set(['customer_changed']), replay: false },
+  sale_settlement: { kinds: new Set(['payment_changed', 'payment_settled']), replay: true },
+  sale_bulk_status: { kinds: new Set(['status_changed', 'cancelled']), replay: true },
+  sale_bulk_update: { kinds: new Set(['customer_changed', 'payment_changed', 'driver_changed']), replay: true },
+  return_create: { kinds: new Set(['status_changed']), replay: false },
+  return_edit: { kinds: new Set(['status_changed']), replay: false },
+  return_bulk: { kinds: new Set(['status_changed']), replay: true },
+}
 
 function fail(message: string): never { throw new SaleRecordEventError(message) }
 function bytes(value: string): number { return new TextEncoder().encode(value).byteLength }
@@ -186,6 +199,11 @@ function validateKnownValue(field: SaleRecordField, value: unknown): void {
   if (field === 'payment') return validatePayment(value)
   if (field === 'delivery') {
     if (!object(value)) fail('delivery must be an object.')
+    exactKeys(value, ['is_delivery', 'driver', 'delivery_fee_usd', 'actual_delivery_cost_usd'], 'delivery')
+    if (value.is_delivery !== true) fail('delivery.is_delivery must be true.')
+    if (value.driver !== null) validateDriver(value.driver)
+    nullableNumber(value.delivery_fee_usd, 'delivery.delivery_fee_usd')
+    nullableNumber(value.actual_delivery_cost_usd, 'delivery.actual_delivery_cost_usd')
     return
   }
   fail(`${field} has no value validator.`)
@@ -229,6 +247,15 @@ function validateChanges(kind: Exclude<SaleRecordKind, 'legacy_sale_change'>, ch
 function validateResponse(value: Record<string, unknown> | null | undefined): string | null {
   if (value == null) return null
   if (!object(value) || Object.keys(value).some((key) => !RESPONSE_KEYS.has(key))) fail('Sales Records retry response has unsupported keys.')
+  for (const [key, entry] of Object.entries(value)) {
+    if (key === 'success' || key === 'duplicate') {
+      if (typeof entry !== 'boolean') fail(`Sales Records retry response ${key} must be boolean.`)
+    } else if (key === 'id' || key === 'saleId' || key === 'returnId') {
+      if (!Number.isSafeInteger(entry) || Number(entry) <= 0) fail(`Sales Records retry response ${key} must be a positive integer.`)
+    } else if (typeof entry !== 'string' || bytes(entry) > 120) {
+      fail(`Sales Records retry response ${key} must be bounded text.`)
+    }
+  }
   const serialized = JSON.stringify(value)
   if (bytes(serialized) > SALE_RECORD_EVENT_CHANGE_BYTES) fail('Sales Records retry response exceeds 65536 UTF-8 bytes.')
   return serialized
@@ -254,6 +281,13 @@ export function buildSaleRecordEventsInsert(events: SaleRecordEventInput[]): { s
     if (!occurredAt || occurredAt.length > 40 || !Number.isFinite(Date.parse(occurredAt))) fail('Sales Records occurredAt is invalid.')
     const digest = event.requestDigest == null ? null : String(event.requestDigest)
     if (digest !== null && !/^[0-9a-f]{64}$/.test(digest)) fail('Sales Records request digest is invalid.')
+    const changesJson = validateChanges(event.kind, event.changes)
+    const sourceRule = SOURCE_RULES[event.sourceKind]
+    if (!sourceRule.kinds.has(event.kind)) fail(`${event.kind} is not valid for ${event.sourceKind}.`)
+    const expectedVia: SaleRecordEventVia = event.generation === 0 ? 'apply' : event.generation % 2 === 1 ? 'undo' : 'redo'
+    if ((!sourceRule.replay && event.generation !== 0) || event.via !== expectedVia) {
+      fail(`Sales Records generation and via are invalid for ${event.sourceKind}.`)
+    }
     return {
       id: crypto.randomUUID(),
       sale_id: event.saleId,
@@ -266,7 +300,7 @@ export function buildSaleRecordEventsInsert(events: SaleRecordEventInput[]): { s
       actor_id: event.actorId == null ? null : event.actorId,
       actor_username: actorUsername,
       occurred_at: occurredAt,
-      changes_json: validateChanges(event.kind, event.changes),
+      changes_json: changesJson,
       request_digest: digest,
       response_json: validateResponse(event.response),
     }

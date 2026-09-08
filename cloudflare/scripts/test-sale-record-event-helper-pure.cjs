@@ -51,9 +51,23 @@ assert.equal(subject.buildSaleRecordEventsInsert([]), null)
 assert.throws(() => subject.buildSaleRecordEventsInsert([base({ kind: 'legacy_sale_change', changes: [] })]), /kind is invalid/)
 assert.throws(() => subject.buildSaleRecordEventsInsert([base({ changes: [] })]), /require 1-12/)
 assert.throws(() => subject.buildSaleRecordEventsInsert([base({ changes: [change('sale_status', known('completed'), known('completed'))] })]), /did not change/)
-assert.throws(() => subject.buildSaleRecordEventsInsert([base({ changes: [change('customer', known({ id: null, name: 'Dara', phone: '012' }), none)], kind: 'customer_changed' })]), /unsupported shape/)
-assert.throws(() => subject.buildSaleRecordEventsInsert([base({ changes: [change('payment_method', known(null), known('Cash'))], kind: 'payment_changed' })]), /known_none/)
+assert.throws(() => subject.buildSaleRecordEventsInsert([base({ sourceKind: 'sale_customer', changes: [change('customer', known({ id: null, name: 'Dara', phone: '012' }), none)], kind: 'customer_changed' })]), /unsupported shape/)
+assert.throws(() => subject.buildSaleRecordEventsInsert([base({ sourceKind: 'sale_settlement', changes: [change('payment_method', known(null), known('Cash'))], kind: 'payment_changed' })]), /known_none/)
+assert.throws(() => subject.buildSaleRecordEventsInsert([base({
+  kind: 'sale_created',
+  changes: [change('delivery', none, known({ phone: '012', address: 'private', arbitrary: { secret: true } }))],
+})]), /unsupported shape/, 'delivery aggregate rejects contact fields and arbitrary nested data')
 assert.throws(() => subject.buildSaleRecordEventsInsert([base({ response: { success: true, raw: 'forbidden' } })]), /unsupported keys/)
+assert.throws(() => subject.buildSaleRecordEventsInsert([base({ response: { success: { private: true }, id: { private: true }, duplicate: ['private'] } })]), /must be boolean/,
+  'retry response allowlists scalar value types as well as keys')
+assert.throws(() => subject.buildSaleRecordEventsInsert([base({
+  kind: 'item_added',
+  changes: [change('item', none, known({ sale_item_id: 1, product_id: 1, name: 'A', sku: null, unit_price_usd: 1, line_total_usd: 1 }))],
+})]), /not valid for sale_status/, 'source and kind must describe the same writer family')
+assert.throws(() => subject.buildSaleRecordEventsInsert([base({ generation: 1, via: 'redo' })]), /generation and via/,
+  'direct status actions cannot claim replay generations')
+assert.doesNotThrow(() => subject.buildSaleRecordEventsInsert([base({ sourceKind: 'sale_settlement', kind: 'payment_settled', generation: 1, via: 'undo',
+  changes: [change('sale_status', known('completed'), known('awaiting_payment'))] })]))
 assert.throws(() => subject.buildSaleRecordEventsInsert(Array.from({ length: 26 }, () => base())), /limited to 25/)
 assert.throws(() => subject.buildSaleRecordEventsInsert([base({
   kind: 'items_replaced',
