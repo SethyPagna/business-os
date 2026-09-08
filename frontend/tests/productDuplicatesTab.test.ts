@@ -30,32 +30,24 @@ test('Select all selects the FILTERED view, not hidden clusters', () => {
   assert.match(src, /setSelectedKeys\(new Set\(visibleClusters\.map\(\(cluster\) => clusterKey\(cluster\)\)\)\)/)
 })
 
-test('bulk merge excludes manual-only conflicts and keeps stock/clean barcode', () => {
-  assert.match(src, /cluster\.products\.length !== 2/, 'a 3+ cluster needs a human-picked keeper')
-  assert.match(src, /normalizeProductGroupName\(a\.name\).*normalizeProductGroupName\(b\.name\)/s, 'names must match exactly after normal grouping')
-  assert.match(src, /cost_price_usd/, 'cost must match before an automatic merge')
-  // S4-29: this used to pin a was-it-normalized BOOLEAN
-  // (`isLeadingZeroPair && aExtraZero !== bExtraZero`). That boolean ties two
-  // rows that BOTH carry leading zeros -- '008339327539' vs '08339327539' --
-  // so the dirtier row won the id tie-break and survived, putting the extra
-  // zero back into the catalog. The ordering now ranks on HOW MANY leading
-  // zeros each row would shed, which orders every case the boolean did and
-  // the double-zero case it could not.
-  assert.match(src, /isLeadingZeroPair/, 'an extra-zero pair must preserve the clean barcode')
-  assert.match(src, /zerosShed\(a\) - zerosShed\(b\)/, 'the cleaner barcode must beat the extra-zero copy, counted in zeros shed')
-  assert.match(src, /const stockDiff =/, 'ordinary exact-barcode duplicates must prefer the stocked row')
-  // Every merge now goes through the shared stock-choice flow, so a bulk run
-  // asks about a stocked row exactly like a single one does.
-  assert.match(src, /await mergeWithChoice\(keeper, other\)/)
-  assert.match(src, /bulk_merge_skipped_multiway/, 'manual-only groups are reported as skipped, not silent')
+test('selected merge partitions candidates before requesting one combined preview', () => {
+  assert.match(src, /const partition = partitionSelectedConflictClusters\(targets\)/)
+  assert.match(src, /previewSelectedConflictMerges\(partition\.cases, \{ signal: request\.signal \}\)/)
+  assert.match(src, /setBatchLocalSkipped\(partition\.skipped\)/, 'client-ineligible and over-limit selections stay visible in the review')
+  assert.match(src, /preserveSelectedConflictChoices\(previous\.cases, preview\.cases, current\)/, 'an explicit re-preview keeps a stock choice only when pair membership and keeper are unchanged')
+  assert.match(src, /<SelectedConflictMergeReviewModal/, 'all eligible pairs share one before/after review')
 })
 
-test('bulk actions run sequentially with live progress and continue past failures', () => {
-  assert.match(src, /bulk_merging_progress/)
+test('dismiss remains sequential while merge uses the atomic batch continuation contract', () => {
   assert.match(src, /bulk_dismissing_progress/)
   assert.match(src, /catch \{\s*\n\s*failed \+= 1/, 'one failed cluster must not abort the rest')
   assert.match(src, /bulk_dismiss_partial_failure/)
-  assert.match(src, /bulk_merge_partial_failure/)
+  assert.match(src, /makeSelectedConflictMergeApplyBody\(batchPreview, batchChoices, createClientRequestId\('product-conflict-merge'\)\)/, 'one stable request id is created at final confirmation')
+  assert.match(src, /runSelectedConflictMergeBatch\(body, \{/)
+  assert.match(src, /for \(const item of result\.committedCases\) next\.delete\(item\.caseKey\)/, 'only committed pairs leave the current selection')
+  assert.match(src, /batchWriteInFlightRef\.current = false[\s\S]*void load\(\)/, 'a cancelled or unknown write reloads only after transport cache invalidation settles')
+  assert.match(src, /if \(!writeWillReconcileWhenSettled\) void load\(\)/, 'closing a read-only preview refreshes immediately without racing an in-flight write')
+  assert.match(src, /t\(`selected_conflict_\$\{code\}`\)/, 'stable API error codes use the bilingual error map before server fallback prose')
 })
 
 test('selection is cleared after any bulk action and pruned when a cluster resolves', () => {
