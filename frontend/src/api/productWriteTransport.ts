@@ -3,7 +3,7 @@ import { ensureClientRequestId } from './requestIds.ts'
 import { withExpectedUpdatedAt, type ExpectedUpdatedAtPayload } from './expectedUpdatedAt.ts'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 import { selectedConflictCanContinueAutomatically, type SelectedConflictPreviewCaseRequest, type SelectedConflictStockChoice } from '../utils/selectedConflictMerge.ts'
-import type { SelectedConflictGroupReviewRequest } from '../utils/selectedConflictActionReview.ts'
+import type { SelectedConflictGroupFinalizeRequest, SelectedConflictGroupReviewRequest } from '../utils/selectedConflictActionReview.ts'
 
 type ProductPayload = ExpectedUpdatedAtPayload
 
@@ -214,10 +214,29 @@ export type SelectedConflictGroupReviewGroup = {
     count: number
   }
   state_digest: string
+  status?: 'actionable' | 'blocked' | 'ready' | 'partial' | 'completed' | 'refused' | 'reversed' | 'history_pending'
+  resolution?: SelectedConflictGroupFinalizeRequest['resolutions'][number] | null
+  projected_result?: { economics?: SelectedConflictGroupReviewGroup['economics']['merged'] } | null
   blocked: null | {
     code: 'stale_group_members' | 'incompatible_group_identity' | 'overlap_requires_selection' | 'invalid_merge_numeric'
     message: string
   }
+}
+
+export type SelectedConflictGroupReviewRemoval = {
+  action_ordinal: number
+  product_id: number
+  reason: string
+  status: 'reviewed' | 'blocked' | 'ready' | 'approval_pending' | 'undo_ready' | 'refused' | 'reversed'
+  operation_id: string
+  state_digest: string
+  plan_digest: string
+  blocker: null | { code: string; message: string }
+  product: Record<string, unknown> | null
+  branch_stock: Array<Record<string, unknown>>
+  batches: Array<Record<string, unknown>>
+  branch_batch_stock: Array<Record<string, unknown>>
+  source_bytes: number
 }
 
 export type SelectedConflictGroupReviewPage = {
@@ -225,6 +244,7 @@ export type SelectedConflictGroupReviewPage = {
   next_cursor: string | null
   limit: number
   groups: SelectedConflictGroupReviewGroup[]
+  removals: SelectedConflictGroupReviewRemoval[]
 }
 
 export type SelectedConflictGroupReviewResult = {
@@ -233,15 +253,111 @@ export type SelectedConflictGroupReviewResult = {
   resolution_version: 2
   review_id: string
   draft_digest: string
-  status: 'draft'
+  manifest_digest: string | null
+  status: 'draft' | 'finalized' | 'running' | 'approval_pending' | 'completed' | 'interrupted'
   expires_at: string
   counts: {
+    requested_actions: number
     requested_groups: number
+    requested_removals: number
     actionable_groups: number
     blocked_groups: number
     total_members: number
   }
   page: SelectedConflictGroupReviewPage
+}
+
+export type SelectedConflictGroupFinalizeResult = {
+  success: true
+  manifest_version: 1
+  resolution_version: 2
+  review_id: string
+  manifest_digest: string
+  status: 'finalized'
+  counts: {
+    requested_groups: number
+    canonical_groups: number
+    ready_groups: number
+    blocked_groups: number
+    total_members: number
+    merge_folds: number
+    requested_actions?: number
+    requested_removals?: number
+    ready_removals?: number
+    blocked_removals?: number
+  }
+  summary: {
+    groups_ready: number
+    groups_blocked: number
+    image_effect_groups: number
+    removals_ready?: number
+    removals_blocked?: number
+  }
+}
+
+export type SelectedConflictGroupApplyBody = {
+  review_id: string
+  manifest_digest: string
+  client_request_id: string
+}
+
+export type SelectedConflictGroupApplyCounts = {
+  requested_actions: number
+  requested_groups: number
+  requested_removals: number
+  total_members: number
+  canonical_groups: number
+  pending_groups: number
+  partial_groups: number
+  completed_groups: number
+  refused_groups: number
+  blocked_groups: number
+  reversed_groups: number
+  history_pending_groups: number
+  undo_ready_groups: number
+  merge_folds: number
+  pending_folds: number
+  committed_folds: number
+  refused_folds: number
+  reversed_folds: number
+  removal_actions: number
+  pending_removals: number
+  approval_pending_removals: number
+  completed_removals: number
+  refused_removals: number
+  blocked_removals: number
+  reversed_removals: number
+}
+
+export type SelectedConflictGroupApplyResult = {
+  success: true
+  manifest_version: 1
+  resolution_version: 2
+  review_id: string
+  manifest_digest: string
+  status: 'running' | 'approval_pending' | 'completed' | 'interrupted'
+  continuation_required: boolean
+  approval_required: boolean
+  counts: SelectedConflictGroupApplyCounts
+  groups: Array<{
+    group_key: string
+    status: string
+    processed_folds: number
+    keeper_id?: number
+    merged_ids: number[]
+    operation_ids: string[]
+  }>
+  removals: Array<{
+    action_ordinal: number
+    product_id: number
+    status: 'undo_ready' | 'approval_pending'
+    pending_action_id?: number | null
+    action_history_id?: number | null
+    undo_availability: 'ready' | 'unavailable'
+    generation: number
+  }>
+  interruption_code?: string
+  interruption_message?: string
 }
 
 function getDevicePayload(): ProductPayload {
@@ -454,6 +570,48 @@ export function getSelectedConflictGroupReviewPage(
     MERGE_DUPLICATES_PREVIEW_TIMEOUT_MS,
     { signal: options.signal },
   ) as Promise<SelectedConflictGroupReviewResult>
+}
+
+export function finalizeSelectedConflictGroupReview(
+  reviewId: string,
+  body: SelectedConflictGroupFinalizeRequest,
+  options: { signal?: AbortSignal } = {},
+): Promise<SelectedConflictGroupFinalizeResult> {
+  return apiFetch(
+    'POST',
+    `/api/products/possible-duplicates/merge-batch/reviews/${encodeId(reviewId)}/finalize`,
+    body,
+    SELECTED_CONFLICT_MERGE_TIMEOUT_MS,
+    { signal: options.signal },
+  ) as Promise<SelectedConflictGroupFinalizeResult>
+}
+
+export function makeSelectedConflictGroupApplyBody(
+  finalized: Pick<SelectedConflictGroupFinalizeResult, 'review_id' | 'manifest_digest'>,
+): SelectedConflictGroupApplyBody {
+  return {
+    review_id: finalized.review_id,
+    manifest_digest: finalized.manifest_digest,
+    client_request_id: finalized.review_id,
+  }
+}
+
+export async function applySelectedConflictGroupReview(
+  body: SelectedConflictGroupApplyBody,
+  options: { signal?: AbortSignal } = {},
+): Promise<SelectedConflictGroupApplyResult> {
+  try {
+    return await apiFetch(
+      'POST',
+      '/api/products/possible-duplicates/merge-batch',
+      body,
+      SELECTED_CONFLICT_MERGE_TIMEOUT_MS,
+      { signal: options.signal },
+    ) as SelectedConflictGroupApplyResult
+  } finally {
+    cacheInvalidate('products')
+    cacheInvalidate('inventory')
+  }
 }
 
 export function makeSelectedConflictMergeApplyBody(
