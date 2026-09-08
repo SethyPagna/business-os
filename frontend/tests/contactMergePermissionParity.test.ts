@@ -12,8 +12,8 @@ const contactsRoute = readFileSync(
 
 assert.match(
   duplicatesUi,
-  /const canResolveConflicts = can\('contacts', 'resolve_conflicts'\)\s+const canMergeDuplicates = canResolveConflicts && can\('contacts', 'merge'\)/,
-  'duplicate merges must require both conflict-resolution access and the dedicated Contacts merge action',
+  /const canResolveConflicts = can\('contacts', 'resolve_conflicts'\)\s+const canBulkContacts = can\('contacts', 'bulk'\)[\s\S]*?const canMergeDuplicates = canBulkContacts && canResolveConflicts && can\('contacts', 'merge'\)/,
+  'duplicate merges must require bulk, conflict-resolution, and the dedicated Contacts merge action',
 )
 
 const clusterCard = duplicatesUi.slice(
@@ -42,8 +42,8 @@ const mergeHandler = duplicatesUi.slice(
 )
 assert.match(
   mergeHandler,
-  /if \(!canMergeDuplicates\) return[\s\S]*?await mergeContacts\(/,
-  'the individual merge handler must refuse stale or programmatic calls after merge permission is lost',
+  /if \(!canBulkContactsRef\.current \|\| !canMergeDuplicates\) return[\s\S]*?await mergeContacts\(/,
+  'the individual merge handler must refuse stale or programmatic calls after bulk or merge permission is lost',
 )
 
 const bulkMergeHandler = duplicatesUi.slice(
@@ -52,12 +52,12 @@ const bulkMergeHandler = duplicatesUi.slice(
 )
 assert.match(
   bulkMergeHandler,
-  /if \(!canMergeDuplicates\) return[\s\S]*?await mergeContacts\(/,
-  'the bulk merge handler must refuse stale or programmatic calls after merge permission is lost',
+  /if \(!canBulkContactsRef\.current \|\| !canMergeDuplicates\) return[\s\S]*?await mergeContacts\(/,
+  'the bulk merge handler must refuse stale or programmatic calls after bulk or merge permission is lost',
 )
 
 const bulkToolbar = duplicatesUi.slice(
-  duplicatesUi.indexOf('{canResolveConflicts && selectedKeys.size > 0 ? ('),
+  duplicatesUi.indexOf('{canBulkContacts && canResolveConflicts && selectedKeys.size > 0 ? ('),
   duplicatesUi.indexOf('<div className="grid grid-cols-1'),
 )
 assert.match(
@@ -67,8 +67,8 @@ assert.match(
 )
 assert.match(
   duplicatesUi,
-  /selectable=\{canResolveConflicts && !bulkBusy\}/,
-  'selection must remain available to conflict resolvers who can dismiss but cannot merge',
+  /selectable=\{canBulkContacts && canResolveConflicts && !bulkBusy\}/,
+  'multi-cluster selection must require bulk while individual dismiss and reopen remain available',
 )
 
 const mergeRoute = contactsRoute.slice(
@@ -84,6 +84,11 @@ assert.match(
   mergeRoute,
   /getActionTier\(user, 'contacts', 'merge'\) === 'none'/,
   'the server merge route must continue to enforce the dedicated Contacts merge action',
+)
+assert.match(
+  mergeRoute,
+  /getActionTier\(user, 'contacts', 'bulk'\) === 'none'/,
+  'the server merge route must enforce the Contacts bulk umbrella',
 )
 assert.match(
   contactsRoute,
