@@ -61,8 +61,6 @@ export interface SaleRecord {
   subject?: string | null
   summary?: string | null
   provenance_unknown?: boolean
-  before?: Record<string, unknown> | null
-  after?: Record<string, unknown> | null
   changes?: SaleRecordChange[] | null
 }
 
@@ -108,45 +106,25 @@ export type SaleRecordFieldFormat = 'money' | 'money_khr' | 'quantity' | 'status
 /**
  * Field name -> how to render it, and what to call it.
  *
- * Keyed by the field names lib/saleRecords.ts actually emits. Anything else
- * falls through to plain text under its own raw name, which is the honest
- * answer for a payload written by a future writer this build predates.
+ * Keyed by the closed field names lib/saleRecords.ts emits. A malformed or
+ * future field uses the translated generic change label; raw variable names
+ * never become user-facing copy.
  */
 const FIELD_RULES: Record<string, { key: string; format: SaleRecordFieldFormat }> = {
-  amount_usd: { key: 'amount', format: 'money' },
   amount_paid_usd: { key: 'amount_paid', format: 'money' },
-  amount_paid_khr: { key: 'amount_paid_khr', format: 'quantity' },
+  amount_paid_khr: { key: 'amount_paid_khr', format: 'money_khr' },
   change_usd: { key: 'change', format: 'money' },
-  change_khr: { key: 'change_khr', format: 'quantity' },
+  change_khr: { key: 'change_khr', format: 'money_khr' },
   total_usd: { key: 'total', format: 'money' },
   quantity: { key: 'quantity', format: 'quantity' },
   sale_status: { key: 'status', format: 'status' },
-  return_status: { key: 'status', format: 'status' },
-  // The returns source's own field: what the customer got back. Money, and
-  // named -- 'refund_usd' printed as its own raw key is exactly the
-  // snake_case-in-Khmer failure this table exists to prevent.
-  refund_usd: { key: 'refund', format: 'money' },
   receipt_number: { key: 'receipt_number', format: 'text' },
-  customer_id: { key: 'customer', format: 'text' },
-  membership_number: { key: 'membership_number', format: 'text' },
   cancel_reason: { key: 'reason', format: 'text' },
-  reason: { key: 'reason', format: 'text' },
   cancel_note: { key: 'note', format: 'text' },
   payment_method: { key: 'payment_method', format: 'text' },
   payment_details: { key: 'payment_details', format: 'text' },
-  products: { key: 'products', format: 'text' },
-  direction: { key: 'action', format: 'text' },
-  stock_skipped: { key: 'stock', format: 'text' },
   is_delivery: { key: 'delivery', format: 'boolean' },
-  delivery_contact_id: { key: 'id', format: 'text' },
-  delivery_contact_name: { key: 'driver', format: 'text' },
-  delivery_contact_phone: { key: 'driver_phone', format: 'text' },
-  delivery_contact_address: { key: 'address', format: 'text' },
   delivery_fee_usd: { key: 'delivery_fee', format: 'money' },
-  delivery_fee_khr: { key: 'delivery_fee', format: 'money_khr' },
-  delivery_fee_paid_by: { key: 'paid_by', format: 'text' },
-  delivery_actual_cost_usd: { key: 'delivery_actual_cost', format: 'money' },
-  delivery_actual_cost_khr: { key: 'delivery_actual_cost', format: 'money_khr' },
   actual_delivery_cost_usd: { key: 'delivery_actual_cost', format: 'money' },
   customer: { key: 'customer', format: 'text' },
   membership: { key: 'membership', format: 'text' },
@@ -155,8 +133,6 @@ const FIELD_RULES: Record<string, { key: string; format: SaleRecordFieldFormat }
   items: { key: 'items', format: 'text' },
   removed_items: { key: 'removed_items', format: 'text' },
   added_items: { key: 'added_items', format: 'text' },
-  exchange_rate: { key: 'exchange_rate', format: 'quantity' },
-  total_khr: { key: 'total', format: 'money_khr' },
 }
 
 export interface SaleRecordFieldRow {
@@ -170,47 +146,37 @@ export interface SaleRecordFieldRow {
   changed: boolean
 }
 
-function normalizeForCompare(value: unknown): string {
-  if (value === null || value === undefined) return ''
-  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : ''
-  if (typeof value === 'object') return JSON.stringify(value)
-  return String(value).trim()
+function normalizeValueState(value: unknown): SaleRecordValue | null {
+  if (!value || typeof value !== 'object') return null
+  const row = value as Record<string, unknown>
+  if (row.state === 'known_none') return { state: 'known_none' }
+  if (row.state === 'unknown') return { state: 'unknown' }
+  if (row.state === 'known_value' && Object.prototype.hasOwnProperty.call(row, 'value')) {
+    return { state: 'known_value', value: row.value }
+  }
+  return null
+}
+
+function statesEqual(left: SaleRecordValue, right: SaleRecordValue): boolean {
+  return JSON.stringify(left) === JSON.stringify(right)
 }
 
 /**
  * The before -> after rows for one record, in a stable order.
  *
- * Order is the order the fields appear in the payload (after's keys first,
- * since a record is about what it became), because that order is chosen
- * server-side per kind and putting the amount before the running total is a
- * deliberate part of it. Fields present on only one side still get a row: a
- * value appearing from nothing, or vanishing, is exactly the change somebody
- * opened this to see.
+ * Order is the server's `changes` order. Equal pairs are rejected as context,
+ * except the fixed sale-creation field set where known absence is itself a
+ * captured fact required by the contract.
  */
 export function saleRecordFieldRows(record: SaleRecord): SaleRecordFieldRow[] {
-  if (Array.isArray(record.changes)) {
-    return record.changes
-      .filter((change) => !['search_normalized', 'internal_context'].includes(change.field))
-      .map((change) => {
-        const rule = FIELD_RULES[change.field] || { key: 'value_changed', format: 'text' as const }
-        return { field: change.field, labelKey: rule.key, format: rule.format, before: change.before, after: change.after, changed: true }
-      })
-  }
-  const before = record.before && typeof record.before === 'object' ? record.before : {}
-  const after = record.after && typeof record.after === 'object' ? record.after : {}
-  const fields: string[] = []
-  for (const key of Object.keys(after)) fields.push(key)
-  for (const key of Object.keys(before)) if (!fields.includes(key)) fields.push(key)
-  return fields.map((field) => {
-    const rule = FIELD_RULES[field]
-    return {
-      field,
-      labelKey: rule ? rule.key : null,
-      format: rule ? rule.format : 'text',
-      before: (before as Record<string, unknown>)[field] == null ? { state: 'known_none' } : { state: 'known_value', value: (before as Record<string, unknown>)[field] },
-      after: (after as Record<string, unknown>)[field] == null ? { state: 'known_none' } : { state: 'known_value', value: (after as Record<string, unknown>)[field] },
-      changed: normalizeForCompare((before as Record<string, unknown>)[field]) !== normalizeForCompare((after as Record<string, unknown>)[field]),
-    }
+  if (!Array.isArray(record.changes)) return []
+  return record.changes.flatMap((change) => {
+    if (!change || typeof change.field !== 'string') return []
+    const before = normalizeValueState(change.before)
+    const after = normalizeValueState(change.after)
+    if (!before || !after || (statesEqual(before, after) && record.kind !== 'sale_created')) return []
+    const rule = FIELD_RULES[change.field] || { key: 'value_changed', format: 'text' as const }
+    return [{ field: change.field, labelKey: rule.key, format: rule.format, before, after, changed: true }]
   })
 }
 

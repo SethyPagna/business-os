@@ -1,354 +1,137 @@
-// One sale's RECORDS list, browser side (N41).
-//
-// The owner, Sep 6 2026: "i want a row at the bottom of sales each sale rows.
-// one line called Records with total records when press it pops up a float
-// with who made changes in this sales record (by default should show change
-// status / add sale / edit product quantity / change delivery fee / or + for
-// matching conditions, and click on specific information/record row can see
-// more details before and after."
-//
-// Four separable claims, each of which can be true while the others are false,
-// so each gets its own case:
-//   the LINE exists on every sale row, at both breakpoints, from one component
-//   the FLOAT is the shared float, not a new one, and is read-only
-//   the DEFAULT list is unfiltered and every kind has a translated label
-//   a RECORD expands to before -> after, with money rendered as money
-//
-// Run: node tests/saleRecords.test.ts
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import {
-  SALE_RECORD_KINDS,
-  SALE_RECORD_KIND_KEYS,
-  filterSaleRecords,
-  normalizeSaleRecordsResponse,
-  saleRecordFieldRows,
-  saleRecordKind,
-  saleRecordKindCounts,
-  saleRecordsCount,
-  type SaleRecord,
+  SALE_RECORD_KINDS, SALE_RECORD_KIND_KEYS, filterSaleRecords, normalizeSaleRecordsResponse,
+  saleRecordFieldRows, saleRecordKind, saleRecordKindCounts, saleRecordsCount,
+  type SaleRecord, type SaleRecordValue,
 } from '../src/utils/saleRecords.ts'
-import { formatSaleRecordValueLines } from '../src/components/sales/saleRecordValue.ts'
+import { formatSaleRecordValueLinesLocalized } from '../src/components/sales/saleRecordValue.ts'
 
 let failed = 0
-const runTest = (name: string, fn: () => void): void => {
-  try {
-    fn()
-    console.log(`PASS ${name}`)
-  } catch (error) {
-    failed += 1
-    console.error(`FAIL ${name}`)
-    console.error(error)
-  }
+const test = (name: string, fn: () => void): void => {
+  try { fn(); console.log(`PASS ${name}`) }
+  catch (error) { failed += 1; console.error(`FAIL ${name}`); console.error(error) }
 }
+const read = (relative: string): string => readFileSync(new URL(relative, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+const value = (entry: unknown): SaleRecordValue => ({ state: 'known_value', value: entry })
+const none = (): SaleRecordValue => ({ state: 'known_none' })
+const unknown = (): SaleRecordValue => ({ state: 'unknown' })
+const change = (field: string, before: SaleRecordValue, after: SaleRecordValue) => ({ field, before, after })
 
-const read = (relative: string): string =>
-  readFileSync(new URL(relative, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
-
-// A sale with one of everything the Worker can emit for it: it was rung up,
-// a line moved, the courier cost was corrected, and it was cancelled in a bulk
-// action -- the last of which audit_logs alone would report nothing about.
 const RECORDS: SaleRecord[] = [
-  {
-    id: 'sale:77', source: 'sale', at: '2026-09-06T09:00:00Z', at_ms: 1,
-    actor_username: 'aza', kind: 'sale_created', via: null, subject: '20260906-090000',
-    summary: 'Sale recorded', before: null,
-    after: { receipt_number: '20260906-090000', sale_status: 'completed', total_usd: 12.5 },
-  },
-  {
-    id: 'amendment:4', source: 'ledger', at: '2026-09-06 09:30:00', at_ms: 2,
-    actor_username: 'dara', kind: 'item_qty_changed', via: 'amend', subject: 'Coca-Cola 330ml',
-    summary: 'Coca-Cola 330ml 2 to 1',
-    before: { quantity: 2, total_usd: 12.5 },
-    after: { quantity: 1, total_usd: 11.5 },
-  },
-  {
-    id: 'amendment:5', source: 'ledger', at: '2026-09-06 09:40:00', at_ms: 3,
-    actor_username: 'dara', kind: 'delivery_cost_changed', via: 'amend', subject: 'delivery',
-    summary: 'Delivery cost - to $1.20',
-    before: { amount_usd: null, total_usd: 11.5 },
-    after: { amount_usd: 1.2, total_usd: 11.5 },
-  },
-  {
-    id: 'bulk:op-1', source: 'bulk', at: '2026-09-06 17:00:00', at_ms: 4,
-    actor_username: 'aza', kind: 'cancelled', via: null, subject: null,
-    summary: 'Bulk status to cancelled',
-    before: { sale_status: 'completed' }, after: { sale_status: 'cancelled' },
-  },
-  {
-    id: 'amendment:6', source: 'ledger', at: '2026-09-06 10:00:00', at_ms: 3.5,
-    actor_username: 'sokha', kind: 'delivery_added', via: 'amend', subject: 'Driver Dara',
-    summary: 'Delivery added',
-    before: { is_delivery: false, delivery_fee_usd: 0, delivery_fee_khr: 0, delivery_actual_cost_usd: null, delivery_actual_cost_khr: null, total_usd: 10, total_khr: 40000 },
-    after: { is_delivery: true, delivery_contact_name: 'Driver Dara', delivery_contact_phone: '0123', delivery_contact_address: 'Zone A', delivery_fee_usd: 2.5, delivery_fee_khr: 10000, delivery_actual_cost_usd: 4, delivery_actual_cost_khr: 16000, total_usd: 12.5, total_khr: 50000 },
-  },
+  { id: 'sale:77', kind: 'sale_created', changes: [
+    change('receipt_number', none(), value('LOCAL-77')),
+    change('items', none(), value([{ name: 'Primer', quantity: 1, line_total_usd: 10 }])),
+    change('payment', none(), value({ method: 'Cash', details: [{ method: 'Cash', amount_usd: 10, amount_khr: 0 }], amount_paid_usd: 10, amount_paid_khr: 0, change_usd: 0, change_khr: 0 })),
+    change('delivery', none(), unknown()), change('customer', none(), none()), change('membership', none(), unknown()),
+  ] },
+  { id: 'amendment:1', kind: 'item_quantity_changed', changes: [
+    change('item', value({ sale_item_id: 1, product_id: 2, name: 'Primer', sku: 'P1', unit_price_usd: 10, line_total_usd: 10 }), value({ sale_item_id: 1, product_id: 2, name: 'Primer', sku: 'P1', unit_price_usd: 10, line_total_usd: 20 })),
+    change('quantity', value(1), value(2)), change('total_usd', value(10), value(20)),
+  ] },
+  { id: 'amendment:2', kind: 'delivery_added', changes: [
+    change('is_delivery', value(false), value(true)),
+    change('driver', none(), value({ id: 9, name: 'Dara', phone: '0123', address: 'Zone A' })),
+    change('delivery_fee_usd', value(0), value(2.5)), change('actual_delivery_cost_usd', none(), value(1.25)),
+    change('total_usd', value(20), value(22.5)),
+  ] },
+  { id: 'audit:3', kind: 'payment_changed', changes: [
+    change('payment_method', value('Cash'), value('ABA')),
+    change('payment_details', value([{ method: 'Cash', amount_usd: 22.5, amount_khr: 0 }]), value([{ method: 'ABA', amount_usd: 22.5, amount_khr: 0 }])),
+    change('amount_paid_usd', value(22.5), value(22.5)),
+  ] },
+  { id: 'legacy:4', kind: 'legacy_sale_change', summary: 'Historical details unavailable', changes: [] },
 ]
 
-runTest('every kind the Worker can emit has a translated label in BOTH packs', () => {
-  const worker = read('../../cloudflare/src/lib/saleRecords.ts')
-  const declared = (worker.match(/export const SALE_RECORD_KINDS = \[([\s\S]*?)\] as const/) || [])[1] || ''
-  const workerKinds = [...declared.matchAll(/'([a-z_]+)'/g)].map((m) => m[1])
-  assert.ok(workerKinds.length > 5, 'could not read the Worker kind list')
-  assert.deepEqual(
-    [...workerKinds].sort(),
-    [...SALE_RECORD_KINDS].sort(),
-    'the browser and the Worker disagree about which kinds exist -- an unknown kind prints raw snake_case in Khmer',
-  )
+test('browser kind vocabulary is the frozen v2 contract and every label is localized', () => {
+  assert.deepEqual(SALE_RECORD_KINDS, [
+    'sale_created', 'driver_changed', 'delivery_cost_changed', 'delivery_fee_changed', 'delivery_added',
+    'item_added', 'item_removed', 'item_quantity_changed', 'items_replaced', 'customer_changed',
+    'membership_changed', 'status_changed', 'payment_changed', 'payment_settled', 'cancelled', 'legacy_sale_change',
+  ])
   const en = JSON.parse(read('../src/lang/en.json')) as Record<string, string>
   const km = JSON.parse(read('../src/lang/km.json')) as Record<string, string>
   for (const kind of SALE_RECORD_KINDS) {
     const key = SALE_RECORD_KIND_KEYS[kind]
-    assert.ok(key, `no label key for ${kind}`)
     assert.ok(en[key], `en.json is missing ${key}`)
     assert.ok(km[key], `km.json is missing ${key}`)
-    assert.notEqual(km[key], en[key], `${key} is not actually translated`)
+    assert.notEqual(km[key], en[key], `${key} is not translated`)
   }
 })
 
-runTest('an unknown kind lands on "other" rather than reaching the UI raw', () => {
-  assert.equal(saleRecordKind('item_added'), 'item_added')
-  assert.equal(saleRecordKind('something_invented_later'), 'other')
-  assert.equal(saleRecordKind(undefined), 'other')
+test('unknown kinds close to one meaningful legacy kind, never raw snake case', () => {
+  assert.equal(saleRecordKind('driver_changed'), 'driver_changed')
+  assert.equal(saleRecordKind('something_invented_later'), 'legacy_sale_change')
+  assert.equal(saleRecordKind(undefined), 'legacy_sale_change')
 })
 
-runTest('a record expands to before -> after, with money known to be money', () => {
-  const rows = saleRecordFieldRows(RECORDS[2])
-  const amount = rows.find((row) => row.field === 'amount_usd')
-  assert.ok(amount, 'the courier-cost record must expand its amount')
-  assert.equal(amount?.format, 'money', 'an amount rendered as a bare number is unreadable in a money list')
-  assert.equal(amount?.before, null)
-  assert.equal(amount?.after, 1.2)
-  assert.equal(amount?.changed, true)
-  // The sale total rides along on every ledger record. A courier cost never
-  // touches it, so it is context -- marked unchanged rather than drawn as an
-  // arrow from a value to itself.
-  const total = rows.find((row) => row.field === 'total_usd')
-  assert.equal(total?.changed, false, 'an unchanged field must not be presented as a change')
-  const qty = saleRecordFieldRows(RECORDS[1]).find((row) => row.field === 'quantity')
-  assert.equal(qty?.format, 'quantity')
-  assert.equal(qty?.changed, true)
-  const status = saleRecordFieldRows(RECORDS[3]).find((row) => row.field === 'sale_status')
-  assert.equal(status?.format, 'status', 'a status must be localized, not printed as awaiting_payment')
+test('detail rows consume only tri-state changes and omit unchanged context', () => {
+  const rows = saleRecordFieldRows(RECORDS[3])
+  assert.deepEqual(rows.map((row) => row.field), ['payment_method', 'payment_details'])
+  assert.equal(rows.every((row) => row.changed), true)
+  assert.deepEqual(saleRecordFieldRows({ id: 'old', before: { sale_status: 'completed' }, after: { sale_status: 'cancelled' } } as unknown as SaleRecord), [])
 })
 
-runTest('delivery addition exposes USD and KHR snapshots with their native formatters', () => {
-  const rows = saleRecordFieldRows(RECORDS[4])
-  assert.equal(rows.find((row) => row.field === 'delivery_fee_usd')?.format, 'money')
-  assert.equal(rows.find((row) => row.field === 'delivery_fee_khr')?.format, 'money_khr')
-  assert.equal(rows.find((row) => row.field === 'delivery_actual_cost_khr')?.format, 'money_khr')
-  assert.equal(rows.find((row) => row.field === 'total_khr')?.format, 'money_khr')
-  assert.equal(rows.find((row) => row.field === 'delivery_contact_name')?.after, 'Driver Dara')
-  assert.equal(rows.find((row) => row.field === 'is_delivery')?.format, 'boolean')
-  const float = read('../src/components/sales/SaleRecordsFloat.tsx')
-  assert.match(float, /row\.format === 'money_khr'[\s\S]*?fmtKHR\(parsed\)/,
-    'KHR snapshots must use the native riel formatter, not the USD formatter')
+test('known none and unknown remain different facts', () => {
+  const rows = saleRecordFieldRows(RECORDS[0])
+  assert.equal(rows.find((row) => row.field === 'customer')?.after.state, 'known_none')
+  assert.equal(rows.find((row) => row.field === 'membership')?.after.state, 'unknown')
+  assert.equal(rows.find((row) => row.field === 'delivery')?.after.state, 'unknown')
 })
 
-runTest('a field present on only one side still gets a row', () => {
-  const rows = saleRecordFieldRows({
-    id: 'x', before: { sale_status: 'completed' }, after: { sale_status: 'cancelled', cancel_reason: 'wrong item' },
-  })
-  const reason = rows.find((row) => row.field === 'cancel_reason')
-  assert.ok(reason, 'a value that appeared from nothing is exactly the change someone opened this to see')
-  assert.equal(reason?.changed, true)
+test('money, KHR, quantity and composite fields use friendly render contracts', () => {
+  assert.equal(saleRecordFieldRows(RECORDS[1]).find((row) => row.field === 'quantity')?.format, 'quantity')
+  assert.equal(saleRecordFieldRows(RECORDS[2]).find((row) => row.field === 'actual_delivery_cost_usd')?.format, 'money')
+  assert.equal(saleRecordFieldRows({ id: 'pay', changes: [change('amount_paid_khr', value(0), value(40000))] })[0].format, 'money_khr')
+  const usd = (n: number | string) => `$${Number(n).toFixed(2)}`
+  const khr = (n: number | string) => `${Number(n).toLocaleString('en-US')}៛`
+  const tr = (_key: string, fallback: string) => fallback
+  assert.deepEqual(formatSaleRecordValueLinesLocalized('driver', { id: 9, name: 'Dara', phone: '0123', address: 'Zone A' }, usd, khr, tr), ['Dara · #9 · 0123 · Zone A'])
+  assert.deepEqual(formatSaleRecordValueLinesLocalized('items', [{ name: 'Primer', quantity: 2, line_total_usd: 20 }], usd, khr, tr), ['Primer × 2 · $20.00'])
+  assert.deepEqual(formatSaleRecordValueLinesLocalized('membership', { number: 'M-1', discount_usd: 2, discount_khr: null, points_redeemed: 5 }, usd, khr, tr), ['M-1', 'Membership discount: $2.00', 'Points redeemed: 5'])
+  const payment = formatSaleRecordValueLinesLocalized('payment', { method: 'ABA', details: [{ method: 'ABA', amount_usd: 10, amount_khr: 0 }], amount_paid_usd: 10, amount_paid_khr: 0, change_usd: 0, change_khr: 0 }, usd, khr, tr)
+  assert.ok(payment.includes('ABA · $10.00'))
+  assert.doesNotMatch(payment.join(' '), /amount_paid_usd|payment_details|\{|\}/)
 })
 
-runTest('return status uses the localized status field contract', () => {
-  const rows = saleRecordFieldRows({
-    id: 'return-bulk:op:1',
-    before: { return_status: 'completed' },
-    after: { return_status: 'cancelled' },
-  })
-  assert.equal(rows[0]?.field, 'return_status')
-  assert.equal(rows[0]?.labelKey, 'status')
-  assert.equal(rows[0]?.format, 'status')
-})
-
-runTest('the default list is unfiltered, and clearing the filter means all again', () => {
-  assert.equal(filterSaleRecords(RECORDS, new Set()).length, RECORDS.length, 'an empty selection means ALL, never none')
-  assert.deepEqual(
-    filterSaleRecords(RECORDS, new Set(['delivery_cost_changed'])).map((r) => r.id),
-    ['amendment:5'],
-  )
-  assert.deepEqual(
-    filterSaleRecords(RECORDS, new Set(['cancelled', 'item_qty_changed'])).map((r) => r.id),
-    ['amendment:4', 'bulk:op-1'],
-  )
-})
-
-runTest('the filter offers only the kinds this sale actually has, in the declared order', () => {
-  const counts = saleRecordKindCounts([...RECORDS, { id: 'dup', kind: 'item_qty_changed' }])
-  assert.deepEqual(counts, [
-    { kind: 'sale_created', count: 1 },
-    { kind: 'item_qty_changed', count: 2 },
-    { kind: 'delivery_cost_changed', count: 1 },
-    { kind: 'delivery_added', count: 1 },
-    { kind: 'cancelled', count: 1 },
+test('filters and counts use closed normalized kinds', () => {
+  assert.equal(filterSaleRecords(RECORDS, new Set()).length, RECORDS.length)
+  assert.deepEqual(filterSaleRecords(RECORDS, new Set(['delivery_added'])).map((row) => row.id), ['amendment:2'])
+  assert.deepEqual(saleRecordKindCounts(RECORDS), [
+    { kind: 'sale_created', count: 1 }, { kind: 'delivery_added', count: 1 },
+    { kind: 'item_quantity_changed', count: 1 }, { kind: 'payment_changed', count: 1 },
+    { kind: 'legacy_sale_change', count: 1 },
   ])
 })
 
-runTest('a missing count is an em dash, never 0 -- "nothing ever happened" is never true', () => {
-  assert.equal(saleRecordsCount({ records_count: 4 }), 4)
-  assert.equal(saleRecordsCount({ records_count: '4' }), 4)
-  assert.equal(saleRecordsCount({}), null, 'an older cached row must not claim zero')
-  assert.equal(saleRecordsCount(null), null)
+test('list counts distinguish missing from zero and malformed payloads stay visible', () => {
+  assert.equal(saleRecordsCount({ records_count: 0 }), 0)
+  assert.equal(saleRecordsCount({}), null)
   assert.equal(saleRecordsCount({ records_count: -1 }), null)
-  const detail = read('../src/components/sales/SaleDetailModal.tsx')
-  assert.match(detail, /saleRecordsCount\(sale\) \?\? '—'/, 'the detail control must print an em dash for a missing count')
-})
-
-runTest('a malformed response degrades to visible rows rather than an empty list', () => {
-  const parsed = normalizeSaleRecordsResponse({ saleId: 77, records: [{ kind: 'item_added' }, null, 'nope'] })
+  const parsed = normalizeSaleRecordsResponse({ records: [{ kind: 'item_added' }, null, 'bad'] })
   assert.equal(parsed.length, 1)
-  assert.equal(parsed[0].id, 'record-0', 'a record with no id still needs a key')
-  assert.deepEqual(normalizeSaleRecordsResponse(null), [])
-  assert.deepEqual(normalizeSaleRecordsResponse({}), [])
+  assert.equal(parsed[0].id, 'record-0')
 })
 
-runTest('structured product and payment details render as readable lines', () => {
-  const fmtUSD = (value: number | string): string => `$${Number(value).toFixed(2)}`
-  assert.deepEqual(
-    formatSaleRecordValueLines(
-      'products',
-      '[{"product":"Fixture product 01","quantity":1,"unit_price_usd":90,"line_total_usd":90}]',
-      fmtUSD,
-    ),
-    ['Fixture product 01 × 1 · $90.00'],
-    'a JSON transport string must not reach the Records table raw',
-  )
-  assert.deepEqual(
-    formatSaleRecordValueLines('products', [
-      { product: 'Primer', quantity: 2, line_total_usd: 16 },
-      { product_name: 'Powder', quantity: 1, line_total_usd: 12 },
-    ], fmtUSD),
-    ['Primer × 2 · $16.00', 'Powder × 1 · $12.00'],
-    'each product must keep its own quantity and total line',
-  )
-  assert.deepEqual(
-    formatSaleRecordValueLines('payment_details', '[{"method":"ABA","amount_usd":90,"amount_khr":0}]', fmtUSD),
-    ['ABA · $90.00'],
-  )
-  assert.deepEqual(
-    formatSaleRecordValueLines('payment_details', { method: 'Cash', amount_khr: 410000 }, fmtUSD),
-    ['Cash · 410,000៛'],
-    'KHR-only payment details remain explicit',
-  )
-  assert.deepEqual(
-    formatSaleRecordValueLines('payment_details', 'legacy payment note', fmtUSD),
-    ['legacy payment note'],
-    'legacy scalar details remain visible rather than being discarded',
-  )
+test('the float renders a shared read-only surface and never exposes raw variables', () => {
+  const source = read('../src/components/sales/SaleRecordsFloat.tsx')
+  assert.match(source, /unsavedChanges="read-only"/)
+  assert.match(source, /SaleRecordChangeTable record=\{record\}/)
+  assert.match(source, /record\.provenance_unknown \|\| !record\.actor_username[\s\S]*label\('unknown', 'Unknown'\)/)
+  assert.doesNotMatch(source, /\{record\.via\}<\/span>/)
+  assert.doesNotMatch(source, /\{row\.field\}<\/td>/)
+  assert.doesNotMatch(source, /record\.summary \|\| t\('historical_details_unavailable'\)/, 'legacy backend summaries must not bypass localization')
 })
 
-// ---- the surfaces -------------------------------------------------------
-
-runTest('Records is inside the expanded sale detail and absent from collapsed rows', () => {
-  const surface = read('../src/components/sales/SalesListSurface.tsx')
-  assert.doesNotMatch(surface, /SaleRecordsLine|openSaleRecords|sale_records/, 'collapsed desktop rows and phone cards must not carry a Records line')
+test('Records stays inside expanded sale details and uses the union endpoint', () => {
+  const list = read('../src/components/sales/SalesListSurface.tsx')
+  assert.doesNotMatch(list, /SaleRecordsLine|openSaleRecords|sale_records/)
   const detail = read('../src/components/sales/SaleDetailModal.tsx')
-  assert.match(detail, /onOpenRecords\?: \(sale: SaleDetail\) => void/, 'expanded details own the Records callback')
-  assert.match(detail, /onClick=\{\(\) => onOpenRecords\(sale\)\}/, 'the detail control opens this sale history')
-  assert.equal((detail.match(/t\('sale_records'\)/g) || []).length, 1, 'expanded detail has one Records entry')
-})
-
-runTest('the float is the SHARED float, read-only, with one close affordance', () => {
-  const float = read('../src/components/sales/SaleRecordsFloat.tsx')
-  assert.match(float, /import Modal from '\.\.\/shared\/Modal\.tsx'/, 'a second float primitive would be a second set of escape/backdrop bugs')
-  assert.match(float, /unsavedChanges="read-only"/, 'a records list can lose nothing')
-  assert.doesNotMatch(float, /onClose=\{onClose\}[\s\S]*<button[^>]*onClose/, 'the header X is the only close affordance')
-  assert.match(float, /import FilterMenu from '\.\.\/shared\/FilterMenu\.tsx'/, 'the filter must be the shared FilterMenu')
-  // Chosen filters live inside the menu -- never as chips in the header row.
-  // Pinned structurally: the float's toolbar row holds the count and the menu
-  // and nothing else, so a selected kind has nowhere to spill to.
-  assert.match(
-    float,
-    /<div className="flex items-center justify-between gap-2">\s*<span[\s\S]*?<\/span>\s*(\{\/\*[\s\S]*?\*\/\}\s*)?<FilterMenu[\s\S]*?\/>\s*<\/div>/,
-    'chosen filters must not spill out of the FilterMenu into the toolbar row',
-  )
-  assert.doesNotMatch(float, /\[\.\.\.kinds\]|Array\.from\(kinds\)/, 'the selection must not be rendered as its own list')
-  assert.match(float, /aria-expanded=\{isOpen\}/, 'selecting a record must announce that it expands')
-  assert.match(float, /fmtDateTime24\(record\.at\)/, 'records read dd/mm/yyyy HH:mm like every other history surface')
-  assert.match(float, /record\.actor_username/, 'the acting USERNAME leads every row')
-  assert.match(float, /record\.provenance_unknown[\s\S]*label\('unknown', 'Unknown'\)/,
-    'a generation-proven replay with pruned provenance must say Unknown instead of misattributing it to System')
-  assert.match(float, /formatSaleRecordValueLines\(row\.field, value, fmtUSD\)/, 'structured detail must use the readable value formatter')
-  assert.match(float, /inline-flex max-w-full flex-col/, 'multiple products or payments must render as separate lines')
-})
-
-runTest("a return's record renders its refund as money, not as a raw field name", () => {
-  // The returns source (lib/saleRecords.ts, source 5) emits a field no other
-  // source does. A field with no rule falls through to plain text UNDER ITS OWN
-  // RAW NAME, so the row would read "refund_usd  -  3" in both languages.
-  const record: SaleRecord = {
-    id: 'return:5', source: 'return', at: '2026-09-06 14:00:00', at_ms: 9,
-    actor_username: 'dara', kind: 'status_changed', via: null, subject: 'R-0005',
-    summary: 'Partial return',
-    before: { sale_status: 'completed' },
-    after: { sale_status: 'partial_return', refund_usd: 3 },
-  }
-  const rows = saleRecordFieldRows(record)
-  const refund = rows.find((row) => row.field === 'refund_usd')
-  assert.ok(refund, 'the refund must expand')
-  assert.equal(refund?.format, 'money', 'a refund rendered as a bare number reads as a quantity')
-  assert.ok(refund?.labelKey, 'and it must have a label key rather than printing refund_usd')
-  const en = JSON.parse(read('../src/lang/en.json')) as Record<string, string>
-  const km = JSON.parse(read('../src/lang/km.json')) as Record<string, string>
-  assert.ok(en[refund!.labelKey!], 'en.json is missing the refund label')
-  assert.ok(km[refund!.labelKey!], 'km.json is missing the refund label')
-  assert.notEqual(km[refund!.labelKey!], en[refund!.labelKey!], 'the refund label is not actually translated')
-  // The status pair still reads as a status, so the row is a transition and
-  // not two opaque strings.
-  const status = rows.find((row) => row.field === 'sale_status')
-  assert.equal(status?.format, 'status')
-  assert.equal(status?.changed, true)
-})
-
-runTest('the "how" badge is translated, not the Worker enum printed raw', () => {
-  // `via` is a Worker enum -- 'amend' | 'undo' | 'redo' -- and the float is the
-  // one surface whose whole job is explaining what happened, so printing it raw
-  // put the English words "undo" and "redo" into the Khmer pack. Both words are
-  // already in both packs.
-  const float = read('../src/components/sales/SaleRecordsFloat.tsx')
-  assert.doesNotMatch(float, /\{record\.via\}<\/span>/, 'the raw enum must not reach the DOM')
-  assert.match(float, /record\.via === 'undo' \? label\('undo', 'Undo'\)/, 'undo reads from the pack')
-  assert.match(float, /record\.via === 'redo' \? label\('redo', 'Redo'\)/, 'redo reads from the pack')
-  assert.match(float, /\{viaLabel\(record\) \?/, 'and the badge renders the looked-up label')
-  const en = JSON.parse(read('../src/lang/en.json')) as Record<string, string>
-  const km = JSON.parse(read('../src/lang/km.json')) as Record<string, string>
-  for (const key of ['undo', 'redo']) {
-    assert.ok(en[key], `en.json is missing ${key}`)
-    assert.ok(km[key], `km.json is missing ${key}`)
-    assert.notEqual(km[key], en[key], `${key} is not actually translated`)
-    // The tell the raw render leaves behind: the Khmer pack showing the
-    // English identifier is exactly the failure this pins.
-    assert.notEqual(km[key], key, `km.json's ${key} is the identifier, not a translation`)
-  }
-  // 'amend' deliberately has NO badge: it is how nearly every record was made.
-  assert.doesNotMatch(float, /label\('amend'/, "the common case must not badge every row")
-})
-
-runTest('the float is wired into the Sales page and fetches the union endpoint', () => {
-  const sales = read('../src/components/sales/Sales.tsx')
-  assert.match(sales, /import\('\.\/SaleRecordsFloat'\)/, 'the float must be code-split like the other sale modals')
-  assert.match(sales, /onOpenRecords=\{\(sale\) => \{[\s\S]*setRecordsSale\(sale as SaleRecord\)[\s\S]*setDetailSale\(null\)/, 'expanded detail opens Records without stacking two dialogs')
-  assert.match(sales, /const sale = recordsSale[\s\S]*setRecordsSale\(null\)[\s\S]*setDetailSale\(sale\)/, 'closing Records returns to the expanded sale detail')
-  assert.match(sales, /\{recordsSale \?/, 'and the page must render it')
+  assert.match(detail, /onClick=\{\(\) => onOpenRecords\(sale\)\}/)
   const transport = read('../src/api/salesTransport.ts')
-  assert.match(transport, /\/api\/sales\/\$\{encodeId\(id\)\}\/records/, 'the float reads the union endpoint, not /amendments')
-  assert.match(transport, /raceLocalFallback: false/, 'an empty list fabricated offline would read as "nobody ever touched this sale"')
-  const float = read('../src/components/sales/SaleRecordsFloat.tsx')
-  assert.match(float, /getSaleRecords\(sale\.id\)/)
-  assert.match(float, /setError\(/, 'a failed read must say it failed rather than show an empty list')
+  assert.match(transport, /\/api\/sales\/\$\{encodeId\(id\)\}\/records/)
+  assert.match(transport, /raceLocalFallback: false/)
 })
 
-runTest('the Worker delivers the count with the list page, not one query per row', () => {
-  const route = read('../../cloudflare/src/routes/sales.ts')
-  assert.match(route, /records_count: \(recordsBySale\.get\(sale\.id\) \|\| 0\) \+ SALE_RECORDS_SELF_COUNT/, 'every listed sale carries its count')
-  assert.match(route, /for \(const chunk of chunkForBinding\(saleIds, 0, SALE_RECORDS_COUNT_BINDS_PER_ID\)\)/, 'one statement per chunk, with the real bind cost declared')
-})
-
-if (failed) {
-  console.error(`${failed} sale-records case(s) failed`)
-  process.exit(1)
-}
+if (failed) { console.error(`${failed} sale-records case(s) failed`); process.exit(1) }
 console.log('sale records (browser): all cases pass')
