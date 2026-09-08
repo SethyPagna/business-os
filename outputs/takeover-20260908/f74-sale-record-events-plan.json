@@ -1,6 +1,6 @@
 {
-  "schema_version": 2,
-  "status": "proposed_for_architecture_review",
+  "schema_version": 3,
+  "status": "proposed_for_final_review",
   "migration": "0140_sale_record_events.sql",
   "table": {
     "name": "sale_record_events",
@@ -22,29 +22,33 @@
     ],
     "identity": {
       "unique": ["source_kind", "source_id", "generation", "sale_id"],
-      "id_formula": "source_kind || ':' || source_id || ':' || generation || ':' || sale_id",
-      "rule": "kind is payload under the unique act identity and cannot create a second record for one act"
+      "id_formula": "crypto.randomUUID() generated before the atomic batch; id is an opaque row identifier, while the composite unique key is the retry identity",
+      "rule": "kind is payload under the unique act identity and cannot create a second record for one act. Do not concatenate unescaped tuple parts into id."
     },
     "checks": [
       "source_kind is one of sale_status, sale_customer, sale_settlement, sale_bulk_status, sale_bulk_update, return_create, return_edit, return_bulk",
       "source_id length is 1..180",
       "generation is an integer from 0 through 1000000",
-      "kind is one of the frozen F74 kinds",
+      "kind is one of the frozen F74 kinds except legacy_sale_change, which is synthesized only from legacy rows and is never appended to this table",
       "via is apply, undo, or redo",
       "actor_username is null or at most 120 characters",
       "subject is null or at most 240 characters",
       "occurred_at is non-empty and at most 40 characters",
-      "changes_json is a valid JSON array with 1..12 elements and at most 65536 UTF-8 bytes",
+      "changes_json is a valid JSON array with 1..12 elements and at most 65536 UTF-8 bytes; the migration measures bytes with length(CAST(changes_json AS BLOB))",
       "request_digest is null or a 64-character lowercase SHA-256 hex string",
-      "response_json is null or a valid JSON object no larger than 65536 UTF-8 bytes"
+      "response_json is null or a valid JSON object no larger than 65536 UTF-8 bytes, measured with length(CAST(response_json AS BLOB))"
     ],
-    "index": ["sale_id", "occurred_at", "id"],
+    "index": [
+      "sale_id, occurred_at, id",
+      "UNIQUE(source_kind,source_id,generation) WHERE source_kind IN ('sale_status','sale_customer','return_edit') prevents one direct request identity from targeting two sales"
+    ],
     "backfill": "none"
   },
   "server_validation_before_sql": {
     "max_events_per_statement": 25,
     "max_changes_per_event": 12,
     "max_changes_bytes": 65536,
+    "max_events_json_bytes": 131072,
     "rules": [
       "Reject unknown source_kind, kind, via, field, or field-for-kind combinations.",
       "Require each change to contain exactly field, before, and after.",
@@ -52,9 +56,10 @@
       "Reject duplicate fields and equal before/after states.",
       "Validate nested customer, membership, driver, item, item-list, payment, and payment-details shapes and scalar bounds. New customer values permit only stable id and display name; phone and address are forbidden. Existing undo receipts may retain their pre-existing private fields internally, but projection into changes_json removes them.",
       "When response_json is used for direct-request idempotency, permit only the endpoint's fixed success/id/status/timestamp response keys. Never persist a request body, contact details, or arbitrary error payload in response_json.",
+      "Require the complete serialized @events array to be at most 131072 UTF-8 bytes.",
       "Serialize only the validated normalized structure; never serialize request bodies or arbitrary audit variables."
     ],
-    "batch_insert": "One INSERT...SELECT FROM json_each(@events) statement writes all changed members. A 25-member bulk action or replay therefore adds exactly one D1 batch statement, not 25. Existing 500-statement and 512000-byte guards remain authoritative and run after the event statement is added."
+    "batch_insert": "One INSERT...SELECT FROM json_each(@events) statement writes all changed members. A 25-member bulk action or replay therefore adds exactly one D1 batch statement, not 25. saleBulkStatus, saleBulkUpdate, and returnBulkAction each change their bounded helper to receive eventsBytes and require eventsBytes <= 131072, snapshotBytes + eventsBytes <= 512000, and the final statement count <= 500 after the event statement is added."
   },
   "writer_matrix": [
     {
@@ -63,7 +68,7 @@
       "source_id": "actor:<actor_id>:request:<client_request_id>",
       "generation": 0,
       "kind": "status_changed or cancelled",
-      "idempotency": "Require a stable client_request_id for every non-noop status request. Save SHA-256 canonical request digest and response_json in the event. An exact retry returns response_json; reuse with another digest is 409. Event and sale/audit/stock writes share one guarded batch."
+      "idempotency": "Require a stable client_request_id for every non-noop status request. The canonical digest includes the target sale id plus status, notes, cancellation, settlement, expected revision, and other accepted semantic fields. Save SHA-256 digest and response_json in the event. An exact retry returns response_json; reuse with another digest or sale id is 409. Event and sale/audit/stock writes share one guarded batch."
     },
     {
       "writer": "PATCH /sales/:id/customer legacy direct endpoint",
@@ -71,7 +76,7 @@
       "source_id": "actor:<actor_id>:request:<client_request_id>",
       "generation": 0,
       "kind": "customer_changed",
-      "idempotency": "Require a stable client_request_id. Save canonical digest and response. Exact retry returns the saved response; conflicting reuse is 409. F72's active UI continues to use sale_bulk_update."
+      "idempotency": "Require a stable client_request_id. The canonical digest includes the target sale id, target customer id, and expected revision. Save canonical digest and response. Exact retry returns the saved response; conflicting reuse or sale id is 409. F72's active UI continues to use sale_bulk_update."
     },
     {
       "writer": "sale settlement/payment correction Apply, Undo, Redo",
@@ -111,7 +116,7 @@
       "source_id": "actor:<actor_id>:request:<client_request_id>",
       "generation": 0,
       "kind": "status_changed",
-      "idempotency": "Require a stable client_request_id and expected_updated_at for edits. Save canonical digest and response. The event, return edit outcome, and resulting sale status must commit as one revision-guarded unit. Supplier returns emit no sale event."
+      "idempotency": "Require a stable client_request_id and expected_updated_at for edits. The canonical digest includes the target return id and every accepted semantic edit field. Save canonical digest and response. Exact reuse against another return is blocked by both digest comparison and the partial unique direct-request index. The event, return edit outcome, and resulting sale status must commit as one revision-guarded unit. Supplier returns emit no sale event."
     },
     {
       "writer": "return bulk status Apply, Undo, Redo",
@@ -153,7 +158,8 @@
     "Native SQLite create/edit customer return sale-status before/after and supplier non-event.",
     "Stable retry returns prior response; conflicting request-id reuse fails; concurrent revision loses atomically.",
     "Maximum 25-member bulk fixtures prove exactly one added statement and remain below existing 500/512000 bounds.",
-    "Malformed kind/field/state/nested value, 13 changes, oversized JSON, duplicate field, and equal-state events fail before SQL.",
+    "Malformed kind/field/state/nested value, legacy_sale_change insertion, 13 changes, per-event oversized JSON, aggregate events JSON over 131072 bytes, combined snapshot plus events over 512000 bytes, duplicate field, and equal-state events fail before SQL.",
+    "One direct client_request_id cannot target two sales or returns, even concurrently; each canonical digest includes its route target id.",
     "Migration CHECKs, append-only triggers, reset maintenance order, backup/restore dependency coverage, factory reset, sales reset, all reset, products includeSales.",
     "Audit pruning leaves every new event and exact legacy fallback; count equals detail for mixed pre/post migration history."
   ]
