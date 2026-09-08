@@ -376,6 +376,10 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   const em = (text: string): string => (tpl.show_emojis === false ? stripEmoji(text) : text)
   const items = useMemo(() => parseItems(sale.items), [sale.items])
   const paymentDetails = useMemo(() => parsePaymentDetails(sale.payment_details), [sale.payment_details])
+  const paymentMethodText = useMemo(() => {
+    const detailMethods = Array.from(new Set(paymentDetails.map((detail) => detail.method)))
+    return detailMethods.join(' + ') || String(sale.payment_method || '').trim() || 'Cash'
+  }, [paymentDetails, sale.payment_method])
   const rNum = sale.receiptNumber || sale.receipt_number || 'Receipt'
   const createdAt = sale.created_at
   // Route every supported timestamp shape through the shared formatter:
@@ -562,7 +566,6 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
             ) : <span className="whitespace-nowrap">{exchangeRateText}</span>}
           />
         ) : null}
-        {tpl.show_payment_method ? <Row label={labelFor(lang, 'payment')} value={sale.payment_method || 'Cash'} subValue={paymentDetails.length > 1 ? paymentDetails.map((detail) => `${detail.method}: ${detail.amount_usd > 0 ? fmtUSD(detail.amount_usd) : ''}${detail.amount_usd > 0 && detail.amount_khr > 0 ? ' + ' : ''}${detail.amount_khr > 0 ? fmtKHR(detail.amount_khr) : ''}`).join(' · ') : ''} /> : null}
       </div>
     ),
     customer: hasCustomer ? (
@@ -748,8 +751,13 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
     ) : null,
     payment: tpl.show_amount_paid ? (
       <div key="payment">
-        {paidUsd > 0 ? <Row label={`${labelFor(lang, 'paid')} (USD)`} value={fmtUSD(paidUsd)} /> : null}
-        {paidKhr > 0 ? <Row label={`${labelFor(lang, 'paid')} (KHR)`} value={fmtKHR(paidKhr)} /> : null}
+        {paidUsd > 0 || paidKhr > 0 ? (
+          <Row
+            label={`${labelFor(lang, 'paid')}${tpl.show_payment_method ? ` ${paymentMethodText}` : ''}`}
+            value={paidUsd > 0 ? fmtUSD(paidUsd) : fmtKHR(paidKhr)}
+            subValue={paidUsd > 0 && paidKhr > 0 ? fmtKHR(paidKhr) : ''}
+          />
+        ) : null}
         {/* What is still owed. A credit / awaiting-payment sale printed a
             Total and a smaller Paid and then simply stopped, leaving the
             customer to do the subtraction on a receipt that never named the

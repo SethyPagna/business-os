@@ -132,7 +132,7 @@ const saleFixture = {
   ],
 }
 
-function renderReceipt(templateOverrides: Record<string, unknown> = {}, printOverrides: Record<string, unknown> = {}): string {
+function renderReceipt(templateOverrides: Record<string, unknown> = {}, printOverrides: Record<string, unknown> = {}, saleOverrides: Record<string, unknown> = {}): string {
   const settings = {
     business_name: 'Shop',
     exchange_rate: 4065,
@@ -140,7 +140,7 @@ function renderReceipt(templateOverrides: Record<string, unknown> = {}, printOve
     receipt_print_settings: JSON.stringify(printOverrides),
   }
   return renderToStaticMarkup(React.createElement(Receipt, {
-    sale: saleFixture,
+    sale: { ...saleFixture, ...saleOverrides },
     settings,
     onClose: () => {},
     _previewMode: true,
@@ -288,6 +288,69 @@ await runTest('the delivery-contact section no longer carries a fee heading', ()
     1,
     'only the totals row may use the delivery-fee label',
   )
+})
+
+// --- 2a. tender methods belong to the Paid row -----------------------------
+
+await runTest('payment methods print after Paid, never as a standalone row', () => {
+  for (const [receipt_language, expectedLabel] of [
+    ['en', 'Paid: ABA'],
+    ['km', 'បានបង់: ABA'],
+    ['both', 'បានបង់ / Paid: ABA'],
+  ] as const) {
+    const html = renderReceipt({ receipt_language }, {}, {
+      payment_method: 'ABA',
+      payment_details: [{ method: 'ABA', amount_usd: 80, amount_khr: 0 }],
+      amount_paid_usd: 80,
+      amount_paid_khr: 0,
+    })
+    assert.ok(html.includes(expectedLabel), `${receipt_language}: tender follows the Paid label`)
+    assert.ok(!html.includes('Payment:'), `${receipt_language}: the standalone English payment row is gone`)
+    assert.ok(!html.includes('ការទូទាត់:'), `${receipt_language}: the standalone Khmer payment row is gone`)
+    const paidRow = html.split('data-receipt-line="true"').find((row) => row.includes(expectedLabel)) || ''
+    assert.ok(paidRow.includes('$80.00'), `${receipt_language}: the paid amount is unchanged`)
+  }
+})
+
+await runTest('split and mixed-currency tenders share one truthful Paid row', () => {
+  const html = renderReceipt({}, {}, {
+    payment_method: 'ABA + Cash',
+    payment_details: [
+      { method: 'ABA', amount_usd: 10, amount_khr: 0 },
+      { method: 'Cash', amount_usd: 0, amount_khr: 41000 },
+    ],
+    amount_paid_usd: 10,
+    amount_paid_khr: 41000,
+  })
+  const paidRows = html.split('data-receipt-line="true"').filter((row) => row.includes('Paid:'))
+  assert.equal(paidRows.length, 1, 'USD and KHR remain attached to one Paid fact')
+  assert.ok(paidRows[0].includes('Paid: ABA + Cash'))
+  assert.ok(paidRows[0].includes('$10.00'))
+  assert.ok(paidRows[0].includes('41,000៛'))
+  assert.ok(!html.includes('ABA: $10.00'), 'per-tender amounts do not recreate a second payment breakdown')
+})
+
+await runTest('payment visibility, unpaid balance, and refunds keep their existing meaning', () => {
+  const hiddenMethod = renderReceipt({ show_payment_method: false }, {}, {
+    payment_method: 'ABA',
+    payment_details: [{ method: 'ABA', amount_usd: 80, amount_khr: 0 }],
+  })
+  assert.ok(hiddenMethod.includes('Paid:'))
+  assert.ok(!hiddenMethod.includes('Paid: ABA'), 'show_payment_method still hides the tender name')
+
+  const unpaid = renderReceipt({}, {}, {
+    sale_status: 'awaiting_payment',
+    payment_method: '',
+    payment_details: [],
+    amount_paid_usd: 0,
+    amount_paid_khr: 0,
+  })
+  assert.ok(!unpaid.includes('Paid:'), 'a fully unpaid sale does not invent Cash or a paid row')
+  assert.ok(unpaid.includes('Balance due:'), 'the existing unpaid balance remains visible')
+
+  const refunded = renderReceipt({}, {}, { refund_usd: 5, refund_khr: 20325 })
+  assert.ok(refunded.includes('Refunded:'), 'refund stays a distinct post-total row')
+  assert.ok(refunded.includes('-$5.00'))
 })
 
 // --- 3. no item-count row on any template ---------------------------------
