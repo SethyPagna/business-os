@@ -68,6 +68,8 @@ import {
 } from '../lib/productConflictActionGroups'
 import { attachBatchCounts } from '../lib/productBatches'
 import { maybeQueueForReview } from '../lib/reviewGate'
+import { ProductRemoveError, prepareProductRemovePlan, productRemoveApplyStatements, productRemovePlanDigest,
+  productRemoveQueueStatements, type ProductRemoveOperationRow } from '../lib/productDelete'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { createBulkDeleteJob, getBulkDeleteJob, reapStalledBulkDeleteJobs } from '../lib/bulkDeleteEngine'
@@ -1991,84 +1993,97 @@ app.put('/:id', async (c) => {
 
 app.delete('/:id', async (c) => {
   const user = c.get('user')
-  if (getActionTier(user, 'products', 'delete') === 'none') {
+  const tier = getActionTier(user, 'products', 'delete')
+  if (tier === 'none') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
-  const id = c.req.param('id')
-
-  // Delete now requires a reason, same mandatory-reason rule already
-  // enforced server-side for stock adjustments (see inventory.ts's /adjust
-  // route) -- not just a client-side nicety, so this can't be bypassed by
-  // calling the API directly. Applies to single delete and every per-row
-  // call the bulk-delete flow makes (Products.tsx calls this same route
-  // once per id), so one check here covers both entry points.
+  const id = Number(c.req.param('id'))
+  if (!Number.isSafeInteger(id) || id <= 0) return c.json({ success: false, code: 'invalid_product_id', error: 'A valid product id is required.' }, 400)
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
-  const reason = body.reason != null ? String(body.reason).trim() || null : null
-  if (!reason) return c.json({ error: 'A reason is required to delete a product' }, 400)
-
-  // Also a real pre-existing gap fixed alongside the reason requirement:
-  // this route never wrote to the audit log at all (every other
-  // delete-type route in this app does -- branches.ts, contacts.ts,
-  // fees.ts, promotions.ts, etc.), so a product delete previously left no
-  // trace of who deleted it, when, or why. Name captured before the
-  // update since a soft delete doesn't remove the row but the name is
-  // still worth freezing into the audit entry rather than re-reading it
-  // live later. Per-branch stock captured the same way, for the
-  // inventory_movements entries below -- same reasoning as the audit
-  // name capture, and needed before the soft delete zeroes nothing out
-  // itself (branch_stock rows are untouched by this route, but their
-  // quantities at this moment are what the movement log should reflect).
-  const existing = await getDb(c.env).prepare('SELECT name FROM products WHERE id = @id').get<{ name?: string }>({ id })
-  const stockRows = await getDb(c.env).prepare(`
-    SELECT bs.branch_id AS branchId, bs.quantity AS quantity, b.name AS branchName
-    FROM branch_stock bs LEFT JOIN branches b ON b.id = bs.branch_id
-    WHERE bs.product_id = @id AND bs.quantity > 0
-  `).all<{ branchId: number; quantity: number; branchName: string | null }>({ id })
-
-  // Same Review Required tier as create/update above: delete also queues
-  // rather than applying directly for a 'review'-tier user. No-op (null)
-  // for Full tier, same as every other maybeQueueForReview call site.
-  const pendingId = await maybeQueueForReview(c.env, user, 'products', {
-    actionType: 'delete',
-    entityType: 'product',
-    entityId: Number(id),
-    payload: { id, reason },
-    summary: `Delete product #${id}`,
-  })
-  if (pendingId != null) {
-    return c.json({ success: true, pending: true, pendingActionId: pendingId }, 202)
+  const allowed = new Set(['reason', 'expectedUpdatedAt', 'expected_updated_at', 'client_request_id'])
+  if (Object.keys(body).some((key) => !allowed.has(key))) {
+    return c.json({ success: false, code: 'invalid_remove_request', error: 'The product removal request contains unsupported fields.' }, 400)
   }
-
-  const result = await getDb(c.env).prepare('UPDATE products SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = @id').run({ id })
-
-  // One inventory_movements row per branch that still had stock at delete
-  // time -- same table/shape /adjust's own remove path writes to (see
-  // that route just above), movement_type: 'delete' so this is
-  // distinguishable in the Inventory movements log from an ordinary
-  // manual stock_remove. A soft delete doesn't touch branch_stock rows
-  // itself (the product just stops showing up as active), so without
-  // this the movement history would show no record at all of the stock
-  // that existed when the product was removed.
-  for (const row of stockRows) {
-    await getDb(c.env).prepare(`
-      INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at)
-      VALUES (@productId, @productName, @branchId, @branchName, 'delete', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP)
-    `).run({
-      productId: Number(id),
-      productName: existing?.name ?? null,
-      branchId: row.branchId,
-      branchName: row.branchName,
-      quantity: row.quantity,
-      reason,
-      userId: user?.id ?? null,
-      userName: actorSnapshot(user),
-    })
+  const reason = typeof body.reason === 'string' ? body.reason.trim() : ''
+  if (!reason || reason.length > 500) return c.json({ success: false, code: 'invalid_remove_reason', error: 'A reason of 1-500 characters is required.' }, 400)
+  const suppliedRequestId = typeof body.client_request_id === 'string' ? body.client_request_id.trim() : ''
+  if (suppliedRequestId && !/^[A-Za-z0-9_-]{8,120}$/.test(suppliedRequestId)) {
+    return c.json({ success: false, code: 'invalid_client_request_id', error: 'A stable client_request_id is invalid.' }, 400)
   }
-
-  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'delete', 'product', Number(id), { name: existing?.name ?? null, reason })
+  const requestId = suppliedRequestId || `legacy-remove-${id}-${crypto.randomUUID()}`
+  const db = getDb(c.env)
+  const existingOperation = suppliedRequestId ? await db.prepare(`SELECT * FROM product_remove_operations
+    WHERE actor_id=@actor AND source='direct' AND request_id=@request`).get<ProductRemoveOperationRow>({ actor: user.id, request: requestId }) : null
+  if (existingOperation) {
+    if (Number(existingOperation.product_id) !== id || existingOperation.reason !== reason) {
+      return c.json({ success: false, code: 'idempotency_conflict', error: 'client_request_id was already used for a different product removal.' }, 409)
+    }
+    if (existingOperation.status === 'approval_pending') {
+      return c.json({ success: true, pending: true, pendingActionId: existingOperation.pending_action_id,
+        operation_id: existingOperation.operation_id, status: existingOperation.status, generation: Number(existingOperation.generation) }, 202)
+    }
+    if (existingOperation.status === 'undo_ready') {
+      let response: Record<string, unknown> = {}
+      try { response = existingOperation.response_json ? JSON.parse(existingOperation.response_json) : {} } catch { response = {} }
+      return c.json({ success: true, ...response, replayed: true })
+    }
+    return c.json({ success: false, code: existingOperation.status === 'reversed' ? 'remove_reversed' : 'remove_state_conflict',
+      error: 'This product removal request is not available for another forward apply.' }, 409)
+  }
+  let plan
+  try {
+    plan = await prepareProductRemovePlan(db, id, reason)
+    assertUpdatedAtMatch('product', plan.product, getExpectedUpdatedAt(body))
+  } catch (error) {
+    if (error instanceof WriteConflictError) {
+      const conflict = writeConflictResponse(error); return c.json(conflict.body, conflict.status)
+    }
+    if (error instanceof ProductRemoveError) {
+      if (!suppliedRequestId && error.code === 'product_not_removable') {
+        return c.json({ success: true, changes: 0, already_removed: true })
+      }
+      return c.json({ success: false, code: error.code, error: error.message }, error.status)
+    }
+    throw error
+  }
+  const planDigest = await productRemovePlanDigest(plan)
+  const operationId = crypto.randomUUID()
+  if (tier === 'review') {
+    try { await db.batch(productRemoveQueueStatements({ plan, operationId, requestId, user, planDigest })) }
+    catch (error) {
+      const replay = suppliedRequestId ? await db.prepare(`SELECT * FROM product_remove_operations
+        WHERE actor_id=@actor AND source='direct' AND request_id=@request`).get<ProductRemoveOperationRow>({ actor: user.id, request: requestId }) : null
+      if (replay?.status === 'approval_pending' && replay.product_id === id && replay.reason === reason) {
+        return c.json({ success: true, pending: true, pendingActionId: replay.pending_action_id,
+          operation_id: replay.operation_id, status: replay.status, generation: Number(replay.generation) }, 202)
+      }
+      return c.json({ success: false, code: 'review_state_conflict', error: 'The product changed before the removal request was queued.' }, 409)
+    }
+    const queued = await db.prepare('SELECT pending_action_id FROM product_remove_operations WHERE operation_id=@operation')
+      .get<{ pending_action_id: number }>({ operation: operationId })
+    return c.json({ success: true, pending: true, pendingActionId: Number(queued?.pending_action_id),
+      operation_id: operationId, status: 'approval_pending', generation: 0 }, 202)
+  }
+  const transitionStamp = new Date().toISOString()
+  try {
+    await db.batch(productRemoveApplyStatements({ plan, operationId, source: 'direct', requestId, user, transitionStamp, planDigest }))
+  } catch (error) {
+    const replay = await db.prepare(`SELECT * FROM product_remove_operations WHERE actor_id=@actor AND source='direct' AND request_id=@request`)
+      .get<ProductRemoveOperationRow>({ actor: user.id, request: requestId })
+    if (replay?.status === 'undo_ready' && replay.product_id === id && replay.reason === reason) {
+      let response: Record<string, unknown> = {}
+      try { response = replay.response_json ? JSON.parse(replay.response_json) : {} } catch { response = {} }
+      return c.json({ success: true, ...response, replayed: true })
+    }
+    return c.json({ success: false, code: 'review_state_conflict', error: 'The product changed before the removal committed.' }, 409)
+  }
+  const committed = await db.prepare(`SELECT operation_id,product_id,status,action_history_id,generation,response_json
+    FROM product_remove_operations WHERE operation_id=@operation`).get<ProductRemoveOperationRow>({ operation: operationId })
   c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'delete', id }))
-  return c.json({ success: true, changes: result.changes })
+  c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'update' }))
+  return c.json({ success: true, changes: 1, operation_id: operationId, product_id: id, status: committed?.status || 'undo_ready',
+    action_history_id: committed?.action_history_id ?? null, generation: Number(committed?.generation || 0) })
 })
 
 // POST /api/products/bulk-delete-jobs -- the 10k+-safe path. Products.tsx's

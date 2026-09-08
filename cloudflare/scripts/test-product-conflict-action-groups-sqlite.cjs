@@ -28,10 +28,10 @@ function loadTs(rel, stubs = {}) {
 }
 
 class FakeHono {
-  constructor() { this.posts = new Map(); this.gets = new Map(); FakeHono.instance = this }
+  constructor() { this.posts = new Map(); this.gets = new Map(); this.deletes = new Map(); FakeHono.instance = this }
   post(path, handler) { this.posts.set(path, handler); return this }
   get(path, handler) { this.gets.set(path, handler); return this }
-  put() { return this } patch() { return this } delete() { return this } use() { return this }
+  put() { return this } patch() { return this } delete(path, handler) { this.deletes.set(path, handler); return this } use() { return this }
   on() { return this } all() { return this } route() { return this } onError() { return this } notFound() { return this }
 }
 
@@ -99,10 +99,13 @@ function loadRoute(d1, realMergeRuntime = false) {
     './productConflictMergeBatch': selected,
   })
   const permissions = {
-    getActionTier: (user, section, action) => (action === 'merge_duplicates' && user.noMerge) || (action === 'image' && user.noImage) ? 'none' : 'full',
+    getActionTier: (user, section, action) => action === 'delete' && user.noDelete ? 'none'
+      : action === 'delete' && user.reviewDelete ? 'review'
+        : (action === 'merge_duplicates' && user.noMerge) || (action === 'image' && user.noImage) ? 'none' : 'full',
     getPermissionTier: () => 'full', hasPermission: () => true, getMergedPermissions: () => ({}), isAdminControlUser: () => true,
   }
   const actor = loadTs('lib/actorSnapshot.ts')
+  const productDelete = loadTs('lib/productDelete.ts', { './auth': {}, './db': {}, './actorSnapshot': actor })
   const never = () => { throw new Error('unrelated undo branch invoked') }
   const snapshot = realMergeRuntime ? loadTs('lib/productMergeSnapshot.ts', { './db': {} }) : undefined
   const undo = realMergeRuntime ? loadTs('lib/undoAppliers.ts', {
@@ -125,6 +128,7 @@ function loadRoute(d1, realMergeRuntime = false) {
     '../lib/productDetailRule': detail, '../lib/sqlBinding': binding, '../lib/productIdentity': identity, '../lib/productMerge': merge,
     '../lib/productConflictMergeBatch': selected, '../lib/productConflictActionGroups': actionGroups, '../lib/permissions': permissions,
     '../lib/searchMatch': searchMatch,
+    '../lib/productDelete': productDelete,
     ...(realMergeRuntime ? { '../lib/undoAppliers': undo, '../lib/productMergeSnapshot': snapshot, '../lib/actorSnapshot': actor } : {}),
     '../lib/audit': { audit: async () => {} }, '../lib/cache': { bumpVersion: async () => {}, cachedJsonResponse: async () => null, getVersionWithFallback: async () => '1' },
     '../durable-objects/broadcastHub': { broadcast: async () => {} },
