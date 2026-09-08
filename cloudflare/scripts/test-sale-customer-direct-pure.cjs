@@ -167,6 +167,10 @@ async function run() {
 
   f = fixture()
   f.sql.prepare('UPDATE customers SET is_anonymous=1 WHERE id=1').run()
+  const clearMarkedGeneral = await f.call(2, request({ client_request_id: 'clear-marked-general', expected_updated_at: 'sale-2-v1', clearAssignment: true, customerId: undefined }))
+  assert.deepEqual(clearMarkedGeneral, { status: 200, body: { id: 2, updated_at: 'sale-2-v1' } })
+  assert.equal(f.sql.prepare('SELECT customer_id FROM sales WHERE id=2').get().customer_id, 1, 'semantic General clear preserves the historical marked id')
+  assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM sale_record_events WHERE source_kind='sale_customer'").get().n, 0)
   const markedGeneral = await f.call(2, request({ client_request_id: 'marked-general', expected_updated_at: 'sale-2-v1', customerId: 3 }))
   assert.equal(markedGeneral.status, 200, JSON.stringify(markedGeneral))
   const markedChanges = JSON.parse(f.sql.prepare("SELECT changes_json FROM sale_record_events WHERE sale_id=2").get().changes_json)
