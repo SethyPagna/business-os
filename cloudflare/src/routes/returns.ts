@@ -1125,7 +1125,7 @@ app.post('/', async (c) => {
 
   type ProductMeta = {
     id: number; name: string; cost_price_usd: number; cost_price_khr: number
-    selling_price_usd: number; selling_price_khr: number; updated_at: string | null
+    selling_price_usd: number; selling_price_khr: number; updated_at: string | null; is_active: number | null
   }
   const productIds = [...new Set([
     ...returnItems.map((item) => Number(item.product_id)),
@@ -1134,10 +1134,10 @@ app.post('/', async (c) => {
   const productMap = new Map<number, ProductMeta>()
   if (productIds.length) {
     const rows = await selectInChunks(productIds, 0, (chunk) => db.prepare(`SELECT id,name,cost_price_usd,cost_price_khr,
-      selling_price_usd,selling_price_khr,updated_at FROM products WHERE id IN (${chunk.map(() => '?').join(',')})`).all<ProductMeta>(chunk))
+      selling_price_usd,selling_price_khr,updated_at,is_active FROM products WHERE id IN (${chunk.map(() => '?').join(',')})`).all<ProductMeta>(chunk))
     for (const row of rows) productMap.set(Number(row.id), row)
   }
-  if (replacementInputs.some((input) => !productMap.has(Number(input.product_id)))) {
+  if (replacementInputs.some((input) => Number(productMap.get(Number(input.product_id))?.is_active || 0) !== 1)) {
     return c.json({ error: 'Each replacement line needs an active catalog product' }, 400)
   }
   const replacementLines = replacementInputs.map((input) => {
@@ -1224,7 +1224,7 @@ app.post('/', async (c) => {
   }
   for (const [index, line] of replacementLines.entries()) {
     if (line.batchId == null) continue
-    const lot = await db.prepare('SELECT lot_code,expiry_date FROM product_batches WHERE id=? AND variant_product_id=?')
+    const lot = await db.prepare('SELECT lot_code,expiry_date FROM product_batches WHERE id=? AND variant_product_id=? AND is_active=1')
       .get<{ lot_code: string | null; expiry_date: string | null }>([line.batchId, line.productId])
     if (!lot) return c.json({ error: 'Selected received date does not belong to this replacement product' }, 400)
     replacementExplicitTakes.set(index, [{ batchId: line.batchId, lotCode: lot.lot_code, expiryDate: lot.expiry_date, quantity: line.quantity }])
@@ -1300,17 +1300,18 @@ app.post('/', async (c) => {
 
   const pairKey = (productId: number, branch: number) => `${productId}:${branch}`
   const branchDeltas = new Map<string, { product_id: number; branch_id: number; delta: number }>()
-  const batchDeltas = new Map<string, { batch_id: number; product_id: number; branch_id: number; delta: number }>()
+  const batchDeltas = new Map<string, { batch_id: number; product_id: number; branch_id: number; delta: number; requires_active: number }>()
   const addBranchDelta = (productId: number, lineBranchId: number, delta: number) => {
     const key = pairKey(productId, lineBranchId)
     const current = branchDeltas.get(key) || { product_id: productId, branch_id: lineBranchId, delta: 0 }
     current.delta += delta
     branchDeltas.set(key, current)
   }
-  const addBatchDelta = (batchId: number, productId: number, lineBranchId: number, delta: number) => {
+  const addBatchDelta = (batchId: number, productId: number, lineBranchId: number, delta: number, requiresActive = false) => {
     const key = `${batchId}:${lineBranchId}`
-    const current = batchDeltas.get(key) || { batch_id: batchId, product_id: productId, branch_id: lineBranchId, delta: 0 }
+    const current = batchDeltas.get(key) || { batch_id: batchId, product_id: productId, branch_id: lineBranchId, delta: 0, requires_active: 0 }
     current.delta += delta
+    if (requiresActive) current.requires_active = 1
     batchDeltas.set(key, current)
   }
   for (const [index, item] of returnItems.entries()) {
@@ -1322,7 +1323,7 @@ app.post('/', async (c) => {
   for (const [index, line] of replacementLines.entries()) {
     addBranchDelta(line.productId, line.branchId, -line.quantity)
     for (const take of [...(replacementFifoTakes.get(index) || []), ...(replacementExplicitTakes.get(index) || [])]) {
-      addBatchDelta(take.batchId, line.productId, line.branchId, -take.quantity)
+      addBatchDelta(take.batchId, line.productId, line.branchId, -take.quantity, true)
     }
   }
   const branchSnapshots = []
@@ -1336,7 +1337,9 @@ app.post('/', async (c) => {
     const row = await db.prepare(`SELECT pb.variant_product_id AS product_id,pb.is_active,pb.lot_code,pb.expiry_date,COALESCE(bbs.quantity,0) quantity
       FROM product_batches pb LEFT JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id AND bbs.branch_id=? WHERE pb.id=?`)
       .get<{ product_id: number; is_active: number; lot_code: string | null; expiry_date: string | null; quantity: number }>([value.branch_id, value.batch_id])
-    if (!row || Number(row.product_id) !== value.product_id) return c.json({ error: 'A selected received date no longer belongs to this product', code: 'write_conflict' }, 409)
+    if (!row || Number(row.product_id) !== value.product_id || (value.requires_active === 1 && Number(row.is_active) !== 1)) {
+      return c.json({ error: 'A selected received date is no longer active for this product', code: 'write_conflict' }, 409)
+    }
     const before = Number(row.quantity) || 0
     if (before + value.delta < 0) return c.json({ error: 'Replacement stock changed. Reload and try again.', code: 'write_conflict' }, 409)
     batchSnapshots.push({
@@ -1354,7 +1357,8 @@ app.post('/', async (c) => {
     products: productIds.map((id) => {
       const product = productMap.get(id)
       return {
-        id, updated_at: product?.updated_at || '', name: product?.name || '',
+        id, updated_at: product?.updated_at || '', name: product?.name || '', is_active: Number(product?.is_active || 0),
+        requires_active: replacementLines.some((line) => line.productId === id) ? 1 : 0,
         cost_price_usd: Number(product?.cost_price_usd) || 0, cost_price_khr: Number(product?.cost_price_khr) || 0,
         selling_price_usd: Number(product?.selling_price_usd) || 0, selling_price_khr: Number(product?.selling_price_khr) || 0,
       }
@@ -1391,6 +1395,8 @@ app.post('/', async (c) => {
       WHERE NOT EXISTS(SELECT 1 FROM products p WHERE p.id=json_extract(j.value,'$.id')
         AND COALESCE(p.updated_at,'')=json_extract(j.value,'$.updated_at')
         AND COALESCE(p.name,'')=json_extract(j.value,'$.name')
+        AND COALESCE(p.is_active,0)=json_extract(j.value,'$.is_active')
+        AND (json_extract(j.value,'$.requires_active')=0 OR COALESCE(p.is_active,0)=1)
         AND COALESCE(p.cost_price_usd,0)=json_extract(j.value,'$.cost_price_usd')
         AND COALESCE(p.cost_price_khr,0)=json_extract(j.value,'$.cost_price_khr')
         AND COALESCE(p.selling_price_usd,0)=json_extract(j.value,'$.selling_price_usd')
@@ -1412,6 +1418,7 @@ app.post('/', async (c) => {
         ON bbs.batch_id=pb.id AND bbs.branch_id=json_extract(j.value,'$.branch_id')
         WHERE pb.id=json_extract(j.value,'$.batch_id') AND pb.variant_product_id=json_extract(j.value,'$.product_id')
           AND COALESCE(pb.is_active,0)=json_extract(j.value,'$.is_active')
+          AND (json_extract(j.value,'$.requires_active')=0 OR COALESCE(pb.is_active,0)=1)
           AND COALESCE(pb.lot_code,'')=json_extract(j.value,'$.lot_code')
           AND COALESCE(pb.expiry_date,'')=json_extract(j.value,'$.expiry_date')
           AND COALESCE(bbs.quantity,0)=json_extract(j.value,'$.before')))
