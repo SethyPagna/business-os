@@ -41,6 +41,7 @@ const media = loadTs('lib/media.ts')
 const sqlBinding = loadTs('lib/sqlBinding.ts')
 const imagePermission = loadTs('lib/productImagePermission.ts', { './media': media, './sqlBinding': sqlBinding })
 const permissions = loadTs('lib/permissions.ts')
+const productMerge = loadTs('lib/productMerge.ts')
 
 function permissiveModule() {
   return new Proxy({}, {
@@ -130,6 +131,7 @@ function loadProductsRoute(state) {
     '../lib/db': { getDb: () => db },
     '../lib/media': media,
     '../lib/productImagePermission': imagePermission,
+    '../lib/productMerge': productMerge,
     '../lib/productWrites': productWrites,
     '../lib/reviewGate': {
       maybeQueueForReview: async (_env, user, _section, request) => {
