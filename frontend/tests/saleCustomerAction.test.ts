@@ -6,7 +6,6 @@ import React, { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import react from '@vitejs/plugin-react'
 import { createServer } from 'vite'
-import ts from 'typescript'
 import { updateSalesBulkField, type BulkSaleUpdatePayload } from '../src/api/salesTransport.ts'
 import { __resetApiHealthForTests, __resetApiWriteDedupeForTests, setSyncServerUrl, setSyncToken } from '../src/api/http.ts'
 
@@ -18,15 +17,22 @@ const modalSource = readFileSync(resolve(frontendRoot, 'src/components/sales/Sal
 const nameModalSource = readFileSync(resolve(frontendRoot, 'src/components/sales/SaleCustomerNameModal.tsx'), 'utf8').replace(/\r\n?/g, '\n')
 
 assert.match(sales, /const canBrowseCustomers = can\('contacts', 'view'\)/)
-assert.match(sales, /const canCreateCustomer = can\('contacts', 'add'\)/)
 assert.match(sales, /const canEditCustomerName = can\('contacts', 'edit'\)/)
-assert.match(sales, /setSaleCustomerPrompt\(\{ sale: \{ \.\.\.sale \}, choices: \[\] \}\)[\s\S]{0,180}if \(canBrowseCustomers\)/, 'remove-link opens before the optional Contacts read')
-assert.match(sales, /readContactDuplicateDecisionError\(error\)[\s\S]{0,120}duplicateDecisionRequired/, 'create duplicate races return the form recovery contract')
-assert.match(sales, /updateCustomer\(String\(form\.id\), \{ name: after, __rename_cascade:/, 'Edit current sends a name-only profile payload')
-assert.doesNotMatch(nameModalSource, /name="[^"]*(?:phone|membership|address|notes)|onSave\(\{/, 'the name editor must not render or submit other profile fields')
-assert.match(detail, /t\('sale_customer_actions'\)/, 'the Sale Detail entry point is localized')
-assert.doesNotMatch(modalSource, /choices\.filter/, 'server phone or membership matches must not be hidden by a second name-only filter')
+assert.match(sales, /const canEditCustomerMembership = canEditCustomerName && getPermissionTier\('contacts'\) === 'full'/)
+assert.match(sales, /if \(hasCurrentCustomer\)[\s\S]{0,180}if \(!canEditCustomerName\)/, 'a real customer is edited only with Contacts edit permission')
+assert.match(sales, /setSaleCustomerPrompt\(\{ sale: \{ \.\.\.sale \}, choices: \[\] \}\)/, 'General opens the existing-contact assignment flow')
+assert.match(sales, /getCustomers\(\{ ids: \[String\(customerId\)\] \}\)/, 'a real customer profile is loaded by stable id')
+assert.match(sales, /payload\.membership_number = afterMembership/, 'membership association is a scoped profile update')
+assert.match(sales, /payload\.__rename_cascade = renameChoice === 'carry' \? 'carry' : 'record_only'/, 'name edits preserve the explicit linked-record choice')
+assert.doesNotMatch(sales, /createCustomer|CustomerFormModal|saleCustomerCreateRecovery/, 'the sale flow cannot create a customer')
+assert.doesNotMatch(modalSource, /Replace customer|Create customer|Remove link|onReplace|onCreate|onRemove/, 'the anonymous editor has no replace, create, or remove action')
+assert.match(detail, /t\('sale_customer_edit_entry'\)/, 'the Sale Detail entry point is one localized Edit customer action')
+assert.doesNotMatch(modalSource, /customer\.name[^\n]*includes/, 'server phone results are not hidden by a secondary name filter')
+assert.match(modalSource, /choices\.filter\(\(customer\) => canonicalizeSaleCustomerPhone\(customer\.phone\) === phoneKey\)/, 'only the exact canonical phone identity can be assigned')
 assert.match(modalSource, /SALE_CUSTOMER_SEARCH_DEBOUNCE_MS = 300/, 'server search is debounced')
+assert.match(modalSource, /formatPhoneInputElement/, 'the primary phone lookup uses the shared phone formatter')
+assert.match(nameModalSource, /readOnly=\{!membershipCanChange\}/, 'existing membership and non-Full membership access remain read-only')
+assert.match(nameModalSource, /Phone is this customer’s primary identity/, 'the real-customer form states the phone identity boundary')
 
 const zeroStart = sales.indexOf('if (result.changedCount === 0)')
 const zeroEnd = sales.indexOf('return false', zeroStart)
@@ -36,17 +42,8 @@ assert.ok(zeroBlock.indexOf('savePendingBulkFieldRequest(null)') < zeroBlock.ind
 assert.match(zeroBlock, /setSaleCustomerPrompt\(null\)/)
 assert.match(sales, /if \(pendingBulkFieldRequest && !retryRequest\)[\s\S]{0,500}const payload: BulkSaleUpdatePayload = retryRequest \|\|/, 'a new link body cannot overwrite an unknown frozen request')
 
-const classifierStart = sales.indexOf('export function isKnownUncommittedCustomerCreateError')
-const classifierEnd = sales.indexOf('\n\nexport default function Sales', classifierStart)
-assert.ok(classifierStart >= 0 && classifierEnd > classifierStart)
-const classifierCode = ts.transpileModule(`${sales.slice(classifierStart, classifierEnd).replace('export ', '')}; return isKnownUncommittedCustomerCreateError`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
-const isKnownUncommittedCustomerCreateError = new Function(classifierCode)() as (error: unknown) => boolean
-assert.equal(isKnownUncommittedCustomerCreateError({ status: 403 }), true)
-assert.equal(isKnownUncommittedCustomerCreateError({ reason: 'server_offline' }), true)
-assert.equal(isKnownUncommittedCustomerCreateError({ reason: 'server_unreachable' }), false)
-assert.equal(isKnownUncommittedCustomerCreateError({ code: 'request_timeout' }), false)
-assert.equal(isKnownUncommittedCustomerCreateError({ status: 503 }), false)
-console.log('PASS create recovery distinguishes known rejection from an honestly unknown outcome')
+assert.match(sales, /export function isKnownUncommittedSaleCustomerChangeError/)
+console.log('PASS one customer edit entry separates anonymous assignment from scoped real-customer edits')
 
 // Exercise the real transport: the one-sale body and receipt id must arrive
 // unchanged at the durable bulk endpoint.
@@ -63,7 +60,7 @@ globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
 const request: BulkSaleUpdatePayload = {
   client_request_id: 'f72-link-exact-request',
   items: [{ id: 72, expected_updated_at: '2026-09-08 11:00:00' }],
-  action: { kind: 'customer', source_id: 4, target_id: 9 },
+  action: { kind: 'customer', source_id: null, target_id: 9 },
 }
 try {
   const result = await updateSalesBulkField(request)
@@ -184,47 +181,42 @@ try {
   const actionModule = await vite.ssrLoadModule('/src/components/sales/SaleCustomerActionModal.tsx') as {
     default: React.ComponentType<Record<string, unknown>>
     useDebouncedSaleCustomerSearch: (query: string, onSearch?: (query: string) => void) => void
+    canonicalizeSaleCustomerPhone: (phone: unknown) => string
   }
   const nameModule = await vite.ssrLoadModule('/src/components/sales/SaleCustomerNameModal.tsx') as { default: React.ComponentType<Record<string, unknown>> }
   const translate = (_key: string, fallback: string) => fallback
   const container = memoryDocument.createElement('div')
   memoryDocument.body.appendChild(container)
   const root = createRoot(container as unknown as Element)
-  const common = { saleLabel: 'S-72', currentName: 'Old customer', hasCurrentCustomer: true, choices: [], saving: false, translate, onClose() {}, onReplace() {}, onRemove() {} }
+  const common = { saleLabel: 'S-72', choices: [], saving: false, translate, onClose() {}, onAssign() {} }
 
-  await act(async () => root.render(React.createElement(actionModule.default, { ...common, key: 'remove-only' })))
-  assert.match(container.textContent, /Remove link/)
-  assert.match(container.textContent, /Customer search needs Contacts view permission/)
-  assert.doesNotMatch(container.textContent, /Create customer|Edit current name|Find by name/)
-
-  await act(async () => root.render(React.createElement(actionModule.default, {
-    ...common,
-    key: 'independent-grants',
-    choices: [{ id: 9, name: 'Alice', phone: '012 345 678' }],
-    onSearch() {},
-    onCreate() {},
-  })))
-  assert.match(container.textContent, /Alice/, 'a server-returned phone or membership hit remains visible even when its name does not match the query')
-  assert.match(container.textContent, /Create customer/)
-  assert.doesNotMatch(container.textContent, /Edit current name/)
+  await act(async () => root.render(React.createElement(actionModule.default, { ...common, key: 'no-contacts-view' })))
+  assert.match(container.textContent, /General \(anonymous\)/)
+  assert.match(container.textContent, /Assigning an existing customer needs Contacts view permission/)
+  assert.doesNotMatch(container.textContent, /Replace customer|Create customer|Remove link/)
 
   await act(async () => root.render(React.createElement(actionModule.default, {
     ...common,
-    key: 'unknown-create',
-    choices: [{ id: 9, name: 'Alice', phone: '012 345 678' }],
-    createRecovery: { name: 'Unknown customer', query: 'LC-900' },
+    key: 'phone-first-match',
+    choices: [{ id: 9, name: 'Alice', phone: '012 345 678', membershipNumber: 'LC-009' }],
     onSearch() {},
-    onCreate() {},
-    onClearCreateRecovery() {},
   })))
-  assert.match(container.textContent, /Do not create it again/)
-  assert.match(container.textContent, /I checked Contacts/)
-  assert.doesNotMatch(container.textContent, /Create customer/, 'an unknown create cannot be repeated until the operator explicitly reconciles it')
-  assert.match(container.textContent, /Alice/, 'server results remain selectable for reconciliation')
+  assert.match(container.textContent, /Phone is the customer identity used for this lookup/)
+  assert.doesNotMatch(container.textContent, /Replace customer|Create customer|Remove link/)
+  assert.equal(actionModule.canonicalizeSaleCustomerPhone('+855 12 345 678'), '012345678')
+  assert.equal(actionModule.canonicalizeSaleCustomerPhone('012 345 678'), '012345678')
 
-  await act(async () => root.render(React.createElement(actionModule.default, { ...common, key: 'edit-grant', onEdit() {} })))
-  assert.match(container.textContent, /Edit current name/)
-  assert.doesNotMatch(container.textContent, /Create customer/)
+  await act(async () => root.render(React.createElement(actionModule.default, {
+    ...common,
+    key: 'unknown-assignment',
+    pendingOutcome: true,
+    onSearch() {},
+    onRetryPending() {},
+    onDiscardPending() {},
+  })))
+  assert.match(container.textContent, /previous assignment has an unknown outcome/)
+  assert.match(container.textContent, /Retry original request/)
+  assert.match(container.textContent, /Discard retry/)
 
   const searchCalls: string[] = []
   const recordSearch = (query: string) => searchCalls.push(query)
@@ -239,26 +231,43 @@ try {
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 360)) })
   assert.deepEqual(searchCalls, ['012345'], 'mounted typing issues one server search for the latest query')
 
-  await act(async () => root.render(React.createElement(nameModule.default, { currentName: 'Old customer', translate, onSave: async () => true, onClose() {} })))
-  assert.match(container.textContent, /edits only the customer profile name/)
-  assert.match(container.textContent, /Phone, membership number, addresses, and notes stay unchanged/)
+  await act(async () => root.render(React.createElement(nameModule.default, {
+    currentName: 'Old customer',
+    currentPhone: '012 345 678',
+    currentMembershipNumber: 'LC-009',
+    canAssignMembership: true,
+    translate,
+    onSave: async () => true,
+    onClose() {},
+  })))
+  assert.match(container.textContent, /Phone is this customer’s primary identity/)
+  assert.match(container.textContent, /Name is the secondary display identity/)
+  assert.match(container.textContent, /existing membership number is preserved and cannot be changed here/)
+  await act(async () => root.render(React.createElement(nameModule.default, {
+    currentName: 'No membership yet',
+    currentPhone: '098 765 432',
+    currentMembershipNumber: '',
+    canAssignMembership: false,
+    translate,
+    onSave: async () => true,
+    onClose() {},
+  })))
+  assert.match(container.textContent, /Assigning membership needs Full Contacts permission/)
   await act(async () => root.unmount())
 } finally {
   await vite.close()
 }
-console.log('PASS mounted customer UI enforces independent grants, durable remove access, truthful name scope, unfiltered results, and debounced search')
+console.log('PASS mounted customer UI enforces one phone-first anonymous assignment and scoped real-customer editing')
 
 for (const language of ['en', 'km']) {
   const labels = JSON.parse(readFileSync(resolve(frontendRoot, `src/lang/${language}.json`), 'utf8')) as Record<string, string>
   const keys = new Set([
     ...[modalSource, nameModalSource].flatMap((source) => [...source.matchAll(/translate\('(sale_customer_[a-z0-9_]+)'/g)].map((match) => match[1])),
-    'sale_customer_actions',
+    'sale_customer_edit_entry',
     'sale_customer_conflict',
     'sale_customer_choices_load_failed',
-    'sale_customer_create_failed',
-    'sale_customer_create_id_missing',
     'sale_customer_name_exists',
-    'sale_customer_name_updated',
+    'sale_customer_profile_updated',
     'sale_customer_current_unavailable',
     'sale_customer_current_load_failed',
   ])

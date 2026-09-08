@@ -15,15 +15,15 @@ assert.match(header, /<CopyableId[\s\S]*?copy_receipt_number[\s\S]*?<StatusBadge
 assert.match(header, /aria-label=\{t\('close'\) \|\| 'Close'\}/, 'the top close remains keyboard and screen-reader named')
 assert.doesNotMatch(header, /onReturn\(sale\)|onPrint\(sale\)/, 'Return and Print stay out of the compact header')
 
-// U13: permission-gated membership editing occupies the Membership row itself;
-// read-only viewers receive the stored value without a dead input.
-const membershipStart = detail.indexOf('{onAttachMembership ? (')
-const membership = detail.slice(membershipStart, detail.indexOf('</SectionCard>', membershipStart))
-assert.match(membership, /data-sale-membership-row=""/)
-assert.match(membership, /<label htmlFor="sale-membership-attach" className="sr-only">[\s\S]*?<input[\s\S]*?id="sale-membership-attach"/, 'the merged field remains associated with its accessible label')
-assert.match(membership, /onClick=\{handleMembershipAttach\}/)
-assert.match(membership, /:\s*\(\s*<DetailRow label=\{t\('membership'\)[\s\S]*?value=\{sale\.customer_membership_number\} mono/, 'without write permission only the stored membership is shown')
-assert.match(sales, /onAttachMembership=\{canChangeSaleCustomer \? handleAttachMembership : undefined\}/, 'the existing Sales permission gate remains the callback authority')
+// F72 override: the sale exposes one customer mutation entry. Membership is
+// read-only in the detail card and is edited, with its own Contacts scope, in
+// the unified Edit customer flow.
+const customerCardStart = detail.indexOf("<SectionCard title={t('customer')")
+const customerCard = detail.slice(customerCardStart, detail.indexOf('</SectionCard>', customerCardStart))
+assert.match(customerCard, /t\('sale_customer_edit_entry'\) \|\| 'Edit customer'/)
+assert.match(customerCard, /<DetailRow label=\{t\('membership'\)[\s\S]*?value=\{sale\.customer_membership_number\} mono/, 'the stored membership remains readable in the detail card')
+assert.doesNotMatch(sales, /onAttachMembership=/, 'the standalone membership mutation is no longer mounted from Sales')
+assert.match(sales, /onCustomerAction=\{canChangeSaleCustomer \? \(sale\) => \{ void openSaleCustomerEdit/, 'the one Edit customer entry remains gated by the sales customer grant')
 
 // Three ordinary destination statuses share one row at 375px. Review keeps
 // Back and Update together instead of parking the secondary action above it.
