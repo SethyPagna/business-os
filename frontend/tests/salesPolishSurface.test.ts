@@ -54,6 +54,16 @@ for (const translations of [en, km]) {
     assert.doesNotMatch(label, /^[⏳🚚↩️]/u, `${key} badge text omits its decorative icon`)
   }
 }
+assert.deepEqual(
+  ['status_awaiting_payment', 'status_awaiting_delivery', 'status_partial_return', 'status_returned'].map((key) => en[key].replace(/^[⏳🚚↩️\s]+/u, '').trim()),
+  ['Not Paid', 'Awaiting Delivery', 'Partial Return', 'Returned'],
+  'English badges remove every current source prefix while retaining the requested Not Paid label',
+)
+assert.deepEqual(
+  ['status_awaiting_payment', 'status_awaiting_delivery', 'status_partial_return', 'status_returned'].map((key) => km[key].replace(/^[⏳🚚↩️\s]+/u, '').trim()),
+  ['ប្រាក់ជំពាក់', 'រង់ចាំការដឹកជញ្ជូន', 'ប្រគល់ខ្លះ', 'បានប្រគល់'],
+  'Khmer badges remove every current source prefix while retaining concise translated status text',
+)
 assert.match(statusBadge, /awaiting_payment: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900\/40 dark:text-yellow-200'/)
 assert.match(statusBadge, /awaiting_delivery: 'bg-blue-100 text-blue-800 dark:bg-blue-900\/40 dark:text-blue-200'/)
 assert.match(statusBadge, /partial_return: 'bg-blue-100 text-blue-800 dark:bg-blue-900\/40 dark:text-blue-200'/)
@@ -65,6 +75,7 @@ assert.match(salesSurface, /const columnCount = 8 \+ cols\.visibleCount/)
 assert.doesNotMatch(salesSurface, /t\('actions'\) \|\| 'Actions'/)
 assert.match(salesSurface, /<th className="w-10 px-1 py-2 text-right">\s*<ColumnChooser className="hidden lg:inline-block"/)
 assert.match(salesSurface, /<td className="w-10 px-1 py-1\.5 text-right"[\s\S]*?<Printer className="h-3\.5 w-3\.5"/)
+assert.doesNotMatch(salesSurface, /<td className="hidden lg:table-cell"\s*\/>/, 'each rendered sale row has no orphan chooser cell after the print cell')
 assert.doesNotMatch(salesPage, /CurrentShiftSummary/, 'the full current-shift block no longer occupies the space above sales stats')
 assert.equal((salesPage.match(/<ShiftHistoryModal/g) || []).length, 1, 'the compact header exposes one Shift action')
 assert.match(salesPage, /rangeActions=\{\([\s\S]*?<ShiftHistoryModal[\s\S]*?<SectionExportAction>/, 'Shift and export stay together in the responsive stats-header actions')
