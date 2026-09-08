@@ -7,6 +7,7 @@ import { createRoot } from 'react-dom/client'
 import react from '@vitejs/plugin-react'
 import { createServer } from 'vite'
 import { updateSalesBulkField, type BulkSaleUpdatePayload } from '../src/api/salesTransport.ts'
+import { updateCustomer } from '../src/api/contactWriteTransport.ts'
 import { __resetApiHealthForTests, __resetApiWriteDedupeForTests, setSyncServerUrl, setSyncToken } from '../src/api/http.ts'
 
 const testDir = dirname(fileURLToPath(import.meta.url))
@@ -22,6 +23,8 @@ assert.match(sales, /const canEditCustomerMembership = canEditCustomerName && ge
 assert.match(sales, /if \(hasCurrentCustomer\)[\s\S]{0,180}if \(!canEditCustomerName\)/, 'a real customer is edited only with Contacts edit permission')
 assert.match(sales, /setSaleCustomerPrompt\(\{ sale: \{ \.\.\.sale \}, choices: \[\] \}\)/, 'General opens the existing-contact assignment flow')
 assert.match(sales, /getCustomers\(\{ ids: \[String\(customerId\)\] \}\)/, 'a real customer profile is loaded by stable id')
+assert.match(sales, /const updatedAt = String\(customer\.updated_at \|\| ''\)\.trim\(\)[\s\S]{0,160}if \(!updatedAt\) throw/, 'a profile edit refuses to open without the exact server version')
+assert.match(sales, /const payload: Record<string, unknown> = \{ expectedUpdatedAt: form\.updatedAt \}/, 'the reviewed customer version is frozen into the profile PUT')
 assert.match(sales, /payload\.membership_number = afterMembership/, 'membership association is a scoped profile update')
 assert.match(sales, /payload\.__rename_cascade = renameChoice === 'carry' \? 'carry' : 'record_only'/, 'name edits preserve the explicit linked-record choice')
 assert.doesNotMatch(sales, /createCustomer|CustomerFormModal|saleCustomerCreateRecovery/, 'the sale flow cannot create a customer')
@@ -33,6 +36,7 @@ assert.match(modalSource, /SALE_CUSTOMER_SEARCH_DEBOUNCE_MS = 300/, 'server sear
 assert.match(modalSource, /formatPhoneInputElement/, 'the primary phone lookup uses the shared phone formatter')
 assert.match(nameModalSource, /readOnly=\{!membershipCanChange\}/, 'existing membership and non-Full membership access remain read-only')
 assert.match(nameModalSource, /Phone is this customer’s primary identity/, 'the real-customer form states the phone identity boundary')
+assert.match(sales, /The refreshed sale can leave the active search\/page[\s\S]{0,220}setDetailSale\(null\)/, 'assignment closes an unrefreshable detail instead of showing stale contact snapshots')
 
 const zeroStart = sales.indexOf('if (result.changedCount === 0)')
 const zeroEnd = sales.indexOf('return false', zeroStart)
@@ -77,6 +81,47 @@ try {
   __resetApiHealthForTests()
 }
 console.log('PASS real sales transport preserves the exact one-sale customer request')
+
+// The customer profile write must use the version returned by the exact
+// stable-id server read. No local Dexie customer is seeded in this process;
+// the explicit token must reach the real PUT unchanged and a stale response
+// must surface without a second write.
+__resetApiWriteDedupeForTests()
+__resetApiHealthForTests()
+setSyncServerUrl('https://sync.example.test')
+setSyncToken('sale-customer-token')
+const profileCalls: Array<[RequestInfo | URL, RequestInit | undefined]> = []
+globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+  profileCalls.push([input, init])
+  return Promise.resolve(new Response(JSON.stringify({
+    error: 'Customer changed on another device',
+    code: 'write_conflict',
+    conflict: true,
+  }), { status: 409, headers: { 'Content-Type': 'application/json' } }))
+}) as typeof fetch
+try {
+  const conflict = await updateCustomer(9, {
+    name: 'Alice Revised',
+    expectedUpdatedAt: '2026-09-08 12:34:56',
+  }).then(() => null, (error) => error as { status?: number; code?: string; conflict?: boolean })
+  assert.equal(profileCalls.length, 1)
+  assert.equal(String(profileCalls[0][0]), 'https://sync.example.test/api/customers/9')
+  assert.equal(profileCalls[0][1]?.method, 'PUT')
+  assert.deepEqual(JSON.parse(String(profileCalls[0][1]?.body)), {
+    name: 'Alice Revised',
+    expectedUpdatedAt: '2026-09-08 12:34:56',
+  })
+  assert.equal(conflict?.status, 409)
+  assert.equal(conflict?.code, 'write_conflict')
+  assert.equal(conflict?.conflict, true)
+} finally {
+  globalThis.fetch = originalFetch
+  setSyncServerUrl('')
+  setSyncToken('')
+  __resetApiWriteDedupeForTests()
+  __resetApiHealthForTests()
+}
+console.log('PASS exact customer version reaches the real PUT and stale conflict does not retry')
 
 class MemoryNode {
   nodeType: number
