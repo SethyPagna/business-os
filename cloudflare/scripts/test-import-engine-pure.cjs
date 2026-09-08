@@ -773,7 +773,8 @@ console.log('PASS resolveRowImagePath matches explicit filenames and falls back 
 }
 
 // -- Multi-branch new-product seeding: a brand-new product's CSV row only
-// ever names ONE branch, but every OTHER active branch must still get an
+// ever names ONE branch, but every OTHER unambiguous active canonical branch
+// must still get an
 // explicit 0-quantity branch_stock row (not silently no row at all) --
 // same fix as seedBranchStockForNewProduct already applies to the manual
 // Add Product form. Source-text assertion (no fake-D1 harness for
@@ -785,19 +786,20 @@ console.log('PASS resolveRowImagePath matches explicit filenames and falls back 
   const newProductBlockEnd = source.indexOf("} else if (job.type === 'customers'", newProductBlockStart)
   const block = source.slice(newProductBlockStart, newProductBlockEnd)
 
-  assert.ok(/SELECT id FROM branches WHERE is_active = 1/.test(source), 'runImportApply should fetch every active branch id (allActiveBranchIds) so it knows which branches still need a 0 row seeded')
+  assert.ok(/SELECT id, name, is_default, is_active FROM branches WHERE is_active = 1/.test(source), 'runImportApply should fetch active branch identities before deciding which canonical branches need a 0 row seeded')
+  assert.ok(/productSeedBranchIds = \[\.\.\.index\.byRole\.values\(\)\]/.test(source), 'zero-row seeding is limited to one unambiguous active Shop/Warehouse identity, never an arbitrary legacy branch')
 
   const chosenBranchInsertIdx = block.indexOf('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@id, @branchId, @qty)')
   assert.ok(chosenBranchInsertIdx !== -1, 'the chosen branch should still get its real-quantity branch_stock insert')
 
   const seedZeroIdx = block.indexOf('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@id, @branchId, 0)')
-  assert.ok(seedZeroIdx !== -1, 'a brand-new product should get a 0-quantity branch_stock seed statement for every other active branch')
+  assert.ok(seedZeroIdx !== -1, 'a brand-new product should get a 0-quantity branch_stock seed statement for every other unambiguous active canonical branch')
   assert.ok(seedZeroIdx > chosenBranchInsertIdx, 'the 0-quantity seed loop must be built AFTER the chosen branch\'s real-quantity insert -- an in-batch duplicate row for the same product naming one of these branches has to be able to overwrite the seed with a real value, not the other way around')
 
   assert.ok(/branchId === d\.branch_id\) continue/.test(block), 'the seed loop must skip the chosen branch itself -- it already has its real quantity from the statement above')
   assert.ok(/ON CONFLICT\(product_id, branch_id\) DO NOTHING/.test(block.slice(seedZeroIdx, seedZeroIdx + 300)), 'the 0-quantity seed insert must use DO NOTHING (never DO UPDATE) so it can never stomp a real quantity written by an earlier statement in the same batch')
 
-  console.log('PASS a brand-new imported product seeds every OTHER active branch at 0 stock, not just the branch its CSV row named, matching seedBranchStockForNewProduct\'s existing fix for manual product creation')
+  console.log('PASS a brand-new imported product seeds every OTHER unambiguous active canonical branch at 0 stock, never an arbitrary legacy branch')
 }
 
 // -- Duplicate snapshot quantities: when identity merging turns two source
