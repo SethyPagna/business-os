@@ -1718,6 +1718,163 @@ await runTest('non-invalidated SWR still caches and emits its refresh', async ()
   }
 })
 
+async function withImmediateFallbackTimers(work: () => Promise<void>) {
+  resetApiState(); cacheClearAll(); setSyncServerUrl('https://sync.example.test')
+  const originalWindow = globalThis.window
+  globalThis.window = {
+    setTimeout: (fn: () => void) => setTimeout(fn, 0),
+    clearTimeout: (id: ReturnType<typeof setTimeout>) => clearTimeout(id),
+    dispatchEvent: () => true,
+  } as unknown as Window & typeof globalThis
+  try {
+    await work()
+  } finally {
+    await flushReadCallbacks()
+    globalThis.window = originalWindow; cacheClearAll(); resetApiState()
+  }
+}
+
+for (const deduped of [false, true]) {
+  for (const serverFirst of [true, false]) {
+    await runTest(`F54 server retains precedence (serverFirst=${serverFirst}, deduped=${deduped})`, () => withImmediateFallbackTimers(async () => {
+      const server = deferredRead<number>()
+      const locals = [deferredRead<number>(), deferredRead<number>()]
+      const started = [deferredRead<void>(), deferredRead<void>()]
+      const reads: Array<Promise<number | null>> = []
+      let serverCalls = 0
+      for (let index = 0; index < (deduped ? 2 : 1); index++) {
+        reads.push(route('products:f54-orders', () => { serverCalls++; return server.promise }, () => {
+          started[index].resolve(); return locals[index].promise
+        }))
+      }
+      try {
+        await Promise.all(started.slice(0, reads.length).map(item => item.promise))
+        if (serverFirst) {
+          server.resolve(2)
+          assert.deepEqual(await Promise.all(reads), reads.map(() => 2))
+          assert.equal(cacheGet('products:f54-orders'), 2)
+          locals.forEach(local => local.resolve(1))
+        } else {
+          // A deduped caller's local data may still be pending when the first
+          // caller returns local and the shared server later upgrades it.
+          locals[0].resolve(1)
+          assert.equal(await reads[0], 1)
+          assert.equal(cacheGet('products:f54-orders'), 1)
+          server.resolve(2)
+          if (deduped) assert.equal(await reads[1], 2)
+          await flushReadCallbacks()
+          locals[1].resolve(1)
+        }
+        await flushReadCallbacks()
+        assert.equal(serverCalls, 1)
+        assert.equal(cacheGet('products:f54-orders'), 2, 'late local results must not replace authoritative server data')
+      } finally {
+        server.resolve(2); locals.forEach(local => local.resolve(1))
+        await Promise.allSettled(reads); await flushReadCallbacks()
+      }
+    }))
+  }
+}
+
+for (const failure of ['server-error', 'local-error', 'invalid-session', 'abort'] as const) {
+  await runTest(`F54 fallback rejection handling: ${failure}`, () => withImmediateFallbackTimers(async () => {
+    const server = deferredRead<number>()
+    const local = deferredRead<number>()
+    const started = deferredRead<void>()
+    const pending = route('products:f54-rejection', () => server.promise, () => {
+      started.resolve(); return local.promise
+    })
+    // Observe rejection immediately; late race losers must also be consumed.
+    const settled = pending.then(value => ({ value, error: null }), error => ({ value: null, error }))
+    try {
+      await started.promise
+      if (failure === 'local-error') {
+        local.reject(new Error('local read failed'))
+        server.resolve(2)
+        assert.deepEqual(await settled, { value: 2, error: null })
+        assert.equal(cacheGet('products:f54-rejection'), 2)
+      } else if (failure === 'server-error') {
+        server.reject(new Error('server read refused'))
+        local.resolve(1)
+        assert.deepEqual(await settled, { value: 1, error: null })
+        assert.equal(cacheGet('products:f54-rejection'), 1)
+      } else {
+        const error = failure === 'invalid-session'
+          ? Object.assign(new Error('sign in'), { code: 'invalid_session', status: 401 })
+          : Object.assign(new Error('canceled'), { name: 'AbortError' })
+        server.reject(error)
+        assert.equal((await settled).error, error)
+        local.resolve(1)
+        await flushReadCallbacks()
+        assert.equal(cacheGet('products:f54-rejection'), null, 'rejected auth/canceled race cannot cache its late local result')
+      }
+    } finally {
+      server.resolve(2); local.resolve(1)
+      await settled; await flushReadCallbacks()
+    }
+  }))
+}
+
+await runTest('F54 caller abort after server success consumes a late local rejection', () => withImmediateFallbackTimers(async () => {
+  const signal = new AbortController()
+  const server = deferredRead<number>()
+  const local = deferredRead<number>()
+  const started = deferredRead<void>()
+  const pending = route('products:f54-late-abort', () => server.promise, () => {
+    started.resolve(); return local.promise
+  }, { signal: signal.signal })
+  await started.promise
+  server.resolve(2)
+  assert.equal(await pending, 2)
+  signal.abort()
+  local.resolve(1)
+  await flushReadCallbacks()
+  assert.equal(cacheGet('products:f54-late-abort'), 2)
+}))
+
+await runTest('F54 local winner remains usable when its background server later rejects', () => withImmediateFallbackTimers(async () => {
+  const server = deferredRead<number>()
+  assert.equal(await route('products:f54-late-server-error', () => server.promise, () => 1), 1)
+  server.reject(new Error('server read refused'))
+  await flushReadCallbacks()
+  assert.equal(cacheGet('products:f54-late-server-error'), 1)
+}))
+
+for (const deduped of [false, true]) {
+  await runTest(`F54 near-simultaneous settlement never exposes local after server cache (deduped=${deduped})`, () => withImmediateFallbackTimers(async () => {
+    const server = deferredRead<number>()
+    const locals = [deferredRead<number>(), deferredRead<number>()]
+    const started = [deferredRead<void>(), deferredRead<void>()]
+    const reads: Array<Promise<number | null>> = []
+    for (let index = 0; index < (deduped ? 2 : 1); index++) {
+      reads.push(route('products:f54-microtasks', () => server.promise, () => {
+        started[index].resolve(); return locals[index].promise
+      }))
+    }
+    try {
+      await Promise.all(started.slice(0, reads.length).map(item => item.promise))
+      locals.forEach(local => local.resolve(1))
+      queueMicrotask(() => server.resolve(2))
+      let sawServer = false
+      const exposedReads: Array<Promise<number | null>> = []
+      for (let tick = 0; tick < 30; tick++) {
+        await Promise.resolve()
+        const cached = cacheGet('products:f54-microtasks')
+        if (cached === 2) sawServer = true
+        if (sawServer && cached === 1) {
+          exposedReads.push(route('products:f54-microtasks', () => 3))
+        }
+      }
+      assert.equal(sawServer, true)
+      assert.deepEqual(await Promise.all(exposedReads), [], 'a new caller must never observe local data after the server value was cached')
+      assert.equal(cacheGet('products:f54-microtasks'), 2)
+    } finally {
+      server.resolve(2); locals.forEach(local => local.resolve(1))
+      await Promise.allSettled(reads); await flushReadCallbacks()
+    }
+  }))
+}
+
 if (failed > 0) {
   process.exitCode = 1
 }
