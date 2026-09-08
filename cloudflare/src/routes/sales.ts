@@ -4940,7 +4940,7 @@ app.get('/day-report', async (c) => {
 // belongs to contacts-granted staff, and the figures are the same ones the
 // sales surfaces already show them per sale.
 app.get('/delivery-contact-report', async (c) => {
-  if (!canReadSales(c.get('user')) && !hasPermission(c.get('user'), 'contacts')) {
+  if (getActionTier(c.get('user'), 'contacts', 'financial_history') !== 'full') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const query = c.req.query()
@@ -4965,7 +4965,7 @@ app.get('/delivery-contact-report', async (c) => {
 // customer leg of the per-contact drills. Same sales-OR-contacts gate as
 // the courier report (the Customers tab lives behind 'contacts').
 app.get('/customer-report', async (c) => {
-  if (!canReadSales(c.get('user')) && !hasPermission(c.get('user'), 'contacts')) {
+  if (getActionTier(c.get('user'), 'contacts', 'financial_history') !== 'full') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const query = c.req.query()

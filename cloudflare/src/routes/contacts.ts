@@ -2107,6 +2107,9 @@ app.get('/suppliers/reports/ap-invoices', async (c) => {
 // Resilient to the ledger not being applied yet -- returns an empty payload
 // rather than erroring, so the section renders "no receivables" until then.
 app.get('/customers/reports/ar-invoices', async (c) => {
+  if (getActionTier(c.get('user'), 'contacts', 'financial_history') !== 'full') {
+    return c.json({ error: 'You do not have permission to view customer financial history' }, 403)
+  }
   const db = getDb(c.env)
   const query = c.req.query()
   const page = clampInt(query.page, 1, 1, 100000)
