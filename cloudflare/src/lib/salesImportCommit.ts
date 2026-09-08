@@ -183,13 +183,27 @@ export async function applyHistoricalSaleImport(
   const importedCustomerId = Number(d.customer_id)
   const hasImportedCustomer = Number.isSafeInteger(importedCustomerId) && importedCustomerId > 0
   const importedCustomerReference = hasImportedCustomer
-    ? await db.prepare('SELECT id,is_anonymous FROM customers WHERE id=?').get<{ id: number; is_anonymous: number | null }>([importedCustomerId])
+    ? await db.prepare('SELECT id,name,phone,phone_normalized,is_anonymous FROM customers WHERE id=?').get<{
+      id: number
+      name: string | null
+      phone: string | null
+      phone_normalized: string | null
+      is_anonymous: number | null
+    }>([importedCustomerId])
     : null
   const importedCustomerIsAnonymous = isAnonymousCustomer(importedCustomerReference)
   const effectiveImportedCustomerId = hasImportedCustomer && !importedCustomerIsAnonymous ? importedCustomerId : null
   const effectiveImportedCustomerName = importedCustomerIsAnonymous ? null : d.customer_name
   const effectiveImportedCustomerPhone = importedCustomerIsAnonymous ? null : d.customer_phone
   const effectiveImportedCustomerAddress = importedCustomerIsAnonymous ? null : d.customer_address
+  const customerMatchBasis = String(d.customer_match_basis || '').trim()
+  const customerMatchKey = String(d.customer_match_key || '').trim()
+  const hasCustomerMatchFingerprint = Object.prototype.hasOwnProperty.call(d, 'customer_match_name_snapshot')
+    && Object.prototype.hasOwnProperty.call(d, 'customer_match_phone_snapshot')
+    && Object.prototype.hasOwnProperty.call(d, 'customer_match_phone_normalized_snapshot')
+  if (effectiveImportedCustomerId != null && (!(customerMatchBasis === 'phone' || customerMatchBasis === 'name') || !customerMatchKey || !hasCustomerMatchFingerprint)) {
+    throw new Error(`Sale on row ${rowNumber} has stale customer matching evidence; re-analyze the import before applying it.`)
+  }
   const hasImportedCustomerName = Boolean(String(effectiveImportedCustomerName ?? '').trim())
   const importedMembershipNumber = String(d.membership_number ?? '').trim()
   const importedMembershipDiscountUsd = Number(d.membership_discount_usd) || 0
@@ -244,10 +258,36 @@ export async function applyHistoricalSaleImport(
     batch_refs_json: batchRefsJson,
     branch_id: saleHeaderBranchId,
     customer_id: effectiveImportedCustomerId,
+    customer_match_basis: customerMatchBasis,
+    customer_match_key: customerMatchKey,
+    customer_match_name_snapshot: d.customer_match_name_snapshot ?? null,
+    customer_match_phone_snapshot: d.customer_match_phone_snapshot ?? null,
+    customer_match_phone_normalized_snapshot: d.customer_match_phone_normalized_snapshot ?? null,
   }
   const currentCustomerReferenceGuard = effectiveImportedCustomerId == null
     ? '1=1'
-    : `EXISTS(SELECT 1 FROM customers WHERE id=@customer_id AND COALESCE(is_anonymous,0)=0)`
+    : `EXISTS(
+        SELECT 1 FROM customers matched
+        WHERE matched.id=@customer_id
+          AND COALESCE(matched.is_anonymous,0)=0
+          AND matched.name IS @customer_match_name_snapshot
+          AND matched.phone IS @customer_match_phone_snapshot
+          AND matched.phone_normalized IS @customer_match_phone_normalized_snapshot
+      ) AND CASE @customer_match_basis
+        WHEN 'phone' THEN (
+          SELECT COUNT(*) FROM customers candidate
+          WHERE COALESCE(candidate.is_anonymous,0)=0
+            AND (
+              candidate.phone_normalized=@customer_match_key
+              OR (candidate.phone_normalized IS NULL AND candidate.phone IS @customer_match_phone_snapshot)
+            )
+        )=1
+        WHEN 'name' THEN (
+          SELECT COUNT(*) FROM customers candidate
+          WHERE lower(trim(COALESCE(candidate.name,'')))=@customer_match_key
+        )=1
+        ELSE 0
+      END`
   const currentHistoricalReferencesGuard = `(${currentImportReferencesGuard}) AND (${currentCustomerReferenceGuard})`
   const writeGuard = `(${pendingGuard}) AND (${currentHistoricalReferencesGuard})`
   const statements: Array<{ sql: string; params: Record<string, unknown> }> = [{

@@ -2143,6 +2143,12 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
 
     const byPhone = await classifySales(db, [row({ receipt_number: 'R-12a', sku: 'SKU-1', quantity: 1, customer_name: 'Someone Else', customer_phone: '012-345-678' }, 1)], null)
     assert.strictEqual(byPhone[0].data.customer_id, 101, 'phone match (formatting-tolerant) resolves customer_id even when the name on the row differs from what is on file')
+    assert.deepStrictEqual({
+      basis: byPhone[0].data.customer_match_basis,
+      key: byPhone[0].data.customer_match_key,
+      name: byPhone[0].data.customer_match_name_snapshot,
+      phone: byPhone[0].data.customer_match_phone_snapshot,
+    }, { basis: 'phone', key: '012345678', name: 'Dara', phone: '012345678' })
 
     const byName = await classifySales(db, [row({ receipt_number: 'R-12b', sku: 'SKU-1', quantity: 1, customer_name: 'Sreymom' }, 1)], null)
     assert.strictEqual(byName[0].data.customer_id, 103, 'unambiguous name match resolves customer_id when no phone is given')
@@ -2165,6 +2171,19 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     assert.strictEqual(explicitAnonymousId[0].data.customer_name, null)
     assert.strictEqual(explicitAnonymousId[0].data.customer_phone, null)
     assert.strictEqual(explicitAnonymousId[0].data.customer_is_anonymous, 1, 'an explicit marked source normalizes to canonical General even when another profile phone is present')
+
+    const duplicatePhoneCustomers = [
+      { id: 106, name: 'First phone owner', phone: '077 123 456' },
+      { id: 107, name: 'Second phone owner', phone: '077-123-456' },
+    ]
+    for (const ordered of [duplicatePhoneCustomers, [...duplicatePhoneCustomers].reverse()]) {
+      const duplicatePhone = await classifySales(makeFakeDb({ customers: ordered }), [row({
+        receipt_number: 'R-12h', sku: 'SKU-1', quantity: 1,
+        customer_name: 'First phone owner', customer_phone: '077123456',
+      }, 1)], null)
+      assert.strictEqual(duplicatePhone[0].data.customer_id, null, 'a duplicated normalized phone stays unlinked regardless of customer row order')
+      assert.strictEqual(duplicatePhone[0].data.customer_match_basis, null, 'an ambiguous phone must not fall back to a matching name')
+    }
   }
 
   // 13) Track F parity gap (part 70): cashier_id/delivery_contact_id

@@ -106,6 +106,17 @@ function saleData(overrides = {}) {
   }
 }
 
+function customerMatch(overrides = {}) {
+  return {
+    customer_match_basis: 'name',
+    customer_match_key: 'historical member',
+    customer_match_name_snapshot: 'Historical Member',
+    customer_match_phone_snapshot: null,
+    customer_match_phone_normalized_snapshot: null,
+    ...overrides,
+  }
+}
+
 ;(async () => {
   const subject = compileSubject()
   const actor = { id: 41, username: 'current-importer', name: 'Ignored Full Name' }
@@ -152,6 +163,7 @@ function saleData(overrides = {}) {
       membership_number: 'HIST-5',
       membership_discount_usd: 1,
       membership_points_redeemed: 20,
+      ...customerMatch(),
     }),
   })
   const memberCreation = JSON.parse(member.sqlite.prepare(`SELECT creation_snapshot_json FROM sales WHERE client_request_id = 'sales-import:job-1:3'`).get().creation_snapshot_json)
@@ -187,11 +199,35 @@ function saleData(overrides = {}) {
   markerRace.sqlite.prepare("INSERT INTO customers(id,name,is_anonymous) VALUES(5,'Historical Member',0)").run()
   markerRace.setBeforeBatch(() => markerRace.sqlite.prepare('UPDATE customers SET is_anonymous=1 WHERE id=5').run())
   await assert.rejects(
-    () => subject.applyHistoricalSaleImport(markerRace.db, { ...input, rowNumber: 5, data: saleData({ customer_id: 5, customer_name: 'Historical Member' }), nowIso: input.nowIso, actor }),
+    () => subject.applyHistoricalSaleImport(markerRace.db, { ...input, rowNumber: 5, data: saleData({ customer_id: 5, customer_name: 'Historical Member', ...customerMatch() }), nowIso: input.nowIso, actor }),
     /did not commit/,
   )
   assert.equal(markerRace.sqlite.prepare('SELECT COUNT(*) n FROM sales').get().n, 0)
   assert.equal(markerRace.sqlite.prepare('SELECT COUNT(*) n FROM import_sales_commits').get().n, 0)
+
+  const identityRace = setup()
+  identityRace.sqlite.prepare("INSERT INTO customers(id,name,phone,phone_normalized,is_anonymous) VALUES(5,'Historical Member','012345678','012345678',0)").run()
+  identityRace.setBeforeBatch(() => identityRace.sqlite.prepare("UPDATE customers SET name='Changed after review',phone='099999999',phone_normalized='099999999' WHERE id=5").run())
+  await assert.rejects(
+    () => subject.applyHistoricalSaleImport(identityRace.db, {
+      ...input,
+      rowNumber: 6,
+      data: saleData({
+        customer_id: 5,
+        customer_name: 'Historical Member',
+        customer_phone: '012345678',
+        ...customerMatch({
+          customer_match_basis: 'phone',
+          customer_match_key: '012345678',
+          customer_match_phone_snapshot: '012345678',
+          customer_match_phone_normalized_snapshot: '012345678',
+        }),
+      }),
+    }),
+    /did not commit/,
+  )
+  assert.equal(identityRace.sqlite.prepare('SELECT COUNT(*) n FROM sales').get().n, 0)
+  assert.equal(identityRace.sqlite.prepare('SELECT COUNT(*) n FROM import_sales_commits').get().n, 0)
   assert.equal(normal.sqlite.prepare(`SELECT COUNT(*) n FROM sale_items`).get().n, 1)
   assert.equal(normal.sqlite.prepare(`SELECT s.receipt_number FROM sale_items si JOIN sales s ON s.id = si.sale_id`).get().receipt_number, '20260828-143000')
   assert.equal(normal.sqlite.prepare(`SELECT stock_quantity FROM products WHERE id = 10`).get().stock_quantity, 5, 'ordinary history import never deducts current stock')

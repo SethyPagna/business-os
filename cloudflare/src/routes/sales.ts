@@ -2335,9 +2335,10 @@ app.patch('/:id/customer', async (c) => {
   }
 
   const currentName = String(sale.customer_name || '').trim()
+  const sourceIsAnonymous = isAnonymousCustomer({ is_anonymous: sale.source_customer_is_anonymous })
   const assignmentUnchanged = customer
     ? Number(sale.customer_id) === customer.id
-    : sale.customer_id == null && !currentName
+    : (sale.customer_id == null && !currentName) || sourceIsAnonymous
   if (assignmentUnchanged) {
     return c.json({ id: saleId, updated_at: sale.updated_at || expectedUpdatedAt })
   }
@@ -2354,7 +2355,6 @@ app.patch('/:id/customer', async (c) => {
       ? { state: 'known_value', value: { number: normalized, discount_usd: null, discount_khr: null, points_redeemed: null } }
       : { state: 'known_none' }
   }
-  const sourceIsAnonymous = isAnonymousCustomer({ is_anonymous: sale.source_customer_is_anonymous })
   const beforeCustomer = sourceIsAnonymous ? { state: 'known_none' } as const : identityState(sale.customer_id, sale.customer_name)
   const afterCustomer = identityState(customer?.id ?? null, customer?.name ?? null)
   const beforeMembership: SaleRecordChange['before'] = sale.customer_id == null || sourceIsAnonymous

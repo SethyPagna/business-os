@@ -2879,8 +2879,9 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
   // classifyContacts' byPhone/byName maps, only ever MATCHES an existing
   // customer, never creates one (a sales-history file isn't a customer
   // import; an unmatched name/phone just stays free text, same as today).
-  const customers = await db.prepare(`SELECT id, name, phone, is_anonymous FROM customers`).all<{ id: number; name: string | null; phone: string | null; is_anonymous?: number | null }>()
-  const customerByPhone = new Map<string, number>()
+  const customers = await db.prepare(`SELECT id, name, phone, phone_normalized, is_anonymous FROM customers`).all<{ id: number; name: string | null; phone: string | null; phone_normalized?: string | null; is_anonymous?: number | null }>()
+  const customerById = new Map(customers.map((customer) => [customer.id, customer]))
+  const customerByPhone = new Map<string, number | null>() // null = ambiguous normalized phone
   const customerByName = new Map<string, number | null>() // null = ambiguous (>1 customer shares this name)
   const anonymousCustomerIds = new Set<number>()
   const anonymousCustomerNames = new Set<string>()
@@ -2891,8 +2892,8 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
       if (anonymousNameKey) anonymousCustomerNames.add(anonymousNameKey)
       continue
     }
-    const phoneDigits = str(customer.phone).replace(/\D/g, '')
-    if (phoneDigits) customerByPhone.set(phoneDigits, customer.id)
+    const phoneKey = canonicalizePhone(customer.phone)
+    if (phoneKey) customerByPhone.set(phoneKey, customerByPhone.has(phoneKey) ? null : customer.id)
     const nameKey = lower(customer.name)
     if (nameKey) customerByName.set(nameKey, customerByName.has(nameKey) ? null : customer.id)
   }
@@ -3047,7 +3048,7 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
     // shared name), name only as a fallback; an ambiguous name (>1 customer
     // shares it, see the `null` case above) intentionally resolves to no
     // match rather than guessing -- same as leaving it unmatched today.
-    const rowCustomerPhoneDigits = str(first.customer_phone).replace(/\D/g, '')
+    const rowCustomerPhoneKey = canonicalizePhone(first.customer_phone)
     const rowCustomerNameKey = lower(first.customer_name)
     const explicitCustomerId = Number(first.customer_id)
     const explicitlyAnonymous = toBool01(first.customer_is_anonymous, 0) === 1
@@ -3058,9 +3059,18 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
     // turn a historical General sale into a real customer's purchase.
     const matchedCustomerId = explicitlyAnonymous
       ? null
-      : (rowCustomerPhoneDigits && customerByPhone.get(rowCustomerPhoneDigits))
-        || (rowCustomerNameKey && !anonymousCustomerNames.has(rowCustomerNameKey) && customerByName.get(rowCustomerNameKey))
-        || null
+      : rowCustomerPhoneKey
+        ? customerByPhone.get(rowCustomerPhoneKey) ?? null
+        : (rowCustomerNameKey && !anonymousCustomerNames.has(rowCustomerNameKey) && customerByName.get(rowCustomerNameKey)) || null
+    const matchedCustomer = matchedCustomerId == null ? null : customerById.get(matchedCustomerId) || null
+    const customerMatchBasis = matchedCustomer
+      ? rowCustomerPhoneKey ? 'phone' : 'name'
+      : null
+    const customerMatchKey = customerMatchBasis === 'phone'
+      ? rowCustomerPhoneKey
+      : customerMatchBasis === 'name'
+        ? rowCustomerNameKey
+        : null
 
     // Resolve cashier_name -> user id. Reviewed aliases take precedence over a
     // direct username/name match: an old label can intentionally map away from
@@ -3295,6 +3305,14 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
       // ordinary case, including a numeric house number -- passes through.
       customer_address: explicitlyAnonymous ? null : contactDisplayAddress(str(first.customer_address)) || null,
       customer_is_anonymous: explicitlyAnonymous ? 1 : 0,
+      // Private review evidence. Apply rechecks this exact profile and match
+      // basis in the same D1 batch as the sale; it never resolves the name or
+      // phone again after the operator has reviewed the import.
+      customer_match_basis: customerMatchBasis,
+      customer_match_key: customerMatchKey,
+      customer_match_name_snapshot: matchedCustomer?.name ?? null,
+      customer_match_phone_snapshot: matchedCustomer?.phone ?? null,
+      customer_match_phone_normalized_snapshot: matchedCustomer?.phone_normalized ?? null,
       payment_method: str(first.payment_method) || 'Cash',
       payment_currency: str(first.payment_currency) || 'USD',
       exchange_rate: exchangeRate,
