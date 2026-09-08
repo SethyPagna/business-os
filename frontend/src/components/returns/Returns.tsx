@@ -41,6 +41,7 @@ import {
   freezeDirectMutationBody,
   loadPendingDirectMutationSlot,
   savePendingDirectMutationSlot,
+  type DirectMutationHistoryContext,
   type PendingDirectMutation,
 } from '../../utils/directMutationRequest.ts'
 import {
@@ -139,7 +140,6 @@ interface ReturnHistoryPayload extends Record<string, unknown> {
   total_refund_usd: number | string
   total_refund_khr: number | string
   branch_id: number | string | null
-  updated_at: string | null
   items: Array<{
     sale_item_id: number | string | null
     product_id: number | string | null
@@ -397,11 +397,17 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
   const actionHistory = useActionHistory({ limit: 8, notify, scope: 'returns', enabled: historyReady, user })
   const bulkRetryKey = `returns.bulk.retry:${user?.id || 'anonymous'}`
   const [bulkRetryRevision, setBulkRetryRevision] = useState(0)
-  const [pendingHistoryRequest, setPendingHistoryRequest] = useState<PendingDirectMutation<PreparedReturnUpdateRequest> | null>(() => (
-    loadPendingDirectMutationSlot<PreparedReturnUpdateRequest>('return-history', user?.id)
-  ))
-  const savePendingHistoryRequest = useCallback((returnId: number | string, body: PreparedReturnUpdateRequest | null) => {
-    setPendingHistoryRequest(savePendingDirectMutationSlot('return-history', user?.id, returnId, body))
+  const initialPendingHistoryRequest = loadPendingDirectMutationSlot<PreparedReturnUpdateRequest>('return-history', user?.id)
+  const [pendingHistoryRequest, setPendingHistoryRequest] = useState<PendingDirectMutation<PreparedReturnUpdateRequest> | null>(initialPendingHistoryRequest)
+  const pendingHistoryRequestRef = useRef<PendingDirectMutation<PreparedReturnUpdateRequest> | null>(initialPendingHistoryRequest)
+  const savePendingHistoryRequest = useCallback((
+    returnId: number | string,
+    body: PreparedReturnUpdateRequest | null,
+    history: DirectMutationHistoryContext | null = null,
+  ) => {
+    const pending = savePendingDirectMutationSlot('return-history', user?.id, returnId, body, undefined, history)
+    pendingHistoryRequestRef.current = pending
+    setPendingHistoryRequest(pending)
   }, [user?.id])
   const pendingBulkRequest = useMemo(() => {
     if (bulkRetryMemory.current?.key === bulkRetryKey) return bulkRetryMemory.current.request
@@ -722,7 +728,6 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
       total_refund_usd: snapshot.total_refund_usd || 0,
       total_refund_khr: snapshot.total_refund_khr || 0,
       branch_id: snapshot.branch_id || null,
-      updated_at: snapshot.updated_at || null,
       items: (Array.isArray(snapshot.items) ? snapshot.items : []).map((item) => ({
         sale_item_id: item.sale_item_id || null,
         product_id: item.product_id || null,
@@ -753,38 +758,77 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
     }
   }, [])
 
-  const submitReturnHistoryRequest = useCallback(async (returnId: number | string, body: PreparedReturnUpdateRequest): Promise<void> => {
+  const submitReturnHistoryRequest = useCallback(async (returnId: number | string, body: PreparedReturnUpdateRequest): Promise<unknown> => {
     try {
-      await withLoaderTimeout(
+      const result = await withLoaderTimeout(
         () => updateReturnRequest(returnId, body),
         'Restore return snapshot',
         RETURNS_HISTORY_RESTORE_TIMEOUT_MS,
       )
       savePendingHistoryRequest(returnId, null)
       await loadReturns(true)
+      return result
     } catch (error) {
-      if (!directMutationOutcomeIsUnknown(error)) savePendingHistoryRequest(returnId, null)
+      if (!directMutationOutcomeIsUnknown(error) && (error as { code?: unknown } | null)?.code !== 'pending_request_persistence_failed') savePendingHistoryRequest(returnId, null)
       throw error
     }
   }, [loadReturns, savePendingHistoryRequest])
 
-  const restoreReturnSnapshot = useCallback(async (snapshot: ReturnRow, historyReason?: string): Promise<void> => {
+  const restoreReturnSnapshot = useCallback(async (
+    snapshot: ReturnRow,
+    historyReason?: string,
+    historyContext: DirectMutationHistoryContext | null = null,
+  ): Promise<void> => {
     if (!snapshot?.id) throw new Error('Return snapshot is unavailable.')
-    if (pendingHistoryRequest) throw new Error(tr('sale_bulk_pending', 'A previous request has an unknown outcome. Retry the original request or discard it before starting another.'))
+    const storedPending = pendingHistoryRequestRef.current
+    const storedHistoryMatches = !!historyContext
+      && storedPending?.history?.entryId === historyContext.entryId
+      && storedPending.history.direction === historyContext.direction
+    if (storedPending && !storedHistoryMatches) throw new Error(tr('sale_bulk_pending', 'A previous request has an unknown outcome. Retry the original request or discard it before starting another.'))
     if (!beginSingleAction(historyRestoreInFlightRef)) return
     setHistoryRestoreSaving(true)
     try {
-      const body = freezeDirectMutationBody(await prepareReturnRequest(snapshot.id as number | string, {
-        ...buildReturnHistoryPayload(snapshot),
-        notes: historyReason || snapshot.notes || '',
-      }))
-      savePendingHistoryRequest(snapshot.id as number | string, body)
+      let body: PreparedReturnUpdateRequest
+      if (storedHistoryMatches) {
+        body = storedPending!.body
+      } else {
+        const current = await fetchReturnDetail(snapshot.id) as ReturnRow | null
+        const currentUpdatedAt = String(current?.updated_at || '').trim()
+        if (!currentUpdatedAt) throw new Error('Refresh the return before replaying this action.')
+        body = freezeDirectMutationBody(await prepareReturnRequest(snapshot.id as number | string, {
+          ...buildReturnHistoryPayload(snapshot),
+          notes: historyReason || snapshot.notes || '',
+          expected_updated_at: currentUpdatedAt,
+        }))
+        savePendingHistoryRequest(snapshot.id as number | string, body, historyContext)
+      }
       await submitReturnHistoryRequest(snapshot.id as number | string, body)
     } finally {
       finishSingleAction(historyRestoreInFlightRef)
       setHistoryRestoreSaving(false)
     }
-  }, [buildReturnHistoryPayload, pendingHistoryRequest, savePendingHistoryRequest, submitReturnHistoryRequest, tr])
+  }, [buildReturnHistoryPayload, savePendingHistoryRequest, submitReturnHistoryRequest, tr])
+
+  const retryPendingReturnHistoryRequest = async (): Promise<void> => {
+    const pending = pendingHistoryRequestRef.current
+    if (!pending) return
+    const history = pending.history
+    if (history) {
+      const source = history.direction === 'undo' ? actionHistory.undoItems : actionHistory.redoItems
+      if (source.some((entry) => String(entry.id) === history.entryId)) {
+        await actionHistory[history.direction](history.entryId)
+        return
+      }
+    }
+    if (!beginSingleAction(historyRestoreInFlightRef)) return
+    setHistoryRestoreSaving(true)
+    try {
+      await submitReturnHistoryRequest(pending.entityId, pending.body)
+    } finally {
+      finishSingleAction(historyRestoreInFlightRef)
+      setHistoryRestoreSaving(false)
+    }
+  }
 
   const handleReturnMutationSuccess = useCallback(async (mutation: ReturnMutation): Promise<void> => {
     const kind = String(mutation?.kind || '')
@@ -800,13 +844,15 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
 
     if (kind === 'edit' && previousSnapshot?.id && latestSnapshot?.id) {
       const returnLabel = latestSnapshot.return_number || previousSnapshot.return_number || `#${latestSnapshot.id}`
+      const entryId = crypto.randomUUID()
       actionHistory.pushAction({
+        id: entryId,
         label: `Edit return ${returnLabel}`,
         entity: 'return',
         entity_id: latestSnapshot.id,
         scope: 'returns',
-        undo: () => restoreReturnSnapshot(previousSnapshot, 'Undo return edit'),
-        redo: () => restoreReturnSnapshot(latestSnapshot, 'Redo return edit'),
+        undo: () => restoreReturnSnapshot(previousSnapshot, 'Undo return edit', { entryId, direction: 'undo' }),
+        redo: () => restoreReturnSnapshot(latestSnapshot, 'Redo return edit', { entryId, direction: 'redo' }),
       })
       return
     }
@@ -1185,18 +1231,18 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
         </SectionExportAction>
       </div>
       {pendingHistoryRequest ? (
-        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
-          <span className="min-w-0 flex-1">{tr('sale_bulk_pending', 'A previous request has an unknown outcome. Retry the original request or discard it before starting another.')}</span>
+        <div data-needs-reconciliation={pendingHistoryRequest.needsReconciliation || undefined} className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
+          <span className="min-w-0 flex-1">{pendingHistoryRequest.needsReconciliation
+            ? tr('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.')
+            : tr('sale_bulk_pending', 'A previous request has an unknown outcome. Retry the original request or discard it before starting another.')}</span>
           <button type="button" className="btn-secondary" disabled={historyRestoreSaving} onClick={() => {
-            if (!beginSingleAction(historyRestoreInFlightRef)) return
-            setHistoryRestoreSaving(true)
-            void submitReturnHistoryRequest(pendingHistoryRequest.entityId, pendingHistoryRequest.body)
+            void retryPendingReturnHistoryRequest()
               .catch((error) => notify(String((error as { message?: unknown })?.message || error), 'error'))
-              .finally(() => { finishSingleAction(historyRestoreInFlightRef); setHistoryRestoreSaving(false) })
           }}>{tr('retry_original_request', 'Retry original request')}</button>
           <button type="button" className="btn-secondary" disabled={historyRestoreSaving} onClick={() => {
             if (window.confirm(tr('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.'))) {
-              savePendingHistoryRequest(pendingHistoryRequest.entityId, null)
+              try { savePendingHistoryRequest(pendingHistoryRequest.entityId, null) }
+              catch (error) { notify(String((error as { message?: unknown })?.message || error), 'error') }
             }
           }}>{tr('discard_retry', 'Discard retry')}</button>
         </div>

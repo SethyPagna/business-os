@@ -73,6 +73,7 @@ import {
   freezeDirectMutationBody,
   loadPendingDirectMutationSlot,
   savePendingDirectMutationSlot,
+  type DirectMutationHistoryContext,
   type PendingDirectMutation,
 } from '../../utils/directMutationRequest.ts'
 
@@ -372,6 +373,8 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   const { syncChannel } = useSync()
   const isActive = useIsPageActive('sales')
   const [sales, setSales] = useState<SaleRecord[]>([])
+  const salesRef = useRef<SaleRecord[]>([])
+  useEffect(() => { salesRef.current = sales }, [sales])
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [userFilter, setUserFilter] = useState('all')
@@ -469,11 +472,17 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   >(null)
   const pendingStatusResultRef = useRef<SingleUseResult<SaleStatusUiResult> | null>(null)
   const [statusConfirmSaving, setStatusConfirmSaving] = useState(false)
-  const [pendingDirectStatus, setPendingDirectStatus] = useState<PendingDirectMutation<PreparedSaleStatusRequest> | null>(() => (
-    loadPendingDirectMutationSlot<PreparedSaleStatusRequest>('sale-status', user?.id)
-  ))
-  const savePendingDirectStatus = useCallback((saleId: number | string, body: PreparedSaleStatusRequest | null) => {
-    setPendingDirectStatus(savePendingDirectMutationSlot('sale-status', user?.id, saleId, body))
+  const initialPendingDirectStatus = loadPendingDirectMutationSlot<PreparedSaleStatusRequest>('sale-status', user?.id)
+  const [pendingDirectStatus, setPendingDirectStatus] = useState<PendingDirectMutation<PreparedSaleStatusRequest> | null>(initialPendingDirectStatus)
+  const pendingDirectStatusRef = useRef<PendingDirectMutation<PreparedSaleStatusRequest> | null>(initialPendingDirectStatus)
+  const savePendingDirectStatus = useCallback((
+    saleId: number | string,
+    body: PreparedSaleStatusRequest | null,
+    history: DirectMutationHistoryContext | null = null,
+  ) => {
+    const pending = savePendingDirectMutationSlot('sale-status', user?.id, saleId, body, undefined, history)
+    pendingDirectStatusRef.current = pending
+    setPendingDirectStatus(pending)
   }, [user?.id])
   // Group-by dropped (user, Aug 31: "the group by seems a bit redundant
   // with the arrange by") — the list always groups by day; sorting by a
@@ -905,7 +914,8 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     recordHistory = true,
     extra: SaleCancelPayload | Record<string, unknown> | null = null,
     confirmed = false,
-    preparedRetry: PreparedSaleStatusRequest | null = null,
+    preparedRetryInput: PreparedSaleStatusRequest | null = null,
+    historyContext: DirectMutationHistoryContext | null = null,
   ): Promise<SaleStatusUiResult> => {
     // View-only (Part 557): status changes are Full-Access only. The backend
     // already refuses these through sales.status, so this matching client
@@ -916,11 +926,16 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     }
     const numericId = Number(saleId)
     if (!Number.isFinite(numericId)) return false
-    if (pendingDirectStatus && !preparedRetry) {
+    const storedPending = pendingDirectStatusRef.current
+    const storedHistoryMatches = !!historyContext
+      && storedPending?.history?.entryId === historyContext.entryId
+      && storedPending.history.direction === historyContext.direction
+    const preparedRetry = preparedRetryInput || (storedHistoryMatches ? storedPending?.body || null : null)
+    if (storedPending && !preparedRetry) {
       notify(translateOr('sale_bulk_pending', 'A previous request has an unknown outcome. Retry the original request or discard it before starting another.'), 'error')
       return false
     }
-    const previousSale = sales.find((entry) => Number(entry?.id || 0) === numericId)
+    const previousSale = salesRef.current.find((entry) => Number(entry?.id || 0) === numericId)
     const previousStatus = previousSale?.sale_status || 'completed'
     // Cancelling needs its reason (+ optional lost fee) -- the backend
     // refuses without one. First entry opens the dialog; the dialog calls
@@ -980,7 +995,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
             : {}),
         },
       ))
-      if (!isSettlementRequest && !preparedRetry) savePendingDirectStatus(saleId, preparedRequest)
+      if (!isSettlementRequest && !preparedRetry) savePendingDirectStatus(saleId, preparedRequest, historyContext)
       const mutationResult = await runSaleStatusMutation(saleId, preparedRequest) as {
         actionHistoryId?: string | number | null
         actionKind?: string | null
@@ -999,15 +1014,17 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       if (hasServerSettlementHistory) {
         await actionHistory.refreshServerItems()
       } else if (recordHistory && previousSale && previousStatus !== newStatus) {
+        const entryId = crypto.randomUUID()
         actionHistory.pushAction({
+          id: entryId,
           label: `Update sale ${previousSale.receipt_number || numericId} to ${getStatusLabel(newStatus, t)}`,
-          undo: () => handleStatusChange(saleId, previousStatus, 'Undo sale status update', false),
-          redo: () => handleStatusChange(
+          undo: () => replaySaleStatusHistory(saleId, previousStatus, 'Undo sale status update', null, { entryId, direction: 'undo' }),
+          redo: () => replaySaleStatusHistory(
             saleId,
             newStatus,
             notes || 'Redo sale status update',
-            false,
             extra || (preparedRetry ? statusReplayExtra(preparedRetry) : null),
+            { entryId, direction: 'redo' },
           ),
         })
       }
@@ -1024,7 +1041,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       if (isSettlementRequest) {
         return { settlementError: getErrorMessage(error, String(error || 'Unable to settle this sale.')) }
       }
-      if (!directMutationOutcomeIsUnknown(error)) savePendingDirectStatus(saleId, null)
+      if (!directMutationOutcomeIsUnknown(error) && (error as { code?: unknown } | null)?.code !== 'pending_request_persistence_failed') savePendingDirectStatus(saleId, null)
       if (isWriteConflict(error)) {
         await loadSales()
         return false
@@ -1034,6 +1051,41 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     } finally {
       finishKeyedAction(statusActionRef, actionKey)
     }
+  }
+
+  const replaySaleStatusHistory = async (
+    saleId: number | string,
+    saleStatus: string,
+    notes: string,
+    extra: SaleCancelPayload | Record<string, unknown> | null,
+    history: DirectMutationHistoryContext,
+  ): Promise<void> => {
+    const result = await handleStatusChange(saleId, saleStatus, notes, false, extra, false, null, history)
+    if (result === true || (result && typeof result === 'object' && 'statusUpdatedAt' in result)) return
+    throw new Error(translateOr('action_failed', 'The sale status change did not complete. Retry the original action.'))
+  }
+
+  const retryPendingDirectStatusRequest = async (): Promise<void> => {
+    const pending = pendingDirectStatusRef.current
+    if (!pending) return
+    const history = pending.history
+    if (history) {
+      const source = history.direction === 'undo' ? actionHistory.undoItems : actionHistory.redoItems
+      if (source.some((entry) => String(entry.id) === history.entryId)) {
+        await actionHistory[history.direction](history.entryId)
+        return
+      }
+    }
+    await handleStatusChange(
+      pending.entityId,
+      String(pending.body.sale_status || ''),
+      String(pending.body.notes || ''),
+      !history,
+      null,
+      true,
+      pending.body,
+      history,
+    )
   }
 
   // S4-24b: add product lines to a sale that already exists. The server does
@@ -2286,23 +2338,17 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
       </div>
 
       {pendingDirectStatus ? (
-        <div className="mb-2 flex flex-wrap items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-100">
-          <span className="min-w-0 flex-1">{translateOr('sale_bulk_pending', 'A previous request has an unknown outcome. Retry the original request or discard it before starting another.')}</span>
+        <div data-needs-reconciliation={pendingDirectStatus.needsReconciliation || undefined} className="mb-2 flex flex-wrap items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-100">
+          <span className="min-w-0 flex-1">{pendingDirectStatus.needsReconciliation
+            ? translateOr('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.')
+            : translateOr('sale_bulk_pending', 'A previous request has an unknown outcome. Retry the original request or discard it before starting another.')}</span>
           <button type="button" className="btn-secondary" disabled={statusActionRef.current.size > 0 || !canChangeSaleStatus} onClick={() => {
-            const body = pendingDirectStatus.body
-            void handleStatusChange(
-              pendingDirectStatus.entityId,
-              String(body.sale_status || ''),
-              String(body.notes || ''),
-              true,
-              null,
-              true,
-              body,
-            )
+            void retryPendingDirectStatusRequest()
           }}>{translateOr('retry_original_request', 'Retry original request')}</button>
           <button type="button" className="btn-secondary" disabled={statusActionRef.current.size > 0} onClick={() => {
             if (window.confirm(translateOr('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.'))) {
-              savePendingDirectStatus(pendingDirectStatus.entityId, null)
+              try { savePendingDirectStatus(pendingDirectStatus.entityId, null) }
+              catch (error) { notify(getErrorMessage(error, 'Unable to discard the pending retry.'), 'error') }
             }
           }}>{translateOr('discard_retry', 'Discard retry')}</button>
         </div>
