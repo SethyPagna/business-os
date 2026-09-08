@@ -19,6 +19,7 @@ assert.match(source, /const resolvedChoice = choice \|\| \(!item\.needs_stock_ch
 assert.match(source, /after_by_stock_choice\[resolvedChoice\]/, 'the visible After state follows the explicit stock decision')
 assert.match(source, /\(\['merge', 'write_off'\] as const\)\.map/, 'both stock outcomes are offered')
 assert.match(source, /checked=\{choice === value\}/)
+assert.match(source, /disabled=\{choiceDisabled\}/, 'stock decisions are frozen after confirmation so the visible projection matches the retained request body')
 assert.doesNotMatch(source, /useState<SelectedConflictStockChoice>/, 'the component must not preselect a destructive stock outcome')
 assert.match(source, /selectedConflictChoicesComplete\(preview\.cases, choices\)/, 'confirmation waits for every required stock choice')
 assert.match(source, /&& !needsRefresh/, 'a stale preview cannot be reconfirmed')
