@@ -3,7 +3,9 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import {
   buildSelectedConflictGroupReviewRequest,
+  buildSelectedConflictGroupFinalizeRequest,
   selectedConflictGroupChoiceComplete,
+  selectedConflictGroupChoicesComplete,
   selectedConflictGroupLoadedProgress,
   selectedConflictGroupSourceValue,
 } from '../src/utils/selectedConflictActionReview.ts'
@@ -30,40 +32,62 @@ const clusters = [
   },
 ]
 
-const body = buildSelectedConflictGroupReviewRequest(clusters, 'review-1')
+const body = buildSelectedConflictGroupReviewRequest(clusters, 'review-1', { 9: 'Duplicate row selected after review' })
 assert.deepEqual(body, {
   manifest_version: 1,
   resolution_version: 2,
   client_request_id: 'review-1',
   merge_groups: [
-    { group_key: 'name:face wash', member_ids: [3, 9] },
     { group_key: 'barcode:00123', member_ids: [20, 21] },
   ],
-  remove_rows: [],
+  remove_rows: [{ product_id: 9, reason: 'Duplicate row selected after review' }],
 })
 assert.throws(() => buildSelectedConflictGroupReviewRequest(clusters, '  '), /stable client request ID/)
+assert.throws(() => buildSelectedConflictGroupReviewRequest(clusters, 'review-2', { 9: ' ' }), /removal reason/)
 
-const options = {
-  barcode_source_ids: [3, 9],
-  category_source_ids: [3, 9],
-  brand_source_ids: [3, 9],
-  unit_source_ids: [3, 9],
+const group = {
+  group_key: 'name:face wash',
+  eligibility_basis: 'name' as const,
+  member_ids: [3, 9],
+  options: {
+    barcode_source_ids: [3, 9],
+    category_source_ids: [3, 9],
+    brand_source_ids: [3, 9],
+    unit_source_ids: [3, 9],
+  },
+  blocked: null,
 }
-assert.equal(selectedConflictGroupChoiceComplete(options, [3, 9], undefined), false)
-assert.equal(selectedConflictGroupChoiceComplete(options, [3, 9], {
+assert.equal(selectedConflictGroupChoiceComplete(group, undefined), false)
+const completeChoice = {
   keeper_id: 3,
-  barcode_source_id: 9,
+  barcode: { mode: 'member' as const, source_product_id: 9 },
   category_source_id: 3,
   brand_source_id: 3,
   unit_source_id: 9,
-}), true)
-assert.equal(selectedConflictGroupChoiceComplete(options, [3, 9], {
+}
+assert.equal(selectedConflictGroupChoiceComplete(group, completeChoice), true)
+assert.equal(selectedConflictGroupChoiceComplete(group, {
   keeper_id: 99,
-  barcode_source_id: 9,
+  barcode: { mode: 'member', source_product_id: 9 },
   category_source_id: 3,
   brand_source_id: 3,
   unit_source_id: 9,
 }), false)
+assert.equal(selectedConflictGroupChoiceComplete({ ...group, eligibility_basis: 'barcode' }, { ...completeChoice, barcode: { mode: 'canonical' } }), true)
+assert.equal(selectedConflictGroupChoiceComplete(group, { ...completeChoice, barcode: { mode: 'canonical' } }), false)
+assert.equal(selectedConflictGroupChoicesComplete([group], { [group.group_key]: completeChoice }), true)
+
+assert.deepEqual(buildSelectedConflictGroupFinalizeRequest(
+  { review_id: 'review-id', draft_digest: 'draft-digest' },
+  [group, { ...group, group_key: 'blocked', blocked: { code: 'stale' } }],
+  { [group.group_key]: completeChoice },
+), {
+  manifest_version: 1,
+  resolution_version: 2,
+  review_id: 'review-id',
+  draft_digest: 'draft-digest',
+  resolutions: [{ group_key: 'name:face wash', ...completeChoice }],
+})
 
 const members = [
   { id: 3, barcode: '', category: null, brand: 'Brand A', unit: 'pcs' },
@@ -74,9 +98,12 @@ assert.equal(selectedConflictGroupSourceValue(members, 9, 'category'), 'Skin')
 assert.equal(selectedConflictGroupSourceValue(members, undefined, 'unit'), undefined, 'unselected is distinct from a chosen blank')
 
 assert.deepEqual(selectedConflictGroupLoadedProgress([
-  { groups: [{ ordinal: 0 }, { ordinal: 1 }], next_cursor: '2' },
-  { groups: [{ ordinal: 1 }, { ordinal: 2 }], next_cursor: null },
-], 1600), { loaded: 3, total: 1600, complete: true })
+  { groups: [{ ordinal: 0 }, { ordinal: 1 }], removals: [], next_cursor: '2' },
+  { groups: [{ ordinal: 1 }], removals: [{ action_ordinal: 2 }], next_cursor: null },
+], 1600), { loaded: 3, total: 1600, complete: false }, 'a truncated final page cannot claim every action was reviewed')
+assert.equal(selectedConflictGroupLoadedProgress([
+  { groups: [{ ordinal: 0 }, { ordinal: 1 }], removals: [{ action_ordinal: 2 }], next_cursor: null },
+], 3).complete, true)
 
 const transportSource = readFileSync(fileURLToPath(new URL('../src/api/productWriteTransport.ts', import.meta.url)), 'utf8')
 assert.match(transportSource, /manifest_version: 1[\s\S]*resolution_version: 2[\s\S]*status: 'draft'/, 'the frozen v2 review response is discriminated from the legacy pair preview')
