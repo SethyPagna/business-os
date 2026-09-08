@@ -164,6 +164,10 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
   const isKnownReason = RETURN_REASONS.includes(reason)
 
   useEffect(() => {
+    setPendingRequest(loadPendingDirectMutation<PreparedReturnUpdateRequest>('return-edit', user?.id, ret.id))
+  }, [ret.id, user?.id])
+
+  useEffect(() => {
     if (!reason || reason === OTHER_LABEL || isKnownReason) return
     setCustomReason((current) => current || reason)
   }, [OTHER_LABEL, isKnownReason, reason])
