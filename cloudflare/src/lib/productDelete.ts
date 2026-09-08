@@ -294,3 +294,131 @@ export function productRemoveApplyStatements(args: {
     params: { request: args.requestId, operation: args.operationId, product: plan.product_id, stamp: args.transitionStamp },
   }]
 }
+
+export type ProductRemoveSnapshot = {
+  version: 1
+  operation_id: string
+  generation: number
+  transition_stamp: string
+  plan: ProductRemovePlan
+}
+
+export function parseProductRemoveSnapshot(value: unknown): ProductRemoveSnapshot {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid product removal snapshot.')
+  const snapshot = value as ProductRemoveSnapshot
+  if (snapshot.version !== 1 || typeof snapshot.operation_id !== 'string'
+    || !Number.isSafeInteger(Number(snapshot.generation)) || Number(snapshot.generation) < 0
+    || typeof snapshot.transition_stamp !== 'string' || !snapshot.transition_stamp
+    || !snapshot.plan || snapshot.plan.version !== 1 || snapshot.plan.product_id <= 0) {
+    throw new Error('Invalid product removal snapshot.')
+  }
+  return snapshot
+}
+
+function restoreProductStatement(plan: ProductRemovePlan): ProductRemoveStatement {
+  const fields = Object.keys(plan.product).filter((field) => field !== 'id')
+  return {
+    sql: `UPDATE products SET ${fields.map((field) => `${identifier(field)}=json_extract(@row,'$.${field}')`).join(',')}
+      WHERE id=@product`,
+    params: { row: JSON.stringify(plan.product), product: plan.product_id },
+  }
+}
+
+export function productRemoveReplayStatements(args: {
+  snapshot: ProductRemoveSnapshot
+  operation: ProductRemoveOperationRow
+  direction: 'undo' | 'redo'
+  historyId: number
+  expectedGeneration: number
+  user: SessionUser
+  transitionStamp: string
+  transitionRequestId: string
+}): ProductRemoveStatement[] {
+  const { snapshot, operation, direction } = args
+  const plan = snapshot.plan
+  const undo = direction === 'undo'
+  const nextGeneration = args.expectedGeneration + 1
+  const fromStatus = undo ? 'undo_ready' : 'reversed'
+  const toStatus = undo ? 'reversed' : 'undo_ready'
+  const snapshotFrom = undo ? 'applied' : 'reversed'
+  const snapshotTo = undo ? 'reversed' : 'applied'
+  const historyFrom = undo ? 'undoable' : 'redoable'
+  const historyTo = undo ? 'redoable' : 'undoable'
+  const actorName = actorSnapshot(args.user)
+  const pointer = JSON.stringify({ applier: PRODUCT_REMOVE_ACTION_KIND, operation_id: operation.operation_id, generation: nextGeneration })
+  const details = JSON.stringify({ operation_id: operation.operation_id, reason: plan.reason, generation: args.expectedGeneration,
+    direction, via: 'undo_applier' })
+  const mutation: ProductRemoveStatement[] = undo ? [restoreProductStatement(plan), {
+    sql: `UPDATE branch_stock SET
+      quantity=(SELECT json_extract(value,'$.quantity') FROM json_each(@rows) WHERE json_extract(value,'$.id')=branch_stock.id),
+      rfid_confirmed_qty=(SELECT json_extract(value,'$.rfid_confirmed_qty') FROM json_each(@rows) WHERE json_extract(value,'$.id')=branch_stock.id)
+      WHERE product_id=@product`,
+    params: { rows: JSON.stringify(plan.branch_stock), product: plan.product_id },
+  }, {
+    sql: `UPDATE branch_batch_stock SET
+      quantity=(SELECT json_extract(value,'$.quantity') FROM json_each(@rows) WHERE json_extract(value,'$.id')=branch_batch_stock.id),
+      updated_at=(SELECT json_extract(value,'$.updated_at') FROM json_each(@rows) WHERE json_extract(value,'$.id')=branch_batch_stock.id)
+      WHERE batch_id IN (SELECT id FROM product_batches WHERE variant_product_id=@product)`,
+    params: { rows: JSON.stringify(plan.branch_batch_stock), product: plan.product_id },
+  }, {
+    sql: `UPDATE product_batches SET
+      is_active=(SELECT json_extract(value,'$.is_active') FROM json_each(@rows) WHERE json_extract(value,'$.id')=product_batches.id),
+      updated_at=(SELECT json_extract(value,'$.updated_at') FROM json_each(@rows) WHERE json_extract(value,'$.id')=product_batches.id)
+      WHERE variant_product_id=@product`,
+    params: { rows: JSON.stringify(plan.batches), product: plan.product_id },
+  }] : [{
+    sql: `UPDATE products SET is_active=0,stock_quantity=0,rfid_confirmed_qty=0,updated_at=@stamp WHERE id=@product`,
+    params: { stamp: args.transitionStamp, product: plan.product_id },
+  }, {
+    sql: 'UPDATE branch_stock SET quantity=0,rfid_confirmed_qty=0 WHERE product_id=@product',
+    params: { product: plan.product_id },
+  }, {
+    sql: `UPDATE branch_batch_stock SET quantity=0,updated_at=@stamp
+      WHERE batch_id IN (SELECT id FROM product_batches WHERE variant_product_id=@product)`,
+    params: { stamp: args.transitionStamp, product: plan.product_id },
+  }, {
+    sql: 'UPDATE product_batches SET is_active=0,updated_at=@stamp WHERE variant_product_id=@product',
+    params: { stamp: args.transitionStamp, product: plan.product_id },
+  }]
+  return [{
+    sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM product_remove_operations
+      WHERE operation_id=@operation AND product_id=@product AND status=@status AND generation=@generation
+        AND undo_snapshot_id=@snapshot AND action_history_id=@history)
+      AND EXISTS(SELECT 1 FROM undo_snapshots WHERE id=@snapshot AND kind=@kind AND status=@snapshotStatus)
+      AND EXISTS(SELECT 1 FROM action_history WHERE id=@history AND status=@historyStatus AND reversible=1)
+      THEN 1 ELSE json_extract('', '$') END AS product_remove_replay_guard`,
+    params: { operation: operation.operation_id, product: plan.product_id, status: fromStatus,
+      generation: args.expectedGeneration, snapshot: operation.undo_snapshot_id, history: args.historyId,
+      kind: PRODUCT_REMOVE_ACTION_KIND, snapshotStatus: snapshotFrom, historyStatus: historyFrom },
+  }, productRemoveGraphGuard(plan, undo ? 'deleted' : 'source', snapshot.transition_stamp), ...mutation, {
+    sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,reason,user_id,user_name,created_at)
+      SELECT @product,@productName,CAST(json_extract(value,'$.branch_id') AS INTEGER),json_extract(value,'$.branch_name'),
+        @movement,CAST(json_extract(value,'$.quantity') AS REAL),@reason,@actor,@actorName,@stamp
+      FROM json_each(@rows) WHERE CAST(json_extract(value,'$.quantity') AS REAL)>0`,
+    params: { product: plan.product_id, productName: plan.product.name ?? null, movement: undo ? 'add' : 'write_off',
+      reason: `${undo ? 'Undo' : 'Redo'}: ${plan.reason}`, actor: args.user.id, actorName, stamp: args.transitionStamp,
+      rows: JSON.stringify(plan.branch_stock) },
+  }, {
+    sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
+      VALUES(@actor,@actorName,@action,'product',@product,@details,'products',@product,@details)`,
+    params: { actor: args.user.id, actorName, action: undo ? 'action_undo' : 'action_redo', product: String(plan.product_id), details },
+  }, {
+    sql: `UPDATE undo_snapshots SET status=@status,
+      payload_json=json_set(payload_json,'$.generation',@nextGeneration,'$.transition_stamp',@stamp),updated_at=@stamp
+      WHERE id=@snapshot AND kind=@kind AND status=@fromStatus`,
+    params: { status: snapshotTo, nextGeneration, stamp: args.transitionStamp,
+      snapshot: operation.undo_snapshot_id, kind: PRODUCT_REMOVE_ACTION_KIND, fromStatus: snapshotFrom },
+  }, {
+    sql: `UPDATE action_history SET status=@status,undo_payload=@pointer,redo_payload=@pointer,last_error=NULL,updated_at=@stamp
+      WHERE id=@history AND status=@fromStatus`,
+    params: { status: historyTo, pointer, stamp: args.transitionStamp, history: args.historyId, fromStatus: historyFrom },
+  }, {
+    sql: `UPDATE product_remove_operations SET status=@status,generation=@nextGeneration,
+      last_transition_request_id=@request,last_transition_direction=@direction,last_transition_from_generation=@generation,
+      last_transition_to_generation=@nextGeneration,response_json=json_object('success',json('true'),'operation_id',operation_id,
+        'product_id',product_id,'status',@status,'action_history_id',action_history_id,'generation',@nextGeneration),updated_at=@stamp
+      WHERE operation_id=@operation AND status=@fromStatus AND generation=@generation`,
+    params: { status: toStatus, nextGeneration, request: args.transitionRequestId, direction, generation: args.expectedGeneration,
+      stamp: args.transitionStamp, operation: operation.operation_id, fromStatus },
+  }]
+}

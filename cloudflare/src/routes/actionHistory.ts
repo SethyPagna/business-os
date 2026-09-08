@@ -4,6 +4,7 @@ import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
 import { getActionTier, getPermissionTier, hasPermission, isAdminControlUser, isSensitiveActionHistory, permissionForActionHistory } from '../lib/permissions'
 import { SALE_ADD_ITEMS_ACTION_KIND, PRODUCT_MERGE_GROUP_ACTION_KIND, isServerReplayable, resolveUndoApplier, applierPermissionTier, mergeReplayChangesProductImages, type UndoApplierOutcome } from '../lib/undoAppliers'
+import { PRODUCT_REMOVE_ACTION_KIND } from '../lib/productDelete'
 import type { Env } from '../index'
 import { BULK_STATUS_KIND, notifyBulkStatus } from '../lib/saleBulkStatus'
 import { notifySaleBulkUpdate, SALE_BULK_UPDATE_KINDS } from '../lib/saleBulkUpdate'
@@ -112,7 +113,7 @@ function isServerManagedPayload(value: unknown): boolean {
   if (!value || typeof value !== 'object') return false
   const payload = value as Record<string, unknown>
   const kind = String(payload.applier || '')
-  return SERVER_BULK_KINDS.has(kind) || kind === PRODUCT_MERGE_GROUP_ACTION_KIND
+  return SERVER_BULK_KINDS.has(kind) || kind === PRODUCT_MERGE_GROUP_ACTION_KIND || kind === PRODUCT_REMOVE_ACTION_KIND
     || (kind === SALE_ADD_ITEMS_ACTION_KIND && typeof payload.operation_id === 'string' && payload.operation_id.length > 0)
 }
 
@@ -201,6 +202,15 @@ app.get('/:id/details', async (c) => {
   if (!row || !canOperateHistoryRow(user, row)) return c.json({ error: 'Action not found.' }, 404)
   const payload = parseJson(row.undo_payload)
   const applierKind = String(payload.applier || '')
+  if (applierKind === PRODUCT_REMOVE_ACTION_KIND) {
+    if (!canUseNamedAppliers(user, [payload])) return c.json({ error: 'No permission.' }, 403)
+    const operation = await db.prepare(`SELECT operation_id,product_id,reason,source,status,generation,created_at,updated_at
+      FROM product_remove_operations WHERE action_history_id=@history AND operation_id=@operation`)
+      .get<Record<string, unknown>>({ history: row.id, operation: String(payload.operation_id || '') })
+    if (!operation) return c.json({ error: 'Saved details unavailable.' }, 404)
+    return c.json({ success: true, kind: PRODUCT_REMOVE_ACTION_KIND, total: 1, offset: 0, limit: 1,
+      items: [operation], next_offset: null })
+  }
   if (applierKind === PRODUCT_MERGE_GROUP_ACTION_KIND) {
     if (!canUseNamedAppliers(user, [payload])) return c.json({ error: 'No permission.' }, 403)
     const group = await db.prepare(`
@@ -346,7 +356,8 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     const nextStatus = direction === 'undo' ? 'redoable' : 'undoable'
     const stockReplay = parseJson(existing.undo_payload)?.applier === STOCK_SESSION_KIND
     const groupReplay = parseJson(existing.undo_payload)?.applier === PRODUCT_MERGE_GROUP_ACTION_KIND
-    if (currentStatus !== expected && !stockReplay && !groupReplay) {
+    const productRemoveReplay = parseJson(existing.undo_payload)?.applier === PRODUCT_REMOVE_ACTION_KIND
+    if (currentStatus !== expected && !stockReplay && !groupReplay && !productRemoveReplay) {
       return c.json({ success: false, error: `Action is not ${direction === 'undo' ? 'undoable' : 'redoable'} right now` }, 409)
     }
 

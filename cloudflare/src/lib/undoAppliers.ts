@@ -31,6 +31,8 @@ import {
   resolveProductMergeClusterPlanEconomics,
   type ProductMergeEconomics,
 } from './productMerge'
+import { PRODUCT_REMOVE_ACTION_KIND, parseProductRemoveSnapshot, productRemovePlanDigest, productRemoveReplayStatements,
+  type ProductRemoveOperationRow } from './productDelete'
 
 export const SALE_ADD_ITEMS_ACTION_KIND = 'sale.add_items'
 
@@ -1888,6 +1890,52 @@ async function replayProductMergeGroup(payload: Record<string, unknown>, ctx: Un
   }
 }
 
+async function replayProductRemove(payload: Record<string, unknown>, ctx: UndoApplierContext): Promise<UndoApplierOutcome> {
+  if (!ctx.user || !ctx.historyId) throw new UndoConflictError('Authoritative product removal history is required.')
+  const operationId = typeof payload.operation_id === 'string' ? payload.operation_id : ''
+  const pointerGeneration = Number(payload.generation)
+  const expectedGeneration = Number(ctx.generation)
+  if (!operationId || !Number.isSafeInteger(pointerGeneration) || pointerGeneration < 0
+    || !Number.isSafeInteger(expectedGeneration) || expectedGeneration < 0 || pointerGeneration !== expectedGeneration) {
+    throw new UndoConflictError('An exact product removal generation is required.')
+  }
+  const db = getDb(ctx.env)
+  const operation = await db.prepare(`SELECT * FROM product_remove_operations
+    WHERE operation_id=@operation AND action_history_id=@history`).get<ProductRemoveOperationRow>({ operation: operationId, history: ctx.historyId })
+  if (!operation?.undo_snapshot_id) throw new UndoConflictError('The saved product removal is unavailable.')
+  const targetStatus = ctx.direction === 'undo' ? 'reversed' : 'undo_ready'
+  if (Number(operation.generation) === expectedGeneration + 1 && operation.status === targetStatus) {
+    return { complete: true, continuation_required: false, processed_children: 0, pending_children: 0, generation: Number(operation.generation) }
+  }
+  if (Number(operation.generation) !== expectedGeneration
+    || operation.status !== (ctx.direction === 'undo' ? 'undo_ready' : 'reversed')) {
+    throw new UndoConflictError('This product removal generation is stale.')
+  }
+  const snapshotRow = await db.prepare('SELECT payload_json FROM undo_snapshots WHERE id=@snapshot AND kind=@kind')
+    .get<{ payload_json: string }>({ snapshot: operation.undo_snapshot_id, kind: PRODUCT_REMOVE_ACTION_KIND })
+  let snapshot
+  try { snapshot = parseProductRemoveSnapshot(JSON.parse(snapshotRow?.payload_json || 'null')) }
+  catch { throw new UndoConflictError('The saved product removal details are invalid.') }
+  if (snapshot.operation_id !== operation.operation_id || snapshot.plan.product_id !== Number(operation.product_id)
+    || await productRemovePlanDigest(snapshot.plan) !== operation.plan_digest) {
+    throw new UndoConflictError('The saved product removal details do not match their receipt.')
+  }
+  const transitionStamp = new Date().toISOString()
+  const transitionRequestId = `${ctx.historyId}:${ctx.direction}:${expectedGeneration}`
+  try {
+    await db.batch(productRemoveReplayStatements({ snapshot, operation, direction: ctx.direction,
+      historyId: Number(ctx.historyId), expectedGeneration, user: ctx.user, transitionStamp, transitionRequestId }))
+  } catch (error) {
+    if (/malformed JSON|product_remove_.*guard|constraint/i.test(String(error))) {
+      throw new UndoConflictError('This removed product changed concurrently. Nothing was replayed.')
+    }
+    throw error
+  }
+  await broadcast(ctx.env, 'products', { action: ctx.direction === 'undo' ? 'restore' : 'delete', id: snapshot.plan.product_id })
+  await broadcast(ctx.env, 'inventory', { action: 'update' })
+  return { complete: true, continuation_required: false, processed_children: 1, pending_children: 0, generation: expectedGeneration + 1 }
+}
+
 const APPLIERS: Record<string, UndoApplierDef> = {
   [STOCK_SESSION_KIND]: {
     permission: 'inventory',
@@ -2267,6 +2315,11 @@ const APPLIERS: Record<string, UndoApplierDef> = {
     permission: 'products',
     action: 'merge_duplicates',
     run: replayProductMergeGroup,
+  },
+  [PRODUCT_REMOVE_ACTION_KIND]: {
+    permission: 'products',
+    action: 'delete',
+    run: replayProductRemove,
   },
   // Payload shape: { applier: 'supplier.backfill', snapshot_id }. The snapshot
   // holds a SupplierBackfillReversal (the lots + each lot's prior attribution).
