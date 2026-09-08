@@ -103,4 +103,16 @@ plan = groups.buildProductConflictActionGroupPlans(
 )[0]
 assert.equal(plan.blocked.code, 'invalid_merge_numeric')
 
-console.log('product conflict action groups pure: 24 checks passed')
+plan = groups.buildProductConflictActionGroupPlans(
+  [{ group_key: 'blank-name', member_ids: [50, 51, 52] }],
+  [row(50, 'Tea', 'a', 1), row(51, 'tea', 'b', 2), row(52, '', 'c', 3)], [], [],
+)[0]
+assert.equal(plan.blocked.code, 'incompatible_group_identity', 'every member needs the common nonempty name')
+
+plan = groups.buildProductConflictActionGroupPlans(
+  [{ group_key: 'blank-barcode', member_ids: [60, 61, 62] }],
+  [row(60, 'One', '601', 1), row(61, 'Two', '0601', 2), row(62, 'Three', '', 3)], [], [],
+)[0]
+assert.equal(plan.blocked.code, 'incompatible_group_identity', 'every member needs the common nonempty barcode')
+
+console.log('product conflict action groups pure: 26 checks passed')
