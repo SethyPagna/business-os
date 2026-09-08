@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { requireAuth, type SessionUser } from '../lib/auth'
-import { hasPermission, getPermissionTier } from '../lib/permissions'
+import { hasPermission, getActionTier, getPermissionTier } from '../lib/permissions'
 import { audit } from '../lib/audit'
 import { broadcast } from '../durable-objects/broadcastHub'
 import {
@@ -11,8 +11,9 @@ import {
   resubmitPendingAction,
   type PendingActionStatus,
 } from '../lib/pendingActions'
-import { applyApprovedPendingAction, NoReviewApplierError, ReviewRequesterPermissionError } from '../lib/reviewApply'
+import { applyApprovedPendingAction, NoReviewApplierError, productRemovePendingPointer, ReviewRequesterPermissionError } from '../lib/reviewApply'
 import { ProductImageAssetError } from '../lib/productImagePermission'
+import { ProductRemoveError } from '../lib/productDelete'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 
@@ -94,6 +95,16 @@ app.post('/:id/resubmit', async (c) => {
     payloadJson = null
   }
 
+  if (payloadJson != null) {
+    const existing = await getPendingAction(c.env, id)
+    if (!existing || existing.requested_by !== Number(user.id)) {
+      return c.json({ error: 'That request is not yours, or is not awaiting resubmission.' }, 404)
+    }
+    if (productRemovePendingPointer(existing)) {
+      return c.json({ error: 'A product removal approval pointer cannot be edited. Submit a new removal request instead.' }, 400)
+    }
+  }
+
   const ok = await resubmitPendingAction(c.env, id, { requestedBy: Number(user.id), payloadJson, summary })
   // One response for "not yours", "doesn't exist" and "not in a rejected
   // state" -- distinguishing them would confirm the existence of other
@@ -148,10 +159,21 @@ app.post('/:id/approve', async (c) => {
 
   const row = await getPendingAction(c.env, id)
   if (!row) return c.json({ error: 'Not found' }, 404)
-  if (row.status !== 'open') return c.json({ error: 'Already reviewed' }, 409)
+  const productRemoveApproval = productRemovePendingPointer(row) != null
+  if (productRemoveApproval && getActionTier(user, 'products', 'delete') !== 'full') {
+    return c.json({ error: 'Full product removal permission is required to approve this request.' }, 403)
+  }
+  if (row.status !== 'open') {
+    if (productRemoveApproval && row.status === 'approved') {
+      return c.json({ success: true, data: row, replayed: true })
+    }
+    return c.json({ error: 'Already reviewed' }, 409)
+  }
 
+  let pendingActionMarkedAtomically = false
   try {
-    await applyApprovedPendingAction(c.env, row, { id: user.id, name: actorSnapshot(user) })
+    const outcome = await applyApprovedPendingAction(c.env, row, { id: user.id, name: actorSnapshot(user) }, user)
+    pendingActionMarkedAtomically = outcome.pendingActionMarkedAtomically
   } catch (err) {
     if (err instanceof NoReviewApplierError) {
       return c.json({ error: err.message, code: 'no_review_applier' }, 501)
@@ -162,14 +184,19 @@ app.post('/:id/approve', async (c) => {
     if (err instanceof ProductImageAssetError) {
       return c.json({ error: err.message, code: err.code }, 409)
     }
+    if (err instanceof ProductRemoveError) {
+      return c.json({ error: err.message, code: err.code }, err.status)
+    }
     return c.json({ error: (err as Error).message || 'Failed to apply the approved change' }, 500)
   }
 
-  const ok = await markPendingActionApproved(c.env, id, {
-    reviewedBy: user.id,
-    reviewedByName: actorSnapshot(user),
-  })
-  if (!ok) return c.json({ error: 'Already reviewed or not found' }, 409)
+  if (!pendingActionMarkedAtomically) {
+    const ok = await markPendingActionApproved(c.env, id, {
+      reviewedBy: user.id,
+      reviewedByName: actorSnapshot(user),
+    })
+    if (!ok) return c.json({ error: 'Already reviewed or not found' }, 409)
+  }
   const updatedRow = await getPendingAction(c.env, id)
   await audit(c.env, user.id, actorSnapshot(user), 'approve', 'pending_action', id, updatedRow)
   await broadcast(c.env, 'pendingActions', { id, status: 'approved' })

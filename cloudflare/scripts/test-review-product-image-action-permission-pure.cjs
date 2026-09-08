@@ -114,6 +114,13 @@ function loadReviewApply(state, updateChanges = 1) {
     './canonicalBranchIdentity': canonicalBranchIdentity,
     './permissions': permissions,
     './productImagePermission': imagePermission,
+    './productDelete': {
+      parseProductRemovePendingPointer: () => null,
+      parseProductRemovePlan: () => { throw new Error('unrelated product removal') },
+      productRemoveApprovalStatements: () => [],
+      productRemovePlanDigest: async () => '',
+      ProductRemoveError: class ProductRemoveError extends Error {},
+    },
     './pendingActions': {},
     '../index': {},
   })
