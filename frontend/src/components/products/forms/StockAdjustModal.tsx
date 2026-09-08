@@ -31,6 +31,7 @@ import {
 } from '../../../utils/stockAdjustOutcome.ts'
 import { clearWorkDraft, writeWorkDraft } from '../../../utils/workDrafts.ts'
 import { readStockAdjustDraft, stockAdjustDraftKey, type StockAdjustDraft } from '../../../utils/stockAdjustDraft.ts'
+import { buildStockAdjustQuantityReview } from '../../../utils/stockAdjustReview.ts'
 
 // Full-featured "Adjust stock" flow for the Products page "Stock Changes"
 // ledger. It REUSES Inventory's own presentational adjust modal
@@ -163,6 +164,11 @@ type AppContextSlice = {
   usdSymbol: string
   user: { id?: string | number; name?: string; username?: string } | null | undefined
   notify: (message: unknown, type?: string, duration?: number) => void
+}
+
+type PendingStockAdjust = {
+  request: Parameters<typeof adjustStock>[0]
+  beforeQuantity: number
 }
 
 // All received-date defaults use the fixed Cambodia business calendar day.
@@ -353,7 +359,7 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
   // explicit confirm. onAdjust validates + builds the request and parks it
   // here (opening the review dialog); commitAdjust does the actual write once
   // the dialog is confirmed. null = no confirm pending.
-  const [pendingAdjust, setPendingAdjust] = useState<Parameters<typeof adjustStock>[0] | null>(null)
+  const [pendingAdjust, setPendingAdjust] = useState<PendingStockAdjust | null>(null)
   // Failure resilience (user, Sep 3: a failed adjustment "should not close the
   // action ... so user can edit the failed to correct"). `rows` is the
   // row-outcome list from utils/stockAdjustOutcome.ts -- one row here, since
@@ -585,7 +591,7 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
     }
     // Part 563: don't write yet -- park the validated request and open the
     // review dialog. commitAdjust runs the actual write once confirmed.
-    setPendingAdjust(adjustmentRequest)
+    setPendingAdjust({ request: adjustmentRequest, beforeQuantity: currentQuantity })
     // Keep the row's identity across a retry: an edited-and-resubmitted failed
     // row stays the SAME rowId, so the outcome list never grows a phantom
     // duplicate and a committed row can never be re-entered.
@@ -635,7 +641,7 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
   }, [storage, userKey, selectedProduct, branches])
 
   const commitAdjust = useCallback(async () => {
-    const adjustmentRequest = pendingAdjust
+    const adjustmentRequest = pendingAdjust?.request
     if (!adjustmentRequest) return
     // The row this confirm is committing -- never a row already 'done'.
     const target = rows.find((row) => row.status === 'pending') || rows.find((row) => row.status === 'failed')
@@ -803,15 +809,18 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
   // Compact review rows for the confirm dialog, read from the parked request
   // (so they match exactly what will be written, not the live form).
   const buildAdjustReviewItems = (): ConfirmReviewItem[] => {
-    const req = pendingAdjust
+    const req = pendingAdjust?.request
     if (!req) return []
-    const reqType = String(req.type || '')
-    const typeLabel = reqType === 'remove' ? tr('remove', 'Remove') : reqType === 'set' ? tr('set', 'Set') : tr('add', 'Add')
     const reqBranchId = req.branchId != null ? Number(req.branchId) : null
     const branchName = reqBranchId ? (branches.find((b) => Number(b.id) === reqBranchId)?.name || String(reqBranchId)) : '--'
     const items: ConfirmReviewItem[] = [
-      { label: tr('type', 'Type'), value: typeLabel },
-      { label: tr('quantity', 'Quantity'), value: `${Number(req.quantity || 0)}${product.unit ? ` ${product.unit}` : ''}` },
+      ...buildStockAdjustQuantityReview({
+        type: req.type,
+        quantity: req.quantity,
+        beforeQuantity: pendingAdjust?.beforeQuantity,
+        unit: product.unit,
+        tr,
+      }),
       { label: tr('branch', 'Branch'), value: branchName },
     ]
     const reqReason = String(req.reason || '').trim()
@@ -906,7 +915,7 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
         <ConfirmDialog
           t={t}
           title={tr('adjust_stock', 'Adjust stock')}
-          message={String(pendingAdjust.productName || product.name || '')}
+          message={String(pendingAdjust.request.productName || product.name || '')}
           items={buildAdjustReviewItems()}
           // Once anything has failed the primary action is a RETRY of exactly
           // that row, never a fresh submit -- committed rows are excluded by
