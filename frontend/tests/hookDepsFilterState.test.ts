@@ -59,7 +59,7 @@ export const ALLOWLIST: AllowEntry[] = [
   {
     file: 'components/products/Products.tsx',
     names: ['branchFilter', 'brandFilter', 'catFilter', 'groupFilter', 'stockFilter', 'supplierFilter'],
-    line: 1357,
+    line: 1418,
     reason:
       'Deferred filter-metadata fallback. filterMetaScope includes all six filters at :1334; '
       + 'its effect at :1342 invalidates the outstanding fallback and clears readiness, while '
@@ -73,7 +73,7 @@ export const ALLOWLIST: AllowEntry[] = [
   {
     file: 'components/products/Products.tsx',
     names: ['stockFilter'],
-    line: 2398,
+    line: 2501,
     reason:
       'False-positive class 3. `stockFilter:` here is an OBJECT KEY -- the value read is '
       + 'effectiveStockState, which IS in the deps. Nothing to fix. Re-verified and '
