@@ -97,6 +97,7 @@ export const SALE_RECORD_KINDS = [
   'delivery_cost_changed',
   'delivery_added',
   'customer_changed',
+  'customer_contact_changed',
   'membership_changed',
   'payment_changed',
   'payment_settled',

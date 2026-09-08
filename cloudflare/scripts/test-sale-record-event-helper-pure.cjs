@@ -68,6 +68,28 @@ assert.throws(() => subject.buildSaleRecordEventsInsert([base({
 })]), /not valid for sale_status/, 'source and kind must describe the same writer family')
 assert.throws(() => subject.buildSaleRecordEventsInsert([base({ generation: 1, via: 'redo' })]), /generation and via/,
   'direct status actions cannot claim replay generations')
+assert.doesNotThrow(() => subject.buildSaleRecordEventsInsert([base({
+  sourceKind: 'contact_customer_carry',
+  sourceId: crypto.randomUUID(),
+  kind: 'customer_contact_changed',
+  changes: [],
+  metadata: { changed_contact_fields: ['phone', 'address'] },
+})]))
+assert.throws(() => subject.buildSaleRecordEventsInsert([base({
+  sourceKind: 'contact_customer_carry', sourceId: crypto.randomUUID(), kind: 'customer_contact_changed', changes: [],
+})]), /require changed_contact_fields/)
+assert.throws(() => subject.buildSaleRecordEventsInsert([base({
+  sourceKind: 'contact_customer_carry', sourceId: 'not-a-receipt', kind: 'customer_contact_changed', changes: [],
+  metadata: { changed_contact_fields: ['phone'] },
+})]), /receipt UUID/)
+assert.throws(() => subject.buildSaleRecordEventsInsert([base({
+  sourceKind: 'contact_customer_carry', sourceId: crypto.randomUUID(), kind: 'customer_contact_changed', changes: [],
+  metadata: { changed_contact_fields: ['phone', 'phone'] },
+})]), /unique phone\/address/)
+assert.throws(() => subject.buildSaleRecordEventsInsert([base({
+  sourceKind: 'payment_method_replace', sourceId: crypto.randomUUID(), kind: 'payment_changed',
+  changes: [change('payment_method', known('Cash'), known('Card'))], metadata: { changed_contact_fields: ['phone'] },
+})]), /metadata is not allowed/)
 assert.doesNotThrow(() => subject.buildSaleRecordEventsInsert([base({ sourceKind: 'sale_settlement', kind: 'payment_settled', generation: 1, via: 'undo',
   changes: [change('sale_status', known('completed'), known('awaiting_payment'))] })]))
 assert.throws(() => subject.buildSaleRecordEventsInsert(Array.from({ length: 26 }, () => base())), /limited to 25/)

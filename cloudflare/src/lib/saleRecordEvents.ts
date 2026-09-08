@@ -22,6 +22,13 @@ export const SALE_RECORD_SOURCE_KINDS = [
   'return_create',
   'return_edit',
   'return_bulk',
+  'contact_customer_carry',
+  'contact_delivery_carry',
+  'contact_customer_merge',
+  'contact_delivery_merge',
+  'customer_link_repair',
+  'customer_missing_resolve',
+  'payment_method_replace',
 ] as const
 
 export type SaleRecordSourceKind = (typeof SALE_RECORD_SOURCE_KINDS)[number]
@@ -40,9 +47,13 @@ export interface SaleRecordEventInput {
   actorUsername?: string | null
   occurredAt: string
   changes: SaleRecordChange[]
+  metadata?: SaleRecordEventMetadata | null
   requestDigest?: string | null
   response?: Record<string, unknown> | null
 }
+
+export type SaleRecordContactField = 'phone' | 'address'
+export type SaleRecordEventMetadata = { changed_contact_fields: SaleRecordContactField[] }
 
 export class SaleRecordEventError extends Error {
   constructor(message: string) {
@@ -53,6 +64,13 @@ export class SaleRecordEventError extends Error {
 
 const FIELDS = new Set<string>(SALE_RECORD_FIELDS)
 const SOURCE_KINDS = new Set<string>(SALE_RECORD_SOURCE_KINDS)
+const REFERENCE_SOURCE_KINDS = new Set<SaleRecordSourceKind>([
+  'contact_customer_carry', 'contact_delivery_carry', 'contact_customer_merge',
+  'contact_delivery_merge', 'customer_link_repair', 'customer_missing_resolve',
+  'payment_method_replace',
+])
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+const ISO_MILLISECONDS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
 const KINDS = new Set<string>(SALE_RECORD_KINDS.filter((kind) => kind !== 'legacy_sale_change'))
 const FIELDS_BY_KIND: Record<Exclude<SaleRecordKind, 'legacy_sale_change'>, readonly SaleRecordField[]> = {
   sale_created: ['receipt_number', 'sale_status', 'items', 'total_usd', 'payment', 'delivery', 'customer', 'membership'],
@@ -65,6 +83,7 @@ const FIELDS_BY_KIND: Record<Exclude<SaleRecordKind, 'legacy_sale_change'>, read
   item_quantity_changed: ['item', 'quantity', 'total_usd'],
   items_replaced: ['removed_items', 'added_items', 'total_usd'],
   customer_changed: ['customer', 'membership'],
+  customer_contact_changed: [],
   membership_changed: ['membership'],
   status_changed: ['sale_status'],
   payment_changed: ['payment_method', 'payment_details', 'amount_paid_usd', 'amount_paid_khr', 'change_usd', 'change_khr', 'sale_status'],
@@ -92,7 +111,18 @@ const SOURCE_RULES: Record<SaleRecordSourceKind, {
   return_create: { kinds: new Set(['status_changed']), replay: false },
   return_edit: { kinds: new Set(['status_changed']), replay: false },
   return_bulk: { kinds: new Set(['status_changed']), replay: true },
+  contact_customer_carry: { kinds: new Set(['customer_changed', 'customer_contact_changed']), replay: false },
+  contact_delivery_carry: { kinds: new Set(['driver_changed']), replay: false },
+  contact_customer_merge: { kinds: new Set(['customer_changed']), replay: false },
+  contact_delivery_merge: { kinds: new Set(['driver_changed']), replay: false },
+  customer_link_repair: { kinds: new Set(['customer_changed']), replay: false },
+  customer_missing_resolve: { kinds: new Set(['customer_changed']), replay: false },
+  payment_method_replace: { kinds: new Set(['payment_changed']), replay: false },
 }
+
+const CONTACT_METADATA_KINDS = new Set<Exclude<SaleRecordKind, 'legacy_sale_change'>>([
+  'customer_changed', 'customer_contact_changed',
+])
 
 function fail(message: string): never { throw new SaleRecordEventError(message) }
 function bytes(value: string): number { return new TextEncoder().encode(value).byteLength }
@@ -224,8 +254,9 @@ function validateState(field: SaleRecordField, value: unknown): asserts value is
 }
 
 function validateChanges(kind: Exclude<SaleRecordKind, 'legacy_sale_change'>, changes: SaleRecordChange[]): string {
-  if (!Array.isArray(changes) || changes.length < 1 || changes.length > SALE_RECORD_EVENT_CHANGE_LIMIT) {
-    fail(`Sales Records events require 1-${SALE_RECORD_EVENT_CHANGE_LIMIT} changed fields.`)
+  const minimum = kind === 'customer_contact_changed' ? 0 : 1
+  if (!Array.isArray(changes) || changes.length < minimum || changes.length > SALE_RECORD_EVENT_CHANGE_LIMIT) {
+    fail(`Sales Records events require ${minimum}-${SALE_RECORD_EVENT_CHANGE_LIMIT} changed fields.`)
   }
   const allowed = new Set<string>(FIELDS_BY_KIND[kind])
   const seen = new Set<string>()
@@ -241,6 +272,24 @@ function validateChanges(kind: Exclude<SaleRecordKind, 'legacy_sale_change'>, ch
   }
   const serialized = JSON.stringify(changes)
   if (bytes(serialized) > SALE_RECORD_EVENT_CHANGE_BYTES) fail('Sales Records changes exceed 65536 UTF-8 bytes.')
+  return serialized
+}
+
+function validateMetadata(kind: Exclude<SaleRecordKind, 'legacy_sale_change'>, value: SaleRecordEventMetadata | null | undefined): string | null {
+  if (value == null) {
+    if (kind === 'customer_contact_changed') fail('Customer contact events require changed_contact_fields metadata.')
+    return null
+  }
+  if (!CONTACT_METADATA_KINDS.has(kind) || !object(value)) fail(`Sales Records metadata is not allowed for ${kind}.`)
+  exactKeys(value, ['changed_contact_fields'], 'Sales Records metadata')
+  const fields = value.changed_contact_fields
+  if (!Array.isArray(fields) || fields.length < 1 || fields.length > 2
+    || fields.some((field) => field !== 'phone' && field !== 'address')
+    || new Set(fields).size !== fields.length) {
+    fail('changed_contact_fields must contain unique phone/address values.')
+  }
+  const serialized = JSON.stringify({ changed_contact_fields: [...fields].sort() })
+  if (bytes(serialized) > 512) fail('Sales Records metadata exceeds 512 UTF-8 bytes.')
   return serialized
 }
 
@@ -271,6 +320,7 @@ export function buildSaleRecordEventsInsert(events: SaleRecordEventInput[]): { s
     if (!SOURCE_KINDS.has(event.sourceKind)) fail('Sales Records sourceKind is invalid.')
     const sourceId = String(event.sourceId || '')
     if (!sourceId || sourceId.length > 180) fail('Sales Records sourceId is invalid.')
+    if (REFERENCE_SOURCE_KINDS.has(event.sourceKind) && !UUID_V4.test(sourceId)) fail('Sales Records reference sourceId must be a receipt UUID.')
     if (!Number.isSafeInteger(event.generation) || event.generation < 0 || event.generation > 1_000_000) fail('Sales Records generation is invalid.')
     if (!KINDS.has(event.kind)) fail('Sales Records kind is invalid.')
     if (!['apply', 'undo', 'redo'].includes(event.via)) fail('Sales Records via is invalid.')
@@ -281,6 +331,7 @@ export function buildSaleRecordEventsInsert(events: SaleRecordEventInput[]): { s
     if (event.actorId != null && (!Number.isSafeInteger(event.actorId) || event.actorId <= 0)) fail('Sales Records actor id is invalid.')
     const occurredAt = String(event.occurredAt || '')
     if (!occurredAt || occurredAt.length > 40 || !Number.isFinite(Date.parse(occurredAt))) fail('Sales Records occurredAt is invalid.')
+    if (REFERENCE_SOURCE_KINDS.has(event.sourceKind) && !ISO_MILLISECONDS.test(occurredAt)) fail('Sales Records reference occurredAt must be canonical UTC with milliseconds.')
     const digest = event.requestDigest == null ? null : String(event.requestDigest)
     if (digest !== null && !/^[0-9a-f]{64}$/.test(digest)) fail('Sales Records request digest is invalid.')
     const changesJson = validateChanges(event.kind, event.changes)
@@ -303,6 +354,7 @@ export function buildSaleRecordEventsInsert(events: SaleRecordEventInput[]): { s
       actor_username: actorUsername,
       occurred_at: occurredAt,
       changes_json: changesJson,
+      metadata_json: validateMetadata(event.kind, event.metadata),
       request_digest: digest,
       response_json: validateResponse(event.response),
     }
@@ -314,7 +366,7 @@ export function buildSaleRecordEventsInsert(events: SaleRecordEventInput[]): { s
     statement: {
       sql: `INSERT INTO sale_record_events(
               id,sale_id,source_kind,source_id,generation,kind,via,subject,
-              actor_id,actor_username,occurred_at,changes_json,request_digest,response_json
+              actor_id,actor_username,occurred_at,changes_json,metadata_json,request_digest,response_json
             )
             SELECT
               json_extract(value,'$.id'),
@@ -323,7 +375,7 @@ export function buildSaleRecordEventsInsert(events: SaleRecordEventInput[]): { s
               CAST(json_extract(value,'$.generation') AS INTEGER),
               json_extract(value,'$.kind'),json_extract(value,'$.via'),json_extract(value,'$.subject'),
               CAST(json_extract(value,'$.actor_id') AS INTEGER),json_extract(value,'$.actor_username'),
-              json_extract(value,'$.occurred_at'),json_extract(value,'$.changes_json'),
+              json_extract(value,'$.occurred_at'),json_extract(value,'$.changes_json'),json_extract(value,'$.metadata_json'),
               json_extract(value,'$.request_digest'),json_extract(value,'$.response_json')
             FROM json_each(@events)`,
       params: { events: serialized },
