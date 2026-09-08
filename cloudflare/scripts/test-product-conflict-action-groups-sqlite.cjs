@@ -227,7 +227,7 @@ async function main() {
   const conflict = await post(app, changed)
   assert.equal(conflict.status, 409)
   assert.equal(conflict.body.code, 'idempotency_conflict')
-  const remove = await post(app, { ...body, client_request_id: 'remove_disabled_001', remove_rows: [{ product_id: 10000, reason: 'bad' }] })
+  const remove = await post(app, { ...body, client_request_id: 'remove_disabled_001', remove_rows: [{ product_id: 99999, reason: 'bad' }] })
   assert.equal(remove.status, 409); assert.equal(remove.body.code, 'phase_not_available')
   const applyDisabled = await app.posts.get('/possible-duplicates/merge-batch')({
     env: {}, req: { json: async () => ({ review_id: response.body.review_id, manifest_digest: response.body.draft_digest, client_request_id: response.body.review_id }) },
@@ -242,8 +242,8 @@ async function main() {
 
   for (let index = 0; index < 8; index += 1) d1.db.prepare(`INSERT INTO product_conflict_action_reviews
     (id,actor_id,request_id,request_digest,manifest_version,resolution_version,draft_digest,status,
-     requested_group_count,actionable_group_count,blocked_group_count,total_member_count,expires_at)
-    VALUES(@id,777,@requestId,'digest',1,2,'draft','draft',1,1,0,2,@expiresAt)`).run({
+     requested_action_count,requested_group_count,requested_removal_count,actionable_group_count,blocked_group_count,total_member_count,expires_at)
+    VALUES(@id,777,@requestId,'digest',1,2,'draft','draft',1,1,0,1,0,2,@expiresAt)`).run({
     id: `cap-${index}`, requestId: `cap-request-${index}`, expiresAt: '2099-01-01T00:00:00.000Z',
   })
   const capped = await post(app, { ...body, client_request_id: 'actor_cap_request_009' }, { id: 777, username: 'capped' })

@@ -20,16 +20,19 @@ CREATE TABLE product_conflict_action_reviews (
   finalize_digest TEXT,
   manifest_digest TEXT,
   status TEXT NOT NULL DEFAULT 'draft'
-    CHECK (status IN ('draft', 'finalized', 'running', 'completed', 'interrupted', 'expired')),
-  requested_group_count INTEGER NOT NULL CHECK (requested_group_count >= 1 AND requested_group_count <= 1600),
+    CHECK (status IN ('draft', 'finalized', 'running', 'completed', 'interrupted', 'approval_pending', 'expired')),
+  requested_action_count INTEGER NOT NULL CHECK (requested_action_count >= 1 AND requested_action_count <= 3200),
+  requested_group_count INTEGER NOT NULL CHECK (requested_group_count >= 0 AND requested_group_count <= 1600),
+  requested_removal_count INTEGER NOT NULL CHECK (requested_removal_count >= 0 AND requested_removal_count <= 1600),
   actionable_group_count INTEGER NOT NULL CHECK (actionable_group_count >= 0),
   blocked_group_count INTEGER NOT NULL CHECK (blocked_group_count >= 0),
-  total_member_count INTEGER NOT NULL CHECK (total_member_count >= 2 AND total_member_count <= 4000),
+  total_member_count INTEGER NOT NULL CHECK (total_member_count >= 0 AND total_member_count <= 4000),
   expires_at TEXT NOT NULL,
   finalized_at TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE (actor_id, request_id)
+  UNIQUE (actor_id, request_id),
+  CHECK (requested_action_count = requested_group_count + requested_removal_count)
 );
 
 CREATE TABLE product_conflict_action_groups (
@@ -82,6 +85,40 @@ CREATE TABLE product_conflict_action_group_members (
     REFERENCES product_conflict_action_groups(review_id, ordinal) ON DELETE CASCADE
 );
 
+CREATE TABLE product_remove_operations (
+  operation_id TEXT PRIMARY KEY,
+  actor_id INTEGER NOT NULL,
+  requester_id INTEGER NOT NULL,
+  source TEXT NOT NULL CHECK (source IN ('direct', 'conflict_review')),
+  request_id TEXT NOT NULL,
+  review_id TEXT REFERENCES product_conflict_action_reviews(id) ON DELETE CASCADE,
+  action_ordinal INTEGER,
+  product_id INTEGER NOT NULL,
+  reason TEXT NOT NULL CHECK (length(trim(reason)) BETWEEN 1 AND 500),
+  state_digest TEXT NOT NULL,
+  plan_digest TEXT NOT NULL,
+  plan_json TEXT NOT NULL CHECK (json_valid(plan_json) AND json_type(plan_json) = 'object'),
+  status TEXT NOT NULL CHECK (status IN ('reviewed', 'blocked', 'ready', 'approval_pending', 'undo_ready', 'refused', 'reversed')),
+  blocker_code TEXT,
+  error_message TEXT,
+  pending_action_id INTEGER REFERENCES pending_actions(id) ON DELETE SET NULL,
+  undo_snapshot_id INTEGER REFERENCES undo_snapshots(id) ON DELETE SET NULL,
+  action_history_id INTEGER REFERENCES action_history(id) ON DELETE SET NULL,
+  generation INTEGER NOT NULL DEFAULT 0 CHECK (generation >= 0),
+  last_transition_request_id TEXT,
+  last_transition_direction TEXT CHECK (last_transition_direction IS NULL OR last_transition_direction IN ('apply', 'undo', 'redo')),
+  last_transition_from_generation INTEGER,
+  last_transition_to_generation INTEGER,
+  response_json TEXT CHECK (response_json IS NULL OR json_valid(response_json)),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (actor_id, source, request_id),
+  UNIQUE (review_id, action_ordinal),
+  UNIQUE (review_id, product_id),
+  CHECK ((source = 'conflict_review') = (review_id IS NOT NULL AND action_ordinal IS NOT NULL)),
+  CHECK ((status = 'blocked') = (blocker_code IS NOT NULL))
+);
+
 CREATE INDEX idx_product_conflict_action_reviews_actor_status
 ON product_conflict_action_reviews(actor_id, status, updated_at, id);
 
@@ -93,3 +130,9 @@ ON product_conflict_action_groups(review_id, ordinal, status);
 
 CREATE INDEX idx_product_conflict_action_members_product
 ON product_conflict_action_group_members(product_id, review_id);
+
+CREATE INDEX idx_product_remove_operations_review_status
+ON product_remove_operations(review_id, action_ordinal, status);
+
+CREATE INDEX idx_product_remove_operations_product
+ON product_remove_operations(product_id, status, operation_id);
