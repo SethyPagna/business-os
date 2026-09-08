@@ -37,6 +37,19 @@ export const CONTACT_PICKER_COLUMNS: Record<ContactPickerTable, string[]> = {
   delivery_contacts: ['id', 'name', 'phone', 'area', 'address', 'created_at', 'updated_at'],
 }
 
+// Sales/POS customer search must not inherit Contacts-directory fields or a
+// purchase-recency value. Address remains because it stores the customer's
+// labelled contact options; updated_at and the anonymous marker are needed
+// for current-identity validation.
+export const SALES_CUSTOMER_PICKER_COLUMNS = [
+  'id', 'name', 'phone', 'email', 'address', 'membership_number', 'updated_at', 'is_anonymous',
+] as const
+
+export function buildSalesCustomerPickerSql(extraPredicates: string[] = []): string {
+  const where = ['COALESCE(is_anonymous, 0) = 0', ...extraPredicates]
+  return `SELECT ${SALES_CUSTOMER_PICKER_COLUMNS.join(', ')} FROM customers WHERE ${where.join(' AND ')} ORDER BY lower(name) ASC, id ASC LIMIT @limit`
+}
+
 /**
  * Customers: most recently active first, so a bounded copy keeps the people
  * who actually buy. The correlated MAX() is one covering-index seek per row
@@ -48,8 +61,8 @@ export const CONTACT_PICKER_COLUMNS: Record<ContactPickerTable, string[]> = {
 export function buildContactPickerSql(table: ContactPickerTable): string {
   const columns = CONTACT_PICKER_COLUMNS[table].join(', ')
   if (table === 'customers') {
-    return `SELECT ${columns}, (SELECT MAX(s.created_at) FROM sales s WHERE s.customer_id = customers.id) AS last_sale_at `
-      + `FROM customers WHERE COALESCE(is_anonymous, 0) = 0 ORDER BY last_sale_at DESC NULLS LAST, lower(name) ASC, id ASC LIMIT @limit`
+    return `SELECT ${columns} FROM customers WHERE COALESCE(is_anonymous, 0) = 0 `
+      + `ORDER BY (SELECT MAX(s.created_at) FROM sales s WHERE s.customer_id = customers.id) DESC NULLS LAST, lower(name) ASC, id ASC LIMIT @limit`
   }
   return `SELECT ${columns} FROM ${table} ORDER BY lower(name) ASC, id ASC LIMIT @limit`
 }
