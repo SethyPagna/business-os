@@ -5,6 +5,7 @@ import DateTimeRangePicker from '../shared/DateTimeRangePicker'
 import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import { fmtDateOnly } from '../../utils/formatters'
 import { getStockInInvoiceLines, getStockInInvoiceReport } from '../../api/contactReadTransport.ts'
+import InvoiceLedgerSummary from './InvoiceLedgerSummary.tsx'
 
 type TranslateFn = (key: string) => string | undefined
 
@@ -256,7 +257,7 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
   }
 
   return (
-    <div className="space-y-3 p-3">
+    <div className="space-y-3 py-3 pl-[calc(0.75rem+env(safe-area-inset-left))] pr-[calc(0.75rem+env(safe-area-inset-right))]">
       {/* The filter + date row pins while the supplier-day groups scroll --
           the app-wide "search bar row and the date both can be pinned and
           stick ... for all sections and pages" convention, at the same
@@ -326,22 +327,15 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
         <div className="py-8 text-center text-sm text-gray-400">{tr('loading', 'Loading...')}</div>
       ) : (
         <>
-          {/* Part 567: 4 stat cells, not 5 (user: "the stats can be 4 stats
-              not 5... made more compact"). Invoices and Lines -- both plain
-              counts -- share one cell so nothing is dropped. */}
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {[
-              [`${tr('stock_in_invoices_count', 'Invoices')} / ${tr('invoice_lines', 'Lines')}`, `${totals.invoices ?? 0} / ${totals.lines ?? 0}`],
-              [tr('units_received', 'Units received'), qty(totals.units_received)],
-              [tr('purchase_cost', 'Purchase cost'), money(totals.cost_usd)],
-              [tr('credit_open', 'On credit'), String(totals.credit_lines ?? 0)],
-            ].map(([label, value]) => (
-              <div key={label} className="rounded-xl border border-gray-200 px-3 py-1.5 dark:border-gray-700">
-                <div className="text-[11px] text-gray-400">{label}</div>
-                <div className="text-sm font-semibold text-gray-900 dark:text-white">{value}</div>
-              </div>
-            ))}
-          </div>
+          <InvoiceLedgerSummary
+            ariaLabel={tr('stock_in_invoices', 'Stock-In invoices')}
+            items={[
+              { key: 'invoices', label: `${tr('stock_in_invoices_count', 'Invoices')} / ${tr('invoice_lines', 'Lines')}`, value: `${totals.invoices ?? 0} / ${totals.lines ?? 0}` },
+              { key: 'units', label: tr('units_received', 'Units received'), value: qty(totals.units_received) },
+              { key: 'credit', label: tr('credit_open', 'On credit'), value: String(totals.credit_lines ?? 0) },
+            ]}
+            total={{ key: 'total', label: tr('purchase_cost', 'Purchase cost'), value: money(totals.cost_usd) }}
+          />
           {Number(totals.lines_without_cost) > 0 ? (
             <div className="text-[11px] text-gray-400">
               {tr('purchase_cost_partial_hint', 'Some batches have no recorded quantity/cost yet (received before tracking, or cost unknown) -- the totals above only count batches where both are known:')} {totals.lines_without_cost}
@@ -371,8 +365,8 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
                       aria-expanded={Boolean(linesState)}
                     >
                       <ChevronDown className={`h-4 w-4 flex-shrink-0 text-gray-400 transition-transform ${linesState ? '' : '-rotate-90'}`} />
-                      <span className="text-sm font-semibold text-gray-900 dark:text-white">
-                        {group.received_day ? fmtDateOnly(group.received_day) : tr('no_date_recorded', 'No date recorded')}
+                      <span className="whitespace-nowrap text-sm font-semibold tabular-nums text-gray-900 dark:text-white">
+                        {group.received_day ? <time dateTime={group.received_day}>{fmtDateOnly(group.received_day)}</time> : tr('no_date_recorded', 'No date recorded')}
                       </span>
                       <span className="min-w-0 flex-1 truncate text-sm text-gray-700 dark:text-gray-200">{supplierLabel(group)}</span>
                       {branchNames ? <span className="text-[11px] text-gray-400">{branchNames}</span> : null}
@@ -391,8 +385,8 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
                           <div className="px-3 py-3 text-center text-sm text-gray-400">{tr('loading', 'Loading...')}</div>
                         ) : (
                           <>
-                            <div className="overflow-x-auto">
-                              <table className="w-full min-w-[860px] text-left text-xs">
+                            <div data-invoice-ledger-scroll className="max-w-full overflow-x-auto overscroll-x-contain">
+                              <table className="w-full min-w-[860px] text-left text-xs tabular-nums">
                                 <thead className="bg-gray-50 text-[11px] uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
                                   <tr>
                                     <th className="px-3 py-2">{tr('product', 'Product')}</th>

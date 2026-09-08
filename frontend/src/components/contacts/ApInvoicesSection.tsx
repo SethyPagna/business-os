@@ -8,6 +8,7 @@ import DateTimeRangePicker from '../shared/DateTimeRangePicker'
 import { fmtDate } from '../../utils/formatters'
 import { getSupplierApInvoices } from '../../api/contactReadTransport.ts'
 import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
+import InvoiceLedgerSummary from './InvoiceLedgerSummary.tsx'
 
 type TranslateFn = (key: string) => string | undefined
 
@@ -139,7 +140,7 @@ export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
   }
 
   return (
-    <div className="space-y-3 p-3">
+    <div className="space-y-3 py-3 pl-[calc(0.75rem+env(safe-area-inset-left))] pr-[calc(0.75rem+env(safe-area-inset-right))]">
       {/* The filter + date row pins while the invoice rows scroll under it --
           the app-wide convention (user, Aug 31: "the search bar row and the
           date both can be pinned and stick ... for all sections and pages"),
@@ -220,25 +221,21 @@ export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
         <div className="py-8 text-center text-sm text-gray-400">{tr('loading', 'Loading...')}</div>
       ) : (
         <>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {[
-              [tr('stock_in_invoices_count', 'Invoices'), String(totals.invoices ?? 0)],
-              [tr('ap_total_billed', 'Total billed'), money(totals.total_usd)],
-              [tr('paid', 'Paid'), money(totals.paid_usd)],
-              [`${tr('ap_outstanding', 'Outstanding')} (${totals.outstanding_count ?? 0})`, money(totals.outstanding_usd)],
-            ].map(([label, value]) => (
-              <div key={label} className="rounded-xl border border-gray-200 px-3 py-2 dark:border-gray-700">
-                <div className="text-[11px] text-gray-400">{label}</div>
-                <div className="text-sm font-semibold text-gray-900 dark:text-white">{value}</div>
-              </div>
-            ))}
-          </div>
+          <InvoiceLedgerSummary
+            ariaLabel={tr('ap_invoices', 'Supplier AP Invoices')}
+            items={[
+              { key: 'invoices', label: tr('stock_in_invoices_count', 'Invoices'), value: String(totals.invoices ?? 0) },
+              { key: 'paid', label: tr('paid', 'Paid'), value: money(totals.paid_usd) },
+              { key: 'outstanding', label: `${tr('ap_outstanding', 'Outstanding')} (${totals.outstanding_count ?? 0})`, value: money(totals.outstanding_usd) },
+            ]}
+            total={{ key: 'total', label: tr('ap_total_billed', 'Total billed'), value: money(totals.total_usd) }}
+          />
 
           {invoices.length === 0 ? (
             <div className="py-6 text-center text-sm text-gray-400">{tr('ap_invoices_empty', 'No supplier invoices match these filters.')}</div>
           ) : (
-            <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700">
-              <table className="w-full min-w-[980px] text-left text-xs">
+            <div data-invoice-ledger-scroll className="max-w-full overflow-x-auto overscroll-x-contain rounded-xl border border-gray-200 dark:border-gray-700">
+              <table className="w-full min-w-[980px] text-left text-xs tabular-nums">
                 <thead className="bg-gray-50 text-[11px] uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
                   <tr>
                     <th className="px-3 py-2">{tr('invoice_date', 'Invoice date')}</th>
@@ -257,14 +254,14 @@ export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
                 <tbody>
                   {invoices.map((row) => (
                     <tr key={row.id} className="border-t border-gray-100 dark:border-gray-800">
-                      <td className="px-3 py-2 text-gray-800 dark:text-gray-100">{fmtDate(row.invoice_date)}</td>
+                      <td className="whitespace-nowrap px-3 py-2 text-gray-800 dark:text-gray-100"><time dateTime={row.invoice_date}>{fmtDate(row.invoice_date)}</time></td>
                       <td className="px-3 py-2 text-gray-500">{branchLabel(row.source_branch)}</td>
                       <td className="px-3 py-2 text-gray-800 dark:text-gray-100">{row.supplier_name || '--'}</td>
-                      <td className="px-3 py-2 text-gray-500">
+                      <td className="whitespace-nowrap px-3 py-2 text-gray-500">
                         {row.invoice_no || '--'}
                         <span className="ml-1 text-[10px] text-gray-400">#{row.legacy_id}</span>
                       </td>
-                      <td className="px-3 py-2 text-gray-500">{row.due_date ? fmtDate(row.due_date) : '--'}</td>
+                      <td className="whitespace-nowrap px-3 py-2 text-gray-500">{row.due_date ? <time dateTime={row.due_date}>{fmtDate(row.due_date)}</time> : '--'}</td>
                       <td className="px-3 py-2 text-right text-gray-500">{money(row.taxable_amount_usd)}</td>
                       <td className="px-3 py-2 text-right text-gray-500">{money(row.vat_amount_usd)}</td>
                       <td className="px-3 py-2 text-right font-medium text-gray-800 dark:text-gray-100">{money(row.total_amount_usd)}</td>
