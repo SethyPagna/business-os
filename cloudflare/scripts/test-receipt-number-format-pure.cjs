@@ -336,8 +336,10 @@ check('the sales importer routes a foreign CSV label to legacy_receipt_number', 
 function mintsAtReceipt(line) {
   const code = line.trimStart()
   if (code.startsWith('//') || code.startsWith('*')) return false
+  const interpolatedAtId = /`[^`\n]*\$\{[^`\n]*\}@/.test(line)
+  const receiptIdentityContext = /\b(?:receipt[A-Za-z_]*|invoice(?:No|Number)?)\b/i.test(line)
   return /receipt[A-Za-z_]*\s*[:=]\s*[`'"][^`'"\n]*@/i.test(line)
-    || /`[^`\n]*\$\{[^`\n]*\}@/.test(line)
+    || (interpolatedAtId && receiptIdentityContext)
 }
 
 check('the @-minting detector is not vacuous', () => {
@@ -345,6 +347,8 @@ check('the @-minting detector is not vacuous', () => {
   assert.equal(mintsAtReceipt("  const receipt = `${invoiceNo}@${date}`"), true)
   assert.equal(mintsAtReceipt("  receipt_number: '004434@2026-09-02',"), true)
   assert.equal(mintsAtReceipt('  const receiptNumber = `${counter}@2026-09-01`'), true)
+  assert.equal(mintsAtReceipt('  const legacyKey = `${invoiceNo}@${date}`'), true)
+  assert.equal(mintsAtReceipt('  fingerprint: `v1|${candidate.id}@${candidate.version}`,'), false)
   assert.equal(mintsAtReceipt('  // historical receipts looked like 4351@2026-08-28'), false)
   assert.equal(mintsAtReceipt('  const receiptNumber = businessDateTimeId()'), false)
 })
