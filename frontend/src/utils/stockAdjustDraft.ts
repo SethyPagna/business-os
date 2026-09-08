@@ -1,4 +1,5 @@
-import { readWorkDraft, scopedWorkDraftKey } from './workDrafts.ts'
+import { browserStockStorage, dropFailedStockAttempt, emitFailedAttemptsChanged } from './stockAdjustOutcome.ts'
+import { clearWorkDraft, readWorkDraft, scopedWorkDraftKey } from './workDrafts.ts'
 
 export const STOCK_ADJUST_RESTORE_HOST = {
   pageId: 'products',
@@ -51,4 +52,16 @@ export function readStockAdjustDraft(key: string | null | undefined): StockAdjus
     attemptId: candidate.attemptId,
     rows: Array.isArray(candidate.rows) ? candidate.rows.filter((row) => Boolean(row) && typeof row === 'object') : [],
   }
+}
+
+/** Discard both durable handles for one minimized adjustment. */
+export function discardStockAdjustDraft(
+  key: string,
+  userKey: string | number | null | undefined,
+): void {
+  const draft = readStockAdjustDraft(key)
+  clearWorkDraft(key)
+  if (!draft?.attemptId) return
+  dropFailedStockAttempt(browserStockStorage(), userKey, draft.attemptId)
+  emitFailedAttemptsChanged()
 }

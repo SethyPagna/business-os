@@ -44,7 +44,8 @@ const {
   removeMinimizedWork,
 } = await import('../src/utils/minimizedWork.ts')
 const { readWorkDraft, scopedWorkDraftKey, writeWorkDraft } = await import('../src/utils/workDrafts.ts')
-const { readStockAdjustDraft, stockAdjustDraftKey } = await import('../src/utils/stockAdjustDraft.ts')
+const { discardStockAdjustDraft, readStockAdjustDraft, stockAdjustDraftKey } = await import('../src/utils/stockAdjustDraft.ts')
+const { readFailedStockAttempts, recordFailedStockAttempt } = await import('../src/utils/stockAdjustOutcome.ts')
 
 function signIn(id: number, organization: string): void {
   memory.set(STORAGE_KEYS.USER, JSON.stringify({ id, organization_public_id: organization }))
@@ -179,6 +180,25 @@ writeWorkDraft(stockAdjustKey, {
   rows: [],
 })
 assert.equal(readStockAdjustDraft(stockAdjustKey)?.form.reason, 'Damage')
+recordFailedStockAttempt(localStorage, 'operator-7', {
+  id: 'attempt-stock-901',
+  createdAt: new Date(0).toISOString(),
+  source: 'adjust',
+  rows: [],
+})
+discardStockAdjustDraft(stockAdjustKey, 'operator-7')
+assert.equal(readStockAdjustDraft(stockAdjustKey), null, 'discard removes the exact minimized stock-adjust draft')
+assert.deepEqual(readFailedStockAttempts(localStorage, 'operator-7'), [], 'discard also removes the exact failed-attempt handle')
+writeWorkDraft(stockAdjustKey, {
+  version: 1,
+  product: { id: 901, name: 'Stock item' },
+  form: { product_id: 901, type: 'remove', quantity: 2, reason: 'Damage' },
+  initialType: 'remove',
+  search: '',
+  receiptSessionId: 123,
+  attemptId: 'attempt-stock-901',
+  rows: [],
+})
 const mismatchedStockKey = stockAdjustDraftKey(902)
 writeWorkDraft(mismatchedStockKey, {
   version: 1,
@@ -235,6 +255,7 @@ assert.match(traySource, /receive_batch: null/, 'per-product receive drafts must
 assert.match(traySource, /if \(!canRestoreMinimizedWork\(entry, can\)\) \{[\s\S]*?return[\s\S]*?\}\s*navigateTo\(entry\.pageId, entry\.anchor\)/, 'permission must be rechecked before exact page/section navigation and dispatch')
 assert.match(traySource, /edit_product: null/, 'per-product edit drafts must never use a family-wide fallback clear')
 assert.match(traySource, /stock_adjust: null/, 'per-product stock drafts must never use a family-wide fallback clear')
+assert.match(traySource, /entry\.kind === 'stock_adjust'[\s\S]*?discardStockAdjustDraft\(draftKey, user\?\.id \?\? user\?\.username \?\? null\)/, 'dismissing a stock-adjust chip discards its exact failed-attempt handle in the current user scope')
 assert.match(inventoryStockModalSource, /useCloseGuard\(\{ dirty: adjustDirty\.dirty \|\| Boolean\(adjustRestoredDirty\) \}, onCloseAdjust, onMinimizeAdjust\)/, 'X must keep the close guard while its prompt gains the same preserve capability')
 assert.match(inventoryStockModalSource, /<MinimizeButton disabled=\{adjustSaving\} tr=\{tr\} onMinimize=\{onMinimizeAdjust\} \/>/, 'the header minus calls preserve directly, never the X handler')
 assert.match(stockAdjustSource, /writeWorkDraft<StockAdjustDraft>\(currentDraftKey,[\s\S]*?onMinimize\([\s\S]*?onClose\(\)/, 'stock adjust persists before parking and closing')
