@@ -427,6 +427,20 @@ runTest('Close on a dirty header offers Discard / Back', () => {
   assert.doesNotMatch(modalSource, /import ConfirmDialog from/, 'nothing here needs its own confirm dialog now')
 })
 
+runTest('only a completed session latches clean before onDone and close', () => {
+  assert.match(modalSource, /const sessionCommittedRef = useRef\(false\)/)
+  assert.match(modalSource, /closeDirtyRef\.current = !sessionCommittedRef\.current[\s\S]*?isCreateProductsHeaderDirty/)
+  const finishStart = modalSource.indexOf('  const finishSession = async')
+  const finishEnd = modalSource.indexOf('\n\n  const canStart', finishStart)
+  const finish = modalSource.slice(finishStart, finishEnd)
+  const cleanLatches = finish.match(/sessionCommittedRef\.current = true\s+closeDirtyRef\.current = false\s+clearWorkDraft\(draftKey\)/g) || []
+  assert.equal(cleanLatches.length, 2, 'empty/already-saved and atomic server completion must both latch clean before draft clear')
+  assert.doesNotMatch(finish.slice(finish.indexOf('} catch (error)')), /sessionCommittedRef\.current = true/, 'failed and unknown outcomes must never latch the session clean')
+  const itemSaveStart = modalSource.indexOf('  const saveNewItem = async')
+  const itemSaveEnd = modalSource.indexOf('  const removeLine', itemSaveStart)
+  assert.doesNotMatch(modalSource.slice(itemSaveStart, itemSaveEnd), /sessionCommittedRef\.current = true/, 'saving a nested item only queues session work and must leave the outer session dirty')
+})
+
 runTest('the session survives a reload, like the stock-in session draft does', () => {
   assert.match(modalSource, /scopedWorkDraftKey\('create_products_session'\)/)
   assert.match(modalSource, /scheduleWorkDraftWrite<UnifiedSessionDraft>/)
@@ -606,7 +620,8 @@ runTest('nested ProductForm shows session duplicate immediately and availability
 
 runTest('Existing-product search reuses the controlled scanner without auto-creating', () => {
   assert.match(modalSource, /import ScanSearchButton from '\.\.\/shared\/ScanSearchButton\.tsx'/)
-  const existing = modalSource.slice(modalSource.indexOf("mode === 'existing'"), modalSource.indexOf("create_products_created"))
+  const existingStart = modalSource.indexOf("{mode === 'existing' && allowExisting ?")
+  const existing = modalSource.slice(existingStart, modalSource.indexOf("create_products_created", existingStart))
   assert.match(existing, /<ScanSearchButton onDetected=\{\(value\) => setQuery\(String\(value \|\| ''\)\.trim\(\)\)\}/)
   assert.doesNotMatch(existing, /openItemForm|onCreateProduct|createProduct/)
   assert.match(modalSource, /findSessionProductDuplicate\(rows, product, editingLineId\)/, 'the scanned result still enters the existing duplicate guard')

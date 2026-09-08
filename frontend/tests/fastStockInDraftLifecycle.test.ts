@@ -22,6 +22,12 @@ const minimizeBody = modal.slice(minimizeStart, minimizeEnd)
 assert.ok(minimizeBody.indexOf('flushPendingWorkDraft(fastStockInDraftKey)') < minimizeBody.indexOf("onMinimize(tr('fast_stockin_title'"), 'minimize must flush before parking the chip')
 assert.ok(minimizeBody.indexOf("onMinimize(tr('fast_stockin_title'") < minimizeBody.indexOf('onClose()'), 'chip must be parked before the modal unmounts')
 
+const createStart = modal.indexOf('  const createProductForScannedBarcode = async')
+const createEnd = modal.indexOf('  const addLine', createStart)
+assert.ok(createStart >= 0 && createEnd > createStart)
+assert.doesNotMatch(modal.slice(createStart, createEnd), /setCreateBarcode\(''\)/, 'successful scanner creation must return to ProductForm before ProductForm clears and closes')
+assert.match(modal, /onClose=\{\(\) => setCreateBarcode\(''\)\}/, 'ProductForm owns the scanner child close after its successful clean latch')
+
 assert.match(inventory, /draftKey: scopedWorkDraftKey\('fast_stockin'\)/)
 assert.match(inventory, /requiredPermission: \{ permissionKey: 'inventory', actionKey: 'adjust' \}/)
 assert.match(inventory, /\.\.\.FAST_STOCK_IN_RESTORE_HOST/)
