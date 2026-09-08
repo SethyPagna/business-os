@@ -277,9 +277,9 @@ function counts(db) {
   console.log('PASS 2 -- server-owned lot metadata and allocation are stored')
 
 
-  // A cashier can explicitly identify only the branch_stock remainder that
-  // has no lot record. Positive lots stay untouched and the line persists
-  // with no fabricated batch identity.
+  // An explicit unrecorded line preserves known lot identity. The Shop
+  // aggregate is 10 while its known positive lots total 7, so only 3 are
+  // legitimately unrecorded.
   {
     const db = fixture()
     const result = await postSale(db, [{ product_id: 10, quantity: 3, branch_id: 1, unlotted_stock: true }], 'unlotted-remainder')
@@ -291,7 +291,96 @@ function counts(db) {
     const refused = await postSale(db, [{ product_id: 10, quantity: 4, branch_id: 1, unlotted_stock: true }], 'unlotted-oversell')
     assert.equal(refused.status, 409, JSON.stringify(refused.body))
   }
-  console.log('PASS 2b -- explicit unrecorded remainder preserves recorded lots and rejects excess')
+
+  // An inactive lot is still known provenance. It cannot be reclassified as
+  // the unrecorded remainder merely because FIFO correctly ignores it.
+  {
+    const db = fixture()
+    const before = counts(db)
+    run(db, 'UPDATE product_batches SET is_active=0 WHERE id=500')
+    const result = await postSale(db, [{ product_id: 10, quantity: 4, branch_id: 1, unlotted_stock: true }], 'unlotted-inactive-known-lot')
+    assert.equal(result.status, 409, JSON.stringify(result.body))
+    assert.deepEqual(counts(db), before)
+  }
+
+  // Warehouse-only provenance is not a Shop lot. The Shop's whole aggregate
+  // remains explicitly unrecorded when it has no positive Shop lot rows.
+  {
+    const db = fixture()
+    run(db, "INSERT INTO branches(id,name,is_default,is_active) VALUES(2,'Warehouse',0,1)")
+    run(db, 'DELETE FROM branch_batch_stock WHERE branch_id=1 AND batch_id IN (500,502)')
+    run(db, 'INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(500,2,7)')
+    const result = await postSale(db, [{ product_id: 10, quantity: 10, branch_id: 1, unlotted_stock: true }], 'unlotted-warehouse-only')
+    assert.equal(result.status, 200, JSON.stringify(result.body))
+  }
+
+  // A zero Shop lot row also does not consume remainder. A positive one does;
+  // the aggregate-minus-positive-known-lots result is enforced across repeated
+  // cart lines, full tracked Shop stock, and no Shop stock.
+  {
+    const zeroLot = fixture()
+    run(zeroLot, 'UPDATE branch_batch_stock SET quantity=0 WHERE batch_id IN (500,502) AND branch_id=1')
+    const zeroResult = await postSale(zeroLot, [{ product_id: 10, quantity: 10, branch_id: 1, unlotted_stock: true }], 'unlotted-zero-shop-lots')
+    assert.equal(zeroResult.status, 200, JSON.stringify(zeroResult.body))
+
+    const repeated = fixture()
+    const repeatedBefore = counts(repeated)
+    const repeatedResult = await postSale(repeated, [
+      { product_id: 10, quantity: 2, branch_id: 1, unlotted_stock: true },
+      { product_id: 10, quantity: 2, branch_id: 1, unlotted_stock: true },
+    ], 'unlotted-repeated-oversell')
+    assert.equal(repeatedResult.status, 409, JSON.stringify(repeatedResult.body))
+    assert.deepEqual(counts(repeated), repeatedBefore)
+
+    const fullTracked = fixture()
+    run(fullTracked, 'UPDATE branch_stock SET quantity=7 WHERE product_id=10 AND branch_id=1')
+    const fullTrackedBefore = counts(fullTracked)
+    const fullTrackedResult = await postSale(fullTracked, [{ product_id: 10, quantity: 1, branch_id: 1, unlotted_stock: true }], 'unlotted-full-tracked')
+    assert.equal(fullTrackedResult.status, 409, JSON.stringify(fullTrackedResult.body))
+    assert.deepEqual(counts(fullTracked), fullTrackedBefore)
+
+    const noShop = fixture()
+    run(noShop, 'UPDATE branch_stock SET quantity=0 WHERE product_id=10 AND branch_id=1')
+    const noShopBefore = counts(noShop)
+    const noShopResult = await postSale(noShop, [{ product_id: 10, quantity: 1, branch_id: 1, unlotted_stock: true }], 'unlotted-no-shop-stock')
+    assert.equal(noShopResult.status, 409, JSON.stringify(noShopResult.body))
+    assert.deepEqual(counts(noShop), noShopBefore)
+  }
+
+  // The preflight is advisory: a positive Shop lot can be attributed after
+  // it succeeds. The first statement of the real D1 batch rechecks the live
+  // remainder and rolls back the sale instead of consuming that known lot.
+  {
+    const db = fixture()
+    run(db, 'DELETE FROM branch_batch_stock WHERE batch_id=500 AND branch_id=1')
+    const before = {
+      sales: get(db, 'SELECT COUNT(*) AS n FROM sales').n,
+      items: get(db, 'SELECT COUNT(*) AS n FROM sale_items').n,
+      allocations: get(db, 'SELECT COUNT(*) AS n FROM sale_item_batch_allocations').n,
+      movements: get(db, 'SELECT COUNT(*) AS n FROM inventory_movements').n,
+      branch: get(db, 'SELECT quantity AS n FROM branch_stock WHERE product_id=10 AND branch_id=1').n,
+      product: get(db, 'SELECT stock_quantity AS n FROM products WHERE id=10').n,
+    }
+    const result = await postSale(
+      db,
+      [{ product_id: 10, quantity: 4, branch_id: 1, unlotted_stock: true }],
+      'unlotted-attribution-race',
+      {},
+      { beforeBatch: ({ rawDb }) => run(rawDb, 'INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(500,1,2)') },
+    )
+    assert.equal(result.status, 409, JSON.stringify(result.body))
+    assert.equal(result.body.code, 'stock_conflict')
+    assert.deepEqual({
+      sales: get(db, 'SELECT COUNT(*) AS n FROM sales').n,
+      items: get(db, 'SELECT COUNT(*) AS n FROM sale_items').n,
+      allocations: get(db, 'SELECT COUNT(*) AS n FROM sale_item_batch_allocations').n,
+      movements: get(db, 'SELECT COUNT(*) AS n FROM inventory_movements').n,
+      branch: get(db, 'SELECT quantity AS n FROM branch_stock WHERE product_id=10 AND branch_id=1').n,
+      product: get(db, 'SELECT stock_quantity AS n FROM products WHERE id=10').n,
+    }, before)
+    assert.equal(get(db, 'SELECT quantity AS n FROM branch_batch_stock WHERE batch_id=500 AND branch_id=1').n, 2)
+  }
+  console.log('PASS 2b -- explicit unrecorded remainder preserves all known lots and rejects races')
 
   // FIFO spanning two lots stays attributable through two allocation rows;
   // neither the line nor its movement falsely claims one batch.

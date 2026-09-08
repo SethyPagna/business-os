@@ -266,6 +266,9 @@ type FindCartLineOptions = {
   // match just like productId/priceMode/branchId do. Non-batch lines
   // always pass/compare undefined here, unaffected.
   batchId?: unknown
+  // Explicit unrecorded stock has no batch id, so it needs its own stable
+  // intent discriminator. It must not merge with an ordinary unpicked line.
+  unlottedStock?: boolean
 }
 
 function normalizeNumber(value: unknown): number {
@@ -629,12 +632,13 @@ export function getCartLineId(item: ProductRecord | null | undefined): string {
   )
 }
 
-export function findMatchingCartLineIndex(cart: readonly ProductRecord[] = [], { productId, priceMode = 'selling', branchId = null, batchId = null }: FindCartLineOptions = {}): number {
+export function findMatchingCartLineIndex(cart: readonly ProductRecord[] = [], { productId, priceMode = 'selling', branchId = null, batchId = null, unlottedStock = false }: FindCartLineOptions = {}): number {
   return (Array.isArray(cart) ? cart : []).findIndex((item) => (
     Number(item?.id) === Number(productId)
     && String(item?.price_mode || 'selling') === String(priceMode || 'selling')
     && Number(item?.branch_id || 0) === Number(branchId || 0)
     && Number((item as { batch_id?: unknown })?.batch_id || 0) === Number(batchId || 0)
+    && Boolean((item as { unlotted_stock?: unknown })?.unlotted_stock) === unlottedStock
   ))
 }
 

@@ -500,18 +500,43 @@ app.post('/', async (c) => {
       .map((item) => ({ productId: item.product_id, branchId: item.branch_id as number })),
   )
   // A selected unlotted remainder is a factual claim, not an escape hatch:
-  // the branch must hold more aggregate stock than all its positive active
-  // lots. Reserve the remainder across repeated lines before checkout writes.
-  const remainingUnlottedByKey = new Map<string, number>()
+  // the branch must hold more aggregate stock than EVERY positive recorded
+  // lot, including inactive lots that remain attributable in the ledger.
+  // Reserve the remainder across repeated lines before checkout writes.
+  const requestedUnlottedByKey = new Map<string, { productId: number; branchId: number; quantity: number }>()
   for (const item of normalized) {
     if (!item.unlotted_stock) continue
     if (item.batch_id || item.damaged_lot_id || !item.branch_id) return c.json({ error: 'Unrecorded stock must be a regular Shop sale line.' }, 400)
     const key = `${item.product_id}:${item.branch_id}`
-    const lotQuantity = (lotsByProductBranch.get(key) || []).reduce((sum, lot) => sum + lot.available, 0)
-    const aggregate = stockByBranch.get(item.branch_id)?.get(item.product_id) || 0
-    const available = remainingUnlottedByKey.has(key) ? remainingUnlottedByKey.get(key)! : Math.max(0, aggregate - lotQuantity)
-    if (item.quantity > available) return c.json({ error: `Insufficient unrecorded stock: requested ${item.quantity}, available ${available}` }, 409)
-    remainingUnlottedByKey.set(key, available - item.quantity)
+    const requested = requestedUnlottedByKey.get(key)
+    requestedUnlottedByKey.set(key, requested
+      ? { ...requested, quantity: requested.quantity + item.quantity }
+      : { productId: item.product_id, branchId: item.branch_id, quantity: item.quantity })
+  }
+  const knownLotQuantityByKey = new Map<string, number>()
+  const unlottedRequestsByBranch = new Map<number, number[]>()
+  for (const request of requestedUnlottedByKey.values()) {
+    const productIds = unlottedRequestsByBranch.get(request.branchId) || []
+    if (!productIds.includes(request.productId)) productIds.push(request.productId)
+    unlottedRequestsByBranch.set(request.branchId, productIds)
+  }
+  for (const [branchId, productIds] of unlottedRequestsByBranch.entries()) {
+    const rows = await selectInChunks(productIds, 1, (chunk) => db.prepare(`
+      SELECT pb.variant_product_id AS product_id, bbs.branch_id, SUM(bbs.quantity) AS quantity
+      FROM branch_batch_stock bbs
+      JOIN product_batches pb ON pb.id = bbs.batch_id
+      WHERE bbs.branch_id = ?
+        AND pb.variant_product_id IN (${chunk.map(() => '?').join(',')})
+        AND bbs.quantity > 0
+      GROUP BY pb.variant_product_id, bbs.branch_id
+    `).all<{ product_id: number; branch_id: number; quantity: number }>([branchId, ...chunk]))
+    for (const row of rows) knownLotQuantityByKey.set(`${row.product_id}:${row.branch_id}`, Number(row.quantity) || 0)
+  }
+  for (const [key, request] of requestedUnlottedByKey.entries()) {
+    const aggregate = stockByBranch.get(request.branchId)?.get(request.productId) || 0
+    const knownLots = knownLotQuantityByKey.get(key) || 0
+    const available = Math.max(0, aggregate - knownLots)
+    if (request.quantity > available) return c.json({ error: `Insufficient unrecorded stock: requested ${request.quantity}, available ${available}` }, 409)
   }
 
   const explicitBatchResolution = resolveExplicitSaleLineBatches(
@@ -1015,6 +1040,29 @@ app.post('/', async (c) => {
   // never sees a "sale" with no items. ----
   try {
     const statements: Array<{ sql: string; params: Record<string, unknown> }> = []
+    // The preflight above improves the cashier response, but it cannot guard
+    // a concurrent lot attribution/update. Re-evaluate the exact same
+    // aggregate-minus-all-positive-known-lots predicate in this D1 batch
+    // before any sale/item/stock write. Inactive lots intentionally count:
+    // their stock is still known provenance and cannot be sold as unrecorded.
+    if (shouldDeductStock) {
+      for (const request of requestedUnlottedByKey.values()) {
+        statements.push({
+          sql: `SELECT CASE WHEN
+                  COALESCE((SELECT quantity FROM branch_stock
+                            WHERE product_id = @product_id AND branch_id = @branch_id), 0)
+                  - COALESCE((SELECT SUM(bbs.quantity)
+                              FROM branch_batch_stock bbs
+                              JOIN product_batches pb ON pb.id = bbs.batch_id
+                              WHERE pb.variant_product_id = @product_id
+                                AND bbs.branch_id = @branch_id
+                                AND bbs.quantity > 0), 0)
+                  >= @quantity
+                THEN 1 ELSE json_extract('unlotted_stock_conflict', '$') END`,
+          params: { product_id: request.productId, branch_id: request.branchId, quantity: request.quantity },
+        })
+      }
+    }
     const allocationReleasedAt = shouldDeductStock ? null : new Date().toISOString()
     for (const [itemIndex, item] of priced.entries()) {
       statements.push({
@@ -1249,7 +1297,7 @@ app.post('/', async (c) => {
     // stock between this request's availability read and its write -- report
     // it as the same 409 an up-front shortage gets, not an opaque 500, so the
     // client retries/refreshes rather than treating it as a server fault.
-    if (/CHECK constraint|constraint failed/i.test(message)) {
+    if (/CHECK constraint|constraint failed|malformed JSON/i.test(message)) {
       return c.json({ error: 'Insufficient stock: another sale took the last units while this one was being recorded. Refresh and try again.', code: 'stock_conflict' }, 409)
     }
     return c.json({ error: `Failed to record sale items: ${message}` }, 500)
