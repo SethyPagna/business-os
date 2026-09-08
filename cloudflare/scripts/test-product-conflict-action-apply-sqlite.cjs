@@ -248,7 +248,10 @@ async function main() {
 
   {
     const races = [
+      ['keeper branch quantity', (db) => db.prepare('UPDATE branch_stock SET quantity=20 WHERE product_id=10000 AND branch_id=1').run()],
+      ['keeper RFID quantity', (db) => db.prepare('UPDATE branch_stock SET rfid_confirmed_qty=2 WHERE product_id=10000 AND branch_id=1').run()],
       ['branch quantity', (db) => db.prepare('UPDATE branch_stock SET quantity=30 WHERE product_id=10001 AND branch_id=1').run()],
+      ['member RFID quantity', (db) => db.prepare('UPDATE branch_stock SET rfid_confirmed_qty=2 WHERE product_id=10001 AND branch_id=1').run()],
       ['lot quantity', (db) => db.prepare('UPDATE branch_batch_stock SET quantity=30 WHERE batch_id=99002 AND branch_id=1').run()],
       ['added lot', (db) => db.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_key,received_at,is_active)
         VALUES(99004,10001,'concurrent-lot','2026-09-08',1)`).run()],

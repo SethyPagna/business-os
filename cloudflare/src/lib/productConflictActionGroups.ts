@@ -46,7 +46,7 @@ export type ProductConflictActionProductRow = Record<string, unknown> & {
   updated_at: string | null
 }
 
-export type ProductConflictActionStockRow = { product_id: number; branch_id: number; branch_name: string | null; quantity: number }
+export type ProductConflictActionStockRow = { product_id: number; branch_id: number; branch_name: string | null; quantity: number; rfid_confirmed_qty: number }
 export type ProductConflictActionLotRow = Record<string, unknown> & { product_id: number; batch_id: number; branch_id: number | null; quantity: number | null }
 export type ProductConflictActionBlocker = { code: string; message: string }
 export type ProductConflictActionGroupPlan = {
@@ -256,7 +256,8 @@ export function buildProductConflictActionGroupPlans(
     if (!blocked && economics.issues.length) blocked = { code: 'invalid_merge_numeric', message: 'A selected product has an invalid non-negative money value.' }
     const memberSet = new Set(group.member_ids)
     const stockRows = stock.filter((row) => memberSet.has(Number(row.product_id)))
-      .map((row) => ({ ...row, product_id: Number(row.product_id), branch_id: Number(row.branch_id), quantity: Number(row.quantity) || 0 }))
+      .map((row) => ({ ...row, product_id: Number(row.product_id), branch_id: Number(row.branch_id), quantity: Number(row.quantity) || 0,
+        rfid_confirmed_qty: Number(row.rfid_confirmed_qty) || 0 }))
       .sort((a, b) => a.product_id - b.product_id || a.branch_id - b.branch_id)
     const projected = new Map<number, { branch_id: number; branch_name: string | null; quantity: number }>()
     for (const row of stockRows) {

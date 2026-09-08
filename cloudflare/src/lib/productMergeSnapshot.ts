@@ -99,7 +99,7 @@ export async function readProductMergeCaseSnapshot(
   const reads: KeyedRead[] = [
     { key: 'canonicalBatches', sql: 'SELECT id, batch_key, batch_number FROM product_batches WHERE variant_product_id = @id', params: { id: keeperId } },
     { key: 'duplicateStock', sql: 'SELECT branch_id, quantity, rfid_confirmed_qty FROM branch_stock WHERE product_id = @id', params: { id: duplicateId } },
-    { key: 'canonicalStock', sql: 'SELECT branch_id, quantity FROM branch_stock WHERE product_id = @id', params: { id: keeperId } },
+    { key: 'canonicalStock', sql: 'SELECT branch_id, quantity, rfid_confirmed_qty FROM branch_stock WHERE product_id = @id', params: { id: keeperId } },
     {
       key: 'canonicalProduct',
       sql: `SELECT id, name, barcode, image_path, is_active, updated_at, ${PRODUCT_MONEY_COLUMNS}

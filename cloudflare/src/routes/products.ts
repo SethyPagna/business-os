@@ -5416,7 +5416,8 @@ async function readProductConflictActionInputStats(db: ReturnType<typeof getDb>,
     }
     const stockStats = await db.prepare(`SELECT bs.product_id,COUNT(*) AS detail_rows,
       COALESCE(SUM(length(CAST(COALESCE(bs.branch_id,'') AS BLOB))+
-        length(CAST(COALESCE(b.name,'') AS BLOB))+length(CAST(COALESCE(bs.quantity,'') AS BLOB))),0) AS detail_bytes
+        length(CAST(COALESCE(b.name,'') AS BLOB))+length(CAST(COALESCE(bs.quantity,'') AS BLOB))+
+        length(CAST(COALESCE(bs.rfid_confirmed_qty,'') AS BLOB))),0) AS detail_bytes
       FROM branch_stock bs LEFT JOIN branches b ON b.id=bs.branch_id
       WHERE bs.product_id IN (${sql}) GROUP BY bs.product_id ORDER BY bs.product_id`)
       .all<{ product_id: number; detail_rows: number; detail_bytes: number }>(params)
@@ -5467,7 +5468,7 @@ async function readBoundedProductConflictActionDetails(db: ReturnType<typeof get
     products.push(...await db.prepare(`SELECT id,name,barcode,category,categories,brand,brands,brand_compact,unit,unit_normalized,image_path,is_active,COALESCE(is_group,0) AS is_group,updated_at,
       cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,wholesale_price_usd,wholesale_price_khr
       FROM products WHERE id IN (${sql}) ORDER BY id`).all<ProductConflictActionProductRow>(params))
-    stock.push(...await db.prepare(`SELECT bs.product_id,bs.branch_id,b.name AS branch_name,bs.quantity
+    stock.push(...await db.prepare(`SELECT bs.product_id,bs.branch_id,b.name AS branch_name,bs.quantity,bs.rfid_confirmed_qty
       FROM branch_stock bs LEFT JOIN branches b ON b.id=bs.branch_id WHERE bs.product_id IN (${sql})
       ORDER BY bs.product_id,bs.branch_id`).all<ProductConflictActionStockRow>(params))
   }
@@ -5972,7 +5973,8 @@ function productConflictActionSourceStateAssertion(
   productId: number,
 ): AtomicMergeStatement {
   const stockRows = detail.stock.rows.filter((row) => Number(row.product_id) === productId)
-    .map((row) => ({ branch_id: Number(row.branch_id), quantity: Number(row.quantity) || 0 }))
+    .map((row) => ({ branch_id: Number(row.branch_id), quantity: Number(row.quantity) || 0,
+      rfid_confirmed_qty: Number(row.rfid_confirmed_qty) || 0 }))
     .sort((left, right) => left.branch_id - right.branch_id)
   const lotRows = detail.lots.rows.filter((row) => Number(row.product_id) === productId).map((row) => ({
     batch_id: Number(row.batch_id), batch_key: row.batch_key == null ? null : String(row.batch_key),
@@ -5996,6 +5998,7 @@ function productConflictActionSourceStateAssertion(
           WHERE stock.product_id=@product
             AND stock.branch_id IS json_extract(expected.value,'$.branch_id')
             AND stock.quantity IS json_extract(expected.value,'$.quantity')
+            AND stock.rfid_confirmed_qty IS json_extract(expected.value,'$.rfid_confirmed_qty')
         )
       )
       AND (SELECT COUNT(*) FROM product_batches pb LEFT JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id
@@ -6027,6 +6030,57 @@ function productConflictActionSourceStateAssertion(
       THEN 1 ELSE json_extract('', '$') END AS product_conflict_source_state_guard`,
     params: { product: productId, stockJson: JSON.stringify(stockRows), lotJson: JSON.stringify(lotRows) },
   }
+}
+
+function productConflictActionStockStateAssertion(
+  productId: number,
+  rows: Array<{ branch_id: number; quantity: number; rfid_confirmed_qty?: number | null }>,
+): AtomicMergeStatement {
+  const expected = rows.map((row) => ({ branch_id: Number(row.branch_id), quantity: Number(row.quantity) || 0,
+    rfid_confirmed_qty: Number(row.rfid_confirmed_qty) || 0 })).sort((left, right) => left.branch_id - right.branch_id)
+  return {
+    sql: `SELECT CASE WHEN (SELECT COUNT(*) FROM branch_stock WHERE product_id=@product)=json_array_length(json(@rowsJson))
+      AND NOT EXISTS(SELECT 1 FROM json_each(json(@rowsJson)) expected WHERE NOT EXISTS(
+        SELECT 1 FROM branch_stock stock WHERE stock.product_id=@product
+          AND stock.branch_id IS json_extract(expected.value,'$.branch_id')
+          AND stock.quantity IS json_extract(expected.value,'$.quantity')
+          AND stock.rfid_confirmed_qty IS json_extract(expected.value,'$.rfid_confirmed_qty')
+      )) THEN 1 ELSE json_extract('', '$') END AS product_conflict_stock_state_guard`,
+    params: { product: productId, rowsJson: JSON.stringify(expected) },
+  }
+}
+
+function productConflictActionExpectedKeeperStock(
+  detail: ProductConflictActionGroupPlan,
+  keeperId: number,
+  members: ProductConflictActionMemberReceipt[],
+): Array<{ branch_id: number; quantity: number; rfid_confirmed_qty: number }> {
+  const byBranch = new Map<number, { branch_id: number; quantity: number; rfid_confirmed_qty: number }>()
+  for (const row of detail.stock.rows.filter((candidate) => Number(candidate.product_id) === keeperId)) {
+    byBranch.set(Number(row.branch_id), { branch_id: Number(row.branch_id), quantity: Number(row.quantity) || 0,
+      rfid_confirmed_qty: Number(row.rfid_confirmed_qty) || 0 })
+  }
+  const committed = new Set(members.filter((candidate) => candidate.role === 'merged'
+    && ['history_pending', 'undo_ready'].includes(candidate.status)).map((candidate) => Number(candidate.product_id)))
+  for (const row of detail.stock.rows.filter((candidate) => committed.has(Number(candidate.product_id)))) {
+    const quantity = Number(row.quantity) || 0
+    if (!quantity) continue
+    const branchId = Number(row.branch_id)
+    const current = byBranch.get(branchId) || { branch_id: branchId, quantity: 0, rfid_confirmed_qty: 0 }
+    current.quantity += quantity
+    byBranch.set(branchId, current)
+  }
+  return [...byBranch.values()].sort((left, right) => left.branch_id - right.branch_id)
+}
+
+function productConflictActionStockMatches(
+  actual: Array<{ branch_id: number; quantity: number; rfid_confirmed_qty?: number | null }>,
+  expected: Array<{ branch_id: number; quantity: number; rfid_confirmed_qty?: number | null }>,
+): boolean {
+  const normalized = (rows: typeof actual) => rows.map((row) => ({ branch_id: Number(row.branch_id),
+    quantity: Number(row.quantity) || 0, rfid_confirmed_qty: Number(row.rfid_confirmed_qty) || 0 }))
+    .sort((left, right) => left.branch_id - right.branch_id)
+  return canonicalProductConflictJson(normalized(actual)) === canonicalProductConflictJson(normalized(expected))
 }
 
 function productConflictActionForwardStatements(args: {
@@ -6328,10 +6382,12 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
   }
   const firstFold = !group.action_history_id
   const preparedSnapshot = await readProductMergeCaseSnapshot(db, plan.keeper_id, member.product_id, MERGE_REPARENT_TABLES)
+  const expectedKeeperStock = productConflictActionExpectedKeeperStock(detail, plan.keeper_id, members)
   if (!productConflictOriginalMemberMatches(detail, member.product_id, duplicate)
     || (firstFold
       ? !productConflictOriginalMemberMatches(detail, plan.keeper_id, keeper)
-      : !productConflictKeeperPostFoldMatches(plan, keeper))) {
+      : !productConflictKeeperPostFoldMatches(plan, keeper))
+    || !productConflictActionStockMatches(preparedSnapshot.canonicalStockBefore, expectedKeeperStock)) {
     throw new ProductConflictActionApplyStop('merge_state_conflict', 'A reviewed product changed after finalization.', 409)
   }
   const preStatements: AtomicMergeStatement[] = [{
@@ -6360,7 +6416,10 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
       groupStatus: firstFold ? 'ready' : 'partial', generation: Number(group.reversal_generation || 0),
       first: firstFold ? 1 : 0, history: group.action_history_id, groupSnapshotKind: PRODUCT_MERGE_GROUP_ACTION_KIND, memberOrdinal: member.member_ordinal,
       member: member.product_id, memberOperation: member.operation_id, keeper: plan.keeper_id },
-  }, productConflictActionSourceStateAssertion(detail, member.product_id)]
+  }, productConflictActionSourceStateAssertion(detail, member.product_id),
+  productConflictActionStockStateAssertion(plan.keeper_id, preparedSnapshot.canonicalStockBefore),
+  productConflictActionStockStateAssertion(member.product_id, preparedSnapshot.duplicateStockRows)]
+  if (firstFold) preStatements.push(productConflictActionSourceStateAssertion(detail, plan.keeper_id))
   let foldResult: Awaited<ReturnType<typeof foldDuplicateProductInto>>
   try {
     foldResult = await foldDuplicateProductInto(c.env, db, user, keeper, duplicate, branchNameById,
