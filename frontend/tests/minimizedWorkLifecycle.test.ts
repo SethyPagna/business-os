@@ -222,9 +222,19 @@ const stockAdjustEntry = getMinimizedWork()[0]!
 assert.equal(canRestoreMinimizedWork(stockAdjustEntry, () => false), false, 'legacy stock-adjust chips still require current inventory adjustment permission')
 assert.equal(canRestoreMinimizedWork(stockAdjustEntry, (permission, action) => permission === 'inventory' && action === 'adjust'), true)
 dispatchRestore(stockAdjustEntry)
+assert.equal(getMinimizedWork()[0]?.key, stockAdjustEntry.key, 'stock-adjust chip remains until its lazy modal commits')
+assert.equal(peekPendingRestore('stock_adjust')?.key, stockAdjustEntry.key)
 reparkDeniedRestore(stockAdjustEntry)
 assert.equal(getMinimizedWork()[0]?.draftKey, stockAdjustKey, 'a denied stock-adjust restore reparks its exact product draft')
 removeMinimizedWork(stockAdjustEntry.key)
+
+const { minimizedAt: _previousStockAdjustMinimizedAt, ...acceptedStockAdjust } = stockAdjustEntry
+minimizeWork(acceptedStockAdjust)
+const acceptedStockAdjustEntry = getMinimizedWork()[0]!
+dispatchRestore(acceptedStockAdjustEntry)
+markRestoreHandled('stock_adjust')
+assert.equal(peekPendingRestore('stock_adjust'), null)
+assert.deepEqual(getMinimizedWork(), [], 'stock-adjust host acknowledgement consumes the chip')
 
 // A handled event also consumes the pending replay, and removing a chip does
 // not itself make a broad family-draft decision.
@@ -260,7 +270,9 @@ assert.match(inventoryStockModalSource, /useCloseGuard\(\{ dirty: adjustDirty\.d
 assert.match(inventoryStockModalSource, /<MinimizeButton disabled=\{adjustSaving\} tr=\{tr\} onMinimize=\{onMinimizeAdjust\} \/>/, 'the header minus calls preserve directly, never the X handler')
 assert.match(stockAdjustSource, /writeWorkDraft<StockAdjustDraft>\(currentDraftKey,[\s\S]*?onMinimize\([\s\S]*?onClose\(\)/, 'stock adjust persists before parking and closing')
 assert.match(stockAdjustSource, /clearWorkDraft\(currentDraftKey\)[\s\S]*?onDone\(\)[\s\S]*?onClose\(\)/, 'successful stock writes clear the parked draft before closing')
-assert.match(productsSource, /if \(!canAdjustInventoryStock \|\| !canRestoreMinimizedWork\(entry, can\)\)[\s\S]*?readStockAdjustDraft\(draftKey\)[\s\S]*?consumePendingRestore\('stock_adjust'\)/, 'the canonical host rechecks current permission and the exact draft before restore')
+assert.match(productsSource, /if \(!canAdjustInventoryStock \|\| !canRestoreMinimizedWork\(entry, can\)\)[\s\S]*?readStockAdjustDraft\(draftKey\)[\s\S]*?peekPendingRestore\('stock_adjust'\)/, 'the canonical host rechecks current permission and the exact draft before restore')
+assert.match(productsSource, /restoringStockAdjustRef\.current = entry[\s\S]*?<StockAdjustRestoreCommit onCommit=\{commitStockAdjustRestore\}/, 'the stock-adjust chip remains pending until its lazy modal subtree commits')
+assert.match(productsSource, /const commitStockAdjustRestore = useCallback[\s\S]*?canRestoreMinimizedWork\(entry, can\)[\s\S]*?reparkDeniedRestore\(entry\)[\s\S]*?markRestoreHandled\('stock_adjust'\)/, 'the lazy commit boundary rechecks current permission before consuming the chip')
 assert.match(productsSource, /kind: 'stock_adjust'[\s\S]*?\.\.\.STOCK_ADJUST_RESTORE_HOST[\s\S]*?requiredPermission: \{ permissionKey: 'inventory', actionKey: 'adjust' \}/, 'Products parks stock adjustments at the canonical section with current authority metadata')
 assert.match(stockChangeSource, /\.\.\.FAST_STOCK_IN_RESTORE_HOST/, 'the canonical Stock Changes host parks the exact hub destination')
 assert.match(stockChangeSource, /peekPendingRestore\('fast_stockin'\)/, 'the conditionally mounted host must see restores dispatched before it mounted')
