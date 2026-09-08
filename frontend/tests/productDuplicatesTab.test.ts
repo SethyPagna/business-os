@@ -43,11 +43,14 @@ test('dismiss remains sequential while merge uses the atomic batch continuation 
   assert.match(src, /catch \{\s*\n\s*failed \+= 1/, 'one failed cluster must not abort the rest')
   assert.match(src, /bulk_dismiss_partial_failure/)
   assert.match(src, /makeSelectedConflictMergeApplyBody\(batchPreview, batchChoices, createClientRequestId\('product-conflict-merge'\)\)/, 'one stable request id is created at final confirmation')
+  assert.match(src, /setBatchApplyBody\(body\)[\s\S]*executeSelectedMergeBody\(body\)/, 'the exact confirmed request body is retained before the first write')
+  assert.match(src, /resumeSelectedMergeReview[\s\S]*executeSelectedMergeBody\(batchApplyBody\)/, 'manual resume reuses the same request id, manifest, cases, and choices')
   assert.match(src, /runSelectedConflictMergeBatch\(body, \{/)
   assert.match(src, /for \(const item of result\.committedCases\) next\.delete\(item\.caseKey\)/, 'only committed pairs leave the current selection')
-  assert.match(src, /batchWriteInFlightRef\.current = false[\s\S]*void load\(\)/, 'a cancelled or unknown write reloads only after transport cache invalidation settles')
+  assert.match(src, /batchWriteInFlightRef\.current = false[\s\S]*await load\(\)/, 'a cancelled or unknown write reloads only after transport cache invalidation settles')
   assert.match(src, /if \(!writeWillReconcileWhenSettled\) void load\(\)/, 'closing a read-only preview refreshes immediately without racing an in-flight write')
   assert.match(src, /t\(`selected_conflict_\$\{code\}`\)/, 'stable API error codes use the bilingual error map before server fallback prose')
+  assert.match(src, /selectedConflictChangedCases\(previous\.cases, preview\.cases\)/, 'a fresh preview retains the old values for every changed fingerprint')
 })
 
 test('selection is cleared after any bulk action and pruned when a cluster resolves', () => {

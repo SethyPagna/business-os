@@ -199,6 +199,32 @@ export function preserveSelectedConflictChoices(
   return preserved
 }
 
+export function selectedConflictChangedCases<T extends {
+  case_key: string
+  keep_id: number
+  merge_id: number
+  needs_stock_choice: boolean
+  state_digest: string
+}>(previousCases: T[], nextCases: T[]): Record<string, T> {
+  const previous = new Map(previousCases.map((item) => [item.case_key, item]))
+  const changed: Record<string, T> = {}
+  for (const item of nextCases) {
+    const before = previous.get(item.case_key)
+    if (!before) continue
+    if (before.keep_id !== item.keep_id || before.merge_id !== item.merge_id
+      || before.needs_stock_choice !== item.needs_stock_choice || before.state_digest !== item.state_digest) {
+      changed[item.case_key] = before
+    }
+  }
+  return changed
+}
+
+export function mergeSelectedConflictCommittedCases<T extends { caseKey: string; operationId: string }>(current: T[], incoming: T[]): T[] {
+  const merged = new Map(current.map((item) => [item.operationId || item.caseKey, item]))
+  for (const item of incoming) merged.set(item.operationId || item.caseKey, item)
+  return [...merged.values()]
+}
+
 export function createSelectedConflictRequestCoordinator(): {
   begin: () => { signal: AbortSignal; isCurrent: () => boolean; finish: () => boolean }
   cancel: () => void
@@ -243,11 +269,16 @@ export function selectedConflictRequiresManualResume(result: {
   complete?: boolean
   interruptionCode?: string | null
 } | null | undefined): boolean {
-  if (!result || result.complete) return false
+  return selectedConflictCanResumeSameRequest(result)
+}
+
+export function selectedConflictCanResumeSameRequest(result: {
+  complete?: boolean
+  interruptionCode?: string | null
+} | null | undefined): boolean {
+  if (!result) return false
   return result.interruptionCode === 'merge_infrastructure_interrupted'
     || result.interruptionCode === 'merge_history_pending'
-    || result.interruptionCode === 'merge_history_unavailable'
-    || result.interruptionCode === 'merge_state_conflict'
 }
 
 export function selectedConflictOutcomeIsUnknown(error: unknown): boolean {

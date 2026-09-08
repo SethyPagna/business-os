@@ -14,6 +14,7 @@ import {
   previewSelectedConflictMerges,
   runSelectedConflictMergeBatch,
   updateProduct,
+  type SelectedConflictMergeApplyBody,
   type SelectedConflictMergeApplyResult,
   type SelectedConflictMergePreviewResult,
 } from '../../api/productWriteTransport.ts'
@@ -25,8 +26,11 @@ import SelectedConflictMergeReviewModal from './SelectedConflictMergeReviewModal
 import {
   createSelectedConflictRequestCoordinator,
   partitionSelectedConflictClusters,
+  mergeSelectedConflictCommittedCases,
   preserveSelectedConflictChoices,
+  selectedConflictCanResumeSameRequest,
   selectedConflictCaseKey,
+  selectedConflictChangedCases,
   selectedConflictOutcomeIsUnknown,
   type ProductConflictCluster,
   type ProductConflictProduct,
@@ -297,6 +301,9 @@ export default function ProductDuplicatesTab({ t, notify }: {
   const [batchLocalSkipped, setBatchLocalSkipped] = useState<SelectedConflictLocalSkip[]>([])
   const [batchChoices, setBatchChoices] = useState<Record<string, SelectedConflictStockChoice>>({})
   const [batchResult, setBatchResult] = useState<SelectedConflictMergeApplyResult | null>(null)
+  const [batchApplyBody, setBatchApplyBody] = useState<SelectedConflictMergeApplyBody | null>(null)
+  const [batchCommittedCases, setBatchCommittedCases] = useState<SelectedConflictMergeApplyResult['committedCases']>([])
+  const [batchChangedCases, setBatchChangedCases] = useState<Record<string, SelectedConflictMergePreviewResult['cases'][number]>>({})
   const [batchUnknownOutcome, setBatchUnknownOutcome] = useState(false)
   const [batchNeedsRefresh, setBatchNeedsRefresh] = useState(false)
   const batchRequestRef = useRef(createSelectedConflictRequestCoordinator())
@@ -477,6 +484,9 @@ export default function ProductDuplicatesTab({ t, notify }: {
     setBulkBusy(true)
     setBulkProgress(t('selected_conflict_loading_preview') || 'Loading combined review…')
     setBatchResult(null)
+    setBatchApplyBody(null)
+    setBatchCommittedCases([])
+    setBatchChangedCases({})
     setBatchUnknownOutcome(false)
     setBatchNeedsRefresh(false)
     try {
@@ -513,9 +523,11 @@ export default function ProductDuplicatesTab({ t, notify }: {
       const preview = await previewSelectedConflictMerges(partition.cases, { signal: request.signal })
       if (!request.isCurrent()) return
       setBatchChoices((current) => preserveSelectedConflictChoices(previous.cases, preview.cases, current))
+      setBatchChangedCases(selectedConflictChangedCases(previous.cases, preview.cases))
       setBatchPreview(preview)
       setBatchLocalSkipped(partition.skipped)
       setBatchResult(null)
+      setBatchApplyBody(null)
       setBatchUnknownOutcome(false)
       setBatchNeedsRefresh(false)
     } catch (error: unknown) {
@@ -535,6 +547,9 @@ export default function ProductDuplicatesTab({ t, notify }: {
     setBatchLocalSkipped([])
     setBatchChoices({})
     setBatchResult(null)
+    setBatchApplyBody(null)
+    setBatchCommittedCases([])
+    setBatchChangedCases({})
     setBatchUnknownOutcome(false)
     setBatchNeedsRefresh(false)
     setBulkBusy(false)
@@ -542,10 +557,8 @@ export default function ProductDuplicatesTab({ t, notify }: {
     if (!writeWillReconcileWhenSettled) void load()
   }
 
-  const applySelectedMergeReview = async () => {
-    if (!batchPreview || bulkBusy || batchResult || batchUnknownOutcome || batchNeedsRefresh) return
+  const executeSelectedMergeBody = async (body: SelectedConflictMergeApplyBody) => {
     const request = batchRequestRef.current.begin()
-    const body = makeSelectedConflictMergeApplyBody(batchPreview, batchChoices, createClientRequestId('product-conflict-merge'))
     batchWriteInFlightRef.current = true
     setBulkBusy(true)
     setBulkProgress(t('selected_conflict_merging_progress') || 'Merging reviewed pairs…')
@@ -561,6 +574,9 @@ export default function ProductDuplicatesTab({ t, notify }: {
       })
       if (!request.isCurrent()) return
       setBatchResult(result)
+      setBatchUnknownOutcome(false)
+      setBatchNeedsRefresh(false)
+      setBatchCommittedCases((current) => mergeSelectedConflictCommittedCases(current, result.committedCases))
       setSelectedKeys((current) => {
         const next = new Set(current)
         for (const item of result.committedCases) next.delete(item.caseKey)
@@ -584,16 +600,30 @@ export default function ProductDuplicatesTab({ t, notify }: {
       ), 'error')
     } finally {
       batchWriteInFlightRef.current = false
+      // The same-request Resume action is enabled only after the cache was
+      // invalidated by the transport and this authoritative reload settled.
+      await load()
       if (request.finish()) {
         setBulkBusy(false)
         setBulkProgress('')
       }
-      // runSelectedConflictMergeBatch invalidates product/inventory caches in
-      // its own finally before it settles. Reload here even after Cancel made
-      // this request stale, so a possibly committed write can never be
-      // reconciled from the pre-request cache.
-      void load()
     }
+  }
+
+  const applySelectedMergeReview = async () => {
+    if (!batchPreview || bulkBusy || batchResult || batchUnknownOutcome || batchNeedsRefresh) return
+    const body = makeSelectedConflictMergeApplyBody(batchPreview, batchChoices, createClientRequestId('product-conflict-merge'))
+    if (!body.cases.length) return
+    setBatchApplyBody(body)
+    await executeSelectedMergeBody(body)
+  }
+
+  const resumeSelectedMergeReview = async () => {
+    if (!batchApplyBody || bulkBusy) return
+    setBatchResult(null)
+    setBatchUnknownOutcome(false)
+    setBatchNeedsRefresh(false)
+    await executeSelectedMergeBody(batchApplyBody)
   }
 
   const normalizedSearch = search.trim().toLowerCase()
@@ -789,10 +819,15 @@ export default function ProductDuplicatesTab({ t, notify }: {
           choices={batchChoices}
           working={bulkBusy}
           result={batchResult}
+          committedCases={batchCommittedCases}
+          changedCases={batchChangedCases}
           unknownOutcome={batchUnknownOutcome}
           needsRefresh={batchNeedsRefresh}
+          canResume={Boolean(batchApplyBody) && (batchUnknownOutcome || selectedConflictCanResumeSameRequest(batchResult))}
+          canRepreview={batchResult?.interruptionCode === 'merge_state_conflict'}
           onChoice={(caseKey, choice) => setBatchChoices((current) => ({ ...current, [caseKey]: choice }))}
           onConfirm={() => void applySelectedMergeReview()}
+          onResume={() => void resumeSelectedMergeReview()}
           onRefresh={() => void refreshSelectedMergeReview()}
           onClose={closeSelectedMergeReview}
           t={t}

@@ -3,10 +3,13 @@ import {
   SELECTED_CONFLICT_MAX_CASES,
   chooseSelectedConflictKeeper,
   createSelectedConflictRequestCoordinator,
+  mergeSelectedConflictCommittedCases,
   partitionSelectedConflictClusters,
   preserveSelectedConflictChoices,
   selectedConflictCaseKey,
+  selectedConflictCanResumeSameRequest,
   selectedConflictCanContinueAutomatically,
+  selectedConflictChangedCases,
   selectedConflictChoicesComplete,
   selectedConflictEligibility,
   selectedConflictOutcomeIsUnknown,
@@ -81,15 +84,31 @@ assert.equal(selectedConflictChoicesComplete([{ ...previewCases[0], blocked: { c
 assert.equal(selectedConflictChoicesComplete([previewCases[0], { ...previewCases[1], blocked: { code: 'blocked' } }], { a: 'write_off' }), true, 'a blocked display row does not prevent an independently actionable pair')
 assert.deepEqual(preserveSelectedConflictChoices(previewCases, previewCases, { a: 'merge' }), { a: 'merge' })
 assert.deepEqual(preserveSelectedConflictChoices(previewCases, [{ ...previewCases[0], merge_id: 9 }], { a: 'merge' }), {}, 'a changed manifest cannot retain a prior stock decision')
+const reviewed = [{ ...previewCases[0], state_digest: 'old' }, { ...previewCases[1], state_digest: 'same' }]
+const refreshed = [{ ...previewCases[0], state_digest: 'new' }, { ...previewCases[1], state_digest: 'same' }]
+assert.deepEqual(Object.keys(selectedConflictChangedCases(reviewed, refreshed)), ['a'], 'a refreshed fingerprint keeps the previous values for a visible changed marker')
+assert.deepEqual(
+  mergeSelectedConflictCommittedCases(
+    [{ caseKey: 'a', operationId: 'op-a', value: 1 }],
+    [{ caseKey: 'a', operationId: 'op-a', value: 1 }, { caseKey: 'b', operationId: 'op-b', value: 2 }],
+  ).map((item) => item.operationId),
+  ['op-a', 'op-b'],
+  'reconciling the same receipt does not duplicate already committed cases',
+)
 
 assert.equal(selectedConflictCanContinueAutomatically({ interruptionCode: 'merge_budget_reached', madeProgress: true, maxAdditionalRequests: 2 }), true)
 assert.equal(selectedConflictCanContinueAutomatically({ interruptionCode: 'merge_budget_reached', madeProgress: false, maxAdditionalRequests: 2 }), false)
 assert.equal(selectedConflictCanContinueAutomatically({ interruptionCode: 'merge_infrastructure_interrupted', madeProgress: true, maxAdditionalRequests: 2 }), false)
 assert.equal(selectedConflictRequiresManualResume({ interruptionCode: 'merge_infrastructure_interrupted' }), true)
 assert.equal(selectedConflictRequiresManualResume({ interruptionCode: 'merge_history_pending' }), true)
-assert.equal(selectedConflictRequiresManualResume({ interruptionCode: 'merge_history_unavailable' }), true)
-assert.equal(selectedConflictRequiresManualResume({ interruptionCode: 'merge_state_conflict' }), true)
+assert.equal(selectedConflictRequiresManualResume({ interruptionCode: 'merge_history_unavailable' }), false, 'terminally unavailable history is not described as retryable')
+assert.equal(selectedConflictRequiresManualResume({ interruptionCode: 'merge_state_conflict' }), false, 'state conflicts require a fresh review, not a same-request resume')
 assert.equal(selectedConflictRequiresManualResume({ interruptionCode: 'merge_budget_reached' }), false)
+assert.equal(selectedConflictCanResumeSameRequest({ interruptionCode: 'merge_infrastructure_interrupted' }), true)
+assert.equal(selectedConflictCanResumeSameRequest({ interruptionCode: 'merge_history_pending' }), true)
+assert.equal(selectedConflictCanResumeSameRequest({ complete: true, interruptionCode: 'merge_history_pending' }), true, 'a fully committed run may still need the same receipt to finalize Undo history')
+assert.equal(selectedConflictCanResumeSameRequest({ interruptionCode: 'merge_history_unavailable' }), false)
+assert.equal(selectedConflictCanResumeSameRequest({ interruptionCode: 'merge_state_conflict' }), false)
 assert.equal(selectedConflictOutcomeIsUnknown(Object.assign(new Error('conflict'), { status: 409 })), false)
 assert.equal(selectedConflictOutcomeIsUnknown(Object.assign(new Error('overload'), { status: 503 })), true)
 assert.equal(selectedConflictOutcomeIsUnknown(new TypeError('Failed to fetch')), true)
