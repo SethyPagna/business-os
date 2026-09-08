@@ -182,6 +182,10 @@ async function run(){
 
   f=fixture()
   f.sql.prepare('UPDATE customers SET is_anonymous=1 WHERE id=1').run()
+  const clearMarkedGeneral=await f.call(sales,'/bulk-update',request(f,{kind:'customer',source_id:null,target_id:null},'clear-marked-general-1',[1]))
+  assert.equal(clearMarkedGeneral.status,200,JSON.stringify(clearMarkedGeneral))
+  assert.deepEqual([clearMarkedGeneral.body.changedCount,clearMarkedGeneral.body.unchangedCount],[0,1])
+  assert.equal(f.sql.prepare('SELECT customer_id FROM sales WHERE id=1').get().customer_id,1,'General-to-General clear preserves the historical marked id')
   const fromMarkedGeneral=await f.call(sales,'/bulk-update',request(f,{kind:'customer',source_id:null,target_id:3},'customer-marked-general-1',[1,2]))
   assert.equal(fromMarkedGeneral.status,200,JSON.stringify(fromMarkedGeneral))
   assert.deepEqual([fromMarkedGeneral.body.changedCount,fromMarkedGeneral.body.unchangedCount],[2,0])

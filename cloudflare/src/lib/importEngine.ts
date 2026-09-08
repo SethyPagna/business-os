@@ -3048,7 +3048,8 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
     // shared name), name only as a fallback; an ambiguous name (>1 customer
     // shares it, see the `null` case above) intentionally resolves to no
     // match rather than guessing -- same as leaving it unmatched today.
-    const rowCustomerPhoneKey = canonicalizePhone(first.customer_phone)
+    const rowCustomerPhoneRaw = str(first.customer_phone).trim()
+    const rowCustomerPhoneKey = canonicalizePhone(rowCustomerPhoneRaw)
     const rowCustomerNameKey = lower(first.customer_name)
     const explicitCustomerId = Number(first.customer_id)
     const explicitlyAnonymous = toBool01(first.customer_is_anonymous, 0) === 1
@@ -3059,8 +3060,8 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
     // turn a historical General sale into a real customer's purchase.
     const matchedCustomerId = explicitlyAnonymous
       ? null
-      : rowCustomerPhoneKey
-        ? customerByPhone.get(rowCustomerPhoneKey) ?? null
+      : rowCustomerPhoneRaw
+        ? rowCustomerPhoneKey ? customerByPhone.get(rowCustomerPhoneKey) ?? null : null
         : (rowCustomerNameKey && !anonymousCustomerNames.has(rowCustomerNameKey) && customerByName.get(rowCustomerNameKey)) || null
     const matchedCustomer = matchedCustomerId == null ? null : customerById.get(matchedCustomerId) || null
     const customerMatchBasis = matchedCustomer

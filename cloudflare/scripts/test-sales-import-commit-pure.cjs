@@ -228,6 +228,30 @@ function customerMatch(overrides = {}) {
   )
   assert.equal(identityRace.sqlite.prepare('SELECT COUNT(*) n FROM sales').get().n, 0)
   assert.equal(identityRace.sqlite.prepare('SELECT COUNT(*) n FROM import_sales_commits').get().n, 0)
+
+  const duplicatePhoneRace = setup()
+  duplicatePhoneRace.sqlite.prepare("INSERT INTO customers(id,name,phone,phone_normalized,is_anonymous) VALUES(5,'Historical Member','012345678','012345678',0)").run()
+  duplicatePhoneRace.setBeforeBatch(() => duplicatePhoneRace.sqlite.prepare("INSERT INTO customers(id,name,phone,phone_normalized,is_anonymous) VALUES(6,'Concurrent duplicate','012-345-678',NULL,0)").run())
+  await assert.rejects(
+    () => subject.applyHistoricalSaleImport(duplicatePhoneRace.db, {
+      ...input,
+      rowNumber: 7,
+      data: saleData({
+        customer_id: 5,
+        customer_name: 'Historical Member',
+        customer_phone: '012345678',
+        ...customerMatch({
+          customer_match_basis: 'phone',
+          customer_match_key: '012345678',
+          customer_match_phone_snapshot: '012345678',
+          customer_match_phone_normalized_snapshot: '012345678',
+        }),
+      }),
+    }),
+    /did not commit/,
+  )
+  assert.equal(duplicatePhoneRace.sqlite.prepare('SELECT COUNT(*) n FROM sales').get().n, 0)
+  assert.equal(duplicatePhoneRace.sqlite.prepare('SELECT COUNT(*) n FROM import_sales_commits').get().n, 0)
   assert.equal(normal.sqlite.prepare(`SELECT COUNT(*) n FROM sale_items`).get().n, 1)
   assert.equal(normal.sqlite.prepare(`SELECT s.receipt_number FROM sale_items si JOIN sales s ON s.id = si.sale_id`).get().receipt_number, '20260828-143000')
   assert.equal(normal.sqlite.prepare(`SELECT stock_quantity FROM products WHERE id = 10`).get().stock_quantity, 5, 'ordinary history import never deducts current stock')
