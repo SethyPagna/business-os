@@ -273,6 +273,9 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
   const canBulkContacts = can('contacts', 'bulk')
   const canBulkContactsRef = useRef(canBulkContacts)
   canBulkContactsRef.current = canBulkContacts
+  const canImportContacts = canBulkContacts && can('contacts', 'import')
+  const canImportContactsRef = useRef(canImportContacts)
+  canImportContactsRef.current = canImportContacts
   // Client-side export gated by the modeled 'contacts:export' action, matching
   // the Suppliers/Delivery tabs and the Products precedent.
   const canExportContacts = can('contacts', 'export')
@@ -449,10 +452,10 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
     },
   }
   useEffect(() => {
-    if (canBulkContacts) return
+    if (canImportContacts) return
     setSelectedIds((current) => current.size ? new Set<number>() : current)
     setModal((current) => current === 'import' ? null : current)
-  }, [canBulkContacts, setSelectedIds])
+  }, [canImportContacts, setSelectedIds])
   // H1+X5 (Part 402): exports go through the shared options dialog.
   const [exportDialog, setExportDialog] = useState<{ rows: Array<Record<string, unknown>>; baseName: string } | null>(null)
   // 11.1/11.2 (B6): in select mode a cell click toggles the row; out of it
@@ -963,7 +966,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
           button's label at narrow widths. */}
       <div className="flex min-w-0 items-stretch gap-1.5 overflow-x-auto pb-1">
         <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} summaryMode="compact" t={t} className="min-w-0 flex-1" showLabel dense />
-        {(canBulkContacts || canExportContacts) ? (
+        {(canImportContacts || canExportContacts) ? (
         <LazyPortalMenu
           align="auto"
           triggerWrapperClassName="min-w-0 flex-1"
@@ -980,7 +983,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
             </button>
           )}
           items={([
-            ...(canBulkContacts ? [{ label: tr(t, 'import_contacts', 'Import'), onClick: () => { if (!canBulkContactsRef.current) return; setModal('import') }, color: 'blue' as const, icon: <Download className="h-4 w-4 shrink-0" /> }] : []),
+            ...(canImportContacts ? [{ label: tr(t, 'import_contacts', 'Import'), onClick: () => { if (!canImportContactsRef.current) return; setModal('import') }, color: 'blue' as const, icon: <Download className="h-4 w-4 shrink-0" /> }] : []),
             ...(canExportContacts ? [{
               label: tr(t, 'export', 'Export'),
               color: 'green',
@@ -1322,7 +1325,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
           <CustomerFormModal customer={selected} onSave={handleSave} onUseExisting={handleUseExisting} onClose={() => { setModal(null); setSelected(null) }} t={t} />
         </Suspense>
       ) : null}
-      {canBulkContacts && modal === 'import' ? (
+      {canImportContacts && modal === 'import' ? (
         <Suspense fallback={null}>
           <ContactImportModal type="customer" onClose={() => setModal(null)} onDone={() => load({ silent: true, label: 'Customers after import' })} />
         </Suspense>

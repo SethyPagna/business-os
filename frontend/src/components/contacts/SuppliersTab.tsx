@@ -446,6 +446,9 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
   const canBulkContacts = can('contacts', 'bulk')
   const canBulkContactsRef = useRef(canBulkContacts)
   canBulkContactsRef.current = canBulkContacts
+  const canImportContacts = canBulkContacts && can('contacts', 'import')
+  const canImportContactsRef = useRef(canImportContacts)
+  canImportContactsRef.current = canImportContacts
   // Export is assembled client-side from already-loaded rows; gating it
   // enforces the stated policy (review-tier cannot export) and matches the
   // modeled 'contacts:export' action + the Products/Customers/Delivery tabs.
@@ -602,10 +605,10 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
     },
   }
   useEffect(() => {
-    if (canBulkContacts) return
+    if (canImportContacts) return
     setSelectedIds((current) => current.size ? new Set<number>() : current)
     setModal((current) => current === 'import' ? null : current)
-  }, [canBulkContacts, setSelectedIds])
+  }, [canImportContacts, setSelectedIds])
   // H1+X5 (Part 402): exports go through the shared options dialog.
   const [exportDialog, setExportDialog] = useState<{ rows: Array<Record<string, unknown>>; baseName: string } | null>(null)
   // 11.1/11.2 (B6): in select mode a cell click toggles the row; out of it
@@ -1069,7 +1072,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
           History before Manage per the ordering used on those tabs. */}
       <div className="flex min-w-0 items-stretch gap-1.5 overflow-x-auto pb-1">
         <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} t={t} className="min-w-0 flex-1" showLabel dense />
-        {(canBulkContacts || canExportContacts) ? (
+        {(canImportContacts || canExportContacts) ? (
         <LazyPortalMenu
           align="auto"
           triggerWrapperClassName="min-w-0 flex-1"
@@ -1086,7 +1089,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
             </button>
           )}
           items={([
-            ...(canBulkContacts ? [{ label: tr('import_contacts', 'Import', 'នាំចូល'), onClick: () => { if (!canBulkContactsRef.current) return; setModal('import') }, color: 'blue' as const, icon: <Download className="h-4 w-4 shrink-0" /> }] : []),
+            ...(canImportContacts ? [{ label: tr('import_contacts', 'Import', 'នាំចូល'), onClick: () => { if (!canImportContactsRef.current) return; setModal('import') }, color: 'blue' as const, icon: <Download className="h-4 w-4 shrink-0" /> }] : []),
             ...(canExportContacts ? [{
               label: tr('export', 'Export', 'នាំចេញ'),
               color: 'green',
@@ -1400,7 +1403,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
       )}
 
       {modal === 'form' ? <SupplierForm supplier={selected} onSave={handleSave} onUseExisting={handleUseExisting} onClose={() => { setModal(null); setSelected(null) }} t={t} /> : null}
-      {canBulkContacts && modal === 'import' ? (
+      {canImportContacts && modal === 'import' ? (
         <Suspense fallback={null}>
           <ContactImportModal type="supplier" onClose={() => setModal(null)} onDone={() => load({ silent: true, label: 'Suppliers after import' })} />
         </Suspense>

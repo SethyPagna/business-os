@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import Search from 'lucide-react/dist/esm/icons/search.js'
@@ -267,7 +267,10 @@ function ClusterCard({
 export default function DuplicatesTab({ t, notify, active = true, onResolve, includeSuppliers = true }: DuplicatesTabProps) {
   const { can } = useApp() as { can: (permissionKey: string, actionKey: string) => boolean }
   const canResolveConflicts = can('contacts', 'resolve_conflicts')
-  const canMergeDuplicates = canResolveConflicts && can('contacts', 'merge')
+  const canBulkContacts = can('contacts', 'bulk')
+  const canBulkContactsRef = useRef(canBulkContacts)
+  canBulkContactsRef.current = canBulkContacts
+  const canMergeDuplicates = canBulkContacts && canResolveConflicts && can('contacts', 'merge')
   // Supplier privacy (Part 383 R2): without the contacts_suppliers grant
   // the supplier duplicates scan isn't offered (its endpoint would 403
   // server-side anyway).
@@ -304,6 +307,10 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
   // are meaningless).
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set())
   const [bulkBusy, setBulkBusy] = useState(false)
+
+  useEffect(() => {
+    if (!canBulkContacts) setSelectedKeys(new Set())
+  }, [canBulkContacts])
 
   const load = async (targetTable: ContactTableKind, includeDismissed: boolean) => {
     setLoading(true)
@@ -388,7 +395,7 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
   // the first failed merge rather than silently leaving some records
   // merged and others not with no indication which.
   const handleMergeInto = async (cluster: ContactDuplicateCluster, keeper: ContactDuplicateClusterEntry) => {
-    if (!canMergeDuplicates) return
+    if (!canBulkContactsRef.current || !canMergeDuplicates) return
     const others = cluster.contacts.filter((contact) => contact.id !== keeper.id)
     if (!others.length) return
     const id = clusterKey(table, cluster)
@@ -407,6 +414,7 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
   }
 
   const toggleSelected = (id: string) => {
+    if (!canBulkContactsRef.current) return
     setSelectedKeys((current) => {
       const next = new Set(current)
       if (next.has(id)) next.delete(id)
@@ -423,11 +431,13 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
   // fails just stays in the list, reported once at the end) rather than
   // aborting the whole batch on the first error.
   const bulkDismiss = async () => {
+    if (!canBulkContactsRef.current) return
     const targets = clusters.filter((cluster) => selectedKeys.has(clusterKey(table, cluster)))
     if (!targets.length) return
     setBulkBusy(true)
     let failed = 0
     for (const cluster of targets) {
+      if (!canBulkContactsRef.current) break
       const id = clusterKey(table, cluster)
       try {
         await dismissContactDuplicateCluster(table, { type: cluster.type, value: cluster.value })
@@ -452,7 +462,7 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
   // this" flow), so those are skipped here and left for individual
   // resolution rather than guessing at a keeper.
   const bulkMerge = async () => {
-    if (!canMergeDuplicates) return
+    if (!canBulkContactsRef.current || !canMergeDuplicates) return
     const targets = clusters.filter((cluster) => selectedKeys.has(clusterKey(table, cluster)))
     if (!targets.length) return
     const mergeable = targets.filter((cluster) => cluster.contacts.length === 2)
@@ -460,6 +470,7 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
     setBulkBusy(true)
     let failed = 0
     for (const cluster of mergeable) {
+      if (!canBulkContactsRef.current) break
       const id = clusterKey(table, cluster)
       const [first, second] = [...cluster.contacts].sort((a, b) => a.id - b.id)
       try {
@@ -631,7 +642,7 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
             {counts.name_only > 0 ? (
               <span>{counts.name_only} {(t(SEVERITY_LABEL_KEY.name_only[0]) || SEVERITY_LABEL_KEY.name_only[1]).toLowerCase()}</span>
             ) : null}
-            {canResolveConflicts ? <button
+            {canBulkContacts && canResolveConflicts ? <button
               type="button"
               onClick={() => setSelectedKeys(new Set(pagedClusters.map((cluster) => clusterKey(table, cluster))))}
               disabled={bulkBusy || !pagedClusters.length}
@@ -639,7 +650,7 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
             >
               {t('select_all') || 'Select all'}
             </button> : null}
-            {selectedKeys.size > 0 ? (
+            {canBulkContacts && selectedKeys.size > 0 ? (
               <button
                 type="button"
                 onClick={() => setSelectedKeys(new Set())}
@@ -651,7 +662,7 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
             ) : null}
           </div>
 
-          {canResolveConflicts && selectedKeys.size > 0 ? (
+          {canBulkContacts && canResolveConflicts && selectedKeys.size > 0 ? (
             <div className="flex flex-wrap items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs dark:border-blue-900/40 dark:bg-blue-950/30">
               <span className="font-medium text-blue-700 dark:text-blue-300">
                 {replaceVars(t('duplicates_bulk_selected_count') || '{count} selected', { count: selectedKeys.size })}
@@ -690,8 +701,8 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
                   table={table}
                   dismissing={dismissingId === id}
                   merging={mergingId === id}
-                  selected={selectedKeys.has(id)}
-                  selectable={canResolveConflicts && !bulkBusy}
+                  selected={canBulkContacts && selectedKeys.has(id)}
+                  selectable={canBulkContacts && canResolveConflicts && !bulkBusy}
                   canResolveConflicts={canResolveConflicts}
                   canMergeDuplicates={canMergeDuplicates}
                   onToggleSelect={() => toggleSelected(id)}

@@ -191,9 +191,9 @@ function countCsvDataRowsInWorker(text: string): Promise<number> {
 
 export default function ContactImportModal({ type, onClose, onDone }: ContactImportModalProps) {
   const { notify, t, can } = useApp()
-  const canBulkContacts = can('contacts', 'bulk')
-  const canBulkContactsRef = useRef(canBulkContacts)
-  canBulkContactsRef.current = canBulkContacts
+  const canImportContacts = can('contacts', 'bulk') && can('contacts', 'import')
+  const canImportContactsRef = useRef(canImportContacts)
+  canImportContactsRef.current = canImportContacts
   const tr = (key: string, fallbackEn: string): string => {
     const value = typeof t === 'function' ? t(key) : null
     return value && value !== key ? value : fallbackEn
@@ -235,8 +235,8 @@ export default function ContactImportModal({ type, onClose, onDone }: ContactImp
   // ready, so the operator doesn't click a second "approve now". Reset per run.
   const autoApproveAttemptedRef = useRef(false)
 
-  const ensureBulkContactsPermission = (): boolean => {
-    if (canBulkContactsRef.current) return true
+  const ensureContactImportPermission = (): boolean => {
+    if (canImportContactsRef.current) return true
     notify(t('no_permission') || 'No permission', 'error')
     return false
   }
@@ -306,7 +306,7 @@ export default function ContactImportModal({ type, onClose, onDone }: ContactImp
   }
 
   const handleApproveNow = async (jobId: string | number, queuedRowCount: number, mode: ConflictMode) => {
-    if (!ensureBulkContactsPermission()) return
+    if (!ensureContactImportPermission()) return
     setApproving(true)
     try {
       await approveImportJob(jobId, { source: 'contacts_modal' })
@@ -466,7 +466,7 @@ export default function ContactImportModal({ type, onClose, onDone }: ContactImp
   }
 
   const handleImport = async () => {
-    if (!ensureBulkContactsPermission()) return
+    if (!ensureContactImportPermission()) return
     if (!config?.jobType) {
       notify(tr('contacts_import_unsupported_type', 'Unsupported import type'), 'error')
       return
@@ -508,7 +508,7 @@ export default function ContactImportModal({ type, onClose, onDone }: ContactImp
         'Contact import CSV upload',
         CONTACT_IMPORT_JOB_UPLOAD_TIMEOUT_MS,
       )
-      if (!ensureBulkContactsPermission()) return
+      if (!ensureContactImportPermission()) return
       await withLoaderTimeout(
         () => api.startImportJob(jobId),
         'Contact import start',
@@ -744,7 +744,7 @@ export default function ContactImportModal({ type, onClose, onDone }: ContactImp
         ) : null}
 
         <div className="flex gap-2">
-          <button type="button" className="btn-primary flex-1" disabled={!canBulkContacts || loading || analyzingCsv || !rowCount} onClick={handleImport}>
+          <button type="button" className="btn-primary flex-1" disabled={!canImportContacts || loading || analyzingCsv || !rowCount} onClick={handleImport}>
             {loading ? (t('importing') || 'Importing...') : analyzingCsv ? tr('contacts_import_checking', 'Checking...') : tr('contacts_import_button', 'Import')}
           </button>
           <button type="button" className="btn-secondary" onClick={onClose}>{t('close') || 'Close'}</button>
