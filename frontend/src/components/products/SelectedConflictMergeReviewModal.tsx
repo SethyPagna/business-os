@@ -696,7 +696,7 @@ export function SelectedConflictGroupReviewModal({
               {canResume ? <button type="button" className="btn-secondary px-3 py-2 text-sm" onClick={onResume}>{tr('selected_conflict_resume_same_review', 'Resume same review')}</button> : null}
               {!applyResult || applyResult.continuation_required ? (
                 <button type="button" className="btn-primary px-3 py-2 text-sm disabled:opacity-40" disabled={working || (!finalized && !canFinalize)} onClick={() => { void prepareConfirmation() }}>
-                  {working ? tr('saving', 'Saving...') : finalized ? tr('selected_conflict_apply_button', 'Apply reviewed actions') : tr('selected_conflict_continue_confirmation', 'Continue to confirmation')}
+                  {working ? tr('saving', 'Saving...') : finalized ? tr('selected_conflict_group_apply_button', 'Apply reviewed actions') : tr('selected_conflict_continue_confirmation', 'Continue to confirmation')}
                 </button>
               ) : null}
             </div>
@@ -707,15 +707,15 @@ export function SelectedConflictGroupReviewModal({
       {confirmOpen ? (
         <ConfirmDialog
           layer="nested"
-          title={tr('selected_conflict_confirm_title', 'Confirm reviewed product actions')}
-          message={tr('selected_conflict_confirm_message', 'This applies the complete frozen review. It may continue in bounded steps without asking again.')}
+          title={tr('selected_conflict_group_confirm_title', 'Confirm reviewed product actions')}
+          message={tr('selected_conflict_group_confirm_message', 'This applies the complete frozen review. It may continue in bounded steps without asking again.')}
           items={[
             { label: tr('selected_conflict_merge_groups', 'Merge groups'), value: finalized?.counts.ready_groups ?? 0 },
             { label: tr('selected_conflict_requested_removals', 'Removals'), value: finalized?.counts.ready_removals ?? 0 },
             { label: tr('selected_conflict_folds', 'Merge folds'), value: finalized?.counts.merge_folds ?? 0 },
           ]}
-          note={tr('selected_conflict_confirm_note', 'Every committed merge or removal has a stable receipt and an Undo path; approval-pending removals remain unchanged.')}
-          confirmLabel={tr('selected_conflict_apply_button', 'Apply reviewed actions')}
+          note={tr('selected_conflict_group_confirm_note', 'Every committed merge or removal has a stable receipt and an Undo path; approval-pending removals remain unchanged.')}
+          confirmLabel={tr('selected_conflict_group_apply_button', 'Apply reviewed actions')}
           onConfirm={() => { setConfirmOpen(false); onApply() }}
           onClose={() => setConfirmOpen(false)}
           t={t}
