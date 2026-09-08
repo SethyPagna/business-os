@@ -286,7 +286,6 @@ const DELIBERATELY_UNGUARDED: Record<string, string> = {
   // comment ("X/backdrop keep the draft (reopen later, shipment intact)").
   // A "Discard changes?" prompt would be asking about a loss that cannot
   // happen, and answering Discard would not discard anything.
-  'components/inventory/FastStockInModal.tsx': 'the whole session persists as a work draft and is restored on reopen',
   // Confirmations and choosers: what they hold is the question itself, not
   // authored content. Reopening costs one tap.
   'components/sales/SaleStatusConfirmModal.tsx': 'a confirmation -- its two toggles are gates on the action, not typed work',

@@ -144,7 +144,9 @@ runTest('STK-06: creation reuses ProductForm and resumes without losing the stoc
     'fast stock-in drafts should be scoped to the signed-in user')
   assert.match(modalSource, /writeWorkDraft<FastStockInDraft>\(fastStockInDraftKey/)
   assert.match(modalSource, /onClose=\{\(\) => setCreateBarcode\(''\)\}/)
-  assert.match(modalSource, /setCreateBarcode\(''\)\s*\n\s*pick\(created\)/)
+  const createHandler = modalSource.slice(modalSource.indexOf('  const createProductForScannedBarcode = async'), modalSource.indexOf('\n  const ', modalSource.indexOf('  const createProductForScannedBarcode = async') + 1))
+  assert.match(createHandler, /pick\(created\)/)
+  assert.doesNotMatch(createHandler, /setCreateBarcode\(''\)/, 'ProductForm must clear its draft before its onClose unmounts the scanned-product form')
   assert.match(modalSource, /Product created\. Continue adding it to this stock-in session\./)
 })
 
