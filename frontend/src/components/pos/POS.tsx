@@ -294,6 +294,9 @@ type CartLineRecord = ProductRecord & {
   batch_label?: string | null
   batch_expiry_date?: string | null
   batch_available_quantity?: number
+  // Explicitly chosen branch_stock remainder with no received-date identity.
+  unlotted_stock?: boolean
+  unlotted_available_quantity?: number
   // 11.9: this line draws from a damaged lot -- capped by that lot's
   // quantity_remaining, and the checkout sends damaged_lot_id so the
   // server consumes the LOT, never branch/batch stock.
@@ -2388,7 +2391,7 @@ export default function POS() {
           productId: product?.id,
           priceMode: priceValues.price_mode,
           branchId: assignedBranchId,
-          batchId: batchSelection?.batchId ?? null,
+          batchId: batchSelection?.batchId ?? (batchSelection?.unlottedStock ? -1 : null),
         })
     if (!damagedSelection && existingIndex >= 0 && (active.cart[existingIndex] as CartLineRecord).damaged_lot_id) existingIndex = -1
     const existing = existingIndex >= 0 ? active.cart[existingIndex] : null
@@ -2407,15 +2410,19 @@ export default function POS() {
       if (stock <= 0) { notify(t('not_enough_stock'), 'error'); return }
       newCart = [...active.cart, {
         ...product,
-        cart_line_id: `${Number(product.id)}:${priceValues.price_mode}:${Number(assignedBranchId || 0)}:${batchSelection?.batchId || 0}:D${damagedSelection?.damagedLotId || 0}:${Date.now()}:${Math.random().toString(36).slice(2, 7)}`,
+        cart_line_id: `${Number(product.id)}:${priceValues.price_mode}:${Number(assignedBranchId || 0)}:${batchSelection?.batchId || (batchSelection?.unlottedStock ? 'unlotted' : 0)}:D${damagedSelection?.damagedLotId || 0}:${Date.now()}:${Math.random().toString(36).slice(2, 7)}`,
         quantity: 1,
         ...priceValues,
         branch_id: assignedBranchId || null,
-        ...(batchSelection ? {
+        ...(batchSelection?.batchId ? {
           batch_id: batchSelection.batchId,
           batch_label: batchSelection.batchLabel,
           batch_expiry_date: batchSelection.batchExpiryDate,
           batch_available_quantity: batchCeiling ?? 0,
+        } : {}),
+        ...(batchSelection?.unlottedStock ? {
+          unlotted_stock: true,
+          unlotted_available_quantity: batchCeiling ?? 0,
         } : {}),
         ...(damagedSelection ? {
           damaged_lot_id: damagedSelection.damagedLotId,
@@ -2450,7 +2457,7 @@ export default function POS() {
     // product's overall stock across every lot.
     const stockCeiling = cartItem?.damaged_lot_id
       ? (cartItem.damaged_available_quantity ?? 0)
-      : cartItem?.batch_id ? (cartItem.batch_available_quantity ?? 0) : getDisplayStock(product, cartItem)
+      : cartItem?.batch_id ? (cartItem.batch_available_quantity ?? 0) : cartItem?.unlotted_stock ? (cartItem.unlotted_available_quantity ?? 0) : getDisplayStock(product, cartItem)
     if (qty > stockCeiling) { notify(t('not_enough_stock'), 'error'); return }
     patchActive({ cart: active.cart.map((item) => getCartLineId(item) === cartLineId ? { ...item, quantity: qty } : item) })
   }
@@ -2653,7 +2660,7 @@ export default function POS() {
     // metadata cannot leak a previous branch's received date into checkout.
     patchActive({
       cart: active.cart.map((entry) => getCartLineId(entry) === cartLineId
-        ? { ...entry, branch_id: targetBranchId, batch_id: null, batch_label: null, batch_expiry_date: null, batch_available_quantity: undefined }
+        ? { ...entry, branch_id: targetBranchId, batch_id: null, batch_label: null, batch_expiry_date: null, batch_available_quantity: undefined, unlotted_stock: undefined, unlotted_available_quantity: undefined }
         : entry),
     })
   }
@@ -2915,6 +2922,7 @@ export default function POS() {
         batch_id:          i.batch_id || null,
         batch_label:       i.batch_label || null,
         batch_expiry_date: i.batch_expiry_date || null,
+        unlotted_stock:     i.unlotted_stock === true,
         damaged_lot_id:    i.damaged_lot_id || null,
       })),
       subtotal_usd: subtotalUsd, subtotal_khr: Math.round(subtotalKhr),
