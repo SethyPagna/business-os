@@ -45,6 +45,7 @@ import {
   saleRecordKindCounts,
   type SaleRecord,
   type SaleRecordFieldRow,
+  type SaleRecordValue,
 } from '../../utils/saleRecords.ts'
 
 type TranslateFn = (key: string) => string
@@ -156,21 +157,29 @@ export default function SaleRecordsFloat({ sale, onClose, t, fmtUSD, fmtKHR }: S
     return label(key, KIND_FALLBACKS[key] || key)
   }
 
-  const renderValue = (row: SaleRecordFieldRow, value: unknown) => {
-    if (value === null || value === undefined || value === '') return label('not_recorded', 'Not recorded')
+  const renderValue = (row: SaleRecordFieldRow, snapshot: SaleRecordValue) => {
+    if (snapshot.state === 'unknown') return label('historical_details_unavailable', 'Historical details unavailable')
+    if (snapshot.state === 'known_none') {
+      if (row.field === 'customer') return label('general', 'General')
+      if (row.field === 'membership') return label('no_membership', 'No membership')
+      if (row.field === 'driver') return label('no_driver', 'No driver')
+      if (row.field === 'actual_delivery_cost_usd') return label('no_actual_delivery_cost', 'No actual delivery cost')
+      return label('none', 'None')
+    }
+    const value = snapshot.value
     if (row.format === 'money') {
       const parsed = Number(value)
-      return Number.isFinite(parsed) ? fmtUSD(parsed) : String(value)
+      return Number.isFinite(parsed) ? fmtUSD(parsed) : label('value_changed', 'Value changed')
     }
     if (row.format === 'money_khr') {
       const parsed = Number(value)
-      return Number.isFinite(parsed) ? fmtKHR(parsed) : String(value)
+      return Number.isFinite(parsed) ? fmtKHR(parsed) : label('value_changed', 'Value changed')
     }
     if (row.format === 'status') return getStatusLabel(value, t)
     if (row.format === 'boolean') return value ? label('yes', 'Yes') : label('no', 'No')
-    if (row.format === 'quantity') return String(value)
+    if (row.format === 'quantity') return Number.isFinite(Number(value)) ? String(value) : label('value_changed', 'Value changed')
     const lines = formatSaleRecordValueLines(row.field, value, fmtUSD)
-    if (lines.length === 0) return label('not_recorded', 'Not recorded')
+    if (lines.length === 0) return label('value_changed', 'Value changed')
     return (
       <span className="inline-flex max-w-full flex-col items-end gap-0.5">
         {lines.map((line, index) => <span key={`${index}:${line}`} className="max-w-full break-words">{line}</span>)}
@@ -275,8 +284,8 @@ export default function SaleRecordsFloat({ sale, onClose, t, fmtUSD, fmtKHR }: S
                           </thead>
                           <tbody>
                             {rows.map((row) => (
-                              <tr key={row.field} className={row.changed ? '' : 'text-gray-400'}>
-                                <td className="py-0.5 pr-2">{row.labelKey ? label(row.labelKey, FIELD_FALLBACKS[row.labelKey] || row.labelKey) : row.field}</td>
+                              <tr key={row.field}>
+                                <td className="py-0.5 pr-2">{label(row.labelKey || 'value_changed', FIELD_FALLBACKS[row.labelKey || ''] || 'Value changed')}</td>
                                 <td className="py-0.5 text-right tabular-nums">{renderValue(row, row.before)}</td>
                                 <td className={`py-0.5 text-right tabular-nums ${row.changed ? 'font-semibold text-gray-800 dark:text-gray-100' : ''}`}>{renderValue(row, row.after)}</td>
                               </tr>

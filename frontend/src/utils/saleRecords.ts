@@ -31,20 +31,21 @@
 /** The closed set the Worker emits. Mirrors lib/saleRecords.ts's own list. */
 export const SALE_RECORD_KINDS = [
   'sale_created',
-  'status_changed',
+  'driver_changed',
+  'delivery_cost_changed',
+  'delivery_fee_changed',
+  'delivery_added',
   'item_added',
   'item_removed',
-  'item_qty_changed',
-  'item_price_changed',
-  'delivery_fee_changed',
-  'delivery_cost_changed',
-  'delivery_added',
-  'discount_changed',
+  'item_quantity_changed',
+  'items_replaced',
   'customer_changed',
+  'membership_changed',
+  'status_changed',
+  'payment_changed',
   'payment_settled',
   'cancelled',
-  'undone',
-  'other',
+  'legacy_sale_change',
 ] as const
 
 export type SaleRecordKind = (typeof SALE_RECORD_KINDS)[number]
@@ -62,7 +63,15 @@ export interface SaleRecord {
   provenance_unknown?: boolean
   before?: Record<string, unknown> | null
   after?: Record<string, unknown> | null
+  changes?: SaleRecordChange[] | null
 }
+
+export type SaleRecordValue =
+  | { state: 'known_value'; value: unknown }
+  | { state: 'known_none' }
+  | { state: 'unknown' }
+
+export interface SaleRecordChange { field: string; before: SaleRecordValue; after: SaleRecordValue }
 
 /**
  * Every kind's translation key. Exhaustive by construction: the Record type
@@ -70,26 +79,27 @@ export interface SaleRecord {
  */
 export const SALE_RECORD_KIND_KEYS: Record<SaleRecordKind, string> = {
   sale_created: 'record_kind_sale_created',
-  status_changed: 'record_kind_status_changed',
+  driver_changed: 'record_kind_driver_changed',
+  delivery_cost_changed: 'record_kind_delivery_cost_changed',
+  delivery_fee_changed: 'record_kind_delivery_fee_changed',
+  delivery_added: 'record_kind_delivery_added',
   item_added: 'record_kind_item_added',
   item_removed: 'record_kind_item_removed',
-  item_qty_changed: 'record_kind_item_qty_changed',
-  item_price_changed: 'record_kind_item_price_changed',
-  delivery_fee_changed: 'record_kind_delivery_fee_changed',
-  delivery_cost_changed: 'record_kind_delivery_cost_changed',
-  delivery_added: 'record_kind_delivery_added',
-  discount_changed: 'record_kind_discount_changed',
+  item_quantity_changed: 'record_kind_item_quantity_changed',
+  items_replaced: 'record_kind_items_replaced',
   customer_changed: 'record_kind_customer_changed',
+  membership_changed: 'record_kind_membership_changed',
+  status_changed: 'record_kind_status_changed',
+  payment_changed: 'record_kind_payment_changed',
   payment_settled: 'record_kind_payment_settled',
   cancelled: 'record_kind_cancelled',
-  undone: 'record_kind_undone',
-  other: 'record_kind_other',
+  legacy_sale_change: 'record_kind_legacy_sale_change',
 }
 
 /** A kind this build knows, or 'other' -- never a raw string in the UI. */
 export function saleRecordKind(raw: unknown): SaleRecordKind {
   const value = String(raw ?? '')
-  return (SALE_RECORD_KINDS as readonly string[]).includes(value) ? value as SaleRecordKind : 'other'
+  return (SALE_RECORD_KINDS as readonly string[]).includes(value) ? value as SaleRecordKind : 'legacy_sale_change'
 }
 
 /** How one before/after field should be rendered. */
@@ -137,6 +147,14 @@ const FIELD_RULES: Record<string, { key: string; format: SaleRecordFieldFormat }
   delivery_fee_paid_by: { key: 'paid_by', format: 'text' },
   delivery_actual_cost_usd: { key: 'delivery_actual_cost', format: 'money' },
   delivery_actual_cost_khr: { key: 'delivery_actual_cost', format: 'money_khr' },
+  actual_delivery_cost_usd: { key: 'delivery_actual_cost', format: 'money' },
+  customer: { key: 'customer', format: 'text' },
+  membership: { key: 'membership', format: 'text' },
+  driver: { key: 'driver', format: 'text' },
+  item: { key: 'item', format: 'text' },
+  items: { key: 'items', format: 'text' },
+  removed_items: { key: 'removed_items', format: 'text' },
+  added_items: { key: 'added_items', format: 'text' },
   exchange_rate: { key: 'exchange_rate', format: 'quantity' },
   total_khr: { key: 'total', format: 'money_khr' },
 }
@@ -146,8 +164,8 @@ export interface SaleRecordFieldRow {
   /** Translation key for the field's label, or null to print `field` itself. */
   labelKey: string | null
   format: SaleRecordFieldFormat
-  before: unknown
-  after: unknown
+  before: SaleRecordValue
+  after: SaleRecordValue
   /** False when the two sides are the same value -- context, not a change. */
   changed: boolean
 }
@@ -170,6 +188,14 @@ function normalizeForCompare(value: unknown): string {
  * opened this to see.
  */
 export function saleRecordFieldRows(record: SaleRecord): SaleRecordFieldRow[] {
+  if (Array.isArray(record.changes)) {
+    return record.changes
+      .filter((change) => !['search_normalized', 'internal_context'].includes(change.field))
+      .map((change) => {
+        const rule = FIELD_RULES[change.field] || { key: 'value_changed', format: 'text' as const }
+        return { field: change.field, labelKey: rule.key, format: rule.format, before: change.before, after: change.after, changed: true }
+      })
+  }
   const before = record.before && typeof record.before === 'object' ? record.before : {}
   const after = record.after && typeof record.after === 'object' ? record.after : {}
   const fields: string[] = []
@@ -181,8 +207,8 @@ export function saleRecordFieldRows(record: SaleRecord): SaleRecordFieldRow[] {
       field,
       labelKey: rule ? rule.key : null,
       format: rule ? rule.format : 'text',
-      before: (before as Record<string, unknown>)[field],
-      after: (after as Record<string, unknown>)[field],
+      before: (before as Record<string, unknown>)[field] == null ? { state: 'known_none' } : { state: 'known_value', value: (before as Record<string, unknown>)[field] },
+      after: (after as Record<string, unknown>)[field] == null ? { state: 'known_none' } : { state: 'known_value', value: (after as Record<string, unknown>)[field] },
       changed: normalizeForCompare((before as Record<string, unknown>)[field]) !== normalizeForCompare((after as Record<string, unknown>)[field]),
     }
   })
