@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "generated_at": "2026-09-09",
-  "backend_head": "bd0ab24e",
+  "backend_head": "8512e105",
   "contract": "outputs/takeover-20260908/f74-sales-records-backend-contract.json",
   "principles": {
     "display": "Closed changed-only kind/field vocabulary with known_value, known_none, and unknown. No raw variables or current-profile reconstruction.",
-    "general": "A new sale with customer_id null and no customer_name is known_none General. A null id with a nonblank written name is a name-only known_value identity. Missing legacy evidence is unknown.",
+    "general": "A new sale with customer_id null and no customer_name is known_none General. A null id with a nonblank written name is a name-only known_value identity. A persisted is_anonymous=1 customer is also General while its stored id remains available for guarded repair/replay. Missing legacy evidence is unknown.",
     "retention": "sale_record_events and return_mutation_receipts are immutable, included in backup/reset lifecycle, and excluded from ordinary audit/action-history pruning.",
     "legacy": "Genuine historical sale-related rows without exact typed evidence remain one legacy_sale_change record with actor/time and details unavailable. They are not silently dropped."
   },
@@ -33,9 +33,9 @@
     },
     {
       "action": "General to customer, customer swap, membership swap",
-      "paths": ["POST /api/sales/bulk-update used by the F72 one-sale flow and grouped flows"],
-      "capture": "durable sale_bulk operation/member snapshots with per-sale customer and membership before/after",
-      "apply_undo_redo": "apply, undo, redo",
+      "paths": ["POST /api/sales/bulk-update used by the F72 one-sale flow and grouped flows", "legacy PATCH /api/sales/:id/customer"],
+      "capture": "durable sale_bulk operation/member snapshots or actor-scoped direct sale_customer events with per-sale customer and membership before/after; marked anonymous sources render as known_none and cannot be targets",
+      "apply_undo_redo": "bulk apply, undo, redo; direct apply with exact idempotent retry",
       "status": "captured"
     },
     {
@@ -64,8 +64,16 @@
       "paths": ["PATCH /api/returns/:id"],
       "capture": "actor-scoped immutable edit receipt plus conditional changed-only return_edit sale-status event in one guarded batch",
       "apply_undo_redo": "apply only; exact retry is idempotent",
-      "status": "implemented_pending_independent_review",
+      "status": "captured_independently_reviewed",
       "commit": "bd0ab24e"
+    },
+    {
+      "action": "anonymous customer creation and historical sales import matching",
+      "paths": ["POST /api/sales", "sales list read", "sales import classify/commit"],
+      "capture": "new marked anonymous selections normalize to canonical null; old marked rows retain their id but expose customer_is_anonymous and no joined membership; imports never link a marked identity or guess an unmarked same-name profile when the phone is blank",
+      "apply_undo_redo": "creation/import apply only",
+      "status": "captured_requires_0141_marker_schema",
+      "commit": "8512e105"
     }
   ],
   "not_yet_captured": [
@@ -75,10 +83,6 @@
       "preserved_behavior": "Existing return and audit history remains visible as legacy_sale_change rather than disappearing."
     },
     {
-      "action": "legacy PATCH /api/sales/:id/customer",
-      "reason": "This older direct route has no stable request receipt/event. The released F72 interaction uses the captured bulk-update kernel, but scripted or stale callers can still reach this route."
-    },
-    {
       "action": "customer profile carry rename/phone/address and merge/relink/resolve-missing",
       "reason": "contacts.ts can rewrite sales customer snapshots or ids without per-sale immutable F74 events. Record-only profile edits intentionally do not mutate a sale and need no Sales Record.",
       "privacy": "Any future event must retain only customer id/name and membership identity needed for the change; it must not bulk-copy current phone/address into the immutable event ledger."
@@ -86,15 +90,13 @@
     {
       "action": "linked payment-method rename",
       "reason": "settings.ts rewrites historical sale payment labels in one guarded operation but does not yet append per-sale immutable F74 events."
-    },
-    {
-      "action": "legacy positive-id customer whose profile is semantically General",
-      "reason": "Current creation classification treats every positive customer id as a real profile. Root is coordinating a shared canonical-anonymous predicate; F74 does not fabricate a null identity or rewrite old history before that decision."
     }
   ],
   "release_dependencies": [
     "Direct status and return edit server requirements must ship with a frontend that freezes client_request_id and expected_updated_at before send and preserves exact requests across unknown outcomes.",
     "The current frontend candidate e04e0b15 has a separate blocked review for pending-request retention bounds and Undo/Redo reconciliation; backend commits alone are not a release candidate.",
+    "Direct PATCH /api/sales/:id/customer now requires a stable client_request_id and expected_updated_at. The mounted F72 customer editor uses the bulk-update kernel; any future direct caller must implement the same unknown-outcome retry discipline.",
+    "Anonymous handling depends on append-only migration 0141 and its shared helper; F74 must not deploy without that schema dependency and the paired UI interpretation of customer_is_anonymous.",
     "No migration, deployment, remote D1 command, or production write was performed."
   ]
 }
