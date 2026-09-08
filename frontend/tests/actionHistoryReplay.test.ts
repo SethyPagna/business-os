@@ -26,7 +26,7 @@ const refresh = () => 'refreshed'
 const action = () => 'mutated'
 
 const actionHistorySource = fs.readFileSync(new URL('../src/utils/actionHistory.ts', import.meta.url), 'utf8')
-const replayRequestHelperSource = actionHistorySource.match(/export function buildServerReplayRequest[\s\S]*?\n}\n/)?.[0]
+const replayRequestHelperSource = actionHistorySource.match(/export function buildServerReplayRequest[\s\S]*?\r?\n}\r?\n/)?.[0]
 assert.ok(replayRequestHelperSource, 'the server replay request helper is present')
 const buildServerReplayRequest = new Function(
   `${stripTypeScriptTypes(replayRequestHelperSource.replace('export ', ''))}; return buildServerReplayRequest`,
