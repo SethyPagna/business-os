@@ -15,7 +15,7 @@ import {
   branchRuleMessageKey,
   localizeBranchRuleError,
 } from '../src/api/branchRuleErrors.ts'
-import { branchRoleFromName, branchCanSell, branchCanBeTransferSource, branchCanBeTransferDestination } from '../src/utils/branchRoles.ts'
+import { branchRoleFromName, branchCanSell, branchCanBeTransferSource, branchCanBeTransferDestination, branchCanTransferBetween } from '../src/utils/branchRoles.ts'
 
 let failed = 0
 
@@ -58,9 +58,12 @@ await runTest('branch roles come from the name, never from is_default', () => {
   // An unrecognised branch is not evidence of a stock-only branch.
   assert.equal(branchCanSell('Kiosk'), false)
   assert.equal(branchCanBeTransferSource('Warehouse'), true)
-  assert.equal(branchCanBeTransferSource('Shop'), false)
+  assert.equal(branchCanBeTransferSource('Shop'), true)
   assert.equal(branchCanBeTransferDestination('Shop'), true)
-  assert.equal(branchCanBeTransferDestination('Warehouse'), false)
+  assert.equal(branchCanBeTransferDestination('Warehouse'), true)
+  assert.equal(branchCanTransferBetween('Warehouse', 'Shop'), true)
+  assert.equal(branchCanTransferBetween('Shop', 'Warehouse'), true)
+  assert.equal(branchCanTransferBetween('Shop', 'Shop'), false)
 })
 
 // SHAPE B from the investigation: a flat, NON-batch-tracked product with real
@@ -455,6 +458,7 @@ const kmPack = JSON.parse(src('lang', 'km.json')) as Record<string, string>
 await runTest('a Worker branch-rule refusal is translated, and nothing else is touched', () => {
   const t = (key: string) => kmPack[key]
   assert.equal(branchRuleMessageKey('Only allow Shop sale. Please transfer to Shop first.'), 'pos_warehouse_not_sellable')
+  assert.equal(branchRuleMessageKey('Transfers move stock only between Shop and Warehouse.'), 'transfer_canonical_pair_only')
   assert.equal(branchRuleMessageKey('Transfers move stock from Warehouse to Shop.'), 'transfer_source_warehouse_only')
   assert.equal(
     branchRuleMessageKey('Stock transfer is unavailable because the branch setup must contain exactly one active Shop and one active Warehouse. Ask an administrator to repair the branch records before trying again.'),
@@ -471,6 +475,7 @@ await runTest('a Worker branch-rule refusal is translated, and nothing else is t
     'a Khmer session must read the Khmer sentence, not the English the server sent',
   )
   assert.equal(localizeBranchRuleError('Transfers move stock from Warehouse to Shop.', t), kmPack.transfer_source_warehouse_only)
+  assert.equal(localizeBranchRuleError('Transfers move stock only between Shop and Warehouse.', t), kmPack.transfer_canonical_pair_only)
   assert.equal(localizeBranchRuleError('Something else entirely', t), 'Something else entirely')
 })
 
@@ -506,6 +511,7 @@ await runTest('the mapped sentences are the exact English of the pack keys', () 
   // shown an English sentence in a Khmer session -- silently.
   assert.equal(enPack.pos_warehouse_not_sellable, 'Only allow Shop sale. Please transfer to Shop first.')
   assert.equal(enPack.transfer_source_warehouse_only, 'Transfers move stock from Warehouse to Shop.')
+  assert.equal(enPack.transfer_canonical_pair_only, 'Transfers move stock only between Shop and Warehouse.')
   assert.equal(
     enPack.canonical_branch_configuration_invalid,
     'Stock transfer is unavailable because the branch setup must contain exactly one active Shop and one active Warehouse. Ask an administrator to repair the branch records before trying again.',

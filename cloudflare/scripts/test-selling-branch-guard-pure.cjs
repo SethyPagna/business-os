@@ -1,4 +1,5 @@
-// The warehouse holds stock and never sells.
+// The warehouse holds stock and never sells. Stock transfers may move in
+// either direction between the canonical Shop and Warehouse.
 //
 // Before this test the rule existed only in people's heads: every sale-side
 // picker offered whatever branch it happened to have, POST /sales took any
@@ -6,8 +7,8 @@
 // branch unchecked, and POST /transfer only ever refused a transfer whose
 // source and destination were the same branch. So a sale could be rung
 // against the warehouse -- deducting stock that was never on a shelf -- and
-// a transfer could run shop -> warehouse, which is not a direction this
-// business has.
+// transfers were originally limited to warehouse -> shop, which made a
+// legitimate return-to-warehouse transfer and Inventory undo fail.
 //
 // What is exercised here:
 //   1. The two canonical roles, off the only discriminator this lineage has
@@ -123,12 +124,15 @@ runTest('a sale line is accepted only at the exact Shop', () => {
   assert.equal(guards.firstUnsellableBranch([{ id: 9, name: null }])?.id, 9, 'an unnamed branch is never guessed to be the Shop')
 })
 
-runTest('transfers run warehouse -> shop, and nothing else that names those two', () => {
+runTest('transfers run both ways between opposite canonical roles only', () => {
   assert.equal(guards.transferDirectionError('Warehouse', 'Shop'), null)
   assert.equal(guards.transferDirectionError('  WAREHOUSE ', 'shop'), null)
-  assert.equal(guards.transferDirectionError('Shop', 'Warehouse'), guards.TRANSFER_DIRECTION_ERROR)
-  assert.equal(guards.transferDirectionError('Shop', 'Depot'), guards.TRANSFER_DIRECTION_ERROR, 'the shop never sends stock away')
-  assert.equal(guards.transferDirectionError('Depot', 'Warehouse'), guards.TRANSFER_DIRECTION_ERROR, 'the warehouse never receives a transfer')
+  assert.equal(guards.transferDirectionError('Shop', 'Warehouse'), null)
+  assert.equal(guards.transferDirectionError(' shop ', ' WAREHOUSE '), null)
+  assert.equal(guards.transferDirectionError('Shop', 'Shop'), guards.TRANSFER_DIRECTION_ERROR)
+  assert.equal(guards.transferDirectionError('Warehouse', 'Warehouse'), guards.TRANSFER_DIRECTION_ERROR)
+  assert.equal(guards.transferDirectionError('Shop', 'Depot'), guards.TRANSFER_DIRECTION_ERROR)
+  assert.equal(guards.transferDirectionError('Depot', 'Warehouse'), guards.TRANSFER_DIRECTION_ERROR)
   assert.equal(guards.transferDirectionError('Depot', 'Kiosk'), guards.TRANSFER_DIRECTION_ERROR)
   assert.equal(guards.transferDirectionError('Warehouse', 'Depot'), guards.TRANSFER_DIRECTION_ERROR)
   assert.equal(guards.transferDirectionError('Depot', 'Shop'), guards.TRANSFER_DIRECTION_ERROR)
@@ -143,11 +147,11 @@ const km = JSON.parse(readRepo('frontend/src/lang/km.json'))
 
 runTest('both rejections carry the exact English of a translated pack key', () => {
   assert.equal(guards.WAREHOUSE_NOT_SELLABLE_ERROR, en.pos_warehouse_not_sellable)
-  assert.equal(guards.TRANSFER_DIRECTION_ERROR, en.transfer_source_warehouse_only)
+  assert.equal(guards.TRANSFER_DIRECTION_ERROR, en.transfer_canonical_pair_only)
   assert.ok(km.pos_warehouse_not_sellable, 'the Khmer pack carries the refusal too')
-  assert.ok(km.transfer_source_warehouse_only)
+  assert.ok(km.transfer_canonical_pair_only)
   assert.notEqual(km.pos_warehouse_not_sellable, en.pos_warehouse_not_sellable, 'the Khmer entry is a translation, not a copy')
-  assert.notEqual(km.transfer_source_warehouse_only, en.transfer_source_warehouse_only)
+  assert.notEqual(km.transfer_canonical_pair_only, en.transfer_canonical_pair_only)
 })
 
 // ---------------------------------------------------------------------------
