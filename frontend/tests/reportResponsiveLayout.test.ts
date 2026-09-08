@@ -11,7 +11,9 @@ const overview = read('components/sales/reports/OverviewReport.tsx')
 const sheet = read('components/sales/reports/ReceiptSheet.tsx')
 
 // Throw on failure so this suite can also be statically imported by reportsHub.test.ts.
-assert.match(hub, /reports-mobile-primary[\s\S]*?\{viewPicker\}\{rangePicker\}/)
+const mobilePrimary = hub.slice(hub.indexOf('<div className="reports-mobile-primary">'), hub.indexOf('</div>', hub.indexOf('<div className="reports-mobile-primary">')))
+assert.match(mobilePrimary, /\{rangePicker\}/)
+assert.doesNotMatch(mobilePrimary, /\{viewPicker\}/)
 assert.match(css, /\.reports-mobile-primary\s*\{[^}]*flex-wrap:\s*wrap/)
 assert.match(hub, /showCalendarIcon=\{false\}/)
 assert.match(picker, /showCalendarIcon = true/)

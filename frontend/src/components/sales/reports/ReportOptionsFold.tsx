@@ -18,9 +18,8 @@
 import type { ReactNode, RefObject } from 'react'
 import Receipt from 'lucide-react/dist/esm/icons/receipt.js'
 import Table2 from 'lucide-react/dist/esm/icons/table-2.js'
-import InfoHint from '../../shared/InfoHint.tsx'
 import { Button, Chip, Fold } from '../../shared/kit'
-import { DEFAULT_REPORT_OPTIONS, type ReportBasis, type ReportCurrency, type ReportOptions, type ReportProfitMode, type ReportStyle } from './reportModel.ts'
+import { DEFAULT_REPORT_OPTIONS, type ReportCurrency, type ReportOptions, type ReportStyle } from './reportModel.ts'
 import type { Tr } from './reportTypes.ts'
 
 export interface ReportOptionsFoldProps {
@@ -31,10 +30,8 @@ export interface ReportOptionsFoldProps {
   onChange: (patch: Partial<ReportOptions>) => void
   onReset: () => void
   tr: Tr
-  /** Cost/profit are admin-only; without them the profit-mode group is inert. */
-  showProfit: boolean
-  /** "Net after expenses" needs the Expenses permission. */
-  showExpenses: boolean
+  /** The permission-filtered report picker, rendered as an opaque slot. */
+  viewControl: ReactNode
   /** The branch / status / payment selects, rendered as an opaque slot. */
   filterControls?: ReactNode
   /** Excel vs Receipt -- the former standalone toggle, now a chip group. */
@@ -44,42 +41,29 @@ export interface ReportOptionsFoldProps {
   resetDisabled?: boolean
 }
 
-function Group({ title, hint, hintLabel, children }: { title: string; hint?: string; hintLabel?: string; children: React.ReactNode }) {
+function Group({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="report-segment space-y-1">
-      <div className="flex items-center gap-1 text-[length:var(--ui-size-meta)] font-medium text-[var(--ui-ink-2)]">
-        {title}
-        {hint ? <InfoHint text={hint} label={hintLabel || title} /> : null}
-      </div>
+    <div className="reports-filter-group space-y-1">
+      <div className="text-[length:var(--ui-size-meta)] font-medium text-[var(--ui-ink-2)]">{title}</div>
       <div className="flex flex-wrap gap-1">{children}</div>
     </div>
   )
 }
 
-export default function ReportOptionsFold({ open, onClose, anchorRef, options, onChange, onReset, tr, showProfit, showExpenses, filterControls, style, onStyleChange, resetDisabled }: ReportOptionsFoldProps) {
-  const bases: Array<{ id: ReportBasis; label: string }> = [
-    { id: 'revenue', label: `${tr('revenue', 'Revenue')} (${tr('rpt_default', 'default')})` },
-    { id: 'gross', label: tr('gross_sales', 'Gross sales') },
-    { id: 'collected', label: tr('collected_total', 'Collected total') },
-  ]
-  const profitModes: Array<{ id: ReportProfitMode; label: string; disabled?: boolean }> = [
-    { id: 'gross', label: tr('rpt_gross_profit', 'Gross profit') },
-    { id: 'net', label: tr('rpt_profit_net', 'Net after expenses'), disabled: !showExpenses },
-  ]
+export default function ReportOptionsFold({ open, onClose, anchorRef, options, onChange, onReset, tr, viewControl, filterControls, style, onStyleChange, resetDisabled }: ReportOptionsFoldProps) {
   const currencies: Array<{ id: ReportCurrency; label: string }> = [
-    { id: 'setting', label: tr('rpt_currency_setting', 'App setting') },
     { id: 'usd', label: 'USD' },
     { id: 'khr', label: 'KHR' },
     { id: 'both', label: tr('rpt_currency_both', 'Both') },
   ]
-  const optionsAreDefault = JSON.stringify(options) === JSON.stringify({ ...DEFAULT_REPORT_OPTIONS, granularity: options.granularity })
+  const optionsAreDefault = options.currency === DEFAULT_REPORT_OPTIONS.currency
   const isDefault = resetDisabled ?? optionsAreDefault
   return (
     <Fold
       open={open}
       onClose={onClose}
       anchorRef={anchorRef}
-      className="reports-fold-panel"
+      className="reports-fold-panel reports-filter-fold"
       title={tr('filters', 'Filters')}
       actions={
         <Button size="sm" variant="ghost" onClick={onReset} disabled={isDefault}>
@@ -87,7 +71,10 @@ export default function ReportOptionsFold({ open, onClose, anchorRef, options, o
         </Button>
       }
     >
-      <div className="space-y-2.5 p-2.5" data-reports-fold="">
+      <div className="reports-filter-grid" data-reports-fold="" data-reports-filter="">
+        <Group title={tr('view', 'View')}>
+          <div className="w-full min-w-0">{viewControl}</div>
+        </Group>
         {filterControls ? (
           <Group title={tr('filters', 'Filters')}>
             <div className="flex w-full flex-col gap-1.5">{filterControls}</div>
@@ -104,34 +91,7 @@ export default function ReportOptionsFold({ open, onClose, anchorRef, options, o
             <span className="inline-flex items-center gap-1"><Receipt className="h-3 w-3" />{tr('rpt_style_receipt', 'Receipt style')}</span>
           </Chip>
         </Group>
-        <Group
-          title={tr('rpt_basis', 'Basis')}
-          hint={tr('rpt_basis_hint', 'The figure that leads the summary line and divides the margin. Revenue is the app-wide definition: net sales of recognized sales minus refunds, tax and delivery excluded.')}
-        >
-          {bases.map((b) => (
-            <Chip key={b.id} selected={options.basis === b.id} onClick={() => onChange({ basis: b.id })}>
-              {b.label}
-            </Chip>
-          ))}
-        </Group>
-        <Group
-          title={tr('profit', 'Profit')}
-          hint={showProfit
-            ? tr('rpt_profit_hint', 'Profit = revenue − cost of goods sold + delivery fees charged − courier costs. Includes Not Paid sales. Operating expenses are deducted separately; this option selects which profit subtotal leads the summary.')
-            : tr('rpt_cost_hidden_hint', 'Cost and profit figures are visible to admins only.')}
-        >
-          {profitModes.map((m) => (
-            <Chip key={m.id} selected={options.profitMode === m.id} disabled={!showProfit || m.disabled} onClick={() => onChange({ profitMode: m.id })}>
-              {m.label}
-            </Chip>
-          ))}
-        </Group>
-        <Group title={tr('rpt_compare', 'Compare')} hint={tr('rpt_compare_hint', 'Overview: also load the previous period of equal length and show the change.')}>
-          <Chip selected={options.compare} onClick={() => onChange({ compare: !options.compare })}>
-            {tr('rpt_compare_prev', 'Previous period')}
-          </Chip>
-        </Group>
-        <Group title={tr('rpt_currency', 'Currency')} hint={tr('rpt_currency_hint', 'Display only. Stored amounts never change; single-currency views convert at the main exchange rate.')}>
+        <Group title={tr('rpt_currency', 'Currency')}>
           {currencies.map((c) => (
             <Chip key={c.id} selected={options.currency === c.id} onClick={() => onChange({ currency: c.id })}>
               {c.label}
