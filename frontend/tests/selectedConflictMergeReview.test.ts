@@ -65,6 +65,7 @@ assert.match(source, /review\.counts\.actionable_groups \+ review\.counts\.block
 assert.match(source, /onFinalize\(\)[\s\S]*setConfirmOpen\(true\)/, 'the server freezes the complete review before the one confirmation opens')
 assert.match(source, /<ConfirmDialog[\s\S]*onConfirm=\{\(\) => \{ setConfirmOpen\(false\); onApply\(\) \}\}/, 'one confirmation starts the already frozen apply request')
 assert.match(source, /applyResult\.approval_required[\s\S]*not reported as completed/, 'approval-pending removals remain distinct from completed actions')
+assert.match(source, /status === 'approval_pending'[\s\S]*selected_conflict_pending_approval/, 'API status tokens are rendered as localized operator labels')
 assert.match(source, /review_reversed[\s\S]*Redo the visible group action/, 'a reversed prefix is not silently replayed')
 assert.match(source, /applyError\?\.code !== 'review_reversed'/, 'a reversed review cannot expose a misleading same-request Resume action')
 assert.match(source, /unknownOutcome[\s\S]*same review receipt and request ID/, 'unknown outcomes explicitly resume the immutable request')

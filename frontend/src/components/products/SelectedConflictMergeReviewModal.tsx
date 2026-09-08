@@ -604,6 +604,18 @@ export function SelectedConflictGroupReviewModal({
     const translated = t(key)
     return translated && translated !== key ? translated : fallback
   }
+  const statusLabel = (status: string) => {
+    if (status === 'running') return tr('processing', 'Processing…')
+    if (status === 'approval_pending') return tr('selected_conflict_pending_approval', 'Pending approval')
+    if (status === 'completed') return tr('completed', 'Completed')
+    if (status === 'interrupted') return tr('selected_conflict_apply_interrupted', 'Apply stopped')
+    if (status === 'partial') return tr('partial', 'Partial')
+    if (status === 'refused') return tr('selected_conflict_refused', 'Refused')
+    if (status === 'reversed') return tr('selected_conflict_review_reversed', 'Review reversed')
+    if (status === 'history_pending') return tr('selected_conflict_undo_pending', 'Undo history pending')
+    if (status === 'undo_ready') return tr('selected_conflict_undo_ready', 'Undo ready')
+    return status.replaceAll('_', ' ')
+  }
   const progress = selectedConflictGroupLoadedProgress(
     pages.map((item) => item.page),
     review.counts.actionable_groups + review.counts.blocked_groups + review.counts.requested_removals,
@@ -659,7 +671,7 @@ export function SelectedConflictGroupReviewModal({
           ) : null}
           {applyResult ? (
             <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-100">
-              <strong>{tr(`selected_conflict_status_${applyResult.status}`, applyResult.status)}</strong> · {processed}/{totalWork} {tr('selected_conflict_processed', 'processed')}
+              <strong>{statusLabel(applyResult.status)}</strong> · {processed}/{totalWork} {tr('selected_conflict_processed', 'processed')}
               {applyResult.approval_required ? <p className="mt-1 font-medium">{tr('selected_conflict_group_approval_pending', 'Removal requests are pending approval; they are not reported as completed.')}</p> : null}
             </div>
           ) : null}
@@ -679,7 +691,7 @@ export function SelectedConflictGroupReviewModal({
           {appliedGroups.length || appliedRemovals.length ? (
             <div className="rounded-xl border border-gray-200 p-3 text-xs dark:border-zinc-700">
               <h3 className="font-semibold">{tr('selected_conflict_current_receipts', 'Receipts from this apply')}</h3>
-              {appliedGroups.map((row) => <p key={row.group_key}>{tr('selected_conflict_action_merge', 'Merge')} · {row.group_key} · {row.status} · {row.processed_folds} {tr('selected_conflict_folds', 'folds')}</p>)}
+              {appliedGroups.map((row) => <p key={row.group_key}>{tr('selected_conflict_action_merge', 'Merge')} · {row.group_key} · {statusLabel(row.status)} · {row.processed_folds} {tr('selected_conflict_folds', 'folds')}</p>)}
               {appliedRemovals.map((row) => <p key={row.action_ordinal}>{tr('selected_conflict_remove_independently', 'Remove')} · #{row.product_id} · {row.status === 'approval_pending' ? tr('selected_conflict_pending_approval', 'Pending approval') : tr('selected_conflict_undo_ready', 'Undo ready')}</p>)}
             </div>
           ) : null}
