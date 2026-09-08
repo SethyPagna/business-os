@@ -161,6 +161,7 @@ export const BACKUP_TABLES = [
   'sale_item_batch_allocations',
   'returns',
   'return_mutation_receipts',
+  'return_create_receipts',
   'return_items',
   'return_item_batch_allocations',
   'return_replacement_items',
@@ -1088,6 +1089,7 @@ export const SALE_REPLAY_RESTORE_BUNDLE = [
   'sale_mutation_receipts', 'sale_mutation_members',
   'return_write_revisions', 'return_bulk_operations', 'return_bulk_members',
   'return_mutation_receipts',
+  'return_create_receipts',
   // Product identity is part of the Sales replay graph. Include every F65
   // receipt that references products/history so a scoped Sales backup remains
   // restorable after reviewed conflict actions exist.
