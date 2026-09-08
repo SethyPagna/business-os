@@ -17,6 +17,7 @@ export type MinimizedWorkKind =
   | 'add_product'
   | 'edit_product'
   | 'fast_stockin'
+  | 'stock_adjust'
   | 'receive_batch'
   | 'create_products_session'
   | 'branch_form'
@@ -76,6 +77,7 @@ const FALLBACK_PERMISSION_BY_KIND: Partial<Record<MinimizedWorkKind, MinimizedWo
   // explicit requiredPermission metadata now written by the host.
   edit_product: { permissionKey: 'products', actionKey: 'edit' },
   fast_stockin: { permissionKey: 'inventory', actionKey: 'adjust' },
+  stock_adjust: { permissionKey: 'inventory', actionKey: 'adjust' },
 }
 
 /** Fast stock-in has one canonical restore host. Older builds parked it on

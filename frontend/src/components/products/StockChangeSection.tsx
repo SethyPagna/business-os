@@ -41,6 +41,7 @@ import {
   type MinimizedWorkEntry,
 } from '../../utils/minimizedWork.ts'
 import { scopedWorkDraftKey } from '../../utils/workDrafts.ts'
+import { STOCK_ADJUST_RESTORE_HOST } from '../../utils/stockAdjustDraft.ts'
 import { fmtDate, fmtClock24, fmtDateTime24 } from '../../utils/formatters'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { buildHistoryRowModel, formatHistoryReference, historyExportField, historyField } from '../../utils/historyRowModel.ts'
@@ -1235,6 +1236,18 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
             t={t}
             onClose={() => { setAdjustType(null); setResumeAttempt(null) }}
             onDone={() => { setAdjustType(null); setResumeAttempt(null); void load() }}
+            onMinimize={(label: string, detail: { draftKey: string; productId: string | number }) => {
+              minimizeWork({
+                key: `stock-adjust-${String(detail.productId)}`,
+                kind: 'stock_adjust',
+                ...STOCK_ADJUST_RESTORE_HOST,
+                label,
+                payload: { productId: detail.productId },
+                draftKey: detail.draftKey,
+                requiredPermission: { permissionKey: 'inventory', actionKey: 'adjust' },
+              })
+              app.notify(tr(t, 'minimized_to_chip', 'Minimized. Pick it back up from the chip — nothing was lost.'), 'info')
+            }}
           />
         </Suspense>
       ) : null}

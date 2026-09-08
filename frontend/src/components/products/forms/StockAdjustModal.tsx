@@ -29,6 +29,8 @@ import {
   submitButtonState,
   type StockAdjustRow,
 } from '../../../utils/stockAdjustOutcome.ts'
+import { clearWorkDraft, writeWorkDraft } from '../../../utils/workDrafts.ts'
+import { readStockAdjustDraft, stockAdjustDraftKey, type StockAdjustDraft } from '../../../utils/stockAdjustDraft.ts'
 
 // Full-featured "Adjust stock" flow for the Products page "Stock Changes"
 // ledger. It REUSES Inventory's own presentational adjust modal
@@ -147,6 +149,8 @@ type StockAdjustModalProps = {
   resumeAttemptId?: string | null
   onClose: () => void
   onDone: () => void
+  onMinimize?: (label: string, detail: { draftKey: string; productId: InventoryId }) => void
+  restoreDraftKey?: string | null
   t: (key: string) => string
 }
 
@@ -173,7 +177,7 @@ function stockQtyOf(product?: Record<string, any> | null): number {
   return Number(product.stock_quantity || 0)
 }
 
-export default function StockAdjustModal({ initialType = 'add', initialProduct = null, resumeRow = null, resumeAttemptId = null, onClose, onDone, t }: StockAdjustModalProps) {
+export default function StockAdjustModal({ initialType = 'add', initialProduct = null, resumeRow = null, resumeAttemptId = null, onClose, onDone, onMinimize, restoreDraftKey = null, t }: StockAdjustModalProps) {
   const { fmtUSD, fmtKHR, usdSymbol, user, notify } = useApp() as AppContextSlice
 
   const isKhmer = /[ក-៿]/.test(t('cancel') || '')
@@ -184,9 +188,13 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
   }, [t, isKhmer])
 
   // --- product picker (step 1) ---
-  const initialPickedProduct = initialProduct?.id != null ? initialProduct as PickedProduct : null
+  const restoredDraftRef = useRef<StockAdjustDraft | null>(readStockAdjustDraft(restoreDraftKey))
+  const restoredDraft = restoredDraftRef.current
+  const openingProduct = (restoredDraft?.product || initialProduct) as PickedProduct | null
+  const openingType = restoredDraft?.initialType || initialType
+  const initialPickedProduct = openingProduct?.id != null ? openingProduct : null
   const [selectedProduct, setSelectedProduct] = useState<PickedProduct | null>(initialPickedProduct)
-  const [search, setSearch] = useState('')
+  const [search, setSearch] = useState(restoredDraft?.search || '')
   const debouncedSearch = useDebouncedValue(search, 200)
   const [results, setResults] = useState<PickedProduct[]>([])
   const [searching, setSearching] = useState(false)
@@ -306,8 +314,8 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
   }, [inventoryReasons, saveReasonCatalog, tr])
 
   // --- adjust form (step 2) ---
-  const [adjustForm, setAdjustForm] = useState<AdjustForm>(() => ({
-    type: initialType,
+  const [adjustForm, setAdjustForm] = useState<AdjustForm>(() => restoredDraft ? restoredDraft.form as unknown as AdjustForm : ({
+    type: openingType,
     quantity: 1,
     reason: '',
     branch_id: '',
@@ -338,6 +346,7 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
   // as the movement's reference_id, which is the key stockInSessionsQuery
   // groups on in preference to the created_at/user/branch/supplier fallback.
   const receiptSessionIdRef = useRef(Date.now())
+  if (restoredDraft) receiptSessionIdRef.current = restoredDraft.receiptSessionId
   const [adjustSaving, setAdjustSaving] = useState(false)
   const submitRef = useRef(false)
   // Part 563: the built, validated adjustment request awaiting the operator's
@@ -352,21 +361,29 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
   // same reducer the bulk surface uses so the rule is one rule. A row that
   // reached 'done' is never resubmitted; a failed row keeps its request
   // verbatim and carries the server's reason for inline display.
-  const [rows, setRows] = useState<StockAdjustRow<Parameters<typeof adjustStock>[0]>[]>([])
-  const attemptIdRef = useRef<string>(resumeAttemptId || `attempt-${Date.now().toString(36)}`)
+  const [rows, setRows] = useState<StockAdjustRow<Parameters<typeof adjustStock>[0]>[]>(() => restoredDraft?.rows as StockAdjustRow<Parameters<typeof adjustStock>[0]>[] || [])
+  const attemptIdRef = useRef<string>(restoredDraft?.attemptId || resumeAttemptId || `attempt-${Date.now().toString(36)}`)
   const resumeRef = useRef(resumeRow)
   const storage = useMemo(() => browserStockStorage(), [])
   const userKey = user?.id ?? user?.username ?? null
   const failedRow = rows.find((row) => row.status === 'failed') || null
   const submitState = submitButtonState(rows)
+  const currentDraftKey = restoreDraftKey || stockAdjustDraftKey(selectedProduct?.id || openingProduct?.id)
 
   // Initialize adjustForm exactly like Inventory.openAdjust once a product
   // is picked (pricingLocked true, prices from the product, branch = default).
   const selectProduct = useCallback((product: PickedProduct, picked?: { branchId?: string | null; batchId?: number | null }) => {
+    const restore = restoredDraftRef.current
+    if (restore && String(restore.product.id) === String(product.id)) {
+      restoredDraftRef.current = null
+      setSelectedProduct(product)
+      setAdjustForm({ ...(restore.form as unknown as AdjustForm), product_id: product.id })
+      return
+    }
     setSelectedProduct(product)
     setAdjustForm({
       product_id: product.id,
-      type: initialType,
+      type: openingType,
       quantity: 1,
       reason: '',
       // The branch the option sheet resolved wins over the default branch:
@@ -413,14 +430,14 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
         received_date: resume.receivedDate || prev.received_date,
       }))
     }
-  }, [defaultBranch, initialType])
+  }, [defaultBranch, openingType])
 
   // When opened from a product detail card, skip the product-picker step and
   // refresh that exact row with branch_stock/images/batches before adjustment.
   // This makes the floating Adjust Stock action authoritative even if the
   // detail card itself came from a lighter paged product row.
   useEffect(() => {
-    const initial = initialProduct
+    const initial = openingProduct
     const id = initial?.id
     if (!initial || id == null) return
     let cancelled = false
@@ -447,7 +464,7 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
       })
       .catch(() => { if (!cancelled) selectProduct(initial as PickedProduct) })
     return () => { cancelled = true }
-  }, [initialProduct?.id, selectProduct])
+  }, [openingProduct?.id, selectProduct])
 
   // onAdjust: replicates Inventory.handleAdjust's validation + payload build
   // EXACTLY, minus the undo/redo action-history pinning (omitted here).
@@ -635,6 +652,7 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
         emitFailedAttemptsChanged()
         notify(tr('stock_updated', 'Stock updated'))
         setPendingAdjust(null)
+        clearWorkDraft(currentDraftKey)
         onDone()
         onClose()
         return
@@ -654,7 +672,7 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
       finishSingleAction(submitRef)
       setAdjustSaving(false)
     }
-  }, [pendingAdjust, rows, adjustSaving, notify, tr, onDone, onClose, storage, userKey, persistFailedAttempt])
+  }, [pendingAdjust, rows, adjustSaving, notify, tr, currentDraftKey, onDone, onClose, storage, userKey, persistFailedAttempt])
 
   // S4-21: closing with an unresolved failure still asks first, but the
   // ASKING is no longer this file's job. InventoryStockModals (the shared
@@ -666,12 +684,32 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
   // (adjustDiscardItems) still appear in the prompt, and Discard still runs
   // this cleanup rather than a generic close.
   const discardFailedAndClose = useCallback(() => {
+    clearWorkDraft(currentDraftKey)
     if (hasUnsavedFailures(rows)) {
       dropFailedStockAttempt(storage, userKey, attemptIdRef.current)
       emitFailedAttemptsChanged()
     }
     onClose()
-  }, [rows, storage, userKey, onClose])
+  }, [currentDraftKey, rows, storage, userKey, onClose])
+
+  const preserveAndMinimize = useCallback(() => {
+    if (!onMinimize || adjustSaving || !selectedProduct) return
+    writeWorkDraft<StockAdjustDraft>(currentDraftKey, {
+      version: 1,
+      product: { ...selectedProduct },
+      form: { ...adjustForm },
+      initialType: adjustForm.type === 'remove' || adjustForm.type === 'set' ? adjustForm.type : 'add',
+      search,
+      receiptSessionId: receiptSessionIdRef.current,
+      attemptId: attemptIdRef.current,
+      rows,
+    })
+    onMinimize(`${tr('adjust_stock', 'Adjust stock')} — ${String(selectedProduct.name || `#${selectedProduct.id}`)}`, {
+      draftKey: currentDraftKey,
+      productId: selectedProduct.id,
+    })
+    onClose()
+  }, [adjustForm, adjustSaving, currentDraftKey, onClose, onMinimize, rows, search, selectedProduct, tr])
 
   // Step 1: product picker.
   if (!selectedProduct) {
@@ -816,6 +854,8 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
         adjustSaving={adjustSaving}
         onAdjust={onAdjust}
         onCloseAdjust={discardFailedAndClose}
+        onMinimizeAdjust={onMinimize ? preserveAndMinimize : undefined}
+        adjustRestoredDirty={Boolean(restoredDraft)}
         adjustDiscardItems={buildAdjustReviewItems()}
         adjustNotice={failureNotice}
         adjustSubmitLabel={submitState.mode === 'retry'
