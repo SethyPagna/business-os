@@ -1,4 +1,11 @@
 
+## Latest verified deployment — September 8, 04:57 UTC
+
+**LIVE: 4e576eaad290d158f4a388ef1652729bb103e720**, Worker c7b6a310-efb9-4106-b8cc-f0a56edf03ae, deployment4adb0e4d-6423-4abb-9d1f-a78f66115362, independently confirmed100% at2026-09-08T04:57:24.418726Z. F53 permission-refresh coalescing/session generation, F54 shared HTTP cache ownership/server precedence, and U05 positive profit headline colors are deployed. Frontend320/320, both types, i18n5384/566sources,1103-module build and300-asset dry-run passed. Backend source/migrations exactly match previous livec2eb; no migration. Nine individual commits preserve author/date/messages; source cutoff599f2b70 differs only by the eight approved private evidence exclusions.
+
+Still active: F46 backend budget verification and combined browser/gates/migration0136 release; U13–U15 mobile Sales independent review; F55 offline quarantine/fencing plan review; F56 expense optimistic-write guard; F57 promotion image-reference protection with frontend usage display; F58 isolated loading-boundary candidate integration. Production duplicate merge remains eight completed cases and browser access pending. Legacy evidence cleanup, hardware camera validation, financial census, warning attribution, remaining UI/minimize, legal/business/image-rights facts and token rotation remain open as detailed below. Earlier deployment/current paragraphs are historical; this entry supersedes them.
+
+
 ## Current continuation — September 8, 04:46 UTC
 
 Live remains c2eb9d57 / Worker3931ea55 at100%. The next small release from source599f2b70 includes F53 permission refresh, F54 HTTP cache ownership and U05 positive profit styling. Final frontend320/320, types, i18n, build and local dry-run passed; release provenance/parity is being finalized before deployment. Backend source and migrations are unchanged from live.
@@ -123,7 +130,7 @@ Every shipped row must eventually record its actual deployment version.
 | U02 | Add icons to subpage navigation. | Deferred UI |
 | U03 | Reports centered with safe edge gutters, larger readable text, consistent larger filter button. | Core gutters, centered report document, readable type and mobile filter sizing deployed c2eb9d57/source-verified; final visual polish remains |
 | U04 | Compact Shift button with stats/actions; move export beside section title or near small-screen page title without crowding notifications. | Core compact Shift/Export and dedicated shift-report actions deployed c2eb9d57/source-verified; remaining mobile arrangement review |
-| U05 | Merge Not paid heading/value into one highlighted row; green total/final profit. | Not Paid row deployed; selected profit headline green correction integrated b2299a2b, next release pending |
+| U05 | One highlighted Not Paid row; positive total/final profit green. | Deployed4e576eaa | Selected headline contrast corrected; no accounting changes. |
 | U06 | Receipt Item/Qty/Price/Total headings English by default, including mixed English/Khmer setting. | Deployed/source and render-test verified: literal Item/Qty/Price/Total in en/km/both |
 | U07 | Add minus next to Close for edit/add/set/stock/session actions; Back/discard/minimize must cooperate with scoped drafts. | Partial deployed: Product, Fast Stock-In, Receive Batch, Create Products Session, Branch edit and Fee drafts minimize/restore; stock adjust/set/remove and broader rollout remain |
 | U08 | Compact Start/End dates; default entire days 00:00–23:59 without extra selector; align with stats/actions across Dashboard/Sales/Expenses/Returns/Branches. | Deferred UI |
@@ -216,7 +223,7 @@ F46 runtime implementation is now ACTIVE (supersedes earlier not-started notes):
 
 Production product merge remains eight cases and browser access pending. Functional fixes still precede deferred UI. Original dirty workspace and historical evidence remain preserved.
 
-| F53 | Permission update debounce loses own-user refresh after unrelated event; payloadless role refresh misses bootstrap. | Integrated b2299a2b; independent PASS, next release pending | Accumulated intent and session-generation guard pass ordinary and logout/relogin races; backend authority unchanged. |
+| F53 | Permission refresh intent and session isolation. | Deployed4e576eaa | Independent event/debounce/logout race checks passed; backend authority unchanged. |
 
 ## Branch/contact checkpoint deployed
 
@@ -224,7 +231,7 @@ Exact public c2eb9d57 is live100%, source9654562d, Worker3931ea55-3f66-459e-823d
 
 Remaining: F46 combined conflict review/execution and truthful saved run/undo status (backup/reset schema slice independently approved, runtime/UI still active); F53 permission-refresh coalescing; eight-case production merge continuation; legacy contact/membership evidence cleanup; ambiguous historical driver/sale links; real phone-camera verification; unresolved browser-warning attribution; U01–U15 remaining layouts/minimize/visual confirmation; business registration/market/contact and image-rights facts; Telegram token rotation.
 
-| F54 | Invalidated in-flight reads and late local fallback must not restore stale shared HTTP cache. | Integrated b2299a2b; independent bounded PASS, next release pending | 69 focused tests and512 timing schedules; callback-side persistent mirrors and already-started callers remain outside scope. |
+| F54 | Shared HTTP cache invalidation and server precedence. | Deployed4e576eaa | 69 focused tests and512 timing schedules; callback-side persistent mirror effects remain outside scope. |
 
 ## Freshness follow-up candidate — September 8
 
