@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useFormDirty } from '../../utils/formDirty.ts'
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import Search from 'lucide-react/dist/esm/icons/search.js'
@@ -7,11 +7,31 @@ import Merge from 'lucide-react/dist/esm/icons/merge.js'
 import InfoHint from '../shared/InfoHint.tsx'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import { ProductImg } from './shared/primitives.tsx'
-import { getPossiblySameProducts, dismissProductDuplicateCluster, updateProduct } from '../../api/productWriteTransport.ts'
+import {
+  getPossiblySameProducts,
+  dismissProductDuplicateCluster,
+  makeSelectedConflictMergeApplyBody,
+  previewSelectedConflictMerges,
+  runSelectedConflictMergeBatch,
+  updateProduct,
+  type SelectedConflictMergeApplyResult,
+  type SelectedConflictMergePreviewResult,
+} from '../../api/productWriteTransport.ts'
+import { createClientRequestId } from '../../api/requestIds.ts'
 import { normalizeProductGroupName } from '../../utils/productGrouping.ts'
-import { identityBarcodeKey, normalizeLeadingZeroBarcodeForCleanup, resolveMergedCostDetail } from '../../utils/productDetailRule.ts'
 import { useMergeStockChoice } from './useMergeStockChoice.tsx'
 import Modal from '../shared/Modal'
+import SelectedConflictMergeReviewModal from './SelectedConflictMergeReviewModal.tsx'
+import {
+  createSelectedConflictRequestCoordinator,
+  partitionSelectedConflictClusters,
+  preserveSelectedConflictChoices,
+  selectedConflictOutcomeIsUnknown,
+  type ProductConflictCluster,
+  type ProductConflictProduct,
+  type SelectedConflictLocalSkip,
+  type SelectedConflictStockChoice,
+} from '../../utils/selectedConflictMerge.ts'
 
 // Products → Duplicates: the human-review residue the identity rule can't
 // settle on its own. Mirrors the contacts Possible Duplicates panel
@@ -25,30 +45,9 @@ import Modal from '../shared/Modal'
 type TranslateFn = (key: string) => string | undefined
 type NotifyFn = (message: string, tone?: string) => void
 
-type Severity = 'leading_zero' | 'same_barcode' | 'same_name' | 'similar_name'
-
-type ClusterProduct = {
-  id: number
-  name: string | null
-  barcode: string | null
-  cost_price_usd: number | null
-  cost_price_khr?: number | null
-  selling_price_usd: number | null
-  stock_quantity: number | null
-  image_path: string | null
-  // WHERE this row's stock sits, not just how much. A pair whose set costs
-  // genuinely differ is review-only (never auto-merged), and the reviewer
-  // deciding it by hand needs both costs -- shown above -- and both rows'
-  // per-branch lines. Absent on an older Worker; an unstocked row sends [].
-  branch_stock?: Array<{ branch_id: number; branch_name: string | null; quantity: number }>
-}
-
-type Cluster = {
-  type: 'leadingzero' | 'barcode' | 'name' | 'similar'
-  value: string
-  severity: Severity
-  products: ClusterProduct[]
-}
+type Severity = ProductConflictCluster['severity']
+type ClusterProduct = ProductConflictProduct
+type Cluster = ProductConflictCluster
 
 const SEVERITY_STYLE: Record<Severity, string> = {
   leading_zero: 'border-emerald-200 bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30',
@@ -87,60 +86,6 @@ function clusterIsExact(cluster: Cluster): boolean {
   return names.size === 1 && !names.has('')
 }
 
-// The leading-zero fold used to be hand-copied into this file. It now comes
-// from utils/productDetailRule.ts -- the module the Worker carries verbatim,
-// byte-compared by tests/productDetailRuleParity.test.ts -- so the client and
-// the server can no longer answer "is this one product?" differently.
-const cleanupBarcode = (value: string | null): string => normalizeLeadingZeroBarcodeForCleanup(value)
-
-// Only these pairs are safe for an automatic bulk decision: same exact name,
-// and either the exact barcode or the same code written with extra leading
-// zeros. Similar names and a shared barcode under different names stay manual.
-//
-// COST NO LONGER BLOCKS THE AUTOMATIC PATH. This gate used to refuse any pair
-// whose costs DISAGREED ("real money out, never averaged away by a bulk run"),
-// which was the pre-Sep-4 policy: back then a differing cost forked a child
-// row. Sep 4 reversed it -- "all products if cost is different add different
-// costs together and divide by the number different costs" -- and the Worker
-// has averaged ever since (resolveMergedCostDetail), so this gate was refusing
-// exactly the case the owner asked for (N15) while POST /merge-duplicates
-// merged the identical pair. Frontend validation with no backend mirror,
-// inverted.
-//
-// What DOES still refuse is a cost pair too far apart to be one cost: above
-// COST_OUTLIER_RATIO the server refuses the merge outright (cost_outlier_review)
-// rather than inventing a mean nobody paid, so the bulk run must not offer it.
-function clusterIsSafeAutoMerge(cluster: Cluster): boolean {
-  if (cluster.products.length !== 2) return false
-  const [a, b] = cluster.products
-  if (!normalizeProductGroupName(a.name) || normalizeProductGroupName(a.name) !== normalizeProductGroupName(b.name)) return false
-  if (resolveMergedCostDetail([a, b]).outliers.length) return false
-  return identityBarcodeKey(a.barcode) === identityBarcodeKey(b.barcode)
-}
-
-function chooseAutomaticKeeper(products: ClusterProduct[]): [ClusterProduct, ClusterProduct] {
-  const rawBarcodes = new Set(products.map((product) => String(product.barcode || '').trim().toLowerCase()))
-  const isLeadingZeroPair = rawBarcodes.size > 1
-  // MIRROR of the survivor ordering in findDuplicateProductGroups. Rank on the
-  // NUMBER of leading zeros a row would shed, not on a was-it-normalized
-  // boolean: '008339327539' and '08339327539' are both "normalized", so the
-  // boolean tied them and the dirtier row won the id tie-break.
-  const zerosShed = (product: ClusterProduct) => {
-    const raw = String(product.barcode || '').trim().toLowerCase()
-    return raw.length - cleanupBarcode(raw).length
-  }
-  const ordered = [...products].sort((a, b) => {
-    if (isLeadingZeroPair) {
-      const zeroDiff = zerosShed(a) - zerosShed(b)
-      if (zeroDiff) return zeroDiff
-    }
-    const stockDiff = (Number(b.stock_quantity) || 0) - (Number(a.stock_quantity) || 0)
-    if (stockDiff) return stockDiff
-    return a.id - b.id
-  })
-  return [ordered[0], ordered[1]]
-}
-
 function replaceVars(template: string, values: Record<string, unknown>): string {
   return template.replace(/\{(\w+)\}/g, (_match, key) => String(values?.[key] ?? ''))
 }
@@ -148,6 +93,16 @@ function replaceVars(template: string, values: Record<string, unknown>): string 
 function money(value: number | null | undefined): string {
   const n = Number(value) || 0
   return `$${n % 1 === 0 ? n : n.toFixed(2)}`
+}
+
+function selectedConflictErrorMessage(t: TranslateFn, error: unknown, fallbackKey: string, fallback: string): string {
+  const code = String((error as { code?: unknown } | null)?.code || '').trim().toLowerCase()
+  if (code) {
+    const translated = t(`selected_conflict_${code}`)
+    if (translated && translated !== `selected_conflict_${code}`) return translated
+  }
+  if (error instanceof Error && error.message) return error.message
+  return t(fallbackKey) || fallback
 }
 
 function ClusterCard({
@@ -336,9 +291,15 @@ export default function ProductDuplicatesTab({ t, notify }: {
   // cluster are meaningless).
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set())
   const [bulkBusy, setBulkBusy] = useState(false)
-  // "Merging 3/8…" -- bulk runs are sequential server calls, so tell the
-  // reviewer where it is instead of freezing on a bare disabled button.
   const [bulkProgress, setBulkProgress] = useState('')
+  const [batchPreview, setBatchPreview] = useState<SelectedConflictMergePreviewResult | null>(null)
+  const [batchLocalSkipped, setBatchLocalSkipped] = useState<SelectedConflictLocalSkip[]>([])
+  const [batchChoices, setBatchChoices] = useState<Record<string, SelectedConflictStockChoice>>({})
+  const [batchResult, setBatchResult] = useState<SelectedConflictMergeApplyResult | null>(null)
+  const [batchUnknownOutcome, setBatchUnknownOutcome] = useState(false)
+  const [batchNeedsRefresh, setBatchNeedsRefresh] = useState(false)
+  const batchRequestRef = useRef(createSelectedConflictRequestCoordinator())
+  const batchWriteInFlightRef = useRef(false)
 
   const load = async () => {
     setLoading(true)
@@ -359,6 +320,8 @@ export default function ProductDuplicatesTab({ t, notify }: {
     // only changes when someone edits/merges a product.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => () => batchRequestRef.current.cancel(), [])
 
   const removeCluster = (id: string) => {
     setClusters((current) => current.filter((cluster) => clusterKey(cluster) !== id))
@@ -500,52 +463,135 @@ export default function ProductDuplicatesTab({ t, notify }: {
     }
   }
 
-  // Bulk Merge is intentionally narrow. Similar-name groups and shared-
-  // barcode/different-name groups require a human decision. Only exact
-  // same-name + same-cost barcode pairs (including one extra leading zero)
-  // are automatic; the row with live stock wins, then the clean barcode.
-  const bulkMerge = async () => {
+  const openSelectedMergeReview = async () => {
     const targets = clusters.filter((cluster) => selectedKeys.has(clusterKey(cluster)))
     if (!targets.length || bulkBusy) return
-    const mergeable = targets.filter(clusterIsSafeAutoMerge)
-    const skipped = targets.length - mergeable.length
-    setBulkBusy(true)
-    let failed = 0
-    // A refusal is a DECISION, not a failure -- a cost pair too far apart to be
-    // one cost, or a stock-in session that can still be undone. A bare count
-    // tells the operator a number and hides the one sentence that says what to
-    // do about it, so the first message is carried out of the loop.
-    let firstRefusal = ''
-    let cancelled = 0
-    let done = 0
-    for (const cluster of mergeable) {
-      setBulkProgress(replaceVars(t('bulk_merging_progress') || 'Merging {done}/{total}…', { done: done + 1, total: mergeable.length }))
-      const [keeper, other] = chooseAutomaticKeeper(cluster.products)
-      try {
-        // Same question as the per-card Apply: a bulk run may not decide for
-        // the operator what happens to a stocked row's lots just because it is
-        // faster. The dialog opens mid-run and the progress label waits for it.
-        const outcome = await mergeWithChoice(keeper, other)
-        if (outcome === 'cancelled') { cancelled += 1; done += 1; continue }
-        removeCluster(clusterKey(cluster))
-      } catch (e: unknown) {
-        failed += 1
-        if (!firstRefusal && e instanceof Error && e.message) firstRefusal = e.message
-      }
-      done += 1
+    const partition = partitionSelectedConflictClusters(targets)
+    if (!partition.cases.length) {
+      const reasons = [...new Set(partition.skipped.map((item) => t(`selected_conflict_${item.code}`) || item.code))]
+      notify([t('selected_conflict_none_eligible') || 'None of the selected groups is an eligible two-product merge.', ...reasons].join(' '), 'info')
+      return
     }
+    const request = batchRequestRef.current.begin()
+    setBulkBusy(true)
+    setBulkProgress(t('selected_conflict_loading_preview') || 'Loading combined review…')
+    setBatchResult(null)
+    setBatchUnknownOutcome(false)
+    setBatchNeedsRefresh(false)
+    try {
+      const preview = await previewSelectedConflictMerges(partition.cases, { signal: request.signal })
+      if (!request.isCurrent()) return
+      setBatchPreview(preview)
+      setBatchLocalSkipped(partition.skipped)
+      setBatchChoices({})
+    } catch (error: unknown) {
+      if (request.isCurrent()) notify(selectedConflictErrorMessage(t, error, 'selected_conflict_preview_failed', 'Could not load the combined merge review'), 'error')
+    } finally {
+      if (request.finish()) {
+        setBulkBusy(false)
+        setBulkProgress('')
+      }
+    }
+  }
+
+  const refreshSelectedMergeReview = async () => {
+    if (!batchPreview || bulkBusy) return
+    const targets = clusters.filter((cluster) => selectedKeys.has(clusterKey(cluster)))
+    const partition = partitionSelectedConflictClusters(targets)
+    if (!partition.cases.length) {
+      const reasons = [...new Set(partition.skipped.map((item) => t(`selected_conflict_${item.code}`) || item.code))]
+      notify([t('selected_conflict_none_eligible') || 'None of the selected groups is an eligible two-product merge.', ...reasons].join(' '), 'info')
+      closeSelectedMergeReview()
+      return
+    }
+    const previous = batchPreview
+    const request = batchRequestRef.current.begin()
+    setBulkBusy(true)
+    setBulkProgress(t('selected_conflict_loading_preview') || 'Loading combined review…')
+    try {
+      const preview = await previewSelectedConflictMerges(partition.cases, { signal: request.signal })
+      if (!request.isCurrent()) return
+      setBatchChoices((current) => preserveSelectedConflictChoices(previous.cases, preview.cases, current))
+      setBatchPreview(preview)
+      setBatchLocalSkipped(partition.skipped)
+      setBatchResult(null)
+      setBatchUnknownOutcome(false)
+      setBatchNeedsRefresh(false)
+    } catch (error: unknown) {
+      if (request.isCurrent()) notify(selectedConflictErrorMessage(t, error, 'selected_conflict_preview_failed', 'Could not load the combined merge review'), 'error')
+    } finally {
+      if (request.finish()) {
+        setBulkBusy(false)
+        setBulkProgress('')
+      }
+    }
+  }
+
+  const closeSelectedMergeReview = () => {
+    const writeWillReconcileWhenSettled = batchWriteInFlightRef.current
+    batchRequestRef.current.cancel()
+    setBatchPreview(null)
+    setBatchLocalSkipped([])
+    setBatchChoices({})
+    setBatchResult(null)
+    setBatchUnknownOutcome(false)
+    setBatchNeedsRefresh(false)
     setBulkBusy(false)
     setBulkProgress('')
-    setSelectedKeys(new Set())
-    if (failed || skipped || cancelled) {
-      const parts = []
-      if (failed) parts.push(replaceVars(t('bulk_merge_partial_failure') || '{count} could not be merged', { count: failed }))
-      if (firstRefusal) parts.push(firstRefusal)
-      if (skipped) parts.push(replaceVars(t('bulk_merge_skipped_multiway') || '{count} group(s) need manual review and were skipped', { count: skipped }))
-      if (cancelled) parts.push(replaceVars(t('bulk_merge_cancelled_count') || '{count} left untouched — you cancelled the stock decision', { count: cancelled }))
-      notify(parts.join('. '), failed ? 'error' : 'info')
-    } else {
-      notify(t('bulk_merge_success') || 'Merged the selected duplicates')
+    if (!writeWillReconcileWhenSettled) void load()
+  }
+
+  const applySelectedMergeReview = async () => {
+    if (!batchPreview || bulkBusy || batchResult || batchUnknownOutcome || batchNeedsRefresh) return
+    const request = batchRequestRef.current.begin()
+    const body = makeSelectedConflictMergeApplyBody(batchPreview, batchChoices, createClientRequestId('product-conflict-merge'))
+    batchWriteInFlightRef.current = true
+    setBulkBusy(true)
+    setBulkProgress(t('selected_conflict_merging_progress') || 'Merging reviewed pairs…')
+    try {
+      const result = await runSelectedConflictMergeBatch(body, {
+        signal: request.signal,
+        onProgress: (progress) => {
+          if (!request.isCurrent()) return
+          const committed = progress.committedCases.length
+          const remaining = progress.remainingCaseCount == null ? (t('unknown') || 'Unknown') : progress.remainingCaseCount
+          setBulkProgress(replaceVars(t('selected_conflict_progress_counts') || '{committed} committed · {remaining} remaining', { committed, remaining }))
+        },
+      })
+      if (!request.isCurrent()) return
+      setBatchResult(result)
+      setSelectedKeys((current) => {
+        const next = new Set(current)
+        for (const item of result.committedCases) next.delete(item.caseKey)
+        return next
+      })
+      if (result.complete && !result.refusals.length) notify(t('bulk_merge_success') || 'Merged the selected duplicates')
+    } catch (error: unknown) {
+      if (!request.isCurrent()) return
+      const unknown = selectedConflictOutcomeIsUnknown(error)
+      setBatchUnknownOutcome(unknown)
+      if (!unknown) {
+        setBatchNeedsRefresh(true)
+      }
+      notify(selectedConflictErrorMessage(
+        t,
+        unknown && !(error as { code?: unknown } | null)?.code ? null : error,
+        unknown ? 'selected_conflict_apply_failed' : 'selected_conflict_preview_stale',
+        unknown
+          ? 'The selected merge outcome is unknown. Product data will be refreshed.'
+          : 'The review changed. Product data was refreshed; refresh the review before confirming.',
+      ), 'error')
+    } finally {
+      batchWriteInFlightRef.current = false
+      if (request.finish()) {
+        setBulkBusy(false)
+        setBulkProgress('')
+      }
+      // runSelectedConflictMergeBatch invalidates product/inventory caches in
+      // its own finally before it settles. Reload here even after Cancel made
+      // this request stale, so a possibly committed write can never be
+      // reconciled from the pre-request cache.
+      void load()
     }
   }
 
@@ -656,9 +702,9 @@ export default function ProductDuplicatesTab({ t, notify }: {
               </span>
               <button
                 type="button"
-                onClick={() => void bulkMerge()}
+                onClick={() => void openSelectedMergeReview()}
                 disabled={bulkBusy}
-                title={t('bulk_merge_products_hint') || 'Only exact same-name and same-cost pairs are automatic. Similar names and same-barcode/different-name groups stay manual.'}
+                title={t('bulk_merge_products_hint') || 'Review exact two-product matches together. Ineligible groups stay selected for individual review.'}
                 className="btn-secondary px-2.5 py-1 text-xs disabled:opacity-50"
               >
                 <Merge className="mr-1 inline h-3.5 w-3.5" />
@@ -735,6 +781,22 @@ export default function ProductDuplicatesTab({ t, notify }: {
           review grid; the Apply and bulk flows AWAIT it (the shared
           ConfirmDialog, never window.confirm). */}
       {mergeStockChoiceDialog}
+      {batchPreview ? (
+        <SelectedConflictMergeReviewModal
+          preview={batchPreview}
+          localSkipped={batchLocalSkipped}
+          choices={batchChoices}
+          working={bulkBusy}
+          result={batchResult}
+          unknownOutcome={batchUnknownOutcome}
+          needsRefresh={batchNeedsRefresh}
+          onChoice={(caseKey, choice) => setBatchChoices((current) => ({ ...current, [caseKey]: choice }))}
+          onConfirm={() => void applySelectedMergeReview()}
+          onRefresh={() => void refreshSelectedMergeReview()}
+          onClose={closeSelectedMergeReview}
+          t={t}
+        />
+      ) : null}
     </div>
   )
 }
