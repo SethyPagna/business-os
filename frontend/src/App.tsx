@@ -1321,6 +1321,24 @@ function useMobileHeaderAutoHide(page: string): boolean {
 }
 
 function GlobalScrollControls({ mobileBottomNavVisible }: { mobileBottomNavVisible: boolean }) {
+  const [visible, setVisible] = useState(false)
+  useEffect(() => {
+    const update = () => {
+      const target = getScrollTarget(window) as { scrollTop?: number; scrollY?: number }
+      setVisible(Number(target.scrollTop ?? target.scrollY ?? 0) > 220)
+    }
+    update()
+    window.addEventListener('scroll', update, true)
+    window.addEventListener('resize', update)
+    // Admin pages can stay mounted while their visibility changes on navigation.
+    const observer = new MutationObserver(update)
+    observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'hidden', 'style'] })
+    return () => {
+      window.removeEventListener('scroll', update, true)
+      window.removeEventListener('resize', update)
+      observer.disconnect()
+    }
+  }, [])
   const scrollTo = (direction: ScrollDirection) => {
     const target = getScrollTarget(window)
     const top = getScrollToPosition(target, direction)
@@ -1334,11 +1352,13 @@ function GlobalScrollControls({ mobileBottomNavVisible }: { mobileBottomNavVisib
     }
   }
 
+  if (!visible) return null
+
   return (
     <div className={`pointer-events-none fixed right-[calc(0.625rem+env(safe-area-inset-right))] z-[1000] flex flex-col gap-1.5 ${mobileBottomNavVisible ? 'bottom-[calc(5rem+env(safe-area-inset-bottom))]' : 'bottom-[calc(0.75rem+env(safe-area-inset-bottom))]'} md:bottom-[calc(1rem+env(safe-area-inset-bottom))] md:right-[calc(1rem+env(safe-area-inset-right))]`}>
       <button
         type="button"
-        className="pointer-events-auto flex h-8 w-8 items-center justify-center rounded-full border border-transparent bg-transparent text-gray-500 shadow-none backdrop-blur-none transition hover:bg-white/70 hover:text-blue-700 dark:text-gray-300 dark:hover:bg-gray-900/55 dark:hover:text-blue-300"
+        className="pointer-events-auto flex h-8 w-8 items-center justify-center rounded-lg border border-neutral-300/40 bg-white/40 text-neutral-800 shadow-none backdrop-blur-sm transition hover:bg-white/70 hover:text-blue-700 dark:border-neutral-600/40 dark:bg-neutral-950/40 dark:text-white dark:hover:bg-gray-900/55 dark:hover:text-blue-300"
         onClick={() => scrollTo('top')}
         aria-label="Scroll to top"
         title="Scroll to top"
@@ -1347,7 +1367,7 @@ function GlobalScrollControls({ mobileBottomNavVisible }: { mobileBottomNavVisib
       </button>
       <button
         type="button"
-        className="pointer-events-auto flex h-8 w-8 items-center justify-center rounded-full border border-transparent bg-transparent text-gray-500 shadow-none backdrop-blur-none transition hover:bg-white/70 hover:text-blue-700 dark:text-gray-300 dark:hover:bg-gray-900/55 dark:hover:text-blue-300"
+        className="pointer-events-auto flex h-8 w-8 items-center justify-center rounded-lg border border-neutral-300/40 bg-white/40 text-neutral-800 shadow-none backdrop-blur-sm transition hover:bg-white/70 hover:text-blue-700 dark:border-neutral-600/40 dark:bg-neutral-950/40 dark:text-white dark:hover:bg-gray-900/55 dark:hover:text-blue-300"
         onClick={() => scrollTo('bottom')}
         aria-label="Scroll to bottom"
         title="Scroll to bottom"
