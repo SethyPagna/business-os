@@ -560,6 +560,32 @@ async function buildPortalMeta(env: Env, showOutOfStockProducts: boolean) {
   }
 }
 
+// Resolve galleries by exact product id, including every row in a paged
+// family. Chunking bounds D1 parameters without mixing sibling galleries;
+// the stored sort order and admin image cap match the product read paths.
+async function attachPortalImageGallery(env: Env, products: Array<Record<string, unknown>>) {
+  const ids = Array.from(new Set(products.map((product) => Number(product.id))
+    .filter((id) => Number.isSafeInteger(id) && id > 0)))
+  if (!ids.length) return products
+  const db = getDb(env)
+  const imageRows = await selectInChunks(ids, 0, (chunk) => db.prepare(`
+    SELECT product_id, image_path FROM product_images
+    WHERE product_id IN (${chunk.map(() => '?').join(',')})
+    ORDER BY sort_order ASC, id ASC
+  `).all<{ product_id: number; image_path: string }>(chunk))
+  const imageMap = new Map<number, string[]>()
+  for (const row of imageRows) {
+    if (!imageMap.has(row.product_id)) imageMap.set(row.product_id, [])
+    imageMap.get(row.product_id)!.push(row.image_path)
+  }
+  return products.map((product) => {
+    const gallery = sanitizeMediaList(imageMap.get(Number(product.id)) || []).slice(0, ADMIN_MAX_IMAGES_PER_PRODUCT)
+    const fallbackImage = sanitizeMediaList([product.image_path])[0] || null
+    if (!gallery.length && fallbackImage) gallery.push(fallbackImage)
+    return { ...product, image_path: gallery[0] || null, image_gallery: gallery }
+  })
+}
+
 async function buildPortalCatalog(env: Env, showOutOfStockProducts: boolean) {
   const db = getDb(env)
   const visibleFilter = portalVisibleProductFilter(showOutOfStockProducts)
@@ -605,6 +631,7 @@ async function buildPortalCatalog(env: Env, showOutOfStockProducts: boolean) {
   const total = snapshot.total
   const portalRules = snapshotRules
   const itemsWithStockStatus = await attachPortalStockStatus(env, (items || []) as Array<Record<string, unknown>>)
+  const publicItems = await attachPortalImageGallery(env, itemsWithStockStatus)
   // Two things were wrong here, and both made the storefront's A-Z rail
   // disagree with what the page below it actually shows.
   //
@@ -636,7 +663,7 @@ async function buildPortalCatalog(env: Env, showOutOfStockProducts: boolean) {
     ORDER BY value ASC
   `).all<{ value: string; count: number }>()
   return {
-    items: itemsWithStockStatus,
+    items: publicItems,
     total,
     page,
     pageSize,
@@ -888,30 +915,7 @@ async function loadPortalAiCatalog(env: Env, showOutOfStockProducts: boolean) {
     ORDER BY COALESCE(created_at, updated_at) DESC, id DESC
     LIMIT 500
   `).all<Record<string, unknown>>()
-  const items = products || []
-  if (!items.length) return items
-
-  // Up to 500 rows come back from the query above -- five times D1's
-  // whole per-statement bound-parameter budget.
-  const ids = items.map((product) => Number(product.id))
-  const imageRows = await selectInChunks(ids, 0, (chunk) => db.prepare(`
-    SELECT product_id, image_path FROM product_images
-    WHERE product_id IN (${chunk.map(() => '?').join(',')})
-    ORDER BY sort_order ASC, id ASC
-  `).all<{ product_id: number; image_path: string }>(chunk))
-
-  const imageMap = new Map<number, string[]>()
-  for (const row of imageRows || []) {
-    if (!imageMap.has(row.product_id)) imageMap.set(row.product_id, [])
-    imageMap.get(row.product_id)?.push(row.image_path)
-  }
-
-  return items.map((product) => {
-    const gallery = sanitizeMediaList(imageMap.get(Number(product.id)) || []).slice(0, ADMIN_MAX_IMAGES_PER_PRODUCT)
-    const fallbackImage = sanitizeMediaList([product.image_path])[0] || null
-    if (!gallery.length && fallbackImage) gallery.push(fallbackImage)
-    return { ...product, image_path: gallery[0] || null, image_gallery: gallery }
-  })
+  return attachPortalImageGallery(env, products || [])
 }
 
 // POST /ai/chat -- builds a product-grounded prompt from the live catalog
@@ -2079,6 +2083,7 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
   // re-leak raw quantities/thresholds on every interaction after the first
   // page load.
   const itemsWithStockStatus = await attachPortalStockStatus(c.env, (items || []) as Array<Record<string, unknown>>)
+  const publicItems = await attachPortalImageGallery(c.env, itemsWithStockStatus)
 
   // Alphabet-bar counts scoped to the SAME filters as the main query above
   // (with `initial` itself forced to 'all', so the bar shows every letter
@@ -2103,7 +2108,7 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
   `).all<{ value: string; count: number }>(initialsParams)
 
   return {
-    items: itemsWithStockStatus,
+    items: publicItems,
     total,
     page,
     pageSize,
