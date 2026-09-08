@@ -2019,7 +2019,7 @@ assert.match(
 )
 assert.match(
   returns,
-  /const submitReturnHistoryRequest = useCallback\(async \(returnId:[\s\S]*withLoaderTimeout\(\s*\(\) => updateReturnRequest\(returnId, body\),\s*'Restore return snapshot',\s*RETURNS_HISTORY_RESTORE_TIMEOUT_MS,\s*\)[\s\S]*const restoreReturnSnapshot = useCallback[\s\S]*freezeDirectMutationBody\(await prepareReturnRequest\(snapshot\.id as number \| string,[\s\S]*savePendingHistoryRequest\(snapshot\.id as number \| string, body\)[\s\S]*await submitReturnHistoryRequest\(snapshot\.id as number \| string, body\)/,
+  /const submitReturnHistoryRequest = useCallback\(async \(returnId:[\s\S]*withLoaderTimeout\(\s*\(\) => updateReturnRequest\(returnId, body\),\s*'Restore return snapshot',\s*RETURNS_HISTORY_RESTORE_TIMEOUT_MS,\s*\)[\s\S]*const restoreReturnSnapshot = useCallback[\s\S]*const current = await fetchReturnDetail\(snapshot\.id\)[\s\S]*expected_updated_at: currentUpdatedAt,[\s\S]*savePendingHistoryRequest\(snapshot\.id as number \| string, body, historyContext\)[\s\S]*await submitReturnHistoryRequest\(snapshot\.id as number \| string, body\)/,
   'return history undo/redo restore should timeout slow return writes',
 )
 assert.doesNotMatch(

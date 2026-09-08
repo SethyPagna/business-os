@@ -182,9 +182,15 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
   const totalRefund    = activeItems.reduce((sum, it) => sum + toNumber(it.applied_price_usd) * it.returnQty, 0)
   const totalRefundKhr = activeItems.reduce((sum, it) => sum + toNumber(it.applied_price_khr) * it.returnQty, 0)
 
-  const clearPendingRequest = (): void => {
-    savePendingDirectMutation('return-edit', user?.id, ret.id, null)
-    setPendingRequest(null)
+  const clearPendingRequest = (): boolean => {
+    try {
+      savePendingDirectMutation('return-edit', user?.id, ret.id, null)
+      setPendingRequest(null)
+      return true
+    } catch (error) {
+      notify(getLoaderErrorMessage(error), 'error')
+      return false
+    }
   }
 
   const handleSubmit = async (): Promise<void> => {
@@ -226,7 +232,7 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
         'Update return',
         RETURN_UPDATE_TIMEOUT_MS,
       )
-      clearPendingRequest()
+      if (!clearPendingRequest()) return
       notify(T('success','Return updated successfully'))
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'returns' } }))
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
@@ -239,7 +245,7 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
         onSuccess?.()
         return
       }
-      if (!directMutationOutcomeIsUnknown(error)) clearPendingRequest()
+      if (!directMutationOutcomeIsUnknown(error) && (error as { code?: unknown } | null)?.code !== 'pending_request_persistence_failed') clearPendingRequest()
       notify((T('error','Error') || 'Error') + ': ' + getLoaderErrorMessage(error), 'error')
     } finally {
       finishSingleAction(submitInFlightRef)
@@ -287,8 +293,10 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
         </div>
 
         {pendingRequest ? (
-          <div role="status" className="mx-4 mt-4 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-100">
-            {T('sale_bulk_pending', 'A previous request has an unknown outcome. Retry the original request or discard it before starting another.')}
+          <div role="status" data-needs-reconciliation={pendingRequest.needsReconciliation || undefined} className="mx-4 mt-4 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-100">
+            {pendingRequest.needsReconciliation
+              ? T('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.')
+              : T('sale_bulk_pending', 'A previous request has an unknown outcome. Retry the original request or discard it before starting another.')}
           </div>
         ) : null}
         <fieldset disabled={submitting || !!pendingRequest} className="contents">
