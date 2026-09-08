@@ -1,7 +1,8 @@
-import { normalizeProductGroupName } from './productGrouping.ts'
 import {
   identityBarcodeKey,
   normalizeLeadingZeroBarcodeForCleanup,
+  normalizeProductFuzzyName,
+  normalizeProductGroupName,
   resolveMergedCostDetail,
 } from './productDetailRule.ts'
 
@@ -68,7 +69,15 @@ export type SelectedConflictPartition = {
 export type SelectedConflictStockChoice = 'merge' | 'write_off'
 
 export function selectedConflictCaseKey(cluster: Pick<ProductConflictCluster, 'type' | 'value'>): string {
-  return `${cluster.type}:${String(cluster.value || '').trim()}`
+  const raw = String(cluster.value || '').trim()
+  const normalized = cluster.type === 'leadingzero'
+    ? identityBarcodeKey(raw)
+    : cluster.type === 'similar'
+      ? normalizeProductFuzzyName(raw)
+      : cluster.type === 'name'
+        ? normalizeProductGroupName(raw)
+        : raw
+  return normalized ? `${cluster.type}:${normalized}` : ''
 }
 
 function rowIsActiveNonGroup(product: ProductConflictProduct): boolean {
@@ -87,7 +96,7 @@ function mergeNumericFieldsAreValid(product: ProductConflictProduct): boolean {
     product.wholesale_price_khr,
     product.stock_quantity,
   ]
-  return values.every((value) => value == null || Number.isFinite(Number(value)))
+  return values.every((value) => value == null || (Number.isFinite(Number(value)) && Number(value) >= 0))
 }
 
 export function selectedConflictEligibility(cluster: ProductConflictCluster): {
@@ -98,7 +107,7 @@ export function selectedConflictEligibility(cluster: ProductConflictCluster): {
   eligible: false
   code: Exclude<SelectedConflictLocalSkipCode, 'selection_limit_exceeded'>
 } {
-  const value = String(cluster.value || '').trim()
+  const value = selectedConflictCaseKey(cluster).slice(cluster.type.length + 1)
   const products = Array.isArray(cluster.products) ? cluster.products : []
   if (!value || products.length !== 2 || new Set(products.map((product) => Number(product.id))).size !== 2) {
     return { eligible: false, code: 'not_exact_pair' }
