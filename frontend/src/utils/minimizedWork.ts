@@ -153,9 +153,9 @@ export function subscribeMinimizedWork(listener: () => void): () => void {
 
 /**
  * Restore = hand the entry to whoever hosts it. Most flows remove their chip
- * immediately for backward compatibility. Fast stock-in keeps its chip until
- * the destination's lazy modal has actually committed, because its host is a
- * conditionally mounted Products hub section.
+ * immediately for backward compatibility. Fast stock-in and stock adjustment
+ * keep their chip until the destination's lazy modal has actually committed,
+ * because their hosts are conditionally mounted Products surfaces.
  * The caller (the chrome) navigates to entry.pageId FIRST, then dispatches;
  * hosts listen for RESTORE_WORK_EVENT and open their flow when the kind
  * is theirs. The flow's own draft brings the content back.
@@ -170,7 +170,7 @@ let pendingRestoreScope: string | null = null
 export function dispatchRestore(entry: MinimizedWorkEntry): void {
   const storeKey = ensureCurrentScope()
   const normalized = normalizeEntry(entry)
-  if (normalized.kind !== 'fast_stockin') removeMinimizedWork(normalized.key)
+  if (normalized.kind !== 'fast_stockin' && normalized.kind !== 'stock_adjust') removeMinimizedWork(normalized.key)
   pendingRestore = normalized
   pendingRestoreScope = storeKey
   window.dispatchEvent(new CustomEvent(RESTORE_WORK_EVENT, {
@@ -196,8 +196,8 @@ export function consumePendingRestore(kind: MinimizedWorkKind): MinimizedWorkEnt
   return entry
 }
 
-/** Read a pending restore without accepting it. Fast stock-in uses this while
- * navigation mounts Products -> Stock Changes and its lazy modal. */
+/** Read a pending restore without accepting it. Lazy Products flows use this
+ * while navigation mounts their destination and modal subtree. */
 export function peekPendingRestore(kind: MinimizedWorkKind): MinimizedWorkEntry | null {
   const storeKey = ensureCurrentScope()
   if (pendingRestoreScope !== storeKey) return null
@@ -212,7 +212,7 @@ export function markRestoreHandled(kind: MinimizedWorkKind): void {
     const handled = pendingRestore
     pendingRestore = null
     pendingRestoreScope = null
-    if (kind === 'fast_stockin') removeMinimizedWork(handled.key)
+    if (kind === 'fast_stockin' || kind === 'stock_adjust') removeMinimizedWork(handled.key)
   }
 }
 
