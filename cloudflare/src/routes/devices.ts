@@ -232,30 +232,40 @@ app.post('/:id/reset', async (c) => {
   if (!device) return c.json({ error: 'Device request not found' }, 404)
   if (device.status !== 'rejected') return c.json({ error: 'Only rejected devices can be reset for re-approval.' }, 400)
 
-  // Snapshot only sessions that existed before the guarded delete. If another
-  // administrator changes this device row first, the delete fails and these
-  // sessions are untouched. If the delete succeeds, a later login begins
-  // pending and cannot create a new session before approval, so only these
-  // exact ids may be revoked.
-  const priorSessions = await db.prepare(`
-    SELECT id FROM user_sessions
-    WHERE user_id = @user_id AND device_id = @device_id AND revoked_at IS NULL
-  `).all<{ id: number }>({ user_id: device.user_id, device_id: device.device_id })
-
-  const deleted = await db.prepare(`
-    DELETE FROM trusted_devices
-    WHERE id = @id AND user_id = @user_id AND device_id = @device_id AND status = 'rejected'
-  `).run({ id: device.id, user_id: device.user_id, device_id: device.device_id })
-  if (!deleted?.changes) return c.json({ error: 'Device request is no longer rejected.' }, 409)
-
-  let revokedSessions = 0
-  for (const session of priorSessions || []) {
-    const result = await db.prepare(`
-      UPDATE user_sessions SET revoked_at = CURRENT_TIMESTAMP
-      WHERE id = @session_id AND user_id = @user_id AND device_id = @device_id AND revoked_at IS NULL
-    `).run({ session_id: session.id, user_id: device.user_id, device_id: device.device_id })
-    revokedSessions += result?.changes || 0
+  // D1 batch is one SQLite transaction. The guard throws when the row changed
+  // after the pre-read, rolling back both the targeted session revoke and the
+  // delete. The session update itself requires the exact rejected row to still
+  // exist, so it can never revoke a later approval/reapproval session.
+  const params = { id: device.id, user_id: device.user_id, device_id: device.device_id, reapproval_reset_guard_error: '{' }
+  let resetResults: Array<{ meta?: { changes?: number } }>
+  try {
+    resetResults = await db.batch([
+      {
+        sql: `SELECT CASE WHEN EXISTS (
+          SELECT 1 FROM trusted_devices
+          WHERE id = @id AND user_id = @user_id AND device_id = @device_id AND status = 'rejected'
+        ) THEN 1 ELSE json_extract(@reapproval_reset_guard_error, '$') END AS device_reapproval_reset_guard`,
+        params,
+      },
+      {
+        sql: `UPDATE user_sessions SET revoked_at = CURRENT_TIMESTAMP
+          WHERE user_id = @user_id AND device_id = @device_id AND revoked_at IS NULL
+            AND EXISTS (SELECT 1 FROM trusted_devices WHERE id = @id AND user_id = @user_id AND device_id = @device_id AND status = 'rejected')`,
+        params,
+      },
+      {
+        sql: `DELETE FROM trusted_devices
+          WHERE id = @id AND user_id = @user_id AND device_id = @device_id AND status = 'rejected'`,
+        params,
+      },
+    ])
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('malformed JSON')) {
+      return c.json({ error: 'Device request is no longer rejected.' }, 409)
+    }
+    throw error
   }
+  const revokedSessions = Number(resetResults[1]?.meta?.changes || 0)
 
   await audit(c.env, admin.id, admin.username, 'device_reapproval_reset', 'user', device.user_id, {
     targetTrustedDeviceRowId: device.id,
