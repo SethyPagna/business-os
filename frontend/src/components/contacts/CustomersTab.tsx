@@ -42,7 +42,7 @@ import {
   serializeContactOptions as serializeStoredContactOptions,
 } from './contactOptionUtils'
 import type { ContactOption } from './contactOptionUtils'
-import { readContactDuplicateDecisionError, type ContactDuplicateMatch } from './contactDuplicates'
+import { readContactDuplicateDecisionError, resolveContactDuplicateSyncError, type ContactDuplicateMatch } from './contactDuplicates'
 
 type TranslateFn = (key: string) => string | undefined
 type NotifyFn = (message: string, tone?: string) => void
@@ -752,10 +752,12 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
       setModal(null)
       setSelected(null)
       await load({ silent: true, label: 'Customers after save' })
+      return { success: true }
     } catch (error: unknown) {
       const duplicateCheck = readContactDuplicateDecisionError(error)
       if (duplicateCheck) return { duplicateDecisionRequired: duplicateCheck }
       notify(getErrorMessage(error, 'Failed'), 'error')
+      return { success: false }
     } finally {
       finishSingleAction(saveInFlightRef)
     }
@@ -772,6 +774,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
       if (!existing) throw new Error('The existing customer could not be loaded')
       setSelected(existing)
       setModal('detail')
+      resolveContactDuplicateSyncError(match)
     } catch (error) {
       notify(getErrorMessage(error, tr(t, 'contact_duplicate_existing_load_failed', 'Could not load the existing record. Try again.')), 'error')
     }

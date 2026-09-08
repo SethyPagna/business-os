@@ -24,6 +24,7 @@ import { claimChunkReload, clearChunkReloadMarker } from './utils/chunkReloadGua
 import { hasDirtyWork } from './utils/dirtyWork.ts'
 import { withLoaderTimeout } from './utils/loaders.ts'
 import { flushPendingWorkDrafts } from './utils/workDrafts.ts'
+import { shouldClearResolvedSyncError, SYNC_ERROR_RESOLVED_EVENT, type SyncProblemReference } from './utils/syncProblemLifecycle.ts'
 
 declare const __FRONTEND_BUILD_HASH__: string | undefined
 
@@ -90,6 +91,7 @@ interface AppNotification {
 }
 
 interface SyncProblemDetail {
+  errorId?: string | null
   reason?: string
   error?: string
   // The server's machine-readable error code (api/http.ts's sync:error).
@@ -797,6 +799,10 @@ function useSyncErrorBanner(user: AppUser | null) {
         refreshPendingSync()
       }
     }
+    const onSyncErrorResolved = (event: Event) => {
+      const detail = event instanceof CustomEvent ? event.detail as SyncProblemReference : null
+      setSyncError((current) => shouldClearResolvedSyncError(current, detail) ? null : current)
+    }
     const onQueueChanged = () => refreshPendingSync()
     const onVaultLocked = (event: Event) => setVaultLocked(event instanceof CustomEvent ? event.detail as SyncProblemDetail : { reason: 'locked', ts: Date.now() })
     const onConflictReview = (event: Event) => {
@@ -808,6 +814,7 @@ function useSyncErrorBanner(user: AppUser | null) {
     window.addEventListener('sync:transient-outage', onTransientOutage)
     window.addEventListener('sync:status', onSyncRecovered)
     window.addEventListener('sync:reconnected', onSyncRecovered)
+    window.addEventListener(SYNC_ERROR_RESOLVED_EVENT, onSyncErrorResolved)
     window.addEventListener('sync:queue-changed', onQueueChanged)
     window.addEventListener('sync:offline-sale-queued', onQueueChanged)
     window.addEventListener('sync:offline-sale-synced', onQueueChanged)
@@ -823,6 +830,7 @@ function useSyncErrorBanner(user: AppUser | null) {
       window.removeEventListener('sync:transient-outage', onTransientOutage)
       window.removeEventListener('sync:status', onSyncRecovered)
       window.removeEventListener('sync:reconnected', onSyncRecovered)
+      window.removeEventListener(SYNC_ERROR_RESOLVED_EVENT, onSyncErrorResolved)
       window.removeEventListener('sync:queue-changed', onQueueChanged)
       window.removeEventListener('sync:offline-sale-queued', onQueueChanged)
       window.removeEventListener('sync:offline-sale-synced', onQueueChanged)

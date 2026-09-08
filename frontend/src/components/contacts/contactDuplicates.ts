@@ -1,4 +1,5 @@
 import { apiFetch, route } from '../../api/http.ts'
+import { dispatchResolvedSyncError, type SyncProblemReference } from '../../utils/syncProblemLifecycle.ts'
 
 // Frontend transport for the live/whole-table duplicate-detection endpoints
 // added to routes/contacts.ts (see cloudflare/src/lib/contactDuplicates.ts
@@ -22,6 +23,7 @@ export type ContactDuplicateMatch = {
   matchedPhone: string | null
   severity: ContactDuplicateSeverity
   version: string
+  syncProblem?: SyncProblemReference
 }
 
 export type ContactDuplicateCandidateVersion = { id: number; version: string }
@@ -36,6 +38,7 @@ export type ContactDuplicateCheck = {
   matches: ContactDuplicateMatch[]
   duplicateReview: ContactDuplicateReview
   allowedActions: Array<'use_existing' | 'create_separate'>
+  syncProblem?: SyncProblemReference
 }
 
 export type ContactDuplicateDecision = ContactDuplicateReview & { action: 'create_separate' }
@@ -141,8 +144,23 @@ export function readContactDuplicateDecisionError(error: unknown): ContactDuplic
     && code !== 'possible_duplicate'
     && code !== 'phone_conflict'
     && code !== 'contact_duplicate_candidates_changed') return null
-  return normalizeContactDuplicateCheck(input)
+  const check = normalizeContactDuplicateCheck(input)
     || normalizeContactDuplicateCheck(input?.duplicate)
+  if (!check) return null
+  const syncProblem = typeof input?.syncErrorId === 'string'
+    ? {
+        errorId: input.syncErrorId,
+        channel: typeof input.syncErrorChannel === 'string' ? input.syncErrorChannel : null,
+        code: typeof input.code === 'string' ? input.code : null,
+      }
+    : null
+  return syncProblem
+    ? { ...check, syncProblem, matches: check.matches.map((match) => ({ ...match, syncProblem })) }
+    : check
+}
+
+export function resolveContactDuplicateSyncError(value: ContactDuplicateCheck | ContactDuplicateMatch | null | undefined): boolean {
+  return dispatchResolvedSyncError(value?.syncProblem)
 }
 
 export function createSeparateContactDecision(check: ContactDuplicateCheck): ContactDuplicateDecision | null {
