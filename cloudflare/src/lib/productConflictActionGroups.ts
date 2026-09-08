@@ -171,10 +171,12 @@ export function buildProductConflictActionGroupPlans(
   return canonicalizeProductConflictActionGroups(groups).map((group) => {
     const rows = group.member_ids.map((id) => byId.get(id)).filter((row): row is ProductConflictActionProductRow => Boolean(row))
     let blocked: ProductConflictActionBlocker | null = null
-    const names = new Set(rows.map((row) => normalizeProductGroupName(row.name)).filter(Boolean))
-    const barcodes = new Set(rows.map((row) => identityBarcodeKey(row.barcode)).filter(Boolean))
-    const nameEligible = rows.length === group.member_ids.length && names.size === 1
-    const barcodeEligible = rows.length === group.member_ids.length && barcodes.size === 1
+    const nameKeys = rows.map((row) => normalizeProductGroupName(row.name))
+    const barcodeKeys = rows.map((row) => identityBarcodeKey(row.barcode))
+    const names = new Set(nameKeys)
+    const barcodes = new Set(barcodeKeys)
+    const nameEligible = rows.length === group.member_ids.length && nameKeys.every(Boolean) && names.size === 1
+    const barcodeEligible = rows.length === group.member_ids.length && barcodeKeys.every(Boolean) && barcodes.size === 1
     let eligibilityBasis: 'name' | 'barcode' | null = nameEligible ? 'name' : barcodeEligible ? 'barcode' : null
     let eligibilityValue = eligibilityBasis === 'name' ? [...names][0] : eligibilityBasis === 'barcode' ? [...barcodes][0] : null
     if (rows.length !== group.member_ids.length || rows.some((row) => !Number(row.is_active) || Number(row.is_group))) {
