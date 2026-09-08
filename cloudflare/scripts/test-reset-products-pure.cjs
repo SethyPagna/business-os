@@ -93,7 +93,11 @@ const systemRoute = loadReal('routes/system.ts', {
   // K4: the orphan-staging endpoint's engine lives in its own lib with its
   // own pure test -- stubbed here, this test is about the reset contract.
   '../lib/importRetention': { cleanOrphanImportStaging: async () => ({ applied: false, tables: {}, r2Keys: 0 }) },
-  '../lib/coreDataInvariants': coreDataInvariants,
+  '../lib/coreDataInvariants': {
+    ...coreDataInvariants,
+    ensureCoreDataInvariants: async () => ({ adminUserCreated: false }),
+    dropAllCustomTables: async () => [],
+  },
   '../lib/backup': {
     // Real prerequisite under test: every mode must call one of these
     // BEFORE touching any data, and abort cleanly if it throws. Tracked
@@ -123,7 +127,7 @@ const systemRoute = loadReal('routes/system.ts', {
 const ALL_RESET_CANDIDATE_TABLES = [
   'product_images', 'rfid_tags', 'branch_batch_stock', 'product_batches', 'branch_stock', 'products',
   'inventory_movements', 'stock_row_moves', 'stock_transfers',
-  'return_item_batch_allocations', 'sale_item_batch_allocations', 'return_items', 'returns', 'sale_items', 'sales',
+  'sale_record_events', 'return_item_batch_allocations', 'sale_item_batch_allocations', 'return_items', 'returns', 'sale_items', 'sales',
   'action_history',
 ]
 
@@ -159,6 +163,10 @@ function count(table) { return row(`SELECT COUNT(*) AS n FROM "${table}"`).n }
 function seed() {
   // Wipe every table this test touches so each check() starts clean,
   // regardless of run order.
+  exec(`INSERT INTO system_flags(key,value) VALUES('sale_record_events_reset_guard','{"mode":"reset","token":"test-seed"}')
+        ON CONFLICT(key) DO UPDATE SET value=excluded.value;
+        DELETE FROM sale_record_events;
+        DELETE FROM system_flags WHERE key='sale_record_events_reset_guard';`)
   const wipe = [
     'stock_session_members', 'stock_session_operations', 'stock_session_guards',
     'return_item_batch_allocations', 'sale_item_batch_allocations', 'return_items', 'returns',
@@ -181,6 +189,10 @@ function seed() {
   // Sales/returns/movements -- denormalized, must survive with a dangling
   // product_id, per this session's spec.
   rawDbHandle.prepare('INSERT INTO sales (id, branch_id) VALUES (1, 1)').run()
+  rawDbHandle.prepare(`INSERT INTO sale_record_events(
+    id,sale_id,source_kind,source_id,generation,kind,via,occurred_at,changes_json
+  ) VALUES('reset-event',1,'sale_status','actor:1:request:reset-fixture',0,'status_changed','apply','2026-09-08T00:00:00.000Z',?)`)
+    .run([JSON.stringify([{ field: 'sale_status', before: { state: 'known_value', value: 'completed' }, after: { state: 'known_value', value: 'returned' } }])])
   rawDbHandle.prepare("INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity, applied_price_usd, batch_id) VALUES (1, 1, 1, 'Eye Shadow Palette', 2, 12.5, 1)").run()
   rawDbHandle.prepare("INSERT INTO returns (id, sale_id, branch_id) VALUES (1, 1, 1)").run()
   rawDbHandle.prepare("INSERT INTO return_items (id, return_id, sale_item_id, product_id, product_name, quantity) VALUES (1, 1, 1, 1, 'Eye Shadow Palette', 1)").run()
@@ -353,6 +365,7 @@ async function main() {
     // includeSales alone must not also clear these.
     assert.strictEqual(count('inventory_movements'), 1, 'inventory_movements must survive includeSales=true alone')
     assert.strictEqual(count('customers'), 1, 'customers must always survive mode=products regardless of toggles')
+    assert.strictEqual(count('sale_record_events'), 0, 'Sales Records must clear atomically with their sale')
   })
 
   await check('mode=products, both toggles true clears products, movements, AND sales/returns in one atomic call, but never contacts', async () => {
@@ -365,6 +378,7 @@ async function main() {
     assert.strictEqual(count('inventory_movements'), 0)
     assert.strictEqual(count('sales'), 0)
     assert.strictEqual(count('returns'), 0)
+    assert.strictEqual(count('sale_record_events'), 0)
     assert.strictEqual(count('customers'), 1, 'customers must never be touched by mode=products, even with both toggles on')
     assert.strictEqual(count('suppliers'), 1, 'suppliers must never be touched by mode=products, even with both toggles on')
   })
@@ -380,6 +394,7 @@ async function main() {
     assert.strictEqual(json.success, true, JSON.stringify(json))
     assert.strictEqual(count('products'), 1, 'mode=sales must never delete products, regardless of stray products-only fields')
     assert.strictEqual(count('customers'), 1, 'mode=sales must never touch customers')
+    assert.strictEqual(count('sale_record_events'), 0, 'mode=sales clears immutable Sales Records under the reset guard')
   })
 
   await check('mode=sales now also forces a backup first (Part 248 fix -- previously only mode=products had this gate) and aborts with zero rows changed if it fails', async () => {
@@ -435,6 +450,15 @@ async function main() {
     assert.strictEqual(status, 200, JSON.stringify(json))
     assert.strictEqual(json.success, true, JSON.stringify(json))
     for (const table of ALL_IMPORT_RESET_TABLES) assert.strictEqual(count(table), 0, `${table} should be empty after mode=all`)
+  })
+
+  await check('factory-reset clears immutable Sales Records through the same atomic reset guard', async () => {
+    seed()
+    assert.strictEqual(count('sale_record_events'), 1, 'sanity: immutable event fixture exists')
+    const { status, json } = await req('POST', '/factory-reset', {})
+    assert.strictEqual(status, 200, JSON.stringify(json))
+    assert.strictEqual(count('sale_record_events'), 0)
+    assert.strictEqual(count('system_flags'), 0, 'the short-lived reset guard cannot survive the atomic batch')
   })
 
   console.log(`\n${passed} PASS, 0 FAIL`)

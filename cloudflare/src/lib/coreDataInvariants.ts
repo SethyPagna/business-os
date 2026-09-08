@@ -375,6 +375,9 @@ export function ensureCoreDataInvariantsOnce(env: Env): Promise<CoreDataInvarian
 // by it. Confirmed with an in-memory D1-equivalent test seeded with a
 // non-default org/branch/admin before wiping these tables too.
 export const FACTORY_RESET_TABLES = [
+  // Immutable Sales Records must be cleared before their sales/receipt
+  // parents, under the atomic reset guard in routes/system.ts.
+  'sale_record_events',
   // Durable monetary-mutation members reference their receipts, whose history
   // parent is cleared below. Guards are transient but must not survive reset.
   'sale_mutation_members',
