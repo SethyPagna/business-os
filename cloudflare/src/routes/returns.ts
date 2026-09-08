@@ -20,6 +20,9 @@ import {
 import { uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
 import { computeSaleTotals } from '../lib/saleTotals'
 import { applyReturnBulkAction, notifyReturnBulkAction, ReturnBulkError } from '../lib/returnBulkAction'
+import { saleRevisionGuard } from '../lib/saleBulkStatus'
+import { allocateReturnedQuantities } from '../lib/saleTransitions'
+import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from '../lib/saleRecordEvents'
 // A replacement line is an ordinary sale line, so the warehouse may not
 // carry one -- the same rule, and the same message, POST /sales enforces.
 import { WAREHOUSE_NOT_SELLABLE_ERROR } from '../lib/branchRoleGuards'
@@ -351,6 +354,60 @@ async function recordReturnItemBatchAllocations(
     }
   }
   if (inserts.length) await db.batch(inserts)
+}
+
+type ReturnSaleStatusProjection = {
+  saleId: number
+  receiptNumber: string | null
+  before: string
+  after: string
+  writeRevision: number
+}
+
+async function readReturnSaleStatusProjection(
+  db: ReturnType<typeof getDb>,
+  saleId: number,
+): Promise<ReturnSaleStatusProjection | null> {
+  const sale = await db.prepare(`
+    SELECT s.id,s.receipt_number,s.sale_status,s.status_before_return,
+      COALESCE(v.revision,0) AS write_revision
+    FROM sales s LEFT JOIN sale_write_revisions v ON v.sale_id=s.id
+    WHERE s.id=?
+  `).get<{
+    id: number; receipt_number: string | null; sale_status: string | null
+    status_before_return: string | null; write_revision: number
+  }>([saleId])
+  if (!sale) return null
+  const items = await db.prepare(`SELECT id,product_id,product_name,quantity,cost_price_usd,cost_price_khr,branch_id,batch_id
+    FROM sale_items WHERE sale_id=? ORDER BY id`)
+    .all<{
+      id: number; product_id: number | null; product_name: string | null; quantity: number
+      cost_price_usd: number | null; cost_price_khr: number | null; branch_id: number | null; batch_id: number | null
+    }>([saleId])
+  const returnedRows = await db.prepare(`
+    SELECT ri.sale_item_id,ri.product_id,SUM(ri.quantity) AS quantity
+    FROM return_items ri JOIN returns r ON r.id=ri.return_id
+    WHERE r.sale_id=? AND COALESCE(r.status,'completed')!='cancelled'
+      AND COALESCE(r.return_scope,'customer')='customer'
+    GROUP BY ri.sale_item_id,ri.product_id
+  `).all<{ sale_item_id: number | null; product_id: number | null; quantity: number }>([saleId])
+  const itemLevel = new Map<number, number>()
+  const productLevel = new Map<number, number>()
+  for (const row of returnedRows) {
+    const quantity = Math.max(0, Number(row.quantity) || 0)
+    if (row.sale_item_id) itemLevel.set(Number(row.sale_item_id), (itemLevel.get(Number(row.sale_item_id)) || 0) + quantity)
+    else if (row.product_id) productLevel.set(Number(row.product_id), (productLevel.get(Number(row.product_id)) || 0) + quantity)
+  }
+  const returnedByItem = allocateReturnedQuantities(items, itemLevel, productLevel)
+  const hasAny = [...returnedByItem.values()].some((quantity) => quantity > 0)
+  const fullyReturned = items.length > 0 && items.every((item) => (returnedByItem.get(item.id) || 0) >= Number(item.quantity || 0))
+  return {
+    saleId: Number(sale.id),
+    receiptNumber: sale.receipt_number == null ? null : String(sale.receipt_number),
+    before: String(sale.sale_status || 'completed'),
+    after: fullyReturned ? 'returned' : hasAny ? 'partial_return' : String(sale.status_before_return || 'completed'),
+    writeRevision: Number(sale.write_revision || 0),
+  }
 }
 
 // Validate requested return quantities against what's actually returnable
@@ -1195,6 +1252,7 @@ app.post('/', async (c) => {
   const returnId = returnInsert.lastInsertRowid
   let replacementSaleId: number | null = null
   let replacementReceiptNumber: string | null = null
+  let returnCreateRecordProvenance: { source_kind: 'return_create'; source_id: string; generation: 0; sale_id: number } | null = null
 
   // Compensation log (Part-77, write-path + batch-identity audits): every
   // stock write that lands OUTSIDE the outer db.batch() below --
@@ -1698,18 +1756,37 @@ app.post('/', async (c) => {
     await recordReturnItemBatchAllocations(db, returnId, perItemBatchSplits)
 
     if (body.sale_id) {
-      const saleItems = await db.prepare('SELECT product_id, quantity FROM sale_items WHERE sale_id = ?').all<{ product_id: number; quantity: number }>([body.sale_id])
-      const returnedRows = await db.prepare(`
-        SELECT ri.product_id, SUM(ri.quantity) AS total_qty
-        FROM return_items ri JOIN returns r ON r.id = ri.return_id
-        WHERE r.sale_id = ? AND COALESCE(r.status, 'completed') != 'cancelled' AND COALESCE(r.return_scope, 'customer') = 'customer'
-        GROUP BY ri.product_id
-      `).all<{ product_id: number; total_qty: number }>([body.sale_id])
-      const returnedMap = new Map(returnedRows.map((r) => [r.product_id, r.total_qty]))
-      const fullyReturned = saleItems.every((si) => (returnedMap.get(si.product_id) || 0) >= si.quantity)
-      await db.prepare(`UPDATE sales SET
-        status_before_return = CASE WHEN COALESCE(sale_status,'completed') NOT IN ('returned','partial_return') THEN COALESCE(sale_status,'completed') ELSE status_before_return END,
-        sale_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run([fullyReturned ? 'returned' : 'partial_return', body.sale_id])
+      const status = await readReturnSaleStatusProjection(db, Number(body.sale_id))
+      if (!status) throw new Error('Parent sale was removed while the return was being recorded.')
+      const stamp = new Date().toISOString()
+      const sourceId = `return:${returnId}`
+      const statusStatements: Array<{ sql: string; params: Record<string, unknown> }> = [
+        saleRevisionGuard(status.saleId, status.writeRevision),
+        {
+          sql: `UPDATE sales SET
+            status_before_return=CASE WHEN COALESCE(sale_status,'completed') NOT IN ('returned','partial_return') THEN COALESCE(sale_status,'completed') ELSE status_before_return END,
+            sale_status=@status,updated_at=@stamp WHERE id=@saleId`,
+          params: { status: status.after, stamp, saleId: status.saleId },
+        },
+      ]
+      let eventBytes = 0
+      if (status.before !== status.after) {
+        const event = buildSaleRecordEventsInsert([{
+          saleId: status.saleId, sourceKind: 'return_create', sourceId,
+          generation: 0, kind: 'status_changed', via: 'apply',
+          subject: returnNumber, actorId: user.id, actorUsername: actorSnapshot(user), occurredAt: stamp,
+          changes: [{
+            field: 'sale_status',
+            before: { state: 'known_value', value: status.before },
+            after: { state: 'known_value', value: status.after },
+          }],
+        }])!
+        statusStatements.push(event.statement)
+        eventBytes = event.eventsBytes
+        returnCreateRecordProvenance = { source_kind: 'return_create', source_id: sourceId, generation: 0, sale_id: status.saleId }
+      }
+      assertSaleRecordBatchBounds(statusStatements.length, status, eventBytes)
+      await db.batch(statusStatements)
     }
   } catch (error) {
     // Reverse the stock FIRST, then delete the rows (Part-77): the restocks
@@ -1796,6 +1873,7 @@ app.post('/', async (c) => {
     replacementSaleId,
     replacementReceiptNumber,
     reason: body.reason,
+    ...(returnCreateRecordProvenance ? { record_event: returnCreateRecordProvenance } : {}),
   })
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'return', id: returnId }))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
