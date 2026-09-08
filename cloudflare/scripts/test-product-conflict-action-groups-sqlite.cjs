@@ -43,6 +43,8 @@ function adapter(d1, controls) {
     controls.maxCompoundTerms = Math.max(controls.maxCompoundTerms, terms)
     if (terms > 5) throw new Error(`too many terms in compound SELECT: ${terms}`)
     if (Object.keys(params || {}).length > 100) throw new Error(`too many SQL variables: ${Object.keys(params).length}`)
+    if (/SELECT\s+id,name,barcode,category,brand,unit,image_path/i.test(sql)) controls.fullProductDetailReads += 1
+    if (/SELECT\s+pb\.variant_product_id\s+AS\s+product_id,pb\.id\s+AS\s+batch_id/i.test(sql)) controls.fullLotDetailReads += 1
   }
   return {
     prepare(sql) {
@@ -66,7 +68,10 @@ function adapter(d1, controls) {
 }
 
 function loadRoute(d1) {
-  const controls = { statements: 0, maxBindings: 0, maxCompoundTerms: 0, maxBatchStatements: 0, failNextBatch: false }
+  const controls = {
+    statements: 0, maxBindings: 0, maxCompoundTerms: 0, maxBatchStatements: 0, failNextBatch: false,
+    fullProductDetailReads: 0, fullLotDetailReads: 0,
+  }
   const db = adapter(d1, controls)
   const detail = loadTs('lib/productDetailRule.ts')
   const binding = loadTs('lib/sqlBinding.ts')
@@ -217,6 +222,8 @@ async function main() {
   const replacement = await post(app, { ...body, client_request_id: 'replacement_review_001' })
   assert.equal(replacement.status, 200)
   assert.equal(d1.db.prepare('SELECT COUNT(*) n FROM product_conflict_action_reviews WHERE id=?').get(response.body.review_id).n, 0, 'a later preview reaps expired drafts')
+  assert.ok(d1.db.prepare('SELECT MAX(length(CAST(detail_json AS BLOB))) AS bytes FROM product_conflict_action_groups').get().bytes <= 512 * 1024,
+    'every persisted conflict group stays within the final detail byte ceiling')
   assert.ok(controls.maxBindings <= 80, `max observed bindings ${controls.maxBindings}`)
   assert.ok(controls.maxCompoundTerms <= 5, `max compound terms ${controls.maxCompoundTerms}`)
   assert.ok(controls.statements <= 700, `request and verification stayed bounded: ${controls.statements}`)
@@ -237,10 +244,42 @@ async function main() {
     assert.equal(fanout.body.page.groups[0].lots.detail_row_count, 10002)
     assert.equal(fanout.body.page.groups[0].lots.detail_status, 'refused')
     assert.equal(fanout.body.page.groups[0].lots.rows.length, 0)
+    assert.equal(fanout.body.page.groups[0].eligibility_value, '700000')
+    assert.equal(fanout.body.page.groups[0].economics.merged.cost_price_usd, 5)
+    assert.deepEqual(fanout.body.page.groups[0].members.map((member) => member.id), [10000, 10001])
+    assert.equal(fanout.body.page.groups[0].stock.projected_by_branch[0].quantity, 5)
     assert.ok(Buffer.byteLength(JSON.stringify(fanout.body.page.groups[0])) < 64 * 1024)
     assert.ok(fanoutControls.statements < 20, 'fanout is counted then refused without loading every lot row')
   }
-  console.log(`product conflict action groups sqlite: 51 checks passed; ${controls.statements} statements, ${controls.maxBindings} bindings, ${controls.maxCompoundTerms} compound terms`)
+  {
+    const { d1: memberDb, groups: memberGroups } = seed(1)
+    memberDb.db.prepare('UPDATE products SET name=? WHERE id IN (10000,10001)').run('M'.repeat(300000))
+    const { app: memberApp, controls: memberControls } = loadRoute(memberDb)
+    const member = await post(memberApp, { manifest_version: 1, resolution_version: 2, client_request_id: 'oversized_member_detail', merge_groups: memberGroups, remove_rows: [] })
+    assert.equal(member.status, 200)
+    assert.equal(member.body.page.groups[0].blocked.code, 'review_detail_limit')
+    assert.equal(member.body.page.groups[0].detail_status, 'refused')
+    assert.deepEqual(member.body.page.groups[0].members, [{ id: 10000, detail_status: 'refused' }, { id: 10001, detail_status: 'refused' }])
+    assert.equal(memberControls.fullProductDetailReads, 0, 'oversized member text is refused before the full detail SELECT')
+    const stored = memberDb.db.prepare(`SELECT length(CAST(g.detail_json AS BLOB)) AS bytes FROM product_conflict_action_groups g
+      JOIN product_conflict_action_reviews r ON r.id=g.review_id WHERE r.request_id=?`).get('oversized_member_detail')
+    assert.ok(stored.bytes <= 512 * 1024, `stored member refusal is bounded: ${stored.bytes}`)
+  }
+  {
+    const { d1: lotDb, groups: lotGroups } = seed(1)
+    lotDb.db.prepare('UPDATE product_batches SET notes=? WHERE id IN (99001,99002)').run('L'.repeat(300000))
+    const { app: lotApp, controls: lotControls } = loadRoute(lotDb)
+    const lot = await post(lotApp, { manifest_version: 1, resolution_version: 2, client_request_id: 'oversized_lot_detail', merge_groups: lotGroups, remove_rows: [] })
+    assert.equal(lot.status, 200)
+    assert.equal(lot.body.page.groups[0].blocked.code, 'review_detail_limit')
+    assert.equal(lot.body.page.groups[0].lots.detail_row_count, 2)
+    assert.equal(lot.body.page.groups[0].lots.detail_status, 'refused')
+    assert.equal(lotControls.fullLotDetailReads, 0, 'sub-row-limit oversized lot text is refused before the full detail SELECT')
+    const stored = lotDb.db.prepare(`SELECT length(CAST(g.detail_json AS BLOB)) AS bytes FROM product_conflict_action_groups g
+      JOIN product_conflict_action_reviews r ON r.id=g.review_id WHERE r.request_id=?`).get('oversized_lot_detail')
+    assert.ok(stored.bytes <= 512 * 1024, `stored lot refusal is bounded: ${stored.bytes}`)
+  }
+  console.log(`product conflict action groups sqlite: 69 checks passed; ${controls.statements} statements, ${controls.maxBindings} bindings, ${controls.maxCompoundTerms} compound terms`)
 }
 
 main().catch((error) => { console.error(error); process.exit(1) })

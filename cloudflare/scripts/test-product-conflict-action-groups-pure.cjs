@@ -40,6 +40,14 @@ for (const bad of [
   request({ merge_groups: [{ group_key: 'x', member_ids: [1] }] }),
   request({ merge_groups: [{ group_key: 'x', member_ids: [1, 1] }] }),
 ]) assert.throws(() => groups.parseProductConflictActionPreviewRequest(bad), /./)
+assert.throws(() => groups.parseProductConflictActionPreviewRequest(request({
+  merge_groups: [{ group_key: `${'😀'.repeat(61)}`, member_ids: [1, 2] }],
+})), /bounded string/, 'group_key length is enforced in UTF-8 bytes')
+assert.throws(() => groups.parseProductConflictActionPreviewRequest(request({
+  merge_groups: Array.from({ length: 1600 }, (_, index) => ({
+    group_key: `${String(index).padStart(4, '0')}-${'k'.repeat(165)}`, member_ids: [1, 2],
+  })),
+})), /combined group_key payload/, 'collapsed source keys have a bounded total UTF-8 size')
 try { groups.parseProductConflictActionPreviewRequest(request({ remove_rows: [{ product_id: 1 }] })) }
 catch (error) { assert.equal(error.code, 'phase_not_available'); assert.equal(error.status, 409) }
 
@@ -115,4 +123,4 @@ plan = groups.buildProductConflictActionGroupPlans(
 )[0]
 assert.equal(plan.blocked.code, 'incompatible_group_identity', 'every member needs the common nonempty barcode')
 
-console.log('product conflict action groups pure: 26 checks passed')
+console.log('product conflict action groups pure: 28 checks passed')

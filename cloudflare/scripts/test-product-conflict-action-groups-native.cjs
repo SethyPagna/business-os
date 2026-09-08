@@ -36,11 +36,12 @@ class FakeHono {
 function loadRoute(nativeDb) {
   const dbLib = loadTs('lib/db.ts')
   const rawCompat = new dbLib.D1Compat(nativeDb)
-  const controls = { statements: 0, maxBindings: 0, maxCompoundTerms: 0, maxBatchStatements: 0 }
+  const controls = { statements: 0, maxBindings: 0, maxCompoundTerms: 0, maxBatchStatements: 0, fullLotDetailReads: 0 }
   const observe = (sql, params = {}) => {
     controls.statements += 1
     controls.maxBindings = Math.max(controls.maxBindings, Object.keys(params || {}).length)
     controls.maxCompoundTerms = Math.max(controls.maxCompoundTerms, 1 + (sql.match(/\bUNION(?:\s+ALL)?\b/gi) || []).length)
+    if (/SELECT\s+pb\.variant_product_id\s+AS\s+product_id,pb\.id\s+AS\s+batch_id/i.test(sql)) controls.fullLotDetailReads += 1
   }
   const db = {
     prepare(sql) {
@@ -127,10 +128,30 @@ async function main() {
     assert.equal((await db.prepare('SELECT COUNT(*) n FROM product_conflict_action_reviews').get()).n, 1)
     assert.equal((await db.prepare('SELECT COUNT(*) n FROM product_conflict_action_group_members').get()).n, 36)
     assert.equal((await db.prepare('SELECT COUNT(*) n FROM products WHERE is_active=1').get()).n, 36, 'native preview does not mutate products')
+    await native.batch([
+      native.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_key,is_active,notes) VALUES(?,?,?,?,?)`)
+        .bind(90001, 2000, 'huge-a', 1, 'N'.repeat(300000)),
+      native.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_key,is_active,notes) VALUES(?,?,?,?,?)`)
+        .bind(90002, 2001, 'huge-b', 1, 'N'.repeat(300000)),
+    ])
+    const fullLotReadsBefore = controls.fullLotDetailReads
+    const oversizedBody = { manifest_version: 1, resolution_version: 2, client_request_id: 'native_oversized_lots', merge_groups: [mergeGroups[0]], remove_rows: [] }
+    const oversized = await app.posts.get('/possible-duplicates/merge-batch/preview')({
+      env: {}, req: { json: async () => oversizedBody }, get: () => ({ id: 77, username: 'native' }),
+      json: (payload, status = 200) => ({ status, body: payload }), executionCtx: { waitUntil: () => {} },
+    })
+    assert.equal(oversized.status, 200)
+    assert.equal(oversized.body.page.groups[0].blocked.code, 'review_detail_limit')
+    assert.equal(oversized.body.page.groups[0].lots.detail_status, 'refused')
+    assert.equal(controls.fullLotDetailReads, fullLotReadsBefore, 'native oversized lot text is refused before the full detail SELECT')
+    const storedBytes = await db.prepare(`SELECT length(CAST(g.detail_json AS BLOB)) AS bytes
+      FROM product_conflict_action_groups g JOIN product_conflict_action_reviews r ON r.id=g.review_id
+      WHERE r.request_id=@requestId`).get({ requestId: 'native_oversized_lots' })
+    assert.ok(Number(storedBytes?.bytes) <= 512 * 1024)
     assert.ok(controls.maxBindings <= 80)
     assert.ok(controls.maxCompoundTerms <= 5)
     assert.ok(controls.statements <= 700)
-    console.log(`product conflict action groups native D1: 12 groups/36 members passed; ${controls.statements} statements, ${controls.maxBindings} bindings, ${controls.maxCompoundTerms} compound terms`)
+    console.log(`product conflict action groups native D1: 12 groups/36 members plus oversized-lot refusal passed; ${controls.statements} statements, ${controls.maxBindings} bindings, ${controls.maxCompoundTerms} compound terms`)
   } finally { await mf.dispose() }
 }
 
