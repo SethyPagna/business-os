@@ -371,6 +371,14 @@ async function main() {
     assert.equal(d1.db.prepare('SELECT is_active FROM products WHERE id=10000').get().is_active, 1)
     assert.equal(d1.db.prepare("SELECT COUNT(*) n FROM pending_actions WHERE status='open'").get().n, 1)
     assert.equal(d1.db.prepare('SELECT COUNT(*) n FROM action_history').get().n, 0)
+    const queuedReplay = await apply(loaded.app, review.body, finalized.body.manifest_digest, reviewer)
+    assert.equal(queuedReplay.status, 200, JSON.stringify(queuedReplay.body))
+    assert.equal(queuedReplay.body.status, 'approval_pending')
+    assert.equal(queuedReplay.body.approval_required, true)
+    assert.equal(queuedReplay.body.continuation_required, false)
+    assert.deepEqual(queuedReplay.body.removals, [])
+    assert.equal(d1.db.prepare("SELECT COUNT(*) n FROM pending_actions WHERE status='open'").get().n, 1,
+      'lost-response replay does not duplicate a queued removal')
     const pending = { ...d1.db.prepare("SELECT * FROM pending_actions WHERE status='open'").get() }
     const approval = loadReviewApply(loaded)
     const approver = { id: 903, username: 'approver', name: 'Approver', organization_id: null, role_id: null,
@@ -404,6 +412,36 @@ async function main() {
     assert.equal(second.body.counts.completed_removals, 13)
     assert.ok(loaded.controls.statements <= 700)
     assert.ok(loaded.controls.maxBatchStatements <= 100)
+  }
+
+  {
+    const { d1 } = seed(7)
+    const loaded = loadRoute(d1, true)
+    const reviewer = { ...user, noMerge: true, reviewDelete: true }
+    const removeRows = Array.from({ length: 13 }, (_, index) => ({ product_id: 10000 + index, reason: `Review row ${index + 1}` }))
+    const review = await post(loaded.app, { manifest_version: 1, resolution_version: 2,
+      client_request_id: 'remove_thirteen_review_tier_001', merge_groups: [], remove_rows: removeRows }, reviewer)
+    assert.equal(review.status, 200)
+    const finalized = await finalize(loaded.app, review.body, [], {}, reviewer)
+    assert.equal(finalized.status, 200)
+    const first = await apply(loaded.app, review.body, finalized.body.manifest_digest, reviewer)
+    assert.equal(first.status, 200, JSON.stringify(first.body))
+    assert.equal(first.body.removals.length, 12)
+    assert.equal(first.body.status, 'approval_pending')
+    assert.equal(first.body.approval_required, true)
+    assert.equal(first.body.continuation_required, true)
+    assert.equal(first.body.counts.pending_removals, 1)
+    assert.equal(first.body.counts.approval_pending_removals, 12)
+    const second = await apply(loaded.app, review.body, finalized.body.manifest_digest, reviewer)
+    assert.equal(second.status, 200, JSON.stringify(second.body))
+    assert.equal(second.body.removals.length, 1)
+    assert.equal(second.body.continuation_required, false)
+    assert.equal(second.body.counts.approval_pending_removals, 13)
+    const replay = await apply(loaded.app, review.body, finalized.body.manifest_digest, reviewer)
+    assert.equal(replay.status, 200, JSON.stringify(replay.body))
+    assert.deepEqual(replay.body.removals, [])
+    assert.equal(replay.body.approval_required, true)
+    assert.equal(d1.db.prepare("SELECT COUNT(*) n FROM pending_actions WHERE status='open'").get().n, 13)
   }
 
   {
