@@ -76,7 +76,7 @@
     "immutability": "BEFORE UPDATE always aborts. BEFORE DELETE aborts unless maintenance mode is restore or sale_record_events_reset_guard contains mode reset and a non-empty token. No ordinary retention/pruning path may update or delete receipts.",
     "server_validation": [
       "Require client_request_id matching the existing bounded client-id normalizer and expected_updated_at for every PATCH /returns/:id edit before any write.",
-      "Build a normalized canonical request with return_id, expected_updated_at, items in submitted order, reason/return_type/notes presence and values, server-derived refund line inputs, and branch presence/value. Preserve meaningful missing versus null with explicit presence booleans.",
+      "Build a normalized canonical request only from the route target and accepted client intent available before mutable domain reads: return_id, expected_updated_at, submitted items in order, and reason/return_type/notes/refund/branch presence and submitted values. Preserve meaningful missing versus null with explicit presence booleans. Never include server-derived refund prices, current sale items, current customer/contact values, or any other mutable database result in the digest/request_json; those facts remain in the domain rows.",
       "Hash the canonical JSON with SHA-256. Lookup by actor_id, mutation_kind edit, and request_id before the stale revision check; exact digest returns the stored response, while any digest or target mismatch returns 409 idempotency_conflict.",
       "Allow response_json only as exactly {id: positive integer, updated_at: bounded non-empty text}; do not retain contact data, arbitrary errors, nested values, or the response body beyond these scalars."
     ],
@@ -84,12 +84,20 @@
       "Read the return and parent sale, capture return_write_revision, sale_write_revision, exact parent status, and normalized request before any write.",
       "Compute the projected parent status from other active customer returns plus the proposed item set, using sale_item_id first and product fallback allocation without double-counting duplicate products.",
       "Put return revision guard and sale revision/current-status guard first in the existing compensated edit batch.",
-      "Put the return row/item rewrite and every return_item_batch_allocations insert in that same batch; identify each just-inserted return item by the newest id for that return before any allocation insert changes last_insert_rowid().",
+      "Put the return row/item rewrite and every return_item_batch_allocations insert in that same batch with strict per-line sequencing: INSERT one return_item, immediately INSERT every allocation for that line using (SELECT id FROM return_items WHERE return_id=@return_id ORDER BY id DESC LIMIT 1), then move to the next return_item. Never defer allocations until after another return_item insert; never reuse last_insert_rowid() after an allocation insert.",
       "Put the guarded parent sales update next only when its status changes, followed by the conditional immutable return_edit event whose before/after matches the guarded snapshot.",
-      "Insert return_mutation_receipts last in the same batch, with its UUID also used as the conditional event source_id, so no receipt can exist without every essential edit effect.",
+      "Insert return_mutation_receipts last in the same batch, with its UUID also used as the conditional event source_id, so no receipt can exist without every essential edit effect. response_json.updated_at is the exact mutationStamp bound to returns.updated_at in the same batch.",
       "After a successful batch, only operational audit/cache/broadcast work may remain. On any batch failure, SQLite rolls back return, allocations, parent status, event, and receipt together; the existing catch compensates only pre-batch lot/damaged writes. Remove the old post-batch allocation and sale-status writes."
     ],
     "conditional_event": "Emit one return_edit/status_changed event only when the guarded parent sale status changes. Generation is 0, via apply, source_id is return_mutation_receipts.id, subject is the historical return number, actor/time are captured, and the one sale_status change is exact known_value before/after. If status is unchanged or the return has no parent sale, persist the receipt but emit no event.",
+    "required_focused_tests": [
+      "Two edited return items that each have multiple allocations map every allocation to its own immediately preceding item.",
+      "Status-unchanged and no-parent edits commit one receipt and zero sale events.",
+      "Exact retry after mutable sale/item/return data changes returns the stored response because the digest depends only on frozen client intent.",
+      "Same actor/request against another return returns 409 idempotency_conflict; a different actor may use the same request id.",
+      "Concurrent duplicate execution yields one complete outcome; injected event or receipt constraint failure yields zero event/receipt/domain mutation and compensates every pre-batch stock write.",
+      "Generated scoped and full backups restore receipts with FK checks on; factory, sales, all, and products+includeSales reset scopes delete receipts under the guard."
+    ],
     "lifecycle": [
       "BACKUP_TABLES: insert return_mutation_receipts after returns and before sale_record_events, preserving parent-first restore order; include it in SALE_REPLAY_RESTORE_BUNDLE so every scoped sales/returns/events backup widens to include it.",
       "Reverse restore deletion deletes sale_record_events before return_mutation_receipts before returns/sales. Restore insertion restores returns/sales before return_mutation_receipts before sale_record_events.",
