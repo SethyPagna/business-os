@@ -9,7 +9,8 @@
 --   SELECT COUNT(*) FROM audit_logs;
 -- All six results must be identical before and after applying this migration.
 -- Recovery: roll back the route/UI while retaining these receipts. Never drop receipt rows
--- to simulate a product-merge rollback; every committed pair remains independently undoable.
+-- to simulate a product-merge rollback. A committed receipt prevents replay; Undo is exposed
+-- only while its separately retained action-history and snapshot link remains live.
 
 CREATE TABLE product_conflict_merge_runs (
   id TEXT PRIMARY KEY,
