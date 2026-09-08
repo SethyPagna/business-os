@@ -146,6 +146,27 @@ export interface SaleRecordChange {
   after: SaleRecordValueState
 }
 
+export interface SaleRecordEventRow {
+  id: string
+  sale_id: number | string
+  source_kind: string
+  source_id: string
+  generation: number
+  kind: string
+  via: string
+  subject?: string | null
+  actor_username?: string | null
+  occurred_at: string
+  changes_json: unknown
+}
+
+type SaleRecordProvenance = {
+  source_kind: string
+  source_id: string
+  generation: number
+  sale_id: number
+}
+
 export interface SaleRecord {
   /**
    * Stable across reloads and unique across sources. Source-prefixed because
@@ -246,6 +267,78 @@ export interface SaleRecordSaleRow {
   }>
   /** Reader-only marker produced by reconstructSaleCreation. */
   creation_unknown_fields?: string[]
+}
+
+function provenanceKey(value: SaleRecordProvenance): string {
+  return JSON.stringify([value.source_kind, value.source_id, value.generation, value.sale_id])
+}
+
+function detailsProvenance(raw: unknown): SaleRecordProvenance | null {
+  const details = parseDetails(raw)
+  const value = details?.record_event
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const row = value as Record<string, unknown>
+  const generation = Number(row.generation)
+  const saleId = Number(row.sale_id)
+  if (!text(row.source_kind) || !text(row.source_id) || !Number.isSafeInteger(generation) || generation < 0
+    || !Number.isSafeInteger(saleId) || saleId <= 0) return null
+  return {
+    source_kind: String(row.source_kind), source_id: String(row.source_id), generation, sale_id: saleId,
+  }
+}
+
+function validEventState(value: unknown): value is SaleRecordValueState {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const stateValue = value as Record<string, unknown>
+  if (stateValue.state === 'known_value') return Object.keys(stateValue).length === 2 && 'value' in stateValue
+  return (stateValue.state === 'known_none' || stateValue.state === 'unknown') && Object.keys(stateValue).length === 1
+}
+
+function eventChanges(raw: unknown): SaleRecordChange[] | null {
+  let parsed: unknown = raw
+  if (typeof raw === 'string') {
+    try { parsed = JSON.parse(raw) } catch (_) { return null }
+  }
+  if (!Array.isArray(parsed) || parsed.length < 1 || parsed.length > 12) return null
+  const fields = new Set<string>(SALE_RECORD_FIELDS)
+  const seen = new Set<string>()
+  const changes: SaleRecordChange[] = []
+  for (const candidate of parsed) {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return null
+    const change = candidate as Record<string, unknown>
+    const field = String(change.field || '')
+    if (!fields.has(field) || seen.has(field) || !validEventState(change.before) || !validEventState(change.after)
+      || JSON.stringify(change.before) === JSON.stringify(change.after)) return null
+    seen.add(field)
+    changes.push({ field: field as SaleRecordField, before: change.before, after: change.after })
+  }
+  return changes
+}
+
+function eventSource(sourceKind: string): SaleRecordSource {
+  if (sourceKind === 'sale_settlement') return 'mutation'
+  if (sourceKind === 'sale_bulk_status' || sourceKind === 'sale_bulk_update') return 'bulk'
+  if (sourceKind.startsWith('return_')) return 'return'
+  return 'audit'
+}
+
+export function saleRecordEventRecord(row: SaleRecordEventRow): SaleRecord | null {
+  if (!SALE_RECORD_KINDS.includes(row.kind as SaleRecordKind) || row.kind === 'legacy_sale_change') return null
+  const changes = eventChanges(row.changes_json)
+  if (!changes) return null
+  const at = text(row.occurred_at)
+  return {
+    id: `event:${row.id}`,
+    source: eventSource(String(row.source_kind)),
+    at,
+    at_ms: atMs(at),
+    actor_username: text(row.actor_username),
+    kind: row.kind as SaleRecordKind,
+    via: text(row.via),
+    subject: text(row.subject),
+    summary: 'Sale record changed',
+    changes,
+  }
 }
 
 /**
@@ -1179,6 +1272,10 @@ function itemValue(record: SaleRecord, snapshot: Record<string, unknown>): Recor
 }
 
 function publicRecord(record: SaleRecord): SaleRecord {
+  if (record.changes !== undefined) {
+    const { before: _before, after: _after, unknown_before_fields: _ub, unknown_after_fields: _ua, ...publicFields } = record
+    return publicFields
+  }
   const changes: SaleRecordChange[] = []
   const beforeNone = state(null)
   const after = record.after || {}
@@ -1298,6 +1395,7 @@ export function orderSaleRecords(records: SaleRecord[]): SaleRecord[] {
 
 export function buildSaleRecords(input: {
   sale: SaleRecordSaleRow
+  events?: SaleRecordEventRow[]
   ledger?: SaleRecordLedgerRow[]
   audit?: SaleRecordAuditRow[]
   bulk?: SaleRecordBulkRow[]
@@ -1312,6 +1410,15 @@ export function buildSaleRecords(input: {
   const records: SaleRecord[] = [creationSnapshot
     ? saleCreatedRecordFromSnapshot(input.sale, creationSnapshot)
     : saleCreatedRecord(reconstructSaleCreation(input))]
+  const eventRows = (input.events || []).filter((row) => String(row.sale_id) === String(input.sale.id))
+  const eventEntries = eventRows
+    .map((row) => ({ row, record: saleRecordEventRecord(row) }))
+    .filter((entry): entry is { row: SaleRecordEventRow; record: SaleRecord } => entry.record !== null)
+  const eventKeys = new Set(eventEntries.map(({ row }) => provenanceKey({
+    source_kind: String(row.source_kind), source_id: String(row.source_id),
+    generation: Number(row.generation), sale_id: Number(row.sale_id),
+  })))
+  for (const entry of eventEntries) records.push(entry.record)
   const missingReturnBulkReplays: Array<{
     original: SaleRecord | null
     firstSurviving: SaleRecord | null
@@ -1349,6 +1456,8 @@ export function buildSaleRecords(input: {
     .filter((row) => text(row.mutation_kind) === 'settlement' && text(row.id))
     .map((row) => String(row.id)))
   for (const row of input.audit || []) {
+    const provenance = detailsProvenance(row.details)
+    if (provenance && eventKeys.has(provenanceKey(provenance))) continue
     if (String(row.action || '') === 'sale_settlement') {
       const details = parseDetails(row.details) || {}
       if (durableSettlementIds.has(String(details.operationId || ''))) continue
@@ -1362,15 +1471,32 @@ export function buildSaleRecords(input: {
     if (record) records.push(record)
   }
   for (const row of input.mutations || []) {
-    records.push(...mutationRecords(row, input.mutationReplays || []))
+    mutationRecords(row, input.mutationReplays || []).forEach((record, generation) => {
+      const key = provenanceKey({ source_kind: 'sale_settlement', source_id: String(row.id), generation, sale_id: Number(input.sale.id) })
+      if (!eventKeys.has(key)) records.push(record)
+    })
   }
-  for (const row of input.bulk || []) records.push(...bulkRecords(row, input.sale.id, input.bulkReplays || []))
+  for (const row of input.bulk || []) {
+    const request = parseDetails(row.request_json) || {}
+    const sourceKind = text(request.target_status) ? 'sale_bulk_status' : 'sale_bulk_update'
+    bulkRecords(row, input.sale.id, input.bulkReplays || []).forEach((record, generation) => {
+      const key = provenanceKey({ source_kind: sourceKind, source_id: row.operation_id, generation, sale_id: Number(input.sale.id) })
+      if (!eventKeys.has(key)) records.push(record)
+    })
+  }
   const creationAuditedReturnIds = new Set<string>()
   for (const row of input.returnAudit || []) {
+    if (String(row.action || '') === 'create') creationAuditedReturnIds.add(String(row.return_id))
+    const provenance = detailsProvenance(row.details)
+    if (provenance && eventKeys.has(provenanceKey(provenance))) continue
     const record = returnAuditRecord(row)
     if (record) {
       records.push(record)
-      if (String(row.action || '') === 'create') creationAuditedReturnIds.add(String(row.return_id))
+    }
+  }
+  for (const { row } of eventEntries) {
+    if (row.source_kind === 'return_create' && String(row.source_id).startsWith('return:')) {
+      creationAuditedReturnIds.add(String(row.source_id).slice('return:'.length))
     }
   }
   const returnBulkGroups = new Map<string, SaleRecordReturnBulkEventRow[]>()
@@ -1384,11 +1510,28 @@ export function buildSaleRecords(input: {
     const emitted = rows
       .map((row) => ({ row, record: returnBulkEventRecord(row) }))
       .filter((entry): entry is { row: SaleRecordReturnBulkEventRow; record: SaleRecord } => entry.record !== null)
-    for (const entry of emitted) records.push(entry.record)
+    for (const entry of emitted) {
+      const provenance = detailsProvenance(entry.row.details)
+      const generation = String(entry.row.action || '') === 'return_fields_bulk' ? 0 : provenance?.generation
+      const key = generation === undefined ? null : provenanceKey({
+        source_kind: 'return_bulk', source_id: entry.row.operation_id,
+        generation, sale_id: Number(input.sale.id),
+      })
+      if (!key || !eventKeys.has(key)) records.push(entry.record)
+    }
 
     const generation = Math.max(0, ...rows.map((row) => Math.floor(numberOrNull(row.generation) || 0)))
     const surviving = emitted.filter((entry) => ['action_undo', 'action_redo'].includes(String(entry.row.action || '')))
-    const missingCount = Math.max(0, generation - surviving.length)
+      .filter((entry) => {
+        const provenance = detailsProvenance(entry.row.details)
+        return !provenance || !eventKeys.has(provenanceKey(provenance))
+      })
+    const durableReplayGenerations = new Set(eventEntries
+      .map((entry) => entry.row)
+      .filter((row) => row.source_kind === 'return_bulk' && row.source_id === rows[0]?.operation_id
+        && Number(row.generation) > 0 && Number(row.generation) <= generation)
+      .map((row) => Number(row.generation)))
+    const missingCount = Math.max(0, generation - durableReplayGenerations.size - surviving.length)
     const base = rows.find((row) => String(row.action || '') === 'return_fields_bulk') || rows[0]
     if (!base || missingCount === 0) continue
     const unknown: SaleRecord[] = []
@@ -1482,6 +1625,15 @@ export function buildSaleRecordsCountSql(placeholders: string): string {
           ))
       + (SELECT COUNT(*) FROM audit_logs a
         WHERE a.entity = 'sale' AND a.entity_id = CAST(s.id AS TEXT)
+          AND NOT EXISTS (
+            SELECT 1 FROM sale_record_events sre
+            WHERE json_valid(a.details)
+              AND sre.sale_id=s.id
+              AND sre.source_kind=json_extract(a.details,'$.record_event.source_kind')
+              AND sre.source_id=json_extract(a.details,'$.record_event.source_id')
+              AND sre.generation=json_extract(a.details,'$.record_event.generation')
+              AND sre.sale_id=json_extract(a.details,'$.record_event.sale_id')
+          )
           AND COALESCE(CASE WHEN json_valid(a.details) THEN json_extract(a.details, '$.action') END, '') <> 'amend'
           AND NOT (a.action IN ('action_undo','action_redo')
                    AND CASE WHEN json_valid(a.details) THEN json_extract(a.details, '$.applier') END = 'sale.add_items')
@@ -1500,10 +1652,22 @@ export function buildSaleRecordsCountSql(placeholders: string): string {
               AND json_extract(explicit.details, '$.operationId') = json_extract(a.details, '$.operationId')
           ))
       )
-      + COALESCE((SELECT SUM(1 + MAX(0, COALESCE(smr.generation,0)))
+      + (SELECT COUNT(*) FROM sale_record_events sre WHERE sre.sale_id=s.id)
+      + COALESCE((SELECT SUM(MAX(0, 1 + MAX(0, COALESCE(smr.generation,0)) - (
+          SELECT COUNT(*) FROM sale_record_events sre
+          WHERE sre.sale_id=s.id AND sre.source_kind='sale_settlement'
+            AND sre.source_id=smr.id AND sre.generation BETWEEN 0 AND MAX(0,COALESCE(smr.generation,0))
+        )))
         FROM sale_mutation_receipts smr
         WHERE smr.sale_id=s.id AND smr.mutation_kind='settlement'),0)
-      + COALESCE((SELECT SUM(1 + MAX(0, COALESCE(sbo.generation,0)))
+      + COALESCE((SELECT SUM(MAX(0, 1 + MAX(0, COALESCE(sbo.generation,0)) - (
+          SELECT COUNT(*) FROM sale_record_events sre
+          WHERE sre.sale_id=s.id
+            AND sre.source_kind=CASE
+              WHEN json_valid(sbo.request_json) AND json_extract(sbo.request_json,'$.target_status') IS NOT NULL
+                THEN 'sale_bulk_status' ELSE 'sale_bulk_update' END
+            AND sre.source_id=sbo.id AND sre.generation BETWEEN 0 AND MAX(0,COALESCE(sbo.generation,0))
+        )))
         FROM sale_bulk_members sbm
         JOIN sale_bulk_operations sbo ON sbo.id=sbm.operation_id
         WHERE sbm.sale_id = s.id),0)
@@ -1515,14 +1679,32 @@ export function buildSaleRecordsCountSql(placeholders: string): string {
             WHERE ra.entity = 'return' AND ra.entity_id = CAST(returns.id AS TEXT)
               AND ra.action = 'create'
           )
+          AND NOT EXISTS (
+            SELECT 1 FROM sale_record_events sre
+            WHERE sre.sale_id=s.id AND sre.source_kind='return_create'
+              AND sre.source_id='return:' || CAST(returns.id AS TEXT) AND sre.generation=0
+          )
       )
       + (SELECT COUNT(*) FROM audit_logs ra
         JOIN returns r ON ra.entity = 'return' AND ra.entity_id = CAST(r.id AS TEXT)
         WHERE r.sale_id = s.id
           AND COALESCE(r.return_scope, 'customer') = 'customer'
           AND ra.action IN ('create','update')
+          AND NOT EXISTS (
+            SELECT 1 FROM sale_record_events sre
+            WHERE json_valid(ra.details)
+              AND sre.sale_id=s.id
+              AND sre.source_kind=json_extract(ra.details,'$.record_event.source_kind')
+              AND sre.source_id=json_extract(ra.details,'$.record_event.source_id')
+              AND sre.generation=json_extract(ra.details,'$.record_event.generation')
+              AND sre.sale_id=json_extract(ra.details,'$.record_event.sale_id')
+          )
       )
-      + COALESCE((SELECT SUM(1 + MAX(0, COALESCE(ro.generation, 0)))
+      + COALESCE((SELECT SUM(MAX(0, 1 + MAX(0, COALESCE(ro.generation, 0)) - (
+          SELECT COUNT(*) FROM sale_record_events sre
+          WHERE sre.sale_id=s.id AND sre.source_kind='return_bulk'
+            AND sre.source_id=ro.id AND sre.generation BETWEEN 0 AND MAX(0,COALESCE(ro.generation,0))
+        )))
         FROM return_bulk_members m
         JOIN return_bulk_operations ro ON ro.id = m.operation_id
         JOIN action_history rh ON rh.id = ro.history_id
