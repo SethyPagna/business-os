@@ -137,6 +137,31 @@ async function main() {
     assert.equal(d1.db.prepare("SELECT COUNT(*) n FROM audit_logs WHERE action='merge_duplicate'").get().n, 1)
   }
 
+  for (const [label, mutate, verify] of [
+    ['second-fold keeper lot quantity',
+      (db) => db.prepare('UPDATE branch_batch_stock SET quantity=20 WHERE batch_id=99002 AND branch_id=1').run(),
+      (db) => assert.equal(db.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=99002 AND branch_id=1').get().quantity, 20)],
+    ['second-fold keeper lot key',
+      (db) => db.prepare("UPDATE product_batches SET batch_key='concurrent-key' WHERE id=99002").run(),
+      (db) => assert.equal(db.prepare('SELECT batch_key FROM product_batches WHERE id=99002').get().batch_key, 'concurrent-key')],
+  ]) {
+    const fixture = await prepareThreeMemberReview()
+    let injected = false
+    fixture.controls.beforeWriteBatch = (statements) => {
+      if (!injected && statements.some((statement) => Number(statement.params?.member) === 10002)) {
+        mutate(fixture.d1.db)
+        injected = true
+      }
+    }
+    const applied = await apply(fixture.app, fixture.review, fixture.finalized.manifest_digest)
+    assert.equal(applied.status, 200, label)
+    assert.equal(applied.body.interruption_code, 'merge_state_conflict', label)
+    assert.equal(applied.body.counts.committed_folds, 1, label)
+    assert.equal(fixture.d1.db.prepare('SELECT is_active FROM products WHERE id=10002').get().is_active, 1, label)
+    verify(fixture.d1.db)
+    assert.equal(fixture.d1.db.prepare("SELECT COUNT(*) n FROM audit_logs WHERE action='merge_duplicate'").get().n, 1, label)
+  }
+
   {
     const fixture = await prepareThreeMemberReview()
     const before = catalogState(fixture.d1)

@@ -6050,6 +6050,34 @@ function productConflictActionStockStateAssertion(
   }
 }
 
+function productConflictActionKeeperLotStateAssertion(
+  productId: number,
+  snapshot: ProductMergeCaseSnapshot,
+): AtomicMergeStatement {
+  const batchFields = ['id', 'variant_product_id', 'batch_key', 'lot_code', 'expiry_date', 'received_at', 'is_active', 'notes',
+    'synthetic', 'created_at', 'updated_at', 'batch_number', 'supplier_id', 'supplier_name', 'payment_status', 'credit_due_date',
+    'unit_cost_usd', 'received_quantity', 'received_branch_id', 'received_cost_usd'] as const
+  const stockFields = ['id', 'batch_id', 'branch_id', 'quantity', 'created_at', 'updated_at'] as const
+  const batches = snapshot.canonicalBatchRows.map((row) => Object.fromEntries(batchFields.map((field) => [field, row[field] ?? null])))
+  const stock = snapshot.canonicalBatchStockRows.map((row) => Object.fromEntries(stockFields.map((field) => [field, row[field] ?? null])))
+  const batchMatch = batchFields.map((field) => `pb.${field} IS json_extract(expected.value,'$.${field}')`).join('\n            AND ')
+  const stockMatch = stockFields.map((field) => `bbs.${field} IS json_extract(expected.value,'$.${field}')`).join('\n            AND ')
+  return {
+    sql: `SELECT CASE WHEN
+      (SELECT COUNT(*) FROM product_batches WHERE variant_product_id=@product)=json_array_length(json(@batchesJson))
+      AND NOT EXISTS(SELECT 1 FROM json_each(json(@batchesJson)) expected WHERE NOT EXISTS(
+        SELECT 1 FROM product_batches pb WHERE pb.variant_product_id=@product AND ${batchMatch}
+      ))
+      AND (SELECT COUNT(*) FROM branch_batch_stock bbs JOIN product_batches pb ON pb.id=bbs.batch_id
+        WHERE pb.variant_product_id=@product)=json_array_length(json(@stockJson))
+      AND NOT EXISTS(SELECT 1 FROM json_each(json(@stockJson)) expected WHERE NOT EXISTS(
+        SELECT 1 FROM branch_batch_stock bbs JOIN product_batches pb ON pb.id=bbs.batch_id
+        WHERE pb.variant_product_id=@product AND ${stockMatch}
+      )) THEN 1 ELSE json_extract('', '$') END AS product_conflict_keeper_lot_state_guard`,
+    params: { product: productId, batchesJson: JSON.stringify(batches), stockJson: JSON.stringify(stock) },
+  }
+}
+
 function productConflictActionExpectedKeeperStock(
   detail: ProductConflictActionGroupPlan,
   keeperId: number,
@@ -6382,6 +6410,21 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
   }
   const firstFold = !group.action_history_id
   const preparedSnapshot = await readProductMergeCaseSnapshot(db, plan.keeper_id, member.product_id, MERGE_REPARENT_TABLES)
+  if (!firstFold) {
+    const prior = [...members].reverse().find((candidate) => candidate.role === 'merged'
+      && candidate.status === 'undo_ready' && candidate.undo_snapshot_id)
+    const priorSnapshot = prior?.undo_snapshot_id
+      ? await db.prepare(`SELECT payload_json FROM undo_snapshots WHERE id=@snapshot AND kind=@kind AND status='applied'`)
+        .get<{ payload_json: string }>({ snapshot: prior.undo_snapshot_id, kind: PRODUCT_MERGE_GROUP_CHILD_KIND })
+      : null
+    let priorReversal: (MergeReversal & { fingerprintPending?: unknown; mergedStateFingerprint?: unknown }) | null = null
+    try { priorReversal = priorSnapshot ? JSON.parse(priorSnapshot.payload_json) : null } catch { priorReversal = null }
+    if (!priorReversal || priorReversal.fingerprintPending !== false || typeof priorReversal.mergedStateFingerprint !== 'string'
+      || await mergeStateFingerprint(db, [priorReversal]) !== priorReversal.mergedStateFingerprint) {
+      throw new ProductConflictActionApplyStop('merge_state_conflict',
+        'The reviewed keeper graph changed after the prior committed fold.', 409)
+    }
+  }
   const expectedKeeperStock = productConflictActionExpectedKeeperStock(detail, plan.keeper_id, members)
   if (!productConflictOriginalMemberMatches(detail, member.product_id, duplicate)
     || (firstFold
@@ -6418,7 +6461,8 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
       member: member.product_id, memberOperation: member.operation_id, keeper: plan.keeper_id },
   }, productConflictActionSourceStateAssertion(detail, member.product_id),
   productConflictActionStockStateAssertion(plan.keeper_id, preparedSnapshot.canonicalStockBefore),
-  productConflictActionStockStateAssertion(member.product_id, preparedSnapshot.duplicateStockRows)]
+  productConflictActionStockStateAssertion(member.product_id, preparedSnapshot.duplicateStockRows),
+  productConflictActionKeeperLotStateAssertion(plan.keeper_id, preparedSnapshot)]
   if (firstFold) preStatements.push(productConflictActionSourceStateAssertion(detail, plan.keeper_id))
   let foldResult: Awaited<ReturnType<typeof foldDuplicateProductInto>>
   try {
