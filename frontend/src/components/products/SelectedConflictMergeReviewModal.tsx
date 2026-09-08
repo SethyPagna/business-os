@@ -9,6 +9,8 @@ import { useApp as useAppHook } from '../../AppContext.tsx'
 import type {
   SelectedConflictGroupReviewGroup,
   SelectedConflictGroupReviewResult,
+  SelectedConflictGroupFinalizeResult,
+  SelectedConflictGroupApplyResult,
   SelectedConflictMergeApplyResult,
   SelectedConflictMergePreviewCase,
   SelectedConflictMergePreviewResult,
@@ -20,6 +22,7 @@ import {
 } from '../../utils/selectedConflictMerge.ts'
 import {
   selectedConflictGroupLoadedProgress,
+  selectedConflictGroupChoicesComplete,
   selectedConflictGroupSourceValue,
   type SelectedConflictGroupResolutionChoice,
 } from '../../utils/selectedConflictActionReview.ts'
@@ -346,9 +349,18 @@ type GroupReviewProps = {
   pageIndex: number
   choices: Readonly<Record<string, SelectedConflictGroupResolutionChoice | undefined>>
   working: boolean
+  finalized: SelectedConflictGroupFinalizeResult | null
+  applyResult: SelectedConflictGroupApplyResult | null
+  appliedGroups: SelectedConflictGroupApplyResult['groups']
+  appliedRemovals: SelectedConflictGroupApplyResult['removals']
+  applyError: { code: string; message: string } | null
+  unknownOutcome: boolean
   onChoice: (groupKey: string, patch: Partial<SelectedConflictGroupResolutionChoice>) => void
   onPreviousPage: () => void
   onNextPage: () => void
+  onFinalize: () => Promise<boolean>
+  onApply: () => void
+  onResume: () => void
   onClose: () => void
   t: Translate
 }
@@ -379,7 +391,7 @@ function GroupMoneyRows({ group, t }: { group: SelectedConflictGroupReviewGroup;
 
 function GroupSourceSelect({ label, field, ids, group, choice, disabled, onChoice, t }: {
   label: string
-  field: 'barcode_source_id' | 'category_source_id' | 'brand_source_id' | 'unit_source_id'
+  field: 'category_source_id' | 'brand_source_id' | 'unit_source_id'
   ids: number[]
   group: SelectedConflictGroupReviewGroup
   choice: SelectedConflictGroupResolutionChoice | undefined
@@ -387,7 +399,7 @@ function GroupSourceSelect({ label, field, ids, group, choice, disabled, onChoic
   onChoice: (patch: Partial<SelectedConflictGroupResolutionChoice>) => void
   t: Translate
 }) {
-  const sourceField = field.replace('_source_id', '') as 'barcode' | 'category' | 'brand' | 'unit'
+  const sourceField = field.replace('_source_id', '') as 'category' | 'brand' | 'unit'
   const selected = choice?.[field]
   const tr = (key: string, fallback: string) => {
     const translated = t(key)
@@ -408,9 +420,51 @@ function GroupSourceSelect({ label, field, ids, group, choice, disabled, onChoic
   )
 }
 
-function GroupReviewCard({ group, choice, onChoice, t }: {
+function GroupBarcodeSelect({ group, choice, disabled, onChoice, t }: {
   group: SelectedConflictGroupReviewGroup
   choice: SelectedConflictGroupResolutionChoice | undefined
+  disabled: boolean
+  onChoice: (patch: Partial<SelectedConflictGroupResolutionChoice>) => void
+  t: Translate
+}) {
+  const tr = (key: string, fallback: string) => {
+    const translated = t(key)
+    return translated && translated !== key ? translated : fallback
+  }
+  const value = choice?.barcode?.mode === 'member'
+    ? `member:${choice.barcode.source_product_id}`
+    : choice?.barcode?.mode || ''
+  return (
+    <label className="block text-xs">
+      <span className="mb-1 block font-medium text-gray-600 dark:text-gray-300">{tr('barcode', 'Barcode')}</span>
+      <select
+        className="input w-full text-xs"
+        value={value}
+        disabled={disabled}
+        onChange={(event) => {
+          if (event.target.value === 'canonical') onChoice({ barcode: { mode: 'canonical' } })
+          else if (event.target.value === 'clear') onChoice({ barcode: { mode: 'clear' } })
+          else if (event.target.value.startsWith('member:')) onChoice({ barcode: { mode: 'member', source_product_id: Number(event.target.value.slice(7)) } })
+          else onChoice({ barcode: undefined })
+        }}
+      >
+        <option value="">{tr('selected_conflict_choose_barcode', 'Choose barcode result')}</option>
+        {group.eligibility_basis === 'barcode' ? <option value="canonical">{tr('selected_conflict_canonical_barcode', 'Use canonical shared barcode')}</option> : null}
+        {group.options.barcode_source_ids.map((id) => {
+          const member = group.members.find((item) => item.id === id)
+          const barcode = selectedConflictGroupSourceValue(group.members, id, 'barcode')
+          return <option key={id} value={`member:${id}`}>#{id} · {barcode || tr('selected_conflict_blank', 'Blank')} · {member?.name || tr('unknown', 'Unknown')}</option>
+        })}
+        <option value="clear">{tr('selected_conflict_clear_barcode', 'Clear barcode')}</option>
+      </select>
+    </label>
+  )
+}
+
+function GroupReviewCard({ group, choice, choicesFrozen, onChoice, t }: {
+  group: SelectedConflictGroupReviewGroup
+  choice: SelectedConflictGroupResolutionChoice | undefined
+  choicesFrozen: boolean
   onChoice: (patch: Partial<SelectedConflictGroupResolutionChoice>) => void
   t: Translate
 }) {
@@ -419,7 +473,7 @@ function GroupReviewCard({ group, choice, onChoice, t }: {
     const translated = t(key)
     return translated && translated !== key ? translated : fallback
   }
-  const disabled = Boolean(group.blocked)
+  const disabled = Boolean(group.blocked) || choicesFrozen
   return (
     <section className="rounded-xl border border-gray-200 p-3 dark:border-zinc-700" data-group-key={group.group_key}>
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -427,8 +481,8 @@ function GroupReviewCard({ group, choice, onChoice, t }: {
           <h3 className="text-sm font-semibold text-gray-900 dark:text-white">{group.eligibility_value || group.group_key}</h3>
           <p className="text-[11px] text-gray-500 dark:text-gray-400">{group.member_ids.length} {tr('selected_conflict_members', 'products')} · {group.eligibility_basis ? tr(`selected_conflict_basis_${group.eligibility_basis}`, group.eligibility_basis) : tr('unknown', 'Unknown')}</p>
         </div>
-        <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${disabled ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-200' : 'bg-blue-100 text-blue-700 dark:bg-blue-950/50 dark:text-blue-200'}`}>
-          {disabled ? tr(`selected_conflict_${group.blocked?.code}`, group.blocked?.message || tr('selected_conflict_blocked', 'Blocked')) : tr('selected_conflict_action_merge', 'Merge')}
+        <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${group.blocked ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-200' : 'bg-blue-100 text-blue-700 dark:bg-blue-950/50 dark:text-blue-200'}`}>
+          {group.blocked ? tr(`selected_conflict_${group.blocked.code}`, group.blocked.message || tr('selected_conflict_blocked', 'Blocked')) : tr('selected_conflict_action_merge', 'Merge')}
         </span>
       </div>
 
@@ -479,7 +533,7 @@ function GroupReviewCard({ group, choice, onChoice, t }: {
             </select>
           </label>
           <div className="grid gap-2 sm:grid-cols-2">
-            <GroupSourceSelect label={tr('barcode', 'Barcode')} field="barcode_source_id" ids={group.options.barcode_source_ids} group={group} choice={choice} disabled={disabled} onChoice={onChoice} t={t} />
+            <GroupBarcodeSelect group={group} choice={choice} disabled={disabled} onChoice={onChoice} t={t} />
             <GroupSourceSelect label={tr('category', 'Category')} field="category_source_id" ids={group.options.category_source_ids} group={group} choice={choice} disabled={disabled} onChoice={onChoice} t={t} />
             <GroupSourceSelect label={tr('brand', 'Brand')} field="brand_source_id" ids={group.options.brand_source_ids} group={group} choice={choice} disabled={disabled} onChoice={onChoice} t={t} />
             <GroupSourceSelect label={tr('unit', 'Unit')} field="unit_source_id" ids={group.options.unit_source_ids} group={group} choice={choice} disabled={disabled} onChoice={onChoice} t={t} />
@@ -496,7 +550,54 @@ function GroupReviewCard({ group, choice, onChoice, t }: {
   )
 }
 
-export function SelectedConflictGroupReviewModal({ pages, pageIndex, choices, working, onChoice, onPreviousPage, onNextPage, onClose, t }: GroupReviewProps) {
+function RemovalReviewCard({ removal, t }: {
+  removal: SelectedConflictGroupReviewResult['page']['removals'][number]
+  t: Translate
+}) {
+  const tr = (key: string, fallback: string) => {
+    const translated = t(key)
+    return translated && translated !== key ? translated : fallback
+  }
+  const product = removal.product || {}
+  const productName = String(product.name || `#${removal.product_id}`)
+  const barcode = String(product.barcode || '')
+  return (
+    <section className="rounded-xl border border-rose-200 p-3 dark:border-rose-900/60" data-removal-product-id={removal.product_id}>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-900 dark:text-white">#{removal.product_id} · {productName}</h3>
+          <p className="text-[11px] text-gray-500 dark:text-gray-400">{tr('barcode', 'Barcode')}: {barcode || tr('selected_conflict_blank', 'Blank')}</p>
+        </div>
+        <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${removal.blocker ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-200' : 'bg-rose-100 text-rose-700 dark:bg-rose-950/50 dark:text-rose-200'}`}>
+          {removal.blocker ? tr('selected_conflict_blocked', 'Blocked') : tr('selected_conflict_remove_independently', 'Remove independently')}
+        </span>
+      </div>
+      <p className="mt-2 rounded-lg bg-gray-50 p-2 text-xs text-gray-700 dark:bg-zinc-900 dark:text-gray-200"><strong>{tr('reason', 'Reason')}:</strong> {removal.reason}</p>
+      {removal.blocker ? <p className="mt-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-900 dark:bg-amber-950/30 dark:text-amber-100">{removal.blocker.message}</p> : null}
+      <div className="mt-2 grid gap-2 text-[11px] sm:grid-cols-2">
+        <div className="rounded-lg bg-gray-50 p-2 dark:bg-zinc-900">
+          <p className="font-semibold">{tr('stock', 'Stock')}</p>
+          {removal.branch_stock.length ? removal.branch_stock.map((row, index) => (
+            <p key={index}>{String(row.branch_name || `#${row.branch_id || '?'}`)}: {String(row.quantity ?? 0)}</p>
+          )) : <p>{tr('selected_conflict_no_stock_rows', 'No branch stock')}</p>}
+        </div>
+        <div className="rounded-lg bg-gray-50 p-2 dark:bg-zinc-900">
+          <p className="font-semibold">{tr('selected_conflict_lots', 'Lots')}</p>
+          {removal.batches.length ? removal.batches.map((batch, index) => (
+            <p key={index}>{String(batch.lot_code || batch.batch_key || `#${batch.id || '?'}`)} · {String(batch.supplier_name || tr('unknown', 'Unknown'))} · {String(batch.received_at || tr('unknown', 'Unknown'))} · {String(batch.expiry_date || tr('unknown', 'Unknown'))}</p>
+          )) : <p>{tr('selected_conflict_no_lots', 'No lots')}</p>}
+        </div>
+      </div>
+      <p className="mt-2 text-[11px] text-rose-700 dark:text-rose-300">{tr('selected_conflict_remove_effect', 'This clears current stock and deactivates the product while preserving transaction and history records. Undo restores the same product identity.')}</p>
+    </section>
+  )
+}
+
+export function SelectedConflictGroupReviewModal({
+  pages, pageIndex, choices, working, finalized, applyResult, appliedGroups, appliedRemovals,
+  applyError, unknownOutcome, onChoice, onPreviousPage, onNextPage, onFinalize, onApply, onResume, onClose, t,
+}: GroupReviewProps) {
+  const [confirmOpen, setConfirmOpen] = useState(false)
   const review = pages[pageIndex]
   if (!review) return null
   const tr = (key: string, fallback: string) => {
@@ -505,41 +606,121 @@ export function SelectedConflictGroupReviewModal({ pages, pageIndex, choices, wo
   }
   const progress = selectedConflictGroupLoadedProgress(
     pages.map((item) => item.page),
-    review.counts.actionable_groups + review.counts.blocked_groups,
+    review.counts.actionable_groups + review.counts.blocked_groups + review.counts.requested_removals,
   )
+  const allGroups = pages.flatMap((item) => item.page.groups)
+  const allChoicesComplete = selectedConflictGroupChoicesComplete(allGroups, choices)
   const canGoNext = pageIndex < pages.length - 1 || review.page.next_cursor != null
+  const canFinalize = progress.complete && allChoicesComplete && !working && !finalized
+  const canResume = Boolean(finalized) && !working && applyError?.code !== 'review_reversed'
+    && (unknownOutcome || (!applyError && Boolean(applyResult?.continuation_required)))
+  const processed = applyResult
+    ? applyResult.counts.committed_folds + applyResult.counts.completed_removals + applyResult.counts.approval_pending_removals
+    : 0
+  const totalWork = finalized ? finalized.counts.merge_folds + Number(finalized.counts.ready_removals || 0) : 0
+  const prepareConfirmation = async () => {
+    const ready = finalized ? true : await onFinalize()
+    if (ready) setConfirmOpen(true)
+  }
   return (
-    <Modal title={tr('selected_conflict_group_review_title', 'Review selected product groups')} onClose={onClose} size="xl" draggable unsavedChanges={{ dirty: Object.keys(choices).length > 0 }}>
-      <div className="space-y-3">
-        <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-100">
-          <p>{tr('selected_conflict_group_review_intro', 'This is one server-saved review for every selected group. Move through the pages and choose the kept product and source values.')}</p>
-          <p className="mt-1 text-xs font-medium">{tr('selected_conflict_phase_one_notice', 'Review only: Apply and Remove will become available after the protected write and Undo workflow is complete.')}</p>
-        </div>
-        <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
-          <div className="rounded bg-gray-100 p-2 dark:bg-zinc-800">{tr('selected_conflict_requested_groups', 'Requested')}<strong className="block text-base">{review.counts.requested_groups}</strong></div>
-          <div className="rounded bg-emerald-50 p-2 dark:bg-emerald-950/30">{tr('selected_conflict_actionable_groups', 'Actionable')}<strong className="block text-base">{review.counts.actionable_groups}</strong></div>
-          <div className="rounded bg-amber-50 p-2 dark:bg-amber-950/30">{tr('selected_conflict_blocked_groups', 'Blocked')}<strong className="block text-base">{review.counts.blocked_groups}</strong></div>
-          <div className="rounded bg-gray-100 p-2 dark:bg-zinc-800">{tr('selected_conflict_members', 'Products')}<strong className="block text-base">{review.counts.total_members}</strong></div>
-        </div>
-        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500 dark:text-gray-400">
-          <span>{tr('selected_conflict_review_id', 'Review')} {review.review_id} · {tr('selected_conflict_loaded_progress', 'loaded')} {progress.loaded}/{progress.total ?? tr('unknown', 'Unknown')}</span>
-          <span>{tr('selected_conflict_page', 'Page')} {pageIndex + 1}/{pages.length}{progress.complete ? ` · ${tr('selected_conflict_review_complete', 'Complete')}` : ''}</span>
-        </div>
-        {review.page.groups.map((group) => <GroupReviewCard key={`${review.review_id}-${group.ordinal}`} group={group} choice={choices[group.group_key]} onChoice={(patch) => onChoice(group.group_key, patch)} t={t} />)}
-        {!review.page.groups.length ? <p className="rounded-lg bg-gray-50 p-3 text-sm text-gray-500 dark:bg-zinc-900 dark:text-gray-400">{tr('selected_conflict_empty_page', 'No groups are on this page.')}</p> : null}
-        <div className="sticky bottom-0 -mx-3 -mb-3 flex flex-wrap items-center justify-between gap-2 border-t border-gray-200 bg-white px-3 py-3 dark:border-zinc-700 dark:bg-gray-800 sm:-mx-4 sm:-mb-4 sm:px-4">
-          <div className="flex gap-2">
-            <button type="button" className="btn-secondary px-3 py-2 text-sm" disabled={working || pageIndex === 0} onClick={onPreviousPage}>{tr('previous', 'Previous')}</button>
-            <button type="button" className="btn-secondary px-3 py-2 text-sm" disabled={working || !canGoNext} onClick={onNextPage}>{working ? tr('loading', 'Loading...') : tr('next', 'Next')}</button>
+    <>
+      <Modal
+        title={tr('selected_conflict_group_review_title', 'Review selected product actions')}
+        onClose={onClose}
+        size="xl"
+        draggable
+        unsavedChanges={{
+          dirty: finalized
+            ? (!applyResult || applyResult.continuation_required || applyResult.status === 'interrupted' || unknownOutcome || Boolean(applyError))
+            : Object.keys(choices).length > 0,
+        }}
+      >
+        <div className="space-y-3">
+          <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-100">
+            <p>{tr('selected_conflict_group_review_intro', 'This is one server-saved review for every selected merge and independent removal. Inspect every page before applying.')}</p>
+            <p className="mt-1 text-xs font-medium">{tr('selected_conflict_one_confirmation_notice', 'After every page and choice is complete, one confirmation applies the frozen review through bounded resumable steps.')}</p>
           </div>
-          <div className="flex gap-2">
-            <ModalCloseContext.Consumer>
-              {(requestClose) => <button type="button" className="btn-secondary px-3 py-2 text-sm" onClick={requestClose || onClose}>{tr('close', 'Close')}</button>}
-            </ModalCloseContext.Consumer>
-            <button type="button" className="btn-primary px-3 py-2 text-sm opacity-50" disabled title={tr('selected_conflict_phase_one_notice', 'Review only')}>{tr('selected_conflict_apply_unavailable', 'Apply unavailable')}</button>
+          <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-5">
+            <div className="rounded bg-gray-100 p-2 dark:bg-zinc-800">{tr('selected_conflict_requested_actions', 'Actions')}<strong className="block text-base">{review.counts.requested_actions}</strong></div>
+            <div className="rounded bg-gray-100 p-2 dark:bg-zinc-800">{tr('selected_conflict_requested_groups', 'Merge groups')}<strong className="block text-base">{review.counts.requested_groups}</strong></div>
+            <div className="rounded bg-rose-50 p-2 dark:bg-rose-950/30">{tr('selected_conflict_requested_removals', 'Removals')}<strong className="block text-base">{review.counts.requested_removals}</strong></div>
+            <div className="rounded bg-amber-50 p-2 dark:bg-amber-950/30">{tr('selected_conflict_blocked_groups', 'Blocked groups')}<strong className="block text-base">{review.counts.blocked_groups}</strong></div>
+            <div className="rounded bg-gray-100 p-2 dark:bg-zinc-800">{tr('selected_conflict_members', 'Products')}<strong className="block text-base">{review.counts.total_members}</strong></div>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500 dark:text-gray-400">
+            <span>{tr('selected_conflict_review_id', 'Review')} {review.review_id} · {tr('selected_conflict_loaded_progress', 'loaded')} {progress.loaded}/{progress.total ?? tr('unknown', 'Unknown')}</span>
+            <span>{tr('selected_conflict_page', 'Page')} {pageIndex + 1}/{pages.length}{progress.complete ? ` · ${tr('selected_conflict_review_complete', 'Complete')}` : ''}</span>
+          </div>
+
+          {finalized ? (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-100">
+              <strong>{tr('selected_conflict_review_frozen', 'Review frozen')}</strong> · {finalized.counts.ready_groups} {tr('selected_conflict_merge_groups', 'merge groups')} · {Number(finalized.counts.ready_removals || 0)} {tr('selected_conflict_requested_removals', 'removals')} · {totalWork} {tr('selected_conflict_work_steps', 'protected steps')}
+            </div>
+          ) : null}
+          {applyResult ? (
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-100">
+              <strong>{tr(`selected_conflict_status_${applyResult.status}`, applyResult.status)}</strong> · {processed}/{totalWork} {tr('selected_conflict_processed', 'processed')}
+              {applyResult.approval_required ? <p className="mt-1 font-medium">{tr('selected_conflict_group_approval_pending', 'Removal requests are pending approval; they are not reported as completed.')}</p> : null}
+            </div>
+          ) : null}
+          {applyError ? (
+            <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100">
+              <strong>{applyError.code === 'review_reversed' ? tr('selected_conflict_review_reversed', 'Review reversed') : tr('selected_conflict_apply_interrupted', 'Apply stopped')}</strong>
+              <p>{applyError.message}</p>
+              {applyError.code === 'review_reversed' ? <p className="mt-1">{tr('selected_conflict_review_reversed_help', 'Redo the visible group action from History or close this review and start a new one.')}</p> : null}
+              {unknownOutcome ? <p className="mt-1">{tr('selected_conflict_unknown_outcome', 'The last request may have committed. Resume uses the same review receipt and request ID.')}</p> : null}
+            </div>
+          ) : null}
+
+          {review.page.groups.map((group) => <GroupReviewCard key={`${review.review_id}-${group.ordinal}`} group={group} choice={choices[group.group_key]} choicesFrozen={Boolean(finalized)} onChoice={(patch) => onChoice(group.group_key, patch)} t={t} />)}
+          {review.page.removals.map((removal) => <RemovalReviewCard key={`${review.review_id}-remove-${removal.action_ordinal}`} removal={removal} t={t} />)}
+          {!review.page.groups.length && !review.page.removals.length ? <p className="rounded-lg bg-gray-50 p-3 text-sm text-gray-500 dark:bg-zinc-900 dark:text-gray-400">{tr('selected_conflict_empty_page', 'No actions are on this page.')}</p> : null}
+
+          {appliedGroups.length || appliedRemovals.length ? (
+            <div className="rounded-xl border border-gray-200 p-3 text-xs dark:border-zinc-700">
+              <h3 className="font-semibold">{tr('selected_conflict_current_receipts', 'Receipts from this apply')}</h3>
+              {appliedGroups.map((row) => <p key={row.group_key}>{tr('selected_conflict_action_merge', 'Merge')} · {row.group_key} · {row.status} · {row.processed_folds} {tr('selected_conflict_folds', 'folds')}</p>)}
+              {appliedRemovals.map((row) => <p key={row.action_ordinal}>{tr('selected_conflict_remove_independently', 'Remove')} · #{row.product_id} · {row.status === 'approval_pending' ? tr('selected_conflict_pending_approval', 'Pending approval') : tr('selected_conflict_undo_ready', 'Undo ready')}</p>)}
+            </div>
+          ) : null}
+
+          <div className="sticky bottom-0 -mx-3 -mb-3 flex flex-wrap items-center justify-between gap-2 border-t border-gray-200 bg-white px-3 py-3 dark:border-zinc-700 dark:bg-gray-800 sm:-mx-4 sm:-mb-4 sm:px-4">
+            <div className="flex gap-2">
+              <button type="button" className="btn-secondary px-3 py-2 text-sm" disabled={working || pageIndex === 0} onClick={onPreviousPage}>{tr('previous', 'Previous')}</button>
+              <button type="button" className="btn-secondary px-3 py-2 text-sm" disabled={working || !canGoNext} onClick={onNextPage}>{working ? tr('loading', 'Loading...') : tr('next', 'Next')}</button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <ModalCloseContext.Consumer>
+                {(requestClose) => <button type="button" className="btn-secondary px-3 py-2 text-sm" onClick={requestClose || onClose}>{tr('close', 'Close')}</button>}
+              </ModalCloseContext.Consumer>
+              {canResume ? <button type="button" className="btn-secondary px-3 py-2 text-sm" onClick={onResume}>{tr('selected_conflict_resume_same_review', 'Resume same review')}</button> : null}
+              {!applyResult || applyResult.continuation_required ? (
+                <button type="button" className="btn-primary px-3 py-2 text-sm disabled:opacity-40" disabled={working || (!finalized && !canFinalize)} onClick={() => { void prepareConfirmation() }}>
+                  {working ? tr('saving', 'Saving...') : finalized ? tr('selected_conflict_apply_button', 'Apply reviewed actions') : tr('selected_conflict_continue_confirmation', 'Continue to confirmation')}
+                </button>
+              ) : null}
+            </div>
           </div>
         </div>
-      </div>
-    </Modal>
+      </Modal>
+
+      {confirmOpen ? (
+        <ConfirmDialog
+          layer="nested"
+          title={tr('selected_conflict_confirm_title', 'Confirm reviewed product actions')}
+          message={tr('selected_conflict_confirm_message', 'This applies the complete frozen review. It may continue in bounded steps without asking again.')}
+          items={[
+            { label: tr('selected_conflict_merge_groups', 'Merge groups'), value: finalized?.counts.ready_groups ?? 0 },
+            { label: tr('selected_conflict_requested_removals', 'Removals'), value: finalized?.counts.ready_removals ?? 0 },
+            { label: tr('selected_conflict_folds', 'Merge folds'), value: finalized?.counts.merge_folds ?? 0 },
+          ]}
+          note={tr('selected_conflict_confirm_note', 'Every committed merge or removal has a stable receipt and an Undo path; approval-pending removals remain unchanged.')}
+          confirmLabel={tr('selected_conflict_apply_button', 'Apply reviewed actions')}
+          onConfirm={() => { setConfirmOpen(false); onApply() }}
+          onClose={() => setConfirmOpen(false)}
+          t={t}
+        />
+      ) : null}
+    </>
   )
 }
