@@ -842,6 +842,14 @@ export default function ProductDuplicatesTab({ t, notify }: {
                 <EyeOff className="mr-1 inline h-3.5 w-3.5" />
                 {bulkBusy ? (t('saving') || 'Saving...') : (t('duplicates_bulk_dismiss_action') || 'Dismiss selected')}
               </button>
+              <button
+                type="button"
+                disabled
+                title={t('selected_conflict_remove_phase_notice') || 'Remove is unavailable until its stock clearing, history preservation, audit, and Undo path is complete.'}
+                className="btn-secondary px-2.5 py-1 text-xs opacity-50"
+              >
+                {t('selected_conflict_remove_unavailable') || 'Remove unavailable'}
+              </button>
             </div>
           ) : null}
 

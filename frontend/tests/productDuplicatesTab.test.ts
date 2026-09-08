@@ -47,6 +47,8 @@ test('N-row selections can open one durable paged review without replacing the l
   assert.match(src, /<SelectedConflictGroupReviewModal/)
   assert.match(src, /selected_conflict_group_review_action/)
   assert.match(src, /selected_conflict_merge_exact_pairs/, 'the existing pair-only write remains separately available')
+  assert.match(src, /disabled\s*\n\s*title=\{t\('selected_conflict_remove_phase_notice'/, 'Remove is a distinct but unavailable action until its own authority, stock clearing, audit, and Undo path exists')
+  assert.match(src, /selected_conflict_remove_unavailable[\s\S]*duplicates_bulk_dismiss_action|duplicates_bulk_dismiss_action[\s\S]*selected_conflict_remove_unavailable/, 'Remove is never mislabeled as the non-destructive Dismiss action')
   assert.match(src, /groupReviewRequestRef[\s\S]*batchRequestRef/, 'read-only paging and legacy writes have independent cancellation ownership')
 })
 
