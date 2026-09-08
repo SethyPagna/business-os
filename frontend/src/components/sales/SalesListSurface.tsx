@@ -8,9 +8,11 @@ import ColumnChooser from '../shared/ColumnChooser.tsx'
 import { useColumnPreferences } from '../shared/useColumnPreferences.ts'
 import { resolveDriverLabel } from '../../utils/salesDriverLabel.ts'
 import { SALES_COLUMNS_SURFACE_KEY, SALES_OPTIONAL_COLUMNS } from './salesListColumns.ts'
+import { useApp as useAppHook } from '../../AppContext.tsx'
 
 type TranslateFn = (key: string) => string
 type MoneyFormatter = (value: number | string) => string
+const useApp = useAppHook as unknown as () => { can: (section: string, action?: string) => boolean }
 
 interface SaleItem {
   id?: number | string
@@ -138,6 +140,10 @@ export default function SalesListSurface({
   toggleSelectAll,
   toggleSelectionScope,
 }: SalesListSurfaceProps) {
+  // Bulk selection is its own authority. Individual status/customer/amend
+  // grants must not make long-press multi-select available to an Employee.
+  const { can } = useApp()
+  selectionModeActive = selectionModeActive && can('sales', 'bulk')
   const skeletonRows = Array.from({ length: 8 }, (_, index) => index)
   const mobileSkeletonCards = Array.from({ length: 4 }, (_, index) => index)
   // 11.1: the checkbox column only takes space in select mode; out of it
@@ -503,17 +509,13 @@ export default function SalesListSurface({
                             <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-gray-500">
                               <span className="font-medium text-gray-700 dark:text-gray-300">{sale.customer_name?.trim() || (t('walk_in') || 'Walk-in')}</span>
                               {sale.customer_phone?.trim() ? <span className="text-gray-400">{sale.customer_phone}</span> : null}
-                              {/* N23: the driver is NAMED here. Cashier,
-                                  branch and driver shared one unlabeled
-                                  pipe-separated line, so a bare "Sok Dara"
-                                  could equally have been the cashier -- the
-                                  desktop table has a column header to say
-                                  which, the card had nothing. The N/A
-                                  placeholder is a TABLE convention (an empty
-                                  cell reads as a bug); a card elides an
-                                  empty field, as cashier and branch beside
-                                  it already do. */}
-                              {driverLabel ? <span>| {t('driver')}: {driverLabel}</span> : null}
+                              {/* U22: phone and delivery stay on one compact
+                                  contact line. The driver's actual name is the
+                                  useful fact here; the repeated "Driver" label
+                                  made this phone row read like another form.
+                                  Assistive text still identifies the value as
+                                  delivery information. */}
+                              {driverLabel ? <><span aria-hidden="true">|</span><span aria-label={`${t('delivery') || 'Delivery'}: ${driverLabel}`}>{driverLabel}</span></> : null}
                             </div>
                             {/* Third row on small screens (user, Aug 30):
                                 status + payment get their OWN line, and the

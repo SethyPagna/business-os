@@ -992,6 +992,7 @@ export default function SaleDetailModal({
   // rows, on the same label/value rhythm as everything else there.
   const deliveryDriverName = sanitizeSaleDetailText(sale.delivery_contact_name)
   const deliveryDriverPhone = sanitizeSaleDetailText(sale.delivery_contact_phone)
+  const customerIsAnonymous = isAnonymousCustomerIdentity(sale)
   // N21 (owner, Sep 6 2026): "i see the customer show delivery address and
   // address. just keep address ... because in sales only show address." The
   // Customer card used to carry BOTH an Address row and a Delivery address
@@ -1190,24 +1191,30 @@ export default function SaleDetailModal({
         className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl sm:max-w-3xl sm:rounded-2xl dark:bg-gray-800"
         onClick={(event: MouseEvent<HTMLDivElement>) => event.stopPropagation()}
       >
-        {/* Compact record identity: receipt + explicit copy and status share
-            the first line, the full business date/time stays directly below,
-            and the always-available Close remains at the edge. CopyableId can
-            still wrap a long id instead of clipping it or replacing the
-            accessible copy control with a hidden gesture. */}
+        {/* Compact record identity: on phones the receipt, time, branch and
+            cashier share one wrapping metadata line. Wider screens retain the
+            full date/time beneath the receipt and the labelled Sale rows.
+            CopyableId can still wrap a long id instead of clipping it or
+            replacing the accessible copy control with a hidden gesture. */}
         <div data-sale-detail-header="" className="flex flex-shrink-0 items-start justify-between gap-2 border-b border-gray-200 p-3 dark:border-gray-700 sm:p-4">
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 items-start gap-2">
-              <CopyableId
-                value={sale.receipt_number || ''}
-                copyLabel={translateOr('copy_receipt_number', 'Copy receipt number', 'ចម្លងលេខវិក្កយបត្រ')}
-                copiedLabel={t('copied') || 'Copied'}
-                className="min-w-0 flex-1"
-                valueClassName="font-mono text-sm font-bold text-gray-900 dark:text-white sm:text-base"
-              />
+              <div data-sale-detail-primary-meta="" className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-gray-400">
+                <CopyableId
+                  value={sale.receipt_number || ''}
+                  copyLabel={translateOr('copy_receipt_number', 'Copy receipt number', 'ចម្លងលេខវិក្កយបត្រ')}
+                  copiedLabel={t('copied') || 'Copied'}
+                  className="!w-auto max-w-full flex-none sm:min-w-0 sm:flex-1"
+                  valueClassName="font-mono text-sm font-bold text-gray-900 dark:text-white sm:text-base"
+                />
+                <span aria-hidden="true" className="sm:hidden">|</span>
+                <span className="shrink-0 sm:hidden">{fmtTime(sale.created_at)}</span>
+                {sale.branch_name ? <><span aria-hidden="true" className="sm:hidden">|</span><span className="sm:hidden" aria-label={`${t('branch') || 'Branch'}: ${sale.branch_name}`}>{sale.branch_name}</span></> : null}
+                {sale.cashier_name ? <><span aria-hidden="true" className="sm:hidden">|</span><span className="font-bold text-gray-700 dark:text-gray-200 sm:hidden" aria-label={`${t('cashier') || 'Cashier'}: ${sale.cashier_name}`}>{sale.cashier_name}</span></> : null}
+              </div>
               <StatusBadge status={currentStatus} t={t} />
             </div>
-            <div className="mt-1 text-xs text-gray-400">{fmtTime(sale.created_at)}</div>
+            <div className="mt-1 hidden text-xs text-gray-400 sm:block">{fmtTime(sale.created_at)}</div>
           </div>
           <button
             ref={closeButtonRef}
@@ -1235,7 +1242,7 @@ export default function SaleDetailModal({
           <div className="grid gap-4 md:grid-cols-2">
             <SectionCard title={t('sale') || 'Sale'}>
               <DetailRowGroup>
-                <DetailRow label={t('cashier') || 'Cashier'} value={sale.cashier_name} />
+                <div className="hidden sm:block"><DetailRow label={t('cashier') || 'Cashier'} value={sale.cashier_name} /></div>
                 {/* Z8: an awaiting-payment (credit) sale carries no method yet
                     -- the field becomes a Record-payment affordance right here
                     "near the payment method", per the user. */}
@@ -1276,10 +1283,27 @@ export default function SaleDetailModal({
                     </span>
                   </DetailRow>
                 )}
-                <DetailRow label={t('branch') || 'Branch'} value={sale.branch_name} />
+                <div className="hidden sm:block"><DetailRow label={t('branch') || 'Branch'} value={sale.branch_name} /></div>
                 <DetailRow label={t('status') || 'Status'} value={getStatusLabel(currentStatus, t)} />
                 {sale.source_return_id ? (
                   <DetailRow label={translateOr('replacement_for_return', 'Replacement for return', 'ការលក់ជំនួសសម្រាប់ការបង្វិលត្រឡប់')} value={`#${sale.source_return_id}`} mono />
+                ) : null}
+                {/* On phones the customer phone and delivery contact share one
+                    compact line, with the driver's name shown directly rather
+                    than behind a repeated Driver label. Labeled rows remain on
+                    wider screens where the Sale card has room for its table
+                    rhythm. Anonymous customer identity still suppresses the
+                    phone, exactly as the Customer card does below. */}
+                {(!customerIsAnonymous && sale.customer_phone) || deliveryDriverName || deliveryDriverPhone ? (
+                  <div data-sale-detail-mobile-contact="" className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 py-1.5 text-xs text-gray-500 sm:hidden">
+                    {!customerIsAnonymous && sale.customer_phone ? <span>{sale.customer_phone}</span> : null}
+                    {!customerIsAnonymous && sale.customer_phone && (deliveryDriverName || deliveryDriverPhone) ? <span aria-hidden="true">|</span> : null}
+                    {deliveryDriverName || deliveryDriverPhone ? (
+                      <span aria-label={`${translateOr('delivery', 'Delivery', 'ការដឹកជញ្ជូន')}: ${[deliveryDriverName, deliveryDriverPhone].filter(Boolean).join(' · ')}`}>
+                        {[deliveryDriverName, deliveryDriverPhone].filter(Boolean).join(' · ')}
+                      </span>
+                    ) : null}
+                  </div>
                 ) : null}
                 {/* Driver, compact, in the section that describes the sale --
                     not in the money block and not in a card of its own. Each
@@ -1287,8 +1311,8 @@ export default function SaleDetailModal({
                     walk-in sale is unchanged and a free delivery still names
                     its driver, which the fee row could not do when the fee was
                     zero and the row did not render. */}
-                <DetailRow label={translateOr('driver', 'Driver', 'អ្នកដឹកជញ្ជូន')} value={deliveryDriverName} />
-                <DetailRow label={translateOr('driver_phone', 'Driver phone', 'ទូរស័ព្ទអ្នកដឹក')} value={deliveryDriverPhone} />
+                <div className="hidden sm:block"><DetailRow label={translateOr('driver', 'Driver', 'អ្នកដឹកជញ្ជូន')} value={deliveryDriverName} /></div>
+                <div className="hidden sm:block"><DetailRow label={translateOr('driver_phone', 'Driver phone', 'ទូរស័ព្ទអ្នកដឹក')} value={deliveryDriverPhone} /></div>
                 {!toNumber(sale.is_delivery) && canAmendThisSale ? (
                   <div className="py-1.5">
                     <button
@@ -1469,9 +1493,9 @@ export default function SaleDetailModal({
               {onCustomerAction ? <div className="mb-3 flex justify-end"><button type="button" className="btn-secondary text-xs" onClick={() => onCustomerAction(sale)}>{t('sale_customer_edit_entry') || 'Edit customer'}</button></div> : null}
               <DetailRowGroup>
                 <DetailRow label={t('customer_name') || 'Customer'} value={sale.customer_name} />
-                {!isAnonymousCustomerIdentity(sale) ? <DetailRow label={t('phone') || 'Phone'} value={sale.customer_phone} /> : null}
+                {!customerIsAnonymous ? <div className="hidden sm:block"><DetailRow label={t('phone') || 'Phone'} value={sale.customer_phone} /></div> : null}
                 <DetailRow label={t('address') || 'Address'} value={customerAddress} />
-                {isAnonymousCustomerIdentity(sale) ? null : onAttachMembership ? (
+                {customerIsAnonymous ? null : onAttachMembership ? (
                   <DetailRow label={t('membership') || 'Membership'}>
                     <span data-sale-membership-row="" className="block min-w-0">
                       <span className="flex min-w-0 gap-2">
