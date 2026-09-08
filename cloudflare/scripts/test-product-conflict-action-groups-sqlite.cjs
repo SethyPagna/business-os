@@ -233,7 +233,11 @@ async function main() {
   assert.equal(conflict.status, 409)
   assert.equal(conflict.body.code, 'idempotency_conflict')
   const remove = await post(app, { ...body, client_request_id: 'remove_disabled_001', remove_rows: [{ product_id: 99999, reason: 'bad' }] })
-  assert.equal(remove.status, 409); assert.equal(remove.body.code, 'phase_not_available')
+  assert.equal(remove.status, 200)
+  assert.equal(remove.body.counts.requested_removals, 1)
+  const removalPage = await get(app, remove.body.review_id, { cursor: '801', limit: '10' })
+  assert.equal(removalPage.body.page.removals[0].product_id, 99999)
+  assert.equal(removalPage.body.page.removals[0].blocker.code, 'product_not_found')
   const applyDisabled = await app.posts.get('/possible-duplicates/merge-batch')({
     env: {}, req: { json: async () => ({ review_id: response.body.review_id, manifest_digest: response.body.draft_digest, client_request_id: response.body.review_id }) },
     get: () => ({ id: 900, username: 'reviewer' }), json: (payload, status = 200) => ({ status, body: payload }),

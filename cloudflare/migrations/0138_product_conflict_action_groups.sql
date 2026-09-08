@@ -21,7 +21,7 @@ CREATE TABLE product_conflict_action_reviews (
   manifest_digest TEXT,
   status TEXT NOT NULL DEFAULT 'draft'
     CHECK (status IN ('draft', 'finalized', 'running', 'completed', 'interrupted', 'approval_pending', 'expired')),
-  requested_action_count INTEGER NOT NULL CHECK (requested_action_count >= 1 AND requested_action_count <= 3200),
+  requested_action_count INTEGER NOT NULL CHECK (requested_action_count >= 1 AND requested_action_count <= 1600),
   requested_group_count INTEGER NOT NULL CHECK (requested_group_count >= 0 AND requested_group_count <= 1600),
   requested_removal_count INTEGER NOT NULL CHECK (requested_removal_count >= 0 AND requested_removal_count <= 1600),
   actionable_group_count INTEGER NOT NULL CHECK (actionable_group_count >= 0),

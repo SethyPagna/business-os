@@ -5,6 +5,8 @@ import type { getDb } from './db'
 export const PRODUCT_REMOVE_ACTION_KIND = 'product.remove'
 export const PRODUCT_REMOVE_MAX_SOURCE_BYTES = 384 * 1024
 export const PRODUCT_REMOVE_MAX_LOTS = 1000
+export const PRODUCT_REMOVE_MAX_REVIEW_LOTS = 10000
+export const PRODUCT_REMOVE_MAX_REVIEW_SOURCE_BYTES = 16 * 1024 * 1024
 
 export type ProductRemoveStatement = { sql: string; params?: Record<string, unknown> }
 
@@ -41,6 +43,16 @@ export type ProductRemoveOperationRow = {
   action_history_id: number | null
   generation: number
   response_json: string | null
+}
+
+export type ProductRemoveReviewPlan = {
+  product_id: number
+  reason: string
+  plan: ProductRemovePlan | null
+  state_digest: string
+  plan_digest: string
+  detail_json: string
+  blocked: { code: string; message: string } | null
 }
 
 export class ProductRemoveError extends Error {
@@ -105,6 +117,98 @@ export async function prepareProductRemovePlan(
   }
 }
 
+export async function prepareProductRemoveReviewPlans(
+  db: ReturnType<typeof getDb>,
+  removals: ReadonlyArray<{ product_id: number; reason: string }>,
+): Promise<ProductRemoveReviewPlan[]> {
+  if (!removals.length) return []
+  const idsJson = JSON.stringify(removals.map((row) => row.product_id))
+  const products = rows(await db.prepare(`SELECT p.* FROM products p
+    JOIN json_each(@ids) selected ON CAST(selected.value AS INTEGER)=p.id ORDER BY p.id`)
+    .all<Record<string, unknown>>({ ids: idsJson }))
+  const lotCounts = rows(await db.prepare(`SELECT pb.variant_product_id AS product_id,COUNT(*) AS lot_count
+    FROM product_batches pb JOIN json_each(@ids) selected ON CAST(selected.value AS INTEGER)=pb.variant_product_id
+    GROUP BY pb.variant_product_id ORDER BY pb.variant_product_id`).all<Record<string, unknown>>({ ids: idsJson }))
+  const productById = new Map(products.map((row) => [Number(row.id), row]))
+  const lotsById = new Map(lotCounts.map((row) => [Number(row.product_id), Number(row.lot_count) || 0]))
+  const blocked = new Map<number, { code: string; message: string }>()
+  const allowedIds: number[] = []
+  let retainedLots = 0
+  for (const removal of removals) {
+    const product = productById.get(removal.product_id)
+    const lotCount = lotsById.get(removal.product_id) || 0
+    if (!product) blocked.set(removal.product_id, { code: 'product_not_found', message: 'Product not found.' })
+    else if (Number(product.is_active) !== 1 || Number(product.is_group) === 1) {
+      blocked.set(removal.product_id, { code: 'product_not_removable', message: 'Only an active non-group product can be removed.' })
+    } else if (lotCount > PRODUCT_REMOVE_MAX_LOTS) {
+      blocked.set(removal.product_id, { code: 'remove_graph_too_large', message: 'This product has too many receipt lots for one reversible removal.' })
+    } else if (retainedLots + lotCount > PRODUCT_REMOVE_MAX_REVIEW_LOTS) {
+      blocked.set(removal.product_id, { code: 'remove_review_too_large', message: 'This removal exceeds the bounded receipt detail for one review.' })
+    } else {
+      retainedLots += lotCount
+      allowedIds.push(removal.product_id)
+    }
+  }
+  const allowedJson = JSON.stringify(allowedIds)
+  const branchStock = rows(await db.prepare(`SELECT bs.id,bs.product_id,bs.branch_id,bs.quantity,bs.rfid_confirmed_qty,b.name AS branch_name
+    FROM branch_stock bs LEFT JOIN branches b ON b.id=bs.branch_id
+    JOIN json_each(@ids) selected ON CAST(selected.value AS INTEGER)=bs.product_id ORDER BY bs.product_id,bs.id`)
+    .all<Record<string, unknown>>({ ids: allowedJson }))
+  const batches = rows(await db.prepare(`SELECT pb.* FROM product_batches pb
+    JOIN json_each(@ids) selected ON CAST(selected.value AS INTEGER)=pb.variant_product_id ORDER BY pb.variant_product_id,pb.id`)
+    .all<Record<string, unknown>>({ ids: allowedJson }))
+  const branchBatchStock = rows(await db.prepare(`SELECT bbs.*,pb.variant_product_id AS product_id FROM branch_batch_stock bbs
+    JOIN product_batches pb ON pb.id=bbs.batch_id JOIN json_each(@ids) selected ON CAST(selected.value AS INTEGER)=pb.variant_product_id
+    ORDER BY pb.variant_product_id,bbs.id`).all<Record<string, unknown>>({ ids: allowedJson }))
+  const productImages = rows(await db.prepare(`SELECT pi.* FROM product_images pi
+    JOIN json_each(@ids) selected ON CAST(selected.value AS INTEGER)=pi.product_id ORDER BY pi.product_id,pi.id`)
+    .all<Record<string, unknown>>({ ids: allowedJson }))
+  const childLinks = rows(await db.prepare(`SELECT child.id,child.parent_id FROM products child
+    JOIN json_each(@ids) selected ON CAST(selected.value AS INTEGER)=child.parent_id ORDER BY child.parent_id,child.id`)
+    .all<Record<string, unknown>>({ ids: allowedJson }))
+  let retainedBytes = 0
+  const results: ProductRemoveReviewPlan[] = []
+  for (const removal of removals) {
+    let blocker = blocked.get(removal.product_id) || null
+    const product = productById.get(removal.product_id)
+    let plan: ProductRemovePlan | null = null
+    if (!blocker && product) {
+      const source = {
+        product: { ...product },
+        branch_stock: branchStock.filter((row) => Number(row.product_id) === removal.product_id),
+        batches: batches.filter((row) => Number(row.variant_product_id) === removal.product_id),
+        branch_batch_stock: branchBatchStock.filter((row) => Number(row.product_id) === removal.product_id)
+          .map(({ product_id: _productId, ...row }) => row),
+        product_images: productImages.filter((row) => Number(row.product_id) === removal.product_id),
+        child_links: childLinks.filter((row) => Number(row.parent_id) === removal.product_id),
+      }
+      const sourceBytes = byteLength(source)
+      if (sourceBytes > PRODUCT_REMOVE_MAX_SOURCE_BYTES || retainedBytes + sourceBytes > PRODUCT_REMOVE_MAX_REVIEW_SOURCE_BYTES) {
+        blocker = { code: sourceBytes > PRODUCT_REMOVE_MAX_SOURCE_BYTES ? 'remove_graph_too_large' : 'remove_review_too_large',
+          message: sourceBytes > PRODUCT_REMOVE_MAX_SOURCE_BYTES
+            ? 'This product graph is too large for one reversible removal.'
+            : 'This removal exceeds the bounded source detail for one review.' }
+      } else {
+        retainedBytes += sourceBytes
+        plan = { version: 1, product_id: removal.product_id, reason: removal.reason, ...source, source_bytes: sourceBytes,
+          state_digest: await sha256({ version: 1, product_id: removal.product_id, reason: removal.reason, source }) }
+      }
+    }
+    const detail = plan
+      ? { product_id: removal.product_id, reason: removal.reason, product: plan.product, branch_stock: plan.branch_stock,
+          batches: plan.batches, branch_batch_stock: plan.branch_batch_stock, product_images: plan.product_images,
+          child_links: plan.child_links, source_bytes: plan.source_bytes, blocked: null }
+      : { product_id: removal.product_id, reason: removal.reason,
+          product: product ? { id: product.id, name: product.name, barcode: product.barcode, is_active: product.is_active, is_group: product.is_group } : null,
+          branch_stock: [], batches: [], branch_batch_stock: [], product_images: [], child_links: [], source_bytes: 0, blocked: blocker }
+    const stateDigest = plan?.state_digest || await sha256({ version: 1, removal, blocker, product: detail.product })
+    const planDigest = await sha256(plan || detail)
+    results.push({ product_id: removal.product_id, reason: removal.reason, plan, state_digest: stateDigest,
+      plan_digest: planDigest, detail_json: JSON.stringify(detail), blocked: blocker })
+  }
+  return results
+}
+
 function identifier(value: string): string {
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) throw new Error('Unsafe database column in product removal snapshot.')
   return `"${value}"`
@@ -142,34 +246,41 @@ function expectedDeletedPlan(plan: ProductRemovePlan, transitionStamp: string): 
   }
 }
 
-export function productRemoveGraphGuard(
+export function productRemoveGraphGuards(
   plan: ProductRemovePlan,
   expected: 'source' | 'deleted',
   transitionStamp?: string,
-): ProductRemoveStatement {
+): ProductRemoveStatement[] {
   const snapshot = expected === 'source' ? plan : expectedDeletedPlan(plan, String(transitionStamp || ''))
   const productColumns = Object.keys(snapshot.product)
   if (!productColumns.length) throw new Error('Product removal snapshot is missing the product row.')
-  return {
-    sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM products p WHERE p.id=@product
-        AND ${exactObjectSql('p', snapshot.product, 'productJson')})
-      AND ${exactRowsSql({ table: 'branch_stock', alias: 'bs', scope: 'bs.product_id=@product', rows: snapshot.branch_stock,
-        parameter: 'stockJson', identity: ['id', 'product_id', 'branch_id', 'quantity', 'rfid_confirmed_qty'] })}
-      AND ${exactRowsSql({ table: 'product_batches', alias: 'pb', scope: 'pb.variant_product_id=@product', rows: snapshot.batches,
-        parameter: 'batchesJson', identity: ['id'] })}
-      AND ${exactRowsSql({ table: 'branch_batch_stock', alias: 'bbs', scope: 'bbs.batch_id IN (SELECT id FROM product_batches WHERE variant_product_id=@product)',
-        rows: snapshot.branch_batch_stock, parameter: 'batchStockJson', identity: ['id'] })}
-      AND ${exactRowsSql({ table: 'product_images', alias: 'pi', scope: 'pi.product_id=@product', rows: snapshot.product_images,
-        parameter: 'imagesJson', identity: ['id'] })}
-      AND ${exactRowsSql({ table: 'products', alias: 'child', scope: 'child.parent_id=@product', rows: snapshot.child_links,
-        parameter: 'childrenJson', identity: ['id', 'parent_id'] })}
-      THEN 1 ELSE json_extract('', '$') END AS product_remove_graph_guard`,
-    params: {
-      product: plan.product_id, productJson: JSON.stringify(snapshot.product), stockJson: JSON.stringify(snapshot.branch_stock),
-      batchesJson: JSON.stringify(snapshot.batches), batchStockJson: JSON.stringify(snapshot.branch_batch_stock),
-      imagesJson: JSON.stringify(snapshot.product_images), childrenJson: JSON.stringify(snapshot.child_links),
-    },
+  const productGuards: ProductRemoveStatement[] = []
+  for (let offset = 0; offset < productColumns.length; offset += 32) {
+    const selected = Object.fromEntries(productColumns.slice(offset, offset + 32).map((field) => [field, snapshot.product[field]]))
+    productGuards.push({
+      sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM products p WHERE p.id=@product
+        AND ${exactObjectSql('p', selected, 'productJson')})
+        THEN 1 ELSE json_extract('', '$') END AS product_remove_product_guard`,
+      params: { product: plan.product_id, productJson: JSON.stringify(selected) },
+    })
   }
+  const rowGuards = [
+    { table: 'branch_stock', alias: 'bs', scope: 'bs.product_id=@product', rows: snapshot.branch_stock,
+      parameter: 'rowsJson', identity: ['id', 'product_id', 'branch_id', 'quantity', 'rfid_confirmed_qty'] },
+    { table: 'product_batches', alias: 'pb', scope: 'pb.variant_product_id=@product', rows: snapshot.batches,
+      parameter: 'rowsJson', identity: ['id'] },
+    { table: 'branch_batch_stock', alias: 'bbs', scope: 'bbs.batch_id IN (SELECT id FROM product_batches WHERE variant_product_id=@product)',
+      rows: snapshot.branch_batch_stock, parameter: 'rowsJson', identity: ['id'] },
+    { table: 'product_images', alias: 'pi', scope: 'pi.product_id=@product', rows: snapshot.product_images,
+      parameter: 'rowsJson', identity: ['id'] },
+    { table: 'products', alias: 'child', scope: 'child.parent_id=@product', rows: snapshot.child_links,
+      parameter: 'rowsJson', identity: ['id', 'parent_id'] },
+  ]
+  return [...productGuards, ...rowGuards.map((guard) => ({
+    sql: `SELECT CASE WHEN ${exactRowsSql(guard)}
+      THEN 1 ELSE json_extract('', '$') END AS product_remove_graph_guard`,
+    params: { product: plan.product_id, rowsJson: JSON.stringify(guard.rows) },
+  }))]
 }
 
 export async function productRemovePlanDigest(plan: ProductRemovePlan): Promise<string> {
@@ -210,7 +321,7 @@ export function productRemoveQueueStatements(args: {
 }): ProductRemoveStatement[] {
   const userName = actorSnapshot(args.user)
   const payload = JSON.stringify({ kind: 'product.remove.pending', operation_id: args.operationId, plan_digest: args.planDigest })
-  return [productRemoveGraphGuard(args.plan, 'source'), {
+  return [...productRemoveGraphGuards(args.plan, 'source'), {
     sql: `INSERT INTO product_remove_operations(operation_id,actor_id,requester_id,source,request_id,product_id,reason,
       state_digest,plan_digest,plan_json,status)
       VALUES(@operation,@actor,@actor,'direct',@request,@product,@reason,@stateDigest,@planDigest,@plan,'approval_pending')`,
@@ -225,6 +336,37 @@ export function productRemoveQueueStatements(args: {
     sql: `UPDATE product_remove_operations SET pending_action_id=last_insert_rowid(),updated_at=CURRENT_TIMESTAMP
       WHERE operation_id=@operation AND status='approval_pending' AND pending_action_id IS NULL`,
     params: { operation: args.operationId },
+  }]
+}
+
+export function productRemoveReviewQueueStatements(args: {
+  operation: ProductRemoveOperationRow
+  plan: ProductRemovePlan
+  user: SessionUser
+}): ProductRemoveStatement[] {
+  const pointer = JSON.stringify({ kind: 'product.remove.pending', operation_id: args.operation.operation_id,
+    plan_digest: args.operation.plan_digest })
+  return [...productRemoveGraphGuards(args.plan, 'source'), {
+    sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM product_remove_operations WHERE operation_id=@operation
+      AND actor_id=@actor AND requester_id=@actor AND source='conflict_review' AND review_id=@review
+      AND action_ordinal=@ordinal AND product_id=@product AND plan_digest=@planDigest AND status='ready'
+      AND pending_action_id IS NULL AND generation=0)
+      THEN 1 ELSE json_extract('', '$') END AS product_remove_review_queue_guard`,
+    params: { operation: args.operation.operation_id, actor: args.operation.actor_id, review: args.operation.review_id,
+      ordinal: args.operation.action_ordinal, product: args.operation.product_id, planDigest: args.operation.plan_digest },
+  }, {
+    sql: `INSERT INTO pending_actions(section,action_type,entity_type,entity_id,payload_json,summary,status,requested_by,requested_by_name)
+      VALUES('products','delete','product',@product,@payload,@summary,'open',@actor,@actorName)`,
+    params: { product: args.operation.product_id, payload: pointer, summary: `Remove product #${args.operation.product_id}`,
+      actor: args.user.id, actorName: actorSnapshot(args.user) },
+  }, {
+    sql: `UPDATE product_remove_operations SET status='approval_pending',pending_action_id=last_insert_rowid(),updated_at=CURRENT_TIMESTAMP
+      WHERE operation_id=@operation AND status='ready' AND pending_action_id IS NULL`,
+    params: { operation: args.operation.operation_id },
+  }, {
+    sql: `UPDATE product_conflict_action_reviews SET status='approval_pending',updated_at=CURRENT_TIMESTAMP
+      WHERE id=@review AND actor_id=@actor AND status IN ('finalized','running','interrupted','approval_pending')`,
+    params: { review: args.operation.review_id, actor: args.operation.actor_id },
   }]
 }
 
@@ -270,7 +412,7 @@ export function productRemoveApplyStatements(args: {
     params: { operation: args.operationId, actor: receiptActorId, source: args.source, request: args.requestId,
       product: plan.product_id, stateDigest: plan.state_digest, planDigest: args.planDigest,
       review: args.reviewId ?? null, pending: args.pendingActionId ?? null },
-  }, productRemoveGraphGuard(plan, 'source'), {
+  }, ...productRemoveGraphGuards(plan, 'source'), {
     sql: `INSERT INTO undo_snapshots(kind,status,payload_json,created_by_id,created_by_name)
       VALUES(@kind,'applied',@payload,@actor,@actorName)`,
     params: { kind: PRODUCT_REMOVE_ACTION_KIND, payload: snapshot, actor: args.user.id, actorName: userName },
@@ -321,7 +463,19 @@ export function productRemoveApplyStatements(args: {
         'product_id',@product,'status','undo_ready','action_history_id',action_history_id,'generation',0),updated_at=@stamp
       WHERE operation_id=@operation AND status='ready' AND undo_snapshot_id IS NOT NULL AND action_history_id IS NOT NULL`,
     params: { request: args.requestId, operation: args.operationId, product: plan.product_id, stamp: args.transitionStamp },
-  }]
+  }, ...(args.reviewId ? [{
+    sql: `UPDATE product_conflict_action_reviews SET status=CASE
+      WHEN EXISTS(SELECT 1 FROM product_remove_operations WHERE review_id=@review AND status='reversed')
+        OR EXISTS(SELECT 1 FROM product_conflict_action_groups WHERE review_id=@review AND status='reversed')
+        OR EXISTS(SELECT 1 FROM product_conflict_action_group_members WHERE review_id=@review AND status='reversed') THEN 'interrupted'
+      WHEN EXISTS(SELECT 1 FROM product_remove_operations WHERE review_id=@review AND status='approval_pending') THEN 'approval_pending'
+      WHEN NOT EXISTS(SELECT 1 FROM product_remove_operations WHERE review_id=@review AND status IN ('reviewed','ready'))
+        AND NOT EXISTS(SELECT 1 FROM product_conflict_action_groups WHERE review_id=@review AND status IN ('actionable','ready','running','partial'))
+        AND NOT EXISTS(SELECT 1 FROM product_conflict_action_group_members WHERE review_id=@review AND status IN ('planned','history_pending'))
+        THEN 'completed' ELSE 'running' END,updated_at=@stamp
+      WHERE id=@review AND actor_id=@owner`,
+    params: { review: args.reviewId, owner: receiptActorId, stamp: args.transitionStamp },
+  }] : [])]
 }
 
 export function productRemoveApprovalStatements(args: {
@@ -333,14 +487,17 @@ export function productRemoveApprovalStatements(args: {
 }): ProductRemoveStatement[] {
   return [{
     sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM product_remove_operations
-      WHERE operation_id=@operation AND actor_id=@actor AND requester_id=@requester AND source='direct'
-        AND request_id=@request AND product_id=@product AND plan_digest=@planDigest
+      WHERE operation_id=@operation AND actor_id=@actor AND requester_id=@requester
+        AND source=@source AND request_id=@request AND product_id=@product AND plan_digest=@planDigest
+        AND ((@review IS NULL AND review_id IS NULL) OR review_id=@review)
+        AND ((@ordinal IS NULL AND action_ordinal IS NULL) OR action_ordinal=@ordinal)
         AND status='approval_pending' AND generation=0 AND pending_action_id=@pending)
       AND EXISTS(SELECT 1 FROM pending_actions WHERE id=@pending AND status='open'
         AND section='products' AND action_type='delete' AND entity_type='product' AND entity_id=@product
         AND requested_by=@requester)
       THEN 1 ELSE json_extract('', '$') END AS product_remove_approval_guard`,
     params: { operation: args.operation.operation_id, actor: args.operation.actor_id, requester: args.operation.requester_id,
+      source: args.operation.source, review: args.operation.review_id, ordinal: args.operation.action_ordinal,
       request: args.operation.request_id, product: args.operation.product_id, planDigest: args.operation.plan_digest,
       pending: args.pendingActionId },
   }, {
@@ -348,8 +505,8 @@ export function productRemoveApprovalStatements(args: {
       WHERE operation_id=@operation AND status='approval_pending' AND generation=0 AND pending_action_id=@pending`,
     params: { stamp: args.transitionStamp, operation: args.operation.operation_id, pending: args.pendingActionId },
   }, ...productRemoveApplyStatements({
-    plan: args.plan, operationId: args.operation.operation_id, source: 'direct', requestId: args.operation.request_id,
-    reviewId: null, actionOrdinal: null, user: args.reviewer, transitionStamp: args.transitionStamp,
+    plan: args.plan, operationId: args.operation.operation_id, source: args.operation.source, requestId: args.operation.request_id,
+    reviewId: args.operation.review_id, actionOrdinal: args.operation.action_ordinal, user: args.reviewer, transitionStamp: args.transitionStamp,
     planDigest: args.operation.plan_digest, pendingActionId: args.pendingActionId,
     receiptActorId: args.operation.actor_id, requesterId: args.operation.requester_id,
   })]
@@ -450,7 +607,7 @@ export function productRemoveReplayStatements(args: {
     params: { operation: operation.operation_id, product: plan.product_id, status: fromStatus,
       generation: args.expectedGeneration, snapshot: operation.undo_snapshot_id, history: args.historyId,
       kind: PRODUCT_REMOVE_ACTION_KIND, snapshotStatus: snapshotFrom, historyStatus: historyFrom },
-  }, productRemoveGraphGuard(plan, undo ? 'deleted' : 'source', snapshot.transition_stamp), ...mutation, {
+  }, ...productRemoveGraphGuards(plan, undo ? 'deleted' : 'source', snapshot.transition_stamp), ...mutation, {
     sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,reason,user_id,user_name,created_at)
       SELECT @product,@productName,CAST(json_extract(value,'$.branch_id') AS INTEGER),json_extract(value,'$.branch_name'),
         @movement,CAST(json_extract(value,'$.quantity') AS REAL),@reason,@actor,@actorName,@stamp
@@ -480,5 +637,18 @@ export function productRemoveReplayStatements(args: {
       WHERE operation_id=@operation AND status=@fromStatus AND generation=@generation`,
     params: { status: toStatus, nextGeneration, request: args.transitionRequestId, direction, generation: args.expectedGeneration,
       stamp: args.transitionStamp, operation: operation.operation_id, fromStatus },
-  }]
+  }, ...(operation.review_id ? [{
+    sql: undo
+      ? `UPDATE product_conflict_action_reviews SET status='interrupted',updated_at=@stamp WHERE id=@review AND actor_id=@owner`
+      : `UPDATE product_conflict_action_reviews SET status=CASE
+          WHEN EXISTS(SELECT 1 FROM product_remove_operations WHERE review_id=@review AND status='reversed')
+            OR EXISTS(SELECT 1 FROM product_conflict_action_groups WHERE review_id=@review AND status='reversed')
+            OR EXISTS(SELECT 1 FROM product_conflict_action_group_members WHERE review_id=@review AND status='reversed') THEN 'interrupted'
+          WHEN EXISTS(SELECT 1 FROM product_remove_operations WHERE review_id=@review AND status='approval_pending') THEN 'approval_pending'
+          WHEN NOT EXISTS(SELECT 1 FROM product_remove_operations WHERE review_id=@review AND status IN ('reviewed','ready'))
+            AND NOT EXISTS(SELECT 1 FROM product_conflict_action_groups WHERE review_id=@review AND status IN ('actionable','ready','running','partial'))
+            AND NOT EXISTS(SELECT 1 FROM product_conflict_action_group_members WHERE review_id=@review AND status IN ('planned','history_pending'))
+            THEN 'completed' ELSE 'running' END,updated_at=@stamp WHERE id=@review AND actor_id=@owner`,
+    params: { stamp: args.transitionStamp, review: operation.review_id, owner: operation.actor_id },
+  }] : [])]
 }

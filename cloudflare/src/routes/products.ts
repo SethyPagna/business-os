@@ -68,8 +68,9 @@ import {
 } from '../lib/productConflictActionGroups'
 import { attachBatchCounts } from '../lib/productBatches'
 import { maybeQueueForReview } from '../lib/reviewGate'
-import { ProductRemoveError, prepareProductRemovePlan, productRemoveApplyStatements, productRemovePlanDigest,
-  productRemoveQueueStatements, type ProductRemoveOperationRow } from '../lib/productDelete'
+import { ProductRemoveError, parseProductRemovePlan, prepareProductRemovePlan, prepareProductRemoveReviewPlans,
+  productRemoveApplyStatements, productRemovePlanDigest, productRemoveQueueStatements, productRemoveReviewQueueStatements,
+  type ProductRemoveOperationRow } from '../lib/productDelete'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { createBulkDeleteJob, getBulkDeleteJob, reapStalledBulkDeleteJobs } from '../lib/bulkDeleteEngine'
@@ -4991,13 +4992,20 @@ async function readSelectedConflictUndoAvailability(
 type ProductConflictActionReviewRow = {
   id: string; actor_id: number; request_id: string; request_digest: string; draft_digest: string; status: string
   finalize_digest: string | null; manifest_digest: string | null
-  requested_group_count: number; actionable_group_count: number; blocked_group_count: number; total_member_count: number; expires_at: string
+  requested_action_count: number; requested_group_count: number; requested_removal_count: number
+  actionable_group_count: number; blocked_group_count: number; total_member_count: number; expires_at: string
 }
 
 type ProductConflictActionStoredGroupRow = {
   ordinal: number; group_key: string; source_group_keys_json: string; member_ids_json: string; status: string
   state_digest: string; detail_json: string; resolution_json: string | null; final_plan_json: string | null; operation_id: string | null
   action_history_id?: number | null; reversal_generation?: number
+}
+
+type ProductConflictActionStoredRemovalRow = ProductRemoveOperationRow & {
+  action_ordinal: number
+  blocker_code: string | null
+  error_message: string | null
 }
 
 function productConflictActionCursor(value: string | undefined): number | null {
@@ -5016,7 +5024,7 @@ function productConflictActionPageLimit(value: string | undefined): number | nul
 
 async function readProductConflictActionReview(db: ReturnType<typeof getDb>, actorId: number, reviewId: string) {
   return db.prepare(`SELECT id,actor_id,request_id,request_digest,draft_digest,finalize_digest,manifest_digest,status,
-    requested_group_count,actionable_group_count,blocked_group_count,total_member_count,expires_at
+    requested_action_count,requested_group_count,requested_removal_count,actionable_group_count,blocked_group_count,total_member_count,expires_at
     FROM product_conflict_action_reviews WHERE id=@reviewId AND actor_id=@actorId`)
     .get<ProductConflictActionReviewRow>({ reviewId, actorId })
 }
@@ -5026,7 +5034,18 @@ async function productConflictActionReviewPage(db: ReturnType<typeof getDb>, rev
     resolution_json,final_plan_json,operation_id FROM product_conflict_action_groups
     WHERE review_id=@reviewId AND ordinal>=@cursor ORDER BY ordinal LIMIT @limit`)
     .all<ProductConflictActionStoredGroupRow>({ reviewId, cursor, limit: limit + 1 })
-  const groups = rows.slice(0, limit).map((row) => {
+  const removalRows = await db.prepare(`SELECT operation_id,actor_id,requester_id,source,request_id,review_id,action_ordinal,
+    product_id,reason,state_digest,plan_digest,plan_json,status,blocker_code,error_message,pending_action_id,undo_snapshot_id,
+    action_history_id,generation,response_json FROM product_remove_operations
+    WHERE review_id=@reviewId AND action_ordinal>=@cursor ORDER BY action_ordinal LIMIT @limit`)
+    .all<ProductConflictActionStoredRemovalRow>({ reviewId, cursor, limit: limit + 1 })
+  const actions = [
+    ...rows.map((row) => ({ kind: 'group' as const, ordinal: Number(row.ordinal), row })),
+    ...removalRows.map((row) => ({ kind: 'removal' as const, ordinal: Number(row.action_ordinal), row })),
+  ].sort((left, right) => left.ordinal - right.ordinal).slice(0, limit + 1)
+  const pageActions = actions.slice(0, limit)
+  const groups = pageActions.filter((item) => item.kind === 'group').map((item) => {
+    const row = item.row as ProductConflictActionStoredGroupRow
     try {
       const detail = JSON.parse(row.detail_json)
       if (!detail || typeof detail !== 'object' || Array.isArray(detail)) throw new Error('invalid detail')
@@ -5036,7 +5055,25 @@ async function productConflictActionReviewPage(db: ReturnType<typeof getDb>, rev
         projected_result: finalPlan?.projected_result ?? null }
     } catch { throw new ProductConflictMergeValidationError('The stored conflict review is unreadable.', 'review_corrupt', 409) }
   })
-  return { cursor: String(cursor), next_cursor: rows.length > limit ? String(Number(rows[limit].ordinal)) : null, limit, groups }
+  const removals = pageActions.filter((item) => item.kind === 'removal').map((item) => {
+    const row = item.row as ProductConflictActionStoredRemovalRow
+    try {
+      const detail = JSON.parse(row.plan_json)
+      return { action_ordinal: Number(row.action_ordinal), product_id: Number(row.product_id), reason: row.reason,
+        status: row.status, operation_id: row.operation_id, state_digest: row.state_digest, plan_digest: row.plan_digest,
+        blocker: row.blocker_code ? { code: row.blocker_code, message: row.error_message } : null,
+        product: detail.product ?? null, branch_stock: detail.branch_stock ?? [], batches: detail.batches ?? [],
+        branch_batch_stock: detail.branch_batch_stock ?? [], source_bytes: Number(detail.source_bytes) || 0 }
+    } catch { throw new ProductConflictMergeValidationError('The stored removal review is unreadable.', 'review_corrupt', 409) }
+  })
+  return { cursor: String(cursor), next_cursor: actions.length > limit ? String(actions[limit].ordinal) : null, limit, groups, removals }
+}
+
+async function readProductConflictActionStoredRemovals(db: ReturnType<typeof getDb>, reviewId: string) {
+  return db.prepare(`SELECT operation_id,actor_id,requester_id,source,request_id,review_id,action_ordinal,product_id,reason,
+    state_digest,plan_digest,plan_json,status,blocker_code,error_message,pending_action_id,undo_snapshot_id,action_history_id,generation,response_json
+    FROM product_remove_operations WHERE review_id=@reviewId ORDER BY action_ordinal`)
+    .all<ProductConflictActionStoredRemovalRow>({ reviewId })
 }
 
 async function productConflictActionReviewResponse(db: ReturnType<typeof getDb>, review: ProductConflictActionReviewRow, cursor = 0, limit = 50) {
@@ -5044,7 +5081,8 @@ async function productConflictActionReviewResponse(db: ReturnType<typeof getDb>,
     success: true, manifest_version: 1, resolution_version: 2, review_id: review.id,
     draft_digest: review.draft_digest, manifest_digest: review.manifest_digest, status: review.status, expires_at: review.expires_at,
     counts: {
-      requested_groups: Number(review.requested_group_count), actionable_groups: Number(review.actionable_group_count),
+      requested_actions: Number(review.requested_action_count), requested_groups: Number(review.requested_group_count),
+      requested_removals: Number(review.requested_removal_count), actionable_groups: Number(review.actionable_group_count),
       blocked_groups: Number(review.blocked_group_count), total_members: Number(review.total_member_count),
     },
     page: await productConflictActionReviewPage(db, review.id, cursor, limit),
@@ -5349,6 +5387,7 @@ function productConflictActionFinalizeResponse(
   storedGroups: ProductConflictActionStoredGroupRow[],
   finalPlans: ProductConflictActionFinalPlan[],
   manifestDigest: string,
+  storedRemovals: ProductConflictActionStoredRemovalRow[] = [],
 ) {
   const mergeFolds = finalPlans.reduce((sum, plan) => sum + plan.fold_members.length, 0)
   return {
@@ -5358,10 +5397,17 @@ function productConflictActionFinalizeResponse(
       requested_groups: Number(review.requested_group_count), canonical_groups: storedGroups.length,
       ready_groups: finalPlans.length, blocked_groups: storedGroups.length - finalPlans.length,
       total_members: Number(review.total_member_count), merge_folds: mergeFolds,
+      ...(storedRemovals.length ? {
+        requested_actions: Number(review.requested_action_count), requested_removals: Number(review.requested_removal_count),
+        ready_removals: storedRemovals.filter((row) => row.status !== 'blocked').length,
+        blocked_removals: storedRemovals.filter((row) => row.status === 'blocked').length,
+      } : {}),
     },
     summary: {
       groups_ready: finalPlans.length, groups_blocked: storedGroups.length - finalPlans.length,
       image_effect_groups: finalPlans.filter((plan) => plan.image_effect).length,
+      ...(storedRemovals.length ? { removals_ready: storedRemovals.filter((row) => row.status !== 'blocked').length,
+        removals_blocked: storedRemovals.filter((row) => row.status === 'blocked').length } : {}),
     },
   }
 }
@@ -5570,12 +5616,21 @@ async function createProductConflictActionReview(
   db: ReturnType<typeof getDb>, actorId: number,
   request: ReturnType<typeof parseProductConflictActionPreviewRequest>, requestDigest: string,
 ) {
-  const ids = [...new Set(request.merge_groups.flatMap((group) => group.member_ids))].sort((a, b) => a - b)
+  const ids = [...new Set([...request.merge_groups.flatMap((group) => group.member_ids),
+    ...request.remove_rows.map((row) => row.product_id)])].sort((a, b) => a - b)
   const plans = await buildProductConflictActionReviewPlans(db, request.merge_groups)
+  const removalPlans = await prepareProductRemoveReviewPlans(db, request.remove_rows)
+  const combinedDetailBytes = plans.reduce((sum, plan) => sum + new TextEncoder().encode(JSON.stringify(plan)).length, 0)
+    + removalPlans.reduce((sum, plan) => sum + new TextEncoder().encode(plan.detail_json).length, 0)
+  if (combinedDetailBytes > PRODUCT_CONFLICT_ACTION_MAX_REVIEW_DETAIL_BYTES) {
+    throw new ProductConflictMergeValidationError('The selected conflict review metadata exceeds the bounded review size.', 'review_detail_limit', 413)
+  }
   const reviewId = crypto.randomUUID()
   const expiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString()
   const draftDigest = await productConflictSha256({ manifest_version: 1, resolution_version: 2,
-    groups: plans.map((plan, ordinal) => ({ ordinal, group_key: plan.group_key, member_ids: plan.member_ids, state_digest: plan.state_digest })) })
+    groups: plans.map((plan, ordinal) => ({ ordinal, group_key: plan.group_key, member_ids: plan.member_ids, state_digest: plan.state_digest })),
+    removals: removalPlans.map((plan, index) => ({ action_ordinal: plans.length + index, product_id: plan.product_id,
+      state_digest: plan.state_digest, plan_digest: plan.plan_digest, blocked: plan.blocked?.code ?? null })) })
   const actionable = plans.filter((plan) => !plan.blocked).length
   const statements: Array<{ sql: string; params?: Record<string, unknown> }> = [{
     sql: `SELECT CASE WHEN (SELECT COUNT(*) FROM product_conflict_action_reviews
@@ -5586,9 +5641,10 @@ async function createProductConflictActionReview(
     sql: `INSERT INTO product_conflict_action_reviews
       (id,actor_id,request_id,request_digest,manifest_version,resolution_version,draft_digest,status,
        requested_action_count,requested_group_count,requested_removal_count,actionable_group_count,blocked_group_count,total_member_count,expires_at)
-      VALUES(@id,@actorId,@requestId,@requestDigest,1,2,@draftDigest,'draft',@requested,@requested,0,@actionable,@blocked,@members,@expiresAt)`,
+      VALUES(@id,@actorId,@requestId,@requestDigest,1,2,@draftDigest,'draft',@actions,@groups,@removals,@actionable,@blocked,@members,@expiresAt)`,
     params: { id: reviewId, actorId, requestId: request.client_request_id, requestDigest, draftDigest,
-      requested: request.merge_groups.length, actionable, blocked: plans.length - actionable, members: ids.length, expiresAt },
+      actions: plans.length + removalPlans.length, groups: plans.length, removals: removalPlans.length,
+      actionable, blocked: plans.length - actionable, members: ids.length, expiresAt },
   }]
   const groups = plans.map((plan, ordinal) => ({ ordinal, group_key: plan.group_key,
     source_group_keys_json: JSON.stringify(plan.source_group_keys), member_ids_json: JSON.stringify(plan.member_ids),
@@ -5615,6 +5671,28 @@ async function createProductConflictActionReview(
       FROM json_each(@rowsJson)`,
     params: { reviewId, rowsJson: JSON.stringify(members.slice(offset, offset + 200)) },
   })
+  const removals: Array<Record<string, unknown>> = []
+  for (let index = 0; index < removalPlans.length; index += 1) {
+    const removal = removalPlans[index]
+    removals.push({
+      operation_id: `product-remove-review-${(await productConflictSha256({ review_id: reviewId, product_id: removal.product_id })).slice(7)}`,
+      request_id: `${request.client_request_id}:remove:${index}`, action_ordinal: plans.length + index,
+      product_id: removal.product_id, reason: removal.reason, state_digest: removal.state_digest,
+      plan_digest: removal.plan_digest, plan_json: removal.plan ? JSON.stringify(removal.plan) : removal.detail_json,
+      status: removal.blocked ? 'blocked' : 'reviewed', blocker_code: removal.blocked?.code ?? null,
+      error_message: removal.blocked?.message ?? null,
+    })
+  }
+  for (let offset = 0; offset < removals.length; offset += 100) statements.push({
+    sql: `INSERT INTO product_remove_operations(operation_id,actor_id,requester_id,source,request_id,review_id,action_ordinal,
+      product_id,reason,state_digest,plan_digest,plan_json,status,blocker_code,error_message)
+      SELECT json_extract(value,'$.operation_id'),@actorId,@actorId,'conflict_review',json_extract(value,'$.request_id'),@reviewId,
+        CAST(json_extract(value,'$.action_ordinal') AS INTEGER),CAST(json_extract(value,'$.product_id') AS INTEGER),
+        json_extract(value,'$.reason'),json_extract(value,'$.state_digest'),json_extract(value,'$.plan_digest'),
+        json_extract(value,'$.plan_json'),json_extract(value,'$.status'),json_extract(value,'$.blocker_code'),json_extract(value,'$.error_message')
+      FROM json_each(@rowsJson)`,
+    params: { actorId, reviewId, rowsJson: JSON.stringify(removals.slice(offset, offset + 100)) },
+  })
   await db.batch(statements)
   const review = await readProductConflictActionReview(db, actorId, reviewId)
   if (!review) throw new Error('The conflict action review receipt was not created.')
@@ -5625,9 +5703,6 @@ async function createProductConflictActionReview(
 // receipts, so 1600+ reviewed rows can be paged from one immutable snapshot.
 app.post('/possible-duplicates/merge-batch/preview', async (c) => {
   const user = c.get('user')
-  if (getActionTier(user, 'products', 'merge_duplicates') !== 'full') {
-    return c.json({ success: false, code: 'permission_denied', error: 'You do not have permission to perform this action' }, 403)
-  }
   const bodyRejection = await admitRequestBody(c, PRODUCT_CONFLICT_ACTION_PREVIEW_BODY_BYTES)
   if (bodyRejection) return bodyRejection
   const raw = await c.req.json().catch(() => null)
@@ -5638,14 +5713,17 @@ app.post('/possible-duplicates/merge-batch/preview', async (c) => {
       const validation = error instanceof ProductConflictMergeValidationError ? error : new ProductConflictMergeValidationError('The selected conflict review request is invalid.')
       return c.json({ success: false, code: validation.code, error: validation.message }, validation.status as 400 | 409 | 413)
     }
-    if (request.remove_rows.length) {
-      return c.json({ success: false, code: 'phase_not_available', error: 'Independent Remove is not available in this review phase.' }, 409)
+    if (request.merge_groups.length && getActionTier(user, 'products', 'merge_duplicates') !== 'full') {
+      return c.json({ success: false, code: 'permission_denied', error: 'Full duplicate merge permission is required.' }, 403)
+    }
+    if (request.remove_rows.length && getActionTier(user, 'products', 'delete') === 'none') {
+      return c.json({ success: false, code: 'permission_denied', error: 'Product removal permission is required.' }, 403)
     }
     const db = getDb(c.env)
     const requestDigest = await productConflictSha256(request)
     const now = new Date()
     let review = await db.prepare(`SELECT id,actor_id,request_id,request_digest,draft_digest,finalize_digest,manifest_digest,status,
-      requested_group_count,actionable_group_count,blocked_group_count,total_member_count,expires_at
+      requested_action_count,requested_group_count,requested_removal_count,actionable_group_count,blocked_group_count,total_member_count,expires_at
       FROM product_conflict_action_reviews WHERE actor_id=@actorId AND request_id=@requestId`)
       .get<ProductConflictActionReviewRow>({ actorId: user.id, requestId: request.client_request_id })
     if (review && productConflictActionReviewExpired(review, now.getTime())) {
@@ -5668,7 +5746,7 @@ app.post('/possible-duplicates/merge-batch/preview', async (c) => {
       try { review = await createProductConflictActionReview(db, user.id, request, requestDigest) }
       catch (error) {
         review = await db.prepare(`SELECT id,actor_id,request_id,request_digest,draft_digest,finalize_digest,manifest_digest,status,
-          requested_group_count,actionable_group_count,blocked_group_count,total_member_count,expires_at
+          requested_action_count,requested_group_count,requested_removal_count,actionable_group_count,blocked_group_count,total_member_count,expires_at
           FROM product_conflict_action_reviews WHERE actor_id=@actorId AND request_id=@requestId`)
           .get<ProductConflictActionReviewRow>({ actorId: user.id, requestId: request.client_request_id })
         if (!review || review.request_digest !== requestDigest) {
@@ -5720,9 +5798,8 @@ app.post('/possible-duplicates/merge-batch/preview', async (c) => {
 
 app.post('/possible-duplicates/merge-batch/reviews/:reviewId/finalize', async (c) => {
   const user = c.get('user')
-  if (getActionTier(user, 'products', 'merge_duplicates') !== 'full') {
-    return c.json({ success: false, code: 'permission_denied', error: 'You do not have permission to perform this action' }, 403)
-  }
+  const mergeTier = getActionTier(user, 'products', 'merge_duplicates')
+  const removeTier = getActionTier(user, 'products', 'delete')
   const bodyRejection = await admitRequestBody(c, PRODUCT_CONFLICT_ACTION_PREVIEW_BODY_BYTES)
   if (bodyRejection) return bodyRejection
   let request
@@ -5737,12 +5814,19 @@ app.post('/possible-duplicates/merge-batch/reviews/:reviewId/finalize', async (c
   const db = getDb(c.env)
   let review = await readProductConflictActionReview(db, user.id, request.review_id)
   if (!review) return c.json({ success: false, code: 'review_not_found', error: 'Conflict review not found.' }, 404)
+  if (Number(review.requested_group_count) > 0 && mergeTier !== 'full') {
+    return c.json({ success: false, code: 'permission_denied', error: 'Full duplicate merge permission is required.' }, 403)
+  }
+  if (Number(review.requested_removal_count) > 0 && removeTier === 'none') {
+    return c.json({ success: false, code: 'permission_denied', error: 'Product removal permission is required.' }, 403)
+  }
   if (productConflictActionReviewExpired(review)) {
     await expireProductConflictActionReview(db, review)
     return c.json({ success: false, code: 'review_expired', error: 'This conflict review expired. Start a new review.' }, 410)
   }
   const finalizeDigest = await productConflictSha256(request)
   let storedGroups = await readProductConflictActionStoredGroups(db, review.id)
+  const storedRemovals = await readProductConflictActionStoredRemovals(db, review.id)
   const readReplayPlans = () => storedGroups.filter((row) => row.status !== 'blocked')
     .map((row) => {
       try {
@@ -5759,7 +5843,7 @@ app.post('/possible-duplicates/merge-batch/reviews/:reviewId/finalize', async (c
     if (replayPlans.some((plan) => plan.image_effect) && getActionTier(user, 'products', 'image') !== 'full') {
       return c.json({ success: false, code: 'image_permission_required', error: 'This finalized review changes product images and requires full image permission.' }, 403)
     }
-    return c.json(productConflictActionFinalizeResponse(review, storedGroups, replayPlans, review.manifest_digest))
+    return c.json(productConflictActionFinalizeResponse(review, storedGroups, replayPlans, review.manifest_digest, storedRemovals))
   }
   if (review.status !== 'draft' || review.draft_digest !== request.draft_digest) {
     return c.json({ success: false, code: 'review_state_conflict', error: 'The reviewed conflict draft changed. Refresh before finalizing.' }, 409)
@@ -5794,6 +5878,19 @@ app.post('/possible-duplicates/merge-batch/reviews/:reviewId/finalize', async (c
       finalPlans.push(await buildProductConflictActionFinalPlan(review, plan, resolution,
         productConflictActionImageEffect(plan, resolution.keeper_id, groupImages), groupImages))
     }
+    const currentRemovals = await prepareProductRemoveReviewPlans(db,
+      storedRemovals.map((row) => ({ product_id: Number(row.product_id), reason: row.reason })))
+    if (currentRemovals.length !== storedRemovals.length) throw new Error('invalid removal count')
+    for (let index = 0; index < currentRemovals.length; index += 1) {
+      const current = currentRemovals[index]
+      const stored = storedRemovals[index]
+      const expectedBlocked = stored.status === 'blocked'
+      if (current.product_id !== Number(stored.product_id) || current.state_digest !== stored.state_digest
+        || current.plan_digest !== stored.plan_digest || Boolean(current.blocked) !== expectedBlocked
+        || (!expectedBlocked && (!current.plan || stored.status !== 'reviewed'))) {
+        throw new ProductConflictMergeValidationError('A selected removal changed after review.', 'review_state_conflict', 409)
+      }
+    }
   } catch (error) {
     const validation = error instanceof ProductConflictMergeValidationError ? error : new ProductConflictMergeValidationError('The reviewed conflict state is invalid.', 'review_state_conflict', 409)
     return c.json({ success: false, code: validation.code, error: validation.message }, validation.status as 400 | 409 | 413)
@@ -5804,6 +5901,8 @@ app.post('/possible-duplicates/merge-batch/reviews/:reviewId/finalize', async (c
   }
   const manifestDigest = await productConflictSha256({
     manifest_version: 1, resolution_version: 2, review_id: review.id, draft_digest: review.draft_digest, final_plans: finalPlans,
+    removals: storedRemovals.map((row) => ({ action_ordinal: Number(row.action_ordinal), operation_id: row.operation_id,
+      product_id: Number(row.product_id), state_digest: row.state_digest, plan_digest: row.plan_digest, status: row.status })),
   })
   let finalBytes = 0
   for (const plan of finalPlans) {
@@ -5853,6 +5952,21 @@ app.post('/possible-duplicates/merge-batch/reviews/:reviewId/finalize', async (c
       WHERE review_id=@reviewId AND product_id IN (SELECT CAST(json_extract(value,'$.product_id') AS INTEGER) FROM json_each(@rowsJson))`,
     params: { reviewId: review.id, rowsJson: JSON.stringify(chunk) },
   })
+  if (storedRemovals.length) statements.push({
+    sql: `SELECT CASE WHEN (SELECT COUNT(*) FROM product_remove_operations WHERE review_id=@reviewId)=json_array_length(@rowsJson)
+      AND NOT EXISTS(SELECT 1 FROM json_each(@rowsJson) expected LEFT JOIN product_remove_operations removal
+        ON removal.review_id=@reviewId AND removal.action_ordinal=CAST(json_extract(expected.value,'$.action_ordinal') AS INTEGER)
+        WHERE removal.operation_id IS NULL OR removal.product_id<>CAST(json_extract(expected.value,'$.product_id') AS INTEGER)
+          OR removal.state_digest<>json_extract(expected.value,'$.state_digest') OR removal.plan_digest<>json_extract(expected.value,'$.plan_digest')
+          OR removal.status<>json_extract(expected.value,'$.status'))
+      THEN 1 ELSE json_extract('', '$') END AS product_remove_finalize_guard`,
+    params: { reviewId: review.id, rowsJson: JSON.stringify(storedRemovals.map((row) => ({ action_ordinal: Number(row.action_ordinal),
+      product_id: Number(row.product_id), state_digest: row.state_digest, plan_digest: row.plan_digest, status: row.status }))) },
+  }, {
+    sql: `UPDATE product_remove_operations SET status='ready',updated_at=CURRENT_TIMESTAMP
+      WHERE review_id=@reviewId AND status='reviewed'`,
+    params: { reviewId: review.id },
+  })
   statements.push({
     sql: `UPDATE product_conflict_action_reviews SET status='finalized',finalize_digest=@finalizeDigest,
       manifest_digest=@manifestDigest,finalized_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP
@@ -5865,7 +5979,7 @@ app.post('/possible-duplicates/merge-batch/reviews/:reviewId/finalize', async (c
     storedGroups = await readProductConflictActionStoredGroups(db, request.review_id)
     if (review?.finalize_digest === finalizeDigest && review.manifest_digest) {
       finalPlans = readReplayPlans()
-      return c.json(productConflictActionFinalizeResponse(review, storedGroups, finalPlans, review.manifest_digest))
+      return c.json(productConflictActionFinalizeResponse(review, storedGroups, finalPlans, review.manifest_digest, storedRemovals))
     }
     if (review?.status === 'finalized') {
       return c.json({ success: false, code: 'finalized_conflict', error: 'This review was finalized with different selections.' }, 409)
@@ -5874,7 +5988,7 @@ app.post('/possible-duplicates/merge-batch/reviews/:reviewId/finalize', async (c
   }
   review = await readProductConflictActionReview(db, user.id, review.id)
   if (!review?.manifest_digest) throw new Error('The finalized conflict receipt was not stored.')
-  return c.json(productConflictActionFinalizeResponse(review, storedGroups, finalPlans, review.manifest_digest))
+  return c.json(productConflictActionFinalizeResponse(review, storedGroups, finalPlans, review.manifest_digest, storedRemovals))
 })
 
 type ProductConflictActionMemberReceipt = {
@@ -6279,6 +6393,11 @@ async function productConflictActionApplyCounts(db: ReturnType<typeof getDb>, re
     SUM(status='planned') AS pending_folds,SUM(status IN ('history_pending','undo_ready')) AS committed_folds,
     SUM(status='refused') AS refused_folds,SUM(status='reversed') AS reversed_folds
     FROM product_conflict_action_group_members WHERE review_id=@review AND role='merged'`).get<Record<string, number>>({ review: reviewId })
+  const removals = await db.prepare(`SELECT COUNT(*) AS removal_actions,
+    SUM(status IN ('reviewed','ready')) AS pending_removals,SUM(status='approval_pending') AS approval_pending_removals,
+    SUM(status='undo_ready') AS completed_removals,SUM(status='refused') AS refused_removals,
+    SUM(status='blocked') AS blocked_removals,SUM(status='reversed') AS reversed_removals
+    FROM product_remove_operations WHERE review_id=@review`).get<Record<string, number>>({ review: reviewId })
   const number = (value: unknown) => Number(value) || 0
   return {
     canonical_groups: number(groups?.canonical_groups), pending_groups: number(groups?.pending_groups),
@@ -6288,6 +6407,10 @@ async function productConflictActionApplyCounts(db: ReturnType<typeof getDb>, re
     undo_ready_groups: number(groups?.undo_ready_groups), merge_folds: number(folds?.merge_folds),
     pending_folds: number(folds?.pending_folds), committed_folds: number(folds?.committed_folds),
     refused_folds: number(folds?.refused_folds), reversed_folds: number(folds?.reversed_folds),
+    removal_actions: number(removals?.removal_actions), pending_removals: number(removals?.pending_removals),
+    approval_pending_removals: number(removals?.approval_pending_removals), completed_removals: number(removals?.completed_removals),
+    refused_removals: number(removals?.refused_removals), blocked_removals: number(removals?.blocked_removals),
+    reversed_removals: number(removals?.reversed_removals),
   }
 }
 
@@ -6321,16 +6444,25 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
   }
   const counted = createCountedProductMergeDb(getDb(c.env))
   const db = counted.db
+  const mergeTier = getActionTier(user, 'products', 'merge_duplicates')
+  const removeTier = getActionTier(user, 'products', 'delete')
   let review = await readProductConflictActionReview(db, user.id, request.review_id)
   if (!review) return c.json({ success: false, code: 'review_not_found', error: 'Conflict review not found.' }, 404)
+  if (Number(review.requested_group_count) > 0 && mergeTier !== 'full') {
+    return c.json({ success: false, code: 'permission_denied', error: 'Full duplicate merge permission is required.' }, 403)
+  }
+  if (Number(review.requested_removal_count) > 0 && removeTier === 'none') {
+    return c.json({ success: false, code: 'permission_denied', error: 'Product removal permission is required.' }, 403)
+  }
   if (!['finalized', 'running', 'interrupted', 'completed'].includes(review.status) || review.manifest_digest !== request.manifest_digest) {
     return c.json({ success: false, code: 'manifest_conflict', error: 'This reviewed manifest is stale or does not match.' }, 409)
   }
   if (review.status === 'completed') {
     const counts = await productConflictActionApplyCounts(db, review.id)
-    const reversed = counts.reversed_groups > 0 || counts.reversed_folds > 0
+    const reversed = counts.reversed_groups > 0 || counts.reversed_folds > 0 || counts.reversed_removals > 0
     if (reversed || counts.pending_groups > 0 || counts.partial_groups > 0
-      || counts.history_pending_groups > 0 || counts.pending_folds > 0) {
+      || counts.history_pending_groups > 0 || counts.pending_folds > 0 || counts.pending_removals > 0
+      || counts.approval_pending_removals > 0) {
       return c.json({ success: false, code: reversed ? 'review_reversed' : 'review_state_conflict',
         error: reversed
           ? 'A reviewed group was reversed. Redo it or start a new review before continuing.'
@@ -6338,10 +6470,13 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
     }
     return c.json({ success: true, manifest_version: 1, resolution_version: 2, review_id: review.id,
       manifest_digest: review.manifest_digest, status: review.status, continuation_required: false,
-      counts: { requested_groups: Number(review.requested_group_count), total_members: Number(review.total_member_count), ...counts }, groups: [] })
+      counts: { requested_actions: Number(review.requested_action_count), requested_groups: Number(review.requested_group_count),
+        requested_removals: Number(review.requested_removal_count), total_members: Number(review.total_member_count), ...counts },
+      groups: [], removals: [], approval_required: false })
   }
   const requestStartedAt = Date.now()
   const deltaGroups: ProductConflictActionApplyDelta[] = []
+  const deltaRemovals: Array<Record<string, unknown>> = []
   let processedFolds = 0
   let interruption: ProductConflictActionApplyStop | null = null
   const branchRows = await db.prepare('SELECT id,name FROM branches').all<{ id: number; name: string }>()
@@ -6516,22 +6651,79 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
       break
     }
   }
+  while (!interruption && deltaGroups.length + deltaRemovals.length < PRODUCT_CONFLICT_ACTION_APPLY_MAX_DELTA_GROUPS) {
+    if ((deltaGroups.length + deltaRemovals.length > 0
+        && Date.now() - requestStartedAt + 1_000 >= MERGE_DUPLICATES_REQUEST_BUDGET_MS)
+      || counted.statementCount() + 100 > MERGE_DUPLICATES_REQUEST_STATEMENT_BUDGET) {
+      interruption = new ProductConflictActionApplyStop('remove_budget_reached',
+        'Committed reviewed actions were saved. Continue the same review to process the remaining removals.', 409)
+      break
+    }
+    const operation = await db.prepare(`SELECT operation_id,actor_id,requester_id,source,request_id,review_id,action_ordinal,
+      product_id,reason,state_digest,plan_digest,plan_json,status,blocker_code,error_message,pending_action_id,undo_snapshot_id,
+      action_history_id,generation,response_json FROM product_remove_operations
+      WHERE review_id=@review AND status='ready' ORDER BY action_ordinal LIMIT 1`)
+      .get<ProductConflictActionStoredRemovalRow>({ review: review.id })
+    if (!operation) break
+    let plan
+    try {
+      plan = parseProductRemovePlan(JSON.parse(operation.plan_json))
+      if (plan.product_id !== Number(operation.product_id) || plan.reason !== operation.reason
+        || plan.state_digest !== operation.state_digest || await productRemovePlanDigest(plan) !== operation.plan_digest) {
+        throw new Error('receipt mismatch')
+      }
+    } catch {
+      interruption = new ProductConflictActionApplyStop('review_corrupt', 'The saved product removal plan is unreadable.', 409)
+      break
+    }
+    try {
+      if (removeTier === 'review') {
+        await db.batch(productRemoveReviewQueueStatements({ operation, plan, user }))
+        const pending = await db.prepare('SELECT pending_action_id FROM product_remove_operations WHERE operation_id=@operation')
+          .get<{ pending_action_id: number | null }>({ operation: operation.operation_id })
+        deltaRemovals.push({ action_ordinal: Number(operation.action_ordinal), product_id: Number(operation.product_id),
+          status: 'approval_pending', pending_action_id: pending?.pending_action_id ?? null, undo_availability: 'unavailable', generation: 0 })
+      } else {
+        const transitionStamp = new Date().toISOString()
+        await db.batch(productRemoveApplyStatements({ plan, operationId: operation.operation_id, source: 'conflict_review',
+          requestId: operation.request_id, reviewId: review.id, actionOrdinal: Number(operation.action_ordinal), user,
+          transitionStamp, planDigest: operation.plan_digest, receiptActorId: operation.actor_id, requesterId: operation.requester_id }))
+        const applied = await db.prepare(`SELECT action_history_id,generation FROM product_remove_operations
+          WHERE operation_id=@operation AND status='undo_ready'`).get<{ action_history_id: number | null; generation: number }>({ operation: operation.operation_id })
+        if (!applied?.action_history_id) throw new Error('product_remove_history_missing')
+        deltaRemovals.push({ action_ordinal: Number(operation.action_ordinal), product_id: Number(operation.product_id),
+          status: 'undo_ready', action_history_id: applied.action_history_id, undo_availability: 'ready', generation: Number(applied.generation) })
+      }
+    } catch (error) {
+      interruption = new ProductConflictActionApplyStop(/malformed JSON|product_remove_.*guard|constraint/i.test(String(error))
+        ? 'review_state_conflict' : 'remove_failed', 'The reviewed product removal could not be applied.',
+      /malformed JSON|product_remove_.*guard|constraint/i.test(String(error)) ? 409 : 500)
+      break
+    }
+  }
   review = await readProductConflictActionReview(db, user.id, review.id) || review
   const counts = await productConflictActionApplyCounts(db, review.id)
-  const reversed = counts.reversed_groups > 0 || counts.reversed_folds > 0
-  if (deltaGroups.length === 0 && reversed) {
+  const reversed = counts.reversed_groups > 0 || counts.reversed_folds > 0 || counts.reversed_removals > 0
+  if (deltaGroups.length === 0 && deltaRemovals.length === 0 && reversed) {
     return c.json({ success: false, code: 'review_reversed',
       error: 'A reviewed group was reversed. Redo it or start a new review before continuing.' }, 409)
   }
   const complete = !reversed && counts.pending_groups === 0 && counts.partial_groups === 0
     && counts.history_pending_groups === 0 && counts.pending_folds === 0
+    && counts.pending_removals === 0 && counts.approval_pending_removals === 0
+  const continuationRequired = !reversed && (counts.pending_groups > 0 || counts.partial_groups > 0
+    || counts.history_pending_groups > 0 || counts.pending_folds > 0 || counts.pending_removals > 0)
+  const approvalRequired = counts.approval_pending_removals > 0
   if (complete) interruption = null
   if (!complete && !interruption && (deltaGroups.length >= PRODUCT_CONFLICT_ACTION_APPLY_MAX_DELTA_GROUPS
     || processedFolds >= PRODUCT_CONFLICT_ACTION_APPLY_MAX_FOLDS)) {
     interruption = new ProductConflictActionApplyStop('merge_budget_reached',
       'Committed reviewed folds were saved. Continue the same review to process the remaining folds.', 409)
   }
-  if (deltaGroups.length === 0 && !complete) {
+  if (deltaGroups.length === 0 && deltaRemovals.length === 0 && !complete && !approvalRequired) {
+    if (interruption) {
+      return c.json({ success: false, code: interruption.code, error: interruption.message }, interruption.status)
+    }
     return c.json({ success: false, code: 'review_state_conflict', error: 'No resumable reviewed group is available.' }, 409)
   }
   if (complete && review.status !== 'completed') {
@@ -6540,15 +6732,17 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
       .run({ review: review.id, actor: user.id, manifest: review.manifest_digest })
     review = await readProductConflictActionReview(db, user.id, review.id) || { ...review, status: 'completed' }
   }
-  if (processedFolds > 0) {
+  if (processedFolds > 0 || deltaRemovals.some((row) => row.status === 'undo_ready')) {
     c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
     c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
     c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'update' }))
   }
   return c.json({ success: true, manifest_version: 1, resolution_version: 2, review_id: review.id,
-    manifest_digest: review.manifest_digest, status: review.status, continuation_required: !complete,
-    counts: { requested_groups: Number(review.requested_group_count), total_members: Number(review.total_member_count), ...counts },
-    groups: deltaGroups,
+    manifest_digest: review.manifest_digest, status: review.status, continuation_required: continuationRequired,
+    approval_required: approvalRequired,
+    counts: { requested_actions: Number(review.requested_action_count), requested_groups: Number(review.requested_group_count),
+      requested_removals: Number(review.requested_removal_count), total_members: Number(review.total_member_count), ...counts },
+    groups: deltaGroups, removals: deltaRemovals,
     ...(interruption ? { interruption_code: interruption.code, interruption_message: interruption.message } : {}) })
 }
 
@@ -6581,15 +6775,18 @@ registerProductMergeGroupRedo(async (ctx) => {
 
 app.get('/possible-duplicates/merge-batch/reviews/:reviewId', async (c) => {
   const user = c.get('user')
-  if (getActionTier(user, 'products', 'merge_duplicates') !== 'full') {
-    return c.json({ success: false, code: 'permission_denied', error: 'You do not have permission to perform this action' }, 403)
-  }
+  const mergeTier = getActionTier(user, 'products', 'merge_duplicates')
+  const removeTier = getActionTier(user, 'products', 'delete')
   const cursor = productConflictActionCursor(c.req.query('cursor'))
   const limit = productConflictActionPageLimit(c.req.query('limit'))
   if (cursor == null || limit == null) return c.json({ success: false, code: 'invalid_page', error: 'cursor and limit are invalid.' }, 400)
   const db = getDb(c.env)
   const review = await readProductConflictActionReview(db, user.id, c.req.param('reviewId'))
   if (!review) return c.json({ success: false, code: 'review_not_found', error: 'Conflict review not found.' }, 404)
+  if ((Number(review.requested_group_count) > 0 && mergeTier !== 'full')
+    || (Number(review.requested_removal_count) > 0 && removeTier === 'none')) {
+    return c.json({ success: false, code: 'permission_denied', error: 'You do not have permission to read this review.' }, 403)
+  }
   if (productConflictActionReviewExpired(review)) {
     await expireProductConflictActionReview(db, review)
     return c.json({ success: false, code: 'review_expired', error: 'This conflict review expired. Start a new review.' }, 410)
@@ -6603,15 +6800,15 @@ app.get('/possible-duplicates/merge-batch/reviews/:reviewId', async (c) => {
 app.post('/possible-duplicates/merge-batch', async (c) => {
   const startedAt = Date.now()
   const user = c.get('user')
-  if (getActionTier(user, 'products', 'merge_duplicates') !== 'full') {
-    return c.json({ success: false, code: 'permission_denied', error: 'You do not have permission to perform this action' }, 403)
-  }
   const raw = await c.req.json().catch(() => null)
   if (isProductConflictActionApplyRequest(raw)) {
     return applyProductConflictActionReview(c, raw, user)
   }
   if (isProductConflictActionPreviewRequest(raw)) {
     return c.json({ success: false, code: 'phase_not_available', error: 'Resolution-v2 apply is not available in this review phase.' }, 409)
+  }
+  if (getActionTier(user, 'products', 'merge_duplicates') !== 'full') {
+    return c.json({ success: false, code: 'permission_denied', error: 'You do not have permission to perform this action' }, 403)
   }
   let request
   try { request = parseProductConflictApplyRequest(raw) }
