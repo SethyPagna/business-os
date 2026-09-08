@@ -8,10 +8,11 @@ import ColumnChooser from '../shared/ColumnChooser.tsx'
 import { useColumnPreferences } from '../shared/useColumnPreferences.ts'
 import { resolveDriverLabel } from '../../utils/salesDriverLabel.ts'
 import { SALES_COLUMNS_SURFACE_KEY, SALES_OPTIONAL_COLUMNS } from './salesListColumns.ts'
-import { useApp } from '../../AppContext.tsx'
+import { useApp as useAppHook } from '../../AppContext.tsx'
 
 type TranslateFn = (key: string) => string
 type MoneyFormatter = (value: number | string) => string
+const useApp = useAppHook as unknown as () => { can: (section: string, action?: string) => boolean }
 
 interface SaleItem {
   id?: number | string
