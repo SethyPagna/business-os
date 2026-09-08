@@ -148,7 +148,7 @@ assert.match(
 const returnsRoutes = worker('src/routes/returns.ts')
 assert.match(
   returnsRoutes,
-  /const replacementCustomerAddress = replacementCustomerIsAnonymous \? null : contactDisplayAddress\(saleMeta\.customer_address\) \|\| null[\s\S]*?customer_address: replacementCustomerAddress/,
+  /replacementCustomerAddress = candidateIsAnonymous \? null : contactDisplayAddress\(saleMeta\?\.customer_address\) \|\| null[\s\S]*?customer_address: replacementCustomerAddress/,
   'the replacement sale must carry the display address for a real customer and no address for the reserved anonymous identity',
 )
 // The sales importer is a writer too: a CSV exported by a build older than
