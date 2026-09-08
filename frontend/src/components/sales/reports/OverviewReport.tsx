@@ -305,7 +305,16 @@ export default function OverviewReport(p: ReportViewProps) {
                       ].join(' ').trim()}>
                         {total ? (
                           l.headline
-                            ? <span className="inline-block rounded-[var(--ui-radius-sm)] bg-[var(--ui-ink)] px-1.5 py-0.5 text-[var(--ui-surface)]">{amount}</span>
+                            ? <span className={[
+                              'inline-block rounded-[var(--ui-radius-sm)] bg-[var(--ui-ink)] px-1.5 py-0.5',
+                              // The badge is an opaque child, so it must carry the
+                              // semantic foreground itself; the tone on the td
+                              // cannot win over a child text utility. These pairs
+                              // stay legible against the ink badge in both themes.
+                              l.tone === 'positive' ? 'text-green-300 dark:text-green-700'
+                                : l.tone === 'negative' ? 'text-red-300 dark:text-red-700'
+                                  : 'text-[var(--ui-surface)]',
+                            ].join(' ')}>{amount}</span>
                             : amount
                         ) : ''}
                       </td>
