@@ -281,11 +281,6 @@ await runTest('prompt minimize is capability-gated and never inferred from dirty
  * cannot cost anyone work, because ...".
  */
 const DELIBERATELY_UNGUARDED: Record<string, string> = {
-  // Its entire session is written to a localStorage draft on every keystroke
-  // and restored on reopen -- the file says so itself at the closeIfIdle
-  // comment ("X/backdrop keep the draft (reopen later, shipment intact)").
-  // A "Discard changes?" prompt would be asking about a loss that cannot
-  // happen, and answering Discard would not discard anything.
   // Confirmations and choosers: what they hold is the question itself, not
   // authored content. Reopening costs one tap.
   'components/sales/SaleStatusConfirmModal.tsx': 'a confirmation -- its two toggles are gates on the action, not typed work',
