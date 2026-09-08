@@ -39,6 +39,18 @@ function normalizedScopePart(value: unknown): string {
   return String(value ?? '').trim()
 }
 
+export function pendingDirectMutationForScope<TBody extends Record<string, unknown>>(
+  pending: PendingDirectMutation<TBody> | null | undefined,
+  actorId: unknown,
+  entityId?: unknown,
+): PendingDirectMutation<TBody> | null {
+  if (!pending) return null
+  const actor = normalizedScopePart(actorId)
+  if (!actor || pending.actorId !== actor) return null
+  if (entityId !== undefined && pending.entityId !== normalizedScopePart(entityId)) return null
+  return pending
+}
+
 function requireActorId(actorId: unknown): string {
   const normalized = normalizedScopePart(actorId)
   if (!normalized) throw new DirectMutationPersistenceError('This request was not sent because the signed-in user could not be identified. Sign in again, then retry.')

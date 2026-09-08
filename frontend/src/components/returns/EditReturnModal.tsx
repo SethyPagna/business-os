@@ -14,6 +14,7 @@ import {
   directMutationOutcomeIsUnknown,
   freezeDirectMutationBody,
   loadPendingDirectMutation,
+  pendingDirectMutationForScope,
   savePendingDirectMutation,
 } from '../../utils/directMutationRequest.ts'
 import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
@@ -160,6 +161,8 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
   )
   const [submitting,   setSubmitting]   = useState(false)
   const [pendingRequest, setPendingRequest] = useState(() => loadPendingDirectMutation<PreparedReturnUpdateRequest>('return-edit', user?.id, ret.id))
+  const activePendingRequest = pendingDirectMutationForScope(pendingRequest, user?.id, ret.id)
+    || loadPendingDirectMutation<PreparedReturnUpdateRequest>('return-edit', user?.id, ret.id)
   const submitInFlightRef = useRef(false)
   const isKnownReason = RETURN_REASONS.includes(reason)
 
@@ -224,11 +227,11 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
           branch_id:         it.branch_id || ret.branch_id || null,
         })),
       }
-      const prepared = pendingRequest?.body || freezeDirectMutationBody(await prepareReturnRequest(ret.id, {
+      const prepared = activePendingRequest?.body || freezeDirectMutationBody(await prepareReturnRequest(ret.id, {
         ...payload,
         expected_updated_at: ret.updated_at || undefined,
       }))
-      if (!pendingRequest) {
+      if (!activePendingRequest) {
         setPendingRequest(savePendingDirectMutation('return-edit', user?.id, ret.id, prepared))
       }
       const result = await withLoaderTimeout(
@@ -296,14 +299,14 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
           </div>
         </div>
 
-        {pendingRequest ? (
-          <div role="status" data-needs-reconciliation={pendingRequest.needsReconciliation || undefined} className="mx-4 mt-4 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-100">
-            {pendingRequest.needsReconciliation
+        {activePendingRequest ? (
+          <div role="status" data-needs-reconciliation={activePendingRequest.needsReconciliation || undefined} className="mx-4 mt-4 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-100">
+            {activePendingRequest.needsReconciliation
               ? T('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.')
               : T('sale_bulk_pending', 'A previous request has an unknown outcome. Retry the original request or discard it before starting another.')}
           </div>
         ) : null}
-        <fieldset disabled={submitting || !!pendingRequest} className="contents">
+        <fieldset disabled={submitting || !!activePendingRequest} className="contents">
         <div className="modal-scroll p-4 space-y-4">
           {/* Warning */}
           <div className="bg-orange-50 dark:bg-orange-900/20 rounded-xl p-3 text-xs text-orange-700 dark:text-orange-400">
@@ -438,7 +441,7 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
           <button onClick={closeIfIdle} disabled={submitting} className="btn-secondary text-sm flex-1 disabled:opacity-50">
             {T('cancel','Cancel')}
           </button>
-          {pendingRequest ? (
+          {activePendingRequest ? (
             <>
               <button onClick={handleSubmit} disabled={submitting} className="btn-primary text-sm flex-1 disabled:opacity-50">
                 {submitting ? `⏳ ${T('saving_label','Saving…')}` : T('retry_original_request', 'Retry original request')}

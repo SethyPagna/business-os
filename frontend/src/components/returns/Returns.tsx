@@ -40,6 +40,7 @@ import {
   directMutationOutcomeIsUnknown,
   freezeDirectMutationBody,
   loadPendingDirectMutationSlot,
+  pendingDirectMutationForScope,
   savePendingDirectMutationSlot,
   type DirectMutationHistoryContext,
   type PendingDirectMutation,
@@ -405,6 +406,12 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
     pendingHistoryRequestRef.current = pending
     setPendingHistoryRequest(pending)
   }, [user?.id])
+  const currentPendingHistoryRequest = useCallback(() => (
+    pendingDirectMutationForScope(pendingHistoryRequestRef.current, user?.id)
+      || loadPendingDirectMutationSlot<PreparedReturnUpdateRequest>('return-history', user?.id)
+  ), [user?.id])
+  const activePendingHistoryRequest = pendingDirectMutationForScope(pendingHistoryRequest, user?.id)
+    || currentPendingHistoryRequest()
   const savePendingHistoryRequest = useCallback((
     returnId: number | string,
     body: PreparedReturnUpdateRequest | null,
@@ -785,7 +792,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
     historyContext: DirectMutationHistoryContext | null = null,
   ): Promise<void> => {
     if (!snapshot?.id) throw new Error('Return snapshot is unavailable.')
-    const storedPending = pendingHistoryRequestRef.current
+    const storedPending = currentPendingHistoryRequest()
     const storedHistoryMatches = !!historyContext
       && storedPending?.history?.entryId === historyContext.entryId
       && storedPending.history.direction === historyContext.direction
@@ -812,10 +819,10 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
       finishSingleAction(historyRestoreInFlightRef)
       setHistoryRestoreSaving(false)
     }
-  }, [buildReturnHistoryPayload, savePendingHistoryRequest, submitReturnHistoryRequest, tr])
+  }, [buildReturnHistoryPayload, currentPendingHistoryRequest, savePendingHistoryRequest, submitReturnHistoryRequest, tr])
 
   const retryPendingReturnHistoryRequest = async (): Promise<void> => {
-    const pending = pendingHistoryRequestRef.current
+    const pending = currentPendingHistoryRequest()
     if (!pending) return
     const history = pending.history
     if (history) {
@@ -1235,9 +1242,9 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
           />
         </SectionExportAction>
       </div>
-      {pendingHistoryRequest ? (
-        <div data-needs-reconciliation={pendingHistoryRequest.needsReconciliation || undefined} className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
-          <span className="min-w-0 flex-1">{pendingHistoryRequest.needsReconciliation
+      {activePendingHistoryRequest ? (
+        <div data-needs-reconciliation={activePendingHistoryRequest.needsReconciliation || undefined} className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
+          <span className="min-w-0 flex-1">{activePendingHistoryRequest.needsReconciliation
             ? tr('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.')
             : tr('sale_bulk_pending', 'A previous request has an unknown outcome. Retry the original request or discard it before starting another.')}</span>
           <button type="button" className="btn-secondary" disabled={historyRestoreSaving} onClick={() => {
@@ -1246,7 +1253,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
           }}>{tr('retry_original_request', 'Retry original request')}</button>
           <button type="button" className="btn-secondary" disabled={historyRestoreSaving} onClick={() => {
             if (window.confirm(tr('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.'))) {
-              try { savePendingHistoryRequest(pendingHistoryRequest.entityId, null) }
+              try { savePendingHistoryRequest(activePendingHistoryRequest.entityId, null) }
               catch (error) { notify(String((error as { message?: unknown })?.message || error), 'error') }
             }
           }}>{tr('discard_retry', 'Discard retry')}</button>
