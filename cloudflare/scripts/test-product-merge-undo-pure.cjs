@@ -578,6 +578,27 @@ async function run() {
     assert.equal(d1.db.prepare('SELECT image_path FROM products WHERE id=?').get(KEEPER).image_path, '/uploads/concurrent.png')
   })
 
+  await check('reviewed merge undo restores the optional exact keeper catalog before-image', async () => {
+    const statement = undo.mergeKeeperRestoreStatement({
+      keeperId: KEEPER,
+      dupId: DUP,
+      keeperImagePathBefore: null,
+      dupImagesBefore: [],
+      imagesMovedToKeeper: [],
+      keeperCatalogBefore: {
+        category: 'Before category', categories: '["Before category"]',
+        brand: '', brands: '[]', unit: 'box', unit_normalized: 'box', brand_compact: '',
+      },
+    }, false)
+    assert.match(statement.sql, /category=@category,categories=@categories,brand=@brand,brands=@brands,unit=@unit,unit_normalized=@unitNormalized,brand_compact=@brandCompact/)
+    d1.db.prepare(statement.sql).run(statement.params)
+    const keeper = d1.db.prepare('SELECT category,categories,brand,brands,unit,unit_normalized,brand_compact FROM products WHERE id=?').get(KEEPER)
+    assert.deepEqual({ ...keeper }, {
+      category: 'Before category', categories: '["Before category"]', brand: '', brands: '[]',
+      unit: 'box', unit_normalized: 'box', brand_compact: '',
+    })
+  })
+
   await check('undo refuses a merge after later stock activity', async () => {
     await applier.run({ applier: 'product.merge', snapshot_id: snapshotId }, { env: {}, user: { id: 42 }, direction: 'redo' })
     run1('UPDATE branch_stock SET quantity = quantity + 1 WHERE product_id = @productId AND branch_id = @branchId', { productId: KEEPER, branchId: B1 })

@@ -92,9 +92,10 @@ function wrapDb(sqlite) {
       const tx = sqlite.transaction((stmts) => {
         for (const s of stmts) {
           const st = sqlite.prepare(s.sql)
-          if (s.params == null) st.run()
-          else if (Array.isArray(s.params)) st.run(...s.params)
-          else st.run(s.params)
+          const execute = st.reader ? 'get' : 'run'
+          if (s.params == null) st[execute]()
+          else if (Array.isArray(s.params)) st[execute](...s.params)
+          else st[execute](s.params)
         }
       })
       tx(statements)
@@ -192,7 +193,7 @@ const undoAppliers = loadModule('lib/undoAppliers.ts', (id) => {
   }
   return require(id)
 })
-const { resolveUndoApplier, registeredUndoAppliers, isServerReplayable, mergeReplayChangesProductImages } = undoAppliers
+const { resolveUndoApplier, registeredUndoAppliers, isServerReplayable, mergeReplayChangesProductImages, registerProductMergeGroupRedo, productMergeGroupPrefixFingerprint } = undoAppliers
 
 let passed = 0
 async function check(name, fn) {
@@ -274,6 +275,48 @@ function atomicSaleItemsFixture() {
   db.prepare("INSERT INTO sale_mutation_members(operation_id,entity_kind,entity_id,ordinal) VALUES('add-operation-77','sale_item',10,0)").run()
   db.prepare("INSERT INTO sale_mutation_members(operation_id,entity_kind,entity_id,ordinal) VALUES('add-operation-77','undo_snapshot',1,0)").run()
   return { db, payload }
+}
+
+async function productMergeGroupFixture() {
+  const db = new Database(':memory:')
+  db.exec(`
+    CREATE TABLE products(id INTEGER PRIMARY KEY,is_active INTEGER,updated_at TEXT,image_path TEXT,barcode TEXT,
+      category TEXT,categories TEXT,brand TEXT,brands TEXT,unit TEXT,unit_normalized TEXT,brand_compact TEXT,stock_quantity REAL);
+    CREATE TABLE branch_stock(product_id INTEGER,branch_id INTEGER,quantity REAL,rfid_confirmed_qty REAL,PRIMARY KEY(product_id,branch_id));
+    CREATE TABLE inventory_movements(id INTEGER PRIMARY KEY,product_id INTEGER,movement_type TEXT,reason TEXT);
+    CREATE TABLE undo_snapshots(id INTEGER PRIMARY KEY,kind TEXT,status TEXT,payload_json TEXT,created_by_id INTEGER,updated_at TEXT);
+    CREATE TABLE action_history(id INTEGER PRIMARY KEY,status TEXT,undo_payload TEXT,redo_payload TEXT,last_error TEXT,created_by_id INTEGER,updated_at TEXT);
+    CREATE TABLE product_conflict_action_reviews(id TEXT PRIMARY KEY,actor_id INTEGER);
+    CREATE TABLE product_conflict_action_groups(review_id TEXT,ordinal INTEGER,group_key TEXT,status TEXT,reversal_generation INTEGER,action_history_id INTEGER,updated_at TEXT,PRIMARY KEY(review_id,ordinal));
+    CREATE TABLE product_conflict_action_group_members(review_id TEXT,group_ordinal INTEGER,member_ordinal INTEGER,product_id INTEGER,role TEXT,status TEXT,undo_snapshot_id INTEGER,updated_at TEXT,PRIMARY KEY(review_id,group_ordinal,member_ordinal));
+    CREATE TABLE audit_logs(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,user_name TEXT,action TEXT,entity TEXT,entity_id TEXT,details TEXT,table_name TEXT,record_id TEXT,new_value TEXT);
+  `)
+  db.prepare("INSERT INTO products VALUES(1,1,NULL,NULL,'GROUP-1','Final','[\"Final\"]','Final','[\"Final\"]','ea','ea','final',0)").run()
+  db.prepare("INSERT INTO products VALUES(2,0,NULL,NULL,'GROUP-1','Old A','[\"Old A\"]','A','[\"A\"]','box','box','a',0)").run()
+  db.prepare("INSERT INTO products VALUES(3,0,NULL,NULL,'GROUP-1','Old B','[\"Old B\"]','B','[\"B\"]','pack','pack','b',0)").run()
+  const reversal = (dupId, label) => ({
+    keeperId: 1, keeperName: 'Keeper', dupId, dupName: label, mergeContext: 'group test',
+    keeperImagePathBefore: null, dupImagePathBefore: null, keeperBarcodeBefore: 'GROUP-1',
+    keeperCatalogBefore: { category: label, categories: `[\"${label}\"]`, brand: label, brands: `[\"${label}\"]`, unit: 'ea', unit_normalized: 'ea', brand_compact: label.toLowerCase() },
+    keeperStockBefore: [], dupStockBefore: [], dupImagesBefore: [], imagesMovedToKeeper: [], repointedBatches: [], foldedBatches: [],
+    reparentedSaleItemIds: [], reparentedMovementIds: [], adjustmentMovementIds: [], operationId: `op-${dupId}`,
+  })
+  const childIds = [11, 12]
+  db.prepare("INSERT INTO undo_snapshots VALUES(11,'product.merge.group.child','applied',?,7,NULL)").run(JSON.stringify(reversal(2, 'Old A')))
+  db.prepare("INSERT INTO undo_snapshots VALUES(12,'product.merge.group.child','applied',?,7,NULL)").run(JSON.stringify(reversal(3, 'Old B')))
+  const groupSnapshot = {
+    version: 1, review_id: 'review-1', group_key: 'group-1', child_snapshot_ids: childIds,
+    prefix_fingerprint: await productMergeGroupPrefixFingerprint('review-1', 'group-1', childIds, 0), generation: 0,
+  }
+  db.prepare("INSERT INTO undo_snapshots VALUES(10,'product.merge.group','applied',?,7,NULL)").run(JSON.stringify(groupSnapshot))
+  const pointer = { applier: 'product.merge.group', snapshot_id: 10, review_id: 'review-1', group_key: 'group-1', generation: 0 }
+  db.prepare("INSERT INTO action_history VALUES(41,'undoable',?,?,NULL,7,NULL)").run(JSON.stringify(pointer), JSON.stringify(pointer))
+  db.prepare("INSERT INTO product_conflict_action_reviews VALUES('review-1',7)").run()
+  db.prepare("INSERT INTO product_conflict_action_groups VALUES('review-1',0,'group-1','completed',0,41,NULL)").run()
+  db.prepare("INSERT INTO product_conflict_action_group_members VALUES('review-1',0,0,1,'keeper','undo_ready',NULL,NULL)").run()
+  db.prepare("INSERT INTO product_conflict_action_group_members VALUES('review-1',0,1,2,'merged','undo_ready',11,NULL)").run()
+  db.prepare("INSERT INTO product_conflict_action_group_members VALUES('review-1',0,2,3,'merged','undo_ready',12,NULL)").run()
+  return { db, pointer }
 }
 
 function atomicSaleItemsState(db) {
@@ -432,6 +475,119 @@ await check('the product.merge.bulk applier (whole-catalog cleanup) is registere
   assert.strictEqual(resolved?.action, 'merge_duplicates')
 })
 
+await check('the product.merge.group applier is registered with the merge action gate', () => {
+  assert.ok(registeredUndoAppliers().includes('product.merge.group'))
+  const resolved = resolveUndoApplier({ applier: 'product.merge.group', snapshot_id: 1 })
+  assert.strictEqual(resolved?.permission, 'products')
+  assert.strictEqual(resolved?.action, 'merge_duplicates')
+})
+
+await check('product.merge.group undo is reverse-order, resumable, atomic, and reconciles a lost final response', async () => {
+  const fixture = await productMergeGroupFixture()
+  sharedDb = fixture.db
+  try {
+    const applier = resolveUndoApplier(fixture.pointer)
+    const first = await applier.run(fixture.pointer, { env: {}, user: atomicUser, direction: 'undo', historyId: 41, generation: 0 })
+    assert.deepEqual(first, { complete: false, continuation_required: true, processed_children: 1, pending_children: 1, generation: 0 })
+    assert.equal(fixture.db.prepare('SELECT is_active FROM products WHERE id=3').get().is_active, 1, 'last child reverses first')
+    assert.equal(fixture.db.prepare('SELECT is_active FROM products WHERE id=2').get().is_active, 0)
+    assert.equal(fixture.db.prepare('SELECT status FROM action_history WHERE id=41').get().status, 'undoable', 'partial undo remains undoable')
+    assert.equal(fixture.db.prepare('SELECT status FROM product_conflict_action_groups').get().status, 'partial')
+
+    const second = await applier.run(fixture.pointer, { env: {}, user: atomicUser, direction: 'undo', historyId: 41, generation: 0 })
+    assert.deepEqual(second, { complete: true, continuation_required: false, processed_children: 1, pending_children: 0, generation: 1 })
+    assert.equal(fixture.db.prepare('SELECT status FROM action_history WHERE id=41').get().status, 'redoable')
+    const currentPointer = JSON.parse(fixture.db.prepare('SELECT undo_payload FROM action_history WHERE id=41').get().undo_payload)
+    const currentGroupSnapshot = JSON.parse(fixture.db.prepare('SELECT payload_json FROM undo_snapshots WHERE id=10').get().payload_json)
+    assert.equal(currentGroupSnapshot.prefix_fingerprint,
+      await productMergeGroupPrefixFingerprint('review-1', 'group-1', [11, 12], 1),
+      'final child transaction authenticates the same ordered ids under the new generation')
+    const reconciled = await applier.run(currentPointer, { env: {}, user: atomicUser, direction: 'undo', historyId: 41, generation: 0 })
+    assert.deepEqual(reconciled, { complete: true, continuation_required: false, processed_children: 0, pending_children: 0, generation: 1 })
+    assert.equal(fixture.db.prepare('SELECT COUNT(*) n FROM audit_logs').get().n, 2, 'reconciliation writes no duplicate audit')
+  } finally { sharedDb = null }
+})
+
+await check('product.merge.group redo is forward-order, resumable, and stale generations fail without writes', async () => {
+  const fixture = await productMergeGroupFixture()
+  sharedDb = fixture.db
+  try {
+    const applier = resolveUndoApplier(fixture.pointer)
+    await applier.run(fixture.pointer, { env: {}, user: atomicUser, direction: 'undo', historyId: 41, generation: 0 })
+    await applier.run(fixture.pointer, { env: {}, user: atomicUser, direction: 'undo', historyId: 41, generation: 0 })
+    registerProductMergeGroupRedo(async ({ db, reversal, completionStatements }) => {
+      const fresh = { ...reversal }
+      await db.batch([
+        { sql: 'UPDATE products SET is_active=0,updated_at=CURRENT_TIMESTAMP WHERE id=@id', params: { id: reversal.dupId } },
+        ...completionStatements(fresh),
+      ])
+    })
+    let pointer = JSON.parse(fixture.db.prepare('SELECT redo_payload FROM action_history WHERE id=41').get().redo_payload)
+    const first = await applier.run(pointer, { env: {}, user: atomicUser, direction: 'redo', historyId: 41, generation: 1 })
+    assert.deepEqual(first, { complete: false, continuation_required: true, processed_children: 1, pending_children: 1, generation: 1 })
+    assert.equal(fixture.db.prepare('SELECT is_active FROM products WHERE id=2').get().is_active, 0, 'first child reapplies first')
+    assert.equal(fixture.db.prepare('SELECT is_active FROM products WHERE id=3').get().is_active, 1)
+    assert.equal(fixture.db.prepare('SELECT status FROM action_history WHERE id=41').get().status, 'redoable', 'partial redo remains redoable')
+    const second = await applier.run(pointer, { env: {}, user: atomicUser, direction: 'redo', historyId: 41, generation: 1 })
+    assert.equal(second.complete, true)
+    assert.equal(second.generation, 2)
+    const state = JSON.stringify(fixture.db.prepare('SELECT status,reversal_generation FROM product_conflict_action_groups').get())
+    pointer = JSON.parse(fixture.db.prepare('SELECT redo_payload FROM action_history WHERE id=41').get().redo_payload)
+    await assert.rejects(
+      () => applier.run(pointer, { env: {}, user: atomicUser, direction: 'redo', historyId: 41, generation: 0 }),
+      error => error?.statusCode === 409,
+    )
+    assert.equal(JSON.stringify(fixture.db.prepare('SELECT status,reversal_generation FROM product_conflict_action_groups').get()), state)
+  } finally { sharedDb = null }
+})
+
+await check('product.merge.group rejects duplicate, missing, foreign-actor, and mismatched-member children', async () => {
+  for (const mutate of [
+    db => {
+      const snap = JSON.parse(db.prepare('SELECT payload_json FROM undo_snapshots WHERE id=10').get().payload_json)
+      snap.prefix_fingerprint = `sha256-${'f'.repeat(64)}`
+      db.prepare('UPDATE undo_snapshots SET payload_json=? WHERE id=10').run(JSON.stringify(snap))
+    },
+    db => {
+      const snap = JSON.parse(db.prepare('SELECT payload_json FROM undo_snapshots WHERE id=10').get().payload_json)
+      snap.child_snapshot_ids = [11, 11]
+      db.prepare('UPDATE undo_snapshots SET payload_json=? WHERE id=10').run(JSON.stringify(snap))
+    },
+    db => db.prepare('DELETE FROM undo_snapshots WHERE id=12').run(),
+    db => db.prepare('UPDATE undo_snapshots SET created_by_id=8 WHERE id=12').run(),
+    db => db.prepare('UPDATE product_conflict_action_group_members SET product_id=99 WHERE undo_snapshot_id=12').run(),
+  ]) {
+    const fixture = await productMergeGroupFixture()
+    sharedDb = fixture.db
+    mutate(fixture.db)
+    const before = JSON.stringify(fixture.db.prepare('SELECT id,is_active FROM products ORDER BY id').all())
+    await assert.rejects(
+      () => resolveUndoApplier(fixture.pointer).run(fixture.pointer, { env: {}, user: atomicUser, direction: 'undo', historyId: 41, generation: 0 }),
+      error => error?.statusCode === 409,
+    )
+    assert.equal(JSON.stringify(fixture.db.prepare('SELECT id,is_active FROM products ORDER BY id').all()), before)
+  }
+  sharedDb = null
+})
+
+await check('product.merge.group CAS rejects a boundary race without a partial child reversal', async () => {
+  const fixture = await productMergeGroupFixture()
+  sharedDb = fixture.db
+  beforeAtomicBatch = db => db.prepare('UPDATE product_conflict_action_groups SET reversal_generation=1').run()
+  try {
+    await assert.rejects(
+      () => resolveUndoApplier(fixture.pointer).run(fixture.pointer, { env: {}, user: atomicUser, direction: 'undo', historyId: 41, generation: 0 }),
+      error => error?.statusCode === 409,
+    )
+    assert.equal(fixture.db.prepare('SELECT is_active FROM products WHERE id=3').get().is_active, 0)
+    assert.equal(fixture.db.prepare('SELECT status FROM undo_snapshots WHERE id=12').get().status, 'applied')
+    assert.equal(fixture.db.prepare('SELECT status FROM action_history WHERE id=41').get().status, 'undoable')
+  } finally {
+    beforeAtomicBatch = null
+    sharedDb = null
+  }
+})
+
 await check('merge replay image authority is required only for saved cover/gallery effects', async () => {
   const db = new Database(':memory:')
   db.exec('CREATE TABLE undo_snapshots(id INTEGER PRIMARY KEY, kind TEXT, payload_json TEXT); CREATE TABLE products(id INTEGER PRIMARY KEY, image_path TEXT)')
@@ -454,6 +610,14 @@ await check('merge replay image authority is required only for saved cover/galle
     ...base, keeperId: 3, dupId: 4, dupImagesBefore: [{ image_path: '/uploads/b.png', sort_order: 0 }],
   }] }))
   assert.equal(await mergeReplayChangesProductImages({}, { applier: 'product.merge.bulk', snapshot_id: 4 }, 'redo'), true)
+  db.prepare('INSERT INTO undo_snapshots(id,kind,payload_json) VALUES(5,?,?)').run('product.merge.group.child', JSON.stringify(base))
+  db.prepare('INSERT INTO undo_snapshots(id,kind,payload_json) VALUES(6,?,?)').run('product.merge.group.child', JSON.stringify({
+    ...base, keeperId: 3, dupId: 4, dupImagesBefore: [{ image_path: '/uploads/group.png', sort_order: 0 }],
+  }))
+  db.prepare('INSERT INTO undo_snapshots(id,kind,payload_json) VALUES(7,?,?)').run('product.merge.group', JSON.stringify({ child_snapshot_ids: [5, 6] }))
+  assert.equal(await mergeReplayChangesProductImages({}, { applier: 'product.merge.group', snapshot_id: 7 }, 'undo'), true)
+  db.prepare('INSERT INTO undo_snapshots(id,kind,payload_json) VALUES(8,?,?)').run('product.merge.group', JSON.stringify({ child_snapshot_ids: [5, 999] }))
+  assert.equal(await mergeReplayChangesProductImages({}, { applier: 'product.merge.group', snapshot_id: 8 }, 'undo'), true, 'missing child fails closed')
   sharedDb = null
 })
 
