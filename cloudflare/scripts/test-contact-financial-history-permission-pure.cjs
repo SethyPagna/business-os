@@ -79,6 +79,25 @@ const routeDependencies = {
 const contactsApp = load('routes/contacts.ts', routeDependencies).default
 const salesApp = load('routes/sales.ts', routeDependencies).default
 
+const pickerSql = []
+const pickerDb = {
+  prepare(sql) {
+    pickerSql.push(sql)
+    return {
+      all: async () => [{ id: 7, name: 'Picker customer', phone: '0123', is_anonymous: 0 }],
+    }
+  },
+}
+const posOnly = { username: 'cashier', role_code: 'employee', role_permissions: JSON.stringify({ pos: true }), permissions: '{}' }
+const posContactsApp = load('routes/contacts.ts', {
+  ...routeDependencies,
+  '../lib/auth': { requireAuth: async (c, next) => { c.set('user', posOnly); return next() } },
+  '../lib/db': { getDb: () => pickerDb },
+  '../lib/contactPicker': load('lib/contactPicker.ts'),
+  '../lib/contactIds': load('lib/contactIds.ts'),
+  '../lib/contactSearch': { buildContactMatchClause: () => undefined },
+}).default
+
 async function assertDeniedBeforeRead(app, pathname) {
   dbReads = 0
   const response = await app.request(pathname, {}, {})
@@ -92,6 +111,19 @@ Promise.all([
   assertDeniedBeforeRead(salesApp, '/delivery-contact-report?delivery_contact_id=1'),
 ]).then(() => {
   console.log('PASS real Contacts and Sales report routes refuse before D1 reads')
+  return (async () => {
+    pickerSql.length = 0
+    const picker = await posContactsApp.request('/customers?fields=sales_picker&limit=20', {}, {})
+    assert.equal(picker.status, 200)
+    assert.equal((await picker.json()).items[0].name, 'Picker customer')
+    assert.equal(pickerSql.length, 1)
+    assert.match(pickerSql[0], /COALESCE\(is_anonymous, 0\) = 0/)
+    for (const path of ['/customers', '/customers/7', '/customers?fields=picker', '/suppliers?fields=sales_picker']) {
+      assert.equal((await posContactsApp.request(path, {}, {})).status, 403, path)
+    }
+    assert.equal(pickerSql.length, 1, 'denied ordinary Contacts reads must not reach D1')
+    console.log('PASS POS-only user reaches only the bounded sales_picker carve-out')
+  })()
 }).catch(error => {
   console.error(error)
   process.exitCode = 1
