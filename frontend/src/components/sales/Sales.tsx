@@ -27,7 +27,7 @@ import { createLongPressState, type LongPressState } from '../../utils/longPress
 import { buildTimeActionSections, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.ts'
 import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { buildBulkSaleCancelInput, getSales as fetchSales, getSalesStats as fetchSalesStats, getSalesStatsStrip, SALES_LIST_REQUEST_TIMEOUT_MS, updateSalesBulkField, updateSalesBulkStatus, type BulkSaleStatusItem, type BulkSaleStatusPayload, type BulkSaleUpdatePayload, type PreparedSaleStatusRequest, type SaleAmendmentRequest } from '../../api/salesTransport.ts'
-import { getCustomerIdentityById, getCustomers, getDeliveryContacts } from '../../api/contactReadTransport.ts'
+import { getCustomerIdentityById, getSalesCustomerPicker, getDeliveryContacts } from '../../api/contactReadTransport.ts'
 import { resolveSaleCustomerEditorRoute } from '../../utils/customerIdentity.ts'
 import { getCustomerRenameImpact, updateCustomer } from '../../api/contactWriteTransport.ts'
 import RenameCascadeModal, { type RenameCascadeChoice, type RenameCascadeRequest } from '../shared/RenameCascadeModal.tsx'
@@ -353,6 +353,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   const canAmendSales = can('sales', 'amend')
   const canImportSales = can('sales', 'import')
   const canExportSales = can('sales', 'export')
+  const canBulkSales = can('sales', 'bulk')
   const canViewSales = can('sales', 'view')
   const canViewFees = can('fees', 'view')
   // Returning straight from the receipt is still a RETURNS write, so it is
@@ -384,7 +385,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // only exist while something is selected; a long-press on a row/card
   // enters select mode; the desktop column-header checkbox is select-all.
   // Ends automatically once the last item is deselected.
-  const selectionModeActive = selectedIds.size > 0
+  const selectionModeActive = canBulkSales && selectedIds.size > 0
   // One long-press slot per visible row, keyed by sale id -- same reasoning
   // as Products.tsx/Inventory.tsx: SalesListSurface renders rows inside a
   // .map(), not as mounted components, so the mutable state lives here.
@@ -543,6 +544,17 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     } catch { /* retain in memory when storage is unavailable */ }
     setBulkRetryRevision(value => value + 1)
   }
+  useEffect(() => {
+    if (canBulkSales) return
+    // Permission refreshes apply while this page stays mounted. Make every
+    // already-open bulk surface inert immediately; keep unknown-outcome
+    // retry bodies in session storage so an authorized operator can resume.
+    bulkTargetSearchVersionRef.current += 1
+    setSelectedIds(new Set<number>())
+    setBulkChangePrompt(null)
+    setCancelPrompt((current) => current?.mode === 'bulk' ? null : current)
+    setStatusPrompt((current) => current?.mode === 'bulk' ? null : current)
+  }, [canBulkSales])
   const aliveRef = useRef(true)
   const actionHistory = useActionHistory({ limit: 3, notify, enabled: historyReady, user })
   // 180ms, matching Products.tsx/POS.tsx/Inventory.tsx's shared canonical
@@ -1547,12 +1559,17 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
     : saleListCreditUsd(filtered)
 
   const toggleSelected = (saleId: number | string) => {
+    if (!canBulkSales) return
     const numericId = Number(saleId)
     if (!Number.isFinite(numericId)) return
     setSelectedIds((current) => toggleIdSet(current, [numericId], !current.has(numericId)))
   }
 
   const toggleSelectAll = (checked: boolean) => {
+    if (!canBulkSales) {
+      setSelectedIds(new Set<number>())
+      return
+    }
     if (!checked) {
       setSelectedIds(new Set<number>())
       return
@@ -1561,9 +1578,10 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
   }
 
   const toggleSelectionScope = useCallback((ids: Array<number | string>, checked: boolean) => {
+    if (!canBulkSales) return
     const normalized = normalizeFiniteIds(ids)
     setSelectedIds((current) => toggleIdSet(current, normalized, checked))
-  }, [])
+  }, [canBulkSales])
 
   const toggleSalesSection = useCallback((sectionId: string) => {
     setCollapsedSalesSections((current) => {
@@ -1643,6 +1661,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
   }
 
   const openBulkChange = async (field: BulkSaleField) => {
+    if (!canBulkSales) return
     if (!selectedSales.length) return
     if (selectedSales.length > 25) {
       notify(translateOr('sale_bulk_limit', 'Select at most 25 sales for one change.'), 'error')
@@ -1664,7 +1683,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
         targetChoices = uniqueChoices([...sourceChoices, ...(Array.isArray(configured) ? configured : []).map((method) => valueChoice(method, translateOr('none', 'None')))])
       } else {
         const result = field === 'customer'
-          ? await getCustomers({ page: 1, pageSize: SALES_BULK_LINKED_PAGE_SIZE })
+          ? await getSalesCustomerPicker({ page: 1, pageSize: SALES_BULK_LINKED_PAGE_SIZE })
           : await getDeliveryContacts({ page: 1, pageSize: SALES_BULK_LINKED_PAGE_SIZE })
         const record = (result || {}) as Record<string, unknown>
         const rows = Array.isArray(result) ? result : Array.isArray(record.data) ? record.data : Array.isArray(record.items) ? record.items : []
@@ -1688,6 +1707,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
   }
 
   const searchBulkLinkedTargets = async (query: string) => {
+    if (!canBulkSales) return
     const prompt = bulkChangePrompt
     if (!prompt || (prompt.field !== 'customer' && prompt.field !== 'delivery_contact')) return
     const searchVersion = ++bulkTargetSearchVersionRef.current
@@ -1706,7 +1726,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
     if (searchVersion !== bulkTargetSearchVersionRef.current) return
     try {
       const result = prompt.field === 'customer'
-        ? await getCustomers({ search: query, page: 1, pageSize: SALES_BULK_LINKED_PAGE_SIZE })
+        ? await getSalesCustomerPicker({ search: query, page: 1, pageSize: SALES_BULK_LINKED_PAGE_SIZE })
         : await getDeliveryContacts({ search: query, page: 1, pageSize: SALES_BULK_LINKED_PAGE_SIZE })
       const record = (result || {}) as Record<string, unknown>
       const rows = Array.isArray(result) ? result : Array.isArray(record.data) ? record.data : Array.isArray(record.items) ? record.items : []
@@ -1739,6 +1759,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
     // Keep the original selection vocabulary inside the frozen scoped flow;
     // focused compatibility checks and the prompt copy both rely on it.
     const selectedSales = scopeSales
+    if (!canBulkSales) return
     // View-only (Part 557): bulk status writes share sales.status with single
     // status changes, including the per-action override.
     if (!canChangeSaleStatus) {
@@ -1836,6 +1857,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
   }
 
   const submitBulkFieldChange = async (field: Exclude<BulkSaleField, 'status'>, source: BulkSaleChoice, target: BulkSaleChoice, matched: BulkSaleChangeRow[], frozenSales: SaleRecord[], retryRequest?: BulkSaleUpdatePayload) => {
+    if (!canBulkSales) return
     if (!retryRequest && !matched.length) return
     if (!beginSingleAction(bulkStatusInFlightRef, { blocked: bulkFieldSaving })) return
     setBulkFieldSaving(true)
@@ -1873,7 +1895,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
       setSaleCustomerPrompt((current) => current?.sale.id === sale.id ? { ...current, choices: [] } : current)
       return
     }
-    const result = await getCustomers({ ...(search ? { search } : {}), page: 1, pageSize: SALES_BULK_LINKED_PAGE_SIZE })
+    const result = await getSalesCustomerPicker({ ...(search ? { search } : {}), page: 1, pageSize: SALES_BULK_LINKED_PAGE_SIZE })
     const choices = customerRows(result).map((row) => ({
       id: Number(row.id),
       name: String(row.name || `#${row.id}`),
@@ -2275,7 +2297,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
           }}>{translateOr('discard_retry', 'Discard retry')}</button>
         </div>
       ) : null}
-      {pendingBulkRequest ? (
+      {canBulkSales && pendingBulkRequest ? (
         <div role="status" className="mb-2 flex flex-wrap items-center gap-2 rounded-xl border p-3 text-sm">
           <span>{translateOr('sale_bulk_pending', 'A previous request has an unknown outcome. Retry the original request or discard it before starting another.')}</span>
           <button type="button" className="btn-secondary" disabled={!!bulkStatusSaving || !canChangeSaleStatus} onClick={() => handleBulkStatusUpdate(pendingBulkRequest.target_status, null, true, true)}>{translateOr('sale_bulk_retry', 'Retry original request')}</button>
@@ -2284,8 +2306,8 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
           }}>{translateOr('sale_bulk_discard', 'Discard retry')}</button>
         </div>
       ) : null}
-      {selectedSales.length > 25 && (canChangeSaleStatus || canAmendSales || canChangeSaleCustomer) ? <p role="status" className="mb-2 text-sm text-red-600">{translateOr('sale_bulk_limit', 'Select at most 25 sales for one change.')}</p> : null}
-      {selectedSales.length > 0 ? (
+      {canBulkSales && selectedSales.length > 25 && (canChangeSaleStatus || canAmendSales || canChangeSaleCustomer) ? <p role="status" className="mb-2 text-sm text-red-600">{translateOr('sale_bulk_limit', 'Select at most 25 sales for one change.')}</p> : null}
+      {canBulkSales && selectedSales.length > 0 ? (
           <div className="bulk-toolbar mb-2 flex flex-wrap items-center gap-1.5 rounded-xl border px-2.5 py-2 text-sm shadow-sm">
             <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-900/40 dark:text-blue-200">{selectedSales.length}</span>
             {/* Bulk status writes are Full-Access only (Part 557): View-only
@@ -2546,7 +2568,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
           />
         </Suspense>
       ) : null}
-      {pendingBulkFieldRequest ? (
+      {canBulkSales && pendingBulkFieldRequest ? (
         <div role="status" className="mb-2 flex flex-wrap items-center gap-2 rounded-xl border p-3 text-sm">
           <span>{translateOr('sale_bulk_pending', 'A previous request has an unknown outcome. Retry the original request or discard it before starting another.')}</span>
           <button type="button" className="btn-secondary" disabled={bulkFieldSaving} onClick={() => { const kind = pendingBulkFieldRequest.action.kind; void submitBulkFieldChange(kind, { key: '', label: '' }, { key: '', label: '' }, [], [], pendingBulkFieldRequest) }}>{translateOr('sale_bulk_retry', 'Retry original request')}</button>
@@ -2554,7 +2576,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
         </div>
       ) : null}
 
-      {bulkChangePrompt ? (
+      {canBulkSales && bulkChangePrompt ? (
         <BulkSaleChangeModal
           field={bulkChangePrompt.field}
           rows={bulkChangePrompt.rows}
