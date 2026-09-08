@@ -178,23 +178,14 @@ async function loadPromotionImageReferences(db: ReturnType<typeof getDb>, public
   if (!requestedPaths.length) return new Map()
 
   const promotionRowsById = new Map<number, PromotionImageReference>()
-  // One candidate consumes five D1 bindings: its exact value, and lower/upper
-  // boundaries for the `?` and `#` cache suffix ranges. Keep every statement
-  // within D1's 100-binding ceiling with the real shared chunk helper.
+  // Five bindings per candidate and three compound terms per query,
+  // independent of candidate count. CROSS JOIN keeps the small candidate
+  // table outermost so each promotion lookup uses its image-path index.
   for (const candidates of chunkForBinding(promotionLookupCandidates(requestedPaths), 0, 5)) {
     const params: Record<string, string> = {}
     const values = candidates.map((path, index) => {
       const key = `promotionLookupPath${index}`
       params[key] = path
-      return `(@${key})`
-    })
-    const queryParts = [`
-      WITH requested_promotion_paths(path) AS (VALUES ${values.join(', ')})
-      SELECT p.id, p.title, p.is_active, p.image_path, p.sort_order
-      FROM promotions p
-      WHERE p.image_path IN (SELECT path FROM requested_promotion_paths)
-    `]
-    for (const [index, path] of candidates.entries()) {
       const queryStart = `promotionQueryStart${index}`
       const queryEnd = `promotionQueryEnd${index}`
       const hashStart = `promotionHashStart${index}`
@@ -203,21 +194,21 @@ async function loadPromotionImageReferences(db: ReturnType<typeof getDb>, public
       params[queryEnd] = `${path}@`
       params[hashStart] = `${path}#`
       params[hashEnd] = `${path}$`
-      queryParts.push(`
-        SELECT p.id, p.title, p.is_active, p.image_path, p.sort_order
-        FROM promotions p
-        WHERE p.image_path COLLATE BINARY >= @${queryStart}
-          AND p.image_path COLLATE BINARY < @${queryEnd}
-      `)
-      queryParts.push(`
-        SELECT p.id, p.title, p.is_active, p.image_path, p.sort_order
-        FROM promotions p
-        WHERE p.image_path COLLATE BINARY >= @${hashStart}
-          AND p.image_path COLLATE BINARY < @${hashEnd}
-      `)
-    }
+      return `(@${key}, @${queryStart}, @${queryEnd}, @${hashStart}, @${hashEnd})`
+    })
     const rows = await db.prepare(`
-      ${queryParts.join('\nUNION\n')}
+      WITH requested_promotion_paths(path,query_start,query_end,hash_start,hash_end) AS (VALUES ${values.join(', ')})
+      SELECT p.id, p.title, p.is_active, p.image_path, p.sort_order
+      FROM requested_promotion_paths r CROSS JOIN promotions p
+      WHERE p.image_path = r.path
+      UNION
+      SELECT p.id, p.title, p.is_active, p.image_path, p.sort_order
+      FROM requested_promotion_paths r CROSS JOIN promotions p
+      WHERE p.image_path COLLATE BINARY >= r.query_start AND p.image_path COLLATE BINARY < r.query_end
+      UNION
+      SELECT p.id, p.title, p.is_active, p.image_path, p.sort_order
+      FROM requested_promotion_paths r CROSS JOIN promotions p
+      WHERE p.image_path COLLATE BINARY >= r.hash_start AND p.image_path COLLATE BINARY < r.hash_end
     `).all<PromotionImageReference>(params)
     for (const row of rows) promotionRowsById.set(Number(row.id), row)
   }

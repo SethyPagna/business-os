@@ -232,8 +232,33 @@ async function main() {
     const details = plan.map((row) => String(row.detail || '')).join('\n')
     assert.match(details, /SEARCH p USING INDEX idx_promotions_image_path/, details)
     assert.match(details, /image_path>\? AND image_path<\?/, details)
+    assert.doesNotMatch(details, /SCAN p(?:\s|$)/m, 'promotion references must not scan the promotion table')
+    assert.equal((query.sql.match(/\bUNION\b/g) || []).length, 2, 'candidate count must not increase compound terms')
   }
   console.log('PASS page-sized promotion lookup stays within D1 bindings and uses the promotion image-path index')
+
+  if (process.env.F57_NATIVE_D1 === '1') {
+    const { Miniflare } = require('miniflare')
+    const mf = new Miniflare({ modules: true, script: 'export default { fetch() { return new Response("test") } }', compatibilityDate: '2026-08-01', d1Databases: ['DB'] })
+    try {
+      const native = await mf.getD1Database('DB')
+      const adapter = loadTs('lib/db.ts', {}).getDb({ DB: native })
+      for (const row of db.prepare("SELECT sql FROM sqlite_master WHERE tbl_name = 'promotions' AND sql IS NOT NULL ORDER BY type DESC").all()) {
+        await native.prepare(row.sql).run()
+      }
+      for (const row of db.prepare('SELECT id, title, image_path, sort_order FROM promotions').all()) {
+        await adapter.prepare('INSERT INTO promotions (id,title,image_path,sort_order) VALUES (@id,@title,@image_path,@sort_order)').run(row)
+      }
+      for (const query of promotionReferenceQueries) {
+        const expected = db.prepare(query.sql).all(query.params).map((row) => row.id).sort((a,b) => a-b)
+        const actual = (await adapter.prepare(query.sql).all(query.params)).map((row) => row.id).sort((a,b) => a-b)
+        assert.deepEqual(actual, expected, 'actual route SQL must return the same references in native D1')
+      }
+      console.log('PASS native D1 executes every real 100-file-page promotion query through the production adapter')
+    } finally {
+      await mf.dispose()
+    }
+  }
 
   reset()
   asset(8, 'permission-check.png', '/uploads/permission-check.png')
