@@ -31,7 +31,8 @@ runTest('8.1/F57: the usage drill-in names every protected reference kind and st
   assert.match(routeSource, /SELECT id, name, barcode FROM products WHERE image_path = @path/)
   assert.match(routeSource, /FROM product_images pi LEFT JOIN products p ON p\.id = pi\.product_id/)
   assert.match(routeSource, /SELECT id, name, username FROM users WHERE avatar_path = @path/)
-  assert.match(routeSource, /SELECT id, title, is_active FROM promotions WHERE image_path = @path/)
+  assert.match(routeSource, /loadPromotionImageReferences\(db, \[publicPath\]\)/)
+  assert.match(routeSource, /WITH requested_promotion_paths\(path\) AS/)
   // settings keys are reported (and later skipped by rewire), never guessed
   assert.match(routeSource, /settings: settingKeys/)
 })
