@@ -24,7 +24,18 @@ import { applyDatedStockCountPlan } from '../lib/datedStockCountApply'
 import { parseRawDatedCountRows, resolveDatedStockCountRows } from '../lib/datedStockCountResolve'
 import { applyDatedStockCountDecisions, type DatedCountDecision } from '../lib/datedStockCountDecisions'
 import { formatStockChangeTelegramLines, formatTransferTelegramLines, sendTelegramEvent } from '../lib/telegram'
-import { transferDirectionError } from '../lib/branchRoleGuards'
+import { TRANSFER_DIRECTION_ERROR, transferDirectionError } from '../lib/branchRoleGuards'
+import {
+  CANONICAL_BRANCH_CONFIGURATION_CODE,
+  CANONICAL_BRANCH_CONFIGURATION_ERROR,
+  CANONICAL_TRANSFER_BRANCHES_SQL,
+  CanonicalBranchConfigurationError,
+  canonicalTransferAuthorityGuardStatement,
+  isCanonicalTransferSelection,
+  resolveCanonicalTransferPair,
+  type CanonicalTransferBranchRow,
+  type CanonicalTransferPair,
+} from '../lib/canonicalBranchIdentity'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { RESOLVED_BRANCH_NAME_COLUMN, movementBranchNameSql, withResolvedBranchName } from '../lib/movementBranchName'
@@ -1929,10 +1940,21 @@ app.post('/transfer', async (c) => {
   const available = await branchStockQty(c.env, productId, fromBranchId)
   if (quantity > available) return c.json({ error: 'Insufficient stock in source branch' }, 400)
 
-  const [fromBranch, toBranch] = await Promise.all([
+  const [fromBranch, toBranch, canonicalTransferRows] = await Promise.all([
     db.prepare('SELECT id, name FROM branches WHERE id = @id').get<{ id: number; name: string }>({ id: fromBranchId }),
     db.prepare('SELECT id, name FROM branches WHERE id = @id').get<{ id: number; name: string }>({ id: toBranchId }),
+    db.prepare(CANONICAL_TRANSFER_BRANCHES_SQL).all<CanonicalTransferBranchRow>(),
   ])
+
+  let canonicalTransferPair: CanonicalTransferPair
+  try {
+    canonicalTransferPair = resolveCanonicalTransferPair(canonicalTransferRows)
+  } catch (error) {
+    if (error instanceof CanonicalBranchConfigurationError) {
+      return c.json({ error: CANONICAL_BRANCH_CONFIGURATION_ERROR, code: CANONICAL_BRANCH_CONFIGURATION_CODE }, 409)
+    }
+    throw error
+  }
 
   // The direction rule, on the THIRD transfer route. /branches/transfer and
   // /branches/transfer-bulk already refuse a shop source or a warehouse
@@ -1941,9 +1963,12 @@ app.post('/transfer', async (c) => {
   // move the other two rejected was one button away -- and undo of a
   // legitimate warehouse -> shop transfer runs the refused direction by
   // construction. Refused BEFORE the db.batch below, i.e. before any stock
-  // moves. It reuses the rows this route already read, so it costs no extra
-  // round-trip.
+  // moves. The selected rows and the complete canonical-role set are read
+  // separately so duplicate active identities cannot be hidden by an id lookup.
   const directionError = transferDirectionError(fromBranch?.name, toBranch?.name)
+    || (!isCanonicalTransferSelection(canonicalTransferPair, fromBranchId, toBranchId)
+      ? TRANSFER_DIRECTION_ERROR
+      : null)
   if (directionError) return c.json({ error: directionError }, 400)
 
   // The LOTS move with the quantity (Part-77 CRITICAL, x3 audits): this
@@ -1969,6 +1994,7 @@ app.post('/transfer', async (c) => {
   const movementBatchId = takes.length === 1 && uncovered === 0 ? takes[0].batchId : null
 
   await db.batch([
+    canonicalTransferAuthorityGuardStatement(fromBranchId, toBranchId),
     { sql: 'UPDATE branch_stock SET quantity = quantity - @quantity WHERE product_id = @productId AND branch_id = @branchId', params: { quantity, productId, branchId: fromBranchId } },
     {
       sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@productId, @branchId, @quantity)

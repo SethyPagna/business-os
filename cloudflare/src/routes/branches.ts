@@ -17,14 +17,23 @@ import { findIdentityMatch, findIdentityMatches, type ProductIdentityRow } from 
 import { decrementBatchStockStatement, decrementBatchStockStrictStatement, incrementBatchStockStatement, resolveDestinationBatch, readFifoLotAvailability, allocateAcrossLots } from '../lib/productBatches'
 import { branchUpdateStatements } from '../lib/branchWrites'
 import {
+  CANONICAL_BRANCH_CONFIGURATION_CODE,
+  CANONICAL_BRANCH_CONFIGURATION_ERROR,
   CANONICAL_BRANCH_IDENTITY_CODE,
   CANONICAL_BRANCH_IDENTITY_ERROR,
+  CANONICAL_TRANSFER_BRANCHES_SQL,
+  CanonicalBranchConfigurationError,
   CanonicalBranchIdentityError,
+  canonicalTransferAuthorityGuardStatement,
+  isCanonicalTransferSelection,
   prepareCanonicalBranchUpdate,
+  resolveCanonicalTransferPair,
+  type CanonicalTransferBranchRow,
+  type CanonicalTransferPair,
 } from '../lib/canonicalBranchIdentity'
 // Transfers run warehouse -> shop. The direction rule lives with the two
 // canonical branch roles rather than being restated at each call site.
-import { transferDirectionError } from '../lib/branchRoleGuards'
+import { TRANSFER_DIRECTION_ERROR, transferDirectionError } from '../lib/branchRoleGuards'
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/productSearchQuery'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
@@ -395,16 +404,29 @@ app.post('/transfer', async (c) => {
     if (quantity > batchAvailable) return c.json({ error: 'Insufficient stock in source branch' }, 400)
   }
 
-  const [fromBranch, toBranch, mergeTarget] = await Promise.all([
+  const [fromBranch, toBranch, canonicalTransferRows, mergeTarget] = await Promise.all([
     db.prepare('SELECT id, name FROM branches WHERE id = @id').get<{ id: number; name: string }>({ id: fromBranchId }),
     db.prepare('SELECT id, name FROM branches WHERE id = @id').get<{ id: number; name: string }>({ id: toBranchId }),
+    db.prepare(CANONICAL_TRANSFER_BRANCHES_SQL).all<CanonicalTransferBranchRow>(),
     findIdentityMatch(db, product),
   ])
+  let canonicalTransferPair: CanonicalTransferPair
+  try {
+    canonicalTransferPair = resolveCanonicalTransferPair(canonicalTransferRows)
+  } catch (error) {
+    if (error instanceof CanonicalBranchConfigurationError) {
+      return c.json({ error: CANONICAL_BRANCH_CONFIGURATION_ERROR, code: CANONICAL_BRANCH_CONFIGURATION_CODE }, 409)
+    }
+    throw error
+  }
   // Direction, on the same shared predicate the TransferModal's two selects
   // grey out with (lib/branchRoles.ts). Same-branch is rejected above; this
   // is the other half of the rule -- the shop never sends stock away and the
   // warehouse never receives it.
   const directionError = transferDirectionError(fromBranch?.name, toBranch?.name)
+    || (!isCanonicalTransferSelection(canonicalTransferPair, fromBranchId, toBranchId)
+      ? TRANSFER_DIRECTION_ERROR
+      : null)
   if (directionError) return c.json({ error: directionError }, 400)
 
   const destProductId = mergeTarget?.id ?? productId
@@ -417,10 +439,13 @@ app.post('/transfer', async (c) => {
   // quantity); resolved/cloned into an equivalent batch on destProductId
   // when it was.
   const destBatchId = sourceBatch
-    ? (mergeTarget ? await resolveDestinationBatch(db, sourceBatch, destProductId) : sourceBatch.id)
+    ? (mergeTarget ? await resolveDestinationBatch(db, sourceBatch, destProductId, {
+        writeGuard: canonicalTransferAuthorityGuardStatement(fromBranchId, toBranchId),
+      }) : sourceBatch.id)
     : null
 
   const statements: Array<{ sql: string; params?: Record<string, unknown> }> = [
+    canonicalTransferAuthorityGuardStatement(fromBranchId, toBranchId),
     { sql: 'UPDATE branch_stock SET quantity = quantity - @quantity WHERE product_id = @productId AND branch_id = @branchId', params: { quantity, productId, branchId: fromBranchId } },
     {
       sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@productId, @branchId, @quantity)
@@ -501,7 +526,9 @@ app.post('/transfer', async (c) => {
     const { takes } = allocateAcrossLots(sourceLots, quantity)
     for (const take of takes) {
       const destLotId = mergeTarget
-        ? await resolveDestinationBatch(db, { lot_code: take.lotCode, expiry_date: take.expiryDate, notes: null }, destProductId)
+        ? await resolveDestinationBatch(db, { lot_code: take.lotCode, expiry_date: take.expiryDate, notes: null }, destProductId, {
+            writeGuard: canonicalTransferAuthorityGuardStatement(fromBranchId, toBranchId),
+          })
         : take.batchId
       statements.push(
         decrementBatchStockStrictStatement(take.batchId, fromBranchId, take.quantity),
@@ -640,7 +667,7 @@ app.post('/transfer-bulk', async (c) => {
   // reserved out of the stock query's budget.
   const productIds = items.map((item) => item.productId)
 
-  const [products, stockRows, fromBranch, toBranch] = await Promise.all([
+  const [products, stockRows, fromBranch, toBranch, canonicalTransferRows] = await Promise.all([
     selectInChunks(productIds, 0, (chunk) => {
       const { sql, params } = buildInClause('id', chunk)
       return db.prepare(`
@@ -654,9 +681,23 @@ app.post('/transfer-bulk', async (c) => {
     }),
     db.prepare('SELECT id, name FROM branches WHERE id = @id').get<{ id: number; name: string }>({ id: fromBranchId }),
     db.prepare('SELECT id, name FROM branches WHERE id = @id').get<{ id: number; name: string }>({ id: toBranchId }),
+    db.prepare(CANONICAL_TRANSFER_BRANCHES_SQL).all<CanonicalTransferBranchRow>(),
   ])
 
+  let canonicalTransferPair: CanonicalTransferPair
+  try {
+    canonicalTransferPair = resolveCanonicalTransferPair(canonicalTransferRows)
+  } catch (error) {
+    if (error instanceof CanonicalBranchConfigurationError) {
+      return c.json({ error: CANONICAL_BRANCH_CONFIGURATION_ERROR, code: CANONICAL_BRANCH_CONFIGURATION_CODE }, 409)
+    }
+    throw error
+  }
+
   const bulkDirectionError = transferDirectionError(fromBranch?.name, toBranch?.name)
+    || (!isCanonicalTransferSelection(canonicalTransferPair, fromBranchId, toBranchId)
+      ? TRANSFER_DIRECTION_ERROR
+      : null)
   if (bulkDirectionError) return c.json({ error: bulkDirectionError }, 400)
 
   const productById = new Map(products.map((product) => [product.id, product]))
@@ -723,7 +764,9 @@ app.post('/transfer-bulk', async (c) => {
     }
   }
 
-  const statements: Array<{ sql: string; params?: Record<string, unknown> }> = []
+  const statements: Array<{ sql: string; params?: Record<string, unknown> }> = [
+    canonicalTransferAuthorityGuardStatement(fromBranchId, toBranchId),
+  ]
   const merges: Array<{ productId: number; productName: string | null; mergedIntoProductId: number; mergedIntoProductName: string | null }> = []
   for (const item of items) {
     const product = productById.get(item.productId)!
@@ -738,7 +781,9 @@ app.post('/transfer-bulk', async (c) => {
     // lot (0084) -- same values the branch_batch_stock statements below use.
     const sourceBatchForItem = item.batchId != null ? batchById.get(item.batchId)! : null
     const destBatchIdForItem = sourceBatchForItem
-      ? (mergeTarget ? await resolveDestinationBatch(db, sourceBatchForItem, destProductId) : sourceBatchForItem.id)
+      ? (mergeTarget ? await resolveDestinationBatch(db, sourceBatchForItem, destProductId, {
+          writeGuard: canonicalTransferAuthorityGuardStatement(fromBranchId, toBranchId),
+        }) : sourceBatchForItem.id)
       : null
 
     statements.push(
@@ -808,7 +853,9 @@ app.post('/transfer-bulk', async (c) => {
       const { takes } = allocateAcrossLots(sourceLots, item.quantity)
       for (const take of takes) {
         const destLotId = mergeTarget
-          ? await resolveDestinationBatch(db, { lot_code: take.lotCode, expiry_date: take.expiryDate, notes: null }, destProductId)
+          ? await resolveDestinationBatch(db, { lot_code: take.lotCode, expiry_date: take.expiryDate, notes: null }, destProductId, {
+              writeGuard: canonicalTransferAuthorityGuardStatement(fromBranchId, toBranchId),
+            })
           : take.batchId
         statements.push(
           decrementBatchStockStrictStatement(take.batchId, fromBranchId, take.quantity),

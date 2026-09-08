@@ -505,6 +505,7 @@ export async function resolveDestinationBatch(
   db: D1Compat,
   sourceBatch: { lot_code: string | null; expiry_date: string | null; notes: string | null },
   destProductId: number,
+  options?: { writeGuard?: { sql: string; params?: Record<string, unknown> } },
 ): Promise<number> {
   const lotCode = normalizeLotCode(sourceBatch.lot_code)
   const match = lotCode
@@ -526,17 +527,25 @@ export async function resolveDestinationBatch(
   // batchLabel.ts).
   const batchNumber = await nextBatchNumber(db, destProductId)
   const batchKey = lotCode || generateBatchKey()
-  const inserted = await db.prepare(`
-    INSERT INTO product_batches (variant_product_id, batch_key, lot_code, expiry_date, received_at, is_active, notes, batch_number)
-    VALUES (@productId, @batchKey, @lotCode, @expiryDate, datetime('now'), 1, @notes, @batchNumber)
-  `).run({
-    productId: destProductId,
-    batchKey,
-    lotCode,
-    expiryDate: sourceBatch.expiry_date || null,
-    notes: sourceBatch.notes || null,
-    batchNumber,
-  })
+  const insertStatement = {
+    sql: `INSERT INTO product_batches (variant_product_id, batch_key, lot_code, expiry_date, received_at, is_active, notes, batch_number)
+      VALUES (@productId, @batchKey, @lotCode, @expiryDate, datetime('now'), 1, @notes, @batchNumber)`,
+    params: {
+      productId: destProductId,
+      batchKey,
+      lotCode,
+      expiryDate: sourceBatch.expiry_date || null,
+      notes: sourceBatch.notes || null,
+      batchNumber,
+    },
+  }
+  if (options?.writeGuard) {
+    const results = await db.batch([options.writeGuard, insertStatement])
+    const insertedId = Number(results[1]?.meta?.last_row_id ?? 0)
+    if (!Number.isSafeInteger(insertedId) || insertedId <= 0) throw new Error('Destination received date was not created')
+    return insertedId
+  }
+  const inserted = await db.prepare(insertStatement.sql).run(insertStatement.params)
   return Number(inserted.lastInsertRowid)
 }
 

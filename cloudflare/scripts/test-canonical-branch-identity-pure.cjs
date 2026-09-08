@@ -50,6 +50,7 @@ function freshDb() {
     CREATE TABLE inventory_movements (branch_id INTEGER, branch_name TEXT);
     CREATE TABLE returns (branch_id INTEGER, branch_name TEXT);
     CREATE TABLE stock_row_moves (branch_id INTEGER, branch_name TEXT);
+    CREATE TABLE transfer_effects (id INTEGER PRIMARY KEY, note TEXT NOT NULL);
     INSERT INTO branches(id,name,location,is_default,is_active) VALUES
       (1,'Shop','old',1,1),(2,'Warehouse','bulk',0,1),(3,'Legacy Depot','legacy',1,0);
   `)
@@ -82,6 +83,55 @@ async function main() {
       assert.equal(identity.canonicalBranchName(value), null)
       assert.equal(identity.isCanonicalBranchName(value), false)
     }
+  })
+
+  await check('transfer authority requires one active row for each canonical role', () => {
+    const db = freshDb()
+    const rows = db.prepare(identity.CANONICAL_TRANSFER_BRANCHES_SQL).all()
+    const pair = identity.resolveCanonicalTransferPair(rows)
+    assert.equal(pair.shop.id, 1)
+    assert.equal(pair.warehouse.id, 2)
+    assert.equal(identity.isCanonicalTransferSelection(pair, 2, 1), true)
+    assert.equal(identity.isCanonicalTransferSelection(pair, 1, 2), false)
+
+    db.prepare("INSERT INTO branches(id,name,is_active) VALUES (4,' shop ',1)").run()
+    assert.throws(
+      () => identity.resolveCanonicalTransferPair(db.prepare(identity.CANONICAL_TRANSFER_BRANCHES_SQL).all()),
+      identity.CanonicalBranchConfigurationError,
+    )
+    db.prepare('UPDATE branches SET is_active=0 WHERE id=4').run()
+    db.prepare('UPDATE branches SET is_active=0 WHERE id=2').run()
+    assert.throws(
+      () => identity.resolveCanonicalTransferPair(db.prepare(identity.CANONICAL_TRANSFER_BRANCHES_SQL).all()),
+      identity.CanonicalBranchConfigurationError,
+    )
+  })
+
+  await check('a concurrent canonical transfer ambiguity rolls back every effect', () => {
+    const mutations = [
+      (db) => db.prepare("INSERT INTO branches(id,name,is_active) VALUES (4,'SHOP',1)").run(),
+      (db) => db.prepare('UPDATE branches SET is_active=0 WHERE id=2').run(),
+      (db) => db.prepare("UPDATE branches SET name='Dispatch' WHERE id=2").run(),
+      (db) => db.prepare('DELETE FROM branches WHERE id=1').run(),
+    ]
+    for (const mutate of mutations) {
+      const db = freshDb()
+      identity.resolveCanonicalTransferPair(db.prepare(identity.CANONICAL_TRANSFER_BRANCHES_SQL).all())
+      const statements = [
+        identity.canonicalTransferAuthorityGuardStatement(2, 1),
+        { sql: "INSERT INTO transfer_effects(note) VALUES ('must roll back')" },
+      ]
+      mutate(db)
+      assert.throws(() => runBatch(db, statements), /NOT NULL/)
+      assert.equal(db.prepare('SELECT COUNT(*) AS total FROM transfer_effects').get().total, 0)
+    }
+
+    const db = freshDb()
+    runBatch(db, [
+      identity.canonicalTransferAuthorityGuardStatement(2, 1),
+      { sql: "INSERT INTO transfer_effects(note) VALUES ('allowed')" },
+    ])
+    assert.equal(db.prepare('SELECT COUNT(*) AS total FROM transfer_effects').get().total, 1)
   })
 
   await check('metadata/default edits preserve identity and leave legacy defaults untouched', () => {
@@ -141,6 +191,8 @@ async function main() {
     assert.match(review, /branchUpdateStatements\(id, body, current\)/)
     assert.match(undo, /branchUpdateStatements\(id, fields, existing\)/)
     assert.equal((review.match(/assertCanonicalBranchSetMutationAllowed\(\)/g) || []).length, 2)
+    assert.equal((route.match(/resolveCanonicalTransferPair\(/g) || []).length, 2)
+    assert.equal((route.match(/canonicalTransferAuthorityGuardStatement\(/g) || []).length, 6, 'two final transfer batches plus four conditional destination-lot clone guards')
   })
 
   console.log(`\n${passed} canonical branch identity checks passed.`)

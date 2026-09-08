@@ -14,9 +14,26 @@ export type BranchIdentityFields = {
   is_active?: unknown
 }
 
+export type CanonicalTransferBranchRow = BranchIdentitySnapshot
+
+export type CanonicalTransferPair = {
+  shop: CanonicalTransferBranchRow
+  warehouse: CanonicalTransferBranchRow
+}
+
 export const CANONICAL_BRANCH_IDENTITY_CODE = 'canonical_branch_identity_locked'
 export const CANONICAL_BRANCH_IDENTITY_ERROR =
   'Branches are fixed to Shop and Warehouse. You can edit their details, but you cannot add, rename, deactivate, or delete a branch.'
+export const CANONICAL_BRANCH_CONFIGURATION_CODE = 'canonical_branch_configuration_invalid'
+export const CANONICAL_BRANCH_CONFIGURATION_ERROR =
+  'Stock transfer is unavailable because the branch setup must contain exactly one active Shop and one active Warehouse. Ask an administrator to repair the branch records before trying again.'
+
+export const CANONICAL_TRANSFER_BRANCHES_SQL = `
+  SELECT id, name, is_active
+  FROM branches
+  WHERE LOWER(TRIM(name)) IN ('shop', 'warehouse')
+  ORDER BY id ASC
+`
 
 export class CanonicalBranchIdentityError extends Error {
   readonly code = CANONICAL_BRANCH_IDENTITY_CODE
@@ -24,6 +41,15 @@ export class CanonicalBranchIdentityError extends Error {
   constructor() {
     super(CANONICAL_BRANCH_IDENTITY_ERROR)
     this.name = 'CanonicalBranchIdentityError'
+  }
+}
+
+export class CanonicalBranchConfigurationError extends Error {
+  readonly code = CANONICAL_BRANCH_CONFIGURATION_CODE
+
+  constructor() {
+    super(CANONICAL_BRANCH_CONFIGURATION_ERROR)
+    this.name = 'CanonicalBranchConfigurationError'
   }
 }
 
@@ -37,6 +63,66 @@ export function canonicalBranchName(value: unknown): CanonicalBranchName | null 
 
 export function isCanonicalBranchName(value: unknown): boolean {
   return canonicalBranchName(value) !== null
+}
+
+/**
+ * Resolve the two operational identities from an authoritative branches read.
+ * Legacy/inactive rows remain untouched, but duplicate or missing active
+ * canonical rows make transfer authority ambiguous and therefore fail closed.
+ */
+export function resolveCanonicalTransferPair(rows: CanonicalTransferBranchRow[]): CanonicalTransferPair {
+  const active = rows.filter((row) => toDbBool(row.is_active, 0) === 1)
+  const shops = active.filter((row) => canonicalBranchName(row.name) === 'Shop')
+  const warehouses = active.filter((row) => canonicalBranchName(row.name) === 'Warehouse')
+  if (shops.length !== 1 || warehouses.length !== 1) throw new CanonicalBranchConfigurationError()
+  return { shop: shops[0], warehouse: warehouses[0] }
+}
+
+export function isCanonicalTransferSelection(
+  pair: CanonicalTransferPair,
+  fromBranchId: number,
+  toBranchId: number,
+): boolean {
+  return Number(pair.warehouse.id) === fromBranchId && Number(pair.shop.id) === toBranchId
+}
+
+/**
+ * Re-check canonical uniqueness, activation, and the selected IDs inside the
+ * same D1 batch as the stock movement. A concurrent identity change causes a
+ * NOT NULL failure and rolls the whole transfer back.
+ */
+export function canonicalTransferAuthorityGuardStatement(
+  fromBranchId: number,
+  toBranchId: number,
+): { sql: string; params: Record<string, unknown> } {
+  return {
+    sql: `INSERT INTO branches (name)
+      SELECT NULL
+      WHERE NOT (
+        (SELECT COUNT(*) FROM branches
+          WHERE COALESCE(is_active, 0) = 1
+            AND LOWER(TRIM(name)) = 'warehouse') = 1
+        AND (SELECT COUNT(*) FROM branches
+          WHERE COALESCE(is_active, 0) = 1
+            AND LOWER(TRIM(name)) = 'shop') = 1
+        AND EXISTS (
+          SELECT 1 FROM branches
+          WHERE id = @transfer_from_branch_id
+            AND COALESCE(is_active, 0) = 1
+            AND LOWER(TRIM(name)) = 'warehouse'
+        )
+        AND EXISTS (
+          SELECT 1 FROM branches
+          WHERE id = @transfer_to_branch_id
+            AND COALESCE(is_active, 0) = 1
+            AND LOWER(TRIM(name)) = 'shop'
+        )
+      )`,
+    params: {
+      transfer_from_branch_id: fromBranchId,
+      transfer_to_branch_id: toBranchId,
+    },
+  }
 }
 
 /** Creation and deletion are both forbidden by the fixed two-branch model. */
