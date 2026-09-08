@@ -2391,7 +2391,8 @@ export default function POS() {
           productId: product?.id,
           priceMode: priceValues.price_mode,
           branchId: assignedBranchId,
-          batchId: batchSelection?.batchId ?? (batchSelection?.unlottedStock ? -1 : null),
+          batchId: batchSelection?.batchId ?? null,
+          unlottedStock: batchSelection?.unlottedStock === true,
         })
     if (!damagedSelection && existingIndex >= 0 && (active.cart[existingIndex] as CartLineRecord).damaged_lot_id) existingIndex = -1
     const existing = existingIndex >= 0 ? active.cart[existingIndex] : null
