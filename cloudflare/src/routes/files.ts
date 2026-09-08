@@ -7,6 +7,7 @@ import { hasPermission, getActionTier, getPermissionTier } from '../lib/permissi
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { getMediaType, buildUniqueStoredName, normalizePhysicalStorageSummary, sanitizeOriginalFileName } from '../lib/fileAssets'
 import { logicalLibraryName } from '../lib/libraryLogicalAssets'
+import { sanitizeMediaPath } from '../lib/media'
 import { validateUploadedBuffer } from '../lib/uploadSecurity'
 import { audit } from '../lib/audit'
 import { broadcast } from '../durable-objects/broadcastHub'
@@ -86,6 +87,54 @@ function isPathReferencedInSettings(values: readonly { value: string }[], public
   return values.some((row) => String(row.value || '').includes(publicPath))
 }
 
+type PromotionImageReference = { id: number; title: string | null; is_active: number | null; image_path: string | null }
+
+function decodedUploadPathCandidate(path: string): string {
+  if (!path.startsWith('/uploads/')) return path
+  try {
+    return decodeURI(path)
+  } catch (_) {
+    return path
+  }
+}
+
+// Promotion images predate the product-image ownership guard, so legacy/API
+// callers can carry a cache-busted or encoded upload path. Resolve it as the
+// product guard does: preserve an exact known asset first, then normalize a
+// relative upload path and finally accept one URI decode only when it names a
+// known asset. An existing literal `?`/`#` filename must never collapse onto
+// its query/hash-stripped sibling.
+function resolveKnownPromotionImagePath(value: unknown, knownPaths: ReadonlySet<string>): string {
+  const raw = String(value || '').trim()
+  if (!raw || knownPaths.has(raw)) return raw
+  const normalized = sanitizeMediaPath(raw, '')
+  if (knownPaths.has(normalized)) return normalized
+  const decoded = decodedUploadPathCandidate(normalized)
+  return decoded !== normalized && knownPaths.has(decoded) ? decoded : raw
+}
+
+function indexPromotionImageReferences(rows: readonly PromotionImageReference[], knownPaths: ReadonlySet<string>): Map<string, PromotionImageReference[]> {
+  const references = new Map<string, PromotionImageReference[]>()
+  for (const row of rows) {
+    const publicPath = resolveKnownPromotionImagePath(row.image_path, knownPaths)
+    if (!knownPaths.has(publicPath)) continue
+    const existing = references.get(publicPath) || []
+    existing.push(row)
+    references.set(publicPath, existing)
+  }
+  return references
+}
+
+async function loadPromotionImageReferences(db: ReturnType<typeof getDb>): Promise<Map<string, PromotionImageReference[]>> {
+  const [promotionRows, assetRows] = await Promise.all([
+    db.prepare("SELECT id, title, is_active, image_path FROM promotions WHERE image_path IS NOT NULL AND image_path != '' ORDER BY sort_order ASC, id ASC")
+      .all<PromotionImageReference>(),
+    db.prepare("SELECT public_path FROM file_assets WHERE public_path IS NOT NULL AND public_path != ''")
+      .all<{ public_path: string }>(),
+  ])
+  return indexPromotionImageReferences(promotionRows, new Set(assetRows.map((row) => String(row.public_path || ''))))
+}
+
 // The Docker path used to run `sharp` server-side to compress oversized
 // images; `sharp` doesn't run in a Workers isolate (see
 // lib/uploadSecurity.ts), so there's no equivalent server-side step here.
@@ -151,7 +200,7 @@ app.get('/', async (c) => {
   // zero and the frontend's canDelete flag always undefined/false --
   // deleting was silently disabled for every file in the Library, in-use or
   // not.
-  const [totalRow, rawItems, settingValues, physicalStorageRow] = await Promise.all([
+  const [totalRow, rawItems, settingValues, physicalStorageRow, promotionReferences] = await Promise.all([
     db.prepare(`${LOGICAL_LIBRARY_CTE} SELECT COUNT(*) AS count FROM logical_assets ${whereSql}`).get<{ count: number }>(params),
     db.prepare(`
     ${LOGICAL_LIBRARY_CTE}
@@ -160,8 +209,7 @@ app.get('/', async (c) => {
            optimization_status, optimization_note, reference_product_id, reference_product_name,
            (SELECT COUNT(*) FROM products WHERE image_path = logical_assets.public_path) AS product_usage,
            (SELECT COUNT(*) FROM product_images WHERE image_path = logical_assets.public_path) AS gallery_usage,
-           (SELECT COUNT(*) FROM users WHERE avatar_path = logical_assets.public_path) AS avatar_usage,
-           (SELECT COUNT(*) FROM promotions WHERE image_path = logical_assets.public_path) AS promotion_usage
+           (SELECT COUNT(*) FROM users WHERE avatar_path = logical_assets.public_path) AS avatar_usage
     FROM logical_assets ${whereSql}
     ORDER BY id DESC, reference_product_name COLLATE NOCASE ASC, reference_product_id ASC
     LIMIT @limit OFFSET @offset
@@ -180,6 +228,7 @@ app.get('/', async (c) => {
         COALESCE(SUM(CASE WHEN media_type NOT IN ('image', 'video', 'document') OR media_type IS NULL THEN 1 ELSE 0 END), 0) AS other_count
       FROM file_assets
     `).get<Record<string, unknown>>(),
+    loadPromotionImageReferences(db),
   ])
 
   // User-reported gap: the delete lock previously gave no reason beyond a
@@ -192,11 +241,11 @@ app.get('/', async (c) => {
       products: Number(row.product_usage || 0),
       gallery: Number(row.gallery_usage || 0),
       avatars: Number(row.avatar_usage || 0),
-      promotions: Number(row.promotion_usage || 0),
+      promotions: promotionReferences.get(String(row.public_path || ''))?.length || 0,
       settings: settingsUsage,
     }
     const usageCount = usage.products + usage.gallery + usage.avatars + usage.promotions + usage.settings
-    const { product_usage: _p, gallery_usage: _g, avatar_usage: _a, promotion_usage: _pr, ...rest } = row
+    const { product_usage: _p, gallery_usage: _g, avatar_usage: _a, ...rest } = row
     const referenceProductId = row.reference_product_id == null ? null : Number(row.reference_product_id)
     const referenceProductName = String(row.reference_product_name || '').trim() || null
     return {
@@ -356,7 +405,7 @@ app.get('/:id/usage', async (c) => {
   const asset = await db.prepare('SELECT id, public_path FROM file_assets WHERE id = ?').get<{ id: number; public_path: string }>([id])
   if (!asset) return c.json({ error: 'File not found' }, 404)
   const publicPath = String(asset.public_path || '')
-  const [covers, gallery, avatars, promotions, settingRows] = await Promise.all([
+  const [covers, gallery, avatars, settingRows, promotionReferences] = await Promise.all([
     db.prepare('SELECT id, name, barcode FROM products WHERE image_path = @path ORDER BY name COLLATE NOCASE ASC LIMIT 200')
       .all<{ id: number; name: string | null; barcode: string | null }>({ path: publicPath }),
     db.prepare(`
@@ -366,9 +415,8 @@ app.get('/:id/usage', async (c) => {
     `).all<{ product_id: number; name: string | null; sort_order: number | null }>({ path: publicPath }),
     db.prepare('SELECT id, name, username FROM users WHERE avatar_path = @path ORDER BY name COLLATE NOCASE ASC LIMIT 50')
       .all<{ id: number; name: string | null; username: string | null }>({ path: publicPath }),
-    db.prepare('SELECT id, title, is_active FROM promotions WHERE image_path = @path ORDER BY sort_order ASC, id ASC LIMIT 200')
-      .all<{ id: number; title: string | null; is_active: number | null }>({ path: publicPath }),
     db.prepare('SELECT key, value FROM settings').all<{ key: string; value: string }>(),
+    loadPromotionImageReferences(db),
   ])
   const settingKeys = publicPath
     ? settingRows.filter((row) => String(row.value || '').includes(publicPath)).map((row) => row.key)
@@ -379,7 +427,7 @@ app.get('/:id/usage', async (c) => {
     covers,
     gallery,
     avatars,
-    promotions,
+    promotions: (promotionReferences.get(publicPath) || []).map(({ id, title, is_active }) => ({ id, title, is_active })),
     settings: settingKeys,
   })
 })
@@ -533,18 +581,19 @@ app.delete('/:id', async (c) => {
   // type ("CONFIRM DELETE"), checked here too so a force-delete can't
   // happen from a stale client that never actually showed that prompt.
   const body = await c.req.json<{ force?: boolean; confirmText?: string }>().catch(() => ({}) as { force?: boolean; confirmText?: string })
-  const [usageBreakdown, settingValues] = await Promise.all([
+  const [usageBreakdown, settingValues, promotionReferences] = await Promise.all([
     db.prepare(`
     SELECT
       (SELECT COUNT(*) FROM products WHERE image_path = @publicPath) AS product_count,
       (SELECT COUNT(*) FROM product_images WHERE image_path = @publicPath) AS gallery_count,
-      (SELECT COUNT(*) FROM users WHERE avatar_path = @publicPath) AS avatar_count,
-      (SELECT COUNT(*) FROM promotions WHERE image_path = @publicPath) AS promotion_count
-    `).get<{ product_count: number; gallery_count: number; avatar_count: number; promotion_count: number }>({ publicPath: asset.public_path }),
+      (SELECT COUNT(*) FROM users WHERE avatar_path = @publicPath) AS avatar_count
+    `).get<{ product_count: number; gallery_count: number; avatar_count: number }>({ publicPath: asset.public_path }),
     db.prepare('SELECT value FROM settings').all<{ value: string }>(),
+    loadPromotionImageReferences(db),
   ])
   const settingsUsage = isPathReferencedInSettings(settingValues, asset.public_path) ? 1 : 0
-  const usageCount = Number(usageBreakdown?.product_count || 0) + Number(usageBreakdown?.gallery_count || 0) + Number(usageBreakdown?.avatar_count || 0) + Number(usageBreakdown?.promotion_count || 0) + settingsUsage
+  const promotionsUsage = promotionReferences.get(asset.public_path)?.length || 0
+  const usageCount = Number(usageBreakdown?.product_count || 0) + Number(usageBreakdown?.gallery_count || 0) + Number(usageBreakdown?.avatar_count || 0) + promotionsUsage + settingsUsage
   if (usageCount > 0) {
     const forceRequested = body.force === true && String(body.confirmText || '').trim().toUpperCase() === 'CONFIRM DELETE'
     if (!forceRequested) {
@@ -554,7 +603,7 @@ app.delete('/:id', async (c) => {
           products: Number(usageBreakdown?.product_count || 0),
           gallery: Number(usageBreakdown?.gallery_count || 0),
           avatars: Number(usageBreakdown?.avatar_count || 0),
-          promotions: Number(usageBreakdown?.promotion_count || 0),
+          promotions: promotionsUsage,
           settings: settingsUsage,
         },
         forceable: true,
@@ -575,7 +624,7 @@ app.delete('/:id', async (c) => {
           products: Number(usageBreakdown?.product_count || 0),
           gallery: Number(usageBreakdown?.gallery_count || 0),
           avatars: Number(usageBreakdown?.avatar_count || 0),
-          promotions: Number(usageBreakdown?.promotion_count || 0),
+          promotions: promotionsUsage,
           settings: settingsUsage,
         }
       : undefined,
