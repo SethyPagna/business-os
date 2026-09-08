@@ -1,0 +1,178 @@
+{
+  "schema_version": 1,
+  "status": "proposed_for_independent_review_no_implementation_authorized",
+  "base_head": "e75066a918e694c89e903dff5a6cd378a4b39a53",
+  "scope": "Immutable Sales Records for Contacts and Settings writers that fan out changes to persisted sales.",
+  "frozen_public_contract_amendment": {
+    "kind": "customer_contact_changed",
+    "metadata": {
+      "changed_contact_fields": "unique non-empty array containing only phone and/or address; maximum 2"
+    },
+    "changes_rule": "This kind alone may use changes=[] when metadata is valid. A combined name/identity change remains customer_changed with real changed fields and may carry the same metadata.",
+    "privacy": "Never retain phone or address values or fabricated before/after booleans in the event. The UI states that older contact values were not retained and that the current contact is available through authorized sale details.",
+    "summaries": {
+      "phone": "Customer phone updated",
+      "address": "Customer address updated",
+      "phone_and_address": "Customer contact details updated"
+    }
+  },
+  "current_writer_trace": [
+    {
+      "writer": "PUT /customers/:id",
+      "locators": ["cloudflare/src/routes/contacts.ts:1268", "cloudflare/src/routes/contacts.ts:1391", "cloudflare/src/routes/contacts.ts:1419", "cloudflare/src/routes/contacts.ts:1428", "cloudflare/src/routes/contacts.ts:1460", "cloudflare/src/routes/contacts.ts:1492"],
+      "sales_effect": "Name carry and every phone/address edit set-update every sale with customer_id=id; name-only record_only does not update sales. The contact, sales, and linked returns are in one D1 batch, but audit is post-commit.",
+      "permission": "contacts access plus contacts:edit; Review tier may change only name.",
+      "identity_and_replay": "expected_updated_at is optional; there is no client request id, durable receipt, action history, or Undo/Redo.",
+      "scale": "Fixed statement count, unbounded affected sale rows. Each matched sale revision increments; linked return updates can increment the parent again."
+    },
+    {
+      "writer": "PUT /delivery-contacts/:id",
+      "locators": ["cloudflare/src/routes/contacts.ts:1268", "cloudflare/src/routes/contacts.ts:1451"],
+      "sales_effect": "Name carry set-updates sales.delivery_contact_name for every matching delivery_contact_id. record_only does not update sales.",
+      "permission": "contacts access plus contacts:edit; Review tier may change only name.",
+      "identity_and_replay": "No stable request receipt or Undo/Redo.",
+      "scale": "Fixed statement count, unbounded affected rows."
+    },
+    {
+      "writer": "POST /customers|suppliers|delivery-contacts/merge",
+      "locators": ["cloudflare/src/routes/contacts.ts:980", "cloudflare/src/routes/contacts.ts:1060", "cloudflare/src/lib/contactMerge.ts:48", "cloudflare/src/lib/contactMerge.ts:98", "cloudflare/src/lib/contactMerge.ts:142", "cloudflare/src/lib/contactMerge.ts:156", "cloudflare/src/lib/contactMerge.ts:171", "cloudflare/src/lib/contactMerge.ts:187"],
+      "sales_effect": "Customer merge repoints customer identity and snapshots; delivery merge repoints driver identity/name. Supplier merge updates returns only and has no frozen Sales Records field.",
+      "permission": "Full Contacts access and contacts:merge; Review tier rejected.",
+      "identity_and_replay": "The server creates a random operationId and stores it in the atomic audit, which can reconcile this invocation but cannot make a new retry idempotent. No Undo/Redo.",
+      "scale": "Plan is capped at 80 statements and 80 binds per statement; set updates still affect an unbounded number of sales."
+    },
+    {
+      "writer": "POST /customers/link-conflicts/relink",
+      "locators": ["cloudflare/src/routes/contacts.ts:2336", "cloudflare/src/routes/contacts.ts:2351", "cloudflare/src/routes/contacts.ts:2356"],
+      "sales_effect": "Standalone set update changes customer_id for the exact current-id plus phone group; it does not change sale name/phone/address or linked returns.",
+      "permission": "Full Contacts resolve_conflicts action.",
+      "identity_and_replay": "No expected revision, request id, receipt, atomic audit, or Undo/Redo.",
+      "scale": "Fixed statement count, unbounded affected rows."
+    },
+    {
+      "writer": "POST /customers/link-conflicts/resolve-missing",
+      "locators": ["cloudflare/src/routes/contacts.ts:2366", "cloudflare/src/routes/contacts.ts:2391", "cloudflare/src/routes/contacts.ts:2412", "cloudflare/src/routes/contacts.ts:2419"],
+      "sales_effect": "Links a null-id name/phone group to an existing or newly created customer. New contact creation, sale linking, and audit currently commit in separate phases.",
+      "permission": "Full Contacts resolve_conflicts action.",
+      "identity_and_replay": "No expected revision, request id, receipt, atomic audit, or Undo/Redo.",
+      "scale": "Fixed statement count, unbounded affected rows."
+    },
+    {
+      "writer": "POST /payment-methods/replace with scope=linked",
+      "locators": ["cloudflare/src/routes/settings.ts:601", "cloudflare/src/routes/settings.ts:656", "cloudflare/src/routes/settings.ts:678", "cloudflare/src/routes/settings.ts:691", "cloudflare/src/routes/settings.ts:703", "cloudflare/src/routes/settings.ts:721", "cloudflare/src/routes/settings.ts:734"],
+      "sales_effect": "One guarded D1 batch updates settings and every matching sale payment_method/payment_details/search snapshot with atomic audit. settings_only and backfill do not mutate sales.",
+      "permission": "sales_policy or settings.",
+      "identity_and_replay": "expected_updated_at is optional; a server operationId proves this invocation but there is no stable retry lookup or Undo/Redo.",
+      "scale": "Candidate scan pages by 200 and caps distinct spellings at 1000; matched sales are unbounded and a 300-sale fixture exists."
+    }
+  ],
+  "excluded_writers": [
+    "Customer name-only record_only, delivery name-only record_only, and settings_only do not mutate sales and emit no event.",
+    "Supplier edit/merge updates products or returns but has no frozen supplier field in Sales Records; it emits no sale_record_event under this plan.",
+    "Payment-method backfill and the generic Settings save update configuration only and emit no sale event."
+  ],
+  "migration_amendment": {
+    "sale_record_events": [
+      "Add customer_contact_changed to the closed kind CHECK.",
+      "Add nullable metadata_json with UTF-8 byte bound 512 and exact kind-specific JSON CHECK: absent for ordinary events, or exactly one changed_contact_fields array with unique phone/address values.",
+      "Allow changes_json=[] only for customer_contact_changed with valid metadata. customer_changed may have non-empty changes and the same valid metadata for a combined identity/contact act.",
+      "Add source_kind values contact_customer_carry, contact_delivery_carry, contact_customer_merge, contact_delivery_merge, customer_link_repair, customer_missing_resolve, and payment_method_replace with exact allowed kind/via/generation pairs.",
+      "Keep UNIQUE(source_kind,source_id,generation,sale_id); generation=0 and via=apply for every writer in this plan. No backfill."
+    ],
+    "receipt_table": {
+      "name": "sale_reference_mutation_receipts",
+      "purpose": "Durable actor-scoped idempotency for fan-out acts, including valid no-sale-change outcomes that cannot invent a Sales Records event.",
+      "columns": ["id lowercase RFC4122 v4 UUID primary key", "actor_id positive integer", "mutation_kind closed enum", "target_key non-empty bounded text", "request_id trimmed non-empty text <=120 UTF-8 bytes", "request_digest lowercase SHA-256", "response_json closed scalar object <=4096 UTF-8 bytes", "occurred_at bounded timestamp"],
+      "mutation_kinds": ["customer_profile_carry", "delivery_contact_carry", "customer_merge", "delivery_contact_merge", "customer_link_repair", "customer_missing_resolve", "payment_method_replace"],
+      "identity": "UNIQUE(actor_id,mutation_kind,request_id). The target key and full normalized semantic request are included in the digest, so cross-target or changed-intent reuse returns 409.",
+      "response_policy": "Persist only operation id, target ids, affected counts, scope, and exact mutation timestamp. Do not persist contact profiles, phone/address, request bodies, arbitrary error bodies, or unbounded arrays. Paired callers refetch domain rows after success/replay.",
+      "immutability": "UPDATE always aborts. DELETE is permitted only by the existing restore maintenance mode or the atomic Sales Records reset guard. Ordinary audit/action-history pruning never references the table."
+    }
+  },
+  "request_and_retry_contract": [
+    "Require client_request_id only when the selected mode can fan out to sales: customer/delivery carry, customer/delivery merge, customer relink/resolve, and linked payment replacement.",
+    "Require the route's existing expected_updated_at/revision snapshot for those modes; a missing stable id or revision returns typed refresh_required before mutation. The server never invents a retry id after an unknown response.",
+    "Canonical digest contains route target, exact normalized accepted intent, selected carry/scope mode, expected revision, and link-group identity. It excludes mutable database reads and server-derived customer ids for create-and-link.",
+    "Lookup actor+mutation_kind+request_id before mutable reads. Exact digest returns the stored minimal outcome; mismatch or cross-target reuse is 409 idempotency_conflict.",
+    "The paired frontend freezes and persists the exact request before send, retains it across network/timeout/5xx/unreadable outcomes under bounded storage, and clears it only after terminal success/conflict or explicit discard."
+  ],
+  "event_projection": [
+    {
+      "operation": "customer profile carry",
+      "source_kind": "contact_customer_carry",
+      "projection": "One changed sale gets customer_changed when id/name changes; phone/address differences populate metadata. A phone/address-only sale gets customer_contact_changed with changes=[]. Exact per-sale metadata includes only fields whose persisted snapshot actually differs from the computed value."
+    },
+    {
+      "operation": "delivery contact carry",
+      "source_kind": "contact_delivery_carry",
+      "projection": "driver_changed with exact stored driver before and computed driver after; only rows whose frozen driver value differs get an event."
+    },
+    {
+      "operation": "customer merge",
+      "source_kind": "contact_customer_merge",
+      "projection": "customer_changed with exact sale snapshot id/name and exact keeper id/name; membership is included only when the source and final keeper membership states differ. Per-sale phone/address differences use privacy-safe metadata only."
+    },
+    {
+      "operation": "delivery contact merge",
+      "source_kind": "contact_delivery_merge",
+      "projection": "driver_changed with exact merged-contact sale snapshot before and keeper driver snapshot after."
+    },
+    {
+      "operation": "customer conflict relink",
+      "source_kind": "customer_link_repair",
+      "projection": "customer_changed from current customer id plus the sale's persisted name to target id plus the same persisted name, because the current route changes id only; include membership only when exact captured source/target membership states differ."
+    },
+    {
+      "operation": "missing customer resolve",
+      "source_kind": "customer_missing_resolve",
+      "projection": "customer_changed from name-only {id:null,name:sale.customer_name} to {id:targetId,name:sale.customer_name}; before membership is known_none and after is the exact target membership snapshot when present."
+    },
+    {
+      "operation": "linked payment-method replacement",
+      "source_kind": "payment_method_replace",
+      "projection": "payment_changed contains only payment_method and/or payment_details whose exact persisted before values differ from the same SQL rename expressions used by the update."
+    }
+  ],
+  "atomic_set_write_design": [
+    "Generate the receipt UUID before the batch. Generate each event UUID inside the INSERT...SELECT with SQLite randomblob UUID-v4 construction; the receipt/source composite unique key remains the retry identity.",
+    "Preflight the exact candidate selector, difference selector, event JSON byte CHECKs, malformed payment rows, and affected-sale limit before mutation.",
+    "Inside one D1 batch: revision/reference guards first; INSERT INTO sale_record_events ... SELECT from the exact mutation candidates and public-field difference predicate; execute the existing set update; perform all essential linked-domain effects; insert atomic audit; insert the receipt last; clear scratch guards last.",
+    "The event INSERT and domain UPDATE derive before/after and predicates from shared SQL expression constants. The event reads before state because it precedes the update. Any event, domain, audit, or receipt failure rolls the complete act back.",
+    "Customer missing create-and-link must move contact insert, exact target-id resolution, per-sale events, sale link update, audit, and receipt into one batch. A server-minted membership is excluded from the request digest and is resolved inside that batch.",
+    "Keep the current broader domain UPDATE predicate when compatibility requires its revision bumps; the event selector additionally requires a real frozen-field or contact-metadata difference, so no same-value record is invented."
+  ],
+  "scalability_contract": {
+    "strategy": "One SQL-native INSERT...SELECT per fan-out, never one JavaScript event or one D1 statement per sale. This adds a constant one statement to each batch.",
+    "max_affected_sales_proposed": 5000,
+    "oversize_behavior": "If candidate count exceeds 5000 or any constructed event exceeds its SQL byte bound, return a typed too_many_linked_sales or sale_record_event_too_large response before mutation. Do not partially apply. A future resumable operation requires a separately reviewed state machine.",
+    "payment_bounds": "Retain 200-row scan pages and 1000-variant cap. Verify 5000 linked rows, maximum valid payment details, constant statement count, and 5001 rejection in native SQLite and the Worker D1 adapter.",
+    "contact_bounds": "Verify 5000 linked rows for carry/merge/link repair with constant statement count and 5001 rejection. CONTACT_MERGE_MAX_STATEMENTS remains 80."
+  },
+  "permissions_audit_and_replay": [
+    "No new route or wider permission. Preserve every current route permission and per-action gate.",
+    "Security audit remains. For sales-mutating modes, move audit into the same batch and stamp receipt/event provenance. Existing audit rows are never rewritten.",
+    "These routes have no existing user-visible Undo/Redo. This plan adds idempotent Apply only and does not claim replay. Any future Undo/Redo requires new guarded before/after domain receipts and generation tests.",
+    "Records count/detail use the same source-kind mapping and exact four-key anti-join. Existing genuine pre-cutover audit remains legacy_sale_change unless an exact provenance tuple proves its durable event twin."
+  ],
+  "lifecycle": [
+    "Add sale_reference_mutation_receipts before sale_record_events in BACKUP_TABLES and the full sale replay restore bundle. Restore parents/config/contacts before receipts and events; reverse-delete events before receipts.",
+    "Add events then receipts before sales/contacts/settings in factory reset, sales reset, all-data reset, and products+includeSales recovery/reset scopes under the existing atomic reset guard.",
+    "Generated scoped and full backups must restore a receipt plus customer, delivery, and payment events with FK checks enabled and byte-identical payloads.",
+    "No ordinary 21-day audit or action-history retention path may update or delete receipts/events."
+  ],
+  "required_tests": [
+    "Customer name carry, phone-only, address-only, combined name/contact, same-value rows, record_only, Review-tier name edit, anonymous-source refusal/race, event failure rollback, receipt retry, and 5000/5001 bounds.",
+    "Customer merge and delivery merge exact per-sale event grouping; supplier merge zero sale events; contact/audit/receipt/event rollback; exact retry and cross-target conflict.",
+    "Relink and missing resolve exact predicates, existing/new target, membership states, zero-match receipt, event failure rollback, and no partial new contact.",
+    "Linked payment replacement exact summary and split details, settings_only/backfill zero events, malformed and oversized rejection, 300-row existing regression, 5000-row constant-statement case, stale revision rollback, exact retry, and cross-target conflict.",
+    "Records list count equals detail for every new source; no mutable contact/settings lookup is needed to render historical labels.",
+    "Backup/restore, factory, sales, all, and products+includeSales reset cover the new receipt and amended event schema."
+  ],
+  "release_dependencies_and_blockers": [
+    "Independent architecture review must accept this artifact, including the proposed 5000-sale bound, before migration or writer implementation.",
+    "Contacts and Settings routes are owned by other tasks; exact path allocation and paired frontend request/retry/UI work are required before edits.",
+    "Lifecycle paths are currently owned by the F65 reconciliation owner; implementation must preserve both F65 and F74 tables and rerun the combined restore/reset suites.",
+    "The customer_contact_changed EN/KM summaries and expanded privacy explanation must ship with the backend schema amendment.",
+    "No deployment, remote migration, remote D1 command, or production write is authorized by this plan."
+  ]
+}
