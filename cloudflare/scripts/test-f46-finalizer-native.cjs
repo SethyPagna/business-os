@@ -3,22 +3,38 @@
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 
-const base = String(process.env.F46_BASE || '').replace(/\/$/, '')
-const requestFile = process.env.F46_PREVIEW_REQUEST_FILE
-const sessionCookie = process.env.F46_SESSION_COOKIE
-if (!base || !requestFile || !sessionCookie) {
-  throw new Error('Set F46_BASE, F46_PREVIEW_REQUEST_FILE, and F46_SESSION_COOKIE for a local native Worker fixture.')
+function validateLoopbackBase(value) {
+  let parsed
+  try {
+    parsed = new URL(String(value || ''))
+  } catch {
+    throw new Error('F46_BASE must be a loopback HTTP origin.')
+  }
+
+  const host = parsed.hostname.toLowerCase()
+  const isLoopback = host === 'localhost'
+    || host === '::1'
+    || host === '[::1]'
+    || /^127(?:\.\d{1,3}){3}$/.test(host)
+  if (parsed.protocol !== 'http:'
+    || !isLoopback
+    || parsed.username
+    || parsed.password
+    || (parsed.pathname !== '/' && parsed.pathname !== '')
+    || parsed.search
+    || parsed.hash) {
+    throw new Error('F46_BASE must be a loopback HTTP origin.')
+  }
+
+  return parsed.origin
 }
 
-const fixture = JSON.parse(fs.readFileSync(requestFile, 'utf8'))
-const previewRequest = fixture?.attempts?.[1]?.request ?? fixture?.request
-assert.ok(previewRequest && typeof previewRequest === 'object', 'fixture must carry the F46 preview request')
-
-async function call(path, body) {
+async function call(base, sessionCookie, path, body) {
   const response = await fetch(`${base}${path}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', cookie: `bos_session=${sessionCookie}` },
     body: JSON.stringify(body),
+    redirect: 'error',
   })
   const json = await response.json()
   assert.equal(response.status, 200, `${path} must return HTTP 200`)
@@ -42,7 +58,19 @@ function applyBody(preview) {
 }
 
 async function main() {
-  const preview = await call('/api/products/possible-duplicates/merge-batch/preview', previewRequest)
+  // Validate the destination before retrieving any credential or request-file input.
+  const base = validateLoopbackBase(process.env.F46_BASE)
+  const requestFile = process.env.F46_PREVIEW_REQUEST_FILE
+  const sessionCookie = process.env.F46_SESSION_COOKIE
+  if (!requestFile || !sessionCookie) {
+    throw new Error('Set F46_BASE, F46_PREVIEW_REQUEST_FILE, and F46_SESSION_COOKIE for a local native Worker fixture.')
+  }
+
+  const fixture = JSON.parse(fs.readFileSync(requestFile, 'utf8'))
+  const previewRequest = fixture?.attempts?.[1]?.request ?? fixture?.request
+  assert.ok(previewRequest && typeof previewRequest === 'object', 'fixture must carry the F46 preview request')
+
+  const preview = await call(base, sessionCookie, '/api/products/possible-duplicates/merge-batch/preview', previewRequest)
   assert.equal(preview.success, true)
   assert.equal(preview.cases.length, 11, 'frozen native fixture carries eleven actionable cases')
   assert.equal(preview.skipped.length, 0)
@@ -50,7 +78,7 @@ async function main() {
   const apply = applyBody(preview)
   let result
   for (let attempt = 1; attempt <= 12; attempt += 1) {
-    result = await call('/api/products/possible-duplicates/merge-batch', apply)
+    result = await call(base, sessionCookie, '/api/products/possible-duplicates/merge-batch', apply)
     const committed = Array.isArray(result.committedCases) ? result.committedCases.length : 0
     const undoReady = Array.isArray(result.committedCases)
       ? result.committedCases.filter((item) => item.undoReady === true).length
@@ -64,4 +92,8 @@ async function main() {
   console.log('test-f46-finalizer-native: passed')
 }
 
-main().catch((error) => { console.error(error.message); process.exitCode = 1 })
+module.exports = { call, validateLoopbackBase }
+
+if (require.main === module) {
+  main().catch((error) => { console.error(error.message); process.exitCode = 1 })
+}
