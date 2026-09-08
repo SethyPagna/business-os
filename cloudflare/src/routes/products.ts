@@ -482,16 +482,15 @@ type ProductSearchOptions = { useSearchIndex?: boolean }
 // So: once a search has picked a page of results, look at which OTHER
 // active products anywhere in the catalog share a search-result row's
 // normalized name (and aren't already in the page), and pull those in too.
-// One extra indexed-ish query (name compare is case/whitespace-normalized,
-// so it can't use a plain index, but the IN-list is bounded to this page's
-// distinct names, not the whole catalog) rather than N queries.
+// One extra query uses migration 0010's indexed, trigger-maintained
+// lower(trim(name)) key. The IN-list is bounded to this page's distinct
+// names rather than issuing N queries.
 async function expandSearchResultsToNameSiblings(env: Env, items: Array<Record<string, unknown>>): Promise<Array<Record<string, unknown>>> {
   if (!items.length) return items
   const seenIds = new Set(items.map((p) => Number(p.id)).filter((id) => Number.isFinite(id) && id > 0))
-  // Matches normalizeProductGroupName's own normalization exactly (trim +
-  // collapse internal whitespace + lowercase) so this can't miss a sibling
-  // the client would otherwise have grouped it with, or pull in one it
-  // wouldn't have.
+  // Keep the existing trim + internal-whitespace collapse + lowercase input
+  // normalization. The lookup below changes only how SQLite reads the
+  // persisted lower(trim(name)) values that the old predicate computed.
   const namesByKey = new Map<string, string>()
   for (const item of items) {
     const rawName = String(item.name || '').trim().replace(/\s+/g, ' ')
@@ -523,9 +522,9 @@ async function expandSearchResultsToNameSiblings(env: Env, items: Array<Record<s
              p.discount_badge_color, p.discount_starts_at, p.discount_ends_at,
              p.expiry_date, p.expiry_alert_days, p.created_at, p.updated_at,
            COALESCE(p.auto_merged_count, 0) AS auto_merged_count
-      FROM products p
+      FROM products p INDEXED BY idx_products_name_key_pg
       WHERE p.is_active = 1
-        AND lower(trim(p.name)) IN (${sql})
+        AND p.name_key IN (${sql})
     `).all<Record<string, unknown>>(params)
   })
 
