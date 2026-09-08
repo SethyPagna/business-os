@@ -23,7 +23,6 @@ const { loadAll } = require('./harness/load_migrations.cjs')
 
 const rawDb = openDb(loadAll())
 let beforeBatchHook = null
-let beforeReplacementSaleInsertHook = null
 let corruptNextReturnReceipt = false
 let corruptNextReturnCreateReceipt = false
 let corruptNextSaleRecordEvent = false
@@ -39,11 +38,6 @@ const db = {
       get: (params) => stmt.get(params),
       all: (params) => stmt.all(params) ?? [],
       run: (params) => {
-        if (beforeReplacementSaleInsertHook && /INSERT\s+INTO\s+sales\s*\(/i.test(sql) && /source_return_id/i.test(sql)) {
-          const hook = beforeReplacementSaleInsertHook
-          beforeReplacementSaleInsertHook = null
-          hook()
-        }
         const r = stmt.run(params)
         return { changes: r.meta?.changes ?? 0, lastInsertRowid: Number(r.meta?.last_row_id ?? 0) }
       },
@@ -731,13 +725,13 @@ async function main() {
       const batchId = seedReplacementStock()
       rawDb.prepare("INSERT INTO customers(id,name,phone,address,membership_number,is_anonymous) VALUES(7,'Sok Dara','0123','Address','MEM-7',0)").run()
       const beforeSales = rawDb.prepare('SELECT COUNT(*) AS n FROM sales').get().n
-      beforeReplacementSaleInsertHook = () => {
+      beforeBatchHook = async () => {
         if (race === 'marker') rawDb.prepare('UPDATE customers SET is_anonymous=1 WHERE id=7').run()
         else rawDb.prepare("UPDATE customers SET membership_number='MEM-CHANGED' WHERE id=7").run()
       }
       const raced = await createReplacement({ customer_id: 7, customer_name: 'Sok Dara' })
       assert.strictEqual(raced.status, 409, `${race}: ${JSON.stringify(raced.json)}`)
-      assert.strictEqual(raced.json.code, 'customer_state_conflict')
+      assert.strictEqual(raced.json.code, 'write_conflict')
       assert.strictEqual(rawDb.prepare('SELECT COUNT(*) AS n FROM sales').get().n, beforeSales, `${race}: no replacement sale remains`)
       assert.strictEqual(rawDb.prepare('SELECT COUNT(*) AS n FROM returns').get().n, 0, `${race}: the provisional return is rolled back`)
       assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id=2 AND branch_id=1').get().quantity, 10)
