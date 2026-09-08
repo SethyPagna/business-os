@@ -21,6 +21,8 @@ assert.match(createSessionSource, /useState\(\(\) => rows\.length\)/, 'a restore
 assert.match(productsSource, /draftScope="standalone-create"/, 'standalone creation needs its own draft namespace')
 assert.match(productsSource, /if \(!res\?\.success\) throw new Error/, 'failed product creates must reject back to ProductForm')
 assert.match(productFormSource, /clearAfterSuccessfulProductSave/, 'draft clearing must be gated by a resolved save')
+assert.match(productFormSource, /await Promise\.resolve\(save\(\)\)\s+clear\(\)\s+close\(\)/, 'successful save must mark clean before the form closes')
+assert.match(productFormSource, /clearAfterSuccessfulProductSave\([\s\S]*?clearCurrentProductDraft\(\)[\s\S]*?onClose,[\s\S]*?\)/, 'ProductForm must own the ordered successful close')
 assert.match(productFormSource, /const legacyDraft = !draft && legacyDraftKey/, 'legacy fallback must run only when the new scoped draft is absent')
 assert.match(productFormSource, /restoredLegacyDraftKeyRef\.current = legacyDraft\?\.data \? legacyDraftKey : null/, 'legacy clearing must be armed only by an actual fallback restore')
 assert.match(productFormSource, /useEffect\(\(\) => \(\) => \{[\s\S]*?flushPendingWorkDraft\(draftKey\)[\s\S]*?\}, \[draftKey\]\)/, 'unmount/key change must flush only this form pending draft')
@@ -48,6 +50,23 @@ const sessionProductForm = createSessionSource.match(/<ProductForm[\s\S]*?\/>/)?
 const stockInProductForm = fastStockInSource.match(/<ProductForm[\s\S]*?\/>/)?.[0] || ''
 assert.doesNotMatch(sessionProductForm, /onMinimize=/, 'create session must not fake a restorable minimized item')
 assert.doesNotMatch(stockInProductForm, /onMinimize=/, 'scanner-created stock-in item must not fake a separate minimized form')
+
+const catalogSaveStart = productsSource.indexOf('  const handleSaveWithGallery = async')
+const catalogSaveEnd = productsSource.indexOf('\n\n  // Opens DeleteConfirmModal', catalogSaveStart)
+const catalogSaveBody = productsSource.slice(catalogSaveStart, catalogSaveEnd)
+assert.doesNotMatch(catalogSaveBody, /setModal\(null\)|setSelected\(null\)|setDetailProduct\(null\)/, 'the catalog host must not unmount ProductForm before its successful clean latch')
+assert.match(catalogSaveBody, /void \(async \(\) => \{[\s\S]*?await fetchProductsByIds/, 'post-save enrichment must not delay ProductForm clean-and-close')
+
+const sessionNewSaveStart = createSessionSource.indexOf('  const saveNewItem = async')
+const sessionNewSaveEnd = createSessionSource.indexOf('\n\n  const saveEditedNewLine', sessionNewSaveStart)
+const sessionEditSaveStart = sessionNewSaveEnd + 2
+const sessionEditSaveEnd = createSessionSource.indexOf('\n\n  const removeLine', sessionEditSaveStart)
+assert.doesNotMatch(createSessionSource.slice(sessionNewSaveStart, sessionNewSaveEnd), /closeItemForm\(\)/, 'a queued new session item resolves to ProductForm before ProductForm closes itself')
+assert.doesNotMatch(createSessionSource.slice(sessionEditSaveStart, sessionEditSaveEnd), /closeItemForm\(\)/, 'an edited queued item resolves to ProductForm before ProductForm closes itself')
+
+const scannedCreateStart = fastStockInSource.indexOf('  const createProductForScannedBarcode = async')
+const scannedCreateEnd = fastStockInSource.indexOf('\n\n  const addLine', scannedCreateStart)
+assert.doesNotMatch(fastStockInSource.slice(scannedCreateStart, scannedCreateEnd), /setCreateBarcode\(''\)/, 'the scanner host must let ProductForm clear its draft before onClose replaces it')
 
 console.log('PASS product draft lifecycle source contracts')
 
@@ -178,6 +197,8 @@ const {
   scopedWorkDraftKey,
   writeWorkDraft,
 } = await import('../src/utils/workDrafts.ts')
+const { isWorkDirty, registerDirtyWork } = await import('../src/utils/dirtyWork.ts')
+const { useCloseGuard } = await import('../src/utils/useCloseGuard.ts')
 const { STORAGE_KEYS } = await import('../src/constants.ts')
 
 // Node executes this repository's .ts helpers directly but does not load JSX
@@ -225,11 +246,12 @@ assert.ok(saveGateStart >= 0 && saveGateEnd > saveGateStart, 'successful-save ga
 const saveGateSource = productFormSource.slice(saveGateStart, saveGateEnd)
   .replace(
     /export async function clearAfterSuccessfulProductSave[\s\S]*?\): Promise<void> \{/,
-    'return async function clearAfterSuccessfulProductSave(save, clear) {',
+    'return async function clearAfterSuccessfulProductSave(save, clear, close) {',
   )
 const clearAfterSuccessfulProductSave = Function(saveGateSource)() as (
   save: () => unknown | Promise<unknown>,
   clear: () => void,
+  close: () => void,
 ) => Promise<void>
 
 type HarnessState = {
@@ -391,10 +413,115 @@ await assert.rejects(
   clearAfterSuccessfulProductSave(
     async () => { throw new Error('server refused create') },
     () => { clearCount += 1 },
+    () => { throw new Error('a refused save must not close') },
   ),
   /server refused create/,
 )
 assert.equal(clearCount, 0, 'a rejected create must leave its draft intact')
-await clearAfterSuccessfulProductSave(async () => ({ success: true }), () => { clearCount += 1 })
+let closeCount = 0
+await clearAfterSuccessfulProductSave(
+  async () => ({ success: true }),
+  () => { clearCount += 1 },
+  () => { closeCount += 1 },
+)
 assert.equal(clearCount, 1, 'only a resolved save clears its draft')
-console.log('PASS failed saves preserve drafts and successful saves clear once')
+assert.equal(closeCount, 1, 'only a resolved save closes the form')
+console.log('PASS failed saves preserve drafts and successful saves clear then close once')
+
+type LifecycleSave = () => Promise<unknown>
+let runLifecycleSave: (() => Promise<void>) | null = null
+let requestLifecycleClose: (() => void) | null = null
+let backFromLifecyclePrompt: (() => void) | null = null
+let discardLifecycleDraft: (() => void) | null = null
+let lifecycleCloseSawDirty: boolean[] = []
+
+function SaveCloseForm({ draftKey, save, close }: { draftKey: string; save: LifecycleSave; close: () => void }) {
+  const dirtyRef = React.useRef(true)
+  const workKey = `save-close-${draftKey}`
+  React.useEffect(() => registerDirtyWork({
+    key: workKey,
+    pageId: 'products',
+    label: 'Save close lifecycle',
+    isDirty: () => dirtyRef.current,
+    discard: () => clearWorkDraft(draftKey),
+  }), [draftKey, workKey])
+  const guard = useCloseGuard({ workKey }, close)
+  runLifecycleSave = () => clearAfterSuccessfulProductSave(
+    save,
+    () => {
+      dirtyRef.current = false
+      clearWorkDraft(draftKey)
+    },
+    close,
+  )
+  requestLifecycleClose = guard.requestClose
+  backFromLifecyclePrompt = guard.dismissPrompt
+  discardLifecycleDraft = guard.discardAndClose
+  return React.createElement('span', null, guard.promptOpen ? 'prompt' : 'form')
+}
+
+function SaveCloseHost({ draftKey, save }: { draftKey: string; save: LifecycleSave }) {
+  const [open, setOpen] = React.useState(true)
+  if (!open) return React.createElement('span', null, 'closed')
+  const workKey = `save-close-${draftKey}`
+  return React.createElement(SaveCloseForm, {
+    draftKey,
+    save,
+    close: () => {
+      lifecycleCloseSawDirty.push(isWorkDirty(workKey))
+      setOpen(false)
+    },
+  })
+}
+
+const successLifecycleKey = scopedWorkDraftKey('product_save-close-success')
+writeWorkDraft(successLifecycleKey, { name: 'Committed product draft' })
+let resolveServerSave: (() => void) | null = null
+const serverSave = new Promise<void>((resolve) => { resolveServerSave = resolve })
+const successLifecycleContainer = memoryDocument.createElement('div')
+const successLifecycleRoot = createRoot(successLifecycleContainer as unknown as Element)
+lifecycleCloseSawDirty = []
+await act(async () => {
+  successLifecycleRoot.render(React.createElement(SaveCloseHost, {
+    draftKey: successLifecycleKey,
+    save: () => serverSave,
+  }))
+})
+const pendingSuccessfulSave = runLifecycleSave!()
+assert.equal(successLifecycleContainer.textContent, 'form', 'the form stays mounted while the server save is pending')
+assert.ok(readWorkDraft(successLifecycleKey), 'the restorable draft remains while the server save is pending')
+await act(async () => {
+  resolveServerSave?.()
+  await pendingSuccessfulSave
+})
+assert.equal(successLifecycleContainer.textContent, 'closed')
+assert.deepEqual(lifecycleCloseSawDirty, [false], 'the actual React host must observe clean work before it unmounts the form')
+assert.equal(readWorkDraft(successLifecycleKey), null, 'the exact committed draft is cleared before close')
+await act(async () => successLifecycleRoot.unmount())
+
+const failedLifecycleKey = scopedWorkDraftKey('product_save-close-failed')
+writeWorkDraft(failedLifecycleKey, { name: 'Retryable product draft' })
+const failedLifecycleContainer = memoryDocument.createElement('div')
+const failedLifecycleRoot = createRoot(failedLifecycleContainer as unknown as Element)
+lifecycleCloseSawDirty = []
+await act(async () => {
+  failedLifecycleRoot.render(React.createElement(SaveCloseHost, {
+    draftKey: failedLifecycleKey,
+    save: async () => { throw new Error('server refused create') },
+  }))
+})
+await assert.rejects(runLifecycleSave!(), /server refused create/)
+assert.equal(failedLifecycleContainer.textContent, 'form', 'a failed save keeps the form mounted')
+assert.ok(readWorkDraft(failedLifecycleKey), 'a failed save keeps the exact draft')
+await act(async () => requestLifecycleClose?.())
+assert.equal(failedLifecycleContainer.textContent, 'prompt', 'failed work still raises Back/Discard')
+await act(async () => backFromLifecyclePrompt?.())
+assert.equal(failedLifecycleContainer.textContent, 'form', 'Back keeps failed work mounted and editable')
+assert.ok(readWorkDraft(failedLifecycleKey), 'Back preserves the failed draft')
+await act(async () => requestLifecycleClose?.())
+await act(async () => discardLifecycleDraft?.())
+assert.equal(failedLifecycleContainer.textContent, 'closed')
+assert.deepEqual(lifecycleCloseSawDirty, [true], 'Discard closes dirty work without pretending it was saved')
+assert.equal(readWorkDraft(failedLifecycleKey), null, 'Discard removes only the local draft')
+await act(async () => failedLifecycleRoot.unmount())
+console.log('PASS actual React save lifecycle clears before close; failure keeps Back/Discard and draft state')

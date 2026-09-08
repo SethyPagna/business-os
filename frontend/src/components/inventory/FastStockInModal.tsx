@@ -449,7 +449,6 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
       name: String(item?.name || payload.name || ''),
       barcode: String(item?.barcode || createBarcode),
     }
-    setCreateBarcode('')
     pick(created)
     notify(tr('product_created_continue_stockin', 'Product created. Continue adding it to this stock-in session.'))
   }

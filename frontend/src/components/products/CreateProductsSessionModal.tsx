@@ -341,7 +341,9 @@ export default function CreateProductsSessionModal({
   }, [summaryRows, rows.length, header, branchSelectOptions, t])
 
   const closeDirtyRef = useRef(false)
-  closeDirtyRef.current = isCreateProductsHeaderDirty(header, resolvedDefaultBranchId) || rows.length > 0 || step === 'items'
+  const sessionCommittedRef = useRef(false)
+  closeDirtyRef.current = !sessionCommittedRef.current
+    && (isCreateProductsHeaderDirty(header, resolvedDefaultBranchId) || rows.length > 0 || step === 'items')
 
   useEffect(() => registerDirtyWork({
     key: `create-products-session-${draftKey}`,
@@ -601,7 +603,7 @@ export default function CreateProductsSessionModal({
         }
         setRows((prev) => [row, ...prev])
       }
-      setCommitError(''); setSubmissionErrorCode(''); closeItemForm(); setItemFormSeq((seq) => seq + 1)
+      setCommitError(''); setSubmissionErrorCode(''); setItemFormSeq((seq) => seq + 1)
     } catch (error) {
       throw error instanceof Error ? error : new Error(tr('failed', 'Failed'))
     } finally { setSaving(false) }
@@ -660,7 +662,7 @@ export default function CreateProductsSessionModal({
         unitCostUsd: cost,
       }
       setRows((prev) => prev.map((row) => row.lineId === lineId ? updated : row))
-      setCommitError(''); setSubmissionErrorCode(''); closeItemForm()
+      setCommitError(''); setSubmissionErrorCode('')
     } catch (error) {
       throw error instanceof Error ? error : new Error(tr('failed', 'Failed'))
     } finally { setSaving(false) }
@@ -714,6 +716,8 @@ export default function CreateProductsSessionModal({
     if (saving || idempotencyConflict) return
     const pending = rows.filter((row) => row.status === 'queued')
     if (!pending.length && !submittedItems) {
+      sessionCommittedRef.current = true
+      closeDirtyRef.current = false
       clearWorkDraft(draftKey); if (rows.length) onDone(); onClose(); return
     }
     const attemptItems = submittedItems || pending.map(sessionLine)
@@ -740,6 +744,8 @@ export default function CreateProductsSessionModal({
     try {
       const receipt = await createInventorySession(attemptPayload)
       notify(tr('stock_session_completed', 'Received {count} stock-in line(s) successfully.').replace('{count}', String(receipt.memberCount)), 'success')
+      sessionCommittedRef.current = true
+      closeDirtyRef.current = false
       clearWorkDraft(draftKey); onDone(); onClose()
     } catch (error) {
       const message = error instanceof Error ? error.message : tr('failed', 'Failed')

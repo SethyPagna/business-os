@@ -417,9 +417,11 @@ export function useStableHydratedState<T>(initialState: T, hydrationKey: string)
 export async function clearAfterSuccessfulProductSave(
   save: () => unknown | Promise<unknown>,
   clear: () => void,
+  close: () => void,
 ): Promise<void> {
   await Promise.resolve(save())
   clear()
+  close()
 }
 
 function editableInitialForm(initialForm: ProductFormState): ProductFormState {
@@ -1322,6 +1324,10 @@ export default function ProductForm({
           // Saved for real -- the autosaved draft is now history (Part 388).
           clearCurrentProductDraft()
         },
+        // ProductForm owns the successful close. Its hosts only persist or
+        // queue the payload; none may unmount this form before the dirty latch
+        // and exact draft are cleared above.
+        onClose,
       )
     } catch (error) {
       // "Merge into it instead of creating a twin" used to be a dead end: the
