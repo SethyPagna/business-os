@@ -1,0 +1,155 @@
+{
+  "schema_version": 1,
+  "task_id": "F55-offline-work-quarantine-plan",
+  "agent": {
+    "provider": "codex",
+    "role": "implementation_worker",
+    "session_id": "identity_impl"
+  },
+  "status": "completed",
+  "summary": "Read-only reproduction and bounded implementation plan for preserving durable offline work across runtime changes while preventing replay or disclosure under a different actor, organization, API origin, or server data generation.",
+  "base_sha": "1befb1d8197f848ae334e43cfd15c18c806be13d",
+  "changes": [
+    "Added this private planning/result artifact only; application and migration source remained unchanged."
+  ],
+  "evidence": [
+    {
+      "claim": "A hard storageVersion/dataRootKey/organizationPublicId change can erase the only durable replay instruction.",
+      "source": "repository source and adapted executable probe",
+      "locator": "frontend/src/AppContext.tsx:848-857; frontend/src/platform/runtime/clientRuntime.ts:108-123,284-297; frontend/src/api/localDb.ts:221-245",
+      "observed": "The pinned probe selected resetLocalMirrorDb for a storage-version change; that reset clears sync_queue, sync_outbox, offline_vault, and offline_file_chunks. The preserve variant keeps exactly those four stores."
+    },
+    {
+      "claim": "A queued sale has no trusted actor/runtime scope and can be submitted under the next current session.",
+      "source": "repository source and adapted executable probe",
+      "locator": "frontend/src/api/saleWriteTransport.ts:103-159,285-317",
+      "observed": "The probe queued a payload shaped by A and observed POST /api/sales under current authenticated user B. Queue rows contain no API origin, organization, data generation, or authenticated owner."
+    },
+    {
+      "claim": "The finding is attribution/recovery ownership rather than an authorization bypass.",
+      "source": "repository source",
+      "locator": "cloudflare/src/routes/sync.ts:192-232; cloudflare/src/routes/sales.ts:295-309,835-906",
+      "observed": "The Worker authenticates the current cookie, rechecks current POS/Sales permission, and stores the current authenticated actor. Client cashier_id is not authorization."
+    },
+    {
+      "claim": "Service-worker replay has the same ownership gap and can race foreground/session transitions.",
+      "source": "repository source",
+      "locator": "frontend/src/public-runtime/service-worker.ts:104-145,288-368,453-463",
+      "observed": "The worker reads all eligible sales:create rows, sends credentials:include, and uses only a timestamp lease. It has no scope comparison, claim token, or authenticated-owner check."
+    },
+    {
+      "claim": "Logout preserves durable stores but does not disable every replay path or relock the vault.",
+      "source": "repository source",
+      "locator": "frontend/src/AppContext.tsx:792-833,1730-1747; frontend/src/web-api.ts:398-435,837-852,888-949",
+      "observed": "Logout and unauthorized handling preserve offline stores/service worker. Maintenance starts when any stored session exists. Vault relock is idle/manual/tab-close only."
+    },
+    {
+      "claim": "Existing Cloudflare bootstrap cannot currently establish a complete hard runtime identity.",
+      "source": "repository source",
+      "locator": "cloudflare/src/routes/auth.ts:355-382; frontend/src/AppContext.tsx:548-560",
+      "observed": "Bootstrap returns runtime/database/storage kinds and organization null; storageVersion and dataRootKey are absent. User organization_public_id may exist, but there is no stable server data generation."
+    },
+    {
+      "claim": "Recommended durable row schema and classification.",
+      "source": "design inference from verified boundaries",
+      "locator": "planned frontend/src/api/offlineWorkScope.ts and frontend/src/api/localDb.ts Dexie version 6",
+      "observed": "Each new sync_queue, sync_outbox, and offline_file_chunks row should keep immutable origin_scope {protocolVersion:2, apiOrigin, organizationPublicId, dataGeneration, storageVersion, actorUserId, deviceId, scopeDigest}, scope_state, lease_token, lease_scope_digest, lease_expires_at, existing client_request_id, payload_digest, and ciphertext/payload bytes. Exact active scope is eligible; a different current actor/org/origin is held and hidden; a hard runtime transition is scope_quarantined; missing/invalid legacy scope is legacy_unattributed. Legacy and quarantined rows are never auto-replayed."
+    },
+    {
+      "claim": "Recommended server fence and rollout paths.",
+      "source": "design inference from verified client/server race",
+      "locator": "planned cloudflare/migrations/0137_offline_replay_generation.sql (recheck next free number after reserved 0136); cloudflare/src/lib/offlineReplayScope.ts; cloudflare/src/routes/auth.ts; cloudflare/src/routes/sync.ts; cloudflare/src/routes/sales.ts; cloudflare/src/routes/system.ts; cloudflare/src/routes/backups.ts; cloudflare/scripts/test-offline-replay-scope-pure.cjs; cloudflare/scripts/test-data-generation-pure.cjs",
+      "observed": "Seed a random data_generation in system_flags, expose a stable protocol/storage version and server-computed scope digest at authenticated bootstrap, and validate raw scope fields plus digest against current actor/org/origin/generation before replay. Use new operation id sale.create.scoped.v2 so older Workers reject it as unsupported. Reject legacy sale.create outbox operations and direct /api/sales requests carrying offline created_at without a valid scope as a nonretrying conflict before reads/writes. Rotate data_generation before destructive reset/restore writes; a failed rotation leaves maintenance/reset blocked."
+    },
+    {
+      "claim": "Recommended client storage/lifecycle paths.",
+      "source": "design inference from verified reset/logout flow",
+      "locator": "planned frontend/src/api/offlineWorkScope.ts; frontend/src/api/localDb.ts; frontend/src/platform/runtime/clientRuntime.ts; frontend/src/AppContext.tsx; frontend/src/web-api.ts",
+      "observed": "Dexie version 6 adds [scope_digest+status] indexes without rewriting payload/ciphertext bytes and marks unscoped rows legacy_unattributed in the upgrade transaction. Persist active_scope metadata for both window and service worker. Establish it only after authoritative bootstrap. Clear it and relock the vault before logout/unauthorized transition. On hard runtime change, atomically quarantine matching durable rows first, then clear only disposable mirrors while preserving all durable stores; if quarantine fails, do not write the new runtime descriptor or apply the new bootstrap."
+    },
+    {
+      "claim": "Recommended replay, privacy, and recovery paths.",
+      "source": "design inference from verified replay and preview surfaces",
+      "locator": "planned frontend/src/api/saleWriteTransport.ts; frontend/src/api/pendingSyncTransport.ts; frontend/src/api/syncPreview.ts; frontend/src/api/syncRuntime.ts; frontend/src/public-runtime/service-worker.ts; frontend/public/sw.js; frontend/src/App.tsx; frontend/src/components/server/ServerPage.tsx",
+      "observed": "Foreground and service worker atomically claim only exact-scope rows and condition ack/failure on lease token. Foreground sales replay uses /api/sync/outbox with sale.create.scoped.v2. Pending-state APIs return full items only for exact active scope and aggregate counts for held/quarantined rows, never entity labels or customer payloads to another user. Discard operates transactionally on an explicit scope/classification and reports failure if deletion fails. Quarantined/legacy work offers count, safe discard, and manual reconciliation guidance only; no automatic takeover or actor rewrite."
+    },
+    {
+      "claim": "Acceptance matrix for the implementation decision.",
+      "source": "planned executable verification",
+      "locator": "planned frontend/tests/offlineWorkScope.test.ts; offlineRuntimeQuarantine.test.ts; offlineReplayOwnership.test.ts; existing offlineSalesQueue.test.ts, swOfflineSaleReplay.test.ts, offlineSecurityHardening.test.ts, offlineSyncArchitecture.test.ts; planned Cloudflare tests above",
+      "observed": "Required cases: A queue then B login; same A re-login; revoked A permission; API origin/org/data-generation/storage-version change; missing/malformed/legacy scope; hard reset with each durable store populated; failure during quarantine; foreground/SW claim race; cookie change after client claim; request accepted but local ack lost; idempotent retry; logout vault relock; encrypted outbox/chunk scope; pending preview privacy; transactional discard failure; successful and failed restore/reset generation rotation; old cached client direct replay; server rollback rejecting scoped v2. Every refused case asserts zero sale/stock/audit writes and preserved queue bytes/client_request_id."
+    },
+    {
+      "claim": "Migration, recovery, and rollback constraints.",
+      "source": "design inference from existing backup/system_flags policy",
+      "locator": "cloudflare/migrations/0089_system_flags.sql; cloudflare/src/lib/backup.ts:80-145,1160-1235; cloudflare/src/routes/backups.ts:145-205; cloudflare/src/routes/system.ts factory/reset handlers",
+      "observed": "system_flags is intentionally excluded from backups, so the generation is live runtime state and must be rotated during restore. Migration is append-only INSERT OR IGNORE and preserves all business rows/schema. Rollout order is migration, backend guard/capability, then frontend/service worker. Rollback must retain the backend guard; scoped v2 operation IDs and versioned chunk endpoints fail closed on older code. IndexedDB version 6 is forward-only: rollback code must ignore retained extra fields/stores and must never clear or down-migrate durable rows."
+    }
+  ],
+  "verification": [
+    {
+      "command": "node %TEMP%/f55-freshness-recovery-1befb1d8.probe.cjs",
+      "scope": "adapted reviewer probe against exact pinned pinned source",
+      "exit_code": 0,
+      "expected": "Reproduce runtime-reset routing and current-session replay without browser or production writes",
+      "observed": "Storage-version change selected all-table reset; A-shaped sale was sent using current user B; all seven source-module probe cases reproduced."
+    },
+    {
+      "command": "node --experimental-strip-types tests/offlineSalesQueue.test.ts",
+      "scope": "existing foreground offline-sale contracts",
+      "exit_code": 0,
+      "expected": "Baseline suite passes before implementation",
+      "observed": "6 checks passed."
+    },
+    {
+      "command": "node --experimental-strip-types tests/swOfflineSaleReplay.test.ts",
+      "scope": "existing service-worker replay contracts",
+      "exit_code": 0,
+      "expected": "Baseline digest/delete safeguards pass before implementation",
+      "observed": "4 checks passed."
+    },
+    {
+      "command": "node --experimental-strip-types tests/offlineSecurityHardening.test.ts",
+      "scope": "existing offline vault/security source contracts",
+      "exit_code": 0,
+      "expected": "Baseline suite passes before implementation",
+      "observed": "10 checks passed."
+    },
+    {
+      "command": "node --experimental-strip-types tests/offlineSyncArchitecture.test.ts",
+      "scope": "existing offline sync architecture source contracts",
+      "exit_code": 0,
+      "expected": "Baseline suite passes before implementation",
+      "observed": "7 checks passed."
+    },
+    {
+      "command": "git status --porcelain=v1",
+      "scope": "pinned isolated source before plan artifact",
+      "exit_code": 0,
+      "expected": "No source modifications",
+      "observed": "Empty output at 1befb1d8197f848ae334e43cfd15c18c806be13d."
+    }
+  ],
+  "risks": [
+    "Client-only checks are insufficient because the authenticated cookie can change after a service-worker claim; server actor/org/generation validation is mandatory.",
+    "The current specialized sale queue is plaintext. Scope filtering prevents normal UI/replay disclosure across users, but browser-profile/DevTools access remains until a separate product decision enables encrypted POS queues.",
+    "The existing offline vault accepts any nonblank PIN and discovers a wrong PIN only during row decryption. A verifier plus scope-bound AES-GCM additionalData is recommended before recovery UI exposes encrypted work, but it is a separate bounded security slice.",
+    "A server mutation may commit before local acknowledgment. Quarantine/discard must distinguish outcome-unknown and reconcile by client_request_id; local discard cannot claim to undo a server commit.",
+    "Current Cloudflare bootstrap lacks stable data generation. Preserving queues without adding and rotating one cannot prove restore/data-root compatibility on other devices.",
+    "Migration number 0137 is provisional because 0136 is reserved outside the pinned base; the implementation owner must recheck the latest integrated migration before claiming a filename."
+  ],
+  "blockers": [],
+  "not_done": [
+    "No application, migration, browser storage, production data, network, or remote state was changed.",
+    "No end-to-end browser IndexedDB loss, service-worker cookie-race, or real D1 migration was executed.",
+    "No automatic actor takeover was designed; manual reconciliation remains fail-closed and must record original recorder plus actual approver if later authorized.",
+    "No claim is made that the current Cloudflare bootstrap has caused observed production queue loss; its absent hard keys make the demonstrated reset path conditional."
+  ],
+  "handoff": "Recommended decision: implement in three ordered slices. (1) Backend fence first: append-only generation seed, bootstrap scope capability, scoped-v2 replay validation, legacy offline replay rejection, and reset/restore generation rotation. (2) Client persistence: Dexie v6 scope metadata/indexes, legacy quarantine, active-scope lifecycle, hard-change quarantine-before-clear, logout relock. (3) Replay and recovery surfaces: exact-scope atomic claims in foreground/SW/generic outbox/chunks, privacy-filtered pending state, truthful scoped discard, and bilingual recovery status. Exact same actor+origin+organization+generation may resume automatically after authoritative bootstrap and current server permission checks; user/org mismatches are merely held and hidden so returning to the original exact scope can resume; hard-runtime and legacy rows require manual reconciliation or explicit discard. Do not enable operator takeover in this slice. Run the full acceptance matrix and both package typechecks/i18n/build after focused tests; independently verify the integrated backend-before-client rollout and rollback fence before deployment.",
+  "workspace": {
+    "branch": "codex/f55-offline-quarantine-plan-20260908",
+    "worktree": "C:/Users/mrkl6/Downloads/bos-f55-offline-quarantine-20260908",
+    "dirty_before": [],
+    "dirty_after": []
+  }
+}
