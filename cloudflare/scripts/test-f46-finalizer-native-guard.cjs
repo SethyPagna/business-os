@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict')
 const http = require('node:http')
-const { call, validateLoopbackBase } = require('./test-f46-finalizer-native.cjs')
+const { call, validateLoopbackBase } = require('./verify-f46-finalizer-native.cjs')
 
 function rejectsBase(value) {
   assert.throws(() => validateLoopbackBase(value), /loopback HTTP origin/)
