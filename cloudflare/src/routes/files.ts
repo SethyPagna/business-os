@@ -144,7 +144,7 @@ app.get('/', async (c) => {
   // soon as one photo is shared by two products.
   // usage_count cross-references each asset's public_path against every place
   // a file can be referenced elsewhere in the app: a product's cover image,
-  // its gallery, a user's avatar, and any business/portal setting (logo,
+  // its gallery, a user's avatar, a promotion banner, and any business/portal setting (logo,
   // favicon, cover, etc. -- settings is a generic key/value table, so a LIKE
   // scan of `value` catches all of those without hardcoding every key). This
   // used to be missing entirely, which left every asset's usage looking like
@@ -160,7 +160,8 @@ app.get('/', async (c) => {
            optimization_status, optimization_note, reference_product_id, reference_product_name,
            (SELECT COUNT(*) FROM products WHERE image_path = logical_assets.public_path) AS product_usage,
            (SELECT COUNT(*) FROM product_images WHERE image_path = logical_assets.public_path) AS gallery_usage,
-           (SELECT COUNT(*) FROM users WHERE avatar_path = logical_assets.public_path) AS avatar_usage
+           (SELECT COUNT(*) FROM users WHERE avatar_path = logical_assets.public_path) AS avatar_usage,
+           (SELECT COUNT(*) FROM promotions WHERE image_path = logical_assets.public_path) AS promotion_usage
     FROM logical_assets ${whereSql}
     ORDER BY id DESC, reference_product_name COLLATE NOCASE ASC, reference_product_id ASC
     LIMIT @limit OFFSET @offset
@@ -191,10 +192,11 @@ app.get('/', async (c) => {
       products: Number(row.product_usage || 0),
       gallery: Number(row.gallery_usage || 0),
       avatars: Number(row.avatar_usage || 0),
+      promotions: Number(row.promotion_usage || 0),
       settings: settingsUsage,
     }
-    const usageCount = usage.products + usage.gallery + usage.avatars + usage.settings
-    const { product_usage: _p, gallery_usage: _g, avatar_usage: _a, ...rest } = row
+    const usageCount = usage.products + usage.gallery + usage.avatars + usage.promotions + usage.settings
+    const { product_usage: _p, gallery_usage: _g, avatar_usage: _a, promotion_usage: _pr, ...rest } = row
     const referenceProductId = row.reference_product_id == null ? null : Number(row.reference_product_id)
     const referenceProductName = String(row.reference_product_name || '').trim() || null
     return {
@@ -344,7 +346,7 @@ app.get('/:id/download', async (c) => {
 })
 
 // 8.1 (Part 418): the drill-in behind the list's usage COUNTS -- which
-// products/rows/avatars/settings actually reference this asset, by NAME.
+// products/rows/avatars/promotions/settings actually reference this asset, by NAME.
 // Read-only, so it follows the list's own rule: any authenticated user can
 // see it (no cost or money data lives here).
 app.get('/:id/usage', async (c) => {
@@ -354,7 +356,7 @@ app.get('/:id/usage', async (c) => {
   const asset = await db.prepare('SELECT id, public_path FROM file_assets WHERE id = ?').get<{ id: number; public_path: string }>([id])
   if (!asset) return c.json({ error: 'File not found' }, 404)
   const publicPath = String(asset.public_path || '')
-  const [covers, gallery, avatars, settingRows] = await Promise.all([
+  const [covers, gallery, avatars, promotions, settingRows] = await Promise.all([
     db.prepare('SELECT id, name, barcode FROM products WHERE image_path = @path ORDER BY name COLLATE NOCASE ASC LIMIT 200')
       .all<{ id: number; name: string | null; barcode: string | null }>({ path: publicPath }),
     db.prepare(`
@@ -364,6 +366,8 @@ app.get('/:id/usage', async (c) => {
     `).all<{ product_id: number; name: string | null; sort_order: number | null }>({ path: publicPath }),
     db.prepare('SELECT id, name, username FROM users WHERE avatar_path = @path ORDER BY name COLLATE NOCASE ASC LIMIT 50')
       .all<{ id: number; name: string | null; username: string | null }>({ path: publicPath }),
+    db.prepare('SELECT id, title, is_active FROM promotions WHERE image_path = @path ORDER BY sort_order ASC, id ASC LIMIT 200')
+      .all<{ id: number; title: string | null; is_active: number | null }>({ path: publicPath }),
     db.prepare('SELECT key, value FROM settings').all<{ key: string; value: string }>(),
   ])
   const settingKeys = publicPath
@@ -375,6 +379,7 @@ app.get('/:id/usage', async (c) => {
     covers,
     gallery,
     avatars,
+    promotions,
     settings: settingKeys,
   })
 })
@@ -533,12 +538,13 @@ app.delete('/:id', async (c) => {
     SELECT
       (SELECT COUNT(*) FROM products WHERE image_path = @publicPath) AS product_count,
       (SELECT COUNT(*) FROM product_images WHERE image_path = @publicPath) AS gallery_count,
-      (SELECT COUNT(*) FROM users WHERE avatar_path = @publicPath) AS avatar_count
-    `).get<{ product_count: number; gallery_count: number; avatar_count: number }>({ publicPath: asset.public_path }),
+      (SELECT COUNT(*) FROM users WHERE avatar_path = @publicPath) AS avatar_count,
+      (SELECT COUNT(*) FROM promotions WHERE image_path = @publicPath) AS promotion_count
+    `).get<{ product_count: number; gallery_count: number; avatar_count: number; promotion_count: number }>({ publicPath: asset.public_path }),
     db.prepare('SELECT value FROM settings').all<{ value: string }>(),
   ])
   const settingsUsage = isPathReferencedInSettings(settingValues, asset.public_path) ? 1 : 0
-  const usageCount = Number(usageBreakdown?.product_count || 0) + Number(usageBreakdown?.gallery_count || 0) + Number(usageBreakdown?.avatar_count || 0) + settingsUsage
+  const usageCount = Number(usageBreakdown?.product_count || 0) + Number(usageBreakdown?.gallery_count || 0) + Number(usageBreakdown?.avatar_count || 0) + Number(usageBreakdown?.promotion_count || 0) + settingsUsage
   if (usageCount > 0) {
     const forceRequested = body.force === true && String(body.confirmText || '').trim().toUpperCase() === 'CONFIRM DELETE'
     if (!forceRequested) {
@@ -548,6 +554,7 @@ app.delete('/:id', async (c) => {
           products: Number(usageBreakdown?.product_count || 0),
           gallery: Number(usageBreakdown?.gallery_count || 0),
           avatars: Number(usageBreakdown?.avatar_count || 0),
+          promotions: Number(usageBreakdown?.promotion_count || 0),
           settings: settingsUsage,
         },
         forceable: true,
@@ -568,6 +575,7 @@ app.delete('/:id', async (c) => {
           products: Number(usageBreakdown?.product_count || 0),
           gallery: Number(usageBreakdown?.gallery_count || 0),
           avatars: Number(usageBreakdown?.avatar_count || 0),
+          promotions: Number(usageBreakdown?.promotion_count || 0),
           settings: settingsUsage,
         }
       : undefined,
