@@ -169,34 +169,55 @@ async function loadKnownPromotionAssetPaths(db: ReturnType<typeof getDb>, paths:
 }
 
 // Query only the promotion paths that can resolve to the Library assets in
-// this response. The exact file_assets lookup uses its unique public_path
-// index, retaining a literal filename such as `banner.png?v=7` before its
-// cache-busted sibling is normalized. This deliberately avoids reading the
-// entire Library for each page, usage detail, or delete guard.
+// this response. Each UNION arm is an indexable equality or binary prefix
+// range over promotions.image_path. The exact file_assets lookup uses its
+// unique public_path index, retaining a literal filename such as
+// `banner.png?v=7` before its cache-busted sibling is normalized.
 async function loadPromotionImageReferences(db: ReturnType<typeof getDb>, publicPaths: readonly string[]): Promise<Map<string, PromotionImageReference[]>> {
   const requestedPaths = [...new Set(publicPaths.map((path) => String(path || '')).filter(Boolean))]
   if (!requestedPaths.length) return new Map()
 
   const promotionRowsById = new Map<number, PromotionImageReference>()
-  for (const candidates of chunkForBinding(promotionLookupCandidates(requestedPaths))) {
+  // One candidate consumes five D1 bindings: its exact value, and lower/upper
+  // boundaries for the `?` and `#` cache suffix ranges. Keep every statement
+  // within D1's 100-binding ceiling with the real shared chunk helper.
+  for (const candidates of chunkForBinding(promotionLookupCandidates(requestedPaths), 0, 5)) {
     const params: Record<string, string> = {}
     const values = candidates.map((path, index) => {
       const key = `promotionLookupPath${index}`
       params[key] = path
       return `(@${key})`
     })
-    const rows = await db.prepare(`
+    const queryParts = [`
       WITH requested_promotion_paths(path) AS (VALUES ${values.join(', ')})
-      SELECT DISTINCT p.id, p.title, p.is_active, p.image_path, p.sort_order
+      SELECT p.id, p.title, p.is_active, p.image_path, p.sort_order
       FROM promotions p
-      JOIN requested_promotion_paths requested ON (
-        p.image_path = requested.path
-        OR (
-          substr(p.image_path, 1, length(requested.path)) = requested.path
-          AND substr(p.image_path, length(requested.path) + 1, 1) IN ('?', '#')
-        )
-      )
-      WHERE p.image_path IS NOT NULL AND p.image_path != ''
+      WHERE p.image_path IN (SELECT path FROM requested_promotion_paths)
+    `]
+    for (const [index, path] of candidates.entries()) {
+      const queryStart = `promotionQueryStart${index}`
+      const queryEnd = `promotionQueryEnd${index}`
+      const hashStart = `promotionHashStart${index}`
+      const hashEnd = `promotionHashEnd${index}`
+      params[queryStart] = `${path}?`
+      params[queryEnd] = `${path}@`
+      params[hashStart] = `${path}#`
+      params[hashEnd] = `${path}$`
+      queryParts.push(`
+        SELECT p.id, p.title, p.is_active, p.image_path, p.sort_order
+        FROM promotions p
+        WHERE p.image_path COLLATE BINARY >= @${queryStart}
+          AND p.image_path COLLATE BINARY < @${queryEnd}
+      `)
+      queryParts.push(`
+        SELECT p.id, p.title, p.is_active, p.image_path, p.sort_order
+        FROM promotions p
+        WHERE p.image_path COLLATE BINARY >= @${hashStart}
+          AND p.image_path COLLATE BINARY < @${hashEnd}
+      `)
+    }
+    const rows = await db.prepare(`
+      ${queryParts.join('\nUNION\n')}
     `).all<PromotionImageReference>(params)
     for (const row of rows) promotionRowsById.set(Number(row.id), row)
   }
