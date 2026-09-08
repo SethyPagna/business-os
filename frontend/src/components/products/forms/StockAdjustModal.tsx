@@ -32,6 +32,7 @@ import {
 import { clearWorkDraft, writeWorkDraft } from '../../../utils/workDrafts.ts'
 import { readStockAdjustDraft, stockAdjustDraftKey, type StockAdjustDraft } from '../../../utils/stockAdjustDraft.ts'
 import { buildStockAdjustQuantityReview } from '../../../utils/stockAdjustReview.ts'
+import { useRestoredStockAdjustDirty } from '../../../utils/useRestoredStockAdjustDirty.ts'
 
 // Full-featured "Adjust stock" flow for the Products page "Stock Changes"
 // ledger. It REUSES Inventory's own presentational adjust modal
@@ -167,7 +168,7 @@ type AppContextSlice = {
 }
 
 type PendingStockAdjust = {
-  request: Parameters<typeof adjustStock>[0]
+  request: NonNullable<Parameters<typeof adjustStock>[0]>
   beforeQuantity: number
 }
 
@@ -196,6 +197,7 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
   // --- product picker (step 1) ---
   const restoredDraftRef = useRef<StockAdjustDraft | null>(readStockAdjustDraft(restoreDraftKey))
   const restoredDraft = restoredDraftRef.current
+  const adjustRestoredDirty = useRestoredStockAdjustDirty(Boolean(restoredDraft))
   const openingProduct = (restoredDraft?.product || initialProduct) as PickedProduct | null
   const openingType = restoredDraft?.initialType || initialType
   const initialPickedProduct = openingProduct?.id != null ? openingProduct : null
@@ -864,7 +866,7 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
         onAdjust={onAdjust}
         onCloseAdjust={discardFailedAndClose}
         onMinimizeAdjust={onMinimize ? preserveAndMinimize : undefined}
-        adjustRestoredDirty={Boolean(restoredDraft)}
+        adjustRestoredDirty={adjustRestoredDirty}
         adjustDiscardItems={buildAdjustReviewItems()}
         adjustNotice={failureNotice}
         adjustSubmitLabel={submitState.mode === 'retry'
@@ -915,7 +917,7 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
         <ConfirmDialog
           t={t}
           title={tr('adjust_stock', 'Adjust stock')}
-          message={String(pendingAdjust.request.productName || product.name || '')}
+          message={String(pendingAdjust?.request.productName || product.name || '')}
           items={buildAdjustReviewItems()}
           // Once anything has failed the primary action is a RETRY of exactly
           // that row, never a fresh submit -- committed rows are excluded by
