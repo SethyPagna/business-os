@@ -83,6 +83,8 @@ assert.equal(actionAllowed('returns', 'edit', 'review'), false)
 assert.equal(actionAllowed('contacts', 'delete', 'review'), false)
 assert.equal(actionAllowed('sales', 'export', 'view'), true)
 assert.equal(actionAllowed('sales', 'status', 'view'), false)
+assert.equal(actionAllowed('sales', 'bulk', 'view'), false)
+assert.equal(actionAllowed('contacts', 'financial_history', 'review'), false)
 assert.equal(actionAllowed('promotions', 'manage', 'view'), false)
 
 // Fees is the permissive one: only delete needs approval.

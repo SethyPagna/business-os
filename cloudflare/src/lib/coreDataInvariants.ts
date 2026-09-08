@@ -41,10 +41,29 @@ import bcrypt from 'bcryptjs'
 // doesn't already exist) and are otherwise left alone as editable by the
 // org, so an existing installation's already-customized Manager/Employee
 // roles are not silently reset by this change.
-const DEFAULT_ROLE_PERMISSIONS: Record<string, Record<string, boolean>> = {
+type DefaultRolePermissionValue = boolean | 'review' | 'view'
+const DEFAULT_ROLE_PERMISSIONS: Record<string, Record<string, DefaultRolePermissionValue>> = {
   admin: { all: true },
   manager: {},
-  employee: {},
+  employee: {
+    dashboard: true,
+    customer_portal: true,
+    pos: true,
+    sales: true,
+    'sales:status': true,
+    'sales:customer': true,
+    'sales:add_items': true,
+    'sales:amend': true,
+    'sales:bulk': false,
+    'sales:import': false,
+    'sales:export': false,
+    products: 'review',
+    inventory: 'review',
+    returns: 'review',
+    contacts: 'review',
+    'contacts:financial_history': false,
+    contacts_suppliers: false,
+  },
 }
 
 export type CoreDataInvariants = {
@@ -255,7 +274,7 @@ export async function ensureCoreDataInvariants(env: Env): Promise<CoreDataInvari
     branchId = shop?.id ?? null
   }
 
-  const roleDefs: Array<[string, string, number, Record<string, boolean>]> = [
+  const roleDefs: Array<[string, string, number, Record<string, DefaultRolePermissionValue>]> = [
     ['Admin', 'admin', 1, DEFAULT_ROLE_PERMISSIONS.admin],
     ['Manager', 'manager', 0, DEFAULT_ROLE_PERMISSIONS.manager],
     ['Employee', 'employee', 0, DEFAULT_ROLE_PERMISSIONS.employee],

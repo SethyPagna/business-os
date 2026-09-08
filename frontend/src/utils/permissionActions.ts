@@ -212,6 +212,10 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     // confidentiality boundary. Modeled here so it is no longer the one
     // contact-tab control absent from the permission editor.
     { key: 'export', tKey: 'perm_act_contacts_export', label: 'Export', review: 'block' },
+    // Customer invoices, purchase history, and delivery-contact reports reveal
+    // financial activity. Keep this independent from the directory/search
+    // grant so a cashier can find a customer without opening their history.
+    { key: 'financial_history', tKey: 'perm_act_contacts_financial_history', label: 'View contact invoices and purchase history', review: 'block' },
   ],
 
   // View-tier sections also need action rows: the middle tier is still
@@ -237,6 +241,10 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     // add_items it can never be queued for review -- the stock movement is
     // immediate.
     { key: 'amend', tKey: 'perm_act_sales_amend', label: 'Amend a recorded sale (change quantities, remove or replace lines, correct delivery fee or actual courier cost)', review: 'block' },
+    // Multi-sale status/field updates and their grouped Undo/Redo share this
+    // explicit capability. Individual actions above remain independently
+    // grantable to front-line staff.
+    { key: 'bulk', tKey: 'perm_act_sales_bulk', label: 'Change multiple sales at once', review: 'block' },
   ],
 
   promotions: [
