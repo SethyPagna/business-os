@@ -1,4 +1,11 @@
 
+## Latest verified deployment — September 8, 06:10 UTC
+
+**LIVE73fd7dc15801b3f1bc6eb5c40cd115a6b76edf1f**, Worker a38779e9-32c9-4a12-8aab-e9b8e380cf05, deployment942bfcae-e9f5-4ea7-9426-12c713494295, independently confirmed100% at2026-09-08T06:10:49.221845Z. Five fix-scoped commits deploy compact mobile Sales U13–U15, F56 expense version/zero-row guards, F58 frontend loading boundaries, and F59 exact Khmer labels ថ្លៃដឹកដើម / ថ្លៃដឹកដើមថ្មី. Frontend322/322, types/i18n, expense races6/6 and fees10/10, build, emitted chunk checks and303-asset dry-run passed. No schema migration; F46/F57/0136/0137 are excluded.
+
+Open: F46 actual D1 preview compound-SELECT repair plus repeated real browser/combined gates; F57 indexed promotion-image lookup final independent review; F55 offline recovery plan correction/implementation; production duplicate merge after8cases (browser access pending); ambiguous historical/contact evidence; phone-camera validation; financial census; browser warning attribution; remaining U01–U12 UI/minimize work; legal/business/image-rights facts and bot token rotation. F60 Excel review of6145 source entries,5573 effective keys and572 overridden copies is in final formatting/validation. Broader Khmer proposals have not been applied.
+
+
 ## Active checkpoint and Khmer review — September 8, 06:04 UTC
 
 Production remains4e576eaa at100%. Small checkpoint73fd7dc1 is in final build/dry-run verification after322/322 frontend files passed. It contains ONLY compact mobile Sales U13–U15, F56 expense concurrency/zero-row handling, F58 loading boundaries and F59 the two approved Khmer labels (ថ្លៃដឹកដើម; ថ្លៃដឹកដើមថ្មី). No schema migration. Five fix-scoped commits preserve provenance.
