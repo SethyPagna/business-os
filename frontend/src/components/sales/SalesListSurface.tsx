@@ -145,7 +145,7 @@ export default function SalesListSurface({
   // the column.
   const selectCellPad = selectionModeActive ? 'px-3' : 'px-0'
   const cols = useColumnPreferences(SALES_COLUMNS_SURFACE_KEY, SALES_OPTIONAL_COLUMNS)
-  const columnCount = 9 + cols.visibleCount
+  const columnCount = 8 + cols.visibleCount
   const chooserColumns = SALES_OPTIONAL_COLUMNS.map((column) => ({ ...column, label: t(column.key) || column.label }))
 
   return (
@@ -177,9 +177,8 @@ export default function SalesListSurface({
                 {cols.isVisible('driver') ? <th className="hidden px-3 py-2 text-left font-semibold md:table-cell">{t('driver')}</th> : null}
                 <th className="px-3 py-2 text-right font-semibold">{t('total')}</th>
                 {cols.isVisible('items') ? <th className="hidden px-3 py-2 text-center font-semibold md:table-cell">{t('items')}</th> : null}
-                <th className="px-3 py-2 text-right font-semibold">{t('actions') || 'Actions'}</th>
-                <th className="hidden w-10 px-1 py-2 text-right lg:table-cell">
-                  <ColumnChooser columns={chooserColumns} isVisible={cols.isVisible} toggle={cols.toggle} reset={cols.reset} label={t('columns') || 'Columns'} resetLabel={t('reset') || 'Reset'} />
+                <th className="w-10 px-1 py-2 text-right">
+                  <ColumnChooser className="hidden lg:inline-block" columns={chooserColumns} isVisible={cols.isVisible} toggle={cols.toggle} reset={cols.reset} label={t('columns') || 'Columns'} resetLabel={t('reset') || 'Reset'} />
                 </th>
               </tr>
             </thead>
@@ -198,8 +197,7 @@ export default function SalesListSurface({
                     {cols.isVisible('driver') ? <td className="hidden px-4 py-3 md:table-cell"><div className="h-3 w-20 rounded bg-slate-200 dark:bg-slate-700" /></td> : null}
                     <td className="px-4 py-3"><div className="ml-auto h-4 w-16 rounded bg-slate-200 dark:bg-slate-700" /></td>
                     {cols.isVisible('items') ? <td className="hidden px-4 py-3 md:table-cell"><div className="mx-auto h-4 w-8 rounded bg-slate-200 dark:bg-slate-700" /></td> : null}
-                    <td className="px-4 py-3"><div className="mx-auto h-6 w-16 rounded bg-slate-200 dark:bg-slate-700" /></td>
-                    <td className="hidden lg:table-cell" />
+                    <td className="w-10 px-1 py-3"><div className="ml-auto h-7 w-7 rounded bg-slate-200 dark:bg-slate-700" /></td>
                   </tr>
                 ))
               ) : filtered.length === 0 ? (
@@ -333,7 +331,7 @@ export default function SalesListSurface({
                                 {totalKhr > 0 ? <div className="text-xs text-gray-400">{fmtKHR(totalKhr)}</div> : null}
                               </td>
                               {cols.isVisible('items') ? <td className="hidden px-3 py-1.5 text-center text-gray-500 md:table-cell">{items.length}</td> : null}
-                              <td className="px-2 py-1.5 text-right" onClick={(event) => event.stopPropagation()}>
+                              <td className="w-10 px-1 py-1.5 text-right" onClick={(event) => event.stopPropagation()}>
                                 <div className="flex flex-nowrap items-center justify-end gap-0.5">
                                   <button type="button" onClick={() => setSelectedSale(sale)} className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-blue-600 dark:hover:bg-slate-800" aria-label={t('print') || 'Print'} title={t('print') || 'Print'}><Printer className="h-3.5 w-3.5" /></button>
                                 </div>
