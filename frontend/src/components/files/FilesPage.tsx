@@ -276,7 +276,9 @@ const useApp = useAppHook as () => AppContextValue
 const useSync = useSyncHook as () => SyncContextValue
 
 const focusedFilesApi: FilesApi = {
-  getFiles: (options) => getFilesRequest(options) as Promise<FilesResponse>,
+  // Preserve the request ownership boundary from fileTransport. Dropping this
+  // second argument silently made every library search share the default group.
+  getFiles: (options, requestOptions) => getFilesRequest(options, requestOptions) as Promise<FilesResponse>,
   uploadFileAsset: (payload) => uploadFileAssetRequest(payload),
   deleteFileAsset: (id, options) => deleteFileAssetRequest(id, options),
   renameFileAsset: (id, originalName) => renameFileAssetRequest(id, originalName),
@@ -689,6 +691,10 @@ export default function FilesPage() {
   const [totalFiles, setTotalFiles] = useState(0)
   const [physicalStorage, setPhysicalStorage] = useState<NonNullable<FilesResponse['physicalStorage']> | null>(null)
   const [loadingFiles, setLoadingFiles] = useState(true)
+  // A write changes physical usage even when the next accepted list request
+  // is a search. Keep this latch until an accepted metadata response arrives;
+  // a stale/search response must never acknowledge the refresh for us.
+  const storageMetaRefreshNeededRef = useRef(true)
   const [uploading, setUploading] = useState(false)
   const [deletingAssetId, setDeletingAssetId] = useState<string | number | null>(null)
   // Rename (inline, see renderAssetCard below): `renamingAssetId` is which
@@ -892,9 +898,10 @@ export default function FilesPage() {
   }, [notify])
 
   const loadFiles = useCallback(async ({ refreshMeta = false }: { refreshMeta?: boolean } = {}) => {
+    if (refreshMeta) storageMetaRefreshNeededRef.current = true
     const requestId = beginTrackedRequest(fileLoadRequestRef)
     setLoadingFiles(true)
-    const includeMeta = refreshMeta || !filesLoadedOnceRef.current
+    const includeMeta = storageMetaRefreshNeededRef.current || !filesLoadedOnceRef.current
     try {
       const result = await withLoaderTimeout(() => filesApi.getFiles({
         search: deferredSearch,
@@ -917,7 +924,10 @@ export default function FilesPage() {
       const nextFiles = result.items
       setFiles(nextFiles)
       setTotalFiles(Number(result?.total || nextFiles.length || 0))
-      if (includeMeta) setPhysicalStorage(result.physicalStorage || null)
+      if (includeMeta && Object.prototype.hasOwnProperty.call(result, 'physicalStorage')) {
+        setPhysicalStorage(result.physicalStorage || null)
+        storageMetaRefreshNeededRef.current = false
+      }
       filesLoadedOnceRef.current = true
       setSelectedAssetIds((current) => {
         const validIds = new Set(nextFiles.map(logicalAssetKey))
