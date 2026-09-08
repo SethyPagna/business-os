@@ -464,6 +464,11 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   const initialPendingDirectStatus = loadPendingDirectMutationSlot<PreparedSaleStatusRequest>('sale-status', user?.id)
   const [pendingDirectStatus, setPendingDirectStatus] = useState<PendingDirectMutation<PreparedSaleStatusRequest> | null>(initialPendingDirectStatus)
   const pendingDirectStatusRef = useRef<PendingDirectMutation<PreparedSaleStatusRequest> | null>(initialPendingDirectStatus)
+  useEffect(() => {
+    const pending = loadPendingDirectMutationSlot<PreparedSaleStatusRequest>('sale-status', user?.id)
+    pendingDirectStatusRef.current = pending
+    setPendingDirectStatus(pending)
+  }, [user?.id])
   const savePendingDirectStatus = useCallback((
     saleId: number | string,
     body: PreparedSaleStatusRequest | null,

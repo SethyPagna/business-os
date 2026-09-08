@@ -400,6 +400,11 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
   const initialPendingHistoryRequest = loadPendingDirectMutationSlot<PreparedReturnUpdateRequest>('return-history', user?.id)
   const [pendingHistoryRequest, setPendingHistoryRequest] = useState<PendingDirectMutation<PreparedReturnUpdateRequest> | null>(initialPendingHistoryRequest)
   const pendingHistoryRequestRef = useRef<PendingDirectMutation<PreparedReturnUpdateRequest> | null>(initialPendingHistoryRequest)
+  useEffect(() => {
+    const pending = loadPendingDirectMutationSlot<PreparedReturnUpdateRequest>('return-history', user?.id)
+    pendingHistoryRequestRef.current = pending
+    setPendingHistoryRequest(pending)
+  }, [user?.id])
   const savePendingHistoryRequest = useCallback((
     returnId: number | string,
     body: PreparedReturnUpdateRequest | null,
