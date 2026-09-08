@@ -83,12 +83,28 @@ console.log('PASS online-only transport, server replay generation, no duplicate 
 // Execute actual transport and actual cache functions, with a warm history cache.
 const http=fs.readFileSync(path.join(root,'src/api/http.ts'),'utf8')
 const cacheCode=http.slice(http.indexOf('export function cacheGet('),http.indexOf('// Y18:'))
-const cache=new Function(ts.transpileModule(`const _cache={}; const CACHE_TTL=20000; ${cacheCode.replace(/export /g,'')}; return {cacheGet,cacheSet,cacheInvalidate}`,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText)()
+const cacheStateStart=http.indexOf('const _cache:')
+const cacheStateEnd=http.indexOf('const CACHE_TTL',cacheStateStart)
+const clearInflightStart=http.indexOf('function clearInflight(')
+assert.ok(cacheStateStart>=0 && cacheStateEnd>cacheStateStart && clearInflightStart>=0)
+const cacheState=http.slice(cacheStateStart,cacheStateEnd)
+const clearInflight=http.slice(clearInflightStart,http.indexOf('\n}',clearInflightStart)+2)
+const cache=new Function(ts.transpileModule(`${cacheState}; const CACHE_TTL=20000; ${clearInflight}; ${cacheCode.replace(/export /g,'')}; return {cacheGet,cacheSet,cacheInvalidate,_inflight,_inflightStartedAt,_readCacheTokens}`,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText)()
 cache.cacheSet('actionHistory:get:sales',[])
+cache._inflight['actionHistory:get:sales']=Promise.resolve([])
+cache._inflightStartedAt['actionHistory:get:sales']=Date.now()
+const historyRead={channel:'actionHistory:get:sales',valid:true,pending:1}
+const unrelatedRead={channel:'customers:search:keep',valid:true,pending:1}
+cache._readCacheTokens.add(historyRead)
+cache._readCacheTokens.add(unrelatedRead)
 const transportCode=transport.slice(transport.indexOf('export async function updateSalesBulkStatus'),transport.indexOf('export function createSaleWithoutWriteDedupe'))
 const write=new Function('route','apiFetch','cacheInvalidate','navigator',ts.transpileModule(`${transportCode.replace('export ','')}; return updateSalesBulkStatus`,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText)(async(_key:string,fn:()=>unknown)=>fn(),async()=>({actionHistoryId:7}),cache.cacheInvalidate,{onLine:true})
 await write({client_request_id:'test',items:[],target_status:'completed'})
 assert.equal(cache.cacheGet('actionHistory:get:sales'),null)
+assert.equal(cache._inflight['actionHistory:get:sales'],undefined)
+assert.equal(cache._inflightStartedAt['actionHistory:get:sales'],undefined)
+assert.equal(historyRead.valid,false,'a pre-mutation history read must not refill the invalidated cache')
+assert.equal(unrelatedRead.valid,true,'unrelated pending reads retain their cache ownership')
 console.log('PASS actual bulk transport invalidates warm actionHistory cache before resolving')
 
 // Execute the production persistence hooks, not a signature-only test shim.
