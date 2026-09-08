@@ -1186,39 +1186,34 @@ export default function SaleDetailModal({
         className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl sm:max-w-3xl sm:rounded-2xl dark:bg-gray-800"
         onClick={(event: MouseEvent<HTMLDivElement>) => event.stopPropagation()}
       >
-        {/* The receipt id owns a full-width row of its own below sm (user,
-            Sep 3 2026: "for smaller screens the receipt id must be shown
-            clearly fully, no scroll; can push to second row and copy
-            easily"), so it wraps instead of scrolling sideways and the
-            status/actions cluster drops underneath it. From sm the two share
-            one compact row again, with the same copy button. */}
-        <div className="flex flex-shrink-0 flex-col gap-2 border-b border-gray-200 p-4 dark:border-gray-700 sm:flex-row sm:items-start sm:justify-between">
+        {/* Compact record identity: receipt + explicit copy and status share
+            the first line, the full business date/time stays directly below,
+            and the always-available Close remains at the edge. CopyableId can
+            still wrap a long id instead of clipping it or replacing the
+            accessible copy control with a hidden gesture. */}
+        <div data-sale-detail-header="" className="flex flex-shrink-0 items-start justify-between gap-2 border-b border-gray-200 p-3 dark:border-gray-700 sm:p-4">
           <div className="min-w-0 flex-1">
-            <CopyableId
-              value={sale.receipt_number || ''}
-              copyLabel={translateOr('copy_receipt_number', 'Copy receipt number', 'ចម្លងលេខវិក្កយបត្រ')}
-              copiedLabel={t('copied') || 'Copied'}
-              valueClassName="font-mono text-sm font-bold text-gray-900 dark:text-white sm:text-base"
-            />
+            <div className="flex min-w-0 items-start gap-2">
+              <CopyableId
+                value={sale.receipt_number || ''}
+                copyLabel={translateOr('copy_receipt_number', 'Copy receipt number', 'ចម្លងលេខវិក្កយបត្រ')}
+                copiedLabel={t('copied') || 'Copied'}
+                className="min-w-0 flex-1"
+                valueClassName="font-mono text-sm font-bold text-gray-900 dark:text-white sm:text-base"
+              />
+              <StatusBadge status={currentStatus} t={t} />
+            </div>
             <div className="mt-1 text-xs text-gray-400">{fmtTime(sale.created_at)}</div>
           </div>
-          {/* S4-24 (user, Sep 4 2026): "print buttons end of page...not on top
-              near the x close button". Print and Return moved to the footer at
-              the end of the record. Only the status badge and the close control
-              stay up here -- a badge is a fact about the record, and X is how
-              you leave, not something you do to the sale. */}
-          <div className="flex shrink-0 flex-wrap items-center gap-2">
-            <StatusBadge status={currentStatus} t={t} />
-            <button
-              ref={closeButtonRef}
-              type="button"
-              onClick={closeGuard.requestClose}
-              className="flex h-11 w-11 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700"
-              aria-label={t('close') || 'Close'}
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
+          <button
+            ref={closeButtonRef}
+            type="button"
+            onClick={closeGuard.requestClose}
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700"
+            aria-label={t('close') || 'Close'}
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
 
         {/* One rhythm for the whole record (user, Sep 3 2026: "a row view is
@@ -1471,35 +1466,38 @@ export default function SaleDetailModal({
                 <DetailRow label={t('customer_name') || 'Customer'} value={sale.customer_name} />
                 <DetailRow label={t('phone') || 'Phone'} value={sale.customer_phone} />
                 <DetailRow label={t('address') || 'Address'} value={customerAddress} />
-                <DetailRow label={t('membership') || 'Membership'} value={sale.customer_membership_number} mono />
+                {onAttachMembership ? (
+                  <DetailRow label={t('membership') || 'Membership'}>
+                    <span data-sale-membership-row="" className="block min-w-0">
+                      <span className="flex min-w-0 gap-2">
+                        <label htmlFor="sale-membership-attach" className="sr-only">
+                          {translateOr('attach_membership', 'Attach membership to this sale', 'ភ្ជាប់សមាជិកទៅការលក់នេះ')}
+                        </label>
+                        <input
+                          id="sale-membership-attach"
+                          className="input min-w-0 flex-1 font-mono text-sm"
+                          value={membershipNumber}
+                          onChange={(event) => setMembershipNumber(event.target.value)}
+                          placeholder={t('membership_number') || 'Membership number'}
+                        />
+                        <button
+                          type="button"
+                          className="btn-primary shrink-0 whitespace-nowrap text-xs"
+                          disabled={membershipSaving || !String(membershipNumber || '').trim()}
+                          onClick={handleMembershipAttach}
+                        >
+                          {membershipSaving ? (t('loading') || 'Saving') : (t('save') || 'Save')}
+                        </button>
+                      </span>
+                      <span className="mt-1 block text-[11px] font-normal text-gray-500 dark:text-gray-400">
+                        {translateOr('sale_membership_attach_hint', 'Use this when a sale was created anonymously and staff need to link it to a member later.', 'ប្រើពេលការលក់ត្រូវបានបង្កើតដោយមិនមានសមាជិក ហើយបុគ្គលិកត្រូវភ្ជាប់ទៅសមាជិកនៅពេលក្រោយ។')}
+                      </span>
+                    </span>
+                  </DetailRow>
+                ) : (
+                  <DetailRow label={t('membership') || 'Membership'} value={sale.customer_membership_number} mono />
+                )}
               </DetailRowGroup>
-              {/* An ACTION, not a field -- kept in the Customer card but held
-                  below the row list so it cannot break the row rhythm. */}
-              <div className="mt-3 border-t border-gray-100 pt-3 dark:border-gray-700/60">
-                <label htmlFor="sale-membership-attach" className="mb-1 block text-xs text-gray-400">
-                  {translateOr('attach_membership', 'Attach membership to this sale', 'ភ្ជាប់សមាជិកទៅការលក់នេះ')}
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    id="sale-membership-attach"
-                    className="input text-sm"
-                    value={membershipNumber}
-                    onChange={(event) => setMembershipNumber(event.target.value)}
-                    placeholder={t('membership_number') || 'Membership number'}
-                  />
-                  <button
-                    type="button"
-                    className="btn-primary whitespace-nowrap text-xs"
-                    disabled={membershipSaving || !String(membershipNumber || '').trim()}
-                    onClick={handleMembershipAttach}
-                  >
-                    {membershipSaving ? (t('loading') || 'Saving') : (t('save') || 'Save')}
-                  </button>
-                </div>
-                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                  {translateOr('sale_membership_attach_hint', 'Use this when a sale was created anonymously and staff need to link it to a member later.', 'ប្រើពេលការលក់ត្រូវបានបង្កើតដោយមិនមានសមាជិក ហើយបុគ្គលិកត្រូវភ្ជាប់ទៅសមាជិកនៅពេលក្រោយ។')}
-                </p>
-              </div>
             </SectionCard>
 
             {/* S4-25: delivery is no longer a card of its own. The driver,
@@ -1510,21 +1508,6 @@ export default function SaleDetailModal({
                 number they both explain. */}
 
           </div>
-
-          {onOpenRecords ? (
-            <button
-              type="button"
-              onClick={() => onOpenRecords(sale)}
-              className="flex w-full items-center justify-between rounded-xl border border-gray-200 px-3 py-2 text-left text-sm font-medium text-gray-700 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 dark:border-gray-700 dark:text-gray-200 dark:hover:border-blue-700 dark:hover:bg-blue-950/30 dark:hover:text-blue-300"
-              title={t('records_open') || 'Show who changed this sale'}
-            >
-              <span className="inline-flex items-center gap-2">
-                <History className="h-4 w-4" />
-                <span>{t('sale_records') || 'Records'}</span>
-              </span>
-              <span className="tabular-nums text-xs text-gray-500 dark:text-gray-400">{saleRecordsCount(sale) ?? '—'}</span>
-            </button>
-          ) : null}
 
           {/* Items AND the money summary in ONE table: the tfoot amounts sit in
               the same column as the line totals above them, which is the whole
@@ -2311,20 +2294,36 @@ export default function SaleDetailModal({
             </section>
           ) : null}
 
-          {/* S4-24: the record's actions, at the end of the record. They read
-              in the order you reach them -- you have just finished reading the
-              sale, so Print and Return are the next things you might do.
-              Full-width and stacked below sm so a thumb cannot miss them; a
-              row from sm. */}
-          {onPrint || onReturn ? (
-            <div className="flex flex-col gap-2 border-t border-gray-200 pt-4 sm:flex-row sm:justify-end dark:border-gray-700">
+          {/* Records is the last body section. It remains a read action even
+              when none of the write callbacks are available. */}
+          {onOpenRecords ? (
+            <button
+              type="button"
+              data-sale-records-action=""
+              onClick={() => onOpenRecords(sale)}
+              className="flex w-full items-center justify-between rounded-xl border border-gray-200 px-3 py-2 text-left text-sm font-medium text-gray-700 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 dark:border-gray-700 dark:text-gray-200 dark:hover:border-blue-700 dark:hover:bg-blue-950/30 dark:hover:text-blue-300"
+              title={t('records_open') || 'Show who changed this sale'}
+            >
+              <span className="inline-flex items-center gap-2">
+                <History className="h-4 w-4" />
+                <span>{t('sale_records') || 'Records'}</span>
+              </span>
+              <span className="tabular-nums text-xs text-gray-500 dark:text-gray-400">{saleRecordsCount(sale) ?? '—'}</span>
+            </button>
+          ) : null}
+
+          {/* The record actions finish the modal in one mobile row. Return and
+              Print keep their existing permission/guard callbacks; Close is
+              repeated here as visible text while the compact icon remains in
+              the header for quick dismissal. */}
+          <div data-sale-detail-footer-actions="" className="flex items-stretch gap-2 border-t border-gray-200 pt-4 sm:justify-end dark:border-gray-700">
               {onReturn ? (
-                <span className="inline-flex items-center gap-1">
+                <span className="flex min-w-0 flex-1 items-center gap-1 sm:flex-none">
                   <button
                     type="button"
                     onClick={() => onReturn(sale)}
                     disabled={returnBlockedReason !== ''}
-                    className="w-full rounded-lg bg-orange-50 px-4 py-2 text-sm font-medium text-orange-700 hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto dark:bg-orange-900/30 dark:text-orange-300 dark:hover:bg-orange-900/50"
+                    className="min-h-10 min-w-0 flex-1 rounded-lg bg-orange-50 px-2 py-2 text-sm font-medium text-orange-700 hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none sm:px-4 dark:bg-orange-900/30 dark:text-orange-300 dark:hover:bg-orange-900/50"
                   >
                     {t('return') || 'Return'}
                   </button>
@@ -2342,13 +2341,20 @@ export default function SaleDetailModal({
                     onClose()
                     onPrint(sale)
                   }}
-                  className="w-full rounded-lg bg-blue-50 px-4 py-2 text-sm font-medium text-blue-600 hover:bg-blue-100 sm:w-auto dark:bg-blue-900/30 dark:text-blue-400 dark:hover:bg-blue-900/50"
+                  className="min-w-0 flex-1 rounded-lg bg-blue-50 px-2 py-2 text-sm font-medium text-blue-600 hover:bg-blue-100 sm:flex-none sm:px-4 dark:bg-blue-900/30 dark:text-blue-400 dark:hover:bg-blue-900/50"
                 >
                   {t('print') || 'Print'}
                 </button>
               ) : null}
-            </div>
-          ) : null}
+              <button
+                type="button"
+                onClick={closeGuard.requestClose}
+                className="btn-secondary inline-flex min-w-0 flex-1 items-center justify-center gap-1 px-2 py-2 text-sm sm:flex-none sm:px-4"
+              >
+                <X className="h-4 w-4" aria-hidden="true" />
+                {t('close') || 'Close'}
+              </button>
+          </div>
 
           {/* The review step. A stock write never leaves this app on a single
               click: the person sees each line, the money it adds, and whether

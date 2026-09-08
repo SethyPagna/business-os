@@ -48,14 +48,15 @@ assert.doesNotMatch(classAttributes(copyableId), /\btruncate\b|detail-scroll-tex
 
 console.log('PASS CopyableId wraps, selects, and copies the identifier with a copied state')
 
-// --- 2. the sale detail receipt id uses it, and pushes to its own row -----
+// --- 2. the sale detail receipt id remains explicit in its compact header --
 
 assert.match(saleDetail, /import CopyableId from '\.\.\/shared\/CopyableId\.tsx'/, 'the sale detail must use the shared copyable id')
-const saleHeader = saleDetail.slice(saleDetail.indexOf('flex-shrink-0 flex-col'), saleDetail.indexOf('modal-scroll'))
+const saleHeader = saleDetail.slice(saleDetail.indexOf('Compact record identity:'), saleDetail.indexOf('modal-scroll'))
 assert.ok(saleHeader.length > 200, 'expected to find the sale detail modal header block')
-assert.match(saleHeader, /flex-shrink-0 flex-col gap-2[\s\S]*?sm:flex-row/, 'below sm the receipt id takes a full-width row of its own and the actions drop beneath it')
+assert.match(saleHeader, /flex flex-shrink-0 items-start justify-between gap-2/, 'the phone header keeps identity and its compact close control on one bounded row')
 assert.match(saleHeader, /<CopyableId[\s\S]*?value=\{sale\.receipt_number \|\| ''\}/, 'the receipt number itself must render through CopyableId')
 assert.match(saleHeader, /copy_receipt_number/, 'the copy control must carry a translated label')
+assert.match(saleHeader, /<CopyableId[\s\S]*?<StatusBadge[\s\S]*?fmtTime\(sale\.created_at\)/, 'receipt/copy and status lead, with the date-time directly below')
 assert.doesNotMatch(saleHeader, /detail-scroll-text|truncate/, 'the sale receipt id must not be scrolled sideways or ellipsised')
 
 console.log('PASS SaleDetailModal renders the receipt id full-width, wrapping, with a copy control and no truncation')
@@ -63,20 +64,18 @@ console.log('PASS SaleDetailModal renders the receipt id full-width, wrapping, w
 // --- 3. the Return action, its gate, and its guards ----------------------
 
 assert.match(saleDetail, /onReturn\?: \(sale: SaleDetail\) => void/, 'SaleDetailModal must accept an onReturn callback')
-// S4-24 (user, Sep 4 2026): "print buttons end of page...not on top near the x
-// close button". Return and Print left the header for a footer at the end of
-// the record. Every guarantee this section was written for still holds -- it is
-// only the slice that moved -- and the header is now asserted EMPTY of them, so
-// the buttons cannot drift back up beside the close control.
-const saleActions = saleDetail.slice(saleDetail.indexOf("{onPrint || onReturn ?"))
-assert.ok(saleActions.length > 200, 'expected to find the sale detail action footer')
+// Return and Print remain at the end of the record. The mobile composition
+// adds a second visible Close beside them while retaining the compact header X.
+const saleActions = saleDetail.slice(saleDetail.indexOf('data-sale-detail-footer-actions=""'))
+assert.ok(saleActions.length > 200, 'expected to find the sale detail footer actions')
 assert.match(saleActions, /onClick=\{\(\) => onReturn\(sale\)\}/, 'the Return button must invoke onReturn with the sale')
 assert.match(saleActions, /disabled=\{returnBlockedReason !== ''\}/, 'a sale that cannot be returned leaves the button inert')
 assert.match(saleActions, /<InfoHint text=\{returnBlockedReason\}/, 'the reason belongs behind an InfoHint, not as inline prose')
 assert.match(saleActions, /onPrint\(sale\)/, 'Print lives in the same footer')
+assert.match(saleActions, /onClick=\{closeGuard\.requestClose\}[\s\S]*?\{t\('close'\) \|\| 'Close'\}/, 'a visible Close lives beside Return and Print')
+assert.match(saleActions, /className="flex items-stretch gap-2/, 'the mobile footer stays one row')
 assert.doesNotMatch(saleHeader, /onReturn\(sale\)|onPrint\(sale\)/, 'no record action may sit beside the close button')
-// One close affordance per modal: the header X, and nothing else.
-assert.equal((saleDetail.match(/aria-label=\{t\('close'\) \|\| 'Close'\}/g) || []).length, 1, 'the sale detail modal keeps exactly one close affordance')
+assert.equal((saleHeader.match(/aria-label=\{t\('close'\) \|\| 'Close'\}/g) || []).length, 1, 'the compact header keeps one explicitly named Close icon')
 
 assert.match(saleDetail, /getSaleReturnBlockReason/, 'the sale detail must use the shared return guard, not its own copy of the rule')
 

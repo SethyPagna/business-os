@@ -480,7 +480,7 @@ export default function SalesListSurface({
                       >
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0 flex-1">
-                            <div className="mb-1 flex flex-wrap items-center gap-2">
+                            <div data-sales-card-primary-meta="" className="mb-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-gray-400">
                               {selectionModeActive ? (
                               <input
                                 type="checkbox"
@@ -496,15 +496,16 @@ export default function SalesListSurface({
                                   -- it wraps onto a second line inside the
                                   card instead (user, Sep 3 2026). */}
                               <span className="min-w-0 whitespace-normal break-all font-mono text-sm font-semibold leading-snug text-blue-600 dark:text-blue-400">{sale.receipt_number}</span>
-                              <span className="shrink-0 text-xs text-gray-400">{fmtTime(sale.created_at)}</span>
+                              <span aria-hidden="true">|</span>
+                              <span className="shrink-0">{fmtTime(sale.created_at)}</span>
+                              {branchLabel ? <><span aria-hidden="true">|</span><span aria-label={`${t('branch') || 'Branch'}: ${branchLabel}`}>{branchLabel}</span></> : null}
+                              {sale.cashier_name ? <><span aria-hidden="true">|</span><span className="font-bold text-gray-700 dark:text-gray-200" aria-label={`${t('cashier') || 'Cashier'}: ${sale.cashier_name}`}>{sale.cashier_name}</span></> : null}
                             </div>
                             {/* Y17: customer (name + phone) leads the meta line;
                                 tapping the card opens the full detail. */}
                             <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-gray-500">
                               <span className="font-medium text-gray-700 dark:text-gray-300">{sale.customer_name?.trim() || (t('walk_in') || 'Walk-in')}</span>
                               {sale.customer_phone?.trim() ? <span className="text-gray-400">{sale.customer_phone}</span> : null}
-                              {sale.cashier_name ? <span>| {sale.cashier_name}</span> : null}
-                              {branchLabel ? <span>| {branchLabel}</span> : null}
                               {/* N23: the driver is NAMED here. Cashier,
                                   branch and driver shared one unlabeled
                                   pipe-separated line, so a bare "Sok Dara"

@@ -49,15 +49,11 @@ export default function SaleStatusWorkflow({
 
   return (
     <div className="space-y-3">
-      <button type="button" className="inline-flex min-h-10 items-center gap-1 text-sm font-semibold text-gray-600 dark:text-gray-300" onClick={() => setStep(step === 'review' ? 'destination' : 'closed')}>
-        <ChevronLeft className="h-4 w-4" />
-        {step === 'review' ? (t('back') || 'Back') : (t('cancel') || 'Cancel')}
-      </button>
       {step === 'destination' ? (
         <>
           <div>
             <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t('choose_status') || 'Choose destination status'}</div>
-            <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+            <div data-sale-status-destinations="" className="mt-2 grid grid-cols-3 gap-2">
               {destinations.map((status) => (
                 <button
                   key={status}
@@ -85,11 +81,19 @@ export default function SaleStatusWorkflow({
             <textarea id="sale-status-notes" className="input min-h-[80px] resize-none text-sm" value={notes} onChange={(event) => onNotesChange(event.target.value)} placeholder={t('status_notes_placeholder') || 'Optional notes about this status change'} />
           </div> : null}
           {children}
-          <button type="button" className="btn-primary w-full text-sm" disabled={saving || confirmDisabled || selectedStatus === currentStatus} onClick={onConfirm}>
-            {saving ? (t('loading') || 'Saving') : (t('confirm') || 'Confirm')}
-          </button>
         </>
       )}
+      <div data-sale-status-review-actions="" className="flex items-stretch gap-2">
+        <button type="button" className="btn-secondary inline-flex min-h-11 min-w-0 flex-1 items-center justify-center gap-1 px-2 text-sm font-semibold" onClick={() => setStep(step === 'review' ? 'destination' : 'closed')}>
+          <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+          {step === 'review' ? (t('back') || 'Back') : (t('cancel') || 'Cancel')}
+        </button>
+        {step === 'review' ? (
+          <button type="button" className="btn-primary min-h-11 min-w-0 flex-1 px-2 text-sm" disabled={saving || confirmDisabled || selectedStatus === currentStatus} onClick={onConfirm}>
+            {saving ? (t('loading') || 'Saving') : (t('update') || 'Update')}
+          </button>
+        ) : null}
+      </div>
     </div>
   )
 }
