@@ -1239,6 +1239,14 @@ app.post('/', async (c) => {
   let replacementCreationSnapshot: string | null = null
   let replacementTotals: ReturnType<typeof computeSaleTotals> | null = null
   let replacementNotice: Parameters<typeof formatSaleTelegramLines>[0] | null = null
+  let replacementCustomerId: number | null = null
+  let replacementCustomerName: string | null = null
+  let replacementCustomerPhone: string | null = null
+  let replacementCustomerAddress: string | null = null
+  let replacementMembershipNumber: string | null = null
+  let replacementCustomerGuard: {
+    customer_id: number; exists: number; is_anonymous: number; membership_number: string
+  } | null = null
   const replacementPaymentMethod = String(body.replacement_payment_method || '').trim() || DEFAULT_REPLACEMENT_PAYMENT_METHOD
   if (replacementLines.length) {
     replacementReceiptNumber = await uniqueBusinessDateTimeNumber('', async (candidate) => !!(await db.prepare('SELECT 1 FROM sales WHERE receipt_number=? LIMIT 1').get([candidate])))
@@ -1249,11 +1257,24 @@ app.post('/', async (c) => {
       deliveryFeePaidBy: 'customer', isDelivery: false, exchangeRate,
       rawAmountPaidUsd: subtotalUsd, rawAmountPaidKhr: 0,
     })
-    const replacementCustomerId = Number(body.customer_id || saleMeta?.customer_id) || null
-    const replacementCustomerName = body.customer_name || saleMeta?.customer_name || null
-    const membership = replacementCustomerId
-      ? await db.prepare('SELECT membership_number FROM customers WHERE id=?').get<{ membership_number: string | null }>([replacementCustomerId])
+    const candidateCustomerId = Number(body.customer_id || saleMeta?.customer_id) || null
+    const candidateCustomer = candidateCustomerId
+      ? await db.prepare('SELECT id,membership_number,is_anonymous FROM customers WHERE id=?')
+        .get<{ id: number; membership_number: string | null; is_anonymous: number | null }>([candidateCustomerId])
       : null
+    if (candidateCustomerId) {
+      replacementCustomerGuard = {
+        customer_id: candidateCustomerId, exists: candidateCustomer ? 1 : 0,
+        is_anonymous: Number(candidateCustomer?.is_anonymous || 0),
+        membership_number: candidateCustomer?.membership_number || '',
+      }
+    }
+    const candidateIsAnonymous = isAnonymousCustomer(candidateCustomer)
+    replacementCustomerId = candidateCustomer && !candidateIsAnonymous ? candidateCustomerId : null
+    replacementCustomerName = candidateIsAnonymous ? null : body.customer_name || saleMeta?.customer_name || null
+    replacementCustomerPhone = candidateIsAnonymous ? null : saleMeta?.customer_phone || null
+    replacementCustomerAddress = candidateIsAnonymous ? null : contactDisplayAddress(saleMeta?.customer_address) || null
+    replacementMembershipNumber = candidateCustomer && !candidateIsAnonymous ? candidateCustomer.membership_number || null : null
     const paymentDetails = subtotalUsd > 0 ? [{ method: replacementPaymentMethod, amount_usd: subtotalUsd, amount_khr: 0 }] : []
     replacementCreationSnapshot = buildSaleCreationSnapshot({
       origin: 'return_replacement', recordedAt: occurredAt, saleAt: occurredAt,
@@ -1264,11 +1285,11 @@ app.post('/', async (c) => {
       amountPaidUsd: replacementTotals.amountPaidUsd, amountPaidKhr: replacementTotals.amountPaidKhr,
       changeUsd: 0, changeKhr: 0, isDelivery: false, deliveryFeeUsd: 0,
       customerSnapshot: replacementCustomerId || String(replacementCustomerName || '').trim() ? { id: replacementCustomerId, name: replacementCustomerName } : null,
-      membershipSnapshot: membership?.membership_number ? { number: membership.membership_number, discountUsd: 0, discountKhr: 0, pointsRedeemed: 0 } : null,
+      membershipSnapshot: replacementMembershipNumber ? { number: replacementMembershipNumber, discountUsd: 0, discountKhr: 0, pointsRedeemed: 0 } : null,
     })
     replacementNotice = {
       status: 'completed', createdAt: occurredAt, receiptNumber: replacementReceiptNumber,
-      cashier: actorSnapshot(user), customer: replacementCustomerName, phone: saleMeta?.customer_phone || null,
+      cashier: actorSnapshot(user), customer: replacementCustomerName, phone: replacementCustomerPhone,
       branch: branchName, items: replacementLines.map((line) => ({ name: line.productName, quantity: line.quantity, unitPriceUsd: line.priceUsd, basePriceUsd: null, lineTotalUsd: line.totalUsd })),
       exchangeRate, isDelivery: false, deliveryFeeUsd: 0, deliveryPaidBy: null, driver: null,
       subtotalUsd, discountUsd: 0, taxUsd: 0, totalUsd: replacementTotals.totalUsd,
@@ -1312,13 +1333,16 @@ app.post('/', async (c) => {
   }
   const batchSnapshots = []
   for (const value of batchDeltas.values()) {
-    const row = await db.prepare(`SELECT pb.variant_product_id AS product_id,pb.is_active,COALESCE(bbs.quantity,0) quantity
+    const row = await db.prepare(`SELECT pb.variant_product_id AS product_id,pb.is_active,pb.lot_code,pb.expiry_date,COALESCE(bbs.quantity,0) quantity
       FROM product_batches pb LEFT JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id AND bbs.branch_id=? WHERE pb.id=?`)
-      .get<{ product_id: number; is_active: number; quantity: number }>([value.branch_id, value.batch_id])
+      .get<{ product_id: number; is_active: number; lot_code: string | null; expiry_date: string | null; quantity: number }>([value.branch_id, value.batch_id])
     if (!row || Number(row.product_id) !== value.product_id) return c.json({ error: 'A selected received date no longer belongs to this product', code: 'write_conflict' }, 409)
     const before = Number(row.quantity) || 0
     if (before + value.delta < 0) return c.json({ error: 'Replacement stock changed. Reload and try again.', code: 'write_conflict' }, 409)
-    batchSnapshots.push({ ...value, is_active: Number(row.is_active), before, after: before + value.delta })
+    batchSnapshots.push({
+      ...value, is_active: Number(row.is_active), lot_code: row.lot_code || '', expiry_date: row.expiry_date || '',
+      before, after: before + value.delta,
+    })
   }
   if (branchSnapshots.some((row) => row.after < 0)) {
     return c.json({ error: 'Replacement stock changed. Reload and try again.', code: 'write_conflict' }, 409)
@@ -1327,7 +1351,15 @@ app.post('/', async (c) => {
   const guardState = {
     sale: saleMeta ? { id: requestedSaleId, revision: saleMeta.write_revision, status: beforeSaleStatus, status_before_return: saleMeta.status_before_return || '' } : null,
     branch: branch ? { id: branch.id, name: branch.name || '', is_active: Number(branch.is_active || 0) } : null,
-    products: productIds.map((id) => ({ id, updated_at: productMap.get(id)?.updated_at || '' })),
+    products: productIds.map((id) => {
+      const product = productMap.get(id)
+      return {
+        id, updated_at: product?.updated_at || '', name: product?.name || '',
+        cost_price_usd: Number(product?.cost_price_usd) || 0, cost_price_khr: Number(product?.cost_price_khr) || 0,
+        selling_price_usd: Number(product?.selling_price_usd) || 0, selling_price_khr: Number(product?.selling_price_khr) || 0,
+      }
+    }),
+    customer: replacementCustomerGuard,
     branch_stock: branchSnapshots,
     batch_stock: batchSnapshots,
   }
@@ -1357,7 +1389,21 @@ app.post('/', async (c) => {
     ))
     AND NOT EXISTS(SELECT 1 FROM json_each(@guardJson,'$.products') j
       WHERE NOT EXISTS(SELECT 1 FROM products p WHERE p.id=json_extract(j.value,'$.id')
-        AND COALESCE(p.updated_at,'')=json_extract(j.value,'$.updated_at')))
+        AND COALESCE(p.updated_at,'')=json_extract(j.value,'$.updated_at')
+        AND COALESCE(p.name,'')=json_extract(j.value,'$.name')
+        AND COALESCE(p.cost_price_usd,0)=json_extract(j.value,'$.cost_price_usd')
+        AND COALESCE(p.cost_price_khr,0)=json_extract(j.value,'$.cost_price_khr')
+        AND COALESCE(p.selling_price_usd,0)=json_extract(j.value,'$.selling_price_usd')
+        AND COALESCE(p.selling_price_khr,0)=json_extract(j.value,'$.selling_price_khr')))
+    AND (json_type(@guardJson,'$.customer')='null' OR (
+      (json_extract(@guardJson,'$.customer.exists')=0 AND NOT EXISTS(
+        SELECT 1 FROM customers c WHERE c.id=json_extract(@guardJson,'$.customer.customer_id')
+      )) OR (json_extract(@guardJson,'$.customer.exists')=1 AND EXISTS(
+        SELECT 1 FROM customers c WHERE c.id=json_extract(@guardJson,'$.customer.customer_id')
+          AND COALESCE(c.is_anonymous,0)=json_extract(@guardJson,'$.customer.is_anonymous')
+          AND COALESCE(c.membership_number,'')=json_extract(@guardJson,'$.customer.membership_number')
+      ))
+    ))
     AND NOT EXISTS(SELECT 1 FROM json_each(@guardJson,'$.branch_stock') j
       WHERE COALESCE((SELECT quantity FROM branch_stock WHERE product_id=json_extract(j.value,'$.product_id')
         AND branch_id=json_extract(j.value,'$.branch_id')),0)!=json_extract(j.value,'$.before'))
@@ -1366,6 +1412,8 @@ app.post('/', async (c) => {
         ON bbs.batch_id=pb.id AND bbs.branch_id=json_extract(j.value,'$.branch_id')
         WHERE pb.id=json_extract(j.value,'$.batch_id') AND pb.variant_product_id=json_extract(j.value,'$.product_id')
           AND COALESCE(pb.is_active,0)=json_extract(j.value,'$.is_active')
+          AND COALESCE(pb.lot_code,'')=json_extract(j.value,'$.lot_code')
+          AND COALESCE(pb.expiry_date,'')=json_extract(j.value,'$.expiry_date')
           AND COALESCE(bbs.quantity,0)=json_extract(j.value,'$.before')))
   `
   const statements: Array<{ sql: string; params: Record<string, unknown> }> = [
@@ -1424,10 +1472,10 @@ app.post('/', async (c) => {
       params: {
         receipt_number: replacementReceiptNumber, replacementClientRequestId,
         cashier_id: authenticatedActorId, cashier_name: actorSnapshot(user), branch_id: branchId, branch_name: branchName,
-        customer_id: body.customer_id || saleMeta?.customer_id || null,
-        customer_name: body.customer_name || saleMeta?.customer_name || null,
-        customer_phone: saleMeta?.customer_phone || null,
-        customer_address: contactDisplayAddress(saleMeta?.customer_address) || null,
+        customer_id: replacementCustomerId,
+        customer_name: replacementCustomerName,
+        customer_phone: replacementCustomerPhone,
+        customer_address: replacementCustomerAddress,
         payment_method: replacementPaymentMethod, payment_details: JSON.stringify(paymentDetails), exchange_rate: exchangeRate,
         subtotal_usd: subtotalUsd, subtotal_khr: replacementTotals.totalKhr,
         total_usd: replacementTotals.totalUsd, total_khr: replacementTotals.totalKhr,
@@ -1440,7 +1488,7 @@ app.post('/', async (c) => {
         }))),
         search_normalized: normalizeSearchText([
           replacementReceiptNumber, returnNumber, originalReceipt, actorSnapshot(user),
-          body.customer_name || saleMeta?.customer_name, branchName, ...replacementLines.map((line) => line.productName),
+          replacementCustomerName, branchName, ...replacementLines.map((line) => line.productName),
         ].filter(Boolean).join(' ')),
         returnClientRequestId: clientRequestId,
       },
