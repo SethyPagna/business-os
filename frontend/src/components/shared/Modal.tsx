@@ -1,7 +1,7 @@
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { useRef, useState, type PointerEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { useApp as useAppHook } from '../../AppContext.tsx'
+import { useApp as useAppHook } from '../../app/AppContextCore.tsx'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
 import type { DraftPreservingMinimize, UnsavedChangesDeclaration } from '../../utils/closeGuard.ts'
 import { ModalCloseContext } from './modalCloseContext.ts'

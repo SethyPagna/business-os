@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import { neutralPrimitiveChunk } from '../build/chunkBoundaries.ts'
 
 const app = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 const appContext = fs.readFileSync(new URL('../src/AppContext.tsx', import.meta.url), 'utf8')
@@ -350,7 +351,7 @@ assert.match(catalogPreviewSurface, /import '..\/..\/styles\/public-portal\.css'
 assert.match(publicPortalCss, /business-os-portal-translate-widget[\s\S]*portal-contact-value[\s\S]*portal-nav-tab-active/, 'public portal stylesheet should own portal contact, navigation, and translate-widget rules')
 assert.doesNotMatch(mainCss, /portal-contact-value|portal-nav-tab-active|business-os-portal-translate-widget/, 'global startup CSS should not include public portal route-only rules')
 assert.match(viteConfig, /modulePreload:\s*false/, 'Vite generic modulepreload injection should stay disabled so public startup does not import the helper from the app-auth chunk')
-assert.match(viteConfig, /includes\('vite\/preload-helper'\)[\s\S]*return 'vendor'/, 'Vite preload helper should stay in the neutral vendor chunk instead of the admin auth chunk')
+assert.equal(neutralPrimitiveChunk('\0vite/preload-helper.js'), 'app-routing', 'Vite preload helper should share the neutral routing runtime without loading unrelated vendor libraries')
 assert.match(webApi, /const INITIAL_OFFLINE_MAINTENANCE_DELAY_MS = 45_000/, 'offline queue and snapshot maintenance should stay out of the first-load network window')
 assert.match(webApi, /const INITIAL_OFFLINE_MAINTENANCE_IDLE_TIMEOUT_MS = 60_000/, 'initial offline maintenance should still run during a long-lived authenticated session')
 assert.match(webApi, /const BOOTSTRAP_STORAGE_MAINTENANCE_DELAY_MS = 2200/, 'bootstrap storage cleanup and persistence should be delayed past first paint')
