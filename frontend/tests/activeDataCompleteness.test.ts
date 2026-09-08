@@ -48,7 +48,19 @@ test('Sales export top-products aggregate is independent of the bounded preview 
   const exportStart = src.indexOf("app.get('/export',")
   const exportEnd = src.indexOf('\n})\n\nexport default app', exportStart)
   const route = src.slice(exportStart, exportEnd)
-  assert.match(route, /FROM sale_items si\s+JOIN sales s ON s\.id = si\.sale_id[\s\S]*GROUP BY si\.product_id, si\.product_name[\s\S]*LIMIT 100/, 'top products rank the full filtered period directly in SQL')
+  const productStart = route.indexOf('const productRows = await db.prepare(`')
+  const productEnd = route.indexOf('const byStatusRows = await db.prepare(`', productStart)
+  const productQuery = route.slice(productStart, productEnd)
+  assert.ok(productStart >= 0 && productEnd > productStart, 'export keeps a dedicated server-side product aggregate')
+  assert.match(productQuery, /WITH sale_product_lines AS \([\s\S]*FROM sale_items si\s+JOIN sales s ON s\.id = si\.sale_id[\s\S]*WHERE \$\{snapshotWhere\.join\(' AND '\)\}[\s\S]*GROUP BY si\.sale_id, si\.product_id, si\.product_name/, 'product lines aggregate from the full frozen filtered period')
+  assert.match(productQuery, /ranked_products AS \([\s\S]*FROM product_totals[\s\S]*WHERE rp\.rank <= lim\.named_limit[\s\S]*SUM\(rp\.revenue_usd\)[\s\S]*WHERE rp\.rank > lim\.named_limit/, 'the bounded preview ranks after full-period aggregation and retains overflow as Other products')
+  assert.doesNotMatch(productQuery, /\bpageRows\b|\bsaleIds\b/, 'product totals must not inherit the current detail page')
+
+  const fullSchemaCoverage = worker('scripts/test-sales-export-preview-revenue-pure.cjs')
+  assert.match(fullSchemaCoverage, /const db = openDb\(loadAll\(\)\)/, 'the executable export regression uses the full migrated schema')
+  assert.match(fullSchemaCoverage, /const app = load\('routes\/sales\.ts'\)\.default/, 'the executable regression drives the real Sales export route')
+  assert.match(fullSchemaCoverage, /crowded\.by_product\.some\(\(row\) => row\.product_name === 'Other products'\)/, 'the executable regression covers bounded overflow without losing full-period revenue')
+  assert.match(fullSchemaCoverage, /sum\(crowded\.by_product, 'revenue_usd'\), crowded\.summary\.net_revenue_usd/, 'the executable regression reconciles every preview bucket to the full-period headline')
 })
 
 if (failed) { console.error(`\n${failed} active-data completeness test(s) failed`); process.exit(1) }
