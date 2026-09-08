@@ -1,7 +1,7 @@
 import type { ChangeEvent, ComponentProps, ComponentType, ReactNode } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { fmtDateTime24 } from '../../utils/formatters.ts'
-import { Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import CheckSquare from 'lucide-react/dist/esm/icons/check-square.js'
 import Copy from 'lucide-react/dist/esm/icons/copy.js'
 import Download from 'lucide-react/dist/esm/icons/download.js'
@@ -27,6 +27,7 @@ import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.ts'
 import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.ts'
+import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import { getSyncServerUrl } from '../../api/http.ts'
 import { logicalAssetDisplayName, logicalAssetDownloadPath, logicalAssetKey } from './libraryLogicalRows.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
@@ -247,7 +248,10 @@ type FilesResponsesTabProps = {
 }
 
 interface FilesApi {
-  getFiles: (options: { search: string; mediaType: MediaTypeFilter; page: number; pageSize: number; includeMeta: boolean }) => Promise<FilesResponse>
+  getFiles: (
+    options: { search: string; mediaType: MediaTypeFilter; page: number; pageSize: number; includeMeta: boolean; includeStorageMeta?: boolean },
+    requestOptions?: { searchGroup?: string },
+  ) => Promise<FilesResponse>
   uploadFileAsset: (payload: { file: File; userId?: string | number; userName?: string; compressOptions?: typeof LIBRARY_IMAGE_COMPRESS_OPTIONS }) => Promise<unknown>
   deleteFileAsset: (id: string | number, options: { expectedUpdatedAt?: string; force?: boolean; confirmText?: string }) => Promise<unknown>
   renameFileAsset: (id: string | number, originalName: string) => Promise<unknown>
@@ -676,7 +680,10 @@ export default function FilesPage() {
   const [files, setFiles] = useState<FileAsset[]>([])
   const [search, setSearch] = useState('')
   const [mediaType, setMediaType] = useState<MediaTypeFilter>('all')
-  const deferredSearch = useDeferredValue(search)
+  // Keep typing immediate while waiting for a real trailing pause before
+  // issuing the expensive logical-library search. The transport's scoped
+  // group then aborts an already-started assets-page request only.
+  const deferredSearch = useDebouncedValue(search, 180)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(() => getDefaultFilesPageSize())
   const [totalFiles, setTotalFiles] = useState(0)
@@ -884,9 +891,10 @@ export default function FilesPage() {
     }
   }, [notify])
 
-  const loadFiles = useCallback(async () => {
+  const loadFiles = useCallback(async ({ refreshMeta = false }: { refreshMeta?: boolean } = {}) => {
     const requestId = beginTrackedRequest(fileLoadRequestRef)
     setLoadingFiles(true)
+    const includeMeta = refreshMeta || !filesLoadedOnceRef.current
     try {
       const result = await withLoaderTimeout(() => filesApi.getFiles({
         search: deferredSearch,
@@ -894,6 +902,9 @@ export default function FilesPage() {
         page,
         pageSize,
         includeMeta: true,
+        includeStorageMeta: includeMeta,
+      }, {
+        searchGroup: 'files:library-assets',
       }), 'Files library', FILES_LIBRARY_LOAD_TIMEOUT_MS)
       if (!isTrackedRequestCurrent(fileLoadRequestRef, requestId)) return
       // A malformed/transient response must not erase a library that is
@@ -906,7 +917,7 @@ export default function FilesPage() {
       const nextFiles = result.items
       setFiles(nextFiles)
       setTotalFiles(Number(result?.total || nextFiles.length || 0))
-      setPhysicalStorage(result.physicalStorage || null)
+      if (includeMeta) setPhysicalStorage(result.physicalStorage || null)
       filesLoadedOnceRef.current = true
       setSelectedAssetIds((current) => {
         const validIds = new Set(nextFiles.map(logicalAssetKey))
@@ -1038,7 +1049,7 @@ export default function FilesPage() {
     if (!isActive || !syncChannel) return undefined
     const channel = String(syncChannel.channel || '')
     if (channel === 'files' || channel === 'users') {
-      void loadFiles()
+      void loadFiles({ refreshMeta: true })
       if (activeTab === 'responses') void loadResponses('AI responses refresh')
     }
     if ((channel === 'files' || channel === 'settings') && activeTab === 'providers') {
@@ -1071,7 +1082,7 @@ export default function FilesPage() {
         FILES_ASSET_UPLOAD_TIMEOUT_MS,
       )
       notify(tr('upload_complete', 'Upload complete'), 'success')
-      await loadFiles()
+      await loadFiles({ refreshMeta: true })
     } catch (error) {
       notify(getErrorMessage(error, 'Upload failed'), 'error')
     } finally {
@@ -1116,7 +1127,7 @@ export default function FilesPage() {
       setDeleteConfirmAsset(null)
       setDeleteConfirmText('')
       setDeleteUnlockChecked(false)
-      await loadFiles()
+      await loadFiles({ refreshMeta: true })
     } catch (error) {
       notify(getErrorMessage(error, 'Delete failed'), 'error')
     } finally {
@@ -1172,7 +1183,7 @@ export default function FilesPage() {
       notify(tr('file_renamed', 'File renamed'), 'success')
       setRenamingAssetId(null)
       setRenameDraft('')
-      await loadFiles()
+      await loadFiles({ refreshMeta: true })
     } catch (error) {
       notify(getErrorMessage(error, 'Rename failed'), 'error')
     } finally {
@@ -1256,7 +1267,7 @@ export default function FilesPage() {
       setSelectedAssetIds(new Set())
       setBulkDeleteConfirmOpen(false)
       setBulkDeleteConfirmText('')
-      await loadFiles()
+      await loadFiles({ refreshMeta: true })
     } catch (error) {
       notify(getErrorMessage(error, 'Bulk delete failed'), 'error')
     } finally {
@@ -1809,7 +1820,7 @@ export default function FilesPage() {
           canManage={canManageLibrary}
           notify={notify}
           filesApi={filesApi}
-          onRewired={() => { void loadFiles() }}
+          onRewired={() => { void loadFiles({ refreshMeta: true }) }}
           tr={tr}
         />
       ) : null}
