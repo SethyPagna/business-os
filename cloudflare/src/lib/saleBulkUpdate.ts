@@ -218,7 +218,13 @@ function referenceGuard(action: SaleBulkUpdateAction, state: Row): StockStatemen
 function referenceState(action: SaleBulkUpdateAction, row: Row | null): Row | null {
   if (!row || action.kind === 'payment_method') return null
   if (action.kind === 'customer') {
-    return { customer_id: row.id, customer_name: row.name ?? null, customer_phone: row.phone ?? null, customer_address: row.address ?? null }
+    return {
+      customer_id: row.id,
+      customer_name: row.name ?? null,
+      customer_phone: row.phone ?? null,
+      customer_address: row.address ?? null,
+      membership_number: row.membership_number ?? null,
+    }
   }
   return {
     delivery_contact_id: row.id,
@@ -312,7 +318,7 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, raw: Row)
   let sourceReference: Row | null = null
   if (sourceMatchedIds.length && request.action.kind !== 'payment_method' && request.action.source_id !== null) {
     const table = request.action.kind === 'customer' ? 'customers' : 'delivery_contacts'
-    const columns = request.action.kind === 'customer' ? 'id,name,phone,address' : 'id,name,phone,area,address'
+    const columns = request.action.kind === 'customer' ? 'id,name,membership_number,phone,address' : 'id,name,phone,area,address'
     sourceReference = await db.prepare(`SELECT ${columns} FROM ${table} WHERE id=?`).get<Row>([request.action.source_id]) || null
     if (!sourceReference) fail('Source linked record was not found.', 400)
   }
@@ -369,11 +375,19 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, raw: Row)
       } : { ...before }
     } else {
       sourceMatched = matchedAtRead
-      before = { customer_id: sale.customer_id ?? null, customer_name: sale.customer_name ?? null, customer_phone: sale.customer_phone ?? null, customer_address: sale.customer_address ?? null, search_normalized: sale.search_normalized ?? null }
+      before = {
+        customer_id: sale.customer_id ?? null,
+        customer_name: sale.customer_name ?? null,
+        customer_phone: sale.customer_phone ?? null,
+        customer_address: sale.customer_address ?? null,
+        membership_number: sourceReference?.membership_number ?? null,
+        search_normalized: sale.search_normalized ?? null,
+      }
       after = sourceMatched ? {
         customer_id: targetCustomer?.id ?? null,
         customer_name: targetCustomer?.name ?? null,
         customer_phone: targetCustomer?.phone ?? null,
+        membership_number: targetCustomer?.membership_number ?? null,
         // N21: the sale stores the DISPLAY address, not the Contact Options
         // JSON in customers.address. referenceState/referenceGuard above keep
         // using the RAW column: they assert the customer row has not changed
