@@ -6284,5 +6284,8 @@
   "selected_conflict_blocked": "Blocked",
   "selected_conflict_review_complete": "Complete",
   "selected_conflict_remove_unavailable": "Remove unavailable",
-  "selected_conflict_remove_phase_notice": "Remove is unavailable until its stock clearing, history preservation, audit, and Undo path is complete."
+  "selected_conflict_remove_phase_notice": "Remove is unavailable until its stock clearing, history preservation, audit, and Undo path is complete.",
+  "selected_conflict_received_quantity": "Received quantity",
+  "selected_conflict_received_cost": "Received cost",
+  "selected_conflict_payment_status": "Payment status"
 }

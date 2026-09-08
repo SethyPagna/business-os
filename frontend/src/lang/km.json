@@ -6284,5 +6284,8 @@
   "selected_conflict_blocked": "បានរារាំង",
   "selected_conflict_review_complete": "រួចរាល់",
   "selected_conflict_remove_unavailable": "មិនទាន់អាចលុបបាន",
-  "selected_conflict_remove_phase_notice": "មិនទាន់អាចលុបបានទេ រហូតដល់ការសម្អាតស្តុក ការរក្សាប្រវត្តិ កំណត់ត្រាសវនកម្ម និងដំណើរការមិនធ្វើវិញរួចរាល់។"
+  "selected_conflict_remove_phase_notice": "មិនទាន់អាចលុបបានទេ រហូតដល់ការសម្អាតស្តុក ការរក្សាប្រវត្តិ កំណត់ត្រាសវនកម្ម និងដំណើរការមិនធ្វើវិញរួចរាល់។",
+  "selected_conflict_received_quantity": "បរិមាណដែលបានទទួល",
+  "selected_conflict_received_cost": "ថ្លៃដើមពេលទទួល",
+  "selected_conflict_payment_status": "ស្ថានភាពការទូទាត់"
 }

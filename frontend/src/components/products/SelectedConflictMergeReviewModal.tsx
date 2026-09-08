@@ -450,6 +450,7 @@ function GroupReviewCard({ group, choice, onChoice, t }: {
                     <p className="text-[11px] text-gray-500 dark:text-gray-400">{member.category || tr('selected_conflict_blank', 'Blank')} · {member.brand || tr('selected_conflict_blank', 'Blank')} · {member.unit || tr('selected_conflict_blank', 'Blank')}</p>
                     <p className="text-[11px] text-gray-500 dark:text-gray-400">{tr('cost_price', 'Cost')}: {optionalMoney(member.cost_price_usd, fmtUSD, tr('unknown', 'Unknown'))} · {optionalMoney(member.cost_price_khr, fmtKHR, tr('unknown', 'Unknown'))}</p>
                     <p className="text-[11px] text-gray-500 dark:text-gray-400">{tr('selling_price', 'Selling price')}: {optionalMoney(member.selling_price_usd, fmtUSD, tr('unknown', 'Unknown'))} · {optionalMoney(member.selling_price_khr, fmtKHR, tr('unknown', 'Unknown'))}</p>
+                    <p className="text-[11px] text-gray-500 dark:text-gray-400">{tr('wholesale_price', 'Wholesale price')}: {optionalMoney(member.wholesale_price_usd, fmtUSD, tr('unknown', 'Unknown'))} · {optionalMoney(member.wholesale_price_khr, fmtKHR, tr('unknown', 'Unknown'))}</p>
                   </div>
                 </div>
                 <div className="mt-2 space-y-0.5 text-[11px] text-gray-600 dark:text-gray-300">
@@ -458,6 +459,8 @@ function GroupReviewCard({ group, choice, onChoice, t }: {
                     <div key={`${lot.batch_id}-${lot.branch_id}`} className="rounded bg-gray-100 p-1.5 dark:bg-zinc-800">
                       {tr('batch', 'Batch')} {lot.lot_code || lot.batch_key} · {lot.branch_id == null ? tr('unknown', 'Unknown') : (stockRows.find((row) => row.branch_id === lot.branch_id)?.branch_name || `#${lot.branch_id}`)} · {lot.quantity ?? tr('unknown', 'Unknown')}
                       <br />{tr('supplier', 'Supplier')}: {lot.supplier_name || tr('unknown', 'Unknown')} · {tr('received_date', 'Received date')}: {lot.received_at || tr('unknown', 'Unknown')} · {tr('expiry_date', 'Expiry date')}: {lot.expiry_date || tr('unknown', 'Unknown')}
+                      <br />{tr('selected_conflict_received_quantity', 'Received quantity')}: {lot.received_quantity ?? tr('unknown', 'Unknown')} · {tr('selected_conflict_received_cost', 'Received cost')}: {optionalMoney(lot.received_cost_usd ?? lot.unit_cost_usd, fmtUSD, tr('unknown', 'Unknown'))}
+                      <br />{tr('selected_conflict_payment_status', 'Payment status')}: {lot.payment_status || tr('unknown', 'Unknown')} · {tr('due_date', 'Due date')}: {lot.credit_due_date || tr('unknown', 'Unknown')} · {lot.is_active ? tr('active', 'Active') : tr('inactive', 'Inactive')}
                     </div>
                   ))}
                 </div>
