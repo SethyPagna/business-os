@@ -1,3 +1,9 @@
+## Owner confirmed shared General identity — September 9
+
+Owner confirmed customer 24969 is the shared walk-in/General customer. Mark only this identity through a guarded repair after paired anonymous-marker code is verified and deployed. Preserve its transaction history and historical membership value while disabling membership use. Customer 22305 remains unmarked. No production identity mutation has occurred. Unknown-phone inline creation remains a separate unanswered question.
+
+Live remains 2767fbf4. F65 frontend 330/330 passes at ab08474f; backend harness repairs/full rerun and final-head review remain before deployment. All 102 tasks retained.
+
 ## Active release gates and identity clarification — September 9
 
 Live2767fbf4 remains verified100%;102 tasks retained. F65 combined global merge/remove UI and backend are reconciled; delete-permission gate0318fbae passes, missing0138 durable backup/reset integration under repair before real-backend browser/finalrelease gates. F74 reader/typedENKM UI/settlement/bulk and directreturneditbd0ab24e independentlyPASS. Stablefrontend request lifecycle/history/revision repairs still active; return-create event race reverted, directcustomer and contacts/settings rewrite coverage notyetcomplete.0140unapplied.
