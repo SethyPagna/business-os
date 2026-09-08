@@ -1464,7 +1464,7 @@ export default function SaleDetailModal({
             </SectionCard>
 
             <SectionCard title={t('customer') || 'Customer'}>
-              {onCustomerAction ? <div className="mb-3 flex justify-end"><button type="button" className="btn-secondary text-xs" onClick={() => onCustomerAction(sale)}>{t('sale_customer_actions') || 'Customer actions'}</button></div> : null}
+              {onCustomerAction ? <div className="mb-3 flex justify-end"><button type="button" className="btn-secondary text-xs" onClick={() => onCustomerAction(sale)}>{t('sale_customer_edit_entry') || 'Edit customer'}</button></div> : null}
               <DetailRowGroup>
                 <DetailRow label={t('customer_name') || 'Customer'} value={sale.customer_name} />
                 <DetailRow label={t('phone') || 'Phone'} value={sale.customer_phone} />
