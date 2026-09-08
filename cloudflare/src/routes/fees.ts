@@ -551,8 +551,9 @@ app.put('/:id', async (c) => {
   // concurrent editor can change the row in that interval; zero affected
   // rows means this request lost that race and must not emit audit/broadcast
   // side effects for a write that never happened.
-  if (expectedUpdatedAt && updateResult.changes === 0) {
+  if (updateResult.changes === 0) {
     const current = await db.prepare(`SELECT * FROM fees WHERE id = @id`).get<FeeRow>({ id })
+    if (!expectedUpdatedAt) return c.json({ error: current ? 'Fee was not updated' : 'Fee not found' }, current ? 409 : 404)
     const conflict = new WriteConflictError('fee', current || null, expectedUpdatedAt, current ? 'updated' : 'deleted')
     const { body: conflictBody, status } = writeConflictResponse(conflict)
     return c.json(conflictBody, status)
