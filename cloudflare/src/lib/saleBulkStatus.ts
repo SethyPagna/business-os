@@ -9,6 +9,8 @@ import { bumpVersion } from './cache';
 import { broadcast } from '../durable-objects/broadcastHub';
 import { actorSnapshot } from './actorSnapshot';
 import { branchCanSell } from './branchRoles';
+import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from './saleRecordEvents';
+import type { SaleRecordChange, SaleRecordValueState } from './saleRecords';
 export const BULK_STATUS_KIND = 'sale.status.bulk';
 export const BULK_STATUS_LIMIT = 25;
 export const BULK_STATUS_MOVEMENT_LIMIT = 256;
@@ -187,9 +189,36 @@ async function rowsIn<T>(db: D1Compat, ids: number[], sql: (marks: string) => st
     return db.prepare(sql(ids.map(() => '?').join(','))).all<T>(ids);
 }
 function scalar(row: Row): Row { return Object.fromEntries(fields.map(k => [k, row[k] ?? null])); }
-function bounded(statements: StockStatement[], snapshot: Snapshot) {
-    if (statements.length > 500 || new TextEncoder().encode(JSON.stringify(snapshot)).length > 512000)
+function bounded(statements: StockStatement[], snapshot: Snapshot, eventsBytes = 0) {
+    try {
+        assertSaleRecordBatchBounds(statements.length, snapshot, eventsBytes);
+    }
+    catch (_) {
         throw new SaleBulkError('Selection is too large for one atomic action. Select fewer sales.', 400);
+    }
+}
+function recordState(value: unknown): SaleRecordValueState {
+    return value === null || value === undefined ? { state: 'known_none' } : { state: 'known_value', value };
+}
+function statusChanges(before: Row, after: Row, cancelled: boolean): SaleRecordChange[] {
+    const keys = cancelled ? ['sale_status', 'cancel_reason', 'cancel_note'] as const : ['sale_status'] as const;
+    return keys.flatMap(field => {
+        const left = recordState(before[field]), right = recordState(after[field]);
+        return JSON.stringify(left) === JSON.stringify(right) ? [] : [{ field, before: left, after: right }];
+    });
+}
+function statusRecordEvents(members: Member[], operationId: string, generation: number, via: 'apply' | 'undo' | 'redo', user: SessionUser, stamp: string) {
+    return buildSaleRecordEventsInsert(members.filter(member => member.changed).map(member => {
+        const before = via === 'undo' ? member.after : member.before;
+        const after = via === 'undo' ? member.before : member.after;
+        const cancelled = before.sale_status === 'cancelled' || after.sale_status === 'cancelled';
+        return {
+            saleId: member.id, sourceKind: 'sale_bulk_status' as const, sourceId: operationId, generation,
+            kind: cancelled ? 'cancelled' as const : 'status_changed' as const, via,
+            subject: member.receipt, actorId: user.id, actorUsername: actorSnapshot(user), occurredAt: stamp,
+            changes: statusChanges(before, after, cancelled),
+        };
+    }));
 }
 function stockStatements(member: Member, sign: number, user: SessionUser, stamp: string): StockStatement[] {
     const out: StockStatement[] = [];
@@ -433,6 +462,9 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
     const statements: StockStatement[] = [...guards, { sql: 'INSERT INTO sale_bulk_operations(id,actor_id,request_id,request_json,receipt_json) VALUES(@id,@actor,@request,@canonical,@receipt)', params: { id: operationId, actor: user.id, request: request.client_request_id, canonical, receipt: JSON.stringify(receipt) } }];
     for (const m of members)
         statements.push(...memberStatements(m, 1, user, stamp));
+    const recordEvents = statusRecordEvents(members, operationId, 0, 'apply', user, stamp);
+    if (recordEvents)
+        statements.push(recordEvents.statement);
     statements.push({ sql: 'INSERT INTO undo_snapshots(kind,payload_json,created_by_id,created_by_name) VALUES(@kind,@payload,@actor,@name)', params: { kind: BULK_STATUS_KIND, payload: JSON.stringify(snapshot), actor: user.id, name: actorSnapshot(user) } });
     statements.push({ sql: 'UPDATE sale_bulk_operations SET snapshot_id=last_insert_rowid() WHERE id=@id', params: { id: operationId } });
     const historyStatementIndex = statements.length;
@@ -441,7 +473,7 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
     for (const m of members.filter(member => member.changed))
         statements.push({ sql: `INSERT INTO sale_bulk_members(operation_id,sale_id,revision,movement_fingerprint) VALUES(@op,@id,COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@id),0),${saleMovementFingerprint('@id')})`, params: { op: operationId, id: m.id } });
     statements.push(auditStatement(user, operationId, 'sale_status_bulk', changedIds.length), { sql: 'DELETE FROM sale_bulk_guards', params: {} });
-    bounded(statements, snapshot);
+    bounded(statements, snapshot, recordEvents?.eventsBytes || 0);
     try {
         const results = await db.batch(statements);
         return { ...receipt, actionHistoryId: Number(results[historyStatementIndex].meta.last_row_id) };
@@ -472,13 +504,17 @@ export async function replaySaleBulkStatus(env: Env, user: SessionUser, directio
         statements.push(bulkAssertion(`EXISTS(SELECT 1 FROM sales s JOIN sale_bulk_members m ON m.sale_id=s.id WHERE m.operation_id=@op AND s.id=@id AND m.revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=s.id),0) AND m.movement_fingerprint=${saleMovementFingerprint('s.id')})`, { op: op.id, id: m.id }));
     for (const m of snapshot.members)
         statements.push(...memberStatements(m, sign, user, stamp));
+    const nextGeneration = Number(generation) + 1;
+    const recordEvents = statusRecordEvents(snapshot.members, String(op.id), nextGeneration, direction, user, stamp);
+    if (recordEvents)
+        statements.push(recordEvents.statement);
     for (const m of snapshot.members.filter(member => member.changed))
         statements.push({ sql: `UPDATE sale_bulk_members SET revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@id),0),movement_fingerprint=${saleMovementFingerprint('@id')} WHERE operation_id=@op AND sale_id=@id`, params: { op: op.id, id: m.id } });
     statements.push({ sql: 'UPDATE sale_bulk_operations SET generation=generation+1 WHERE id=@op', params: { op: op.id } });
     statements.push({ sql: 'UPDATE undo_snapshots SET status=@status,updated_at=@stamp WHERE id=@id', params: { id: op.snapshot_id, status: direction === 'undo' ? 'reversed' : 'applied', stamp } });
     statements.push({ sql: "UPDATE action_history SET status=@status,last_error=NULL,updated_at=@stamp,undo_payload=json_set(undo_payload,'$.generation',@generation),redo_payload=json_set(redo_payload,'$.generation',@generation) WHERE id=@id", params: { id: historyId, status: next, stamp, generation: Number(generation) + 1 } });
     statements.push(auditStatement(user, String(op.id), `action_${direction}`, snapshot.members.filter(m => m.changed).length), { sql: 'DELETE FROM sale_bulk_guards', params: {} });
-    bounded(statements, snapshot);
+    bounded(statements, snapshot, recordEvents?.eventsBytes || 0);
     try {
         await db.batch(statements);
     }

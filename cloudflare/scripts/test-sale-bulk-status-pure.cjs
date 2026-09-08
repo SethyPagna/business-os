@@ -5,9 +5,10 @@ const assert = require('node:assert/strict')
 const ts = require('typescript')
 const Database = require('better-sqlite3')
 const root = path.join(__dirname, '..')
+const recordContract = JSON.parse(fs.readFileSync(path.join(root, '..', 'outputs', 'takeover-20260908', 'f74-sales-records-backend-contract.json'), 'utf8'))
 let user = { id: 1, name: 'Admin', username: 'admin', role_code: 'admin', permissions: { all: true } }
 const cache = new Map()
-const actual = new Set(['actorSnapshot','movementBranchName','db','permissions','saleBulkStatus','saleBulkUpdate','saleTransitions','saleTotals','sqlBinding','productBatches','batchCode','salesStatus','undoAppliers','branchWrites','branchRoles','conflictControl','searchMatch'])
+const actual = new Set(['actorSnapshot','movementBranchName','db','permissions','saleBulkStatus','saleBulkUpdate','saleRecordEvents','saleTransitions','saleTotals','sqlBinding','productBatches','batchCode','salesStatus','undoAppliers','branchWrites','branchRoles','conflictControl','searchMatch'])
 function load(rel) {
   if (cache.has(rel)) return cache.get(rel).exports
   const mod = { exports: {} }; cache.set(rel,mod)
@@ -20,6 +21,7 @@ function load(rel) {
     if (name.endsWith('/broadcastHub')) return {broadcast:async()=>{}}
     if (name.endsWith('/audit')) return {audit:async()=>{}}
     if (name.endsWith('/telegram')) return {formatSaleTelegramLines:()=>[],sendTelegramEvent:async()=>{},telegramMoney:()=>''}
+    if (rel.endsWith('saleRecordEvents.ts') && name === './saleRecords') return { SALE_RECORD_FIELDS: recordContract.fields, SALE_RECORD_KINDS: recordContract.kinds }
     if (name.startsWith('.')) {
       const target=path.posix.normalize(path.posix.join(path.posix.dirname(rel),name))+'.ts'
       if(actual.has(path.posix.basename(name))) return load(target)
@@ -67,7 +69,7 @@ function request(f,target='completed',key='request-0001') {
   return {client_request_id:key,target_status:target,items:f.sql.prepare('SELECT id,sale_status expected_status,updated_at expected_updated_at FROM sales ORDER BY id').all(),...(target==='cancelled'?{cancel_reason:'mistake'}:{})}
 }
 function snapshot(f) {
-  return JSON.stringify(['sales','sale_items','products','branch_stock','branch_batch_stock','sale_item_batch_allocations','damaged_stock_lots','fees','inventory_movements','undo_snapshots','action_history','sale_bulk_operations','sale_bulk_members','sale_write_revisions','audit_logs'].map(t=>[t,f.sql.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all()]))
+  return JSON.stringify(['sales','sale_items','products','branch_stock','branch_batch_stock','sale_item_batch_allocations','damaged_stock_lots','fees','inventory_movements','undo_snapshots','action_history','sale_bulk_operations','sale_bulk_members','sale_record_events','sale_write_revisions','audit_logs'].map(t=>[t,f.sql.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all()]))
 }
 async function replay(f,id,direction='undo',generation=0) {return f.call(history,`/${id}/${direction}`,{require_applied:true,expected_generation:generation})}
 async function run() {
@@ -110,6 +112,12 @@ async function run() {
   assert.equal((await replay(f,h)).status,200)
   assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM sales WHERE sale_status='awaiting_payment'").get().n,7)
   assert.equal((await replay(f,h,'redo',1)).status,200)
+  const recordEvents=f.sql.prepare('SELECT generation,kind,via,COUNT(*) n FROM sale_record_events GROUP BY generation,kind,via ORDER BY generation').all()
+  assert.deepEqual(recordEvents,[
+    {generation:0,kind:'status_changed',via:'apply',n:7},
+    {generation:1,kind:'status_changed',via:'undo',n:7},
+    {generation:2,kind:'status_changed',via:'redo',n:7},
+  ])
   console.log('PASS one request, seven changes/two noops, one group, reload undo/redo')
   f=fixture();seed(f)
   const req=request(f,'cancelled'),first=await f.call(sales,'/bulk-status',req)

@@ -18,6 +18,8 @@ import {
 import type { StockStatement } from './saleTransitions'
 import { actorSnapshot } from './actorSnapshot'
 import { contactDisplayAddress } from './contactOptions'
+import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from './saleRecordEvents'
+import type { SaleRecordChange, SaleRecordKind, SaleRecordValueState } from './saleRecords'
 
 export const BULK_UPDATE_KIND = 'sale.fields.bulk'
 export const BULK_CUSTOMER_UPDATE_KIND = 'sale.customer.bulk'
@@ -133,10 +135,83 @@ async function rowsIn<T>(db: D1Compat, ids: number[], sql: (marks: string) => st
   return db.prepare(sql(ids.map(() => '?').join(','))).all<T>(ids)
 }
 
-function bounded(statements: StockStatement[], snapshot: BulkUpdateSnapshot): void {
-  if (statements.length > 500 || new TextEncoder().encode(JSON.stringify(snapshot)).length > 512000) {
+function bounded(statements: StockStatement[], snapshot: BulkUpdateSnapshot, eventsBytes = 0): void {
+  try {
+    assertSaleRecordBatchBounds(statements.length, snapshot, eventsBytes)
+  } catch (_) {
     fail('Selection is too large for one atomic action. Select fewer sales.', 400)
   }
+}
+
+function recordState(value: unknown): SaleRecordValueState {
+  return value === null || value === undefined ? { state: 'known_none' } : { state: 'known_value', value }
+}
+
+function customerState(row: Row): SaleRecordValueState {
+  const id = row.customer_id == null ? null : Number(row.customer_id)
+  const name = String(row.customer_name || '').trim() || null
+  return id === null && name === null ? { state: 'known_none' } : { state: 'known_value', value: { id, name } }
+}
+
+function membershipState(row: Row): SaleRecordValueState {
+  const number = String(row.membership_number || '').trim() || null
+  return number === null ? { state: 'known_none' } : { state: 'known_value', value: {
+    number, discount_usd: null, discount_khr: null, points_redeemed: null,
+  } }
+}
+
+function driverState(row: Row): SaleRecordValueState {
+  const id = row.delivery_contact_id == null ? null : Number(row.delivery_contact_id)
+  const name = String(row.delivery_contact_name || '').trim() || null
+  const phone = String(row.delivery_contact_phone || '').trim() || null
+  const address = String(row.delivery_contact_address || '').trim() || null
+  return id === null && name === null && phone === null && address === null
+    ? { state: 'known_none' }
+    : { state: 'known_value', value: { id, name, phone, address } }
+}
+
+function paymentDetailsState(value: unknown): SaleRecordValueState {
+  if (value === null || value === undefined || value === '') return { state: 'known_none' }
+  try {
+    const parsed = typeof value === 'string' ? JSON.parse(value) : value
+    if (!Array.isArray(parsed) || parsed.length > 20) return { state: 'unknown' }
+    const normalized = parsed.map((entry) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new Error('invalid')
+      const row = entry as Row
+      const method = String(row.method || '').trim()
+      const amountUsd = Number(row.amount_usd)
+      const amountKhr = Number(row.amount_khr)
+      if (!method || !Number.isFinite(amountUsd) || !Number.isFinite(amountKhr)) throw new Error('invalid')
+      return { method, amount_usd: amountUsd, amount_khr: amountKhr }
+    })
+    return { state: 'known_value', value: normalized }
+  } catch (_) {
+    return { state: 'unknown' }
+  }
+}
+
+function updateChanges(action: SaleBulkUpdateAction, before: Row, after: Row): SaleRecordChange[] {
+  const pairs: Array<{ field: SaleRecordChange['field']; before: SaleRecordValueState; after: SaleRecordValueState }> = action.kind === 'customer'
+    ? [{ field: 'customer', before: customerState(before), after: customerState(after) }, { field: 'membership', before: membershipState(before), after: membershipState(after) }]
+    : action.kind === 'delivery_contact'
+      ? [{ field: 'driver', before: driverState(before), after: driverState(after) }]
+      : [{ field: 'payment_method', before: recordState(before.payment_method), after: recordState(after.payment_method) }, { field: 'payment_details', before: paymentDetailsState(before.payment_details), after: paymentDetailsState(after.payment_details) }]
+  return pairs.filter(pair => JSON.stringify(pair.before) !== JSON.stringify(pair.after))
+}
+
+function bulkUpdateRecordEvents(snapshot: BulkUpdateSnapshot, generation: number, via: 'apply' | 'undo' | 'redo', user: SessionUser, stamp: string) {
+  const kind: SaleRecordKind = snapshot.action.kind === 'customer' ? 'customer_changed'
+    : snapshot.action.kind === 'delivery_contact' ? 'driver_changed' : 'payment_changed'
+  return buildSaleRecordEventsInsert(snapshot.members.filter(member => member.changed).map(member => {
+    const before = via === 'undo' ? member.after : member.before
+    const after = via === 'undo' ? member.before : member.after
+    return {
+      saleId: member.id, sourceKind: 'sale_bulk_update' as const, sourceId: snapshot.operationId,
+      generation, kind: kind as 'customer_changed' | 'driver_changed' | 'payment_changed', via,
+      subject: member.receipt, actorId: user.id, actorUsername: actorSnapshot(user), occurredAt: stamp,
+      changes: updateChanges(snapshot.action, before, after),
+    }
+  }))
 }
 
 function parsePaymentDetails(raw: unknown): Row[] {
@@ -461,6 +536,8 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, raw: Row)
     { sql: 'INSERT INTO sale_bulk_operations(id,actor_id,request_id,request_json,receipt_json) VALUES(@id,@actor,@request,@canonical,@receipt)', params: { id: operationId, actor: user.id, request: request.client_request_id, canonical, receipt: JSON.stringify(receipt) } },
   ]
   for (const member of members) statements.push(...saleUpdateStatement(member, request.action, 1, stamp))
+  const recordEvents = bulkUpdateRecordEvents(snapshot, 0, 'apply', user, stamp)
+  if (recordEvents) statements.push(recordEvents.statement)
   statements.push({ sql: 'INSERT INTO undo_snapshots(kind,payload_json,created_by_id,created_by_name) VALUES(@kind,@payload,@actor,@name)', params: { kind: BULK_UPDATE_KIND, payload: JSON.stringify(snapshot), actor: user.id, name: actorSnapshot(user) } })
   statements.push({ sql: 'UPDATE sale_bulk_operations SET snapshot_id=last_insert_rowid() WHERE id=@id', params: { id: operationId } })
   const historyIndex = statements.length
@@ -478,7 +555,7 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, raw: Row)
   }
   statements.push(auditStatement(user, operationId, 'sale_fields_bulk', request.action, changedIds.length))
   statements.push({ sql: 'DELETE FROM sale_bulk_guards', params: {} })
-  bounded(statements, snapshot)
+  bounded(statements, snapshot, recordEvents?.eventsBytes || 0)
   try {
     const results = await db.batch(statements)
     return { ...receipt, actionHistoryId: Number(results[historyIndex].meta.last_row_id) }
@@ -516,6 +593,9 @@ export async function replaySaleBulkUpdate(env: Env, user: SessionUser, directio
     if (guard) statements.push(guard)
   }
   for (const member of snapshot.members) statements.push(...saleUpdateStatement(member, snapshot.action, sign, stamp))
+  const nextGeneration = Number(generation) + 1
+  const recordEvents = bulkUpdateRecordEvents(snapshot, nextGeneration, direction, user, stamp)
+  if (recordEvents) statements.push(recordEvents.statement)
   for (const member of snapshot.members.filter((candidate) => candidate.changed)) {
     statements.push({ sql: `UPDATE sale_bulk_members SET revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@id),0),movement_fingerprint=${saleMovementFingerprint('@id')} WHERE operation_id=@op AND sale_id=@id`, params: { op: op.id, id: member.id } })
   }
@@ -524,7 +604,7 @@ export async function replaySaleBulkUpdate(env: Env, user: SessionUser, directio
   statements.push({ sql: "UPDATE action_history SET status=@status,last_error=NULL,updated_at=@stamp,undo_payload=json_set(undo_payload,'$.generation',@generation),redo_payload=json_set(redo_payload,'$.generation',@generation) WHERE id=@id", params: { id: historyId, status: next, stamp, generation: Number(generation) + 1 } })
   statements.push(auditStatement(user, String(op.id), `action_${direction}`, snapshot.action, snapshot.members.filter((member) => member.changed).length))
   statements.push({ sql: 'DELETE FROM sale_bulk_guards', params: {} })
-  bounded(statements, snapshot)
+  bounded(statements, snapshot, recordEvents?.eventsBytes || 0)
   try {
     await db.batch(statements)
   } catch (error) {
