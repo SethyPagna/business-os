@@ -38,4 +38,22 @@ assert.match(source, /gallery\.slice\(0, 4\)[\s\S]*gallery\.length > 4[\s\S]*set
 assert.match(source, /tr\('primary', 'Primary'\)/, 'image projections label the primary image independently from the gallery')
 assert.match(source, /onClick=\{onClose\}>\{working \? tr\('selected_conflict_cancel_and_refresh'/, 'Cancel remains available during the request and refreshes through the owner')
 
+assert.match(source, /export function SelectedConflictGroupReviewModal/, 'the N-row workflow has a distinct review-only surface')
+for (const field of ['barcode', 'category', 'brand', 'unit']) {
+  assert.match(source, new RegExp(`field="${field}_source_id"`), `the resolved ${field} must come from an explicit member source`)
+}
+for (const field of ['supplier_name', 'received_at', 'expiry_date', 'lot_code', 'batch_key']) {
+  assert.ok(source.includes(field), `member lot history must expose ${field}`)
+}
+assert.match(source, /group\.stock\.rows\.filter\(\(row\) => row\.product_id === member\.id\)/, 'before stock stays attributed to each member')
+assert.match(source, /group\.stock\.projected_by_branch\.map/, 'resolved stock is shown by branch')
+assert.match(source, /group\.lots\.projected_quantity/, 'resolved lot quantity is visible')
+assert.match(source, /group\.economics\.merged/, 'server-computed original-group economics drive the After display')
+assert.match(source, /distinct non-zero values from the original group/, 'the immutable group-wide cost rule is explained')
+assert.match(source, /Manual barcode editing is not part of this review/, 'barcode resolution is source selection rather than a free-text edit')
+assert.match(source, /disabled title=\{tr\('selected_conflict_phase_one_notice'/, 'Apply is visibly and truthfully unavailable in Phase 1')
+assert.doesNotMatch(source.slice(source.indexOf('export function SelectedConflictGroupReviewModal')), /onConfirm|runSelectedConflictMergeBatch/, 'the Phase 1 group review cannot execute a write')
+assert.match(source, /onPreviousPage[\s\S]*onNextPage/, 'one modal pages through the durable global review')
+assert.match(source.slice(source.indexOf('export function SelectedConflictGroupReviewModal')), /ModalCloseContext\.Consumer[\s\S]*requestClose \|\| onClose/, 'the footer Close preserves locally selected sources through the same unsaved guard as the header X')
+
 console.log('PASS selected conflict combined review shows exact before/after, explicit choices, partial truth, and independent undo identities')

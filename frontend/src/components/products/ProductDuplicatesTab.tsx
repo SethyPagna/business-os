@@ -10,6 +10,8 @@ import { ProductImg } from './shared/primitives.tsx'
 import {
   getPossiblySameProducts,
   dismissProductDuplicateCluster,
+  createSelectedConflictGroupReview,
+  getSelectedConflictGroupReviewPage,
   makeSelectedConflictMergeApplyBody,
   previewSelectedConflictMerges,
   runSelectedConflictMergeBatch,
@@ -17,12 +19,13 @@ import {
   type SelectedConflictMergeApplyBody,
   type SelectedConflictMergeApplyResult,
   type SelectedConflictMergePreviewResult,
+  type SelectedConflictGroupReviewResult,
 } from '../../api/productWriteTransport.ts'
 import { createClientRequestId } from '../../api/requestIds.ts'
 import { normalizeProductGroupName } from '../../utils/productGrouping.ts'
 import { useMergeStockChoice } from './useMergeStockChoice.tsx'
 import Modal from '../shared/Modal'
-import SelectedConflictMergeReviewModal from './SelectedConflictMergeReviewModal.tsx'
+import SelectedConflictMergeReviewModal, { SelectedConflictGroupReviewModal } from './SelectedConflictMergeReviewModal.tsx'
 import {
   createSelectedConflictRequestCoordinator,
   partitionSelectedConflictClusters,
@@ -37,6 +40,11 @@ import {
   type SelectedConflictLocalSkip,
   type SelectedConflictStockChoice,
 } from '../../utils/selectedConflictMerge.ts'
+import {
+  buildSelectedConflictGroupReviewRequest,
+  SELECTED_CONFLICT_GROUP_REVIEW_PAGE_LIMIT,
+  type SelectedConflictGroupResolutionChoice,
+} from '../../utils/selectedConflictActionReview.ts'
 
 // Products → Duplicates: the human-review residue the identity rule can't
 // settle on its own. Mirrors the contacts Possible Duplicates panel
@@ -308,6 +316,10 @@ export default function ProductDuplicatesTab({ t, notify }: {
   const [batchNeedsRefresh, setBatchNeedsRefresh] = useState(false)
   const batchRequestRef = useRef(createSelectedConflictRequestCoordinator())
   const batchWriteInFlightRef = useRef(false)
+  const [groupReviewPages, setGroupReviewPages] = useState<SelectedConflictGroupReviewResult[]>([])
+  const [groupReviewPageIndex, setGroupReviewPageIndex] = useState(0)
+  const [groupReviewChoices, setGroupReviewChoices] = useState<Record<string, SelectedConflictGroupResolutionChoice>>({})
+  const groupReviewRequestRef = useRef(createSelectedConflictRequestCoordinator())
 
   const load = async () => {
     setLoading(true)
@@ -329,7 +341,10 @@ export default function ProductDuplicatesTab({ t, notify }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  useEffect(() => () => batchRequestRef.current.cancel(), [])
+  useEffect(() => () => {
+    batchRequestRef.current.cancel()
+    groupReviewRequestRef.current.cancel()
+  }, [])
 
   const removeCluster = (id: string) => {
     setClusters((current) => current.filter((cluster) => clusterKey(cluster) !== id))
@@ -497,6 +512,73 @@ export default function ProductDuplicatesTab({ t, notify }: {
       setBatchChoices({})
     } catch (error: unknown) {
       if (request.isCurrent()) notify(selectedConflictErrorMessage(t, error, 'selected_conflict_preview_failed', 'Could not load the combined merge review'), 'error')
+    } finally {
+      if (request.finish()) {
+        setBulkBusy(false)
+        setBulkProgress('')
+      }
+    }
+  }
+
+  const openSelectedGroupReview = async () => {
+    const targets = clusters.filter((cluster) => selectedKeys.has(clusterKey(cluster)))
+    if (!targets.length || bulkBusy) return
+    const body = buildSelectedConflictGroupReviewRequest(targets, createClientRequestId('product-conflict-group-review'))
+    if (!body.merge_groups.length) {
+      notify(t('selected_conflict_group_none_reviewable') || 'None of the selected groups contains at least two valid products.', 'info')
+      return
+    }
+    const request = groupReviewRequestRef.current.begin()
+    setBulkBusy(true)
+    setBulkProgress(t('selected_conflict_loading_group_review') || 'Creating one combined group review…')
+    try {
+      const review = await createSelectedConflictGroupReview(body, { signal: request.signal })
+      if (!request.isCurrent()) return
+      setGroupReviewPages([review])
+      setGroupReviewPageIndex(0)
+      setGroupReviewChoices({})
+    } catch (error: unknown) {
+      if (request.isCurrent()) notify(selectedConflictErrorMessage(t, error, 'selected_conflict_group_review_failed', 'Could not create the group review'), 'error')
+    } finally {
+      if (request.finish()) {
+        setBulkBusy(false)
+        setBulkProgress('')
+      }
+    }
+  }
+
+  const closeSelectedGroupReview = () => {
+    groupReviewRequestRef.current.cancel()
+    setGroupReviewPages([])
+    setGroupReviewPageIndex(0)
+    setGroupReviewChoices({})
+    setBulkBusy(false)
+    setBulkProgress('')
+  }
+
+  const showNextGroupReviewPage = async () => {
+    const current = groupReviewPages[groupReviewPageIndex]
+    if (!current || bulkBusy) return
+    if (groupReviewPageIndex < groupReviewPages.length - 1) {
+      setGroupReviewPageIndex((index) => index + 1)
+      return
+    }
+    const cursor = current.page.next_cursor
+    if (cursor == null) return
+    const request = groupReviewRequestRef.current.begin()
+    setBulkBusy(true)
+    setBulkProgress(t('selected_conflict_loading_next_page') || 'Loading the next review page…')
+    try {
+      const next = await getSelectedConflictGroupReviewPage(current.review_id, cursor, SELECTED_CONFLICT_GROUP_REVIEW_PAGE_LIMIT, { signal: request.signal })
+      if (!request.isCurrent()) return
+      const sameReview = next.review_id === current.review_id
+        && next.draft_digest === current.draft_digest
+        && next.resolution_version === current.resolution_version
+      if (!sameReview || next.page.cursor !== cursor) throw new Error(t('selected_conflict_review_page_mismatch') || 'The review page did not match the saved review. Close and start again.')
+      setGroupReviewPages((pages) => [...pages, next])
+      setGroupReviewPageIndex((index) => index + 1)
+    } catch (error: unknown) {
+      if (request.isCurrent()) notify(selectedConflictErrorMessage(t, error, 'selected_conflict_group_review_failed', 'Could not load the next review page'), 'error')
     } finally {
       if (request.finish()) {
         setBulkBusy(false)
@@ -733,13 +815,23 @@ export default function ProductDuplicatesTab({ t, notify }: {
               </span>
               <button
                 type="button"
+                onClick={() => void openSelectedGroupReview()}
+                disabled={bulkBusy}
+                title={t('selected_conflict_group_review_hint') || 'Review every selected N-row group in one durable, paged server review. This phase does not apply changes.'}
+                className="btn-secondary px-2.5 py-1 text-xs disabled:opacity-50"
+              >
+                <Search className="mr-1 inline h-3.5 w-3.5" />
+                {bulkBusy ? (t('loading') || 'Loading...') : (t('selected_conflict_group_review_action') || 'Review selected groups')}
+              </button>
+              <button
+                type="button"
                 onClick={() => void openSelectedMergeReview()}
                 disabled={bulkBusy}
                 title={t('bulk_merge_products_hint') || 'Review exact two-product matches together. Ineligible groups stay selected for individual review.'}
                 className="btn-secondary px-2.5 py-1 text-xs disabled:opacity-50"
               >
                 <Merge className="mr-1 inline h-3.5 w-3.5" />
-                {bulkBusy ? (t('saving') || 'Saving...') : (t('duplicates_bulk_merge_action') || 'Merge selected')}
+                {bulkBusy ? (t('saving') || 'Saving...') : `${t('duplicates_bulk_merge_action') || 'Merge selected'} · ${t('selected_conflict_merge_exact_pairs') || 'exact pairs'}`}
               </button>
               <button
                 type="button"
@@ -831,6 +923,19 @@ export default function ProductDuplicatesTab({ t, notify }: {
           onResume={() => void resumeSelectedMergeReview()}
           onRefresh={() => void refreshSelectedMergeReview()}
           onClose={closeSelectedMergeReview}
+          t={t}
+        />
+      ) : null}
+      {groupReviewPages.length ? (
+        <SelectedConflictGroupReviewModal
+          pages={groupReviewPages}
+          pageIndex={groupReviewPageIndex}
+          choices={groupReviewChoices}
+          working={bulkBusy}
+          onChoice={(groupKey, patch) => setGroupReviewChoices((current) => ({ ...current, [groupKey]: { ...current[groupKey], ...patch } }))}
+          onPreviousPage={() => setGroupReviewPageIndex((index) => Math.max(0, index - 1))}
+          onNextPage={() => void showNextGroupReviewPage()}
+          onClose={closeSelectedGroupReview}
           t={t}
         />
       ) : null}
