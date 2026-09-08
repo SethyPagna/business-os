@@ -220,6 +220,12 @@ const requireContactsAccess = async (c: Context<{ Bindings: Env; Variables: { us
   // Only this exact, authenticated read grants POS a minimal membership view.
   if (c.req.method === 'GET' && /^\/(?:api\/)?customers\/membership\/[^/]+$/.test(c.req.path)
     && getPermissionTier(user, 'pos') !== 'none') return next()
+  // Sales/POS customer selection has its own bounded response shape. Grant
+  // only this exact list request; the ordinary Contacts list, customer
+  // detail and financial-history routes still require Contacts access.
+  if (c.req.method === 'GET' && /^\/(?:api\/)?customers$/.test(c.req.path)
+    && c.req.query('fields') === 'sales_picker'
+    && (getPermissionTier(user, 'pos') !== 'none' || getPermissionTier(user, 'sales') !== 'none')) return next()
   if (getPermissionTier(user, 'contacts') === 'none') return c.json({ error: 'You do not have permission to perform this action' }, 403)
   return next()
 }
