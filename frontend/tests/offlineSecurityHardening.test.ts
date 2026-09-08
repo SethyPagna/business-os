@@ -28,6 +28,7 @@ const packageSource = fs.readFileSync(new URL('../package.json', import.meta.url
 const swRuntimeSource = fs.readFileSync(new URL('../src/public-runtime/service-worker.ts', import.meta.url), 'utf8')
 const websocketSource = fs.readFileSync(new URL('../src/api/websocket.ts', import.meta.url), 'utf8')
 const appContextSource = fs.readFileSync(new URL('../src/AppContext.tsx', import.meta.url), 'utf8')
+const offlineSnapshotSource = fs.readFileSync(new URL('../src/api/offlineSnapshotTransport.ts', import.meta.url), 'utf8')
 
 await runTest('frontend uses cookie credentials and does not persist auth tokens for offline sync', () => {
   assert.match(httpSource, /credentials:\s*'include'/)
@@ -126,6 +127,12 @@ await runTest('offline security hardening test is part of the utility suite', ()
   // Since 0a5e836e test:utils runs every tests/*.test.ts through the discovery
   // runner, so this file is in the suite by existing; pin the runner instead.
   assert.match(packageSource, /"test:utils": "node tests\/runTestChain\.ts"/)
+})
+
+await runTest('offline customer snapshots use the bounded picker shape and replace the prior mirror', () => {
+  assert.match(offlineSnapshotSource, /\/api\/customers\?fields=picker&limit=\$\{OFFLINE_CUSTOMER_MIRROR_LIMIT\}/)
+  assert.match(offlineSnapshotSource, /await mirrorTable\('customers'\)\(items\)/)
+  assert.doesNotMatch(offlineSnapshotSource, /apiFetch\('GET', '\/api\/customers'\)/)
 })
 
 if (failed > 0) {
