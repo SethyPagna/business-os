@@ -162,7 +162,7 @@ await runTest('return create, edit, and supplier flows keep synchronous submit g
   assert.match(editReturn, /function loadReturnsTransport\(\): Promise<ReturnsTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/returnsTransport\.ts'\)/)
   assert.match(editReturn, /async function prepareReturnRequest\(id: number \| string, payload: ReturnUpdatePayload\): Promise<PreparedReturnUpdateRequest>[\s\S]*prepareReturnUpdateRequest\(id, payload\)/)
   assert.match(editReturn, /async function updateReturnRequest\(id: number \| string, payload: PreparedReturnUpdateRequest\): Promise<unknown>[\s\S]*submitReturnUpdateRequest\(id, payload\)/)
-  assert.match(editReturn, /const payload: ReturnUpdatePayload = \{[\s\S]*const prepared = pendingRequest\?\.body \|\| freezeDirectMutationBody\(await prepareReturnRequest\(ret\.id,[\s\S]*savePendingDirectMutation\('return-edit'[\s\S]*withLoaderTimeout\(\s*\(\) => updateReturnRequest\(ret\.id, prepared\),\s*'Update return',\s*RETURN_UPDATE_TIMEOUT_MS,\s*\)/)
+  assert.match(editReturn, /const payload: ReturnUpdatePayload = \{[\s\S]*const prepared = activePendingRequest\?\.body \|\| freezeDirectMutationBody\(await prepareReturnRequest\(ret\.id,[\s\S]*savePendingDirectMutation\('return-edit'[\s\S]*withLoaderTimeout\(\s*\(\) => updateReturnRequest\(ret\.id, prepared\),\s*'Update return',\s*RETURN_UPDATE_TIMEOUT_MS,\s*\)/)
   assert.doesNotMatch(editReturn, /getReturnApi|window\.api|api\.updateReturn/)
   assert.match(supplierReturn, /const SUPPLIER_RETURN_CREATE_TIMEOUT_MS = 15000/)
   assert.match(supplierReturn, /function loadReturnsTransport\(\): Promise<ReturnsTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/returnsTransport\.ts'\)/)

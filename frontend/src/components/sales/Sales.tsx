@@ -72,6 +72,7 @@ import {
   directMutationOutcomeIsUnknown,
   freezeDirectMutationBody,
   loadPendingDirectMutationSlot,
+  pendingDirectMutationForScope,
   savePendingDirectMutationSlot,
   type DirectMutationHistoryContext,
   type PendingDirectMutation,
@@ -469,6 +470,12 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     pendingDirectStatusRef.current = pending
     setPendingDirectStatus(pending)
   }, [user?.id])
+  const currentPendingDirectStatus = useCallback(() => (
+    pendingDirectMutationForScope(pendingDirectStatusRef.current, user?.id)
+      || loadPendingDirectMutationSlot<PreparedSaleStatusRequest>('sale-status', user?.id)
+  ), [user?.id])
+  const activePendingDirectStatus = pendingDirectMutationForScope(pendingDirectStatus, user?.id)
+    || currentPendingDirectStatus()
   const savePendingDirectStatus = useCallback((
     saleId: number | string,
     body: PreparedSaleStatusRequest | null,
@@ -911,7 +918,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     }
     const numericId = Number(saleId)
     if (!Number.isFinite(numericId)) return false
-    const storedPending = pendingDirectStatusRef.current
+    const storedPending = currentPendingDirectStatus()
     const storedHistoryMatches = !!historyContext
       && storedPending?.history?.entryId === historyContext.entryId
       && storedPending.history.direction === historyContext.direction
@@ -1059,7 +1066,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   }
 
   const retryPendingDirectStatusRequest = async (): Promise<void> => {
-    const pending = pendingDirectStatusRef.current
+    const pending = currentPendingDirectStatus()
     if (!pending) return
     const history = pending.history
     if (history) {
@@ -2252,9 +2259,9 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
 
       </div>
 
-      {pendingDirectStatus ? (
-        <div data-needs-reconciliation={pendingDirectStatus.needsReconciliation || undefined} className="mb-2 flex flex-wrap items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-100">
-          <span className="min-w-0 flex-1">{pendingDirectStatus.needsReconciliation
+      {activePendingDirectStatus ? (
+        <div data-needs-reconciliation={activePendingDirectStatus.needsReconciliation || undefined} className="mb-2 flex flex-wrap items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-100">
+          <span className="min-w-0 flex-1">{activePendingDirectStatus.needsReconciliation
             ? translateOr('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.')
             : translateOr('sale_bulk_pending', 'A previous request has an unknown outcome. Retry the original request or discard it before starting another.')}</span>
           <button type="button" className="btn-secondary" disabled={statusActionRef.current.size > 0 || !canChangeSaleStatus} onClick={() => {
@@ -2262,7 +2269,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
           }}>{translateOr('retry_original_request', 'Retry original request')}</button>
           <button type="button" className="btn-secondary" disabled={statusActionRef.current.size > 0} onClick={() => {
             if (window.confirm(translateOr('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.'))) {
-              try { savePendingDirectStatus(pendingDirectStatus.entityId, null) }
+              try { savePendingDirectStatus(activePendingDirectStatus.entityId, null) }
               catch (error) { notify(getErrorMessage(error, 'Unable to discard the pending retry.'), 'error') }
             }
           }}>{translateOr('discard_retry', 'Discard retry')}</button>

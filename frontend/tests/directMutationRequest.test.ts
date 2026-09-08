@@ -10,6 +10,7 @@ import {
   freezeDirectMutationBody,
   loadPendingDirectMutation,
   loadPendingDirectMutationSlot,
+  pendingDirectMutationForScope,
   savePendingDirectMutation,
   savePendingDirectMutationSlot,
 } from '../src/utils/directMutationRequest.ts'
@@ -71,6 +72,52 @@ await test('one actor-scoped status slot retains the exact target and body acros
   assert.equal(loadPendingDirectMutationSlot('sale-status', 8, storage), null)
   savePendingDirectMutationSlot('sale-status', 7, 31, null, storage)
   assert.equal(loadPendingDirectMutationSlot('sale-status', 7, storage), null)
+})
+
+await test('transition-window senders reject stale actor and target bodies synchronously', () => {
+  const storage = new MemoryStorage()
+  const body = { client_request_id: 'return-edit-44', expected_updated_at: 'return-rev-1', reason: 'Damaged' }
+  const pending = savePendingDirectMutation('return-edit', 7, 44, body, storage)
+  assert.ok(pending)
+
+  const sent: unknown[] = []
+  const invokeSender = (actorId: unknown, entityId: unknown) => {
+    const active = pendingDirectMutationForScope(pending, actorId, entityId)
+    if (active) sent.push(active.body)
+  }
+
+  invokeSender(8, 44)
+  invokeSender(7, 45)
+  assert.deepEqual(sent, [], 'a pre-effect actor or target transition cannot send the stale body')
+
+  invokeSender('7', '44')
+  assert.deepEqual(sent, [body], 'the matching scope retries the exact frozen body')
+  assert.equal(pendingDirectMutationForScope(pending, '', 44), null, 'an unidentified actor never shares a pending scope')
+
+  const currentActorBody = { client_request_id: 'return-edit-55', expected_updated_at: 'return-rev-2', reason: 'Wrong item' }
+  savePendingDirectMutation('return-edit', 8, 55, currentActorBody, storage)
+  const resolvedDuringTransition = pendingDirectMutationForScope(pending, 8, 55)
+    || loadPendingDirectMutation<typeof currentActorBody>('return-edit', 8, 55, storage)
+  assert.deepEqual(resolvedDuringTransition?.body, currentActorBody, 'the new actor/target storage slot is visible before an effect copies it into state')
+})
+
+await test('transition-window discard and new submit stay inside the current scope', () => {
+  const storage = new MemoryStorage()
+  const oldEdit = savePendingDirectMutation('return-edit', 7, 44, { client_request_id: 'old-edit' }, storage)
+  assert.equal(pendingDirectMutationForScope(oldEdit, 7, 45), null, 'target 45 cannot expose target 44 retry controls')
+
+  const freshEdit = savePendingDirectMutation('return-edit', 7, 45, { client_request_id: 'fresh-edit' }, storage)
+  assert.equal(loadPendingDirectMutation('return-edit', 7, 44, storage)?.body.client_request_id, 'old-edit', 'new submit preserves the unresolved old target')
+  assert.equal(loadPendingDirectMutation('return-edit', 7, 45, storage)?.body.client_request_id, 'fresh-edit')
+  if (pendingDirectMutationForScope(freshEdit, 7, 45)) savePendingDirectMutation('return-edit', 7, 45, null, storage)
+  assert.equal(loadPendingDirectMutation('return-edit', 7, 45, storage), null, 'discard clears the current target')
+  assert.equal(loadPendingDirectMutation('return-edit', 7, 44, storage)?.body.client_request_id, 'old-edit', 'discard cannot erase another target')
+
+  const oldStatus = savePendingDirectMutationSlot('sale-status', 7, 31, { client_request_id: 'old-status' }, storage)
+  assert.equal(pendingDirectMutationForScope(oldStatus, 8), null, 'actor 8 cannot expose actor 7 retry controls')
+  savePendingDirectMutationSlot('sale-status', 8, 32, { client_request_id: 'fresh-status' }, storage)
+  assert.equal(loadPendingDirectMutationSlot('sale-status', 7, storage)?.body.client_request_id, 'old-status', 'new actor submit cannot overwrite the old actor slot')
+  assert.equal(loadPendingDirectMutationSlot('sale-status', 8, storage)?.body.client_request_id, 'fresh-status')
 })
 
 await test('pending storage is actor-required, bounded, and fails closed before a write can start', () => {
@@ -180,14 +227,14 @@ await test('direct-write UI exposes manual exact retry and freezes return edits 
   const sales = readFileSync(new URL('../src/components/sales/Sales.tsx', import.meta.url), 'utf8')
   const editReturn = readFileSync(new URL('../src/components/returns/EditReturnModal.tsx', import.meta.url), 'utf8')
   const returns = readFileSync(new URL('../src/components/returns/Returns.tsx', import.meta.url), 'utf8')
-  assert.match(sales, /const pending = pendingDirectStatusRef\.current[\s\S]*await handleStatusChange\([\s\S]*pending\.body,/)
+  assert.match(sales, /const pending = currentPendingDirectStatus\(\)[\s\S]*await handleStatusChange\([\s\S]*pending\.body,/)
   assert.match(sales, /newStatus === 'cancelled'[\s\S]*!extra && !preparedRetry/)
   assert.match(sales, /statusReplayExtra\(preparedRetry\)/)
   assert.doesNotMatch(sales, /redo:[^\n]*preparedRetry\)/)
   assert.match(sales, /prepareSaleStatusRequest[\s\S]*savePendingDirectStatus\(saleId, preparedRequest, historyContext\)[\s\S]*runSaleStatusMutation\(saleId, preparedRequest\)/)
   assert.match(sales, /directMutationOutcomeIsUnknown\(error\)[\s\S]*savePendingDirectStatus\(saleId, null\)/)
-  assert.match(editReturn, /pendingRequest\?\.body \|\|[\s\S]*prepareReturnRequest[\s\S]*savePendingDirectMutation\('return-edit'/)
-  assert.match(editReturn, /fieldset disabled=\{submitting \|\| !!pendingRequest\}/)
+  assert.match(editReturn, /activePendingRequest\?\.body \|\|[\s\S]*prepareReturnRequest[\s\S]*savePendingDirectMutation\('return-edit'/)
+  assert.match(editReturn, /fieldset disabled=\{submitting \|\| !!activePendingRequest\}/)
   assert.match(editReturn, /retry_original_request[\s\S]*discard_retry/)
   assert.match(editReturn, /useEffect\(\(\) => \{\s*setPendingRequest\(loadPendingDirectMutation<PreparedReturnUpdateRequest>\('return-edit', user\?\.id, ret\.id\)\)[\s\S]*\}, \[ret\.id, user\?\.id\]\)/)
   assert.match(sales, /salesRef\.current\.find/)
@@ -199,6 +246,27 @@ await test('direct-write UI exposes manual exact retry and freezes return edits 
   assert.match(returns, /expected_updated_at: currentUpdatedAt/)
   assert.match(returns, /loadPendingDirectMutationSlot<PreparedReturnUpdateRequest>\('return-history', user\?\.id\)[\s\S]*pendingHistoryRequestRef\.current = pending/)
   assert.match(returns, /actionHistory\[history\.direction\]\(history\.entryId\)/)
+})
+
+await test('production send and banner paths derive current actor and entity scope before passive reload', () => {
+  const sales = readFileSync(new URL('../src/components/sales/Sales.tsx', import.meta.url), 'utf8')
+  const returns = readFileSync(new URL('../src/components/returns/Returns.tsx', import.meta.url), 'utf8')
+  const editReturn = readFileSync(new URL('../src/components/returns/EditReturnModal.tsx', import.meta.url), 'utf8')
+
+  assert.match(sales, /const currentPendingDirectStatus = useCallback\(\(\) => \([\s\S]*pendingDirectMutationForScope\(pendingDirectStatusRef\.current, user\?\.id\)[\s\S]*loadPendingDirectMutationSlot<PreparedSaleStatusRequest>\('sale-status', user\?\.id\)/)
+  assert.ok((sales.match(/currentPendingDirectStatus\(\)/g) || []).length >= 3)
+  assert.match(sales, /\{activePendingDirectStatus \? \(/)
+  assert.doesNotMatch(sales, /\{pendingDirectStatus \? \(/)
+
+  assert.match(returns, /const currentPendingHistoryRequest = useCallback\(\(\) => \([\s\S]*pendingDirectMutationForScope\(pendingHistoryRequestRef\.current, user\?\.id\)[\s\S]*loadPendingDirectMutationSlot<PreparedReturnUpdateRequest>\('return-history', user\?\.id\)/)
+  assert.ok((returns.match(/currentPendingHistoryRequest\(\)/g) || []).length >= 3)
+  assert.match(returns, /\{activePendingHistoryRequest \? \(/)
+  assert.doesNotMatch(returns, /\{pendingHistoryRequest \? \(/)
+
+  assert.match(editReturn, /const activePendingRequest = pendingDirectMutationForScope\(pendingRequest, user\?\.id, ret\.id\)[\s\S]*loadPendingDirectMutation<PreparedReturnUpdateRequest>\('return-edit', user\?\.id, ret\.id\)/)
+  assert.match(editReturn, /const prepared = activePendingRequest\?\.body \|\|/)
+  assert.match(editReturn, /fieldset disabled=\{submitting \|\| !!activePendingRequest\}/)
+  assert.doesNotMatch(editReturn, /const prepared = pendingRequest\?\.body \|\|/)
 })
 
 if (failed) process.exit(1)
