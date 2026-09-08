@@ -112,14 +112,18 @@ runTest('closing with unsaved failures asks through the ONE shared close guard',
   // modal instead of each surface growing its own.
   assert.doesNotMatch(adjustModal, /setConfirmDiscard/, 'the private discard dialog must not come back')
   // The shared adjust chrome does the asking...
-  assert.match(stockModals, /const adjustGuard = useCloseGuard\(/)
+  assert.match(stockModals, /const adjustGuard = useCloseGuard\(\{ dirty: adjustDirty\.dirty \|\| Boolean\(adjustRestoredDirty\) \}, onCloseAdjust, onMinimizeAdjust\)/)
   assert.match(stockModals, /onClick=\{requestCloseAdjust\}/)
   assert.match(stockModals, /<UnsavedChangesPrompt guard=\{adjustGuard\} items=\{adjustDiscardItems\} \/>/)
+  assert.match(stockModals, /<MinimizeButton disabled=\{adjustSaving\} tr=\{tr\} onMinimize=\{onMinimizeAdjust\} \/>/, 'minus directly preserves while X still requests close')
   // ...Discard still runs THIS page's cleanup, not a generic close...
   assert.match(adjustModal, /onCloseAdjust=\{discardFailedAndClose\}/)
   assert.match(adjustModal, /hasUnsavedFailures\(rows\)[\s\S]{0,200}?dropFailedStockAttempt\(/)
   // ...and the failed attempt's values still appear in the prompt.
   assert.match(adjustModal, /adjustDiscardItems=\{buildAdjustReviewItems\(\)\}/)
+  assert.match(adjustModal, /onMinimizeAdjust=\{onMinimize \? preserveAndMinimize : undefined\}/)
+  assert.match(adjustModal, /writeWorkDraft<StockAdjustDraft>\(currentDraftKey,[\s\S]*?onMinimize\([\s\S]*?onClose\(\)/, 'minimize persists exact typed values before the parent hides the modal')
+  assert.match(adjustModal, /const discardFailedAndClose = useCallback\(\(\) => \{\s*clearWorkDraft\(currentDraftKey\)/, 'Discard removes the exact local draft')
   // Confirmations go through a rendered dialog -- never a native popup.
   assert.doesNotMatch(adjustModal, /window\.confirm\(\s*tr\('discard/)
 })

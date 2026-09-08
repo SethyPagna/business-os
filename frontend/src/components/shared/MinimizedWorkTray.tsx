@@ -22,6 +22,9 @@ const LEGACY_DRAFT_BASE_BY_KIND: Record<MinimizedWorkKind, string | null> = {
   // exact actor-scoped key; an older chip must never clear a sibling edit.
   edit_product: null,
   fast_stockin: 'fast_stockin',
+  // Stock-adjust drafts are entity-specific; the parked entry carries the
+  // exact key and an older chip must not guess which product to discard.
+  stock_adjust: null,
   create_products_session: 'create_products_session',
   // Receive drafts are per product. New chips always carry their exact
   // actor-scoped key; an older chip cannot safely guess which one to clear.

@@ -136,6 +136,7 @@ import { buildAutoMergedFilterSection } from './AutoMergedFilterOptions.tsx'
 import { buildCreatedDateFilterSection } from './CreatedDateFilterOptions.tsx'
 import { RESTORE_WORK_EVENT, canRestoreMinimizedWork, consumePendingRestore, markRestoreHandled, minimizeWork, reparkDeniedRestore, type MinimizedWorkEntry, type MinimizedWorkKind } from '../../utils/minimizedWork.ts'
 import { scopedWorkDraftKey } from '../../utils/workDrafts.ts'
+import { readStockAdjustDraft, STOCK_ADJUST_RESTORE_HOST } from '../../utils/stockAdjustDraft.ts'
 import { buildIssuesFilterSection } from '../shared/IssuesFilterOptions.tsx'
 import { buildPromotionsFilterSection } from '../shared/PromotionsFilterOptions.ts'
 import type { PromotionRule } from '../../utils/promotionRules.ts'
@@ -893,6 +894,34 @@ function ProductsFullEditor() {
   }, [can, canAddProduct, notify])
   const [detailProduct,setDetailProduct]= useState<ProductRecord | null>(null)
   const [adjustStockProduct, setAdjustStockProduct] = useState<ProductRecord | null>(null)
+  const [restoreStockAdjustDraftKey, setRestoreStockAdjustDraftKey] = useState<string | null>(null)
+  useEffect(() => {
+    const restore = (entry: MinimizedWorkEntry | null | undefined) => {
+      if (!entry) return
+      if (!canAdjustInventoryStock || !canRestoreMinimizedWork(entry, can)) {
+        reparkDeniedRestore(entry)
+        notify(tr('permission_denied', 'You no longer have permission for this action.', 'អ្នកលែងមានសិទ្ធិសម្រាប់សកម្មភាពនេះទៀតហើយ។'), 'error')
+        return
+      }
+      const draftKey = entry.draftKey || null
+      if (!readStockAdjustDraft(draftKey)) {
+        notify(tr('load_failed', 'This saved draft is no longer available.', 'សេចក្តីព្រាងដែលបានរក្សាទុកនេះលែងមានទៀតហើយ។'), 'error')
+        return
+      }
+      setAdjustStockProduct(null)
+      setRestoreStockAdjustDraftKey(draftKey)
+    }
+    const pending = consumePendingRestore('stock_adjust')
+    if (pending) restore(pending)
+    const onRestore = (event: Event) => {
+      const detail = (event as CustomEvent).detail
+      if (detail?.kind !== 'stock_adjust') return
+      markRestoreHandled('stock_adjust')
+      restore(detail.entry as MinimizedWorkEntry | undefined)
+    }
+    window.addEventListener(RESTORE_WORK_EVENT, onRestore)
+    return () => window.removeEventListener(RESTORE_WORK_EVENT, onRestore)
+  }, [can, canAdjustInventoryStock, notify])
   // `toModalProduct(selected)` used to be called inline in the ProductForm
   // JSX below -- a plain function returning a new object literal on every
   // render of Products.tsx, not just when `selected` itself changes. That
@@ -4806,13 +4835,26 @@ function ProductsFullEditor() {
         </Suspense>
       )}
 
-      {adjustStockProduct ? (
+      {adjustStockProduct || restoreStockAdjustDraftKey ? (
         <Suspense fallback={null}>
           <StockAdjustModal
             initialProduct={adjustStockProduct}
+            restoreDraftKey={restoreStockAdjustDraftKey}
             t={t}
-            onClose={() => setAdjustStockProduct(null)}
-            onDone={() => { setAdjustStockProduct(null); void load(true) }}
+            onClose={() => { setAdjustStockProduct(null); setRestoreStockAdjustDraftKey(null) }}
+            onDone={() => { setAdjustStockProduct(null); setRestoreStockAdjustDraftKey(null); void load(true) }}
+            onMinimize={(label: string, detail: { draftKey: string; productId: EntityId }) => {
+              minimizeWork({
+                key: `stock-adjust-${String(detail.productId)}`,
+                kind: 'stock_adjust',
+                ...STOCK_ADJUST_RESTORE_HOST,
+                label,
+                payload: { productId: detail.productId },
+                draftKey: detail.draftKey,
+                requiredPermission: { permissionKey: 'inventory', actionKey: 'adjust' },
+              })
+              notify(tr('minimized_to_chip', 'Minimized. Pick it back up from the chip — nothing was lost.', 'បានបង្រួម។ បន្តវាឡើងវិញពីស្លាក — គ្មានអ្វីបាត់បង់ទេ។'), 'info')
+            }}
           />
         </Suspense>
       ) : null}
