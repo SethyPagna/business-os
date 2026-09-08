@@ -1,3 +1,6 @@
+> **Latest deployed release: c2eb9d57** — independently confirmed Worker 3931ea55-3f66-459e-823d-3339979bd441,100% at 2026-09-08T03:37:12.286363Z. Explicit contact/POS duplicate decisions, disabled Warehouse/stale-lot picker safeguards, canonical branch CRUD/review/undo/reset/transfer guards, general/dated stock-import authority, corrected export breakdowns, bilingual branch setup guidance and matching resolved-error cleanup are live. Backend291/291, frontend319/319, both types, i18n, build and dry-run passed; real local browser and independent reviews passed. No migration. GitHub preserves31 individual commits.
+> **Remaining active:** F46 combined selected-conflict workflow (backend/frontend/backup/reset, migration0136 local only); F53 permission event coalescing; remaining production duplicate merge beyond eight cases (browser access pending); unresolved historical/contact identity evidence and deferred UI. Earlier status paragraphs below are history, not current deployment claims.
+
 
 ## Functional follow-through — September 8, next checkpoint active
 
