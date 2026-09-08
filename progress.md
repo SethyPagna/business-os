@@ -1,3 +1,19 @@
+## Owner follow-ups — September 8, returned workbook and urgent functional fixes
+
+Live remains 73fd7dc1 at 100%. Returned workbook compared by key: 15 edited review entries, 11 source updates and four already-equal no-ops; four whitespace-only fragment edits retain required separators. Source commit5832b05 integrated48acb624, not deployed. Full untouched Proposed Khmer column approval question remains pending; explicit edits proceed.
+
+P07: owner reports Telegram bot token already rotated. Independent dated rotation evidence was not located; do not re-rotate solely because the old ledger says pending. P05: owner reports most images are first-party photography; remaining provenance review concerns exceptions, not a blanket claim that shop photographs lack rights.
+
+F57 native D1 independently reproduced a compound-SELECT failure in the indexed candidate. Root owns bounded native-query repair. F55 corrected plan completed, runtime implementation remains pending. F46 native fingerprint repair continues separately.
+
+| ID | Request | Current state | Next step |
+| --- | --- | --- | --- |
+| F61 | Stock-positive POS product blocked by received-date picker; branch choices missing | Candidate under independent review | Verify legitimate Shop unlotted remainder, recorded lot identity, atomic quantity guards and explicit branch choices. |
+| F62 | Save still leads to Back/Discard prompt | Implementing | Clean-before-close lifecycle across product hosts and completed sessions; retain unsaved outer session after item queueing. |
+| F63 | Reset revoked device history so it can request approval again | Candidate awaiting security review | Admin reset must return unknown; next sign-in requires normal approval and cannot restore sessions. |
+| F64 | Existing-product add/create session needs barcode scanner | Candidate awaiting integrated checks | Reuse scanner, leading-zero search and same-session duplicate guard. |
+| F65 | Conflict Merge/Remove actions and owner-defined field rules | Contract review; implementation pending | Direct Remove independent of barcode match; Merge transfers stock, distinct nonzero mean cost, max prices, explicit barcode/category/brand/unit choices, supplier/date history retained. |
+
 ## Khmer review workbook completed — September 8
 
 F60 is complete as a review deliverable: outputs/khmer-review-20260908/Business-OS-Khmer-review.xlsx contains 259 effective-string proposals, all 6145 source entries (5573 effective keys; 572 overridden copies), and all 82 task statuses. Rendered Khmer was visually checked; exported XLSX ZIP/XML, row counts, tables, frozen headers, decision validation, placeholder parity and exactly two Owner approved decisions passed. The remaining 257 proposals are not applied. F59 exact terms are already live in 73fd7dc1 at 100%, with no migration. Current-status.md provides the full readable status snapshot. F46 real D1 repair, F57 independent indexed-query review and F55 corrected offline plan remain open; no new release is claimed here.
