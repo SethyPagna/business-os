@@ -812,6 +812,7 @@
   "received_dates_none": "No received dates at this branch",
   "stock_without_received_date": "Units are at this branch but carry no received date.",
   "transfer_source_warehouse_only": "Transfers move stock from Warehouse to Shop.",
+  "canonical_branch_configuration_invalid": "Stock transfer is unavailable because the branch setup must contain exactly one active Shop and one active Warehouse. Ask an administrator to repair the branch records before trying again.",
   "batches_load_failed": "Could not load received dates.",
   "before_data": "Before (old data)",
   "before_qty": "Before",
