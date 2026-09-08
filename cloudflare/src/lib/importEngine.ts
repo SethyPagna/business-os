@@ -5519,6 +5519,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // this prevents a branch identity change between a product INSERT and
     // its branch_stock/batch writes from leaving a half-applied row.
     const productStatementGroups: Array<Array<{ sql: string; params: Record<string, unknown> }>> = []
+    let productSeedBranchIds: number[] = []
     const appliedRowGuards = new Set(
       (await db.prepare(`SELECT guard_key FROM import_stock_action_guards WHERE job_id = @id AND action_key = @ak`)
         .all<{ guard_key: string }>({ id: jobId, ak: GENERIC_APPLY_GUARD_ACTION })).map((g) => g.guard_key),
@@ -5573,7 +5574,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       // "Shop" -- there's no per-row "and also 0 everywhere else" column).
       // Without this, a brand-new imported product ended up with a
       // branch_stock row ONLY at the branch its row happened to name --
-      // every other active branch had no row at all, which every
+      // every other active canonical branch had no row at all, which every
       // branch-filtered view (Products/Inventory/POS) reads as "not
       // tracked here", not as "0 in stock here" (see
       // seedBranchStockForNewProduct in productWrites.ts, which already
@@ -5581,9 +5582,12 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       // mirrors that fix for the bulk-import create path, which never
       // called it). Fetched once per chunk, after the selected canonical
       // branch ids have been revalidated.
-      const allActiveBranchIds = createRows.length
-        ? (await db.prepare(`SELECT id FROM branches WHERE is_active = 1`).all<{ id: number }>()).map((b) => b.id)
-        : []
+      if (createRows.length) {
+        const rows = await db.prepare(`SELECT id, name, is_default, is_active FROM branches WHERE is_active = 1`).all<CanonicalImportBranchRow>()
+        const index = indexCanonicalImportBranches(rows)
+        productSeedBranchIds = [...index.byRole.values()]
+          .flatMap((matches) => matches.length === 1 ? [Number(matches[0].id)] : [])
+      }
       // Same pre-allocation reasoning as nextProductId above, for the
       // product_batches row each new-product-with-stock create statement
       // below also inserts -- see that statement's own comment for why a
@@ -6077,8 +6081,9 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
             if (str(d.lot_code)) {
               batchByProductAndLot.set(`${newId}\u0001${lower(d.lot_code)}`, { id: batchId, received_at: d.received_date as string })
             }
-            // Seed every OTHER active branch at 0 (tracked, not absent) --
-            // see allActiveBranchIds' own comment above for why. Runs
+            // Seed every OTHER unambiguous active canonical branch at 0
+            // (tracked, not absent) -- see productSeedBranchIds above.
+            // Runs
             // AFTER the chosen branch's real-quantity insert above, and
             // uses ON CONFLICT DO NOTHING rather than DO UPDATE: if a
             // later row in this same chunk names one of these branches for
@@ -6089,7 +6094,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
             // stomp a real value back down to 0. Statements in one D1
             // batch execute sequentially, so "pushed earlier" is
             // guaranteed to mean "applied first" here.
-            for (const branchId of allActiveBranchIds) {
+            for (const branchId of productSeedBranchIds) {
               if (branchId === d.branch_id) continue
               rowWriteGroup.push({
                 sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@id, @branchId, 0)
@@ -6183,6 +6188,12 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       }
     }
 
+    if (job.type === 'products' && productSeedBranchIds.length) {
+      importWriteDb = withCanonicalImportBranchWriteGuard(db, [
+        ...actionable.map((result) => Number((result.data as Record<string, unknown>).branch_id)),
+        ...productSeedBranchIds,
+      ])
+    }
     if (productStatementGroups.length) await runD1BatchGroupsInChunks(importWriteDb, productStatementGroups)
     if (statements.length) await runD1BatchInChunks(importWriteDb, statements)
     // The guarded additive groups run AFTER the plain statements (their
