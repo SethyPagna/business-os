@@ -54,6 +54,7 @@ assert.match(source, /Manual barcode editing is not part of this review/, 'barco
 assert.match(source, /disabled title=\{tr\('selected_conflict_phase_one_notice'/, 'Apply is visibly and truthfully unavailable in Phase 1')
 assert.doesNotMatch(source.slice(source.indexOf('export function SelectedConflictGroupReviewModal')), /onConfirm|runSelectedConflictMergeBatch/, 'the Phase 1 group review cannot execute a write')
 assert.match(source, /onPreviousPage[\s\S]*onNextPage/, 'one modal pages through the durable global review')
+assert.match(source, /review\.counts\.actionable_groups \+ review\.counts\.blocked_groups/, 'page progress uses canonical stored groups, not the larger pre-dedup requested count')
 assert.match(source.slice(source.indexOf('export function SelectedConflictGroupReviewModal')), /ModalCloseContext\.Consumer[\s\S]*requestClose \|\| onClose/, 'the footer Close preserves locally selected sources through the same unsaved guard as the header X')
 
 console.log('PASS selected conflict combined review shows exact before/after, explicit choices, partial truth, and independent undo identities')
