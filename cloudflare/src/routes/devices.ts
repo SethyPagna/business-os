@@ -188,11 +188,22 @@ app.post('/:id/approve', async (c) => {
     }, 409)
   }
 
+  // The pre-read above improves the ordinary cap message, but it is not the
+  // authority: this write repeats the count in its own WHERE predicate so two
+  // stale approval requests cannot both consume the final device slot.
   const updated = await db.prepare(`
     UPDATE trusted_devices
     SET status = 'approved', decided_at = CURRENT_TIMESTAMP, decided_by_user_id = @admin_id, decided_by_name = @admin_name, revoked_at = NULL
-    WHERE id = @id AND status = 'pending'
-  `).run({ id, admin_id: admin.id, admin_name: admin.name })
+    WHERE id = @id AND user_id = @user_id AND status = 'pending'
+      AND (SELECT COUNT(*) FROM trusted_devices
+           WHERE user_id = @user_id AND status = 'approved' AND id != @id) < @approved_device_limit
+  `).run({
+    id,
+    user_id: device.user_id,
+    admin_id: admin.id,
+    admin_name: admin.name,
+    approved_device_limit: MAX_APPROVED_DEVICES_PER_USER,
+  })
 
   // A concurrent reject/reset must never be overwritten by this stale
   // approval read. The guarded update changed no row, so report the state
@@ -206,6 +217,16 @@ app.post('/:id/approve', async (c) => {
         error: 'This rejected device must be reset before it can request approval again.',
         code: 'device_reapproval_reset_required',
       }, 409)
+    }
+    if (current?.status === 'pending') {
+      const currentApprovedCount = await countApprovedDevices(c.env, device.user_id, device.id)
+      if (currentApprovedCount >= MAX_APPROVED_DEVICES_PER_USER) {
+        return c.json({
+          error: `This account already has ${currentApprovedCount} approved devices (limit ${MAX_APPROVED_DEVICES_PER_USER}). Revoke one of its devices first, then approve this one.`,
+          code: 'device_limit_reached',
+          limit: MAX_APPROVED_DEVICES_PER_USER,
+        }, 409)
+      }
     }
     return c.json({ error: 'Device request is no longer available.' }, 409)
   }
