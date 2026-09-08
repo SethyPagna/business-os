@@ -76,10 +76,81 @@ function catalogState(d1) {
 async function main() {
   {
     const fixture = await prepareThreeMemberReview()
+    const applied = await apply(fixture.app, fixture.review, fixture.finalized.manifest_digest)
+    assert.equal(applied.status, 200, JSON.stringify(applied.body))
+    assert.equal(applied.body.status, 'completed')
+    assert.equal(applied.body.groups.length, 1)
+    assert.equal(applied.body.groups[0].processed_folds, 2)
+    assert.deepEqual(applied.body.groups[0].merged_ids, [10001, 10002])
+    assert.deepEqual(fixture.d1.db.prepare(`SELECT id,variant_product_id,is_active FROM product_batches
+      WHERE id IN (99002,99003) ORDER BY id`).all().map((row) => ({ ...row })), [
+      { id: 99002, variant_product_id: 10000, is_active: 1 },
+      { id: 99003, variant_product_id: 10002, is_active: 0 },
+    ])
+    assert.ok(fixture.controls.statements <= 700)
+  }
+
+  {
+    const { d1, groups } = seed(3)
+    const loaded = loadRoute(d1, true)
+    const review = await post(loaded.app, {
+      manifest_version: 1, resolution_version: 2, client_request_id: 'apply_three_groups_001', merge_groups: groups, remove_rows: [],
+    })
+    assert.equal(review.status, 200)
+    const finalized = await finalize(loaded.app, review.body, groups)
+    assert.equal(finalized.status, 200)
+    const applied = await apply(loaded.app, review.body, finalized.body.manifest_digest)
+    assert.equal(applied.status, 200, JSON.stringify(applied.body))
+    assert.equal(applied.body.status, 'completed')
+    assert.equal(applied.body.continuation_required, false)
+    assert.equal(applied.body.groups.length, 3)
+    assert.deepEqual(applied.body.groups.map((group) => group.group_key), groups.map((group) => group.group_key))
+    assert.equal(applied.body.groups.reduce((sum, group) => sum + group.processed_folds, 0), 3)
+    assert.equal(d1.db.prepare("SELECT COUNT(*) n FROM action_history WHERE json_extract(undo_payload,'$.applier')='product.merge.group'").get().n, 3)
+    assert.ok(loaded.controls.statements <= 700)
+  }
+
+  {
+    const { d1, groups } = seed(3)
+    const loaded = loadRoute(d1, true)
+    const review = await post(loaded.app, {
+      manifest_version: 1, resolution_version: 2, client_request_id: 'apply_second_fold_race_001', merge_groups: groups, remove_rows: [],
+    })
+    const finalized = await finalize(loaded.app, review.body, groups)
+    let injected = false
+    loaded.controls.beforeWriteBatch = (statements) => {
+      if (!injected && statements.some((statement) => Number(statement.params?.member) === 10002)) {
+        d1.db.prepare('UPDATE branch_stock SET quantity=30 WHERE product_id=10002 AND branch_id=1').run()
+        injected = true
+      }
+    }
+    const applied = await apply(loaded.app, review.body, finalized.body.manifest_digest)
+    assert.equal(applied.status, 200, JSON.stringify(applied.body))
+    assert.equal(applied.body.interruption_code, 'merge_state_conflict')
+    assert.equal(applied.body.continuation_required, true)
+    assert.equal(applied.body.groups.length, 1)
+    assert.equal(applied.body.groups[0].group_key, groups[0].group_key)
+    assert.equal(d1.db.prepare('SELECT is_active FROM products WHERE id=10000').get().is_active, 0)
+    assert.equal(d1.db.prepare('SELECT is_active FROM products WHERE id=10002').get().is_active, 1)
+    assert.equal(d1.db.prepare('SELECT quantity FROM branch_stock WHERE product_id=10002 AND branch_id=1').get().quantity, 30)
+    assert.equal(d1.db.prepare("SELECT COUNT(*) n FROM action_history WHERE json_extract(undo_payload,'$.applier')='product.merge.group'").get().n, 1)
+    assert.equal(d1.db.prepare("SELECT COUNT(*) n FROM audit_logs WHERE action='merge_duplicate'").get().n, 1)
+  }
+
+  {
+    const fixture = await prepareThreeMemberReview()
     const before = catalogState(fixture.d1)
-    const first = await apply(fixture.app, fixture.review, fixture.finalized.manifest_digest)
+    const realNow = Date.now
+    const baseNow = realNow()
+    let firstFoldCommitted = false
+    fixture.controls.beforeNextWriteBatch = () => { firstFoldCommitted = true }
+    Date.now = () => baseNow + (firstFoldCommitted ? 19_000 : 0)
+    let first
+    try { first = await apply(fixture.app, fixture.review, fixture.finalized.manifest_digest) }
+    finally { Date.now = realNow }
     assert.equal(first.status, 200, JSON.stringify(first.body))
     assert.equal(first.body.continuation_required, true)
+    assert.equal(first.body.interruption_code, 'merge_budget_reached')
     assert.equal(first.body.groups.length, 1)
     assert.equal(first.body.groups[0].processed_folds, 1)
     assert.equal(first.body.counts.committed_folds, 1)
@@ -200,7 +271,7 @@ async function main() {
     }
   }
 
-  console.log('product conflict action apply sqlite: N=3 apply, receipt, product/stock/lot CAS, exact Undo/Redo checks passed')
+  console.log('product conflict action apply sqlite: bounded multi-fold/group apply, receipt CAS, exact Undo/Redo checks passed')
 }
 
 main().catch((error) => { console.error(error); process.exit(1) })

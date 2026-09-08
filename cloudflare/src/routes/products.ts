@@ -6191,6 +6191,27 @@ async function productConflictActionApplyCounts(db: ReturnType<typeof getDb>, re
   }
 }
 
+const PRODUCT_CONFLICT_ACTION_APPLY_MAX_DELTA_GROUPS = 12
+const PRODUCT_CONFLICT_ACTION_APPLY_MAX_FOLDS = 8
+const PRODUCT_CONFLICT_ACTION_APPLY_NEXT_FOLD_RESERVE = 380
+
+class ProductConflictActionApplyStop extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+    readonly status: 403 | 409 | 500,
+  ) { super(message) }
+}
+
+type ProductConflictActionApplyDelta = {
+  group_key: string
+  status: string
+  processed_folds: number
+  keeper_id?: number
+  merged_ids: number[]
+  operation_ids: string[]
+}
+
 async function applyProductConflictActionReview(c: any, raw: unknown, user: SessionUser) {
   let request
   try { request = parseProductConflictActionApplyRequest(raw) }
@@ -6219,28 +6240,28 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
       manifest_digest: review.manifest_digest, status: review.status, continuation_required: false,
       counts: { requested_groups: Number(review.requested_group_count), total_members: Number(review.total_member_count), ...counts }, groups: [] })
   }
-  let group = await db.prepare(`SELECT ordinal,group_key,source_group_keys_json,member_ids_json,status,state_digest,detail_json,
+  const requestStartedAt = Date.now()
+  const deltaGroups: ProductConflictActionApplyDelta[] = []
+  let processedFolds = 0
+  let interruption: ProductConflictActionApplyStop | null = null
+  const branchRows = await db.prepare('SELECT id,name FROM branches').all<{ id: number; name: string }>()
+  const branchNameById = new Map(branchRows.map((row) => [Number(row.id), row.name]))
+  while (deltaGroups.length < PRODUCT_CONFLICT_ACTION_APPLY_MAX_DELTA_GROUPS
+    && processedFolds < PRODUCT_CONFLICT_ACTION_APPLY_MAX_FOLDS) {
+    if ((processedFolds > 0 && Date.now() - requestStartedAt + 1_500 >= MERGE_DUPLICATES_REQUEST_BUDGET_MS)
+      || counted.statementCount() + PRODUCT_CONFLICT_ACTION_APPLY_NEXT_FOLD_RESERVE > MERGE_DUPLICATES_REQUEST_STATEMENT_BUDGET) {
+      interruption = new ProductConflictActionApplyStop('merge_budget_reached',
+        'Committed reviewed folds were saved. Continue the same review to process the remaining folds.', 409)
+      break
+    }
+    try {
+      let group = await db.prepare(`SELECT ordinal,group_key,source_group_keys_json,member_ids_json,status,state_digest,detail_json,
     resolution_json,final_plan_json,operation_id,action_history_id,reversal_generation
     FROM product_conflict_action_groups g WHERE review_id=@review AND (status IN ('ready','partial') OR EXISTS(
       SELECT 1 FROM product_conflict_action_group_members m WHERE m.review_id=g.review_id AND m.group_ordinal=g.ordinal AND m.status='history_pending'))
     ORDER BY ordinal LIMIT 1`)
     .get<ProductConflictActionStoredGroupRow>({ review: review.id })
-  if (!group) {
-    const counts = await productConflictActionApplyCounts(db, review.id)
-    if (counts.pending_groups === 0 && counts.partial_groups === 0 && counts.history_pending_groups === 0 && counts.pending_folds === 0) {
-      await db.prepare(`UPDATE product_conflict_action_reviews SET status='completed',updated_at=CURRENT_TIMESTAMP
-        WHERE id=@review AND actor_id=@actor AND manifest_digest=@manifest AND status IN ('finalized','running','interrupted')`)
-        .run({ review: review.id, actor: user.id, manifest: review.manifest_digest })
-      return c.json({ success: true, manifest_version: 1, resolution_version: 2, review_id: review.id,
-        manifest_digest: review.manifest_digest, status: 'completed', continuation_required: false,
-        counts: { requested_groups: Number(review.requested_group_count), total_members: Number(review.total_member_count), ...counts }, groups: [] })
-    }
-    const reversed = counts.reversed_groups > 0 || counts.reversed_folds > 0
-    return c.json({ success: false, code: reversed ? 'review_reversed' : 'review_state_conflict',
-      error: reversed
-        ? 'A reviewed group was reversed. Redo it or start a new review before continuing.'
-        : 'No resumable reviewed group is available.' }, 409)
-  }
+      if (!group) break
   let plan: ProductConflictActionFinalPlan
   let detail: ProductConflictActionGroupPlan
   try {
@@ -6248,14 +6269,14 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
     detail = JSON.parse(group.detail_json) as ProductConflictActionGroupPlan
   } catch (error) {
     const validation = error instanceof ProductConflictMergeValidationError ? error : new ProductConflictMergeValidationError('The stored conflict review is unreadable.', 'review_corrupt', 409)
-    return c.json({ success: false, code: validation.code, error: validation.message }, 409)
+    throw new ProductConflictActionApplyStop(validation.code, validation.message, 409)
   }
   const members = await db.prepare(`SELECT member_ordinal,product_id,role,status,operation_id,undo_snapshot_id
     FROM product_conflict_action_group_members WHERE review_id=@review AND group_ordinal=@ordinal ORDER BY member_ordinal`)
     .all<ProductConflictActionMemberReceipt>({ review: review.id, ordinal: group.ordinal })
   if (members.some((member) => member.status === 'reversed')) {
-    return c.json({ success: false, code: 'review_reversed',
-      error: 'This reviewed group has a reversed prefix. Redo it or start a new review before continuing.' }, 409)
+    throw new ProductConflictActionApplyStop('review_reversed',
+      'This reviewed group has a reversed prefix. Redo it or start a new review before continuing.', 409)
   }
   const pendingHistory = members.find((member) => member.status === 'history_pending')
   if (pendingHistory?.undo_snapshot_id) {
@@ -6264,26 +6285,28 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
     let stored: MergeReversal | null = null
     try { stored = child ? JSON.parse(child.payload_json) as MergeReversal : null } catch { stored = null }
     const reconciled = stored ? await reconcileProductConflictActionChild(db, user, review, group, pendingHistory, stored).catch(() => false) : false
-    review = await readProductConflictActionReview(db, user.id, review.id) || review
-    const counts = await productConflictActionApplyCounts(db, review.id)
-    return c.json({ success: true, manifest_version: 1, resolution_version: 2, review_id: review.id,
-      manifest_digest: review.manifest_digest, status: review.status, continuation_required: review.status !== 'completed',
-      counts: { requested_groups: Number(review.requested_group_count), total_members: Number(review.total_member_count), ...counts },
-      groups: [{ group_key: group.group_key, status: reconciled ? 'history_reconciled' : 'history_pending', processed_folds: 0 }] })
+    deltaGroups.push({ group_key: group.group_key, status: reconciled ? 'history_reconciled' : 'history_pending',
+      processed_folds: 0, merged_ids: [], operation_ids: [] })
+    if (!reconciled) {
+      interruption = new ProductConflictActionApplyStop('merge_history_pending',
+        'A committed reviewed fold still needs its history receipt finalized.', 409)
+      break
+    }
+    continue
   }
   const member = members.find((candidate) => candidate.role === 'merged' && candidate.status === 'planned')
-  if (!member?.operation_id) return c.json({ success: false, code: 'review_state_conflict', error: 'The reviewed group member receipt is invalid.' }, 409)
+  if (!member?.operation_id) throw new ProductConflictActionApplyStop('review_state_conflict', 'The reviewed group member receipt is invalid.', 409)
   if (plan.image_effect && getActionTier(user, 'products', 'image') !== 'full') {
-    return c.json({ success: false, code: 'image_permission_required', error: 'This reviewed group changes product images.' }, 403)
+    throw new ProductConflictActionApplyStop('image_permission_required', 'This reviewed group changes product images.', 403)
   }
   const currentProducts = await db.prepare(`SELECT * FROM products WHERE id IN (@keeper,@member)`)
     .all<Record<string, unknown> & { id: number; name: string | null; image_path: string | null }>({ keeper: plan.keeper_id, member: member.product_id })
   const keeper = currentProducts.find((row) => Number(row.id) === Number(plan.keeper_id))
   const duplicate = currentProducts.find((row) => Number(row.id) === Number(member.product_id))
-  if (!keeper || !duplicate) return c.json({ success: false, code: 'merge_state_conflict', error: 'A reviewed product is unavailable.' }, 409)
+  if (!keeper || !duplicate) throw new ProductConflictActionApplyStop('merge_state_conflict', 'A reviewed product is unavailable.', 409)
   if (getActionTier(user, 'products', 'image') !== 'full'
     && await productMergeChangesImages(db, [{ keeper, discarded: duplicate }])) {
-    return c.json({ success: false, code: 'image_permission_required', error: 'This reviewed group now changes product images.' }, 403)
+    throw new ProductConflictActionApplyStop('image_permission_required', 'This reviewed group now changes product images.', 403)
   }
   const firstFold = !group.action_history_id
   const preparedSnapshot = await readProductMergeCaseSnapshot(db, plan.keeper_id, member.product_id, MERGE_REPARENT_TABLES)
@@ -6291,10 +6314,8 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
     || (firstFold
       ? !productConflictOriginalMemberMatches(detail, plan.keeper_id, keeper)
       : !productConflictKeeperPostFoldMatches(plan, keeper))) {
-    return c.json({ success: false, code: 'merge_state_conflict', error: 'A reviewed product changed after finalization.' }, 409)
+    throw new ProductConflictActionApplyStop('merge_state_conflict', 'A reviewed product changed after finalization.', 409)
   }
-  const branchRows = await db.prepare('SELECT id,name FROM branches').all<{ id: number; name: string }>()
-  const branchNameById = new Map(branchRows.map((row) => [Number(row.id), row.name]))
   const preStatements: AtomicMergeStatement[] = [{
     sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM product_conflict_action_reviews
       WHERE id=@review AND actor_id=@actor AND manifest_digest=@manifest AND status IN ('finalized','running','interrupted'))
@@ -6334,8 +6355,9 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
       })
   } catch (error) {
     const conflict = /merge_state_conflict|merge_identity_conflict|merge_cluster_plan_conflict/.test(String(error))
-    return c.json({ success: false, code: conflict ? 'merge_state_conflict' : 'merge_failed',
-      error: conflict ? 'A reviewed product or receipt changed before this fold committed.' : 'The reviewed fold could not be completed.' }, conflict ? 409 : 500)
+    const infrastructure = isProductMergeInfrastructureError(error)
+    throw new ProductConflictActionApplyStop(conflict ? 'merge_state_conflict' : infrastructure ? 'merge_infrastructure_interrupted' : 'merge_failed',
+      conflict ? 'A reviewed product or receipt changed before this fold committed.' : 'The reviewed fold could not be completed.', conflict ? 409 : 500)
   }
   group = await db.prepare(`SELECT ordinal,group_key,source_group_keys_json,member_ids_json,status,state_digest,detail_json,
     resolution_json,final_plan_json,operation_id,action_history_id,reversal_generation
@@ -6345,16 +6367,68 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
     FROM product_conflict_action_group_members WHERE review_id=@review AND group_ordinal=@ordinal AND member_ordinal=@memberOrdinal`)
     .get<ProductConflictActionMemberReceipt>({ review: review.id, ordinal: group.ordinal, memberOrdinal: member.member_ordinal }) || member
   const reconciled = await reconcileProductConflictActionChild(db, user, review, group, refreshedMember, foldResult.reversal).catch(() => false)
+      const existingDelta = deltaGroups.find((candidate) => candidate.group_key === group.group_key)
+      if (existingDelta) {
+        existingDelta.status = reconciled ? group.status : 'history_pending'
+        existingDelta.processed_folds += 1
+        existingDelta.keeper_id = plan.keeper_id
+        existingDelta.merged_ids.push(member.product_id)
+        existingDelta.operation_ids.push(member.operation_id)
+      } else {
+        deltaGroups.push({ group_key: group.group_key, status: reconciled ? group.status : 'history_pending',
+          processed_folds: 1, keeper_id: plan.keeper_id, merged_ids: [member.product_id], operation_ids: [member.operation_id] })
+      }
+      processedFolds += 1
+      if (!reconciled) {
+        interruption = new ProductConflictActionApplyStop('merge_history_pending',
+          'A committed reviewed fold still needs its history receipt finalized.', 409)
+        break
+      }
+    } catch (error) {
+      const stop = error instanceof ProductConflictActionApplyStop
+        ? error
+        : new ProductConflictActionApplyStop('merge_infrastructure_interrupted', 'The reviewed merge was interrupted.', 500)
+      if (processedFolds === 0 && deltaGroups.length === 0) {
+        return c.json({ success: false, code: stop.code, error: stop.message }, stop.status)
+      }
+      interruption = stop
+      break
+    }
+  }
   review = await readProductConflictActionReview(db, user.id, review.id) || review
   const counts = await productConflictActionApplyCounts(db, review.id)
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
-  c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
-  c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'update' }))
+  const reversed = counts.reversed_groups > 0 || counts.reversed_folds > 0
+  if (deltaGroups.length === 0 && reversed) {
+    return c.json({ success: false, code: 'review_reversed',
+      error: 'A reviewed group was reversed. Redo it or start a new review before continuing.' }, 409)
+  }
+  const complete = !reversed && counts.pending_groups === 0 && counts.partial_groups === 0
+    && counts.history_pending_groups === 0 && counts.pending_folds === 0
+  if (complete) interruption = null
+  if (!complete && !interruption && (deltaGroups.length >= PRODUCT_CONFLICT_ACTION_APPLY_MAX_DELTA_GROUPS
+    || processedFolds >= PRODUCT_CONFLICT_ACTION_APPLY_MAX_FOLDS)) {
+    interruption = new ProductConflictActionApplyStop('merge_budget_reached',
+      'Committed reviewed folds were saved. Continue the same review to process the remaining folds.', 409)
+  }
+  if (deltaGroups.length === 0 && !complete) {
+    return c.json({ success: false, code: 'review_state_conflict', error: 'No resumable reviewed group is available.' }, 409)
+  }
+  if (complete && review.status !== 'completed') {
+    await db.prepare(`UPDATE product_conflict_action_reviews SET status='completed',updated_at=CURRENT_TIMESTAMP
+      WHERE id=@review AND actor_id=@actor AND manifest_digest=@manifest AND status IN ('finalized','running','interrupted')`)
+      .run({ review: review.id, actor: user.id, manifest: review.manifest_digest })
+    review = await readProductConflictActionReview(db, user.id, review.id) || { ...review, status: 'completed' }
+  }
+  if (processedFolds > 0) {
+    c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+    c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
+    c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'update' }))
+  }
   return c.json({ success: true, manifest_version: 1, resolution_version: 2, review_id: review.id,
-    manifest_digest: review.manifest_digest, status: review.status, continuation_required: review.status !== 'completed',
+    manifest_digest: review.manifest_digest, status: review.status, continuation_required: !complete,
     counts: { requested_groups: Number(review.requested_group_count), total_members: Number(review.total_member_count), ...counts },
-    groups: [{ group_key: group.group_key, status: reconciled ? group.status : 'history_pending',
-      processed_folds: 1, keeper_id: plan.keeper_id, merged_ids: [member.product_id], operation_ids: [member.operation_id] }] })
+    groups: deltaGroups,
+    ...(interruption ? { interruption_code: interruption.code, interruption_message: interruption.message } : {}) })
 }
 
 registerProductMergeGroupRedo(async (ctx) => {
