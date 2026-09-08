@@ -124,6 +124,18 @@ async function main() {
       'payment_settled', 'apply', 1, 'synthetic-review', '2026-09-08T00:00:00.000Z',
       JSON.stringify([{ field: 'payment_method', before: { state: 'known_value', value: 'Credit' }, after: { state: 'known_value', value: 'Cash' } }]),
     )
+    f.sql.prepare("INSERT INTO returns(id,return_number,sale_id,branch_id) VALUES(991,'BACKUP-RETURN',999,1)").run()
+    const immutableReturnReceipt = {
+      id: '00000000-0000-4000-8000-000000000991',
+      requestJson: JSON.stringify({ return_id: 991, type: 'refund', notes: 'exact accepted intent' }),
+      responseJson: JSON.stringify({ id: 991, updated_at: '2026-09-08T00:00:00.000Z' }),
+    }
+    f.sql.prepare(`INSERT INTO return_mutation_receipts(
+      id,actor_id,return_id,sale_id,mutation_kind,request_id,request_digest,
+      request_json,response_json,occurred_at
+    ) VALUES(?,1,991,999,'edit','backup-return-edit',?,?,?,'2026-09-08T00:00:00.000Z')`).run(
+      immutableReturnReceipt.id, 'c'.repeat(64), immutableReturnReceipt.requestJson, immutableReturnReceipt.responseJson,
+    )
     const snap = (tables = f.sql.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all().map(t => t.name)) =>
       Object.fromEntries(tables.map(t => [t, f.sql.prepare(`SELECT * FROM "${t.replaceAll('"', '""')}"`).all()
         .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))]))
@@ -132,7 +144,7 @@ async function main() {
     const document = JSON.parse(f.env.ASSETS._store.get(created.key).body)
     assert.equal(Object.keys(document.tables).length, backup.BACKUP_TABLES.length)
     assert.deepEqual(Object.keys(document.tables), [...backup.BACKUP_TABLES], 'full backup must include every table in exact dependency order')
-    for (const table of ['return_write_revisions', 'return_bulk_operations', 'return_bulk_members', 'stock_session_revisions', 'stock_session_operations', 'stock_session_members', 'sale_mutation_receipts', 'sale_mutation_members', 'sale_record_events']) {
+    for (const table of ['return_write_revisions', 'return_bulk_operations', 'return_bulk_members', 'return_mutation_receipts', 'stock_session_revisions', 'stock_session_operations', 'stock_session_members', 'sale_mutation_receipts', 'sale_mutation_members', 'sale_record_events']) {
       assert.ok(Object.hasOwn(document.tables, table), `backup includes durable replay table ${table}`)
     }
     for (const table of ['product_conflict_merge_runs', 'product_conflict_merge_run_cases']) {
@@ -163,6 +175,11 @@ async function main() {
       { run_id: 'conflict-run-fixture', status: 'history_pending', error: 'history finalization pending' },
       'selected-conflict case continuation state round-trips byte-for-byte',
     )
+    assert.deepEqual(
+      f.sql.prepare('SELECT request_json,response_json FROM return_mutation_receipts WHERE id=?').get(immutableReturnReceipt.id),
+      { request_json: immutableReturnReceipt.requestJson, response_json: immutableReturnReceipt.responseJson },
+      'full backup preserves immutable return request/response evidence byte-for-byte',
+    )
     assert.deepEqual(f.sql.pragma('foreign_key_check'), [])
     f.sql.exec("DELETE FROM system_flags WHERE key='maintenance'")
     const operations = f.sql.prepare('SELECT * FROM sale_bulk_operations ORDER BY request_id').all()
@@ -170,7 +187,7 @@ async function main() {
     assert.equal((await bulk.replay(f, operations[1].history_id, 'redo', 1)).status, 200)
     const replayBundleTables = backup.BACKUP_TABLES.filter(table => backup.SALE_REPLAY_RESTORE_BUNDLE.includes(table))
     const replayBundleBefore = snap(replayBundleTables)
-    const scopedCreated = await backup.createSectionBackup(f.env, ['products', 'sales', 'sale_record_events'], 'manual')
+    const scopedCreated = await backup.createSectionBackup(f.env, ['products', 'sales', 'return_mutation_receipts', 'sale_record_events'], 'manual')
     const scopedDocument = JSON.parse(f.env.ASSETS._store.get(scopedCreated.key).body)
     assert.deepEqual(Object.keys(scopedDocument.tables), replayBundleTables,
       'requesting any Sales replay table widens the generated section backup to the complete restorable bundle')
@@ -179,6 +196,7 @@ async function main() {
     await backup.restoreCloudflareBackup(f.env, scopedCreated.key)
     f.sql.exec("DELETE FROM system_flags WHERE key='maintenance'")
     assert.deepEqual(snap(replayBundleTables), replayBundleBefore)
+    assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM return_mutation_receipts').get().n, 1)
     assert.deepEqual(f.sql.pragma('foreign_key_check'), [])
     console.log('PASS generated Sales reset backup widens to the complete replay bundle and restores FK-on')
 

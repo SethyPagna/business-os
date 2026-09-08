@@ -105,3 +105,49 @@ AND NOT EXISTS (
 BEGIN
   SELECT RAISE(ABORT, 'sale record events are immutable: delete only during restore or reset');
 END;
+
+CREATE TABLE return_mutation_receipts (
+  id TEXT PRIMARY KEY CHECK (
+    length(id)=36 AND lower(id)=id
+    AND id GLOB '[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]-[0-9a-f][0-9a-f][0-9a-f][0-9a-f]-4[0-9a-f][0-9a-f][0-9a-f]-[89ab][0-9a-f][0-9a-f][0-9a-f]-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]'
+  ),
+  actor_id INTEGER NOT NULL CHECK(typeof(actor_id)='integer' AND actor_id>0),
+  return_id INTEGER NOT NULL REFERENCES returns(id) ON DELETE RESTRICT
+    CHECK(typeof(return_id)='integer' AND return_id>0),
+  sale_id INTEGER REFERENCES sales(id) ON DELETE RESTRICT
+    CHECK(sale_id IS NULL OR (typeof(sale_id)='integer' AND sale_id>0)),
+  mutation_kind TEXT NOT NULL CHECK(mutation_kind='edit'),
+  request_id TEXT NOT NULL CHECK(length(CAST(trim(request_id) AS BLOB)) BETWEEN 1 AND 120),
+  request_digest TEXT NOT NULL CHECK(length(request_digest)=64 AND request_digest NOT GLOB '*[^0-9a-f]*'),
+  request_json TEXT NOT NULL CHECK(json_valid(request_json))
+    CHECK(json_type(CASE WHEN json_valid(request_json) THEN request_json ELSE '{}' END)='object')
+    CHECK(length(CAST(request_json AS BLOB))<=131072),
+  response_json TEXT NOT NULL CHECK(json_valid(response_json))
+    CHECK(json_type(CASE WHEN json_valid(response_json) THEN response_json ELSE '{}' END)='object')
+    CHECK(length(CAST(response_json AS BLOB))<=65536)
+    CHECK(json_type(response_json,'$.id')='integer' AND json_extract(response_json,'$.id')>0)
+    CHECK(json_type(response_json,'$.updated_at')='text' AND length(CAST(json_extract(response_json,'$.updated_at') AS BLOB)) BETWEEN 1 AND 40)
+    CHECK(json_remove(response_json,'$.id','$.updated_at')='{}'),
+  occurred_at TEXT NOT NULL CHECK(length(trim(occurred_at)) BETWEEN 1 AND 40),
+  UNIQUE(actor_id,mutation_kind,request_id)
+);
+
+CREATE INDEX idx_return_mutation_receipts_return_time
+  ON return_mutation_receipts(return_id,occurred_at,id);
+
+CREATE TRIGGER return_mutation_receipts_append_only_update
+BEFORE UPDATE ON return_mutation_receipts BEGIN
+  SELECT RAISE(ABORT, 'return mutation receipts are immutable');
+END;
+
+CREATE TRIGGER return_mutation_receipts_append_only_delete
+BEFORE DELETE ON return_mutation_receipts
+WHEN NOT EXISTS (SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore')
+AND NOT EXISTS (
+  SELECT 1 FROM system_flags WHERE key='sale_record_events_reset_guard'
+    AND json_extract(value,'$.mode')='reset'
+    AND length(trim(COALESCE(json_extract(value,'$.token'),'')))>0
+)
+BEGIN
+  SELECT RAISE(ABORT, 'return mutation receipts are immutable: delete only during restore or reset');
+END;

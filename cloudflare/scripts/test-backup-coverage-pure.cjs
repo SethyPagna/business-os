@@ -117,6 +117,8 @@ check('FK dependency order holds: every child sits after every parent it referen
   before('return_items', 'return_item_batch_allocations')
   before('return_items', 'return_replacement_items')
   before('sales', 'sale_items')
+  before('sales', 'return_mutation_receipts')
+  before('returns', 'return_mutation_receipts')
   before('returns', 'return_items')
   before('products', 'product_images')
   before('promotions', 'promotion_rules')

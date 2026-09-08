@@ -378,6 +378,7 @@ export const FACTORY_RESET_TABLES = [
   // Immutable Sales Records must be cleared before their sales/receipt
   // parents, under the atomic reset guard in routes/system.ts.
   'sale_record_events',
+  'return_mutation_receipts',
   // Reviewed conflict actions cannot survive product identity reuse. Clear
   // both child receipt sets before their groups/reviews and product/history
   // parents.

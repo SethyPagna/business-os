@@ -77,21 +77,85 @@ db.prepare("INSERT INTO system_flags(key,value) VALUES('sale_record_events_reset
 assert.throws(() => db.prepare('DELETE FROM sale_record_events WHERE id=?').run(resetId.id), /immutable/i)
 db.prepare("UPDATE system_flags SET value='{" + '"mode":"reset","token":"test-reset"' + "}' WHERE key='sale_record_events_reset_guard'").run()
 db.prepare('DELETE FROM sale_record_events WHERE id=?').run(resetId.id)
+db.prepare("DELETE FROM system_flags WHERE key='sale_record_events_reset_guard'").run()
 
 const fkId = valid()
 insert.run(fkId)
+assert.throws(() => db.prepare('DELETE FROM sales WHERE id=1').run(), /foreign key/i)
+
+db.prepare("INSERT INTO returns(id,return_number,sale_id) VALUES(1,'R-1',1)").run()
+const receiptInsert = db.prepare(`INSERT INTO return_mutation_receipts(
+  id,actor_id,return_id,sale_id,mutation_kind,request_id,request_digest,
+  request_json,response_json,occurred_at
+) VALUES(@id,@actor_id,@return_id,@sale_id,@mutation_kind,@request_id,@request_digest,
+  @request_json,@response_json,@occurred_at)`)
+const validReceipt = (overrides = {}) => ({
+  id: crypto.randomUUID(), actor_id: 1, return_id: 1, sale_id: 1,
+  mutation_kind: 'edit', request_id: `return-edit-${crypto.randomUUID()}`,
+  request_digest: 'b'.repeat(64), request_json: '{"return_id":1}',
+  response_json: '{"id":1,"updated_at":"2026-09-08T00:00:00.000Z"}',
+  occurred_at: '2026-09-08T00:00:00.000Z', ...overrides,
+})
+const receipt = validReceipt()
+receiptInsert.run(receipt)
+for (const [label, overrides] of [
+  ['receipt id', { id: 'not-a-uuid' }],
+  ['receipt actor', { actor_id: 0 }],
+  ['receipt return', { return_id: 0 }],
+  ['receipt sale', { sale_id: 0 }],
+  ['receipt kind', { mutation_kind: 'create' }],
+  ['receipt request blank', { request_id: '   ' }],
+  ['receipt request long', { request_id: 'r'.repeat(121) }],
+  ['receipt digest', { request_digest: 'G'.repeat(64) }],
+  ['receipt request array', { request_json: '[]' }],
+  ['receipt response array', { response_json: '[]' }],
+  ['receipt response id', { response_json: '{"id":"1","updated_at":"2026-09-08T00:00:00.000Z"}' }],
+  ['receipt response stamp', { response_json: '{"id":1,"updated_at":1}' }],
+  ['receipt response extra', { response_json: '{"id":1,"updated_at":"2026-09-08T00:00:00.000Z","private":true}' }],
+]) assert.throws(() => receiptInsert.run(validReceipt(overrides)), /constraint|malformed JSON/i, label)
+
+const oversizedRequest = JSON.stringify({ note: 'ក'.repeat(44000) })
+assert(Buffer.byteLength(oversizedRequest, 'utf8') > 131072 && oversizedRequest.length < 131072)
+assert.throws(() => receiptInsert.run(validReceipt({ request_json: oversizedRequest })), /constraint/i)
+const oversizedResponse = JSON.stringify({ id: 1, updated_at: 'ក'.repeat(22000) })
+assert(Buffer.byteLength(oversizedResponse, 'utf8') > 65536 && oversizedResponse.length < 65536)
+assert.throws(() => receiptInsert.run(validReceipt({ response_json: oversizedResponse })), /constraint/i)
+
+const sharedReceiptRequest = `shared-${crypto.randomUUID()}`
+receiptInsert.run(validReceipt({ request_id: sharedReceiptRequest }))
+assert.throws(() => receiptInsert.run(validReceipt({ request_id: sharedReceiptRequest })), /unique/i)
+receiptInsert.run(validReceipt({ actor_id: 2, request_id: sharedReceiptRequest }))
+
+assert.throws(() => db.prepare('UPDATE return_mutation_receipts SET occurred_at=? WHERE id=?')
+  .run('2026-09-09T00:00:00.000Z', receipt.id), /immutable/i)
+assert.throws(() => db.prepare('DELETE FROM return_mutation_receipts WHERE id=?').run(receipt.id), /immutable/i)
+db.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance','{\"mode\":\"backup\"}') ON CONFLICT(key) DO UPDATE SET value=excluded.value").run()
+assert.throws(() => db.prepare('DELETE FROM return_mutation_receipts WHERE id=?').run(receipt.id), /immutable/i)
+db.prepare("UPDATE system_flags SET value='{\"mode\":\"restore\"}' WHERE key='maintenance'").run()
+db.prepare('DELETE FROM return_mutation_receipts WHERE id=?').run(receipt.id)
+
+const resetReceipt = validReceipt()
+receiptInsert.run(resetReceipt)
+db.prepare("DELETE FROM system_flags WHERE key='maintenance'").run()
+db.prepare("INSERT INTO system_flags(key,value) VALUES('sale_record_events_reset_guard','{\"mode\":\"reset\",\"token\":\"\"}') ON CONFLICT(key) DO UPDATE SET value=excluded.value").run()
+assert.throws(() => db.prepare('DELETE FROM return_mutation_receipts WHERE id=?').run(resetReceipt.id), /immutable/i)
+db.prepare("UPDATE system_flags SET value='{\"mode\":\"reset\",\"token\":\"receipt-reset\"}' WHERE key='sale_record_events_reset_guard'").run()
+db.prepare('DELETE FROM return_mutation_receipts WHERE id=?').run(resetReceipt.id)
+db.prepare("DELETE FROM system_flags WHERE key='sale_record_events_reset_guard'").run()
+assert.throws(() => db.prepare('DELETE FROM returns WHERE id=1').run(), /foreign key/i)
 assert.throws(() => db.prepare('DELETE FROM sales WHERE id=1').run(), /foreign key/i)
 
 const backupSource = fs.readFileSync(path.join(__dirname, '../src/lib/backup.ts'), 'utf8')
 const coreSource = fs.readFileSync(path.join(__dirname, '../src/lib/coreDataInvariants.ts'), 'utf8')
 const systemSource = fs.readFileSync(path.join(__dirname, '../src/routes/system.ts'), 'utf8')
 assert.match(backupSource, /BACKUP_TABLES = \[[\s\S]*?'sales'[\s\S]*?'sale_record_events'/)
-assert.match(backupSource, /SALE_REPLAY_RESTORE_BUNDLE = \[[\s\S]*?'sale_record_events'/)
+assert.match(backupSource, /BACKUP_TABLES = \[[\s\S]*?'returns'[\s\S]*?'return_mutation_receipts'[\s\S]*?'return_items'/)
+assert.match(backupSource, /SALE_REPLAY_RESTORE_BUNDLE = \[[\s\S]*?'return_mutation_receipts'[\s\S]*?'sale_record_events'/)
 assert.match(backupSource, /createSectionBackup[\s\S]*?BACKUP_TABLES\.filter/)
-assert.match(coreSource, /FACTORY_RESET_TABLES = \[[\s\S]*?'sale_record_events'[\s\S]*?'sales'/)
-assert.match(systemSource, /tablesToClear\.unshift\('sale_record_events'\)/)
-assert.match(systemSource, /const statements:[\s\S]*?'DELETE FROM sale_record_events'[\s\S]*?'DELETE FROM sales'/)
+assert.match(coreSource, /FACTORY_RESET_TABLES = \[[\s\S]*?'sale_record_events'[\s\S]*?'return_mutation_receipts'[\s\S]*?'sales'/)
+assert.match(systemSource, /tablesToClear\.unshift\('sale_record_events'\)[\s\S]*?tablesToClear\.splice\(1, 0, 'return_mutation_receipts'\)/)
+assert.match(systemSource, /const statements:[\s\S]*?'DELETE FROM sale_record_events'[\s\S]*?'DELETE FROM return_mutation_receipts'[\s\S]*?'DELETE FROM returns'[\s\S]*?'DELETE FROM sales'/)
 assert.match(systemSource, /guardSaleRecordReset\(FACTORY_RESET_TABLES/)
 
 db.close()
-console.log('PASS 0140 schema, byte bounds, identity, immutability, restore/reset guards, FK order, and lifecycle coverage')
+console.log('PASS 0140 event/return receipt schema, byte bounds, identity, immutability, restore/reset guards, FK order, and lifecycle coverage')
