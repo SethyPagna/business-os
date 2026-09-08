@@ -49,6 +49,15 @@ export interface SaleCreationSnapshotInput {
   deliveryContactPhone?: unknown
   deliveryFeeUsd?: unknown
   deliveryActualCostUsd?: unknown
+  /** Explicit null means the sale was recorded for anonymous General. */
+  customerSnapshot?: { id?: unknown; name?: unknown; phone?: unknown; address?: unknown } | null
+  /** Explicit null means the captured customer had no membership. */
+  membershipSnapshot?: {
+    number?: unknown
+    discountUsd?: unknown
+    discountKhr?: unknown
+    pointsRedeemed?: unknown
+  } | null
 }
 
 export interface SaleCreationSnapshotV1 {
@@ -82,6 +91,8 @@ export interface SaleCreationSnapshotV1 {
     delivery_fee_usd: number | null
     delivery_actual_cost_usd: number | null
   }
+  customer?: { id: number | null; name: string | null; phone: string | null; address: string | null } | null
+  membership?: { number: string | null; discount_usd: number | null; discount_khr: number | null; points_redeemed: number | null } | null
 }
 
 export class SaleCreationSnapshotError extends Error {
@@ -180,6 +191,22 @@ export function buildSaleCreationSnapshot(input: SaleCreationSnapshotInput): str
       delivery_fee_usd: finite(input.deliveryFeeUsd),
       delivery_actual_cost_usd: finite(input.deliveryActualCostUsd),
     },
+    ...(input.customerSnapshot === undefined ? {} : {
+      customer: input.customerSnapshot === null ? null : {
+        id: id(input.customerSnapshot.id),
+        name: text(input.customerSnapshot.name),
+        phone: text(input.customerSnapshot.phone),
+        address: text(input.customerSnapshot.address),
+      },
+    }),
+    ...(input.membershipSnapshot === undefined ? {} : {
+      membership: input.membershipSnapshot === null ? null : {
+        number: text(input.membershipSnapshot.number),
+        discount_usd: finite(input.membershipSnapshot.discountUsd),
+        discount_khr: finite(input.membershipSnapshot.discountKhr),
+        points_redeemed: finite(input.membershipSnapshot.pointsRedeemed),
+      },
+    }),
   }
   const serialized = JSON.stringify(snapshot)
   if (utf8Bytes(serialized) > MAX_SALE_CREATION_SNAPSHOT_BYTES) {

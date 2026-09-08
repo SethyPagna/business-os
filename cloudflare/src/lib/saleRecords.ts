@@ -241,6 +241,10 @@ export function saleCreatedRecordFromSnapshot(
     delivery_fee_usd: null,
     delivery_actual_cost_usd: null,
   }
+  const customerCaptured = Object.prototype.hasOwnProperty.call(snapshot, 'customer')
+  const membershipCaptured = Object.prototype.hasOwnProperty.call(snapshot, 'membership')
+  const customer = snapshot.customer || null
+  const membership = snapshot.membership || null
   return {
     id: `sale:${sale.id}`,
     source: 'sale',
@@ -274,7 +278,19 @@ export function saleCreatedRecordFromSnapshot(
       delivery_contact_phone: text(driver.driver_phone),
       delivery_fee_usd: numberOrNull(driver.delivery_fee_usd),
       delivery_actual_cost_usd: numberOrNull(driver.delivery_actual_cost_usd),
+      customer_id: numberOrNull(customer?.id),
+      customer_name: text(customer?.name),
+      customer_phone: text(customer?.phone),
+      customer_address: text(customer?.address),
+      membership_number: text(membership?.number),
+      membership_discount_usd: numberOrNull(membership?.discount_usd),
+      membership_discount_khr: numberOrNull(membership?.discount_khr),
+      membership_points_redeemed: numberOrNull(membership?.points_redeemed),
     },
+    unknown_after_fields: [
+      ...(customerCaptured ? [] : ['customer_id']),
+      ...(membershipCaptured ? [] : ['membership_number']),
+    ],
   }
 }
 
@@ -470,6 +486,9 @@ export function reconstructSaleCreation(input: {
   reconstructed.items = undefined
   reconstructed.creation_unknown_fields = [
     'products',
+    'is_delivery',
+    'customer_id',
+    'membership_number',
     ...LEGACY_AMBIGUOUS_CREATION_FIELDS.filter((field) => !known[field]),
   ]
   return reconstructed
@@ -1157,6 +1176,10 @@ function publicRecord(record: SaleRecord): SaleRecord {
           actual_delivery_cost_usd: numberOrNull(after.delivery_actual_cost_usd),
         })
     addChange(changes, 'delivery', beforeNone, delivery, true)
+    addChange(changes, 'customer', beforeNone,
+      compositeState(record, 'after', ['customer_id'], customerValue), true)
+    addChange(changes, 'membership', beforeNone,
+      compositeState(record, 'after', ['membership_number'], membershipValue), true)
   } else if (record.kind === 'item_added' || record.kind === 'item_removed' || record.kind === 'item_quantity_changed') {
     addChange(changes, 'item',
       compositeState(record, 'before', ['product_name'], (snapshot) => itemValue(record, snapshot)),

@@ -60,6 +60,8 @@ const validInput = {
   deliveryContactPhone: '012345678',
   deliveryFeeUsd: 2,
   deliveryActualCostUsd: 1.5,
+  customerSnapshot: { id: 42, name: 'Customer At Sale', phone: '010000001', address: 'Recorded address' },
+  membershipSnapshot: { number: 'MEM-42', discountUsd: 1, discountKhr: 0, pointsRedeemed: 25 },
 }
 
 const serialized = subject.buildSaleCreationSnapshot(validInput)
@@ -87,6 +89,32 @@ assert.deepEqual(snapshot.delivery, {
   delivery_fee_usd: 2,
   delivery_actual_cost_usd: 1.5,
 })
+assert.deepEqual(snapshot.customer, {
+  id: 42,
+  name: 'Customer At Sale',
+  phone: '010000001',
+  address: 'Recorded address',
+})
+assert.deepEqual(snapshot.membership, {
+  number: 'MEM-42',
+  discount_usd: 1,
+  discount_khr: 0,
+  points_redeemed: 25,
+})
+const generalSnapshot = JSON.parse(subject.buildSaleCreationSnapshot({
+  ...validInput,
+  customerSnapshot: null,
+  membershipSnapshot: null,
+}))
+assert.equal(generalSnapshot.customer, null, 'explicit General must remain known anonymous')
+assert.equal(generalSnapshot.membership, null, 'explicit no membership must remain known none')
+const historicalV1Snapshot = JSON.parse(subject.buildSaleCreationSnapshot({
+  ...validInput,
+  customerSnapshot: undefined,
+  membershipSnapshot: undefined,
+}))
+assert.ok(!Object.hasOwn(historicalV1Snapshot, 'customer'), 'omitted legacy evidence must remain unknown')
+assert.ok(!Object.hasOwn(historicalV1Snapshot, 'membership'), 'omitted legacy evidence must remain unknown')
 assert.ok(!serialized.includes('cost_price'), 'snapshot must not retain cost or unrelated source fields')
 assert.ok(!serialized.includes('Creator Full Name'), 'actor snapshots use the authenticated username')
 assert.equal(subject.parseSaleCreationSnapshot('{bad'), null)

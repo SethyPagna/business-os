@@ -967,7 +967,10 @@ runTest('the public contract is changed-only and distinguishes General from unkn
   const legacy = buildSaleRecords({ sale: SALE })[0]
   assert.equal(changed(legacy, 'items').after.state, 'unknown')
   assert.equal(changed(legacy, 'payment').after.state, 'unknown')
-  assert.ok(legacy.changes.every((entry) => ['receipt_number', 'sale_status', 'items', 'total_usd', 'payment', 'delivery'].includes(entry.field)))
+  assert.equal(changed(legacy, 'delivery').after.state, 'unknown')
+  assert.equal(changed(legacy, 'customer').after.state, 'unknown')
+  assert.equal(changed(legacy, 'membership').after.state, 'unknown')
+  assert.ok(legacy.changes.every((entry) => ['receipt_number', 'sale_status', 'items', 'total_usd', 'payment', 'delivery', 'customer', 'membership'].includes(entry.field)))
 })
 
 runTest('one grouped replacement is one record with removed and added historical labels', () => {
