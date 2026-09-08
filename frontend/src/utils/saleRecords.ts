@@ -110,7 +110,7 @@ export type SaleRecordFieldFormat = 'money' | 'money_khr' | 'quantity' | 'status
  * future field uses the translated generic change label; raw variable names
  * never become user-facing copy.
  */
-const FIELD_RULES: Record<string, { key: string; format: SaleRecordFieldFormat }> = {
+export const SALE_RECORD_FIELD_RULES: Record<string, { key: string; format: SaleRecordFieldFormat }> = {
   amount_paid_usd: { key: 'amount_paid', format: 'money' },
   amount_paid_khr: { key: 'amount_paid_khr', format: 'money_khr' },
   change_usd: { key: 'change', format: 'money' },
@@ -175,7 +175,7 @@ export function saleRecordFieldRows(record: SaleRecord): SaleRecordFieldRow[] {
     const before = normalizeValueState(change.before)
     const after = normalizeValueState(change.after)
     if (!before || !after || (statesEqual(before, after) && record.kind !== 'sale_created')) return []
-    const rule = FIELD_RULES[change.field] || { key: 'value_changed', format: 'text' as const }
+    const rule = SALE_RECORD_FIELD_RULES[change.field] || { key: 'value_changed', format: 'text' as const }
     return [{ field: change.field, labelKey: rule.key, format: rule.format, before, after, changed: true }]
   })
 }

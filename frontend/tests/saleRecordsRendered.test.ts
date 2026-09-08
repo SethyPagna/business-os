@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { transformSync } from 'esbuild'
-import type { SaleRecord, SaleRecordValue } from '../src/utils/saleRecords.ts'
+import { SALE_RECORD_FIELD_RULES, type SaleRecord, type SaleRecordValue } from '../src/utils/saleRecords.ts'
 
 const require = createRequire(import.meta.url)
 const React = require('react')
@@ -31,22 +31,18 @@ const v = (value: unknown): SaleRecordValue => ({ state: 'known_value', value })
 const none: SaleRecordValue = { state: 'known_none' }
 const unknown: SaleRecordValue = { state: 'unknown' }
 const c = (field: string, before: SaleRecordValue, after: SaleRecordValue) => ({ field, before, after })
-const labels: Record<string, string> = {
-  field: 'Field', before: 'Before', after: 'After', none: 'None', general: 'General',
-  no_membership: 'No membership', no_driver: 'No driver', no_actual_delivery_cost: 'No actual delivery cost',
-  historical_details_unavailable: 'Historical details unavailable', value_changed: 'Value changed',
-  item: 'Product', items: 'Products', removed_items: 'Removed products', added_items: 'Added products',
-  quantity: 'Quantity', total: 'Sale total', driver: 'Driver', delivery_fee: 'Delivery fee',
-  delivery_actual_cost: 'Actual delivery cost', payment_method: 'Payment method', payment_details: 'Payment details',
-  amount_paid: 'Amount paid', amount_paid_khr: 'Amount paid (KHR)', change: 'Change', change_khr: 'Change (KHR)',
-  status: 'Status', customer: 'Customer', membership: 'Membership', membership_discount: 'Membership discount',
-  points_redeemed: 'Points redeemed', delivery: 'Delivery', yes: 'Yes', no: 'No',
-  status_completed: 'Completed', status_awaiting_payment: 'Not Paid',
-}
-const t = (key: string): string => labels[key] || key
-const html = (record: SaleRecord): string => renderToStaticMarkup(React.createElement(SaleRecordChangeTable, {
+const en = JSON.parse(readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8')) as Record<string, unknown>
+const km = JSON.parse(readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8')) as Record<string, unknown>
+const translator = (dictionary: Record<string, unknown>) => (key: string): string => typeof dictionary[key] === 'string' ? String(dictionary[key]) : key
+const tEn = translator(en)
+const tKm = translator(km)
+const html = (
+  record: SaleRecord,
+  t = tEn,
+  fmtKHR: (value: number | string) => string = (amount) => `${Number(amount).toLocaleString('en-US')}៛`,
+): string => renderToStaticMarkup(React.createElement(SaleRecordChangeTable, {
   record, t, fmtUSD: (amount: number | string) => `$${Number(amount).toFixed(2)}`,
-  fmtKHR: (amount: number | string) => `${Number(amount).toLocaleString('en-US')}៛`,
+  fmtKHR,
 }))
 
 const cases: Array<{ name: string; record: SaleRecord; contains: string[] }> = [
@@ -55,7 +51,7 @@ const cases: Array<{ name: string; record: SaleRecord; contains: string[] }> = [
   { name: 'replace', record: { id: 'replace', kind: 'items_replaced', changes: [c('removed_items', v([{ name: 'Old serum', quantity: 1, line_total_usd: 9 }]), v([])), c('added_items', v([]), v([{ name: 'New serum', quantity: 2, line_total_usd: 18 }]))] }, contains: ['Old serum × 1 · $9.00', 'New serum × 2 · $18.00'] },
   { name: 'driver fee cost', record: { id: 'delivery', kind: 'delivery_added', changes: [c('driver', none, v({ id: 9, name: 'Dara', phone: '0123', address: 'Zone A' })), c('delivery_fee_usd', v(0), v(2.5)), c('actual_delivery_cost_usd', none, v(1.25))] }, contains: ['Dara · #9 · 0123 · Zone A', '$2.50', 'No actual delivery cost', '$1.25'] },
   { name: 'payment and status', record: { id: 'payment', kind: 'payment_changed', changes: [c('payment_method', v('Cash'), v('ABA')), c('payment_details', v([{ method: 'Cash', amount_usd: 20, amount_khr: 0 }]), v([{ method: 'ABA', amount_usd: 20, amount_khr: 0 }])), c('amount_paid_khr', v(0), v(80000)), c('sale_status', v('awaiting_payment'), v('completed'))] }, contains: ['Cash · $20.00', 'ABA · $20.00', '80,000៛', 'Not Paid', 'Completed'] },
-  { name: 'customer and membership', record: { id: 'customer', kind: 'customer_changed', changes: [c('customer', none, v({ id: 5, name: 'Srey Mom' })), c('membership', unknown, v({ number: 'M-5', discount_usd: 1, discount_khr: null, points_redeemed: 3 }))] }, contains: ['General', 'Srey Mom', 'Historical details unavailable', 'M-5', 'Membership discount: $1.00', 'Points redeemed: 3'] },
+  { name: 'customer and membership', record: { id: 'customer', kind: 'customer_changed', changes: [c('customer', none, v({ id: 5, name: 'Srey Mom' })), c('membership', unknown, v({ number: 'M-5', discount_usd: 1, discount_khr: null, points_redeemed: 3 }))] }, contains: ['General', 'Srey Mom', 'Historical details unavailable', 'M-5', 'Membership Discount: $1.00', 'Points Redeemed: 3'] },
 ]
 
 let failed = 0
@@ -81,6 +77,45 @@ try {
 } catch (error) {
   failed += 1
   console.error('FAIL rendered unchanged and tri-state distinction')
+  console.error(error)
+}
+
+try {
+  const fieldLabelKeys = [...new Set(Object.values(SALE_RECORD_FIELD_RULES).map((rule) => rule.key))]
+  for (const key of fieldLabelKeys) {
+    assert.equal(typeof en[key], 'string', `English is missing ${key}`)
+    assert.equal(typeof km[key], 'string', `Khmer is missing ${key}`)
+    assert.notEqual(km[key], en[key], `Khmer ${key} falls back to English`)
+  }
+  console.log('PASS real EN/KM dictionaries cover every typed field label')
+} catch (error) {
+  failed += 1
+  console.error('FAIL real EN/KM dictionaries cover every typed field label')
+  console.error(error)
+}
+
+try {
+  let khrCalls = 0
+  const record: SaleRecord = { id: 'km-payment-replace', kind: 'payment_changed', changes: [
+    c('payment_details', v([{ method: 'ABA', amount_khr: 40000 }]), v([{ method: 'Cash', amount_khr: 80000 }])),
+    c('amount_paid_khr', v(40000), v(80000)),
+    c('change_khr', v(0), v(1000)),
+    c('removed_items', v([{ name: 'ចាស់', quantity: 1 }]), v([])),
+    c('added_items', v([]), v([{ name: 'ថ្មី', quantity: 1 }])),
+  ] }
+  const rendered = html(record, tKm, (amount) => { khrCalls += 1; return `KHR_SENTINEL_${amount}` })
+  for (const key of ['payment_details', 'amount_paid_khr', 'change_khr', 'removed_items', 'added_items']) {
+    assert.ok(rendered.includes(String(km[key])), `Khmer render is missing ${key}`)
+    assert.ok(!rendered.includes(String(en[key])), `Khmer render leaked English ${key}`)
+  }
+  assert.ok(rendered.includes('KHR_SENTINEL_40000'))
+  assert.ok(rendered.includes('KHR_SENTINEL_80000'))
+  assert.ok(rendered.includes('KHR_SENTINEL_1000'))
+  assert.ok(khrCalls >= 6, `expected nested and direct KHR formatter calls, got ${khrCalls}`)
+  console.log('PASS rendered Khmer uses real labels and injected KHR formatter')
+} catch (error) {
+  failed += 1
+  console.error('FAIL rendered Khmer uses real labels and injected KHR formatter')
   console.error(error)
 }
 
