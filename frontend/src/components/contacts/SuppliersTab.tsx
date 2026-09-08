@@ -31,7 +31,7 @@ import { ThreeDotMenu, DetailModal, ContactTable, buildSelectedSnapshots, countA
 import { DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import { useContactDuplicateFlag } from './useContactDuplicateFlag'
 import DuplicateFlagBanner from './DuplicateFlagBanner'
-import { createSeparateContactDecision, readContactDuplicateDecisionError, type ContactDuplicateCheck, type ContactDuplicateDecision, type ContactDuplicateMatch } from './contactDuplicates'
+import { createSeparateContactDecision, readContactDuplicateDecisionError, resolveContactDuplicateSyncError, type ContactDuplicateCheck, type ContactDuplicateDecision, type ContactDuplicateMatch } from './contactDuplicates'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
@@ -289,6 +289,8 @@ function SupplierForm({ supplier, onSave, onUseExisting, onClose, t }: SupplierF
       if (nextCheck) {
         setServerDuplicateCheck(nextCheck)
         setLocalError(t('contact_duplicate_review_changed') || 'Review the current possible duplicate records before saving.')
+      } else if (duplicateDecision && (result as { success?: boolean } | null)?.success === true) {
+        resolveContactDuplicateSyncError(pendingDuplicateCheck)
       }
     } finally {
       setSaving(false)
@@ -864,10 +866,12 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
       setModal(null)
       setSelected(null)
       await load({ silent: true, label: 'Suppliers after save' })
+      return { success: true }
     } catch (error: unknown) {
       const duplicateCheck = readContactDuplicateDecisionError(error)
       if (duplicateCheck) return { duplicateDecisionRequired: duplicateCheck }
       notify(getErrorMessage(error, 'Failed'), 'error')
+      return { success: false }
     } finally {
       finishSingleAction(saveInFlightRef)
     }
@@ -884,6 +888,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
       if (!existing) throw new Error('The existing supplier could not be loaded')
       setSelected(existing)
       setModal('detail')
+      resolveContactDuplicateSyncError(match)
     } catch (error) {
       notify(getErrorMessage(error, t('contact_duplicate_existing_load_failed') || 'Could not load the existing record. Try again.'), 'error')
     }

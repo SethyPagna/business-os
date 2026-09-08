@@ -29,7 +29,7 @@ import { ThreeDotMenu, DetailModal, ContactTable, buildSelectedSnapshots, countA
 import { DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import { useContactDuplicateFlag } from './useContactDuplicateFlag'
 import DuplicateFlagBanner from './DuplicateFlagBanner'
-import { createSeparateContactDecision, readContactDuplicateDecisionError, type ContactDuplicateCheck, type ContactDuplicateDecision, type ContactDuplicateMatch } from './contactDuplicates'
+import { createSeparateContactDecision, readContactDuplicateDecisionError, resolveContactDuplicateSyncError, type ContactDuplicateCheck, type ContactDuplicateDecision, type ContactDuplicateMatch } from './contactDuplicates'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
@@ -344,6 +344,8 @@ function DeliveryForm({ contact, onSave, onUseExisting, onClose, t }: DeliveryFo
       if (nextCheck) {
         setServerDuplicateCheck(nextCheck)
         setLocalError(t('contact_duplicate_review_changed') || 'Review the current possible duplicate records before saving.')
+      } else if (duplicateDecision && (result as { success?: boolean } | null)?.success === true) {
+        resolveContactDuplicateSyncError(pendingDuplicateCheck)
       }
     } finally {
       setSaving(false)
@@ -883,11 +885,12 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
       } else {
         notify(selected ? (t('delivery_contact_updated')||'Updated') : (t('delivery_contact_added')||'Added'))
       }
-      setModal(null); setSelected(null); await load({ silent: true, label: 'Delivery contacts after save' })
+      setModal(null); setSelected(null); await load({ silent: true, label: 'Delivery contacts after save' }); return { success: true }
     } catch (error: unknown) {
       const duplicateCheck = readContactDuplicateDecisionError(error)
       if (duplicateCheck) return { duplicateDecisionRequired: duplicateCheck }
       notify(getErrorMessage(error, 'Failed'), 'error')
+      return { success: false }
     }
     finally { finishSingleAction(saveInFlightRef) }
   }
@@ -903,6 +906,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
       if (!existing) throw new Error('The existing delivery contact could not be loaded')
       setSelected(existing)
       setModal('detail')
+      resolveContactDuplicateSyncError(match)
     } catch (error) {
       notify(getErrorMessage(error, t('contact_duplicate_existing_load_failed') || 'Could not load the existing record. Try again.'), 'error')
     }

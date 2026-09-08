@@ -12,7 +12,7 @@ import type { ContactOption } from './contactOptionUtils'
 import { CUSTOMER_MEMBERSHIP_PLACEHOLDER } from './customerMembershipNumber'
 import { useContactDuplicateFlag } from './useContactDuplicateFlag'
 import DuplicateFlagBanner from './DuplicateFlagBanner'
-import { createSeparateContactDecision, type ContactDuplicateCheck, type ContactDuplicateDecision, type ContactDuplicateMatch } from './contactDuplicates'
+import { createSeparateContactDecision, resolveContactDuplicateSyncError, type ContactDuplicateCheck, type ContactDuplicateDecision, type ContactDuplicateMatch } from './contactDuplicates'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
 import { formatPhoneInputElement, handlePhoneInputBeforeInput, handlePhoneInputKeyDown } from '../../utils/phoneInput.ts'
 
@@ -214,6 +214,8 @@ export default function CustomerFormModal({ customer, onSave, onUseExisting, onC
       if (nextCheck) {
         setServerDuplicateCheck(nextCheck)
         setLocalError(tr(t, 'contact_duplicate_review_changed', 'Review the current possible duplicate records before saving.'))
+      } else if (duplicateDecision && (result as { success?: boolean } | null)?.success === true) {
+        resolveContactDuplicateSyncError(pendingDuplicateCheck)
       }
     } finally {
       setSaving(false)
