@@ -61,7 +61,7 @@ async function main() {
 
   const snapshot = await readProductMergeCaseSnapshot(adapter, 9001, 9002, reparent)
   assert.equal(batches.length, 1, 'all independent case reads use one D1 batch call')
-  assert.equal(batches[0].length, 12, 'eight core reads, two reparent reads, promotion rules and children')
+  assert.equal(batches[0].length, 13, 'nine core reads, two reparent reads, promotion rules and children')
   assert.equal(snapshot.canonicalProduct.id, 9001)
   assert.equal(snapshot.duplicateProduct.id, 9002)
   assert.deepEqual(snapshot.duplicateStockRows.map((row) => Number(row.quantity)), [3])

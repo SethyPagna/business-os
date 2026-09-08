@@ -153,14 +153,14 @@ async function main() {
   const foldBatchSizes = counters.batchStatementCounts.slice(beforeFolds.batchStatementCounts.length)
   assert.deepEqual(
     [...new Set(foldBatchSizes)].sort((a, b) => a - b),
-    [3, 8, 10, 20],
+    [3, 8, 10, 21],
     'the no-stock fold has bounded snapshot/write/fingerprint/finalize statement groups',
   )
   const { batchStatementCounts: _batchStatementCounts, ...reportedCounters } = counters
 
   console.log(JSON.stringify({
     candidates: 1600, chunk: 25, scanMs: Number(scanMs.toFixed(1)), runMs: Number(runMs.toFixed(1)),
-    foldAdapterCalls, foldCallsPerCase: foldAdapterCalls / 25, foldBatchSizes: [20, 10, 8, 3],
+    foldAdapterCalls, foldCallsPerCase: foldAdapterCalls / 25, foldBatchSizes: [21, 10, 8, 3],
     ...reportedCounters,
   }))
   console.log('test-product-merge-bulk-benchmark: all checks passed')

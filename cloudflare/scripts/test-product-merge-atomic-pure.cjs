@@ -51,6 +51,14 @@ function loadUndoAppliers(db) {
       saleLineKhrSnapshotStatement: never, saleMoneyUpdateStatement: never,
     },
     './saleAmendments': { amendmentEntryStatement: never },
+    // F65 registers product.remove in the shared undo module. This harness
+    // exercises only atomic merge history, so keep removal replay inert.
+    './productDelete': {
+      PRODUCT_REMOVE_ACTION_KIND: 'product.remove',
+      parseProductRemoveSnapshot: (value) => value,
+      productRemovePlanDigest: async () => '',
+      productRemoveReplayStatements: () => [],
+    },
   }
   const source = fs.readFileSync(path.join(libDir, 'undoAppliers.ts'), 'utf8')
   const { outputText } = ts.transpileModule(source, {

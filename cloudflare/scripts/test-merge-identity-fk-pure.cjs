@@ -192,6 +192,8 @@ const EXCLUDED = new Map([
 const RECEIPT_SNAPSHOTS = new Map([
   ['product_conflict_merge_run_cases.keeper_product_id', 'durable receipt: the product selected to survive'],
   ['product_conflict_merge_run_cases.merged_product_id', 'durable receipt: the product selected for retirement'],
+  ['product_conflict_action_group_members.product_id', 'durable receipt: the product reviewed as a group member'],
+  ['product_remove_operations.product_id', 'durable receipt: the product selected for reversible removal'],
 ])
 
 async function fkSweep() {
@@ -286,9 +288,12 @@ async function main() {
   })
 
   await check('selected merge receipt product ids stay immutable historical evidence', () => {
-    const receiptMigration = fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0136_product_conflict_merge_runs.sql'), 'utf8')
-    assert.match(receiptMigration, /Durable receipts for Products > Conflicts selected merge runs/)
-    assert.match(receiptMigration, /Never drop receipt rows/)
+    const selectedMergeReceiptMigration = fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0136_product_conflict_merge_runs.sql'), 'utf8')
+    const globalActionReceiptMigration = fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0138_product_conflict_action_groups.sql'), 'utf8')
+    assert.match(selectedMergeReceiptMigration, /Durable receipts for Products > Conflicts selected merge runs/)
+    assert.match(selectedMergeReceiptMigration, /Never drop receipt rows/)
+    assert.match(globalActionReceiptMigration, /Durable draft receipts for one global Products > Conflicts action review/)
+    assert.match(globalActionReceiptMigration, /Never drop receipt rows/)
     for (const key of RECEIPT_SNAPSHOTS.keys()) {
       assert.ok(found.has(key), `${key} must remain visible to the migration FK sweep`)
       assert.ok(!reparented.has(key), `${key} must not be rewritten by the product merge fold`)

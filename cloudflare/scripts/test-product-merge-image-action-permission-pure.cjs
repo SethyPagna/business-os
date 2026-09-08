@@ -127,7 +127,11 @@ function loadProductsRoute(state) {
     },
     '../lib/productMerge': productMerge,
     '../lib/sqlBinding': sqlBinding,
-    '../lib/undoAppliers': { registerMergeFold: () => {}, MERGE_REPARENT_TABLES: [] },
+    '../lib/undoAppliers': {
+      registerMergeFold: () => {},
+      registerProductMergeGroupRedo: () => {},
+      MERGE_REPARENT_TABLES: [],
+    },
     '../lib/importImageMatch': { ADMIN_MAX_IMAGES_PER_PRODUCT: 5, MAX_IMAGES_PER_PRODUCT: 3 },
     '../durable-objects/broadcastHub': { broadcast: async () => {} },
     '../index': {},

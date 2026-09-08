@@ -609,6 +609,14 @@ console.log('PASS 8b -- an unlotted oversell aborts on branch_stock itself, it i
       // migration's own append-only triggers -- in
       // test-sale-amendments-pure.cjs.
       './saleAmendments': { amendmentEntryStatement: () => ({ sql: 'SELECT 1', params: {} }) },
+      // F65 registers product.remove in the shared undo module. Sale line
+      // replay is the only applier under test here, so removal stays inert.
+      './productDelete': {
+        PRODUCT_REMOVE_ACTION_KIND: 'product.remove',
+        parseProductRemoveSnapshot: (value) => value,
+        productRemovePlanDigest: async () => '',
+        productRemoveReplayStatements: () => [],
+      },
     })
     const resolved = undoModule.resolveUndoApplier({ applier: 'sale.add_items', snapshot_id: 1 })
     assert.ok(resolved, "resolveUndoApplier must find 'sale.add_items' -- an unregistered applier makes Undo a no-op")

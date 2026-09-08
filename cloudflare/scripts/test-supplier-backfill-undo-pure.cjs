@@ -104,6 +104,14 @@ function loadUndoAppliers(d1) {
     './saleAmendments': {
       amendmentEntryStatement: () => ({ sql: 'SELECT 1', params: {} }),
     },
+    // F65 registers product.remove in the shared undo module. This harness
+    // exercises supplier backfill only, so removal replay remains inert.
+    './productDelete': {
+      PRODUCT_REMOVE_ACTION_KIND: 'product.remove',
+      parseProductRemoveSnapshot: (value) => value,
+      productRemovePlanDigest: async () => '',
+      productRemoveReplayStatements: () => [],
+    },
   }
   const src = fs.readFileSync(path.join(LIB_DIR, 'undoAppliers.ts'), 'utf8')
   const { outputText } = ts.transpileModule(src, {

@@ -154,6 +154,18 @@ const reviewGate = loadReal('lib/reviewGate.ts', {
   './pendingActions': pendingActions,
   '../index': {},
 })
+// F65 adds reviewed product removal to the shared approval path. Fee approval
+// is the behavior under test here, so removal remains an inert load-time stub.
+class ProductRemoveError extends Error {
+  constructor(code, message, status = 409) { super(message); this.code = code; this.status = status }
+}
+const productDeleteStub = {
+  ProductRemoveError,
+  parseProductRemovePendingPointer: () => null,
+  parseProductRemovePlan: () => { throw new Error('unrelated product removal') },
+  productRemoveApprovalStatements: () => [],
+  productRemovePlanDigest: async () => '',
+}
 // batchCode.ts is pure (no D1/Env dependency) -- productWrites.ts's
 // seedInitialBatchForNewProduct now derives lot_code through it
 // (dateToBatchCode), so it needs to be the real transpiled module, not
@@ -209,6 +221,7 @@ const reviewApply = loadReal('lib/reviewApply.ts', {
   './permissions': permissions,
   './productImagePermission': productImagePermission,
   './cache': { bumpVersion: async () => {} },
+  './productDelete': productDeleteStub,
   '../index': {},
 })
 
@@ -243,6 +256,7 @@ const reviewQueueRoute = loadReal('routes/reviewQueue.ts', {
   '../lib/pendingActions': pendingActions,
   '../lib/reviewApply': reviewApply,
   '../lib/productImagePermission': productImagePermission,
+  '../lib/productDelete': productDeleteStub,
 })
 
 const feesApp = feesRoute.default

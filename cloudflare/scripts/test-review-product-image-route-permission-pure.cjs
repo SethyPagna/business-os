@@ -25,6 +25,9 @@ class ReviewRequesterPermissionError extends Error {
 class ProductImageAssetError extends Error {
   constructor(imagePath) { super(`Image asset ${imagePath} does not exist.`); this.code = 'missing_image_asset' }
 }
+class ProductRemoveError extends Error {
+  constructor(code, message, status = 409) { super(message); this.code = code; this.status = status }
+}
 
 function loadRoute(state) {
   const filePath = path.join(srcRoot, 'routes', 'reviewQueue.ts')
@@ -45,9 +48,11 @@ function loadRoute(state) {
     '../lib/reviewApply': {
       NoReviewApplierError,
       ReviewRequesterPermissionError,
+      productRemovePendingPointer: () => null,
       applyApprovedPendingAction: async () => { throw state.applyError },
     },
     '../lib/productImagePermission': { ProductImageAssetError },
+    '../lib/productDelete': { ProductRemoveError },
     '../lib/audit': { audit: async () => { state.audits++ } },
     '../lib/actorSnapshot': { actorSnapshot: (user) => user.name },
     '../durable-objects/broadcastHub': { broadcast: async () => {} },
