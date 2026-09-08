@@ -5,6 +5,7 @@ import {
   canRestoreMinimizedWork, dispatchRestore, getMinimizedWork, removeMinimizedWork, subscribeMinimizedWork,
   type MinimizedWorkEntry, type MinimizedWorkKind,
 } from '../../utils/minimizedWork.ts'
+import { discardStockAdjustDraft } from '../../utils/stockAdjustDraft.ts'
 import { clearWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
 
 // F3 slice 2 (Part 424): the chips minimized flows park in. Mobile renders
@@ -42,11 +43,12 @@ const useApp = useAppHook as unknown as () => {
   navigateTo: (pageId: string, anchor?: string) => void
   notify: (message: string, type?: string) => void
   t: (key: string) => string
+  user: { id?: string | number; username?: string } | null
 }
 
 export default function MinimizedWorkTray({ variant }: { variant: 'mobile' | 'desktop' }) {
   const entries = useSyncExternalStore(subscribeMinimizedWork, getMinimizedWork, getMinimizedWork)
-  const { can, navigateTo, notify, t, language } = useApp()
+  const { can, navigateTo, notify, t, language, user } = useApp()
   const tr = (key: string, fallbackEn: string, fallbackKm: string): string => {
     const translated = t(key)
     if (translated && translated !== key) return translated
@@ -66,7 +68,12 @@ export default function MinimizedWorkTray({ variant }: { variant: 'mobile' | 'de
     removeMinimizedWork(entry.key)
     const legacyDraftBase = LEGACY_DRAFT_BASE_BY_KIND[entry.kind]
     const draftKey = entry.draftKey || (legacyDraftBase ? scopedWorkDraftKey(legacyDraftBase) : null)
-    if (draftKey) clearWorkDraft(draftKey)
+    if (!draftKey) return
+    if (entry.kind === 'stock_adjust') {
+      discardStockAdjustDraft(draftKey, user?.id ?? user?.username ?? null)
+      return
+    }
+    clearWorkDraft(draftKey)
   }
 
   return (
