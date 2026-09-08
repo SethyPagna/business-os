@@ -350,7 +350,12 @@ const { hasPermission, hasAnyPermission, isAdminControlUser, getActionTier, getP
   assert.match(contactsSrc, /isAdminControlUser\(user\) \|\| hasPermission\(user, 'contacts_suppliers'\)/, 'contacts.ts must gate suppliers on admin-control OR contacts_suppliers')
   assert.match(contactsSrc, /app\.use\('\/suppliers', requireSupplierAccess\)\s*\n\s*app\.use\('\/suppliers\/\*', requireSupplierAccess\)/, 'the supplier gate must cover both /suppliers and /suppliers/*')
   assert.match(contactsSrc, /c\.req\.query\('fields'\) \|\| ''\) === 'names'\) return next\(\)/, 'the fields=names carve-out must exist for the name-only pickers')
-  assert.match(contactsSrc, /SELECT id, name FROM \$\{config\.table\} ORDER BY/, 'the fields=names list must select id + name ONLY -- it is reachable without the suppliers grant')
+  const namesStart = contactsSrc.indexOf("String(query.fields || '') === 'names'")
+  const namesEnd = contactsSrc.indexOf("String(query.fields || '') === 'picker'", namesStart)
+  const namesBranch = contactsSrc.slice(namesStart, namesEnd)
+  assert.match(namesBranch, /SELECT id, name FROM \$\{config\.table\}/, 'the fields=names list must select id + name')
+  assert.doesNotMatch(namesBranch, /SELECT id, name,/, 'the fields=names list must not add private columns -- it is reachable without the suppliers grant')
+  assert.match(namesBranch, /customerIsProfileSql\(\)/, 'customer names must exclude the anonymous marker inside the query')
 
   const notificationsSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'notifications.ts'), 'utf8')
   assert.match(notificationsSrc, /preferences\.supplierCreditEnabled && isAdminControlUser\(user\)/, 'supplier-credit reminders (money owed) must be admin-control only')

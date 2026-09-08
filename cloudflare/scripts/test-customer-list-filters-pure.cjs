@@ -39,7 +39,9 @@ function loadModule(relPath) {
 const { parseContactIdFilter, buildContactIdClause, CONTACT_ID_FILTER_MAX } = loadModule('lib/contactIds.ts')
 const {
   buildContactPickerSql,
+  buildSalesCustomerPickerSql,
   CONTACT_PICKER_COLUMNS,
+  SALES_CUSTOMER_PICKER_COLUMNS,
   CONTACT_PICKER_DEFAULT_LIMIT,
   CONTACT_PICKER_MAX_LIMIT,
 } = loadModule('lib/contactPicker.ts')
@@ -178,6 +180,19 @@ check('the picker SQL runs against real SQLite and returns the picker columns', 
   assert.ok(!('points_balance' in rows[0]), 'the picker shape must not run the loyalty aggregation')
   assert.ok(!('notes' in rows[0]), 'the picker shape must not ship free-text notes')
   assert.ok(!('company' in rows[0]), 'the picker shape must not ship the company column')
+  assert.ok(!('last_sale_at' in rows[0]), 'activity ordering must not expose purchase recency')
+})
+
+check('Sales/POS picker runs against real SQLite with its exact privacy allowlist', () => {
+  const db = freshDb()
+  seedCustomers(db)
+  db.prepare("UPDATE customers SET email='private at example',address='Option JSON',gender='other',notes='private note',is_anonymous=1 WHERE id=2").run()
+  const rows = db.prepare(buildSalesCustomerPickerSql(['id IN (1, 2)'])).bind({ limit: 10 }).all()
+  assert.deepStrictEqual(rows.map((row) => Number(row.id)), [1], 'anonymous rows are excluded in the same SQL read')
+  assert.deepStrictEqual(Object.keys(rows[0]).sort(), [...SALES_CUSTOMER_PICKER_COLUMNS].sort())
+  for (const forbidden of ['notes', 'gender', 'created_at', 'points_balance', 'last_sale_at']) {
+    assert.ok(!(forbidden in rows[0]), `${forbidden} must not leave the Sales/POS picker`)
+  }
 })
 
 check('the picker filters anonymous markers inside the same bounded SQL read', () => {
@@ -274,6 +289,20 @@ check('routes/contacts.ts wires fields=picker, bounded and separately cached', (
     /truncated: total > \(items \|\| \[\]\)\.length/.test(routeSource),
     'the reply must say whether the copy is complete, so a client can tell a full mirror from a cut one',
   )
+})
+
+check('routes/contacts.ts wires the narrow Sales/POS picker without a full customer read', () => {
+  const marker = "String(query.fields || '') === 'sales_picker'"
+  assert.ok(routeSource.includes(marker))
+  const start = routeSource.indexOf(marker)
+  const end = routeSource.indexOf('const hasPaging', start)
+  const branch = routeSource.slice(start, end)
+  assert.match(branch, /buildSalesCustomerPickerSql\(predicates\)/)
+  assert.match(branch, /clampInt\(query\.pageSize \?\? query\.limit, 50, 1, 100\)/)
+  assert.match(branch, /parseContactIdFilter/)
+  assert.match(branch, /buildContactMatchClause/)
+  assert.ok(!branch.includes('withPoints('), 'picker must not calculate loyalty history')
+  assert.ok(!branch.includes('SELECT *'), 'picker must not expose the directory row')
 })
 
 check('the picker branch sits behind the same auth/permission gates as the rest', () => {
