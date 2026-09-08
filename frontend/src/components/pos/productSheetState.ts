@@ -94,6 +94,7 @@ export type ProductSheetStateInput = {
   receivedDateStepHidden?: boolean
   batches?: readonly SheetBatchLike[]
   selectedBatchId?: number | null
+  selectedUnlottedStock?: boolean
   damagedLots?: readonly SheetDamagedLotLike[]
   selectedDamagedLotId?: number | null
   intent?: SheetIntent
@@ -128,6 +129,7 @@ export type ProductSheetState = {
   pickBlockedReason: SheetPickBlockedReason
   receivedDateOptions: SheetBatchLike[]
   receivedDateTotal: number
+  unlottedStockQuantity: number
   // TRUE when the branch holds units in branch_stock but the lot ledger
   // has nothing to draw them from. The sheet used to render this as
   // "Stock: 0" beside a branch line saying 28 -- two ledgers contradicting
@@ -278,6 +280,7 @@ export function deriveProductSheetState(input: ProductSheetStateInput): ProductS
     receivedDateStepHidden = false,
     batches = [],
     selectedBatchId = null,
+    selectedUnlottedStock = false,
     damagedLots = [],
     selectedDamagedLotId = null,
     intent = 'sell',
@@ -381,12 +384,13 @@ export function deriveProductSheetState(input: ProductSheetStateInput): ProductS
   const receivedDateOptions = sortBatchesForPicker(batches as readonly SheetBatchLike[]) as SheetBatchLike[]
   const receivedDateTotal = receivedDateOptions.reduce((sum, batch) => sum + toNumber(batch.quantity), 0)
   const selectedBatch = receivedDateOptions.find((batch) => batch.id === selectedBatchId) || null
+  const unlottedStockQuantity = Math.max(0, effectiveVariantStock - receivedDateTotal)
   const selectedDamagedLot = damagedLots.find((lot) => lot.id === selectedDamagedLotId) || null
 
   const batchSelectionRequired = isBatchTracked
   const batchReadyToSell = selectedDamagedLot != null
     ? toNumber(selectedDamagedLot.quantity_remaining) > 0
-    : (!batchSelectionRequired || (selectedBatch != null && toNumber(selectedBatch.quantity) > 0))
+    : (!batchSelectionRequired || (selectedBatch != null && toNumber(selectedBatch.quantity) > 0) || (selectedUnlottedStock && unlottedStockQuantity > 0))
 
   // On-hand comes from branch_stock, the ledger that answers "how many
   // units are at this branch". The lot ledger answers a different
@@ -396,7 +400,9 @@ export function deriveProductSheetState(input: ProductSheetStateInput): ProductS
     ? toNumber(selectedDamagedLot.quantity_remaining)
     : selectedBatch
       ? toNumber(selectedBatch.quantity)
-      : effectiveVariantStock
+      : selectedUnlottedStock
+        ? unlottedStockQuantity
+        : effectiveVariantStock
 
   const branchSummary = branchOptions.map((option) => `${option.name}: ${option.quantity}`).join(' · ')
 
@@ -427,6 +433,7 @@ export function deriveProductSheetState(input: ProductSheetStateInput): ProductS
     pickBlockedReason,
     receivedDateOptions,
     receivedDateTotal,
+    unlottedStockQuantity,
     stockWithoutReceivedDate: batchSelectionRequired
       && receivedDateOptions.length === 0
       && effectiveVariantStock > 0,

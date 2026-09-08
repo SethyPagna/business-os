@@ -316,6 +316,7 @@ export default function ProductDetailSheet({
   // lots. The two must not render the same way -- see the fetch below.
   const [batchesError, setBatchesError] = useState('')
   const [selectedBatchId, setSelectedBatchId] = useState<number | null>(null)
+  const [selectedUnlottedStock, setSelectedUnlottedStock] = useState(false)
   const [batchChoicesOpen, setBatchChoicesOpen] = useState(false)
   // 11.9: open damaged lots for the resolved row/branch -- the Damage
   // source option shown beside the sellable lots. A failed fetch shows no
@@ -333,6 +334,7 @@ export default function ProductDetailSheet({
     setBranchPage(0)
     setBarcodePage(0)
     setSelectedBatchId(null)
+    setSelectedUnlottedStock(false)
     setBatchChoicesOpen(false)
     setBatchPage(0)
   }, [product?.id])
@@ -355,6 +357,7 @@ export default function ProductDetailSheet({
     receivedDateStepHidden: hideReceivedDates,
     batches,
     selectedBatchId,
+    selectedUnlottedStock,
     damagedLots,
     selectedDamagedLotId,
     intent,
@@ -538,7 +541,7 @@ export default function ProductDetailSheet({
     // Kept on one line: "picking a lot clears the damaged-lot pick and closes
     // the list" is a contract both tests/returnOptions.test.ts and
     // tests/productsResponsiveSurface.test.ts assert on the source text.
-    setSelectedBatchId(batch.id); setSelectedDamagedLotId(null); setBatchChoicesOpen(false)
+    setSelectedBatchId(batch.id); setSelectedUnlottedStock(false); setSelectedDamagedLotId(null); setBatchChoicesOpen(false)
     if (mergeRowsIntoLotList && batch.__productId != null) setSelectedVariantId(String(batch.__productId))
   }
   // Requires an in-stock lot to be picked before the price buttons below
@@ -551,6 +554,7 @@ export default function ProductDetailSheet({
   // date gate the same way a sellable lot does (the units come from it).
   const batchSelectionRequired = sheetState.batchSelectionRequired
   const batchReadyToSell = sheetState.batchReadyToSell
+  const unlottedStockQuantity = sheetState.unlottedStockQuantity
   const pickAllowed = sheetState.pickAllowed
   const pickBlockedReason = sheetState.pickBlockedReason
   // The ONE stock number this sheet shows, from productSheetState.ts:
@@ -570,7 +574,9 @@ export default function ProductDetailSheet({
 
   const buildBatchSelection = (): BatchSelection | undefined => {
     if (selectedDamagedLot) return undefined
-    if (!batchSelectionRequired || !selectedBatch) return undefined
+    if (!batchSelectionRequired) return undefined
+    if (selectedUnlottedStock && unlottedStockQuantity > 0) return { unlottedStock: true, quantity: unlottedStockQuantity }
+    if (!selectedBatch) return undefined
     return {
       batchId: selectedBatch.id,
       batchLabel: formatBatchLabel(selectedBatch, batchWord),
@@ -888,6 +894,12 @@ export default function ProductDetailSheet({
                           </> : null}
                         </>
                       )}
+                      {unlottedStockQuantity > 0 ? <button type="button"
+                        className={pillClass(selectedUnlottedStock, false)}
+                        onClick={() => { setSelectedBatchId(null); setSelectedUnlottedStock(true); setSelectedDamagedLotId(null); setBatchChoicesOpen(false) }}>
+                        <span>{posCopy('Received date not recorded', 'មិនបានកត់ត្រាកាលបរិច្ឆេទទទួល')}</span>
+                        <span className="ml-1 text-[10px] font-normal opacity-75">({unlottedStockQuantity} {effectiveVariant.unit})</span>
+                      </button> : null}
                     </div>
                   ) : null}
                   {damagedLots.length > 0 ? (
@@ -908,7 +920,7 @@ export default function ProductDetailSheet({
                   <div className="flex flex-wrap gap-1.5">
                     {onPick ? renderPickButton(effectiveVariant) : null}
                     {onPick ? null : <button className="btn-primary flex-1 text-xs" disabled={!effectiveVariantInStock || !batchReadyToSell} onClick={() => closeAfterAdd(effectiveVariant, 'selling')}>
-                      {batchSelectionRequired && !selectedBatch ? t('pick_received_date_first') || 'Pick a received date first' : `${t('selling_price') || 'Selling'} ${fmtUSD(asNumber(effectiveVariant.selling_price_usd || 0))}`}
+                      {batchSelectionRequired && !selectedBatch && !selectedUnlottedStock ? t('pick_received_date_first') || 'Pick a received date first' : `${t('selling_price') || 'Selling'} ${fmtUSD(asNumber(effectiveVariant.selling_price_usd || 0))}`}
                     </button>}
                     {/* The variant's VIP add-to-cart button is deleted by the
                         2026-09-04 ruling; the Wholesale button beside it now
@@ -984,6 +996,12 @@ export default function ProductDetailSheet({
                     </> : null}
                   </>
                 )}
+                {unlottedStockQuantity > 0 ? <button type="button"
+                  className={pillClass(selectedUnlottedStock, false)}
+                  onClick={() => { setSelectedBatchId(null); setSelectedUnlottedStock(true); setSelectedDamagedLotId(null); setBatchChoicesOpen(false) }}>
+                  <span>{posCopy('Received date not recorded', 'មិនបានកត់ត្រាកាលបរិច្ឆេទទទួល')}</span>
+                  <span className="ml-1 text-[10px] font-normal opacity-75">({unlottedStockQuantity} {product.unit})</span>
+                </button> : null}
               </div>
             ) : null}
             {damagedLots.length > 0 ? (
@@ -1004,7 +1022,7 @@ export default function ProductDetailSheet({
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
               {onPick ? renderPickButton(product) : null}
               {onPick ? null : <button className="btn-primary flex-1" disabled={displayedStock <= asNumber(product.out_of_stock_threshold) || !batchReadyToSell} onClick={() => closeAfterAdd(product, 'selling')}>
-                {displayedStock <= asNumber(product.out_of_stock_threshold) ? t('out_of_stock') : batchSelectionRequired && !selectedBatch ? t('pick_received_date_first') || 'Pick a received date first' : `${t('selling_price') || 'Selling'} ${fmtUSD(asNumber(product.selling_price_usd || 0))}`}
+                {displayedStock <= asNumber(product.out_of_stock_threshold) ? t('out_of_stock') : batchSelectionRequired && !selectedBatch && !selectedUnlottedStock ? t('pick_received_date_first') || 'Pick a received date first' : `${t('selling_price') || 'Selling'} ${fmtUSD(asNumber(product.selling_price_usd || 0))}`}
               </button>}
               {!onPick && promotion.active ? (
                 <button className="btn-secondary flex-1 border-rose-200 text-rose-700 dark:border-rose-800 dark:text-rose-200" disabled={displayedStock <= asNumber(product.out_of_stock_threshold) || !batchReadyToSell} onClick={() => closeAfterAdd(product, 'promotion')}>

@@ -260,6 +260,9 @@ type SaleItemInput = {
   batch_id?: number | null
   batch_label?: string | null
   batch_expiry_date?: string | null
+  // Explicit cashier choice for the branch_stock remainder that has no
+  // received-date identity. It is validated below; false/absent keeps FIFO.
+  unlotted_stock?: boolean
   // 11.9 (Part 416): set when the cashier picked the DAMAGE source for
   // this line -- the units come out of this damaged_stock_lots row
   // (quantity_remaining), not out of branch/batch stock.
@@ -496,6 +499,21 @@ app.post('/', async (c) => {
       .filter((item) => !item.damaged_lot_id && item.branch_id)
       .map((item) => ({ productId: item.product_id, branchId: item.branch_id as number })),
   )
+  // A selected unlotted remainder is a factual claim, not an escape hatch:
+  // the branch must hold more aggregate stock than all its positive active
+  // lots. Reserve the remainder across repeated lines before checkout writes.
+  const remainingUnlottedByKey = new Map<string, number>()
+  for (const item of normalized) {
+    if (!item.unlotted_stock) continue
+    if (item.batch_id || item.damaged_lot_id || !item.branch_id) return c.json({ error: 'Unrecorded stock must be a regular Shop sale line.' }, 400)
+    const key = `${item.product_id}:${item.branch_id}`
+    const lotQuantity = (lotsByProductBranch.get(key) || []).reduce((sum, lot) => sum + lot.available, 0)
+    const aggregate = stockByBranch.get(item.branch_id)?.get(item.product_id) || 0
+    const available = remainingUnlottedByKey.has(key) ? remainingUnlottedByKey.get(key)! : Math.max(0, aggregate - lotQuantity)
+    if (item.quantity > available) return c.json({ error: `Insufficient unrecorded stock: requested ${item.quantity}, available ${available}` }, 409)
+    remainingUnlottedByKey.set(key, available - item.quantity)
+  }
+
   const explicitBatchResolution = resolveExplicitSaleLineBatches(
     normalized.map((item) => {
       const product = productMap.get(item.product_id)
@@ -581,7 +599,7 @@ app.post('/', async (c) => {
     // a round-trip per line -- the grouped Map is still mutated in place
     // below so a second line of the same product can't double-take a lot.
     for (const [itemIndex, item] of normalized.entries()) {
-      if (item.batch_id || item.damaged_lot_id || !item.branch_id) continue
+      if (item.batch_id || item.unlotted_stock || item.damaged_lot_id || !item.branch_id) continue
       const key = `${item.product_id}:${item.branch_id}`
       const lots = lotsByProductBranch.get(key) || []
       const { takes } = allocateAcrossLots(lots, item.quantity)

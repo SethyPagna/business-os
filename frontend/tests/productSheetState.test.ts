@@ -601,4 +601,29 @@ if (failed) {
   console.error(`${failed} test(s) failed`)
   process.exit(1)
 }
+
+await runTest('Shop exposes only its genuine unrecorded remainder beside recorded lots', () => {
+  const product = { id: 141, name: 'Mixed provenance', branch_stock: branchStock(6, 9), stock_quantity: 15 }
+  const batches = [{ id: 801, quantity: 2, received_at: '2026-09-01' }]
+  const state = deriveProductSheetState({ product, trackedBatchProductIds: new Set([141]), batches, selectedUnlottedStock: true })
+  assert.equal(state.receivedDateTotal, 2)
+  assert.equal(state.unlottedStockQuantity, 4)
+  assert.equal(state.batchReadyToSell, true)
+  assert.equal(state.displayedStock, 4)
+  const full = deriveProductSheetState({ product, trackedBatchProductIds: new Set([141]), batches: [{ id: 801, quantity: 6 }] })
+  assert.equal(full.unlottedStockQuantity, 0, 'fully tracked Shop stock offers no invented remainder')
+})
+
+await runTest('Warehouse-only or zero-Shop lots do not consume the selectable Shop remainder', () => {
+  const product = { id: 142, name: 'Shop legacy', branch_stock: branchStock(6, 2), stock_quantity: 8 }
+  const state = deriveProductSheetState({ product, trackedBatchProductIds: new Set([142]), batches: [{ id: 802, quantity: 0 }] })
+  assert.equal(state.unlottedStockQuantity, 6)
+  assert.equal(state.batchReadyToSell, false)
+  const selected = deriveProductSheetState({ product, trackedBatchProductIds: new Set([142]), batches: [{ id: 802, quantity: 0 }], selectedUnlottedStock: true })
+  assert.equal(selected.batchReadyToSell, true)
+  const noShop = deriveProductSheetState({ product: { id: 143, name: 'Warehouse only', branch_stock: branchStock(0, 6) }, trackedBatchProductIds: new Set([143]), batches: [] })
+  assert.equal(noShop.unlottedStockQuantity, 0)
+  assert.equal(noShop.pickAllowed, false)
+})
+
 console.log('productSheetState tests passed')
