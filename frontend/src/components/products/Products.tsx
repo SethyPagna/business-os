@@ -134,8 +134,8 @@ import { buildAvailabilityFilterSection } from '../shared/AvailabilityFilterOpti
 import { buildSearchModeFilterSection } from '../shared/SearchModeFilterOptions.tsx'
 import { buildAutoMergedFilterSection } from './AutoMergedFilterOptions.tsx'
 import { buildCreatedDateFilterSection } from './CreatedDateFilterOptions.tsx'
-import { RESTORE_WORK_EVENT, canRestoreMinimizedWork, consumePendingRestore, markRestoreHandled, minimizeWork, reparkDeniedRestore, type MinimizedWorkEntry, type MinimizedWorkKind } from '../../utils/minimizedWork.ts'
-import { scopedWorkDraftKey } from '../../utils/workDrafts.ts'
+import { RESTORE_WORK_EVENT, canRestoreMinimizedWork, consumePendingRestore, markRestoreHandled, minimizeWork, peekPendingRestore, reparkDeniedRestore, type MinimizedWorkEntry, type MinimizedWorkKind } from '../../utils/minimizedWork.ts'
+import { clearWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
 import { readStockAdjustDraft, STOCK_ADJUST_RESTORE_HOST } from '../../utils/stockAdjustDraft.ts'
 import { buildIssuesFilterSection } from '../shared/IssuesFilterOptions.tsx'
 import { buildPromotionsFilterSection } from '../shared/PromotionsFilterOptions.ts'
@@ -168,6 +168,11 @@ const ProductForm = lazyRetry(() => import('./forms/ProductForm'), 'products-pro
 const CreateProductsSessionModal = lazyRetry(() => import('./CreateProductsSessionModal'), 'products-create-products-session-modal')
 type CreateProductsSessionMinimizeDetails = import('../../utils/createProductsSession.ts').CreateProductsSessionMinimizeDetails
 const StockAdjustModal = lazyRetry(() => import('./forms/StockAdjustModal'), 'products-stock-adjust-modal')
+
+function StockAdjustRestoreCommit({ onCommit }: { onCommit: () => void }) {
+  useEffect(() => { onCommit() }, [onCommit])
+  return null
+}
 const ProductDetailModal = lazyRetry(() => import('./surfaces/ProductDetailModal'), 'products-product-detail-modal')
 // Reused as-is from Inventory's own batches surface (see ManageBatchesModal.tsx)
 // rather than duplicated -- the "click to view/manage batches" affordance the
@@ -895,6 +900,7 @@ function ProductsFullEditor() {
   const [detailProduct,setDetailProduct]= useState<ProductRecord | null>(null)
   const [adjustStockProduct, setAdjustStockProduct] = useState<ProductRecord | null>(null)
   const [restoreStockAdjustDraftKey, setRestoreStockAdjustDraftKey] = useState<string | null>(null)
+  const restoringStockAdjustRef = useRef<MinimizedWorkEntry | null>(null)
   useEffect(() => {
     const restore = (entry: MinimizedWorkEntry | null | undefined) => {
       if (!entry) return
@@ -905,22 +911,37 @@ function ProductsFullEditor() {
       }
       const draftKey = entry.draftKey || null
       if (!readStockAdjustDraft(draftKey)) {
+        if (draftKey) clearWorkDraft(draftKey)
+        markRestoreHandled('stock_adjust')
         notify(tr('load_failed', 'This saved draft is no longer available.', 'សេចក្តីព្រាងដែលបានរក្សាទុកនេះលែងមានទៀតហើយ។'), 'error')
         return
       }
+      if (restoringStockAdjustRef.current?.key === entry.key) return
+      restoringStockAdjustRef.current = entry
       setAdjustStockProduct(null)
       setRestoreStockAdjustDraftKey(draftKey)
     }
-    const pending = consumePendingRestore('stock_adjust')
-    if (pending) restore(pending)
+    restore(peekPendingRestore('stock_adjust'))
     const onRestore = (event: Event) => {
       const detail = (event as CustomEvent).detail
       if (detail?.kind !== 'stock_adjust') return
-      markRestoreHandled('stock_adjust')
       restore(detail.entry as MinimizedWorkEntry | undefined)
     }
     window.addEventListener(RESTORE_WORK_EVENT, onRestore)
     return () => window.removeEventListener(RESTORE_WORK_EVENT, onRestore)
+  }, [can, canAdjustInventoryStock, notify])
+  const commitStockAdjustRestore = useCallback(() => {
+    const entry = restoringStockAdjustRef.current
+    if (!entry) return
+    if (!canAdjustInventoryStock || !canRestoreMinimizedWork(entry, can)) {
+      restoringStockAdjustRef.current = null
+      setRestoreStockAdjustDraftKey(null)
+      reparkDeniedRestore(entry)
+      notify(tr('permission_denied', 'You no longer have permission for this action.', 'អ្នកលែងមានសិទ្ធិសម្រាប់សកម្មភាពនេះទៀតហើយ។'), 'error')
+      return
+    }
+    restoringStockAdjustRef.current = null
+    markRestoreHandled('stock_adjust')
   }, [can, canAdjustInventoryStock, notify])
   // `toModalProduct(selected)` used to be called inline in the ProductForm
   // JSX below -- a plain function returning a new object literal on every
@@ -4856,6 +4877,7 @@ function ProductsFullEditor() {
               notify(tr('minimized_to_chip', 'Minimized. Pick it back up from the chip — nothing was lost.', 'បានបង្រួម។ បន្តវាឡើងវិញពីស្លាក — គ្មានអ្វីបាត់បង់ទេ។'), 'info')
             }}
           />
+          {restoringStockAdjustRef.current ? <StockAdjustRestoreCommit onCommit={commitStockAdjustRestore} /> : null}
         </Suspense>
       ) : null}
 
