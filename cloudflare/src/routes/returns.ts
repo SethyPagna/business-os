@@ -20,6 +20,8 @@ import {
 import { uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
 import { computeSaleTotals } from '../lib/saleTotals'
 import { applyReturnBulkAction, notifyReturnBulkAction, ReturnBulkError } from '../lib/returnBulkAction'
+import { bulkAssertion, saleRevisionGuard } from '../lib/saleBulkStatus'
+import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert, SaleRecordEventError, sha256Hex } from '../lib/saleRecordEvents'
 // A replacement line is an ordinary sale line, so the warehouse may not
 // carry one -- the same rule, and the same message, POST /sales enforces.
 import { WAREHOUSE_NOT_SELLABLE_ERROR } from '../lib/branchRoleGuards'
@@ -172,6 +174,79 @@ function normalizeClientRequestId(value: unknown): string | null {
   return normalized.length > 120 ? normalized.slice(0, 120) : normalized
 }
 
+type PresentIntent = { present: false } | { present: true; value: string | number | boolean | null }
+
+function returnEditIntentField(source: Record<string, unknown>, key: string): PresentIntent {
+  if (!Object.prototype.hasOwnProperty.call(source, key)) return { present: false }
+  const raw = source[key]
+  if (raw == null) return { present: true, value: null }
+  if (typeof raw === 'string' || typeof raw === 'boolean') return { present: true, value: raw }
+  const numeric = Number(raw)
+  return { present: true, value: Number.isFinite(numeric) ? numeric : String(raw) }
+}
+
+function canonicalReturnEditIntent(returnId: number, expectedUpdatedAt: string, body: Record<string, unknown>): Record<string, unknown> {
+  const itemKeys = [
+    'sale_item_id', 'product_id', 'product_name', 'quantity',
+    'applied_price_usd', 'applied_price_khr', 'cost_price_usd', 'cost_price_khr',
+    'unit_cost_usd', 'unit_cost_khr', 'return_to_stock', 'stock_action', 'branch_id', 'batch_id',
+  ] as const
+  const itemsPresent = Object.prototype.hasOwnProperty.call(body, 'items')
+  const rawItems = body.items
+  if (itemsPresent && !Array.isArray(rawItems)) throw new Error('items must be an array')
+  const items = Array.isArray(rawItems) ? rawItems.map((raw, index) => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(`Return item ${index + 1} must be an object`)
+    const item = raw as Record<string, unknown>
+    return Object.fromEntries(itemKeys.map((key) => [key, returnEditIntentField(item, key)]))
+  }) : []
+  return {
+    return_id: returnId,
+    expected_updated_at: expectedUpdatedAt,
+    items: { present: itemsPresent, value: items },
+    reason: returnEditIntentField(body, 'reason'),
+    return_type: returnEditIntentField(body, 'return_type'),
+    notes: returnEditIntentField(body, 'notes'),
+    total_refund_usd: returnEditIntentField(body, 'total_refund_usd'),
+    total_refund_khr: returnEditIntentField(body, 'total_refund_khr'),
+    branch_id: returnEditIntentField(body, 'branch_id'),
+  }
+}
+
+function projectedSaleStatusForReturnEdit(
+  saleItems: Array<{ id: number; product_id: number | null; quantity: number }>,
+  returnLines: Array<{ sale_item_id?: number | null; product_id?: number | null; quantity: number }>,
+  statusBeforeReturn: string | null,
+): string {
+  const saleItemIds = new Set(saleItems.map((item) => Number(item.id)))
+  const returnedByItem = new Map<number, number>()
+  const fallbackByProduct = new Map<number, number>()
+  let hasAny = false
+  for (const line of returnLines) {
+    const quantity = Number(line.quantity) || 0
+    if (!(quantity > 0)) continue
+    hasAny = true
+    const saleItemId = Number(line.sale_item_id) || 0
+    if (saleItemId && saleItemIds.has(saleItemId)) {
+      returnedByItem.set(saleItemId, (returnedByItem.get(saleItemId) || 0) + quantity)
+      continue
+    }
+    const productId = Number(line.product_id) || 0
+    if (productId) fallbackByProduct.set(productId, (fallbackByProduct.get(productId) || 0) + quantity)
+  }
+  for (const item of saleItems) {
+    const productId = Number(item.product_id) || 0
+    let fallback = fallbackByProduct.get(productId) || 0
+    if (!(fallback > 0)) continue
+    const outstanding = Math.max(0, (Number(item.quantity) || 0) - (returnedByItem.get(item.id) || 0))
+    const allocated = Math.min(outstanding, fallback)
+    if (allocated > 0) returnedByItem.set(item.id, (returnedByItem.get(item.id) || 0) + allocated)
+    fallback -= allocated
+    fallbackByProduct.set(productId, fallback)
+  }
+  const fullyReturned = hasAny && saleItems.every((item) => (returnedByItem.get(item.id) || 0) >= (Number(item.quantity) || 0))
+  return fullyReturned ? 'returned' : hasAny ? 'partial_return' : (statusBeforeReturn || 'completed')
+}
+
 function normalizeScope(value: unknown, fallback: string = CUSTOMER_SCOPE): string {
   const scope = String(value || '').trim().toLowerCase()
   if (scope === 'all') return 'all'
@@ -193,6 +268,7 @@ type ReturnRow = Record<string, unknown> & {
   branch_id: number | null
   branch_name: string | null
   reason: string | null
+  status?: string | null
   updated_at: string | null
   replacement_sale_id?: number | null
   replacement_receipt_number?: string | null
@@ -2155,24 +2231,69 @@ app.patch('/:id', async (c) => {
     total_refund_usd?: number
     total_refund_khr?: number
     branch_id?: number
+    client_request_id?: string
     [key: string]: unknown
   }>().catch(() => ({} as Record<string, unknown>))
 
-  const existing = await db.prepare('SELECT * FROM returns WHERE id = ?').get<ReturnRow>([id])
+  const returnId = Number(id)
+  if (!Number.isSafeInteger(returnId) || returnId <= 0) return c.json({ error: 'Return not found' }, 404)
+  const requestId = normalizeClientRequestId(body.client_request_id)
+  if (!requestId) {
+    return c.json({
+      error: 'This return edit was created by an older app version. Refresh and review it before submitting.',
+      code: 'client_request_id_required', action: 'refresh_required',
+    }, 400)
+  }
+  const expectedUpdatedAt = getExpectedUpdatedAt(body)
+  if (!expectedUpdatedAt) {
+    return c.json({
+      error: 'Refresh this return before editing it.',
+      code: 'expected_updated_at_required', action: 'refresh_required',
+    }, 400)
+  }
+  const authenticatedActorId = actorId(user)
+  if (!authenticatedActorId) return c.json({ error: 'Authenticated account id is required.' }, 401)
+  let canonicalIntent: Record<string, unknown>
+  try {
+    canonicalIntent = canonicalReturnEditIntent(returnId, expectedUpdatedAt, body)
+  } catch (error) {
+    return c.json({ error: (error as Error).message }, 400)
+  }
+  const requestJson = JSON.stringify(canonicalIntent)
+  if (new TextEncoder().encode(requestJson).byteLength > 131072) {
+    return c.json({ error: 'Return edit is too large. Submit fewer items.', code: 'request_too_large' }, 400)
+  }
+  const requestDigest = await sha256Hex(requestJson)
+  const previousReceipt = await db.prepare(`
+    SELECT return_id,request_digest,response_json FROM return_mutation_receipts
+    WHERE actor_id=@actor AND mutation_kind='edit' AND request_id=@request
+  `).get<{ return_id: number; request_digest: string; response_json: string }>({ actor: authenticatedActorId, request: requestId })
+  if (previousReceipt) {
+    if (Number(previousReceipt.return_id) !== returnId || previousReceipt.request_digest !== requestDigest) {
+      return c.json({ error: 'client_request_id was already used with different return edit data.', code: 'idempotency_conflict' }, 409)
+    }
+    return c.json(JSON.parse(previousReceipt.response_json) as { id: number; updated_at: string })
+  }
+
+  const existing = await db.prepare(`SELECT r.*,COALESCE(v.revision,0) AS write_revision
+    FROM returns r LEFT JOIN return_write_revisions v ON v.return_id=r.id WHERE r.id=?`).get<ReturnRow & { write_revision: number }>([id])
   if (!existing) return c.json({ error: 'Return not found' }, 404)
   if (normalizeScope(existing.return_scope, CUSTOMER_SCOPE) !== CUSTOMER_SCOPE) {
     return c.json({ error: 'Supplier returns cannot be edited from this form yet.' }, 400)
   }
 
-  const existingItems = await db.prepare('SELECT * FROM return_items WHERE return_id = ?').all<{
+  const existingItems = await db.prepare('SELECT * FROM return_items WHERE return_id = ? ORDER BY id').all<{
     id: number; product_id: number | null; product_name: string | null; quantity: number
     return_to_stock: number; stock_action: string | null; branch_id: number | null; cost_price_usd: number | null; cost_price_khr: number | null
     batch_id: number | null
   }>([id])
   const newItems: ReturnItemInput[] = Array.isArray(body.items) ? body.items : existingItems
+  if (existingItems.length > 50 || newItems.length > 50) {
+    return c.json({ error: 'Edit at most 50 return items at a time.', code: 'return_edit_too_large' }, 400)
+  }
 
   try {
-    assertUpdatedAtMatch('return', existing, getExpectedUpdatedAt(body))
+    assertUpdatedAtMatch('return', existing, expectedUpdatedAt)
     await assertReturnableItems(db, existing.sale_id, newItems, Number(id))
   } catch (error) {
     if (error instanceof WriteConflictError) {
@@ -2248,8 +2369,44 @@ app.patch('/:id', async (c) => {
     editLotPlans.push({ splits: plan.splits, plainQuantity: plan.plainQuantity })
   }
 
+  type LinkedSaleState = {
+    id: number; sale_status: string | null; status_before_return: string | null
+    receipt_number: string | null; write_revision: number
+  }
+  let linkedSale: LinkedSaleState | null = null
+  let projectedSaleStatus: string | null = null
+  if (existing.sale_id) {
+    linkedSale = await db.prepare(`SELECT s.id,s.sale_status,s.status_before_return,s.receipt_number,
+      COALESCE(v.revision,0) AS write_revision
+      FROM sales s LEFT JOIN sale_write_revisions v ON v.sale_id=s.id WHERE s.id=?`)
+      .get<LinkedSaleState>([existing.sale_id]) || null
+    if (!linkedSale) return c.json({ error: 'Original sale not found' }, 400)
+    const soldLines = await db.prepare('SELECT id,product_id,quantity FROM sale_items WHERE sale_id=? ORDER BY id')
+      .all<{ id: number; product_id: number | null; quantity: number }>([existing.sale_id])
+    const siblingLines = await db.prepare(`SELECT ri.sale_item_id,ri.product_id,ri.quantity
+      FROM return_items ri JOIN returns r ON r.id=ri.return_id
+      WHERE r.sale_id=@sale AND r.id<>@return
+        AND COALESCE(r.status,'completed')!='cancelled'
+        AND COALESCE(r.return_scope,'customer')='customer'
+      ORDER BY r.id,ri.id`).all<{ sale_item_id: number | null; product_id: number | null; quantity: number }>({ sale: existing.sale_id, return: returnId })
+    const proposedLines = String(existing.status || 'completed') === 'cancelled' ? [] : newItems.map((item) => ({
+      sale_item_id: item.sale_item_id ?? null,
+      product_id: item.product_id ?? null,
+      quantity: Number(item.quantity) || 0,
+    }))
+    projectedSaleStatus = projectedSaleStatusForReturnEdit(
+      soldLines,
+      [...siblingLines, ...proposedLines],
+      linkedSale.status_before_return,
+    )
+  }
+
   const statements: Array<{ sql: string; params: Record<string, unknown> }> = []
   const touchedProductIds = new Set<number>()
+  const receiptId = crypto.randomUUID()
+  const mutationStamp = new Date().toISOString()
+  const fixedResponse = { id: returnId, updated_at: mutationStamp }
+  let saleEventProvenance: { source_kind: 'return_edit'; source_id: string; generation: 0; sale_id: number } | null = null
 
   // Compensation log (Part-77, same shape as POST /'s -- Part 523): every
   // stock write that lands OUTSIDE the final atomic batch, so a failure
@@ -2257,18 +2414,30 @@ app.patch('/:id', async (c) => {
   const editReversedRestocks: Array<{ productId: number; batchId: number; branchId: number; quantity: number }> = []
   const editReappliedRestocks: Array<{ productId: number; batchId: number; branchId: number; quantity: number }> = []
   let editReversedDamaged: Awaited<ReturnType<typeof reverseDamagedLots>> = []
-  let editCreatedDamaged = false
-  // Written inside the guarded stretch, read after it (the allocation
-  // recording runs post-batch) -- declared here so both can see it.
-  const perItemBatchSplits: ReturnBatchSplit[][] = []
 
   // 11.13: this return's damaged lots come back out before the re-apply.
   // A lot POS already drew from can't be un-damaged (that stock left the
   // building) -- ConsumedDamagedStockError blocks the edit outright.
   try {
-    const reversedLots = await reverseDamagedLots(db, id)
-    editReversedDamaged = reversedLots
-    for (const lot of reversedLots) {
+    const damagedLots = await db.prepare(`SELECT product_id,product_name,branch_id,batch_id,quantity,quantity_remaining,
+      reason,created_by_user_id,created_by_user_name FROM damaged_stock_lots WHERE return_id=@returnId ORDER BY id`)
+      .all<{
+        product_id: number; product_name: string | null; branch_id: number | null; batch_id: number | null
+        quantity: number; quantity_remaining: number; reason: string | null
+        created_by_user_id: number | string | null; created_by_user_name: string | null
+      }>({ returnId: id })
+    for (const lot of damagedLots) {
+      if (Number(lot.quantity_remaining) < Number(lot.quantity)) {
+        throw new ConsumedDamagedStockError(String(lot.product_name || `product #${lot.product_id}`), Number(lot.quantity) - Number(lot.quantity_remaining))
+      }
+    }
+    editReversedDamaged = damagedLots.map((lot) => ({
+      product_id: lot.product_id, product_name: lot.product_name, branch_id: lot.branch_id,
+      batch_id: lot.batch_id ?? null, quantity: Number(lot.quantity), reason: lot.reason ?? null,
+      created_by_user_id: lot.created_by_user_id ?? null, created_by_user_name: lot.created_by_user_name ?? null,
+    }))
+    if (damagedLots.length) statements.push({ sql: 'DELETE FROM damaged_stock_lots WHERE return_id=@returnId', params: { returnId: id } })
+    for (const lot of editReversedDamaged) {
       statements.push({
         sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
               VALUES (@product_id, @product_name, @branch_id, '${DAMAGE_REVERSAL_MOVEMENT}', @quantity, 0, 0, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
@@ -2424,17 +2593,16 @@ app.patch('/:id', async (c) => {
 
     if (stockAction === 'damaged' && item.product_id && itemBranchId) {
       const originalBatchId = item.sale_item_id ? (saleItemBatchInfoForEdit.get(item.sale_item_id)?.batch_id ?? null) : null
-      editCreatedDamaged = true
-      await createDamagedLot(db, {
-        productId: item.product_id,
-        productName: item.product_name || null,
-        branchId: itemBranchId,
-        batchId: originalBatchId,
-        returnId: id,
-        quantity,
-        reason: String(body.reason || existing.reason || '') || null,
-        userId: user?.id ?? null,
-        userName: actorSnapshot(user),
+      statements.push({
+        sql: `INSERT INTO damaged_stock_lots(
+          product_id,product_name,branch_id,batch_id,return_id,quantity,quantity_remaining,reason,created_by_user_id,created_by_user_name
+        ) VALUES(@productId,@productName,@branchId,@batchId,@returnId,@quantity,@quantity,@reason,@userId,@userName)`,
+        params: {
+          productId: item.product_id, productName: item.product_name || null,
+          branchId: itemBranchId, batchId: originalBatchId, returnId: id, quantity,
+          reason: String(body.reason || existing.reason || '') || null,
+          userId: user?.id ?? null, userName: actorSnapshot(user),
+        },
       })
       statements.push({
         sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
@@ -2478,6 +2646,24 @@ app.patch('/:id', async (c) => {
       },
     })
 
+    // Allocation rows must follow their own return_item immediately. The
+    // newest-id subquery is evaluated before any later item insert, so two
+    // edited lines with multiple lots cannot bind every split to the last
+    // line in the request.
+    for (const split of itemSplits) {
+      statements.push({
+        sql: `INSERT INTO return_item_batch_allocations (return_item_id, sale_item_id, batch_id, branch_id, quantity)
+              VALUES ((SELECT id FROM return_items WHERE return_id=@return_id ORDER BY id DESC LIMIT 1), @sale_item_id, @batch_id, @branch_id, @quantity)`,
+        params: {
+          return_id: id,
+          sale_item_id: split.saleItemId ?? null,
+          batch_id: split.batchId,
+          branch_id: split.branchId ?? null,
+          quantity: split.quantity,
+        },
+      })
+    }
+
     if (returnToStock && item.product_id && itemBranchId) {
       statements.push({
         sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
@@ -2498,9 +2684,6 @@ app.patch('/:id', async (c) => {
         },
       })
     }
-    // Parallel to newItems order -- recorded against the re-inserted
-    // return_items after the batch below, same as the create path.
-    perItemBatchSplits.push(itemSplits)
   }
 
   for (const productId of touchedProductIds) {
@@ -2513,7 +2696,7 @@ app.patch('/:id', async (c) => {
   statements.push({
     sql: `UPDATE returns SET reason=@reason, return_type=@return_type, notes=@notes,
           total_refund_usd=@total_refund_usd, total_refund_khr=@total_refund_khr,
-          branch_id=@branch_id, branch_name=@branch_name, updated_at=CURRENT_TIMESTAMP WHERE id=@id`,
+          branch_id=@branch_id, branch_name=@branch_name, updated_at=@updated_at WHERE id=@id`,
     params: {
       reason: body.reason || existing.reason,
       return_type: body.return_type || existing.return_type,
@@ -2525,9 +2708,78 @@ app.patch('/:id', async (c) => {
       total_refund_khr: Math.round(totalRefundKhr),
       branch_id: body.branch_id || existing.branch_id,
       branch_name: branchName,
+      updated_at: mutationStamp,
       id,
     },
   })
+
+  const expectedReturnRevision = Number(existing.write_revision)
+  statements.unshift(
+    { sql: 'DELETE FROM return_bulk_guards', params: {} },
+    { sql: 'DELETE FROM sale_bulk_guards', params: {} },
+    {
+      sql: `INSERT INTO return_bulk_guards(guard_value)
+            SELECT CASE WHEN (
+              NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore')
+              AND EXISTS(SELECT 1 FROM returns WHERE id=@id)
+              AND COALESCE((SELECT revision FROM return_write_revisions WHERE return_id=@id),0)=@revision
+            ) THEN 1 ELSE 0 END`,
+      params: { id: returnId, revision: expectedReturnRevision },
+    },
+  )
+  let eventBytes = 0
+  if (linkedSale) {
+    statements.splice(3, 0,
+      saleRevisionGuard(linkedSale.id, Number(linkedSale.write_revision)),
+      bulkAssertion(`
+        COALESCE((SELECT sale_status FROM sales WHERE id=@sale),'completed')=@status
+        AND COALESCE((SELECT status_before_return FROM sales WHERE id=@sale),'')=@beforeReturn
+      `, {
+        sale: linkedSale.id,
+        status: String(linkedSale.sale_status || 'completed'),
+        beforeReturn: String(linkedSale.status_before_return || ''),
+      }),
+    )
+    const beforeStatus = String(linkedSale.sale_status || 'completed')
+    if (projectedSaleStatus && projectedSaleStatus !== beforeStatus) {
+      statements.push({
+        sql: `UPDATE sales SET
+          status_before_return=CASE WHEN COALESCE(sale_status,'completed') NOT IN ('returned','partial_return') THEN COALESCE(sale_status,'completed') ELSE status_before_return END,
+          sale_status=@status,updated_at=@updatedAt WHERE id=@sale`,
+        params: { status: projectedSaleStatus, updatedAt: mutationStamp, sale: linkedSale.id },
+      })
+      const event = buildSaleRecordEventsInsert([{
+        saleId: linkedSale.id,
+        sourceKind: 'return_edit', sourceId: receiptId, generation: 0,
+        kind: 'status_changed', via: 'apply',
+        subject: existing.return_number == null ? null : String(existing.return_number),
+        actorId: authenticatedActorId, actorUsername: actorSnapshot(user), occurredAt: mutationStamp,
+        changes: [{
+          field: 'sale_status',
+          before: { state: 'known_value', value: beforeStatus },
+          after: { state: 'known_value', value: projectedSaleStatus },
+        }],
+      }])!
+      eventBytes = event.eventsBytes
+      statements.push(event.statement)
+      saleEventProvenance = { source_kind: 'return_edit', source_id: receiptId, generation: 0, sale_id: linkedSale.id }
+    }
+  }
+  statements.push(
+    { sql: 'DELETE FROM return_bulk_guards', params: {} },
+    { sql: 'DELETE FROM sale_bulk_guards', params: {} },
+  )
+  statements.push({
+    sql: `INSERT INTO return_mutation_receipts(
+      id,actor_id,return_id,sale_id,mutation_kind,request_id,request_digest,request_json,response_json,occurred_at
+    ) VALUES(@receipt,@actor,@returnId,@saleId,'edit',@request,@digest,@requestJson,@responseJson,@occurredAt)`,
+    params: {
+      receipt: receiptId, actor: authenticatedActorId, returnId,
+      saleId: existing.sale_id || null, request: requestId, digest: requestDigest,
+      requestJson, responseJson: JSON.stringify(fixedResponse), occurredAt: mutationStamp,
+    },
+  })
+  assertSaleRecordBatchBounds(statements.length, canonicalIntent, eventBytes)
 
   await db.batch(statements)
 
@@ -2553,34 +2805,23 @@ app.patch('/:id', async (c) => {
         unreversed.push(`reversal of ${reversed.quantity} out of lot #${reversed.batchId} (product #${reversed.productId})`)
       }
     }
-    if (editCreatedDamaged) {
-      // The fresh rows are unconsumed by construction, so this delete-them
-      // reversal cannot hit ConsumedDamagedStockError.
-      try {
-        await reverseDamagedLots(db, id)
-      } catch (_) {
-        unreversed.push('newly created damaged lots')
-      }
-    }
-    for (const lot of editReversedDamaged) {
-      try {
-        await createDamagedLot(db, {
-          productId: lot.product_id,
-          productName: lot.product_name,
-          branchId: lot.branch_id,
-          batchId: lot.batch_id,
-          returnId: id,
-          quantity: lot.quantity,
-          reason: lot.reason,
-          userId: lot.created_by_user_id,
-          userName: lot.created_by_user_name,
-        })
-      } catch (_) {
-        unreversed.push(`original damaged lot of ${lot.quantity} (product #${lot.product_id})`)
-      }
-    }
     if (unreversed.length) {
       await audit(c.env, user?.id ?? null, actorSnapshot(user), 'return_rollback_incomplete', 'return', id, { via: 'edit', unreversed })
+    }
+    const retry = await db.prepare(`SELECT return_id,request_digest,response_json FROM return_mutation_receipts
+      WHERE actor_id=@actor AND mutation_kind='edit' AND request_id=@request`)
+      .get<{ return_id: number; request_digest: string; response_json: string }>({ actor: authenticatedActorId, request: requestId })
+    if (retry) {
+      if (Number(retry.return_id) === returnId && retry.request_digest === requestDigest) {
+        return c.json(JSON.parse(retry.response_json) as { id: number; updated_at: string })
+      }
+      return c.json({ error: 'client_request_id was already used with different return edit data.', code: 'idempotency_conflict' }, 409)
+    }
+    if (error instanceof SaleRecordEventError) {
+      return c.json({ error: error.message, code: 'return_edit_too_large' }, 400)
+    }
+    if (/return_bulk_guards|sale_bulk_guards|CHECK constraint failed: guard_value/i.test((error as Error).message)) {
+      return c.json({ error: 'Return or linked sale changed. Refresh before retrying.', code: 'write_conflict', conflict: true }, 409)
     }
     return c.json({
       error: `Failed to update return: ${(error as Error).message}`
@@ -2590,29 +2831,10 @@ app.patch('/:id', async (c) => {
     }, 500)
   }
 
-  // Record the fresh per-lot split for the re-inserted return_items, same as
-  // POST / -- so a subsequent edit reverses the right lots again.
-  await recordReturnItemBatchAllocations(db, id, perItemBatchSplits)
-
-  if (existing.sale_id) {
-    const saleItems = await db.prepare('SELECT product_id, quantity FROM sale_items WHERE sale_id = ?').all<{ product_id: number; quantity: number }>([existing.sale_id])
-    const returnedRows = await db.prepare(`
-      SELECT ri.product_id, SUM(ri.quantity) AS total_qty
-      FROM return_items ri JOIN returns r ON r.id = ri.return_id
-      WHERE r.sale_id = ? AND COALESCE(r.status, 'completed') != 'cancelled' AND COALESCE(r.return_scope, 'customer') = 'customer'
-      GROUP BY ri.product_id
-    `).all<{ product_id: number; total_qty: number }>([existing.sale_id])
-    const returnedMap = new Map(returnedRows.map((r) => [r.product_id, r.total_qty]))
-    const hasAny = returnedRows.length > 0
-    const fullyReturned = saleItems.every((si) => (returnedMap.get(si.product_id) || 0) >= si.quantity)
-    const saleState = await db.prepare('SELECT sale_status,status_before_return FROM sales WHERE id=?').get<{ sale_status: string | null; status_before_return: string | null }>([existing.sale_id])
-    const newStatus = fullyReturned ? 'returned' : hasAny ? 'partial_return' : (saleState?.status_before_return || 'completed')
-    await db.prepare(`UPDATE sales SET
-      status_before_return = CASE WHEN COALESCE(sale_status,'completed') NOT IN ('returned','partial_return') THEN COALESCE(sale_status,'completed') ELSE status_before_return END,
-      sale_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run([newStatus, existing.sale_id])
-  }
-
-  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'return', id, { reason: body.reason })
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'return', id, {
+    reason: body.reason,
+    ...(saleEventProvenance ? { record_event: saleEventProvenance } : {}),
+  })
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'return_edit', id: Number(id) }))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
   c.executionCtx.waitUntil(Promise.all([
@@ -2625,8 +2847,7 @@ app.patch('/:id', async (c) => {
     c.executionCtx.waitUntil(broadcast(c.env, 'sales', { action: 'update', id: existing.sale_id }))
   }
 
-  const updated = await db.prepare('SELECT id, updated_at FROM returns WHERE id = ?').get<{ id: number; updated_at: string }>([id])
-  return c.json(updated || { id: Number(id) })
+  return c.json(fixedResponse)
 })
 
 export default app
