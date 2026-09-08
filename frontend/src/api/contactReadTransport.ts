@@ -181,6 +181,34 @@ export function invalidateCustomerReadCache(): void {
   searchGroupControllers.delete('customers')
 }
 
+// Sales/POS-only customer identity shape. The server omits Contacts finance
+// and directory-only fields; an offline fallback is projected to the same
+// allowlist so a cached directory row cannot widen the picker response.
+export async function getSalesCustomerPicker(params: QueryParams = {}): Promise<unknown> {
+  const query = buildQueryString({ ...params, fields: 'sales_picker' })
+  try {
+    return await apiFetch('GET', appendQuery(CUSTOMER_READ.endpoint, query))
+  } catch (error) {
+    if (isInvalidSessionError(error) || isAbortError(error)) throw error
+    const search = String(params.search || params.q || '').trim().toLocaleLowerCase('en-US')
+    const ids = new Set(String(params.ids || '').split(',').map((value) => value.trim()).filter(Boolean))
+    const rows = (await readLocalContacts('customers'))
+      .filter((row) => {
+        const value = row as Record<string, unknown>
+        if (Number(value.is_anonymous || 0) === 1) return false
+        if (ids.size && !ids.has(String(value.id ?? ''))) return false
+        if (!search) return true
+        return [value.name, value.phone, value.membership_number].some((candidate) => String(candidate || '').toLocaleLowerCase('en-US').includes(search))
+      })
+      .slice(0, Math.max(1, Math.min(100, Number(params.pageSize || params.limit || 50) || 50)))
+      .map((row) => {
+        const value = row as Record<string, unknown>
+        return Object.fromEntries(['id', 'name', 'phone', 'email', 'address', 'membership_number', 'updated_at', 'is_anonymous'].map((key) => [key, value[key]]))
+      })
+    return { items: rows, limit: rows.length }
+  }
+}
+
 // Authenticated exact lookup: never mirror a balance or fall back after denial.
 export function lookupCustomerMembership(membershipNumber: string): Promise<unknown> {
   return apiFetch('GET', `/api/customers/membership/${encodeURIComponent(membershipNumber.trim())}`)

@@ -532,8 +532,8 @@ function toPosCustomerRows(data: unknown): CustomerRecord[] {
 }
 
 async function searchPosCustomers(search: string): Promise<CustomerRecord[]> {
-  const { getCustomers } = await getContactReadTransport()
-  const data = await getCustomers({
+  const { getSalesCustomerPicker } = await getContactReadTransport()
+  const data = await getSalesCustomerPicker({
     ...(search ? { search } : {}),
     page: 1,
     pageSize: POS_CUSTOMER_PAGE_SIZE,
@@ -556,8 +556,8 @@ async function searchPosCustomers(search: string): Promise<CustomerRecord[]> {
 async function loadPosCustomersByIds(ids: Array<string | number>): Promise<CustomerRecord[]> {
   const wanted = ids.map((id) => String(id ?? '').trim()).filter(Boolean)
   if (!wanted.length) return []
-  const { getCustomers } = await getContactReadTransport()
-  const rows = toPosCustomerRows(await getCustomers({ ids: wanted.join(',') }))
+  const { getSalesCustomerPicker } = await getContactReadTransport()
+  const rows = toPosCustomerRows(await getSalesCustomerPicker({ ids: wanted.join(',') }))
   const wantedSet = new Set(wanted)
   return rows.filter((row) => wantedSet.has(String(row?.id ?? '').trim()))
 }

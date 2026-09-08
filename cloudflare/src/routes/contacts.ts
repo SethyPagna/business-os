@@ -33,7 +33,7 @@ import { revokePortalSessionsForAccount } from '../lib/portalSession'
 import bcrypt from 'bcryptjs'
 import { buildContactMatchClause } from '../lib/contactSearch'
 import { buildContactIdClause, parseContactIdFilter, CONTACT_ID_FILTER_MAX } from '../lib/contactIds'
-import { buildContactPickerSql, CONTACT_PICKER_DEFAULT_LIMIT, CONTACT_PICKER_MAX_LIMIT } from '../lib/contactPicker'
+import { buildContactPickerSql, buildSalesCustomerPickerSql, CONTACT_PICKER_DEFAULT_LIMIT, CONTACT_PICKER_MAX_LIMIT } from '../lib/contactPicker'
 import { createBulkDeleteJob, getBulkDeleteJob, reapStalledBulkDeleteJobs, type BulkDeleteEntityType } from '../lib/bulkDeleteEngine'
 import { bumpVersion, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
 import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr } from '../lib/businessDateWindow'
@@ -696,6 +696,27 @@ function registerContactRoutes(config: ContactConfig) {
         return { items: items || [], total, limit, truncated: total > (items || []).length }
       })
       return c.json(payload)
+    }
+    // Narrow Sales/POS customer search. It is deliberately customers-only
+    // and omits notes, loyalty totals, gender, contact-created date and the
+    // previous picker's last_sale_at value. Search and exact-id lookup use
+    // the same authoritative anonymous-row predicate inside the SQL read.
+    if (String(query.fields || '') === 'sales_picker') {
+      if (config.table !== 'customers') return c.json({ error: 'sales_picker is customers-only' }, 400)
+      const limit = clampInt(query.pageSize ?? query.limit, 50, 1, 100)
+      const predicates: string[] = []
+      const params: Record<string, unknown> = { limit }
+      const contactMatch = buildContactMatchClause('customers', String(query.search || query.q || ''), 'picker')
+      if (contactMatch) {
+        predicates.push(contactMatch.sql)
+        Object.assign(params, contactMatch.params)
+      }
+      const idFilter = parseContactIdFilter(c.req.queries('ids') ?? query.ids)
+      if (idFilter.tooMany) return c.json({ error: `ids: at most ${CONTACT_ID_FILTER_MAX} ids per request` }, 400)
+      const idClause = buildContactIdClause(idFilter)
+      if (idClause) predicates.push(idClause)
+      const items = await db.prepare(buildSalesCustomerPickerSql(predicates)).all<Record<string, unknown>>(params)
+      return c.json({ items, limit })
     }
     const hasPaging = Object.prototype.hasOwnProperty.call(query, 'page') || Object.prototype.hasOwnProperty.call(query, 'pageSize')
     const search = String(query.search || query.q || '').trim().toLowerCase()
