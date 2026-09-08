@@ -5,6 +5,7 @@ import {
   createSelectedConflictRequestCoordinator,
   partitionSelectedConflictClusters,
   preserveSelectedConflictChoices,
+  selectedConflictCaseKey,
   selectedConflictCanContinueAutomatically,
   selectedConflictChoicesComplete,
   selectedConflictEligibility,
@@ -39,6 +40,7 @@ const cluster = (value: string, left = product(1), right = product(2)): ProductC
 })
 
 assert.equal(selectedConflictEligibility(cluster('012345000065')).eligible, true)
+assert.equal(selectedConflictCaseKey({ type: 'name', value: '  Case   WATER ' }), 'name:case water', 'case keys use the same normalized cluster identity the Worker validates')
 assert.deepEqual(
   selectedConflictEligibility(cluster('pair', product(5, { barcode: '001234565' }), product(4, { barcode: '01234565' }))),
   { eligible: true, keeper: product(4, { barcode: '01234565' }), discarded: product(5, { barcode: '001234565' }) },
@@ -49,6 +51,7 @@ assert.equal(selectedConflictEligibility(cluster('pair', product(1), product(2, 
 assert.equal(selectedConflictEligibility(cluster('pair', product(1), product(2, { is_active: 0 }))).eligible, false)
 assert.equal(selectedConflictEligibility(cluster('pair', product(1), product(2, { group_id: 20 }))).eligible, false)
 assert.equal(selectedConflictEligibility(cluster('pair', product(1), product(2, { cost_price_usd: Number.NaN }))).eligible, false)
+assert.equal(selectedConflictEligibility(cluster('pair', product(1), product(2, { selling_price_usd: -1 }))).eligible, false)
 assert.equal(selectedConflictEligibility({ ...cluster('pair'), products: [product(1), product(2), product(3)] }).eligible, false)
 
 assert.deepEqual(
