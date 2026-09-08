@@ -273,6 +273,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
   // Client-side export gated by the modeled 'contacts:export' action, matching
   // the Suppliers/Delivery tabs and the Products precedent.
   const canExportContacts = can('contacts', 'export')
+  const canViewFinancialHistory = can('contacts', 'financial_history')
 
   const { syncChannel } = useSync()
   const loadRequestRef = useRef(0)
@@ -292,6 +293,11 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
     setSearch(initialSearch)
   }, [initialSearch])
   const [modal, setModal] = useState<ContactModal>(null)
+  useEffect(() => {
+    if (canViewFinancialHistory) return
+    setSection('directory')
+    setModal((current) => current === 'purchases' ? 'detail' : current)
+  }, [canViewFinancialHistory])
   const [selected, setSelected] = useState<CustomerRow | null>(null)
   const [renameRequest, setRenameRequest] = useState<RenameCascadeRequest | null>(null)
   const renameResolveRef = useRef<((choice: RenameCascadeChoice) => void) | null>(null)
@@ -889,7 +895,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
 
   const sectionChips: Array<{ key: CustomerSection; label: string; icon: typeof List }> = [
     { key: 'directory', label: tr(t, 'customer_directory', 'Directory'), icon: List },
-    { key: 'invoices', label: tr(t, 'invoices', 'Invoices'), icon: Receipt },
+    ...(canViewFinancialHistory ? [{ key: 'invoices' as const, label: tr(t, 'invoices', 'Invoices'), icon: Receipt }] : []),
   ]
 
   return (
@@ -918,7 +924,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
         </div>
       </div>
 
-      {section === 'invoices' ? (
+      {canViewFinancialHistory && section === 'invoices' ? (
         <Suspense fallback={<div className="py-6 text-center text-sm text-gray-400">{tr(t, 'loading', 'Loading...')}</div>}>
           <ArInvoicesSection t={t} />
         </Suspense>
@@ -1316,7 +1322,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
           onDelete={canDeleteContact ? () => handleDelete(selected) : undefined}
           onClose={() => { setModal(null); setSelected(null) }}
           t={t}
-          extraButtons={[{ label: tr(t, 'customer_purchases', 'Purchases'), onClick: () => setModal('purchases') }]}
+          extraButtons={canViewFinancialHistory ? [{ label: tr(t, 'customer_purchases', 'Purchases'), onClick: () => setModal('purchases') }] : []}
         />
       ) : null}
       {exportDialog ? (
@@ -1335,7 +1341,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
       ) : null}
       {/* X4: per-customer purchase totals -- the customer leg of the
           per-contact drills (suppliers: D5; couriers: X3). */}
-      {modal === 'purchases' && selected ? (
+      {canViewFinancialHistory && modal === 'purchases' && selected ? (
         <Suspense fallback={null}>
           <CustomerPurchasesReportModal
             customerId={selected.id as number}

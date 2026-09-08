@@ -492,6 +492,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
   // Client-side export gated by the modeled 'contacts:export' action, matching
   // the Customers/Suppliers tabs and the Products precedent.
   const canExportContacts = can('contacts', 'export')
+  const canViewFinancialHistory = can('contacts', 'financial_history')
 
   const { syncChannel } = useSync()
   const loadRequestRef = useRef(0)
@@ -530,6 +531,9 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
     setSearch(initialSearch)
   }, [initialSearch])
   const [modal,    setModal]    = useState<DeliveryModal>(null)
+  useEffect(() => {
+    if (!canViewFinancialHistory) setModal((current) => current === 'report' ? 'detail' : current)
+  }, [canViewFinancialHistory])
   const [selected, setSelected] = useState<DeliveryContact | null>(null)
   const [loading,  setLoading]  = useState(true)
   // Y1: true while ANY load is in flight (incl. silent search refetches)
@@ -1343,7 +1347,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
             ]
           })()}
           onEdit={() => setModal('form')} onDelete={canDeleteContact ? () => handleDelete(selected) : undefined} onClose={() => { setModal(null); setSelected(null) }} t={t}
-          extraButtons={[{ label: tr('delivery_report', 'Deliveries'), onClick: () => setModal('report') }]} />
+          extraButtons={canViewFinancialHistory ? [{ label: tr('delivery_report', 'Deliveries'), onClick: () => setModal('report') }] : []} />
       )}
       {exportDialog ? (
         <Suspense fallback={null}>
@@ -1361,7 +1365,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
       ) : null}
       {/* X3: the per-courier totals drill -- the same pattern as the supplier
           Purchases modal, backed by /api/sales/delivery-contact-report. */}
-      {modal === 'report' && selected ? (
+      {canViewFinancialHistory && modal === 'report' && selected ? (
         <Suspense fallback={null}>
           <DeliveryContactReportModal
             contactId={selected.id as number}
