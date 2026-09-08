@@ -177,6 +177,45 @@ export function projectedSaleStatusForReturnCreate(
   return fullyReturned ? 'returned' : hasAny ? 'partial_return' : (statusBeforeReturn || 'completed')
 }
 
+export function assertReturnCreateCapacity(
+  saleItems: Array<{ id: number; product_id: number | null; quantity: number; product_name?: string | null }>,
+  committedReturnLines: Array<{ sale_item_id?: number | null; product_id?: number | null; quantity: number }>,
+  requestLines: Array<{ sale_item_id?: number | null; product_id?: number | null; quantity: number }>,
+): void {
+  const byId = new Map(saleItems.map((item) => [Number(item.id), item]))
+  const usedByItem = new Map<number, number>()
+  const fallbackByProduct = new Map<number, number>()
+  for (const line of [...committedReturnLines, ...requestLines]) {
+    const quantity = Number(line.quantity) || 0
+    if (!(quantity > 0)) continue
+    const saleItemId = Number(line.sale_item_id) || 0
+    if (saleItemId) {
+      const item = byId.get(saleItemId)
+      if (!item) throw new Error('Sale item not found for this return')
+      usedByItem.set(saleItemId, (usedByItem.get(saleItemId) || 0) + quantity)
+      continue
+    }
+    const productId = Number(line.product_id) || 0
+    if (!productId) throw new Error('Each return line needs a sale item or product')
+    fallbackByProduct.set(productId, (fallbackByProduct.get(productId) || 0) + quantity)
+  }
+  for (const item of saleItems) {
+    const used = usedByItem.get(item.id) || 0
+    if (used > Number(item.quantity)) {
+      throw new Error(`Cannot return ${used} of ${item.product_name || 'this item'} — only ${Math.max(0, Number(item.quantity))} sold`)
+    }
+    const productId = Number(item.product_id) || 0
+    let fallback = fallbackByProduct.get(productId) || 0
+    if (!(fallback > 0)) continue
+    const remaining = Math.max(0, Number(item.quantity) - used)
+    const allocated = Math.min(remaining, fallback)
+    usedByItem.set(item.id, used + allocated)
+    fallbackByProduct.set(productId, fallback - allocated)
+  }
+  const overflow = [...fallbackByProduct.entries()].find(([, quantity]) => quantity > 0)
+  if (overflow) throw new Error(`Cannot return ${overflow[1]} additional unit(s) of product #${overflow[0]} — only the unreturned sold quantity is eligible`)
+}
+
 export function returnCreateGuardStatement(
   operationId: string,
   phase: 'precondition' | 'postcondition',

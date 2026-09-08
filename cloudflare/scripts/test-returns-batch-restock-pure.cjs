@@ -25,6 +25,7 @@ const rawDb = openDb(loadAll())
 let beforeBatchHook = null
 let beforeReplacementSaleInsertHook = null
 let corruptNextReturnReceipt = false
+let corruptNextReturnCreateReceipt = false
 let corruptNextSaleRecordEvent = false
 // Flatten node:sqlite's run() result the same way lib/db.ts's real
 // D1Compat.run() does (see test-pending-actions-pure.cjs's own comment for
@@ -49,7 +50,7 @@ const db = {
     }
   },
   async batch(items) {
-    if (beforeBatchHook && items.some((item) => /INSERT INTO return_mutation_receipts/i.test(item.sql))) {
+    if (beforeBatchHook && items.some((item) => /INSERT INTO return_(?:mutation|create)_receipts/i.test(item.sql))) {
       const hook = beforeBatchHook
       beforeBatchHook = null
       await hook()
@@ -66,6 +67,13 @@ const db = {
       if (receipt) {
         corruptNextReturnReceipt = false
         receipt.params.responseJson = '{"id":"invalid","updated_at":1}'
+      }
+    }
+    if (corruptNextReturnCreateReceipt) {
+      const receipt = items.find((item) => /INSERT INTO return_create_receipts/i.test(item.sql))
+      if (receipt) {
+        corruptNextReturnCreateReceipt = false
+        receipt.params.requestDigest = 'G'.repeat(64)
       }
     }
     const results = await rawDb.batch(items)
@@ -125,6 +133,7 @@ const saleRecordsContract = {
   SALE_RECORD_FIELDS: ['receipt_number', 'sale_status', 'items', 'total_usd', 'payment', 'delivery', 'customer', 'membership', 'item', 'quantity', 'removed_items', 'added_items', 'delivery_fee_usd', 'actual_delivery_cost_usd', 'is_delivery', 'driver', 'payment_method', 'payment_details', 'amount_paid_usd', 'amount_paid_khr', 'change_usd', 'change_khr', 'cancel_reason', 'cancel_note'],
 }
 const saleRecordEventsKernel = loadReal('lib/saleRecordEvents.ts', { './saleRecords': saleRecordsContract })
+const returnCreateActionKernel = loadReal('lib/returnCreateAction.ts', { './saleRecordEvents': saleRecordEventsKernel })
 const saleBulkStatusKernel = {
   bulkAssertion: (predicate, params = {}) => ({ sql: `INSERT INTO sale_bulk_guards(guard_value) SELECT CASE WHEN (${predicate}) THEN 1 ELSE 0 END`, params }),
   saleRevisionGuard: (id, revision) => ({
@@ -162,6 +171,7 @@ const returnsRoute = loadReal('routes/returns.ts', {
   '../lib/returnBulkAction': { applyReturnBulkAction: async () => ({}), notifyReturnBulkAction: async () => {}, ReturnBulkError: class ReturnBulkError extends Error {} },
   '../lib/saleBulkStatus': saleBulkStatusKernel,
   '../lib/saleRecordEvents': saleRecordEventsKernel,
+  '../lib/returnCreateAction': returnCreateActionKernel,
   '../lib/searchMatch': { buildLikeAliasClause: () => '1=1', tokenizeSearchTermGroups: () => [], normalizeSearchText: (value) => String(value || '') },
   '../lib/productBatches': productBatches,
   // K2 (Part 410): real, pure -- the three-way stock_action + Replace
@@ -171,7 +181,15 @@ const returnsRoute = loadReal('routes/returns.ts', {
   // Part 519 (session 0b) gave the route a datetime return-number generator;
   // the real one reads the DB for same-second collisions -- a deterministic
   // stub keeps this suite's return numbers stable.
-  '../lib/receiptNumber': { uniqueBusinessDateTimeNumber: async (prefix) => `${prefix ? `${prefix}-` : ''}20260830-120000` },
+  '../lib/receiptNumber': { uniqueBusinessDateTimeNumber: async (prefix, exists) => {
+    const base = `${prefix ? `${prefix}-` : ''}20260830-120000`
+    if (!await exists(base)) return base
+    for (let suffix = 1; suffix < 100; suffix += 1) {
+      const candidate = `${base}-${String(suffix).padStart(2, '0')}`
+      if (!await exists(candidate)) return candidate
+    }
+    throw new Error('test receipt space exhausted')
+  } },
   // Real money kernel -- the replacement sale derives its totals through the
   // same function routes/sales.ts uses, so it must be the real one here too.
   '../lib/saleTotals': loadReal('lib/saleTotals.ts'),
@@ -190,7 +208,7 @@ function seed() {
   auditCalls = []
   rawDb.exec(`INSERT INTO system_flags(key,value) VALUES('sale_record_events_reset_guard','{"mode":"reset","token":"return-test-seed"}')
     ON CONFLICT(key) DO UPDATE SET value=excluded.value;
-    DELETE FROM sale_record_events; DELETE FROM return_mutation_receipts;
+    DELETE FROM sale_record_events; DELETE FROM return_mutation_receipts; DELETE FROM return_create_receipts; DELETE FROM return_create_guards;
     DELETE FROM system_flags WHERE key='sale_record_events_reset_guard';
     DELETE FROM return_bulk_guards; DELETE FROM sale_bulk_guards;
     DELETE FROM branch_batch_stock; DELETE FROM product_batches; DELETE FROM branch_stock; DELETE FROM products; DELETE FROM branches; DELETE FROM sale_items; DELETE FROM sale_item_batch_allocations; DELETE FROM sales; DELETE FROM customers; DELETE FROM returns; DELETE FROM return_items; DELETE FROM return_item_batch_allocations; DELETE FROM inventory_movements; DELETE FROM damaged_stock_lots; DELETE FROM return_replacement_items;`)
@@ -222,6 +240,9 @@ const fakeExecutionCtx = { waitUntil: (p) => { p?.catch?.(() => {}) }, passThrou
 
 async function req(method, url, body) {
   let requestBody = body
+  if (method === 'POST' && url === '/' && body && typeof body === 'object') {
+    requestBody = { client_request_id: body.client_request_id || `return-create-${crypto.randomUUID()}`, ...body }
+  }
   if (method === 'PATCH' && /^\/\d+$/.test(url) && body && typeof body === 'object') {
     const returnId = Number(url.slice(1))
     const current = rawDb.prepare('SELECT updated_at FROM returns WHERE id=@id').get({ id: returnId })
@@ -1038,12 +1059,11 @@ async function main() {
     assert.strictEqual(rawDb.prepare('SELECT quantity_remaining FROM damaged_stock_lots WHERE return_id = @id').get({ id: created.json.id }).quantity_remaining, 2)
   })
 
-  await check('Part-77: a failure AFTER a lot restock reverses the restock -- no phantom stock, no orphan rows', async () => {
+  await check('atomic create refuses a replacement shortfall before every return/stock write', async () => {
     seed()
     // A prior sale drew 5 from a lot; the return restocks 3 back into it,
-    // then the replacement line (deliberately missing its branch) throws
-    // INSIDE the same request, after the restock already committed as its
-    // own write. The catch must reverse the restock, not just delete rows.
+    // while an impossible replacement is requested. The compiled action must
+    // refuse before its single batch; there is no compensation phase.
     const batch = await productBatches.receiveBatchStock(db, { productId: 1, branchId: 1, quantity: 10, lotCode: 'LOT-R' })
     await productBatches.removeStockFromBatch(db, { batchId: batch.batchId, productId: 1, branchId: 1, quantity: 5 })
     rawDb.prepare('INSERT INTO sale_items (id, sale_id, product_id, quantity, batch_id) VALUES (1, 1, 1, 5, @batchId)').run({ batchId: batch.batchId })
@@ -1061,7 +1081,8 @@ async function main() {
       replacement_items: [{ product_id: 2, quantity: 99, branch_id: 1, applied_price_usd: 10 }],
       reason: 'Compensation probe',
     })
-    assert.strictEqual(status, 500, JSON.stringify(json))
+    assert.strictEqual(status, 409, JSON.stringify(json))
+    assert.strictEqual(json.code, 'write_conflict')
 
     // The restock was fully reversed: lot, aggregate and product total are
     // exactly where the sale left them.
@@ -1205,6 +1226,116 @@ async function main() {
     assert.strictEqual(plain.status, 200, JSON.stringify(plain.json))
     const plainRow = rawDb.prepare('SELECT customer_address FROM sales WHERE id = ?').get([plain.json.replacementSaleId])
     assert.strictEqual(plainRow.customer_address, '271', 'a numeric house number is an address, not swallowed JSON')
+  })
+
+  await check('return-create receipt freezes the exact response and rejects changed-body reuse after mutable database changes', async () => {
+    seed()
+    const legacy = await reqExact('POST', '/', {
+      return_number: 'RET-OLD-SCREEN', reason: 'Old screen',
+      items: [{ product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1 }],
+    })
+    assert.strictEqual(legacy.status, 400)
+    assert.strictEqual(legacy.json.code, 'client_request_id_required')
+    assert.strictEqual(legacy.json.action, 'refresh_required')
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM returns').get().n, 0)
+    const payload = {
+      client_request_id: 'return-create-frozen-response', return_number: 'RET-FROZEN',
+      reason: 'Original intent', items: [{ product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1 }],
+    }
+    const first = await reqExact('POST', '/', payload)
+    assert.strictEqual(first.status, 200, JSON.stringify(first.json))
+    rawDb.prepare("UPDATE products SET name='Changed after commit' WHERE id=1").run()
+    const replay = await reqExact('POST', '/', payload)
+    assert.strictEqual(replay.status, 200, JSON.stringify(replay.json))
+    assert.deepStrictEqual(replay.json, first.json)
+    assert.strictEqual(rawDb.prepare("SELECT COUNT(*) n FROM returns WHERE client_request_id='return-create-frozen-response'").get().n, 1)
+    assert.strictEqual(rawDb.prepare("SELECT COUNT(*) n FROM return_create_receipts WHERE request_id='return-create-frozen-response'").get().n, 1)
+    const changed = await reqExact('POST', '/', { ...payload, reason: 'Different intent' })
+    assert.strictEqual(changed.status, 409)
+    assert.strictEqual(changed.json.code, 'idempotency_conflict')
+    const otherActor = await reqAs({ ...FAKE_USER, id: 2 }, 'POST', '/', payload)
+    assert.strictEqual(otherActor.status, 409, 'global returns client key cannot be adopted by a second actor')
+  })
+
+  await check('two same-sale creates from one frozen revision produce one whole winner, then the loser retries from fresh truth', async () => {
+    seed()
+    rawDb.prepare("UPDATE products SET stock_quantity=0 WHERE id=1").run()
+    rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity) VALUES(1,1,1,'Widget',2)").run()
+    const winnerPayload = {
+      client_request_id: 'return-create-race-winner', return_number: 'RET-RACE-WINNER', sale_id: 1,
+      reason: 'Race winner', items: [{ sale_item_id: 1, product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1 }],
+    }
+    const loserPayload = {
+      client_request_id: 'return-create-race-loser', return_number: 'RET-RACE-LOSER', sale_id: 1,
+      reason: 'Race loser', items: [{ sale_item_id: 1, product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1 }],
+    }
+    let winner
+    beforeBatchHook = async () => { winner = await reqExact('POST', '/', winnerPayload) }
+    const raced = await reqExact('POST', '/', loserPayload)
+    assert.strictEqual(winner.status, 200, JSON.stringify(winner.json))
+    assert.strictEqual(raced.status, 409, JSON.stringify(raced.json))
+    assert.strictEqual(raced.json.code, 'write_conflict')
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM returns').get().n, 1)
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM return_create_receipts').get().n, 1)
+    assert.strictEqual(rawDb.prepare("SELECT COUNT(*) n FROM sale_record_events WHERE source_kind='return_create'").get().n, 1)
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM return_create_guards').get().n, 0)
+    assert.strictEqual(rawDb.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status, 'partial_return')
+
+    const retry = await reqExact('POST', '/', loserPayload)
+    assert.strictEqual(retry.status, 200, JSON.stringify(retry.json))
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM returns').get().n, 2)
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM return_create_receipts').get().n, 2)
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM return_create_guards').get().n, 0)
+    assert.strictEqual(rawDb.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status, 'returned')
+  })
+
+  await check('status-unchanged and manual creates keep receipts without inventing sale events', async () => {
+    seed()
+    rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity) VALUES(1,1,1,'Widget',3)").run()
+    const first = await reqExact('POST', '/', {
+      client_request_id: 'return-create-status-first', return_number: 'RET-STATUS-1', sale_id: 1, reason: 'One',
+      items: [{ sale_item_id: 1, product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1 }],
+    })
+    assert.strictEqual(first.status, 200, JSON.stringify(first.json))
+    const second = await reqExact('POST', '/', {
+      client_request_id: 'return-create-status-same', return_number: 'RET-STATUS-2', sale_id: 1, reason: 'Two',
+      items: [{ sale_item_id: 1, product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1 }],
+    })
+    assert.strictEqual(second.status, 200, JSON.stringify(second.json))
+    const sameReceipt = rawDb.prepare("SELECT id FROM return_create_receipts WHERE request_id='return-create-status-same'").get()
+    assert.strictEqual(rawDb.prepare("SELECT COUNT(*) n FROM sale_record_events WHERE source_kind='return_create' AND source_id=?").get(sameReceipt.id).n, 0)
+    const manual = await reqExact('POST', '/', {
+      client_request_id: 'return-create-manual', return_number: 'RET-MANUAL', reason: 'Manual',
+      items: [{ product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1 }],
+    })
+    assert.strictEqual(manual.status, 200, JSON.stringify(manual.json))
+    assert.strictEqual(rawDb.prepare("SELECT COUNT(*) n FROM return_create_receipts WHERE request_id='return-create-manual'").get().n, 1)
+  })
+
+  await check('event or receipt constraint failure rolls the entire create back with zero guards', async () => {
+    seed()
+    const createAuditBefore = rawDb.prepare("SELECT COUNT(*) n FROM audit_logs WHERE entity='return_create'").get().n
+    rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,quantity) VALUES(1,1,1,1)").run()
+    corruptNextSaleRecordEvent = true
+    const badEvent = await reqExact('POST', '/', {
+      client_request_id: 'return-create-bad-event', return_number: 'RET-BAD-EVENT', sale_id: 1, reason: 'Bad event',
+      items: [{ sale_item_id: 1, product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1 }],
+    })
+    assert.strictEqual(badEvent.status, 409, JSON.stringify(badEvent.json))
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM returns').get().n, 0)
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM sale_record_events').get().n, 0)
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM return_create_receipts').get().n, 0)
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM return_create_guards').get().n, 0)
+
+    corruptNextReturnCreateReceipt = true
+    const badReceipt = await reqExact('POST', '/', {
+      client_request_id: 'return-create-bad-receipt', return_number: 'RET-BAD-RECEIPT', reason: 'Bad receipt',
+      items: [{ product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1 }],
+    })
+    assert.strictEqual(badReceipt.status, 409, JSON.stringify(badReceipt.json))
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM returns').get().n, 0)
+    assert.strictEqual(rawDb.prepare("SELECT COUNT(*) n FROM audit_logs WHERE entity='return_create'").get().n, createAuditBefore)
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM return_create_guards').get().n, 0)
   })
 
   console.log(`\n${passed} check(s) passed.`)
