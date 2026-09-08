@@ -336,7 +336,6 @@ export default function SalesListSurface({
                                   <button type="button" onClick={() => setSelectedSale(sale)} className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-blue-600 dark:hover:bg-slate-800" aria-label={t('print') || 'Print'} title={t('print') || 'Print'}><Printer className="h-3.5 w-3.5" /></button>
                                 </div>
                               </td>
-                              <td className="hidden lg:table-cell" />
                             </tr>
                             </Fragment>
                           )
