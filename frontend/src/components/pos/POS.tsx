@@ -86,6 +86,7 @@ import { resolveSaleBranch } from './productSheetState.ts'
 import { branchCanSell } from '../../utils/branchRoles.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import { contactDisplayAddress } from '../contacts/contactOptionUtils.ts'
+import { filterSelectableCustomerRows, isAnonymousCustomerIdentity, isSelectableCustomerIdentity, resolveSelectableCustomerById } from '../../utils/customerIdentity.ts'
 import type { BatchSelection } from '../../api/batchesTransport.ts'
 const Receipt = lazyRetry(() => import('../receipt/Receipt'), 'pos-receipt')
 const ImageGalleryLightbox = lazyRetry(() => import('../shared/ImageGalleryLightbox'), 'pos-image-gallery-lightbox')
@@ -312,6 +313,7 @@ type CustomerRecord = Record<string, unknown> & {
   membership_number?: string
   name: string
   phone?: string
+  is_anonymous?: number | boolean | null
 }
 
 type DeliveryContactRecord = Record<string, unknown> & {
@@ -524,9 +526,9 @@ async function loadPosCategories(): Promise<unknown[]> {
 function toPosCustomerRows(data: unknown): CustomerRecord[] {
   // Paged reads answer { items, total, ... }; the offline fallback (the
   // local mirror, see contactReadTransport.ts) answers a plain array.
-  if (Array.isArray(data)) return data as CustomerRecord[]
+  if (Array.isArray(data)) return filterSelectableCustomerRows(data as CustomerRecord[])
   const items = (data as { items?: unknown } | null)?.items
-  return Array.isArray(items) ? items as CustomerRecord[] : []
+  return Array.isArray(items) ? filterSelectableCustomerRows(items as CustomerRecord[]) : []
 }
 
 async function searchPosCustomers(search: string): Promise<CustomerRecord[]> {
@@ -558,6 +560,11 @@ async function loadPosCustomersByIds(ids: Array<string | number>): Promise<Custo
   const rows = toPosCustomerRows(await getCustomers({ ids: wanted.join(',') }))
   const wantedSet = new Set(wanted)
   return rows.filter((row) => wantedSet.has(String(row?.id ?? '').trim()))
+}
+
+async function invalidatePosCustomerReads(): Promise<void> {
+  const { invalidateCustomerReadCache } = await getContactReadTransport()
+  invalidateCustomerReadCache()
 }
 
 async function loadPosDeliveryContacts(): Promise<DeliveryContactRecord[]> {
@@ -829,6 +836,20 @@ export default function POS() {
   const patchActive = useCallback((patch: Partial<PosOrder>) => {
     setOrders(prev => prev.map(o => o.id === resolvedActiveId ? { ...o, ...patch } : o))
   }, [resolvedActiveId])
+
+  // A marker can arrive from the bounded offline mirror when this tab is
+  // restored. Treat it as no selected profile before membership lookup or
+  // checkout can reuse the stale customer payload.
+  useEffect(() => {
+    if (!isAnonymousCustomerIdentity(active.customer)) return
+    patchActive({
+      customer: { ...EMPTY_CUSTOMER },
+      customerSearch: '',
+      membershipDiscountUsd: '',
+      membershipDiscountKhr: '',
+      membershipRedeemUnits: '',
+    })
+  }, [active.customer, patchActive])
 
   const addNewOrder = () => {
     if (orders.length >= LAYOUT.MAX_CONCURRENT_ORDERS) {
@@ -1634,12 +1655,40 @@ export default function POS() {
       // branches) is unaffected, so no forceMetadata here.
       void loadCatalogData('POS sync stock')
     }
-    if (channel === 'customers' && customerOptionsLoadedRef.current) {
+    if (channel === 'customers') {
       // Re-run the SAME search the picker is showing, not a bare list read.
       // Read through a ref: putting customerSearch in this effect's deps
       // would re-run the whole sync branch (catalog reloads included) on
       // every keystroke.
-      void loadCustomers('POS sync customers', customerSearchRef.current)
+      void (async () => {
+        await invalidatePosCustomerReads()
+        const selected = ordersRef.current.find((order) => order.id === resolvedActiveId)?.customer
+        if (selected?.id != null) {
+          const rows = await withLoaderTimeout(
+            () => loadPosCustomersByIds([selected.id as string | number]),
+            'POS selected customer refresh',
+            POS_CONTACT_OPTIONS_TIMEOUT_MS,
+          ).catch(() => [])
+          const current = resolveSelectableCustomerById(rows, selected.id)
+          if (!current) {
+            setOrders((previous) => previous.map((order) => (
+              order.id === resolvedActiveId && String(order.customer?.id ?? '') === String(selected.id)
+                ? {
+                    ...order,
+                    customer: { ...EMPTY_CUSTOMER },
+                    customerSearch: '',
+                    membershipDiscountUsd: '',
+                    membershipDiscountKhr: '',
+                    membershipRedeemUnits: '',
+                  }
+                : order
+            )))
+          }
+        }
+        if (customerOptionsLoadedRef.current) {
+          await loadCustomers('POS sync customers', customerSearchRef.current)
+        }
+      })()
     }
     if (channel === 'deliveryContacts' && deliveryOptionsLoadedRef.current) {
       void loadDeliveryContacts('POS sync delivery contacts')
@@ -1707,6 +1756,7 @@ export default function POS() {
 
 // Customer actions
   const selectCustomer = async (c: CustomerRecord) => {
+    if (!isSelectableCustomerIdentity(c)) return
     const opts = await parseContactOptions(c.address)
     setCustomerSuggestions([])
     setShowCustomerDrop(false)
@@ -2879,6 +2929,9 @@ export default function POS() {
     const hasPaymentInput = paidUsdNum > 0 || paidKhrNum > 0
 
     const device = getClientDeviceInfo()
+    const checkoutCustomer: CustomerRecord = isSelectableCustomerIdentity(active.customer)
+      ? active.customer
+      : { ...EMPTY_CUSTOMER }
     const saleData = {
       client_request_id: clientRequestId,
       cashier_id:   user?.id || null,
@@ -2886,14 +2939,14 @@ export default function POS() {
       // Keeps new sales consistent with historical ones and with the rename
       // cascade, which writes the username into cashier_name too.
       cashier_name: (user as { username?: string } | null | undefined)?.username || user?.name || '',
-      customer_name:    active.customer.name    || null,
-      customer_id:      active.customer.id      || null,
-      customer_membership_number: active.customer.membership_number || null,
-      customer_phone:   active.customer.phone   || null,
+      customer_name:    checkoutCustomer.name    || null,
+      customer_id:      checkoutCustomer.id      || null,
+      customer_membership_number: checkoutCustomer.membership_number || null,
+      customer_phone:   checkoutCustomer.phone   || null,
       // N21: the receipt and the sale detail print this snapshot, so it is
       // the display address, not the Contact Options JSON a linked customer
       // carries in customers.address.
-      customer_address: contactDisplayAddress(active.customer.address) || null,
+      customer_address: contactDisplayAddress(checkoutCustomer.address) || null,
       branch_id: saleBranchId,
       items: active.cart.map(i => ({
         id:                i.id,
@@ -2928,9 +2981,9 @@ export default function POS() {
       })),
       subtotal_usd: subtotalUsd, subtotal_khr: Math.round(subtotalKhr),
       discount_usd: discUsd,    discount_khr: discKhr,
-      membership_discount_usd: membershipDiscUsd,
-      membership_discount_khr: membershipDiscKhr,
-      membership_points_redeemed: membershipRedeemUnits * redeemPointsStep,
+      membership_discount_usd: isSelectableCustomerIdentity(active.customer) ? membershipDiscUsd : 0,
+      membership_discount_khr: isSelectableCustomerIdentity(active.customer) ? membershipDiscKhr : 0,
+      membership_points_redeemed: isSelectableCustomerIdentity(active.customer) ? membershipRedeemUnits * redeemPointsStep : 0,
       loyalty_accrual: loyaltyAccrual,
       tax_usd:      taxUsd,     tax_khr:      taxKhr,
       total_usd:    totalUsd,   total_khr:    totalKhr,

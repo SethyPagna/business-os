@@ -22,6 +22,7 @@ import {
   RECEIPT_ROW_GRID_TEMPLATE,
   receiptItemGridTemplate,
 } from '../../utils/receiptItemColumns.ts'
+import { isAnonymousCustomerIdentity } from '../../utils/customerIdentity.ts'
 
 type LanguageMode = 'en' | 'km' | 'both'
 // N4 (owner, Sep 6 2026): "Open PDF" is removed -- it opened the same document
@@ -104,6 +105,7 @@ interface ReceiptSale {
   customer_phone?: string | null
   customer_address?: string | null
   customer_membership_number?: string | null
+  customer_is_anonymous?: number | boolean | null
   is_delivery?: boolean | number | string | null
   delivery_contact_name?: string | null
   delivery_contact_phone?: string | null
@@ -496,6 +498,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   // cashier row carries it at all.
   const exchangeRateText = tpl.show_exchange_rate ? `1 USD = ${Number(exchangeRate).toLocaleString()} ${khrSymbol}` : ''
   const showMembershipId = tpl.show_customer_membership !== false
+  const customerIsAnonymous = isAnonymousCustomerIdentity(sale)
   // N21: sales.customer_address may hold the Contact Options JSON that was
   // snapshotted raw out of customers.address. Rendering it through the shared
   // kernel (contactOptionUtils.ts, twinned in cloudflare/src/lib/contactOptions.ts)
@@ -503,7 +506,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   // RESOLVED value stops a row that resolves to nothing forcing an empty
   // customer block onto the paper.
   const customerAddress = contactDisplayAddress(sale.customer_address)
-  const hasCustomer = sale.customer_name || sale.customer_phone || customerAddress || (showMembershipId && sale.customer_membership_number)
+  const hasCustomer = sale.customer_name || (!customerIsAnonymous && sale.customer_phone) || customerAddress || (!customerIsAnonymous && showMembershipId && sale.customer_membership_number)
   const hasDelivery = !!sale.is_delivery && (sale.delivery_contact_name || sale.delivery_contact_phone || sale.delivery_contact_address)
   const showDeliveryContactSection = tpl.delivery_show_contact !== false
   const showDeliveryDriverName = showDeliveryContactSection && tpl.delivery_show_driver_name !== false
@@ -565,9 +568,9 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
     customer: hasCustomer ? (
       <div key="customer" className="mt-2 border-t border-dashed border-gray-300 pt-2">
         {tpl.show_customer_name && sale.customer_name ? <Row label={labelFor(lang, 'customer')} value={sale.customer_name} /> : null}
-        {tpl.show_customer_phone && sale.customer_phone ? <Row label={labelFor(lang, 'phone')} value={sale.customer_phone} /> : null}
+        {!customerIsAnonymous && tpl.show_customer_phone && sale.customer_phone ? <Row label={labelFor(lang, 'phone')} value={sale.customer_phone} /> : null}
         {tpl.show_customer_address && customerAddress ? <Row label={labelFor(lang, 'address')} value={customerAddress} /> : null}
-        {showMembershipId && sale.customer_membership_number ? <Row label={labelFor(lang, 'membership')} value={sale.customer_membership_number} /> : null}
+        {!customerIsAnonymous && showMembershipId && sale.customer_membership_number ? <Row label={labelFor(lang, 'membership')} value={sale.customer_membership_number} /> : null}
       </div>
     ) : null,
     // N33 (owner, Sep 6 2026): "the delivery fee is shown twice in a row, by
@@ -844,7 +847,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
       {settings.business_phone ? <div className="text-center">{settings.business_phone}</div> : null}
       <div className="border-t border-gray-300 pt-1">
         <Row label={labelFor(lang, 'date')} value={dateStr} />
-        {sale.customer_phone ? <Row label={labelFor(lang, 'phone')} value={sale.customer_phone} /> : null}
+        {!customerIsAnonymous && sale.customer_phone ? <Row label={labelFor(lang, 'phone')} value={sale.customer_phone} /> : null}
         {customerAddress ? <Row label={labelFor(lang, 'address')} value={customerAddress} /> : null}
       </div>
       <div className="border-y border-gray-900 py-1">

@@ -1,5 +1,6 @@
 import { apiFetch, isInvalidSessionError } from './http.ts'
 import type { QueryParams } from './query.ts'
+import { filterSelectableCustomerRows } from '../utils/customerIdentity.ts'
 
 type ContactTableName = 'customers' | 'suppliers' | 'delivery_contacts'
 
@@ -155,7 +156,22 @@ function readContacts(config: ContactReadConfig, params: QueryParams = {}): Prom
 }
 
 export function getCustomers(params: QueryParams = {}): Promise<unknown> {
-  return readContacts(CUSTOMER_READ, params)
+  return readContacts(CUSTOMER_READ, params).then((data) => {
+    if (Array.isArray(data)) return filterSelectableCustomerRows(data)
+    if (!data || typeof data !== 'object') return data
+    const payload = data as Record<string, unknown>
+    if (!Array.isArray(payload.items)) return data
+    const items = filterSelectableCustomerRows(payload.items)
+    return items.length === payload.items.length ? data : { ...payload, items }
+  })
+}
+
+export function invalidateCustomerReadCache(): void {
+  for (const key of readCache.keys()) {
+    if (key === CUSTOMER_READ.routeKey || key.startsWith(`${CUSTOMER_READ.routeKey}:`)) readCache.delete(key)
+  }
+  searchGroupControllers.get('customers')?.abort()
+  searchGroupControllers.delete('customers')
 }
 
 // Authenticated exact lookup: never mirror a balance or fall back after denial.
