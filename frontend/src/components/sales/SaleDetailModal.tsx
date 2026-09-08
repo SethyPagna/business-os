@@ -256,6 +256,7 @@ interface SaleDetailModalProps {
   // carries the reviewed full tender when settling an awaiting-payment sale.
   onStatusChange?: (saleId: string | number, status: string, notes: string, recordHistory?: boolean, extra?: Record<string, unknown> | null) => Promise<unknown> | unknown
   onAttachMembership?: (saleId: string | number, membershipNumber: string) => Promise<boolean | unknown> | boolean | unknown
+  onCustomerAction?: (sale: SaleDetail) => void
   onPrint?: (sale: SaleDetail) => void
   // Opens the SAME new-return flow the Returns section uses
   // (returns/NewReturnModal), pre-filled with this sale. Omitted entirely
@@ -319,6 +320,7 @@ export default function SaleDetailModal({
   onClose,
   onStatusChange,
   onAttachMembership,
+  onCustomerAction,
   onPrint,
   onReturn,
   onAddItems,
@@ -1462,6 +1464,7 @@ export default function SaleDetailModal({
             </SectionCard>
 
             <SectionCard title={t('customer') || 'Customer'}>
+              {onCustomerAction ? <div className="mb-3 flex justify-end"><button type="button" className="btn-secondary text-xs" onClick={() => onCustomerAction(sale)}>Replace customer / Remove link / Edit current</button></div> : null}
               <DetailRowGroup>
                 <DetailRow label={t('customer_name') || 'Customer'} value={sale.customer_name} />
                 <DetailRow label={t('phone') || 'Phone'} value={sale.customer_phone} />
