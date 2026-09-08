@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "task_id": "f72-anonymous-customer-24969-repair",
+  "status": "prepared_not_executed",
+  "authority": {
+    "decision": "The owner confirmed customer 24969 is the shared walk-in General identity.",
+    "preserve": [
+      "customer id 24969",
+      "all linked sales, returns, and historical customer snapshots",
+      "the physical historical membership_number LC-04971",
+      "all address and other stored profile evidence"
+    ],
+    "exclude": [
+      "customer 22305, which is a real customer with phone 086897171",
+      "all other customers named General/general",
+      "name-based, phone-based, or membership-based backfills"
+    ]
+  },
+  "observed_evidence": {
+    "source": "outputs/takeover-20260908/f72-general-identities-preflight.json and f72-legacy-general-evidence.json",
+    "customer": {
+      "id": 24969,
+      "name": "general",
+      "phone": "",
+      "membership_number": "LC-04971",
+      "sales_count": 5,
+      "returns_count": 1,
+      "portal_accounts_count": 0
+    },
+    "sale_example": {
+      "sale_id": 16947,
+      "receipt_number": "20260908-162823",
+      "customer_id": 24969
+    }
+  },
+  "prerequisites": [
+    "Deploy migration 0141 and the F72 marker-aware application code before this repair.",
+    "Immediately before the write, fetch id, name, phone, membership_number, is_anonymous, updated_at and the portal-account count for id 24969 through the root-owned read-only production path.",
+    "Substitute the exact fresh updated_at value as @expectedUpdatedAt. Do not guess or reuse an older timestamp.",
+    "Require is_anonymous=0 and portal-account count=0 in the same preflight. Stop on any mismatch."
+  ],
+  "atomic_batch": [
+    {
+      "sql": "UPDATE customers SET is_anonymous = 1, updated_at = CURRENT_TIMESTAMP WHERE id = @id AND name IS @name AND phone IS @phone AND membership_number IS @membershipNumber AND is_anonymous = 0 AND updated_at IS @expectedUpdatedAt AND NOT EXISTS (SELECT 1 FROM portal_accounts WHERE contact_id = customers.id)",
+      "params": {
+        "id": 24969,
+        "name": "general",
+        "phone": "",
+        "membershipNumber": "LC-04971",
+        "expectedUpdatedAt": "REQUIRED_FRESH_VALUE"
+      }
+    },
+    {
+      "sql": "SELECT CASE WHEN changes() = 1 THEN 1 ELSE json_extract('f72_anonymous_repair_guard_failed', '$') END AS repair_guard"
+    },
+    {
+      "sql": "SELECT CASE WHEN EXISTS (SELECT 1 FROM customers WHERE id = 24969 AND name IS 'general' AND phone IS '' AND membership_number IS 'LC-04971' AND is_anonymous = 1) THEN 1 ELSE json_extract('f72_anonymous_repair_postcondition_failed', '$') END AS post_guard"
+    }
+  ],
+  "post_assertions": [
+    "Exactly one customer row changed and id 24969 now has is_anonymous=1.",
+    "Customer 22305 remains is_anonymous=0.",
+    "Sales count for customer_id=24969 remains 5 and returns count remains 1 at the observed baseline, unless the fresh preflight documents legitimate intervening activity.",
+    "membership_number remains byte-for-byte LC-04971; the application masks and disables its use without deleting historical evidence.",
+    "No portal account points to customer 24969."
+  ],
+  "recovery": {
+    "automatic": "Any guard failure rolls the one-row update back because all three statements must run in one D1 batch.",
+    "manual": "If a later reviewed decision must reverse the marker, use a separately reviewed exact-version one-row UPDATE from is_anonymous=1 to 0. Never clear membership or historical links as recovery."
+  },
+  "execution": "Not executed. Root alone owns the authorized production preflight and write after code deployment."
+}
