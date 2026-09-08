@@ -41,6 +41,17 @@ import {
   type ProductConflictPreviewCase,
   type ProductConflictStockChoice,
 } from '../lib/productConflictMergeBatch'
+import {
+  PRODUCT_CONFLICT_ACTION_PAGE_MAX,
+  PRODUCT_CONFLICT_ACTION_READ_CHUNK,
+  buildProductConflictActionGroupPlans,
+  isProductConflictActionPreviewRequest,
+  parseProductConflictActionPreviewRequest,
+  type ProductConflictActionGroupPlan,
+  type ProductConflictActionLotRow,
+  type ProductConflictActionProductRow,
+  type ProductConflictActionStockRow,
+} from '../lib/productConflictActionGroups'
 import { attachBatchCounts } from '../lib/productBatches'
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
@@ -4910,16 +4921,173 @@ async function readSelectedConflictUndoAvailability(
   }
 }
 
-// One read-only authoritative review for every selected exact pair. The
-// returned manifest freezes order, keeper choice, and all fold-affecting state;
-// the apply endpoint recomputes it before creating any receipt.
+type ProductConflictActionReviewRow = {
+  id: string; actor_id: number; request_id: string; request_digest: string; draft_digest: string; status: string
+  requested_group_count: number; actionable_group_count: number; blocked_group_count: number; total_member_count: number; expires_at: string
+}
+
+type ProductConflictActionStoredGroupRow = { ordinal: number; detail_json: string }
+
+function productConflictActionCursor(value: string | undefined): number | null {
+  if (value == null || value === '') return 0
+  if (!/^\d{1,4}$/.test(value)) return null
+  const parsed = Number(value)
+  return Number.isSafeInteger(parsed) && parsed >= 0 && parsed < 1600 ? parsed : null
+}
+
+function productConflictActionPageLimit(value: string | undefined): number | null {
+  if (value == null || value === '') return 50
+  if (!/^\d{1,3}$/.test(value)) return null
+  const parsed = Number(value)
+  return Number.isSafeInteger(parsed) && parsed >= 1 && parsed <= PRODUCT_CONFLICT_ACTION_PAGE_MAX ? parsed : null
+}
+
+async function readProductConflictActionReview(db: ReturnType<typeof getDb>, actorId: number, reviewId: string) {
+  return db.prepare(`SELECT id,actor_id,request_id,request_digest,draft_digest,status,
+    requested_group_count,actionable_group_count,blocked_group_count,total_member_count,expires_at
+    FROM product_conflict_action_reviews WHERE id=@reviewId AND actor_id=@actorId`)
+    .get<ProductConflictActionReviewRow>({ reviewId, actorId })
+}
+
+async function productConflictActionReviewPage(db: ReturnType<typeof getDb>, reviewId: string, cursor: number, limit: number) {
+  const rows = await db.prepare(`SELECT ordinal,detail_json FROM product_conflict_action_groups
+    WHERE review_id=@reviewId AND ordinal>=@cursor ORDER BY ordinal LIMIT @limit`)
+    .all<ProductConflictActionStoredGroupRow>({ reviewId, cursor, limit: limit + 1 })
+  const groups = rows.slice(0, limit).map((row) => {
+    try {
+      const detail = JSON.parse(row.detail_json)
+      if (!detail || typeof detail !== 'object' || Array.isArray(detail)) throw new Error('invalid detail')
+      return { ordinal: Number(row.ordinal), ...detail }
+    } catch { throw new ProductConflictMergeValidationError('The stored conflict review is unreadable.', 'review_corrupt', 409) }
+  })
+  return { cursor: String(cursor), next_cursor: rows.length > limit ? String(Number(rows[limit].ordinal)) : null, limit, groups }
+}
+
+async function productConflictActionReviewResponse(db: ReturnType<typeof getDb>, review: ProductConflictActionReviewRow, cursor = 0, limit = 50) {
+  return {
+    success: true, manifest_version: 1, resolution_version: 2, review_id: review.id,
+    draft_digest: review.draft_digest, status: review.status, expires_at: review.expires_at,
+    counts: {
+      requested_groups: Number(review.requested_group_count), actionable_groups: Number(review.actionable_group_count),
+      blocked_groups: Number(review.blocked_group_count), total_members: Number(review.total_member_count),
+    },
+    page: await productConflictActionReviewPage(db, review.id, cursor, limit),
+  }
+}
+
+async function readProductConflictActionInputs(db: ReturnType<typeof getDb>, ids: number[]) {
+  const products: ProductConflictActionProductRow[] = []
+  const stock: ProductConflictActionStockRow[] = []
+  const lots: ProductConflictActionLotRow[] = []
+  for (let offset = 0; offset < ids.length; offset += PRODUCT_CONFLICT_ACTION_READ_CHUNK) {
+    const chunk = ids.slice(offset, offset + PRODUCT_CONFLICT_ACTION_READ_CHUNK)
+    const { sql, params } = buildInClause('reviewProduct', chunk)
+    products.push(...await db.prepare(`SELECT id,name,barcode,category,brand,unit,image_path,is_active,COALESCE(is_group,0) AS is_group,updated_at,
+      cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,wholesale_price_usd,wholesale_price_khr
+      FROM products WHERE id IN (${sql}) ORDER BY id`).all<ProductConflictActionProductRow>(params))
+    stock.push(...await db.prepare(`SELECT bs.product_id,bs.branch_id,b.name AS branch_name,bs.quantity
+      FROM branch_stock bs LEFT JOIN branches b ON b.id=bs.branch_id WHERE bs.product_id IN (${sql})
+      ORDER BY bs.product_id,bs.branch_id`).all<ProductConflictActionStockRow>(params))
+    lots.push(...await db.prepare(`SELECT pb.variant_product_id AS product_id,pb.id AS batch_id,pb.batch_key,pb.lot_code,pb.expiry_date,pb.received_at,
+      pb.is_active,pb.notes,pb.unit_cost_usd,pb.received_quantity,pb.received_branch_id,pb.received_cost_usd,
+      pb.supplier_id,pb.supplier_name,pb.payment_status,pb.credit_due_date,bbs.branch_id,bbs.quantity
+      FROM product_batches pb LEFT JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id
+      WHERE pb.variant_product_id IN (${sql}) ORDER BY pb.variant_product_id,pb.id,bbs.branch_id`).all<ProductConflictActionLotRow>(params))
+  }
+  return { products, stock, lots }
+}
+
+async function createProductConflictActionReview(
+  db: ReturnType<typeof getDb>, actorId: number,
+  request: ReturnType<typeof parseProductConflictActionPreviewRequest>, requestDigest: string,
+) {
+  const ids = [...new Set(request.merge_groups.flatMap((group) => group.member_ids))].sort((a, b) => a - b)
+  const inputs = await readProductConflictActionInputs(db, ids)
+  const rawPlans = buildProductConflictActionGroupPlans(request.merge_groups, inputs.products, inputs.stock, inputs.lots)
+  const plans = []
+  for (const plan of rawPlans) plans.push({ ...plan, state_digest: await productConflictSha256({ version: 2, group: plan }) })
+  const reviewId = crypto.randomUUID()
+  const expiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString()
+  const draftDigest = await productConflictSha256({ manifest_version: 1, resolution_version: 2,
+    groups: plans.map((plan, ordinal) => ({ ordinal, group_key: plan.group_key, member_ids: plan.member_ids, state_digest: plan.state_digest })) })
+  const actionable = plans.filter((plan) => !plan.blocked).length
+  const statements: Array<{ sql: string; params?: Record<string, unknown> }> = [{
+    sql: `INSERT INTO product_conflict_action_reviews
+      (id,actor_id,request_id,request_digest,manifest_version,resolution_version,draft_digest,status,
+       requested_group_count,actionable_group_count,blocked_group_count,total_member_count,expires_at)
+      VALUES(@id,@actorId,@requestId,@requestDigest,1,2,@draftDigest,'draft',@requested,@actionable,@blocked,@members,@expiresAt)`,
+    params: { id: reviewId, actorId, requestId: request.client_request_id, requestDigest, draftDigest,
+      requested: request.merge_groups.length, actionable, blocked: plans.length - actionable, members: ids.length, expiresAt },
+  }]
+  const groups = plans.map((plan, ordinal) => ({ ordinal, group_key: plan.group_key,
+    source_group_keys_json: JSON.stringify(plan.source_group_keys), member_ids_json: JSON.stringify(plan.member_ids),
+    eligibility_basis: plan.eligibility_basis, eligibility_value: plan.eligibility_value,
+    status: plan.blocked ? 'blocked' : 'actionable', blocker_code: plan.blocked?.code ?? null,
+    blocker_message: plan.blocked?.message ?? null, state_digest: plan.state_digest, detail_json: JSON.stringify(plan) }))
+  for (let offset = 0; offset < groups.length; offset += 100) statements.push({
+    sql: `INSERT INTO product_conflict_action_groups
+      (review_id,ordinal,group_key,source_group_keys_json,member_ids_json,eligibility_basis,eligibility_value,status,blocker_code,blocker_message,state_digest,detail_json)
+      SELECT @reviewId,CAST(json_extract(value,'$.ordinal') AS INTEGER),json_extract(value,'$.group_key'),json_extract(value,'$.source_group_keys_json'),
+        json_extract(value,'$.member_ids_json'),json_extract(value,'$.eligibility_basis'),json_extract(value,'$.eligibility_value'),json_extract(value,'$.status'),
+        json_extract(value,'$.blocker_code'),json_extract(value,'$.blocker_message'),json_extract(value,'$.state_digest'),json_extract(value,'$.detail_json')
+      FROM json_each(@rowsJson)`,
+    params: { reviewId, rowsJson: JSON.stringify(groups.slice(offset, offset + 100)) },
+  })
+  const members = plans.flatMap((plan, groupOrdinal) => plan.member_ids.map((id, memberOrdinal) => ({ group_ordinal: groupOrdinal,
+    member_ordinal: memberOrdinal, product_id: id, state_digest: plan.state_digest,
+    snapshot_json: JSON.stringify(plan.members.find((member) => Number(member.id) === id) || {}) })))
+  for (let offset = 0; offset < members.length; offset += 200) statements.push({
+    sql: `INSERT INTO product_conflict_action_group_members
+      (review_id,group_ordinal,member_ordinal,product_id,role,status,state_digest,snapshot_json)
+      SELECT @reviewId,CAST(json_extract(value,'$.group_ordinal') AS INTEGER),CAST(json_extract(value,'$.member_ordinal') AS INTEGER),
+        CAST(json_extract(value,'$.product_id') AS INTEGER),'candidate','reviewed',json_extract(value,'$.state_digest'),json_extract(value,'$.snapshot_json')
+      FROM json_each(@rowsJson)`,
+    params: { reviewId, rowsJson: JSON.stringify(members.slice(offset, offset + 200)) },
+  })
+  await db.batch(statements)
+  const review = await readProductConflictActionReview(db, actorId, reviewId)
+  if (!review) throw new Error('The conflict action review receipt was not created.')
+  return review
+}
+
+// Legacy requests remain read-only. Resolution-v2 creates only durable draft
+// receipts, so 1600+ reviewed rows can be paged from one immutable snapshot.
 app.post('/possible-duplicates/merge-batch/preview', async (c) => {
   const user = c.get('user')
   if (getActionTier(user, 'products', 'merge_duplicates') !== 'full') {
     return c.json({ success: false, code: 'permission_denied', error: 'You do not have permission to perform this action' }, 403)
   }
+  const raw = await c.req.json().catch(() => null)
+  if (isProductConflictActionPreviewRequest(raw)) {
+    let request
+    try { request = parseProductConflictActionPreviewRequest(raw) }
+    catch (error) {
+      const validation = error instanceof ProductConflictMergeValidationError ? error : new ProductConflictMergeValidationError('The selected conflict review request is invalid.')
+      return c.json({ success: false, code: validation.code, error: validation.message }, validation.status as 400 | 409)
+    }
+    const db = getDb(c.env)
+    const requestDigest = await productConflictSha256(request)
+    let review = await db.prepare(`SELECT id,actor_id,request_id,request_digest,draft_digest,status,
+      requested_group_count,actionable_group_count,blocked_group_count,total_member_count,expires_at
+      FROM product_conflict_action_reviews WHERE actor_id=@actorId AND request_id=@requestId`)
+      .get<ProductConflictActionReviewRow>({ actorId: user.id, requestId: request.client_request_id })
+    if (review && review.request_digest !== requestDigest) {
+      return c.json({ success: false, code: 'idempotency_conflict', error: 'client_request_id was already used with a different conflict review.' }, 409)
+    }
+    if (!review) {
+      try { review = await createProductConflictActionReview(db, user.id, request, requestDigest) }
+      catch (error) {
+        review = await db.prepare(`SELECT id,actor_id,request_id,request_digest,draft_digest,status,
+          requested_group_count,actionable_group_count,blocked_group_count,total_member_count,expires_at
+          FROM product_conflict_action_reviews WHERE actor_id=@actorId AND request_id=@requestId`)
+          .get<ProductConflictActionReviewRow>({ actorId: user.id, requestId: request.client_request_id })
+        if (!review || review.request_digest !== requestDigest) throw error
+      }
+    }
+    return c.json(await productConflictActionReviewResponse(db, review))
+  }
   let request
-  try { request = parseProductConflictPreviewRequest(await c.req.json()) }
+  try { request = parseProductConflictPreviewRequest(raw) }
   catch (error) {
     const validation = error instanceof ProductConflictMergeValidationError ? error : new ProductConflictMergeValidationError('The selected merge preview request is invalid.')
     return c.json({ success: false, code: validation.code, error: validation.message }, 400)
@@ -4949,6 +5117,20 @@ app.post('/possible-duplicates/merge-batch/preview', async (c) => {
   })
 })
 
+app.get('/possible-duplicates/merge-batch/reviews/:reviewId', async (c) => {
+  const user = c.get('user')
+  if (getActionTier(user, 'products', 'merge_duplicates') !== 'full') {
+    return c.json({ success: false, code: 'permission_denied', error: 'You do not have permission to perform this action' }, 403)
+  }
+  const cursor = productConflictActionCursor(c.req.query('cursor'))
+  const limit = productConflictActionPageLimit(c.req.query('limit'))
+  if (cursor == null || limit == null) return c.json({ success: false, code: 'invalid_page', error: 'cursor and limit are invalid.' }, 400)
+  const db = getDb(c.env)
+  const review = await readProductConflictActionReview(db, user.id, c.req.param('reviewId'))
+  if (!review) return c.json({ success: false, code: 'review_not_found', error: 'Conflict review not found.' }, 404)
+  return c.json(await productConflictActionReviewResponse(db, review, cursor, limit))
+})
+
 // Executes one reviewed manifest as independent, atomic pair transactions.
 // The durable run/case rows make lost responses and manual continuation
 // reconcilable without inferring success from today's product state.
@@ -4958,8 +5140,12 @@ app.post('/possible-duplicates/merge-batch', async (c) => {
   if (getActionTier(user, 'products', 'merge_duplicates') !== 'full') {
     return c.json({ success: false, code: 'permission_denied', error: 'You do not have permission to perform this action' }, 403)
   }
+  const raw = await c.req.json().catch(() => null)
+  if (isProductConflictActionPreviewRequest(raw)) {
+    return c.json({ success: false, code: 'phase_not_available', error: 'Resolution-v2 apply is not available in this review phase.' }, 409)
+  }
   let request
-  try { request = parseProductConflictApplyRequest(await c.req.json()) }
+  try { request = parseProductConflictApplyRequest(raw) }
   catch (error) {
     const validation = error instanceof ProductConflictMergeValidationError ? error : new ProductConflictMergeValidationError('The selected merge request is invalid.')
     return c.json({ success: false, code: validation.code, error: validation.message }, 400)
