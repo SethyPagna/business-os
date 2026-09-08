@@ -39,7 +39,7 @@ async function prepareThreeMemberReview() {
   d1.db.prepare(`INSERT INTO product_batches
     (id,variant_product_id,batch_key,lot_code,expiry_date,received_at,is_active,notes,batch_number,supplier_id,supplier_name,
      unit_cost_usd,payment_status,credit_due_date,received_quantity,received_branch_id,received_cost_usd)
-    VALUES(99003,10002,'receipt-a','LOT-C','2027-03-01','2026-09-03',1,'third receipt',1,43,'Supplier C',8,'paid',NULL,4,1,32)`).run()
+    VALUES(99003,10002,'receipt-b','LOT-C','2027-03-01','2026-09-03',1,'third receipt',1,43,'Supplier C',8,'paid',NULL,4,1,32)`).run()
   d1.db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(99003,1,4)').run()
   groups[0].member_ids = [10000, 10001, 10002]
   const loaded = loadRoute(d1, true)
@@ -52,6 +52,12 @@ async function prepareThreeMemberReview() {
     category_source_id: 10002, brand_source_id: 10001, unit_source_id: 10002,
   })
   assert.equal(finalized.status, 200)
+  const storedPlan = JSON.parse(d1.db.prepare('SELECT final_plan_json FROM product_conflict_action_groups WHERE review_id=?').get(review.body.review_id).final_plan_json)
+  assert.deepEqual(storedPlan.projected_result.lot_dispositions.map((row) => ({ source: row.source_batch_id,
+    target: row.target_batch_id, collision: row.collision, supplier: row.supplier_name, received: row.received_at })), [
+    { source: 99002, target: 99002, collision: 'reparent', supplier: 'Supplier B', received: '2026-09-02' },
+    { source: 99003, target: 99002, collision: 'fold', supplier: 'Supplier C', received: '2026-09-03' },
+  ])
   return { d1, groups, ...loaded, review: review.body, finalized: finalized.body }
 }
 
@@ -121,12 +127,22 @@ async function main() {
     const applier = fixture.undo.resolveUndoApplier(payload)
     const undoOne = await applier.run(payload, { env: {}, user, direction: 'undo', historyId: history.id, generation: 2 })
     assert.equal(undoOne.continuation_required, true)
+    const applyDuringUndo = await apply(fixture.app, fixture.review, fixture.finalized.manifest_digest)
+    assert.equal(applyDuringUndo.status, 409)
+    assert.equal(applyDuringUndo.body.code, 'review_reversed',
+      'a completed review must not use its success fast path after the first child Undo')
     const undoTwo = await applier.run(payload, { env: {}, user, direction: 'undo', historyId: history.id, generation: 2 })
     assert.equal(undoTwo.complete, true)
     assert.deepEqual(catalogState(fixture.d1), before, 'two-child Undo restores exact catalog, stock and lot provenance')
+    const applyAfterUndo = await apply(fixture.app, fixture.review, fixture.finalized.manifest_digest)
+    assert.equal(applyAfterUndo.status, 409)
+    assert.equal(applyAfterUndo.body.code, 'review_reversed')
     const redoPayload = JSON.parse(fixture.d1.db.prepare('SELECT redo_payload FROM action_history WHERE id=?').get(history.id).redo_payload)
     const redoOne = await applier.run(redoPayload, { env: {}, user, direction: 'redo', historyId: history.id, generation: 3 })
     assert.equal(redoOne.continuation_required, true)
+    const applyDuringRedo = await apply(fixture.app, fixture.review, fixture.finalized.manifest_digest)
+    assert.equal(applyDuringRedo.status, 409)
+    assert.equal(applyDuringRedo.body.code, 'review_reversed')
     const redoTwo = await applier.run(redoPayload, { env: {}, user, direction: 'redo', historyId: history.id, generation: 3 })
     assert.equal(redoTwo.complete, true)
     assert.equal(fixture.d1.db.prepare('SELECT is_active FROM products WHERE id=10002').get().is_active, 0)
@@ -159,7 +175,23 @@ async function main() {
     assert.equal(fixture.d1.db.prepare("SELECT COUNT(*) n FROM product_conflict_action_group_members WHERE status!='planned'").get().n, 0)
   }
 
-  console.log('product conflict action apply sqlite: N=3 apply, receipt, stale CAS, exact Undo/Redo checks passed')
+  {
+    const fixture = await prepareThreeMemberReview()
+    fixture.controls.beforeNextWriteBatch = () => {
+      fixture.d1.db.prepare('UPDATE branch_stock SET quantity=30 WHERE product_id=10001 AND branch_id=1').run()
+      fixture.d1.db.prepare("UPDATE product_batches SET supplier_name='Concurrent supplier' WHERE id=99002").run()
+    }
+    const stale = await apply(fixture.app, fixture.review, fixture.finalized.manifest_digest)
+    assert.equal(stale.status, 409)
+    assert.equal(stale.body.code, 'merge_state_conflict')
+    assert.equal(fixture.d1.db.prepare('SELECT is_active FROM products WHERE id=10001').get().is_active, 1)
+    assert.equal(fixture.d1.db.prepare('SELECT quantity FROM branch_stock WHERE product_id=10001 AND branch_id=1').get().quantity, 30)
+    assert.equal(fixture.d1.db.prepare('SELECT supplier_name FROM product_batches WHERE id=99002').get().supplier_name, 'Concurrent supplier')
+    assert.equal(fixture.d1.db.prepare('SELECT COUNT(*) n FROM action_history').get().n, 0)
+    assert.equal(fixture.d1.db.prepare('SELECT COUNT(*) n FROM audit_logs').get().n, 0)
+  }
+
+  console.log('product conflict action apply sqlite: N=3 apply, receipt, product/stock/lot CAS, exact Undo/Redo checks passed')
 }
 
 main().catch((error) => { console.error(error); process.exit(1) })

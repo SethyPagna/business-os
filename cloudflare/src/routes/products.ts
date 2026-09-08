@@ -5148,10 +5148,16 @@ async function buildProductConflictActionFinalPlan(
   )
   const keeperBatchByKey = new Map(plan.lots.rows.filter((row) => Number(row.product_id) === resolution.keeper_id)
     .map((row) => [String(row.batch_key), Number(row.batch_id)]))
-  const lotDispositions = plan.lots.rows.filter((row) => Number(row.product_id) !== resolution.keeper_id).map((row) => {
-    const target = keeperBatchByKey.get(String(row.batch_key))
-    return { ...row, source_batch_id: Number(row.batch_id), target_batch_id: target ?? Number(row.batch_id), collision: target ? 'fold' as const : 'reparent' as const }
-  })
+  const lotDispositions: ProductConflictActionFinalPlan['projected_result']['lot_dispositions'] = []
+  for (const memberId of foldMembers) {
+    for (const row of plan.lots.rows.filter((candidate) => Number(candidate.product_id) === memberId)) {
+      const key = String(row.batch_key)
+      const target = keeperBatchByKey.get(key)
+      lotDispositions.push({ ...row, source_batch_id: Number(row.batch_id), target_batch_id: target ?? Number(row.batch_id),
+        collision: target ? 'fold' : 'reparent' })
+      if (target == null) keeperBatchByKey.set(key, Number(row.batch_id))
+    }
+  }
   const category = categorySource.category ?? null
   const categories = categorySource.categories ?? null
   const brand = brandSource.brand ?? null
@@ -5943,6 +5949,68 @@ function productConflictKeeperPostFoldMatches(plan: ProductConflictActionFinalPl
     && String(row.unit_normalized ?? '') === plan.selected.unit.unit_normalized
 }
 
+function productConflictActionSourceStateAssertion(
+  detail: ProductConflictActionGroupPlan,
+  productId: number,
+): AtomicMergeStatement {
+  const stockRows = detail.stock.rows.filter((row) => Number(row.product_id) === productId)
+    .map((row) => ({ branch_id: Number(row.branch_id), quantity: Number(row.quantity) || 0 }))
+    .sort((left, right) => left.branch_id - right.branch_id)
+  const lotRows = detail.lots.rows.filter((row) => Number(row.product_id) === productId).map((row) => ({
+    batch_id: Number(row.batch_id), batch_key: row.batch_key == null ? null : String(row.batch_key),
+    lot_code: row.lot_code == null ? null : String(row.lot_code), expiry_date: row.expiry_date == null ? null : String(row.expiry_date),
+    received_at: row.received_at == null ? null : String(row.received_at), is_active: Number(row.is_active),
+    notes: row.notes == null ? null : String(row.notes), unit_cost_usd: row.unit_cost_usd == null ? null : Number(row.unit_cost_usd),
+    received_quantity: row.received_quantity == null ? null : Number(row.received_quantity),
+    received_branch_id: row.received_branch_id == null ? null : Number(row.received_branch_id),
+    received_cost_usd: row.received_cost_usd == null ? null : Number(row.received_cost_usd),
+    supplier_id: row.supplier_id == null ? null : Number(row.supplier_id), supplier_name: row.supplier_name == null ? null : String(row.supplier_name),
+    payment_status: row.payment_status == null ? null : String(row.payment_status), credit_due_date: row.credit_due_date == null ? null : String(row.credit_due_date),
+    branch_id: row.branch_id == null ? null : Number(row.branch_id), quantity: row.quantity == null ? null : Number(row.quantity),
+  })).sort((left, right) => left.batch_id - right.batch_id || Number(left.branch_id ?? -1) - Number(right.branch_id ?? -1))
+  return {
+    sql: `SELECT CASE WHEN
+      (SELECT COUNT(*) FROM branch_stock WHERE product_id=@product)=json_array_length(json(@stockJson))
+      AND NOT EXISTS (
+        SELECT 1 FROM json_each(json(@stockJson)) expected
+        WHERE NOT EXISTS (
+          SELECT 1 FROM branch_stock stock
+          WHERE stock.product_id=@product
+            AND stock.branch_id IS json_extract(expected.value,'$.branch_id')
+            AND stock.quantity IS json_extract(expected.value,'$.quantity')
+        )
+      )
+      AND (SELECT COUNT(*) FROM product_batches pb LEFT JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id
+        WHERE pb.variant_product_id=@product)=json_array_length(json(@lotJson))
+      AND NOT EXISTS (
+        SELECT 1 FROM json_each(json(@lotJson)) expected
+        WHERE NOT EXISTS (
+          SELECT 1 FROM product_batches pb LEFT JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id
+          WHERE pb.variant_product_id=@product
+            AND pb.id IS json_extract(expected.value,'$.batch_id')
+            AND pb.batch_key IS json_extract(expected.value,'$.batch_key')
+            AND pb.lot_code IS json_extract(expected.value,'$.lot_code')
+            AND pb.expiry_date IS json_extract(expected.value,'$.expiry_date')
+            AND pb.received_at IS json_extract(expected.value,'$.received_at')
+            AND pb.is_active IS json_extract(expected.value,'$.is_active')
+            AND pb.notes IS json_extract(expected.value,'$.notes')
+            AND pb.unit_cost_usd IS json_extract(expected.value,'$.unit_cost_usd')
+            AND pb.received_quantity IS json_extract(expected.value,'$.received_quantity')
+            AND pb.received_branch_id IS json_extract(expected.value,'$.received_branch_id')
+            AND pb.received_cost_usd IS json_extract(expected.value,'$.received_cost_usd')
+            AND pb.supplier_id IS json_extract(expected.value,'$.supplier_id')
+            AND pb.supplier_name IS json_extract(expected.value,'$.supplier_name')
+            AND pb.payment_status IS json_extract(expected.value,'$.payment_status')
+            AND pb.credit_due_date IS json_extract(expected.value,'$.credit_due_date')
+            AND bbs.branch_id IS json_extract(expected.value,'$.branch_id')
+            AND bbs.quantity IS json_extract(expected.value,'$.quantity')
+        )
+      )
+      THEN 1 ELSE json_extract('', '$') END AS product_conflict_source_state_guard`,
+    params: { product: productId, stockJson: JSON.stringify(stockRows), lotJson: JSON.stringify(lotRows) },
+  }
+}
+
 function productConflictActionForwardStatements(args: {
   user: SessionUser
   review: ProductConflictActionReviewRow
@@ -6139,6 +6207,14 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
   }
   if (review.status === 'completed') {
     const counts = await productConflictActionApplyCounts(db, review.id)
+    const reversed = counts.reversed_groups > 0 || counts.reversed_folds > 0
+    if (reversed || counts.pending_groups > 0 || counts.partial_groups > 0
+      || counts.history_pending_groups > 0 || counts.pending_folds > 0) {
+      return c.json({ success: false, code: reversed ? 'review_reversed' : 'review_state_conflict',
+        error: reversed
+          ? 'A reviewed group was reversed. Redo it or start a new review before continuing.'
+          : 'The completed review no longer has a completed authoritative partition.' }, 409)
+    }
     return c.json({ success: true, manifest_version: 1, resolution_version: 2, review_id: review.id,
       manifest_digest: review.manifest_digest, status: review.status, continuation_required: false,
       counts: { requested_groups: Number(review.requested_group_count), total_members: Number(review.total_member_count), ...counts }, groups: [] })
@@ -6159,8 +6235,9 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
         manifest_digest: review.manifest_digest, status: 'completed', continuation_required: false,
         counts: { requested_groups: Number(review.requested_group_count), total_members: Number(review.total_member_count), ...counts }, groups: [] })
     }
-    return c.json({ success: false, code: counts.reversed_groups > 0 ? 'review_reversed' : 'review_state_conflict',
-      error: counts.reversed_groups > 0
+    const reversed = counts.reversed_groups > 0 || counts.reversed_folds > 0
+    return c.json({ success: false, code: reversed ? 'review_reversed' : 'review_state_conflict',
+      error: reversed
         ? 'A reviewed group was reversed. Redo it or start a new review before continuing.'
         : 'No resumable reviewed group is available.' }, 409)
   }
@@ -6244,7 +6321,7 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
       groupStatus: firstFold ? 'ready' : 'partial', generation: Number(group.reversal_generation || 0),
       first: firstFold ? 1 : 0, history: group.action_history_id, groupSnapshotKind: PRODUCT_MERGE_GROUP_ACTION_KIND, memberOrdinal: member.member_ordinal,
       member: member.product_id, memberOperation: member.operation_id, keeper: plan.keeper_id },
-  }]
+  }, productConflictActionSourceStateAssertion(detail, member.product_id)]
   let foldResult: Awaited<ReturnType<typeof foldDuplicateProductInto>>
   try {
     foldResult = await foldDuplicateProductInto(c.env, db, user, keeper, duplicate, branchNameById,
