@@ -1,3 +1,15 @@
+## All-task status and final frontend gates — September 9
+
+All107 requests retained. Production4495bccf remains independently verified100%. Next candidate21d22fc contains core expanded Records, General marker code and U21/U22/U23. Independent runtime review passed; backend313/315 sweep plus both bundled-Node native reruns pass; two frontend stale assertions repaired after332/334 run, final full rerun/package gates active. No new deployment.
+
+F75/F76e6a80e16 and return-createbc114757 are independently certified and in separate future integration. Employee role data rollout, General24969 cache-aware repair, wide reference cascades, offline recovery, transfer receipts, production cleanup, historical census and remaining UI/portal items remain open. Current-status.md and task-status.json now reflect these states, corrected stale browser blockers, old F46-pending text and deployment metadata.
+
+## All-task status refresh — September 9
+
+All107 requests retained. Production4495bccf remains independently verified100%. Next candidate21d22fc contains core expanded Records, General marker code and U21/U22/U23. Independent runtime review passed; backend313/315 sweep plus both bundled-Node native reruns pass; two frontend stale assertions repaired after332/334 run, final full rerun/package gates active. No new deployment.
+
+F75/F76e6a80e16 and return-createbc114757 are independently certified and in separate future integration. Employee role data rollout, General24969 cache-aware repair, wide reference cascades, offline recovery, transfer receipts, production cleanup, historical census and remaining UI/portal items remain open. Current-status.md and task-status.json now reflect these states, corrected stale browser blockers, old F46-pending text and deployment metadata.
+
 ## Compact Sales metadata and Paid method labels — September 9
 
 Added U22: compact mobile sale ID/time/branch/cashier metadata and inline customer phone/delivery without Driver label. U23: show methods beside Paid and remove redundant receipt payment-method row, retaining split-payment and numeric semantics. Implementation assigned with list/detail ownership coordination. U21 invoice presentation af735110 implemented and independently reviewing, not live. F74/F72 reconciled candidate ba66e521 is entering focused/package gates; return-create and wide cascades remain explicitly incomplete. Employee permissions/Contacts privacy implementation continues separately. Live4495bccf unchanged; all107 requests retained.
