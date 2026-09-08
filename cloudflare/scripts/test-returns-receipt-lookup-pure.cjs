@@ -84,11 +84,15 @@ const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: J
 // N13: the shared actor / branch kernels these routes now import.
 const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
 const saleCreationSnapshotKernel = loadReal('lib/saleCreationSnapshot.ts', { './actorSnapshot': actorSnapshotKernel })
+const returnCreateActionKernel = loadReal('lib/returnCreateAction.ts', {
+  './saleRecordEvents': { assertSaleRecordBatchBounds: () => {} },
+})
 const returnsRoute = loadReal('routes/returns.ts', {
   '../lib/branchRoles': branchRolesKernel,
   '../lib/branchRoleGuards': loadReal('lib/branchRoleGuards.ts', { './branchRoles': branchRolesKernel }),
   '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/saleCreationSnapshot': saleCreationSnapshotKernel,
+  '../lib/returnCreateAction': returnCreateActionKernel,
   // N21: the display-address kernel routes/returns.ts snapshots through, REAL
   // (it has no imports of its own; a stub would leave it undefined).
   '../lib/contactOptions': loadReal('lib/contactOptions.ts'),

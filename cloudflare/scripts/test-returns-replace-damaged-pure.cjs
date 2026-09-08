@@ -284,7 +284,7 @@ async function run() {
     // three-way action drives both create and edit re-apply, and the
     // column is written on both INSERT INTO return_items statements
     assert.match(routeSource, /const stockAction = normalizeStockAction\(item\)/)
-    assert.equal((routeSource.match(/@return_to_stock, @stock_action, @branch_id/g) || []).length, 2)
+    assert.equal((routeSource.match(/@return_to_stock,\s*@stock_action,\s*@branch_id/g) || []).length, 2)
     // damaged lots reverse (and can block) before an edit re-applies
     assert.match(routeSource, /const damagedLots = await db\.prepare\(`[\s\S]*?FROM damaged_stock_lots WHERE return_id=@returnId/)
     assert.match(routeSource, /editReversedDamaged = damagedLots\.map[\s\S]*?DELETE FROM damaged_stock_lots WHERE return_id=@returnId/)
@@ -299,14 +299,16 @@ async function run() {
     assert.doesNotMatch(routeSource, /computeSettlement/)
     // ...and the lot refusal took its place
     assert.match(routeSource, /code: error\.code, product_id: productId/)
-    assert.match(routeSource, /INSERT INTO sales \(/)
+    assert.match(routeSource, /INSERT INTO sales\(/)
     assert.match(routeSource, /source_return_id/)
-    assert.match(routeSource, /INSERT INTO sale_items \(/)
+    assert.match(routeSource, /INSERT INTO sale_items\(/)
     assert.match(routeSource, /replacementReceiptNumber/)
     assert.ok(routeSource.indexOf(`app.get('/damaged-lots'`) < routeSource.indexOf(`app.get('/:id'`))
-    // failed creates clean up ALL of this return's rows
-    assert.match(routeSource, /DELETE FROM damaged_stock_lots WHERE return_id = \?/)
-    assert.match(routeSource, /DELETE FROM return_replacement_items WHERE return_id = \?/)
+    // Create is one guarded atomic batch, so a failed create never needs a
+    // compensating partial-row cleanup path.
+    assert.match(routeSource, /returnCreateGuardStatement\(operationId, 'precondition'/)
+    assert.match(routeSource, /INSERT INTO return_create_receipts\(/)
+    assert.match(routeSource, /returnCreateGuardStatement\(operationId, 'postcondition'/)
     const migration = fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0074_returns_replace_damaged.sql'), 'utf8')
     assert.match(migration, /CREATE TABLE IF NOT EXISTS damaged_stock_lots/)
     assert.match(migration, /CREATE TABLE IF NOT EXISTS return_replacement_items/)
@@ -315,6 +317,8 @@ async function run() {
     const replacementSaleMigration = fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0106_return_replacement_sales.sql'), 'utf8')
     assert.match(replacementSaleMigration, /ALTER TABLE returns ADD COLUMN replacement_sale_id INTEGER/)
     assert.match(replacementSaleMigration, /ALTER TABLE sales ADD COLUMN source_return_id INTEGER/)
+    const atomicCreateMigration = fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0142_return_create_receipts.sql'), 'utf8')
+    assert.match(atomicCreateMigration, /CREATE TABLE return_create_receipts/)
   })
 
   console.log(`\n${passed} check(s) passed.`)
