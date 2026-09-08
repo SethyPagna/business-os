@@ -1,13 +1,15 @@
 {
   "schema_version": 1,
   "generated_at": "2026-09-09",
-  "backend_head": "8512e105",
+  "implementation_head": "81f15560",
+  "wide_writer_plan_head": "8bfd5ee0",
   "contract": "outputs/takeover-20260908/f74-sales-records-backend-contract.json",
   "principles": {
     "display": "Closed changed-only kind/field vocabulary with known_value, known_none, and unknown. No raw variables or current-profile reconstruction.",
     "general": "A new sale with customer_id null and no customer_name is known_none General. A null id with a nonblank written name is a name-only known_value identity. A persisted is_anonymous=1 customer is also General while its stored id remains available for guarded repair/replay. Missing legacy evidence is unknown.",
     "retention": "sale_record_events and return_mutation_receipts are immutable, included in backup/reset lifecycle, and excluded from ordinary audit/action-history pruning.",
-    "legacy": "Genuine historical sale-related rows without exact typed evidence remain one legacy_sale_change record with actor/time and details unavailable. They are not silently dropped."
+    "legacy": "Genuine historical sale-related rows without exact typed evidence remain one legacy_sale_change record with actor/time and details unavailable. They are not silently dropped.",
+    "contact_privacy": "Phone/address carry is a visible customer_contact_changed fact with changed_contact_fields metadata only. No old or new contact values and no fabricated booleans are retained."
   },
   "coverage": [
     {
@@ -73,7 +75,7 @@
       "capture": "new marked anonymous selections normalize to canonical null; old marked rows retain their id but expose customer_is_anonymous and no joined membership; imports never link a marked identity or guess an unmarked same-name profile when the phone is blank",
       "apply_undo_redo": "creation/import apply only",
       "status": "captured_requires_0141_marker_schema",
-      "commit": "8512e105"
+      "commits": ["8512e105", "e75066a9", "aa5a969a", "ef640cb9"]
     }
   ],
   "not_yet_captured": [
@@ -84,12 +86,14 @@
     },
     {
       "action": "customer profile carry rename/phone/address and merge/relink/resolve-missing",
-      "reason": "contacts.ts can rewrite sales customer snapshots or ids without per-sale immutable F74 events. Record-only profile edits intentionally do not mutate a sale and need no Sales Record.",
-      "privacy": "Any future event must retain only customer id/name and membership identity needed for the change; it must not bulk-copy current phone/address into the immutable event ledger."
+      "reason": "contacts.ts can rewrite sales customer snapshots or ids without per-sale immutable F74 events. Record-only profile edits intentionally do not mutate a sale and need no Sales Record. The exact source/receipt/atomic set-write contract is frozen but not implemented.",
+      "plan": "outputs/takeover-20260908/f74-wide-writer-event-hook-plan.json",
+      "privacy": "The frozen extension retains only customer id/name and membership identity plus changed_contact_fields=phone/address. It never copies either contact value into the immutable ledger."
     },
     {
       "action": "linked payment-method rename",
-      "reason": "settings.ts rewrites historical sale payment labels in one guarded operation but does not yet append per-sale immutable F74 events."
+      "reason": "settings.ts rewrites historical sale payment labels in one guarded operation but does not yet append per-sale immutable F74 events. A constant-statement SQL set-insert and stable receipt are planned but not implemented.",
+      "plan": "outputs/takeover-20260908/f74-wide-writer-event-hook-plan.json"
     }
   ],
   "release_dependencies": [
@@ -97,6 +101,8 @@
     "The current frontend candidate e04e0b15 has a separate blocked review for pending-request retention bounds and Undo/Redo reconciliation; backend commits alone are not a release candidate.",
     "Direct PATCH /api/sales/:id/customer now requires a stable client_request_id and expected_updated_at. The mounted F72 customer editor uses the bulk-update kernel; any future direct caller must implement the same unknown-outcome retry discipline.",
     "Anonymous handling depends on append-only migration 0141 and its shared helper; F74 must not deploy without that schema dependency and the paired UI interpretation of customer_is_anonymous.",
+    "The marker backend authority repair 3406d17c is integrated as ef640cb9; paired frontend masking 7ba9aa72 remains required in the release candidate.",
+    "The contract-only customer_contact_changed kind is not implemented in the current event schema/reader and must not be advertised as captured until its migration, backend writers, EN/KM UI, lifecycle tests, and independent review land together.",
     "No migration, deployment, remote D1 command, or production write was performed."
   ]
 }
