@@ -478,7 +478,11 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, raw: Row)
         is_anonymous: Number(sale.customer_is_anonymous || 0),
         search_normalized: sale.search_normalized ?? null,
       }
-      after = sourceMatched ? {
+      // A persisted anonymous checkout row and canonical null are the same
+      // public General identity. Clearing General to General is therefore a
+      // true no-op: preserve the historical positive id for guarded repair
+      // and never manufacture an empty customer_changed event.
+      after = sourceMatched && targetCustomer == null && isAnonymousCustomer(before) ? { ...before } : sourceMatched ? {
         customer_id: targetCustomer?.id ?? null,
         customer_name: targetCustomer?.name ?? null,
         customer_phone: targetCustomer?.phone ?? null,

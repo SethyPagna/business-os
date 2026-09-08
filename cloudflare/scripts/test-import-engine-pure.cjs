@@ -2184,6 +2184,13 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
       assert.strictEqual(duplicatePhone[0].data.customer_id, null, 'a duplicated normalized phone stays unlinked regardless of customer row order')
       assert.strictEqual(duplicatePhone[0].data.customer_match_basis, null, 'an ambiguous phone must not fall back to a matching name')
     }
+
+    const invalidPhone = await classifySales(makeFakeDb({ customers: [{ id: 108, name: 'Exact Name', phone: '012345678' }] }), [row({
+      receipt_number: 'R-12i', sku: 'SKU-1', quantity: 1,
+      customer_name: 'Exact Name', customer_phone: 'not-a-phone',
+    }, 1)], null)
+    assert.strictEqual(invalidPhone[0].data.customer_id, null, 'a supplied nonnumeric phone must not fall back to an exact name')
+    assert.strictEqual(invalidPhone[0].data.customer_match_basis, null)
   }
 
   // 13) Track F parity gap (part 70): cashier_id/delivery_contact_id

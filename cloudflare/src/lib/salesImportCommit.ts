@@ -64,6 +64,27 @@ const currentSaleBranchGuard = `EXISTS (
 
 const currentImportReferencesGuard = `(${currentSaleBranchGuard}) AND (${currentBatchReferencesGuard})`
 
+// Exact SQL equivalent of phone.ts canonicalizePhone(). The classifier uses
+// that helper in JavaScript; the commit guard must independently reconstruct
+// the same digits-only key so a concurrent differently formatted duplicate
+// cannot bypass the match-uniqueness check when phone_normalized is absent.
+const currentCustomerPhoneKeySql = (column: string): string => `(SELECT
+  CASE WHEN length(raw_digits) IN (11,12) AND substr(raw_digits,1,3)='855'
+    THEN '0'||substr(raw_digits,4) ELSE raw_digits END
+  FROM (
+    WITH RECURSIVE phone_chars(pos,digits) AS (
+      SELECT 1,''
+      UNION ALL
+      SELECT pos+1,digits||CASE
+        WHEN substr(COALESCE(${column},''),pos,1) GLOB '[0-9]'
+          THEN substr(COALESCE(${column},''),pos,1)
+        ELSE '' END
+      FROM phone_chars
+      WHERE pos<=length(COALESCE(${column},''))
+    )
+    SELECT digits AS raw_digits FROM phone_chars ORDER BY pos DESC LIMIT 1
+  ))`
+
 /** Commit one reviewed historical receipt as an indivisible, retry-safe unit. */
 export async function applyHistoricalSaleImport(
   db: D1Compat,
@@ -277,10 +298,7 @@ export async function applyHistoricalSaleImport(
         WHEN 'phone' THEN (
           SELECT COUNT(*) FROM customers candidate
           WHERE COALESCE(candidate.is_anonymous,0)=0
-            AND (
-              candidate.phone_normalized=@customer_match_key
-              OR (candidate.phone_normalized IS NULL AND candidate.phone IS @customer_match_phone_snapshot)
-            )
+            AND ${currentCustomerPhoneKeySql('candidate.phone')}=@customer_match_key
         )=1
         WHEN 'name' THEN (
           SELECT COUNT(*) FROM customers candidate
