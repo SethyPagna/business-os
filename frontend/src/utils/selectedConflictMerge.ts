@@ -178,8 +178,8 @@ export function selectedConflictChoicesComplete(
   cases: Array<{ case_key: string; needs_stock_choice: boolean; blocked?: unknown }>,
   choices: Readonly<Record<string, SelectedConflictStockChoice | undefined>>,
 ): boolean {
-  const eligible = cases.filter((item) => !item.blocked)
-  return eligible.length > 0 && eligible.every((item) => !item.needs_stock_choice || choices[item.case_key] === 'merge' || choices[item.case_key] === 'write_off')
+  if (!cases.length || cases.some((item) => item.blocked)) return false
+  return cases.every((item) => !item.needs_stock_choice || choices[item.case_key] === 'merge' || choices[item.case_key] === 'write_off')
 }
 
 export function preserveSelectedConflictChoices(
