@@ -28,13 +28,48 @@ type Props = {
   choices: Readonly<Record<string, SelectedConflictStockChoice | undefined>>
   working: boolean
   result: SelectedConflictMergeApplyResult | null
+  committedCases: SelectedConflictMergeApplyResult['committedCases']
+  changedCases: Readonly<Record<string, SelectedConflictMergePreviewCase | undefined>>
   unknownOutcome: boolean
   needsRefresh: boolean
+  canResume: boolean
+  canRepreview: boolean
   onChoice: (caseKey: string, choice: SelectedConflictStockChoice) => void
   onConfirm: () => void
+  onResume: () => void
   onRefresh: () => void
   onClose: () => void
   t: Translate
+}
+
+function ImageSummary({ primary, gallery, label, t }: {
+  primary: string | null
+  gallery: string[]
+  label: string
+  t: Translate
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const tr = (key: string, fallback: string) => {
+    const translated = t(key)
+    return translated && translated !== key ? translated : fallback
+  }
+  const visible = expanded ? gallery : gallery.slice(0, 4)
+  return (
+    <div className="mt-2 rounded border border-black/5 p-1.5 text-[11px] dark:border-white/10">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="font-medium">{label}</span>
+        <span>{tr('primary', 'Primary')}:</span>
+        {primary ? <ProductImg src={primary} alt="" className="h-9 w-9 rounded object-cover" /> : <span>{tr('no_image', 'No image')}</span>}
+        <span>· {tr('images', 'Images')}: {gallery.length}</span>
+      </div>
+      {visible.length ? <div className="mt-1 flex flex-wrap gap-1">{visible.map((src, index) => <ProductImg key={`${src}-${index}`} src={src} alt="" className="h-9 w-9 rounded object-cover" />)}</div> : null}
+      {gallery.length > 4 ? (
+        <button type="button" className="mt-1 text-blue-600 dark:text-blue-300" onClick={() => setExpanded((open) => !open)}>
+          {expanded ? tr('show_less', 'Show less') : `${tr('selected_conflict_show_all_images', 'Show all images')} (+${gallery.length - 4})`}
+        </button>
+      ) : null}
+    </div>
+  )
 }
 
 function asNumber(value: unknown): number {
@@ -56,8 +91,9 @@ function SummaryPair({ label, usdValue, khrValue }: { label: string; usdValue: u
   )
 }
 
-function BeforeAfterCase({ item, choice, onChoice, t }: {
+function BeforeAfterCase({ item, previousReview, choice, onChoice, t }: {
   item: SelectedConflictMergePreviewCase
+  previousReview?: SelectedConflictMergePreviewCase
   choice?: SelectedConflictStockChoice
   onChoice: (choice: SelectedConflictStockChoice) => void
   t: Translate
@@ -68,13 +104,8 @@ function BeforeAfterCase({ item, choice, onChoice, t }: {
   }
   const resolvedChoice = choice || (!item.needs_stock_choice ? 'merge' : null)
   const after = resolvedChoice ? item.after_by_stock_choice[resolvedChoice] : null
-  const beforeImages = [
-    item.before.images.keeper.primary,
-    ...(item.before.images.keeper.gallery || []),
-    item.before.images.discarded.primary,
-    ...(item.before.images.discarded.gallery || []),
-  ].filter(Boolean)
-  const afterImages = after ? [after.images.primary, ...(after.images.gallery || [])].filter(Boolean) : []
+  const previousChoice = previousReview && (choice || (!previousReview.needs_stock_choice ? 'merge' : null))
+  const previousAfter = previousReview && previousChoice ? previousReview.after_by_stock_choice[previousChoice] : null
   return (
     <section className="rounded-xl border border-gray-200 p-3 dark:border-zinc-700" data-case-key={item.case_key}>
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -94,7 +125,40 @@ function BeforeAfterCase({ item, choice, onChoice, t }: {
             {tr(codeKey(item.blocked.code), item.blocked.message || item.blocked.code)}
           </span>
         ) : null}
+        {previousReview ? (
+          <span className="rounded-full bg-amber-100 px-2 py-1 text-[11px] font-medium text-amber-800 dark:bg-amber-950/50 dark:text-amber-200">
+            {tr('selected_conflict_changed_since_review', 'Changed since review')}
+          </span>
+        ) : null}
       </div>
+
+      {previousReview ? (
+        <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs dark:border-amber-900/50 dark:bg-amber-950/20">
+          <p className="font-semibold text-amber-900 dark:text-amber-100">{tr('selected_conflict_previous_review_values', 'Previous review values')}</p>
+          <SummaryPair label={`${tr('keep', 'Keep')} · ${tr('cost_price', 'Cost')}`} usdValue={previousReview.before.costs.keeper.cost_price_usd} khrValue={previousReview.before.costs.keeper.cost_price_khr} />
+          <SummaryPair label={`${tr('remove', 'Remove')} · ${tr('cost_price', 'Cost')}`} usdValue={previousReview.before.costs.discarded.cost_price_usd} khrValue={previousReview.before.costs.discarded.cost_price_khr} />
+          <SummaryPair label={`${tr('keep', 'Keep')} · ${tr('selling_price', 'Selling price')}`} usdValue={previousReview.before.prices.keeper.selling_price_usd} khrValue={previousReview.before.prices.keeper.selling_price_khr} />
+          <SummaryPair label={`${tr('remove', 'Remove')} · ${tr('selling_price', 'Selling price')}`} usdValue={previousReview.before.prices.discarded.selling_price_usd} khrValue={previousReview.before.prices.discarded.selling_price_khr} />
+          <SummaryPair label={`${tr('keep', 'Keep')} · ${tr('wholesale_price', 'Wholesale price')}`} usdValue={previousReview.before.prices.keeper.wholesale_price_usd} khrValue={previousReview.before.prices.keeper.wholesale_price_khr} />
+          <SummaryPair label={`${tr('remove', 'Remove')} · ${tr('wholesale_price', 'Wholesale price')}`} usdValue={previousReview.before.prices.discarded.wholesale_price_usd} khrValue={previousReview.before.prices.discarded.wholesale_price_khr} />
+          <div className="mt-1 space-y-0.5 text-[11px] text-amber-900 dark:text-amber-100">
+            {previousReview.before.stock.map((line) => <div key={line.branch_id}>{line.branch_name || `#${line.branch_id}`}: {line.keeper_quantity} + {line.discarded_quantity} · {line.keeper_lot_count} + {line.discarded_lot_count} {tr('selected_conflict_lots', 'lots')}</div>)}
+          </div>
+          <ImageSummary primary={previousReview.before.images.keeper.primary} gallery={previousReview.before.images.keeper.gallery || []} label={`${tr('previous', 'Previous')} · ${tr('keep', 'Keep')}`} t={t} />
+          <ImageSummary primary={previousReview.before.images.discarded.primary} gallery={previousReview.before.images.discarded.gallery || []} label={`${tr('previous', 'Previous')} · ${tr('remove', 'Remove')}`} t={t} />
+          {previousAfter ? (
+            <div className="mt-2 border-t border-amber-200 pt-1 dark:border-amber-900/50">
+              <SummaryPair label={`${tr('previous', 'Previous')} · ${tr('after', 'After')} · ${tr('cost_price', 'Cost')}`} usdValue={previousAfter.costs.cost_price_usd} khrValue={previousAfter.costs.cost_price_khr} />
+              <SummaryPair label={`${tr('previous', 'Previous')} · ${tr('after', 'After')} · ${tr('selling_price', 'Selling price')}`} usdValue={previousAfter.prices.selling_price_usd} khrValue={previousAfter.prices.selling_price_khr} />
+              <SummaryPair label={`${tr('previous', 'Previous')} · ${tr('after', 'After')} · ${tr('wholesale_price', 'Wholesale price')}`} usdValue={previousAfter.prices.wholesale_price_usd} khrValue={previousAfter.prices.wholesale_price_khr} />
+              <div className="mt-1 space-y-0.5 text-[11px] text-amber-900 dark:text-amber-100">
+                {previousAfter.stock.map((line) => <div key={line.branch_id}>{line.branch_name || `#${line.branch_id}`}: {line.quantity} · {line.lot_count} {tr('selected_conflict_lots', 'lots')}</div>)}
+              </div>
+              <ImageSummary primary={previousAfter.images.primary} gallery={previousAfter.images.gallery || []} label={`${tr('previous', 'Previous')} · ${tr('after', 'After')}`} t={t} />
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <div className="rounded-lg bg-gray-50 p-2.5 dark:bg-zinc-900/60">
@@ -113,7 +177,8 @@ function BeforeAfterCase({ item, choice, onChoice, t }: {
               </div>
             ))}
           </div>
-          {beforeImages.length ? <div className="mt-2 flex gap-1">{beforeImages.slice(0, 6).map((src, index) => <ProductImg key={`${src}-${index}`} src={String(src)} alt="" className="h-9 w-9 rounded object-cover" />)}</div> : null}
+          <ImageSummary primary={item.before.images.keeper.primary} gallery={item.before.images.keeper.gallery || []} label={tr('keep', 'Keep')} t={t} />
+          <ImageSummary primary={item.before.images.discarded.primary} gallery={item.before.images.discarded.gallery || []} label={tr('remove', 'Remove')} t={t} />
         </div>
         <div className="rounded-lg bg-blue-50 p-2.5 dark:bg-blue-950/20">
           <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300">{tr('after', 'After')}</h4>
@@ -130,7 +195,7 @@ function BeforeAfterCase({ item, choice, onChoice, t }: {
                   </div>
                 ))}
               </div>
-              {afterImages.length ? <div className="mt-2 flex gap-1">{afterImages.slice(0, 4).map((src, index) => <ProductImg key={`${src}-${index}`} src={String(src)} alt="" className="h-9 w-9 rounded object-cover" />)}</div> : null}
+              <ImageSummary primary={after.images.primary} gallery={after.images.gallery || []} label={tr('after', 'After')} t={t} />
             </>
           ) : <p className="text-xs text-blue-800 dark:text-blue-200">{tr('selected_conflict_choose_stock_to_preview', 'Choose what happens to the discarded stock to see the projected result.')}</p>}
         </div>
@@ -155,7 +220,7 @@ function BeforeAfterCase({ item, choice, onChoice, t }: {
   )
 }
 
-export default function SelectedConflictMergeReviewModal({ preview, localSkipped, choices, working, result, unknownOutcome, needsRefresh, onChoice, onConfirm, onRefresh, onClose, t }: Props) {
+export default function SelectedConflictMergeReviewModal({ preview, localSkipped, choices, working, result, committedCases, changedCases, unknownOutcome, needsRefresh, canResume, canRepreview, onChoice, onConfirm, onResume, onRefresh, onClose, t }: Props) {
   const [confirmOpen, setConfirmOpen] = useState(false)
   const tr = (key: string, fallback: string) => {
     const translated = t(key)
@@ -177,9 +242,10 @@ export default function SelectedConflictMergeReviewModal({ preview, localSkipped
           </p>
 
           {unknownOutcome ? (
-            <div className="flex gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-              {tr('selected_conflict_unknown_outcome', 'The connection ended after the merge started. Product data was refreshed; reopen this review to reconcile the saved receipt before retrying.')}
+              <span className="min-w-0 flex-1">{tr('selected_conflict_unknown_outcome', 'The connection ended after the merge started. Product data was refreshed; resume the same request to reconcile its saved receipt.')}</span>
+              {canResume ? <button type="button" className="btn-secondary px-3 py-1.5 text-xs" disabled={working} onClick={onResume}>{tr('selected_conflict_resume_request', 'Resume same request')}</button> : null}
             </div>
           ) : null}
 
@@ -194,10 +260,10 @@ export default function SelectedConflictMergeReviewModal({ preview, localSkipped
             <div className="rounded-xl border border-gray-200 p-3 text-sm dark:border-zinc-700">
               <h3 className="font-semibold text-gray-900 dark:text-white">{tr('selected_conflict_result_title', 'Merge result')}</h3>
               <p className="mt-1 text-gray-600 dark:text-gray-300">
-                {result.committedCases.length} {tr('selected_conflict_committed', 'committed')} · {result.refusals.length} {tr('selected_conflict_refused', 'refused')} · {result.remainingCaseCount == null ? tr('unknown', 'Unknown') : result.remainingCaseCount} {tr('selected_conflict_remaining', 'remaining')}
+                {committedCases.length} {tr('selected_conflict_committed', 'committed')} · {result.refusals.length} {tr('selected_conflict_refused', 'refused')} · {result.remainingCaseCount == null ? tr('unknown', 'Unknown') : result.remainingCaseCount} {tr('selected_conflict_remaining', 'remaining')}
               </p>
               <div className="mt-2 space-y-1 text-xs">
-                {result.committedCases.map((item) => (
+                {committedCases.map((item) => (
                   <div key={item.caseKey} className="rounded bg-emerald-50 px-2 py-1.5 text-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-100">
                     #{item.mergedId} → #{item.keptId} · {item.undoReady
                       ? `${tr('selected_conflict_undo_available', 'Undo available')} #${item.actionHistoryId}`
@@ -210,10 +276,18 @@ export default function SelectedConflictMergeReviewModal({ preview, localSkipped
                 {result.pendingCaseKeys.map((caseKey) => <div key={caseKey} className="rounded bg-gray-100 px-2 py-1.5 text-gray-700 dark:bg-zinc-800 dark:text-gray-200">{caseKey}: {tr('pending', 'Pending')}</div>)}
               </div>
               {result.interrupted ? <p className="mt-2 text-xs font-medium text-amber-700 dark:text-amber-300">{tr(codeKey(result.interruptionCode || 'unknown'), result.interruptionCode || 'Unknown interruption')}</p> : null}
+              {canResume ? <button type="button" className="btn-secondary mt-2 px-3 py-1.5 text-xs" disabled={working} onClick={onResume}>{tr('selected_conflict_resume_request', 'Resume same request')}</button> : null}
+              {canRepreview ? <button type="button" className="btn-secondary mt-2 px-3 py-1.5 text-xs" disabled={working} onClick={onRefresh}>{tr('selected_conflict_repreview_remaining', 'Review remaining pairs again')}</button> : null}
             </div>
           ) : null}
 
-          {preview.cases.map((item) => <BeforeAfterCase key={item.case_key} item={item} choice={choices[item.case_key]} onChoice={(choice) => onChoice(item.case_key, choice)} t={t} />)}
+          {!result && committedCases.length ? (
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/20 dark:text-emerald-100">
+              {committedCases.length} {tr('selected_conflict_committed', 'committed')} · {tr('selected_conflict_retained_commits', 'kept from the previous attempt')}
+            </div>
+          ) : null}
+
+          {preview.cases.map((item) => <BeforeAfterCase key={item.case_key} item={item} previousReview={changedCases[item.case_key]} choice={choices[item.case_key]} onChoice={(choice) => onChoice(item.case_key, choice)} t={t} />)}
 
           {skipped.length || preview.cases.some((item) => item.blocked) ? (
             <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 dark:border-amber-900/50 dark:bg-amber-950/20">
