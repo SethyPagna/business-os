@@ -244,6 +244,12 @@ export function writeStoredJson(storage: StorageLike | null | undefined, key: st
   }
 }
 
+export function persistReportStyleChoice(storage: StorageLike | null | undefined, style: ReportStyle | null): void {
+  // Persist the reset state as JSON null. Leaving the old explicit style in
+  // storage would resurrect it the next time the report hub mounts.
+  writeStoredJson(storage, REPORT_STORAGE_KEYS.style, style)
+}
+
 // ---- numbers ---------------------------------------------------------------
 
 export function num(v: unknown): number {
