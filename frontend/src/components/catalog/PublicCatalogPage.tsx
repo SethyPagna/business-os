@@ -62,7 +62,6 @@ import {
   normalizeTranslateTarget,
   readStoredTranslateTarget,
   removePortalTranslateWidgetHost,
-  requestPortalTranslateReload,
   setupPortalExternalTranslateWidget,
   sleep,
 } from './portalTranslateController.ts'
@@ -860,8 +859,8 @@ export default function PublicCatalogPage() {
 
   // Once the widget's ready, repeatedly nudge Google's own select element to
   // the chosen language and confirm it actually took (its DOM/cookie state can
-  // lag the widget being "ready"); fall back to a one-time page reload if
-  // it's still stuck after ~3.5s, same recovery CatalogPage.tsx's preview uses.
+  // lag the widget being "ready"). Report failure in place rather than
+  // navigating away from the shopper's current page when translation stalls.
   useEffect(() => {
     if (!translateWidgetEnabled || !externalTranslateTarget || !translateReady) return undefined
     let cancelled = false
@@ -878,7 +877,6 @@ export default function PublicCatalogPage() {
         await sleep(180)
       }
       if (cancelled) return
-      if (requestPortalTranslateReload('external-translate-stuck', 5000)) return
       setTranslateApplyState('failed')
       setTranslateApplyMessage(copy('translationFailed', 'Translation could not apply. Try again.'))
     }, loading ? 650 : 260)
@@ -1779,7 +1777,7 @@ export default function PublicCatalogPage() {
   // gallery/lightbox or either drawer/popover is open, so a pull-down
   // gesture inside one of those (which have their own pinch/pan/scroll
   // handling) is never mistaken for a page-level refresh pull.
-  const pullToRefreshEnabled = !productGalleryView.open && !portalImageView.open && !bucketOpen && !contactOpen && !filePicker.open && !accountOpen && !wishlistOpen
+  const pullToRefreshEnabled = !productDetailView.open && !productGalleryView.open && !portalImageView.open && !bucketOpen && !contactOpen && !filePicker.open && !accountOpen && !wishlistOpen
   const { pullDistance: publicPullDistance, refreshing: publicPullRefreshing } = usePullToRefresh(
     publicPageRootRef,
     () => {
