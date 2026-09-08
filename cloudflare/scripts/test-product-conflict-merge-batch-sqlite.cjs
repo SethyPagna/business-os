@@ -119,7 +119,7 @@ function seed() {
   return d1
 }
 
-function seedManyPairs(count = 12) {
+function seedManyPairs(count = 12, lotsPerProduct = 10) {
   const d1 = openDb(loadAll())
   d1.db.prepare("INSERT INTO branches(id,name,is_active) VALUES(901,'Shop',1)").run()
   const cases = []
@@ -133,6 +133,15 @@ function seedManyPairs(count = 12) {
       (id,name,name_key,barcode,is_active,is_group,stock_quantity,cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,wholesale_price_usd,wholesale_price_khr)
       VALUES(@left,@name,@nameKey,@barcode,1,0,0,5,20000,8,32000,7,28000),
             (@right,@name,@nameKey,@barcode,1,0,0,5,20000,8,32000,7,28000)`).run({ left, right, name, nameKey, barcode })
+    for (let lot = 0; lot < lotsPerProduct; lot += 1) {
+      const keeperBatchId = 200000 + index * 100 + lot * 2
+      const mergedBatchId = keeperBatchId + 1
+      d1.db.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_key,batch_number,lot_code,is_active)
+        VALUES(@keeperBatchId,@left,@batchKey,@batchNumber,@lotCode,1),
+              (@mergedBatchId,@right,@batchKey,@batchNumber,@lotCode,1)`).run({
+        keeperBatchId, mergedBatchId, left, right, batchKey: `lot-${lot}`, batchNumber: lot + 1, lotCode: `L${lot + 1}`,
+      })
+    }
     cases.push({ case_key: `barcode:${barcode}`, cluster_type: 'barcode', cluster_value: barcode, product_ids: [left, right] })
   }
   return { d1, cases }
