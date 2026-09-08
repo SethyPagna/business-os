@@ -98,6 +98,17 @@ const productImagePermission = loadReal('lib/productImagePermission.ts', {
 const batchCode = loadReal('lib/batchCode.ts')
 const searchMatch = loadReal('lib/searchMatch.ts')
 const productDetailRule = loadReal('lib/productDetailRule.ts')
+const productMerge = loadReal('lib/productMerge.ts')
+const productIdentity = loadReal('lib/productIdentity.ts', {
+  './db': { getDb: () => dbShim },
+  './sqlBinding': sqlBinding,
+  './productDetailRule': productDetailRule,
+})
+const productConflictMergeBatch = loadReal('lib/productConflictMergeBatch.ts', {
+  './productIdentity': productIdentity,
+  './productDetailRule': productDetailRule,
+  './productMerge': productMerge,
+})
 const productMergeSnapshot = loadReal('lib/productMergeSnapshot.ts', { './db': { getDb: () => dbShim } })
 const productWrites = loadReal('lib/productWrites.ts', {
   './db': { getDb: () => dbShim },
@@ -176,9 +187,10 @@ const productsRoute = loadReal('routes/products.ts', {
   '../lib/productWrites': productWrites,
   // Product merge economics has dedicated route/kernel tests. Gallery wiring
   // never invokes it, but the identity lane imports it from products.ts.
-  '../lib/productMerge': {},
+  '../lib/productMerge': productMerge,
   '../lib/productMergeSnapshot': productMergeSnapshot,
-  '../lib/productIdentity': { findDuplicateProductGroups: async () => [] },
+  '../lib/productConflictMergeBatch': productConflictMergeBatch,
+  '../lib/productIdentity': productIdentity,
   '../lib/productBatches': { attachBatchCounts: async () => {} },
   '../lib/searchMatch': searchMatch,
   // The shared search-tail/ranking module products.ts now builds its search
