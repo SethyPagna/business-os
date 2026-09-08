@@ -559,7 +559,8 @@ test('views: permissions gate the picker, the stored view survives only while al
 
 test('options / style persistence is tolerant of garbage and round-trips through storage', () => {
   assert.deepEqual(normalizeReportOptions(undefined), DEFAULT_REPORT_OPTIONS)
-  assert.deepEqual(normalizeReportOptions({ basis: 'collected', profitMode: 'nope', granularity: 'week', compare: 'yes', currency: 'khr' }), { basis: 'collected', profitMode: 'gross', granularity: 'week', compare: false, currency: 'khr' })
+  assert.deepEqual(normalizeReportOptions({ basis: 'collected', profitMode: 'net', granularity: 'week', compare: true, currency: 'khr' }), { basis: 'revenue', profitMode: 'gross', granularity: 'week', compare: false, currency: 'khr' })
+  assert.equal(normalizeReportOptions({ currency: 'setting' }).currency, 'usd', 'retired App setting storage migrates to USD')
   assert.equal(normalizeReportStyle('receipt'), 'receipt')
   assert.equal(normalizeReportStyle('grid'), null)
   assert.equal(defaultReportStyle(true), 'receipt')
@@ -567,7 +568,7 @@ test('options / style persistence is tolerant of garbage and round-trips through
   const store = new Map<string, string>()
   const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => { store.set(k, v) } }
   writeStoredJson(storage, REPORT_STORAGE_KEYS.options, { ...DEFAULT_REPORT_OPTIONS, basis: 'gross' })
-  assert.equal(readStoredJson(storage, REPORT_STORAGE_KEYS.options, normalizeReportOptions).basis, 'gross')
+  assert.equal(readStoredJson(storage, REPORT_STORAGE_KEYS.options, normalizeReportOptions).basis, 'revenue')
   store.set(REPORT_STORAGE_KEYS.options, '{not json')
   assert.deepEqual(readStoredJson(storage, REPORT_STORAGE_KEYS.options, normalizeReportOptions), DEFAULT_REPORT_OPTIONS, 'corrupt storage falls back, never throws')
   const throwing = { getItem: () => { throw new Error('blocked') }, setItem: () => { throw new Error('blocked') } }
@@ -666,12 +667,12 @@ test('the control row keeps every control at each width: nothing is dropped, not
   const tail = hub.slice(hub.indexOf('const collapsedTail'), hub.indexOf('const body'))
   assert.ok(tail.includes('{filtersButton}'), 'the tail carries the filter menu')
 
-  // Desktop and compact layouts share the same picker definition. Each
-  // mutually exclusive responsive branch renders it once.
+  // The one picker lives inside the filter fold and is never duplicated into
+  // either the desktop toolbar or compact primary row.
   assert.ok(!tail.includes('viewPicker'), 'the picker is not in the tail any more (it would double up with the search slot)')
-  assert.ok(/const searchSlot = \([\s\S]*?\{viewPicker\}/.test(hub), 'the search slot carries the view picker at every tier')
-  assert.ok(/reports-mobile-primary[\s\S]*?\{viewPicker\}\{rangePicker\}/.test(hub), 'the compact tier pairs view and range, wrapping when needed')
-  assert.equal((hub.match(/\{viewPicker\}/g) || []).length, 2, 'one picker reference exists in each responsive branch')
+  assert.ok(/viewControl=\{viewPicker\}/.test(hub), 'the filter fold owns the view picker')
+  assert.ok(/reports-mobile-primary">\{rangePicker\}/.test(hub), 'the compact primary row keeps only the range')
+  assert.equal((hub.match(/\{viewPicker\}/g) || []).length, 1, 'the picker has one render reference, on the filter-fold prop')
 
   // The four controls Part 586 folded into the one menu must not come back as
   // separate control-row citizens -- that crowding is what hid the search box.
@@ -687,13 +688,11 @@ test('the control row keeps every control at each width: nothing is dropped, not
   assert.ok(hub.includes('<SearchIcon'), 'the search box reads as a search box')
   assert.ok(/min-w-\[9rem\] flex-1/.test(hub), 'the search box keeps a width floor and takes the free space')
 
-  // The menu owns the filters AND the options, so its badge must count both,
-  // and its Reset must clear both -- a Reset that silently left a non-default
-  // basis in force would be worse than no Reset.
+  // The menu owns filters, display style and currency. Reset clears all three.
   assert.ok(/filterControls=\{/.test(hub), 'the filter selects are passed into the menu')
   assert.ok(/onStyleChange=\{/.test(hub), 'the style choice is made in the menu')
-  assert.ok(hub.includes('activeFilterCount + (optionsAreDefault ? 0 : 1)'), 'the badge counts filters and non-default options')
-  assert.ok(/onReset=\{\(\) => \{ clearFilters\(\); setOptions\(/.test(hub), 'one Reset clears the filters and the options together')
+  assert.ok(hub.includes('activeFilterCount + (optionsAreDefault ? 0 : 1) + (styleIsDefault ? 0 : 1)'), 'the badge counts filters, non-default currency and explicit style')
+  assert.ok(/onReset=\{\(\) => \{ clearFilters\(\); setStyleChoice\(null\); setOptions\(/.test(hub), 'one Reset clears filters, style and currency together')
 
   // The date range is the widest control on a phone row; it only fits because
   // the trigger becomes a full-width field whose labels can truncate.
@@ -796,7 +795,7 @@ test('Khmer keeps a line box tall enough that truncating cells cannot shear it',
   // The shared Fold stays unchanged; report callers opt in with a class on
   // the panel root and retain the data hook on the body.
   const optionsFold = read('src/components/sales/reports/ReportOptionsFold.tsx')
-  assert.match(optionsFold, /className="reports-fold-panel"/, 'the fold panel root receives the report type scope')
+  assert.match(optionsFold, /className="reports-fold-panel reports-filter-fold"/, 'the filter fold receives the report type and compact filter scopes')
   assert.match(optionsFold, /data-reports-fold=""/, 'the fold body retains the explicit clip-relief hook')
   assert.ok(css.includes('.reports-fold-panel'), 'the panel class receives the same Khmer boost and line-height floor')
   // Scoped, not global: the app-wide fix is a separate board item.

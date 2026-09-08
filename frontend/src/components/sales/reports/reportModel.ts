@@ -29,7 +29,7 @@ export type ReportStyle = 'excel' | 'receipt'
 export type ReportBasis = 'revenue' | 'gross' | 'collected'
 export type ReportProfitMode = 'gross' | 'net'
 export type ReportGranularity = 'day' | 'week' | 'month'
-export type ReportCurrency = 'setting' | 'usd' | 'khr' | 'both'
+export type ReportCurrency = 'usd' | 'khr' | 'both'
 
 export interface ReportOptions {
   /** Which figure leads the summary line and is the margin denominator. */
@@ -37,9 +37,9 @@ export interface ReportOptions {
   /** Gross profit (kernel) or net after expenses (Overview only). */
   profitMode: ReportProfitMode
   granularity: ReportGranularity
-  /** Overview: show the previous period of equal length and the change. */
+  /** Kept in the persisted shape for compatibility; the reports UI pins it off. */
   compare: boolean
-  /** Display-only currency override of the display_currency setting. */
+  /** Display-only currency; reports default to USD independently of app settings. */
   currency: ReportCurrency
 }
 
@@ -48,7 +48,7 @@ export const DEFAULT_REPORT_OPTIONS: ReportOptions = {
   profitMode: 'gross',
   granularity: 'day',
   compare: false,
-  currency: 'setting',
+  currency: 'usd',
 }
 
 export interface ReportViewDef {
@@ -194,10 +194,8 @@ export interface StorageLike {
   setItem(key: string, value: string): void
 }
 
-const BASES: ReportBasis[] = ['revenue', 'gross', 'collected']
-const PROFIT_MODES: ReportProfitMode[] = ['gross', 'net']
 const GRANULARITIES: ReportGranularity[] = ['day', 'week', 'month']
-const CURRENCIES: ReportCurrency[] = ['setting', 'usd', 'khr', 'both']
+const CURRENCIES: ReportCurrency[] = ['usd', 'khr', 'both']
 
 function pick<T extends string>(raw: unknown, allowed: readonly T[], fallback: T): T {
   return typeof raw === 'string' && (allowed as readonly string[]).includes(raw) ? (raw as T) : fallback
@@ -207,10 +205,15 @@ function pick<T extends string>(raw: unknown, allowed: readonly T[], fallback: T
 export function normalizeReportOptions(raw: unknown): ReportOptions {
   const o = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
   return {
-    basis: pick(o.basis, BASES, DEFAULT_REPORT_OPTIONS.basis),
-    profitMode: pick(o.profitMode, PROFIT_MODES, DEFAULT_REPORT_OPTIONS.profitMode),
+    // These presentation choices used to create alternate report readings.
+    // Preserve the stored object shape for compatibility while pinning the
+    // effective report to the canonical revenue/gross/no-comparison view.
+    basis: DEFAULT_REPORT_OPTIONS.basis,
+    profitMode: DEFAULT_REPORT_OPTIONS.profitMode,
     granularity: pick(o.granularity, GRANULARITIES, DEFAULT_REPORT_OPTIONS.granularity),
-    compare: typeof o.compare === 'boolean' ? o.compare : DEFAULT_REPORT_OPTIONS.compare,
+    compare: DEFAULT_REPORT_OPTIONS.compare,
+    // The retired `setting` value deliberately falls back to USD so removing
+    // that control cannot leave a hidden app-setting override active.
     currency: pick(o.currency, CURRENCIES, DEFAULT_REPORT_OPTIONS.currency),
   }
 }
