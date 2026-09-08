@@ -838,6 +838,7 @@ export async function finalizeAtomicMergeHistory(
     historyResolved: resolvedSnapshotId != null && resolvedActionHistoryId != null,
     fingerprintReady: false,
   })
+  let phase: 'history_lookup' | 'snapshot_lookup' | 'fingerprint_read' | 'finalization_batch' = 'history_lookup'
   try {
     // The graph mutation, snapshot, history and audit were committed in the
     // caller's preceding atomic batch. Every operation below is reconciliation
@@ -859,6 +860,7 @@ export async function finalizeAtomicMergeHistory(
     }
     resolvedSnapshotId = snapshotId
     resolvedActionHistoryId = actionHistoryId
+    phase = 'snapshot_lookup'
     const ready = await db.prepare(`
       SELECT CAST(json_extract(payload_json,'$.fingerprintPending') AS INTEGER) AS pending
       FROM undo_snapshots WHERE id=@snapshotId AND kind='product.merge' AND status='applied'
@@ -866,9 +868,11 @@ export async function finalizeAtomicMergeHistory(
     if (Number(ready?.pending) === 0 && Number(history?.reversible) === 1 && history?.status === 'undoable') {
       return { operationId, committed: true, snapshotId, actionHistoryId, historyResolved: true, fingerprintReady: true }
     }
+    phase = 'fingerprint_read'
     const mergedStateFingerprint = await mergeStateFingerprint(db, [reversal])
     const stored = { ...reversal, operationId, fingerprintPending: false, mergedStateFingerprint }
-    await db.batch([
+    phase = 'finalization_batch'
+    const finalization = await db.batch([
       {
         sql: `UPDATE undo_snapshots SET payload_json=@payload,updated_at=CURRENT_TIMESTAMP
               WHERE id=@snapshotId AND kind='product.merge' AND status='applied'
@@ -886,12 +890,21 @@ export async function finalizeAtomicMergeHistory(
         sql: `SELECT CASE WHEN
                 EXISTS(SELECT 1 FROM undo_snapshots WHERE id=@snapshotId AND json_extract(payload_json,'$.fingerprintPending')=0)
                 AND EXISTS(SELECT 1 FROM action_history WHERE id=@historyId AND reversible=1 AND status='undoable')
-              THEN 1 ELSE json_extract('', '$') END AS merge_history_guard`,
+              THEN 1 ELSE 0 END AS merge_history_ready`,
         params: { snapshotId, historyId: actionHistoryId },
       },
     ])
+    const finalizationRows = Array.isArray(finalization[2]?.results)
+      ? finalization[2].results as Array<Record<string, unknown>>
+      : []
+    const finalized = Number(finalizationRows[0]?.merge_history_ready) === 1
+    if (!finalized) return pending()
     return { operationId, committed: true, snapshotId, actionHistoryId, historyResolved: true, fingerprintReady: true }
   } catch {
+    // This is deliberately identifier-only observability: callers need to
+    // distinguish a retryable read from the guarded write without logging a
+    // reversal payload, customer data, or credentials.
+    console.error('product.merge history finalization deferred', { operationId, phase })
     // The merge and its audit are already durable. Keep the history visibly
     // non-reversible while the explicit pending flag makes undo fail closed;
     // never advertise an Undo control before its fingerprint is complete.
