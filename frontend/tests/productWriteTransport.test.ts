@@ -55,8 +55,11 @@ const preview = {
 }
 const applyBody = makeSelectedConflictMergeApplyBody(preview as never, { 'barcode:one': 'write_off' }, 'stable-request')
 assert.equal(applyBody.client_request_id, 'stable-request')
-assert.deepEqual(applyBody.cases.map((item) => item.stock), ['write_off', null, null])
-assert.ok(applyBody.cases.some((item) => item.case_key === 'barcode:blocked'), 'the apply body preserves the complete manifest; the UI disables confirmation while any case is blocked')
+assert.deepEqual(applyBody.cases.map((item) => item.stock), ['write_off', null])
+assert.deepEqual(applyBody.cases.map((item) => item.ordinal), [0, 1], 'actionable cases are densely reindexed after display-only blocked rows are removed')
+assert.ok(!applyBody.cases.some((item) => item.case_key === 'barcode:blocked'), 'a preview-blocked case is display-only and never sent to apply')
+const allBlockedBody = makeSelectedConflictMergeApplyBody({ ...preview, cases: [preview.cases[2]] } as never, {}, 'all-blocked')
+assert.deepEqual(allBlockedBody.cases, [], 'an all-blocked preview produces no mutation cases')
 assert.match(transport, /previewSelectedConflictMerges[\s\S]*apiFetch\([\s\S]*'POST',[\s\S]*'\/api\/products\/possible-duplicates\/merge-batch\/preview'/)
 const selectedApply = transport.slice(transport.indexOf('export async function runSelectedConflictMergeBatch'), transport.indexOf('// Zero-quantity product cleanup'))
 assert.match(selectedApply, /while \(attempts < callCeiling\)/)

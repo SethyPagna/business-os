@@ -339,8 +339,9 @@ export function makeSelectedConflictMergeApplyBody(
     manifest_version: preview.manifest_version,
     manifest_digest: preview.manifest_digest,
     cases: preview.cases
-      .map((item) => ({
-        ordinal: item.ordinal,
+      .filter((item) => !item.blocked)
+      .map((item, ordinal) => ({
+        ordinal,
         case_key: item.case_key,
         keep_id: item.keep_id,
         merge_id: item.merge_id,
