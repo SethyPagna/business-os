@@ -498,8 +498,9 @@ app.put('/:id', async (c) => {
   const existing = await db.prepare(`SELECT * FROM fees WHERE id = @id`).get<FeeRow>({ id })
   if (!existing) return c.json({ error: 'Fee not found' }, 404)
 
+  const expectedUpdatedAt = getExpectedUpdatedAt(body)
   try {
-    assertUpdatedAtMatch('fee', existing, getExpectedUpdatedAt(body))
+    assertUpdatedAtMatch('fee', existing, expectedUpdatedAt)
   } catch (err) {
     if (err instanceof WriteConflictError) {
       const { body: conflictBody, status } = writeConflictResponse(err)
@@ -538,12 +539,24 @@ app.put('/:id', async (c) => {
   const notes = body.notes !== undefined ? normalizeText(body.notes, 2000) : existing.notes
   const now = new Date().toISOString()
 
-  await db.prepare(`
+  const updateResult = await db.prepare(`
     UPDATE fees SET fee_type = @feeType, label = @label, amount_usd = @amountUsd, amount_khr = @amountKhr,
       fee_date = @feeDate, sale_id = @saleId, branch_id = @branchId,
       delivery_contact_id = @deliveryContactId, notes = @notes, updated_at = @now
-    WHERE id = @id
-  `).run({ feeType, label, amountUsd, amountKhr, feeDate, saleId, branchId, deliveryContactId, notes, now, id })
+    WHERE id = @id${expectedUpdatedAt ? ' AND updated_at IS @expectedUpdatedAt' : ''}
+  `).run({ feeType, label, amountUsd, amountKhr, feeDate, saleId, branchId, deliveryContactId, notes, now, id, expectedUpdatedAt })
+
+  // The pre-read check gives callers an immediate conflict response, while
+  // this predicate closes the interval between that read and the write. A
+  // concurrent editor can change the row in that interval; zero affected
+  // rows means this request lost that race and must not emit audit/broadcast
+  // side effects for a write that never happened.
+  if (expectedUpdatedAt && updateResult.changes === 0) {
+    const current = await db.prepare(`SELECT * FROM fees WHERE id = @id`).get<FeeRow>({ id })
+    const conflict = new WriteConflictError('fee', current || null, expectedUpdatedAt, current ? 'updated' : 'deleted')
+    const { body: conflictBody, status } = writeConflictResponse(conflict)
+    return c.json(conflictBody, status)
+  }
 
   const fee = await db.prepare(`SELECT * FROM fees WHERE id = @id`).get<FeeRow>({ id })
   await audit(c.env, user.id, user.username || null, 'update', 'fee', id, {
