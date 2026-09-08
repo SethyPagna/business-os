@@ -44,9 +44,15 @@ import {
 import {
   PRODUCT_CONFLICT_ACTION_PAGE_MAX,
   PRODUCT_CONFLICT_ACTION_READ_CHUNK,
+  PRODUCT_CONFLICT_ACTION_MAX_ACTIVE_DRAFTS,
+  PRODUCT_CONFLICT_ACTION_MAX_GROUP_DETAIL_BYTES,
+  PRODUCT_CONFLICT_ACTION_MAX_LOT_ROWS_PER_GROUP,
+  PRODUCT_CONFLICT_ACTION_MAX_LOT_ROWS_PER_REVIEW,
   buildProductConflictActionGroupPlans,
+  canonicalizeProductConflictActionGroups,
   isProductConflictActionPreviewRequest,
   parseProductConflictActionPreviewRequest,
+  refuseProductConflictActionGroupDetail,
   type ProductConflictActionGroupPlan,
   type ProductConflictActionLotRow,
   type ProductConflictActionProductRow,
@@ -4979,6 +4985,7 @@ async function readProductConflictActionInputs(db: ReturnType<typeof getDb>, ids
   const products: ProductConflictActionProductRow[] = []
   const stock: ProductConflictActionStockRow[] = []
   const lots: ProductConflictActionLotRow[] = []
+  const lotDetailRowsByProductId = new Map<number, number>()
   for (let offset = 0; offset < ids.length; offset += PRODUCT_CONFLICT_ACTION_READ_CHUNK) {
     const chunk = ids.slice(offset, offset + PRODUCT_CONFLICT_ACTION_READ_CHUNK)
     const { sql, params } = buildInClause('reviewProduct', chunk)
@@ -4988,13 +4995,37 @@ async function readProductConflictActionInputs(db: ReturnType<typeof getDb>, ids
     stock.push(...await db.prepare(`SELECT bs.product_id,bs.branch_id,b.name AS branch_name,bs.quantity
       FROM branch_stock bs LEFT JOIN branches b ON b.id=bs.branch_id WHERE bs.product_id IN (${sql})
       ORDER BY bs.product_id,bs.branch_id`).all<ProductConflictActionStockRow>(params))
+    const counts = await db.prepare(`SELECT pb.variant_product_id AS product_id,COUNT(*) AS detail_rows
+      FROM product_batches pb LEFT JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id
+      WHERE pb.variant_product_id IN (${sql}) GROUP BY pb.variant_product_id ORDER BY pb.variant_product_id`)
+      .all<{ product_id: number; detail_rows: number }>(params)
+    for (const row of counts) lotDetailRowsByProductId.set(Number(row.product_id), Number(row.detail_rows) || 0)
+  }
+  return { products, stock, lots, lotDetailRowsByProductId }
+}
+
+function productConflictActionReviewExpired(review: ProductConflictActionReviewRow, now = Date.now()): boolean {
+  const expires = Date.parse(review.expires_at)
+  return !Number.isFinite(expires) || expires <= now || review.status === 'expired'
+}
+
+async function expireProductConflictActionReview(db: ReturnType<typeof getDb>, review: ProductConflictActionReviewRow) {
+  await db.prepare(`UPDATE product_conflict_action_reviews SET status='expired',updated_at=CURRENT_TIMESTAMP
+    WHERE id=@reviewId AND actor_id=@actorId AND status='draft'`).run({ reviewId: review.id, actorId: review.actor_id })
+}
+
+async function readBoundedProductConflictActionLots(db: ReturnType<typeof getDb>, ids: number[]) {
+  const lots: ProductConflictActionLotRow[] = []
+  for (let offset = 0; offset < ids.length; offset += PRODUCT_CONFLICT_ACTION_READ_CHUNK) {
+    const chunk = ids.slice(offset, offset + PRODUCT_CONFLICT_ACTION_READ_CHUNK)
+    const { sql, params } = buildInClause('reviewLotProduct', chunk)
     lots.push(...await db.prepare(`SELECT pb.variant_product_id AS product_id,pb.id AS batch_id,pb.batch_key,pb.lot_code,pb.expiry_date,pb.received_at,
       pb.is_active,pb.notes,pb.unit_cost_usd,pb.received_quantity,pb.received_branch_id,pb.received_cost_usd,
       pb.supplier_id,pb.supplier_name,pb.payment_status,pb.credit_due_date,bbs.branch_id,bbs.quantity
       FROM product_batches pb LEFT JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id
       WHERE pb.variant_product_id IN (${sql}) ORDER BY pb.variant_product_id,pb.id,bbs.branch_id`).all<ProductConflictActionLotRow>(params))
   }
-  return { products, stock, lots }
+  return lots
 }
 
 async function createProductConflictActionReview(
@@ -5003,7 +5034,28 @@ async function createProductConflictActionReview(
 ) {
   const ids = [...new Set(request.merge_groups.flatMap((group) => group.member_ids))].sort((a, b) => a - b)
   const inputs = await readProductConflictActionInputs(db, ids)
+  const detailRefusals = new Map<string, number>()
+  const detailAllowedIds = new Set<number>()
+  let retainedDetailRows = 0
+  for (const group of canonicalizeProductConflictActionGroups(request.merge_groups)) {
+    const detailRows = group.member_ids.reduce((sum, id) => sum + (inputs.lotDetailRowsByProductId.get(id) || 0), 0)
+    if (detailRows > PRODUCT_CONFLICT_ACTION_MAX_LOT_ROWS_PER_GROUP
+      || retainedDetailRows + detailRows > PRODUCT_CONFLICT_ACTION_MAX_LOT_ROWS_PER_REVIEW) {
+      detailRefusals.set(group.group_key, detailRows)
+    } else {
+      retainedDetailRows += detailRows
+      group.member_ids.forEach((id) => detailAllowedIds.add(id))
+    }
+  }
+  inputs.lots.push(...await readBoundedProductConflictActionLots(db, [...detailAllowedIds].sort((a, b) => a - b)))
   const rawPlans = buildProductConflictActionGroupPlans(request.merge_groups, inputs.products, inputs.stock, inputs.lots)
+    .map((plan) => detailRefusals.has(plan.group_key)
+      ? refuseProductConflictActionGroupDetail(plan, detailRefusals.get(plan.group_key) || 0)
+      : plan)
+    .map((plan) => {
+      if (new TextEncoder().encode(canonicalProductConflictJson(plan)).length <= PRODUCT_CONFLICT_ACTION_MAX_GROUP_DETAIL_BYTES) return plan
+      return refuseProductConflictActionGroupDetail(plan, plan.lots.detail_row_count, 'This group detail is too large for one bounded review. Review it separately.')
+    })
   const plans = []
   for (const plan of rawPlans) plans.push({ ...plan, state_digest: await productConflictSha256({ version: 2, group: plan }) })
   const reviewId = crypto.randomUUID()
@@ -5012,6 +5064,11 @@ async function createProductConflictActionReview(
     groups: plans.map((plan, ordinal) => ({ ordinal, group_key: plan.group_key, member_ids: plan.member_ids, state_digest: plan.state_digest })) })
   const actionable = plans.filter((plan) => !plan.blocked).length
   const statements: Array<{ sql: string; params?: Record<string, unknown> }> = [{
+    sql: `SELECT CASE WHEN (SELECT COUNT(*) FROM product_conflict_action_reviews
+      WHERE actor_id=@actorId AND status='draft' AND expires_at>@now) < @maxDrafts
+      THEN 1 ELSE json_extract('', '$') END AS product_conflict_review_limit_guard`,
+    params: { actorId, now: new Date().toISOString(), maxDrafts: PRODUCT_CONFLICT_ACTION_MAX_ACTIVE_DRAFTS },
+  }, {
     sql: `INSERT INTO product_conflict_action_reviews
       (id,actor_id,request_id,request_digest,manifest_version,resolution_version,draft_digest,status,
        requested_group_count,actionable_group_count,blocked_group_count,total_member_count,expires_at)
@@ -5067,21 +5124,43 @@ app.post('/possible-duplicates/merge-batch/preview', async (c) => {
     }
     const db = getDb(c.env)
     const requestDigest = await productConflictSha256(request)
+    const now = new Date()
     let review = await db.prepare(`SELECT id,actor_id,request_id,request_digest,draft_digest,status,
       requested_group_count,actionable_group_count,blocked_group_count,total_member_count,expires_at
       FROM product_conflict_action_reviews WHERE actor_id=@actorId AND request_id=@requestId`)
       .get<ProductConflictActionReviewRow>({ actorId: user.id, requestId: request.client_request_id })
+    if (review && productConflictActionReviewExpired(review, now.getTime())) {
+      await expireProductConflictActionReview(db, review)
+      return c.json({ success: false, code: 'review_expired', error: 'This conflict review expired. Start a new review with a new request id.' }, 410)
+    }
     if (review && review.request_digest !== requestDigest) {
       return c.json({ success: false, code: 'idempotency_conflict', error: 'client_request_id was already used with a different conflict review.' }, 409)
     }
     if (!review) {
+      await db.prepare(`DELETE FROM product_conflict_action_reviews
+        WHERE actor_id=@actorId AND status IN ('draft','expired') AND expires_at<=@now`)
+        .run({ actorId: user.id, now: now.toISOString() })
+      const active = await db.prepare(`SELECT COUNT(*) AS count FROM product_conflict_action_reviews
+        WHERE actor_id=@actorId AND status='draft' AND expires_at>@now`)
+        .get<{ count: number }>({ actorId: user.id, now: now.toISOString() })
+      if (Number(active?.count) >= PRODUCT_CONFLICT_ACTION_MAX_ACTIVE_DRAFTS) {
+        return c.json({ success: false, code: 'review_limit_reached', error: 'Finish or wait for an existing conflict review before starting another.' }, 409)
+      }
       try { review = await createProductConflictActionReview(db, user.id, request, requestDigest) }
       catch (error) {
         review = await db.prepare(`SELECT id,actor_id,request_id,request_digest,draft_digest,status,
           requested_group_count,actionable_group_count,blocked_group_count,total_member_count,expires_at
           FROM product_conflict_action_reviews WHERE actor_id=@actorId AND request_id=@requestId`)
           .get<ProductConflictActionReviewRow>({ actorId: user.id, requestId: request.client_request_id })
-        if (!review || review.request_digest !== requestDigest) throw error
+        if (!review || review.request_digest !== requestDigest) {
+          const concurrentActive = await db.prepare(`SELECT COUNT(*) AS count FROM product_conflict_action_reviews
+            WHERE actor_id=@actorId AND status='draft' AND expires_at>@now`)
+            .get<{ count: number }>({ actorId: user.id, now: now.toISOString() })
+          if (Number(concurrentActive?.count) >= PRODUCT_CONFLICT_ACTION_MAX_ACTIVE_DRAFTS) {
+            return c.json({ success: false, code: 'review_limit_reached', error: 'Finish or wait for an existing conflict review before starting another.' }, 409)
+          }
+          throw error
+        }
       }
     }
     return c.json(await productConflictActionReviewResponse(db, review))
@@ -5128,6 +5207,10 @@ app.get('/possible-duplicates/merge-batch/reviews/:reviewId', async (c) => {
   const db = getDb(c.env)
   const review = await readProductConflictActionReview(db, user.id, c.req.param('reviewId'))
   if (!review) return c.json({ success: false, code: 'review_not_found', error: 'Conflict review not found.' }, 404)
+  if (productConflictActionReviewExpired(review)) {
+    await expireProductConflictActionReview(db, review)
+    return c.json({ success: false, code: 'review_expired', error: 'This conflict review expired. Start a new review.' }, 410)
+  }
   return c.json(await productConflictActionReviewResponse(db, review, cursor, limit))
 })
 

@@ -82,6 +82,9 @@ CREATE TABLE product_conflict_action_group_members (
 CREATE INDEX idx_product_conflict_action_reviews_actor_status
 ON product_conflict_action_reviews(actor_id, status, updated_at, id);
 
+CREATE INDEX idx_product_conflict_action_reviews_actor_expiry
+ON product_conflict_action_reviews(actor_id, expires_at, id);
+
 CREATE INDEX idx_product_conflict_action_groups_page
 ON product_conflict_action_groups(review_id, ordinal, status);
 

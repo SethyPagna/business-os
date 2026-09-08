@@ -9,6 +9,10 @@ export const PRODUCT_CONFLICT_ACTION_MAX_MEMBERS = 4000
 export const PRODUCT_CONFLICT_ACTION_MAX_MEMBERS_PER_GROUP = 100
 export const PRODUCT_CONFLICT_ACTION_PAGE_MAX = 100
 export const PRODUCT_CONFLICT_ACTION_READ_CHUNK = 80
+export const PRODUCT_CONFLICT_ACTION_MAX_ACTIVE_DRAFTS = 8
+export const PRODUCT_CONFLICT_ACTION_MAX_LOT_ROWS_PER_GROUP = 1000
+export const PRODUCT_CONFLICT_ACTION_MAX_LOT_ROWS_PER_REVIEW = 10000
+export const PRODUCT_CONFLICT_ACTION_MAX_GROUP_DETAIL_BYTES = 512 * 1024
 
 export type ProductConflictActionGroupInput = { group_key: string; member_ids: number[] }
 export type ProductConflictActionPreviewRequest = {
@@ -45,7 +49,7 @@ export type ProductConflictActionGroupPlan = {
   options: { barcode_source_ids: number[]; category_source_ids: number[]; brand_source_ids: number[]; unit_source_ids: number[] }
   economics: ProductMergeEconomics
   stock: { rows: ProductConflictActionStockRow[]; projected_by_branch: Array<{ branch_id: number; branch_name: string | null; quantity: number }> }
-  lots: { rows: ProductConflictActionLotRow[]; projected_quantity: number; count: number }
+  lots: { rows: ProductConflictActionLotRow[]; projected_quantity: number; count: number; detail_row_count: number; detail_status: 'complete' | 'refused' }
   blocked: ProductConflictActionBlocker | null
 }
 
@@ -221,8 +225,20 @@ export function buildProductConflictActionGroupPlans(
       },
       economics,
       stock: { rows: stockRows, projected_by_branch: [...projected.values()].sort((a, b) => a.branch_id - b.branch_id) },
-      lots: { rows: lotRows, projected_quantity: lotRows.reduce((sum, row) => sum + Number(row.quantity || 0), 0), count: new Set(lotRows.map((row) => row.batch_id)).size },
+      lots: { rows: lotRows, projected_quantity: lotRows.reduce((sum, row) => sum + Number(row.quantity || 0), 0), count: new Set(lotRows.map((row) => row.batch_id)).size, detail_row_count: lotRows.length, detail_status: 'complete' },
       blocked,
     }
   })
+}
+
+export function refuseProductConflictActionGroupDetail(
+  plan: ProductConflictActionGroupPlan,
+  detailRowCount: number,
+  message = 'This group has too much lot history for one bounded review. Review it separately.',
+): ProductConflictActionGroupPlan {
+  return {
+    ...plan,
+    lots: { rows: [], projected_quantity: 0, count: 0, detail_row_count: detailRowCount, detail_status: 'refused' },
+    blocked: plan.blocked ?? { code: 'review_detail_limit', message },
+  }
 }

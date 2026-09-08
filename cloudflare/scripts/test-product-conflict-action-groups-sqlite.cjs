@@ -200,11 +200,47 @@ async function main() {
   assert.equal(d1.db.prepare("SELECT COUNT(*) n FROM product_conflict_action_reviews WHERE request_id='atomic_failure_001'").get().n, 0)
   assert.equal(d1.db.prepare("SELECT COUNT(*) n FROM product_conflict_action_groups WHERE review_id NOT IN (SELECT id FROM product_conflict_action_reviews)").get().n, 0)
   assert.equal((await post(app, body, { id: 1, noMerge: true })).status, 403)
+
+  for (let index = 0; index < 8; index += 1) d1.db.prepare(`INSERT INTO product_conflict_action_reviews
+    (id,actor_id,request_id,request_digest,manifest_version,resolution_version,draft_digest,status,
+     requested_group_count,actionable_group_count,blocked_group_count,total_member_count,expires_at)
+    VALUES(@id,777,@requestId,'digest',1,2,'draft','draft',1,1,0,2,@expiresAt)`).run({
+    id: `cap-${index}`, requestId: `cap-request-${index}`, expiresAt: '2099-01-01T00:00:00.000Z',
+  })
+  const capped = await post(app, { ...body, client_request_id: 'actor_cap_request_009' }, { id: 777, username: 'capped' })
+  assert.equal(capped.status, 409); assert.equal(capped.body.code, 'review_limit_reached')
+
+  d1.db.prepare('UPDATE product_conflict_action_reviews SET expires_at=? WHERE id=?').run('2000-01-01T00:00:00.000Z', response.body.review_id)
+  const expired = await get(app, response.body.review_id)
+  assert.equal(expired.status, 410); assert.equal(expired.body.code, 'review_expired')
+  assert.equal((await post(app, body)).status, 410, 'expired request ids cannot silently become a fresh draft')
+  const replacement = await post(app, { ...body, client_request_id: 'replacement_review_001' })
+  assert.equal(replacement.status, 200)
+  assert.equal(d1.db.prepare('SELECT COUNT(*) n FROM product_conflict_action_reviews WHERE id=?').get(response.body.review_id).n, 0, 'a later preview reaps expired drafts')
   assert.ok(controls.maxBindings <= 80, `max observed bindings ${controls.maxBindings}`)
   assert.ok(controls.maxCompoundTerms <= 5, `max compound terms ${controls.maxCompoundTerms}`)
   assert.ok(controls.statements <= 700, `request and verification stayed bounded: ${controls.statements}`)
   assert.ok(controls.maxBatchStatements < 100, `atomic receipt batch stayed compact: ${controls.maxBatchStatements}`)
-  console.log(`product conflict action groups sqlite: 34 checks passed; ${controls.statements} statements, ${controls.maxBindings} bindings, ${controls.maxCompoundTerms} compound terms`)
+  {
+    const { d1: fanoutDb, groups: fanoutGroups } = seed(1)
+    fanoutDb.db.exec(`WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<10000)
+      INSERT INTO product_batches(id,variant_product_id,batch_key,batch_number,is_active)
+      SELECT 200000+x,10000,printf('fanout-%05d',x),x,1 FROM n;
+      WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<10000)
+      INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) SELECT 200000+x,1,1 FROM n;`)
+    const { app: fanoutApp, controls: fanoutControls } = loadRoute(fanoutDb)
+    const fanout = await post(fanoutApp, { manifest_version: 1, resolution_version: 2, client_request_id: 'fanout_review_10000', merge_groups: fanoutGroups, remove_rows: [] })
+    assert.equal(fanout.status, 200)
+    assert.equal(fanout.body.counts.actionable_groups, 0)
+    assert.equal(fanout.body.counts.blocked_groups, 1)
+    assert.equal(fanout.body.page.groups[0].blocked.code, 'review_detail_limit')
+    assert.equal(fanout.body.page.groups[0].lots.detail_row_count, 10002)
+    assert.equal(fanout.body.page.groups[0].lots.detail_status, 'refused')
+    assert.equal(fanout.body.page.groups[0].lots.rows.length, 0)
+    assert.ok(Buffer.byteLength(JSON.stringify(fanout.body.page.groups[0])) < 64 * 1024)
+    assert.ok(fanoutControls.statements < 20, 'fanout is counted then refused without loading every lot row')
+  }
+  console.log(`product conflict action groups sqlite: 51 checks passed; ${controls.statements} statements, ${controls.maxBindings} bindings, ${controls.maxCompoundTerms} compound terms`)
 }
 
 main().catch((error) => { console.error(error); process.exit(1) })
