@@ -13,6 +13,11 @@ export const PRODUCT_CONFLICT_ACTION_MAX_ACTIVE_DRAFTS = 8
 export const PRODUCT_CONFLICT_ACTION_MAX_LOT_ROWS_PER_GROUP = 1000
 export const PRODUCT_CONFLICT_ACTION_MAX_LOT_ROWS_PER_REVIEW = 10000
 export const PRODUCT_CONFLICT_ACTION_MAX_GROUP_DETAIL_BYTES = 512 * 1024
+export const PRODUCT_CONFLICT_ACTION_MAX_GROUP_SOURCE_BYTES = 384 * 1024
+export const PRODUCT_CONFLICT_ACTION_MAX_REVIEW_DETAIL_BYTES = 16 * 1024 * 1024
+export const PRODUCT_CONFLICT_ACTION_MAX_GROUP_KEY_BYTES = 240
+export const PRODUCT_CONFLICT_ACTION_MAX_GROUP_KEYS_BYTES = 256 * 1024
+export const PRODUCT_CONFLICT_ACTION_PREVIEW_BODY_BYTES = 4 * 1024 * 1024
 
 export type ProductConflictActionGroupInput = { group_key: string; member_ids: number[] }
 export type ProductConflictActionPreviewRequest = {
@@ -50,6 +55,7 @@ export type ProductConflictActionGroupPlan = {
   economics: ProductMergeEconomics
   stock: { rows: ProductConflictActionStockRow[]; projected_by_branch: Array<{ branch_id: number; branch_name: string | null; quantity: number }> }
   lots: { rows: ProductConflictActionLotRow[]; projected_quantity: number; count: number; detail_row_count: number; detail_status: 'complete' | 'refused' }
+  detail_status: 'complete' | 'refused'
   blocked: ProductConflictActionBlocker | null
 }
 
@@ -67,7 +73,7 @@ function exactKeys(value: Record<string, unknown>, allowed: readonly string[], p
 }
 
 function groupKey(value: unknown, path: string): string {
-  if (typeof value !== 'string' || !value.trim() || value.trim().length > 240 || /[\u0000-\u001f]/.test(value)) {
+  if (typeof value !== 'string' || !value.trim() || new TextEncoder().encode(value.trim()).length > PRODUCT_CONFLICT_ACTION_MAX_GROUP_KEY_BYTES || /[\u0000-\u001f]/.test(value)) {
     throw new ProductConflictMergeValidationError(`${path} must be a non-empty bounded string.`)
   }
   return value.trim()
@@ -103,10 +109,15 @@ export function parseProductConflictActionPreviewRequest(value: unknown): Produc
   }
   const seenKeys = new Set<string>()
   const uniqueMembers = new Set<number>()
+  let groupKeyBytes = 0
   const mergeGroups = root.merge_groups.map((candidate, index): ProductConflictActionGroupInput => {
     const item = asRecord(candidate, `merge_groups[${index}]`)
     exactKeys(item, ['group_key', 'member_ids'], `merge_groups[${index}]`)
     const key = groupKey(item.group_key, `merge_groups[${index}].group_key`)
+    groupKeyBytes += new TextEncoder().encode(key).length
+    if (groupKeyBytes > PRODUCT_CONFLICT_ACTION_MAX_GROUP_KEYS_BYTES) {
+      throw new ProductConflictMergeValidationError(`The combined group_key payload must not exceed ${PRODUCT_CONFLICT_ACTION_MAX_GROUP_KEYS_BYTES} UTF-8 bytes.`)
+    }
     if (seenKeys.has(key)) throw new ProductConflictMergeValidationError('group_key values must be unique.')
     seenKeys.add(key)
     if (!Array.isArray(item.member_ids) || item.member_ids.length < 2 || item.member_ids.length > PRODUCT_CONFLICT_ACTION_MAX_MEMBERS_PER_GROUP) {
@@ -226,6 +237,7 @@ export function buildProductConflictActionGroupPlans(
       economics,
       stock: { rows: stockRows, projected_by_branch: [...projected.values()].sort((a, b) => a.branch_id - b.branch_id) },
       lots: { rows: lotRows, projected_quantity: lotRows.reduce((sum, row) => sum + Number(row.quantity || 0), 0), count: new Set(lotRows.map((row) => row.batch_id)).size, detail_row_count: lotRows.length, detail_status: 'complete' },
+      detail_status: 'complete',
       blocked,
     }
   })
@@ -235,10 +247,19 @@ export function refuseProductConflictActionGroupDetail(
   plan: ProductConflictActionGroupPlan,
   detailRowCount: number,
   message = 'This group has too much lot history for one bounded review. Review it separately.',
+  compact = false,
 ): ProductConflictActionGroupPlan {
   return {
     ...plan,
+    ...(compact ? {
+      members: plan.members.map((member) => ({ id: member.id, detail_status: 'refused' })),
+      options: { barcode_source_ids: [], category_source_ids: [], brand_source_ids: [], unit_source_ids: [] },
+      stock: { rows: [], projected_by_branch: [] },
+      eligibility_basis: null,
+      eligibility_value: null,
+    } : {}),
     lots: { rows: [], projected_quantity: 0, count: 0, detail_row_count: detailRowCount, detail_status: 'refused' },
-    blocked: plan.blocked ?? { code: 'review_detail_limit', message },
+    detail_status: 'refused',
+    blocked: { code: 'review_detail_limit', message },
   }
 }

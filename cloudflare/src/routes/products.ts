@@ -17,6 +17,7 @@ import { getProductSalesBreakdown } from '../lib/salesAnalytics'
 import { localDateExpr, localMonthExpr } from '../lib/businessDateWindow'
 import { validateUploadedBuffer } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
+import { admitRequestBody } from '../lib/requestBodyGuard'
 import { audit } from '../lib/audit'
 import { canonicalProductBarcode, findDuplicateProductGroups, findPossiblySameProductClusters, identityBarcodeKey, identityBarcodeKeySql, normalizeProductClusterKey, pickSameIdentityRow, productsShareExactIdentity, resolveProductIdentityEdit } from '../lib/productIdentity'
 import { compareCosts, normalizeProductGroupName } from '../lib/productDetailRule'
@@ -46,8 +47,11 @@ import {
   PRODUCT_CONFLICT_ACTION_READ_CHUNK,
   PRODUCT_CONFLICT_ACTION_MAX_ACTIVE_DRAFTS,
   PRODUCT_CONFLICT_ACTION_MAX_GROUP_DETAIL_BYTES,
+  PRODUCT_CONFLICT_ACTION_MAX_GROUP_SOURCE_BYTES,
   PRODUCT_CONFLICT_ACTION_MAX_LOT_ROWS_PER_GROUP,
   PRODUCT_CONFLICT_ACTION_MAX_LOT_ROWS_PER_REVIEW,
+  PRODUCT_CONFLICT_ACTION_MAX_REVIEW_DETAIL_BYTES,
+  PRODUCT_CONFLICT_ACTION_PREVIEW_BODY_BYTES,
   buildProductConflictActionGroupPlans,
   canonicalizeProductConflictActionGroups,
   isProductConflictActionPreviewRequest,
@@ -4981,27 +4985,82 @@ async function productConflictActionReviewResponse(db: ReturnType<typeof getDb>,
   }
 }
 
-async function readProductConflictActionInputs(db: ReturnType<typeof getDb>, ids: number[]) {
-  const products: ProductConflictActionProductRow[] = []
-  const stock: ProductConflictActionStockRow[] = []
-  const lots: ProductConflictActionLotRow[] = []
+type ProductConflictActionInputStats = {
+  compactProducts: ProductConflictActionProductRow[]
+  productBytesById: Map<number, number>
+  stockRowsByProductId: Map<number, number>
+  stockBytesByProductId: Map<number, number>
+  lotDetailRowsByProductId: Map<number, number>
+  lotBytesByProductId: Map<number, number>
+}
+
+function productConflictActionMeasuredBytes(value: unknown): number {
+  const measured = Number(value)
+  return Number.isSafeInteger(measured) && measured > 0 ? measured : 0
+}
+
+async function readProductConflictActionInputStats(db: ReturnType<typeof getDb>, ids: number[]): Promise<ProductConflictActionInputStats> {
+  const compactProducts: ProductConflictActionProductRow[] = []
+  const productBytesById = new Map<number, number>()
+  const stockRowsByProductId = new Map<number, number>()
+  const stockBytesByProductId = new Map<number, number>()
   const lotDetailRowsByProductId = new Map<number, number>()
+  const lotBytesByProductId = new Map<number, number>()
   for (let offset = 0; offset < ids.length; offset += PRODUCT_CONFLICT_ACTION_READ_CHUNK) {
     const chunk = ids.slice(offset, offset + PRODUCT_CONFLICT_ACTION_READ_CHUNK)
     const { sql, params } = buildInClause('reviewProduct', chunk)
-    products.push(...await db.prepare(`SELECT id,name,barcode,category,brand,unit,image_path,is_active,COALESCE(is_group,0) AS is_group,updated_at,
-      cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,wholesale_price_usd,wholesale_price_khr
-      FROM products WHERE id IN (${sql}) ORDER BY id`).all<ProductConflictActionProductRow>(params))
-    stock.push(...await db.prepare(`SELECT bs.product_id,bs.branch_id,b.name AS branch_name,bs.quantity
-      FROM branch_stock bs LEFT JOIN branches b ON b.id=bs.branch_id WHERE bs.product_id IN (${sql})
-      ORDER BY bs.product_id,bs.branch_id`).all<ProductConflictActionStockRow>(params))
-    const counts = await db.prepare(`SELECT pb.variant_product_id AS product_id,COUNT(*) AS detail_rows
+    const productStats = await db.prepare(`SELECT id,is_active,COALESCE(is_group,0) AS is_group,
+      cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,wholesale_price_usd,wholesale_price_khr,
+      length(CAST(COALESCE(name,'') AS BLOB))+length(CAST(COALESCE(barcode,'') AS BLOB))+
+      length(CAST(COALESCE(category,'') AS BLOB))+length(CAST(COALESCE(brand,'') AS BLOB))+
+      length(CAST(COALESCE(unit,'') AS BLOB))+length(CAST(COALESCE(image_path,'') AS BLOB))+
+      length(CAST(COALESCE(updated_at,'') AS BLOB))+length(CAST(COALESCE(cost_price_usd,'') AS BLOB))+
+      length(CAST(COALESCE(cost_price_khr,'') AS BLOB))+length(CAST(COALESCE(selling_price_usd,'') AS BLOB))+
+      length(CAST(COALESCE(selling_price_khr,'') AS BLOB))+length(CAST(COALESCE(wholesale_price_usd,'') AS BLOB))+
+      length(CAST(COALESCE(wholesale_price_khr,'') AS BLOB)) AS detail_bytes
+      FROM products WHERE id IN (${sql}) ORDER BY id`).all<ProductConflictActionProductRow & { detail_bytes: number }>(params)
+    for (const row of productStats) {
+      const id = Number(row.id)
+      productBytesById.set(id, productConflictActionMeasuredBytes(row.detail_bytes))
+      compactProducts.push({
+        id, name: null, barcode: null, category: null, brand: null, unit: null, image_path: null,
+        is_active: Number(row.is_active), is_group: Number(row.is_group), updated_at: null,
+        cost_price_usd: row.cost_price_usd, cost_price_khr: row.cost_price_khr,
+        selling_price_usd: row.selling_price_usd, selling_price_khr: row.selling_price_khr,
+        wholesale_price_usd: row.wholesale_price_usd, wholesale_price_khr: row.wholesale_price_khr,
+      })
+    }
+    const stockStats = await db.prepare(`SELECT bs.product_id,COUNT(*) AS detail_rows,
+      COALESCE(SUM(length(CAST(COALESCE(bs.branch_id,'') AS BLOB))+
+        length(CAST(COALESCE(b.name,'') AS BLOB))+length(CAST(COALESCE(bs.quantity,'') AS BLOB))),0) AS detail_bytes
+      FROM branch_stock bs LEFT JOIN branches b ON b.id=bs.branch_id
+      WHERE bs.product_id IN (${sql}) GROUP BY bs.product_id ORDER BY bs.product_id`)
+      .all<{ product_id: number; detail_rows: number; detail_bytes: number }>(params)
+    for (const row of stockStats) {
+      const id = Number(row.product_id)
+      stockRowsByProductId.set(id, productConflictActionMeasuredBytes(row.detail_rows))
+      stockBytesByProductId.set(id, productConflictActionMeasuredBytes(row.detail_bytes))
+    }
+    const lotStats = await db.prepare(`SELECT pb.variant_product_id AS product_id,COUNT(*) AS detail_rows,
+      COALESCE(SUM(length(CAST(COALESCE(pb.id,'') AS BLOB))+length(CAST(COALESCE(pb.batch_key,'') AS BLOB))+
+        length(CAST(COALESCE(pb.lot_code,'') AS BLOB))+length(CAST(COALESCE(pb.expiry_date,'') AS BLOB))+
+        length(CAST(COALESCE(pb.received_at,'') AS BLOB))+length(CAST(COALESCE(pb.is_active,'') AS BLOB))+
+        length(CAST(COALESCE(pb.notes,'') AS BLOB))+length(CAST(COALESCE(pb.unit_cost_usd,'') AS BLOB))+
+        length(CAST(COALESCE(pb.received_quantity,'') AS BLOB))+length(CAST(COALESCE(pb.received_branch_id,'') AS BLOB))+
+        length(CAST(COALESCE(pb.received_cost_usd,'') AS BLOB))+length(CAST(COALESCE(pb.supplier_id,'') AS BLOB))+
+        length(CAST(COALESCE(pb.supplier_name,'') AS BLOB))+length(CAST(COALESCE(pb.payment_status,'') AS BLOB))+
+        length(CAST(COALESCE(pb.credit_due_date,'') AS BLOB))+length(CAST(COALESCE(bbs.branch_id,'') AS BLOB))+
+        length(CAST(COALESCE(bbs.quantity,'') AS BLOB))),0) AS detail_bytes
       FROM product_batches pb LEFT JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id
       WHERE pb.variant_product_id IN (${sql}) GROUP BY pb.variant_product_id ORDER BY pb.variant_product_id`)
-      .all<{ product_id: number; detail_rows: number }>(params)
-    for (const row of counts) lotDetailRowsByProductId.set(Number(row.product_id), Number(row.detail_rows) || 0)
+      .all<{ product_id: number; detail_rows: number; detail_bytes: number }>(params)
+    for (const row of lotStats) {
+      const id = Number(row.product_id)
+      lotDetailRowsByProductId.set(id, productConflictActionMeasuredBytes(row.detail_rows))
+      lotBytesByProductId.set(id, productConflictActionMeasuredBytes(row.detail_bytes))
+    }
   }
-  return { products, stock, lots, lotDetailRowsByProductId }
+  return { compactProducts, productBytesById, stockRowsByProductId, stockBytesByProductId, lotDetailRowsByProductId, lotBytesByProductId }
 }
 
 function productConflictActionReviewExpired(review: ProductConflictActionReviewRow, now = Date.now()): boolean {
@@ -5014,10 +5073,22 @@ async function expireProductConflictActionReview(db: ReturnType<typeof getDb>, r
     WHERE id=@reviewId AND actor_id=@actorId AND status='draft'`).run({ reviewId: review.id, actorId: review.actor_id })
 }
 
-async function readBoundedProductConflictActionLots(db: ReturnType<typeof getDb>, ids: number[]) {
+async function readBoundedProductConflictActionDetails(db: ReturnType<typeof getDb>, ids: number[], lotIds: number[]) {
+  const products: ProductConflictActionProductRow[] = []
+  const stock: ProductConflictActionStockRow[] = []
   const lots: ProductConflictActionLotRow[] = []
   for (let offset = 0; offset < ids.length; offset += PRODUCT_CONFLICT_ACTION_READ_CHUNK) {
     const chunk = ids.slice(offset, offset + PRODUCT_CONFLICT_ACTION_READ_CHUNK)
+    const { sql, params } = buildInClause('reviewLotProduct', chunk)
+    products.push(...await db.prepare(`SELECT id,name,barcode,category,brand,unit,image_path,is_active,COALESCE(is_group,0) AS is_group,updated_at,
+      cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,wholesale_price_usd,wholesale_price_khr
+      FROM products WHERE id IN (${sql}) ORDER BY id`).all<ProductConflictActionProductRow>(params))
+    stock.push(...await db.prepare(`SELECT bs.product_id,bs.branch_id,b.name AS branch_name,bs.quantity
+      FROM branch_stock bs LEFT JOIN branches b ON b.id=bs.branch_id WHERE bs.product_id IN (${sql})
+      ORDER BY bs.product_id,bs.branch_id`).all<ProductConflictActionStockRow>(params))
+  }
+  for (let offset = 0; offset < lotIds.length; offset += PRODUCT_CONFLICT_ACTION_READ_CHUNK) {
+    const chunk = lotIds.slice(offset, offset + PRODUCT_CONFLICT_ACTION_READ_CHUNK)
     const { sql, params } = buildInClause('reviewLotProduct', chunk)
     lots.push(...await db.prepare(`SELECT pb.variant_product_id AS product_id,pb.id AS batch_id,pb.batch_key,pb.lot_code,pb.expiry_date,pb.received_at,
       pb.is_active,pb.notes,pb.unit_cost_usd,pb.received_quantity,pb.received_branch_id,pb.received_cost_usd,
@@ -5025,7 +5096,7 @@ async function readBoundedProductConflictActionLots(db: ReturnType<typeof getDb>
       FROM product_batches pb LEFT JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id
       WHERE pb.variant_product_id IN (${sql}) ORDER BY pb.variant_product_id,pb.id,bbs.branch_id`).all<ProductConflictActionLotRow>(params))
   }
-  return lots
+  return { products, stock, lots }
 }
 
 async function createProductConflictActionReview(
@@ -5033,29 +5104,60 @@ async function createProductConflictActionReview(
   request: ReturnType<typeof parseProductConflictActionPreviewRequest>, requestDigest: string,
 ) {
   const ids = [...new Set(request.merge_groups.flatMap((group) => group.member_ids))].sort((a, b) => a - b)
-  const inputs = await readProductConflictActionInputs(db, ids)
-  const detailRefusals = new Map<string, number>()
+  const inputStats = await readProductConflictActionInputStats(db, ids)
+  const detailRefusals = new Map<string, { lotRows: number; message: string; compact: boolean }>()
   const detailAllowedIds = new Set<number>()
+  const lotAllowedIds = new Set<number>()
   let retainedDetailRows = 0
+  let retainedDetailBytes = 0
   for (const group of canonicalizeProductConflictActionGroups(request.merge_groups)) {
-    const detailRows = group.member_ids.reduce((sum, id) => sum + (inputs.lotDetailRowsByProductId.get(id) || 0), 0)
-    if (detailRows > PRODUCT_CONFLICT_ACTION_MAX_LOT_ROWS_PER_GROUP
-      || retainedDetailRows + detailRows > PRODUCT_CONFLICT_ACTION_MAX_LOT_ROWS_PER_REVIEW) {
-      detailRefusals.set(group.group_key, detailRows)
+    const detailRows = group.member_ids.reduce((sum, id) => sum + (inputStats.lotDetailRowsByProductId.get(id) || 0), 0)
+    const productBytes = group.member_ids.reduce((sum, id) => sum + (inputStats.productBytesById.get(id) || 0), 0)
+    const stockRows = group.member_ids.reduce((sum, id) => sum + (inputStats.stockRowsByProductId.get(id) || 0), 0)
+    const stockBytes = group.member_ids.reduce((sum, id) => sum + (inputStats.stockBytesByProductId.get(id) || 0), 0)
+    const lotBytes = group.member_ids.reduce((sum, id) => sum + (inputStats.lotBytesByProductId.get(id) || 0), 0)
+    // JSON escaping can expand one source byte to six bytes; fixed row allowances cover field names and punctuation.
+    const baseEstimatedBytes = 6 * (productBytes + stockBytes) + group.member_ids.length * 512 + stockRows * 192
+    const lotEstimatedBytes = 6 * lotBytes + detailRows * 640
+    const compact = baseEstimatedBytes > PRODUCT_CONFLICT_ACTION_MAX_GROUP_SOURCE_BYTES
+      || retainedDetailBytes + baseEstimatedBytes > PRODUCT_CONFLICT_ACTION_MAX_REVIEW_DETAIL_BYTES
+    const refuseLots = detailRows > PRODUCT_CONFLICT_ACTION_MAX_LOT_ROWS_PER_GROUP
+      || retainedDetailRows + detailRows > PRODUCT_CONFLICT_ACTION_MAX_LOT_ROWS_PER_REVIEW
+      || baseEstimatedBytes + lotEstimatedBytes > PRODUCT_CONFLICT_ACTION_MAX_GROUP_SOURCE_BYTES
+      || retainedDetailBytes + baseEstimatedBytes + lotEstimatedBytes > PRODUCT_CONFLICT_ACTION_MAX_REVIEW_DETAIL_BYTES
+    if (compact) {
+      detailRefusals.set(group.group_key, { lotRows: detailRows, message: 'This group detail is too large for one bounded review. Review it separately.', compact: true })
+    } else if (refuseLots) {
+      retainedDetailBytes += baseEstimatedBytes
+      group.member_ids.forEach((id) => detailAllowedIds.add(id))
+      detailRefusals.set(group.group_key, { lotRows: detailRows, message: 'This group has too much lot history for one bounded review. Review it separately.', compact: false })
     } else {
       retainedDetailRows += detailRows
-      group.member_ids.forEach((id) => detailAllowedIds.add(id))
+      retainedDetailBytes += baseEstimatedBytes + lotEstimatedBytes
+      group.member_ids.forEach((id) => { detailAllowedIds.add(id); lotAllowedIds.add(id) })
     }
   }
-  inputs.lots.push(...await readBoundedProductConflictActionLots(db, [...detailAllowedIds].sort((a, b) => a - b)))
-  const rawPlans = buildProductConflictActionGroupPlans(request.merge_groups, inputs.products, inputs.stock, inputs.lots)
-    .map((plan) => detailRefusals.has(plan.group_key)
-      ? refuseProductConflictActionGroupDetail(plan, detailRefusals.get(plan.group_key) || 0)
-      : plan)
-    .map((plan) => {
-      if (new TextEncoder().encode(canonicalProductConflictJson(plan)).length <= PRODUCT_CONFLICT_ACTION_MAX_GROUP_DETAIL_BYTES) return plan
-      return refuseProductConflictActionGroupDetail(plan, plan.lots.detail_row_count, 'This group detail is too large for one bounded review. Review it separately.')
-    })
+  const inputs = await readBoundedProductConflictActionDetails(db,
+    [...detailAllowedIds].sort((a, b) => a - b), [...lotAllowedIds].sort((a, b) => a - b))
+  const productsById = new Map(inputStats.compactProducts.map((row) => [Number(row.id), row]))
+  inputs.products.forEach((row) => productsById.set(Number(row.id), row))
+  const builtPlans = buildProductConflictActionGroupPlans(request.merge_groups, [...productsById.values()], inputs.stock, inputs.lots)
+  const rawPlans: ProductConflictActionGroupPlan[] = []
+  let persistedDetailBytes = 0
+  for (const plan of builtPlans) {
+    const refusal = detailRefusals.get(plan.group_key)
+    let bounded = refusal ? refuseProductConflictActionGroupDetail(plan, refusal.lotRows, refusal.message, refusal.compact) : plan
+    let bytes = new TextEncoder().encode(canonicalProductConflictJson(bounded)).length
+    if (bytes > PRODUCT_CONFLICT_ACTION_MAX_GROUP_DETAIL_BYTES || persistedDetailBytes + bytes > PRODUCT_CONFLICT_ACTION_MAX_REVIEW_DETAIL_BYTES) {
+      bounded = refuseProductConflictActionGroupDetail(plan, plan.lots.detail_row_count, 'This group detail is too large for one bounded review. Review it separately.', true)
+      bytes = new TextEncoder().encode(canonicalProductConflictJson(bounded)).length
+    }
+    if (bytes > PRODUCT_CONFLICT_ACTION_MAX_GROUP_DETAIL_BYTES || persistedDetailBytes + bytes > PRODUCT_CONFLICT_ACTION_MAX_REVIEW_DETAIL_BYTES) {
+      throw new ProductConflictMergeValidationError('The selected conflict review metadata exceeds the bounded review size.', 'review_detail_limit', 413)
+    }
+    persistedDetailBytes += bytes
+    rawPlans.push(bounded)
+  }
   const plans = []
   for (const plan of rawPlans) plans.push({ ...plan, state_digest: await productConflictSha256({ version: 2, group: plan }) })
   const reviewId = crypto.randomUUID()
@@ -5114,13 +5216,15 @@ app.post('/possible-duplicates/merge-batch/preview', async (c) => {
   if (getActionTier(user, 'products', 'merge_duplicates') !== 'full') {
     return c.json({ success: false, code: 'permission_denied', error: 'You do not have permission to perform this action' }, 403)
   }
+  const bodyRejection = await admitRequestBody(c, PRODUCT_CONFLICT_ACTION_PREVIEW_BODY_BYTES)
+  if (bodyRejection) return bodyRejection
   const raw = await c.req.json().catch(() => null)
   if (isProductConflictActionPreviewRequest(raw)) {
     let request
     try { request = parseProductConflictActionPreviewRequest(raw) }
     catch (error) {
       const validation = error instanceof ProductConflictMergeValidationError ? error : new ProductConflictMergeValidationError('The selected conflict review request is invalid.')
-      return c.json({ success: false, code: validation.code, error: validation.message }, validation.status as 400 | 409)
+      return c.json({ success: false, code: validation.code, error: validation.message }, validation.status as 400 | 409 | 413)
     }
     const db = getDb(c.env)
     const requestDigest = await productConflictSha256(request)
@@ -5153,6 +5257,9 @@ app.post('/possible-duplicates/merge-batch/preview', async (c) => {
           FROM product_conflict_action_reviews WHERE actor_id=@actorId AND request_id=@requestId`)
           .get<ProductConflictActionReviewRow>({ actorId: user.id, requestId: request.client_request_id })
         if (!review || review.request_digest !== requestDigest) {
+          if (error instanceof ProductConflictMergeValidationError) {
+            return c.json({ success: false, code: error.code, error: error.message }, error.status as 400 | 409 | 413)
+          }
           const concurrentActive = await db.prepare(`SELECT COUNT(*) AS count FROM product_conflict_action_reviews
             WHERE actor_id=@actorId AND status='draft' AND expires_at>@now`)
             .get<{ count: number }>({ actorId: user.id, now: now.toISOString() })
