@@ -1,0 +1,138 @@
+{
+  "schema_version": 1,
+  "task_id": "f65-conflicts-frontend-phase1",
+  "agent": {
+    "provider": "codex",
+    "role": "implementation-worker",
+    "session_id": "minimize_impl"
+  },
+  "status": "completed",
+  "summary": "Completed the bounded F65 Phase 1 frontend: an N-row, actor-scoped, durable paged group review alongside the unchanged legacy pair merge. It shows original member catalog, stock and lot provenance beside server-computed resolved economics and projections, retains explicit source choices across pages, reports canonical progress, and keeps Apply and independent Remove unavailable.",
+  "base_sha": "0d340a183297d22402a50bc3c621440f1964bc47",
+  "head_sha": "ad1ab8c75403e4f712843c1dbf177dd6dca381ac",
+  "changes": [
+    "Added the exact resolution-v2 preview request/response types and read-only POST/GET transport without offline write replay.",
+    "Added N-row request construction, stable member ordering, explicit source-choice validation, blank-value preservation, and canonical paged-progress helpers.",
+    "Added a separate global group-review action and modal while preserving the existing exact-pair preview/apply flow.",
+    "Rendered every member's catalog identity, prices, branch stock, lot/batch identity, supplier, received/expiry dates, received quantity/cost, payment/due status, and active state.",
+    "Rendered server-computed distinct-nonzero mean cost, maximum prices, projected branch stock, lot count and projected quantity; added explicit keeper and barcode/category/brand/unit source selectors.",
+    "Added bilingual Phase 1 wording, disabled Apply and Remove affordances, and kept non-destructive Dismiss visibly distinct from Remove.",
+    "Added focused contract, paging, transport-boundary, source-choice, component, and legacy coexistence assertions."
+  ],
+  "commits": [
+    "363426731ed49b2d70f7f5d5dadbb9b61f610b22",
+    "4012fe0c8d7666204b4de45f44b4c55a43eb1517",
+    "2e5409e53e1f7be039c2f7e6ad20222534ab8991",
+    "a88f1ec69b0556fb6a8011d89ffbeb8b8e3daf77",
+    "549d0088dc486b9a61f508b158a9694fcadb03da",
+    "131292ed42425e12e38e92bdb7c7c8915c1b452c",
+    "ad1ab8c75403e4f712843c1dbf177dd6dca381ac"
+  ],
+  "evidence": [
+    {
+      "claim": "The frontend is typed to the implemented Phase 1 response and paging contract.",
+      "source": "git",
+      "locator": "frontend/src/api/productWriteTransport.ts at ad1ab8c7; backend e2f5489b cloudflare/src/routes/products.ts:4925-5132",
+      "observed": "Both sides use manifest_version 1, resolution_version 2, actor-scoped review_id, draft_digest, draft status, requested/actionable/blocked/member counts, inclusive decimal cursor, next_cursor, limit and the frozen group detail shape."
+    },
+    {
+      "claim": "The real browser paged one saved review through a Worker interruption without performing a product mutation.",
+      "source": "independent playwright_tester /root/expense_version_guard/f65_phase1_browser",
+      "locator": "actual Chrome against frontend 131292ed42425e12e38e92bdb7c7c8915c1b452c and backend e2f5489b9be9a07932edc0486822a9210fbf7fd8",
+      "observed": "One preview POST returned 200 with review 75deedd1-7841-495c-9666-466559ddf212, 52 requested/51 actionable/1 blocked/105 members. After a local Worker restart, page 2 GET returned 200 and rendered loaded 52/52, Page 2/2 Complete. Apply/remove/delete request count was zero."
+    },
+    {
+      "claim": "The browser showed complete N-row facts and correct resolved projections.",
+      "source": "independent playwright_tester /root/expense_version_guard/f65_phase1_browser",
+      "locator": "N=3 group on review page 2",
+      "observed": "Rows 1001-1003 showed distinct barcodes, categories, brands and units; Warehouse 1+1+1 and Shop 2+3+4; LOT-A/B/C supplier, received, expiry, quantity, cost, payment/due and active facts. After showed $5 cost, $12 selling, $9 wholesale, Warehouse 3, Shop 9 and 3 lots/projected quantity 9."
+    },
+    {
+      "claim": "Explicit choices persist across review pages and the mobile modal is contained.",
+      "source": "independent playwright_tester /root/expense_version_guard/f65_phase1_browser",
+      "locator": "headed Chrome 390x844, frontend 131292ed",
+      "observed": "Keeper #1002, barcode #1003, category #1001, brand #1002 and unit #1003 remained selected after Previous then Next. Document and modal clientWidth/scrollWidth were both 390/390. Apply unavailable and Remove unavailable were AX-disabled."
+    },
+    {
+      "claim": "Legacy behavior remains available and separate.",
+      "source": "frontend source plus independent browser",
+      "locator": "frontend/src/components/products/ProductDuplicatesTab.tsx",
+      "observed": "The browser showed Review selected groups, Merge selected · exact pairs, Dismiss selected and disabled Remove unavailable as distinct controls; the original legacy pair state machine and transport remain present."
+    }
+  ],
+  "verification": [
+    {
+      "command": "node --experimental-strip-types tests/selectedConflictActionReview.test.ts; node --experimental-strip-types tests/productDuplicatesTab.test.ts; node --experimental-strip-types tests/selectedConflictMergeReview.test.ts; node --experimental-strip-types tests/selectedConflictMerge.test.ts",
+      "scope": "F65 request construction, explicit choices, paging, Product Duplicates integration, review rendering and legacy merge utilities",
+      "exit_code": 0,
+      "expected": "All focused behavior and contract assertions pass.",
+      "observed": "All four tests passed; Product Duplicates reported all checks passed."
+    },
+    {
+      "command": "node --experimental-strip-types tests/productWriteTransport.test.ts; node --experimental-strip-types tests/mergeRulesParity.test.ts; node --experimental-strip-types tests/mergeStockChoice.test.ts",
+      "scope": "Related legacy product merge transport, identity/economics parity and stock-choice behavior",
+      "exit_code": 0,
+      "expected": "The parallel Phase 1 path does not weaken legacy selected-pair behavior.",
+      "observed": "Transport PASS, merge rules 13 checks passed, and all merge stock-choice tests passed."
+    },
+    {
+      "command": "npm run typecheck",
+      "scope": "frontend exact ad1ab8c7",
+      "exit_code": 0,
+      "expected": "No TypeScript diagnostics.",
+      "observed": "tsc --noEmit completed without output."
+    },
+    {
+      "command": "npm run verify:i18n",
+      "scope": "frontend bilingual keys through 549d0088",
+      "exit_code": 0,
+      "expected": "Every referenced key resolves in both packs.",
+      "observed": "verify:i18n OK: 5483 pack keys, 569 source files."
+    },
+    {
+      "command": "npm run build",
+      "scope": "frontend exact ad1ab8c7",
+      "exit_code": 0,
+      "expected": "Vite production build completes.",
+      "observed": "1106 modules transformed; build completed in 47.14s."
+    },
+    {
+      "command": "node scripts/test-product-conflict-action-groups-sqlite.cjs",
+      "scope": "independent frozen Phase 1 backend SQLite contract at e2f5489b",
+      "exit_code": 0,
+      "expected": "N-row durable review route and persistence checks pass.",
+      "observed": "34 checks passed; 177 statements, 80 bindings, 1 compound term."
+    },
+    {
+      "command": "node scripts/test-product-conflict-action-groups-native.cjs",
+      "scope": "independent frozen Phase 1 native D1 contract at e2f5489b",
+      "exit_code": 0,
+      "expected": "The actual D1 limits accept the bounded review path.",
+      "observed": "12 groups/36 members passed; 9 statements, 36 bindings, 1 compound term."
+    },
+    {
+      "command": "node C:/Users/mrkl6/Downloads/business-os-v1/agent-team/scripts/team-state.mjs validate-task --file outputs/takeover-20260908/f65-frontend-phase1-task.json",
+      "scope": "durable task envelope",
+      "exit_code": 0,
+      "expected": "Task contract validates.",
+      "observed": "Task envelope valid: f65-conflicts-frontend-phase1."
+    }
+  ],
+  "risks": [
+    "The Phase 1 choices are retained while the modal is open and guarded against accidental close, but are not finalized or persisted as resolution choices because the Phase 2 finalize contract is intentionally outside this slice.",
+    "The repository's standard local migration wrapper batched pending migrations into a SQLite compound-term limit during the independent browser setup; the browser tester applied the same local migrations one transaction at a time. This did not affect the production source or remote data."
+  ],
+  "blockers": [],
+  "not_done": [
+    "Resolution-v2 finalize and apply are not implemented or enabled in this Phase 1 frontend.",
+    "Independent Remove, including delete authority, stock clearing, history preservation, audit and same-id Undo, is not implemented or enabled.",
+    "No production action, deployment, migration, remote write or data change was performed."
+  ],
+  "handoff": "Replay code commits 36342673, 4012fe0c, a88f1ec6, 549d0088, 131292ed and test-only ad1ab8c7 onto an integration containing backend Phase 1 e2f5489b or its reviewed successor. The docs-only task commit 2e5409e5 is optional. Keep Phase 2 controls disabled until its separate backend implementation and independent verification are complete.",
+  "workspace": {
+    "branch": "codex/f65-conflicts-frontend-phase1-20260908",
+    "worktree": "C:/Users/mrkl6/Downloads/bos-f65-conflicts-frontend-phase1-20260908",
+    "dirty_before": [],
+    "dirty_after": []
+  }
+}
