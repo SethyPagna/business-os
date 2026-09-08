@@ -69,12 +69,16 @@ function loadRoute(nativeDb, realMergeRuntime = false) {
   })
   const permissions = { getActionTier: () => 'full', getPermissionTier: () => 'full', hasPermission: () => true, getMergedPermissions: () => ({}), isAdminControlUser: () => true }
   const actor = loadTs('lib/actorSnapshot.ts')
+  const productDelete = loadTs('lib/productDelete.ts', {
+    './auth': {}, './actorSnapshot': actor, './db': {},
+  })
   const never = () => { throw new Error('unrelated undo branch invoked') }
   const snapshot = realMergeRuntime ? loadTs('lib/productMergeSnapshot.ts', { './db': {} }) : undefined
   const undo = realMergeRuntime ? loadTs('lib/undoAppliers.ts', {
     '../index': {}, './auth': {}, './db': { getDb: () => db }, './audit': { audit: async () => {} },
     '../durable-objects/broadcastHub': { broadcast: async () => {} }, './branchWrites': { branchUpdateStatements: () => [] },
     './permissions': permissions, './actorSnapshot': actor, './productMerge': merge,
+    './productDelete': productDelete,
     './saleBulkStatus': { replaySaleBulkStatus: never },
     './saleBulkUpdate': { BULK_UPDATE_KIND: 'sale.fields.bulk', BULK_CUSTOMER_UPDATE_KIND: 'sale.customer.bulk', replaySaleBulkUpdate: never },
     './returnBulkAction': { RETURN_BULK_ACTION_KIND: 'return.fields.bulk', replayReturnBulkAction: never },
@@ -91,11 +95,12 @@ function loadRoute(nativeDb, realMergeRuntime = false) {
     '../lib/productDetailRule': detail, '../lib/sqlBinding': binding, '../lib/productIdentity': identity, '../lib/productMerge': merge,
     '../lib/productConflictMergeBatch': selected, '../lib/productConflictActionGroups': actionGroups, '../lib/permissions': permissions,
     '../lib/searchMatch': searchMatch,
+    '../lib/productDelete': productDelete,
     ...(realMergeRuntime ? { '../lib/undoAppliers': undo, '../lib/productMergeSnapshot': snapshot, '../lib/actorSnapshot': actor } : {}),
     '../lib/audit': { audit: async () => {} }, '../lib/cache': { bumpVersion: async () => {}, cachedJsonResponse: async () => null, getVersionWithFallback: async () => '1' },
     '../durable-objects/broadcastHub': { broadcast: async () => {} },
   })
-  return { app: FakeHono.instance, controls, db: rawCompat, undo }
+  return { app: FakeHono.instance, controls, db: rawCompat, undo, productDelete }
 }
 
 async function main() {
@@ -109,14 +114,17 @@ async function main() {
     await execSql(`
       CREATE TABLE action_history(id INTEGER PRIMARY KEY);
       CREATE TABLE undo_snapshots(id INTEGER PRIMARY KEY);
+      CREATE TABLE pending_actions(id INTEGER PRIMARY KEY);
       CREATE TABLE branches(id INTEGER PRIMARY KEY,name TEXT,is_active INTEGER);
       CREATE TABLE products(id INTEGER PRIMARY KEY,name TEXT,barcode TEXT,category TEXT,categories TEXT,brand TEXT,brands TEXT,brand_compact TEXT,
         unit TEXT,unit_normalized TEXT,image_path TEXT,is_active INTEGER,is_group INTEGER,updated_at TEXT,
-        cost_price_usd REAL,cost_price_khr REAL,selling_price_usd REAL,selling_price_khr REAL,wholesale_price_usd REAL,wholesale_price_khr REAL);
-      CREATE TABLE branch_stock(product_id INTEGER,branch_id INTEGER,quantity REAL,PRIMARY KEY(product_id,branch_id));
+        stock_quantity REAL,rfid_confirmed_qty REAL,cost_price_usd REAL,cost_price_khr REAL,selling_price_usd REAL,selling_price_khr REAL,
+        wholesale_price_usd REAL,wholesale_price_khr REAL);
+      CREATE TABLE branch_stock(product_id INTEGER,branch_id INTEGER,quantity REAL,rfid_confirmed_qty REAL,PRIMARY KEY(product_id,branch_id));
       CREATE TABLE product_batches(id INTEGER PRIMARY KEY,variant_product_id INTEGER,batch_key TEXT,lot_code TEXT,expiry_date TEXT,received_at TEXT,is_active INTEGER,notes TEXT,
-        unit_cost_usd REAL,received_quantity REAL,received_branch_id INTEGER,received_cost_usd REAL,supplier_id INTEGER,supplier_name TEXT,payment_status TEXT,credit_due_date TEXT);
-      CREATE TABLE branch_batch_stock(batch_id INTEGER,branch_id INTEGER,quantity REAL,PRIMARY KEY(batch_id,branch_id));
+        synthetic INTEGER,created_at TEXT,updated_at TEXT,batch_number TEXT,unit_cost_usd REAL,received_quantity REAL,received_branch_id INTEGER,
+        received_cost_usd REAL,supplier_id INTEGER,supplier_name TEXT,payment_status TEXT,credit_due_date TEXT);
+      CREATE TABLE branch_batch_stock(id INTEGER PRIMARY KEY,batch_id INTEGER,branch_id INTEGER,quantity REAL,created_at TEXT,updated_at TEXT,UNIQUE(batch_id,branch_id));
     `)
     await execSql(fs.readFileSync(path.join(__dirname, '..', 'migrations', '0138_product_conflict_action_groups.sql'), 'utf8'))
     const seed = [native.prepare("INSERT INTO branches(id,name,is_active) VALUES(1,'Shop',1)")]

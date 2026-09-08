@@ -1,9 +1,18 @@
 const assert = require('node:assert/strict')
-const { loadRoute, seed, post } = require('./test-product-conflict-action-groups-sqlite.cjs')
+const { loadRoute, loadTs, seed, post } = require('./test-product-conflict-action-groups-sqlite.cjs')
 
 const user = { id: 900, username: 'reviewer' }
 
-async function finalize(app, review, groups, choices = {}) {
+function loadReviewApply(fixture) {
+  return loadTs('lib/reviewApply.ts', {
+    './db': { getDb: () => fixture.db }, './audit': { audit: async () => {} },
+    '../durable-objects/broadcastHub': { broadcast: async () => {} }, './cache': { bumpVersion: async () => {} },
+    './productWrites': {}, './branchWrites': {}, './canonicalBranchIdentity': {}, './permissions': fixture.permissions,
+    './productImagePermission': {}, './auth': {}, './pendingActions': {}, '../index': {}, './productDelete': fixture.productDelete,
+  })
+}
+
+async function finalize(app, review, groups, choices = {}, actor = user) {
   const resolutions = groups.map((group) => ({
     group_key: group.group_key,
     keeper_id: choices.keeper_id ?? group.member_ids[0],
@@ -13,7 +22,7 @@ async function finalize(app, review, groups, choices = {}) {
     unit_source_id: choices.unit_source_id ?? group.member_ids[0],
   }))
   return app.posts.get('/possible-duplicates/merge-batch/reviews/:reviewId/finalize')({
-    env: {}, get: () => user,
+    env: {}, get: () => actor,
     req: { json: async () => ({ manifest_version: 1, resolution_version: 2, review_id: review.review_id,
       draft_digest: review.draft_digest, resolutions }), param: () => review.review_id },
     json: (body, status = 200) => ({ status, body }),
@@ -98,7 +107,7 @@ async function main() {
     })
     assert.equal(review.status, 200)
     const finalized = await finalize(loaded.app, review.body, groups)
-    assert.equal(finalized.status, 200)
+    assert.equal(finalized.status, 200, JSON.stringify(finalized.body))
     const applied = await apply(loaded.app, review.body, finalized.body.manifest_digest)
     assert.equal(applied.status, 200, JSON.stringify(applied.body))
     assert.equal(applied.body.status, 'completed')
@@ -297,6 +306,122 @@ async function main() {
       assert.equal(fixture.d1.db.prepare('SELECT COUNT(*) n FROM action_history').get().n, 0, label)
       assert.equal(fixture.d1.db.prepare('SELECT COUNT(*) n FROM audit_logs').get().n, 0, label)
     }
+  }
+
+  {
+    const { d1 } = seed(1)
+    const loaded = loadRoute(d1, true)
+    const review = await post(loaded.app, {
+      manifest_version: 1, resolution_version: 2, client_request_id: 'remove_only_review_001', merge_groups: [],
+      remove_rows: [{ product_id: 10000, reason: 'Independent duplicate row' }],
+    }, { ...user, noMerge: true })
+    assert.equal(review.status, 200, JSON.stringify(review.body))
+    assert.equal(review.body.counts.requested_groups, 0)
+    assert.equal(review.body.counts.requested_removals, 1)
+    assert.equal(review.body.page.removals[0].batches[0].supplier_name, 'Supplier A')
+    const finalized = await finalize(loaded.app, review.body, [])
+    assert.equal(finalized.status, 200, JSON.stringify(finalized.body))
+    assert.equal(finalized.body.counts.ready_removals, 1)
+    const applied = await apply(loaded.app, review.body, finalized.body.manifest_digest, { ...user, noMerge: true })
+    assert.equal(applied.status, 200, JSON.stringify(applied.body))
+    assert.equal(applied.body.status, 'completed')
+    assert.equal(applied.body.continuation_required, false)
+    assert.equal(applied.body.removals[0].status, 'undo_ready')
+    assert.equal(applied.body.removals[0].undo_availability, 'ready')
+    assert.equal(d1.db.prepare('SELECT is_active FROM products WHERE id=10000').get().is_active, 0)
+    assert.equal(d1.db.prepare('SELECT is_active FROM product_batches WHERE id=99001').get().is_active, 0)
+    assert.deepEqual({ ...d1.db.prepare("SELECT movement_type,quantity FROM inventory_movements WHERE product_id=10000 AND movement_type='write_off'").get() },
+      { movement_type: 'write_off', quantity: 2 })
+    const history = d1.db.prepare("SELECT id,undo_payload FROM action_history WHERE json_extract(undo_payload,'$.applier')='product.remove'").get()
+    const payload = JSON.parse(history.undo_payload)
+    const applier = loaded.undo.resolveUndoApplier(payload)
+    const undone = await applier.run(payload, { env: {}, user, direction: 'undo', historyId: history.id, generation: 0 })
+    assert.equal(undone.complete, true)
+    assert.equal(d1.db.prepare('SELECT is_active FROM products WHERE id=10000').get().is_active, 1)
+    const blockedApply = await apply(loaded.app, review.body, finalized.body.manifest_digest)
+    assert.equal(blockedApply.status, 409)
+    assert.equal(blockedApply.body.code, 'review_reversed')
+    const redoPayload = JSON.parse(d1.db.prepare('SELECT redo_payload FROM action_history WHERE id=?').get(history.id).redo_payload)
+    await applier.run(redoPayload, { env: {}, user, direction: 'redo', historyId: history.id, generation: 1 })
+    const replay = await apply(loaded.app, review.body, finalized.body.manifest_digest)
+    assert.equal(replay.status, 200)
+    assert.equal(replay.body.continuation_required, false)
+  }
+
+  {
+    const { d1 } = seed(1)
+    d1.db.prepare(`INSERT INTO users(id,username,name,password,permissions,is_active)
+      VALUES(900,'requester','Requester','x','{}',1),(903,'approver','Approver','x','{}',1)`).run()
+    const loaded = loadRoute(d1, true)
+    const reviewer = { ...user, noMerge: true, reviewDelete: true }
+    const review = await post(loaded.app, {
+      manifest_version: 1, resolution_version: 2, client_request_id: 'remove_review_tier_001', merge_groups: [],
+      remove_rows: [{ product_id: 10000, reason: 'Needs full delete review' }],
+    }, reviewer)
+    assert.equal(review.status, 200)
+    const finalized = await finalize(loaded.app, review.body, [], {}, reviewer)
+    assert.equal(finalized.status, 200, JSON.stringify(finalized.body))
+    const queued = await apply(loaded.app, review.body, finalized.body.manifest_digest, reviewer)
+    assert.equal(queued.status, 200, JSON.stringify(queued.body))
+    assert.equal(queued.body.status, 'approval_pending')
+    assert.equal(queued.body.approval_required, true)
+    assert.equal(queued.body.continuation_required, false)
+    assert.equal(queued.body.removals[0].status, 'approval_pending')
+    assert.ok(queued.body.removals[0].pending_action_id > 0)
+    assert.equal(d1.db.prepare('SELECT is_active FROM products WHERE id=10000').get().is_active, 1)
+    assert.equal(d1.db.prepare("SELECT COUNT(*) n FROM pending_actions WHERE status='open'").get().n, 1)
+    assert.equal(d1.db.prepare('SELECT COUNT(*) n FROM action_history').get().n, 0)
+    const pending = { ...d1.db.prepare("SELECT * FROM pending_actions WHERE status='open'").get() }
+    const approval = loadReviewApply(loaded)
+    const approver = { id: 903, username: 'approver', name: 'Approver', organization_id: null, role_id: null,
+      permissions: '{}', is_active: 1 }
+    const approved = await approval.applyApprovedPendingAction({}, pending, { id: 903, name: 'Approver' }, approver)
+    assert.equal(approved.pendingActionMarkedAtomically, true)
+    assert.equal(d1.db.prepare('SELECT status FROM pending_actions WHERE id=?').get(pending.id).status, 'approved')
+    assert.equal(d1.db.prepare('SELECT status FROM product_remove_operations WHERE pending_action_id=?').get(pending.id).status, 'undo_ready')
+    assert.equal(d1.db.prepare('SELECT status FROM product_conflict_action_reviews WHERE id=?').get(review.body.review_id).status, 'completed')
+    assert.equal(d1.db.prepare('SELECT is_active FROM products WHERE id=10000').get().is_active, 0)
+  }
+
+  {
+    const { d1 } = seed(7)
+    const loaded = loadRoute(d1, true)
+    const removeRows = Array.from({ length: 13 }, (_, index) => ({ product_id: 10000 + index, reason: `Remove row ${index + 1}` }))
+    const review = await post(loaded.app, { manifest_version: 1, resolution_version: 2,
+      client_request_id: 'remove_thirteen_001', merge_groups: [], remove_rows: removeRows })
+    assert.equal(review.status, 200)
+    const finalized = await finalize(loaded.app, review.body, [])
+    assert.equal(finalized.status, 200)
+    const first = await apply(loaded.app, review.body, finalized.body.manifest_digest)
+    assert.equal(first.status, 200, JSON.stringify(first.body))
+    assert.equal(first.body.removals.length, 12)
+    assert.equal(first.body.continuation_required, true)
+    assert.equal(first.body.counts.pending_removals, 1)
+    const second = await apply(loaded.app, review.body, finalized.body.manifest_digest)
+    assert.equal(second.status, 200)
+    assert.equal(second.body.removals.length, 1)
+    assert.equal(second.body.continuation_required, false)
+    assert.equal(second.body.counts.completed_removals, 13)
+    assert.ok(loaded.controls.statements <= 700)
+    assert.ok(loaded.controls.maxBatchStatements <= 100)
+  }
+
+  {
+    const { d1, groups } = seed(2)
+    const loaded = loadRoute(d1, true)
+    const review = await post(loaded.app, { manifest_version: 1, resolution_version: 2,
+      client_request_id: 'mixed_group_remove_001', merge_groups: [groups[0]],
+      remove_rows: [{ product_id: 10002, reason: 'Remove independent row' }] })
+    assert.equal(review.status, 200)
+    const finalized = await finalize(loaded.app, review.body, [groups[0]])
+    assert.equal(finalized.status, 200)
+    const applied = await apply(loaded.app, review.body, finalized.body.manifest_digest)
+    assert.equal(applied.status, 200, JSON.stringify(applied.body))
+    assert.equal(applied.body.groups[0].processed_folds, 1)
+    assert.equal(applied.body.removals[0].product_id, 10002)
+    assert.equal(applied.body.status, 'completed')
+    assert.equal(applied.body.counts.canonical_groups, 1)
+    assert.equal(applied.body.counts.removal_actions, 1)
   }
 
   console.log('product conflict action apply sqlite: bounded multi-fold/group apply, receipt CAS, exact Undo/Redo checks passed')
