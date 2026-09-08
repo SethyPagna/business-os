@@ -216,6 +216,28 @@ async function main() {
     assert.equal(broadcasts.length, 0)
   })
 
+  for (const expectedUpdatedAt of [undefined, null]) {
+    await check(`deleted row with ${expectedUpdatedAt === null ? 'null' : 'absent'} version does not report a saved edit`, async () => {
+      beforeFeeUpdate = (db) => db.prepare('DELETE FROM fees WHERE id = 1').run()
+      const result = await update({ label: 'lost edit', expectedUpdatedAt })
+      assert.equal(result.status, 404, JSON.stringify(result.body))
+      assert.equal(result.body.error, 'Fee not found')
+      assert.equal(feeUpdateRuns, 1)
+      assert.equal(audits.length, 0)
+      assert.equal(broadcasts.length, 0)
+      assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM fees').get().n, 0)
+    })
+  }
+
+  await check('deleted versioned row returns a conflict without side effects', async () => {
+    beforeFeeUpdate = (db) => db.prepare('DELETE FROM fees WHERE id = 1').run()
+    const result = await update({ label: 'lost edit', expectedUpdatedAt: '2026-09-08T00:00:00.000Z' })
+    assert.equal(result.status, 409, JSON.stringify(result.body))
+    assert.equal(result.body.code, 'write_conflict')
+    assert.equal(audits.length, 0)
+    assert.equal(broadcasts.length, 0)
+  })
+
   console.log(`\n${passed} fee update version-guard checks passed.`)
 }
 
