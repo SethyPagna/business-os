@@ -137,6 +137,7 @@ async function run(){
   const customer=await f.call(sales,'/bulk-update',request(f,{kind:'customer',source_id:1,target_id:3},'customer-request-1'))
   assert.equal(customer.status,200,JSON.stringify(customer))
   assert.deepEqual([customer.body.changedCount,customer.body.unchangedCount],[2,1])
+  assert.equal(f.sql.prepare('SELECT json_extract(undo_payload,\'$.applier\') applier FROM action_history WHERE id=?').get(customer.body.actionHistoryId).applier,'sale.customer.v2.bulk')
   assert.deepEqual(f.sql.prepare('SELECT customer_id,customer_name FROM returns WHERE id=1').get(),{customer_id:3,customer_name:'New'})
   // N21: the sale snapshot must be the DISPLAY address. Copying the column raw,
   // as this writer used to, stores the options JSON, and the sale detail, the
@@ -221,6 +222,9 @@ async function run(){
   const customerOnly=await f.call(sales,'/bulk-update',request(f,{kind:'customer',source_id:1,target_id:3},'customer-permission-1',[1]))
   assert.equal(customerOnly.status,200)
   assert.equal(f.sql.prepare('SELECT json_extract(undo_payload,\'$.applier\') applier FROM action_history WHERE id=?').get(customerOnly.body.actionHistoryId).applier,'sale.customer.single')
+  // Pre-F75 one-sale customer assignments used the shared bulk applier name.
+  // Preserve their historical individual customer authority and replayability.
+  f.sql.prepare("UPDATE action_history SET undo_payload=json_set(undo_payload,'$.applier','sale.customer.bulk'),redo_payload=json_set(redo_payload,'$.applier','sale.customer.bulk') WHERE id=?").run(customerOnly.body.actionHistoryId)
   assert.equal((await replay(f,customerOnly.body.actionHistoryId)).status,200)
   const beforeBulkDenied=snapshot(f)
   const customerBulkDenied=await f.call(sales,'/bulk-update',request(f,{kind:'customer',source_id:1,target_id:3},'customer-bulk-denied-1',[1,2]))
@@ -229,6 +233,6 @@ async function run(){
   const paymentDenied=await f.call(sales,'/bulk-update',request(f,{kind:'payment_method',source:'Cash',target:'Card'},'payment-permission-1',[2]))
   assert.equal(paymentDenied.status,403)
   user={id:1,name:'Admin',username:'admin',role_code:'admin',permissions:{all:true}}
-  console.log('PASS one-customer assignment and replay use individual authority while every true bulk action is refused without sales.bulk')
+  console.log('PASS new and legacy one-customer replay use individual authority while every true bulk action is refused without sales.bulk')
 }
 run().catch(error=>{console.error(error);process.exitCode=1})

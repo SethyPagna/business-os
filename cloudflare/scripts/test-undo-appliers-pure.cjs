@@ -118,6 +118,7 @@ const undoAppliers = loadModule('lib/undoAppliers.ts', (id) => {
   if (id === './saleBulkUpdate') return {
     BULK_UPDATE_KIND: 'sale.fields.bulk',
     BULK_CUSTOMER_UPDATE_KIND: 'sale.customer.bulk',
+    MULTI_CUSTOMER_UPDATE_KIND: 'sale.customer.v2.bulk',
     SINGLE_CUSTOMER_UPDATE_KIND: 'sale.customer.single',
     replaySaleBulkUpdate: async () => { throw new Error('Use the dedicated bulk fixture') },
   }
@@ -439,6 +440,7 @@ await check('resolveUndoApplier recognizes a registered applier and falls throug
   assert.ok(registeredUndoAppliers().includes('branch.update'))
   assert.ok(registeredUndoAppliers().includes('sale.fields.bulk'))
   assert.ok(registeredUndoAppliers().includes('sale.customer.bulk'))
+  assert.ok(registeredUndoAppliers().includes('sale.customer.v2.bulk'))
   assert.ok(registeredUndoAppliers().includes('sale.customer.single'))
   assert.ok(registeredUndoAppliers().includes('return.fields.bulk'))
 })
@@ -607,7 +609,8 @@ await check('product.merge.group CAS rejects a boundary race without a partial c
 await check('sale bulk replay needs sales.bulk while one-customer replay keeps sales.customer', () => {
   assert.strictEqual(resolveUndoApplier({ applier: 'sale.status.bulk' })?.action, 'bulk')
   assert.strictEqual(resolveUndoApplier({ applier: 'sale.fields.bulk' })?.action, 'bulk')
-  assert.strictEqual(resolveUndoApplier({ applier: 'sale.customer.bulk' })?.action, 'bulk')
+  assert.strictEqual(resolveUndoApplier({ applier: 'sale.customer.v2.bulk' })?.action, 'bulk')
+  assert.strictEqual(resolveUndoApplier({ applier: 'sale.customer.bulk' })?.action, 'customer', 'legacy outer gate remains compatible; replay rechecks multi size')
   assert.strictEqual(resolveUndoApplier({ applier: 'sale.customer.single' })?.action, 'customer')
 })
 
