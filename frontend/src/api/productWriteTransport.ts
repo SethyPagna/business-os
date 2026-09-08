@@ -3,6 +3,7 @@ import { ensureClientRequestId } from './requestIds.ts'
 import { withExpectedUpdatedAt, type ExpectedUpdatedAtPayload } from './expectedUpdatedAt.ts'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 import { selectedConflictCanContinueAutomatically, type SelectedConflictPreviewCaseRequest, type SelectedConflictStockChoice } from '../utils/selectedConflictMerge.ts'
+import type { SelectedConflictGroupReviewRequest } from '../utils/selectedConflictActionReview.ts'
 
 type ProductPayload = ExpectedUpdatedAtPayload
 
@@ -146,6 +147,101 @@ export type SelectedConflictMergeApplyResult = {
   maxAdditionalRequests: number | null
   undoPendingOperationIds: string[]
   undoUnavailableOperationIds: string[]
+}
+
+export type SelectedConflictGroupReviewMember = {
+  id: number
+  name: string | null
+  barcode: string | null
+  category: string | null
+  brand: string | null
+  unit: string | null
+  image_path: string | null
+  updated_at: string | null
+  cost_price_usd: number | string | null
+  cost_price_khr: number | string | null
+  selling_price_usd: number | string | null
+  selling_price_khr: number | string | null
+  wholesale_price_usd: number | string | null
+  wholesale_price_khr: number | string | null
+}
+
+export type SelectedConflictGroupReviewGroup = {
+  ordinal: number
+  group_key: string
+  source_group_keys: string[]
+  member_ids: number[]
+  eligibility_basis: 'name' | 'barcode' | null
+  eligibility_value: string | null
+  members: SelectedConflictGroupReviewMember[]
+  options: {
+    barcode_source_ids: number[]
+    category_source_ids: number[]
+    brand_source_ids: number[]
+    unit_source_ids: number[]
+  }
+  economics: {
+    merged: Partial<Record<'cost_price_usd' | 'cost_price_khr' | 'selling_price_usd' | 'selling_price_khr' | 'wholesale_price_usd' | 'wholesale_price_khr', number>>
+    distinctCosts: Partial<Record<'cost_price_usd' | 'cost_price_khr', number[]>>
+    issues: Array<{ field: string; rowId: number | null; value: unknown; code: 'negative' | 'malformed' }>
+  }
+  stock: {
+    rows: Array<{ product_id: number; branch_id: number; branch_name: string | null; quantity: number }>
+    projected_by_branch: Array<{ branch_id: number; branch_name: string | null; quantity: number }>
+  }
+  lots: {
+    rows: Array<{
+      product_id: number
+      batch_id: number
+      batch_key: string
+      lot_code: string | null
+      expiry_date: string | null
+      received_at: string | null
+      is_active: number
+      notes: string | null
+      unit_cost_usd: number | null
+      received_quantity: number | null
+      received_branch_id: number | null
+      received_cost_usd: number | null
+      supplier_id: number | null
+      supplier_name: string | null
+      payment_status: string | null
+      credit_due_date: string | null
+      branch_id: number | null
+      quantity: number | null
+    }>
+    projected_quantity: number
+    count: number
+  }
+  state_digest: string
+  blocked: null | {
+    code: 'stale_group_members' | 'incompatible_group_identity' | 'overlap_requires_selection' | 'invalid_merge_numeric'
+    message: string
+  }
+}
+
+export type SelectedConflictGroupReviewPage = {
+  cursor: string
+  next_cursor: string | null
+  limit: number
+  groups: SelectedConflictGroupReviewGroup[]
+}
+
+export type SelectedConflictGroupReviewResult = {
+  success: true
+  manifest_version: 1
+  resolution_version: 2
+  review_id: string
+  draft_digest: string
+  status: 'draft'
+  expires_at: string
+  counts: {
+    requested_groups: number
+    actionable_groups: number
+    blocked_groups: number
+    total_members: number
+  }
+  page: SelectedConflictGroupReviewPage
 }
 
 function getDevicePayload(): ProductPayload {
@@ -328,6 +424,36 @@ export function previewSelectedConflictMerges(
     MERGE_DUPLICATES_PREVIEW_TIMEOUT_MS,
     { signal: options.signal },
   ) as Promise<SelectedConflictMergePreviewResult>
+}
+
+export function createSelectedConflictGroupReview(
+  body: SelectedConflictGroupReviewRequest,
+  options: { signal?: AbortSignal } = {},
+): Promise<SelectedConflictGroupReviewResult> {
+  return apiFetch(
+    'POST',
+    '/api/products/possible-duplicates/merge-batch/preview',
+    body,
+    MERGE_DUPLICATES_PREVIEW_TIMEOUT_MS,
+    { signal: options.signal },
+  ) as Promise<SelectedConflictGroupReviewResult>
+}
+
+export function getSelectedConflictGroupReviewPage(
+  reviewId: string,
+  cursor: string,
+  limit = 50,
+  options: { signal?: AbortSignal } = {},
+): Promise<SelectedConflictGroupReviewResult> {
+  const safeLimit = Math.max(1, Math.min(100, Math.floor(Number(limit) || 50)))
+  const safeCursor = /^\d+$/.test(String(cursor)) ? String(cursor) : '0'
+  return apiFetch(
+    'GET',
+    `/api/products/possible-duplicates/merge-batch/reviews/${encodeId(reviewId)}?cursor=${encodeURIComponent(safeCursor)}&limit=${safeLimit}`,
+    undefined,
+    MERGE_DUPLICATES_PREVIEW_TIMEOUT_MS,
+    { signal: options.signal },
+  ) as Promise<SelectedConflictGroupReviewResult>
 }
 
 export function makeSelectedConflictMergeApplyBody(
