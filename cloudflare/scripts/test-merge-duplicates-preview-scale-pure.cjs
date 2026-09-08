@@ -231,8 +231,10 @@ async function invokePreview(handler, user) {
 
 function verifyPlanLookupMigrationPreservesRows() {
   const migrations = loadAll()
-  assert.match(migrations.at(-1), /idx_undo_product_merge_plan_keeper/, '0135 must remain the final migration in this fixture')
-  const before0135 = openDb(migrations.slice(0, -1))
+  const planLookupMigrationIndex = migrations.findIndex((sql) => /idx_undo_product_merge_plan_keeper/.test(sql))
+  assert.notEqual(planLookupMigrationIndex, -1, 'the full migration chain must include the 0135 product merge plan indexes')
+  assert.match(migrations.at(-1), /CREATE TABLE product_conflict_merge_runs/, 'the fixture must include the current 0136 migration')
+  const before0135 = openDb(migrations.slice(0, planLookupMigrationIndex))
   const raw = before0135.db
   raw.prepare(`INSERT INTO undo_snapshots(id,kind,status,payload_json)
     VALUES(501,'product.merge','applied',?), (502,'product.merge','applied','{malformed')`)
@@ -241,7 +243,7 @@ function verifyPlanLookupMigrationPreservesRows() {
     VALUES(601,'products','product','10','preserved','undoable')`).run()
   const snapshotsBefore = raw.prepare('SELECT id,kind,status,payload_json FROM undo_snapshots ORDER BY id').all()
   const historyBefore = raw.prepare('SELECT id,scope,entity,entity_id,label,status FROM action_history ORDER BY id').all()
-  raw.exec(migrations.at(-1))
+  raw.exec(migrations[planLookupMigrationIndex])
   assert.deepEqual(raw.prepare('SELECT id,kind,status,payload_json FROM undo_snapshots ORDER BY id').all(), snapshotsBefore,
     '0135 preserves valid and malformed opaque snapshot bytes')
   assert.deepEqual(raw.prepare('SELECT id,scope,entity,entity_id,label,status FROM action_history ORDER BY id').all(), historyBefore,
