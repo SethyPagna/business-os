@@ -91,12 +91,14 @@ function buildAccounts(rawDb) {
     './contactOptions': contactOptions,
     './phone': phone,
   })
+  const anonymousCustomer = loadReal('lib/anonymousCustomer.ts')
   return loadReal('lib/portalAccounts.ts', {
     './db': dbModule,
     './membershipNumber': membershipNumber,
     './phone': phone,
     './passwordPolicy': passwordPolicy,
     './contactDuplicates': contactDuplicates,
+    './anonymousCustomer': anonymousCustomer,
   })
 }
 

@@ -32,7 +32,7 @@ export const CONTACT_PICKER_MAX_LIMIT = 5000
 // expected-updated_at write guard (frontend expectedUpdatedAt.ts) reads it
 // back; `created_at` because the contacts list surfaces a joined date.
 export const CONTACT_PICKER_COLUMNS: Record<ContactPickerTable, string[]> = {
-  customers: ['id', 'name', 'phone', 'email', 'address', 'membership_number', 'gender', 'created_at', 'updated_at'],
+  customers: ['id', 'name', 'phone', 'email', 'address', 'membership_number', 'gender', 'created_at', 'updated_at', 'is_anonymous'],
   suppliers: ['id', 'name', 'phone', 'email', 'address', 'created_at', 'updated_at'],
   delivery_contacts: ['id', 'name', 'phone', 'area', 'address', 'created_at', 'updated_at'],
 }
@@ -49,7 +49,7 @@ export function buildContactPickerSql(table: ContactPickerTable): string {
   const columns = CONTACT_PICKER_COLUMNS[table].join(', ')
   if (table === 'customers') {
     return `SELECT ${columns}, (SELECT MAX(s.created_at) FROM sales s WHERE s.customer_id = customers.id) AS last_sale_at `
-      + `FROM customers ORDER BY last_sale_at DESC NULLS LAST, lower(name) ASC, id ASC LIMIT @limit`
+      + `FROM customers WHERE COALESCE(is_anonymous, 0) = 0 ORDER BY last_sale_at DESC NULLS LAST, lower(name) ASC, id ASC LIMIT @limit`
   }
   return `SELECT ${columns} FROM ${table} ORDER BY lower(name) ASC, id ASC LIMIT @limit`
 }

@@ -106,6 +106,7 @@ const db = wrap(rawDb)
 const session = loadReal('lib/portalSession.ts', {
   './db': { getDb: () => db },
   './portalAccounts': { PORTAL_CONSENT_VERSION: 'portal-legal-2026-09-07' },
+  './anonymousCustomer': loadReal('lib/anonymousCustomer.ts'),
   'hono/cookie': cookieStub,
 })
 
@@ -150,6 +151,22 @@ let passed = 0
 async function check(name, fn) { await fn(); passed += 1; console.log(`PASS ${name}`) }
 
 async function run() {
+  await check('a session stops authenticating as soon as its linked customer is marked anonymous', async () => {
+    const accountId = seedAccount()
+    const customerInsert = rawDb.prepare("INSERT INTO customers (name,is_anonymous) VALUES ('General',0)").run()
+    const customerId = Number(customerInsert.meta?.last_row_id ?? 0)
+    rawDb.prepare('UPDATE portal_accounts SET contact_id=? WHERE id=?').run([customerId, accountId])
+    const { token } = await session.createPortalSession(ctx.env, accountId)
+    jar.value = token
+    const before = await session.getPortalAccountState(ctx)
+    assert.equal(before.status, 'authenticated')
+    await settle()
+    rawDb.prepare('UPDATE customers SET is_anonymous=1 WHERE id=?').run([customerId])
+    const after = await session.getPortalAccountState(ctx)
+    assert.deepStrictEqual(after, { status: 'unauthenticated', account: null })
+    assert.equal(pending.length, 0, 'a marked profile cannot schedule a session slide')
+  })
+
   await check('an active session does not authenticate or slide after its consent version becomes stale', async () => {
     const accountId = seedAccount()
     const { token } = await session.createPortalSession(ctx.env, accountId)

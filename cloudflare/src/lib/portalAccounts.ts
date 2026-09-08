@@ -4,6 +4,7 @@ import { getDb } from './db'
 import { canonicalizePhone } from './phone'
 import { formatPhoneP8, collectContactPhones, contactDuplicateWriteGuardStatement } from './contactDuplicates'
 import { passwordMinLengthError, passwordTooShort } from './passwordPolicy'
+import { customerIsProfileSql, customerProfileMutationGuardSql, isAnonymousCustomer } from './anonymousCustomer'
 import type { Env } from '../index'
 
 // The account decision engine for the storefront. Route code (routes/portal.ts)
@@ -171,9 +172,9 @@ export async function signupPortalAccount(env: Env, input: SignupInput): Promise
     // Existing-customer path: the id must resolve to a customer whose phone
     // matches. Every failure here returns the same reminder (no oracle).
     const customer = await db.prepare(
-      'SELECT id, name, phone, address FROM customers WHERE lower(trim(membership_number)) = lower(trim(@m)) LIMIT 1',
-    ).get<{ id: number; name: string | null; phone: string | null; address: string | null }>({ m: membershipId })
-    if (!customer) return existingReject()
+      'SELECT id, name, phone, address, is_anonymous FROM customers WHERE lower(trim(membership_number)) = lower(trim(@m)) LIMIT 1',
+    ).get<{ id: number; name: string | null; phone: string | null; address: string | null; is_anonymous: number }>({ m: membershipId })
+    if (!customer || isAnonymousCustomer(customer)) return existingReject()
     const phoneMatches = collectContactPhones(customer).some((raw) => canonicalizePhone(raw) === canonical)
     if (!phoneMatches) return existingReject()
     return claimAccount(env, { membershipId, name, canonical, passwordHash, contactId: customer.id, consentLocale: String(input.consentLocale || 'und').slice(0, 16) })
@@ -271,12 +272,20 @@ async function claimAccount(
         }
         accountId = insertedAccountId
       } else {
-        const res = await db.prepare(sql).run(params)
-        accountId = res.lastInsertRowid
+        const results = await db.batch([
+          { sql: customerProfileMutationGuardSql('contactId'), params: { contactId: args.contactId } },
+          { sql, params },
+        ])
+        accountId = Number(results[1]?.meta?.last_row_id ?? 0) || null
       }
       break
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
+      if (args.contactId != null) {
+        const guardedContact = await db.prepare('SELECT is_anonymous FROM customers WHERE id = @id LIMIT 1')
+          .get<{ is_anonymous: number | null }>({ id: args.contactId })
+        if (isAnonymousCustomer(guardedContact)) return existingReject()
+      }
       if (!/UNIQUE constraint failed/i.test(message)) throw error
       // Only a collision on an id WE minted (createContact === true) may
       // retry -- deliberately NOT gated on remaining-attempts here, so the
@@ -314,9 +323,23 @@ export async function signinPortalAccount(env: Env, input: SigninInput): Promise
     return { ok: false, status: 428, error: 'Please agree to the current Terms & Conditions and Privacy Policy to sign in.', code: 'consent_required' }
   }
 
-  const account = await db.prepare(
-    'SELECT id, name, membership_id, password_hash, consent_version FROM portal_accounts WHERE phone = @p LIMIT 1',
-  ).get<{ id: number; name: string; membership_id: string; password_hash: string; consent_version: string | null }>({ p: canonical })
+  const account = await db.prepare(`
+    SELECT a.id, a.name, a.membership_id, a.password_hash, a.consent_version,
+           a.contact_id, c.id AS contact_exists, c.is_anonymous
+    FROM portal_accounts a
+    LEFT JOIN customers c ON c.id = a.contact_id
+    WHERE a.phone = @p
+    LIMIT 1
+  `).get<{
+    id: number
+    name: string
+    membership_id: string
+    password_hash: string
+    consent_version: string | null
+    contact_id: number | null
+    contact_exists: number | null
+    is_anonymous: number | null
+  }>({ p: canonical })
 
   if (!account) {
     // No account for this phone — still spend a bcrypt compare so timing does
@@ -328,17 +351,22 @@ export async function signinPortalAccount(env: Env, input: SigninInput): Promise
   const idLower = identifier.toLowerCase()
   const identifierMatches = idLower === account.name.trim().toLowerCase() || idLower === account.membership_id.trim().toLowerCase()
   const passwordMatches = bcrypt.compareSync(password, account.password_hash)
-  if (!identifierMatches || !passwordMatches) return genericFail
+  const contactEligible = account.contact_id == null || (account.contact_exists != null && !isAnonymousCustomer(account))
+  if (!identifierMatches || !passwordMatches || !contactEligible) return genericFail
 
-  await db.prepare(`
+  const consentUpdate = await db.prepare(`
     UPDATE portal_accounts
     SET consent_version = @version, consent_at = CURRENT_TIMESTAMP, consent_locale = @locale, updated_at = CURRENT_TIMESTAMP
     WHERE id = @id
+      AND (contact_id IS NULL OR EXISTS (
+        SELECT 1 FROM customers WHERE id = portal_accounts.contact_id AND ${customerIsProfileSql()}
+      ))
   `).run({
     version: PORTAL_CONSENT_VERSION,
     locale: String(input.consentLocale || 'und').slice(0, 16),
     id: account.id,
   })
+  if (Number(consentUpdate.changes || 0) !== 1) return genericFail
 
   return { ok: true, accountId: account.id }
 }
