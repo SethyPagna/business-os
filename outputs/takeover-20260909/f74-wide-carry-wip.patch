@@ -1,0 +1,741 @@
+diff --git a/cloudflare/migrations/0143_sale_reference_mutation_receipts.sql b/cloudflare/migrations/0143_sale_reference_mutation_receipts.sql
+index c450402e..b65e4bfb 100644
+--- a/cloudflare/migrations/0143_sale_reference_mutation_receipts.sql
++++ b/cloudflare/migrations/0143_sale_reference_mutation_receipts.sql
+@@ -301,5 +301,15 @@ CREATE TABLE sale_reference_mutation_guards (
+     length(operation_id)=36 AND lower(operation_id)=operation_id
+     AND operation_id GLOB '[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]-[0-9a-f][0-9a-f][0-9a-f][0-9a-f]-4[0-9a-f][0-9a-f][0-9a-f]-[89ab][0-9a-f][0-9a-f][0-9a-f]-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]'
+   ),
+-  guard_value INTEGER NOT NULL CHECK(typeof(guard_value)='integer' AND guard_value=1)
++  guard_value INTEGER NOT NULL CHECK(typeof(guard_value)='integer' AND guard_value=1),
++  candidate_count INTEGER NOT NULL CHECK(typeof(candidate_count)='integer' AND candidate_count BETWEEN 0 AND 5000),
++  event_count INTEGER NOT NULL CHECK(typeof(event_count)='integer' AND event_count BETWEEN 0 AND 5000),
++  event_bytes INTEGER NOT NULL CHECK(typeof(event_bytes)='integer' AND event_bytes BETWEEN 0 AND 8388608),
++  related_count INTEGER NOT NULL CHECK(typeof(related_count)='integer' AND related_count>=0)
+ );
++
++CREATE TRIGGER sale_reference_mutation_receipts_cleanup_guard
++AFTER INSERT ON sale_reference_mutation_receipts
++BEGIN
++  DELETE FROM sale_reference_mutation_guards WHERE operation_id=NEW.id;
++END;
+diff --git a/cloudflare/scripts/test-sale-reference-mutation-pure.cjs b/cloudflare/scripts/test-sale-reference-mutation-pure.cjs
+index ed790810..e1317e1e 100644
+--- a/cloudflare/scripts/test-sale-reference-mutation-pure.cjs
++++ b/cloudflare/scripts/test-sale-reference-mutation-pure.cjs
+@@ -135,6 +135,54 @@ assert.throws(() => db.prepare(contactEventSql).run({
+   changes: '[]', metadata: JSON.stringify({ changed_contact_fields: ['phone'], private_value: '012' }),
+ }), /CHECK constraint failed/)
+ 
++db.prepare(`INSERT INTO sales(
++  id,receipt_number,customer_id,customer_name,customer_phone,customer_address,delivery_contact_id,delivery_contact_name
++) VALUES(2,'S-2',7,'Old name','012','Old address',9,'Old driver')`).run()
++const customerProjection = helper.customerCarryProjection({
++  targetId: 7,
++  afterName: 'New name',
++  afterPhone: '099',
++  afterAddress: 'New address',
++  beforeMembership: null,
++  afterMembership: 'LC-00001',
++  carryName: true,
++  carryPhone: true,
++  carryAddress: true,
++  carryMembership: true,
++})
++const customerBounds = db.prepare(helper.saleReferenceBoundsSql(customerProjection.sharedCtes)).get(customerProjection.params)
++assert.deepEqual({ candidates: customerBounds.candidates, maxPositive: customerBounds.max_event_bytes > 0 }, { candidates: 1, maxPositive: true })
++const customerInsert = helper.saleReferenceEventInsert({
++  projection: customerProjection,
++  sourceKind: 'contact_customer_carry',
++  receiptId: '00000000-0000-4000-8000-000000000020',
++  actorId: 1,
++  actorUsername: 'owner',
++  occurredAt,
++  requestDigest: digestA,
++})
++db.prepare(customerInsert.sql).run(customerInsert.params)
++const customerEvent = db.prepare("SELECT kind,changes_json,metadata_json FROM sale_record_events WHERE source_id='00000000-0000-4000-8000-000000000020'").get()
++assert.equal(customerEvent.kind, 'customer_changed')
++assert.deepEqual(JSON.parse(customerEvent.changes_json).map((entry) => entry.field), ['customer', 'membership'])
++assert.deepEqual(JSON.parse(customerEvent.metadata_json), { changed_contact_fields: ['address', 'phone'] })
++
++const deliveryProjection = helper.deliveryCarryProjection({ targetId: 9, afterName: 'New driver' })
++const deliveryInsert = helper.saleReferenceEventInsert({
++  projection: deliveryProjection,
++  sourceKind: 'contact_delivery_carry',
++  receiptId: '00000000-0000-4000-8000-000000000021',
++  actorId: 1,
++  actorUsername: 'owner',
++  occurredAt,
++  requestDigest: digestA,
++})
++db.prepare(deliveryInsert.sql).run(deliveryInsert.params)
++const deliveryEvent = db.prepare("SELECT kind,changes_json,metadata_json FROM sale_record_events WHERE source_id='00000000-0000-4000-8000-000000000021'").get()
++assert.equal(deliveryEvent.kind, 'driver_changed')
++assert.equal(JSON.parse(deliveryEvent.changes_json)[0].before.value.name, 'Old driver')
++assert.equal(deliveryEvent.metadata_json, null)
++
+ const ctesFor = (candidateCount, fullEvents, finalEventBytes = 0) => `WITH RECURSIVE
+   mutationCandidates(n) AS (
+     SELECT 1 WHERE ${candidateCount}>0
+diff --git a/cloudflare/src/lib/saleReferenceMutation.ts b/cloudflare/src/lib/saleReferenceMutation.ts
+index 9f3c8d33..f2c36381 100644
+--- a/cloudflare/src/lib/saleReferenceMutation.ts
++++ b/cloudflare/src/lib/saleReferenceMutation.ts
+@@ -19,6 +19,11 @@ export const SALE_REFERENCE_MUTATION_KINDS = [
+ export type SaleReferenceMutationKind = (typeof SALE_REFERENCE_MUTATION_KINDS)[number]
+ export type SaleReferenceStatement = { sql: string; params: Record<string, unknown> }
+ 
++export type SaleReferenceProjection = {
++  sharedCtes: string
++  params: Record<string, unknown>
++}
++
+ type ReceiptBase = {
+   success: true
+   receipt_id: string
+@@ -294,16 +299,28 @@ export function saleReferenceGuardInsert(
+   operationId: string,
+   sharedCtes: string,
+   params: Record<string, unknown>,
++  relatedCountSql = '0',
+ ): SaleReferenceStatement {
+   if (!UUID_V4.test(operationId)) fail('Sale reference operation id must be a lowercase UUID v4.')
+   return {
+     sql: `${sharedCtes}
+-      INSERT INTO sale_reference_mutation_guards(operation_id,guard_value)
+-      SELECT @saleReferenceOperationId,CASE WHEN
+-        (SELECT COUNT(*) FROM mutationCandidates)<=${SALE_REFERENCE_MAX_CANDIDATES}
+-        AND COALESCE((SELECT MAX(length(CAST(projected_event_json AS BLOB))) FROM eventProjection),0)<=${SALE_REFERENCE_MAX_EVENT_BYTES}
+-        AND COALESCE((SELECT SUM(length(CAST(projected_event_json AS BLOB))) FROM eventProjection),0)<=${SALE_REFERENCE_MAX_AGGREGATE_EVENT_BYTES}
+-        THEN 1 ELSE 0 END`,
++      INSERT INTO sale_reference_mutation_guards(
++        operation_id,guard_value,candidate_count,event_count,event_bytes,related_count
++      )
++      SELECT @saleReferenceOperationId,
++        CASE WHEN candidate_count<=${SALE_REFERENCE_MAX_CANDIDATES}
++          AND max_event_bytes<=${SALE_REFERENCE_MAX_EVENT_BYTES}
++          AND event_bytes<=${SALE_REFERENCE_MAX_AGGREGATE_EVENT_BYTES}
++          THEN 1 ELSE 0 END,
++        candidate_count,event_count,event_bytes,related_count
++      FROM (
++        SELECT
++          (SELECT COUNT(*) FROM mutationCandidates) AS candidate_count,
++          (SELECT COUNT(*) FROM eventProjection) AS event_count,
++          COALESCE((SELECT MAX(length(CAST(projected_event_json AS BLOB))) FROM eventProjection),0) AS max_event_bytes,
++          COALESCE((SELECT SUM(length(CAST(projected_event_json AS BLOB))) FROM eventProjection),0) AS event_bytes,
++          (${relatedCountSql}) AS related_count
++      )`,
+     params: { ...params, saleReferenceOperationId: operationId },
+   }
+ }
+@@ -316,6 +333,273 @@ export function saleReferenceGuardDelete(operationId: string): SaleReferenceStat
+   }
+ }
+ 
++const EVENT_UUID_SQL = `lower(
++  hex(randomblob(4))||'-'||hex(randomblob(2))||'-4'||substr(hex(randomblob(2)),2)||'-'
++  ||substr('89ab',abs(random())%4+1,1)||substr(hex(randomblob(2)),2)||'-'||hex(randomblob(6))
++)`
++
++function knownValueSql(valueSql: string): string {
++  return `json_object('state','known_value','value',json(${valueSql}))`
++}
++
++function membershipStateSql(valueSql: string): string {
++  return `CASE WHEN ${valueSql} IS NULL OR trim(CAST(${valueSql} AS TEXT))=''
++    THEN json_object('state','known_none')
++    ELSE json_object('state','known_value','value',json_object(
++      'number',${valueSql},'discount_usd',NULL,'discount_khr',NULL,'points_redeemed',NULL
++    )) END`
++}
++
++export function customerCarryProjection(input: {
++  targetId: number
++  afterName: string | null
++  afterPhone: string | null
++  afterAddress: string | null
++  beforeMembership: string | null
++  afterMembership: string | null
++  carryName: boolean
++  carryPhone: boolean
++  carryAddress: boolean
++  carryMembership: boolean
++}): SaleReferenceProjection {
++  const targetId = positiveId(input.targetId, 'target_id')
++  const params: Record<string, unknown> = {
++    saleReferenceTargetId: targetId,
++    saleReferenceAfterName: input.afterName,
++    saleReferenceAfterPhone: input.afterPhone,
++    saleReferenceAfterAddress: input.afterAddress,
++    saleReferenceBeforeMembership: input.beforeMembership,
++    saleReferenceAfterMembership: input.afterMembership,
++    saleReferenceCarryName: input.carryName ? 1 : 0,
++    saleReferenceCarryPhone: input.carryPhone ? 1 : 0,
++    saleReferenceCarryAddress: input.carryAddress ? 1 : 0,
++    saleReferenceCarryMembership: input.carryMembership ? 1 : 0,
++  }
++  const nameDiff = `@saleReferenceCarryName=1 AND s.customer_name IS NOT @saleReferenceAfterName`
++  const phoneDiff = `@saleReferenceCarryPhone=1 AND s.customer_phone IS NOT @saleReferenceAfterPhone`
++  const addressDiff = `@saleReferenceCarryAddress=1 AND s.customer_address IS NOT @saleReferenceAfterAddress`
++  const membershipDiff = `@saleReferenceCarryMembership=1 AND @saleReferenceBeforeMembership IS NOT @saleReferenceAfterMembership`
++  const customerBefore = `json_object('id',@saleReferenceTargetId,'name',s.customer_name)`
++  const customerAfter = `json_object('id',@saleReferenceTargetId,'name',@saleReferenceAfterName)`
++  const customerChange = `json_object('field','customer','before',json(${knownValueSql(customerBefore)}),'after',json(${knownValueSql(customerAfter)}))`
++  const membershipChange = `json_object('field','membership','before',json(${membershipStateSql('@saleReferenceBeforeMembership')}),'after',json(${membershipStateSql('@saleReferenceAfterMembership')}))`
++  const changes = `CASE
++    WHEN name_changed=1 AND membership_changed=1 THEN json_array(json(${customerChange}),json(${membershipChange}))
++    WHEN name_changed=1 THEN json_array(json(${customerChange}))
++    WHEN membership_changed=1 THEN json_array(json(${membershipChange}))
++    ELSE json_array()
++  END`
++  const metadata = `CASE
++    WHEN phone_changed=1 AND address_changed=1 THEN json_object('changed_contact_fields',json_array('address','phone'))
++    WHEN phone_changed=1 THEN json_object('changed_contact_fields',json_array('phone'))
++    WHEN address_changed=1 THEN json_object('changed_contact_fields',json_array('address'))
++    ELSE NULL
++  END`
++  return {
++    params,
++    sharedCtes: `WITH mutationCandidates AS (
++      SELECT s.id AS sale_id,s.customer_name,s.customer_phone,s.customer_address,
++        CASE WHEN ${nameDiff} THEN 1 ELSE 0 END AS name_changed,
++        CASE WHEN ${phoneDiff} THEN 1 ELSE 0 END AS phone_changed,
++        CASE WHEN ${addressDiff} THEN 1 ELSE 0 END AS address_changed,
++        CASE WHEN ${membershipDiff} THEN 1 ELSE 0 END AS membership_changed
++      FROM sales s
++      WHERE s.customer_id=@saleReferenceTargetId
++        AND (${nameDiff} OR ${phoneDiff} OR ${addressDiff} OR ${membershipDiff})
++    ), eventValues AS (
++      SELECT sale_id,
++        CASE WHEN name_changed=1 OR membership_changed=1 THEN 'customer_changed' ELSE 'customer_contact_changed' END AS kind,
++        ${changes} AS changes_json,
++        ${metadata} AS metadata_json
++      FROM mutationCandidates s
++    ), eventProjection AS (
++      SELECT *,json_object(
++        'sale_id',sale_id,'source_kind','contact_customer_carry','source_id','00000000-0000-4000-8000-000000000000',
++        'generation',0,'kind',kind,'via','apply','actor_id',0,
++        'occurred_at','0000-00-00T00:00:00.000Z','changes',json(changes_json),
++        'metadata',CASE WHEN metadata_json IS NULL THEN NULL ELSE json(metadata_json) END
++      ) AS projected_event_json
++      FROM eventValues
++    )`,
++  }
++}
++
++export function deliveryCarryProjection(input: { targetId: number; afterName: string | null }): SaleReferenceProjection {
++  const targetId = positiveId(input.targetId, 'target_id')
++  const driverBefore = `json_object('id',@saleReferenceTargetId,'name',s.delivery_contact_name,'phone',NULL,'address',NULL)`
++  const driverAfter = `json_object('id',@saleReferenceTargetId,'name',@saleReferenceAfterName,'phone',NULL,'address',NULL)`
++  const changes = `json_array(json_object(
++    'field','driver',
++    'before',json(${knownValueSql(driverBefore)}),
++    'after',json(${knownValueSql(driverAfter)})
++  ))`
++  return {
++    params: { saleReferenceTargetId: targetId, saleReferenceAfterName: input.afterName },
++    sharedCtes: `WITH mutationCandidates AS (
++      SELECT s.id AS sale_id,s.delivery_contact_name
++      FROM sales s
++      WHERE s.delivery_contact_id=@saleReferenceTargetId
++        AND s.delivery_contact_name IS NOT @saleReferenceAfterName
++    ), eventValues AS (
++      SELECT sale_id,'driver_changed' AS kind,${changes} AS changes_json,NULL AS metadata_json
++      FROM mutationCandidates s
++    ), eventProjection AS (
++      SELECT *,json_object(
++        'sale_id',sale_id,'source_kind','contact_delivery_carry','source_id','00000000-0000-4000-8000-000000000000',
++        'generation',0,'kind',kind,'via','apply','actor_id',0,
++        'occurred_at','0000-00-00T00:00:00.000Z','changes',json(changes_json),'metadata',NULL
++      ) AS projected_event_json
++      FROM eventValues
++    )`,
++  }
++}
++
++export function saleReferenceEventInsert(input: {
++  projection: SaleReferenceProjection
++  sourceKind: 'contact_customer_carry' | 'contact_delivery_carry' | 'contact_customer_merge' | 'contact_delivery_merge' | 'customer_link_repair' | 'customer_missing_resolve' | 'payment_method_replace'
++  receiptId: string
++  actorId: number
++  actorUsername: string | null
++  occurredAt: string
++  requestDigest: string
++}): SaleReferenceStatement {
++  if (!UUID_V4.test(input.receiptId)) fail('Sale reference receipt id must be a lowercase UUID v4.')
++  positiveId(input.actorId, 'actor_id')
++  validateTimestamp(input.occurredAt)
++  if (!SHA256.test(input.requestDigest)) fail('Sale reference request digest is invalid.')
++  return {
++    sql: `${input.projection.sharedCtes}
++      INSERT INTO sale_record_events(
++        id,sale_id,source_kind,source_id,generation,kind,via,subject,actor_id,
++        actor_username,occurred_at,changes_json,metadata_json,request_digest,response_json
++      )
++      SELECT ${EVENT_UUID_SQL},sale_id,@saleReferenceSourceKind,@saleReferenceReceiptId,0,kind,'apply',NULL,
++        @saleReferenceActorId,@saleReferenceActorUsername,@saleReferenceOccurredAt,changes_json,metadata_json,
++        @saleReferenceRequestDigest,NULL
++      FROM eventProjection`,
++    params: {
++      ...input.projection.params,
++      saleReferenceSourceKind: input.sourceKind,
++      saleReferenceReceiptId: input.receiptId,
++      saleReferenceActorId: input.actorId,
++      saleReferenceActorUsername: input.actorUsername,
++      saleReferenceOccurredAt: input.occurredAt,
++      saleReferenceRequestDigest: input.requestDigest,
++    },
++  }
++}
++
++export function contactCarrySalesUpdate(
++  projection: SaleReferenceProjection,
++  kind: 'customer_profile_carry' | 'delivery_contact_carry',
++): SaleReferenceStatement {
++  return kind === 'customer_profile_carry'
++    ? {
++      sql: `${projection.sharedCtes}
++        UPDATE sales SET
++          customer_name=@saleReferenceAfterName,
++          customer_phone=@saleReferenceAfterPhone,
++          customer_address=@saleReferenceAfterAddress
++        WHERE id IN (SELECT sale_id FROM mutationCandidates)`,
++      params: projection.params,
++    }
++    : {
++      sql: `${projection.sharedCtes}
++        UPDATE sales SET delivery_contact_name=@saleReferenceAfterName
++        WHERE id IN (SELECT sale_id FROM mutationCandidates)`,
++      params: projection.params,
++    }
++}
++
++export function saleReferenceAuditInsert(input: {
++  operationId: string
++  actorId: number
++  actorUsername: string | null
++  action: string
++  entity: string
++  entityId: number
++  sourceKind: string
++  receiptId: string
++}): SaleReferenceStatement {
++  if (!UUID_V4.test(input.operationId) || !UUID_V4.test(input.receiptId)) fail('Sale reference audit identity is invalid.')
++  positiveId(input.actorId, 'actor_id')
++  positiveId(input.entityId, 'entity_id')
++  return {
++    sql: `INSERT INTO audit_logs(
++      user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value
++    )
++    SELECT @actorId,@actorUsername,@action,@entity,@entityId,
++      json_object(
++        'operationId',@operationId,
++        'sale_record_provenance',json_object(
++          'source_kind',@sourceKind,'source_id',@receiptId,'generation',0,'via','apply'
++        ),
++        'event_count',event_count
++      ),
++      @entity,@entityId,
++      json_object('operationId',@operationId,'event_count',event_count)
++    FROM sale_reference_mutation_guards WHERE operation_id=@operationId`,
++    params: {
++      operationId: input.operationId,
++      actorId: input.actorId,
++      actorUsername: input.actorUsername,
++      action: input.action,
++      entity: input.entity,
++      entityId: input.entityId,
++      sourceKind: input.sourceKind,
++      receiptId: input.receiptId,
++    },
++  }
++}
++
++export function contactCarryReceiptInsert(input: {
++  operationId: string
++  receiptId: string
++  actorId: number
++  mutationKind: 'customer_profile_carry' | 'delivery_contact_carry'
++  targetKey: string
++  targetId: number
++  requestId: string
++  requestDigest: string
++  occurredAt: string
++}): SaleReferenceStatement {
++  if (!UUID_V4.test(input.operationId) || !UUID_V4.test(input.receiptId)) fail('Sale reference receipt identity is invalid.')
++  positiveId(input.actorId, 'actor_id')
++  positiveId(input.targetId, 'target_id')
++  const targetKey = saleReferenceTargetKey(input.mutationKind, { target_id: input.targetId })
++  if (targetKey !== input.targetKey) fail('Sale reference target key is invalid.')
++  const requestId = requireSaleReferenceRequestId(input.requestId)
++  if (requestId !== input.requestId || !SHA256.test(input.requestDigest)) fail('Sale reference request identity is invalid.')
++  validateTimestamp(input.occurredAt)
++  const response = input.mutationKind === 'customer_profile_carry'
++    ? `json_object(
++        'success',json('true'),'receipt_id',@receiptId,'target_id',@targetId,
++        'affected_sales',event_count,'affected_returns',related_count,'updated_at',@occurredAt
++      )`
++    : `json_object(
++        'success',json('true'),'receipt_id',@receiptId,'target_id',@targetId,
++        'affected_sales',event_count,'updated_at',@occurredAt
++      )`
++  return {
++    sql: `INSERT INTO sale_reference_mutation_receipts(
++      id,actor_id,mutation_kind,target_key,request_id,request_digest,response_json,occurred_at
++    )
++    SELECT @receiptId,@actorId,@mutationKind,@targetKey,@requestId,@requestDigest,${response},@occurredAt
++    FROM sale_reference_mutation_guards WHERE operation_id=@operationId`,
++    params: {
++      operationId: input.operationId,
++      receiptId: input.receiptId,
++      actorId: input.actorId,
++      mutationKind: input.mutationKind,
++      targetKey,
++      targetId: input.targetId,
++      requestId,
++      requestDigest: input.requestDigest,
++      occurredAt: input.occurredAt,
++    },
++  }
++}
++
+ export function classifySaleReferenceConstraint(error: unknown): SaleReferenceMutationError | null {
+   const message = error instanceof Error ? error.message : String(error)
+   if (/sale_reference_mutation_guards|CHECK constraint failed/i.test(message)) {
+diff --git a/cloudflare/src/routes/contacts.ts b/cloudflare/src/routes/contacts.ts
+index 8932a0d1..3ff6a469 100644
+--- a/cloudflare/src/routes/contacts.ts
++++ b/cloudflare/src/routes/contacts.ts
+@@ -48,6 +48,26 @@ import {
+   customerProfileMutationGuardSql,
+   isAnonymousCustomer,
+ } from '../lib/anonymousCustomer'
++import {
++  assertSaleReferencePreflight,
++  canonicalSaleReferenceIntent,
++  contactCarryReceiptInsert,
++  contactCarrySalesUpdate,
++  customerCarryProjection,
++  deliveryCarryProjection,
++  findSaleReferenceReceipt,
++  requireSaleReferenceRequestId,
++  requireSaleReferenceRevision,
++  saleReferenceAuditInsert,
++  saleReferenceEventInsert,
++  saleReferenceGuardDelete,
++  saleReferenceGuardInsert,
++  saleReferenceRequestDigest,
++  saleReferenceTargetKey,
++  SaleReferenceMutationError,
++  type SaleReferenceMutationKind,
++  type SaleReferenceProjection,
++} from '../lib/saleReferenceMutation'
+ 
+ // Customers, suppliers, and delivery contacts, ported from
+ // backend/src/routes/contacts.ts. This never had a real route on Cloudflare
+@@ -458,6 +478,15 @@ function conflictResult(error: unknown) {
+   return null
+ }
+ 
++function saleReferenceErrorResult(error: unknown) {
++  if (!(error instanceof SaleReferenceMutationError)) return null
++  const status = error.code === 'idempotency_conflict' ? 409
++    : error.code === 'refresh_required' ? 409
++      : error.code === 'too_many_linked_sales' || error.code === 'sale_record_event_too_large' ? 413
++        : 400
++  return { status, body: { success: false, code: error.code, error: error.message } }
++}
++
+ // Whether an optional/legacy table exists yet. The AR/AP ledgers ship in
+ // late migrations (supplier_invoices 0088, customer_receivables 0094), so a
+ // merge must repoint them WHEN present without throwing on a DB where they
+@@ -1308,10 +1337,74 @@ function registerContactRoutes(config: ContactConfig) {
+     const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
+     const db = getDb(c.env)
+ 
++    const tier = getPermissionTier(user, 'contacts')
++    const allowedColumns = tier === 'review' ? ['name'] : config.columns
++    const requestedPayload = pickColumns(body, allowedColumns)
++    if (Object.prototype.hasOwnProperty.call(requestedPayload, 'phone')) requestedPayload.phone = formatPhoneP8(requestedPayload.phone)
++    if (Object.prototype.hasOwnProperty.call(requestedPayload, 'address')) requestedPayload.address = formatContactOptionPhones(requestedPayload.address, config.optionMode)
++    if (config.table === 'customers' && Object.prototype.hasOwnProperty.call(requestedPayload, 'phone')) {
++      requestedPayload.phone_normalized = canonicalizePhone(requestedPayload.phone)
++    }
++    const requestedRenameScope = String(body.__rename_cascade || '').trim().toLowerCase()
++    const mayFanOutToSales = (config.table === 'customers' && (
++      requestedRenameScope === 'carry'
++      || Object.prototype.hasOwnProperty.call(requestedPayload, 'phone')
++      || Object.prototype.hasOwnProperty.call(requestedPayload, 'address')
++      || Object.prototype.hasOwnProperty.call(requestedPayload, 'membership_number')
++    )) || (config.table === 'delivery_contacts' && requestedRenameScope === 'carry')
++    const expectedUpdatedAt = getExpectedUpdatedAt(body)
++    let referenceMutation: {
++      kind: 'customer_profile_carry' | 'delivery_contact_carry'
++      receiptId: string
++      operationId: string
++      requestId: string
++      requestDigest: string
++      targetKey: string
++      occurredAt: string
++      actorId: number
++    } | null = null
++    if (mayFanOutToSales) {
++      try {
++        const actorId = Number(user?.id)
++        if (!Number.isSafeInteger(actorId) || actorId <= 0) throw new SaleReferenceMutationError('refresh_required', 'Sign in again before applying this linked Sales change.')
++        const mutationKind: 'customer_profile_carry' | 'delivery_contact_carry' = config.table === 'customers'
++          ? 'customer_profile_carry'
++          : 'delivery_contact_carry'
++        const requestId = requireSaleReferenceRequestId(body.client_request_id)
++        const revision = requireSaleReferenceRevision(expectedUpdatedAt)
++        const targetId = Number(id)
++        const targetKey = saleReferenceTargetKey(mutationKind, { target_id: targetId })
++        const requestDigest = await saleReferenceRequestDigest({
++          mutation_kind: mutationKind,
++          target_key: targetKey,
++          carry_mode: requestedRenameScope || null,
++          expected_updated_at: revision,
++          payload: requestedPayload,
++          duplicate_decision: body.duplicateDecision ?? null,
++        })
++        const replay = await findSaleReferenceReceipt(db, actorId, mutationKind, requestId, requestDigest)
++        if (replay) return c.json(replay)
++        referenceMutation = {
++          kind: mutationKind,
++          receiptId: crypto.randomUUID(),
++          operationId: '',
++          requestId,
++          requestDigest,
++          targetKey,
++          occurredAt: new Date().toISOString(),
++          actorId,
++        }
++        referenceMutation.operationId = referenceMutation.receiptId
++      } catch (error) {
++        const result = saleReferenceErrorResult(error)
++        if (result) return c.json(result.body, result.status as 400 | 409 | 413)
++        throw error
++      }
++    }
++
+     const current = await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get<Record<string, unknown>>({ id })
+     if (!current) return c.json({ error: `${config.entity} not found` }, 404)
+     if (config.table === 'customers' && isAnonymousCustomer(current)) return anonymousCustomerMutationResponse(c)
+-    const expectedUpdatedAt = getExpectedUpdatedAt(body)
+     try {
+       assertUpdatedAtMatch(config.entity, current, expectedUpdatedAt)
+     } catch (error) {
+@@ -1323,7 +1416,7 @@ function registerContactRoutes(config: ContactConfig) {
+     const name = body.name != null ? String(body.name).trim() : String(current.name || '')
+     if (!name) return c.json({ error: 'Name is required' }, 400)
+     const nameChanged = String(current.name || '').trim().toLowerCase() !== name.toLowerCase()
+-    const renameScope = String(body.__rename_cascade || '').trim().toLowerCase()
++    const renameScope = requestedRenameScope
+     // Every contact kind with live name snapshots asks the rename question
+     // (the user's rule: a rename either links everything over or keeps the
+     // past records as they were). Delivery contacts snapshot onto
+@@ -1355,18 +1448,12 @@ function registerContactRoutes(config: ContactConfig) {
+     // -- instead, every non-name column is silently dropped from the
+     // payload for a 'review'-tier user before it's applied, exactly like
+     // pickColumns already drops any column not sent at all.
+-    const tier = getPermissionTier(user, 'contacts')
+-    const allowedColumns = tier === 'review' ? ['name'] : config.columns
+-    const payload = pickColumns(body, allowedColumns)
++    const payload = { ...requestedPayload }
+     payload.name = name
+     // P7-c: same P8 display shape on edit as on create -- an update that
+     // touches the phone must not undo the convention.
+-    if (Object.prototype.hasOwnProperty.call(payload, 'phone')) payload.phone = formatPhoneP8(payload.phone)
+-    if (Object.prototype.hasOwnProperty.call(payload, 'address')) payload.address = formatContactOptionPhones(payload.address, config.optionMode)
+-    // Keep the canonical phone key in sync on edit too (see create above).
+-    if (config.table === 'customers' && Object.prototype.hasOwnProperty.call(payload, 'phone')) {
+-      payload.phone_normalized = canonicalizePhone(payload.phone)
+-    }
++    // Phone/address normalization already happened before the receipt lookup,
++    // so the exact accepted intent is stable across an unknown-outcome retry.
+ 
+     delete (body as Record<string, unknown>).__rename_cascade
+ 
+@@ -1437,6 +1524,7 @@ function registerContactRoutes(config: ContactConfig) {
+         params: { id, expectedUpdatedAt },
+       })
+     }
++    const referenceGuardStatementCount = statements.length
+     const columns = Object.keys(payload)
+     let contactUpdate: { sql: string; params: Record<string, unknown> } | null = null
+     if (columns.length) {
+@@ -1446,7 +1534,7 @@ function registerContactRoutes(config: ContactConfig) {
+           WHERE id = @id`,
+         params: { ...payload, id },
+       }
+-      statements.push(contactUpdate)
++      if (!referenceMutation) statements.push(contactUpdate)
+     }
+ 
+     if ((nameChanged && snapshotCarry) || phoneChanged || addressChanged) {
+@@ -1457,12 +1545,14 @@ function registerContactRoutes(config: ContactConfig) {
+         // the full options set, which is what the Customers page edits.
+         const customerAddress = contactDisplayAddress(Object.prototype.hasOwnProperty.call(payload, 'address') ? payload.address : current.address) || null
+         const snapshotName = nameChanged && !snapshotCarry ? current.name : name
+-        statements.push(
+-          { sql: `UPDATE sales SET customer_name = @name, customer_phone = @phone, customer_address = @address WHERE customer_id = @id`, params: { id, name: snapshotName, phone: customerPhone ?? null, address: customerAddress ?? null } },
+-          { sql: `UPDATE returns SET customer_name = @name WHERE customer_id = @id`, params: { id, name: snapshotName } },
+-          { sql: `UPDATE customer_share_submissions SET customer_name = @name WHERE customer_id = @id`, params: { id, name: snapshotName } },
++        if (!referenceMutation) {
++          statements.push({ sql: `UPDATE sales SET customer_name = @name, customer_phone = @phone, customer_address = @address WHERE customer_id = @id`, params: { id, name: snapshotName, phone: customerPhone ?? null, address: customerAddress ?? null } })
++        }
++        if (nameChanged && snapshotCarry) statements.push(
++          { sql: `UPDATE returns SET customer_name = @name WHERE customer_id = @id AND customer_name IS NOT @name`, params: { id, name: snapshotName } },
++          { sql: `UPDATE customer_share_submissions SET customer_name = @name WHERE customer_id = @id AND customer_name IS NOT @name`, params: { id, name: snapshotName } },
+         )
+-        if (snapshotCarry && await hasTable(db, 'customer_receivables')) {
++        if (nameChanged && snapshotCarry && await hasTable(db, 'customer_receivables')) {
+           statements.push({ sql: `UPDATE customer_receivables SET customer_name = @name WHERE customer_id = @id`, params: { id, name: snapshotName } })
+         }
+       } else if (config.table === 'suppliers' && nameChanged && snapshotCarry) {
+@@ -1481,7 +1571,7 @@ function registerContactRoutes(config: ContactConfig) {
+             { sql: `UPDATE supplier_invoices SET supplier_name = @name WHERE supplier_id IS NULL AND lower(trim(COALESCE(supplier_name, ''))) = @from`, params: { name, from: fromName.toLowerCase() } },
+           )
+         }
+-      } else if (config.table === 'delivery_contacts' && nameChanged) {
++      } else if (config.table === 'delivery_contacts' && nameChanged && !referenceMutation) {
+         statements.push({ sql: `UPDATE sales SET delivery_contact_name = @name WHERE delivery_contact_id = @id`, params: { id, name } })
+       }
+     }
+@@ -1490,17 +1580,92 @@ function registerContactRoutes(config: ContactConfig) {
+     // runs: withMintedMembershipNumber re-mints and calls back on a lost
+     // UNIQUE race, and the retry must write the NEW number, not the one it
+     // just lost. Same one retry story as the POST route above.
++    let referenceProjection: SaleReferenceProjection | null = null
++    const runStatements = async () => {
++      if (!referenceMutation) {
++        if (statements.length) await db.batch(statements)
++        return
++      }
++      const snapshotName = nameChanged && !snapshotCarry ? current.name : name
++      const customerPhone = Object.prototype.hasOwnProperty.call(payload, 'phone') ? payload.phone : current.phone
++      const customerAddress = contactDisplayAddress(Object.prototype.hasOwnProperty.call(payload, 'address') ? payload.address : current.address) || null
++      referenceProjection = referenceMutation.kind === 'customer_profile_carry'
++        ? customerCarryProjection({
++          targetId: Number(id),
++          afterName: snapshotName == null ? null : String(snapshotName),
++          afterPhone: customerPhone == null ? null : String(customerPhone),
++          afterAddress: customerAddress,
++          beforeMembership: current.membership_number == null ? null : String(current.membership_number),
++          afterMembership: payload.membership_number == null ? null : String(payload.membership_number),
++          carryName: nameChanged && snapshotCarry,
++          carryPhone: phoneChanged,
++          carryAddress: addressChanged,
++          carryMembership: current.membership_number !== payload.membership_number,
++        })
++        : deliveryCarryProjection({ targetId: Number(id), afterName: name })
++      await assertSaleReferencePreflight(db, referenceProjection.sharedCtes, referenceProjection.params)
++      const prefix = statements.slice(0, referenceGuardStatementCount)
++      const linkedEffects = statements.slice(referenceGuardStatementCount)
++      const sourceKind = referenceMutation.kind === 'customer_profile_carry' ? 'contact_customer_carry' : 'contact_delivery_carry'
++      const relatedCountSql = referenceMutation.kind === 'customer_profile_carry' && nameChanged && snapshotCarry
++        ? '(SELECT COUNT(*) FROM returns WHERE customer_id=@saleReferenceTargetId AND customer_name IS NOT @saleReferenceAfterName)'
++        : '0'
++      await db.batch([
++        ...prefix,
++        saleReferenceGuardInsert(referenceMutation.operationId, referenceProjection.sharedCtes, referenceProjection.params, relatedCountSql),
++        saleReferenceEventInsert({
++          projection: referenceProjection,
++          sourceKind,
++          receiptId: referenceMutation.receiptId,
++          actorId: referenceMutation.actorId,
++          actorUsername: actorSnapshot(user),
++          occurredAt: referenceMutation.occurredAt,
++          requestDigest: referenceMutation.requestDigest,
++        }),
++        ...(contactUpdate ? [contactUpdate] : []),
++        contactCarrySalesUpdate(referenceProjection, referenceMutation.kind),
++        ...linkedEffects,
++        saleReferenceAuditInsert({
++          operationId: referenceMutation.operationId,
++          actorId: referenceMutation.actorId,
++          actorUsername: actorSnapshot(user),
++          action: 'update',
++          entity: config.entity,
++          entityId: Number(id),
++          sourceKind,
++          receiptId: referenceMutation.receiptId,
++        }),
++        contactCarryReceiptInsert({
++          operationId: referenceMutation.operationId,
++          receiptId: referenceMutation.receiptId,
++          actorId: referenceMutation.actorId,
++          mutationKind: referenceMutation.kind,
++          targetKey: referenceMutation.targetKey,
++          targetId: Number(id),
++          requestId: referenceMutation.requestId,
++          requestDigest: referenceMutation.requestDigest,
++          occurredAt: referenceMutation.occurredAt,
++        }),
++      ])
++    }
+     try {
+       if (mintMembership) {
+         await withMintedMembershipNumber(db, async (membershipNumber) => {
+           payload.membership_number = membershipNumber
+           if (contactUpdate) contactUpdate.params = { ...payload, id }
+-          if (statements.length) await db.batch(statements)
++          await runStatements()
+         })
+-      } else if (statements.length) {
+-        await db.batch(statements)
++      } else {
++        await runStatements()
+       }
+     } catch (error) {
++      if (referenceMutation) {
++        const replay = await findSaleReferenceReceipt(
++          db, referenceMutation.actorId, referenceMutation.kind,
++          referenceMutation.requestId, referenceMutation.requestDigest,
++        )
++        if (replay) return c.json(replay)
++      }
+       if (config.table === 'customers' && (await anonymousCustomerIds(db, [id])).has(Number(id))) return anonymousCustomerMutationResponse(c)
+       const duplicateBlock = await duplicateBlockAfterGuardFailure(c.env, config, { id, name, phones: duplicateDecision.phones }, duplicateDecision.decision)
+       if (duplicateBlock) return c.json(duplicateBlock.body, duplicateBlock.status as 400 | 409)
+@@ -1523,14 +1688,16 @@ function registerContactRoutes(config: ContactConfig) {
+         historical_snapshots_preserved: true,
+       })
+     }
+-    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', config.entity, id, {
+-      name,
+-      ...(duplicateDecision.decision ? {
+-        duplicate_decision: 'create_separate',
+-        duplicate_candidate_ids: duplicateDecision.decision.candidateIds,
+-        duplicate_candidate_fingerprint: duplicateDecision.decision.fingerprint,
+-      } : {}),
+-    })
++    if (!referenceMutation) {
++      await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', config.entity, id, {
++        name,
++        ...(duplicateDecision.decision ? {
++          duplicate_decision: 'create_separate',
++          duplicate_candidate_ids: duplicateDecision.decision.candidateIds,
++          duplicate_candidate_fingerprint: duplicateDecision.decision.fingerprint,
++        } : {}),
++      })
++    }
+     const updateVersions: string[] = [config.table]
+     if (nameChanged && snapshotCarry) {
+       if (config.table === 'customers') {
+@@ -1543,6 +1710,14 @@ function registerContactRoutes(config: ContactConfig) {
+     }
+     await Promise.all([...new Set(updateVersions)].map((namespace) => bumpVersion(c.env, namespace)))
+     c.executionCtx.waitUntil(broadcast(c.env, config.channel, { action: 'update', id }))
++    if (referenceMutation) {
++      const receipt = await findSaleReferenceReceipt(
++        db, referenceMutation.actorId, referenceMutation.kind,
++        referenceMutation.requestId, referenceMutation.requestDigest,
++      )
++      if (!receipt) throw new Error('Sale reference mutation committed without its receipt')
++      return c.json(receipt)
++    }
+     const item = await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get({ id })
+     // `partial`/`partialFields` are additive -- every existing caller reads
+     // specific known fields off this response (id, name, etc.) or just

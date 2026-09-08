@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "status": "paused_priority_one_release_has_no_dependency",
+  "foundation_base": "c8d3cfec268506caffc0ff3abf4c1f4c593f7975",
+  "branch": "codex/f74-wide-cascades-20260909",
+  "tested_foundation_commit": "26519d0e",
+  "tested_foundation": {
+    "checks": [
+      "test-sale-reference-mutation-pure.cjs PASS",
+      "test-sale-record-event-helper-pure.cjs PASS",
+      "test-sale-record-events-pure.cjs PASS",
+      "cloudflare typecheck PASS"
+    ],
+    "scope": "0143 schema, immutable receipts, closed event kind/source/metadata helper, advisory and in-batch bounds"
+  },
+  "unfinished_carry_patch": "outputs/takeover-20260909/f74-wide-carry-wip.patch",
+  "unfinished_scope": [
+    "customer/delivery projection SQL",
+    "receipt-final guard cleanup trigger",
+    "PUT contact carry route wiring"
+  ],
+  "unfinished_warning": "Patch typechecks and its schema/helper test passes, but it has no real-route carry test, no independent review, and must not be integrated as released behavior.",
+  "next_steps": [
+    "apply patch after priority-one release checkpoint",
+    "add real route tests for exact retry, zero-change, 5000/5001, 8MiB, event rollback, anonymous and revision races",
+    "review receipt-final ordering and typed in-batch error mapping",
+    "commit carry vertical only after independent PASS"
+  ],
+  "priority_one": {
+    "dependency_on_0143": false,
+    "head": "c8d3cfec268506caffc0ff3abf4c1f4c593f7975",
+    "note": "Do not cherry-pick 190f046a, 26519d0e, or the WIP artifact into the employee/return release."
+  },
+  "remote_actions": false
+}
