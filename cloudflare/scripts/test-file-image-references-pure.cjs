@@ -70,6 +70,7 @@ const route = loadTs('routes/files.ts', {
   '../lib/db': { getDb: () => dbShim },
   '../lib/permissions': permissions,
   '../lib/media': media,
+  '../lib/sqlBinding': { chunkForBinding: (items) => items.length ? [items] : [] },
   '../lib/fileAssets': {
     getMediaType: () => 'image',
     buildUniqueStoredName: (name) => name,

@@ -8,6 +8,7 @@ import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { getMediaType, buildUniqueStoredName, normalizePhysicalStorageSummary, sanitizeOriginalFileName } from '../lib/fileAssets'
 import { logicalLibraryName } from '../lib/libraryLogicalAssets'
 import { sanitizeMediaPath } from '../lib/media'
+import { chunkForBinding } from '../lib/sqlBinding'
 import { validateUploadedBuffer } from '../lib/uploadSecurity'
 import { audit } from '../lib/audit'
 import { broadcast } from '../durable-objects/broadcastHub'
@@ -87,7 +88,13 @@ function isPathReferencedInSettings(values: readonly { value: string }[], public
   return values.some((row) => String(row.value || '').includes(publicPath))
 }
 
-type PromotionImageReference = { id: number; title: string | null; is_active: number | null; image_path: string | null }
+type PromotionImageReference = {
+  id: number
+  title: string | null
+  is_active: number | null
+  image_path: string | null
+  sort_order: number | null
+}
 
 function decodedUploadPathCandidate(path: string): string {
   if (!path.startsWith('/uploads/')) return path
@@ -96,6 +103,11 @@ function decodedUploadPathCandidate(path: string): string {
   } catch (_) {
     return path
   }
+}
+
+function encodedUploadPathCandidate(path: string): string {
+  if (!path.startsWith('/uploads/') && !path.startsWith('uploads/')) return path
+  return path.split('/').map((part) => encodeURIComponent(part)).join('/')
 }
 
 // Promotion images predate the product-image ownership guard, so legacy/API
@@ -125,14 +137,76 @@ function indexPromotionImageReferences(rows: readonly PromotionImageReference[],
   return references
 }
 
-async function loadPromotionImageReferences(db: ReturnType<typeof getDb>): Promise<Map<string, PromotionImageReference[]>> {
-  const [promotionRows, assetRows] = await Promise.all([
-    db.prepare("SELECT id, title, is_active, image_path FROM promotions WHERE image_path IS NOT NULL AND image_path != '' ORDER BY sort_order ASC, id ASC")
-      .all<PromotionImageReference>(),
-    db.prepare("SELECT public_path FROM file_assets WHERE public_path IS NOT NULL AND public_path != ''")
-      .all<{ public_path: string }>(),
+function promotionLookupCandidates(publicPaths: readonly string[]): string[] {
+  const candidates = new Set<string>()
+  for (const publicPath of publicPaths) {
+    if (!publicPath) continue
+    candidates.add(publicPath)
+    const encoded = encodedUploadPathCandidate(publicPath)
+    candidates.add(encoded)
+    if (publicPath.startsWith('/uploads/')) {
+      candidates.add(publicPath.slice(1))
+      candidates.add(encoded.slice(1))
+    }
+  }
+  return [...candidates]
+}
+
+async function loadKnownPromotionAssetPaths(db: ReturnType<typeof getDb>, paths: readonly string[]): Promise<Set<string>> {
+  const knownPaths = new Set<string>()
+  for (const pathsChunk of chunkForBinding([...new Set(paths.filter(Boolean))])) {
+    const params: Record<string, string> = {}
+    const placeholders = pathsChunk.map((path, index) => {
+      const key = `promotionAssetPath${index}`
+      params[key] = path
+      return `@${key}`
+    })
+    const assetRows = await db.prepare(`SELECT public_path FROM file_assets WHERE public_path IN (${placeholders.join(', ')})`)
+      .all<{ public_path: string }>(params)
+    for (const row of assetRows) knownPaths.add(String(row.public_path || ''))
+  }
+  return knownPaths
+}
+
+// Query only the promotion paths that can resolve to the Library assets in
+// this response. The exact file_assets lookup uses its unique public_path
+// index, retaining a literal filename such as `banner.png?v=7` before its
+// cache-busted sibling is normalized. This deliberately avoids reading the
+// entire Library for each page, usage detail, or delete guard.
+async function loadPromotionImageReferences(db: ReturnType<typeof getDb>, publicPaths: readonly string[]): Promise<Map<string, PromotionImageReference[]>> {
+  const requestedPaths = [...new Set(publicPaths.map((path) => String(path || '')).filter(Boolean))]
+  if (!requestedPaths.length) return new Map()
+
+  const promotionRowsById = new Map<number, PromotionImageReference>()
+  for (const candidates of chunkForBinding(promotionLookupCandidates(requestedPaths))) {
+    const params: Record<string, string> = {}
+    const values = candidates.map((path, index) => {
+      const key = `promotionLookupPath${index}`
+      params[key] = path
+      return `(@${key})`
+    })
+    const rows = await db.prepare(`
+      WITH requested_promotion_paths(path) AS (VALUES ${values.join(', ')})
+      SELECT DISTINCT p.id, p.title, p.is_active, p.image_path, p.sort_order
+      FROM promotions p
+      JOIN requested_promotion_paths requested ON (
+        p.image_path = requested.path
+        OR (
+          substr(p.image_path, 1, length(requested.path)) = requested.path
+          AND substr(p.image_path, length(requested.path) + 1, 1) IN ('?', '#')
+        )
+      )
+      WHERE p.image_path IS NOT NULL AND p.image_path != ''
+    `).all<PromotionImageReference>(params)
+    for (const row of rows) promotionRowsById.set(Number(row.id), row)
+  }
+  const promotionRows = [...promotionRowsById.values()]
+    .sort((left, right) => Number(left.sort_order || 0) - Number(right.sort_order || 0) || Number(left.id) - Number(right.id))
+  const knownPaths = await loadKnownPromotionAssetPaths(db, [
+    ...requestedPaths,
+    ...promotionRows.map((row) => String(row.image_path || '').trim()),
   ])
-  return indexPromotionImageReferences(promotionRows, new Set(assetRows.map((row) => String(row.public_path || ''))))
+  return indexPromotionImageReferences(promotionRows, knownPaths)
 }
 
 // The Docker path used to run `sharp` server-side to compress oversized
@@ -200,7 +274,7 @@ app.get('/', async (c) => {
   // zero and the frontend's canDelete flag always undefined/false --
   // deleting was silently disabled for every file in the Library, in-use or
   // not.
-  const [totalRow, rawItems, settingValues, physicalStorageRow, promotionReferences] = await Promise.all([
+  const [totalRow, rawItems, settingValues, physicalStorageRow] = await Promise.all([
     db.prepare(`${LOGICAL_LIBRARY_CTE} SELECT COUNT(*) AS count FROM logical_assets ${whereSql}`).get<{ count: number }>(params),
     db.prepare(`
     ${LOGICAL_LIBRARY_CTE}
@@ -228,8 +302,8 @@ app.get('/', async (c) => {
         COALESCE(SUM(CASE WHEN media_type NOT IN ('image', 'video', 'document') OR media_type IS NULL THEN 1 ELSE 0 END), 0) AS other_count
       FROM file_assets
     `).get<Record<string, unknown>>(),
-    loadPromotionImageReferences(db),
   ])
+  const promotionReferences = await loadPromotionImageReferences(db, rawItems.map((row) => String(row.public_path || '')))
 
   // User-reported gap: the delete lock previously gave no reason beyond a
   // generic "in use" -- surfaced now as a per-row breakdown (`usage`) so
@@ -416,7 +490,7 @@ app.get('/:id/usage', async (c) => {
     db.prepare('SELECT id, name, username FROM users WHERE avatar_path = @path ORDER BY name COLLATE NOCASE ASC LIMIT 50')
       .all<{ id: number; name: string | null; username: string | null }>({ path: publicPath }),
     db.prepare('SELECT key, value FROM settings').all<{ key: string; value: string }>(),
-    loadPromotionImageReferences(db),
+    loadPromotionImageReferences(db, [publicPath]),
   ])
   const settingKeys = publicPath
     ? settingRows.filter((row) => String(row.value || '').includes(publicPath)).map((row) => row.key)
@@ -589,7 +663,7 @@ app.delete('/:id', async (c) => {
       (SELECT COUNT(*) FROM users WHERE avatar_path = @publicPath) AS avatar_count
     `).get<{ product_count: number; gallery_count: number; avatar_count: number }>({ publicPath: asset.public_path }),
     db.prepare('SELECT value FROM settings').all<{ value: string }>(),
-    loadPromotionImageReferences(db),
+    loadPromotionImageReferences(db, [asset.public_path]),
   ])
   const settingsUsage = isPathReferencedInSettings(settingValues, asset.public_path) ? 1 : 0
   const promotionsUsage = promotionReferences.get(asset.public_path)?.length || 0
