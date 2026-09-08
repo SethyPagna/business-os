@@ -45,9 +45,20 @@ type FileListMeta = {
 
 type FileListParams = QueryParams & {
   includeMeta?: boolean
+  // Response-shape control used by existing callers. Keep this separate from
+  // `includeStorageMeta`: callers that need the paginated response must not
+  // accidentally receive a bare items array while skipping storage totals.
+  includeStorageMeta?: boolean
   page?: number
   pageSize?: number
   limit?: number
+}
+
+type FileListRequestOptions = {
+  // The Library assets page owns this group. Pickers and the rewire chooser
+  // deliberately omit it so a keystroke in one surface cannot abort a read
+  // another surface still needs.
+  searchGroup?: string
 }
 
 export type UploadProgress = {
@@ -147,16 +158,17 @@ function parseJsonResponse(text: string): { data?: unknown; error?: string; mess
   }
 }
 
-export async function getFiles(params: FileListParams = {}): Promise<unknown[] | FileListMeta> {
+export async function getFiles(params: FileListParams = {}, options: FileListRequestOptions = {}): Promise<unknown[] | FileListMeta> {
   const query = buildQueryString(params)
   const result = await route(
     `files:get:${query}`,
-    () => apiFetch('GET', appendQuery('/api/files', query)),
+    (signal) => apiFetch('GET', appendQuery('/api/files', query), undefined, undefined, { signal }),
     // The media library has no offline mirror. Returning [] on a failed
     // server read makes a real error look like an empty successful library,
     // which clears the visible upload list until a manual refresh. Let the
     // caller keep its current list and show the actual error instead.
     null,
+    { searchGroup: options.searchGroup },
   )
   if (result == null) throw new Error('Files library is unavailable')
   return normalizeFileListResult(result, params)
