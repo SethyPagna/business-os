@@ -23,7 +23,7 @@ const libDir = path.join(__dirname, '..', 'src', 'lib')
 const REAL = new Set([
   'batchCode', 'importNumbers', 'stockActionResolver', 'stockActionImport',
   'stockActionCatalog', 'stockActionCommit', 'sqlBinding', 'productDetailRule',
-  'branchRoles',
+  'branchRoles', 'importBranchAuthority',
   // productIdentity carries identityBarcodeKeySql -- the ONE SQL spelling of the
   // fold the bounded catalog query uses. Stubbing it would let this test pass
   // over a query that never folds.
@@ -90,7 +90,7 @@ function makeDb() {
       category TEXT, brand TEXT, selling_price_usd REAL DEFAULT 0, selling_price_khr REAL DEFAULT 0,
       wholesale_price_usd REAL DEFAULT 0, cost_price_usd REAL DEFAULT 0, cost_price_khr REAL DEFAULT 0,
       stock_quantity REAL DEFAULT 0, is_active INTEGER DEFAULT 1, created_at TEXT, updated_at TEXT);
-    CREATE TABLE branches (id INTEGER PRIMARY KEY, name TEXT, is_active INTEGER DEFAULT 1);
+    CREATE TABLE branches (id INTEGER PRIMARY KEY, name TEXT, is_default INTEGER DEFAULT 0, is_active INTEGER DEFAULT 1);
     CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT, phone TEXT);
     CREATE TABLE delivery_contacts (id INTEGER PRIMARY KEY, name TEXT, phone TEXT);
     CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT, name TEXT, is_active INTEGER DEFAULT 1);
@@ -100,7 +100,7 @@ function makeDb() {
       payment_status TEXT, credit_due_date TEXT, received_quantity REAL, created_at TEXT, updated_at TEXT);
     CREATE TABLE branch_batch_stock (batch_id INTEGER, branch_id INTEGER, quantity REAL DEFAULT 0,
       updated_at TEXT, UNIQUE(batch_id, branch_id));
-    INSERT INTO branches(id, name) VALUES (1, 'Shop'), (2, 'Warehouse');
+    INSERT INTO branches(id, name, is_default) VALUES (1, 'Shop', 1), (2, 'Warehouse', 0);
   `)
   const db = {
     prepare(sql) {
@@ -317,11 +317,11 @@ function seedCatalog(sqlite) {
       CREATE TABLE products (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, name_normalized TEXT,
         barcode TEXT, selling_price_usd REAL DEFAULT 0, wholesale_price_usd REAL DEFAULT 0,
         cost_price_usd REAL DEFAULT 0, is_active INTEGER DEFAULT 1);
-      CREATE TABLE branches (id INTEGER PRIMARY KEY, name TEXT, is_active INTEGER DEFAULT 1);
+      CREATE TABLE branches (id INTEGER PRIMARY KEY, name TEXT, is_default INTEGER DEFAULT 0, is_active INTEGER DEFAULT 1);
       CREATE TABLE product_batches (id INTEGER PRIMARY KEY AUTOINCREMENT, variant_product_id INTEGER,
         batch_key TEXT, lot_code TEXT, is_active INTEGER DEFAULT 1);
       CREATE TABLE branch_stock (product_id INTEGER, branch_id INTEGER, quantity REAL DEFAULT 0);
-      INSERT INTO branches (id, name) VALUES (1, 'Shop'), (2, 'Warehouse');
+      INSERT INTO branches (id, name, is_default) VALUES (1, 'Shop', 1), (2, 'Warehouse', 0);
     `)
     const insert = sqlite.prepare(`INSERT INTO products (id, name, name_normalized, barcode, selling_price_usd, wholesale_price_usd, cost_price_usd)
       VALUES (@id, @name, @normalized, @barcode, @selling, @wholesale, @cost)`)
