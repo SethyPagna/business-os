@@ -702,6 +702,10 @@ function setup(withCostKind) {
       movement_fingerprint TEXT NOT NULL, PRIMARY KEY(operation_id, sale_id));
     CREATE TABLE sale_mutation_receipts (id TEXT PRIMARY KEY, sale_id INTEGER NOT NULL,
       mutation_kind TEXT NOT NULL, generation INTEGER NOT NULL DEFAULT 0);
+    CREATE TABLE sale_record_events (id TEXT PRIMARY KEY, sale_id INTEGER NOT NULL, source_kind TEXT NOT NULL,
+      source_id TEXT NOT NULL, generation INTEGER NOT NULL, kind TEXT NOT NULL, via TEXT NOT NULL,
+      subject TEXT, actor_username TEXT, occurred_at TEXT NOT NULL, changes_json TEXT NOT NULL,
+      UNIQUE(source_kind,source_id,generation,sale_id));
     CREATE TABLE return_bulk_operations (id TEXT PRIMARY KEY, request_json TEXT NOT NULL, receipt_json TEXT NOT NULL,
       history_id INTEGER, generation INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE return_bulk_members (operation_id TEXT NOT NULL, return_id INTEGER NOT NULL, sale_id INTEGER,
@@ -841,6 +845,17 @@ function seedRecords(sqlite) {
     .run({ req: BULK[0].request_json, rec: BULK[0].receipt_json })
   sqlite.prepare("INSERT INTO sale_bulk_members (operation_id, sale_id, revision, movement_fingerprint) VALUES ('op-abc',77,1,'[]')").run()
   sqlite.prepare("INSERT INTO action_history (id, scope, entity, entity_id, label, created_by_name, created_at) VALUES (90,'global','sale','op-abc','2 sales -> cancelled','admin','2026-09-06 17:45:00')").run()
+  sqlite.prepare(`INSERT INTO sale_record_events(
+    id,sale_id,source_kind,source_id,generation,kind,via,actor_username,occurred_at,changes_json
+  ) VALUES('00000000-0000-4000-8000-000000000077',77,'sale_bulk_status','op-abc',0,'cancelled','apply','admin','2026-09-06 17:45:00',?)`)
+    .run(JSON.stringify([{ field: 'sale_status', before: { state: 'known_value', value: 'completed' }, after: { state: 'known_value', value: 'cancelled' } }]))
+}
+
+const DURABLE_BULK_EVENT = {
+  id: '00000000-0000-4000-8000-000000000077', sale_id: 77,
+  source_kind: 'sale_bulk_status', source_id: 'op-abc', generation: 0,
+  kind: 'cancelled', via: 'apply', actor_username: 'admin', occurred_at: '2026-09-06 17:45:00',
+  changes_json: JSON.stringify([{ field: 'sale_status', before: { state: 'known_value', value: 'completed' }, after: { state: 'known_value', value: 'cancelled' } }]),
 }
 
 runTest('the list-row count equals the number of lines the float shows, for both a busy sale and an untouched one', () => {
@@ -863,7 +878,7 @@ runTest('the list-row count equals the number of lines the float shows, for both
   // other -- and this is the assertion that makes them one number.
   const detail77 = buildSaleRecords({
     sale: SALE_RETURNED, ledger: [...LEDGER, UNDO_LEDGER, REDO_LEDGER], audit: [...AUDIT, UNDO_AUDIT, REDO_AUDIT],
-    bulk: BULK, returns: RETURNS, returnAudit: RETURN_AUDIT, returnBulk: RETURN_BULK_EVENTS,
+    events: [DURABLE_BULK_EVENT], bulk: BULK, returns: RETURNS, returnAudit: RETURN_AUDIT, returnBulk: RETURN_BULK_EVENTS,
   })
   assert.strictEqual(count77, detail77.length, 'the row badge and the float must agree')
   assert.strictEqual(count77, 14,
@@ -889,7 +904,7 @@ runTest('the list-row count equals the number of lines the float shows, for both
   const afterPruneCount77 = Number(afterPrune.find((row) => Number(row.sale_id) === 77)?.n || 0) + SALE_RECORDS_SELF_COUNT
   const detailAfterPrune = buildSaleRecords({
     sale: SALE_RETURNED, ledger: [...LEDGER, UNDO_LEDGER, REDO_LEDGER], audit: [...AUDIT, UNDO_AUDIT, REDO_AUDIT],
-    bulk: BULK, returns: RETURNS, returnAudit: RETURN_AUDIT, returnBulk: [RETURN_BULK_EVENTS[0]],
+    events: [DURABLE_BULK_EVENT], bulk: BULK, returns: RETURNS, returnAudit: RETURN_AUDIT, returnBulk: [RETURN_BULK_EVENTS[0]],
   })
   assert.strictEqual(afterPruneCount77, 14, 'durable generation keeps the badge count after replay audit pruning')
   assert.strictEqual(detailAfterPrune.length, afterPruneCount77, 'synthesized unknown replay rows keep detail/count parity')
@@ -1047,6 +1062,28 @@ runTest('durable sale bulk receipt emits exact replay directions and surviving a
   assert.equal(known(changed(records[1], 'sale_status')), 'completed')
 })
 
+runTest('durable events suppress only the exact four-key legacy twin', () => {
+  const event = {
+    id: '00000000-0000-4000-8000-000000000088', sale_id: 77,
+    source_kind: 'sale_status', source_id: 'actor:1:request:stable', generation: 0,
+    kind: 'status_changed', via: 'apply', actor_username: 'admin', occurred_at: '2026-09-06 18:00:00',
+    changes_json: JSON.stringify([{ field: 'sale_status', before: { state: 'known_value', value: 'completed' }, after: { state: 'known_value', value: 'awaiting_delivery' } }]),
+  }
+  const exact = { id: 901, action: 'update', user_name: 'admin', created_at: event.occurred_at, details: JSON.stringify({
+    oldStatus: 'completed', newStatus: 'awaiting_delivery',
+    record_event: { source_kind: event.source_kind, source_id: event.source_id, generation: 0, sale_id: 77 },
+  }) }
+  const distinct = { ...exact, id: 902, details: JSON.stringify({
+    oldStatus: 'completed', newStatus: 'awaiting_delivery',
+    record_event: { source_kind: event.source_kind, source_id: 'actor:1:request:distinct', generation: 0, sale_id: 77 },
+  }) }
+  const records = buildSaleRecords({ sale: SALE, events: [event], audit: [exact, distinct] })
+  assert.ok(records.some((record) => record.id === `event:${event.id}`))
+  assert.ok(!records.some((record) => record.id === 'audit:901'))
+  assert.ok(records.some((record) => record.id === 'audit:902'), 'same actor/time/state is still a real event when provenance differs')
+  assert.deepEqual(records.find((record) => record.id === `event:${event.id}`).changes, JSON.parse(event.changes_json))
+})
+
 // ---------------------------------------------------------------------------
 // The route, by source shape. There is no Worker runtime in this harness, so
 // these assert the four properties that would otherwise only be provable in
@@ -1082,6 +1119,11 @@ runTest('the Worker route is actually wired to this module', () => {
     'detail accepts only the replay audit family counted by durable generation')
   assert.match(ROUTES, /FROM sale_mutation_receipts/,
     'permanent mutation before-snapshots survive audit retention for creation reconstruction')
+  assert.match(ROUTES, /FROM sale_record_events\s+WHERE sale_id = \?/,
+    'the detail route reads the immutable event ledger by its indexed sale key')
+  assert.match(ROUTES, /events: eventRows/, 'durable events participate in the shared detail classifier')
+  assert.match(buildSaleRecordsCountSql('?'), /SELECT COUNT\(\*\) FROM sale_record_events sre WHERE sre\.sale_id=s\.id/,
+    'the list badge counts the same immutable event rows')
   assert.match(ROUTES, /status_before_return/, "the returns source's before comes from the sale row")
   // The customer-scope filter, in the route AND in the count SQL: a supplier
   // return never moved sales.sale_status, and counting it would put a number on

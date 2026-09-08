@@ -102,6 +102,7 @@ import {
   type SaleRecordMutationRow,
   type SaleRecordMutationReplayRow,
   type SaleRecordSaleRow,
+  type SaleRecordEventRow,
 } from '../lib/saleRecords'
 import { VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES } from '../lib/salesStatus'
 import { consumeDamagedLot, restoreDamagedLot, DamagedLotShortfallError, DAMAGE_OUT_MOVEMENT, DAMAGE_IN_MOVEMENT } from '../lib/returnsStock'
@@ -2836,6 +2837,14 @@ app.get('/:id/records', async (c) => {
   `).get<SaleRecordSaleRow>([saleId])
   if (!sale) return c.json({ error: 'Sale not found' }, 404)
 
+  const eventRows = await db.prepare(`
+    SELECT id,sale_id,source_kind,source_id,generation,kind,via,subject,
+      actor_username,occurred_at,changes_json
+    FROM sale_record_events
+    WHERE sale_id = ?
+    ORDER BY occurred_at ASC,id ASC
+  `).all<SaleRecordEventRow>([saleId])
+
   const ledger = await db.prepare(`
     SELECT id, kind, group_id, product_name,
       quantity_before, quantity_after, amount_before_usd, amount_after_usd,
@@ -2956,6 +2965,7 @@ app.get('/:id/records', async (c) => {
 
   const records = buildSaleRecords({
     sale,
+    events: eventRows,
     ledger,
     audit: auditRows,
     bulk,
