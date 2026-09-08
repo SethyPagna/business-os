@@ -112,6 +112,7 @@ function loadRoute(d1, realMergeRuntime = false) {
     '../index': {}, './auth': {}, './db': { getDb: () => db }, './audit': { audit: async () => {} },
     '../durable-objects/broadcastHub': { broadcast: async () => {} }, './branchWrites': { branchUpdateStatements: () => [] },
     './permissions': permissions, './actorSnapshot': actor, './productMerge': merge,
+    './productDelete': productDelete,
     './saleBulkStatus': { replaySaleBulkStatus: never },
     './saleBulkUpdate': { BULK_UPDATE_KIND: 'sale.fields.bulk', BULK_CUSTOMER_UPDATE_KIND: 'sale.customer.bulk', replaySaleBulkUpdate: never },
     './returnBulkAction': { RETURN_BULK_ACTION_KIND: 'return.fields.bulk', replayReturnBulkAction: never },

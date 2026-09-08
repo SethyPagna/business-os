@@ -28,9 +28,20 @@ function setup() {
   return { d1, ...loaded }
 }
 
+function productGraph(d1) {
+  return {
+    product: { ...d1.db.prepare('SELECT * FROM products WHERE id=10000').get() },
+    stock: d1.db.prepare('SELECT * FROM branch_stock WHERE product_id=10000 ORDER BY id').all().map((row) => ({ ...row })),
+    batches: d1.db.prepare('SELECT * FROM product_batches WHERE variant_product_id=10000 ORDER BY id').all().map((row) => ({ ...row })),
+    batchStock: d1.db.prepare(`SELECT bbs.* FROM branch_batch_stock bbs JOIN product_batches pb ON pb.id=bbs.batch_id
+      WHERE pb.variant_product_id=10000 ORDER BY bbs.id`).all().map((row) => ({ ...row })),
+  }
+}
+
 async function main() {
   {
     const fixture = setup()
+    const sourceGraph = productGraph(fixture.d1)
     const body = { reason: 'Independent duplicate', expectedUpdatedAt: '2026-09-08 01:00:00', client_request_id: 'direct_remove_10000' }
     const first = await remove(fixture.app, 10000, body)
     assert.equal(first.status, 200, JSON.stringify(first.body))
@@ -65,6 +76,23 @@ async function main() {
     }, beforeReplay)
     const conflict = await remove(fixture.app, 10000, { ...body, reason: 'Changed intent' })
     assert.equal(conflict.status, 409); assert.equal(conflict.body.code, 'idempotency_conflict')
+    const history = fixture.d1.db.prepare("SELECT id,undo_payload FROM action_history WHERE json_extract(undo_payload,'$.applier')='product.remove'").get()
+    const undoPayload = JSON.parse(history.undo_payload)
+    const applier = fixture.undo.resolveUndoApplier(undoPayload)
+    const undone = await applier.run(undoPayload, { env: {}, user: { id: 900, username: 'owner' }, direction: 'undo', historyId: history.id, generation: 0 })
+    assert.equal(undone.complete, true)
+    assert.deepEqual(productGraph(fixture.d1), sourceGraph, 'Undo restores the same product, stock and receipt ids with every saved value')
+    assert.deepEqual({ ...fixture.d1.db.prepare('SELECT status,generation FROM product_remove_operations WHERE operation_id=?').get(first.body.operation_id) },
+      { status: 'reversed', generation: 1 })
+    const lostUndoResponse = await applier.run(undoPayload, { env: {}, user: { id: 900, username: 'owner' }, direction: 'undo', historyId: history.id, generation: 0 })
+    assert.equal(lostUndoResponse.processed_children, 0)
+    const redoPayload = JSON.parse(fixture.d1.db.prepare('SELECT redo_payload FROM action_history WHERE id=?').get(history.id).redo_payload)
+    const redone = await applier.run(redoPayload, { env: {}, user: { id: 900, username: 'owner' }, direction: 'redo', historyId: history.id, generation: 1 })
+    assert.equal(redone.complete, true)
+    assert.deepEqual({ ...fixture.d1.db.prepare('SELECT is_active,stock_quantity,rfid_confirmed_qty FROM products WHERE id=10000').get() },
+      { is_active: 0, stock_quantity: 0, rfid_confirmed_qty: 0 })
+    assert.deepEqual({ ...fixture.d1.db.prepare('SELECT status,generation FROM product_remove_operations WHERE operation_id=?').get(first.body.operation_id) },
+      { status: 'undo_ready', generation: 2 })
     assert.ok(fixture.controls.statements <= 80)
     assert.ok(fixture.controls.maxBindings <= 100)
     assert.ok(fixture.controls.maxCompoundTerms <= 5)

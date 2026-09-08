@@ -68,6 +68,7 @@ export function buildServerReplayRequest(payload: Record<string, unknown> | unde
   const generationGuarded = applier.endsWith('.bulk')
     || applier === 'sale.settlement'
     || applier === 'product.merge.group'
+    || applier === 'product.remove'
   return {
     require_applied: true,
     ...(generationGuarded && payload?.generation != null ? { expected_generation: payload.generation } : {}),
