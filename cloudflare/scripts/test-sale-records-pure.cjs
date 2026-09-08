@@ -452,11 +452,12 @@ runTest('a payment correction is one rich record, not a status-only duplicate', 
   const at = '2026-09-06 12:30:00'
   const generic = {
     id: 700, action: 'update', user_name: 'dara', created_at: at,
-    details: JSON.stringify({ oldStatus: 'awaiting_payment', newStatus: 'completed' }),
+    details: JSON.stringify({ operationId: 'settlement-1', oldStatus: 'awaiting_payment', newStatus: 'completed' }),
   }
   const explicit = {
     id: 701, action: 'sale_settlement', user_name: 'dara', created_at: at,
     details: JSON.stringify({
+      operationId: 'settlement-1',
       paymentCorrection: true,
       before: { sale_status: 'awaiting_payment', payment_method: null, payment_details: null, amount_paid_usd: 0, amount_paid_khr: 0 },
       after: { sale_status: 'completed', payment_method: 'ABA', payment_details: '[{"method":"ABA","amount_usd":90,"amount_khr":0}]', amount_paid_usd: 90, amount_paid_khr: 0 },
@@ -470,6 +471,13 @@ runTest('a payment correction is one rich record, not a status-only duplicate', 
   assert.strictEqual(known(changed(payments[0], 'payment_method')), 'ABA')
   assert.strictEqual(known(changed(payments[0], 'amount_paid_usd')), 90)
   assert.deepStrictEqual(known(changed(payments[0], 'payment_details')), [{ method: 'ABA', amount_usd: 90, amount_khr: 0 }])
+
+  const distinct = buildSaleRecords({
+    sale: SALE,
+    audit: [{ ...generic, id: 702, details: JSON.stringify({ operationId: 'status-2', oldStatus: 'awaiting_payment', newStatus: 'completed' }) }, explicit],
+  })
+  assert.strictEqual(distinct.filter((record) => record.source === 'audit').length, 2,
+    'same actor, states and timestamp cannot suppress a distinct operation')
 })
 
 runTest('a customer swap reports both ids', () => {
@@ -825,8 +833,8 @@ function seedRecords(sqlite) {
   sqlite.prepare("INSERT INTO returns (id, return_number, sale_id, cashier_name, status, return_scope, total_refund_usd, created_at, updated_at) VALUES (9,'R-0009',78,'sokha','completed','customer',1,'2026-09-06 19:30:00','2026-09-06 19:30:00')").run()
   // An audit row about a DIFFERENT sale and a row about another entity: both
   // must be invisible to sale 77's count.
-  sqlite.prepare(`INSERT INTO audit_logs (id, user_name, action, entity, entity_id, details, created_at) VALUES (600,'admin','update','sale','78','{"oldStatus":"completed","newStatus":"cancelled"}','2026-09-06 19:00:00')`).run()
-  sqlite.prepare(`INSERT INTO audit_logs (id, user_name, action, entity, entity_id, details, created_at) VALUES (602,'admin','sale_payment_correction_opened','sale','78','{"oldStatus":"completed","newStatus":"cancelled"}','2026-09-06 19:00:00')`).run()
+  sqlite.prepare(`INSERT INTO audit_logs (id, user_name, action, entity, entity_id, details, created_at) VALUES (600,'admin','update','sale','78','{"operationId":"correction-78","oldStatus":"completed","newStatus":"cancelled"}','2026-09-06 19:00:00')`).run()
+  sqlite.prepare(`INSERT INTO audit_logs (id, user_name, action, entity, entity_id, details, created_at) VALUES (602,'admin','sale_payment_correction_opened','sale','78','{"operationId":"correction-78","oldStatus":"completed","newStatus":"cancelled"}','2026-09-06 19:00:00')`).run()
   sqlite.prepare("INSERT INTO audit_logs (id, user_name, action, entity, entity_id, details, created_at) VALUES (601,'admin','update','product','77','{}','2026-09-06 19:00:00')").run()
 
   sqlite.prepare("INSERT INTO sale_bulk_operations (id, actor_id, request_id, request_json, receipt_json, history_id) VALUES ('op-abc',1,'r1',@req,@rec,90)")
@@ -980,7 +988,7 @@ runTest('the public contract is changed-only and distinguishes General from unkn
   assert.equal(customer.after, undefined)
   const identity = changed(customer, 'customer')
   assert.deepStrictEqual(identity.before, { state: 'known_none' }, 'General is a known anonymous assignment')
-  assert.deepStrictEqual(identity.after, { state: 'known_value', value: { id: 9, name: null, phone: null, address: null } })
+  assert.deepStrictEqual(identity.after, { state: 'known_value', value: { id: 9, name: null } })
   const legacy = buildSaleRecords({ sale: SALE })[0]
   assert.equal(changed(legacy, 'items').after.state, 'unknown')
   assert.equal(changed(legacy, 'payment').after.state, 'unknown')

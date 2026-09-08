@@ -637,6 +637,8 @@ export async function applyUnifiedStockSale(db: D1Compat, input: UnifiedStockSal
     changeKhr: 0,
     isDelivery: false,
     deliveryFeeUsd: 0,
+    customerSnapshot: null,
+    membershipSnapshot: null,
   })
   statements.push({
     sql: `INSERT INTO sales (

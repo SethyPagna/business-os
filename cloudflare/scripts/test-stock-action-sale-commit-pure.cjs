@@ -132,6 +132,8 @@ const base = {
     { product_id: 10, product: 'Serum', sku: null, quantity: 4, unit_price_usd: 11, line_total_usd: 44 },
   ])
   assert.equal(creation.total_usd, 64)
+  assert.equal(creation.customer, null)
+  assert.equal(creation.membership, null)
 
   const explicit = setup()
   await subject.applyUnifiedStockSale(explicit.db, {

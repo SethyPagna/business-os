@@ -50,7 +50,7 @@ export interface SaleCreationSnapshotInput {
   deliveryFeeUsd?: unknown
   deliveryActualCostUsd?: unknown
   /** Explicit null means the sale was recorded for anonymous General. */
-  customerSnapshot?: { id?: unknown; name?: unknown; phone?: unknown; address?: unknown } | null
+  customerSnapshot?: { id?: unknown; name?: unknown } | null
   /** Explicit null means the captured customer had no membership. */
   membershipSnapshot?: {
     number?: unknown
@@ -91,7 +91,7 @@ export interface SaleCreationSnapshotV1 {
     delivery_fee_usd: number | null
     delivery_actual_cost_usd: number | null
   }
-  customer?: { id: number | null; name: string | null; phone: string | null; address: string | null } | null
+  customer?: { id: number | null; name: string | null } | null
   membership?: { number: string | null; discount_usd: number | null; discount_khr: number | null; points_redeemed: number | null } | null
 }
 
@@ -195,8 +195,6 @@ export function buildSaleCreationSnapshot(input: SaleCreationSnapshotInput): str
       customer: input.customerSnapshot === null ? null : {
         id: id(input.customerSnapshot.id),
         name: text(input.customerSnapshot.name),
-        phone: text(input.customerSnapshot.phone),
-        address: text(input.customerSnapshot.address),
       },
     }),
     ...(input.membershipSnapshot === undefined ? {} : {

@@ -133,6 +133,24 @@ function saleData(overrides = {}) {
   }])
   assert.equal(creation.sale_at, '2026-08-28T07:30:00.000Z')
   assert.equal(creation.recorded_at, input.nowIso)
+  assert.equal(creation.customer, null, 'an imported General sale is known anonymous')
+  assert.equal(creation.membership, null, 'an imported General sale has known no membership')
+
+  const member = setup()
+  await subject.applyHistoricalSaleImport(member.db, {
+    ...input,
+    rowNumber: 3,
+    data: saleData({
+      customer_id: 5,
+      customer_name: 'Historical Member',
+      membership_number: 'HIST-5',
+      membership_discount_usd: 1,
+      membership_points_redeemed: 20,
+    }),
+  })
+  const memberCreation = JSON.parse(member.sqlite.prepare(`SELECT creation_snapshot_json FROM sales WHERE client_request_id = 'sales-import:job-1:3'`).get().creation_snapshot_json)
+  assert.deepEqual(memberCreation.customer, { id: 5, name: 'Historical Member' })
+  assert.deepEqual(memberCreation.membership, { number: 'HIST-5', discount_usd: 1, discount_khr: 0, points_redeemed: 20 })
   assert.equal(normal.sqlite.prepare(`SELECT COUNT(*) n FROM sale_items`).get().n, 1)
   assert.equal(normal.sqlite.prepare(`SELECT s.receipt_number FROM sale_items si JOIN sales s ON s.id = si.sale_id`).get().receipt_number, '20260828-143000')
   assert.equal(normal.sqlite.prepare(`SELECT stock_quantity FROM products WHERE id = 10`).get().stock_quantity, 5, 'ordinary history import never deducts current stock')

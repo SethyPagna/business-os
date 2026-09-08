@@ -308,8 +308,6 @@ export function saleCreatedRecordFromSnapshot(
       delivery_actual_cost_usd: numberOrNull(driver.delivery_actual_cost_usd),
       customer_id: numberOrNull(customer?.id),
       customer_name: text(customer?.name),
-      customer_phone: text(customer?.phone),
-      customer_address: text(customer?.address),
       membership_number: text(membership?.number),
       membership_discount_usd: numberOrNull(membership?.discount_usd),
       membership_discount_khr: numberOrNull(membership?.discount_khr),
@@ -1157,9 +1155,7 @@ function driverValue(snapshot: Record<string, unknown>): Record<string, unknown>
 function customerValue(snapshot: Record<string, unknown>): Record<string, unknown> | null {
   const id = numberOrNull(snapshot.customer_id)
   const name = text(snapshot.customer_name)
-  const phone = text(snapshot.customer_phone)
-  const address = text(snapshot.customer_address)
-  return id === null ? null : { id, name, phone, address }
+  return id === null ? null : { id, name }
 }
 
 function membershipValue(snapshot: Record<string, unknown>): Record<string, unknown> | null {
@@ -1341,25 +1337,14 @@ export function buildSaleRecords(input: {
   for (const row of input.ledger || []) {
     if (!groupedLedgerIds.has(row.id)) records.push(ledgerRecord(row))
   }
-  const explicitTransitions = (input.audit || []).flatMap((row) => {
+  const explicitTransitionOperationIds = new Set((input.audit || []).flatMap((row) => {
     const action = String(row.action || '')
     const details = parseDetails(row.details) || {}
-    let before: unknown
-    let after: unknown
-    if (action === 'sale_payment_correction_opened') {
-      before = details.oldStatus
-      after = details.newStatus
-    } else if (action === 'sale_settlement') {
-      before = details.before && typeof details.before === 'object' ? (details.before as Record<string, unknown>).sale_status : null
-      after = details.after && typeof details.after === 'object' ? (details.after as Record<string, unknown>).sale_status : null
-    } else return []
-    return [{
-      actor: text(row.user_name) || '',
-      at: atMs(row.created_at),
-      before: text(before) || '',
-      after: text(after) || '',
-    }]
-  })
+    const operationId = text(details.operationId)
+    return operationId && ['sale_payment_correction_opened', 'sale_settlement'].includes(action)
+      ? [operationId]
+      : []
+  }))
   const durableSettlementIds = new Set((input.mutations || [])
     .filter((row) => text(row.mutation_kind) === 'settlement' && text(row.id))
     .map((row) => String(row.id)))
@@ -1370,14 +1355,8 @@ export function buildSaleRecords(input: {
     }
     if (String(row.action || '') === 'update') {
       const details = parseDetails(row.details) || {}
-      const transitionAt = atMs(row.created_at)
-      if (explicitTransitions.some((candidate) => (
-        candidate.actor === (text(row.user_name) || '')
-        && candidate.before === (text(details.oldStatus) || '')
-        && candidate.after === (text(details.newStatus) || '')
-        && candidate.at !== null && transitionAt !== null
-        && Math.abs(candidate.at - transitionAt) <= 2000
-      ))) continue
+      const operationId = text(details.operationId)
+      if (operationId && explicitTransitionOperationIds.has(operationId)) continue
     }
     const record = auditRecord(row)
     if (record) records.push(record)
@@ -1511,21 +1490,14 @@ export function buildSaleRecordsCountSql(placeholders: string): string {
             WHERE smr.sale_id=s.id AND smr.mutation_kind='settlement'
               AND smr.id=json_extract(a.details,'$.operationId')
           ))
-          AND NOT (a.action = 'update' AND EXISTS (
+          AND NOT (a.action = 'update' AND json_valid(a.details)
+            AND COALESCE(json_extract(a.details, '$.operationId'), '') <> '' AND EXISTS (
             SELECT 1 FROM audit_logs explicit
             WHERE explicit.entity = a.entity
               AND explicit.entity_id = a.entity_id
-              AND COALESCE(explicit.user_name, '') = COALESCE(a.user_name, '')
-              AND ABS((julianday(explicit.created_at) - julianday(a.created_at)) * 86400) <= 2
-              AND (
-                (explicit.action = 'sale_payment_correction_opened'
-                  AND COALESCE(CASE WHEN json_valid(explicit.details) THEN json_extract(explicit.details, '$.oldStatus') END, '') = COALESCE(CASE WHEN json_valid(a.details) THEN json_extract(a.details, '$.oldStatus') END, '')
-                  AND COALESCE(CASE WHEN json_valid(explicit.details) THEN json_extract(explicit.details, '$.newStatus') END, '') = COALESCE(CASE WHEN json_valid(a.details) THEN json_extract(a.details, '$.newStatus') END, ''))
-                OR
-                (explicit.action = 'sale_settlement'
-                  AND COALESCE(CASE WHEN json_valid(explicit.details) THEN json_extract(explicit.details, '$.before.sale_status') END, '') = COALESCE(CASE WHEN json_valid(a.details) THEN json_extract(a.details, '$.oldStatus') END, '')
-                  AND COALESCE(CASE WHEN json_valid(explicit.details) THEN json_extract(explicit.details, '$.after.sale_status') END, '') = COALESCE(CASE WHEN json_valid(a.details) THEN json_extract(a.details, '$.newStatus') END, ''))
-              )
+              AND explicit.action IN ('sale_payment_correction_opened','sale_settlement')
+              AND json_valid(explicit.details)
+              AND json_extract(explicit.details, '$.operationId') = json_extract(a.details, '$.operationId')
           ))
       )
       + COALESCE((SELECT SUM(1 + MAX(0, COALESCE(smr.generation,0)))

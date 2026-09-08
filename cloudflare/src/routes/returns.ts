@@ -1258,6 +1258,13 @@ app.post('/', async (c) => {
       const replacementPaymentDetails = customerTenderUsd > 0
         ? [{ method: replacementPaymentMethod, amount_usd: customerTenderUsd, amount_khr: 0 }]
         : []
+      const replacementCustomerId = Number(body.customer_id || saleMeta.customer_id) || null
+      const replacementCustomerName = body.customer_name || saleMeta.customer_name || null
+      const replacementCustomerPhone = saleMeta.customer_phone || null
+      const replacementCustomerAddress = contactDisplayAddress(saleMeta.customer_address) || null
+      const replacementMembership = replacementCustomerId
+        ? await db.prepare('SELECT membership_number FROM customers WHERE id = ?').get<{ membership_number: string | null }>([replacementCustomerId])
+        : null
       const replacementCreationSnapshot = buildSaleCreationSnapshot({
         origin: 'return_replacement',
         recordedAt: replacementRecordedAt,
@@ -1283,6 +1290,16 @@ app.post('/', async (c) => {
         changeKhr: 0,
         isDelivery: false,
         deliveryFeeUsd: 0,
+        customerSnapshot: replacementCustomerId ? {
+          id: replacementCustomerId,
+          name: replacementCustomerName,
+        } : null,
+        membershipSnapshot: replacementMembership?.membership_number ? {
+          number: replacementMembership.membership_number,
+          discountUsd: 0,
+          discountKhr: 0,
+          pointsRedeemed: 0,
+        } : null,
       })
       const replacementSaleInsert = await db.prepare(`
         INSERT INTO sales (
@@ -1311,10 +1328,10 @@ app.post('/', async (c) => {
         cashier_name: actorSnapshot(user),
         branch_id: branchId,
         branch_name: branchName,
-        customer_id: body.customer_id || saleMeta.customer_id || null,
-        customer_name: body.customer_name || saleMeta.customer_name || null,
-        customer_phone: saleMeta.customer_phone || null,
-        customer_address: contactDisplayAddress(saleMeta.customer_address) || null,
+        customer_id: replacementCustomerId,
+        customer_name: replacementCustomerName,
+        customer_phone: replacementCustomerPhone,
+        customer_address: replacementCustomerAddress,
         payment_method: replacementPaymentMethod,
         payment_details: JSON.stringify(replacementPaymentDetails),
         exchange_rate: exchangeRate,

@@ -41,7 +41,10 @@ function fixture() {
     INSERT INTO branches(id,name) VALUES(1,'Shop');
     -- N21: customer 3 carries the Contact Options JSON that customers.address
     -- actually stores, so the reassignment below is exercised on the real shape.
-    INSERT INTO customers(id,name,phone,address) VALUES(1,'Old','011','Old road'),(2,'Other','022','Other road'),(3,'New','033','[{"label":"Default","name":null,"phone":null,"email":null,"address":"New road","area":null}]');
+    INSERT INTO customers(id,name,phone,address,membership_number) VALUES
+      (1,'Old','011','Old road','OLD-MEMBER'),
+      (2,'Other','022','Other road',NULL),
+      (3,'New','033','[{"label":"Default","name":null,"phone":null,"email":null,"address":"New road","area":null}]','NEW-MEMBER');
     INSERT INTO delivery_contacts(id,name,phone,area,address) VALUES(1,'Driver A','111','A area','A road'),(2,'Driver B','222','B area','B road');
     INSERT INTO sales(id,receipt_number,sale_status,branch_id,branch_name,cashier_name,customer_id,customer_name,customer_phone,customer_address,payment_method,payment_details,payment_currency,exchange_rate,amount_paid_usd,amount_paid_khr,change_usd,change_khr,is_delivery,delivery_contact_id,delivery_contact_name,delivery_contact_phone,delivery_contact_address,delivery_actual_cost_usd,updated_at)
     VALUES
@@ -132,6 +135,9 @@ async function run(){
   // as this writer used to, stores the options JSON, and the sale detail, the
   // receipt and the CSV export then print it.
   assert.equal(f.sql.prepare('SELECT customer_address FROM sales WHERE id=1').get().customer_address,'New road')
+  const customerReceipt=JSON.parse(f.sql.prepare('SELECT receipt_json FROM sale_bulk_operations WHERE id=?').get(customer.body.operationId).receipt_json)
+  assert.equal(customerReceipt.items.find(item=>item.id===1).before.membership_number,'OLD-MEMBER')
+  assert.equal(customerReceipt.items.find(item=>item.id===1).after.membership_number,'NEW-MEMBER')
   f.sql.prepare("UPDATE customers SET name='Older' WHERE id=1").run()
   const editedSource=snapshot(f)
   assert.equal((await replay(f,customer.body.actionHistoryId)).status,409)
@@ -149,6 +155,16 @@ async function run(){
   assert.equal((await replay(f,customer.body.actionHistoryId,'undo',2)).status,409)
   assert.equal(snapshot(f),lateReturn)
   console.log('PASS customer reassignment mirrors exact linked returns; destination reference edits and newly linked returns block replay')
+
+  f=fixture()
+  f.sql.prepare("UPDATE sales SET customer_id=NULL,customer_name=NULL,customer_phone=NULL,customer_address=NULL,updated_at='general-time' WHERE id=3").run()
+  const fromGeneral=await f.call(sales,'/bulk-update',request(f,{kind:'customer',source_id:null,target_id:3},'customer-general-1',[3]))
+  assert.equal(fromGeneral.status,200,JSON.stringify(fromGeneral))
+  const generalReceipt=JSON.parse(f.sql.prepare('SELECT receipt_json FROM sale_bulk_operations WHERE id=?').get(fromGeneral.body.operationId).receipt_json)
+  assert.equal(generalReceipt.items[0].before.customer_id,null)
+  assert.equal(generalReceipt.items[0].before.membership_number,null)
+  assert.equal(generalReceipt.items[0].after.membership_number,'NEW-MEMBER')
+  console.log('PASS General is explicit null and customer membership is a write-time receipt snapshot')
 
   f=fixture()
   f.sql.prepare('UPDATE sales SET delivery_contact_phone=NULL WHERE id=1').run()
