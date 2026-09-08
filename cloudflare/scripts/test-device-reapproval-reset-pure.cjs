@@ -29,7 +29,10 @@ ok(route.includes("code: 'device_reapproval_reset_required'"), 'rejected approva
 ok(route.includes("if (device.status === 'approved') return c.json({ success: true, idempotent: true })"), 'approved device approval remains idempotent')
 ok(route.includes("WHERE id = @id AND status = 'pending'"), 'pending approval update is guarded against a concurrent decision')
 ok(route.includes("WHERE id = @id AND user_id = @user_id AND device_id = @device_id AND status = 'rejected'"), 'reset deletes only the exact rejected device row')
-ok(route.includes('WHERE id = @session_id AND user_id = @user_id AND device_id = @device_id AND revoked_at IS NULL'), 'reset revokes only the preselected exact user/device session ids')
+ok(route.includes('await db.batch(['), 'reset combines guard, session revoke, and device delete in one atomic D1 batch')
+ok(route.includes("json_extract(@reapproval_reset_guard_error, '$')"), 'reset batch guard throws when the rejected row changed')
+ok(route.includes("WHERE user_id = @user_id AND device_id = @device_id AND revoked_at IS NULL"), 'reset revokes only sessions for the target user/device pair')
+ok(route.includes("AND EXISTS (SELECT 1 FROM trusted_devices WHERE id = @id AND user_id = @user_id AND device_id = @device_id AND status = 'rejected')"), 'targeted revoke requires the exact rejected row inside the batch')
 const resetBlock = route.slice(resetAt, route.indexOf("app.post('/:id/reject'", resetAt))
 ok(!/userAgent|firstIp|lastIp|firstCountry|lastCountry/.test(resetBlock), 'reset audit payload contains no IP or user-agent data')
 ok(/previousState: 'rejected'/.test(resetBlock) && /priorDecision:/.test(resetBlock) && /revokedSessions/.test(resetBlock), 'reset audit records minimal prior decision and revocation facts')
@@ -56,17 +59,17 @@ insertSession.run({ id: 20, user: 9, token: 'old-target', device: 'same-device',
 insertSession.run({ id: 21, user: 9, token: 'other-device', device: 'other-device', expires: future })
 insertSession.run({ id: 22, user: 10, token: 'other-user', device: 'same-device', expires: future })
 
+const guardSql = route.match(/SELECT CASE WHEN EXISTS \([\s\S]*?json_extract\(@reapproval_reset_guard_error, '\$'\) END AS device_reapproval_reset_guard/)?.[0]
+const revokeSql = route.match(/UPDATE user_sessions SET revoked_at = CURRENT_TIMESTAMP\s+WHERE user_id = @user_id AND device_id = @device_id AND revoked_at IS NULL[\s\S]*?status = 'rejected'\)/)?.[0]
 const deleteSql = route.match(/DELETE FROM trusted_devices\s+WHERE id = @id AND user_id = @user_id AND device_id = @device_id AND status = 'rejected'/)?.[0]
-const sessionSelectSql = route.match(/SELECT id FROM user_sessions\s+WHERE user_id = @user_id AND device_id = @device_id AND revoked_at IS NULL/)?.[0]
-const revokeSql = route.match(/UPDATE user_sessions SET revoked_at = CURRENT_TIMESTAMP\s+WHERE id = @session_id AND user_id = @user_id AND device_id = @device_id AND revoked_at IS NULL/)?.[0]
-assert.ok(deleteSql && sessionSelectSql && revokeSql, 'lifted reset SQL is present')
+assert.ok(guardSql && revokeSql && deleteSql, 'lifted atomic reset batch SQL is present')
 
-const target = { id: 1, user_id: 9, device_id: 'same-device' }
-const selected = db.prepare(sessionSelectSql).all({ user_id: target.user_id, device_id: target.device_id })
-assert.equal(selected.length, 1, 'reset snapshots one live target session before deleting the rejected row')
-const removed = db.prepare(deleteSql).run(target)
-assert.equal(removed.changes, 1, 'reset deletes the rejected row exactly once')
-for (const session of selected) db.prepare(revokeSql).run({ session_id: session.id, user_id: target.user_id, device_id: target.device_id })
+const target = { id: 1, user_id: 9, device_id: 'same-device', reapproval_reset_guard_error: '{' }
+db.transaction(() => {
+  assert.equal(db.prepare(guardSql).get(target).device_reapproval_reset_guard, 1, 'batch guard accepts the exact rejected row')
+  assert.equal(db.prepare(revokeSql).run(target).changes, 1, 'batch revokes the target device session')
+  assert.equal(db.prepare(deleteSql).run(target).changes, 1, 'batch deletes the rejected row exactly once')
+})()
 ok(!db.prepare('SELECT 1 FROM trusted_devices WHERE id = 1').get(), 'rejected trust row is removed without changing pending or approved rows')
 ok(db.prepare('SELECT status FROM trusted_devices WHERE id = 2').get().status === 'pending' && db.prepare('SELECT status FROM trusted_devices WHERE id = 3').get().status === 'approved', 'reset leaves the rest of the account device state intact')
 ok(db.prepare('SELECT revoked_at FROM user_sessions WHERE id = 20').get().revoked_at, 'reset revokes the pre-existing matching device session')
@@ -78,14 +81,25 @@ ok(!db.prepare('SELECT revoked_at FROM user_sessions WHERE id = 21').get().revok
 db.prepare("INSERT INTO trusted_devices (user_id, device_id, device_name, status) VALUES (9, 'same-device', 'Store tablet', 'pending')").run()
 ok(db.prepare("SELECT status FROM trusted_devices WHERE user_id = 9 AND device_id = 'same-device'").get().status === 'pending', 'same device id becomes pending on its next login and still needs approval')
 
-// Race proof: an approval changing the old row before reset's guarded DELETE
-// means no delete and no session revoke. A fresh approved row/session is not
-// mistaken for the rejected snapshot.
+// Race proof: an approval changing the old row before the batch makes the
+// guard throw; no session or device write starts.
 insertDevice.run({ id: 10, user: 10, device: 'race-device', name: 'Race', status: 'rejected', decided_at: '2026-09-08 05:00:00', decided_by: 1, decided_name: 'admin', revoked_at: null })
 insertSession.run({ id: 23, user: 10, token: 'race-old', device: 'race-device', expires: future })
-const raceSessions = db.prepare(sessionSelectSql).all({ user_id: 10, device_id: 'race-device' })
 db.prepare("UPDATE trusted_devices SET status = 'approved' WHERE id = 10").run()
-assert.equal(db.prepare(deleteSql).run({ id: 10, user_id: 10, device_id: 'race-device' }).changes, 0, 'guarded delete refuses a row changed after reset read')
-ok(!db.prepare('SELECT revoked_at FROM user_sessions WHERE id = 23').get().revoked_at && raceSessions.length === 1, 'failed guarded delete leaves sessions untouched, preventing the wrong-row race')
+assert.throws(() => db.prepare(guardSql).get({ id: 10, user_id: 10, device_id: 'race-device', reapproval_reset_guard_error: '{' }), /malformed JSON/, 'batch guard fails when the row stopped being rejected')
+ok(!db.prepare('SELECT revoked_at FROM user_sessions WHERE id = 23').get().revoked_at, 'failed guard leaves sessions untouched, preventing the wrong-row race')
+
+// DB failure after the session statement must roll the transaction back, so a
+// retry still finds both the rejected row and its active session.
+insertDevice.run({ id: 11, user: 10, device: 'failure-device', name: 'Failure', status: 'rejected', decided_at: '2026-09-08 05:00:00', decided_by: 1, decided_name: 'admin', revoked_at: null })
+insertSession.run({ id: 24, user: 10, token: 'failure-old', device: 'failure-device', expires: future })
+db.exec("CREATE TRIGGER fail_reset_session_update BEFORE UPDATE OF revoked_at ON user_sessions WHEN NEW.device_id = 'failure-device' BEGIN SELECT RAISE(ABORT, 'forced reset failure'); END")
+assert.throws(() => db.transaction(() => {
+  const failureTarget = { id: 11, user_id: 10, device_id: 'failure-device', reapproval_reset_guard_error: '{' }
+  db.prepare(guardSql).get(failureTarget)
+  db.prepare(revokeSql).run(failureTarget)
+  db.prepare(deleteSql).run(failureTarget)
+})(), /forced reset failure/, 'a database failure aborts the reset batch')
+ok(db.prepare('SELECT status FROM trusted_devices WHERE id = 11').get().status === 'rejected' && !db.prepare('SELECT revoked_at FROM user_sessions WHERE id = 24').get().revoked_at, 'database failure rolls back both session revocation and rejected-row deletion')
 
 console.log(`test-device-reapproval-reset-pure: ${checks} checks passed`)
