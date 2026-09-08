@@ -29,6 +29,9 @@ import ProductOptionSheet from '../shared/ProductOptionSheet.tsx'
 import { stockReceiptGateCode, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../utils/stockReceiptFields.ts'
 import InfoHint from '../shared/InfoHint.tsx'
 import { findSessionProductDuplicate } from '../../utils/createProductsSession.ts'
+import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
+import { useCloseGuard } from '../../utils/useCloseGuard.ts'
+import { stableSnapshot } from '../../utils/formDirty.ts'
 
 // Keep product creation inside this receiving flow rather than sending the
 // operator to a separate page. The standard ProductForm and create transport
@@ -130,12 +133,24 @@ type FastStockInDraft = {
   picked: ProductCandidate | null
   quantity: string
   unitCost: string
+  freeGoods?: boolean
   createPriceVariant?: boolean
   expiryDate: string
+  batchChoice?: 'new' | number
   lines?: ReceivedLine[]
   // Only set by a camera/scan-button result. Typed text must not turn every
   // empty suggestion list into a prompt to create a new catalog record.
   scannedBarcode?: string
+}
+
+type FastStockInCloseState = Pick<FastStockInDraft,
+  'mode' | 'createdProductIds' | 'branchId' | 'receivedDate' | 'supplier' |
+  'paymentStatus' | 'creditDueDate' | 'query' | 'picked' | 'quantity' |
+  'unitCost' | 'freeGoods' | 'createPriceVariant' | 'expiryDate' | 'batchChoice' |
+  'lines' | 'scannedBarcode'>
+
+export function fastStockInHasUnsavedWork(current: FastStockInCloseState, pristine: FastStockInCloseState): boolean {
+  return stableSnapshot(current) !== stableSnapshot(pristine)
 }
 
 type LookupOption = { id: number | string; name: string }
@@ -165,6 +180,25 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
   // ---- shipment header (entered once, applies to every line) ----
   const draftRef = useRef<FastStockInDraft | null>(readWorkDraft<FastStockInDraft>(fastStockInDraftKey)?.data ?? null)
   const draft = draftRef.current
+  const pristineCloseStateRef = useRef<FastStockInCloseState>({
+    mode: initialMode || 'add',
+    createdProductIds: [],
+    branchId: String(initialHeader?.branchId || (defaultBranchId != null ? defaultBranchId : (branchOptions[0]?.value || ''))),
+    receivedDate: initialHeader?.receivedDate || todayStr(),
+    supplier: initialHeader?.supplier || { supplierId: null, supplierName: '' },
+    paymentStatus: initialHeader?.paymentStatus || 'paid',
+    creditDueDate: initialHeader?.creditDueDate || '',
+    query: '',
+    picked: null,
+    quantity: '1',
+    unitCost: '',
+    freeGoods: false,
+    createPriceVariant: false,
+    expiryDate: '',
+    batchChoice: 'new',
+    lines: [],
+    scannedBarcode: '',
+  })
   const [branchId, setBranchId] = useState<string>(draft?.branchId || initialHeader?.branchId || (defaultBranchId != null ? String(defaultBranchId) : (branchOptions[0]?.value || '')))
   // Received date defaults to TODAY (business day) rather than empty (user,
   // Sep 3 2026): nearly every fast stock-in is for stock that just arrived,
@@ -188,7 +222,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
   const [picked, setPicked] = useState<ProductCandidate | null>(draft?.picked || null)
   const [quantity, setQuantity] = useState(draft?.quantity || '1')
   const [unitCost, setUnitCost] = useState(draft?.unitCost || '')
-  const [freeGoods, setFreeGoods] = useState(false)
+  const [freeGoods, setFreeGoods] = useState(Boolean(draft?.freeGoods))
   const [createPriceVariant, setCreatePriceVariant] = useState(Boolean(draft?.createPriceVariant))
   const [expiryDate, setExpiryDate] = useState(draft?.expiryDate || '')
   const [scannedBarcode, setScannedBarcode] = useState(draft?.scannedBarcode || '')
@@ -216,7 +250,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
   // Set by editLine, consumed by the lot-options effect once that product's
   // lots have loaded. Without it the effect's own setBatchChoice('new') wins
   // the race and the reopened line loses the lot it was queued against.
-  const pendingBatchRestoreRef = useRef<'new' | number | null>(null)
+  const pendingBatchRestoreRef = useRef<'new' | number | null>(draft?.batchChoice ?? null)
   const searchSeqRef = useRef(0)
   const sessionIdRef = useRef(draft?.sessionId || Date.now())
   const searchInputRef = useRef<HTMLInputElement | null>(null)
@@ -256,9 +290,9 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     return scheduleWorkDraftWrite<FastStockInDraft>(fastStockInDraftKey, {
       sessionId: sessionIdRef.current, mode, createdProductIds,
       branchId, receivedDate, supplier, paymentStatus, creditDueDate,
-      query, picked, quantity, unitCost, createPriceVariant, expiryDate, lines: received, scannedBarcode,
+      query, picked, quantity, unitCost, freeGoods, createPriceVariant, expiryDate, batchChoice, lines: received, scannedBarcode,
     })
-  }, [branchId, receivedDate, supplier, paymentStatus, creditDueDate, query, picked, quantity, unitCost, createPriceVariant, expiryDate, received, scannedBarcode, mode, createdProductIds])
+  }, [branchId, receivedDate, supplier, paymentStatus, creditDueDate, query, picked, quantity, unitCost, freeGoods, createPriceVariant, expiryDate, batchChoice, received, scannedBarcode, mode, createdProductIds])
 
   useEffect(() => {
     const text = query.trim()
@@ -416,8 +450,8 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
   const persistDraftBeforeProductCreate = () => {
     writeWorkDraft<FastStockInDraft>(fastStockInDraftKey, {
       sessionId: sessionIdRef.current,
-      branchId, receivedDate, supplier, paymentStatus, creditDueDate,
-      query, picked, quantity, unitCost, createPriceVariant, expiryDate, lines: received, scannedBarcode,
+      mode, createdProductIds, branchId, receivedDate, supplier, paymentStatus, creditDueDate,
+      query, picked, quantity, unitCost, freeGoods, createPriceVariant, expiryDate, batchChoice, lines: received, scannedBarcode,
     })
   }
 
@@ -702,15 +736,30 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
   const sessionCostTotal = received.reduce((total, line) => (
     total + (line.mode === 'remove' ? 0 : Math.max(0, Number(line.quantity) || 0) * Math.max(0, Number(line.unitCost) || 0))
   ), 0)
-  // X/backdrop keep the draft (reopen later, shipment intact); only the
-  // explicit Done button completes the batch and clears it.
-  const closeIfIdle = () => {
-    if (saving) return
+  const closeState: FastStockInCloseState = {
+    mode, createdProductIds, branchId, receivedDate, supplier, paymentStatus, creditDueDate,
+    query, picked, quantity, unitCost, freeGoods, createPriceVariant, expiryDate, batchChoice,
+    lines: received, scannedBarcode,
+  }
+  const closeDirty = fastStockInHasUnsavedWork(closeState, pristineCloseStateRef.current)
+  // The minus is an explicit preserve action. It flushes the exact draft,
+  // parks the chip, then unmounts. The X/backdrop are dismissal requests and
+  // must never reuse this callback: dirty work goes through the shared
+  // Discard / Back / Minimize prompt instead.
+  const preserveAndMinimize = () => {
+    if (saving || !onMinimize) return
     flushPendingWorkDraft(fastStockInDraftKey)
+    onMinimize(tr('fast_stockin_title', 'Fast stock-in'))
+    onClose()
+  }
+  const discardAndClose = () => {
+    clearWorkDraft(fastStockInDraftKey)
     if (successCount > 0) onDone()
     onClose()
   }
-  const closeBackdropIfIdle = () => { if (!selectedGroup) closeIfIdle() }
+  const closeGuard = useCloseGuard({ dirty: closeDirty }, discardAndClose, onMinimize ? preserveAndMinimize : undefined)
+  const requestCloseIfIdle = () => { if (!saving) closeGuard.requestClose() }
+  const closeBackdropIfIdle = () => { if (!selectedGroup) requestCloseIfIdle() }
 
   // The receiver stays mounted (and its session state stays in memory) while
   // the standard product form is open. Cancel simply returns to the exact
@@ -747,14 +796,10 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
               <MinimizeButton
                 disabled={saving}
                 tr={tr}
-                onMinimize={() => {
-                  flushPendingWorkDraft(fastStockInDraftKey)
-                  onMinimize(tr('fast_stockin_title', 'Fast stock-in'))
-                  onClose()
-                }}
+                onMinimize={preserveAndMinimize}
               />
             ) : null}
-            <button type="button" onClick={closeIfIdle} disabled={saving} aria-label={tr('close', 'Close')} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600 disabled:opacity-50"><X className="h-4 w-4" /></button>
+            <button type="button" onClick={requestCloseIfIdle} disabled={saving} aria-label={tr('close', 'Close')} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600 disabled:opacity-50"><X className="h-4 w-4" /></button>
           </div>
         </div>
 
@@ -1000,6 +1045,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
           </button>
         </div>
       </div>
+      <UnsavedChangesPrompt guard={closeGuard} />
 
       {pendingCommit ? (
         <ConfirmDialog
