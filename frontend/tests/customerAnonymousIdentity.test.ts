@@ -77,8 +77,9 @@ assert.doesNotMatch(anonymousHtml, /LC-04971/)
 
 const saleDetail = fs.readFileSync(new URL('../src/components/sales/SaleDetailModal.tsx', import.meta.url), 'utf8')
 assert.match(saleDetail, /customer_is_anonymous\?: number \| boolean \| null/)
-assert.match(saleDetail, /!isAnonymousCustomerIdentity\(sale\).*customer_phone/)
-assert.match(saleDetail, /isAnonymousCustomerIdentity\(sale\) \? null : onAttachMembership/)
+assert.match(saleDetail, /const customerIsAnonymous = isAnonymousCustomerIdentity\(sale\)/)
+assert.match(saleDetail, /!customerIsAnonymous && sale\.customer_phone/)
+assert.match(saleDetail, /customerIsAnonymous \? null : onAttachMembership/)
 assert.match(saleDetail, /onClick=\{\(\) => onCustomerAction\(sale\)\}/, 'the single Edit action remains for the parent to route to attach-contact')
 
 const pos = fs.readFileSync(new URL('../src/components/pos/POS.tsx', import.meta.url), 'utf8')

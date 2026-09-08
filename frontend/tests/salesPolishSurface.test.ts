@@ -36,7 +36,8 @@ assert.match(detail, /modal-viewport-safe[\s\S]*modal-panel-safe/, 'sale detail 
 // the width floor, so it fits 375 with no scroll at all.
 assert.match(detail, /<div className="overflow-x-auto">\s*<table className="w-full text-sm">/, 'sale detail items must be a table inside its own horizontal-scroll container')
 assert.doesNotMatch(detail, /min-w-\[34rem\]/, 'the items table must not carry a width floor that starves the product column')
-assert.doesNotMatch(detail, /sm:hidden|md:hidden/, 'the sale detail must not fork a phone-only item list that drops columns')
+assert.doesNotMatch(detail, /data-sale-detail-mobile-items|space-y-2 sm:hidden/, 'the sale detail must not fork a phone-only item list that drops columns')
+assert.match(detail, /data-sale-detail-mobile-contact=""[\s\S]*?sm:hidden/, 'the approved compact phone row is metadata, separate from the one shared items table')
 assert.match(reports, /useState<DateTimeRange>\(\(\) => todayDateTimeRange\(\)\)/)
 assert.match(salesSurface, /border-collapse text-xs/)
 assert.match(salesSurface, /setDetailSale\(sale\)/)
