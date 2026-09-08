@@ -276,6 +276,23 @@ function counts(db) {
   }
   console.log('PASS 2 -- server-owned lot metadata and allocation are stored')
 
+
+  // A cashier can explicitly identify only the branch_stock remainder that
+  // has no lot record. Positive lots stay untouched and the line persists
+  // with no fabricated batch identity.
+  {
+    const db = fixture()
+    const result = await postSale(db, [{ product_id: 10, quantity: 3, branch_id: 1, unlotted_stock: true }], 'unlotted-remainder')
+    assert.equal(result.status, 200, JSON.stringify(result.body))
+    assert.deepEqual({ ...get(db, 'SELECT batch_id,batch_label FROM sale_items') }, { batch_id: null, batch_label: null })
+    assert.equal(get(db, 'SELECT COUNT(*) AS n FROM sale_item_batch_allocations').n, 0)
+    assert.equal(get(db, 'SELECT quantity AS n FROM branch_batch_stock WHERE batch_id=500').n, 2)
+    assert.equal(get(db, 'SELECT quantity AS n FROM branch_batch_stock WHERE batch_id=502').n, 5)
+    const refused = await postSale(db, [{ product_id: 10, quantity: 4, branch_id: 1, unlotted_stock: true }], 'unlotted-oversell')
+    assert.equal(refused.status, 409, JSON.stringify(refused.body))
+  }
+  console.log('PASS 2b -- explicit unrecorded remainder preserves recorded lots and rejects excess')
+
   // FIFO spanning two lots stays attributable through two allocation rows;
   // neither the line nor its movement falsely claims one batch.
   {

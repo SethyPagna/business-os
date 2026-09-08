@@ -59,9 +59,12 @@ export type ReceiveBatchPayload = {
 // clamp the cart line (a batch-tracked product's sellable quantity is
 // whichever single lot was picked, not the product's overall stock).
 export type BatchSelection = {
-  batchId: number
-  batchLabel: string | null
-  batchExpiryDate: string | null
+  batchId?: number
+  batchLabel?: string | null
+  batchExpiryDate?: string | null
+  // A selected Shop remainder whose stock has no received-date record. The
+  // backend validates it against branch_stock minus live positive lot stock.
+  unlottedStock?: boolean
   // The lot's own received date, carried so a host that DISPLAYS the picked
   // intake ("Batch 2 · Received: 09/01/2026" on a staged sale line) does not
   // have to re-fetch the lot list to find out what it just picked. Optional:
