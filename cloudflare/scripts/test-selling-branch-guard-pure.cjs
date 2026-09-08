@@ -219,6 +219,12 @@ runTest('ALL THREE transfer routes check the direction', () => {
   assert.match(branchesSource, /if \(bulkDirectionError\) return c\.json\(\{ error: bulkDirectionError \}, 400\)/)
   assert.match(inventorySource, /if \(directionError\) return c\.json\(\{ error: directionError \}, 400\)/)
   assert.match(inventorySource, /from '\.\.\/lib\/branchRoleGuards'/)
+  assert.equal((branchesSource.match(/resolveCanonicalTransferPair\(/g) || []).length, 2, 'both branch transfer routes require an unambiguous active pair')
+  assert.equal((inventorySource.match(/resolveCanonicalTransferPair\(/g) || []).length, 1, 'the inventory transfer requires an unambiguous active pair')
+  assert.equal((branchesSource.match(/canonicalTransferAuthorityGuardStatement\(/g) || []).length, 6, 'both final transfer batches and four conditional lot-clone writes re-check authority atomically')
+  assert.equal((inventorySource.match(/canonicalTransferAuthorityGuardStatement\(/g) || []).length, 1, 'the inventory transfer batch re-checks authority atomically')
+  assert.match(branchesSource, /CANONICAL_BRANCH_CONFIGURATION_CODE \}, 409\)/)
+  assert.match(inventorySource, /CANONICAL_BRANCH_CONFIGURATION_CODE \}, 409\)/)
 })
 
 runTest('the inventory transfer is refused before its atomic write', () => {
@@ -228,10 +234,13 @@ runTest('the inventory transfer is refused before its atomic write', () => {
   const routeAt = inventorySource.indexOf("app.post('/transfer'")
   assert.ok(routeAt > 0, 'the inventory transfer route must still exist')
   const guardAt = inventorySource.indexOf('transferDirectionError(', routeAt)
+  const atomicGuardAt = inventorySource.indexOf('canonicalTransferAuthorityGuardStatement(', routeAt)
   const batchAt = inventorySource.indexOf('db.batch(', routeAt)
   assert.ok(guardAt > routeAt, 'the guard must live inside the transfer route')
   assert.ok(batchAt > routeAt)
   assert.ok(guardAt < batchAt, 'the direction check must precede the first atomic write')
+  const stockUpdateAt = inventorySource.indexOf("UPDATE branch_stock SET quantity = quantity - @quantity", routeAt)
+  assert.ok(atomicGuardAt > batchAt && atomicGuardAt < stockUpdateAt, 'the authoritative identity guard must be the first statement inside the atomic transfer batch')
 })
 
 if (failures) {

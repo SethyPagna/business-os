@@ -121,8 +121,8 @@ const branchRoute = loadModule('routes/branches.ts', (id) => {
     decrementBatchStockStrictStatement: noop,
     incrementBatchStockStatement: noop,
     resolveDestinationBatch: noop,
-    readFifoLotAvailability: noop,
-    allocateAcrossLots: noop,
+    readFifoLotAvailability: async () => [],
+    allocateAcrossLots: (_lots, quantity) => ({ takes: [], uncovered: quantity }),
   }
   if (id === '../lib/branchWrites') return writes
   if (id === '../lib/canonicalBranchIdentity') return identity
@@ -147,13 +147,33 @@ function reset() {
       is_active INTEGER NOT NULL DEFAULT 1, updated_at TEXT
     );
     CREATE TABLE sales (branch_id INTEGER, branch_name TEXT, updated_at TEXT);
-    CREATE TABLE inventory_movements (branch_id INTEGER, branch_name TEXT);
+    CREATE TABLE inventory_movements (
+      id INTEGER PRIMARY KEY, product_id INTEGER, product_name TEXT,
+      branch_id INTEGER, branch_name TEXT, movement_type TEXT, quantity REAL,
+      reason TEXT, user_id INTEGER, user_name TEXT, created_at TEXT, batch_id INTEGER
+    );
     CREATE TABLE returns (branch_id INTEGER, branch_name TEXT);
     CREATE TABLE stock_row_moves (branch_id INTEGER, branch_name TEXT);
     CREATE TABLE pending_actions (id INTEGER PRIMARY KEY, status TEXT);
+    CREATE TABLE products (
+      id INTEGER PRIMARY KEY, name TEXT NOT NULL, barcode TEXT,
+      cost_price_usd REAL, cost_price_khr REAL,
+      selling_price_usd REAL, selling_price_khr REAL
+    );
+    CREATE TABLE branch_stock (
+      id INTEGER PRIMARY KEY, product_id INTEGER NOT NULL, branch_id INTEGER NOT NULL,
+      quantity REAL NOT NULL DEFAULT 0, UNIQUE(product_id, branch_id)
+    );
+    CREATE TABLE stock_transfers (
+      id INTEGER PRIMARY KEY, product_id INTEGER, product_name TEXT,
+      from_branch_id INTEGER, to_branch_id INTEGER, quantity REAL, notes TEXT,
+      user_id INTEGER, user_name TEXT, created_at TEXT
+    );
     INSERT INTO branches(id,name,location,is_default,is_active,updated_at) VALUES
       (1,'Shop','shop old',1,1,'2026-09-08 00:00:00'),
       (2,'Warehouse','warehouse old',0,1,'2026-09-08 00:00:00');
+    INSERT INTO products(id,name) VALUES (10,'Transfer product');
+    INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES (10,2,5);
   `)
   currentUser = { id: 7, name: 'Branch editor', tier: 'full' }
   beforeBatch = null
@@ -244,6 +264,33 @@ async function main() {
     assert.equal(result.status, 500)
     assert.equal(sqlite.prepare('SELECT COUNT(*) AS count FROM branches WHERE id=1').get().count, 0)
     assert.equal(sqlite.prepare('SELECT is_default FROM branches WHERE id=2').get().is_default, 0, 'default clear rolled back')
+    assert.equal(audits.length, 0)
+    assert.equal(broadcasts.length, 0)
+  })
+
+  await check('duplicate active canonical rows return 409 before transfer effects', async () => {
+    sqlite.prepare("INSERT INTO branches(id,name,is_active) VALUES (3,' shop ',1)").run()
+    const result = await request('POST', '/transfer', {
+      productId: 10, fromBranchId: 2, toBranchId: 1, quantity: 2, reason: 'restock shop',
+    })
+    assert.equal(result.status, 409, JSON.stringify(result.json))
+    assert.equal(result.json.code, identity.CANONICAL_BRANCH_CONFIGURATION_CODE)
+    assert.equal(sqlite.prepare('SELECT quantity FROM branch_stock WHERE product_id=10 AND branch_id=2').get().quantity, 5)
+    assert.equal(sqlite.prepare('SELECT COUNT(*) AS total FROM stock_transfers').get().total, 0)
+    assert.equal(batchCalls, 0)
+    assert.equal(audits.length, 0)
+  })
+
+  await check('an interposed canonical duplicate aborts the actual transfer batch', async () => {
+    beforeBatch = (db) => db.prepare("INSERT INTO branches(id,name,is_active) VALUES (3,'Warehouse',1)").run()
+    const result = await request('POST', '/transfer', {
+      productId: 10, fromBranchId: 2, toBranchId: 1, quantity: 2, reason: 'restock shop',
+    })
+    assert.equal(result.status, 500)
+    assert.equal(sqlite.prepare('SELECT quantity FROM branch_stock WHERE product_id=10 AND branch_id=2').get().quantity, 5)
+    assert.equal(sqlite.prepare('SELECT COUNT(*) AS total FROM branch_stock WHERE product_id=10 AND branch_id=1').get().total, 0)
+    assert.equal(sqlite.prepare('SELECT COUNT(*) AS total FROM stock_transfers').get().total, 0)
+    assert.equal(sqlite.prepare('SELECT COUNT(*) AS total FROM inventory_movements').get().total, 0)
     assert.equal(audits.length, 0)
     assert.equal(broadcasts.length, 0)
   })
