@@ -29,7 +29,6 @@ import {
   createPermissionRefreshAccumulator,
   finishPermissionRefresh,
   notePermissionRefreshIntent,
-  resetPermissionRefreshAccumulator,
 } from './utils/permissionRefreshAccumulator.ts'
 import {
   AppContext,
@@ -940,11 +939,11 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   const schedulePermissionRefreshRef = useRef<() => void>(() => {})
   useEffect(() => {
     if (publicMode) {
-      resetPermissionRefreshAccumulator(permissionRefreshRef.current)
+      permissionRefreshRef.current = createPermissionRefreshAccumulator()
       return undefined
     }
     const hasRecoverableSession = !!(user?.id || getStoredUserPayload())
-    if (!hasRecoverableSession) resetPermissionRefreshAccumulator(permissionRefreshRef.current)
+    if (!hasRecoverableSession) permissionRefreshRef.current = createPermissionRefreshAccumulator()
     if (!hasRecoverableSession) {
       setSyncConnected(false)
       setSyncServerUnreachable(false)
@@ -955,7 +954,8 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     let disposed = false
     const refreshPermissions = async () => {
       permissionRefreshTimerRef.current = null
-      if (!beginPermissionRefresh(permissionRefreshRef.current)) return
+      const accumulator = permissionRefreshRef.current
+      if (!beginPermissionRefresh(accumulator)) return
       try {
         await clearLocalBusinessState({
           clearAuth: false,
@@ -975,7 +975,8 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
           await loadSettings().catch(() => {})
         }
       } finally {
-        if (finishPermissionRefresh(permissionRefreshRef.current)) {
+        const needsAnotherRefresh = finishPermissionRefresh(accumulator)
+        if (permissionRefreshRef.current === accumulator && needsAnotherRefresh) {
           schedulePermissionRefreshRef.current()
         }
       }

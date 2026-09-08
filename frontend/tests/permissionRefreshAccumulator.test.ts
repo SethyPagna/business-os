@@ -67,13 +67,34 @@ test('events arriving during a refresh remain pending without starting concurren
   assert.equal(finishPermissionRefresh(accumulator), false)
 })
 
+test('a late refresh from an old session cannot clear or reschedule the new session generation', () => {
+  const oldSession = createPermissionRefreshAccumulator()
+  notePermissionRefreshIntent(oldSession, { channel: 'users', payload: { id: 'me' } }, subject)
+  assert.equal(beginPermissionRefresh(oldSession), true)
+
+  let currentSession = createPermissionRefreshAccumulator()
+  notePermissionRefreshIntent(currentSession, { channel: 'roles', payload: null }, subject)
+  assert.equal(beginPermissionRefresh(currentSession), true)
+
+  const oldNeedsAnotherRefresh = finishPermissionRefresh(oldSession)
+  assert.equal(oldNeedsAnotherRefresh && currentSession === oldSession, false)
+  assert.equal(currentSession.running, true, 'the old completion must not clear the new refresh')
+
+  notePermissionRefreshIntent(currentSession, { channel: 'users', payload: { id: 'me' } }, subject)
+  assert.equal(beginPermissionRefresh(currentSession), false, 'a third refresh must not overlap the new refresh')
+  assert.equal(finishPermissionRefresh(currentSession), true)
+  assert.equal(beginPermissionRefresh(currentSession), true, 'the later intent runs after the new refresh finishes')
+})
+
 test('AppContext records auth intent before the per-channel debounce can replace event detail', () => {
   const onUpdate = appContextSource.slice(appContextSource.indexOf('    const onUpdate = (e: Event) => {'), appContextSource.indexOf('    const onStatus = (e: Event) => {'))
   assert.ok(onUpdate.indexOf('notePermissionRefreshIntent(') >= 0)
   assert.ok(onUpdate.indexOf('notePermissionRefreshIntent(') < onUpdate.indexOf('if (debounceRef.current[channel])'))
   assert.doesNotMatch(onUpdate, /affectsThisSession/)
-  assert.match(appContextSource, /beginPermissionRefresh\(permissionRefreshRef\.current\)/)
-  assert.match(appContextSource, /finishPermissionRefresh\(permissionRefreshRef\.current\)/)
+  assert.match(appContextSource, /const accumulator = permissionRefreshRef\.current\n\s+if \(!beginPermissionRefresh\(accumulator\)\) return/)
+  assert.match(appContextSource, /const needsAnotherRefresh = finishPermissionRefresh\(accumulator\)/)
+  assert.match(appContextSource, /permissionRefreshRef\.current === accumulator && needsAnotherRefresh/)
+  assert.match(appContextSource, /permissionRefreshRef\.current = createPermissionRefreshAccumulator\(\)/)
 })
 
 async function runExtractedHandler(events: Array<{ channel: string; reason?: string; payload?: { id?: string | number } | null }>): Promise<number> {

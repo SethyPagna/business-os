@@ -60,8 +60,3 @@ export function finishPermissionRefresh(accumulator: PermissionRefreshAccumulato
   accumulator.running = false
   return accumulator.pending
 }
-
-export function resetPermissionRefreshAccumulator(accumulator: PermissionRefreshAccumulator): void {
-  accumulator.pending = false
-  accumulator.running = false
-}
