@@ -1785,9 +1785,15 @@ function productMergeGroupCompletionStatements(args: {
       params: { status: toMemberStatus, stamp, review: association.review_id, groupOrdinal: Number(association.group_ordinal), memberOrdinal: child.member_ordinal, child: child.id, fromStatus: fromMemberStatus },
     },
     {
-      sql: `UPDATE product_conflict_action_groups SET status=@status,reversal_generation=@nextGeneration,updated_at=@stamp
+      sql: `UPDATE product_conflict_action_groups SET status=CASE WHEN @redoFinal=1 AND EXISTS(
+              SELECT 1 FROM product_conflict_action_group_members pending
+              WHERE pending.review_id=product_conflict_action_groups.review_id
+                AND pending.group_ordinal=product_conflict_action_groups.ordinal
+                AND pending.role='merged' AND pending.status='planned')
+              THEN 'partial' ELSE @status END,reversal_generation=@nextGeneration,updated_at=@stamp
             WHERE review_id=@review AND ordinal=@groupOrdinal AND reversal_generation=@generation`,
-      params: { status: final ? finalGroupStatus : 'partial', nextGeneration, stamp, review: association.review_id, groupOrdinal: Number(association.group_ordinal), generation },
+      params: { status: final ? finalGroupStatus : 'partial', redoFinal: direction === 'redo' && final ? 1 : 0,
+        nextGeneration, stamp, review: association.review_id, groupOrdinal: Number(association.group_ordinal), generation },
     },
     ...(final ? [{
       sql: `UPDATE undo_snapshots SET status=@status,

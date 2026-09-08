@@ -6151,7 +6151,7 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
     .get<ProductConflictActionStoredGroupRow>({ review: review.id })
   if (!group) {
     const counts = await productConflictActionApplyCounts(db, review.id)
-    if (counts.pending_groups === 0 && counts.partial_groups === 0 && counts.history_pending_groups === 0) {
+    if (counts.pending_groups === 0 && counts.partial_groups === 0 && counts.history_pending_groups === 0 && counts.pending_folds === 0) {
       await db.prepare(`UPDATE product_conflict_action_reviews SET status='completed',updated_at=CURRENT_TIMESTAMP
         WHERE id=@review AND actor_id=@actor AND manifest_digest=@manifest AND status IN ('finalized','running','interrupted')`)
         .run({ review: review.id, actor: user.id, manifest: review.manifest_digest })
@@ -6159,7 +6159,10 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
         manifest_digest: review.manifest_digest, status: 'completed', continuation_required: false,
         counts: { requested_groups: Number(review.requested_group_count), total_members: Number(review.total_member_count), ...counts }, groups: [] })
     }
-    return c.json({ success: false, code: 'review_state_conflict', error: 'No resumable reviewed group is available.' }, 409)
+    return c.json({ success: false, code: counts.reversed_groups > 0 ? 'review_reversed' : 'review_state_conflict',
+      error: counts.reversed_groups > 0
+        ? 'A reviewed group was reversed. Redo it or start a new review before continuing.'
+        : 'No resumable reviewed group is available.' }, 409)
   }
   let plan: ProductConflictActionFinalPlan
   let detail: ProductConflictActionGroupPlan
@@ -6173,6 +6176,10 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
   const members = await db.prepare(`SELECT member_ordinal,product_id,role,status,operation_id,undo_snapshot_id
     FROM product_conflict_action_group_members WHERE review_id=@review AND group_ordinal=@ordinal ORDER BY member_ordinal`)
     .all<ProductConflictActionMemberReceipt>({ review: review.id, ordinal: group.ordinal })
+  if (members.some((member) => member.status === 'reversed')) {
+    return c.json({ success: false, code: 'review_reversed',
+      error: 'This reviewed group has a reversed prefix. Redo it or start a new review before continuing.' }, 409)
+  }
   const pendingHistory = members.find((member) => member.status === 'history_pending')
   if (pendingHistory?.undo_snapshot_id) {
     const child = await db.prepare(`SELECT payload_json FROM undo_snapshots WHERE id=@id AND kind=@kind`)
@@ -6221,6 +6228,13 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
       AND EXISTS(SELECT 1 FROM product_conflict_action_group_members
         WHERE review_id=@review AND group_ordinal=@ordinal AND member_ordinal=@memberOrdinal
           AND product_id=@member AND role='merged' AND status='planned' AND operation_id=@memberOperation)
+      AND (@first=1 OR (
+        EXISTS(SELECT 1 FROM action_history WHERE id=@history AND status='undoable' AND reversible=1)
+        AND EXISTS(SELECT 1 FROM undo_snapshots WHERE id=(SELECT CAST(json_extract(undo_payload,'$.snapshot_id') AS INTEGER)
+          FROM action_history WHERE id=@history) AND kind=@groupSnapshotKind AND status='applied')
+        AND NOT EXISTS(SELECT 1 FROM product_conflict_action_group_members
+          WHERE review_id=@review AND group_ordinal=@ordinal AND undo_snapshot_id IS NOT NULL AND status<>'undo_ready')
+      ))
       AND NOT EXISTS(SELECT 1 FROM stock_session_members sm JOIN stock_session_operations so ON so.id=sm.operation_id
         JOIN action_history sh ON sh.id=so.history_id
         WHERE sm.product_id IN (@keeper,@member) AND sh.status IN ('undoable','redoable'))
@@ -6228,7 +6242,7 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
     params: { review: review.id, actor: user.id, manifest: review.manifest_digest, ordinal: group.ordinal,
       groupKey: group.group_key, plan: group.final_plan_json, groupOperation: group.operation_id,
       groupStatus: firstFold ? 'ready' : 'partial', generation: Number(group.reversal_generation || 0),
-      first: firstFold ? 1 : 0, history: group.action_history_id, memberOrdinal: member.member_ordinal,
+      first: firstFold ? 1 : 0, history: group.action_history_id, groupSnapshotKind: PRODUCT_MERGE_GROUP_ACTION_KIND, memberOrdinal: member.member_ordinal,
       member: member.product_id, memberOperation: member.operation_id, keeper: plan.keeper_id },
   }]
   let foldResult: Awaited<ReturnType<typeof foldDuplicateProductInto>>

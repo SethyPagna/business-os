@@ -47,7 +47,7 @@ check('undo peels children in reverse and redo advances them forward through one
   assert.match(undo, /product_merge_group_guard/)
   assert.match(undo, /undo_snapshot_id=@child AND status=@fromMember/)
   assert.match(undo, /UPDATE undo_snapshots SET status=@status,payload_json=@payload/)
-  assert.match(undo, /UPDATE product_conflict_action_groups SET status=@status,reversal_generation=@nextGeneration/)
+  assert.match(undo, /UPDATE product_conflict_action_groups SET status=CASE WHEN @redoFinal=1[\s\S]*reversal_generation=@nextGeneration/)
 })
 
 check('partial replay leaves history in its current direction and final replay advances status and generation', () => {
@@ -56,6 +56,7 @@ check('partial replay leaves history in its current direction and final replay a
   assert.match(undo, /final \? generation \+ 1 : generation/)
   assert.match(undo, /complete: final,[\s\S]*continuation_required: !final,[\s\S]*processed_children: 1/)
   assert.match(history, /complete[\s\S]*continuation_required[\s\S]*processed_children[\s\S]*pending_children[\s\S]*generation/)
+  assert.match(undo, /@redoFinal=1 AND EXISTS\([\s\S]*pending\.role='merged' AND pending\.status='planned'\)[\s\S]*THEN 'partial'/)
 })
 
 check('same-generation terminal retry reconciles while stale generations conflict', () => {
