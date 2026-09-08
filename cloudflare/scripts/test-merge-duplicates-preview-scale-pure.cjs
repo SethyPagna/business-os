@@ -233,7 +233,7 @@ function verifyPlanLookupMigrationPreservesRows() {
   const migrations = loadAll()
   const planLookupMigrationIndex = migrations.findIndex((sql) => /idx_undo_product_merge_plan_keeper/.test(sql))
   assert.notEqual(planLookupMigrationIndex, -1, 'the full migration chain must include the 0135 product merge plan indexes')
-  assert.match(migrations.at(-1), /CREATE TABLE product_conflict_merge_runs/, 'the fixture must include the current 0136 migration')
+  assert.ok(migrations.some((sql) => /CREATE TABLE product_conflict_merge_runs/.test(sql)), 'the fixture must include the 0136 receipt migration even after later migrations are appended')
   const before0135 = openDb(migrations.slice(0, planLookupMigrationIndex))
   const raw = before0135.db
   raw.prepare(`INSERT INTO undo_snapshots(id,kind,status,payload_json)
