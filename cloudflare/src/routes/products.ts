@@ -22,7 +22,7 @@ import { audit } from '../lib/audit'
 import { canonicalProductBarcode, findDuplicateProductGroups, findPossiblySameProductClusters, identityBarcodeKey, identityBarcodeKeySql, normalizeProductClusterKey, pickSameIdentityRow, productsShareExactIdentity, resolveProductIdentityEdit } from '../lib/productIdentity'
 import { compareCosts, normalizeProductGroupName } from '../lib/productDetailRule'
 import type { CostVerdict, MergedCostOutlier } from '../lib/productDetailRule'
-import { buildAtomicMergeHistoryStatements, finalizeAtomicMergeHistory, registerMergeFold, recordSupplierBackfillSnapshot, MERGE_REPARENT_TABLES, type MergeReversal, type MergeStockDisposition } from '../lib/undoAppliers'
+import { buildAtomicMergeHistoryStatements, finalizeAtomicMergeHistory, mergeStateFingerprint, PRODUCT_MERGE_GROUP_ACTION_KIND, PRODUCT_MERGE_GROUP_CHILD_KIND, productMergeGroupPrefixFingerprint, registerMergeFold, registerProductMergeGroupRedo, recordSupplierBackfillSnapshot, MERGE_REPARENT_TABLES, type AtomicMergeStatement, type MergeReversal, type MergeStockDisposition } from '../lib/undoAppliers'
 import { createProductMergeClusterPlan, MERGE_COST_FIELDS, MERGE_PRICE_FIELDS, parseProductMergeClusterPlan, productMergeCaseKey, productMergeCasAssertion, productMergeNumericError, productMergePlanKeeperMatches, productMergePlanSourceMemberMatches, resolveProductMergeClusterPlanEconomics, resolveProductMergeEconomics, type ProductMergeClusterPlan, type ProductMergeEconomics, type ProductMergeNumericIssue } from '../lib/productMerge'
 import { PRODUCT_MERGE_READ_BATCH_MAX_STATEMENTS, readProductMergeCaseSnapshot, readProductMergeDependentLotSnapshots } from '../lib/productMergeSnapshot'
 import type { ProductMergeCaseSnapshot, ProductMergeLotSnapshot } from '../lib/productMergeSnapshot'
@@ -55,6 +55,8 @@ import {
   buildProductConflictActionGroupPlans,
   canonicalizeProductConflictActionGroups,
   isProductConflictActionPreviewRequest,
+  isProductConflictActionApplyRequest,
+  parseProductConflictActionApplyRequest,
   parseProductConflictActionFinalizeRequest,
   parseProductConflictActionPreviewRequest,
   refuseProductConflictActionGroupDetail,
@@ -2795,6 +2797,10 @@ export async function foldDuplicateProductInto(
     snapshotContext?: Record<string, unknown>
     preparedSnapshot?: ProductMergeCaseSnapshot
     preparedDependentLotSnapshots?: Map<number, ProductMergeLotSnapshot>
+    reviewedPlan?: ProductConflictActionFinalPlan
+    reviewedRedo?: boolean
+    reviewedCatalogBefore?: MergeReversal['keeperCatalogBefore']
+    groupCompletionStatements?: (reversal: MergeReversal) => AtomicMergeStatement[]
   },
 ): Promise<{
   batchesMoved: number
@@ -2845,15 +2851,29 @@ export async function foldDuplicateProductInto(
   type MergeProductPricingRow = { id: number; name: string | null; barcode: string | null; image_path?: string | null; is_active: number; updated_at: string | null; selling_price_usd: number | null; selling_price_khr: number | null; wholesale_price_usd: number | null; wholesale_price_khr: number | null; cost_price_usd: number | null; cost_price_khr: number | null }
   const canonicalBefore = snapshot.canonicalProduct as MergeProductPricingRow | undefined
   const dupPricing = snapshot.duplicateProduct as MergeProductPricingRow | undefined
-  if (!canonicalBefore || !dupPricing || !productsShareExactIdentity(canonicalBefore, dupPricing)) {
+  const reviewedPlan = atomicHistory?.reviewedPlan
+  const reviewedAuthorityValid = reviewedPlan?.authority === 'reviewed_product_conflict_v2'
+    && reviewedPlan.keeper_id === canonicalId
+    && reviewedPlan.member_ids.includes(dup.id)
+    && reviewedPlan.fold_members.some((member) => member.member_id === dup.id && member.operation_id === atomicHistory?.operationId)
+  if (!canonicalBefore || !dupPricing || (!reviewedAuthorityValid && !productsShareExactIdentity(canonicalBefore, dupPricing))) {
     throw new Error('merge_identity_conflict')
   }
   if (atomicHistory?.bulkClusterPlan) {
     const plan = atomicHistory.bulkClusterPlan
-    const keeperMatches = atomicHistory.resumedCluster
-      ? productMergePlanKeeperMatches(plan, canonicalBefore)
-      : productMergePlanSourceMemberMatches(plan, canonicalBefore)
-    if (!keeperMatches || !productMergePlanSourceMemberMatches(plan, dupPricing)) {
+    const reviewedRedoSourceMatches = (row: Record<string, unknown>) => {
+      const source = plan.members.find((candidate) => candidate.id === Number(row.id))
+      return Boolean(source && Object.entries(source.money).every(([field, value]) => Number(row[field] ?? 0) === Number(value ?? 0)))
+    }
+    const keeperMatches = atomicHistory.reviewedRedo
+      ? (atomicHistory.resumedCluster ? productMergePlanKeeperMatches(plan, canonicalBefore) : reviewedRedoSourceMatches(canonicalBefore))
+      : atomicHistory.resumedCluster
+        ? productMergePlanKeeperMatches(plan, canonicalBefore)
+        : productMergePlanSourceMemberMatches(plan, canonicalBefore)
+    const duplicateMatches = atomicHistory.reviewedRedo
+      ? reviewedRedoSourceMatches(dupPricing)
+      : productMergePlanSourceMemberMatches(plan, dupPricing)
+    if (!keeperMatches || !duplicateMatches) {
       throw new Error('merge_cluster_plan_conflict')
     }
   }
@@ -2880,7 +2900,7 @@ export async function foldDuplicateProductInto(
   const mergedPricing = mergedEconomics.merged
   const mergedCost = mergedEconomics.merged
   const costOutliers: MergedCostOutlier[] = []
-  const canonicalBarcode = canonicalProductBarcode([canonicalBefore, dupPricing])
+  const canonicalBarcode = reviewedAuthorityValid ? reviewedPlan.selected.barcode.value : canonicalProductBarcode([canonicalBefore, dupPricing])
   // Which of the keeper's prices this fold actually moves. Computed from the
   // same two rows and the same fallback chain the UPDATE below writes, so the
   // audit trail cannot claim a change the fold did not make (or miss one it
@@ -3006,6 +3026,13 @@ export async function foldDuplicateProductInto(
               cost_price_usd = @costUsd,
               cost_price_khr = @costKhr,
               barcode = @barcode,
+              category = CASE WHEN @reviewed = 1 THEN @category ELSE category END,
+              categories = CASE WHEN @reviewed = 1 THEN @categories ELSE categories END,
+              brand = CASE WHEN @reviewed = 1 THEN @brand ELSE brand END,
+              brands = CASE WHEN @reviewed = 1 THEN @brands ELSE brands END,
+              brand_compact = CASE WHEN @reviewed = 1 THEN @brandCompact ELSE brand_compact END,
+              unit = CASE WHEN @reviewed = 1 THEN @unit ELSE unit END,
+              unit_normalized = CASE WHEN @reviewed = 1 THEN @unitNormalized ELSE unit_normalized END,
               updated_at = CURRENT_TIMESTAMP
           WHERE id = @canonicalId`,
     params: {
@@ -3017,6 +3044,14 @@ export async function foldDuplicateProductInto(
       costUsd: mergedCost.cost_price_usd ?? canonicalBefore?.cost_price_usd ?? 0,
       costKhr: mergedCost.cost_price_khr ?? canonicalBefore?.cost_price_khr ?? 0,
       barcode: canonicalBarcode,
+      reviewed: reviewedAuthorityValid ? 1 : 0,
+      category: reviewedAuthorityValid ? reviewedPlan.selected.category.value : null,
+      categories: reviewedAuthorityValid ? reviewedPlan.selected.category.categories : null,
+      brand: reviewedAuthorityValid ? reviewedPlan.selected.brand.value : null,
+      brands: reviewedAuthorityValid ? reviewedPlan.selected.brand.brands : null,
+      brandCompact: reviewedAuthorityValid ? reviewedPlan.selected.brand.brand_compact : null,
+      unit: reviewedAuthorityValid ? reviewedPlan.selected.unit.value : null,
+      unitNormalized: reviewedAuthorityValid ? reviewedPlan.selected.unit.unit_normalized : null,
     },
   })
 
@@ -3251,6 +3286,7 @@ export async function foldDuplicateProductInto(
     keeperImagePathBefore: canonicalBefore?.image_path ?? null,
     dupImagePathBefore: dup.image_path ?? null,
     keeperBarcodeBefore: canonicalBefore?.barcode ?? null,
+    ...(atomicHistory?.reviewedCatalogBefore ? { keeperCatalogBefore: atomicHistory.reviewedCatalogBefore } : {}),
     keeperPricingBefore: {
       selling_price_usd: Number(canonicalBefore?.selling_price_usd) || 0,
       selling_price_khr: Number(canonicalBefore?.selling_price_khr) || 0,
@@ -3277,6 +3313,7 @@ export async function foldDuplicateProductInto(
     stockDisposition,
     mergeContext,
     ...(atomicHistory?.bulkClusterPlan ? { bulkClusterPlan: atomicHistory.bulkClusterPlan } : {}),
+    ...(atomicHistory ? { operationId: atomicHistory.operationId } : {}),
     ...(atomicHistory?.snapshotContext ? { selectedConflictContext: atomicHistory.snapshotContext } : {}),
   }
 
@@ -3304,7 +3341,8 @@ export async function foldDuplicateProductInto(
     { sql: 'UPDATE products SET stock_quantity=(SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id=@id),updated_at=CURRENT_TIMESTAMP WHERE id=@id', params: { id: dup.id } },
   )
   if (atomicHistory?.additionalStatements?.length) statements.push(...atomicHistory.additionalStatements)
-  if (atomicHistory) statements.push(...buildAtomicMergeHistoryStatements(user, reversal, atomicHistory.operationId, auditDetails))
+  if (atomicHistory?.groupCompletionStatements) statements.push(...atomicHistory.groupCompletionStatements(reversal))
+  else if (atomicHistory) statements.push(...buildAtomicMergeHistoryStatements(user, reversal, atomicHistory.operationId, auditDetails))
 
   // Keep each atomic write batch within the same conservative 100-statement
   // bound used by the catalog's D1 query chunking. Refuse before the first
@@ -3339,7 +3377,7 @@ export async function foldDuplicateProductInto(
   reversal.adjustmentMovementIds = adjustmentMovementIds
 
   if (!atomicHistory) await audit(env, user?.id ?? null, actorSnapshot(user), 'merge_duplicate', 'product', dup.id, auditDetails)
-  const atomicRecord = atomicHistory
+  const atomicRecord = atomicHistory && !atomicHistory.groupCompletionStatements
     ? await finalizeAtomicMergeHistory(env, atomicHistory.operationId, reversal, db)
     : null
 
@@ -4944,6 +4982,7 @@ type ProductConflictActionReviewRow = {
 type ProductConflictActionStoredGroupRow = {
   ordinal: number; group_key: string; source_group_keys_json: string; member_ids_json: string; status: string
   state_digest: string; detail_json: string; resolution_json: string | null; final_plan_json: string | null; operation_id: string | null
+  action_history_id?: number | null; reversal_generation?: number
 }
 
 function productConflictActionCursor(value: string | undefined): number | null {
@@ -5813,6 +5852,447 @@ app.post('/possible-duplicates/merge-batch/reviews/:reviewId/finalize', async (c
   return c.json(productConflictActionFinalizeResponse(review, storedGroups, finalPlans, review.manifest_digest))
 })
 
+type ProductConflictActionMemberReceipt = {
+  member_ordinal: number
+  product_id: number
+  role: 'keeper' | 'merged'
+  status: 'planned' | 'history_pending' | 'undo_ready' | 'refused' | 'reversed'
+  operation_id: string | null
+  undo_snapshot_id: number | null
+}
+
+function strictProductConflictActionFinalPlan(row: ProductConflictActionStoredGroupRow, expectedReviewId?: string): ProductConflictActionFinalPlan {
+  let plan: ProductConflictActionFinalPlan
+  try { plan = JSON.parse(String(row.final_plan_json || 'null')) as ProductConflictActionFinalPlan }
+  catch { throw new ProductConflictMergeValidationError('The finalized conflict plan is unreadable.', 'review_corrupt', 409) }
+  const memberIds = Array.isArray(plan?.member_ids) ? plan.member_ids.map(Number) : []
+  const storedIds = parseProductConflictStoredArray(row.member_ids_json, 'member ids').map(Number)
+  const clusterPlan = parseProductMergeClusterPlan(plan?.cluster_plan)
+  const foldIds = Array.isArray(plan?.fold_members) ? plan.fold_members.map((member) => Number(member.member_id)) : []
+  const selectedSourceIds = plan?.selected ? [plan.selected.category?.source_product_id, plan.selected.brand?.source_product_id,
+    plan.selected.unit?.source_product_id, ...(plan.selected.barcode?.mode === 'member' ? [plan.selected.barcode.source_product_id] : [])].map(Number) : []
+  if (!plan || plan.version !== 1 || plan.authority !== 'reviewed_product_conflict_v2'
+    || plan.review_id == null || plan.review_id === '' || (expectedReviewId != null && plan.review_id !== expectedReviewId) || plan.group_key !== row.group_key
+    || plan.operation_id !== row.operation_id || !clusterPlan
+    || memberIds.length < 2 || memberIds.length !== storedIds.length
+    || memberIds.some((id, index) => id !== storedIds[index])
+    || !memberIds.includes(Number(plan.keeper_id))
+    || !Array.isArray(plan.fold_members) || plan.fold_members.length !== memberIds.length - 1
+    || new Set(foldIds).size !== foldIds.length
+    || plan.fold_members.some((member) => !memberIds.includes(Number(member.member_id))
+      || Number(member.member_id) === Number(plan.keeper_id) || !String(member.operation_id || '').trim())
+    || foldIds.some((id) => !memberIds.includes(id))
+    || clusterPlan.keeperId !== Number(plan.keeper_id) || clusterPlan.memberIds.length !== memberIds.length
+    || clusterPlan.memberIds.some((id, index) => id !== memberIds[index])
+    || !plan.selected || !plan.projected_result || !['canonical', 'member', 'clear'].includes(plan.selected.barcode?.mode)
+    || typeof plan.selected.barcode?.value !== 'string' || typeof plan.selected.brand?.brand_compact !== 'string'
+    || typeof plan.selected.unit?.unit_normalized !== 'string' || selectedSourceIds.some((id) => !memberIds.includes(id))) {
+    throw new ProductConflictMergeValidationError('The finalized conflict plan failed its authority check.', 'review_corrupt', 409)
+  }
+  return { ...plan, cluster_plan: clusterPlan }
+}
+
+function reviewedKeeperCatalogBefore(
+  detail: ProductConflictActionGroupPlan,
+  plan: ProductConflictActionFinalPlan,
+  firstFold: boolean,
+): NonNullable<MergeReversal['keeperCatalogBefore']> {
+  const source = firstFold
+    ? productConflictActionPlanMember(detail, plan.keeper_id)
+    : {
+        category: plan.selected.category.value, categories: plan.selected.category.categories,
+        brand: plan.selected.brand.value, brands: plan.selected.brand.brands,
+        brand_compact: plan.selected.brand.brand_compact,
+        unit: plan.selected.unit.value, unit_normalized: plan.selected.unit.unit_normalized,
+      }
+  const nullableText = (value: unknown) => value == null ? null : String(value)
+  return {
+    category: nullableText(source.category), categories: nullableText(source.categories),
+    brand: nullableText(source.brand), brands: nullableText(source.brands),
+    unit: nullableText(source.unit), unit_normalized: nullableText(source.unit_normalized),
+    brand_compact: nullableText(source.brand_compact),
+  }
+}
+
+function productConflictOriginalMemberMatches(
+  detail: ProductConflictActionGroupPlan,
+  productId: number,
+  row: Record<string, unknown> | undefined,
+): boolean {
+  const expected = detail.members.find((candidate) => Number(candidate.id) === Number(productId))
+  if (!expected || !row) return false
+  const textFields = ['name', 'barcode', 'category', 'categories', 'brand', 'brands', 'brand_compact',
+    'unit', 'unit_normalized', 'image_path', 'updated_at'] as const
+  const moneyFields = [...MERGE_COST_FIELDS, ...MERGE_PRICE_FIELDS]
+  const textMatch = textFields.every((field) => String(row[field] ?? '') === String(expected[field] ?? ''))
+  const moneyMatch = moneyFields.every((field) => Number(row[field] ?? 0) === Number(expected[field] ?? 0))
+  return textMatch && moneyMatch
+    && Number(row.is_active) === 1 && Number(row.is_group) === 0
+}
+
+function productConflictKeeperPostFoldMatches(plan: ProductConflictActionFinalPlan, row: Record<string, unknown> | undefined): boolean {
+  if (!row || Number(row.id) !== Number(plan.keeper_id) || Number(row.is_active) !== 1) return false
+  return productMergePlanKeeperMatches(plan.cluster_plan, row)
+    && String(row.barcode ?? '') === plan.selected.barcode.value
+    && String(row.category ?? '') === String(plan.selected.category.value ?? '')
+    && String(row.categories ?? '') === String(plan.selected.category.categories ?? '')
+    && String(row.brand ?? '') === String(plan.selected.brand.value ?? '')
+    && String(row.brands ?? '') === String(plan.selected.brand.brands ?? '')
+    && String(row.brand_compact ?? '') === plan.selected.brand.brand_compact
+    && String(row.unit ?? '') === String(plan.selected.unit.value ?? '')
+    && String(row.unit_normalized ?? '') === plan.selected.unit.unit_normalized
+}
+
+function productConflictActionForwardStatements(args: {
+  user: SessionUser
+  review: ProductConflictActionReviewRow
+  group: ProductConflictActionStoredGroupRow
+  plan: ProductConflictActionFinalPlan
+  member: ProductConflictActionMemberReceipt
+  firstFold: boolean
+}): (reversal: MergeReversal) => AtomicMergeStatement[] {
+  const { user, review, group, plan, member, firstFold } = args
+  const byName = actorSnapshot(user)
+  const storedReversal = (reversal: MergeReversal) => JSON.stringify({
+    ...reversal, operationId: member.operation_id, fingerprintPending: true,
+  })
+  const groupSnapshotPlaceholder = 'sha256-' + '0'.repeat(64)
+  return (reversal) => {
+    const statements: AtomicMergeStatement[] = [{
+      sql: `INSERT INTO undo_snapshots(kind,status,payload_json,created_by_id,created_by_name)
+            VALUES(@kind,'recorded',@payload,@actor,@byName)`,
+      params: { kind: PRODUCT_MERGE_GROUP_CHILD_KIND, payload: storedReversal(reversal), actor: user.id, byName },
+    }, {
+      sql: `UPDATE product_conflict_action_group_members SET status='history_pending',undo_snapshot_id=last_insert_rowid(),updated_at=CURRENT_TIMESTAMP
+            WHERE review_id=@review AND group_ordinal=@ordinal AND member_ordinal=@memberOrdinal
+              AND product_id=@product AND role='merged' AND status='planned' AND operation_id=@operationId`,
+      params: { review: review.id, ordinal: group.ordinal, memberOrdinal: member.member_ordinal, product: member.product_id, operationId: member.operation_id },
+    }]
+    if (firstFold) {
+      statements.push({
+        sql: `INSERT INTO undo_snapshots(kind,status,payload_json,created_by_id,created_by_name)
+              VALUES(@kind,'recorded',json_object('version',1,'review_id',@review,'group_key',@groupKey,
+                'child_snapshot_ids',json_array(last_insert_rowid()),'prefix_fingerprint',@prefix,'generation',0),@actor,@byName)`,
+        params: { kind: PRODUCT_MERGE_GROUP_ACTION_KIND, review: review.id, groupKey: group.group_key, prefix: groupSnapshotPlaceholder, actor: user.id, byName },
+      }, {
+        sql: `INSERT INTO action_history(scope,entity,entity_id,label,undo_label,redo_label,reversible,status,
+                undo_payload,redo_payload,created_by_id,created_by_name)
+              VALUES('products','product_conflict_group',@entityId,@label,@undoLabel,@redoLabel,0,'recorded',
+                json_object('applier',@applier,'snapshot_id',last_insert_rowid(),'review_id',@review,'group_key',@groupKey,'generation',0),
+                json_object('applier',@applier,'snapshot_id',last_insert_rowid(),'review_id',@review,'group_key',@groupKey,'generation',0),
+                @actor,@byName)`,
+        params: {
+          entityId: `${review.id}:${group.group_key}`, label: `Merged reviewed product group "${group.group_key}"`,
+          undoLabel: `Undo reviewed product group "${group.group_key}"`, redoLabel: `Redo reviewed product group "${group.group_key}"`,
+          applier: PRODUCT_MERGE_GROUP_ACTION_KIND, review: review.id, groupKey: group.group_key, actor: user.id, byName,
+        },
+      }, {
+        sql: `UPDATE product_conflict_action_groups SET action_history_id=last_insert_rowid(),status=@status,updated_at=CURRENT_TIMESTAMP
+              WHERE review_id=@review AND ordinal=@ordinal AND status='ready' AND action_history_id IS NULL`,
+        params: { status: plan.fold_members.length === 1 ? 'completed' : 'partial', review: review.id, ordinal: group.ordinal },
+      })
+    } else {
+      statements.push({
+        sql: `UPDATE undo_snapshots SET status='recorded',
+              payload_json=json_insert(payload_json,'$.child_snapshot_ids[#]',last_insert_rowid()),updated_at=CURRENT_TIMESTAMP
+              WHERE id=(SELECT CAST(json_extract(undo_payload,'$.snapshot_id') AS INTEGER) FROM action_history WHERE id=@history)
+                AND kind=@kind AND status='applied'`,
+        params: { history: group.action_history_id, kind: PRODUCT_MERGE_GROUP_ACTION_KIND },
+      }, {
+        sql: `UPDATE action_history SET reversible=0,status='recorded',updated_at=CURRENT_TIMESTAMP
+              WHERE id=@history AND status='undoable' AND reversible=1`,
+        params: { history: group.action_history_id },
+      }, {
+        sql: `UPDATE product_conflict_action_groups SET status=@status,updated_at=CURRENT_TIMESTAMP
+              WHERE review_id=@review AND ordinal=@ordinal AND status='partial' AND action_history_id=@history`,
+        params: {
+          status: member.member_ordinal === Math.max(...plan.fold_members.map((fold) => plan.member_ids.indexOf(fold.member_id))) ? 'completed' : 'partial',
+          review: review.id, ordinal: group.ordinal, history: group.action_history_id,
+        },
+      })
+    }
+    statements.push({
+      sql: `UPDATE product_conflict_action_reviews SET status='running',updated_at=CURRENT_TIMESTAMP
+            WHERE id=@review AND actor_id=@actor AND manifest_digest=@manifest AND status IN ('finalized','running','interrupted')`,
+      params: { review: review.id, actor: user.id, manifest: review.manifest_digest },
+    }, {
+      sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
+            VALUES(@actor,@byName,'merge_duplicate','product',@product,@details,'product',@product,@details)`,
+      params: {
+        actor: user.id, byName, product: String(member.product_id),
+        details: JSON.stringify({ review_id: review.id, group_key: group.group_key, keeper_id: plan.keeper_id,
+          merged_id: member.product_id, operation_id: member.operation_id, authority: plan.authority }),
+      },
+    })
+    return statements
+  }
+}
+
+async function reconcileProductConflictActionChild(
+  db: ReturnType<typeof getDb>, user: SessionUser, review: ProductConflictActionReviewRow,
+  group: ProductConflictActionStoredGroupRow, member: ProductConflictActionMemberReceipt, reversal: MergeReversal,
+): Promise<boolean> {
+  if (!member.undo_snapshot_id || !group.action_history_id || !member.operation_id) return false
+  const child = await db.prepare(`SELECT payload_json FROM undo_snapshots WHERE id=@id AND kind=@kind AND status='recorded' AND created_by_id=@actor`)
+    .get<{ payload_json: string }>({ id: member.undo_snapshot_id, kind: PRODUCT_MERGE_GROUP_CHILD_KIND, actor: user.id })
+  if (!child) return false
+  const stored = JSON.parse(child.payload_json) as MergeReversal & { operationId?: unknown }
+  if (stored.operationId !== member.operation_id || Number(stored.keeperId) !== Number(reversal.keeperId)
+    || Number(stored.dupId) !== Number(reversal.dupId)) return false
+  const fingerprint = await mergeStateFingerprint(db, [reversal])
+  const memberRows = await db.prepare(`SELECT undo_snapshot_id FROM product_conflict_action_group_members
+    WHERE review_id=@review AND group_ordinal=@ordinal AND undo_snapshot_id IS NOT NULL ORDER BY member_ordinal`)
+    .all<{ undo_snapshot_id: number }>({ review: review.id, ordinal: group.ordinal })
+  const childIds = memberRows.map((row) => Number(row.undo_snapshot_id))
+  if (!childIds.length || childIds[childIds.length - 1] !== Number(member.undo_snapshot_id)) return false
+  const prefix = await productMergeGroupPrefixFingerprint(review.id, group.group_key, childIds, Number(group.reversal_generation || 0))
+  const groupSnapshot = await db.prepare(`SELECT CAST(json_extract(undo_payload,'$.snapshot_id') AS INTEGER) AS id
+    FROM action_history WHERE id=@history AND created_by_id=@actor AND status='recorded' AND reversible=0`)
+    .get<{ id: number }>({ history: group.action_history_id, actor: user.id })
+  if (!groupSnapshot?.id) return false
+  const finalGroup = !await db.prepare(`SELECT 1 AS found FROM product_conflict_action_group_members
+    WHERE review_id=@review AND group_ordinal=@ordinal AND role='merged' AND status='planned' LIMIT 1`)
+    .get<{ found: number }>({ review: review.id, ordinal: group.ordinal })
+  const readyPayload = JSON.stringify({ ...stored, fingerprintPending: false, mergedStateFingerprint: fingerprint })
+  const groupPayload = JSON.stringify({ version: 1, review_id: review.id, group_key: group.group_key,
+    child_snapshot_ids: childIds, prefix_fingerprint: prefix, generation: Number(group.reversal_generation || 0) })
+  try {
+    await db.batch([{
+      sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM product_conflict_action_group_members
+        WHERE review_id=@review AND group_ordinal=@ordinal AND member_ordinal=@memberOrdinal
+          AND status='history_pending' AND undo_snapshot_id=@child AND operation_id=@operationId)
+        AND EXISTS(SELECT 1 FROM undo_snapshots WHERE id=@child AND kind=@childKind AND status='recorded' AND payload_json=@oldPayload)
+        AND EXISTS(SELECT 1 FROM undo_snapshots WHERE id=@groupSnapshot AND kind=@groupKind AND status='recorded')
+        AND EXISTS(SELECT 1 FROM action_history WHERE id=@history AND status='recorded' AND reversible=0)
+        THEN 1 ELSE json_extract('', '$') END AS product_conflict_history_guard`,
+      params: { review: review.id, ordinal: group.ordinal, memberOrdinal: member.member_ordinal, child: member.undo_snapshot_id,
+        operationId: member.operation_id, childKind: PRODUCT_MERGE_GROUP_CHILD_KIND, oldPayload: child.payload_json,
+        groupSnapshot: groupSnapshot.id, groupKind: PRODUCT_MERGE_GROUP_ACTION_KIND, history: group.action_history_id },
+    }, {
+      sql: `UPDATE undo_snapshots SET status='applied',payload_json=@payload,updated_at=CURRENT_TIMESTAMP WHERE id=@id AND status='recorded'`,
+      params: { payload: readyPayload, id: member.undo_snapshot_id },
+    }, {
+      sql: `UPDATE product_conflict_action_group_members SET status='undo_ready',updated_at=CURRENT_TIMESTAMP
+            WHERE review_id=@review AND group_ordinal=@ordinal AND member_ordinal=@memberOrdinal AND status='history_pending'`,
+      params: { review: review.id, ordinal: group.ordinal, memberOrdinal: member.member_ordinal },
+    }, {
+      sql: `UPDATE undo_snapshots SET status='applied',payload_json=@payload,updated_at=CURRENT_TIMESTAMP
+            WHERE id=@id AND kind=@kind AND status='recorded'`,
+      params: { payload: groupPayload, id: groupSnapshot.id, kind: PRODUCT_MERGE_GROUP_ACTION_KIND },
+    }, {
+      sql: `UPDATE action_history SET reversible=1,status='undoable',updated_at=CURRENT_TIMESTAMP
+            WHERE id=@history AND status='recorded' AND reversible=0`,
+      params: { history: group.action_history_id },
+    }, {
+      sql: `UPDATE product_conflict_action_groups SET status=@status,updated_at=CURRENT_TIMESTAMP
+            WHERE review_id=@review AND ordinal=@ordinal AND action_history_id=@history`,
+      params: { status: finalGroup ? 'completed' : 'partial', review: review.id, ordinal: group.ordinal, history: group.action_history_id },
+    }, {
+      sql: `UPDATE product_conflict_action_reviews SET status=CASE WHEN NOT EXISTS(
+              SELECT 1 FROM product_conflict_action_groups WHERE review_id=@review AND status IN ('ready','running','partial','actionable'))
+              AND NOT EXISTS(SELECT 1 FROM product_conflict_action_group_members WHERE review_id=@review AND status='history_pending')
+              THEN 'completed' ELSE 'running' END,updated_at=CURRENT_TIMESTAMP
+            WHERE id=@review AND actor_id=@actor`,
+      params: { review: review.id, actor: user.id },
+    }])
+    return true
+  } catch { return false }
+}
+
+async function productConflictActionApplyCounts(db: ReturnType<typeof getDb>, reviewId: string) {
+  const groups = await db.prepare(`SELECT COUNT(*) AS canonical_groups,
+    SUM(status IN ('ready','actionable','running')) AS pending_groups,SUM(status='partial') AS partial_groups,
+    SUM(status='completed') AS completed_groups,SUM(status='refused') AS refused_groups,
+    SUM(status='blocked') AS blocked_groups,SUM(status='reversed') AS reversed_groups,
+    SUM(EXISTS(SELECT 1 FROM product_conflict_action_group_members m WHERE m.review_id=g.review_id AND m.group_ordinal=g.ordinal AND m.status='history_pending')) AS history_pending_groups,
+    SUM(EXISTS(SELECT 1 FROM product_conflict_action_group_members m WHERE m.review_id=g.review_id AND m.group_ordinal=g.ordinal AND m.status='undo_ready')) AS undo_ready_groups
+    FROM product_conflict_action_groups g WHERE review_id=@review`).get<Record<string, number>>({ review: reviewId })
+  const folds = await db.prepare(`SELECT COUNT(*) AS merge_folds,
+    SUM(status='planned') AS pending_folds,SUM(status IN ('history_pending','undo_ready')) AS committed_folds,
+    SUM(status='refused') AS refused_folds,SUM(status='reversed') AS reversed_folds
+    FROM product_conflict_action_group_members WHERE review_id=@review AND role='merged'`).get<Record<string, number>>({ review: reviewId })
+  const number = (value: unknown) => Number(value) || 0
+  return {
+    canonical_groups: number(groups?.canonical_groups), pending_groups: number(groups?.pending_groups),
+    partial_groups: number(groups?.partial_groups), completed_groups: number(groups?.completed_groups),
+    refused_groups: number(groups?.refused_groups), blocked_groups: number(groups?.blocked_groups),
+    reversed_groups: number(groups?.reversed_groups), history_pending_groups: number(groups?.history_pending_groups),
+    undo_ready_groups: number(groups?.undo_ready_groups), merge_folds: number(folds?.merge_folds),
+    pending_folds: number(folds?.pending_folds), committed_folds: number(folds?.committed_folds),
+    refused_folds: number(folds?.refused_folds), reversed_folds: number(folds?.reversed_folds),
+  }
+}
+
+async function applyProductConflictActionReview(c: any, raw: unknown, user: SessionUser) {
+  let request
+  try { request = parseProductConflictActionApplyRequest(raw) }
+  catch (error) {
+    const validation = error instanceof ProductConflictMergeValidationError ? error : new ProductConflictMergeValidationError('The reviewed apply request is invalid.')
+    return c.json({ success: false, code: validation.code, error: validation.message }, validation.status as 400 | 409)
+  }
+  const counted = createCountedProductMergeDb(getDb(c.env))
+  const db = counted.db
+  let review = await readProductConflictActionReview(db, user.id, request.review_id)
+  if (!review) return c.json({ success: false, code: 'review_not_found', error: 'Conflict review not found.' }, 404)
+  if (!['finalized', 'running', 'interrupted', 'completed'].includes(review.status) || review.manifest_digest !== request.manifest_digest) {
+    return c.json({ success: false, code: 'manifest_conflict', error: 'This reviewed manifest is stale or does not match.' }, 409)
+  }
+  if (review.status === 'completed') {
+    const counts = await productConflictActionApplyCounts(db, review.id)
+    return c.json({ success: true, manifest_version: 1, resolution_version: 2, review_id: review.id,
+      manifest_digest: review.manifest_digest, status: review.status, continuation_required: false,
+      counts: { requested_groups: Number(review.requested_group_count), total_members: Number(review.total_member_count), ...counts }, groups: [] })
+  }
+  let group = await db.prepare(`SELECT ordinal,group_key,source_group_keys_json,member_ids_json,status,state_digest,detail_json,
+    resolution_json,final_plan_json,operation_id,action_history_id,reversal_generation
+    FROM product_conflict_action_groups g WHERE review_id=@review AND (status IN ('ready','partial') OR EXISTS(
+      SELECT 1 FROM product_conflict_action_group_members m WHERE m.review_id=g.review_id AND m.group_ordinal=g.ordinal AND m.status='history_pending'))
+    ORDER BY ordinal LIMIT 1`)
+    .get<ProductConflictActionStoredGroupRow>({ review: review.id })
+  if (!group) {
+    const counts = await productConflictActionApplyCounts(db, review.id)
+    if (counts.pending_groups === 0 && counts.partial_groups === 0 && counts.history_pending_groups === 0) {
+      await db.prepare(`UPDATE product_conflict_action_reviews SET status='completed',updated_at=CURRENT_TIMESTAMP
+        WHERE id=@review AND actor_id=@actor AND manifest_digest=@manifest AND status IN ('finalized','running','interrupted')`)
+        .run({ review: review.id, actor: user.id, manifest: review.manifest_digest })
+      return c.json({ success: true, manifest_version: 1, resolution_version: 2, review_id: review.id,
+        manifest_digest: review.manifest_digest, status: 'completed', continuation_required: false,
+        counts: { requested_groups: Number(review.requested_group_count), total_members: Number(review.total_member_count), ...counts }, groups: [] })
+    }
+    return c.json({ success: false, code: 'review_state_conflict', error: 'No resumable reviewed group is available.' }, 409)
+  }
+  let plan: ProductConflictActionFinalPlan
+  let detail: ProductConflictActionGroupPlan
+  try {
+    plan = strictProductConflictActionFinalPlan(group, review.id)
+    detail = JSON.parse(group.detail_json) as ProductConflictActionGroupPlan
+  } catch (error) {
+    const validation = error instanceof ProductConflictMergeValidationError ? error : new ProductConflictMergeValidationError('The stored conflict review is unreadable.', 'review_corrupt', 409)
+    return c.json({ success: false, code: validation.code, error: validation.message }, 409)
+  }
+  const members = await db.prepare(`SELECT member_ordinal,product_id,role,status,operation_id,undo_snapshot_id
+    FROM product_conflict_action_group_members WHERE review_id=@review AND group_ordinal=@ordinal ORDER BY member_ordinal`)
+    .all<ProductConflictActionMemberReceipt>({ review: review.id, ordinal: group.ordinal })
+  const pendingHistory = members.find((member) => member.status === 'history_pending')
+  if (pendingHistory?.undo_snapshot_id) {
+    const child = await db.prepare(`SELECT payload_json FROM undo_snapshots WHERE id=@id AND kind=@kind`)
+      .get<{ payload_json: string }>({ id: pendingHistory.undo_snapshot_id, kind: PRODUCT_MERGE_GROUP_CHILD_KIND })
+    let stored: MergeReversal | null = null
+    try { stored = child ? JSON.parse(child.payload_json) as MergeReversal : null } catch { stored = null }
+    const reconciled = stored ? await reconcileProductConflictActionChild(db, user, review, group, pendingHistory, stored).catch(() => false) : false
+    review = await readProductConflictActionReview(db, user.id, review.id) || review
+    const counts = await productConflictActionApplyCounts(db, review.id)
+    return c.json({ success: true, manifest_version: 1, resolution_version: 2, review_id: review.id,
+      manifest_digest: review.manifest_digest, status: review.status, continuation_required: review.status !== 'completed',
+      counts: { requested_groups: Number(review.requested_group_count), total_members: Number(review.total_member_count), ...counts },
+      groups: [{ group_key: group.group_key, status: reconciled ? 'history_reconciled' : 'history_pending', processed_folds: 0 }] })
+  }
+  const member = members.find((candidate) => candidate.role === 'merged' && candidate.status === 'planned')
+  if (!member?.operation_id) return c.json({ success: false, code: 'review_state_conflict', error: 'The reviewed group member receipt is invalid.' }, 409)
+  if (plan.image_effect && getActionTier(user, 'products', 'image') !== 'full') {
+    return c.json({ success: false, code: 'image_permission_required', error: 'This reviewed group changes product images.' }, 403)
+  }
+  const currentProducts = await db.prepare(`SELECT * FROM products WHERE id IN (@keeper,@member)`)
+    .all<Record<string, unknown> & { id: number; name: string | null; image_path: string | null }>({ keeper: plan.keeper_id, member: member.product_id })
+  const keeper = currentProducts.find((row) => Number(row.id) === Number(plan.keeper_id))
+  const duplicate = currentProducts.find((row) => Number(row.id) === Number(member.product_id))
+  if (!keeper || !duplicate) return c.json({ success: false, code: 'merge_state_conflict', error: 'A reviewed product is unavailable.' }, 409)
+  if (getActionTier(user, 'products', 'image') !== 'full'
+    && await productMergeChangesImages(db, [{ keeper, discarded: duplicate }])) {
+    return c.json({ success: false, code: 'image_permission_required', error: 'This reviewed group now changes product images.' }, 403)
+  }
+  const firstFold = !group.action_history_id
+  const preparedSnapshot = await readProductMergeCaseSnapshot(db, plan.keeper_id, member.product_id, MERGE_REPARENT_TABLES)
+  if (!productConflictOriginalMemberMatches(detail, member.product_id, duplicate)
+    || (firstFold
+      ? !productConflictOriginalMemberMatches(detail, plan.keeper_id, keeper)
+      : !productConflictKeeperPostFoldMatches(plan, keeper))) {
+    return c.json({ success: false, code: 'merge_state_conflict', error: 'A reviewed product changed after finalization.' }, 409)
+  }
+  const branchRows = await db.prepare('SELECT id,name FROM branches').all<{ id: number; name: string }>()
+  const branchNameById = new Map(branchRows.map((row) => [Number(row.id), row.name]))
+  const preStatements: AtomicMergeStatement[] = [{
+    sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM product_conflict_action_reviews
+      WHERE id=@review AND actor_id=@actor AND manifest_digest=@manifest AND status IN ('finalized','running','interrupted'))
+      AND EXISTS(SELECT 1 FROM product_conflict_action_groups
+        WHERE review_id=@review AND ordinal=@ordinal AND group_key=@groupKey AND final_plan_json=@plan
+          AND operation_id=@groupOperation AND status=@groupStatus AND reversal_generation=@generation
+          AND ((@first=1 AND action_history_id IS NULL) OR (@first=0 AND action_history_id=@history)) )
+      AND EXISTS(SELECT 1 FROM product_conflict_action_group_members
+        WHERE review_id=@review AND group_ordinal=@ordinal AND member_ordinal=@memberOrdinal
+          AND product_id=@member AND role='merged' AND status='planned' AND operation_id=@memberOperation)
+      AND NOT EXISTS(SELECT 1 FROM stock_session_members sm JOIN stock_session_operations so ON so.id=sm.operation_id
+        JOIN action_history sh ON sh.id=so.history_id
+        WHERE sm.product_id IN (@keeper,@member) AND sh.status IN ('undoable','redoable'))
+      THEN 1 ELSE json_extract('', '$') END AS product_conflict_apply_guard`,
+    params: { review: review.id, actor: user.id, manifest: review.manifest_digest, ordinal: group.ordinal,
+      groupKey: group.group_key, plan: group.final_plan_json, groupOperation: group.operation_id,
+      groupStatus: firstFold ? 'ready' : 'partial', generation: Number(group.reversal_generation || 0),
+      first: firstFold ? 1 : 0, history: group.action_history_id, memberOrdinal: member.member_ordinal,
+      member: member.product_id, memberOperation: member.operation_id, keeper: plan.keeper_id },
+  }]
+  let foldResult: Awaited<ReturnType<typeof foldDuplicateProductInto>>
+  try {
+    foldResult = await foldDuplicateProductInto(c.env, db, user, keeper, duplicate, branchNameById,
+      'reviewed product conflict group', 'merge', resolveProductMergeClusterPlanEconomics(plan.cluster_plan), {
+        operationId: member.operation_id, bulkClusterPlan: plan.cluster_plan, resumedCluster: !firstFold,
+        reviewedPlan: plan, reviewedCatalogBefore: reviewedKeeperCatalogBefore(detail, plan, firstFold),
+        preparedSnapshot,
+        preStatements, groupCompletionStatements: productConflictActionForwardStatements({ user, review, group, plan, member, firstFold }),
+        snapshotContext: { review_id: review.id, group_key: group.group_key, authority: plan.authority },
+      })
+  } catch (error) {
+    const conflict = /merge_state_conflict|merge_identity_conflict|merge_cluster_plan_conflict/.test(String(error))
+    return c.json({ success: false, code: conflict ? 'merge_state_conflict' : 'merge_failed',
+      error: conflict ? 'A reviewed product or receipt changed before this fold committed.' : 'The reviewed fold could not be completed.' }, conflict ? 409 : 500)
+  }
+  group = await db.prepare(`SELECT ordinal,group_key,source_group_keys_json,member_ids_json,status,state_digest,detail_json,
+    resolution_json,final_plan_json,operation_id,action_history_id,reversal_generation
+    FROM product_conflict_action_groups WHERE review_id=@review AND ordinal=@ordinal`)
+    .get<ProductConflictActionStoredGroupRow>({ review: review.id, ordinal: group.ordinal }) || group
+  const refreshedMember = await db.prepare(`SELECT member_ordinal,product_id,role,status,operation_id,undo_snapshot_id
+    FROM product_conflict_action_group_members WHERE review_id=@review AND group_ordinal=@ordinal AND member_ordinal=@memberOrdinal`)
+    .get<ProductConflictActionMemberReceipt>({ review: review.id, ordinal: group.ordinal, memberOrdinal: member.member_ordinal }) || member
+  const reconciled = await reconcileProductConflictActionChild(db, user, review, group, refreshedMember, foldResult.reversal).catch(() => false)
+  review = await readProductConflictActionReview(db, user.id, review.id) || review
+  const counts = await productConflictActionApplyCounts(db, review.id)
+  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+  c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
+  c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'update' }))
+  return c.json({ success: true, manifest_version: 1, resolution_version: 2, review_id: review.id,
+    manifest_digest: review.manifest_digest, status: review.status, continuation_required: review.status !== 'completed',
+    counts: { requested_groups: Number(review.requested_group_count), total_members: Number(review.total_member_count), ...counts },
+    groups: [{ group_key: group.group_key, status: reconciled ? group.status : 'history_pending',
+      processed_folds: 1, keeper_id: plan.keeper_id, merged_ids: [member.product_id], operation_ids: [member.operation_id] }] })
+}
+
+registerProductMergeGroupRedo(async (ctx) => {
+  const group = await ctx.db.prepare(`SELECT ordinal,group_key,source_group_keys_json,member_ids_json,status,state_digest,detail_json,
+    resolution_json,final_plan_json,operation_id,action_history_id,reversal_generation
+    FROM product_conflict_action_groups WHERE review_id=@review AND ordinal=@ordinal AND group_key=@groupKey`)
+    .get<ProductConflictActionStoredGroupRow>({ review: ctx.reviewId, ordinal: ctx.groupOrdinal, groupKey: ctx.groupKey })
+  if (!group) throw new Error('merge_group_plan_unavailable')
+  const plan = strictProductConflictActionFinalPlan(group, ctx.reviewId)
+  const fold = plan.fold_members.find((candidate) => Number(candidate.member_id) === Number(ctx.reversal.dupId))
+  if (!fold || fold.operation_id !== ctx.operationId || Number(ctx.reversal.keeperId) !== Number(plan.keeper_id)) {
+    throw new Error('merge_group_plan_conflict')
+  }
+  const products = await ctx.db.prepare(`SELECT id,name,image_path FROM products WHERE id IN (@keeper,@member)`)
+    .all<{ id: number; name: string | null; image_path: string | null }>({ keeper: plan.keeper_id, member: fold.member_id })
+  const keeper = products.find((row) => Number(row.id) === Number(plan.keeper_id))
+  const duplicate = products.find((row) => Number(row.id) === Number(fold.member_id))
+  if (!keeper || !duplicate) throw new Error('merge_group_product_unavailable')
+  const branches = await ctx.db.prepare('SELECT id,name FROM branches').all<{ id: number; name: string }>()
+  await foldDuplicateProductInto(ctx.env, ctx.db, ctx.user, keeper, duplicate,
+    new Map(branches.map((row) => [Number(row.id), row.name])), 'reviewed product conflict group redo',
+    ctx.reversal.stockDisposition || 'merge', resolveProductMergeClusterPlanEconomics(plan.cluster_plan), {
+      operationId: ctx.operationId, bulkClusterPlan: plan.cluster_plan, resumedCluster: ctx.childOrdinal > 0,
+      reviewedPlan: plan, reviewedRedo: true, reviewedCatalogBefore: ctx.reversal.keeperCatalogBefore,
+      groupCompletionStatements: ctx.completionStatements,
+      snapshotContext: { review_id: ctx.reviewId, group_key: ctx.groupKey, authority: plan.authority },
+    })
+})
+
 app.get('/possible-duplicates/merge-batch/reviews/:reviewId', async (c) => {
   const user = c.get('user')
   if (getActionTier(user, 'products', 'merge_duplicates') !== 'full') {
@@ -5841,6 +6321,9 @@ app.post('/possible-duplicates/merge-batch', async (c) => {
     return c.json({ success: false, code: 'permission_denied', error: 'You do not have permission to perform this action' }, 403)
   }
   const raw = await c.req.json().catch(() => null)
+  if (isProductConflictActionApplyRequest(raw)) {
+    return applyProductConflictActionReview(c, raw, user)
+  }
   if (isProductConflictActionPreviewRequest(raw)) {
     return c.json({ success: false, code: 'phase_not_available', error: 'Resolution-v2 apply is not available in this review phase.' }, 409)
   }

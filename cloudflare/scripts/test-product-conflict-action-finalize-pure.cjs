@@ -60,4 +60,17 @@ for (const invalid of [
   { ...base, resolutions: [{ ...base.resolutions[0], barcode: { mode: 'invented' } }] },
 ]) assert.throws(() => groups.parseProductConflictActionFinalizeRequest(invalid), /./)
 
-console.log('product conflict action finalize pure: 12 checks passed')
+const apply = {
+  review_id: base.review_id,
+  manifest_digest: `sha256-${'b'.repeat(64)}`,
+  client_request_id: base.review_id,
+}
+assert.equal(groups.isProductConflictActionApplyRequest(apply), true)
+assert.deepEqual(groups.parseProductConflictActionApplyRequest(apply), apply)
+for (const invalid of [
+  { ...apply, client_request_id: 'different' },
+  { ...apply, manifest_digest: 'sha256-short' },
+  { ...apply, extra: true },
+]) assert.throws(() => groups.parseProductConflictActionApplyRequest(invalid), /./)
+
+console.log('product conflict action finalize/apply pure: strict contracts passed')

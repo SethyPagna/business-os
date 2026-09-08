@@ -84,6 +84,12 @@ export type ProductConflictActionFinalizeRequest = {
   resolutions: ProductConflictActionFinalizeResolution[]
 }
 
+export type ProductConflictActionApplyRequest = {
+  review_id: string
+  manifest_digest: string
+  client_request_id: string
+}
+
 function asRecord(value: unknown, path: string): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ProductConflictMergeValidationError(`${path} must be an object.`)
   return value as Record<string, unknown>
@@ -314,6 +320,30 @@ export function parseProductConflictActionFinalizeRequest(value: unknown): Produ
   return {
     manifest_version: 1, resolution_version: 2, review_id: root.review_id,
     draft_digest: root.draft_digest, resolutions,
+  }
+}
+
+export function isProductConflictActionApplyRequest(value: unknown): boolean {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value)
+    && Object.prototype.hasOwnProperty.call(value, 'review_id'))
+}
+
+export function parseProductConflictActionApplyRequest(value: unknown): ProductConflictActionApplyRequest {
+  const root = asRecord(value, 'request')
+  exactKeys(root, ['review_id', 'manifest_digest', 'client_request_id'], 'request')
+  if (typeof root.review_id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(root.review_id)) {
+    throw new ProductConflictMergeValidationError('A valid review_id is required.')
+  }
+  if (typeof root.manifest_digest !== 'string' || !/^sha256-[0-9a-f]{64}$/.test(root.manifest_digest)) {
+    throw new ProductConflictMergeValidationError('A valid manifest_digest is required.')
+  }
+  if (root.client_request_id !== root.review_id) {
+    throw new ProductConflictMergeValidationError('client_request_id must equal review_id for this reviewed apply.')
+  }
+  return {
+    review_id: root.review_id,
+    manifest_digest: root.manifest_digest,
+    client_request_id: root.client_request_id,
   }
 }
 
