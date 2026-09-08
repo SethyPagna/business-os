@@ -53,12 +53,24 @@ async function run() {
       'the losing-row snapshot must be taken before resolveMergedPricing mutates it')
     // internal keys never pollute the record
     assert.match(engineSource, /key\.startsWith\('__'\) \|\| key === 'name_normalized'/)
-    // the records + counter updates are appended before the ONE batch flush,
-    // so they land after the product INSERTs in the same atomic batch
-    const recordsIndex = engineSource.indexOf('if (autoMergeRecords.length) {')
-    const flushAfterRecords = engineSource.indexOf('if (statements.length) await runD1BatchInChunks(db, statements)', recordsIndex)
-    assert.ok(recordsIndex !== -1 && flushAfterRecords !== -1,
-      'auto-merge statements must be appended before their batch flush (a flush must follow the records block)')
+    // The product writer now keeps every imported product row in its own
+    // statement group. The merge record and counter must be appended to that
+    // SAME group before it is queued, and those groups must use the group-
+    // atomic runner. A global statements flush would allow the product write
+    // and its merge history to split across D1 batches.
+    const finishGroupIndex = engineSource.indexOf('const finishProductRowWriteGroup = () => {')
+    const recordsIndex = engineSource.indexOf('const mergeRecords = autoMergeRecords.filter(', finishGroupIndex)
+    const counterIndex = engineSource.indexOf("sql: 'UPDATE products SET auto_merged_count", recordsIndex)
+    const queueGroupIndex = engineSource.indexOf('productStatementGroups.push(rowWriteGroup)', counterIndex)
+    const flushAfterGroup = engineSource.indexOf(
+      'runD1BatchGroupsInChunks(importWriteDb, productStatementGroups)',
+      queueGroupIndex,
+    )
+    assert.ok(
+      finishGroupIndex !== -1 && recordsIndex !== -1 && counterIndex !== -1
+        && queueGroupIndex !== -1 && flushAfterGroup !== -1,
+      'auto-merge record + counter must join the product row group before its group-atomic flush',
+    )
     assert.match(engineSource, /UPDATE products SET auto_merged_count = COALESCE\(auto_merged_count, 0\) \+ @count WHERE id = @id/)
   })
 
