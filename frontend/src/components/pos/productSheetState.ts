@@ -33,6 +33,7 @@ export type SheetBatchLike = {
   expiry_date?: string | null
   batch_number?: number | null
   received_date?: string | null
+  received_at?: string | null
   created_at?: string | null
   __productId?: number
 }
