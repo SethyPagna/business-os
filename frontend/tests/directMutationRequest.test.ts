@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { transformSync } from 'esbuild'
 import {
+  DIRECT_MUTATION_MAX_PENDING,
+  DIRECT_MUTATION_RECONCILE_AFTER_MS,
   directMutationOutcomeIsUnknown,
   directMutationStorageKey,
   freezeDirectMutationBody,
@@ -27,8 +29,14 @@ function loadTransport(relative: string, mocks: Record<string, unknown>): Record
 
 class MemoryStorage {
   private rows = new Map<string, string>()
+  failWrites = false
+  get length() { return this.rows.size }
+  key(index: number) { return [...this.rows.keys()][index] ?? null }
   getItem(key: string) { return this.rows.get(key) ?? null }
-  setItem(key: string, value: string) { this.rows.set(key, value) }
+  setItem(key: string, value: string) {
+    if (this.failWrites) throw new Error('quota')
+    this.rows.set(key, value)
+  }
   removeItem(key: string) { this.rows.delete(key) }
 }
 
@@ -53,13 +61,36 @@ await test('pending bodies are frozen and scoped by actor plus entity', () => {
 await test('one actor-scoped status slot retains the exact target and body across reload', () => {
   const storage = new MemoryStorage()
   const body = { client_request_id: 'sale-status-1', expected_updated_at: 'sale-rev-1', sale_status: 'cancelled', cancel_reason: 'mistake' }
-  savePendingDirectMutationSlot('sale-status', 7, 31, body, storage)
-  const restored = loadPendingDirectMutationSlot<typeof body>('sale-status', 7, storage)
+  const history = { entryId: 'history-31', direction: 'undo' as const }
+  savePendingDirectMutationSlot('sale-status', 7, 31, body, storage, history, 1000)
+  const restored = loadPendingDirectMutationSlot<typeof body>('sale-status', 7, storage, 1000 + DIRECT_MUTATION_RECONCILE_AFTER_MS + 1)
   assert.equal(restored?.entityId, '31')
   assert.deepEqual(restored?.body, body)
+  assert.deepEqual(restored?.history, history)
+  assert.equal(restored?.needsReconciliation, true)
   assert.equal(loadPendingDirectMutationSlot('sale-status', 8, storage), null)
   savePendingDirectMutationSlot('sale-status', 7, 31, null, storage)
   assert.equal(loadPendingDirectMutationSlot('sale-status', 7, storage), null)
+})
+
+await test('pending storage is actor-required, bounded, and fails closed before a write can start', () => {
+  const storage = new MemoryStorage()
+  assert.throws(() => savePendingDirectMutation('return-edit', null, 1, { client_request_id: 'missing-actor' }, storage), /signed-in user/)
+  assert.throws(() => directMutationStorageKey('return-edit', '', 1), /signed-in user/)
+  for (let id = 1; id <= DIRECT_MUTATION_MAX_PENDING; id += 1) {
+    savePendingDirectMutation('return-edit', 7, id, { client_request_id: `request-${id}` }, storage, null, 1000)
+  }
+  assert.throws(
+    () => savePendingDirectMutation('return-edit', 7, DIRECT_MUTATION_MAX_PENDING + 1, { client_request_id: 'overflow' }, storage),
+    /too many earlier requests/,
+  )
+  assert.equal(loadPendingDirectMutation('return-edit', 7, 1, storage, 1000 + DIRECT_MUTATION_RECONCILE_AFTER_MS + 1)?.needsReconciliation, true)
+  assert.equal(storage.length, DIRECT_MUTATION_MAX_PENDING, 'unresolved old entries remain visible and block fresh identities instead of being pruned')
+
+  const quota = new MemoryStorage()
+  quota.failWrites = true
+  assert.throws(() => savePendingDirectMutation('return-edit', 7, 44, { client_request_id: 'quota-failure' }, quota), /request was not sent/)
+  assert.equal(loadPendingDirectMutation('return-edit', 7, 44, quota), null)
 })
 
 await test('stored retry records without a prepared request id are ignored', () => {
@@ -72,7 +103,7 @@ await test('stored retry records without a prepared request id are ignored', () 
     body: { expected_updated_at: 'return-rev-1' },
   }))
   assert.equal(loadPendingDirectMutation('return-edit', 7, 44, storage), null)
-  const slotKey = 'businessos_pending_return-history_v1:7:active'
+  const slotKey = 'businessos_pending_return-history_v2:7:active'
   storage.setItem(slotKey, JSON.stringify({ version: 1, kind: 'return-history', actorId: '7', entityId: '44', body: {} }))
   assert.equal(loadPendingDirectMutationSlot('return-history', 7, storage), null)
 })
@@ -86,6 +117,7 @@ await test('unknown outcome classifier retains only responses that may have comm
   assert.equal(directMutationOutcomeIsUnknown({ status: 409, code: 'write_conflict' }), false)
   assert.equal(directMutationOutcomeIsUnknown({ status: 400, code: 'invalid_request' }), false)
   assert.equal(directMutationOutcomeIsUnknown({ code: 'write_requires_live_server', reason: 'server_offline' }), false)
+  assert.equal(directMutationOutcomeIsUnknown({ code: 'pending_request_persistence_failed' }), false)
   assert.equal(directMutationOutcomeIsUnknown({ name: 'AbortError' }), false)
 })
 
@@ -148,16 +180,21 @@ await test('direct-write UI exposes manual exact retry and freezes return edits 
   const sales = readFileSync(new URL('../src/components/sales/Sales.tsx', import.meta.url), 'utf8')
   const editReturn = readFileSync(new URL('../src/components/returns/EditReturnModal.tsx', import.meta.url), 'utf8')
   const returns = readFileSync(new URL('../src/components/returns/Returns.tsx', import.meta.url), 'utf8')
-  assert.match(sales, /pendingDirectStatus\.body[\s\S]*handleStatusChange\([\s\S]*body,/)
+  assert.match(sales, /const pending = pendingDirectStatusRef\.current[\s\S]*await handleStatusChange\([\s\S]*pending\.body,/)
   assert.match(sales, /newStatus === 'cancelled'[\s\S]*!extra && !preparedRetry/)
   assert.match(sales, /statusReplayExtra\(preparedRetry\)/)
   assert.doesNotMatch(sales, /redo:[^\n]*preparedRetry\)/)
-  assert.match(sales, /prepareSaleStatusRequest[\s\S]*savePendingDirectStatus\(saleId, preparedRequest\)[\s\S]*runSaleStatusMutation\(saleId, preparedRequest\)/)
+  assert.match(sales, /prepareSaleStatusRequest[\s\S]*savePendingDirectStatus\(saleId, preparedRequest, historyContext\)[\s\S]*runSaleStatusMutation\(saleId, preparedRequest\)/)
   assert.match(sales, /directMutationOutcomeIsUnknown\(error\)[\s\S]*savePendingDirectStatus\(saleId, null\)/)
   assert.match(editReturn, /pendingRequest\?\.body \|\|[\s\S]*prepareReturnRequest[\s\S]*savePendingDirectMutation\('return-edit'/)
   assert.match(editReturn, /fieldset disabled=\{submitting \|\| !!pendingRequest\}/)
   assert.match(editReturn, /retry_original_request[\s\S]*discard_retry/)
-  assert.match(returns, /submitReturnHistoryRequest\(pendingHistoryRequest\.entityId, pendingHistoryRequest\.body\)/)
+  assert.match(sales, /salesRef\.current\.find/)
+  assert.match(sales, /const replaySaleStatusHistory[\s\S]*await handleStatusChange\([\s\S]*throw new Error/)
+  assert.match(sales, /undo: \(\) => replaySaleStatusHistory[\s\S]*redo: \(\) => replaySaleStatusHistory/)
+  assert.match(sales, /actionHistory\[history\.direction\]\(history\.entryId\)/)
+  assert.match(returns, /expected_updated_at: currentUpdatedAt/)
+  assert.match(returns, /actionHistory\[history\.direction\]\(history\.entryId\)/)
 })
 
 if (failed) process.exit(1)
