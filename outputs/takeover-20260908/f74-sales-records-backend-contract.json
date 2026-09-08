@@ -1,0 +1,107 @@
+{
+  "schema_version": 2,
+  "feature": "F74 Sales Records",
+  "frozen_at": "2026-09-08",
+  "record": {
+    "required": ["id", "source", "at", "actor_username", "kind", "via", "subject", "changes"],
+    "properties": {
+      "id": "stable source-prefixed string",
+      "source": "sale | ledger | audit | bulk | return | mutation",
+      "at": "stored event timestamp or null when unavailable",
+      "actor_username": "immutable acting-account username snapshot or null when unavailable",
+      "kind": "one of kinds",
+      "via": "apply/amend/origin, undo, redo, or null",
+      "subject": "immutable historical subject label or null",
+      "changes": "ordered changed-only array"
+    },
+    "forbidden_api_properties": ["before", "after", "unknown_before_fields", "unknown_after_fields", "raw_variables"]
+  },
+  "value_state": {
+    "known_value": { "state": "known_value", "value": "typed value" },
+    "known_none": { "state": "known_none" },
+    "unknown": { "state": "unknown" }
+  },
+  "change": {
+    "shape": { "field": "one of fields", "before": "value_state", "after": "value_state" },
+    "rule": "Emit only a directly changed field. Omit equal before/after states. Sale creation emits its fixed captured field set from known_none to its captured state."
+  },
+  "kinds": [
+    "sale_created",
+    "driver_changed",
+    "delivery_cost_changed",
+    "delivery_fee_changed",
+    "delivery_added",
+    "item_added",
+    "item_removed",
+    "item_quantity_changed",
+    "items_replaced",
+    "customer_changed",
+    "membership_changed",
+    "status_changed",
+    "payment_changed",
+    "payment_settled",
+    "cancelled",
+    "legacy_sale_change"
+  ],
+  "fields": [
+    "receipt_number",
+    "sale_status",
+    "items",
+    "total_usd",
+    "payment",
+    "delivery",
+    "customer",
+    "membership",
+    "item",
+    "quantity",
+    "removed_items",
+    "added_items",
+    "delivery_fee_usd",
+    "actual_delivery_cost_usd",
+    "is_delivery",
+    "driver",
+    "payment_method",
+    "payment_details",
+    "amount_paid_usd",
+    "amount_paid_khr",
+    "change_usd",
+    "change_khr",
+    "cancel_reason",
+    "cancel_note"
+  ],
+  "fields_by_kind": {
+    "sale_created": ["receipt_number", "sale_status", "items", "total_usd", "payment", "delivery", "customer", "membership"],
+    "driver_changed": ["driver"],
+    "delivery_cost_changed": ["actual_delivery_cost_usd"],
+    "delivery_fee_changed": ["delivery_fee_usd", "total_usd"],
+    "delivery_added": ["is_delivery", "driver", "delivery_fee_usd", "actual_delivery_cost_usd", "total_usd"],
+    "item_added": ["item", "quantity", "total_usd"],
+    "item_removed": ["item", "quantity", "total_usd"],
+    "item_quantity_changed": ["item", "quantity", "total_usd"],
+    "items_replaced": ["removed_items", "added_items", "total_usd"],
+    "customer_changed": ["customer", "membership"],
+    "membership_changed": ["membership"],
+    "status_changed": ["sale_status"],
+    "payment_changed": ["payment_method", "payment_details", "amount_paid_usd", "amount_paid_khr", "change_usd", "change_khr", "sale_status"],
+    "payment_settled": ["payment_method", "payment_details", "amount_paid_usd", "amount_paid_khr", "change_usd", "change_khr", "sale_status"],
+    "cancelled": ["sale_status", "cancel_reason", "cancel_note"],
+    "legacy_sale_change": []
+  },
+  "typed_values": {
+    "customer": { "id": "number|null", "name": "string|null", "phone": "string|null", "address": "string|null" },
+    "membership": { "number": "string|null", "discount_usd": "number|null", "discount_khr": "number|null", "points_redeemed": "number|null" },
+    "driver": { "id": "number|null", "name": "string|null", "phone": "string|null", "address": "string|null" },
+    "item": { "sale_item_id": "number|null", "product_id": "number|null", "name": "string|null", "sku": "string|null", "unit_price_usd": "number|null", "line_total_usd": "number|null" },
+    "payment": { "method": "string|null", "details": "payment_details[]|null", "amount_paid_usd": "number|null", "amount_paid_khr": "number|null", "change_usd": "number|null", "change_khr": "number|null" },
+    "payment_details": [{ "method": "string", "amount_usd": "number", "amount_khr": "number" }]
+  },
+  "historical_rules": [
+    "General customer_id null is known_none, never unknown.",
+    "An absent legacy customer or membership snapshot is unknown, never fabricated from the current contact.",
+    "Customer, membership, driver, item and actor labels are write-time snapshots and are never resolved through mutable current rows.",
+    "A genuine historical sale event that cannot be mapped narrowly is legacy_sale_change with changes=[]; render Earlier sale change and historical details unavailable without raw variables.",
+    "Rows sharing one replacement group_id and direction form one items_replaced record.",
+    "Durable receipt generation preserves one original record and every Undo/Redo record even after ordinary audit pruning; unavailable replay actor/time stay null and provenance_unknown=true.",
+    "Records detail length and list-row records_count must remain equal."
+  ]
+}
