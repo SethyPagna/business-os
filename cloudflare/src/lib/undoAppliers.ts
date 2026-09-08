@@ -21,7 +21,7 @@ import {
 // that outright.
 import { amendmentEntryStatement } from './saleAmendments'
 import { replaySaleBulkStatus } from './saleBulkStatus'
-import { BULK_CUSTOMER_UPDATE_KIND, BULK_UPDATE_KIND, SINGLE_CUSTOMER_UPDATE_KIND, replaySaleBulkUpdate } from './saleBulkUpdate'
+import { BULK_CUSTOMER_UPDATE_KIND, BULK_UPDATE_KIND, MULTI_CUSTOMER_UPDATE_KIND, SINGLE_CUSTOMER_UPDATE_KIND, replaySaleBulkUpdate } from './saleBulkUpdate'
 import { RETURN_BULK_ACTION_KIND, replayReturnBulkAction } from './returnBulkAction'
 import { SALE_SETTLEMENT_ACTION_KIND, replaySaleSettlementAction, saleMutationGuard } from './saleSettlementAction'
 import { STOCK_SESSION_KIND, replayStockSession } from './stockSession'
@@ -1975,6 +1975,17 @@ const APPLIERS: Record<string, UndoApplierDef> = {
     },
   },
   [BULK_CUSTOMER_UPDATE_KIND]: {
+    // Legacy rows used this applier for both one- and multi-sale customer
+    // updates. Their historical outer gate was sales:customer; the replay
+    // helper rechecks the live snapshot size and additionally requires
+    // sales:bulk before any legacy multi-sale write.
+    permission: 'sales', action: 'customer',
+    run: async (payload, ctx) => {
+      if (!ctx.user || !ctx.historyId) throw new UndoConflictError('Authoritative history identity required.')
+      await replaySaleBulkUpdate(ctx.env, ctx.user, ctx.direction, ctx.historyId, ctx.generation, payload)
+    },
+  },
+  [MULTI_CUSTOMER_UPDATE_KIND]: {
     permission: 'sales', action: 'bulk',
     run: async (payload, ctx) => {
       if (!ctx.user || !ctx.historyId) throw new UndoConflictError('Authoritative history identity required.')

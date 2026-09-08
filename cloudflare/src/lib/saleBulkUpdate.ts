@@ -23,9 +23,13 @@ import type { SaleRecordChange, SaleRecordKind, SaleRecordValueState } from './s
 import { ANONYMOUS_CUSTOMER_MUTATION_ERROR, isAnonymousCustomer } from './anonymousCustomer'
 
 export const BULK_UPDATE_KIND = 'sale.fields.bulk'
+// Historical customer groups, including one-sale assignments recorded before
+// F75 split individual and bulk authority, used this name. Keep it registered
+// so those receipts remain replayable under their saved contract.
 export const BULK_CUSTOMER_UPDATE_KIND = 'sale.customer.bulk'
+export const MULTI_CUSTOMER_UPDATE_KIND = 'sale.customer.v2.bulk'
 export const SINGLE_CUSTOMER_UPDATE_KIND = 'sale.customer.single'
-export const SALE_BULK_UPDATE_KINDS = new Set([BULK_UPDATE_KIND, BULK_CUSTOMER_UPDATE_KIND, SINGLE_CUSTOMER_UPDATE_KIND])
+export const SALE_BULK_UPDATE_KINDS = new Set([BULK_UPDATE_KIND, BULK_CUSTOMER_UPDATE_KIND, MULTI_CUSTOMER_UPDATE_KIND, SINGLE_CUSTOMER_UPDATE_KIND])
 
 type Row = Record<string, unknown>
 type BulkUpdateItem = { id: number; expected_updated_at: string | null }
@@ -42,7 +46,7 @@ export type SaleBulkUpdateRequest = {
 
 export function saleBulkUpdateApplier(action: SaleBulkUpdateAction, itemCount = 2): string {
   return action.kind === 'customer'
-    ? itemCount === 1 ? SINGLE_CUSTOMER_UPDATE_KIND : BULK_CUSTOMER_UPDATE_KIND
+    ? itemCount === 1 ? SINGLE_CUSTOMER_UPDATE_KIND : MULTI_CUSTOMER_UPDATE_KIND
     : BULK_UPDATE_KIND
 }
 
@@ -604,7 +608,9 @@ export async function replaySaleBulkUpdate(env: Env, user: SessionUser, directio
   if (!op || op.kind !== BULK_UPDATE_KIND || op.id !== payload.operation_id || op.snapshot_id !== payload.snapshot_id || op.generation !== generation) fail('This group has changed or its snapshot does not match.')
   const snapshot = JSON.parse(String(op.payload_json)) as BulkUpdateSnapshot
   if (snapshot.version !== 1 || snapshot.operationId !== op.id || snapshot.members.length > BULK_STATUS_LIMIT) fail('Unsupported bulk update snapshot.')
-  if (payload.applier !== saleBulkUpdateApplier(snapshot.action, snapshot.members.length)) fail('This group does not match its saved permission scope.')
+  const expectedApplier = saleBulkUpdateApplier(snapshot.action, snapshot.members.length)
+  const legacyCustomerApplier = snapshot.action.kind === 'customer' && payload.applier === BULK_CUSTOMER_UPDATE_KIND
+  if (payload.applier !== expectedApplier && !legacyCustomerApplier) fail('This group does not match its saved permission scope.')
   permission(user, snapshot.action, snapshot.members.length)
   const sign: 1 | -1 = direction === 'undo' ? -1 : 1
   const expected = direction === 'undo' ? 'undoable' : 'redoable'
