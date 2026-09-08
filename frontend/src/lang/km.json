@@ -6282,5 +6282,7 @@
   "selected_conflict_overlap_requires_selection": "ទំនិញមួយមាននៅក្នុងក្រុមដែលបានជ្រើសច្រើនជាងមួយ។ សូមជ្រើសក្រុមមួយសម្រាប់វា។",
   "selected_conflict_blank": "ទទេ",
   "selected_conflict_blocked": "បានរារាំង",
-  "selected_conflict_review_complete": "រួចរាល់"
+  "selected_conflict_review_complete": "រួចរាល់",
+  "selected_conflict_remove_unavailable": "មិនទាន់អាចលុបបាន",
+  "selected_conflict_remove_phase_notice": "មិនទាន់អាចលុបបានទេ រហូតដល់ការសម្អាតស្តុក ការរក្សាប្រវត្តិ កំណត់ត្រាសវនកម្ម និងដំណើរការមិនធ្វើវិញរួចរាល់។"
 }

@@ -6282,5 +6282,7 @@
   "selected_conflict_overlap_requires_selection": "A product appears in more than one selected group. Choose one group for it.",
   "selected_conflict_blank": "Blank",
   "selected_conflict_blocked": "Blocked",
-  "selected_conflict_review_complete": "Complete"
+  "selected_conflict_review_complete": "Complete",
+  "selected_conflict_remove_unavailable": "Remove unavailable",
+  "selected_conflict_remove_phase_notice": "Remove is unavailable until its stock clearing, history preservation, audit, and Undo path is complete."
 }
