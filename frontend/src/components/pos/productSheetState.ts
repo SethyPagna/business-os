@@ -93,6 +93,12 @@ export type ProductSheetStateInput = {
   // a question with no effect. On-hand still comes from branch_stock.
   receivedDateStepHidden?: boolean
   batches?: readonly SheetBatchLike[]
+  // Returned by GET /api/batches for the resolved product + branch. Null
+  // means the picker has not received an authoritative answer yet, so POS
+  // must not offer a date-less remainder based only on the active-lot array.
+  // Undefined preserves the generic non-POS host fallback to the supplied
+  // list total.
+  knownPositiveBatchQuantityByProduct?: Readonly<Record<number, number | null>>
   selectedBatchId?: number | null
   selectedUnlottedStock?: boolean
   damagedLots?: readonly SheetDamagedLotLike[]
@@ -384,7 +390,15 @@ export function deriveProductSheetState(input: ProductSheetStateInput): ProductS
   const receivedDateOptions = sortBatchesForPicker(batches as readonly SheetBatchLike[]) as SheetBatchLike[]
   const receivedDateTotal = receivedDateOptions.reduce((sum, batch) => sum + toNumber(batch.quantity), 0)
   const selectedBatch = receivedDateOptions.find((batch) => batch.id === selectedBatchId) || null
-  const unlottedStockQuantity = Math.max(0, effectiveVariantStock - receivedDateTotal)
+  const authoritativeKnownQuantity = input.knownPositiveBatchQuantityByProduct
+    ? input.knownPositiveBatchQuantityByProduct[Number(effectiveVariant?.id ?? product.id)]
+    : undefined
+  const knownPositiveBatchQuantity = authoritativeKnownQuantity === undefined
+    ? (input.knownPositiveBatchQuantityByProduct === undefined ? receivedDateTotal : null)
+    : (authoritativeKnownQuantity == null ? null : Math.max(0, toNumber(authoritativeKnownQuantity)))
+  const unlottedStockQuantity = knownPositiveBatchQuantity == null
+    ? 0
+    : Math.max(0, effectiveVariantStock - knownPositiveBatchQuantity)
   const selectedDamagedLot = damagedLots.find((lot) => lot.id === selectedDamagedLotId) || null
 
   const batchSelectionRequired = isBatchTracked
@@ -435,7 +449,7 @@ export function deriveProductSheetState(input: ProductSheetStateInput): ProductS
     receivedDateTotal,
     unlottedStockQuantity,
     stockWithoutReceivedDate: batchSelectionRequired
-      && receivedDateOptions.length === 0
+      && knownPositiveBatchQuantity === 0
       && effectiveVariantStock > 0,
   }
 }

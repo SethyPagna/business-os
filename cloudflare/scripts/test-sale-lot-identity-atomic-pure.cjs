@@ -380,6 +380,16 @@ function counts(db) {
     }, before)
     assert.equal(get(db, 'SELECT quantity AS n FROM branch_batch_stock WHERE batch_id=500 AND branch_id=1').n, 2)
   }
+  {
+    const db = fixture()
+    const before = counts(db)
+    const result = await postSale(db, [{ product_id: 10, quantity: 1, branch_id: 1, unlotted_stock: 'true' }], 'unlotted-nonboolean')
+    assert.equal(result.status, 400, JSON.stringify(result.body))
+    assert.match(result.body.error, /invalid unlotted_stock flag/i)
+    assert.deepEqual(counts(db), before)
+  }
+  console.log('PASS 2ba -- unrecorded stock requires a boolean opt-in')
+
   console.log('PASS 2b -- explicit unrecorded remainder preserves all known lots and rejects races')
 
   // FIFO spanning two lots stays attributable through two allocation rows;
