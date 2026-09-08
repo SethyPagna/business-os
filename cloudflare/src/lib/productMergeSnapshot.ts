@@ -8,7 +8,10 @@ export type ProductMergeBatchRow = {
   id: number
   batch_key: string
   batch_number: number | null
+  [field: string]: unknown
 }
+
+export type ProductMergeBatchStockRow = Record<string, unknown> & { id: number; batch_id: number; branch_id: number; quantity: number }
 
 export type ProductMergeStockRow = {
   branch_id: number
@@ -32,6 +35,7 @@ export type ProductMergeProductRow = Record<string, unknown> & {
 
 export type ProductMergeCaseSnapshot = {
   canonicalBatchRows: ProductMergeBatchRow[]
+  canonicalBatchStockRows: ProductMergeBatchStockRow[]
   duplicateStockRows: ProductMergeStockRow[]
   canonicalStockBefore: ProductMergeStockRow[]
   canonicalProduct: ProductMergeProductRow | undefined
@@ -97,7 +101,9 @@ export async function readProductMergeCaseSnapshot(
   reparentTables: readonly ProductMergeReparentTable[],
 ): Promise<ProductMergeCaseSnapshot> {
   const reads: KeyedRead[] = [
-    { key: 'canonicalBatches', sql: 'SELECT id, batch_key, batch_number FROM product_batches WHERE variant_product_id = @id', params: { id: keeperId } },
+    { key: 'canonicalBatches', sql: 'SELECT * FROM product_batches WHERE variant_product_id = @id ORDER BY id', params: { id: keeperId } },
+    { key: 'canonicalBatchStock', sql: `SELECT bbs.* FROM branch_batch_stock bbs
+      JOIN product_batches pb ON pb.id=bbs.batch_id WHERE pb.variant_product_id=@id ORDER BY bbs.id`, params: { id: keeperId } },
     { key: 'duplicateStock', sql: 'SELECT branch_id, quantity, rfid_confirmed_qty FROM branch_stock WHERE product_id = @id', params: { id: duplicateId } },
     { key: 'canonicalStock', sql: 'SELECT branch_id, quantity, rfid_confirmed_qty FROM branch_stock WHERE product_id = @id', params: { id: keeperId } },
     {
@@ -135,6 +141,7 @@ export async function readProductMergeCaseSnapshot(
 
   return {
     canonicalBatchRows: asRows<ProductMergeBatchRow>('canonicalBatches'),
+    canonicalBatchStockRows: asRows<ProductMergeBatchStockRow>('canonicalBatchStock'),
     duplicateStockRows: asRows<ProductMergeStockRow>('duplicateStock'),
     canonicalStockBefore: asRows<ProductMergeStockRow>('canonicalStock'),
     canonicalProduct: asRows<ProductMergeProductRow>('canonicalProduct')[0],

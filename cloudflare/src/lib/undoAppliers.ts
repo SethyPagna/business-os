@@ -1877,6 +1877,21 @@ async function replayProductMergeGroup(payload: Record<string, unknown>, ctx: Un
         groupSnapshot, association, child, generation, final, nextPrefixFingerprint, freshReversal,
       }),
     })
+    const refreshed = await db.prepare(`SELECT payload_json FROM undo_snapshots
+      WHERE id=@child AND kind=@kind AND status='applied'`).get<{ payload_json: string }>({ child: child.id, kind: PRODUCT_MERGE_GROUP_CHILD_KIND })
+    if (!refreshed?.payload_json) throw new UndoConflictError('The redone group child receipt is unavailable.')
+    let refreshedReversal: MergeReversal
+    try { refreshedReversal = JSON.parse(refreshed.payload_json) as MergeReversal }
+    catch { throw new UndoConflictError('The redone group child receipt is invalid.') }
+    const fingerprinted = JSON.stringify({ ...refreshedReversal, fingerprintPending: false,
+      mergedStateFingerprint: await mergeStateFingerprint(db, [refreshedReversal]) })
+    const updated = await db.prepare(`UPDATE undo_snapshots SET payload_json=@payload,updated_at=CURRENT_TIMESTAMP
+      WHERE id=@child AND kind=@kind AND status='applied' AND payload_json=@before`)
+      .run({ payload: fingerprinted, child: child.id, kind: PRODUCT_MERGE_GROUP_CHILD_KIND, before: refreshed.payload_json })
+    if (!Number((updated as { changes?: number; meta?: { changes?: number } }).changes
+      ?? (updated as { meta?: { changes?: number } }).meta?.changes)) {
+      throw new UndoConflictError('The redone group child changed before its fingerprint was recorded.')
+    }
   }
   const pending = ctx.direction === 'undo' ? targetIndex : children.length - targetIndex - 1
   await broadcast(ctx.env, 'products', { action: 'update' })
