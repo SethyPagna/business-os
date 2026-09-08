@@ -24,10 +24,12 @@ function load(file, dependencies = {}) {
 const membership = load('lib/membershipNumber.ts')
 const contactOptions = load('lib/contactOptions.ts')
 const phone = load('lib/phone.ts')
+const anonymousCustomer = load('lib/anonymousCustomer.ts')
 const contactDuplicates = load('lib/contactDuplicates.ts', { './contactOptions': contactOptions, './phone': phone })
 const portal = load('routes/portal.ts', {
   '../lib/db': { getDb: () => db },
   '../lib/auth': { requireAuth: async (c, next) => next() },
+  '../lib/anonymousCustomer': anonymousCustomer,
 })
 const contactDependencies = {
   '../lib/db': { getDb: () => db },
@@ -40,6 +42,7 @@ const contactDependencies = {
   '../lib/permissions': load('lib/permissions.ts'),
   '../lib/sqlBinding': load('lib/sqlBinding.ts'),
   '../lib/membershipNumber': membership,
+  '../lib/anonymousCustomer': anonymousCustomer,
   './portal': { ...portal, loadSettingsMap: async () => ({ loyalty_points_enabled: 'false' }) },
 }
 const contacts = load('routes/contacts.ts', contactDependencies).default
@@ -246,7 +249,9 @@ ${collisionCode}
   // than a hopeful Promise.all interleave.
   membershipBatchCalls = 0
   onMembershipBatch = items => {
-    const minted = items[0].params.membership_number
+    const update = items.find(item => Object.prototype.hasOwnProperty.call(item.params || {}, 'membership_number'))
+    assert.ok(update, 'the guarded contact batch must contain the membership-bearing customer update')
+    const minted = update.params.membership_number
     raw.prepare("INSERT INTO customers (name,membership_number) VALUES ('Interloper',@n)").run({ n: minted })
   }
   const secondPut = await putCustomer(901, { name: 'Race B', membership_number: '' })

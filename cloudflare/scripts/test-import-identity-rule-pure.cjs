@@ -24,6 +24,7 @@ const REAL = new Set([
   'batchCode', 'importNumbers', 'stockActionResolver', 'stockActionImport',
   'stockActionCatalog', 'stockActionCommit', 'sqlBinding', 'productDetailRule',
   'branchRoles', 'importBranchAuthority',
+  'phone',
   // productIdentity carries identityBarcodeKeySql -- the ONE SQL spelling of the
   // fold the bounded catalog query uses. Stubbing it would let this test pass
   // over a query that never folds.
@@ -91,7 +92,7 @@ function makeDb() {
       wholesale_price_usd REAL DEFAULT 0, cost_price_usd REAL DEFAULT 0, cost_price_khr REAL DEFAULT 0,
       stock_quantity REAL DEFAULT 0, is_active INTEGER DEFAULT 1, created_at TEXT, updated_at TEXT);
     CREATE TABLE branches (id INTEGER PRIMARY KEY, name TEXT, is_default INTEGER DEFAULT 0, is_active INTEGER DEFAULT 1);
-    CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT, phone TEXT);
+    CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT, phone TEXT, phone_normalized TEXT, is_anonymous INTEGER DEFAULT 0);
     CREATE TABLE delivery_contacts (id INTEGER PRIMARY KEY, name TEXT, phone TEXT);
     CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT, name TEXT, is_active INTEGER DEFAULT 1);
     CREATE TABLE product_batches (id INTEGER PRIMARY KEY AUTOINCREMENT, variant_product_id INTEGER,

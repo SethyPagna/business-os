@@ -106,6 +106,7 @@ const { normalizeSearchText } = searchMatch
 const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
 const portalRoute = loadReal('routes/portal.ts', {
   '../lib/actorSnapshot': actorSnapshotKernel,
+  '../lib/anonymousCustomer': loadReal('lib/anonymousCustomer.ts'),
   '../lib/requestBodyGuard': loadReal('lib/requestBodyGuard.ts'),
   '../lib/db': { getDb: () => db },
   '../lib/sqlBinding': loadReal('lib/sqlBinding.ts'),

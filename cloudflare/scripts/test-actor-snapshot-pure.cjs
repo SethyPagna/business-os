@@ -181,19 +181,20 @@ ok(true, `no writer hides a JS comment inside a prepared SQL statement (${WRITER
 // every call site instead of the writer.
 const returnsSrc = read('src/routes/returns.ts')
 const damagedLotCalls = returnsSrc.split('createDamagedLot(db, {').slice(1)
-assert.ok(damagedLotCalls.length >= 3, `expected the three createDamagedLot call sites, found ${damagedLotCalls.length}`)
+assert.equal(damagedLotCalls.length, 1, `the create route should have one external createDamagedLot write, found ${damagedLotCalls.length}`)
 let newWriteOffs = 0
-let restoredWriteOffs = 0
 for (const [i, chunk] of damagedLotCalls.entries()) {
   const head = chunk.slice(0, 600)
   if (/userName:\s*actorSnapshot\(user\)/.test(head)) { newWriteOffs += 1; continue }
-  // The rollback path re-creates the ORIGINAL lot after a failed edit; it must
-  // restore that lot's own stored actor, not re-stamp the current session.
-  if (/userName:\s*lot\.created_by_user_name/.test(head)) { restoredWriteOffs += 1; continue }
-  assert.fail(`createDamagedLot call site #${i + 1} neither stamps actorSnapshot(user) nor restores the original lot's actor`)
+  assert.fail(`createDamagedLot call site #${i + 1} does not stamp actorSnapshot(user)`)
 }
-assert.ok(newWriteOffs >= 2, `expected at least two write-off creation sites stamping the session username, found ${newWriteOffs}`)
-ok(true, `write-off (damaged_stock_lots) actor: ${newWriteOffs} creation site(s) store the session username, ${restoredWriteOffs} rollback site(s) restore the original snapshot`)
+assert.equal(newWriteOffs, 1)
+assert.match(
+  returnsSrc,
+  /INSERT INTO damaged_stock_lots\([\s\S]*?created_by_user_id,created_by_user_name[\s\S]*?userId: user\?\.id \?\? null, userName: actorSnapshot\(user\)/,
+  'the atomic edit batch must stamp new damaged lots with the session username too',
+)
+ok(true, 'write-off (damaged_stock_lots) actor is session-derived in both create and atomic edit paths')
 
 // sales.ts is the one writer that trusted the CLIENT rather than a wrong
 // server field, so it gets its own explicit pin.

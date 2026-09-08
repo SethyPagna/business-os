@@ -92,6 +92,7 @@ const returnsRoute = loadReal('routes/returns.ts', {
   // N21: the display-address kernel routes/returns.ts snapshots through, REAL
   // (it has no imports of its own; a stub would leave it undefined).
   '../lib/contactOptions': loadReal('lib/contactOptions.ts'),
+  '../lib/anonymousCustomer': loadReal('lib/anonymousCustomer.ts'),
   '../lib/db': { getDb: () => db },
   '../lib/businessDateWindow': loadReal('lib/businessDateWindow.ts'),
   '../lib/sqlBinding': sqlBinding,
@@ -108,6 +109,8 @@ const returnsRoute = loadReal('routes/returns.ts', {
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   '../lib/cache': { bumpVersion: async () => {} },
   '../lib/returnBulkAction': { applyReturnBulkAction: async () => ({}), notifyReturnBulkAction: async () => {}, ReturnBulkError: class ReturnBulkError extends Error {} },
+  '../lib/saleBulkStatus': { bulkAssertion: () => ({ sql: 'SELECT 1', params: {} }), saleRevisionGuard: () => ({ sql: 'SELECT 1', params: {} }) },
+  '../lib/saleRecordEvents': { assertSaleRecordBatchBounds: () => {}, buildSaleRecordEventsInsert: () => ({ sql: 'SELECT 1', params: {} }), SaleRecordEventError: class SaleRecordEventError extends Error {}, sha256Hex: async () => '' },
   '../lib/searchMatch': { buildLikeAliasClause: () => '1=1', tokenizeSearchTermGroups: () => [], normalizeSearchText: (value) => String(value || '') },
   '../lib/productBatches': productBatches,
   '../lib/returnsStock': loadReal('lib/returnsStock.ts', { './db': { getDb: () => db }, './productBatches': productBatches, './sqlBinding': sqlBinding }),

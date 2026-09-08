@@ -15,7 +15,7 @@ const mapper = ts.transpileModule(source.slice(mapStart, mapEnd + '\n    })'.len
   { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS } }).outputText
 const shape = new Function('sales', 'refundsBySale', 'itemsBySale', 'recordsBySale', 'SALE_RECORDS_SELF_COUNT', mapper)
 const db = new Database(':memory:')
-db.exec(`CREATE TABLE customers(id INTEGER PRIMARY KEY, membership_number TEXT);
+db.exec(`CREATE TABLE customers(id INTEGER PRIMARY KEY, membership_number TEXT, is_anonymous INTEGER DEFAULT 0);
 CREATE TABLE delivery_contacts(id INTEGER PRIMARY KEY, name TEXT, phone TEXT);
 CREATE TABLE audit_logs(id INTEGER PRIMARY KEY, action TEXT, entity TEXT, table_name TEXT, entity_id TEXT, record_id TEXT, details TEXT);
 CREATE TABLE sales(id INTEGER PRIMARY KEY, customer_id INTEGER, delivery_contact_id INTEGER, is_delivery INTEGER,

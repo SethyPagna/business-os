@@ -62,6 +62,7 @@ function loadReal(relPath, requireOverrides = {}) {
 const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
 const portalRoute = loadReal('routes/portal.ts', {
   '../lib/actorSnapshot': actorSnapshotKernel,
+  '../lib/anonymousCustomer': loadReal('lib/anonymousCustomer.ts'),
   '../lib/requestBodyGuard': loadReal('lib/requestBodyGuard.ts'),
   '../index': {},
   '../lib/db': { getDb: () => db },

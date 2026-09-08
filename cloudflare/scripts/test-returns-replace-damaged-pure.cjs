@@ -286,7 +286,8 @@ async function run() {
     assert.match(routeSource, /const stockAction = normalizeStockAction\(item\)/)
     assert.equal((routeSource.match(/@return_to_stock, @stock_action, @branch_id/g) || []).length, 2)
     // damaged lots reverse (and can block) before an edit re-applies
-    assert.match(routeSource, /const reversedLots = await reverseDamagedLots\(db, id\)/)
+    assert.match(routeSource, /const damagedLots = await db\.prepare\(`[\s\S]*?FROM damaged_stock_lots WHERE return_id=@returnId/)
+    assert.match(routeSource, /editReversedDamaged = damagedLots\.map[\s\S]*?DELETE FROM damaged_stock_lots WHERE return_id=@returnId/)
     assert.match(routeSource, /instanceof ConsumedDamagedStockError/)
     // replacements: any catalog item is accepted, a linked sale/receipt is
     // written, and the damaged-lots endpoint sits above the /:id param route.

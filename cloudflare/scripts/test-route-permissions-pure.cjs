@@ -350,7 +350,7 @@ const { hasPermission, hasAnyPermission, isAdminControlUser, getActionTier, getP
   assert.match(contactsSrc, /isAdminControlUser\(user\) \|\| hasPermission\(user, 'contacts_suppliers'\)/, 'contacts.ts must gate suppliers on admin-control OR contacts_suppliers')
   assert.match(contactsSrc, /app\.use\('\/suppliers', requireSupplierAccess\)\s*\n\s*app\.use\('\/suppliers\/\*', requireSupplierAccess\)/, 'the supplier gate must cover both /suppliers and /suppliers/*')
   assert.match(contactsSrc, /c\.req\.query\('fields'\) \|\| ''\) === 'names'\) return next\(\)/, 'the fields=names carve-out must exist for the name-only pickers')
-  assert.match(contactsSrc, /SELECT id, name FROM \$\{config\.table\} ORDER BY/, 'the fields=names list must select id + name ONLY -- it is reachable without the suppliers grant')
+  assert.match(contactsSrc, /SELECT id, name FROM \$\{config\.table\} \$\{config\.table === 'customers' \? `WHERE \$\{customerIsProfileSql\(\)\}` : ''\} ORDER BY lower\(name\) ASC/, 'the fields=names list must select id + name only and exclude the reserved anonymous customer inside the query')
 
   const notificationsSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'notifications.ts'), 'utf8')
   assert.match(notificationsSrc, /preferences\.supplierCreditEnabled && isAdminControlUser\(user\)/, 'supplier-credit reminders (money owed) must be admin-control only')
