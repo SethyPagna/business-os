@@ -2,7 +2,7 @@
   "schema_version": 1,
   "generated_at": "2026-09-09",
   "implementation_head": "81f15560",
-  "wide_writer_plan_head": "8bfd5ee0",
+  "wide_writer_plan_head": "eea88ad0",
   "contract": "outputs/takeover-20260908/f74-sales-records-backend-contract.json",
   "principles": {
     "display": "Closed changed-only kind/field vocabulary with known_value, known_none, and unknown. No raw variables or current-profile reconstruction.",

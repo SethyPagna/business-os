@@ -107,7 +107,8 @@
     "The recursive canonical-phone SQL guard is deliberately fail-closed but has a residual performance cost on large customer tables.",
     "Direct status and return edit server requirements need the paired frontend stable-request lifecycle in the same release; backend commits alone are not a release candidate.",
     "Migration 0141 and paired frontend anonymous masking commit 7ba9aa72 are required before the integrated anonymous behavior can ship.",
-    "The customer_contact_changed metadata extension is contract-only and must not be advertised until backend schema/writers and EN/KM rendering are implemented and reviewed."
+    "The customer_contact_changed metadata extension is contract-only and must not be advertised until backend schema/writers and EN/KM rendering are implemented and reviewed.",
+    "The revised wide-writer architecture at eea88ad0 remains a plan-only rereview candidate; it authorizes no migration or runtime writer change."
   ],
   "blockers": [
     "Full F74 coverage is blocked on an atomic return-create batch with a stable create receipt and paired frontend request lifecycle.",
@@ -119,7 +120,7 @@
     "The contract-only customer_contact_changed kind and changed_contact_fields metadata are not present in the current event schema or reader.",
     "No deployment, remote migration, production D1 command, anonymous marker repair, or other production write was performed."
   ],
-  "handoff": "Integrate through 4e4259fe only with the paired F72/F74 frontend and migration dependencies. Use outputs/takeover-20260908/f74-return-create-event-race-plan.json for return-create redesign and outputs/takeover-20260908/f74-wide-writer-event-hook-plan.json for reference cascades. Preserve the explicit partial status until those writers and EN/KM rendering are independently certified.",
+  "handoff": "Integrate the bounded runtime through 81f15560 only with the paired F72/F74 frontend and migration dependencies; later F74 commits are durable ledgers/plans. Use outputs/takeover-20260908/f74-return-create-event-race-plan.json for return-create redesign and the eea88ad0 version of outputs/takeover-20260908/f74-wide-writer-event-hook-plan.json for reference cascades. Preserve the explicit partial status until those writers and EN/KM rendering are independently certified.",
   "workspace": {
     "branch": "codex/f74-sales-records-backend-20260908",
     "worktree": "C:/Users/mrkl6/Downloads/bos-f74-sales-records-backend-20260908",
