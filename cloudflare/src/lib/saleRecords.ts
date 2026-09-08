@@ -278,10 +278,12 @@ function detailsProvenance(raw: unknown): SaleRecordProvenance | null {
   const value = details?.record_event
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const row = value as Record<string, unknown>
-  const generation = Number(row.generation)
-  const saleId = Number(row.sale_id)
-  if (!text(row.source_kind) || !text(row.source_id) || !Number.isSafeInteger(generation) || generation < 0
-    || !Number.isSafeInteger(saleId) || saleId <= 0) return null
+  if (typeof row.source_kind !== 'string' || !row.source_kind.trim()
+    || typeof row.source_id !== 'string' || !row.source_id.trim()
+    || typeof row.generation !== 'number' || typeof row.sale_id !== 'number') return null
+  const generation = row.generation
+  const saleId = row.sale_id
+  if (!Number.isSafeInteger(generation) || generation < 0 || !Number.isSafeInteger(saleId) || saleId <= 0) return null
   return {
     source_kind: String(row.source_kind), source_id: String(row.source_id), generation, sale_id: saleId,
   }
@@ -1628,6 +1630,10 @@ export function buildSaleRecordsCountSql(placeholders: string): string {
           AND NOT EXISTS (
             SELECT 1 FROM sale_record_events sre
             WHERE json_valid(a.details)
+              AND json_type(a.details,'$.record_event.source_kind')='text'
+              AND json_type(a.details,'$.record_event.source_id')='text'
+              AND json_type(a.details,'$.record_event.generation')='integer'
+              AND json_type(a.details,'$.record_event.sale_id')='integer'
               AND sre.sale_id=s.id
               AND sre.source_kind=json_extract(a.details,'$.record_event.source_kind')
               AND sre.source_id=json_extract(a.details,'$.record_event.source_id')
@@ -1693,6 +1699,10 @@ export function buildSaleRecordsCountSql(placeholders: string): string {
           AND NOT EXISTS (
             SELECT 1 FROM sale_record_events sre
             WHERE json_valid(ra.details)
+              AND json_type(ra.details,'$.record_event.source_kind')='text'
+              AND json_type(ra.details,'$.record_event.source_id')='text'
+              AND json_type(ra.details,'$.record_event.generation')='integer'
+              AND json_type(ra.details,'$.record_event.sale_id')='integer'
               AND sre.sale_id=s.id
               AND sre.source_kind=json_extract(ra.details,'$.record_event.source_kind')
               AND sre.source_id=json_extract(ra.details,'$.record_event.source_id')

@@ -1082,6 +1082,22 @@ runTest('durable events suppress only the exact four-key legacy twin', () => {
   assert.ok(!records.some((record) => record.id === 'audit:901'))
   assert.ok(records.some((record) => record.id === 'audit:902'), 'same actor/time/state is still a real event when provenance differs')
   assert.deepEqual(records.find((record) => record.id === `event:${event.id}`).changes, JSON.parse(event.changes_json))
+
+  const malformed = { ...exact, id: 903, details: JSON.stringify({
+    oldStatus: 'completed', newStatus: 'awaiting_delivery',
+    record_event: { source_kind: event.source_kind, source_id: event.source_id, generation: null, sale_id: 77 },
+  }) }
+  const sqlite = setup(true)
+  sqlite.prepare("INSERT INTO sales(id,receipt_number,sale_status,cashier_name,total_usd,created_at) VALUES(77,'S-77','completed','admin',1,'2026-09-06 17:00:00')").run()
+  sqlite.prepare(`INSERT INTO sale_record_events(id,sale_id,source_kind,source_id,generation,kind,via,actor_username,occurred_at,changes_json)
+    VALUES(@id,@sale_id,@source_kind,@source_id,@generation,@kind,@via,@actor_username,@occurred_at,@changes_json)`).run(event)
+  sqlite.prepare("INSERT INTO audit_logs(id,user_name,action,entity,entity_id,details,created_at) VALUES(903,'admin','update','sale','77',?,'2026-09-06 18:00:00')").run(malformed.details)
+  const count = Number(sqlite.prepare(buildSaleRecordsCountSql('?')).get(77).n) + SALE_RECORDS_SELF_COUNT
+  const malformedDetail = buildSaleRecords({ sale: SALE, events: [event], audit: [malformed] })
+  assert.equal(count, 3)
+  assert.equal(malformedDetail.length, count, 'malformed provenance preserves the audit in both count and detail')
+  assert.ok(malformedDetail.some(record => record.id === 'audit:903'))
+  sqlite.close()
 })
 
 // ---------------------------------------------------------------------------
