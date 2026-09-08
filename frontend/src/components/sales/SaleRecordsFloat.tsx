@@ -35,7 +35,7 @@ import FilterMenu from '../shared/FilterMenu.tsx'
 import { getSaleRecords } from '../../api/salesTransport.ts'
 import { fmtDateTime24 } from '../../utils/formatters.ts'
 import { getStatusLabel } from './StatusBadge.tsx'
-import { formatSaleRecordValueLines } from './saleRecordValue.ts'
+import { formatSaleRecordValueLinesLocalized } from './saleRecordValue.ts'
 import {
   SALE_RECORD_KIND_KEYS,
   filterSaleRecords,
@@ -60,20 +60,21 @@ interface SaleRecordsFloatProps {
 
 const KIND_FALLBACKS: Record<string, string> = {
   record_kind_sale_created: 'Sale recorded',
+  record_kind_driver_changed: 'Driver changed',
   record_kind_status_changed: 'Status changed',
   record_kind_item_added: 'Product added',
   record_kind_item_removed: 'Product removed',
-  record_kind_item_qty_changed: 'Quantity changed',
-  record_kind_item_price_changed: 'Price changed',
+  record_kind_item_quantity_changed: 'Quantity changed',
+  record_kind_items_replaced: 'Products replaced',
   record_kind_delivery_fee_changed: 'Delivery fee changed',
   record_kind_delivery_cost_changed: 'Delivery cost changed',
   record_kind_delivery_added: 'Delivery added',
-  record_kind_discount_changed: 'Discount changed',
   record_kind_customer_changed: 'Customer changed',
+  record_kind_membership_changed: 'Membership changed',
+  record_kind_payment_changed: 'Payment changed',
   record_kind_payment_settled: 'Payment settled',
   record_kind_cancelled: 'Sale cancelled',
-  record_kind_undone: 'Action undone',
-  record_kind_other: 'Other change',
+  record_kind_legacy_sale_change: 'Earlier sale change',
 }
 
 const FIELD_FALLBACKS: Record<string, string> = {
@@ -93,9 +94,11 @@ const FIELD_FALLBACKS: Record<string, string> = {
   note: 'Note',
   payment_method: 'Payment method',
   payment_details: 'Payment details',
-  products: 'Products',
-  action: 'Action',
-  stock: 'Stock',
+  items: 'Products',
+  item: 'Product',
+  removed_items: 'Removed products',
+  added_items: 'Added products',
+  membership: 'Membership',
   delivery: 'Delivery',
   id: 'ID',
   driver: 'Driver',
@@ -105,6 +108,67 @@ const FIELD_FALLBACKS: Record<string, string> = {
   paid_by: 'Paid by',
   delivery_actual_cost: 'Actual delivery cost',
   exchange_rate: 'Exchange rate',
+}
+
+export interface SaleRecordChangeTableProps {
+  record: SaleRecord
+  t: TranslateFn
+  fmtUSD: (value: number | string) => string
+  fmtKHR: (value: number | string) => string
+}
+
+/** The actual expanded Records table, exported so its rendered contract is testable. */
+export function SaleRecordChangeTable({ record, t, fmtUSD, fmtKHR }: SaleRecordChangeTableProps) {
+  const label = (key: string, fallback: string): string => {
+    const value = t(key)
+    return value && value !== key ? value : fallback
+  }
+  const rows = saleRecordFieldRows(record)
+  const renderValue = (row: SaleRecordFieldRow, snapshot: SaleRecordValue) => {
+    if (snapshot.state === 'unknown') return label('historical_details_unavailable', 'Historical details unavailable')
+    if (snapshot.state === 'known_none') {
+      if (row.field === 'customer') return label('general', 'General')
+      if (row.field === 'membership') return label('no_membership', 'No membership')
+      if (row.field === 'driver') return label('no_driver', 'No driver')
+      if (row.field === 'actual_delivery_cost_usd') return label('no_actual_delivery_cost', 'No actual delivery cost')
+      return label('none', 'None')
+    }
+    const value = snapshot.value
+    if (row.format === 'money') {
+      const parsed = Number(value)
+      return Number.isFinite(parsed) ? fmtUSD(parsed) : label('value_changed', 'Value changed')
+    }
+    if (row.format === 'money_khr') {
+      const parsed = Number(value)
+      return Number.isFinite(parsed) ? fmtKHR(parsed) : label('value_changed', 'Value changed')
+    }
+    if (row.format === 'status') return getStatusLabel(value, t)
+    if (row.format === 'boolean') return value ? label('yes', 'Yes') : label('no', 'No')
+    if (row.format === 'quantity') return Number.isFinite(Number(value)) ? String(value) : label('value_changed', 'Value changed')
+    const lines = formatSaleRecordValueLinesLocalized(row.field, value, fmtUSD, fmtKHR, label)
+    return (
+      <span className="inline-flex max-w-full flex-col items-end gap-0.5">
+        {lines.map((line, index) => <span key={`${index}:${line}`} className="max-w-full break-words">{line}</span>)}
+      </span>
+    )
+  }
+  if (rows.length === 0) return <p className="text-xs text-gray-400">{label('historical_details_unavailable', 'Historical details unavailable')}</p>
+  return (
+    <table className="w-full text-[11px]">
+      <thead className="text-gray-400"><tr>
+        <th className="py-1 text-left font-medium">{label('field', 'Field')}</th>
+        <th className="py-1 text-right font-medium">{label('before', 'Before')}</th>
+        <th className="py-1 text-right font-medium">{label('after', 'After')}</th>
+      </tr></thead>
+      <tbody>{rows.map((row) => (
+        <tr key={row.field}>
+          <td className="py-0.5 pr-2">{label(row.labelKey || 'value_changed', FIELD_FALLBACKS[row.labelKey || ''] || 'Value changed')}</td>
+          <td className="py-0.5 text-right tabular-nums">{renderValue(row, row.before)}</td>
+          <td className="py-0.5 text-right tabular-nums font-semibold text-gray-800 dark:text-gray-100">{renderValue(row, row.after)}</td>
+        </tr>
+      ))}</tbody>
+    </table>
+  )
 }
 
 export default function SaleRecordsFloat({ sale, onClose, t, fmtUSD, fmtKHR }: SaleRecordsFloatProps) {
@@ -157,36 +221,6 @@ export default function SaleRecordsFloat({ sale, onClose, t, fmtUSD, fmtKHR }: S
     return label(key, KIND_FALLBACKS[key] || key)
   }
 
-  const renderValue = (row: SaleRecordFieldRow, snapshot: SaleRecordValue) => {
-    if (snapshot.state === 'unknown') return label('historical_details_unavailable', 'Historical details unavailable')
-    if (snapshot.state === 'known_none') {
-      if (row.field === 'customer') return label('general', 'General')
-      if (row.field === 'membership') return label('no_membership', 'No membership')
-      if (row.field === 'driver') return label('no_driver', 'No driver')
-      if (row.field === 'actual_delivery_cost_usd') return label('no_actual_delivery_cost', 'No actual delivery cost')
-      return label('none', 'None')
-    }
-    const value = snapshot.value
-    if (row.format === 'money') {
-      const parsed = Number(value)
-      return Number.isFinite(parsed) ? fmtUSD(parsed) : label('value_changed', 'Value changed')
-    }
-    if (row.format === 'money_khr') {
-      const parsed = Number(value)
-      return Number.isFinite(parsed) ? fmtKHR(parsed) : label('value_changed', 'Value changed')
-    }
-    if (row.format === 'status') return getStatusLabel(value, t)
-    if (row.format === 'boolean') return value ? label('yes', 'Yes') : label('no', 'No')
-    if (row.format === 'quantity') return Number.isFinite(Number(value)) ? String(value) : label('value_changed', 'Value changed')
-    const lines = formatSaleRecordValueLines(row.field, value, fmtUSD)
-    if (lines.length === 0) return label('value_changed', 'Value changed')
-    return (
-      <span className="inline-flex max-w-full flex-col items-end gap-0.5">
-        {lines.map((line, index) => <span key={`${index}:${line}`} className="max-w-full break-words">{line}</span>)}
-      </span>
-    )
-  }
-
   const toggleKind = (kind: string): void => {
     setKinds((current) => {
       const next = new Set(current)
@@ -237,7 +271,6 @@ export default function SaleRecordsFloat({ sale, onClose, t, fmtUSD, fmtKHR }: S
         ) : (
           <ul className="divide-y divide-gray-100 dark:divide-gray-700">
             {visible.map((record) => {
-              const rows = saleRecordFieldRows(record)
               const isOpen = openId === record.id
               return (
                 <li key={record.id}>
@@ -256,9 +289,9 @@ export default function SaleRecordsFloat({ sale, onClose, t, fmtUSD, fmtKHR }: S
                       {/* The history convention: acting USERNAME, then the
                           dd/mm/yyyy HH:mm stamp. */}
                       <span className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-gray-400">
-                        <span>{record.provenance_unknown
+                        <span>{record.provenance_unknown || !record.actor_username
                           ? label('unknown', 'Unknown')
-                          : record.actor_username || (t('system') || 'System')}</span>
+                          : record.actor_username}</span>
                         <span>{fmtDateTime24(record.at)}</span>
                         {/* HOW it was done. `via` is a Worker enum -- amend /
                             undo / redo -- not a display string: printing it raw
@@ -271,28 +304,7 @@ export default function SaleRecordsFloat({ sale, onClose, t, fmtUSD, fmtKHR }: S
                   </button>
                   {isOpen ? (
                     <div className="px-1 pb-3 pl-6">
-                      {rows.length === 0 ? (
-                        <p className="text-xs text-gray-400">{record.summary || t('no_data')}</p>
-                      ) : (
-                        <table className="w-full text-[11px]">
-                          <thead className="text-gray-400">
-                            <tr>
-                              <th className="py-1 text-left font-medium">{label('field', 'Field')}</th>
-                              <th className="py-1 text-right font-medium">{label('before', 'Before')}</th>
-                              <th className="py-1 text-right font-medium">{label('after', 'After')}</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {rows.map((row) => (
-                              <tr key={row.field}>
-                                <td className="py-0.5 pr-2">{label(row.labelKey || 'value_changed', FIELD_FALLBACKS[row.labelKey || ''] || 'Value changed')}</td>
-                                <td className="py-0.5 text-right tabular-nums">{renderValue(row, row.before)}</td>
-                                <td className={`py-0.5 text-right tabular-nums ${row.changed ? 'font-semibold text-gray-800 dark:text-gray-100' : ''}`}>{renderValue(row, row.after)}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      )}
+                      <SaleRecordChangeTable record={record} t={t} fmtUSD={fmtUSD} fmtKHR={fmtKHR} />
                     </div>
                   ) : null}
                 </li>
