@@ -8,6 +8,7 @@ import { createHash } from 'node:crypto'
 import { readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import tailwindcss from 'tailwindcss'
+import { neutralPrimitiveChunk } from './build/chunkBoundaries.ts'
 
 function readGitRevision(): string {
   if (process.env.BUSINESS_OS_BUILD_REVISION) return process.env.BUSINESS_OS_BUILD_REVISION
@@ -616,7 +617,11 @@ function manualChunks(id: string): string | undefined {
   // small enough that first-open admin pages do not drag the whole app shell
   // over the wire up front.
   const normalized = id.replace(/\\/g, '/')
-  if (normalized.includes('vite/preload-helper')) return 'vendor'
+  const neutralChunk = neutralPrimitiveChunk(normalized)
+  if (neutralChunk) return neutralChunk
+  // Font CSS has no JavaScript exports. Assigning it to generic vendor emits
+  // an entry-side effect import of unrelated media/export JavaScript as well.
+  if (normalized.includes('/node_modules/@fontsource/') && normalized.endsWith('.css')) return undefined
   if (normalized.includes('/node_modules/lucide-react/dist/esm/icons/')) {
     const iconName = path.basename(normalized, '.js')
     if (routeSharedIconNames.has(iconName) || appShellIconNames.has(iconName)) return 'shared-ui'
@@ -816,10 +821,7 @@ function manualChunks(id: string): string | undefined {
     ) {
       return 'catalog-public'
     }
-    if (
-      normalized.includes('/src/components/catalog/CatalogProductsSection.tsx')
-      || normalized.includes('/src/components/catalog/catalogPagination.ts')
-    ) {
+    if (normalized.includes('/src/components/catalog/CatalogProductsSection.tsx')) {
       return 'catalog-products'
     }
     if (normalized.includes('/src/components/catalog/CatalogSecondaryTabs.tsx')) {
@@ -827,9 +829,6 @@ function manualChunks(id: string): string | undefined {
     }
     if (normalized.includes('/src/utils/initials.ts')) return 'route-sync-utils'
     if (normalized.endsWith('/src/utils/scriptTypography.ts')) return 'route-sync-utils'
-    if (normalized.endsWith('/src/utils/publicAssetUrls.ts')) {
-      return 'app-shared'
-    }
     if (normalized.includes('/src/components/catalog/portalTranslateController.ts')) {
       return 'portal-translate-controller'
     }
