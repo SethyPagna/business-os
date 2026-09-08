@@ -217,13 +217,18 @@ async function run(){
   console.log('PASS delivery reassignment preserves historical sale snapshots and actual cost while replay guards canonical contacts')
 
   f=fixture()
-  user={id:2,name:'Customer editor',role_code:'user',permissions:JSON.stringify({sales:true,'sales:status':false,'sales:customer':true})}
+  user={id:2,name:'Customer editor',role_code:'user',permissions:JSON.stringify({sales:true,'sales:status':true,'sales:customer':true,'sales:bulk':false})}
   const customerOnly=await f.call(sales,'/bulk-update',request(f,{kind:'customer',source_id:1,target_id:3},'customer-permission-1',[1]))
   assert.equal(customerOnly.status,200)
+  assert.equal(f.sql.prepare('SELECT json_extract(undo_payload,\'$.applier\') applier FROM action_history WHERE id=?').get(customerOnly.body.actionHistoryId).applier,'sale.customer.single')
   assert.equal((await replay(f,customerOnly.body.actionHistoryId)).status,200)
+  const beforeBulkDenied=snapshot(f)
+  const customerBulkDenied=await f.call(sales,'/bulk-update',request(f,{kind:'customer',source_id:1,target_id:3},'customer-bulk-denied-1',[1,2]))
+  assert.equal(customerBulkDenied.status,403)
+  assert.equal(snapshot(f),beforeBulkDenied)
   const paymentDenied=await f.call(sales,'/bulk-update',request(f,{kind:'payment_method',source:'Cash',target:'Card'},'payment-permission-1',[2]))
   assert.equal(paymentDenied.status,403)
   user={id:1,name:'Admin',username:'admin',role_code:'admin',permissions:{all:true}}
-  console.log('PASS customer and status-field actions preserve their distinct granular permissions, including replay')
+  console.log('PASS one-customer assignment and replay use individual authority while every true bulk action is refused without sales.bulk')
 }
 run().catch(error=>{console.error(error);process.exitCode=1})

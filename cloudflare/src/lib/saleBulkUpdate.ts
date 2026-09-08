@@ -24,7 +24,8 @@ import { ANONYMOUS_CUSTOMER_MUTATION_ERROR, isAnonymousCustomer } from './anonym
 
 export const BULK_UPDATE_KIND = 'sale.fields.bulk'
 export const BULK_CUSTOMER_UPDATE_KIND = 'sale.customer.bulk'
-export const SALE_BULK_UPDATE_KINDS = new Set([BULK_UPDATE_KIND, BULK_CUSTOMER_UPDATE_KIND])
+export const SINGLE_CUSTOMER_UPDATE_KIND = 'sale.customer.single'
+export const SALE_BULK_UPDATE_KINDS = new Set([BULK_UPDATE_KIND, BULK_CUSTOMER_UPDATE_KIND, SINGLE_CUSTOMER_UPDATE_KIND])
 
 type Row = Record<string, unknown>
 type BulkUpdateItem = { id: number; expected_updated_at: string | null }
@@ -39,8 +40,10 @@ export type SaleBulkUpdateRequest = {
   action: SaleBulkUpdateAction
 }
 
-export function saleBulkUpdateApplier(action: SaleBulkUpdateAction): string {
-  return action.kind === 'customer' ? BULK_CUSTOMER_UPDATE_KIND : BULK_UPDATE_KIND
+export function saleBulkUpdateApplier(action: SaleBulkUpdateAction, itemCount = 2): string {
+  return action.kind === 'customer'
+    ? itemCount === 1 ? SINGLE_CUSTOMER_UPDATE_KIND : BULK_CUSTOMER_UPDATE_KIND
+    : BULK_UPDATE_KIND
 }
 
 type ReturnCustomerSnapshot = {
@@ -84,8 +87,8 @@ function optionalId(value: unknown, label: string): number | null {
   return Number(value)
 }
 
-function permission(user: SessionUser, action: SaleBulkUpdateAction): void {
-  const actionKey = action.kind === 'customer' ? 'customer' : 'status'
+function permission(user: SessionUser, action: SaleBulkUpdateAction, itemCount: number): void {
+  const actionKey = action.kind === 'customer' && itemCount === 1 ? 'customer' : 'bulk'
   if (getActionTier(user, 'sales', actionKey) !== 'full') {
     fail('No permission to change the selected sales.', 403)
   }
@@ -336,7 +339,7 @@ export async function notifySaleBulkUpdate(env: Env, actionKind?: string): Promi
 
 export async function applySaleBulkUpdate(env: Env, user: SessionUser, raw: Row) {
   const request = parseRequest(raw)
-  permission(user, request.action)
+  permission(user, request.action, request.items.length)
   const db = getDb(env)
   const canonical = JSON.stringify(request)
   const previous = await db.prepare('SELECT request_json,receipt_json FROM sale_bulk_operations WHERE actor_id=@actor AND request_id=@request').get<Row>({ actor: user.id, request: request.client_request_id })
@@ -545,7 +548,7 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, raw: Row)
     referenceBefore: referenceState(request.action, sourceReference),
     referenceAfter: referenceState(request.action, request.action.kind === 'customer' ? targetCustomer : targetContact),
   }
-  const applier = saleBulkUpdateApplier(request.action)
+  const applier = saleBulkUpdateApplier(request.action, request.items.length)
   const changedIds = members.filter((member) => member.changed).map((member) => member.id)
   const unchangedIds = members.filter((member) => !member.changed).map((member) => member.id)
   const receipt = {
@@ -601,8 +604,8 @@ export async function replaySaleBulkUpdate(env: Env, user: SessionUser, directio
   if (!op || op.kind !== BULK_UPDATE_KIND || op.id !== payload.operation_id || op.snapshot_id !== payload.snapshot_id || op.generation !== generation) fail('This group has changed or its snapshot does not match.')
   const snapshot = JSON.parse(String(op.payload_json)) as BulkUpdateSnapshot
   if (snapshot.version !== 1 || snapshot.operationId !== op.id || snapshot.members.length > BULK_STATUS_LIMIT) fail('Unsupported bulk update snapshot.')
-  if (payload.applier !== saleBulkUpdateApplier(snapshot.action)) fail('This group does not match its saved permission scope.')
-  permission(user, snapshot.action)
+  if (payload.applier !== saleBulkUpdateApplier(snapshot.action, snapshot.members.length)) fail('This group does not match its saved permission scope.')
+  permission(user, snapshot.action, snapshot.members.length)
   const sign: 1 | -1 = direction === 'undo' ? -1 : 1
   const expected = direction === 'undo' ? 'undoable' : 'redoable'
   const next = direction === 'undo' ? 'redoable' : 'undoable'

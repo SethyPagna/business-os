@@ -8,6 +8,7 @@ import ColumnChooser from '../shared/ColumnChooser.tsx'
 import { useColumnPreferences } from '../shared/useColumnPreferences.ts'
 import { resolveDriverLabel } from '../../utils/salesDriverLabel.ts'
 import { SALES_COLUMNS_SURFACE_KEY, SALES_OPTIONAL_COLUMNS } from './salesListColumns.ts'
+import { useApp } from '../../AppContext.tsx'
 
 type TranslateFn = (key: string) => string
 type MoneyFormatter = (value: number | string) => string
@@ -138,6 +139,10 @@ export default function SalesListSurface({
   toggleSelectAll,
   toggleSelectionScope,
 }: SalesListSurfaceProps) {
+  // Bulk selection is its own authority. Individual status/customer/amend
+  // grants must not make long-press multi-select available to an Employee.
+  const { can } = useApp()
+  selectionModeActive = selectionModeActive && can('sales', 'bulk')
   const skeletonRows = Array.from({ length: 8 }, (_, index) => index)
   const mobileSkeletonCards = Array.from({ length: 4 }, (_, index) => index)
   // 11.1: the checkbox column only takes space in select mode; out of it
