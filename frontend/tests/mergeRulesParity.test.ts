@@ -28,6 +28,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { resolveMergedPricing, resolveMergedCost, productIdentitySignature } from '../src/utils/productDetailRule.ts'
 import { mergeSameDetailRows } from '../src/utils/productGrouping.ts'
+import { chooseSelectedConflictKeeper } from '../src/utils/selectedConflictMerge.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.join(here, '..', '..')
@@ -121,12 +122,22 @@ check('the keeper ordering ranks on the NUMBER of zeros shed, in both copies', (
   // lets the dirtier row win the id tie-break, putting the extra zero back
   // into the catalog as the survivor.
   const worker = fs.readFileSync(path.join(repoRoot, 'cloudflare', 'src', 'lib', 'productIdentity.ts'), 'utf8')
-  const duplicatesTab = fs.readFileSync(
-    path.join(repoRoot, 'frontend', 'src', 'components', 'products', 'ProductDuplicatesTab.tsx'), 'utf8')
-  for (const [label, source] of [['Worker', worker], ['client', duplicatesTab]] as const) {
-    assert.ok(/zerosShed/.test(source),
-      `${label} keeper ordering must rank on how many leading zeros a row sheds`)
-  }
+  assert.ok(/zerosShed/.test(worker),
+    'Worker keeper ordering must rank on how many leading zeros a row sheds')
+
+  const [keeper] = chooseSelectedConflictKeeper([
+    { id: 1, name: 'Double padded', barcode: '008339327539', stock_quantity: 99, cost_price_usd: 1, selling_price_usd: 2, image_path: null },
+    { id: 2, name: 'Single padded', barcode: '08339327539', stock_quantity: 1, cost_price_usd: 1, selling_price_usd: 2, image_path: null },
+  ])
+  assert.equal(keeper.id, 2,
+    'the client helper must prefer the row that sheds fewer zeros even when the dirtier row has more stock and the lower id')
+
+  const [exactBarcodeKeeper] = chooseSelectedConflictKeeper([
+    { id: 1, name: 'Exact barcode low stock', barcode: '08339327539', stock_quantity: 1, cost_price_usd: 1, selling_price_usd: 2, image_path: null },
+    { id: 2, name: 'Exact barcode high stock', barcode: '08339327539', stock_quantity: 9, cost_price_usd: 1, selling_price_usd: 2, image_path: null },
+  ])
+  assert.equal(exactBarcodeKeeper.id, 2,
+    'negative control: exact-barcode duplicates still use stock before id; zero ranking must not replace the ordinary keeper rule')
 })
 
 // N15: the fold is no longer copied by hand into the surfaces that use it.
