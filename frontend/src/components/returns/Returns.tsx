@@ -37,6 +37,13 @@ import {
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { pruneSelectionToVisibleIds } from '../../utils/rowSelection.ts'
 import {
+  directMutationOutcomeIsUnknown,
+  freezeDirectMutationBody,
+  loadPendingDirectMutationSlot,
+  savePendingDirectMutationSlot,
+  type PendingDirectMutation,
+} from '../../utils/directMutationRequest.ts'
+import {
   getReturn as fetchReturnDetail,
   getReturns as fetchReturns,
   getReturnsReport,
@@ -46,6 +53,7 @@ import StatsRangeRow from '../shared/StatsRangeRow.tsx'
 import { EMPTY_DATE_TIME_RANGE, type DateTimeRange } from '../shared/DateTimeRangePicker'
 import ReturnsListSurface from './ReturnsListSurface'
 import { RETURN_BULK_LIMIT, type ReturnBulkPayload, type ReturnBulkResult } from './helpers/returnBulkAction.ts'
+import type { PreparedReturnUpdateRequest } from '../../api/returnsTransport.ts'
 const ReturnDetailModal = lazyRetry(() => import('./ReturnDetailModal'), 'returns-detail-modal')
 const EditReturnModal = lazyRetry(() => import('./EditReturnModal'), 'returns-edit-modal')
 const NewReturnModal = lazyRetry(() => import('./NewReturnModal'), 'returns-new-modal')
@@ -146,9 +154,14 @@ interface ReturnHistoryPayload extends Record<string, unknown> {
   }>
 }
 
-async function updateReturnRequest(id: number | string, payload: ReturnHistoryPayload): Promise<unknown> {
-  const { updateReturn } = await loadReturnsWriteTransport()
-  return updateReturn(id, payload)
+async function prepareReturnRequest(id: number | string, payload: ReturnHistoryPayload): Promise<PreparedReturnUpdateRequest> {
+  const { prepareReturnUpdateRequest } = await loadReturnsWriteTransport()
+  return prepareReturnUpdateRequest(id, payload)
+}
+
+async function updateReturnRequest(id: number | string, payload: PreparedReturnUpdateRequest): Promise<unknown> {
+  const { submitReturnUpdateRequest } = await loadReturnsWriteTransport()
+  return submitReturnUpdateRequest(id, payload)
 }
 
 interface ReturnMutation {
@@ -374,6 +387,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
   const editRequestRef = useRef(0)
   const detailRequestRef = useRef(0)
   const historyRestoreInFlightRef = useRef(false)
+  const [historyRestoreSaving, setHistoryRestoreSaving] = useState(false)
   const bulkActionInFlightRef = useRef(false)
   const bulkRetryMemory = useRef<{ key: string; request: ReturnBulkPayload | null } | null>(null)
   const [bulkActionSaving, setBulkActionSaving] = useState(false)
@@ -383,6 +397,12 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
   const actionHistory = useActionHistory({ limit: 8, notify, scope: 'returns', enabled: historyReady, user })
   const bulkRetryKey = `returns.bulk.retry:${user?.id || 'anonymous'}`
   const [bulkRetryRevision, setBulkRetryRevision] = useState(0)
+  const [pendingHistoryRequest, setPendingHistoryRequest] = useState<PendingDirectMutation<PreparedReturnUpdateRequest> | null>(() => (
+    loadPendingDirectMutationSlot<PreparedReturnUpdateRequest>('return-history', user?.id)
+  ))
+  const savePendingHistoryRequest = useCallback((returnId: number | string, body: PreparedReturnUpdateRequest | null) => {
+    setPendingHistoryRequest(savePendingDirectMutationSlot('return-history', user?.id, returnId, body))
+  }, [user?.id])
   const pendingBulkRequest = useMemo(() => {
     if (bulkRetryMemory.current?.key === bulkRetryKey) return bulkRetryMemory.current.request
     void bulkRetryRevision
@@ -733,23 +753,38 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
     }
   }, [])
 
-  const restoreReturnSnapshot = useCallback(async (snapshot: ReturnRow, historyReason?: string): Promise<void> => {
-    if (!snapshot?.id) throw new Error('Return snapshot is unavailable.')
-    if (!beginSingleAction(historyRestoreInFlightRef)) return
+  const submitReturnHistoryRequest = useCallback(async (returnId: number | string, body: PreparedReturnUpdateRequest): Promise<void> => {
     try {
       await withLoaderTimeout(
-        () => updateReturnRequest(snapshot.id as number | string, {
-          ...buildReturnHistoryPayload(snapshot),
-          notes: historyReason || snapshot.notes || '',
-        }),
+        () => updateReturnRequest(returnId, body),
         'Restore return snapshot',
         RETURNS_HISTORY_RESTORE_TIMEOUT_MS,
       )
+      savePendingHistoryRequest(returnId, null)
       await loadReturns(true)
+    } catch (error) {
+      if (!directMutationOutcomeIsUnknown(error)) savePendingHistoryRequest(returnId, null)
+      throw error
+    }
+  }, [loadReturns, savePendingHistoryRequest])
+
+  const restoreReturnSnapshot = useCallback(async (snapshot: ReturnRow, historyReason?: string): Promise<void> => {
+    if (!snapshot?.id) throw new Error('Return snapshot is unavailable.')
+    if (pendingHistoryRequest) throw new Error(tr('sale_bulk_pending', 'A previous request has an unknown outcome. Retry the original request or discard it before starting another.'))
+    if (!beginSingleAction(historyRestoreInFlightRef)) return
+    setHistoryRestoreSaving(true)
+    try {
+      const body = freezeDirectMutationBody(await prepareReturnRequest(snapshot.id as number | string, {
+        ...buildReturnHistoryPayload(snapshot),
+        notes: historyReason || snapshot.notes || '',
+      }))
+      savePendingHistoryRequest(snapshot.id as number | string, body)
+      await submitReturnHistoryRequest(snapshot.id as number | string, body)
     } finally {
       finishSingleAction(historyRestoreInFlightRef)
+      setHistoryRestoreSaving(false)
     }
-  }, [buildReturnHistoryPayload, loadReturns])
+  }, [buildReturnHistoryPayload, pendingHistoryRequest, savePendingHistoryRequest, submitReturnHistoryRequest, tr])
 
   const handleReturnMutationSuccess = useCallback(async (mutation: ReturnMutation): Promise<void> => {
     const kind = String(mutation?.kind || '')
@@ -1149,6 +1184,23 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
           />
         </SectionExportAction>
       </div>
+      {pendingHistoryRequest ? (
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
+          <span className="min-w-0 flex-1">{tr('sale_bulk_pending', 'A previous request has an unknown outcome. Retry the original request or discard it before starting another.')}</span>
+          <button type="button" className="btn-secondary" disabled={historyRestoreSaving} onClick={() => {
+            if (!beginSingleAction(historyRestoreInFlightRef)) return
+            setHistoryRestoreSaving(true)
+            void submitReturnHistoryRequest(pendingHistoryRequest.entityId, pendingHistoryRequest.body)
+              .catch((error) => notify(String((error as { message?: unknown })?.message || error), 'error'))
+              .finally(() => { finishSingleAction(historyRestoreInFlightRef); setHistoryRestoreSaving(false) })
+          }}>{tr('retry_original_request', 'Retry original request')}</button>
+          <button type="button" className="btn-secondary" disabled={historyRestoreSaving} onClick={() => {
+            if (window.confirm(tr('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.'))) {
+              savePendingHistoryRequest(pendingHistoryRequest.entityId, null)
+            }
+          }}>{tr('discard_retry', 'Discard retry')}</button>
+        </div>
+      ) : null}
       {pendingBulkRequest ? (
         <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
           <span className="min-w-0 flex-1">{tr('return_bulk_pending', 'A previous bulk action has an unknown outcome. Retry that exact request or discard it after checking Returns and History.', 'សកម្មភាពជាក្រុមមុនមានលទ្ធផលមិនទាន់ច្បាស់។ សូមសាកល្បងសំណើដដែលឡើងវិញ ឬបោះបង់បន្ទាប់ពីពិនិត្យការត្រឡប់ និងប្រវត្តិ។')}</span>

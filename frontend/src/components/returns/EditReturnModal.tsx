@@ -10,7 +10,14 @@ import { normalizeReturnReasonList } from './helpers/returnReasonPresets.ts'
 import { useReturnReasonPresets } from './helpers/useReturnReasonPresets.ts'
 import { useFormDirty } from '../../utils/formDirty.ts'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
+import {
+  directMutationOutcomeIsUnknown,
+  freezeDirectMutationBody,
+  loadPendingDirectMutation,
+  savePendingDirectMutation,
+} from '../../utils/directMutationRequest.ts'
 import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
+import type { PreparedReturnUpdateRequest } from '../../api/returnsTransport.ts'
 
 const RETURN_UPDATE_TIMEOUT_MS = 15000
 
@@ -53,6 +60,7 @@ interface ExistingReturn {
   notes?: string | null
   branch_id?: number | string | null
   items?: ExistingReturnItem[] | null
+  updated_at?: string | null
 }
 
 interface ReturnUpdatePayload extends Record<string, unknown> {
@@ -105,9 +113,14 @@ function loadReturnsTransport(): Promise<ReturnsTransportModule> {
   return returnsTransportPromise
 }
 
-async function updateReturnRequest(id: number | string, payload: ReturnUpdatePayload): Promise<unknown> {
-  const { updateReturn } = await loadReturnsTransport()
-  return updateReturn(id, payload)
+async function prepareReturnRequest(id: number | string, payload: ReturnUpdatePayload): Promise<PreparedReturnUpdateRequest> {
+  const { prepareReturnUpdateRequest } = await loadReturnsTransport()
+  return prepareReturnUpdateRequest(id, payload)
+}
+
+async function updateReturnRequest(id: number | string, payload: PreparedReturnUpdateRequest): Promise<unknown> {
+  const { submitReturnUpdateRequest } = await loadReturnsTransport()
+  return submitReturnUpdateRequest(id, payload)
 }
 
 function toNumber(value: number | string | null | undefined): number {
@@ -146,6 +159,7 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
     existingItems.map((item) => ({ ...item, returnQty: toNumber(item.quantity), stock_action: normalizeStockAction(item as { stock_action?: unknown; return_to_stock?: unknown }) })),
   )
   const [submitting,   setSubmitting]   = useState(false)
+  const [pendingRequest, setPendingRequest] = useState(() => loadPendingDirectMutation<PreparedReturnUpdateRequest>('return-edit', user?.id, ret.id))
   const submitInFlightRef = useRef(false)
   const isKnownReason = RETURN_REASONS.includes(reason)
 
@@ -167,6 +181,11 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
   const activeItems    = items.filter(it => it.returnQty > 0)
   const totalRefund    = activeItems.reduce((sum, it) => sum + toNumber(it.applied_price_usd) * it.returnQty, 0)
   const totalRefundKhr = activeItems.reduce((sum, it) => sum + toNumber(it.applied_price_khr) * it.returnQty, 0)
+
+  const clearPendingRequest = (): void => {
+    savePendingDirectMutation('return-edit', user?.id, ret.id, null)
+    setPendingRequest(null)
+  }
 
   const handleSubmit = async (): Promise<void> => {
     if (!finalReason.trim()) { notify(T('return_reason','Please provide a reason'), 'error'); return }
@@ -195,11 +214,19 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
           branch_id:         it.branch_id || ret.branch_id || null,
         })),
       }
+      const prepared = pendingRequest?.body || freezeDirectMutationBody(await prepareReturnRequest(ret.id, {
+        ...payload,
+        expected_updated_at: ret.updated_at || undefined,
+      }))
+      if (!pendingRequest) {
+        setPendingRequest(savePendingDirectMutation('return-edit', user?.id, ret.id, prepared))
+      }
       const result = await withLoaderTimeout(
-        () => updateReturnRequest(ret.id, payload),
+        () => updateReturnRequest(ret.id, prepared),
         'Update return',
         RETURN_UPDATE_TIMEOUT_MS,
       )
+      clearPendingRequest()
       notify(T('success','Return updated successfully'))
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'returns' } }))
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
@@ -208,9 +235,11 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
       onClose()
     } catch (error) {
       if (isWriteConflict(error)) {
+        clearPendingRequest()
         onSuccess?.()
         return
       }
+      if (!directMutationOutcomeIsUnknown(error)) clearPendingRequest()
       notify((T('error','Error') || 'Error') + ': ' + getLoaderErrorMessage(error), 'error')
     } finally {
       finishSingleAction(submitInFlightRef)
@@ -257,6 +286,12 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
           </div>
         </div>
 
+        {pendingRequest ? (
+          <div role="status" className="mx-4 mt-4 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-100">
+            {T('sale_bulk_pending', 'A previous request has an unknown outcome. Retry the original request or discard it before starting another.')}
+          </div>
+        ) : null}
+        <fieldset disabled={submitting || !!pendingRequest} className="contents">
         <div className="modal-scroll p-4 space-y-4">
           {/* Warning */}
           <div className="bg-orange-50 dark:bg-orange-900/20 rounded-xl p-3 text-xs text-orange-700 dark:text-orange-400">
@@ -383,6 +418,7 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
           )}
 
         </div>
+        </fieldset>
         {/* S4-20: the actions live at the END of the form and nowhere else.
             Outside .modal-scroll, so they are the last thing in the panel
             without being the last thing behind a scroll. */}
@@ -390,11 +426,24 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
           <button onClick={closeIfIdle} disabled={submitting} className="btn-secondary text-sm flex-1 disabled:opacity-50">
             {T('cancel','Cancel')}
           </button>
-          <button onClick={handleSubmit}
-            disabled={submitting || !finalReason.trim()}
-            className="btn-primary text-sm flex-1 disabled:opacity-50">
-            {submitting ? `⏳ ${T('saving_label','Saving…')}` : `✓ ${T('save','Save Changes')}`}
-          </button>
+          {pendingRequest ? (
+            <>
+              <button onClick={handleSubmit} disabled={submitting} className="btn-primary text-sm flex-1 disabled:opacity-50">
+                {submitting ? `⏳ ${T('saving_label','Saving…')}` : T('retry_original_request', 'Retry original request')}
+              </button>
+              <button type="button" disabled={submitting} className="btn-secondary text-sm flex-1 disabled:opacity-50" onClick={() => {
+                if (window.confirm(T('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.'))) clearPendingRequest()
+              }}>
+                {T('discard_retry', 'Discard retry')}
+              </button>
+            </>
+          ) : (
+            <button onClick={handleSubmit}
+              disabled={submitting || !finalReason.trim()}
+              className="btn-primary text-sm flex-1 disabled:opacity-50">
+              {submitting ? `⏳ ${T('saving_label','Saving…')}` : `✓ ${T('save','Save Changes')}`}
+            </button>
+          )}
         </div>
       </div>
       <UnsavedChangesPrompt guard={closeGuard} />

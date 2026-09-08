@@ -9,6 +9,7 @@ import { getReturn, getReturns } from './returnsReadTransport.ts'
 import type { ReturnBulkPayload, ReturnBulkResult } from '../components/returns/helpers/returnBulkAction.ts'
 
 type ReturnPayload = ExpectedUpdatedAtPayload
+export type PreparedReturnUpdateRequest = ExpectedUpdatedAtPayload & { client_request_id: string }
 type ReturnUpdateAttempt = {
   reason: unknown
   return_type: unknown
@@ -120,8 +121,15 @@ export function bulkUpdateReturns(payload: ReturnBulkPayload): Promise<ReturnBul
   return apiFetch('POST', '/api/returns/bulk', payload) as Promise<ReturnBulkResult>
 }
 
-export async function updateReturn(id: number | string, payload: ReturnPayload = {}): Promise<unknown> {
-  const body = await withExpectedUpdatedAt('returns', id, { ...getDevicePayload(), ...(payload || {}) })
+export async function prepareReturnUpdateRequest(id: number | string, payload: ReturnPayload = {}): Promise<PreparedReturnUpdateRequest> {
+  const body = await withExpectedUpdatedAt('returns', id, ensureClientRequestId({ ...getDevicePayload(), ...(payload || {}) }, 'return-edit'))
+  return body as PreparedReturnUpdateRequest
+}
+
+export async function submitReturnUpdateRequest(id: number | string, body: PreparedReturnUpdateRequest): Promise<unknown> {
+  if (!String(body?.client_request_id || '').trim()) {
+    throw new Error('Return updates require a prepared client_request_id.')
+  }
   try {
     const result = await route(
       'returns:update',
@@ -130,12 +138,24 @@ export async function updateReturn(id: number | string, payload: ReturnPayload =
       true,
     )
     const db = await getLocalDb()
+    const {
+      client_request_id: _clientRequestId,
+      expected_updated_at: _expectedUpdatedAt,
+      clientTime: _clientTime,
+      deviceTz: _deviceTz,
+      deviceName: _deviceName,
+      ...localUpdate
+    } = body
     await db.table('returns').update(id, {
-      ...payload,
+      ...localUpdate,
       updated_at: getResultTimestamp(result),
     }).catch(() => {})
     return result
   } catch (error) {
-    attachAttemptedReturnUpdate(error, payload)
+    attachAttemptedReturnUpdate(error, body)
   }
+}
+
+export async function updateReturn(id: number | string, payload: ReturnPayload = {}): Promise<unknown> {
+  return submitReturnUpdateRequest(id, await prepareReturnUpdateRequest(id, payload))
 }

@@ -27,7 +27,7 @@ import { pruneSelectionToVisibleIds } from '../../utils/rowSelection.ts'
 import { createLongPressState, type LongPressState } from '../../utils/longPress.ts'
 import { buildTimeActionSections, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.ts'
 import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
-import { buildBulkSaleCancelInput, getSales as fetchSales, getSalesStats as fetchSalesStats, getSalesStatsStrip, SALES_LIST_REQUEST_TIMEOUT_MS, updateSalesBulkField, updateSalesBulkStatus, type BulkSaleStatusItem, type BulkSaleStatusPayload, type BulkSaleUpdatePayload, type SaleAmendmentRequest } from '../../api/salesTransport.ts'
+import { buildBulkSaleCancelInput, getSales as fetchSales, getSalesStats as fetchSalesStats, getSalesStatsStrip, SALES_LIST_REQUEST_TIMEOUT_MS, updateSalesBulkField, updateSalesBulkStatus, type BulkSaleStatusItem, type BulkSaleStatusPayload, type BulkSaleUpdatePayload, type PreparedSaleStatusRequest, type SaleAmendmentRequest } from '../../api/salesTransport.ts'
 import { getCustomers, getDeliveryContacts } from '../../api/contactReadTransport.ts'
 import { getCustomerRenameImpact, updateCustomer } from '../../api/contactWriteTransport.ts'
 import RenameCascadeModal, { type RenameCascadeChoice, type RenameCascadeRequest } from '../shared/RenameCascadeModal.tsx'
@@ -68,6 +68,13 @@ import BulkSaleChangeModal, { type BulkSaleChangeRow, type BulkSaleChoice, type 
 import BulkSaleCancelModal, { type BulkSaleCancelDraft } from './BulkSaleCancelModal.tsx'
 import SectionExportAction from '../shared/SectionExportAction.tsx'
 import { createSingleUseResult, type SingleUseResult } from './saleStatusConfirmation.ts'
+import {
+  directMutationOutcomeIsUnknown,
+  freezeDirectMutationBody,
+  loadPendingDirectMutationSlot,
+  savePendingDirectMutationSlot,
+  type PendingDirectMutation,
+} from '../../utils/directMutationRequest.ts'
 
 const SALES_USER_OPTIONS_TIMEOUT_MS = 8000
 const SALES_STATUS_MUTATION_TIMEOUT_MS = 12000
@@ -129,6 +136,7 @@ interface SaleRecord extends Record<string, unknown> {
   id: number | string
   receipt_number?: string
   created_at?: string
+  updated_at?: string
   sale_status?: string
   // S4-2 (migration 0114): 1 when an admin deliberately changed this sale's
   // status without moving stock. The sale stays outside the stock ledger
@@ -226,8 +234,18 @@ type SaleMutationReview = { client_request_id: string; expected_exchange_rate: n
 type SaleMutationUiResult = boolean | { exchangeRateChanged: number } | { mutationError: string }
 type SaleStatusUiResult = boolean | { exchangeRateChanged: number } | { settlementError: string } | { statusUpdatedAt: string }
 
+function statusReplayExtra(request: PreparedSaleStatusRequest): Record<string, unknown> | null {
+  const allowedKeys = ['cancel_reason', 'cancel_note', 'cancel_fee_usd', 'cancel_fee_khr', 'cancel_fee_note', 'skip_stock'] as const
+  const entries = allowedKeys
+    .filter((key) => Object.prototype.hasOwnProperty.call(request, key))
+    .map((key) => [key, request[key]] as const)
+  return entries.length > 0 ? Object.fromEntries(entries) : null
+}
+
 interface SalesApi {
   updateSaleStatus: (saleId: number | string, status: string, notes?: string, extra?: Record<string, unknown>) => Promise<unknown>
+  prepareSaleStatusRequest: (saleId: number | string, status: string, notes?: string, extra?: Record<string, unknown>) => Promise<PreparedSaleStatusRequest>
+  submitSaleStatusRequest: (saleId: number | string, payload: PreparedSaleStatusRequest) => Promise<unknown>
   attachSaleCustomer: (saleId: number | string, payload: SaleMembershipPayload) => Promise<unknown>
   addSaleItems: (saleId: number | string, items: SaleItemAddition[], notes: string, review: SaleMutationReview) => Promise<unknown>
   // S4-30: amend a recorded sale, and read its history.
@@ -451,6 +469,12 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   >(null)
   const pendingStatusResultRef = useRef<SingleUseResult<SaleStatusUiResult> | null>(null)
   const [statusConfirmSaving, setStatusConfirmSaving] = useState(false)
+  const [pendingDirectStatus, setPendingDirectStatus] = useState<PendingDirectMutation<PreparedSaleStatusRequest> | null>(() => (
+    loadPendingDirectMutationSlot<PreparedSaleStatusRequest>('sale-status', user?.id)
+  ))
+  const savePendingDirectStatus = useCallback((saleId: number | string, body: PreparedSaleStatusRequest | null) => {
+    setPendingDirectStatus(savePendingDirectMutationSlot('sale-status', user?.id, saleId, body))
+  }, [user?.id])
   // Group-by dropped (user, Aug 31: "the group by seems a bit redundant
   // with the arrange by") — the list always groups by day; sorting by a
   // non-date field flattens it. Kept as a const so the grouping pipeline
@@ -855,9 +879,9 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     pendingLoadRef.current = null
   }, [clearLoadWatchdog])
 
-  const runSaleStatusMutation = useCallback((saleId: number | string, nextStatus: string, notes?: string, extra?: SaleCancelPayload | Record<string, unknown> | null) => (
+  const runSaleStatusMutation = useCallback((saleId: number | string, request: PreparedSaleStatusRequest) => (
     withLoaderTimeout(
-      () => getSalesApi().updateSaleStatus(saleId, nextStatus, notes, extra || undefined),
+      () => getSalesApi().submitSaleStatusRequest(saleId, request),
       'Update sale status',
       SALES_STATUS_MUTATION_TIMEOUT_MS,
     )
@@ -874,7 +898,15 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // `extra` carries the full reviewed tender snapshot when SaleDetailModal
   // settles an awaiting-payment sale. That write returns a durable server
   // history row; ordinary status changes keep the local reversible entry.
-  const handleStatusChange = async (saleId: number | string, newStatus: string, notes = '', recordHistory = true, extra: SaleCancelPayload | Record<string, unknown> | null = null, confirmed = false): Promise<SaleStatusUiResult> => {
+  const handleStatusChange = async (
+    saleId: number | string,
+    newStatus: string,
+    notes = '',
+    recordHistory = true,
+    extra: SaleCancelPayload | Record<string, unknown> | null = null,
+    confirmed = false,
+    preparedRetry: PreparedSaleStatusRequest | null = null,
+  ): Promise<SaleStatusUiResult> => {
     // View-only (Part 557): status changes are Full-Access only. The backend
     // already refuses these through sales.status, so this matching client
     // guard also honors a Full role whose one action was switched off.
@@ -884,6 +916,10 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     }
     const numericId = Number(saleId)
     if (!Number.isFinite(numericId)) return false
+    if (pendingDirectStatus && !preparedRetry) {
+      notify(translateOr('sale_bulk_pending', 'A previous request has an unknown outcome. Retry the original request or discard it before starting another.'), 'error')
+      return false
+    }
     const previousSale = sales.find((entry) => Number(entry?.id || 0) === numericId)
     const previousStatus = previousSale?.sale_status || 'completed'
     // Cancelling needs its reason (+ optional lost fee) -- the backend
@@ -891,7 +927,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     // back in with `extra` filled. Undo (recordHistory=false, back to the
     // previous status) is an UN-cancel and needs no reason; redo carries
     // the original extra through its closure.
-    if (newStatus === 'cancelled' && previousStatus !== 'cancelled' && !extra) {
+    if (newStatus === 'cancelled' && previousStatus !== 'cancelled' && !extra && !preparedRetry) {
       setCancelPrompt({
         mode: 'single',
         saleId: numericId,
@@ -933,11 +969,24 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     if (!beginKeyedAction(statusActionRef, actionKey)) return false
     const isSettlementRequest = Array.isArray((extra as { payment_details?: unknown } | null)?.payment_details)
     try {
-      const mutationResult = await runSaleStatusMutation(saleId, newStatus, isSettlementRequest ? undefined : notes, extra) as {
+      const preparedRequest = preparedRetry || freezeDirectMutationBody(await getSalesApi().prepareSaleStatusRequest(
+        saleId,
+        newStatus,
+        isSettlementRequest ? undefined : notes,
+        {
+          ...(extra || {}),
+          ...(previousSale?.updated_at && !(extra as { expected_updated_at?: unknown } | null)?.expected_updated_at
+            ? { expected_updated_at: previousSale.updated_at }
+            : {}),
+        },
+      ))
+      if (!isSettlementRequest && !preparedRetry) savePendingDirectStatus(saleId, preparedRequest)
+      const mutationResult = await runSaleStatusMutation(saleId, preparedRequest) as {
         actionHistoryId?: string | number | null
         actionKind?: string | null
         updated_at?: string | null
       } | null
+      if (!isSettlementRequest) savePendingDirectStatus(saleId, null)
       const hasServerSettlementHistory = mutationResult?.actionKind === 'sale.settlement'
         && mutationResult.actionHistoryId != null
       notify(`${t('status_updated') || 'Status updated'}: ${getStatusLabel(newStatus, t)}`)
@@ -953,7 +1002,13 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         actionHistory.pushAction({
           label: `Update sale ${previousSale.receipt_number || numericId} to ${getStatusLabel(newStatus, t)}`,
           undo: () => handleStatusChange(saleId, previousStatus, 'Undo sale status update', false),
-          redo: () => handleStatusChange(saleId, newStatus, notes || 'Redo sale status update', false, extra),
+          redo: () => handleStatusChange(
+            saleId,
+            newStatus,
+            notes || 'Redo sale status update',
+            false,
+            extra || (preparedRetry ? statusReplayExtra(preparedRetry) : null),
+          ),
         })
       }
       const statusUpdatedAt = String(mutationResult?.updated_at || '').trim()
@@ -969,6 +1024,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       if (isSettlementRequest) {
         return { settlementError: getErrorMessage(error, String(error || 'Unable to settle this sale.')) }
       }
+      if (!directMutationOutcomeIsUnknown(error)) savePendingDirectStatus(saleId, null)
       if (isWriteConflict(error)) {
         await loadSales()
         return false
@@ -2229,6 +2285,28 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
 
       </div>
 
+      {pendingDirectStatus ? (
+        <div className="mb-2 flex flex-wrap items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-100">
+          <span className="min-w-0 flex-1">{translateOr('sale_bulk_pending', 'A previous request has an unknown outcome. Retry the original request or discard it before starting another.')}</span>
+          <button type="button" className="btn-secondary" disabled={statusActionRef.current.size > 0 || !canChangeSaleStatus} onClick={() => {
+            const body = pendingDirectStatus.body
+            void handleStatusChange(
+              pendingDirectStatus.entityId,
+              String(body.sale_status || ''),
+              String(body.notes || ''),
+              true,
+              null,
+              true,
+              body,
+            )
+          }}>{translateOr('retry_original_request', 'Retry original request')}</button>
+          <button type="button" className="btn-secondary" disabled={statusActionRef.current.size > 0} onClick={() => {
+            if (window.confirm(translateOr('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.'))) {
+              savePendingDirectStatus(pendingDirectStatus.entityId, null)
+            }
+          }}>{translateOr('discard_retry', 'Discard retry')}</button>
+        </div>
+      ) : null}
       {pendingBulkRequest ? (
         <div role="status" className="mb-2 flex flex-wrap items-center gap-2 rounded-xl border p-3 text-sm">
           <span>{translateOr('sale_bulk_pending', 'A previous request has an unknown outcome. Retry the original request or discard it before starting another.')}</span>
