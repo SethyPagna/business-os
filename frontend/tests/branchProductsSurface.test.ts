@@ -137,7 +137,7 @@ test('actual surface restores existing-data columns, server totals, expand and g
   assert.ok(withAdjust.includes('adjust_stock'))
   assert.ok(withAdjust.includes('data-inventory-product-menu'), 'desktop product cell keeps a compact reachable action menu')
   assert.equal((html.match(/<th /g) || []).length, 11, 'desktop header drops the dedicated Actions column')
-  const dataRows = Array.from(html.matchAll(/<tr class="[^"]*hover:bg-blue[^"]*">([\s\S]*?)<\/tr>/g))
+  const dataRows = Array.from(html.matchAll(/<tr class="[^"]*hover:bg-blue[^"]*">([\s\S]*?)<\/tr>/g) as Iterable<RegExpMatchArray>)
   assert.equal(dataRows.length, 1, 'the duplicate family renders one merged desktop product row')
   const firstDataRow = dataRows[0]
   assert.ok(firstDataRow, 'the merged desktop row is available for cell-count parity')
