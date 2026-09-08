@@ -33,8 +33,12 @@ export type ProductConflictActionProductRow = Record<string, unknown> & {
   name: string | null
   barcode: string | null
   category: string | null
+  categories: string | null
   brand: string | null
+  brands: string | null
   unit: string | null
+  unit_normalized: string | null
+  brand_compact: string | null
   image_path: string | null
   is_active: number
   is_group: number
@@ -57,6 +61,27 @@ export type ProductConflictActionGroupPlan = {
   lots: { rows: ProductConflictActionLotRow[]; projected_quantity: number; count: number; detail_row_count: number; detail_status: 'complete' | 'refused' }
   detail_status: 'complete' | 'refused'
   blocked: ProductConflictActionBlocker | null
+}
+
+export type ProductConflictActionBarcodeResolution =
+  | { mode: 'canonical' | 'clear' }
+  | { mode: 'member'; source_product_id: number }
+
+export type ProductConflictActionFinalizeResolution = {
+  group_key: string
+  keeper_id: number
+  barcode: ProductConflictActionBarcodeResolution
+  category_source_id: number
+  brand_source_id: number
+  unit_source_id: number
+}
+
+export type ProductConflictActionFinalizeRequest = {
+  manifest_version: 1
+  resolution_version: 2
+  review_id: string
+  draft_digest: string
+  resolutions: ProductConflictActionFinalizeResolution[]
 }
 
 function asRecord(value: unknown, path: string): Record<string, unknown> {
@@ -217,7 +242,9 @@ export function buildProductConflictActionGroupPlans(
       .map((row) => ({ ...row, product_id: Number(row.product_id), batch_id: Number(row.batch_id), branch_id: row.branch_id == null ? null : Number(row.branch_id), quantity: row.quantity == null ? null : Number(row.quantity) || 0 }))
       .sort((a, b) => a.product_id - b.product_id || a.batch_id - b.batch_id || Number(a.branch_id ?? -1) - Number(b.branch_id ?? -1))
     const members = rows.map((row) => ({
-      id: row.id, name: row.name, barcode: row.barcode, category: row.category, brand: row.brand, unit: row.unit,
+      id: row.id, name: row.name, barcode: row.barcode, category: row.category, categories: row.categories,
+      brand: row.brand, brands: row.brands, brand_compact: row.brand_compact,
+      unit: row.unit, unit_normalized: row.unit_normalized,
       image_path: row.image_path, updated_at: row.updated_at,
       cost_price_usd: row.cost_price_usd, cost_price_khr: row.cost_price_khr,
       selling_price_usd: row.selling_price_usd, selling_price_khr: row.selling_price_khr,
@@ -241,6 +268,53 @@ export function buildProductConflictActionGroupPlans(
       blocked,
     }
   })
+}
+
+export function parseProductConflictActionFinalizeRequest(value: unknown): ProductConflictActionFinalizeRequest {
+  const root = asRecord(value, 'request')
+  exactKeys(root, ['manifest_version', 'resolution_version', 'review_id', 'draft_digest', 'resolutions'], 'request')
+  if (root.manifest_version !== 1 || root.resolution_version !== 2) {
+    throw new ProductConflictMergeValidationError('The selected conflict review version is unsupported.', 'unsupported_version')
+  }
+  if (typeof root.review_id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(root.review_id)) {
+    throw new ProductConflictMergeValidationError('A valid review_id is required.')
+  }
+  if (typeof root.draft_digest !== 'string' || !/^sha256-[0-9a-f]{64}$/.test(root.draft_digest)) {
+    throw new ProductConflictMergeValidationError('A valid draft_digest is required.')
+  }
+  if (!Array.isArray(root.resolutions) || root.resolutions.length > PRODUCT_CONFLICT_ACTION_MAX_GROUPS) {
+    throw new ProductConflictMergeValidationError(`resolutions must contain at most ${PRODUCT_CONFLICT_ACTION_MAX_GROUPS} entries.`)
+  }
+  const seen = new Set<string>()
+  const resolutions = root.resolutions.map((candidate, index): ProductConflictActionFinalizeResolution => {
+    const item = asRecord(candidate, `resolutions[${index}]`)
+    exactKeys(item, ['group_key', 'keeper_id', 'barcode', 'category_source_id', 'brand_source_id', 'unit_source_id'], `resolutions[${index}]`)
+    const key = groupKey(item.group_key, `resolutions[${index}].group_key`)
+    if (seen.has(key)) throw new ProductConflictMergeValidationError('resolution group_key values must be unique.')
+    seen.add(key)
+    const barcode = asRecord(item.barcode, `resolutions[${index}].barcode`)
+    if (barcode.mode === 'member') {
+      exactKeys(barcode, ['mode', 'source_product_id'], `resolutions[${index}].barcode`)
+    } else if (barcode.mode === 'canonical' || barcode.mode === 'clear') {
+      exactKeys(barcode, ['mode'], `resolutions[${index}].barcode`)
+    } else {
+      throw new ProductConflictMergeValidationError(`resolutions[${index}].barcode.mode is unsupported.`)
+    }
+    return {
+      group_key: key,
+      keeper_id: productId(item.keeper_id, `resolutions[${index}].keeper_id`),
+      barcode: barcode.mode === 'member'
+        ? { mode: 'member', source_product_id: productId(barcode.source_product_id, `resolutions[${index}].barcode.source_product_id`) }
+        : { mode: barcode.mode },
+      category_source_id: productId(item.category_source_id, `resolutions[${index}].category_source_id`),
+      brand_source_id: productId(item.brand_source_id, `resolutions[${index}].brand_source_id`),
+      unit_source_id: productId(item.unit_source_id, `resolutions[${index}].unit_source_id`),
+    }
+  })
+  return {
+    manifest_version: 1, resolution_version: 2, review_id: root.review_id,
+    draft_digest: root.draft_digest, resolutions,
+  }
 }
 
 export function refuseProductConflictActionGroupDetail(

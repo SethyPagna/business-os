@@ -88,7 +88,8 @@ async function main() {
     await execSql(`
       CREATE TABLE action_history(id INTEGER PRIMARY KEY);
       CREATE TABLE branches(id INTEGER PRIMARY KEY,name TEXT,is_active INTEGER);
-      CREATE TABLE products(id INTEGER PRIMARY KEY,name TEXT,barcode TEXT,category TEXT,brand TEXT,unit TEXT,image_path TEXT,is_active INTEGER,is_group INTEGER,updated_at TEXT,
+      CREATE TABLE products(id INTEGER PRIMARY KEY,name TEXT,barcode TEXT,category TEXT,categories TEXT,brand TEXT,brands TEXT,brand_compact TEXT,
+        unit TEXT,unit_normalized TEXT,image_path TEXT,is_active INTEGER,is_group INTEGER,updated_at TEXT,
         cost_price_usd REAL,cost_price_khr REAL,selling_price_usd REAL,selling_price_khr REAL,wholesale_price_usd REAL,wholesale_price_khr REAL);
       CREATE TABLE branch_stock(product_id INTEGER,branch_id INTEGER,quantity REAL,PRIMARY KEY(product_id,branch_id));
       CREATE TABLE product_batches(id INTEGER PRIMARY KEY,variant_product_id INTEGER,batch_key TEXT,lot_code TEXT,expiry_date TEXT,received_at TEXT,is_active INTEGER,notes TEXT,

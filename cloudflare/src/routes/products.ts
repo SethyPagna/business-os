@@ -55,8 +55,10 @@ import {
   buildProductConflictActionGroupPlans,
   canonicalizeProductConflictActionGroups,
   isProductConflictActionPreviewRequest,
+  parseProductConflictActionFinalizeRequest,
   parseProductConflictActionPreviewRequest,
   refuseProductConflictActionGroupDetail,
+  type ProductConflictActionFinalizeResolution,
   type ProductConflictActionGroupPlan,
   type ProductConflictActionLotRow,
   type ProductConflictActionProductRow,
@@ -79,6 +81,8 @@ import {
 } from '../lib/renameCascade'
 import {
   buildIssueStateClauses,
+  compactSearchText,
+  normalizeSearchText,
 } from '../lib/searchMatch'
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/productSearchQuery'
 import { omitUnchangedProductImageFields, productImageFieldsChanged, productImageFieldsChangedResolved, resolveProductImageFields, ProductImageAssetError } from '../lib/productImagePermission'
@@ -4933,10 +4937,14 @@ async function readSelectedConflictUndoAvailability(
 
 type ProductConflictActionReviewRow = {
   id: string; actor_id: number; request_id: string; request_digest: string; draft_digest: string; status: string
+  finalize_digest: string | null; manifest_digest: string | null
   requested_group_count: number; actionable_group_count: number; blocked_group_count: number; total_member_count: number; expires_at: string
 }
 
-type ProductConflictActionStoredGroupRow = { ordinal: number; detail_json: string }
+type ProductConflictActionStoredGroupRow = {
+  ordinal: number; group_key: string; source_group_keys_json: string; member_ids_json: string; status: string
+  state_digest: string; detail_json: string; resolution_json: string | null; final_plan_json: string | null; operation_id: string | null
+}
 
 function productConflictActionCursor(value: string | undefined): number | null {
   if (value == null || value === '') return 0
@@ -4953,21 +4961,25 @@ function productConflictActionPageLimit(value: string | undefined): number | nul
 }
 
 async function readProductConflictActionReview(db: ReturnType<typeof getDb>, actorId: number, reviewId: string) {
-  return db.prepare(`SELECT id,actor_id,request_id,request_digest,draft_digest,status,
+  return db.prepare(`SELECT id,actor_id,request_id,request_digest,draft_digest,finalize_digest,manifest_digest,status,
     requested_group_count,actionable_group_count,blocked_group_count,total_member_count,expires_at
     FROM product_conflict_action_reviews WHERE id=@reviewId AND actor_id=@actorId`)
     .get<ProductConflictActionReviewRow>({ reviewId, actorId })
 }
 
 async function productConflictActionReviewPage(db: ReturnType<typeof getDb>, reviewId: string, cursor: number, limit: number) {
-  const rows = await db.prepare(`SELECT ordinal,detail_json FROM product_conflict_action_groups
+  const rows = await db.prepare(`SELECT ordinal,group_key,source_group_keys_json,member_ids_json,status,state_digest,detail_json,
+    resolution_json,final_plan_json,operation_id FROM product_conflict_action_groups
     WHERE review_id=@reviewId AND ordinal>=@cursor ORDER BY ordinal LIMIT @limit`)
     .all<ProductConflictActionStoredGroupRow>({ reviewId, cursor, limit: limit + 1 })
   const groups = rows.slice(0, limit).map((row) => {
     try {
       const detail = JSON.parse(row.detail_json)
       if (!detail || typeof detail !== 'object' || Array.isArray(detail)) throw new Error('invalid detail')
-      return { ordinal: Number(row.ordinal), ...detail }
+      const resolution = row.resolution_json ? JSON.parse(row.resolution_json) : null
+      const finalPlan = row.final_plan_json ? JSON.parse(row.final_plan_json) : null
+      return { ordinal: Number(row.ordinal), ...detail, status: row.status, resolution,
+        projected_result: finalPlan?.projected_result ?? null }
     } catch { throw new ProductConflictMergeValidationError('The stored conflict review is unreadable.', 'review_corrupt', 409) }
   })
   return { cursor: String(cursor), next_cursor: rows.length > limit ? String(Number(rows[limit].ordinal)) : null, limit, groups }
@@ -4976,12 +4988,321 @@ async function productConflictActionReviewPage(db: ReturnType<typeof getDb>, rev
 async function productConflictActionReviewResponse(db: ReturnType<typeof getDb>, review: ProductConflictActionReviewRow, cursor = 0, limit = 50) {
   return {
     success: true, manifest_version: 1, resolution_version: 2, review_id: review.id,
-    draft_digest: review.draft_digest, status: review.status, expires_at: review.expires_at,
+    draft_digest: review.draft_digest, manifest_digest: review.manifest_digest, status: review.status, expires_at: review.expires_at,
     counts: {
       requested_groups: Number(review.requested_group_count), actionable_groups: Number(review.actionable_group_count),
       blocked_groups: Number(review.blocked_group_count), total_members: Number(review.total_member_count),
     },
     page: await productConflictActionReviewPage(db, review.id, cursor, limit),
+  }
+}
+
+type ProductConflictActionFinalPlan = {
+  version: 1
+  authority: 'reviewed_product_conflict_v2'
+  review_id: string
+  group_key: string
+  draft_digest: string
+  reviewed_state_digest: string
+  operation_id: string
+  eligibility: { basis: 'name' | 'barcode'; value: string }
+  member_ids: number[]
+  keeper_id: number
+  fold_members: Array<{ member_id: number; operation_id: string }>
+  cluster_plan: ProductMergeClusterPlan
+  selected: {
+    barcode: { mode: 'canonical' | 'member' | 'clear'; source_product_id: number | null; value: string }
+    category: { source_product_id: number; value: unknown; categories: unknown }
+    brand: { source_product_id: number; value: unknown; brands: unknown; brand_compact: string }
+    unit: { source_product_id: number; value: unknown; unit_normalized: string }
+  }
+  image_effect: boolean
+  reviewed_images: Array<{ product_id: number; image_path: string; sort_order: number | null }>
+  projected_result: {
+    economics: ProductMergeEconomics['merged']
+    barcode: string
+    category: unknown
+    categories: unknown
+    brand: unknown
+    brands: unknown
+    brand_compact: string
+    unit: unknown
+    unit_normalized: string
+    stock_by_branch: ProductConflictActionGroupPlan['stock']['projected_by_branch']
+    lot_dispositions: Array<ProductConflictActionLotRow & {
+      source_batch_id: number; target_batch_id: number; collision: 'fold' | 'reparent'
+    }>
+  }
+}
+
+function parseProductConflictStoredArray(value: string, field: string): unknown[] {
+  try {
+    const parsed = JSON.parse(value)
+    if (!Array.isArray(parsed)) throw new Error('not an array')
+    return parsed
+  } catch { throw new ProductConflictMergeValidationError(`The stored conflict review ${field} is unreadable.`, 'review_corrupt', 409) }
+}
+
+async function readProductConflictActionStoredGroups(db: ReturnType<typeof getDb>, reviewId: string) {
+  const rows: ProductConflictActionStoredGroupRow[] = []
+  let cursor = 0
+  while (true) {
+    const page = await db.prepare(`SELECT ordinal,group_key,source_group_keys_json,member_ids_json,status,state_digest,detail_json,
+      resolution_json,final_plan_json,operation_id FROM product_conflict_action_groups
+      WHERE review_id=@reviewId AND ordinal>=@cursor ORDER BY ordinal LIMIT 11`)
+      .all<ProductConflictActionStoredGroupRow>({ reviewId, cursor })
+    rows.push(...page.slice(0, 10))
+    if (page.length <= 10) return rows
+    cursor = Number(page[10].ordinal)
+  }
+}
+
+function productConflictActionPlanMember(plan: ProductConflictActionGroupPlan, productId: number): Record<string, unknown> {
+  const member = plan.members.find((candidate) => Number(candidate.id) === productId)
+  if (!member) throw new ProductConflictMergeValidationError('A selected field source is not a current group member.', 'invalid_resolution')
+  return member
+}
+
+async function buildProductConflictActionFinalPlan(
+  review: ProductConflictActionReviewRow,
+  plan: ProductConflictActionGroupPlan & { state_digest: string },
+  resolution: ProductConflictActionFinalizeResolution,
+  imageEffect: boolean,
+  imageRows: Array<{ product_id: number; image_path: string; sort_order: number | null }>,
+): Promise<ProductConflictActionFinalPlan> {
+  if (plan.blocked || plan.detail_status !== 'complete' || !plan.eligibility_basis || !plan.eligibility_value) {
+    throw new ProductConflictMergeValidationError('Blocked conflict groups cannot be finalized.', 'invalid_resolution')
+  }
+  const memberIds = plan.member_ids.map(Number)
+  const members = new Set(memberIds)
+  const selectedIds = [resolution.keeper_id, resolution.category_source_id, resolution.brand_source_id, resolution.unit_source_id]
+  if (resolution.barcode.mode === 'member') selectedIds.push(resolution.barcode.source_product_id)
+  if (selectedIds.some((id) => !members.has(id))) {
+    throw new ProductConflictMergeValidationError('Every keeper and field source must belong to its conflict group.', 'invalid_resolution')
+  }
+  productConflictActionPlanMember(plan, resolution.keeper_id)
+  const categorySource = productConflictActionPlanMember(plan, resolution.category_source_id)
+  const brandSource = productConflictActionPlanMember(plan, resolution.brand_source_id)
+  const unitSource = productConflictActionPlanMember(plan, resolution.unit_source_id)
+  let barcodeSourceId: number | null = null
+  let barcodeValue = ''
+  if (resolution.barcode.mode === 'canonical') {
+    if (plan.eligibility_basis !== 'barcode') {
+      throw new ProductConflictMergeValidationError('Canonical barcode is available only for a barcode-eligible group.', 'invalid_resolution')
+    }
+    barcodeValue = canonicalProductBarcode(plan.members.map((member) => ({ id: Number(member.id), barcode: member.barcode })))
+  } else if (resolution.barcode.mode === 'member') {
+    barcodeSourceId = resolution.barcode.source_product_id
+    barcodeValue = identityBarcodeKey(productConflictActionPlanMember(plan, barcodeSourceId).barcode)
+  }
+  const groupOperationId = `product-merge-group-${(await productConflictSha256({ review_id: review.id, group_key: plan.group_key })).slice(7)}`
+  const foldMembers = memberIds.filter((id) => id !== resolution.keeper_id).sort((a, b) => a - b)
+  const foldOperations = []
+  for (const memberId of foldMembers) foldOperations.push({
+    member_id: memberId,
+    operation_id: `product-merge-member-${(await productConflictSha256({ review_id: review.id, group_key: plan.group_key, member_id: memberId })).slice(7)}`,
+  })
+  const clusterPlan = createProductMergeClusterPlan(
+    `reviewed:${plan.eligibility_basis}:${plan.eligibility_value}`,
+    resolution.keeper_id,
+    plan.members,
+  )
+  const keeperBatchByKey = new Map(plan.lots.rows.filter((row) => Number(row.product_id) === resolution.keeper_id)
+    .map((row) => [String(row.batch_key), Number(row.batch_id)]))
+  const lotDispositions = plan.lots.rows.filter((row) => Number(row.product_id) !== resolution.keeper_id).map((row) => {
+    const target = keeperBatchByKey.get(String(row.batch_key))
+    return { ...row, source_batch_id: Number(row.batch_id), target_batch_id: target ?? Number(row.batch_id), collision: target ? 'fold' as const : 'reparent' as const }
+  })
+  const category = categorySource.category ?? null
+  const categories = categorySource.categories ?? null
+  const brand = brandSource.brand ?? null
+  const brands = brandSource.brands ?? null
+  const unit = unitSource.unit ?? null
+  return {
+    version: 1, authority: 'reviewed_product_conflict_v2', review_id: review.id, group_key: plan.group_key,
+    draft_digest: review.draft_digest, reviewed_state_digest: plan.state_digest, operation_id: groupOperationId,
+    eligibility: { basis: plan.eligibility_basis, value: plan.eligibility_value }, member_ids: memberIds,
+    keeper_id: resolution.keeper_id, fold_members: foldOperations, cluster_plan: clusterPlan,
+    selected: {
+      barcode: { mode: resolution.barcode.mode, source_product_id: barcodeSourceId, value: barcodeValue },
+      category: { source_product_id: resolution.category_source_id, value: category, categories },
+      brand: { source_product_id: resolution.brand_source_id, value: brand, brands, brand_compact: compactSearchText(brand) },
+      unit: { source_product_id: resolution.unit_source_id, value: unit, unit_normalized: normalizeSearchText(unit) },
+    },
+    image_effect: imageEffect, reviewed_images: imageRows,
+    projected_result: {
+      economics: plan.economics.merged, barcode: barcodeValue, category, categories, brand, brands,
+      brand_compact: compactSearchText(brand), unit, unit_normalized: normalizeSearchText(unit),
+      stock_by_branch: plan.stock.projected_by_branch, lot_dispositions: lotDispositions,
+    },
+  }
+}
+
+async function rebuildProductConflictActionStoredPlans(
+  db: ReturnType<typeof getDb>, storedGroups: ProductConflictActionStoredGroupRow[],
+) {
+  const mergeGroups = storedGroups.map((row) => ({
+    group_key: row.group_key,
+    member_ids: parseProductConflictStoredArray(row.member_ids_json, 'member ids').map(Number),
+  }))
+  const rebuilt = await buildProductConflictActionReviewPlans(db, mergeGroups)
+  const byKey = new Map(rebuilt.map((plan) => [plan.group_key, plan]))
+  const plans: Array<ProductConflictActionGroupPlan & { state_digest: string }> = []
+  for (const stored of storedGroups) {
+    const current = byKey.get(stored.group_key)
+    if (!current) throw new ProductConflictMergeValidationError('A reviewed conflict group is missing.', 'review_state_conflict', 409)
+    const { state_digest: _ignored, ...currentWithoutDigest } = current
+    const sourceKeys = parseProductConflictStoredArray(stored.source_group_keys_json, 'source group keys').map(String)
+    const adjusted = { ...currentWithoutDigest, source_group_keys: sourceKeys }
+    const stateDigest = await productConflictSha256({ version: 2, group: adjusted })
+    plans.push({ ...adjusted, state_digest: stateDigest })
+  }
+  return plans
+}
+
+async function readProductConflictActionImageRows(db: ReturnType<typeof getDb>, productIds: number[]) {
+  const rows: Array<{ product_id: number; image_path: string; sort_order: number | null }> = []
+  let count = 0
+  let bytes = 0
+  for (let offset = 0; offset < productIds.length; offset += PRODUCT_CONFLICT_ACTION_READ_CHUNK) {
+    const chunk = productIds.slice(offset, offset + PRODUCT_CONFLICT_ACTION_READ_CHUNK)
+    const { sql, params } = buildInClause('reviewImageProduct', chunk)
+    const stats = await db.prepare(`SELECT COUNT(*) AS count,
+      COALESCE(SUM(length(CAST(COALESCE(image_path,'') AS BLOB))),0) AS bytes
+      FROM product_images WHERE product_id IN (${sql})`).get<{ count: number; bytes: number }>(params)
+    count += Number(stats?.count) || 0
+    bytes += Number(stats?.bytes) || 0
+  }
+  if (count > productIds.length * ADMIN_MAX_IMAGES_PER_PRODUCT || bytes > PRODUCT_CONFLICT_ACTION_MAX_REVIEW_DETAIL_BYTES) {
+    throw new ProductConflictMergeValidationError('Product images changed beyond the bounded review.', 'review_state_conflict', 409)
+  }
+  for (let offset = 0; offset < productIds.length; offset += PRODUCT_CONFLICT_ACTION_READ_CHUNK) {
+    const chunk = productIds.slice(offset, offset + PRODUCT_CONFLICT_ACTION_READ_CHUNK)
+    const { sql, params } = buildInClause('reviewImageProduct', chunk)
+    rows.push(...await db.prepare(`SELECT product_id,image_path,sort_order FROM product_images
+      WHERE product_id IN (${sql}) ORDER BY product_id,sort_order,id`)
+      .all<{ product_id: number; image_path: string; sort_order: number | null }>(params))
+  }
+  return rows.map((row) => ({ product_id: Number(row.product_id), image_path: String(row.image_path),
+    sort_order: row.sort_order == null ? null : Number(row.sort_order) }))
+}
+
+function productConflictActionImageEffect(
+  plan: ProductConflictActionGroupPlan,
+  keeperId: number,
+  imageRows: Array<{ product_id: number; image_path: string; sort_order: number | null }>,
+): boolean {
+  const discarded = new Set(plan.member_ids.filter((id) => id !== keeperId))
+  if (imageRows.some((row) => discarded.has(row.product_id))) return true
+  const keeper = productConflictActionPlanMember(plan, keeperId)
+  return !String(keeper.image_path ?? '').trim()
+    && plan.members.some((member) => discarded.has(Number(member.id)) && Boolean(String(member.image_path ?? '').trim()))
+}
+
+function productConflictActionFinalizeStateGuard(
+  plans: Array<ProductConflictActionGroupPlan & { state_digest: string }>,
+  imageRows: Array<{ product_id: number; image_path: string; sort_order: number | null }>,
+) {
+  const memberIds = [...new Set(plans.flatMap((plan) => plan.member_ids))].sort((a, b) => a - b)
+  const products = plans.flatMap((plan) => plan.members).sort((a, b) => Number(a.id) - Number(b.id))
+  const stock = plans.flatMap((plan) => plan.stock.rows)
+    .sort((a, b) => Number(a.product_id) - Number(b.product_id) || Number(a.branch_id) - Number(b.branch_id))
+  const lots = plans.flatMap((plan) => plan.lots.rows)
+    .sort((a, b) => Number(a.product_id) - Number(b.product_id) || Number(a.batch_id) - Number(b.batch_id)
+      || Number(a.branch_id ?? -1) - Number(b.branch_id ?? -1))
+  const productFields = ['name', 'barcode', 'category', 'categories', 'brand', 'brands', 'brand_compact', 'unit', 'unit_normalized', 'image_path',
+    'updated_at', 'cost_price_usd', 'cost_price_khr', 'selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr']
+  const lotFields = ['batch_key', 'lot_code', 'expiry_date', 'received_at', 'is_active', 'notes', 'unit_cost_usd', 'received_quantity',
+    'received_branch_id', 'received_cost_usd', 'supplier_id', 'supplier_name', 'payment_status', 'credit_due_date', 'quantity']
+  const productMismatch = productFields.map((field) => `p.${field} IS NOT json_extract(expected.value,'$.${field}')`).join(' OR ')
+  const lotMismatch = lotFields.map((field) => `${field === 'quantity' ? 'bbs' : 'pb'}.${field} IS NOT json_extract(expected.value,'$.${field}')`).join(' OR ')
+  return {
+    sql: `SELECT CASE WHEN
+      (SELECT COUNT(*) FROM products WHERE id IN (SELECT CAST(value AS INTEGER) FROM json_each(@memberIdsJson)))=json_array_length(@productsJson)
+      AND NOT EXISTS(SELECT 1 FROM json_each(@productsJson) expected LEFT JOIN products p
+        ON p.id=CAST(json_extract(expected.value,'$.id') AS INTEGER)
+        WHERE p.id IS NULL OR COALESCE(p.is_active,0)<>1 OR COALESCE(p.is_group,0)<>0 OR ${productMismatch})
+      AND (SELECT COUNT(*) FROM branch_stock WHERE product_id IN (SELECT CAST(value AS INTEGER) FROM json_each(@memberIdsJson)))=json_array_length(@stockJson)
+      AND NOT EXISTS(SELECT 1 FROM json_each(@stockJson) expected LEFT JOIN branch_stock bs
+        ON bs.product_id=CAST(json_extract(expected.value,'$.product_id') AS INTEGER)
+       AND bs.branch_id=CAST(json_extract(expected.value,'$.branch_id') AS INTEGER)
+       LEFT JOIN branches b ON b.id=bs.branch_id
+       WHERE bs.product_id IS NULL OR bs.quantity IS NOT json_extract(expected.value,'$.quantity')
+          OR b.name IS NOT json_extract(expected.value,'$.branch_name'))
+      AND (SELECT COUNT(*) FROM product_batches pb LEFT JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id
+        WHERE pb.variant_product_id IN (SELECT CAST(value AS INTEGER) FROM json_each(@memberIdsJson)))=json_array_length(@lotsJson)
+      AND NOT EXISTS(SELECT 1 FROM json_each(@lotsJson) expected LEFT JOIN product_batches pb
+        ON pb.variant_product_id=CAST(json_extract(expected.value,'$.product_id') AS INTEGER)
+       AND pb.id=CAST(json_extract(expected.value,'$.batch_id') AS INTEGER)
+       LEFT JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id
+        AND bbs.branch_id IS json_extract(expected.value,'$.branch_id')
+       WHERE pb.id IS NULL
+          OR (json_extract(expected.value,'$.branch_id') IS NULL AND EXISTS(SELECT 1 FROM branch_batch_stock actual_bbs WHERE actual_bbs.batch_id=pb.id))
+          OR (json_extract(expected.value,'$.branch_id') IS NOT NULL AND bbs.batch_id IS NULL)
+          OR ${lotMismatch})
+      AND (SELECT COUNT(*) FROM product_images WHERE product_id IN (SELECT CAST(value AS INTEGER) FROM json_each(@memberIdsJson)))=json_array_length(@imagesJson)
+      AND NOT EXISTS(SELECT 1 FROM json_each(@imagesJson) expected LEFT JOIN product_images pi
+        ON pi.product_id=CAST(json_extract(expected.value,'$.product_id') AS INTEGER)
+       AND pi.image_path=json_extract(expected.value,'$.image_path')
+       AND pi.sort_order IS json_extract(expected.value,'$.sort_order')
+       WHERE pi.id IS NULL)
+      THEN 1 ELSE json_extract('', '$') END AS product_conflict_finalize_state_guard`,
+    params: {
+      memberIdsJson: JSON.stringify(memberIds), productsJson: JSON.stringify(products), stockJson: JSON.stringify(stock),
+      lotsJson: JSON.stringify(lots), imagesJson: JSON.stringify(imageRows),
+    },
+  }
+}
+
+function chunkProductConflictActionRows<T>(rows: T[], maxBytes: number): T[][] {
+  const chunks: T[][] = []
+  let current: T[] = []
+  let currentBytes = 2
+  const encoder = new TextEncoder()
+  for (const row of rows) {
+    const rowBytes = encoder.encode(JSON.stringify(row)).length + (current.length ? 1 : 0)
+    if (current.length && currentBytes + rowBytes > maxBytes) {
+      chunks.push(current)
+      current = [row]
+      currentBytes = 2 + rowBytes - 1
+    } else {
+      current.push(row)
+      currentBytes += rowBytes
+    }
+  }
+  if (current.length) chunks.push(current)
+  return chunks
+}
+
+function productConflictActionFinalizeStateGuards(
+  plans: Array<ProductConflictActionGroupPlan & { state_digest: string }>,
+  imageRows: Array<{ product_id: number; image_path: string; sort_order: number | null }>,
+) {
+  return chunkProductConflictActionRows(plans, PRODUCT_CONFLICT_ACTION_MAX_GROUP_DETAIL_BYTES).map((chunk) => {
+    const memberIds = new Set(chunk.flatMap((plan) => plan.member_ids))
+    return productConflictActionFinalizeStateGuard(chunk, imageRows.filter((row) => memberIds.has(row.product_id)))
+  })
+}
+
+function productConflictActionFinalizeResponse(
+  review: ProductConflictActionReviewRow,
+  storedGroups: ProductConflictActionStoredGroupRow[],
+  finalPlans: ProductConflictActionFinalPlan[],
+  manifestDigest: string,
+) {
+  const mergeFolds = finalPlans.reduce((sum, plan) => sum + plan.fold_members.length, 0)
+  return {
+    success: true, manifest_version: 1, resolution_version: 2, review_id: review.id,
+    manifest_digest: manifestDigest, status: 'finalized',
+    counts: {
+      requested_groups: Number(review.requested_group_count), canonical_groups: storedGroups.length,
+      ready_groups: finalPlans.length, blocked_groups: storedGroups.length - finalPlans.length,
+      total_members: Number(review.total_member_count), merge_folds: mergeFolds,
+    },
+    summary: {
+      groups_ready: finalPlans.length, groups_blocked: storedGroups.length - finalPlans.length,
+      image_effect_groups: finalPlans.filter((plan) => plan.image_effect).length,
+    },
   }
 }
 
@@ -5012,8 +5333,10 @@ async function readProductConflictActionInputStats(db: ReturnType<typeof getDb>,
     const productStats = await db.prepare(`SELECT id,is_active,COALESCE(is_group,0) AS is_group,
       cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,wholesale_price_usd,wholesale_price_khr,
       length(CAST(COALESCE(name,'') AS BLOB))+length(CAST(COALESCE(barcode,'') AS BLOB))+
-      length(CAST(COALESCE(category,'') AS BLOB))+length(CAST(COALESCE(brand,'') AS BLOB))+
-      length(CAST(COALESCE(unit,'') AS BLOB))+length(CAST(COALESCE(image_path,'') AS BLOB))+
+      length(CAST(COALESCE(category,'') AS BLOB))+length(CAST(COALESCE(categories,'') AS BLOB))+
+      length(CAST(COALESCE(brand,'') AS BLOB))+length(CAST(COALESCE(brands,'') AS BLOB))+
+      length(CAST(COALESCE(brand_compact,'') AS BLOB))+length(CAST(COALESCE(unit,'') AS BLOB))+
+      length(CAST(COALESCE(unit_normalized,'') AS BLOB))+length(CAST(COALESCE(image_path,'') AS BLOB))+
       length(CAST(COALESCE(updated_at,'') AS BLOB))+length(CAST(COALESCE(cost_price_usd,'') AS BLOB))+
       length(CAST(COALESCE(cost_price_khr,'') AS BLOB))+length(CAST(COALESCE(selling_price_usd,'') AS BLOB))+
       length(CAST(COALESCE(selling_price_khr,'') AS BLOB))+length(CAST(COALESCE(wholesale_price_usd,'') AS BLOB))+
@@ -5023,7 +5346,8 @@ async function readProductConflictActionInputStats(db: ReturnType<typeof getDb>,
       const id = Number(row.id)
       productBytesById.set(id, productConflictActionMeasuredBytes(row.detail_bytes))
       compactProducts.push({
-        id, name: null, barcode: null, category: null, brand: null, unit: null, image_path: null,
+        id, name: null, barcode: null, category: null, categories: null, brand: null, brands: null,
+        brand_compact: null, unit: null, unit_normalized: null, image_path: null,
         is_active: Number(row.is_active), is_group: Number(row.is_group), updated_at: null,
         cost_price_usd: row.cost_price_usd, cost_price_khr: row.cost_price_khr,
         selling_price_usd: row.selling_price_usd, selling_price_khr: row.selling_price_khr,
@@ -5065,7 +5389,7 @@ async function readProductConflictActionInputStats(db: ReturnType<typeof getDb>,
 
 function productConflictActionReviewExpired(review: ProductConflictActionReviewRow, now = Date.now()): boolean {
   const expires = Date.parse(review.expires_at)
-  return !Number.isFinite(expires) || expires <= now || review.status === 'expired'
+  return review.status === 'expired' || (review.status === 'draft' && (!Number.isFinite(expires) || expires <= now))
 }
 
 async function expireProductConflictActionReview(db: ReturnType<typeof getDb>, review: ProductConflictActionReviewRow) {
@@ -5080,7 +5404,7 @@ async function readBoundedProductConflictActionDetails(db: ReturnType<typeof get
   for (let offset = 0; offset < ids.length; offset += PRODUCT_CONFLICT_ACTION_READ_CHUNK) {
     const chunk = ids.slice(offset, offset + PRODUCT_CONFLICT_ACTION_READ_CHUNK)
     const { sql, params } = buildInClause('reviewLotProduct', chunk)
-    products.push(...await db.prepare(`SELECT id,name,barcode,category,brand,unit,image_path,is_active,COALESCE(is_group,0) AS is_group,updated_at,
+    products.push(...await db.prepare(`SELECT id,name,barcode,category,categories,brand,brands,brand_compact,unit,unit_normalized,image_path,is_active,COALESCE(is_group,0) AS is_group,updated_at,
       cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,wholesale_price_usd,wholesale_price_khr
       FROM products WHERE id IN (${sql}) ORDER BY id`).all<ProductConflictActionProductRow>(params))
     stock.push(...await db.prepare(`SELECT bs.product_id,bs.branch_id,b.name AS branch_name,bs.quantity
@@ -5099,18 +5423,18 @@ async function readBoundedProductConflictActionDetails(db: ReturnType<typeof get
   return { products, stock, lots }
 }
 
-async function createProductConflictActionReview(
-  db: ReturnType<typeof getDb>, actorId: number,
-  request: ReturnType<typeof parseProductConflictActionPreviewRequest>, requestDigest: string,
+async function buildProductConflictActionReviewPlans(
+  db: ReturnType<typeof getDb>,
+  mergeGroups: ReturnType<typeof parseProductConflictActionPreviewRequest>['merge_groups'],
 ) {
-  const ids = [...new Set(request.merge_groups.flatMap((group) => group.member_ids))].sort((a, b) => a - b)
+  const ids = [...new Set(mergeGroups.flatMap((group) => group.member_ids))].sort((a, b) => a - b)
   const inputStats = await readProductConflictActionInputStats(db, ids)
   const detailRefusals = new Map<string, { lotRows: number; message: string; compact: boolean }>()
   const detailAllowedIds = new Set<number>()
   const lotAllowedIds = new Set<number>()
   let retainedDetailRows = 0
   let retainedDetailBytes = 0
-  for (const group of canonicalizeProductConflictActionGroups(request.merge_groups)) {
+  for (const group of canonicalizeProductConflictActionGroups(mergeGroups)) {
     const detailRows = group.member_ids.reduce((sum, id) => sum + (inputStats.lotDetailRowsByProductId.get(id) || 0), 0)
     const productBytes = group.member_ids.reduce((sum, id) => sum + (inputStats.productBytesById.get(id) || 0), 0)
     const stockRows = group.member_ids.reduce((sum, id) => sum + (inputStats.stockRowsByProductId.get(id) || 0), 0)
@@ -5141,7 +5465,7 @@ async function createProductConflictActionReview(
     [...detailAllowedIds].sort((a, b) => a - b), [...lotAllowedIds].sort((a, b) => a - b))
   const productsById = new Map(inputStats.compactProducts.map((row) => [Number(row.id), row]))
   inputs.products.forEach((row) => productsById.set(Number(row.id), row))
-  const builtPlans = buildProductConflictActionGroupPlans(request.merge_groups, [...productsById.values()], inputs.stock, inputs.lots)
+  const builtPlans = buildProductConflictActionGroupPlans(mergeGroups, [...productsById.values()], inputs.stock, inputs.lots)
   const rawPlans: ProductConflictActionGroupPlan[] = []
   let persistedDetailBytes = 0
   for (const plan of builtPlans) {
@@ -5178,6 +5502,15 @@ async function createProductConflictActionReview(
     storedDetailBytes += bytes
     plans.push(stored)
   }
+  return plans
+}
+
+async function createProductConflictActionReview(
+  db: ReturnType<typeof getDb>, actorId: number,
+  request: ReturnType<typeof parseProductConflictActionPreviewRequest>, requestDigest: string,
+) {
+  const ids = [...new Set(request.merge_groups.flatMap((group) => group.member_ids))].sort((a, b) => a - b)
+  const plans = await buildProductConflictActionReviewPlans(db, request.merge_groups)
   const reviewId = crypto.randomUUID()
   const expiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString()
   const draftDigest = await productConflictSha256({ manifest_version: 1, resolution_version: 2,
@@ -5247,7 +5580,7 @@ app.post('/possible-duplicates/merge-batch/preview', async (c) => {
     const db = getDb(c.env)
     const requestDigest = await productConflictSha256(request)
     const now = new Date()
-    let review = await db.prepare(`SELECT id,actor_id,request_id,request_digest,draft_digest,status,
+    let review = await db.prepare(`SELECT id,actor_id,request_id,request_digest,draft_digest,finalize_digest,manifest_digest,status,
       requested_group_count,actionable_group_count,blocked_group_count,total_member_count,expires_at
       FROM product_conflict_action_reviews WHERE actor_id=@actorId AND request_id=@requestId`)
       .get<ProductConflictActionReviewRow>({ actorId: user.id, requestId: request.client_request_id })
@@ -5270,7 +5603,7 @@ app.post('/possible-duplicates/merge-batch/preview', async (c) => {
       }
       try { review = await createProductConflictActionReview(db, user.id, request, requestDigest) }
       catch (error) {
-        review = await db.prepare(`SELECT id,actor_id,request_id,request_digest,draft_digest,status,
+        review = await db.prepare(`SELECT id,actor_id,request_id,request_digest,draft_digest,finalize_digest,manifest_digest,status,
           requested_group_count,actionable_group_count,blocked_group_count,total_member_count,expires_at
           FROM product_conflict_action_reviews WHERE actor_id=@actorId AND request_id=@requestId`)
           .get<ProductConflictActionReviewRow>({ actorId: user.id, requestId: request.client_request_id })
@@ -5319,6 +5652,165 @@ app.post('/possible-duplicates/merge-batch/preview', async (c) => {
     }),
     skipped,
   })
+})
+
+app.post('/possible-duplicates/merge-batch/reviews/:reviewId/finalize', async (c) => {
+  const user = c.get('user')
+  if (getActionTier(user, 'products', 'merge_duplicates') !== 'full') {
+    return c.json({ success: false, code: 'permission_denied', error: 'You do not have permission to perform this action' }, 403)
+  }
+  const bodyRejection = await admitRequestBody(c, PRODUCT_CONFLICT_ACTION_PREVIEW_BODY_BYTES)
+  if (bodyRejection) return bodyRejection
+  let request
+  try { request = parseProductConflictActionFinalizeRequest(await c.req.json().catch(() => null)) }
+  catch (error) {
+    const validation = error instanceof ProductConflictMergeValidationError ? error : new ProductConflictMergeValidationError('The conflict finalization request is invalid.')
+    return c.json({ success: false, code: validation.code, error: validation.message }, validation.status as 400 | 409 | 413)
+  }
+  if (c.req.param('reviewId') !== request.review_id) {
+    return c.json({ success: false, code: 'review_id_mismatch', error: 'The path and request review ids must match.' }, 400)
+  }
+  const db = getDb(c.env)
+  let review = await readProductConflictActionReview(db, user.id, request.review_id)
+  if (!review) return c.json({ success: false, code: 'review_not_found', error: 'Conflict review not found.' }, 404)
+  if (productConflictActionReviewExpired(review)) {
+    await expireProductConflictActionReview(db, review)
+    return c.json({ success: false, code: 'review_expired', error: 'This conflict review expired. Start a new review.' }, 410)
+  }
+  const finalizeDigest = await productConflictSha256(request)
+  let storedGroups = await readProductConflictActionStoredGroups(db, review.id)
+  const readReplayPlans = () => storedGroups.filter((row) => row.status !== 'blocked')
+    .map((row) => {
+      try {
+        const parsed = JSON.parse(String(row.final_plan_json || 'null')) as ProductConflictActionFinalPlan
+        if (!parsed || parsed.authority !== 'reviewed_product_conflict_v2' || parsed.review_id !== review?.id || parsed.group_key !== row.group_key) throw new Error('invalid plan')
+        return parsed
+      } catch { throw new ProductConflictMergeValidationError('The finalized conflict review is unreadable.', 'review_corrupt', 409) }
+    })
+  if (review.status === 'finalized' || review.status === 'running' || review.status === 'completed' || review.status === 'interrupted') {
+    if (review.finalize_digest !== finalizeDigest || !review.manifest_digest) {
+      return c.json({ success: false, code: 'finalized_conflict', error: 'This review was finalized with different selections.' }, 409)
+    }
+    const replayPlans = readReplayPlans()
+    if (replayPlans.some((plan) => plan.image_effect) && getActionTier(user, 'products', 'image') !== 'full') {
+      return c.json({ success: false, code: 'image_permission_required', error: 'This finalized review changes product images and requires full image permission.' }, 403)
+    }
+    return c.json(productConflictActionFinalizeResponse(review, storedGroups, replayPlans, review.manifest_digest))
+  }
+  if (review.status !== 'draft' || review.draft_digest !== request.draft_digest) {
+    return c.json({ success: false, code: 'review_state_conflict', error: 'The reviewed conflict draft changed. Refresh before finalizing.' }, 409)
+  }
+  const actionableGroups = storedGroups.filter((row) => row.status === 'actionable')
+  const blockedKeys = new Set(storedGroups.filter((row) => row.status === 'blocked').map((row) => row.group_key))
+  const resolutions = new Map(request.resolutions.map((resolution) => [resolution.group_key, resolution]))
+  if (resolutions.size !== actionableGroups.length
+    || actionableGroups.some((row) => !resolutions.has(row.group_key))
+    || request.resolutions.some((resolution) => blockedKeys.has(resolution.group_key))) {
+    return c.json({ success: false, code: 'invalid_resolution', error: 'Provide exactly one resolution for every actionable canonical group and omit blocked groups.' }, 400)
+  }
+  let currentPlans: Array<ProductConflictActionGroupPlan & { state_digest: string }>
+  let actionableCurrentPlans: Array<ProductConflictActionGroupPlan & { state_digest: string }>
+  let imageRows: Array<{ product_id: number; image_path: string; sort_order: number | null }>
+  let finalPlans: ProductConflictActionFinalPlan[] = []
+  try {
+    currentPlans = await rebuildProductConflictActionStoredPlans(db, storedGroups)
+    if (currentPlans.some((plan, index) => plan.state_digest !== storedGroups[index]?.state_digest)) {
+      throw new ProductConflictMergeValidationError('A selected conflict group changed after review.', 'review_state_conflict', 409)
+    }
+    const actionableKeys = new Set(actionableGroups.map((row) => row.group_key))
+    actionableCurrentPlans = currentPlans.filter((plan) => actionableKeys.has(plan.group_key))
+    const productIds = [...new Set(actionableCurrentPlans.flatMap((plan) => plan.member_ids))].sort((a, b) => a - b)
+    imageRows = await readProductConflictActionImageRows(db, productIds)
+    for (const row of actionableGroups) {
+      const plan = currentPlans.find((candidate) => candidate.group_key === row.group_key)
+      const resolution = resolutions.get(row.group_key)
+      if (!plan || !resolution) throw new ProductConflictMergeValidationError('A conflict resolution is missing.', 'invalid_resolution')
+      const memberSet = new Set(plan.member_ids)
+      const groupImages = imageRows.filter((image) => memberSet.has(image.product_id))
+      finalPlans.push(await buildProductConflictActionFinalPlan(review, plan, resolution,
+        productConflictActionImageEffect(plan, resolution.keeper_id, groupImages), groupImages))
+    }
+  } catch (error) {
+    const validation = error instanceof ProductConflictMergeValidationError ? error : new ProductConflictMergeValidationError('The reviewed conflict state is invalid.', 'review_state_conflict', 409)
+    return c.json({ success: false, code: validation.code, error: validation.message }, validation.status as 400 | 409 | 413)
+  }
+  const imageDenied = finalPlans.filter((plan) => plan.image_effect).map((plan) => plan.group_key)
+  if (imageDenied.length && getActionTier(user, 'products', 'image') !== 'full') {
+    return c.json({ success: false, code: 'image_permission_required', error: 'One or more selected groups change product images.', groups: imageDenied }, 403)
+  }
+  const manifestDigest = await productConflictSha256({
+    manifest_version: 1, resolution_version: 2, review_id: review.id, draft_digest: review.draft_digest, final_plans: finalPlans,
+  })
+  let finalBytes = 0
+  for (const plan of finalPlans) {
+    const bytes = new TextEncoder().encode(JSON.stringify(plan)).length
+    finalBytes += bytes
+    if (bytes > PRODUCT_CONFLICT_ACTION_MAX_GROUP_DETAIL_BYTES || finalBytes > PRODUCT_CONFLICT_ACTION_MAX_REVIEW_DETAIL_BYTES) {
+      return c.json({ success: false, code: 'review_detail_limit', error: 'The finalized conflict plan exceeds the bounded review size.' }, 413)
+    }
+  }
+  const groupUpdates = finalPlans.map((plan) => ({
+    group_key: plan.group_key, operation_id: plan.operation_id,
+    resolution: resolutions.get(plan.group_key), final_plan: plan,
+  }))
+  const memberUpdates = finalPlans.flatMap((plan) => plan.member_ids.map((productId) => ({
+    product_id: productId, role: productId === plan.keeper_id ? 'keeper' : 'merged',
+    operation_id: productId === plan.keeper_id ? null : plan.fold_members.find((member) => member.member_id === productId)?.operation_id ?? null,
+  })))
+  const groupGuards = storedGroups.map((row) => ({ group_key: row.group_key, status: row.status, state_digest: row.state_digest }))
+  const statements: Array<{ sql: string; params?: Record<string, unknown> }> = [{
+    sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM product_conflict_action_reviews
+      WHERE id=@reviewId AND actor_id=@actorId AND status='draft' AND draft_digest=@draftDigest AND expires_at>@now)
+      THEN 1 ELSE json_extract('', '$') END AS product_conflict_finalize_review_guard`,
+    params: { reviewId: review.id, actorId: user.id, draftDigest: review.draft_digest, now: new Date().toISOString() },
+  }, {
+    sql: `SELECT CASE WHEN (SELECT COUNT(*) FROM product_conflict_action_groups WHERE review_id=@reviewId)=json_array_length(@groupsJson)
+      AND NOT EXISTS(SELECT 1 FROM json_each(@groupsJson) expected LEFT JOIN product_conflict_action_groups g
+        ON g.review_id=@reviewId AND g.group_key=json_extract(expected.value,'$.group_key')
+        WHERE g.group_key IS NULL OR g.status<>json_extract(expected.value,'$.status') OR g.state_digest<>json_extract(expected.value,'$.state_digest'))
+      THEN 1 ELSE json_extract('', '$') END AS product_conflict_finalize_group_guard`,
+    params: { reviewId: review.id, groupsJson: JSON.stringify(groupGuards) },
+  }, ...productConflictActionFinalizeStateGuards(actionableCurrentPlans, imageRows)]
+  for (const chunk of chunkProductConflictActionRows(groupUpdates, 2 * 1024 * 1024)) statements.push({
+    sql: `UPDATE product_conflict_action_groups SET status='ready',
+      resolution_json=(SELECT json_extract(value,'$.resolution') FROM json_each(@rowsJson) WHERE json_extract(value,'$.group_key')=group_key),
+      final_plan_json=(SELECT json_extract(value,'$.final_plan') FROM json_each(@rowsJson) WHERE json_extract(value,'$.group_key')=group_key),
+      operation_id=(SELECT json_extract(value,'$.operation_id') FROM json_each(@rowsJson) WHERE json_extract(value,'$.group_key')=group_key),
+      updated_at=CURRENT_TIMESTAMP
+      WHERE review_id=@reviewId AND status='actionable'
+        AND group_key IN (SELECT json_extract(value,'$.group_key') FROM json_each(@rowsJson))`,
+    params: { reviewId: review.id, rowsJson: JSON.stringify(chunk) },
+  })
+  for (const chunk of chunkProductConflictActionRows(memberUpdates, PRODUCT_CONFLICT_ACTION_MAX_GROUP_DETAIL_BYTES)) statements.push({
+    sql: `UPDATE product_conflict_action_group_members SET status='planned',
+      role=(SELECT json_extract(value,'$.role') FROM json_each(@rowsJson) WHERE CAST(json_extract(value,'$.product_id') AS INTEGER)=product_id),
+      operation_id=(SELECT json_extract(value,'$.operation_id') FROM json_each(@rowsJson) WHERE CAST(json_extract(value,'$.product_id') AS INTEGER)=product_id),
+      updated_at=CURRENT_TIMESTAMP
+      WHERE review_id=@reviewId AND product_id IN (SELECT CAST(json_extract(value,'$.product_id') AS INTEGER) FROM json_each(@rowsJson))`,
+    params: { reviewId: review.id, rowsJson: JSON.stringify(chunk) },
+  })
+  statements.push({
+    sql: `UPDATE product_conflict_action_reviews SET status='finalized',finalize_digest=@finalizeDigest,
+      manifest_digest=@manifestDigest,finalized_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP
+      WHERE id=@reviewId AND actor_id=@actorId AND status='draft' AND draft_digest=@draftDigest`,
+    params: { reviewId: review.id, actorId: user.id, draftDigest: review.draft_digest, finalizeDigest, manifestDigest },
+  })
+  try { await db.batch(statements) }
+  catch {
+    review = await readProductConflictActionReview(db, user.id, request.review_id)
+    storedGroups = await readProductConflictActionStoredGroups(db, request.review_id)
+    if (review?.finalize_digest === finalizeDigest && review.manifest_digest) {
+      finalPlans = readReplayPlans()
+      return c.json(productConflictActionFinalizeResponse(review, storedGroups, finalPlans, review.manifest_digest))
+    }
+    if (review?.status === 'finalized') {
+      return c.json({ success: false, code: 'finalized_conflict', error: 'This review was finalized with different selections.' }, 409)
+    }
+    return c.json({ success: false, code: 'review_state_conflict', error: 'The reviewed conflict state changed before finalization.' }, 409)
+  }
+  review = await readProductConflictActionReview(db, user.id, review.id)
+  if (!review?.manifest_digest) throw new Error('The finalized conflict receipt was not stored.')
+  return c.json(productConflictActionFinalizeResponse(review, storedGroups, finalPlans, review.manifest_digest))
 })
 
 app.get('/possible-duplicates/merge-batch/reviews/:reviewId', async (c) => {
