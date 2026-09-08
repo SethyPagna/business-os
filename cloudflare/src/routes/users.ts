@@ -657,12 +657,13 @@ app.put('/roles/:id', async (c) => {
   const id = c.req.param('id')
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
   const db = getDb(c.env)
-  const existingRole = await db.prepare('SELECT id, code, is_system, updated_at FROM roles WHERE id = @id').get<{
-    id: number; code: string | null; is_system: number; updated_at: string | null
+  const existingRole = await db.prepare('SELECT id, name, code, is_system, permissions, updated_at FROM roles WHERE id = @id').get<{
+    id: number; name: string; code: string | null; is_system: number; permissions: string | null; updated_at: string | null
   }>({ id })
   if (!existingRole) return c.json({ success: false, error: 'Role not found' }, 404)
+  const expectedUpdatedAt = getExpectedUpdatedAt(body)
   try {
-    assertUpdatedAtMatch('role', existingRole, getExpectedUpdatedAt(body))
+    assertUpdatedAtMatch('role', existingRole, expectedUpdatedAt)
   } catch (error) {
     const result = conflictResult(error)
     if (result) return c.json(result.body, result.status)
@@ -675,10 +676,52 @@ app.put('/roles/:id', async (c) => {
   if (!name) return c.json({ success: false, error: 'Name required' }, 400)
   if (normalizeLookup(name) === 'admin') return c.json({ success: false, error: 'Admin role is reserved' }, 400)
   try {
-    await db.prepare('UPDATE roles SET name = @name, permissions = @permissions, updated_at = CURRENT_TIMESTAMP WHERE id = @id').run({
-      name, permissions: JSON.stringify(body.permissions || {}), id,
-    })
-    await audit(c.env, actor?.id ?? null, actor?.name ?? null, 'update', 'role', id, { name })
+    const permissions = JSON.stringify(body.permissions || {})
+    const updatedAt = new Date().toISOString()
+    const details = JSON.stringify({ name })
+    const results = await db.batch([{
+      sql: `UPDATE roles
+            SET name = @name, permissions = @permissions, updated_at = @updated_at
+            WHERE id = @id
+              AND updated_at IS @observed_updated_at
+              AND name IS @observed_name
+              AND code IS @observed_code
+              AND is_system IS @observed_is_system
+              AND permissions IS @observed_permissions`,
+      params: {
+        id, name, permissions, updated_at: updatedAt,
+        observed_updated_at: existingRole.updated_at,
+        observed_name: existingRole.name,
+        observed_code: existingRole.code,
+        observed_is_system: existingRole.is_system,
+        observed_permissions: existingRole.permissions,
+      },
+    }, {
+      // changes() is the preceding guarded UPDATE's affected-row count. A
+      // lost race therefore cannot create an audit row, while an audit
+      // failure aborts this D1 batch and rolls the role update back.
+      sql: `INSERT INTO audit_logs (
+              user_id, user_name, action, entity, entity_id, details,
+              table_name, record_id, new_value, device_name, device_tz
+            )
+            SELECT @user_id,
+              COALESCE((SELECT NULLIF(trim(username), '') FROM users WHERE id = @user_id), @user_name),
+              'update', 'role', @id, @details, 'role', @id, @details,
+              (SELECT device_name FROM user_sessions WHERE user_id = @user_id AND revoked_at IS NULL ORDER BY last_seen_at DESC, id DESC LIMIT 1),
+              (SELECT device_tz FROM user_sessions WHERE user_id = @user_id AND revoked_at IS NULL ORDER BY last_seen_at DESC, id DESC LIMIT 1)
+            WHERE changes() = 1`,
+      params: { user_id: actor?.id ?? null, user_name: actorSnapshot(actor), id, details },
+    }])
+    const firstResult = results[0] as { changes?: number; meta?: { changes?: number } } | undefined
+    const updatedRows = Number(firstResult?.meta?.changes ?? firstResult?.changes ?? 0)
+    if (updatedRows !== 1) {
+      const currentRole = await db.prepare(
+        'SELECT id, name, code, is_system, permissions, created_at, updated_at FROM roles WHERE id = @id',
+      ).get<Record<string, unknown>>({ id })
+      const conflict = new WriteConflictError('role', currentRole || null, expectedUpdatedAt, currentRole ? 'updated' : 'deleted')
+      const result = writeConflictResponse(conflict)
+      return c.json(result.body, result.status)
+    }
     c.executionCtx.waitUntil(broadcast(c.env, 'roles', { action: 'update', id }))
     return c.json({ success: true, ...(await db.prepare(
       'SELECT id, name, code, is_system, permissions, created_at, updated_at FROM roles WHERE id = @id',
