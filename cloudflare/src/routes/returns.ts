@@ -33,6 +33,7 @@ import { buildSaleCreationSnapshot } from '../lib/saleCreationSnapshot'
 // below copies the SOURCE sale's snapshot, which for a row written before that
 // fix is still the Contact Options JSON.
 import { contactDisplayAddress } from '../lib/contactOptions'
+import { isAnonymousCustomer } from '../lib/anonymousCustomer'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
@@ -68,6 +69,15 @@ app.use('*', async (c, next) => {
 // the price difference; lib/salesAnalytics.ts's collectedExpr keeps reading
 // them correctly.)
 const DEFAULT_REPLACEMENT_PAYMENT_METHOD = 'Cash'
+
+class ReplacementCustomerStateConflictError extends Error {
+  readonly code = 'customer_state_conflict'
+
+  constructor() {
+    super('The selected customer changed before the replacement sale was saved. Review the customer and try again.')
+    this.name = 'ReplacementCustomerStateConflictError'
+  }
+}
 
 const CUSTOMER_SCOPE = 'customer'
 const SUPPLIER_SCOPE = 'supplier'
@@ -1334,13 +1344,16 @@ app.post('/', async (c) => {
       const replacementPaymentDetails = customerTenderUsd > 0
         ? [{ method: replacementPaymentMethod, amount_usd: customerTenderUsd, amount_khr: 0 }]
         : []
-      const replacementCustomerId = Number(body.customer_id || saleMeta.customer_id) || null
-      const replacementCustomerName = body.customer_name || saleMeta.customer_name || null
-      const replacementCustomerPhone = saleMeta.customer_phone || null
-      const replacementCustomerAddress = contactDisplayAddress(saleMeta.customer_address) || null
-      const replacementMembership = replacementCustomerId
-        ? await db.prepare('SELECT membership_number FROM customers WHERE id = ?').get<{ membership_number: string | null }>([replacementCustomerId])
+      const replacementCustomerCandidateId = Number(body.customer_id || saleMeta.customer_id) || null
+      const replacementCustomer = replacementCustomerCandidateId
+        ? await db.prepare('SELECT id, membership_number, is_anonymous FROM customers WHERE id = ?').get<{ id: number; membership_number: string | null; is_anonymous: number | null }>([replacementCustomerCandidateId])
         : null
+      const replacementCustomerIsAnonymous = isAnonymousCustomer(replacementCustomer)
+      const replacementCustomerId = replacementCustomerIsAnonymous ? null : replacementCustomer?.id ?? null
+      const replacementCustomerName = replacementCustomerIsAnonymous ? null : body.customer_name || saleMeta.customer_name || null
+      const replacementCustomerPhone = replacementCustomerIsAnonymous ? null : saleMeta.customer_phone || null
+      const replacementCustomerAddress = replacementCustomerIsAnonymous ? null : contactDisplayAddress(saleMeta.customer_address) || null
+      const replacementMembership = replacementCustomerIsAnonymous ? null : replacementCustomer
       const replacementCreationSnapshot = buildSaleCreationSnapshot({
         origin: 'return_replacement',
         recordedAt: replacementRecordedAt,
@@ -1387,7 +1400,7 @@ app.post('/', async (c) => {
           membership_discount_usd, membership_discount_khr, membership_points_redeemed,
           is_delivery, loyalty_accrual, sale_status, notes, items, search_normalized,
           source_return_id, creation_snapshot_json, updated_at
-        ) VALUES (
+        ) SELECT
           @receipt_number, @client_request_id, @cashier_id, @cashier_name, @branch_id, @branch_name,
           @customer_id, @customer_name, @customer_phone, @customer_address,
           @payment_method, @payment_details, 'USD', @exchange_rate,
@@ -1396,6 +1409,11 @@ app.post('/', async (c) => {
           0, 0, 0,
           0, 1, 'completed', @notes, @items, @search_normalized,
           @source_return_id, @creation_snapshot_json, CURRENT_TIMESTAMP
+        WHERE @customer_guard_id IS NULL OR EXISTS (
+          SELECT 1 FROM customers
+          WHERE id = @customer_guard_id
+            AND COALESCE(is_anonymous, 0) = @customer_guard_is_anonymous
+            AND (@customer_guard_membership_enforced = 0 OR membership_number IS @customer_guard_membership_number)
         )
       `).run({
         receipt_number: replacementReceiptNumber,
@@ -1405,6 +1423,10 @@ app.post('/', async (c) => {
         branch_id: branchId,
         branch_name: branchName,
         customer_id: replacementCustomerId,
+        customer_guard_id: replacementCustomer?.id ?? null,
+        customer_guard_is_anonymous: replacementCustomerIsAnonymous ? 1 : 0,
+        customer_guard_membership_enforced: replacementCustomer && !replacementCustomerIsAnonymous ? 1 : 0,
+        customer_guard_membership_number: replacementCustomer?.membership_number ?? null,
         customer_name: replacementCustomerName,
         customer_phone: replacementCustomerPhone,
         customer_address: replacementCustomerAddress,
@@ -1437,13 +1459,14 @@ app.post('/', async (c) => {
           returnNumber,
           body.receipt_number || saleMeta.receipt_number,
           actorSnapshot(user),
-          body.customer_name || saleMeta.customer_name,
+          replacementCustomerName,
           branchName,
           ...replacementLines.map((line) => line.productName),
         ].filter(Boolean).join(' ')),
         source_return_id: returnId,
         creation_snapshot_json: replacementCreationSnapshot,
       })
+      if (replacementSaleInsert.changes !== 1) throw new ReplacementCustomerStateConflictError()
       replacementSaleId = replacementSaleInsert.lastInsertRowid
       await db.prepare('UPDATE returns SET replacement_sale_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run([replacementSaleId, returnId])
       // A normal sale announces itself on the sales Telegram channel through
@@ -1455,8 +1478,8 @@ app.post('/', async (c) => {
         createdAt: null,
         receiptNumber: replacementReceiptNumber,
         cashier: actorSnapshot(user),
-        customer: body.customer_name || saleMeta.customer_name || null,
-        phone: saleMeta.customer_phone || null,
+        customer: replacementCustomerName,
+        phone: replacementCustomerPhone,
         branch: branchName,
         items: replacementLines.map((line) => ({
           name: line.productName,
@@ -1858,12 +1881,14 @@ app.post('/', async (c) => {
     if (unreversed.length) {
       await audit(c.env, user?.id ?? null, actorSnapshot(user), 'return_rollback_incomplete', 'return', returnId, { unreversed })
     }
+    const customerStateConflict = error instanceof ReplacementCustomerStateConflictError
     return c.json({
       error: `Failed to record return items: ${(error as Error).message}`
         + (unreversed.length
           ? ` -- WARNING: ${unreversed.length} stock write(s) could not be reversed (recorded in the audit log; run Verify Integrity): ${unreversed.join('; ')}`
           : ''),
-    }, 500)
+      ...(customerStateConflict ? { code: error.code } : {}),
+    }, customerStateConflict ? 409 : 500)
   }
 
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'create', 'return', returnId, {

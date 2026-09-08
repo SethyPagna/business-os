@@ -23,6 +23,7 @@ const { loadAll } = require('./harness/load_migrations.cjs')
 
 const rawDb = openDb(loadAll())
 let beforeBatchHook = null
+let beforeReplacementSaleInsertHook = null
 let corruptNextReturnReceipt = false
 let corruptNextSaleRecordEvent = false
 // Flatten node:sqlite's run() result the same way lib/db.ts's real
@@ -37,6 +38,11 @@ const db = {
       get: (params) => stmt.get(params),
       all: (params) => stmt.all(params) ?? [],
       run: (params) => {
+        if (beforeReplacementSaleInsertHook && /INSERT\s+INTO\s+sales\s*\(/i.test(sql) && /source_return_id/i.test(sql)) {
+          const hook = beforeReplacementSaleInsertHook
+          beforeReplacementSaleInsertHook = null
+          hook()
+        }
         const r = stmt.run(params)
         return { changes: r.meta?.changes ?? 0, lastInsertRowid: Number(r.meta?.last_row_id ?? 0) }
       },
@@ -138,6 +144,7 @@ const returnsRoute = loadReal('routes/returns.ts', {
   // N21: the display-address kernel, REAL. A stub resolves every address to
   // undefined and would make the assertion below agree with itself.
   '../lib/contactOptions': loadReal('lib/contactOptions.ts'),
+  '../lib/anonymousCustomer': loadReal('lib/anonymousCustomer.ts'),
   '../lib/db': { getDb: () => db },
   // routes/returns.ts buckets return dates in UTC+7 through the pure
   // businessDateWindow helpers; provide the real module so its date SQL resolves.
@@ -186,12 +193,21 @@ function seed() {
     DELETE FROM sale_record_events; DELETE FROM return_mutation_receipts;
     DELETE FROM system_flags WHERE key='sale_record_events_reset_guard';
     DELETE FROM return_bulk_guards; DELETE FROM sale_bulk_guards;
-    DELETE FROM branch_batch_stock; DELETE FROM product_batches; DELETE FROM branch_stock; DELETE FROM products; DELETE FROM branches; DELETE FROM sale_items; DELETE FROM sale_item_batch_allocations; DELETE FROM sales; DELETE FROM returns; DELETE FROM return_items; DELETE FROM return_item_batch_allocations; DELETE FROM inventory_movements; DELETE FROM damaged_stock_lots; DELETE FROM return_replacement_items;`)
+    DELETE FROM branch_batch_stock; DELETE FROM product_batches; DELETE FROM branch_stock; DELETE FROM products; DELETE FROM branches; DELETE FROM sale_items; DELETE FROM sale_item_batch_allocations; DELETE FROM sales; DELETE FROM customers; DELETE FROM returns; DELETE FROM return_items; DELETE FROM return_item_batch_allocations; DELETE FROM inventory_movements; DELETE FROM damaged_stock_lots; DELETE FROM return_replacement_items;`)
   rawDb.prepare('INSERT INTO branches (id, name, is_active, is_default) VALUES (1, \'Shop\', 1, 1)').run()
   rawDb.prepare('INSERT INTO branches (id, name, is_active, is_default) VALUES (2, \'Warehouse\', 1, 0)').run()
   rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity) VALUES (1, 'Widget', 1, 0)").run()
   rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity, selling_price_usd) VALUES (2, 'Different Serum', 1, 0, 10)").run()
   rawDb.prepare("INSERT INTO sales (id, branch_id) VALUES (1, 1)").run()
+}
+
+function seedReplacementStock() {
+  rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (2, 1, 10)').run()
+  rawDb.prepare('UPDATE products SET stock_quantity = 10 WHERE id = 2').run()
+  rawDb.prepare("INSERT INTO product_batches (variant_product_id, batch_key, lot_code, received_at, is_active, batch_number) VALUES (2, 'replacement-lot', 'REPL-LOT', '2026-08-01', 1, 1)").run()
+  const batchId = Number(rawDb.prepare('SELECT id FROM product_batches WHERE variant_product_id = 2').get().id)
+  rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (?, 1, 5)').run([batchId])
+  return batchId
 }
 
 // routes/returns.ts fires several c.executionCtx.waitUntil(...) calls after
@@ -594,11 +610,7 @@ async function main() {
 
   await check('K2: Replace accepts a different product and creates a linked sale receipt', async () => {
     seed()
-    rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (2, 1, 10)').run()
-    rawDb.prepare('UPDATE products SET stock_quantity = 10 WHERE id = 2').run()
-    rawDb.prepare("INSERT INTO product_batches (variant_product_id, batch_key, lot_code, received_at, is_active, batch_number) VALUES (2, 'replacement-lot', 'REPL-LOT', '2026-08-01', 1, 1)").run()
-    const replacementBatchId = Number(rawDb.prepare('SELECT id FROM product_batches WHERE variant_product_id = 2').get().id)
-    rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (?, 1, 5)').run([replacementBatchId])
+    const replacementBatchId = seedReplacementStock()
     const { status, json } = await req('POST', '/', {
       items: [{ product_id: 1, quantity: 2, stock_action: 'none', branch_id: 1, applied_price_usd: 10 }],
       replacement_items: [{ product_id: 2, quantity: 2, branch_id: 1, applied_price_usd: 10 }],
@@ -646,6 +658,70 @@ async function main() {
     assert.strictEqual(replacementAllocation.quantity, 2)
     const move = rawDb.prepare("SELECT quantity FROM inventory_movements WHERE movement_type = 'replacement_out' AND reference_id = @id").get({ id: json.id })
     assert.strictEqual(move.quantity, -2)
+  })
+
+  await check('replacement sales canonicalize marked customers and atomically guard marker and membership races', async () => {
+    const createReplacement = (extra = {}) => req('POST', '/', {
+      items: [{ product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1, applied_price_usd: 10 }],
+      replacement_items: [{ product_id: 2, quantity: 1, branch_id: 1, applied_price_usd: 10 }],
+      reason: 'Customer identity guard',
+      ...extra,
+    })
+
+    seed()
+    seedReplacementStock()
+    rawDb.prepare("INSERT INTO customers(id,name,phone,address,membership_number,is_anonymous) VALUES(7,'General','0123','Private address','GENERAL-7',1)").run()
+    const markedTarget = await createReplacement({ customer_id: 7, customer_name: 'General' })
+    assert.strictEqual(markedTarget.status, 200, JSON.stringify(markedTarget.json))
+    const markedTargetSale = rawDb.prepare('SELECT customer_id,customer_name,customer_phone,customer_address,search_normalized,creation_snapshot_json FROM sales WHERE id=?').get([markedTarget.json.replacementSaleId])
+    assert.deepStrictEqual(
+      { id: markedTargetSale.customer_id, name: markedTargetSale.customer_name, phone: markedTargetSale.customer_phone, address: markedTargetSale.customer_address },
+      { id: null, name: null, phone: null, address: null },
+    )
+    assert.strictEqual(JSON.parse(markedTargetSale.creation_snapshot_json).customer, null)
+    assert.strictEqual(JSON.parse(markedTargetSale.creation_snapshot_json).membership, null)
+    assert.doesNotMatch(markedTargetSale.search_normalized, /General|0123|Private address/)
+
+    seed()
+    seedReplacementStock()
+    rawDb.prepare("INSERT INTO customers(id,name,phone,address,membership_number,is_anonymous) VALUES(7,'Named General','0123','Shop address','MEM-7',0)").run()
+    const unmarkedTarget = await createReplacement({ customer_id: 7, customer_name: 'Named General' })
+    assert.strictEqual(unmarkedTarget.status, 200, JSON.stringify(unmarkedTarget.json))
+    const unmarkedSale = rawDb.prepare('SELECT customer_id,customer_name,creation_snapshot_json FROM sales WHERE id=?').get([unmarkedTarget.json.replacementSaleId])
+    assert.deepStrictEqual({ id: unmarkedSale.customer_id, name: unmarkedSale.customer_name }, { id: 7, name: 'Named General' })
+    assert.strictEqual(JSON.parse(unmarkedSale.creation_snapshot_json).membership.number, 'MEM-7')
+
+    seed()
+    seedReplacementStock()
+    rawDb.prepare("INSERT INTO customers(id,name,phone,address,membership_number,is_anonymous) VALUES(7,'General','0123','Historical address','GENERAL-7',1)").run()
+    rawDb.prepare("UPDATE sales SET customer_id=7,customer_name='General',customer_phone='0123',customer_address='Historical address',sale_status='completed' WHERE id=1").run()
+    rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity) VALUES(1,1,1,'Widget',2)").run()
+    const markedSource = await createReplacement({ sale_id: 1, items: [{ sale_item_id: 1, product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1, applied_price_usd: 10 }] })
+    assert.strictEqual(markedSource.status, 200, JSON.stringify(markedSource.json))
+    assert.deepStrictEqual(
+      { ...rawDb.prepare('SELECT customer_id,customer_name,customer_phone,customer_address FROM sales WHERE id=?').get([markedSource.json.replacementSaleId]) },
+      { customer_id: null, customer_name: null, customer_phone: null, customer_address: null },
+      'a marked source sale stays historical on the return but is not copied into its new replacement sale',
+    )
+
+    for (const race of ['marker', 'membership']) {
+      seed()
+      const batchId = seedReplacementStock()
+      rawDb.prepare("INSERT INTO customers(id,name,phone,address,membership_number,is_anonymous) VALUES(7,'Sok Dara','0123','Address','MEM-7',0)").run()
+      const beforeSales = rawDb.prepare('SELECT COUNT(*) AS n FROM sales').get().n
+      beforeReplacementSaleInsertHook = () => {
+        if (race === 'marker') rawDb.prepare('UPDATE customers SET is_anonymous=1 WHERE id=7').run()
+        else rawDb.prepare("UPDATE customers SET membership_number='MEM-CHANGED' WHERE id=7").run()
+      }
+      const raced = await createReplacement({ customer_id: 7, customer_name: 'Sok Dara' })
+      assert.strictEqual(raced.status, 409, `${race}: ${JSON.stringify(raced.json)}`)
+      assert.strictEqual(raced.json.code, 'customer_state_conflict')
+      assert.strictEqual(rawDb.prepare('SELECT COUNT(*) AS n FROM sales').get().n, beforeSales, `${race}: no replacement sale remains`)
+      assert.strictEqual(rawDb.prepare('SELECT COUNT(*) AS n FROM returns').get().n, 0, `${race}: the provisional return is rolled back`)
+      assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id=2 AND branch_id=1').get().quantity, 10)
+      assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=? AND branch_id=1').get([batchId]).quantity, 5)
+      assert.strictEqual(rawDb.prepare('SELECT COUNT(*) AS n FROM inventory_movements').get().n, 0)
+    }
   })
 
   await check('replacement sale rejects missing, Warehouse, and mixed branch identities before writes', async () => {

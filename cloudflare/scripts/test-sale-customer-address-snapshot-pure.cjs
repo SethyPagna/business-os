@@ -79,8 +79,9 @@ const OPTIONS_JSON = JSON.stringify([
 ])
 assert.equal(contactDisplayAddress(OPTIONS_JSON), 'St 271, Phnom Penh', 'sanity: the kernel is the real one, not a stub')
 
-function fixture() {
+function fixture(options = {}) {
   const sql = new Database(':memory:')
+  let saleInsertIntercepted = false
   sql.pragma('foreign_keys = OFF')
   for (const file of fs.readdirSync(path.join(root, 'migrations')).filter((name) => name.endsWith('.sql')).sort()) {
     sql.exec(fs.readFileSync(path.join(root, 'migrations', file), 'utf8'))
@@ -91,7 +92,14 @@ function fixture() {
         return { text, params,
           async first() { return sql.prepare(text).get(...params) || null },
           async all() { return { results: sql.prepare(text).all(...params) } },
-          async run() { const r = sql.prepare(text).run(...params); return { meta: { changes: r.changes, last_row_id: Number(r.lastInsertRowid) } } },
+          async run() {
+            if (!saleInsertIntercepted && /INSERT\s+INTO\s+sales\s*\(/i.test(text) && options.beforeSaleInsert) {
+              saleInsertIntercepted = true
+              options.beforeSaleInsert(sql)
+            }
+            const r = sql.prepare(text).run(...params)
+            return { meta: { changes: r.changes, last_row_id: Number(r.lastInsertRowid) } }
+          },
         }
       } }
     },
@@ -223,6 +231,41 @@ async function run() {
   assert.equal(JSON.parse(anonymousRow.creation_snapshot_json).customer, null)
   assert.equal(JSON.parse(anonymousRow.creation_snapshot_json).membership, null)
   console.log('PASS a marked anonymous profile is not copied into a new sale or its membership snapshot')
+
+  const namedGeneral = fixture()
+  namedGeneral.sql.prepare("UPDATE customers SET name='General', is_anonymous=0 WHERE id=1").run()
+  const namedGeneralSale = await namedGeneral.call('/', {
+    items: [{ product_id: 1, quantity: 1, applied_price_usd: 5, branch_id: 1 }],
+    branch_id: 1, customer_id: 1, customer_name: 'General',
+    payment_details: [{ method: 'Cash', amount_usd: 5, amount_khr: 0 }],
+    payment_currency: 'USD', amount_paid_usd: 5, amount_paid_khr: 0, exchange_rate: 4200,
+    client_request_id: 'named-general-create-1',
+  }, 'POST')
+  assert.equal(namedGeneralSale.status, 200, JSON.stringify(namedGeneralSale))
+  assert.deepEqual(
+    namedGeneral.sql.prepare('SELECT customer_id,customer_name FROM sales WHERE id=?').get(namedGeneralSale.body.id),
+    { customer_id: 1, customer_name: 'General' },
+    'a normal customer named General must remain linked unless the server marker says anonymous',
+  )
+
+  const racedAnonymous = fixture({
+    beforeSaleInsert(sql) {
+      sql.prepare('UPDATE customers SET is_anonymous=1 WHERE id=1').run()
+    },
+  })
+  const racedSale = await racedAnonymous.call('/', {
+    items: [{ product_id: 1, quantity: 1, applied_price_usd: 5, branch_id: 1 }],
+    branch_id: 1, customer_id: 1, customer_name: 'Sok Dara',
+    payment_details: [{ method: 'Cash', amount_usd: 5, amount_khr: 0 }],
+    payment_currency: 'USD', amount_paid_usd: 5, amount_paid_khr: 0, exchange_rate: 4200,
+    client_request_id: 'anonymous-race-create-1',
+  }, 'POST')
+  assert.equal(racedSale.status, 409, JSON.stringify(racedSale))
+  assert.equal(racedSale.body.code, 'customer_state_conflict')
+  assert.equal(racedAnonymous.sql.prepare("SELECT COUNT(*) AS n FROM sales WHERE client_request_id='anonymous-race-create-1'").get().n, 0)
+  assert.equal(racedAnonymous.sql.prepare('SELECT COUNT(*) AS n FROM sale_items').get().n, 0)
+  assert.equal(racedAnonymous.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity, 8)
+  console.log('PASS sale creation atomically rejects a customer marker race with zero sale, item, or stock writes')
 
   const listed = fixture()
   listed.sql.prepare("UPDATE customers SET is_anonymous=1,membership_number='LEGACY-GENERAL' WHERE id=1").run()

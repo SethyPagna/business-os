@@ -675,6 +675,10 @@ app.post('/', async (c) => {
   } else if (body.customer_membership_number) {
     customer = await db.prepare('SELECT id, name, membership_number, is_anonymous FROM customers WHERE lower(trim(membership_number)) = lower(trim(?)) AND COALESCE(is_anonymous,0)=0').get([body.customer_membership_number]) || null
   }
+  const customerStateGuard = customer ? {
+    id: customer.id,
+    isAnonymous: isAnonymousCustomer(customer) ? 1 : 0,
+  } : null
   // New sales store General as the canonical null assignment. A persisted
   // legacy anonymous identity remains readable on old rows, but it is never
   // copied forward as if it were a customer profile.
@@ -948,7 +952,7 @@ app.post('/', async (c) => {
         delivery_fee_usd, delivery_fee_khr, delivery_fee_paid_by,
         delivery_actual_cost_usd, delivery_actual_cost_khr,
         loyalty_accrual, sale_status, search_normalized, creation_snapshot_json, created_at, updated_at
-      ) VALUES (@receipt_number, @client_request_id, @cashier_id, @cashier_name, @branch_id, @branch_name,
+      ) SELECT @receipt_number, @client_request_id, @cashier_id, @cashier_name, @branch_id, @branch_name,
         @customer_id, @customer_name, @customer_phone, @customer_address,
         @payment_method, @payment_details, @payment_currency, @exchange_rate,
         @subtotal_usd, @subtotal_khr, @discount_usd, @discount_khr, @tax_usd, @tax_khr, @total_usd, @total_khr,
@@ -957,7 +961,12 @@ app.post('/', async (c) => {
         @is_delivery, @delivery_contact_id, @delivery_contact_name, @delivery_contact_phone, @delivery_contact_address,
         @delivery_fee_usd, @delivery_fee_khr, @delivery_fee_paid_by,
         @delivery_actual_cost_usd, @delivery_actual_cost_khr,
-        @loyalty_accrual, @sale_status, @search_normalized, @creation_snapshot_json, COALESCE(@created_at, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)
+        @loyalty_accrual, @sale_status, @search_normalized, @creation_snapshot_json, COALESCE(@created_at, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP
+      WHERE @customer_guard_id IS NULL OR EXISTS (
+        SELECT 1 FROM customers
+        WHERE id = @customer_guard_id
+          AND COALESCE(is_anonymous, 0) = @customer_guard_is_anonymous
+      )
     `)
     .run({
       receipt_number: receiptNumber,
@@ -978,6 +987,8 @@ app.post('/', async (c) => {
       branch_id: body.branch_id || null,
       branch_name: branchRow?.name || null,
       customer_id: customer?.id || null,
+      customer_guard_id: customerStateGuard?.id ?? null,
+      customer_guard_is_anonymous: customerStateGuard?.isAnonymous ?? null,
       customer_name: saleCustomerName,
       customer_phone: saleCustomerPhone,
       // N21: normalized, not trusted. The POS sends the display address now,
@@ -1036,6 +1047,9 @@ app.post('/', async (c) => {
       delivery_actual_cost_khr: deliveryActualCostKhr,
       sale_status: saleStatus,
     })
+  if (saleInsert.changes !== 1) {
+    return c.json({ error: 'The selected customer changed before the sale was saved. Review the customer and try again.', code: 'customer_state_conflict' }, 409)
+  }
   const saleId = saleInsert.lastInsertRowid
 
   // 11.9: draw the damaged lots FIRST (each consumeDamagedLot is its own
