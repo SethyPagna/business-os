@@ -88,6 +88,7 @@ runTest('F71: the focused adapter preserves the library search ownership and sto
   assert.match(pageSource, /if \(refreshMeta\) storageMetaRefreshNeededRef\.current = true/)
   assert.match(pageSource, /const includeMeta = storageMetaRefreshNeededRef\.current \|\| !filesLoadedOnceRef\.current/)
   assert.match(pageSource, /if \(includeMeta && Object\.prototype\.hasOwnProperty\.call\(result, 'physicalStorage'\)\) \{[\s\S]*storageMetaRefreshNeededRef\.current = false/)
+  assert.match(pageSource, /const eventId = `\$\{channel\}:\$\{String\(syncChannel\.ts \?\? ''\)\}`[\s\S]*consumedFileSyncEventRef\.current === eventId[\s\S]*loadFilesLatestRef\.current\?\.\(\{ refreshMeta: true \}\)/)
 })
 
 if (failed > 0) {

@@ -695,6 +695,11 @@ export default function FilesPage() {
   // is a search. Keep this latch until an accepted metadata response arrives;
   // a stale/search response must never acknowledge the refresh for us.
   const storageMetaRefreshNeededRef = useRef(true)
+  // The sync event has its own identity. Keeping the latest loader in a ref
+  // lets a new search replace a pending refresh without replaying that same
+  // sync event merely because the loader closure changed.
+  const loadFilesLatestRef = useRef<((options?: { refreshMeta?: boolean }) => Promise<void>) | null>(null)
+  const consumedFileSyncEventRef = useRef('')
   const [uploading, setUploading] = useState(false)
   const [deletingAssetId, setDeletingAssetId] = useState<string | number | null>(null)
   // Rename (inline, see renderAssetCard below): `renamingAssetId` is which
@@ -940,6 +945,7 @@ export default function FilesPage() {
       if (isTrackedRequestCurrent(fileLoadRequestRef, requestId)) setLoadingFiles(false)
     }
   }, [deferredSearch, filesApi, mediaType, notify, page, pageSize])
+  loadFilesLatestRef.current = loadFiles
 
   useEffect(() => {
     setPage(1)
@@ -1058,15 +1064,18 @@ export default function FilesPage() {
   useEffect(() => {
     if (!isActive || !syncChannel) return undefined
     const channel = String(syncChannel.channel || '')
+    const eventId = `${channel}:${String(syncChannel.ts ?? '')}`
+    if (consumedFileSyncEventRef.current === eventId) return undefined
+    consumedFileSyncEventRef.current = eventId
     if (channel === 'files' || channel === 'users') {
-      void loadFiles({ refreshMeta: true })
+      void loadFilesLatestRef.current?.({ refreshMeta: true })
       if (activeTab === 'responses') void loadResponses('AI responses refresh')
     }
     if ((channel === 'files' || channel === 'settings') && activeTab === 'providers') {
       void loadProviders('AI providers refresh')
     }
     return undefined
-  }, [activeTab, isActive, loadFiles, loadProviders, loadResponses, syncChannel?.channel, syncChannel?.ts])
+  }, [activeTab, isActive, loadProviders, loadResponses, syncChannel?.channel, syncChannel?.ts])
 
   useEffect(() => () => {
     invalidateTrackedRequest(fileLoadRequestRef)
