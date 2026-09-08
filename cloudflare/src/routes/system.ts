@@ -225,6 +225,7 @@ app.post('/reset-data', async (c) => {
     if (includeSales) {
       tablesToClear.unshift('sale_record_events')
       tablesToClear.splice(1, 0, 'return_mutation_receipts')
+      tablesToClear.splice(2, 0, 'return_create_receipts', 'return_create_guards')
       tablesToClear.push(
         'return_item_batch_allocations',
         'sale_item_batch_allocations',
@@ -381,6 +382,8 @@ app.post('/reset-data', async (c) => {
     const statements: Array<{ sql: string }> = [
       { sql: 'DELETE FROM sale_record_events' },
       { sql: 'DELETE FROM return_mutation_receipts' },
+      { sql: 'DELETE FROM return_create_receipts' },
+      { sql: 'DELETE FROM return_create_guards' },
       { sql: 'DELETE FROM return_item_batch_allocations' },
       { sql: 'DELETE FROM sale_item_batch_allocations' },
       { sql: 'DELETE FROM return_items' },

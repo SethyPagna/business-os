@@ -136,7 +136,7 @@ const ALL_RESET_CANDIDATE_TABLES = [
   'product_conflict_merge_run_cases', 'product_conflict_merge_runs',
   'product_images', 'rfid_tags', 'branch_batch_stock', 'product_batches', 'branch_stock', 'products',
   'inventory_movements', 'stock_row_moves', 'stock_transfers',
-  'sale_record_events', 'return_mutation_receipts', 'return_item_batch_allocations', 'sale_item_batch_allocations', 'return_items', 'returns', 'sale_items', 'sales',
+  'sale_record_events', 'return_mutation_receipts', 'return_create_receipts', 'return_create_guards', 'return_item_batch_allocations', 'sale_item_batch_allocations', 'return_items', 'returns', 'sale_items', 'sales',
   'action_history',
 ]
 
@@ -176,6 +176,8 @@ function seed() {
         ON CONFLICT(key) DO UPDATE SET value=excluded.value;
         DELETE FROM sale_record_events;
         DELETE FROM return_mutation_receipts;
+        DELETE FROM return_create_receipts;
+        DELETE FROM return_create_guards;
         DELETE FROM system_flags WHERE key='sale_record_events_reset_guard';`)
   const wipe = [
     'product_conflict_action_group_members', 'product_remove_operations',
@@ -238,6 +240,10 @@ function seed() {
     id,actor_id,return_id,sale_id,mutation_kind,request_id,request_digest,request_json,response_json,occurred_at
   ) VALUES('00000000-0000-4000-8000-000000000003',1,1,1,'edit','reset-receipt',?,'{}',?,'2026-09-08T00:00:00.000Z')`)
     .run(['d'.repeat(64), JSON.stringify({ id: 1, updated_at: '2026-09-08T00:00:00.000Z' })])
+  rawDbHandle.prepare(`INSERT INTO return_create_receipts(
+    id,actor_id,return_id,sale_id,request_id,request_digest,request_json,response_json,occurred_at
+  ) VALUES('00000000-0000-4000-8000-000000000004',1,1,1,'reset-create',?,'{"sale_id":1}',?,'2026-09-08T00:00:00.000Z')`)
+    .run(['e'.repeat(64), JSON.stringify({ id: 1, returnNumber: 'RET-1', replacementSaleId: null, replacementReceiptNumber: null })])
   rawDbHandle.prepare("INSERT INTO return_items (id, return_id, sale_item_id, product_id, product_name, quantity) VALUES (1, 1, 1, 1, 'Eye Shadow Palette', 1)").run()
   rawDbHandle.prepare("INSERT INTO sale_item_batch_allocations (id, sale_item_id, batch_id, branch_id, quantity, lot_code) VALUES (1, 1, 1, 1, 2, 'LOT-A')").run()
   rawDbHandle.prepare("INSERT INTO inventory_movements (id, product_id, product_name, branch_id, movement_type, quantity) VALUES (1, 1, 'Eye Shadow Palette', 1, 'sale', -2)").run()
@@ -290,6 +296,7 @@ async function main() {
     assert.strictEqual(count('sale_items'), 1, 'sale_items must survive a products reset')
     assert.strictEqual(count('returns'), 1, 'returns must survive a products reset')
     assert.strictEqual(count('return_mutation_receipts'), 1, 'immutable return receipts must survive a products reset')
+    assert.strictEqual(count('return_create_receipts'), 1, 'immutable return-create receipts must survive a products reset')
     assert.strictEqual(count('return_items'), 1, 'return_items must survive a products reset')
     assert.strictEqual(count('sale_item_batch_allocations'), 1, 'batch allocations must survive a products reset')
     assert.strictEqual(count('inventory_movements'), 1, 'inventory_movements must survive a products reset')
@@ -415,6 +422,7 @@ async function main() {
     assert.strictEqual(count('returns'), 0, 'returns should be cleared when includeSales=true')
     assert.strictEqual(count('return_items'), 0, 'return_items should be cleared when includeSales=true')
     assert.strictEqual(count('return_mutation_receipts'), 0, 'return mutation receipts should clear before their return parent')
+    assert.strictEqual(count('return_create_receipts'), 0, 'return create receipts should clear before their return parent')
     assert.strictEqual(count('sale_item_batch_allocations'), 0, 'sale_item_batch_allocations should be cleared when includeSales=true')
 
     // Movements/contacts are a SEPARATE toggle/always-kept set --
@@ -436,6 +444,7 @@ async function main() {
     assert.strictEqual(count('returns'), 0)
     assert.strictEqual(count('sale_record_events'), 0)
     assert.strictEqual(count('return_mutation_receipts'), 0)
+    assert.strictEqual(count('return_create_receipts'), 0)
     assert.strictEqual(count('customers'), 1, 'customers must never be touched by mode=products, even with both toggles on')
     assert.strictEqual(count('suppliers'), 1, 'suppliers must never be touched by mode=products, even with both toggles on')
   })
@@ -453,6 +462,7 @@ async function main() {
     assert.strictEqual(count('customers'), 1, 'mode=sales must never touch customers')
     assert.strictEqual(count('sale_record_events'), 0, 'mode=sales clears immutable Sales Records under the reset guard')
     assert.strictEqual(count('return_mutation_receipts'), 0, 'mode=sales clears immutable return receipts under the reset guard')
+    assert.strictEqual(count('return_create_receipts'), 0, 'mode=sales clears immutable return-create receipts under the reset guard')
   })
 
   await check('mode=sales now also forces a backup first (Part 248 fix -- previously only mode=products had this gate) and aborts with zero rows changed if it fails', async () => {
@@ -543,6 +553,7 @@ async function main() {
     seed()
     assert.strictEqual(count('sale_record_events'), 1, 'sanity: immutable event fixture exists')
     assert.strictEqual(count('return_mutation_receipts'), 1, 'sanity: immutable return receipt fixture exists')
+    assert.strictEqual(count('return_create_receipts'), 1, 'sanity: immutable return-create receipt fixture exists')
     const { status, json } = await req('POST', '/factory-reset', {})
     assert.strictEqual(status, 200, JSON.stringify(json))
     assert.strictEqual(json.success, true, JSON.stringify(json))
@@ -554,6 +565,7 @@ async function main() {
       'product_conflict_action_reviews',
     ]) assert.strictEqual(count(table), 0, `${table} should be empty after factory reset`)
     assert.strictEqual(count('return_mutation_receipts'), 0)
+    assert.strictEqual(count('return_create_receipts'), 0)
     assert.strictEqual(count('system_flags'), 0, 'the short-lived reset guard cannot survive the atomic batch')
   })
 

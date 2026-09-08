@@ -26,7 +26,7 @@
 // added, so scripts/test-returns-replace-damaged-pure.cjs can drive the
 // real logic against a real sqlite database.
 import type { D1Compat } from './db'
-import { removeStockFromBatch } from './productBatches'
+import { InsufficientBatchStockError, planRemoveStockFromBatch, type StockWriteStatement } from './productBatches'
 
 export type ReturnStockAction = 'none' | 'restock' | 'damaged'
 
@@ -121,6 +121,40 @@ export function planReturnLot(input: {
   }
 }
 
+export function createDamagedLotStatement(input: {
+  productId: number
+  productName: string | null
+  branchId: number | null
+  batchId: number | null
+  returnIdSql: string
+  quantity: number
+  reason: string | null
+  userId: number | string | null
+  userName: string | null
+}): StockWriteStatement {
+  const quantity = Number(input.quantity)
+  if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('Damaged quantity must be positive')
+  return {
+    sql: `INSERT INTO damaged_stock_lots (
+      product_id, product_name, branch_id, batch_id, return_id, quantity,
+      quantity_remaining, reason, created_by_user_id, created_by_user_name
+    ) VALUES (
+      @product_id,@product_name,@branch_id,@batch_id,${input.returnIdSql},@quantity,
+      @quantity,@reason,@user_id,@user_name
+    )`,
+    params: {
+      product_id: input.productId,
+      product_name: input.productName,
+      branch_id: input.branchId,
+      batch_id: input.batchId,
+      quantity,
+      reason: input.reason,
+      user_id: input.userId,
+      user_name: input.userName,
+    },
+  }
+}
+
 export async function createDamagedLot(db: D1Compat, input: {
   productId: number
   productName: string | null
@@ -132,20 +166,8 @@ export async function createDamagedLot(db: D1Compat, input: {
   userId: number | string | null
   userName: string | null
 }): Promise<void> {
-  await db.prepare(`
-    INSERT INTO damaged_stock_lots (product_id, product_name, branch_id, batch_id, return_id, quantity, quantity_remaining, reason, created_by_user_id, created_by_user_name)
-    VALUES (@product_id, @product_name, @branch_id, @batch_id, @return_id, @quantity, @quantity, @reason, @user_id, @user_name)
-  `).run({
-    product_id: input.productId,
-    product_name: input.productName,
-    branch_id: input.branchId,
-    batch_id: input.batchId,
-    return_id: input.returnId,
-    quantity: input.quantity,
-    reason: input.reason,
-    user_id: input.userId,
-    user_name: input.userName,
-  })
+  const statement = createDamagedLotStatement({ ...input, returnIdSql: '@return_id' })
+  await db.prepare(statement.sql).run({ ...(statement.params as Record<string, unknown>), return_id: input.returnId })
 }
 
 export class ConsumedDamagedStockError extends Error {
@@ -189,6 +211,61 @@ export class InsufficientReplacementStockError extends Error {
   }
 }
 
+export function planReplacementStock(input: {
+  productId: number
+  productName: string
+  branchId: number
+  batchId: number | null
+  quantity: number
+  unitCostUsd: number
+  unitCostKhr: number
+  returnIdSql: string
+  returnNumber: string | null
+  userId: number | string | null
+  userName: string | null
+}): { statements: StockWriteStatement[]; usedBatch: boolean } {
+  const quantity = Number(input.quantity)
+  if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('Replacement quantity must be positive')
+  const shared = {
+    product_id: input.productId,
+    product_name: input.productName,
+    branch_id: input.branchId,
+    quantity,
+    unit_cost_usd: input.unitCostUsd,
+    unit_cost_khr: input.unitCostKhr,
+    reason: `Replacement for return ${input.returnNumber ? `#${input.returnNumber}` : 'being recorded'}`,
+    user_id: input.userId,
+    user_name: input.userName,
+    batch_id: input.batchId,
+  }
+  const statements: StockWriteStatement[] = input.batchId != null
+    ? [...planRemoveStockFromBatch({ batchId: input.batchId, productId: input.productId, branchId: input.branchId, quantity }).statements]
+    : [
+        {
+          sql: `UPDATE branch_stock SET quantity=quantity-@quantity
+                WHERE product_id=@product_id AND branch_id=@branch_id`,
+          params: shared,
+        },
+        {
+          sql: `UPDATE products SET stock_quantity=(
+                  SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id=@product_id
+                ), updated_at=CURRENT_TIMESTAMP WHERE id=@product_id`,
+          params: shared,
+        },
+      ]
+  statements.push({
+    sql: `INSERT INTO inventory_movements (
+      product_id,product_name,branch_id,movement_type,quantity,unit_cost_usd,
+      unit_cost_khr,reason,reference_id,user_id,user_name,batch_id
+    ) VALUES (
+      @product_id,@product_name,@branch_id,'${REPLACEMENT_OUT_MOVEMENT}',-@quantity,
+      @unit_cost_usd,@unit_cost_khr,@reason,${input.returnIdSql},@user_id,@user_name,@batch_id
+    )`,
+    params: shared,
+  })
+  return { statements, usedBatch: input.batchId != null }
+}
+
 // Drain the stock a replacement line hands to the customer -- the POS way:
 // an explicit batch drains that exact lot (validated by
 // removeStockFromBatch, which also keeps branch_stock/stock_quantity in
@@ -208,18 +285,16 @@ export async function applyReplacementStock(db: D1Compat, input: {
   userId: number | string | null
   userName: string | null
 }): Promise<{ usedBatch: boolean }> {
-  let usedBatch = false
   if (input.batchId != null) {
-    // Throws InsufficientBatchStockError/Error before writing anything if
-    // the lot can't cover it -- deliberately NOT caught here: the person
-    // picked this exact lot, so a shortfall is an answer, not a fallback.
-    await removeStockFromBatch(db, {
-      batchId: input.batchId,
-      productId: input.productId,
-      branchId: input.branchId,
-      quantity: input.quantity,
+    const batch = await db.prepare(`SELECT COALESCE(bbs.quantity,0) AS available
+      FROM product_batches pb
+      LEFT JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id AND bbs.branch_id=@branchId
+      WHERE pb.id=@batchId AND pb.variant_product_id=@productId`).get<{ available: number }>({
+      batchId: input.batchId, productId: input.productId, branchId: input.branchId,
     })
-    usedBatch = true
+    if (!batch) throw new Error('Selected received date does not belong to this product')
+    const available = Number(batch.available) || 0
+    if (input.quantity > available) throw new InsufficientBatchStockError(available)
   } else {
     const stockRow = await db.prepare('SELECT quantity FROM branch_stock WHERE product_id = @product_id AND branch_id = @branch_id')
       .get<{ quantity: number }>({ product_id: input.productId, branch_id: input.branchId })
@@ -227,38 +302,13 @@ export async function applyReplacementStock(db: D1Compat, input: {
     if (input.quantity > available) {
       throw new InsufficientReplacementStockError(input.productName, input.quantity, available)
     }
-    // Strict (unclamped) subtraction (Part-77, oversell-clamp audit): the
-    // check above already validated availability, so the only way this goes
-    // negative is a concurrent consumer winning the read-write race -- then
-    // 0058's CHECK(quantity >= 0) rejects the write (the movement below
-    // never runs) instead of the old MAX(0, ...) clamp handing the customer
-    // units the branch no longer had.
-    await db.prepare(`
-      INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@product_id, @branch_id, 0)
-      ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = branch_stock.quantity - @quantity
-    `).run({ product_id: input.productId, branch_id: input.branchId, quantity: input.quantity })
   }
-  await db.prepare(`
-    INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
-    VALUES (@product_id, @product_name, @branch_id, '${REPLACEMENT_OUT_MOVEMENT}', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, @batch_id)
-  `).run({
-    product_id: input.productId,
-    product_name: input.productName,
-    branch_id: input.branchId,
-    quantity: -input.quantity,
-    unit_cost_usd: input.unitCostUsd,
-    unit_cost_khr: input.unitCostKhr,
-    reason: `Replacement for return ${input.returnNumber ? `#${input.returnNumber}` : `id ${input.returnId}`}`,
-    reference_id: input.returnId,
-    user_id: input.userId,
-    user_name: input.userName,
-    // 0084: an explicit lot pick drained exactly that lot. The plain path is
-    // reached only by a product that has never used lot tracking (the modal
-    // requires a lot wherever lots exist), so a NULL here means "this
-    // product has no lots", never "we did not bother to look".
-    batch_id: input.batchId ?? null,
-  })
-  return { usedBatch }
+  const plan = planReplacementStock({ ...input, returnIdSql: '@return_id' })
+  await db.batch(plan.statements.map((statement) => ({
+    ...statement,
+    params: { ...(statement.params as Record<string, unknown>), return_id: input.returnId },
+  })))
+  return { usedBatch: plan.usedBatch }
 }
 
 export const DAMAGE_OUT_MOVEMENT = 'damage_out'

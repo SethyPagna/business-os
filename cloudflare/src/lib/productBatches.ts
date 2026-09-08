@@ -438,6 +438,48 @@ export class InsufficientBatchStockError extends Error {
   }
 }
 
+export type RemoveBatchStockPlanInput = {
+  batchId: number
+  productId: number
+  branchId: number
+  quantity: number
+}
+
+// Side-effect-free strict removal plan for callers that place lot stock,
+// aggregate branch stock, and their surrounding domain write in one D1
+// batch. Availability is read by the caller, while these unclamped updates
+// make a stale concurrent decrement violate the stock CHECK and roll the
+// entire action back instead of silently flooring a quantity at zero.
+export function planRemoveStockFromBatch(input: RemoveBatchStockPlanInput): { statements: StockWriteStatement[] } {
+  const batchId = Number(input.batchId)
+  const productId = Number(input.productId)
+  const branchId = Number(input.branchId)
+  const quantity = Number(input.quantity)
+  if (![batchId, productId, branchId].every((value) => Number.isSafeInteger(value) && value > 0)) {
+    throw new Error('A valid product, branch, and received date are required')
+  }
+  if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('Quantity must be a positive number')
+  const params = { batchId, productId, branchId, quantity }
+  return { statements: [
+    {
+      sql: `UPDATE branch_batch_stock SET quantity = quantity - @quantity, updated_at = datetime('now')
+            WHERE batch_id = @batchId AND branch_id = @branchId`,
+      params,
+    },
+    {
+      sql: `UPDATE branch_stock SET quantity = quantity - @quantity
+            WHERE product_id = @productId AND branch_id = @branchId`,
+      params,
+    },
+    {
+      sql: `UPDATE products SET stock_quantity = (
+              SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id=@productId
+            ), updated_at = CURRENT_TIMESTAMP WHERE id = @productId`,
+      params,
+    },
+  ] }
+}
+
 // Mirror of receiveBatchStock for the remove side of mandatory batch
 // selection (Inventory's "Adjust stock" > Remove, see routes/inventory.ts's
 // /adjust). Validates against the BATCH's own quantity at this branch, not
