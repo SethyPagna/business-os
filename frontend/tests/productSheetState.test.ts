@@ -7,7 +7,13 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { branchAllowsSale, deriveProductSheetState, resolveSaleBranch } from '../src/components/pos/productSheetState.ts'
-import { BRANCH_RULE_MESSAGE_KEYS, branchRuleMessageKey, localizeBranchRuleError } from '../src/api/branchRuleErrors.ts'
+import {
+  BRANCH_RULE_CODE_KEYS,
+  BRANCH_RULE_MESSAGE_KEYS,
+  branchRuleErrorKey,
+  branchRuleMessageKey,
+  localizeBranchRuleError,
+} from '../src/api/branchRuleErrors.ts'
 import { branchRoleFromName, branchCanSell, branchCanBeTransferSource, branchCanBeTransferDestination } from '../src/utils/branchRoles.ts'
 
 let failed = 0
@@ -430,7 +436,7 @@ await runTest('the pick button reads the derived gate rather than re-deriving in
 })
 
 // ---------------------------------------------------------------------------
-// The Worker's two refusals, shown from the packs.
+// The Worker's branch refusals, shown from the packs.
 // ---------------------------------------------------------------------------
 
 const enPack = JSON.parse(src('lang', 'en.json')) as Record<string, string>
@@ -440,6 +446,10 @@ await runTest('a Worker branch-rule refusal is translated, and nothing else is t
   const t = (key: string) => kmPack[key]
   assert.equal(branchRuleMessageKey('Only allow Shop sale. Please transfer to Shop first.'), 'pos_warehouse_not_sellable')
   assert.equal(branchRuleMessageKey('Transfers move stock from Warehouse to Shop.'), 'transfer_source_warehouse_only')
+  assert.equal(
+    branchRuleMessageKey('Stock transfer is unavailable because the branch setup must contain exactly one active Shop and one active Warehouse. Ask an administrator to repair the branch records before trying again.'),
+    'canonical_branch_configuration_invalid',
+  )
   // The paths that show these wrap the sentence to different depths.
   assert.equal(branchRuleMessageKey('Error: Only allow Shop sale. Please transfer to Shop first.'), 'pos_warehouse_not_sellable')
   assert.equal(branchRuleMessageKey('Insufficient stock in source branch'), null)
@@ -454,11 +464,42 @@ await runTest('a Worker branch-rule refusal is translated, and nothing else is t
   assert.equal(localizeBranchRuleError('Something else entirely', t), 'Something else entirely')
 })
 
+await runTest('the canonical branch configuration API code localizes without depending on server prose', () => {
+  const t = (key: string) => kmPack[key]
+  const apiError = Object.assign(new Error('Server wording may change'), {
+    code: 'canonical_branch_configuration_invalid',
+    status: 409,
+  })
+  assert.equal(
+    BRANCH_RULE_CODE_KEYS.canonical_branch_configuration_invalid,
+    'canonical_branch_configuration_invalid',
+  )
+  assert.equal(branchRuleErrorKey(apiError), 'canonical_branch_configuration_invalid')
+  assert.equal(localizeBranchRuleError(apiError, t), kmPack.canonical_branch_configuration_invalid)
+  assert.equal(
+    localizeBranchRuleError({
+      code: 'canonical_branch_configuration_invalid',
+      error: enPack.canonical_branch_configuration_invalid,
+    }, t),
+    kmPack.canonical_branch_configuration_invalid,
+    'a structured API response uses the same localized operator guidance',
+  )
+  assert.equal(
+    localizeBranchRuleError({ code: 'some_other_error', message: 'Unmapped refusal' }, t),
+    'Unmapped refusal',
+    'unknown API codes keep their readable server message',
+  )
+})
+
 await runTest('the mapped sentences are the exact English of the pack keys', () => {
   // If either side drifts, the mapping stops matching and the operator is
   // shown an English sentence in a Khmer session -- silently.
   assert.equal(enPack.pos_warehouse_not_sellable, 'Only allow Shop sale. Please transfer to Shop first.')
   assert.equal(enPack.transfer_source_warehouse_only, 'Transfers move stock from Warehouse to Shop.')
+  assert.equal(
+    enPack.canonical_branch_configuration_invalid,
+    'Stock transfer is unavailable because the branch setup must contain exactly one active Shop and one active Warehouse. Ask an administrator to repair the branch records before trying again.',
+  )
   for (const [english, key] of BRANCH_RULE_MESSAGE_KEYS) {
     assert.equal(enPack[key], english, `${key} must be the sentence the Worker sends`)
     assert.ok(kmPack[key], `${key} must exist in the Khmer pack`)
