@@ -176,19 +176,28 @@ async function main() {
   }
 
   {
-    const fixture = await prepareThreeMemberReview()
-    fixture.controls.beforeNextWriteBatch = () => {
-      fixture.d1.db.prepare('UPDATE branch_stock SET quantity=30 WHERE product_id=10001 AND branch_id=1').run()
-      fixture.d1.db.prepare("UPDATE product_batches SET supplier_name='Concurrent supplier' WHERE id=99002").run()
+    const races = [
+      ['branch quantity', (db) => db.prepare('UPDATE branch_stock SET quantity=30 WHERE product_id=10001 AND branch_id=1').run()],
+      ['lot quantity', (db) => db.prepare('UPDATE branch_batch_stock SET quantity=30 WHERE batch_id=99002 AND branch_id=1').run()],
+      ['added lot', (db) => db.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_key,received_at,is_active)
+        VALUES(99004,10001,'concurrent-lot','2026-09-08',1)`).run()],
+      ['removed lot', (db) => {
+        db.prepare('DELETE FROM branch_batch_stock WHERE batch_id=99002').run()
+        db.prepare('DELETE FROM product_batches WHERE id=99002').run()
+      }],
+      ['supplier', (db) => db.prepare("UPDATE product_batches SET supplier_name='Concurrent supplier' WHERE id=99002").run()],
+      ['received date', (db) => db.prepare("UPDATE product_batches SET received_at='2026-09-09' WHERE id=99002").run()],
+    ]
+    for (const [label, mutate] of races) {
+      const fixture = await prepareThreeMemberReview()
+      fixture.controls.beforeNextWriteBatch = () => mutate(fixture.d1.db)
+      const stale = await apply(fixture.app, fixture.review, fixture.finalized.manifest_digest)
+      assert.equal(stale.status, 409, label)
+      assert.equal(stale.body.code, 'merge_state_conflict', label)
+      assert.equal(fixture.d1.db.prepare('SELECT is_active FROM products WHERE id=10001').get().is_active, 1, label)
+      assert.equal(fixture.d1.db.prepare('SELECT COUNT(*) n FROM action_history').get().n, 0, label)
+      assert.equal(fixture.d1.db.prepare('SELECT COUNT(*) n FROM audit_logs').get().n, 0, label)
     }
-    const stale = await apply(fixture.app, fixture.review, fixture.finalized.manifest_digest)
-    assert.equal(stale.status, 409)
-    assert.equal(stale.body.code, 'merge_state_conflict')
-    assert.equal(fixture.d1.db.prepare('SELECT is_active FROM products WHERE id=10001').get().is_active, 1)
-    assert.equal(fixture.d1.db.prepare('SELECT quantity FROM branch_stock WHERE product_id=10001 AND branch_id=1').get().quantity, 30)
-    assert.equal(fixture.d1.db.prepare('SELECT supplier_name FROM product_batches WHERE id=99002').get().supplier_name, 'Concurrent supplier')
-    assert.equal(fixture.d1.db.prepare('SELECT COUNT(*) n FROM action_history').get().n, 0)
-    assert.equal(fixture.d1.db.prepare('SELECT COUNT(*) n FROM audit_logs').get().n, 0)
   }
 
   console.log('product conflict action apply sqlite: N=3 apply, receipt, product/stock/lot CAS, exact Undo/Redo checks passed')
