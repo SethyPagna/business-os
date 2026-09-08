@@ -489,6 +489,9 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
   // 'block'.
   const canDeleteContact = can('contacts', 'delete')
   const canBulkDeleteContacts = can('contacts', 'bulk_delete')
+  const canBulkContacts = can('contacts', 'bulk')
+  const canBulkContactsRef = useRef(canBulkContacts)
+  canBulkContactsRef.current = canBulkContacts
   // Client-side export gated by the modeled 'contacts:export' action, matching
   // the Customers/Suppliers tabs and the Products precedent.
   const canExportContacts = can('contacts', 'export')
@@ -637,7 +640,26 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
     [collapsedSections, filteredSections],
   )
 
-  const { selectedIds, setSelectedIds, toggleOne, selectAllProp, selectionModeActive, getRowLongPressState } = useContactSelection(visibleContacts)
+  const contactSelection = useContactSelection(visibleContacts)
+  const { setSelectedIds, getRowLongPressState } = contactSelection
+  const selectedIds = canBulkContacts ? contactSelection.selectedIds : new Set<number>()
+  const selectionModeActive = canBulkContacts && contactSelection.selectionModeActive
+  const toggleOne = (id: unknown) => {
+    if (!canBulkContactsRef.current) return
+    contactSelection.toggleOne(id)
+  }
+  const selectAllProp = {
+    ...contactSelection.selectAllProp,
+    onChange: (checked: boolean) => {
+      if (!canBulkContactsRef.current) return
+      contactSelection.selectAllProp.onChange(checked)
+    },
+  }
+  useEffect(() => {
+    if (canBulkContacts) return
+    setSelectedIds((current) => current.size ? new Set<number>() : current)
+    setModal((current) => current === 'import' ? null : current)
+  }, [canBulkContacts, setSelectedIds])
   // H1+X5 (Part 402): exports go through the shared options dialog.
   const [exportDialog, setExportDialog] = useState<{ rows: Array<Record<string, unknown>>; baseName: string } | null>(null)
   // 11.1/11.2 (B6): in select mode a cell click toggles the row; out of it
@@ -696,6 +718,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
   const isSectionFullySelected = (ids: Array<number | string> = []) => ids.length > 0 && ids.every((id) => selectedIds.has(Number(id)))
   const isSectionPartiallySelected = (ids: Array<number | string> = []) => ids.some((id) => selectedIds.has(Number(id))) && !isSectionFullySelected(ids)
   const toggleSectionSelection = (ids: Array<number | string>, checked: boolean) => {
+    if (!canBulkContactsRef.current) return
     ids.forEach((id) => {
       const numericId = Number(id)
       const isSelected = selectedIds.has(numericId)
@@ -954,7 +977,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
   }
 
   const handleBulkDelete = async () => {
-    if (!selectedIds.size || !beginSingleAction(bulkDeleteInFlightRef, { blocked: bulkActionBusy })) return
+    if (!canBulkContactsRef.current || !selectedIds.size || !beginSingleAction(bulkDeleteInFlightRef, { blocked: bulkActionBusy })) return
     if (!confirm(`Delete ${selectedIds.size} delivery contact(s)?`)) {
       finishSingleAction(bulkDeleteInFlightRef)
       return
@@ -979,6 +1002,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
         actionHistory.pushAction({
           label: `Delete ${deletedCount} delivery contact${deletedCount === 1 ? '' : 's'}`,
           undo: async () => {
+            if (!canBulkContactsRef.current) throw new Error(t('no_permission') || 'No permission')
             const restoreRun = await runConcurrentTasks(deletedSnapshots, async (snapshot: DeliveryContact) => {
               const result = await runDeliveryMutation(() => getDeliveryApi().createDeliveryContact({
                 name: snapshot.name || '',
@@ -996,6 +1020,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
             await load({ silent: true, label: 'Delivery contacts restore deleted' })
           },
           redo: async () => {
+            if (!canBulkContactsRef.current) throw new Error(t('no_permission') || 'No permission')
             const idsToDelete = restoredEntries.map((entry) => Number(entry.restoredId || 0)).filter((id) => id > 0)
             const redoRun = await runConcurrentTasks(idsToDelete, async (id: number) => (
               runDeliveryMutation(() => getDeliveryApi().deleteDeliveryContact(id), 'Redo bulk delivery contact delete')
@@ -1023,6 +1048,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
           Manage per the ordering used on Products. */}
       <div className="flex min-w-0 items-stretch gap-1.5 overflow-x-auto pb-1">
         <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} t={t} className="min-w-0 flex-1" showLabel dense />
+        {(canBulkContacts || canExportContacts) ? (
         <LazyPortalMenu
           align="auto"
           triggerWrapperClassName="min-w-0 flex-1"
@@ -1039,7 +1065,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
             </button>
           )}
           items={([
-            { label: tr('import_contacts', 'Import', 'នាំចូល'), onClick: () => setModal('import'), color: 'blue', icon: <Download className="h-4 w-4 shrink-0" /> },
+            ...(canBulkContacts ? [{ label: tr('import_contacts', 'Import', 'នាំចូល'), onClick: () => { if (!canBulkContactsRef.current) return; setModal('import') }, color: 'blue' as const, icon: <Download className="h-4 w-4 shrink-0" /> }] : []),
             ...(canExportContacts ? [{
               label: tr('export', 'Export', 'នាំចេញ'),
               color: 'green',
@@ -1067,6 +1093,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
             }] : []),
           ] as PortalMenuItem[])}
         />
+        ) : null}
         <button
           className="inline-flex h-8 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-xl border border-blue-700 bg-blue-600 px-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 hover:border-blue-800 sm:text-sm"
           onClick={() => { setSelected(null); setModal('form') }}
@@ -1108,7 +1135,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
               {tr('retry', 'Retry')}
             </button>
           ) : null}
-          {selectedIds.size > 0 && canBulkDeleteContacts && (
+          {canBulkContacts && selectedIds.size > 0 && canBulkDeleteContacts && (
             <button
               className="btn-secondary text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-60"
               onClick={handleBulkDelete}
@@ -1197,7 +1224,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
           })
           const rowLongPressState = getRowLongPressState(Number(contact.id))
           const rowLongPress = createLongPressHandlers(rowLongPressState, {
-            disabled: selectionModeActive,
+            disabled: !canBulkContacts || selectionModeActive,
             onLongPress: () => {
               if (!selectedIds.has(Number(contact.id))) toggleOne(contact.id)
             },
@@ -1207,7 +1234,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
           <tr
             key={contact.id}
             className={`table-row cursor-pointer select-none hover:bg-gray-50 dark:hover:bg-gray-700/30 ${selectedIds.has(Number(contact.id)) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}
-            {...(selectionModeActive ? {} : rowLongPress)}
+            {...(canBulkContacts && !selectionModeActive ? rowLongPress : {})}
             onClickCapture={(event) => {
               // Swallow the ghost click that follows a fired long-press.
               if (consumeLongPressClick(rowLongPressState)) {
@@ -1273,7 +1300,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
           })
           const cardLongPressState = getRowLongPressState(Number(contact.id))
           const cardLongPress = createLongPressHandlers(cardLongPressState, {
-            disabled: selectionModeActive,
+            disabled: !canBulkContacts || selectionModeActive,
             onLongPress: () => {
               if (!selectedIds.has(Number(contact.id))) toggleOne(contact.id)
             },
@@ -1290,7 +1317,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
             key={contact.id}
             className={`card p-3 flex cursor-pointer select-none items-center gap-3 ${selectedIds.has(Number(contact.id)) ? 'ring-2 ring-blue-400 bg-blue-50 dark:bg-blue-900/20' : ''}`}
             onClick={() => handleContactCellClick(contact)}
-            {...(selectionModeActive ? {} : cardLongPress)}
+            {...(canBulkContacts && !selectionModeActive ? cardLongPress : {})}
             onClickCapture={(event) => {
               if (consumeLongPressClick(cardLongPressState)) {
                 event.preventDefault()
@@ -1324,7 +1351,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
       />
 
       {modal === 'form'   && <DeliveryForm contact={selected} onSave={handleSave} onUseExisting={handleUseExisting} onClose={() => { setModal(null); setSelected(null) }} t={t} />}
-      {modal === 'import' ? (
+      {canBulkContacts && modal === 'import' ? (
         <Suspense fallback={null}>
           <ContactImportModal type="deliveryContact" onClose={() => setModal(null)} onDone={() => load({ silent: true, label: 'Delivery contacts after import' })} />
         </Suspense>

@@ -443,6 +443,9 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
   // 'block'.
   const canDeleteContact = can('contacts', 'delete')
   const canBulkDeleteContacts = can('contacts', 'bulk_delete')
+  const canBulkContacts = can('contacts', 'bulk')
+  const canBulkContactsRef = useRef(canBulkContacts)
+  canBulkContactsRef.current = canBulkContacts
   // Export is assembled client-side from already-loaded rows; gating it
   // enforces the stated policy (review-tier cannot export) and matches the
   // modeled 'contacts:export' action + the Products/Customers/Delivery tabs.
@@ -583,7 +586,26 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
     [collapsedSections, filteredSections],
   )
 
-  const { selectedIds, setSelectedIds, toggleOne, selectAllProp, selectionModeActive, getRowLongPressState } = useContactSelection(visibleSuppliers)
+  const contactSelection = useContactSelection(visibleSuppliers)
+  const { setSelectedIds, getRowLongPressState } = contactSelection
+  const selectedIds = canBulkContacts ? contactSelection.selectedIds : new Set<number>()
+  const selectionModeActive = canBulkContacts && contactSelection.selectionModeActive
+  const toggleOne = (id: unknown) => {
+    if (!canBulkContactsRef.current) return
+    contactSelection.toggleOne(id)
+  }
+  const selectAllProp = {
+    ...contactSelection.selectAllProp,
+    onChange: (checked: boolean) => {
+      if (!canBulkContactsRef.current) return
+      contactSelection.selectAllProp.onChange(checked)
+    },
+  }
+  useEffect(() => {
+    if (canBulkContacts) return
+    setSelectedIds((current) => current.size ? new Set<number>() : current)
+    setModal((current) => current === 'import' ? null : current)
+  }, [canBulkContacts, setSelectedIds])
   // H1+X5 (Part 402): exports go through the shared options dialog.
   const [exportDialog, setExportDialog] = useState<{ rows: Array<Record<string, unknown>>; baseName: string } | null>(null)
   // 11.1/11.2 (B6): in select mode a cell click toggles the row; out of it
@@ -646,6 +668,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
   const isSectionFullySelected = (ids: Array<number | string> = []) => ids.length > 0 && ids.every((id) => selectedIds.has(Number(id)))
   const isSectionPartiallySelected = (ids: Array<number | string> = []) => ids.some((id) => selectedIds.has(Number(id))) && !isSectionFullySelected(ids)
   const toggleSectionSelection = (ids: Array<number | string>, checked: boolean) => {
+    if (!canBulkContactsRef.current) return
     ids.forEach((id) => {
       const numericId = Number(id)
       const isSelected = selectedIds.has(numericId)
@@ -934,7 +957,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
   }
 
   const handleBulkDelete = async () => {
-    if (!selectedIds.size || !beginSingleAction(bulkDeleteInFlightRef, { blocked: bulkActionBusy })) return
+    if (!canBulkContactsRef.current || !selectedIds.size || !beginSingleAction(bulkDeleteInFlightRef, { blocked: bulkActionBusy })) return
     if (!confirm(`Delete ${selectedIds.size} supplier(s)?`)) {
       finishSingleAction(bulkDeleteInFlightRef)
       return
@@ -959,6 +982,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
         actionHistory.pushAction({
           label: `Delete ${deletedCount} supplier${deletedCount === 1 ? '' : 's'}`,
           undo: async () => {
+            if (!canBulkContactsRef.current) throw new Error(t('no_permission') || 'No permission')
             const restoreRun = await runConcurrentTasks(deletedSnapshots, async (snapshot: SupplierRow) => {
               const result = await runSupplierMutation(() => getSupplierApi().createSupplier({
                 name: snapshot.name || '',
@@ -978,6 +1002,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
             await load({ silent: true, label: 'Suppliers restore deleted' })
           },
           redo: async () => {
+            if (!canBulkContactsRef.current) throw new Error(t('no_permission') || 'No permission')
             const idsToDelete = restoredEntries.map((entry) => Number(entry.restoredId || 0)).filter((id) => id > 0)
             const redoRun = await runConcurrentTasks(idsToDelete, async (id: number) => (
               runSupplierMutation(() => getSupplierApi().deleteSupplier(id), 'Redo bulk supplier delete')
@@ -1044,6 +1069,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
           History before Manage per the ordering used on those tabs. */}
       <div className="flex min-w-0 items-stretch gap-1.5 overflow-x-auto pb-1">
         <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} t={t} className="min-w-0 flex-1" showLabel dense />
+        {(canBulkContacts || canExportContacts) ? (
         <LazyPortalMenu
           align="auto"
           triggerWrapperClassName="min-w-0 flex-1"
@@ -1060,7 +1086,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
             </button>
           )}
           items={([
-            { label: tr('import_contacts', 'Import', 'នាំចូល'), onClick: () => setModal('import'), color: 'blue', icon: <Download className="h-4 w-4 shrink-0" /> },
+            ...(canBulkContacts ? [{ label: tr('import_contacts', 'Import', 'នាំចូល'), onClick: () => { if (!canBulkContactsRef.current) return; setModal('import') }, color: 'blue' as const, icon: <Download className="h-4 w-4 shrink-0" /> }] : []),
             ...(canExportContacts ? [{
               label: tr('export', 'Export', 'នាំចេញ'),
               color: 'green',
@@ -1098,6 +1124,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
             }] : []),
           ] as PortalMenuItem[])}
         />
+        ) : null}
         <button
           className="inline-flex h-8 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-xl border border-blue-700 bg-blue-600 px-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 hover:border-blue-800 sm:text-sm"
           onClick={() => { setSelected(null); setModal('form') }}
@@ -1139,7 +1166,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
               {tr('retry', 'Retry')}
             </button>
           ) : null}
-          {selectedIds.size > 0 && canBulkDeleteContacts ? (
+          {canBulkContacts && selectedIds.size > 0 && canBulkDeleteContacts ? (
             <button
               className="btn-secondary whitespace-nowrap text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:cursor-not-allowed disabled:opacity-60"
               onClick={handleBulkDelete}
@@ -1233,7 +1260,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
           })
           const rowLongPressState = getRowLongPressState(Number(supplier.id))
           const rowLongPress = createLongPressHandlers(rowLongPressState, {
-            disabled: selectionModeActive,
+            disabled: !canBulkContacts || selectionModeActive,
             onLongPress: () => {
               if (!selectedIds.has(Number(supplier.id))) toggleOne(supplier.id)
             },
@@ -1243,7 +1270,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
           <tr
             key={supplier.id}
             className={`table-row cursor-pointer select-none hover:bg-gray-50 dark:hover:bg-gray-700/30 ${selectedIds.has(Number(supplier.id)) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}
-            {...(selectionModeActive ? {} : rowLongPress)}
+            {...(canBulkContacts && !selectionModeActive ? rowLongPress : {})}
             onClickCapture={(event) => {
               // Swallow the ghost click that follows a fired long-press.
               if (consumeLongPressClick(rowLongPressState)) {
@@ -1315,7 +1342,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
           })
           const cardLongPressState = getRowLongPressState(Number(supplier.id))
           const cardLongPress = createLongPressHandlers(cardLongPressState, {
-            disabled: selectionModeActive,
+            disabled: !canBulkContacts || selectionModeActive,
             onLongPress: () => {
               if (!selectedIds.has(Number(supplier.id))) toggleOne(supplier.id)
             },
@@ -1336,7 +1363,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
             key={supplier.id}
             className={`card flex cursor-pointer select-none items-center gap-3 p-3 ${selectedIds.has(Number(supplier.id)) ? 'bg-blue-50 ring-2 ring-blue-400 dark:bg-blue-900/20' : ''}`}
             onClick={() => handleContactCellClick(supplier)}
-            {...(selectionModeActive ? {} : cardLongPress)}
+            {...(canBulkContacts && !selectionModeActive ? cardLongPress : {})}
             onClickCapture={(event) => {
               if (consumeLongPressClick(cardLongPressState)) {
                 event.preventDefault()
@@ -1373,7 +1400,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
       )}
 
       {modal === 'form' ? <SupplierForm supplier={selected} onSave={handleSave} onUseExisting={handleUseExisting} onClose={() => { setModal(null); setSelected(null) }} t={t} /> : null}
-      {modal === 'import' ? (
+      {canBulkContacts && modal === 'import' ? (
         <Suspense fallback={null}>
           <ContactImportModal type="supplier" onClose={() => setModal(null)} onDone={() => load({ silent: true, label: 'Suppliers after import' })} />
         </Suspense>
