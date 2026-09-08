@@ -40,7 +40,7 @@ function loadFinalizer(db) {
   return mod.exports
 }
 
-function finalizerDb(readyOutcomes) {
+function finalizerDb({ failFinalization = false } = {}) {
   const batches = []
   return {
     batches,
@@ -54,9 +54,8 @@ function finalizerDb(readyOutcomes) {
       if (statements.every((statement) => /^\s*SELECT\b/i.test(statement.sql))) {
         return statements.map(() => ({ success: true, results: [] }))
       }
-      return [{ success: true, results: [] }, { success: true, results: [] }, {
-        success: true, results: [{ merge_history_ready: readyOutcomes.shift() ? 1 : 0 }],
-      }]
+      if (failFinalization) throw new Error('native guarded finalization fault')
+      return statements.map(() => ({ success: true, results: [] }))
     },
   }
 }
@@ -64,20 +63,22 @@ function finalizerDb(readyOutcomes) {
 const reversal = { keeperId: 2001, dupId: 2002, keeperName: 'fixture', dupName: 'fixture', reparentedByTable: [] }
 
 async function run() {
-  const db = finalizerDb([true])
+  const db = finalizerDb()
   const undo = loadFinalizer(db)
   const result = await undo.finalizeAtomicMergeHistory({}, 'f46-local-operation', reversal, db)
   assert.deepEqual(result, { operationId: 'f46-local-operation', committed: true, snapshotId: 82, actionHistoryId: 118, historyResolved: true, fingerprintReady: true })
   const finalization = db.batches.at(-1)
-  assert.match(finalization[2].sql, /AS merge_history_ready/)
-  assert.doesNotMatch(finalization[2].sql, /json_extract\('', '\$'\)/)
+  assert.match(finalization[2].sql, /AS merge_history_guard/)
+  assert.match(finalization[2].sql, /json_extract\('', '\$'\)/)
 
-  const retryDb = finalizerDb([false, true])
+  const retryDb = finalizerDb({ failFinalization: true })
   const retryUndo = loadFinalizer(retryDb)
   const first = await retryUndo.finalizeAtomicMergeHistory({}, 'f46-retry-operation', reversal, retryDb)
   assert.equal(first.fingerprintReady, false, 'a failed guarded result must keep undo unavailable')
   assert.equal(first.historyResolved, true, 'the committed durable rows remain discoverable for retry')
-  const second = await retryUndo.finalizeAtomicMergeHistory({}, 'f46-retry-operation', reversal, retryDb)
+  const secondDb = finalizerDb()
+  const secondUndo = loadFinalizer(secondDb)
+  const second = await secondUndo.finalizeAtomicMergeHistory({}, 'f46-retry-operation', reversal, secondDb)
   assert.equal(second.fingerprintReady, true, 'a later guarded retry may complete the same committed merge')
   console.log('F46 finalizer runtime regression: 2/2 passed')
 }

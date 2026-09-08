@@ -872,7 +872,7 @@ export async function finalizeAtomicMergeHistory(
     const mergedStateFingerprint = await mergeStateFingerprint(db, [reversal])
     const stored = { ...reversal, operationId, fingerprintPending: false, mergedStateFingerprint }
     phase = 'finalization_batch'
-    const finalization = await db.batch([
+    await db.batch([
       {
         sql: `UPDATE undo_snapshots SET payload_json=@payload,updated_at=CURRENT_TIMESTAMP
               WHERE id=@snapshotId AND kind='product.merge' AND status='applied'
@@ -890,15 +890,10 @@ export async function finalizeAtomicMergeHistory(
         sql: `SELECT CASE WHEN
                 EXISTS(SELECT 1 FROM undo_snapshots WHERE id=@snapshotId AND json_extract(payload_json,'$.fingerprintPending')=0)
                 AND EXISTS(SELECT 1 FROM action_history WHERE id=@historyId AND reversible=1 AND status='undoable')
-              THEN 1 ELSE 0 END AS merge_history_ready`,
+              THEN 1 ELSE json_extract('', '$') END AS merge_history_guard`,
         params: { snapshotId, historyId: actionHistoryId },
       },
     ])
-    const finalizationRows = Array.isArray(finalization[2]?.results)
-      ? finalization[2].results as Array<Record<string, unknown>>
-      : []
-    const finalized = Number(finalizationRows[0]?.merge_history_ready) === 1
-    if (!finalized) return pending()
     return { operationId, committed: true, snapshotId, actionHistoryId, historyResolved: true, fingerprintReady: true }
   } catch {
     // This is deliberately identifier-only observability: callers need to
