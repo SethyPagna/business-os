@@ -79,7 +79,7 @@ const NUMERIC_FIELDS = new Set<SaleRecordField>([
 const TEXT_FIELDS = new Set<SaleRecordField>([
   'receipt_number', 'sale_status', 'payment_method', 'cancel_reason', 'cancel_note',
 ])
-const RESPONSE_KEYS = new Set(['success', 'id', 'saleId', 'returnId', 'sale_status', 'status', 'updated_at', 'duplicate'])
+const RESPONSE_KEYS = new Set(['success', 'id', 'saleId', 'returnId', 'sale_status', 'status', 'updated_at', 'duplicate', 'stock_skipped'])
 const SOURCE_RULES: Record<SaleRecordSourceKind, {
   kinds: ReadonlySet<Exclude<SaleRecordKind, 'legacy_sale_change'>>
   replay: boolean
@@ -252,6 +252,8 @@ function validateResponse(value: Record<string, unknown> | null | undefined): st
       if (typeof entry !== 'boolean') fail(`Sales Records retry response ${key} must be boolean.`)
     } else if (key === 'id' || key === 'saleId' || key === 'returnId') {
       if (!Number.isSafeInteger(entry) || Number(entry) <= 0) fail(`Sales Records retry response ${key} must be a positive integer.`)
+    } else if (key === 'stock_skipped') {
+      if (entry !== 1) fail('Sales Records retry response stock_skipped must be 1.')
     } else if (typeof entry !== 'string' || bytes(entry) > 120) {
       fail(`Sales Records retry response ${key} must be bounded text.`)
     }

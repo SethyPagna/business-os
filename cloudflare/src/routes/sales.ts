@@ -33,7 +33,7 @@ import {
   saleSettlementStateStatements,
   type SaleSettlementSnapshot,
 } from '../lib/saleSettlementAction'
-import { assertSaleRecordBatchBounds } from '../lib/saleRecordEvents'
+import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from '../lib/saleRecordEvents'
 import { CUSTOMER_REFUND_JOIN, awaitingExpr, getCustomerSalesTotals, getDeliveryContactTotals, getPaymentMethodBreakdown, getSalesDayReport, getSalesPeriodSeries, getSalesTotals, netRefundExpr, netSaleExpr, recognizedExpr, saleStatusExpr } from '../lib/salesAnalytics'
 import { allocateAcrossLots, decrementBatchStockStatement, decrementBatchStockStrictStatement, readFifoLotAvailabilityForCart, type FifoLotTake } from '../lib/productBatches'
 // S4-24b: adding lines to an EXISTING sale. The rules (which statuses accept
@@ -1504,6 +1504,34 @@ app.patch('/:id/status', async (c) => {
   if (paymentFieldsSent && !settlementRequestId) {
     return c.json({ error: 'client_request_id is required when settling a sale.', code: 'client_request_id_required' }, 400)
   }
+  const statusRequestId = paymentFieldsSent ? null : normalizeClientRequestId(body.client_request_id)
+  const statusSourceId = statusRequestId ? `actor:${Number(user.id)}:request:${statusRequestId}` : null
+  const statusCanonical = statusRequestId ? JSON.stringify({
+    sale_id: Number(id),
+    sale_status: saleStatus,
+    expected_updated_at: getExpectedUpdatedAt(body) ?? null,
+    notes_present: body.notes !== undefined,
+    notes: body.notes === undefined ? null : body.notes == null ? null : String(body.notes),
+    cancel_reason: saleStatus === 'cancelled' ? normalizeCancelReason(body.cancel_reason) : null,
+    cancel_note: saleStatus === 'cancelled' ? String(body.cancel_note || '').trim() || null : null,
+    cancel_fee_usd: saleStatus === 'cancelled' ? round2(Math.max(0, Number(body.cancel_fee_usd) || 0)) : 0,
+    cancel_fee_khr: saleStatus === 'cancelled' ? Math.max(0, Math.round(Number(body.cancel_fee_khr) || 0)) : 0,
+    cancel_fee_note: saleStatus === 'cancelled' ? String(body.cancel_fee_note || '').trim() || null : null,
+    skip_stock: skipStockRequested,
+  }) : null
+  const statusDigest = statusCanonical ? await saleMutationDigest(JSON.parse(statusCanonical)) : null
+  if (statusSourceId && statusDigest) {
+    const previous = await db.prepare(`
+      SELECT request_digest,response_json FROM sale_record_events
+      WHERE source_kind='sale_status' AND source_id=@source AND generation=0
+    `).get<{ request_digest: string | null; response_json: string | null }>({ source: statusSourceId })
+    if (previous) {
+      if (previous.request_digest !== statusDigest) {
+        return c.json({ error: 'client_request_id was already used with different sale status data.', code: 'idempotency_conflict' }, 409)
+      }
+      return c.json(JSON.parse(previous.response_json || '{}') as Record<string, unknown>)
+    }
+  }
   const settlementCanonical = paymentFieldsSent ? JSON.stringify({
     sale_id: Number(id),
     sale_status: saleStatus,
@@ -1551,6 +1579,9 @@ app.patch('/:id/status', async (c) => {
   const oldStatus = sale.sale_status || 'completed'
   if (oldStatus === saleStatus && !paymentFieldsSent) {
     return c.json({ id: Number(id), sale_status: saleStatus, updated_at: sale.updated_at || null })
+  }
+  if (!paymentFieldsSent && !statusRequestId) {
+    return c.json({ error: 'client_request_id is required when changing a sale status.', code: 'client_request_id_required' }, 400)
   }
 
   // Which transitions are legal at all (returns-flow ownership of
@@ -1695,7 +1726,7 @@ app.patch('/:id/status', async (c) => {
   // Stable identity shared by the generic status audit and any richer audit
   // emitted for this same request. Records suppresses a twin only by this
   // identity; actor/status/timestamp proximity is not proof of one act.
-  const statusOperationId = crypto.randomUUID()
+  const statusOperationId = statusSourceId || crypto.randomUUID()
   const statements: Array<{ sql: string; params: Record<string, unknown> }> = [saleRevisionGuard(Number(id), Number(sale.write_revision))]
   const updates = ['sale_status = @sale_status', 'updated_at = @updated_at']
   const updateParams: Record<string, unknown> = { sale_status: saleStatus, id, updated_at: mutationStamp }
@@ -1729,6 +1760,8 @@ app.patch('/:id/status', async (c) => {
   let settlementOperationId: string | null = null
   let settlementHistoryIndex = -1
   let settlementEventBytes = 0
+  let statusEventBytes = 0
+  let directStatusResponse: Record<string, unknown> | null = null
   let settlementLineStatements: Array<{ sql: string; params: Record<string, unknown> }> = []
   let paymentCorrection = false
   if (paymentFieldsSent) {
@@ -1901,6 +1934,40 @@ app.patch('/:id/status', async (c) => {
     updates.push('cancel_fee_id = last_insert_rowid()')
   }
   statements.push({ sql: `UPDATE sales SET ${updates.join(', ')} WHERE id = @id`, params: updateParams })
+  if (!paymentFieldsSent && statusSourceId && statusDigest) {
+    directStatusResponse = {
+      id: Number(id), sale_status: saleStatus, updated_at: mutationStamp,
+      ...(skipStock ? { stock_skipped: 1 } : {}),
+    }
+    const statusChanges: Array<{
+      field: 'sale_status' | 'cancel_reason' | 'cancel_note'
+      before: { state: 'known_value'; value: string } | { state: 'known_none' }
+      after: { state: 'known_value'; value: string } | { state: 'known_none' }
+    }> = [{
+      field: 'sale_status',
+      before: { state: 'known_value', value: oldStatus },
+      after: { state: 'known_value', value: saleStatus },
+    }]
+    if (saleStatus === 'cancelled' && cancelReason) {
+      statusChanges.push({
+        field: 'cancel_reason', before: { state: 'known_none' },
+        after: { state: 'known_value', value: cancelReason },
+      })
+      if (cancelNote) statusChanges.push({
+        field: 'cancel_note', before: { state: 'known_none' },
+        after: { state: 'known_value', value: cancelNote },
+      })
+    }
+    const statusEvent = buildSaleRecordEventsInsert([{
+      saleId: Number(id), sourceKind: 'sale_status', sourceId: statusSourceId,
+      generation: 0, kind: saleStatus === 'cancelled' ? 'cancelled' : 'status_changed', via: 'apply',
+      subject: sale.receipt_number == null ? null : String(sale.receipt_number),
+      actorId: user.id, actorUsername: actorSnapshot(user), occurredAt: mutationStamp,
+      changes: statusChanges, requestDigest: statusDigest, response: directStatusResponse,
+    }])!
+    statusEventBytes = statusEvent.eventsBytes
+    statements.push(statusEvent.statement)
+  }
   if (saleStatus === 'awaiting_payment' && (oldStatus === 'completed' || oldStatus === 'awaiting_delivery')) {
     statements.push({
       sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
@@ -2036,7 +2103,11 @@ app.patch('/:id/status', async (c) => {
 
   statements.push({ sql: 'DELETE FROM sale_bulk_guards', params: {} })
   if (settlementSnapshot) statements.push({ sql: 'DELETE FROM sale_mutation_guards', params: {} })
-  if (settlementSnapshot) assertSaleRecordBatchBounds(statements.length, settlementSnapshot, settlementEventBytes)
+  if (settlementSnapshot || directStatusResponse) {
+    assertSaleRecordBatchBounds(statements.length, settlementSnapshot || {
+      saleId: Number(id), before: oldStatus, after: saleStatus, response: directStatusResponse,
+    }, settlementEventBytes + statusEventBytes)
+  }
   try {
     const results = await db.batch(statements)
     if (settlementResponse && settlementHistoryIndex >= 0) {
@@ -2052,6 +2123,16 @@ app.patch('/:id/status', async (c) => {
       if (retry) {
         if (retry.request_digest === settlementDigest) return c.json(JSON.parse(retry.response_json) as Record<string, unknown>)
         return c.json({ error: 'client_request_id was already used with different settlement data.', code: 'idempotency_conflict' }, 409)
+      }
+    }
+    if (statusSourceId && statusDigest) {
+      const retry = await db.prepare(`
+        SELECT request_digest,response_json FROM sale_record_events
+        WHERE source_kind='sale_status' AND source_id=@source AND generation=0
+      `).get<{ request_digest: string | null; response_json: string | null }>({ source: statusSourceId })
+      if (retry) {
+        if (retry.request_digest === statusDigest) return c.json(JSON.parse(retry.response_json || '{}') as Record<string, unknown>)
+        return c.json({ error: 'client_request_id was already used with different sale status data.', code: 'idempotency_conflict' }, 409)
       }
     }
     if (/guard_value/i.test(message)) {
@@ -2070,6 +2151,9 @@ app.patch('/:id/status', async (c) => {
 
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'sale', id, {
     operationId: settlementOperationId || statusOperationId,
+    ...(!paymentFieldsSent && statusSourceId ? { record_event: {
+      source_kind: 'sale_status', source_id: statusSourceId, generation: 0, sale_id: Number(id),
+    } } : {}),
     oldStatus,
     newStatus: saleStatus,
     ...(cancelReason ? { cancelReason, cancelNote, cancelFeeUsd, cancelFeeKhr } : {}),
@@ -2096,7 +2180,7 @@ app.patch('/:id/status', async (c) => {
       : []),
   ]))
   const updated = await db.prepare('SELECT id, sale_status, updated_at FROM sales WHERE id = ?').get<{ id: number; sale_status: string; updated_at: string }>([id])
-  const payload = settlementResponse || updated || { id: Number(id), sale_status: saleStatus }
+  const payload = settlementResponse || directStatusResponse || updated || { id: Number(id), sale_status: saleStatus }
   // S4-6: name who made the change. The actor is the request's authenticated
   // user (requireAuth, above) -- known synchronously here regardless of
   // whether it is ALSO persisted for later in-app display (that is S4-11b's

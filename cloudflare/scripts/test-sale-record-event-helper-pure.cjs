@@ -60,6 +60,8 @@ assert.throws(() => subject.buildSaleRecordEventsInsert([base({
 assert.throws(() => subject.buildSaleRecordEventsInsert([base({ response: { success: true, raw: 'forbidden' } })]), /unsupported keys/)
 assert.throws(() => subject.buildSaleRecordEventsInsert([base({ response: { success: { private: true }, id: { private: true }, duplicate: ['private'] } })]), /must be boolean/,
   'retry response allowlists scalar value types as well as keys')
+assert.doesNotThrow(() => subject.buildSaleRecordEventsInsert([base({ response: { id: 1, sale_status: 'completed', updated_at: '2026-09-08T00:00:00.000Z', stock_skipped: 1 } })]))
+assert.throws(() => subject.buildSaleRecordEventsInsert([base({ response: { stock_skipped: 0 } })]), /must be 1/)
 assert.throws(() => subject.buildSaleRecordEventsInsert([base({
   kind: 'item_added',
   changes: [change('item', none, known({ sale_item_id: 1, product_id: 1, name: 'A', sku: null, unit_price_usd: 1, line_total_usd: 1 }))],

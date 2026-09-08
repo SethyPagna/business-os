@@ -255,12 +255,23 @@ async function run() {
 
   correction.sql.prepare("UPDATE sales SET sale_status='completed',updated_at='correction-v1' WHERE id=1").run()
   const correctionStockBefore = correction.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity
-  const reopened = await correction.call('/1/status', {
+  const reopenRequest = {
     sale_status: 'awaiting_payment',
     expected_updated_at: 'correction-v1',
-  })
+    client_request_id: 'payment-correction-reopen',
+  }
+  const reopened = await correction.call('/1/status', reopenRequest)
   assert.equal(reopened.status, 200, JSON.stringify(reopened))
   assert.equal(correction.sql.prepare("SELECT COUNT(*) n FROM audit_logs WHERE action='sale_payment_correction_opened' AND entity_id='1'").get().n, 1)
+  const reopenEvent = correction.sql.prepare("SELECT * FROM sale_record_events WHERE source_kind='sale_status'").get()
+  assert.equal(reopenEvent.source_id, 'actor:1:request:payment-correction-reopen')
+  assert.deepEqual([reopenEvent.kind,reopenEvent.via,reopenEvent.generation], ['status_changed','apply',0])
+  assert.deepEqual(JSON.parse(reopenEvent.changes_json), [{
+    field: 'sale_status', before: { state: 'known_value', value: 'completed' }, after: { state: 'known_value', value: 'awaiting_payment' },
+  }])
+  assert.deepEqual(JSON.parse(reopenEvent.response_json), reopened.body)
+  assert.deepEqual(await correction.call('/1/status', reopenRequest), reopened, 'exact retry returns the first stored status response')
+  assert.equal((await correction.call('/1/status', { ...reopenRequest, notes: 'different intent' })).body.code, 'idempotency_conflict')
   const reopenedRevision = correction.sql.prepare('SELECT updated_at FROM sales WHERE id=1').get().updated_at
   const corrected = await correction.call('/1/status', {
     sale_status: 'completed',
@@ -294,10 +305,44 @@ async function run() {
     ['completed','ABA Bank',5],
   )
   assert.deepEqual(
-    correction.sql.prepare('SELECT generation,kind,via FROM sale_record_events ORDER BY generation').all(),
+    correction.sql.prepare("SELECT generation,kind,via FROM sale_record_events WHERE source_kind='sale_settlement' ORDER BY generation").all(),
     [{ generation: 0, kind: 'payment_changed', via: 'apply' }, { generation: 1, kind: 'payment_changed', via: 'undo' }, { generation: 2, kind: 'payment_changed', via: 'redo' }],
   )
   console.log('PASS completed-to-awaiting marker authorizes one atomic payment replacement with receipt, stock invariance, undo, and redo')
+
+  const missingStatusKey = fixture(); seed(missingStatusKey)
+  const missingStatusKeyResult = await missingStatusKey.call('/1/status', {
+    sale_status: 'completed', expected_updated_at: 'sale-v1',
+  })
+  assert.equal(missingStatusKeyResult.status, 400, JSON.stringify(missingStatusKeyResult))
+  assert.equal(missingStatusKeyResult.body.code, 'client_request_id_required')
+  assert.equal(missingStatusKey.sql.prepare('SELECT COUNT(*) n FROM sale_record_events').get().n, 0)
+
+  const directRace = fixture(); seed(directRace)
+  directRace.barrier(() => directRace.sql.prepare("UPDATE sales SET notes='concurrent' WHERE id=1").run())
+  const directRaceResult = await directRace.call('/1/status', {
+    sale_status: 'completed', expected_updated_at: 'sale-v1', client_request_id: 'direct-status-race',
+  })
+  assert.equal(directRaceResult.status, 409, JSON.stringify(directRaceResult))
+  assert.equal(directRace.sql.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status, 'awaiting_payment')
+  assert.equal(directRace.sql.prepare('SELECT COUNT(*) n FROM sale_record_events').get().n, 0)
+  console.log('PASS direct status requires a stable request id and its sale mutation/event roll back together on a revision race')
+
+  const cancelled = fixture(); seed(cancelled)
+  const cancelledResult = await cancelled.call('/1/status', {
+    sale_status: 'cancelled', expected_updated_at: 'sale-v1', client_request_id: 'direct-cancel-1',
+    cancel_reason: 'other', cancel_note: 'Customer changed their mind',
+  })
+  assert.equal(cancelledResult.status, 200, JSON.stringify(cancelledResult))
+  const cancelledEvent = cancelled.sql.prepare("SELECT kind,changes_json,response_json FROM sale_record_events WHERE source_kind='sale_status'").get()
+  assert.equal(cancelledEvent.kind, 'cancelled')
+  assert.deepEqual(JSON.parse(cancelledEvent.changes_json), [
+    { field: 'sale_status', before: { state: 'known_value', value: 'awaiting_payment' }, after: { state: 'known_value', value: 'cancelled' } },
+    { field: 'cancel_reason', before: { state: 'known_none' }, after: { state: 'known_value', value: 'other' } },
+    { field: 'cancel_note', before: { state: 'known_none' }, after: { state: 'known_value', value: 'Customer changed their mind' } },
+  ])
+  assert.deepEqual(JSON.parse(cancelledEvent.response_json), cancelledResult.body)
+  console.log('PASS direct cancellation records only the changed status, reason, and supplied note with its exact retry response')
 
   const raced = fixture(); seed(raced)
   raced.barrier(() => raced.sql.prepare("UPDATE sales SET notes='concurrent' WHERE id=1").run())
