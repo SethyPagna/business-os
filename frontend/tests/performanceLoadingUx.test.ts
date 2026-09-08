@@ -3131,7 +3131,7 @@ assert.match(
 )
 assert.match(
   filesPage,
-  /withLoaderTimeout\(\(\) => filesApi\.getFiles\(\{[\s\S]{0,180}includeMeta: true,[\s\S]{0,80}\}\), 'Files library', FILES_LIBRARY_LOAD_TIMEOUT_MS\)/,
+  /withLoaderTimeout\(\(\) => filesApi\.getFiles\(\{[\s\S]{0,180}includeMeta: true,[\s\S]{0,140}\}, \{[\s\S]{0,80}searchGroup: 'files:library-assets'/,
   'files page library should timeout slow file reads',
 )
 assert.doesNotMatch(

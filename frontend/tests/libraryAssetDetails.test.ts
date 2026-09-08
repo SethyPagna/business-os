@@ -78,7 +78,16 @@ runTest('8.1/F57: the details modal shows promotions as protected, not rewritabl
   assert.match(pageSource, /const referenceCount = usage \? usage\.covers\.length \+ usage\.gallery\.length \+ usage\.avatars\.length : 0/)
   // the page passes the real gate + refresh through
   assert.match(pageSource, /canManage=\{canManageLibrary\}/)
-  assert.match(pageSource, /onRewired=\{\(\) => \{ void loadFiles\(\) \}\}/)
+  assert.match(pageSource, /onRewired=\{\(\) => \{ void loadFiles\(\{ refreshMeta: true \}\) \}\}/)
+})
+
+runTest('F71: the focused adapter preserves the library search ownership and storage refresh cannot be acknowledged by a search', () => {
+  assert.match(pageSource, /getFiles: \(options, requestOptions\) => getFilesRequest\(options, requestOptions\)/)
+  assert.match(pageSource, /searchGroup: 'files:library-assets'/)
+  assert.match(pageSource, /const storageMetaRefreshNeededRef = useRef\(true\)/)
+  assert.match(pageSource, /if \(refreshMeta\) storageMetaRefreshNeededRef\.current = true/)
+  assert.match(pageSource, /const includeMeta = storageMetaRefreshNeededRef\.current \|\| !filesLoadedOnceRef\.current/)
+  assert.match(pageSource, /if \(includeMeta && Object\.prototype\.hasOwnProperty\.call\(result, 'physicalStorage'\)\) \{[\s\S]*storageMetaRefreshNeededRef\.current = false/)
 })
 
 if (failed > 0) {
