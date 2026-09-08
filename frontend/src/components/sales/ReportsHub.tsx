@@ -50,6 +50,7 @@ import {
   isReportViewId,
   normalizeReportOptions,
   normalizeReportStyle,
+  persistReportStyleChoice,
   readStoredJson,
   resolveReportView,
   visibleReportViews,
@@ -132,7 +133,7 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
   const style: ReportStyle = styleChoice ?? defaultReportStyle(compact)
   useEffect(() => { setViewId((cur) => resolveReportView(cur, perms)) }, [perms])
   useEffect(() => { if (viewId) writeStoredJson(storage, REPORT_STORAGE_KEYS.view, viewId) }, [viewId, storage])
-  useEffect(() => { if (styleChoice) writeStoredJson(storage, REPORT_STORAGE_KEYS.style, styleChoice) }, [styleChoice, storage])
+  useEffect(() => { persistReportStyleChoice(storage, styleChoice) }, [styleChoice, storage])
   useEffect(() => { writeStoredJson(storage, REPORT_STORAGE_KEYS.options, options) }, [options, storage])
   const view = viewId ? getReportView(viewId) : null
   const supportsTime = !!view?.supportsTime
