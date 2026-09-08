@@ -137,6 +137,15 @@ function loadUndoAppliers(d1) {
     './saleAmendments': {
       amendmentEntryStatement: () => ({ sql: 'SELECT 1', params: {} }),
     },
+    // F65 registers the product.remove applier in the shared module. This
+    // harness exercises product merge replay only, so keep removal behavior
+    // inert while allowing the real undoAppliers source to load.
+    './productDelete': {
+      PRODUCT_REMOVE_ACTION_KIND: 'product.remove',
+      parseProductRemoveSnapshot: (value) => value,
+      productRemovePlanDigest: async () => '',
+      productRemoveReplayStatements: () => [],
+    },
   }
   const src = fs.readFileSync(path.join(LIB_DIR, 'undoAppliers.ts'), 'utf8')
   const { outputText } = ts.transpileModule(src, {

@@ -90,16 +90,17 @@ function wrapDb(sqlite) {
         inject(sqlite)
       }
       const tx = sqlite.transaction((stmts) => {
-        for (const s of stmts) {
+        return stmts.map((s) => {
           const st = sqlite.prepare(s.sql)
-          const execute = st.reader ? 'get' : 'run'
-          if (s.params == null) st[execute]()
-          else if (Array.isArray(s.params)) st[execute](...s.params)
-          else st[execute](s.params)
-        }
+          const invoke = (method) => s.params == null
+            ? st[method]()
+            : Array.isArray(s.params) ? st[method](...s.params) : st[method](s.params)
+          if (st.reader) return { results: invoke('all') }
+          const result = invoke('run')
+          return { results: [], changes: result.changes, meta: { changes: result.changes } }
+        })
       })
-      tx(statements)
-      return Promise.resolve()
+      return Promise.resolve(tx(statements))
     },
   }
 }
@@ -190,6 +191,15 @@ const undoAppliers = loadModule('lib/undoAppliers.ts', (id) => {
   // test-sale-amendments-pure.cjs.
   if (id === './saleAmendments') return {
     amendmentEntryStatement: () => ({ sql: 'SELECT 1', params: {} }),
+  }
+  // F65 registers product.remove beside the appliers exercised here. Stub its
+  // dependency so this focused harness can continue loading the real registry
+  // without executing the separately covered removal kernel.
+  if (id === './productDelete') return {
+    PRODUCT_REMOVE_ACTION_KIND: 'product.remove',
+    parseProductRemoveSnapshot: (value) => value,
+    productRemovePlanDigest: async () => '',
+    productRemoveReplayStatements: () => [],
   }
   return require(id)
 })
@@ -283,6 +293,10 @@ async function productMergeGroupFixture() {
     CREATE TABLE products(id INTEGER PRIMARY KEY,is_active INTEGER,updated_at TEXT,image_path TEXT,barcode TEXT,
       category TEXT,categories TEXT,brand TEXT,brands TEXT,unit TEXT,unit_normalized TEXT,brand_compact TEXT,stock_quantity REAL);
     CREATE TABLE branch_stock(product_id INTEGER,branch_id INTEGER,quantity REAL,rfid_confirmed_qty REAL,PRIMARY KEY(product_id,branch_id));
+    CREATE TABLE product_batches(id INTEGER PRIMARY KEY,variant_product_id INTEGER,batch_key TEXT,batch_number INTEGER,is_active INTEGER,updated_at TEXT);
+    CREATE TABLE branch_batch_stock(batch_id INTEGER,branch_id INTEGER,quantity REAL,updated_at TEXT,PRIMARY KEY(batch_id,branch_id));
+    CREATE TABLE product_images(id INTEGER PRIMARY KEY,product_id INTEGER,image_path TEXT,sort_order INTEGER);
+    CREATE TABLE stock_session_members(operation_id TEXT,product_id INTEGER);
     CREATE TABLE inventory_movements(id INTEGER PRIMARY KEY,product_id INTEGER,movement_type TEXT,reason TEXT);
     CREATE TABLE undo_snapshots(id INTEGER PRIMARY KEY,kind TEXT,status TEXT,payload_json TEXT,created_by_id INTEGER,updated_at TEXT);
     CREATE TABLE action_history(id INTEGER PRIMARY KEY,status TEXT,undo_payload TEXT,redo_payload TEXT,last_error TEXT,created_by_id INTEGER,updated_at TEXT);
