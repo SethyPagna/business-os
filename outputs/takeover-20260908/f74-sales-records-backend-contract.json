@@ -88,7 +88,7 @@
     "legacy_sale_change": []
   },
   "typed_values": {
-    "customer": { "id": "number|null", "name": "string|null", "phone": "string|null", "address": "string|null" },
+    "customer": { "id": "number|null", "name": "string|null" },
     "membership": { "number": "string|null", "discount_usd": "number|null", "discount_khr": "number|null", "points_redeemed": "number|null" },
     "driver": { "id": "number|null", "name": "string|null", "phone": "string|null", "address": "string|null" },
     "item": { "sale_item_id": "number|null", "product_id": "number|null", "name": "string|null", "sku": "string|null", "unit_price_usd": "number|null", "line_total_usd": "number|null" },
@@ -99,6 +99,7 @@
     "General customer_id null is known_none, never unknown.",
     "An absent legacy customer or membership snapshot is unknown, never fabricated from the current contact.",
     "Customer, membership, driver, item and actor labels are write-time snapshots and are never resolved through mutable current rows.",
+    "Customer Records retain only stable id and display name. They do not add immutable phone or address copies; full contact data remains on authorized sale details.",
     "A genuine historical sale event that cannot be mapped narrowly is legacy_sale_change with changes=[]; render Earlier sale change and historical details unavailable without raw variables.",
     "Rows sharing one replacement group_id and direction form one items_replaced record.",
     "Durable receipt generation preserves one original record and every Undo/Redo record even after ordinary audit pruning; unavailable replay actor/time stay null and provenance_unknown=true.",

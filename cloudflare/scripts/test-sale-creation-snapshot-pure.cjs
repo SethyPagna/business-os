@@ -60,7 +60,7 @@ const validInput = {
   deliveryContactPhone: '012345678',
   deliveryFeeUsd: 2,
   deliveryActualCostUsd: 1.5,
-  customerSnapshot: { id: 42, name: 'Customer At Sale', phone: '010000001', address: 'Recorded address' },
+  customerSnapshot: { id: 42, name: 'Customer At Sale' },
   membershipSnapshot: { number: 'MEM-42', discountUsd: 1, discountKhr: 0, pointsRedeemed: 25 },
 }
 
@@ -92,8 +92,6 @@ assert.deepEqual(snapshot.delivery, {
 assert.deepEqual(snapshot.customer, {
   id: 42,
   name: 'Customer At Sale',
-  phone: '010000001',
-  address: 'Recorded address',
 })
 assert.deepEqual(snapshot.membership, {
   number: 'MEM-42',
@@ -188,6 +186,8 @@ for (const [file, origin] of [
   const writer = source(file)
   assert.match(writer, origin, `${file} must identify its creation origin`)
   assert.match(writer, /creation_snapshot_json/, `${file} must persist the envelope in the sale insert`)
+  assert.match(writer, /customerSnapshot:/, `${file} must decide captured customer evidence explicitly`)
+  assert.match(writer, /membershipSnapshot:/, `${file} must decide captured membership evidence explicitly`)
 }
 assert.match(source('lib/backup.ts'), /export const BACKUP_TABLES = \[[\s\S]*?'sales'/, 'sales snapshot column rides the existing sales backup')
 

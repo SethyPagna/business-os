@@ -907,6 +907,16 @@ app.post('/', async (c) => {
       deliveryContactPhone: deliveryContact?.phone,
       deliveryFeeUsd,
       deliveryActualCostUsd,
+      customerSnapshot: customer ? {
+        id: customer.id,
+        name: body.customer_name || customer.name || null,
+      } : null,
+      membershipSnapshot: customer?.membership_number ? {
+        number: customer.membership_number,
+        discountUsd: membershipDiscountUsd,
+        discountKhr: membershipDiscountKhr,
+        pointsRedeemed: membershipPointsRedeemed,
+      } : null,
     })
   } catch (error) {
     if (error instanceof SaleCreationSnapshotError) return c.json({ error: error.message }, 400)
@@ -1679,6 +1689,10 @@ app.patch('/:id/status', async (c) => {
   }
 
   const mutationStamp = new Date().toISOString()
+  // Stable identity shared by the generic status audit and any richer audit
+  // emitted for this same request. Records suppresses a twin only by this
+  // identity; actor/status/timestamp proximity is not proof of one act.
+  const statusOperationId = crypto.randomUUID()
   const statements: Array<{ sql: string; params: Record<string, unknown> }> = [saleRevisionGuard(Number(id), Number(sale.write_revision))]
   const updates = ['sale_status = @sale_status', 'updated_at = @updated_at']
   const updateParams: Record<string, unknown> = { sale_status: saleStatus, id, updated_at: mutationStamp }
@@ -1892,6 +1906,7 @@ app.patch('/:id/status', async (c) => {
         actorName: actorSnapshot(user),
         saleId: String(id),
         details: JSON.stringify({
+          operationId: statusOperationId,
           oldStatus,
           newStatus: saleStatus,
           reason: 'completed_sale_reopened_for_payment_correction',
@@ -2031,6 +2046,7 @@ app.patch('/:id/status', async (c) => {
   }
 
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'sale', id, {
+    operationId: settlementOperationId || statusOperationId,
     oldStatus,
     newStatus: saleStatus,
     ...(cancelReason ? { cancelReason, cancelNote, cancelFeeUsd, cancelFeeKhr } : {}),
