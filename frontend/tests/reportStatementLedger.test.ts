@@ -29,7 +29,10 @@ assert.match(excel, /total \? '' : 'pl-\[calc\(var\(--ui-cell-px,12px\)\+1rem\)\
 assert.match(excel, /\{total \? null : <span[^>]*>\{statementOperator\(l\.kind\)\}<\/span>\}/, 'the operator sits inside the label, only on detail lines')
 assert.match(excel, /<td[^>]*>\{total \? '' : amount\}<\/td>/, 'inner column carries detail amounts only')
 assert.match(excel, /\{total \? \([\s\S]*?\) : ''\}/, 'outer column carries totals only')
-assert.match(excel, /l\.headline\s*\?\s*<span[^>]*bg-\[var\(--ui-ink\)\][^>]*>\{amount\}<\/span>/, 'the headline total is badged')
+assert.match(excel, /l\.headline\s*\?\s*<span[^>]*bg-\[var\(--ui-ink\)\][\s\S]*?>\{amount\}<\/span>/, 'the headline total is badged')
+assert.match(excel, /l\.tone === 'positive' \? 'text-green-300 dark:text-green-700'/, 'a positive selected Total/Final Profit keeps a green foreground on the ink badge')
+assert.match(excel, /l\.tone === 'negative' \? 'text-red-300 dark:text-red-700'/, 'a negative selected Total/Final Profit keeps a red foreground on the ink badge')
+assert.match(excel, /: 'text-\[var\(--ui-surface\)\]'/, 'an untoned selected headline retains the neutral high-contrast foreground')
 assert.equal((excel.match(/fmtMoney\(l\.usd, l\.khr\)/g) || []).length, 1, 'one formatter call per line feeds both columns')
 
 // Delivery keeps a caption because its memo rows need one shared heading.
