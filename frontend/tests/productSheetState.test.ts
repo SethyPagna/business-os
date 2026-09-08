@@ -7,6 +7,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { branchAllowsSale, deriveProductSheetState, resolveSaleBranch } from '../src/components/pos/productSheetState.ts'
+import { findMatchingCartLineIndex } from '../src/components/pos/posCore.ts'
 import {
   BRANCH_RULE_CODE_KEYS,
   BRANCH_RULE_MESSAGE_KEYS,
@@ -38,6 +39,15 @@ const branchStock = (shop: number, warehouse: number) => ([
   { branch_id: 2, branch_name: 'Shop', quantity: shop },
   { branch_id: 1, branch_name: 'Warehouse', quantity: warehouse },
 ])
+
+await runTest('explicit unrecorded stock reuses its own cart intent without absorbing regular lines', () => {
+  const cart = [
+    { id: 51, price_mode: 'selling', branch_id: 2, quantity: 1, unlotted_stock: true },
+    { id: 51, price_mode: 'selling', branch_id: 2, quantity: 1 },
+  ]
+  assert.equal(findMatchingCartLineIndex(cart as never, { productId: 51, priceMode: 'selling', branchId: 2, unlottedStock: true }), 0)
+  assert.equal(findMatchingCartLineIndex(cart as never, { productId: 51, priceMode: 'selling', branchId: 2, unlottedStock: false }), 1)
+})
 
 await runTest('branch roles come from the name, never from is_default', () => {
   assert.equal(branchRoleFromName('Warehouse'), 'warehouse')
