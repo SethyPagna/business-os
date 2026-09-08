@@ -410,6 +410,9 @@ app.post('/', async (c) => {
     if (!Number.isFinite(quantity) || quantity <= 0) {
       return c.json({ error: `Sale item #${index + 1} has an invalid quantity` }, 400)
     }
+    if (item.unlotted_stock !== undefined && typeof item.unlotted_stock !== 'boolean') {
+      return c.json({ error: `Sale item #${index + 1} has an invalid unlotted_stock flag` }, 400)
+    }
     const lineBranchId = Number(item.branch_id ?? saleHeaderBranchId)
     if (!Number.isSafeInteger(lineBranchId) || lineBranchId <= 0 || lineBranchId !== saleHeaderBranchId) {
       return c.json({ error: 'The sale header and every line must use the same Shop branch.' }, 400)

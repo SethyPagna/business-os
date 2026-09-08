@@ -74,10 +74,13 @@ function generateBatchKey(): string {
 
 // GET /api/batches/tracked-product-ids -- product ids the POS should force
 // through the batch-picker (ProductDetailSheet) instead of a one-tap add.
-// A product counts as "tracked" if it has at least one active batch; when
-// branchId is given, further scoped to products that actually have a
-// branch_batch_stock row at that branch (a product batch-tracked only at
-// other branches shouldn't force the picker here).
+// A product counts as tracked when it has an active scoped lot (including a
+// zero-quantity row, preserving the existing picker gate) OR an inactive lot
+// with positive known stock. Inactive rows remain absent from the received-date
+// picker, but their provenance must still make POS load the scoped scalar that
+// prevents their units being offered as date-less stock. When branchId is
+// given, scope to that branch so another branch's lots do not force this
+// picker here.
 // Per-product batch COUNT for a list badge (Products + Inventory). The list
 // reads deliberately do NOT ship every product's full batch array
 // (production has ~6,700 batches -- the detail view loads them on demand),
@@ -280,11 +283,14 @@ export async function getTrackedProductIds(db: D1Compat, branchId: number | null
   const sql = branchId
     ? `SELECT DISTINCT pb.variant_product_id AS productId
        FROM product_batches pb
-       JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id AND bbs.branch_id = @branchId
-       WHERE pb.is_active = 1`
+       JOIN branch_batch_stock bbs
+         ON bbs.batch_id = pb.id
+        AND bbs.branch_id = @branchId
+       WHERE pb.is_active = 1 OR bbs.quantity > 0`
     : `SELECT DISTINCT pb.variant_product_id AS productId
        FROM product_batches pb
-       WHERE pb.is_active = 1`
+       WHERE pb.is_active = 1
+          OR EXISTS (SELECT 1 FROM branch_batch_stock bbs WHERE bbs.batch_id = pb.id AND bbs.quantity > 0)`
   const rows = await db.prepare(sql).all<{ productId: number }>(branchId ? { branchId } : {})
   return rows.map((row) => Number(row.productId)).filter((id) => Number.isFinite(id))
 }

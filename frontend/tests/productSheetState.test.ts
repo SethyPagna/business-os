@@ -624,6 +624,49 @@ await runTest('Shop exposes only its genuine unrecorded remainder beside recorde
   assert.equal(full.unlottedStockQuantity, 0, 'fully tracked Shop stock offers no invented remainder')
 })
 
+await runTest('authoritative known lots bound the unrecorded Shop choice while inactive lots stay unselectable', () => {
+  const product = { id: 145, name: 'Inactive-known lot', branch_stock: branchStock(10, 0), stock_quantity: 10 }
+  const state = deriveProductSheetState({
+    product,
+    trackedBatchProductIds: new Set([145]),
+    // This is the existing active picker array: the inactive positive lot is
+    // intentionally absent and never becomes a received-date option.
+    batches: [{ id: 805, quantity: 2, received_at: '2026-09-01' }],
+    knownPositiveBatchQuantityByProduct: { 145: 7 },
+    selectedUnlottedStock: true,
+  })
+  assert.equal(state.receivedDateOptions.length, 1)
+  assert.equal(state.receivedDateTotal, 2)
+  assert.equal(state.unlottedStockQuantity, 3)
+  assert.equal(state.displayedStock, 3)
+  assert.equal(state.batchReadyToSell, true)
+
+  const inactiveOnly = deriveProductSheetState({
+    product,
+    trackedBatchProductIds: new Set([145]),
+    // No active picker rows is distinct from no known lot coverage: an
+    // inactive known lot remains hidden but still leaves only three units.
+    batches: [],
+    knownPositiveBatchQuantityByProduct: { 145: 7 },
+    selectedUnlottedStock: true,
+  })
+  assert.equal(inactiveOnly.receivedDateOptions.length, 0)
+  assert.equal(inactiveOnly.unlottedStockQuantity, 3)
+  assert.equal(inactiveOnly.batchReadyToSell, true)
+
+  const pending = deriveProductSheetState({
+    product,
+    trackedBatchProductIds: new Set([145]),
+    batches: [],
+    // The POS sends an empty map while the authoritative list has not
+    // returned, so it must not infer that all ten are unrecorded.
+    knownPositiveBatchQuantityByProduct: {},
+    selectedUnlottedStock: true,
+  })
+  assert.equal(pending.unlottedStockQuantity, 0)
+  assert.equal(pending.batchReadyToSell, false)
+})
+
 await runTest('Warehouse-only or zero-Shop lots do not consume the selectable Shop remainder', () => {
   const product = { id: 142, name: 'Shop legacy', branch_stock: branchStock(6, 2), stock_quantity: 8 }
   const state = deriveProductSheetState({ product, trackedBatchProductIds: new Set([142]), batches: [{ id: 802, quantity: 0 }] })
