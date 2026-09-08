@@ -184,6 +184,11 @@ async function main() {
   await expectAuthorityError(engine.assertCurrentImportApplyAuthority({}, activeState.job), 'products:import')
   console.log('PASS current section import action override is rechecked')
 
+  activeState = makeState(actor({ contacts: true, 'contacts:bulk': false, 'contacts:import': true }))
+  activeState.job.type = 'customers'
+  await expectAuthorityError(engine.assertCurrentImportApplyAuthority({}, activeState.job), 'contacts:bulk')
+  console.log('PASS contact import apply rechecks the umbrella bulk capability')
+
   activeState = makeState(actor({ products: true, 'products:image': false }))
   const allowed = await engine.assertCurrentImportApplyAuthority({}, activeState.job)
   assert.equal(allowed.allowProductImageWrites, false)

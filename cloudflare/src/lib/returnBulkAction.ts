@@ -334,7 +334,7 @@ function returnSaleRecordEvents(snapshot: Snapshot, generation: number, via: 'ap
 }
 
 function permission(user: SessionUser): void {
-  if (getActionTier(user, 'returns', 'edit') !== 'full') fail('Full Access to Returns is required.', 403)
+  if (getActionTier(user, 'returns', 'bulk') !== 'full') fail('Bulk Returns access is required.', 403)
 }
 
 async function buildMembers(db: D1Compat, request: BulkRequest): Promise<{ members: Member[]; guards: Statement[] }> {

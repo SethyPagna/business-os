@@ -85,6 +85,7 @@ interface ReturnsListSurfaceProps {
   scope: string
   selectAllRef: RefObject<HTMLInputElement>
   selectedIds: Set<number>
+  selectionEnabled: boolean
   // 11.1/11.2 (B6), same selection model as Products/Inventory/Sales:
   // checkboxes and the select column only exist while something IS
   // selected; enter select mode by long-pressing a row (click-and-hold
@@ -159,6 +160,7 @@ export default function ReturnsListSurface({
   scope,
   selectAllRef,
   selectedIds,
+  selectionEnabled,
   selectionModeActive,
   getReturnLongPressState,
   setDetailRet,
@@ -306,7 +308,7 @@ export default function ReturnsListSurface({
                           // Inventory/Sales rows.
                           const rowLongPressState = getReturnLongPressState(Number(ret.id))
                           const longPress = createLongPressHandlers(rowLongPressState, {
-                            disabled: selectionModeActive,
+                            disabled: !selectionEnabled || selectionModeActive,
                             onLongPress: () => toggleSelected(ret.id),
                             onClick: () => setDetailRet(ret),
                           })
@@ -457,7 +459,7 @@ export default function ReturnsListSurface({
                     // interactive at a given viewport width).
                     const cardLongPressState = getReturnLongPressState(Number(ret.id))
                     const cardLongPress = createLongPressHandlers(cardLongPressState, {
-                      disabled: selectionModeActive,
+                      disabled: !selectionEnabled || selectionModeActive,
                       onLongPress: () => toggleSelected(ret.id),
                       onClick: () => setDetailRet(ret),
                     })

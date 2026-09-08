@@ -163,7 +163,13 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     // PATCH /:id -> 403 for review (returns.ts ~781): editing reverses and
     // re-applies batch restocking against live state.
     { key: 'edit', tKey: 'perm_act_returns_edit', label: 'Edit return', review: 'block' },
-    // There is no third returns action. The retired one gated settling a
+    // Multi-return field/status updates and their grouped Undo/Redo share
+    // one explicit capability. Individual create/edit remain independent.
+    { key: 'bulk', tKey: 'perm_act_returns_bulk', label: 'Change multiple returns at once', review: 'block' },
+    // Client-side export uses rows already visible to the caller. The action
+    // still controls whether the export UI can package those rows.
+    { key: 'export', tKey: 'perm_act_returns_export', label: 'Export returns', review: 'block' },
+    // There is no returns import action. The retired action gated settling a
     // price difference on an uneven replacement exchange; a return no longer
     // nets against its replacement, so there is no difference to settle and
     // nothing to gate. Removed rather than left unreachable -- a permission
@@ -191,6 +197,10 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     { key: 'edit', tKey: 'perm_act_contacts_edit', label: 'Edit contact (name only)', review: 'limited' },
     // DELETE -> 403 for review (contacts.ts ~710)
     { key: 'delete', tKey: 'perm_act_contacts_delete', label: 'Delete contact', review: 'block' },
+    // Selection mode, multi-row mutations, merge/import workflows, and their
+    // replay entry points require this umbrella capability in addition to
+    // any narrower action switch below.
+    { key: 'bulk', tKey: 'perm_act_contacts_bulk', label: 'Select and change multiple contacts', review: 'block' },
     // POST /bulk-delete-jobs -> 403 for review (contacts.ts ~748)
     { key: 'bulk_delete', tKey: 'perm_act_contacts_bulk_delete', label: 'Bulk delete', review: 'block' },
     // POST /merge -> 403 for review (contacts.ts ~492)

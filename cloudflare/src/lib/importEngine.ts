@@ -354,6 +354,9 @@ export async function assertCurrentImportApplyAuthority(
     throw new ImportApplyAuthorizationError(missingPermission, `The user who authorized this import no longer has ${missingPermission} permission.`)
   }
   const section = importActionSection(job.type)
+  if (section === 'contacts' && isActionBlocked(actor, 'contacts', 'bulk')) {
+    throw new ImportApplyAuthorizationError('contacts:bulk', 'The user who authorized this import no longer has contacts:bulk permission.')
+  }
   if (isActionBlocked(actor, section, 'import')) {
     throw new ImportApplyAuthorizationError(`${section}:import`, `The user who authorized this import no longer has ${section}:import permission.`)
   }

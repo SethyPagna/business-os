@@ -323,6 +323,8 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
   // returned 403 on click. Creating a return is deliberately NOT gated here:
   // that tier is allowed to create directly, and the route has no extra check.
   const canEditReturn = can('returns', 'edit')
+  const canBulkReturns = can('returns', 'bulk')
+  const canExportReturns = can('returns', 'export')
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
   const cleanFallback = useCallback((fallbackEn: string, fallbackKm?: string): string => {
     const candidate = fallbackKm || fallbackEn
@@ -352,7 +354,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
   // checkboxes only exist while something is selected; long-press a
   // row/card to enter select mode; the desktop column-header checkbox is
   // select-all. Ends automatically once the last item is deselected.
-  const selectionModeActive = selectedIds.size > 0
+  const selectionModeActive = canBulkReturns && selectedIds.size > 0
   const returnLongPressStateByRowIdRef = useRef<Map<number, LongPressState>>(new Map())
   const getReturnLongPressState = useCallback((rowId: number): LongPressState => {
     const existing = returnLongPressStateByRowIdRef.current.get(rowId)
@@ -398,6 +400,11 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
   const actionHistory = useActionHistory({ limit: 8, notify, scope: 'returns', enabled: historyReady, user })
   const bulkRetryKey = `returns.bulk.retry:${user?.id || 'anonymous'}`
   const [bulkRetryRevision, setBulkRetryRevision] = useState(0)
+  useEffect(() => {
+    if (canBulkReturns) return
+    setSelectedIds(new Set())
+    setBulkActionSnapshot(null)
+  }, [canBulkReturns])
   const initialPendingHistoryRequest = loadPendingDirectMutationSlot<PreparedReturnUpdateRequest>('return-history', user?.id)
   const [pendingHistoryRequest, setPendingHistoryRequest] = useState<PendingDirectMutation<PreparedReturnUpdateRequest> | null>(initialPendingHistoryRequest)
   const pendingHistoryRequestRef = useRef<PendingDirectMutation<PreparedReturnUpdateRequest> | null>(initialPendingHistoryRequest)
@@ -1037,6 +1044,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
   )
 
   const applyBulkAction = useCallback(async (request: ReturnBulkPayload): Promise<ReturnBulkResult> => {
+    if (!canBulkReturns) throw new Error(tr('permission_denied', 'You do not have permission to perform this action.'))
     if (!beginSingleAction(bulkActionInFlightRef)) throw new Error(tr('return_bulk_in_progress', 'A return bulk action is already running.'))
     setBulkActionSaving(true)
     savePendingBulkRequest(request)
@@ -1065,7 +1073,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
       finishSingleAction(bulkActionInFlightRef)
       setBulkActionSaving(false)
     }
-  }, [actionHistory, loadReturns, notify, savePendingBulkRequest, tr])
+  }, [actionHistory, canBulkReturns, loadReturns, notify, savePendingBulkRequest, tr])
 
   useEffect(() => {
     if (!selectAllRef.current) return
@@ -1073,23 +1081,26 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
   }, [selectedIds.size, visibleIds.length])
 
   const toggleSelected = useCallback((returnId: ReturnRow['id']) => {
+    if (!canBulkReturns) return
     const numericId = Number(returnId)
     if (!Number.isFinite(numericId)) return
     setSelectedIds((current) => toggleIdSet(current, [numericId], !current.has(numericId)))
-  }, [])
+  }, [canBulkReturns])
 
   const toggleSelectAll = useCallback((checked: boolean) => {
+    if (!canBulkReturns) return
     if (!checked) {
       setSelectedIds(new Set())
       return
     }
     setSelectedIds(new Set(visibleIds))
-  }, [visibleIds])
+  }, [canBulkReturns, visibleIds])
 
   const toggleSelectionScope = useCallback((ids: unknown[], checked: boolean) => {
+    if (!canBulkReturns) return
     const normalized = normalizeFiniteIds(ids)
     setSelectedIds((current) => toggleIdSet(current, normalized, checked))
-  }, [])
+  }, [canBulkReturns])
 
   const toggleReturnSection = useCallback((sectionId: string) => {
     setCollapsedReturnSections((current) => {
@@ -1135,12 +1146,16 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
   // chooser remembered per page + CSV/Excel/PDF) instead of a fixed xlsx.
   const [exportDialog, setExportDialog] = useState<{ rows: Array<Record<string, unknown>>; baseName: string } | null>(null)
   const exportVisible = useCallback(async (rowsToExport: ReturnRow[] = visibleReturns, prefix = 'returns-visible') => {
+    if (!canExportReturns) {
+      notify(tr('permission_denied', 'You do not have permission to perform this action.'), 'error')
+      return
+    }
     if (!rowsToExport.length) {
       notify(tr('no_data_to_export', 'No data to export'), 'error')
       return
     }
     setExportDialog({ rows: exportReturnRows(rowsToExport, tr), baseName: prefix })
-  }, [notify, tr, visibleReturns])
+  }, [canExportReturns, notify, tr, visibleReturns])
 
   const exportSelected = useCallback(async () => {
     if (!selectedReturns.length) return
@@ -1232,7 +1247,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
 
   return (
     <div className={`${embedded ? '' : 'page-scroll '}flex flex-col p-3 sm:p-6`}>
-      <div className="mb-3 flex justify-end max-md:contents">
+      {canExportReturns ? <div className="mb-3 flex justify-end max-md:contents">
         <SectionExportAction>
           <ExportMenu
             label={tr('export', 'Export')}
@@ -1241,7 +1256,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
             triggerClassName="!h-11 !w-11 !min-w-0 !px-0 md:!h-8 md:!w-auto md:!min-w-[5.75rem] md:!px-3 [&>span]:!hidden md:[&>span]:!inline"
           />
         </SectionExportAction>
-      </div>
+      </div> : null}
       {activePendingHistoryRequest ? (
         <div data-needs-reconciliation={activePendingHistoryRequest.needsReconciliation || undefined} className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
           <span className="min-w-0 flex-1">{activePendingHistoryRequest.needsReconciliation
@@ -1259,7 +1274,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
           }}>{tr('discard_retry', 'Discard retry')}</button>
         </div>
       ) : null}
-      {pendingBulkRequest ? (
+      {canBulkReturns && pendingBulkRequest ? (
         <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
           <span className="min-w-0 flex-1">{tr('return_bulk_pending', 'A previous bulk action has an unknown outcome. Retry that exact request or discard it after checking Returns and History.', 'សកម្មភាពជាក្រុមមុនមានលទ្ធផលមិនទាន់ច្បាស់។ សូមសាកល្បងសំណើដដែលឡើងវិញ ឬបោះបង់បន្ទាប់ពីពិនិត្យការត្រឡប់ និងប្រវត្តិ។')}</span>
           <button type="button" className="btn-secondary" disabled={bulkActionSaving} onClick={() => { void applyBulkAction(pendingBulkRequest).catch(() => {}) }}>{tr('retry_original_request', 'Retry original request', 'សាកល្បងសំណើដើមឡើងវិញ')}</button>
@@ -1268,10 +1283,10 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
           }} disabled={bulkActionSaving}>{tr('discard_retry', 'Discard retry', 'បោះបង់ការសាកល្បង')}</button>
         </div>
       ) : null}
-      {selectedReturns.length > 0 ? (
+      {canBulkReturns && selectedReturns.length > 0 ? (
         <div className="bulk-toolbar mb-3 flex flex-wrap items-center gap-2 rounded-xl border px-3 py-2 text-sm">
           <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-900/40 dark:text-blue-200">{selectedReturns.length} {tr('selected', 'Selected')}</span>
-          {canEditReturn ? <button type="button" className="btn-secondary px-3 py-1 text-xs" disabled={!!pendingBulkRequest || selectedReturns.length > RETURN_BULK_LIMIT} onClick={() => setBulkActionSnapshot({ rows: selectedReturns.map((row) => ({ ...row })), scope })}>{tr('change_selected', 'Change selected', 'កែប្រែការជ្រើសរើស')}</button> : null}
+          <button type="button" className="btn-secondary px-3 py-1 text-xs" disabled={!!pendingBulkRequest || selectedReturns.length > RETURN_BULK_LIMIT} onClick={() => setBulkActionSnapshot({ rows: selectedReturns.map((row) => ({ ...row })), scope })}>{tr('change_selected', 'Change selected', 'កែប្រែការជ្រើសរើស')}</button>
           {selectedReturns.length > RETURN_BULK_LIMIT ? <span className="text-xs font-medium text-red-600 dark:text-red-300">{tr('return_bulk_limit', `Select at most ${RETURN_BULK_LIMIT} returns.`, `ជ្រើសរើសការត្រឡប់មិនលើស ${RETURN_BULK_LIMIT}។`)}</span> : null}
           <button type="button" className="ml-auto text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" onClick={() => setSelectedIds(new Set())}>
             {tr('clear', 'Clear')}
@@ -1418,6 +1433,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
         scope={scope}
         selectAllRef={selectAllRef as ReturnsListSurfaceProps['selectAllRef']}
         selectedIds={selectedIds}
+        selectionEnabled={canBulkReturns}
         selectionModeActive={selectionModeActive}
         getReturnLongPressState={getReturnLongPressState}
         setDetailRet={(ret) => { void openReturnDetail(ret as ReturnRow) }}
@@ -1436,7 +1452,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
         <PaginationControls compact rangeAsPageSize page={returnPage} pageSize={returnPageSize} totalItems={allVisibleReturns.length} label={tr('returns_count', 'returns')} t={t} onPageChange={setReturnPage} onPageSizeChange={(size) => { setReturnPageSize(size); setReturnPage(1) }} />
       </div>
 
-      {exportDialog ? (
+      {canExportReturns && exportDialog ? (
         <Suspense fallback={null}>
           <ExportOptionsDialog
             title={t('export_options_title') || 'Export options'}
@@ -1513,7 +1529,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
           />
         </Suspense>
       ) : null}
-      {bulkActionSnapshot?.rows.length ? (
+      {canBulkReturns && bulkActionSnapshot?.rows.length ? (
         <Suspense fallback={null}>
           <ReturnsBulkActionModal
             rows={bulkActionSnapshot.rows}

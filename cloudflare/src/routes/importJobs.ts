@@ -84,6 +84,9 @@ async function requireImportPermission(c: any, job: Record<string, unknown> | un
   // A role with the full grant can still have this import type's
   // `section:import` action switched off in the permission editor.
   const overrideSection = importActionSection(type)
+  if (overrideSection === 'contacts' && isActionBlocked(user, 'contacts', 'bulk')) {
+    return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: 'contacts:bulk' }, 403)
+  }
   if (overrideSection && isActionBlocked(user, overrideSection, 'import')) {
     return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: `${overrideSection}:import` }, 403)
   }

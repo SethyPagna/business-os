@@ -108,6 +108,13 @@ async function replay(f, historyId, direction, generation) {
 
 async function run() {
   let f = fixture(); seed(f)
+  const blockedUser = { id: 2, name: 'Employee', username: 'employee', role_code: 'employee', permissions: { returns: true, 'returns:bulk': false } }
+  const blockedState = snapshot(f)
+  await assert.rejects(() => helper.applyReturnBulkAction(f.env, blockedUser, request(f, [1], 'status', 'completed', 'cancelled', 'return-blocked-001')), /Bulk Returns access is required/)
+  assert.equal(snapshot(f), blockedState)
+  console.log('PASS explicit returns:bulk denial blocks a full-Returns user before writes')
+
+  f = fixture(); seed(f)
   const method = await helper.applyReturnBulkAction(f.env, user, request(f, [1,2], 'return_type', 'refund', 'writeoff', 'return-method-001'))
   assert.deepEqual(method.changedIds, [2]); assert.deepEqual(method.unchangedIds, [1])
   assert.equal(f.sql.prepare('SELECT return_type FROM returns WHERE id=1').get().return_type, 'restock')
@@ -158,6 +165,9 @@ async function run() {
   }])
   const committed = snapshot(f)
   assert.deepEqual(await helper.applyReturnBulkAction(f.env, user, cancelRequest), cancelled)
+  assert.equal(snapshot(f), committed)
+  const replayPayload = JSON.parse(f.sql.prepare('SELECT undo_payload FROM action_history WHERE id=?').get(cancelled.actionHistoryId).undo_payload)
+  await assert.rejects(() => helper.replayReturnBulkAction(f.env, blockedUser, 'undo', cancelled.actionHistoryId, 0, replayPayload), /Bulk Returns access is required/)
   assert.equal(snapshot(f), committed)
   await replay(f, cancelled.actionHistoryId, 'undo', 0)
   assert.equal(f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1').get().quantity, 12)

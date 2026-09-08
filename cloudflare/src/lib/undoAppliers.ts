@@ -2000,7 +2000,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
     },
   },
   [RETURN_BULK_ACTION_KIND]: {
-    permission: 'returns', action: 'edit',
+    permission: 'returns', action: 'bulk',
     run: async (payload, ctx) => {
       if (!ctx.user || !ctx.historyId) throw new UndoConflictError('Authoritative history identity required.')
       await replayReturnBulkAction(ctx.env, ctx.user, ctx.direction, ctx.historyId, ctx.generation, payload)

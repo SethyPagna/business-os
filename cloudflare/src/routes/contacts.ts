@@ -1015,6 +1015,9 @@ function registerContactRoutes(config: ContactConfig) {
     if (getActionTier(user, 'contacts', 'merge') === 'none') {
       return c.json({ error: 'You do not have permission to perform this action' }, 403)
     }
+    if (getActionTier(user, 'contacts', 'bulk') === 'none') {
+      return c.json({ error: 'You do not have permission to perform this action' }, 403)
+    }
     const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
     const keepId = Number(body.keepId)
     const mergeId = Number(body.mergeId)
@@ -1631,6 +1634,9 @@ function registerContactRoutes(config: ContactConfig) {
     }
     // Per-action override (Part 546): 'contacts:bulk_delete' switched off.
     if (getActionTier(user, 'contacts', 'bulk_delete') === 'none') {
+      return c.json({ error: 'You do not have permission to perform this action' }, 403)
+    }
+    if (getActionTier(user, 'contacts', 'bulk') === 'none') {
       return c.json({ error: 'You do not have permission to perform this action' }, 403)
     }
 
