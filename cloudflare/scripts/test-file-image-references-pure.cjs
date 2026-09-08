@@ -20,11 +20,16 @@ for (const file of fs.readdirSync(migrationsDir).filter((file) => file.endsWith(
   db.exec(fs.readFileSync(path.join(migrationsDir, file), 'utf8'))
 }
 
+const promotionReferenceQueries = []
+
 const dbShim = {
   prepare(sql) {
     return {
       async get(params) { return db.prepare(sql).get(params ?? {}) },
-      async all(params) { return db.prepare(sql).all(params ?? {}) },
+      async all(params) {
+        if (sql.includes('requested_promotion_paths')) promotionReferenceQueries.push({ sql, params: params ?? {} })
+        return db.prepare(sql).all(params ?? {})
+      },
       async run(params) {
         const result = db.prepare(sql).run(params ?? {})
         return { changes: result.changes, lastInsertRowid: Number(result.lastInsertRowid) }
@@ -63,6 +68,7 @@ function loadTs(relativePath, stubs) {
 
 const permissions = loadTs('lib/permissions.ts', {})
 const media = loadTs('lib/media.ts', {})
+const sqlBinding = loadTs('lib/sqlBinding.ts', {})
 const deletedKeys = []
 const route = loadTs('routes/files.ts', {
   hono: { Hono },
@@ -70,7 +76,7 @@ const route = loadTs('routes/files.ts', {
   '../lib/db': { getDb: () => dbShim },
   '../lib/permissions': permissions,
   '../lib/media': media,
-  '../lib/sqlBinding': { chunkForBinding: (items) => items.length ? [items] : [] },
+  '../lib/sqlBinding': sqlBinding,
   '../lib/fileAssets': {
     getMediaType: () => 'image',
     buildUniqueStoredName: (name) => name,
@@ -109,6 +115,7 @@ async function request(pathname, init = {}, requestUser = user) {
 
 function reset() {
   deletedKeys.length = 0
+  promotionReferenceQueries.length = 0
   db.exec('DELETE FROM promotions; DELETE FROM product_images; DELETE FROM products; DELETE FROM users; DELETE FROM settings; DELETE FROM file_assets;')
 }
 
@@ -206,6 +213,27 @@ async function main() {
     assert.equal(protectedDelete.status, 409, `asset ${id}: ${JSON.stringify(protectedDelete.json)}`)
   }
   console.log('PASS encoded/cache-busted promotion paths protect the correct exact-first file identity')
+
+  reset()
+  for (let id = 1; id <= 100; id += 1) {
+    const publicPath = `/uploads/promotion-page-${id}.png`
+    asset(id, `promotion-page-${id}.png`, publicPath)
+    db.prepare('INSERT INTO promotions (id, title, image_path, sort_order) VALUES (@id, @title, @path, @id)')
+      .run({ id, title: `Page ${id}`, path: `${publicPath}?v=7` })
+  }
+  const page = await request('/?pageSize=100')
+  assert.equal(page.status, 200, JSON.stringify(page.json))
+  assert.equal(page.json.items.length, 100)
+  assert.ok(page.json.items.every((item) => item.usage.promotions === 1), 'every page asset must retain its cache-busted promotion lock')
+  assert.ok(promotionReferenceQueries.length > 1, 'the real D1 chunk helper must split a page of candidate paths')
+  for (const query of promotionReferenceQueries) {
+    assert.ok(Object.keys(query.params).length <= 100, `D1 binding budget exceeded: ${Object.keys(query.params).length}`)
+    const plan = db.prepare(`EXPLAIN QUERY PLAN ${query.sql}`).all(query.params)
+    const details = plan.map((row) => String(row.detail || '')).join('\n')
+    assert.match(details, /SEARCH p USING INDEX idx_promotions_image_path/, details)
+    assert.match(details, /image_path>\? AND image_path<\?/, details)
+  }
+  console.log('PASS page-sized promotion lookup stays within D1 bindings and uses the promotion image-path index')
 
   reset()
   asset(8, 'permission-check.png', '/uploads/permission-check.png')
