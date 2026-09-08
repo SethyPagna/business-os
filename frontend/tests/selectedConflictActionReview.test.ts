@@ -80,8 +80,15 @@ assert.deepEqual(selectedConflictGroupLoadedProgress([
 
 const transportSource = readFileSync(fileURLToPath(new URL('../src/api/productWriteTransport.ts', import.meta.url)), 'utf8')
 assert.match(transportSource, /manifest_version: 1[\s\S]*resolution_version: 2[\s\S]*status: 'draft'/, 'the frozen v2 review response is discriminated from the legacy pair preview')
-assert.match(transportSource, /apiFetch\([\s\S]*'POST',[\s\S]*'\/api\/products\/possible-duplicates\/merge-batch\/preview',[\s\S]*body,[\s\S]*MERGE_DUPLICATES_PREVIEW_TIMEOUT_MS/, 'v2 preview uses the read-only legacy endpoint without route/offline replay')
-assert.match(transportSource, /reviews\/\$\{encodeId\(reviewId\)\}\?cursor=\$\{encodeURIComponent\(safeCursor\)\}&limit=\$\{safeLimit\}/, 'review pages use the actor-scoped review id and bounded decimal cursor')
-assert.match(transportSource, /Math\.max\(1, Math\.min\(100,/, 'the client honors the backend page ceiling')
+const createAt = transportSource.indexOf('export function createSelectedConflictGroupReview')
+const pageAt = transportSource.indexOf('export function getSelectedConflictGroupReviewPage')
+const legacyApplyAt = transportSource.indexOf('export function makeSelectedConflictMergeApplyBody')
+assert.ok(createAt > 0 && pageAt > createAt && legacyApplyAt > pageAt, 'the v2 transport is defined independently from the legacy apply body')
+const createTransport = transportSource.slice(createAt, pageAt)
+const pageTransport = transportSource.slice(pageAt, legacyApplyAt)
+assert.match(createTransport, /apiFetch\([\s\S]*'POST',[\s\S]*'\/api\/products\/possible-duplicates\/merge-batch\/preview',[\s\S]*body,[\s\S]*MERGE_DUPLICATES_PREVIEW_TIMEOUT_MS/, 'v2 preview uses the read-only legacy endpoint without route/offline replay')
+assert.doesNotMatch(createTransport, /\broute\(/, 'a durable review request cannot enter the offline product-write replay queue')
+assert.match(pageTransport, /reviews\/\$\{encodeId\(reviewId\)\}\?cursor=\$\{encodeURIComponent\(safeCursor\)\}&limit=\$\{safeLimit\}/, 'review pages use the actor-scoped review id and bounded decimal cursor')
+assert.match(pageTransport, /Math\.max\(1, Math\.min\(100,/, 'the client honors the backend page ceiling')
 
 console.log('PASS selected conflict N-row review request, explicit sources, blank values, and paged progress')
