@@ -2136,6 +2136,8 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
       { id: 101, name: 'Dara', phone: '012345678' },
       { id: 102, name: 'Dara', phone: '099999999' }, // ambiguous name, different customer
       { id: 103, name: 'Sreymom', phone: null },
+      { id: 104, name: 'General', phone: null, is_anonymous: 1 },
+      { id: 105, name: 'General', phone: '088123456', is_anonymous: 0 },
     ]
     const db = makeFakeDb({ customers })
 
@@ -2150,6 +2152,19 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
 
     const noMatch = await classifySales(db, [row({ receipt_number: 'R-12d', sku: 'SKU-1', quantity: 1, customer_name: 'Nobody On File', customer_phone: '011000000' }, 1)], null)
     assert.strictEqual(noMatch[0].data.customer_id, null, 'no phone/name match still imports fine, just with no customer_id -- not a new error case')
+
+    const ambiguousGeneral = await classifySales(db, [row({ receipt_number: 'R-12e', sku: 'SKU-1', quantity: 1, customer_name: 'General', customer_phone: '' }, 1)], null)
+    assert.strictEqual(ambiguousGeneral[0].data.customer_id, null, 'blank-phone General must not name-match the real profile when an explicit anonymous identity shares that name')
+    assert.strictEqual(ambiguousGeneral[0].data.customer_name, 'General', 'ambiguous name-only evidence remains historical free text rather than being fabricated as anonymous')
+
+    const phoneGeneral = await classifySales(db, [row({ receipt_number: 'R-12f', sku: 'SKU-1', quantity: 1, customer_name: 'General', customer_phone: '088-123-456' }, 1)], null)
+    assert.strictEqual(phoneGeneral[0].data.customer_id, 105, 'an exact real-profile phone remains authoritative even when the display name is shared with General')
+
+    const explicitAnonymousId = await classifySales(db, [row({ receipt_number: 'R-12g', sku: 'SKU-1', quantity: 1, customer_id: 104, customer_name: 'General', customer_phone: '088-123-456' }, 1)], null)
+    assert.strictEqual(explicitAnonymousId[0].data.customer_id, null)
+    assert.strictEqual(explicitAnonymousId[0].data.customer_name, null)
+    assert.strictEqual(explicitAnonymousId[0].data.customer_phone, null)
+    assert.strictEqual(explicitAnonymousId[0].data.customer_is_anonymous, 1, 'an explicit marked source normalizes to canonical General even when another profile phone is present')
   }
 
   // 13) Track F parity gap (part 70): cashier_id/delivery_contact_id

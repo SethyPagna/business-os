@@ -105,6 +105,7 @@ import {
   type SaleRecordMutationReplayRow,
   type SaleRecordSaleRow,
   type SaleRecordEventRow,
+  type SaleRecordChange,
 } from '../lib/saleRecords'
 import { VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES } from '../lib/salesStatus'
 import { consumeDamagedLot, restoreDamagedLot, DamagedLotShortfallError, DAMAGE_OUT_MOVEMENT, DAMAGE_IN_MOVEMENT } from '../lib/returnsStock'
@@ -131,6 +132,7 @@ import { contactDisplayAddress } from '../lib/contactOptions'
 import { buildSaleCreationSnapshot, SaleCreationSnapshotError } from '../lib/saleCreationSnapshot'
 import type { Env } from '../index'
 import { actorId, actorSnapshot } from '../lib/actorSnapshot'
+import { ANONYMOUS_CUSTOMER_ERROR_CODE, ANONYMOUS_CUSTOMER_MUTATION_ERROR, isAnonymousCustomer } from '../lib/anonymousCustomer'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 const SHOP_ONLY_SALE_ERROR = 'Sales can only be recorded at the Shop. Transfer Warehouse stock to the Shop first.'
@@ -667,12 +669,20 @@ app.post('/', async (c) => {
     `SELECT value FROM settings WHERE key = 'change_exchange_rate'`,
   ).get<{ value: string }>()
   const changeExchangeRateSetting = changeRateRow?.value
-  let customer: { id: number; name: string | null; membership_number: string | null } | null = null
+  let customer: { id: number; name: string | null; membership_number: string | null; is_anonymous: number } | null = null
   if (body.customer_id) {
-    customer = await db.prepare('SELECT id, name, membership_number FROM customers WHERE id = ?').get([body.customer_id]) || null
+    customer = await db.prepare('SELECT id, name, membership_number, is_anonymous FROM customers WHERE id = ?').get([body.customer_id]) || null
   } else if (body.customer_membership_number) {
-    customer = await db.prepare('SELECT id, name, membership_number FROM customers WHERE lower(trim(membership_number)) = lower(trim(?))').get([body.customer_membership_number]) || null
+    customer = await db.prepare('SELECT id, name, membership_number, is_anonymous FROM customers WHERE lower(trim(membership_number)) = lower(trim(?)) AND COALESCE(is_anonymous,0)=0').get([body.customer_membership_number]) || null
   }
+  // New sales store General as the canonical null assignment. A persisted
+  // legacy anonymous identity remains readable on old rows, but it is never
+  // copied forward as if it were a customer profile.
+  const anonymousCustomerSelected = isAnonymousCustomer(customer)
+  if (anonymousCustomerSelected) customer = null
+  const saleCustomerName = anonymousCustomerSelected ? null : body.customer_name || customer?.name || null
+  const saleCustomerPhone = anonymousCustomerSelected ? null : body.customer_phone || null
+  const saleCustomerAddress = anonymousCustomerSelected ? null : contactDisplayAddress(body.customer_address) || null
 
   const membershipPointsRedeemed = Math.max(0, Number(body.membership_points_redeemed) || 0)
   let membershipDiscountUsd = round2(Math.max(0, Number(body.membership_discount_usd) || 0))
@@ -910,9 +920,9 @@ app.post('/', async (c) => {
       deliveryContactPhone: deliveryContact?.phone,
       deliveryFeeUsd,
       deliveryActualCostUsd,
-      customerSnapshot: customer || String(body.customer_name ?? '').trim() ? {
+      customerSnapshot: customer || String(saleCustomerName ?? '').trim() ? {
         id: customer?.id ?? null,
-        name: body.customer_name || customer?.name || null,
+        name: saleCustomerName,
       } : null,
       membershipSnapshot: customer?.membership_number ? {
         number: customer.membership_number,
@@ -968,21 +978,21 @@ app.post('/', async (c) => {
       branch_id: body.branch_id || null,
       branch_name: branchRow?.name || null,
       customer_id: customer?.id || null,
-      customer_name: body.customer_name || customer?.name || null,
-      customer_phone: body.customer_phone || null,
+      customer_name: saleCustomerName,
+      customer_phone: saleCustomerPhone,
       // N21: normalized, not trusted. The POS sends the display address now,
       // but an out-of-date shell -- or a sale it queued offline and replayed
       // after the update -- still sends the raw Contact Options JSON out of
       // customers.address, and the server is the only place that catches that.
       // A plainly typed address passes through untouched.
-      customer_address: contactDisplayAddress(body.customer_address) || null,
+      customer_address: saleCustomerAddress,
       // Write-time diacritic fold of this sale's own searchable text fields
       // (migration 0082) -- the same normalizeSearchText the typed query is
       // run through, so folded queries match folded storage. Read additively
       // by buildSalesSearchWhere; membership_number is joined from customers
       // at read time, so it stays out of this per-row blob.
       search_normalized: normalizeSearchText(
-        [receiptNumber, actorSnapshot(user), body.customer_name || customer?.name, body.customer_phone, branchRow?.name, paymentMethod]
+        [receiptNumber, actorSnapshot(user), saleCustomerName, saleCustomerPhone, branchRow?.name, paymentMethod]
           .filter(Boolean)
           .join(' '),
       ),
@@ -1348,8 +1358,8 @@ app.post('/', async (c) => {
       createdAt: clientCreatedAt,
       receiptNumber,
       cashier: actorSnapshot(user),
-      customer: body.customer_name || customer?.name || null,
-      phone: body.customer_phone || null,
+      customer: saleCustomerName,
+      phone: saleCustomerPhone,
       branch: branchRow?.name || null,
       items: priced.map((item) => ({ name: item.product_name, quantity: item.quantity, unitPriceUsd: item.unitPriceUsd, basePriceUsd: Number(item.base_price_usd) || null, lineTotalUsd: item.lineTotalUsd })),
       exchangeRate,
@@ -2233,10 +2243,72 @@ app.patch('/:id/customer', async (c) => {
   if (getActionTier(user, 'sales', 'customer') !== 'full') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
-  const saleId = c.req.param('id')
-  const body = await c.req.json<{ customerId?: number; membershipNumber?: string; clearAssignment?: boolean; [key: string]: unknown }>().catch(() => ({} as Record<string, unknown>))
+  const saleId = Number(c.req.param('id'))
+  if (!Number.isSafeInteger(saleId) || saleId <= 0) return c.json({ error: 'Sale not found' }, 404)
+  const body = await c.req.json<{
+    customerId?: number
+    membershipNumber?: string
+    clearAssignment?: boolean
+    client_request_id?: string
+    expected_updated_at?: string | null
+    expectedUpdatedAt?: string | null
+    [key: string]: unknown
+  }>().catch(() => ({} as Record<string, unknown>))
+  const requestId = normalizeClientRequestId(body.client_request_id)
+  const expectedUpdatedAt = getExpectedUpdatedAt(body)
+  if (!requestId || expectedUpdatedAt == null) {
+    return c.json({
+      error: 'Refresh this app before changing a sale customer, then try again.',
+      code: !requestId ? 'client_request_id_required' : 'expected_updated_at_required',
+      action: 'refresh_required',
+    }, 400)
+  }
+  const currentActorId = actorId(user)
+  if (!currentActorId) return c.json({ error: 'Authenticated user id is required.', code: 'actor_required' }, 400)
+  const shouldClear = Boolean(body.clearAssignment)
+  const requestedCustomerId = Number(body.customerId)
+  const requestedMembership = String(body.membershipNumber || '').trim()
+  const canonicalRequest = {
+    sale_id: saleId,
+    expected_updated_at: expectedUpdatedAt,
+    target: shouldClear
+      ? { kind: 'clear' }
+      : Number.isSafeInteger(requestedCustomerId) && requestedCustomerId > 0
+        ? { kind: 'customer_id', id: requestedCustomerId }
+        : { kind: 'membership_number', number: requestedMembership.toLowerCase() },
+  }
+  const requestDigest = await saleMutationDigest(canonicalRequest)
+  const sourceId = `actor:${currentActorId}:request:${requestId}`
+  const prior = await db.prepare(`
+    SELECT request_digest,response_json FROM sale_record_events
+    WHERE source_kind='sale_customer' AND source_id=@source_id AND generation=0
+  `).get<{ request_digest: string | null; response_json: string | null }>({ source_id: sourceId })
+  if (prior) {
+    if (prior.request_digest !== requestDigest) {
+      return c.json({ error: 'client_request_id was already used with different sale customer data.', code: 'idempotency_conflict' }, 409)
+    }
+    return c.json(JSON.parse(prior.response_json || '{}') as Record<string, unknown>)
+  }
 
-  const sale = await db.prepare('SELECT s.*,COALESCE(v.revision,0) AS write_revision FROM sales s LEFT JOIN sale_write_revisions v ON v.sale_id=s.id WHERE s.id = ?').get<Record<string, unknown> & { id: number; customer_id: number | null; updated_at: string | null; write_revision: number }>([saleId])
+  const sale = await db.prepare(`
+    SELECT s.*,COALESCE(v.revision,0) AS write_revision,
+      source_customer.id AS source_customer_exists,
+      source_customer.membership_number AS source_membership_number,
+      source_customer.is_anonymous AS source_customer_is_anonymous
+    FROM sales s
+    LEFT JOIN sale_write_revisions v ON v.sale_id=s.id
+    LEFT JOIN customers source_customer ON source_customer.id=s.customer_id
+    WHERE s.id=?
+  `).get<Record<string, unknown> & {
+    id: number
+    customer_id: number | null
+    customer_name: string | null
+    updated_at: string | null
+    write_revision: number
+    source_customer_exists: number | null
+    source_membership_number: string | null
+    source_customer_is_anonymous: number | null
+  }>([saleId])
   if (!sale) return c.json({ error: 'Sale not found' }, 404)
 
   try {
@@ -2249,19 +2321,73 @@ app.patch('/:id/customer', async (c) => {
     throw error
   }
 
-  const shouldClear = Boolean(body.clearAssignment)
-  let customer: { id: number; name: string | null; membership_number: string | null; phone: string | null; address: string | null } | undefined
+  let customer: { id: number; name: string | null; membership_number: string | null; phone: string | null; address: string | null; is_anonymous: number } | undefined
   if (!shouldClear) {
-    if (body.customerId) {
-      customer = await db.prepare('SELECT id, name, membership_number, phone, address FROM customers WHERE id = ?').get([body.customerId])
+    if (Number.isSafeInteger(requestedCustomerId) && requestedCustomerId > 0) {
+      customer = await db.prepare('SELECT id, name, membership_number, phone, address, is_anonymous FROM customers WHERE id = ?').get([requestedCustomerId])
     } else {
-      const membership = String(body.membershipNumber || '').trim()
-      if (membership) {
-        customer = await db.prepare('SELECT id, name, membership_number, phone, address FROM customers WHERE lower(trim(membership_number)) = lower(trim(?))').get([membership])
+      if (requestedMembership) {
+        customer = await db.prepare('SELECT id, name, membership_number, phone, address, is_anonymous FROM customers WHERE lower(trim(membership_number)) = lower(trim(?))').get([requestedMembership])
       }
     }
     if (!customer) return c.json({ error: 'Customer or membership number not found' }, 404)
+    if (isAnonymousCustomer(customer)) return c.json({ error: ANONYMOUS_CUSTOMER_MUTATION_ERROR, code: ANONYMOUS_CUSTOMER_ERROR_CODE }, 400)
   }
+
+  const currentName = String(sale.customer_name || '').trim()
+  const assignmentUnchanged = customer
+    ? Number(sale.customer_id) === customer.id
+    : sale.customer_id == null && !currentName
+  if (assignmentUnchanged) {
+    return c.json({ id: saleId, updated_at: sale.updated_at || expectedUpdatedAt })
+  }
+
+  const identityState = (id: number | null, name: string | null): SaleRecordChange['before'] => {
+    const normalizedName = String(name || '').trim() || null
+    return id == null && normalizedName == null
+      ? { state: 'known_none' }
+      : { state: 'known_value', value: { id, name: normalizedName } }
+  }
+  const membershipState = (number: string | null): SaleRecordChange['before'] => {
+    const normalized = String(number || '').trim() || null
+    return normalized
+      ? { state: 'known_value', value: { number: normalized, discount_usd: null, discount_khr: null, points_redeemed: null } }
+      : { state: 'known_none' }
+  }
+  const sourceIsAnonymous = isAnonymousCustomer({ is_anonymous: sale.source_customer_is_anonymous })
+  const beforeCustomer = sourceIsAnonymous ? { state: 'known_none' } as const : identityState(sale.customer_id, sale.customer_name)
+  const afterCustomer = identityState(customer?.id ?? null, customer?.name ?? null)
+  const beforeMembership: SaleRecordChange['before'] = sale.customer_id == null || sourceIsAnonymous
+    ? { state: 'known_none' }
+    : sale.source_customer_exists == null
+      ? { state: 'unknown' }
+      : membershipState(sale.source_membership_number)
+  const afterMembership = membershipState(customer?.membership_number ?? null)
+  const changes: SaleRecordChange[] = []
+  if (JSON.stringify(beforeCustomer) !== JSON.stringify(afterCustomer)) {
+    changes.push({ field: 'customer', before: beforeCustomer, after: afterCustomer })
+  }
+  if (JSON.stringify(beforeMembership) !== JSON.stringify(afterMembership)) {
+    changes.push({ field: 'membership', before: beforeMembership, after: afterMembership })
+  }
+  const mutationStamp = new Date().toISOString()
+  const response = { id: saleId, updated_at: mutationStamp }
+  const eventInsert = buildSaleRecordEventsInsert([{
+    saleId,
+    sourceKind: 'sale_customer',
+    sourceId,
+    generation: 0,
+    kind: 'customer_changed',
+    via: 'apply',
+    subject: sale.receipt_number == null ? null : String(sale.receipt_number),
+    actorId: currentActorId,
+    actorUsername: actorSnapshot(user),
+    occurredAt: mutationStamp,
+    changes,
+    requestDigest,
+    response,
+  }])!
+  assertSaleRecordBatchBounds(7, { beforeCustomer, afterCustomer, beforeMembership, afterMembership }, eventInsert.eventsBytes)
 
   const customerSearchNormalized = normalizeSearchText([
     sale.receipt_number,
@@ -2272,20 +2398,31 @@ app.patch('/:id/customer', async (c) => {
     sale.payment_method,
   ].filter(Boolean).join(' '))
   const customerReferenceGuard = customer
-    ? bulkAssertion("EXISTS(SELECT 1 FROM customers WHERE id=@id AND COALESCE(name,'')=COALESCE(@name,'') AND COALESCE(phone,'')=COALESCE(@phone,'') AND COALESCE(address,'')=COALESCE(@address,''))", {
+    ? bulkAssertion("EXISTS(SELECT 1 FROM customers WHERE id=@id AND COALESCE(name,'')=COALESCE(@name,'') AND COALESCE(phone,'')=COALESCE(@phone,'') AND COALESCE(address,'')=COALESCE(@address,'') AND COALESCE(membership_number,'')=COALESCE(@membership_number,'') AND COALESCE(is_anonymous,0)=0)", {
       id: customer.id,
       name: customer.name,
       phone: customer.phone,
       address: customer.address,
+      membership_number: customer.membership_number,
     })
     : null
+  const sourceReferenceGuard = sale.customer_id == null
+    ? null
+    : sale.source_customer_exists == null
+      ? bulkAssertion('NOT EXISTS(SELECT 1 FROM customers WHERE id=@id)', { id: sale.customer_id })
+      : bulkAssertion("EXISTS(SELECT 1 FROM customers WHERE id=@id AND COALESCE(membership_number,'')=COALESCE(@membership_number,'') AND COALESCE(is_anonymous,0)=@is_anonymous)", {
+        id: sale.customer_id,
+        membership_number: sale.source_membership_number,
+        is_anonymous: sourceIsAnonymous ? 1 : 0,
+      })
 
   try {
     await db.batch([
       saleRevisionGuard(Number(saleId), Number(sale.write_revision)),
+      ...(sourceReferenceGuard ? [sourceReferenceGuard] : []),
       ...(customerReferenceGuard ? [customerReferenceGuard] : []),
       {
-      sql: `UPDATE sales SET customer_id = @customer_id, customer_name = @customer_name, customer_phone = @customer_phone, customer_address = @customer_address, search_normalized = @search_normalized, updated_at = CURRENT_TIMESTAMP WHERE id = @id`,
+      sql: `UPDATE sales SET customer_id = @customer_id, customer_name = @customer_name, customer_phone = @customer_phone, customer_address = @customer_address, search_normalized = @search_normalized, updated_at = @updated_at WHERE id = @id`,
       params: {
         customer_id: customer?.id ?? null,
         customer_name: customer?.name ?? null,
@@ -2297,23 +2434,34 @@ app.patch('/:id/customer', async (c) => {
         // asserting has not changed underneath us.
         customer_address: contactDisplayAddress(customer?.address) || null,
         search_normalized: customerSearchNormalized,
+        updated_at: mutationStamp,
         id: saleId,
       },
       },
       {
-      sql: `UPDATE returns SET customer_id = @customer_id, customer_name = @customer_name, updated_at = CURRENT_TIMESTAMP WHERE sale_id = @sale_id`,
-      params: { customer_id: customer?.id ?? null, customer_name: customer?.name ?? null, sale_id: saleId },
+      sql: `UPDATE returns SET customer_id = @customer_id, customer_name = @customer_name, updated_at = @updated_at WHERE sale_id = @sale_id`,
+      params: { customer_id: customer?.id ?? null, customer_name: customer?.name ?? null, updated_at: mutationStamp, sale_id: saleId },
       },
+      eventInsert.statement,
       { sql: 'DELETE FROM sale_bulk_guards', params: {} },
     ])
   } catch (error) {
     if (/constraint/i.test(String(error))) {
+      const replay = await db.prepare(`
+        SELECT request_digest,response_json FROM sale_record_events
+        WHERE source_kind='sale_customer' AND source_id=@source_id AND generation=0
+      `).get<{ request_digest: string | null; response_json: string | null }>({ source_id: sourceId })
+      if (replay) {
+        if (replay.request_digest === requestDigest) return c.json(JSON.parse(replay.response_json || '{}') as Record<string, unknown>)
+        return c.json({ error: 'client_request_id was already used with different sale customer data.', code: 'idempotency_conflict' }, 409)
+      }
       return c.json({ error: 'This sale or one of its linked returns changed. Refresh and try again.', code: 'write_conflict' }, 409)
     }
     throw error
   }
 
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'sale', saleId, {
+    record_event: { source_kind: 'sale_customer', source_id: sourceId, generation: 0, sale_id: saleId },
     previous_customer_id: sale.customer_id ?? null,
     next_customer_id: customer?.id ?? null,
     membership_number: customer?.membership_number ?? null,
@@ -2325,13 +2473,7 @@ app.patch('/:id/customer', async (c) => {
     bumpVersion(c.env, 'returns'),
   ]))
 
-  const updated = await db.prepare('SELECT id, customer_id, customer_name, updated_at FROM sales WHERE id = ?').get<{ id: number; customer_id: number | null; customer_name: string | null; updated_at: string }>([saleId])
-  return c.json({
-    ...(updated || { id: Number(saleId) }),
-    customer: customer
-      ? { id: customer.id, name: customer.name || null, membership_number: customer.membership_number || null, phone: customer.phone || null, address: customer.address || null }
-      : null,
-  })
+  return c.json(response)
 })
 
 // ---------------------------------------------------------------------------
@@ -4396,7 +4538,9 @@ app.get('/', async (c) => {
   const payload = await cachedJsonResponse(c.req.raw, c.executionCtx, cacheVersion, SALES_READ_CACHE_TTL_SECONDS, async () => {
 
     const sales = await db.prepare(`
-      SELECT s.*, c.membership_number AS customer_membership_number,
+      SELECT s.*,
+        CASE WHEN COALESCE(c.is_anonymous,0)=1 THEN NULL ELSE c.membership_number END AS customer_membership_number,
+        COALESCE(c.is_anonymous,0) AS customer_is_anonymous,
         dc.name AS linked_driver_name, dc.phone AS linked_driver_phone,
         CASE WHEN COALESCE(s.sale_status,'completed')='awaiting_payment'
           AND COALESCE((

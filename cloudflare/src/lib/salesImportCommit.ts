@@ -5,6 +5,7 @@ import { branchCanSell } from './branchRoles'
 import { WAREHOUSE_NOT_SELLABLE_ERROR } from './branchRoleGuards'
 import type { ActorLike } from './actorSnapshot'
 import { buildSaleCreationSnapshot } from './saleCreationSnapshot'
+import { isAnonymousCustomer } from './anonymousCustomer'
 
 // 100, not 50, since Part 388: the real Aug-28 sales history holds three
 // genuine receipts of 86/58/55 lines (big wholesale orders) that the old
@@ -181,15 +182,23 @@ export async function applyHistoricalSaleImport(
   const legacyReceiptNumber = ownReceipt ? null : suppliedReceipt || null
   const importedCustomerId = Number(d.customer_id)
   const hasImportedCustomer = Number.isSafeInteger(importedCustomerId) && importedCustomerId > 0
-  const hasImportedCustomerName = Boolean(String(d.customer_name ?? '').trim())
+  const importedCustomerReference = hasImportedCustomer
+    ? await db.prepare('SELECT id,is_anonymous FROM customers WHERE id=?').get<{ id: number; is_anonymous: number | null }>([importedCustomerId])
+    : null
+  const importedCustomerIsAnonymous = isAnonymousCustomer(importedCustomerReference)
+  const effectiveImportedCustomerId = hasImportedCustomer && !importedCustomerIsAnonymous ? importedCustomerId : null
+  const effectiveImportedCustomerName = importedCustomerIsAnonymous ? null : d.customer_name
+  const effectiveImportedCustomerPhone = importedCustomerIsAnonymous ? null : d.customer_phone
+  const effectiveImportedCustomerAddress = importedCustomerIsAnonymous ? null : d.customer_address
+  const hasImportedCustomerName = Boolean(String(effectiveImportedCustomerName ?? '').trim())
   const importedMembershipNumber = String(d.membership_number ?? '').trim()
   const importedMembershipDiscountUsd = Number(d.membership_discount_usd) || 0
   const importedMembershipDiscountKhr = Number(d.membership_discount_khr) || 0
   const importedMembershipPoints = Number(d.membership_points_redeemed) || 0
-  const hasImportedMembershipEvidence = Boolean(importedMembershipNumber)
+  const hasImportedMembershipEvidence = !importedCustomerIsAnonymous && (Boolean(importedMembershipNumber)
     || importedMembershipDiscountUsd !== 0
     || importedMembershipDiscountKhr !== 0
-    || importedMembershipPoints !== 0
+    || importedMembershipPoints !== 0)
   const creationSnapshotJson = buildSaleCreationSnapshot({
     origin: 'sales_import',
     recordedAt: input.nowIso,
@@ -212,9 +221,9 @@ export async function applyHistoricalSaleImport(
     deliveryContactPhone: d.delivery_contact_phone,
     deliveryFeeUsd: d.delivery_fee_usd,
     deliveryActualCostUsd: d.delivery_actual_cost_usd,
-    customerSnapshot: hasImportedCustomer || hasImportedCustomerName ? {
-      id: hasImportedCustomer ? importedCustomerId : null,
-      name: d.customer_name,
+    customerSnapshot: effectiveImportedCustomerId || hasImportedCustomerName ? {
+      id: effectiveImportedCustomerId,
+      name: effectiveImportedCustomerName,
     } : null,
     // A matched imported customer does not prove whether membership existed
     // at the historical sale. Preserve unknown unless the reviewed row itself
@@ -224,7 +233,7 @@ export async function applyHistoricalSaleImport(
       discountUsd: importedMembershipDiscountUsd,
       discountKhr: importedMembershipDiscountKhr,
       pointsRedeemed: importedMembershipPoints,
-    } : hasImportedCustomer ? undefined : null,
+    } : effectiveImportedCustomerId ? undefined : null,
   })
 
   const common = {
@@ -234,12 +243,17 @@ export async function applyHistoricalSaleImport(
     client_request_id: clientRequestId,
     batch_refs_json: batchRefsJson,
     branch_id: saleHeaderBranchId,
+    customer_id: effectiveImportedCustomerId,
   }
-  const writeGuard = `(${pendingGuard}) AND (${currentImportReferencesGuard})`
+  const currentCustomerReferenceGuard = effectiveImportedCustomerId == null
+    ? '1=1'
+    : `EXISTS(SELECT 1 FROM customers WHERE id=@customer_id AND COALESCE(is_anonymous,0)=0)`
+  const currentHistoricalReferencesGuard = `(${currentImportReferencesGuard}) AND (${currentCustomerReferenceGuard})`
+  const writeGuard = `(${pendingGuard}) AND (${currentHistoricalReferencesGuard})`
   const statements: Array<{ sql: string; params: Record<string, unknown> }> = [{
     sql: `INSERT OR IGNORE INTO import_sales_commits (job_id, group_key, row_number, status)
           SELECT @job_id, @group_key, @row_number, 'pending'
-          WHERE ${currentImportReferencesGuard}`,
+          WHERE ${currentHistoricalReferencesGuard}`,
     params: common,
   }, {
     sql: `INSERT INTO sales (
@@ -276,6 +290,13 @@ export async function applyHistoricalSaleImport(
     params: {
       ...common,
       ...d,
+      customer_id: effectiveImportedCustomerId,
+      customer_name: effectiveImportedCustomerName,
+      customer_phone: effectiveImportedCustomerPhone,
+      customer_address: effectiveImportedCustomerAddress,
+      membership_discount_usd: importedCustomerIsAnonymous ? 0 : importedMembershipDiscountUsd,
+      membership_discount_khr: importedCustomerIsAnonymous ? 0 : importedMembershipDiscountKhr,
+      membership_points_redeemed: importedCustomerIsAnonymous ? 0 : importedMembershipPoints,
       branch_id: saleHeaderBranchId,
       branch_name: saleBranch.name,
       receipt_number: receiptNumber,
@@ -355,7 +376,7 @@ export async function applyHistoricalSaleImport(
   statements.push({
     sql: `UPDATE import_sales_commits SET status = 'applied', applied_at = CURRENT_TIMESTAMP
           WHERE job_id = @job_id AND group_key = @group_key AND status = 'pending'
-            AND ${currentImportReferencesGuard}`,
+            AND ${currentHistoricalReferencesGuard}`,
     params: common,
   })
   await db.batch(statements)
