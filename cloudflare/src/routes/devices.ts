@@ -162,6 +162,20 @@ app.post('/:id/approve', async (c) => {
   const device = await db.prepare('SELECT * FROM trusted_devices WHERE id = @id LIMIT 1').get<TrustedDeviceRow>({ id })
   if (!device) return c.json({ error: 'Device request not found' }, 404)
 
+  // A rejection is deliberately terminal for this row. An administrator must
+  // use the reset action, which removes this exact rejected request so the
+  // next authenticated login creates a fresh pending request to review.
+  if (device.status === 'rejected') {
+    return c.json({
+      error: 'This rejected device must be reset before it can request approval again.',
+      code: 'device_reapproval_reset_required',
+    }, 409)
+  }
+
+  // Repeating an approval after a successful decision is harmless and must
+  // stay idempotent even if the account is now at the approved-device cap.
+  if (device.status === 'approved') return c.json({ success: true, idempotent: true })
+
   // At most MAX_APPROVED_DEVICES_PER_USER approved devices per account (the
   // Aug-28 rule). Excluding this row keeps re-approving an already-approved
   // device idempotent instead of tripping its own limit.
@@ -174,11 +188,27 @@ app.post('/:id/approve', async (c) => {
     }, 409)
   }
 
-  await db.prepare(`
+  const updated = await db.prepare(`
     UPDATE trusted_devices
     SET status = 'approved', decided_at = CURRENT_TIMESTAMP, decided_by_user_id = @admin_id, decided_by_name = @admin_name, revoked_at = NULL
-    WHERE id = @id
+    WHERE id = @id AND status = 'pending'
   `).run({ id, admin_id: admin.id, admin_name: admin.name })
+
+  // A concurrent reject/reset must never be overwritten by this stale
+  // approval read. The guarded update changed no row, so report the state
+  // that now exists instead of writing an audit decision that did not happen.
+  if (!updated?.changes) {
+    const current = await db.prepare('SELECT status FROM trusted_devices WHERE id = @id LIMIT 1')
+      .get<Pick<TrustedDeviceRow, 'status'>>({ id })
+    if (current?.status === 'approved') return c.json({ success: true, idempotent: true })
+    if (current?.status === 'rejected') {
+      return c.json({
+        error: 'This rejected device must be reset before it can request approval again.',
+        code: 'device_reapproval_reset_required',
+      }, 409)
+    }
+    return c.json({ error: 'Device request is no longer available.' }, 409)
+  }
 
   await audit(c.env, admin.id, admin.username, 'device_approved', 'user', device.user_id, {
     deviceId: device.device_id, deviceName: device.device_name, userAgent: device.user_agent,
@@ -188,6 +218,61 @@ app.post('/:id/approve', async (c) => {
   await broadcast(c.env, 'notifications', { type: 'device_decision' })
 
   return c.json({ success: true })
+})
+
+// POST /api/auth/devices/:id/reset -- remove one rejected trust row so the
+// same persistent device id can create a new pending request at its next
+// authenticated login. Reset does not approve the device and does not alter
+// any earlier audit history.
+app.post('/:id/reset', async (c) => {
+  const id = c.req.param('id')
+  const admin = c.get('user')
+  const db = getDb(c.env)
+  const device = await db.prepare('SELECT * FROM trusted_devices WHERE id = @id LIMIT 1').get<TrustedDeviceRow>({ id })
+  if (!device) return c.json({ error: 'Device request not found' }, 404)
+  if (device.status !== 'rejected') return c.json({ error: 'Only rejected devices can be reset for re-approval.' }, 400)
+
+  // Snapshot only sessions that existed before the guarded delete. If another
+  // administrator changes this device row first, the delete fails and these
+  // sessions are untouched. If the delete succeeds, a later login begins
+  // pending and cannot create a new session before approval, so only these
+  // exact ids may be revoked.
+  const priorSessions = await db.prepare(`
+    SELECT id FROM user_sessions
+    WHERE user_id = @user_id AND device_id = @device_id AND revoked_at IS NULL
+  `).all<{ id: number }>({ user_id: device.user_id, device_id: device.device_id })
+
+  const deleted = await db.prepare(`
+    DELETE FROM trusted_devices
+    WHERE id = @id AND user_id = @user_id AND device_id = @device_id AND status = 'rejected'
+  `).run({ id: device.id, user_id: device.user_id, device_id: device.device_id })
+  if (!deleted?.changes) return c.json({ error: 'Device request is no longer rejected.' }, 409)
+
+  let revokedSessions = 0
+  for (const session of priorSessions || []) {
+    const result = await db.prepare(`
+      UPDATE user_sessions SET revoked_at = CURRENT_TIMESTAMP
+      WHERE id = @session_id AND user_id = @user_id AND device_id = @device_id AND revoked_at IS NULL
+    `).run({ session_id: session.id, user_id: device.user_id, device_id: device.device_id })
+    revokedSessions += result?.changes || 0
+  }
+
+  await audit(c.env, admin.id, admin.username, 'device_reapproval_reset', 'user', device.user_id, {
+    targetTrustedDeviceRowId: device.id,
+    deviceId: device.device_id,
+    deviceName: device.device_name,
+    previousState: 'rejected',
+    priorDecision: {
+      decidedAt: device.decided_at,
+      decidedByUserId: device.decided_by_user_id,
+      decidedByName: device.decided_by_name,
+      revokedAt: device.revoked_at,
+    },
+    revokedSessions,
+  })
+  await broadcast(c.env, 'notifications', { type: 'device_decision' })
+
+  return c.json({ success: true, revokedSessions, nextLoginDeviceStatus: 'pending' })
 })
 
 app.post('/:id/reject', async (c) => {

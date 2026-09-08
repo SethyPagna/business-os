@@ -45,6 +45,12 @@ export function revokeDevice(id: number | string): Promise<unknown> {
   return apiFetch('POST', `/api/auth/devices/${encodeURIComponent(String(id))}/revoke`, {})
 }
 
+// Reset only removes a rejected trust request. The next authenticated login
+// with the same persistent device id starts a new pending approval request.
+export function resetDeviceForReapproval(id: number | string): Promise<{ success?: boolean; revokedSessions?: number; nextLoginDeviceStatus?: 'pending' }> {
+  return apiFetch('POST', `/api/auth/devices/${encodeURIComponent(String(id))}/reset`, {}) as Promise<{ success?: boolean; revokedSessions?: number; nextLoginDeviceStatus?: 'pending' }>
+}
+
 // ---- Live sessions (J3) ----------------------------------------------------
 // A device row answers "may a future login from this device pass?"; a live
 // session row is a login that already happened and is still valid. Same
