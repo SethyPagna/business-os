@@ -270,6 +270,9 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
   // 'block'.
   const canDeleteContact = can('contacts', 'delete')
   const canBulkDeleteContacts = can('contacts', 'bulk_delete')
+  const canBulkContacts = can('contacts', 'bulk')
+  const canBulkContactsRef = useRef(canBulkContacts)
+  canBulkContactsRef.current = canBulkContacts
   // Client-side export gated by the modeled 'contacts:export' action, matching
   // the Suppliers/Delivery tabs and the Products precedent.
   const canExportContacts = can('contacts', 'export')
@@ -430,7 +433,26 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
     [collapsedSections, filteredSections],
   )
 
-  const { selectedIds, setSelectedIds, toggleOne, selectAllProp, selectionModeActive, getRowLongPressState } = useContactSelection(visibleCustomers)
+  const contactSelection = useContactSelection(visibleCustomers)
+  const { setSelectedIds, getRowLongPressState } = contactSelection
+  const selectedIds = canBulkContacts ? contactSelection.selectedIds : new Set<number>()
+  const selectionModeActive = canBulkContacts && contactSelection.selectionModeActive
+  const toggleOne = (id: unknown) => {
+    if (!canBulkContactsRef.current) return
+    contactSelection.toggleOne(id)
+  }
+  const selectAllProp = {
+    ...contactSelection.selectAllProp,
+    onChange: (checked: boolean) => {
+      if (!canBulkContactsRef.current) return
+      contactSelection.selectAllProp.onChange(checked)
+    },
+  }
+  useEffect(() => {
+    if (canBulkContacts) return
+    setSelectedIds((current) => current.size ? new Set<number>() : current)
+    setModal((current) => current === 'import' ? null : current)
+  }, [canBulkContacts, setSelectedIds])
   // H1+X5 (Part 402): exports go through the shared options dialog.
   const [exportDialog, setExportDialog] = useState<{ rows: Array<Record<string, unknown>>; baseName: string } | null>(null)
   // 11.1/11.2 (B6): in select mode a cell click toggles the row; out of it
@@ -526,6 +548,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
   const isSectionFullySelected = (ids: Array<number | string> = []) => ids.length > 0 && ids.every((id) => selectedIds.has(Number(id)))
   const isSectionPartiallySelected = (ids: Array<number | string> = []) => ids.some((id) => selectedIds.has(Number(id))) && !isSectionFullySelected(ids)
   const toggleSectionSelection = (ids: Array<number | string>, checked: boolean) => {
+    if (!canBulkContactsRef.current) return
     ids.forEach((id) => {
       const numericId = Number(id)
       const isSelected = selectedIds.has(numericId)
@@ -826,7 +849,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
   }
 
   const handleBulkDelete = async () => {
-    if (!selectedIds.size || !beginSingleAction(bulkDeleteInFlightRef, { blocked: bulkActionBusy })) return
+    if (!canBulkContactsRef.current || !selectedIds.size || !beginSingleAction(bulkDeleteInFlightRef, { blocked: bulkActionBusy })) return
     if (!confirm(`Delete ${selectedIds.size} customer(s)?`)) {
       finishSingleAction(bulkDeleteInFlightRef)
       return
@@ -851,6 +874,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
         actionHistory.pushAction({
           label: `Delete ${deletedCount} customer${deletedCount === 1 ? '' : 's'}`,
           undo: async () => {
+            if (!canBulkContactsRef.current) throw new Error(t('no_permission') || 'No permission')
             const restoreRun = await runConcurrentTasks(deletedSnapshots, async (snapshot: CustomerRow) => {
               const result = await runCustomerMutation(() => getCustomerApi().createCustomer({
                 name: snapshot.name || '',
@@ -873,6 +897,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
             await load({ silent: true, label: 'Customers restore deleted' })
           },
           redo: async () => {
+            if (!canBulkContactsRef.current) throw new Error(t('no_permission') || 'No permission')
             const idsToDelete = restoredEntries.map((entry) => Number(entry.restoredId || 0)).filter((id) => id > 0)
             const redoRun = await runConcurrentTasks(idsToDelete, async (id: number) => (
               runCustomerMutation(() => getCustomerApi().deleteCustomer(id), 'Redo bulk customer delete')
@@ -938,6 +963,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
           button's label at narrow widths. */}
       <div className="flex min-w-0 items-stretch gap-1.5 overflow-x-auto pb-1">
         <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} summaryMode="compact" t={t} className="min-w-0 flex-1" showLabel dense />
+        {(canBulkContacts || canExportContacts) ? (
         <LazyPortalMenu
           align="auto"
           triggerWrapperClassName="min-w-0 flex-1"
@@ -954,7 +980,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
             </button>
           )}
           items={([
-            { label: tr(t, 'import_contacts', 'Import'), onClick: () => setModal('import'), color: 'blue', icon: <Download className="h-4 w-4 shrink-0" /> },
+            ...(canBulkContacts ? [{ label: tr(t, 'import_contacts', 'Import'), onClick: () => { if (!canBulkContactsRef.current) return; setModal('import') }, color: 'blue' as const, icon: <Download className="h-4 w-4 shrink-0" /> }] : []),
             ...(canExportContacts ? [{
               label: tr(t, 'export', 'Export'),
               color: 'green',
@@ -981,6 +1007,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
             }] : []),
           ] as PortalMenuItem[])}
         />
+        ) : null}
         <button
           className="inline-flex h-8 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-xl border border-blue-700 bg-blue-600 px-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 hover:border-blue-800 sm:text-sm"
           onClick={() => { setSelected(null); setModal('form') }}
@@ -1023,7 +1050,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
               {tr(t, 'retry', 'Retry')}
             </button>
           ) : null}
-          {selectedIds.size > 0 && canBulkDeleteContacts ? (
+          {canBulkContacts && selectedIds.size > 0 && canBulkDeleteContacts ? (
             <button
               className="btn-secondary whitespace-nowrap text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:cursor-not-allowed disabled:opacity-60"
               onClick={handleBulkDelete}
@@ -1123,7 +1150,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
           })
           const rowLongPressState = getRowLongPressState(Number(customerRow.id))
           const rowLongPress = createLongPressHandlers(rowLongPressState, {
-            disabled: selectionModeActive,
+            disabled: !canBulkContacts || selectionModeActive,
             onLongPress: () => {
               if (!selectedIds.has(Number(customerRow.id))) toggleOne(customerRow.id)
             },
@@ -1133,7 +1160,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
             <tr
               key={customerRow.id}
               className={`table-row cursor-pointer select-none hover:bg-gray-50 dark:hover:bg-gray-700/30 ${selectedIds.has(Number(customerRow.id)) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}
-              {...(selectionModeActive ? {} : rowLongPress)}
+              {...(canBulkContacts && !selectionModeActive ? rowLongPress : {})}
               onClickCapture={(event) => {
                 // Swallow the ghost click that follows a fired long-press so
                 // entering select mode doesn't also open the detail panel.
@@ -1230,7 +1257,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
           })
           const cardLongPressState = getRowLongPressState(Number(customerRow.id))
           const cardLongPress = createLongPressHandlers(cardLongPressState, {
-            disabled: selectionModeActive,
+            disabled: !canBulkContacts || selectionModeActive,
             onLongPress: () => {
               if (!selectedIds.has(Number(customerRow.id))) toggleOne(customerRow.id)
             },
@@ -1247,7 +1274,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
               key={customerRow.id}
               className={`card flex cursor-pointer select-none items-center gap-3 p-3 ${selectedIds.has(Number(customerRow.id)) ? 'bg-blue-50 ring-2 ring-blue-400 dark:bg-blue-900/20' : ''}`}
               onClick={() => handleContactCellClick(customerRow)}
-              {...(selectionModeActive ? {} : cardLongPress)}
+              {...(canBulkContacts && !selectionModeActive ? cardLongPress : {})}
               onClickCapture={(event) => {
                 if (consumeLongPressClick(cardLongPressState)) {
                   event.preventDefault()
@@ -1295,7 +1322,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
           <CustomerFormModal customer={selected} onSave={handleSave} onUseExisting={handleUseExisting} onClose={() => { setModal(null); setSelected(null) }} t={t} />
         </Suspense>
       ) : null}
-      {modal === 'import' ? (
+      {canBulkContacts && modal === 'import' ? (
         <Suspense fallback={null}>
           <ContactImportModal type="customer" onClose={() => setModal(null)} onDone={() => load({ silent: true, label: 'Customers after import' })} />
         </Suspense>
