@@ -1,0 +1,124 @@
+{
+  "schema_version": 1,
+  "task_id": "f65-group-merge-phase1-20260908",
+  "agent": {
+    "provider": "codex",
+    "role": "implementation_worker",
+    "session_id": "/root/expense_version_guard"
+  },
+  "status": "completed",
+  "summary": "Implemented and independently certified the additive resolution-v2 N-product conflict review preview and durable paged draft receipts while preserving the legacy selected-pair workflow.",
+  "base_sha": "0d340a183297d22402a50bc3c621440f1964bc47",
+  "head_sha": "e2f5489b9be9a07932edc0486822a9210fbf7fd8",
+  "commits": [
+    "d50bd5fca8ae87f6aaf94b9a4fb09c139a885ba6",
+    "17e18ab8fa43cffed5af4a1bc99a3cf6f639e764",
+    "d0f3fa126a41400141308ddae1ab060e0acd6f91",
+    "e2f5489b9be9a07932edc0486822a9210fbf7fd8"
+  ],
+  "changes": [
+    "Added a strict resolution-v2 preview parser for up to 1600 reviewed merge groups and 4000 distinct products; nonempty Remove and v2 Apply fail closed as phase_not_available.",
+    "Canonicalized exact duplicate groups, coalesced overlap only when the full union shares one nonempty normalized name or barcode, and blocked transitive or incomplete identity.",
+    "Froze original-group distinct-positive cost means, selling and wholesale maxima, source-field options, branch stock, lots, supplier and received-date metadata into per-group state digests.",
+    "Added migration 0138 with actor/idempotency-scoped review receipts plus canonical group and member receipts.",
+    "Added actor-scoped cursor paging on the persisted draft while leaving legacy {cases} preview/apply parsing and responses intact."
+  ],
+  "evidence": [
+    {
+      "claim": "A global review covers more than 1600 selected products within D1 limits.",
+      "source": "Focused SQLite route regression",
+      "locator": "cloudflare/scripts/test-product-conflict-action-groups-sqlite.cjs",
+      "observed": "1604 selected ids across 802 requested groups produced 801 actionable and one stale blocked group; the suite observed 177 statements across success, replay and injected rollback, at most 80 bindings and one compound term."
+    },
+    {
+      "claim": "Group economics use the immutable original member set.",
+      "source": "Pure and SQLite regressions",
+      "locator": "cloudflare/src/lib/productConflictActionGroups.ts and focused tests",
+      "observed": "Repeated nonzero costs are de-duplicated, zero is excluded, [0,4,4,6] resolves to 5, and retail and wholesale fields use their independent maxima."
+    },
+    {
+      "claim": "Supplier and receipt metadata remain in the frozen review.",
+      "source": "SQLite route regression",
+      "locator": "cloudflare/scripts/test-product-conflict-action-groups-sqlite.cjs",
+      "observed": "Separate LOT-A/Supplier A/2026-09-01 and LOT-B/Supplier B/2026-09-02 rows are returned unchanged with the group projection."
+    },
+    {
+      "claim": "Receipt creation is atomic and product data remains untouched.",
+      "source": "SQLite failure injection",
+      "locator": "cloudflare/scripts/test-product-conflict-action-groups-sqlite.cjs",
+      "observed": "A forced failure at the end of the receipt batch rolled back the review and all group rows; successful preview left product, stock, batch, audit and history counts unchanged."
+    },
+    {
+      "claim": "Native D1 accepts the actual route SQL.",
+      "source": "Miniflare D1 route regression",
+      "locator": "cloudflare/scripts/test-product-conflict-action-groups-native.cjs",
+      "observed": "Twelve three-member groups completed on native D1 with nine observed route statements, 36 bindings maximum and one compound term."
+    },
+    {
+      "claim": "The repaired identity predicate requires every member to share the common nonempty key.",
+      "source": "Independent verifier /root/expense_version_guard/f65_phase1_verify",
+      "locator": "e2f5489b9be9a07932edc0486822a9210fbf7fd8",
+      "observed": "Independent Tea/tea/blank and 601/0601/blank probes both returned incompatible_group_identity; all focused and legacy checks passed."
+    }
+  ],
+  "verification": [
+    {
+      "command": "node scripts/test-product-conflict-action-groups-pure.cjs",
+      "scope": "parser, canonicalization, identity, economics, options and projections",
+      "exit_code": 0,
+      "expected": "All focused rules pass.",
+      "observed": "26 checks passed."
+    },
+    {
+      "command": "node scripts/test-product-conflict-action-groups-sqlite.cjs",
+      "scope": "real SQLite route mutation, paging, actor scope, replay, rollback and limits",
+      "exit_code": 0,
+      "expected": "Review receipts are correct, atomic and bounded.",
+      "observed": "34 checks passed; 177 statements, 80 bindings and one compound term."
+    },
+    {
+      "command": "node scripts/test-product-conflict-action-groups-native.cjs",
+      "scope": "native Miniflare D1 adapter and migration",
+      "exit_code": 0,
+      "expected": "N-group review succeeds under native D1.",
+      "observed": "12 groups and 36 members passed; 9 statements, 36 bindings and one compound term."
+    },
+    {
+      "command": "node scripts/test-product-conflict-merge-batch-pure.cjs; node scripts/test-product-conflict-merge-batch-sqlite.cjs",
+      "scope": "legacy selected-pair compatibility",
+      "exit_code": 0,
+      "expected": "Legacy v1 behavior remains green.",
+      "observed": "Both existing suites passed."
+    },
+    {
+      "command": "npm run typecheck",
+      "scope": "Cloudflare Worker",
+      "exit_code": 0,
+      "expected": "No TypeScript diagnostics.",
+      "observed": "tsc --noEmit passed."
+    },
+    {
+      "command": "node scripts/test-migration-chain-fresh-pure.cjs; node scripts/test-migration-line-endings-pure.cjs",
+      "scope": "full migration chain, integrity, FKs and LF formatting",
+      "exit_code": 0,
+      "expected": "Migration 0138 applies in the full chain and stays LF-only.",
+      "observed": "Eight fresh-chain assertions passed; all 137 migrations are LF."
+    }
+  ],
+  "risks": [
+    "The frozen group detail can be large for products with many receipt lots; phase-two execution must keep pagination and D1 response limits explicit.",
+    "New 0138 tables still need backup, restore, reset and core-data enumeration before any deployment."
+  ],
+  "blockers": [],
+  "not_done": [
+    "Finalize, destructive N-member apply, composite group Undo/Redo and direct Remove are separate required F65 slices.",
+    "No frontend source, backup/reset/core list, production data, remote migration, deployment or remote service was changed."
+  ],
+  "handoff": "Integrate the four phase-one code commits through e2f5489b. Phase two may build from that exact SHA after its architecture review; keep resolution-v2 Apply and Remove disabled until their independently verified implementations land.",
+  "workspace": {
+    "branch": "codex/f65-group-merge-phase1-20260908",
+    "worktree": "C:/Users/mrkl6/Downloads/bos-f65-group-merge-phase1-20260908",
+    "dirty_before": [],
+    "dirty_after": []
+  }
+}
