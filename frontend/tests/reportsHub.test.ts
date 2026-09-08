@@ -561,6 +561,7 @@ test('options / style persistence is tolerant of garbage and round-trips through
   assert.deepEqual(normalizeReportOptions(undefined), DEFAULT_REPORT_OPTIONS)
   assert.deepEqual(normalizeReportOptions({ basis: 'collected', profitMode: 'net', granularity: 'week', compare: true, currency: 'khr' }), { basis: 'revenue', profitMode: 'gross', granularity: 'week', compare: false, currency: 'khr' })
   assert.equal(normalizeReportOptions({ currency: 'setting' }).currency, 'usd', 'retired App setting storage migrates to USD')
+  assert.equal(normalizeReportOptions({ currency: 'EUR' }).currency, 'usd', 'unknown legacy currency choices fall back to USD')
   assert.equal(normalizeReportStyle('receipt'), 'receipt')
   assert.equal(normalizeReportStyle('grid'), null)
   assert.equal(defaultReportStyle(true), 'receipt')
@@ -671,6 +672,7 @@ test('the control row keeps every control at each width: nothing is dropped, not
   // either the desktop toolbar or compact primary row.
   assert.ok(!tail.includes('viewPicker'), 'the picker is not in the tail any more (it would double up with the search slot)')
   assert.ok(/viewControl=\{viewPicker\}/.test(hub), 'the filter fold owns the view picker')
+  assert.match(hub, /const viewPicker = \(\s*<AppSelect[\s\S]*?ariaLabel=\{trh\('view', 'View'\)\}/, 'the menu view picker retains AppSelect keyboard semantics and its accessible name')
   assert.ok(/reports-mobile-primary">\{rangePicker\}/.test(hub), 'the compact primary row keeps only the range')
   assert.equal((hub.match(/\{viewPicker\}/g) || []).length, 1, 'the picker has one render reference, on the filter-fold prop')
 
