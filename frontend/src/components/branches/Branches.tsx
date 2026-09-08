@@ -1490,13 +1490,8 @@ export default function Branches({ embedded = false, view, showSectionNavigation
               <button type="button" key={transfer.id} onClick={() => setTransferDetail(transfer)} className="card w-full p-2.5 text-left transition hover:border-violet-300 hover:bg-violet-50/30 dark:hover:border-violet-800 dark:hover:bg-violet-950/10">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
-                    <div className="mb-0.5 flex min-w-0 items-center gap-1.5">
-                      <span className="truncate font-mono text-[10px] font-semibold text-violet-600 dark:text-violet-300" title={`Transfer #${transfer.id}`}>
-                        {formatTransferReference(transfer.id)}
-                      </span>
-                      <span className="shrink-0 rounded bg-violet-50 px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide text-violet-600 dark:bg-violet-950/40 dark:text-violet-300">
-                        {tr('transfer', 'Transfer')}
-                      </span>
+                    <div className="mb-0.5 truncate font-mono text-[10px] font-semibold text-violet-600 dark:text-violet-300" title={`Transfer #${transfer.id}`}>
+                      {formatTransferReference(transfer.id)}
                     </div>
                     <div className="whitespace-normal break-words text-sm font-semibold text-gray-900 dark:text-white">{transfer.product_name}</div>
                     <div className="mt-0.5 text-[11px] text-gray-400">{formatTransferDate(transfer.created_at)}</div>
@@ -1544,7 +1539,6 @@ export default function Branches({ embedded = false, view, showSectionNavigation
                   <tr key={transfer.id} className="table-row cursor-pointer hover:bg-violet-50/50 dark:hover:bg-violet-950/10" onClick={() => setTransferDetail(transfer)}>
                     <td className="whitespace-nowrap px-2.5 py-1.5">
                       <div className="font-mono text-[11px] font-semibold text-violet-700 dark:text-violet-300" title={`Transfer #${transfer.id}`}>{formatTransferReference(transfer.id)}</div>
-                      <div className="text-[9px] font-bold uppercase tracking-wide text-violet-500 dark:text-violet-400">{tr('transfer', 'Transfer')}</div>
                     </td>
                     <td className="whitespace-nowrap px-2.5 py-1.5 text-[11px] text-gray-400">{formatTransferDate(transfer.created_at)}</td>
                     <td className="max-w-[16rem] whitespace-normal break-words px-2.5 py-1.5 font-medium text-gray-800 dark:text-gray-200">{transfer.product_name}</td>

@@ -110,6 +110,10 @@ test('Transfer is permission gated and available from both hub-controlled branch
 test('transfer rows use compact traceable references and restrained semantic columns', () => {
   assert.match(source, /function formatTransferReference/)
   assert.match(source, /return value \? `TRF-\$\{value\}` : 'TRF—'/)
+  assert.equal((source.match(/\{formatTransferReference\(transfer\.id\)\}/g) || []).length, 2, 'mobile and desktop rows keep the TRF reference')
+  assert.equal((source.match(/title=\{`Transfer #\$\{transfer\.id\}`\}/g) || []).length, 2, 'both TRF references keep their full-id tooltip')
+  assert.doesNotMatch(source, /formatTransferReference\(transfer\.id\)[\s\S]{0,180}tr\('transfer', 'Transfer'\)/, 'TRF already conveys the record type, so rows do not repeat a Transfer badge or suffix')
+  assert.equal((source.match(/\{formatTransferDate\(transfer\.created_at\)\}/g) || []).length, 2, 'mobile and desktop rows keep the transfer date')
   assert.match(source, /tr\('reference', 'Reference'\)/)
   assert.match(source, /tr\('route', 'Route'\)/)
   assert.match(source, /bg-violet-50\/70/)
