@@ -121,6 +121,7 @@ const systemRoute = loadReal('routes/system.ts', {
 // than imported so this test fails if the route quietly starts clearing
 // something new without it being noticed.
 const ALL_RESET_CANDIDATE_TABLES = [
+  'product_conflict_merge_run_cases', 'product_conflict_merge_runs',
   'product_images', 'rfid_tags', 'branch_batch_stock', 'product_batches', 'branch_stock', 'products',
   'inventory_movements', 'stock_row_moves', 'stock_transfers',
   'return_item_batch_allocations', 'sale_item_batch_allocations', 'return_items', 'returns', 'sale_items', 'sales',
@@ -160,6 +161,7 @@ function seed() {
   // Wipe every table this test touches so each check() starts clean,
   // regardless of run order.
   const wipe = [
+    'product_conflict_merge_run_cases', 'product_conflict_merge_runs',
     'stock_session_members', 'stock_session_operations', 'stock_session_guards',
     'return_item_batch_allocations', 'sale_item_batch_allocations', 'return_items', 'returns',
     'sale_items', 'sales', 'inventory_movements', 'stock_transfers', 'stock_row_moves',
@@ -171,12 +173,19 @@ function seed() {
 
   rawDbHandle.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Main', 1, 1)").run()
   rawDbHandle.prepare("INSERT INTO products (id, name, is_active, stock_quantity, image_path) VALUES (1, 'Eye Shadow Palette', 1, 10, '/uploads/product-1-main.jpg')").run()
+  rawDbHandle.prepare("INSERT INTO products (id, name, is_active, stock_quantity) VALUES (2, 'Duplicate Eye Shadow Palette', 1, 0)").run()
   rawDbHandle.prepare("INSERT INTO product_images (id, product_id, image_path) VALUES (1, 1, '/uploads/product-1-gallery-a.jpg')").run()
   rawDbHandle.prepare("INSERT INTO product_images (id, product_id, image_path) VALUES (2, 1, 'uploads/product-1-gallery-b.jpg')").run()
   rawDbHandle.prepare('INSERT INTO branch_stock (id, product_id, branch_id, quantity) VALUES (1, 1, 1, 10)').run()
   const batch = rawDbHandle.prepare("INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code) VALUES (1, 1, 'BK-1', 'LOT-A')").run()
   rawDbHandle.prepare('INSERT INTO branch_batch_stock (id, batch_id, branch_id, quantity) VALUES (1, 1, 1, 10)').run()
   rawDbHandle.prepare("INSERT INTO rfid_tags (id, epc_id, product_id, branch_id, status) VALUES (1, 'EPC-1', 1, 1, 'active')").run()
+  rawDbHandle.prepare(`INSERT INTO product_conflict_merge_runs(
+    id,actor_id,request_id,request_digest,manifest_version,manifest_digest,request_json,status
+  ) VALUES('reset-conflict-run',1,'reset-conflict-request','request-digest',1,'manifest-digest','{}','interrupted')`).run()
+  rawDbHandle.prepare(`INSERT INTO product_conflict_merge_run_cases(
+    run_id,ordinal,case_key,keeper_product_id,merged_product_id,expected_state_digest,operation_id,status
+  ) VALUES('reset-conflict-run',0,'leadingzero:reset',1,2,'case-digest','reset-conflict-operation','planned')`).run()
 
   // Sales/returns/movements -- denormalized, must survive with a dangling
   // product_id, per this session's spec.
@@ -252,18 +261,25 @@ async function main() {
     assert.strictEqual(count('branches'), 1, 'branches must be untouched by a products reset')
   })
 
+  await check('mode=sales preserves selected-conflict product receipts', async () => {
+    seed()
+    await req('POST', '/reset-data', { mode: 'sales' })
+    assert.strictEqual(count('product_conflict_merge_runs'), 1)
+    assert.strictEqual(count('product_conflict_merge_run_cases'), 1)
+  })
+
   await check('mode=products forces a backup BEFORE deleting anything, and aborts with zero rows changed if the backup fails', async () => {
     seed()
     backupShouldFail = true
     const beforeProducts = count('products')
-    assert.strictEqual(beforeProducts, 1, 'sanity')
+    assert.strictEqual(beforeProducts, 2, 'sanity')
 
     const { status, json } = await req('POST', '/reset-data', { mode: 'products' })
     assert.strictEqual(status, 500, JSON.stringify(json))
     assert.strictEqual(json.success, false, JSON.stringify(json))
     assert.ok(/backup/i.test(json.error || ''), `error message should mention the backup failure, got: ${json.error}`)
     assert.strictEqual(backupCallLog.length, 1, 'backup must have been attempted')
-    assert.strictEqual(count('products'), 1, 'products must be UNCHANGED when the pre-reset backup fails -- this is the whole point of the prerequisite')
+    assert.strictEqual(count('products'), 2, 'products must be UNCHANGED when the pre-reset backup fails -- this is the whole point of the prerequisite')
   })
 
   // The failure a scoped backup can introduce, guarded directly: a backup
@@ -378,7 +394,7 @@ async function main() {
     const { status, json } = await req('POST', '/reset-data', { mode: 'sales', includeMovements: true, includeSales: true })
     assert.strictEqual(status, 200, JSON.stringify(json))
     assert.strictEqual(json.success, true, JSON.stringify(json))
-    assert.strictEqual(count('products'), 1, 'mode=sales must never delete products, regardless of stray products-only fields')
+    assert.strictEqual(count('products'), 2, 'mode=sales must never delete products, regardless of stray products-only fields')
     assert.strictEqual(count('customers'), 1, 'mode=sales must never touch customers')
   })
 
@@ -399,7 +415,7 @@ async function main() {
     const { status, json } = await req('POST', '/reset-data', { mode: 'all' })
     assert.strictEqual(status, 500, JSON.stringify(json))
     assert.strictEqual(json.success, false, JSON.stringify(json))
-    assert.strictEqual(count('products'), 1, 'products must be UNCHANGED when the pre-reset backup fails')
+    assert.strictEqual(count('products'), 2, 'products must be UNCHANGED when the pre-reset backup fails')
     assert.strictEqual(count('customers'), 1, 'customers must be UNCHANGED when the pre-reset backup fails')
   })
 
@@ -411,6 +427,19 @@ async function main() {
     assert.strictEqual(status, 200, JSON.stringify(json))
     assert.strictEqual(json.success, true, JSON.stringify(json))
     assert.strictEqual(count('file_assets'), 0, 'file_assets should be empty after mode=all, matching the R2 uploads/ wipe it runs alongside')
+  })
+
+  await check('mode=all clears selected-conflict cases before their parent runs', async () => {
+    seed()
+    const { status, json } = await req('POST', '/reset-data', { mode: 'all' })
+    assert.strictEqual(status, 200, JSON.stringify(json))
+    assert.strictEqual(count('product_conflict_merge_run_cases'), 0)
+    assert.strictEqual(count('product_conflict_merge_runs'), 0)
+    const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'system.ts'), 'utf8')
+    const casesAt = source.indexOf("DELETE FROM product_conflict_merge_run_cases")
+    const runsAt = source.indexOf("DELETE FROM product_conflict_merge_runs")
+    const productsAt = source.indexOf("DELETE FROM product_batches", casesAt)
+    assert.ok(casesAt > -1 && casesAt < runsAt && runsAt < productsAt, 'mode=all is ordered case children, parent run, then product data')
   })
 
   await check('mode=all clears every current import job ledger so a migration rerun starts clean', async () => {

@@ -79,6 +79,14 @@ check('shift sessions and their immutable amendment ledger are restored together
   assert.match(migration, /json_extract\(value, '\$\.mode'\) = 'restore'/)
 })
 
+check('selected-conflict run receipts survive in parent-first dependency order', () => {
+  assert.ok(BACKUP_TABLES.includes('product_conflict_merge_runs'))
+  assert.ok(BACKUP_TABLES.includes('product_conflict_merge_run_cases'))
+  assert.ok(BACKUP_TABLES.indexOf('product_conflict_merge_runs') > BACKUP_TABLES.indexOf('products'))
+  assert.ok(BACKUP_TABLES.indexOf('product_conflict_merge_run_cases') > BACKUP_TABLES.indexOf('product_conflict_merge_runs'))
+  assert.ok(BACKUP_TABLES.indexOf('product_conflict_merge_run_cases') > BACKUP_TABLES.indexOf('action_history'))
+})
+
 check('FK dependency order holds: every child sits after every parent it references', () => {
   const at = (t) => BACKUP_TABLES.indexOf(t)
   const before = (parent, child) => assert.ok(
