@@ -6,7 +6,7 @@ const ts = require('typescript')
 const Database = require('better-sqlite3')
 const root = path.join(__dirname, '..')
 const cache = new Map()
-const actual = new Set(['actorSnapshot','movementBranchName','db', 'permissions', 'returnBulkAction'])
+const actual = new Set(['actorSnapshot','movementBranchName','db', 'permissions', 'saleRecords', 'saleRecordEvents', 'returnBulkAction'])
 
 function load(rel) {
   if (cache.has(rel)) return cache.get(rel).exports
@@ -91,7 +91,13 @@ function request(f, ids, field, source, target, key) {
 }
 
 function snapshot(f) {
-  return JSON.stringify(['returns','products','branch_stock','branch_batch_stock','damaged_stock_lots','inventory_movements','undo_snapshots','action_history','return_bulk_operations','return_bulk_members','return_write_revisions','audit_logs'].map(table => [table, f.sql.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()]))
+  return JSON.stringify(['returns','products','branch_stock','branch_batch_stock','damaged_stock_lots','inventory_movements','undo_snapshots','action_history','return_bulk_operations','return_bulk_members','return_write_revisions','audit_logs','sale_record_events'].map(table => [table, f.sql.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()]))
+}
+
+function saleRecordEvents(f, sourceId) {
+  return f.sql.prepare(`SELECT sale_id,source_kind,source_id,generation,kind,via,subject,changes_json
+    FROM sale_record_events WHERE source_kind='return_bulk' AND source_id=? ORDER BY generation,id`).all(sourceId)
+    .map(row => ({ ...row, changes: JSON.parse(row.changes_json) }))
 }
 
 async function replay(f, historyId, direction, generation) {
@@ -143,15 +149,28 @@ async function run() {
   assert.equal(f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1').get().quantity, 10)
   assert.equal(f.sql.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=1').get().quantity, 5)
   assert.equal(f.sql.prepare('SELECT total_refund_usd FROM returns WHERE id=1').get().total_refund_usd, 8)
+  assert.deepEqual(saleRecordEvents(f, cancelled.operationId).map(event => ({
+    sale_id: event.sale_id, generation: event.generation, kind: event.kind, via: event.via,
+    subject: event.subject, changes: event.changes,
+  })), [{
+    sale_id: 1, generation: 0, kind: 'status_changed', via: 'apply', subject: 'RET-1',
+    changes: [{ field: 'sale_status', before: { state: 'known_value', value: 'returned' }, after: { state: 'known_value', value: 'completed' } }],
+  }])
   const committed = snapshot(f)
   assert.deepEqual(await helper.applyReturnBulkAction(f.env, user, cancelRequest), cancelled)
   assert.equal(snapshot(f), committed)
   await replay(f, cancelled.actionHistoryId, 'undo', 0)
   assert.equal(f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1').get().quantity, 12)
   assert.equal(f.sql.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=1').get().quantity, 7)
+  assert.deepEqual(saleRecordEvents(f, cancelled.operationId).map(event => [event.generation,event.via,event.changes[0].before.value,event.changes[0].after.value]), [
+    [0,'apply','returned','completed'], [1,'undo','completed','returned'],
+  ])
   await replay(f, cancelled.actionHistoryId, 'redo', 1)
   assert.equal(f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1').get().quantity, 10)
   assert.equal(f.sql.prepare('SELECT total_refund_usd FROM returns WHERE id=1').get().total_refund_usd, 8)
+  assert.deepEqual(saleRecordEvents(f, cancelled.operationId).map(event => [event.generation,event.via,event.changes[0].before.value,event.changes[0].after.value]), [
+    [0,'apply','returned','completed'], [1,'undo','completed','returned'], [2,'redo','returned','completed'],
+  ])
   console.log('PASS customer cancel/uncancel exact lot and retry issues stock once')
 
   f = fixture(); seed(f)
