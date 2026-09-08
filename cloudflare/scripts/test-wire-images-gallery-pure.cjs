@@ -172,7 +172,8 @@ const productsRoute = loadReal('routes/products.ts', {
   // undo snapshots; this test asserts image wiring and never hits the merge
   // routes. registerMergeFold runs at module load, so it must be a callable
   // no-op. (Added by 7651025a -- the loader wasn't updated for the new import.)
-  '../lib/undoAppliers': { registerMergeFold: () => {}, recordMergeUndoSnapshot: async () => null, recordBulkMergeUndoSnapshot: async () => null, recordSupplierBackfillSnapshot: async () => null },
+  // Merge budgeting reads this list at module load; no merge route runs here.
+  '../lib/undoAppliers': { MERGE_REPARENT_TABLES: [], registerMergeFold: () => {}, recordMergeUndoSnapshot: async () => null, recordBulkMergeUndoSnapshot: async () => null, recordSupplierBackfillSnapshot: async () => null },
 
   '../lib/cache': { cachedJsonResponse: async (_r, _c, _v, _t, producer) => producer(), getVersion: async () => '0', bumpVersion: async () => {} },
   '../lib/rateLimit': { checkRateLimit: async () => ({ allowed: true }), getClientIp: () => '127.0.0.1' },
