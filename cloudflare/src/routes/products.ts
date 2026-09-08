@@ -6454,7 +6454,8 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
   if (Number(review.requested_removal_count) > 0 && removeTier === 'none') {
     return c.json({ success: false, code: 'permission_denied', error: 'Product removal permission is required.' }, 403)
   }
-  if (!['finalized', 'running', 'interrupted', 'completed'].includes(review.status) || review.manifest_digest !== request.manifest_digest) {
+  if (!['finalized', 'running', 'interrupted', 'approval_pending', 'completed'].includes(review.status)
+    || review.manifest_digest !== request.manifest_digest) {
     return c.json({ success: false, code: 'manifest_conflict', error: 'This reviewed manifest is stale or does not match.' }, 409)
   }
   if (review.status === 'completed') {
