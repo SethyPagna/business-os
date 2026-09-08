@@ -447,7 +447,7 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
   const hasCover = Boolean(previewConfig.showCover && versionedBusinessCover)
   const bannerBackground = `linear-gradient(135deg, ${heroGradientStart} 0%, ${heroGradientMid} 55%, ${heroGradientEnd} 100%)`
   const logoSizePx = Math.max(72, Number(previewConfig.logoSize || 80))
-  const hasContactInfo = Boolean(businessFacts?.length || socialLinks?.length)
+  const hasContactInfo = Boolean(businessFacts?.length)
 
   return (
     <section
@@ -579,33 +579,7 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
                 })}
               </div>
             ) : null}
-            {socialLinks?.length ? (
-              <div className="flex flex-wrap gap-2">
-                {socialLinks.map((item) => {
-                  const Icon = item.key === 'facebook'
-                    ? Facebook
-                    : item.key === 'instagram'
-                      ? Instagram
-                      : item.key === 'telegram'
-                        ? Send
-                        : Globe
-                  return (
-                    <a
-                      key={item.key}
-                      href={item.value}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex h-9 min-w-9 items-center justify-center gap-1.5 rounded-full border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:bg-neutral-800 sm:px-3.5 sm:text-sm"
-                      aria-label={item.label}
-                      title={item.label}
-                    >
-                      <Icon className="h-4 w-4" />
-                      <span className="sr-only sm:not-sr-only">{item.label}</span>
-                    </a>
-                  )
-                })}
-              </div>
-            ) : null}
+
           </div>
         ) : null}
         {storyText ? (
@@ -698,6 +672,10 @@ function CatalogFaqSection(props: CatalogFaqSectionProps) {
       title={previewConfig.faqTitle || copy('faq', 'FAQ')}
       subtitle={copy('faqHint', 'Quick answers to common questions.')}
     >
+      <article className="mb-4 rounded-xl border border-neutral-200 bg-neutral-50 p-4 dark:border-neutral-700 dark:bg-neutral-900">
+        <h3 className="text-sm font-semibold text-neutral-900 dark:text-white">{copy('membershipPointsFaqQuestion', 'Are membership points available?', 'តើពិន្ទុសមាជិកអាចប្រើបានទេ?')}</h3>
+        <p className="mt-2 text-sm leading-7 text-neutral-700 dark:text-neutral-200">{copy('membershipPointsFaqAnswer', 'Membership points are not enabled yet. Earning and redeeming points are currently unavailable.', 'ពិន្ទុសមាជិកមិនទាន់បានបើកដំណើរការទេ។ បច្ចុប្បន្ន មិនទាន់អាចទទួល ឬប្តូរយកពិន្ទុបានទេ។')}</p>
+      </article>
       <div className="grid items-start gap-4 sm:grid-cols-2">
         {publicFaqItems.length ? publicFaqItems.map((item, index) => {
           const open = expandedFaqId === item.id
@@ -728,11 +706,7 @@ function CatalogFaqSection(props: CatalogFaqSectionProps) {
               {open ? <div className="border-t border-white/80 px-5 py-4 text-sm leading-7 text-slate-700 dark:border-neutral-700 dark:text-neutral-300">{item.answer}</div> : null}
             </article>
           )
-        }) : (
-          <div className="rounded-[28px] border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500 dark:border-neutral-700 dark:bg-neutral-800/60 dark:text-neutral-400 sm:col-span-2">
-            {copy('faqEmptyState', 'No questions yet. Contact us any time and we are happy to help.')}
-          </div>
-        )}
+        }) : null}
       </div>
     </SectionShell>
   )

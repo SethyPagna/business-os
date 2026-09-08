@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { Dispatch, SetStateAction } from 'react'
 import ArrowRight from 'lucide-react/dist/esm/icons/arrow-right.js'
 import BadgeCheck from 'lucide-react/dist/esm/icons/badge-check.js'
@@ -484,53 +485,13 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
     </>
   )
 
-  return (
-    <SectionShell
-      title={copy('products', 'Products')}
-      subtitle={copy('liveCatalog', 'Browse our products and check availability.')}
-    >
-      {/* Desktop (lg+): an always-visible left rail replaces the floating
-          Filters layer used below `lg`; no popover is needed when there is
-          room for a permanent sidebar. */}
-      {/* `relative` so the editor preview's in-flow brand rail (edge="inline",
-          mounted at the end of this grid) has a positioned ancestor to stick
-          inside. The public storefront's rail is `fixed` and portalled, so
-          this changes nothing for it. */}
-      <div className="relative lg:grid lg:grid-cols-[17rem_minmax(0,1fr)] lg:items-start lg:gap-6">
-        <aside className="hidden min-w-0 lg:sticky lg:top-20 lg:block lg:min-w-0 lg:self-start">
-          <div className="min-w-0 space-y-2 rounded-[1.35rem] border border-slate-200 bg-white p-2.5 shadow-sm dark:border-neutral-700 dark:bg-neutral-900">
-            <div className="flex items-center justify-between gap-2 px-1 pb-1">
-              <span className="text-sm font-semibold text-slate-900 dark:text-neutral-100">{copy('filters', 'Filters')}</span>
-              {portalActiveFilterCount > 0 ? (
-                <button type="button" className="text-xs font-semibold text-slate-500 hover:text-slate-700 dark:text-neutral-300 dark:hover:text-white" onClick={clearPortalFilters}>
-                  {copy('clear', 'Clear')}
-                </button>
-              ) : null}
-            </div>
-            {renderFilterFields()}
-          </div>
-          {/* The brand index used to be a second card here: a 4-column letter
-              GRID inside its own `max-h-[...] overflow-y-auto` box. That box
-              sat over the product list and swallowed wheel/touch gestures
-              aimed at the page, and it duplicated a `lg:hidden` chip row
-              below the search field. Both are now the single screen-edge
-              AlphaIndexRail mounted at the end of this section. */}
-        </aside>
-
-        <div className="min-w-0">
-      {/* G3: the auto-scrolling promo row sits ABOVE search, public view
-          only, and only when the merchant shows promotions at all. */}
-      {publicView && previewConfig.showPromotions !== false ? (
-        <PortalPromoStrip
-          products={filteredProducts}
-          promotionRules={promotionRules}
-          copy={copy}
-          formatPrice={(usd, khr) => formatPortalPrice(usd, khr, previewConfig)}
-          openProductDetail={openProductDetail}
-        />
-      ) : null}
-      <div className="mb-5 space-y-3">
-        <div className="sticky top-16 z-20 -mx-1 space-y-2 rounded-[22px] border border-slate-200 bg-white/96 p-2 shadow-[0_8px_24px_rgba(15,23,42,0.08)] backdrop-blur dark:border-neutral-700 dark:bg-neutral-900/96 sm:top-20">
+  const [toolbarHost, setToolbarHost] = useState<HTMLElement | null>(null)
+  useEffect(() => {
+    setToolbarHost(publicView ? document.getElementById('portal-catalog-toolbar-slot') : null)
+  }, [publicView])
+  const searchToolbar = (
+<div className="portal-catalog-toolbar py-1.5">
+        <div className="portal-search-bar space-y-1">
           <div className="flex items-center gap-2">
           {/* The wrapping <label> held only the magnifier icon, so it gave the
               field no accessible name at all: a reader announced a bare "edit
@@ -549,7 +510,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
               onChange={(event) => setSearch(event.target.value)}
             />
           </label>
-          <div className="flex shrink-0 items-center gap-1.5 lg:hidden">
+          <div className="flex shrink-0 items-center gap-1.5">
             <LazyPortalMenu
               align="auto"
               triggerWrapperClassName="min-w-0"
@@ -614,8 +575,8 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
             above the grid, and it was the phone half of a control the
             screen-edge rail now provides at every breakpoint. */}
 
-        <div className="flex items-center justify-between gap-2 border-t border-slate-100 px-1 pt-2 text-xs text-slate-500 dark:border-neutral-800 dark:text-neutral-400">
-          <span>{portalActiveFilterCount > 0 ? `${portalActiveFilterCount} ${copy('selected', 'selected')}` : copy('filterCompactHint', 'Use quick filters to narrow products faster.')}</span>
+        <div className="flex items-center justify-between gap-2 px-1 pt-1 text-xs text-slate-500 dark:border-neutral-800 dark:text-neutral-400">
+          <span>{portalActiveFilterCount > 0 ? `${portalActiveFilterCount} ${copy('selected', 'selected')}` : ''}</span>
           <span className="font-semibold text-slate-600 dark:text-neutral-200">
             {refreshingProducts
               ? copy('refreshing', 'Refreshing...')
@@ -626,9 +587,30 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
         </div>
         </div>
       </div>
+  )
+
+  return (
+    <SectionShell
+      title={copy('products', 'Products')}
+      subtitle={copy('liveCatalog', 'Browse our products and check availability.')}
+    >
+      <div className="relative">
+        <div className="min-w-0">
+      {/* G3: the auto-scrolling promo row sits ABOVE search, public view
+          only, and only when the merchant shows promotions at all. */}
+      {publicView && previewConfig.showPromotions !== false ? (
+        <PortalPromoStrip
+          products={filteredProducts}
+          promotionRules={promotionRules}
+          copy={copy}
+          formatPrice={(usd, khr) => formatPortalPrice(usd, khr, previewConfig)}
+          openProductDetail={openProductDetail}
+        />
+      ) : null}
+      {toolbarHost ? createPortal(searchToolbar, toolbarHost) : searchToolbar}
 
       {previewConfig.showPromotions !== false && visiblePromotionItems.length ? (
-        <div className="mb-5 space-y-3">
+        <div className="mb-3 space-y-2">
           <div className="flex flex-col gap-1 px-1">
             {/* WCAG 1.3.1 / 2.4.10: the promotions group announced itself as a
                 heading only by being bigger, while each promotion card below

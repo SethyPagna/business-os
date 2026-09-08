@@ -138,8 +138,10 @@ runTest('public portal mobile contact actions stay compact', () => {
   assert.match(catalogSecondaryTabsSource, /data-portal-contact-tray="true"/, 'public contact tray should expose a mobile measurement hook')
   assert.match(catalogSecondaryTabsSource, /-mt-(?:7|9) flex flex-wrap items-end gap-(?:3|4) sm:-mt-(?:9|12)/, 'public about name/tagline should sit on a plain surface below the banner, not overlaid on it')
   assert.match(catalogSecondaryTabsSource, /portal-contact-value-address/, 'long public portal addresses should be clamped on mobile')
-  assert.match(catalogSecondaryTabsSource, /<span className="sr-only sm:not-sr-only">\{item\.label\}<\/span>/, 'social labels should collapse to accessible icon buttons on phones')
-  assert.match(catalogSecondaryTabsSource, /businessFacts\?\.length \|\| socialLinks\?\.length/, 'contact and social actions should share one compact mobile tray')
+  const social = fs.readFileSync(new URL('../src/components/catalog/PortalSocialLinks.tsx', import.meta.url), 'utf8')
+  assert.match(social, /flex-nowrap/, 'social links must remain in one row')
+  assert.match(social, /aria-label=\{label\}/, 'icon links must retain accessible names')
+  assert.doesNotMatch(catalogSecondaryTabsSource, /socialLinks.map/, 'About must not duplicate the header and footer social rows')
   assert.match(catalogPageSource, /data-portal-secondary-loading="true"/, 'public secondary tab fallback should be compact and measurable')
   assert.doesNotMatch(catalogPageSource, /<SectionShell title=\{copy\('loadingPortal', 'Loading customer portal\.\.\.'\)\}>\s*<div className="text-sm text-slate-500">Loading\.\.\.<\/div>\s*<\/SectionShell>\s*}\)/, 'public secondary tab fallback should not show the large generic loading card')
 })
@@ -323,8 +325,8 @@ runTest('portal editor work leaves product filter popovers viewport-portalled', 
 
 runTest('public product discovery uses a sticky unified search, responsive brand index, and explicit paging controls', () => {
   const paginationSource = fs.readFileSync(new URL('../src/components/catalog/catalogPagination.tsx', import.meta.url), 'utf8')
-  assert.match(catalogProductsSectionSource, /sticky top-16[\s\S]*focus-within:border-blue-400/,
-    'search should stay sticky and use the same blue discovery accent as filters')
+  assert.match(catalogProductsSectionSource, /createPortal\(searchToolbar, toolbarHost\)/, 'search must share the sticky section navigation container')
+  assert.match(catalogProductsSectionSource, /focus-within:border-blue-400/, 'search retains visible keyboard focus')
   assert.match(catalogProductsSectionSource, /copy\('jumpToBrand', 'Jump to brand'\)/,
     'the brand index still needs its labelled, translated name')
   // The brand index used to be TWO controls: a scrolling 4-column letter grid

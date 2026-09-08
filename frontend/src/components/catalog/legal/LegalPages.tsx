@@ -11,9 +11,7 @@
 // this" notice. Nothing here is legal advice.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ExternalLink from 'lucide-react/dist/esm/icons/external-link.js'
-import ShieldCheck from 'lucide-react/dist/esm/icons/shield-check.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import {
   LEGAL_PAGE_ORDER,
@@ -132,14 +130,12 @@ export default function PortalFooter({
   phone,
   email,
 }: PortalFooterProps) {
-  const [menuOpen, setMenuOpen] = useState(false)
   const [activePage, setActivePage] = useState<LegalPageKey | null>(() =>
     typeof window === 'undefined' ? null : readLegalPageFromSearch(window.location.search))
   // True while the reader was opened by us (so closing can go BACK and leave
   // no history crumb); false when the visitor arrived on a policy link
   // directly, where going back would leave the site entirely.
   const pushedRef = useRef(false)
-  const policiesTriggerRef = useRef<HTMLButtonElement | null>(null)
   const returnFocusRef = useRef<HTMLElement | null>(null)
   // Capture the catalogue title before a direct ?legal= reader's first
   // effect can replace it. Effect reruns must never promote a policy title to
@@ -169,11 +165,8 @@ export default function PortalFooter({
   const openPage = useCallback((page: LegalPageKey) => {
     if (!activePage && typeof document !== 'undefined') {
       const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null
-      returnFocusRef.current = focused?.getAttribute('role') === 'menuitem'
-        ? policiesTriggerRef.current
-        : focused
+      returnFocusRef.current = focused
     }
-    setMenuOpen(false)
     setActivePage(page)
     if (typeof window === 'undefined') return
     try {
@@ -240,10 +233,8 @@ export default function PortalFooter({
     return () => { document.title = baseDocumentTitleRef.current }
   }, [activePage, text, details.name])
 
-  // Restore focus only after the reader has unmounted. A footer menu item is
-  // removed as soon as it opens a policy, so the stable return target for that
-  // flow is the Policies trigger. A direct ?legal= link has no opener; the
-  // catalogue main landmark is the meaningful fallback.
+  // Restore focus to the persistent policy link after the reader unmounts.
+  // A direct ?legal= link has no opener; use the catalogue main landmark.
   const hadActivePageRef = useRef(!!activePage)
   useEffect(() => {
     const hadActivePage = hadActivePageRef.current
@@ -264,9 +255,9 @@ export default function PortalFooter({
         role="contentinfo"
         aria-label={text('portal_legal_footer_landmark')}
         data-portal-footer="true"
-        className="mt-8 border-t border-slate-200 px-4 py-6 text-slate-600 dark:border-neutral-800 dark:text-neutral-400"
+        className="px-1 py-4 text-slate-600 dark:border-neutral-800 dark:text-neutral-400"
       >
-        <div className="mx-auto flex max-w-3xl flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="mx-auto flex max-w-none flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0 space-y-1 text-xs leading-relaxed">
             <div className="text-sm font-semibold text-slate-900 dark:text-neutral-100">
               {details.name}
@@ -302,50 +293,19 @@ export default function PortalFooter({
             <div className="pt-1 text-[11px] text-slate-400 dark:text-neutral-500">{fill('portal_legal_footer_rights')}</div>
           </div>
 
-          <div className="relative shrink-0">
-            <button
-              ref={policiesTriggerRef}
-              type="button"
-              className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:bg-neutral-800"
-              onClick={() => setMenuOpen((open) => !open)}
-              aria-expanded={menuOpen}
-              aria-haspopup="menu"
-              aria-label={text('portal_legal_open_policies')}
-            >
-              <ShieldCheck className="h-4 w-4" />
-              {text('portal_legal_policies')}
-              <ChevronDown className={`h-3.5 w-3.5 transition ${menuOpen ? 'rotate-180' : ''}`} />
-            </button>
-            {menuOpen ? (
-              <>
-                {/* Click-away layer: the menu floats above content rather than
-                    pushing the footer taller. */}
-                <div className="fixed inset-0 z-[75]" onClick={() => setMenuOpen(false)} aria-hidden="true" />
-                <div
-                  role="menu"
-                  aria-label={text('portal_legal_policies')}
-                  className="absolute bottom-full right-0 z-[76] mb-2 w-56 max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-slate-200 bg-white p-1 shadow-2xl dark:border-neutral-700 dark:bg-neutral-900"
-                >
-                  {LEGAL_PAGE_ORDER.map((page) => (
-                    <a
-                      key={page}
-                      role="menuitem"
-                      href={typeof window === 'undefined' ? '' : legalHref(page, window.location.search, window.location.pathname)}
-                      className="flex items-center justify-between gap-2 rounded-xl px-3 py-2 text-xs font-medium text-slate-700 transition hover:bg-slate-50 dark:text-neutral-200 dark:hover:bg-neutral-800"
-                      onClick={(event) => {
-                        if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return
-                        event.preventDefault()
-                        openPage(page)
-                      }}
-                    >
-                      {text(LEGAL_PAGE_TITLE_KEY[page])}
-                      <ExternalLink className="h-3.5 w-3.5 shrink-0 text-slate-300 dark:text-neutral-600" />
-                    </a>
-                  ))}
-                </div>
-              </>
-            ) : null}
-          </div>
+          <nav aria-label={text('portal_legal_policies')} className="flex max-w-lg flex-wrap items-center gap-x-4 gap-y-1">
+            {LEGAL_PAGE_ORDER.map((page) => (
+              <a key={page} href={typeof window === 'undefined' ? `?legal=${page}` : legalHref(page, window.location.search, window.location.pathname)}
+                className="inline-flex min-h-8 items-center text-xs font-medium text-neutral-700 underline-offset-4 hover:underline focus-visible:underline dark:text-neutral-200"
+                onClick={(event) => {
+                  if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return
+                  event.preventDefault()
+                  openPage(page)
+                }}>
+                {text(LEGAL_PAGE_TITLE_KEY[page])}
+              </a>
+            ))}
+          </nav>
         </div>
       </footer>
 
@@ -386,7 +346,7 @@ function LegalReader({
     // inside them. Marking those landmarks inert keeps pointer and keyboard
     // interaction inside the modal without hiding the reader itself.
     const background = Array.from(document.querySelectorAll<HTMLElement>(
-      '[data-portal-root="true"] header, [data-portal-root="true"] nav, [data-portal-root="true"] main, [data-portal-root="true"] footer',
+      '[data-portal-root="true"] header, [data-portal-root="true"] nav, [data-portal-root="true"] main, [data-portal-root="true"] footer, [data-portal-social-links="true"]',
     )).filter((element) => !element.contains(dialog) && !dialog?.contains(element))
     const previouslyInert = background.map((element) => element.hasAttribute('inert'))
     background.forEach((element) => element.setAttribute('inert', ''))
@@ -440,7 +400,7 @@ function LegalReader({
       className="fixed inset-0 z-[90] overflow-y-auto overscroll-contain bg-white text-slate-800 dark:bg-neutral-950 dark:text-neutral-200"
     >
       <div className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 backdrop-blur dark:border-neutral-800 dark:bg-neutral-950/95">
-        <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-3">
+        <div className="mx-auto flex max-w-none items-center gap-3 px-4 py-3">
           <h1
             id={titleId}
             className="min-w-0 flex-1 truncate text-base font-semibold text-slate-900 dark:text-neutral-100"

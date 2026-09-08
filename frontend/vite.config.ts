@@ -804,6 +804,7 @@ function manualChunks(id: string): string | undefined {
     if (
       normalized.includes('/src/components/catalog/PublicCatalogPage.tsx')
       || normalized.includes('/src/components/catalog/CatalogPreviewSurface.tsx')
+      || normalized.includes('/src/components/catalog/PortalSocialLinks.tsx')
       // portalBucket is only ever imported by PublicCatalogPage above. Left to the
       // generic '/src/components/catalog/' catch-all further down, it lands in the
       // 'catalog' chunk instead -- and since the admin-only CatalogPage imports

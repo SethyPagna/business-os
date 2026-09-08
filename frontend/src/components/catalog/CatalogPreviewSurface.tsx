@@ -10,6 +10,7 @@ import Sun from 'lucide-react/dist/esm/icons/sun.js'
 import User from 'lucide-react/dist/esm/icons/user.js'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
 import CatalogProductImage from './catalogImages'
+import PortalSocialLinks from './PortalSocialLinks'
 import type { ProductDetailViewState } from './ProductDetailFlyout'
 import '../../styles/public-portal.css'
 
@@ -353,23 +354,8 @@ export default function CatalogPreviewSurface({
                   {/* 6.2 (user): the LOGO is out of the top bar -- it still
                       lives on the About page hero. Social links take this
                       side; language + light/dark sit on the far side. */}
-                  <div className="flex min-w-0 flex-wrap items-center gap-1">
-                    {headerLinks.map((item) => {
-                      const Icon = item.icon
-                      return (
-                        <a
-                          key={item.key}
-                          href={item.value}
-                          target="_blank"
-                          rel="noreferrer"
-                          className={`inline-flex h-9 w-9 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800 ${item.accentClassName || ''}`}
-                          aria-label={item.label}
-                          title={item.label}
-                        >
-                          <Icon className="h-[18px] w-[18px]" />
-                        </a>
-                      )
-                    })}
+                  <div className="min-w-0 overflow-x-auto">
+                    <PortalSocialLinks links={headerLinks} />
                     {!publicView ? (
                       <div className="hidden shrink-0 items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-700 sm:inline-flex dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
                         {copy('previewBadge', 'Portal Studio')}
@@ -593,30 +579,19 @@ export default function CatalogPreviewSurface({
                     })}
                   </div>
                 </div>
+                {publicView ? <div id="portal-catalog-toolbar-slot" /> : null}
               </div>
             </nav>
-
-            {displayConfig.publicationReady === false ? (
-              <div role="status" className="mx-1 mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-950 dark:border-amber-700/60 dark:bg-amber-900/20 dark:text-amber-100">
-                <div className="font-semibold">
-                  {copy('portalPublicationReadinessTitle', 'Some online features are unavailable', 'មុខងារអនឡាញមួយចំនួនមិនអាចប្រើបាន')}
-                </div>
-                <p className="mt-1">
-                  {copy(
-                    'portalPublicationReadinessBody',
-                    'Browse the catalogue or contact the store while we complete our seller details.',
-                    'សូមមើលកាតាឡុក ឬទាក់ទងហាង ខណៈយើងកំពុងបំពេញព័ត៌មានអ្នកលក់។',
-                  )}
-                </p>
-              </div>
-            ) : null}
 
             <main id="portal-main-content" tabIndex={-1}>
               {promotionsSection}
               {catalogSection}
               {secondaryTabSection}
             </main>
-            {footer}
+            <div className="mt-6 border-t border-slate-200 pt-4 dark:border-neutral-800">
+              <PortalSocialLinks links={headerLinks} />
+              {footer}
+            </div>
           </div>
         </div>
       </div>
@@ -649,7 +624,7 @@ export default function CatalogPreviewSurface({
             type="button"
             tabIndex={publicScrollButtonsVisible ? 0 : -1}
             aria-hidden={!publicScrollButtonsVisible}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200/80 bg-white/95 text-neutral-600 shadow-[0_10px_24px_rgba(148,163,184,0.22)] backdrop-blur transition hover:bg-slate-50 hover:text-neutral-950 dark:border-neutral-700/80 dark:bg-neutral-900/92 dark:text-neutral-100 dark:hover:bg-neutral-800 dark:hover:text-white"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-neutral-300/40 bg-white/50 text-neutral-800 shadow-none backdrop-blur-sm transition hover:bg-white/90 dark:border-neutral-600/40 dark:bg-neutral-950/50 dark:text-white dark:hover:bg-neutral-900/90"
             onClick={() => scrollPublicPortal('top')}
             aria-label={copy('scrollToTop', 'Move to top')}
             title={copy('scrollToTop', 'Move to top')}
@@ -660,7 +635,7 @@ export default function CatalogPreviewSurface({
             type="button"
             tabIndex={publicScrollButtonsVisible ? 0 : -1}
             aria-hidden={!publicScrollButtonsVisible}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200/80 bg-white/95 text-neutral-600 shadow-[0_10px_24px_rgba(148,163,184,0.22)] backdrop-blur transition hover:bg-slate-50 hover:text-neutral-950 dark:border-neutral-700/80 dark:bg-neutral-900/92 dark:text-neutral-100 dark:hover:bg-neutral-800 dark:hover:text-white"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-neutral-300/40 bg-white/50 text-neutral-800 shadow-none backdrop-blur-sm transition hover:bg-white/90 dark:border-neutral-600/40 dark:bg-neutral-950/50 dark:text-white dark:hover:bg-neutral-900/90"
             onClick={() => scrollPublicPortal('bottom')}
             aria-label={copy('scrollToBottom', 'Move to bottom')}
             title={copy('scrollToBottom', 'Move to bottom')}
