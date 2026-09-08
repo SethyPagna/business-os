@@ -44,6 +44,18 @@ assert.equal(subject.projectedSaleStatusForReturnCreate(
   [{ id: 1, product_id: 5, quantity: 2 }], [], [{ sale_item_id: 1, quantity: 1 }], 'completed',
 ), 'partial_return')
 assert.equal(subject.projectedSaleStatusForReturnCreate([], [], [], 'awaiting_payment'), 'awaiting_payment')
+assert.doesNotThrow(() => subject.assertReturnCreateCapacity(
+  [{ id: 1, product_id: 5, product_name: 'A', quantity: 2 }, { id: 2, product_id: 5, product_name: 'A', quantity: 1 }],
+  [{ sale_item_id: 1, quantity: 1 }], [{ sale_item_id: 1, quantity: 1 }, { product_id: 5, quantity: 1 }],
+))
+assert.throws(() => subject.assertReturnCreateCapacity(
+  [{ id: 1, product_id: 5, product_name: 'A', quantity: 2 }], [],
+  [{ sale_item_id: 1, quantity: 2 }, { sale_item_id: 1, quantity: 1 }],
+), /only 2 sold/, 'duplicate lines are aggregate-validated')
+assert.throws(() => subject.assertReturnCreateCapacity(
+  [{ id: 1, product_id: 5, product_name: 'A', quantity: 2 }], [],
+  [{ sale_item_id: 1, quantity: 2 }, { product_id: 5, quantity: 1 }],
+), /additional unit/, 'sale-line and product-fallback quantities share one capacity')
 
 const guard = subject.returnCreateGuardStatement(crypto.randomUUID(), 'precondition', '1=1')
 assert.match(guard.sql, /operation_id,phase,guard_value/)
@@ -51,6 +63,7 @@ assert.equal(guard.params.returnCreatePhase, 'precondition')
 assert.match(subject.returnCreateIdSql(), /client_request_id=@returnClientRequestId/)
 assert.match(subject.replacementSaleIdSql(), /client_request_id=@replacementClientRequestId/)
 assert.throws(() => subject.assertReturnCreatePlanBounds(Array.from({ length: 501 }, () => ({ sql: 'SELECT 1', params: {} })), canonical, 0), /fewer items/)
+assert.doesNotThrow(() => subject.assertReturnCreatePlanBounds(Array.from({ length: 500 }, () => ({ sql: 'SELECT 1', params: {} })), canonical, 0))
 assert.throws(() => subject.assertReturnCreatePlanBounds([{ sql: 'SELECT 1', params: Object.fromEntries(Array.from({ length: 101 }, (_, i) => [`p${i}`, i])) }], canonical, 0), /too many inputs/)
 assert.throws(() => subject.assertReturnCreatePlanBounds([{ sql: 'SELECT 1', params: {} }], { value: 'x'.repeat(500000) }, 20000), /combined too large/)
 
