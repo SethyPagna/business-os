@@ -202,6 +202,10 @@ export const BACKUP_TABLES = [
   'return_write_revisions',
   'return_bulk_operations',
   'return_bulk_members',
+  // Immutable Sales Records rows reference sales and the durable operation
+  // identities above. This position inserts parents first and reverse-deletes
+  // the events before any parent during restore.
+  'sale_record_events',
   // Durable stock receipts reference history/snapshots, products/lots and
   // movements above. Retained revision tombstones must round-trip unchanged.
   'stock_session_revisions',
@@ -791,7 +795,9 @@ async function writeBackupDocument(
 // it was taken for. routes/system.ts derives both lists from the same
 // place for exactly that reason.
 export async function createSectionBackup(env: Env, tables: readonly string[], source: 'manual' | 'scheduled' = 'manual') {
-  return writeBackupDocument(env, { tables, includeAssets: false, source })
+  const requested = new Set(tables)
+  const ordered = BACKUP_TABLES.filter((table) => requested.has(table))
+  return writeBackupDocument(env, { tables: ordered, includeAssets: false, source })
 }
 
 // Queue consumer entry point (called from queue.ts's handleBackupQueue for
@@ -1080,6 +1086,7 @@ const SALE_REPLAY_RESTORE_BUNDLE = [
   'undo_snapshots', 'sale_amendments', 'sale_write_revisions', 'sale_bulk_operations', 'sale_bulk_members',
   'sale_mutation_receipts', 'sale_mutation_members',
   'return_write_revisions', 'return_bulk_operations', 'return_bulk_members',
+  'sale_record_events',
   'stock_session_revisions', 'stock_session_operations', 'stock_session_members',
 ] as const
 

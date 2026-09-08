@@ -141,7 +141,7 @@
       "The existing maintenance mode restore bypass permits reverse-order child deletion; event UPDATE remains forbidden."
     ],
     "factory_reset": "Add sale_record_events before sales in FACTORY_RESET_TABLES and wrap that existing atomic batch with the dedicated reset guard statements.",
-    "reset_data": "Add sale_record_events before sales in products+includeSales, sales, and all lists; wrap each existing atomic delete batch with the dedicated reset guard statements. The same ordered table list drives the pre-reset scoped backup and delete.",
+    "reset_data": "Add sale_record_events before sales in products+includeSales, sales, and all lists; wrap each existing atomic delete batch with the dedicated reset guard statements. The same exact table set drives both operations: BACKUP_TABLES parent-first order writes the scoped backup, while the reset list uses child-first delete order.",
     "retention": "No ephemeral-retention path references sale_record_events. Ordinary 21-day audit and action-history pruning cannot erase it."
   },
   "permissions_and_audit": {

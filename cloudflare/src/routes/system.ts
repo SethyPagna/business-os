@@ -38,6 +38,32 @@ import { actorSnapshot } from '../lib/actorSnapshot'
 // the remainder honestly.
 const MAX_IMAGE_DELETES_PER_RESET = 500
 
+const SALE_RECORD_RESET_GUARD_KEY = 'sale_record_events_reset_guard'
+
+type ResetStatement = { sql: string; params?: Record<string, unknown> }
+
+// sale_record_events is immutable outside restore/reset. Keep its short-lived
+// reset authority inside the same D1 transaction as every destructive delete:
+// no request can observe the flag and a failure rolls the flag and deletes back.
+function guardSaleRecordReset(statements: ResetStatement[]): ResetStatement[] {
+  const token = crypto.randomUUID()
+  return [
+    {
+      sql: `INSERT INTO system_flags(key,value,updated_at)
+            VALUES(@key,json_object('mode','reset','token',@token),CURRENT_TIMESTAMP)
+            ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=CURRENT_TIMESTAMP`,
+      params: { key: SALE_RECORD_RESET_GUARD_KEY, token },
+    },
+    ...statements,
+    {
+      sql: `DELETE FROM system_flags
+            WHERE key=@key AND json_extract(value,'$.mode')='reset'
+              AND json_extract(value,'$.token')=@token`,
+      params: { key: SALE_RECORD_RESET_GUARD_KEY, token },
+    },
+  ]
+}
+
 const app = new Hono<{ Bindings: Env; Variables: { user: any } }>()
 
 app.use('*', requireAuth)
@@ -197,6 +223,7 @@ app.post('/reset-data', async (c) => {
     // whether or not this toggle is used. Allocation tables are listed
     // first since they reference sale_items/return_items.
     if (includeSales) {
+      tablesToClear.unshift('sale_record_events')
       tablesToClear.push(
         'return_item_batch_allocations',
         'sale_item_batch_allocations',
@@ -257,7 +284,8 @@ app.post('/reset-data', async (c) => {
         imageKeysToDelete = sanitizeMediaList(rawPaths).map((p) => p.replace(/^\/+/, ''))
       }
 
-      await db.batch(tablesToClear.map((table) => ({ sql: `DELETE FROM "${table}"` })))
+      const deletes = tablesToClear.map((table) => ({ sql: `DELETE FROM "${table}"` }))
+      await db.batch(includeSales ? guardSaleRecordReset(deletes) : deletes)
       // Deliberately NOT touched by either toggle: customers, suppliers,
       // delivery_contacts, custom_fields, import job history, and every
       // settings/user/branch/category/unit table.
@@ -350,6 +378,7 @@ app.post('/reset-data', async (c) => {
 
   try {
     const statements: Array<{ sql: string }> = [
+      { sql: 'DELETE FROM sale_record_events' },
       { sql: 'DELETE FROM return_item_batch_allocations' },
       { sql: 'DELETE FROM sale_item_batch_allocations' },
       { sql: 'DELETE FROM return_items' },
@@ -420,7 +449,7 @@ app.post('/reset-data', async (c) => {
       )
     }
 
-    await db.batch(statements)
+    await db.batch(guardSaleRecordReset(statements))
 
     // mode 'all' wipes the import tables in `statements` above; the two BULK
     // members (import_job_rows, import_job_source_rows) live on the separate
@@ -823,7 +852,7 @@ app.post('/factory-reset', async (c) => {
   try {
     const droppedCustomTables = await dropAllCustomTables(c.env)
 
-    await db.batch(FACTORY_RESET_TABLES.map((table) => ({ sql: `DELETE FROM "${table}"` })))
+    await db.batch(guardSaleRecordReset(FACTORY_RESET_TABLES.map((table) => ({ sql: `DELETE FROM "${table}"` }))))
     // The two bulk import-staging tables live on the separate import-staging DB
     // (see lib/db.ts); FACTORY_RESET_TABLES' DELETE of import_job_rows hits only
     // the main DB's empty shell, so clear the real staging on its own DB. No-op

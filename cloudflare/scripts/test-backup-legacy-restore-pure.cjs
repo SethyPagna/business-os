@@ -117,6 +117,13 @@ async function main() {
       'case-digest', 'merge', 'conflict-operation-fixture', 'history_pending',
       'history finalization pending', '2026-09-08 02:00:00', '2026-09-08 02:01:00',
     )
+    f.sql.prepare(`INSERT INTO sale_record_events(
+      id,sale_id,source_kind,source_id,generation,kind,via,actor_id,actor_username,occurred_at,changes_json
+    ) VALUES(?,?,?,?,?,?,?,?,?,?,?)`).run(
+      'record-event-fixture', 1, 'sale_settlement', 'mutation-fixture', 0,
+      'payment_settled', 'apply', 1, 'synthetic-review', '2026-09-08T00:00:00.000Z',
+      JSON.stringify([{ field: 'payment_method', before: { state: 'known_value', value: 'Credit' }, after: { state: 'known_value', value: 'Cash' } }]),
+    )
     const snap = (tables = f.sql.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all().map(t => t.name)) =>
       Object.fromEntries(tables.map(t => [t, f.sql.prepare(`SELECT * FROM "${t.replaceAll('"', '""')}"`).all()
         .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))]))
@@ -125,7 +132,7 @@ async function main() {
     const document = JSON.parse(f.env.ASSETS._store.get(created.key).body)
     assert.equal(Object.keys(document.tables).length, backup.BACKUP_TABLES.length)
     assert.deepEqual(Object.keys(document.tables), [...backup.BACKUP_TABLES], 'full backup must include every table in exact dependency order')
-    for (const table of ['return_write_revisions', 'return_bulk_operations', 'return_bulk_members', 'stock_session_revisions', 'stock_session_operations', 'stock_session_members', 'sale_mutation_receipts', 'sale_mutation_members']) {
+    for (const table of ['return_write_revisions', 'return_bulk_operations', 'return_bulk_members', 'stock_session_revisions', 'stock_session_operations', 'stock_session_members', 'sale_mutation_receipts', 'sale_mutation_members', 'sale_record_events']) {
       assert.ok(Object.hasOwn(document.tables, table), `backup includes durable replay table ${table}`)
     }
     for (const table of ['product_conflict_merge_runs', 'product_conflict_merge_run_cases']) {
@@ -161,7 +168,7 @@ async function main() {
     const operations = f.sql.prepare('SELECT * FROM sale_bulk_operations ORDER BY request_id').all()
     assert.equal((await bulk.replay(f, operations[0].history_id, 'undo', 0)).status, 200)
     assert.equal((await bulk.replay(f, operations[1].history_id, 'redo', 1)).status, 200)
-    console.log(`PASS actual FK-on streaming full ${backup.BACKUP_TABLES.length}-table roundtrip, sale/Returns/stock/conflict replay tables, and restored-generation undo/redo`)
+    console.log(`PASS actual FK-on streaming full ${backup.BACKUP_TABLES.length}-table roundtrip, Sales Records/sale/Returns/stock/conflict replay tables, and restored-generation undo/redo`)
 
     const pre0127 = structuredClone(document)
     const salesColumns = pre0127.tables.sales.columns
