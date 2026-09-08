@@ -1413,6 +1413,14 @@ export const updateSaleStatus = async (id, sale_status, notes, extra) => {
   const { updateSaleStatus: updateSaleStatusRequest } = await loadSalesTransport()
   return updateSaleStatusRequest(id, sale_status, notes, extra)
 }
+export const prepareSaleStatusRequest = async (id, sale_status, notes, extra) => {
+  const { prepareSaleStatusRequest: prepareRequest } = await loadSalesTransport()
+  return prepareRequest(id, sale_status, notes, extra)
+}
+export const submitSaleStatusRequest = async (id, payload) => {
+  const { submitSaleStatusRequest: submitRequest } = await loadSalesTransport()
+  return submitRequest(id, payload)
+}
 
 // ─── Add items to a recorded sale (S4-24b) ────────────────────────────────────
 // N18: `review` is NOT optional. It carries the caller's STABLE
@@ -1453,6 +1461,14 @@ export const getSalesExport = async (params) => {
 export const updateReturn = async (id, d) => {
   const { updateReturn: updateReturnRequest } = await loadReturnsTransport()
   return updateReturnRequest(id, d)
+}
+export const prepareReturnUpdateRequest = async (id, d) => {
+  const { prepareReturnUpdateRequest: prepareRequest } = await loadReturnsTransport()
+  return prepareRequest(id, d)
+}
+export const submitReturnUpdateRequest = async (id, body) => {
+  const { submitReturnUpdateRequest: submitRequest } = await loadReturnsTransport()
+  return submitRequest(id, body)
 }
 
 // ─── Sync server health test ──────────────────────────────────────────────────
