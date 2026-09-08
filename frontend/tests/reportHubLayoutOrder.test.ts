@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url'
 const rootPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const read = (rel: string) => fs.readFileSync(path.join(rootPath, rel), 'utf8')
 const hub = read('src/components/sales/ReportsHub.tsx')
+const overview = read('src/components/sales/reports/OverviewReport.tsx')
 const render = hub.slice(hub.lastIndexOf('  return ('))
 
 // Order on the page: controls, then exactly one selected report body.
@@ -23,6 +24,15 @@ const body = at('{body}')
 assert.ok(controls < body, 'controls come before the report')
 assert.match(hub, /view\.id === 'shift' \? <ShiftReport/, 'Shift is selectable through the same report switch')
 assert.doesNotMatch(hub, /CurrentShiftSummary|ShiftHistoryPanel/, 'no shift overview is appended beneath every report')
+
+// Overview's breakdown choices sit at the top of its body, immediately after
+// the hub controls. The statement no longer repeats those controls with a
+// prose summary before showing the canonical rows.
+const overviewRender = overview.slice(overview.lastIndexOf('  return ('))
+const tabs = overviewRender.indexOf('className="reports-overview-tabs"')
+const frame = overviewRender.indexOf('<ReportFrame')
+assert.ok(tabs >= 0 && tabs < frame, 'Overview breakdown tabs precede the statement frame')
+assert.doesNotMatch(overviewRender, /summary=\{|summaryNote=/, 'Overview does not render the redundant summary prose')
 
 // Compact tier: Show folds the card; the folded line is a handle that
 // unfolds it, names the view and the range, and keeps the Filters button

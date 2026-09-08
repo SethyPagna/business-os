@@ -287,12 +287,12 @@ test('Overview and expense rows share nearest-cent display for the exact Sep 5 p
   assert.equal(exactFoldedUsd.toFixed(12), '16.974169741697')
   assert.equal(productionDeps.fmtUSD(exactFoldedUsd), '$16.98', 'unmodified global pricing formatting reproduces the observed summary bug')
   assert.equal(statement.expenses.usd, 16.97, 'the canonical statement/table amount rounds nearest-cent')
-  assert.equal(fmtMoney(nativeExpenses.usd, nativeExpenses.khr), '$16.97', 'Overview summary formats the raw pair to the same cent')
+  assert.equal(fmtMoney(nativeExpenses.usd, nativeExpenses.khr), '$16.97', 'the shared formatter formats the raw pair to the same cent')
   assert.equal(fmtMoney(statement.expenses.usd), '$16.97', 'statement/table formatting remains identical')
   assert.deepEqual(nativeExpenses, { usd: 0, khr: 69000 }, 'the production raw pair remains immutable')
 
   const overviewSource = read('src/components/sales/reports/OverviewReport.tsx')
-  assert.match(overviewSource, /fmtMoney\(num\(expenses\.amount_usd\), num\(expenses\.amount_khr\)\)/, 'Overview passes the raw pair to the shared formatter')
+  assert.match(overviewSource, /expenses:\s*expenses \? \{ usd: num\(expenses\.amount_usd\), khr: num\(expenses\.amount_khr\) \}/, 'Overview passes the raw pair into the canonical statement model')
   assert.doesNotMatch(overviewSource, /round2\(num\(expenses\.amount_/, 'Overview does not pre-round either component')
 })
 
@@ -724,7 +724,7 @@ test('compact report filters match the stacked mobile control contract', () => {
   assert.match(css, /\.reports-mobile-controls\s*\{[\s\S]*display:\s*grid/, 'mobile controls stack in a scoped grid')
   assert.match(css, /\.reports-mobile-presets\s*\{[\s\S]*flex-wrap:\s*wrap/, 'quick ranges wrap instead of scrolling horizontally')
   assert.match(css, /\.reports-mobile-range\s*\{[^}]*\bmin-height:\s*44px\s*;/, 'the combined date/calendar target is at least 44px, regardless of declaration order')
-  assert.match(css, /\.reports-mobile-show\s*\{[^}]*width:\s*100%/, 'Show fills the available action width')
+  assert.match(css, /\.reports-mobile-show\s*\{[^}]*width:\s*auto[^}]*min-width:\s*5\.5rem[^}]*min-height:\s*44px/, 'Show is compact while retaining its 44px target')
   assert.match(css, /font-variant-numeric:\s*tabular-nums/, 'report amounts use tabular numerals')
   assert.match(css, /overflow-x:\s*clip/, 'the report surface cannot create page-level horizontal overflow')
 })
@@ -827,10 +827,12 @@ test('no view assigns a cost/profit key itself -- profit is shown only when the 
   }
   // The per-receipt list keys on the server-typed presence of gross_profit_usd in the totals block.
   assert.ok(read('src/components/sales/reports/SalesListReport.tsx').includes("typeof totals.gross_profit_usd === 'number'"), 'the Sales list gates profit on the server having sent it')
-  // The Overview reads its profit figure from the statement, which buildIncomeStatement only emits when the server sent cost.
+  // The Overview renders every figure from the statement, which
+  // buildIncomeStatement only emits with the server-provided inputs.
   const overview = read('src/components/sales/reports/OverviewReport.tsx')
-  assert.ok(overview.includes("lines.find((l) => l.key === 'gross_profit')"), 'the Overview takes gross profit from the statement lines')
   assert.ok(overview.includes('buildIncomeStatement('), 'the Overview builds its statement through the model')
+  assert.ok(overview.includes('lines.map((l)'), 'the Overview renders the statement lines instead of a separate profit summary')
+  assert.doesNotMatch(overview, /summary=\{|summaryNote=/, 'the redundant Overview summary cannot diverge from the statement')
 })
 
 test('the awaiting-payment block is set apart in the warning tint on every surface that renders a statement', () => {

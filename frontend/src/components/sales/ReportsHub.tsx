@@ -231,7 +231,8 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
   // ---- the one filter menu ----
   // Part 586 folded the former four control-row citizens (a Filters fold, a
   // style IconButton, an Options button and an OverflowMenu) into ONE menu,
-  // so the row is just: search · view · range · Filters. That is what freed
+  // so the row is just: search · range · Filters. The permission-scoped view
+  // selector now leads the menu. That is what freed
   // the width the search box had been losing.
   const [optionsOpen, setOptionsOpen] = useState(false)
   // Compact tier only: after Show, the filter card folds to one line (view ·
@@ -280,7 +281,7 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
   const optionsAreDefault = options.currency === DEFAULT_REPORT_OPTIONS.currency
   const styleIsDefault = styleChoice == null
   // The badge counts everything the menu now owns, so a person can see at a
-  // glance that a non-default basis/currency is in force without opening it.
+  // glance that a non-default display choice is in force without opening it.
   const menuCount = activeFilterCount + (optionsAreDefault ? 0 : 1) + (styleIsDefault ? 0 : 1)
   const filtersLabel = `${trh('filters', 'Filters')}${menuCount ? ` · ${menuCount}` : ''}`
   const filtersButton = (
@@ -318,8 +319,7 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
   } : null
 
   // One tail for every tier: the menu is the ONLY thing that can move, and it
-  // never disappears. The view picker is not here -- it lives in the search
-  // slot, which ControlRow renders at all three tiers.
+  // never disappears. The view picker lives inside that menu at every tier.
   const collapsedTail = <>{filtersButton}</>
 
   const mobilePresets: Array<{ id: MobileRangePreset; label: string }> = [
@@ -366,7 +366,7 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
             : <GroupedReport key={view.id} {...viewProps} />
 
   // One line standing in for the folded card: what is showing, for which
-  // range, and the Filters button (which also keeps the options fold's
+  // range, and the Filters button (which also keeps the menu's
   // anchor mounted). The whole line is the handle. The fold shrinks the
   // CONTENT, never the tap area: the handle and the Filters button keep the
   // tier's 44px height (a2 measured 18-20px targets on the first cut, Sep 6
