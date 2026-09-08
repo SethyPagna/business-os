@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "proposed_for_independent_review_no_implementation_authorized",
+  "status": "revised_for_independent_rereview_no_implementation_authorized",
   "base_head": "e75066a918e694c89e903dff5a6cd378a4b39a53",
   "scope": "Immutable Sales Records for Contacts and Settings writers that fan out changes to persisted sales.",
   "frozen_public_contract_amendment": {
@@ -82,10 +82,28 @@
     "receipt_table": {
       "name": "sale_reference_mutation_receipts",
       "purpose": "Durable actor-scoped idempotency for fan-out acts, including valid no-sale-change outcomes that cannot invent a Sales Records event.",
-      "columns": ["id lowercase RFC4122 v4 UUID primary key", "actor_id positive integer", "mutation_kind closed enum", "target_key non-empty bounded text", "request_id trimmed non-empty text <=120 UTF-8 bytes", "request_digest lowercase SHA-256", "response_json closed scalar object <=4096 UTF-8 bytes", "occurred_at bounded timestamp"],
+      "columns": ["id lowercase RFC4122 v4 UUID primary key", "actor_id positive integer", "mutation_kind closed enum", "target_key trimmed non-empty text <=160 UTF-8 bytes", "request_id trimmed non-empty text <=120 UTF-8 bytes", "request_digest exactly 64 lowercase hexadecimal SHA-256 characters", "response_json closed scalar object <=4096 UTF-8 bytes", "occurred_at exactly 24 UTF-8 bytes in canonical UTC YYYY-MM-DDTHH:mm:ss.sssZ form and accepted by SQLite datetime()"],
       "mutation_kinds": ["customer_profile_carry", "delivery_contact_carry", "customer_merge", "delivery_contact_merge", "customer_link_repair", "customer_missing_resolve", "payment_method_replace"],
-      "identity": "UNIQUE(actor_id,mutation_kind,request_id). The target key and full normalized semantic request are included in the digest, so cross-target or changed-intent reuse returns 409.",
-      "response_policy": "Persist only operation id, target ids, affected counts, scope, and exact mutation timestamp. Do not persist contact profiles, phone/address, request bodies, arbitrary error bodies, or unbounded arrays. Paired callers refetch domain rows after success/replay.",
+      "identity": "UNIQUE(actor_id,mutation_kind,request_id). Every emitted sale_record_event uses source_id=receipt.id, generation=0, and via=apply. The target key and full normalized semantic request are included in the digest, so cross-target or changed-intent reuse returns 409.",
+      "target_key_shapes": {
+        "customer_profile_carry": "customer:<positive-id>",
+        "delivery_contact_carry": "delivery_contact:<positive-id>",
+        "customer_merge": "customer_merge:<positive-keep-id>:<positive-merge-id>",
+        "delivery_contact_merge": "delivery_contact_merge:<positive-keep-id>:<positive-merge-id>",
+        "customer_link_repair": "customer_link:<positive-current-id>:<64-lowercase-hex-SHA256-of-canonical-phone-group>",
+        "customer_missing_resolve": "customer_missing:<64-lowercase-hex-SHA256-of-normalized-name-NUL-canonical-phone-group>",
+        "payment_method_replace": "payment_method:<64-lowercase-hex-SHA256-of-normalized-source-label>"
+      },
+      "response_shapes": {
+        "customer_profile_carry": {"success": "literal true", "receipt_id": "receipt UUID", "target_id": "positive integer", "affected_sales": "non-negative integer", "affected_returns": "non-negative integer", "updated_at": "canonical receipt timestamp"},
+        "delivery_contact_carry": {"success": "literal true", "receipt_id": "receipt UUID", "target_id": "positive integer", "affected_sales": "non-negative integer", "updated_at": "canonical receipt timestamp"},
+        "customer_merge": {"success": "literal true", "receipt_id": "receipt UUID", "keep_id": "positive integer", "merge_id": "positive integer", "affected_sales": "non-negative integer", "updated_at": "canonical receipt timestamp"},
+        "delivery_contact_merge": {"success": "literal true", "receipt_id": "receipt UUID", "keep_id": "positive integer", "merge_id": "positive integer", "affected_sales": "non-negative integer", "updated_at": "canonical receipt timestamp"},
+        "customer_link_repair": {"success": "literal true", "receipt_id": "receipt UUID", "target_id": "positive integer", "affected_sales": "non-negative integer", "updated_at": "canonical receipt timestamp"},
+        "customer_missing_resolve": {"success": "literal true", "receipt_id": "receipt UUID", "target_id": "positive integer", "created": "boolean", "affected_sales": "non-negative integer", "updated_at": "canonical receipt timestamp"},
+        "payment_method_replace": {"success": "literal true", "receipt_id": "receipt UUID", "affected_sales": "non-negative integer", "affected_payment_lines": "non-negative integer", "updated_at": "canonical receipt timestamp"}
+      },
+      "response_policy": "response_json must have exactly the keys for its mutation_kind and the scalar types above; no additional or missing key is accepted. Persist no contact profile, phone/address value, payment label, request body, arbitrary error body, or array. Exact retry returns this stored response; paired callers refetch domain rows after success/replay.",
       "immutability": "UPDATE always aborts. DELETE is permitted only by the existing restore maintenance mode or the atomic Sales Records reset guard. Ordinary audit/action-history pruning never references the table."
     }
   },
@@ -95,6 +113,14 @@
     "Canonical digest contains route target, exact normalized accepted intent, selected carry/scope mode, expected revision, and link-group identity. It excludes mutable database reads and server-derived customer ids for create-and-link.",
     "Lookup actor+mutation_kind+request_id before mutable reads. Exact digest returns the stored minimal outcome; mismatch or cross-target reuse is 409 idempotency_conflict.",
     "The paired frontend freezes and persists the exact request before send, retains it across network/timeout/5xx/unreadable outcomes under bounded storage, and clears it only after terminal success/conflict or explicit discard."
+  ],
+  "revision_and_digest_by_route": [
+    "Customer profile carry requires expected_updated_at for the customer and digests target id, carry mode, expected_updated_at, the exact normalized allowlisted editable payload, and the accepted duplicate-decision fingerprint. The atomic first guard rechecks that full editable snapshot, is_anonymous=0, and the reviewed duplicate fingerprint.",
+    "Delivery contact carry requires and digests target id, carry mode, expected_updated_at, exact normalized allowlisted editable payload, and duplicate-decision fingerprint; the atomic first guard rechecks the same full snapshot and duplicate identity.",
+    "Customer and delivery merges require client_request_id, keep_id, merge_id, expected_keep_updated_at, expected_merge_updated_at, duplicate cluster type, and a SHA-256 review fingerprint over the two ordered full editable snapshots. All fields enter the digest; the atomic first guard rechecks both rows, revisions, marker state for customers, and duplicate fingerprint.",
+    "Customer relink requires current_customer_id, target_customer_id, canonical phone_key, expected_current_updated_at, expected_target_updated_at, and group_version. group_version is SHA-256 over the selector plus ordered current (sale_id,revision) members returned by the review endpoint. The digest contains all six semantic inputs; the atomic guard rechecks both profiles, the exact group version, and target is_anonymous=0.",
+    "Missing resolve requires normalized name, canonical phone_key, group_version, and target_mode. group_version is SHA-256 over the selector plus ordered current (sale_id,revision) members. Existing-target mode also requires target_customer_id and expected_target_updated_at. New-target mode instead digests the exact normalized new name/phone intent and accepted duplicate-decision fingerprint; the server-minted membership and resulting customer id are excluded. The atomic guard rechecks the group and, for existing mode, the target profile/marker revision; new contact creation remains inside the final batch.",
+    "Linked payment replacement requires normalized source label, exact normalized target display label, scope=linked, expected_settings_updated_at, and sales_group_version. sales_group_version is SHA-256 over the reviewed source/identity variants plus ordered matching (sale_id,revision) members. Every value enters the digest; the atomic first guard rechecks settings bytes, the exact group version, variant bounds, and malformed-payment absence."
   ],
   "event_projection": [
     {
@@ -135,8 +161,9 @@
   ],
   "atomic_set_write_design": [
     "Generate the receipt UUID before the batch. Generate each event UUID inside the INSERT...SELECT with SQLite randomblob UUID-v4 construction; the receipt/source composite unique key remains the retry identity.",
-    "Preflight the exact candidate selector, difference selector, event JSON byte CHECKs, malformed payment rows, and affected-sale limit before mutation.",
-    "Inside one D1 batch: revision/reference guards first; INSERT INTO sale_record_events ... SELECT from the exact mutation candidates and public-field difference predicate; execute the existing set update; perform all essential linked-domain effects; insert atomic audit; clear operation-scoped scratch guards; insert the receipt as the final statement.",
+    "Preflight the exact mutation-candidate selector, event difference selector, per-event JSON byte CHECKs, aggregate projected event bytes, malformed payment rows, and affected-sale limit for an early typed response. Preflight is advisory and never substitutes for the in-batch guards.",
+    "One parameterized mutationCandidates CTE and one eventProjection CTE are rendered from shared SQL constants. Those exact CTE strings and bindings are reused byte-for-byte by preflight, the first in-batch guard, event INSERT...SELECT, and domain UPDATE; a route may not maintain parallel hand-written selectors.",
+    "Inside one D1 batch: revision/reference guards first; insert an operation-scoped scratch guard whose SELECT succeeds only when the identical mutationCandidates count is <=5000, every projected event is <=65536 UTF-8 bytes, and SUM(length(CAST(projected_event_json AS BLOB))) is <=8388608; INSERT INTO sale_record_events ... SELECT from eventProjection; execute the domain update from mutationCandidates; perform all essential linked-domain effects; insert atomic audit; delete this operation's scratch guard; insert the receipt as the final statement.",
     "The event INSERT and domain UPDATE derive before/after and predicates from shared SQL expression constants. The event reads before state because it precedes the update. Any event, domain, audit, or receipt failure rolls the complete act back.",
     "Customer missing create-and-link must move contact insert, exact target-id resolution, per-sale events, sale link update, audit, and receipt into one batch. A server-minted membership is excluded from the request digest and is resolved inside that batch.",
     "Keep the current broader domain UPDATE predicate when compatibility requires its revision bumps; the event selector additionally requires a real frozen-field or contact-metadata difference, so no same-value record is invented."
@@ -144,13 +171,14 @@
   "scalability_contract": {
     "strategy": "One SQL-native INSERT...SELECT per fan-out, never one JavaScript event or one D1 statement per sale. This adds a constant one statement to each batch.",
     "max_affected_sales_proposed": 5000,
-    "oversize_behavior": "If candidate count exceeds 5000 or any constructed event exceeds its SQL byte bound, return a typed too_many_linked_sales or sale_record_event_too_large response before mutation. Do not partially apply. A future resumable operation requires a separately reviewed state machine.",
+    "aggregate_event_payload_bytes": 8388608,
+    "oversize_behavior": "If candidate count exceeds 5000, any constructed event exceeds 65536 UTF-8 bytes, or the complete projected-event aggregate exceeds 8388608 UTF-8 bytes, the in-batch CHECK aborts the transaction and maps to typed too_many_linked_sales or sale_record_event_too_large without mutation. Preflight normally returns the same typed error earlier. A future resumable operation requires a separately reviewed state machine.",
     "payment_bounds": "Retain 200-row scan pages and 1000-variant cap. Verify 5000 linked rows, maximum valid payment details, constant statement count, and 5001 rejection in native SQLite and the Worker D1 adapter.",
     "contact_bounds": "Verify 5000 linked rows for carry/merge/link repair with constant statement count and 5001 rejection. CONTACT_MERGE_MAX_STATEMENTS remains 80."
   },
   "permissions_audit_and_replay": [
     "No new route or wider permission. Preserve every current route permission and per-action gate.",
-    "Security audit remains. For sales-mutating modes, move audit into the same batch and stamp receipt/event provenance. Existing audit rows are never rewritten.",
+    "Security audit remains. For sales-mutating modes, move the operation audit into the same batch and stamp details.sale_record_provenance with exactly {source_kind,source_id:receipt.id,generation:0,via:'apply'} plus event_count. Each event adds its sale_id to that same four-key tuple. The operation-level audit is explicitly excluded from per-sale legacy ingestion, so it cannot become a second Sales Record; old audit rows without canonical provenance retain the existing legacy fallback. Existing audit rows are never rewritten.",
     "These routes have no existing user-visible Undo/Redo. This plan adds idempotent Apply only and does not claim replay. Any future Undo/Redo requires new guarded before/after domain receipts and generation tests.",
     "Records count/detail use the same source-kind mapping and exact four-key anti-join. Existing genuine pre-cutover audit remains legacy_sale_change unless an exact provenance tuple proves its durable event twin."
   ],
@@ -165,6 +193,9 @@
     "Customer merge and delivery merge exact per-sale event grouping; supplier merge zero sale events; contact/audit/receipt/event rollback; exact retry and cross-target conflict.",
     "Relink and missing resolve exact predicates, existing/new target, membership states, zero-match receipt, event failure rollback, and no partial new contact.",
     "Linked payment replacement exact summary and split details, settings_only/backfill zero events, malformed and oversized rejection, 300-row existing regression, 5000-row constant-statement case, stale revision rollback, exact retry, and cross-target conflict.",
+    "Interpose a new or relinked sale after preflight and before the D1 batch for every fan-out family; the in-batch identical-selector count/group guard must reject the entire act with zero events/domain/audit/receipt rows.",
+    "Exercise 5000 rows using the largest route-valid projections that remain under 8388608 bytes, one maximum 65536-byte event, aggregate payload exactly at the cap, and aggregate payload one byte over; record Worker/D1 adapter statement count, wall time, CPU time, and database growth before accepting 5000 for migration.",
+    "Validate every mutation-specific exact response shape, target_key byte limit and grammar, canonical occurred_at, event source_id=receipt.id, cross-target key reuse, both merge revisions, both relink profiles/group version, missing existing/new target intent, payment group version, and operation-audit provenance/exclusion from legacy fallback.",
     "Records list count equals detail for every new source; no mutable contact/settings lookup is needed to render historical labels.",
     "Backup/restore, factory, sales, all, and products+includeSales reset cover the new receipt and amended event schema."
   ],
