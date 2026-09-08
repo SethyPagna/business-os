@@ -3,7 +3,7 @@ import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
 import { getActionTier, getPermissionTier, hasPermission, isAdminControlUser, isSensitiveActionHistory, permissionForActionHistory } from '../lib/permissions'
-import { SALE_ADD_ITEMS_ACTION_KIND, isServerReplayable, resolveUndoApplier, applierPermissionTier, mergeReplayChangesProductImages } from '../lib/undoAppliers'
+import { SALE_ADD_ITEMS_ACTION_KIND, PRODUCT_MERGE_GROUP_ACTION_KIND, isServerReplayable, resolveUndoApplier, applierPermissionTier, mergeReplayChangesProductImages, type UndoApplierOutcome } from '../lib/undoAppliers'
 import type { Env } from '../index'
 import { BULK_STATUS_KIND, notifyBulkStatus } from '../lib/saleBulkStatus'
 import { notifySaleBulkUpdate, SALE_BULK_UPDATE_KINDS } from '../lib/saleBulkUpdate'
@@ -112,7 +112,7 @@ function isServerManagedPayload(value: unknown): boolean {
   if (!value || typeof value !== 'object') return false
   const payload = value as Record<string, unknown>
   const kind = String(payload.applier || '')
-  return SERVER_BULK_KINDS.has(kind)
+  return SERVER_BULK_KINDS.has(kind) || kind === PRODUCT_MERGE_GROUP_ACTION_KIND
     || (kind === SALE_ADD_ITEMS_ACTION_KIND && typeof payload.operation_id === 'string' && payload.operation_id.length > 0)
 }
 
@@ -201,6 +201,39 @@ app.get('/:id/details', async (c) => {
   if (!row || !canOperateHistoryRow(user, row)) return c.json({ error: 'Action not found.' }, 404)
   const payload = parseJson(row.undo_payload)
   const applierKind = String(payload.applier || '')
+  if (applierKind === PRODUCT_MERGE_GROUP_ACTION_KIND) {
+    if (!canUseNamedAppliers(user, [payload])) return c.json({ error: 'No permission.' }, 403)
+    const group = await db.prepare(`
+      SELECT g.review_id,g.ordinal,g.group_key,g.status,g.reversal_generation,
+             g.updated_at,COUNT(m.undo_snapshot_id) AS child_count
+      FROM product_conflict_action_groups g
+      JOIN product_conflict_action_reviews r ON r.id=g.review_id
+      JOIN action_history h ON h.id=g.action_history_id AND h.created_by_id=r.actor_id
+      LEFT JOIN product_conflict_action_group_members m
+        ON m.review_id=g.review_id AND m.group_ordinal=g.ordinal
+      WHERE g.action_history_id=? AND g.review_id=? AND g.group_key=?
+      GROUP BY g.review_id,g.ordinal,g.group_key,g.status,g.reversal_generation,g.updated_at
+    `).get<Record<string, unknown>>([row.id, String(payload.review_id || ''), String(payload.group_key || '')])
+    if (!group) return c.json({ error: 'Saved details unavailable.' }, 404)
+    const offset = Math.max(0, Math.min(3999, Number.parseInt(c.req.query('offset') || '0', 10) || 0))
+    const limit = Math.max(1, Math.min(10, Number.parseInt(c.req.query('limit') || '10', 10) || 10))
+    const items = await db.prepare(`
+      SELECT member_ordinal,product_id,role,status
+      FROM product_conflict_action_group_members
+      WHERE review_id=? AND group_ordinal=?
+      ORDER BY member_ordinal LIMIT ? OFFSET ?
+    `).all<Record<string, unknown>>([String(group.review_id), Number(group.ordinal), limit, offset])
+    const totalRow = await db.prepare(`
+      SELECT COUNT(*) AS total FROM product_conflict_action_group_members
+      WHERE review_id=? AND group_ordinal=?
+    `).get<{ total: number }>([String(group.review_id), Number(group.ordinal)])
+    return c.json({
+      action: { review_id: group.review_id, group_key: group.group_key, status: group.status, generation: group.reversal_generation },
+      items,
+      total: Number(totalRow?.total || 0),
+      childCount: Number(group.child_count || 0),
+    })
+  }
   if (!SERVER_BULK_KINDS.has(applierKind) || !canUseNamedAppliers(user, [payload])) return c.json({ error: 'No permission.' }, 403)
   const operationTable = applierKind === STOCK_SESSION_KIND
     ? 'stock_session_operations'
@@ -273,7 +306,7 @@ app.patch('/:id', async (c) => {
       .get<ActionHistoryRow>({ id: actionId, user_id: user?.id || 0 })
     if (!existing) return c.json({ success: false, error: 'Action history item not found' }, 404)
 
-    if ([parseJson(existing.undo_payload), parseJson(existing.redo_payload)].some(p => SERVER_BULK_KINDS.has(String(p.applier || '')))) return c.json({ success: false, error: 'Grouped history is server-managed.' }, 403)
+    if ([parseJson(existing.undo_payload), parseJson(existing.redo_payload)].some(isServerManagedPayload)) return c.json({ success: false, error: 'Grouped history is server-managed.' }, 403)
 
     await db.prepare(`
       UPDATE action_history SET status = @status, last_error = @last_error, updated_at = CURRENT_TIMESTAMP WHERE id = @id
@@ -312,7 +345,8 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     const expected = direction === 'undo' ? 'undoable' : 'redoable'
     const nextStatus = direction === 'undo' ? 'redoable' : 'undoable'
     const stockReplay = parseJson(existing.undo_payload)?.applier === STOCK_SESSION_KIND
-    if (currentStatus !== expected && !stockReplay) {
+    const groupReplay = parseJson(existing.undo_payload)?.applier === PRODUCT_MERGE_GROUP_ACTION_KIND
+    if (currentStatus !== expected && !stockReplay && !groupReplay) {
       return c.json({ success: false, error: `Action is not ${direction === 'undo' ? 'undoable' : 'redoable'} right now` }, 409)
     }
 
@@ -349,9 +383,10 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
       }, 409)
     }
     let applied = false
+    let outcome: UndoApplierOutcome | void = undefined
     if (applier) {
       try {
-        await applier.run(payload, { env: c.env, user, direction, historyId: existing.id, generation: body.expected_generation })
+        outcome = await applier.run(payload, { env: c.env, user, direction, historyId: existing.id, generation: body.expected_generation })
         applied = true
       } catch (error) {
         if (!serverManagedReplay) await db.prepare('UPDATE action_history SET last_error = @last_error, updated_at = CURRENT_TIMESTAMP WHERE id = @id')
@@ -363,7 +398,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     }
 
     if (serverManagedReplay && applier) {
-      if (applier.name !== SALE_ADD_ITEMS_ACTION_KIND) c.executionCtx.waitUntil(applier.name === STOCK_SESSION_KIND
+      if (applier.name !== SALE_ADD_ITEMS_ACTION_KIND && applier.name !== PRODUCT_MERGE_GROUP_ACTION_KIND) c.executionCtx.waitUntil(applier.name === STOCK_SESSION_KIND
         ? notifyStockSession(c.env, { operationId: String(payload.operation_id) })
         : applier.name === SALE_SETTLEMENT_ACTION_KIND
           ? notifySaleSettlementAction(c.env)
@@ -373,7 +408,15 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
               ? notifyBulkStatus(c.env)
               : notifySaleBulkUpdate(c.env, String(payload.action || '')))
       const row = await db.prepare('SELECT * FROM action_history WHERE id = @id').get<ActionHistoryRow>({ id: existing.id })
-      return c.json({ success: true, applied: true, item: row ? await mapRow(row, user, c.env) : null, payload })
+      return c.json({
+        success: true,
+        applied: true,
+        item: row ? await mapRow(row, user, c.env) : null,
+        payload,
+        ...(applier.name === PRODUCT_MERGE_GROUP_ACTION_KIND
+          ? (outcome || { complete: true, continuation_required: false, processed_children: 0, pending_children: 0, generation: Number(body.expected_generation || 0) })
+          : {}),
+      })
     }
 
     await db.prepare(`

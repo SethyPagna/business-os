@@ -65,7 +65,15 @@ export interface UndoApplierContext {
   generation?: unknown
 }
 
-export type UndoApplier = (payload: Record<string, unknown>, ctx: UndoApplierContext) => Promise<void>
+export interface UndoApplierOutcome {
+  complete: boolean
+  continuation_required: boolean
+  processed_children: number
+  pending_children: number
+  generation: number
+}
+
+export type UndoApplier = (payload: Record<string, unknown>, ctx: UndoApplierContext) => Promise<void | UndoApplierOutcome>
 
 export class UndoConflictError extends Error {
   readonly statusCode = 409
@@ -126,6 +134,16 @@ export interface MergeReversal {
   /** Duplicate primary captured for image-effect permission checks on replay. */
   dupImagePathBefore?: string | null
   keeperBarcodeBefore?: string | null
+  /** Optional exact keeper catalog before-image for reviewed v2 merges. */
+  keeperCatalogBefore?: {
+    category: string | null
+    categories: string | null
+    brand: string | null
+    brands: string | null
+    unit: string | null
+    unit_normalized: string | null
+    brand_compact: string | null
+  }
   // Optional for backward compatibility with snapshots written before merge
   // cleanup began carrying the highest selling/wholesale prices to the keeper.
   keeperPricingBefore?: {
@@ -202,7 +220,9 @@ export interface MergeReversal {
   operationId?: string
 }
 
-const PRODUCT_MERGE_APPLIER_KINDS = new Set(['product.merge', 'product.merge.bulk'])
+export const PRODUCT_MERGE_GROUP_ACTION_KIND = 'product.merge.group'
+export const PRODUCT_MERGE_GROUP_CHILD_KIND = 'product.merge.group.child'
+const PRODUCT_MERGE_APPLIER_KINDS = new Set(['product.merge', 'product.merge.bulk', PRODUCT_MERGE_GROUP_ACTION_KIND])
 
 function mergeReversalHasSavedImageEffect(reversal: MergeReversal): boolean {
   if ((reversal.dupImagesBefore || []).length || (reversal.imagesMovedToKeeper || []).length) return true
@@ -224,15 +244,42 @@ export async function mergeReplayChangesProductImages(
   const db = getDb(env)
   const snap = await db.prepare('SELECT payload_json FROM undo_snapshots WHERE id = ? AND kind = ?')
     .get<{ payload_json: string }>([snapshotId, kind])
-  if (!snap) return false
+  // A group pointer fans out to child snapshots. Missing or malformed group
+  // state fails closed: the replay itself will reject it, and history must not
+  // advertise the operation to an actor without image authority meanwhile.
+  if (!snap) return kind === PRODUCT_MERGE_GROUP_ACTION_KIND
   let reversals: MergeReversal[] = []
   try {
-    const parsed = JSON.parse(snap.payload_json) as MergeReversal | { reversals?: MergeReversal[] }
-    reversals = kind === 'product.merge.bulk'
-      ? (Array.isArray((parsed as { reversals?: MergeReversal[] }).reversals) ? (parsed as { reversals: MergeReversal[] }).reversals : [])
-      : [parsed as MergeReversal]
+    const parsed = JSON.parse(snap.payload_json) as MergeReversal | { reversals?: MergeReversal[]; child_snapshot_ids?: unknown[] }
+    if (kind === PRODUCT_MERGE_GROUP_ACTION_KIND) {
+      const rawChildIds = (parsed as { child_snapshot_ids?: unknown[] }).child_snapshot_ids
+      const childIds = intIds(rawChildIds)
+      if (!Array.isArray(rawChildIds) || !childIds.length || childIds.length !== rawChildIds.length || childIds.length !== new Set(childIds).size) return true
+      // One aggregate lookup covers the entire ordered child set without
+      // materializing thousands of reversal payloads or issuing one query per
+      // 80 ids. New group-child snapshots always carry dupImagePathBefore, so
+      // the legacy live-product fallback below is unnecessary for this kind.
+      const effect = await db.prepare(`
+        SELECT COUNT(j.value) AS referenced_count,COUNT(s.id) AS found_count,
+          MAX(CASE WHEN
+            json_array_length(json_extract(s.payload_json,'$.dupImagesBefore')) > 0
+            OR json_array_length(json_extract(s.payload_json,'$.imagesMovedToKeeper')) > 0
+            OR (json_type(s.payload_json,'$.dupImagePathBefore') IS NOT NULL
+              AND trim(COALESCE(json_extract(s.payload_json,'$.keeperImagePathBefore'),''))=''
+              AND trim(COALESCE(json_extract(s.payload_json,'$.dupImagePathBefore'),''))!='')
+          THEN 1 ELSE 0 END) AS changes_images
+        FROM json_each(?) j
+        LEFT JOIN undo_snapshots s ON s.id=CAST(j.value AS INTEGER) AND s.kind=?
+      `).get<{ referenced_count: number; found_count: number; changes_images: number | null }>([JSON.stringify(childIds), PRODUCT_MERGE_GROUP_CHILD_KIND])
+      if (Number(effect?.referenced_count) !== childIds.length || Number(effect?.found_count) !== childIds.length) return true
+      return Number(effect?.changes_images) === 1
+    } else {
+      reversals = kind === 'product.merge.bulk'
+        ? (Array.isArray((parsed as { reversals?: MergeReversal[] }).reversals) ? (parsed as { reversals: MergeReversal[] }).reversals : [])
+        : [parsed as MergeReversal]
+    }
   } catch (_) {
-    return false
+    return kind === PRODUCT_MERGE_GROUP_ACTION_KIND
   }
   if (reversals.some(mergeReversalHasSavedImageEffect)) return true
 
@@ -987,17 +1034,30 @@ export async function recordBulkMergeUndoSnapshot(
 // Restore both products to their exact pre-merge state from the snapshot.
 export function mergeKeeperRestoreStatement(r: MergeReversal, canChangeProductImages: boolean) {
   const imageSet = canChangeProductImages ? 'image_path=@path,' : ''
+  const catalog = r.keeperCatalogBefore
+  const catalogSet = catalog
+    ? `category=@category,categories=@categories,brand=@brand,brands=@brands,unit=@unit,unit_normalized=@unitNormalized,brand_compact=@brandCompact,`
+    : ''
   return {
-    sql: `UPDATE products SET ${imageSet}${r.keeperBarcodeBefore !== undefined ? 'barcode=@barcode,' : ''}updated_at=CURRENT_TIMESTAMP WHERE id=@keeperId`,
+    sql: `UPDATE products SET ${imageSet}${r.keeperBarcodeBefore !== undefined ? 'barcode=@barcode,' : ''}${catalogSet}updated_at=CURRENT_TIMESTAMP WHERE id=@keeperId`,
     params: {
       keeperId: Number(r.keeperId),
       ...(canChangeProductImages ? { path: r.keeperImagePathBefore ?? null } : {}),
       ...(r.keeperBarcodeBefore !== undefined ? { barcode: r.keeperBarcodeBefore } : {}),
+      ...(catalog ? {
+        category: catalog.category ?? null,
+        categories: catalog.categories ?? null,
+        brand: catalog.brand ?? null,
+        brands: catalog.brands ?? null,
+        unit: catalog.unit ?? null,
+        unitNormalized: catalog.unit_normalized ?? null,
+        brandCompact: catalog.brand_compact ?? null,
+      } : {}),
     },
   }
 }
 
-async function applyMergeReversal(env: Env, r: MergeReversal, canChangeProductImages = true): Promise<void> {
+async function buildMergeReversalStatements(env: Env, r: MergeReversal, canChangeProductImages = true): Promise<AtomicMergeStatement[]> {
   const db = getDb(env)
   const keeperId = Number(r.keeperId)
   const dupId = Number(r.dupId)
@@ -1221,7 +1281,12 @@ async function applyMergeReversal(env: Env, r: MergeReversal, canChangeProductIm
   stmts.push({ sql: 'UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @keeperId), updated_at = CURRENT_TIMESTAMP WHERE id = @keeperId', params: { keeperId } })
   stmts.push({ sql: 'UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @dupId), updated_at = CURRENT_TIMESTAMP WHERE id = @dupId', params: { dupId } })
 
-  await db.batch(stmts)
+  return stmts
+}
+
+async function applyMergeReversal(env: Env, r: MergeReversal, canChangeProductImages = true): Promise<void> {
+  const db = getDb(env)
+  await db.batch(await buildMergeReversalStatements(env, r, canChangeProductImages))
 }
 
 // Undo a whole bulk merge: replay each fold's reversal in REVERSE application
@@ -1431,6 +1496,390 @@ export async function recordSaleAddItemsUndoSnapshot(
     byName: actorSnapshot(user),
   })
   return { snapshotId, actionHistoryId: Number(hist.lastInsertRowid ?? 0) }
+}
+
+export interface ProductMergeGroupSnapshot {
+  version: 1
+  review_id: string
+  group_key: string
+  child_snapshot_ids: number[]
+  prefix_fingerprint: string
+  generation: number
+}
+
+export function productMergeGroupPrefixFingerprint(
+  reviewId: string,
+  groupKey: string,
+  childSnapshotIds: number[],
+  generation: number,
+): Promise<string> {
+  const canonicalize = (value: unknown): unknown => Array.isArray(value)
+    ? value.map(canonicalize)
+    : value && typeof value === 'object'
+      ? Object.fromEntries(Object.keys(value as Record<string, unknown>).sort()
+        .map((key) => [key, canonicalize((value as Record<string, unknown>)[key])]))
+      : value
+  const preimage = JSON.stringify(canonicalize({
+    version: 1,
+    review_id: reviewId,
+    group_key: groupKey,
+    generation,
+    child_snapshot_ids: childSnapshotIds,
+  }))
+  return crypto.subtle.digest('SHA-256', new TextEncoder().encode(preimage)).then((hashed) =>
+    `sha256-${[...new Uint8Array(hashed)].map((byte) => byte.toString(16).padStart(2, '0')).join('')}`)
+}
+
+type ProductMergeGroupAssociation = {
+  review_id: string
+  group_ordinal: number
+  group_key: string
+  group_status: string
+  reversal_generation: number
+  action_history_id: number
+  actor_id: number
+  history_actor_id: number | null
+  snapshot_actor_id: number | null
+}
+
+type ProductMergeGroupChild = {
+  id: number
+  status: string
+  payload_json: string
+  created_by_id: number | null
+  member_ordinal: number
+  product_id: number
+  role: string
+  member_status: string
+  reversal: MergeReversal
+}
+
+export interface ProductMergeGroupRedoContext {
+  env: Env
+  db: ReturnType<typeof getDb>
+  user: SessionUser
+  reversal: MergeReversal
+  reviewId: string
+  groupOrdinal: number
+  groupKey: string
+  childSnapshotId: number
+  childOrdinal: number
+  historyId: number
+  generation: number
+  operationId: string
+  completionStatements: (freshReversal: MergeReversal) => AtomicMergeStatement[]
+}
+
+// The products route owns the forward fold. It registers this narrow group
+// seam after module load so redo can reuse that production fold while placing
+// the child snapshot/member/group/history CAS statements in the SAME batch.
+// A callback that cannot include completionStatements in its graph batch must
+// reject; the applier deliberately has no non-atomic fallback.
+export type ProductMergeGroupRedoFn = (ctx: ProductMergeGroupRedoContext) => Promise<void>
+let productMergeGroupRedoFn: ProductMergeGroupRedoFn | null = null
+export function registerProductMergeGroupRedo(fn: ProductMergeGroupRedoFn): void {
+  productMergeGroupRedoFn = fn
+}
+
+function strictProductMergeGroupSnapshot(value: unknown): ProductMergeGroupSnapshot | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const record = value as Record<string, unknown>
+  const keys = Object.keys(record).sort()
+  const expected = ['child_snapshot_ids', 'generation', 'group_key', 'prefix_fingerprint', 'review_id', 'version']
+  if (keys.length !== expected.length || keys.some((key, index) => key !== expected[index])) return null
+  const ids = Array.isArray(record.child_snapshot_ids) ? record.child_snapshot_ids.map(Number) : []
+  if (!ids.length || ids.length > 3999 || ids.some((id) => !Number.isSafeInteger(id) || id <= 0) || new Set(ids).size !== ids.length) return null
+  const generation = Number(record.generation)
+  if (record.version !== 1 || !Number.isSafeInteger(generation) || generation < 0) return null
+  const reviewId = String(record.review_id || '')
+  const groupKey = String(record.group_key || '')
+  const prefixFingerprint = String(record.prefix_fingerprint || '')
+  if (!reviewId || !groupKey || !/^sha256-[0-9a-f]{64}$/.test(prefixFingerprint)) return null
+  return { version: 1, review_id: reviewId, group_key: groupKey, child_snapshot_ids: ids, prefix_fingerprint: prefixFingerprint, generation }
+}
+
+function strictProductMergeGroupPointer(payload: Record<string, unknown>): {
+  snapshotId: number
+  reviewId: string
+  groupKey: string
+  generation: number
+} | null {
+  const keys = Object.keys(payload).sort()
+  const expected = ['applier', 'generation', 'group_key', 'review_id', 'snapshot_id']
+  if (keys.length !== expected.length || keys.some((key, index) => key !== expected[index])) return null
+  const snapshotId = Number(payload.snapshot_id)
+  const generation = Number(payload.generation)
+  const reviewId = String(payload.review_id || '')
+  const groupKey = String(payload.group_key || '')
+  if (payload.applier !== PRODUCT_MERGE_GROUP_ACTION_KIND || !Number.isSafeInteger(snapshotId) || snapshotId <= 0
+    || !Number.isSafeInteger(generation) || generation < 0 || !reviewId || !groupKey) return null
+  return { snapshotId, reviewId, groupKey, generation }
+}
+
+async function loadProductMergeGroupReplay(
+  env: Env,
+  payload: Record<string, unknown>,
+  historyId: number,
+): Promise<{
+  db: ReturnType<typeof getDb>
+  pointer: NonNullable<ReturnType<typeof strictProductMergeGroupPointer>>
+  groupSnapshot: ProductMergeGroupSnapshot
+  association: ProductMergeGroupAssociation
+  children: ProductMergeGroupChild[]
+}> {
+  const pointer = strictProductMergeGroupPointer(payload)
+  if (!pointer) throw new UndoConflictError('This group merge has an invalid saved history pointer.')
+  const db = getDb(env)
+  const groupRow = await db.prepare(`
+    SELECT payload_json,created_by_id FROM undo_snapshots WHERE id=? AND kind=?
+  `).get<{ payload_json: string; created_by_id: number | null }>([pointer.snapshotId, PRODUCT_MERGE_GROUP_ACTION_KIND])
+  if (!groupRow) throw new UndoConflictError('The saved group merge details are unavailable.')
+  let groupSnapshot: ProductMergeGroupSnapshot | null = null
+  try { groupSnapshot = strictProductMergeGroupSnapshot(JSON.parse(groupRow.payload_json)) } catch { groupSnapshot = null }
+  if (!groupSnapshot || groupSnapshot.review_id !== pointer.reviewId || groupSnapshot.group_key !== pointer.groupKey) {
+    throw new UndoConflictError('The saved group merge details are invalid.')
+  }
+  const expectedPrefixFingerprint = await productMergeGroupPrefixFingerprint(
+    groupSnapshot.review_id,
+    groupSnapshot.group_key,
+    groupSnapshot.child_snapshot_ids,
+    groupSnapshot.generation,
+  )
+  if (groupSnapshot.prefix_fingerprint !== expectedPrefixFingerprint) {
+    throw new UndoConflictError('The saved group merge prefix fingerprint is invalid.')
+  }
+  const association = await db.prepare(`
+    SELECT g.review_id,g.ordinal AS group_ordinal,g.group_key,g.status AS group_status,
+           g.reversal_generation,g.action_history_id,r.actor_id,
+           h.created_by_id AS history_actor_id,@snapshot_actor AS snapshot_actor_id
+    FROM product_conflict_action_groups g
+    JOIN product_conflict_action_reviews r ON r.id=g.review_id
+    JOIN action_history h ON h.id=g.action_history_id
+    WHERE g.review_id=@review AND g.group_key=@groupKey AND g.action_history_id=@history
+  `).get<ProductMergeGroupAssociation>({
+    review: pointer.reviewId,
+    groupKey: pointer.groupKey,
+    history: historyId,
+    snapshot_actor: groupRow.created_by_id,
+  })
+  if (!association || Number(association.actor_id) <= 0
+    || Number(association.history_actor_id) !== Number(association.actor_id)
+    || Number(association.snapshot_actor_id) !== Number(association.actor_id)) {
+    throw new UndoConflictError('This group merge is not associated with its authoritative actor and history row.')
+  }
+  const allMemberRows = await db.prepare(`
+    SELECT member_ordinal,product_id,role,status AS member_status,undo_snapshot_id
+    FROM product_conflict_action_group_members
+    WHERE review_id=? AND group_ordinal=?
+    ORDER BY member_ordinal
+  `).all<{ member_ordinal: number; product_id: number; role: string; member_status: string; undo_snapshot_id: number | null }>([pointer.reviewId, Number(association.group_ordinal)])
+  const keeperRows = allMemberRows.filter((row) => row.role === 'keeper')
+  if (keeperRows.length !== 1 || keeperRows[0].undo_snapshot_id != null) {
+    throw new UndoConflictError('This group merge has an invalid authoritative keeper member.')
+  }
+  const memberRows = allMemberRows.filter((row) => row.undo_snapshot_id != null) as Array<{
+    member_ordinal: number; product_id: number; role: string; member_status: string; undo_snapshot_id: number
+  }>
+  const memberIds = memberRows.map((row) => Number(row.undo_snapshot_id))
+  if (memberIds.length !== groupSnapshot.child_snapshot_ids.length
+    || memberIds.some((id, index) => id !== groupSnapshot!.child_snapshot_ids[index])) {
+    throw new UndoConflictError('This group merge has foreign, missing, duplicated, or reordered child snapshots.')
+  }
+  const snapshotRows: Array<{ id: number; status: string; payload_json: string; created_by_id: number | null }> = []
+  for (const ids of chunk(groupSnapshot.child_snapshot_ids, 80)) {
+    const placeholders = ids.map(() => '?').join(',')
+    snapshotRows.push(...await db.prepare(`
+      SELECT id,status,payload_json,created_by_id FROM undo_snapshots
+      WHERE kind=? AND id IN (${placeholders})
+    `).all<{ id: number; status: string; payload_json: string; created_by_id: number | null }>([PRODUCT_MERGE_GROUP_CHILD_KIND, ...ids]))
+  }
+  if (snapshotRows.length !== groupSnapshot.child_snapshot_ids.length) {
+    throw new UndoConflictError('This group merge has missing child snapshots.')
+  }
+  const snapshotsById = new Map(snapshotRows.map((row) => [Number(row.id), row]))
+  const membersById = new Map(memberRows.map((row) => [Number(row.undo_snapshot_id), row]))
+  const children = groupSnapshot.child_snapshot_ids.map((id) => {
+    const row = snapshotsById.get(id)
+    const member = membersById.get(id)
+    if (!row || !member || Number(row.created_by_id) !== Number(association.actor_id)) {
+      throw new UndoConflictError('This group merge has a foreign child snapshot.')
+    }
+    let reversal: MergeReversal
+    try { reversal = JSON.parse(row.payload_json) as MergeReversal } catch { throw new UndoConflictError('A group merge child snapshot is unreadable.') }
+    if (!reversal || Number(reversal.dupId) !== Number(member.product_id)
+      || Number(reversal.keeperId) !== Number(keeperRows[0].product_id)
+      || member.role !== 'merged' || !String(reversal.operationId || '').trim()) {
+      throw new UndoConflictError('A group merge child snapshot does not match its authoritative member.')
+    }
+    return { ...row, ...member, reversal }
+  })
+  const firstReversed = children.findIndex((child) => child.status === 'reversed')
+  if (children.some((child, index) => !['applied', 'reversed'].includes(child.status)
+    || (firstReversed >= 0 && index >= firstReversed && child.status !== 'reversed'))) {
+    throw new UndoConflictError('This group merge has an invalid child replay sequence.')
+  }
+  return { db, pointer, groupSnapshot, association, children }
+}
+
+function productMergeGroupCompletionStatements(args: {
+  direction: 'undo' | 'redo'
+  user: SessionUser
+  historyId: number
+  groupSnapshotId: number
+  groupSnapshot: ProductMergeGroupSnapshot
+  association: ProductMergeGroupAssociation
+  child: ProductMergeGroupChild
+  generation: number
+  final: boolean
+  nextPrefixFingerprint: string
+  freshReversal?: MergeReversal
+}): AtomicMergeStatement[] {
+  const { direction, user, historyId, groupSnapshotId, association, child, generation, final } = args
+  const fromSnapshotStatus = direction === 'undo' ? 'applied' : 'reversed'
+  const toSnapshotStatus = direction === 'undo' ? 'reversed' : 'applied'
+  const fromMemberStatus = direction === 'undo' ? 'undo_ready' : 'reversed'
+  const toMemberStatus = direction === 'undo' ? 'reversed' : 'undo_ready'
+  const finalGroupStatus = direction === 'undo' ? 'reversed' : 'completed'
+  const finalHistoryStatus = direction === 'undo' ? 'redoable' : 'undoable'
+  const nextGeneration = final ? generation + 1 : generation
+  const payload = JSON.stringify(args.freshReversal || child.reversal)
+  const stamp = new Date().toISOString()
+  const guard = {
+    sql: `SELECT CASE WHEN
+      EXISTS(SELECT 1 FROM product_conflict_action_groups
+        WHERE review_id=@review AND ordinal=@groupOrdinal AND group_key=@groupKey
+          AND action_history_id=@history AND reversal_generation=@generation)
+      AND EXISTS(SELECT 1 FROM product_conflict_action_reviews WHERE id=@review AND actor_id=@actor)
+      AND EXISTS(SELECT 1 FROM undo_snapshots
+        WHERE id=@groupSnapshot AND kind=@groupKind AND status=@groupSnapshotStatus AND created_by_id=@actor
+          AND CAST(json_extract(payload_json,'$.generation') AS INTEGER)=@generation
+          AND json_extract(payload_json,'$.prefix_fingerprint')=@prefixFingerprint)
+      AND EXISTS(SELECT 1 FROM undo_snapshots
+        WHERE id=@child AND kind=@childKind AND status=@fromSnapshot AND created_by_id=@actor AND payload_json=@childPayload)
+      AND EXISTS(SELECT 1 FROM product_conflict_action_group_members
+        WHERE review_id=@review AND group_ordinal=@groupOrdinal AND member_ordinal=@memberOrdinal
+          AND product_id=@product AND undo_snapshot_id=@child AND status=@fromMember)
+      AND EXISTS(SELECT 1 FROM action_history WHERE id=@history AND created_by_id=@actor AND status=@historyStatus)
+      THEN 1 ELSE json_extract('', '$') END AS product_merge_group_guard`,
+    params: {
+      review: association.review_id, groupOrdinal: Number(association.group_ordinal), groupKey: association.group_key,
+      history: historyId, generation, groupSnapshot: groupSnapshotId, groupKind: PRODUCT_MERGE_GROUP_ACTION_KIND,
+      groupSnapshotStatus: direction === 'undo' ? 'applied' : 'reversed', prefixFingerprint: args.groupSnapshot.prefix_fingerprint,
+      child: child.id, childKind: PRODUCT_MERGE_GROUP_CHILD_KIND, childPayload: child.payload_json,
+      fromSnapshot: fromSnapshotStatus, memberOrdinal: child.member_ordinal, product: child.product_id,
+      fromMember: fromMemberStatus, actor: Number(association.actor_id),
+      historyStatus: direction === 'undo' ? 'undoable' : 'redoable',
+    },
+  }
+  return [
+    guard,
+    {
+      sql: `UPDATE undo_snapshots SET status=@status,payload_json=@payload,updated_at=@stamp
+            WHERE id=@id AND kind=@kind AND status=@fromStatus`,
+      params: { status: toSnapshotStatus, payload, stamp, id: child.id, kind: PRODUCT_MERGE_GROUP_CHILD_KIND, fromStatus: fromSnapshotStatus },
+    },
+    {
+      sql: `UPDATE product_conflict_action_group_members SET status=@status,updated_at=@stamp
+            WHERE review_id=@review AND group_ordinal=@groupOrdinal AND member_ordinal=@memberOrdinal
+              AND undo_snapshot_id=@child AND status=@fromStatus`,
+      params: { status: toMemberStatus, stamp, review: association.review_id, groupOrdinal: Number(association.group_ordinal), memberOrdinal: child.member_ordinal, child: child.id, fromStatus: fromMemberStatus },
+    },
+    {
+      sql: `UPDATE product_conflict_action_groups SET status=@status,reversal_generation=@nextGeneration,updated_at=@stamp
+            WHERE review_id=@review AND ordinal=@groupOrdinal AND reversal_generation=@generation`,
+      params: { status: final ? finalGroupStatus : 'partial', nextGeneration, stamp, review: association.review_id, groupOrdinal: Number(association.group_ordinal), generation },
+    },
+    ...(final ? [{
+      sql: `UPDATE undo_snapshots SET status=@status,
+            payload_json=json_set(payload_json,'$.generation',@nextGeneration,'$.prefix_fingerprint',@nextPrefixFingerprint),updated_at=@stamp
+            WHERE id=@id AND kind=@kind AND CAST(json_extract(payload_json,'$.generation') AS INTEGER)=@generation`,
+      params: { status: direction === 'undo' ? 'reversed' : 'applied', nextGeneration, nextPrefixFingerprint: args.nextPrefixFingerprint, stamp, id: groupSnapshotId, kind: PRODUCT_MERGE_GROUP_ACTION_KIND, generation },
+    }, {
+      sql: `UPDATE action_history SET status=@status,last_error=NULL,updated_at=@stamp,
+            undo_payload=json_set(undo_payload,'$.generation',@nextGeneration),
+            redo_payload=json_set(redo_payload,'$.generation',@nextGeneration)
+            WHERE id=@history AND status=@fromStatus`,
+      params: { status: finalHistoryStatus, stamp, nextGeneration, history: historyId, fromStatus: direction === 'undo' ? 'undoable' : 'redoable' },
+    }] : []),
+    {
+      sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
+            VALUES(@actor,@actorName,@action,'product',@product,@details,'product',@product,@details)`,
+      params: {
+        actor: user.id,
+        actorName: actorSnapshot(user),
+        action: direction === 'undo' ? 'action_undo' : 'action_redo',
+        product: String(child.product_id),
+        details: JSON.stringify({ via: 'undo_applier', applier: PRODUCT_MERGE_GROUP_ACTION_KIND, review_id: association.review_id, group_key: association.group_key, child_snapshot_id: child.id, generation }),
+      },
+    },
+  ]
+}
+
+async function replayProductMergeGroup(payload: Record<string, unknown>, ctx: UndoApplierContext): Promise<UndoApplierOutcome> {
+  if (!ctx.user || !ctx.historyId) throw new UndoConflictError('Authoritative group history identity is required.')
+  const expectedGeneration = Number(ctx.generation)
+  if (!Number.isSafeInteger(expectedGeneration) || expectedGeneration < 0) {
+    throw new UndoConflictError('An exact group reversal generation is required.')
+  }
+  const loaded = await loadProductMergeGroupReplay(ctx.env, payload, Number(ctx.historyId))
+  const { db, pointer, groupSnapshot, association, children } = loaded
+  const generation = Number(association.reversal_generation)
+  if (pointer.generation !== generation || groupSnapshot.generation !== generation) {
+    throw new UndoConflictError('The saved group reversal generation is inconsistent.')
+  }
+  const appliedCount = children.filter((child) => child.status === 'applied').length
+  const terminal = ctx.direction === 'undo' ? appliedCount === 0 : appliedCount === children.length
+  if (generation === expectedGeneration + 1 && terminal) {
+    return { complete: true, continuation_required: false, processed_children: 0, pending_children: 0, generation }
+  }
+  if (generation !== expectedGeneration) throw new UndoConflictError('This group reversal generation is stale.')
+  const targetIndex = ctx.direction === 'undo' ? appliedCount - 1 : appliedCount
+  if (targetIndex < 0 || targetIndex >= children.length) {
+    throw new UndoConflictError(`This group merge is already ${ctx.direction === 'undo' ? 'reversed' : 'applied'}.`)
+  }
+  const child = children[targetIndex]
+  const final = ctx.direction === 'undo' ? targetIndex === 0 : targetIndex === children.length - 1
+  const nextPrefixFingerprint = final
+    ? await productMergeGroupPrefixFingerprint(groupSnapshot.review_id, groupSnapshot.group_key, groupSnapshot.child_snapshot_ids, generation + 1)
+    : groupSnapshot.prefix_fingerprint
+  if (ctx.direction === 'undo') {
+    await assertMergeStateUnchanged(db, [child.reversal], child.reversal.mergedStateFingerprint)
+    const statements = await buildMergeReversalStatements(ctx.env, child.reversal, getActionTier(ctx.user, 'products', 'image') === 'full')
+    const completion = productMergeGroupCompletionStatements({
+      direction: ctx.direction, user: ctx.user, historyId: Number(ctx.historyId), groupSnapshotId: pointer.snapshotId,
+      groupSnapshot, association, child, generation, final, nextPrefixFingerprint,
+    })
+    statements.unshift(completion[0])
+    statements.push(...completion.slice(1))
+    try { await db.batch(statements) } catch (error) {
+      if (/malformed JSON|product_merge_group_guard|constraint/i.test(String(error))) {
+        throw new UndoConflictError('This group merge changed concurrently. Nothing was reversed.')
+      }
+      throw error
+    }
+  } else {
+    if (!productMergeGroupRedoFn) throw new UndoConflictError('This group merge cannot be redone in the current server build.')
+    await productMergeGroupRedoFn({
+      env: ctx.env, db, user: ctx.user, reversal: child.reversal,
+      reviewId: association.review_id, groupOrdinal: Number(association.group_ordinal), groupKey: association.group_key,
+      childSnapshotId: child.id, childOrdinal: targetIndex, historyId: Number(ctx.historyId), generation,
+      operationId: String(child.reversal.operationId || ''),
+      completionStatements: (freshReversal) => productMergeGroupCompletionStatements({
+        direction: ctx.direction, user: ctx.user!, historyId: Number(ctx.historyId), groupSnapshotId: pointer.snapshotId,
+        groupSnapshot, association, child, generation, final, nextPrefixFingerprint, freshReversal,
+      }),
+    })
+  }
+  const pending = ctx.direction === 'undo' ? targetIndex : children.length - targetIndex - 1
+  await broadcast(ctx.env, 'products', { action: 'update' })
+  await broadcast(ctx.env, 'inventory', { action: 'update' })
+  return {
+    complete: final,
+    continuation_required: !final,
+    processed_children: 1,
+    pending_children: pending,
+    generation: final ? generation + 1 : generation,
+  }
 }
 
 const APPLIERS: Record<string, UndoApplierDef> = {
@@ -1807,6 +2256,11 @@ const APPLIERS: Record<string, UndoApplierDef> = {
       await broadcast(ctx.env, 'products', { action: 'update' })
       await broadcast(ctx.env, 'inventory', { action: 'update' })
     },
+  },
+  [PRODUCT_MERGE_GROUP_ACTION_KIND]: {
+    permission: 'products',
+    action: 'merge_duplicates',
+    run: replayProductMergeGroup,
   },
   // Payload shape: { applier: 'supplier.backfill', snapshot_id }. The snapshot
   // holds a SupplierBackfillReversal (the lots + each lot's prior attribution).
