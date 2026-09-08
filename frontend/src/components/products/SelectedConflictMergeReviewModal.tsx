@@ -503,7 +503,10 @@ export function SelectedConflictGroupReviewModal({ pages, pageIndex, choices, wo
     const translated = t(key)
     return translated && translated !== key ? translated : fallback
   }
-  const progress = selectedConflictGroupLoadedProgress(pages.map((item) => item.page), review.counts.requested_groups)
+  const progress = selectedConflictGroupLoadedProgress(
+    pages.map((item) => item.page),
+    review.counts.actionable_groups + review.counts.blocked_groups,
+  )
   const canGoNext = pageIndex < pages.length - 1 || review.page.next_cursor != null
   return (
     <Modal title={tr('selected_conflict_group_review_title', 'Review selected product groups')} onClose={onClose} size="xl" draggable unsavedChanges={{ dirty: Object.keys(choices).length > 0 }}>

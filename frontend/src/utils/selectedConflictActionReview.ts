@@ -89,9 +89,9 @@ export function selectedConflictGroupSourceValue<T extends {
 
 export function selectedConflictGroupLoadedProgress(
   pages: Array<{ groups: Array<{ ordinal: number }>; next_cursor: string | null }>,
-  requestedGroups: number,
+  canonicalGroups: number,
 ): { loaded: number; total: number | null; complete: boolean } {
   const loaded = new Set(pages.flatMap((page) => page.groups.map((group) => group.ordinal))).size
-  const total = Number.isSafeInteger(requestedGroups) && requestedGroups >= 0 ? requestedGroups : null
+  const total = Number.isSafeInteger(canonicalGroups) && canonicalGroups >= 0 ? canonicalGroups : null
   return { loaded, total, complete: pages.length > 0 && pages[pages.length - 1].next_cursor == null }
 }
