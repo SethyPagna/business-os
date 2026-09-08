@@ -109,6 +109,12 @@ const productConflictMergeBatch = loadReal('lib/productConflictMergeBatch.ts', {
   './productDetailRule': productDetailRule,
   './productMerge': productMerge,
 })
+const productConflictActionGroups = loadReal('lib/productConflictActionGroups.ts', {
+  './productIdentity': productIdentity,
+  './productDetailRule': productDetailRule,
+  './productMerge': productMerge,
+  './productConflictMergeBatch': productConflictMergeBatch,
+})
 const productMergeSnapshot = loadReal('lib/productMergeSnapshot.ts', { './db': { getDb: () => dbShim } })
 const productWrites = loadReal('lib/productWrites.ts', {
   './db': { getDb: () => dbShim },
@@ -130,6 +136,11 @@ const lowStockStub = { ...lowStockRule, loadLowStockConfig: async () => lowStock
 
 // N13: the shared actor / branch kernels these routes now import.
 const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
+const productDelete = loadReal('lib/productDelete.ts', {
+  './actorSnapshot': actorSnapshotKernel,
+  './db': { getDb: () => dbShim },
+})
+const requestBodyGuard = loadReal('lib/requestBodyGuard.ts')
 const productsRoute = loadReal('routes/products.ts', {
   '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/db': { getDb: () => dbShim },
@@ -173,7 +184,7 @@ const productsRoute = loadReal('routes/products.ts', {
   // routes. registerMergeFold runs at module load, so it must be a callable
   // no-op. (Added by 7651025a -- the loader wasn't updated for the new import.)
   // Merge budgeting reads this list at module load; no merge route runs here.
-  '../lib/undoAppliers': { MERGE_REPARENT_TABLES: [], registerMergeFold: () => {}, recordMergeUndoSnapshot: async () => null, recordBulkMergeUndoSnapshot: async () => null, recordSupplierBackfillSnapshot: async () => null },
+  '../lib/undoAppliers': { MERGE_REPARENT_TABLES: [], registerMergeFold: () => {}, registerProductMergeGroupRedo: () => {}, recordMergeUndoSnapshot: async () => null, recordBulkMergeUndoSnapshot: async () => null, recordSupplierBackfillSnapshot: async () => null },
 
   '../lib/cache': { cachedJsonResponse: async (_r, _c, _v, _t, producer) => producer(), getVersion: async () => '0', bumpVersion: async () => {} },
   '../lib/rateLimit': { checkRateLimit: async () => ({ allowed: true }), getClientIp: () => '127.0.0.1' },
@@ -191,6 +202,9 @@ const productsRoute = loadReal('routes/products.ts', {
   '../lib/productMerge': productMerge,
   '../lib/productMergeSnapshot': productMergeSnapshot,
   '../lib/productConflictMergeBatch': productConflictMergeBatch,
+  '../lib/productConflictActionGroups': productConflictActionGroups,
+  '../lib/productDelete': productDelete,
+  '../lib/requestBodyGuard': requestBodyGuard,
   '../lib/productIdentity': productIdentity,
   '../lib/productBatches': { attachBatchCounts: async () => {} },
   '../lib/searchMatch': searchMatch,

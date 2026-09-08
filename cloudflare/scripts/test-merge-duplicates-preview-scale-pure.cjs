@@ -120,6 +120,7 @@ function loadPreviewRoute(adapter) {
     '../lib/sqlBinding': sqlBinding,
     '../lib/undoAppliers': {
       registerMergeFold: () => {},
+      registerProductMergeGroupRedo: () => {},
       MERGE_REPARENT_TABLES: [
         ['sale_items', 'product_id'], ['return_items', 'product_id'], ['return_replacement_items', 'product_id'],
         ['inventory_movements', 'product_id'], ['damaged_stock_lots', 'product_id'], ['stock_transfers', 'product_id'],
