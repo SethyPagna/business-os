@@ -303,6 +303,12 @@ check('routes/contacts.ts wires the narrow Sales/POS picker without a full custo
   assert.match(branch, /buildContactMatchClause/)
   assert.ok(!branch.includes('withPoints('), 'picker must not calculate loyalty history')
   assert.ok(!branch.includes('SELECT *'), 'picker must not expose the directory row')
+  const accessStart = routeSource.indexOf('const requireContactsAccess')
+  const accessEnd = routeSource.indexOf('\nfunction denyUnlessFullContactAction', accessStart)
+  const access = routeSource.slice(accessStart, accessEnd)
+  assert.match(access, /c\.req\.query\('fields'\) === 'sales_picker'/)
+  assert.match(access, /getPermissionTier\(user, 'pos'\) !== 'none' \|\| getPermissionTier\(user, 'sales'\) !== 'none'/)
+  assert.match(access, /\^\\\/\(\?:api\\\/\)\?customers\$/)
 })
 
 check('the picker branch sits behind the same auth/permission gates as the rest', () => {
