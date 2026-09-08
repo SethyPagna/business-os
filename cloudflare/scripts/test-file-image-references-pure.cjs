@@ -1,9 +1,9 @@
 // Regression coverage for Library image references owned by promotions.
 //
 // Runs the real files route against real SQLite/migrations. Promotion paths
-// are intentionally compared to file_assets.public_path exactly, matching the
-// canonical path written by the upload/promotion-editor flow. Encoded URLs and
-// cache-busted URLs are not alternate stored paths and must not lock a file.
+// use the same exact-first, known-file identity rule as product images: a
+// legacy encoded/cache-busted uploads path protects its stored asset, while a
+// literal matching filename keeps precedence over a normalized sibling.
 
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
@@ -62,12 +62,14 @@ function loadTs(relativePath, stubs) {
 }
 
 const permissions = loadTs('lib/permissions.ts', {})
+const media = loadTs('lib/media.ts', {})
 const deletedKeys = []
 const route = loadTs('routes/files.ts', {
   hono: { Hono },
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', c.env.TEST_USER); await next() } },
   '../lib/db': { getDb: () => dbShim },
   '../lib/permissions': permissions,
+  '../lib/media': media,
   '../lib/fileAssets': {
     getMediaType: () => 'image',
     buildUniqueStoredName: (name) => name,
@@ -94,10 +96,11 @@ const route = loadTs('routes/files.ts', {
 })
 const app = route.default || route
 const user = { id: 7, username: 'librarian', role_code: 'staff', permissions: JSON.stringify({ library: true }), role_permissions: null }
+const viewer = { ...user, permissions: JSON.stringify({}) }
 
-async function request(pathname, init = {}) {
+async function request(pathname, init = {}, requestUser = user) {
   const response = await app.request(`http://local${pathname}`, init, {
-    TEST_USER: user,
+    TEST_USER: requestUser,
     ASSETS: { delete: async (key) => { deletedKeys.push(key) } },
   }, { waitUntil() {}, passThroughOnException() {} })
   return { status: response.status, json: await response.json().catch(() => null) }
@@ -140,7 +143,22 @@ async function main() {
   assert.equal(blocked.json.usage.promotions, 1)
   assert.ok(db.prepare('SELECT id FROM file_assets WHERE id = 1').get(), 'a promotion-referenced file must survive a normal delete')
   assert.deepEqual(deletedKeys, [], 'the R2 object must not be deleted when a promotion blocks it')
-  console.log('PASS promotion references lock list/delete and appear in usage detail')
+  const wrongForce = await request('/1', {
+    method: 'DELETE',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ force: true, confirmText: 'CONFIRM DELETE NOW' }),
+  })
+  assert.equal(wrongForce.status, 409, JSON.stringify(wrongForce.json))
+  assert.ok(db.prepare('SELECT id FROM file_assets WHERE id = 1').get(), 'a near-match confirmation must not bypass protection')
+  const exactForce = await request('/1', {
+    method: 'DELETE',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ force: true, confirmText: 'CONFIRM DELETE' }),
+  })
+  assert.equal(exactForce.status, 200, JSON.stringify(exactForce.json))
+  assert.equal(db.prepare('SELECT id FROM file_assets WHERE id = 1').get(), undefined)
+  assert.deepEqual(deletedKeys, ['uploads/promotion-banner.png'])
+  console.log('PASS promotion references lock list/delete, require the exact force phrase, and appear in usage detail')
 
   reset()
   asset(2, 'product-cover.png', '/uploads/product-cover.png')
@@ -166,15 +184,35 @@ async function main() {
 
   reset()
   asset(4, 'space.png', '/uploads/promotion space.png')
-  asset(5, 'cache.png', '/uploads/promotion-cache.png')
+  asset(5, 'cache-base.png', '/uploads/promotion-cache.png')
+  asset(6, 'cache-literal.png', '/uploads/promotion-cache.png?v=7')
+  asset(7, 'cache-only-base.png', '/uploads/promotion-cache-only.png')
   db.prepare("INSERT INTO promotions (id, title, image_path) VALUES (10, 'Encoded only', '/uploads/promotion%20space.png')").run()
-  db.prepare("INSERT INTO promotions (id, title, image_path) VALUES (11, 'Cache only', '/uploads/promotion-cache.png?v=7')").run()
+  db.prepare("INSERT INTO promotions (id, title, image_path) VALUES (11, 'Literal cache filename', '/uploads/promotion-cache.png?v=7')").run()
+  db.prepare("INSERT INTO promotions (id, title, image_path) VALUES (12, 'Cache only', '/uploads/promotion-cache-only.png?v=7')").run()
   const variants = await request('/')
-  assert.equal(findItem(variants.json, 4).usage.promotions, 0, 'URL-encoded text is not a second spelling of a stored canonical path')
-  assert.equal(findItem(variants.json, 5).usage.promotions, 0, 'cache-busted text is not a second spelling of a stored canonical path')
-  assert.equal((await request('/4', { method: 'DELETE' })).status, 200)
-  assert.equal((await request('/5', { method: 'DELETE' })).status, 200)
-  console.log('PASS encoded/cache-busted promotion strings do not broaden exact canonical-path matching')
+  assert.equal(findItem(variants.json, 4).usage.promotions, 1, 'one legacy URI decode must resolve a known upload path')
+  assert.equal(findItem(variants.json, 5).usage.promotions, 0, 'an exact literal cache filename owns the raw promotion path before normalization')
+  assert.equal(findItem(variants.json, 6).usage.promotions, 1, 'exact filename identity wins over query stripping')
+  assert.equal(findItem(variants.json, 7).usage.promotions, 1, 'a cache-busted legacy upload path resolves to its only known base asset')
+  for (const [id, promotionId] of [[4, 10], [6, 11], [7, 12]]) {
+    const detail = await request(`/${id}/usage`)
+    assert.equal(detail.status, 200, `asset ${id}: ${JSON.stringify(detail.json)}`)
+    assert.deepEqual(detail.json.promotions.map((row) => row.id), [promotionId])
+  }
+  for (const id of [4, 6, 7]) {
+    const protectedDelete = await request(`/${id}`, { method: 'DELETE' })
+    assert.equal(protectedDelete.status, 409, `asset ${id}: ${JSON.stringify(protectedDelete.json)}`)
+  }
+  console.log('PASS encoded/cache-busted promotion paths protect the correct exact-first file identity')
+
+  reset()
+  asset(8, 'permission-check.png', '/uploads/permission-check.png')
+  const denied = await request('/8', { method: 'DELETE' }, viewer)
+  assert.equal(denied.status, 403, JSON.stringify(denied.json))
+  assert.ok(db.prepare('SELECT id FROM file_assets WHERE id = 8').get(), 'a non-Library user cannot delete an otherwise orphaned file')
+  assert.deepEqual(deletedKeys, [])
+  console.log('PASS missing Full Library permission denies deletion before asset work')
 }
 
 main().catch((error) => { console.error(error); process.exitCode = 1 })
