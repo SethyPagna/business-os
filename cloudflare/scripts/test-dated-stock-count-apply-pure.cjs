@@ -20,6 +20,7 @@ const { loadAll } = require('./harness/load_migrations.cjs')
 
 function freshDb() {
   const rawDb = openDb(loadAll())
+  let beforeBatch = null
   const db = {
     prepare(sql) {
       const stmt = rawDb.prepare(sql)
@@ -33,17 +34,20 @@ function freshDb() {
       }
     },
     async batch(items) {
-      const results = []
-      for (const item of items) {
-        const stmt = rawDb.prepare(item.sql)
-        const r = stmt.run(item.params || {})
-        results.push({ changes: r.meta?.changes ?? 0, lastInsertRowid: Number(r.meta?.last_row_id ?? 0) })
+      if (beforeBatch) {
+        const hook = beforeBatch
+        beforeBatch = null
+        hook(rawDb)
       }
-      return results
+      const results = await rawDb.batch(items)
+      return results.map((result) => ({
+        changes: result.meta?.changes ?? 0,
+        lastInsertRowid: Number(result.meta?.last_row_id ?? 0),
+      }))
     },
     async transaction(fn) { return fn(this) },
   }
-  return { rawDb, db }
+  return { rawDb, db, setBeforeBatch(hook) { beforeBatch = hook } }
 }
 
 function transpile(relPath) {
@@ -90,6 +94,10 @@ const relMap = {
   './db.ts': () => ({}),
   './datedStockCountImport': () => ({}),
   './datedStockCountImport.ts': () => ({}),
+  './importBranchAuthority': () => loadReal('lib/importBranchAuthority.ts'),
+  './importBranchAuthority.ts': () => loadReal('lib/importBranchAuthority.ts'),
+  './branchRoles': () => loadReal('lib/branchRoles.ts'),
+  './branchRoles.ts': () => loadReal('lib/branchRoles.ts'),
 }
 const originalCompile = Module.prototype._compile
 Module.prototype._compile = function (content, filename) {
@@ -128,7 +136,7 @@ async function testAsync(name, fn) {
 }
 
 function seedProduct(rawDb, { id, name, stockQuantity }) {
-  rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Main', 1, 1) ON CONFLICT(id) DO NOTHING").run()
+  rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Shop', 1, 1) ON CONFLICT(id) DO NOTHING").run()
   rawDb.prepare('INSERT INTO products (id, name, is_active, stock_quantity) VALUES (@id, @name, 1, @stockQuantity)').run({ id, name, stockQuantity })
   rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@id, 1, @stockQuantity)').run({ id, stockQuantity })
 }
@@ -139,14 +147,14 @@ async function main() {
     seedProduct(rawDb, { id: 1, name: 'Widget', stockQuantity: 10 })
     const oldMovementId = rawDb.prepare(
       `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, created_at)
-       VALUES (1, 'Widget', 1, 'Main', 'add', 5, 'Dated stock count import', '2026-08-16 00:00:00')`
+       VALUES (1, 'Widget', 1, 'Shop', 'add', 5, 'Dated stock count import', '2026-08-16 00:00:00')`
     ).run().meta.last_row_id
 
     const plan = {
       movementsToDelete: [oldMovementId],
       movementsToCreate: [
-        { productId: 1, productName: 'Widget', branchId: 1, branchName: 'Main', date: '2026-08-16', quantity: 3, movementType: 'add', reason: 'Dated stock count import' },
-        { productId: 1, productName: 'Widget', branchId: 1, branchName: 'Main', date: '2026-08-18', quantity: 2, movementType: 'remove', reason: 'Dated stock count import' },
+        { productId: 1, productName: 'Widget', branchId: 1, branchName: 'Shop', date: '2026-08-16', quantity: 3, movementType: 'add', reason: 'Dated stock count import' },
+        { productId: 1, productName: 'Widget', branchId: 1, branchName: 'Shop', date: '2026-08-18', quantity: 2, movementType: 'remove', reason: 'Dated stock count import' },
       ],
       finalBranchStock: [{ productId: 1, branchId: 1, quantity: 11 }],
       batchTopUps: [], batchCreates: [], batchDrains: [], batchDeactivations: [],
@@ -181,8 +189,8 @@ async function main() {
     const plan = {
       movementsToDelete: [],
       movementsToCreate: [
-        { productId: 2, productName: 'Gadget', branchId: 1, branchName: 'Main', date: '2026-08-10', quantity: 5, movementType: 'add', reason: 'Dated stock count import' },
-        { productId: 2, productName: 'Gadget', branchId: 1, branchName: 'Main', date: '2026-08-12', quantity: 5, movementType: 'remove', reason: 'Dated stock count import' },
+        { productId: 2, productName: 'Gadget', branchId: 1, branchName: 'Shop', date: '2026-08-10', quantity: 5, movementType: 'add', reason: 'Dated stock count import' },
+        { productId: 2, productName: 'Gadget', branchId: 1, branchName: 'Shop', date: '2026-08-12', quantity: 5, movementType: 'remove', reason: 'Dated stock count import' },
       ],
       finalBranchStock: [{ productId: 2, branchId: 1, quantity: 0 }],
       // batchCreates present for this group -> marks it batch-tracked,
@@ -216,8 +224,8 @@ async function main() {
     const plan = {
       movementsToDelete: [],
       movementsToCreate: [
-        { productId: 3, productName: 'Thingamajig', branchId: 1, branchName: 'Main', date: '2026-08-10', quantity: 3, movementType: 'add', reason: 'Dated stock count import' },
-        { productId: 3, productName: 'Thingamajig', branchId: 1, branchName: 'Main', date: '2026-08-12', quantity: 5, movementType: 'remove', reason: 'Dated stock count import' },
+        { productId: 3, productName: 'Thingamajig', branchId: 1, branchName: 'Shop', date: '2026-08-10', quantity: 3, movementType: 'add', reason: 'Dated stock count import' },
+        { productId: 3, productName: 'Thingamajig', branchId: 1, branchName: 'Shop', date: '2026-08-12', quantity: 5, movementType: 'remove', reason: 'Dated stock count import' },
       ],
       finalBranchStock: [{ productId: 3, branchId: 1, quantity: 0 }],
       batchTopUps: [], batchCreates: [{ productId: 3, branchId: 1, date: '2026-08-10', quantity: 3 }], batchDrains: [], batchDeactivations: [],
@@ -242,7 +250,7 @@ async function main() {
     const plan = {
       movementsToDelete: [],
       movementsToCreate: [
-        { productId: 4, productName: 'Doohickey', branchId: 1, branchName: 'Main', date: '2026-01-05', quantity: 1, movementType: 'add', reason: 'Dated stock count import' },
+        { productId: 4, productName: 'Doohickey', branchId: 1, branchName: 'Shop', date: '2026-01-05', quantity: 1, movementType: 'add', reason: 'Dated stock count import' },
       ],
       finalBranchStock: [{ productId: 4, branchId: 1, quantity: 1 }],
       batchTopUps: [], batchCreates: [], batchDrains: [], batchDeactivations: [],
@@ -259,7 +267,7 @@ async function main() {
     const plan = {
       movementsToDelete: [],
       movementsToCreate: [
-        { productId: 5, productName: 'Gizmo', branchId: 1, branchName: 'Main', date: '2026-08-10', quantity: 7, movementType: 'add', reason: 'Dated stock count import' },
+        { productId: 5, productName: 'Gizmo', branchId: 1, branchName: 'Shop', date: '2026-08-10', quantity: 7, movementType: 'add', reason: 'Dated stock count import' },
       ],
       finalBranchStock: [{ productId: 5, branchId: 1, quantity: 7 }],
       batchTopUps: [], batchCreates: [{ productId: 5, branchId: 1, date: '2026-08-10', quantity: 7 }], batchDrains: [], batchDeactivations: [],
@@ -281,8 +289,8 @@ async function main() {
     const plan = {
       movementsToDelete: [],
       movementsToCreate: [
-        { productId: 6, productName: 'Sprocket', branchId: 1, branchName: 'Main', date: '2026-08-10', quantity: 3, movementType: 'add', reason: 'Dated stock count import' },
-        { productId: 6, productName: 'Sprocket', branchId: 1, branchName: 'Main', date: '2026-08-12', quantity: 5, movementType: 'remove', reason: 'Dated stock count import' },
+        { productId: 6, productName: 'Sprocket', branchId: 1, branchName: 'Shop', date: '2026-08-10', quantity: 3, movementType: 'add', reason: 'Dated stock count import' },
+        { productId: 6, productName: 'Sprocket', branchId: 1, branchName: 'Shop', date: '2026-08-12', quantity: 5, movementType: 'remove', reason: 'Dated stock count import' },
       ],
       finalBranchStock: [{ productId: 6, branchId: 1, quantity: 0 }],
       batchTopUps: [], batchCreates: [{ productId: 6, branchId: 1, date: '2026-08-10', quantity: 3 }], batchDrains: [], batchDeactivations: [],
@@ -305,7 +313,7 @@ async function main() {
     seedProduct(rawDb, { id: 7, name: 'Widget Pro', stockQuantity: 0 })
     const oldMovementId = rawDb.prepare(
       `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, created_at)
-       VALUES (7, 'Widget Pro', 1, 'Main', 'add', 10, 'Dated stock count import', '2026-08-01 00:00:00')`
+       VALUES (7, 'Widget Pro', 1, 'Shop', 'add', 10, 'Dated stock count import', '2026-08-01 00:00:00')`
     ).run().meta.last_row_id
     rawDb.prepare(
       `INSERT INTO dated_stock_count_batch_actions (movement_id, batch_id, quantity) VALUES (@movementId, 999, 10)`,
@@ -314,7 +322,7 @@ async function main() {
     const plan = {
       movementsToDelete: [oldMovementId],
       movementsToCreate: [
-        { productId: 7, productName: 'Widget Pro', branchId: 1, branchName: 'Main', date: '2026-08-01', quantity: 4, movementType: 'add', reason: 'Dated stock count import' },
+        { productId: 7, productName: 'Widget Pro', branchId: 1, branchName: 'Shop', date: '2026-08-01', quantity: 4, movementType: 'add', reason: 'Dated stock count import' },
       ],
       finalBranchStock: [{ productId: 7, branchId: 1, quantity: 4 }],
       batchTopUps: [], batchCreates: [], batchDrains: [], batchDeactivations: [],
@@ -324,6 +332,51 @@ async function main() {
     const orphaned = rawDb.prepare('SELECT id FROM dated_stock_count_batch_actions WHERE movement_id = @id').all({ id: oldMovementId })
     assert.strictEqual(orphaned.length, 0, 'provenance rows for a deleted movement should not survive it')
   })
+
+  await testAsync('direct apply refuses a non-canonical branch before deleting movements or changing stock', async () => {
+    const { rawDb, db } = freshDb()
+    seedProduct(rawDb, { id: 8, name: 'Guarded Widget', stockQuantity: 4 })
+    rawDb.prepare("UPDATE branches SET name = 'Main' WHERE id = 1").run()
+    const oldMovementId = rawDb.prepare(
+      `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, created_at)
+       VALUES (8, 'Guarded Widget', 1, 'Main', 'add', 4, 'Dated stock count import', '2026-08-01 00:00:00')`,
+    ).run().meta.last_row_id
+    const plan = {
+      movementsToDelete: [oldMovementId],
+      movementsToCreate: [{ productId: 8, productName: 'Guarded Widget', branchId: 1, branchName: 'Main', date: '2026-08-02', quantity: 3, movementType: 'add', reason: 'Dated stock count import' }],
+      finalBranchStock: [{ productId: 8, branchId: 1, quantity: 7 }],
+      batchTopUps: [], batchCreates: [], batchDrains: [], batchDeactivations: [],
+    }
+    await assert.rejects(() => applyDatedStockCountPlan(db, plan), /non-canonical|ambiguous/i)
+    assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id = 8 AND branch_id = 1').get().quantity, 4)
+    assert.ok(rawDb.prepare('SELECT id FROM inventory_movements WHERE id = @id').get({ id: oldMovementId }), 'prior movement remains')
+  })
+
+  for (const scenario of [
+    {
+      name: 'deactivated after validation',
+      mutate: (rawDb) => rawDb.prepare('UPDATE branches SET is_active = 0 WHERE id = 1').run(),
+    },
+    {
+      name: 'duplicate normalized Shop inserted after validation',
+      mutate: (rawDb) => rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (9, ' shop ', 1, 0)").run(),
+    },
+  ]) {
+    await testAsync(`apply rolls back when the selected Shop is ${scenario.name}`, async () => {
+      const { rawDb, db, setBeforeBatch } = freshDb()
+      seedProduct(rawDb, { id: 9, name: 'Raced Widget', stockQuantity: 2 })
+      const plan = {
+        movementsToDelete: [],
+        movementsToCreate: [{ productId: 9, productName: 'Raced Widget', branchId: 1, branchName: 'Shop', date: '2026-08-02', quantity: 3, movementType: 'add', reason: 'Dated stock count import' }],
+        finalBranchStock: [{ productId: 9, branchId: 1, quantity: 5 }],
+        batchTopUps: [], batchCreates: [], batchDrains: [], batchDeactivations: [],
+      }
+      setBeforeBatch(scenario.mutate)
+      await assert.rejects(() => applyDatedStockCountPlan(db, plan), /overflow|canonical|ambiguous/i)
+      assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id = 9 AND branch_id = 1').get().quantity, 2)
+      assert.strictEqual(rawDb.prepare('SELECT COUNT(*) AS n FROM inventory_movements WHERE product_id = 9').get().n, 0)
+    })
+  }
 
   console.log(`\n${passed} PASS, ${failed} FAIL`)
   process.exitCode = failed ? 1 : 0

@@ -82,6 +82,8 @@ const relMap = {
   './productDetailRule.ts': () => loadReal('lib/productDetailRule.ts'),
   './branchRoles': () => loadReal('lib/branchRoles.ts'),
   './branchRoles.ts': () => loadReal('lib/branchRoles.ts'),
+  './importBranchAuthority': () => loadReal('lib/importBranchAuthority.ts'),
+  './importBranchAuthority.ts': () => loadReal('lib/importBranchAuthority.ts'),
 }
 const originalCompile = Module.prototype._compile
 Module.prototype._compile = function (content, filename) {
@@ -359,6 +361,16 @@ async function main() {
     seedBranch(rawDb, 1, 'Shop', 1)
     seedBranch(rawDb, 2, 'Warehouse', 1)
     seedProduct(rawDb, { id: 182, name: 'Widget' })
+    const result = await resolveDatedStockCountRows(db, [row({ branchName: '', productName: 'Widget' })])
+    assert.strictEqual(result.resolved.length, 0)
+    assert.strictEqual(result.unresolved[0].reason, 'missing_branch')
+  })
+
+  await testAsync('a blank branch cannot use a default whose canonical role has another active row', async () => {
+    const { rawDb, db } = freshDb()
+    seedBranch(rawDb, 1, 'Shop', 1)
+    seedBranch(rawDb, 2, ' shop ', 0)
+    seedProduct(rawDb, { id: 184, name: 'Widget' })
     const result = await resolveDatedStockCountRows(db, [row({ branchName: '', productName: 'Widget' })])
     assert.strictEqual(result.resolved.length, 0)
     assert.strictEqual(result.unresolved[0].reason, 'missing_branch')

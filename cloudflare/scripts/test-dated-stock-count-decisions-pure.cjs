@@ -16,6 +16,8 @@ const { loadAll } = require('./harness/load_migrations.cjs')
 
 function freshDb() {
   const rawDb = openDb(loadAll())
+  rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Shop', 1, 1)").run()
+  let beforeBatch = null
   const db = {
     prepare(sql) {
       const stmt = rawDb.prepare(sql)
@@ -29,17 +31,20 @@ function freshDb() {
       }
     },
     async batch(items) {
-      const results = []
-      for (const item of items) {
-        const stmt = rawDb.prepare(item.sql)
-        const r = stmt.run(item.params || {})
-        results.push({ changes: r.meta?.changes ?? 0, lastInsertRowid: Number(r.meta?.last_row_id ?? 0) })
+      if (beforeBatch) {
+        const hook = beforeBatch
+        beforeBatch = null
+        hook(rawDb)
       }
-      return results
+      const results = await rawDb.batch(items)
+      return results.map((result) => ({
+        changes: result.meta?.changes ?? 0,
+        lastInsertRowid: Number(result.meta?.last_row_id ?? 0),
+      }))
     },
     async transaction(fn) { return fn(this) },
   }
-  return { rawDb, db }
+  return { rawDb, db, setBeforeBatch(hook) { beforeBatch = hook } }
 }
 
 function transpile(relPath) {
@@ -64,9 +69,20 @@ function loadReal(relPath) {
   return mod.exports
 }
 
-// datedStockCountDecisions.ts's only relative imports (./db,
-// ./datedStockCountResolve) are both `import type` -- erased by
-// transpileModule, so no relMap of real requires is needed here.
+const relMap = {
+  './importBranchAuthority': () => loadReal('lib/importBranchAuthority.ts'),
+  './importBranchAuthority.ts': () => loadReal('lib/importBranchAuthority.ts'),
+  './branchRoles': () => loadReal('lib/branchRoles.ts'),
+  './branchRoles.ts': () => loadReal('lib/branchRoles.ts'),
+}
+const originalCompile = Module.prototype._compile
+Module.prototype._compile = function (content, filename) {
+  if (filename.includes(`${path.sep}cloudflare${path.sep}src${path.sep}lib${path.sep}`)) {
+    const originalRequire = this.require.bind(this)
+    this.require = (id) => (relMap[id] ? relMap[id]() : originalRequire(id))
+  }
+  return originalCompile.call(this, content, filename)
+}
 
 const { applyDatedStockCountDecisions } = loadReal('lib/datedStockCountDecisions.ts')
 
@@ -103,7 +119,7 @@ function unresolvedRow(overrides = {}) {
   return {
     rowNumber: 1,
     reason: 'product_not_found',
-    raw: { rowNumber: 1, date: '2026-08-10', branchName: 'Main', productName: 'Widget', count: 5 },
+    raw: { rowNumber: 1, date: '2026-08-10', branchName: 'Shop', productName: 'Widget', count: 5 },
     branchId: 1,
     suggestedActions: ['create_new'],
     ...overrides,
@@ -121,7 +137,7 @@ async function main() {
     const { db } = freshDb()
     const unresolved = [
       unresolvedRow({ rowNumber: 1, reason: 'product_not_found', suggestedActions: ['create_new'] }),
-      unresolvedRow({ rowNumber: 2, reason: 'invalid_date', suggestedActions: [], raw: { rowNumber: 2, date: 'bogus', branchName: 'Main', productName: 'X', count: 1 } }),
+      unresolvedRow({ rowNumber: 2, reason: 'invalid_date', suggestedActions: [], raw: { rowNumber: 2, date: 'bogus', branchName: 'Shop', productName: 'X', count: 1 } }),
       unresolvedRow({ rowNumber: 3, reason: 'product_not_found', suggestedActions: ['create_new'] }),
     ]
     const decisions = [
@@ -158,7 +174,7 @@ async function main() {
   // ---- create_new: genuinely new name, standalone row ----
   await testAsync('create_new inserts a standalone product using the row\'s own name', async () => {
     const { db, rawDb } = freshDb()
-    const unresolved = [unresolvedRow({ rowNumber: 1, reason: 'product_not_found', suggestedActions: ['create_new'], raw: { rowNumber: 1, date: '2026-08-10', branchName: 'Main', productName: 'Brand New Thing', count: 7 } })]
+    const unresolved = [unresolvedRow({ rowNumber: 1, reason: 'product_not_found', suggestedActions: ['create_new'], raw: { rowNumber: 1, date: '2026-08-10', branchName: 'Shop', productName: 'Brand New Thing', count: 7 } })]
     const result = await applyDatedStockCountDecisions(db, [], unresolved, [{ rowNumber: 1, action: 'create_new' }])
     assert.strictEqual(result.productsCreated.length, 1)
     assert.strictEqual(result.productsCreated[0].action, 'create_new')
@@ -173,7 +189,7 @@ async function main() {
 
   await testAsync('create_new with no product name is an error, not a blank-name insert', async () => {
     const { db } = freshDb()
-    const unresolved = [unresolvedRow({ rowNumber: 1, raw: { rowNumber: 1, date: '2026-08-10', branchName: 'Main', productName: '', count: 1 } })]
+    const unresolved = [unresolvedRow({ rowNumber: 1, raw: { rowNumber: 1, date: '2026-08-10', branchName: 'Shop', productName: '', count: 1 } })]
     const result = await applyDatedStockCountDecisions(db, [], unresolved, [{ rowNumber: 1, action: 'create_new' }])
     assert.strictEqual(result.errors.length, 1)
     assert.ok(/requires a product name/.test(result.errors[0].error))
@@ -204,7 +220,7 @@ async function main() {
       reason: 'ambiguous_name',
       suggestedActions: ['link_variant', 'create_child', 'create_new'],
       candidateProductIds: [20],
-      raw: { rowNumber: 1, date: '2026-08-10', branchName: 'Main', productName: 'Grouped Product', sku: 'CHILD-SKU', barcode: '111222', count: 3 },
+      raw: { rowNumber: 1, date: '2026-08-10', branchName: 'Shop', productName: 'Grouped Product', sku: 'CHILD-SKU', barcode: '111222', count: 3 },
     })]
     const result = await applyDatedStockCountDecisions(db, [], unresolved, [{ rowNumber: 1, action: 'create_child', candidateProductId: 20 }])
     assert.strictEqual(result.productsCreated.length, 1)
@@ -272,7 +288,7 @@ async function main() {
       reason: 'ambiguous_name',
       suggestedActions: ['link_variant', 'create_child', 'create_new'],
       candidateProductIds: [61],
-      raw: { rowNumber: 1, date: '2026-08-10', branchName: 'Main', productName: 'Unlocked Parent', sku: 'UNLOCKED-SKU', barcode: '999888', count: 2 },
+      raw: { rowNumber: 1, date: '2026-08-10', branchName: 'Shop', productName: 'Unlocked Parent', sku: 'UNLOCKED-SKU', barcode: '999888', count: 2 },
     })]
     const result = await applyDatedStockCountDecisions(db, [], unresolved, [{ rowNumber: 1, action: 'create_child', candidateProductId: 61, name: 'Genuinely Different Name', nameOverrideConfirmed: true }])
     assert.strictEqual(result.errors.length, 0)
@@ -324,6 +340,42 @@ async function main() {
     const count = rawDb.prepare('SELECT COUNT(*) as n FROM products').get().n
     assert.strictEqual(count, 0)
   })
+
+  await testAsync('submitted non-canonical branch ids are rejected before price or product writes', async () => {
+    const { db, rawDb } = freshDb()
+    rawDb.prepare("UPDATE branches SET name = 'Main' WHERE id = 1").run()
+    seedProduct(rawDb, { id: 80, name: 'Existing Price', usd: 3 })
+    const result = await applyDatedStockCountDecisions(
+      db,
+      [resolvedRow({ rowNumber: 1, productId: 80, branchId: 1, priceConflict: { currentUsd: 3, currentKhr: 0, importedUsd: 9, importedKhr: 0, suggestedResolution: 'replace' } })],
+      [unresolvedRow({ rowNumber: 2, branchId: 1 })],
+      [{ rowNumber: 1, action: 'skip', priceResolution: 'apply_new' }, { rowNumber: 2, action: 'create_new' }],
+    )
+    assert.strictEqual(result.errors.length, 2)
+    assert.strictEqual(rawDb.prepare('SELECT selling_price_usd FROM products WHERE id = 80').get().selling_price_usd, 3)
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) AS n FROM products').get().n, 1)
+  })
+
+  for (const scenario of [
+    {
+      name: 'deactivated after decision validation',
+      mutate: (rawDb) => rawDb.prepare('UPDATE branches SET is_active = 0 WHERE id = 1').run(),
+    },
+    {
+      name: 'made ambiguous after decision validation',
+      mutate: (rawDb) => rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (8, ' SHOP ', 1, 0)").run(),
+    },
+  ]) {
+    await testAsync(`create decision performs no product write when Shop is ${scenario.name}`, async () => {
+      const { db, rawDb, setBeforeBatch } = freshDb()
+      setBeforeBatch(scenario.mutate)
+      await assert.rejects(
+        () => applyDatedStockCountDecisions(db, [], [unresolvedRow()], [{ rowNumber: 1, action: 'create_new' }]),
+        /overflow|canonical|ambiguous/i,
+      )
+      assert.strictEqual(rawDb.prepare('SELECT COUNT(*) AS n FROM products').get().n, 0)
+    })
+  }
 
   // ---- reasons with no possible action (pre-branch-resolution failures) ----
   await testAsync('a row with empty suggestedActions (e.g. invalid_date) is an error even with a decision supplied', async () => {

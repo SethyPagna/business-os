@@ -16,6 +16,7 @@
 import type { D1Compat } from './db'
 import { buildInClause, chunkForBinding, selectInChunks } from './sqlBinding'
 import { normalizeToIsoDate } from './batchCode'
+import { validateCanonicalImportBranchIds } from './importBranchAuthority'
 import {
   computeDatedStockCountPlan,
   DATED_STOCK_COUNT_REASON,
@@ -94,6 +95,8 @@ export async function buildDatedStockCountPlan(
   if (missingProduct != null) return { error: `Product ${missingProduct} not found`, status: 404 }
   const missingBranch = branchIds.find((id) => !branchById.has(id))
   if (missingBranch != null) return { error: `Branch ${missingBranch} not found`, status: 404 }
+  const branchAuthorityError = await validateCanonicalImportBranchIds(db, branchIds)
+  if (branchAuthorityError) return { error: branchAuthorityError, status: 400 }
 
   const datedEntries: DatedCountEntry[] = entries.map((e) => ({
     date: e.date,

@@ -34,7 +34,7 @@ import type { D1Compat } from './db'
 import { buildInClause, selectInChunks } from './sqlBinding'
 import { normalizeToIsoDate } from './batchCode'
 import { identityBarcodeKey, identityBarcodeKeySql } from './productIdentity'
-import { branchRoleFromName } from './branchRoles'
+import { indexCanonicalImportBranches, resolveCanonicalImportBranch } from './importBranchAuthority'
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
@@ -156,16 +156,7 @@ export async function resolveDatedStockCountRows(
   const branches = await db.prepare(`SELECT id, name, is_default, is_active FROM branches`).all<{
     id: number; name: string; is_default: number | null; is_active: number | null
   }>()
-  const canonicalByRole = new Map<'shop' | 'warehouse', typeof branches>([['shop', []], ['warehouse', []]])
-  const canonicalDefaults: typeof branches = []
-  for (const branch of branches) {
-    if (Number(branch.is_active ?? 0) !== 1) continue
-    const role = branchRoleFromName(branch.name)
-    if (role === 'other') continue
-    canonicalByRole.get(role)!.push(branch)
-    if (Number(branch.is_default ?? 0) === 1) canonicalDefaults.push(branch)
-  }
-  const uniqueCanonicalDefault = canonicalDefaults.length === 1 ? canonicalDefaults[0] : null
+  const canonicalBranches = indexCanonicalImportBranches(branches)
 
   // ---- Product resolution: sku -> barcode -> exact name, same priority
   // order as importEngine.ts's classifyProducts ----
@@ -222,10 +213,7 @@ export async function resolveDatedStockCountRows(
   const matched: { row: RawDatedCountRow & { normalizedDate: string }; branchId: number; productId: number }[] = []
   for (const row of candidates) {
     const requestedBranchName = lower(row.branchName)
-    const requestedRole = branchRoleFromName(requestedBranchName)
-    const branch = requestedBranchName
-      ? (requestedRole === 'other' ? null : (canonicalByRole.get(requestedRole)?.length === 1 ? canonicalByRole.get(requestedRole)![0] : null))
-      : uniqueCanonicalDefault
+    const branch = resolveCanonicalImportBranch(canonicalBranches, requestedBranchName)
     if (!branch) {
       unresolved.push({
         rowNumber: row.rowNumber,

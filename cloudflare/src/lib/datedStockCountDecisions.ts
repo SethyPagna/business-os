@@ -50,6 +50,7 @@
 // tested below, not just claimed in a comment.
 import type { D1Compat } from './db'
 import type { ResolvedDatedCountRow, UnresolvedDatedCountRow } from './datedStockCountResolve'
+import { validateCanonicalImportBranchIds, withCanonicalImportBranchWriteGuard } from './importBranchAuthority'
 
 export type DatedCountDecisionAction = 'create_new' | 'link_variant' | 'create_child' | 'skip'
 
@@ -141,6 +142,21 @@ export async function applyDatedStockCountDecisions(
   const skipped: DatedCountSkipped[] = []
   const productsCreated: ProductCreatedFromDecision[] = []
   const newlyResolved: ResolvedDatedCountRow[] = []
+  const branchIds = [...new Set([
+    ...resolved.map((row) => Number(row.branchId)),
+    ...unresolved.flatMap((row) => row.branchId == null ? [] : [Number(row.branchId)]),
+  ])]
+  const branchAuthorityError = await validateCanonicalImportBranchIds(db, branchIds)
+  if (branchAuthorityError) {
+    return {
+      resolved: [],
+      skipped: [],
+      errors: [...new Set([...resolved.map((row) => row.rowNumber), ...unresolved.map((row) => row.rowNumber)])]
+        .map((rowNumber) => ({ rowNumber, error: branchAuthorityError })),
+      productsCreated: [],
+    }
+  }
+  const guardedDb = withCanonicalImportBranchWriteGuard(db, branchIds)
 
   // ---- Part 1: price-conflict decisions on already-resolved rows ----
   // No row is dropped here -- every resolved row is carried through to
@@ -153,7 +169,7 @@ export async function applyDatedStockCountDecisions(
       if (resolution === 'apply_new') {
         const usd = row.priceConflict.importedUsd ?? row.priceConflict.currentUsd
         const khr = row.priceConflict.importedKhr ?? row.priceConflict.currentKhr
-        await db.prepare(`UPDATE products SET selling_price_usd = @usd, selling_price_khr = @khr, updated_at = CURRENT_TIMESTAMP WHERE id = @id`).run({ usd, khr, id: row.productId })
+        await guardedDb.prepare(`UPDATE products SET selling_price_usd = @usd, selling_price_khr = @khr, updated_at = CURRENT_TIMESTAMP WHERE id = @id`).run({ usd, khr, id: row.productId })
       }
     }
     finalResolved.push(row)
@@ -203,7 +219,7 @@ export async function applyDatedStockCountDecisions(
       const name = String(row.raw.productName ?? '').trim()
       if (!name) { errors.push({ rowNumber: row.rowNumber, error: 'create_new requires a product name; this row had none.' }); continue }
       const price = pickPrice(row.raw)
-      const inserted = await db
+      const inserted = await guardedDb
         .prepare(`INSERT INTO products (name, sku, barcode, selling_price_usd, selling_price_khr, is_active) VALUES (@name, @sku, @barcode, @usd, @khr, 1)`)
         .run({ name, sku: row.raw.sku ?? null, barcode: row.raw.barcode ?? null, usd: price.usd, khr: price.khr })
       const productId = Number(inserted.lastInsertRowid)
@@ -253,7 +269,7 @@ export async function applyDatedStockCountDecisions(
     const nameUnlocked = nameDiffers && !!decision.nameOverrideConfirmed
     const finalName = nameUnlocked ? (requestedName as string) : parent.name
     const price = pickPrice(row.raw)
-    const inserted = await db
+    const inserted = await guardedDb
       .prepare(`INSERT INTO products (name, sku, barcode, selling_price_usd, selling_price_khr, is_active) VALUES (@name, @sku, @barcode, @usd, @khr, 1)`)
       .run({ name: finalName, sku: row.raw.sku ?? null, barcode: row.raw.barcode ?? null, usd: price.usd, khr: price.khr })
     const productId = Number(inserted.lastInsertRowid)
