@@ -24,3 +24,12 @@ export function customerIsAnonymousSql(alias = ''): string {
 export function customerIsProfileSql(alias = ''): string {
   return `NOT (${customerIsAnonymousSql(alias)})`
 }
+
+export function customerProfileMutationGuardSql(idParam = 'customerId'): string {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(idParam)) {
+    throw new Error('Invalid SQL parameter for anonymous-customer guard')
+  }
+  return `SELECT CASE WHEN EXISTS (
+    SELECT 1 FROM customers WHERE id = @${idParam} AND ${customerIsProfileSql()}
+  ) THEN 1 ELSE json_extract('${ANONYMOUS_CUSTOMER_ERROR_CODE}', '$') END AS anonymous_customer_guard`
+}

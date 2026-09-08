@@ -78,6 +78,7 @@ const contactDuplicates = loadReal('lib/contactDuplicates.ts', {
   './contactOptions': contactOptions,
   './phone': phone,
 })
+const anonymousCustomer = loadReal('lib/anonymousCustomer.ts')
 const { canonicalizePhone } = phone
 const { getPortalLockoutState, recordPortalFailure, clearPortalLockout } = loadReal('lib/portalAuthLockout.ts', { './db': dbModule })
 const { signupPortalAccount, signinPortalAccount, PORTAL_CONSENT_VERSION } = loadReal('lib/portalAccounts.ts', {
@@ -86,6 +87,7 @@ const { signupPortalAccount, signinPortalAccount, PORTAL_CONSENT_VERSION } = loa
   './phone': phone,
   './passwordPolicy': passwordPolicy,
   './contactDuplicates': contactDuplicates,
+  './anonymousCustomer': anonymousCustomer,
 })
 
 const env = {}
@@ -132,6 +134,7 @@ function makeIsolatedPortal(membershipOverride = membershipNumber, hooks = {}) {
     './phone': phone,
     './passwordPolicy': passwordPolicy,
     './contactDuplicates': contactDuplicates,
+    './anonymousCustomer': anonymousCustomer,
   })
   return {
     signup: signup2,
@@ -143,13 +146,14 @@ function makeIsolatedPortal(membershipOverride = membershipNumber, hooks = {}) {
 
 function seedCustomer(fields) {
   rawDb.prepare(
-    'INSERT INTO customers (name, phone, phone_normalized, address, membership_number) VALUES (@name, @phone, @phone_normalized, @address, @membership_number)',
+    'INSERT INTO customers (name, phone, phone_normalized, address, membership_number, is_anonymous) VALUES (@name, @phone, @phone_normalized, @address, @membership_number, @is_anonymous)',
   ).run({
     name: fields.name,
     phone: fields.phone ?? null,
     phone_normalized: fields.phone_normalized ?? null,
     address: fields.address ?? null,
     membership_number: fields.membership_number ?? null,
+    is_anonymous: fields.is_anonymous ?? 0,
   })
   return Number(rawDb.prepare('SELECT last_insert_rowid() AS id').get().id)
 }
@@ -264,6 +268,31 @@ async function run() {
     assert.strictEqual(account.membership_id, 'lcmn-oldbuyer')
   })
 
+  await check('a marked historical customer cannot be claimed through membership signup', async () => {
+    seedCustomer({ name: 'General', phone: '010 555 010', phone_normalized: '010555010', membership_number: 'LC-ANON', is_anonymous: 1 })
+    const res = await signupPortalAccount(env, { name: 'General', phone: '010 555 010', membershipId: 'LC-ANON', password: 'secret123', consent: true })
+    assert.strictEqual(res.ok, false)
+    assert.strictEqual(res.code, 'verification_failed')
+    assert.strictEqual(rawDb.prepare("SELECT COUNT(*) AS n FROM portal_accounts WHERE membership_id='LC-ANON'").get().n, 0)
+  })
+
+  await check('marking an existing customer after lookup rolls the portal account claim back atomically', async () => {
+    let injected = false
+    const { signup, rawDb: raceDb } = makeIsolatedPortal(membershipNumber, {
+      beforeBatch: ({ rawDb: hookDb, items }) => {
+        if (injected || !items.some((item) => /INSERT INTO portal_accounts/i.test(item.sql))) return
+        injected = true
+        hookDb.prepare("UPDATE customers SET is_anonymous=1 WHERE membership_number='LC-RACE-ANON'").run()
+      },
+    })
+    raceDb.prepare("INSERT INTO customers (name,phone,phone_normalized,membership_number,is_anonymous) VALUES ('Race General','010555011','010555011','LC-RACE-ANON',0)").run()
+    const res = await signup(env, { name: 'Race General', phone: '010555011', membershipId: 'LC-RACE-ANON', password: 'secret123', consent: true })
+    assert.strictEqual(res.ok, false)
+    assert.strictEqual(res.code, 'verification_failed')
+    assert.strictEqual(raceDb.prepare('SELECT COUNT(*) AS n FROM portal_accounts').get().n, 0)
+    assert.strictEqual(raceDb.prepare("SELECT is_anonymous FROM customers WHERE membership_number='LC-RACE-ANON'").get().is_anonymous, 1)
+  })
+
   await check('signup (existing customer) with a PHONE MISMATCH is rejected with the reminder', async () => {
     seedCustomer({ name: 'Mismatch', phone: '012 000 000', phone_normalized: '012000000', membership_number: 'LCMN-MISMATCH' })
     const res = await signupPortalAccount(env, { name: 'Mismatch', phone: '012 999 999', membershipId: 'LCMN-MISMATCH', password: 'secret123', consent: true })
@@ -300,6 +329,16 @@ async function run() {
     assert.strictEqual(byName.ok, true)
     const byId = await signinPortalAccount(env, { identifier: 'lcmn-oldbuyer', phone: '011 222 333', password: 'secret123', consent: true })
     assert.strictEqual(byId.ok, true)
+  })
+
+  await check('marking a linked contact invalidates portal signin without exposing the marker', async () => {
+    const signup = await signupPortalAccount(env, { name: 'Later Marker', phone: '010 555 012', password: 'secret123', consent: true })
+    assert.strictEqual(signup.ok, true)
+    rawDb.prepare('UPDATE customers SET is_anonymous=1 WHERE id=(SELECT contact_id FROM portal_accounts WHERE id=?)').run([signup.accountId])
+    const signin = await signinPortalAccount(env, { identifier: 'Later Marker', phone: '010 555 012', password: 'secret123', consent: true })
+    assert.strictEqual(signin.ok, false)
+    assert.strictEqual(signin.code, 'invalid_credentials')
+    assert.ok(!JSON.stringify(signin).includes('anonymous'))
   })
 
   await check('signin fails on wrong password, unknown phone, and identifier mismatch — all generic', async () => {
