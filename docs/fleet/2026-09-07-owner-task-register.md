@@ -4,7 +4,7 @@ This is the current request register. `progress.md` links here. Append new owner
 requests and corrections; do not replace earlier requests or silently drop them.
 Root owns prioritization, integration, evidence, and deployment claims.
 
-Last reconciled: 2026-09-07T23:53:19.529Z. Functional fixes precede UI polish.
+Last reconciled: 2026-09-08T03:08:17.617Z Functional fixes precede UI polish.
 Current production: **dfb8932e**, Worker **6abf6ffa-5909-4651-8580-c17764d68d6d**, 100% at **2026-09-07T23:41:06.03494Z**. F47B contact-import targets, F47D new-customer signup atomicity, checkout and sales-import F51 guards deployed. Earlier releases included. Historical branch repair complete; production product merge remains eight completed cases. Older dated statements below are historical evidence.
 
 First functional release **821efc94ce7a** is serving 100% traffic as Worker
@@ -80,7 +80,7 @@ Every shipped row must eventually record its actual deployment version.
 | F43 | Contact phone entry automatically spaces digits as typed; formatted display and canonical matching must agree. | Deployed da5c8b02; independent PASS including mobile deletion and IME | Progressive spacing, prefixes, paste and caret covered in seven create/edit/quick-add fields. |
 | F44 | Latest owner correction: visible Credit / ឥណទាន becomes Not Paid / ប្រាក់ជំពាក់ everywhere. | Deployed 560bfbcb; live EN/KM verified | Supersedes N39/F13 unpaid-state wording. Internal values/accounting unchanged; distinct Store Credit, supplier credit and overpayment concepts preserved. |
 | F45 | Investigate failed admin WebSocket and reported content.js/VM listener/startTime errors. | Deployed 560bfbcb; independent PASS | Cooldown lacked wake-up and actual logout did not disconnect. Both corrected. content.js listener is extension noise; VM startTime ownership unproven. |
-| F46 | Bulk conflict multi-select processes slowly one by one; present combined before/after review and efficient bounded execution. | Plan complete; runtime not started / sales | Combined before/after workflow is separate from bounded duplicate merge; scoped plan committed, execution/receipt implementation remains. |
+| F46 | Bulk conflict multi-select processes slowly one by one; present combined before/after review and efficient bounded execution. | Runtime active, isolated next slice / conflict_batch_impl, sales, media | Combined before/after workflow is separate from bounded duplicate merge; backend execution/receipts, combined frontend review and backup/reset integration now assigned. |
 
 | F47 | Prevent and clearly prompt about existing customers, suppliers and delivery contacts across add/create/edit/quick-add/import/session surfaces; distinguish reuse from intentional creation. | Partially deployed; F47A integrated, final gates/browser active | B import choices and D new-customer signup deployed dfb8932e; C hidden supplier creation deployed4afe9825. A explicit manual/POS decisions at c09c707a not yet deployed. |
 | F48 | Shift difference must show when supported across Telegram, reports and history; Closing cash / សាច់ប្រាក់បិទវេន; Not Paid / ប្រាក់ជំពាក់; use owner's supplied concise report arrangement. | Deployed 4afe9825; independent review passed / sales | Each known currency difference is shown even under review; missing inputs remain unknown. Requested section order and Closing cash labels are pinned. |
@@ -192,3 +192,13 @@ Remaining functional owners: Identity handles explicit contact/POS duplicate cho
 - Financial audit: canonical revenue includes Not Paid and is nonnegative. Genuine losses must remain visible as negative profit; no clamp or invented money. Clarify misleading nonnegative-profit test wording separately.
 
 Release dfb8932e was independently confirmed at100%; no migration. Full285 backend suites and316 frontend test files passed before deployment. Source integration c09c707a remains a later candidate, not the deployed release.
+
+## Functional follow-through — September 8, next checkpoint active
+
+Production remains dfb8932e (Worker6abf6ffa,100%). Approved canonical branch administration/reset/transfers, guarded general/dated imports and export breakdown corrections are integrated through2766eb52. The provisional public candidate is dbdb24b7, pending final follow-ups; it is NOT deployed.
+
+Exact-c09 Contacts/POS browser passed explicit duplicate decisions, blocked shared-phone/membership creation and disabled Warehouse. It found a stale resolved-error banner; fix1f9dd5a4 is in independent review and exact-browser validation. Full combined frontend317/318 passed; sole stale export-source assertion fixed and focused rerun passed. Frozen combined backend285/291 effective pass; six known stale test/fixture/loader failures, receipt already fixed and remaining five under correction. Do not label the combined gate green until these checks pass.
+
+F46 runtime implementation is now ACTIVE (supersedes earlier not-started notes): dedicated backend owner conflict_batch_impl, frontend owner sales_impl, backup/reset owner media_stock_impl, isolated from this checkpoint. Migration0136 is reserved locally for durable selected-conflict run/case receipts; it has NOT been applied to production. Combined preview/one confirmation, scoped per-pair stock choices, atomic audit/undo and truthful continuation remain acceptance requirements.
+
+Production product merge remains eight cases and browser access pending. Functional fixes still precede deferred UI. Original dirty workspace and historical evidence remain preserved.
