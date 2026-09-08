@@ -363,6 +363,7 @@ async function main() {
     const { status, json } = await req('POST', '/', {
       items: [{ product_id: 1, quantity: 2, stock_action: 'none', branch_id: 1, applied_price_usd: 10 }],
       replacement_items: [{ product_id: 2, quantity: 2, branch_id: 1, applied_price_usd: 10 }],
+      customer_name: 'Walk-in Dara',
       reason: 'Defective, swapped on the spot',
     })
     assert.strictEqual(status, 200, JSON.stringify(json))
@@ -396,6 +397,7 @@ async function main() {
     assert.equal(creation.payment_method, 'Cash')
     assert.equal(creation.total_usd, 20)
     assert.equal(creation.delivery.is_delivery, false)
+    assert.deepEqual(creation.customer, { id: null, name: 'Walk-in Dara' }, 'a name-only replacement buyer is not rewritten as General')
     const replacementSaleItem = rawDb.prepare('SELECT product_id, quantity FROM sale_items WHERE sale_id = ?').get([json.replacementSaleId])
     assert.strictEqual(replacementSaleItem.product_id, 2)
     assert.strictEqual(replacementSaleItem.quantity, 2)

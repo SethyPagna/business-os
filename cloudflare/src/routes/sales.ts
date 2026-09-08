@@ -907,9 +907,9 @@ app.post('/', async (c) => {
       deliveryContactPhone: deliveryContact?.phone,
       deliveryFeeUsd,
       deliveryActualCostUsd,
-      customerSnapshot: customer ? {
-        id: customer.id,
-        name: body.customer_name || customer.name || null,
+      customerSnapshot: customer || String(body.customer_name ?? '').trim() ? {
+        id: customer?.id ?? null,
+        name: body.customer_name || customer?.name || null,
       } : null,
       membershipSnapshot: customer?.membership_number ? {
         number: customer.membership_number,
