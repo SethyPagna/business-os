@@ -5,6 +5,7 @@ import { getActionTier } from './permissions'
 import { bumpVersion } from './cache'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { actorSnapshot } from './actorSnapshot'
+import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from './saleRecordEvents'
 
 export const RETURN_BULK_ACTION_KIND = 'return.fields.bulk'
 export const RETURN_BULK_LIMIT = 25
@@ -86,7 +87,8 @@ type Member = {
   stock: StockDelta[]
 }
 
-type Snapshot = { version: 1; operationId: string; field: ReturnField; members: Member[] }
+type SaleStatusSnapshot = { saleId: number; before: string; after: string }
+type Snapshot = { version: 1; operationId: string; field: ReturnField; members: Member[]; saleStatuses?: SaleStatusSnapshot[] }
 
 export class ReturnBulkError extends Error {
   constructor(message: string, readonly statusCode: 400 | 403 | 409 = 409) {
@@ -275,10 +277,60 @@ function auditStatement(user: SessionUser, operationId: string, action: string, 
   }
 }
 
-function assertBounded(statements: Statement[], snapshot: Snapshot): void {
-  if (statements.length > 500 || new TextEncoder().encode(JSON.stringify(snapshot)).length > 512000) {
+function assertBounded(statements: Statement[], snapshot: Snapshot, eventsBytes = 0): void {
+  try {
+    assertSaleRecordBatchBounds(statements.length, snapshot, eventsBytes)
+  } catch (_) {
     fail('Selection is too large for one atomic action. Select fewer returns.', 400)
   }
+}
+
+async function saleStatusSnapshots(db: D1Compat, members: Member[]): Promise<SaleStatusSnapshot[]> {
+  const overrides = members.filter((member) => member.changed && member.updateSale && member.saleId && member.scope === 'customer')
+    .map((member) => ({ id: member.id, status: member.after.status }))
+  const saleIds = [...new Set(members.filter((member) => member.changed && member.updateSale && member.saleId).map((member) => member.saleId!))]
+  if (!saleIds.length) return []
+  const effective = `(COALESCE((SELECT json_extract(o.value,'$.status') FROM json_each(@overrides) o
+    WHERE CAST(json_extract(o.value,'$.id') AS INTEGER)=r.id),COALESCE(r.status,'completed')))`
+  const rows = await db.prepare(`
+    SELECT s.id AS saleId,COALESCE(s.sale_status,'completed') AS beforeStatus,
+      CASE
+        WHEN NOT EXISTS(SELECT 1 FROM returns r WHERE r.sale_id=s.id AND ${effective}!='cancelled'
+          AND COALESCE(r.return_scope,'customer')='customer') THEN COALESCE(s.status_before_return,'completed')
+        WHEN NOT EXISTS(
+          SELECT 1 FROM sale_items si WHERE si.sale_id=s.id AND COALESCE((
+            SELECT SUM(ri.quantity) FROM return_items ri JOIN returns r ON r.id=ri.return_id
+            WHERE r.sale_id=s.id AND ${effective}!='cancelled' AND COALESCE(r.return_scope,'customer')='customer'
+              AND (ri.sale_item_id=si.id OR (ri.sale_item_id IS NULL AND ri.product_id=si.product_id))
+          ),0) < si.quantity
+        ) THEN 'returned' ELSE 'partial_return' END AS afterStatus
+    FROM sales s
+    WHERE EXISTS(SELECT 1 FROM json_each(@saleIds) ids WHERE CAST(ids.value AS INTEGER)=s.id)
+    ORDER BY s.id
+  `).all<{ saleId: number; beforeStatus: string; afterStatus: string }>({
+    overrides: JSON.stringify(overrides), saleIds: JSON.stringify(saleIds),
+  })
+  return rows.map((row) => ({ saleId: Number(row.saleId), before: String(row.beforeStatus), after: String(row.afterStatus) }))
+}
+
+function returnSaleRecordEvents(snapshot: Snapshot, generation: number, via: 'apply' | 'undo' | 'redo', user: SessionUser, stamp: string) {
+  return buildSaleRecordEventsInsert((snapshot.saleStatuses || []).flatMap((status) => {
+    const before = via === 'undo' ? status.after : status.before
+    const after = via === 'undo' ? status.before : status.after
+    if (before === after) return []
+    const related = snapshot.members.filter((member) => member.changed && member.saleId === status.saleId).map((member) => member.returnNumber)
+    return [{
+      saleId: status.saleId, sourceKind: 'return_bulk' as const, sourceId: snapshot.operationId,
+      generation, kind: 'status_changed' as const, via,
+      subject: related.join(', ').slice(0, 240) || null,
+      actorId: user.id, actorUsername: actorSnapshot(user), occurredAt: stamp,
+      changes: [{
+        field: 'sale_status' as const,
+        before: { state: 'known_value' as const, value: before },
+        after: { state: 'known_value' as const, value: after },
+      }],
+    }]
+  }))
 }
 
 function permission(user: SessionUser): void {
@@ -435,7 +487,8 @@ export async function applyReturnBulkAction(env: Env, user: SessionUser, raw: Ro
   const { members, guards } = await buildMembers(db, request)
   const operationId = crypto.randomUUID()
   const stamp = new Date().toISOString()
-  const snapshot: Snapshot = { version: 1, operationId, field: request.field, members }
+  const snapshot: Snapshot = { version: 1, operationId, field: request.field, members,
+    saleStatuses: request.field === 'status' ? await saleStatusSnapshots(db, members) : [] }
   const changedIds = members.filter((member) => member.changed).map((member) => member.id)
   const unchangedIds = members.filter((member) => !member.changed).map((member) => member.id)
   const receipt = {
@@ -460,6 +513,8 @@ export async function applyReturnBulkAction(env: Env, user: SessionUser, raw: Ro
   ]
   for (const member of members) statements.push(...memberStatements(member, 1, user, stamp))
   for (const saleId of [...new Set(members.filter((member) => member.changed && member.updateSale && member.saleId).map((member) => member.saleId!))]) statements.push(saleStatusStatement(saleId, stamp))
+  const recordEvents = returnSaleRecordEvents(snapshot, 0, 'apply', user, stamp)
+  if (recordEvents) statements.push(recordEvents.statement)
   statements.push({ sql: 'INSERT INTO undo_snapshots(kind,payload_json,created_by_id,created_by_name) VALUES(@kind,@payload,@actor,@name)', params: { kind: RETURN_BULK_ACTION_KIND, payload: JSON.stringify(snapshot), actor: user.id, name: actorSnapshot(user) } })
   statements.push({ sql: 'UPDATE return_bulk_operations SET snapshot_id=last_insert_rowid() WHERE id=@id', params: { id: operationId } })
   const historyIndex = statements.length
@@ -477,7 +532,7 @@ export async function applyReturnBulkAction(env: Env, user: SessionUser, raw: Ro
   }
   statements.push(auditStatement(user, operationId, 'return_fields_bulk', changedIds.length))
   statements.push({ sql: 'DELETE FROM return_bulk_guards', params: {} })
-  assertBounded(statements, snapshot)
+  assertBounded(statements, snapshot, recordEvents?.eventsBytes || 0)
   try {
     const results = await db.batch(statements)
     return { ...receipt, actionHistoryId: Number(results[historyIndex].meta.last_row_id) }
@@ -508,13 +563,16 @@ export async function replayReturnBulkAction(env: Env, user: SessionUser, direct
   }
   for (const member of snapshot.members) statements.push(...memberStatements(member, directionSign, user, stamp))
   for (const saleId of [...new Set(snapshot.members.filter((member) => member.changed && member.updateSale && member.saleId).map((member) => member.saleId!))]) statements.push(saleStatusStatement(saleId, stamp))
+  const nextGeneration = Number(generation) + 1
+  const recordEvents = returnSaleRecordEvents(snapshot, nextGeneration, direction, user, stamp)
+  if (recordEvents) statements.push(recordEvents.statement)
   for (const member of snapshot.members.filter((candidate) => candidate.changed)) statements.push({ sql: `UPDATE return_bulk_members SET revision=COALESCE((SELECT revision FROM return_write_revisions WHERE return_id=@id),0),sale_revision=CASE WHEN sale_id IS NULL THEN NULL ELSE COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_write_revisions.sale_id=return_bulk_members.sale_id),0) END,stock_fingerprint=${movementFingerprint('@id')} WHERE operation_id=@operation AND return_id=@id`, params: { operation: operation.id, id: member.id } })
   statements.push({ sql: 'UPDATE return_bulk_operations SET generation=generation+1 WHERE id=@operation', params: { operation: operation.id } })
   statements.push({ sql: 'UPDATE undo_snapshots SET status=@status,updated_at=@stamp WHERE id=@id', params: { id: operation.snapshot_id, status: direction === 'undo' ? 'reversed' : 'applied', stamp } })
   statements.push({ sql: "UPDATE action_history SET status=@status,last_error=NULL,updated_at=@stamp,undo_payload=json_set(undo_payload,'$.generation',@generation),redo_payload=json_set(redo_payload,'$.generation',@generation) WHERE id=@id", params: { id: historyId, status: nextStatus, stamp, generation: Number(generation) + 1 } })
   statements.push(auditStatement(user, String(operation.id), `action_${direction}`, snapshot.members.filter((member) => member.changed).length))
   statements.push({ sql: 'DELETE FROM return_bulk_guards', params: {} })
-  assertBounded(statements, snapshot)
+  assertBounded(statements, snapshot, recordEvents?.eventsBytes || 0)
   try {
     await db.batch(statements)
   } catch (error) {
