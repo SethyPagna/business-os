@@ -603,6 +603,15 @@ runTest('nested ProductForm shows session duplicate immediately and availability
     'green availability cannot appear while a lookup is pending')
 })
 
+
+runTest('Existing-product search reuses the controlled scanner without auto-creating', () => {
+  assert.match(modalSource, /import ScanSearchButton from '\.\.\/shared\/ScanSearchButton\.tsx'/)
+  const existing = modalSource.slice(modalSource.indexOf("mode === 'existing'"), modalSource.indexOf("create_products_created"))
+  assert.match(existing, /<ScanSearchButton onDetected=\{\(value\) => setQuery\(String\(value \|\| ''\)\.trim\(\)\)\}/)
+  assert.doesNotMatch(existing, /openItemForm|onCreateProduct|createProduct/)
+  assert.match(modalSource, /findSessionProductDuplicate\(rows, product, editingLineId\)/, 'the scanned result still enters the existing duplicate guard')
+})
+
 runTest('minimize writes the exact scoped draft before the host parks the session', () => {
   assert.match(modalSource, /const preserveAndMinimize = onMinimize \? \(\) => \{\s*writeDraft\(\)\s*onMinimize/)
   assert.match(modalSource, /step, receivedDate, freeGoods, mode, query, submittedItems/)
