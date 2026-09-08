@@ -28,10 +28,12 @@ import {
   SALE_SETTLEMENT_ACTION_KIND,
   buildSaleSettlementAfterState,
   readSaleSettlementState,
+  saleSettlementRecordEvent,
   saleMutationGuard,
   saleSettlementStateStatements,
   type SaleSettlementSnapshot,
 } from '../lib/saleSettlementAction'
+import { assertSaleRecordBatchBounds } from '../lib/saleRecordEvents'
 import { CUSTOMER_REFUND_JOIN, awaitingExpr, getCustomerSalesTotals, getDeliveryContactTotals, getPaymentMethodBreakdown, getSalesDayReport, getSalesPeriodSeries, getSalesTotals, netRefundExpr, netSaleExpr, recognizedExpr, saleStatusExpr } from '../lib/salesAnalytics'
 import { allocateAcrossLots, decrementBatchStockStatement, decrementBatchStockStrictStatement, readFifoLotAvailabilityForCart, type FifoLotTake } from '../lib/productBatches'
 // S4-24b: adding lines to an EXISTING sale. The rules (which statuses accept
@@ -1726,6 +1728,7 @@ app.patch('/:id/status', async (c) => {
   let settlementResponse: Record<string, unknown> | null = null
   let settlementOperationId: string | null = null
   let settlementHistoryIndex = -1
+  let settlementEventBytes = 0
   let settlementLineStatements: Array<{ sql: string; params: Record<string, unknown> }> = []
   let paymentCorrection = false
   if (paymentFieldsSent) {
@@ -1996,6 +1999,20 @@ app.patch('/:id/status', async (c) => {
         stamp: mutationStamp,
       },
     })
+    const recordEvent = saleSettlementRecordEvent({
+      snapshot: settlementSnapshot,
+      kind: paymentCorrection ? 'payment_changed' : 'payment_settled',
+      generation: 0,
+      via: 'apply',
+      before: settlementSnapshot.before,
+      after: settlementSnapshot.after,
+      actorId: user.id,
+      actorUsername: actorSnapshot(user),
+      occurredAt: mutationStamp,
+      requestDigest: settlementDigest,
+    })
+    settlementEventBytes = recordEvent.eventsBytes
+    statements.push(recordEvent.statement)
     statements.push({
       sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
             VALUES(@actor,@actorName,'sale_settlement','sale',@saleId,@details,'sale',@saleId,@details)`,
@@ -2008,6 +2025,10 @@ app.patch('/:id/status', async (c) => {
           paymentCorrection,
           before: settlementSnapshot.before,
           after: settlementSnapshot.after,
+          record_event: {
+            source_kind: 'sale_settlement', source_id: settlementOperationId,
+            generation: 0, sale_id: Number(id),
+          },
         }),
       },
     })
@@ -2015,6 +2036,7 @@ app.patch('/:id/status', async (c) => {
 
   statements.push({ sql: 'DELETE FROM sale_bulk_guards', params: {} })
   if (settlementSnapshot) statements.push({ sql: 'DELETE FROM sale_mutation_guards', params: {} })
+  if (settlementSnapshot) assertSaleRecordBatchBounds(statements.length, settlementSnapshot, settlementEventBytes)
   try {
     const results = await db.batch(statements)
     if (settlementResponse && settlementHistoryIndex >= 0) {

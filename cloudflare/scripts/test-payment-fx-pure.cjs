@@ -11,7 +11,7 @@ const actual = new Set(['actorSnapshot','movementBranchName',
   'db','permissions','saleBulkStatus','saleBulkUpdate','saleTransitions','saleTotals','sqlBinding',
   'productBatches','batchCode','salesStatus','conflictControl','searchMatch','financialPrecision',
   'paymentMethodRegistry','paymentSettlement','saleSettlementAction','saleLineAddition','saleAmendments',
-  'nativeSaleChange','deliveryAmounts','saleRecords','saleCreationSnapshot',
+  'nativeSaleChange','deliveryAmounts','saleRecords','saleRecordEvents','saleCreationSnapshot',
   'receiptNumber','clientTimestamp',
   // N21: routes/sales.ts resolves the display address through this kernel on
   // every write. A stub makes contactDisplayAddress undefined and the route
@@ -191,12 +191,25 @@ async function run() {
   assert.equal(amendments.planDeliveryFeeChange({ saleId: 1, sale: { delivery_fee_usd: 1 }, newFeeUsd: 2.01, exchangeRate: 4200.1234 }).statements[0].params.fee_khr, 8442.248)
   assert.ok(applied.body.actionHistoryId > 0)
   assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM sale_mutation_receipts').get().n, 1)
+  let recordEvents = f.sql.prepare('SELECT * FROM sale_record_events ORDER BY generation').all()
+  assert.equal(recordEvents.length, 1)
+  assert.deepEqual(
+    [recordEvents[0].source_kind, recordEvents[0].generation, recordEvents[0].kind, recordEvents[0].via],
+    ['sale_settlement', 0, 'payment_settled', 'apply'],
+  )
+  assert.deepEqual(JSON.parse(recordEvents[0].changes_json).map(change => change.field),
+    ['payment_method', 'payment_details', 'amount_paid_usd', 'amount_paid_khr', 'change_usd', 'change_khr', 'sale_status'])
+  const settlementAudit = f.sql.prepare("SELECT details FROM audit_logs WHERE action='sale_settlement'").get()
+  assert.deepEqual(JSON.parse(settlementAudit.details).record_event, {
+    source_kind: 'sale_settlement', source_id: recordEvents[0].source_id, generation: 0, sale_id: 1,
+  })
   console.log('PASS settlement canonicalizes active methods, preserves inactive legacy tender, uses latest rate once, and moves no stock')
 
   f.sql.prepare("UPDATE settings SET value='4300' WHERE key='exchange_rate'").run()
   const retry = await f.call('/1/status', request())
   assert.deepEqual(retry, applied)
   assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM sale_mutation_receipts').get().n, 1)
+  assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM sale_record_events').get().n, 1)
   assert.equal((await f.call('/1/status', { ...request(), payment_details: [...request().payment_details, { method: 'ABA Bank', amount_usd: 1 }] })).status, 409)
   const rateChanged = fixture(); seed(rateChanged)
   rateChanged.sql.prepare("UPDATE settings SET value='4300' WHERE key='exchange_rate'").run()
@@ -219,6 +232,13 @@ async function run() {
   assert.equal(f.sql.prepare('SELECT exchange_rate FROM sales WHERE id=1').get().exchange_rate, 4200)
   assert.deepEqual(Object.values(f.sql.prepare('SELECT change_is_actual,change_exchange_rate FROM sales WHERE id=1').get()), [0,null])
   assert.equal(f.sql.prepare('SELECT value FROM settings WHERE key=\'exchange_rate\'').get().value, '4300')
+  recordEvents = f.sql.prepare('SELECT generation,kind,via,changes_json FROM sale_record_events ORDER BY generation').all()
+  assert.deepEqual(recordEvents.map(event => [event.generation,event.kind,event.via]), [
+    [0,'payment_settled','apply'], [1,'payment_settled','undo'], [2,'payment_settled','redo'],
+  ])
+  assert.deepEqual(JSON.parse(recordEvents[1].changes_json)[0], {
+    field: 'payment_method', before: { state: 'known_value', value: 'Legacy Cash + ABA Bank' }, after: { state: 'known_value', value: 'Legacy Cash' },
+  })
   console.log('PASS undo restores exact nullable 4100 snapshot and redo restores captured 4200 without current settings recomputation')
 
   const correction = fixture(); seed(correction)
@@ -273,6 +293,10 @@ async function run() {
     Object.values(correction.sql.prepare('SELECT sale_status,payment_method,amount_paid_usd FROM sales WHERE id=1').get()),
     ['completed','ABA Bank',5],
   )
+  assert.deepEqual(
+    correction.sql.prepare('SELECT generation,kind,via FROM sale_record_events ORDER BY generation').all(),
+    [{ generation: 0, kind: 'payment_changed', via: 'apply' }, { generation: 1, kind: 'payment_changed', via: 'undo' }, { generation: 2, kind: 'payment_changed', via: 'redo' }],
+  )
   console.log('PASS completed-to-awaiting marker authorizes one atomic payment replacement with receipt, stock invariance, undo, and redo')
 
   const raced = fixture(); seed(raced)
@@ -281,6 +305,7 @@ async function run() {
   assert.equal(conflict.status, 409, JSON.stringify(conflict))
   assert.equal(raced.sql.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status, 'awaiting_payment')
   assert.equal(raced.sql.prepare('SELECT COUNT(*) n FROM sale_mutation_receipts').get().n, 0)
+  assert.equal(raced.sql.prepare('SELECT COUNT(*) n FROM sale_record_events').get().n, 0)
   console.log('PASS stale matched sale/settings conflict is all-or-none')
 
   const amended = fixture(); seed(amended)

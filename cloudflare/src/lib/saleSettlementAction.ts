@@ -7,6 +7,12 @@ import { financialCalculationValue } from './financialPrecision'
 import type { SettlementPlan } from './paymentSettlement'
 import { normalizeSearchText } from './searchMatch'
 import { actorSnapshot } from './actorSnapshot'
+import {
+  buildSaleRecordEventsInsert,
+  assertSaleRecordBatchBounds,
+  type SaleRecordEventStatement,
+} from './saleRecordEvents'
+import type { SaleRecordChange, SaleRecordValueState } from './saleRecords'
 
 export const SALE_SETTLEMENT_ACTION_KIND = 'sale.settlement'
 
@@ -50,6 +56,73 @@ export type SaleSettlementSnapshot = {
   receiptNumber: string | null
   before: SaleSettlementState
   after: SaleSettlementState
+}
+
+function recordState(value: unknown): SaleRecordValueState {
+  return value === null || value === undefined
+    ? { state: 'known_none' }
+    : { state: 'known_value', value }
+}
+
+function paymentDetailsState(value: unknown): SaleRecordValueState {
+  if (value === null || value === undefined || value === '') return { state: 'known_none' }
+  try {
+    const parsed = typeof value === 'string' ? JSON.parse(value) : value
+    if (!Array.isArray(parsed) || parsed.length > 20) return { state: 'unknown' }
+    const normalized = parsed.map((entry) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new Error('invalid')
+      const row = entry as Record<string, unknown>
+      const method = String(row.method || '').trim()
+      const amountUsd = Number(row.amount_usd)
+      const amountKhr = Number(row.amount_khr)
+      if (!method || !Number.isFinite(amountUsd) || !Number.isFinite(amountKhr)) throw new Error('invalid')
+      return { method, amount_usd: amountUsd, amount_khr: amountKhr }
+    })
+    return { state: 'known_value', value: normalized }
+  } catch (_) {
+    return { state: 'unknown' }
+  }
+}
+
+function settlementChanges(before: SaleSettlementState, after: SaleSettlementState): SaleRecordChange[] {
+  const fields = ['payment_method', 'payment_details', 'amount_paid_usd', 'amount_paid_khr', 'change_usd', 'change_khr', 'sale_status'] as const
+  const changes: SaleRecordChange[] = []
+  for (const field of fields) {
+    const left = field === 'payment_details' ? paymentDetailsState(before[field]) : recordState(before[field])
+    const right = field === 'payment_details' ? paymentDetailsState(after[field]) : recordState(after[field])
+    if (JSON.stringify(left) !== JSON.stringify(right)) changes.push({ field, before: left, after: right })
+  }
+  return changes
+}
+
+export function saleSettlementRecordEvent(input: {
+  snapshot: SaleSettlementSnapshot
+  kind: 'payment_settled' | 'payment_changed'
+  generation: number
+  via: 'apply' | 'undo' | 'redo'
+  before: SaleSettlementState
+  after: SaleSettlementState
+  actorId: number
+  actorUsername: string | null
+  occurredAt: string
+  requestDigest?: string | null
+}): { statement: SaleRecordEventStatement; eventsBytes: number } {
+  const built = buildSaleRecordEventsInsert([{
+    saleId: input.snapshot.saleId,
+    sourceKind: 'sale_settlement',
+    sourceId: input.snapshot.operationId,
+    generation: input.generation,
+    kind: input.kind,
+    via: input.via,
+    subject: input.snapshot.receiptNumber,
+    actorId: input.actorId,
+    actorUsername: input.actorUsername,
+    occurredAt: input.occurredAt,
+    changes: settlementChanges(input.before, input.after),
+    requestDigest: input.requestDigest,
+  }])
+  if (!built) throw new Error('Settlement did not produce a Sales Records event.')
+  return built
 }
 
 function n(value: unknown): number {
@@ -181,7 +254,7 @@ export function saleMutationGuard(predicate: string, params: Record<string, unkn
   }
 }
 
-function replayAuditStatement(user: SessionUser, saleId: number, direction: 'undo' | 'redo', operationId: string): Statement {
+function replayAuditStatement(user: SessionUser, saleId: number, direction: 'undo' | 'redo', operationId: string, generation: number): Statement {
   return {
     sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
           VALUES(@userId,@userName,@action,'sale',@saleId,@details,'sale',@saleId,@details)`,
@@ -190,7 +263,10 @@ function replayAuditStatement(user: SessionUser, saleId: number, direction: 'und
       userName: actorSnapshot(user),
       action: `action_${direction}`,
       saleId: String(saleId),
-      details: JSON.stringify({ applier: SALE_SETTLEMENT_ACTION_KIND, operationId, direction }),
+      details: JSON.stringify({
+        applier: SALE_SETTLEMENT_ACTION_KIND, operationId, direction,
+        record_event: { source_kind: 'sale_settlement', source_id: operationId, generation, sale_id: saleId },
+      }),
     },
   }
 }
@@ -243,6 +319,20 @@ export async function replaySaleSettlementAction(
   const expectedHistoryStatus = direction === 'undo' ? 'undoable' : 'redoable'
   const nextHistoryStatus = direction === 'undo' ? 'redoable' : 'undoable'
   const stamp = new Date().toISOString()
+  const nextGeneration = Number(generation) + 1
+  let correction = false
+  try { correction = JSON.parse(String(operation.request_json || '{}')).replace_existing_payment === true } catch (_) {}
+  const recordEvent = saleSettlementRecordEvent({
+    snapshot: { version: 1, operationId: String(operation.id), saleId, receiptNumber: null, before, after },
+    kind: correction ? 'payment_changed' : 'payment_settled',
+    generation: nextGeneration,
+    via: direction,
+    before: expected,
+    after: target,
+    actorId: user.id,
+    actorUsername: actorSnapshot(user),
+    occurredAt: stamp,
+  })
   const statements: Statement[] = [
     { sql: 'DELETE FROM sale_mutation_guards', params: {} },
     saleMutationGuard(`EXISTS(
@@ -252,6 +342,7 @@ export async function replaySaleSettlementAction(
         AND h.status=@historyStatus
     )`, { operation: operation.id, history: historyId, generation, historyStatus: expectedHistoryStatus }),
     ...saleSettlementStateStatements(saleId, target, stamp),
+    recordEvent.statement,
     {
       sql: `UPDATE sale_mutation_receipts SET generation=generation+1,
             sale_revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@saleId),0),
@@ -263,11 +354,12 @@ export async function replaySaleSettlementAction(
             undo_payload=json_set(undo_payload,'$.generation',@nextGeneration),
             redo_payload=json_set(redo_payload,'$.generation',@nextGeneration)
             WHERE id=@history`,
-      params: { status: nextHistoryStatus, stamp, nextGeneration: Number(generation) + 1, history: historyId },
+      params: { status: nextHistoryStatus, stamp, nextGeneration, history: historyId },
     },
-    replayAuditStatement(user, saleId, direction, String(operation.id)),
+    replayAuditStatement(user, saleId, direction, String(operation.id), nextGeneration),
     { sql: 'DELETE FROM sale_mutation_guards', params: {} },
   ]
+  assertSaleRecordBatchBounds(statements.length, { before, after }, recordEvent.eventsBytes)
   try {
     await db.batch(statements)
   } catch (error) {
