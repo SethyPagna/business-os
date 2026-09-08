@@ -1,0 +1,11 @@
+{
+  "note": "Optional mirrors for reconciliation; public FAQ already uses these inline EN/KM fallbacks. Shared packs were not edited.",
+  "en": {
+    "membershipPointsFaqQuestion": "Are membership points available?",
+    "membershipPointsFaqAnswer": "Membership points are not enabled yet. Earning and redeeming points are currently unavailable."
+  },
+  "km": {
+    "membershipPointsFaqQuestion": "តើពិន្ទុសមាជិកអាចប្រើបានទេ?",
+    "membershipPointsFaqAnswer": "ពិន្ទុសមាជិកមិនទាន់បានបើកដំណើរការទេ។ បច្ចុប្បន្ន មិនទាន់អាចទទួល ឬប្តូរយកពិន្ទុបានទេ។"
+  }
+}

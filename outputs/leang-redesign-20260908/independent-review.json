@@ -1,0 +1,196 @@
+{
+  "schema_version": 1,
+  "task_id": "leang-redesign-independent-review-20260908",
+  "agent": {
+    "provider": "codex",
+    "role": "verifier",
+    "session_id": "redesign_review"
+  },
+  "status": "completed",
+  "summary": "CERTIFIED WITH EXCEPTIONS: independent review of the integrated five-commit redesign found no blocking defects. Source and focused executed checks pass. Browser metrics are supplied by the lead; final package build and production verification are outside this certificate.",
+  "base_sha": "6dbb8a8e3029e220cbec650051a4d7c37a6da2c9",
+  "head_sha": "c707d53050ef4ab1e2cd62a2a687367085277eef",
+  "changes": [],
+  "workspace": {
+    "branch": "codex/leang-redesign-20260908",
+    "worktree": "C:/Users/mrkl6/Downloads/bos-leang-redesign-20260908",
+    "dirty_before": [
+      "frontend/src/App.tsx",
+      "frontend/src/components/catalog/CatalogPreviewSurface.tsx",
+      "frontend/src/components/catalog/CatalogProductsSection.tsx",
+      "frontend/src/components/catalog/CatalogSecondaryTabs.tsx",
+      "frontend/src/components/catalog/ProductDetailFlyout.tsx",
+      "frontend/src/components/catalog/PublicCatalogPage.tsx",
+      "frontend/src/components/catalog/legal/LegalPages.tsx",
+      "frontend/tests/portalLegalFocus.test.ts",
+      "frontend/src/components/catalog/PortalSocialLinks.tsx (untracked)",
+      "outputs/leang-redesign-20260908/ (untracked)"
+    ],
+    "dirty_after": [
+      "frontend/public/runtime-noise-guard.js (generated build/line-ending dirt)",
+      "frontend/public/sw.js (generated build/line-ending dirt)",
+      "frontend/public/theme-bootstrap.js (generated build/line-ending dirt)",
+      "outputs/leang-redesign-20260908/ (untracked)",
+      "Source, tests and vite config exactly match c707d530. Reviewer edited no source."
+    ]
+  },
+  "evidence": [
+    {
+      "claim": "The toolbar is rendered into the sticky section navigation only while Products is mounted.",
+      "source": "observed source",
+      "locator": "frontend/src/components/catalog/CatalogProductsSection.tsx:488; CatalogPreviewSurface.tsx:551,582; PublicCatalogPage.tsx:1914",
+      "observed": "Post-commit effect resolves stable host; React createPortal shares component state and unmounts with Products; slot remains in navigation when changing tabs. No early return precedes new hooks."
+    },
+    {
+      "claim": "Gallery hydration uses only returned product IDs and retains stock privacy.",
+      "source": "observed source and executed runtime",
+      "locator": "cloudflare/src/routes/portal.ts:566-589,634,2086; cloudflare/scripts/test-portal-gallery-runtime.cjs",
+      "observed": "Exact IDs, ordered images, normalized/deduplicated paths, configured image cap, fallback image, chunked reads. Six Hono/SQLite checks pass including hidden products, stock redaction, fuzzy search and105-row family identity."
+    },
+    {
+      "claim": "Direct policy links retain opener focus and modal lifecycle in source.",
+      "source": "observed source; source assertion test",
+      "locator": "frontend/src/components/catalog/legal/LegalPages.tsx:165,239,298,340",
+      "observed": "Ordinary clicks preserve focused opener; modifier clicks retain navigation; close restores connected opener with main fallback; effect locks body/document, traps Tab, restores inert state. Test examines source only."
+    },
+    {
+      "claim": "Admin scroll visibility and style implement stated source behavior.",
+      "source": "observed source; executed pure helpers",
+      "locator": "frontend/src/App.tsx:1323-1370; frontend/src/components/shared/globalScroll.ts",
+      "observed": "Controls hidden until visible scroll target exceeds220; capture scroll/resize plus body mutation observer; cleanup removes listeners and observer;32px translucent rounded-lg light/dark controls. Pure target tests pass, mounted observer not executed."
+    },
+    {
+      "claim": "Banner removal does not remove backend seller readiness enforcement.",
+      "source": "observed source diff",
+      "locator": "frontend/src/components/catalog/CatalogPreviewSurface.tsx:585; cloudflare/src/routes/portal.ts:837,944,1532",
+      "observed": "Only readiness banner removed; backend AI/service readiness checks untouched. Existing gallery-only backend diff does not alter permissions, import, bulk, audit, undo, offline identity or mutations."
+    },
+    {
+      "claim": "FAQ fallback copy and detail hierarchy are present.",
+      "source": "observed source",
+      "locator": "frontend/src/components/catalog/CatalogSecondaryTabs.tsx:675-678; ProductDetailFlyout.tsx:105,127",
+      "observed": "EN/KM fallback notice says earning/redemption unavailable; darker labels and bordered sections separate detail headings/content. No business configuration is enabled."
+    },
+    {
+      "claim": "Automatic refresh prevention is bounded.",
+      "source": "observed source",
+      "locator": "frontend/src/components/catalog/PublicCatalogPage.tsx:877,1777; frontend/src/utils/lazyImport.ts:35-49; frontend/src/public-runtime/theme-bootstrap.ts:79-93",
+      "observed": "Translation stall now reports failure and detail flyout disables pull refresh; existing failed-code-download paths can still trigger location.replace/reload."
+    },
+    {
+      "claim": "Integrated source matches frozen commit.",
+      "source": "observed Git",
+      "locator": "git rev-parse HEAD; git diff --name-only c707d530 -- frontend/src frontend/tests frontend/vite.config.ts cloudflare/src cloudflare/scripts",
+      "observed": "HEAD c707d53050ef4ab1e2cd62a2a687367085277eef; no diff for reviewed source/tests/config."
+    },
+    {
+      "claim": "New footer social row participates in legal modal inert lifecycle.",
+      "source": "observed integrated source",
+      "locator": "frontend/src/components/catalog/legal/LegalPages.tsx:349",
+      "observed": "Background selector now includes [data-portal-social-links=\"true\"]; exact prior inert state is captured/restored."
+    },
+    {
+      "claim": "Product detail has an opaque reading surface with sufficient CSS selector precedence.",
+      "source": "observed integrated source",
+      "locator": "frontend/src/styles/public-portal.css:388-398; ProductDetailFlyout.tsx:242",
+      "observed": "Dedicated product-detail class sets white and #171717 opaque background with important; dark selectors match or exceed earlier broad .bg-white overrides and occur later."
+    },
+    {
+      "claim": "Admin scroll hook and translation failure behavior were executed independently.",
+      "source": "observed test execution",
+      "locator": "frontend/tests/leangRedesign.test.ts",
+      "observed": "Extracted actual App component hooks: hidden at0, shown300, hidden after target change0, listener/observer cleanup. Actual public translation effect:20 failed attempts, failure state, zero reloads; detail-open pull gate false. Mock React hooks/browser services; not mounted React DOM."
+    },
+    {
+      "claim": "Lead supplied responsive and interactive browser observations.",
+      "source": "supplied lead message, not independently observed and not raw CUA output",
+      "locator": "collaboration NEW_TASK final implementation freeze c707d530",
+      "observed": "Reported375px sticky nav top4/bottom125 with search descendant;320px filter bounds[9,311]/documentWidth320;1280px contained/no sidebar; policy Escape focus returns Privacy Policy/query removed; both social rows inert; gallery second thumbnail current after Next; dark background rgb23,23,23."
+    }
+  ],
+  "verification": [
+    {
+      "command": "node scripts/test-portal-gallery-runtime.cjs",
+      "scope": "cloudflare, initial attempt without dependency path",
+      "exit_code": 1,
+      "expected": "Execute gallery runtime checks",
+      "observed": "Could not resolve typescript; no runtime assertion executed."
+    },
+    {
+      "command": "$env:NODE_PATH='C:/Users/mrkl6/Downloads/business-os-v1/cloudflare/node_modules'; node scripts/test-portal-gallery-runtime.cjs",
+      "scope": "cloudflare, current committed gallery code",
+      "exit_code": 0,
+      "expected": "All public gallery runtime checks pass",
+      "observed": "6/6 PASS with actual Hono route and SQLite SQL; provider/cache/auth mocked."
+    },
+    {
+      "command": "node tests/portalLegalFocus.test.ts",
+      "scope": "frontend, current dirty UI source",
+      "exit_code": 0,
+      "expected": "Focus source assertions pass",
+      "observed": "PASS; source-shape coverage, not mounted browser behavior."
+    },
+    {
+      "command": "node tests/globalScrollControls.test.ts; node tests/globalScroll.test.ts",
+      "scope": "frontend scroll helper functions",
+      "exit_code": 0,
+      "expected": "Scroll target and top/bottom calculations pass",
+      "observed": "Both commands printed PASS; no mounted GlobalScrollControls observer coverage."
+    },
+    {
+      "command": "git diff --check",
+      "scope": "current working diff",
+      "exit_code": 0,
+      "expected": "No whitespace errors",
+      "observed": "No errors; LF-to-CRLF warnings only."
+    },
+    {
+      "command": "node tests/leangRedesign.test.ts",
+      "scope": "frontend frozen c707d530 actual extracted component/effect code with mocked runtime",
+      "exit_code": 0,
+      "expected": "Scroll lifecycle and refresh guard behaviors pass",
+      "observed": "PASS admin scroll lifecycle and stalled translation/detail refresh guards."
+    },
+    {
+      "command": "node tests/portalLegalFocus.test.ts",
+      "scope": "frontend frozen c707d530 source-shape contracts",
+      "exit_code": 0,
+      "expected": "Legal focus/lifecycle source checks pass",
+      "observed": "PASS legal reader traps modal focus, locks background interaction, and restores focus after close."
+    },
+    {
+      "command": "node tests/portalCatalogDisplay.test.ts",
+      "scope": "frontend frozen c707d530 mixed pure/helper and source-shape display contracts",
+      "exit_code": 0,
+      "expected": "Catalogue display contracts pass",
+      "observed": "26 PASS; no failures."
+    },
+    {
+      "command": "git diff --check 6dbb8a8e..c707d530",
+      "scope": "integrated five-commit diff",
+      "exit_code": 0,
+      "expected": "No whitespace errors",
+      "observed": "No output/errors."
+    }
+  ],
+  "risks": [
+    "Existing lazyImport/theme-bootstrap failed-code-download recovery can still reload automatically; refresh correction is limited to translation stalls and detail pull refresh.",
+    "Browser observations are supplied as a lead summary, not independently observed or raw CUA output in this reviewer session.",
+    "Admin test executes actual extracted hooks against mocked services; does not measure full app MutationObserver performance or React DOM behavior."
+  ],
+  "blockers": [],
+  "not_done": [
+    "Lead final exact-commit package build still running at handoff; reviewer did not run package typechecks/i18n/build or full suites.",
+    "No independent mounted browser/visual/Khmer/real-device testing; lead reports responsive and interactive browser coverage.",
+    "No production deployment, image inventory or publication business-fact verification.",
+    "No source repairs."
+  ],
+  "handoff": "No blocking review findings for c707d530. Lead may reconcile this certificate with final package gates and durable raw browser evidence; release coordination remains with the other active session. Do not claim all automatic code-recovery reloads removed or production deployed.",
+  "commits": [
+    "6215281243e60aabf4f873d4433c60962ef16d1e",
+    "102f2268",
+    "f377d2da",
+    "6b165ac5",
+    "c707d53050ef4ab1e2cd62a2a687367085277eef"
+  ]
+}

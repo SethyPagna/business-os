@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "task_id": "leang-gallery",
+  "agent": {
+    "provider": "codex",
+    "role": "implementation_worker",
+    "session_id": "gallery_fix"
+  },
+  "status": "completed",
+  "summary": "Public bootstrap/catalog/search now hydrate each product's saved gallery, sharing the existing AI gallery behavior.",
+  "base_sha": "6dbb8a8e3029e220cbec650051a4d7c37a6da2c9",
+  "head_sha": "9fae6a2701252b6a4c80fe780a73c31b48c6c471",
+  "workspace": {
+    "branch": "codex/leang-gallery-20260908",
+    "worktree": "C:/Users/mrkl6/Downloads/bos-leang-gallery-20260908",
+    "dirty_before": [],
+    "dirty_after": []
+  },
+  "changes": [
+    "cloudflare/src/routes/portal.ts: extract attachPortalImageGallery with exact product IDs and <=100 bindings per read, sorted/deduplicated/sanitized galleries capped at ADMIN_MAX_IMAGES_PER_PRODUCT; hydrate public rows after stock redaction; reuse helper for AI catalog.",
+    "cloudflare/scripts/test-portal-gallery-runtime.cjs: add actual Hono/SQLite route tests for bootstrap/catalog/search, order/cap/fallback/empty/identity/stock redaction, fuzzy search and >100-row family chunking."
+  ],
+  "commits": [
+    "9fae6a2701252b6a4c80fe780a73c31b48c6c471"
+  ],
+  "evidence": [
+    {
+      "claim": "Gallery hydration uses exact product ids and preserves sanitizer, sort order, fallback and existing limit.",
+      "source": "repository",
+      "locator": "cloudflare/src/routes/portal.ts:566",
+      "observed": "selectInChunks(ids,0), ORDER BY sort_order ASC,id ASC; sanitizeMediaList(...).slice(0,ADMIN_MAX_IMAGES_PER_PRODUCT)."
+    },
+    {
+      "claim": "Public catalogue and search preserve inventory redaction before image attachment.",
+      "source": "repository/runtime test",
+      "locator": "cloudflare/src/routes/portal.ts:633;2085",
+      "observed": "Both paths call attachPortalStockStatus then attachPortalImageGallery; tests assert raw stock quantities and thresholds absent."
+    },
+    {
+      "claim": "Regression test detects original missing-gallery bug.",
+      "source": "baseline negative control",
+      "locator": "cloudflare/scripts/test-portal-gallery-runtime.cjs:108 with portal.ts read from git show 6dbb8a8e",
+      "observed": "Exit1: image_gallery undefined instead of expected five saved images."
+    }
+  ],
+  "verification": [
+    {
+      "command": "node scripts/test-portal-gallery-runtime.cjs",
+      "scope": "cloudflare",
+      "exit_code": 0,
+      "expected": "All public gallery runtime cases pass.",
+      "observed": "6 checks passed, including >100-row family and fuzzy search."
+    },
+    {
+      "command": "node scripts/test-portal-catalog-sort-pure.cjs",
+      "scope": "cloudflare",
+      "exit_code": 0,
+      "expected": "Existing ordering and family pagination unchanged.",
+      "observed": "4 checks passed."
+    },
+    {
+      "command": "node scripts/test-portal-stock-redaction-pure.cjs",
+      "scope": "cloudflare",
+      "exit_code": 0,
+      "expected": "Public stock boundary unchanged.",
+      "observed": "6 pins passed."
+    },
+    {
+      "command": "node scripts/test-product-image-limit-pure.cjs",
+      "scope": "cloudflare",
+      "exit_code": 0,
+      "expected": "Existing normal/admin image limits unchanged.",
+      "observed": "Passed normal=3 and admin=5 checks."
+    },
+    {
+      "command": "npm run typecheck",
+      "scope": "cloudflare",
+      "exit_code": 0,
+      "expected": "Worker compiles.",
+      "observed": "tsc --noEmit passed."
+    },
+    {
+      "command": "git diff --check",
+      "scope": "isolated worktree",
+      "exit_code": 0,
+      "expected": "No whitespace errors.",
+      "observed": "No whitespace errors; Git emitted existing LF-to-CRLF normalization warning."
+    },
+    {
+      "command": "node via stdin: override fs.readFileSync only for src/routes/portal.ts with git show 6dbb8a8e:cloudflare/src/routes/portal.ts, then require ./scripts/test-portal-gallery-runtime.cjs",
+      "scope": "baseline negative control",
+      "exit_code": 1,
+      "expected": "New runtime regression fails on base source.",
+      "observed": "First bootstrap gallery assertion failed: undefined instead of five images."
+    }
+  ],
+  "risks": [
+    "The existing sanitizer normalizes/deduplicates paths; this change deliberately preserves its current semantics.",
+    "No production gallery inventory or live browser behavior was checked in this bounded task."
+  ],
+  "blockers": [],
+  "not_done": [
+    "Deployment, remote writes and migrations.",
+    "Other storefront UI, FAQ, refresh, admin scroll and products.ts fixes belong to other owners."
+  ],
+  "handoff": "Cherry-pick 9fae6a2701252b6a4c80fe780a73c31b48c6c471 onto the coordinator candidate; independently verify the integrated storefront."
+}
