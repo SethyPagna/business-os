@@ -52,7 +52,7 @@ function productLine(value: unknown, fmtUSD: FormatUsd): string {
   return line
 }
 
-function paymentLine(value: unknown, fmtUSD: FormatUsd): string {
+function paymentLine(value: unknown, fmtUSD: FormatUsd, fmtKHR: FormatKhr): string {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return fallbackLine(value)
   const row = value as StructuredRow
   const method = String(row.method ?? row.payment_method ?? '').trim()
@@ -61,7 +61,7 @@ function paymentLine(value: unknown, fmtUSD: FormatUsd): string {
   const parts: string[] = []
   if (method) parts.push(method)
   if (usd !== null) parts.push(fmtUSD(usd))
-  if (khr !== null && (khr !== 0 || usd === null)) parts.push(`${khr.toLocaleString('en-US')}៛`)
+  if (khr !== null && (khr !== 0 || usd === null)) parts.push(fmtKHR(khr))
   return parts.length ? parts.join(' · ') : fallbackLine(value)
 }
 
@@ -116,7 +116,7 @@ export function formatSaleRecordValueLinesLocalized(
   }
   if (field === 'payment_details') {
     const rows = Array.isArray(parsed) ? parsed : parsed && typeof parsed === 'object' ? [parsed] : null
-    return rows ? rows.map((row) => paymentLine(row, fmtUSD)) : [fallbackLine(value, label)]
+    return rows ? rows.map((row) => paymentLine(row, fmtUSD, fmtKHR)) : [fallbackLine(value, label)]
   }
   if (field === 'payment') {
     const row = objectRow(parsed)
@@ -125,7 +125,7 @@ export function formatSaleRecordValueLinesLocalized(
     const method = String(row.method ?? '').trim()
     const details = Array.isArray(row.details) ? row.details : []
     if (method && details.length === 0) lines.push(method)
-    lines.push(...details.map((detail) => paymentLine(detail, fmtUSD)))
+    lines.push(...details.map((detail) => paymentLine(detail, fmtUSD, fmtKHR)))
     const usd = finiteNumber(row.amount_paid_usd)
     const khr = finiteNumber(row.amount_paid_khr)
     const changeUsd = finiteNumber(row.change_usd)

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import {
-  SALE_RECORD_KINDS, SALE_RECORD_KIND_KEYS, filterSaleRecords, normalizeSaleRecordsResponse,
+  SALE_RECORD_FIELD_RULES, SALE_RECORD_KINDS, SALE_RECORD_KIND_KEYS, filterSaleRecords, normalizeSaleRecordsResponse,
   saleRecordFieldRows, saleRecordKind, saleRecordKindCounts, saleRecordsCount,
   type SaleRecord, type SaleRecordValue,
 } from '../src/utils/saleRecords.ts'
@@ -92,6 +92,30 @@ test('money, KHR, quantity and composite fields use friendly render contracts', 
   const payment = formatSaleRecordValueLinesLocalized('payment', { method: 'ABA', details: [{ method: 'ABA', amount_usd: 10, amount_khr: 0 }], amount_paid_usd: 10, amount_paid_khr: 0, change_usd: 0, change_khr: 0 }, usd, khr, tr)
   assert.ok(payment.includes('ABA · $10.00'))
   assert.doesNotMatch(payment.join(' '), /amount_paid_usd|payment_details|\{|\}/)
+})
+
+test('every typed field label exists in both real language packs', () => {
+  const en = JSON.parse(read('../src/lang/en.json')) as Record<string, unknown>
+  const km = JSON.parse(read('../src/lang/km.json')) as Record<string, unknown>
+  const keys = [...new Set(Object.values(SALE_RECORD_FIELD_RULES).map((rule) => rule.key))]
+  for (const key of keys) {
+    assert.equal(typeof en[key], 'string', `English is missing ${key}`)
+    assert.ok(String(en[key]).trim(), `English ${key} is blank`)
+    assert.equal(typeof km[key], 'string', `Khmer is missing ${key}`)
+    assert.ok(String(km[key]).trim(), `Khmer ${key} is blank`)
+    assert.notEqual(km[key], en[key], `Khmer ${key} must not fall back to English`)
+  }
+})
+
+test('payment detail KHR uses the injected formatter in direct and nested payment shapes', () => {
+  const usd = (n: number | string) => `$${Number(n).toFixed(2)}`
+  const calls: Array<number | string> = []
+  const khr = (n: number | string) => { calls.push(n); return `KHR:${n}` }
+  const direct = formatSaleRecordValueLinesLocalized('payment_details', [{ method: 'Cash', amount_khr: 40000 }], usd, khr)
+  const nested = formatSaleRecordValueLinesLocalized('payment', { details: [{ method: 'ABA', amount_khr: 80000 }] }, usd, khr)
+  assert.deepEqual(direct, ['Cash · KHR:40000'])
+  assert.deepEqual(nested, ['ABA · KHR:80000'])
+  assert.deepEqual(calls, [40000, 80000])
 })
 
 test('filters and counts use closed normalized kinds', () => {
