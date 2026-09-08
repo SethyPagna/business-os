@@ -2,6 +2,7 @@ import { apiFetch, cacheInvalidate, route } from './http.ts'
 import { ensureClientRequestId } from './requestIds.ts'
 import { withExpectedUpdatedAt, type ExpectedUpdatedAtPayload } from './expectedUpdatedAt.ts'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
+import { selectedConflictCanContinueAutomatically, type SelectedConflictPreviewCaseRequest, type SelectedConflictStockChoice } from '../utils/selectedConflictMerge.ts'
 
 type ProductPayload = ExpectedUpdatedAtPayload
 
@@ -34,6 +35,118 @@ export type MergeDuplicateProductsOptions = { requestId?: string; signal?: Abort
 
 const MERGE_DUPLICATES_CHUNK_TIMEOUT_MS = 120_000
 export const MERGE_DUPLICATES_PREVIEW_TIMEOUT_MS = 30_000
+export const SELECTED_CONFLICT_MERGE_TIMEOUT_MS = 120_000
+
+export type SelectedConflictMergeProductState = {
+  id: number
+  name: string | null
+  barcode: string | null
+  is_active: number | boolean
+  is_group: number | boolean
+  stock_quantity: number
+  image_path: string | null
+}
+
+export type SelectedConflictMergeBranchState = {
+  branch_id: number
+  branch_name: string | null
+  keeper_quantity: number
+  discarded_quantity: number
+  keeper_lot_count: number
+  discarded_lot_count: number
+}
+
+export type SelectedConflictMergeProjectedBranchState = {
+  branch_id: number
+  branch_name: string | null
+  quantity: number
+  lot_count: number
+}
+
+export type SelectedConflictMergeMoneyState = {
+  cost_price_usd?: number | null
+  cost_price_khr?: number | null
+  selling_price_usd?: number | null
+  selling_price_khr?: number | null
+  wholesale_price_usd?: number | null
+  wholesale_price_khr?: number | null
+}
+
+export type SelectedConflictMergeImageState = { primary: string | null; gallery: string[] }
+
+export type SelectedConflictMergePreviewCase = {
+  ordinal: number
+  case_key: string
+  keep_id: number
+  merge_id: number
+  needs_stock_choice: boolean
+  state_digest: string
+  before: {
+    keeper: SelectedConflictMergeProductState
+    discarded: SelectedConflictMergeProductState
+    stock: SelectedConflictMergeBranchState[]
+    costs: { keeper: SelectedConflictMergeMoneyState; discarded: SelectedConflictMergeMoneyState }
+    prices: { keeper: SelectedConflictMergeMoneyState; discarded: SelectedConflictMergeMoneyState }
+    images: { keeper: SelectedConflictMergeImageState; discarded: SelectedConflictMergeImageState }
+  }
+  after_by_stock_choice: Record<SelectedConflictStockChoice, {
+    stock: SelectedConflictMergeProjectedBranchState[]
+    costs: SelectedConflictMergeMoneyState
+    prices: SelectedConflictMergeMoneyState
+    images: SelectedConflictMergeImageState
+  }>
+  blocked: null | { code: string; message: string; operation_id?: string }
+}
+
+export type SelectedConflictMergePreviewResult = {
+  success: true
+  manifest_version: 1
+  manifest_digest: string
+  cases: SelectedConflictMergePreviewCase[]
+  skipped: Array<{ ordinal: number; case_key: string; product_ids: number[]; code: string; message: string }>
+}
+
+export type SelectedConflictMergeApplyBody = {
+  client_request_id: string
+  manifest_version: 1
+  manifest_digest: string
+  cases: Array<{
+    ordinal: number
+    case_key: string
+    keep_id: number
+    merge_id: number
+    state_digest: string
+    stock: SelectedConflictStockChoice | null
+  }>
+}
+
+export type SelectedConflictMergeApplyResult = {
+  success: true
+  complete: boolean
+  blockedOnly: boolean
+  interrupted: boolean
+  interruptionCode: null | 'merge_budget_reached' | 'merge_infrastructure_interrupted' | 'merge_history_pending' | 'merge_history_unavailable' | 'merge_state_conflict'
+  madeProgress: boolean
+  requestId: string
+  manifestDigest: string
+  committedCases: Array<{
+    caseKey: string
+    keptId: number
+    mergedId: number
+    stockDisposition: SelectedConflictStockChoice | null
+    operationId: string
+    actionHistoryId: number | null
+    undoReady: boolean
+    undoAvailability: 'ready' | 'pending' | 'unavailable'
+  }>
+  processedCaseKeys: string[]
+  refusals: Array<{ caseKey: string; keeperId: number; mergedId: number; code: string; error: string }>
+  pendingCaseKeys: string[]
+  remainingCaseCount: number | null
+  maxAdditionalRequests: number | null
+  undoPendingOperationIds: string[]
+  undoUnavailableOperationIds: string[]
+}
 
 function getDevicePayload(): ProductPayload {
   return { ...getClientDeviceInfo() }
@@ -194,6 +307,87 @@ export function mergePossiblySameProducts(
     null,
     true,
   )
+}
+
+// Combined review for a reviewer-selected set of exact two-row conflicts.
+// Both calls deliberately bypass route(): preview is read-only and the apply
+// request must never enter the offline replay queue because its manifest is a
+// point-in-time authorization. A fresh server preview is required after any
+// uncertain outcome or manual resume.
+export function previewSelectedConflictMerges(
+  cases: SelectedConflictPreviewCaseRequest[],
+  options: { signal?: AbortSignal } = {},
+): Promise<SelectedConflictMergePreviewResult> {
+  return apiFetch(
+    'POST',
+    '/api/products/possible-duplicates/merge-batch/preview',
+    { cases },
+    MERGE_DUPLICATES_PREVIEW_TIMEOUT_MS,
+    { signal: options.signal },
+  ) as Promise<SelectedConflictMergePreviewResult>
+}
+
+export function makeSelectedConflictMergeApplyBody(
+  preview: SelectedConflictMergePreviewResult,
+  choices: Readonly<Record<string, SelectedConflictStockChoice | undefined>>,
+  clientRequestId: string,
+): SelectedConflictMergeApplyBody {
+  const requestId = String(clientRequestId || '').trim()
+  if (!requestId) throw new Error('A stable client request ID is required.')
+  return {
+    client_request_id: requestId,
+    manifest_version: preview.manifest_version,
+    manifest_digest: preview.manifest_digest,
+    cases: preview.cases
+      .filter((item) => !item.blocked)
+      .map((item) => ({
+        ordinal: item.ordinal,
+        case_key: item.case_key,
+        keep_id: item.keep_id,
+        merge_id: item.merge_id,
+        state_digest: item.state_digest,
+        stock: item.needs_stock_choice ? choices[item.case_key] || null : null,
+      })),
+  }
+}
+
+export async function runSelectedConflictMergeBatch(
+  body: SelectedConflictMergeApplyBody,
+  options: {
+    signal?: AbortSignal
+    onProgress?: (result: SelectedConflictMergeApplyResult) => void
+  } = {},
+): Promise<SelectedConflictMergeApplyResult> {
+  let attempts = 0
+  let callCeiling = 1
+  // At most one productive continuation per reviewed case, plus a bounded
+  // final receipt/history pass. A malicious or broken response cannot keep
+  // extending its own loop by returning the same positive allowance forever.
+  const absoluteCallCeiling = Math.max(1, Math.min(14, body.cases.length + 2))
+  try {
+    while (attempts < callCeiling) {
+      // Count the attempt before awaiting: a timeout can happen after D1 has
+      // committed, so reconciliation must run even when no response arrives.
+      attempts += 1
+      const result = await apiFetch(
+        'POST',
+        '/api/products/possible-duplicates/merge-batch',
+        body,
+        SELECTED_CONFLICT_MERGE_TIMEOUT_MS,
+        { signal: options.signal },
+      ) as SelectedConflictMergeApplyResult
+      options.onProgress?.(result)
+      if (!selectedConflictCanContinueAutomatically(result)) return result
+      const additional = Math.min(12, Number(result.maxAdditionalRequests))
+      callCeiling = Math.min(absoluteCallCeiling, Math.max(callCeiling, attempts + additional))
+    }
+    throw new Error('Selected conflict merge continuation limit reached.')
+  } finally {
+    if (attempts > 0) {
+      cacheInvalidate('products')
+      cacheInvalidate('inventory')
+    }
+  }
 }
 
 // Zero-quantity product cleanup (progress.md part 91's full spec, part 97

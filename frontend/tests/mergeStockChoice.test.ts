@@ -31,6 +31,8 @@ const read = (...parts: string[]): string => readFileSync(join(here, '..', 'src'
 const dialog = read('components', 'products', 'MergeStockChoiceDialog.tsx')
 const hook = read('components', 'products', 'useMergeStockChoice.tsx')
 const duplicatesTab = read('components', 'products', 'ProductDuplicatesTab.tsx')
+const selectedConflictMerge = read('utils', 'selectedConflictMerge.ts')
+const selectedConflictReview = read('components', 'products', 'SelectedConflictMergeReviewModal.tsx')
 const productsPage = read('components', 'products', 'Products.tsx')
 const reviewModal = read('components', 'products', 'MergeDuplicatesReviewModal.tsx')
 const productForm = read('components', 'products', 'forms', 'ProductForm.tsx')
@@ -223,17 +225,17 @@ test('every new string ships in BOTH packs', () => {
   assert.ok(/[ក-៿]/.test(km.product_duplicates_hint))
 })
 
-test('a barcode or cost mismatch is NEVER auto-merged', () => {
+test('a barcode or identity mismatch is NEVER offered in the selected batch', () => {
   // Name + barcode + cost is the identity rule: a row differing on barcode or
   // cost is a legitimate sibling child row, not a duplicate. Bulk merge only
   // ever automates a pair that agrees on all of them (a GTIN-14/EAN-13 leading
   // zero being the one documented equivalence).
-  const guard = duplicatesTab.slice(
-    duplicatesTab.indexOf('function clusterIsSafeAutoMerge'),
-    duplicatesTab.indexOf('function chooseAutomaticKeeper'),
+  const guard = selectedConflictMerge.slice(
+    selectedConflictMerge.indexOf('export function selectedConflictEligibility'),
+    selectedConflictMerge.indexOf('export function chooseSelectedConflictKeeper'),
   )
   assert.ok(guard, 'the auto-merge guard must exist')
-  assert.match(guard, /normalizeProductGroupName\(a\.name\) !== normalizeProductGroupName\(b\.name\)/)
+  assert.match(guard, /leftName !== rightName/)
   // COST NO LONGER BLOCKS THE AUTOMATIC PATH, and this assertion is the
   // reversal of what it pinned before. Until 2026-09-06 the guard refused any
   // pair whose costs DISAGREED -- the pre-Sep-4 policy, when a different cost
@@ -246,11 +248,11 @@ test('a barcode or cost mismatch is NEVER auto-merged', () => {
   // so the bulk run must not offer that pair either.
   assert.ok(!/compareCosts\(a, b\) === 'differs'/.test(guard),
     'a differing cost is a MERGE under the Sep-4 ruling, not a fork')
-  assert.match(guard, /resolveMergedCostDetail\(\[a, b\]\)\.outliers\.length/,
+  assert.match(guard, /resolveMergedCostDetail\(products\)\.outliers\.length/,
     'only an un-averageable cost pair may block the automatic path')
-  assert.match(guard, /identityBarcodeKey\(a\.barcode\) === identityBarcodeKey\(b\.barcode\)/,
+  assert.match(guard, /leftBarcode !== rightBarcode/,
     'only a leading-zero-equivalent barcode may auto-merge, judged by the SHARED fold')
-  assert.match(duplicatesTab, /targets\.filter\(clusterIsSafeAutoMerge\)/, 'bulk merge must run through the guard')
+  assert.match(duplicatesTab, /partitionSelectedConflictClusters\(targets\)/, 'selected merge must run through the guard')
 })
 
 test('a cross-identity merge says which field differs, and is never silent', () => {
@@ -312,8 +314,11 @@ test('a whole-catalog run that skipped pairs does not report plain success', () 
   assert.match(productsPage, /undoPendingCount \+= Math\.max\(0, Number\(result\?\.undoPendingCount \|\| 0\)\)/)
   assert.match(productsPage, /merge_duplicates_undo_unavailable/,
     'committed cases whose recovery record is incomplete must stay visible to the operator')
-  // Same reporting shape the Conflicts tab already uses for its bulk run.
-  assert.match(duplicatesTab, /if \(firstRefusal\) parts\.push\(firstRefusal\)/)
+  // The selected Conflicts batch reports each refusal and its independent Undo
+  // identifier in the combined result instead of reducing them to one toast.
+  assert.match(selectedConflictReview, /result\.refusals\.map/)
+  assert.match(selectedConflictReview, /item\.undoReady/)
+  assert.match(selectedConflictReview, /item\.actionHistoryId/)
   for (const key of ['merge_duplicates_refused_count', 'merge_duplicates_preview_cost_refused', 'merge_duplicates_preview_cost_refused_group']) {
     assert.ok(en[key], `en.json is missing ${key}`)
     assert.ok(km[key] && /[ក-៿]/.test(km[key]), `km.json is missing ${key}`)
