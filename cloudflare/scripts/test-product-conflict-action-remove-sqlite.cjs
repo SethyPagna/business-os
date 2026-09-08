@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict')
-const { loadRoute, seed } = require('./test-product-conflict-action-groups-sqlite.cjs')
+const { loadRoute, loadTs, seed } = require('./test-product-conflict-action-groups-sqlite.cjs')
 
 function reset(controls) {
   Object.assign(controls, { statements: 0, maxBindings: 0, maxCompoundTerms: 0, maxBatchStatements: 0,
@@ -17,6 +17,8 @@ async function remove(app, productId, body, user = { id: 900, username: 'owner' 
 
 function setup() {
   const { d1 } = seed(1)
+  d1.db.prepare(`INSERT INTO users(id,username,name,password,permissions,is_active)
+    VALUES(902,'requester','Requester','x','{}',1),(903,'reviewer','Reviewer','x','{}',1)`).run()
   d1.db.prepare('UPDATE products SET rfid_confirmed_qty=1 WHERE id=10000').run()
   d1.db.prepare('UPDATE branch_stock SET rfid_confirmed_qty=1 WHERE product_id=10000 AND branch_id=1').run()
   d1.db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity,rfid_confirmed_qty) VALUES(10000,2,0,0)').run()
@@ -26,6 +28,15 @@ function setup() {
   const loaded = loadRoute(d1, true)
   reset(loaded.controls)
   return { d1, ...loaded }
+}
+
+function loadReviewApply(fixture) {
+  return loadTs('lib/reviewApply.ts', {
+    './db': { getDb: () => fixture.db }, './audit': { audit: async () => {} },
+    '../durable-objects/broadcastHub': { broadcast: async () => {} }, './cache': { bumpVersion: async () => {} },
+    './productWrites': {}, './branchWrites': {}, './canonicalBranchIdentity': {}, './permissions': fixture.permissions,
+    './productImagePermission': {}, './auth': {}, './pendingActions': {}, '../index': {}, './productDelete': fixture.productDelete,
+  })
 }
 
 function productGraph(d1) {
@@ -99,6 +110,28 @@ async function main() {
     assert.ok(fixture.controls.maxBatchStatements <= 100)
   }
 
+  for (const denial of ['reviewer', 'requester', 'stale']) {
+    const fixture = setup()
+    const queued = await remove(fixture.app, 10000, { reason: `Approval ${denial}`, client_request_id: `approval_${denial}` },
+      { id: 902, username: 'requester', reviewDelete: true })
+    assert.equal(queued.status, 202)
+    const pending = { ...fixture.d1.db.prepare("SELECT * FROM pending_actions WHERE status='open'").get() }
+    const reviewApply = loadReviewApply(fixture)
+    const reviewer = { id: 903, username: 'reviewer', name: 'Reviewer', organization_id: null, role_id: null,
+      permissions: '{}', is_active: 1, ...(denial === 'reviewer' ? { noDelete: true } : {}) }
+    if (denial === 'requester') fixture.d1.db.prepare('UPDATE users SET is_active=0 WHERE id=902').run()
+    if (denial === 'stale') fixture.d1.db.prepare("UPDATE product_batches SET supplier_name='Changed after review' WHERE id=99001").run()
+    await assert.rejects(
+      () => reviewApply.applyApprovedPendingAction({}, pending, { id: 903, name: 'Reviewer' }, reviewer),
+      denial === 'stale' ? /changed after review/i : /permission/i,
+    )
+    assert.equal(fixture.d1.db.prepare('SELECT is_active FROM products WHERE id=10000').get().is_active, 1)
+    assert.equal(fixture.d1.db.prepare('SELECT status FROM pending_actions WHERE id=?').get(pending.id).status, 'open')
+    assert.equal(fixture.d1.db.prepare('SELECT status FROM product_remove_operations WHERE pending_action_id=?').get(pending.id).status,
+      'approval_pending')
+    assert.equal(fixture.d1.db.prepare('SELECT COUNT(*) n FROM action_history').get().n, 0)
+  }
+
   {
     const fixture = setup()
     const denied = await remove(fixture.app, 10000, { reason: 'No permission', client_request_id: 'direct_remove_denied' },
@@ -113,6 +146,20 @@ async function main() {
     assert.equal(fixture.d1.db.prepare("SELECT COUNT(*) n FROM pending_actions WHERE status='open'").get().n, 1)
     assert.equal(fixture.d1.db.prepare("SELECT COUNT(*) n FROM action_history").get().n, 0)
     assert.equal(fixture.d1.db.prepare("SELECT COUNT(*) n FROM audit_logs").get().n, 0)
+    const pending = { ...fixture.d1.db.prepare('SELECT * FROM pending_actions WHERE status=\'open\'').get() }
+    reset(fixture.controls)
+    const reviewApply = loadReviewApply(fixture)
+    const reviewer = { id: 903, username: 'reviewer', name: 'Reviewer', organization_id: null, role_id: null,
+      permissions: '{}', is_active: 1 }
+    const approved = await reviewApply.applyApprovedPendingAction({}, pending, { id: 903, name: 'Reviewer' }, reviewer)
+    assert.equal(approved.pendingActionMarkedAtomically, true)
+    assert.deepEqual({ ...fixture.d1.db.prepare('SELECT status,reviewed_by FROM pending_actions WHERE id=?').get(pending.id) },
+      { status: 'approved', reviewed_by: 903 })
+    assert.deepEqual({ ...fixture.d1.db.prepare('SELECT status,generation FROM product_remove_operations WHERE pending_action_id=?').get(pending.id) },
+      { status: 'undo_ready', generation: 0 })
+    assert.equal(fixture.d1.db.prepare('SELECT is_active FROM products WHERE id=10000').get().is_active, 0)
+    assert.equal(fixture.d1.db.prepare('SELECT COUNT(*) n FROM action_history').get().n, 1)
+    assert.ok(fixture.controls.maxBatchStatements <= 100)
   }
 
   {

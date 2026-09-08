@@ -26,6 +26,8 @@ import { branchUpdateStatements } from './branchWrites'
 import { assertCanonicalBranchSetMutationAllowed } from './canonicalBranchIdentity'
 import { getActionTier } from './permissions'
 import { omitUnchangedProductImageFields, productImageFieldsChanged, productImageFieldsChangedResolved, resolveProductImageFields } from './productImagePermission'
+import { parseProductRemovePendingPointer, parseProductRemovePlan, productRemoveApprovalStatements, productRemovePlanDigest,
+  ProductRemoveError, type ProductRemoveOperationRow } from './productDelete'
 import type { SessionUser } from './auth'
 import type { PendingActionRow } from './pendingActions'
 import type { Env } from '../index'
@@ -42,6 +44,7 @@ export interface ReviewerInfo {
   name: string | null
 }
 
+export type ReviewApplyOutcome = { pendingActionMarkedAtomically: boolean }
 type Applier = (env: Env, row: PendingActionRow, reviewer: ReviewerInfo) => Promise<void>
 
 const appliers = new Map<string, Applier>()
@@ -290,8 +293,67 @@ registerApplier('branches', 'delete', 'branch', async (env, row, reviewer) => {
   assertCanonicalBranchSetMutationAllowed()
 })
 
-export async function applyApprovedPendingAction(env: Env, row: PendingActionRow, reviewer: ReviewerInfo): Promise<void> {
+export function productRemovePendingPointer(row: Pick<PendingActionRow, 'payload_json'>): { operation_id: string; plan_digest: string } | null {
+  try { return parseProductRemovePendingPointer(JSON.parse(row.payload_json || 'null')) }
+  catch { return null }
+}
+
+async function applyApprovedProductRemove(
+  env: Env,
+  row: PendingActionRow,
+  reviewer: ReviewerInfo,
+  reviewerUser: SessionUser | undefined,
+): Promise<ReviewApplyOutcome> {
+  const pointer = productRemovePendingPointer(row)
+  if (!pointer) throw new Error('Invalid product removal approval pointer.')
+  // This guard deliberately precedes the operation/idempotency lookup.
+  if (!reviewerUser || getActionTier(reviewerUser, 'products', 'delete') !== 'full') {
+    throw new ReviewRequesterPermissionError('The reviewer does not have full permission to remove products.')
+  }
+  const requester = await loadPendingRequester(env, row.requested_by)
+  if (!requester || getActionTier(requester, 'products', 'delete') === 'none') {
+    throw new ReviewRequesterPermissionError('The requester no longer has permission to remove products.')
+  }
+  const db = getDb(env)
+  const operation = await db.prepare(`SELECT * FROM product_remove_operations
+    WHERE operation_id=@operation AND pending_action_id=@pending`).get<ProductRemoveOperationRow>({ operation: pointer.operation_id, pending: row.id })
+  if (!operation || operation.plan_digest !== pointer.plan_digest || operation.product_id !== row.entity_id
+    || operation.requester_id !== row.requested_by || operation.status !== 'approval_pending') {
+    throw new ProductRemoveError('review_state_conflict', 'The saved product removal approval no longer matches its receipt.')
+  }
+  let plan
+  try { plan = parseProductRemovePlan(JSON.parse(operation.plan_json || 'null')) }
+  catch { throw new ProductRemoveError('review_state_conflict', 'The saved product removal plan is invalid.') }
+  if (plan.product_id !== operation.product_id || plan.reason !== operation.reason
+    || plan.state_digest !== operation.state_digest || await productRemovePlanDigest(plan) !== operation.plan_digest) {
+    throw new ProductRemoveError('review_state_conflict', 'The saved product removal plan no longer matches its receipt.')
+  }
+  const transitionStamp = new Date().toISOString()
+  try {
+    await db.batch(productRemoveApprovalStatements({ operation, plan, pendingActionId: row.id,
+      reviewer: reviewerUser, transitionStamp }))
+  } catch (error) {
+    if (/malformed JSON|product_remove_.*guard|constraint/i.test(String(error))) {
+      throw new ProductRemoveError('review_state_conflict', 'The product changed after review. Nothing was approved or removed.')
+    }
+    throw error
+  }
+  await bumpVersion(env, 'products')
+  await broadcast(env, 'products', { action: 'delete', id: plan.product_id })
+  await broadcast(env, 'inventory', { action: 'update' })
+  void reviewer
+  return { pendingActionMarkedAtomically: true }
+}
+
+export async function applyApprovedPendingAction(
+  env: Env,
+  row: PendingActionRow,
+  reviewer: ReviewerInfo,
+  reviewerUser?: SessionUser,
+): Promise<ReviewApplyOutcome> {
+  if (productRemovePendingPointer(row)) return applyApprovedProductRemove(env, row, reviewer, reviewerUser)
   const fn = appliers.get(applierKey(row.section, row.action_type, row.entity_type))
   if (!fn) throw new NoReviewApplierError(row.section, row.action_type, row.entity_type)
   await fn(env, row, reviewer)
+  return { pendingActionMarkedAtomically: false }
 }

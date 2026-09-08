@@ -134,7 +134,7 @@ function loadRoute(d1, realMergeRuntime = false) {
     '../lib/audit': { audit: async () => {} }, '../lib/cache': { bumpVersion: async () => {}, cachedJsonResponse: async () => null, getVersionWithFallback: async () => '1' },
     '../durable-objects/broadcastHub': { broadcast: async () => {} },
   })
-  return { app: FakeHono.instance, controls, undo }
+  return { app: FakeHono.instance, controls, undo, db, productDelete, permissions }
 }
 
 function seed(groupCount = 801) {
@@ -323,4 +323,4 @@ async function main() {
 
 if (require.main === module) main().catch((error) => { console.error(error); process.exit(1) })
 
-module.exports = { loadRoute, seed, post, get }
+module.exports = { loadRoute, loadTs, seed, post, get }

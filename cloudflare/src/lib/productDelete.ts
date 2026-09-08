@@ -176,6 +176,31 @@ export async function productRemovePlanDigest(plan: ProductRemovePlan): Promise<
   return sha256(plan)
 }
 
+export function parseProductRemovePlan(value: unknown): ProductRemovePlan {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ProductRemoveError('invalid_remove_plan', 'Invalid saved product removal plan.')
+  const plan = value as ProductRemovePlan
+  if (plan.version !== 1 || !Number.isSafeInteger(Number(plan.product_id)) || Number(plan.product_id) <= 0
+    || typeof plan.reason !== 'string' || !plan.reason.trim() || plan.reason.length > 500
+    || !plan.product || typeof plan.product !== 'object' || Array.isArray(plan.product)
+    || !Array.isArray(plan.branch_stock) || !Array.isArray(plan.batches) || !Array.isArray(plan.branch_batch_stock)
+    || !Array.isArray(plan.product_images) || !Array.isArray(plan.child_links)
+    || !Number.isSafeInteger(Number(plan.source_bytes)) || Number(plan.source_bytes) < 0
+    || typeof plan.state_digest !== 'string' || !plan.state_digest) {
+    throw new ProductRemoveError('invalid_remove_plan', 'Invalid saved product removal plan.')
+  }
+  return plan
+}
+
+export function parseProductRemovePendingPointer(value: unknown): { operation_id: string; plan_digest: string } | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const pointer = value as Record<string, unknown>
+  if (Object.keys(pointer).sort().join(',') !== 'kind,operation_id,plan_digest'
+    || pointer.kind !== 'product.remove.pending'
+    || typeof pointer.operation_id !== 'string' || !pointer.operation_id
+    || typeof pointer.plan_digest !== 'string' || !pointer.plan_digest) return null
+  return { operation_id: pointer.operation_id, plan_digest: pointer.plan_digest }
+}
+
 export function productRemoveQueueStatements(args: {
   plan: ProductRemovePlan
   operationId: string
@@ -214,18 +239,22 @@ export function productRemoveApplyStatements(args: {
   transitionStamp: string
   planDigest: string
   pendingActionId?: number | null
+  receiptActorId?: number
+  requesterId?: number
 }): ProductRemoveStatement[] {
   const { plan } = args
   const userName = actorSnapshot(args.user)
+  const receiptActorId = args.receiptActorId ?? args.user.id
+  const requesterId = args.requesterId ?? receiptActorId
   const pointer = JSON.stringify({ applier: PRODUCT_REMOVE_ACTION_KIND, operation_id: args.operationId, generation: 0 })
   const snapshot = JSON.stringify({ version: 1, operation_id: args.operationId, generation: 0, transition_stamp: args.transitionStamp, plan })
   const details = JSON.stringify({ operation_id: args.operationId, reason: plan.reason, source: args.source })
   return [{
     sql: `INSERT INTO product_remove_operations(operation_id,actor_id,requester_id,source,request_id,review_id,action_ordinal,
       product_id,reason,state_digest,plan_digest,plan_json,status,pending_action_id)
-      VALUES(@operation,@actor,@actor,@source,@request,@review,@ordinal,@product,@reason,@stateDigest,@planDigest,@plan,'ready',@pending)
+      VALUES(@operation,@actor,@requester,@source,@request,@review,@ordinal,@product,@reason,@stateDigest,@planDigest,@plan,'ready',@pending)
       ON CONFLICT(actor_id,source,request_id) DO NOTHING`,
-    params: { operation: args.operationId, actor: args.user.id, source: args.source, request: args.requestId,
+    params: { operation: args.operationId, actor: receiptActorId, requester: requesterId, source: args.source, request: args.requestId,
       review: args.reviewId ?? null, ordinal: args.actionOrdinal ?? null, product: plan.product_id, reason: plan.reason,
       stateDigest: plan.state_digest, planDigest: args.planDigest, plan: JSON.stringify(plan), pending: args.pendingActionId ?? null },
   }, {
@@ -238,7 +267,7 @@ export function productRemoveApplyStatements(args: {
       AND NOT EXISTS(SELECT 1 FROM stock_session_members sm JOIN stock_session_operations so ON so.id=sm.operation_id
         JOIN action_history ah ON ah.id=so.history_id WHERE sm.product_id=@product AND ah.status IN ('undoable','redoable'))
       THEN 1 ELSE json_extract('', '$') END AS product_remove_receipt_guard`,
-    params: { operation: args.operationId, actor: args.user.id, source: args.source, request: args.requestId,
+    params: { operation: args.operationId, actor: receiptActorId, source: args.source, request: args.requestId,
       product: plan.product_id, stateDigest: plan.state_digest, planDigest: args.planDigest,
       review: args.reviewId ?? null, pending: args.pendingActionId ?? null },
   }, productRemoveGraphGuard(plan, 'source'), {
@@ -293,6 +322,37 @@ export function productRemoveApplyStatements(args: {
       WHERE operation_id=@operation AND status='ready' AND undo_snapshot_id IS NOT NULL AND action_history_id IS NOT NULL`,
     params: { request: args.requestId, operation: args.operationId, product: plan.product_id, stamp: args.transitionStamp },
   }]
+}
+
+export function productRemoveApprovalStatements(args: {
+  operation: ProductRemoveOperationRow
+  plan: ProductRemovePlan
+  pendingActionId: number
+  reviewer: SessionUser
+  transitionStamp: string
+}): ProductRemoveStatement[] {
+  return [{
+    sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM product_remove_operations
+      WHERE operation_id=@operation AND actor_id=@actor AND requester_id=@requester AND source='direct'
+        AND request_id=@request AND product_id=@product AND plan_digest=@planDigest
+        AND status='approval_pending' AND generation=0 AND pending_action_id=@pending)
+      AND EXISTS(SELECT 1 FROM pending_actions WHERE id=@pending AND status='open'
+        AND section='products' AND action_type='delete' AND entity_type='product' AND entity_id=@product
+        AND requested_by=@requester)
+      THEN 1 ELSE json_extract('', '$') END AS product_remove_approval_guard`,
+    params: { operation: args.operation.operation_id, actor: args.operation.actor_id, requester: args.operation.requester_id,
+      request: args.operation.request_id, product: args.operation.product_id, planDigest: args.operation.plan_digest,
+      pending: args.pendingActionId },
+  }, {
+    sql: `UPDATE product_remove_operations SET status='ready',updated_at=@stamp
+      WHERE operation_id=@operation AND status='approval_pending' AND generation=0 AND pending_action_id=@pending`,
+    params: { stamp: args.transitionStamp, operation: args.operation.operation_id, pending: args.pendingActionId },
+  }, ...productRemoveApplyStatements({
+    plan: args.plan, operationId: args.operation.operation_id, source: 'direct', requestId: args.operation.request_id,
+    reviewId: null, actionOrdinal: null, user: args.reviewer, transitionStamp: args.transitionStamp,
+    planDigest: args.operation.plan_digest, pendingActionId: args.pendingActionId,
+    receiptActorId: args.operation.actor_id, requesterId: args.operation.requester_id,
+  })]
 }
 
 export type ProductRemoveSnapshot = {
