@@ -1915,7 +1915,7 @@ assert.match(
 )
 assert.match(
   editReturnModal,
-  /const payload: ReturnUpdatePayload = \{[\s\S]*const prepared = pendingRequest\?\.body \|\| freezeDirectMutationBody\(await prepareReturnRequest\(ret\.id,[\s\S]*savePendingDirectMutation\('return-edit'[\s\S]*withLoaderTimeout\(\s*\(\) => updateReturnRequest\(ret\.id, prepared\),\s*'Update return',\s*RETURN_UPDATE_TIMEOUT_MS,\s*\)/,
+  /const payload: ReturnUpdatePayload = \{[\s\S]*const prepared = activePendingRequest\?\.body \|\| freezeDirectMutationBody\(await prepareReturnRequest\(ret\.id,[\s\S]*savePendingDirectMutation\('return-edit'[\s\S]*withLoaderTimeout\(\s*\(\) => updateReturnRequest\(ret\.id, prepared\),\s*'Update return',\s*RETURN_UPDATE_TIMEOUT_MS,\s*\)/,
   'customer return update should timeout slow return writes through the focused returns transport',
 )
 assert.doesNotMatch(

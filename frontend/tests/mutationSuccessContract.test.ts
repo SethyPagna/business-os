@@ -63,8 +63,8 @@ runTest('sale status mutations preserve normal notes and omit settlement notes',
   const sales = readFileSync(new URL('../src/components/sales/Sales.tsx', import.meta.url), 'utf8')
   assert.match(
     sales,
-    /const isSettlementRequest = Array\.isArray\([\s\S]*?runSaleStatusMutation\(saleId, newStatus, isSettlementRequest \? undefined : notes, extra\)/,
-    'the shared status guard must pass notes for ordinary transitions and omit them only for a tender settlement',
+    /const isSettlementRequest = Array\.isArray\([\s\S]*?prepareSaleStatusRequest\(\s*saleId,\s*newStatus,\s*isSettlementRequest \? undefined : notes,[\s\S]*?runSaleStatusMutation\(saleId, preparedRequest\)/,
+    'the shared status guard must freeze normal notes into the prepared request, omit settlement notes, and submit that exact request body',
   )
   assert.doesNotMatch(
     sales,

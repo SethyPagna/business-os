@@ -85,6 +85,7 @@ function loadReceiptComponent(source: string): unknown {
     if (id.includes('receiptAppliedConfig')) return require('../src/utils/receiptAppliedConfig.ts')
     if (id.includes('receiptTextContrast')) return require('../src/utils/receiptTextContrast.ts')
     if (id.includes('receiptItemColumns')) return require('../src/utils/receiptItemColumns.ts')
+    if (id.includes('customerIdentity')) return require('../src/utils/customerIdentity.ts')
     // Real: the receipt prints the sale's DISPLAY address, and this kernel is
     // what turns a stored options blob into one (see contactDisplayAddress.test
     // .ts). Stubbed away, the customer row silently renders nothing.

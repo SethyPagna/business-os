@@ -135,7 +135,11 @@ assert.match(contactsRoutes, /const customerAddress = contactDisplayAddress\(/, 
 // Bulk "set customer on N sales".
 assert.match(bulkUpdate, /address: contactDisplayAddress\(/, 'the bulk customer update must snapshot the display address')
 // POS checkout.
-assert.match(pos, /customer_address: contactDisplayAddress\(active\.customer\.address\)/, 'POS checkout must snapshot the display address')
+assert.match(
+  pos,
+  /const checkoutCustomer: CustomerRecord = isSelectableCustomerIdentity\(active\.customer\)[\s\S]*?customer_address: contactDisplayAddress\(checkoutCustomer\.address\) \|\| null/,
+  'POS checkout must exclude the reserved anonymous marker before snapshotting the display address',
+)
 
 // A Replace return mints a NEW sale row and copies the source sale's snapshot
 // onto it. Until the repair script runs, the source sale of any legacy row
@@ -144,7 +148,7 @@ assert.match(pos, /customer_address: contactDisplayAddress\(active\.customer\.ad
 const returnsRoutes = worker('src/routes/returns.ts')
 assert.match(
   returnsRoutes,
-  /customer_address: contactDisplayAddress\(saleMeta\.customer_address\)/,
+  /const replacementCustomerAddress = contactDisplayAddress\(saleMeta\.customer_address\) \|\| null[\s\S]*?customer_address: replacementCustomerAddress/,
   'the replacement sale a Replace return mints must carry the display address',
 )
 // The sales importer is a writer too: a CSV exported by a build older than
@@ -153,8 +157,8 @@ assert.match(
 const importEngine = worker('src/lib/importEngine.ts')
 assert.match(
   importEngine,
-  /customer_address: contactDisplayAddress\(str\(first\.customer_address\)\)/,
-  'the sales importer must normalize the address column it stores',
+  /customer_address: explicitlyAnonymous \? null : contactDisplayAddress\(str\(first\.customer_address\)\) \|\| null/,
+  'the sales importer must normalize ordinary addresses while keeping anonymous imports unlinked',
 )
 
 for (const [label, source] of [['routes/sales.ts', salesRoutes], ['routes/contacts.ts', contactsRoutes], ['lib/contactMerge.ts', contactMerge], ['lib/saleBulkUpdate.ts', bulkUpdate], ['routes/returns.ts', returnsRoutes], ['lib/importEngine.ts', importEngine]] as const) {
@@ -234,8 +238,8 @@ assert.match(
 // exercises that against the real route.
 assert.match(
   salesRoutes,
-  /customer_address: contactDisplayAddress\(body\.customer_address\) \|\| null/,
-  'sale creation must normalize the address a client sent',
+  /const saleCustomerAddress = anonymousCustomerSelected \? null : contactDisplayAddress\(body\.customer_address\) \|\| null[\s\S]*?customer_address: saleCustomerAddress/,
+  'sale creation must normalize the address a client sent while keeping the reserved anonymous customer unlinked',
 )
 
 // ---------------------------------------------------------------------------
