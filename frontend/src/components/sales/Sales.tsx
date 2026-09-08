@@ -29,6 +29,9 @@ import { buildTimeActionSections, getTimeGroupingMode, toggleIdSet } from '../..
 import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { buildBulkSaleCancelInput, getSales as fetchSales, getSalesStats as fetchSalesStats, getSalesStatsStrip, SALES_LIST_REQUEST_TIMEOUT_MS, updateSalesBulkField, updateSalesBulkStatus, type BulkSaleStatusItem, type BulkSaleStatusPayload, type BulkSaleUpdatePayload, type SaleAmendmentRequest } from '../../api/salesTransport.ts'
 import { getCustomers, getDeliveryContacts } from '../../api/contactReadTransport.ts'
+import { createCustomer, getCustomerRenameImpact, updateCustomer } from '../../api/contactWriteTransport.ts'
+import CustomerFormModal from '../contacts/CustomerFormModal.tsx'
+import RenameCascadeModal, { type RenameCascadeChoice, type RenameCascadeRequest } from '../shared/RenameCascadeModal.tsx'
 import { getFeesReport } from '../../api/feesTransport.ts'
 import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
@@ -44,6 +47,7 @@ import {
 import { lazyRetry } from '../../utils/lazyImport.ts'
 const Receipt = lazyRetry(() => import('../receipt/Receipt'), 'sales-receipt')
 const SaleDetailModal = lazyRetry(() => import('./SaleDetailModal'), 'sales-sale-detail-modal')
+const SaleCustomerActionModal = lazyRetry(() => import('./SaleCustomerActionModal'), 'sales-customer-action-modal')
 const SaleRecordsFloat = lazyRetry(() => import('./SaleRecordsFloat'), 'sales-sale-records-float')
 const CancelSaleModal = lazyRetry(() => import('./CancelSaleModal'), 'sales-cancel-sale-modal')
 // S4-2: the confirmation every sale status change now goes through -- it
@@ -375,6 +379,11 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // a legacy row carries no receipt number.
   const [returnForSale, setReturnForSale] = useState<SaleRecord | null>(null)
   const [detailSale, setDetailSale] = useState<SaleRecord | null>(null)
+  const [saleCustomerPrompt, setSaleCustomerPrompt] = useState<{ sale: SaleRecord; choices: Array<{ id: number; name: string; phone?: string | null }> } | null>(null)
+  const [saleCustomerSaving, setSaleCustomerSaving] = useState(false)
+  const [saleCustomerForm, setSaleCustomerForm] = useState<{ mode: 'create' | 'edit'; customer?: Record<string, unknown> } | null>(null)
+  const [saleCustomerRename, setSaleCustomerRename] = useState<RenameCascadeRequest | null>(null)
+  const saleCustomerRenameResolveRef = useRef<((choice: RenameCascadeChoice) => void) | null>(null)
   // N41: the sale whose Records float is open. Its own state rather than a
   // mode of detailSale -- the list row's Records line opens it WITHOUT opening
   // the detail modal, which is the whole point of putting the line on the row.
@@ -1813,6 +1822,77 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
     }
   }
 
+  const customerRows = (result: unknown): Array<Record<string, unknown>> => {
+    const record = (result || {}) as Record<string, unknown>
+    return Array.isArray(result) ? result as Array<Record<string, unknown>> : Array.isArray(record.data) ? record.data as Array<Record<string, unknown>> : Array.isArray(record.items) ? record.items as Array<Record<string, unknown>> : []
+  }
+  const loadSaleCustomerChoices = async (sale: SaleRecord, search = '') => {
+    const result = await getCustomers({ ...(search ? { search } : {}), page: 1, pageSize: SALES_BULK_LINKED_PAGE_SIZE })
+    const choices = customerRows(result).map((row) => ({ id: Number(row.id), name: String(row.name || `#${row.id}`), phone: typeof row.phone === 'string' ? row.phone : null })).filter((row) => Number.isFinite(row.id) && row.id > 0)
+    setSaleCustomerPrompt((current) => current?.sale.id === sale.id ? { ...current, choices } : { sale: { ...sale }, choices })
+  }
+  const openSaleCustomerAction = async (sale: SaleRecord) => {
+    if (pendingBulkFieldRequest) { notify(translateOr('sale_bulk_pending', 'A previous request has an unknown outcome. Retry the original request or discard it before starting another.'), 'error'); return }
+    try { await loadSaleCustomerChoices(sale) } catch (error) { notify(getErrorMessage(error, translateOr('load_failed', 'Unable to load choices.')), 'error') }
+  }
+  const submitSaleCustomerChange = async (sale: SaleRecord, target: { id: number; name: string } | null) => {
+    if (!beginSingleAction(bulkStatusInFlightRef, { blocked: bulkFieldSaving || saleCustomerSaving })) return false
+    setBulkFieldSaving(true); setSaleCustomerSaving(true)
+    const payload: BulkSaleUpdatePayload = {
+      client_request_id: crypto.randomUUID(),
+      items: [{ id: Number(sale.id), expected_updated_at: sale.updated_at == null ? null : String(sale.updated_at) }],
+      action: { kind: 'customer', source_id: sale.customer_id == null ? null : Number(sale.customer_id), target_id: target?.id ?? null },
+    }
+    try {
+      // Preserve this exact one-sale request before sending. In particular a
+      // newly-created profile is never created again when the link response is lost.
+      savePendingBulkFieldRequest(payload)
+      const result = await updateSalesBulkField(payload)
+      if (result.changedCount === 0) {
+        notify(translateOr('sale_customer_conflict', 'This sale changed before the customer link could be saved. Refresh and review it.'), 'error')
+        return false
+      }
+      savePendingBulkFieldRequest(null)
+      await Promise.all([loadSales(true), actionHistory.refreshServerItems()])
+      window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
+      setDetailSale((current) => current?.id === sale.id ? { ...current, customer_id: target?.id ?? null, customer_name: target?.name ?? null } : current)
+      setSaleCustomerPrompt(null)
+      notify(translateOr('sale_bulk_status_result', 'Updated {changed} sales; {unchanged} unchanged.').replace('{changed}', String(result.changedCount)).replace('{unchanged}', String(result.unchangedCount)), 'success')
+      return true
+    } catch (error) {
+      notify(getErrorMessage(error, translateOr('update_failed', 'Unable to update the selected sales.')), 'error')
+      return false
+    } finally { finishSingleAction(bulkStatusInFlightRef); setBulkFieldSaving(false); setSaleCustomerSaving(false) }
+  }
+  const askSaleCustomerRename = (request: RenameCascadeRequest) => new Promise<RenameCascadeChoice>((resolve) => { saleCustomerRenameResolveRef.current = resolve; setSaleCustomerRename(request) })
+  const closeSaleCustomerRename = (choice: RenameCascadeChoice) => { setSaleCustomerRename(null); const resolve = saleCustomerRenameResolveRef.current; saleCustomerRenameResolveRef.current = null; resolve?.(choice) }
+  const saveSaleCustomerForm = async (payload: Record<string, unknown>) => {
+    const form = saleCustomerForm; const prompt = saleCustomerPrompt
+    if (!form || !prompt) return
+    if (form.mode === 'create') {
+      const result = await createCustomer(payload)
+      const record = result as Record<string, unknown>
+      const created = Number(record.id || (record.data as Record<string, unknown> | undefined)?.id)
+      if (!Number.isFinite(created) || created <= 0) throw new Error('Customer was created but its id was not returned.')
+      setSaleCustomerForm(null)
+      setSaleCustomerPrompt((current) => current ? { ...current, choices: [{ id: created, name: String(payload.name || `#${created}`), phone: typeof payload.phone === 'string' ? payload.phone : null }, ...current.choices] } : current)
+      await submitSaleCustomerChange(prompt.sale, { id: created, name: String(payload.name || `#${created}`) })
+      return
+    }
+    const current = form.customer || {}
+    const before = String(current.name || '').trim(); const after = String(payload.name || '').trim()
+    if (before && after && before.toLocaleLowerCase() !== after.toLocaleLowerCase()) {
+      const impact = await getCustomerRenameImpact(String(current.id), after)
+      if (impact.target_exists) throw new Error(`"${after}" already exists.`)
+      const choice = await askSaleCustomerRename({ kind: 'customer', from: before, to: after, impact, choices: ['carry', 'only'] })
+      if (choice === 'cancel') return
+      payload.__rename_cascade = choice === 'carry' ? 'carry' : 'record_only'
+    }
+    await updateCustomer(String(current.id), payload)
+    setSaleCustomerForm(null)
+    await loadSaleCustomerChoices(prompt.sale)
+  }
+
   const exportVisibleSales = useCallback(async (rows: SaleRecord[] = filtered, filePrefix = 'sales-visible') => {
     openExportOptions(rows, filePrefix)
   }, [filtered, openExportOptions])
@@ -2172,6 +2252,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
             // its status buttons and membership form entirely.
             onStatusChange={canChangeSaleStatus ? handleStatusChange : undefined}
             onAttachMembership={canChangeSaleCustomer ? handleAttachMembership : undefined}
+            onCustomerAction={canChangeSaleCustomer ? (sale) => { void openSaleCustomerAction(sale as SaleRecord) } : undefined}
             // Same hide-by-omission gate as the other write callbacks: without
             // `sales:add_items` the prop is absent and the whole Add-items
             // section never renders.
@@ -2196,6 +2277,40 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
           />
         </Suspense>
       ) : null}
+
+      {saleCustomerPrompt ? (
+        <Suspense fallback={null}>
+          <SaleCustomerActionModal
+            saleLabel={String(saleCustomerPrompt.sale.receipt_number || `#${saleCustomerPrompt.sale.id}`)}
+            currentName={saleCustomerPrompt.sale.customer_name}
+            choices={saleCustomerPrompt.choices}
+            saving={saleCustomerSaving || bulkFieldSaving}
+            onClose={() => { if (!saleCustomerSaving && !bulkFieldSaving) setSaleCustomerPrompt(null) }}
+            onSearch={(search) => { void loadSaleCustomerChoices(saleCustomerPrompt.sale, search).catch((error) => notify(getErrorMessage(error, translateOr('load_failed', 'Unable to load choices.')), 'error')) }}
+            onReplace={(customer) => { void submitSaleCustomerChange(saleCustomerPrompt.sale, customer) }}
+            onRemove={() => { void submitSaleCustomerChange(saleCustomerPrompt.sale, null) }}
+            onCreate={() => setSaleCustomerForm({ mode: 'create' })}
+            onEdit={() => {
+              const id = Number(saleCustomerPrompt.sale.customer_id)
+              void getCustomers({ ids: [String(id)] }).then((result) => {
+                const customer = customerRows(result).find((row) => Number(row.id) === id)
+                if (!customer) throw new Error('Current customer is unavailable.')
+                setSaleCustomerForm({ mode: 'edit', customer })
+              }).catch((error) => notify(getErrorMessage(error, 'Unable to load the current customer.'), 'error'))
+            }}
+          />
+        </Suspense>
+      ) : null}
+      {saleCustomerForm ? (
+        <CustomerFormModal
+          customer={saleCustomerForm.mode === 'edit' ? saleCustomerForm.customer : null}
+          onClose={() => setSaleCustomerForm(null)}
+          onUseExisting={(match) => { if (saleCustomerPrompt) void submitSaleCustomerChange(saleCustomerPrompt.sale, { id: Number(match.id), name: String(match.name || `#${match.id}`) }) }}
+          onSave={(payload) => saveSaleCustomerForm(payload as unknown as Record<string, unknown>)}
+          t={t}
+        />
+      ) : null}
+      <RenameCascadeModal request={saleCustomerRename} busy={saleCustomerSaving} layer="nested" t={(key, fallback) => t(key) || fallback || key} onChoose={closeSaleCustomerRename} />
 
       {recordsSale ? (
         <Suspense fallback={null}>
