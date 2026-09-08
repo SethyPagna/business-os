@@ -3,6 +3,7 @@ import Merge from 'lucide-react/dist/esm/icons/merge.js'
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import Modal from '../shared/Modal.tsx'
 import ConfirmDialog from '../shared/ConfirmDialog.tsx'
+import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 import { ModalCloseContext } from '../shared/modalCloseContext.ts'
 import { ProductImg } from './shared/primitives.tsx'
 import { useApp as useAppHook } from '../../AppContext.tsx'
@@ -401,22 +402,36 @@ function GroupSourceSelect({ label, field, ids, group, choice, disabled, onChoic
 }) {
   const sourceField = field.replace('_source_id', '') as 'category' | 'brand' | 'unit'
   const selected = choice?.[field]
+  const inputId = `selected-conflict-${group.group_key}-${field}`
   const tr = (key: string, fallback: string) => {
     const translated = t(key)
     return translated && translated !== key ? translated : fallback
   }
+  const options: AppSelectOption[] = [
+    { value: '', label: tr('selected_conflict_choose_source', 'Choose source product') },
+    ...ids.map((id) => {
+      const member = group.members.find((item) => item.id === id)
+      const sourceValue = selectedConflictGroupSourceValue(group.members, id, sourceField)
+      return {
+        value: id,
+        label: `#${id} · ${sourceValue == null || sourceValue === '' ? tr('selected_conflict_blank', 'Blank') : sourceValue} · ${member?.name || tr('unknown', 'Unknown')}`,
+      }
+    }),
+  ]
   return (
-    <label className="block text-xs">
-      <span className="mb-1 block font-medium text-gray-600 dark:text-gray-300">{label}</span>
-      <select className="input w-full text-xs" value={selected == null ? '' : String(selected)} disabled={disabled} onChange={(event) => onChoice({ [field]: event.target.value ? Number(event.target.value) : undefined })}>
-        <option value="">{tr('selected_conflict_choose_source', 'Choose source product')}</option>
-        {ids.map((id) => {
-          const member = group.members.find((item) => item.id === id)
-          const value = selectedConflictGroupSourceValue(group.members, id, sourceField)
-          return <option key={id} value={id}>#{id} · {value == null || value === '' ? tr('selected_conflict_blank', 'Blank') : value} · {member?.name || tr('unknown', 'Unknown')}</option>
-        })}
-      </select>
-    </label>
+    <div className="block text-xs">
+      <label htmlFor={inputId} className="mb-1 block font-medium text-gray-600 dark:text-gray-300">{label}</label>
+      <AppSelect
+        id={inputId}
+        className="w-full"
+        buttonClassName="w-full text-xs"
+        value={selected == null ? '' : String(selected)}
+        options={options}
+        disabled={disabled}
+        onChange={(nextValue) => onChoice({ [field]: nextValue ? Number(nextValue) : undefined })}
+        ariaLabel={label}
+      />
+    </div>
   )
 }
 
@@ -434,30 +449,42 @@ function GroupBarcodeSelect({ group, choice, disabled, onChoice, t }: {
   const value = choice?.barcode?.mode === 'member'
     ? `member:${choice.barcode.source_product_id}`
     : choice?.barcode?.mode || ''
+  const label = tr('barcode', 'Barcode')
+  const inputId = `selected-conflict-${group.group_key}-barcode`
+  const options: AppSelectOption[] = [
+    { value: '', label: tr('selected_conflict_choose_barcode', 'Choose barcode result') },
+    ...(group.eligibility_basis === 'barcode'
+      ? [{ value: 'canonical', label: tr('selected_conflict_canonical_barcode', 'Use canonical shared barcode') }]
+      : []),
+    ...group.options.barcode_source_ids.map((id) => {
+      const member = group.members.find((item) => item.id === id)
+      const barcode = selectedConflictGroupSourceValue(group.members, id, 'barcode')
+      return {
+        value: `member:${id}`,
+        label: `#${id} · ${barcode || tr('selected_conflict_blank', 'Blank')} · ${member?.name || tr('unknown', 'Unknown')}`,
+      }
+    }),
+    { value: 'clear', label: tr('selected_conflict_clear_barcode', 'Clear barcode') },
+  ]
   return (
-    <label className="block text-xs">
-      <span className="mb-1 block font-medium text-gray-600 dark:text-gray-300">{tr('barcode', 'Barcode')}</span>
-      <select
-        className="input w-full text-xs"
+    <div className="block text-xs">
+      <label htmlFor={inputId} className="mb-1 block font-medium text-gray-600 dark:text-gray-300">{label}</label>
+      <AppSelect
+        id={inputId}
+        className="w-full"
+        buttonClassName="w-full text-xs"
         value={value}
+        options={options}
         disabled={disabled}
-        onChange={(event) => {
-          if (event.target.value === 'canonical') onChoice({ barcode: { mode: 'canonical' } })
-          else if (event.target.value === 'clear') onChoice({ barcode: { mode: 'clear' } })
-          else if (event.target.value.startsWith('member:')) onChoice({ barcode: { mode: 'member', source_product_id: Number(event.target.value.slice(7)) } })
+        onChange={(nextValue) => {
+          if (nextValue === 'canonical') onChoice({ barcode: { mode: 'canonical' } })
+          else if (nextValue === 'clear') onChoice({ barcode: { mode: 'clear' } })
+          else if (nextValue.startsWith('member:')) onChoice({ barcode: { mode: 'member', source_product_id: Number(nextValue.slice(7)) } })
           else onChoice({ barcode: undefined })
         }}
-      >
-        <option value="">{tr('selected_conflict_choose_barcode', 'Choose barcode result')}</option>
-        {group.eligibility_basis === 'barcode' ? <option value="canonical">{tr('selected_conflict_canonical_barcode', 'Use canonical shared barcode')}</option> : null}
-        {group.options.barcode_source_ids.map((id) => {
-          const member = group.members.find((item) => item.id === id)
-          const barcode = selectedConflictGroupSourceValue(group.members, id, 'barcode')
-          return <option key={id} value={`member:${id}`}>#{id} · {barcode || tr('selected_conflict_blank', 'Blank')} · {member?.name || tr('unknown', 'Unknown')}</option>
-        })}
-        <option value="clear">{tr('selected_conflict_clear_barcode', 'Clear barcode')}</option>
-      </select>
-    </label>
+        ariaLabel={label}
+      />
+    </div>
   )
 }
 
@@ -525,13 +552,22 @@ function GroupReviewCard({ group, choice, choicesFrozen, onChoice, t }: {
 
         <div className="space-y-3 rounded-lg bg-blue-50 p-2.5 dark:bg-blue-950/20">
           <h4 className="text-xs font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300">{tr('after', 'Resolved after')}</h4>
-          <label className="block text-xs">
-            <span className="mb-1 block font-medium text-gray-600 dark:text-gray-300">{tr('selected_conflict_keeper', 'Kept product')}</span>
-            <select className="input w-full text-xs" value={choice?.keeper_id == null ? '' : String(choice.keeper_id)} disabled={disabled} onChange={(event) => onChoice({ keeper_id: event.target.value ? Number(event.target.value) : undefined })}>
-              <option value="">{tr('selected_conflict_choose_keeper', 'Choose kept product')}</option>
-              {group.members.map((member) => <option key={member.id} value={member.id}>#{member.id} · {member.name || tr('unknown', 'Unknown')}</option>)}
-            </select>
-          </label>
+          <div className="block text-xs">
+            <label htmlFor={`selected-conflict-${group.group_key}-keeper`} className="mb-1 block font-medium text-gray-600 dark:text-gray-300">{tr('selected_conflict_keeper', 'Kept product')}</label>
+            <AppSelect
+              id={`selected-conflict-${group.group_key}-keeper`}
+              className="w-full"
+              buttonClassName="w-full text-xs"
+              value={choice?.keeper_id == null ? '' : String(choice.keeper_id)}
+              options={[
+                { value: '', label: tr('selected_conflict_choose_keeper', 'Choose kept product') },
+                ...group.members.map((member) => ({ value: member.id, label: `#${member.id} · ${member.name || tr('unknown', 'Unknown')}` })),
+              ]}
+              disabled={disabled}
+              onChange={(nextValue) => onChoice({ keeper_id: nextValue ? Number(nextValue) : undefined })}
+              ariaLabel={tr('selected_conflict_keeper', 'Kept product')}
+            />
+          </div>
           <div className="grid gap-2 sm:grid-cols-2">
             <GroupBarcodeSelect group={group} choice={choice} disabled={disabled} onChoice={onChoice} t={t} />
             <GroupSourceSelect label={tr('category', 'Category')} field="category_source_id" ids={group.options.category_source_ids} group={group} choice={choice} disabled={disabled} onChoice={onChoice} t={t} />
