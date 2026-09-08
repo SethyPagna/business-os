@@ -185,6 +185,15 @@ const EXCLUDED = new Map([
   ['stock_session_members.product_id', 'provenance AND the replay driver -- see the guard, not a reparent'],
 ])
 
+// 0136 stores immutable selected-merge receipts. These ids describe what the
+// run chose and what it committed; rewriting either id during a later merge
+// would falsify that receipt. Keep this category separate from EXCLUDED so its
+// evidence remains pinned to the migration's explicit durable-receipt contract.
+const RECEIPT_SNAPSHOTS = new Map([
+  ['product_conflict_merge_run_cases.keeper_product_id', 'durable receipt: the product selected to survive'],
+  ['product_conflict_merge_run_cases.merged_product_id', 'durable receipt: the product selected for retirement'],
+])
+
 async function fkSweep() {
   const migrationsDir = path.join(cloudflareRoot, 'migrations')
   const files = fs.readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort()
@@ -271,9 +280,19 @@ async function main() {
 
   await check('every product FK in the schema is reparented, folded, or excluded WITH a reason', () => {
     const unaccounted = [...found.keys()].filter(
-      (key) => !reparented.has(key) && !FOLD_HANDLED.has(key) && !EXCLUDED.has(key),
+      (key) => !reparented.has(key) && !FOLD_HANDLED.has(key) && !EXCLUDED.has(key) && !RECEIPT_SNAPSHOTS.has(key),
     )
     assert.deepEqual(unaccounted, [], `these product FKs would be orphaned by a merge: ${unaccounted.join(', ')}`)
+  })
+
+  await check('selected merge receipt product ids stay immutable historical evidence', () => {
+    const receiptMigration = fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0136_product_conflict_merge_runs.sql'), 'utf8')
+    assert.match(receiptMigration, /Durable receipts for Products > Conflicts selected merge runs/)
+    assert.match(receiptMigration, /Never drop receipt rows/)
+    for (const key of RECEIPT_SNAPSHOTS.keys()) {
+      assert.ok(found.has(key), `${key} must remain visible to the migration FK sweep`)
+      assert.ok(!reparented.has(key), `${key} must not be rewritten by the product merge fold`)
+    }
   })
 
   await check('each exclusion is documented at the list itself, not only in this test', () => {
