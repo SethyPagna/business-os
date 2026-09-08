@@ -5765,6 +5765,9 @@ app.post('/possible-duplicates/merge-batch/preview', async (c) => {
     }
     return c.json(await productConflictActionReviewResponse(db, review))
   }
+  if (getActionTier(user, 'products', 'merge_duplicates') !== 'full') {
+    return c.json({ success: false, code: 'permission_denied', error: 'You do not have permission to perform this action' }, 403)
+  }
   let request
   try { request = parseProductConflictPreviewRequest(raw) }
   catch (error) {
