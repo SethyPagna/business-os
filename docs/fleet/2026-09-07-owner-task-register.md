@@ -108,20 +108,20 @@ Every shipped row must eventually record its actual deployment version.
 |---|---|---|
 | U01 | Improve small-screen main/subpage back navigation and remove the large empty bottom gap. | Deferred UI |
 | U02 | Add icons to subpage navigation. | Deferred UI |
-| U03 | Reports centered with safe edge gutters, larger readable text, consistent larger filter button. | Initial responsive fixes integrated; remaining polish deferred |
-| U04 | Compact Shift button with stats/actions; move export beside section title or near small-screen page title without crowding notifications. | Partial integrated; remaining polish deferred |
-| U05 | Merge Not paid heading/value into one highlighted row; green total/final profit. | Integrated; final visual confirmation pending |
-| U06 | Receipt Item/Qty/Price/Total headings English by default, including mixed English/Khmer setting. | Integrated; receipt browser text checked |
-| U07 | Add minus next to Close for edit/add/set/stock/session actions; Back/discard/minimize must cooperate with scoped drafts. | Core Product/Stock/Branch/Fee flows integrated; broad remaining modal rollout deferred |
+| U03 | Reports centered with safe edge gutters, larger readable text, consistent larger filter button. | Core gutters, centered report document, readable type and mobile filter sizing deployed c2eb9d57/source-verified; final visual polish remains |
+| U04 | Compact Shift button with stats/actions; move export beside section title or near small-screen page title without crowding notifications. | Core compact Shift/Export and dedicated shift-report actions deployed c2eb9d57/source-verified; remaining mobile arrangement review |
+| U05 | Merge Not paid heading/value into one highlighted row; green total/final profit. | Not Paid row deployed; selected profit headline green correction integrated b2299a2b, next release pending |
+| U06 | Receipt Item/Qty/Price/Total headings English by default, including mixed English/Khmer setting. | Deployed/source and render-test verified: literal Item/Qty/Price/Total in en/km/both |
+| U07 | Add minus next to Close for edit/add/set/stock/session actions; Back/discard/minimize must cooperate with scoped drafts. | Partial deployed: Product, Fast Stock-In, Receive Batch, Create Products Session, Branch edit and Fee drafts minimize/restore; stock adjust/set/remove and broader rollout remain |
 | U08 | Compact Start/End dates; default entire days 00:00–23:59 without extra selector; align with stats/actions across Dashboard/Sales/Expenses/Returns/Branches. | Deferred UI |
 | U09 | Compact rectangular payment-method control while changing awaiting-payment status. | Deferred UI; F01 functional editing remains priority |
-| U10 | Date/time before IDs on receipts, sessions and analogous rows. | Partial day-first work integrated; remaining layout deferred |
+| U10 | Date/time before IDs on receipts, sessions and analogous rows. | Partial deployed: Shift/movement time-first; receipt and remaining list ordering still open |
 | U11 | Compact report presets and This month on same row. | Deferred UI |
 | U12 | Consistent button/stat heights following the Shift control. | Deferred UI |
 
-| U13 | Expanded mobile Sales: Return/Print/Close one row, three status options one row, Cancel/Back alongside Update; Records at bottom; merge membership/attach controls. | Deferred UI; latest owner request recorded |
-| U14 | Expanded sale header compact ID/status/actions with date/time below; evaluate double-click/long-press copy with accessible explicit alternative. | Deferred UI; latest owner request recorded |
-| U15 | Collapsed mobile Sales: cashier and branch share receipt/time row, pipe separators, bold cashier. | Deferred UI; latest owner request recorded |
+| U13 | Expanded mobile Sales: Return/Print/Close one row, three status options one row, Cancel/Back alongside Update; Records at bottom; merge membership/attach controls. | Active isolated responsive implementation; separate fix commits and mobile/desktop checks pending |
+| U14 | Expanded sale header compact ID/status/actions with date/time below; evaluate double-click/long-press copy with accessible explicit alternative. | Active isolated responsive implementation; accessible explicit copy retained |
+| U15 | Collapsed mobile Sales: cashier and branch share receipt/time row, pipe separators, bold cashier. | Active isolated responsive implementation; compact cashier/branch metadata and bold cashier |
 
 ## Release and follow-through
 
@@ -203,10 +203,18 @@ F46 runtime implementation is now ACTIVE (supersedes earlier not-started notes):
 
 Production product merge remains eight cases and browser access pending. Functional fixes still precede deferred UI. Original dirty workspace and historical evidence remain preserved.
 
-| F53 | Permission update debounce loses own-user refresh after unrelated event; payloadless role refresh misses bootstrap. | Active isolated correction / identity | Actual handler deterministic reproduction with positive controls; no backend authorization bypass demonstrated. Separate next checkpoint. |
+| F53 | Permission update debounce loses own-user refresh after unrelated event; payloadless role refresh misses bootstrap. | Integrated b2299a2b; independent PASS, next release pending | Accumulated intent and session-generation guard pass ordinary and logout/relogin races; backend authority unchanged. |
 
 ## Branch/contact checkpoint deployed
 
 Exact public c2eb9d57 is live100%, source9654562d, Worker3931ea55-3f66-459e-823d-3339979bd441 at2026-09-08T03:37:12.286363Z.31 individual commits pushed. Full291 backend suites and319 frontend files, types,5384 bilingual keys,1102-module build, dry-run and independent browser/source reviews passed. No remote migration. New migration0136 belongs exclusively to unfinishedF46 and is not deployed.
 
 Remaining: F46 combined conflict review/execution and truthful saved run/undo status (backup/reset schema slice independently approved, runtime/UI still active); F53 permission-refresh coalescing; eight-case production merge continuation; legacy contact/membership evidence cleanup; ambiguous historical driver/sale links; real phone-camera verification; unresolved browser-warning attribution; U01–U15 remaining layouts/minimize/visual confirmation; business registration/market/contact and image-rights facts; Telegram token rotation.
+
+| F54 | Invalidated in-flight reads and late local fallback must not restore stale shared HTTP cache. | Integrated b2299a2b; independent bounded PASS, next release pending | 69 focused tests and512 timing schedules; callback-side persistent mirrors and already-started callers remain outside scope. |
+
+## Freshness follow-up candidate — September 8
+
+Production remains c2eb9d57/Worker3931ea55,100%. Next isolated release includes F53 permission-refresh coalescing and session-generation isolation (independent review PASS); F54 HTTP invalidation/in-flight ownership and authoritative server-cache precedence (69 focused checks plus512 independent timing schedules); U05 selected positive profit headline stays green in both themes. Source b2299a2b is integrated, not deployed. Existing callbacks that write persistent queryCache/IndexedDB and already-started caller results are outside F54's proven shared-HTTP-cache boundary. No backend source or migration changes in this follow-up.
+
+F46 is NOT in this candidate. Schema/backup/reset are independently approved locally; backend/UI parity still active. Required corrections: actionable-only manifest with blocked cases shown separately, exact same-request manual resume, changed-value markers after re-preview, complete image counts/primary indication. No incomplete F46 runtime or migration0136 is deployed. U13–U15 mobile Sales layouts are active separately.
