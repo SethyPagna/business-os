@@ -1731,19 +1731,31 @@ function ProductsFullEditor() {
     setBulkActionBusy(true)
     setDeleteConfirmBusy(true)
     try {
-      const deletionRun = await runConcurrentTasks<EntityId, number>(ids, async (id: EntityId) => {
+      const deletionRun = await runConcurrentTasks<EntityId, ProductApiResponse>(ids, async (id: EntityId) => {
         const result = await runProductDeleteMutation(() => productApi.deleteProduct(id, reason), 'Delete product')
         if (result?.success === false) throw new Error(result.error || 'Failed to delete product')
-        return Number(id)
+        return result || {}
       })
-      const { done, failed, failedIds } = summarizeProductRun(deletionRun)
-      setSelectedIds(new Set(failedIds))
+      const { failed, failedIds } = summarizeProductRun(deletionRun)
+      const pendingIds = deletionRun.successes
+        .filter((entry) => entry.value?.pending === true)
+        .map((entry) => Number(entry.item))
+      const deletedIds = deletionRun.successes
+        .filter((entry) => entry.value?.pending !== true)
+        .map((entry) => Number(entry.item))
+      const serverReceiptIds = deletionRun.successes
+        .filter((entry) => entry.value?.pending !== true && Number(entry.value?.action_history_id || 0) > 0)
+        .map((entry) => Number(entry.item))
+      const legacyDeletedIds = deletedIds.filter((id) => !serverReceiptIds.includes(id))
+      const done = deletedIds.length
+      setSelectedIds(new Set([...failedIds, ...pendingIds]))
       await load(true)
-      const deletedSnapshots = snapshots.filter((snapshot) => !failedIds.includes(Number(snapshot?.id || 0)))
-      if (done > 0 && deletedSnapshots.length) {
+      if (serverReceiptIds.length) await actionHistory.refreshServerItems()
+      const deletedSnapshots = snapshots.filter((snapshot) => legacyDeletedIds.includes(Number(snapshot?.id || 0)))
+      if (deletedSnapshots.length) {
         let restoredEntries: RestoredProductEntry[] = []
         actionHistory.pushAction({
-          label: `Delete ${done} product${done === 1 ? '' : 's'}`,
+          label: `Delete ${deletedSnapshots.length} product${deletedSnapshots.length === 1 ? '' : 's'}`,
           undo: async () => {
             restoredEntries = await restoreDeletedProducts(deletedSnapshots, 'Undo product delete')
           },
@@ -1760,8 +1772,9 @@ function ProductsFullEditor() {
           },
         })
       }
-      if (failed) notify(`Deleted ${done}, ${failed} failed`, 'warning')
-      else notify(`${done} product${done > 1 ? 's' : ''} deleted`)
+      if (pendingIds.length || failed) {
+        notify(`Deleted ${done}, ${pendingIds.length} pending review, ${failed} failed`, 'warning')
+      } else notify(`${done} product${done > 1 ? 's' : ''} deleted`)
     } catch (e) {
       // Matches runSingleDeleteConfirmed's catch/notify pattern (see above).
       // Before this fix, an error outside the per-id runConcurrentTasks loop
@@ -1889,8 +1902,19 @@ function ProductsFullEditor() {
     setDeleteConfirmBusy(true)
     try {
       const snapshot = cloneHistorySnapshot(p)
-      await runProductDeleteMutation(() => productApi.deleteProduct(p.id || 0, reason), 'Delete product')
+      const result = await runProductDeleteMutation(() => productApi.deleteProduct(p.id || 0, reason), 'Delete product')
+      if (result?.success === false) throw new Error(result.error || 'Failed to delete product')
+      if (result?.pending === true) {
+        notify('Product removal submitted for review')
+        return
+      }
       await load(true)
+      if (Number(result?.action_history_id || 0) > 0) {
+        await actionHistory.refreshServerItems()
+        notify('Product deleted')
+        setDetailProduct(null)
+        return
+      }
       let restoredEntries: RestoredProductEntry[] = []
       actionHistory.pushAction({
         label: `Delete product ${snapshot.name || ''}`.trim(),

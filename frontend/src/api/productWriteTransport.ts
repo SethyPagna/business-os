@@ -177,7 +177,10 @@ export async function updateProduct(id: string | number, payload: ProductPayload
 }
 
 export async function deleteProduct(id: string | number, reason?: string): Promise<unknown> {
-  const payload = await withExpectedUpdatedAt('products', id, { reason: reason ?? '' })
+  const payload = ensureClientRequestId(
+    await withExpectedUpdatedAt('products', id, { reason: reason ?? '' }),
+    'product-remove',
+  )
   return route(
     'products:delete',
     () => apiFetch('DELETE', `/api/products/${encodeId(id)}`, payload),
