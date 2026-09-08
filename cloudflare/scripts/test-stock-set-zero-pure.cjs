@@ -90,6 +90,11 @@ const stockReceiptGate = loadReal('lib/stockReceiptGate.ts')
 const sqlBinding = loadReal('lib/sqlBinding.ts')
 const productBatches = loadReal('lib/productBatches.ts', { './db': { getDb: () => db }, './batchCode': batchCode, './sqlBinding': sqlBinding })
 const permissions = loadReal('lib/permissions.ts')
+const branchRoles = loadReal('lib/branchRoles.ts')
+const canonicalBranchIdentity = loadReal('lib/canonicalBranchIdentity.ts', {
+  './db': loadReal('lib/db.ts'),
+  './branchRoles': branchRoles,
+})
 const businessDateWindow = loadReal('lib/businessDateWindow.ts')
 const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './db': { getDb: () => db }, './businessDateWindow': businessDateWindow })
 const lowStockRule = loadReal('lib/lowStockSettings.ts', { './db': { getDb: () => { throw new Error('no DB in this test') } } })
@@ -108,6 +113,7 @@ const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: J
 
 const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/branchRoleGuards': loadReal('lib/branchRoleGuards.ts', { './branchRoles': loadReal('lib/branchRoles.ts') }),
+  '../lib/canonicalBranchIdentity': canonicalBranchIdentity,
   '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/movementBranchName': movementBranchNameKernel,
   '../lib/movementActorName': movementActorNameKernel,
