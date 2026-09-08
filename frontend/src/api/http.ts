@@ -108,6 +108,9 @@ const RECONNECT_REFRESH_CHANNELS = [
 const _cache: Record<string, CacheEntry> = {}
 const _inflight: Record<string, Promise<any>> = {}  // Track in-flight requests to dedupe
 const _inflightStartedAt: Record<string, number> = {}
+// Every local contender (including deduped callers) observes the same server
+// acceptance boundary. Weak ownership retains no completed request history.
+const _successfulServerReads = new WeakSet<Promise<any>>()
 // Only pending work owns tokens; completed query keys leave no generation map.
 const _readCacheTokens = new Set<ReadCacheToken>()
 const _writeInflight = new Map<string, InflightWrite>()
@@ -1141,9 +1144,8 @@ async function raceServerReadWithLocalFallback<T>(
         })
         .then((result) => {
           throwIfRequestAborted(signal)
-          if (hasUsableLocalData(result)) {
-            cacheReadResult(token, result)
-          }
+          // Cache only when this race accepts the local result below. A local
+          // read can finish after server success, auth rejection or cancellation.
           return result
         }))
         .catch((error) => {
@@ -1182,6 +1184,7 @@ async function raceServerReadWithLocalFallback<T>(
 
     if (winner?.source === 'local' && winner.data !== null) {
       throwIfRequestAborted(signal)
+      if (!_successfulServerReads.has(inflightPromise)) cacheReadResult(token, winner.data)
       logCall(channel, sourceLabel ? `${sourceLabel}-local` : 'local-fast', Date.now() - t0)
       trackCacheRead(token, () => inflightPromise
         .then((result) => {
@@ -1212,6 +1215,7 @@ async function raceServerReadWithLocalFallback<T>(
     const localResult = await startLocalRead()
     throwIfRequestAborted(signal)
     if (hasUsableLocalData(localResult)) {
+      if (!_successfulServerReads.has(inflightPromise)) cacheReadResult(token, localResult)
       if (isTransientGatewayError(error?.status)) {
         const recoverySource = sourceLabel
           ? `${sourceLabel}-transient-gateway-local-recovery`
@@ -1306,6 +1310,7 @@ export async function route<T = any>(
           const groupCtrl = searchGroup ? beginSearchGroup(searchGroup) : null
           const promise = trackCacheRead(token, () => tryServerReadWithRetry(serverFn, groupCtrl?.signal || callerSignal, retryTimedOutRead).then(result => {
             throwIfRequestAborted(callerSignal)
+            _successfulServerReads.add(promise)
             cacheReadResult(token, result)
             setServerHealth(true)
             logCall(channel, 'server', Date.now() - t0)
