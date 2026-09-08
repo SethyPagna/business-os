@@ -160,6 +160,20 @@ async function composeBranchTransferStatements(db, quantity) {
   return { statements, takes, uncovered }
 }
 
+function composeExplicitLotTransferStatements(quantity) {
+  return [
+    identity.canonicalTransferAuthorityGuardStatement(1, 2),
+    { sql: 'UPDATE branch_stock SET quantity = quantity - @quantity WHERE product_id = 1 AND branch_id = 1', params: { quantity } },
+    {
+      sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 2, @quantity)
+            ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = quantity + excluded.quantity`,
+      params: { quantity },
+    },
+    decrementBatchStockStrictStatement(101, 1, quantity),
+    incrementBatchStockStatement(101, 2, quantity),
+  ]
+}
+
 let passed = 0
 async function check(name, fn) {
   await fn()
@@ -233,6 +247,20 @@ await check('strict decrement makes a concurrent lot drain abort-and-rollback, n
   assert.strictEqual(lotQty(db, 101, 2) + lotQty(db, 102, 2), 0, 'no phantom destination lot minted')
 })
 
+await check('an explicit-lot concurrent drain rolls back aggregate and lot effects instead of clamping', async () => {
+  const db = freshDb()
+  const statements = composeExplicitLotTransferStatements(5)
+  // The route pre-read saw 6 units in lot A. A concurrent sale then consumes
+  // 4 from that lot and 4 from the aggregate before this transfer batch.
+  db.prepare('UPDATE branch_batch_stock SET quantity = 2 WHERE batch_id = 101 AND branch_id = 1').run()
+  db.prepare('UPDATE branch_stock SET quantity = 8 WHERE product_id = 1 AND branch_id = 1').run()
+  await assert.rejects(wrapDb(db).batch(statements), /CHECK|constraint/i)
+  assert.strictEqual(stockQty(db, 1), 8, 'aggregate source update rolls back')
+  assert.strictEqual(stockQty(db, 2), 0, 'aggregate destination receives nothing')
+  assert.strictEqual(lotQty(db, 101, 1), 2, 'concurrent source-lot value is preserved')
+  assert.strictEqual(lotQty(db, 101, 2), 0, 'destination lot is not minted')
+})
+
 await check('a destination-lot clone is guarded against a concurrent ambiguous branch identity', async () => {
   const db = freshDb()
   const compat = wrapDb(db)
@@ -274,10 +302,10 @@ await check('source lock: BOTH /transfer and /transfer-bulk auto-allocate FIFO f
   // back in and silently re-opening the race.
   assert.ok(/decrementBatchStockStrictStatement\(take\.batchId, fromBranchId, take\.quantity\)/.test(single), '/transfer no-batch decrement must be the STRICT statement')
   assert.ok(/decrementBatchStockStrictStatement\(take\.batchId, fromBranchId, take\.quantity\)/.test(bulk), '/transfer-bulk no-batch decrement must be the STRICT statement')
-  // ...while each route's EXPLICIT-batch leg (a user-picked lot whose quantity
-  // may legitimately trail the branch total) stays CLAMPED.
-  assert.ok(/decrementBatchStockStatement\(sourceBatch\.id, fromBranchId, quantity\)/.test(single), '/transfer explicit-batch leg stays clamped')
-  assert.ok(/decrementBatchStockStatement\(sourceBatchForItem\.id, fromBranchId, item\.quantity\)/.test(bulk), '/transfer-bulk explicit-batch leg stays clamped')
+  // The explicit-batch legs are strict too: their availability reads also
+  // occur before the final batch, so a concurrent drain must abort atomically.
+  assert.ok(/decrementBatchStockStrictStatement\(sourceBatch\.id, fromBranchId, quantity\)/.test(single), '/transfer explicit-batch leg is strict')
+  assert.ok(/decrementBatchStockStrictStatement\(sourceBatchForItem\.id, fromBranchId, item\.quantity\)/.test(bulk), '/transfer-bulk explicit-batch leg is strict')
   assert.equal((single.match(/writeGuard: canonicalTransferAuthorityGuardStatement\(fromBranchId, toBranchId\)/g) || []).length, 2, '/transfer guards explicit and FIFO destination-lot clones')
   assert.equal((bulk.match(/writeGuard: canonicalTransferAuthorityGuardStatement\(fromBranchId, toBranchId\)/g) || []).length, 2, '/transfer-bulk guards explicit and FIFO destination-lot clones')
 })
