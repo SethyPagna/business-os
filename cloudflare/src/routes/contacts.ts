@@ -40,6 +40,13 @@ import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr } from '../lib/b
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { buildContactMergePlan, contactMergeHasDistinctMemberships } from '../lib/contactMerge'
+import {
+  ANONYMOUS_CUSTOMER_ERROR_CODE,
+  ANONYMOUS_CUSTOMER_MUTATION_ERROR,
+  customerIsAnonymousSql,
+  customerIsProfileSql,
+  isAnonymousCustomer,
+} from '../lib/anonymousCustomer'
 
 // Customers, suppliers, and delivery contacts, ported from
 // backend/src/routes/contacts.ts. This never had a real route on Cloudflare
@@ -127,6 +134,38 @@ const DELIVERY_CONTACTS: ContactConfig = {
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 const CONTACT_READ_CACHE_TTL_SECONDS = 20
+
+function anonymousCustomerMutationResponse(c: Context) {
+  return c.json({ error: ANONYMOUS_CUSTOMER_MUTATION_ERROR, code: ANONYMOUS_CUSTOMER_ERROR_CODE }, 409)
+}
+
+async function anonymousCustomerIds(db: ReturnType<typeof getDb>, ids: Array<number | string>): Promise<Set<number>> {
+  const normalized = [...new Set(ids.map(Number).filter((id) => Number.isInteger(id) && id > 0))]
+  const result = new Set<number>()
+  for (const idChunk of chunkForBinding(normalized)) {
+    const placeholders = idChunk.map(() => '?').join(',')
+    const rows = await db.prepare(`SELECT id FROM customers WHERE ${customerIsAnonymousSql()} AND id IN (${placeholders})`).all<{ id: number }>(idChunk)
+    for (const row of rows) result.add(Number(row.id))
+  }
+  return result
+}
+
+async function excludeAnonymousCustomerDuplicateState<T extends {
+  matches: ContactDuplicateMatch[]
+  review: ContactDuplicateReview
+  snapshots: ContactDuplicateCandidateSnapshot[]
+}>(db: ReturnType<typeof getDb>, config: ContactConfig, state: T): Promise<T> {
+  if (config.table !== 'customers' || state.matches.length === 0) return state
+  const excluded = await anonymousCustomerIds(db, state.matches.map((match) => match.id))
+  if (excluded.size === 0) return state
+  const matches = state.matches.filter((match) => !excluded.has(Number(match.id)))
+  return {
+    ...state,
+    matches,
+    review: buildContactDuplicateReview(matches),
+    snapshots: state.snapshots.filter((snapshot) => !excluded.has(Number(snapshot.id))),
+  }
+}
 
 async function getContactReadCacheVersion(env: Env, table: ContactTable): Promise<string> {
   // Customer rows include a computed loyalty balance derived from sales, so
@@ -337,7 +376,11 @@ async function checkContactDuplicateBlock(
 }> {
   const db = getDb(env)
   const phones = collectContactPhones({ phone: subject.phone, address: subject.address }, config.optionMode)
-  const duplicateState = await findContactDuplicateState(db, config.table, { id: subject.id, name: subject.name, phones }, config.optionMode)
+  const duplicateState = await excludeAnonymousCustomerDuplicateState(
+    db,
+    config,
+    await findContactDuplicateState(db, config.table, { id: subject.id, name: subject.name, phones }, config.optionMode),
+  )
   const { matches, review, snapshots } = duplicateState
   const decision = parseContactDuplicateCreateSeparateDecision(decisionInput)
   if (decisionInput != null && !decision) {
@@ -383,7 +426,12 @@ async function duplicateBlockAfterGuardFailure(
   subject: { id?: number | string | null; name: string; phones: string[] },
   decision: ContactDuplicateCreateSeparateDecision | null,
 ): Promise<{ body: Record<string, unknown>; status: number } | null> {
-  const { matches, review } = await findContactDuplicateState(getDb(env), config.table, subject, config.optionMode)
+  const db = getDb(env)
+  const { matches, review } = await excludeAnonymousCustomerDuplicateState(
+    db,
+    config,
+    await findContactDuplicateState(db, config.table, subject, config.optionMode),
+  )
   if (decision && !contactDuplicateDecisionMatches(review, decision)) {
     const top = matches[0]
     return top
@@ -512,7 +560,10 @@ app.get('/customers/membership/:membershipNumber', async (c) => {
   const number = normalizeMembershipNumber(c.req.param('membershipNumber'))
   if (!number) return c.json({ error: 'Membership not found' }, 404)
   const matches = await getDb(c.env).prepare(
-    'SELECT id, name, membership_number FROM customers WHERE lower(trim(membership_number)) = lower(@number) LIMIT 2',
+    `SELECT id, name, membership_number FROM customers
+      WHERE lower(trim(membership_number)) = lower(@number)
+        AND ${customerIsProfileSql()}
+      LIMIT 2`,
   ).all<{ id: number; name: string; membership_number: string }>({ number })
   if (!matches.length) return c.json({ error: 'Membership not found' }, 404)
   if (matches.length !== 1) return c.json({ error: 'Membership is ambiguous' }, 409)
@@ -612,7 +663,7 @@ function registerContactRoutes(config: ContactConfig) {
     if (String(query.fields || '') === 'names') {
       const version = await getContactReadCacheVersion(c.env, config.table)
       const rows = await cachedJsonResponse(c.req.raw, c.executionCtx, version, CONTACT_READ_CACHE_TTL_SECONDS, () =>
-        db.prepare(`SELECT id, name FROM ${config.table} ORDER BY lower(name) ASC`).all<Record<string, unknown>>(),
+        db.prepare(`SELECT id, name FROM ${config.table} ${config.table === 'customers' ? `WHERE ${customerIsProfileSql()}` : ''} ORDER BY lower(name) ASC`).all<Record<string, unknown>>(),
       )
       return c.json(rows)
     }
@@ -631,10 +682,15 @@ function registerContactRoutes(config: ContactConfig) {
       const limit = clampInt(query.limit, CONTACT_PICKER_DEFAULT_LIMIT, 1, CONTACT_PICKER_MAX_LIMIT)
       const version = `${config.table}:${await getVersionWithFallback(c.env, config.table)}`
       const payload = await cachedJsonResponse(c.req.raw, c.executionCtx, version, CONTACT_READ_CACHE_TTL_SECONDS, async () => {
-        const [totalRow, items] = await Promise.all([
-          db.prepare(`SELECT COUNT(*) AS count FROM ${config.table}`).get<{ count: number }>({}),
-          db.prepare(buildContactPickerSql(config.table)).all<Record<string, unknown>>({ limit }),
+        const excludedIds = config.table === 'customers'
+          ? await db.prepare(`SELECT id FROM customers WHERE ${customerIsAnonymousSql()}`).all<{ id: number }>()
+          : []
+        const excluded = new Set(excludedIds.map((row) => Number(row.id)))
+        const [totalRow, rawItems] = await Promise.all([
+          db.prepare(`SELECT COUNT(*) AS count FROM ${config.table} ${config.table === 'customers' ? `WHERE ${customerIsProfileSql()}` : ''}`).get<{ count: number }>({}),
+          db.prepare(buildContactPickerSql(config.table)).all<Record<string, unknown>>({ limit: limit + excluded.size }),
         ])
+        const items = rawItems.filter((row) => !excluded.has(Number(row.id))).slice(0, limit)
         const total = Number(totalRow?.count || 0)
         return { items: items || [], total, limit, truncated: total > (items || []).length }
       })
@@ -650,6 +706,7 @@ function registerContactRoutes(config: ContactConfig) {
     // valid years and makes records on other pages unreachable.
     const baseWhere: string[] = []
     const params: Record<string, unknown> = {}
+    if (config.table === 'customers') baseWhere.push(customerIsProfileSql())
     // Was a `lower(COALESCE(col, '')) LIKE '%term%'` OR-chain across every
     // searchable column (same full-scan cost migrations/0018_products_fts.sql
     // documented for the pre-FTS5 products search, run twice per keystroke
@@ -834,7 +891,11 @@ function registerContactRoutes(config: ContactConfig) {
     const excludeId = query.excludeId || null
     if (!name && !rawPhones.length) return c.json({ matches: [], duplicateReview: buildContactDuplicateReview([]), allowedActions: [] })
     const phones = [...new Set(rawPhones.flatMap((phone) => collectContactPhones({ phone }, config.optionMode)))]
-    const { matches, review } = await findContactDuplicateState(db, config.table, { id: excludeId, name, phones }, config.optionMode)
+    const { matches, review } = await excludeAnonymousCustomerDuplicateState(
+      db,
+      config,
+      await findContactDuplicateState(db, config.table, { id: excludeId, name, phones }, config.optionMode),
+    )
     return c.json({ matches, duplicateReview: review, allowedActions: duplicateAllowedActions(matches) })
   })
 
@@ -853,14 +914,21 @@ function registerContactRoutes(config: ContactConfig) {
   const mismatchOffset = (mismatchPage - 1) * pageSize
   const missingOffset = (missingPage - 1) * pageSize
     const clusters = await findDuplicateContactClusters(db, config.table, config.optionMode, { includeDismissed })
+    const excludedIds = config.table === 'customers'
+      ? await anonymousCustomerIds(db, clusters.flatMap((cluster) => cluster.contacts.map((contact) => contact.id)))
+      : new Set<number>()
+    const visibleClusters = excludedIds.size
+      ? clusters.map((cluster) => ({ ...cluster, contacts: cluster.contacts.filter((contact) => !excludedIds.has(Number(contact.id))) }))
+        .filter((cluster) => cluster.contacts.length > 1)
+      : clusters
     // Attach each contact's "worth knowing before you act" history summary
     // (loyalty points balance for customers, past sales/returns counts for
     // any table) so the review panel can warn a reviewer before they
     // delete a record that would silently orphan that history -- merge
     // already repoints these references, delete does not.
-    const allIds = [...new Set(clusters.flatMap((cluster) => cluster.contacts.map((contact) => contact.id)))]
+    const allIds = [...new Set(visibleClusters.flatMap((cluster) => cluster.contacts.map((contact) => contact.id)))]
     const historyMap = await computeContactHistorySummaryMap(c.env, config.table, allIds)
-    const enriched = clusters.map((cluster) => ({
+    const enriched = visibleClusters.map((cluster) => ({
       ...cluster,
       contacts: cluster.contacts.map((contact) => ({ ...contact, history: historyMap.get(contact.id) || null })),
     }))
@@ -932,6 +1000,9 @@ function registerContactRoutes(config: ContactConfig) {
     ])
     if (!keeper) return c.json({ error: `Contact to keep (id ${keepId}) not found` }, 404)
     if (!merged) return c.json({ error: `Contact to merge (id ${mergeId}) not found` }, 404)
+    if (config.table === 'customers' && (isAnonymousCustomer(keeper) || isAnonymousCustomer(merged))) {
+      return anonymousCustomerMutationResponse(c)
+    }
 
     // A merge endpoint is not a general hard-delete primitive. Re-prove that
     // these two current rows still share the duplicate identity the review UI
@@ -1176,6 +1247,9 @@ function registerContactRoutes(config: ContactConfig) {
       }
       const id = c.req.param('id')
       const db = getDb(c.env)
+      const customer = await db.prepare('SELECT id, is_anonymous FROM customers WHERE id = @id').get<Record<string, unknown>>({ id })
+      if (!customer) return c.json({ error: 'customer not found' }, 404)
+      if (isAnonymousCustomer(customer)) return anonymousCustomerMutationResponse(c)
       const account = await db.prepare('SELECT id FROM portal_accounts WHERE contact_id = @id LIMIT 1').get<{ id: number }>({ id })
       if (!account) return c.json({ error: 'This contact has no storefront account' }, 404)
       // A readable-but-random temporary password (no ambiguous chars).
@@ -1204,6 +1278,7 @@ function registerContactRoutes(config: ContactConfig) {
 
     const current = await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get<Record<string, unknown>>({ id })
     if (!current) return c.json({ error: `${config.entity} not found` }, 404)
+    if (config.table === 'customers' && isAnonymousCustomer(current)) return anonymousCustomerMutationResponse(c)
     const expectedUpdatedAt = getExpectedUpdatedAt(body)
     try {
       assertUpdatedAtMatch(config.entity, current, expectedUpdatedAt)
@@ -1470,6 +1545,7 @@ function registerContactRoutes(config: ContactConfig) {
     const db = getDb(c.env)
     const current = await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get<Record<string, unknown>>({ id })
     if (!current) return c.json({ error: `${config.entity} not found` }, 404)
+    if (config.table === 'customers' && isAnonymousCustomer(current)) return anonymousCustomerMutationResponse(c)
 
     let body: Record<string, unknown> = Object.fromEntries(new URL(c.req.url).searchParams)
     try {
@@ -1520,6 +1596,9 @@ function registerContactRoutes(config: ContactConfig) {
     // Same generous, untuned 50,000 ceiling as products.ts's identical route.
     if (!rawIds.length) return c.json({ error: `No ${config.entity}s selected` }, 400)
     if (rawIds.length > 50000) return c.json({ error: `Select 50,000 or fewer ${config.entity}s per bulk delete` }, 400)
+    if (config.table === 'customers' && (await anonymousCustomerIds(getDb(c.env), rawIds as number[])).size > 0) {
+      return anonymousCustomerMutationResponse(c)
+    }
 
     try {
       const { jobId, totalCount } = await createBulkDeleteJob(c.env, contactBulkDeleteEntityType(config), rawIds as number[], reason, { id: user?.id ?? null, name: actorSnapshot(user) })
@@ -2266,8 +2345,9 @@ app.post('/customers/link-conflicts/relink', async (c) => {
     return c.json({ error: 'customer_id, phone_key and a different target_customer_id are required' }, 400)
   }
   const db = getDb(c.env)
-  const target = await db.prepare('SELECT id, name FROM customers WHERE id = ?').get<{ id: number; name: string | null }>([targetId])
+  const target = await db.prepare('SELECT id, name, is_anonymous FROM customers WHERE id = ?').get<{ id: number; name: string | null; is_anonymous: number }>([targetId])
   if (!target) return c.json({ error: 'Target customer not found.' }, 404)
+  if (isAnonymousCustomer(target)) return anonymousCustomerMutationResponse(c)
   const result = await db.prepare(`
     UPDATE sales SET customer_id = @targetId, updated_at = CURRENT_TIMESTAMP
     WHERE customer_id = @currentId AND ${PHONE_KEY_SQL('customer_phone')} = @phoneKey
@@ -2298,8 +2378,9 @@ app.post('/customers/link-conflicts/resolve-missing', async (c) => {
   let targetId: number
   let created = false
   if (Number.isFinite(requestedTarget) && requestedTarget > 0) {
-    const target = await db.prepare('SELECT id FROM customers WHERE id = ?').get<{ id: number }>([requestedTarget])
+    const target = await db.prepare('SELECT id, is_anonymous FROM customers WHERE id = ?').get<{ id: number; is_anonymous: number }>([requestedTarget])
     if (!target) return c.json({ error: 'Target customer not found.' }, 404)
+    if (isAnonymousCustomer(target)) return anonymousCustomerMutationResponse(c)
     targetId = target.id
   } else {
     const storedPhone = formatPhoneP8(phone)
@@ -2397,8 +2478,9 @@ app.post('/customers/:id/points', async (c) => {
     return c.json({ error: 'Points must be a positive number no greater than 1,000,000.' }, 400)
   }
   const db = getDb(c.env)
-  const customer = await db.prepare('SELECT id, name, membership_number FROM customers WHERE id = ?').get<{ id: number; name: string | null; membership_number: string | null }>([customerId])
+  const customer = await db.prepare('SELECT id, name, membership_number, is_anonymous FROM customers WHERE id = ?').get<{ id: number; name: string | null; membership_number: string | null; is_anonymous: number }>([customerId])
   if (!customer) return c.json({ error: 'Customer not found.' }, 404)
+  if (isAnonymousCustomer(customer)) return anonymousCustomerMutationResponse(c)
   const note = String(body.note || '').trim().slice(0, 500) || null
   // created_by_name is a USER_NAME_SNAPSHOTS column (userIdentity.ts), so the
   // rename cascade rewrites it to the account USERNAME. Stamping the full name
@@ -2443,6 +2525,7 @@ app.get('/customers/points-summary', async (c) => {
 
   const where: string[] = []
   const params: Record<string, unknown> = {}
+  where.push(customerIsProfileSql())
   // Same FTS5 swap as registerContactRoutes above -- see lib/contactSearch.ts.
   // This endpoint is currently unreachable from the frontend (see the
   // comment above this handler), but kept correct rather than left on the
