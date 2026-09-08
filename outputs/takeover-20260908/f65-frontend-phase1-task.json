@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "run_id": "takeover-20260908",
+  "task_id": "f65-conflicts-frontend-phase1",
+  "role": "implementation-worker",
+  "objective": "Add the non-destructive Phase 1 N-row, server-paged selected-conflict review experience while preserving the legacy pair workflow and keeping apply/remove unavailable.",
+  "base_sha": "0d340a183297d22402a50bc3c621440f1964bc47",
+  "mode": "workspace_write",
+  "ownership": {
+    "include": [
+      "frontend/src/components/products/ProductDuplicatesTab.tsx",
+      "frontend/src/components/products/SelectedConflictMergeReviewModal.tsx",
+      "frontend/src/utils/selectedConflictMerge.ts",
+      "frontend/src/utils/selectedConflictActionReview.ts",
+      "frontend/src/api/productWriteTransport.ts",
+      "frontend/src/lang/en.json",
+      "frontend/src/lang/km.json",
+      "frontend/tests/selectedConflictMerge.test.ts",
+      "frontend/tests/selectedConflictMergeReview.test.ts",
+      "frontend/tests/productDuplicatesTab.test.ts",
+      "frontend/tests/selectedConflictActionReview.test.ts",
+      "outputs/takeover-20260908/f65-frontend-phase1-task.json",
+      "outputs/takeover-20260908/f65-frontend-phase1-result.json"
+    ],
+    "exclude": [
+      "cloudflare",
+      "frontend/src/components/products/ProductForm.tsx"
+    ]
+  },
+  "worktree": "C:/Users/mrkl6/Downloads/bos-f65-conflicts-frontend-phase1-20260908",
+  "branch": "codex/f65-conflicts-frontend-phase1-20260908",
+  "dependencies": [
+    "Backend Phase 1 v2 preview/page schema frozen by /root/expense_version_guard",
+    "Backend finalize/apply and remove endpoints remain unavailable"
+  ],
+  "acceptance_criteria": [
+    "Build N-row merge group requests without weakening the existing automatic identity rules",
+    "Load one durable review and page through all review groups using the frozen actor-scoped API",
+    "Show member catalog, stock, lot, supplier/date, source options, original economics, projected economics, blocked reasons, and truthful progress",
+    "Keep Apply and Remove unavailable and clearly describe this as review-only Phase 1",
+    "Preserve the existing legacy pair preview/apply flow"
+  ],
+  "verification": [
+    "Focused utility, transport, and component behavior tests",
+    "Frontend typecheck and i18n verification",
+    "Frontend build",
+    "Actual browser review against the compatible Phase 1 backend when available"
+  ],
+  "side_effect_policy": "workspace_only",
+  "delegation": {"allowed": false, "max_depth": 0}
+}
