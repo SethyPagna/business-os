@@ -5,6 +5,7 @@ import { apiFetch, cacheInvalidate, route } from './http.ts'
 import { getLocalDb } from './lazyLocalDb.ts'
 import { mirrorReadResult, mirrorTable } from './localMirrors.ts'
 import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
+import { ensureClientRequestId } from './requestIds.ts'
 import { contactDisplayAddress } from '../components/contacts/contactOptionUtils.ts'
 
 type SalePayload = ExpectedUpdatedAtPayload
@@ -137,7 +138,9 @@ export function getSales(params: QueryParams = {}, options: SalesReadOptions = {
   )
 }
 
-export async function updateSaleStatus(
+export type PreparedSaleStatusRequest = ExpectedUpdatedAtPayload & { client_request_id: string }
+
+export async function prepareSaleStatusRequest(
   id: number | string,
   saleStatus: unknown,
   notes?: unknown,
@@ -146,13 +149,20 @@ export async function updateSaleStatus(
   // REFUSES a transition to 'cancelled' without a reason, so callers
   // collect it (CancelSaleModal) before calling this.
   extra?: Record<string, unknown> | null,
-): Promise<unknown> {
-  const payload = await withExpectedUpdatedAt('sales', id, {
+): Promise<PreparedSaleStatusRequest> {
+  const payload = await withExpectedUpdatedAt('sales', id, ensureClientRequestId({
     ...getDevicePayload(),
     sale_status: saleStatus,
     notes,
     ...(extra || {}),
-  })
+  }, 'sale-status'))
+  return payload as PreparedSaleStatusRequest
+}
+
+export async function submitSaleStatusRequest(id: number | string, payload: PreparedSaleStatusRequest): Promise<unknown> {
+  if (!String(payload?.client_request_id || '').trim()) {
+    throw new Error('Sale status updates require a prepared client_request_id.')
+  }
   try {
     const result = await route(
       'sales:updateStatus',
@@ -162,13 +172,22 @@ export async function updateSaleStatus(
     )
     const db = await getLocalDb()
     await db.table('sales').update(id, {
-      sale_status: saleStatus,
+      sale_status: payload.sale_status,
       updated_at: getResultTimestamp(result),
     }).catch(() => {})
     return result
   } catch (error) {
-    attachAttempted(error, { sale_status: saleStatus, notes })
+    attachAttempted(error, { sale_status: payload.sale_status, notes: payload.notes })
   }
+}
+
+export async function updateSaleStatus(
+  id: number | string,
+  saleStatus: unknown,
+  notes?: unknown,
+  extra?: Record<string, unknown> | null,
+): Promise<unknown> {
+  return submitSaleStatusRequest(id, await prepareSaleStatusRequest(id, saleStatus, notes, extra))
 }
 
 export async function attachSaleCustomer(

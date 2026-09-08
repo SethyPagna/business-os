@@ -1910,12 +1910,12 @@ assert.match(
 )
 assert.match(
   editReturnModal,
-  /function loadReturnsTransport\(\): Promise<ReturnsTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/returnsTransport\.ts'\)[\s\S]*async function updateReturnRequest\(id: number \| string, payload: ReturnUpdatePayload\): Promise<unknown>[\s\S]*updateReturn\(id, payload\)/,
+  /function loadReturnsTransport\(\): Promise<ReturnsTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/returnsTransport\.ts'\)[\s\S]*async function prepareReturnRequest\(id: number \| string, payload: ReturnUpdatePayload\): Promise<PreparedReturnUpdateRequest>[\s\S]*prepareReturnUpdateRequest\(id, payload\)[\s\S]*async function updateReturnRequest\(id: number \| string, payload: PreparedReturnUpdateRequest\): Promise<unknown>[\s\S]*submitReturnUpdateRequest\(id, payload\)/,
   'customer return update should use the focused returns transport instead of the broad API registry',
 )
 assert.match(
   editReturnModal,
-  /const payload: ReturnUpdatePayload = \{[\s\S]*withLoaderTimeout\(\s*\(\) => updateReturnRequest\(ret\.id, payload\),\s*'Update return',\s*RETURN_UPDATE_TIMEOUT_MS,\s*\)/,
+  /const payload: ReturnUpdatePayload = \{[\s\S]*const prepared = pendingRequest\?\.body \|\| freezeDirectMutationBody\(await prepareReturnRequest\(ret\.id,[\s\S]*savePendingDirectMutation\('return-edit'[\s\S]*withLoaderTimeout\(\s*\(\) => updateReturnRequest\(ret\.id, prepared\),\s*'Update return',\s*RETURN_UPDATE_TIMEOUT_MS,\s*\)/,
   'customer return update should timeout slow return writes through the focused returns transport',
 )
 assert.doesNotMatch(
@@ -2019,7 +2019,7 @@ assert.match(
 )
 assert.match(
   returns,
-  /withLoaderTimeout\(\s*\(\) => updateReturnRequest\(snapshot\.id as number \| string, \{[\s\S]*\}\),\s*'Restore return snapshot',\s*RETURNS_HISTORY_RESTORE_TIMEOUT_MS,\s*\)/,
+  /const submitReturnHistoryRequest = useCallback\(async \(returnId:[\s\S]*withLoaderTimeout\(\s*\(\) => updateReturnRequest\(returnId, body\),\s*'Restore return snapshot',\s*RETURNS_HISTORY_RESTORE_TIMEOUT_MS,\s*\)[\s\S]*const restoreReturnSnapshot = useCallback[\s\S]*freezeDirectMutationBody\(await prepareReturnRequest\(snapshot\.id as number \| string,[\s\S]*savePendingHistoryRequest\(snapshot\.id as number \| string, body\)[\s\S]*await submitReturnHistoryRequest\(snapshot\.id as number \| string, body\)/,
   'return history undo/redo restore should timeout slow return writes',
 )
 assert.doesNotMatch(
