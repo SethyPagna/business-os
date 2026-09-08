@@ -45,6 +45,8 @@ test('dismiss remains sequential while merge uses the atomic batch continuation 
   assert.match(src, /makeSelectedConflictMergeApplyBody\(batchPreview, batchChoices, createClientRequestId\('product-conflict-merge'\)\)/, 'one stable request id is created at final confirmation')
   assert.match(src, /setBatchApplyBody\(body\)[\s\S]*executeSelectedMergeBody\(body\)/, 'the exact confirmed request body is retained before the first write')
   assert.match(src, /resumeSelectedMergeReview[\s\S]*executeSelectedMergeBody\(batchApplyBody\)/, 'manual resume reuses the same request id, manifest, cases, and choices')
+  assert.match(src, /choicesFrozen=\{Boolean\(batchApplyBody\)\}/, 'stock controls freeze for the lifetime of the confirmed request receipt')
+  assert.match(src, /if \(!batchApplyBody\) setBatchChoices/, 'late input cannot change the projection while Resume retains the original body')
   assert.match(src, /runSelectedConflictMergeBatch\(body, \{/)
   assert.match(src, /for \(const item of result\.committedCases\) next\.delete\(item\.caseKey\)/, 'only committed pairs leave the current selection')
   assert.match(src, /batchWriteInFlightRef\.current = false[\s\S]*await load\(\)/, 'a cancelled or unknown write reloads only after transport cache invalidation settles')

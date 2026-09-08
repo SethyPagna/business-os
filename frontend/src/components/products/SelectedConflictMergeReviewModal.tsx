@@ -30,6 +30,7 @@ type Props = {
   result: SelectedConflictMergeApplyResult | null
   committedCases: SelectedConflictMergeApplyResult['committedCases']
   changedCases: Readonly<Record<string, SelectedConflictMergePreviewCase | undefined>>
+  choicesFrozen: boolean
   unknownOutcome: boolean
   needsRefresh: boolean
   canResume: boolean
@@ -91,10 +92,11 @@ function SummaryPair({ label, usdValue, khrValue }: { label: string; usdValue: u
   )
 }
 
-function BeforeAfterCase({ item, previousReview, choice, onChoice, t }: {
+function BeforeAfterCase({ item, previousReview, choice, choiceDisabled, onChoice, t }: {
   item: SelectedConflictMergePreviewCase
   previousReview?: SelectedConflictMergePreviewCase
   choice?: SelectedConflictStockChoice
+  choiceDisabled: boolean
   onChoice: (choice: SelectedConflictStockChoice) => void
   t: Translate
 }) {
@@ -207,7 +209,7 @@ function BeforeAfterCase({ item, previousReview, choice, onChoice, t }: {
           <div className="grid gap-2 sm:grid-cols-2">
             {(['merge', 'write_off'] as const).map((value) => (
               <label key={value} className={`cursor-pointer rounded-lg border px-3 py-2 text-xs ${choice === value ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/30' : 'border-gray-200 dark:border-zinc-700'}`}>
-                <input type="radio" className="mr-2" name={`stock-${item.case_key}`} value={value} checked={choice === value} onChange={() => onChoice(value)} />
+                <input type="radio" className="mr-2" name={`stock-${item.case_key}`} value={value} checked={choice === value} disabled={choiceDisabled} onChange={() => onChoice(value)} />
                 {value === 'merge'
                   ? tr('selected_conflict_move_stock', 'Move stock and lots to the kept product')
                   : tr('selected_conflict_write_off_stock', 'Write off the discarded stock')}
@@ -220,7 +222,7 @@ function BeforeAfterCase({ item, previousReview, choice, onChoice, t }: {
   )
 }
 
-export default function SelectedConflictMergeReviewModal({ preview, localSkipped, choices, working, result, committedCases, changedCases, unknownOutcome, needsRefresh, canResume, canRepreview, onChoice, onConfirm, onResume, onRefresh, onClose, t }: Props) {
+export default function SelectedConflictMergeReviewModal({ preview, localSkipped, choices, working, result, committedCases, changedCases, choicesFrozen, unknownOutcome, needsRefresh, canResume, canRepreview, onChoice, onConfirm, onResume, onRefresh, onClose, t }: Props) {
   const [confirmOpen, setConfirmOpen] = useState(false)
   const tr = (key: string, fallback: string) => {
     const translated = t(key)
@@ -287,7 +289,7 @@ export default function SelectedConflictMergeReviewModal({ preview, localSkipped
             </div>
           ) : null}
 
-          {preview.cases.map((item) => <BeforeAfterCase key={item.case_key} item={item} previousReview={changedCases[item.case_key]} choice={choices[item.case_key]} onChoice={(choice) => onChoice(item.case_key, choice)} t={t} />)}
+          {preview.cases.map((item) => <BeforeAfterCase key={item.case_key} item={item} previousReview={changedCases[item.case_key]} choice={choices[item.case_key]} choiceDisabled={choicesFrozen} onChoice={(choice) => onChoice(item.case_key, choice)} t={t} />)}
 
           {skipped.length || preview.cases.some((item) => item.blocked) ? (
             <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 dark:border-amber-900/50 dark:bg-amber-950/20">

@@ -821,11 +821,12 @@ export default function ProductDuplicatesTab({ t, notify }: {
           result={batchResult}
           committedCases={batchCommittedCases}
           changedCases={batchChangedCases}
+          choicesFrozen={Boolean(batchApplyBody)}
           unknownOutcome={batchUnknownOutcome}
           needsRefresh={batchNeedsRefresh}
           canResume={Boolean(batchApplyBody) && (batchUnknownOutcome || selectedConflictCanResumeSameRequest(batchResult))}
           canRepreview={batchResult?.interruptionCode === 'merge_state_conflict'}
-          onChoice={(caseKey, choice) => setBatchChoices((current) => ({ ...current, [caseKey]: choice }))}
+          onChoice={(caseKey, choice) => { if (!batchApplyBody) setBatchChoices((current) => ({ ...current, [caseKey]: choice })) }}
           onConfirm={() => void applySelectedMergeReview()}
           onResume={() => void resumeSelectedMergeReview()}
           onRefresh={() => void refreshSelectedMergeReview()}
