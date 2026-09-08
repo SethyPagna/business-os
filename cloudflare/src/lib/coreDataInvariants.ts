@@ -28,12 +28,10 @@ import bcrypt from 'bcryptjs'
 // Manager; pos, products, contacts for Employee) -- that meant a brand-new
 // Manager/Employee role on a freshly-seeded instance already had write
 // access to real business data before an admin had reviewed or granted
-// anything. Both now seed to `{}` (nothing granted), matching what
-// PermissionEditor.tsx's own "new role" form already defaults to
-// (Users.tsx line ~270, `permissions: {}`) -- so a freshly-created role
-// behaves the same everywhere it can be created, whether that's the
-// first-boot seed or the "Add role" button. Admin is unchanged (`{all:
-// true}`), the sole exception the spec calls out.
+// anything. Manager still seeds to `{}` (nothing granted), matching what
+// PermissionEditor.tsx's own "new role" form defaults to. Employee receives
+// only the explicitly approved front-line POS/Sales defaults below;
+// unrelated page grants remain absent. Admin is unchanged (`{all: true}`).
 //
 // This only affects instances seeded from empty -- the loop below only
 // force-rewrites the *admin* role's permissions back to this default on
@@ -46,8 +44,6 @@ const DEFAULT_ROLE_PERMISSIONS: Record<string, Record<string, DefaultRolePermiss
   admin: { all: true },
   manager: {},
   employee: {
-    dashboard: true,
-    customer_portal: true,
     pos: true,
     sales: true,
     'sales:status': true,
@@ -57,10 +53,6 @@ const DEFAULT_ROLE_PERMISSIONS: Record<string, Record<string, DefaultRolePermiss
     'sales:bulk': false,
     'sales:import': false,
     'sales:export': false,
-    products: 'review',
-    inventory: 'review',
-    returns: 'review',
-    contacts: 'review',
     'contacts:financial_history': false,
     contacts_suppliers: false,
   },
