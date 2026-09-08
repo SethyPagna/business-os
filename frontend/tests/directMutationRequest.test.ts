@@ -191,6 +191,7 @@ await test('direct-write UI exposes manual exact retry and freezes return edits 
   assert.match(editReturn, /retry_original_request[\s\S]*discard_retry/)
   assert.match(editReturn, /useEffect\(\(\) => \{\s*setPendingRequest\(loadPendingDirectMutation<PreparedReturnUpdateRequest>\('return-edit', user\?\.id, ret\.id\)\)[\s\S]*\}, \[ret\.id, user\?\.id\]\)/)
   assert.match(sales, /salesRef\.current\.find/)
+  assert.match(sales, /const statusUpdatedAt = String\(mutationResult\?\.updated_at[\s\S]*salesRef\.current = nextRows[\s\S]*setSales\(nextRows\)/)
   assert.match(sales, /loadPendingDirectMutationSlot<PreparedSaleStatusRequest>\('sale-status', user\?\.id\)[\s\S]*pendingDirectStatusRef\.current = pending/)
   assert.match(sales, /const replaySaleStatusHistory[\s\S]*await handleStatusChange\([\s\S]*throw new Error/)
   assert.match(sales, /undo: \(\) => replaySaleStatusHistory[\s\S]*redo: \(\) => replaySaleStatusHistory/)

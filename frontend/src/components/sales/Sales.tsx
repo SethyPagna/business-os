@@ -989,6 +989,15 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       if (!isSettlementRequest) savePendingDirectStatus(saleId, null)
       const hasServerSettlementHistory = mutationResult?.actionKind === 'sale.settlement'
         && mutationResult.actionHistoryId != null
+      const statusUpdatedAt = String(mutationResult?.updated_at || '').trim()
+      if (statusUpdatedAt) {
+        const currentRows = salesRef.current
+        const nextRows = currentRows.map((entry) => Number(entry?.id || 0) === numericId
+          ? { ...entry, sale_status: newStatus, updated_at: statusUpdatedAt }
+          : entry)
+        salesRef.current = nextRows
+        setSales(nextRows)
+      }
       notify(`${t('status_updated') || 'Status updated'}: ${getStatusLabel(newStatus, t)}`)
       await loadSales(true)
       void loadSalesStats() // Z3a: refresh the summary aggregate immediately, not only via the sync round-trip
@@ -1013,7 +1022,6 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
           ),
         })
       }
-      const statusUpdatedAt = String(mutationResult?.updated_at || '').trim()
       return statusUpdatedAt ? { statusUpdatedAt } : true
     } catch (error) {
       if (error && typeof error === 'object' && (error as { code?: unknown }).code === 'exchange_rate_changed') {
