@@ -36,7 +36,8 @@ const FastStockInModal = lazyRetry(() => import('./FastStockInModal'), 'inventor
 // the canonical Products -> Stock Changes host. This retained Inventory body
 // must not listen for the shared restore event and reopen a hidden modal.
 import { FAST_STOCK_IN_RESTORE_HOST, minimizeWork } from '../../utils/minimizedWork.ts'
-import { scopedWorkDraftKey } from '../../utils/workDrafts.ts'
+import { clearWorkDraft, scopedWorkDraftKey, writeWorkDraft } from '../../utils/workDrafts.ts'
+import { STOCK_ADJUST_RESTORE_HOST, stockAdjustDraftKey, type StockAdjustDraft } from '../../utils/stockAdjustDraft.ts'
 const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'inventory-export-options') as any
 const ManageBatchesModal = lazyRetry(() => import('./ManageBatchesModal'), 'inventory-manage-batches-modal') as any
 const InventoryReasonManagerModal = lazyRetry(() => import('./InventoryReasonManagerModal'), 'inventory-reason-manager-modal') as any
@@ -1321,6 +1322,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
           },
         })
         notify('Stock adjusted')
+        clearWorkDraft(stockAdjustDraftKey(adjustModal?.id))
         setAdjustModal(null)
         await load(true)
       }
@@ -1344,6 +1346,36 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   // S4-15: minted per modal OPENING, not per component mount -- a page-wide
   // id would fold every adjustment made all day into one Sessions row.
   const receiptSessionIdRef = useRef(Date.now())
+  const closeAdjustAndDiscardDraft = useCallback(() => {
+    clearWorkDraft(stockAdjustDraftKey(adjustModal?.id))
+    setAdjustModal(null)
+  }, [adjustModal?.id])
+  const preserveAndMinimizeAdjust = useCallback(() => {
+    if (!adjustModal || adjustSaving) return
+    const draftKey = stockAdjustDraftKey(adjustModal.id)
+    const initialType = adjustForm.type === 'remove' || adjustForm.type === 'set' ? adjustForm.type : 'add'
+    writeWorkDraft<StockAdjustDraft>(draftKey, {
+      version: 1,
+      product: { ...adjustModal },
+      form: { ...adjustForm },
+      initialType,
+      search: '',
+      receiptSessionId: receiptSessionIdRef.current,
+      attemptId: `inventory-${receiptSessionIdRef.current}`,
+      rows: [],
+    })
+    minimizeWork({
+      key: `stock-adjust-${String(adjustModal.id)}`,
+      kind: 'stock_adjust',
+      ...STOCK_ADJUST_RESTORE_HOST,
+      label: `${tr('adjust_stock', 'Adjust stock')} — ${adjustModal.name || `#${adjustModal.id}`}`,
+      payload: { productId: adjustModal.id },
+      draftKey,
+      requiredPermission: { permissionKey: 'inventory', actionKey: 'adjust' },
+    })
+    notify(tr('minimized_to_chip', 'Minimized. Pick it back up from the chip — nothing was lost.', 'បានបង្រួម។ បន្តវាឡើងវិញពីស្លាក — គ្មានអ្វីបាត់បង់ទេ។'), 'info')
+    setAdjustModal(null)
+  }, [adjustForm, adjustModal, adjustSaving, notify, tr])
   const openAdjust = (p: InventoryProduct) => {
     void ensureInventoryReasonsLoaded()
     receiptSessionIdRef.current = Date.now()
@@ -2627,7 +2659,8 @@ ${inventoryFeesFormulaText}`,
             fmtUSD={fmtUSD}
             getStockQty={getStockQty}
             onAdjust={handleAdjust}
-            onCloseAdjust={() => setAdjustModal(null)}
+            onCloseAdjust={closeAdjustAndDiscardDraft}
+            onMinimizeAdjust={adjustModal ? preserveAndMinimizeAdjust : undefined}
             onCloseTransfer={() => setTransferModal(null)}
             onTransfer={handleTransferStock}
             reasonsByType={reasonsByType}

@@ -13,6 +13,7 @@ import InfoHint from '../shared/InfoHint.tsx'
 import { useFormDirty } from '../../utils/formDirty.ts'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
 import UnsavedChangesPrompt, { type UnsavedChangesPromptItem } from '../shared/UnsavedChangesPrompt.tsx'
+import MinimizeButton from '../shared/MinimizeButton.tsx'
 
 type MoneyFormatter = (value: number) => string
 
@@ -146,6 +147,8 @@ type InventoryStockModalsProps = {
   getStockQty: (product?: InventoryProduct | null) => number
   onAdjust: () => void
   onCloseAdjust: () => void
+  onMinimizeAdjust?: () => void
+  adjustRestoredDirty?: boolean
   onCloseTransfer: () => void
   onTransfer: () => void
   reasonsByType: InventoryReasonGroups
@@ -181,6 +184,8 @@ export default function InventoryStockModals({
   getStockQty,
   onAdjust,
   onCloseAdjust,
+  onMinimizeAdjust,
+  adjustRestoredDirty = false,
   onCloseTransfer,
   onTransfer,
   reasonsByType,
@@ -328,7 +333,7 @@ export default function InventoryStockModals({
   const transferDirty = useFormDirty(transferForm, transferModal ? `transfer-${transferModal.id}` : null)
   // The backdrop, the ✕ and Cancel all reach the same prop today; each is
   // routed through the guard so none of the three can slip past it.
-  const adjustGuard = useCloseGuard({ dirty: adjustDirty.dirty }, onCloseAdjust)
+  const adjustGuard = useCloseGuard({ dirty: adjustDirty.dirty || Boolean(adjustRestoredDirty) }, onCloseAdjust, onMinimizeAdjust)
   const transferGuard = useCloseGuard({ dirty: transferDirty.dirty }, onCloseTransfer)
   // Same in-flight rule the other stock modals use: a dismissal during a
   // save is ignored outright rather than raising a prompt about a form the
@@ -349,6 +354,7 @@ export default function InventoryStockModals({
                 <div className="truncate text-xs text-gray-400 mt-0.5">{adjustModal.name} - Current: {adjustCurrentQuantity} {adjustModal.unit}</div>
               </div>
               <div className="flex shrink-0 items-center gap-1">
+                {onMinimizeAdjust ? <MinimizeButton disabled={adjustSaving} tr={tr} onMinimize={onMinimizeAdjust} /> : null}
                 <button type="button" onClick={requestCloseAdjust} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600" aria-label={t('close') || 'Close'}>
                   <X className="h-4 w-4" />
                 </button>

@@ -44,6 +44,7 @@ const {
   removeMinimizedWork,
 } = await import('../src/utils/minimizedWork.ts')
 const { readWorkDraft, scopedWorkDraftKey, writeWorkDraft } = await import('../src/utils/workDrafts.ts')
+const { readStockAdjustDraft, stockAdjustDraftKey } = await import('../src/utils/stockAdjustDraft.ts')
 
 function signIn(id: number, organization: string): void {
   memory.set(STORAGE_KEYS.USER, JSON.stringify({ id, organization_public_id: organization }))
@@ -166,6 +167,45 @@ assert.equal(getMinimizedWork()[0]?.draftKey, productEditDraftKey, 'a denied hos
 assert.equal(readWorkDraft<{ name: string }>(productEditDraftKey)?.data.name, 'Khmer edit')
 removeMinimizedWork(productEdit.key)
 
+const stockAdjustKey = stockAdjustDraftKey(901)
+writeWorkDraft(stockAdjustKey, {
+  version: 1,
+  product: { id: 901, name: 'Stock item' },
+  form: { product_id: 901, type: 'remove', quantity: 2, reason: 'Damage' },
+  initialType: 'remove',
+  search: '',
+  receiptSessionId: 123,
+  attemptId: 'attempt-stock-901',
+  rows: [],
+})
+assert.equal(readStockAdjustDraft(stockAdjustKey)?.form.reason, 'Damage')
+const mismatchedStockKey = stockAdjustDraftKey(902)
+writeWorkDraft(mismatchedStockKey, {
+  version: 1,
+  product: { id: 902, name: 'Wrong draft' },
+  form: { product_id: 999, type: 'remove' },
+  initialType: 'remove',
+  receiptSessionId: 124,
+  attemptId: 'attempt-stock-902',
+})
+assert.equal(readStockAdjustDraft(mismatchedStockKey), null, 'a draft cannot restore typed stock changes onto a different product id')
+minimizeWork({
+  key: 'stock-adjust-901',
+  kind: 'stock_adjust',
+  pageId: 'products',
+  anchor: 'hub:products:stock_changes',
+  label: 'Adjust stock — Stock item',
+  payload: { productId: 901 },
+  draftKey: stockAdjustKey,
+})
+const stockAdjustEntry = getMinimizedWork()[0]!
+assert.equal(canRestoreMinimizedWork(stockAdjustEntry, () => false), false, 'legacy stock-adjust chips still require current inventory adjustment permission')
+assert.equal(canRestoreMinimizedWork(stockAdjustEntry, (permission, action) => permission === 'inventory' && action === 'adjust'), true)
+dispatchRestore(stockAdjustEntry)
+reparkDeniedRestore(stockAdjustEntry)
+assert.equal(getMinimizedWork()[0]?.draftKey, stockAdjustKey, 'a denied stock-adjust restore reparks its exact product draft')
+removeMinimizedWork(stockAdjustEntry.key)
+
 // A handled event also consumes the pending replay, and removing a chip does
 // not itself make a broad family-draft decision.
 minimizeWork({ key: 'session', kind: 'create_products_session', pageId: 'products', label: 'Create products', draftKey: scopedWorkDraftKey('create_products_session') })
@@ -186,11 +226,21 @@ const stockChangeSource = readFileSync(new URL('../src/components/products/Stock
 const inventorySource = readFileSync(new URL('../src/components/inventory/Inventory.tsx', import.meta.url), 'utf8')
 const stockSessionsSource = readFileSync(new URL('../src/components/products/StockInSessionsSection.tsx', import.meta.url), 'utf8')
 const feesPageSource = readFileSync(new URL('../src/components/fees/FeesPage.tsx', import.meta.url), 'utf8')
+const productsSource = readFileSync(new URL('../src/components/products/Products.tsx', import.meta.url), 'utf8')
+const stockAdjustSource = readFileSync(new URL('../src/components/products/forms/StockAdjustModal.tsx', import.meta.url), 'utf8')
+const inventoryStockModalSource = readFileSync(new URL('../src/components/inventory/InventoryStockModals.tsx', import.meta.url), 'utf8')
 assert.match(traySource, /entry\.draftKey \|\| \(legacyDraftBase \? scopedWorkDraftKey\(legacyDraftBase\) : null\)/)
 assert.match(traySource, /aria-label=\{tr\('minimized_dismiss_hint', 'Dismiss and discard this draft'/)
 assert.match(traySource, /receive_batch: null/, 'per-product receive drafts must never use a family-wide fallback clear')
 assert.match(traySource, /if \(!canRestoreMinimizedWork\(entry, can\)\) \{[\s\S]*?return[\s\S]*?\}\s*navigateTo\(entry\.pageId, entry\.anchor\)/, 'permission must be rechecked before exact page/section navigation and dispatch')
 assert.match(traySource, /edit_product: null/, 'per-product edit drafts must never use a family-wide fallback clear')
+assert.match(traySource, /stock_adjust: null/, 'per-product stock drafts must never use a family-wide fallback clear')
+assert.match(inventoryStockModalSource, /useCloseGuard\(\{ dirty: adjustDirty\.dirty \|\| Boolean\(adjustRestoredDirty\) \}, onCloseAdjust, onMinimizeAdjust\)/, 'X must keep the close guard while its prompt gains the same preserve capability')
+assert.match(inventoryStockModalSource, /<MinimizeButton disabled=\{adjustSaving\} tr=\{tr\} onMinimize=\{onMinimizeAdjust\} \/>/, 'the header minus calls preserve directly, never the X handler')
+assert.match(stockAdjustSource, /writeWorkDraft<StockAdjustDraft>\(currentDraftKey,[\s\S]*?onMinimize\([\s\S]*?onClose\(\)/, 'stock adjust persists before parking and closing')
+assert.match(stockAdjustSource, /clearWorkDraft\(currentDraftKey\)[\s\S]*?onDone\(\)[\s\S]*?onClose\(\)/, 'successful stock writes clear the parked draft before closing')
+assert.match(productsSource, /if \(!canAdjustInventoryStock \|\| !canRestoreMinimizedWork\(entry, can\)\)[\s\S]*?readStockAdjustDraft\(draftKey\)[\s\S]*?consumePendingRestore\('stock_adjust'\)/, 'the canonical host rechecks current permission and the exact draft before restore')
+assert.match(productsSource, /kind: 'stock_adjust'[\s\S]*?\.\.\.STOCK_ADJUST_RESTORE_HOST[\s\S]*?requiredPermission: \{ permissionKey: 'inventory', actionKey: 'adjust' \}/, 'Products parks stock adjustments at the canonical section with current authority metadata')
 assert.match(stockChangeSource, /\.\.\.FAST_STOCK_IN_RESTORE_HOST/, 'the canonical Stock Changes host parks the exact hub destination')
 assert.match(stockChangeSource, /peekPendingRestore\('fast_stockin'\)/, 'the conditionally mounted host must see restores dispatched before it mounted')
 assert.match(stockChangeSource, /FastStockInRestoreCommit onCommit=\{commitFastStockInRestore\}/, 'the chip is accepted only after the lazy modal subtree commits')
