@@ -8,6 +8,7 @@ import react from '@vitejs/plugin-react'
 import { createServer } from 'vite'
 import { updateSalesBulkField, type BulkSaleUpdatePayload } from '../src/api/salesTransport.ts'
 import { updateCustomer } from '../src/api/contactWriteTransport.ts'
+import { resolveSaleCustomerEditorRoute } from '../src/utils/customerIdentity.ts'
 import { __resetApiHealthForTests, __resetApiWriteDedupeForTests, setSyncServerUrl, setSyncToken } from '../src/api/http.ts'
 
 const testDir = dirname(fileURLToPath(import.meta.url))
@@ -20,14 +21,17 @@ const nameModalSource = readFileSync(resolve(frontendRoot, 'src/components/sales
 assert.match(sales, /const canBrowseCustomers = can\('contacts', 'view'\)/)
 assert.match(sales, /const canEditCustomerName = can\('contacts', 'edit'\)/)
 assert.match(sales, /const canEditCustomerMembership = canEditCustomerName && getPermissionTier\('contacts'\) === 'full'/)
-assert.match(sales, /if \(hasCurrentCustomer\)[\s\S]{0,180}if \(!canEditCustomerName\)/, 'a real customer is edited only with Contacts edit permission')
+assert.match(sales, /const initialRoute = resolveSaleCustomerEditorRoute\(sale\)/)
+assert.match(sales, /getCustomerIdentityById\(customerId\)[\s\S]*resolveSaleCustomerEditorRoute\(sale, customer\) === 'assignment'[\s\S]*setSaleCustomerPrompt/)
+assert.match(sales, /resolveSaleCustomerEditorRoute\(sale, customer\) === 'assignment'[\s\S]*if \(!canEditCustomerName\)/, 'a marked current customer routes to assignment before profile edit permission is required')
 assert.match(sales, /setSaleCustomerPrompt\(\{ sale: \{ \.\.\.sale \}, choices: \[\] \}\)/, 'General opens the existing-contact assignment flow')
-assert.match(sales, /getCustomers\(\{ ids: \[String\(customerId\)\] \}\)/, 'a real customer profile is loaded by stable id')
+assert.match(sales, /getCustomerIdentityById\(customerId\)/, 'the current linked identity is loaded without exposing anonymous rows to pickers')
 assert.match(sales, /const updatedAt = String\(customer\.updated_at \|\| ''\)\.trim\(\)[\s\S]{0,160}if \(!updatedAt\) throw/, 'a profile edit refuses to open without the exact server version')
 assert.match(sales, /const payload: Record<string, unknown> = \{ expectedUpdatedAt: form\.updatedAt \}/, 'the reviewed customer version is frozen into the profile PUT')
 assert.match(sales, /payload\.membership_number = afterMembership/, 'membership association is a scoped profile update')
 assert.match(sales, /payload\.__rename_cascade = renameChoice === 'carry' \? 'carry' : 'record_only'/, 'name edits preserve the explicit linked-record choice')
 assert.doesNotMatch(sales, /createCustomer|CustomerFormModal|saleCustomerCreateRecovery/, 'the sale flow cannot create a customer')
+assert.doesNotMatch(sales, /attachSaleCustomer|handleAttachMembership|runSaleMembershipMutation/, 'the removed direct membership writer has no mounted or dead caller')
 assert.doesNotMatch(modalSource, /Replace customer|Create customer|Remove link|onReplace|onCreate|onRemove/, 'the anonymous editor has no replace, create, or remove action')
 assert.match(detail, /t\('sale_customer_edit_entry'\)/, 'the Sale Detail entry point is one localized Edit customer action')
 assert.doesNotMatch(modalSource, /customer\.name[^\n]*includes/, 'server phone results are not hidden by a secondary name filter')
@@ -48,6 +52,10 @@ assert.match(sales, /if \(pendingBulkFieldRequest && !retryRequest\)[\s\S]{0,500
 
 assert.match(sales, /export function isKnownUncommittedSaleCustomerChangeError/)
 console.log('PASS one customer edit entry separates anonymous assignment from scoped real-customer edits')
+
+assert.equal(resolveSaleCustomerEditorRoute({ customer_id: 24969, customer_is_anonymous: 1 }), 'assignment', 'a marked positive customer id uses the assignment editor')
+assert.equal(resolveSaleCustomerEditorRoute({ customer_id: 22305, customer_is_anonymous: 0 }, { is_anonymous: 0 }), 'profile', 'an unmarked real customer named General remains profile-editable')
+console.log('PASS explicit markers route the sale customer editor without name inference')
 
 // Exercise the real transport: the one-sale body and receipt id must arrive
 // unchanged at the durable bulk endpoint.
@@ -234,6 +242,31 @@ try {
   memoryDocument.body.appendChild(container)
   const root = createRoot(container as unknown as Element)
   const common = { saleLabel: 'S-72', choices: [], saving: false, translate, onClose() {}, onAssign() {} }
+
+  function RoutedCustomerEditor({ sale, currentCustomer }: { sale: Record<string, unknown>; currentCustomer?: Record<string, unknown> }) {
+    const route = resolveSaleCustomerEditorRoute(sale, currentCustomer)
+    if (route === 'assignment') return React.createElement(actionModule.default, { ...common, key: 'routed-assignment' })
+    return React.createElement(nameModule.default, {
+      key: 'routed-profile',
+      currentName: String(currentCustomer?.name || ''),
+      currentPhone: String(currentCustomer?.phone || ''),
+      currentMembershipNumber: '',
+      canAssignMembership: false,
+      translate,
+      onSave: async () => true,
+      onClose() {},
+    })
+  }
+
+  await act(async () => root.render(React.createElement(RoutedCustomerEditor, {
+    sale: { id: 72, customer_id: 24969, customer_name: 'General', customer_is_anonymous: 1 },
+  })))
+  assert.match(container.textContent, /General \(anonymous\)/, 'a mounted positive-id marked sale opens assignment')
+  await act(async () => root.render(React.createElement(RoutedCustomerEditor, {
+    sale: { id: 73, customer_id: 22305, customer_name: 'General', customer_is_anonymous: 0 },
+    currentCustomer: { id: 22305, name: 'General', phone: '086897171', is_anonymous: 0 },
+  })))
+  assert.match(container.textContent, /Phone is this customer’s primary identity/, 'a mounted unmarked real General opens profile editing')
 
   await act(async () => root.render(React.createElement(actionModule.default, { ...common, key: 'no-contacts-view' })))
   assert.match(container.textContent, /General \(anonymous\)/)

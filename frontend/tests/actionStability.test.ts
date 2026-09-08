@@ -505,17 +505,15 @@ await runTest('contact tabs use same-tick guards and bounded mutations', () => {
   }
 })
 
-await runTest('sales status and membership actions use shared guards and bounded mutations', () => {
+await runTest('sales status and customer actions use shared guards and bounded mutations', () => {
   const source = readFrontend('src/components/sales/Sales.tsx')
 
   assert.match(source, /import \{ beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(source, /const SALES_STATUS_MUTATION_TIMEOUT_MS = 12000/)
-  assert.match(source, /const SALES_MEMBERSHIP_MUTATION_TIMEOUT_MS = 12000/)
   assert.match(source, /const statusActionRef = useRef<Set<string>>\(new Set\(\)\)/)
-  assert.match(source, /const membershipActionRef = useRef<Set<string>>\(new Set\(\)\)/)
   assert.match(source, /const bulkStatusInFlightRef = useRef\(false\)/)
   assert.match(source, /withLoaderTimeout\(\s*\(\) => getSalesApi\(\)\.submitSaleStatusRequest\(saleId, request\),\s*'Update sale status',\s*SALES_STATUS_MUTATION_TIMEOUT_MS,\s*\)/)
-  assert.match(source, /withLoaderTimeout\(\s*\(\) => getSalesApi\(\)\.attachSaleCustomer\(saleId, payload\),\s*'Attach sale membership',\s*SALES_MEMBERSHIP_MUTATION_TIMEOUT_MS,\s*\)/)
+  assert.doesNotMatch(source, /getSalesApi\(\)\.attachSaleCustomer|handleAttachMembership|runSaleMembershipMutation/, 'the removed direct membership writer cannot bypass the receipt-backed customer action')
   assert.match(source, /if \(!beginKeyedAction\(statusActionRef, actionKey\)\) return false/)
   assert.match(source, /finishKeyedAction\(statusActionRef, actionKey\)[\s\S]*return false/)
   assert.match(source, /const isSettlementRequest = Array\.isArray\(\(extra as \{ payment_details\?: unknown \} \| null\)\?\.payment_details\)/)
@@ -523,10 +521,8 @@ await runTest('sales status and membership actions use shared guards and bounded
   assert.match(source, /const replaySaleStatusHistory[\s\S]*result === true[\s\S]*'statusUpdatedAt' in result[\s\S]*throw new Error/)
   assert.match(source, /const retryPendingDirectStatusRequest[\s\S]*actionHistory\[history\.direction\]\(history\.entryId\)/)
   assert.match(source, /finally \{[\s\S]*finishKeyedAction\(statusActionRef, actionKey\)/)
-  assert.match(source, /if \(!beginKeyedAction\(membershipActionRef, actionKey\)\) return false/)
-  assert.match(source, /await runSaleMembershipMutation\(saleId, \{/)
-  assert.match(source, /await runSaleMembershipMutation\(saleId, payload\)/)
-  assert.match(source, /finally \{[\s\S]*finishKeyedAction\(membershipActionRef, actionKey\)/)
+  assert.match(source, /const submitSaleCustomerChange = async[\s\S]*if \(!beginSingleAction\(bulkStatusInFlightRef, \{ blocked: bulkFieldSaving \|\| saleCustomerSaving \}\)\) return false/)
+  assert.match(source, /savePendingBulkFieldRequest\(payload\)[\s\S]*await updateSalesBulkField\(payload\)/, 'the one-sale customer receipt is saved before its mutation')
   const bulkStart = source.indexOf('  const handleBulkStatusUpdate = async')
   const bulkEnd = source.indexOf('  const exportVisibleSales =', bulkStart)
   assert.ok(bulkStart >= 0 && bulkEnd > bulkStart, 'bulk status handler must remain identifiable')

@@ -5,6 +5,7 @@ import { transformSync } from 'esbuild'
 import {
   filterSelectableCustomerRows,
   isAnonymousCustomerIdentity,
+  resolveSaleCustomerEditorRoute,
   resolveSelectableCustomerById,
 } from '../src/utils/customerIdentity.ts'
 
@@ -28,6 +29,10 @@ assert.equal(resolveSelectableCustomerById(staleRows, 7)?.id, 7)
 const refreshedRows = [{ id: 7, name: 'Selected before sync', is_anonymous: 1 }, staleRows[1]]
 assert.equal(resolveSelectableCustomerById(refreshedRows, 7), null, 'a server marker transition clears a cached selected id')
 assert.deepEqual(filterSelectableCustomerRows(refreshedRows).map((row) => row.id), [8])
+assert.equal(resolveSaleCustomerEditorRoute({ customer_id: 24969, customer_is_anonymous: 1 }), 'assignment')
+assert.equal(resolveSaleCustomerEditorRoute({ customer_id: 24969, customer_is_anonymous: 0 }), 'load-profile')
+assert.equal(resolveSaleCustomerEditorRoute({ customer_id: 24969, customer_is_anonymous: 0 }, { is_anonymous: 0 }), 'profile')
+assert.equal(resolveSaleCustomerEditorRoute({ customer_id: 24969, customer_is_anonymous: 0 }, { is_anonymous: 1 }), 'assignment')
 
 function loadReceipt(): unknown {
   const source = fs.readFileSync(new URL('../src/components/receipt/Receipt.tsx', import.meta.url), 'utf8')
@@ -81,4 +86,4 @@ assert.match(pos, /invalidatePosCustomerReads\(\)/)
 assert.match(pos, /resolveSelectableCustomerById\(rows, selected\.id\)/)
 assert.match(pos, /const checkoutCustomer: CustomerRecord = isSelectableCustomerIdentity\(active\.customer\)/)
 
-console.log('customer anonymous identity: 12 checks passed')
+console.log('customer anonymous identity: 16 checks passed')

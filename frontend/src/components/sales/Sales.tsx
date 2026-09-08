@@ -20,7 +20,6 @@ import ActionHistoryBar from '../shared/ActionHistoryBar'
 import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import { ALL_STATUSES, getStatusLabel } from './StatusBadge'
 import type { SaleCancelPayload } from './CancelSaleModal'
-import { getClientDeviceInfo } from '../../utils/deviceInfo'
 import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { pruneSelectionToVisibleIds } from '../../utils/rowSelection.ts'
@@ -28,7 +27,8 @@ import { createLongPressState, type LongPressState } from '../../utils/longPress
 import { buildTimeActionSections, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.ts'
 import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { buildBulkSaleCancelInput, getSales as fetchSales, getSalesStats as fetchSalesStats, getSalesStatsStrip, SALES_LIST_REQUEST_TIMEOUT_MS, updateSalesBulkField, updateSalesBulkStatus, type BulkSaleStatusItem, type BulkSaleStatusPayload, type BulkSaleUpdatePayload, type PreparedSaleStatusRequest, type SaleAmendmentRequest } from '../../api/salesTransport.ts'
-import { getCustomers, getDeliveryContacts } from '../../api/contactReadTransport.ts'
+import { getCustomerIdentityById, getCustomers, getDeliveryContacts } from '../../api/contactReadTransport.ts'
+import { resolveSaleCustomerEditorRoute } from '../../utils/customerIdentity.ts'
 import { getCustomerRenameImpact, updateCustomer } from '../../api/contactWriteTransport.ts'
 import RenameCascadeModal, { type RenameCascadeChoice, type RenameCascadeRequest } from '../shared/RenameCascadeModal.tsx'
 import { getFeesReport } from '../../api/feesTransport.ts'
@@ -79,7 +79,6 @@ import {
 
 const SALES_USER_OPTIONS_TIMEOUT_MS = 8000
 const SALES_STATUS_MUTATION_TIMEOUT_MS = 12000
-const SALES_MEMBERSHIP_MUTATION_TIMEOUT_MS = 12000
 const SALES_BULK_LINKED_PAGE_SIZE = 100
 const SALES_BULK_LINKED_SEARCH_DEBOUNCE_MS = 180
 // S4-24b: adding lines deducts stock and rewrites the sale's totals in one
@@ -148,6 +147,7 @@ interface SaleRecord extends Record<string, unknown> {
   payment_method?: string
   payment_details?: string | Array<{ method?: string }> | null
   customer_id?: number | null
+  customer_is_anonymous?: number | boolean | null
   notes?: string
   customer_name?: string
   customer_membership_number?: string
@@ -207,16 +207,6 @@ interface SyncContextValue {
   } | null
 }
 
-interface SaleMembershipPayload extends Record<string, unknown> {
-  membershipNumber?: string
-  clearAssignment?: boolean
-  userId?: number | string | null
-  userName?: string | null
-  device_name?: string
-  device_tz?: string
-}
-
-
 interface SaleItemAddition {
   product_id: number
   quantity: number
@@ -247,7 +237,6 @@ interface SalesApi {
   updateSaleStatus: (saleId: number | string, status: string, notes?: string, extra?: Record<string, unknown>) => Promise<unknown>
   prepareSaleStatusRequest: (saleId: number | string, status: string, notes?: string, extra?: Record<string, unknown>) => Promise<PreparedSaleStatusRequest>
   submitSaleStatusRequest: (saleId: number | string, payload: PreparedSaleStatusRequest) => Promise<unknown>
-  attachSaleCustomer: (saleId: number | string, payload: SaleMembershipPayload) => Promise<unknown>
   addSaleItems: (saleId: number | string, items: SaleItemAddition[], notes: string, review: SaleMutationReview) => Promise<unknown>
   // S4-30: amend a recorded sale, and read its history.
   amendSale: (saleId: number | string, request: SaleAmendmentRequest) => Promise<unknown>
@@ -521,7 +510,6 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   const latestLoadRef = useRef<((silent?: boolean) => Promise<void>) | null>(null)
   const loadWatchdogRef = useRef<number | undefined>(undefined)
   const statusActionRef = useRef<Set<string>>(new Set())
-  const membershipActionRef = useRef<Set<string>>(new Set())
   const bulkStatusInFlightRef = useRef(false)
   const bulkStatusSelectionRef = useRef<BulkSaleStatusItem[]>([])
   const bulkRetryKey = `sales.bulk-status.retry:${user?.id || 'anonymous'}`
@@ -896,14 +884,6 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     )
   ), [])
 
-  const runSaleMembershipMutation = useCallback((saleId: number | string, payload: SaleMembershipPayload) => (
-    withLoaderTimeout(
-      () => getSalesApi().attachSaleCustomer(saleId, payload),
-      'Attach sale membership',
-      SALES_MEMBERSHIP_MUTATION_TIMEOUT_MS,
-    )
-  ), [])
-
   // `extra` carries the full reviewed tender snapshot when SaleDetailModal
   // settles an awaiting-payment sale. That write returns a durable server
   // history row; ordinary status changes keep the local reversible entry.
@@ -1202,87 +1182,6 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       return Array.isArray(result?.entries) ? result.entries : []
     } catch {
       return null
-    }
-  }
-
-  const handleAttachMembership = async (saleId: number | string, membershipNumber: string): Promise<boolean> => {
-    // View-only (Part 557): linking a membership edits the sale's customer,
-    // which the backend gates behind Full sales.customer access; refuse
-    // client-side too, including an explicit action-off override.
-    if (!canChangeSaleCustomer) {
-      notify?.(translateOr('perm_view_only_action', 'View only: you do not have permission to change sales.'), 'error')
-      return false
-    }
-    const numericId = Number(saleId)
-    if (!Number.isFinite(numericId)) return false
-    const actionKey = String(numericId)
-    if (!beginKeyedAction(membershipActionRef, actionKey)) return false
-    const previousSale = sales.find((entry) => Number(entry?.id || 0) === numericId)
-    const previousMembershipNumber = String(previousSale?.customer_membership_number || '').trim()
-    const nextMembershipNumber = String(membershipNumber || '').trim()
-    try {
-      const device = getClientDeviceInfo()
-      await runSaleMembershipMutation(saleId, {
-        membershipNumber: nextMembershipNumber,
-        userId: user?.id || null,
-        userName: user?.name || null,
-        device_name: device.deviceName || '',
-        device_tz: device.deviceTz || '',
-      })
-      notify(translateOr('membership_attached_to_sale', 'Membership linked to sale'))
-      await loadSales()
-      window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
-      window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'returns' } }))
-      if (previousSale && previousMembershipNumber.toLowerCase() !== nextMembershipNumber.toLowerCase()) {
-        actionHistory.pushAction({
-          label: `Link membership on sale ${previousSale.receipt_number || numericId}`,
-          undo: async () => {
-            const deviceInfo = getClientDeviceInfo()
-            const payload = previousMembershipNumber
-              ? {
-                  membershipNumber: previousMembershipNumber,
-                  userId: user?.id || null,
-                  userName: user?.name || null,
-                  device_name: deviceInfo.deviceName || '',
-                  device_tz: deviceInfo.deviceTz || '',
-                }
-              : {
-                  clearAssignment: true,
-                  userId: user?.id || null,
-                  userName: user?.name || null,
-                  device_name: deviceInfo.deviceName || '',
-                  device_tz: deviceInfo.deviceTz || '',
-                }
-            await runSaleMembershipMutation(saleId, payload)
-            await loadSales(true)
-            window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
-            window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'returns' } }))
-          },
-          redo: async () => {
-            const deviceInfo = getClientDeviceInfo()
-            await runSaleMembershipMutation(saleId, {
-              membershipNumber: nextMembershipNumber,
-              userId: user?.id || null,
-              userName: user?.name || null,
-              device_name: deviceInfo.deviceName || '',
-              device_tz: deviceInfo.deviceTz || '',
-            })
-            await loadSales(true)
-            window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
-            window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'returns' } }))
-          },
-        })
-      }
-      return true
-    } catch (error) {
-      if (isWriteConflict(error)) {
-        await loadSales()
-        return false
-      }
-      notify(getErrorMessage(error, translateOr('failed_to_attach_membership', 'Failed to link membership')), 'error')
-      return false
-    } finally {
-      finishKeyedAction(membershipActionRef, actionKey)
     }
   }
 
@@ -1966,7 +1865,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
   }
   const openSaleCustomerEdit = (sale: SaleRecord) => {
     const customerId = Number(sale.customer_id)
-    const hasCurrentCustomer = Number.isFinite(customerId) && customerId > 0
+    const initialRoute = resolveSaleCustomerEditorRoute(sale)
     const pendingBelongsToSale = pendingBulkFieldRequest?.action.kind === 'customer'
       && pendingBulkFieldRequest.items.length === 1
       && Number(pendingBulkFieldRequest.items[0]?.id) === Number(sale.id)
@@ -1975,14 +1874,17 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
       return
     }
     saleCustomerSearchVersionRef.current += 1
-    if (hasCurrentCustomer) {
-      if (!canEditCustomerName) {
-        notify(translateOr('sale_customer_profile_permission', 'Editing a linked customer needs Contacts edit permission.'), 'error')
-        return
-      }
-      void getCustomers({ ids: [String(customerId)] }).then((result) => {
+    if (initialRoute === 'load-profile') {
+      void getCustomerIdentityById(customerId).then((result) => {
         const customer = customerRows(result).find((row) => Number(row.id) === customerId)
         if (!customer) throw new Error(translateOr('sale_customer_current_unavailable', 'The current customer is unavailable.'))
+        if (resolveSaleCustomerEditorRoute(sale, customer) === 'assignment') {
+          setSaleCustomerPrompt({ sale: { ...sale }, choices: [] })
+          return
+        }
+        if (!canEditCustomerName) {
+          throw new Error(translateOr('sale_customer_profile_permission', 'Editing a linked customer needs Contacts edit permission.'))
+        }
         const updatedAt = String(customer.updated_at || '').trim()
         if (!updatedAt) throw new Error(translateOr('sale_customer_current_load_failed', 'Unable to load the current customer.'))
         setSaleCustomerNameForm({
