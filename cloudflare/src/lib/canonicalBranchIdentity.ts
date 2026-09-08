@@ -83,7 +83,10 @@ export function isCanonicalTransferSelection(
   fromBranchId: number,
   toBranchId: number,
 ): boolean {
-  return Number(pair.warehouse.id) === fromBranchId && Number(pair.shop.id) === toBranchId
+  const shopId = Number(pair.shop.id)
+  const warehouseId = Number(pair.warehouse.id)
+  return (warehouseId === fromBranchId && shopId === toBranchId)
+    || (shopId === fromBranchId && warehouseId === toBranchId)
 }
 
 /**
@@ -105,17 +108,35 @@ export function canonicalTransferAuthorityGuardStatement(
         AND (SELECT COUNT(*) FROM branches
           WHERE COALESCE(is_active, 0) = 1
             AND LOWER(TRIM(name)) = 'shop') = 1
-        AND EXISTS (
-          SELECT 1 FROM branches
-          WHERE id = @transfer_from_branch_id
-            AND COALESCE(is_active, 0) = 1
-            AND LOWER(TRIM(name)) = 'warehouse'
-        )
-        AND EXISTS (
-          SELECT 1 FROM branches
-          WHERE id = @transfer_to_branch_id
-            AND COALESCE(is_active, 0) = 1
-            AND LOWER(TRIM(name)) = 'shop'
+        AND (
+          (
+            EXISTS (
+              SELECT 1 FROM branches
+              WHERE id = @transfer_from_branch_id
+                AND COALESCE(is_active, 0) = 1
+                AND LOWER(TRIM(name)) = 'warehouse'
+            )
+            AND EXISTS (
+              SELECT 1 FROM branches
+              WHERE id = @transfer_to_branch_id
+                AND COALESCE(is_active, 0) = 1
+                AND LOWER(TRIM(name)) = 'shop'
+            )
+          )
+          OR (
+            EXISTS (
+              SELECT 1 FROM branches
+              WHERE id = @transfer_from_branch_id
+                AND COALESCE(is_active, 0) = 1
+                AND LOWER(TRIM(name)) = 'shop'
+            )
+            AND EXISTS (
+              SELECT 1 FROM branches
+              WHERE id = @transfer_to_branch_id
+                AND COALESCE(is_active, 0) = 1
+                AND LOWER(TRIM(name)) = 'warehouse'
+            )
+          )
         )
       )`,
     params: {

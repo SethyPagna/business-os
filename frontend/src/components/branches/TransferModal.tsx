@@ -25,7 +25,7 @@ import { buildProductGroups } from '../../utils/productGrouping.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import ProductOptionSheet from '../shared/ProductOptionSheet.tsx'
-import { branchCanBeTransferDestination, branchCanBeTransferSource, branchRoleFromName } from '../../utils/branchRoles.ts'
+import { branchCanBeTransferDestination, branchCanBeTransferSource, branchCanTransferBetween, branchRoleFromName } from '../../utils/branchRoles.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
 
@@ -332,14 +332,18 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
     }
   }, [])
 
-  // Stock moves warehouse -> shop, refused on the same shared predicate the
-  // Worker rejects on (utils/branchRoles.ts). The wrong-direction branches
-  // stay VISIBLE and inert rather than disappearing, so the rule is legible
-  // instead of the list looking arbitrarily short. The hint below the source
-  // select only makes sense where a canonical warehouse exists.
-  const hasWarehouseBranch = useMemo(
-    () => branches.some((branch) => branchRoleFromName(branch.name) === 'warehouse'),
+  // Stock can move in either direction between the one canonical Shop and
+  // Warehouse. Other and same-role destinations stay visible but inert so a
+  // stale or ambiguous branch list cannot create a stock-action identity.
+  const hasCanonicalTransferPair = useMemo(
+    () => branches.some((branch) => branchRoleFromName(branch.name) === 'shop')
+      && branches.some((branch) => branchRoleFromName(branch.name) === 'warehouse'),
     [branches],
+  )
+
+  const selectedSourceBranch = useMemo(
+    () => branches.find((branch) => String(branch.id) === String(fromBranch)) || null,
+    [branches, fromBranch],
   )
 
   const branchOptions = useMemo<AppSelectOption[]>(() => [
@@ -358,9 +362,24 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
       .map((branch) => ({
         value: branch.id,
         label: branch.name,
-        disabled: !branchCanBeTransferDestination(branch.name),
+        disabled: !branchCanBeTransferDestination(branch.name)
+          || !branchCanTransferBetween(selectedSourceBranch?.name, branch.name),
       })),
-  ], [branches, fromBranch, t])
+  ], [branches, fromBranch, selectedSourceBranch, t])
+
+  const setTransferSource = useCallback((nextSource: string) => {
+    setFromBranch(nextSource)
+    const nextSourceBranch = branches.find((branch) => String(branch.id) === String(nextSource))
+    const currentDestinationBranch = branches.find((branch) => String(branch.id) === String(toBranch))
+    if (!branchCanTransferBetween(nextSourceBranch?.name, currentDestinationBranch?.name)) setToBranch('')
+  }, [branches, toBranch])
+
+  const requireCanonicalTransferDirection = useCallback((): boolean => {
+    const destinationBranch = branches.find((branch) => String(branch.id) === String(toBranch))
+    if (branchCanTransferBetween(selectedSourceBranch?.name, destinationBranch?.name)) return true
+    notify(t('transfer_canonical_pair_only') || 'Transfers move stock only between Shop and Warehouse.', 'error')
+    return false
+  }, [branches, notify, selectedSourceBranch, t, toBranch])
 
   const invalidQuantityText = settings?.language === 'km'
     ? 'ចំនួនផ្ទេរត្រូវតែធំជាងសូន្យ។'
@@ -797,6 +816,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
       notify(t('transfer_same_branch_error') || 'Source and destination cannot be the same', 'error')
       return
     }
+    if (!requireCanonicalTransferDirection()) return
     if (!requireTransferReason()) return
     // The listing is only fetched once something asks for it. Ask, and
     // re-enter through the ref once it lands, so the confirm can show real
@@ -834,6 +854,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
       notify(t('transfer_same_branch_error') || 'Source and destination cannot be the same', 'error')
       return
     }
+    if (!requireCanonicalTransferDirection()) return
 
     const qty = Number(quantity)
     if (!Number.isFinite(qty) || qty <= 0) {
@@ -926,6 +947,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
       notify(t('transfer_same_branch_error') || 'Source and destination cannot be the same', 'error')
       return
     }
+    if (!requireCanonicalTransferDirection()) return
     if (!selectedEntries.length) return
     if (!requireTransferReason()) return
 
@@ -1083,11 +1105,11 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                 buttonClassName="w-full"
                 value={fromBranch}
                 options={branchOptions}
-                onChange={setFromBranch}
+                onChange={setTransferSource}
                 ariaLabel={t('from_branch') || 'From Branch'}
               />
-              {hasWarehouseBranch ? (
-                <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">{t('transfer_source_warehouse_only') || 'Transfers move stock from Warehouse to Shop.'}</p>
+              {hasCanonicalTransferPair ? (
+                <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">{t('transfer_canonical_pair_only') || 'Transfers move stock only between Shop and Warehouse.'}</p>
               ) : null}
             </div>
 

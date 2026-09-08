@@ -18,6 +18,9 @@
 // against the Worker's constants by Cloudflare's branch guard tests.
 export const BRANCH_RULE_MESSAGE_KEYS: ReadonlyArray<readonly [string, string]> = [
   ['Only allow Shop sale. Please transfer to Shop first.', 'pos_warehouse_not_sellable'],
+  ['Transfers move stock only between Shop and Warehouse.', 'transfer_canonical_pair_only'],
+  // Keep the previous one-way response localized while an older cached
+  // Worker or queued offline response is still in flight.
   ['Transfers move stock from Warehouse to Shop.', 'transfer_source_warehouse_only'],
   [
     'Stock transfer is unavailable because the branch setup must contain exactly one active Shop and one active Warehouse. Ask an administrator to repair the branch records before trying again.',

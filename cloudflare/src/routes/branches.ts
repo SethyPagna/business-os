@@ -31,8 +31,9 @@ import {
   type CanonicalTransferBranchRow,
   type CanonicalTransferPair,
 } from '../lib/canonicalBranchIdentity'
-// Transfers run warehouse -> shop. The direction rule lives with the two
-// canonical branch roles rather than being restated at each call site.
+// Transfers run in either direction between Shop and Warehouse. The exact
+// opposite-role rule lives with the canonical branch roles rather than being
+// restated at each call site.
 import { TRANSFER_DIRECTION_ERROR, transferDirectionError } from '../lib/branchRoleGuards'
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/productSearchQuery'
 import type { Env } from '../index'
@@ -421,8 +422,8 @@ app.post('/transfer', async (c) => {
   }
   // Direction, on the same shared predicate the TransferModal's two selects
   // grey out with (lib/branchRoles.ts). Same-branch is rejected above; this
-  // is the other half of the rule -- the shop never sends stock away and the
-  // warehouse never receives it.
+  // is the other half of the rule: endpoints must have opposite canonical
+  // Shop/Warehouse roles in either order.
   const directionError = transferDirectionError(fromBranch?.name, toBranch?.name)
     || (!isCanonicalTransferSelection(canonicalTransferPair, fromBranchId, toBranchId)
       ? TRANSFER_DIRECTION_ERROR
