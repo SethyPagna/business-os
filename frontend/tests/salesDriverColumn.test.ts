@@ -125,15 +125,15 @@ for (const [label, pattern] of [
   assert.equal(breakpointOf(className), breakpointOf(branchHeader), `the driver ${label} must match the header's breakpoint`)
 }
 
-// Phone card: the driver is not just present but NAMED. Cashier / branch /
-// driver all shared one unlabeled pipe-separated meta line, so a bare "Sok
-// Dara" could equally have been the cashier. The desktop table has a column
-// header to disambiguate; the card needs the label itself.
+// Phone card: customer phone and delivery are one compact line. The driver's
+// actual name is shown directly; an aria-label retains the semantic Delivery
+// cue without the repeated visible "Driver:" form label.
 const mobileCardStart = salesSurface.indexOf('space-y-2 md:hidden')
 assert.ok(mobileCardStart > 0, 'expected to find the phone card list in SalesListSurface')
 const mobileCardSource = salesSurface.slice(mobileCardStart)
 assert.match(mobileCardSource, /const driverLabel = resolveDriverLabel\(sale\)/, 'the phone card must also resolve the driver label')
-assert.match(mobileCardSource, /\{driverLabel \? <span>\| \{t\('driver'\)}: \{driverLabel}<\/span> : null}/, 'the phone card must NAME the driver, not show a bare name')
+assert.match(mobileCardSource, /\{driverLabel \? <><span aria-hidden="true">\|<\/span><span aria-label=\{`\$\{t\('delivery'\)[\s\S]*?\{driverLabel}<\/span><\/> : null}/, 'the phone card identifies delivery accessibly while showing the name directly')
+assert.doesNotMatch(mobileCardSource, /\{t\('driver'\)\}:/, 'the compact contact row has no visible Driver prefix')
 
 // ---------------------------------------------------------------------------
 // 3. A stored preference written BEFORE the driver column existed must not
