@@ -38,6 +38,7 @@ import {
   normalizeReportOptions,
   normalizeReportStyle,
   normalizeTotals,
+  persistReportStyleChoice,
   periodLabel,
   readStoredJson,
   reportFileName,
@@ -576,6 +577,20 @@ test('options / style persistence is tolerant of garbage and round-trips through
   assert.deepEqual(readStoredJson(throwing, 'k', normalizeReportOptions), DEFAULT_REPORT_OPTIONS)
   assert.doesNotThrow(() => writeStoredJson(throwing, 'k', 1))
   assert.deepEqual(readStoredJson(null, 'k', normalizeReportOptions), DEFAULT_REPORT_OPTIONS)
+})
+
+test('resetting an explicit report style stays reset after remount', () => {
+  const store = new Map<string, string>([[REPORT_STORAGE_KEYS.style, JSON.stringify('excel')]])
+  const storage = {
+    getItem: (key: string) => store.get(key) ?? null,
+    setItem: (key: string, value: string) => { store.set(key, value) },
+  }
+
+  assert.equal(readStoredJson(storage, REPORT_STORAGE_KEYS.style, normalizeReportStyle), 'excel', 'the first mount reads the explicit style')
+  persistReportStyleChoice(storage, null)
+  const remountedChoice = readStoredJson(storage, REPORT_STORAGE_KEYS.style, normalizeReportStyle)
+  assert.equal(remountedChoice, null, 'the reset state survives a new mount')
+  assert.equal(remountedChoice ?? defaultReportStyle(true), 'receipt', 'a compact remount follows its responsive default')
 })
 
 test('labels: hours read as a clock range, weeks as a Monday–Sunday span, months as mm/yyyy', () => {
