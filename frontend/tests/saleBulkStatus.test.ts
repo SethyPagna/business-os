@@ -15,7 +15,7 @@ let calls: Record<string,unknown>[] = [], notices: string[] = [], selection: unk
 let statusPrompt: unknown
 const frozen = {current:[] as unknown[]}
 const context = {
-  selectedSales:selected, canChangeSaleStatus:true, bulkStatusInFlightRef:{current:false}, bulkStatusSelectionRef:frozen, bulkStatusSaving:'',
+  selectedSales:selected, canBulkSales:true, canChangeSaleStatus:true, bulkStatusInFlightRef:{current:false}, bulkStatusSelectionRef:frozen, bulkStatusSaving:'',
   beginSingleAction:()=>true, finishSingleAction:()=>{}, setCancelPrompt:()=>{}, setStatusPrompt:(value:unknown)=>{statusPrompt=value},
   translateOr:(_key:string,fallback:string)=>fallback, getStatusLabel:(value:string)=>value, transitionMovesStock:()=>false, t:()=>'', setBulkStatusSaving:()=>{},
   updateSalesBulkStatus:async(payload:Record<string,unknown>)=>{calls.push(payload);if(reject)throw Error('stale');return {changedCount:1,unchangedCount:1}},
@@ -108,7 +108,8 @@ assert.equal(unrelatedRead.valid,true,'unrelated pending reads retain their cach
 console.log('PASS actual bulk transport invalidates warm actionHistory cache before resolving')
 
 // Execute the production persistence hooks, not a signature-only test shim.
-const persistenceSource=source.slice(source.indexOf('  const bulkRetryKey ='),source.indexOf('  const aliveRef ='))
+const persistenceStart=source.indexOf('  const bulkRetryKey =')
+const persistenceSource=source.slice(persistenceStart,source.indexOf('  useEffect(() => {',persistenceStart))
 const persistenceCode=ts.transpileModule(`${persistenceSource}; return {pendingBulkRequest,savePendingBulkRequest}`,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText
 const mount=(actor:number,unavailable=false)=>new Function('user','useState','useRef','useMemo','sessionStorage',persistenceCode)(
   {id:actor},(initial:unknown)=>[initial,()=>{}],(initial:unknown)=>({current:initial}), (fn:()=>unknown)=>fn(),

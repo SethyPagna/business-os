@@ -177,24 +177,22 @@ for (const [, rel] of WRITERS) {
 }
 ok(true, `no writer hides a JS comment inside a prepared SQL statement (${WRITERS.length} files)`)
 
-// Write-offs: the damaged-lot writer takes its actor as an argument, so pin
-// every call site instead of the writer.
+// Write-offs: customer return creation now plans the damaged-lot INSERT in
+// the atomic batch. Pin the planned statement's actor and the separate edit
+// batch rather than expecting the removed pre-transaction helper call.
 const returnsSrc = read('src/routes/returns.ts')
-const damagedLotCalls = returnsSrc.split('createDamagedLot(db, {').slice(1)
-assert.equal(damagedLotCalls.length, 1, `the create route should have one external createDamagedLot write, found ${damagedLotCalls.length}`)
-let newWriteOffs = 0
-for (const [i, chunk] of damagedLotCalls.entries()) {
-  const head = chunk.slice(0, 600)
-  if (/userName:\s*actorSnapshot\(user\)/.test(head)) { newWriteOffs += 1; continue }
-  assert.fail(`createDamagedLot call site #${i + 1} does not stamp actorSnapshot(user)`)
-}
-assert.equal(newWriteOffs, 1)
+assert.doesNotMatch(returnsSrc, /createDamagedLot\(db, \{/, 'customer return create must keep damaged-lot creation inside its atomic statement plan')
+assert.match(
+  returnsSrc,
+  /createDamagedLotStatement\(\{[\s\S]*?userId: authenticatedActorId, userName: actorSnapshot\(user\)/,
+  'the atomic create plan must stamp damaged lots with the session username',
+)
 assert.match(
   returnsSrc,
   /INSERT INTO damaged_stock_lots\([\s\S]*?created_by_user_id,created_by_user_name[\s\S]*?userId: user\?\.id \?\? null, userName: actorSnapshot\(user\)/,
   'the atomic edit batch must stamp new damaged lots with the session username too',
 )
-ok(true, 'write-off (damaged_stock_lots) actor is session-derived in both create and atomic edit paths')
+ok(true, 'write-off (damaged_stock_lots) actor is session-derived in both atomic create and edit paths')
 
 // sales.ts is the one writer that trusted the CLIENT rather than a wrong
 // server field, so it gets its own explicit pin.

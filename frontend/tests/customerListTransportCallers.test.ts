@@ -10,9 +10,8 @@
 // 70-second stall.
 //
 // The rule this file enforces: only the Contacts page (which IS the paged
-// customers list) and the POS customer picker (a debounced, page-capped
-// typeahead plus a bounded `ids=` read) may touch that transport at all,
-// and neither may ask for the list unfiltered. Any other component that
+// customers list) may touch that generic transport. POS and Sales use the
+// narrower sales-customer picker transport, checked separately below. Any other component that
 // needs a customer either has its id already (use `ids=`) or wants a
 // search (use the picker's pattern) -- a whole-table download is never the
 // answer, and this test fails the moment one reappears.
@@ -36,14 +35,6 @@ const ALLOWED = new Map<string, string>([
   [
     'components/contacts/CustomersTab.tsx',
     'the Contacts page: it IS the customers list, and reads it one page at a time',
-  ],
-  [
-    'components/pos/POS.tsx',
-    'the shared customer picker/typeahead: debounced server search, capped page size, ids= by id',
-  ],
-  [
-    'components/sales/Sales.tsx',
-    'the bulk customer reassignment picker: debounced server search at a bounded page size',
   ],
 ])
 
@@ -203,11 +194,11 @@ check('the POS picker searches server-side, debounced, at a short page size', ()
     `POS customer search debounce must stay between 100ms and 1000ms, found ${debounce[1]}`,
   )
   assert.ok(
-    /getCustomers\(\{[\s\S]*?pageSize:\s*POS_CUSTOMER_PAGE_SIZE/.test(pos),
+    /getSalesCustomerPicker\(\{[\s\S]*?pageSize:\s*POS_CUSTOMER_PAGE_SIZE/.test(pos),
     'the POS search read must send the capped pageSize',
   )
   assert.ok(
-    /getCustomers\(\{\s*ids:/.test(pos),
+    /getSalesCustomerPicker\(\{\s*ids:/.test(pos),
     'the POS by-id read must use the ids= filter, not a list scan',
   )
 })
@@ -251,7 +242,7 @@ check('the Sales bulk customer picker is debounced and page-capped', () => {
   )
   assert.match(
     sales,
-    /getCustomers\(\{\s*search:\s*query,\s*page:\s*1,\s*pageSize:\s*SALES_BULK_LINKED_PAGE_SIZE\s*\}\)/,
+    /getSalesCustomerPicker\(\{\s*search:\s*query,\s*page:\s*1,\s*pageSize:\s*SALES_BULK_LINKED_PAGE_SIZE\s*\}\)/,
     'Sales bulk customer search must send the bounded page size',
   )
   assert.match(
