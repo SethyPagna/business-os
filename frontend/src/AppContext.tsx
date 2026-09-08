@@ -25,6 +25,13 @@ import { refreshAppData } from './utils/appRefresh.ts'
 import { normalizeSettingsWriteOptions } from './utils/settingsWriteOptions.ts'
 import type { SettingsWriteOptions } from './types/settingsContracts.ts'
 import {
+  beginPermissionRefresh,
+  createPermissionRefreshAccumulator,
+  finishPermissionRefresh,
+  notePermissionRefreshIntent,
+  resetPermissionRefreshAccumulator,
+} from './utils/permissionRefreshAccumulator.ts'
+import {
   AppContext,
   SyncContext,
   isBrokenLocalizedString,
@@ -928,9 +935,16 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
 
   // Sync event listeners (loadSettings is defined above).
   const debounceRef = useRef<Record<string, number>>({})
+  const permissionRefreshRef = useRef(createPermissionRefreshAccumulator())
+  const permissionRefreshTimerRef = useRef<number | null>(null)
+  const schedulePermissionRefreshRef = useRef<() => void>(() => {})
   useEffect(() => {
-    if (publicMode) return undefined
+    if (publicMode) {
+      resetPermissionRefreshAccumulator(permissionRefreshRef.current)
+      return undefined
+    }
     const hasRecoverableSession = !!(user?.id || getStoredUserPayload())
+    if (!hasRecoverableSession) resetPermissionRefreshAccumulator(permissionRefreshRef.current)
     if (!hasRecoverableSession) {
       setSyncConnected(false)
       setSyncServerUnreachable(false)
@@ -938,56 +952,59 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     }
     ensureSyncUpdateCacheListener()
 
+    let disposed = false
+    const refreshPermissions = async () => {
+      permissionRefreshTimerRef.current = null
+      if (!beginPermissionRefresh(permissionRefreshRef.current)) return
+      try {
+        await clearLocalBusinessState({
+          clearAuth: false,
+          preserveSyncServer: true,
+          preserveSessionDuration: true,
+          preserveOfflineWork: true,
+          preserveUiDrafts: true,
+        })
+        if (disposed) return
+        const bootstrap = await readAppBootstrap('Runtime bootstrap')
+        if (disposed) return
+        if (bootstrap?.user) {
+          await applyBootstrapPayload(bootstrap, { fallbackUser: user || null })
+        } else if (bootstrap?.unauthorized) {
+          await handleUnauthorizedSession(bootstrap.authError || 'Please sign in again to continue.')
+        } else if (!getStoredUserPayload()) {
+          await loadSettings().catch(() => {})
+        }
+      } finally {
+        if (finishPermissionRefresh(permissionRefreshRef.current)) {
+          schedulePermissionRefreshRef.current()
+        }
+      }
+    }
+    const schedulePermissionRefresh = () => {
+      if (disposed) return
+      if (permissionRefreshTimerRef.current != null) {
+        window.clearTimeout(permissionRefreshTimerRef.current)
+      }
+      permissionRefreshTimerRef.current = window.setTimeout(() => {
+        void refreshPermissions().catch(() => {})
+      }, SYNC.EVENT_DEBOUNCE_MS)
+    }
+    schedulePermissionRefreshRef.current = schedulePermissionRefresh
+    if (permissionRefreshRef.current.pending) schedulePermissionRefresh()
+
     const onUpdate = (e: Event) => {
       const detail = eventDetail<{ channel?: string; reason?: string | null; source?: string | null; payload?: { action?: string; id?: string | number } | null }>(e)
       const channel = String(detail.channel || '')
       if (!channel) return
+      const roleId = (user as { role_id?: string | number | null } | null)?.role_id
+      if (notePermissionRefreshIntent(permissionRefreshRef.current, detail, { userId: user?.id, roleId })) {
+        schedulePermissionRefresh()
+      }
       if (debounceRef.current[channel]) clearTimeout(debounceRef.current[channel])
       debounceRef.current[channel] = window.setTimeout(async () => {
         delete debounceRef.current[channel]
         // Settings changes from other devices apply immediately; no reload needed.
         if (channel === 'settings') loadSettings().catch(() => {})
-        // Live permission propagation. Was: a 'users'/'roles' broadcast
-        // (fired by every PATCH /api/users/:id and PATCH /api/roles/:id --
-        // see cloudflare/src/routes/users.ts) only ever invalidated that
-        // page's own list cache here. It never touched the CURRENT
-        // session's own `user.permissions`/`user.role_permissions` --
-        // those only get re-read from the server on the 'runtime' branch
-        // below, or a fresh login. So an already-logged-in employee whose
-        // permissions (or whose role's permissions) an admin edited on
-        // another device kept running on their stale, cached permission
-        // set until they logged out and back in -- exactly "permission
-        // changes don't take effect for employees" and the follow-on
-        // "POS stops showing products", since hasPermission()/
-        // canAccessPage() read straight off that stale `user` object.
-        // Fixed by re-fetching the session (same bootstrap path 'runtime'
-        // already uses) whenever the broadcast's own id says it actually
-        // affects THIS session -- the edited user's id for 'users', or
-        // this user's own role_id for 'roles' -- rather than for every
-        // unrelated user/role edit anyone makes.
-        const payloadId = detail.payload?.id
-        const currentUserId = user?.id != null ? String(user.id) : null
-        const currentRoleId = (user as { role_id?: string | number | null } | null)?.role_id
-        const affectsThisSession =
-          (channel === 'users' && payloadId != null && currentUserId != null && String(payloadId) === currentUserId) ||
-          (channel === 'roles' && payloadId != null && currentRoleId != null && String(payloadId) === String(currentRoleId))
-        if (channel === 'runtime' || affectsThisSession) {
-          await clearLocalBusinessState({
-            clearAuth: false,
-            preserveSyncServer: true,
-            preserveSessionDuration: true,
-            preserveOfflineWork: true,
-            preserveUiDrafts: true,
-          })
-          const bootstrap = await readAppBootstrap('Runtime bootstrap')
-          if (bootstrap?.user) {
-            await applyBootstrapPayload(bootstrap, { fallbackUser: user || null })
-          } else if (bootstrap?.unauthorized) {
-            await handleUnauthorizedSession(bootstrap.authError || 'Please sign in again to continue.')
-          } else if (!getStoredUserPayload()) {
-            await loadSettings().catch(() => {})
-          }
-        }
         setSyncChannel({
           channel,
           ts: Date.now(),
@@ -1225,8 +1242,16 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     window.addEventListener('sync:conflict', onConflict)
     window.addEventListener('auth:unauthorized', onUnauthorized)
     return () => {
+      disposed = true
       clearTimeout(quickCheck)
       if (pollTimer != null) clearInterval(pollTimer)
+      if (permissionRefreshTimerRef.current != null) {
+        window.clearTimeout(permissionRefreshTimerRef.current)
+        permissionRefreshTimerRef.current = null
+      }
+      if (schedulePermissionRefreshRef.current === schedulePermissionRefresh) {
+        schedulePermissionRefreshRef.current = () => {}
+      }
       window.removeEventListener('sync:update', onUpdate)
       window.removeEventListener('sync:status', onStatus)
       window.removeEventListener('sync:error',  onError)
