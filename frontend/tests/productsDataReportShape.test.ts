@@ -222,6 +222,12 @@ runTest('the list surface renders only reading affordances on a group row', () =
 const INTERPOLATION_WINDOW = 700
 const INTERPOLATION_LOOKBEHIND = 200
 
+function replaceVarsHandles(window: string, name: string): boolean {
+  return new RegExp(
+    `replaceVars\\([\\s\\S]{0,${INTERPOLATION_WINDOW}}?,\\s*\\{[\\s\\S]{0,${INTERPOLATION_WINDOW}}?\\b${name}\\b\\s*(?::|,|\\})`,
+  ).test(window)
+}
+
 runTest('no Products surface renders an uninterpolated {placeholder}', () => {
   const en = JSON.parse(readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8')) as Record<string, string>
   const km = JSON.parse(readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8')) as Record<string, string>
@@ -263,7 +269,7 @@ runTest('no Products surface renders an uninterpolated {placeholder}', () => {
               && !window.includes(`.replace("${mark}"`)
               && !window.includes(`.split('${mark}')`)
               && !window.includes(`.split("${mark}")`)
-              && !new RegExp(`replaceVars\\([\\s\\S]{0,${INTERPOLATION_WINDOW}}?\\b${name}\\s*:`).test(window)
+              && !replaceVarsHandles(window, name)
           })
           if (unhandled.length) {
             const line = src.slice(0, at).split('\n').length
@@ -275,6 +281,17 @@ runTest('no Products surface renders an uninterpolated {placeholder}', () => {
     }
   }
   assert.deepEqual(leaks, [], `a Products surface would print raw braces to the operator:\n  ${leaks.join('\n  ')}`)
+
+  assert.equal(
+    replaceVarsHandles("replaceVars(t('key'), { committed, remaining })", 'committed'),
+    true,
+    'positive control: shorthand object properties satisfy a matching placeholder',
+  )
+  assert.equal(
+    replaceVarsHandles("replaceVars(t('key'), { remaining })", 'committed'),
+    false,
+    'negative control: another shorthand property must not satisfy a missing placeholder',
+  )
 })
 
 if (failed > 0) {

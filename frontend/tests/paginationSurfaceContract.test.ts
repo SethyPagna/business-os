@@ -134,16 +134,29 @@ check('every inventoried paginated surface is reachable from the app', () => {
 })
 
 check('no page-local Previous/Next paginator remains', () => {
-  const manualPager = /(tr|t)\('previous'|>Previous<|>Next<|(tr|t)\('next'/
+  const manualPagerLabel = /(tr|t)\('previous'|>Previous<|>Next<|(tr|t)\('next'/
+  const manualPagerButtons = (source: string): string[] =>
+    (source.match(/<button\b[\s\S]*?<\/button>/g) || []).filter((button) => manualPagerLabel.test(button))
   const allowed = new Set([
     'src/components/products/Products.tsx', // image-lightbox navigation, not row pagination
     'src/components/shared/PaginationControls.tsx',
   ])
   const offenders = componentFiles
-    .filter((file) => manualPager.test(fs.readFileSync(file, 'utf8')))
+    .filter((file) => manualPagerButtons(fs.readFileSync(file, 'utf8')).length > 0)
     .map(relative)
     .filter((file) => !allowed.has(file))
   assert.deepStrictEqual(offenders, [])
+
+  assert.equal(
+    manualPagerButtons("<section>{tr('previous', 'Previous')} review values</section>").length,
+    0,
+    'negative control: historical Previous text is not a page-local paginator',
+  )
+  assert.equal(
+    manualPagerButtons("<button type=\"button\">{tr('previous', 'Previous')}</button>").length,
+    1,
+    'positive control: a manual Previous button is still detected',
+  )
 })
 
 check('server-paged mutable/filterable lists correct an empty former last page', () => {
