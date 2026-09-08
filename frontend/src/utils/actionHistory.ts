@@ -63,6 +63,17 @@ type ServerHistoryItem = {
   [key: string]: unknown
 }
 
+export function buildServerReplayRequest(payload: Record<string, unknown> | undefined) {
+  const applier = String(payload?.applier || '')
+  const generationGuarded = applier.endsWith('.bulk')
+    || applier === 'sale.settlement'
+    || applier === 'product.merge.group'
+  return {
+    require_applied: true,
+    ...(generationGuarded && payload?.generation != null ? { expected_generation: payload.generation } : {}),
+  }
+}
+
 type UserOption = {
   id: string | number
   name?: string
@@ -374,9 +385,7 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
       if (navigator.onLine === false) throw new Error('Connect to the server to replay history.')
       const item = serverItems.find(item => String(item.id) === String(serverId))
       const payload = item?.[direction === 'undo' ? 'undo_payload' : 'redo_payload'] as Record<string, unknown> | undefined
-      const applier = String(payload?.applier || '')
-      const generationGuarded = applier.endsWith('.bulk') || applier === 'sale.settlement'
-      const replayRequest = { require_applied: true, ...(generationGuarded && payload?.generation != null ? { expected_generation: payload.generation } : {}) }
+      const replayRequest = buildServerReplayRequest(payload)
       const response = direction === 'undo'
         ? await api.undoActionHistory(serverId, replayRequest)
         : await api.redoActionHistory(serverId, replayRequest)
