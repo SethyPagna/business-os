@@ -1668,7 +1668,7 @@ function registerContactRoutes(config: ContactConfig) {
     if (getPermissionTier(user, 'contacts') === 'none') return c.json({ error: 'You do not have permission to perform this action' }, 403)
     await reapStalledBulkDeleteJobs(c.env)
     const job = await getBulkDeleteJob(c.env, c.req.param('id'))
-    if (!job) return c.json({ error: 'Bulk delete job not found' }, 404)
+    if (!job || job.entity_type !== contactBulkDeleteEntityType(config)) return c.json({ error: 'Bulk delete job not found' }, 404)
     return c.json({
       success: true,
       job: {
@@ -1690,8 +1690,11 @@ function registerContactRoutes(config: ContactConfig) {
   // cancellation and products.ts's identical route.
   app.post(`${config.path}/bulk-delete-jobs/:id/cancel`, async (c) => {
     const user = c.get('user')
-    if (getPermissionTier(user, 'contacts') === 'none') return c.json({ error: 'You do not have permission to perform this action' }, 403)
-    await getDb(c.env).prepare(`UPDATE bulk_delete_jobs SET cancel_requested = 1, updated_at = CURRENT_TIMESTAMP WHERE id = @id AND status IN ('pending', 'processing')`).run({ id: c.req.param('id') })
+    if (getActionTier(user, 'contacts', 'bulk') !== 'full') return c.json({ error: 'You do not have permission to perform this action' }, 403)
+    const entityType = contactBulkDeleteEntityType(config)
+    const job = await getBulkDeleteJob(c.env, c.req.param('id'))
+    if (!job || job.entity_type !== entityType) return c.json({ error: 'Bulk delete job not found' }, 404)
+    await getDb(c.env).prepare(`UPDATE bulk_delete_jobs SET cancel_requested = 1, updated_at = CURRENT_TIMESTAMP WHERE id = @id AND entity_type = @entityType AND status IN ('pending', 'processing')`).run({ id: c.req.param('id'), entityType })
     return c.json({ success: true })
   })
 
