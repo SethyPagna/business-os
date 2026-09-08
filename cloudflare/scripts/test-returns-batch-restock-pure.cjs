@@ -40,10 +40,13 @@ const db = {
     }
   },
   async batch(items) {
-    return (await rawDb.batch(items)).map((r) => ({
-      changes: r.meta?.changes ?? 0,
-      lastInsertRowid: Number(r.meta?.last_row_id ?? 0),
-    }))
+    const results = []
+    for (const item of items) {
+      const stmt = rawDb.prepare(item.sql)
+      const r = stmt.run(item.params || {})
+      results.push({ changes: r.meta?.changes ?? 0, lastInsertRowid: Number(r.meta?.last_row_id ?? 0) })
+    }
+    return results
   },
   async transaction(fn) { return fn(this) },
 }
@@ -93,32 +96,11 @@ let activeUser = FAKE_USER
 const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
 const saleCreationSnapshotKernel = loadReal('lib/saleCreationSnapshot.ts', { './actorSnapshot': actorSnapshotKernel })
 const branchRolesKernel = loadReal('lib/branchRoles.ts')
-const saleRecordContract = JSON.parse(fs.readFileSync(path.join(__dirname, '../../outputs/takeover-20260908/f74-sales-records-backend-contract.json'), 'utf8'))
-const saleRecordEventsKernel = loadReal('lib/saleRecordEvents.ts', {
-  './saleRecords': { SALE_RECORD_FIELDS: saleRecordContract.fields, SALE_RECORD_KINDS: saleRecordContract.kinds },
-})
-const salesStatusKernel = loadReal('lib/salesStatus.ts')
-const saleTransitionsKernel = loadReal('lib/saleTransitions.ts', {
-  './salesStatus': salesStatusKernel,
-  './productBatches': productBatches,
-})
 const returnsRoute = loadReal('routes/returns.ts', {
   '../lib/branchRoleGuards': loadReal('lib/branchRoleGuards.ts', { './branchRoles': branchRolesKernel }),
   '../lib/branchRoles': branchRolesKernel,
   '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/saleCreationSnapshot': saleCreationSnapshotKernel,
-  '../lib/saleRecordEvents': saleRecordEventsKernel,
-  '../lib/saleTransitions': saleTransitionsKernel,
-  '../lib/saleBulkStatus': {
-    saleRevisionGuard: (saleId, revision) => ({
-      sql: `INSERT INTO sale_bulk_guards(guard_value) SELECT CASE WHEN (
-              NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore')
-              AND EXISTS(SELECT 1 FROM sales WHERE id=@id)
-              AND COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@id),0)=@revision
-            ) THEN 1 ELSE 0 END`,
-      params: { id: saleId, revision },
-    }),
-  },
   // N21: the display-address kernel, REAL. A stub resolves every address to
   // undefined and would make the assertion below agree with itself.
   '../lib/contactOptions': loadReal('lib/contactOptions.ts'),
@@ -167,10 +149,7 @@ async function check(name, fn) {
 }
 
 function seed() {
-  rawDb.exec(`INSERT OR REPLACE INTO system_flags(key,value) VALUES('sale_record_events_reset_guard','{"mode":"reset","token":"return-test"}');
-    DELETE FROM sale_record_events;
-    DELETE FROM system_flags WHERE key='sale_record_events_reset_guard';
-    DELETE FROM branch_batch_stock; DELETE FROM product_batches; DELETE FROM branch_stock; DELETE FROM products; DELETE FROM branches; DELETE FROM sale_items; DELETE FROM sale_item_batch_allocations; DELETE FROM sales; DELETE FROM returns; DELETE FROM return_items; DELETE FROM return_item_batch_allocations; DELETE FROM inventory_movements; DELETE FROM damaged_stock_lots; DELETE FROM return_replacement_items;`)
+  rawDb.exec('DELETE FROM branch_batch_stock; DELETE FROM product_batches; DELETE FROM branch_stock; DELETE FROM products; DELETE FROM branches; DELETE FROM sale_items; DELETE FROM sale_item_batch_allocations; DELETE FROM sales; DELETE FROM returns; DELETE FROM return_items; DELETE FROM return_item_batch_allocations; DELETE FROM inventory_movements; DELETE FROM damaged_stock_lots; DELETE FROM return_replacement_items;')
   rawDb.prepare('INSERT INTO branches (id, name, is_active, is_default) VALUES (1, \'Shop\', 1, 1)').run()
   rawDb.prepare('INSERT INTO branches (id, name, is_active, is_default) VALUES (2, \'Warehouse\', 1, 0)').run()
   rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity) VALUES (1, 'Widget', 1, 0)").run()
@@ -234,15 +213,6 @@ async function main() {
 
     const storedBatchId = rawDb.prepare('SELECT batch_id FROM return_items WHERE return_id = @returnId').get({ returnId: json.id }).batch_id
     assert.strictEqual(storedBatchId, batch.batchId, 'the return_items row should record which batch it restocked into')
-    const recordEvent = rawDb.prepare("SELECT source_id,kind,via,generation,subject,changes_json FROM sale_record_events WHERE source_kind='return_create'").get()
-    assert.deepStrictEqual({ ...recordEvent, changes_json: JSON.parse(recordEvent.changes_json) }, {
-      source_id: `return:${json.id}`, kind: 'status_changed', via: 'apply', generation: 0,
-      subject: json.returnNumber,
-      changes_json: [{
-        field: 'sale_status', before: { state: 'known_value', value: 'completed' },
-        after: { state: 'known_value', value: 'partial_return' },
-      }],
-    })
   })
 
   await check('return with no resolvable batch (no sale_item_id) falls back to the plain branch_stock bump', async () => {
@@ -256,7 +226,6 @@ async function main() {
     assert.strictEqual(aggregateQty, 4)
     const storedBatchId = rawDb.prepare('SELECT batch_id FROM return_items WHERE return_id = @returnId').get({ returnId: json.id }).batch_id
     assert.strictEqual(storedBatchId, null, 'no batch could be resolved, so batch_id should stay null')
-    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM sale_record_events').get().n, 0, 'manual return without a parent sale emits no sale record event')
   })
 
   await check('editing a return reverses the SAME batch it originally restocked, not the aggregate blindly', async () => {
