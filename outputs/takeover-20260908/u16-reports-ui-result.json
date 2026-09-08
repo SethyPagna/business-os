@@ -1,0 +1,152 @@
+{
+  "schema_version": 1,
+  "task_id": "u16-reports-ui-simplification",
+  "agent": {
+    "provider": "codex",
+    "role": "implementation_worker",
+    "session_id": "/root/minimize_impl"
+  },
+  "status": "completed",
+  "summary": "Simplified the Reports filter and Overview surface without changing report calculations or backend data. The permission-scoped view selector now lives in the filter sheet; hidden presentation choices normalize to revenue/gross/no comparison; USD is the default and legacy or unknown stored currencies migrate to USD; the redundant Overview prose is removed; and Payment methods, Couriers, By reason, and Expenses by type render as contained horizontal buttons before the statement.",
+  "base_sha": "923bc28b498d3bdadadd225d756f606c4518a0a3",
+  "head_sha": "28c02ebdcec09702800e681088924d9fc76985bb",
+  "changes": [
+    "frontend/src/components/sales/ReportsHub.tsx: moved the permission-filtered view picker into the single filter sheet, kept the filter trigger secondary/high contrast, counted and reset explicit style, made Show compact, and used USD directly as the report display default.",
+    "frontend/src/components/sales/reports/ReportOptionsFold.tsx: reduced the menu to View, supported query filters, Excel/Receipt style, and USD/KHR/Both currency.",
+    "frontend/src/components/sales/reports/reportModel.ts: normalized every effective basis/profit/comparison choice to revenue/gross/false and migrated retired or unknown currencies to USD.",
+    "frontend/src/components/sales/reports/OverviewReport.tsx: removed the duplicate prose summary and placed the four existing breakdown buttons before the canonical statement while preserving their Fold details.",
+    "frontend/src/components/sales/reports/reports-surface.css: added report-scoped compact filter styling, a contained horizontal breakdown row, a white high-contrast trigger, and a smaller Show button with a 44px target.",
+    "Updated five focused report tests to assert the canonical calculations, permission-scoped picker, reset behavior, summary removal, control order, and viewport containment."
+  ],
+  "commits": [
+    "ad4a9320dd6c5f5d846d9a93edfd8e1ef6348249 fix(reports): simplify canonical filter choices",
+    "bbd79aacaf7aaa8f57018fb5f08bbc892520cf21 fix(reports): streamline overview controls",
+    "28c02ebdcec09702800e681088924d9fc76985bb test(reports): cover USD migration and keyboard picker"
+  ],
+  "evidence": [
+    {
+      "claim": "The report view remains permission scoped and is rendered once inside the filter sheet.",
+      "source": "repository source and focused test",
+      "locator": "frontend/src/components/sales/ReportsHub.tsx viewPicker/viewControl; frontend/tests/reportsHub.test.ts control-row contract",
+      "observed": "visibleReportViews(perms) supplies AppSelect options, viewControl receives the single picker render, and unavailable stored views continue to fall back through resolveReportView."
+    },
+    {
+      "claim": "Removed controls cannot survive through stale local storage.",
+      "source": "pure model test",
+      "locator": "frontend/src/components/sales/reports/reportModel.ts normalizeReportOptions; frontend/tests/reportsHub.test.ts options persistence case",
+      "observed": "collected/net/compare=true normalizes to revenue/gross/false; legacy setting and unknown EUR currency values normalize to USD; KHR and Both remain valid."
+    },
+    {
+      "claim": "Overview keeps one canonical financial statement and no duplicate summary prose.",
+      "source": "actual React component browser harness and source tests",
+      "locator": "OverviewReport rendered at browser-emulated widths 320, 375, 390, and 1280",
+      "observed": "data-report-summary count was 0 at every width; the statement rendered Total Profit and Final Profit from buildIncomeStatement; the breakdown row preceded the statement frame."
+    },
+    {
+      "claim": "Narrow layouts remain contained while the four breakdown buttons stay readable.",
+      "source": "Playwright CLI browser-emulated layout measurements",
+      "locator": "Chromium viewport loop at 320x844, 375x844, 390x844, and 1280x844",
+      "observed": "Document and hub scrollWidth equaled clientWidth at every width. The tab row used internal scrolling at 320/375/390 (scrollWidth 465; clientWidth 291/346/361) and did not widen the page. Filter sheet and grid stayed within each viewport."
+    },
+    {
+      "claim": "Compact actions and the collapsed layout do not leave a large empty area.",
+      "source": "Playwright CLI browser-emulated layout measurements",
+      "locator": "390x844 Chromium harness after Show",
+      "observed": "Show measured 88x44, the filter trigger 44x44, the collapsed control occupied 66px including its padding and borders, and the next tab row began after the intended 8px layout gap."
+    },
+    {
+      "claim": "The moved view selector remains keyboard reachable and operable.",
+      "source": "Playwright CLI against actual Fold, ReportOptionsFold, and AppSelect components",
+      "locator": "390x844 filter sheet keyboard sequence",
+      "observed": "Opening Filters focused Close; one Tab focused the View button; Enter opened its listbox; ArrowDown plus Enter selected Returns; reopening Filters showed Returns persisted."
+    }
+  ],
+  "verification": [
+    {
+      "command": "node --experimental-strip-types tests/reportHubLayoutOrder.test.ts",
+      "scope": "report control/body order, collapsed handle, and Overview tab-before-statement order",
+      "exit_code": 0,
+      "expected": "PASS",
+      "observed": "PASS report hub layout order"
+    },
+    {
+      "command": "node --experimental-strip-types tests/reportResponsiveLayout.test.ts",
+      "scope": "report responsive source and CSS contracts",
+      "exit_code": 0,
+      "expected": "PASS",
+      "observed": "PASS report responsive layout, preset parity, unchanged 24-hour capability contracts and wide-screen gutter/label-value adjacency"
+    },
+    {
+      "command": "node --experimental-strip-types tests/reportDocumentSurface.test.ts",
+      "scope": "scoped report surface and filter Fold styling",
+      "exit_code": 0,
+      "expected": "PASS",
+      "observed": "PASS report document surface: centered gutters, four-sided segments, readable Khmer fold scope"
+    },
+    {
+      "command": "node --experimental-strip-types tests/reportsHub.test.ts",
+      "scope": "canonical report model, filters, persistence, permissions, and surface integration",
+      "exit_code": 0,
+      "expected": "all report tests pass",
+      "observed": "reportsHub: all tests passed"
+    },
+    {
+      "command": "node --experimental-strip-types tests/statsStrip.test.ts",
+      "scope": "report summary/statement visibility and sibling statistics contracts",
+      "exit_code": 0,
+      "expected": "all stats strip tests pass",
+      "observed": "All statsStrip tests passed"
+    },
+    {
+      "command": "npm run typecheck",
+      "scope": "frontend TypeScript",
+      "exit_code": 0,
+      "expected": "tsc exits successfully",
+      "observed": "tsc --noEmit -p tsconfig.json exited 0"
+    },
+    {
+      "command": "npm run verify:i18n",
+      "scope": "English/Khmer referenced keys",
+      "exit_code": 0,
+      "expected": "all referenced keys resolve",
+      "observed": "verify:i18n OK — 5391 pack keys, 569 source files, every referenced key resolves in both packs"
+    },
+    {
+      "command": "npm run build",
+      "scope": "frontend production build",
+      "exit_code": 0,
+      "expected": "Vite build succeeds",
+      "observed": "1106 modules transformed; built in 24.13s"
+    },
+    {
+      "command": "npx --package @playwright/cli playwright-cli -s=u16 run-code --filename %TEMP%/u16-pw-measure.js",
+      "scope": "browser-emulated 320/375/390/1280 containment and filter contents",
+      "exit_code": 0,
+      "expected": "no page overflow; Fold contained; removed choices absent",
+      "observed": "All four width records had document and hub clientWidth=scrollWidth; every Fold stayed within viewport; Basis/Profit/Compare/App setting were absent."
+    },
+    {
+      "command": "playwright-cli -s=u16 click Filters; press Tab; press Enter; press ArrowDown; press Enter; reopen Filters",
+      "scope": "actual AppSelect keyboard access inside the mobile Fold",
+      "exit_code": 0,
+      "expected": "View is reachable and selection persists",
+      "observed": "View received focus after one Tab from Close, opened with Enter, and persisted Returns after keyboard selection."
+    }
+  ],
+  "risks": [
+    "Browser checks used Chromium viewport emulation with synthetic report data and actual report components; they are not tests on physical iOS hardware or an authenticated production session.",
+    "The report model retains compatibility fields for basis, profitMode, granularity, and compare because sibling calculation/export code still consumes the shared type; normalization now fixes their effective values."
+  ],
+  "blockers": [],
+  "not_done": [
+    "No backend, migration, production data, deployment, shared/global style, language pack, or F65 code was changed.",
+    "No physical iOS device verification was claimed."
+  ],
+  "handoff": "Cherry-pick the three listed commits in order. Re-run the five focused report tests after integration if adjacent report files changed. F65 Phase1 remains separate and untouched.",
+  "workspace": {
+    "branch": "codex/u16-reports-ui-20260908",
+    "worktree": "C:/Users/mrkl6/Downloads/bos-u16-reports-ui-20260908",
+    "dirty_before": [],
+    "dirty_after": []
+  }
+}
