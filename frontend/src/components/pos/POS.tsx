@@ -122,6 +122,7 @@ import { createContactOption, serializeContactOptions } from '../contacts/contac
 import {
   createSeparateContactDecision,
   readContactDuplicateDecisionError,
+  resolveContactDuplicateSyncError,
   type ContactDuplicateCheck,
   type ContactDuplicateDecision,
   type ContactDuplicateMatch,
@@ -1809,6 +1810,7 @@ export default function POS() {
         return exists ? prev.map(customer => String(customer.id) === String(createdCustomer.id) ? { ...customer, ...createdCustomer } : customer) : [...prev, createdCustomer]
       })
       await selectCustomer(createdCustomer)
+      if (duplicateDecision) resolveContactDuplicateSyncError(customerDuplicateCheck)
       setShowAddCustomer(false)
       setCustomerDuplicateCheck(null)
       setNewCustomerForm({ name: '', membership_number: '', phone: '', address: '' })
@@ -1846,6 +1848,7 @@ export default function POS() {
       const [existing] = await loadPosCustomersByIds([match.id])
       if (!existing) throw new Error(t('contact_duplicate_existing_load_failed') || 'Could not load the existing record. Try again.')
       await selectCustomer(existing)
+      resolveContactDuplicateSyncError(match)
       setShowAddCustomer(false)
       setCustomerDuplicateCheck(null)
       setNewCustomerForm({ name: '', membership_number: '', phone: '', address: '' })
@@ -1896,6 +1899,7 @@ export default function POS() {
       const created = { ...payload, id: res.id }
       setDeliveryContacts(prev => [...prev, created])
       selectDelivery(created)
+      if (duplicateDecision) resolveContactDuplicateSyncError(deliveryDuplicateCheck)
       setShowAddDelivery(false)
       setDeliveryDuplicateCheck(null)
       setNewDeliveryForm({ name: '', phone: '', area: '' })
@@ -1923,6 +1927,7 @@ export default function POS() {
       const [existing] = await loadPosDeliveryContactsByIds([match.id])
       if (!existing) throw new Error(t('contact_duplicate_existing_load_failed') || 'Could not load the existing record. Try again.')
       selectDelivery(existing)
+      resolveContactDuplicateSyncError(match)
       setShowAddDelivery(false)
       setDeliveryDuplicateCheck(null)
       setNewDeliveryForm({ name: '', phone: '', area: '' })

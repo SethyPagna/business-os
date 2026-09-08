@@ -13,6 +13,7 @@
 
 import { SYNC } from '../constants.ts'
 import { getClientMetaHeaders as sharedGetClientMetaHeaders } from '../utils/deviceInfo.ts'
+import { createSyncErrorId } from '../utils/syncProblemLifecycle.ts'
 import {
   getSyncServerUrl,
   getSyncToken,
@@ -1436,8 +1437,12 @@ export async function route<T = any>(
     // sentence, so a failure the user can actually FIX -- an out-of-date app
     // shell rejected by a newer Worker (code client_request_id_required) --
     // read as the same opaque "Write failed" as everything else.
+    const errorId = createSyncErrorId()
+    e.syncErrorId = errorId
+    e.syncErrorChannel = channel
     window.dispatchEvent(new CustomEvent('sync:error', {
       detail: {
+        errorId,
         channel,
         error: e.message,
         code: e.code || null,

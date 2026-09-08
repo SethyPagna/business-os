@@ -53,6 +53,23 @@ test('structured duplicate review survives the legacy nested api error shape', (
   assert.equal(readContactDuplicateDecisionError({ code: 'contact_duplicate_decision_required', duplicate: match }), null)
 })
 
+test('a duplicate write error carries a local-only sync occurrence without changing the server decision wire', () => {
+  const syncProblem = {
+    errorId: 'failure-17',
+    channel: 'customers:create',
+    code: 'contact_duplicate_decision_required',
+  }
+  const parsed = readContactDuplicateDecisionError({
+    code: syncProblem.code,
+    syncErrorId: syncProblem.errorId,
+    syncErrorChannel: syncProblem.channel,
+    duplicate: { ...match, ...check },
+  })
+  assert.deepEqual(parsed?.syncProblem, syncProblem)
+  assert.deepEqual(parsed?.matches[0].syncProblem, syncProblem)
+  assert.deepEqual(createSeparateContactDecision(parsed!), { action: 'create_separate', ...review })
+})
+
 test('live form checks include every secondary option phone and never send a boolean confirmation', () => {
   const hook = read('../src/components/contacts/useContactDuplicateFlag.ts')
   const customer = read('../src/components/contacts/CustomerFormModal.tsx')
