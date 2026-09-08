@@ -180,6 +180,10 @@ export const BACKUP_TABLES = [
   'google_drive_sync_entries',
   'action_history',
   'undo_snapshots',
+  // Selected-conflict run receipts are durable idempotency/continuation state.
+  // Restore the parent run before its product/history-linked case children.
+  'product_conflict_merge_runs',
+  'product_conflict_merge_run_cases',
   'sale_amendments',
   'sale_write_revisions',
   // Durable monetary-mutation receipts reference action_history above; their

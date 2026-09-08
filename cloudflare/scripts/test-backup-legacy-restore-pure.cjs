@@ -101,16 +101,36 @@ async function main() {
     )
     f.sql.prepare('INSERT INTO sale_mutation_members(operation_id,entity_kind,entity_id,ordinal) VALUES(?,?,?,?)')
       .run('mutation-fixture', 'sale_item', 1, 0)
+    f.sql.prepare(`INSERT INTO product_conflict_merge_runs(
+      id,actor_id,request_id,request_digest,manifest_version,manifest_digest,
+      request_json,status,result_json,created_at,updated_at
+    ) VALUES(?,?,?,?,?,?,?,?,?,?,?)`).run(
+      'conflict-run-fixture', 1, 'conflict-request-fixture', 'request-digest', 1,
+      'manifest-digest', '{"cases":[1]}', 'interrupted', '{"complete":false}',
+      '2026-09-08 02:00:00', '2026-09-08 02:01:00',
+    )
+    f.sql.prepare(`INSERT INTO product_conflict_merge_run_cases(
+      run_id,ordinal,case_key,keeper_product_id,merged_product_id,
+      expected_state_digest,stock_choice,operation_id,status,error,created_at,updated_at
+    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      'conflict-run-fixture', 0, 'leadingzero:fixture', 1, 2,
+      'case-digest', 'merge', 'conflict-operation-fixture', 'history_pending',
+      'history finalization pending', '2026-09-08 02:00:00', '2026-09-08 02:01:00',
+    )
     const snap = (tables = f.sql.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all().map(t => t.name)) =>
       Object.fromEntries(tables.map(t => [t, f.sql.prepare(`SELECT * FROM "${t.replaceAll('"', '""')}"`).all()
         .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))]))
     const before = snap(backup.BACKUP_TABLES)
     const created = await backup.createCloudflareBackup(f.env, 'manual')
     const document = JSON.parse(f.env.ASSETS._store.get(created.key).body)
-    assert.equal(Object.keys(document.tables).length, 69)
+    assert.equal(Object.keys(document.tables).length, backup.BACKUP_TABLES.length)
     assert.deepEqual(Object.keys(document.tables), [...backup.BACKUP_TABLES], 'full backup must include every table in exact dependency order')
     for (const table of ['return_write_revisions', 'return_bulk_operations', 'return_bulk_members', 'stock_session_revisions', 'stock_session_operations', 'stock_session_members', 'sale_mutation_receipts', 'sale_mutation_members']) {
       assert.ok(Object.hasOwn(document.tables, table), `backup includes durable replay table ${table}`)
+    }
+    for (const table of ['product_conflict_merge_runs', 'product_conflict_merge_run_cases']) {
+      assert.ok(Object.hasOwn(document.tables, table), `backup includes selected-conflict receipt table ${table}`)
+      assert.equal(document.tables[table].rows.length, 1, `backup preserves the seeded ${table} receipt`)
     }
     assert.equal((await backup.validateCloudflareBackup(f.env, created.key)).restorable, true)
     f.sql.exec(`INSERT INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore"}')`)
@@ -126,12 +146,22 @@ async function main() {
       immutableCreationSnapshot,
       'full backup preserves the immutable sale creation envelope byte-for-byte',
     )
+    assert.deepEqual(
+      f.sql.prepare('SELECT id,status,result_json FROM product_conflict_merge_runs').get(),
+      { id: 'conflict-run-fixture', status: 'interrupted', result_json: '{"complete":false}' },
+      'selected-conflict parent receipt round-trips byte-for-byte',
+    )
+    assert.deepEqual(
+      f.sql.prepare('SELECT run_id,status,error FROM product_conflict_merge_run_cases').get(),
+      { run_id: 'conflict-run-fixture', status: 'history_pending', error: 'history finalization pending' },
+      'selected-conflict case continuation state round-trips byte-for-byte',
+    )
     assert.deepEqual(f.sql.pragma('foreign_key_check'), [])
     f.sql.exec("DELETE FROM system_flags WHERE key='maintenance'")
     const operations = f.sql.prepare('SELECT * FROM sale_bulk_operations ORDER BY request_id').all()
     assert.equal((await bulk.replay(f, operations[0].history_id, 'undo', 0)).status, 200)
     assert.equal((await bulk.replay(f, operations[1].history_id, 'redo', 1)).status, 200)
-    console.log('PASS actual FK-on streaming full 69-table roundtrip, sale/Returns/stock replay tables, and restored-generation undo/redo')
+    console.log(`PASS actual FK-on streaming full ${backup.BACKUP_TABLES.length}-table roundtrip, sale/Returns/stock/conflict replay tables, and restored-generation undo/redo`)
 
     const pre0127 = structuredClone(document)
     const salesColumns = pre0127.tables.sales.columns
@@ -182,7 +212,7 @@ async function main() {
     const omitted = ['customer_receivables', 'supplier_invoices', 'undo_snapshots', 'sale_amendments', 'sale_write_revisions', 'sale_mutation_receipts', 'sale_mutation_members', 'sale_bulk_operations', 'sale_bulk_members']
     await refused(await variant('legacy-nine-missing', omitted), ['sale_bulk_operations', 'sale_bulk_members', 'sale_mutation_receipts', 'sale_mutation_members', 'undo_snapshots'])
     console.log('PASS valid legacy nine-table omission refuses before any write; every DB row preserved')
-    for (const table of ['sale_bulk_operations', 'sale_bulk_members', 'sale_mutation_receipts', 'sale_mutation_members', 'undo_snapshots', 'sale_write_revisions', 'sale_amendments']) {
+    for (const table of ['sale_bulk_operations', 'sale_bulk_members', 'sale_mutation_receipts', 'sale_mutation_members', 'undo_snapshots', 'sale_write_revisions', 'sale_amendments', 'product_conflict_merge_runs', 'product_conflict_merge_run_cases']) {
       await refused(await variant(`missing-${table}`, [table]), [table])
     }
     console.log('PASS individually incomplete replay bundles fail validation and direct restore without writes')
