@@ -1541,7 +1541,8 @@ function ProductsFullEditor() {
       }
 
       // The write itself is now confirmed done -- tell the person right
-      // away and close the form. Everything below this point (re-fetching
+      // away and let ProductForm clear its dirty latch/draft before it closes.
+      // Everything below this point (re-fetching
       // the canonical row for the undo/redo snapshot, pinning it in the
       // current view, refreshing the background list) is best-effort
       // enrichment, not part of whether the save succeeded. It used to sit
@@ -1553,48 +1554,50 @@ function ProductsFullEditor() {
       // happen again.
       const targetProductId = selected ? Number(selected.id || 0) : createdProductId
       notify(selected ? t('product_updated') || 'Product updated' : t('product_created') || 'Product created')
-      setModal(null)
-      setSelected(null)
-      setDetailProduct(null)
 
-      try {
-        const latestProducts = await fetchProductsByIds([targetProductId])
-        const latestProductsById = buildProductIdMap(latestProducts || [])
-        const latestProductSnapshot = selected
-          ? cloneHistorySnapshot(
-              latestProductsById.get(targetProductId)
-              || { ...payload, id: targetProductId },
-            )
-          : resolveCreatedHistorySnapshot({
-              result: { id: createdProductId },
-              latestItems: latestProducts,
-              clientRequestId: createClientRequestId,
-              fallbackSnapshot: { ...payload, id: createdProductId },
-            }).snapshot
+      // Do not keep ProductForm mounted behind best-effort enrichment, but do
+      // not close it here either: resolving onSave hands that ordered close to
+      // ProductForm after it has synchronously marked itself clean.
+      void (async () => {
+        try {
+          const latestProducts = await fetchProductsByIds([targetProductId])
+          const latestProductsById = buildProductIdMap(latestProducts || [])
+          const latestProductSnapshot = selected
+            ? cloneHistorySnapshot(
+                latestProductsById.get(targetProductId)
+                || { ...payload, id: targetProductId },
+              )
+            : resolveCreatedHistorySnapshot({
+                result: { id: createdProductId },
+                latestItems: latestProducts,
+                clientRequestId: createClientRequestId,
+                fallbackSnapshot: { ...payload, id: createdProductId },
+              }).snapshot
 
-        if (previousSnapshot && targetProductId) {
-          actionHistory.pushAction({
-            label: `Edit product ${previousSnapshot.name || latestProductSnapshot.name || ''}`.trim(),
-            undo: () => restoreProductSnapshots([previousSnapshot], 'Undo product edit'),
-            redo: () => restoreProductSnapshots([latestProductSnapshot], 'Redo product edit'),
-          })
-        } else if (latestProductSnapshot?.id) {
-          pushCreatedProductHistory(latestProductSnapshot, `Add product ${latestProductSnapshot.name || ''}`.trim())
+          if (previousSnapshot && targetProductId) {
+            actionHistory.pushAction({
+              label: `Edit product ${previousSnapshot.name || latestProductSnapshot.name || ''}`.trim(),
+              undo: () => restoreProductSnapshots([previousSnapshot], 'Undo product edit'),
+              redo: () => restoreProductSnapshots([latestProductSnapshot], 'Redo product edit'),
+            })
+          } else if (latestProductSnapshot?.id) {
+            pushCreatedProductHistory(latestProductSnapshot, `Add product ${latestProductSnapshot.name || ''}`.trim())
+          }
+
+          if (targetProductId && latestProductSnapshot) {
+            pinnedEditedProductsRef.current.set(Number(targetProductId), latestProductSnapshot as ProductRecord)
+          }
+
+          await load(true)
+        } catch (enrichErr) {
+          // Save already succeeded and the person's already been told so --
+          // this is just the undo/redo snapshot and/or background refresh
+          // not completing (commonly a superseded-search abort, which is
+          // expected and harmless). Log it for debugging, don't alarm the
+          // person about a save that went through fine.
+          console.warn('[handleSaveWithGallery] post-save refresh/snapshot skipped:', enrichErr)
         }
-
-        if (targetProductId && latestProductSnapshot) {
-          pinnedEditedProductsRef.current.set(Number(targetProductId), latestProductSnapshot as ProductRecord)
-        }
-
-        await load(true)
-      } catch (enrichErr) {
-        // Save already succeeded and the person's already been told so --
-        // this is just the undo/redo snapshot and/or background refresh
-        // not completing (commonly a superseded-search abort, which is
-        // expected and harmless). Log it for debugging, don't alarm the
-        // person about a save that went through fine.
-        console.warn('[handleSaveWithGallery] post-save refresh/snapshot skipped:', enrichErr)
-      }
+      })()
     } catch (e) {
       console.error('[handleSaveWithGallery] error:', e)
       throw e instanceof Error ? e : new Error(getErrorMessage(e, 'Failed to save product'))
