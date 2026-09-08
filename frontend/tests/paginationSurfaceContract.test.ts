@@ -55,6 +55,7 @@ const expectedConsumers = [
   'src/components/pos/POS.tsx',
   'src/components/products/Products.tsx',
   'src/components/products/ProductsImageOnlyView.tsx',
+  'src/components/products/SelectedConflictMergeReviewModal.tsx',
   'src/components/products/StockChangeSection.tsx',
   'src/components/products/StockInSessionsSection.tsx',
   'src/components/products/import/ProductImportConflictsModal.tsx',

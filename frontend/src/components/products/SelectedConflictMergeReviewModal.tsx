@@ -4,6 +4,7 @@ import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import Modal from '../shared/Modal.tsx'
 import ConfirmDialog from '../shared/ConfirmDialog.tsx'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
+import PaginationControls from '../shared/PaginationControls.tsx'
 import { ModalCloseContext } from '../shared/modalCloseContext.ts'
 import { ProductImg } from './shared/primitives.tsx'
 import { useApp as useAppHook } from '../../AppContext.tsx'
@@ -733,10 +734,21 @@ export function SelectedConflictGroupReviewModal({
           ) : null}
 
           <div className="sticky bottom-0 -mx-3 -mb-3 flex flex-wrap items-center justify-between gap-2 border-t border-gray-200 bg-white px-3 py-3 dark:border-zinc-700 dark:bg-gray-800 sm:-mx-4 sm:-mb-4 sm:px-4">
-            <div className="flex gap-2">
-              <button type="button" className="btn-secondary px-3 py-2 text-sm" disabled={working || pageIndex === 0} onClick={onPreviousPage}>{tr('previous', 'Previous')}</button>
-              <button type="button" className="btn-secondary px-3 py-2 text-sm" disabled={working || !canGoNext} onClick={onNextPage}>{working ? tr('loading', 'Loading...') : tr('next', 'Next')}</button>
-            </div>
+            <PaginationControls
+              page={pageIndex + 1}
+              pageSize={review.page.limit}
+              totalItems={progress.total ?? progress.loaded}
+              onPageChange={(nextPage) => {
+                if (working || nextPage === pageIndex + 1) return
+                if (nextPage < pageIndex + 1) onPreviousPage()
+                else if (canGoNext) onNextPage()
+              }}
+              label={tr('selected_conflict_actions', 'actions')}
+              t={t}
+              layout="centered"
+              editablePageInput={false}
+              className={working ? 'pointer-events-none opacity-50' : ''}
+            />
             <div className="flex flex-wrap gap-2">
               <ModalCloseContext.Consumer>
                 {(requestClose) => <button type="button" className="btn-secondary px-3 py-2 text-sm" onClick={requestClose || onClose}>{tr('close', 'Close')}</button>}
