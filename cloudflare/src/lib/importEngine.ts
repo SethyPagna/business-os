@@ -2879,10 +2879,18 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
   // classifyContacts' byPhone/byName maps, only ever MATCHES an existing
   // customer, never creates one (a sales-history file isn't a customer
   // import; an unmatched name/phone just stays free text, same as today).
-  const customers = await db.prepare(`SELECT id, name, phone FROM customers`).all<{ id: number; name: string | null; phone: string | null }>()
+  const customers = await db.prepare(`SELECT id, name, phone, is_anonymous FROM customers`).all<{ id: number; name: string | null; phone: string | null; is_anonymous?: number | null }>()
   const customerByPhone = new Map<string, number>()
   const customerByName = new Map<string, number | null>() // null = ambiguous (>1 customer shares this name)
+  const anonymousCustomerIds = new Set<number>()
+  const anonymousCustomerNames = new Set<string>()
   for (const customer of customers) {
+    if (Number(customer.is_anonymous || 0) === 1) {
+      anonymousCustomerIds.add(customer.id)
+      const anonymousNameKey = lower(customer.name)
+      if (anonymousNameKey) anonymousCustomerNames.add(anonymousNameKey)
+      continue
+    }
     const phoneDigits = str(customer.phone).replace(/\D/g, '')
     if (phoneDigits) customerByPhone.set(phoneDigits, customer.id)
     const nameKey = lower(customer.name)
@@ -3041,9 +3049,18 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
     // match rather than guessing -- same as leaving it unmatched today.
     const rowCustomerPhoneDigits = str(first.customer_phone).replace(/\D/g, '')
     const rowCustomerNameKey = lower(first.customer_name)
-    const matchedCustomerId = (rowCustomerPhoneDigits && customerByPhone.get(rowCustomerPhoneDigits))
-      || (rowCustomerNameKey && customerByName.get(rowCustomerNameKey))
-      || null
+    const explicitCustomerId = Number(first.customer_id)
+    const explicitlyAnonymous = toBool01(first.customer_is_anonymous, 0) === 1
+      || (Number.isSafeInteger(explicitCustomerId) && explicitCustomerId > 0 && anonymousCustomerIds.has(explicitCustomerId))
+    // A phone match remains authoritative even if its display name is also
+    // used by an anonymous checkout identity. With no phone, that shared name
+    // is ambiguous and stays unlinked; choosing the unmarked profile would
+    // turn a historical General sale into a real customer's purchase.
+    const matchedCustomerId = explicitlyAnonymous
+      ? null
+      : (rowCustomerPhoneDigits && customerByPhone.get(rowCustomerPhoneDigits))
+        || (rowCustomerNameKey && !anonymousCustomerNames.has(rowCustomerNameKey) && customerByName.get(rowCustomerNameKey))
+        || null
 
     // Resolve cashier_name -> user id. Reviewed aliases take precedence over a
     // direct username/name match: an old label can intentionally map away from
@@ -3270,13 +3287,14 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
       branch_id: matchedBranchId,
       branch_name: matchedBranchId ? branchName : null,
       customer_id: matchedCustomerId,
-      customer_name: str(first.customer_name) || null,
-      customer_phone: str(first.customer_phone) || null,
+      customer_name: explicitlyAnonymous ? null : str(first.customer_name) || null,
+      customer_phone: explicitlyAnonymous ? null : str(first.customer_phone) || null,
       // N21: a CSV exported by a build older than the address fix carries the
       // Contact Options JSON in this column, and importing it would put machine
       // text back into sales.customer_address. A plainly typed address -- the
       // ordinary case, including a numeric house number -- passes through.
-      customer_address: contactDisplayAddress(str(first.customer_address)) || null,
+      customer_address: explicitlyAnonymous ? null : contactDisplayAddress(str(first.customer_address)) || null,
+      customer_is_anonymous: explicitlyAnonymous ? 1 : 0,
       payment_method: str(first.payment_method) || 'Cash',
       payment_currency: str(first.payment_currency) || 'USD',
       exchange_rate: exchangeRate,

@@ -18,6 +18,7 @@ function compileLib(name, localRequire) {
 function compileSubject() {
   let actorSnapshot
   let saleCreationSnapshot
+  let anonymousCustomer
   const localRequire = (request) => {
     if (request === './db') return {}
     if (request === './salesStatus') return { RETURN_STATUSES: new Set(['returned', 'partial_return']) }
@@ -33,6 +34,10 @@ function compileSubject() {
     if (request === './saleCreationSnapshot') {
       saleCreationSnapshot ||= compileLib('saleCreationSnapshot', localRequire)
       return saleCreationSnapshot
+    }
+    if (request === './anonymousCustomer') {
+      anonymousCustomer ||= compileLib('anonymousCustomer', localRequire)
+      return anonymousCustomer
     }
     return require(request)
   }
@@ -137,6 +142,7 @@ function saleData(overrides = {}) {
   assert.equal(creation.membership, null, 'a name-only imported sale has no linked membership')
 
   const member = setup()
+  member.sqlite.prepare("INSERT INTO customers(id,name,membership_number,is_anonymous) VALUES(5,'Historical Member','HIST-5',0)").run()
   await subject.applyHistoricalSaleImport(member.db, {
     ...input,
     rowNumber: 3,
@@ -151,6 +157,41 @@ function saleData(overrides = {}) {
   const memberCreation = JSON.parse(member.sqlite.prepare(`SELECT creation_snapshot_json FROM sales WHERE client_request_id = 'sales-import:job-1:3'`).get().creation_snapshot_json)
   assert.deepEqual(memberCreation.customer, { id: 5, name: 'Historical Member' })
   assert.deepEqual(memberCreation.membership, { number: 'HIST-5', discount_usd: 1, discount_khr: 0, points_redeemed: 20 })
+
+  const anonymous = setup()
+  anonymous.sqlite.prepare("INSERT INTO customers(id,name,membership_number,is_anonymous) VALUES(5,'General','LEGACY-GENERAL',1)").run()
+  await subject.applyHistoricalSaleImport(anonymous.db, {
+    ...input,
+    rowNumber: 4,
+    data: saleData({
+      customer_id: 5,
+      customer_name: 'General',
+      customer_phone: '',
+      membership_number: 'LEGACY-GENERAL',
+      membership_discount_usd: 2,
+      membership_points_redeemed: 50,
+    }),
+  })
+  const anonymousSale = anonymous.sqlite.prepare("SELECT customer_id,customer_name,customer_phone,membership_discount_usd,membership_points_redeemed,creation_snapshot_json FROM sales WHERE client_request_id='sales-import:job-1:4'").get()
+  assert.deepEqual({
+    customer_id: anonymousSale.customer_id,
+    customer_name: anonymousSale.customer_name,
+    customer_phone: anonymousSale.customer_phone,
+    membership_discount_usd: anonymousSale.membership_discount_usd,
+    membership_points_redeemed: anonymousSale.membership_points_redeemed,
+  }, { customer_id: null, customer_name: null, customer_phone: null, membership_discount_usd: 0, membership_points_redeemed: 0 })
+  assert.equal(JSON.parse(anonymousSale.creation_snapshot_json).customer, null)
+  assert.equal(JSON.parse(anonymousSale.creation_snapshot_json).membership, null)
+
+  const markerRace = setup()
+  markerRace.sqlite.prepare("INSERT INTO customers(id,name,is_anonymous) VALUES(5,'Historical Member',0)").run()
+  markerRace.setBeforeBatch(() => markerRace.sqlite.prepare('UPDATE customers SET is_anonymous=1 WHERE id=5').run())
+  await assert.rejects(
+    () => subject.applyHistoricalSaleImport(markerRace.db, { ...input, rowNumber: 5, data: saleData({ customer_id: 5, customer_name: 'Historical Member' }), nowIso: input.nowIso, actor }),
+    /did not commit/,
+  )
+  assert.equal(markerRace.sqlite.prepare('SELECT COUNT(*) n FROM sales').get().n, 0)
+  assert.equal(markerRace.sqlite.prepare('SELECT COUNT(*) n FROM import_sales_commits').get().n, 0)
   assert.equal(normal.sqlite.prepare(`SELECT COUNT(*) n FROM sale_items`).get().n, 1)
   assert.equal(normal.sqlite.prepare(`SELECT s.receipt_number FROM sale_items si JOIN sales s ON s.id = si.sale_id`).get().receipt_number, '20260828-143000')
   assert.equal(normal.sqlite.prepare(`SELECT stock_quantity FROM products WHERE id = 10`).get().stock_quantity, 5, 'ordinary history import never deducts current stock')

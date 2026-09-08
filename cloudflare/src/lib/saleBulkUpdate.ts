@@ -20,6 +20,7 @@ import { actorSnapshot } from './actorSnapshot'
 import { contactDisplayAddress } from './contactOptions'
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from './saleRecordEvents'
 import type { SaleRecordChange, SaleRecordKind, SaleRecordValueState } from './saleRecords'
+import { ANONYMOUS_CUSTOMER_MUTATION_ERROR, isAnonymousCustomer } from './anonymousCustomer'
 
 export const BULK_UPDATE_KIND = 'sale.fields.bulk'
 export const BULK_CUSTOMER_UPDATE_KIND = 'sale.customer.bulk'
@@ -148,12 +149,14 @@ function recordState(value: unknown): SaleRecordValueState {
 }
 
 function customerState(row: Row): SaleRecordValueState {
+  if (isAnonymousCustomer(row)) return { state: 'known_none' }
   const id = row.customer_id == null ? null : Number(row.customer_id)
   const name = String(row.customer_name || '').trim() || null
   return id === null && name === null ? { state: 'known_none' } : { state: 'known_value', value: { id, name } }
 }
 
 function membershipState(row: Row): SaleRecordValueState {
+  if (isAnonymousCustomer(row)) return { state: 'known_none' }
   const number = String(row.membership_number || '').trim() || null
   return number === null ? { state: 'known_none' } : { state: 'known_value', value: {
     number, discount_usd: null, discount_khr: null, points_redeemed: null,
@@ -281,8 +284,9 @@ function referenceGuard(action: SaleBulkUpdateAction, state: Row): StockStatemen
   const id = state[action.kind === 'customer' ? 'customer_id' : 'delivery_contact_id']
   if (id == null) return null
   if (action.kind === 'customer') {
-    return bulkAssertion("EXISTS(SELECT 1 FROM customers WHERE id=@id AND COALESCE(name,'')=COALESCE(@name,'') AND COALESCE(phone,'')=COALESCE(@phone,'') AND COALESCE(address,'')=COALESCE(@address,''))", {
+    return bulkAssertion("EXISTS(SELECT 1 FROM customers WHERE id=@id AND COALESCE(name,'')=COALESCE(@name,'') AND COALESCE(phone,'')=COALESCE(@phone,'') AND COALESCE(address,'')=COALESCE(@address,'') AND COALESCE(membership_number,'')=COALESCE(@membership_number,'') AND COALESCE(is_anonymous,0)=@is_anonymous)", {
       id, name: state.customer_name, phone: state.customer_phone, address: state.customer_address,
+      membership_number: state.membership_number, is_anonymous: Number(state.is_anonymous || 0),
     })
   }
   return bulkAssertion("EXISTS(SELECT 1 FROM delivery_contacts WHERE id=@id AND COALESCE(NULLIF(address,''),area,'')=COALESCE(@address,'') AND COALESCE(name,'')=COALESCE(@name,'') AND COALESCE(phone,'')=COALESCE(@phone,''))", {
@@ -299,6 +303,7 @@ function referenceState(action: SaleBulkUpdateAction, row: Row | null): Row | nu
       customer_phone: row.phone ?? null,
       customer_address: row.address ?? null,
       membership_number: row.membership_number ?? null,
+      is_anonymous: Number(row.is_anonymous || 0),
     }
   }
   return {
@@ -307,6 +312,16 @@ function referenceState(action: SaleBulkUpdateAction, row: Row | null): Row | nu
     delivery_contact_phone: row.phone ?? null,
     delivery_contact_address: row.address || row.area || null,
   }
+}
+
+function anonymousReferenceGuard(action: SaleBulkUpdateAction, state: Row): StockStatement | null {
+  if (action.kind !== 'customer' || !isAnonymousCustomer(state) || state.customer_id == null) return null
+  // Names, phone, address and even legacy membership values are deliberately
+  // irrelevant to General. The persisted marker itself must remain true before
+  // a replay can restore this historical row id.
+  return bulkAssertion('EXISTS(SELECT 1 FROM customers WHERE id=@id AND COALESCE(is_anonymous,0)=1)', {
+    id: state.customer_id,
+  })
 }
 
 export async function notifySaleBulkUpdate(env: Env, actionKind?: string): Promise<void> {
@@ -343,7 +358,7 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, raw: Row)
   }
 
   const ids = request.items.map((item) => item.id)
-  const sales = await rowsIn<Row>(db, ids, (marks) => `SELECT s.*,COALESCE(v.revision,0) AS write_revision,${saleMovementFingerprint('s.id')} AS movement_fingerprint FROM sales s LEFT JOIN sale_write_revisions v ON v.sale_id=s.id WHERE s.id IN (${marks})`)
+  const sales = await rowsIn<Row>(db, ids, (marks) => `SELECT s.*,COALESCE(v.revision,0) AS write_revision,COALESCE(source_customer.is_anonymous,0) AS customer_is_anonymous,${saleMovementFingerprint('s.id')} AS movement_fingerprint FROM sales s LEFT JOIN sale_write_revisions v ON v.sale_id=s.id LEFT JOIN customers source_customer ON source_customer.id=s.customer_id WHERE s.id IN (${marks})`)
   const sourceMatches = new Map<number, boolean>()
   const paymentDetails = new Map<number, Row[]>()
   for (const expected of request.items) {
@@ -367,7 +382,10 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, raw: Row)
     } else if (request.action.kind === 'delivery_contact') {
       matches = (sale.delivery_contact_id == null ? null : Number(sale.delivery_contact_id)) === request.action.source_id && Number(sale.is_delivery || 0) === 1
     } else {
-      matches = (sale.customer_id == null ? null : Number(sale.customer_id)) === request.action.source_id
+      const currentCustomerId = sale.customer_id == null ? null : Number(sale.customer_id)
+      matches = request.action.source_id === null
+        ? currentCustomerId === null || isAnonymousCustomer({ is_anonymous: sale.customer_is_anonymous })
+        : currentCustomerId === request.action.source_id
     }
     sourceMatches.set(expected.id, matches)
     if (!matches) continue
@@ -387,13 +405,14 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, raw: Row)
   }
   let targetCustomer: Row | null = null
   if (request.action.kind === 'customer' && request.action.target_id !== null) {
-    targetCustomer = await db.prepare('SELECT id,name,membership_number,phone,address FROM customers WHERE id=?').get<Row>([request.action.target_id]) || null
+    targetCustomer = await db.prepare('SELECT id,name,membership_number,phone,address,is_anonymous FROM customers WHERE id=?').get<Row>([request.action.target_id]) || null
     if (!targetCustomer) fail('Target customer was not found.', 400)
+    if (isAnonymousCustomer(targetCustomer)) fail(ANONYMOUS_CUSTOMER_MUTATION_ERROR, 400)
   }
   let sourceReference: Row | null = null
   if (sourceMatchedIds.length && request.action.kind !== 'payment_method' && request.action.source_id !== null) {
     const table = request.action.kind === 'customer' ? 'customers' : 'delivery_contacts'
-    const columns = request.action.kind === 'customer' ? 'id,name,membership_number,phone,address' : 'id,name,phone,area,address'
+    const columns = request.action.kind === 'customer' ? 'id,name,membership_number,phone,address,is_anonymous' : 'id,name,phone,area,address'
     sourceReference = await db.prepare(`SELECT ${columns} FROM ${table} WHERE id=?`).get<Row>([request.action.source_id]) || null
     if (!sourceReference) fail('Source linked record was not found.', 400)
   }
@@ -456,6 +475,7 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, raw: Row)
         customer_phone: sale.customer_phone ?? null,
         customer_address: sale.customer_address ?? null,
         membership_number: sourceReference?.membership_number ?? null,
+        is_anonymous: Number(sale.customer_is_anonymous || 0),
         search_normalized: sale.search_normalized ?? null,
       }
       after = sourceMatched ? {
@@ -463,6 +483,7 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, raw: Row)
         customer_name: targetCustomer?.name ?? null,
         customer_phone: targetCustomer?.phone ?? null,
         membership_number: targetCustomer?.membership_number ?? null,
+        is_anonymous: Number(targetCustomer?.is_anonymous || 0),
         // N21: the sale stores the DISPLAY address, not the Contact Options
         // JSON in customers.address. referenceState/referenceGuard above keep
         // using the RAW column: they assert the customer row has not changed
@@ -488,6 +509,8 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, raw: Row)
           ].filter(Boolean).join(' ')),
         }
       })
+      const anonymousSourceGuard = anonymousReferenceGuard(request.action, before)
+      if (sourceMatched && anonymousSourceGuard) guards.push(anonymousSourceGuard)
     }
     const changed = sourceMatched && JSON.stringify(before) !== JSON.stringify(after)
     members.push({
@@ -583,6 +606,12 @@ export async function replaySaleBulkUpdate(env: Env, user: SessionUser, directio
   const statements: StockStatement[] = [bulkAssertion("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore') AND EXISTS(SELECT 1 FROM sale_bulk_operations o JOIN action_history h ON h.id=o.history_id JOIN undo_snapshots s ON s.id=o.snapshot_id WHERE o.id=@op AND o.generation=@generation AND h.id=@history AND h.status=@expected AND s.kind=@kind AND s.status=@snap AND s.payload_json=@payload)", { op: op.id, generation, history: historyId, expected, kind: BULK_UPDATE_KIND, snap: direction === 'undo' ? 'applied' : 'reversed', payload: op.payload_json })]
   for (const member of snapshot.members.filter((candidate) => candidate.changed)) {
     statements.push(bulkAssertion(`EXISTS(SELECT 1 FROM sales s JOIN sale_bulk_members m ON m.sale_id=s.id WHERE m.operation_id=@op AND s.id=@id AND m.revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=s.id),0) AND m.movement_fingerprint=${saleMovementFingerprint('s.id')})`, { op: op.id, id: member.id }))
+  }
+  if (direction === 'undo') {
+    for (const member of snapshot.members.filter((candidate) => candidate.changed)) {
+      const guard = anonymousReferenceGuard(snapshot.action, member.before)
+      if (guard) statements.push(guard)
+    }
   }
   const changedReference = snapshot.members.find((member) => member.changed)
   if (changedReference) {

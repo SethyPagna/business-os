@@ -28,6 +28,7 @@ const ts = require('typescript')
 const Database = require('better-sqlite3')
 
 const root = path.join(__dirname, '..')
+const recordContract = JSON.parse(fs.readFileSync(path.join(root, '..', 'outputs', 'takeover-20260908', 'f74-sales-records-backend-contract.json'), 'utf8'))
 const user = { id: 1, name: 'Admin', username: 'admin', role_code: 'admin', permissions: { all: true } }
 const cache = new Map()
 // contactOptions is on this list deliberately: the loader stubs any relative
@@ -39,7 +40,7 @@ const actual = new Set([
   'conflictControl', 'searchMatch', 'financialPrecision', 'paymentMethodRegistry',
   'paymentSettlement', 'saleSettlementAction', 'saleLineAddition', 'saleAmendments',
   'nativeSaleChange', 'receiptNumber', 'clientTimestamp', 'branchRoleGuards', 'branchRoles',
-  'contactOptions', 'saleCreationSnapshot',
+  'contactOptions', 'saleCreationSnapshot', 'saleRecordEvents', 'saleRecords', 'anonymousCustomer',
 ])
 function load(rel) {
   if (cache.has(rel)) return cache.get(rel).exports
@@ -51,11 +52,12 @@ function load(rel) {
   const req = (name) => {
     if (name === 'hono') return require(name)
     if (name.endsWith('/auth')) return { requireAuth: async (c, next) => { c.set('user', user); return next() } }
-    if (name.endsWith('/cache')) return { bumpVersion: async () => {}, getVersionWithFallback: async () => 0, cachedJsonResponse: async (_e, _k, _t, fn) => fn() }
+    if (name.endsWith('/cache')) return { bumpVersion: async () => {}, getVersionWithFallback: async () => 0, cachedJsonResponse: async (_request, _ctx, _version, _ttl, fn) => fn() }
     if (name.endsWith('/broadcastHub')) return { broadcast: async () => {} }
     if (name.endsWith('/audit')) return { audit: async () => {} }
     if (name.endsWith('/telegram')) return { formatSaleTelegramLines: () => [], sendTelegramEvent: async () => {}, telegramMoney: () => '' }
     if (name.endsWith('/undoAppliers')) return { recordSaleAddItemsUndoSnapshot: async () => null }
+    if (rel.endsWith('saleRecordEvents.ts') && name === './saleRecords') return { SALE_RECORD_FIELDS: recordContract.fields, SALE_RECORD_KINDS: recordContract.kinds }
     if (name.startsWith('.')) {
       const target = path.posix.normalize(path.posix.join(path.posix.dirname(rel), name)) + '.ts'
       if (actual.has(path.posix.basename(name))) return load(target)
@@ -105,6 +107,10 @@ function fixture() {
     const response = await sales.request(url, { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }, env, executionCtx)
     return { status: response.status, body: await response.json() }
   }
+  const read = async (url) => {
+    const response = await sales.request(url, { method: 'GET' }, env, executionCtx)
+    return { status: response.status, body: await response.json() }
+  }
   sql.exec(`
     INSERT INTO settings(key,value,updated_at) VALUES
       ('exchange_rate','4200','s1'),('pos_payment_methods','["Cash"]','s1');
@@ -118,13 +124,13 @@ function fixture() {
   `)
   // Bound, not inlined: the options JSON carries double quotes.
   sql.prepare('INSERT INTO customers(id,name,phone,address) VALUES(1,?,?,?)').run('Sok Dara', '012345678', OPTIONS_JSON)
-  return { sql, call }
+  return { sql, call, read }
 }
 
 async function run() {
   // 1. PATCH /sales/:id/customer -- the writer that produced the owner's rows.
   const f = fixture()
-  const linked = await f.call('/1/customer', { customerId: 1, expected_updated_at: 'sale-v1' })
+  const linked = await f.call('/1/customer', { customerId: 1, expected_updated_at: 'sale-v1', client_request_id: 'address-link-1' })
   assert.equal(linked.status, 200, JSON.stringify(linked))
   const stored = f.sql.prepare('SELECT customer_id,customer_name,customer_address FROM sales WHERE id=1').get()
   assert.equal(stored.customer_id, 1)
@@ -198,6 +204,36 @@ async function run() {
     'a direct name-only sale must not be recorded as General',
   )
   console.log('PASS a name-only direct sale stays distinct from General')
+
+  const anonymous = fixture()
+  anonymous.sql.prepare('UPDATE customers SET is_anonymous=1,membership_number=? WHERE id=1').run('LEGACY-GENERAL')
+  const anonymousSale = await anonymous.call('/', {
+    items: [{ product_id: 1, quantity: 1, applied_price_usd: 5, branch_id: 1 }],
+    branch_id: 1,
+    customer_id: 1,
+    customer_name: 'General',
+    customer_phone: '',
+    payment_details: [{ method: 'Cash', amount_usd: 5, amount_khr: 0 }],
+    payment_currency: 'USD', amount_paid_usd: 5, amount_paid_khr: 0, exchange_rate: 4200,
+    client_request_id: 'anonymous-create-1',
+  }, 'POST')
+  assert.equal(anonymousSale.status, 200, JSON.stringify(anonymousSale))
+  const anonymousRow = anonymous.sql.prepare('SELECT customer_id,customer_name,creation_snapshot_json FROM sales WHERE id=?').get(anonymousSale.body.id)
+  assert.deepEqual({ customer_id: anonymousRow.customer_id, customer_name: anonymousRow.customer_name }, { customer_id: null, customer_name: null })
+  assert.equal(JSON.parse(anonymousRow.creation_snapshot_json).customer, null)
+  assert.equal(JSON.parse(anonymousRow.creation_snapshot_json).membership, null)
+  console.log('PASS a marked anonymous profile is not copied into a new sale or its membership snapshot')
+
+  const listed = fixture()
+  listed.sql.prepare("UPDATE customers SET is_anonymous=1,membership_number='LEGACY-GENERAL' WHERE id=1").run()
+  listed.sql.prepare("UPDATE sales SET customer_id=1,customer_name='General' WHERE id=1").run()
+  const listResponse = await listed.read('/?limit=10')
+  assert.equal(listResponse.status, 200, JSON.stringify(listResponse))
+  const listedSale = listResponse.body.find((row) => row.id === 1)
+  assert.equal(listedSale.customer_is_anonymous, 1)
+  assert.equal(listedSale.customer_membership_number, null)
+  assert.equal(listedSale.customer_id, 1, 'the historical persisted id remains intact for exact repair/replay')
+  console.log('PASS list reads mark legacy anonymous identities and mask their joined membership')
 
   // A plainly typed address is untouched -- the normalization must not eat
   // ordinary input, including a numeric house number that parses as JSON.
