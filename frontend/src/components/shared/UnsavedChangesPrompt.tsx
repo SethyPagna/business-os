@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
-import { useApp as useAppHook } from '../../AppContext.tsx'
+import { useApp as useAppHook } from '../../app/AppContextCore.tsx'
 import type { CloseGuard } from '../../utils/useCloseGuard.ts'
 import MinimizeButton from './MinimizeButton.tsx'
 
