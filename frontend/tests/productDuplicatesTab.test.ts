@@ -52,6 +52,15 @@ test('N-row selections can open one durable paged review without replacing the l
   assert.match(src, /groupReviewRequestRef[\s\S]*batchRequestRef/, 'read-only paging and legacy writes have independent cancellation ownership')
 })
 
+test('independent removal is rendered only when the caller has product-delete authority', () => {
+  assert.match(src, /ProductDuplicatesTab\(\{ t, notify, canRemoveProduct \}/)
+  assert.match(src, /selected && canRemoveProduct \? \(/, 'the selected-row removal control is absent when deletion is unavailable')
+  assert.match(src, /canRemoveProduct=\{canRemoveProduct\}/, 'every rendered cluster receives the same resolved delete capability')
+  const products = readFileSync(join(here, '..', 'src', 'components', 'products', 'Products.tsx'), 'utf8')
+  assert.match(products, /const canRemoveProduct = can\('products', 'delete'\)/)
+  assert.match(products, /<ProductDuplicatesTab t=\{t\} notify=\{notify\} canRemoveProduct=\{canRemoveProduct\}/)
+})
+
 test('global review freezes once, then reuses one apply receipt across bounded continuation', () => {
   assert.match(src, /buildSelectedConflictGroupFinalizeRequest\(review, groups, groupReviewChoices\)/)
   assert.match(src, /finalizeSelectedConflictGroupReview\(review\.review_id, body, \{ signal: request\.signal \}\)/)

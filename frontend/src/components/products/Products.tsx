@@ -691,6 +691,7 @@ function ProductsFullEditor() {
   const canExportProducts = can('products', 'export')
   const canManageLookups = can('products', 'manage_lookups')
   const canMergeDuplicates = can('products', 'merge_duplicates')
+  const canRemoveProduct = can('products', 'delete')
   const canZeroQuantityCleanup = can('products', 'zero_qty_cleanup')
   // Same action the per-product image uploader is gated on: wiring photos
   // in bulk is the same authority as attaching one by hand, just applied
@@ -4845,7 +4846,7 @@ function ProductsFullEditor() {
       {activeProductSection === 'duplicates' && canMergeDuplicates && (
         <div className="mt-1">
           <Suspense fallback={<div className="py-6 text-center text-sm text-gray-400">{t('loading') || 'Loading'}...</div>}>
-            <ProductDuplicatesTab t={t} notify={notify} />
+            <ProductDuplicatesTab t={t} notify={notify} canRemoveProduct={canRemoveProduct} />
           </Suspense>
         </div>
       )}

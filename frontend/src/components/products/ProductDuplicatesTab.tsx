@@ -126,7 +126,7 @@ function selectedConflictErrorMessage(t: TranslateFn, error: unknown, fallbackKe
 }
 
 function ClusterCard({
-  cluster, t, dismissing, merging, selected, selectable, isExact, removalReasons, onToggleSelect, onRemovalChange, onDismiss, onApplyDecisions, onEdit,
+  cluster, t, dismissing, merging, selected, selectable, isExact, canRemoveProduct, removalReasons, onToggleSelect, onRemovalChange, onDismiss, onApplyDecisions, onEdit,
 }: {
   cluster: Cluster
   t: TranslateFn
@@ -134,6 +134,7 @@ function ClusterCard({
   merging: boolean
   selected: boolean
   selectable: boolean
+  canRemoveProduct: boolean
   removalReasons: Readonly<Record<number, string>>
   // Same barcode AND same name -> the Resolve (edit) button is hidden; the
   // Keep this / Keep both decision is the only sane next step (spec item #3).
@@ -269,7 +270,7 @@ function ClusterCard({
                   )}
                 </div>
               </div>
-              {selected ? (
+              {selected && canRemoveProduct ? (
                 <div className="mt-1.5 border-t border-black/5 pt-1.5 dark:border-white/10">
                   <label className="flex items-center gap-1.5 text-[11px] font-medium text-rose-700 dark:text-rose-300">
                     <input type="checkbox" checked={removeIndependently} disabled={busy} onChange={(event) => onRemovalChange(product.id, event.target.checked ? '' : null)} />
@@ -312,9 +313,10 @@ function ClusterCard({
   )
 }
 
-export default function ProductDuplicatesTab({ t, notify }: {
+export default function ProductDuplicatesTab({ t, notify, canRemoveProduct }: {
   t: TranslateFn
   notify: NotifyFn
+  canRemoveProduct: boolean
 }) {
   const [clusters, setClusters] = useState<Cluster[]>([])
   const [loading, setLoading] = useState(false)
@@ -1047,6 +1049,7 @@ export default function ProductDuplicatesTab({ t, notify }: {
                   selected={selectedKeys.has(id)}
                   selectable={!bulkBusy}
                   isExact={clusterIsExact(cluster)}
+                  canRemoveProduct={canRemoveProduct}
                   removalReasons={groupRemovalReasons}
                   onToggleSelect={() => toggleSelected(id)}
                   onRemovalChange={updateGroupRemoval}
