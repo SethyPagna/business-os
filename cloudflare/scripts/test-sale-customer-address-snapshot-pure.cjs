@@ -104,6 +104,12 @@ function fixture(options = {}) {
       } }
     },
     async batch(statements) {
+      if (!saleInsertIntercepted
+        && statements.some((statement) => /INSERT\s+INTO\s+sales\s*\(/i.test(statement.text))
+        && options.beforeSaleInsert) {
+        saleInsertIntercepted = true
+        options.beforeSaleInsert(sql)
+      }
       return sql.transaction(() => statements.map((statement) => {
         const r = sql.prepare(statement.text).run(...statement.params)
         return { meta: { changes: r.changes, last_row_id: Number(r.lastInsertRowid) } }
