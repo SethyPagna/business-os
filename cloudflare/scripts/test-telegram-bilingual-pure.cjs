@@ -135,7 +135,7 @@ console.log(`PASS glossary: ${checked} Worker terms also exist in the language p
 // src/lib/telegramLang.ts driven by THAT file's GLOSSARY, so the rules live
 // in one place. Until then this is the retail subset Telegram can hit.
 const RIVAL_SPELLINGS = [
-  ['batch / lot', 'បាច់', [/(?<!អាប់)ឡូត/, 'ឡុត']],
+  ['batch / lot / received date', 'ថ្ងៃចូល', ['បាច់', /ឡូត/, 'ឡុត']],
   ['customer', 'អតិថិជន', ['អ្នកទិញ']],
   ['cost', 'ថ្លៃដើម', ['តម្លៃដើម']],
   ['reason', 'មូលហេតុ', ['ហេតុផល']],

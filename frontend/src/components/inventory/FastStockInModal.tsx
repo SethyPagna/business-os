@@ -551,12 +551,12 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
         expiryDate: mode === 'remove' ? '' : expiryDate,
         batchChoice: effectiveBatchChoice,
         batchLabel: chosenLot
-          ? batchDisplayLabel(chosenLot, tr('batch', 'Batch'))
+          ? batchDisplayLabel(chosenLot, tr('batch', 'Received date'))
           : mode === 'remove'
-            ? tr('fast_stock_auto_lot', 'Oldest lots first')
+            ? tr('fast_stock_auto_lot', 'Oldest received dates first')
             : mode === 'set'
               ? (branchOptions.find((option) => String(option.value) === String(branchId))?.label || tr('branch', 'Branch'))
-              : tr('new_batch', '+ New batch'),
+              : tr('new_batch', '+ New received date'),
         mode,
         createdProduct: createdProductIds.includes(String(picked.id)),
         status: 'queued',
@@ -676,7 +676,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
             : result?.lotCode
             // Z1a: the server hands back an MMDDYYYY lot code; show it as the
             // received date it encodes, not as a raw 8-digit run.
-            ? `${tr('lot', 'lot')} ${lotCodeAsDate(result.lotCode) || result.lotCode}`
+            ? `${tr('received_date', 'Received date')} ${lotCodeAsDate(result.lotCode) || result.lotCode}`
             : line.createPriceVariant
               ? tr('price_variant_received', 'Price variant received')
               : tr('received', 'Received'),
@@ -824,7 +824,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
                     </button>
                   ))}
                 </span>
-                <InfoHint label={tr('stock_action', 'Stock action')} text={tr('fast_stock_mode_hint', 'Add receives stock into a lot. Remove takes stock out — pick the lot, or the oldest lots drain first. Set makes the branch total exactly this quantity; the difference posts as an add (supplier and cost required) or a remove.')} />
+                <InfoHint label={tr('stock_action', 'Stock action')} text={tr('fast_stock_mode_hint', 'Add receives stock under a received date. Remove takes stock out — pick the received date, or the oldest received dates drain first. Set makes the branch total exactly this quantity; the difference posts as an add (supplier and cost required) or a remove.')} />
               </span>
             </div>
             <div className="flex gap-2">
@@ -870,11 +870,11 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
                 </div>
               ) : mode === 'add' && costChanged(picked, unitCost) && createPriceVariant ? (
                 <div className="mt-2 rounded-lg border border-gray-200 px-3 py-2 text-[11px] text-gray-500 dark:border-gray-700 dark:text-gray-400">
-                  {tr('batch_auto_new_unlocked', 'A new batch is created automatically for unlocked pricing.')}
+                  {tr('batch_auto_new_unlocked', 'A new received date is created automatically for unlocked pricing.')}
                 </div>
               ) : (
                 <div className="mt-2">
-                  <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('batch', 'Batch')}</span>
+                  <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('batch', 'Received date')}</span>
                   {batchLoading ? (
                     <div className="text-[11px] text-gray-400">{tr('loading', 'Loading...')}</div>
                   ) : (
@@ -882,13 +882,13 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
                       <button type="button"
                         className={`rounded-full border px-2.5 py-1 text-[11px] font-medium ${batchChoice === 'new' ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}
                         onClick={() => setBatchChoice('new')}>
-                        {mode === 'remove' ? tr('fast_stock_auto_lot', 'Oldest lots first') : tr('new_batch', '+ New batch')}
+                        {mode === 'remove' ? tr('fast_stock_auto_lot', 'Oldest received dates first') : tr('new_batch', '+ New received date')}
                       </button>
                       {batchOptions.map((batch) => (
                         <button key={batch.id} type="button"
                           className={`rounded-full border px-2.5 py-1 text-[11px] font-medium ${batchChoice === Number(batch.id) ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}
                           onClick={() => setBatchChoice(Number(batch.id))}>
-                          {batchDisplayLabel(batch, tr('batch', 'Batch'))} ({batch.quantity})
+                          {batchDisplayLabel(batch, tr('batch', 'Received date'))} ({batch.quantity})
                         </button>
                       ))}
                     </div>
@@ -897,8 +897,8 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
                       code from whichever date is actually submitted. */}
                   {mode === 'add' ? <span className="mt-1 block text-[11px] text-gray-400">
                     {batchChoice === 'new'
-                      ? `${tr('batch_code_preview', 'Batch code')}: ${dateToBatchCode(receivedDate) || '--'}`
-                      : tr('existing_lot_keeps_date', 'Tops up the selected lot — its received date stays.')}
+                      ? `${tr('batch_code_preview', 'Received date code')}: ${dateToBatchCode(receivedDate) || '--'}`
+                      : tr('existing_lot_keeps_date', 'Tops up the selected received date — that date stays.')}
                   </span> : null}
                 </div>
               )}
@@ -972,7 +972,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
                 onChange={setSupplier}
                 tr={tr}
                 idPrefix="fast-stockin"
-                hint={tr('fast_stockin_supplier_hint', 'Recorded on every lot this session receives (first attribution sticks).')}
+                hint={tr('fast_stockin_supplier_hint', 'Recorded on every received date this session receives (first attribution sticks).')}
                 hintDisplay="tooltip"
               /></div>
               <div className="col-span-2 sm:col-span-4">

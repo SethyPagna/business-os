@@ -173,7 +173,7 @@ export default function ManageBatchesModal({
   const saveEdit = async (batch: ProductBatch) => {
     const nextQuantity = Number(draft.quantity)
     const quantityChange = Number.isFinite(nextQuantity) && nextQuantity >= 0 && nextQuantity !== Number(batch.quantity)
-    const batchLabel = batchDisplayLabel({ id: batch.id, lot_code: batch.lot_code ?? null, received_at: batch.received_at ?? null, batch_number: batch.batch_number ?? null }, t('batch') || 'Batch')
+    const batchLabel = batchDisplayLabel({ id: batch.id, lot_code: batch.lot_code ?? null, received_at: batch.received_at ?? null, batch_number: batch.batch_number ?? null }, t('batch') || 'Received date')
     const quantityNote = quantityChange
       ? ` ${tr('batch_quantity_change_note', 'Quantity will change from {from} to {to} at this branch.')
           .replace('{from}', String(batch.quantity))
@@ -227,7 +227,7 @@ export default function ManageBatchesModal({
   }
 
   const deactivate = async (batch: ProductBatch) => {
-    const batchLabel = batchDisplayLabel({ id: batch.id, lot_code: batch.lot_code ?? null, received_at: batch.received_at ?? null, batch_number: batch.batch_number ?? null }, t('batch') || 'Batch')
+    const batchLabel = batchDisplayLabel({ id: batch.id, lot_code: batch.lot_code ?? null, received_at: batch.received_at ?? null, batch_number: batch.batch_number ?? null }, t('batch') || 'Received date')
     if (!window.confirm(tr(
       'confirm_deactivate_batch_details',
       'Deactivate {batch} for {product}? It will no longer be available for new stock operations.',
@@ -425,7 +425,7 @@ export default function ManageBatchesModal({
                 ) : (
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0 flex-1">
-                      <div className="font-semibold text-amber-700 dark:text-amber-200">{batchDisplayLabel(batch, tr('batch', 'Batch'))}</div>
+                      <div className="font-semibold text-amber-700 dark:text-amber-200">{batchDisplayLabel(batch, tr('batch', 'Received date'))}</div>
                       {/* Compact product-card-style meta: received date (drills
                           to the day view where the times live), expiry and
                           supplier collapse onto ONE wrapping line instead of a

@@ -705,7 +705,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
     if (!activeItems.length) { notify(T('select_items_to_return','Select at least one item to return.'), 'error'); return }
     if (!finalReason) { notify(T('return_reason','Please provide a return reason.'), 'error'); return }
     if (itemsMissingLot.length || replacementsMissingLot.length) {
-      notify(T('lot_required', 'Pick the lot for every line first — stock never goes back to, or comes out of, unspecified stock.'), 'error')
+      notify(T('lot_required', 'Pick the received date for every line first — stock never goes back to, or comes out of, unspecified stock.'), 'error')
       return
     }
     if (!beginSingleAction(submitInFlightRef)) return
@@ -809,7 +809,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
     if (!activeItems.length) { notify(T('select_items_to_return', 'Select at least one item to return.'), 'error'); return }
     if (!finalReason) { notify(T('return_reason', 'Please provide a return reason.'), 'error'); return }
     if (itemsMissingLot.length || replacementsMissingLot.length) {
-      notify(T('lot_required', 'Pick the lot for every line first — stock never goes back to, or comes out of, unspecified stock.'), 'error')
+      notify(T('lot_required', 'Pick the received date for every line first — stock never goes back to, or comes out of, unspecified stock.'), 'error')
       return
     }
     setStep('confirm')
@@ -1077,28 +1077,28 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                               {item.stock_action === 'restock' && (
                                 toNumber(item.batch_id) > 0 || toNumber(item.lot_allocation_count) > 0 ? (
                                   <div data-lot="known" className="text-[10px] text-gray-400">
-                                    ↩ {T('return_lot_from_sale', 'Back into the lot this line was sold from')}
+                                    ↩ {T('return_lot_from_sale', 'Back into the received date this line was sold from')}
                                     {item.batch_label ? `: ${item.batch_label}` : ''}
                                   </div>
                                 ) : item.lotOptions.length > 0 ? (
                                   <div data-lot="pick" className="flex items-center gap-2">
-                                    <span className="flex-shrink-0 text-[10px] text-gray-400">{T('return_lot_pick', 'Back into lot')}</span>
+                                    <span className="flex-shrink-0 text-[10px] text-gray-400">{T('return_lot_pick', 'Back into received date')}</span>
                                     <AppSelect
                                       value={item.pickedBatchId != null ? String(item.pickedBatchId) : ''}
                                       onChange={(next) => updateItemLot(idx, next ? Number(next) : null)}
-                                      ariaLabel={T('return_lot_pick', 'Back into lot')}
+                                      ariaLabel={T('return_lot_pick', 'Back into received date')}
                                       className="min-w-0 flex-1"
                                       buttonClassName={`h-8 w-full text-xs ${item.pickedBatchId == null ? 'border-amber-400 dark:border-amber-600' : ''}`}
                                       optionClassName="text-xs"
                                       options={[
-                                        { value: '', label: T('select_lot', 'Choose a lot…') },
+                                        { value: '', label: T('select_lot', 'Choose a received date…') },
                                         ...item.lotOptions.map((batch) => ({ value: String(batch.id), label: describeBatchOption(batch) })),
                                       ]}
                                     />
                                   </div>
                                 ) : (
                                   <div data-lot="untracked" className="text-[10px] text-gray-400">
-                                    {T('lot_untracked', 'This product has no lots — stock goes back to the branch count.')}
+                                    {T('lot_untracked', 'This product has no received dates — stock goes back to the branch count.')}
                                   </div>
                                 )
                               )}
@@ -1232,14 +1232,14 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                           <AppSelect
                             value={line.batch_id != null ? String(line.batch_id) : ''}
                             onChange={(next) => updateReplacement(line.key, { batch_id: next ? Number(next) : null })}
-                            ariaLabel={T('batch','Batch')}
+                            ariaLabel={T('batch','Received date')}
                             className="flex-1 min-w-0"
                             optionClassName="text-xs"
                             buttonClassName={`h-9 w-full text-xs ${line.batches.length > 0 && line.batch_id == null ? 'border-amber-400 dark:border-amber-600' : ''}`}
                             options={line.batches.length > 0
-                              ? [{ value: '', label: T('select_lot', 'Choose a lot…') },
+                              ? [{ value: '', label: T('select_lot', 'Choose a received date…') },
                                 ...line.batches.map((batch) => ({ value: String(batch.id), label: describeBatchOption(batch) }))]
-                              : [{ value: '', label: T('lot_untracked_out', 'No lots — drawn from the branch count') }]}
+                              : [{ value: '', label: T('lot_untracked_out', 'No received dates — drawn from the branch count') }]}
                           />
                           <input type="number" min="1" step="1" className="input w-16 flex-shrink-0 py-1 text-center text-sm"
                             aria-label={T('quantity','Quantity')}

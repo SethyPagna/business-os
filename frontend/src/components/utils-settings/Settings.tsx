@@ -2157,7 +2157,7 @@ export default function Settings() {
                 ['telegram_sales_enabled', t('telegram_cat_sales') || 'Sales & new receipts', t('telegram_cat_sales_desc') || 'Receipt number, status, totals, items, customer, and branch'],
                 ['telegram_status_enabled', t('telegram_cat_status') || 'Receipt status changes', t('telegram_cat_status_desc') || 'Payment, delivery, completion, and cancellation changes'],
                 ['telegram_fees_enabled', t('fees') || 'Fees', t('telegram_cat_fees_desc') || 'New fee type, amount, date, label, and note'],
-                ['telegram_stock_in_enabled', t('stock_in') || 'Stock in', t('telegram_cat_stock_in_desc') || 'Product, quantity, branch, reason, and lot'],
+                ['telegram_stock_in_enabled', t('stock_in') || 'Stock in', t('telegram_cat_stock_in_desc') || 'Product, quantity, branch, reason, and received date'],
                 ['telegram_stock_out_enabled', t('stock_out') || 'Stock out', t('telegram_cat_stock_out_desc') || 'Product, quantity, branch, and reason'],
               ].map(([key, label, description]) => (
                 <label key={key} className="flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/70">

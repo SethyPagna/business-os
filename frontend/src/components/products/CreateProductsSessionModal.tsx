@@ -500,7 +500,7 @@ export default function CreateProductsSessionModal({
       supplierName: lotAttributedName || lineSupplier.supplierName.trim(), supplierLocked: Boolean(lotAttributedName),
       branchId: String(branchId), branchName: branchNameFor(String(branchId)), receivedDate: lineReceivedDate || receivedDate,
       expiryDate: lineExpiryDate, batchId: chosenBatch ? Number(chosenBatch.id) : null,
-      batchLabel: chosenBatch ? batchDisplayLabel(chosenBatch, tr('batch', 'Batch')) : tr('new_batch', '+ New batch'),
+      batchLabel: chosenBatch ? batchDisplayLabel(chosenBatch, tr('batch', 'Received date')) : tr('new_batch', '+ New batch'),
       quantity, unitCostUsd, freeGoods,
       status: 'queued', detail: tr('ready_to_receive', 'Ready'),
     }
@@ -825,8 +825,8 @@ export default function CreateProductsSessionModal({
         <label><span className="mb-1 block text-[11px] text-gray-500">{tr('unit_cost_usd', 'Unit cost (USD)')}</span><input className="input h-9 w-full text-sm" type="number" min="0" step="0.01" value={lineUnitCost} onChange={(event) => setLineUnitCost(event.target.value)} /></label>
       </div>
       <div className="mt-3">
-        <span className="mb-1 block text-[11px] text-gray-500">{tr('batch', 'Batch')}</span>
-        {batchLoading ? <p className="text-xs text-gray-400">{tr('loading', 'Loading...')}</p> : batchFailed ? <p className="text-xs text-red-600">{tr('load_failed', 'Could not load stock batches.')}</p> : <div className="flex flex-wrap gap-1.5"><button type="button" className={batchChoice === 'new' ? 'rounded-full border border-blue-600 bg-blue-50 px-2.5 py-1 text-xs text-blue-700' : 'rounded-full border border-gray-300 px-2.5 py-1 text-xs'} onClick={() => setBatchChoice('new')}>{tr('new_batch', '+ New batch')}</button>{batchOptions.map((batch) => <button key={batch.id} type="button" className={batchChoice === Number(batch.id) ? 'rounded-full border border-blue-600 bg-blue-50 px-2.5 py-1 text-xs text-blue-700' : 'rounded-full border border-gray-300 px-2.5 py-1 text-xs'} onClick={() => setBatchChoice(Number(batch.id))}>{batchDisplayLabel(batch, tr('batch', 'Batch'))} ({batch.quantity})</button>)}</div>}
+        <span className="mb-1 block text-[11px] text-gray-500">{tr('batch', 'Received date')}</span>
+        {batchLoading ? <p className="text-xs text-gray-400">{tr('loading', 'Loading...')}</p> : batchFailed ? <p className="text-xs text-red-600">{tr('load_failed', 'Could not load stock batches.')}</p> : <div className="flex flex-wrap gap-1.5"><button type="button" className={batchChoice === 'new' ? 'rounded-full border border-blue-600 bg-blue-50 px-2.5 py-1 text-xs text-blue-700' : 'rounded-full border border-gray-300 px-2.5 py-1 text-xs'} onClick={() => setBatchChoice('new')}>{tr('new_batch', '+ New batch')}</button>{batchOptions.map((batch) => <button key={batch.id} type="button" className={batchChoice === Number(batch.id) ? 'rounded-full border border-blue-600 bg-blue-50 px-2.5 py-1 text-xs text-blue-700' : 'rounded-full border border-gray-300 px-2.5 py-1 text-xs'} onClick={() => setBatchChoice(Number(batch.id))}>{batchDisplayLabel(batch, tr('batch', 'Received date'))} ({batch.quantity})</button>)}</div>}
       </div>
       <button type="button" className="btn-primary mt-4 h-11 w-full text-sm disabled:opacity-50" disabled={batchLoading || batchFailed || exactBatchLoadKey !== `${Number(selectedProduct.id)}:${Number(lineBranchId)}`} onClick={onContinue}>{editingExistingLine ? tr('save_changes', 'Save changes') : tr('continue', 'Continue')}</button>
     </div>

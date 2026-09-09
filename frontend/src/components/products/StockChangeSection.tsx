@@ -437,7 +437,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
       quantity: row.signed_quantity,
       before: row.before_qty,
       after: row.after_qty,
-      batch: row.batch_id ? batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at }) : '',
+      batch: row.batch_id ? batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at }, tr(t, 'batch', 'Received date')) : '',
       supplier: historyExportField(row.batch_supplier_name),
       // N13: the export carries the SAME columns the table shows. `receipt` is
       // the record a person recognises ("Sale 20260901-193100"); `reference`
@@ -645,7 +645,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
           <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-400">
             {row.batch_id ? (
               <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-gray-500 dark:bg-gray-800 dark:text-gray-300">
-                {batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at })}
+                {batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at }, tr(t, 'batch', 'Received date'))}
               </span>
             ) : null}
             {row.batch_supplier_name ? <span className="break-words font-medium text-gray-500 dark:text-gray-300">{row.batch_supplier_name}</span> : null}
@@ -777,9 +777,9 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                         // that could reveal the value on repeating the column header.
                         <span
                           className="block dense-cell-truncate dense-id leading-[0.85rem] text-gray-400"
-                          title={batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at })}
+                          title={batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at }, tr(t, 'batch', 'Received date'))}
                         >
-                          {batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at })}
+                          {batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at }, tr(t, 'batch', 'Received date'))}
                         </span>
                       ) : null}
                     </td>
@@ -1071,8 +1071,8 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
             </div>
             {detail.batch_id ? (
               <p className="rounded-xl bg-gray-50 px-3 py-2 text-sm text-gray-600 dark:bg-gray-800/60 dark:text-gray-300">
-                <span className="text-[11px] uppercase tracking-wide text-gray-400">{tr(t, 'batch', 'Batch')}: </span>
-                {batchDisplayLabel({ id: detail.batch_id, lot_code: detail.batch_lot_code, received_at: detail.batch_received_at })}
+                <span className="text-[11px] uppercase tracking-wide text-gray-400">{tr(t, 'batch', 'Received date')}: </span>
+                {batchDisplayLabel({ id: detail.batch_id, lot_code: detail.batch_lot_code, received_at: detail.batch_received_at }, tr(t, 'batch', 'Received date'))}
                 {detail.batch_supplier_name ? <span className="text-gray-400"> · {detail.batch_supplier_name}</span> : null}
               </p>
             ) : null}

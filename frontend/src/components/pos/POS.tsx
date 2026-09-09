@@ -3171,8 +3171,8 @@ export default function POS() {
               <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-200">
                 <span className="flex-1 min-w-[12rem]">
                   {posCopy(
-                    'Batch and expiry tracking could not be loaded, so lot selection cannot be skipped. Check each item before selling.',
-                    'Batch and expiry tracking could not be loaded, so lot selection cannot be skipped. Check each item before selling.',
+                    'Batch and expiry tracking could not be loaded, so received-date selection cannot be skipped. Check each item before selling.',
+                    'មិនអាចផ្ទុកការតាមដានថ្ងៃចូល និងផុតកំណត់បានទេ ដូច្នេះមិនអាចរំលងការជ្រើសថ្ងៃចូលបានទេ។ សូមពិនិត្យទំនិញនីមួយៗមុនលក់។',
                   )}
                 </span>
                 <button

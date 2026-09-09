@@ -950,7 +950,10 @@ export type TelegramSaleSummary = {
 }
 export type TelegramStockChange = {
   product: string; type: 'add' | 'remove'; quantity: number; branch?: string | null; reason?: string | null
-  lot?: string | null; branchOnHand?: number | null; totalOnHand?: number | null; by?: string | null
+  /** Received date is the display concept; `lot` remains a wire-compatible
+   * legacy alias for callers that still carry the stored lot code. */
+  receivedDate?: string | null; lot?: string | null
+  branchOnHand?: number | null; totalOnHand?: number | null; by?: string | null
 }
 const TELEGRAM_MAX_ITEM_LINES = 20
 
@@ -964,6 +967,33 @@ export function formatBusinessDateTime(value?: string | null, nowMs = Date.now()
   const local = new Date((Number.isFinite(parsed) ? parsed : nowMs) + BUSINESS_UTC_OFFSET_MINUTES * 60_000)
   const pad = (n: number) => String(n).padStart(2, '0')
   return `${pad(local.getUTCDate())}/${pad(local.getUTCMonth() + 1)}/${local.getUTCFullYear()} ${pad(local.getUTCHours())}:${pad(local.getUTCMinutes())}`
+}
+
+/**
+ * Convert the stored lot identifier used by older event callers into the
+ * operator-facing received date. Date-derived lot codes are MMDDYYYY in the
+ * database and must be read day-first on screen. A custom legacy code is
+ * preserved as a value rather than dropped; it is still better to show the
+ * recorded identity than to silently claim that no date exists.
+ */
+function receivedDateText(receivedDate?: string | null, lotCode?: string | null): string {
+  const raw = String(receivedDate || lotCode || '').trim()
+  if (!raw) return ''
+  const iso = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/)
+  if (iso) return `${String(Number(iso[3])).padStart(2, '0')}/${String(Number(iso[2])).padStart(2, '0')}/${iso[1]}`
+  const slash = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/)
+  if (slash) {
+    const year = Number(slash[3]) < 100 ? Number(slash[3]) + 2000 : Number(slash[3])
+    return `${String(Number(slash[1])).padStart(2, '0')}/${String(Number(slash[2])).padStart(2, '0')}/${year}`
+  }
+  if (/^\d{8}$/.test(raw)) {
+    const month = Number(raw.slice(0, 2)); const day = Number(raw.slice(2, 4)); const year = Number(raw.slice(4))
+    const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate()
+    if (month >= 1 && month <= 12 && day >= 1 && day <= lastDay && year >= 1970 && year <= 2999) {
+      return `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year}`
+    }
+  }
+  return raw
 }
 
 export function formatSaleTelegramLines(sale: TelegramSaleSummary): string[] {
@@ -1049,6 +1079,7 @@ export function formatSaleTelegramLines(sale: TelegramSaleSummary): string[] {
 // branches), not only the delta -- "for stock change, should also show total".
 export function formatStockChangeTelegramLines(change: TelegramStockChange): string[] {
   const quantity = Math.abs(Number(change.quantity) || 0)
+  const received = receivedDateText(change.receivedDate, change.lot)
   const onHand: string[] = []
   if (change.branchOnHand != null) onHand.push(`${change.branch || 'Branch'} ${Number(change.branchOnHand) || 0}`)
   if (change.totalOnHand != null) onHand.push(`all branches ${Number(change.totalOnHand) || 0}`)
@@ -1060,7 +1091,7 @@ export function formatStockChangeTelegramLines(change: TelegramStockChange): str
     // On hand line below already names whichever branches it can.
     change.branch ? `Branch: ${change.branch}` : '',
     change.reason ? `Reason: ${change.reason}` : '',
-    change.lot ? `Lot: ${change.lot}` : '',
+    received ? `Received date: ${received}` : '',
     onHand.length ? `On hand: ${onHand.join(' · ')}` : '',
     change.by ? `By: ${change.by}` : '',
   ]
@@ -1076,7 +1107,7 @@ export function formatStockChangeTelegramLines(change: TelegramStockChange): str
 // transfer is not a plain stock-out, while the enable switch stays the
 // user's existing five categories.
 export type TelegramTransferLine = {
-  product: string; quantity: number; lot?: string | null; mergedInto?: string | null
+  product: string; quantity: number; receivedDate?: string | null; lot?: string | null; mergedInto?: string | null
   fromOnHand?: number | null; toOnHand?: number | null; totalOnHand?: number | null
 }
 export type TelegramTransferSummary = {
@@ -1084,7 +1115,7 @@ export type TelegramTransferSummary = {
   items: TelegramTransferLine[]; note?: string | null; by?: string | null
 }
 export type TelegramReturnLine = {
-  product: string; quantity: number; refundUsd?: number | null; lot?: string | null
+  product: string; quantity: number; refundUsd?: number | null; receivedDate?: string | null; lot?: string | null
   stockAction?: string | null; branchOnHand?: number | null; totalOnHand?: number | null
 }
 export type TelegramReturnSummary = {
@@ -1105,9 +1136,10 @@ export function formatTransferTelegramLines(transfer: TelegramTransferSummary): 
   const from = transfer.fromBranch || 'Source'
   const to = transfer.toBranch || 'Destination'
   const items = transfer.items.slice(0, TELEGRAM_MAX_ITEM_LINES).map((item) => {
+    const received = receivedDateText(item.receivedDate, item.lot)
     const onHand = onHandLine([[from, item.fromOnHand], [to, item.toOnHand], ['all branches', item.totalOnHand]])
     return `• ${cleanLine(item.product, 100)} ${Math.abs(Number(item.quantity) || 0)}`
-      + (item.lot ? ` (lot ${cleanLine(item.lot, 40)})` : '')
+      + (received ? ` (received date ${cleanLine(received, 40)})` : '')
       + (item.mergedInto ? ` → ${cleanLine(item.mergedInto, 100)}` : '')
       + (onHand ? ` — ${onHand.slice('On hand: '.length)}` : '')
   })
@@ -1135,11 +1167,12 @@ export function formatTransferTelegramLines(transfer: TelegramTransferSummary): 
 
 export function formatReturnTelegramLines(ret: TelegramReturnSummary): string[] {
   const items = ret.items.slice(0, TELEGRAM_MAX_ITEM_LINES).map((item) => {
+    const received = receivedDateText(item.receivedDate, item.lot)
     const onHand = onHandLine([[ret.branch || 'Branch', item.branchOnHand], ['all branches', item.totalOnHand]])
     return `• ${cleanLine(item.product, 100)} ${Math.abs(Number(item.quantity) || 0)}`
       + (item.refundUsd != null ? ` = ${usd(item.refundUsd)}` : '')
       + (item.stockAction ? ` (${String(item.stockAction).replace(/_/g, ' ')})` : '')
-      + (item.lot ? ` (lot ${cleanLine(item.lot, 40)})` : '')
+      + (received ? ` (received date ${cleanLine(received, 40)})` : '')
       + (onHand ? ` — ${onHand.slice('On hand: '.length)}` : '')
   })
   const replacements = (ret.replacements || []).slice(0, TELEGRAM_MAX_ITEM_LINES)
@@ -1171,11 +1204,11 @@ export function formatReturnTelegramLines(ret: TelegramReturnSummary): string[] 
 // Return alerts read the recorded lines back (return_items is the truth the
 // route just wrote, incl. the lot each line landed in and its branch) and the
 // resulting on-hand per product, so the route hands over only the header.
-type ReturnItemRow = { product_name: string | null; quantity: number; total_usd: number | null; stock_action: string | null; lot_code: string | null; branch_on_hand: number | null; total_on_hand: number | null }
+type ReturnItemRow = { product_name: string | null; quantity: number; total_usd: number | null; stock_action: string | null; lot_code: string | null; received_at: string | null; branch_on_hand: number | null; total_on_hand: number | null }
 export async function sendReturnTelegramEvent(env: Env, returnId: number, base: Omit<TelegramReturnSummary, 'items' | 'replacements'>): Promise<boolean> {
   const db = getDb(env)
   const [items, replacements] = await Promise.all([
-    db.prepare(`SELECT ri.product_name, ri.quantity, ri.total_usd, ri.stock_action, pb.lot_code,
+    db.prepare(`SELECT ri.product_name, ri.quantity, ri.total_usd, ri.stock_action, pb.lot_code, pb.received_at,
         (SELECT quantity FROM branch_stock WHERE product_id = ri.product_id AND branch_id = ri.branch_id) AS branch_on_hand,
         (SELECT stock_quantity FROM products WHERE id = ri.product_id) AS total_on_hand
       FROM return_items ri LEFT JOIN product_batches pb ON pb.id = ri.batch_id
@@ -1190,7 +1223,9 @@ export async function sendReturnTelegramEvent(env: Env, returnId: number, base: 
       items: items.map((row) => ({
         product: row.product_name || 'Item', quantity: Number(row.quantity) || 0,
         refundUsd: base.kind === 'supplier' ? null : Number(row.total_usd) || 0,
-        stockAction: base.kind === 'supplier' ? null : row.stock_action, lot: row.lot_code,
+        stockAction: base.kind === 'supplier' ? null : row.stock_action,
+        receivedDate: row.received_at,
+        lot: row.lot_code,
         branchOnHand: row.branch_on_hand == null ? null : Number(row.branch_on_hand) || 0,
         totalOnHand: row.total_on_hand == null ? null : Number(row.total_on_hand) || 0,
       })),

@@ -68,11 +68,11 @@ test('both dispositions are offered and neither is pre-selected', () => {
   assert.match(dialog, /danger=\{choice === 'write_off' \|\| identityDiffers\}/, 'writing stock off is the destructive branch')
 })
 
-test('MERGE explains that same-lot same-branch quantities are ADDED, not replaced', () => {
+test('MERGE explains that same received-date same-branch quantities are ADDED, not replaced', () => {
   const hint = en.merge_stock_choice_merge_hint
   assert.ok(hint, 'merge_stock_choice_merge_hint must ship in the pack')
-  assert.match(hint, /lot code/i)
-  assert.match(hint, /batch number/i)
+  assert.match(hint, /received-date code/i)
+  assert.doesNotMatch(hint, /\blot code\b|\bbatch number\b/i)
   assert.match(hint, /branch/i)
   assert.match(hint, /added together/i)
 })
@@ -85,7 +85,7 @@ test('REMOVE explains the balancing stock movement (reason, who, when)', () => {
   assert.match(hint, /ledger/i)
 })
 
-test('the dialog shows the stock the discarded row actually holds, per branch and per lot', () => {
+test('the dialog shows the stock the discarded row actually holds, per branch and per received date', () => {
   assert.match(dialog, /impact\.branches\.map/)
   assert.match(dialog, /branch\.quantity/)
   assert.match(dialog, /branch\.lotCount/)

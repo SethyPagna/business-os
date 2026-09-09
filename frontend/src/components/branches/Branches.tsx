@@ -1409,8 +1409,8 @@ export default function Branches({ embedded = false, view, showSectionNavigation
                                         <button
                                           type="button"
                                           className="ml-auto flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-blue-100 hover:text-blue-600 dark:hover:bg-blue-900/40 dark:hover:text-blue-300"
-                                          title={tr('receive_batch', 'Receive Batch')}
-                                          aria-label={`${tr('receive_batch', 'Receive Batch')} — ${product.name || ''}`}
+                                          title={tr('receive_batch', 'Receive Stock')}
+                                          aria-label={`${tr('receive_batch', 'Receive Stock')} — ${product.name || ''}`}
                                           onClick={() => setReceiveTarget({ product, branchId: String(branch.id) })}
                                         >
                                           <Plus className="h-3.5 w-3.5" />

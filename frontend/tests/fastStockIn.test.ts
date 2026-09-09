@@ -195,7 +195,7 @@ runTest('the lot picker matches the sibling add-stock surfaces', () => {
   assert.match(modalSource, /getProductBatches\(productId, parsedBranchId, false\)/, 'add shows every active lot, empty ones included')
   assert.match(modalSource, /\}, \[picked\?\.id, branchId\]\)/, 'lots refetch per picked product AND branch')
   assert.match(modalSource, /setBatchChoice\('new'\)/, "a stale lot id can never ride to submit")
-  assert.match(modalSource, /batchDisplayLabel\(batch, tr\('batch', 'Batch'\)\)/, 'lot labels come from the shared helper')
+  assert.match(modalSource, /batchDisplayLabel\(batch, tr\('batch', 'Received date'\)\)/, 'lot labels come from the shared helper')
   // A batch is identified by its DATE -- the code is previewed, never typed.
   assert.match(modalSource, /dateToBatchCode\(receivedDate\)/, 'the derived lot code is visible before commit')
   assert.match(modalSource, /existing_lot_keeps_date/, 'picking a lot replaces the date rather than pretending it applies')

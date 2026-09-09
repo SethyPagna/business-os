@@ -261,7 +261,7 @@ const LABELS = {
     phone: 'ទូរស័ព្ទ:',
     address: 'អាសយដ្ឋាន:',
     membership: 'លេខសមាជិក:',
-    delivery: 'ថ្លៃដឹកជញ្ជូន:',
+    delivery: 'ថ្លៃដឹក:',
     free: 'ឥតគិតថ្លៃ',
     driver: 'ដឹកជញ្ជូន:',
     subtotal: 'សរុបរង:',

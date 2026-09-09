@@ -528,7 +528,7 @@ export default function InventoryStockModals({
               {showBatchPicker ? (
                 <div>
                   <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">
-                    {adjustForm.type === 'add' ? tr('batch', 'Batch') : tr('batch_to_remove_from', 'Batch to remove from')} *
+                    {adjustForm.type === 'add' ? tr('batch', 'Received date') : tr('batch_to_remove_from', 'Received date to remove from')} *
                   </label>
                   {batchLoading ? (
                     <div className="text-xs text-gray-400">{t('loading') || 'Loading...'}</div>
@@ -540,7 +540,7 @@ export default function InventoryStockModals({
                           className={`rounded-full px-2.5 py-1 text-[11px] font-medium border ${adjustForm.batch_id === 'new' ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}
                           onClick={() => setAdjustForm((f) => ({ ...f, batch_id: 'new' }))}
                         >
-                          {tr('new_batch', '+ New batch')}
+                          {tr('new_batch', '+ New received date')}
                         </button>
                       ) : null}
                       {batchOptions.map((batch) => (
@@ -550,7 +550,7 @@ export default function InventoryStockModals({
                           className={`rounded-full px-2.5 py-1 text-[11px] font-medium border ${String(adjustForm.batch_id) === String(batch.id) ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}
                           onClick={() => setAdjustForm((f) => ({ ...f, batch_id: batch.id }))}
                         >
-                          {batchDisplayLabel(batch, tr('batch', 'Batch'))} ({batch.quantity})
+                          {batchDisplayLabel(batch, tr('batch', 'Received date'))} ({batch.quantity})
                         </button>
                       ))}
                       {!batchOptions.length && adjustForm.type === 'remove' ? (
@@ -562,7 +562,7 @@ export default function InventoryStockModals({
               ) : null}
               {adjustForm.type === 'add' && unlockPricing ? (
                 <div className="text-[11px] text-gray-400">
-                  {tr('batch_auto_new_unlocked', 'A new batch is created automatically for unlocked-pricing receipts.')}
+                  {tr('batch_auto_new_unlocked', 'A new received date is created automatically for unlocked-pricing receipts.')}
                 </div>
               ) : null}
               {/* D4 (11.28): recording stock late may carry the REAL
@@ -588,7 +588,7 @@ export default function InventoryStockModals({
                     onChange={iso => setAdjustForm(f => ({ ...f, received_date: iso }))}
                   />
                   <div className="mt-1 text-[11px] text-gray-400">
-                    {tr('batch_code_preview', 'Batch code', 'កូដបាច់')}: {dateToBatchCode(adjustForm.received_date) || '--'}
+                    {tr('batch_code_preview', 'Received date code', 'កូដថ្ងៃចូល')}: {dateToBatchCode(adjustForm.received_date) || '--'}
                   </div>
                 </div>
               ) : null}
@@ -611,7 +611,7 @@ export default function InventoryStockModals({
                   tr={tr}
                   lockedName={adjustLotAttributedName}
                   hint={selectedAdjustLot && !adjustLotAttributedName
-                    ? tr('supplier_will_fill_lot', 'This lot has no supplier yet — your choice will be recorded on it.')
+                    ? tr('supplier_will_fill_lot', 'This received date has no supplier yet — your choice will be recorded on it.')
                     : null}
                 />
               ) : null}

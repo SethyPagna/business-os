@@ -657,8 +657,8 @@ export default function SaleDetailModal({
   // is actually sent, so there is one error path and one reload.
   const amendmentRows: AmendmentDisplayRow[] = useMemo(
     () => toAmendmentDisplayRows(amendments, (value) => fmtUSD(value), t('delivery') || 'Delivery', {
-      feeLabel: translateOr('delivery_fee', 'Delivery fee', 'ថ្លៃដឹកជញ្ជូន'),
-      actualCostLabel: translateOr('delivery_actual_cost', 'Actual delivery cost', 'ថ្លៃដឹកជញ្ជូនពិតប្រាកដ'),
+      feeLabel: translateOr('delivery_fee', 'Delivery fee', 'ថ្លៃដឹក'),
+      actualCostLabel: translateOr('delivery_actual_cost', 'Actual delivery cost', 'ថ្លៃដឹកដើម'),
       notRecordedLabel: translateOr('not_recorded', 'Not recorded', 'មិនទាន់កត់ត្រា'),
     }),
     [amendments, fmtUSD, t],
@@ -843,7 +843,7 @@ export default function SaleDetailModal({
     setAmendMutationError('')
     setAmendConfirm({
       request: { kind: 'delivery_actual_cost_changed', delivery_actual_cost_usd: next },
-      title: translateOr('amend_actual_cost_title', 'Correct the actual delivery cost?', 'កែថ្លៃដឹកជញ្ជូនពិតប្រាកដ?'),
+      title: translateOr('amend_actual_cost_title', 'Correct the actual delivery cost?', 'កែថ្លៃដឹកដើម?'),
       summary: `${currentCostUsd === null ? translateOr('not_recorded', 'Not recorded', 'មិនទាន់កត់ត្រា') : fmtUSD(currentCostUsd)} → ${next === null ? translateOr('not_recorded', 'Not recorded', 'មិនទាន់កត់ត្រា') : fmtUSD(next)}`,
     })
   }
@@ -1371,11 +1371,11 @@ export default function SaleDetailModal({
                         ) : null}
                         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                           <label className="text-[11px] font-medium text-gray-600 dark:text-gray-300" htmlFor="sale-add-delivery-fee">
-                            {translateOr('delivery_fee', 'Delivery fee', 'ថ្លៃដឹកជញ្ជូន')}
+                            {translateOr('delivery_fee', 'Delivery fee', 'ថ្លៃដឹក')}
                             <input id="sale-add-delivery-fee" type="number" min="0" step="0.01" inputMode="decimal" value={feeText} onChange={(event) => setFeeText(event.target.value)} className="input mt-1 w-full text-sm tabular-nums" />
                           </label>
                           <label className="text-[11px] font-medium text-gray-600 dark:text-gray-300" htmlFor="sale-add-delivery-cost">
-                            {translateOr('delivery_actual_cost', 'Actual delivery cost', 'ថ្លៃដឹកជញ្ជូនពិតប្រាកដ')}
+                            {translateOr('delivery_actual_cost', 'Actual delivery cost', 'ថ្លៃដឹកដើម')}
                             <input id="sale-add-delivery-cost" type="number" min="0" step="0.01" inputMode="decimal" value={actualCostText} onChange={(event) => setActualCostText(event.target.value)} placeholder={translateOr('not_recorded', 'Not recorded', 'មិនទាន់កត់ត្រា')} className="input mt-1 w-full text-sm tabular-nums" />
                           </label>
                         </div>
@@ -1408,7 +1408,7 @@ export default function SaleDetailModal({
                     summary is untouched, and a customer-facing surface still
                     never sees it. */}
                 {isDelivery ? (
-                  <DetailRow label={translateOr('delivery_actual_cost', 'Actual delivery cost', 'ថ្លៃដឹកជញ្ជូនពិតប្រាកដ')}>
+                  <DetailRow label={translateOr('delivery_actual_cost', 'Actual delivery cost', 'ថ្លៃដឹកដើម')}>
                     <span className="flex flex-wrap items-center gap-2">
                       <span className="tabular-nums">
                         {actualCostUsd === null ? (
@@ -1436,7 +1436,7 @@ export default function SaleDetailModal({
                       <span className="mt-2 block">
                         <span className="flex flex-wrap items-center gap-2">
                           <label className="text-[11px] font-medium text-gray-600 dark:text-gray-300" htmlFor="amend-delivery-actual-cost">
-                            {translateOr('amend_actual_cost_new', 'New actual delivery cost', 'ថ្លៃដឹកជញ្ជូនពិតប្រាកដថ្មី')}
+                            {translateOr('amend_actual_cost_new', 'New actual delivery cost', 'ថ្លៃដឹកដើមថ្មី')}
                           </label>
                           <input
                             id="amend-delivery-actual-cost"
@@ -1778,7 +1778,7 @@ export default function SaleDetailModal({
                       contact the old card used to show. */}
                   {isDelivery || deliveryFeeUsd > 0 || deliveryFeeKhr > 0 ? (
                     <MoneyRow
-                      label={translateOr('delivery_fee', 'Delivery fee', 'ថ្លៃដឹកជញ្ជូន')}
+                      label={translateOr('delivery_fee', 'Delivery fee', 'ថ្លៃដឹក')}
                       {...(deliveryPaidByStore ? { tone: 'credit' as const } : {})}
                       /* A fee the shop absorbed reads "Free" with the figure
                          struck through -- the same wording the receipt prints.

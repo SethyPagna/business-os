@@ -295,7 +295,7 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
                 {batchPreview.items.map((batch, index) => (
                   <div key={String(batch.id || batch.batch_id || `batch-${index}`)} className="rounded-xl border border-amber-100 bg-amber-50/70 px-3 py-2 dark:border-amber-900/50 dark:bg-amber-950/20">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="font-semibold text-amber-700 dark:text-amber-200">{batchDisplayLabel({ id: batch.id ?? batch.batch_id ?? `b-${index}`, lot_code: batch.lot_code ?? null, received_at: (batch.received_at as string) ?? null, batch_number: (batch.batch_number as number) ?? null }, T('batch', 'Batch'))}</span>
+                      <span className="font-semibold text-amber-700 dark:text-amber-200">{batchDisplayLabel({ id: batch.id ?? batch.batch_id ?? `b-${index}`, lot_code: batch.lot_code ?? null, received_at: (batch.received_at as string) ?? null, batch_number: (batch.batch_number as number) ?? null }, T('batch', 'Received date'))}</span>
                       <span className="text-sm font-medium text-gray-900 dark:text-white">{batch.quantity} {p.unit}</span>
                     </div>
                     <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-300">{batch.expiry_date || T('no_expiry', 'No expiry')}</div>

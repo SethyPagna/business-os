@@ -711,7 +711,7 @@ export default function ProductsImageOnlyView() {
                               `batch.lotCode` verbatim printed the raw MMDDYYYY
                               code ("08242026") next to real dd/mm/yyyy dates --
                               exactly what batchDisplayLabel exists to prevent. */}
-                          {batchDisplayLabel({ id: batch.id, lot_code: batch.lotCode, received_at: batch.receivedAt, batch_number: batch.batchNumber }, t('batch') || 'Batch')}
+                          {batchDisplayLabel({ id: batch.id, lot_code: batch.lotCode, received_at: batch.receivedAt, batch_number: batch.batchNumber }, t('batch') || 'Received date')}
                           {batch.expiryDate ? <span className="ml-1 text-gray-400">exp {fmtDateOnly(batch.expiryDate)}</span> : null}
                         </span>
                         <span className="flex-shrink-0 text-gray-500 dark:text-gray-400">{batch.branchName}: {Number(batch.quantity || 0)}</span>

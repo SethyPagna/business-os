@@ -142,7 +142,7 @@ export default function MergeStockChoiceDialog({
   }
 
   const pcs = T('pcs', 'pcs')
-  const lotWord = T('lot', 'lot')
+  const lotWord = T('batches', 'received dates')
   const priceChanges = pricing?.changes ?? []
   const identityDiffers = Boolean(identity && !identity.same && identity.differs.length)
   // The kept row has no cost of its own and takes the removed row's. Not a

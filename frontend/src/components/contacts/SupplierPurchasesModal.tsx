@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import Modal from '../shared/Modal'
 import { fmtDateOnly } from '../../utils/formatters'
 import PaginationControls, { DEFAULT_PAGE_SIZE } from '../shared/PaginationControls.tsx'
+import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 
 type TranslateFn = (key: string) => string | undefined
 
@@ -129,7 +130,7 @@ export default function SupplierPurchasesModal({ supplierId, supplierName, fetch
                   <thead className="sticky top-0 bg-gray-50 text-[11px] uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
                     <tr>
                       <th className="px-3 py-2">{tr('product', 'Product')}</th>
-                      <th className="px-3 py-2">{tr('batch', 'Batch')}</th>
+                      <th className="px-3 py-2">{tr('batch', 'Received date')}</th>
                       <th className="px-3 py-2">{tr('received_date', 'Received')}</th>
                       <th className="px-3 py-2 text-right">{tr('quantity_received', 'Qty received')}</th>
                       <th className="px-3 py-2 text-right">{tr('unit_cost_usd', 'Unit cost (USD)')}</th>
@@ -141,7 +142,7 @@ export default function SupplierPurchasesModal({ supplierId, supplierName, fetch
                     {batches.map((batch) => (
                       <tr key={batch.id} className="border-t border-gray-100 dark:border-gray-800">
                         <td className="px-3 py-2 text-gray-800 dark:text-gray-100">{batch.product_name || '--'}</td>
-                        <td className="px-3 py-2 text-gray-500">{batch.lot_code || (batch.batch_number != null ? `#${batch.batch_number}` : '--')}</td>
+                        <td className="px-3 py-2 text-gray-500">{batchDisplayLabel({ id: batch.id, lot_code: batch.lot_code, received_at: batch.received_at, batch_number: batch.batch_number }, tr('batch', 'Received date'))}</td>
                         <td className="px-3 py-2 text-gray-500">{batch.received_at ? fmtDateOnly(batch.received_at) : '--'}</td>
                         <td className="px-3 py-2 text-right text-gray-800 dark:text-gray-100">{qty(batch.received_quantity)}</td>
                         <td className="px-3 py-2 text-right text-gray-800 dark:text-gray-100">{batch.unit_cost_usd == null ? '--' : money(batch.unit_cost_usd)}</td>

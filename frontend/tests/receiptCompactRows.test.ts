@@ -238,7 +238,7 @@ await runTest('when the row wraps it is the VALUE that breaks, never the label m
 await runTest('a sale with a delivery fee prints the fee row once, in the totals', () => {
   for (const receipt_language of ['en', 'km', 'both']) {
     const html = renderReceipt({ receipt_language })
-    const feeLabel = receipt_language === 'km' ? 'ថ្លៃដឹកជញ្ជូន' : 'Delivery Fee'
+    const feeLabel = receipt_language === 'km' ? 'ថ្លៃដឹក:' : 'Delivery Fee'
     assert.equal(
       occurrences(html, feeLabel),
       1,

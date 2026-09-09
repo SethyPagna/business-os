@@ -69,7 +69,7 @@ export default function SupplierInvoicesSection({ t }: SupplierInvoicesSectionPr
         </div>
         <InfoHint
           label={tr('supplier_invoices', 'Supplier invoices')}
-          text={tr('supplier_invoices_hint', 'Both supplier ledgers in one place. Stock-In lists what was received (product lines, batch, cost, remaining). AP lists the old billing documents (invoice number, due date, VAT, paid, outstanding). They are separate records with no shared invoice number, so each keeps its own full detail rather than being forced into one table.')}
+          text={tr('supplier_invoices_hint', 'Both supplier ledgers in one place. Stock-In lists what was received (product lines, received date, cost, remaining). AP lists the old billing documents (invoice number, due date, VAT, paid, outstanding). They are separate records with no shared invoice number, so each keeps its own full detail rather than being forced into one table.')}
         />
       </div>
 

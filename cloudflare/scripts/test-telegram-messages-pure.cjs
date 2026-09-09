@@ -279,26 +279,31 @@ assert.deepEqual(telegram.formatStockChangeTelegramLines({
 }).filter(Boolean), ['Product: Rice 5kg', 'Stock change: −3', 'Branch: Shop', 'Reason: Damaged', 'On hand: Shop 12 · all branches 40', 'By: Za'])
 assert.deepEqual(telegram.formatStockChangeTelegramLines({
   product: 'Rice 5kg', type: 'add', quantity: 5, branch: 'Warehouse', lot: '09032026', branchOnHand: 0, totalOnHand: null,
-}).filter(Boolean), ['Product: Rice 5kg', 'Stock change: +5', 'Branch: Warehouse', 'Lot: 09032026', 'On hand: Warehouse 0'])
+}).filter(Boolean), ['Product: Rice 5kg', 'Stock change: +5', 'Branch: Warehouse', 'Received date: 03/09/2026', 'On hand: Warehouse 0'])
+assert.deepEqual(telegram.formatStockChangeTelegramLines({
+  product: 'Rice 5kg', type: 'add', quantity: 5, branch: 'Warehouse', receivedDate: '2026-09-04', branchOnHand: 5, totalOnHand: 5,
+}).filter(Boolean), ['Product: Rice 5kg', 'Stock change: +5', 'Branch: Warehouse', 'Received date: 04/09/2026', 'On hand: Warehouse 5 · all branches 5'])
 
 // --- transfers: one builder for the single, bulk and inventory-page routes ---
 assert.deepEqual(telegram.formatTransferTelegramLines({
   createdAt: '2026-09-03 03:04:05', fromBranch: 'Warehouse', toBranch: 'Shop', note: 'Restock front shelf', by: 'Za',
   items: [
     { product: 'Rice 5kg', quantity: 10, lot: '09032026', fromOnHand: 90, toOnHand: 25, totalOnHand: 115 },
+    { product: 'Soap', quantity: 2, receivedDate: '2026-09-04', fromOnHand: 8, toOnHand: 2, totalOnHand: 10 },
     { product: 'Coca Cola 330ml', quantity: 24, mergedInto: 'Coca-Cola 330ml', fromOnHand: 0, toOnHand: 48, totalOnHand: null },
   ],
 }).filter(Boolean), [
   'Date: 03/09/2026 10:04',
   'From: Warehouse',
   'To: Shop',
-  '• Rice 5kg 10 (lot 09032026) — Warehouse 90 · Shop 25 · all branches 115',
+  '• Rice 5kg 10 (received date 03/09/2026) — Warehouse 90 · Shop 25 · all branches 115',
+  '• Soap 2 (received date 04/09/2026) — Warehouse 8 · Shop 2 · all branches 10',
   '• Coca Cola 330ml 24 → Coca-Cola 330ml — Warehouse 0 · Shop 48',
   // ONE figure. The product count that used to ride on this line ("· 2
   // product(s)") counted the bullets directly above it -- the same repeated
   // figure the Sep 2026 redesign took out of the expense report, where the
   // records under the total ARE the count.
-  'Total moved: 34 unit(s)',
+  'Total moved: 36 unit(s)',
   'Note: Restock front shelf',
   'By: Za',
 ])
@@ -335,7 +340,7 @@ assert.deepEqual(telegram.formatReturnTelegramLines({
   party: 'Sok Dara', branch: 'Shop', reason: 'Wrong size', returnType: 'restock',
   items: [
     { product: 'Rice 5kg', quantity: 1, refundUsd: 7.25, stockAction: 'restock', lot: '09012026', branchOnHand: 13, totalOnHand: 41 },
-    { product: 'Broken jar', quantity: 2, refundUsd: 3, stockAction: 'damaged', branchOnHand: 5, totalOnHand: 5 },
+    { product: 'Broken jar', quantity: 2, refundUsd: 3, stockAction: 'damaged', receivedDate: '2026-09-05', branchOnHand: 5, totalOnHand: 5 },
   ],
   refundUsd: 10.25, refundKhr: 0, replacements: [{ product: 'Rice 5kg', quantity: 1 }], by: 'Za',
 }).filter(Boolean), [
@@ -346,8 +351,8 @@ assert.deepEqual(telegram.formatReturnTelegramLines({
   'Branch: Shop',
   'Reason: Wrong size',
   'Type: restock',
-  '• Rice 5kg 1 = $7.25 (restock) (lot 09012026) — Shop 13 · all branches 41',
-  '• Broken jar 2 = $3.00 (damaged) — Shop 5 · all branches 5',
+  '• Rice 5kg 1 = $7.25 (restock) (received date 01/09/2026) — Shop 13 · all branches 41',
+  '• Broken jar 2 = $3.00 (damaged) (received date 05/09/2026) — Shop 5 · all branches 5',
   '↔ Rice 5kg 1',
   'Refund: $10.25',
   'By: Za',

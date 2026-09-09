@@ -241,8 +241,8 @@ export default function ReceiveBatchModal({
     }
     const branchName = branchSelectOptions.find((option) => String(option.value) === String(branchId))?.label || tr('branch', 'selected branch')
     const lotLabel = typeof batchChoice === 'number'
-      ? batchDisplayLabel({ id: batchChoice, lot_code: selectedLot?.lot_code ?? null, received_at: selectedLot?.received_at ?? null, batch_number: selectedLot?.batch_number ?? null }, t('batch') || 'Batch')
-      : tr('new_batch', 'a new lot')
+      ? batchDisplayLabel({ id: batchChoice, lot_code: selectedLot?.lot_code ?? null, received_at: selectedLot?.received_at ?? null, batch_number: selectedLot?.batch_number ?? null }, t('batch') || 'Received date')
+      : tr('new_batch', 'a new received date')
     if (!window.confirm(tr(
       'confirm_receive_batch_details',
       'Receive {quantity} {unit} of {product} into {branch}, using {lot}? This posts stock movement(s).',
@@ -357,7 +357,7 @@ export default function ReceiveBatchModal({
                 original create-or-match-by-date behavior; picking a lot
                 tops up that exact one. */}
             <div className="block sm:col-span-2">
-              <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('batch', 'Batch')}</span>
+              <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('batch', 'Received date')}</span>
               {batchLoading ? (
                 <div className="text-[11px] text-gray-400">{t('loading') || 'Loading...'}</div>
               ) : (
@@ -376,7 +376,7 @@ export default function ReceiveBatchModal({
                       className={`rounded-full border px-2.5 py-1 text-[11px] font-medium ${batchChoice === Number(batch.id) ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}
                       onClick={() => setBatchChoice(Number(batch.id))}
                     >
-                      {batchDisplayLabel(batch, tr('batch', 'Batch'))} ({batch.quantity})
+                      {batchDisplayLabel(batch, tr('batch', 'Received date'))} ({batch.quantity})
                     </button>
                   ))}
                 </div>

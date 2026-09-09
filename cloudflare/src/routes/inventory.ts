@@ -1742,6 +1742,7 @@ app.post('/adjust', async (c) => {
           quantity: delta,
           branch: branch?.name || null,
           reason,
+          receivedDate: type === 'add' ? receivedDate : null,
           lot: type === 'add' ? lotCode : null,
           branchOnHand: branchRow ? num(branchRow.quantity) : null,
           totalOnHand: productRow ? num(productRow.stock_quantity) : null,
@@ -2067,7 +2068,9 @@ app.post('/transfer', async (c) => {
       lines: formatTransferTelegramLines({
         fromBranch: fromBranch?.name || null, toBranch: toBranch?.name || null, note: reason, by: actorSnapshot(user),
         items: [{
-          product: product.name, quantity, lot: takes.length === 1 ? takes[0].lotCode || null : null,
+          product: product.name, quantity,
+          receivedDate: takes.length === 1 ? takes[0].receivedAt || null : null,
+          lot: takes.length === 1 ? takes[0].lotCode || null : null,
           fromOnHand: fromRow ? Number(fromRow.quantity) || 0 : null, toOnHand: toRow ? Number(toRow.quantity) || 0 : null,
           totalOnHand: totalRow ? Number(totalRow.stock_quantity) || 0 : null,
         }],

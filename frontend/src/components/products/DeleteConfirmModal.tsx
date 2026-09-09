@@ -166,8 +166,8 @@ export default function DeleteConfirmModal({
               {summary.productsWithBatches > 0 && (
                 <li>
                   {isBulk
-                    ? T('delete_confirm_impact_batches_bulk', '{count} product(s) with active batch/lot stock').replace('{count}', String(summary.productsWithBatches))
-                    : T('delete_confirm_impact_batches_single', 'Active batch/lot stock')}
+                    ? T('delete_confirm_impact_batches_bulk', '{count} product(s) with active received-date stock').replace('{count}', String(summary.productsWithBatches))
+                    : T('delete_confirm_impact_batches_single', 'Active received-date stock')}
                 </li>
               )}
             </ul>

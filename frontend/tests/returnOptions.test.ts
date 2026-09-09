@@ -138,7 +138,7 @@ runTest('no surface offers "any stock" -- a lot is named or the product has none
   assert.doesNotMatch(newReturnSource, /any_stock/)
   assert.doesNotMatch(newReturnSource, /Any stock/i)
   // the replacement lot picker's empty option is a prompt, never a choice
-  assert.match(newReturnSource, /T\('select_lot', 'Choose a lot…'\)/)
+  assert.match(newReturnSource, /T\('select_lot', 'Choose a received date…'\)/)
   // and a line with no lot named cannot be submitted or even reviewed
   assert.match(newReturnSource, /const itemsMissingLot = activeItems\.filter\(lineNeedsLot\)/)
   assert.match(newReturnSource, /const replacementsMissingLot = replacements\.filter\(\(line\) => line\.batches\.length > 0 && line\.batch_id == null\)/)

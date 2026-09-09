@@ -98,7 +98,10 @@ const LABELS = {
   stockChange: { en: 'Stock change', km: 'ការផ្លាស់ប្ដូរស្តុក' },
   quantity: { en: 'Quantity', km: 'បរិមាណ' },
   reason: { en: 'Reason', km: 'មូលហេតុ' },
-  lot: { en: 'Lot', km: 'បាច់' },
+  // `lot`/`batch` are storage and import identifiers. The operator-facing
+  // concept is the date the stock was received, so Telegram uses the same
+  // label as the PWA rather than reintroducing the retired noun.
+  receivedDate: { en: 'Received date', km: 'ថ្ងៃចូល' },
   onHand: { en: 'On hand', km: 'នៅក្នុងស្តុក', localizeValue: true },
   // S4-6's slot. A route that knows who made a change adds ONE line --
   // `by ? \`By: ${by}\` : ''` -- and it ships bilingual with no change here.
@@ -177,7 +180,7 @@ const LABELS = {
   expenses: { en: 'Expenses', km: 'ចំណាយ' },
   expensesOther: { en: 'Other expenses', km: 'ចំណាយផ្សេងទៀត' },
   deliveryFee: { en: 'Delivery fee', km: 'ថ្លៃដឹក' },
-  deliveryCost: { en: 'Delivery cost', km: 'ថ្លៃដើមដឹកជញ្ជូន' },
+  deliveryCost: { en: 'Actual delivery cost', km: 'ថ្លៃដឹកដើម' },
   // Copied from km.json's shift_opening_cash / shift_counted_cash -- the same
   // words the shift screen itself uses for these two figures, so a cashier
   // reading the phone message and the shift screen sees the same terms.

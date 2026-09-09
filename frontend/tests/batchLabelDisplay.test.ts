@@ -52,10 +52,10 @@ check('a genuine custom lot code still renders AS a code', () => {
   assert.equal(batchDisplayLabel({ id: 4, lot_code: 'LOT-A123', received_at: '2026-08-24 10:00:00' }), 'LOT-A123')
 })
 
-check('no lot code falls back to the received date, then Batch n, then id', () => {
+check('no lot code falls back to the received date, then Received date n, then id', () => {
   assert.equal(batchDisplayLabel({ id: 5, lot_code: null, received_at: '2026-08-24 10:00:00' }), '24/08/2026')
-  assert.equal(batchDisplayLabel({ id: 6, lot_code: null, batch_number: 3, received_at: null }), 'Batch 3')
-  assert.equal(batchDisplayLabel({ id: 7, lot_code: null, batch_number: null, received_at: null }), 'Batch #7')
+  assert.equal(batchDisplayLabel({ id: 6, lot_code: null, batch_number: 3, received_at: null }), 'Received date 3')
+  assert.equal(batchDisplayLabel({ id: 7, lot_code: null, batch_number: null, received_at: null }), 'Received date #7')
 })
 
 if (failed > 0) process.exitCode = 1

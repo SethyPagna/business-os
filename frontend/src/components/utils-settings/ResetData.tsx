@@ -820,7 +820,7 @@ function MigrationFinalize({ actionHistory = null }: ResetPanelProps) {
   const steps: Array<{ id: FinalizeStage; label: string; icon: LucideIcon }> = [
     { id: 'zero', label: T('finalize_step_zero', 'Zero stock'), icon: RotateCcw },
     { id: 'reimport', label: T('finalize_step_reimport', 'Re-import'), icon: Upload },
-    { id: 'park', label: T('finalize_step_park', 'Park lots'), icon: Archive },
+    { id: 'park', label: T('finalize_step_park', 'Park received dates'), icon: Archive },
   ]
   const stageOrder: FinalizeStage[] = ['zero', 'reimport', 'park', 'done']
   const currentIndex = stageOrder.indexOf(stage)
@@ -835,7 +835,7 @@ function MigrationFinalize({ actionHistory = null }: ResetPanelProps) {
           <div className="min-w-0">
             <h2 className="mb-1 text-base font-semibold text-gray-800 dark:text-gray-200">{T('finalize_title', 'Finalize migration')}</h2>
             <p className="text-sm text-gray-500 dark:text-gray-400">
-              {T('finalize_desc', 'The last two old-system import steps, run in order: zero the live stock, re-import the product files, then park the historical lots. Each takes a fresh backup first. Only run this right after the history import — never on a running store.')}
+              {T('finalize_desc', 'The last two old-system import steps, run in order: zero the live stock, re-import the product files, then park the historical received dates. Each takes a fresh backup first. Only run this right after the history import — never on a running store.')}
             </p>
           </div>
         </div>
@@ -872,7 +872,7 @@ function MigrationFinalize({ actionHistory = null }: ResetPanelProps) {
           description={T('finalize_zero_desc', 'Sets every branch stock count and product stock quantity to zero, so the next re-import of the product files lands exactly on the template totals instead of stacking on top of the stock-history import. Reversible by the re-import you do next; a fresh backup is taken first.')}
           whatHeader={T('finalize_zero_header', 'This will set to zero:')}
           whatDeleted={T('finalize_zero_what', 'All branch_stock quantities and all products.stock_quantity values')}
-          whatKept={T('finalize_zero_kept', 'Products, batches, suppliers, sales, and lot costs — only the live counts are zeroed')}
+          whatKept={T('finalize_zero_kept', 'Products, received dates, suppliers, sales, and received-date costs — only the live counts are zeroed')}
           confirmWord="ZERO STOCK"
           onConfirm={() => runStep('zero_stock', () => { setReimportAck(false); setStage('reimport') })}
           working={working}
@@ -898,7 +898,7 @@ function MigrationFinalize({ actionHistory = null }: ResetPanelProps) {
           </div>
           <label className="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
             <input type="checkbox" className="mt-0.5" checked={reimportAck} onChange={(event) => setReimportAck(event.target.checked)} />
-            <span>{T('finalize_reimport_ack', "I've re-imported both product files (Add / Update). Continue to parking the historical lots.")}</span>
+            <span>{T('finalize_reimport_ack', "I've re-imported both product files (Add / Update). Continue to parking the historical received dates.")}</span>
           </label>
           <div className="mt-4 flex gap-3">
             <button
@@ -917,16 +917,16 @@ function MigrationFinalize({ actionHistory = null }: ResetPanelProps) {
 
       {stage === 'park' ? (
         <ConfirmReset
-          title={T('finalize_park_title', 'Step 3 — Park historical lots')}
-          description={T('finalize_park_desc', "Zeros the remaining quantity on the historical 'Unified stock import' lots so the POS lot picker skips them — the old system never tied sales to lots, so their remaining counts aren't allocatable. The opening lots from the product import are left alone, so migration 0081's lot-ledger reconcile still works and re-running this is a no-op. A fresh backup is taken first.")}
+          title={T('finalize_park_title', 'Step 3 — Park historical received dates')}
+          description={T('finalize_park_desc', "Zeros the remaining quantity on the historical 'Unified stock import' received dates so the POS received-date picker skips them — the old system never tied sales to a received date, so their remaining counts aren't allocatable. The opening received dates from the product import are left alone, so migration 0081's received-date ledger reconcile still works and re-running this is a no-op. A fresh backup is taken first.")}
           whatHeader={T('finalize_park_header', 'This will set to zero:')}
-          whatDeleted={T('finalize_park_what', "The remaining quantity on every 'Unified stock import' historical lot")}
-          whatKept={T('finalize_park_kept', 'The lots themselves and their received/cost data (the supplier Purchases view still reads them); the product-import opening lots are untouched')}
+          whatDeleted={T('finalize_park_what', "The remaining quantity on every 'Unified stock import' historical received date")}
+          whatKept={T('finalize_park_kept', 'The received dates themselves and their received/cost data (the supplier Purchases view still reads them); the product-import opening received dates are untouched')}
           confirmWord="PARK LOTS"
           onConfirm={() => runStep('park_lots', () => setStage('done'))}
           working={working}
           elapsedSeconds={elapsedSeconds}
-          buttonLabel={T('finalize_park_button', 'Park historical lots')}
+          buttonLabel={T('finalize_park_button', 'Park historical received dates')}
           icon={Archive}
           t={t}
         />
@@ -941,7 +941,7 @@ function MigrationFinalize({ actionHistory = null }: ResetPanelProps) {
             <div>
               <h2 className="mb-1 text-base font-semibold text-emerald-700 dark:text-emerald-400">{T('finalize_done_title', 'Migration finalized')}</h2>
               <p className="text-sm text-gray-500 dark:text-gray-400">
-                {T('finalize_done_desc', 'Live stock is zeroed and re-imported to the template totals, and the historical lots are parked. The lot-ledger reconcile (Step 4f) runs automatically as migration 0081 on the next deploy — nothing more to do here.')}
+                {T('finalize_done_desc', 'Live stock is zeroed and re-imported to the template totals, and the historical received dates are parked. The received-date ledger reconcile (Step 4f) runs automatically as migration 0081 on the next deploy — nothing more to do here.')}
               </p>
             </div>
           </div>

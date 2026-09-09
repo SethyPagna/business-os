@@ -886,8 +886,8 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
     const fromName = branches.find((branch) => String(branch.id) === String(fromBranch))?.name || t('source_branch') || 'source branch'
     const toName = branches.find((branch) => String(branch.id) === String(toBranch))?.name || t('destination_branch') || 'destination branch'
     const lot = selectedBatch
-      ? ` ${t('transfer_selected_lot') || 'Selected lot'}: ${batchDisplayLabel({ id: selectedBatch.id, lot_code: (selectedBatch.lot_code as string) ?? null, received_at: (selectedBatch.received_at as string) ?? null, batch_number: (selectedBatch.batch_number as number) ?? null }, t('batch') || 'Batch')}.`
-      : ` ${t('transfer_fifo_lot_notice') || 'Available lots will be allocated FIFO.'}`
+      ? ` ${t('transfer_selected_lot') || 'Selected received date'}: ${batchDisplayLabel({ id: selectedBatch.id, lot_code: (selectedBatch.lot_code as string) ?? null, received_at: (selectedBatch.received_at as string) ?? null, batch_number: (selectedBatch.batch_number as number) ?? null }, t('batch') || 'Received date')}.`
+      : ` ${t('transfer_fifo_lot_notice') || 'Available received dates will be allocated FIFO.'}`
     if (!window.confirm((t('confirm_transfer_details') || 'Transfer {n} {unit} of "{name}" from {from} to {to}?')
       .replace('{n}', String(qty))
       .replace('{unit}', selectedProduct.unit || '')
@@ -1263,12 +1263,12 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
               {hasBatchLots ? (
                 <div>
                   <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    {t('transfer_pick_batch_optional') || 'Lot / batch (optional)'}
+                    {t('transfer_pick_batch_optional') || 'Received date (optional)'}
                   </label>
                   {loadingBatches ? (
                     <p className="py-3 text-center text-sm text-gray-400">{t('loading') || 'Loading'}...</p>
                   ) : productBatches.length === 0 ? (
-                    <p className="py-3 text-center text-sm text-gray-400">{t('transfer_no_batches') || 'No lots with stock at this branch'}</p>
+                    <p className="py-3 text-center text-sm text-gray-400">{t('transfer_no_batches') || 'No received dates with stock at this branch'}</p>
                   ) : (
                     <>
                       <div className="max-h-32 overflow-auto divide-y divide-gray-100 rounded-xl border border-gray-200 dark:divide-gray-700 dark:border-gray-600">
@@ -1282,7 +1282,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                         }`}
                       >
                         <span className="font-medium">{t('transfer_auto_fifo') || 'Automatic (FIFO)'}</span>
-                        <span className="text-xs text-gray-500 dark:text-gray-400">{t('transfer_auto_fifo_hint') || 'Use all available lots'}</span>
+                        <span className="text-xs text-gray-500 dark:text-gray-400">{t('transfer_auto_fifo_hint') || 'Use all available received dates'}</span>
                       </button>
                       {productBatches.map((batch) => {
                         const batchOut = Number(batch.quantity || 0) <= 0
@@ -1300,7 +1300,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                                 : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'
                             }`}
                           >
-                            <span className="font-mono">{batchDisplayLabel({ id: batch.id, lot_code: (batch.lot_code as string) ?? null, received_at: (batch.received_at as string) ?? null, batch_number: (batch.batch_number as number) ?? null }, t('batch') || 'Batch')}</span>
+                            <span className="font-mono">{batchDisplayLabel({ id: batch.id, lot_code: (batch.lot_code as string) ?? null, received_at: (batch.received_at as string) ?? null, batch_number: (batch.batch_number as number) ?? null }, t('batch') || 'Received date')}</span>
                             <span className="text-xs text-gray-500 dark:text-gray-400">
                               {batch.expiry_date ? `${t('expires') || 'exp'} ${batch.expiry_date} · ` : ''}
                               {batch.quantity} {selectedProduct.unit}
@@ -1310,7 +1310,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                       })}
                       </div>
                       <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                        {t('transfer_optional_lot_hint') || 'Choose a specific lot only when needed. Otherwise, stock is allocated FIFO from available lots.'}
+                        {t('transfer_optional_lot_hint') || 'Choose a specific received date only when needed. Otherwise, stock is allocated FIFO from available received dates.'}
                       </p>
                     </>
                   )}

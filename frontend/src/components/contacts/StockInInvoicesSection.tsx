@@ -6,6 +6,7 @@ import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/Pagi
 import { fmtDateOnly } from '../../utils/formatters'
 import { getStockInInvoiceLines, getStockInInvoiceReport } from '../../api/contactReadTransport.ts'
 import InvoiceLedgerSummary from './InvoiceLedgerSummary.tsx'
+import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 
 type TranslateFn = (key: string) => string | undefined
 
@@ -61,6 +62,7 @@ type InvoiceLine = {
   id: number
   batch_number?: number | null
   lot_code?: string | null
+  received_at?: string | null
   received_quantity?: number | null
   unit_cost_usd?: number | null
   line_total_usd?: number | null
@@ -391,7 +393,7 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
                                   <tr>
                                     <th className="px-3 py-2">{tr('product', 'Product')}</th>
                                     <th className="px-3 py-2">{tr('barcode', 'Barcode')}</th>
-                                    <th className="px-3 py-2">{tr('batch', 'Batch')}</th>
+                                    <th className="px-3 py-2">{tr('batch', 'Received date')}</th>
                                     <th className="px-3 py-2 text-right">{tr('quantity_received', 'Qty received')}</th>
                                     <th className="px-3 py-2">{tr('unit', 'Unit')}</th>
                                     <th className="px-3 py-2 text-right">{tr('unit_cost_usd', 'Unit cost (USD)')}</th>
@@ -406,7 +408,7 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
                                     <tr key={line.id} className="border-t border-gray-100 dark:border-gray-800">
                                       <td className="px-3 py-2 text-gray-800 dark:text-gray-100">{line.product_name || '--'}</td>
                                       <td className="px-3 py-2 text-gray-500">{line.barcode || '--'}</td>
-                                      <td className="px-3 py-2 text-gray-500">{line.lot_code || (line.batch_number != null ? `#${line.batch_number}` : '--')}</td>
+                                      <td className="px-3 py-2 text-gray-500">{batchDisplayLabel({ id: line.id, lot_code: line.lot_code, received_at: line.received_at, batch_number: line.batch_number }, tr('batch', 'Received date'))}</td>
                                       <td className="px-3 py-2 text-right text-gray-800 dark:text-gray-100">{qty(line.received_quantity)}</td>
                                       <td className="px-3 py-2 text-gray-500">{line.unit || '--'}</td>
                                       <td className="px-3 py-2 text-right text-gray-800 dark:text-gray-100">{line.unit_cost_usd == null ? '--' : money(line.unit_cost_usd)}</td>

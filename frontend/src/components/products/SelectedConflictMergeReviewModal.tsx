@@ -7,6 +7,7 @@ import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 import PaginationControls from '../shared/PaginationControls.tsx'
 import { ModalCloseContext } from '../shared/modalCloseContext.ts'
 import { ProductImg } from './shared/primitives.tsx'
+import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import type {
   SelectedConflictGroupReviewGroup,
@@ -539,7 +540,7 @@ function GroupReviewCard({ group, choice, choicesFrozen, onChoice, t }: {
                   {stockRows.length ? stockRows.map((row) => <div key={`${row.branch_id}-${row.product_id}`}>{row.branch_name || `#${row.branch_id}`}: {row.quantity}</div>) : <div>{tr('selected_conflict_no_stock_rows', 'No branch stock')}</div>}
                   {lotRows.map((lot) => (
                     <div key={`${lot.batch_id}-${lot.branch_id}`} className="rounded bg-gray-100 p-1.5 dark:bg-zinc-800">
-                      {tr('batch', 'Batch')} {lot.lot_code || lot.batch_key} · {lot.branch_id == null ? tr('unknown', 'Unknown') : (stockRows.find((row) => row.branch_id === lot.branch_id)?.branch_name || `#${lot.branch_id}`)} · {lot.quantity ?? tr('unknown', 'Unknown')}
+                      {tr('batch', 'Received date')} {batchDisplayLabel({ id: lot.batch_id, lot_code: lot.lot_code || lot.batch_key || null, received_at: lot.received_at || null }, tr('batch', 'Received date'))} · {lot.branch_id == null ? tr('unknown', 'Unknown') : (stockRows.find((row) => row.branch_id === lot.branch_id)?.branch_name || `#${lot.branch_id}`)} · {lot.quantity ?? tr('unknown', 'Unknown')}
                       <br />{tr('supplier', 'Supplier')}: {lot.supplier_name || tr('unknown', 'Unknown')} · {tr('received_date', 'Received date')}: {lot.received_at || tr('unknown', 'Unknown')} · {tr('expiry_date', 'Expiry date')}: {lot.expiry_date || tr('unknown', 'Unknown')}
                       <br />{tr('selected_conflict_received_quantity', 'Received quantity')}: {lot.received_quantity ?? tr('unknown', 'Unknown')} · {tr('selected_conflict_received_cost', 'Received cost')}: {optionalMoney(lot.received_cost_usd ?? lot.unit_cost_usd, fmtUSD, tr('unknown', 'Unknown'))}
                       <br />{tr('selected_conflict_payment_status', 'Payment status')}: {lot.payment_status || tr('unknown', 'Unknown')} · {tr('due_date', 'Due date')}: {lot.credit_due_date || tr('unknown', 'Unknown')} · {lot.is_active ? tr('active', 'Active') : tr('inactive', 'Inactive')}

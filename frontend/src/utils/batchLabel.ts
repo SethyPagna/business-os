@@ -103,7 +103,7 @@ export function lotCodeToIsoDate(lotCode: string | null | undefined): string | n
 // lot code. Only a GENUINE custom lot code (not an MMDDYYYY date) renders as a
 // code. Then "Batch <n: dd/mm/yyyy>" for pre-redesign rows, then a bare id so
 // a pill/row is never blank.
-export function batchDisplayLabel(batch: BatchLike, batchWord = 'Batch'): string {
+export function batchDisplayLabel(batch: BatchLike, batchWord = 'Received date'): string {
   const codeAsDate = lotCodeAsDate(batch.lot_code)
   // A real custom code (has a lot_code that is NOT an MMDDYYYY date) shows as
   // the code.

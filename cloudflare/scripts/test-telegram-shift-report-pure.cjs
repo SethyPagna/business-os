@@ -146,7 +146,7 @@ assert.deepEqual(lines, [
   'Closing cash / សាច់ប្រាក់បិទវេន: $182.50 · 240,000៛',
   RULE,
   // Expenses as exactly two plain lines and ONE informational difference.
-  'Delivery cost / ថ្លៃដើមដឹកជញ្ជូន: $7.50',
+  'Actual delivery cost / ថ្លៃដឹកដើម: $7.50',
   'Other expenses / ចំណាយផ្សេងទៀត: $9.50 · 20,000៛',
   'Expected cash / សាច់ប្រាក់ត្រូវមាន: $178.00 · 240,000៛',
   'Difference / ភាពខុសគ្នា: +$4.50 · 0៛',
@@ -269,7 +269,7 @@ check('the day Expenses total is the fees table plus the recorded delivery cost'
 // ...and it prints the same two component lines under it that the shift does,
 // so the reader can see which half is which without a second command.
 check('and it prints the same two component lines the shift prints',
-  daySummary.includes('Delivery cost / ថ្លៃដើមដឹកជញ្ជូន: $7.50')
+  daySummary.includes('Actual delivery cost / ថ្លៃដឹកដើម: $7.50')
   && daySummary.includes('Other expenses / ចំណាយផ្សេងទៀត: $9.50 · 20,000៛'), daySummary)
 
 // THE SHARED HEADER, BYTE FOR BYTE. One set of numbers, two reports, one
