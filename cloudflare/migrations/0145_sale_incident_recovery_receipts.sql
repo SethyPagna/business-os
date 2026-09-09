@@ -36,3 +36,35 @@ CREATE TABLE sale_incident_recovery_guards (
   id INTEGER PRIMARY KEY CHECK(id = 1),
   guard_value INTEGER NOT NULL CHECK(guard_value = 1)
 );
+
+CREATE TRIGGER sale_incident_recovery_receipts_append_only_update
+BEFORE UPDATE ON sale_incident_recovery_receipts
+WHEN NOT EXISTS (SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore')
+ AND NOT EXISTS (SELECT 1 FROM system_flags WHERE key='sale_incident_recovery_reset_guard' AND json_extract(value,'$.mode')='reset')
+BEGIN
+  SELECT RAISE(ABORT, 'sale incident recovery receipts are append-only');
+END;
+
+CREATE TRIGGER sale_incident_recovery_receipts_append_only_delete
+BEFORE DELETE ON sale_incident_recovery_receipts
+WHEN NOT EXISTS (SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore')
+ AND NOT EXISTS (SELECT 1 FROM system_flags WHERE key='sale_incident_recovery_reset_guard' AND json_extract(value,'$.mode')='reset')
+BEGIN
+  SELECT RAISE(ABORT, 'sale incident recovery receipts are append-only');
+END;
+
+CREATE TRIGGER sale_incident_recovery_members_append_only_update
+BEFORE UPDATE ON sale_incident_recovery_members
+WHEN NOT EXISTS (SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore')
+ AND NOT EXISTS (SELECT 1 FROM system_flags WHERE key='sale_incident_recovery_reset_guard' AND json_extract(value,'$.mode')='reset')
+BEGIN
+  SELECT RAISE(ABORT, 'sale incident recovery members are append-only');
+END;
+
+CREATE TRIGGER sale_incident_recovery_members_append_only_delete
+BEFORE DELETE ON sale_incident_recovery_members
+WHEN NOT EXISTS (SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore')
+ AND NOT EXISTS (SELECT 1 FROM system_flags WHERE key='sale_incident_recovery_reset_guard' AND json_extract(value,'$.mode')='reset')
+BEGIN
+  SELECT RAISE(ABORT, 'sale incident recovery members are append-only');
+END;
