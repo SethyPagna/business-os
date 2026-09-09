@@ -13,7 +13,9 @@ migrations or production data changes. The older release facts below remain
 historical evidence for the individual functional rows; they are not a claim
 that the older Worker is still serving.
 
-Last reconciled: 2026-09-10T04:30:00+08:00. Functional fixes precede UI polish.
+Last reconciled: 2026-09-10T05:15:00+08:00.
+
+Fresh read-only evidence follow-up (2026-09-10): shared anonymous General customer 24969 remains marked but still stores legacy membership LC-04971; protected actual customer 22305 is unchanged. Additional zero-line historical sales 16917 and 16827 have nonzero headers/fees but no persisted items and no creation snapshots. Both are evidence-only and outside the fixed 16951–16954 recovery allowlist; no production mutation was performed. See `output/historical-evidence-followup-20260910.json` in the release checkout. Functional fixes precede UI polish.
 Current production: **c2eb9d57**, Worker **3931ea55-3f66-459e-823d-3339979bd441**,100% at **2026-09-08T03:37:12.286363Z**. F47A, canonical branch/import/transfer and export F51 followups are deployed, including resolved duplicate error cleanup. No migration; backend291/291 and frontend319/319 pass. Earlier proven historical repair and prior releases remain included. Production product merge remains eight completed cases.
 
 First functional release **821efc94ce7a** is serving 100% traffic as Worker
