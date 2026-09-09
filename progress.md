@@ -1,6 +1,6 @@
-## Owner correction: Not Paid must deduct stock — September 9
+## Owner correction: Not Paid must deduct stock — September 9 (superseded by the deployed correction below)
 
-The owner explicitly confirmed that awaiting_payment/Not Paid deducts stock. Earlier ledger claims treating released allocations and preserved stock as correct are withdrawn. Live 4aba954f has the recovered product lines, but three awaiting-payment sales 16952/16953/16954 still need stock correction: four quantity-one lines, fully released allocations, no sale movements. Exactly these three awaiting-payment sales exist in the fresh production census. Completed16951 already deducted36 once and must stay unchanged.
+The owner explicitly confirmed that awaiting_payment/Not Paid deducts stock. This was the pre-apply investigation state; it is superseded by the deployed correction recorded in “Not Paid stock rule correction and timeout release deployed — September 9” below. Do not treat the old 4aba954f census as current production state.
 
 Backend canonical status behavior and guarded historical correction are under separate read-only investigations before implementation. Settings12s timeout/error translation remains active; root transport WIP is preserved in outputs/takeover-20260909/write-timeout-transport-root-wip.patch and not deployed. Edit Customer alignment added as F79; timeout/i18n F78. All earlier tasks retained; no new production writes yet.
 
