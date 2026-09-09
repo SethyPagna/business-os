@@ -1,3 +1,8 @@
+## Verification follow-up promotion LIVE — September 10
+
+After the adversarial pass, the pushed head **98eea9d6aa1e** was rebuilt and promoted to 100% as Worker version **a9d5e95b-d332-4648-982a-8dcd2e48339d** (build hash **8d83db0e06bd2064**, deployed 2026-09-09T16:08Z / 2026-09-10 local). This promotion carries the same tested settlement/transfer runtime plus the corrected status-dialog stock-holding explanation and its regression assertion.
+
+The focused re-check passed again: settlement/payment/create/stock-holding/cancel/add-item/amendment/returns/lot-transfer/canonical-branch/revenue/Telegram suites all green. The live tab still shows sale `20260909-175106` with four item lines, `$265.00`, Shop, and Not Paid.
 ## Settlement retry and transfer guard release LIVE — September 10
 
 The exact tested release head **bf51f06fd4ad** is live at 100% in Worker version **e5795fe6-cc55-4d56-b3ca-aefe19b0b0eb**, deployed at 2026-09-09T15:59Z (2026-09-10 local). Build hash: **5882f8919df051f8**. This release contains separate fix-scoped commits: `588decad` (persist sale status/settlement retries and align the UI write deadline to 45s), `e930a75` (run canonical Shop/Warehouse transfer identity guards before receipt/audit/stock effects), `542e4cd5` (four-line, no-delivery settlement regression), `915be6c8` (load the TypeScript transfer receipt helper in inventory fixture tests), `8ccd6127` (guard-order parity assertion), and `bf51f06f` (awaiting-payment Telegram Khmer wording). The earlier shift fixture contract commit `447962a9` is also included in this release branch.
