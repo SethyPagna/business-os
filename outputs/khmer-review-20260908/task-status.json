@@ -1,7 +1,7 @@
 {
-  "asOf": "2026-09-09T10:34:00Z",
-  "liveCommit": "e093b5c5",
-  "liveSummary": "Release e093b5c5 is live at Worker version 718a3d15-8d64-4b5c-88de-2f486b5b48e7, 100%. Its ancestry includes the deployed Not Paid/awaiting_payment stock correction and write-outcome hardening (aea2b6aa, ee1127d7, 6ed60cb5, 3b98fc1a), plus transfer timeout/cap reliability (b312c331), additional cash/expected drawer in shift reports and Telegram (b059237a), and the iOS viewport zoom guard (e093b5c5). Migration 0147_shift_additional_cash.sql is remote migration row 143. The release branch is clean and pushed; broader transfer durability and visual compaction remain tracked follow-ups.",
+  "asOf": "2026-09-09T13:04:00Z",
+  "liveCommit": "be7bdaedc6c609ee339e33b9717771265bcf20f0",
+  "liveSummary": "Transfer retry durability checkpoint live: stable request receipts and audit-before-stock are deployed, with Not Paid stock, shift additional cash, transfer timeout/lot guards, and iOS viewport guard retained.",
   "tasks": [
     {
       "id": "F01",
@@ -699,9 +699,9 @@
     {
       "id": "F73",
       "request": "Transfer retries lack server receipt deduplication and audit is after stock writes",
-      "state": "Transfer stock-limit and timeout fixes deployed; broader durability remains open",
-      "next": "Add server-side idempotency/receipt dedupe and record the audit before stock writes, then verify retry behavior with an uncertain network outcome. Employee inventory/branches remain absent by scope.",
-      "notes": "The deployed UI waits for bounded mutation windows and reports an uncertain outcome instead of falsely claiming failure; no receipt dedupe claim yet."
+      "state": "Server receipt dedupe and audit ordering deployed; physical retry verification open",
+      "next": "Exercise one real uncertain-network retry from the authenticated iOS PWA and confirm one movement plus one receipt. Employee inventory/branches remain absent by scope.",
+      "notes": "Migration 0148 adds actor/request receipts. Single, bulk and inventory routes bind a canonical digest, replay the original response, reject conflicting request reuse, and commit a transfer-intent audit before stock mutation. Focused route tests pass (12 canonical, 8 inventory); no production stock mutation was used for the test."
     },
     {
       "id": "F74",
@@ -770,22 +770,20 @@
     }
   ],
   "deployment": {
-    "commit": "e093b5c50fe37ac7816e1f38eec15ff134c7321a",
-    "workerVersion": "718a3d15-8d64-4b5c-88de-2f486b5b48e7",
+    "commit": "be7bdaedc6c609ee339e33b9717771265bcf20f0",
+    "workerVersion": "4eda51e2-52c6-4157-ad86-1efa8d5f1af1",
     "deploymentId": null,
-    "deploymentLog": "outputs/takeover-20260909/mobile-viewport-deploy.log",
+    "deploymentLog": "outputs/takeover-20260909/transfer-idempotency-deploy.log",
     "percentage": 100,
-    "createdOn": "2026-09-09T10:31:00Z"
+    "createdOn": "2026-09-09T13:03:00Z"
   },
   "nextRelease": {
-    "priority": "Remaining transfer reliability and cleanup",
-    "scope": "Preserve F73 retry durability work and remaining employee/return verification. UI/mobile/public/customer portal later; offline paused. Duplicate execution remains held until urgent sales follow-through is complete."
+    "priority": "Remaining historical-sales evidence, cleanup and UI/public follow-up",
+    "scope": "F73 server retry durability is live. Continue the owner order with remaining sales evidence and cleanup, then compact UI/mobile and public/customer portal work; offline remains paused."
   },
   "priorityOrder": [
-    "Urgent Not Paid stock rule and three-sale correction",
+    "Remaining historical-sales evidence and cleanup",
     "Settings/write timeout and Khmer errors",
-    "Transfer retry durability",
-    "Remaining employee/return verification and cleanup",
     "UI/customer heading/mobile fit",
     "Public site and customer portal",
     "Offline paused"

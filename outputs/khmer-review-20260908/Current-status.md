@@ -1,10 +1,10 @@
 # Current task status
-Updated: 2026-09-09T10:34:00Z
-Release `e093b5c5` is live at Worker version `718a3d15-8d64-4b5c-88de-2f486b5b48e7` (deployment completed 2026-09-09T10:31Z, 100%). Its ancestry also includes the deployed Not Paid/`awaiting_payment` stock correction and write-outcome hardening (`aea2b6aa`, `ee1127d7`, `6ed60cb5`, `3b98fc1a`). It includes the transfer timeout/cap fix from `b312c331`, the additional-cash shift reconciliation/report/Telegram fix from `b059237a`, and the iOS viewport zoom guard from `e093b5c5`. D1 migration `0147_shift_additional_cash.sql` is applied remotely as migration row 143. The release branch is clean and pushed; the later `7b72cd7c` commit only aligns source tests and does not change runtime. Logs and exact test evidence are in `outputs/takeover-20260909/`.
+Updated: 2026-09-09T13:04:00Z
+Release `be7bdaedc6c609ee339e33b9717771265bcf20f0` is live at Worker version `4eda51e2-52c6-4157-ad86-1efa8d5f1af1` (deployment completed approximately 2026-09-09T13:03Z, 100%). Its ancestry also includes the deployed Not Paid/`awaiting_payment` stock correction and write-outcome hardening (`aea2b6aa`, `ee1127d7`, `6ed60cb5`, `3b98fc1a`). It includes the transfer timeout/cap fix from `b312c331`, the additional-cash shift reconciliation/report/Telegram fix from `b059237a`, and the iOS viewport zoom guard from `e093b5c5`. D1 migrations `0147_shift_additional_cash.sql` and `0148_transfer_operation_receipts.sql` are applied remotely as migration rows 143 and 144. The release branch is clean and pushed; commits are fix-scoped. Logs and exact test evidence are in `outputs/takeover-20260909/`.
 
 Shift behavior now records cash added after opening separately in USD/KHR, includes it in expected cash and difference, keeps returns in shift figures rather than the cash breakdown, shows expected/difference for open and closed reports, and renders the USD/KHR pair compactly. Close/amend writes preserve opening register values, so employees closing a shift cannot overwrite the opening cash.
 
-Transfer behavior now allows both Shop → Warehouse and Warehouse → Shop with the canonical branch/lot guards and a bounded mutation timeout (single 45s, bulk 90s); transfer limits and rollback tests pass. The broader transfer receipt-deduplication/audit-before-stock durability follow-up remains open under F73.
+Transfer behavior now allows both Shop → Warehouse and Warehouse → Shop with the canonical branch/lot guards and a bounded mutation timeout (single 45s, bulk 90s). A stable request ID and request digest now protect single, bulk and inventory transfers from duplicate stock movement; a retry returns its original receipt, conflicting reuse returns 409, and a transfer-intent audit is committed before stock changes in the same atomic batch. Focused route tests pass (canonical 12, inventory 8). Physical uncertain-network verification remains open under F73.
 
 The mobile viewport fix caps browser zoom at the device width and removes page-level `pinch-zoom` from admin/public roots; the product image lightbox keeps its explicit zoom controls. This directly addresses the iOS PWA scaling defect. Physical iOS hardware and desktop device-toolbar emulation remain follow-up verification under U20.
 
@@ -611,9 +611,9 @@ Notes: Owner request with screenshot codex-clipboard-ef24b217-5a3e-4e63-891f-6c0
 
 ## F73: Transfer retries lack server receipt deduplication and audit is after stock writes
 
-Status: Transfer stock-limit and timeout fixes deployed; broader durability remains open
-Next: Add server-side idempotency/receipt dedupe and record the audit before stock writes, then verify retry behavior with an uncertain network outcome. Employee inventory/branches remain absent by scope.
-Notes: The deployed UI waits for the bounded mutation windows and reports an uncertain outcome instead of falsely claiming failure; no receipt dedupe claim yet.
+Status: Server receipt dedupe and audit ordering deployed; physical retry verification open
+Next: Exercise one real uncertain-network retry from the authenticated iOS PWA and confirm one movement plus one receipt. Employee inventory/branches remain absent by scope.
+Notes: Migration 0148 adds actor/request receipts. Single, bulk and inventory routes bind a canonical digest, replay the original response, reject conflicting request reuse, and commit a transfer-intent audit before stock mutation. Focused route tests pass (12 canonical, 8 inventory); no production stock mutation was used for the test.
 
 ## F74: Specific, change-driven Sales Records with complete EN/KM labels and before/after for driver, delivery cost/fee, product add/remove/replace/quantity, customer/General/membership, status and payment
 

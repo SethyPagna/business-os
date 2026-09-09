@@ -1,18 +1,50 @@
 {
-  "asOf": "2026-09-09T10:34:00Z",
+  "asOf": "2026-09-09T13:04:00Z",
   "releaseBranch": "codex/sale-create-trigger-release-20260909",
   "sourceCommits": [
-    { "sha": "aea2b6aa", "scope": "Not Paid/awaiting_payment stock deduction and guarded recovery" },
-    { "sha": "ee1127d7", "scope": "bounded mutation writes with unknown-outcome preservation" },
-    { "sha": "6ed60cb5", "scope": "localized Khmer write-error presentation" },
-    { "sha": "b059237a", "scope": "shift additional cash, expected drawer, reports and Telegram" },
-    { "sha": "b312c331", "scope": "Shop/Warehouse transfer timeout and lot availability cap" },
-    { "sha": "e093b5c5", "scope": "iOS viewport scale and page pinch-zoom guard" },
-    { "sha": "7b72cd7c", "scope": "test contract alignment for transfer, shift and mobile behavior (no runtime change)" }
+    {
+      "sha": "aea2b6aa",
+      "scope": "Not Paid/awaiting_payment stock deduction and guarded recovery"
+    },
+    {
+      "sha": "ee1127d7",
+      "scope": "bounded mutation writes with unknown-outcome preservation"
+    },
+    {
+      "sha": "6ed60cb5",
+      "scope": "localized Khmer write-error presentation"
+    },
+    {
+      "sha": "b059237a",
+      "scope": "shift additional cash, expected drawer, reports and Telegram"
+    },
+    {
+      "sha": "b312c331",
+      "scope": "Shop/Warehouse transfer timeout and lot availability cap"
+    },
+    {
+      "sha": "e093b5c5",
+      "scope": "iOS viewport scale and page pinch-zoom guard"
+    },
+    {
+      "sha": "7b72cd7c",
+      "scope": "test contract alignment for transfer, shift and mobile behavior (no runtime change)"
+    },
+    {
+      "sha": "be7bdaedc6c609ee339e33b9717771265bcf20f0",
+      "scope": "transfer request receipts, replay/conflict protection and audit-before-stock ordering"
+    }
   ],
-  "liveWorkerVersion": "718a3d15-8d64-4b5c-88de-2f486b5b48e7",
-  "deployment": "completed successfully by wrangler deploy; 100% traffic",
-  "migration": { "name": "0147_shift_additional_cash.sql", "remoteD1MigrationId": 143 },
+  "liveWorkerVersion": "4eda51e2-52c6-4157-ad86-1efa8d5f1af1",
+  "deployment": "completed successfully by wrangler deploy; 100% traffic; clean source commit be7bdaedc6c609ee339e33b9717771265bcf20f0",
+  "migration": {
+    "name": "0148_transfer_operation_receipts.sql",
+    "remoteD1MigrationId": 144,
+    "previous": {
+      "name": "0147_shift_additional_cash.sql",
+      "remoteD1MigrationId": 143
+    }
+  },
   "verification": {
     "workerTypecheck": "PASS",
     "frontendTypecheck": "PASS",
@@ -21,15 +53,16 @@
     "shiftReconciliationPure": "PASS",
     "shiftReportPure": "PASS",
     "mobileViewportGuard": "PASS",
-    "transferCanonicalBranchRoute": "PASS (10)",
+    "transferCanonicalBranchRoute": "PASS (12)",
     "transferBranchLots": "PASS (6)",
-    "transferInventoryLots": "PASS (7)",
+    "transferInventoryLots": "PASS (8)",
     "transferCanonicalIdentity": "PASS (7)",
-    "frontendTestUtils": "PASS (346/346)"
+    "frontendTestUtils": "PASS (346/346)",
+    "transferReplayAndConflict": "PASS (single, bulk, inventory)"
   },
   "limitations": [
     "Physical iOS PWA and desktop device-toolbar checks remain open under U20.",
-    "Transfer server idempotency/receipt dedupe and audit-before-stock ordering remain open under F73.",
+    "Physical uncertain-network transfer retry verification remains open under F73.",
     "Unauthenticated runtime endpoint verification was blocked by the Cloudflare challenge; deployment CLI provenance is recorded."
   ]
 }

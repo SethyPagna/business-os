@@ -8,7 +8,7 @@ This review records the change that is live and the work that remains. It is del
 
 - The transfer modal used a 12-second mutation timeout. A real lot move could still be committing when the client declared failure, which made Shop → Warehouse appear unusable and encouraged a retry.
 - The picker had to preserve the canonical pair (Shop sells; Warehouse never sells), the source branch, destination branch, product identity and optional received-date/lot identity. A selected lot could not exceed either its own available quantity or the source aggregate.
-- A retry receipt/idempotency contract was not present at the server boundary, and transfer audit entries are written after the stock statements. Those are durability risks even after the timeout fix.
+- A retry receipt/idempotency contract was not present at the server boundary, and transfer audit entries were written after the stock statements. Those were durability risks after the timeout fix.
 
 ### Live behavior after `b312c331`
 
@@ -19,7 +19,7 @@ This review records the change that is live and the work that remains. It is del
 
 ### Still required
 
-F73 remains open: add a server idempotency/receipt key, make a replay return the original result without a second stock movement, and record an intent/audit before stock mutation. Verify timeout, retry, rollback and audit ordering with an uncertain network test. This is the next transfer reliability checkpoint.
+F73 server durability is now live in commit `be7bdaedc6c609ee339e33b9717771265bcf20f0`: migration `0148_transfer_operation_receipts.sql` (remote row 144) records an actor/request digest and original response; single, bulk and inventory routes replay safely, reject conflicting reuse, and commit a typed transfer-intent audit before stock mutation. Focused route tests pass (canonical 12, inventory 8). The remaining check is one real uncertain-network retry from the authenticated iOS PWA, confirming one movement and one receipt without relying on a production mutation for automated tests.
 
 ## Mobile/admin UI
 
@@ -64,7 +64,7 @@ The current legal copy is a template and explicitly tells the owner to obtain qu
 ## Release evidence
 
 - Release branch: `codex/sale-create-trigger-release-20260909` (clean and pushed).
-- Commits are fix-scoped: `b059237a` (shift additional cash/expected drawer), `b312c331` (transfer timeout/cap), `e093b5c5` (mobile viewport guard), and `7b72cd7c` (test-contract alignment only; no runtime change).
-- Live Worker: `718a3d15-8d64-4b5c-88de-2f486b5b48e7`, deployed from `e093b5c5` at approximately 2026-09-09T10:31Z; migration `0147_shift_additional_cash.sql` is remote D1 migration row 143.
-- Full frontend utility gate: 346/346 passed, including typecheck, public-runtime verification and source syntax preflight. Cloudflare Worker typecheck and focused shift/transfer suites also passed.
+- Commits are fix-scoped: `b059237a` (shift additional cash/expected drawer), `b312c331` (transfer timeout/cap), `e093b5c5` (mobile viewport guard), `7b72cd7c` (test-contract alignment only; no runtime change), and `be7bdaed` (transfer receipts, replay protection and audit ordering).
+- Live Worker: `4eda51e2-52c6-4157-ad86-1efa8d5f1af1`, deployed from clean `be7bdaedc6c609ee339e33b9717771265bcf20f0` at approximately 2026-09-09T13:03Z; migrations `0147_shift_additional_cash.sql` and `0148_transfer_operation_receipts.sql` are remote D1 rows 143 and 144.
+- Full frontend utility gate: 346/346 passed, including typecheck, public-runtime verification and source syntax preflight. Cloudflare Worker typecheck, canonical branch route (12) and inventory transfer route (8) replay/lot suites also passed.
 - Logs: `shift-additional-cash-migration.log`, `shift-transfer-deploy.log`, and `mobile-viewport-deploy.log` in this directory. Cloudflare’s unauthenticated HTTP challenge prevented a direct runtime endpoint read; the deployment CLI completed successfully and reported the full Worker version.
