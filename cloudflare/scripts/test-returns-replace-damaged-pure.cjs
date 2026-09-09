@@ -258,9 +258,13 @@ async function run() {
     const salesSource = fs.readFileSync(path.join(cloudflareRoot, 'src', 'routes', 'sales.ts'), 'utf8')
     // damaged lines skip the sellable-stock checks and deductions...
     assert.match(salesSource, /shouldDeductStock && !item\.damaged_lot_id\)/)
-    // ...draw their lot up front with compensation on every later failure...
-    assert.match(salesSource, /await consumeDamagedLot\(db, \{ lotId: Number\(item\.damaged_lot_id\)/)
-    assert.match(salesSource, /await restoreConsumedDamagedLots\(\)\s+await db\.prepare\('DELETE FROM sales WHERE id = \?'\)/)
+    // ...guard and draw their lot inside the same atomic creation batch. The
+    // route-level sale-create suite injects a later audit failure and proves
+    // quantity_remaining rolls back with the header, line and movement.
+    assert.match(salesSource, /SELECT CASE WHEN EXISTS \([\s\S]*?FROM damaged_stock_lots[\s\S]*?quantity_remaining >= @quantity/)
+    assert.match(salesSource, /UPDATE damaged_stock_lots[\s\S]*?quantity_remaining = quantity_remaining - @quantity/)
+    assert.doesNotMatch(salesSource, /await consumeDamagedLot\(db/)
+    assert.doesNotMatch(salesSource, /restoreConsumedDamagedLots/)
     // ...record which damaged lot on the sale line. Sellable batch metadata
     // comes from the validated current-line CTE rather than trusting the
     // caller's batch label/expiry strings.

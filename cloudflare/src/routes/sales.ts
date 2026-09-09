@@ -108,7 +108,7 @@ import {
   type SaleRecordChange,
 } from '../lib/saleRecords'
 import { VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES } from '../lib/salesStatus'
-import { consumeDamagedLot, restoreDamagedLot, DamagedLotShortfallError, DAMAGE_OUT_MOVEMENT, DAMAGE_IN_MOVEMENT } from '../lib/returnsStock'
+import { DAMAGE_OUT_MOVEMENT, DAMAGE_IN_MOVEMENT } from '../lib/returnsStock'
 import {
   CANCEL_REASONS,
   allocateReturnedQuantities,
@@ -399,6 +399,11 @@ app.post('/', async (c) => {
       return c.json({ id: existingSale.id, receiptNumber: existingSale.receipt_number, duplicate: true })
     }
   }
+  // Every atomic create needs a stable identity that later statements in the
+  // D1 batch can resolve before the auto-generated sale id is available to JS.
+  // Current POS/offline clients provide client_request_id; the internal key
+  // keeps the legacy direct-API path atomic without making that field required.
+  const saleWriteKey = clientRequestId || `server:${crypto.randomUUID()}`
 
   if (!Array.isArray(body.items) || body.items.length === 0) {
     return c.json({ error: 'Sale items required' }, 400)
@@ -952,8 +957,8 @@ app.post('/', async (c) => {
     if (error instanceof SaleCreationSnapshotError) return c.json({ error: error.message }, 400)
     throw error
   }
-  const saleInsert = await db
-    .prepare(`
+  const saleInsertStatement = {
+    sql: `
       INSERT INTO sales (
         receipt_number, client_request_id, cashier_id, cashier_name, branch_id, branch_name,
         customer_id, customer_name, customer_phone, customer_address,
@@ -980,11 +985,11 @@ app.post('/', async (c) => {
         WHERE id = @customer_guard_id
           AND COALESCE(is_anonymous, 0) = @customer_guard_is_anonymous
       )
-    `)
-    .run({
+    `,
+    params: {
       receipt_number: receiptNumber,
       created_at: clientCreatedAt,
-      client_request_id: clientRequestId,
+      client_request_id: saleWriteKey,
       // N13: the cashier snapshot is the AUTHENTICATED session's account, not
       // whatever the client put in the body. Before this, POST /api/sales was
       // the one history writer that trusted a client string outright
@@ -1059,46 +1064,56 @@ app.post('/', async (c) => {
       delivery_actual_cost_usd: deliveryActualCostUsd,
       delivery_actual_cost_khr: deliveryActualCostKhr,
       sale_status: saleStatus,
-    })
-  // Native D1 reports trigger writes in meta.changes. The sales INSERT fires
-  // sale_revision_sales_insert, so a successful insert reports 2 rather than
-  // SQLite's direct-statement count of 1. Only zero means the guarded SELECT
-  // inserted no sale because the selected customer changed.
-  if (saleInsert.changes < 1) {
-    return c.json({ error: 'The selected customer changed before the sale was saved. Review the customer and try again.', code: 'customer_state_conflict' }, 409)
+    },
   }
-  const saleId = saleInsert.lastInsertRowid
 
-  // 11.9: draw the damaged lots FIRST (each consumeDamagedLot is its own
-  // atomic, self-guarding statement -- see the kernel); anything that
-  // fails after this point restores them in its error path, the same
-  // compensation shape the returns route uses for receiveBatchStock.
-  const consumedDamagedLots: Array<{ lotId: number; quantity: number }> = []
-  const restoreConsumedDamagedLots = async () => {
-    for (const consumed of consumedDamagedLots) {
-      try { await restoreDamagedLot(db, { lotId: consumed.lotId, quantity: consumed.quantity }) } catch { /* compensation is best-effort; the lot ledger still holds the draw */ }
-    }
-  }
-  if (shouldDeductStock) {
-    for (const item of damagedItems) {
-      try {
-        await consumeDamagedLot(db, { lotId: Number(item.damaged_lot_id), productId: item.product_id, quantity: item.quantity })
-        consumedDamagedLots.push({ lotId: Number(item.damaged_lot_id), quantity: item.quantity })
-      } catch (error) {
-        await restoreConsumedDamagedLots()
-        await db.prepare('DELETE FROM sales WHERE id = ?').run([saleId])
-        const status = error instanceof DamagedLotShortfallError ? 409 : 400
-        return c.json({ error: (error as Error).message }, status)
+  // ---- 5. Atomically write the sale header, items, allocations, stock,
+  // movement log, and creation audit. A stable write key lets every statement
+  // resolve the new auto-generated sale id inside the same D1 transaction. ----
+  let saleId = 0
+  let recoveredCommittedCreate = false
+  let resolvedReceiptNumber = receiptNumber
+  try {
+    const statements: Array<{ sql: string; params: Record<string, unknown> }> = [
+      saleInsertStatement,
+      {
+        // D1 batch rolls back only on an exception, not a zero-row INSERT.
+        // Fail the transaction if the guarded header SELECT saw a customer
+        // state change and therefore did not create the target sale.
+        sql: `SELECT CASE WHEN EXISTS (
+                SELECT 1 FROM sales
+                WHERE client_request_id = @sale_write_key AND client_request_id <> ''
+              ) THEN 1 ELSE json_extract('customer_state_conflict', '$') END`,
+        params: { sale_write_key: saleWriteKey },
+      },
+    ]
+    // Damaged stock is stock too: guard and consume each lot inside the same
+    // batch instead of relying on a best-effort compensation write.
+    if (shouldDeductStock) {
+      for (const item of damagedItems) {
+        statements.push({
+          sql: `SELECT CASE WHEN EXISTS (
+                  SELECT 1 FROM damaged_stock_lots
+                  WHERE id = @lot_id AND product_id = @product_id
+                    AND quantity_remaining >= @quantity
+                ) THEN 1 ELSE json_extract('damaged_stock_conflict', '$') END`,
+          params: {
+            lot_id: Number(item.damaged_lot_id),
+            product_id: item.product_id,
+            quantity: item.quantity,
+          },
+        }, {
+          sql: `UPDATE damaged_stock_lots
+                SET quantity_remaining = quantity_remaining - @quantity, updated_at = datetime('now')
+                WHERE id = @lot_id AND product_id = @product_id AND quantity_remaining >= @quantity`,
+          params: {
+            lot_id: Number(item.damaged_lot_id),
+            product_id: item.product_id,
+            quantity: item.quantity,
+          },
+        })
       }
     }
-  }
-
-  // ---- 5. Atomically write items + stock deduction + movement log.
-  // If ANY of this fails, none of it is applied (D1 batch() semantics) --
-  // and we then delete the orphaned sale header from step 4, so the caller
-  // never sees a "sale" with no items. ----
-  try {
-    const statements: Array<{ sql: string; params: Record<string, unknown> }> = []
     // The preflight above improves the cashier response, but it cannot guard
     // a concurrent lot attribution/update. Re-evaluate the exact same
     // aggregate-minus-all-positive-known-lots predicate in this D1 batch
@@ -1156,7 +1171,10 @@ app.post('/', async (c) => {
                 batch_id, batch_label, batch_expiry_date, damaged_lot_id
               )
               VALUES (
-                CASE WHEN EXISTS (SELECT 1 FROM current_line) THEN @sale_id ELSE NULL END,
+                CASE WHEN EXISTS (SELECT 1 FROM current_line) THEN (
+                  SELECT id FROM sales
+                  WHERE client_request_id = @sale_write_key AND client_request_id <> ''
+                ) ELSE NULL END,
                 @product_id, @product_name, @quantity, @applied_price_usd, @applied_price_khr,
                 @cost_price_usd, @cost_price_khr, @total_usd, @total_khr, @branch_id,
                 @price_mode, @product_discount_type, @product_discount_label, @product_discount_usd, @product_discount_khr,
@@ -1167,7 +1185,7 @@ app.post('/', async (c) => {
                 @damaged_lot_id
               )`,
         params: {
-          sale_id: saleId,
+          sale_write_key: saleWriteKey,
           product_id: item.product_id,
           product_name: item.product_name,
           quantity: item.quantity,
@@ -1233,7 +1251,10 @@ app.post('/', async (c) => {
                   INSERT INTO sale_item_batch_allocations (sale_item_id, batch_id, branch_id, quantity, lot_code, expiry_date, released_quantity, released_at)
                   VALUES (
                     CASE WHEN EXISTS (SELECT 1 FROM current_batch)
-                      THEN (SELECT id FROM sale_items WHERE sale_id = @sale_id ORDER BY id DESC LIMIT 1)
+                      THEN (SELECT id FROM sale_items WHERE sale_id = (
+                        SELECT id FROM sales
+                        WHERE client_request_id = @sale_write_key AND client_request_id <> ''
+                      ) ORDER BY id DESC LIMIT 1)
                       ELSE NULL END,
                     (SELECT batch_id FROM current_batch),
                     @branch_id, @quantity,
@@ -1242,7 +1263,7 @@ app.post('/', async (c) => {
                     @released_quantity, @released_at
                   )`,
             params: {
-              sale_id: saleId,
+              sale_write_key: saleWriteKey,
               product_id: item.product_id,
               batch_id: take.batchId,
               branch_id: item.branch_id,
@@ -1259,7 +1280,8 @@ app.post('/', async (c) => {
       if (item.damaged_lot_id && item.branch_id && shouldDeductStock) {
         statements.push({
           sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reference_id, user_id, user_name)
-                VALUES (@product_id, @product_name, @branch_id, '${DAMAGE_OUT_MOVEMENT}', @quantity, @unit_cost_usd, @unit_cost_khr, @reference_id, @user_id, @user_name)`,
+                VALUES (@product_id, @product_name, @branch_id, '${DAMAGE_OUT_MOVEMENT}', @quantity, @unit_cost_usd, @unit_cost_khr,
+                  (SELECT id FROM sales WHERE client_request_id = @sale_write_key AND client_request_id <> ''), @user_id, @user_name)`,
           params: {
             product_id: item.product_id,
             product_name: item.product_name,
@@ -1267,7 +1289,7 @@ app.post('/', async (c) => {
             quantity: -item.quantity,
             unit_cost_usd: item.costPriceUsd,
             unit_cost_khr: item.costPriceKhr,
-            reference_id: saleId,
+            sale_write_key: saleWriteKey,
             user_id: actorId(user),
             user_name: actorSnapshot(user),
           },
@@ -1313,7 +1335,8 @@ app.post('/', async (c) => {
           || (autoTakes.length === 1 && autoTakes[0].quantity === item.quantity ? autoTakes[0].batchId : null)
         statements.push({
           sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reference_id, user_id, user_name, batch_id)
-                VALUES (@product_id, @product_name, @branch_id, 'sale', @quantity, @unit_cost_usd, @unit_cost_khr, @reference_id, @user_id, @user_name, @batch_id)`,
+                VALUES (@product_id, @product_name, @branch_id, 'sale', @quantity, @unit_cost_usd, @unit_cost_khr,
+                  (SELECT id FROM sales WHERE client_request_id = @sale_write_key AND client_request_id <> ''), @user_id, @user_name, @batch_id)`,
           params: {
             product_id: item.product_id,
             product_name: item.product_name,
@@ -1321,7 +1344,7 @@ app.post('/', async (c) => {
             quantity: -item.quantity,
             unit_cost_usd: item.costPriceUsd,
             unit_cost_khr: item.costPriceKhr,
-            reference_id: saleId,
+            sale_write_key: saleWriteKey,
             user_id: actorId(user),
             user_name: actorSnapshot(user),
             batch_id: movementBatchId,
@@ -1338,28 +1361,85 @@ app.post('/', async (c) => {
         })
       }
     }
+    statements.push({
+      sql: `SELECT CASE WHEN COALESCE((
+              SELECT COUNT(*) FROM sale_items WHERE sale_id = (
+                SELECT id FROM sales
+                WHERE client_request_id = @sale_write_key AND client_request_id <> ''
+              )
+            ), 0) = @item_count
+            THEN 1 ELSE json_extract('sale_create_incomplete', '$') END`,
+      params: { sale_write_key: saleWriteKey, item_count: priced.length },
+    }, {
+      sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
+            SELECT @user_id,@user_name,'create','sale_creation',CAST(id AS TEXT),@details,'sales',CAST(id AS TEXT),@details
+            FROM sales WHERE client_request_id = @sale_write_key AND client_request_id <> ''`,
+      params: {
+        user_id: actorId(user),
+        user_name: actorSnapshot(user),
+        details: JSON.stringify({
+          kind: 'sale.creation',
+          receiptNumber,
+          itemCount: priced.length,
+          totalUsd,
+          saleStatus,
+          origin: clientCreatedAt ? 'offline_replay' : 'pos',
+        }),
+        sale_write_key: saleWriteKey,
+      },
+    })
     await db.batch(statements)
+    const createdSale = await db.prepare(`SELECT id,receipt_number FROM sales
+      WHERE client_request_id=@sale_write_key AND client_request_id<>'' LIMIT 1`)
+      .get<{ id: number; receipt_number: string }>({ sale_write_key: saleWriteKey })
+    if (!createdSale?.id) throw new Error('sale_create_identity_missing')
+    saleId = Number(createdSale.id)
   } catch (error) {
-    // The atomic batch rolled back, so nothing here was applied; delete the
-    // orphaned header written in step 4 so the caller never sees an itemless
-    // sale. Damaged-lot draws happened before the batch -- hand them back.
-    await restoreConsumedDamagedLots()
-    await db.prepare('DELETE FROM sales WHERE id = ?').run([saleId])
     const message = (error as Error).message || ''
-    if (/NOT NULL constraint failed:\s*(?:sale_items\.sale_id|sale_item_batch_allocations\.sale_item_id)/i.test(message)) {
-      return c.json({
-        error: 'The Shop or batch changed while this sale was being recorded. Refresh the sale and pick the current batch before trying again.',
-        code: 'sale_identity_conflict',
-      }, 409)
+    // If D1 committed the batch but its response was lost, its retry can hit
+    // the unique write key. Reconcile only a sale with durable lines; an old
+    // header-only row is never promoted to a successful replay.
+    const committedSale = await db.prepare(`SELECT id,receipt_number,
+      (SELECT COUNT(*) FROM sale_items WHERE sale_id=sales.id) AS item_count
+      FROM sales WHERE client_request_id=@sale_write_key AND client_request_id<>'' LIMIT 1`)
+      .get<{ id: number; receipt_number: string; item_count: number }>({ sale_write_key: saleWriteKey })
+    if (committedSale && Number(committedSale.item_count) > 0) {
+      saleId = Number(committedSale.id)
+      resolvedReceiptNumber = committedSale.receipt_number
+      recoveredCommittedCreate = true
+    } else {
+      if (committedSale) {
+        return c.json({
+          error: 'This sale was not completely recorded. Keep the original sale details and ask an administrator to recover it.',
+          code: 'sale_incomplete',
+        }, 409)
+      }
+      if (customerStateGuard) {
+        const currentCustomer = await db.prepare('SELECT is_anonymous FROM customers WHERE id=?')
+          .get<{ is_anonymous: number | null }>([customerStateGuard.id])
+        if (!currentCustomer || Number(currentCustomer.is_anonymous || 0) !== customerStateGuard.isAnonymous) {
+          return c.json({ error: 'The selected customer changed before the sale was saved. Review the customer and try again.', code: 'customer_state_conflict' }, 409)
+        }
+      }
+      if (/NOT NULL constraint failed:\s*(?:sale_items\.sale_id|sale_item_batch_allocations\.sale_item_id)/i.test(message)) {
+        return c.json({
+          error: 'The Shop or batch changed while this sale was being recorded. Refresh the sale and pick the current batch before trying again.',
+          code: 'sale_identity_conflict',
+        }, 409)
+      }
+      // A CHECK(quantity >= 0) failure means a concurrent sale consumed the
+      // stock between this request's availability read and its write -- report
+      // it as the same 409 an up-front shortage gets, not an opaque 500, so the
+      // client retries/refreshes rather than treating it as a server fault.
+      if (/CHECK constraint|constraint failed|malformed JSON/i.test(message)) {
+        return c.json({ error: 'Insufficient stock: another sale took the last units while this one was being recorded. Refresh and try again.', code: 'stock_conflict' }, 409)
+      }
+      return c.json({ error: `Failed to record sale items: ${message}` }, 500)
     }
-    // A CHECK(quantity >= 0) failure means a concurrent sale consumed the
-    // stock between this request's availability read and its write -- report
-    // it as the same 409 an up-front shortage gets, not an opaque 500, so the
-    // client retries/refreshes rather than treating it as a server fault.
-    if (/CHECK constraint|constraint failed|malformed JSON/i.test(message)) {
-      return c.json({ error: 'Insufficient stock: another sale took the last units while this one was being recorded. Refresh and try again.', code: 'stock_conflict' }, 409)
-    }
-    return c.json({ error: `Failed to record sale items: ${message}` }, 500)
+  }
+
+  if (recoveredCommittedCreate) {
+    return c.json({ id: saleId, receiptNumber: resolvedReceiptNumber, duplicate: true })
   }
 
   // Invalidate the 20s /api/products/search cache (see lib/cache.ts) so
