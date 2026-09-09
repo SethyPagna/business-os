@@ -1,4 +1,459 @@
+## Owner correction: Not Paid must deduct stock — September 9
+
+The owner explicitly confirmed that awaiting_payment/Not Paid deducts stock. Earlier ledger claims treating released allocations and preserved stock as correct are withdrawn. Live 4aba954f has the recovered product lines, but three awaiting-payment sales 16952/16953/16954 still need stock correction: four quantity-one lines, fully released allocations, no sale movements. Exactly these three awaiting-payment sales exist in the fresh production census. Completed16951 already deducted36 once and must stay unchanged.
+
+Backend canonical status behavior and guarded historical correction are under separate read-only investigations before implementation. Settings12s timeout/error translation remains active; root transport WIP is preserved in outputs/takeover-20260909/write-timeout-transport-root-wip.patch and not deployed. Edit Customer alignment added as F79; timeout/i18n F78. All earlier tasks retained; no new production writes yet.
+
+## Sales recovery Records checkpoint live — September 9
+
+Commit 4aba954f53d52cdff762b6a9b8413735139c547c is live at 100%; Worker 175c9438-c783-45d9-b92e-e9962ca61580, deployment 5bddcc0a-af46-40a8-b2dc-966f4114e769 at 08:07:58 UTC. Independent Records review passed, affected tests/types/i18n/build and clean dry-run/deploy passed. Fix-scoped commits pushed; no migration.
+
+Normal Admin UI refreshed to the new version. Saved receipt 16954 shows its SK-II product. Records now displays the recovery event, product lines 0 to 1, and released allocation/no stock deduction in both English and Khmer. Variant confirmation input IDs are unique. All four incident receipts are repaired; all-history header-only product-snapshot census is zero. No subsequent real checkout was observed, so actual phone checkout remains unverified. All 108 owner tasks remain in the current register; full transfer durability, cleanup and later UI/public work remain open, offline paused.
+
+## All four incident receipts recovered — September 9
+
+Fourth recovery operation bfaebe1d-4435-4d5e-820d-b6ed439dc475 applied at 07:55:37 UTC after backup. Receipt 16954 now has its SK-II product, quantity 1, total 185 and proven cost 170; released allocation, no stock movement, product/Shop/batch stock remains 7/5/5. Normal Sales list and saved detail both show the product. Previous three repairs remain intact. Four recovery histories and audits exist; guard is empty. All-history census finds zero remaining header-only sales with nonempty product snapshots.
+
+Live remains 92ddfc6d; Records display checkpoint is under independent review. No new real checkout since the hotfix was observed, so phone checkout is not claimed validated. All 108 tasks remain tracked; broader transfer durability and deferred UI/public work remain open; offline is paused.
+
+## Fourth-receipt recovery checkpoint live — September 9
+
+Commit 92ddfc6d0e39978f5410fa79fae1bace59ae8842 is live at 100%; Worker e0e58fc7-4035-4e08-a5b9-03976df1a4a2, deployment ffb756a5-802a-445c-a4c6-4422d1758375 at 07:34:33 UTC. Independent review and affected package gates passed. No additional migration.
+
+Receipt 16954 fresh preview confirmed one missing line, total 185 unchanged, released allocation without stock deduction. Exact digest 3b5a3504bace192ba3d5968f89e860fced6e2f00e89a16c29e112ba7103990fe was submitted once through normal Admin UI; backup/apply is pending. First three repairs remain verified. Records recovery labels are under independent review. All 108 tasks retained; UI/public work deferred and offline paused.
+
+## Three incident receipts recovered and verified — September 9
+
+Normal AdminUI operationc2620a5d-84d8-4eca-a117-94a7368acef8 applied07:19:33UTC fromfreshdigestb828c09a8ef1ef0288a93e0ba9aade8676c635f21d49f6e74ce4c183bb550278 afterbackup. D1postread:16951oneitem36units342, product4208stock252/Shop60/batch60, exactlyone-36movement;16952oneitem299bothdeliveryfields2.7;16953twoitems40. Threehistories/threeaudits, guardempty. UIlistand16951detailsnowshowproductsandquantities.
+
+16954stillunrepaired, v2candidate9c343f75underreview withpre-salecost170/0proved. NewrecoveryauditcurrentlyrendersgenericEarlier sale change/Historical details unavailable; underlyingauditcomplete, projectorfixqueued. Livefbdunchanged, all108tasksretained.
+
+## V1 recovery checkpoint LIVE; reviewed operation submitted — September 9
+
+Livefbd48c7c446deff6982d1244c38496602e31c87e at100%, Workera0a92169-f3d4-4507-91e9-165cb0f783f6, deploymentd1081b35-f183-4cb1-b2b1-96ed76c104f1 at2026-09-09T07:12:45.179367Z. Independentbackendreview, focusedbackend/UItests, types/i18n/build, clean dryrun/deploypassed; fix-scopedcommitspushed. Migration145appliedandrecorded07:11:24; all businesscounts/sumsunchanged,3newrecoverytablesempty. Pre-migrationbookmark00001463-00000062-000050e1-7f7e44292617d873a224be2d0df92cea retained.
+
+Normal AdminUI freshpreview3receiptsreviewedand exactdigest b828c09a8ef1ef0288a93e0ba9aade8676c635f21d49f6e74ce4c183bb550278 submittedonce. Backup/applyinflight; do notclaimreceipt repair complete yet. Fourth16954cost170/0provenfromprivatelypreserved00:00backup, separatev2underimplementation. All108tasksretained; no offline/UI/publicscopeexpansion.
+
+## Transfer stock-limit checkpoint LIVE — September 9
+
+Commitc758ce821502efae48cbb3169ed865336e6614dc live100%; Worker2fc4d161-c58e-43a2-9ade-ad4e75f7df2e; deployment9d127f28-548f-42f9-88cb-b67110d87624 at2026-09-09T07:05:14.669227Z. Independent final review PASS, focused transfer/role/reason tests, frontend types/i18n/build, clean dry-run/deploy; pushedfix-scopedcommits. No migration. Cap respects selectedlot andaggregate; nonfinite inputfailsclosed. AdminUI sourceShop/destinationWarehouse selectable, inspectedwithoutstockmutation.
+
+Fourreceipt recovery stillpending. V1three-proven-receipt helper/UI integrated for releasegates;145notapplied. Fourthcost nowproven170/0 frompreserved midnightbackup and image-update revisionevidence; v2separateimplementation. All108tasksretained; UI/public/iconslater,offlinepaused.
+
+## Incident census widened to four pre-hotfix receipts — September 9
+
+Fresh all-history query found exactly4 header-only sales with nonempty product snapshots:16951,16952,16953,16954. The fourth receipt20260909-130228 was created06:02:29UTC before the06:23 hotfix; awaiting payment185, product5370qty1. No new sales observed sincehotfix during this read. Fixed-target recovery expanded toall4, not yet applied. e408 remainslive.
+
+## Atomic sale creation checkpoint LIVE — September 9
+
+Commit e408f31f18744f2de578719de06e97adb1ccd032 is live at100%; Worker e84cc3f1-748e-4123-bca9-0ccf4f7c326a, deployment87599618-10b9-451e-9463-b568db574b5f at2026-09-09T06:36:04.593034Z. Exact tree matches independently reviewed4285586e. Native D1/atomic failure injection, customer, lot and damaged-stock suites, Worker typecheck, clean frontend build, dry-run/deploy and pushed fix-scoped commits all verified. No migration.
+
+Header, items, allocations, stock, movements and creation audit now commit together; recovered saves also invalidate caches. Historical16951/16952/16953 remain unrepaired.16952 amendments prove fee edit caused itemless total299→0; preserve newer actual/fee2.7 during repair. Fixed-target receipt-backed recovery helper/migration0145 being prepared, not applied.
+
+Transfer diagnosis: canonical branches healthy; Admin has30 successful Shop→Warehouse transfers. Employee inventory/branches absent, consistent with existing scope. Eight products show lot availability above aggregate; a bounded UI max fix is assigned. All108 owner requests retained. UI/public/portal/icons later; offline paused; duplicate execution held.
+
+## Urgent checkout hotfix LIVE — September 9
+
+Commit38d27e0371244888530c29568436d564cb81263e is live at100%. Worker2838266c-c0a2-43f8-83e0-441817ed121a; deployment17fabcb5-43fa-4f5d-ae5a-ea0511e7a294 at2026-09-09T06:23:43.4937Z. Independent review, native Miniflare D1 regression4/4, customer guard regression, Worker typecheck, final clean frontend build and clean dry-run/deploy passed. Branch pushed; no migration.
+
+Confirmed cause: sale INSERT trigger makes D1 report2 changed rows; old exact-one check persisted header then rejected before items/stock. New saves accept successful trigger-inclusive metadata; incomplete idempotency replay now returns409 rather than false success. Printed receipt snapshot can contain products while saved preview lacks lines. Both General and named customers were affected.
+
+Atomic header/items/stock/audit phase f5b2adc7 is under independent review. Existing affected sales16951/16952/16953 are not yet repaired; cost evidence and16952 subsequent edits require reconciliation. All108 owner tasks retained. Priority: urgent sales/POS and transfer. UI/mobile icons/public/customer portal deferred to later checkpoint; offline paused and duplicate execution held.
+
+## Urgent zero-item sale incident; owner priorities updated — September 9
+
+Live remains 882136b7. New F77: receipt 20260909-101913 (sale16951) has header342 but0 persisted items and no matching sale movements/audit; creation snapshot proves36 units of product4208 at9.50. Two more September9 headers16952/16953 also have0items; preserve subsequent edits (16952 total is now0). Atomic creation/idempotency prevention assigned; no recovery mutation performed. Product merges are held.
+
+Video IMG_2870.MP4 and screenshots show iOS clipping and viewport/input zoom issues. Mobile fit review and transfer recovery run independently. Owner now prioritizes sale integrity, transfer, mobile UI/icons and compact public/customer portal. Offline F55 paused explicitly. All108 requests and9 review observations retained.
+
+Ledger correction: production branch IDs are1 Warehouse and2 Shop. Earlier cleanup stock totals were conserved but their prose labels were reversed:11962 was Warehouse,12418 Shop. No stock or branch mapping was changed by this correction.
+
+## Merge performance checkpoint LIVE — September 9
+
+Live commit 882136b7d85177851b413e151a5baef6eefdff4f is independently verified at 100% traffic. Worker c222f571-ba39-4a18-bfd2-7204b9db229e; deployment 44843e46-db32-476d-849c-958d82e91799 at 2026-09-09T03:25:24.619084Z. Clean dry run and deployment exited 0; all triggers succeeded. Fix-scoped commits pushed. No migration.
+
+The merge now uses IDs returned by its atomic database batch, removing two serial discovery reads while retaining the legacy fallback, fingerprint checks, audit and Undo. Backend certification: 319 unchanged suites passed in the full sweep, then both corrected test contracts passed at the final head; focused partial/Undo and Worker typecheck passed. Frontend runtime is unchanged from the 341-test checkpoint; final-head build and independent security review passed.
+
+Three checkpoints deployed this continuation: General repair, interrupted-merge recovery and the database-read optimization. General 24969 is repaired; real customer 22305 is unchanged. 174 product merges are recorded in total, with 166 new merges verified this run. Last fresh preview: 1,774 eligible remaining and 19 quarantined groups. No new product merge is in flight. Physical phone/PWA validation and remaining cleanup are not complete.
+
+All 107 owner requests plus 9 nonblocking review observations remain tracked in Current-status.md and task-status.json. Financial census is complete; cause analysis and guarded correction remain open. Next: cleanup, transfer, UI, public site, offline.
+
+## Merge recovery checkpoint LIVE — September 9
+
+LIVEf4a10cb2710586dbe1cd8ad2244752b17d335e73 at100%; Workerb9ce0c89-8f50-4d54-826b-e458b0d95922, deployment93fee51e-7b60-4b65-8e8f-213977d6372b at2026-09-09T02:35:40.241998Z. Clean dry-run/deploy exit0;341 frontend tests/types/i18n/build and independent finalhead review PASS. No migration; fix-scoped commits pushed.
+
+Interrupted merges now retain bilingual recovery, invalidate stale previews and require a validated fresh scan before retry. Live preview verified1793groups/1812candidates,19quarantined,1774eligible; no further merge started.174total recorded merges includes166 verified thisrun. Batchmetadata speed fix is underimplementation; fullcatalogcursor optimization deferred.
+
+General24969 repair remains applied; real22305 protected. Freshcontactcensus confirms2name-only supplierclusters (10/6members), customertriple withmembershipconflicts and2stalephonekeys; no blindmerge. Financialcensus found30negativeKHRdiscountcells needing paired-snapshot review; signedchange may bevalid,100productlossgroups needcauseevidence withoutclamping. All107requests retained. Cleanup continues, then transfer, UI, public site, offline.
+
+## General cleanup checkpoint LIVE and repair applied — September 9
+
+LIVE522a780d76b54917cc84db9949e67a49d42ee1da at100%; Worker ef096149-20c5-4de1-ab95-ea0c91828959, deployment38e8108a-3070-4576-93f6-fbbed48bcac9 at2026-09-09T01:29:57.100127Z. Clean build/dry-run/deploy exit0, independent review PASS, frontend340/340 and backend321/321 passing evidence. No migration. Fix-scoped commits pushed.
+
+Normal Admin UI backed up and marked confirmed General24969 at2026-09-09 01:52:30. Its5 sales/1 return retained; real22305 remainsmarker0 with152 sales and unchanged version. History535 and audit4466; UI reports verified completion.
+
+Product cleanup saved166 additional merges (174 including8 earlier). All166 new histories undoable,166 snapshots applied with0 pending fingerprints,166 audits; Shop11962/Warehouse12418 stock unchanged. The run stopped; exact network cause unknown. Stale preview/transient error bug confirmed and recovery fix under review; remaining cleanup not complete. All107 requests retained. Next: cleanup, transfer, UI, public site, offline. Employee phone smoke, wide Records0143 and transfer0139 remain open.
+
+## Cleanup resumed after verified Employee checkpoint — September 9
+
+Production remains1791eaf7 at100%; Employee role rollout is verified. Cleanup is now active. Recovered the clean General repair helper at124eb57a (commits21d98ffe and124eb57a), its eight prior SQLite groups and saved handoff. Independent helper review and the current protected admin route/UI plan are running before implementation. Stale helper claims released after preserving the checkpoint; no source discarded.
+
+A separate read-only agent is mapping the remaining product/contact/supplier duplicate cleanup evidence. Only eight earlier production product merges are recorded as completed. General24969 remains unmarked,22305 remainsnormal; no cleanup mutation has occurred. All107 requests and the two review observations remain tracked. Transfer, UI, public-site and offline work follow cleanup.
+
+## Employee/return checkpoint LIVE — September 9
+
+LIVE 1791eaf701d767da7109012b3ecd7e89f514c2f1, Worker 936417e0-911a-472e-b666-f7bf6321d7e5, deployment fc7eae67-ecdb-4464-9b76-d25762a4434b, independently verified at 100% traffic on 2026-09-08T23:17:48.005495Z. CLI exit 0; all domains, cron and queue triggers succeeded. Frontend339/339 and backend319/319 have passing evidence; types, translations, build, clean dry-run and independent final-head review pass. Migration0142 applied; recorded business totals unchanged and new receipt/guard tables empty before rollout.
+
+Existing Employee role3 saved through the Admin UI at 2026-09-08T23:45:07.129Z, audit4299: all11 original keys preserved and exactly five false Sales/Returns bulk/import/export keys added. Both user overrides unchanged. Production-role data and deployed permission-kernel checks pass; an already-open Employee phone session was not tested.
+
+All107 owner requests plus two deferred P3 review observations remain tracked. Next priority is cleanup, including the confirmed General24969 repair; it is still unmarked. Transfers, UI, public-site and offline follow in that order.0139 and0143 are not deployed. Wide Records cascades and all preserved WIP remain open.
+
+## Employee/return candidate independently verified — September 9
+
+Clean candidate 9719e6b6 has independent review PASS, 339/339 frontend tests, both typechecks, translation check, production build and Worker dry-run PASS. The broad backend sweep is still running. Production remains 21d22fc; migration 0142 and the existing Employee role update have not been applied.
+
+All 107 owner requests are retained. Two nonblocking P3 review observations are also tracked: unsafe-method request-origin enforcement and early return-body size admission. They do not replace or delay the owner’s priority order: employee/return, cleanup, transfer, UI, public site, offline.
+
+## Employee role-save guard verified — September 9
+
+Employee/return remains the first priority. Atomic role-save commit 99910afb passed independent review and all seven concurrency/audit tests. It awaits integration with the Returns/Contacts bulk-action repairs and final release gates. No production role permissions have been changed.
+
+Production remains 21d22fc. All 107 tasks remain tracked. General customer repair is queued under cleanup; transfer, UI, public-site and offline work follow in the owner’s requested order. The next checkpoint includes only the verified employee/return scope and migration 0142.
+
+## Employee rollout scope review — September 9
+
+Priority1 remains Employee/return. Read-only production role preflight: exactEmployeeid3, codeemployee, is_system0, two assignedusers, existingSales/POS/Returnstrue andContactsreview. No role edit saved. Rootauthorizes exactexistingrole despitecustomflag, preservingunrelatedvalues/useroverrides.
+
+Expanded review found Returns bulk/export inherited fromreturns:true and Contacts long-press/import controls stillvisible. F75 is therefore not release-complete: explicitReturnsbulk/export andContactsselection gates/defaults are underrepair. Existingfinancial-history gates remainverified. RolePUT atomicversion/auditfix assignedseparately. Live21d22fc unchanged; all107tasks retained andlaterpriorityworkpaused.
+
+## Owner execution priority — September 9
+
+Execute in this explicit order: 1. Employee/return changes. 2. Cleanup. 3. Transfer. 4. UI. 5. Public-site work. 6. Offline. Keep all107 tasks; later work must not delay priority1. Current live21d22fc unchanged. Next release owner preparing certified F75/F76 plus0142 fromc8d onto live21d; role rollout remains separately guarded.
+
+Transfer F73 WIP and wide Records0143 are paused with durable handoffs and claims released. General24969 helper belongs cleanup and is paused at a safe checkpoint. No work is discarded and no paused candidate is deployable.
+
+## Core Records and compact Sales checkpoint LIVE — September 9
+
+LIVE21d22fcdefb5eb52c679dfbdec455f45b0fe1fb8, Worker429f6982-7c3a-4407-8b52-4e0ca192e3f0, deployment962caa59-4686-45c7-b466-e59ad1801a16, independently100% at2026-09-08T20:57:00.318305Z. CLIexit0 with all domain/cron/queue triggers.334 frontend tests; all315 backend scripts have passing evidence including bundled-Node reruns of two native process crashes. Independent exact-head review, types/i18n/build/dry-run pass.0140/0141 applied; sales/products/customers/stock/lot/history/audit counts unchanged. General24969 and22305 remain marker0; no production identity repair performed.
+
+U21/U22/U23 and expanded core Records are live. Following foundationc8d combines verified F75/F76 and0142 return-create but remains undeployed; existing Employee role rollout pending. General repair helper, wide Records0143 and transfer reliability0139 are in progress. Remaining offline/cleanup/census/UI/portal tasks retained. Current-status.md and task-status.json cover all107 requests.
+
+## All-task status and final frontend gates — September 9
+
+All107 requests retained. Production4495bccf remains independently verified100%. Next candidate21d22fc contains core expanded Records, General marker code and U21/U22/U23. Independent runtime review passed; backend313/315 sweep plus both bundled-Node native reruns pass; two frontend stale assertions repaired after332/334 run, final full rerun/package gates active. No new deployment.
+
+F75/F76e6a80e16 and return-createbc114757 are independently certified and in separate future integration. Employee role data rollout, General24969 cache-aware repair, wide reference cascades, offline recovery, transfer receipts, production cleanup, historical census and remaining UI/portal items remain open. Current-status.md and task-status.json now reflect these states, corrected stale browser blockers, old F46-pending text and deployment metadata.
+
+## All-task status refresh — September 9
+
+All107 requests retained. Production4495bccf remains independently verified100%. Next candidate21d22fc contains core expanded Records, General marker code and U21/U22/U23. Independent runtime review passed; backend313/315 sweep plus both bundled-Node native reruns pass; two frontend stale assertions repaired after332/334 run, final full rerun/package gates active. No new deployment.
+
+F75/F76e6a80e16 and return-createbc114757 are independently certified and in separate future integration. Employee role data rollout, General24969 cache-aware repair, wide reference cascades, offline recovery, transfer receipts, production cleanup, historical census and remaining UI/portal items remain open. Current-status.md and task-status.json now reflect these states, corrected stale browser blockers, old F46-pending text and deployment metadata.
+
+## Compact Sales metadata and Paid method labels — September 9
+
+Added U22: compact mobile sale ID/time/branch/cashier metadata and inline customer phone/delivery without Driver label. U23: show methods beside Paid and remove redundant receipt payment-method row, retaining split-payment and numeric semantics. Implementation assigned with list/detail ownership coordination. U21 invoice presentation af735110 implemented and independently reviewing, not live. F74/F72 reconciled candidate ba66e521 is entering focused/package gates; return-create and wide cascades remain explicitly incomplete. Employee permissions/Contacts privacy implementation continues separately. Live4495bccf unchanged; all107 requests retained.
+
+## Verified F65 merge/remove checkpoint — September 9
+
+LIVE 4495bccfb097a55f034976795f2030bfc3628152 (runtime source a5702d49), Worker623d8cbe-6b8f-42b7-8205-b0769ff00aee, deploymentfad40d57-39b6-4291-8375-75725b288722, independently verified100% at2026-09-08T18:43:16.626919Z. CLIexit0, all domains/cron/queues succeeded.0138 applied; product/stock/lot/history/audit pre/post counts identical, new receipt tables empty. Recovery bookmark saved.330 frontend tests and all309 backend scripts have passing evidence; two accumulated Windows native process crashes passed isolated reruns. Independent exact-source review and real Worker/browser passed.
+
+No production duplicate merge/removal was executed. F75 employee individual permissions and F76 Contacts privacy are under implementation, not live. U21 invoice design implementation active. F74 stable frontend932293ba independentlyPASS; detailed Records release and remaining return-create/cascade coverage still open. All105 tasks retained.
+
+## Employee single-record access and invoice design — September 9
+
+Added F75: employee individual Sales/POS actions including cancellation/status changes, paired with complete audit capture; multi-select/bulk/import/export disabled by default. F76: restrict employee Contacts invoice/purchase detail visibility, especially suppliers, while retaining Sales customer search. U21: align invoice layout with Sales report presentation without changing calculations. Read-only security and design traces assigned before permission edits; retain owner/admin access and explicit restrictions. All 105 tasks retained. Detailed Records is still under verification, so expanded permissions must not precede verified capture.
+
+## Owner confirmed shared General identity — September 9
+
+Owner confirmed customer 24969 is the shared walk-in/General customer. Mark only this identity through a guarded repair after paired anonymous-marker code is verified and deployed. Preserve its transaction history and historical membership value while disabling membership use. Customer 22305 remains unmarked. No production identity mutation has occurred. Unknown-phone inline creation remains a separate unanswered question.
+
+Live remains 2767fbf4. F65 frontend 330/330 passes at ab08474f; backend harness repairs/full rerun and final-head review remain before deployment. All 102 tasks retained.
+
+## Active release gates and identity clarification — September 9
+
+Live2767fbf4 remains verified100%;102 tasks retained. F65 combined global merge/remove UI and backend are reconciled; delete-permission gate0318fbae passes, missing0138 durable backup/reset integration under repair before real-backend browser/finalrelease gates. F74 reader/typedENKM UI/settlement/bulk and directreturneditbd0ab24e independentlyPASS. Stablefrontend request lifecycle/history/revision repairs still active; return-create event race reverted, directcustomer and contacts/settings rewrite coverage notyetcomplete.0140unapplied.
+
+F72 legacyGeneral uses explicitmarker0141 (schemaonly) rather than name guessing. Rootcurrentproduction read shows22305 hasphoneandaddress, so preserveitunmarked;24969 noPhone/address/noportalaccount awaitsuseridentityclarification before marking. No historicalcustomer data changed. General inlinecreation path alsoawaitsdecision. Current-status.md/task-status.json remainfullregister; previousheadingshistorical.
+
+## Live General-customer follow-through — September 9
+
+F72 is not fully complete: read-only live smoke after2767fbf4 found receipt20260908-162823 (sale16947) linked to legacy contact24969, namegeneral/emptyphone/membershipLC-04971. Edit treats it as a real customer because it has a positive ID. UI and rootD1 read agree; no writes performed. Canonical anonymous-identity trace and bounded repair assigned before claiming General rule satisfied. Existing-null-General and regular actualcontact tests passed but did not cover this legacyplaceholder. All102tasks retained; live remains2767fbf4.
+
+## Latest verified customer Edit deployment — September 8,15:30 UTC
+
+LIVE **2767fbf43559771b94ba00246c3381cd8c509196**, Worker c2fb44d7-2d69-472d-afca-c9bc756efead, deployment 12f8b894-e9e2-4b80-acfd-4c172e836a7a, independently verified100% at2026-09-08T15:30:57.912313Z. Eight fix-scoped F72 commits: single Edit action, anonymous General, phone-first existing contact assignment, exact sale+linked-return attribution, fresh server-version guarded profile edits. Unknown-phone inline creation remains pending; current fallback directs to Contacts. Frontend328/328, focusedF72/mobile/backendbulk, both typechecks/i18n/build/dry-run passed. CLIexit0 with all customdomains/cron/queues; no migration. PreviousF46/F57/F71 and0136/0137 retained.
+
+All102 tasks retained. F74 typedfrontend/reader/schema and receipt-backed settlement/sale bulk/returnbulk writers independently verified; directstatus/returnedit stableID pairing, all-action coverage and final integration remain. NoF74 deployed. F65 backendgroupmerge/directremove conditionalPASS; globalv2 conflict UI/transport underimplementation,0138notdeployed. PeerstorefrontP08 remains separatelyverified/notintegrated. Signed-in browser loaded priorcheckpoint and LibraryKiko search returned two matching files; no production records were changed by this smoke check. Earlierstatuses arehistorical.
+
+## Latest verified merge and Library deployment — September 8,14:31 UTC
+
+LIVE **bfd16f0db4c51dbad2a3de483dd77bb3452842ac**, Worker c04650e8-5549-44fc-acf1-3891eec56158, deployment d7938cd4-00d4-4098-8b05-43cab5feba71, independently verified100% at2026-09-08T14:31:14.412835Z. F46 retry/finalizer/Undo availability and F57/F71 Library usage protection/indexed queries/debounced abortable search are live. Frontend327/327, backend299/299, both typechecks, i18n, production build and dry-run passed. Migrations0136/0137 applied; product/stock/lot/history/audit pre/post assertions identical. Recovery bookmark saved privately; full SQL export unsupported with FTS5.
+
+Wrangler reported a malformed custom-domain trigger response after deployment. Independent API confirms both domains still enabled on business-os production and expected cron; version is100%. Do not report CLI exit0 or HTTP smoke pass: shellrequests403 and browser runtime endpoint blocked.
+
+All102 tasks retained. F72 Edit-only1ee95554 independently verified, next release preparation. F74 full Records remains active: frontend Khmer/formatting and schema/backup review repairs precede writer rollout. F65 grouped phase2c86fa1a0 independently passes stock/lot/RFID races and UndoRedoResume; Direct Remove phase3 remains in progress. Coordinated storefront P08 is verified in peer task, not yet integrated. Earlier statuses are historical.
+
+## Independent customer/Records review and merge-Library release gates — September 8
+
+All102 tasks retained, including coordinated storefront P08. F72 Edit-only candidate1ee95554 independently passes fresh server-version concurrency protection and one-sale linking; unknown-phone creation decision remains pending. F74 detailed Records is active: independent review found missing creation caller inputs and unsafe time-based event deduplication; repairs and durable event lifecycle plan are required before release. F65 grouped apply review found keeper-stock and RFID race data loss; d111a124 repair awaits re-review, Direct Remove approval/persistence remains in progress.
+
+F46/F57/F71 release candidate bfd16f0d passes327 frontend suites,299 backend scripts, both typechecks and i18n. Build/deployment preparation continues; only migrations0136/0137 pending remotely. Current verified production remains6dbb8a8e at100%; no new checkpoint has been deployed in this update. Peer storefront candidate is separately verified, not yet integrated. Earlier status sections are historical.
+
+## Owner customer Edit scope and detailed Sales Records — September 8
+
+F72 latest scope supersedes prior replacement menu: one Edit customer entry only; remove separate New/Replace/Remove actions. General remains anonymous with no phone/membership profile; assigning a real contact uses phone first, name secondary. Phone-not-found creation path clarification pending; dependent create work withheld. Existing617135b7 candidate must be revised before release. No production customer data changed.
+
+F74 added: action-specific Records capture and complete English/Khmer labels for driver, actual delivery cost/fee, product add/remove/replace/quantity, General/customer/membership, status and payment changes. Show changed relevant information with expandable before/after. Avoid raw variable fallback and vague Not recorded; do not fabricate unavailable historical snapshots. All101 requests retained. F71 final mounted re-review passed atc4d8295e and remains undeployed. Live stays6dbb8a8e.
+
+## Latest verified deployment — September 8, 12:18 UTC
+
+LIVE **6dbb8a8e3029e220cbec650051a4d7c37a6da2c9**, Worker da46fd62-a109-463a-92bd-f23452502dda, deployment 584770c0-6b58-4e21-91e5-68339f7b81c0, independently verified100% at 2026-09-08T12:18:10.815529Z. Nine fix-scoped commits deploy U16–U19: compact Reports filters/view/default USD/tabs/summary removal and persistent Reset; plain Sales badges and compact print column; Branch product action menu replacing column; TRF-only references. Frontend325/325 at321542b7 plus focused Reset regression/types/final build at6dbb8a8e, i18n, dry-run and independent reviews passed. No backend source or migration changes; previous F69/F70 remain live. Browser-emulated Reports320/375/390/1280 and keyboard passed; no physical-iOS guarantee.
+
+All100 tasks preserved. F71 final sync correction c4d8295e awaits independent mounted re-review. F72 is assigned to Sol repair after independent type/permission/i18n/retry findings; not live. F73 transfer receipt plan active. F46/F57 local gates/native reversal proof passed, migrations0136/0137 remain local. F65 apply/history work continues; direct Remove unfinished. Earlier dated status paragraphs below are historical.
+
+## Latest verified deployment — September 8, 11:47 UTC
+
+LIVE **2a6f1a40b4e9a34462f5a58d3582b68e5685d4c0**, Worker dc748caf-9828-44ac-af38-6b48143b3f22, deployment aa931baf-bd3d-461f-8fb3-ededfa677461, independently verified100% at 2026-09-08T11:47:13.995546Z. Four fix-scoped commits,21 paths; frontend325/325, both typechecks/i18n/build/dry-run and focused transfer/search tests passed. No migration. Shop↔Warehouse transfers now allowed under exact canonical identity, permissions, reason and stock/lot guards; reverse Undo/Redo passes; explicit-lot race rolls back. Warehouse sales remain prohibited. Indexed Products sibling lookup preserves tested semantics and improves local measured query work. No full production search latency claim.
+
+All100 tasks retained. F73 discovered transfer receipt/audit retry gap is separate follow-up. F71 Library mounted review still requires sync-event consumption repair. F72 independent review blocked prior candidate on type, permissions, duplicate/retry and i18n; Sol repair owner assigned. U16 reports, U17 Sales status/column, U18 Branch product actions and U19 TRF suffix candidates prepared, not live. U20 broader device layout coverage remains open. F46 native independent11-case Apply/Undo/Redo passed; F57 combined package checks passed, both still awaiting separate release/migrations0136/0137. F65 phased apply/history implementation continues; direct Remove remains open. Earlier dated statuses below are history.
+
+## New transfer, search and responsive requests — September 8
+
+Production remains923bc28b at100%. All99 requests retained; new F69–F72 and U16–U20 added. Transfer Shop→Warehouse and Products/Library search speed take priority. Reports, Sales, Branch and transfer-reference layout changes are separately tracked. Customer replacement context is being clarified before changing identity/history. Screenshot is evidence of layout, not a separate instruction source.
+
+| F69 | Shop to Warehouse transfer fails; both canonical transfer directions must work with branch/lot identity and permissions | Priority investigation | Architect tracing transfer UI/API/stock/lot authority before bounded fix. |
+| F70 | Products name/barcode search is too slow | Priority investigation | Measure client request flow and backend query/count/index cost; preserve leading-zero and family semantics. |
+| F71 | Library image search is too slow | Priority investigation | Measure search, usage joins, count and asset lookup; preserve permissions and deletion protection. |
+| F72 | Customer title actions: replace wrong customer versus edit current customer | Clarification pending; code trace next | Confirm sale association versus Contacts profile before destructive identity changes; preserve unrelated transactions. |
+| U16 | Reports compact filters and navigation per owner screenshot | Design trace active | Remove repeated summary prose; move report view into filters; white high-contrast filter/smaller Show; simplify Previous period/estimated profit/basis controls without financial changes; default USD without App Setting option; contain Excel filters; horizontal Payment methods/Couriers/By reason/Expenses by type buttons below filters. |
+| U17 | Sales plain-text colored statuses and compact print/actions column | Queued | Remove icons from Not Paid/Awaiting Delivery/return statuses; use readable colored highlights; print near three-dot menu, release unused column width. |
+| U18 | Branch product section has redundant actions column | Trace assigned | Remove unused actions column while retaining necessary reachable actions. |
+| U19 | Transfer reference should show only TRF identifier | Trace assigned | Remove redundant Transfer suffix from reference column. |
+| U20 | Responsive layout in iOS PWA and desktop device-toolbar emulation | Open; verify affected surfaces | Verify viewport containment, side margins, compact filters and horizontal tabs at phone and desktop widths; distinguish app defects from browser tooling problems. |
+
+## Latest verified deployment — September 8, 10:03 UTC
+
+LIVE **923bc28b498d3bdadadd225d756f606c4518a0a3**, Worker 2a28d01e-cb7a-49cf-bdcd-641cdc8aaf64, deployment 4a7bb7bb-439d-4b40-a920-7337a5f4ccd6, independently verified 100% at 2026-09-08T10:03:56.287246Z. Eight fix-scoped commits, 26 paths, frontend 325/325, both typechecks, i18n, affected lot/permission/atomic tests, build and dry run passed. No migration. F66 per-product close/minimize/draft lifecycle, F67 Add/Remove/Set quantity wording and signed review, F61 inactive-positive-lot coverage are deployed. Original branch-picker screenshot follow-through remains open.
+
+All 90 requests retained. Integration a28868b0 includes current live patches plus independently reviewed F46 native finalizer and F57 query fixes; combined gates running, migrations 0136/0137 still local. F65 preview-only stage is not complete: initial security review disagreed with functional certification on expiry/retention and detail fanout. Owner repair 1f371c03 awaits exact re-review. Corrected phase2 design conditionally approved for implementation with atomic per-member receipts, original-group economics, bounded responses and reversible partial history. Direct Remove remains required. All other historical evidence, production merge, offline, camera, UI and external-fact tasks remain in the full register.
+
+## Latest verified deployment — September 8, 09:02 UTC
+
+LIVE **a5a4162ff8312114c6137fb354c759fde2b5b9d7**, Worker 67453e45-af2b-40f1-819f-737abe88e8e4, deployment eb5c2f2e-35af-4735-974d-81aa86a171a2, independently verified 100% at 2026-09-08T09:02:12.05078Z. Fifteen fix-scoped commits, 28 approved paths, frontend 323/323 and backend 293/293, types/i18n/build and 303-asset dry run passed. No migration. Includes explicit edited Khmer, F61 atomic Shop remainder guards, F62 clean save/close lifecycle, F63 atomic revoked-device reset and approval cap, F64 existing-product scanner, first F66 Fast Stock X/minus fix and F68 confirmation containment. This supersedes earlier candidate/live statements below.
+
+All 90 requests remain tracked in outputs/khmer-review-20260908/Current-status.md and task-status.json. Next: verified per-product F66/F67 through caeaa314; F61 inactive-known-lot coverage 02d9e786 under review; F46 native finalizer 0410c7f5 now completes 11-case Resume but independent Undo/Redo remains; F57 native query repair verified, not deployed; migrations 0136/0137 remain local. F65 backend/frontend N-member review lanes active, apply/direct Remove still required. F55 runtime, remaining production duplicate merge beyond 8 cases, historical/contact evidence gaps, hardware camera validation, broader PWA/UI coverage, financial census and external business/image exceptions remain open. Telegram rotation is owner-reported; do not repeat it merely from an old pending note.
+
+## Checkpoint candidate and stock follow-ups — September 8, 08:30 UTC
+
+Live remains73fd7dc1 at100%. Candidate b21c2e7a in bos-release-owner-functional-20260908 includes only explicit owner Khmer edits, F61 guarded Shop remainder, F62 save-clean-before-close, F63 atomic device reset/cap, F64 existing-product scanner, first F66 FastStock X/minus separation and F68 shared confirmation containment. No migrations. Focused tests and independent security/browser reviews passed; full package gates/build running. F61 inactive-positive-lot display overstatement is safe-server-rejected and has a follow-up. F46 preview is repaired but actual apply remains history_pending after case0, so release is held. F57 native query fix independently verified; F65 multi-row merge/remove contract refinement and F55 offline implementation remain separate.
+
+All90 tasks are retained in Current-status.md/task-status.json. New owner wording overrides prior X/minimize exceptions.
+
+| ID | Request | Current state | Next step |
+| --- | --- | --- | --- |
+| F66 | Stock actions: X closes with Discard / Back / Minimize; minus preserves directly | Fast Stock fix in checkpoint; per-product candidate under review | First fix23bc009e replayed01f41313; second136c8464 under independent review. |
+| F67 | Add/Remove/Set quantity labels, signed delta, before/after and reason | Implementation pending in stock UI lane | Add+n; Remove-n; Set target total with before/after and signed difference. |
+| F68 | iOS PWA responsive containment with left/right margins across pages/dialogs | Shared confirmation repair in checkpoint; wider sweep open | 562d6608 verified actual browser320/375/390/1280 and nested dialogs. |
+
+## Owner follow-ups — September 8, returned workbook and urgent functional fixes
+
+Live remains 73fd7dc1 at 100%. Returned workbook compared by key: 15 edited review entries, 11 source updates and four already-equal no-ops; four whitespace-only fragment edits retain required separators. Source commit5832b05 integrated48acb624, not deployed. Full untouched Proposed Khmer column approval question remains pending; explicit edits proceed.
+
+P07: owner reports Telegram bot token already rotated. Independent dated rotation evidence was not located; do not re-rotate solely because the old ledger says pending. P05: owner reports most images are first-party photography; remaining provenance review concerns exceptions, not a blanket claim that shop photographs lack rights.
+
+F57 native D1 independently reproduced a compound-SELECT failure in the indexed candidate. Root owns bounded native-query repair. F55 corrected plan completed, runtime implementation remains pending. F46 native fingerprint repair continues separately.
+
+| ID | Request | Current state | Next step |
+| --- | --- | --- | --- |
+| F61 | Stock-positive POS product blocked by received-date picker; branch choices missing | Candidate under independent review | Verify legitimate Shop unlotted remainder, recorded lot identity, atomic quantity guards and explicit branch choices. |
+| F62 | Save still leads to Back/Discard prompt | Implementing | Clean-before-close lifecycle across product hosts and completed sessions; retain unsaved outer session after item queueing. |
+| F63 | Reset revoked device history so it can request approval again | Candidate awaiting security review | Admin reset must return unknown; next sign-in requires normal approval and cannot restore sessions. |
+| F64 | Existing-product add/create session needs barcode scanner | Candidate awaiting integrated checks | Reuse scanner, leading-zero search and same-session duplicate guard. |
+| F65 | Conflict Merge/Remove actions and owner-defined field rules | Contract review; implementation pending | Direct Remove independent of barcode match; Merge transfers stock, distinct nonzero mean cost, max prices, explicit barcode/category/brand/unit choices, supplier/date history retained. |
+
+## Khmer review workbook completed — September 8
+
+F60 is complete as a review deliverable: outputs/khmer-review-20260908/Business-OS-Khmer-review.xlsx contains 259 effective-string proposals, all 6145 source entries (5573 effective keys; 572 overridden copies), and all 82 task statuses. Rendered Khmer was visually checked; exported XLSX ZIP/XML, row counts, tables, frozen headers, decision validation, placeholder parity and exactly two Owner approved decisions passed. The remaining 257 proposals are not applied. F59 exact terms are already live in 73fd7dc1 at 100%, with no migration. Current-status.md provides the full readable status snapshot. F46 real D1 repair, F57 independent indexed-query review and F55 corrected offline plan remain open; no new release is claimed here.
+
+
+## Latest verified deployment — September 8, 06:10 UTC
+
+**LIVE73fd7dc15801b3f1bc6eb5c40cd115a6b76edf1f**, Worker a38779e9-32c9-4a12-8aab-e9b8e380cf05, deployment942bfcae-e9f5-4ea7-9426-12c713494295, independently confirmed100% at2026-09-08T06:10:49.221845Z. Five fix-scoped commits deploy compact mobile Sales U13–U15, F56 expense version/zero-row guards, F58 frontend loading boundaries, and F59 exact Khmer labels ថ្លៃដឹកដើម / ថ្លៃដឹកដើមថ្មី. Frontend322/322, types/i18n, expense races6/6 and fees10/10, build, emitted chunk checks and303-asset dry-run passed. No schema migration; F46/F57/0136/0137 are excluded.
+
+Open: F46 actual D1 preview compound-SELECT repair plus repeated real browser/combined gates; F57 indexed promotion-image lookup final independent review; F55 offline recovery plan correction/implementation; production duplicate merge after8cases (browser access pending); ambiguous historical/contact evidence; phone-camera validation; financial census; browser warning attribution; remaining U01–U12 UI/minimize work; legal/business/image-rights facts and bot token rotation. F60 Excel review of6145 source entries,5573 effective keys and572 overridden copies is in final formatting/validation. Broader Khmer proposals have not been applied.
+
+
+## Active checkpoint and Khmer review — September 8, 06:04 UTC
+
+Production remains4e576eaa at100%. Small checkpoint73fd7dc1 is in final build/dry-run verification after322/322 frontend files passed. It contains ONLY compact mobile Sales U13–U15, F56 expense concurrency/zero-row handling, F58 loading boundaries and F59 the two approved Khmer labels (ថ្លៃដឹកដើម; ថ្លៃដឹកដើមថ្មី). No schema migration. Five fix-scoped commits preserve provenance.
+
+F46 is held: actual local Worker/browser preview of11 cases failed with D1 compound-SELECT limit before writes. Expense_version_guard owns a bounded query repair; the repeated real D1/browser check remains required. Broader integration gate initially288/294 backend and319/324frontend; five stale backend harnesses and three frontend source contracts repaired, native subtotal rerun3/3passed, two new received-date labels corrected to existing dictated vocabulary. This is not a passing combined release claim. Migration0136 remains local only.
+
+F57 canonical promotion-image references and Library display have a final indexed-query candidate513b57f1, migration0137 local only, independent review pending. F55 offline recovery plan requires signed server scope, safe generation/version separation, correct reset boundaries and legacy reconciliation before implementation. No created_at heuristic or blind replay is approved.
+
+F60 Excel wording review covers6145 source leaf strings:5573 effective UI keys and572 overridden source copies. Four original batches plus705 nested entries are being consolidated. Broader wording is proposal-only; only the two F59 terms are approved for code changes. The workbook will include all82 task entries and current states. Full review/status artifacts are in outputs/khmer-review-20260908.
+
+
+## Latest verified deployment — September 8, 04:57 UTC
+
+**LIVE: 4e576eaad290d158f4a388ef1652729bb103e720**, Worker c7b6a310-efb9-4106-b8cc-f0a56edf03ae, deployment4adb0e4d-6423-4abb-9d1f-a78f66115362, independently confirmed100% at2026-09-08T04:57:24.418726Z. F53 permission-refresh coalescing/session generation, F54 shared HTTP cache ownership/server precedence, and U05 positive profit headline colors are deployed. Frontend320/320, both types, i18n5384/566sources,1103-module build and300-asset dry-run passed. Backend source/migrations exactly match previous livec2eb; no migration. Nine individual commits preserve author/date/messages; source cutoff599f2b70 differs only by the eight approved private evidence exclusions.
+
+Still active: F46 backend budget verification and combined browser/gates/migration0136 release; U13–U15 mobile Sales independent review; F55 offline quarantine/fencing plan review; F56 expense optimistic-write guard; F57 promotion image-reference protection with frontend usage display; F58 isolated loading-boundary candidate integration. Production duplicate merge remains eight completed cases and browser access pending. Legacy evidence cleanup, hardware camera validation, financial census, warning attribution, remaining UI/minimize, legal/business/image-rights facts and token rotation remain open as detailed below. Earlier deployment/current paragraphs are historical; this entry supersedes them.
+
+
+## Current continuation — September 8, 04:46 UTC
+
+Live remains c2eb9d57 / Worker3931ea55 at100%. The next small release from source599f2b70 includes F53 permission refresh, F54 HTTP cache ownership and U05 positive profit styling. Final frontend320/320, types, i18n, build and local dry-run passed; release provenance/parity is being finalized before deployment. Backend source and migrations are unchanged from live.
+
+F46 remains separate: backend d7775ee8 is frozen for independent heavy-manifest budget verification; migration0136 and backup/reset integration are locally reviewed only. Frontend ed7f7ff9 has one reproduced remaining blocker: changing a visible stock choice after confirmation can disagree with the frozen Resume request. Sales is fixing and Media independently reviewing it. U13–U15 mobile Sales candidate cf3d4d23 is in independent review.
+
+F55 read-only reproduction and plan are complete: origin-scoped offline quarantine, server generation fencing, privacy-filtered recovery and foreground/service-worker replay ownership need implementation. No production loss or backend authorization bypass was demonstrated. Do not erase or blindly replay pending work across accounts/runtime generations.
+
+New source-confirmed candidates from the separately authorized overhaul review: F56 expense edit checks updated_at before an UPDATE that does not include that version in its predicate; F57 library image-usage/delete guard omits promotions.image_path. Neither is claimed repaired or observed in production. F58 isolated frontend chunk-policy candidate57854fd6 reduces measured asset loading and removes static cycles; exact independent certification/integration remains pending, excluded from the small release.
+
+Other open work remains in the owner register: remaining production duplicate merge (eight completed cases; browser access pending), legacy identity and ambiguous historical evidence cleanup, actual phone-camera testing, F52 historical financial census, browser warning attribution, remaining UI/minimize items, business/market/image-rights facts and Telegram token rotation. Existing completed releases and data-repair evidence are preserved.
+
+
+## Freshness follow-up candidate — September 8
+
+Production remains c2eb9d57/Worker3931ea55,100%. Next isolated release includes F53 permission-refresh coalescing and session-generation isolation (independent review PASS); F54 HTTP invalidation/in-flight ownership and authoritative server-cache precedence (69 focused checks plus512 independent timing schedules); U05 selected positive profit headline stays green in both themes. Source b2299a2b is integrated, not deployed. Existing callbacks that write persistent queryCache/IndexedDB and already-started caller results are outside F54's proven shared-HTTP-cache boundary. No backend source or migration changes in this follow-up.
+
+F46 is NOT in this candidate. Schema/backup/reset are independently approved locally; backend/UI parity still active. Required corrections: actionable-only manifest with blocked cases shown separately, exact same-request manual resume, changed-value markers after re-preview, complete image counts/primary indication. No incomplete F46 runtime or migration0136 is deployed. U13–U15 mobile Sales layouts are active separately.
+
+> **Latest deployed release: c2eb9d57** — independently confirmed Worker 3931ea55-3f66-459e-823d-3339979bd441,100% at 2026-09-08T03:37:12.286363Z. Explicit contact/POS duplicate decisions, disabled Warehouse/stale-lot picker safeguards, canonical branch CRUD/review/undo/reset/transfer guards, general/dated stock-import authority, corrected export breakdowns, bilingual branch setup guidance and matching resolved-error cleanup are live. Backend291/291, frontend319/319, both types, i18n, build and dry-run passed; real local browser and independent reviews passed. No migration. GitHub preserves31 individual commits.
+> **Remaining active:** F46 combined selected-conflict workflow (backend/frontend/backup/reset, migration0136 local only); F53 permission event coalescing; remaining production duplicate merge beyond eight cases (browser access pending); unresolved historical/contact identity evidence and deferred UI. Earlier status paragraphs below are history, not current deployment claims.
+
+
+## Functional follow-through — September 8, next checkpoint active
+
+Production remains dfb8932e (Worker6abf6ffa,100%). Approved canonical branch administration/reset/transfers, guarded general/dated imports and export breakdown corrections are integrated through2766eb52. The provisional public candidate is dbdb24b7, pending final follow-ups; it is NOT deployed.
+
+Exact-c09 Contacts/POS browser passed explicit duplicate decisions, blocked shared-phone/membership creation and disabled Warehouse. It found a stale resolved-error banner; fix1f9dd5a4 is in independent review and exact-browser validation. Full combined frontend317/318 passed; sole stale export-source assertion fixed and focused rerun passed. Frozen combined backend285/291 effective pass; six known stale test/fixture/loader failures, receipt already fixed and remaining five under correction. Do not label the combined gate green until these checks pass.
+
+F46 runtime implementation is now ACTIVE (supersedes earlier not-started notes): dedicated backend owner conflict_batch_impl, frontend owner sales_impl, backup/reset owner media_stock_impl, isolated from this checkpoint. Migration0136 is reserved locally for durable selected-conflict run/case receipts; it has NOT been applied to production. Combined preview/one confirmation, scoped per-pair stock choices, atomic audit/undo and truthful continuation remain acceptance requirements.
+
+Production product merge remains eight cases and browser access pending. Functional fixes still precede deferred UI. Original dirty workspace and historical evidence remain preserved.
+
+> **Latest deployed release: dfb8932e** — 100% traffic at 2026-09-07T23:41:06.03494Z, independently confirmed as Worker 6abf6ffa-5909-4651-8580-c17764d68d6d. Contact-import explicit targets, atomic new-customer signup, checkout and sales-import product/branch/lot guards are live. Backend 285/285, frontend 316/316, types, i18n, build and dry-run passed. No migration. Earlier releases remain included. Older dated notes below are history, not current production status.
+> **Active:** F47A explicit Contacts/POS choices and Warehouse/stale-lot picker guards integrated at c09c707a, final gates/browser pending. Canonical branch administration/reset/transfer and other stock-import boundaries remain under repair/review. Export breakdown edge cases remain under repair. F46 combined conflict workflow is now active in isolated backend/frontend/backup lanes; deferred UI remains queued. Production duplicate merge remains eight completed cases; browser connector access is pending.
+
+> **Latest deployed release: 4afe9825** — 100% traffic at 2026-09-07T22:50:59.969774Z, independently confirmed as Worker 4671e0fd-7fc7-40ca-bf58-a576e7802b04. This adds the requested Telegram shift arrangement, Closing cash wording, truthful per-currency differences, four Sales form-label fixes, and removal of hidden supplier creation. No migration. The earlier Contacts/merge release and completed historical branch repair remain included.
+> **Still active:** explicit contact choices and import ambiguity; canonical branch and lot checks across every writer; production duplicate merge (eight cases completed, browser follow-through blocked by connector timeout); remaining UI queue and evidence-dependent cleanup. The owner task register below lists every request and state.
+
+> **LATEST RELEASE LIVE: da5c8b02**, Worker **a49ba8c2-1192-4700-b626-564a72e54938**, 100% at **2026-09-07T20:27:13.051562Z**, independently confirmed by Cloudflare. Migration0135 added only two indexes; all59 undo snapshots,233 action rows and existing schema objects preserved. Contacts canonical guards/phone formatting/membership/atomic merge and bounded product merge corrections deployed. Final frozen browser20-case continuation+undo passed. Live browser follow-through/production merge pending because connector timed out.
+> **Intentional rules:** exactly Shop/Warehouse; only Shop sells; Warehouse stays visible disabled in sale pickers; product+branch+lot identity is mandatory; Not Paid counts in canonical revenue; daily shift prompt and report-only cash registration remain. New F51 enforcement gaps are assigned, not claimed fixed. Negative revenue is guarded; genuine negative profit remains auditable rather than concealed.
+
+> **Current status — September 8, 02:40 local:** Application production remains **560bfbcb**. Historical Shop metadata repair is complete (4,255 fees, 22 sales, 56 sale lines; 44 groups, 46 audits, zero violations). Next Contacts/merge release candidate **da5c8b02** has independent correctness approval; migration 0135 and final rollout remain. Backend full sweep 283/283 passed; frontend 313/314 initially, remaining moved-code assertion corrected and focused rerun passed.
+> **New owner requests tracked:** F47 cross-contact duplicate prompts/guards; F48 Closing cash / សាច់ប្រាក់បិទវេន, Not Paid wording and missing difference across Telegram/reports/history; F49 deprecated browser API attribution; F50 unassociated form labels. Parallel agents assigned. These do not delay the already-reviewed release.
+
+> **Historical branch repair COMPLETE September 7, 17:39 UTC:** 4,255 expense rows, 22 sales and 56 sale lines corrected to Shop. Independent full postcheck: 44 applied groups, 46 exact audits, zero violations. Ambiguous driver/sale-link facts remain unresolved. Current app remains560bfbcb; next Contacts/merge release active.
+
+> **Stability release LIVE September 7, 15:36 UTC:** 560bfbcb, Worker03aa25a5-d482-45e9-9459-727b92ccf06c at100%. F41 polling/retry, F44 Not Paid wording and F45 WebSocket reconnect/auth cleanup shipped. Live EN/KM Sales and matching assets verified. Contacts, deeper merge and historical data correction remain active.
+
+> **Contacts additions F42–F46 and mobile U13–U15 recorded:** supplier/customer duplicates, phone formatting, membership lineage, Not Paid / ប្រាក់ជំពាក់ wording override, WebSocket attribution and bulk conflict review. Functional work continues; current states are in the owner register.
+
+> **Third functional release LIVE September 7, 13:14:39 UTC:** 02eecbe3833b,
+> Worker c3a21a40-544b-4678-bacd-bc50441df8a1 at 100%. F33/F36/F37/F38 shipped.
+> Migration 0134 preserved all 15,106 Sales rows and prior schema objects.
+> Live smoke/duplicate merge follow. Historical correction has not committed;
+> both failed attempts left all 4,333 target rows unchanged with zero audit rows.
+
+> **Delivery addition deployed September7 11:10:18 UTC:** c475e637d197,
+> Worker d5aeeb82-cb0d-4047-8abf-8e96ba17f602 at100%. Migration0133 preserved
+> all prior amendments. Live Sales/Records verified after network recovery.
+> F33 creation snapshots, F36 retry visibility and F37 large duplicate preview
+> remain active; historical metadata repair and production merge remain pending.
+
+> **September 7 first functional release deployed:** 821efc94ce7a,
+> Worker 498efadb-f833-471d-a8b7-b4326950bd26 at 100%, 09:54:13 UTC.
+> Migrations 0128–0132 applied and preservation checks pass. 306 frontend files,
+> 274 backend suites, types/i18n/build and frozen browser smoke pass.
+> Live Sales bootstrap timeout is being diagnosed (F36); delivery addition F32
+> follows separately. Historical correction/duplicate merge remain pending.
+> Current task register below supersedes older undeployed takeover statements.
+
 # progress.md — business-os
+
+> **Current owner task register:** [all requests, additions, owners and release states](docs/fleet/2026-09-07-owner-task-register.md).
+> September 7 latest addition F32: allow driver, delivery fee and actual cost to
+> be added to an existing sale that originally had no delivery. Sales owns the
+> fix with independent review. Functional deployment first; UI remains queued.
+
+> **September 7 owner additions:** next verified checkpoint deployment is now
+> requested; new GitHub commits must each describe an individual fix. Added
+> same-session duplicate warnings, sale-row eye removal, branch versus total
+> stock-alert refresh/parity, draft-preserving minimize controls, permissions,
+> and consistent chart/stat revenue definitions. Sol implementation lanes and a
+> Terra scope review are assigned in the isolated takeover ledger. The existing
+> API-token wrapper now authenticates successfully; final certification remains
+> pending. No production mutation or deployment has occurred in this takeover.
+
+> **Active September 7 Codex takeover:** The user requested completion and
+> reconciliation of all Claude lanes plus sales, stock, products, reports,
+> mobile UI and public-portal policies. Work is isolated in sibling
+> `bos-codex-takeover-20260907`, branch `codex/takeover-20260907`, based on
+> `ea9f0d1b` (contains previous Codex integration and Claude checkpoint 2).
+> Original dirty main and every Claude worktree remain preserved. Initial
+> audits are in `outputs/takeover-20260907/`; the active implementation ledger
+> is the sibling's `docs/fleet/2026-09-07-codex-takeover.md`. Seven bounded
+> implementation lanes are running; no combined candidate is certified yet.
+> Cloudflare API confirms Worker `6c3f9a35-9b38-4f00-bc7d-bae28bb0ef76` at
+> 100% traffic. Read-only production census covered 15,096 sales and 36,340
+> lines; exact anomalies are preserved for evidence-based correction. No
+> deployment, remote migration or production mutation by this takeover.
+
+> **Active Sep 7 wave — camera scanner + public portal:** Read-only swarm evidence
+> is reconciled for the latest request. N55 owns camera permission lifecycle and
+> scanner completion: the browser/OS permission cannot be forced to “Always allow”,
+> but the app must request only from an explicit action, avoid retry loops when
+> permission is denied, stop every track/decoder, and close after any successful
+> camera/ZXing/photo/manual detection. N56 owns the attached public pager visual;
+> the image is ambiguous about removing versus moving the `50` selector, so the
+> provisional implementation keeps the bounded selector and places it before
+> Back, then page indicator, then Next; owner clarification remains recorded.
+> N57 owns public scroll ownership: the public route must set/clear its document
+> marker, use the document as the only vertical page scroller, and retain only
+> intentional horizontal rails and modal/filter scroll areas. Live-site checks
+> confirmed current production can scroll the document on About, Products, FAQ,
+> and Beauty Assistant, but source/deployment lineage differs. The scanner, pager,
+> and public scroll fixes are now integrated and locally certified; no production
+> action, commit/push, or deployment has been authorized.
+
+> **Sep 7 wave status:** COMPLETE locally. Scanner completion is guarded against
+> duplicate and stale callbacks, all successful detection paths close the modal,
+> and denied permission does not retry. The public pager is provisionally ordered
+> `[page size] [Back] [page / total] [Next]` on both public catalog paths, and
+> standalone/legacy public routes now establish and restore the document-scroll
+> marker. The attached image still needs one owner decision: keep the `50`
+> selector moved before Back, or remove that selector entirely. Focused tests,
+> the full frontend utility chain, frontend typecheck/i18n/build, Cloudflare
+> typecheck, 162 Cloudflare script tests, and local/live browser probes passed.
+
+> **Active Codex continuation — September 5:** Production-usability work is in
+> sibling `business-os-v1-integration`, tracked in
+> `docs/fleet/2026-09-05-production-usability.md`. Bounded Sol lanes own product
+> draft reliability, shift lifecycle/ownership and floating UI, compact navigation,
+> date presets and sale-picker layering. Main coordinates/verifies; do not deploy
+> dirty main. This new round is not deployed. September 4 shift 1 remains open;
+> exact historical closing time is unresolved. Existing expenses already total
+> 150000 KHR; do not duplicate them or reapply historical sales settlement.
+
+> **Codex release checkpoint — September 5, 2026:** Production is verified at
+> `0ffc4bfcc4fd`, Worker `be276770-359d-4002-9d26-560fa5656d33`, 100% traffic,
+> from the deployed-lineage integration, not this dirty main checkout. Membership
+> defaults/authenticated lookup/eight-character new IDs, grouped bulk history/undo,
+> and bounded security/restore fixes are deployed. Migrations 0120–0122 applied.
+> Historical settlement: 89 sales fully paid/Completed, 100 receivables settled,
+> two source lines restored; zero unexplained settlement stock residual. The
+> earlier nine-unit stock incident remains unchanged, per the no-stock instruction.
+> All 200 frontend files, full chain, 209 backend suites and builds/typechecks pass.
+> Control-plane release is confirmed; Cloudflare browser challenges blocked final
+> live API/build probes. Authenticated flows and Telegram receipt remain uncertified.
+> Full provenance/recovery and Part 607 are in sibling `business-os-v1-integration`:
+> `docs/fleet/2026-09-05-membership-bulk-release.md` and
+> `docs/fleet/2026-09-05-settlement-result.md`.
+> This checkpoint was added without staging or rewriting existing shared changes.
 
 The control document for this project. **Read this file top-to-bottom at the start of
 every session**; it is deliberately kept short enough that this is realistic.
@@ -3319,6 +3774,272 @@ if it's abandoned, revert it so the tree reflects reality.
 One line per open item; the full text lives in the master-plan phases below (same
 IDs) or the section linked. Statuses: **[~]** = in progress / partly done,
 **[ ]** = not started.
+
+### Sep-6 task wave — shift cash, compact inputs, and historical stock correction
+
+These items were registered on 2026-09-06 from the owner's latest notes. They
+are deliberately separate from the older S4 queues and from already-shipped or
+candidate-only work. The director owns reconciliation: each implementation lane
+must return a durable evidence envelope (base/head/dirty state, files, focused
+tests, risks, and not-done scope), then an independent verifier must challenge
+it before it can move to DONE.
+
+**[~] N43 · Shift open/close cash semantics and layout.** Audit the current
+shift kernel, route, summary, close flow, reports, expenses, offline behavior,
+permissions, and both currency paths. The UI contract to validate is:
+`Available Amount for shift open: <KHR> Riel + <USD> USD` with the numeric inputs
+immediately before their currency labels; at close show `Final Amount (Closed):
+<KHR> Riel + <USD> USD` and `Additional used: <KHR> Riel + <USD> USD`. A counted
+close of zero must be valid; opening-register insufficiency must not silently
+disable closing or invent a sale/expense. Determine and document the exact
+sign/meaning of “Additional used” before editing: it must reconcile the
+operator's cash explanation without changing the report-only rule for register
+breakdown. Preserve registered opening USD/KHR and final USD/KHR in shift
+reports. Keep actual business calculations based on sales, COGS, profit,
+expenses, delivery, and credit rules; do not make a visual registration
+breakdown a second accounting ledger. Add focused backend parity tests and UI
+tests, including blank/zero, KHR-only, USD-only, insufficient opening cash,
+additional-used, duplicate-submit, permissions, and report serialization.
+
+**[~] N44 · Smart, field-specific compact input sizing.** Inventory every
+shared input/control and the product, stock-in, POS, sales, returns, branches,
+contacts, reports, and shift surfaces. Define one field policy from observed
+data: barcodes must remain fully readable with leading zeroes and many digits;
+names, brands, categories, suppliers, and notes must not truncate or wrap
+destructively; phone inputs should fit the normal roughly-ten-digit value; USD
+prices should fit values like `nnn.nn`; USD cash should fit the normal `nnnn`
+range; KHR amounts must fit the larger observed range such as
+`nnnnnnnn.nn`. Separate CSS width/scroll behavior from validation maxLength so
+visual compactness never discards data. Verify keyboard, paste, scanner,
+Khmer/i18n, 375px/768px/desktop, iOS PWA and Android PWA behavior. Add a
+focused contract test for widths, input modes, and preservation of long values.
+
+**[~] N45 · Sep-3–Sep-6 historical warehouse-sale audit and correction.**
+Read-only first: identify the exact business-date window using the canonical
+business timezone, sales and sale lines, statuses/returns/cancellations,
+inventory movements, branch/warehouse identifiers, and current Shop/Warehouse
+quantities. Determine whether any sale consumed Warehouse stock when the rule
+requires Shop stock. For each affected line, design an idempotent correction
+that restores Warehouse where it was wrongly decremented, transfers only the
+needed quantity to Shop before the sale is treated as Shop stock, avoids double
+counting existing movements, and records every stock movement in the Stock
+Change surface with actor/reason/reference. Do not rewrite history or run
+remote D1 writes until the exact target set, pre/post invariants, rollback or
+compensation path, and production authorization are explicitly reviewed. The
+future guard must enforce Shop-only selling and the transfer-first prompt.
+Existing expenses/settlements must not be duplicated.
+
+**[ ] N46 · Reconcile the 2026-09-06 expense note before any data mutation.**
+The listed expenses are 55,000 + 28,300 + 6,000 + 5,000 + 5,000 = **99,300
+KHR**, while the note says `993000៛`; and `64,700 + 34,600 = 99,300`. Preserve
+both the literal note and this arithmetic finding. Status is **needs owner
+confirmation** for whether `993000` is a typo for `99300`; no expense or shift
+record may be created or changed from this note alone.
+
+**[~] N47 · Coordination and certification ledger.** Track all active,
+inactive, uncommitted, committed, candidate-only, deployed, blocked, and
+owner-gated lanes from the current repository ledger and the Claude/Fable
+handoff notes. Do not claim recovery of conversations that are not present in
+the repository. Reuse agents only when ownership is disjoint and relevant;
+never overlap write paths. Every completed lane gets a second-pass adversarial
+review, then the main agent performs the final reconciliation and full affected
+gates. Production deployment, remote migration, and historical D1 correction
+remain explicitly gated actions.
+
+**[~] N48 · Canonical accounting convergence across every consumer.** The
+second independent accounting review confirmed that current `main` still has
+dashboard/compatibility, Telegram, payment-method, customer, product,
+inventory, and export surfaces using `total_usd` or line totals while the
+analytics kernel uses a different recognized/net formula. Build one explicit
+status/discount/refund/delivery authority and make every consumer use it. First
+lock the Credit rule: the owner's ruling says Credit is positive in revenue and
+profit and is labeled `Credit`, while current main/tests still exclude
+`awaiting_payment`. Reconcile item-level discounts in dashboard/export fields,
+linked versus unlinked courier cost, sale-date versus return-date reporting,
+Telegram, receipts, imports, offline replay, and public redaction. Add seeded
+mixed-status parity fixtures; do not accept source-shape tests alone.
+
+**[~] N49 · Real browser/PWA certification and accessibility foundation.** The
+independent UX lanes confirmed no Playwright configuration/dependency and no
+reachable local smoke server, so source-contract tests are not browser proof.
+Provide a safe local authenticated fixture or explicitly document the approved
+manual/browser harness, then test 320/360/375/390/768/1024/1280px, iOS/Android
+PWA metadata, offline/update flows, Khmer rendering, listbox keyboard semantics,
+44px touch targets, long-name/barcode visibility, phone/price input modes, and
+loading/error/success states. Remove or track the `user-scalable=no` decision;
+do not weaken data preservation to achieve compactness.
+
+**[~] N50 · Product identity merge contract — exact name plus barcode identity.**
+Refine and replace conflicting S4-17/S4-17b/S4-29 wording with one executable
+contract. A merge is allowed only when the product name is exactly the same
+(no fuzzy, case-folded, or trimmed-name expansion unless explicitly proven as
+the existing identity rule) and either the barcode is exactly the same or the
+only barcode difference is leading zeroes. Normalize the surviving barcode by
+removing only those leading zeroes, with an explicit all-zero/empty-barcode
+rule. If the normalized barcodes are genuinely different, keep separate child
+rows under the exact-name group; do not merge them merely because the names
+match. Merge all per-branch quantities additively while preserving batch/lot
+ownership and all historical links. Resolve USD and KHR independently: zero is
+missing when another value exists; selling and wholesale use the highest
+recorded nonzero value; cost uses the mean of distinct recorded nonzero costs,
+or the sole nonzero value when zero is the only alternative, and remains zero
+when every value is zero. Pin precision/rounding and duplicate-cost behavior
+with tests before implementation. No product, sale, return, movement,
+supplier, received-date, category, brand, unit, barcode, batch, or alias link
+may be dropped.
+
+**[~] N51 · Existing product-group survey and correction manifest.** Survey
+all exact-name groups for exact and leading-zero-normalized barcode matches,
+including parent/child rows, inactive rows, duplicate costs, zero prices,
+branch/batch stock, sales, returns, transfers, supplier and received-date
+links. Produce a dry-run manifest with survivor, normalized barcode, merged
+quantity, price/cost decisions, linked-record counts, and quarantine reasons.
+Production writes are gated: do not merge or delete rows until the exact
+manifest is reviewed and approved. Every applied group needs a unique case key,
+append-only reversal snapshot, pre/post stock/link invariants, and visible
+Stock Change/audit history.
+
+**[~] N52 · Product-merge link propagation and child-row parity.** Verify the
+merge path and every consumer after identity consolidation: POS/search/scanner,
+stock-in and imports, branches/products, transfers, returns/replacements,
+sales/sale-items, inventory movements, batches, supplier/received dates,
+category/brand/unit, reports/exports, offline replay, audit, and undo. Same
+name plus normalized barcode must resolve to one product identity; same name
+plus genuinely different barcode must remain independently selectable as child
+rows. Conflicts must prompt with a reversible “keep/link/merge” decision rather
+than silently overwriting fields. Add backend enforcement and focused parity
+tests for all link classes.
+
+**[ ] N53 · Product merge numeric-resolution and precision contract.** Pin the
+executable USD/KHR resolver before implementation: zero/missing versus an
+explicit zero, malformed and whitespace-only values, negative values, duplicate
+costs, distinct-cost averaging, sub-cent precision, and deterministic rounding.
+Selling and wholesale must independently select the highest valid recorded value;
+cost must exclude zero when a nonzero value exists, average distinct nonzero costs
+exactly as specified, and remain zero only when every usable value is zero. Add
+adversarial pure tests for one-zero/one-nonzero, duplicate costs, 4/5, 4/4/4/5,
+high-precision decimals, malformed input, negative-only input, both currencies,
+and all-zero input. No numeric coercion may silently turn malformed data into a
+valid business value.
+
+**[ ] N54 · Product merge safety kernel, complete links, and concurrency.** Make
+every server-side merge path enforce the same exact-name plus exact/leading-zero
+barcode rule; an arbitrary pair of active product IDs must not be mergeable just
+because the IDs exist. Reparent or explicitly quarantine every product-linked
+table and batch allocation (including returns, transfers, damaged/replacement,
+stock-row moves, RFID, promotions, and sale/return batch allocations), carry
+wholesale and all resolved fields, and make the operation atomic, idempotent, and
+compare-and-set safe under concurrent merge/undo. Preserve an append-only
+reversal snapshot and Stock Change/audit record; prove rollback on injected
+failure and prove no double stock movement or partial bulk merge. Add backend
+parity tests and a read-only link inventory before any production correction.
+
+#### Sep-7 identity swarm — independent lanes (reconciled)
+
+| Agent | Role | Scope | Status |
+|---|---|---|---|
+| Euler | feature planner | Owner-rule reconciliation and acceptance contract | **[x] complete; contract confirmed, boundary decisions remain** |
+| Zeno | business OS architect | Backend merge/link architecture | **[x] partial; unsafe arbitrary merge and missing links confirmed** |
+| Peirce | verifier | Price/cost/zero/rounding mathematics | **[x] complete; candidate math passes, edge cases remain** |
+| Ramanujan | verifier | UI grouping and child-row behavior | **[x] partial; candidate not integrated, import parity gap** |
+| Popper | security reviewer | Merge integrity, permissions, idempotency, undo | **[x] complete; P1 integrity blockers confirmed** |
+| Franklin | business OS architect | Import/offline/export/backup parity | **[x] partial; identity is not system-wide** |
+| Hilbert | reconciler | Commit, branch, and deployed-provenance reconciliation | **[x] partial; candidate/deploy lineage discrepancy** |
+| McClintock | security reviewer | Production dry-run survey and invariant plan | **[x] complete; manifest and mutation gates defined** |
+
+All are read-only and may not operate on production data. The main agent will
+reconcile their pairwise findings before allocating any writer. Their evidence
+was reconciled on 2026-09-07: the identity rule is not certified on current
+`main`, no candidate is approved for integration, and N53/N54 are required
+before an implementation lane can be considered safe.
+
+#### Sep-7 identity swarm — evidence reconciliation
+
+| Agreement | Refuted assumption / unresolved point | Disposition |
+|---|---|---|
+| All eight lanes agree the owner intent is exact name, exact or leading-zero-equivalent barcode, additive stock, highest selling/wholesale, and distinct nonzero cost averaging. | Current `main` still includes cost in the product-detail identity and S4-17/S4-29 plus A2 hardening are on separate refs or candidate lineages. | N50 remains implementation-pending; candidate ancestry must be proven before integration. |
+| Backend and security lanes independently found the possible-duplicates merge accepts arbitrary active non-group IDs. | Existence, active state, and permissions are not identity compatibility. | N54 P1: enforce identity/cluster validation server-side and test unauthorized pairings. |
+| Backend and security lanes independently found the merge fold updates only part of the product graph. | Returns, transfers, damaged/replacement, stock-row moves, RFID, promotions, and batch allocations can remain attached to the inactive row; wholesale is not fully carried/undone. | N54 P1: inventory the schema and reparent or fail closed; add rollback/link invariants. |
+| Math lanes agree on zero exclusion, maximum selling/wholesale, and cost averaging as the intended direction. | Precision order, negative-only values, malformed/whitespace values, all-zero barcodes, and leading-zero survivor threshold are not pinned; one candidate rounds values before averaging. | N53: pin fixtures and reject silent coercion before code integration. |
+| UI/parity lanes found the candidate covers many surfaces. | Candidate import planning still uses raw barcode detail keys; frontend merged rows can retain a non-canonical displayed barcode; backup/restore and offline replay do not enforce identity. | N52 remains open; add importer/export/restore/offline and displayed-barcode parity tests. |
+| Provenance lane reconciled refs and worktrees. | Current dirty `main` is not the same as the documented deployed/candidate lines; no production state was read. | No deployment or production correction claim; preserve dirty main and use isolated integration worktrees. |
+
+No source files, tests, migrations, production data, deployment, or remote state
+were changed by this swarm. The only changes in this checkpoint are the durable
+task/status records in this file and the session log.
+
+#### Sep-7 identity swarm — adversarial second pass (completed with evidence gap)
+
+The same eight agents were re-tasked to falsify their first conclusions rather
+than repeat them. Euler is rechecking the literal contract and boundary choices;
+Zeno and Popper are red-teaming the complete FK graph, authorization, atomicity,
+idempotency, CAS, and undo; Peirce is recomputing hostile numeric vectors;
+Ramanujan is tracing displayed-barcode and UI/import parity; Franklin is tracing
+backup/offline/export/report consumers; Hilbert is rechecking ancestry and
+deployment provenance; and McClintock is red-teaming the production manifest and
+invariants. This pass was read-only. One additional math envelope was visible and
+reconfirmed the candidate-only precision, negative-value, and current-main
+lineage exceptions. The other seven task turns completed without a surfaced final
+envelope, so their second-pass assertions are deliberately not counted as new
+evidence; their first-pass envelopes remain the recorded basis. A silent task
+completion is not a verification pass.
+
+| Lane | Second-pass disposition |
+|---|---|
+| Euler | Completed, final envelope not surfaced; no new claim admitted |
+| Zeno | Completed, final envelope not surfaced; no new claim admitted |
+| Peirce | Completed, visible envelope reconfirms candidate-only math with precision/negative exceptions |
+| Ramanujan | Completed, final envelope not surfaced; no new claim admitted |
+| Popper | Completed, final envelope not surfaced; no new claim admitted |
+| Franklin | Completed, final envelope not surfaced; no new claim admitted |
+| Hilbert | Completed, final envelope not surfaced; no new claim admitted |
+| McClintock | Completed, final envelope not surfaced; no new claim admitted |
+
+#### N43–N47 evidence checkpoint 1 (2026-09-06)
+
+| Agent | Lane | Status | Evidence disposition |
+|---|---|---|---|
+| Dalton | Shift cash architecture | **[x] Investigation complete** | Read-only audit; found two semantic blockers (Available Amount ceiling vs snapshot; Additional used derived outflow vs manual other-cash event); no edits or production action. |
+| Feynman | Input sizing and responsive UX | **[x] Investigation complete** | Read-only inventory; confirmed responsive and input-mode defects; no edits, browser run, deployment, or remote write. |
+| Dirac | Historical warehouse-sale correction | **[x] Investigation complete** | Read-only security audit; no production counts or mutation; exact target set and invariant-gated correction still required. |
+| Herschel | Requirements refutation and provenance | **[x] Investigation complete** | Confirmed A2 shift/credit changes are not ancestors of current `main`; registered cash is report-only; no edits or production action. |
+| Codex/main | Reconciliation | **[~] Active** | Registered task wave, recomputed note arithmetic, published durable handoffs; implementation and final gates remain open. |
+
+The completed investigation lanes are not implementation approvals. The next
+write lanes must use disjoint ownership, work in isolated worktrees, preserve
+the dirty main checkout, and return base/head/dirty evidence plus focused tests.
+
+#### Swarm wave 2 — independent refutation lanes (2026-09-06)
+
+Eight read-only agents are active. Duplicate subject coverage is intentional:
+each pair has an independent brief and must report disagreements rather than
+converging by assumption. No agent may edit, stage, deploy, migrate, or touch
+production data in this wave.
+
+| Agent | Role | Scope | Status |
+|---|---|---|---|
+| Dewey | business OS architect | Shift-A architecture and lineage | **[x] partial; blockers recorded** |
+| Carver | verifier | Shift-B adversarial counterexamples | **[x] partial; candidate-only, no cash-addition coverage** |
+| Laplace | business OS architect | Accounting-A cross-surface formula authority | **[x] partial; Credit/discount/fee conflicts recorded** |
+| Boyle | verifier | Accounting-B revenue/profit/delivery refutation | **[x] partial; multiple sibling formula inconsistencies confirmed** |
+| Locke | security reviewer | Stock-A correction safety and invariants | **[x] complete; production evidence still absent** |
+| Leibniz | reconciler | Stock-B correction design and provenance | **[x] partial; movement-first design, no live candidates** |
+| Singer | product designer | UX-A field sizing, i18n, PWA | **[x] partial; source defects confirmed, browser not run** |
+| Russell | Playwright tester | UX-B browser/PWA verification feasibility | **[x] partial; no harness/local smoke unavailable** |
+
+Completion requires a valid evidence envelope, not a green assertion. After
+the wave returns, Codex/main will reconcile each pair, assign only non-overlapping
+write paths, require an implementation verifier, and rerun the affected package
+gates. A lane that times out or lacks evidence stays open/blocked.
+
+#### Swarm wave 2 reconciliation result
+
+| Pair | Agreement | Refutation / unresolved point | Disposition |
+|---|---|---|---|
+| Shift | Current `main` lacks the shift implementation; A2 supports per-currency, zero-valid, mismatch-nonblocking close. | Blank is nullable at the Worker but can become zero in UI; cash additions and Additional used have no canonical model; needs-review figures can still display. | N43 remains implementation-pending and owner-semantics-gated. |
+| Accounting | Multiple consumers diverge from the kernel; A2 Credit behavior is positive while main excludes `awaiting_payment`. | A2 comments/tests contradict executable behavior; item discounts and linked/unlinked courier authority are not fully converged. | N48 opened; no merge or accounting claim made. |
+| Stock | Date window and item-level movement-first classification agree; bare branch rewrites are unsafe. | Existing transfers lack correction-grade idempotency/reference and live IDs/balances are unavailable. | N45 remains blocked on read-only production manifest and correction design. |
+| UX/PWA | Preserve full values, avoid arbitrary maxLength, use explicit keyboard modes, and make long values readable. | Source contracts are not device proof; no Playwright/local smoke harness; listbox/touch/PWA issues remain. | N49 opened; browser certification not done. |
 
 ### DEPLOY BLOCKER — main is ten migrations behind production (measured Sep 4 2026, business-os-v1-c3)
 
@@ -12925,3 +13646,22 @@ POS.tsx along the way — no behavior change needed there).
 **→ USER-REASSERTED DATA CONCERNS (logged via session-59, Sep 1 — NOTED for the data lane, NOT closed). After seeing the live dashboard the user reaffirms: (a) "time is not being written in many places", (b) supplier attribution wrong/blank, (c) stock off, (d) "calculations are not correct at all" — and reiterated they routed this data-corruption/error/loss concern to the fleet to coordinate. CRITICAL distinction so nobody marks this closed prematurely: coordinator 7b's read-only prod checks refuted the specific PRESENCE/integrity versions (sales created_at 0/14,939 missing; inventory_movements 0/21,375 missing; subtotal_usd populated, SUM=$1,873,656.34; 0 negative branch_stock/branch_batch_stock; 0 unnamed of 6,104; branches canonical = Warehouse id1 + Shop id2). BUT: "calculations are not correct" is a CORRECTNESS/RECONCILIATION claim that presence/null checks do NOT cover (e.g. does dashboard revenue = gross − discount − refund reconcile to the underlying sales? is COGS/profit right?), and "time not written" may mean a DIFFERENT timestamp field/surface than created_at (received date, stock-adjustment/transfer time, expiry). These stay OPEN — need a concrete offending record from the user OR a read-only reconciliation audit against prod before ANY data mutation. No prod writes without an explicit, specific user-confirmed target.**
 
 **\xe2\x86\x92 MERGE-VERIFICATION PASS (Sep 1, continued session): fixed all 4 pre-existing backend test failures at root cause (harness require-override gap for lib/businessDateWindow.ts in test-review-gate-pure.cjs; stale "misplaced stock" wording in test-route-permissions-pure.cjs vs source's already-correct "stock integrity"; TS 6.0.3 turning TS5112 into a hard error for test-stock-ledger-pure.cjs/test-stock-revert-pure.cjs, fixed with --ignoreConfig). File-by-file verified update_code.zip + business-os-update-20260901.zip against main: confirmed main-newer for compat.ts/inventory.ts route/Inventory.tsx/Products.tsx/StockAdjustModal.tsx/SalesDailyReport.tsx/test-image-normalize-pure.cjs + 4 frontend test files by reading real source (not assumed) -- kept main. Merged in the account-security/password-manager feature (users.ts, auth.ts, Users.tsx, UserProfileModal.tsx, Login.tsx, passwordManager.ts + tests) from the update package; per explicit user decision, REMOVED all primary-admin protection -- admins can now manage any admin account including the seeded primary admin, no account is special-cased. Wired passwordManagement.test.ts into test:utils. Fixed one genuinely stale pre-existing test (performanceLoadingUx.test.ts still asserted the old single-request CSV export shape) and one over-strict regex (actionStability.test.ts false-negatived on a legitimately-guarded multi-line ternary). Fixed zip-transfer node_modules corruption (0-byte files) via a clean frontend npm install. Full verification green: 147/147 backend tests + tsc clean, frontend tsc clean + full test:utils (858 checks) + a REAL vite build (not skipped) all pass. Two live bugs (branch Transfer button/function, "2Medium" search miss) still not investigated -- next up.**
+
+## F53 — permission-refresh event coalescing (next checkpoint)
+
+New reproduced frontend freshness bug from the separately authorized architecture review: an own-user update followed by an unrelated-user update within the debounce loses the required bootstrap; payloadless role refresh also misses bootstrap. Pinned e24fc25e actual-handler experiment has positive controls. No backend authorization bypass demonstrated. Identity owns isolated AppContext/helper/test correction from9654562d; independent review pending. It is excluded from the frozen branch/contact checkpoint. Evidence: C:/Users/mrkl6/Downloads/architecture-review-20260908/permission-event-experiment.cjs and .results.json. Do not change the review artifacts.
+
+## F54 — stale in-flight read/cache ownership (next checkpoint)
+
+Separate authorized efficiency review reproduced invalidation while a read is pending: the next read reused stale in-flight work and old response repopulated shared cache. Isolated fix538d65ee (http.ts/apiHttp.test.ts) has focused tests and independent bounded review; not integrated/deployed here. Reviewer also reproduced a late local fallback replacing fresher server cache without invalidation; follow-up retained with the same external owner. Preserve resolved-error occurrence IDs fromc2eb. Callback-side persistent cache/IndexedDB effects remain outside the proven scope. Root will require exact independent evidence before integration. Active writer: efficiency-cache-worker in C:/Users/mrkl6/.codex/worktrees/bos-efficiency-20260908/business-os-v1; no overlapping HTTP edits.
+
+## F55 — protect pending offline work across hard runtime changes
+
+New read-only overhaul finding (not observed production loss): hard storageVersion/dataRootKey/organization changes can call resetLocalMirrorDb and erase pending queue/outbox/vault/chunks. Old queued work also lacks explicit actor/runtime origin binding. Identity is preparing a bounded plan/reproduction against1befb1d8, no implementation yet. Required design is origin-scoped quarantine and compatible reauthorization/reconciliation; never blindly preserve-and-replay across users/organizations or expose prior private data. Original probe/report: C:/Users/mrkl6/Downloads/overhaul-review-20260908/freshness-recovery.probe.cjs and freshness-recovery.md. Excluded from both deployedc2eb and frozen freshness checkpoint. Backend auth bypass is not demonstrated.
+## Not Paid stock rule correction and timeout release deployed — September 9
+
+- Owner correction is now applied live: `awaiting_payment` / Not Paid sales deduct stock exactly once, just like completed sales; cancellation restores it through the existing guarded path.
+- The signed-in Admin recovery panel applied target `sale-not-paid-stock-recovery-20260909-v1` once after backup. It corrected four quantity-one lines across sales 16952, 16953 and 16954, created four `sale` inventory movements, restored all four unreleased allocations, and left sale 16951's existing 36-unit deduction unchanged. Header totals and delivery data were not changed.
+- Postflight: 16952 has 1 item/revision 10, 16953 has 2 items/revision 7, 16954 has 1 item/revision 4; product stock is 859=0, 409=8, 3490=2, 5370=6. Recovery receipt is backed up and the exact operation has three members with no repeat guard.
+- Release branch `codex/sale-create-trigger-release-20260909` is at `3b98fc1a`; Worker deployment `8bfacf42-bd8b-4e62-9d61-1c4f2c7ddf51` / version `fb2aa5c4-22ec-4de5-ab32-806de9fce7dd` is at 100%. The release includes 45-second mutation timeout handling with unknown-outcome preservation, Khmer write-error presentation, exact recovery-digest hardening, and the Edit Customer heading-row fix.
+- Focused backend/frontend tests, both typechecks, i18n verification and frontend production build passed. No blind retry was used. Transfer durability, duplicate cleanup, broader UI/public portal, and offline work remain open; offline is paused.

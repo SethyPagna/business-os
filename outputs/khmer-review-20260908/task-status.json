@@ -1,0 +1,860 @@
+{
+  "asOf": "2026-09-09T09:30:00Z",
+  "liveCommit": "3b98fc1a",
+  "liveSummary": "Release 3b98fc1a is live at Worker version fb2aa5c4-22ec-4de5-ab32-806de9fce7dd, 100%. Not Paid/awaiting_payment stock correction applied once after backup for four lines across sales 16952/16953/16954; 16951 unchanged. Mutation timeout and Khmer write-error handling deployed.",
+  "tasks": [
+    {
+      "id": "F01",
+      "request": "Completed sale changed back to awaiting payment must allow authorized payment method, amount, item and delete/correction actions.",
+      "state": "Deployed",
+      "next": "Earlier browser checks passed; normal production follow-through remains. Browser access is available again.",
+      "notes": "Sales correction and scope tests; final release smoke."
+    },
+    {
+      "id": "F02",
+      "request": "Audit all historical sales with missing branch, Warehouse/multiple branches, or N/A driver.",
+      "state": "Repair complete; evidence gaps open",
+      "next": "2 ambiguous mixed/Warehouse sales,21 unknown drivers,4282 unlinked legacy fees and6 zero-item sales need evidence.",
+      "notes": "Census covered 15,096 sales and 36,340 lines. Proven null metadata repair prepared; ambiguous fulfillment/driver facts remain unresolved."
+    },
+    {
+      "id": "F03",
+      "request": "Enforce Shop-only sales; Warehouse stock must transfer first, including added lines, imports, replacements and generated sales.",
+      "state": "Deployed",
+      "next": "No new implementation pending for the verified scope.",
+      "notes": "Backend enforcement and sibling parity tests integrated."
+    },
+    {
+      "id": "F04",
+      "request": "Stock-in session times out after 12 seconds.",
+      "state": "Deployed",
+      "next": "No new implementation pending for the verified scope.",
+      "notes": "Session-specific 60-second transport, stable request identity, durable retry; no global timeout inflation."
+    },
+    {
+      "id": "F05",
+      "request": "Multiple products with multiple images each fail in one stock session, including encoded spaces/Khmer/percent filenames.",
+      "state": "Deployed",
+      "next": "No new implementation pending for the verified scope.",
+      "notes": "Older build reproduced 409; identical retained 3-product/6-image request succeeded once on eb06b80b. Six asset GETs and product/gallery ownership passed."
+    },
+    {
+      "id": "F06",
+      "request": "Add/edit/create product images: upload, attach from Library, files, camera entry, and PWA draft lifecycle.",
+      "state": "Deployed",
+      "next": "Actual phone-camera hardware validation remains.",
+      "notes": "Upload/Library associations and close/minimize/retry passed. Actual phone camera hardware was unavailable; do not claim a hardware test."
+    },
+    {
+      "id": "F07",
+      "request": "Library totals: physical storage, file quantities by type, correct usage and deletion protection.",
+      "state": "Deployed",
+      "next": "No new implementation pending for the verified scope.",
+      "notes": "Physical counts unchanged by retry; covers and gallery usage correct."
+    },
+    {
+      "id": "F08",
+      "request": "Same barcode/leading zeros: scanner, search, same-session recognition and merge must use compatible identity.",
+      "state": "Deployed",
+      "next": "No new implementation pending for the verified scope.",
+      "notes": "Guarded UPC/internal-code parity; do not strip meaningful arbitrary code zeros."
+    },
+    {
+      "id": "F09",
+      "request": "Merge cost uses distinct nonzero available costs; highest retail/wholesale prices; preserve stock/relations/audit/undo.",
+      "state": "Implementation deployed; execution partial",
+      "next": "Continue only from a fresh authenticated duplicate preview.",
+      "notes": "1,600 synthetic folds in 64 requests; retry mean remains fixed, changed source refuses retry."
+    },
+    {
+      "id": "F10",
+      "request": "Run the production duplicate merge; one confirmation, bounded progress, faster saves.",
+      "state": "174 merges recorded;1774 eligible remain",
+      "next": "Last fresh preview: 1,793 groups / 1,812 candidates, 19 quarantined groups, 1,774 eligible merges. 174 historical merges recorded, including 166 verified this run. Recovery and two-read optimization deployed; remaining cleanup not executed yet.",
+      "notes": "Prior action IDs318–325 retained. The new global conflict workflow is live under F65; no claim that the entire duplicate catalog has been merged."
+    },
+    {
+      "id": "F11",
+      "request": "Detect duplicate barcode OR name added earlier in the same session, including queued/saved lines; otherwise green only after resolved lookup.",
+      "state": "Deployed",
+      "next": "No new implementation pending for the verified scope.",
+      "notes": "Session identity and duplicate parity tests integrated; explicit quantity edit preserved."
+    },
+    {
+      "id": "F12",
+      "request": "Gross sales, discounts, refunds and revenue must agree across Dashboard chart, headline, Sales, Inventory and reports.",
+      "state": "Deployed",
+      "next": "No new implementation pending for the verified scope.",
+      "notes": "Tested gross 200, total discount 15, net 185; raw item-discount basis corrected."
+    },
+    {
+      "id": "F13",
+      "request": "Credit is recognized in revenue and profit (N39); latest visible wording overridden by F44 Not Paid / ប្រាក់ជំពាក់.",
+      "state": "Deployed",
+      "next": "No new implementation pending for the verified scope.",
+      "notes": "Credit/revenue parity and report tests integrated."
+    },
+    {
+      "id": "F14",
+      "request": "Shift registration is report-only and close always works (N37).",
+      "state": "Deployed",
+      "next": "No new implementation pending for the verified scope.",
+      "notes": "Real route tests; blank and explicit zero are different; invalid values rejected without blocking legitimate close."
+    },
+    {
+      "id": "F15",
+      "request": "Shift report compares registered opening/end USD and KHR; unknown stays unknown (N38).",
+      "state": "Deployed",
+      "next": "No new implementation pending for the verified scope.",
+      "notes": "Migration 0132 conservatively treats ambiguous legacy zero as unknown; report/Telegram tests passed."
+    },
+    {
+      "id": "F16",
+      "request": "Shift Report is its own selectable report view with export, not an extra block in overview.",
+      "state": "Deployed",
+      "next": "No new implementation pending for the verified scope.",
+      "notes": "Final browser smoke includes selection/export."
+    },
+    {
+      "id": "F17",
+      "request": "Concise Telegram reports (N42).",
+      "state": "Deployed",
+      "next": "No new implementation pending for the verified scope.",
+      "notes": "Bilingual composed payloads, day-first dates and concise report tests passed; no live messages sent."
+    },
+    {
+      "id": "F18",
+      "request": "Delivery accounting clearly explains customer charge, actual courier cost, store-paid portion and contribution without double deduction.",
+      "state": "Deployed",
+      "next": "No new implementation pending for the verified scope.",
+      "notes": "Financial parity verified; negative contribution can represent store subsidy."
+    },
+    {
+      "id": "F19",
+      "request": "Expenses generated by sales show a sale link; branch is Shop; manual expenses need no sale ID.",
+      "state": "Implemented; proven branch repair complete",
+      "next": "Do not invent missing legacy sale links.",
+      "notes": "Existing unlinked legacy fees lack proof of a sale relationship. Never invent links; proven branch metadata correction prepared."
+    },
+    {
+      "id": "F20",
+      "request": "Records line belongs INSIDE expanded sale details, not the collapsed row (latest correction to N41).",
+      "state": "Deployed",
+      "next": "No new implementation pending for the verified scope.",
+      "notes": "Browser placement, single dialog and return-to-detail flow passed."
+    },
+    {
+      "id": "F21",
+      "request": "Records includes actor/time, status, products/quantity, payments, delivery fee and actual cost with readable before/after detail.",
+      "state": "Expanded core Records deployed; remaining writers tracked in F74",
+      "next": "Changed-only typed EN/KM core history live21d22fc. Return-create and wider contact/payment reference cascades remain separate.",
+      "notes": "Structured detail/integrity tests pass. Unknown/pruned provenance is explicit; retained replay history survives both clear paths. Sales list D1 failure is F34."
+    },
+    {
+      "id": "F22",
+      "request": "Customer delivery fee and actual delivery cost are separately editable and recorded.",
+      "state": "Deployed",
+      "next": "No new implementation pending for the verified scope.",
+      "notes": "Fee changes customer total; actual cost does not. No-delivery conversion is F32."
+    },
+    {
+      "id": "F23",
+      "request": "Dashboard low/out lists load more at the bottom and reset on leaving.",
+      "state": "Deployed",
+      "next": "No new implementation pending for the verified scope.",
+      "notes": "Desktop and 375px scroll 10→20 and leave/reenter reset passed."
+    },
+    {
+      "id": "F24",
+      "request": "Total stock alerts use Shop+Warehouse; branch pages/POS branch options use individual branch stock.",
+      "state": "Deployed",
+      "next": "No new implementation pending for the verified scope.",
+      "notes": "Pure aggregate/branch tests; alert setting events refresh Dashboard, POS and Branches."
+    },
+    {
+      "id": "F25",
+      "request": "Permissions/roles fully scoped across add/edit/session/images, review, imports, bulk, offline and undo.",
+      "state": "Existing fixes deployed; F55 open",
+      "next": "New offline ownership/recovery issue has a separate reviewed plan.",
+      "notes": "Synchronous matrix through 96abe402 and Queue authority through 1aae81d3 independently certified, including races, cancellation and current-role checks. Combined first-release sweep passed."
+    },
+    {
+      "id": "F26",
+      "request": "Dismiss offline/update notifications with X without hiding failed saves or lying about connectivity.",
+      "state": "Deployed",
+      "next": "No new implementation pending for the verified scope.",
+      "notes": "Dismissal helper and App integration complete; reconnect/error behavior retained."
+    },
+    {
+      "id": "F27",
+      "request": "Remove redundant eye next to Print in sales rows.",
+      "state": "Deployed",
+      "next": "No new implementation pending for the verified scope.",
+      "notes": "Browser row access remains; Actions shows Print only."
+    },
+    {
+      "id": "F28",
+      "request": "Take over Claude lanes, commits, dirty/unverified work and progress sessions.",
+      "state": "Deployed",
+      "next": "No new implementation pending for the verified scope.",
+      "notes": "Twenty-lane lineage and shared patch inventory preserved; original dirty worktrees untouched."
+    },
+    {
+      "id": "F29",
+      "request": "Remove duplicate delivery_actual_cost_usd field and rejected stopgap kind comment in Sales merge fallout.",
+      "state": "Deployed",
+      "next": "No new implementation pending for the verified scope.",
+      "notes": "Source/type/parity gates cover composed Sales."
+    },
+    {
+      "id": "F30",
+      "request": "Finish earlier N18/N21/N23 and N28–N36/audit lanes without losing their fixes.",
+      "state": "Deployed",
+      "next": "No new implementation pending for the verified scope.",
+      "notes": "Canonical ea9f0d1b base includes checkpoint 2 and earlier integrations; individual follow-up fixes retained."
+    },
+    {
+      "id": "F31",
+      "request": "GitHub commits describe individual fixes, not checkpoint/batch commits.",
+      "state": "Individual fix commits pushed",
+      "next": "Latest live4495bccf branch is pushed; runtime fixes retain individual commits. Subsequent candidates remain separate until release.",
+      "notes": "Each runtime fix retained separately on release branches; private reports excluded."
+    },
+    {
+      "id": "F32",
+      "request": "Sale originally without delivery allows later driver, customer fee and actual cost.",
+      "state": "Deployed",
+      "next": "No new implementation pending for the verified scope.",
+      "notes": "Full backend 276 suites; all frontend 306 files covered; independent money/migration review and browser actual retry/driver/totals/Records passed."
+    },
+    {
+      "id": "F33",
+      "request": "Preserve original basket, payments, driver and actor for future sales.",
+      "state": "Deployed",
+      "next": "Earlier browser checks passed; normal production follow-through remains. Browser access is available again.",
+      "notes": "Four writers, migration 0134, backup and immutable Records independently pass; original basket/payment remain unchanged after later edits in browser. Backend 278/278 pass."
+    },
+    {
+      "id": "F34",
+      "request": "Sales list/detail Records SQL failed in real D1.",
+      "state": "Deployed",
+      "next": "No new implementation pending for the verified scope.",
+      "notes": "Frozen actual Worker list/detail now 200; count and compound ordering repaired."
+    },
+    {
+      "id": "F35",
+      "request": "Fast Stock minimize restored wrong host and consumed the chip.",
+      "state": "Deployed",
+      "next": "No new implementation pending for the verified scope.",
+      "notes": "Exact user5 frozen browser restore passed; preserves draft and consumes only after modal mounts."
+    },
+    {
+      "id": "F36",
+      "request": "Sales read retry/deadline/cache cancellation and visible manual Retry after failure.",
+      "state": "Deployed",
+      "next": "Earlier browser checks passed; normal production follow-through remains. Browser access is available again.",
+      "notes": "Frozen 5ec39289 browser: one request aborted at 20s, visible Retry, one manual retry succeeds; late responses never overwrite data or navigation."
+    },
+    {
+      "id": "F37",
+      "request": "Duplicate preview times out on large catalogs because it queries stock/batches/cost per group.",
+      "state": "Deployed",
+      "next": "Large-catalog preview fixed; fresh production merge remains pending.",
+      "notes": "Independent real route 2,000 groups uses 43 reads instead of roughly 6,000; merge rules, prices and blockers preserved."
+    },
+    {
+      "id": "F38",
+      "request": "Immediately recording payment after changing Completed to Credit reports a false other-device conflict.",
+      "state": "Deployed",
+      "next": "Payment update carries the committed status version.",
+      "notes": "9d707f1d carries exact committed status version into payment review; real concurrent-write protection and typed tender values retained."
+    },
+    {
+      "id": "F39",
+      "request": "Live bulk merging remains about eight seconds per case and fails on database overload.",
+      "state": "Improved merge implementation deployed; production follow-through open",
+      "next": "F46 and F65 are live. Remaining production duplicate execution is tracked under F10; measure current real behavior during that reviewed run.",
+      "notes": "Eight commits preceded an 87.3s request failure. Inspect serial D1 round trips and invocation limits; preserve atomic cases, undo and whole-cluster cost mean."
+    },
+    {
+      "id": "F40",
+      "request": "Bulk merge error falsely says data not saved after partial commits.",
+      "state": "Deployed",
+      "next": "Production continuation requires fresh authenticated review.",
+      "notes": "Return/reconcile committed cases and undo IDs on failure; explicit resumable partial state, no blind retry."
+    },
+    {
+      "id": "F41",
+      "request": "Idle import polling writes to D1 and immediate retries amplify database overload.",
+      "state": "Deployed",
+      "next": "No new implementation pending for the verified scope.",
+      "notes": "Skip no-op reaper writes when no stale jobs exist; preserve guarded stale recovery. Fail overload once instead of immediately retrying it."
+    },
+    {
+      "id": "F42",
+      "request": "Contacts duplicates: supplier creation in stock sessions, raw versus spaced customer phone numbers, obsolete membership IDs; inspect existing fixes before correction.",
+      "state": "Fresh contact census complete; guarded cleanup pending",
+      "next": "2 supplier name-only clusters (10/6members);14newerrows have no countedlinks. Customer triple23907/25000/25001 has differentmembershipIDs. No blindidentitymerge;2stalephonekeys needguardedrepair. No deliveryduplicatecluster.",
+      "notes": "Explicit manual/POS choices integrated at c09c707a, final gates/browser pending. Existing ambiguous memberships/contacts require reviewed identity evidence."
+    },
+    {
+      "id": "F43",
+      "request": "Contact phone entry automatically spaces digits as typed; formatted display and canonical matching must agree.",
+      "state": "Deployed",
+      "next": "No new implementation pending for the verified scope.",
+      "notes": "Progressive spacing, prefixes, paste and caret covered in seven create/edit/quick-add fields."
+    },
+    {
+      "id": "F44",
+      "request": "Latest owner correction: visible Credit / ឥណទាន becomes Not Paid / ប្រាក់ជំពាក់ everywhere.",
+      "state": "Deployed",
+      "next": "No new implementation pending for the verified scope.",
+      "notes": "Supersedes N39/F13 unpaid-state wording. Internal values/accounting unchanged; distinct Store Credit, supplier credit and overpayment concepts preserved."
+    },
+    {
+      "id": "F45",
+      "request": "Investigate failed admin WebSocket and reported content.js/VM listener/startTime errors.",
+      "state": "WebSocket fixed; VM attribution open",
+      "next": "Anonymous startTime source remains unproven.",
+      "notes": "Cooldown lacked wake-up and actual logout did not disconnect. Both corrected. content.js listener is extension noise; VM startTime ownership unproven."
+    },
+    {
+      "id": "F46",
+      "request": "Combined selected-conflict review and bounded merge.",
+      "state": "Deployed; independent version verified100%",
+      "next": "Livebfd16f0d. Focused/native/full gates passed;0136/0137 schema applied with unchanged stock/history assertions. Remaining large N-group merge/direct Remove is F65, not included.",
+      "notes": "Independent SQLite/source checks passed, but real11-case preview fails before writes. Migration0136 not deployed."
+    },
+    {
+      "id": "F47",
+      "request": "Prevent and clearly prompt about existing customers, suppliers and delivery contacts across add/create/edit/quick-add/import/session surfaces; distinguish reuse from intentional creation.",
+      "state": "Guards deployed; legacy cleanup open",
+      "next": "Preserve existing reuse/separate choices and backend guards. Fresh legacy census and identity repair tracked under F42.",
+      "notes": "Explicit reuse/separate choices, phone/name/membership guards, reviewed snapshots, import targets, atomic new-customer signup and no hidden supplier creation. Exact browser passed; unrelated failed saves remain visible."
+    },
+    {
+      "id": "F48",
+      "request": "Shift difference must show when supported across Telegram, reports and history; Closing cash / សាច់ប្រាក់បិទវេន; Not Paid / ប្រាក់ជំពាក់; use owner's supplied concise report arrangement.",
+      "state": "Deployed",
+      "next": "No new implementation pending for the verified scope.",
+      "notes": "Each known currency difference is shown even under review; missing inputs remain unknown. Requested section order and Closing cash labels are pinned."
+    },
+    {
+      "id": "F49",
+      "request": "Attribute Protected Audience, Shared Storage and StorageType.persistent deprecation warnings and fix actual app use.",
+      "state": "Unresolved attribution",
+      "next": "No matching app use reproduced; identify exact warning source.",
+      "notes": "No matching app API use found in source or clean-browser warnings. Exact reported third-party/extension source remains unproven; no suppression."
+    },
+    {
+      "id": "F50",
+      "request": "Correct unassociated form labels (browser reports four resources).",
+      "state": "Deployed",
+      "next": "No new implementation pending for the verified scope.",
+      "notes": "Sales custom-export flow now has zero unassociated labels in the clean-browser check. Other forms remain separate follow-up candidates."
+    },
+    {
+      "id": "F51",
+      "request": "Enforce owner-confirmed canonical Shop/Warehouse and product/branch/lot identity across every writer; retain daily prompt/report-only cash and Not Paid revenue.",
+      "state": "Deployed",
+      "next": "Shop-only sale authority, two canonical branches and lot checks retained.",
+      "notes": "CRUD/review/undo/reset and Warehouse→Shop transfer guards, disabled sale-side Warehouse, stale-lot checks, authoritative general/dated/sales imports, and canonical export buckets passed independent and combined checks. Historical unknown identities are not silently repaired."
+    },
+    {
+      "id": "F52",
+      "request": "Investigate negative revenue/profit accuracy.",
+      "state": "Production census complete; causes and repairs open",
+      "next": "Global/report buckets positive.142 sale profit negatives,100 product losses,30 negative KHR discount cells,5 zero-item/4 zero-subtotal-with-items sales and2 refunds on cancelled sales flagged.21 negative delivery margins require context. No orphan return items/excess returned quantities. Signed change may bevalid; preserve evidence and investigate withoutclamping.",
+      "notes": "No formula defect established. Preserve genuine losses; never clamp or invent money."
+    },
+    {
+      "id": "P01",
+      "request": "Privacy, Terms and Cookie policies; footer policy button reachable at page bottom.",
+      "state": "Deployed",
+      "next": "Policies and footer are live.",
+      "notes": "Reader routes, footer, focus/history/title/scroll behavior verified."
+    },
+    {
+      "id": "P02",
+      "request": "Determine cookie consent needs; form consent and durable policy version/time/locale.",
+      "state": "Deployed; legal facts open",
+      "next": "Consent controls live; applicable obligations depend on confirmed markets/business facts.",
+      "notes": "Optional map/AI/share consent controls and server enforcement; migrations 0130/0131 required. No claim of universal legal compliance."
+    },
+    {
+      "id": "P03",
+      "request": "Minimize collected data; inspect analytics/third-party embeds.",
+      "state": "Deployed",
+      "next": "Initial public load and optional embed consent checked.",
+      "notes": "Initial public load has no third-party requests/embeds; map revocation unloads; raw session identifiers removed; HMAC secret needed at release."
+    },
+    {
+      "id": "P04",
+      "request": "Accessible public site: alt text, contrast, keyboard forms, clear buttons and small-screen heading.",
+      "state": "Deployed",
+      "next": "Small-screen, keyboard, alt-text and contrast fixes verified within tested surfaces.",
+      "notes": "375px heading one line/no overflow; modal focus/inert/scroll checks and UI fixes passed."
+    },
+    {
+      "id": "P05",
+      "request": "Remove fake reviews/unsupported claims and review image copyright.",
+      "state": "Mostly first-party photography, per owner",
+      "next": "Confirm exceptional third-party assets and retain their provenance.",
+      "notes": "No invented reviews/claims added. Existing image ownership/license cannot be proven from a file alone; keep this risk visible."
+    },
+    {
+      "id": "P06",
+      "request": "Add truthful business details; check applicable local law and flag risks.",
+      "state": "Business facts needed",
+      "next": "Registered legal identity, registration, email and target markets unconfirmed.",
+      "notes": "Trade name/address/phone verified. Registered legal identity, registration, email and target markets remain unconfirmed; Cambodia sources and conditional foreign-market risks documented privately."
+    },
+    {
+      "id": "P07",
+      "request": "Configuration security findings discovered during takeover.",
+      "state": "Owner reports token rotated",
+      "next": "Dated independent evidence not located; no repeat rotation requested.",
+      "notes": "Dedicated portal HMAC configured and malformed binding removed previously. Owner reports Telegram token already rotated; do not repeat rotation based on stale notes. No credential values retained here."
+    },
+    {
+      "id": "U01",
+      "request": "Improve small-screen main/subpage back navigation and remove the large empty bottom gap.",
+      "state": "Not started",
+      "next": "Small-screen navigation/back-gap layout.",
+      "notes": ""
+    },
+    {
+      "id": "U02",
+      "request": "Add icons to subpage navigation.",
+      "state": "Deferred to later checkpoint by owner",
+      "next": "Preserve reviewed plans; urgent sales/POS and transfer take priority. Add appropriate mobile subpage icons consistently after urgent sale integrity fix.",
+      "notes": ""
+    },
+    {
+      "id": "U03",
+      "request": "Reports centered with safe edge gutters, larger readable text, consistent larger filter button.",
+      "state": "Core deployed; polish open",
+      "next": "Final mobile visual review.",
+      "notes": ""
+    },
+    {
+      "id": "U04",
+      "request": "Compact Shift button with stats/actions; move export beside section title or near small-screen page title without crowding notifications.",
+      "state": "Core deployed; arrangement open",
+      "next": "Remaining mobile Shift/Export placement.",
+      "notes": ""
+    },
+    {
+      "id": "U05",
+      "request": "One highlighted Not Paid row; positive total/final profit green.",
+      "state": "Deployed4e576eaa",
+      "next": "Positive profit highlighting corrected.",
+      "notes": "Selected headline contrast corrected; no accounting changes."
+    },
+    {
+      "id": "U06",
+      "request": "Receipt Item/Qty/Price/Total headings English by default, including mixed English/Khmer setting.",
+      "state": "Deployed",
+      "next": "English Item/Qty/Price/Total receipt headings.",
+      "notes": ""
+    },
+    {
+      "id": "U07",
+      "request": "Add minus next to Close for edit/add/set/stock/session actions; Back/discard/minimize must cooperate with scoped drafts.",
+      "state": "Partly deployed",
+      "next": "Fast Stock and per-product Add/Remove/Set close/minimize behavior is deployed under F66/F67. Remaining broader modal/draft coverage is still open.",
+      "notes": ""
+    },
+    {
+      "id": "U08",
+      "request": "Compact Start/End dates; default entire days 00:00–23:59 without extra selector; align with stats/actions across Dashboard/Sales/Expenses/Returns/Branches.",
+      "state": "Not started",
+      "next": "Compact full-day date controls aligned with stats/actions.",
+      "notes": ""
+    },
+    {
+      "id": "U09",
+      "request": "Compact rectangular payment-method control while changing awaiting-payment status.",
+      "state": "Not started",
+      "next": "Compact payment-method button.",
+      "notes": ""
+    },
+    {
+      "id": "U10",
+      "request": "Date/time before IDs on receipts, sessions and analogous rows.",
+      "state": "Partly deployed",
+      "next": "Complete remaining date/time-before-ID lists.",
+      "notes": ""
+    },
+    {
+      "id": "U11",
+      "request": "Compact report presets and This month on same row.",
+      "state": "Not started",
+      "next": "Compact report presets.",
+      "notes": ""
+    },
+    {
+      "id": "U12",
+      "request": "Consistent button/stat heights following the Shift control.",
+      "state": "Not started",
+      "next": "Consistent button/stat heights.",
+      "notes": ""
+    },
+    {
+      "id": "U13",
+      "request": "Expanded mobile Sales: Return/Print/Close one row, three status options one row, Cancel/Back alongside Update; Records at bottom; merge membership/attach controls.",
+      "state": "Deployed73fd7dc1",
+      "next": "Verified checkpoint at100% traffic; no migration.",
+      "notes": ""
+    },
+    {
+      "id": "U14",
+      "request": "Expanded sale header compact ID/status/actions with date/time below; evaluate double-click/long-press copy with accessible explicit alternative.",
+      "state": "Deployed73fd7dc1",
+      "next": "Verified checkpoint at100% traffic; no migration.",
+      "notes": ""
+    },
+    {
+      "id": "U15",
+      "request": "Collapsed mobile Sales: cashier and branch share receipt/time row, pipe separators, bold cashier.",
+      "state": "Deployed73fd7dc1",
+      "next": "Verified checkpoint at100% traffic; no migration.",
+      "notes": ""
+    },
+    {
+      "id": "F53",
+      "request": "Permission refresh intent and session isolation.",
+      "state": "Deployed4e576eaa",
+      "next": "Permission refresh coalescing and session-generation isolation.",
+      "notes": "Independent event/debounce/logout race checks passed; backend authority unchanged."
+    },
+    {
+      "id": "F54",
+      "request": "Shared HTTP cache invalidation and server precedence.",
+      "state": "Deployed4e576eaa",
+      "next": "Shared HTTP cache scope only; persistent mirror callbacks remain separate.",
+      "notes": "69 focused tests and512 timing schedules; callback-side persistent mirror effects remain outside scope."
+    },
+    {
+      "id": "F55",
+      "request": "Preserve and scope pending offline work across accounts/runtime changes",
+      "state": "Paused by owner",
+      "next": "Preserve prior plan and pending offline work. Do not implement offline redesign in the current wave.",
+      "notes": "No production loss or backend authorization bypass demonstrated."
+    },
+    {
+      "id": "F56",
+      "request": "Prevent stale expense edits and false success after concurrent deletion",
+      "state": "Deployed73fd7dc1",
+      "next": "Verified checkpoint at100% traffic; no migration.",
+      "notes": "c851dba8 source includes null/absent/versioned deletion handling."
+    },
+    {
+      "id": "F57",
+      "request": "Protect promotion images and display their Library references",
+      "state": "Deployed; independent version verified100%",
+      "next": "Livebfd16f0d. Focused/native/full gates passed;0136/0137 schema applied with unchanged stock/history assertions. Remaining large N-group merge/direct Remove is F65, not included.",
+      "notes": "Frontend reference display ready; no promotion rewiring."
+    },
+    {
+      "id": "F58",
+      "request": "Reduce unnecessary frontend chunk loading",
+      "state": "Deployed73fd7dc1",
+      "next": "Verified checkpoint at100% traffic; no migration.",
+      "notes": "Zero static chunk cycles. Asset-size improvements are not a measured user-latency claim."
+    },
+    {
+      "id": "F59",
+      "request": "Use owner-supplied Khmer actual delivery cost labels",
+      "state": "Deployed73fd7dc1",
+      "next": "Verified checkpoint at100% traffic; no migration.",
+      "notes": "Only these two terms are approved for code changes."
+    },
+    {
+      "id": "F60",
+      "request": "Review all English/current Khmer wording and provide Excel proposals",
+      "state": "Workbook delivered; explicit owner edits deployed",
+      "next": "11 source wording updates applied; untouched proposals remain unapproved.",
+      "notes": "Workbook delivered with 6145 source entries. Eleven explicit owner-edited source wording changes were deployed; untouched proposed translations remain unapproved."
+    },
+    {
+      "id": "F61",
+      "request": "Stock-positive POS product blocked by received-date picker; branch choices missing",
+      "state": "Stock remainder and lot coverage fixes deployed; branch screenshot follow-through open",
+      "next": "Inactive positive lots count toward known stock; missing coverage fails closed. Original missing branch-step observation still needs production follow-through.",
+      "notes": ""
+    },
+    {
+      "id": "F62",
+      "request": "Save still leads to Back/Discard prompt",
+      "state": "Deployed",
+      "next": "Verified in a5a4162f; retain normal production follow-through.",
+      "notes": ""
+    },
+    {
+      "id": "F63",
+      "request": "Reset revoked device history so it can request approval again",
+      "state": "Deployed",
+      "next": "Verified in a5a4162f; retain normal production follow-through.",
+      "notes": ""
+    },
+    {
+      "id": "F64",
+      "request": "Existing-product add/create session needs barcode scanner",
+      "state": "Deployed",
+      "next": "Verified in a5a4162f; retain normal production follow-through.",
+      "notes": ""
+    },
+    {
+      "id": "F65",
+      "request": "Conflict Merge/Remove actions and owner-defined field rules",
+      "state": "Deployed; production duplicate execution still open",
+      "next": "Global review, N-member merge and independent Remove deployed at4495bccf (runtime sourcea5702d49). Fresh production preview and owner field choices needed before remaining authorized merges; no1600-row execution claim.",
+      "notes": ""
+    },
+    {
+      "id": "F66",
+      "request": "Stock actions: X closes with Discard / Back / Minimize; minus preserves directly",
+      "state": "Deployed",
+      "next": "Fast Stock and per-product X/Discard/Back/Minimize separation, scoped draft restore and failed-attempt preservation verified.",
+      "notes": ""
+    },
+    {
+      "id": "F67",
+      "request": "Add/Remove/Set quantity labels, signed delta, before/after and reason",
+      "state": "Deployed",
+      "next": "Add/Remove signed quantity and Set target total with before/after, signed difference and reason verified.",
+      "notes": ""
+    },
+    {
+      "id": "F68",
+      "request": "iOS PWA responsive containment with left/right margins across pages/dialogs",
+      "state": "Deferred to later checkpoint by owner",
+      "next": "Preserve reviewed plans; urgent sales/POS and transfer take priority. Video shows stock-change list/dialog clipped on right; assess viewport scale, input autozoom, widths and keyboard. Fix admin PWA fit and requested zoom behavior; test margins and controls at mobile widths.",
+      "notes": ""
+    },
+    {
+      "id": "F69",
+      "request": "Shop to Warehouse transfer fails; both canonical transfer directions must work with branch/lot identity and permissions",
+      "state": "Deployed",
+      "next": "Shop↔Warehouse, reverse Undo/Redo and strict explicit-lot race rollback passed. Warehouse sales remain prohibited. Retry receipt gap is tracked separately as F73.",
+      "notes": "Owner request with screenshot codex-clipboard-ef24b217-5a3e-4e63-891f-6c047e236707.png; previous tasks retained."
+    },
+    {
+      "id": "F70",
+      "request": "Products name/barcode search is too slow",
+      "state": "Indexed lookup improvement deployed; production latency follow-through open",
+      "next": "Same tested sibling results via existing name_key index. Local5,000-product benchmark improved; this is not a measurement of whole production search latency.",
+      "notes": "Owner request with screenshot codex-clipboard-ef24b217-5a3e-4e63-891f-6c047e236707.png; previous tasks retained."
+    },
+    {
+      "id": "F71",
+      "request": "Library image search is too slow",
+      "state": "Deployed; independent version verified100%",
+      "next": "Livebfd16f0d. Focused/native/full gates passed;0136/0137 schema applied with unchanged stock/history assertions. Remaining large N-group merge/direct Remove is F65, not included.",
+      "notes": "Owner request with screenshot codex-clipboard-ef24b217-5a3e-4e63-891f-6c047e236707.png; previous tasks retained."
+    },
+    {
+      "id": "F72",
+      "request": "Sale customer Edit only: anonymous General stays anonymous; phone-first actual-contact assignment and scoped customer/membership edits",
+      "state": "Deployed; confirmed General repair applied",
+      "next": "24969 marker1 at2026-09-09 01:52:30; 5 sales/1 return retained.22305 marker0 and152 sales unchanged. History535/audit4466. Physical-device follow-through remains.",
+      "notes": "Latest owner instruction supersedes earlier replacement menu. Prior617135b7 is not approved unchanged. Preserve exact sale+linked-return attribution and unrelated customer transactions."
+    },
+    {
+      "id": "U16",
+      "request": "Reports compact filters and navigation per owner screenshot",
+      "state": "Deployed",
+      "next": "Report selector inside white filters, smaller Show, USD default, simplified choices, no redundant summary, horizontal breakdown tabs, contained filter styles. Reset persists across reload. Chromium phone/desktop layout and keyboard verified; physical iOS remains open under U20.",
+      "notes": "Owner request with screenshot codex-clipboard-ef24b217-5a3e-4e63-891f-6c047e236707.png; previous tasks retained."
+    },
+    {
+      "id": "U17",
+      "request": "Sales plain-text colored statuses and compact print/actions column",
+      "state": "Deployed",
+      "next": "Plain EN/KM highlighted badges, one compact print/column-chooser column; header/data/loading parity independently verified.",
+      "notes": "Owner request with screenshot codex-clipboard-ef24b217-5a3e-4e63-891f-6c047e236707.png; previous tasks retained."
+    },
+    {
+      "id": "U18",
+      "request": "Branch product section has redundant actions column",
+      "state": "Deployed",
+      "next": "Desktop Actions column removed; compact product-cell menu retains merged-member Detail/Adjust/Catalog. Mobile actions retained.",
+      "notes": "Owner request with screenshot codex-clipboard-ef24b217-5a3e-4e63-891f-6c047e236707.png; previous tasks retained."
+    },
+    {
+      "id": "U19",
+      "request": "Transfer reference should show only TRF identifier",
+      "state": "Deployed",
+      "next": "Only TRF reference shown; redundant Transfer badge/subline removed; date, tooltip and navigation preserved.",
+      "notes": "Owner request with screenshot codex-clipboard-ef24b217-5a3e-4e63-891f-6c047e236707.png; previous tasks retained."
+    },
+    {
+      "id": "U20",
+      "request": "Responsive layout in iOS PWA and desktop device-toolbar emulation",
+      "state": "Open; verify affected surfaces",
+      "next": "Verify viewport containment, side margins, compact filters and horizontal tabs at phone and desktop widths; distinguish app defects from browser tooling problems.",
+      "notes": "Owner request with screenshot codex-clipboard-ef24b217-5a3e-4e63-891f-6c047e236707.png; previous tasks retained."
+    },
+    {
+      "id": "F73",
+      "request": "Transfer retries lack server receipt deduplication and audit is after stock writes",
+      "state": "Transfer stock-limit fix deployed; broader durability remains open",
+      "next": "Livecap uses min selectedlot/source aggregate, rejects nonfiniteavailability. AdminUI Shop→Warehouse options verified without movingstock. Employee inventory/branches remain absent; preserve full F73 durability WIP.",
+      "notes": "Found during independent F69 review; not introduced by symmetric transfer fix."
+    },
+    {
+      "id": "F74",
+      "request": "Specific, change-driven Sales Records with complete EN/KM labels and before/after for driver, delivery cost/fee, product add/remove/replace/quantity, customer/General/membership, status and payment",
+      "state": "Core Records and atomic return creation deployed; wide cascades paused",
+      "next": "0142 return-create is live in1791eaf7. Wide reference cascades remain paused at7716f5e2; foundation26519d0e and carry patch preserved for later work.",
+      "notes": "Owner wants concise summaries with expandable detailed changes, not all possible fields on every record."
+    },
+    {
+      "id": "P08",
+      "request": "Coordinated LeangBeauty storefront follow-up: sticky compact search/filter, social/footer/policy links, FAQ, readable product detail, gallery and refresh guards; admin scroll control",
+      "state": "Deferred to later checkpoint by owner",
+      "next": "Preserve reviewed plans; urgent sales/POS and transfer take priority. Integrate reviewed public-site work against current live, refine compact storefront/customer portal design and retain accessibility/privacy behavior.",
+      "notes": "User explicitly authorized cross-session coordination; peer task01a08132-97e8-7301-9427-915a91fc9f9b, worktree bos-leang-redesign-20260908."
+    },
+    {
+      "id": "F75",
+      "request": "Employee individual Sales/POS actions including cancellation and status changes; all changes recorded. Multi-select, bulk, import and export disabled by default.",
+      "state": "Deployed; existing Employee role updated and audited",
+      "next": "Live1791eaf7 and role3 verified: original11 keys preserved plus five Sales/Returns denials, audit4299; users3/4 overrides unchanged. Local deployed permission-kernel check passes for both. Already-open Employee phone session remains untested."
+    },
+    {
+      "id": "F76",
+      "request": "Employees should not see Contacts invoices or detailed purchase history, especially suppliers; customer search in Sales remains available.",
+      "state": "Deployed",
+      "next": "Contacts financial privacy and bounded Sales/POS picker are live. Review-tier Contacts stays restricted; supplier access remains off. No employee phone session was used for post-deploy smoke."
+    },
+    {
+      "id": "U21",
+      "request": "Invoice formats and designs should follow the Sales report section/subpage.",
+      "state": "Deployed and independently verified",
+      "next": "Live21d22fc at100%. Actual component EN/KM browser checks320/375/390/1280 passed; no physical-device claim."
+    },
+    {
+      "id": "U22",
+      "request": "Compact mobile Sales metadata: sale ID, time, branch and cashier together; customer phone and delivery together with driver name directly, without Driver label.",
+      "state": "Deployed and independently verified",
+      "next": "Live21d22fc at100%. Actual component EN/KM browser checks320/375/390/1280 passed; no physical-device claim."
+    },
+    {
+      "id": "U23",
+      "request": "Receipt payment methods directly beside Paid, e.g. Paid: ABA or Paid: ABA + Cash; remove separate method row.",
+      "state": "Deployed and independently verified",
+      "next": "Live21d22fc at100%. Actual component EN/KM browser checks320/375/390/1280 passed; no physical-device claim."
+    },
+    {
+      "id": "F77",
+      "request": "Urgent: sales show charged totals but zero item rows; repair receipt 20260909-101913 and other affected sales, preserve delivery/receipt totals, and prevent partial sale creation.",
+      "state": "Corrected and deployed",
+      "next": "Continue ordinary Sales/POS browser smoke; keep the immutable recovery target from being rerun.",
+      "notes": "Guarded Admin apply target sale-not-paid-stock-recovery-20260909-v1 ran once after backup. Four quantity-one sale movements were created; four allocations are unreleased; 16951 keeps its existing 36-unit deduction. Postflight item counts 16952/16953/16954 = 1/2/1, revisions 10/7/4; product stock 859=0, 409=8, 3490=2, 5370=6. Headers, totals and delivery data unchanged."
+    },
+    {
+      "id": "F78",
+      "request": "Translate write failures and timeouts into Khmer; fix settings and other writes timing out after12s",
+      "state": "Deployed",
+      "next": "Observe normal production writes; investigate only remaining server-side latency.",
+      "notes": "45-second mutation timeout handling preserves outcome=unknown, reads remain bounded at 12 seconds, no blind retries, and EN/KM write-error presentation is live. Focused tests, typecheck, i18n and build passed."
+    },
+    {
+      "id": "F79",
+      "request": "Keep Edit Customer button on the customer section heading row",
+      "state": "Deployed",
+      "next": "Keep the customer action row in responsive SaleDetailModal smoke coverage.",
+      "notes": "Edit Customer is rendered in the customer section heading row in the live release."
+    }
+  ],
+  "deployment": {
+    "commit": "4aba954f53d52cdff762b6a9b8413735139c547c",
+    "workerVersion": "175c9438-c783-45d9-b92e-e9962ca61580",
+    "deploymentId": "5bddcc0a-af46-40a8-b2dc-966f4114e769",
+    "percentage": 100,
+    "createdOn": "2026-09-09T08:07:58.902089Z"
+  },
+  "nextRelease": {
+    "priority": "Remaining transfer reliability and cleanup",
+    "scope": "Preserve F73 retry durability work and remaining employee/return verification. UI/mobile/public/customer portal later; offline paused. Duplicate execution remains held until urgent sales follow-through is complete."
+  },
+  "priorityOrder": [
+    "Urgent Not Paid stock rule and three-sale correction",
+    "Settings/write timeout and Khmer errors",
+    "Transfer retry durability",
+    "Remaining employee/return verification and cleanup",
+    "UI/customer heading/mobile fit",
+    "Public site and customer portal",
+    "Offline paused"
+  ],
+  "reviewFollowups": [
+    {
+      "id": "employee-review-origin",
+      "state": "Deferred P3 hardening observation; no demonstrated exploit",
+      "request": "Evaluate unsafe-method Origin/CSRF enforcement while preserving OAuth callbacks.",
+      "evidence": "outputs/takeover-20260909/employee-release-independent-review.json"
+    },
+    {
+      "id": "employee-review-body-limit",
+      "state": "Deferred P3 hardening observation",
+      "request": "Reject oversized return bodies before JSON parsing, including chunked requests.",
+      "evidence": "outputs/takeover-20260909/employee-release-independent-review.json"
+    },
+    {
+      "id": "R-GEN-1",
+      "request": "General repair rate counter is non-atomic; harden concurrent request admission.",
+      "state": "Deferred P3; nonblocking independent review observation",
+      "evidence": "f72-general-combined-security-review.json"
+    },
+    {
+      "id": "R-GEN-2",
+      "request": "Recheck General repair permission immediately before frontend apply; Worker403 remains authoritative.",
+      "state": "Deferred P3; nonblocking independent review observation",
+      "evidence": "f72-general-combined-security-review.json"
+    },
+    {
+      "id": "R-GEN-3",
+      "request": "Tighten General preview numeric types and outcome-marker parity.",
+      "state": "Deferred P3; nonblocking independent review observation",
+      "evidence": "f72-general-combined-security-review.json"
+    },
+    {
+      "id": "R-MERGE-1",
+      "request": "Explicitly mark duplicate preview requests/responses no-store.",
+      "state": "Deferred P3; nonblocking independent review observation",
+      "evidence": "product-merge-interruption-ui-security-review.json"
+    },
+    {
+      "id": "R-MERGE-2",
+      "request": "Bound relative quantity tolerance at implausibly large finite amounts.",
+      "state": "Deferred P3; nonblocking independent review observation",
+      "evidence": "product-merge-interruption-ui-security-review.json"
+    },
+    {
+      "id": "R-MERGE-3",
+      "request": "Strengthen legacy ready-snapshot operation ID checks in merge finalization.",
+      "state": "Deferred P3; nonblocking independent review observation",
+      "evidence": "product-merge-fastpath-security-review.json"
+    },
+    {
+      "id": "R-MERGE-4",
+      "request": "Suppress unverified numeric history IDs after adversarial wrong D1 metadata.",
+      "state": "Deferred P3; nonblocking independent review observation",
+      "evidence": "product-merge-fastpath-security-review.json"
+    },
+    {
+      "id": "R-D1-PRODUCT-CREATED",
+      "request": "Product stockActionCommit created flag uses exact-one D1 metadata; product triggers report9. Current importer ignores flag and safely reselects.",
+      "state": "Deferred P3",
+      "next": "Narrow flag fix plus native D1 regression; other five exact-one checks are safe."
+    },
+    {
+      "id": "R-RECOVERY-RESET-TOKEN",
+      "request": "Tighten migration145 recovery-receipt reset exception to require a nonempty reset token.",
+      "state": "Deferred P3; no reachable arbitrary flags writer identified",
+      "evidence": "sale-zero-items-recovery-independent-review.json"
+    }
+  ]
+}
