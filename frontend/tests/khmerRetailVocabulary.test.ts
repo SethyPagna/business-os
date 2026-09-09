@@ -65,6 +65,26 @@ assert.equal(km.inventory_batch_session, 'វគ្គទទួលស្តុ�
 assert.equal(en.confirm_apply_inventory_batch, 'Apply all stock changes in this receive session?')
 assert.equal(km.confirm_apply_inventory_batch, 'អនុវត្តការផ្លាស់ប្ដូរស្តុកទាំងអស់ក្នុងវគ្គទទួលស្តុកនេះមែនទេ?')
 
+// Delivery fee is the short owner-approved label.  Delivery-contact and
+// delivery-transport phrases may still use ដឹកជញ្ជូន, but every direct fee
+// label/message must use the same concise term as the English concept.
+const directDeliveryFeeKeys = [
+  'delivery_khr', 'delivery_absorbed', 'delivery_charged', 'delivery_fee',
+  'delivery_fee_label', 'delivery_fee_position', 'delivery_fee_row',
+  'delivery_fees', 'delivery_margin', 'rfd_delivery_khr', 'rfd_delivery_fee',
+  'rfd_delivery_fee_row', 'rfd_delivery_show_fee', 'show_delivery_fee',
+  'stats_delivery_fees', 'store_paid_delivery', 'rpt_delivery_charged',
+  'rpt_delivery_breakdown', 'rpt_delivery_collected', 'rpt_delivery_net',
+  'rpt_pending_delivery_collected', 'rpt_pending_delivery_paid',
+  'rpt_tax_delivery_collected', 'amend_fee_title', 'amend_fee_edit',
+  'amend_fee_new_total', 'delivery_amount_blank', 'delivery_amount_not_a_number',
+  'delivery_amount_negative', 'delivery_amount_too_large',
+  'record_kind_delivery_fee_changed',
+]
+for (const key of directDeliveryFeeKeys) {
+  assert.ok(!km[key]?.includes('ថ្លៃដឹកជញ្ជូន'), `km.json "${key}" must use concise ថ្លៃដឹក`)
+}
+
 // before → after is shown as one label on the product report; it must be
 // built from the same two words the list column headers use.
 assert.equal(
