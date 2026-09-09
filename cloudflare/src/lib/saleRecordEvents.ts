@@ -71,10 +71,11 @@ const FIELDS_BY_KIND: Record<Exclude<SaleRecordKind, 'legacy_sale_change'>, read
   payment_settled: ['payment_method', 'payment_details', 'amount_paid_usd', 'amount_paid_khr', 'change_usd', 'change_khr', 'sale_status'],
   cancelled: ['sale_status', 'cancel_reason', 'cancel_note'],
   sale_items_recovered: ['item_count', 'stock_effect'],
+  sale_stock_corrected: ['held_units', 'stock_effect'],
 }
 
 const NUMERIC_FIELDS = new Set<SaleRecordField>([
-  'total_usd', 'quantity', 'delivery_fee_usd', 'actual_delivery_cost_usd',
+  'total_usd', 'quantity', 'delivery_fee_usd', 'actual_delivery_cost_usd', 'held_units',
   'amount_paid_usd', 'amount_paid_khr', 'change_usd', 'change_khr',
 ])
 const TEXT_FIELDS = new Set<SaleRecordField>([
