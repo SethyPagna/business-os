@@ -3226,7 +3226,7 @@ app.get('/:id/records', async (c) => {
   // trap the count query documents, and the reason both sides go through
   // saleRecordsCountBinds / this explicit String().
   const auditRows = await db.prepare(`
-    SELECT id, action, details, user_name, created_at
+    SELECT id, action, details, old_value, new_value, user_name, created_at
     FROM audit_logs WHERE entity = 'sale' AND entity_id = ? ORDER BY id ASC
   `).all<SaleRecordAuditRow>([String(saleId)])
 

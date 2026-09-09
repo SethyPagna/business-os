@@ -101,6 +101,7 @@ export const SALE_RECORD_KINDS = [
   'payment_changed',
   'payment_settled',
   'cancelled',
+  'sale_items_recovered',
   'legacy_sale_change',
 ] as const
 export type SaleRecordKind = (typeof SALE_RECORD_KINDS)[number]
@@ -130,6 +131,8 @@ export const SALE_RECORD_FIELDS = [
   'change_khr',
   'cancel_reason',
   'cancel_note',
+  'item_count',
+  'stock_effect',
 ] as const
 export type SaleRecordField = (typeof SALE_RECORD_FIELDS)[number]
 
@@ -720,6 +723,8 @@ export interface SaleRecordAuditRow {
   id: number
   action?: string | null
   details?: unknown
+  old_value?: unknown
+  new_value?: unknown
   user_name?: string | null
   created_at?: string | null
 }
@@ -762,6 +767,34 @@ export function auditRecord(row: SaleRecordAuditRow): SaleRecord | null {
     at_ms: atMs(at),
     actor_username: text(row.user_name),
     via: null,
+  }
+
+  if (action === 'recover_missing_sale_items') {
+    const beforeState = parseDetails(row.old_value)
+    const afterState = parseDetails(row.new_value)
+    const beforeCount = beforeState?.item_count
+    const afterCount = afterState?.item_count
+    if (beforeCount !== 0 || typeof afterCount !== 'number'
+      || !Number.isSafeInteger(afterCount) || afterCount < 1) {
+      return {
+        ...base,
+        kind: 'legacy_sale_change',
+        subject: null,
+        summary: 'Earlier sale change',
+        before: null,
+        after: null,
+      }
+    }
+    const stockEffect = details.stock_effect === 'deducted_now' || details.stock_effect === 'released_allocation_only'
+      ? details.stock_effect : null
+    return {
+      ...base,
+      kind: 'sale_items_recovered',
+      subject: null,
+      summary: 'Sale items recovered',
+      before: { item_count: beforeCount, stock_effect: null },
+      after: { item_count: afterCount, ...(stockEffect ? { stock_effect: stockEffect } : {}) },
+    }
   }
 
   if (action === 'sale_settlement') {
@@ -1341,6 +1374,11 @@ function publicRecord(record: SaleRecord): SaleRecord {
     }
   } else if (record.kind === 'status_changed') {
     addChange(changes, 'sale_status', fieldState(record, 'before', 'sale_status'), fieldState(record, 'after', 'sale_status'))
+  } else if (record.kind === 'sale_items_recovered') {
+    addChange(changes, 'item_count', fieldState(record, 'before', 'item_count'), fieldState(record, 'after', 'item_count'), true)
+    if (record.after && (record.after.stock_effect === 'deducted_now' || record.after.stock_effect === 'released_allocation_only')) {
+      addChange(changes, 'stock_effect', fieldState(record, 'before', 'stock_effect'), fieldState(record, 'after', 'stock_effect'), true)
+    }
   }
   const { before: _before, after: _after, unknown_before_fields: _ub, unknown_after_fields: _ua, ...publicFields } = record
   return { ...publicFields, changes }
