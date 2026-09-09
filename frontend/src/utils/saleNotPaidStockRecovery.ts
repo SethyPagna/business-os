@@ -7,6 +7,11 @@ export const SALE_NOT_PAID_STOCK_RECOVERY_CONFIRMATION = 'CORRECT NOT PAID STOCK
 const PREVIEW_PATH = '/api/system/sale-not-paid-stock-recovery-20260909/preview'
 const APPLY_PATH = '/api/system/sale-not-paid-stock-recovery-20260909/apply'
 const SALE_IDS = [16952, 16953, 16954] as const
+const SALE_TUPLES: Readonly<Record<(typeof SALE_IDS)[number], Readonly<{ receipt_number: string; line_count: number; unit_count: number }>>> = {
+  16952: { receipt_number: '20260909-104116', line_count: 1, unit_count: 1 },
+  16953: { receipt_number: '20260909-111455', line_count: 2, unit_count: 2 },
+  16954: { receipt_number: '20260909-130228', line_count: 1, unit_count: 1 },
+}
 const AFFECTED = { sales: 3, items: 4, allocations: 4, units: 4, movements: 4, histories: 3, audits: 3 } as const
 const SUMMARY = { sales: 3, items: 4, allocations: 4, units: 4, movements: 4 } as const
 
@@ -110,6 +115,8 @@ function sale(value: unknown, index: number): SaleNotPaidStockRecoverySale {
   const id = item.id
   if (!SALE_IDS.includes(id as (typeof SALE_IDS)[number]) || item.status !== 'awaiting_payment' || item.stock_effect !== 'deduct_now'
     || typeof item.receipt_number !== 'string' || !item.receipt_number.trim()) invalid(`sales[${index}] is not a fixed awaiting-payment stock deduction`)
+  const expected = SALE_TUPLES[id as (typeof SALE_IDS)[number]]
+  if (item.receipt_number !== expected.receipt_number || item.line_count !== expected.line_count || item.unit_count !== expected.unit_count) invalid(`sales[${index}] receipt, line, and unit counts do not match the fixed recovery`)
   return freeze({
     id: id as (typeof SALE_IDS)[number],
     receipt_number: item.receipt_number,
@@ -130,14 +137,15 @@ export function validateSaleNotPaidStockRecoveryPreview(value: unknown): SaleNot
   return freeze({ success: true, target: SALE_NOT_PAID_STOCK_RECOVERY_TARGET, outcome: preview.outcome, request: exactRequest(preview.request), sales, summary: SUMMARY })
 }
 
-export function validateSaleNotPaidStockRecoveryResponse(value: unknown): SaleNotPaidStockRecoveryResult {
+export function validateSaleNotPaidStockRecoveryResponse(value: unknown, request?: Pick<SaleNotPaidStockRecoveryRequest, 'manifest_sha256'>): SaleNotPaidStockRecoveryResult {
   const response = record(value, 'apply response')
   if ((response.success !== true && response.success !== false) || !['applied', 'already_applied', 'uncertain'].includes(String(response.outcome))
     || typeof response.verification_pending !== 'boolean' || typeof response.cache_invalidated !== 'boolean'
     || typeof response.refresh_pending !== 'boolean' || typeof response.broadcast_requested !== 'boolean'
     || typeof response.operation_id !== 'string' || !response.operation_id.trim()
     || typeof response.message !== 'string' || !response.message.trim()) invalid('apply response is incomplete')
-  digest(response.manifest_sha256, 'apply response.manifest_sha256')
+  const responseDigest = digest(response.manifest_sha256, 'apply response.manifest_sha256')
+  if (request && responseDigest !== request.manifest_sha256) invalid('apply response digest does not match the held request')
   if (!response.cache_invalidated && !response.refresh_pending) invalid('a non-invalidated cache must require refresh')
   if (response.success === false) {
     if (response.outcome !== 'uncertain' || response.verification_pending !== true || response.cache_invalidated !== false
@@ -158,7 +166,7 @@ export async function previewSaleNotPaidStockRecovery(): Promise<SaleNotPaidStoc
 }
 
 export async function applySaleNotPaidStockRecovery(request: SaleNotPaidStockRecoveryRequest): Promise<SaleNotPaidStockRecoveryResult> {
-  const result = validateSaleNotPaidStockRecoveryResponse(await apiFetch('POST', APPLY_PATH, request, SALE_NOT_PAID_STOCK_RECOVERY_APPLY_TIMEOUT_MS))
+  const result = validateSaleNotPaidStockRecoveryResponse(await apiFetch('POST', APPLY_PATH, request, SALE_NOT_PAID_STOCK_RECOVERY_APPLY_TIMEOUT_MS), request)
   if (saleNotPaidStockRecoveryIsComplete(result)) {
     cacheInvalidateWithDerived('sales')
     cacheInvalidateWithDerived('products')
