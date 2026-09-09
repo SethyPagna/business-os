@@ -296,10 +296,13 @@ function toNumber(value: number | string | null | undefined): number {
 // Every card in this modal wears the same shell, so "Sale", "Customer",
 // "Delivery" and the items/money block are visibly one family instead of the
 // four different treatments they used to be.
-function SectionCard({ title, children, className = '' }: { title: string; children: ReactNode; className?: string }) {
+function SectionCard({ title, children, action, className = '' }: { title: string; children: ReactNode; action?: ReactNode; className?: string }) {
   return (
     <section className={`rounded-xl border border-gray-200 p-3 dark:border-gray-700 ${className}`}>
-      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{title}</div>
+      <div className="mb-2 flex min-w-0 items-center justify-between gap-2">
+        <div className="min-w-0 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{title}</div>
+        {action ? <div className="shrink-0">{action}</div> : null}
+      </div>
       {children}
     </section>
   )
@@ -1489,8 +1492,7 @@ export default function SaleDetailModal({
               </DetailRowGroup>
             </SectionCard>
 
-            <SectionCard title={t('customer') || 'Customer'}>
-              {onCustomerAction ? <div className="mb-3 flex justify-end"><button type="button" className="btn-secondary text-xs" onClick={() => onCustomerAction(sale)}>{t('sale_customer_edit_entry') || 'Edit customer'}</button></div> : null}
+            <SectionCard title={t('customer') || 'Customer'} action={onCustomerAction ? <button type="button" className="btn-secondary text-xs" onClick={() => onCustomerAction(sale)}>{t('sale_customer_edit_entry') || 'Edit customer'}</button> : null}>
               <DetailRowGroup>
                 <DetailRow label={t('customer_name') || 'Customer'} value={sale.customer_name} />
                 {!customerIsAnonymous ? <div className="hidden sm:block"><DetailRow label={t('phone') || 'Phone'} value={sale.customer_phone} /></div> : null}
