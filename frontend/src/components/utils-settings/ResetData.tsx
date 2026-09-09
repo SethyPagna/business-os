@@ -590,7 +590,8 @@ function SectionReset({ actionHistory = null }: ResetPanelProps) {
 
   return (
     <div className="space-y-4">
-      <SaleIncidentRecovery />
+      <SaleIncidentRecovery variant="v1" />
+      <SaleIncidentRecovery variant="v2" />
       <GeneralCustomerRepair />
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {SECTIONS.map((entry) => (
