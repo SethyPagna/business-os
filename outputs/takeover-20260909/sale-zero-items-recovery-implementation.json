@@ -9,7 +9,7 @@
   "status": "completed",
   "summary": "Prepared a fixed, authenticated Admin recovery for the three sales whose line costs are supported by sale-time product fingerprints. Preview is no-store and digest-bound; apply requires backup_restore, a same-origin exact body, rate/body gates and a fresh backup, then restores four lines and allocations for sales 16951-16953 in one guarded D1 batch with a durable receipt, non-reversible history and redacted provenance audit. Sale 16951 alone deducts stock and records a sale movement because it is completed; awaiting sales 16952-16953 receive released allocations without stock effects. Sale 16952 keeps its later USD 2.70 fee/actual-cost edits and repairs only item-derived subtotal/total. Sale 16954 is reported as blocked because current product cost matches its pre-sale lot cost but the product row was updated after the sale, so sale-time product cost is not proven.",
   "base_sha": "4285586ed72cab5014428120dcdc03e7d09dd604",
-  "head_sha": "a45da43d8cac4782aa2828388e2cca6422917b27",
+  "head_sha": "3eef3a04c3c22295f2b6a8d2c75af29ace896a8c",
   "workspace": {
     "branch": "codex/sale-zero-items-recovery-20260909",
     "worktree": "C:/Users/mrkl6/Downloads/bos-sale-zero-items-recovery-20260909",
@@ -26,7 +26,8 @@
     "Added a read-only evidence compiler, preview contract validator, current production evidence summary, offline manifest and explicitly read-only pre/post SQL review queries."
   ],
   "commits": [
-    "a45da43d8cac4782aa2828388e2cca6422917b27"
+    "a45da43d8cac4782aa2828388e2cca6422917b27",
+    "3eef3a04c3c22295f2b6a8d2c75af29ace896a8c"
   ],
   "evidence": [
     {
@@ -103,5 +104,5 @@
     "No line, stock or money value for sale 16954 was written or represented as proven.",
     "No frontend file was edited; the separate UI owner received the frozen preview/apply contract."
   ],
-  "handoff": "Independent review should pin runtime commit a45da43d8cac4782aa2828388e2cca6422917b27, inspect D1 guard/postcondition semantics and run the two focused tests plus Worker typecheck. Release must apply only migration 0145, deploy the Worker/UI, obtain a fresh no-store preview, and let the normal Admin UI submit the exact held request. If preview returns 409, do not weaken guards; refresh production evidence and revise the fixed manifest. Sale 16954 needs separate pre-sale product-cost evidence and a v2 receipt before recovery."
+  "handoff": "Independent review should pin runtime commit 3eef3a04c3c22295f2b6a8d2c75af29ace896a8c, inspect D1 guard/postcondition semantics and run the two focused tests plus Worker typecheck. Release must apply only migration 0145, deploy the Worker/UI, obtain a fresh no-store preview, and let the normal Admin UI submit the exact held request. If preview returns 409, do not weaken guards; refresh production evidence and revise the fixed manifest. Sale 16954 needs separate pre-sale product-cost evidence and a v2 receipt before recovery."
 }
