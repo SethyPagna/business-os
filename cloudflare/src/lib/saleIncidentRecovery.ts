@@ -113,6 +113,11 @@ export type SaleIncidentRecoveryRequest = {
 
 export class SaleIncidentRecoveryValidationError extends Error {}
 export class SaleIncidentRecoveryConflictError extends Error {}
+export class SaleIncidentRecoveryUncertainError extends Error {
+  constructor(public readonly operationId: string, public readonly manifestSha256: string) {
+    super('The recovery request may have committed, but its durable receipt could not be read. Retry the exact held request before taking any other action.')
+  }
+}
 
 function validation(message: string): never { throw new SaleIncidentRecoveryValidationError(message) }
 function conflict(message: string): never { throw new SaleIncidentRecoveryConflictError(message) }
@@ -379,16 +384,16 @@ function buildStatements(
         AND (SELECT COUNT(*) FROM audit_logs WHERE entity='sale' AND entity_id IN ('16951','16952','16953'))=0
         AND (SELECT COUNT(*) FROM action_history WHERE entity='sale_incident_recovery' AND entity_id IN ('16951','16952','16953'))=0
         AND (SELECT group_concat(value,'|') FROM (SELECT s.id||':'||r.revision||':'||s.updated_at AS value FROM sales s JOIN sale_write_revisions r ON r.sale_id=s.id WHERE s.id IN (16951,16952,16953) ORDER BY s.id))=@sale_guard
-        AND (SELECT group_concat(value,'|') FROM (SELECT p.id||':'||p.cost_price_usd||':'||p.cost_price_khr||':'||p.stock_quantity||':'||p.updated_at||':'||bs.quantity AS value FROM products p JOIN branch_stock bs ON bs.product_id=p.id AND bs.branch_id=2 WHERE p.id IN (409,859,3490,4208) ORDER BY p.id))=@product_guard
-        AND (SELECT group_concat(value,'|') FROM (SELECT pb.variant_product_id||':'||pb.id||':'||bbs.id||':'||bbs.quantity AS value FROM product_batches pb JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id AND bbs.branch_id=2 WHERE pb.variant_product_id IN (409,859,3490,4208) AND pb.is_active=1 AND bbs.quantity>0 ORDER BY pb.variant_product_id))=@lot_guard
+        AND (SELECT group_concat(value,'|') FROM (SELECT p.id||':'||p.name||':'||p.is_active||':'||p.cost_price_usd||':'||p.cost_price_khr||':'||p.stock_quantity||':'||p.updated_at||':'||bs.quantity AS value FROM products p JOIN branch_stock bs ON bs.product_id=p.id AND bs.branch_id=2 WHERE p.id IN (409,859,3490,4208) ORDER BY p.id))=@product_guard
+        AND (SELECT group_concat(value,'|') FROM (SELECT pb.variant_product_id||':'||pb.id||':'||bbs.id||':'||pb.lot_code||':'||bbs.quantity AS value FROM product_batches pb JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id AND bbs.branch_id=2 WHERE pb.variant_product_id IN (409,859,3490,4208) AND pb.is_active=1 AND bbs.quantity>0 ORDER BY pb.variant_product_id))=@lot_guard
         AND (SELECT group_concat(value,'|') FROM (SELECT s.id||':'||(SELECT COUNT(*) FROM sale_amendments WHERE sale_id=s.id)||':'||(SELECT COUNT(*) FROM sale_mutation_receipts WHERE sale_id=s.id) AS value FROM sales s WHERE s.id IN (16951,16952,16953) ORDER BY s.id))='16951:0:0|16952:2:2|16953:0:0'
         AND (SELECT delivery_fee_usd||':'||delivery_actual_cost_usd||':'||subtotal_usd||':'||total_usd FROM sales WHERE id=16952)='2.7:2.7:0.0:0.0'
         THEN 1 ELSE 0 END`,
     params: {
       incident: SALE_INCIDENT_RECOVERY_TARGET,
       sale_guard: '16951:1:2026-09-09 03:19:13|16952:6:2026-09-09T03:55:19.857Z|16953:1:2026-09-09 04:14:55',
-      product_guard: '409:6.5:0.0:9.0:2026-09-08 08:45:26:3.0|859:280.0:0.0:1.0:2026-09-02T15:30:00.000Z:1.0|3490:18.0:0.0:3.0:2026-09-02T15:30:00.000Z:3.0|4208:9.55:0.0:288.0:2026-09-08T15:19:49.111Z:96.0',
-      lot_guard: '409:51466:58719:3.0|859:53462:62711:1.0|3490:51280:58347:3.0|4208:61143:77975:96.0',
+      product_guard: '409:Canmake Eyeliner Dark Brown 03:1:6.5:0.0:9.0:2026-09-08 08:45:26:3.0|859:Chanel Set Limited:1:280.0:0.0:1.0:2026-09-02T15:30:00.000Z:1.0|3490:Lancôme Idole Mascara 8ml:1:18.0:0.0:3.0:2026-09-02T15:30:00.000Z:3.0|4208:Maybelline Loose Powder 05:1:9.55:0.0:288.0:2026-09-08T15:19:49.111Z:96.0',
+      lot_guard: '409:51466:58719:ADJ09/02/2026:3.0|859:53462:62711:ADJ09/02/2026:1.0|3490:51280:58347:ADJ09/02/2026:3.0|4208:61143:77975:09082026:96.0',
     },
   }, {
     sql: `INSERT INTO sale_incident_recovery_receipts(id,incident_key,actor_id,actor_name,request_digest,request_json,before_json,after_json,response_json,backup_created)
@@ -512,10 +517,29 @@ function buildStatements(
   return statements
 }
 
-async function verifiedResponse(db: Pick<D1Compat, 'prepare'>, operationId: string, outcome: 'applied' | 'already_applied') {
-  const row = await db.prepare(`SELECT response_json FROM sale_incident_recovery_receipts WHERE id=@id AND incident_key=@incident`).get<{ response_json: string }>({ id: operationId, incident: SALE_INCIDENT_RECOVERY_TARGET })
-  if (!row) conflict('The recovery receipt could not be verified after apply.')
-  const stored = JSON.parse(row.response_json) as Record<string, unknown>
+function expectedResponse(operationId: string, manifestSha256: string, outcome: 'applied' | 'already_applied') {
+  return {
+    success: true,
+    outcome,
+    operation_id: operationId,
+    manifest_sha256: manifestSha256,
+    affected: { sales: 3, items: 4, allocations: 4, movements: 1, histories: 3, audits: 3 },
+  }
+}
+
+function storedResponse(row: { id: string; request_digest: string; response_json: string }, outcome: 'applied' | 'already_applied') {
+  let stored: Record<string, unknown>
+  try { stored = JSON.parse(row.response_json) as Record<string, unknown> } catch { conflict('The durable recovery receipt is malformed. No recovery was retried.') }
+  const expected = expectedResponse(row.id, row.request_digest, 'applied')
+  if (stored.success !== true || stored.outcome !== 'applied' || stored.operation_id !== expected.operation_id
+    || stored.manifest_sha256 !== expected.manifest_sha256
+    || JSON.stringify(stored.affected) !== JSON.stringify(expected.affected)) {
+    conflict('The durable recovery receipt does not match the fixed recovery contract. No recovery was retried.')
+  }
+  return { ...stored, outcome, operation_id: row.id, verification_pending: false }
+}
+
+async function verifyImmediateAfterState(db: Pick<D1Compat, 'prepare'>, operationId: string): Promise<boolean> {
   const counts = await db.prepare(`SELECT
     (SELECT COUNT(*) FROM sale_items WHERE sale_id IN (16951,16952,16953)) AS items,
     (SELECT COUNT(*) FROM sale_items WHERE
@@ -536,21 +560,58 @@ async function verifiedResponse(db: Pick<D1Compat, 'prepare'>, operationId: stri
     || Number(counts.allocations) !== 4 || Number(counts.movements) !== 1 || Number(counts.members) !== 3
     || Number(counts.histories) !== 3 || Number(counts.audits) !== 3 || Number(counts.revisions) !== 3
     || Number(counts.sale16952) !== 1 || Number(counts.stock16951) !== 1) {
-    conflict('The stored recovery receipt does not match the required after-state.')
+    return false
   }
-  return { ...stored, outcome, operation_id: operationId }
+  return true
 }
 
 export async function applySaleIncidentRecovery(
   db: Pick<D1Compat, 'prepare' | 'batch'>,
   prepared: Awaited<ReturnType<typeof prepareSaleIncidentRecovery>>,
 ) {
-  if (prepared.outcome === 'already_applied') return verifiedResponse(db, prepared.operationId, 'already_applied')
+  if (prepared.outcome === 'already_applied') {
+    const receipt = await readReceipt(db)
+    if (!receipt || receipt.id !== prepared.operationId || receipt.request_digest !== prepared.request.manifest_sha256) {
+      conflict('The durable recovery receipt changed before replay. No recovery was retried.')
+    }
+    return storedResponse(receipt, 'already_applied')
+  }
   try {
     await db.batch(prepared.statements)
   } catch (error) {
-    const receipt = await readReceipt(db)
-    if (!receipt || receipt.id !== prepared.operationId || receipt.request_digest !== prepared.request.manifest_sha256) throw error
+    let receipt
+    try { receipt = await readReceipt(db) } catch {
+      throw new SaleIncidentRecoveryUncertainError(prepared.operationId, prepared.request.manifest_sha256)
+    }
+    if (!receipt || receipt.id !== prepared.operationId || receipt.request_digest !== prepared.request.manifest_sha256) {
+      try {
+        const current = await readCanonicalManifest(db)
+        assertExpected(current)
+        if (await sha256(JSON.stringify(current)) !== prepared.request.manifest_sha256) {
+          conflict('Recovery state changed after backup. Fetch a new preview.')
+        }
+      } catch (refreshError) {
+        if (refreshError instanceof SaleIncidentRecoveryConflictError) throw refreshError
+      }
+      throw error
+    }
+    const response = storedResponse(receipt, 'applied')
+    let verified = false
+    try { verified = await verifyImmediateAfterState(db, prepared.operationId) } catch { /* receipt still proves one atomic commit */ }
+    return { ...response, verification_pending: !verified }
   }
-  return verifiedResponse(db, prepared.operationId, 'applied')
+  const fallback = expectedResponse(prepared.operationId, prepared.request.manifest_sha256, 'applied')
+  try {
+    const receipt = await readReceipt(db)
+    if (!receipt || receipt.id !== prepared.operationId || receipt.request_digest !== prepared.request.manifest_sha256) {
+      return { ...fallback, verification_pending: true }
+    }
+    const response = storedResponse(receipt, 'applied')
+    let verified = false
+    try { verified = await verifyImmediateAfterState(db, prepared.operationId) } catch { /* reported below */ }
+    return { ...response, verification_pending: !verified }
+  } catch (error) {
+    if (error instanceof SaleIncidentRecoveryConflictError) throw error
+    return { ...fallback, verification_pending: true }
+  }
 }

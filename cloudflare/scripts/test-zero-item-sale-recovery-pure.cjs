@@ -9,15 +9,21 @@ const USER = { id: 91, username: 'recovery_admin', name: 'Recovery Admin', permi
 let currentUser = USER
 let backupCalls = 0
 let failBackup = false
+let beforeBackup = null
 const moduleCache = new Map()
 
 function routeDb(db, hooks = {}) {
+  let batchCommitted = false
   const api = {
     prepare(sql) {
       const statement = db.prepare(sql)
       return {
         all: (params) => statement.all(params),
-        get: (params) => statement.get(params),
+        get: (params) => {
+          if (batchCommitted && hooks.failReceiptReadAfterBatch && /FROM sale_incident_recovery_receipts/i.test(sql)) throw new Error('simulated receipt read failure')
+          if (batchCommitted && hooks.failAfterStateReadAfterBatch && /AS matched_items/i.test(sql)) throw new Error('simulated after-state read failure')
+          return statement.get(params)
+        },
         run: async (params) => {
           const result = statement.run(params)
           return { changes: Number(result.meta?.changes || 0), lastInsertRowid: Number(result.meta?.last_row_id || 0) }
@@ -26,6 +32,7 @@ function routeDb(db, hooks = {}) {
     },
     batch: async (statements) => {
       const result = await db.batch(statements)
+      batchCommitted = true
       if (hooks.afterBatchThrow) throw new Error('simulated lost D1 response')
       return result
     },
@@ -49,6 +56,7 @@ const overrides = {
     createSectionBackup: async () => {
       backupCalls += 1
       if (failBackup) throw new Error('forced backup failure')
+      if (beforeBackup) await beforeBackup()
       return {}
     },
   },
@@ -155,7 +163,21 @@ function state(db) {
     db.prepare(`INSERT INTO sale_incident_recovery_receipts(id,incident_key,actor_id,actor_name,request_digest,request_json,before_json,after_json,response_json,backup_created) VALUES('v2-proof','sale-zero-items-20260909-v2',91,'Recovery Admin','digest','{}','{}','{}','{}',1)`).run()
     db.prepare(`INSERT INTO sale_incident_recovery_members(operation_id,sale_id,history_id,before_json,after_json) VALUES('v2-proof',16954,@history,'{}','{}')`).run({ history: Number(history.meta.last_row_id) })
     assert.equal(db.prepare('SELECT sale_id FROM sale_incident_recovery_members').get().sale_id, 16954)
-    console.log('PASS migration 0145 reserves a separate v2 receipt for blocked sale 16954 without adding it to v1')
+    assert.throws(() => db.prepare("UPDATE sale_incident_recovery_receipts SET response_json='{}' WHERE id='v2-proof'").run(), /append-only/)
+    assert.throws(() => db.prepare("DELETE FROM sale_incident_recovery_members WHERE operation_id='v2-proof'").run(), /append-only/)
+    await db.batch([
+      { sql: `INSERT INTO system_flags(key,value) VALUES('sale_incident_recovery_reset_guard','{"mode":"reset","token":"test"}')` },
+      { sql: "DELETE FROM sale_incident_recovery_members WHERE operation_id='v2-proof'" },
+      { sql: "DELETE FROM sale_incident_recovery_receipts WHERE id='v2-proof'" },
+      { sql: "DELETE FROM system_flags WHERE key='sale_incident_recovery_reset_guard'" },
+    ])
+    db.prepare(`INSERT INTO sale_incident_recovery_receipts(id,incident_key,actor_id,actor_name,request_digest,request_json,before_json,after_json,response_json,backup_created) VALUES('v2-restore','sale-zero-items-20260909-v2',91,'Recovery Admin','digest','{}','{}','{}','{}',1)`).run()
+    db.prepare(`INSERT INTO sale_incident_recovery_members(operation_id,sale_id,history_id,before_json,after_json) VALUES('v2-restore',16954,@history,'{}','{}')`).run({ history: Number(history.meta.last_row_id) })
+    db.prepare(`INSERT INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore"}')`).run()
+    db.prepare("DELETE FROM sale_incident_recovery_members WHERE operation_id='v2-restore'").run()
+    db.prepare("DELETE FROM sale_incident_recovery_receipts WHERE id='v2-restore'").run()
+    db.prepare("DELETE FROM system_flags WHERE key='maintenance'").run()
+    console.log('PASS migration 0145 reserves v2 and makes receipts append-only outside guarded reset/restore')
   }
   {
     const f = fixture()
@@ -190,6 +212,10 @@ function state(db) {
     const unknowns = f.raw.prepare('SELECT price_mode,base_price_usd,base_price_khr,product_discount_usd,manual_discount_usd FROM sale_items WHERE sale_id=16951').get()
     assert.deepEqual({ ...unknowns }, { price_mode: null, base_price_usd: null, base_price_khr: null, product_discount_usd: 0, manual_discount_usd: 0 })
     assert.equal(backupCalls, 1)
+    f.raw.prepare("UPDATE sales SET sale_status='completed' WHERE id=16953").run()
+    f.raw.prepare('UPDATE products SET stock_quantity=251 WHERE id=4208').run()
+    f.raw.prepare('UPDATE branch_stock SET quantity=59 WHERE product_id=4208 AND branch_id=2').run()
+    f.raw.prepare('UPDATE branch_batch_stock SET quantity=59 WHERE id=77975').run()
     const replay = await call(f.env, '/sale-incident-recovery-20260909/apply', {
       method: 'POST', headers: { 'content-type': 'application/json', origin: 'http://localhost', 'sec-fetch-site': 'same-origin' }, body: JSON.stringify(preview.body.request),
     })
@@ -197,7 +223,9 @@ function state(db) {
     assert.equal(replay.body.outcome, 'already_applied')
     assert.equal(backupCalls, 1, 'exact replay must not take a second backup')
     assert.equal(state(f.raw).items, 4)
-    console.log('PASS fixed preview, atomic apply, sale16952 preservation, explicit unknowns and exact replay')
+    assert.equal(f.raw.prepare('SELECT sale_status FROM sales WHERE id=16953').get().sale_status, 'completed')
+    assert.equal(f.raw.prepare('SELECT stock_quantity FROM products WHERE id=4208').get().stock_quantity, 251)
+    console.log('PASS apply preserves sale16952 and receipt replay neither rejects nor overwrites legitimate later changes')
   }
 
   {
@@ -213,6 +241,19 @@ function state(db) {
   }
 
   {
+    const f = fixture()
+    const preview = await call(f.env, '/sale-incident-recovery-20260909/preview')
+    beforeBackup = () => f.raw.prepare("UPDATE product_batches SET lot_code='CHANGED-AFTER-PREVIEW' WHERE id=61143").run()
+    const stale = await call(f.env, '/sale-incident-recovery-20260909/apply', {
+      method: 'POST', headers: { 'content-type': 'application/json', origin: 'http://localhost' }, body: JSON.stringify(preview.body.request),
+    })
+    beforeBackup = null
+    assert.equal(stale.status, 409, JSON.stringify(stale.body))
+    assert.deepEqual(state(f.raw), { items: 0, allocations: 0, movements: 0, receipts: 0, histories: 0, audits: 0, product4208: 288, branch4208: 96, batch4208: 96 })
+    console.log('PASS lot label race during backup is rejected by the in-batch fingerprint and typed stale recheck')
+  }
+
+  {
     const f = fixture({ afterBatchThrow: true })
     const preview = await call(f.env, '/sale-incident-recovery-20260909/preview')
     const recovered = await call(f.env, '/sale-incident-recovery-20260909/apply', {
@@ -223,6 +264,33 @@ function state(db) {
     assert.equal(state(f.raw).receipts, 1)
     assert.equal(state(f.raw).items, 4)
     console.log('PASS lost D1 response reconciles the exact committed receipt without a second mutation')
+  }
+
+  {
+    const f = fixture({ afterBatchThrow: true, failReceiptReadAfterBatch: true })
+    const preview = await call(f.env, '/sale-incident-recovery-20260909/preview')
+    const uncertain = await call(f.env, '/sale-incident-recovery-20260909/apply', {
+      method: 'POST', headers: { 'content-type': 'application/json', origin: 'http://localhost' }, body: JSON.stringify(preview.body.request),
+    })
+    assert.equal(uncertain.status, 202, JSON.stringify(uncertain.body))
+    assert.equal(uncertain.body.outcome, 'uncertain')
+    assert.equal(uncertain.body.verification_pending, true)
+    assert.equal(uncertain.body.refresh_pending, true)
+    assert.equal(state(f.raw).receipts, 1, 'simulated network uncertainty occurs after the atomic commit')
+    console.log('PASS unresolved post-commit receipt read returns honest uncertain/pending state')
+  }
+
+  {
+    const f = fixture({ failAfterStateReadAfterBatch: true })
+    const preview = await call(f.env, '/sale-incident-recovery-20260909/preview')
+    const pending = await call(f.env, '/sale-incident-recovery-20260909/apply', {
+      method: 'POST', headers: { 'content-type': 'application/json', origin: 'http://localhost' }, body: JSON.stringify(preview.body.request),
+    })
+    assert.equal(pending.status, 200, JSON.stringify(pending.body))
+    assert.equal(pending.body.outcome, 'applied')
+    assert.equal(pending.body.verification_pending, true)
+    assert.equal(state(f.raw).receipts, 1)
+    console.log('PASS committed receipt with unavailable immediate after-state reports verification_pending')
   }
 
   {

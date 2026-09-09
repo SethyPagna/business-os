@@ -39,6 +39,7 @@ import { actorSnapshot } from '../lib/actorSnapshot'
 const MAX_IMAGE_DELETES_PER_RESET = 500
 
 const SALE_RECORD_RESET_GUARD_KEY = 'sale_record_events_reset_guard'
+const SALE_INCIDENT_RECOVERY_RESET_GUARD_KEY = 'sale_incident_recovery_reset_guard'
 
 type ResetStatement = { sql: string; params?: Record<string, unknown> }
 
@@ -54,7 +55,19 @@ function guardSaleRecordReset(statements: ResetStatement[]): ResetStatement[] {
             ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=CURRENT_TIMESTAMP`,
       params: { key: SALE_RECORD_RESET_GUARD_KEY, token },
     },
+    {
+      sql: `INSERT INTO system_flags(key,value,updated_at)
+            VALUES(@key,json_object('mode','reset','token',@token),CURRENT_TIMESTAMP)
+            ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=CURRENT_TIMESTAMP`,
+      params: { key: SALE_INCIDENT_RECOVERY_RESET_GUARD_KEY, token },
+    },
     ...statements,
+    {
+      sql: `DELETE FROM system_flags
+            WHERE key=@key AND json_extract(value,'$.mode')='reset'
+              AND json_extract(value,'$.token')=@token`,
+      params: { key: SALE_INCIDENT_RECOVERY_RESET_GUARD_KEY, token },
+    },
     {
       sql: `DELETE FROM system_flags
             WHERE key=@key AND json_extract(value,'$.mode')='reset'
@@ -397,6 +410,8 @@ app.post('/reset-data', async (c) => {
   try {
     const statements: Array<{ sql: string }> = [
       { sql: 'DELETE FROM sale_record_events' },
+      { sql: 'DELETE FROM sale_incident_recovery_members' },
+      { sql: 'DELETE FROM sale_incident_recovery_receipts' },
       { sql: 'DELETE FROM return_mutation_receipts' },
       { sql: 'DELETE FROM return_create_receipts' },
       { sql: 'DELETE FROM return_create_guards' },
@@ -806,7 +821,7 @@ app.post('/sale-incident-recovery-20260909/apply', async (c) => {
     const refreshPending = refreshes.some((entry) => entry.status === 'rejected')
     return c.json({
       ...result,
-      verification_pending: false,
+      verification_pending: Boolean(result.verification_pending),
       cache_invalidated: cacheInvalidated,
       refresh_pending: refreshPending,
       broadcast_requested: true,
@@ -815,6 +830,19 @@ app.post('/sale-incident-recovery-20260909/apply', async (c) => {
         : 'This exact three-sale recovery was already applied. No sale, stock, audit, history or backup row changed; cache refresh was retried.',
     })
   } catch (error) {
+    if (error instanceof recovery.SaleIncidentRecoveryUncertainError) {
+      return c.json({
+        success: false,
+        outcome: 'uncertain',
+        operation_id: error.operationId,
+        manifest_sha256: error.manifestSha256,
+        verification_pending: true,
+        cache_invalidated: false,
+        refresh_pending: true,
+        broadcast_requested: false,
+        message: error.message,
+      }, 202)
+    }
     if (error instanceof recovery.SaleIncidentRecoveryConflictError) {
       return c.json({ success: false, error: error.message }, 409)
     }

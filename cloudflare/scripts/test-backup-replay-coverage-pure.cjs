@@ -47,6 +47,9 @@ for (const table of [
   'product_conflict_merge_run_cases',
 ]) assert(replayBundleTables.includes(table), `${table} must accompany product-bearing Sales replay backups`)
 const resetSource = fs.readFileSync(path.join(__dirname, '../src/lib/coreDataInvariants.ts'), 'utf8')
+const systemSource = fs.readFileSync(path.join(__dirname, '../src/routes/system.ts'), 'utf8')
+assert.match(systemSource, /SALE_INCIDENT_RECOVERY_RESET_GUARD_KEY[\s\S]*sale_incident_recovery_reset_guard/)
+assert.match(systemSource, /DELETE FROM sale_incident_recovery_members[\s\S]*DELETE FROM sale_incident_recovery_receipts/)
 const resetList = resetSource.match(/export const FACTORY_RESET_TABLES = \[([\s\S]*?)\n\]/)[1]
 const resetTables = [...resetList.matchAll(/'([^']+)'/g)].map(match => match[1])
 assert(resetTables.indexOf('sale_mutation_members') > -1)
