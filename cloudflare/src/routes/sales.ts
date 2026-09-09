@@ -382,9 +382,22 @@ app.post('/', async (c) => {
       // `client_request_id <> ''` from the equality binding, so omitting it
       // turns this idempotency lookup into a full sales-table scan even though
       // idx_sales_client_request_unique_pg already exists.
-      .prepare("SELECT id, receipt_number FROM sales WHERE client_request_id = ? AND client_request_id <> '' LIMIT 1")
-      .get<{ id: number; receipt_number: string }>([clientRequestId])
-    if (existingSale) return c.json({ id: existingSale.id, receiptNumber: existingSale.receipt_number, duplicate: true })
+      .prepare(`SELECT id, receipt_number,
+        (SELECT COUNT(*) FROM sale_items WHERE sale_id = sales.id) AS item_count
+        FROM sales WHERE client_request_id = ? AND client_request_id <> '' LIMIT 1`)
+      .get<{ id: number; receipt_number: string; item_count: number }>([clientRequestId])
+    if (existingSale) {
+      // A prior interrupted checkout can have a durable header but no lines.
+      // Treating that row as a completed idempotent replay clears the client's
+      // offline payload and makes the incomplete sale impossible to retry.
+      if (Number(existingSale.item_count) < 1) {
+        return c.json({
+          error: 'This sale was not completely recorded. Keep the original sale details and ask an administrator to recover it.',
+          code: 'sale_incomplete',
+        }, 409)
+      }
+      return c.json({ id: existingSale.id, receiptNumber: existingSale.receipt_number, duplicate: true })
+    }
   }
 
   if (!Array.isArray(body.items) || body.items.length === 0) {
@@ -1047,7 +1060,11 @@ app.post('/', async (c) => {
       delivery_actual_cost_khr: deliveryActualCostKhr,
       sale_status: saleStatus,
     })
-  if (saleInsert.changes !== 1) {
+  // Native D1 reports trigger writes in meta.changes. The sales INSERT fires
+  // sale_revision_sales_insert, so a successful insert reports 2 rather than
+  // SQLite's direct-statement count of 1. Only zero means the guarded SELECT
+  // inserted no sale because the selected customer changed.
+  if (saleInsert.changes < 1) {
     return c.json({ error: 'The selected customer changed before the sale was saved. Review the customer and try again.', code: 'customer_state_conflict' }, 409)
   }
   const saleId = saleInsert.lastInsertRowid
