@@ -213,6 +213,9 @@ Remaining: F46 combined conflict review/execution and truthful saved run/undo st
 
 | F54 | Invalidated in-flight reads and late local fallback must not restore stale shared HTTP cache. | Integrated b2299a2b; independent bounded PASS, next release pending | 69 focused tests and512 timing schedules; callback-side persistent mirrors and already-started callers remain outside scope. |
 
+| F55 | English, Khmer, and wire variables must describe the same stock and delivery concepts; received-date records must not render as lot/batch, and sale-record fields must not fall back to raw variables. | Deployed 1d8c5813; independent PASS | 5,682 bilingual keys, placeholder parity, Worker/browser sale-kind and field parity, Khmer glossary, Telegram, receipt, merge, and record rendering checks pass. Legacy CSV column names and the internal multi-line Batch session remain compatibility exceptions. |
+| F56 | Transfers must preserve the source received date when cloning or FIFO-allocating a product batch; Telegram transfer/return lines must show the same date. | Deployed 0a0f2865 / 1d8c5813; independent PASS | `received_at` is copied or kept unknown, never replaced with transfer time; branch-transfer regression 6/6 and Telegram message suites pass. |
+
 ## Freshness follow-up candidate — September 8
 
 Production remains c2eb9d57/Worker3931ea55,100%. Next isolated release includes F53 permission-refresh coalescing and session-generation isolation (independent review PASS); F54 HTTP invalidation/in-flight ownership and authoritative server-cache precedence (69 focused checks plus512 independent timing schedules); U05 selected positive profit headline stays green in both themes. Source b2299a2b is integrated, not deployed. Existing callbacks that write persistent queryCache/IndexedDB and already-started caller results are outside F54's proven shared-HTTP-cache boundary. No backend source or migration changes in this follow-up.
