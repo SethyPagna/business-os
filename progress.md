@@ -1,3 +1,11 @@
+## Merge recovery checkpoint LIVE — September 9
+
+LIVEf4a10cb2710586dbe1cd8ad2244752b17d335e73 at100%; Workerb9ce0c89-8f50-4d54-826b-e458b0d95922, deployment93fee51e-7b60-4b65-8e8f-213977d6372b at2026-09-09T02:35:40.241998Z. Clean dry-run/deploy exit0;341 frontend tests/types/i18n/build and independent finalhead review PASS. No migration; fix-scoped commits pushed.
+
+Interrupted merges now retain bilingual recovery, invalidate stale previews and require a validated fresh scan before retry. Live preview verified1793groups/1812candidates,19quarantined,1774eligible; no further merge started.174total recorded merges includes166 verified thisrun. Batchmetadata speed fix is underimplementation; fullcatalogcursor optimization deferred.
+
+General24969 repair remains applied; real22305 protected. Freshcontactcensus confirms2name-only supplierclusters (10/6members), customertriple withmembershipconflicts and2stalephonekeys; no blindmerge. Financialcensus found30negativeKHRdiscountcells needing paired-snapshot review; signedchange may bevalid,100productlossgroups needcauseevidence withoutclamping. All107requests retained. Cleanup continues, then transfer, UI, public site, offline.
+
 ## General cleanup checkpoint LIVE and repair applied — September 9
 
 LIVE522a780d76b54917cc84db9949e67a49d42ee1da at100%; Worker ef096149-20c5-4de1-ab95-ea0c91828959, deployment38e8108a-3070-4576-93f6-fbbed48bcac9 at2026-09-09T01:29:57.100127Z. Clean build/dry-run/deploy exit0, independent review PASS, frontend340/340 and backend321/321 passing evidence. No migration. Fix-scoped commits pushed.
