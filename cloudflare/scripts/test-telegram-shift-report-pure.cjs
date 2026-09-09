@@ -148,6 +148,7 @@ assert.deepEqual(lines, [
   // Expenses as exactly two plain lines and ONE informational difference.
   'Delivery cost / ថ្លៃដើមដឹកជញ្ជូន: $7.50',
   'Other expenses / ចំណាយផ្សេងទៀត: $9.50 · 20,000៛',
+  'Expected cash / សាច់ប្រាក់ត្រូវមាន: $178.00 · 240,000៛',
   'Difference / ភាពខុសគ្នា: +$4.50 · 0៛',
 ], report)
 check('the exact owner sequence renders, with registered opening and closing cash in both currencies', true)

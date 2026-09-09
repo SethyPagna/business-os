@@ -89,6 +89,7 @@ function database() {
   db.exec(fs.readFileSync(path.join(root, 'migrations', '0119_shift_restore_guard.sql'), 'utf8'))
   db.exec(fs.readFileSync(path.join(root, 'migrations', '0123_shift_reopen_segments.sql'), 'utf8'))
   db.exec(fs.readFileSync(path.join(root, 'migrations', '0132_shift_opening_count_presence.sql'), 'utf8'))
+  db.exec(fs.readFileSync(path.join(root, 'migrations', '0147_shift_additional_cash.sql'), 'utf8'))
   db.prepare('INSERT INTO branches(id,name,is_active) VALUES (1,?,1)').run('Shop')
   return db
 }
@@ -102,6 +103,7 @@ function assertOpeningPresenceMigration() {
   insertLegacy.run('legacy-nonzero', 7, '2026-09-06', '2026-09-06T01:00:00.000Z', 12.5, 40000)
   insertLegacy.run('legacy-mixed-zero', 8, '2026-09-06', '2026-09-06T02:00:00.000Z', 8, 0)
   sqlite.exec(fs.readFileSync(path.join(root, 'migrations', '0132_shift_opening_count_presence.sql'), 'utf8'))
+  sqlite.exec(fs.readFileSync(path.join(root, 'migrations', '0147_shift_additional_cash.sql'), 'utf8'))
   const rows = sqlite.prepare(`SELECT shift_code,opening_float_usd,opening_float_khr,
     opening_float_usd_registered,opening_float_khr_registered FROM shift_sessions ORDER BY id`).all()
   assert.deepEqual(rows, [
