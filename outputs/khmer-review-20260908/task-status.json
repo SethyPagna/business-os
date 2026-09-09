@@ -1,7 +1,7 @@
 {
   "asOf": "2026-09-09T10:34:00Z",
   "liveCommit": "e093b5c5",
-  "liveSummary": "Release e093b5c5 is live at Worker version 718a3d15-8d64-4b5c-88de-2f486b5b48e7, 100%. It includes transfer timeout/cap reliability (b312c331), additional cash/expected drawer in shift reports and Telegram (b059237a), and the iOS viewport zoom guard (e093b5c5). Migration 0147_shift_additional_cash.sql is remote migration row 143. The release branch is clean and pushed; broader transfer durability and visual compaction remain tracked follow-ups.",
+  "liveSummary": "Release e093b5c5 is live at Worker version 718a3d15-8d64-4b5c-88de-2f486b5b48e7, 100%. Its ancestry includes the deployed Not Paid/awaiting_payment stock correction and write-outcome hardening (aea2b6aa, ee1127d7, 6ed60cb5, 3b98fc1a), plus transfer timeout/cap reliability (b312c331), additional cash/expected drawer in shift reports and Telegram (b059237a), and the iOS viewport zoom guard (e093b5c5). Migration 0147_shift_additional_cash.sql is remote migration row 143. The release branch is clean and pushed; broader transfer durability and visual compaction remain tracked follow-ups.",
   "tasks": [
     {
       "id": "F01",
@@ -770,11 +770,11 @@
     }
   ],
   "deployment": {
-    "commit": "4aba954f53d52cdff762b6a9b8413735139c547c",
-    "workerVersion": "175c9438-c783-45d9-b92e-e9962ca61580",
-    "deploymentId": "5bddcc0a-af46-40a8-b2dc-966f4114e769",
+    "commit": "e093b5c50fe37ac7816e1f38eec15ff134c7321a",
+    "workerVersion": "718a3d15-8d64-4b5c-88de-2f486b5b48e7",
+    "deploymentId": "recorded in outputs/takeover-20260909/mobile-viewport-deploy.log",
     "percentage": 100,
-    "createdOn": "2026-09-09T08:07:58.902089Z"
+    "createdOn": "2026-09-09T10:31:00Z"
   },
   "nextRelease": {
     "priority": "Remaining transfer reliability and cleanup",

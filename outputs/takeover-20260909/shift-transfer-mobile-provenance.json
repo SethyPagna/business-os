@@ -2,6 +2,9 @@
   "asOf": "2026-09-09T10:34:00Z",
   "releaseBranch": "codex/sale-create-trigger-release-20260909",
   "sourceCommits": [
+    { "sha": "aea2b6aa", "scope": "Not Paid/awaiting_payment stock deduction and guarded recovery" },
+    { "sha": "ee1127d7", "scope": "bounded mutation writes with unknown-outcome preservation" },
+    { "sha": "6ed60cb5", "scope": "localized Khmer write-error presentation" },
     { "sha": "b059237a", "scope": "shift additional cash, expected drawer, reports and Telegram" },
     { "sha": "b312c331", "scope": "Shop/Warehouse transfer timeout and lot availability cap" },
     { "sha": "e093b5c5", "scope": "iOS viewport scale and page pinch-zoom guard" },
