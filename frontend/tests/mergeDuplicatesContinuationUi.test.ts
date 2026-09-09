@@ -67,6 +67,8 @@ assert.match(budgetBlock, /callCeiling = Math\.max\(callCeiling, calls \+ result
 assert.match(budgetBlock, /continue/, 'a valid normal budget yield starts the next bounded request')
 assert.doesNotMatch(budgetBlock, /load\(true\)|setMergeDuplicatesReviewOpen\(false\)|return/,
   'a normal budget yield neither reloads nor asks for another confirmation')
+assert.doesNotMatch(budgetBlock, /setMergeDuplicatesRecovery/,
+  'a normal bounded continuation does not enter unknown-outcome recovery')
 
 const remainingAt = handler.indexOf('const remainingBefore = Number(result?.remainingProductsBefore)', completeAt)
 const terminalBlock = handler.slice(completeAt, remainingAt)
@@ -84,12 +86,19 @@ const catchAt = handler.indexOf('} catch (e) {')
 const finallyAt = handler.indexOf('} finally {', catchAt)
 assert.ok(catchAt > 0 && finallyAt > catchAt, 'unknown-outcome reconciliation stays inside the merge catch path')
 const catchBlock = handler.slice(catchAt, finallyAt)
-assert.match(catchBlock, /if \(calls > 0 \|\| controller\.signal\.aborted\) \{/,
+assert.match(catchBlock, /const startedRun = calls > 0 \|\| controller\.signal\.aborted/,
   'timeout, error, or abort reconciles because a started request may already have committed')
+const recoveryAt = catchBlock.indexOf('setMergeDuplicatesRecovery({')
 const invalidateAt = catchBlock.indexOf('await productApi.invalidateProductReadCacheForReconciliation()')
 const reloadAt = catchBlock.indexOf('await load(true)', invalidateAt)
-assert.ok(invalidateAt > 0 && reloadAt > invalidateAt,
-  'unknown-outcome reconciliation invalidates fresh product reads before the authoritative reload')
+assert.ok(recoveryAt > 0 && invalidateAt > recoveryAt && reloadAt > invalidateAt,
+  'a started-call failure invalidates the confirmed preview before cache invalidation and authoritative reload')
+assert.match(catchBlock, /requestId,[\s\S]*?mergedGroups,[\s\S]*?mergedProducts,[\s\S]*?detail: requestError/,
+  'persistent recovery records only known completed response counts and the request error')
+assert.match(catchBlock, /catch \(reconciliationError\)/,
+  'a failed authoritative reload cannot bypass the persistent recovery state')
+assert.doesNotMatch(catchBlock, /productApi\.mergeDuplicates/,
+  'unknown-outcome recovery never replays a merge write automatically')
 
 assert.match(source, /const active = mergeDuplicatesAbortRef\.current[\s\S]{0,100}active\?\.abort\(\)[\s\S]{0,120}setMergeDuplicatesReviewOpen\(false\)/,
   'closing the modal aborts the active request and closes immediately')
@@ -99,5 +108,21 @@ assert.match(source, /mergeDuplicates: async \(options\)[\s\S]{0,260}merge\(opti
 assert.match(modal, /onClick=\{close\}/, 'the review modal renders its parent close action')
 assert.doesNotMatch(modal, /onClick=\{close\}[^>]*disabled=\{working\}/,
   'Cancel remains available to abort a long confirmed run')
+assert.match(source, /recoveryNotice=\{mergeDuplicatesRecovery\}/,
+  'Products keeps the recovery notice attached to the mounted review')
+assert.match(modal, /previewRequestsRef\.current\?\.cancel\(\)[\s\S]*?setPreview\(null\)[\s\S]*?setAcknowledged\(false\)[\s\S]*?setRecoveryNeedsPreview\(true\)/,
+  'a new recovery notice cancels preview work, clears the old preview and acknowledgement, and requires a fresh scan')
+assert.match(modal, /if \(recoveryNotice\) \{[\s\S]*?setPreviewLoading\(false\)[\s\S]*?return[\s\S]*?\}\s+runPreview\(\)/,
+  'reopening after an unknown outcome waits for an explicit fresh scan instead of loading a confirmable preview automatically')
+assert.match(modal, /const canMerge = !recoveryNeedsPreview && !previewLoading && !previewError/,
+  'confirm remains disabled until the recovery scan succeeds')
+assert.match(modal, /setPreview\(result\)[\s\S]*?setAcknowledged\(false\)[\s\S]*?setRecoveryNeedsPreview\(false\)/,
+  'a successful fresh scan supplies current rows but still resets acknowledgement')
+assert.match(modal, /The previous merge request has an unknown outcome/,
+  'the modal persistently identifies the unknown outcome')
+assert.match(modal, /failed request may have saved more complete groups/,
+  'the warning distinguishes known response counts from possibly committed work')
+assert.match(modal, /No merge write will be retried automatically/,
+  'the recovery action explicitly promises no automatic write replay')
 
 console.log('PASS duplicate merge continuation UI contract')

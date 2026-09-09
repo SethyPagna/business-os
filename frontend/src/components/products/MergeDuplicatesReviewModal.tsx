@@ -48,6 +48,13 @@ type PreviewResult = {
   costRefusalCount?: number
 }
 
+export type MergeDuplicatesRecoveryNotice = {
+  requestId: string
+  mergedGroups: number
+  mergedProducts: number
+  detail: string
+}
+
 const COST_FIELD_LABEL: Record<string, [string, string]> = {
   cost_price_usd: ['cost', 'Cost'],
   cost_price_khr: ['cost_price_khr', 'Cost (KHR)'],
@@ -73,6 +80,7 @@ interface MergeDuplicatesReviewModalProps {
   onClose: () => void
   onConfirm: () => void
   onLoadPreview: (signal: AbortSignal) => Promise<PreviewResult>
+  recoveryNotice?: MergeDuplicatesRecoveryNotice | null
   working: boolean
 }
 
@@ -82,7 +90,7 @@ interface MergeDuplicatesReviewModalProps {
 // (routes/products.ts), which reuses findDuplicateProductGroups without
 // acting on it. Each confirmed fold rechecks identity and source revisions in
 // its transaction; a changed case is refused and remains available to resume.
-export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLoadPreview, working }: MergeDuplicatesReviewModalProps) {
+export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLoadPreview, recoveryNotice, working }: MergeDuplicatesReviewModalProps) {
   // t() returns the raw key itself (never undefined/empty) on a miss, so
   // `t(key) || fallback` never actually falls back -- same fix as
   // ProductDetailModal.tsx/ProductHistoryPreviewModal.tsx's T().
@@ -94,6 +102,7 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
   const [previewLoading, setPreviewLoading] = useState(true)
   const [previewError, setPreviewError] = useState<string | null>(null)
   const [preview, setPreview] = useState<PreviewResult | null>(null)
+  const [recoveryNeedsPreview, setRecoveryNeedsPreview] = useState(Boolean(recoveryNotice))
   const mountedRef = useRef(true)
   const firstLoadRef = useRef(true)
   const previewRequestsRef = useRef<ReturnType<typeof createMergeDuplicatesPreviewRequestCoordinator> | null>(null)
@@ -116,6 +125,7 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
         if (!mountedRef.current || !request.isCurrent()) return
         setPreview(result)
         setAcknowledged(false)
+        setRecoveryNeedsPreview(false)
       })
       .catch((error) => {
         if (mountedRef.current && request.isCurrent()) setPreviewError(error?.message || 'Failed to load preview')
@@ -133,16 +143,30 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
   useEffect(() => {
     if (!firstLoadRef.current) return
     firstLoadRef.current = false
+    if (recoveryNotice) {
+      setPreviewLoading(false)
+      return
+    }
     runPreview()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    if (!recoveryNotice) return
+    previewRequestsRef.current?.cancel()
+    setPreview(null)
+    setPreviewError(null)
+    setPreviewLoading(false)
+    setAcknowledged(false)
+    setRecoveryNeedsPreview(true)
+  }, [recoveryNotice?.requestId])
 
   const groups = preview?.groups || []
   const duplicateProductCount = preview?.duplicateProductCount || 0
   const mergeableDuplicateProductCount = preview?.mergeableDuplicateProductCount ?? duplicateProductCount
   const blockedGroupCount = preview?.blockedGroupCount || 0
   const costRefusalCount = preview?.costRefusalCount || 0
-  const canMerge = !previewLoading && !previewError && mergeableDuplicateProductCount > 0
+  const canMerge = !recoveryNeedsPreview && !previewLoading && !previewError && mergeableDuplicateProductCount > 0
 
   return (
     <Modal title={T('merge_duplicate_products', 'Merge duplicate products')} onClose={close} size="lg" unsavedChanges="read-only">
@@ -156,6 +180,32 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
             )}
           </p>
         </div>
+
+        {recoveryNotice && (
+          <div role="alert" className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <div className="space-y-1">
+              <p className="font-semibold">
+                {T('merge_duplicates_unknown_outcome_title', 'The previous merge request has an unknown outcome.')}
+              </p>
+              <p>
+                {T(
+                  'merge_duplicates_unknown_outcome_counts',
+                  'The browser received confirmation for {products} product(s) in {groups} completed group(s) before the interruption. The failed request may have saved more complete groups.',
+                )
+                  .replace('{products}', String(recoveryNotice.mergedProducts))
+                  .replace('{groups}', String(recoveryNotice.mergedGroups))}
+              </p>
+              <p>
+                {T(
+                  'merge_duplicates_unknown_outcome_rescan',
+                  'The old preview was cleared. Re-scan and review the current remaining products before confirming again. No merge write will be retried automatically.',
+                )}
+              </p>
+              <p className="text-xs opacity-80">{recoveryNotice.detail}</p>
+            </div>
+          </div>
+        )}
 
         <section>
           <h3 className="mb-1 font-semibold text-gray-900 dark:text-gray-100">
@@ -235,11 +285,13 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
             <button
               type="button"
               onClick={runPreview}
-              disabled={previewLoading}
+              disabled={previewLoading || working}
               className="flex items-center gap-1.5 rounded-lg border border-gray-300 px-2.5 py-1 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-40 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
             >
               <RefreshCw className={`h-3.5 w-3.5 ${previewLoading ? 'animate-spin' : ''}`} />
-              {T('merge_duplicates_preview_refresh', 'Re-scan')}
+              {recoveryNeedsPreview
+                ? T('merge_duplicates_recovery_rescan', 'Re-scan current products')
+                : T('merge_duplicates_preview_refresh', 'Re-scan')}
             </button>
           </div>
 
@@ -260,13 +312,13 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
             </div>
           )}
 
-          {!previewLoading && !previewError && groups.length === 0 && (
+          {!previewLoading && !previewError && preview && groups.length === 0 && (
             <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-gray-600 dark:border-gray-700 dark:bg-gray-800/40 dark:text-gray-400">
               {T('merge_duplicates_preview_none', 'No duplicate products found. Nothing to merge right now.')}
             </div>
           )}
 
-          {!previewLoading && !previewError && groups.length > 0 && (
+          {!previewLoading && !previewError && preview && groups.length > 0 && (
             <div className="space-y-2">
               <p className="text-xs text-gray-500 dark:text-gray-400">
                 {T('merge_duplicates_preview_count', 'Found {groups} group(s) containing {products} duplicate product candidate(s). Blocked groups shown below remain unchanged.')

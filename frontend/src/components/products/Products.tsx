@@ -28,7 +28,7 @@ import { ProductImg, ProductImagePlaceholder } from './shared/primitives'
 import ProductsListSurface, { ROW_TEXT_GUTTER } from './surfaces/ProductsListSurface'
 import StockInSessionsSection from './StockInSessionsSection.tsx'
 import MergeDuplicatesReviewModal from './MergeDuplicatesReviewModal'
-import type { MergeDuplicatesPreviewGroup } from './MergeDuplicatesReviewModal'
+import type { MergeDuplicatesPreviewGroup, MergeDuplicatesRecoveryNotice } from './MergeDuplicatesReviewModal'
 import ZeroQuantityCleanupModal from './ZeroQuantityCleanupModal'
 import type { ZeroQuantityCandidate } from './ZeroQuantityCleanupModal'
 import WireImagesReviewModal from './WireImagesReviewModal'
@@ -963,6 +963,7 @@ function ProductsFullEditor() {
   const [bulkActionBusy, setBulkActionBusy] = useState(false)
   const [mergeDuplicatesBusy, setMergeDuplicatesBusy] = useState(false)
   const [mergeDuplicatesReviewOpen, setMergeDuplicatesReviewOpen] = useState(false)
+  const [mergeDuplicatesRecovery, setMergeDuplicatesRecovery] = useState<MergeDuplicatesRecoveryNotice | null>(null)
   const mergeDuplicatesAbortRef = useRef<AbortController | null>(null)
   // Exact-duplicate (same real barcode + same name) flagging for the list
   // rows -- user spec item #3. Single source of truth is the server sweep
@@ -2051,6 +2052,7 @@ function ProductsFullEditor() {
           notify([savedSummary, resumeMessage, undoWarning].filter(Boolean).join(' '),
             result.interruptionCode === 'merge_infrastructure_interrupted' ? 'error' : 'info')
           await load(true)
+          setMergeDuplicatesRecovery(null)
           setMergeDuplicatesReviewOpen(false)
           return
         }
@@ -2124,14 +2126,32 @@ function ProductsFullEditor() {
         )
       }
       await load(true)
+      setMergeDuplicatesRecovery(null)
       setMergeDuplicatesReviewOpen(false)
     } catch (e) {
       // A request can commit its atomic cases before a timeout or cancellation
-      // reaches the client. Reload in every started-run failure path; retrying
-      // re-scans only active cases under the same server contract.
-      if (calls > 0 || controller.signal.aborted) {
-        await productApi.invalidateProductReadCacheForReconciliation()
-        await load(true)
+      // reaches the client. Clear the old confirmed preview before any
+      // reconciliation await so it cannot become confirmable again when the
+      // busy flag drops. This records only responses the browser actually
+      // received; it never guesses how much the failed request committed.
+      const startedRun = calls > 0 || controller.signal.aborted
+      const requestError = getErrorMessage(e, 'The duplicate merge request failed')
+      if (startedRun) {
+        setMergeDuplicatesRecovery({
+          requestId,
+          mergedGroups,
+          mergedProducts,
+          detail: requestError,
+        })
+        try {
+          await productApi.invalidateProductReadCacheForReconciliation()
+          await load(true)
+        } catch (reconciliationError) {
+          const reloadError = getErrorMessage(reconciliationError, 'The current products could not be reloaded')
+          setMergeDuplicatesRecovery((current) => current?.requestId === requestId
+            ? { ...current, detail: `${requestError}. ${reloadError}` }
+            : current)
+        }
       }
       const undoWarning = undoPendingCount > 0
         ? (t('merge_duplicates_undo_unavailable') || 'Merges were committed, but Undo is unavailable for {count} case(s) because their recovery records did not finish saving.')
@@ -2146,7 +2166,7 @@ function ProductsFullEditor() {
         notify([
           partialSummary,
           undoWarning,
-          getErrorMessage(e, 'Failed'),
+          requestError,
         ].filter(Boolean).join('. '), 'error')
       } else if (undoWarning) {
         notify(undoWarning, 'info')
@@ -5171,6 +5191,7 @@ function ProductsFullEditor() {
           }}
           onConfirm={handleMergeDuplicates}
           onLoadPreview={loadMergeDuplicatesPreview}
+          recoveryNotice={mergeDuplicatesRecovery}
           working={mergeDuplicatesBusy}
         />
       )}
