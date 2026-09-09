@@ -706,7 +706,7 @@ export function ledgerRecord(row: SaleRecordLedgerRow): SaleRecord {
     via: text(row.via) || 'amend',
     subject,
     summary: money
-      ? `${ledgerKind === 'delivery_actual_cost_changed' ? 'Delivery cost' : 'Delivery fee'} ${fmt(row.amount_before_usd)} to ${fmt(row.amount_after_usd)}`
+      ? `${ledgerKind === 'delivery_actual_cost_changed' ? 'Actual delivery cost' : 'Delivery fee'} ${fmt(row.amount_before_usd)} to ${fmt(row.amount_after_usd)}`
       : `${text(row.product_name) || 'Line'} ${numberOrNull(row.quantity_before) ?? 0} to ${numberOrNull(row.quantity_after) ?? 0}`,
     before,
     after,

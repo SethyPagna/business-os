@@ -127,7 +127,13 @@ export const SALE_RECORD_FIELD_RULES: Record<string, { key: string; format: Sale
   cancel_note: { key: 'note', format: 'text' },
   payment_method: { key: 'payment_method', format: 'text' },
   payment_details: { key: 'payment_details', format: 'text' },
+  // sale_created carries the immutable payment and delivery snapshots as
+  // composite values. Keep these fields on the same structured renderer as
+  // later payment/delivery changes; otherwise their detail rows fall back to
+  // the generic "Value changed" label even though the value is readable.
+  payment: { key: 'payment', format: 'text' },
   is_delivery: { key: 'delivery', format: 'boolean' },
+  delivery: { key: 'delivery', format: 'text' },
   delivery_fee_usd: { key: 'delivery_fee', format: 'money' },
   actual_delivery_cost_usd: { key: 'delivery_actual_cost', format: 'money' },
   customer: { key: 'customer', format: 'text' },

@@ -125,6 +125,8 @@ test('money, KHR, quantity and composite fields use friendly render contracts', 
   const payment = formatSaleRecordValueLinesLocalized('payment', { method: 'ABA', details: [{ method: 'ABA', amount_usd: 10, amount_khr: 0 }], amount_paid_usd: 10, amount_paid_khr: 0, change_usd: 0, change_khr: 0 }, usd, khr, tr)
   assert.ok(payment.includes('ABA · $10.00'))
   assert.doesNotMatch(payment.join(' '), /amount_paid_usd|payment_details|\{|\}/)
+  assert.equal(SALE_RECORD_FIELD_RULES.payment?.key, 'payment')
+  assert.equal(SALE_RECORD_FIELD_RULES.delivery?.key, 'delivery')
 })
 
 test('every typed field label exists in both real language packs', () => {

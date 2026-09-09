@@ -46,6 +46,11 @@ const html = (
 }))
 
 const cases: Array<{ name: string; record: SaleRecord; contains: string[] }> = [
+  { name: 'sale created composite snapshots', record: { id: 'created', kind: 'sale_created', changes: [
+    c('items', none, v([{ name: 'Serum', quantity: 2, line_total_usd: 30 }])),
+    c('payment', none, v({ method: 'ABA', details: [{ method: 'ABA', amount_usd: 30, amount_khr: 0 }], amount_paid_usd: 30, amount_paid_khr: 0 })),
+    c('delivery', none, v({ is_delivery: true, driver: { id: 4, name: 'Dara' }, delivery_fee_usd: 2, actual_delivery_cost_usd: 1.25 })),
+  ] }, contains: ['Serum × 2 · $30.00', 'Payment', 'ABA · $30.00', 'Amount Paid', 'Delivery', 'Dara · #4', 'Delivery Fee', 'Actual delivery cost'] },
   { name: 'add', record: { id: 'add', kind: 'item_added', changes: [c('item', none, v({ name: 'Primer', sku: 'P1', line_total_usd: 10 })), c('quantity', none, v(1)), c('total_usd', v(0), v(10))] }, contains: ['Primer (P1) · $10.00', 'Quantity', '$10.00'] },
   { name: 'remove', record: { id: 'remove', kind: 'item_removed', changes: [c('item', v({ name: 'Powder', sku: 'P2', line_total_usd: 12 }), none), c('quantity', v(1), none)] }, contains: ['Powder (P2) · $12.00', 'None'] },
   { name: 'replace', record: { id: 'replace', kind: 'items_replaced', changes: [c('removed_items', v([{ name: 'Old serum', quantity: 1, line_total_usd: 9 }]), v([])), c('added_items', v([]), v([{ name: 'New serum', quantity: 2, line_total_usd: 18 }]))] }, contains: ['Old serum × 1 · $9.00', 'New serum × 2 · $18.00'] },
