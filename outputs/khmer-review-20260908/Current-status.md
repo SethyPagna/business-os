@@ -558,8 +558,8 @@ Notes: Release `e093b5c5` caps browser zoom at the device width, removes page-le
 ## F69: Shop to Warehouse transfer fails; both canonical transfer directions must work with branch/lot identity and permissions
 
 Status: Deployed
-Next: Shop↔Warehouse, reverse Undo/Redo and strict explicit-lot race rollback passed. Warehouse sales remain prohibited. Retry receipt gap is tracked separately as F73.
-Notes: `b312c331` keeps selected-lot/source-aggregate caps and rejects nonfinite availability; the UI waits up to 45s for a single transfer and 90s for a bulk transfer. Owner request with screenshot codex-clipboard-ef24b217-5a3e-4e63-891f-6c047e236707.png; previous tasks retained.
+Next: Shop↔Warehouse, reverse Undo/Redo, strict explicit-lot race rollback, and replay-safe transfer receipts passed. Warehouse sales remain prohibited. Physical uncertain-network retry verification is tracked separately as F73.
+Notes: `b312c331` keeps selected-lot/source-aggregate caps and rejects nonfinite availability; the UI waits up to 45s for a single transfer and 90s for a bulk transfer. `be7bdaed` adds actor/request receipts, digest conflict checks and audit-before-stock ordering. Owner request with screenshot codex-clipboard-ef24b217-5a3e-4e63-891f-6c047e236707.png; previous tasks retained.
 
 ## F70: Products name/barcode search is too slow
 
