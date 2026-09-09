@@ -42,18 +42,32 @@ export type SaleIncidentRecoveryPreview = {
   allocation_basis: 'recovery_time_unique_positive_lot_not_historical_proof'
 }
 
-export type SaleIncidentRecoveryApplyResponse = {
-  success: true
-  outcome: 'applied' | 'already_applied'
+type SaleIncidentRecoveryResponseBase = {
+  operation_id: string
+  manifest_sha256: string
   verification_pending: boolean
   cache_invalidated: boolean
   refresh_pending: boolean
-  operation_id: string
-  manifest_sha256: string
-  affected: { sales: 3; items: 4; allocations: 4; movements: 1; histories: 3; audits: 3 }
-  broadcast_requested: true
   message: string
 }
+
+export type SaleIncidentRecoveryApplyResponse = SaleIncidentRecoveryResponseBase & {
+  success: true
+  outcome: 'applied' | 'already_applied'
+  affected: { sales: 3; items: 4; allocations: 4; movements: 1; histories: 3; audits: 3 }
+  broadcast_requested: true
+}
+
+export type SaleIncidentRecoveryUncertainResponse = SaleIncidentRecoveryResponseBase & {
+  success: false
+  outcome: 'uncertain'
+  verification_pending: true
+  cache_invalidated: false
+  refresh_pending: true
+  broadcast_requested: false
+}
+
+export type SaleIncidentRecoveryApplyResult = SaleIncidentRecoveryApplyResponse | SaleIncidentRecoveryUncertainResponse
 
 function invalid(message: string): never {
   const error = new Error(`Invalid sale incident recovery response: ${message}`) as Error & { code?: string }
@@ -146,21 +160,27 @@ export function validateSaleIncidentRecoveryPreview(value: unknown): SaleInciden
   }
 }
 
-export function validateSaleIncidentRecoveryApplyResponse(value: unknown): SaleIncidentRecoveryApplyResponse {
+export function validateSaleIncidentRecoveryApplyResponse(value: unknown): SaleIncidentRecoveryApplyResult {
   const response = asRecord(value, 'apply response')
-  if (response.success !== true || (response.outcome !== 'applied' && response.outcome !== 'already_applied')
+  if ((response.success !== true && response.success !== false) || !['applied', 'already_applied', 'uncertain'].includes(String(response.outcome))
     || typeof response.verification_pending !== 'boolean' || typeof response.cache_invalidated !== 'boolean'
-    || typeof response.refresh_pending !== 'boolean' || response.broadcast_requested !== true
+    || typeof response.refresh_pending !== 'boolean' || typeof response.broadcast_requested !== 'boolean'
     || typeof response.operation_id !== 'string' || !response.operation_id.trim()
     || typeof response.manifest_sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(response.manifest_sha256)
     || typeof response.message !== 'string' || !response.message.trim()) invalid('apply response is incomplete')
-  if (response.refresh_pending !== !response.cache_invalidated) invalid('apply response refresh and cache invalidation flags disagree')
+  if (!response.cache_invalidated && !response.refresh_pending) invalid('a non-invalidated cache must require refresh')
+  if (response.success === false) {
+    if (response.outcome !== 'uncertain' || response.verification_pending !== true || response.cache_invalidated !== false
+      || response.refresh_pending !== true || response.broadcast_requested !== false || Object.prototype.hasOwnProperty.call(response, 'affected')) invalid('uncertain response is not replay-safe')
+    return response as unknown as SaleIncidentRecoveryUncertainResponse
+  }
+  if ((response.outcome !== 'applied' && response.outcome !== 'already_applied') || response.broadcast_requested !== true) invalid('apply response outcome is invalid')
   const affected = asRecord(response.affected, 'apply response.affected')
   if (affected.sales !== 3 || affected.items !== 4 || affected.allocations !== 4 || affected.movements !== 1 || affected.histories !== 3 || affected.audits !== 3) invalid('apply response affected counts do not match the fixed recovery')
   return response as unknown as SaleIncidentRecoveryApplyResponse
 }
 
-export function saleIncidentRecoveryIsComplete(result: SaleIncidentRecoveryApplyResponse | null): boolean {
+export function saleIncidentRecoveryIsComplete(result: SaleIncidentRecoveryApplyResult | null): boolean {
   return result?.success === true && result.verification_pending === false && result.refresh_pending === false && result.cache_invalidated === true
 }
 
@@ -168,7 +188,7 @@ export async function previewSaleIncidentRecovery(): Promise<SaleIncidentRecover
   return validateSaleIncidentRecoveryPreview(await apiFetch('GET', PREVIEW_PATH))
 }
 
-export async function applySaleIncidentRecovery(request: SaleIncidentRecoveryRequest): Promise<SaleIncidentRecoveryApplyResponse> {
+export async function applySaleIncidentRecovery(request: SaleIncidentRecoveryRequest): Promise<SaleIncidentRecoveryApplyResult> {
   const result = validateSaleIncidentRecoveryApplyResponse(await apiFetch('POST', APPLY_PATH, request, SALE_INCIDENT_RECOVERY_APPLY_TIMEOUT_MS))
   if (saleIncidentRecoveryIsComplete(result)) {
     cacheInvalidateWithDerived('sales')

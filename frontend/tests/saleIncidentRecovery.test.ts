@@ -60,13 +60,34 @@ await run('preview accepts the server-issued three-sale request and explicitly e
 })
 
 await run('apply accepts only a complete fixed-count success and paired refresh flags', () => {
-  assert.equal(validateSaleIncidentRecoveryApplyResponse(applyBody()).affected.items, 4)
+  const applied = validateSaleIncidentRecoveryApplyResponse(applyBody())
+  if (!applied.success) throw new Error('Expected an applied recovery response')
+  assert.equal(applied.affected.items, 4)
   const mismatch = applyBody() as Record<string, unknown>
   ;(mismatch.affected as Record<string, unknown>).sales = 4
   assert.throws(() => validateSaleIncidentRecoveryApplyResponse(mismatch), /affected counts/)
+  const broadcastPending = applyBody() as Record<string, unknown>
+  broadcastPending.refresh_pending = true
+  assert.equal(validateSaleIncidentRecoveryApplyResponse(broadcastPending).refresh_pending, true)
   const stale = applyBody() as Record<string, unknown>
-  stale.refresh_pending = true
-  assert.throws(() => validateSaleIncidentRecoveryApplyResponse(stale), /flags disagree/)
+  stale.cache_invalidated = false
+  stale.refresh_pending = false
+  assert.throws(() => validateSaleIncidentRecoveryApplyResponse(stale), /must require refresh/)
+})
+
+await run('202 uncertain keeps the exact request replayable and does not clear local caches', async () => {
+  setSyncServerUrl('https://sync.example.test'); setSyncToken('operator-token')
+  const originalFetch = globalThis.fetch
+  const uncertain = { success: false, outcome: 'uncertain', operation_id: 'operation-1', manifest_sha256: 'a'.repeat(64), verification_pending: true, cache_invalidated: false, refresh_pending: true, broadcast_requested: false, message: 'Verification could not complete. Replay the same request.' }
+  globalThis.fetch = (() => Promise.resolve(new Response(JSON.stringify(uncertain), { status: 202, headers: { 'Content-Type': 'application/json' } }))) as typeof fetch
+  try {
+    const preview = validateSaleIncidentRecoveryPreview(previewBody())
+    cacheSet('sales:list', { retained: true })
+    const result = await applySaleIncidentRecovery(preview.request)
+    assert.equal(result.success, false)
+    assert.equal(result.outcome, 'uncertain')
+    assert.equal(cacheGet('sales:list')?.retained, true)
+  } finally { globalThis.fetch = originalFetch; setSyncServerUrl(''); setSyncToken('') }
 })
 
 await run('transport previews and replays the frozen request, refreshing local reads only after complete server confirmation', async () => {
