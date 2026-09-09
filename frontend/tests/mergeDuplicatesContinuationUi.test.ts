@@ -10,6 +10,8 @@ import {
 
 const source = fs.readFileSync(new URL('../src/components/products/Products.tsx', import.meta.url), 'utf8')
 const modal = fs.readFileSync(new URL('../src/components/products/MergeDuplicatesReviewModal.tsx', import.meta.url), 'utf8')
+const en = JSON.parse(fs.readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8')) as Record<string, string>
+const km = JSON.parse(fs.readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8')) as Record<string, string>
 
 assert.equal(mergeDuplicateChunkRequiresManualResume({ interruptionCode: 'merge_infrastructure_interrupted' }), true)
 assert.equal(mergeDuplicateChunkRequiresManualResume({ interruptionCode: 'merge_budget_reached' }), false)
@@ -124,5 +126,31 @@ assert.match(modal, /failed request may have saved more complete groups/,
   'the warning distinguishes known response counts from possibly committed work')
 assert.match(modal, /No merge write will be retried automatically/,
   'the recovery action explicitly promises no automatic write replay')
+
+const recoveryKeys = [
+  'merge_duplicates_unknown_outcome_title',
+  'merge_duplicates_unknown_outcome_counts',
+  'merge_duplicates_unknown_outcome_rescan',
+  'merge_duplicates_recovery_rescan',
+]
+for (const key of recoveryKeys) {
+  assert.equal(typeof en[key], 'string', `English recovery copy includes ${key}`)
+  assert.equal(typeof km[key], 'string', `Khmer recovery copy includes ${key}`)
+  assert.ok(en[key].length > 0 && km[key].length > 0, `${key} is non-empty in both languages`)
+  assert.notEqual(en[key], km[key], `${key} has a Khmer translation instead of copied English`)
+  assert.match(modal, new RegExp(`T\\(\\s*'${key}'`), `the modal resolves ${key} through i18n`)
+}
+assert.deepEqual(
+  [...en.merge_duplicates_unknown_outcome_counts.matchAll(/\{[^}]+\}/g)].map((match) => match[0]).sort(),
+  ['{groups}', '{products}'],
+  'English unknown-outcome count copy keeps both interpolation placeholders',
+)
+assert.deepEqual(
+  [...km.merge_duplicates_unknown_outcome_counts.matchAll(/\{[^}]+\}/g)].map((match) => match[0]).sort(),
+  ['{groups}', '{products}'],
+  'Khmer unknown-outcome count copy keeps both interpolation placeholders',
+)
+assert.match(km.merge_duplicates_unknown_outcome_title, /[\u1780-\u17ff]/,
+  'the unknown-outcome warning is localized in Khmer script')
 
 console.log('PASS duplicate merge continuation UI contract')
