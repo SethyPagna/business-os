@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-09-09T06:51:05.858Z",
+  "evidence_sha256": "7e1919c4aa867e296b7280319738f4a180f70eb117609b3b3ead874067ff2644",
+  "execution_manifest_source": "authenticated_no_store_worker_preview",
+  "target": "sale-zero-items-20260909-v1",
+  "confirmation": "RECOVER SALES 16951 16952 16953",
+  "proven_sales": [
+    16951,
+    16952,
+    16953
+  ],
+  "blocked_sales": [
+    {
+      "id": 16954,
+      "receipt_number": "20260909-130228",
+      "reason": "sale_time_cost_not_proven",
+      "evidence": "current product cost USD 170 matches the pre-sale positive lot cost, but products.updated_at is 2026-09-09T06:11:40.658Z, after the 06:02:29 sale, and no audit/history proves the sale-time product cost"
+    }
+  ],
+  "preserved_header_contract": {
+    "sale_16952": {
+      "delivery_fee_usd": 2.7,
+      "delivery_actual_cost_usd": 2.7,
+      "subtotal_before_usd": 0,
+      "subtotal_after_usd": 299,
+      "total_before_usd": 0,
+      "total_after_usd": 299
+    }
+  },
+  "unknown_line_fields": [
+    "price_mode",
+    "base_price_usd",
+    "base_price_khr"
+  ],
+  "proven_numeric_discounts": 0,
+  "allocation_basis": "recovery_time_unique_positive_lot_not_historical_proof",
+  "apply_surface": "/api/system/sale-incident-recovery-20260909/apply",
+  "atomicity": "one Worker env.DB.batch guarded by migration 0145 receipt and postconditions",
+  "raw_sql_apply_allowed": false
+}

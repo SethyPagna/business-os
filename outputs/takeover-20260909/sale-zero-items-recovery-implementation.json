@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "task_id": "sale-zero-items-recovery-implementation-20260909",
+  "agent": {
+    "provider": "codex",
+    "role": "implementation_worker",
+    "session_id": "general_backend"
+  },
+  "status": "completed",
+  "summary": "Prepared a fixed, authenticated Admin recovery for the three sales whose line costs are supported by sale-time product fingerprints. Preview is no-store and digest-bound; apply requires backup_restore, a same-origin exact body, rate/body gates and a fresh backup, then restores four lines and allocations for sales 16951-16953 in one guarded D1 batch with a durable receipt, non-reversible history and redacted provenance audit. Sale 16951 alone deducts stock and records a sale movement because it is completed; awaiting sales 16952-16953 receive released allocations without stock effects. Sale 16952 keeps its later USD 2.70 fee/actual-cost edits and repairs only item-derived subtotal/total. Sale 16954 is reported as blocked because current product cost matches its pre-sale lot cost but the product row was updated after the sale, so sale-time product cost is not proven.",
+  "base_sha": "4285586ed72cab5014428120dcdc03e7d09dd604",
+  "head_sha": "a45da43d8cac4782aa2828388e2cca6422917b27",
+  "workspace": {
+    "branch": "codex/sale-zero-items-recovery-20260909",
+    "worktree": "C:/Users/mrkl6/Downloads/bos-sale-zero-items-recovery-20260909",
+    "dirty_before": [
+      "Clean branch at 4285586ed72cab5014428120dcdc03e7d09dd604; the newly gathered current-evidence artifact was then added on its claimed path."
+    ],
+    "dirty_after": []
+  },
+  "changes": [
+    "Added migration 0145 with one fixed-incident durable receipt, three fixed-sale receipt members and a transient atomic guard; registered durable receipt tables in backup/restore and reset ordering.",
+    "Added saleIncidentRecovery helper with exact target/snapshot/cost/lot/effect fingerprints, digest-bound preview, one D1 batch, strict stock subtraction, released awaiting allocations, receipt reconciliation, postcondition verification and explicit unknown optional price fields.",
+    "Added authenticated no-store preview and backup-first same-origin apply routes with backup_restore permission, rate and body-size limits, post-commit cache/broadcast refresh and fixed response contracts.",
+    "Added focused real-Hono migrated-SQLite coverage for permission, preview contract, exact apply/replay, stale state, lost response, rollback, backup failure, origin/body/rate gates, sale 16952 preservation and explicit null pricing metadata.",
+    "Added a read-only evidence compiler, preview contract validator, current production evidence summary, offline manifest and explicitly read-only pre/post SQL review queries."
+  ],
+  "commits": [
+    "a45da43d8cac4782aa2828388e2cca6422917b27"
+  ],
+  "evidence": [
+    {
+      "claim": "Sales 16951-16953 still matched the exact guarded production fingerprints at freeze time.",
+      "source": "read-only production D1 query saved in the task transcript and sale-zero-items-recovery-current-evidence.json",
+      "locator": "sale/product/positive-lot/effect/amendment result sets plus final concatenated guard query",
+      "observed": "Sale revisions/updated_at were 1/03:19:13, 6/03:55:19.857Z and 1/04:14:55; all had zero items/allocations/sale movements. Product cost/stock and the four unique positive Shop lot fingerprints exactly matched the helper literals. Sale 16952 money guard was 2.7:2.7:0.0:0.0."
+    },
+    {
+      "claim": "Sale 16952 zero money is an itemless amendment fallout and its newer delivery edits are preserved.",
+      "source": "sale-zero-items-recovery-current-evidence.json",
+      "locator": "sale 16952 header and amendments 13-14",
+      "observed": "Amendment 13 moved actual delivery cost 2.60 to 2.70 while total stayed 299; amendment 14 moved delivery fee 2.60 to 2.70 while total fell 299 to 0. Recovery changes subtotal/total to 299 and leaves both newer 2.70 fields intact."
+    },
+    {
+      "claim": "Sale 16954 cannot yet use a proven sale-time product cost.",
+      "source": "read-only production D1 product/lot/audit/history queries and sale-incident-fourth-header.json",
+      "locator": "sale 16954; product 5370; positive lot 56737; empty audit/history/merge result sets",
+      "observed": "Snapshot proves one unit at USD 185. Current product cost USD 170 matches lot 56737 unit cost USD 170, but products.updated_at is 06:11:40 after the 06:02:29 sale and no audit/history proves the product cost at sale time. The v1 preview therefore exposes 16954 as blocked and does not mutate it."
+    },
+    {
+      "claim": "Remote execution uses the Worker D1 batch primitive rather than raw SQL execution.",
+      "source": "cloudflare/src/lib/db.ts and cloudflare/src/routes/system.ts",
+      "locator": "D1Compat.batch and /sale-incident-recovery-20260909/apply",
+      "observed": "The route prepares all sale/item/allocation/stock/movement/history/audit/receipt statements and submits them through one db.batch call after the backup succeeds; raw SQL output is labeled read-only."
+    }
+  ],
+  "verification": [
+    {
+      "command": "node scripts/test-zero-item-sale-recovery-pure.cjs",
+      "scope": "real Hono route over the complete migrated SQLite schema",
+      "exit_code": 0,
+      "expected": "Permission, fixed preview, atomic apply, exact replay, stale guard, lost response, rollback, backup, origin, body and rate contracts pass.",
+      "observed": "Six PASS groups; all asserted sale/item/allocation/stock/movement/receipt/history/audit and sale 16952 financial effects matched."
+    },
+    {
+      "command": "node scripts/test-backup-replay-coverage-pure.cjs",
+      "scope": "receipt backup/restore and factory reset dependency ordering",
+      "exit_code": 0,
+      "expected": "Durable recovery receipt/member tables are backed up and transient guard is excluded; reset deletes child before parent.",
+      "observed": "PASS: historical finance and durable reversal backup coverage."
+    },
+    {
+      "command": "npm run typecheck",
+      "scope": "Cloudflare Worker package",
+      "exit_code": 0,
+      "expected": "TypeScript compiles without errors.",
+      "observed": "tsc --noEmit exited 0."
+    },
+    {
+      "command": "node scripts/prepare-zero-item-sale-recovery.cjs",
+      "scope": "offline evidence compiler",
+      "exit_code": 0,
+      "expected": "Exact four-sale evidence parses; three proven sales and one blocked sale produce the manifest and read-only SQL.",
+      "observed": "PASS wrote sale-zero-items-recovery-manifest.json and sale-zero-items-recovery.sql."
+    },
+    {
+      "command": "node scripts/with-wrangler-auth.cjs wrangler d1 execute business-os --remote --command <read-only exact guard SQL> --json",
+      "scope": "production read-only final fingerprint check",
+      "exit_code": 0,
+      "expected": "Literal sale/product/lot/16952-money guards equal helper values without changing D1.",
+      "observed": "All four returned guard strings matched exactly; D1 reported changes=0, rows_written=0."
+    }
+  ],
+  "risks": [
+    "The v1 helper intentionally fails closed if any sale, revision, product, stock or unique-positive-lot fingerprint changes before apply; a new reviewed manifest/code update would then be required.",
+    "Recovery-time lot attribution is recorded explicitly and is not represented as proof of the originally intended lot.",
+    "Sale 16954 remains itemless until a pre-sale product-cost source is found and a separate v2 recovery is reviewed.",
+    "Independent security/data-integrity review and full release gates are still required before migration 0145 or the Worker route can be deployed."
+  ],
+  "blockers": [],
+  "not_done": [
+    "No production mutation, migration application, deployment, backup creation or recovery execution was performed.",
+    "No line, stock or money value for sale 16954 was written or represented as proven.",
+    "No frontend file was edited; the separate UI owner received the frozen preview/apply contract."
+  ],
+  "handoff": "Independent review should pin runtime commit a45da43d8cac4782aa2828388e2cca6422917b27, inspect D1 guard/postcondition semantics and run the two focused tests plus Worker typecheck. Release must apply only migration 0145, deploy the Worker/UI, obtain a fresh no-store preview, and let the normal Admin UI submit the exact held request. If preview returns 409, do not weaken guards; refresh production evidence and revise the fixed manifest. Sale 16954 needs separate pre-sale product-cost evidence and a v2 receipt before recovery."
+}
