@@ -1,3 +1,13 @@
+## Concise delivery vocabulary fix LIVE — September 10
+
+Fix-scoped commit **a6c29922** was pushed to `codex/sale-create-trigger-release-20260909` and deployed successfully at 100% as Worker version **8619640f-0b70-49f1-8609-3dbba0191e8c**. Build revision **a6c299229a62**, build hash **f16b2c2c00d989e8**, built **2026-09-09T22:16:48.513Z**. No database migration or production data mutation was included.
+
+All direct delivery-fee wording in the Khmer pack now uses the owner-approved concise term **ថ្លៃដឹក**. Actual delivery cost remains **ថ្លៃដឹកដើម** and new actual delivery cost remains **ថ្លៃដឹកដើមថ្មី**. Cost price is **ថ្លៃដើម**, selling price is **តម្លៃលក់**, wholesale price is **តម្លៃបោះដុំ**, and received date is **ថ្ងៃចូល**. Transport/contact phrases that mean delivery service remain distinct. A focused glossary guard now prevents direct fee labels from drifting back to ថ្លៃដឹកជញ្ជូន. Internal fields (`batch_id`, `lot_code`, `credit`) were not renamed.
+
+Verification passed from five angles: focused Khmer glossary, Not Paid terminology, rendered sale Records, semantic variable parity, and the complete frontend chain (**347/347**), plus frontend typecheck, i18n verification, Worker typecheck, production build, and clean release-tree diff.
+
+Still open or paused: evidence-led historical duplicate/contact cleanup (review-only candidates remain; no blind merge), unresolved historical driver/sale-link evidence, physical iOS/PWA/camera/printer smoke, broader compact UI/public/customer-portal polish, and offline work (paused by owner).
+
 ## Vocabulary consistency release LIVE — September 10
 
 Fix-scoped commit 06b9346a was pushed to codex/sale-create-trigger-release-20260909 and deployed successfully as Worker version 48d27bdf-8e41-484a-bea3-645a8fb2ab57. Build revision 06b9346a77b6, build hash 61f468e703d7973f, built 2026-09-09T22:01:31Z. No database migration or production data mutation was included.
