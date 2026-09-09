@@ -1,3 +1,17 @@
+## General cleanup checkpoint LIVE and repair applied — September 9
+
+LIVE522a780d76b54917cc84db9949e67a49d42ee1da at100%; Worker ef096149-20c5-4de1-ab95-ea0c91828959, deployment38e8108a-3070-4576-93f6-fbbed48bcac9 at2026-09-09T01:29:57.100127Z. Clean build/dry-run/deploy exit0, independent review PASS, frontend340/340 and backend321/321 passing evidence. No migration. Fix-scoped commits pushed.
+
+Normal Admin UI backed up and marked confirmed General24969 at2026-09-09 01:52:30. Its5 sales/1 return retained; real22305 remainsmarker0 with152 sales and unchanged version. History535 and audit4466; UI reports verified completion.
+
+Product cleanup saved166 additional merges (174 including8 earlier). All166 new histories undoable,166 snapshots applied with0 pending fingerprints,166 audits; Shop11962/Warehouse12418 stock unchanged. The run stopped; exact network cause unknown. Stale preview/transient error bug confirmed and recovery fix under review; remaining cleanup not complete. All107 requests retained. Next: cleanup, transfer, UI, public site, offline. Employee phone smoke, wide Records0143 and transfer0139 remain open.
+
+## Cleanup resumed after verified Employee checkpoint — September 9
+
+Production remains1791eaf7 at100%; Employee role rollout is verified. Cleanup is now active. Recovered the clean General repair helper at124eb57a (commits21d98ffe and124eb57a), its eight prior SQLite groups and saved handoff. Independent helper review and the current protected admin route/UI plan are running before implementation. Stale helper claims released after preserving the checkpoint; no source discarded.
+
+A separate read-only agent is mapping the remaining product/contact/supplier duplicate cleanup evidence. Only eight earlier production product merges are recorded as completed. General24969 remains unmarked,22305 remainsnormal; no cleanup mutation has occurred. All107 requests and the two review observations remain tracked. Transfer, UI, public-site and offline work follow cleanup.
+
 ## Employee/return checkpoint LIVE — September 9
 
 LIVE 1791eaf701d767da7109012b3ecd7e89f514c2f1, Worker 936417e0-911a-472e-b666-f7bf6321d7e5, deployment fc7eae67-ecdb-4464-9b76-d25762a4434b, independently verified at 100% traffic on 2026-09-08T23:17:48.005495Z. CLI exit 0; all domains, cron and queue triggers succeeded. Frontend339/339 and backend319/319 have passing evidence; types, translations, build, clean dry-run and independent final-head review pass. Migration0142 applied; recorded business totals unchanged and new receipt/guard tables empty before rollout.
