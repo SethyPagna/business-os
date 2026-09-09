@@ -206,6 +206,44 @@ async function run() {
   })
   console.log('PASS settlement canonicalizes active methods, preserves inactive legacy tender, uses latest rate once, and moves no stock')
 
+  // The production failure was reported on a sale with several item rows,
+  // no delivery/customer block, and an awaiting-payment -> completed write.
+  // Keep that shape here so a future change cannot make the status/payment
+  // batch succeed while silently dropping the item lines or moving stock a
+  // second time.
+  const multiLine = fixture(); seed(multiLine)
+  multiLine.sql.exec(`
+    INSERT INTO sale_items(
+      id,sale_id,product_id,product_name,quantity,applied_price_usd,applied_price_khr,total_usd,total_khr,
+      product_discount_usd,product_discount_khr,base_price_usd,base_price_khr,manual_discount_usd,manual_discount_khr,branch_id
+    ) VALUES
+      (2,1,1,'Serum',2,40,168000,80,336000,0,NULL,40,NULL,0,NULL,1),
+      (3,1,1,'Serum',3,25,105000,75,315000,0,NULL,25,NULL,0,NULL,1),
+      (4,1,1,'Serum',1,100,420000,100,420000,0,NULL,100,NULL,0,NULL,1);
+    UPDATE sales SET subtotal_usd=260,subtotal_khr=1092000,total_usd=265,total_khr=1113000,
+      amount_paid_usd=0,amount_paid_khr=0,payment_method=NULL,payment_details=NULL,
+      customer_id=NULL,customer_name=NULL,delivery_contact_id=NULL,is_delivery=0,
+      delivery_fee_usd=NULL,delivery_fee_khr=NULL,delivery_actual_cost_usd=NULL,
+      delivery_actual_cost_khr=NULL,updated_at='multi-line-v1' WHERE id=1;
+  `)
+  const multiStockBefore = multiLine.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity
+  const multiApplied = await multiLine.call('/1/status', {
+    sale_status: 'completed',
+    expected_updated_at: 'multi-line-v1',
+    client_request_id: 'multi-line-settlement-1',
+    expected_exchange_rate: 4200,
+    payment_details: [{ method: 'ABA Bank', amount_usd: 265, amount_khr: 0 }],
+  })
+  assert.equal(multiApplied.status, 200, JSON.stringify(multiApplied))
+  assert.equal(multiApplied.body.payment_method, 'ABA Bank')
+  assert.equal(multiApplied.body.amount_paid_usd, 265)
+  assert.equal(multiLine.sql.prepare('SELECT COUNT(*) n FROM sale_items WHERE sale_id=1').get().n, 4)
+  assert.equal(multiLine.sql.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status, 'completed')
+  assert.equal(multiLine.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity, multiStockBefore)
+  assert.equal(multiLine.sql.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n, 0)
+  assert.equal(multiLine.sql.prepare("SELECT COUNT(*) n FROM sale_record_events WHERE source_kind='sale_settlement'").get().n, 1)
+  console.log('PASS four-line no-delivery settlement keeps every item, records payment, and moves no stock twice')
+
   f.sql.prepare("UPDATE settings SET value='4300' WHERE key='exchange_rate'").run()
   const retry = await f.call('/1/status', request())
   assert.deepEqual(retry, applied)
