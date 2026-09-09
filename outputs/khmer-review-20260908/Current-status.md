@@ -1,4 +1,16 @@
 # Current task status
+Updated: 2026-09-09T10:34:00Z
+Release `e093b5c5` is live at Worker version `718a3d15-8d64-4b5c-88de-2f486b5b48e7` (deployment completed 2026-09-09T10:31Z, 100%). It includes the transfer timeout/cap fix from `b312c331`, the additional-cash shift reconciliation/report/Telegram fix from `b059237a`, and the iOS viewport zoom guard from `e093b5c5`. D1 migration `0147_shift_additional_cash.sql` is applied remotely as migration row 143. The release branch is clean and pushed; logs and exact test evidence are in `outputs/takeover-20260909/`.
+
+Shift behavior now records cash added after opening separately in USD/KHR, includes it in expected cash and difference, keeps returns in shift figures rather than the cash breakdown, shows expected/difference for open and closed reports, and renders the USD/KHR pair compactly. Close/amend writes preserve opening register values, so employees closing a shift cannot overwrite the opening cash.
+
+Transfer behavior now allows both Shop → Warehouse and Warehouse → Shop with the canonical branch/lot guards and a bounded mutation timeout (single 45s, bulk 90s); transfer limits and rollback tests pass. The broader transfer receipt-deduplication/audit-before-stock durability follow-up remains open under F73.
+
+The mobile viewport fix caps browser zoom at the device width and removes page-level `pinch-zoom` from admin/public roots; the product image lightbox keeps its explicit zoom controls. This directly addresses the iOS PWA scaling defect. Physical iOS hardware and desktop device-toolbar emulation remain follow-up verification under U20.
+
+The public storefront already contains the legal footer/policy links, portal account/consent surfaces, sticky navigation and overflow containment from the earlier public-site work. A detailed comparison and remaining UI/public-site follow-up list is recorded in `outputs/takeover-20260909/transfer-ui-public-review.md`; the broad visual compaction pass remains a separate queued scope so it does not mix with the deployed data-correctness release.
+
+Previous release note (superseded):
 Updated: 2026-09-09T09:30:00Z
 Release `3b98fc1a` is live at Worker version `fb2aa5c4-22ec-4de5-ab32-806de9fce7dd` (deployment `8bfacf42-bd8b-4e62-9d61-1c4f2c7ddf51`, 100%). Owner correction is applied: Not Paid/awaiting_payment deducts stock exactly once. The guarded recovery corrected four lines across sales 16952/16953/16954 after backup; completed sale 16951 remains unchanged. Mutation timeout handling (45 seconds with unknown outcomes) and Khmer write-error presentation are deployed.
 
@@ -84,13 +96,13 @@ Notes: Credit/revenue parity and report tests integrated.
 
 Status: Deployed
 Next: No new implementation pending for the verified scope.
-Notes: Real route tests; blank and explicit zero are different; invalid values rejected without blocking legitimate close.
+Notes: Real route tests; blank and explicit zero are different; invalid values rejected without blocking legitimate close. Closing writes update close/additional-cash fields only and preserve the registered opening drawer.
 
 ## F15: Shift report compares registered opening/end USD and KHR; unknown stays unknown (N38).
 
 Status: Deployed
 Next: No new implementation pending for the verified scope.
-Notes: Migration 0132 conservatively treats ambiguous legacy zero as unknown; report/Telegram tests passed.
+Notes: Migration 0132 conservatively treats ambiguous legacy zero as unknown. Migration 0147 adds separate USD/KHR additional-cash fields; expected cash and difference include them in reports, exports and Telegram. Returns remain in shift figures and are excluded from cash-breakdown rows.
 
 ## F16: Shift Report is its own selectable report view with export, not an extra block in overview.
 
@@ -538,15 +550,16 @@ Next: Add/Remove signed quantity and Set target total with before/after, signed 
 
 ## F68: iOS PWA responsive containment with left/right margins across pages/dialogs
 
-Status: Deferred to later checkpoint by owner
-Next: Preserve reviewed plans; urgent sales/POS and transfer take priority. Video shows stock-change list/dialog clipped on right; assess viewport scale, input autozoom, widths and keyboard. Fix admin PWA fit and requested zoom behavior; test margins and controls at mobile widths.
+Status: Deployed; physical-device follow-through open
+Next: Verify margins and controls on a physical iOS PWA and desktop device-toolbar emulation under U20; continue page-specific compaction separately.
+Notes: Release `e093b5c5` caps browser zoom at the device width, removes page-level pinch zoom from admin/public roots, and preserves explicit image-lightbox zoom. Focused regression test and production build passed.
 
 
 ## F69: Shop to Warehouse transfer fails; both canonical transfer directions must work with branch/lot identity and permissions
 
 Status: Deployed
 Next: Shop↔Warehouse, reverse Undo/Redo and strict explicit-lot race rollback passed. Warehouse sales remain prohibited. Retry receipt gap is tracked separately as F73.
-Notes: Owner request with screenshot codex-clipboard-ef24b217-5a3e-4e63-891f-6c047e236707.png; previous tasks retained.
+Notes: `b312c331` keeps selected-lot/source-aggregate caps and rejects nonfinite availability; the UI waits up to 45s for a single transfer and 90s for a bulk transfer. Owner request with screenshot codex-clipboard-ef24b217-5a3e-4e63-891f-6c047e236707.png; previous tasks retained.
 
 ## F70: Products name/barcode search is too slow
 
@@ -598,9 +611,9 @@ Notes: Owner request with screenshot codex-clipboard-ef24b217-5a3e-4e63-891f-6c0
 
 ## F73: Transfer retries lack server receipt deduplication and audit is after stock writes
 
-Status: Transfer stock-limit fix deployed; broader durability remains open
-Next: Livecap uses min selectedlot/source aggregate, rejects nonfiniteavailability. AdminUI Shop→Warehouse options verified without movingstock. Employee inventory/branches remain absent; preserve full F73 durability WIP.
-Notes: Found during independent F69 review; not introduced by symmetric transfer fix.
+Status: Transfer stock-limit and timeout fixes deployed; broader durability remains open
+Next: Add server-side idempotency/receipt dedupe and record the audit before stock writes, then verify retry behavior with an uncertain network outcome. Employee inventory/branches remain absent by scope.
+Notes: The deployed UI waits for the bounded mutation windows and reports an uncertain outcome instead of falsely claiming failure; no receipt dedupe claim yet.
 
 ## F74: Specific, change-driven Sales Records with complete EN/KM labels and before/after for driver, delivery cost/fee, product add/remove/replace/quantity, customer/General/membership, status and payment
 

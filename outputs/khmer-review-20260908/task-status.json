@@ -1,7 +1,7 @@
 {
-  "asOf": "2026-09-09T09:30:00Z",
-  "liveCommit": "3b98fc1a",
-  "liveSummary": "Release 3b98fc1a is live at Worker version fb2aa5c4-22ec-4de5-ab32-806de9fce7dd, 100%. Not Paid/awaiting_payment stock correction applied once after backup for four lines across sales 16952/16953/16954; 16951 unchanged. Mutation timeout and Khmer write-error handling deployed.",
+  "asOf": "2026-09-09T10:34:00Z",
+  "liveCommit": "e093b5c5",
+  "liveSummary": "Release e093b5c5 is live at Worker version 718a3d15-8d64-4b5c-88de-2f486b5b48e7, 100%. It includes transfer timeout/cap reliability (b312c331), additional cash/expected drawer in shift reports and Telegram (b059237a), and the iOS viewport zoom guard (e093b5c5). Migration 0147_shift_additional_cash.sql is remote migration row 143. The release branch is clean and pushed; broader transfer durability and visual compaction remain tracked follow-ups.",
   "tasks": [
     {
       "id": "F01",
@@ -99,14 +99,14 @@
       "request": "Shift registration is report-only and close always works (N37).",
       "state": "Deployed",
       "next": "No new implementation pending for the verified scope.",
-      "notes": "Real route tests; blank and explicit zero are different; invalid values rejected without blocking legitimate close."
+      "notes": "Closing writes update close/additional-cash fields only and preserve the registered opening drawer. Additional cash added after opening is recorded separately."
     },
     {
       "id": "F15",
       "request": "Shift report compares registered opening/end USD and KHR; unknown stays unknown (N38).",
       "state": "Deployed",
       "next": "No new implementation pending for the verified scope.",
-      "notes": "Migration 0132 conservatively treats ambiguous legacy zero as unknown; report/Telegram tests passed."
+      "notes": "Migration 0147 adds separate USD/KHR additional-cash fields; expected cash and difference include them in reports, exports and Telegram. Returns remain in shift figures and are excluded from cash-breakdown rows."
     },
     {
       "id": "F16",
@@ -629,16 +629,16 @@
     {
       "id": "F68",
       "request": "iOS PWA responsive containment with left/right margins across pages/dialogs",
-      "state": "Deferred to later checkpoint by owner",
-      "next": "Preserve reviewed plans; urgent sales/POS and transfer take priority. Video shows stock-change list/dialog clipped on right; assess viewport scale, input autozoom, widths and keyboard. Fix admin PWA fit and requested zoom behavior; test margins and controls at mobile widths.",
-      "notes": ""
+      "state": "Deployed; physical-device follow-through open",
+      "next": "Verify margins and controls on a physical iOS PWA and desktop device-toolbar emulation under U20; continue page-specific compaction separately.",
+      "notes": "Release e093b5c5 caps browser zoom at the device width, removes page-level pinch zoom from admin/public roots, and preserves explicit image-lightbox zoom. Focused regression test and production build passed."
     },
     {
       "id": "F69",
       "request": "Shop to Warehouse transfer fails; both canonical transfer directions must work with branch/lot identity and permissions",
       "state": "Deployed",
       "next": "Shop↔Warehouse, reverse Undo/Redo and strict explicit-lot race rollback passed. Warehouse sales remain prohibited. Retry receipt gap is tracked separately as F73.",
-      "notes": "Owner request with screenshot codex-clipboard-ef24b217-5a3e-4e63-891f-6c047e236707.png; previous tasks retained."
+      "notes": "b312c331 keeps selected-lot/source-aggregate caps and rejects nonfinite availability; the UI waits up to 45s for a single transfer and 90s for a bulk transfer."
     },
     {
       "id": "F70",
@@ -699,9 +699,9 @@
     {
       "id": "F73",
       "request": "Transfer retries lack server receipt deduplication and audit is after stock writes",
-      "state": "Transfer stock-limit fix deployed; broader durability remains open",
-      "next": "Livecap uses min selectedlot/source aggregate, rejects nonfiniteavailability. AdminUI Shop→Warehouse options verified without movingstock. Employee inventory/branches remain absent; preserve full F73 durability WIP.",
-      "notes": "Found during independent F69 review; not introduced by symmetric transfer fix."
+      "state": "Transfer stock-limit and timeout fixes deployed; broader durability remains open",
+      "next": "Add server-side idempotency/receipt dedupe and record the audit before stock writes, then verify retry behavior with an uncertain network outcome. Employee inventory/branches remain absent by scope.",
+      "notes": "The deployed UI waits for bounded mutation windows and reports an uncertain outcome instead of falsely claiming failure; no receipt dedupe claim yet."
     },
     {
       "id": "F74",

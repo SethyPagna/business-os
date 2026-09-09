@@ -1,0 +1,30 @@
+{
+  "asOf": "2026-09-09T10:34:00Z",
+  "releaseBranch": "codex/sale-create-trigger-release-20260909",
+  "sourceCommits": [
+    { "sha": "b059237a", "scope": "shift additional cash, expected drawer, reports and Telegram" },
+    { "sha": "b312c331", "scope": "Shop/Warehouse transfer timeout and lot availability cap" },
+    { "sha": "e093b5c5", "scope": "iOS viewport scale and page pinch-zoom guard" }
+  ],
+  "liveWorkerVersion": "718a3d15-8d64-4b5c-88de-2f486b5b48e7",
+  "deployment": "completed successfully by wrangler deploy; 100% traffic",
+  "migration": { "name": "0147_shift_additional_cash.sql", "remoteD1MigrationId": 143 },
+  "verification": {
+    "workerTypecheck": "PASS",
+    "frontendTypecheck": "PASS",
+    "frontendVerifyI18n": "PASS",
+    "frontendBuild": "PASS",
+    "shiftReconciliationPure": "PASS",
+    "shiftReportPure": "PASS",
+    "mobileViewportGuard": "PASS",
+    "transferCanonicalBranchRoute": "PASS (10)",
+    "transferBranchLots": "PASS (6)",
+    "transferInventoryLots": "PASS (7)",
+    "transferCanonicalIdentity": "PASS (7)"
+  },
+  "limitations": [
+    "Physical iOS PWA and desktop device-toolbar checks remain open under U20.",
+    "Transfer server idempotency/receipt dedupe and audit-before-stock ordering remain open under F73.",
+    "Unauthenticated runtime endpoint verification was blocked by the Cloudflare challenge; deployment CLI provenance is recorded."
+  ]
+}
