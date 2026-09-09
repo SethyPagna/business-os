@@ -2595,11 +2595,19 @@ export default function POS() {
     patchActive({
       cart: active.cart.map((item) => {
         if (getCartLineId(item) !== cartLineId) return item
-        const baseUsd = item.base_price_usd ?? item.applied_price_usd
-        const baseKhr = item.base_price_khr ?? item.applied_price_khr
+        const baseUsd = normalizePriceValue(item.base_price_usd ?? item.applied_price_usd, 0)
+        const suppliedBaseKhr = normalizePriceValue(item.base_price_khr ?? item.applied_price_khr, 0)
+        const baseKhr = baseUsd > 0 && exchangeRate > 0
+          ? normalizePriceValue(baseUsd * exchangeRate, 0)
+          : suppliedBaseKhr
         const result = applyManualDiscount(baseUsd, baseKhr, exchangeRate, type, value)
         return {
           ...item,
+          // Preserve the resolved canonical base alongside the applied price.
+          // This matters when a cart line came from an older cached payload
+          // whose KHR base was empty or based on a prior exchange rate.
+          base_price_usd: baseUsd,
+          base_price_khr: baseKhr,
           applied_price_usd: result.applied_price_usd,
           applied_price_khr: result.applied_price_khr,
           manual_discount_type: type,

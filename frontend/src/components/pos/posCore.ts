@@ -124,7 +124,16 @@ export function applyManualDiscount(
   rawValue: number,
 ): ManualDiscountResult {
   const base = normalizePriceValue(basePriceUsd || 0, 0)
-  const baseKhr = normalizePriceValue(basePriceKhr || 0, 0)
+  // USD is the canonical price basis whenever it is present. A stale/zero
+  // KHR value used to survive here, which made a perfectly valid USD-priced
+  // line produce a negative manual_discount_khr after a discount was applied.
+  // Keep the KHR-only path for legacy/catalog rows that genuinely have no USD
+  // price, but otherwise derive both KHR values from the same exchange rate.
+  const suppliedBaseKhr = normalizePriceValue(basePriceKhr || 0, 0)
+  const hasUsdBasis = base > 0 && Number.isFinite(exchangeRate) && exchangeRate > 0
+  const baseKhr = hasUsdBasis
+    ? normalizePriceValue(base * exchangeRate, 0)
+    : suppliedBaseKhr
   if (!type || !Number.isFinite(rawValue) || rawValue <= 0) {
     return {
       manual_discount_type: null,
@@ -140,7 +149,7 @@ export function applyManualDiscount(
     ? normalizePriceValue(base * (value / 100), 0)
     : Math.min(value, base)
   const appliedUsd = normalizePriceValue(Math.max(0, base - discountUsd), 0)
-  const appliedKhr = exchangeRate > 0
+  const appliedKhr = hasUsdBasis
     ? normalizePriceValue(appliedUsd * exchangeRate, 0)
     : normalizePriceValue(Math.max(0, baseKhr - discountUsd * (baseKhr / (base || 1))), 0)
   return {

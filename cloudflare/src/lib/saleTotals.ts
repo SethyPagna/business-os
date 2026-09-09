@@ -31,6 +31,62 @@ export function round2(n: number): number {
   return Math.round((n + Number.EPSILON) * 100) / 100
 }
 
+export type CanonicalSaleItemMoneyInput = {
+  appliedPriceUsd?: unknown
+  appliedPriceKhr?: unknown
+  basePriceUsd?: unknown
+  basePriceKhr?: unknown
+}
+
+export type CanonicalSaleItemMoney = {
+  appliedPriceUsd: number
+  appliedPriceKhr: number
+  basePriceUsd: number
+  basePriceKhr: number
+  manualDiscountUsd: number
+  manualDiscountKhr: number
+}
+
+/**
+ * Resolve the paired USD/KHR snapshots stored on sale_items. USD is the
+ * authoritative basis whenever it is available; client KHR fields are only
+ * a fallback for genuinely KHR-only legacy lines. This keeps manual discount
+ * amounts non-negative and prevents a stale/zero KHR base from becoming a
+ * negative discount when the applied USD price is reduced.
+ */
+export function canonicalSaleItemMoney(
+  input: CanonicalSaleItemMoneyInput,
+  exchangeRate: unknown,
+): CanonicalSaleItemMoney {
+  const rateValue = Number(exchangeRate)
+  const rate = Number.isFinite(rateValue) && rateValue > 0 ? rateValue : 4100
+  const appliedRaw = Number(input.appliedPriceUsd)
+  const appliedPriceUsd = Number.isFinite(appliedRaw) ? round2(Math.max(0, appliedRaw)) : 0
+  const baseRaw = Number(input.basePriceUsd)
+  const basePriceUsd = Number.isFinite(baseRaw) && baseRaw > 0
+    ? round2(baseRaw)
+    : appliedPriceUsd
+  const clientAppliedKhr = Number(input.appliedPriceKhr)
+  const clientBaseKhr = Number(input.basePriceKhr)
+  const fallbackAppliedKhr = Number.isFinite(clientAppliedKhr) ? Math.round(Math.max(0, clientAppliedKhr)) : 0
+  const fallbackBaseKhr = Number.isFinite(clientBaseKhr) ? Math.round(Math.max(0, clientBaseKhr)) : fallbackAppliedKhr
+  const hasUsdBasis = basePriceUsd > 0 || appliedPriceUsd > 0
+  const appliedPriceKhr = hasUsdBasis
+    ? Math.round(appliedPriceUsd * rate)
+    : fallbackAppliedKhr
+  const basePriceKhr = hasUsdBasis
+    ? Math.round(basePriceUsd * rate)
+    : fallbackBaseKhr
+  return {
+    appliedPriceUsd,
+    appliedPriceKhr,
+    basePriceUsd,
+    basePriceKhr,
+    manualDiscountUsd: round2(Math.max(0, basePriceUsd - appliedPriceUsd)),
+    manualDiscountKhr: Math.max(0, basePriceKhr - appliedPriceKhr),
+  }
+}
+
 /**
  * True when the request actually carried a tender amount, as opposed to
  * omitting the field. `undefined`, `null` and `''` all mean "not supplied";

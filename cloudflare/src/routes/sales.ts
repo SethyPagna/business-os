@@ -121,7 +121,7 @@ import {
   type SaleItemAllocation,
 } from '../lib/saleTransitions'
 import { buildLikeAliasClause, tokenizeSearchTermGroups, normalizeSearchText } from '../lib/searchMatch'
-import { computeSaleTotals, resolveChangeExchangeRate, round2 } from '../lib/saleTotals'
+import { canonicalSaleItemMoney, computeSaleTotals, resolveChangeExchangeRate, round2 } from '../lib/saleTotals'
 import { financialCalculationValue } from '../lib/financialPrecision'
 import { planNativeSaleChange, NativeSaleChangeValidationError } from '../lib/nativeSaleChange'
 import { normalizeClientReceiptNumber, uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
@@ -786,7 +786,14 @@ app.post('/', async (c) => {
   let subtotalUsd = 0
   const priced = normalized.map((item) => {
     const product = productMap.get(item.product_id)
-    const unitPriceUsd = Number(item.applied_price_usd ?? product?.selling_price_usd ?? 0)
+    const requestedUnitPriceUsd = item.applied_price_usd ?? product?.selling_price_usd ?? 0
+    const money = canonicalSaleItemMoney({
+      appliedPriceUsd: requestedUnitPriceUsd,
+      appliedPriceKhr: item.applied_price_khr,
+      basePriceUsd: item.base_price_usd,
+      basePriceKhr: item.base_price_khr,
+    }, exchangeRate)
+    const unitPriceUsd = money.appliedPriceUsd
     const lineTotalUsd = round2(unitPriceUsd * item.quantity)
     subtotalUsd += lineTotalUsd
     return {
@@ -794,6 +801,7 @@ app.post('/', async (c) => {
       product_name: item.product_name || item.name || product?.name || `product #${item.product_id}`,
       unitPriceUsd,
       lineTotalUsd,
+      canonicalMoney: money,
       costPriceUsd: Number(product?.cost_price_usd || 0),
       costPriceKhr: Number(product?.cost_price_khr || 0),
     }
@@ -1189,8 +1197,8 @@ app.post('/', async (c) => {
           product_id: item.product_id,
           product_name: item.product_name,
           quantity: item.quantity,
-          applied_price_usd: item.unitPriceUsd,
-          applied_price_khr: Math.round(item.unitPriceUsd * exchangeRate),
+          applied_price_usd: item.canonicalMoney.appliedPriceUsd,
+          applied_price_khr: item.canonicalMoney.appliedPriceKhr,
           cost_price_usd: item.costPriceUsd,
           cost_price_khr: item.costPriceKhr,
           total_usd: item.lineTotalUsd,
@@ -1201,16 +1209,16 @@ app.post('/', async (c) => {
           product_discount_label: item.product_discount_label || null,
           product_discount_usd: Number(item.product_discount_usd) || 0,
           product_discount_khr: Number(item.product_discount_khr) || 0,
-          // base_price defaults to the applied price itself when a client
-          // doesn't send it (e.g. an older frontend build, or a direct API
-          // caller) -- that reads as "no manual discount" rather than a
-          // misleading base of 0, and keeps this purely additive.
-          base_price_usd: Number(item.base_price_usd) || item.unitPriceUsd,
-          base_price_khr: Number(item.base_price_khr) || Math.round(item.unitPriceUsd * exchangeRate),
+          // The canonical helper has already resolved missing/legacy paired
+          // prices and derived both manual discount currencies from USD. Do
+          // not trust client KHR snapshots here: stale cached carts are one
+          // of the inputs this boundary must repair before persistence.
+          base_price_usd: item.canonicalMoney.basePriceUsd,
+          base_price_khr: item.canonicalMoney.basePriceKhr,
           manual_discount_type: item.manual_discount_type || null,
           manual_discount_value: Number(item.manual_discount_value) || 0,
-          manual_discount_usd: Number(item.manual_discount_usd) || 0,
-          manual_discount_khr: Number(item.manual_discount_khr) || 0,
+          manual_discount_usd: item.canonicalMoney.manualDiscountUsd,
+          manual_discount_khr: item.canonicalMoney.manualDiscountKhr,
           batch_id: item.batch_id || null,
           damaged_lot_id: item.damaged_lot_id || null,
         },

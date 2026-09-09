@@ -238,6 +238,41 @@ async function assertNativeD1TriggerMetadata() {
 
   {
     const f = fixture()
+    const staleKhr = request('canonical-khr-discount')
+    staleKhr.items = [{
+      product_id: 10,
+      quantity: 1,
+      branch_id: 1,
+      batch_id: 500,
+      applied_price_usd: 18,
+      applied_price_khr: 0,
+      base_price_usd: 21,
+      base_price_khr: 0,
+      manual_discount_type: 'fixed',
+      manual_discount_value: 3,
+      manual_discount_usd: 3,
+      manual_discount_khr: -12000,
+    }]
+    staleKhr.amount_paid_usd = 18
+    const created = await postSale(f.route, staleKhr)
+    assert.equal(created.status, 200, JSON.stringify(created.body))
+    const line = f.raw.prepare(`SELECT applied_price_usd, applied_price_khr,
+      base_price_usd, base_price_khr, manual_discount_usd, manual_discount_khr
+      FROM sale_items`).get()
+    assert.deepEqual({ ...line }, {
+      applied_price_usd: 18,
+      applied_price_khr: 72000,
+      base_price_usd: 21,
+      base_price_khr: 84000,
+      manual_discount_usd: 3,
+      manual_discount_khr: 12000,
+    })
+    assert.ok(Number(line.manual_discount_khr) >= 0)
+    console.log('PASS sale creation rebases stale KHR discount snapshots from the authoritative USD rate')
+  }
+
+  {
+    const f = fixture()
     f.raw.prepare(`INSERT INTO sales(receipt_number,client_request_id,branch_id,branch_name,cashier_name,payment_method,total_usd,sale_status)
                    VALUES('ORPHAN','orphan-replay',1,'Shop','Sale Cashier','Cash',9.5,'completed')`).run()
     const replay = await postSale(f.route, request('orphan-replay'))

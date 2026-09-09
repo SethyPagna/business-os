@@ -340,6 +340,21 @@ await runTest('Z2: no discount means base equals applied (price edit sets the pr
   assert.equal(d.manual_discount_type, null)
 })
 
+await runTest('Z2: USD discounts rebase a stale or empty KHR snapshot', () => {
+  // A cached line can carry a valid USD base with base_price_khr=0. KHR must
+  // be derived from the same rate before subtracting the discount, otherwise
+  // the old path recorded a negative manual KHR discount.
+  const d = applyManualDiscount(21, 0, 4050, 'fixed', 3)
+  assert.equal(d.applied_price_usd, 18)
+  assert.equal(d.applied_price_khr, 72900)
+  assert.equal(d.manual_discount_usd, 3)
+  assert.equal(d.manual_discount_khr, 12150)
+  assert.ok(d.manual_discount_khr >= 0)
+  const cleared = applyManualDiscount(21, 0, 4050, null, 0)
+  assert.equal(cleared.applied_price_khr, 85050)
+  assert.equal(cleared.manual_discount_khr, 0)
+})
+
 await runTest('Z2 wiring: the cart input, updatePrice, and receipt are decoupled from the discount', () => {
   const cartItem = fs.readFileSync(new URL('../src/components/pos/CartItem.tsx', import.meta.url), 'utf8')
   // The price inputs read the BASE price, not the (discounted) applied price.
