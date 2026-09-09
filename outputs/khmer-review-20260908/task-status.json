@@ -363,9 +363,9 @@
     {
       "id": "F52",
       "request": "Investigate negative revenue/profit accuracy.",
-      "state": "Production census complete; causes and repairs open",
-      "next": "Global/report buckets positive.142 sale profit negatives,100 product losses,30 negative KHR discount cells,5 zero-item/4 zero-subtotal-with-items sales and2 refunds on cancelled sales flagged.21 negative delivery margins require context. No orphan return items/excess returned quantities. Signed change may bevalid; preserve evidence and investigate withoutclamping.",
-      "notes": "No formula defect established. Preserve genuine losses; never clamp or invent money."
+      "state": "Active create-path fix deployed; historical evidence open",
+      "next": "New POS/API sale-item currency snapshots are canonicalized from USD and the server rate; continue evidence-led review of existing negative rows without clamping or rewriting them.",
+      "notes": "The deployed fix prevents stale/zero KHR bases from creating negative manual_discount_khr. Existing census remains: 142 sale-profit negatives, 100 product losses, 30 negative KHR discount cells, 5 zero-item/4 zero-subtotal-with-items, 2 refunds on cancelled and 21 negative delivery margins; each still needs provenance before repair."
     },
     {
       "id": "P01",
