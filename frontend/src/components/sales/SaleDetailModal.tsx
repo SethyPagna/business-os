@@ -673,8 +673,11 @@ export default function SaleDetailModal({
   // decides it (lib/saleAmendments.ts saleAmendmentMovesStock): S4-2's sticky
   // `stock_skipped` flag wins over the status, because a sale the system never
   // took units for must not have units handed back to it either.
+  // Awaiting-payment sales already hold their units. Amendments to one of
+  // those sales therefore move stock immediately, just like completed and
+  // awaiting-delivery sales; excluding it here made the review preview lie
+  // even though the server correctly deducted/restored the delta.
   const amendStockMoves = !Number(sale?.stock_skipped || 0)
-    && String(sale?.sale_status || 'completed') !== 'awaiting_payment'
 
   const submitAmendment = async (request: SaleAmendmentRequest): Promise<void> => {
     if (!onAmend || !sale) return

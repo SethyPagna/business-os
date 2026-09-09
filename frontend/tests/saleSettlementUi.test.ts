@@ -217,7 +217,12 @@ assert.doesNotMatch(modalSource, /payment_method:\s*method[\s\S]{0,120}amount_pa
 assert.match(salesSource, /hasServerSettlementHistory[\s\S]*?refreshServerItems/, 'server settlement history replaces the local status-only history entry')
 assert.match(salesSource, /code\?: unknown \}\)\.code === 'exchange_rate_changed'[\s\S]*?exchangeRateChanged/, 'Sales returns the server current rate to the open review')
 assert.match(salesSource, /isSettlementRequest \? undefined : notes/, 'settlement payloads omit the empty notes field required by the server contract')
-assert.match(salesSource, /isSettlementRequest[\s\S]*?settlementError: getErrorMessage/, 'settlement request failures return to the open modal')
+assert.match(salesSource, /if \(isSettlementRequest\) \{[\s\S]*?return \{ settlementError: detail \}/, 'settlement request failures return to the open modal with localized retry guidance')
+assert.match(salesSource, /const isSettlementRequest = Array\.isArray\(\(extra as \{ payment_details\?: unknown \} \| null\)\?\.payment_details\)\s*\n\s*\|\| Array\.isArray\(\(preparedRetry as \{ payment_details\?: unknown \} \| null\)\?\.payment_details\)/, 'a retry keeps settlement semantics when it comes from the frozen request body')
+assert.match(salesSource, /if \(!preparedRetry\) savePendingDirectStatus\(saleId, preparedRequest, historyContext\)/, 'the exact settlement body is persisted before its network write')
+assert.match(salesSource, /const mutationResult = await runSaleStatusMutation[\s\S]*?savePendingDirectStatus\(saleId, null\)/, 'a confirmed response clears the pending settlement retry')
+assert.match(salesSource, /directMutationOutcomeIsUnknown\(error\)[\s\S]*?savePendingDirectStatus\(saleId, null\)/, 'known settlement failures clear safely while unknown outcomes retain the retry')
+assert.match(salesSource, /await handleStatusChange\([\s\S]*?pending\.body,\s*history,\s*\)/, 'retry submits the exact frozen settlement payload including payment details')
 assert.match(historySource, /applier === 'sale\.settlement'/, 'settlement undo and redo include optimistic generation checks')
 
 console.log('PASS awaiting-payment multi-tender settlement UI contract')

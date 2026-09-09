@@ -79,7 +79,13 @@ import {
 } from '../../utils/directMutationRequest.ts'
 
 const SALES_USER_OPTIONS_TIMEOUT_MS = 8000
-const SALES_STATUS_MUTATION_TIMEOUT_MS = 12000
+// A status settlement writes the sale, every paired KHR line snapshot, the
+// immutable settlement receipt, Sales Records and the audit row in one D1
+// batch. Twelve seconds was shorter than the server's own 45s write window,
+// so a slow but valid commit surfaced as "unknown" while the request was
+// still running. Keep the UI deadline aligned with apiFetch's write ceiling;
+// the durable request id still makes a retry safe if the edge really drops.
+const SALES_STATUS_MUTATION_TIMEOUT_MS = 45000
 const SALES_BULK_LINKED_PAGE_SIZE = 100
 const SALES_BULK_LINKED_SEARCH_DEBOUNCE_MS = 180
 // S4-24b: adding lines deducts stock and rewrites the sale's totals in one
@@ -227,7 +233,10 @@ type SaleMutationUiResult = boolean | { exchangeRateChanged: number } | { mutati
 type SaleStatusUiResult = boolean | { exchangeRateChanged: number } | { settlementError: string } | { statusUpdatedAt: string }
 
 function statusReplayExtra(request: PreparedSaleStatusRequest): Record<string, unknown> | null {
-  const allowedKeys = ['cancel_reason', 'cancel_note', 'cancel_fee_usd', 'cancel_fee_khr', 'cancel_fee_note', 'skip_stock'] as const
+  const allowedKeys = [
+    'cancel_reason', 'cancel_note', 'cancel_fee_usd', 'cancel_fee_khr', 'cancel_fee_note', 'skip_stock',
+    'payment_details', 'expected_exchange_rate', 'replace_existing_payment',
+  ] as const
   const entries = allowedKeys
     .filter((key) => Object.prototype.hasOwnProperty.call(request, key))
     .map((key) => [key, request[key]] as const)
@@ -986,7 +995,12 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     }
     const actionKey = String(numericId)
     if (!beginKeyedAction(statusActionRef, actionKey)) return false
+    // A retry is allowed to come from the durable pending slot, so the
+    // settlement shape must be detected from the frozen request too. The old
+    // check only looked at `extra`; a retried payment was therefore treated
+    // as a plain status change and silently dropped its tender rows.
     const isSettlementRequest = Array.isArray((extra as { payment_details?: unknown } | null)?.payment_details)
+      || Array.isArray((preparedRetry as { payment_details?: unknown } | null)?.payment_details)
     try {
       const preparedRequest = preparedRetry || freezeDirectMutationBody(await getSalesApi().prepareSaleStatusRequest(
         saleId,
@@ -999,13 +1013,17 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
             : {}),
         },
       ))
-      if (!isSettlementRequest && !preparedRetry) savePendingDirectStatus(saleId, preparedRequest, historyContext)
+      // Persist the exact frozen body before the network call for BOTH plain
+      // status changes and payment settlements. If the edge times out after
+      // the batch commits, the Sales page can tell the operator to check the
+      // sale/Records and retry the same idempotent request.
+      if (!preparedRetry) savePendingDirectStatus(saleId, preparedRequest, historyContext)
       const mutationResult = await runSaleStatusMutation(saleId, preparedRequest) as {
         actionHistoryId?: string | number | null
         actionKind?: string | null
         updated_at?: string | null
       } | null
-      if (!isSettlementRequest) savePendingDirectStatus(saleId, null)
+      savePendingDirectStatus(saleId, null)
       const hasServerSettlementHistory = mutationResult?.actionKind === 'sale.settlement'
         && mutationResult.actionHistoryId != null
       const statusUpdatedAt = String(mutationResult?.updated_at || '').trim()
@@ -1051,7 +1069,20 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         if (Number.isFinite(exchangeRateChanged) && exchangeRateChanged > 0) return { exchangeRateChanged }
       }
       if (isSettlementRequest) {
-        return { settlementError: getErrorMessage(error, String(error || 'Unable to settle this sale.')) }
+        // Known validation/conflict errors are safe to clear; an unknown
+        // network/timeout outcome must keep the exact request available for
+        // an explicit check-and-retry. The global banner carries the same
+        // localized wording, while the modal keeps the actionable detail.
+        if (!directMutationOutcomeIsUnknown(error) && (error as { code?: unknown } | null)?.code !== 'pending_request_persistence_failed') {
+          savePendingDirectStatus(saleId, null)
+        }
+        const code = String((error as { code?: unknown } | null)?.code || '')
+        const detail = directMutationOutcomeIsUnknown(error)
+          ? translateOr('write_outcome_unknown', 'The request did not finish. Its result may be unknown. Check the sale and Records before retrying.', 'សំណើមិនទាន់បញ្ចប់។ លទ្ធផលអាចមិនទាន់ប្រាកដ។ សូមពិនិត្យការលក់ និងកំណត់ត្រា មុនសាកល្បងម្ដងទៀត។')
+          : code === 'customer_state_conflict'
+            ? translateOr('customer_state_conflict', 'The selected customer changed before the sale was saved. Review the customer and try again.', 'អតិថិជនដែលបានជ្រើសបានផ្លាស់ប្តូរ មុនពេលរក្សាទុកការលក់។ សូមពិនិត្យអតិថិជន ហើយសាកល្បងម្ដងទៀត។')
+            : getErrorMessage(error, String(error || translateOr('sale_settlement_failed', 'Unable to record this payment. Review the sale and try again.', 'មិនអាចកត់ត្រាការទូទាត់នេះបានទេ។ សូមពិនិត្យការលក់ ហើយសាកល្បងម្ដងទៀត។')))
+        return { settlementError: detail }
       }
       if (!directMutationOutcomeIsUnknown(error) && (error as { code?: unknown } | null)?.code !== 'pending_request_persistence_failed') savePendingDirectStatus(saleId, null)
       if (isWriteConflict(error)) {

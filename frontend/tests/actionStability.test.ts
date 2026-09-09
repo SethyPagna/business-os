@@ -512,7 +512,7 @@ await runTest('sales status and customer actions use shared guards and bounded m
   const source = readFrontend('src/components/sales/Sales.tsx')
 
   assert.match(source, /import \{ beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
-  assert.match(source, /const SALES_STATUS_MUTATION_TIMEOUT_MS = 12000/)
+  assert.match(source, /const SALES_STATUS_MUTATION_TIMEOUT_MS = 45000/)
   assert.match(source, /const statusActionRef = useRef<Set<string>>\(new Set\(\)\)/)
   assert.match(source, /const bulkStatusInFlightRef = useRef\(false\)/)
   assert.match(source, /withLoaderTimeout\(\s*\(\) => getSalesApi\(\)\.submitSaleStatusRequest\(saleId, request\),\s*'Update sale status',\s*SALES_STATUS_MUTATION_TIMEOUT_MS,\s*\)/)
