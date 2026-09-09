@@ -726,8 +726,12 @@ export function __resetApiHealthForTests(): void {
 }
 
 // HTTP helpers ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
-export async function apiFetch(method: unknown, path: string, body?: unknown, timeoutMs: number = SYNC.REQUEST_TIMEOUT_MS, options: ApiFetchOptions = {}): Promise<any> {
+export const WRITE_REQUEST_TIMEOUT_MS = 45_000
+
+export async function apiFetch(method: unknown, path: string, body?: unknown, timeoutMs?: number, options: ApiFetchOptions = {}): Promise<any> {
   const normalizedMethod = String(method || 'GET').toUpperCase()
+  const isMutation = !['GET', 'HEAD', 'OPTIONS'].includes(normalizedMethod)
+  timeoutMs = timeoutMs ?? (isMutation ? WRITE_REQUEST_TIMEOUT_MS : SYNC.REQUEST_TIMEOUT_MS)
   if (normalizedMethod === 'GET' && isRequiredRuntimeApiPath(path)) {
     const mismatchError = getApiVersionMismatchCooldown(path)
     if (mismatchError) {
@@ -790,7 +794,6 @@ export async function apiFetch(method: unknown, path: string, body?: unknown, ti
       requestInit.body = JSON.stringify(body)
     }
     const res = await fetch(`${base}${path}`, requestInit)
-    clearTimeout(timer)
     if (isCloudflareAccessRedirectResponse(res)) {
       const accessError = createCloudflareAccessError(path)
       dispatchUnauthorized({
@@ -826,7 +829,7 @@ export async function apiFetch(method: unknown, path: string, body?: unknown, ti
       }
       throw apiError || new Error(msg || `HTTP ${res.status}`)
     }
-    return res.json()
+    return await res.json()
   } catch (e: any) {
     clearTimeout(timer)
     if (externallyAborted) {
@@ -842,10 +845,19 @@ export async function apiFetch(method: unknown, path: string, body?: unknown, ti
     if (timedOut || e?.name === 'AbortError') {
       const timeoutError = new Error(`Request timed out after ${Math.round(timeoutMs / 1000)}s`) as ApiRuntimeError
       timeoutError.code = 'request_timeout'
+      timeoutError.timeoutMs = timeoutMs
+      if (isMutation) timeoutError.outcome = 'unknown'
       throw timeoutError
+    }
+    // A missing response cannot prove a dispatched write was rolled back.
+    // Preserve the error for callers that can reconcile their operation ID.
+    if (isMutation && (isConnectivityError(e) || Number(e?.status) >= 500 || e instanceof SyntaxError)) {
+      e.outcome = 'unknown'
+      e.code = e.code || 'write_outcome_unknown'
     }
     throw e
   } finally {
+    clearTimeout(timer)
     if (externalSignal) externalSignal.removeEventListener('abort', onExternalAbort)
   }
   })()
@@ -1424,25 +1436,20 @@ export async function route<T = any>(
     return result
   } catch (e: any) {
     const ms = Date.now() - t0
-    if (isConnectivityError(e)) {
-      setServerHealth(false)
-      if (isTransientGatewayError(e?.status)) {
-        dispatchTransientGatewayOutage(channel, e, true)
-      }
-      const message = 'Server is offline. Changes are invalid until the server reconnects.'
-      logCall(channel, 'server', ms, false)
-      dispatchWriteBlocked(channel, message, {
-        reason: 'server_unreachable',
-        serverOnline: false,
-        serverConfigured: true,
-        status: Number(e?.status || 0) || null,
-      })
-      throw createWriteBlockedError(channel, message, {
-        reason: 'server_unreachable',
-        serverOnline: false,
-        serverConfigured: true,
-        status: Number(e?.status || 0) || null,
-      })
+    if (isConnectivityError(e) || e?.outcome === 'unknown') {
+      e.outcome = 'unknown'
+      e.code = e.code || 'write_outcome_unknown'
+      e.syncErrorId = createSyncErrorId()
+      e.syncErrorChannel = channel
+      if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('sync:error', {
+        detail: {
+          errorId: e.syncErrorId, channel, error: e.message, code: e.code,
+          status: Number(e?.status || 0) || null, outcome: 'unknown',
+          timeoutMs: e.timeoutMs || null, ts: new Date().toISOString(),
+        },
+      }))
+      logCall(channel, 'server-outcome-unknown', ms, false)
+      throw e
     }
     logCall(channel, 'server', ms, false)
     if (isWriteConflictError(e)) {
