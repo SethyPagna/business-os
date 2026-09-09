@@ -59,6 +59,7 @@ runTest('the confirmation states the old status, the new one, and the stock effe
   }
   assert.match(sales, /fromLabel: getStatusLabel\(previousStatus, t\)/, 'the OLD status is passed in, not just the new one')
   assert.match(sales, /toLabel=\{getStatusLabel\(/, 'the NEW status is shown as its shopper-facing label')
+  assert.match(modal, /completed \/ awaiting_payment \/ awaiting_delivery \/ return statuses hold/, 'the dialog comment must stay aligned with the canonical holding rule')
 })
 
 runTest('the skip option is admin-only and behind an explicit unlock', () => {

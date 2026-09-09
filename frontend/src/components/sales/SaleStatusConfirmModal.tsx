@@ -17,8 +17,9 @@ type SaleStatusConfirmModalProps = {
   toLabel: string
   mixed?: boolean
   // Does this transition move stock at all (the kernel's held() rule:
-  // completed / awaiting_delivery hold units, awaiting_payment / cancelled
-  // do not)? Purely for the sentence shown -- the server decides.
+  // completed / awaiting_payment / awaiting_delivery / return statuses hold
+  // units, while cancelled holds none)? Purely for the sentence shown -- the
+  // server decides.
   movesStock: boolean
   // S4-2: the "Don't touch stock" option is rendered ONLY for an
   // administrator, and only behind an explicit unlock. The server enforces
