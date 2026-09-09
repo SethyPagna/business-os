@@ -4128,7 +4128,7 @@
   "general_customer_repair_desc": "ការថែទាំថេរ បម្រុងទុកជាមុន សម្រាប់អត្តសញ្ញាណទូទៅដែលម្ចាស់បានបញ្ជាក់។ មិនទទួលលេខអតិថិជន SQL ឬឯកសារទេ។",
   "general_customer_repair_failed": "ការជួសជុលមិនត្រូវបានអនុវត្តទេ។",
   "general_customer_repair_pending": "សញ្ញាសម្គាល់អាចត្រូវបានរក្សាទុក ប៉ុន្តែការផ្ទៀងផ្ទាត់ ឬការធ្វើឱ្យស្រស់កំពុងរង់ចាំ។ សូមលេងសំណើដដែលនេះម្ដងទៀត។",
-  "general_customer_repair_portal": "គណនីផតថល",
+  "general_customer_repair_portal": "គណនីគេហទំព័រ",
   "general_customer_repair_preview": "ពិនិត្យមើលការជួសជុលជាក់លាក់",
   "general_customer_repair_preview_loading": "កំពុងពិនិត្យកំណត់ត្រាបច្ចុប្បន្ន...",
   "general_customer_repair_preview_new": "ផ្ទុកការពិនិត្យមើលជាមុនថ្មី",
