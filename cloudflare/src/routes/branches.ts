@@ -910,7 +910,10 @@ app.post('/transfer-bulk', async (c) => {
   }
 
   responsePayload.merges = merges
-  statements[0] = transferReceiptStatement({ actorId: user.id, requestId: clientRequestId!, digest: requestDigest, requestJson, responseJson: JSON.stringify(responsePayload) })
+  // Keep the canonical identity guard first. The receipt is the second
+  // statement; replacing index 0 would silently remove the guard from bulk
+  // transfers and allow a duplicate receipt failure to surface as a 500.
+  statements[1] = transferReceiptStatement({ actorId: user.id, requestId: clientRequestId!, digest: requestDigest, requestJson, responseJson: JSON.stringify(responsePayload) })
   try {
     await db.batch(statements)
   } catch (error) {
