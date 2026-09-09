@@ -175,6 +175,13 @@ await run('panel gates on the normal maintenance permission and shows amount, st
   assert.match(panel, /subtotal_before_usd/)
   assert.match(panel, /total_after_usd/)
   assert.match(panel, /preview\.blocked_sales\.length/)
+  const confirmationInputId = (variant: 'v1' | 'v2') => `sale-incident-recovery-${variant}-confirmation`
+  assert.notEqual(confirmationInputId('v1'), confirmationInputId('v2'))
+  assert.match(panel, /const confirmationInputId = `sale-incident-recovery-\$\{variant\}-confirmation`/)
+  assert.match(panel, /htmlFor=\{confirmationInputId\}/)
+  assert.match(panel, /<input id=\{confirmationInputId\}/)
+  assert.doesNotMatch(panel, /htmlFor="sale-incident-recovery-confirmation"/)
+  assert.doesNotMatch(panel, /id="sale-incident-recovery-confirmation"/)
   assert.match(panel, /errorStatus\(error\) === 409/)
   assert.match(panel, /setNeedsNewPreview\(true\)/)
   assert.match(panel, /Replay same request/)
