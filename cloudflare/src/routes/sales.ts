@@ -1438,10 +1438,6 @@ app.post('/', async (c) => {
     }
   }
 
-  if (recoveredCommittedCreate) {
-    return c.json({ id: saleId, receiptNumber: resolvedReceiptNumber, duplicate: true })
-  }
-
   // Invalidate the 20s /api/products/search cache (see lib/cache.ts) so
   // Products/POS/Inventory pages reflect this sale's stock deduction
   // immediately instead of waiting out the TTL -- this write path deducts
@@ -1451,6 +1447,9 @@ app.post('/', async (c) => {
     bumpVersion(c.env, 'products'),
     bumpVersion(c.env, 'sales'),
   ]))
+  if (recoveredCommittedCreate) {
+    return c.json({ id: saleId, receiptNumber: resolvedReceiptNumber, duplicate: true })
+  }
   // A method typed at the till joins the configured list (user, Sep 4 2026).
   // Off the response path: the sale is already recorded and must not be held
   // up, or failed, by a settings write. `settings` is bumped only when the
