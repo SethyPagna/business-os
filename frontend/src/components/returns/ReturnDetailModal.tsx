@@ -239,7 +239,7 @@ export default function ReturnDetailModal({ ret, onClose, onEdit, fmtUSD, fmtKHR
                           {!isSupplier && normalizeStockAction({ stock_action: item.stock_action, return_to_stock: item.return_to_stock !== 0 && item.return_to_stock !== false }) === 'damaged' ? (
                             <span
                               data-tag="damaged"
-                              title={tr('stock_action_damaged_hint', 'Tracked as a damaged lot tied to this return — kept out of sellable stock.')}
+                              title={tr('stock_action_damaged_hint', 'Tracked as damaged stock tied to this return — kept out of sellable stock.')}
                               className="inline-flex flex-shrink-0 items-center gap-1 rounded-full border border-orange-300 bg-orange-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-orange-700 dark:border-orange-700 dark:bg-orange-900/40 dark:text-orange-300"
                             >
                               {stockActionOption('damaged').icon} {tr('stock_action_damaged', 'Damaged')}

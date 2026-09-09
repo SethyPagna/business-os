@@ -340,7 +340,7 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
           />
           {Number(totals.lines_without_cost) > 0 ? (
             <div className="text-[11px] text-gray-400">
-              {tr('purchase_cost_partial_hint', 'Some batches have no recorded quantity/cost yet (received before tracking, or cost unknown) -- the totals above only count batches where both are known:')} {totals.lines_without_cost}
+              {tr('purchase_cost_partial_hint', 'Some received dates have no recorded quantity/cost yet (received before tracking, or cost unknown) -- the totals above only count received dates where both are known:')} {totals.lines_without_cost}
             </div>
           ) : null}
           {branchId !== 'all' && Number(totals.invoices_without_branch) > 0 ? (

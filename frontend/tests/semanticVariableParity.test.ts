@@ -50,6 +50,11 @@ const canonical: Record<string, [string, string]> = {
   confirm_receive_batch_details: ['Receive {quantity} {unit} of {product} into {branch}, using received date {lot}? This posts stock movement(s).', 'ទទួល {quantity} {unit} នៃ {product} ចូល {branch} ដោយប្រើថ្ងៃចូល {lot} មែនទេ? វានឹងកត់ត្រាចលនាស្តុក។'],
   confirm_update_batch_details: ['Update received date {batch} for {product}?{note}', 'ធ្វើបច្ចុប្បន្នភាពថ្ងៃចូល {batch} សម្រាប់ {product} មែនទេ?{note}'],
   credit_awaiting_payment: ['Not Paid', 'ប្រាក់ជំពាក់'],
+  pos_status_awaiting_payment_desc: ['Not Paid — stock deducted', 'ប្រាក់ជំពាក់ — ស្តុកត្រូវបានកាត់'],
+  delivery_fee_position_after: ['After items', 'ក្រោយបញ្ជីទំនិញ'],
+  delivery_fee_position_after_desc: ['Delivery fee shown after the items, before totals', 'បង្ហាញក្រោយបញ្ជីទំនិញ មុនចំនួនសរុប'],
+  delivery_fee_position_totals_desc: ['Delivery fee shown inside the totals section', 'បង្ហាញក្នុងផ្នែកចំនួនសរុប (សរុបរង ការបញ្ចុះតម្លៃ និងពន្ធ — ណែនាំ)'],
+  sales_import_stock_help: ['This just records history and links each line to a product -- it never changes stock on its own. The one exception is sale_status "returned" / "partial_return": that restocks the returned_quantity (batch_label optional, to restock a specific received date).', 'វាគ្រាន់តែកត់ត្រាប្រវត្តិ និងភ្ជាប់ជួរនីមួយៗទៅផលិតផល — វាមិនកែស្តុកដោយខ្លួនឯងទេ។ ករណីលើកលែងតែមួយគត់គឺ sale_status «returned» / «partial_return»៖ វានឹងបញ្ចូល returned_quantity ទៅស្តុកវិញ (batch_label ជាជម្រើស សម្រាប់បញ្ចូលទៅថ្ងៃចូលជាក់លាក់)។'],
   payment: ['Payment', 'ការទូទាត់'],
   delivery: ['Delivery', 'ការដឹកជញ្ជូន'],
 }
@@ -118,6 +123,35 @@ assert.match(telegram, /const received = receivedDateText\(/)
 assert.match(telegram, /received \? `Received date: \$\{received\}`/)
 assert.match(telegram, /\(received date \$\{cleanLine\(received, 40\)\}\)/)
 assert.doesNotMatch(telegram, /`Lot: \$\{change\.lot\}/)
+
+// Visible fallback copy is a second translation path when a legacy/partial
+// pack is loaded. It must describe the same domain terms as the canonical
+// packs, otherwise an operator can see “batch/lot” or the old stock rule even
+// though the loaded language file is correct.
+for (const rel of [
+  'src/components/inventory/Inventory.tsx',
+  'src/components/products/forms/StockAdjustModal.tsx',
+  'src/components/inventory/ManageBatchesModal.tsx',
+  'src/components/inventory/ReceiveBatchModal.tsx',
+  'src/components/products/forms/BulkAddStockModal.tsx',
+  'src/components/pos/POS.tsx',
+  'src/components/products/surfaces/ProductDetailModal.tsx',
+  'src/components/products/ProductsImageOnlyView.tsx',
+  'src/components/returns/helpers/returnOptions.ts',
+  'src/components/returns/NewReturnModal.tsx',
+  'src/components/returns/ReturnDetailModal.tsx',
+  'src/components/returns/ReturnsListSurface.tsx',
+]) {
+  const source = read(rel)
+  assert.doesNotMatch(source, /['\"][^'\"\r\n]*(?:Select a batch first|Batch updated|Batch deactivated|Batch date|Batch code|Receive Batch|oldest batch first|stock held|Order placed, payment pending - stock held|same batch when known|damaged lot|\w+ batches? recorded\.)[^'\"\r\n]*['\"]/, `${rel} contains stale visible fallback terminology`)
+}
+assert.equal(en.pos_status_awaiting_payment_desc.includes('stock held'), false)
+assert.equal(km.pos_status_awaiting_payment_desc.includes('កាន់ទុក'), false)
+assert.equal(km.avatar_uploaded.includes('អាប់ថ្ងៃចូល'), false, 'upload copy must not use received-date wording')
+assert.equal(en.delivery_position_after_desc, en.delivery_fee_position_after_desc, 'receipt position aliases must share one English definition')
+assert.equal(km.delivery_position_after_desc, km.delivery_fee_position_after_desc, 'receipt position aliases must share one Khmer definition')
+assert.equal(en.delivery_position_totals_desc, en.delivery_fee_position_totals_desc, 'receipt totals aliases must share one English definition')
+assert.equal(km.delivery_position_totals_desc, km.delivery_fee_position_totals_desc, 'receipt totals aliases must share one Khmer definition')
 
 const saleDetail = read('src/components/sales/SaleDetailModal.tsx')
 assert.doesNotMatch(saleDetail, /ថ្លៃដឹកជញ្ជូនពិតប្រាកដ/)

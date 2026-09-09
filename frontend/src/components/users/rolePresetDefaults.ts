@@ -104,7 +104,7 @@ export const ROLE_PRESETS: RolePreset[] = [
     labelKey: 'role_preset_product_viewer',
     label: 'Product Viewer',
     descriptionKey: 'role_preset_product_viewer_desc',
-    description: 'View everything about products, touch nothing: search, browse, and manage images only, with every product fact visible -- selling and wholesale prices, barcode, category, brand, stock, per-branch stock, and batches (costs stay hidden). No edit, no POS, no other pages.',
+    description: 'View everything about products, touch nothing: search, browse, and manage images only, with every product fact visible -- selling and wholesale prices, barcode, category, brand, stock, per-branch stock, and received dates (costs stay hidden). No edit, no POS, no other pages.',
     permissions: {
       products_image_only: true,
       products_image_only_show_price: true,

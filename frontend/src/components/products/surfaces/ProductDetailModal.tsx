@@ -211,7 +211,7 @@ export default function ProductDetailModal({
     >
       <span className="flex min-w-0 items-center gap-1.5">
         <Layers className="h-3.5 w-3.5" />
-        <span className="truncate">{T('batches', 'Batches')}</span> <span className="shrink-0 text-amber-500/80 dark:text-amber-300/70">({batchCount})</span>
+        <span className="truncate">{T('batches', 'Received dates')}</span> <span className="shrink-0 text-amber-500/80 dark:text-amber-300/70">({batchCount})</span>
       </span>
       {onManageBatches ? <ChevronRight className="h-3.5 w-3.5 flex-shrink-0" /> : null}
     </button>

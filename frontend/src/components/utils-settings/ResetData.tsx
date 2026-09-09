@@ -486,8 +486,8 @@ function SectionReset({ actionHistory = null }: ResetPanelProps) {
       id: 'products',
       kind: 'data',
       label: T('reset_products_label', 'Products Only Reset'),
-      desc: T('reset_products_desc', 'Deletes all products, their batches, branch stock, and image links. Stored image files are kept by default; choose below only if you also want to permanently delete them. Sales, returns, movements, customers, and suppliers are kept by default. Takes a fresh backup first.'),
-      deleted: T('reset_products_deleted', 'All products, product batches, branch/batch stock, product image links'),
+      desc: T('reset_products_desc', 'Deletes all products, their received dates, branch stock, and image links. Stored image files are kept by default; choose below only if you also want to permanently delete them. Sales, returns, movements, customers, and suppliers are kept by default. Takes a fresh backup first.'),
+      deleted: T('reset_products_deleted', 'All products, received dates, branch stock, product image links'),
       kept: T('reset_products_kept', 'Sales, returns, inventory movements, customers, suppliers, contacts, settings, users, branches'),
       word: 'RESET PRODUCTS',
       icon: PackageX,
@@ -759,7 +759,7 @@ function FactoryReset({ actionHistory = null }: ResetPanelProps) {
 //      operator does in Products -> Import; this panel can only instruct and
 //      gate on an explicit acknowledgement, it cannot upload their local CSVs
 //      for them.
-//   3. Park historical lots (4e)     -> POST /finalize-migration park_lots
+//   3. Park historical received dates (4e)     -> POST /finalize-migration park_lots
 //
 // Step 4f (the lot-ledger reconcile) is migration 0081 and applies itself on
 // deploy, so it needs no button here. Both server calls take a fresh scoped
@@ -792,7 +792,7 @@ function MigrationFinalize({ actionHistory = null }: ResetPanelProps) {
     try {
       const result = await withLoaderTimeout(
         () => getFinalizeApi().finalizeMigration?.(step) || Promise.resolve({ success: false, error: 'Migration finalize API is unavailable' }),
-        step === 'zero_stock' ? 'Zero live stock' : 'Park historical lots',
+        step === 'zero_stock' ? 'Zero live stock' : 'Park historical received dates',
         RESET_DATA_TIMEOUT_MS,
       )
       if (result?.success) {

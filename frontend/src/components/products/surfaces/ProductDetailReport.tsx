@@ -438,7 +438,7 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
       {canAttributeSupplier && unattributedLots.length > 0 ? (
         <div className="flex items-center justify-between gap-2 rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
           <span className="min-w-0">
-            {unattributedLots.length} {tr('lots_without_supplier_lc', 'lot(s) have no supplier')}
+            {unattributedLots.length} {tr('lots_without_supplier_lc', 'received date(s) have no supplier')}
           </span>
           <button
             type="button"
@@ -459,7 +459,7 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
               <div className="flex items-center justify-between gap-2">
                 <span className="detail-scroll-text min-w-0 flex-1 font-semibold text-gray-700 dark:text-gray-200">{supplier.supplier_name || tr('unknown', 'Unknown')}</span>
                 <span className="flex shrink-0 items-center gap-2">
-                  <span className="tabular-nums text-gray-500">{supplier.lot_count} {tr('batches', 'Batches').toLowerCase()} · {supplier.current_qty}</span>
+                  <span className="tabular-nums text-gray-500">{supplier.lot_count} {tr('batches', 'Received dates').toLowerCase()} · {supplier.current_qty}</span>
                   <ChevronDown className={`h-3 w-3 shrink-0 text-gray-300 transition-transform ${open ? 'rotate-180' : ''}`} />
                 </span>
               </div>

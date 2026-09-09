@@ -271,7 +271,7 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
             <li>
               {T(
                 'merge_duplicates_trail_batches',
-                'Batch and lot records (lot codes, expiry dates) move to the kept product too, the same way quantity does -- they stay visible under "Manage Batches" after merging, not just the stock number. If both products already had a batch with the same lot code, those two batches are combined into one rather than kept as duplicates.',
+                'Received-date records (their codes and expiry dates) move to the kept product too, the same way quantity does -- they stay visible under "Manage Received Dates" after merging, not just the stock number. If both products already had the same received date, those two records are combined into one rather than kept as duplicates.',
               )}
             </li>
           </ul>
@@ -361,7 +361,7 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
                           </span>
                           {dup.batchCount > 0 && (
                             <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] dark:bg-gray-800">
-                              {dup.batchCount} {T('merge_duplicates_preview_batches', 'batch(es)')}
+                              {dup.batchCount} {T('merge_duplicates_preview_batches', 'received date(s)')}
                             </span>
                           )}
                         </li>

@@ -158,7 +158,7 @@ function BeforeAfterCase({ item, previousReview, choice, choiceDisabled, onChoic
           <SummaryPair label={`${tr('keep', 'Keep')} · ${tr('wholesale_price', 'Wholesale price')}`} usdValue={previousReview.before.prices.keeper.wholesale_price_usd} khrValue={previousReview.before.prices.keeper.wholesale_price_khr} />
           <SummaryPair label={`${tr('remove', 'Remove')} · ${tr('wholesale_price', 'Wholesale price')}`} usdValue={previousReview.before.prices.discarded.wholesale_price_usd} khrValue={previousReview.before.prices.discarded.wholesale_price_khr} />
           <div className="mt-1 space-y-0.5 text-[11px] text-amber-900 dark:text-amber-100">
-            {previousReview.before.stock.map((line) => <div key={line.branch_id}>{line.branch_name || `#${line.branch_id}`}: {line.keeper_quantity} + {line.discarded_quantity} · {line.keeper_lot_count} + {line.discarded_lot_count} {tr('selected_conflict_lots', 'lots')}</div>)}
+            {previousReview.before.stock.map((line) => <div key={line.branch_id}>{line.branch_name || `#${line.branch_id}`}: {line.keeper_quantity} + {line.discarded_quantity} · {line.keeper_lot_count} + {line.discarded_lot_count} {tr('selected_conflict_lots', 'received dates')}</div>)}
           </div>
           <ImageSummary primary={previousReview.before.images.keeper.primary} gallery={previousReview.before.images.keeper.gallery || []} label={`${tr('previous', 'Previous')} · ${tr('keep', 'Keep')}`} t={t} />
           <ImageSummary primary={previousReview.before.images.discarded.primary} gallery={previousReview.before.images.discarded.gallery || []} label={`${tr('previous', 'Previous')} · ${tr('remove', 'Remove')}`} t={t} />
@@ -168,7 +168,7 @@ function BeforeAfterCase({ item, previousReview, choice, choiceDisabled, onChoic
               <SummaryPair label={`${tr('previous', 'Previous')} · ${tr('after', 'After')} · ${tr('selling_price', 'Selling price')}`} usdValue={previousAfter.prices.selling_price_usd} khrValue={previousAfter.prices.selling_price_khr} />
               <SummaryPair label={`${tr('previous', 'Previous')} · ${tr('after', 'After')} · ${tr('wholesale_price', 'Wholesale price')}`} usdValue={previousAfter.prices.wholesale_price_usd} khrValue={previousAfter.prices.wholesale_price_khr} />
               <div className="mt-1 space-y-0.5 text-[11px] text-amber-900 dark:text-amber-100">
-                {previousAfter.stock.map((line) => <div key={line.branch_id}>{line.branch_name || `#${line.branch_id}`}: {line.quantity} · {line.lot_count} {tr('selected_conflict_lots', 'lots')}</div>)}
+                {previousAfter.stock.map((line) => <div key={line.branch_id}>{line.branch_name || `#${line.branch_id}`}: {line.quantity} · {line.lot_count} {tr('selected_conflict_lots', 'received dates')}</div>)}
               </div>
               <ImageSummary primary={previousAfter.images.primary} gallery={previousAfter.images.gallery || []} label={`${tr('previous', 'Previous')} · ${tr('after', 'After')}`} t={t} />
             </div>
@@ -189,7 +189,7 @@ function BeforeAfterCase({ item, previousReview, choice, choiceDisabled, onChoic
             {item.before.stock.map((line) => (
               <div key={line.branch_id} className="flex justify-between gap-2">
                 <span>{line.branch_name || `#${line.branch_id}`}</span>
-                <span>{line.keeper_quantity} + {line.discarded_quantity} · {line.keeper_lot_count} + {line.discarded_lot_count} {tr('selected_conflict_lots', 'lots')}</span>
+                <span>{line.keeper_quantity} + {line.discarded_quantity} · {line.keeper_lot_count} + {line.discarded_lot_count} {tr('selected_conflict_lots', 'received dates')}</span>
               </div>
             ))}
           </div>
@@ -207,7 +207,7 @@ function BeforeAfterCase({ item, previousReview, choice, choiceDisabled, onChoic
                 {after.stock.map((line) => (
                   <div key={line.branch_id} className="flex justify-between gap-2">
                     <span>{line.branch_name || `#${line.branch_id}`}</span>
-                    <span>{line.quantity} · {line.lot_count} {tr('selected_conflict_lots', 'lots')}</span>
+                    <span>{line.quantity} · {line.lot_count} {tr('selected_conflict_lots', 'received dates')}</span>
                   </div>
                 ))}
               </div>
@@ -225,7 +225,7 @@ function BeforeAfterCase({ item, previousReview, choice, choiceDisabled, onChoic
               <label key={value} className={`cursor-pointer rounded-lg border px-3 py-2 text-xs ${choice === value ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/30' : 'border-gray-200 dark:border-zinc-700'}`}>
                 <input type="radio" className="mr-2" name={`stock-${item.case_key}`} value={value} checked={choice === value} disabled={choiceDisabled} onChange={() => onChoice(value)} />
                 {value === 'merge'
-                  ? tr('selected_conflict_move_stock', 'Move stock and lots to the kept product')
+                  ? tr('selected_conflict_move_stock', 'Move stock and received-date records to the kept product')
                   : tr('selected_conflict_write_off_stock', 'Write off the discarded stock')}
               </label>
             ))}
@@ -254,7 +254,7 @@ export default function SelectedConflictMergeReviewModal({ preview, localSkipped
       <Modal title={tr('selected_conflict_review_title', 'Review selected product merges')} onClose={onClose} size="xl" draggable unsavedChanges={{ dirty: working || Object.keys(choices).length > 0 }}>
         <div className="space-y-3">
           <p className="text-sm text-gray-600 dark:text-gray-300">
-            {tr('selected_conflict_review_intro', 'Check each kept and discarded product, then choose what happens to stock before confirming the batch.')}
+              {tr('selected_conflict_review_intro', 'Check each kept and discarded product, then choose what happens to stock before confirming the merge.')}
           </p>
 
           {unknownOutcome ? (
@@ -580,7 +580,7 @@ function GroupReviewCard({ group, choice, choicesFrozen, onChoice, t }: {
           <GroupMoneyRows group={group} t={t} />
           <div className="space-y-0.5 text-[11px] text-gray-600 dark:text-gray-300">
             {group.stock.projected_by_branch.map((row) => <div key={row.branch_id}>{row.branch_name || `#${row.branch_id}`}: {row.quantity}</div>)}
-            <div>{group.lots.count} {tr('selected_conflict_lots', 'lots')} · {tr('selected_conflict_projected_quantity', 'projected quantity')} {group.lots.projected_quantity}</div>
+            <div>{group.lots.count} {tr('selected_conflict_lots', 'received dates')} · {tr('selected_conflict_projected_quantity', 'projected quantity')} {group.lots.projected_quantity}</div>
           </div>
         </div>
       </div>
@@ -620,10 +620,10 @@ function RemovalReviewCard({ removal, t }: {
           )) : <p>{tr('selected_conflict_no_stock_rows', 'No branch stock')}</p>}
         </div>
         <div className="rounded-lg bg-gray-50 p-2 dark:bg-zinc-900">
-          <p className="font-semibold">{tr('selected_conflict_lots', 'Lots')}</p>
+          <p className="font-semibold">{tr('selected_conflict_lots', 'Received dates')}</p>
           {removal.batches.length ? removal.batches.map((batch, index) => (
             <p key={index}>{String(batch.lot_code || batch.batch_key || `#${batch.id || '?'}`)} · {String(batch.supplier_name || tr('unknown', 'Unknown'))} · {String(batch.received_at || tr('unknown', 'Unknown'))} · {String(batch.expiry_date || tr('unknown', 'Unknown'))}</p>
-          )) : <p>{tr('selected_conflict_no_lots', 'No lots')}</p>}
+          )) : <p>{tr('selected_conflict_no_lots', 'No received dates')}</p>}
         </div>
       </div>
       <p className="mt-2 text-[11px] text-rose-700 dark:text-rose-300">{tr('selected_conflict_remove_effect', 'This clears current stock and deactivates the product while preserving transaction and history records. Undo restores the same product identity.')}</p>

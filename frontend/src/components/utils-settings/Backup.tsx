@@ -387,7 +387,7 @@ const MAINTENANCE_TIERS: Array<{ id: 'section' | 'data' | 'migration' | 'factory
   // to be hand-typed wrangler SQL. Sits between Data Reset and Factory Reset
   // because it mutates live stock wholesale but never deletes rows, so it is
   // less destructive than either full reset.
-  { id: 'migration', icon: Layers, labelKey: 'maintenance_tier_migration', label: 'Finalize Migration', hintKey: 'maintenance_tier_migration_hint', hint: 'Run the last old-system import steps in order: zero live stock, re-import the product files, then park the historical lots. Only right after a fresh history import.' },
+  { id: 'migration', icon: Layers, labelKey: 'maintenance_tier_migration', label: 'Finalize Migration', hintKey: 'maintenance_tier_migration_hint', hint: 'Run the last old-system import steps in order: zero live stock, re-import the product files, then park the historical received dates. Only right after a fresh history import.' },
   { id: 'factory', icon: ShieldAlert, labelKey: 'maintenance_tier_factory', label: 'Factory Reset', hintKey: 'maintenance_tier_factory_hint', hint: 'Deletes everything and returns the app to factory defaults. The most dangerous option here, and unrecoverable.' },
 ]
 

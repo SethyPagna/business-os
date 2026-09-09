@@ -169,7 +169,7 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
             <div className="grid grid-cols-2 gap-2 pt-1 text-center">
               {[
                 { label: T('low_stock_threshold', 'Low stock threshold'), value: `${lowStockThreshold} ${p.unit || ''}` },
-                { label: T('batches', 'Batches'), value: String(batchCount || 0) },
+                { label: T('batches', 'Received dates'), value: String(batchCount || 0) },
               ].map((item) => (
                 <div key={item.label} className="rounded-lg bg-white/80 px-2 py-1.5 dark:bg-slate-800/60">
                   <div className="text-[11px] font-semibold text-slate-700 dark:text-slate-200">{item.value}</div>
@@ -290,7 +290,7 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
 
           {visibleBatches.length ? (
             <div>
-              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">{T('batches', 'Batches')}</div>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">{T('batches', 'Received dates')}</div>
               <div className="space-y-2">
                 {batchPreview.items.map((batch, index) => (
                   <div key={String(batch.id || batch.batch_id || `batch-${index}`)} className="rounded-xl border border-amber-100 bg-amber-50/70 px-3 py-2 dark:border-amber-900/50 dark:bg-amber-950/20">
@@ -350,11 +350,11 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
               type="button"
               onClick={() => { onClose(); onManageBatches(p) }}
               className="btn-secondary flex w-full items-center justify-center gap-1.5 truncate px-1 py-2.5 text-xs leading-tight sm:text-sm"
-              aria-label={T('manage_batches', 'Manage Batches')}
-              title={T('manage_batches', 'Manage Batches')}
+              aria-label={T('manage_batches', 'Manage Received Dates')}
+              title={T('manage_batches', 'Manage Received Dates')}
             >
               <Layers className="h-3.5 w-3.5 flex-shrink-0" />
-              <span className="hidden truncate sm:inline">{T('manage_batches', 'Manage Batches')}</span>
+              <span className="hidden truncate sm:inline">{T('manage_batches', 'Manage Received Dates')}</span>
             </button>
           ) : null}
         </div>

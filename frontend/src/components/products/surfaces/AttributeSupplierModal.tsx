@@ -78,7 +78,7 @@ export default function AttributeSupplierModal({
       if (result && result.success) {
         const n = Number(result.updated || 0)
         notify(
-          tr('supplier_attributed_n', `Attributed ${n} lot(s) to ${choice.supplierName}`).replace('{n}', String(n)).replace('{name}', choice.supplierName),
+          tr('supplier_attributed_n', `Attributed ${n} received date(s) to ${choice.supplierName}`).replace('{n}', String(n)).replace('{name}', choice.supplierName),
           'success',
         )
         onDone()
@@ -128,11 +128,11 @@ export default function AttributeSupplierModal({
             onChange={setChoice}
             tr={tr}
             idPrefix={`attr-supplier-${productId}`}
-            hint={tr('attribute_supplier_hint', 'Pick an existing supplier to record on the lots below.')}
+            hint={tr('attribute_supplier_hint', 'Pick an existing supplier to record on the received dates below.')}
           />
 
           <div className="flex items-center justify-between text-[11px] text-gray-500 dark:text-gray-400">
-            <span>{tr('lots_without_supplier', 'Lots without a supplier')}</span>
+            <span>{tr('lots_without_supplier', 'Received dates without a supplier')}</span>
             <button type="button" onClick={toggleAll} className="font-semibold text-purple-600 hover:underline dark:text-purple-300">
               {allSelected ? tr('clear_all', 'Clear all') : tr('select_all', 'Select all')}
             </button>

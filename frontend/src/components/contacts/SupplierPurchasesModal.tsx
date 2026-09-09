@@ -106,7 +106,7 @@ export default function SupplierPurchasesModal({ supplierId, supplierName, fetch
                 counts -- share one cell so nothing is dropped. */}
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               {[
-                [`${tr('purchase_batches', 'Batches')} / ${tr('products', 'Products')}`, `${totals.batches ?? 0} / ${totals.products ?? 0}`],
+                [`${tr('purchase_batches', 'Received dates')} / ${tr('products', 'Products')}`, `${totals.batches ?? 0} / ${totals.products ?? 0}`],
                 [tr('units_received', 'Units received'), qty(totals.units_received)],
                 [tr('purchase_cost', 'Purchase cost'), money(totals.cost_usd)],
                 [tr('credit_open', 'On credit'), `${money(totals.credit_open_usd)} (${totals.credit_batches ?? 0})`],
@@ -119,11 +119,11 @@ export default function SupplierPurchasesModal({ supplierId, supplierName, fetch
             </div>
             {Number(totals.batches_without_cost) > 0 ? (
               <div className="text-[11px] text-gray-400">
-                {tr('purchase_cost_partial_hint', 'Some batches have no recorded quantity/cost yet (received before tracking, or cost unknown) -- the totals above only count batches where both are known:')} {totals.batches_without_cost}
+                {tr('purchase_cost_partial_hint', 'Some received dates have no recorded quantity/cost yet (received before tracking, or cost unknown) -- the totals above only count received dates where both are known:')} {totals.batches_without_cost}
               </div>
             ) : null}
             {batches.length === 0 ? (
-              <div className="py-6 text-center text-sm text-gray-400">{tr('no_purchases_yet', 'No batches are attributed to this supplier yet.')}</div>
+              <div className="py-6 text-center text-sm text-gray-400">{tr('no_purchases_yet', 'No received dates are attributed to this supplier yet.')}</div>
             ) : (
               <div className="max-h-[55vh] overflow-auto rounded-xl border border-gray-200 dark:border-gray-700">
                 <table className="w-full min-w-[640px] text-left text-xs">
@@ -170,7 +170,7 @@ export default function SupplierPurchasesModal({ supplierId, supplierName, fetch
               totalItems={Number(data?.total_batches ?? totals.batches ?? 0)}
               onPageChange={setPage}
               onPageSizeChange={(next) => { setPageSize(next); setPage(1) }}
-              label={tr('purchase_batches', 'batches')}
+              label={tr('purchase_batches', 'received dates')}
               t={t}
               compact
             />

@@ -137,7 +137,7 @@ export default function SupplierPickerField({
           {lockedName}
         </div>
         <span className="mt-1 block text-[11px] text-gray-400">
-          {tr('supplier_first_attribution', "Recorded on this lot's first receipt — later receipts never change it.")}
+          {tr('supplier_first_attribution', "Recorded on this received date's first receipt — later receipts never change it.")}
         </span>
       </div>
     )
@@ -177,7 +177,7 @@ export default function SupplierPickerField({
         onRequestOptions={ensureLoaded}
         ariaLabel={label}
         inputClassName="input min-h-11 w-full text-sm"
-        placeholder={tr('supplier_optional_placeholder', 'Who this lot was bought from')}
+        placeholder={tr('supplier_optional_placeholder', 'Who this received date was bought from')}
         onChange={(next, option) => {
           // A pick carries the contact id; anything else is typing, and
           // typing breaks the link -- the id only ever comes from an explicit

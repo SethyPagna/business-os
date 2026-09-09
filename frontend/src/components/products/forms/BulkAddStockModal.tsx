@@ -511,8 +511,8 @@ export default function BulkAddStockModal({ productIds, products, branches, user
           {action !== 'set' ? (
             <p className="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
               {action === 'add'
-                ? (t('bulk_add_batch_note') || 'Each product gets its own new batch with the received date below.')
-                : (t('bulk_remove_batch_note') || 'Stock is drawn from each product\u2019s oldest batch first (FIFO).')}
+                ? (t('bulk_add_batch_note') || 'Each product is received under the received date below.')
+                : (t('bulk_remove_batch_note') || 'Stock is drawn from each product\u2019s oldest received date first (FIFO).')}
             </p>
           ) : null}
           {/* N14-D: a 'set' shows these too. This surface applies one figure to
@@ -542,7 +542,7 @@ export default function BulkAddStockModal({ productIds, products, branches, user
                 onChange={(iso) => setReceivedDate(iso)}
               />
               <div className="mt-1 text-[11px] text-gray-400">
-                {t('batch_code_preview') || 'Batch code'}: {dateToBatchCode(receivedDate) || '--'}
+                {t('batch_code_preview') || 'Received date code'}: {dateToBatchCode(receivedDate) || '--'}
               </div>
               {/* D5a: the same supplier picker every other add surface has.
                   One choice for the whole bulk event; lots that already
@@ -576,7 +576,7 @@ export default function BulkAddStockModal({ productIds, products, branches, user
                   value={{ supplierId, supplierName }}
                   onChange={(next) => { setSupplierId(next.supplierId); setSupplierName(next.supplierName) }}
                   tr={(key, fallbackEn, _fallbackKm) => { const value = t(key); return value && value !== key ? value : (fallbackEn ?? key) }}
-                  hint={t('supplier_bulk_hint') || 'Applies to every lot this bulk add creates or fills — lots that already have a supplier keep theirs.'}
+                  hint={t('supplier_bulk_hint') || 'Applies to every received date this bulk add creates or fills — received dates that already have a supplier keep theirs.'}
                 />
               </div>
             </div>

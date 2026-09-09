@@ -22,8 +22,8 @@ export interface StockActionOption {
 
 // The ONE chooser (11.13): each option carries what happens to stock.
 export const STOCK_ACTION_OPTIONS: StockActionOption[] = [
-  { value: 'restock', icon: '↩️', labelKey: 'stock_action_restock', labelEn: 'Restock', descKey: 'stock_action_restock_desc', descEn: 'Back to sellable stock (same batch when known)' },
-  { value: 'damaged', icon: '🟠', labelKey: 'stock_action_damaged', labelEn: 'Damaged', descKey: 'stock_action_damaged_desc', descEn: 'Tracked as a damaged lot, not sellable' },
+  { value: 'restock', icon: '↩️', labelKey: 'stock_action_restock', labelEn: 'Restock', descKey: 'stock_action_restock_desc', descEn: 'Back to sellable stock (same received date when known)' },
+  { value: 'damaged', icon: '🟠', labelKey: 'stock_action_damaged', labelEn: 'Damaged', descKey: 'stock_action_damaged_desc', descEn: 'Tracked as damaged stock, not sellable' },
   { value: 'none', icon: '🚫', labelKey: 'stock_action_none', labelEn: 'No restock', descKey: 'stock_action_none_desc', descEn: 'No stock change (write-off / refund only)' },
 ]
 
@@ -85,7 +85,7 @@ export function describeBatchOption(batch: {
 }): string {
   const parts: string[] = []
   const lot = String(batch.lot_code ?? '').trim()
-  parts.push(lot || (batch.batch_number != null ? `#${batch.batch_number}` : 'lot'))
+  parts.push(lot || (batch.batch_number != null ? `#${batch.batch_number}` : 'received date'))
   const expiry = formatBatchDate(batch.expiry_date)
   if (expiry) parts.push(`exp ${expiry}`)
   parts.push(`${Number(batch.quantity) || 0} in stock`)

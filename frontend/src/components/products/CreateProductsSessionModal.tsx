@@ -475,7 +475,7 @@ export default function CreateProductsSessionModal({
       notify(`${tr('unit_cost_usd', 'Unit cost (USD)')}: ${tr('enter_amount', 'Enter Amount')}`, 'error'); return
     }
     if (batchLoading || batchFailed || exactBatchLoadKey !== expectedLoadKey) {
-      notify(tr('load_failed', 'Could not load stock batches.'), 'error'); return
+      notify(tr('load_failed', 'Could not load stock received dates.'), 'error'); return
     }
     const chosenBatch = typeof batchChoice === 'number' ? batchOptions.find((batch) => Number(batch.id) === batchChoice) || null : null
     const lotAttributedName = chosenBatch?.supplier_name?.trim() || ''
@@ -500,7 +500,7 @@ export default function CreateProductsSessionModal({
       supplierName: lotAttributedName || lineSupplier.supplierName.trim(), supplierLocked: Boolean(lotAttributedName),
       branchId: String(branchId), branchName: branchNameFor(String(branchId)), receivedDate: lineReceivedDate || receivedDate,
       expiryDate: lineExpiryDate, batchId: chosenBatch ? Number(chosenBatch.id) : null,
-      batchLabel: chosenBatch ? batchDisplayLabel(chosenBatch, tr('batch', 'Received date')) : tr('new_batch', '+ New batch'),
+      batchLabel: chosenBatch ? batchDisplayLabel(chosenBatch, tr('batch', 'Received date')) : tr('new_batch', '+ New received date'),
       quantity, unitCostUsd, freeGoods,
       status: 'queued', detail: tr('ready_to_receive', 'Ready'),
     }
@@ -607,7 +607,7 @@ export default function CreateProductsSessionModal({
           lineId: `create_${Date.now()}_${rows.length}`, kind: 'create_receive', productId: null, product: stockSessionProduct(prepared),
           name, barcode, brand: String(payload.brand ?? header.brand ?? '').trim(), supplierId: sameSupplier ? header.supplierId : null,
           supplierName, branchId: String(branchId), branchName: branchNameFor(String(branchId)), receivedDate: String(payload.received_date || receivedDate),
-          expiryDate: String(payload.expiry_date || ''), batchId: null, batchLabel: quantity > 0 ? tr('new_batch', '+ New batch') : '', quantity,
+          expiryDate: String(payload.expiry_date || ''), batchId: null, batchLabel: quantity > 0 ? tr('new_batch', '+ New received date') : '', quantity,
           unitCostUsd: Number.isFinite(cost) && cost >= 0 ? cost : 0, freeGoods, status: 'queued', detail: tr('ready_to_receive', 'Ready'),
         }
         setRows((prev) => [row, ...prev])
@@ -666,7 +666,7 @@ export default function CreateProductsSessionModal({
         receivedDate: String(payload.received_date || current.receivedDate || receivedDate),
         expiryDate: String(payload.expiry_date || ''),
         batchId: null,
-        batchLabel: quantity > 0 ? tr('new_batch', '+ New batch') : '',
+        batchLabel: quantity > 0 ? tr('new_batch', '+ New received date') : '',
         quantity,
         unitCostUsd: cost,
       }
@@ -818,7 +818,7 @@ export default function CreateProductsSessionModal({
     <div className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label><span className="mb-1 block text-[11px] text-gray-500">{tr('branch', 'Branch')}</span><AppSelect value={lineBranchId} onChange={setLineBranchId} ariaLabel={tr('branch', 'Branch')} buttonClassName="h-9 w-full text-sm" options={branchSelectOptions} /></label>
-        <SupplierPickerField value={lineSupplier} onChange={setLineSupplier} tr={(key, fallback) => tr(key, fallback || key)} idPrefix="create-products-existing-line" hintDisplay="tooltip" lockedName={typeof batchChoice === 'number' ? batchOptions.find((batch) => Number(batch.id) === batchChoice)?.supplier_name?.trim() || null : null} hint={typeof batchChoice === 'number' && !batchOptions.find((batch) => Number(batch.id) === batchChoice)?.supplier_name?.trim() ? tr('supplier_will_fill_lot', 'This lot has no supplier yet — your choice will be recorded on it.') : null} />
+        <SupplierPickerField value={lineSupplier} onChange={setLineSupplier} tr={(key, fallback) => tr(key, fallback || key)} idPrefix="create-products-existing-line" hintDisplay="tooltip" lockedName={typeof batchChoice === 'number' ? batchOptions.find((batch) => Number(batch.id) === batchChoice)?.supplier_name?.trim() || null : null} hint={typeof batchChoice === 'number' && !batchOptions.find((batch) => Number(batch.id) === batchChoice)?.supplier_name?.trim() ? tr('supplier_will_fill_lot', 'This received date has no supplier yet — your choice will be recorded on it.') : null} />
         <label><span className="mb-1 block text-[11px] text-gray-500">{tr('received_date', 'Received date')}</span><DateEntryInput className="h-9 w-full text-sm" t={packLookup} ariaLabel={tr('received_date', 'Received date')} value={lineReceivedDate} onChange={setLineReceivedDate} /></label>
         <label><span className="mb-1 block text-[11px] text-gray-500">{tr('expiry_optional', 'Expiry (optional)')}</span><DateEntryInput className="h-9 w-full text-sm" t={packLookup} ariaLabel={tr('expiry_optional', 'Expiry (optional)')} value={lineExpiryDate} onChange={setLineExpiryDate} /></label>
         <label><span className="mb-1 block text-[11px] text-gray-500">{tr('quantity', 'Quantity')}</span><input className="input h-9 w-full text-sm" type="number" min="1" step="1" value={lineQuantity} onChange={(event) => setLineQuantity(event.target.value)} /></label>
@@ -826,7 +826,7 @@ export default function CreateProductsSessionModal({
       </div>
       <div className="mt-3">
         <span className="mb-1 block text-[11px] text-gray-500">{tr('batch', 'Received date')}</span>
-        {batchLoading ? <p className="text-xs text-gray-400">{tr('loading', 'Loading...')}</p> : batchFailed ? <p className="text-xs text-red-600">{tr('load_failed', 'Could not load stock batches.')}</p> : <div className="flex flex-wrap gap-1.5"><button type="button" className={batchChoice === 'new' ? 'rounded-full border border-blue-600 bg-blue-50 px-2.5 py-1 text-xs text-blue-700' : 'rounded-full border border-gray-300 px-2.5 py-1 text-xs'} onClick={() => setBatchChoice('new')}>{tr('new_batch', '+ New batch')}</button>{batchOptions.map((batch) => <button key={batch.id} type="button" className={batchChoice === Number(batch.id) ? 'rounded-full border border-blue-600 bg-blue-50 px-2.5 py-1 text-xs text-blue-700' : 'rounded-full border border-gray-300 px-2.5 py-1 text-xs'} onClick={() => setBatchChoice(Number(batch.id))}>{batchDisplayLabel(batch, tr('batch', 'Received date'))} ({batch.quantity})</button>)}</div>}
+        {batchLoading ? <p className="text-xs text-gray-400">{tr('loading', 'Loading...')}</p> : batchFailed ? <p className="text-xs text-red-600">{tr('load_failed', 'Could not load stock received dates.')}</p> : <div className="flex flex-wrap gap-1.5"><button type="button" className={batchChoice === 'new' ? 'rounded-full border border-blue-600 bg-blue-50 px-2.5 py-1 text-xs text-blue-700' : 'rounded-full border border-gray-300 px-2.5 py-1 text-xs'} onClick={() => setBatchChoice('new')}>{tr('new_batch', '+ New received date')}</button>{batchOptions.map((batch) => <button key={batch.id} type="button" className={batchChoice === Number(batch.id) ? 'rounded-full border border-blue-600 bg-blue-50 px-2.5 py-1 text-xs text-blue-700' : 'rounded-full border border-gray-300 px-2.5 py-1 text-xs'} onClick={() => setBatchChoice(Number(batch.id))}>{batchDisplayLabel(batch, tr('batch', 'Received date'))} ({batch.quantity})</button>)}</div>}
       </div>
       <button type="button" className="btn-primary mt-4 h-11 w-full text-sm disabled:opacity-50" disabled={batchLoading || batchFailed || exactBatchLoadKey !== `${Number(selectedProduct.id)}:${Number(lineBranchId)}`} onClick={onContinue}>{editingExistingLine ? tr('save_changes', 'Save changes') : tr('continue', 'Continue')}</button>
     </div>

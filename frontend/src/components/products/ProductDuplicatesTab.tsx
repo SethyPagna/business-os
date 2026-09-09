@@ -443,7 +443,7 @@ export default function ProductDuplicatesTab({ t, notify, canRemoveProduct }: {
         merged += 1
       }
       if (!merged) return
-      notify(t('product_duplicate_merged') || 'Merged -- stock, lots and images were carried onto the kept product')
+      notify(t('product_duplicate_merged') || 'Merged -- stock, received-date records and images were carried onto the kept product')
       if (merged === removals.length) removeCluster(id)
       else void load()
     } catch (e: unknown) {
@@ -919,7 +919,7 @@ export default function ProductDuplicatesTab({ t, notify, canRemoveProduct }: {
       <div className="flex flex-wrap items-center gap-1.5">
         <InfoHint
           label={t('product_duplicates_how') || 'How this review works'}
-          text={t('product_duplicates_hint') || 'Products that share one real barcode (strong same-item evidence — but an EDP/EDT pair or two shades can genuinely share one), one display name with different barcodes (usually genuinely different SKUs), or a similar name — the same name re-typed with different punctuation, accents or word order, each with its own barcode. Keep this = the other rows fold into it: lots, photos, sales and returns carry over and old sales stay valid. If a row you are removing still holds stock you are asked what happens to it — move the lots onto the kept product, or write them off against the ledger. Dismiss = reviewed, genuinely different items — it stays dismissed for everyone.'}
+          text={t('product_duplicates_hint') || 'Products that share one real barcode (strong same-item evidence — but an EDP/EDT pair or two shades can genuinely share one), one display name with different barcodes (usually genuinely different SKUs), or a similar name — the same name re-typed with different punctuation, accents or word order, each with its own barcode. Keep this = the other rows fold into it: received-date records, photos, sales and returns carry over and old sales stay valid. If a row you are removing still holds stock you are asked what happens to it — move the received-date records onto the kept product, or write them off against the ledger. Dismiss = reviewed, genuinely different items — it stays dismissed for everyone.'}
         />
         <div className="flex items-center gap-1">
           {(['all', 'leading_zero', 'same_barcode', 'same_name', 'similar_name'] as const).map((severity) => {

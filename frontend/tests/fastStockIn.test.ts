@@ -162,7 +162,7 @@ runTest('stock-in sessions reuse linked report data and preserve per-receipt cos
   }
   assert.match(ledgerSource, /COUNT\(DISTINCT COALESCE\(mx\.reference_id, -mx\.id\)\)/)
   assert.match(sessionsSource, /function sessionCost\(/)
-  assert.match(sessionsSource, /Shared-lot totals are not guessed\./)
+  assert.match(sessionsSource, /Shared received-date totals are not guessed\./)
   assert.match(sessionsSource, /fmtDateTime24\(session\.createdAt\)/)
   assert.match(sessionsSource, /selectedLine\.brand[\s\S]*selectedLine\.category/,
     'brand and category should remain available after opening a stock-in line')

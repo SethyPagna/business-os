@@ -505,7 +505,7 @@ export default function ProductDetailSheet({
       if (cancelled) return
       setBatches([])
       setKnownPositiveQuantityByProduct({})
-      setBatchesError(error instanceof Error && error.message ? error.message : 'Could not load lots')
+      setBatchesError(error instanceof Error && error.message ? error.message : 'Could not load received dates')
     }).finally(() => { if (!cancelled) setBatchesLoading(false) })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps

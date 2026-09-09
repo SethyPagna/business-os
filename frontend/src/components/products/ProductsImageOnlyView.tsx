@@ -695,13 +695,13 @@ export default function ProductsImageOnlyView() {
                 stripped SERVER-side for this grant. */}
             {showBatches ? (
               <div className="rounded-xl border border-gray-200 p-3 text-sm dark:border-slate-700">
-                <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t('batches') || 'Batches'}</div>
+                <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t('batches') || 'Received dates'}</div>
                 {detailBatches === 'loading' ? (
                   <div className="py-2 text-xs text-gray-400">{t('loading') || 'Loading...'}</div>
                 ) : detailBatches === 'error' ? (
-                  <div className="py-2 text-xs text-amber-600 dark:text-amber-300">{t('batches_load_failed') || 'Could not load batches.'}</div>
+                  <div className="py-2 text-xs text-amber-600 dark:text-amber-300">{t('batches_load_failed') || 'Could not load received dates.'}</div>
                 ) : !Array.isArray(detailBatches) || detailBatches.length === 0 ? (
-                  <div className="py-2 text-xs text-gray-400">{t('no_batches_yet') || 'No batches recorded.'}</div>
+                  <div className="py-2 text-xs text-gray-400">{t('no_batches_yet') || 'No received dates recorded.'}</div>
                 ) : (
                   <div className="divide-y divide-gray-100 dark:divide-slate-700">
                     {detailBatches.map((batch) => (

@@ -541,7 +541,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
       try {
         const res = await withLoaderTimeout<{ batches: ProductBatch[] }>(
           () => getProductBatches(productId as string | number, Number.parseInt(fromBranch, 10), true),
-          'Product batches for transfer',
+          'Product received-date records for transfer',
           TRANSFER_STOCK_LOAD_TIMEOUT_MS,
         )
         if (!aliveRef.current || !isTrackedRequestCurrent(batchRequestRef, requestId)) return
@@ -1568,7 +1568,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
           title={pendingTransfer.scope === 'entire_branch'
             ? (t('transfer_entire_branch') || 'Transfer entire branch')
             : (t('confirm_transfer') || 'Confirm Transfer')}
-          message={(t('confirm_bulk_transfer_details') || 'Transfer {products} products ({quantity} total units) from {from} to {to}? Available lots will be allocated FIFO.')
+          message={(t('confirm_bulk_transfer_details') || 'Transfer {products} products ({quantity} total units) from {from} to {to}? Available received dates will be allocated FIFO.')
             .replace('{products}', String(pendingTransfer.items.length))
             .replace('{quantity}', String(pendingTransfer.totalUnits))
             .replace('{from}', pendingTransfer.fromName)

@@ -348,7 +348,7 @@ export default function ReturnsListSurface({
                                 {(ret.damaged_item_count || 0) > 0 ? (
                                   <span
                                     data-tag="damaged"
-                                    title={tr('stock_action_damaged_hint', 'Tracked as a damaged lot tied to this return — kept out of sellable stock.')}
+                                    title={tr('stock_action_damaged_hint', 'Tracked as damaged stock tied to this return — kept out of sellable stock.')}
                                     className="ml-1 inline-flex items-center rounded-full border border-orange-300 bg-orange-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-orange-700 dark:border-orange-700 dark:bg-orange-900/40 dark:text-orange-300"
                                   >
                                     {ret.damaged_item_count} {tr('damaged_items_tag', 'damaged')}
@@ -493,7 +493,7 @@ export default function ReturnsListSurface({
                               {(ret.damaged_item_count || 0) > 0 ? (
                                 <span
                                   data-tag="damaged"
-                                  title={tr('stock_action_damaged_hint', 'Tracked as a damaged lot tied to this return — kept out of sellable stock.')}
+                                    title={tr('stock_action_damaged_hint', 'Tracked as damaged stock tied to this return — kept out of sellable stock.')}
                                   className="inline-flex items-center rounded-full border border-orange-300 bg-orange-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-orange-700 dark:border-orange-700 dark:bg-orange-900/40 dark:text-orange-300"
                                 >
                                   {ret.damaged_item_count} {tr('damaged_items_tag', 'damaged')}

@@ -1062,7 +1062,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
               .replace('{sets}', String(modeCount(pendingCommit, 'set')))
               .replace('{branch}', commitBranchName)}
           items={commitReviewItems}
-          note={tr('confirm_complete_stock_session_note', 'This posts stock movements and creates or updates the related lots.')}
+          note={tr('confirm_complete_stock_session_note', 'This posts stock movements and creates or updates the related received dates.')}
           confirmLabel={pendingAllAdd ? tr('complete_stock_session', 'Complete stock-in session') : tr('complete_stock_session_changes', 'Post stock changes')}
           working={saving}
           workingLabel={tr('saving_label', 'Saving…')}

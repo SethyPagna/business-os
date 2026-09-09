@@ -641,8 +641,8 @@ export default function ReceiptSettings() {
               <Section title={t('delivery_fee_position') || 'Delivery Fee Position'}>
                 <div className="space-y-2">
                   {[
-                    ['totals',      t('totals_section') || 'In Totals Section',   t('delivery_position_totals_desc') || 'Appears with subtotal, discount, tax (recommended)'],
-                    ['after_items', t('delivery_fee_position_after') || 'After Items List', t('delivery_position_after_desc') || 'Appears right after the items, before totals'],
+                    ['totals',      t('totals_section') || 'In Totals Section',   t('delivery_fee_position_totals_desc') || 'Delivery fee shown inside the totals section'],
+                    ['after_items', t('delivery_fee_position_after') || 'After items', t('delivery_fee_position_after_desc') || 'Delivery fee shown after the items, before totals'],
                   ].map(([val, label, desc]) => (
                     <button key={val} onClick={() => setT('delivery_fee_position', val)}
                       className={`w-full p-3 rounded-xl border-2 text-left ${tpl.delivery_fee_position === val ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/30' : 'border-gray-200 dark:border-gray-600 hover:border-gray-300'}`}>

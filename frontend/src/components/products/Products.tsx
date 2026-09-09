@@ -2220,7 +2220,7 @@ function ProductsFullEditor() {
         merged += 1
       }
       if (!merged) return
-      notify(t('product_duplicate_merged') || 'Merged — stock, lots and images were carried onto the kept product')
+      notify(t('product_duplicate_merged') || 'Merged — stock, received-date records and images were carried onto the kept product')
       await load(true)
       await refreshDuplicateClusters()
     } catch (e) {
@@ -3934,7 +3934,7 @@ function ProductsFullEditor() {
               {Number((p as { batch_count?: number }).batch_count || 0) > 0 ? (
                 <span
                   className="mt-0.5 inline-flex shrink-0 items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
-                  title={`${Number((p as { batch_count?: number }).batch_count || 0)} ${t('batches') || 'batches'}`}
+                  title={`${Number((p as { batch_count?: number }).batch_count || 0)} ${t('batches') || 'received dates'}`}
                 >
                   {Number((p as { batch_count?: number }).batch_count || 0)}
                 </span>

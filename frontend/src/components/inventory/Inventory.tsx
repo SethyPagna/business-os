@@ -322,7 +322,7 @@ function countActiveFlags(flags: unknown[] = []): number {
 }
 
 const RFID_INVENTORY_WORKFLOWS = [
-  { id: 'receiving', labelKey: 'rfid_workflow_receiving', descriptionKey: 'rfid_workflow_receiving_desc', label: 'Receiving', description: 'Pair EPC tags to new stock, supplier lots, cartons, or individual products before adding inventory.' },
+  { id: 'receiving', labelKey: 'rfid_workflow_receiving', descriptionKey: 'rfid_workflow_receiving_desc', label: 'Receiving', description: 'Pair EPC tags to new stock, supplier received-date records, cartons, or individual products before adding inventory.' },
   { id: 'stock-count', labelKey: 'rfid_workflow_stock_count', descriptionKey: 'rfid_workflow_stock_count_desc', label: 'Stock count', description: 'Walk shelves with a reader, compare reads against on-hand stock, then approve counted differences.' },
   { id: 'transfer', labelKey: 'rfid_workflow_branch_transfer', descriptionKey: 'rfid_workflow_branch_transfer_desc', label: 'Branch transfer', description: 'Scan tags out of one branch and into another so transfer movements keep item identity.' },
   { id: 'pos-verify', labelKey: 'rfid_workflow_pos_verify', descriptionKey: 'rfid_workflow_pos_verify_desc', label: 'POS verify', description: 'Use doorway or counter reads to confirm sold items before bagging and reduce missed scans.' },
@@ -331,7 +331,7 @@ const RFID_INVENTORY_WORKFLOWS = [
 
 const RFID_READER_REQUIREMENTS = [
   { id: 'gateway', key: 'rfid_requirement_gateway', text: 'RFID reader gateway must post reads with EPC / TID, antenna, branch, RSSI, and timestamp.' },
-  { id: 'mapping', key: 'rfid_requirement_mapping', text: 'Each tag must be mapped to a product, variant, lot, carton, or serial-level unit before stock can change.' },
+  { id: 'mapping', key: 'rfid_requirement_mapping', text: 'Each tag must be mapped to a product, variant, received-date record, carton, or serial-level unit before stock can change.' },
   { id: 'fallback', key: 'rfid_requirement_barcode_fallback', text: 'Barcode fallback remains available for products that are not tagged or when the reader is offline.' },
 ]
 
@@ -1181,8 +1181,8 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     // edits) without requiring one -- this validation is this form's own
     // rule, not the wire contract's.
     if (!unlockPricing && (adjustForm.type === 'add' || adjustForm.type === 'remove') && numericBranchId) {
-      if (adjustForm.batch_id === '') { notify(tr('select_batch_required', 'Select a batch first'), 'error'); return }
-      if (adjustForm.type === 'remove' && adjustForm.batch_id === 'new') { notify(tr('select_batch_required', 'Select a batch first'), 'error'); return }
+      if (adjustForm.batch_id === '') { notify(tr('select_batch_required', 'Select a received date first'), 'error'); return }
+      if (adjustForm.type === 'remove' && adjustForm.batch_id === 'new') { notify(tr('select_batch_required', 'Select a received date first'), 'error'); return }
     }
     const isStockIn = isStockInSubmission(adjustForm.type, qty, previousQuantity)
     if (isStockIn && isStockReceiptCreditIncomplete(adjustForm)) {

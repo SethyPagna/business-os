@@ -298,7 +298,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
       // per-branch array; batches opens the read-only lot list (the server
       // strips unit cost / paid-credit state for this grant).
       { key: 'products_image_only_show_branch_stock', tKey: 'perm_products_image_only_show_branch_stock', label: 'Image-only role: show per-branch stock', sensitivity: 'normal' },
-      { key: 'products_image_only_show_batches', tKey: 'perm_products_image_only_show_batches', label: 'Image-only role: show batches/lots (no costs)', sensitivity: 'normal' },
+      { key: 'products_image_only_show_batches', tKey: 'perm_products_image_only_show_batches', label: 'Image-only role: show received dates (no costs)', sensitivity: 'normal' },
     ],
   },
   {

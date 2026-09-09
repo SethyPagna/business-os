@@ -171,7 +171,7 @@ export default function ReceiveBatchModal({
       // hosts this flow now, so the nav-guard dot must point THERE.
       // (Rider on F3 slice 1, flagged from a7's E1 notes.)
       pageId: 'branches',
-      label: `${tr('receive_batch', 'Receive Batch')}${product.name ? ` — ${product.name}` : ''}`,
+      label: `${tr('receive_batch', 'Receive Stock')}${product.name ? ` — ${product.name}` : ''}`,
       isDirty: () => dirtyStateRef.current,
       discard: () => clearWorkDraft(draftKey),
     })
@@ -202,7 +202,7 @@ export default function ReceiveBatchModal({
     onMinimize({
       branchId,
       draftKey,
-      label: `${tr('receive_batch', 'Receive Batch')}${product.name ? ` — ${product.name}` : ''}`,
+      label: `${tr('receive_batch', 'Receive Stock')}${product.name ? ` — ${product.name}` : ''}`,
       productId: product.id ?? '',
       productName: product.name || '',
       productUnit: product.unit || '',
@@ -245,7 +245,7 @@ export default function ReceiveBatchModal({
       : tr('new_batch', 'a new received date')
     if (!window.confirm(tr(
       'confirm_receive_batch_details',
-      'Receive {quantity} {unit} of {product} into {branch}, using {lot}? This posts stock movement(s).',
+      'Receive {quantity} {unit} of {product} into {branch}, using received date {lot}? This posts stock movement(s).',
     )
       .replace('{quantity}', String(parsedQuantity))
       .replace('{unit}', product.unit || 'unit(s)')
@@ -292,15 +292,15 @@ export default function ReceiveBatchModal({
         creditDueDate: paymentStatus === 'credit' ? creditDueDate : null,
       })
       if (res?.success === false) {
-        notify((res as any)?.error || tr('receive_batch_failed', 'Failed to receive batch stock'), 'error')
+        notify((res as any)?.error || tr('receive_batch_failed', 'Failed to receive stock'), 'error')
         return
       }
-      notify(tr('batch_received', 'Batch stock received'))
+      notify(tr('batch_received', 'Stock received'))
       clearWorkDraft(scopedWorkDraftKey(`receive_${productId}`))
       onReceived()
       onClose()
     } catch (e: unknown) {
-      notify(e instanceof Error ? e.message : tr('receive_batch_failed', 'Failed to receive batch stock'), 'error')
+      notify(e instanceof Error ? e.message : tr('receive_batch_failed', 'Failed to receive stock'), 'error')
     } finally {
       setSaving(false)
     }
@@ -311,7 +311,7 @@ export default function ReceiveBatchModal({
       <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between gap-3 border-b border-gray-200 p-4 dark:border-gray-700">
           <div className="min-w-0">
-            <h2 className="font-bold text-gray-900 dark:text-white">{tr('receive_batch', 'Receive Batch')}</h2>
+            <h2 className="font-bold text-gray-900 dark:text-white">{tr('receive_batch', 'Receive Stock')}</h2>
             <div className="mt-0.5 truncate text-xs text-gray-400">{product.name}</div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
@@ -367,7 +367,7 @@ export default function ReceiveBatchModal({
                     className={`rounded-full border px-2.5 py-1 text-[11px] font-medium ${batchChoice === 'new' ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}
                     onClick={() => setBatchChoice('new')}
                   >
-                    {tr('new_batch', '+ New batch')}
+                    {tr('new_batch', '+ New received date')}
                   </button>
                   {batchOptions.map((batch) => (
                     <button
@@ -400,7 +400,7 @@ export default function ReceiveBatchModal({
                     A receipt on the same date as an existing batch tops it
                     up automatically; there's no separate lot code to type. */}
                 <span className="mt-1 block text-[11px] text-gray-400">
-                  {tr('batch_code_preview', 'Batch code')}: {dateToBatchCode(receivedDate) || '--'}
+                  {tr('batch_code_preview', 'Received date code')}: {dateToBatchCode(receivedDate) || '--'}
                 </span>
               </label>
             ) : (
@@ -410,7 +410,7 @@ export default function ReceiveBatchModal({
               <div className="block">
                 <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('received_date', 'Received date')}</span>
                 <span className="mt-2 block text-[11px] text-gray-400">
-                  {tr('existing_lot_keeps_date', 'Tops up the selected lot — its received date stays.')}
+                  {tr('existing_lot_keeps_date', 'Tops up the selected received date — that date stays.')}
                 </span>
               </div>
             )}
@@ -434,7 +434,7 @@ export default function ReceiveBatchModal({
               tr={tr}
               lockedName={lotAttributedName}
               hint={selectedLot && !lotAttributedName
-                ? tr('supplier_will_fill_lot', 'This lot has no supplier yet — your choice will be recorded on it.')
+                ? tr('supplier_will_fill_lot', 'This received date has no supplier yet — your choice will be recorded on it.')
                 : null}
             />
             <label className="block">

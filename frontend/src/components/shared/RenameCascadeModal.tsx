@@ -30,7 +30,7 @@ function impactSummary(impact: RenameImpact, t: (key: string, fallback?: string)
   } else if (attachedProducts > 0) {
     lines.push(`${attachedProducts} ${t('rename_attached_products') || 'attached products'}${impact.products_secondary ? ` (${impact.products_secondary} ${t('rename_secondary_note') || 'as a secondary value'})` : ''}`)
   }
-  if (impact.batches > 0) lines.push(`${impact.batches} ${t('rename_attached_batches') || 'stock batches carry this supplier'}`)
+  if (impact.batches > 0) lines.push(`${impact.batches} ${t('rename_attached_batches') || 'received-date records carry this supplier'}`)
   if (impact.target_exists) lines.push(t('rename_target_exists') || 'The new name already exists — carrying will merge into it.')
   if (impact.historical_snapshots_preserved?.length) {
     lines.push(`${t('rename_history_preserved') || 'Point-in-time history stays unchanged'}: ${impact.historical_snapshots_preserved.join(', ')}`)

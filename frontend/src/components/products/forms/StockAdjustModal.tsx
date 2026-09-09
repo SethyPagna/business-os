@@ -496,8 +496,8 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
     const selectedBranchStock = numericBranchId ? branchStockById.get(numericBranchId) : null
     const unlockPricing = adjustForm.type === 'add' && !adjustForm.pricingLocked
     if (!unlockPricing && (adjustForm.type === 'add' || adjustForm.type === 'remove') && numericBranchId) {
-      if (adjustForm.batch_id === '') { notify(tr('select_batch_required', 'Select a batch first'), 'error'); return }
-      if (adjustForm.type === 'remove' && adjustForm.batch_id === 'new') { notify(tr('select_batch_required', 'Select a batch first'), 'error'); return }
+      if (adjustForm.batch_id === '') { notify(tr('select_batch_required', 'Select a received date first'), 'error'); return }
+      if (adjustForm.type === 'remove' && adjustForm.batch_id === 'new') { notify(tr('select_batch_required', 'Select a received date first'), 'error'); return }
     }
     // Same figure InventoryStockModals shows as "Current" and gates its own
     // receipt fields on -- the one shared branch rule, not a second derivation

@@ -167,7 +167,7 @@ export default function MergeStockChoiceDialog({
       hint: [
         T(
           'merge_stock_choice_merge_hint',
-          'Every lot moves onto the kept product with its lot code, batch number, branch, cost and dates unchanged. If the kept product already has the same lot at the same branch, the quantities are added together and one row is kept.',
+          'Every received-date record moves onto the kept product with its received-date code, branch, cost and dates unchanged. If the kept product already has the same received date at the same branch, the quantities are added together and one row is kept.',
         ),
         // Spelled out on the option itself, not only in the banner above: the
         // operator picking "merge the stock" is the one who needs to know the
@@ -184,7 +184,7 @@ export default function MergeStockChoiceDialog({
       label: T('merge_stock_choice_write_off', 'Remove the stock'),
       hint: T(
         'merge_stock_choice_write_off_hint',
-        'The lots are emptied and a stock movement is recorded for each branch — reason, who did it and when — so the ledger still adds up. Nothing is added to the kept product.',
+        'The received-date records are emptied and a stock movement is recorded for each branch — reason, who did it and when — so the ledger still adds up. Nothing is added to the kept product.',
       ),
       tone: 'peer-checked:border-rose-500 peer-checked:bg-rose-50 dark:peer-checked:bg-rose-950/30',
     },

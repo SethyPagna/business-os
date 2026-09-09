@@ -417,7 +417,7 @@ export default function InventoryStockModals({
                         REMOVAL, so it is also where the reason the receipt fields
                         vanished belongs -- as a hint, not a paragraph. */}
                     {isSetDown ? (
-                      <InfoHint label={t('adjust_set') || 'Set'} text={t('stock_set_down_hint') || 'This set lowers the quantity, so it takes stock out: it has no supplier and no cost. Choose the batch to take it from, otherwise the oldest lots are drained first.'} />
+                      <InfoHint label={t('adjust_set') || 'Set'} text={t('stock_set_down_hint') || 'This set lowers the quantity, so it takes stock out: it has no supplier and no cost. Choose the received date to take it from, otherwise the oldest received dates are drained first.'} />
                     ) : null}
                     {/* N14-D: the mirror image -- a set that RAISES the figure is a
                         receipt (routes/inventory.ts converts it into an add of the
@@ -554,7 +554,7 @@ export default function InventoryStockModals({
                         </button>
                       ))}
                       {!batchOptions.length && adjustForm.type === 'remove' ? (
-                        <div className="text-xs text-gray-400">{tr('no_batches_with_stock', 'No batches with stock in this branch')}</div>
+                        <div className="text-xs text-gray-400">{tr('no_batches_with_stock', 'No received dates with stock in this branch')}</div>
                       ) : null}
                     </div>
                   )}

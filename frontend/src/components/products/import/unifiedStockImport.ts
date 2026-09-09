@@ -271,7 +271,7 @@ export function findUnifiedStockCostBatchConflicts(rows: readonly UnifiedStockPa
     const costs = new Set(group.map((row) => row.costPrice).filter((value): value is number => value != null && value !== 0))
     const batches = new Set(group.map((row) => row.batch.trim()).filter(Boolean))
     if (costs.size <= 1 || batches.size <= 1) continue
-    const message = `Same product has ${batches.size} batches at ${costs.size} different cost prices.`
+    const message = `Same product has ${batches.size} received-date records at ${costs.size} different cost prices.`
     group.forEach((row) => conflicts.set(row.rowNumber, message))
   }
   return conflicts

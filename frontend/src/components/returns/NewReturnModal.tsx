@@ -1007,7 +1007,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                                 {isIncluded && item.stock_action === 'damaged' ? (
                                   <span
                                     data-tag="damaged"
-                                    title={T('stock_action_damaged_hint', 'Tracked as a damaged lot tied to this return — kept out of sellable stock.')}
+                                    title={T('stock_action_damaged_hint', 'Tracked as damaged stock tied to this return — kept out of sellable stock.')}
                                     className="inline-flex flex-shrink-0 items-center gap-1 rounded-full border border-orange-300 bg-orange-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-orange-700 dark:border-orange-700 dark:bg-orange-900/40 dark:text-orange-300"
                                   >
                                     {stockActionOption('damaged').icon} {T('stock_action_damaged', 'Damaged')}
@@ -1065,7 +1065,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                               </div>
                               {item.stock_action === 'damaged' && (
                                 <div className="text-[10px] text-orange-500 dark:text-orange-400">
-                                  {T('stock_action_damaged_hint', 'Tracked as a damaged lot tied to this return — kept out of sellable stock.')}
+                                  {T('stock_action_damaged_hint', 'Tracked as damaged stock tied to this return — kept out of sellable stock.')}
                                 </div>
                               )}
                               {/* WHICH lot these units go back into. When the

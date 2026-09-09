@@ -214,7 +214,7 @@ export default function ManageBatchesModal({
         }
       }
 
-      notify(tr('batch_updated', 'Batch updated'))
+      notify(tr('batch_updated', 'Received date updated'))
       setEditingId(null)
       await load()
       onChanged()
@@ -241,7 +241,7 @@ export default function ManageBatchesModal({
         notify((res as any)?.error || tr('deactivate_failed', 'Failed to deactivate'), 'error')
         return
       }
-      notify(tr('batch_deactivated', 'Batch deactivated'))
+      notify(tr('batch_deactivated', 'Received date deactivated'))
       if (editingId === batch.id) setEditingId(null)
       await load()
       onChanged()
@@ -257,7 +257,7 @@ export default function ManageBatchesModal({
       <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between gap-3 border-b border-gray-200 p-4 dark:border-gray-700">
           <div className="min-w-0">
-            <h2 className="font-bold text-gray-900 dark:text-white">{tr('manage_batches', 'Manage Batches')}</h2>
+            <h2 className="font-bold text-gray-900 dark:text-white">{tr('manage_batches', 'Manage Received Dates')}</h2>
             <div className="mt-0.5 truncate text-xs text-gray-400">{product.name}</div>
           </div>
           <button type="button" onClick={closeIfIdle} className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-gray-400 hover:text-gray-600" disabled={!!savingId}>
@@ -346,7 +346,7 @@ export default function ManageBatchesModal({
           ) : loadError ? (
             <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200">{loadError}</div>
           ) : batches.length === 0 ? (
-            <div className="py-8 text-center text-sm text-gray-400">{tr('no_batches_for_branch', 'No batches for this branch')}</div>
+            <div className="py-8 text-center text-sm text-gray-400">{tr('no_batches_for_branch', 'No received dates for this branch')}</div>
           ) : batches.map((batch) => {
             const isEditing = editingId === batch.id
             const isSaving = savingId === batch.id
@@ -356,13 +356,13 @@ export default function ManageBatchesModal({
                   <div className="space-y-2">
                     <div className="grid gap-2 sm:grid-cols-2">
                       <label className="block">
-                        <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('batch_date', 'Batch date')}</span>
+                        <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('batch_date', 'Received date')}</span>
                         {/* Typed, not a native picker (Sep 3) -- this date
                             IS the lot code, and staff key it as digits. */}
                         <DateEntryInput
                           className="w-full text-sm"
                           t={t}
-                          ariaLabel={tr('batch_date', 'Batch date')}
+                          ariaLabel={tr('batch_date', 'Received date')}
                           value={draft.receivedAt}
                           onChange={(iso) => setDraft((prev) => ({ ...prev, receivedAt: iso }))}
                         />
@@ -374,7 +374,7 @@ export default function ManageBatchesModal({
                             this date IS how the batch's code is
                             corrected. */}
                         <span className="mt-1 block text-[11px] text-gray-400">
-                          {tr('batch_code_preview', 'Batch code')}: {dateToBatchCode(draft.receivedAt) || '--'}
+                          {tr('batch_code_preview', 'Received date code')}: {dateToBatchCode(draft.receivedAt) || '--'}
                         </span>
                       </label>
                       <label className="block">
@@ -402,7 +402,7 @@ export default function ManageBatchesModal({
                         onChange={(event) => setDraft((prev) => ({ ...prev, quantity: event.target.value }))}
                       />
                       <span className="mt-1 block text-[11px] text-gray-400">
-                        {tr('batch_quantity_scoped_hint', 'A stock-take correction for this batch/lot only -- other batches of this product are not affected.')}
+                        {tr('batch_quantity_scoped_hint', 'A stock-take correction for this received date only -- other received dates of this product are not affected.')}
                       </span>
                     </label>
                     <label className="block">

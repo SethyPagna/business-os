@@ -53,6 +53,8 @@ assert.equal(en.credit_awaiting_payment, 'Not Paid')
 assert.equal(km.credit_awaiting_payment, 'ប្រាក់ជំពាក់')
 assert.equal(en.rpt_pending_credit, 'Not Paid')
 assert.equal(km.rpt_pending_credit, 'ប្រាក់ជំពាក់')
+assert.equal(en.pos_status_awaiting_payment_desc, 'Not Paid — stock deducted')
+assert.equal(km.pos_status_awaiting_payment_desc, 'ប្រាក់ជំពាក់ — ស្តុកត្រូវបានកាត់')
 
 // Supplier credit, store credit, and an overpayment credit are different
 // financial concepts. Relabelling them as Not Paid would reverse their meaning.
