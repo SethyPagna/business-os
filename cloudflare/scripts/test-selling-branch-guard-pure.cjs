@@ -239,12 +239,12 @@ runTest('the inventory transfer is refused before its atomic write', () => {
   assert.ok(routeAt > 0, 'the inventory transfer route must still exist')
   const guardAt = inventorySource.indexOf('transferDirectionError(', routeAt)
   const atomicGuardAt = inventorySource.indexOf('canonicalTransferAuthorityGuardStatement(', routeAt)
-  const batchAt = inventorySource.indexOf('db.batch(', routeAt)
+  const statementsAt = inventorySource.indexOf('const statements', routeAt)
   assert.ok(guardAt > routeAt, 'the guard must live inside the transfer route')
-  assert.ok(batchAt > routeAt)
-  assert.ok(guardAt < batchAt, 'the direction check must precede the first atomic write')
+  assert.ok(statementsAt > routeAt)
+  assert.ok(guardAt < statementsAt, 'the direction check must precede construction of the atomic write')
   const stockUpdateAt = inventorySource.indexOf("UPDATE branch_stock SET quantity = quantity - @quantity", routeAt)
-  assert.ok(atomicGuardAt > batchAt && atomicGuardAt < stockUpdateAt, 'the authoritative identity guard must be the first statement inside the atomic transfer batch')
+  assert.ok(atomicGuardAt > statementsAt && atomicGuardAt < stockUpdateAt, 'the authoritative identity guard must be the first statement inside the atomic transfer batch')
 })
 
 if (failures) {
