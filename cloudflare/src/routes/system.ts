@@ -722,6 +722,106 @@ app.get('/shared-general-customer-repair/preview', async (c) => {
   }
 })
 
+app.get('/sale-incident-recovery-20260909/preview', async (c) => {
+  c.header('Cache-Control', 'no-store')
+  const denied = denyUnlessRestorePermission(c)
+  if (denied) return denied
+  if (await rateLimited(c, 'sale_incident_recovery_preview', 10, 600)) {
+    return c.json({ success: false, error: 'Too many previews. Wait a few minutes and try again.' }, 429)
+  }
+  const recovery = await import('../lib/saleIncidentRecovery')
+  const user = c.get('user')
+  try {
+    return c.json(await recovery.previewSaleIncidentRecovery(getDb(c.env), {
+      id: user?.id,
+      name: actorSnapshot(user),
+    }))
+  } catch (error) {
+    if (error instanceof recovery.SaleIncidentRecoveryValidationError) {
+      return c.json({ success: false, error: error.message }, 400)
+    }
+    if (error instanceof recovery.SaleIncidentRecoveryConflictError) {
+      return c.json({ success: false, error: error.message }, 409)
+    }
+    return c.json({ success: false, error: 'Could not preview the fixed sale recovery. No data was changed.' }, 500)
+  }
+})
+
+app.post('/sale-incident-recovery-20260909/apply', async (c) => {
+  c.header('Cache-Control', 'no-store')
+  const denied = denyUnlessRestorePermission(c)
+  if (denied) return denied
+  const crossOrigin = denyCrossOriginMaintenanceRequest(c, true)
+  if (crossOrigin) return crossOrigin
+  const advertisedBytes = Number(c.req.header('Content-Length') || 0)
+  if (Number.isFinite(advertisedBytes) && advertisedBytes > 4096) {
+    return c.json({ success: false, error: 'Recovery request body is too large.' }, 413)
+  }
+  if (await rateLimited(c, 'sale_incident_recovery_apply', 5, 600)) {
+    return c.json({ success: false, error: 'Too many recovery attempts. Wait a few minutes and try again.' }, 429)
+  }
+  const rawBody = await c.req.text()
+  if (new TextEncoder().encode(rawBody).byteLength > 4096) {
+    return c.json({ success: false, error: 'Recovery request body is too large.' }, 413)
+  }
+  let body: unknown
+  try { body = JSON.parse(rawBody) } catch { return c.json({ success: false, error: 'Recovery request must be valid JSON.' }, 400) }
+
+  const recovery = await import('../lib/saleIncidentRecovery')
+  const db = getDb(c.env)
+  const user = c.get('user')
+  let plan
+  try {
+    plan = await recovery.prepareSaleIncidentRecovery(db, body, {
+      id: user?.id,
+      name: actorSnapshot(user),
+    })
+  } catch (error) {
+    if (error instanceof recovery.SaleIncidentRecoveryValidationError) {
+      return c.json({ success: false, error: error.message }, 400)
+    }
+    if (error instanceof recovery.SaleIncidentRecoveryConflictError) {
+      return c.json({ success: false, error: error.message }, 409)
+    }
+    return c.json({ success: false, error: 'Could not validate the fixed sale recovery. No data was changed.' }, 500)
+  }
+
+  if (plan.outcome === 'apply') {
+    try {
+      await createSectionBackup(c.env, recovery.SALE_INCIDENT_RECOVERY_BACKUP_TABLES, 'manual')
+    } catch {
+      return c.json({ success: false, error: 'Aborted: could not create the recovery backup first. No data was changed.' }, 500)
+    }
+  }
+
+  try {
+    const result = await recovery.applySaleIncidentRecovery(db, plan)
+    const refreshes = await Promise.allSettled([
+      bumpVersion(c.env, 'sales'),
+      bumpVersion(c.env, 'products'),
+      broadcast(c.env, 'sales', { action: 'update', recovery: recovery.SALE_INCIDENT_RECOVERY_TARGET }),
+      broadcast(c.env, 'products', { action: 'update', recovery: recovery.SALE_INCIDENT_RECOVERY_TARGET }),
+    ])
+    const cacheInvalidated = refreshes[0].status === 'fulfilled' && refreshes[1].status === 'fulfilled'
+    const refreshPending = refreshes.some((entry) => entry.status === 'rejected')
+    return c.json({
+      ...result,
+      verification_pending: false,
+      cache_invalidated: cacheInvalidated,
+      refresh_pending: refreshPending,
+      broadcast_requested: true,
+      message: result.outcome === 'applied'
+        ? 'Recovered the three proven itemless sales in one guarded transaction. Sale 16954 remains blocked pending sale-time cost evidence.'
+        : 'This exact three-sale recovery was already applied. No sale, stock, audit, history or backup row changed; cache refresh was retried.',
+    })
+  } catch (error) {
+    if (error instanceof recovery.SaleIncidentRecoveryConflictError) {
+      return c.json({ success: false, error: error.message }, 409)
+    }
+    return c.json({ success: false, error: 'Sale recovery failed. The atomic D1 batch changed no data.' }, 500)
+  }
+})
+
 app.get('/legacy-subtotal-repair/preview', async (c) => {
   c.header('Cache-Control', 'no-store')
   const denied = denyUnlessRestorePermission(c)

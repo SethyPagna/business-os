@@ -199,6 +199,8 @@ export const BACKUP_TABLES = [
   // members are children of the receipt. sale_mutation_guards is transient.
   'sale_mutation_receipts',
   'sale_mutation_members',
+  'sale_incident_recovery_receipts',
+  'sale_incident_recovery_members',
   'sale_bulk_operations',
   'sale_bulk_members',
   'return_write_revisions',
@@ -1087,6 +1089,7 @@ export const SALE_REPLAY_RESTORE_BUNDLE = [
   'return_item_batch_allocations', 'fees', 'inventory_movements', 'action_history',
   'undo_snapshots', 'sale_amendments', 'sale_write_revisions', 'sale_bulk_operations', 'sale_bulk_members',
   'sale_mutation_receipts', 'sale_mutation_members',
+  'sale_incident_recovery_receipts', 'sale_incident_recovery_members',
   'return_write_revisions', 'return_bulk_operations', 'return_bulk_members',
   'return_mutation_receipts',
   'return_create_receipts',
