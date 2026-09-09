@@ -683,13 +683,13 @@ test('the control row keeps every control at each width: nothing is dropped, not
   const tail = hub.slice(hub.indexOf('const collapsedTail'), hub.indexOf('const body'))
   assert.ok(tail.includes('{filtersButton}'), 'the tail carries the filter menu')
 
-  // The one picker lives inside the filter fold and is never duplicated into
-  // either the desktop toolbar or compact primary row.
+  // The one picker lives beside the active report title and is never duplicated
+  // into either the desktop toolbar or compact primary row.
   assert.ok(!tail.includes('viewPicker'), 'the picker is not in the tail any more (it would double up with the search slot)')
-  assert.ok(/viewControl=\{viewPicker\}/.test(hub), 'the filter fold owns the view picker')
+  assert.ok(/titleControl: viewPicker/.test(hub), 'the active report title owns the view picker')
   assert.match(hub, /const viewPicker = \(\s*<AppSelect[\s\S]*?ariaLabel=\{trh\('view', 'View'\)\}/, 'the menu view picker retains AppSelect keyboard semantics and its accessible name')
   assert.ok(/reports-mobile-primary">\{rangePicker\}/.test(hub), 'the compact primary row keeps only the range')
-  assert.equal((hub.match(/\{viewPicker\}/g) || []).length, 1, 'the picker has one render reference, on the filter-fold prop')
+  assert.equal((hub.match(/titleControl: viewPicker/g) || []).length, 1, 'the picker has one render reference, on the active report title')
 
   // The four controls Part 586 folded into the one menu must not come back as
   // separate control-row citizens -- that crowding is what hid the search box.

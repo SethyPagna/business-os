@@ -315,6 +315,7 @@ export default function OverviewReport(p: ReportViewProps) {
       ) : null}
       <ReportFrame
         title={tr(view.labelKey, view.fallback)}
+        titleControl={p.titleControl}
         hint={{
           label: tr(view.labelKey, view.fallback),
           text: tr('rpt_hint_overview', 'Revenue = net sales of recognized sales minus refunds; tax and delivery are excluded. Cost and profit are visible to admins only.'),

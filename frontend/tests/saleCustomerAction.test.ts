@@ -35,9 +35,9 @@ assert.doesNotMatch(sales, /attachSaleCustomer|handleAttachMembership|runSaleMem
 assert.doesNotMatch(modalSource, /Replace customer|Create customer|Remove link|onReplace|onCreate|onRemove/, 'the anonymous editor has no replace, create, or remove action')
 assert.match(detail, /t\('sale_customer_edit_entry'\)/, 'the Sale Detail entry point is one localized Edit customer action')
 assert.doesNotMatch(modalSource, /customer\.name[^\n]*includes/, 'server phone results are not hidden by a secondary name filter')
-assert.match(modalSource, /choices\.filter\(\(customer\) => canonicalizeSaleCustomerPhone\(customer\.phone\) === phoneKey\)/, 'only the exact canonical phone identity can be assigned')
+assert.match(modalSource, /name\.includes\(normalizedQuery\)/, 'name search is available alongside phone matching')
+assert.match(modalSource, /phone\.includes\(queryDigits\)/, 'phone search uses canonical digits')
 assert.match(modalSource, /SALE_CUSTOMER_SEARCH_DEBOUNCE_MS = 300/, 'server search is debounced')
-assert.match(modalSource, /formatPhoneInputElement/, 'the primary phone lookup uses the shared phone formatter')
 assert.match(nameModalSource, /readOnly=\{!membershipCanChange\}/, 'existing membership and non-Full membership access remain read-only')
 assert.match(nameModalSource, /Phone is this customer’s primary identity/, 'the real-customer form states the phone identity boundary')
 assert.match(sales, /The refreshed sale can leave the active search\/page[\s\S]{0,220}setDetailSale\(null\)/, 'assignment closes an unrefreshable detail instead of showing stale contact snapshots')
@@ -279,7 +279,7 @@ try {
     choices: [{ id: 9, name: 'Alice', phone: '012 345 678', membershipNumber: 'LC-009' }],
     onSearch() {},
   })))
-  assert.match(container.textContent, /Phone is the customer identity used for this lookup/)
+  assert.match(container.textContent, /Phone is the primary match/)
   assert.doesNotMatch(container.textContent, /Replace customer|Create customer|Remove link/)
   assert.equal(actionModule.canonicalizeSaleCustomerPhone('+855 12 345 678'), '012345678')
   assert.equal(actionModule.canonicalizeSaleCustomerPhone('012 345 678'), '012345678')

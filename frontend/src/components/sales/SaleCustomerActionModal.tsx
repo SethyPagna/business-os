@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
 import Modal from '../shared/Modal.tsx'
-import { formatPhoneInputElement, handlePhoneInputBeforeInput, handlePhoneInputKeyDown } from '../../utils/phoneInput.ts'
 
 export type SaleCustomerChoice = {
   id: number
@@ -51,18 +50,23 @@ export default function SaleCustomerActionModal({
   pendingOutcome?: boolean
   translate: TranslateFn
   onClose: () => void
-  onSearch?: (phone: string) => void
+  onSearch?: (query: string) => void
   onAssign: (customer: SaleCustomerChoice) => void
   onRetryPending?: () => void
   onDiscardPending?: () => void
 }) {
-  const [phone, setPhone] = useState('')
-  useDebouncedSaleCustomerSearch(phone, onSearch ? (query) => onSearch(canonicalizeSaleCustomerPhone(query)) : undefined)
+  const [query, setQuery] = useState('')
+  useDebouncedSaleCustomerSearch(query, onSearch)
   const blocked = saving || pendingOutcome
-  const phoneKey = canonicalizeSaleCustomerPhone(phone)
-  const hasPhoneQuery = phoneKey.length >= 3
-  const exactPhoneChoices = hasPhoneQuery
-    ? choices.filter((customer) => canonicalizeSaleCustomerPhone(customer.phone) === phoneKey)
+  const normalizedQuery = query.trim().toLocaleLowerCase('en-US')
+  const queryDigits = canonicalizeSaleCustomerPhone(query)
+  const hasQuery = normalizedQuery.length >= 2 || queryDigits.length >= 3
+  const matchingChoices = hasQuery
+    ? choices.filter((customer) => {
+      const name = String(customer.name || '').toLocaleLowerCase('en-US')
+      const phone = canonicalizeSaleCustomerPhone(customer.phone)
+      return (normalizedQuery && name.includes(normalizedQuery)) || (queryDigits.length >= 3 && phone.includes(queryDigits))
+    })
     : []
 
   return (
@@ -88,24 +92,21 @@ export default function SaleCustomerActionModal({
         {onSearch ? (
           <>
             <div>
-              <label htmlFor="sale-customer-phone" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{translate('phone_number', 'Phone number')}</label>
+              <label htmlFor="sale-customer-lookup" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{translate('customer', 'Customer')}</label>
               <input
-                id="sale-customer-phone"
-                name="sale_customer_phone_lookup"
+                id="sale-customer-lookup"
+                name="sale_customer_lookup"
                 className="input w-full"
-                value={phone}
-                onChange={(event) => setPhone(formatPhoneInputElement(event.currentTarget))}
-                onKeyDown={(event) => handlePhoneInputKeyDown(event, (value) => setPhone(value))}
-                onBeforeInput={(event) => handlePhoneInputBeforeInput(event, (value) => setPhone(value))}
-                placeholder={translate('sale_customer_phone_lookup', 'Find an existing customer by phone')}
-                inputMode="tel"
-                autoComplete="tel"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder={translate('sale_customer_lookup', 'Search by name or phone')}
+                autoComplete="off"
                 autoFocus
               />
-              <p className="mt-1 text-xs text-gray-500">{translate('sale_customer_phone_primary_hint', 'Phone is the customer identity used for this lookup. Name is shown second to confirm the match.')}</p>
+              <p className="mt-1 text-xs text-gray-500">{translate('sale_customer_lookup_hint', 'Phone is the primary match. You can also search by name and choose the matching customer.')}</p>
             </div>
             <div className="max-h-52 space-y-1 overflow-auto">
-              {exactPhoneChoices.map((customer) => (
+              {matchingChoices.map((customer) => (
                 <button
                   key={customer.id}
                   type="button"
@@ -122,8 +123,8 @@ export default function SaleCustomerActionModal({
                   </span>
                 </button>
               ))}
-              {hasPhoneQuery && !exactPhoneChoices.length ? (
-                <p className="px-2 py-3 text-sm text-gray-500">{translate('sale_customer_phone_not_found', 'No existing customer was found. Add the customer in Contacts, then return here and search again.')}</p>
+              {hasQuery && !matchingChoices.length ? (
+                <p className="px-2 py-3 text-sm text-gray-500">{translate('sale_customer_not_found', 'No existing customer was found. Add the customer in Contacts, then return here and search again.')}</p>
               ) : null}
             </div>
           </>

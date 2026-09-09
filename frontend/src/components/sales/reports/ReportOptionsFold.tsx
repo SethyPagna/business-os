@@ -7,7 +7,6 @@
 // is why the search kept getting squeezed. Everything except search, the date
 // range now lives in here, in one menu, in this order:
 //
-//   View             permission-scoped report picker
 //   Filters          branch / status / payment selects (the caller's nodes)
 //   Display settings Excel vs Receipt style
 //   Currency         USD (default) / KHR / Both
@@ -30,8 +29,6 @@ export interface ReportOptionsFoldProps {
   onChange: (patch: Partial<ReportOptions>) => void
   onReset: () => void
   tr: Tr
-  /** The permission-filtered report picker, rendered as an opaque slot. */
-  viewControl: ReactNode
   /** The branch / status / payment selects, rendered as an opaque slot. */
   filterControls?: ReactNode
   /** Excel vs Receipt -- the former standalone toggle, now a chip group. */
@@ -50,7 +47,7 @@ function Group({ title, children }: { title: string; children: React.ReactNode }
   )
 }
 
-export default function ReportOptionsFold({ open, onClose, anchorRef, options, onChange, onReset, tr, viewControl, filterControls, style, onStyleChange, resetDisabled }: ReportOptionsFoldProps) {
+export default function ReportOptionsFold({ open, onClose, anchorRef, options, onChange, onReset, tr, filterControls, style, onStyleChange, resetDisabled }: ReportOptionsFoldProps) {
   const currencies: Array<{ id: ReportCurrency; label: string }> = [
     { id: 'usd', label: 'USD' },
     { id: 'khr', label: 'KHR' },
@@ -72,9 +69,6 @@ export default function ReportOptionsFold({ open, onClose, anchorRef, options, o
       }
     >
       <div className="reports-filter-grid" data-reports-fold="" data-reports-filter="">
-        <Group title={tr('view', 'View')}>
-          <div className="w-full min-w-0">{viewControl}</div>
-        </Group>
         {filterControls ? (
           <Group title={tr('filters', 'Filters')}>
             <div className="flex w-full flex-col gap-1.5">{filterControls}</div>

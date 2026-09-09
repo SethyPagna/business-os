@@ -10,6 +10,8 @@ export type SectionHeaderProps = {
   /** Slot for an `<InfoHint .../>` element; SectionHeader does not own
    *  tooltip logic, it only places the slot next to the title. */
   infoHint?: ReactNode
+  /** Optional control rendered beside the semantic heading. */
+  titleControl?: ReactNode
   /** Right-aligned actions (buttons, an OverflowMenu, etc.). */
   actions?: ReactNode
   className?: string
@@ -22,7 +24,7 @@ export type SectionHeaderProps = {
 // once per mini-section (mini-sections stay visually quieter, per the
 // existing SectionCard `nested` convention this component does not
 // duplicate).
-export default function SectionHeader({ title, count, infoHint, actions, className = '' }: SectionHeaderProps) {
+export default function SectionHeader({ title, count, infoHint, titleControl, actions, className = '' }: SectionHeaderProps) {
   return (
     <div className={['flex min-w-0 items-center gap-2', className].join(' ').trim()}>
       <div className="flex min-w-0 items-center gap-1.5">
@@ -32,6 +34,7 @@ export default function SectionHeader({ title, count, infoHint, actions, classNa
         >
           {title}
         </h2>
+        {titleControl ? <span className="min-w-0 shrink-0">{titleControl}</span> : null}
         {count != null ? (
           <span className="shrink-0 rounded-full bg-[var(--ui-surface-2)] px-1.5 text-[11px] leading-[18px] text-[var(--ui-ink-3)]">{count}</span>
         ) : null}

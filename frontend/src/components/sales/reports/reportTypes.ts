@@ -3,6 +3,7 @@
 // ReportsHub and renders inside a ReportFrame.
 import { fmtDateOnly } from '../../../utils/formatters.ts'
 import type { OverflowMenuItem } from '../../shared/kit'
+import type { ReactNode } from 'react'
 import type { ReportTableLabels } from './ReportTable.tsx'
 import type { ReportFilters, ReportOptions, ReportPermissions, ReportStyle, ReportViewDef, ReportViewId } from './reportModel.ts'
 
@@ -20,6 +21,8 @@ export interface DrillPatch {
 
 export interface ReportViewProps {
   view: ReportViewDef
+  /** Selector for the active report, rendered beside the report heading. */
+  titleControl?: ReactNode
   filters: ReportFilters
   /** Debounced control-row search (already trimmed). */
   search: string

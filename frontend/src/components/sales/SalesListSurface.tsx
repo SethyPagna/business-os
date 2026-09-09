@@ -35,6 +35,7 @@ interface SaleRecord {
   // membership/address detail opens in SaleDetailModal on row click.
   customer_name?: string
   customer_phone?: string
+  customer_is_anonymous?: number | boolean | null
   // N9: resolved server-side (delivery_contact_name falls back to the
   // linked driver's live name in GET /sales) -- see utils/salesDriverLabel.ts.
   linked_driver_name?: string | null
@@ -323,7 +324,7 @@ export default function SalesListSurface({
                                     row click opens the full detail (membership,
                                     address, line items). */}
                                 <div className="min-w-0 max-w-[12rem]">
-                                  <div className="truncate font-medium text-gray-800 dark:text-gray-200">{sale.customer_name?.trim() || (t('walk_in') || 'Walk-in')}</div>
+                                  <div className="truncate font-medium text-gray-800 dark:text-gray-200">{Number(sale.customer_is_anonymous || 0) === 1 ? (t('walk_in') || 'Walk-in') : (sale.customer_name?.trim() || (t('walk_in') || 'Walk-in'))}</div>
                                   {sale.customer_phone?.trim() ? <div className="truncate text-xs text-gray-400">{sale.customer_phone}</div> : null}
                                 </div>
                               </td>
@@ -507,7 +508,7 @@ export default function SalesListSurface({
                             {/* Y17: customer (name + phone) leads the meta line;
                                 tapping the card opens the full detail. */}
                             <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-gray-500">
-                              <span className="font-medium text-gray-700 dark:text-gray-300">{sale.customer_name?.trim() || (t('walk_in') || 'Walk-in')}</span>
+                              <span className="font-medium text-gray-700 dark:text-gray-300">{Number(sale.customer_is_anonymous || 0) === 1 ? (t('walk_in') || 'Walk-in') : (sale.customer_name?.trim() || (t('walk_in') || 'Walk-in'))}</span>
                               {sale.customer_phone?.trim() ? <span className="text-gray-400">{sale.customer_phone}</span> : null}
                               {/* U22: phone and delivery stay on one compact
                                   contact line. The driver's actual name is the

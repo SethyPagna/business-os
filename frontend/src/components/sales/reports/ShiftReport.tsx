@@ -54,6 +54,7 @@ export default function ShiftReport(p: ReportViewProps) {
   return (
     <ReportFrame
       title={tr(view.labelKey, view.fallback)}
+      titleControl={p.titleControl}
       count={shift?.shift_code}
       hint={{ label: tr('shift_report', 'Shift Report'), text: tr('shift_report_hint', 'Registered OPEN and END cash is report-only. Business results come from sales, COGS, profit, delivery, expenses, refunds, and positive Not Paid.') }}
       actions={shift ? (

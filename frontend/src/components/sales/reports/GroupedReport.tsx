@@ -201,6 +201,7 @@ export default function GroupedReport(p: ReportViewProps) {
     return (
       <ReportFrame
         title={title}
+        titleControl={p.titleControl}
         count={productRows.length ? fmtInt(productRows.length) : undefined}
         hint={{ label: title, text: tr('rpt_hint_products', 'Line sales = item line totals after line discounts, before order-level discounts, over recognized sales only. Ranked by line sales; top 500.') }}
         actions={exportMenu(() => downloadCSV(reportFileName('products', filters, 'csv'), csv()), () => openPrintExport({ title: printTitle, subtitle, headers: columns.map((c) => c.label), rows: csv() }))}
@@ -272,6 +273,7 @@ export default function GroupedReport(p: ReportViewProps) {
     return (
       <ReportFrame
         title={title}
+        titleControl={p.titleControl}
         count={courierRows.length ? fmtInt(courierRows.length) : undefined}
         hint={{ label: title, text: tr('rpt_hint_couriers', 'Delivery sales per courier: what customers were charged, what the store absorbed, the recorded actual cost (only deliveries with a cost recorded) and the resulting margin.') }}
         actions={exportMenu(() => downloadCSV(reportFileName('couriers', filters, 'csv'), csv()), () => openPrintExport({ title: printTitle, subtitle, headers: columns.map((c) => c.label), rows: csv() }))}
@@ -329,6 +331,7 @@ export default function GroupedReport(p: ReportViewProps) {
   return (
     <ReportFrame
       title={title}
+      titleControl={p.titleControl}
       count={groupRows.length ? fmtInt(groupRows.length) : undefined}
       hint={{ label: title, text: tr('rpt_hint_grouped', 'Each row is the full revenue calculation for that group (same definition as the Overview), so the rows add up to the totals line. Share = the row’s basis figure as a percentage of the total.') }}
       actions={exportMenu(() => downloadCSV(reportFileName(view.id, filters, 'csv'), csv()), () => openPrintExport({ title: printTitle, subtitle, headers: columns.map((c) => c.label), rows: csv() }))}

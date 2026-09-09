@@ -1247,16 +1247,6 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
 
   return (
     <div className={`${embedded ? '' : 'page-scroll '}flex flex-col p-3 sm:p-6`}>
-      {canExportReturns ? <div className="mb-3 flex justify-end max-md:contents">
-        <SectionExportAction>
-          <ExportMenu
-            label={tr('export', 'Export')}
-            items={exportItems}
-            mobileIconOnly
-            triggerClassName="!h-11 !w-11 !min-w-0 !px-0 md:!h-8 md:!w-auto md:!min-w-[5.75rem] md:!px-3 [&>span]:!hidden md:[&>span]:!inline"
-          />
-        </SectionExportAction>
-      </div> : null}
       {activePendingHistoryRequest ? (
         <div data-needs-reconciliation={activePendingHistoryRequest.needsReconciliation || undefined} className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
           <span className="min-w-0 flex-1">{activePendingHistoryRequest.needsReconciliation
@@ -1310,6 +1300,16 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
         // are not many like only two ... just merge with the stats").
         rangeActions={(
           <>
+            {canExportReturns ? (
+              <SectionExportAction>
+                <ExportMenu
+                  label={tr('export', 'Export')}
+                  items={exportItems}
+                  mobileIconOnly
+                  triggerClassName="!h-8 !min-w-0 !px-2.5 md:!w-auto md:!min-w-[5.75rem]"
+                />
+              </SectionExportAction>
+            ) : null}
             {canEditReturn ? (
               <button type="button" className="btn-secondary inline-flex h-8 items-center gap-1 px-2.5 py-0 text-xs" onClick={() => setShowReasonManager(true)} title={tr('manage_return_reasons', 'Manage return reasons')}>
                 <Settings2 className="h-3.5 w-3.5" />

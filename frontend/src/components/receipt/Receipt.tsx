@@ -503,6 +503,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   const exchangeRateText = tpl.show_exchange_rate ? `1 USD = ${Number(exchangeRate).toLocaleString()} ${khrSymbol}` : ''
   const showMembershipId = tpl.show_customer_membership !== false
   const customerIsAnonymous = isAnonymousCustomerIdentity(sale)
+  const customerDisplayName = customerIsAnonymous ? '' : sale.customer_name
   // N21: sales.customer_address may hold the Contact Options JSON that was
   // snapshotted raw out of customers.address. Rendering it through the shared
   // kernel (contactOptionUtils.ts, twinned in cloudflare/src/lib/contactOptions.ts)
@@ -510,7 +511,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   // RESOLVED value stops a row that resolves to nothing forcing an empty
   // customer block onto the paper.
   const customerAddress = contactDisplayAddress(sale.customer_address)
-  const hasCustomer = sale.customer_name || (!customerIsAnonymous && sale.customer_phone) || customerAddress || (!customerIsAnonymous && showMembershipId && sale.customer_membership_number)
+  const hasCustomer = customerDisplayName || (!customerIsAnonymous && sale.customer_phone) || customerAddress || (!customerIsAnonymous && showMembershipId && sale.customer_membership_number)
   const hasDelivery = !!sale.is_delivery && (sale.delivery_contact_name || sale.delivery_contact_phone || sale.delivery_contact_address)
   const showDeliveryContactSection = tpl.delivery_show_contact !== false
   const showDeliveryDriverName = showDeliveryContactSection && tpl.delivery_show_driver_name !== false
@@ -570,7 +571,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
     ),
     customer: hasCustomer ? (
       <div key="customer" className="mt-2 border-t border-dashed border-gray-300 pt-2">
-        {tpl.show_customer_name && sale.customer_name ? <Row label={labelFor(lang, 'customer')} value={sale.customer_name} /> : null}
+        {tpl.show_customer_name && customerDisplayName ? <Row label={labelFor(lang, 'customer')} value={customerDisplayName} /> : null}
         {!customerIsAnonymous && tpl.show_customer_phone && sale.customer_phone ? <Row label={labelFor(lang, 'phone')} value={sale.customer_phone} /> : null}
         {tpl.show_customer_address && customerAddress ? <Row label={labelFor(lang, 'address')} value={customerAddress} /> : null}
         {!customerIsAnonymous && showMembershipId && sale.customer_membership_number ? <Row label={labelFor(lang, 'membership')} value={sale.customer_membership_number} /> : null}

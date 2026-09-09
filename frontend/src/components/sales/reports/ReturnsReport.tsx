@@ -169,6 +169,7 @@ export default function ReturnsReport(p: ReportViewProps) {
   return (
     <ReportFrame
       title={title}
+      titleControl={p.titleControl}
       count={totals.count ? `${fmtInt(totals.count)}${mode === 'each' && paged.hasMore ? '+' : ''}` : undefined}
       hint={{ label: title, text: tr('rpt_hint_returns', 'Customer returns that are not cancelled, by the return’s business date. Refunds are shown in the currency they were recorded in; the same refunds are already subtracted from Revenue.') }}
       actions={

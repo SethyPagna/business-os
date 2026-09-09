@@ -225,13 +225,13 @@ test('Part 548: report figures remain visible on every viewport without duplicat
 
 test('Part 549/552: the Reports status/method filters are compact chip-selects', () => {
   const report = read('src/components/sales/ReportsHub.tsx')
-  // Compact h-7 chip-selects (not the old full-height dropdowns), matching
-  // the Returns/Fees report density.
+  // The menu select controls use the shared h-9 control height for readable
+  // desktop/mobile tap targets.
   // Part 586 moved these selects into the one filter menu, where they take
-  // the menu column's full width -- so pin the DENSITY (h-7 / 11px / no
-  // vertical padding), which is the thing this test is actually about,
+  // the menu column's full width -- so pin the DENSITY rather than the exact
+  // layout around it,
   // rather than the exact class literal.
-  assert.ok(/buttonClassName="h-7 (?:w-full )?py-0 px-2 text-\[11px\]"/.test(report), 'status/method use the compact chip-select size')
+  assert.ok(/buttonClassName="h-9 w-full py-0 px-2 text-\[12px\]"/.test(report), 'status/method use the consistent filter control size')
   assert.ok(report.includes('options={statusOptions}') && report.includes('options={paymentOptions}'), 'both selects render')
 })
 

@@ -50,7 +50,8 @@ assert.match(sales, /onCustomerAction=\{canChangeSaleCustomer \? \(sale\) => \{ 
 
 // Three ordinary destination statuses share one row at 375px. Review keeps
 // Back and Update together instead of parking the secondary action above it.
-assert.match(workflow, /data-sale-status-destinations="" className="mt-2 grid grid-cols-3 gap-2"/)
+assert.match(workflow, /data-sale-status-destinations="" className="grid grid-cols-3 gap-2"/)
+assert.doesNotMatch(workflow, /Choose destination status/)
 assert.match(workflow, /\.filter\(\(status\) => !\['partial_return', 'returned', currentStatus\]\.includes\(status\)\)/)
 const reviewActions = workflow.slice(workflow.indexOf('data-sale-status-review-actions=""'))
 assert.match(reviewActions, /className="flex items-stretch gap-2"/)

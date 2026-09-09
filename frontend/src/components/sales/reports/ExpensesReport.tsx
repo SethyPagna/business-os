@@ -165,6 +165,7 @@ export default function ExpensesReport(p: ReportViewProps) {
   return (
     <ReportFrame
       title={title}
+      titleControl={p.titleControl}
       count={totals.count ? `${fmtInt(totals.count)}${mode === 'each' && paged.hasMore ? '+' : ''}` : undefined}
       hint={{ label: title, text: tr('rpt_hint_expenses', 'Recorded expenses by their expense date, in the currency each was recorded in (no conversion). "Net after expenses" on the Overview subtracts this total from gross profit.') }}
       actions={

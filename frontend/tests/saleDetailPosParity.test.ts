@@ -292,7 +292,7 @@ assert.match(salesStatusBackend, /\['completed', 'awaiting_payment', 'awaiting_d
 
 assert.match(detail, /<SaleStatusWorkflow/)
 assert.match(workflow, /'closed' \| 'destination' \| 'review'/)
-assert.match(workflow, /Choose destination status/)
+assert.doesNotMatch(workflow, /Choose destination status/)
 assert.match(workflow, /getStatusLabel\(currentStatus, t\)/)
 assert.match(workflow, /getStatusLabel\(selectedStatus, t\)/)
 assert.match(workflow, /onClick=\{onConfirm\}/)

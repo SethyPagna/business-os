@@ -1891,11 +1891,12 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
   }
   const loadSaleCustomerChoices = async (sale: SaleRecord, search = '') => {
     const searchVersion = ++saleCustomerSearchVersionRef.current
-    if (String(search).replace(/\D/g, '').length < 3) {
+    const normalizedSearch = String(search || '').trim()
+    if (normalizedSearch.length < 2 && normalizedSearch.replace(/\D/g, '').length < 3) {
       setSaleCustomerPrompt((current) => current?.sale.id === sale.id ? { ...current, choices: [] } : current)
       return
     }
-    const result = await getSalesCustomerPicker({ ...(search ? { search } : {}), page: 1, pageSize: SALES_BULK_LINKED_PAGE_SIZE })
+    const result = await getSalesCustomerPicker({ ...(normalizedSearch ? { search: normalizedSearch } : {}), page: 1, pageSize: SALES_BULK_LINKED_PAGE_SIZE })
     const choices = customerRows(result).map((row) => ({
       id: Number(row.id),
       name: String(row.name || `#${row.id}`),
@@ -2451,7 +2452,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
               saleCustomerSearchVersionRef.current += 1
               setSaleCustomerPrompt(null)
             }}
-            onSearch={canBrowseCustomers ? (phone) => { void loadSaleCustomerChoices(saleCustomerPrompt.sale, phone).catch((error) => {
+            onSearch={canBrowseCustomers ? (query) => { void loadSaleCustomerChoices(saleCustomerPrompt.sale, query).catch((error) => {
               if ((error as { name?: string } | null)?.name !== 'AbortError') notify(getErrorMessage(error, translateOr('sale_customer_choices_load_failed', 'Unable to search customers.')), 'error')
             }) } : undefined}
             onAssign={(customer) => { void submitSaleCustomerChange(saleCustomerPrompt.sale, customer) }}

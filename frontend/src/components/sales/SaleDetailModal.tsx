@@ -1494,7 +1494,7 @@ export default function SaleDetailModal({
 
             <SectionCard title={t('customer') || 'Customer'} action={onCustomerAction ? <button type="button" className="btn-secondary text-xs" onClick={() => onCustomerAction(sale)}>{t('sale_customer_edit_entry') || 'Edit customer'}</button> : null}>
               <DetailRowGroup>
-                <DetailRow label={t('customer_name') || 'Customer'} value={sale.customer_name} />
+                <DetailRow label={t('customer_name') || 'Customer'} value={customerIsAnonymous ? (t('walk_in') || 'Walk-in') : sale.customer_name} />
                 {!customerIsAnonymous ? <div className="hidden sm:block"><DetailRow label={t('phone') || 'Phone'} value={sale.customer_phone} /></div> : null}
                 <DetailRow label={t('address') || 'Address'} value={customerAddress} />
                 {customerIsAnonymous ? null : onAttachMembership ? (

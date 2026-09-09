@@ -283,6 +283,8 @@
 /* The trigger stays a high-contrast white surface in light mode even when a
    count is active. Dark mode follows the scoped surface token. */
 .reports-filter-trigger {
+  min-height: 40px;
+  height: 40px;
   border-color: var(--ui-ink-2);
   background: var(--ui-surface);
   color: var(--ui-ink);

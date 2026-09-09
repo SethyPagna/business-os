@@ -4,11 +4,11 @@
 //
 // One control row drives every view, and since Part 586 it holds exactly
 // three things: the search box · the Start→End date/time range · one Filters
-// menu. The permission-scoped View picker and everything else that used to compete with the search
-// box for that row -- a separate Filters fold, the Excel/Receipt style
-// toggle, an Options button and an OverflowMenu -- is inside that one menu
-// now (user: "make sure the search is shown, the various options into
-// filtermenu"). Below the row exactly ONE view
+// menu. The active View picker now sits beside the selected report title;
+// the filter sheet keeps branch/status/payment, display style and currency.
+// Everything else that used to compete with the search box for that row -- a
+// separate Filters fold, the Excel/Receipt style toggle, an Options button and
+// an OverflowMenu -- is inside that one menu now. Below the row exactly ONE view
 // renders (Overview, By period, Sales list, Products, Customers, Cashiers,
 // Payment methods, Hours, Days of week, Branches, Couriers, Returns,
 // Expenses); each view is a ReportFrame with its own title-row actions,
@@ -233,10 +233,10 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
   // Part 586 folded the former four control-row citizens (a Filters fold, a
   // style IconButton, an Options button and an OverflowMenu) into ONE menu,
   // so the row is just: search · range · Filters. The permission-scoped view
-  // selector now leads the menu. That is what freed
+  // selector now sits beside the report title. That is what freed
   // the width the search box had been losing.
   const [optionsOpen, setOptionsOpen] = useState(false)
-  // Compact tier only: after Show, the filter card folds to one line (view ·
+  // Compact tier only: after Show, the filter card folds to one line (report ·
   // range · Filters) with a handle, so the results start at the top of the
   // screen -- the old-POS reference (owner, Sep 5 2026, screenshots #3/#4:
   // the panel collapses behind a handle once SHOW is pressed). It opens
@@ -273,9 +273,9 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
 
   const filterSelects = (
     <>
-      {branches.length ? <AppSelect value={branchFilter} options={branchOptions} onChange={setBranchFilter} ariaLabel={trh('branch', 'Branch')} buttonClassName="h-7 w-full py-0 px-2 text-[11px]" showChevron /> : null}
-      {supportsSaleFilters ? <AppSelect value={statusFilter} options={statusOptions} onChange={setStatusFilter} ariaLabel={trh('status', 'Status')} buttonClassName="h-7 w-full py-0 px-2 text-[11px]" showChevron /> : null}
-      {supportsSaleFilters ? <AppSelect value={paymentFilter} options={paymentOptions} onChange={setPaymentFilter} ariaLabel={trh('payment_method', 'Payment method')} buttonClassName="h-7 w-full py-0 px-2 text-[11px]" showChevron /> : null}
+      {branches.length ? <AppSelect value={branchFilter} options={branchOptions} onChange={setBranchFilter} ariaLabel={trh('branch', 'Branch')} buttonClassName="h-9 w-full py-0 px-2 text-[12px]" showChevron /> : null}
+      {supportsSaleFilters ? <AppSelect value={statusFilter} options={statusOptions} onChange={setStatusFilter} ariaLabel={trh('status', 'Status')} buttonClassName="h-9 w-full py-0 px-2 text-[12px]" showChevron /> : null}
+      {supportsSaleFilters ? <AppSelect value={paymentFilter} options={paymentOptions} onChange={setPaymentFilter} ariaLabel={trh('payment_method', 'Payment method')} buttonClassName="h-9 w-full py-0 px-2 text-[12px]" showChevron /> : null}
     </>
   )
   const hasFilterControls = branches.length > 0 || supportsSaleFilters
@@ -317,6 +317,7 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
     compact,
     onDrill,
     onOptionsChange,
+    titleControl: viewPicker,
   } : null
 
   // One tail for every tier: the menu is the ONLY thing that can move, and it
@@ -422,7 +423,6 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
         onChange={onOptionsChange}
         onReset={() => { clearFilters(); setStyleChoice(null); setOptions({ ...DEFAULT_REPORT_OPTIONS, granularity: options.granularity }) }}
         tr={trh}
-        viewControl={viewPicker}
         filterControls={hasFilterControls ? filterSelects : null}
         style={style}
         onStyleChange={setStyleChoice}

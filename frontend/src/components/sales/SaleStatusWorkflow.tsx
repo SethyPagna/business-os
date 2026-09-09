@@ -52,8 +52,7 @@ export default function SaleStatusWorkflow({
       {step === 'destination' ? (
         <>
           <div>
-            <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t('choose_status') || 'Choose destination status'}</div>
-            <div data-sale-status-destinations="" className="mt-2 grid grid-cols-3 gap-2">
+            <div data-sale-status-destinations="" className="grid grid-cols-3 gap-2">
               {destinations.map((status) => (
                 <button
                   key={status}

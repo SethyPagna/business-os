@@ -125,6 +125,7 @@ export default function PeriodReport(p: ReportViewProps) {
   return (
     <ReportFrame
       title={tr(view.labelKey, view.fallback)}
+      titleControl={p.titleControl}
       count={rows.length ? fmtInt(rows.length) : undefined}
       hint={{ label: tr(view.labelKey, view.fallback), text: tr('rpt_hint_periods', 'One row per business day, week (Monday–Sunday) or month in the range. Same revenue definition as everywhere else; rows add up to the Overview.') }}
       actions={
