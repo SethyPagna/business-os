@@ -1,3 +1,13 @@
+## Received-date semantic parity + transfer provenance LIVE — September 10
+
+The exact tested runtime revision **1d8c5813d8a5** is live at 100% in Worker version **df6ab1ff-c60e-4699-85be-762e1fbc935c** (build hash **db2537ed4cefaeaa**, built 2026-09-09T18:21:46.748Z). The deployment contains separate fix-scoped commits: **0a0f2865** (preserve source received dates when transfers clone/allocate stock), **69f4eab8** (align English/Khmer received-date terminology across stock, transfer, merge, RFID, receipt, and sale surfaces), **1ccfa8ba** (render structured payment/delivery sale-record fields), **8dc64906** (cross-layer variable parity guard), and **1d8c5813** (sales-import fallback wording).
+
+Received-date display now derives from `received_at` first, decodes only date-derived legacy codes, and keeps genuine custom codes as codes. Transfer clones preserve the source `received_at` (or unknown), preventing a transfer timestamp from changing inventory history. Operator copy uses `Received date / ថ្ងៃចូល`; actual delivery cost uses `Actual delivery cost / ថ្លៃដឹកដើម`; sale Records now label payment, delivery, fee, and actual-cost changes with structured before/after values. Legacy CSV column names and the internal multi-line “Batch” session remain unchanged for compatibility and scope clarity.
+
+Verification: frontend utility chain **347/347**, frontend typecheck, `verify:i18n` (**5,682** keys / 585 files), production Vite build, Worker typecheck, semantic parity, batch-label, Khmer glossary, merge, transfer (6/6), Telegram bilingual/messages/shift (26 checks), receipt and sale-record suites all pass. Deployment completed successfully and no production data or migrations were changed.
+
+Still open or paused: broader UI/public/customer-portal polish, offline work, historical duplicate/contact cleanup, unresolved historical driver/sale-link evidence, and physical iOS/PWA/camera smoke. These remain tracked in the owner register; this release does not claim hardware or full visual certification.
+
 ## Verification follow-up promotion LIVE — September 10
 
 After the adversarial pass, the pushed head **98eea9d6aa1e** was rebuilt and promoted to 100% as Worker version **a9d5e95b-d332-4648-982a-8dcd2e48339d** (build hash **8d83db0e06bd2064**, deployed 2026-09-09T16:08Z / 2026-09-10 local). This promotion carries the same tested settlement/transfer runtime plus the corrected status-dialog stock-holding explanation and its regression assertion.
