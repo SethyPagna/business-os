@@ -54,12 +54,18 @@ class CapturingHono {
 }
 
 function makeAdapter(d1, hooks = {}) {
-  const state = { durableCases: 0, finalized: 0, statements: 0 }
+  const state = { durableCases: 0, finalized: 0, statements: 0, historyDiscoveryReads: 0, snapshotReadinessReads: 0 }
   return {
     state,
     prepare(sql) {
       const prepared = d1.prepare(sql)
       const maybeThrow = () => {
+        if (/SELECT id, reversible, status,[\s\S]*FROM action_history[\s\S]*operation_id/i.test(sql)) {
+          state.historyDiscoveryReads += 1
+        }
+        if (/SELECT CAST\(json_extract\(payload_json,'\$\.fingerprintPending'\)[\s\S]*FROM undo_snapshots WHERE id=@snapshotId/i.test(sql)) {
+          state.snapshotReadinessReads += 1
+        }
         if (hooks.failHistoryLookupAfterCommitted && state.durableCases >= hooks.failHistoryLookupAfterCommitted
           && /FROM action_history[\s\S]*operation_id/i.test(sql)) {
           throw new Error('D1_ERROR: D1 DB is overloaded. Requests queued for too long.')
@@ -97,7 +103,15 @@ function makeAdapter(d1, hooks = {}) {
         state.finalized += 1
         hooks.afterFinalize?.(state.finalized)
       }
-      return result
+      return result.map((entry, index) => {
+        const isMergeIdInsert = /INSERT INTO (?:undo_snapshots|action_history)/i.test(statements[index]?.sql || '')
+        if (!isMergeIdInsert) return entry
+        if (hooks.omitMergeInsertMetadata) return { ...entry, meta: { ...entry.meta, last_row_id: undefined } }
+        if (hooks.offsetMergeInsertMetadata) {
+          return { ...entry, meta: { ...entry.meta, last_row_id: Number(entry.meta?.last_row_id || 0) + hooks.offsetMergeInsertMetadata } }
+        }
+        return entry
+      })
     },
   }
 }
@@ -229,9 +243,44 @@ async function oversizedFirstClusterIsRefusedWhole() {
   assert.equal(d1.db.prepare('SELECT COUNT(*) AS n FROM undo_snapshots').get().n, 0)
 }
 
+async function batchMetadataFastPathSkipsDiscoveryReads() {
+  const d1 = seedGroups([1])
+  const adapter = makeAdapter(d1)
+  const result = await invoke(loadMergeHandler(adapter))
+  assert.equal(result.status, 200)
+  assert.equal(result.body.success, true)
+  assert.equal(result.body.complete, true)
+  assert.equal(result.body.mergedProducts, 1)
+  assert.equal(result.body.undoPendingCount, 0)
+  assert.equal(result.body.actionHistoryIds.length, 1)
+  assert.equal(adapter.state.historyDiscoveryReads, 0, 'batch metadata must avoid the operation-id history lookup')
+  assert.equal(adapter.state.snapshotReadinessReads, 0, 'a newly inserted pending snapshot needs no readiness lookup')
+  assert.equal(d1.db.prepare("SELECT COUNT(*) AS n FROM action_history WHERE status='undoable' AND reversible=1").get().n, 1)
+  assert.equal(d1.db.prepare("SELECT COUNT(*) AS n FROM undo_snapshots WHERE status='applied' AND json_extract(payload_json,'$.fingerprintPending')=0").get().n, 1)
+  assert.equal(d1.db.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE action='merge_duplicate'").get().n, 1)
+  assert.equal(d1.db.prepare("SELECT COUNT(*) AS n FROM products WHERE is_active=0").get().n, 1)
+}
+
+async function missingBatchMetadataUsesLegacyDiscovery() {
+  const d1 = seedGroups([1])
+  const adapter = makeAdapter(d1, { omitMergeInsertMetadata: true })
+  const result = await invoke(loadMergeHandler(adapter))
+  assert.equal(result.status, 200)
+  assert.equal(result.body.success, true)
+  assert.equal(result.body.complete, true)
+  assert.equal(result.body.mergedProducts, 1)
+  assert.equal(result.body.undoPendingCount, 0)
+  assert.equal(result.body.actionHistoryIds.length, 1)
+  assert.equal(adapter.state.historyDiscoveryReads, 1, 'missing metadata must retain the legacy operation-id lookup')
+  assert.equal(adapter.state.snapshotReadinessReads, 1, 'legacy finalization must retain its readiness check')
+  assert.equal(d1.db.prepare("SELECT COUNT(*) AS n FROM action_history WHERE status='undoable' AND reversible=1").get().n, 1)
+  assert.equal(d1.db.prepare("SELECT COUNT(*) AS n FROM undo_snapshots WHERE json_extract(payload_json,'$.fingerprintPending')=0").get().n, 1)
+}
+
 async function postCommitHistoryLookupFailureRemainsReported() {
   const d1 = seedGroups([1, 1])
-  const result = await invoke(loadMergeHandler(makeAdapter(d1, { failHistoryLookupAfterCommitted: 1 })))
+  const adapter = makeAdapter(d1, { omitMergeInsertMetadata: true, failHistoryLookupAfterCommitted: 1 })
+  const result = await invoke(loadMergeHandler(adapter))
   assert.equal(result.status, 200)
   assert.equal(result.body.complete, false)
   assert.equal(result.body.interrupted, true)
@@ -246,6 +295,28 @@ async function postCommitHistoryLookupFailureRemainsReported() {
   assert.equal(d1.db.prepare("SELECT COUNT(*) AS n FROM products WHERE is_active=1").get().n, 3, 'no later case starts after finalization becomes pending')
   assert.equal(d1.db.prepare("SELECT COUNT(*) AS n FROM action_history WHERE status='recorded' AND reversible=0").get().n, 1)
   assert.equal(d1.db.prepare("SELECT COUNT(*) AS n FROM undo_snapshots WHERE status='applied'").get().n, 1)
+  assert.equal(adapter.state.historyDiscoveryReads, 1)
+  assert.equal(adapter.state.snapshotReadinessReads, 0, 'history lookup failed before snapshot readiness could run')
+}
+
+async function wrongBatchMetadataFailsClosed() {
+  const d1 = seedGroups([1, 1])
+  const adapter = makeAdapter(d1, { offsetMergeInsertMetadata: 100_000 })
+  const result = await invoke(loadMergeHandler(adapter))
+  assert.equal(result.status, 200)
+  assert.equal(result.body.complete, false)
+  assert.equal(result.body.interrupted, true)
+  assert.equal(result.body.interruptionCode, 'merge_infrastructure_interrupted')
+  assert.equal(result.body.mergedProducts, 1, 'the durable first fold remains reported')
+  assert.equal(result.body.undoPendingCount, 1)
+  assert.equal(result.body.actionHistoryIds.length, 1, 'the supplied positive id remains visible but must not become undoable')
+  assert.equal(adapter.state.historyDiscoveryReads, 0, 'positive metadata takes the fast path even when its row is wrong')
+  assert.equal(adapter.state.snapshotReadinessReads, 0)
+  assert.equal(d1.db.prepare("SELECT COUNT(*) AS n FROM action_history WHERE status='recorded' AND reversible=0").get().n, 1)
+  assert.equal(d1.db.prepare("SELECT COUNT(*) AS n FROM action_history WHERE status='undoable' OR reversible=1").get().n, 0)
+  assert.equal(d1.db.prepare("SELECT COUNT(*) AS n FROM undo_snapshots WHERE json_extract(payload_json,'$.fingerprintPending')=1").get().n, 1)
+  assert.equal(d1.db.prepare("SELECT COUNT(*) AS n FROM products WHERE is_active=0").get().n, 1)
+  assert.equal(d1.db.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE action='merge_duplicate'").get().n, 1)
 }
 
 async function oversizedWritePlanRefusesBeforeMutation() {
@@ -375,7 +446,10 @@ async function oversizedPlanHistoryRefusesBeforeMutation() {
   await overloadAfterEight()
   await budgetStopsBetweenWholeGroups()
   await oversizedFirstClusterIsRefusedWhole()
+  await batchMetadataFastPathSkipsDiscoveryReads()
+  await missingBatchMetadataUsesLegacyDiscovery()
   await postCommitHistoryLookupFailureRemainsReported()
+  await wrongBatchMetadataFailsClosed()
   await oversizedWritePlanRefusesBeforeMutation()
   await oversizedDependentReadRefusesBeforeMutation()
   await complexLaterMemberBlocksWholeThreeRowCluster()

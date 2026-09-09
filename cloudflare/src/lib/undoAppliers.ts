@@ -819,6 +819,10 @@ async function replayAtomicSaleAddItems(
 }
 
 export type AtomicMergeStatement = { sql: string; params?: Record<string, unknown> }
+// The caller may carry these directly from the two INSERT results in its
+// already-committed atomic batch. Older D1 adapters can omit that metadata;
+// finalizeAtomicMergeHistory then retains its operation-id discovery path.
+export type AtomicMergeKnownIds = Readonly<{ snapshotId: number; actionHistoryId: number }>
 
 // These statements are appended to the SAME D1 batch as one forward fold.
 // If any graph mutation, snapshot, history, or audit insert fails, D1 rolls
@@ -873,6 +877,7 @@ export async function finalizeAtomicMergeHistory(
   operationId: string,
   reversal: MergeReversal,
   dbOverride?: ReturnType<typeof getDb>,
+  knownIds?: AtomicMergeKnownIds,
 ): Promise<{
   operationId: string
   committed: true
@@ -898,27 +903,36 @@ export async function finalizeAtomicMergeHistory(
     // a reported failure. Reuse the caller's counted adapter when supplied so
     // these reads and the final batch remain inside its request budget.
     const db = dbOverride ?? getDb(env)
-    const history = await db.prepare(`
-      SELECT id, reversible, status, CAST(json_extract(undo_payload,'$.snapshot_id') AS INTEGER) AS snapshot_id
-      FROM action_history
-      WHERE json_extract(undo_payload,'$.operation_id')=@operationId
-        AND json_extract(undo_payload,'$.applier')='product.merge'
-      ORDER BY id DESC LIMIT 1
-    `).get<{ id: number; reversible: number; status: string; snapshot_id: number }>({ operationId })
-    const snapshotId = Number(history?.snapshot_id)
-    const actionHistoryId = Number(history?.id)
+    let snapshotId = Number(knownIds?.snapshotId)
+    let actionHistoryId = Number(knownIds?.actionHistoryId)
+    // A new fold knows both rows are pending because the INSERT statements are
+    // fixed immediately above the audit insert. Missing metadata and explicit
+    // reconciliation calls still discover and inspect the durable rows.
     if (!Number.isSafeInteger(snapshotId) || snapshotId <= 0 || !Number.isSafeInteger(actionHistoryId) || actionHistoryId <= 0) {
-      return pending()
+      const history = await db.prepare(`
+        SELECT id, reversible, status, CAST(json_extract(undo_payload,'$.snapshot_id') AS INTEGER) AS snapshot_id
+        FROM action_history
+        WHERE json_extract(undo_payload,'$.operation_id')=@operationId
+          AND json_extract(undo_payload,'$.applier')='product.merge'
+        ORDER BY id DESC LIMIT 1
+      `).get<{ id: number; reversible: number; status: string; snapshot_id: number }>({ operationId })
+      snapshotId = Number(history?.snapshot_id)
+      actionHistoryId = Number(history?.id)
+      if (!Number.isSafeInteger(snapshotId) || snapshotId <= 0 || !Number.isSafeInteger(actionHistoryId) || actionHistoryId <= 0) {
+        return pending()
+      }
+      resolvedSnapshotId = snapshotId
+      resolvedActionHistoryId = actionHistoryId
+      const ready = await db.prepare(`
+        SELECT CAST(json_extract(payload_json,'$.fingerprintPending') AS INTEGER) AS pending
+        FROM undo_snapshots WHERE id=@snapshotId AND kind='product.merge' AND status='applied'
+      `).get<{ pending: number | null }>({ snapshotId })
+      if (Number(ready?.pending) === 0 && Number(history?.reversible) === 1 && history?.status === 'undoable') {
+        return { operationId, committed: true, snapshotId, actionHistoryId, historyResolved: true, fingerprintReady: true }
+      }
     }
     resolvedSnapshotId = snapshotId
     resolvedActionHistoryId = actionHistoryId
-    const ready = await db.prepare(`
-      SELECT CAST(json_extract(payload_json,'$.fingerprintPending') AS INTEGER) AS pending
-      FROM undo_snapshots WHERE id=@snapshotId AND kind='product.merge' AND status='applied'
-    `).get<{ pending: number | null }>({ snapshotId })
-    if (Number(ready?.pending) === 0 && Number(history?.reversible) === 1 && history?.status === 'undoable') {
-      return { operationId, committed: true, snapshotId, actionHistoryId, historyResolved: true, fingerprintReady: true }
-    }
     const mergedStateFingerprint = await mergeStateFingerprint(db, [reversal])
     const stored = { ...reversal, operationId, fingerprintPending: false, mergedStateFingerprint }
     await db.batch([
@@ -937,10 +951,14 @@ export async function finalizeAtomicMergeHistory(
       },
       {
         sql: `SELECT CASE WHEN
-                EXISTS(SELECT 1 FROM undo_snapshots WHERE id=@snapshotId AND json_extract(payload_json,'$.fingerprintPending')=0)
-                AND EXISTS(SELECT 1 FROM action_history WHERE id=@historyId AND reversible=1 AND status='undoable')
+                EXISTS(SELECT 1 FROM undo_snapshots WHERE id=@snapshotId AND kind='product.merge' AND status='applied'
+                  AND json_extract(payload_json,'$.operationId')=@operationId
+                  AND json_extract(payload_json,'$.fingerprintPending')=0)
+                AND EXISTS(SELECT 1 FROM action_history WHERE id=@historyId AND reversible=1 AND status='undoable'
+                  AND json_extract(undo_payload,'$.operation_id')=@operationId
+                  AND json_extract(undo_payload,'$.applier')='product.merge')
               THEN 1 ELSE json_extract('', '$') END AS merge_history_guard`,
-        params: { snapshotId, historyId: actionHistoryId },
+        params: { snapshotId, historyId: actionHistoryId, operationId },
       },
     ])
     return { operationId, committed: true, snapshotId, actionHistoryId, historyResolved: true, fingerprintReady: true }

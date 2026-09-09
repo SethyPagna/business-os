@@ -22,7 +22,7 @@ import { audit } from '../lib/audit'
 import { canonicalProductBarcode, findDuplicateProductGroups, findPossiblySameProductClusters, identityBarcodeKey, identityBarcodeKeySql, normalizeProductClusterKey, pickSameIdentityRow, productsShareExactIdentity, resolveProductIdentityEdit } from '../lib/productIdentity'
 import { compareCosts, normalizeProductGroupName } from '../lib/productDetailRule'
 import type { CostVerdict, MergedCostOutlier } from '../lib/productDetailRule'
-import { buildAtomicMergeHistoryStatements, finalizeAtomicMergeHistory, mergeStateFingerprint, PRODUCT_MERGE_GROUP_ACTION_KIND, PRODUCT_MERGE_GROUP_CHILD_KIND, productMergeGroupPrefixFingerprint, registerMergeFold, registerProductMergeGroupRedo, recordSupplierBackfillSnapshot, MERGE_REPARENT_TABLES, type AtomicMergeStatement, type MergeReversal, type MergeStockDisposition } from '../lib/undoAppliers'
+import { buildAtomicMergeHistoryStatements, finalizeAtomicMergeHistory, mergeStateFingerprint, PRODUCT_MERGE_GROUP_ACTION_KIND, PRODUCT_MERGE_GROUP_CHILD_KIND, productMergeGroupPrefixFingerprint, registerMergeFold, registerProductMergeGroupRedo, recordSupplierBackfillSnapshot, MERGE_REPARENT_TABLES, type AtomicMergeKnownIds, type AtomicMergeStatement, type MergeReversal, type MergeStockDisposition } from '../lib/undoAppliers'
 import { createProductMergeClusterPlan, MERGE_COST_FIELDS, MERGE_PRICE_FIELDS, parseProductMergeClusterPlan, productMergeCaseKey, productMergeCasAssertion, productMergeNumericError, productMergePlanKeeperMatches, productMergePlanSourceMemberMatches, resolveProductMergeClusterPlanEconomics, resolveProductMergeEconomics, type ProductMergeClusterPlan, type ProductMergeEconomics, type ProductMergeNumericIssue } from '../lib/productMerge'
 import { PRODUCT_MERGE_READ_BATCH_MAX_STATEMENTS, readProductMergeCaseSnapshot, readProductMergeDependentLotSnapshots } from '../lib/productMergeSnapshot'
 import type { ProductMergeCaseSnapshot, ProductMergeLotSnapshot } from '../lib/productMergeSnapshot'
@@ -3357,16 +3357,23 @@ export async function foldDuplicateProductInto(
     { sql: 'UPDATE products SET stock_quantity=(SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id=@id),updated_at=CURRENT_TIMESTAMP WHERE id=@id', params: { id: dup.id } },
   )
   if (atomicHistory?.additionalStatements?.length) statements.push(...atomicHistory.additionalStatements)
+  // Record the exact result slots before appending the fixed snapshot/history/
+  // audit trio. D1 returns one result per statement in input order.
+  let atomicHistoryStatementIndexes: { snapshot: number; actionHistory: number } | null = null
   if (atomicHistory?.groupCompletionStatements) statements.push(...atomicHistory.groupCompletionStatements(reversal))
-  else if (atomicHistory) statements.push(...buildAtomicMergeHistoryStatements(user, reversal, atomicHistory.operationId, auditDetails))
+  else if (atomicHistory) {
+    atomicHistoryStatementIndexes = { snapshot: statements.length, actionHistory: statements.length + 1 }
+    statements.push(...buildAtomicMergeHistoryStatements(user, reversal, atomicHistory.operationId, auditDetails))
+  }
 
   // Keep each atomic write batch within the same conservative 100-statement
   // bound used by the catalog's D1 query chunking. Refuse before the first
   // write so an unusually linked product cannot create an ambiguous outcome.
   if (statements.length > 100) throw new Error('merge_case_statement_budget_exceeded')
 
+  let batchResults: Array<{ meta?: { last_row_id?: number } }> = []
   try {
-    await db.batch(statements)
+    batchResults = await db.batch(statements)
   } catch (error) {
     if (/malformed JSON|merge_guard/i.test(String(error))) throw new Error('merge_state_conflict')
     throw error
@@ -3393,8 +3400,18 @@ export async function foldDuplicateProductInto(
   reversal.adjustmentMovementIds = adjustmentMovementIds
 
   if (!atomicHistory) await audit(env, user?.id ?? null, actorSnapshot(user), 'merge_duplicate', 'product', dup.id, auditDetails)
+  let knownAtomicHistoryIds: AtomicMergeKnownIds | undefined
+  if (atomicHistoryStatementIndexes) {
+    const snapshotId = Number(batchResults[atomicHistoryStatementIndexes.snapshot]?.meta?.last_row_id)
+    const actionHistoryId = Number(batchResults[atomicHistoryStatementIndexes.actionHistory]?.meta?.last_row_id)
+    if (Number.isSafeInteger(snapshotId) && snapshotId > 0 && Number.isSafeInteger(actionHistoryId) && actionHistoryId > 0) {
+      knownAtomicHistoryIds = { snapshotId, actionHistoryId }
+    }
+  }
   const atomicRecord = atomicHistory && !atomicHistory.groupCompletionStatements
-    ? await finalizeAtomicMergeHistory(env, atomicHistory.operationId, reversal, db)
+    ? (knownAtomicHistoryIds
+      ? await finalizeAtomicMergeHistory(env, atomicHistory.operationId, reversal, db, knownAtomicHistoryIds)
+      : await finalizeAtomicMergeHistory(env, atomicHistory.operationId, reversal, db))
     : null
 
   return {
