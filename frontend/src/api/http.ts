@@ -281,6 +281,9 @@ export function cacheInvalidate(prefix: string): void {
 // still-fresh 20s cache (the reported "cancelled sale still shows
 // completed"). Declared ONCE here; both invalidation paths below apply it.
 const DERIVED_READ_PREFIXES: Record<string, string[]> = {
+  // A customer marker change affects the customer labels shown by already
+  // loaded Sales and Returns. Their readers have independent short caches.
+  customers: ['sales', 'returns'],
   sales: ['dashboard', 'analytics'],
   returns: ['dashboard', 'analytics'],
   products: ['dashboard', 'analytics'],
