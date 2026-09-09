@@ -37,6 +37,15 @@ assert.equal(mergeDuplicateChunkCanContinueAutomatically({
   maxAdditionalRequests: 3,
 }), false, 'infrastructure interruption always requires manual resume')
 
+const previewLoaderStart = source.indexOf('const loadMergeDuplicatesPreview = async (signal: AbortSignal) => {')
+const previewLoaderEnd = source.indexOf('const handleMergeDuplicates = async () => {', previewLoaderStart)
+assert.ok(previewLoaderStart > 0 && previewLoaderEnd > previewLoaderStart, 'the preview loader exists as one bounded block')
+const previewLoader = source.slice(previewLoaderStart, previewLoaderEnd)
+assert.match(previewLoader, /validateMergeDuplicatesPreviewResponse\(\s*await productApi\.previewMergeDuplicates\(\{ signal \}\),?\s*\)/,
+  'a fresh scan must pass the raw response through strict validation')
+assert.doesNotMatch(previewLoader, /Number\(|Array\.isArray/,
+  'the page cannot coerce malformed preview values into a confirmable shape')
+
 const start = source.indexOf('const handleMergeDuplicates = async () => {')
 const end = source.indexOf('// --- Exact-duplicate', start)
 assert.ok(start > 0 && end > start, 'merge handler exists as one bounded block')
@@ -120,6 +129,16 @@ assert.match(modal, /const canMerge = !recoveryNeedsPreview && !previewLoading &
   'confirm remains disabled until the recovery scan succeeds')
 assert.match(modal, /setPreview\(result\)[\s\S]*?setAcknowledged\(false\)[\s\S]*?setRecoveryNeedsPreview\(false\)/,
   'a successful fresh scan supplies current rows but still resets acknowledgement')
+const previewCatchAt = modal.indexOf('.catch((error) => {', modal.indexOf('const runPreview = () => {'))
+const previewFinallyAt = modal.indexOf('.finally(() => {', previewCatchAt)
+assert.ok(previewCatchAt > 0 && previewFinallyAt > previewCatchAt, 'preview failure handling is isolated')
+const previewCatch = modal.slice(previewCatchAt, previewFinallyAt)
+assert.match(previewCatch, /setPreviewError/,
+  'a malformed successful HTTP response becomes a visible preview error')
+assert.doesNotMatch(previewCatch, /setPreview\(|setAcknowledged\(|setRecoveryNeedsPreview\(false\)/,
+  'preview validation failure cannot install rows, acknowledge them, or clear recovery mode')
+assert.doesNotMatch(modal, /productApi\.mergeDuplicates|mergeDuplicateProducts\(/,
+  'the recovery modal never performs a merge write while loading a fresh preview')
 assert.match(modal, /The previous merge request has an unknown outcome/,
   'the modal persistently identifies the unknown outcome')
 assert.match(modal, /failed request may have saved more complete groups/,

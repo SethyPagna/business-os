@@ -35,6 +35,7 @@ const selectedConflictMerge = read('utils', 'selectedConflictMerge.ts')
 const selectedConflictReview = read('components', 'products', 'SelectedConflictMergeReviewModal.tsx')
 const productsPage = read('components', 'products', 'Products.tsx')
 const reviewModal = read('components', 'products', 'MergeDuplicatesReviewModal.tsx')
+const previewValidator = read('components', 'products', 'mergeDuplicatesPreviewResponse.ts')
 const productForm = read('components', 'products', 'forms', 'ProductForm.tsx')
 const transport = read('api', 'productWriteTransport.ts')
 const http = read('api', 'http.ts')
@@ -299,10 +300,12 @@ test('the whole-catalog dry run shows the cost it will write, and what it will r
   assert.match(reviewModal, /group\.costRefusals \|\| \[\]/, 'and the rows this run will skip')
   assert.match(reviewModal, /const costRefusalCount = preview\?\.costRefusalCount \|\| 0/)
   assert.match(reviewModal, /merge_duplicates_preview_cost_refused/)
-  // The passthrough is the half that was actually missing: the modal can only
-  // render what Products.tsx hands it.
-  assert.match(productsPage, /costRefusalCount: Number\(result\?\.costRefusalCount \|\| 0\)/,
-    'the preview loader must carry the refusal count through')
+  // The modal can only render a refusal count after the page has accepted a
+  // complete response whose aggregate matches the nested refusal rows.
+  assert.match(productsPage, /validateMergeDuplicatesPreviewResponse/,
+    'the preview loader must validate the complete preview before returning it')
+  assert.match(previewValidator, /costRefusalCount !== derivedCostRefusalCount/,
+    'the validated preview carries only a refusal count that matches its groups')
 })
 
 test('a whole-catalog run that skipped pairs does not report plain success', () => {

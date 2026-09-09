@@ -28,7 +28,8 @@ import { ProductImg, ProductImagePlaceholder } from './shared/primitives'
 import ProductsListSurface, { ROW_TEXT_GUTTER } from './surfaces/ProductsListSurface'
 import StockInSessionsSection from './StockInSessionsSection.tsx'
 import MergeDuplicatesReviewModal from './MergeDuplicatesReviewModal'
-import type { MergeDuplicatesPreviewGroup, MergeDuplicatesRecoveryNotice } from './MergeDuplicatesReviewModal'
+import type { MergeDuplicatesRecoveryNotice } from './MergeDuplicatesReviewModal'
+import { validateMergeDuplicatesPreviewResponse } from './mergeDuplicatesPreviewResponse.ts'
 import ZeroQuantityCleanupModal from './ZeroQuantityCleanupModal'
 import type { ZeroQuantityCandidate } from './ZeroQuantityCleanupModal'
 import WireImagesReviewModal from './WireImagesReviewModal'
@@ -1980,28 +1981,9 @@ function ProductsFullEditor() {
   // there's one place (the ProductApi type above) that has to know the
   // transport layer exists.
   const loadMergeDuplicatesPreview = async (signal: AbortSignal) => {
-    const result = await productApi.previewMergeDuplicates({ signal }) as {
-      success?: boolean
-      error?: string
-      groupCount?: number
-      duplicateProductCount?: number
-      mergeableDuplicateProductCount?: number
-      blockedGroupCount?: number
-      groups?: MergeDuplicatesPreviewGroup[]
-      costRefusalCount?: number
-    } | undefined
-    if (result?.success === false) throw new Error(result.error || 'Failed to load merge preview')
-    return {
-      groupCount: Number(result?.groupCount || 0),
-      duplicateProductCount: Number(result?.duplicateProductCount || 0),
-      mergeableDuplicateProductCount: Number(result?.mergeableDuplicateProductCount || 0),
-      blockedGroupCount: Number(result?.blockedGroupCount || 0),
-      groups: Array.isArray(result?.groups) ? result.groups : [],
-      // Passed straight through: the groups carry costBefore/costAfter and
-      // their own costRefusals, and this is the run-wide total. Dropping them
-      // here is what made the dry run promise "nothing but the row count".
-      costRefusalCount: Number(result?.costRefusalCount || 0),
-    }
+    return validateMergeDuplicatesPreviewResponse(
+      await productApi.previewMergeDuplicates({ signal }),
+    )
   }
 
   const handleMergeDuplicates = async () => {
