@@ -1,3 +1,13 @@
+## Evidence reconciliation and remaining-work status — September 10
+
+The production merge ledger is reconciled: the verified postflight records **166** applied product merges (history IDs 369–534, 166 audits, zero pending fingerprints) in addition to the **8** earlier proven merges, for **174 proven merges total**. Older register paragraphs that say “eight completed cases” describe the pre-cleanup checkpoint and are stale. The old cleanup preview reported 1,774 eligible and 19 quarantined groups, but that preview is not current evidence; a fresh authenticated preview is required before any further merge. No merge is running now.
+
+Contact cleanup remains read-only. Shared General **24969** is excluded and its legacy membership is cleared; protected customer **22305** is unchanged. The open customer cluster **[23907, 25000, 25001]** is blocked by distinct memberships. Supplier name-only groups **[20, 38–46]** and **[23, 33–37]** require profile/source confirmation; no supplier or customer candidate was merged. No delivery-contact duplicate cluster was found.
+
+Historical branch metadata repair is complete for proven targets. The four pre-hotfix zero-item incident receipts were repaired and verified; two separate older header-only sales (**16917**, **16827**) remain outside the recovery allowlist because their item/creation evidence is missing. Ambiguous historical drivers and legacy sale links remain unresolved rather than invented.
+
+Physical iOS/PWA, camera, printer, and uncertain-network transfer testing still cannot be certified from this workstation. Desktop signed-in Admin and public storefront smoke loaded after the latest releases; broad mobile/public/customer-portal visual polish remains queued, and offline work remains paused by owner request.
+
 ## Not Paid terminology follow-up LIVE — September 10
 
 Fix-scoped commit **f0321c78** was pushed to `codex/sale-create-trigger-release-20260909` and deployed successfully at 100% as Worker version **a6c36168-baa9-4352-a4ec-ede19f378f31**. Build revision **f0321c78f49c**, build hash **df9ef64974d248fa**, built **2026-09-09T22:27:27.313Z**. No database migration or production data mutation was included.
