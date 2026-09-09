@@ -839,9 +839,13 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   // Automatic mode stays aggregate-bound and lets the Worker allocate FIFO.
   const selectedBatch = productBatches.find((batch) => batch.id === selectedBatchId) || null
   const hasBatchLots = !!selectedProduct && trackedBatchProductIds.has(Number(selectedProduct.id))
-  const sourceBranchAvailable = Math.max(0, Number(selectedProduct?.branch_quantity || 0))
+  const finiteStockAvailable = (value: unknown) => {
+    const quantity = Number(value)
+    return Number.isFinite(quantity) ? Math.max(0, quantity) : 0
+  }
+  const sourceBranchAvailable = finiteStockAvailable(selectedProduct?.branch_quantity)
   const selectedBatchAvailable = selectedBatch
-    ? Math.max(0, Number(selectedBatch.quantity || 0))
+    ? finiteStockAvailable(selectedBatch.quantity)
     : null
   const transferAvailable = selectedBatchAvailable == null
     ? sourceBranchAvailable

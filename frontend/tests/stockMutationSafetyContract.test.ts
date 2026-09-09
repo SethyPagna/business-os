@@ -25,12 +25,12 @@ runTest('single branch transfer caps explicit lots by aggregate stock and retain
   assert.match(transfer, /const hasBatchLots =/)
   assert.match(
     transfer,
-    /const sourceBranchAvailable = Math\.max\(0, Number\(selectedProduct\?\.branch_quantity \|\| 0\)\)/,
+    /const sourceBranchAvailable = finiteStockAvailable\(selectedProduct\?\.branch_quantity\)/,
     'the UI limit must retain the source branch aggregate used by the Worker',
   )
   assert.match(
     transfer,
-    /const selectedBatchAvailable = selectedBatch[\s\S]*?Math\.max\(0, Number\(selectedBatch\.quantity \|\| 0\)\)[\s\S]*?: null/,
+    /const selectedBatchAvailable = selectedBatch[\s\S]*?finiteStockAvailable\(selectedBatch\.quantity\)[\s\S]*?: null/,
     'a selected lot must contribute its own positive availability limit',
   )
   assert.match(
@@ -42,6 +42,15 @@ runTest('single branch transfer caps explicit lots by aggregate stock and retain
   // above the source aggregate while the Worker correctly checks both. The
   // modal must therefore show/accept five, not the lot's stale six.
   assert.equal(Math.min(Math.max(0, 6), Math.max(0, 5)), 5)
+  const normalizeSource = transfer.match(/const finiteStockAvailable = \(value: unknown\) => \{([\s\S]*?)\n  \}/)?.[1]
+  assert.ok(normalizeSource, 'availability must fail closed for non-finite data')
+  const normalize = new Function('value', normalizeSource) as (value: unknown) => number
+  for (const value of [null, undefined, -1, Number.NaN, Infinity, -Infinity, 'bad', 'Infinity']) {
+    assert.equal(normalize(value), 0, `invalid availability ${String(value)} must become zero`)
+  }
+  assert.equal(normalize('6'), 6)
+  assert.equal(normalize(2.5), 2.5)
+  assert.equal(Math.min(normalize(6), normalize(5)), 5)
   assert.match(transfer, /max=\{transferAvailable\}/)
   assert.match(transfer, /onClick=\{\(\) => setQuantity\(String\(transferAvailable\)\)\}/)
   const validationAt = transfer.indexOf('if (qty > transferAvailable)')
