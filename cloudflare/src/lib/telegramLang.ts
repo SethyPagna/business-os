@@ -238,7 +238,7 @@ const VALUE_PHRASES: Record<string, string> = {
   none: 'គ្មាន',
   // sale statuses (lib/salesStatus.ts VALID_SALE_STATUSES, underscores already
   // replaced with spaces by the callers)
-  'awaiting payment': 'រង់ចាំការទូទាត់',
+  'awaiting payment': 'កំពុងរង់ចាំការទូទាត់',
   'awaiting delivery': 'រង់ចាំការដឹកជញ្ជូន',
   'partial return': 'ត្រឡប់ដោយផ្នែក',
   completed: 'បានបញ្ចប់',
@@ -250,6 +250,10 @@ const VALUE_PHRASES: Record<string, string> = {
   // return settlements
   refund: 'សងប្រាក់',
   replacement: 'ប្តូរទំនិញ',
+  // This value can describe supplier/store-credit settlements, which remain
+  // distinct from the Sales "Not Paid" headline label above. Keep the
+  // context-neutral glossary spelling here; sales debt is emitted via the
+  // dedicated `credit` label and never this value replacement.
   credit: 'ឥណទាន',
   writeoff: 'គ្មានសំណង',
 }

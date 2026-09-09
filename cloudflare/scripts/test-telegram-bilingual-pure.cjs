@@ -241,7 +241,7 @@ const saleLines = assertAllBilingual(telegram.formatSaleTelegramLines({
   driver: { name: 'Dara', phone: '099 111 222' },
   subtotalUsd: 1, discountUsd: 0.2, totalUsd: 0.8, totalKhr: 0, paidUsd: 0, paidKhr: 0,
 }), 'sale receipt summary')
-assert.ok(saleLines.includes('Status / ស្ថានភាព: awaiting payment / រង់ចាំការទូទាត់'), 'sale status value is translated too')
+assert.ok(saleLines.includes('Status / ស្ថានភាព: awaiting payment / កំពុងរង់ចាំការទូទាត់'), 'sale status value is translated too')
 // REDESIGNED Sep 6 2026. The unsettled sale used to end on
 // `Paid / បានបង់: unpaid / មិនទាន់បង់` -- a label saying "paid", a value
 // saying "not paid", and the amount owed nowhere on the line. It now names
