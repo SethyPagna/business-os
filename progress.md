@@ -1,3 +1,10 @@
+## Settlement retry and transfer guard release LIVE — September 10
+
+The exact tested release head **bf51f06fd4ad** is live at 100% in Worker version **e5795fe6-cc55-4d56-b3ca-aefe19b0b0eb**, deployed at 2026-09-09T15:59Z (2026-09-10 local). Build hash: **5882f8919df051f8**. This release contains separate fix-scoped commits: `588decad` (persist sale status/settlement retries and align the UI write deadline to 45s), `e930a75` (run canonical Shop/Warehouse transfer identity guards before receipt/audit/stock effects), `542e4cd5` (four-line, no-delivery settlement regression), `915be6c8` (load the TypeScript transfer receipt helper in inventory fixture tests), `8ccd6127` (guard-order parity assertion), and `bf51f06f` (awaiting-payment Telegram Khmer wording). The earlier shift fixture contract commit `447962a9` is also included in this release branch.
+
+Settlement requests now persist the exact frozen payment/status body before network I/O, preserve payment details on uncertain retries, clear pending state after a confirmed commit, and show localized check-sale/Records guidance for an unknown outcome. Awaiting-payment remains stock-holding; its settlement to completed moves no stock twice, and amendments use the same holding rule. Transfer routes re-check canonical branch identity before any durable receipt, audit, or stock write.
+
+Validation evidence: frontend utility chain **346/346**, frontend typecheck, i18n verification, production build, Worker typecheck; backend sale/payment/returns/delivery/records/revenue/transfer/shift/Telegram matrix all green, including the new four-line no-delivery settlement case. No production data was modified by this release. Physical iOS/PWA, public/customer-portal polish, broader UI cleanup, historical duplicate cleanup and offline work remain open or paused in the existing ledger.
 
 ## Freshness follow-up candidate — September 8
 
