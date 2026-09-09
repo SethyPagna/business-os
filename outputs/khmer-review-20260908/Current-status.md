@@ -1,6 +1,6 @@
 # Current task status
 Updated: 2026-09-09T10:34:00Z
-Release `e093b5c5` is live at Worker version `718a3d15-8d64-4b5c-88de-2f486b5b48e7` (deployment completed 2026-09-09T10:31Z, 100%). It includes the transfer timeout/cap fix from `b312c331`, the additional-cash shift reconciliation/report/Telegram fix from `b059237a`, and the iOS viewport zoom guard from `e093b5c5`. D1 migration `0147_shift_additional_cash.sql` is applied remotely as migration row 143. The release branch is clean and pushed; logs and exact test evidence are in `outputs/takeover-20260909/`.
+Release `e093b5c5` is live at Worker version `718a3d15-8d64-4b5c-88de-2f486b5b48e7` (deployment completed 2026-09-09T10:31Z, 100%). It includes the transfer timeout/cap fix from `b312c331`, the additional-cash shift reconciliation/report/Telegram fix from `b059237a`, and the iOS viewport zoom guard from `e093b5c5`. D1 migration `0147_shift_additional_cash.sql` is applied remotely as migration row 143. The release branch is clean and pushed; the later `7b72cd7c` commit only aligns source tests and does not change runtime. Logs and exact test evidence are in `outputs/takeover-20260909/`.
 
 Shift behavior now records cash added after opening separately in USD/KHR, includes it in expected cash and difference, keeps returns in shift figures rather than the cash breakdown, shows expected/difference for open and closed reports, and renders the USD/KHR pair compactly. Close/amend writes preserve opening register values, so employees closing a shift cannot overwrite the opening cash.
 
@@ -8,7 +8,7 @@ Transfer behavior now allows both Shop → Warehouse and Warehouse → Shop with
 
 The mobile viewport fix caps browser zoom at the device width and removes page-level `pinch-zoom` from admin/public roots; the product image lightbox keeps its explicit zoom controls. This directly addresses the iOS PWA scaling defect. Physical iOS hardware and desktop device-toolbar emulation remain follow-up verification under U20.
 
-The public storefront already contains the legal footer/policy links, portal account/consent surfaces, sticky navigation and overflow containment from the earlier public-site work. A detailed comparison and remaining UI/public-site follow-up list is recorded in `outputs/takeover-20260909/transfer-ui-public-review.md`; the broad visual compaction pass remains a separate queued scope so it does not mix with the deployed data-correctness release.
+The public storefront already contains the legal footer/policy links, portal account/consent surfaces, sticky navigation and overflow containment from the earlier public-site work. A detailed comparison and remaining UI/public-site follow-up list is recorded in `outputs/takeover-20260909/transfer-ui-public-review.md`; the broad visual compaction pass remains a separate queued scope so it does not mix with the deployed data-correctness release. Full frontend utility gate is 346/346 green.
 
 Previous release note (superseded):
 Updated: 2026-09-09T09:30:00Z

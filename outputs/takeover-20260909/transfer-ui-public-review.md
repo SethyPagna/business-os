@@ -64,6 +64,7 @@ The current legal copy is a template and explicitly tells the owner to obtain qu
 ## Release evidence
 
 - Release branch: `codex/sale-create-trigger-release-20260909` (clean and pushed).
-- Commits are fix-scoped: `b059237a` (shift additional cash/expected drawer), `b312c331` (transfer timeout/cap), `e093b5c5` (mobile viewport guard).
+- Commits are fix-scoped: `b059237a` (shift additional cash/expected drawer), `b312c331` (transfer timeout/cap), `e093b5c5` (mobile viewport guard), and `7b72cd7c` (test-contract alignment only; no runtime change).
 - Live Worker: `718a3d15-8d64-4b5c-88de-2f486b5b48e7`, deployed from `e093b5c5` at approximately 2026-09-09T10:31Z; migration `0147_shift_additional_cash.sql` is remote D1 migration row 143.
+- Full frontend utility gate: 346/346 passed, including typecheck, public-runtime verification and source syntax preflight. Cloudflare Worker typecheck and focused shift/transfer suites also passed.
 - Logs: `shift-additional-cash-migration.log`, `shift-transfer-deploy.log`, and `mobile-viewport-deploy.log` in this directory. Cloudflare’s unauthenticated HTTP challenge prevented a direct runtime endpoint read; the deployment CLI completed successfully and reported the full Worker version.
