@@ -87,6 +87,11 @@ export function formatSaleRecordValueLinesLocalized(
     return rows ? rows.map((row) => productLine(row, fmtUSD)) : [fallbackLine(value, label)]
   }
   if (field === 'item') return [productLine(parsed, fmtUSD)]
+  if (field === 'stock_effect') {
+    if (parsed === 'deducted_now') return [label('stock_deducted_now', 'Stock deducted now')]
+    if (parsed === 'released_allocation_only') return [label('stock_released_allocation_only', 'Released allocation; no stock deduction')]
+    return [label('value_changed', 'Value changed')]
+  }
   if (field === 'customer') {
     const row = objectRow(parsed)
     if (!row) return [fallbackLine(value, label)]

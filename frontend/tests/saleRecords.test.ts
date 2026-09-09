@@ -47,7 +47,7 @@ test('browser kind vocabulary is the frozen v2 contract and every label is local
   assert.deepEqual(SALE_RECORD_KINDS, [
     'sale_created', 'driver_changed', 'delivery_cost_changed', 'delivery_fee_changed', 'delivery_added',
     'item_added', 'item_removed', 'item_quantity_changed', 'items_replaced', 'customer_changed',
-    'membership_changed', 'status_changed', 'payment_changed', 'payment_settled', 'cancelled', 'legacy_sale_change',
+    'membership_changed', 'status_changed', 'payment_changed', 'payment_settled', 'cancelled', 'sale_items_recovered', 'legacy_sale_change',
   ])
   const en = JSON.parse(read('../src/lang/en.json')) as Record<string, string>
   const km = JSON.parse(read('../src/lang/km.json')) as Record<string, string>
@@ -70,6 +70,23 @@ test('detail rows consume only tri-state changes and omit unchanged context', ()
   assert.deepEqual(rows.map((row) => row.field), ['payment_method', 'payment_details'])
   assert.equal(rows.every((row) => row.changed), true)
   assert.deepEqual(saleRecordFieldRows({ id: 'old', before: { sale_status: 'completed' }, after: { sale_status: 'cancelled' } } as unknown as SaleRecord), [])
+})
+
+test('recovered sale items expose only product lines and the safe stock action', () => {
+  const recovered: SaleRecord = { id: 'recovery:77', kind: 'sale_items_recovered', changes: [
+    change('item_count', value(0), value(2)),
+    change('stock_effect', none(), value('deducted_now')),
+    change('revision', value(1), value(2)),
+    change('manifest_sha256', value('before'), value('after')),
+  ] }
+  const rows = saleRecordFieldRows(recovered)
+  assert.deepEqual(rows.map((row) => row.field), ['item_count', 'stock_effect'])
+  assert.deepEqual(rows.map((row) => row.labelKey), ['product_lines', 'recovery_stock_action'])
+  const usd = (n: number | string) => `$${Number(n).toFixed(2)}`
+  const khr = (n: number | string) => `${Number(n).toLocaleString('en-US')}៛`
+  const tr = (key: string, fallback: string) => key === 'stock_deducted_now' ? 'Stock deducted now' : fallback
+  assert.deepEqual(formatSaleRecordValueLinesLocalized('stock_effect', 'deducted_now', usd, khr, tr), ['Stock deducted now'])
+  assert.deepEqual(formatSaleRecordValueLinesLocalized('stock_effect', 'unexpected_value', usd, khr, tr), ['Value changed'])
 })
 
 test('known none and unknown remain different facts', () => {
