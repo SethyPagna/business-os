@@ -78,15 +78,28 @@ export function validateGeneralCustomerRepairPreview(value: unknown): GeneralCus
   return preview as unknown as GeneralCustomerRepairPreview
 }
 
+export function validateGeneralCustomerRepairApplyResponse(value: unknown): GeneralCustomerRepairApplyResponse {
+  const response = record(value, 'apply response')
+  exactKeys(response, ['success', 'outcome', 'affected', 'verification_pending', 'cache_invalidated', 'refresh_pending', 'broadcast_requested', 'message'], 'apply response')
+  if (response.success !== true || (response.outcome !== 'applied' && response.outcome !== 'already_applied')
+    || typeof response.verification_pending !== 'boolean' || typeof response.cache_invalidated !== 'boolean'
+    || typeof response.refresh_pending !== 'boolean' || response.broadcast_requested !== true
+    || typeof response.message !== 'string' || !response.message.trim()) invalid('apply response is not a complete success result')
+  const affected = record(response.affected, 'apply response.affected')
+  exactKeys(affected, ['customers'], 'apply response.affected')
+  if (affected.customers !== 0 && affected.customers !== 1) invalid('apply response affected customer count is invalid')
+  if ((response.outcome === 'applied') !== (affected.customers === 1)) invalid('apply response outcome and affected customer count disagree')
+  if (response.refresh_pending !== !response.cache_invalidated) invalid('apply response refresh and cache invalidation flags disagree')
+  return response as unknown as GeneralCustomerRepairApplyResponse
+}
+
 export async function previewGeneralCustomerRepair(): Promise<GeneralCustomerRepairPreview> {
   return validateGeneralCustomerRepairPreview(await apiFetch('GET', PREVIEW_PATH))
 }
 
 export async function applyGeneralCustomerRepair(request: GeneralCustomerRepairRequest): Promise<GeneralCustomerRepairApplyResponse> {
-  const result = await apiFetch('POST', APPLY_PATH, request, GENERAL_CUSTOMER_REPAIR_APPLY_TIMEOUT_MS) as GeneralCustomerRepairApplyResponse
-  if (result?.success) {
-    cacheInvalidateWithDerived('customers')
-    cacheInvalidate('actionHistory')
-  }
+  const result = validateGeneralCustomerRepairApplyResponse(await apiFetch('POST', APPLY_PATH, request, GENERAL_CUSTOMER_REPAIR_APPLY_TIMEOUT_MS))
+  cacheInvalidateWithDerived('customers')
+  cacheInvalidate('actionHistory')
   return result
 }
