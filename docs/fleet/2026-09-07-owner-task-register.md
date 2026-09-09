@@ -4,19 +4,33 @@ This is the current request register. `progress.md` links here. Append new owner
 requests and corrections; do not replace earlier requests or silently drop them.
 Root owns prioritization, integration, evidence, and deployment claims.
 
-Latest verified production checkpoint: source **aa295f7033aa** (full commit
-**aa295f7033aafbae529d30b4d1f01ddc9267b980**) on
+Latest verified production checkpoint: source **16ffa680aa52** (full commit
+**16ffa680aa52e1b0e12e7f3edb2e5c14f60b8c74f**) on
 `codex/sale-create-trigger-release-20260909`, Worker
-**aa0bf477-362f-4c6a-81a6-4f6ef099b8b7**, 100% at
-2026-09-09T20:22:56.046Z. This checkpoint is vocabulary-only and applied zero
-migrations or production data changes. The older release facts below remain
-historical evidence for the individual functional rows; they are not a claim
-that the older Worker is still serving.
+**a5cdcb48-723a-4ec6-a029-1d924e60dc5b**, 100% at
+2026-09-09T21:04:59.891Z. This fix adds a backup-first, exact-value-guarded,
+audited/replayable cleanup for the owner-confirmed shared General membership.
+The authenticated app applied it: customer **24969** now has an empty
+membership while its five sales, one return and anonymous marker remain; the
+protected customer **22305** is unchanged. No migration or secret changed.
+The older release facts below remain historical evidence for individual rows;
+they are not a claim that an older Worker is still serving.
 
 Last reconciled: 2026-09-10T05:15:00+08:00.
 
-Fresh read-only evidence follow-up (2026-09-10): shared anonymous General customer 24969 remains marked but still stores legacy membership LC-04971; protected actual customer 22305 is unchanged. Additional zero-line historical sales 16917 and 16827 have nonzero headers/fees but no persisted items and no creation snapshots. Both are evidence-only and outside the fixed 16951–16954 recovery allowlist; no production mutation was performed. See `output/historical-evidence-followup-20260910.json` in the release checkout. Functional fixes precede UI polish.
-Current production: **aa295f7033aa**, Worker **aa0bf477-362f-4c6a-81a6-4f6ef099b8b7**, 100% at **2026-09-09T20:22:56.046Z**. The latest vocabulary checkpoint is live with zero migrations and zero production data changes; earlier functional releases remain included. Production product merge remains eight completed cases, with broader duplicate/contact cleanup still evidence-blocked.
+Fresh evidence follow-up (2026-09-10): two additional zero-line historical sales
+16917 and 16827 have nonzero headers/fees but no persisted items or creation
+snapshots; they remain outside the fixed 16951–16954 recovery allowlist and
+were not mutated. The shared General membership cleanup was separately
+previewed, applied, then replayed; the replay reported the exact receipt and
+made no second customer/history/audit change. See
+`output/historical-evidence-followup-20260910.json` for the read-only incident
+evidence. Functional fixes still precede UI polish.
+Current production: **16ffa680aa52**, Worker **a5cdcb48-723a-4ec6-a029-1d924e60dc5b**,
+100% at **2026-09-09T21:04:59.891Z**. The latest fix includes the canonical
+vocabulary checkpoint and the shared-General membership cleanup; earlier
+functional releases remain included. Production product merge remains eight
+completed cases, with broader duplicate/contact cleanup still evidence-blocked.
 
 First functional release **821efc94ce7a** is serving 100% traffic as Worker
 **498efadb-f833-471d-a8b7-b4326950bd26**, deployed 2026-09-07 09:54:13 UTC.
@@ -87,7 +101,7 @@ Every shipped row must eventually record its actual deployment version.
 
 | F41 | Idle import polling writes to D1 and immediate retries amplify database overload. | Deployed 560bfbcb; independent PASS, backend 280/280 / sales | Skip no-op reaper writes when no stale jobs exist; preserve guarded stale recovery. Fail overload once instead of immediately retrying it. |
 
-| F42 | Contacts duplicates: supplier creation in stock sessions, raw versus spaced customer phone numbers, obsolete membership IDs; inspect existing fixes before correction. | Canonical guards/atomic merge/formatting and hidden-supplier fix deployed; cleanup pending | Explicit manual/POS choices integrated at c09c707a, final gates/browser pending. Existing ambiguous memberships/contacts require reviewed identity evidence. |
+| F42 | Contacts duplicates: supplier creation in stock sessions, raw versus spaced customer phone numbers, obsolete membership IDs; inspect existing fixes before correction. | Canonical guards/atomic merge/formatting and hidden-supplier fix deployed; broad cleanup pending | Explicit manual/POS choices integrated at c09c707a. The owner-confirmed shared-General membership was cleared separately with backup/history/audit/replay; other customer and supplier candidates still require identity evidence. |
 | F43 | Contact phone entry automatically spaces digits as typed; formatted display and canonical matching must agree. | Deployed da5c8b02; independent PASS including mobile deletion and IME | Progressive spacing, prefixes, paste and caret covered in seven create/edit/quick-add fields. |
 | F44 | Latest owner correction: visible Credit / ឥណទាន becomes Not Paid / ប្រាក់ជំពាក់ everywhere. | Deployed 560bfbcb; live EN/KM verified | Supersedes N39/F13 unpaid-state wording. Internal values/accounting unchanged; distinct Store Credit, supplier credit and overpayment concepts preserved. |
 | F45 | Investigate failed admin WebSocket and reported content.js/VM listener/startTime errors. | Deployed 560bfbcb; independent PASS | Cooldown lacked wake-up and actual logout did not disconnect. Both corrected. content.js listener is extension noise; VM startTime ownership unproven. |
@@ -100,6 +114,7 @@ Every shipped row must eventually record its actual deployment version.
 
 | F51 | Enforce owner-confirmed canonical Shop/Warehouse and product/branch/lot identity across every writer; retain daily prompt/report-only cash and Not Paid revenue. | Canonical branch/lot followups deployed c2eb9d57 | CRUD/review/undo/reset and Warehouse→Shop transfer guards, disabled sale-side Warehouse, stale-lot checks, authoritative general/dated/sales imports, and canonical export buckets passed independent and combined checks. Historical unknown identities are not silently repaired. |
 | F52 | Investigate negative revenue/profit and keep canonical calculations accurate. | Audit complete; accounting clarification retained | Canonical revenue is nonnegative and includes Not Paid. No formula defect found in focused audit. Real below-cost/expense losses may produce negative profit; never falsify by clamping. Inconsistent test wording remains a small follow-up. |
+| F55 | Clear the legacy membership accidentally retained on the shared anonymous General/walk-in customer, without changing real customer links. | Deployed and applied in **16ffa680** / Worker **a5cdcb48-723a-4ec6-a029-1d924e60dc5b** | Preview matched target 24969 and protected 22305; backup-first atomic update cleared only `membership_number`; five sales, one return and anonymous marker stayed intact. Exact replay confirmed one receipt/audit and zero second mutation. |
 
 ## Public portal and legal requests
 
