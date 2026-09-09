@@ -47,7 +47,7 @@ test('browser kind vocabulary is the frozen v2 contract and every label is local
   assert.deepEqual(SALE_RECORD_KINDS, [
     'sale_created', 'driver_changed', 'delivery_cost_changed', 'delivery_fee_changed', 'delivery_added',
     'item_added', 'item_removed', 'item_quantity_changed', 'items_replaced', 'customer_changed',
-    'membership_changed', 'status_changed', 'payment_changed', 'payment_settled', 'cancelled', 'sale_items_recovered', 'legacy_sale_change',
+    'membership_changed', 'status_changed', 'payment_changed', 'payment_settled', 'cancelled', 'sale_items_recovered', 'sale_stock_corrected', 'legacy_sale_change',
   ])
   const en = JSON.parse(read('../src/lang/en.json')) as Record<string, string>
   const km = JSON.parse(read('../src/lang/km.json')) as Record<string, string>
@@ -87,6 +87,22 @@ test('recovered sale items expose only product lines and the safe stock action',
   const tr = (key: string, fallback: string) => key === 'stock_deducted_now' ? 'Stock deducted now' : fallback
   assert.deepEqual(formatSaleRecordValueLinesLocalized('stock_effect', 'deducted_now', usd, khr, tr), ['Stock deducted now'])
   assert.deepEqual(formatSaleRecordValueLinesLocalized('stock_effect', 'unexpected_value', usd, khr, tr), ['Value changed'])
+})
+
+test('Not Paid stock correction exposes held units and a localized safe stock action only', () => {
+  const corrected: SaleRecord = { id: 'audit:16954', kind: 'sale_stock_corrected', changes: [
+    change('held_units', value(0), value(1)),
+    change('stock_effect', value('released_allocation_only'), value('deducted_now')),
+    change('manifest_sha256', value('before'), value('after')),
+    change('revision', value(1), value(2)),
+  ] }
+  const rows = saleRecordFieldRows(corrected)
+  assert.deepEqual(rows.map((row) => row.field), ['held_units', 'stock_effect'])
+  assert.deepEqual(rows.map((row) => row.labelKey), ['held_units', 'recovery_stock_action'])
+  assert.deepEqual(rows.map((row) => [row.before, row.after]), [
+    [value(0), value(1)],
+    [value('released_allocation_only'), value('deducted_now')],
+  ])
 })
 
 test('known none and unknown remain different facts', () => {

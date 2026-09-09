@@ -46,6 +46,7 @@ export const SALE_RECORD_KINDS = [
   'payment_settled',
   'cancelled',
   'sale_items_recovered',
+  'sale_stock_corrected',
   'legacy_sale_change',
 ] as const
 
@@ -93,6 +94,7 @@ export const SALE_RECORD_KIND_KEYS: Record<SaleRecordKind, string> = {
   payment_settled: 'record_kind_payment_settled',
   cancelled: 'record_kind_cancelled',
   sale_items_recovered: 'record_kind_sale_items_recovered',
+  sale_stock_corrected: 'record_kind_sale_stock_corrected',
   legacy_sale_change: 'record_kind_legacy_sale_change',
 }
 
@@ -136,11 +138,13 @@ export const SALE_RECORD_FIELD_RULES: Record<string, { key: string; format: Sale
   removed_items: { key: 'removed_items', format: 'text' },
   added_items: { key: 'added_items', format: 'text' },
   item_count: { key: 'product_lines', format: 'quantity' },
+  held_units: { key: 'held_units', format: 'quantity' },
   stock_effect: { key: 'recovery_stock_action', format: 'text' },
 }
 
 /** Recovery records are intentionally narrow: operational metadata is not a sale detail. */
 const RECOVERED_SALE_ITEM_FIELDS = new Set(['item_count', 'stock_effect'])
+const CORRECTED_SALE_STOCK_FIELDS = new Set(['held_units', 'stock_effect'])
 
 export interface SaleRecordFieldRow {
   field: string
@@ -180,6 +184,7 @@ export function saleRecordFieldRows(record: SaleRecord): SaleRecordFieldRow[] {
   return record.changes.flatMap((change) => {
     if (!change || typeof change.field !== 'string') return []
     if (record.kind === 'sale_items_recovered' && !RECOVERED_SALE_ITEM_FIELDS.has(change.field)) return []
+    if (record.kind === 'sale_stock_corrected' && !CORRECTED_SALE_STOCK_FIELDS.has(change.field)) return []
     const before = normalizeValueState(change.before)
     const after = normalizeValueState(change.after)
     if (!before || !after || (statesEqual(before, after) && record.kind !== 'sale_created')) return []
