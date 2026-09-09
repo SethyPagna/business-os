@@ -1093,7 +1093,7 @@ runTest('the public field vocabulary is exact and closed', () => {
     'delivery_fee_usd', 'actual_delivery_cost_usd', 'is_delivery', 'driver',
     'payment_method', 'payment_details', 'amount_paid_usd', 'amount_paid_khr',
     'change_usd', 'change_khr', 'cancel_reason', 'cancel_note', 'item_count',
-    'stock_effect',
+    'held_units', 'stock_effect',
   ])
   const records = buildSaleRecords({ sale: SALE, ledger: LEDGER, audit: AUDIT, bulk: BULK })
   for (const record of records) {
