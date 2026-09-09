@@ -1,0 +1,104 @@
+{
+  "schema_version": 1,
+  "task_id": "sale-zero-items-recovery-v2-implementation-20260909",
+  "agent": {
+    "provider": "codex",
+    "role": "implementation_worker",
+    "session_id": "general_backend"
+  },
+  "status": "completed",
+  "summary": "Prepared a separate fixed Admin recovery for sale 16954 after a preserved pre-sale backup proved product 5370 cost USD 170/KHR 0. The v2 no-store preview is digest-bound and requires backup_restore; apply requires a same-origin exact body, rate/body gates and a fresh backup, then adds one USD 185/KHR 752,025 line and one fully released allocation in one D1 batch with an append-only v2 receipt, non-reversible history and provenance audit. Because the sale remains awaiting payment, v2 does not change product, branch or lot stock and creates no movement. Receipt-backed replay remains valid after later legitimate sale or product changes, and ambiguous post-commit reads use the same verification_pending and HTTP 202 uncertain contracts as v1.",
+  "base_sha": "5e61505c3265025c7148728c4350e3857c99000b",
+  "head_sha": "9c343f755d439cdb2c7d703e6d81300e2c45ac35",
+  "workspace": {
+    "branch": "codex/sale-zero-items-recovery-v2-20260909",
+    "worktree": "C:/Users/mrkl6/Downloads/bos-sale-zero-items-recovery-v2-20260909",
+    "dirty_before": [],
+    "dirty_after": []
+  },
+  "changes": [
+    "Added a dedicated saleIncidentRecoveryV2 helper with fixed sale 16954, product 5370, pre-sale cost evidence, current product revision, unique-positive-lot, header and zero-effect fingerprints.",
+    "Added separate v2 preview/apply routes with backup_restore permission, no-store, same-origin, 4KB body, rate, backup-first, exact digest-bound request, receipt reconciliation and post-commit cache/broadcast handling.",
+    "Added one atomic D1 batch that inserts the v2 receipt, one explicit-null/zero-discount line, one fully released allocation, one non-reversible history/member and one redacted audit; it does not update header money or stock and does not insert a movement.",
+    "Added focused real-Hono migrated-SQLite coverage for permission, frozen preview, exact apply, v1 receipt coexistence, later-activity replay, lot race rollback, lost response, uncertainty, verification pending, audit rollback, backup failure, origin, body and rate gates."
+  ],
+  "commits": [
+    "9c343f755d439cdb2c7d703e6d81300e2c45ac35"
+  ],
+  "evidence": [
+    {
+      "claim": "Product 5370 cost USD 170/KHR 0 is supported by a source that predates sale 16954.",
+      "source": "outputs/takeover-20260909/sale-16954-product-5370-cost-evidence.json",
+      "locator": "artifact SHA256 D35B883F00082292CA457F664A70ECB8BE62AEF20B5F149AD196C5271177B630; scheduled backup product row and revision/image timeline",
+      "observed": "The 00:00:29 scheduled backup has product 5370 cost 170/0 and updated_at September 2. Sale 16954 was created 06:02:29. The only product revision occurred at 06:11:40 with image asset 460 and retained cost 170/0; the normal sale route reads product cost into sale_items."
+    },
+    {
+      "claim": "The fixed v2 line and allocation preserve the proven sale and awaiting-payment contracts.",
+      "source": "cloudflare/src/lib/saleIncidentRecoveryV2.ts",
+      "locator": "TARGET, pre/post batch guards and sale_items/allocation statements",
+      "observed": "The line is quantity 1 at USD185/KHR752025 with cost USD170/KHR0 and unknown price_mode/base fields NULL. Its allocation records lot 56737 as recovery-time attribution and is fully released. Header USD/KHR totals, change and status remain unchanged; product/branch/batch stock stay 7/5/5 and no movement is added."
+    },
+    {
+      "claim": "V1 and v2 are independent receipt-backed operations.",
+      "source": "cloudflare/src/lib/saleIncidentRecoveryV2.ts and focused route test",
+      "locator": "incident key sale-zero-items-20260909-v2 and prior-v1 coexistence case",
+      "observed": "V2 reads and writes only its incident receipt and sale 16954 member. A pre-existing v1 receipt does not block v2; receipt-only replay does not revalidate or overwrite later mutable sale/product state."
+    },
+    {
+      "claim": "Production still matched the complete v2 precondition after the successful v1 recovery.",
+      "source": "authenticated read-only Cloudflare D1 exact guard query",
+      "locator": "post-v1 receipt counts and full sale16954/product5370/lot56737/effect CASE expression",
+      "observed": "v1_receipts=1, v2_receipts=0, v2_guard_match=1; D1 reported success=true, changes=0, changed_db=false and rows_written=0."
+    }
+  ],
+  "verification": [
+    {
+      "command": "node scripts/test-zero-item-sale-recovery-v2-pure.cjs",
+      "scope": "v2 real-Hono route over the complete migrated SQLite schema",
+      "exit_code": 0,
+      "expected": "Fixed preview/apply/replay, rollback and protected-route contracts pass without stock changes.",
+      "observed": "Seven PASS groups covered permission, v1 coexistence and exact apply/replay, backup-window lot race, lost response, HTTP 202 uncertainty, verification pending, audit rollback, backup, origin, body and rate gates."
+    },
+    {
+      "command": "node scripts/test-zero-item-sale-recovery-pure.cjs",
+      "scope": "unchanged v1 recovery regression after adding v2 routes",
+      "exit_code": 0,
+      "expected": "All v1 contracts remain unchanged.",
+      "observed": "Ten v1 PASS groups completed."
+    },
+    {
+      "command": "node scripts/test-backup-replay-coverage-pure.cjs",
+      "scope": "shared durable receipt/member backup and reset coverage",
+      "exit_code": 0,
+      "expected": "Migration 0145 durable tables remain covered.",
+      "observed": "PASS historical finance and durable reversal backup coverage."
+    },
+    {
+      "command": "npm run typecheck",
+      "scope": "Cloudflare Worker package",
+      "exit_code": 0,
+      "expected": "TypeScript compiles without errors.",
+      "observed": "tsc --noEmit exited 0."
+    },
+    {
+      "command": "node scripts/with-wrangler-auth.cjs wrangler d1 execute business-os --remote --command <read-only exact v2 guard SQL> --json",
+      "scope": "post-v1 production read-only v2 fingerprint",
+      "exit_code": 0,
+      "expected": "One applied v1 receipt, no v2 receipt and complete v2 guard match without writes.",
+      "observed": "v1_receipts=1, v2_receipts=0, v2_guard_match=1; rows_written=0 and changed_db=false."
+    }
+  ],
+  "risks": [
+    "V2 intentionally fails closed if sale 16954, product 5370, its stock revision or unique positive lot changes before apply; a new reviewed fingerprint would then be required.",
+    "Lot 56737 is recorded as recovery-time unique-positive-lot attribution, not as historical proof of the originally selected lot.",
+    "Migration 0145 and the reviewed v1 runtime must already be live before these routes can work; a missing migration returns 409 before backup or mutation.",
+    "Independent exact-head review and release gates remain required before the v2 Worker/UI can be deployed or applied."
+  ],
+  "blockers": [],
+  "not_done": [
+    "No production mutation, backup creation, recovery execution, migration application or deployment was performed by this task.",
+    "No v1 helper, migration 0145, backup table list, reset order or frontend file was changed.",
+    "No customer, cashier, contact, asset path or full private backup content was included in source or output."
+  ],
+  "handoff": "Independent review should pin runtime 9c343f755d439cdb2c7d703e6d81300e2c45ac35, run the v2 test, v1 regression, backup test and Worker typecheck, and inspect the awaiting-payment no-stock contract plus durable replay. Release should pair the reviewed v2 runtime with the separate v2 UI, obtain a fresh no-store v2 preview and submit only its exact held request through the normal same-origin Admin UI. A 409 requires fresh evidence review; a 202 or verification_pending response requires exact-request replay."
+}
