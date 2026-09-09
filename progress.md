@@ -1,3 +1,17 @@
+## Employee/return checkpoint LIVE — September 9
+
+LIVE 1791eaf701d767da7109012b3ecd7e89f514c2f1, Worker 936417e0-911a-472e-b666-f7bf6321d7e5, deployment fc7eae67-ecdb-4464-9b76-d25762a4434b, independently verified at 100% traffic on 2026-09-08T23:17:48.005495Z. CLI exit 0; all domains, cron and queue triggers succeeded. Frontend339/339 and backend319/319 have passing evidence; types, translations, build, clean dry-run and independent final-head review pass. Migration0142 applied; recorded business totals unchanged and new receipt/guard tables empty before rollout.
+
+Existing Employee role3 saved through the Admin UI at 2026-09-08T23:45:07.129Z, audit4299: all11 original keys preserved and exactly five false Sales/Returns bulk/import/export keys added. Both user overrides unchanged. Production-role data and deployed permission-kernel checks pass; an already-open Employee phone session was not tested.
+
+All107 owner requests plus two deferred P3 review observations remain tracked. Next priority is cleanup, including the confirmed General24969 repair; it is still unmarked. Transfers, UI, public-site and offline follow in that order.0139 and0143 are not deployed. Wide Records cascades and all preserved WIP remain open.
+
+## Employee/return candidate independently verified — September 9
+
+Clean candidate 9719e6b6 has independent review PASS, 339/339 frontend tests, both typechecks, translation check, production build and Worker dry-run PASS. The broad backend sweep is still running. Production remains 21d22fc; migration 0142 and the existing Employee role update have not been applied.
+
+All 107 owner requests are retained. Two nonblocking P3 review observations are also tracked: unsafe-method request-origin enforcement and early return-body size admission. They do not replace or delay the owner’s priority order: employee/return, cleanup, transfer, UI, public site, offline.
+
 ## Employee role-save guard verified — September 9
 
 Employee/return remains the first priority. Atomic role-save commit 99910afb passed independent review and all seven concurrency/audit tests. It awaits integration with the Returns/Contacts bulk-action repairs and final release gates. No production role permissions have been changed.
