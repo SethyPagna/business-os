@@ -23,6 +23,7 @@ import { fmtDayFirst } from './utils/formatters.ts'
 import { withLoaderTimeout } from './utils/loaders.ts'
 import { refreshAppData } from './utils/appRefresh.ts'
 import { normalizeSettingsWriteOptions } from './utils/settingsWriteOptions.ts'
+import { presentWriteError, type WriteErrorDetail } from './utils/writeErrorPresentation.ts'
 import type { SettingsWriteOptions } from './types/settingsContracts.ts'
 import {
   beginPermissionRefresh,
@@ -2001,7 +2002,9 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
         }
       }
       if (!normalizedOptions.silentToast) {
-        notify(getErrorMessage(error, 'Failed to save settings'), 'error')
+        const writeError = error && typeof error === 'object' ? error as WriteErrorDetail : {}
+        const presentation = presentWriteError(writeError, t)
+        notify(`${presentation.title}: ${presentation.detail}`, 'error')
       }
       return { success: false, error }
     }
