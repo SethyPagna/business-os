@@ -86,19 +86,22 @@ assert.equal(seen[0].status, 400, 'sync:error must carry the HTTP status too')
 const appSource = read('src/App.tsx')
 assert.match(
   appSource,
-  /client_request_id_required/,
-  'SyncErrorBanner must recognize the stale-client code',
+  /presentWriteError/,
+  'SyncErrorBanner must delegate stable write codes to the shared localized presenter',
 )
-// The replacement message is shown INSTEAD of the raw server text.
+// The shared presenter uses the localized replacement instead of raw server
+// text, and App delegates all banner copy to it.
+const presenterSource = read('src/utils/writeErrorPresentation.ts')
 assert.match(
-  appSource,
+  presenterSource,
   /write_failed_app_out_of_date/,
-  'SyncErrorBanner must render the localized out-of-date message',
+  'the shared presenter must render the localized out-of-date message',
 )
 // ...and it points at the update path that actually exists on this tip: the
 // AppUpdateBanner's "Restart now" control.
 assert.match(appSource, /function AppUpdateBanner/, 'the top-row update bar must exist for the message to reference it')
 assert.match(appSource, /t\('restart_now'\)/, "the top-row update bar's action must still be restart_now")
+assert.doesNotMatch(appSource, /\(operation: \{error\.channel\}\)/, 'the banner must not expose an internal operation channel')
 
 // ---------------------------------------------------------------------------
 // 3. Both packs carry the strings, and the Khmer is really Khmer.
@@ -106,7 +109,19 @@ assert.match(appSource, /t\('restart_now'\)/, "the top-row update bar's action m
 const en = JSON.parse(read('src/lang/en.json')) as Record<string, unknown>
 const km = JSON.parse(read('src/lang/km.json')) as Record<string, unknown>
 
-for (const key of ['write_failed_app_out_of_date', 'app_update_ready', 'restart_now']) {
+for (const key of [
+  'write_failed_app_out_of_date',
+  'write_failed_title',
+  'write_blocked_title',
+  'write_outcome_unknown_title',
+  'write_outcome_unknown_timeout',
+  'write_outcome_unknown',
+  'write_server_unavailable',
+  'write_rejected_title',
+  'write_rejected_details',
+  'app_update_ready',
+  'restart_now',
+]) {
   assert.equal(typeof en[key], 'string', `en.json must define ${key}`)
   assert.equal(typeof km[key], 'string', `km.json must define ${key}`)
   assert.ok(String(en[key]).trim(), `en.json's ${key} must not be blank`)

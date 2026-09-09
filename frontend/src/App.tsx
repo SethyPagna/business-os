@@ -25,6 +25,7 @@ import { hasDirtyWork } from './utils/dirtyWork.ts'
 import { withLoaderTimeout } from './utils/loaders.ts'
 import { flushPendingWorkDrafts } from './utils/workDrafts.ts'
 import { shouldClearResolvedSyncError, SYNC_ERROR_RESOLVED_EVENT, type SyncProblemReference } from './utils/syncProblemLifecycle.ts'
+import { presentWriteError } from './utils/writeErrorPresentation.ts'
 
 declare const __FRONTEND_BUILD_HASH__: string | undefined
 
@@ -98,6 +99,8 @@ interface SyncProblemDetail {
   // Lets the banner explain a failure the user can act on instead of
   // reprinting a sentence written for a developer.
   code?: string | null
+  outcome?: string | null
+  timeoutMs?: number | string | null
   channel?: string
   transient?: boolean
   connected?: boolean
@@ -1202,21 +1205,7 @@ function AppUpdateBanner({ update, onDismiss }: AppUpdateBannerProps) {
 function SyncErrorBanner({ error, onDismiss, onGoToServer }: SyncErrorBannerProps) {
   const { t, canAccessPage } = useApp()
   if (!error) return null
-  const blocked = String(error?.reason || '').startsWith('server_')
-  const title = blocked ? 'Write blocked - server unavailable: ' : 'Write failed - data not saved: '
-  // N18: an app shell older than the Worker it is talking to is refused with
-  // `client_request_id_required` -- the same code routes/sales.ts returns for
-  // all three sale mutations (settle via /status, add-items via /items, amend
-  // via /amendments). The Worker's sentence ("client_request_id is required
-  // when adding sale items.") is written for a developer and names nothing a
-  // shopkeeper can do. They CAN take the update the app already offers, so
-  // say that instead, in their language, naming the same "Restart now"
-  // control the top-row AppUpdateBanner shows.
-  const staleClient = String(error?.code || '') === 'client_request_id_required'
-  const detailText = staleClient
-    ? (t('write_failed_app_out_of_date')
-      || `This app is out of date, so nothing was saved. Use ${t('restart_now') || 'Restart now'} in the top bar, or reload the page, to update - then try again.`)
-    : error.error
+  const presentation = presentWriteError(error, t)
   // navigateTo('server') (App.tsx's onGoToServer -> AppContext.tsx's
   // navigateTo) already silently no-ops for a user without the 'settings'
   // permission the Server Sync page requires (same gate PageSlot's render
@@ -1231,9 +1220,8 @@ function SyncErrorBanner({ error, onDismiss, onGoToServer }: SyncErrorBannerProp
     <div className="fixed left-0 right-0 top-16 z-[200] bg-red-600 text-white px-4 py-2.5 flex items-start gap-3 shadow-lg md:top-14">
       <span className="text-lg flex-shrink-0">!</span>
       <div className="flex-1 min-w-0">
-        <span className="font-semibold text-sm">{title}</span>
-        <span className="text-sm opacity-90">{detailText}</span>
-        {error.channel && <span className="text-xs opacity-70 ml-2">(operation: {error.channel})</span>}
+        <span className="font-semibold text-sm">{presentation.title}</span>
+        <span className="text-sm opacity-90">{presentation.detail}</span>
       </div>
       <div className="flex items-center gap-2 flex-shrink-0">
         {canViewDetails ? (
