@@ -1,3 +1,9 @@
+## Canonical sale-item currency snapshots fix LIVE — September 9
+
+Commit **46b49b6ebb18** is live at 100% in Worker version **7297259f-2bde-4e89-b526-a80f8fd0129f**, deployed from the clean pushed release branch `codex/sale-create-trigger-release-20260909` at approximately 2026-09-09T14:50Z. This fix closes the active negative-KHR-discount path: POS discounts rebase KHR from the USD base and exchange rate, while POST `/sales` canonicalizes applied/base/manual USD+KHR snapshots at the server boundary and preserves a KHR-only fallback for legacy lines. A stale line with $21 base, $18 applied, zero client KHR and a 4,000 rate now persists 84,000 base KHR, 72,000 applied KHR and 12,000 manual KHR.
+
+Verification passed from five independent angles: POS regression (stale/empty KHR and clear-discount), real Hono/D1 atomic sale creation, settlement/amendment/add-line parity, import/financial non-negative suites, and frontend typecheck/i18n/build plus the complete **346/346** utility chain. No production data was modified. Historical negative-profit/discount rows remain an evidence-ledger issue under F52 and were not clamped or rewritten.
+
 ## Returns/Expenses Shift row follow-up LIVE — September 9
 
 Commit **a0d505e880d7** is live at 100% in Worker version **e34ed89d-0d32-4388-9399-2b1448998f43**, deployment **c4d29853-4a55-451c-9dda-68623b22f4f9**, created 2026-09-09T14:13:15.172134Z. This clean, pushed fix follows the report-title checkpoint and is recorded in `outputs/takeover-20260909/returns-expenses-shift-deploy.log`.

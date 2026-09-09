@@ -1,7 +1,7 @@
 {
-  "asOf": "2026-09-09T14:14:00Z",
-  "liveCommit": "a0d505e880d797457e106f320b1aba2108d7e11f",
-  "liveSummary": "Returns/Expenses Shift row follow-up live: both pages share the compact Shift launcher with stats/actions and export, Expenses no longer renders a separate current-shift block, and the report title/filter and anonymous Walk-in fixes remain deployed.",
+  "asOf": "2026-09-09T14:54:00Z",
+  "liveCommit": "46b49b6ebb186db527f53458e551d48e6f7ba514",
+  "liveSummary": "Sale-item currency snapshots are canonicalized at POS and POST /sales: stale or empty KHR bases are rebased from USD and the server rate, manual KHR discounts stay non-negative, and KHR-only legacy lines retain their supplied currency values. Report/filter, anonymous Walk-in, Returns/Expenses Shift and prior correctness fixes remain live.",
   "tasks": [
     {
       "id": "F01",
