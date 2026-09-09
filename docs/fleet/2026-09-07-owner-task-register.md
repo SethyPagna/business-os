@@ -4,7 +4,16 @@ This is the current request register. `progress.md` links here. Append new owner
 requests and corrections; do not replace earlier requests or silently drop them.
 Root owns prioritization, integration, evidence, and deployment claims.
 
-Last reconciled: 2026-09-08T03:39:34.051Z. Functional fixes precede UI polish.
+Latest verified production checkpoint: source **aa295f7033aa** (full commit
+**aa295f7033aafbae529d30b4d1f01ddc9267b980**) on
+`codex/sale-create-trigger-release-20260909`, Worker
+**aa0bf477-362f-4c6a-81a6-4f6ef099b8b7**, 100% at
+2026-09-09T20:22:56.046Z. This checkpoint is vocabulary-only and applied zero
+migrations or production data changes. The older release facts below remain
+historical evidence for the individual functional rows; they are not a claim
+that the older Worker is still serving.
+
+Last reconciled: 2026-09-10T04:30:00+08:00. Functional fixes precede UI polish.
 Current production: **c2eb9d57**, Worker **3931ea55-3f66-459e-823d-3339979bd441**,100% at **2026-09-08T03:37:12.286363Z**. F47A, canonical branch/import/transfer and export F51 followups are deployed, including resolved duplicate error cleanup. No migration; backend291/291 and frontend319/319 pass. Earlier proven historical repair and prior releases remain included. Production product merge remains eight completed cases.
 
 First functional release **821efc94ce7a** is serving 100% traffic as Worker
