@@ -134,49 +134,6 @@ function denyCrossOriginMaintenanceRequest(c: any, requireOrigin: boolean) {
   return null
 }
 
-// Keep the destructive router safe when mounted without index.ts (focused
-// route tests and future Worker compositions do this). Production's outer
-// admission guard uses the same limit before bootstrap/auth work; this second
-// bounded read reconstructs the request without decoding or re-encoding it.
-const MIGRATION_FINALIZE_BODY_BYTES = 768 * 1024
-async function admitMigrationFinalizeBody(c: any) {
-  const raw = c.req.raw as Request
-  const tooLarge = () => c.json({
-    success: false,
-    error: 'Request body is too large.',
-    code: 'request_body_too_large',
-    maxBytes: MIGRATION_FINALIZE_BODY_BYTES,
-  }, 413)
-  const length = raw.headers.get('content-length')
-  if (length !== null && /^\d+$/.test(length) && Number(length) > MIGRATION_FINALIZE_BODY_BYTES) {
-    await raw.body?.cancel().catch(() => {})
-    return tooLarge()
-  }
-  if (!raw.body) return null
-  const reader = raw.body.getReader()
-  const body = new Uint8Array(MIGRATION_FINALIZE_BODY_BYTES)
-  let size = 0
-  try {
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      if (value.byteLength > MIGRATION_FINALIZE_BODY_BYTES - size) {
-        await reader.cancel().catch(() => {})
-        return tooLarge()
-      }
-      body.set(value, size)
-      size += value.byteLength
-    }
-  } catch {
-    await reader.cancel().catch(() => {})
-    return c.json({ success: false, error: 'Could not read request body.', code: 'request_body_unreadable' }, 400)
-  } finally {
-    reader.releaseLock()
-  }
-  c.req.raw = new Request(raw, { body: body.subarray(0, size) })
-  return null
-}
-
 // Simple fixed-window rate limit backed by the CACHE KV namespace. Mirrors
 // the intent of backend's applyRouteRateLimit (5 resets / 10 min) -- not a
 // byte-for-byte port, KV doesn't give us that, but it stops the same
@@ -789,11 +746,6 @@ app.post('/finalize-migration', async (c) => {
   if (denied) return denied
   const crossOrigin = denyCrossOriginMaintenanceRequest(c, false)
   if (crossOrigin) return crossOrigin
-  // index.ts admits this endpoint before routing. Keep the same guard here as
-  // well so the destructive router remains safe when mounted in isolation by
-  // focused tests or a future Worker composition.
-  const bodyRejection = await admitMigrationFinalizeBody(c)
-  if (bodyRejection) return bodyRejection
   if (await rateLimited(c, 'finalize_migration', 10, 600)) {
     return c.json({ error: 'Too many attempts. Wait a few minutes and try again.' }, 429)
   }

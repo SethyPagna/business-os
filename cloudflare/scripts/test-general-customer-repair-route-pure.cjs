@@ -49,6 +49,7 @@ const dbKernel = { getDb: () => db }
 const permissions = loadReal('lib/permissions.ts')
 const actorSnapshot = loadReal('lib/actorSnapshot.ts')
 const auth = loadReal('lib/auth.ts', { './db': dbKernel })
+const requestBodyGuard = loadReal('lib/requestBodyGuard.ts')
 
 let cacheVersion = 10
 let cacheBumpFails = false
@@ -129,6 +130,15 @@ const systemRoute = loadReal('routes/system.ts', {
 })
 
 const app = new Hono()
+// Match index.ts's authenticated/authorized admission boundary using the
+// actual shared guard before the real system router parses the request.
+app.use('/api/system/finalize-migration', async (c, next) => {
+  const user = await auth.getSessionUser(c)
+  if (!user || !permissions.hasPermission(user, 'backup_restore')) return next()
+  const rejection = await requestBodyGuard.admitRequestBody(c, requestBodyGuard.MIGRATION_FINALIZE_BODY_BYTES)
+  if (rejection) return rejection
+  return next()
+})
 app.route('/api/system', systemRoute.default)
 const pending = []
 const executionCtx = {
