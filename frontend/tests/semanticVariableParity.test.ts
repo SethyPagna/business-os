@@ -33,7 +33,7 @@ const canonical: Record<string, [string, string]> = {
   batch: ['Received date', 'ថ្ងៃចូល'],
   batch_date: ['Received date', 'ថ្ងៃចូល'],
   received_date: ['Received date', 'ថ្ងៃចូល'],
-  delivery_fee: ['Delivery Fee', 'ថ្លៃដឹក'],
+  delivery_fee: ['Delivery fee', 'ថ្លៃដឹក'],
   delivery_actual_cost: ['Actual delivery cost', 'ថ្លៃដឹកដើម'],
   record_kind_delivery_cost_changed: ['Actual delivery cost changed', 'ប្តូរថ្លៃដឹកដើម'],
   amend_actual_cost_title: ['Correct the actual delivery cost?', 'កែថ្លៃដឹកដើម?'],

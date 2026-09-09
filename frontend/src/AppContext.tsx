@@ -285,7 +285,7 @@ const CORE_ENGLISH_PACK: TranslationPack = {
   cogs: 'COGS',
   cogs_header: 'COGS',
   cost: 'Cost',
-  cost_in_purchase: 'Cost In (Purchase)',
+  cost_in_purchase: 'Cost price',
   current_stock: 'Current Stock',
   custom: 'Custom',
   customer_portal: 'Customer Portal',

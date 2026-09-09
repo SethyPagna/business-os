@@ -138,7 +138,7 @@ export function toAmendmentDisplayRow(
     const afterCost = after.delivery_actual_cost_usd === null || after.delivery_actual_cost_usd === undefined
       ? null : num(after.delivery_actual_cost_usd)
     const feeLabel = deliveryParts.feeLabel || 'Fee'
-    const actualCostLabel = deliveryParts.actualCostLabel || 'Actual cost'
+    const actualCostLabel = deliveryParts.actualCostLabel || 'Actual delivery cost'
     const notRecordedLabel = deliveryParts.notRecordedLabel || 'Not recorded'
     const composite = (name: unknown, fee: number, cost: number | null): string => [
       String(name || '—'),

@@ -60,6 +60,11 @@ for (const [key, khmer, why] of DICTATED) {
   assert.equal(km[key], khmer, `km.json "${key}" must stay ${khmer} (${why})`)
 }
 
+assert.equal(en.inventory_batch_session, 'Receive session')
+assert.equal(km.inventory_batch_session, 'វគ្គទទួលស្តុក')
+assert.equal(en.confirm_apply_inventory_batch, 'Apply all stock changes in this receive session?')
+assert.equal(km.confirm_apply_inventory_batch, 'អនុវត្តការផ្លាស់ប្ដូរស្តុកទាំងអស់ក្នុងវគ្គទទួលស្តុកនេះមែនទេ?')
+
 // before → after is shown as one label on the product report; it must be
 // built from the same two words the list column headers use.
 assert.equal(
@@ -98,7 +103,7 @@ const GLOSSARY: GlossaryRule[] = [
     concept: 'batch / lot / received date',
     canonical: 'ថ្ងៃចូល',
     forbidden: [/(?<!ចាំ)បាច់/, /(?<!អាប់)ឡូត/, 'ឡុត'],
-    except: ['confirm_apply_inventory_batch', 'inventory_batch_session', 'reason_defective_batch'],
+    except: ['reason_defective_batch'],
   },
   { concept: 'customer', canonical: 'អតិថិជន', forbidden: ['អ្នកទិញ'], except: ['fee_by_customer', 'pos_customer_pays', 'customer_pays'] },
   { concept: 'cost', canonical: 'ថ្លៃដើម', forbidden: ['តម្លៃដើម'] },
