@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { applyGeneralCustomerRepair, GENERAL_CUSTOMER_REPAIR_CONFIRMATION, GENERAL_CUSTOMER_REPAIR_APPLY_TIMEOUT_MS, GENERAL_CUSTOMER_REPAIR_STEP, previewGeneralCustomerRepair, validateGeneralCustomerRepairPreview } from '../src/api/generalCustomerRepairTransport.ts'
+import { applyGeneralCustomerRepair, GENERAL_CUSTOMER_REPAIR_CONFIRMATION, GENERAL_CUSTOMER_REPAIR_APPLY_TIMEOUT_MS, GENERAL_CUSTOMER_REPAIR_STEP, previewGeneralCustomerRepair, validateGeneralCustomerRepairApplyResponse, validateGeneralCustomerRepairPreview } from '../src/api/generalCustomerRepairTransport.ts'
 import { cacheGet, cacheSet, setSyncServerUrl, setSyncToken } from '../src/api/http.ts'
 
 let failed = 0
@@ -16,6 +16,10 @@ function previewBody() {
     target: { id: 24969, name: 'general', phone_state: 'known_empty', address_state: 'known_empty', is_anonymous: 0, portal_account_count: 0, sale_count: 5, return_count: 1 },
     protected_customer: { id: 22305, is_anonymous: 0 },
   }
+}
+
+function applyBody() {
+  return { success: true, outcome: 'already_applied', affected: { customers: 0 }, verification_pending: false, cache_invalidated: true, refresh_pending: false, broadcast_requested: true, message: 'Already applied.' }
 }
 
 await run('preview accepts only the fixed four-field request and deep-freezes it', () => {
@@ -34,7 +38,7 @@ await run('direct online transport previews and replays the held request while c
   const calls: Array<[RequestInfo | URL, RequestInit | undefined]> = []
   globalThis.fetch = ((...args: [RequestInfo | URL, RequestInit | undefined]) => {
     calls.push(args)
-    const body = calls.length === 1 ? previewBody() : { success: true, outcome: 'already_applied', affected: { customers: 0 }, verification_pending: false, cache_invalidated: true, refresh_pending: false, broadcast_requested: true, message: 'Already applied.' }
+    const body = calls.length === 1 ? previewBody() : applyBody()
     return Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } }))
   }) as typeof fetch
   try {
@@ -52,6 +56,25 @@ await run('direct online transport previews and replays the held request while c
   } finally { globalThis.fetch = originalFetch; setSyncServerUrl(''); setSyncToken('') }
 })
 
+await run('partial, string, numeric, or older apply success bodies are uncertain and never clear caches', async () => {
+  const partial = applyBody() as Record<string, unknown>
+  delete partial.refresh_pending
+  const stringFlag = { ...applyBody(), verification_pending: 'false' }
+  const numericFlag = { ...applyBody(), cache_invalidated: 0 }
+  const mismatchedOutcome = { ...applyBody(), outcome: 'applied', affected: { customers: 0 } }
+  const mismatchedRefresh = { ...applyBody(), cache_invalidated: false }
+  for (const malformed of [partial, stringFlag, numericFlag, mismatchedOutcome, mismatchedRefresh]) assert.throws(() => validateGeneralCustomerRepairApplyResponse(malformed), /Invalid shared General customer repair response/)
+
+  setSyncServerUrl('https://sync.example.test'); setSyncToken('operator-token')
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = (() => Promise.resolve(new Response(JSON.stringify(partial), { status: 200, headers: { 'Content-Type': 'application/json' } }))) as typeof fetch
+  try {
+    cacheSet('customers:list', { retained: true }); cacheSet('sales:list', { retained: true }); cacheSet('actionHistory:get', { retained: true })
+    await assert.rejects(() => applyGeneralCustomerRepair(validateGeneralCustomerRepairPreview(previewBody()).request), (error: { status?: unknown; message?: string }) => error.status === undefined && /complete success result|fields do not match/.test(error.message || ''))
+    assert.deepEqual(cacheGet('customers:list'), { retained: true }); assert.deepEqual(cacheGet('sales:list'), { retained: true }); assert.deepEqual(cacheGet('actionHistory:get'), { retained: true })
+  } finally { globalThis.fetch = originalFetch; setSyncServerUrl(''); setSyncToken('') }
+})
+
 await run('panel mounts first in Page Reset and preserves the replay/error contract', () => {
   const panel = fs.readFileSync(new URL('../src/components/utils-settings/GeneralCustomerRepair.tsx', import.meta.url), 'utf8')
   const reset = fs.readFileSync(new URL('../src/components/utils-settings/ResetData.tsx', import.meta.url), 'utf8')
@@ -64,10 +87,12 @@ await run('panel mounts first in Page Reset and preserves the replay/error contr
   assert.match(panel, /errorStatus\(error\) === 409/)
   assert.match(panel, /setNeedsNewPreview\(true\)/)
   assert.match(panel, /verification_pending \|\| result\.refresh_pending/)
+  assert.match(panel, /verification_pending === false && result\.refresh_pending === false && result\.cache_invalidated === true/)
   assert.match(panel, /refreshAppData\(\['customers', 'audit_log'\]/)
   assert.doesNotMatch(panel, /pushAction|window\.confirm|target\.name|phone_state|address_state/)
   assert.match(transport, /cacheInvalidateWithDerived\('customers'\)/)
   assert.match(transport, /cacheInvalidate\('actionHistory'\)/)
+  assert.match(transport, /validateGeneralCustomerRepairApplyResponse\(await apiFetch/)
   assert.doesNotMatch(transport, /\broute\s*\(/)
 })
 

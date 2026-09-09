@@ -36,7 +36,7 @@ function GeneralCustomerRepair() {
   const previewInFlight = useRef(false)
   const applyInFlight = useRef(false)
   const confirmationOpen = useRef(false)
-  const complete = result?.success === true && !result.verification_pending && !result.refresh_pending
+  const complete = result?.success === true && result.verification_pending === false && result.refresh_pending === false && result.cache_invalidated === true
   const canApply = Boolean(preview && acknowledged && typedConfirmation === GENERAL_CUSTOMER_REPAIR_CONFIRMATION && !needsNewPreview && !complete)
   confirmationOpen.current = confirmOpen
 
