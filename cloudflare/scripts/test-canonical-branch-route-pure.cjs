@@ -36,6 +36,7 @@ const writes = loadModule('lib/branchWrites.ts', (id) => {
   if (id === './canonicalBranchIdentity') return identity
   throw new Error(`unexpected writer import ${id}`)
 })
+const transferReceipts = loadModule('lib/transferOperationReceipt.ts', require)
 
 let sqlite
 let currentUser
@@ -113,6 +114,7 @@ const branchRoute = loadModule('routes/branches.ts', (id) => {
   }
   if (id === '../lib/cache') return { bumpVersion: async () => {} }
   if (id === '../lib/audit') return { audit: async (...args) => { audits.push(args) } }
+  if (id === '../lib/transferOperationReceipt') return transferReceipts
   if (id === '../lib/telegram') return { formatTransferTelegramLines: noop, sendTelegramEvent: async () => {} }
   if (id === '../lib/conflictControl') return {
     assertUpdatedAtMatch: () => {},
@@ -174,7 +176,18 @@ function reset() {
     CREATE TABLE stock_transfers (
       id INTEGER PRIMARY KEY, product_id INTEGER, product_name TEXT,
       from_branch_id INTEGER, to_branch_id INTEGER, quantity REAL, notes TEXT,
-      user_id INTEGER, user_name TEXT, created_at TEXT
+      user_id INTEGER, user_name TEXT, created_at TEXT, client_request_id TEXT
+    );
+    CREATE TABLE transfer_operation_receipts (
+      id INTEGER PRIMARY KEY, actor_id INTEGER NOT NULL, request_id TEXT NOT NULL,
+      request_digest TEXT NOT NULL, request_json TEXT NOT NULL, response_json TEXT,
+      status TEXT NOT NULL DEFAULT 'committed', created_at TEXT, updated_at TEXT,
+      UNIQUE(actor_id, request_id)
+    );
+    CREATE TABLE audit_logs (
+      id INTEGER PRIMARY KEY, user_id INTEGER, user_name TEXT, action TEXT,
+      entity TEXT, entity_id TEXT, details TEXT, table_name TEXT, record_id TEXT,
+      new_value TEXT
     );
     INSERT INTO branches(id,name,location,is_default,is_active,updated_at) VALUES
       (1,'Shop','shop old',1,1,'2026-09-08 00:00:00'),
@@ -277,7 +290,7 @@ async function main() {
 
   await check('single transfer supports forward, undo, and redo across both canonical directions', async () => {
     let result = await request('POST', '/transfer', {
-      productId: 10, fromBranchId: 2, toBranchId: 1, quantity: 2, reason: 'restock shop',
+      productId: 10, fromBranchId: 2, toBranchId: 1, quantity: 2, reason: 'restock shop', client_request_id: 'transfer-forward-1',
     })
     assert.equal(result.status, 200, JSON.stringify(result.json))
     assert.deepStrictEqual(
@@ -286,7 +299,7 @@ async function main() {
     )
 
     result = await request('POST', '/transfer', {
-      productId: 10, fromBranchId: 1, toBranchId: 2, quantity: 2, reason: 'Undo: restock shop',
+      productId: 10, fromBranchId: 1, toBranchId: 2, quantity: 2, reason: 'Undo: restock shop', client_request_id: 'transfer-undo-1',
     })
     assert.equal(result.status, 200, JSON.stringify(result.json))
     assert.deepStrictEqual(
@@ -295,7 +308,7 @@ async function main() {
     )
 
     result = await request('POST', '/transfer', {
-      productId: 10, fromBranchId: 2, toBranchId: 1, quantity: 2, reason: 'Redo: restock shop',
+      productId: 10, fromBranchId: 2, toBranchId: 1, quantity: 2, reason: 'Redo: restock shop', client_request_id: 'transfer-redo-1',
     })
     assert.equal(result.status, 200, JSON.stringify(result.json))
     assert.equal(sqlite.prepare('SELECT SUM(quantity) AS total FROM branch_stock WHERE product_id=10').get().total, 5)
@@ -311,18 +324,18 @@ async function main() {
         { movement_type: 'transfer_in', branch_id: 1, quantity: 2 },
       ],
     )
-    assert.equal(audits.length, 3)
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS total FROM audit_logs WHERE action='transfer_intent'").get().total, 3)
   })
 
   await check('bulk transfer supports both canonical directions and conserves stock', async () => {
     let result = await request('POST', '/transfer-bulk', {
-      fromBranchId: 2, toBranchId: 1, reason: 'bulk to shop', items: [{ productId: 10, quantity: 3 }],
+      fromBranchId: 2, toBranchId: 1, reason: 'bulk to shop', items: [{ productId: 10, quantity: 3 }], client_request_id: 'transfer-bulk-1',
     })
     assert.equal(result.status, 200, JSON.stringify(result.json))
     assert.equal(result.json.transferredCount, 1)
 
     result = await request('POST', '/transfer-bulk', {
-      fromBranchId: 1, toBranchId: 2, reason: 'bulk back to warehouse', items: [{ productId: 10, quantity: 1 }],
+      fromBranchId: 1, toBranchId: 2, reason: 'bulk back to warehouse', items: [{ productId: 10, quantity: 1 }], client_request_id: 'transfer-bulk-2',
     })
     assert.equal(result.status, 200, JSON.stringify(result.json))
     assert.equal(result.json.transferredCount, 1)
@@ -333,26 +346,58 @@ async function main() {
     assert.equal(sqlite.prepare('SELECT SUM(quantity) AS total FROM branch_stock WHERE product_id=10').get().total, 5)
     assert.equal(sqlite.prepare('SELECT COUNT(*) AS total FROM stock_transfers').get().total, 2)
     assert.equal(sqlite.prepare('SELECT COUNT(*) AS total FROM inventory_movements').get().total, 4)
-    assert.equal(audits.length, 2)
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS total FROM audit_logs WHERE action='transfer_intent'").get().total, 2)
+  })
+
+  await check('transfer replay returns the original receipt without a second stock movement', async () => {
+    const body = { productId: 10, fromBranchId: 2, toBranchId: 1, quantity: 2, reason: 'replay-safe move', client_request_id: 'transfer-replay-1' }
+    const first = await request('POST', '/transfer', body)
+    assert.equal(first.status, 200, JSON.stringify(first.json))
+    assert.equal(first.json.replayed, false)
+    const replay = await request('POST', '/transfer', body)
+    assert.equal(replay.status, 200, JSON.stringify(replay.json))
+    assert.equal(replay.json.replayed, true)
+    assert.deepStrictEqual(replay.json, { ...first.json, replayed: true })
+    assert.equal(sqlite.prepare('SELECT quantity FROM branch_stock WHERE product_id=10 AND branch_id=2').get().quantity, 3)
+    assert.equal(sqlite.prepare('SELECT COUNT(*) AS total FROM stock_transfers').get().total, 1)
+    assert.equal(sqlite.prepare('SELECT COUNT(*) AS total FROM inventory_movements').get().total, 2)
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS total FROM audit_logs WHERE action='transfer_intent'").get().total, 1)
+    const conflict = await request('POST', '/transfer', { ...body, quantity: 1 })
+    assert.equal(conflict.status, 409, JSON.stringify(conflict.json))
+    assert.equal(conflict.json.code, 'idempotency_conflict')
+    assert.equal(sqlite.prepare('SELECT quantity FROM branch_stock WHERE product_id=10 AND branch_id=2').get().quantity, 3)
+  })
+
+  await check('bulk transfer replay is request-scoped and does not duplicate its lines', async () => {
+    const body = { fromBranchId: 2, toBranchId: 1, reason: 'bulk replay-safe move', items: [{ productId: 10, quantity: 2 }], client_request_id: 'bulk-replay-1' }
+    const first = await request('POST', '/transfer-bulk', body)
+    assert.equal(first.status, 200, JSON.stringify(first.json))
+    const replay = await request('POST', '/transfer-bulk', body)
+    assert.equal(replay.status, 200, JSON.stringify(replay.json))
+    assert.equal(replay.json.replayed, true)
+    assert.equal(sqlite.prepare('SELECT quantity FROM branch_stock WHERE product_id=10 AND branch_id=2').get().quantity, 3)
+    assert.equal(sqlite.prepare('SELECT COUNT(*) AS total FROM stock_transfers').get().total, 1)
+    assert.equal(sqlite.prepare('SELECT COUNT(*) AS total FROM inventory_movements').get().total, 2)
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS total FROM audit_logs WHERE action='transfer_intent'").get().total, 1)
   })
 
   await check('same branch, noncanonical branches, reasons, and lower permissions fail with zero effects', async () => {
     sqlite.prepare("INSERT INTO branches(id,name,is_active) VALUES (3,'Depot',1)").run()
     const initialStock = sqlite.prepare('SELECT * FROM branch_stock ORDER BY id').all()
     const cases = [
-      { body: { productId: 10, fromBranchId: 2, toBranchId: 2, quantity: 1, reason: 'same' }, status: 400 },
-      { body: { productId: 10, fromBranchId: 2, toBranchId: 3, quantity: 1, reason: 'other' }, status: 400 },
+      { body: { productId: 10, fromBranchId: 2, toBranchId: 2, quantity: 1, reason: 'same', client_request_id: 'invalid-same' }, status: 400 },
+      { body: { productId: 10, fromBranchId: 2, toBranchId: 3, quantity: 1, reason: 'other', client_request_id: 'invalid-other' }, status: 400 },
       { body: { productId: 10, fromBranchId: 2, toBranchId: 1, quantity: 1 }, status: 400 },
     ]
     for (const item of cases) assert.equal((await request('POST', '/transfer', item.body)).status, item.status)
 
     currentUser = { id: 8, name: 'Reviewer', tier: 'review' }
     assert.equal((await request('POST', '/transfer', {
-      productId: 10, fromBranchId: 2, toBranchId: 1, quantity: 1, reason: 'review refused',
+      productId: 10, fromBranchId: 2, toBranchId: 1, quantity: 1, reason: 'review refused', client_request_id: 'invalid-review',
     })).status, 403)
     currentUser = { id: 9, name: 'Viewer', tier: 'none' }
     assert.equal((await request('POST', '/transfer-bulk', {
-      fromBranchId: 2, toBranchId: 1, reason: 'none refused', items: [{ productId: 10, quantity: 1 }],
+      fromBranchId: 2, toBranchId: 1, reason: 'none refused', items: [{ productId: 10, quantity: 1 }], client_request_id: 'invalid-none',
     })).status, 403)
 
     assert.deepStrictEqual(sqlite.prepare('SELECT * FROM branch_stock ORDER BY id').all(), initialStock)
@@ -365,7 +410,7 @@ async function main() {
   await check('duplicate active canonical rows return 409 before transfer effects', async () => {
     sqlite.prepare("INSERT INTO branches(id,name,is_active) VALUES (3,' shop ',1)").run()
     const result = await request('POST', '/transfer', {
-      productId: 10, fromBranchId: 2, toBranchId: 1, quantity: 2, reason: 'restock shop',
+      productId: 10, fromBranchId: 2, toBranchId: 1, quantity: 2, reason: 'restock shop', client_request_id: 'transfer-duplicate-canonical',
     })
     assert.equal(result.status, 409, JSON.stringify(result.json))
     assert.equal(result.json.code, identity.CANONICAL_BRANCH_CONFIGURATION_CODE)
@@ -378,7 +423,7 @@ async function main() {
   await check('an interposed canonical duplicate aborts the actual transfer batch', async () => {
     beforeBatch = (db) => db.prepare("INSERT INTO branches(id,name,is_active) VALUES (3,'Warehouse',1)").run()
     const result = await request('POST', '/transfer', {
-      productId: 10, fromBranchId: 2, toBranchId: 1, quantity: 2, reason: 'restock shop',
+      productId: 10, fromBranchId: 2, toBranchId: 1, quantity: 2, reason: 'restock shop', client_request_id: 'transfer-interposed',
     })
     assert.equal(result.status, 500)
     assert.equal(sqlite.prepare('SELECT quantity FROM branch_stock WHERE product_id=10 AND branch_id=2').get().quantity, 5)

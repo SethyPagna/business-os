@@ -2,6 +2,7 @@ import { apiFetch, route } from './http.ts'
 import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
 import { withExpectedUpdatedAt, type ExpectedUpdatedAtPayload } from './expectedUpdatedAt.ts'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
+import { ensureClientRequestId } from './requestIds.ts'
 
 type BranchPayload = ExpectedUpdatedAtPayload
 const BRANCH_MIRROR_WRITE_DELAY_MS = 10_000
@@ -103,18 +104,20 @@ export function getTransfers(params: QueryParams = {}): Promise<unknown> {
 // the old optional `note` instead; the Worker accepts a non-empty `note` as
 // the reason for exactly that reason. Nothing new should send `note`.
 export function transferStock(payload: BranchPayload = {}): Promise<unknown> {
+  const body = ensureClientRequestId({ ...getDevicePayload(), ...(payload || {}) }, 'transfer')
   return route(
     'branches:transfer',
-    () => apiFetch('POST', '/api/branches/transfer', { ...getDevicePayload(), ...(payload || {}) }),
+    () => apiFetch('POST', '/api/branches/transfer', body),
     null,
     true,
   )
 }
 
 export function transferStockBulk(payload: BranchPayload = {}): Promise<unknown> {
+  const body = ensureClientRequestId({ ...getDevicePayload(), ...(payload || {}) }, 'transfer-bulk')
   return route(
     'branches:transfer-bulk',
-    () => apiFetch('POST', '/api/branches/transfer-bulk', { ...getDevicePayload(), ...(payload || {}) }),
+    () => apiFetch('POST', '/api/branches/transfer-bulk', body),
     null,
     true,
   )

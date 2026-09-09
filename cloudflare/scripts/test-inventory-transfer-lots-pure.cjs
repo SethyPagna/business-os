@@ -87,6 +87,7 @@ const inventoryRoute = loadModule('routes/inventory.ts', (id) => {
   if (id === '../lib/branchRoleGuards') return branchGuards
   if (id === '../lib/canonicalBranchIdentity') return canonicalIdentity
   if (id === '../lib/actorSnapshot') return { actorSnapshot: (user) => user?.name || null }
+  if (id === '../lib/transferOperationReceipt') return loadModule('lib/transferOperationReceipt.ts', require)
   if (id === '../lib/telegram') return { formatStockChangeTelegramLines: noop, formatTransferTelegramLines: noop, sendTelegramEvent: asyncNoop }
   if (id === '../lib/businessDateWindow') return { localDateAtOrAfter: noop, localDateAtOrBefore: noop }
   if (id === '../lib/familyPagination') return { paginateProductFamilies: asyncNoop }
@@ -175,7 +176,18 @@ function freshDb() {
     CREATE TABLE stock_transfers (
       id INTEGER PRIMARY KEY, product_id INTEGER, product_name TEXT,
       from_branch_id INTEGER, to_branch_id INTEGER, quantity REAL, notes TEXT,
-      user_id INTEGER, user_name TEXT, created_at TEXT
+      user_id INTEGER, user_name TEXT, created_at TEXT, client_request_id TEXT
+    );
+    CREATE TABLE transfer_operation_receipts (
+      id INTEGER PRIMARY KEY, actor_id INTEGER NOT NULL, request_id TEXT NOT NULL,
+      request_digest TEXT NOT NULL, request_json TEXT NOT NULL, response_json TEXT,
+      status TEXT NOT NULL DEFAULT 'committed', created_at TEXT, updated_at TEXT,
+      UNIQUE(actor_id, request_id)
+    );
+    CREATE TABLE audit_logs (
+      id INTEGER PRIMARY KEY, user_id INTEGER, user_name TEXT, action TEXT,
+      entity TEXT, entity_id TEXT, details TEXT, table_name TEXT, record_id TEXT,
+      new_value TEXT
     );
     CREATE TABLE inventory_movements (
       id INTEGER PRIMARY KEY, product_id INTEGER, product_name TEXT,
@@ -312,7 +324,7 @@ await check('the real Inventory transfer handler applies, undoes, and redoes acr
     warehouseLots: [lotQty(routeDb, 101, 2), lotQty(routeDb, 102, 2)],
   })
 
-  let result = await routeRequest({ productId: 1, fromBranchId: 1, toBranchId: 2, quantity: 8, reason: 'return to warehouse' })
+  let result = await routeRequest({ productId: 1, fromBranchId: 1, toBranchId: 2, quantity: 8, reason: 'return to warehouse', client_request_id: 'inventory-transfer-forward' })
   assert.strictEqual(result.status, 200, JSON.stringify(result.json))
   assert.strictEqual(result.json.success, true)
   const applied = state()
@@ -320,13 +332,13 @@ await check('the real Inventory transfer handler applies, undoes, and redoes acr
     shopStock: 4, warehouseStock: 8, shopLots: [0, 2], warehouseLots: [6, 2],
   })
 
-  result = await routeRequest({ productId: 1, fromBranchId: 2, toBranchId: 1, quantity: 8, reason: 'Undo: return to warehouse' })
+  result = await routeRequest({ productId: 1, fromBranchId: 2, toBranchId: 1, quantity: 8, reason: 'Undo: return to warehouse', client_request_id: 'inventory-transfer-undo' })
   assert.strictEqual(result.status, 200, JSON.stringify(result.json))
   assert.deepStrictEqual(state(), {
     shopStock: 12, warehouseStock: 0, shopLots: [6, 4], warehouseLots: [0, 0],
   })
 
-  result = await routeRequest({ productId: 1, fromBranchId: 1, toBranchId: 2, quantity: 8, reason: 'Redo: return to warehouse' })
+  result = await routeRequest({ productId: 1, fromBranchId: 1, toBranchId: 2, quantity: 8, reason: 'Redo: return to warehouse', client_request_id: 'inventory-transfer-redo' })
   assert.strictEqual(result.status, 200, JSON.stringify(result.json))
   assert.deepStrictEqual(state(), applied)
   assert.strictEqual(routeDb.prepare('SELECT SUM(quantity) AS total FROM branch_stock WHERE product_id=1').get().total, 12)
@@ -342,7 +354,26 @@ await check('the real Inventory transfer handler applies, undoes, and redoes acr
       { movement_type: 'transfer_in', branch_id: 2, quantity: 8, batch_id: null },
     ],
   )
-  assert.strictEqual(routeAudits.length, 3)
+  assert.strictEqual(routeDb.prepare("SELECT COUNT(*) AS total FROM audit_logs WHERE action='transfer_intent'").get().total, 3)
+  await Promise.all(routeWaits)
+})
+
+await check('Inventory transfer replay returns its receipt without moving stock twice', async () => {
+  routeDb = freshDb()
+  routeUser = { id: 7, name: 'Stock manager', tier: 'full' }
+  routeAudits = []
+  routeWaits = []
+  const body = { productId: 1, fromBranchId: 1, toBranchId: 2, quantity: 2, reason: 'replay-safe inventory move', client_request_id: 'inventory-replay-1' }
+  const first = await routeRequest(body)
+  assert.strictEqual(first.status, 200, JSON.stringify(first.json))
+  const replay = await routeRequest(body)
+  assert.strictEqual(replay.status, 200, JSON.stringify(replay.json))
+  assert.strictEqual(replay.json.replayed, true)
+  assert.strictEqual(stockQty(routeDb, 1), 10)
+  assert.strictEqual(stockQty(routeDb, 2), 2)
+  assert.strictEqual(routeDb.prepare('SELECT COUNT(*) AS total FROM stock_transfers').get().total, 1)
+  assert.strictEqual(routeDb.prepare('SELECT COUNT(*) AS total FROM inventory_movements').get().total, 2)
+  assert.strictEqual(routeDb.prepare("SELECT COUNT(*) AS total FROM audit_logs WHERE action='transfer_intent'").get().total, 1)
   await Promise.all(routeWaits)
 })
 
@@ -366,26 +397,26 @@ await check('Inventory rejects same, unknown, inactive, duplicate-role, reasonle
     assert.strictEqual(routeAudits.length, 0)
   }
 
-  await attempt({ body: { productId: 1, fromBranchId: 1, toBranchId: 1, quantity: 1, reason: 'same' }, status: 400 })
+  await attempt({ body: { productId: 1, fromBranchId: 1, toBranchId: 1, quantity: 1, reason: 'same', client_request_id: 'invalid-same-inventory' }, status: 400 })
   await attempt({
     setup: (db) => db.prepare("INSERT INTO branches(id,name,is_active) VALUES (3,'Depot',1)").run(),
-    body: { productId: 1, fromBranchId: 1, toBranchId: 3, quantity: 1, reason: 'other' },
+    body: { productId: 1, fromBranchId: 1, toBranchId: 3, quantity: 1, reason: 'other', client_request_id: 'invalid-other-inventory' },
     status: 400,
   })
   await attempt({
     setup: (db) => db.prepare('UPDATE branches SET is_active=0 WHERE id=2').run(),
-    body: { productId: 1, fromBranchId: 1, toBranchId: 2, quantity: 1, reason: 'inactive' },
+    body: { productId: 1, fromBranchId: 1, toBranchId: 2, quantity: 1, reason: 'inactive', client_request_id: 'invalid-inactive-inventory' },
     status: 409,
   })
   await attempt({
     setup: (db) => db.prepare("INSERT INTO branches(id,name,is_active) VALUES (4,' warehouse ',1)").run(),
-    body: { productId: 1, fromBranchId: 1, toBranchId: 2, quantity: 1, reason: 'duplicate' },
+    body: { productId: 1, fromBranchId: 1, toBranchId: 2, quantity: 1, reason: 'duplicate', client_request_id: 'invalid-duplicate-inventory' },
     status: 409,
   })
   await attempt({ body: { productId: 1, fromBranchId: 1, toBranchId: 2, quantity: 1 }, status: 400 })
   await attempt({
     user: { id: 8, name: 'Reviewer', tier: 'review' },
-    body: { productId: 1, fromBranchId: 1, toBranchId: 2, quantity: 1, reason: 'review refused' },
+    body: { productId: 1, fromBranchId: 1, toBranchId: 2, quantity: 1, reason: 'review refused', client_request_id: 'invalid-review-inventory' },
     status: 403,
   })
 })

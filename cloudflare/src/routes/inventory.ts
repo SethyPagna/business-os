@@ -42,6 +42,7 @@ import { RESOLVED_BRANCH_NAME_COLUMN, movementBranchNameSql, withResolvedBranchN
 import { RESOLVED_ACTOR_NAME_COLUMN, movementActorNameSql, withResolvedActorName } from '../lib/movementActorName'
 import { movementReferenceSelectSql } from '../lib/movementReference'
 import { movementSearchHaystackSql } from '../lib/movementSearch'
+import { findTransferReceipt, normalizeTransferRequestId, transferIntentAuditStatement, transferReceiptResponse, transferReceiptStatement, transferRequestDigest } from '../lib/transferOperationReceipt'
 
 // Inventory routes, ported from backend/src/routes/inventory.ts.
 //
@@ -1915,10 +1916,12 @@ app.post('/transfer', async (c) => {
   // a non-empty legacy `note` is still accepted as the reason so a cached
   // PWA build or a queued offline replay is not 400ed mid-release.
   const reason = String(body.reason ?? '').trim() || String(body.note ?? '').trim() || null
+  const clientRequestId = normalizeTransferRequestId(body.client_request_id)
 
   if (!productId || !fromBranchId || !toBranchId || !Number.isFinite(quantity)) return c.json({ error: 'Missing required fields' }, 400)
   if (fromBranchId === toBranchId) return c.json({ error: 'Source and destination cannot be the same' }, 400)
   if (!(quantity > 0)) return c.json({ error: 'Transfer quantity must be greater than zero' }, 400)
+  if (!clientRequestId) return c.json({ error: 'client_request_id is required for a transfer.', code: 'client_request_id_required' }, 400)
   // The same mandatory-cause rule POST /adjust enforces above, now on the
   // route that MOVES stock between branches.
   // Inventory.tsx has refused a reasonless transfer in the browser since
@@ -1935,6 +1938,15 @@ app.post('/transfer', async (c) => {
   if (!reason) return c.json({ error: 'A transfer reason is required.' }, 400)
 
   const db = getDb(c.env)
+  const requestJson = JSON.stringify({ version: 1, kind: 'inventory-transfer', productId, fromBranchId, toBranchId, quantity, reason })
+  const requestDigest = await transferRequestDigest(requestJson)
+  const previousReceipt = await findTransferReceipt(db, user.id, clientRequestId)
+  if (previousReceipt) {
+    if (previousReceipt.request_digest !== requestDigest || previousReceipt.request_json !== requestJson) {
+      return c.json({ error: 'client_request_id was already used for different transfer data.', code: 'idempotency_conflict' }, 409)
+    }
+    return c.json({ ...(transferReceiptResponse(previousReceipt) as Record<string, unknown>), replayed: true })
+  }
   const product = await db.prepare('SELECT id, name FROM products WHERE id = @id').get<{ id: number; name: string }>({ id: productId })
   if (!product) return c.json({ error: 'Product not found' }, 404)
   const available = await branchStockQty(c.env, productId, fromBranchId)
@@ -1991,7 +2003,10 @@ app.post('/transfer', async (c) => {
   // movement stamps it; a multi-lot or partly-untracked transfer stays NULL.
   const movementBatchId = takes.length === 1 && uncovered === 0 ? takes[0].batchId : null
 
-  await db.batch([
+  const responsePayload = { success: true, fromBranchId, toBranchId, quantity, replayed: false }
+  const statements: Array<{ sql: string; params?: Record<string, unknown> }> = [
+    transferReceiptStatement({ actorId: user.id, requestId: clientRequestId!, digest: requestDigest, requestJson, responseJson: JSON.stringify(responsePayload) }),
+    transferIntentAuditStatement({ actorId: user.id, actorName: actorSnapshot(user), requestId: clientRequestId!, requestJson, digest: requestDigest, bulk: false }),
     canonicalTransferAuthorityGuardStatement(fromBranchId, toBranchId),
     { sql: 'UPDATE branch_stock SET quantity = quantity - @quantity WHERE product_id = @productId AND branch_id = @branchId', params: { quantity, productId, branchId: fromBranchId } },
     {
@@ -2004,9 +2019,9 @@ app.post('/transfer', async (c) => {
       incrementBatchStockStatement(take.batchId, toBranchId, take.quantity),
     ]),
     {
-      sql: `INSERT INTO stock_transfers (product_id, product_name, from_branch_id, to_branch_id, quantity, notes, user_id, user_name, created_at)
-            VALUES (@productId, @productName, @fromBranchId, @toBranchId, @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP)`,
-      params: { productId, productName: product.name, fromBranchId, toBranchId, quantity, reason, userId: user?.id ?? null, userName: actorSnapshot(user) },
+      sql: `INSERT INTO stock_transfers (product_id, product_name, from_branch_id, to_branch_id, quantity, notes, user_id, user_name, created_at, client_request_id)
+            VALUES (@productId, @productName, @fromBranchId, @toBranchId, @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @clientRequestId)`,
+      params: { productId, productName: product.name, fromBranchId, toBranchId, quantity, reason, userId: user?.id ?? null, userName: actorSnapshot(user), clientRequestId },
     },
     {
       sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
@@ -2018,9 +2033,19 @@ app.post('/transfer', async (c) => {
             VALUES (@productId, @productName, @branchId, @branchName, 'transfer_in', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
       params: { productId, productName: product.name, branchId: toBranchId, branchName: toBranch?.name || null, quantity, reason, userId: user?.id ?? null, userName: actorSnapshot(user), batchId: movementBatchId },
     },
-  ])
-
-  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'transfer', 'stock', productId, { productName: product.name, quantity, fromBranchId, toBranchId, lotsMoved: takes.length, uncoveredQuantity: uncovered || undefined })
+  ]
+  try {
+    await db.batch(statements)
+  } catch (error) {
+    const retryReceipt = await findTransferReceipt(db, user.id, clientRequestId)
+    if (retryReceipt) {
+      if (retryReceipt.request_digest !== requestDigest || retryReceipt.request_json !== requestJson) {
+        return c.json({ error: 'client_request_id was already used for different transfer data.', code: 'idempotency_conflict' }, 409)
+      }
+      return c.json({ ...(transferReceiptResponse(retryReceipt) as Record<string, unknown>), replayed: true })
+    }
+    throw error
+  }
   c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'transfer' }))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id: productId }))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'transfer', id: productId }))
@@ -2046,7 +2071,7 @@ app.post('/transfer', async (c) => {
     })
   })().catch((error) => console.error('[telegram] transfer notification failed', error)))
   // See the matching note in /adjust above -- same missing-`success`-field bug.
-  return c.json({ success: true, fromBranchId, toBranchId, quantity })
+  return c.json(responsePayload)
 })
 
 // DEPRECATED as a UI entry point: InventoryStockModals.tsx no longer has a
