@@ -52,6 +52,7 @@ const cases: Array<{ name: string; record: SaleRecord; contains: string[] }> = [
   { name: 'driver fee cost', record: { id: 'delivery', kind: 'delivery_added', changes: [c('driver', none, v({ id: 9, name: 'Dara', phone: '0123', address: 'Zone A' })), c('delivery_fee_usd', v(0), v(2.5)), c('actual_delivery_cost_usd', none, v(1.25))] }, contains: ['Dara · #9 · 0123 · Zone A', '$2.50', 'No actual delivery cost', '$1.25'] },
   { name: 'payment and status', record: { id: 'payment', kind: 'payment_changed', changes: [c('payment_method', v('Cash'), v('ABA')), c('payment_details', v([{ method: 'Cash', amount_usd: 20, amount_khr: 0 }]), v([{ method: 'ABA', amount_usd: 20, amount_khr: 0 }])), c('amount_paid_khr', v(0), v(80000)), c('sale_status', v('awaiting_payment'), v('completed'))] }, contains: ['Cash · $20.00', 'ABA · $20.00', '80,000៛', 'Not Paid', 'Completed'] },
   { name: 'customer and membership', record: { id: 'customer', kind: 'customer_changed', changes: [c('customer', none, v({ id: 5, name: 'Srey Mom' })), c('membership', unknown, v({ number: 'M-5', discount_usd: 1, discount_khr: null, points_redeemed: 3 }))] }, contains: ['General', 'Srey Mom', 'Historical details unavailable', 'M-5', 'Membership Discount: $1.00', 'Points Redeemed: 3'] },
+  { name: 'recovered items', record: { id: 'recovered', kind: 'sale_items_recovered', changes: [c('item_count', v(0), v(2)), c('stock_effect', none, v('deducted_now')), c('revision', v(1), v(2)), c('manifest_sha256', v('old'), v('new'))] }, contains: ['Product lines', '0', '2', 'Stock action', 'None', 'Stock deducted now'] },
 ]
 
 let failed = 0
@@ -77,6 +78,52 @@ try {
 } catch (error) {
   failed += 1
   console.error('FAIL rendered unchanged and tri-state distinction')
+  console.error(error)
+}
+
+try {
+  const rendered = html({ id: 'recovered-one-line', kind: 'sale_items_recovered', changes: [
+    c('item_count', v(0), v(1)),
+    c('stock_effect', none, v('released_allocation_only')),
+  ] })
+  for (const expected of ['Product lines', '>0<', '>1<', 'Stock action', 'Released allocation; no stock deduction']) {
+    assert.ok(rendered.includes(expected), `recovered one line is missing ${expected}: ${rendered}`)
+  }
+  assert.doesNotMatch(rendered, /released_allocation_only|item_count|stock_effect/)
+  console.log('PASS rendered recovery keeps zero and one product line visible')
+} catch (error) {
+  failed += 1
+  console.error('FAIL rendered recovery keeps zero and one product line visible')
+  console.error(error)
+}
+
+try {
+  const rendered = html({ id: 'released-allocation', kind: 'sale_items_recovered', changes: [
+    c('stock_effect', none, v('released_allocation_only')),
+    c('item_count', v(0), v(2)),
+  ] }, tKm)
+  assert.match(rendered, new RegExp(String(km.recovery_stock_action)))
+  assert.match(rendered, new RegExp(String(km.stock_released_allocation_only)))
+  assert.match(rendered, new RegExp(String(km.product_lines)))
+  assert.match(rendered, />0<[^]*>2</)
+  assert.doesNotMatch(rendered, /released_allocation_only|manifest_sha256|revision/)
+  console.log('PASS rendered recovery stock action uses localized safe values')
+} catch (error) {
+  failed += 1
+  console.error('FAIL rendered recovery stock action uses localized safe values')
+  console.error(error)
+}
+
+try {
+  const rendered = html({ id: 'deducted-khmer', kind: 'sale_items_recovered', changes: [
+    c('stock_effect', none, v('deducted_now')),
+  ] }, tKm)
+  assert.match(rendered, new RegExp(String(km.stock_deducted_now)))
+  assert.doesNotMatch(rendered, /deducted_now/)
+  console.log('PASS rendered recovery deducted stock uses Khmer safe value')
+} catch (error) {
+  failed += 1
+  console.error('FAIL rendered recovery deducted stock uses Khmer safe value')
   console.error(error)
 }
 
