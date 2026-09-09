@@ -118,6 +118,65 @@ function denyUnlessRestorePermission(c: any) {
   return null
 }
 
+// This one-time identity repair is driven only from the signed-in Admin UI.
+// The session cookie is SameSite=Lax, but an explicit exact-origin check keeps
+// the unsafe request boundary self-contained if cookie or browser behaviour
+// changes later. Browser fetches always send Origin for POST; rejecting a
+// missing value also prevents a copied command from bypassing the reviewed UI
+// preview/confirmation flow.
+function denyCrossOriginMaintenanceRequest(c: any, requireOrigin: boolean) {
+  const origin = c.req.header('Origin')
+  let requestOrigin = ''
+  try { requestOrigin = new URL(c.req.url).origin } catch { /* denied below */ }
+  if ((requireOrigin && !origin) || (origin && origin !== requestOrigin) || c.req.header('Sec-Fetch-Site') === 'cross-site') {
+    return c.json({ success: false, error: 'This maintenance action must be submitted from the same origin.' }, 403)
+  }
+  return null
+}
+
+// Keep the destructive router safe when mounted without index.ts (focused
+// route tests and future Worker compositions do this). Production's outer
+// admission guard uses the same limit before bootstrap/auth work; this second
+// bounded read reconstructs the request without decoding or re-encoding it.
+const MIGRATION_FINALIZE_BODY_BYTES = 768 * 1024
+async function admitMigrationFinalizeBody(c: any) {
+  const raw = c.req.raw as Request
+  const tooLarge = () => c.json({
+    success: false,
+    error: 'Request body is too large.',
+    code: 'request_body_too_large',
+    maxBytes: MIGRATION_FINALIZE_BODY_BYTES,
+  }, 413)
+  const length = raw.headers.get('content-length')
+  if (length !== null && /^\d+$/.test(length) && Number(length) > MIGRATION_FINALIZE_BODY_BYTES) {
+    await raw.body?.cancel().catch(() => {})
+    return tooLarge()
+  }
+  if (!raw.body) return null
+  const reader = raw.body.getReader()
+  const body = new Uint8Array(MIGRATION_FINALIZE_BODY_BYTES)
+  let size = 0
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (value.byteLength > MIGRATION_FINALIZE_BODY_BYTES - size) {
+        await reader.cancel().catch(() => {})
+        return tooLarge()
+      }
+      body.set(value, size)
+      size += value.byteLength
+    }
+  } catch {
+    await reader.cancel().catch(() => {})
+    return c.json({ success: false, error: 'Could not read request body.', code: 'request_body_unreadable' }, 400)
+  } finally {
+    reader.releaseLock()
+  }
+  c.req.raw = new Request(raw, { body: body.subarray(0, size) })
+  return null
+}
+
 // Simple fixed-window rate limit backed by the CACHE KV namespace. Mirrors
 // the intent of backend's applyRouteRateLimit (5 resets / 10 min) -- not a
 // byte-for-byte port, KV doesn't give us that, but it stops the same
@@ -676,8 +735,35 @@ app.post('/reset-section', async (c) => {
 // above, and only zero quantities -- no row is ever deleted here.
 // ---------------------------------------------------------------------------
 const LEGACY_SUBTOTAL_REPAIR_STEP = 'repair_sep23_subtotals'
-const MIGRATION_FINALIZE_STEPS = ['zero_stock', 'park_lots', LEGACY_SUBTOTAL_REPAIR_STEP] as const
+const GENERAL_CUSTOMER_REPAIR_STEP = 'mark_shared_general_24969'
+const MIGRATION_FINALIZE_STEPS = ['zero_stock', 'park_lots', LEGACY_SUBTOTAL_REPAIR_STEP, GENERAL_CUSTOMER_REPAIR_STEP] as const
 type MigrationFinalizeStep = typeof MIGRATION_FINALIZE_STEPS[number]
+
+app.get('/shared-general-customer-repair/preview', async (c) => {
+  c.header('Cache-Control', 'no-store')
+  const denied = denyUnlessRestorePermission(c)
+  if (denied) return denied
+  if (await rateLimited(c, 'general_customer_repair_preview', 10, 600)) {
+    return c.json({ success: false, error: 'Too many previews. Wait a few minutes and try again.' }, 429)
+  }
+
+  const repair = await import('../lib/generalCustomerRepair')
+  const user = c.get('user')
+  try {
+    return c.json(await repair.previewGeneralCustomerRepair(getDb(c.env), {
+      id: user?.id,
+      name: actorSnapshot(user),
+    }))
+  } catch (error) {
+    if (error instanceof repair.GeneralCustomerRepairValidationError) {
+      return c.json({ success: false, error: error.message }, 400)
+    }
+    if (error instanceof repair.GeneralCustomerRepairConflictError) {
+      return c.json({ success: false, error: error.message }, 409)
+    }
+    return c.json({ success: false, error: 'Could not preview the General customer repair. No data was changed.' }, 500)
+  }
+})
 
 app.get('/legacy-subtotal-repair/preview', async (c) => {
   c.header('Cache-Control', 'no-store')
@@ -701,6 +787,13 @@ app.get('/legacy-subtotal-repair/preview', async (c) => {
 app.post('/finalize-migration', async (c) => {
   const denied = denyUnlessRestorePermission(c)
   if (denied) return denied
+  const crossOrigin = denyCrossOriginMaintenanceRequest(c, false)
+  if (crossOrigin) return crossOrigin
+  // index.ts admits this endpoint before routing. Keep the same guard here as
+  // well so the destructive router remains safe when mounted in isolation by
+  // focused tests or a future Worker composition.
+  const bodyRejection = await admitMigrationFinalizeBody(c)
+  if (bodyRejection) return bodyRejection
   if (await rateLimited(c, 'finalize_migration', 10, 600)) {
     return c.json({ error: 'Too many attempts. Wait a few minutes and try again.' }, 429)
   }
@@ -713,6 +806,65 @@ app.post('/finalize-migration', async (c) => {
 
   const db = getDb(c.env)
   const user = c.get('user')
+
+  if (step === GENERAL_CUSTOMER_REPAIR_STEP) {
+    const missingOrigin = denyCrossOriginMaintenanceRequest(c, true)
+    if (missingOrigin) return missingOrigin
+    const repair = await import('../lib/generalCustomerRepair')
+    let plan
+    try {
+      plan = await repair.prepareGeneralCustomerRepair(db, body, {
+        id: user?.id,
+        name: actorSnapshot(user),
+      })
+    } catch (error) {
+      if (error instanceof repair.GeneralCustomerRepairValidationError) {
+        return c.json({ success: false, error: error.message }, 400)
+      }
+      if (error instanceof repair.GeneralCustomerRepairConflictError) {
+        return c.json({ success: false, error: error.message }, 409)
+      }
+      return c.json({ success: false, error: 'Could not validate the General customer repair request. No data was changed.' }, 500)
+    }
+
+    // Exact replay contains no customer mutation and therefore needs no new
+    // backup. A prepared apply cannot reach its atomic D1 batch until this
+    // customers-only snapshot succeeds.
+    if (plan.outcome === 'apply') {
+      try {
+        await createSectionBackup(c.env, repair.GENERAL_CUSTOMER_REPAIR_BACKUP_TABLES, 'manual')
+      } catch (error) {
+        return c.json({
+          success: false,
+          error: 'Aborted: could not create the customers backup first. No data was changed.',
+        }, 500)
+      }
+    }
+
+    try {
+      const result = await repair.applyGeneralCustomerRepair(db, plan)
+      // Capture the comparison token only after D1 has resolved to applied or
+      // exact replay. An unrelated pre-commit version advance must never be
+      // mistaken for this repair's successful invalidation.
+      const beforeToken = await repair.readGeneralCustomerRepairCacheToken(c.env)
+      const refresh = await repair.refreshGeneralCustomerRepair(c.env, beforeToken)
+      return c.json({
+        success: true,
+        outcome: result.outcome,
+        affected: { customers: result.changedCustomers },
+        verification_pending: result.verification_pending,
+        ...refresh,
+        message: result.outcome === 'applied'
+          ? 'Marked customer 24969 as the shared General checkout identity. Its profile and linked history were preserved, and a fresh customers backup was taken first.'
+          : 'This exact General customer repair was already applied. No customer row or backup changed; the cache refresh was retried.',
+      })
+    } catch (error) {
+      if (error instanceof repair.GeneralCustomerRepairConflictError) {
+        return c.json({ success: false, error: error.message }, 409)
+      }
+      return c.json({ success: false, error: 'General customer repair failed. The atomic batch changed no data.' }, 500)
+    }
+  }
 
   if (step === LEGACY_SUBTOTAL_REPAIR_STEP) {
     // Loaded only for this one-off path so the long-lived finalize actions and
