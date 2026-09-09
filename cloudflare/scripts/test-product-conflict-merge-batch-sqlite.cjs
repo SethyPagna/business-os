@@ -53,11 +53,6 @@ function adapter(d1, controls) {
       return {
         get: (params) => {
           controls.statementCount += 1
-          if (controls.failNextHistoryFinalize > 0
-            && /SELECT\s+id,\s*reversible,\s*status,\s*CAST\(json_extract\(undo_payload/i.test(sql)) {
-            controls.failNextHistoryFinalize -= 1
-            throw new Error('D1 DB is overloaded: injected history finalizer failure')
-          }
           return statement.get(params || {})
         },
         all: (params) => { controls.statementCount += 1; return statement.all(params || {}) },
@@ -68,6 +63,11 @@ function adapter(d1, controls) {
       statements.forEach(({ sql }) => enforceCompoundSelectLimit(sql))
       if (controls.beforeBatch) await controls.beforeBatch(statements)
       controls.statementCount += statements.length
+      if (controls.failNextHistoryFinalize > 0
+        && statements.some(({ sql }) => /UPDATE\s+action_history\s+SET\s+reversible=1,status='undoable'/i.test(sql))) {
+        controls.failNextHistoryFinalize -= 1
+        throw new Error('D1 DB is overloaded: injected history finalizer failure')
+      }
       const readOnly = statements.every(({ sql }) => /^\s*(?:SELECT|WITH|PRAGMA)\b/i.test(sql))
       if (!readOnly) return d1.batch(statements)
       const results = statements.map(({ sql, params }) => ({ success: true, results: d1.prepare(sql).all(params || {}) }))

@@ -147,8 +147,8 @@ async function main() {
   const foldWrites = counters.writes - beforeFolds.writes
   const foldBatches = counters.batches - beforeFolds.batches
   const foldAdapterCalls = foldReads + foldWrites + foldBatches
-  assert.ok(foldAdapterCalls <= 25 * 6, `trivial folds exceeded six D1 adapter calls each: ${foldAdapterCalls}`)
-  assert.equal(foldReads, 25 * 2, 'each fold performs only the two dependent history/fingerprint-ready reads')
+  assert.equal(foldAdapterCalls, 25 * 4, 'each fold performs exactly four bounded D1 batch calls')
+  assert.equal(foldReads, 0, 'batch insert metadata eliminates dependent history/fingerprint-ready reads')
   assert.equal(foldBatches, 25 * 4, 'each fold batches snapshot, writes, fingerprint and history finalization')
   const foldBatchSizes = counters.batchStatementCounts.slice(beforeFolds.batchStatementCounts.length)
   assert.deepEqual(
