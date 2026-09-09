@@ -36,6 +36,14 @@ const saleUnpaidKeys = [
   'rpt_pending_profit',
   'rpt_hint_pending_profit',
   'shift_report_hint',
+  'shift_credit_hint',
+  'sale_incident_recovery_status_awaiting_payment',
+  'sale_not_paid_stock_recovery_status',
+  'sale_not_paid_stock_recovery_desc',
+  'sale_not_paid_stock_recovery_success',
+  'sale_not_paid_stock_recovery_table_label',
+  'sale_not_paid_stock_recovery_title',
+  'record_kind_sale_stock_corrected',
 ] as const
 
 for (const key of saleUnpaidKeys) {
