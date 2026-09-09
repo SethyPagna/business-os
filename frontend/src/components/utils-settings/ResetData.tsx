@@ -15,6 +15,7 @@ import { refreshAppData } from '../../utils/appRefresh'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 import LegacySubtotalRepair from './LegacySubtotalRepair.tsx'
 import GeneralCustomerRepair from './GeneralCustomerRepair.tsx'
+import GeneralCustomerMembershipRepair from './GeneralCustomerMembershipRepair.tsx'
 import SaleNotPaidStockRecovery from './SaleNotPaidStockRecovery.tsx'
 
 type ResetMode = 'sales' | 'products' | 'all'
@@ -592,6 +593,7 @@ function SectionReset({ actionHistory = null }: ResetPanelProps) {
     <div className="space-y-4">
       <SaleNotPaidStockRecovery />
       <GeneralCustomerRepair />
+      <GeneralCustomerMembershipRepair />
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {SECTIONS.map((entry) => (
           <button

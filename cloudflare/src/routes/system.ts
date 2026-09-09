@@ -752,6 +752,75 @@ app.get('/shared-general-customer-repair/preview', async (c) => {
   }
 })
 
+// The marker repair above is immutable and intentionally preserves the old
+// profile row. This follow-up clears only the confirmed legacy membership from
+// that already-anonymous shared identity, with its own manifest and receipt.
+app.get('/shared-general-customer-membership-repair/preview', async (c) => {
+  c.header('Cache-Control', 'no-store')
+  const denied = denyUnlessRestorePermission(c)
+  if (denied) return denied
+  if (await rateLimited(c, 'general_customer_membership_repair_preview', 10, 600)) {
+    return c.json({ success: false, error: 'Too many previews. Wait a few minutes and try again.' }, 429)
+  }
+  const repair = await import('../lib/generalCustomerMembershipRepair')
+  const user = c.get('user')
+  try {
+    return c.json(await repair.previewGeneralCustomerMembershipRepair(getDb(c.env), { id: user?.id, name: actorSnapshot(user) }))
+  } catch (error) {
+    if (error instanceof repair.GeneralCustomerMembershipRepairValidationError) return c.json({ success: false, error: error.message }, 400)
+    if (error instanceof repair.GeneralCustomerMembershipRepairConflictError) return c.json({ success: false, error: error.message }, 409)
+    return c.json({ success: false, error: 'Could not preview the shared General membership repair. No data was changed.' }, 500)
+  }
+})
+
+app.post('/shared-general-customer-membership-repair/apply', async (c) => {
+  c.header('Cache-Control', 'no-store')
+  const denied = denyUnlessRestorePermission(c)
+  if (denied) return denied
+  const crossOrigin = denyCrossOriginMaintenanceRequest(c, true)
+  if (crossOrigin) return crossOrigin
+  if (await rateLimited(c, 'general_customer_membership_repair_apply', 5, 600)) {
+    return c.json({ success: false, error: 'Too many repair attempts. Wait a few minutes and try again.' }, 429)
+  }
+  const rawBody = await c.req.text()
+  if (new TextEncoder().encode(rawBody).byteLength > 4096) return c.json({ success: false, error: 'Repair request body is too large.' }, 413)
+  let body: unknown
+  try { body = JSON.parse(rawBody) } catch { return c.json({ success: false, error: 'Repair request must be valid JSON.' }, 400) }
+  const repair = await import('../lib/generalCustomerMembershipRepair')
+  const db = getDb(c.env)
+  const user = c.get('user')
+  let plan
+  try {
+    plan = await repair.prepareGeneralCustomerMembershipRepair(db, body, { id: user?.id, name: actorSnapshot(user) })
+  } catch (error) {
+    if (error instanceof repair.GeneralCustomerMembershipRepairValidationError) return c.json({ success: false, error: error.message }, 400)
+    if (error instanceof repair.GeneralCustomerMembershipRepairConflictError) return c.json({ success: false, error: error.message }, 409)
+    return c.json({ success: false, error: 'Could not validate the shared General membership repair. No data was changed.' }, 500)
+  }
+  if (plan.outcome === 'apply') {
+    try { await createSectionBackup(c.env, ['customers', 'action_history', 'audit_logs'], 'manual') }
+    catch { return c.json({ success: false, error: 'Aborted: could not create the customer repair backup first. No data was changed.' }, 500) }
+  }
+  const beforeToken = await repair.readGeneralCustomerMembershipRepairCacheToken(c.env)
+  try {
+    const result = await repair.applyGeneralCustomerMembershipRepair(db, plan)
+    const refresh = await repair.refreshGeneralCustomerMembershipRepair(c.env, beforeToken)
+    return c.json({
+      success: true,
+      outcome: result.outcome,
+      affected: { customers: result.changedCustomers },
+      verification_pending: result.verification_pending,
+      ...refresh,
+      message: result.outcome === 'applied'
+        ? 'Cleared the legacy membership from the shared General customer. Sales and links were preserved.'
+        : 'This exact shared General membership repair was already applied. No customer, history or audit row changed.',
+    })
+  } catch (error) {
+    if (error instanceof repair.GeneralCustomerMembershipRepairConflictError) return c.json({ success: false, error: error.message }, 409)
+    return c.json({ success: false, error: 'Shared General membership repair failed. The atomic batch changed no data.' }, 500)
+  }
+})
+
 app.get('/sale-incident-recovery-20260909/preview', async (c) => {
   c.header('Cache-Control', 'no-store')
   const denied = denyUnlessRestorePermission(c)
