@@ -7,9 +7,9 @@
     "session_id": "general_backend"
   },
   "status": "completed",
-  "summary": "Prepared a fixed, authenticated Admin recovery for the three sales whose line costs are supported by sale-time product fingerprints. Preview is no-store and digest-bound; apply requires backup_restore, a same-origin exact body, rate/body gates and a fresh backup, then restores four lines and allocations for sales 16951-16953 in one guarded D1 batch with a durable receipt, non-reversible history and redacted provenance audit. Sale 16951 alone deducts stock and records a sale movement because it is completed; awaiting sales 16952-16953 receive released allocations without stock effects. Sale 16952 keeps its later USD 2.70 fee/actual-cost edits and repairs only item-derived subtotal/total. Sale 16954 is reported as blocked because current product cost matches its pre-sale lot cost but the product row was updated after the sale, so sale-time product cost is not proven.",
+  "summary": "Prepared a fixed, authenticated Admin recovery for the three sales whose line costs are supported by sale-time product fingerprints. Preview is no-store and digest-bound; apply requires backup_restore, a same-origin exact body, rate/body gates and a fresh backup, then restores four lines and allocations for sales 16951-16953 in one guarded D1 batch with an append-only durable receipt, non-reversible history and redacted provenance audit. Receipt-backed replay remains valid after legitimate later sale or stock activity, while immediate after-state read failures are reported honestly as verification_pending or HTTP 202 uncertain for exact-request replay. Sale 16951 alone deducts stock and records a sale movement because it is completed; awaiting sales 16952-16953 receive released allocations without stock effects. Sale 16952 keeps its later USD 2.70 fee/actual-cost edits and repairs only item-derived subtotal/total. Sale 16954 is reported as blocked because current product cost matches its pre-sale lot cost but the product row was updated after the sale, so sale-time product cost is not proven.",
   "base_sha": "4285586ed72cab5014428120dcdc03e7d09dd604",
-  "head_sha": "3eef3a04c3c22295f2b6a8d2c75af29ace896a8c",
+  "head_sha": "5e61505c3265025c7148728c4350e3857c99000b",
   "workspace": {
     "branch": "codex/sale-zero-items-recovery-20260909",
     "worktree": "C:/Users/mrkl6/Downloads/bos-sale-zero-items-recovery-20260909",
@@ -19,15 +19,16 @@
     "dirty_after": []
   },
   "changes": [
-    "Added migration 0145 with one fixed-incident durable receipt, three fixed-sale receipt members and a transient atomic guard; registered durable receipt tables in backup/restore and reset ordering.",
-    "Added saleIncidentRecovery helper with exact target/snapshot/cost/lot/effect fingerprints, digest-bound preview, one D1 batch, strict stock subtraction, released awaiting allocations, receipt reconciliation, postcondition verification and explicit unknown optional price fields.",
-    "Added authenticated no-store preview and backup-first same-origin apply routes with backup_restore permission, rate and body-size limits, post-commit cache/broadcast refresh and fixed response contracts.",
-    "Added focused real-Hono migrated-SQLite coverage for permission, preview contract, exact apply/replay, stale state, lost response, rollback, backup failure, origin/body/rate gates, sale 16952 preservation and explicit null pricing metadata.",
+    "Added migration 0145 with fixed-incident durable receipts, fixed-sale receipt members and a transient atomic guard; registered durable receipt tables in backup/restore and reset ordering, and made receipt/member rows append-only outside guarded restore/reset.",
+    "Added saleIncidentRecovery helper with exact target/snapshot/cost/product/lot/effect fingerprints, digest-bound preview, one D1 batch, strict stock subtraction, released awaiting allocations, durable receipt reconciliation, immediate postcondition verification and explicit unknown optional price fields.",
+    "Added authenticated no-store preview and backup-first same-origin apply routes with backup_restore permission, rate and body-size limits, post-commit cache/broadcast refresh, fixed success contracts and an explicit HTTP 202 uncertain contract for ambiguous post-commit receipt reads.",
+    "Added focused real-Hono migrated-SQLite coverage for permission, preview contract, exact apply/replay after later legitimate activity, stale sale and lot-label races, lost response, uncertain and verification-pending outcomes, rollback, backup failure, origin/body/rate gates, sale 16952 preservation and explicit null pricing metadata.",
     "Added a read-only evidence compiler, preview contract validator, current production evidence summary, offline manifest and explicitly read-only pre/post SQL review queries."
   ],
   "commits": [
     "a45da43d8cac4782aa2828388e2cca6422917b27",
-    "3eef3a04c3c22295f2b6a8d2c75af29ace896a8c"
+    "3eef3a04c3c22295f2b6a8d2c75af29ace896a8c",
+    "5e61505c3265025c7148728c4350e3857c99000b"
   ],
   "evidence": [
     {
@@ -53,6 +54,18 @@
       "source": "cloudflare/src/lib/db.ts and cloudflare/src/routes/system.ts",
       "locator": "D1Compat.batch and /sale-incident-recovery-20260909/apply",
       "observed": "The route prepares all sale/item/allocation/stock/movement/history/audit/receipt statements and submits them through one db.batch call after the backup succeeds; raw SQL output is labeled read-only."
+    },
+    {
+      "claim": "The durable receipt is the exact-once replay authority and is immutable during ordinary runtime.",
+      "source": "cloudflare/migrations/0145_sale_incident_recovery_receipts.sql and cloudflare/src/lib/saleIncidentRecovery.ts",
+      "locator": "receipt/member append-only triggers; prepare and execute receipt branches",
+      "observed": "Ordinary UPDATE/DELETE of receipts or members aborts; reset/restore must install the existing guarded system flag. A matching digest replays the stored response without comparing later mutable stock or sale revision values."
+    },
+    {
+      "claim": "Ambiguous post-commit reads do not claim rollback or silently complete.",
+      "source": "cloudflare/src/lib/saleIncidentRecovery.ts and cloudflare/src/routes/system.ts",
+      "locator": "SaleIncidentRecoveryUncertainError and apply catch mapping",
+      "observed": "A successful batch with unavailable immediate after-state returns verification_pending; an ambiguous D1 response plus unavailable receipt read returns HTTP 202 uncertain with the operation and manifest identifiers for exact-request replay."
     }
   ],
   "verification": [
@@ -61,7 +74,7 @@
       "scope": "real Hono route over the complete migrated SQLite schema",
       "exit_code": 0,
       "expected": "Permission, fixed preview, atomic apply, exact replay, stale guard, lost response, rollback, backup, origin, body and rate contracts pass.",
-      "observed": "Six PASS groups; all asserted sale/item/allocation/stock/movement/receipt/history/audit and sale 16952 financial effects matched."
+      "observed": "Ten PASS groups covered migration immutability, permission, apply and replay after later legitimate activity, stale header, lot-label race rollback, lost response reconciliation, unresolved receipt-read uncertainty, verification_pending, late-audit rollback, and backup/origin/body/rate gates."
     },
     {
       "command": "node scripts/test-backup-replay-coverage-pure.cjs",
@@ -96,7 +109,7 @@
     "The v1 helper intentionally fails closed if any sale, revision, product, stock or unique-positive-lot fingerprint changes before apply; a new reviewed manifest/code update would then be required.",
     "Recovery-time lot attribution is recorded explicitly and is not represented as proof of the originally intended lot.",
     "Sale 16954 remains itemless until a pre-sale product-cost source is found and a separate v2 recovery is reviewed.",
-    "Independent security/data-integrity review and full release gates are still required before migration 0145 or the Worker route can be deployed."
+    "Independent security/data-integrity review of exact runtime 5e61505c and full release gates are still required before migration 0145 or the Worker route can be deployed."
   ],
   "blockers": [],
   "not_done": [
@@ -104,5 +117,5 @@
     "No line, stock or money value for sale 16954 was written or represented as proven.",
     "No frontend file was edited; the separate UI owner received the frozen preview/apply contract."
   ],
-  "handoff": "Independent review should pin runtime commit 3eef3a04c3c22295f2b6a8d2c75af29ace896a8c, inspect D1 guard/postcondition semantics and run the two focused tests plus Worker typecheck. Release must apply only migration 0145, deploy the Worker/UI, obtain a fresh no-store preview, and let the normal Admin UI submit the exact held request. If preview returns 409, do not weaken guards; refresh production evidence and revise the fixed manifest. Sale 16954 needs separate pre-sale product-cost evidence and a v2 receipt before recovery."
+  "handoff": "Independent review should pin runtime commit 5e61505c3265025c7148728c4350e3857c99000b, inspect D1 guard/receipt/postcondition semantics and run the two focused tests plus Worker typecheck. Pair it with frontend follow-up 005eb86272c639a9c0b050ba780f53eadd68d3db, which accepts the exact HTTP 202 uncertainty and 200 verification_pending contracts. Release must apply only migration 0145, deploy the Worker/UI, obtain a fresh no-store preview, and let the normal Admin UI submit the exact held request. If preview returns 409, keep the guards and refresh production evidence before revising the fixed manifest. Sale 16954 needs separate pre-sale product-cost evidence and a v2 receipt before recovery."
 }
