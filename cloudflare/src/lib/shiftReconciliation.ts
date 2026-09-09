@@ -18,6 +18,7 @@
  * them would invent an exchange rate):
  *
  *     expected   = opening float
+ *                + additional cash added after opening
  *                + cash tenders of sales rung in the shift
  *                - cash refunds issued during the shift
  *                - expenses recorded in the shift window
@@ -70,6 +71,8 @@ export type ShiftCount = { usd: number | null; khr: number | null }
 
 export type ShiftReconciliation = {
   opening: ShiftCount
+  /** Cash added to the drawer after opening, before the closing count. */
+  additional_cash: ShiftMoney
   cash_sales: ShiftMoney
   refunds: ShiftMoney
   expenses: ShiftMoney
@@ -103,6 +106,7 @@ export const SHIFT_REVIEW = {
 
 export type ShiftReconciliationInput = {
   opening: Partial<ShiftCount> | null | undefined
+  additionalCash?: Partial<ShiftMoney> | null | undefined
   cashSales: Partial<ShiftMoney> | null | undefined
   refunds: Partial<ShiftMoney> | null | undefined
   expenses: Partial<ShiftMoney> | null | undefined
@@ -124,18 +128,20 @@ function countOf(value: Partial<ShiftCount> | null | undefined): ShiftCount {
 /** The whole arithmetic, pure. Every caller goes through this. */
 export function computeShiftReconciliation(input: ShiftReconciliationInput): ShiftReconciliation {
   const opening = countOf(input.opening)
+  const additionalCash = money(input.additionalCash)
   const cashSales = money(input.cashSales)
   const refunds = money(input.refunds)
   const expenses = money(input.expenses)
   const courier = money(input.courier)
   const counted = countOf(input.counted)
   const expected: ShiftCount = {
-    usd: opening.usd == null ? null : round2(opening.usd + cashSales.usd - refunds.usd - expenses.usd - courier.usd),
-    khr: opening.khr == null ? null : roundKhr(opening.khr + cashSales.khr - refunds.khr - expenses.khr - courier.khr),
+    usd: opening.usd == null ? null : round2(opening.usd + additionalCash.usd + cashSales.usd - refunds.usd - expenses.usd - courier.usd),
+    khr: opening.khr == null ? null : roundKhr(opening.khr + additionalCash.khr + cashSales.khr - refunds.khr - expenses.khr - courier.khr),
   }
   const codes = [...new Set((input.reviewCodes ?? []).filter(Boolean).map(String))].sort()
   return {
     opening,
+    additional_cash: additionalCash,
     cash_sales: cashSales,
     refunds,
     expenses,
@@ -242,6 +248,8 @@ export type ShiftReconciliationSession = {
   cancelled_at?: string | null
   opening_float_usd: number | null
   opening_float_khr: number | null
+  additional_cash_usd?: number | null
+  additional_cash_khr?: number | null
   closing_counted_usd?: number | null
   closing_counted_khr?: number | null
 }
@@ -399,6 +407,7 @@ export async function loadShiftReconciliation(
   ])
   return computeShiftReconciliation({
     opening: { usd: shift.opening_float_usd, khr: shift.opening_float_khr },
+    additionalCash: { usd: shift.additional_cash_usd ?? 0, khr: shift.additional_cash_khr ?? 0 },
     cashSales: cash,
     refunds,
     expenses,
@@ -437,6 +446,8 @@ export async function loadShiftReconciliation(
 export type ShiftFigures = {
   /** Registered cash at OPEN, per currency. Report-only. */
   opening: ShiftCount
+  /** Cash added after opening; report-only, never a business result. */
+  additional_cash: ShiftMoney
   /** Registered cash at END, per currency; null where nobody counted. */
   closing: ShiftCount
   sales_usd: number
@@ -465,6 +476,7 @@ export type ShiftFigures = {
 
 export type ShiftFiguresInput = {
   opening: Partial<ShiftCount> | null | undefined
+  additionalCash?: Partial<ShiftMoney> | null | undefined
   counted: Partial<ShiftCount> | null | undefined
   totals: {
     revenue_usd?: unknown; cost_usd?: unknown; profit_usd?: unknown
@@ -486,6 +498,7 @@ export function composeShiftFigures(input: ShiftFiguresInput): ShiftFigures {
   const totals = input.totals ?? {}
   return {
     opening: countOf(input.opening),
+    additional_cash: money(input.additionalCash),
     closing: countOf(input.counted),
     sales_usd: round2(finite(totals.revenue_usd)),
     cogs_usd: round2(finite(totals.cost_usd)),
@@ -540,6 +553,7 @@ export async function loadShiftFigures(
   ])
   return composeShiftFigures({
     opening: { usd: shift.opening_float_usd, khr: shift.opening_float_khr },
+    additionalCash: { usd: shift.additional_cash_usd ?? 0, khr: shift.additional_cash_khr ?? 0 },
     counted: { usd: shift.closing_counted_usd ?? null, khr: shift.closing_counted_khr ?? null },
     totals,
     expenses,

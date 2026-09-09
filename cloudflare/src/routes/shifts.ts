@@ -18,6 +18,7 @@ export type ShiftRow = {
   id: number; shift_code: string; scope_mode: ShiftScopeMode; user_id: number; user_name: string | null
   branch_id: number | null; branch_name: string | null; business_date: string; opened_at: string
   opening_float_usd: number | null; opening_float_khr: number | null; opening_note: string | null; closed_at: string | null
+  additional_cash_usd: number; additional_cash_khr: number
   closing_counted_usd: number | null; closing_counted_khr: number | null; closing_note: string | null
   closed_by_user_id: number | null; closed_by_user_name: string | null; revision: number
   parent_shift_id: number | null; reopen_reason: string | null
@@ -33,7 +34,7 @@ const SHIFT_COLUMNS = `id, shift_code, scope_mode, user_id, user_name, branch_id
   opened_at,
   CASE WHEN opening_float_usd_registered=1 THEN opening_float_usd ELSE NULL END AS opening_float_usd,
   CASE WHEN opening_float_khr_registered=1 THEN opening_float_khr ELSE NULL END AS opening_float_khr,
-  opening_note,
+  opening_note, additional_cash_usd, additional_cash_khr,
   closed_at, closing_counted_usd, closing_counted_khr, closing_note,
   closed_by_user_id, closed_by_user_name, revision,
   parent_shift_id, reopen_reason, reopened_by_user_id, reopened_by_user_name,
@@ -75,6 +76,13 @@ function countedMoney(value: unknown): { ok: true; value: number | null } | { ok
   if (typeof value === 'string' && value.trim() === '') return { ok: true, value: null }
   const n = Number(typeof value === 'string' ? value.trim() : value)
   return Number.isFinite(n) && n >= 0 ? { ok: true, value: Math.round(n * 100) / 100 } : { ok: false }
+}
+/** Additional cash is an optional non-negative inflow. Blank means no cash
+ * was added, so it is stored as numeric zero and never changes the opening or
+ * closing registration. */
+function additionalMoney(value: unknown): { ok: true; value: number } | { ok: false } {
+  const parsed = countedMoney(value)
+  return parsed.ok ? { ok: true, value: parsed.value ?? 0 } : parsed
 }
 function optionalText(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
@@ -249,7 +257,8 @@ async function writeContinuation(db: D1Compat, user: SessionUser, parent: ShiftD
   const childSnapshot = { shift_code: child.shiftCode, scope_mode: parent.scope_mode, user_id: parent.user_id,
     user_name: parent.user_name, branch_id: parent.branch_id, branch_name: parent.branch_name,
     business_date: parent.business_date, opened_at: child.openedAt, opening_float_usd: child.floatUsd,
-    opening_float_khr: child.floatKhr, opening_note: child.note, parent_shift_id: parent.id,
+    opening_float_khr: child.floatKhr, opening_note: child.note, additional_cash_usd: 0, additional_cash_khr: 0,
+    parent_shift_id: parent.id,
     reopen_reason: child.reason, reopened_by_user_id: child.actorId, reopened_by_user_name: child.actorName,
     closed_at: null, cancelled_at: null, revision: 0 }
   let results: unknown[]
@@ -463,20 +472,24 @@ app.post('/open', async (c) => {
 
 async function writeClose(db: D1Compat, user: SessionUser, row: ShiftDbRow, input: {
   closedAt: string; recordedAt: string; countedUsd: number | null; countedKhr: number | null
+  additionalUsd: number; additionalKhr: number
   note: string | null; deviceName: string | null; reason: string
 }): Promise<{ changed: boolean; shift: ShiftDbRow | undefined }> {
   const shift = storedShift(row)
   const after = { ...shift, closed_at: input.closedAt, closing_counted_usd: input.countedUsd,
-    closing_counted_khr: input.countedKhr, closing_note: input.note, closed_by_user_id: user.id,
+    closing_counted_khr: input.countedKhr, additional_cash_usd: input.additionalUsd, additional_cash_khr: input.additionalKhr,
+    closing_note: input.note, closed_by_user_id: user.id,
     closed_by_user_name: displayName(user), revision: shift.revision + 1 }
   const actorName = displayName(user)
   const results = await db.batch([
     { sql: `UPDATE shift_sessions SET closed_at=@closedAt, closing_counted_usd=@countedUsd,
-        closing_counted_khr=@countedKhr, closing_note=@note, closed_device_name=@deviceName,
+        closing_counted_khr=@countedKhr, additional_cash_usd=@additionalUsd, additional_cash_khr=@additionalKhr,
+        closing_note=@note, closed_device_name=@deviceName,
         closed_by_user_id=@closerId, closed_by_user_name=@closerName, revision=revision+1, updated_at=@recordedAt
         WHERE id=@id AND revision=@revision AND closed_at IS NULL`,
       params: { id: shift.id, revision: shift.revision, closedAt: input.closedAt, countedUsd: input.countedUsd,
-        countedKhr: input.countedKhr, note: input.note, deviceName: input.deviceName,
+        countedKhr: input.countedKhr, additionalUsd: input.additionalUsd, additionalKhr: input.additionalKhr,
+        note: input.note, deviceName: input.deviceName,
         closerId: user.id, closerName: actorName, recordedAt: input.recordedAt } },
     { sql: `INSERT INTO shift_session_amendments (shift_session_id,actor_user_id,actor_name,reason,before_json,after_json,created_at)
         SELECT @id,@actorId,@actorName,@reason,@beforeJson,@afterJson,@createdAt FROM shift_sessions
@@ -507,11 +520,14 @@ app.post('/close', async (c) => {
   // Blank is "not counted", not a refusal -- see countedMoney.
   const countedUsd = countedMoney(body.closing_counted_usd); const countedKhr = countedMoney(body.closing_counted_khr)
   if (!countedUsd.ok || !countedKhr.ok) return c.json({ error: 'Closing counts must be 0 or more, or left blank.' }, 400)
+  const additionalUsd = additionalMoney(body.additional_cash_usd); const additionalKhr = additionalMoney(body.additional_cash_khr)
+  if (!additionalUsd.ok || !additionalKhr.ok) return c.json({ error: 'Additional cash must be 0 or more, or left blank.' }, 400)
   const closedAt = new Date().toISOString()
   const overlap = await intervalError(db, storedShift(shift), shift.opened_at, closedAt)
   if (overlap) return c.json({ error: overlap }, 409)
   const result = await writeClose(db, user, shift, { closedAt, recordedAt: closedAt,
     countedUsd: countedUsd.value, countedKhr: countedKhr.value,
+    additionalUsd: additionalUsd.value, additionalKhr: additionalKhr.value,
     note: optionalText(body.closing_note), deviceName: c.req.header('X-Device-Name') || null, reason: 'Manual shift close' })
   if (result.changed) {
     const report = sendTelegramShiftReport(c.env, shift.id)
@@ -536,6 +552,8 @@ app.post('/:id/close', async (c) => {
   if (parsedClosedAt.getTime() > now) return c.json({ error: 'Closing time cannot be in the future.' }, 400)
   const countedUsd = countedMoney(body.closing_counted_usd); const countedKhr = countedMoney(body.closing_counted_khr)
   if (!countedUsd.ok || !countedKhr.ok) return c.json({ error: 'Closing counts must be 0 or more, or left blank.' }, 400)
+  const additionalUsd = additionalMoney(body.additional_cash_usd); const additionalKhr = additionalMoney(body.additional_cash_khr)
+  if (!additionalUsd.ok || !additionalKhr.ok) return c.json({ error: 'Additional cash must be 0 or more, or left blank.' }, 400)
   const db = getDb(c.env); const shift = await readShiftById(db, id)
   if (!shift) return c.json({ error: 'Shift not found.' }, 404)
   if (shift.branch_id != null && !(await resolveBranch(db, shift.branch_id))) return c.json({ error: 'Shift not found.' }, 404)
@@ -548,6 +566,7 @@ app.post('/:id/close', async (c) => {
   if (overlap) return c.json({ error: overlap }, 409)
   const result = await writeClose(db, user, shift, { closedAt, recordedAt: new Date().toISOString(),
     countedUsd: countedUsd.value, countedKhr: countedKhr.value,
+    additionalUsd: additionalUsd.value, additionalKhr: additionalKhr.value,
     note: optionalText(body.closing_note), deviceName: c.req.header('X-Device-Name') || null, reason: 'Historic manual close' })
   if (!result.changed || !result.shift) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
   const report = sendTelegramShiftReport(c.env, shift.id)
@@ -656,6 +675,10 @@ app.patch('/:id', async (c) => {
     ? countedMoney(body.opening_float_usd) : { ok: true as const, value: before.opening_float_usd }
   const openingKhrParsed = 'opening_float_khr' in body
     ? countedMoney(body.opening_float_khr) : { ok: true as const, value: before.opening_float_khr }
+  const additionalUsdParsed = 'additional_cash_usd' in body
+    ? additionalMoney(body.additional_cash_usd) : { ok: true as const, value: before.additional_cash_usd ?? 0 }
+  const additionalKhrParsed = 'additional_cash_khr' in body
+    ? additionalMoney(body.additional_cash_khr) : { ok: true as const, value: before.additional_cash_khr ?? 0 }
   // The counted drawer stays OPTIONAL after the close, exactly as it is at the
   // close itself: a shift that was ended without a count must still be
   // amendable (opening time, notes, the closing timestamp), and requiring the
@@ -664,14 +687,16 @@ app.patch('/:id', async (c) => {
     ? countedMoney(body.closing_counted_usd) : { ok: true as const, value: before.closing_counted_usd }
   const closingKhrParsed = closedAt && 'closing_counted_khr' in body
     ? countedMoney(body.closing_counted_khr) : { ok: true as const, value: before.closing_counted_khr }
-  if (!openingUsdParsed.ok || !openingKhrParsed.ok || !closingUsdParsed.ok || !closingKhrParsed.ok) {
+  if (!openingUsdParsed.ok || !openingKhrParsed.ok || !additionalUsdParsed.ok || !additionalKhrParsed.ok || !closingUsdParsed.ok || !closingKhrParsed.ok) {
     return c.json({ error: 'Shift cash counts must be finite, non-negative numbers.' }, 400)
   }
   const openingUsd = openingUsdParsed.value; const openingKhr = openingKhrParsed.value
+  const additionalUsd = additionalUsdParsed.value; const additionalKhr = additionalKhrParsed.value
   const closingUsd = closingUsdParsed.value; const closingKhr = closingKhrParsed.value
   const beforeStored = storedShift(before)
   const after = { ...beforeStored, opened_at: openedAt,
     opening_float_usd: openingUsd, opening_float_khr: openingKhr,
+    additional_cash_usd: additionalUsd, additional_cash_khr: additionalKhr,
     opening_note: 'opening_note' in body ? optionalText(body.opening_note) : before.opening_note,
     closed_at: closedAt,
     closing_counted_usd: closedAt ? closingUsd : null,
@@ -703,13 +728,15 @@ app.patch('/:id', async (c) => {
     { sql: `UPDATE shift_sessions SET opened_at=@openedAt,
         opening_float_usd=@storedOpeningUsd, opening_float_khr=@storedOpeningKhr,
         opening_float_usd_registered=@openingUsdRegistered, opening_float_khr_registered=@openingKhrRegistered,
-        opening_note=@openingNote, closed_at=@closedAt, closing_counted_usd=@closingUsd, closing_counted_khr=@closingKhr,
+        opening_note=@openingNote, additional_cash_usd=@additionalUsd, additional_cash_khr=@additionalKhr,
+        closed_at=@closedAt, closing_counted_usd=@closingUsd, closing_counted_khr=@closingKhr,
         closing_note=@closingNote, revision=revision+1, updated_at=@updatedAt WHERE id=@id AND revision=@revision`,
       params: { id, revision: expectedRevision, openedAt: after.opened_at,
         storedOpeningUsd: after.opening_float_usd ?? 0, storedOpeningKhr: after.opening_float_khr ?? 0,
         openingUsdRegistered: after.opening_float_usd == null ? 0 : 1,
         openingKhrRegistered: after.opening_float_khr == null ? 0 : 1,
-        openingNote: after.opening_note, closedAt: after.closed_at,
+        openingNote: after.opening_note, additionalUsd: after.additional_cash_usd, additionalKhr: after.additional_cash_khr,
+        closedAt: after.closed_at,
         closingUsd: after.closing_counted_usd, closingKhr: after.closing_counted_khr, closingNote: after.closing_note, updatedAt: nowIso } },
     { sql: `INSERT INTO shift_session_amendments (shift_session_id, actor_user_id, actor_name, reason, before_json, after_json, created_at)
         SELECT @id,@actorId,@actorName,@reason,@beforeJson,@afterJson,@createdAt FROM shift_sessions

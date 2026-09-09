@@ -4,6 +4,7 @@ export type ShiftCountPairValue = { usd: number | null; khr: number | null }
 
 export type ShiftFiguresShape = {
   opening: ShiftCountPairValue
+  additional_cash?: { usd: number; khr: number }
   closing: ShiftCountPairValue
   sales_usd: number
   cogs_usd: number

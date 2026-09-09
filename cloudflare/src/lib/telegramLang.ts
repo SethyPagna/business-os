@@ -183,6 +183,8 @@ const LABELS = {
   // reading the phone message and the shift screen sees the same terms.
   cashOpen: { en: 'Opening cash', km: 'សាច់ប្រាក់ដើមវេន' },
   cashEnd: { en: 'Closing cash', km: 'សាច់ប្រាក់បិទវេន' },
+  additionalCash: { en: 'Additional cash', km: 'សាច់ប្រាក់បន្ថែម' },
+  expectedCash: { en: 'Expected cash', km: 'សាច់ប្រាក់ត្រូវមាន' },
   // ONE refunds line (no per-return breakdown) and ONE informational
   // difference line -- never "shortage", never a must-match claim. Computed
   // by lib/shiftReconciliation.ts, the one shared drawer definition, but

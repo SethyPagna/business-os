@@ -3,9 +3,9 @@ import InfoHint from '../shared/InfoHint.tsx'
 import { shiftCountedPairText } from './shiftReportModel.ts'
 import type { ShiftReconciliation } from '../../api/shiftTransport.ts'
 
-// The eight drawer rows, in the owner's reading order:
-//
-//   Opening · Cash sales · Refunds · Expenses · Courier · Expected · Counted · Difference
+// The drawer rows, in the owner's reading order. Returns are shown in the
+// shift business figures; this block stays focused on cash movements that
+// explain the expected drawer.
 //
 // Every figure comes from the server's single reconciliation
 // (cloudflare/src/lib/shiftReconciliation.ts). Nothing is recomputed here --
@@ -36,9 +36,7 @@ export default function ShiftCashBreakdown({ reconciliation, className = '' }: P
   }
   if (!reconciliation) return null
 
-  const pair = (usd: number | null, khr: number | null) => usd == null || khr == null
-    ? '—'
-    : `${fmtUSD(usd)} · ${fmtKHR(khr)}`
+  const pair = (usd: number | null, khr: number | null) => shiftCountedPairText(usd, khr, fmtUSD, fmtKHR)
   // The COUNTED row is the one pair that can be half-present: a cashier may
   // count the dollars and leave the riel blank, and that half is a fact they
   // recorded. shiftCountedPairText is the shared rule -- the summary header
@@ -52,8 +50,8 @@ export default function ShiftCashBreakdown({ reconciliation, className = '' }: P
 
   const rows: { key: string; label: string; value: string }[] = [
     { key: 'shift_recon_opening', label: t('shift_recon_opening'), value: countedPair(reconciliation.opening.usd, reconciliation.opening.khr) },
+    { key: 'shift_recon_additional_cash', label: t('shift_recon_additional_cash'), value: `+ ${pair(reconciliation.additional_cash?.usd ?? 0, reconciliation.additional_cash?.khr ?? 0)}` },
     { key: 'shift_recon_cash_sales', label: t('shift_recon_cash_sales'), value: pair(reconciliation.cash_sales.usd, reconciliation.cash_sales.khr) },
-    { key: 'refunds', label: t('refunds'), value: `− ${pair(reconciliation.refunds.usd, reconciliation.refunds.khr)}` },
     { key: 'fees', label: t('fees'), value: `− ${pair(reconciliation.expenses.usd, reconciliation.expenses.khr)}` },
     { key: 'courier', label: t('courier'), value: `− ${pair(reconciliation.courier.usd, reconciliation.courier.khr)}` },
   ]

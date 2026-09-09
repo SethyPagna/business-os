@@ -131,6 +131,8 @@ const CLOSED = {
   opened_at: '2026-09-04T01:15:00.000Z',
   opening_float_usd: 50,
   opening_float_khr: 100000,
+  additional_cash_usd: 10,
+  additional_cash_khr: 5000,
   closed_at: '2026-09-04T10:02:00.000Z',
   closing_counted_usd: 256,
   closing_counted_khr: 100000,
@@ -178,7 +180,7 @@ const ORDER = [
   'Sales', 'Profit', 'Expenses', 'Delivery fee', 'Not Paid',
   'Invoices',
   'Opening cash', 'Closing cash',
-  'Delivery cost', 'Other expenses', 'Difference',
+  'Additional cash', 'Delivery cost', 'Other expenses', 'Expected cash', 'Difference',
 ]
 let cursor = -1
 for (const english of ORDER) {
@@ -243,7 +245,7 @@ console.log('PASS figures: money, both currencies, dd/mm/yyyy 24-hour local time
 // REPORT. Nothing here is an "expected must match" gate, and the difference
 // line is informational. A regression that reintroduces alarm wording would
 // turn a factual readout into an accusation.
-for (const banned of ['shortage', 'short by', 'must match', 'mismatch', 'Expected', 'Final amount', 'discrepanc']) {
+for (const banned of ['shortage', 'short by', 'must match', 'mismatch', 'Final amount', 'discrepanc']) {
   assert.ok(!new RegExp(banned, 'i').test(report), `the report reintroduced "${banned}" -- the cash block is a readout, not a check:\n${report}`)
 }
 // And no explanatory sentence anywhere: every line is a label and a figure,
@@ -277,19 +279,21 @@ console.log('PASS honesty: an unrecorded courier cost prints no line and enters 
 assert.equal(lines.filter((line) => line.startsWith(`Difference${SEP}`)).length, 1)
 // opening 50 + cash 210 - refunds 12 - expenses 4 - courier 3.50 = 240.50,
 // counted 256 -> +15.50. Riel: 100,000 in, 100,000 counted -> 0.
-assert.equal(valueOf('Difference'), '+$15.50 · 0៛')
+assert.equal(valueOf('Additional cash'), '$10.00 · 5,000៛')
+assert.equal(valueOf('Expected cash'), '$250.50 · 105,000៛')
+assert.equal(valueOf('Difference'), '+$5.50 · −5,000៛')
 assert.equal(50 + 210 - 12 - 4 - 3.5, 240.5)
 // And the credit was NOT taken out of it a second time: it was never
 // collected, so it is not in the drawer to remove.
-assert.notEqual(valueOf('Difference'), '+$33.50 · 0៛', 'credit was subtracted from the drawer -- it was never collected')
+assert.notEqual(valueOf('Difference'), '+$23.50 · −5,000៛', 'credit was subtracted from the drawer -- it was never collected')
 
 // A short drawer shows the sign in front of the currency symbol.
 const short = telegram.formatShiftReport('Shop', { ...CLOSED, closing_counted_usd: 235 }, FIGURES, NOW)
 const shortDiff = short.split('\n').find((line) => line.startsWith(`Difference${SEP}`))
-assert.ok(shortDiff.endsWith(': −$5.50 · 0៛'), `a short drawer must read as a negative amount, got: ${shortDiff}`)
+assert.ok(shortDiff.endsWith(': −$15.50 · −5,000៛'), `a short drawer must read as a negative amount, got: ${shortDiff}`)
 const level = telegram.formatShiftReport('Shop', { ...CLOSED, closing_counted_usd: 240.5 }, FIGURES, NOW)
-assert.ok(level.split('\n').find((line) => line.startsWith(`Difference${SEP}`)).endsWith(': $0.00 · 0៛'),
-  'a drawer that balances is unsigned')
+assert.ok(level.split('\n').find((line) => line.startsWith(`Difference${SEP}`)).endsWith(': −$10.00 · −5,000៛'),
+  'a drawer below expected cash is signed')
 console.log('PASS difference: one line, signed in front of the currency symbol, credit not double-counted')
 
 // --- 4b. the riel drawer, and the tender summary ----------------------------
@@ -297,7 +301,7 @@ console.log('PASS difference: one line, signed in front of the currency symbol, 
 const expenses = [30000, 20000, 14000, 50000, 30000, 6000]
 assert.equal(expenses.reduce((sum, n) => sum + n, 0), 150000)
 const rielReport = telegram.formatShiftReport('Shop', {
-  ...CLOSED, opening_float_usd: 0, opening_float_khr: 300000 - 16300,
+  ...CLOSED, additional_cash_usd: 0, additional_cash_khr: 0, opening_float_usd: 0, opening_float_khr: 300000 - 16300,
   closing_counted_usd: 0, closing_counted_khr: 133700,
 }, {
   ...FIGURES, cash: { usd: 0, khr: 0, needsReview: false },
@@ -357,7 +361,7 @@ assert.equal(telegram.summarizeShiftCash([{ sale_status:'awaiting_payment', amou
 // When the tender needs review, the server still supplies its recorded-cash
 // difference. The number and the separate warning must both survive.
 const unknownCash = telegram.formatShiftReport('Shop', CLOSED, { ...FIGURES, cash: { ...cashOnly, needsReview: true } }, NOW)
-assert.ok(unknownCash.includes(lang.labeled('difference', '+$210.50 · −2,000៛')),
+assert.ok(unknownCash.includes(lang.labeled('difference', '+$200.50 · −7,000៛')),
   'a review flag stays beside the computed recorded-cash difference instead of erasing it')
 assert.ok(unknownCash.includes(lang.labeled('cashReview', lang.label('reviewTender'))),
   'the reason for review is a separate bilingual warning')
@@ -441,6 +445,7 @@ assert.ok(KHMER.test(openTo), 'the "still open" note is English-only')
 // -$256.00 on every open till would read as an alarm.
 assert.ok(!openLines.some((line) => line.startsWith(`Closing cash${SEP}`)), 'an open shift must not print a closing count that has not been taken')
 assert.ok(!openReport.includes('Difference'), 'an open shift must not print a difference against a count that does not exist')
+assert.ok(openLines.some((line) => line.startsWith(`Expected cash${SEP}`)), 'an open shift still reports expected cash')
 // The registered-cash block still carries its open half: that is the whole
 // point of showing open vs end.
 assert.ok(openLines.some((line) => line.startsWith(`Opening cash${SEP}`)), 'an open shift still reports its registered opening cash')
@@ -473,7 +478,8 @@ for (const dropped of ['Expenses', 'Delivery fee', 'Not Paid', 'Cancelled', 'Edi
 }
 // The float is still in the drawer and nothing was taken out of it.
 assert.ok(emptyLines.find((line) => line.startsWith(`Opening cash${SEP}`)).endsWith(': $50.00 · 100,000៛'))
-assert.ok(emptyLines.find((line) => line.startsWith(`Difference${SEP}`)).endsWith(': $0.00 · 0៛'))
+assert.ok(emptyLines.find((line) => line.startsWith(`Expected cash${SEP}`)).endsWith(': $60.00 · 105,000៛'))
+assert.ok(emptyLines.find((line) => line.startsWith(`Difference${SEP}`)).endsWith(': −$10.00 · −5,000៛'))
 assert.ok(emptyLines.length < lines.length, 'a quiet shift must be shorter than a busy one')
 console.log(`PASS empty shift: ${emptyLines.length} lines, zero-valued lines dropped, the float is still the drawer`)
 
@@ -679,7 +685,8 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
   assert.equal(mappedValue('Closing cash'), '$256.00 · 100,000៛', 'and the closing cash is the shift row too')
   // opening 50 + cash 0 - refunds 12 - expenses 4 - courier 3.50 = 30.50,
   // counted 256 -> +225.50. Riel: 100,000 in, 100,000 counted -> 0.
-  assert.equal(mappedValue('Difference'), '+$225.50 · 0៛', 'the difference is the five components this stub supplied, and nothing else')
+  assert.equal(mappedValue('Expected cash'), '$40.50 · 105,000៛', 'expected cash includes the additional cash movement')
+  assert.equal(mappedValue('Difference'), '+$215.50 · −5,000៛', 'the difference includes additional cash and the five other components this stub supplied')
   console.log('PASS sources: every figure reads the kernel column it claims, proved with distinct values end to end')
   console.log('OK test-shift-report-pure')
 }).then(async () => {

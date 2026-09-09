@@ -48,17 +48,19 @@ type EditDraft = {
   closedAt: string
   openingUsd: string
   openingKhr: string
+  additionalUsd: string
+  additionalKhr: string
   closingUsd: string
   closingKhr: string
   openingNote: string
   closingNote: string
 }
 
-type CloseDraft = { closedAt: string; closingUsd: string; closingKhr: string; closingNote: string }
+type CloseDraft = { closedAt: string; closingUsd: string; closingKhr: string; additionalUsd: string; additionalKhr: string; closingNote: string }
 type ReopenDraft = { reason: string; openingUsd: string; openingKhr: string; openingNote: string }
 type ActionMode = 'edit' | 'close' | 'reopen' | 'cancel' | null
 
-const blankClose = (): CloseDraft => ({ closedAt: '', closingUsd: '', closingKhr: '', closingNote: '' })
+const blankClose = (): CloseDraft => ({ closedAt: '', closingUsd: '', closingKhr: '', additionalUsd: '', additionalKhr: '', closingNote: '' })
 const blankReopen = (): ReopenDraft => ({ reason: '', openingUsd: '', openingKhr: '', openingNote: '' })
 const refreshMountedShiftState = () => window.dispatchEvent(new Event(SHIFT_STATE_CHANGED_EVENT))
 
@@ -90,6 +92,8 @@ const editDraft = (shift: Shift): EditDraft => ({
   closedAt: dateTimeLocal(shift.closed_at),
   openingUsd: shift.opening_float_usd == null ? '' : String(shift.opening_float_usd),
   openingKhr: shift.opening_float_khr == null ? '' : String(shift.opening_float_khr),
+  additionalUsd: shift.additional_cash_usd ? String(shift.additional_cash_usd) : '',
+  additionalKhr: shift.additional_cash_khr ? String(shift.additional_cash_khr) : '',
   closingUsd: shift.closing_counted_usd == null ? '' : String(shift.closing_counted_usd),
   closingKhr: shift.closing_counted_khr == null ? '' : String(shift.closing_counted_khr),
   openingNote: shift.opening_note || '',
@@ -101,6 +105,8 @@ const amendmentFields = [
   ['closed_at', 'shift_closed_at'],
   ['opening_float_usd', 'shift_float_usd'],
   ['opening_float_khr', 'shift_float_khr'],
+  ['additional_cash_usd', 'shift_recon_additional_cash'],
+  ['additional_cash_khr', 'shift_recon_additional_cash'],
   ['closing_counted_usd', 'shift_counted_usd'],
   ['closing_counted_khr', 'shift_counted_khr'],
   ['opening_note', 'shift_opening_note'],
@@ -280,7 +286,8 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
     const opening = shiftOpeningCounts(edit.openingUsd, edit.openingKhr)
     const closing = edit.closedAt ? shiftClosingCounts(edit.closingUsd, edit.closingKhr) : { usd: null, khr: null }
     if (closingCountInvalid(edit.openingUsd) || closingCountInvalid(edit.openingKhr)
-      || (edit.closedAt && (closingCountInvalid(edit.closingUsd) || closingCountInvalid(edit.closingKhr)))) return
+      || (edit.closedAt && (closingCountInvalid(edit.closingUsd) || closingCountInvalid(edit.closingKhr)
+        || closingCountInvalid(edit.additionalUsd) || closingCountInvalid(edit.additionalKhr)))) return
     setSaving(true)
     try {
       const result = await amendShift(selected.id, {
@@ -289,6 +296,8 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
         openedAt: shiftLocalDateTimeToIso(edit.openedAt),
         openingFloatUsd: opening.usd,
         openingFloatKhr: opening.khr,
+        additionalCashUsd: edit.additionalUsd.trim() === '' ? undefined : Number(edit.additionalUsd),
+        additionalCashKhr: edit.additionalKhr.trim() === '' ? undefined : Number(edit.additionalKhr),
         openingNote: edit.openingNote.trim() || null,
         closedAt: edit.closedAt ? shiftLocalDateTimeToIso(edit.closedAt) : null,
         closingCountedUsd: closing.usd,
@@ -308,7 +317,8 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
   const saveClose = async () => {
     if (!selected || !close.closedAt || saving) return
     const closing = shiftClosingCounts(close.closingUsd, close.closingKhr)
-    if (closingCountInvalid(close.closingUsd) || closingCountInvalid(close.closingKhr)) return
+    if (closingCountInvalid(close.closingUsd) || closingCountInvalid(close.closingKhr)
+      || closingCountInvalid(close.additionalUsd) || closingCountInvalid(close.additionalKhr)) return
     setSaving(true)
     try {
       const result = await closeShiftById(selected.id, {
@@ -318,6 +328,8 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
         // preserve compatibility with the pre-integration transport type.
         closingCountedUsd: closing.usd as number,
         closingCountedKhr: closing.khr as number,
+        additionalCashUsd: close.additionalUsd.trim() === '' ? null : Number(close.additionalUsd),
+        additionalCashKhr: close.additionalKhr.trim() === '' ? null : Number(close.additionalKhr),
         closingNote: close.closingNote.trim() || null,
       })
       if (result.shift) replaceRow(result.shift)
@@ -386,10 +398,12 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
     : !edit.openedAt ? t('shift_opened_at_required')
       : editCountBlocker ? t(shiftCountBlockerKey(editCountBlocker))
         : edit.closedAt && (closingCountInvalid(edit.closingUsd) || closingCountInvalid(edit.closingKhr)) ? t(shiftCountBlockerKey('invalid'))
+        : edit.closedAt && (closingCountInvalid(edit.additionalUsd) || closingCountInvalid(edit.additionalKhr)) ? t(shiftCountBlockerKey('invalid'))
         : !edit.reason.trim() ? t('shift_reason_required')
           : null
   const closeReason = !close.closedAt ? t('shift_close_time_required')
-    : closingCountInvalid(close.closingUsd) || closingCountInvalid(close.closingKhr) ? t(shiftCountBlockerKey('invalid'))
+    : closingCountInvalid(close.closingUsd) || closingCountInvalid(close.closingKhr)
+      || closingCountInvalid(close.additionalUsd) || closingCountInvalid(close.additionalKhr) ? t(shiftCountBlockerKey('invalid'))
       : null
   const reopenCountBlocker = shiftCountPairBlocker(reopen.openingUsd, reopen.openingKhr, { blankMeansUncounted: true })
   const reopenReason = !reopen.reason.trim() ? t('shift_reopen_reason')
@@ -442,6 +456,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
                         <div className="text-xs"><span className="block">{t('shift_closed_at')}</span><DateTimeEntryInput className="mt-1" value={edit.closedAt} disabled={!selected.closed_at} onChange={(next) => setEdit({ ...edit, closedAt: next })} t={t} dateAriaLabel={`${t('shift_closed_at')} · ${t('date')}`} timeAriaLabel={`${t('shift_closed_at')} · ${t('time')}`} /></div>
                         <ShiftCountPair className="sm:col-span-2" label={t('shift_opening_cash')} usdLabel={t('shift_float_usd')} khrLabel={t('shift_float_khr')} usd={edit.openingUsd} khr={edit.openingKhr} onUsd={(value) => setEdit({ ...edit, openingUsd: value })} onKhr={(value) => setEdit({ ...edit, openingKhr: value })} />
                         <ShiftCountPair className="sm:col-span-2" label={t('shift_counted_cash')} usdLabel={t('shift_counted_usd')} khrLabel={t('shift_counted_khr')} hint={t('shift_registered_cash_hint')} usd={edit.closingUsd} khr={edit.closingKhr} disabled={!edit.closedAt} onUsd={(value) => setEdit({ ...edit, closingUsd: value })} onKhr={(value) => setEdit({ ...edit, closingKhr: value })} />
+                        <ShiftCountPair className="sm:col-span-2" label={t('shift_additional_cash')} usdLabel={t('shift_additional_usd')} khrLabel={t('shift_additional_khr')} hint={t('shift_additional_cash_hint')} usd={edit.additionalUsd} khr={edit.additionalKhr} disabled={!edit.closedAt} onUsd={(value) => setEdit({ ...edit, additionalUsd: value })} onKhr={(value) => setEdit({ ...edit, additionalKhr: value })} />
                         <label className="text-xs sm:col-span-2">{t('shift_opening_note')}<input className="input mt-1" value={edit.openingNote} onChange={(event) => setEdit({ ...edit, openingNote: event.target.value })} /></label>
                         <label className="text-xs sm:col-span-2">{t('shift_closing_note')}<input className="input mt-1" value={edit.closingNote} disabled={!edit.closedAt} onChange={(event) => setEdit({ ...edit, closingNote: event.target.value })} /></label>
                         <label className="text-xs font-semibold sm:col-span-2">{t('shift_reason_required')}<textarea className="input mt-1 min-h-20" required value={edit.reason} onChange={(event) => setEdit({ ...edit, reason: event.target.value })} /></label>
@@ -456,6 +471,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
                       <fieldset disabled={saving} className="grid min-w-0 gap-3 sm:grid-cols-2 [&_input]:min-w-0 [&_input]:max-w-full">
                         <div className="text-xs font-semibold sm:col-span-2"><span className="block">{t('shift_close_time_required')}</span><DateTimeEntryInput className="mt-1" value={close.closedAt} onChange={(next) => setClose({ ...close, closedAt: next })} t={t} dateAriaLabel={`${t('shift_close_time_required')} · ${t('date')}`} timeAriaLabel={`${t('shift_close_time_required')} · ${t('time')}`} /></div>
                         <ShiftCountPair className="sm:col-span-2" label={t('shift_counted_cash')} usdLabel={t('shift_counted_usd')} khrLabel={t('shift_counted_khr')} hint={t('shift_registered_cash_hint')} usd={close.closingUsd} khr={close.closingKhr} onUsd={(value) => setClose({ ...close, closingUsd: value })} onKhr={(value) => setClose({ ...close, closingKhr: value })} />
+                        <ShiftCountPair className="sm:col-span-2" label={t('shift_additional_cash')} usdLabel={t('shift_additional_usd')} khrLabel={t('shift_additional_khr')} hint={t('shift_additional_cash_hint')} usd={close.additionalUsd} khr={close.additionalKhr} onUsd={(value) => setClose({ ...close, additionalUsd: value })} onKhr={(value) => setClose({ ...close, additionalKhr: value })} />
                         <label className="text-xs sm:col-span-2">{t('shift_closing_note')}<input className="input mt-1" value={close.closingNote} onChange={(event) => setClose({ ...close, closingNote: event.target.value })} /></label>
                       </fieldset>
                       <ShiftSubmitRow reason={closeReason} busy={saving} label={t('shift_action_close')} onClick={() => void saveClose()} secondary={cancelAction} buttonClassName="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white" />

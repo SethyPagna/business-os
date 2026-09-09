@@ -385,6 +385,8 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
   const [busy, setBusy] = useState(false)
   const [countedUsd, setCountedUsd] = useState('')
   const [countedKhr, setCountedKhr] = useState('')
+  const [additionalUsd, setAdditionalUsd] = useState('')
+  const [additionalKhr, setAdditionalKhr] = useState('')
   const [note, setNote] = useState('')
   // The row the server wrote, held for the summary. Set only after a close
   // that actually returned a shift, and it is what keeps the panel mounted
@@ -394,7 +396,8 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
   const now = useWallClock(open && !closed)
   const shift = closed || state?.shift || null
   const canCloseCurrent = state?.is_open === true && state.shift?.capabilities.can_close === true
-  const endBlocker = closingCountInvalid(countedUsd) || closingCountInvalid(countedKhr) ? 'invalid' as const : null
+  const endBlocker = closingCountInvalid(countedUsd) || closingCountInvalid(countedKhr)
+    || closingCountInvalid(additionalUsd) || closingCountInvalid(additionalKhr) ? 'invalid' as const : null
 
   const submitClose = async () => {
     if (busy) return
@@ -408,6 +411,8 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
         // this component compatible with the pre-integration type surface.
         closingCountedUsd: counts.usd as number,
         closingCountedKhr: counts.khr as number,
+        additionalCashUsd: additionalUsd.trim() === '' ? null : Number(additionalUsd),
+        additionalCashKhr: additionalKhr.trim() === '' ? null : Number(additionalKhr),
         closingNote: note.trim() || null,
       })
       publish(next)
@@ -433,6 +438,8 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
     setClosed(null)
     setCountedUsd('')
     setCountedKhr('')
+    setAdditionalUsd('')
+    setAdditionalKhr('')
     setNote('')
   }
 
@@ -466,7 +473,7 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
           onClose={dismiss}
           // Once the close is written there is nothing unsaved left to lose,
           // so dismissing the summary must not raise a discard prompt.
-          unsavedChanges={{ dirty: !closed && (countedUsd.trim() !== '' || countedKhr.trim() !== '' || note.trim() !== '') }}
+          unsavedChanges={{ dirty: !closed && (countedUsd.trim() !== '' || countedKhr.trim() !== '' || additionalUsd.trim() !== '' || additionalKhr.trim() !== '' || note.trim() !== '') }}
         >
           <div className="space-y-3">
             <p className="text-xs leading-relaxed text-zinc-600 dark:text-zinc-300">
@@ -491,6 +498,7 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
                 // the drawer against what it opened with, on the same cell
                 // shape so the two are read as one comparison.
                 !!closed && { label: t('shift_counted_close'), value: shiftCountedPairText(closed.closing_counted_usd, closed.closing_counted_khr, fmtUSD, fmtKHR) },
+                !!closed && { label: t('shift_recon_additional_cash'), value: `+ ${shiftCountedPairText(closed.additional_cash_usd ?? 0, closed.additional_cash_khr ?? 0, fmtUSD, fmtKHR)}` },
                 !!closed?.closing_note && { label: t('note'), value: closed.closing_note },
               ]}
               />
@@ -513,6 +521,12 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
                   label={t('shift_counted_cash')} usdLabel={t('shift_counted_usd')} khrLabel={t('shift_counted_khr')}
                   hint={t('shift_registered_cash_hint')}
                   usd={countedUsd} khr={countedKhr} onUsd={setCountedUsd} onKhr={setCountedKhr}
+                />
+                <ShiftCountPair
+                  dense disabled={busy}
+                  label={t('shift_additional_cash')} usdLabel={t('shift_additional_usd')} khrLabel={t('shift_additional_khr')}
+                  hint={t('shift_additional_cash_hint')}
+                  usd={additionalUsd} khr={additionalKhr} onUsd={setAdditionalUsd} onKhr={setAdditionalKhr}
                 />
                 {shift?.reconciliation && (
                   <ShiftFactStrip accent facts={[

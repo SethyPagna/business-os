@@ -1,6 +1,6 @@
 import { useApp } from '../../AppContext.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
-import { shiftCountText, shiftFigureRows, shiftFiguresOf, shiftRegisteredCash } from './shiftReportModel.ts'
+import { shiftCountedPairText, shiftFigureRows, shiftFiguresOf, shiftRegisteredCash } from './shiftReportModel.ts'
 import type { Shift } from '../../api/shiftTransport.ts'
 
 /**
@@ -45,6 +45,7 @@ export default function ShiftReportFigures({ shift, className = '' }: Props) {
     return value && value !== key ? value : fallback
   }
   const registered = shiftRegisteredCash(shift)
+  const additional = shift.figures?.additional_cash
   const rows = shiftFigureRows(shiftFiguresOf(shift))
 
   return (
@@ -54,20 +55,24 @@ export default function ShiftReportFigures({ shift, className = '' }: Props) {
           {tr('shift_registered_cash', 'Registered cash')}
           <InfoHint text={tr('shift_registered_cash_hint', 'Drawer registration for reference only; it never changes sales, profit, or whether a shift can close.')} label={tr('shift_registered_cash', 'Registered cash')} />
         </div>
-        {/* Open and end in ONE block, per currency: the owner reads them
-            against each other, so they sit side by side rather than on two
-            screens. Each cell is independently "—" -- a drawer counted in
-            dollars only is not an uncounted drawer. */}
-        <div className="mt-2 grid min-w-0 grid-cols-[minmax(2.25rem,auto)_minmax(0,1fr)_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs">
-          <div aria-hidden="true" />
-          <div className="text-right font-medium text-gray-500 dark:text-gray-400">{tr('shift_registered_open', 'OPEN')}</div>
-          <div className="text-right font-medium text-gray-500 dark:text-gray-400">{tr('shift_registered_end', 'END')}</div>
-          <div className="text-gray-500 dark:text-gray-400">USD</div>
-          <div className="break-words text-right font-medium text-gray-800 dark:text-gray-100">{shiftCountText(registered.open.usd, fmtUSD)}</div>
-          <div className="break-words text-right font-medium text-gray-800 dark:text-gray-100">{shiftCountText(registered.end.usd, fmtUSD)}</div>
-          <div className="text-gray-500 dark:text-gray-400">KHR</div>
-          <div className="break-words text-right font-medium text-gray-800 dark:text-gray-100">{shiftCountText(registered.open.khr, fmtKHR)}</div>
-          <div className="break-words text-right font-medium text-gray-800 dark:text-gray-100">{shiftCountText(registered.end.khr, fmtKHR)}</div>
+        {/* One compact row per drawer state keeps USD and KHR together on
+            narrow PWA screens. The separator makes the two native piles clear
+            without forcing a second horizontal scroll. */}
+        <div className="mt-2 space-y-1 text-xs">
+          <div className="flex min-w-0 items-baseline justify-between gap-3">
+            <span className="shrink-0 font-medium text-gray-500 dark:text-gray-400">{tr('shift_registered_open', 'OPEN')}</span>
+            <span className="min-w-0 break-words text-right font-medium text-gray-800 dark:text-gray-100">{shiftCountedPairText(registered.open.usd, registered.open.khr, fmtUSD, fmtKHR)}</span>
+          </div>
+          <div className="flex min-w-0 items-baseline justify-between gap-3">
+            <span className="shrink-0 font-medium text-gray-500 dark:text-gray-400">{tr('shift_registered_end', 'END')}</span>
+            <span className="min-w-0 break-words text-right font-medium text-gray-800 dark:text-gray-100">{shiftCountedPairText(registered.end.usd, registered.end.khr, fmtUSD, fmtKHR)}</span>
+          </div>
+          {(additional?.usd || additional?.khr) ? (
+            <div className="flex min-w-0 items-baseline justify-between gap-3 border-t border-black/5 pt-1 dark:border-white/10">
+              <span className="shrink-0 font-medium text-gray-500 dark:text-gray-400">{tr('shift_recon_additional_cash', 'Additional cash')}</span>
+              <span className="min-w-0 break-words text-right font-medium text-gray-800 dark:text-gray-100">+ {shiftCountedPairText(additional.usd, additional.khr, fmtUSD, fmtKHR)}</span>
+            </div>
+          ) : null}
         </div>
       </div>
 

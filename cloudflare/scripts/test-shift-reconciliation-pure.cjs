@@ -129,6 +129,8 @@ const SHIFT = {
   closed_at: '2026-09-06T06:00:00.000Z',
   opening_float_usd: 50,
   opening_float_khr: 100_000,
+  additional_cash_usd: 10,
+  additional_cash_khr: 5_000,
   closing_counted_usd: 100,
   closing_counted_khr: 150_000,
 }
@@ -167,13 +169,14 @@ const NOW = Date.parse('2026-09-06T08:00:00.000Z')
 
   const result = await recon.loadShiftReconciliation({}, SHIFT, NOW)
   assert.deepEqual(result.opening, { usd: 50, khr: 100_000 })
+  assert.deepEqual(result.additional_cash, { usd: 10, khr: 5_000 })
   assert.deepEqual(result.cash_sales, { usd: 58, khr: 82_000 })
   assert.deepEqual(result.refunds, { usd: 6, khr: 10_000 })
   assert.deepEqual(result.expenses, { usd: 9, khr: 20_000 })
   assert.deepEqual(result.courier, { usd: 3, khr: 4_000 })
-  assert.deepEqual(result.expected, { usd: 90, khr: 148_000 })
+  assert.deepEqual(result.expected, { usd: 100, khr: 153_000 })
   assert.deepEqual(result.counted, { usd: 100, khr: 150_000 })
-  assert.deepEqual(result.difference, { usd: 10, khr: 2_000 })
+  assert.deepEqual(result.difference, { usd: 0, khr: -3_000 })
   assert.equal(result.needs_review, false)
   assert.deepEqual(result.review_codes, [])
 
@@ -195,8 +198,8 @@ const NOW = Date.parse('2026-09-06T08:00:00.000Z')
   // 82,000 - 10,000 - 20,000 - 4,000 = +48,000. Neither number is derivable
   // from the other at any exchange rate the fixture uses (4,100), so an
   // implementation that folded them would have to miss one.
-  assert.equal(result.expected.usd - result.opening.usd, 40)
-  assert.equal(result.expected.khr - result.opening.khr, 48_000)
+  assert.equal(result.expected.usd - result.opening.usd, 50)
+  assert.equal(result.expected.khr - result.opening.khr, 53_000)
   assert.notEqual(Math.round((result.expected.khr - result.opening.khr) / 4100), result.expected.usd - result.opening.usd)
   console.log('PASS native currencies: dollars and riel move independently; no exchange rate is applied anywhere')
 
@@ -212,7 +215,7 @@ const NOW = Date.parse('2026-09-06T08:00:00.000Z')
   renameTo('Cash USD', ['Cash USD', 'ABA'])
   const renamed = await recon.loadShiftReconciliation({}, SHIFT, NOW)
   assert.deepEqual(renamed.cash_sales, { usd: 58, khr: 82_000 }, 'a renamed cash method is still cash')
-  assert.deepEqual(renamed.expected, { usd: 90, khr: 148_000 })
+  assert.deepEqual(renamed.expected, { usd: 100, khr: 153_000 })
   assert.equal(renamed.needs_review, false)
   assert.equal(registry.resolvePaymentMethodKind('Cash USD'), 'cash')
   assert.equal(registry.resolvePaymentMethodKind('សាច់ប្រាក់ដុល្លារ'), 'cash')
@@ -230,7 +233,7 @@ const NOW = Date.parse('2026-09-06T08:00:00.000Z')
   sql.prepare("INSERT INTO settings(key,value) VALUES('pos_payment_method_kinds',?)").run(JSON.stringify({ Drawer: 'cash' }))
   const pinned = await recon.loadShiftReconciliation({}, SHIFT, NOW)
   assert.deepEqual(pinned.cash_sales, { usd: 58, khr: 82_000 })
-  assert.deepEqual(pinned.expected, { usd: 90, khr: 148_000 })
+  assert.deepEqual(pinned.expected, { usd: 100, khr: 153_000 })
   assert.equal(pinned.needs_review, false)
   sql.prepare("DELETE FROM settings WHERE key='pos_payment_method_kinds'").run()
   renameTo('Cash', ['Cash', 'ABA'])
@@ -255,14 +258,15 @@ const NOW = Date.parse('2026-09-06T08:00:00.000Z')
 
   const pure = recon.computeShiftReconciliation({
     opening: { usd: 10.25, khr: 100_000 },
+    additionalCash: { usd: 3.5, khr: 5_000 },
     cashSales: { usd: 40, khr: 0 },
     refunds: { usd: 5, khr: 0 },
     expenses: { usd: 1.75, khr: 20_000 },
     courier: { usd: 2, khr: 0 },
     counted: { usd: 13.5, khr: 135_000 },
   })
-  assert.deepEqual(pure.expected, { usd: 41.5, khr: 80_000 })
-  assert.deepEqual(pure.difference, { usd: -28, khr: 55_000 })
+  assert.deepEqual(pure.expected, { usd: 45, khr: 85_000 })
+  assert.deepEqual(pure.difference, { usd: -31.5, khr: 50_000 })
   assert.equal(pure.needs_review, false)
   // Floating point must not leak into a money figure a cashier is asked to match.
   const cents = recon.computeShiftReconciliation({

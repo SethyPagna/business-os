@@ -540,6 +540,8 @@ export type ShiftReportSession = {
   opened_at: string
   opening_float_usd: number | null
   opening_float_khr: number | null
+  additional_cash_usd?: number | null
+  additional_cash_khr?: number | null
   closed_at: string | null
   closing_counted_usd: number | null
   closing_counted_khr: number | null
@@ -578,6 +580,8 @@ export type ShiftReportFigures = {
   // Native tender currencies, never USD-equivalent sales totals. Null/absent
   // means the source cannot establish a drawer balance, not zero cash.
   cash?: { usd: number; khr: number; needsReview: boolean }
+  /** Cash added after opening, kept separate from the registered counts. */
+  additionalCash?: { usd: number; khr: number }
   // The drawer reconciliation, from lib/shiftReconciliation.ts. Optional only
   // so a caller with figures but no database (the pure test) still renders:
   // when it is absent the SAME pure function derives one from the fields
@@ -643,6 +647,10 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
   // here, and an open shift (no count taken yet) shows only the open half.
   lines.push(RULE, labeled('cashOpen', registeredMoney(shift.opening_float_usd, shift.opening_float_khr)))
   if (shift.closed_at) lines.push(labeled('cashEnd', registeredMoney(shift.closing_counted_usd, shift.closing_counted_khr)))
+  const additionalCash = shift.additional_cash_usd || shift.additional_cash_khr
+    ? registeredMoney(shift.additional_cash_usd ?? 0, shift.additional_cash_khr ?? 0)
+    : ''
+  if (additionalCash) lines.push(labeled('additionalCash', additionalCash))
 
   // Expenses split into exactly two plain lines and one informational
   // difference line -- none of it an
@@ -652,6 +660,7 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
   // print its own five-part formula any more.
   const recon = figures.reconciliation ?? computeShiftReconciliation({
     opening: { usd: shift.opening_float_usd, khr: shift.opening_float_khr },
+    additionalCash: figures.additionalCash ?? { usd: shift.additional_cash_usd ?? 0, khr: shift.additional_cash_khr ?? 0 },
     cashSales: figures.cash ?? { usd: 0, khr: 0 },
     refunds: { usd: figures.refundUsd, khr: 0 },
     expenses: { usd: figures.otherExpenseUsd, khr: figures.otherExpenseKhr },
@@ -660,6 +669,13 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
     reviewCodes: !figures.cash || figures.cash.needsReview ? ['tender_incomplete'] : [],
   })
   const context: string[] = [...expenses.components]
+  // Expected is shown for both open and closed shifts. An open drawer has no
+  // counted value (and therefore no difference), but the employee still needs
+  // the current target while trading.
+  const expected = recon.expected.usd == null && recon.expected.khr == null
+    ? '—'
+    : `${recon.expected.usd == null ? '—' : usd(recon.expected.usd)} · ${recon.expected.khr == null ? '—' : riel(recon.expected.khr)}`
+  context.push(labeled('expectedCash', expected))
   // The closing count only exists once the employee has ended the shift by
   // hand, so an open shift shows no difference against a count that was
   // never taken -- that would read as a missing-cash alarm on every open till.
@@ -692,7 +708,7 @@ const SHIFT_COLUMNS = `shift_code, scope_mode, user_id, user_name, branch_id, br
   opened_at,
   CASE WHEN opening_float_usd_registered=1 THEN opening_float_usd ELSE NULL END AS opening_float_usd,
   CASE WHEN opening_float_khr_registered=1 THEN opening_float_khr ELSE NULL END AS opening_float_khr,
-  closed_at, closing_counted_usd, closing_counted_khr,
+  additional_cash_usd, additional_cash_khr, closed_at, closing_counted_usd, closing_counted_khr,
   cancelled_at, cancelled_by_user_name, cancel_reason`
 
 /**
@@ -766,6 +782,7 @@ async function shiftFigures(env: Env, shift: ShiftReportSession, nowMs: number):
     // subtracted components of it now (lib/shiftReconciliation.ts), so a shop
     // that takes one return a day stops seeing a permanent dash.
     cash: { ...reconciliation.cash_sales, needsReview: reconciliation.needs_review },
+    additionalCash: reconciliation.additional_cash,
     reconciliation,
   }
 }

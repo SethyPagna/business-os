@@ -17,7 +17,7 @@ import { apiFetch, route } from './http.ts'
  * (cloudflare/src/lib/shiftReconciliation.ts) and returns with the close and
  * with the shift reads. Per currency, never cross-converted:
  *
- *   expected   = opening + cash sales - refunds - expenses - courier
+ *   expected   = opening + additional cash + cash sales - refunds - expenses - courier
  *   difference = counted - expected
  *
  * The client renders these numbers and NEVER recomputes them. A second
@@ -31,6 +31,7 @@ export type ShiftMoney = { usd: number; khr: number }
 export type ShiftCountedMoney = { usd: number | null; khr: number | null }
 export type ShiftReconciliation = {
   opening: ShiftCountedMoney
+  additional_cash?: ShiftMoney
   cash_sales: ShiftMoney
   refunds: ShiftMoney
   expenses: ShiftMoney
@@ -56,6 +57,8 @@ export type Shift = {
   opened_at: string
   opening_float_usd: number | null
   opening_float_khr: number | null
+  additional_cash_usd?: number
+  additional_cash_khr?: number
   opening_note: string | null
   closed_at: string | null
   closing_counted_usd: number | null
@@ -103,6 +106,7 @@ export type Shift = {
  */
 export type ShiftFigures = {
   opening: ShiftCountedMoney
+  additional_cash?: ShiftMoney
   closing: ShiftCountedMoney
   sales_usd: number
   cogs_usd: number
@@ -305,6 +309,8 @@ export type CloseShiftInput = {
   // never gated on the drawer count. See shiftClosingCounts.
   closingCountedUsd: number | null
   closingCountedKhr: number | null
+  additionalCashUsd?: number | null
+  additionalCashKhr?: number | null
   closingNote?: string | null
 }
 
@@ -317,6 +323,8 @@ export async function closeShift(input: CloseShiftInput): Promise<ShiftState> {
       branch_id: input.branchId ?? null,
       closing_counted_usd: closingCountedUsd,
       closing_counted_khr: closingCountedKhr,
+      ...(input.additionalCashUsd !== undefined ? { additional_cash_usd: optionalShiftCount(input.additionalCashUsd, 'Additional USD cash') } : {}),
+      ...(input.additionalCashKhr !== undefined ? { additional_cash_khr: optionalShiftCount(input.additionalCashKhr, 'Additional KHR cash') } : {}),
       closing_note: input.closingNote ?? null,
     }),
     null,
@@ -365,6 +373,8 @@ export type AmendShiftInput = {
   openedAt: string
   openingFloatUsd: number | null
   openingFloatKhr: number | null
+  additionalCashUsd?: number | null
+  additionalCashKhr?: number | null
   openingNote?: string | null
   closedAt?: string | null
   closingCountedUsd?: number | null
@@ -391,6 +401,8 @@ export async function amendShift(id: number, input: AmendShiftInput): Promise<{ 
       opened_at: input.openedAt,
       opening_float_usd: openingFloatUsd,
       opening_float_khr: openingFloatKhr,
+      ...(input.additionalCashUsd !== undefined ? { additional_cash_usd: optionalShiftCount(input.additionalCashUsd, 'Additional USD cash') } : {}),
+      ...(input.additionalCashKhr !== undefined ? { additional_cash_khr: optionalShiftCount(input.additionalCashKhr, 'Additional KHR cash') } : {}),
       opening_note: input.openingNote ?? null,
       closed_at: input.closedAt ?? null,
       closing_counted_usd: closingCountedUsd,
@@ -411,6 +423,8 @@ export type CloseShiftByIdInput = {
   // the Shifts popup is the same close.
   closingCountedUsd: number | null
   closingCountedKhr: number | null
+  additionalCashUsd?: number | null
+  additionalCashKhr?: number | null
   closingNote?: string | null
 }
 
@@ -430,6 +444,8 @@ export async function closeShiftById(id: number, input: CloseShiftByIdInput): Pr
       closed_at: input.closedAt,
       closing_counted_usd: closingCountedUsd,
       closing_counted_khr: closingCountedKhr,
+      additional_cash_usd: optionalShiftCount(input.additionalCashUsd, 'Additional USD cash'),
+      additional_cash_khr: optionalShiftCount(input.additionalCashKhr, 'Additional KHR cash'),
       closing_note: input.closingNote ?? null,
     }),
     null,
