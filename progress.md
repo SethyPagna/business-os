@@ -1,3 +1,9 @@
+## Returns/Expenses Shift row follow-up LIVE — September 9
+
+Commit **a0d505e880d7** is live at 100% in Worker version **e34ed89d-0d32-4388-9399-2b1448998f43**, deployment **c4d29853-4a55-451c-9dda-68623b22f4f9**, created 2026-09-09T14:13:15.172134Z. This clean, pushed fix follows the report-title checkpoint and is recorded in `outputs/takeover-20260909/returns-expenses-shift-deploy.log`.
+
+Returns and Expenses now use the same compact Shift launcher as Sales inside the shared stats/action row. Expenses no longer renders a separate current-shift block; Shift, Export, history/labels and the primary action share the responsive row. Focused StatsStrip and shift-management tests, frontend typecheck, bilingual verification, production build and Worker typecheck pass.
+
 ## Report title picker, filter controls and anonymous customer UI checkpoint LIVE — September 9
 
 Commit **26111791dae8ea5f729a0bb20f62f15bbb39d0f6** is live at 100% in Worker version **e8129c9e-0cfe-4036-bfba-ea4a69b33c7e**, deployment **c16bb4b5-bd98-4890-834c-572f4730f13b**, created 2026-09-09T13:54:59.183176Z. It was deployed from the clean, pushed release branch `codex/sale-create-trigger-release-20260909`; provenance is recorded in `outputs/takeover-20260909/report-title-customer-ui-deploy.log`.

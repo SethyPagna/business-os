@@ -1,7 +1,7 @@
 {
-  "asOf": "2026-09-09T13:55:30Z",
-  "liveCommit": "26111791dae8ea5f729a0bb20f62f15bbb39d0f6",
-  "liveSummary": "Report title picker and filter-height checkpoint live: the active report selector is beside the report title, Returns/Expenses export shares the stats row, anonymous General displays as Walk-in without legacy membership leakage, and sale customer lookup supports phone or name; transfer receipts, Not Paid stock, shift additional cash and iOS viewport guards remain deployed.",
+  "asOf": "2026-09-09T14:14:00Z",
+  "liveCommit": "a0d505e880d797457e106f320b1aba2108d7e11f",
+  "liveSummary": "Returns/Expenses Shift row follow-up live: both pages share the compact Shift launcher with stats/actions and export, Expenses no longer renders a separate current-shift block, and the report title/filter and anonymous Walk-in fixes remain deployed.",
   "tasks": [
     {
       "id": "F01",
@@ -666,7 +666,7 @@
       "request": "Reports compact filters and navigation per owner screenshot",
       "state": "Deployed; physical polish open",
       "next": "Physical iOS/PWA and desktop device-toolbar review; remaining date/preset/spacing polish stays in U08/U11/U12/U20.",
-      "notes": "Report view picker is beside the active report title. Branch/status/payment/display/currency remain in the single Filters menu; desktop filter controls use the shared 40px treatment. Returns and Expenses export now share their stats/action rows."
+      "notes": "Report picker is beside the active title; Filters owns branch/status/payment/display/currency with 40px controls. Returns and Expenses now put Shift plus export/history actions in the shared stats row."
     },
     {
       "id": "U17",
@@ -770,12 +770,12 @@
     }
   ],
   "deployment": {
-    "commit": "26111791dae8ea5f729a0bb20f62f15bbb39d0f6",
-    "workerVersion": "e8129c9e-0cfe-4036-bfba-ea4a69b33c7e",
-    "deploymentId": "c16bb4b5-bd98-4890-834c-572f4730f13b",
-    "deploymentLog": "outputs/takeover-20260909/report-title-customer-ui-deploy.log",
+    "commit": "a0d505e880d797457e106f320b1aba2108d7e11f",
+    "workerVersion": "e34ed89d-0d32-4388-9399-2b1448998f43",
+    "deploymentId": "c4d29853-4a55-451c-9dda-68623b22f4f9",
+    "deploymentLog": "outputs/takeover-20260909/returns-expenses-shift-deploy.log",
     "percentage": 100,
-    "createdOn": "2026-09-09T13:54:59.183176Z"
+    "createdOn": "2026-09-09T14:13:15.172134Z"
   },
   "nextRelease": {
     "priority": "Remaining historical-sales evidence, cleanup and UI/public follow-up",
