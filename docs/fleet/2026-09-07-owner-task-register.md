@@ -1,3 +1,14 @@
+## Vocabulary consistency release LIVE — September 10
+
+Fix-scoped commit 06b9346a was pushed to codex/sale-create-trigger-release-20260909 and deployed successfully as Worker version 48d27bdf-8e41-484a-bea3-645a8fb2ab57. Build revision 06b9346a77b6, build hash 61f468e703d7973f, built 2026-09-09T22:01:31Z. No database migration or production data mutation was included.
+
+Visible terminology is now aligned: Received date / ថ្ងៃចូល for the stock-date concept, Receive session / វគ្គទទួលស្តុក for the multi-line workflow, Cost price / ថ្លៃដើម, Selling price / តម្លៃលក់, Wholesale price / តម្លៃបោះដុំ, Delivery fee / ថ្លៃដឹក, and Actual delivery cost / ថ្លៃដឹកដើម. The AppContext and sale-record fallbacks use the same labels, while internal fields batch_id, lot_code, and credit remain unchanged for compatibility.
+
+The owner-edited workbook substantive Khmer changes were already present in the release and are covered by the live pack. Four whitespace-only workbook edits remain intentionally held because the current JSX composition supplies those separators; applying them literally would join words in import/export messages.
+
+Verification passed from multiple angles: focused Khmer glossary, Not Paid terminology, received-date display, sale-record rendering, semantic variable parity, frontend typecheck, i18n verification, Worker typecheck, production build, and the complete frontend utility chain 347/347. The signed-in Admin UI and public storefront loaded after deployment. CLI runtime/version verification was blocked by a Cloudflare bot challenge, so no claim is made from that path.
+
+Still open or paused: evidence-led historical duplicate/contact cleanup (review-only candidates remain; no blind merge), unresolved historical driver/sale-link evidence, physical iOS/PWA/camera/printer smoke, broader compact UI/public/customer-portal polish, and offline work (paused by owner).
 # Owner task register — September 7, 2026
 
 This is the current request register. `progress.md` links here. Append new owner
