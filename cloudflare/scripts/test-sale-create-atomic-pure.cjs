@@ -7,6 +7,7 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const ts = require('typescript')
+const { Miniflare, Log, LogLevel } = require('miniflare')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
@@ -119,7 +120,33 @@ async function postSale(db, body) {
   return { status: response.status, body: await response.json() }
 }
 
+async function assertNativeD1TriggerMetadata() {
+  const mf = new Miniflare({
+    modules: true,
+    script: 'export default { fetch() { return new Response("ok") } }',
+    compatibilityDate: '2026-07-01',
+    d1Databases: ['DB'],
+    log: new Log(LogLevel.ERROR),
+  })
+  try {
+    const db = await mf.getD1Database('DB')
+    await db.prepare('CREATE TABLE sales(id INTEGER PRIMARY KEY AUTOINCREMENT, receipt_number TEXT)').run()
+    await db.prepare('CREATE TABLE sale_write_revisions(sale_id INTEGER PRIMARY KEY, revision INTEGER NOT NULL DEFAULT 0)').run()
+    await db.prepare(`CREATE TRIGGER sale_revision_sales_insert AFTER INSERT ON sales BEGIN
+      INSERT INTO sale_write_revisions(sale_id,revision) VALUES(NEW.id,1);
+    END`).run()
+    const result = await db.prepare("INSERT INTO sales(receipt_number) VALUES('native-trigger')").run()
+    assert.equal(result.success, true)
+    assert.equal(result.meta.changes, 2, 'native D1 counts the sale row and its revision-trigger row')
+    assert.equal(result.meta.last_row_id, 1)
+    console.log('PASS native Miniflare D1 reports changes=2 for the triggered sale insert')
+  } finally {
+    await mf.dispose()
+  }
+}
+
 ;(async () => {
+  await assertNativeD1TriggerMetadata()
   {
     const f = fixture()
     const created = await postSale(f.route, request('trigger-inclusive-create'))
