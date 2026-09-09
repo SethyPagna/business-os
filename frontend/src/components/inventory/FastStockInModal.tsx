@@ -510,7 +510,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     if (mode === 'set' && (!rawQuantity || qty < 0)) { notify(tr('fast_stockin_set_qty', 'Quantity must be 0 or more'), 'error'); return }
     // A remove has no receipt: no payment, no supplier, no cost to check.
     if (mode !== 'remove' && paymentStatus === 'credit' && !creditDueDate.trim()) {
-      notify(tr('fast_stockin_credit_due', 'On-credit stock needs a due date'), 'error')
+      notify(tr('fast_stockin_credit_due', 'Not Paid supplier stock needs a due date'), 'error')
       return
     }
     // N14-D: the same rule POST /api/batches and /api/inventory/adjust enforce
@@ -606,7 +606,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
       return
     }
     if (!branchId) { notify(tr('fast_stockin_pick_branch', 'Pick a branch'), 'error'); return }
-    if (pending.some((line) => line.mode !== 'remove') && paymentStatus === 'credit' && !creditDueDate.trim()) { notify(tr('fast_stockin_credit_due', 'On-credit stock needs a due date'), 'error'); return }
+    if (pending.some((line) => line.mode !== 'remove') && paymentStatus === 'credit' && !creditDueDate.trim()) { notify(tr('fast_stockin_credit_due', 'Not Paid supplier stock needs a due date'), 'error'); return }
     setPendingCommit(pending)
   }
 
@@ -729,7 +729,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     { label: tr('received_date', 'Received date'), value: receivedDate.trim() || tr('today', 'Today') },
     { label: tr('supplier', 'Supplier'), value: supplier.supplierName.trim() || '—' },
     { label: tr('payment', 'Payment'), value: paymentStatus === 'credit'
-      ? `${tr('on_credit', 'On credit')}${creditDueDate.trim() ? ` · ${creditDueDate.trim()}` : ''}`
+      ? `${tr('on_credit', 'Not Paid to supplier')}${creditDueDate.trim() ? ` · ${creditDueDate.trim()}` : ''}`
       : tr('paid', 'Paid') },
     ] : []),
   ] : []
@@ -984,7 +984,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
                       className={`rounded-lg border px-3 py-2 text-xs transition-colors ${paymentStatus === mode
                         ? 'border-blue-500 bg-blue-100/70 font-semibold text-blue-700 dark:border-blue-500 dark:bg-blue-900/40 dark:text-blue-300'
                         : 'border-gray-200 text-gray-500 hover:border-gray-300 dark:border-gray-600 dark:text-gray-400'}`}>
-                      {mode === 'paid' ? tr('paid', 'Paid') : tr('on_credit', 'On credit')}
+                      {mode === 'paid' ? tr('paid', 'Paid') : tr('on_credit', 'Not Paid to supplier')}
                     </button>
                   ))}
                   {paymentStatus === 'credit' ? (

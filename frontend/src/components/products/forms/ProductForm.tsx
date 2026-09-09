@@ -925,7 +925,7 @@ export default function ProductForm({
   // Compact review rows for the save confirm dialog.
   const saveReviewItems = (): ConfirmReviewItem[] => {
     const items: ConfirmReviewItem[] = [
-      { label: tr('label_selling_price', 'Selling Price'), value: `${usdSymbol}${Number(form.selling_price_usd || 0).toFixed(2)}` },
+      { label: tr('label_selling_price', 'Selling price'), value: `${usdSymbol}${Number(form.selling_price_usd || 0).toFixed(2)}` },
       { label: tr('label_cost', 'Cost'), value: `${usdSymbol}${Number(form.cost_price_usd || 0).toFixed(2)}` },
     ]
     const barcode = String(form.barcode || '').trim()
@@ -1834,12 +1834,12 @@ export default function ProductForm({
 
           <div className="min-w-0 rounded-xl border border-green-100 bg-green-50 p-3 dark:border-green-800 dark:bg-green-900/10">
             <div className="mb-2">
-              <p className="text-sm font-bold text-green-700 dark:text-green-400">{tr('selling_price_to_customer', 'Selling Price', 'តម្លៃលក់')}</p>
+              <p className="text-sm font-bold text-green-700 dark:text-green-400">{tr('selling_price_to_customer', 'Selling price', 'តម្លៃលក់')}</p>
               <p className="text-xs text-green-600 dark:text-green-500">{tr('what_customers_pay_pos', 'What customers pay at point of sale', 'តម្លៃដែលអតិថិជនបង់នៅកន្លែងលក់')}</p>
             </div>
             <DualPriceInput
-              labelUsd={tr('selling_price_usd_full', 'Selling Price (USD)', 'តម្លៃលក់ (USD)')}
-              labelKhr={tr('selling_price_khr_full', 'Selling Price (KHR)', 'តម្លៃលក់ (KHR)')}
+                labelUsd={tr('selling_price_usd_full', 'Selling price (USD)', 'តម្លៃលក់ (USD)')}
+                labelKhr={tr('selling_price_khr_full', 'Selling price (KHR)', 'តម្លៃលក់ (KHR)')}
               valueUsd={form.selling_price_usd}
               valueKhr={form.selling_price_khr}
                 onUsdChange={(value) => {
@@ -1865,7 +1865,7 @@ export default function ProductForm({
               would have re-created the ambiguity the ruling settled. */}
           <div className="min-w-0 rounded-xl border border-indigo-100 bg-indigo-50 p-3 dark:border-indigo-800 dark:bg-indigo-900/10">
             <div className="mb-2">
-              <p className="text-sm font-bold text-indigo-700 dark:text-indigo-400">{tr('wholesale_price', 'Wholesale', 'បោះដុំ')}</p>
+              <p className="text-sm font-bold text-indigo-700 dark:text-indigo-400">{tr('wholesale_price', 'Wholesale price', 'តម្លៃបោះដុំ')}</p>
               <p className="text-xs text-indigo-600 dark:text-indigo-500">{tr('wholesale_price_hint', "The shop's bulk price. Selectable at the POS, and applied on its own above a quantity when that setting is on.", 'តម្លៃបោះដុំរបស់ហាង។ អាចជ្រើសនៅ POS និងប្រើដោយខ្លួនឯងពេលបរិមាណលើសកម្រិត ប្រសិនបើបានបើកការកំណត់នោះ។')}</p>
             </div>
             <DualPriceInput

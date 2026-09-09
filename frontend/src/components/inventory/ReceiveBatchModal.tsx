@@ -464,7 +464,7 @@ export default function ReceiveBatchModal({
             <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('payment_to_supplier', 'Payment to supplier')}</span>
             <div className="flex items-center gap-2">
               <div className="inline-flex overflow-hidden rounded-lg border border-gray-200 text-xs font-medium dark:border-gray-600">
-                {([['', tr('payment_unset', '—')], ['paid', tr('paid', 'Paid')], ['credit', tr('on_credit', 'On credit')]] as const).map(([value, label], index) => (
+                {([['', tr('payment_unset', '—')], ['paid', tr('paid', 'Paid')], ['credit', tr('on_credit', 'Not Paid to supplier')]] as const).map(([value, label], index) => (
                   <button
                     key={value || 'unset'}
                     type="button"

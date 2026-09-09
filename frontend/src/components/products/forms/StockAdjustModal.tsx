@@ -506,7 +506,7 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
     const currentQuantity = adjustBranchQuantity(product.branch_stock, numericBranchId, stockQtyOf(product))
     const isStockIn = isStockInSubmission(adjustForm.type, qty, currentQuantity)
     if (isStockIn && isStockReceiptCreditIncomplete(adjustForm)) {
-      notify(tr('fast_stockin_credit_due', 'On-credit stock needs a due date'), 'error')
+      notify(tr('fast_stockin_credit_due', 'Not Paid supplier stock needs a due date'), 'error')
       return
     }
     // The lot this submission actually names, from the one shared rule

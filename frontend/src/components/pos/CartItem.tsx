@@ -163,7 +163,7 @@ export default function CartItem({
                       : 'border-indigo-300 bg-transparent text-indigo-500 opacity-60 hover:opacity-100 dark:border-indigo-700 dark:text-indigo-400'
                   }`}
                 >
-                  {translate(t, 'wholesale_price', 'Wholesale')}
+                  {translate(t, 'wholesale_price', 'Wholesale price')}
                 </button>
               ) : null}
             </div>

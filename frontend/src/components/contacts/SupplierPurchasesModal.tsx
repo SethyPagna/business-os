@@ -109,7 +109,7 @@ export default function SupplierPurchasesModal({ supplierId, supplierName, fetch
                 [`${tr('purchase_batches', 'Received dates')} / ${tr('products', 'Products')}`, `${totals.batches ?? 0} / ${totals.products ?? 0}`],
                 [tr('units_received', 'Units received'), qty(totals.units_received)],
                 [tr('purchase_cost', 'Purchase cost'), money(totals.cost_usd)],
-                [tr('credit_open', 'On credit'), `${money(totals.credit_open_usd)} (${totals.credit_batches ?? 0})`],
+                [tr('credit_open', 'Not Paid to supplier'), `${money(totals.credit_open_usd)} (${totals.credit_batches ?? 0})`],
               ].map(([label, value]) => (
                 <div key={label} className="rounded-xl border border-gray-200 px-3 py-1.5 dark:border-gray-700">
                   <div className="text-[11px] text-gray-400">{label}</div>
@@ -150,7 +150,7 @@ export default function SupplierPurchasesModal({ supplierId, supplierName, fetch
                         <td className="px-3 py-2">
                           {batch.payment_status === 'credit' ? (
                             <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">
-                              {tr('on_credit', 'On credit')}{batch.credit_due_date ? ` · ${fmtDateOnly(batch.credit_due_date)}` : ''}
+                              {tr('on_credit', 'Not Paid to supplier')}{batch.credit_due_date ? ` · ${fmtDateOnly(batch.credit_due_date)}` : ''}
                             </span>
                           ) : batch.payment_status === 'paid' ? (
                             <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200">{tr('paid', 'Paid')}</span>

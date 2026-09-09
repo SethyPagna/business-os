@@ -136,7 +136,7 @@ export default function ArInvoicesSection({ t }: ArInvoicesSectionProps) {
       return <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">{tr('ar_outstanding', 'Owed')}</span>
     }
     if (outstanding < 0) {
-      return <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-medium text-sky-800 dark:bg-sky-900/40 dark:text-sky-200">{tr('ar_overpaid', 'Credit')}</span>
+      return <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-medium text-sky-800 dark:bg-sky-900/40 dark:text-sky-200">{tr('ar_overpaid', 'Customer balance')}</span>
     }
     return <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200">{tr('paid', 'Paid')}</span>
   }
@@ -169,7 +169,7 @@ export default function ArInvoicesSection({ t }: ArInvoicesSectionProps) {
           options={[
             { value: 'all', label: tr('all', 'All') },
             { value: 'outstanding', label: tr('ar_outstanding', 'Owed') },
-            { value: 'overpaid', label: tr('ar_overpaid', 'Credit') },
+            { value: 'overpaid', label: tr('ar_overpaid', 'Customer balance') },
             { value: 'settled', label: tr('paid', 'Paid') },
           ]}
         />

@@ -250,7 +250,7 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     // add a forgotten item but cannot take one back off a paid sale. Like
     // add_items it can never be queued for review -- the stock movement is
     // immediate.
-    { key: 'amend', tKey: 'perm_act_sales_amend', label: 'Amend a recorded sale (change quantities, remove or replace lines, correct delivery fee or actual courier cost)', review: 'block' },
+    { key: 'amend', tKey: 'perm_act_sales_amend', label: 'Amend a recorded sale (change quantities, remove or replace lines, correct delivery fee or actual delivery cost)', review: 'block' },
     // Multi-sale status/field updates and their grouped Undo/Redo share this
     // explicit capability. Individual actions above remain independently
     // grantable to front-line staff.

@@ -63,6 +63,50 @@ for (const [key, [english, khmer]] of Object.entries(canonical)) {
   assert.equal(km[key], khmer, `Khmer definition drifted for ${key}`)
 }
 
+// Canonical finance and operator labels. These are aliases used by different
+// surfaces, so a pack edit must not quietly reintroduce “purchase price”,
+// “courier cost”, or a second translation for the same amount.
+const conciseAliases: Record<string, [string, string, string][]> = {
+  'cost price': [
+    ['cost_price', 'Cost price', 'ថ្លៃដើម'],
+    ['cost_price_usd', 'Cost price (USD)', 'ថ្លៃដើម (ដុល្លារ)'],
+    ['cost_price_khr', 'Cost price (KHR)', 'ថ្លៃដើម (រៀល)'],
+    ['cost_in_usd_label', 'Cost price (USD)', 'ថ្លៃដើម (ដុល្លារ)'],
+    ['cost_in_khr_label', 'Cost price (KHR)', 'ថ្លៃដើម (រៀល)'],
+    ['label_cost_purchase', 'Cost price', 'ថ្លៃដើម'],
+  ],
+  'selling price': [
+    ['selling_price', 'Selling price', 'តម្លៃលក់'],
+    ['label_selling_price', 'Selling price', 'តម្លៃលក់'],
+  ],
+  'delivery fee charged': [
+    ['delivery_charged', 'Delivery fee charged', 'ថ្លៃដឹកគិតពីអតិថិជន'],
+    ['rpt_delivery_charged', 'Delivery fee charged', 'ថ្លៃដឹកគិតពីអតិថិជន'],
+    ['rpt_delivery_collected', 'Delivery fee charged', 'ថ្លៃដឹកគិតពីអតិថិជន'],
+  ],
+  'actual delivery cost': [
+    ['delivery_actual_cost', 'Actual delivery cost', 'ថ្លៃដឹកដើម'],
+    ['rpt_delivery_cost', 'Actual delivery cost', 'ថ្លៃដឹកដើម'],
+    ['rpt_delivery_paid', 'Actual delivery cost', 'ថ្លៃដឹកដើម'],
+  ],
+  'delivery profit': [
+    ['delivery_margin', 'Delivery profit', 'ចំណេញថ្លៃដឹក'],
+    ['rpt_delivery_margin', 'Delivery profit', 'ចំណេញថ្លៃដឹក'],
+    ['rpt_delivery_net', 'Delivery profit', 'ចំណេញថ្លៃដឹក'],
+  ],
+  'store-paid delivery fee': [
+    ['delivery_absorbed', 'Store-paid delivery fee', 'ថ្លៃដឹកហាងចេញ'],
+    ['store_paid_delivery', 'Store-paid delivery fee', 'ថ្លៃដឹកហាងចេញ'],
+    ['rpt_store_delivery', 'Store-paid delivery fee', 'ថ្លៃដឹកហាងចេញ'],
+  ],
+}
+for (const [concept, entries] of Object.entries(conciseAliases)) {
+  for (const [key, english, khmer] of entries) {
+    assert.equal(en[key], english, `English ${concept} label drifted for ${key}`)
+    assert.equal(km[key], khmer, `Khmer ${concept} label drifted for ${key}`)
+  }
+}
+
 // Long operator guidance must use the same received-date vocabulary as the
 // compact labels; the machine-facing legacy column names remain covered by
 // the CSV compatibility copy and are intentionally not renamed here.

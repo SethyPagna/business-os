@@ -125,10 +125,10 @@ export default function DeliveryContactReportModal({ contactId, contactName, t, 
             <div className="grid grid-cols-2 gap-2">
               {stat(tr(t, 'deliveries', 'Deliveries'), String(row.deliveries),
                 row.last_delivery_at ? `${tr(t, 'last_delivery', 'Last')}: ${String(row.last_delivery_at).slice(0, 10)}` : undefined)}
-              {stat(tr(t, 'delivery_charged', 'Charged to customers'), money(row.charged_fee_usd))}
+              {stat(tr(t, 'delivery_charged', 'Delivery fee charged'), money(row.charged_fee_usd))}
               {stat(tr(t, 'delivery_absorbed', 'Absorbed by store'), money(row.absorbed_fee_usd))}
               {stat(
-                tr(t, 'delivery_actual_cost', 'Actual cost paid'),
+                tr(t, 'delivery_actual_cost', 'Actual delivery cost'),
                 money(row.actual_cost_usd),
                 `${row.actual_cost_count}/${row.deliveries} ${tr(t, 'recorded', 'recorded')}`,
               )}
@@ -141,12 +141,12 @@ export default function DeliveryContactReportModal({ contactId, contactName, t, 
             <div className={`rounded-xl border px-3 py-2 text-sm font-semibold ${row.margin_usd < 0
               ? 'border-red-200 bg-red-50 text-red-700 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-300'
               : 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/20 dark:text-emerald-300'}`}>
-              {tr(t, 'delivery_margin', 'Delivery margin')}: {money(row.margin_usd)}
+                {tr(t, 'delivery_margin', 'Delivery profit')}: {money(row.margin_usd)}
               <span className="ml-1.5 text-xs font-normal opacity-75">({tr(t, 'delivery_margin_hint', 'charged minus actual cost paid')})</span>
             </div>
             {row.actual_cost_count < row.deliveries ? (
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                {tr(t, 'delivery_cost_partial_hint', 'Some deliveries have no recorded courier cost yet, so the actual total covers only the recorded ones -- it is not read as zero cost.')}
+                {tr(t, 'delivery_cost_partial_hint', 'Some deliveries have no actual delivery cost. Totals include recorded costs only; missing costs are not zero.')}
               </p>
             ) : null}
           </>

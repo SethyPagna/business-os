@@ -153,10 +153,10 @@ await runTest('bulk-edit Pricing panel: price labels, placeholders and auto-calc
   assert.doesNotMatch(pricingPanel, />KHR prices will auto-calculate at current exchange rate</, 'auto-calc note still hardcoded')
 
   assert.match(pricingPanel, /tr\('bulk_edit_update_pricing_for_count', 'Update pricing for \{count\} products'\)/)
-  assert.match(pricingPanel, /tr\('selling_price_usd', 'Selling Price \(USD\)'\)/)
-  assert.match(pricingPanel, /tr\('selling_price_khr', 'Selling Price \(KHR\)'\)/)
-  assert.match(pricingPanel, /tr\('purchase_price_usd', 'Purchase Price \(USD\)'\)/)
-  assert.match(pricingPanel, /tr\('purchase_price_khr', 'Purchase Price \(KHR\)'\)/)
+  assert.match(pricingPanel, /tr\('selling_price_usd', 'Selling price \(USD\)'\)/)
+  assert.match(pricingPanel, /tr\('selling_price_khr', 'Selling price \(KHR\)'\)/)
+  assert.match(pricingPanel, /tr\('purchase_price_usd', 'Purchase price \(USD\)'\)/)
+  assert.match(pricingPanel, /tr\('purchase_price_khr', 'Purchase price \(KHR\)'\)/)
   assert.match(pricingPanel, /tr\('bulk_price_khr_auto_note', 'KHR prices will auto-calculate at current exchange rate'\)/)
   // All six price inputs (selling x2, wholesale x2, purchase x2) share the
   // one placeholder key -- count them so a missed input can't hide.

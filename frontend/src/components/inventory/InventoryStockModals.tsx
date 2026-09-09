@@ -503,11 +503,11 @@ export default function InventoryStockModals({
                           <input className="input text-sm" type="number" step="any" min="0" value={adjustForm.cost_khr} onChange={e => setAdjustForm(f=>({...f, cost_khr:e.target.value}))} />
                         </div>
                         <div>
-                          <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{tr('selling_price_usd_full', 'Selling Price')} ({usdSymbol})</label>
+                          <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{tr('selling_price_usd_full', 'Selling price')} ({usdSymbol})</label>
                           <input className="input text-sm" type="number" step="any" min="0" value={adjustForm.selling_price_usd} onChange={e => setAdjustForm(f=>({...f, selling_price_usd:e.target.value}))} />
                         </div>
                         <div>
-                          <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{tr('selling_price_khr_full', 'Selling Price')} (KHR)</label>
+                          <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{tr('selling_price_khr_full', 'Selling price')} (KHR)</label>
                           <input className="input text-sm" type="number" step="any" min="0" value={adjustForm.selling_price_khr} onChange={e => setAdjustForm(f=>({...f, selling_price_khr:e.target.value}))} />
                         </div>
                       </div>
@@ -671,7 +671,7 @@ export default function InventoryStockModals({
                               ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
                               : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}
                           >
-                            {mode === 'credit' ? tr('on_credit', 'On credit') : tr('paid', 'Paid')}
+                            {mode === 'credit' ? tr('on_credit', 'Not Paid to supplier') : tr('paid', 'Paid')}
                           </button>
                         ))}
                       </div>
@@ -690,7 +690,7 @@ export default function InventoryStockModals({
                         onChange={iso => setAdjustForm(f => ({ ...f, credit_due_date: iso }))}
                       />
                       {creditDueMissing ? (
-                        <div className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">{tr('fast_stockin_credit_due', 'On-credit stock needs a due date')}</div>
+                        <div className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">{tr('fast_stockin_credit_due', 'Not Paid supplier stock needs a due date')}</div>
                       ) : null}
                     </div>
                   ) : null}

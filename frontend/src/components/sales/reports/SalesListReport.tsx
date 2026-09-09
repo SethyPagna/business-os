@@ -190,7 +190,7 @@ export default function SalesListReport(p: ReportViewProps) {
       { key: 'revenue', label: tr('revenue', 'Revenue'), value: fmtMoney(r.net_revenue_usd), kind: 'total' as const },
       ...(r.pending_revenue_usd ? [{ key: 'pending', label: tr('rpt_pending_credit', 'Not Paid'), value: fmtMoney(r.pending_revenue_usd), kind: 'info' as const }] : []),
       { key: 'tax', label: tr('tax', 'Tax'), value: fmtMoney(r.tax_usd), kind: 'add' as const },
-      { key: 'delivery', label: tr('rpt_delivery_charged', 'Delivery charged'), value: fmtMoney(r.delivery_usd), kind: 'add' as const },
+      { key: 'delivery', label: tr('rpt_delivery_charged', 'Delivery fee charged'), value: fmtMoney(r.delivery_usd), kind: 'add' as const },
       { key: 'collected', label: tr('collected_total', 'Collected total'), value: fmtMoney(r.collected_total_usd), kind: 'total' as const },
     ]
     if (typeof r.gross_profit_usd === 'number') {

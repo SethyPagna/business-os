@@ -123,7 +123,7 @@ test('buildEquation prints the sentence, drops zero terms, keeps the operators',
   )
   assert.equal(
     buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: 178 }, profitTerms(totals), fmt, tr),
-    'Gross profit $178.00 = Revenue $290.00 − COGS $118.00 + Delivery fees charged $15.00 − Delivery paid to couriers $9.00',
+    'Gross profit $178.00 = Revenue $290.00 − COGS $118.00 + Delivery fees charged $15.00 − Actual delivery cost $9.00',
   )
   const noDelivery: StatsFormulaTotals = { revenue_usd: 50, cost_usd: 20, profit_usd: 30 }
   assert.equal(
@@ -138,7 +138,7 @@ test('buildEquation reads a negative term by its effect, never as "- $-2"', () =
   const tr = (_k: string, fallback: string) => fallback
   const refundedCourier: StatsFormulaTotals = { revenue_usd: 50, cost_usd: 20, recognized_delivery_cost_usd: -2, profit_usd: 32 }
   const text = buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: 32 }, profitTerms(refundedCourier), fmt, tr)
-  assert.equal(text, 'Gross profit $32.00 = Revenue $50.00 − COGS $20.00 + Delivery paid to couriers $2.00')
+  assert.equal(text, 'Gross profit $32.00 = Revenue $50.00 − COGS $20.00 + Actual delivery cost $2.00')
   assert.equal(equationResidual(32, profitTerms(refundedCourier)), 0)
 })
 

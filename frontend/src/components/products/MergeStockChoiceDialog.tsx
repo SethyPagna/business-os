@@ -93,8 +93,8 @@ type TranslateFn = (key: string) => string | undefined
 const PRICE_FIELD_LABEL: Record<string, [string, string]> = {
   selling_price_usd: ['selling_price', 'Selling price'],
   selling_price_khr: ['selling_price_khr', 'Selling price (KHR)'],
-  wholesale_price_usd: ['wholesale_price', 'Wholesale'],
-  wholesale_price_khr: ['wholesale_price_khr', 'Wholesale (KHR)'],
+  wholesale_price_usd: ['wholesale_price', 'Wholesale price'],
+  wholesale_price_khr: ['wholesale_price_khr', 'Wholesale price (KHR)'],
 }
 
 const IDENTITY_FIELD_LABEL: Record<string, [string, string]> = {

@@ -716,11 +716,11 @@ export function buildIncomeStatement(input: StatementInput): StatementLine[] {
       line('revenue_carried', 'rpt_revenue_carried', 'Revenue (from above)', 'total', 'profit', ['rpt_hint_revenue_carried', 'The revenue line repeated, so the first input of the profit calculation is on screen beside the figures taken off it.']),
       line('cogs', 'cogs', 'Cost of goods sold', 'sub', 'profit', ['rpt_hint_cogs', 'Cost snapshots of the items sold, less the cost of goods a return put back on the sellable shelf. Lines without a snapshot count as 0 and are flagged.'], cogsNote(sales)),
       line('delivery_collected', 'rpt_delivery_collected', 'Delivery fees charged', 'add', 'profit', ['rpt_hint_delivery_collected', 'Customer-billed delivery fees, including Not Paid sales. This is revenue, not cash received. Waived fees are excluded.']),
-      line('delivery_paid', 'rpt_delivery_paid', 'Delivery paid to couriers', 'sub', 'profit', ['rpt_hint_delivery_paid', 'The courier money actually paid out and recorded on recognized sales. This is the real delivery cost, not a residual.'], deliveryCoverageNote(sales)),
+      line('delivery_paid', 'rpt_delivery_paid', 'Actual delivery cost', 'sub', 'profit', ['rpt_hint_delivery_paid', 'The actual delivery cost paid to the driver and recorded on recognized sales. This is the cost itself, not a residual.'], deliveryCoverageNote(sales)),
     )
     const rounding = line('profit_rounding', 'rpt_rounding', 'Rounding', 'add', 'profit', ['rpt_hint_rounding', 'Each figure above is rounded to the cent on its own, so the chain can land a cent from the total. Shown rather than absorbed into a line.'])
     if (rounding.usd !== 0) lines.push(rounding)
-    const totalProfit = line('gross_profit', 'rpt_gross_profit', 'Total Profit', 'total', 'profit', ['rpt_hint_gross_profit', 'Revenue minus cost of goods sold, plus delivery fees charged, minus courier costs. Includes Not Paid sales.'])
+    const totalProfit = line('gross_profit', 'rpt_gross_profit', 'Total profit', 'total', 'profit', ['rpt_hint_gross_profit', 'Revenue minus cost of goods sold, plus delivery fees charged, minus actual delivery cost. Includes Not Paid sales.'])
     lines.push({ ...totalProfit, headline: profitMode === 'gross', tone: totalProfit.usd > 0 ? 'positive' : totalProfit.usd < 0 ? 'negative' : undefined })
     // Expenses and the net result are no longer gated on the profit mode --
     // only on whether the caller may read expenses at all. `expenses` is null
@@ -783,8 +783,8 @@ function deliveryCoverageNote(t: ReportTotals): StatementNote | undefined {
   const deliveries = num(t.delivery_sale_count)
   const recorded = num(t.delivery_actual_cost_count)
   if (deliveries <= 0 || recorded >= deliveries) return undefined
-  if (recorded === 0) return { key: 'rpt_note_delivery_none', fallback: 'not available — no courier cost recorded on {total} deliveries', total: deliveries }
-  return { key: 'rpt_note_delivery_partial', fallback: 'recorded on {count} of {total} deliveries', count: recorded, total: deliveries }
+  if (recorded === 0) return { key: 'rpt_note_delivery_none', fallback: 'not available — no actual delivery cost recorded on {total} deliveries', total: deliveries }
+  return { key: 'rpt_note_delivery_partial', fallback: 'actual delivery cost recorded on {count} of {total} deliveries', count: recorded, total: deliveries }
 }
 
 /**
@@ -802,10 +802,10 @@ function deliveryReconciliationLines(t: ReportTotals, line: LineFactory): Statem
   const anyDelivery = num(t.delivery_sale_count) > 0 || t.delivery_usd !== 0 || t.store_delivery_usd !== 0 || t.delivery_actual_cost_usd !== 0
   if (!anyDelivery) return []
   return [
-    line('delivery_charged', 'rpt_delivery_charged', 'Charged to customers', 'memo', 'delivery', ['rpt_hint_delivery_charged', 'Delivery fees billed to customers on every delivery in the range. A fee the shop absorbed is not counted here.']),
-    line('delivery_actual_cost', 'rpt_delivery_cost', 'Actual cost', 'memo', 'delivery', ['rpt_hint_delivery_actual', 'The courier money actually paid out, recorded on the sale. Never printed on a receipt; reported here so actual cost can be compared with what was charged.'], deliveryCoverageNote(t)),
-    line('delivery_absorbed', 'rpt_store_delivery', 'Store-paid delivery', 'memo', 'delivery', ['rpt_hint_delivery_absorbed', 'Delivery the shop absorbed instead of charging. Revenue given away, not cash paid out, so it is reported here and never subtracted from profit.']),
-    line('delivery_net', 'rpt_delivery_net', 'Delivery contribution', 'memo', 'delivery', ['rpt_hint_delivery_net', 'Delivery fees charged minus recorded courier costs, including Not Paid sales. This is the delivery contribution to profit.']),
+    line('delivery_charged', 'rpt_delivery_charged', 'Delivery fee charged', 'memo', 'delivery', ['rpt_hint_delivery_charged', 'Delivery fees charged to customers on every delivery in the range. A fee the shop paid itself is not counted here.']),
+    line('delivery_actual_cost', 'rpt_delivery_cost', 'Actual delivery cost', 'memo', 'delivery', ['rpt_hint_delivery_actual', 'The actual delivery cost recorded on the sale. It is hidden from receipts and shown here so it can be compared with the fee charged.'], deliveryCoverageNote(t)),
+    line('delivery_absorbed', 'rpt_store_delivery', 'Store-paid delivery fee', 'memo', 'delivery', ['rpt_hint_delivery_absorbed', 'Delivery fees paid by the shop instead of charged to the customer. This is revenue given up, not a cash expense, so it is reported here and does not reduce profit.']),
+    line('delivery_net', 'rpt_delivery_net', 'Delivery profit', 'memo', 'delivery', ['rpt_hint_delivery_net', 'Delivery fees charged minus recorded actual delivery costs, including Not Paid sales. This is the delivery profit included in total profit.']),
   ]
 }
 
@@ -832,7 +832,7 @@ export const STATEMENT_GROUPS: readonly StatementGroup[] = ['revenue', 'collecte
 export function statementGroupLabel(group: StatementGroup, tr: (key: string, fallback: string) => string): string {
   if (group === 'revenue') return tr('revenue', 'Revenue')
   if (group === 'collected') return tr('rpt_collected_group', 'Collected')
-  if (group === 'delivery') return tr('rpt_delivery_breakdown', 'Delivery: charged vs paid')
+  if (group === 'delivery') return tr('rpt_delivery_breakdown', 'Delivery fees: charged vs actual cost')
   if (group === 'pending') return tr('rpt_pending_credit', 'Not Paid')
   return tr('profit', 'Profit')
 }

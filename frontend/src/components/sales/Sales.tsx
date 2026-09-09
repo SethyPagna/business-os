@@ -1492,7 +1492,7 @@ ${buildEquation({ key: 'revenue', fallback: 'Revenue', usd: revenueUsd }, revenu
         value: fmtUSD(profitUsd),
         tone: profitUsd < 0 ? ('crit' as const) : ('ok' as const),
         sub: revenueUsd > 0 ? `${((profitUsd / revenueUsd) * 100).toFixed(1)}% ${translateOr('profit_margin_short', 'margin')}` : undefined,
-        hint: `${translateOr('stats_profit_hint', 'Gross profit = revenue − COGS + delivery fees charged − courier cost (Not Paid sales included).', 'ប្រាក់ចំណេញដុល = ចំណូល − ថ្លៃដើមទំនិញ + ថ្លៃដឹកជញ្ជូនគិតពីអតិថិជន − ថ្លៃអ្នកដឹកជញ្ជូន (រួមទាំងការលក់ជាប្រាក់ជំពាក់)។')}
+        hint: `${translateOr('stats_profit_hint', 'Profit = revenue − cost of goods sold + delivery fees charged − actual delivery cost. Includes Not Paid sales.', 'ចំណេញ = ចំណូល − ថ្លៃដើមទំនិញលក់ + ថ្លៃដឹកគិតពីអតិថិជន − ថ្លៃដឹកដើម។ រួមបញ្ចូលការលក់ជាប្រាក់ជំពាក់។')}
 
 ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd }, profitTerms(formulaTotals), fmtUSD, translateOr)}`,
         details: [
@@ -1502,7 +1502,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
           // the delivery correction; the drill still listed the WAIVED fee,
           // which profit does not subtract. These are the real two terms.
           { label: translateOr('rpt_delivery_collected', 'Delivery fees charged'), value: fmtUSD(Number(totals.recognized_delivery_usd) || 0) },
-          { label: translateOr('rpt_delivery_paid', 'Delivery paid to couriers'), value: fmtUSD(Number(totals.recognized_delivery_cost_usd) || 0), tone: 'warn' as const },
+          { label: translateOr('rpt_delivery_paid', 'Actual delivery cost'), value: fmtUSD(Number(totals.recognized_delivery_cost_usd) || 0), tone: 'warn' as const },
           { label: t('gross_profit') || 'Gross profit', value: fmtUSD(profitUsd), tone: profitUsd < 0 ? ('crit' as const) : ('ok' as const) },
         ],
       },

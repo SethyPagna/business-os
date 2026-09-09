@@ -3738,7 +3738,7 @@ function ProductsFullEditor() {
             // Label was a hardcoded "VIP"; it is translated now because the
             // surviving tier has a real key in both packs (wholesale_price).
             <div className="mt-0.5 text-[10px] text-primary-600 dark:text-primary-400">
-              {tr('wholesale_price', 'Wholesale', 'បោះដុំ')} {fmtUSD(wholesaleUsd || sellingUsd)}
+              {tr('wholesale_price', 'Wholesale price', 'តម្លៃបោះដុំ')} {fmtUSD(wholesaleUsd || sellingUsd)}
               {wholesaleKhr > 0 ? ` / ${fmtKHR(wholesaleKhr)}` : ''}
             </div>
           ) : null}
@@ -4548,9 +4548,9 @@ function ProductsFullEditor() {
             return <>{pre}<strong>{selectedVisibleCount}</strong>{post}</>
           })()}</p>
           <div className="grid grid-cols-2 gap-2">
-            <div><label className="text-xs text-gray-500 block mb-1">{tr('selling_price_usd', 'Selling Price (USD)')}</label>
+            <div><label className="text-xs text-gray-500 block mb-1">{tr('selling_price_usd', 'Selling price (USD)')}</label>
               <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.selling_price_usd??''} onChange={e=>setBulkEditForm(f=>({...f,selling_price_usd:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} /></div>
-            <div><label className="text-xs text-gray-500 block mb-1">{tr('selling_price_khr', 'Selling Price (KHR)')}</label>
+            <div><label className="text-xs text-gray-500 block mb-1">{tr('selling_price_khr', 'Selling price (KHR)')}</label>
               <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.selling_price_khr??''} onChange={e=>setBulkEditForm(f=>({...f,selling_price_khr:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} /></div>
             {/* Was the "VIP Price" pair writing special_price_usd/khr. The
                 2026-09-04 ruling deleted that tier, so these now edit the
@@ -4563,9 +4563,9 @@ function ProductsFullEditor() {
               <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.wholesale_price_usd??''} onChange={e=>setBulkEditForm(f=>({...f,wholesale_price_usd:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} /></div>
             <div><label className="text-xs text-gray-500 block mb-1">{tr('wholesale_price_khr_full', 'Wholesale (KHR)', 'តម្លៃបោះដុំ (KHR)')}</label>
               <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.wholesale_price_khr??''} onChange={e=>setBulkEditForm(f=>({...f,wholesale_price_khr:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} /></div>
-            <div><label className="text-xs text-gray-500 block mb-1">{tr('purchase_price_usd', 'Purchase Price (USD)')}</label>
+            <div><label className="text-xs text-gray-500 block mb-1">{tr('purchase_price_usd', 'Purchase price (USD)')}</label>
               <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.purchase_price_usd??''} onChange={e=>setBulkEditForm(f=>({...f,purchase_price_usd:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} /></div>
-            <div><label className="text-xs text-gray-500 block mb-1">{tr('purchase_price_khr', 'Purchase Price (KHR)')}</label>
+            <div><label className="text-xs text-gray-500 block mb-1">{tr('purchase_price_khr', 'Purchase price (KHR)')}</label>
               <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.purchase_price_khr??''} onChange={e=>setBulkEditForm(f=>({...f,purchase_price_khr:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} /></div>
           </div>
           <p className="text-xs text-gray-400 mt-1">{tr('bulk_price_khr_auto_note', 'KHR prices will auto-calculate at current exchange rate')}</p>
@@ -4632,7 +4632,7 @@ function ProductsFullEditor() {
                 // productWriteHelpers.ts for the selected-rows path,
                 // BULK_PRICE_FIELDS in cloudflare/src/routes/products.ts for
                 // the catalog-wide one), so the toggle keeps working.
-                ['adjust_wholesale', tr('wholesale_price', 'Wholesale', 'បោះដុំ'), false],
+                ['adjust_wholesale', tr('wholesale_price', 'Wholesale price', 'តម្លៃបោះដុំ'), false],
                 ['adjust_cost', tr('cost_price', 'Cost price'), false],
               ] as const).map(([key, label, defaultOn]) => (
                 <label key={key} className="inline-flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300">

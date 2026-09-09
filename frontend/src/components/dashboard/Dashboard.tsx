@@ -1241,7 +1241,7 @@ export default function Dashboard() {
   const revenueFormulaText = translateOr('dashboard_formula_revenue', 'Net revenue = Gross sales - Discounts - Refunds')
   const collectedFormulaText = translateOr('dashboard_formula_collected_total', 'Collected total = Net revenue + Tax + Delivery')
   const storeDiscountFormulaText = translateOr('dashboard_formula_store_discounts', 'Store discounts are the cashier-entered sale discounts and product promotions.')
-  const profitFormulaText = translateOr('dashboard_formula_profit', 'Profit = Revenue − COGS + delivery fees charged − courier costs')
+  const profitFormulaText = translateOr('dashboard_formula_profit', 'Profit = revenue − cost of goods sold + delivery fees charged − actual delivery cost')
   const avgOrderFormulaText = translateOr('dashboard_formula_avg_order', 'Average order = Net revenue / transaction count')
   const returnsFormulaText = translateOr('dashboard_formula_returns', 'Returns decrease net revenue and loyalty points')
   const revenueExampleText = `${fmtUSD(aRevenue)} = ${fmtUSD(aGrossSales)} - ${fmtUSD(aDiscounts)} - ${fmtUSD(aKernelRefund)}`
@@ -1442,7 +1442,7 @@ ${translateOr('profit_margin', 'Margin')} = ${translateOr('gross_profit', 'Profi
         // is NOT one of them and moved to the Delivery card, where it is a
         // memo figure rather than a subtraction nothing performs.
         { label: translateOr('rpt_delivery_collected', 'Delivery fees charged'), value: fmtUSD(Number(aFormulaTotals.recognized_delivery_usd) || 0) },
-        { label: translateOr('rpt_delivery_paid', 'Delivery paid to couriers'), value: fmtUSD(Number(aFormulaTotals.recognized_delivery_cost_usd) || 0) },
+        { label: translateOr('rpt_delivery_paid', 'Actual delivery cost'), value: fmtUSD(Number(aFormulaTotals.recognized_delivery_cost_usd) || 0) },
         { label: translateOr('profit_margin', 'Profit margin'), value: aRevenue > 0 ? `${((aProfit / aRevenue) * 100).toFixed(2)}%` : '0.00%' },
       ],
     },
@@ -1497,7 +1497,7 @@ ${translateOr('profit_margin', 'Margin')} = ${translateOr('gross_profit', 'Profi
       id: 'delivery',
       info: `${translateOr('dash_info_delivery', "Delivery in this period: what customers were charged, what the couriers actually cost, and the margin between them.")}
 
-${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} = ${translateOr('delivery_fees', 'Delivery fees')} ${fmtUSD(aDelivery)} − ${translateOr('delivery_actual_cost', 'Actual delivery cost')} ${fmtUSD(aDeliveryActual)}`,
+${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} = ${translateOr('delivery_fees', 'Delivery fees')} ${fmtUSD(aDelivery)} − ${translateOr('delivery_actual_cost', 'Actual delivery cost')} ${fmtUSD(aDeliveryActual)}`,
       label: translateOr('delivery', 'Delivery'),
       value: fmtUSD(aDelivery),
       color: 'text-violet-600',
@@ -1508,8 +1508,8 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
           label: translateOr('delivery_actual_cost', 'Actual delivery cost'),
           value: `${fmtUSD(aDeliveryActual)}${aDeliverySales > 0 && aDeliveryActualCount < aDeliverySales ? ` (${aDeliveryActualCount}/${aDeliverySales} ${translateOr('recorded_short', 'recorded')})` : ''}`,
         },
-        { label: translateOr('delivery_margin', 'Delivery margin'), value: fmtUSD(aDeliveryMargin) },
-        { label: translateOr('store_paid_delivery', 'Store-paid delivery'), value: fmtUSD(aStoreDelivery) },
+        { label: translateOr('delivery_margin', 'Delivery profit'), value: fmtUSD(aDeliveryMargin) },
+        { label: translateOr('store_paid_delivery', 'Store-paid delivery fee'), value: fmtUSD(aStoreDelivery) },
       ],
     },
   ]), [

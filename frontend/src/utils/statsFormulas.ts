@@ -95,7 +95,7 @@ export function profitTerms(t: StatsFormulaTotals): FormulaTerm[] {
     { key: 'revenue_short', fallback: 'Revenue', sign: 1, usd: num(t.revenue_usd) },
     { key: 'cogs', fallback: 'COGS', sign: -1, usd: num(t.cost_usd) },
     { key: 'rpt_delivery_collected', fallback: 'Delivery fees charged', sign: 1, usd: num(t.recognized_delivery_usd) },
-    { key: 'rpt_delivery_paid', fallback: 'Delivery paid to couriers', sign: -1, usd: num(t.recognized_delivery_cost_usd) },
+    { key: 'rpt_delivery_paid', fallback: 'Actual delivery cost', sign: -1, usd: num(t.recognized_delivery_cost_usd) },
   ]
 }
 

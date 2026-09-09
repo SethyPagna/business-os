@@ -636,7 +636,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
       value === 'restock' ? tr('restocked', 'Restocked')
         : value === 'writeoff' ? tr('written_off', 'Written Off')
           : value === 'refund' ? tr('refund_only', 'Refund Only')
-            : value === 'credit' ? tr('supplier_credit', 'Credit')
+            : value === 'credit' ? tr('supplier_credit', 'Supplier balance')
               : value || '—'
     )
     if (scope === SUPPLIER_SCOPE) {

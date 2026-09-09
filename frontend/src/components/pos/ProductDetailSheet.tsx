@@ -744,7 +744,7 @@ export default function ProductDetailSheet({
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
               <span><span className="font-bold text-blue-600">{fmtUSD(asNumber(product.selling_price_usd))}</span>{asNumber(product.selling_price_khr) > 0 ? <span className="text-xs text-gray-400 ml-1">{fmtKHR(asNumber(product.selling_price_khr))}</span> : null}</span>
               {asNumber(product.wholesale_price_usd) > 0 || asNumber(product.wholesale_price_khr) > 0 ? (
-                <span><span className="text-xs text-gray-400 mr-1">{t('wholesale_price') || 'Wholesale'}</span><span className="font-bold text-indigo-600">{fmtUSD(asNumber(product.wholesale_price_usd || 0))}</span>{asNumber(product.wholesale_price_khr || 0) > 0 ? <span className="text-xs text-gray-400 ml-1">{fmtKHR(asNumber(product.wholesale_price_khr || 0))}</span> : null}</span>
+                <span><span className="text-xs text-gray-400 mr-1">{t('wholesale_price') || 'Wholesale price'}</span><span className="font-bold text-indigo-600">{fmtUSD(asNumber(product.wholesale_price_usd || 0))}</span>{asNumber(product.wholesale_price_khr || 0) > 0 ? <span className="text-xs text-gray-400 ml-1">{fmtKHR(asNumber(product.wholesale_price_khr || 0))}</span> : null}</span>
               ) : null}
             </div>
           </div>
@@ -945,7 +945,7 @@ export default function ProductDetailSheet({
                         disabled={!effectiveVariantInStock || !batchReadyToSell}
                         onClick={() => closeAfterAdd(effectiveVariant, 'wholesale')}
                       >
-                        {`${t('wholesale_price') || 'Wholesale'} ${fmtUSD(asNumber(effectiveVariant.wholesale_price_usd || 0))}`}
+                        {`${t('wholesale_price') || 'Wholesale price'} ${fmtUSD(asNumber(effectiveVariant.wholesale_price_usd || 0))}`}
                       </button>
                     ) : null}
                     {!onPick && effectiveVariantPromotion.active ? (
@@ -1053,7 +1053,7 @@ export default function ProductDetailSheet({
                   disabled={displayedStock <= asNumber(product.out_of_stock_threshold) || !batchReadyToSell}
                   onClick={() => closeAfterAdd(product, 'wholesale')}
                 >
-                  {`${t('wholesale_price') || 'Wholesale'} ${fmtUSD(asNumber(product.wholesale_price_usd || 0))}`}
+                  {`${t('wholesale_price') || 'Wholesale price'} ${fmtUSD(asNumber(product.wholesale_price_usd || 0))}`}
                 </button>
               ) : null}
             </div>

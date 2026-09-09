@@ -1124,7 +1124,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                 [tr(t, 'total_cost', 'Total cost'), detail.total_cost_usd != null || detail.batch_received_cost_usd != null ? fmtOptionalUsd(detail.total_cost_usd ?? detail.batch_received_cost_usd) : null],
                 [tr(t, 'expiry_date', 'Expiry'), detail.batch_expiry_date],
                 [tr(t, 'payment_status', 'Payment status'), detail.batch_payment_status],
-                [tr(t, 'credit_due_date', 'Credit due'), detail.batch_credit_due_date],
+                [tr(t, 'credit_due_date', 'Not Paid due date'), detail.batch_credit_due_date],
                 [tr(t, 'receipt_sessions', 'Receipt sessions'), detail.batch_receipt_session_count],
               ] as Array<[string, string | number | null | undefined]>).filter(([, value]) => value !== null && value !== undefined && value !== '').map(([label, value]) => (
                 <div key={label} className="min-w-0">

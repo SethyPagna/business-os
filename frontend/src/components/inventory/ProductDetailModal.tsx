@@ -203,7 +203,7 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
                 {costPriceKhr > 0 ? <div className="text-xs text-gray-400">{fmtKHR(costPriceKhr)}</div> : null}
               </div>
               <div className="rounded-xl bg-green-50 p-3 dark:bg-green-900/20">
-                <div className="mb-1 text-xs font-semibold text-green-600 dark:text-green-400">{T('label_selling_price', 'Selling Price')}</div>
+                <div className="mb-1 text-xs font-semibold text-green-600 dark:text-green-400">{T('label_selling_price', 'Selling price')}</div>
                 <div className="font-bold text-green-700 dark:text-green-300">{fmtUSD(sellingPriceUsd)}</div>
                 {sellingPriceKhr > 0 ? <div className="text-xs text-gray-400">{fmtKHR(sellingPriceKhr)}</div> : null}
               </div>

@@ -335,7 +335,7 @@ const CORE_ENGLISH_PACK: TranslationPack = {
   save: 'Save',
   search: 'Search',
   select_all: 'Select all',
-  selling_price_label: 'Selling Price',
+  selling_price_label: 'Selling price',
   server_back_online: 'Server is back online. You can keep working.',
   server_reconnecting: 'Server reconnecting',
   server_tunnel_reconnecting: 'Server/tunnel reconnecting. Cached data stays visible and read-only checks will refresh automatically.',

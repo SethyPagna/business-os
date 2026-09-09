@@ -56,14 +56,18 @@ assert.equal(km.rpt_pending_credit, 'ប្រាក់ជំពាក់')
 assert.equal(en.pos_status_awaiting_payment_desc, 'Not Paid — stock deducted')
 assert.equal(km.pos_status_awaiting_payment_desc, 'ប្រាក់ជំពាក់ — ស្តុកត្រូវបានកាត់')
 
-// Supplier credit, store credit, and an overpayment credit are different
-// financial concepts. Relabelling them as Not Paid would reverse their meaning.
-assert.equal(en.supplier_credit, 'Credit')
-assert.equal(km.supplier_credit, 'ឥណទាន')
-assert.equal(en.on_credit, 'On credit')
-assert.equal(en.settlement_credit, 'Store Credit')
-assert.equal(km.settlement_credit, 'ឥណទានហាង')
-assert.equal(en.ar_overpaid, 'Credit')
+// These are different financial concepts, so each keeps a precise visible
+// label while the internal wire values remain unchanged. Supplier stock is
+// unpaid; a return compensation, store tender balance, and customer
+// overpayment are balances rather than another sale status.
+assert.equal(en.supplier_credit, 'Supplier balance')
+assert.equal(km.supplier_credit, 'សមតុល្យអ្នកផ្គត់ផ្គង់')
+assert.equal(en.on_credit, 'Not Paid to supplier')
+assert.equal(km.on_credit, 'មិនទាន់បង់អ្នកផ្គត់ផ្គង់')
+assert.equal(en.settlement_credit, 'Store balance')
+assert.equal(km.settlement_credit, 'សមតុល្យហាង')
+assert.equal(en.ar_overpaid, 'Customer balance')
+assert.equal(km.ar_overpaid, 'សមតុល្យអតិថិជន')
 
 const telegramLang = read('../../cloudflare/src/lib/telegramLang.ts')
 const telegram = read('../../cloudflare/src/lib/telegram.ts')

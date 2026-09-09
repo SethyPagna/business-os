@@ -248,7 +248,7 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
     if (line.payment_status === 'credit') {
       return (
         <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">
-          {tr('on_credit', 'On credit')}{line.credit_due_date ? ` · ${fmtDateOnly(line.credit_due_date)}` : ''}
+          {tr('on_credit', 'Not Paid to supplier')}{line.credit_due_date ? ` · ${fmtDateOnly(line.credit_due_date)}` : ''}
         </span>
       )
     }
@@ -334,7 +334,7 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
             items={[
               { key: 'invoices', label: `${tr('stock_in_invoices_count', 'Invoices')} / ${tr('invoice_lines', 'Lines')}`, value: `${totals.invoices ?? 0} / ${totals.lines ?? 0}` },
               { key: 'units', label: tr('units_received', 'Units received'), value: qty(totals.units_received) },
-              { key: 'credit', label: tr('credit_open', 'On credit'), value: String(totals.credit_lines ?? 0) },
+              { key: 'credit', label: tr('credit_open', 'Not Paid to supplier'), value: String(totals.credit_lines ?? 0) },
             ]}
             total={{ key: 'total', label: tr('purchase_cost', 'Purchase cost'), value: money(totals.cost_usd) }}
           />
@@ -373,7 +373,7 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
                       <span className="min-w-0 flex-1 truncate text-sm text-gray-700 dark:text-gray-200">{supplierLabel(group)}</span>
                       {branchNames ? <span className="text-[11px] text-gray-400">{branchNames}</span> : null}
                       {group.credit_lines > 0 ? (
-                        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">{tr('on_credit', 'On credit')}: {group.credit_lines}</span>
+                        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">{tr('on_credit', 'Not Paid to supplier')}: {group.credit_lines}</span>
                       ) : null}
                       <span className="text-xs text-gray-500">{group.line_count} {tr('invoice_lines', 'Lines').toLowerCase()}</span>
                       <span className="text-xs text-gray-500">{qty(group.units_received)} {tr('units', 'Units').toLowerCase()}</span>

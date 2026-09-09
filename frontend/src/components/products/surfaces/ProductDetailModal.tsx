@@ -370,7 +370,7 @@ export default function ProductDetailModal({
                   <span className="text-red-600">{fmtUSD(purchaseUsd)}</span>
                   {purchaseKhr > 0 ? <span className="ml-2 text-xs text-gray-400">{fmtKHR(purchaseKhr)}</span> : null}
                 </Row>
-                <Row label={T('label_selling_price', 'Selling Price')}>
+                <Row label={T('label_selling_price', 'Selling price')}>
                   <span className="text-base font-semibold text-green-600">{fmtUSD(sellingUsd)}</span>
                   {sellingKhr > 0 ? <span className="ml-2 text-xs text-gray-400">{fmtKHR(sellingKhr)}</span> : null}
                 </Row>
@@ -409,7 +409,7 @@ export default function ProductDetailModal({
                     misnamed, and the Wholesale row directly below now shows
                     the very numbers it used to (migration 0111 moved them). */}
                 {(wholesaleUsd > 0 || wholesaleKhr > 0) ? (
-                  <Row label={T('wholesale_price', 'Wholesale')}>
+                  <Row label={T('wholesale_price', 'Wholesale price')}>
                     <span className="text-indigo-600 dark:text-indigo-300">{fmtUSD(wholesaleUsd)}</span>
                     {wholesaleKhr > 0 ? <span className="ml-2 text-xs text-gray-400">{fmtKHR(wholesaleKhr)}</span> : null}
                   </Row>

@@ -636,7 +636,7 @@ export default function ProductsImageOnlyView() {
                   and already carries the values the VIP row used to show. */}
               {showWholesale &&(Number(detailsProduct.wholesale_price_usd || 0) > 0 || Number(detailsProduct.wholesale_price_khr || 0) > 0) ? (
                 <div className="flex justify-between gap-3 py-2">
-                  <dt className="text-gray-500 dark:text-gray-400">{t('wholesale_price') || 'Wholesale'}</dt>
+                  <dt className="text-gray-500 dark:text-gray-400">{t('wholesale_price') || 'Wholesale price'}</dt>
                   <dd className="text-right text-indigo-700 dark:text-indigo-300">
                     {fmtUSD(detailsProduct.wholesale_price_usd)}
                     {Number(detailsProduct.wholesale_price_khr || 0) > 0 ? ` · ${fmtKHR(detailsProduct.wholesale_price_khr)}` : ''}

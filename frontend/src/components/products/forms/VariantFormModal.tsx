@@ -374,7 +374,7 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
 
           <div className="min-w-0">
             <label htmlFor="variant-form-selling-price" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-              {t('selling_price_usd') || `Selling Price (${usdSymbol})`}
+              {t('selling_price_usd') || `Selling price (${usdSymbol})`}
             </label>
             <input
               id="variant-form-selling-price"

@@ -160,10 +160,10 @@ export default function OverviewReport(p: ReportViewProps) {
   const courierColumns: Array<ReportColumn<CourierRow>> = [
     { key: 'name', label: tr('rpt_courier', 'Courier'), primary: true, value: (r) => r.delivery_contact_name || tr('unknown', 'Unknown') },
     { key: 'deliveries', label: tr('rpt_deliveries', 'Deliveries'), kind: 'int', value: (r) => r.deliveries },
-    { key: 'charged_fee_usd', label: tr('rpt_delivery_charged', 'Charged to customers'), kind: 'money', value: (r) => r.charged_fee_usd },
-    { key: 'absorbed_fee_usd', label: tr('rpt_store_delivery', 'Store-paid delivery'), kind: 'money', value: (r) => r.absorbed_fee_usd },
-    { key: 'actual_cost_usd', label: tr('rpt_delivery_cost', 'Actual cost'), kind: 'money', value: (r) => r.actual_cost_usd },
-    { key: 'margin_usd', label: tr('rpt_delivery_margin', 'Delivery margin'), kind: 'money', value: (r) => r.margin_usd, emphasis: true },
+    { key: 'charged_fee_usd', label: tr('rpt_delivery_charged', 'Delivery fee charged'), kind: 'money', value: (r) => r.charged_fee_usd },
+    { key: 'absorbed_fee_usd', label: tr('rpt_store_delivery', 'Store-paid delivery fee'), kind: 'money', value: (r) => r.absorbed_fee_usd },
+    { key: 'actual_cost_usd', label: tr('rpt_delivery_cost', 'Actual delivery cost'), kind: 'money', value: (r) => r.actual_cost_usd },
+    { key: 'margin_usd', label: tr('rpt_delivery_margin', 'Delivery profit'), kind: 'money', value: (r) => r.margin_usd, emphasis: true },
     { key: 'last_delivery_at', label: tr('rpt_last_delivery', 'Last delivery'), kind: 'datetime', value: (r) => r.last_delivery_at, defaultVisible: false },
   ]
   const reasonColumns: Array<ReportColumn<ReasonRow>> = [
