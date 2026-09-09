@@ -30,8 +30,12 @@ import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
 
 const TRANSFER_STOCK_LOAD_TIMEOUT_MS = 12000
-const TRANSFER_STOCK_MUTATION_TIMEOUT_MS = 12000
-const TRANSFER_STOCK_BULK_MUTATION_TIMEOUT_MS = 20000
+// Transfers can allocate and materialize many lot rows in one D1 batch. Keep
+// the request alive long enough for a real commit; a short client timeout
+// falsely reports failure after the server has moved stock, which was the
+// source of the Shop → Warehouse “could not transfer” reports.
+const TRANSFER_STOCK_MUTATION_TIMEOUT_MS = 45000
+const TRANSFER_STOCK_BULK_MUTATION_TIMEOUT_MS = 90000
 // Mirrors MAX_BULK_TRANSFER_ITEMS in the Worker's POST /transfer-bulk. A
 // whole-branch move can be thousands of rows, so it is split into requests
 // this size rather than raising the server cap -- the cap is what keeps one
