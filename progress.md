@@ -1,3 +1,13 @@
+## Report title picker, filter controls and anonymous customer UI checkpoint LIVE — September 9
+
+Commit **26111791dae8ea5f729a0bb20f62f15bbb39d0f6** is live at 100% in Worker version **e8129c9e-0cfe-4036-bfba-ea4a69b33c7e**, deployment **c16bb4b5-bd98-4890-834c-572f4730f13b**, created 2026-09-09T13:54:59.183176Z. It was deployed from the clean, pushed release branch `codex/sale-create-trigger-release-20260909`; provenance is recorded in `outputs/takeover-20260909/report-title-customer-ui-deploy.log`.
+
+The active report view picker now sits beside the report title (for example, `Overview (all)`), so changing the title control switches the report itself. Branch, status and payment filters remain in the single Filters menu; report filter controls and the desktop filter trigger use the consistent 40px treatment. Returns and Expenses keep their export action in the stats/action row rather than a separate top row. Sales status changes no longer show the redundant “Choose destination status” heading.
+
+Sale customer editing now searches the permission-scoped picker by phone or name. Marked anonymous General/Walk-in customers render as Walk-in without leaking a legacy General name or membership into Sales, detail or receipt views. Focused tests and the complete frontend utility gate passed: **346/346**; frontend typecheck, bilingual verification, production build and Worker typecheck also pass.
+
+Physical iOS/PWA and desktop device-toolbar validation, broader compact date/button layout, public/customer-portal polish, historical-sales evidence, duplicate execution, and uncertain-network transfer retry remain open in the ledger. Offline work remains paused by owner request.
+
 ## Transfer retry-durability checkpoint LIVE — September 9
 
 Commit **be7bdaedc6c609ee339e33b9717771265bcf20f0** is live at 100% in Worker version **4eda51e2-52c6-4157-ad86-1efa8d5f1af1**, deployed from a clean release tree at approximately 2026-09-09T13:03Z. D1 migration **0148_transfer_operation_receipts.sql** is applied remotely as migration row **144** (verified at 2026-09-09 12:58:47 UTC). The deployment log and migration query are recorded in `outputs/takeover-20260909/transfer-idempotency-deploy.log` and `outputs/takeover-20260909/transfer-idempotency-migration.log`.
