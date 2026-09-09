@@ -12057,3 +12057,10 @@ POS.tsx along the way — no behavior change needed there).
   invoices still require later-source line verification. No historical data
   repair performed. Exact evidence and safe next steps are in
   `docs/fleet/2026-09-05-historical-payment-preflight.md`.
+## Semantic variable alignment correction LIVE — September 10
+
+Source commit **6221d5e94940** is deployed at 100% in Worker version **e10463c9-a3e3-456a-be49-e501cedf862c** (build hash **90368ef85869d856**, built 2026-09-09T19:27:01.904Z UTC). This fix keeps the English and Khmer operator vocabulary aligned with the wire model: visible batch/lot references now say received date, receipt delivery-position labels describe the actual `after_items` behavior, Not Paid explicitly says stock is deducted, and return/stock/import fallbacks no longer expose stale lot wording. The sales-import explanation now preserves the meaning of its legacy `batch_label` field while explaining that normal imports record history without changing stock.
+
+Compatibility identifiers remain unchanged: database/API fields (`batch_id`, `lot_code`, `received_at`), legacy CSV headers (`batch(dd/mm/yyyy)` / `batch(mm/dd/yyyy)`), and the internal multi-line stock-in session name continue to work. No migration or production data change was made.
+
+Verification: frontend utility chain **347/347**, focused semantic variable parity, Khmer retail vocabulary, Not Paid terminology, batch-label display, return-options, and language-key integrity all pass; frontend typecheck, i18n verification (**5,682 keys / 585 files**), production build, Worker typecheck, and `git diff --check` pass. Direct browser smoke remains limited by the existing Cloudflare bot challenge; the deployment provenance above is from the successful Wrangler upload.
