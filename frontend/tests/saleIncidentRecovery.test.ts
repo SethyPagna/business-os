@@ -194,6 +194,8 @@ await run('English and Khmer include all panel copy', () => {
   const keys = [...panel.matchAll(/T\('(sale_incident_recovery_[a-z0-9_]+)'/g)].map((match) => match[1])
   assert.ok(keys.length >= 20)
   for (const key of new Set(keys)) { assert.ok(en[key], `missing English ${key}`); assert.ok(km[key], `missing Khmer ${key}`); assert.notEqual(en[key], km[key]) }
+  assert.equal(en.sale_incident_recovery_blocked_reason, 'Handled by the separate fourth-receipt recovery.')
+  assert.doesNotMatch(panel, /sale-time cost is not proven/)
 })
 
 if (failed) process.exitCode = 1

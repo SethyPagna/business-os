@@ -6372,7 +6372,7 @@
   "selected_conflict_work_steps": "ជំហានដែលបានការពារ",
   "sale_incident_recovery_ack": "ខ្ញុំបានពិនិត្យបង្កាន់ដៃ និងផលប៉ះពាល់ស្តុកទាំងអស់រួចហើយ។ ម៉ាស៊ីនមេនឹងបម្រុងទុកទិន្នន័យសង្គ្រោះ មុនអនុវត្តសំណើដែលភ្ជាប់នឹង digest នេះ។",
   "sale_incident_recovery_apply": "បម្រុងទុក ហើយអនុវត្តការសង្គ្រោះ",
-  "sale_incident_recovery_blocked_reason": "តម្លៃដើមនៅពេលលក់មិនទាន់មានភស្តុតាង ដូច្នេះវាមិនត្រូវបានរួមបញ្ចូលក្នុងសំណើនេះទេ។",
+  "sale_incident_recovery_blocked_reason": "ត្រូវបានដោះស្រាយដោយការសង្គ្រោះបង្កាន់ដៃទី៤ដោយឡែក។",
   "sale_incident_recovery_blocked_title": "មិនរួមបញ្ចូលក្នុងការសង្គ្រោះនេះ",
   "sale_incident_recovery_col_id": "លេខសម្គាល់ការលក់",
   "sale_incident_recovery_col_lines": "បន្ទាត់ដែលបាត់",

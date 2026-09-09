@@ -6372,7 +6372,7 @@
   "selected_conflict_work_steps": "protected steps",
   "sale_incident_recovery_ack": "I reviewed every receipt and stock effect. The server will create its recovery backup before applying this digest-bound request.",
   "sale_incident_recovery_apply": "Back up and apply recovery",
-  "sale_incident_recovery_blocked_reason": "Its sale-time cost is not proven, so it is not included in this apply request.",
+  "sale_incident_recovery_blocked_reason": "Handled by the separate fourth-receipt recovery.",
   "sale_incident_recovery_blocked_title": "Excluded from this recovery",
   "sale_incident_recovery_col_id": "Sale ID",
   "sale_incident_recovery_col_lines": "Missing lines",
