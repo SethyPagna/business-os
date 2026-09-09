@@ -2005,9 +2005,13 @@ app.post('/transfer', async (c) => {
 
   const responsePayload = { success: true, fromBranchId, toBranchId, quantity, replayed: false }
   const statements: Array<{ sql: string; params?: Record<string, unknown> }> = [
+    // Re-check canonical branch identity before the receipt/audit or stock
+    // writes. If an administrator changes branch roles between the read
+    // preflight and this batch, the guard aborts before any durable side
+    // effect is even attempted.
+    canonicalTransferAuthorityGuardStatement(fromBranchId, toBranchId),
     transferReceiptStatement({ actorId: user.id, requestId: clientRequestId!, digest: requestDigest, requestJson, responseJson: JSON.stringify(responsePayload) }),
     transferIntentAuditStatement({ actorId: user.id, actorName: actorSnapshot(user), requestId: clientRequestId!, requestJson, digest: requestDigest, bulk: false }),
-    canonicalTransferAuthorityGuardStatement(fromBranchId, toBranchId),
     { sql: 'UPDATE branch_stock SET quantity = quantity - @quantity WHERE product_id = @productId AND branch_id = @branchId', params: { quantity, productId, branchId: fromBranchId } },
     {
       sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@productId, @branchId, @quantity)

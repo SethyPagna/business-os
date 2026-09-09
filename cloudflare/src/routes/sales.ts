@@ -1524,8 +1524,8 @@ app.post('/', async (c) => {
 //
 // Rebuilt in Part 383 on lib/saleTransitions.ts's held() invariant: per
 // line, held(status) = quantity - alreadyReturned for statuses where the
-// goods are out (completed/awaiting_delivery/partial_return/returned) and
-// 0 for awaiting_payment/cancelled; every transition moves exactly
+// goods are out or reserved (completed/awaiting_payment/awaiting_delivery/
+// partial_return/returned) and 0 only for cancelled; every transition moves exactly
 // held(new) - held(old) on branch stock, the product total, AND the
 // line's batch, as new movements (never by editing old ones). That closed
 // the old boolean was/willBeDeducted logic's holes: partial_return ->

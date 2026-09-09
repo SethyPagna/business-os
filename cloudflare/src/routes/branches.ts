@@ -461,9 +461,11 @@ app.post('/transfer', async (c) => {
     ? { success: true, mergedIntoProductId: destProductId, mergedIntoProductName: destProductName, destBatchId, replayed: false }
     : { success: true, destBatchId, replayed: false }
   const statements: Array<{ sql: string; params?: Record<string, unknown> }> = [
+    // Authoritative branch identity is the first statement in the atomic
+    // batch, before the receipt/audit and stock effects it protects.
+    canonicalTransferAuthorityGuardStatement(fromBranchId, toBranchId),
     transferReceiptStatement({ actorId: user.id, requestId: clientRequestId!, digest: requestDigest, requestJson, responseJson: JSON.stringify(responsePayload) }),
     transferIntentAuditStatement({ actorId: user.id, actorName: actorSnapshot(user), requestId: clientRequestId!, requestJson, digest: requestDigest, bulk: false }),
-    canonicalTransferAuthorityGuardStatement(fromBranchId, toBranchId),
     { sql: 'UPDATE branch_stock SET quantity = quantity - @quantity WHERE product_id = @productId AND branch_id = @branchId', params: { quantity, productId, branchId: fromBranchId } },
     {
       sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@productId, @branchId, @quantity)
@@ -804,9 +806,11 @@ app.post('/transfer-bulk', async (c) => {
   const merges: Array<{ productId: number; productName: string | null; mergedIntoProductId: number; mergedIntoProductName: string | null }> = []
   const responsePayload = { success: true, transferredCount: items.length, merges, replayed: false }
   const statements: Array<{ sql: string; params?: Record<string, unknown> }> = [
+    // The shared identity guard must run before the bulk receipt/audit and
+    // every per-item stock write in this transaction.
+    canonicalTransferAuthorityGuardStatement(fromBranchId, toBranchId),
     transferReceiptStatement({ actorId: user.id, requestId: clientRequestId!, digest: requestDigest, requestJson, responseJson: JSON.stringify(responsePayload) }),
     transferIntentAuditStatement({ actorId: user.id, actorName: actorSnapshot(user), requestId: clientRequestId!, requestJson, digest: requestDigest, bulk: true }),
-    canonicalTransferAuthorityGuardStatement(fromBranchId, toBranchId),
   ]
   for (const item of items) {
     const product = productById.get(item.productId)!
