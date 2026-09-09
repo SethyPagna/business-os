@@ -309,7 +309,7 @@ export default function CatalogPreviewSurface({
       // back to owning vertical scroll for the whole public route.
       className={`${publicView && darkMode ? 'dark ' : ''}${publicView ? 'min-h-screen w-full overflow-x-clip' : 'w-full'}`}
       style={{
-        ...(publicView ? { touchAction: 'pan-y pinch-zoom', overflowX: 'clip' } : {}),
+        ...(publicView ? { touchAction: 'pan-y', overflowX: 'clip' } : {}),
         background: portalBackground,
       }}
     >

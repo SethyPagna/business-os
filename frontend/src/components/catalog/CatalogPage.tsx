@@ -3446,7 +3446,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       // !publicView is untouched: the admin editor keeps `.page-scroll`.
       className={`${publicView && darkMode ? 'dark ' : ''}${publicView ? 'min-h-screen w-full overflow-visible' : 'page-scroll flex-1 overflow-y-auto'}`}
       style={{
-        ...(publicView ? { touchAction: 'pan-y pinch-zoom' } : {}),
+        ...(publicView ? { touchAction: 'pan-y' } : {}),
         background: portalBackground,
       }}
     >
@@ -3482,7 +3482,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
           // document is the scroll owner, so it must not declare one there either.
           className={`${publicView && darkMode ? 'dark ' : ''}${publicView ? 'min-h-screen w-full overflow-visible' : 'w-full'}`}
           style={{
-            ...(publicView ? { touchAction: 'pan-y pinch-zoom' } : {}),
+            ...(publicView ? { touchAction: 'pan-y' } : {}),
             background: portalBackground,
           }}
         >

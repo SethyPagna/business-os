@@ -65,7 +65,7 @@ html[data-public-portal='true'] {
   overflow-x: hidden;
   overscroll-behavior-y: auto;
   -webkit-overflow-scrolling: touch;
-  touch-action: pan-y pinch-zoom;
+  touch-action: pan-y;
 }
 
 body[data-public-portal='true'] {
@@ -73,7 +73,7 @@ body[data-public-portal='true'] {
   min-height: 100%;
   overflow: visible;
   overscroll-behavior-y: auto;
-  touch-action: pan-y pinch-zoom;
+  touch-action: pan-y;
 }
 
 /* Khmer line-heights (user, Aug 31: "khmer versions are not compact enough...

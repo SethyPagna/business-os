@@ -2,7 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <!-- Keep the app at the device width on iOS. The image lightbox has its
+         own explicit zoom controls; browser pinch-zoom otherwise scales the
+         whole UI and pushes action rows outside the viewport. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#1e3a8a" />
     <meta name="description" content="Leang Beauty — product catalog, prices and store contact" />
     <meta name="mobile-web-app-capable" content="yes" />
