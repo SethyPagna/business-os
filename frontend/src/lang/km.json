@@ -6400,5 +6400,8 @@
   "sale_incident_recovery_title": "សង្គ្រោះបង្កាន់ដៃលក់ដែលត្រូវបានផ្អាក",
   "sale_incident_recovery_type": "វាយពាក្យបញ្ជាក់ឱ្យត្រូវ ដើម្បីអនុវត្ត",
   "sale_incident_recovery_uncertain": "លទ្ធផលមិនប្រាកដ។ សូមលេងសំណើដដែលនេះម្ដងទៀត។",
-  "sale_incident_recovery_working": "កំពុងបម្រុងទុក និងអនុវត្តការសង្គ្រោះ..."
+  "sale_incident_recovery_working": "កំពុងបម្រុងទុក និងអនុវត្តការសង្គ្រោះ...",
+  "sale_incident_recovery_v2_desc": "ពិនិត្យបង្កាន់ដៃដែលមានភស្តុតាងដាច់ដោយឡែក មុនពេលម៉ាស៊ីនមេបម្រុងទុក ហើយស្ដារផលប៉ះពាល់ការលក់ដែលបាត់។",
+  "sale_incident_recovery_v2_success": "ការសង្គ្រោះបង្កាន់ដៃដែលមានភស្តុតាងដាច់ដោយឡែកបានបញ្ចប់។",
+  "sale_incident_recovery_v2_title": "សង្គ្រោះបង្កាន់ដៃលក់ដែលមានភស្តុតាងដាច់ដោយឡែក"
 }

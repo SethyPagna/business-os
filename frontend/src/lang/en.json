@@ -6400,5 +6400,8 @@
   "sale_incident_recovery_title": "Recover interrupted sale receipts",
   "sale_incident_recovery_type": "Type the exact confirmation to apply",
   "sale_incident_recovery_uncertain": "The result is uncertain. Replay the exact same request.",
-  "sale_incident_recovery_working": "Backing up and applying recovery..."
+  "sale_incident_recovery_working": "Backing up and applying recovery...",
+  "sale_incident_recovery_v2_desc": "Review the separately proven receipt before the server creates its backup and restores its missing sale effects.",
+  "sale_incident_recovery_v2_success": "Separately proven receipt recovery completed.",
+  "sale_incident_recovery_v2_title": "Recover separately proven sale receipt"
 }

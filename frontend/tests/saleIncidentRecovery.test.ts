@@ -4,6 +4,8 @@ import {
   SALE_INCIDENT_RECOVERY_APPLY_TIMEOUT_MS,
   SALE_INCIDENT_RECOVERY_CONFIRMATION,
   SALE_INCIDENT_RECOVERY_TARGET,
+  SALE_INCIDENT_RECOVERY_V2_CONFIRMATION,
+  SALE_INCIDENT_RECOVERY_V2_TARGET,
   applySaleIncidentRecovery,
   previewSaleIncidentRecovery,
   validateSaleIncidentRecoveryApplyResponse,
@@ -48,6 +50,25 @@ function applyBody() {
   }
 }
 
+function v2PreviewBody() {
+  const preview = previewBody()
+  return {
+    ...preview,
+    target: SALE_INCIDENT_RECOVERY_V2_TARGET,
+    request: { target: SALE_INCIDENT_RECOVERY_V2_TARGET, confirmation: SALE_INCIDENT_RECOVERY_V2_CONFIRMATION, manifest_sha256: 'b'.repeat(64) },
+    sales: [{ id: 16954, receipt_number: '20260909-130228', status: 'awaiting_payment', expected_revision: 1, line_count: 1, stock_effect: 'released_allocation_only', subtotal_before_usd: 0, subtotal_after_usd: 170, total_before_usd: 0, total_after_usd: 170 }],
+    blocked_sales: [],
+  }
+}
+
+function v2ApplyBody() {
+  return {
+    ...applyBody(),
+    manifest_sha256: 'b'.repeat(64),
+    affected: { sales: 1, items: 1, allocations: 1, movements: 0, histories: 1, audits: 1 },
+  }
+}
+
 await run('preview accepts the server-issued three-sale request and explicitly excluded receipt', () => {
   const preview = validateSaleIncidentRecoveryPreview(previewBody())
   assert.equal(preview.sales.length, 3)
@@ -56,7 +77,20 @@ await run('preview accepts the server-issued three-sale request and explicitly e
   assert.throws(() => { (preview.request as { target: string }).target = 'different' })
   const invalid = previewBody() as Record<string, unknown>
   ;(invalid.sales as Array<Record<string, unknown>>).push({ id: 16954, receipt_number: '20260909-130228', status: 'completed', expected_revision: 1, line_count: 1, stock_effect: 'deduct_now', subtotal_before_usd: 0, subtotal_after_usd: 1, total_before_usd: 0, total_after_usd: 1 })
-  assert.throws(() => validateSaleIncidentRecoveryPreview(invalid), /fixed excluded receipt|unique set/)
+  assert.throws(() => validateSaleIncidentRecoveryPreview(invalid), /fixed recovery/)
+})
+
+await run('v2 accepts only its separately proven sale and has no inherited v1 blocked receipt', () => {
+  const preview = validateSaleIncidentRecoveryPreview(v2PreviewBody(), 'v2')
+  assert.equal(preview.target, SALE_INCIDENT_RECOVERY_V2_TARGET)
+  assert.deepEqual(preview.sales.map((sale) => sale.id), [16954])
+  assert.deepEqual(preview.blocked_sales, [])
+  const withV1Block = v2PreviewBody() as Record<string, unknown>
+  withV1Block.blocked_sales = [{ id: 16954, receipt_number: '20260909-130228', reason: 'sale_time_cost_not_proven' }]
+  assert.throws(() => validateSaleIncidentRecoveryPreview(withV1Block, 'v2'), /not fixed|do not match/)
+  const applied = validateSaleIncidentRecoveryApplyResponse(v2ApplyBody(), 'v2')
+  if (!applied.success) throw new Error('Expected an applied v2 recovery response')
+  assert.equal(applied.affected.movements, 0)
 })
 
 await run('apply accepts only a complete fixed-count success and paired refresh flags', () => {
@@ -113,11 +147,29 @@ await run('transport previews and replays the frozen request, refreshing local r
   } finally { globalThis.fetch = originalFetch; setSyncServerUrl(''); setSyncToken('') }
 })
 
+await run('v2 transport uses its own fixed endpoints and request', async () => {
+  setSyncServerUrl('https://sync.example.test'); setSyncToken('operator-token')
+  const originalFetch = globalThis.fetch
+  const calls: Array<[RequestInfo | URL, RequestInit | undefined]> = []
+  globalThis.fetch = ((...args: [RequestInfo | URL, RequestInit | undefined]) => {
+    calls.push(args)
+    return Promise.resolve(new Response(JSON.stringify(calls.length === 1 ? v2PreviewBody() : v2ApplyBody()), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+  }) as typeof fetch
+  try {
+    const preview = await previewSaleIncidentRecovery('v2')
+    await applySaleIncidentRecovery(preview.request, 'v2')
+    assert.equal(String(calls[0][0]), 'https://sync.example.test/api/system/sale-incident-recovery-20260909-v2/preview')
+    assert.equal(String(calls[1][0]), 'https://sync.example.test/api/system/sale-incident-recovery-20260909-v2/apply')
+    assert.deepEqual(JSON.parse(String(calls[1][1]?.body)), preview.request)
+  } finally { globalThis.fetch = originalFetch; setSyncServerUrl(''); setSyncToken('') }
+})
+
 await run('panel gates on the normal maintenance permission and shows amount, stock, exclusion, stale, replay, and responsive controls', () => {
   const panel = fs.readFileSync(new URL('../src/components/utils-settings/SaleIncidentRecovery.tsx', import.meta.url), 'utf8')
   const reset = fs.readFileSync(new URL('../src/components/utils-settings/ResetData.tsx', import.meta.url), 'utf8')
   assert.match(reset, /import SaleIncidentRecovery from '\.\/SaleIncidentRecovery\.tsx'/)
-  assert.ok(reset.indexOf('<SaleIncidentRecovery />') < reset.indexOf('<GeneralCustomerRepair />'))
+  assert.ok(reset.indexOf('<SaleIncidentRecovery variant="v1" />') < reset.indexOf('<SaleIncidentRecovery variant="v2" />'))
+  assert.ok(reset.indexOf('<SaleIncidentRecovery variant="v2" />') < reset.indexOf('<GeneralCustomerRepair />'))
   assert.match(panel, /if \(!permitted\) return null/)
   assert.match(panel, /preview\.sales\.length/)
   assert.match(panel, /subtotal_before_usd/)
@@ -130,6 +182,8 @@ await run('panel gates on the normal maintenance permission and shows amount, st
   assert.match(panel, /sm:flex-row/)
   assert.match(panel, /min-w-\[940px\]/)
   assert.match(panel, /refreshAppData\(\['sales', 'products', 'inventory', 'audit_log'\]/)
+  assert.match(panel, /variant = 'v1'/)
+  assert.match(panel, /sale_incident_recovery_v2_title/)
   assert.doesNotMatch(panel, /16951|16952|16953|16954/)
 })
 

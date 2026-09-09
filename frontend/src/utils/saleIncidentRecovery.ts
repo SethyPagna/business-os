@@ -1,14 +1,48 @@
 import { apiFetch, cacheInvalidate, cacheInvalidateWithDerived } from '../api/http.ts'
 
 export const SALE_INCIDENT_RECOVERY_APPLY_TIMEOUT_MS = 10 * 60 * 1000
+export type SaleIncidentRecoveryVariant = 'v1' | 'v2'
 export const SALE_INCIDENT_RECOVERY_TARGET = 'sale-zero-items-20260909-v1' as const
 export const SALE_INCIDENT_RECOVERY_CONFIRMATION = 'RECOVER SALES 16951 16952 16953' as const
-const PREVIEW_PATH = '/api/system/sale-incident-recovery-20260909/preview'
-const APPLY_PATH = '/api/system/sale-incident-recovery-20260909/apply'
+export const SALE_INCIDENT_RECOVERY_V2_TARGET = 'sale-zero-items-20260909-v2' as const
+export const SALE_INCIDENT_RECOVERY_V2_CONFIRMATION = 'RECOVER SALE 16954' as const
+
+type RecoveryConfig = {
+  target: string
+  confirmation: string
+  previewPath: string
+  applyPath: string
+  saleIds: readonly number[]
+  blockedSales: readonly SaleIncidentRecoveryBlockedSale[]
+  affected: Readonly<Record<string, number>>
+}
+
+const RECOVERY_CONFIG: Record<SaleIncidentRecoveryVariant, RecoveryConfig> = {
+  v1: {
+    target: SALE_INCIDENT_RECOVERY_TARGET,
+    confirmation: SALE_INCIDENT_RECOVERY_CONFIRMATION,
+    previewPath: '/api/system/sale-incident-recovery-20260909/preview',
+    applyPath: '/api/system/sale-incident-recovery-20260909/apply',
+    saleIds: [16951, 16952, 16953],
+    blockedSales: [{ id: 16954, receipt_number: '20260909-130228', reason: 'sale_time_cost_not_proven' }],
+    affected: { sales: 3, items: 4, allocations: 4, movements: 1, histories: 3, audits: 3 },
+  },
+  v2: {
+    target: SALE_INCIDENT_RECOVERY_V2_TARGET,
+    confirmation: SALE_INCIDENT_RECOVERY_V2_CONFIRMATION,
+    previewPath: '/api/system/sale-incident-recovery-20260909-v2/preview',
+    applyPath: '/api/system/sale-incident-recovery-20260909-v2/apply',
+    saleIds: [16954],
+    blockedSales: [],
+    affected: { sales: 1, items: 1, allocations: 1, movements: 0, histories: 1, audits: 1 },
+  },
+}
+
+function configFor(variant: SaleIncidentRecoveryVariant): RecoveryConfig { return RECOVERY_CONFIG[variant] }
 
 export type SaleIncidentRecoveryRequest = Readonly<{
-  target: typeof SALE_INCIDENT_RECOVERY_TARGET
-  confirmation: typeof SALE_INCIDENT_RECOVERY_CONFIRMATION
+  target: typeof SALE_INCIDENT_RECOVERY_TARGET | typeof SALE_INCIDENT_RECOVERY_V2_TARGET
+  confirmation: typeof SALE_INCIDENT_RECOVERY_CONFIRMATION | typeof SALE_INCIDENT_RECOVERY_V2_CONFIRMATION
   manifest_sha256: string
 }>
 
@@ -33,7 +67,8 @@ export type SaleIncidentRecoveryBlockedSale = {
 
 export type SaleIncidentRecoveryPreview = {
   success: true
-  target: typeof SALE_INCIDENT_RECOVERY_TARGET
+  variant: SaleIncidentRecoveryVariant
+  target: SaleIncidentRecoveryRequest['target']
   outcome: 'apply' | 'already_applied'
   request: SaleIncidentRecoveryRequest
   sales: SaleIncidentRecoverySale[]
@@ -54,7 +89,7 @@ type SaleIncidentRecoveryResponseBase = {
 export type SaleIncidentRecoveryApplyResponse = SaleIncidentRecoveryResponseBase & {
   success: true
   outcome: 'applied' | 'already_applied'
-  affected: { sales: 3; items: 4; allocations: 4; movements: 1; histories: 3; audits: 3 }
+  affected: Record<string, number>
   broadcast_requested: true
 }
 
@@ -88,18 +123,18 @@ function freezeDeep<T>(value: T): T {
   return value
 }
 
-function exactRequest(value: unknown): SaleIncidentRecoveryRequest {
+function exactRequest(value: unknown, config: RecoveryConfig): SaleIncidentRecoveryRequest {
   const request = asRecord(value, 'request')
   const keys = Object.keys(request).sort().join(',')
   if (keys !== 'confirmation,manifest_sha256,target'
-    || request.target !== SALE_INCIDENT_RECOVERY_TARGET
-    || request.confirmation !== SALE_INCIDENT_RECOVERY_CONFIRMATION
+    || request.target !== config.target
+    || request.confirmation !== config.confirmation
     || typeof request.manifest_sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(request.manifest_sha256)) {
     invalid('request is not the server-issued fixed target, confirmation, and SHA-256 digest')
   }
   return freezeDeep({
-    target: request.target,
-    confirmation: request.confirmation,
+    target: config.target as SaleIncidentRecoveryRequest['target'],
+    confirmation: config.confirmation as SaleIncidentRecoveryRequest['confirmation'],
     manifest_sha256: request.manifest_sha256,
   })
 }
@@ -130,9 +165,10 @@ function validateSale(value: unknown, index: number): SaleIncidentRecoverySale {
   }
 }
 
-export function validateSaleIncidentRecoveryPreview(value: unknown): SaleIncidentRecoveryPreview {
+export function validateSaleIncidentRecoveryPreview(value: unknown, variant: SaleIncidentRecoveryVariant = 'v1'): SaleIncidentRecoveryPreview {
+  const config = configFor(variant)
   const preview = asRecord(value, 'preview')
-  if (preview.success !== true || preview.target !== SALE_INCIDENT_RECOVERY_TARGET
+  if (preview.success !== true || preview.target !== config.target
     || (preview.outcome !== 'apply' && preview.outcome !== 'already_applied')
     || !Array.isArray(preview.sales) || !Array.isArray(preview.blocked_sales)
     || !Array.isArray(preview.unknown_line_fields)
@@ -140,19 +176,22 @@ export function validateSaleIncidentRecoveryPreview(value: unknown): SaleInciden
     invalid('preview is incomplete')
   }
   const sales = preview.sales.map(validateSale)
-  if (!sales.length || new Set(sales.map((sale) => sale.id)).size !== sales.length) invalid('preview sales must be a non-empty unique set')
+  if (sales.map((sale) => sale.id).join(',') !== config.saleIds.join(',')) invalid('preview sales do not match this fixed recovery')
   if (preview.unknown_line_fields.length !== 3 || preview.unknown_line_fields.join(',') !== 'price_mode,base_price_usd,base_price_khr') invalid('unknown line fields do not match the reviewed recovery basis')
   const blockedSales = preview.blocked_sales.map((value, index) => {
     const sale = asRecord(value, `blocked_sales[${index}]`)
-    if (sale.id !== 16954 || sale.receipt_number !== '20260909-130228' || sale.reason !== 'sale_time_cost_not_proven') invalid(`blocked_sales[${index}] is not the fixed excluded receipt`)
-    return { id: 16954, receipt_number: '20260909-130228', reason: 'sale_time_cost_not_proven' } as SaleIncidentRecoveryBlockedSale
+    const expected = config.blockedSales[index]
+    if (!expected || sale.id !== expected.id || sale.receipt_number !== expected.receipt_number || sale.reason !== expected.reason) invalid(`blocked_sales[${index}] is not fixed for this recovery`)
+    return expected
   })
+  if (blockedSales.length !== config.blockedSales.length) invalid('blocked sales do not match this fixed recovery')
   if (sales.some((sale) => blockedSales.some((blocked) => blocked.id === sale.id))) invalid('a fixed excluded receipt appears in the apply sales')
   return {
     success: true,
-    target: SALE_INCIDENT_RECOVERY_TARGET,
+    variant,
+    target: config.target as SaleIncidentRecoveryRequest['target'],
     outcome: preview.outcome,
-    request: exactRequest(preview.request),
+    request: exactRequest(preview.request, config),
     sales,
     blocked_sales: blockedSales,
     unknown_line_fields: ['price_mode', 'base_price_usd', 'base_price_khr'],
@@ -160,7 +199,8 @@ export function validateSaleIncidentRecoveryPreview(value: unknown): SaleInciden
   }
 }
 
-export function validateSaleIncidentRecoveryApplyResponse(value: unknown): SaleIncidentRecoveryApplyResult {
+export function validateSaleIncidentRecoveryApplyResponse(value: unknown, variant: SaleIncidentRecoveryVariant = 'v1'): SaleIncidentRecoveryApplyResult {
+  const config = configFor(variant)
   const response = asRecord(value, 'apply response')
   if ((response.success !== true && response.success !== false) || !['applied', 'already_applied', 'uncertain'].includes(String(response.outcome))
     || typeof response.verification_pending !== 'boolean' || typeof response.cache_invalidated !== 'boolean'
@@ -176,7 +216,7 @@ export function validateSaleIncidentRecoveryApplyResponse(value: unknown): SaleI
   }
   if ((response.outcome !== 'applied' && response.outcome !== 'already_applied') || response.broadcast_requested !== true) invalid('apply response outcome is invalid')
   const affected = asRecord(response.affected, 'apply response.affected')
-  if (affected.sales !== 3 || affected.items !== 4 || affected.allocations !== 4 || affected.movements !== 1 || affected.histories !== 3 || affected.audits !== 3) invalid('apply response affected counts do not match the fixed recovery')
+  if (Object.keys(affected).sort().join(',') !== Object.keys(config.affected).sort().join(',') || Object.entries(config.affected).some(([key, expected]) => affected[key] !== expected)) invalid('apply response affected counts do not match the fixed recovery')
   return response as unknown as SaleIncidentRecoveryApplyResponse
 }
 
@@ -184,12 +224,12 @@ export function saleIncidentRecoveryIsComplete(result: SaleIncidentRecoveryApply
   return result?.success === true && result.verification_pending === false && result.refresh_pending === false && result.cache_invalidated === true
 }
 
-export async function previewSaleIncidentRecovery(): Promise<SaleIncidentRecoveryPreview> {
-  return validateSaleIncidentRecoveryPreview(await apiFetch('GET', PREVIEW_PATH))
+export async function previewSaleIncidentRecovery(variant: SaleIncidentRecoveryVariant = 'v1'): Promise<SaleIncidentRecoveryPreview> {
+  return validateSaleIncidentRecoveryPreview(await apiFetch('GET', configFor(variant).previewPath), variant)
 }
 
-export async function applySaleIncidentRecovery(request: SaleIncidentRecoveryRequest): Promise<SaleIncidentRecoveryApplyResult> {
-  const result = validateSaleIncidentRecoveryApplyResponse(await apiFetch('POST', APPLY_PATH, request, SALE_INCIDENT_RECOVERY_APPLY_TIMEOUT_MS))
+export async function applySaleIncidentRecovery(request: SaleIncidentRecoveryRequest, variant: SaleIncidentRecoveryVariant = 'v1'): Promise<SaleIncidentRecoveryApplyResult> {
+  const result = validateSaleIncidentRecoveryApplyResponse(await apiFetch('POST', configFor(variant).applyPath, request, SALE_INCIDENT_RECOVERY_APPLY_TIMEOUT_MS), variant)
   if (saleIncidentRecoveryIsComplete(result)) {
     cacheInvalidateWithDerived('sales')
     cacheInvalidateWithDerived('products')
