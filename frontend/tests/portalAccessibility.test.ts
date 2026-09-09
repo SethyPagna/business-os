@@ -506,14 +506,15 @@ runTest('the storefront offers a skip-to-content link', () => {
   assert.match(css, /\.portal-skip-link:focus/, 'and visible once it is')
 })
 
-runTest('pinch zoom is not disabled', () => {
-  // WCAG 1.4.4: the app shipped `maximum-scale=1, user-scalable=no`, which
-  // stops a low-vision visitor enlarging the storefront at all.
+runTest('browser pinch zoom is disabled while image zoom stays explicit', () => {
+  // The app layout must stay at the device width so iOS cannot scale the
+  // whole interface and push action rows outside the viewport. Product image
+  // inspection still has its own explicit lightbox zoom controls.
   const html = readFrontend('index.html')
   const viewport = /<meta name="viewport" content="([^"]+)"/.exec(html)
   assert.ok(viewport, 'the viewport meta must exist')
-  assert.doesNotMatch(viewport[1], /user-scalable\s*=\s*no/)
-  assert.doesNotMatch(viewport[1], /maximum-scale\s*=\s*1\b/)
+  assert.match(viewport[1], /user-scalable\s*=\s*no/)
+  assert.match(viewport[1], /maximum-scale\s*=\s*1\b/)
   assert.match(viewport[1], /width=device-width/)
 })
 

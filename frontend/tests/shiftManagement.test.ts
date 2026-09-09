@@ -154,7 +154,7 @@ for (const token of ['fmtClock24(shift.opened_at)', "fmtClock24(shift.closed_at)
 }
 ok(/<ShiftCashBreakdown/.test(summary) && /shift\.reconciliation/.test(summary), 'detail renders the server reconciliation, never a locally recomputed difference')
 ok(!/shiftCashDifference/.test(summary), 'the summary no longer subtracts the opening float to invent a difference')
-for (const key of ['shift_recon_opening', 'shift_recon_cash_sales', 'refunds', 'fees', 'courier', 'shift_recon_expected', 'shift_recon_counted', 'shift_difference']) {
+for (const key of ['shift_recon_opening', 'shift_recon_additional_cash', 'shift_recon_cash_sales', 'fees', 'courier', 'shift_recon_expected', 'shift_recon_counted', 'shift_difference']) {
   ok(breakdown.includes(`'${key}'`), `the breakdown carries the ${key} row`)
 }
 ok(/shift_difference_hint/.test(breakdown) && /shift_recon_review/.test(breakdown), 'the breakdown explains expected and surfaces the server review flag')
@@ -237,7 +237,7 @@ ok(breakdownKeys.length >= 12, `expected the breakdown to name its rows through 
 const handedOffLocaleKeys = new Set(['shift_difference_informational'])
 ok(breakdownKeys.every((key) => key in en || handedOffLocaleKeys.has(key)), `unexpected breakdown keys missing from English: ${breakdownKeys.filter((key) => !(key in en) && !handedOffLocaleKeys.has(key)).join(', ')}`)
 ok(breakdownKeys.every((key) => key in km || handedOffLocaleKeys.has(key)), `unexpected breakdown keys missing from Khmer: ${breakdownKeys.filter((key) => !(key in km) && !handedOffLocaleKeys.has(key)).join(', ')}`)
-ok(/expected drawer/i.test(en.shift_difference_hint) && !/opening cash\./i.test(en.shift_difference_hint),
+ok(/expected cash/i.test(en.shift_difference_hint) && !/opening cash\./i.test(en.shift_difference_hint),
   'the difference hint explains the expected drawer, not the old opening-float subtraction')
 
 // Execute the real transport against a deterministic fetch boundary. The

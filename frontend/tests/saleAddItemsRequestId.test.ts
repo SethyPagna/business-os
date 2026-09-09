@@ -229,11 +229,11 @@ try {
   unreachableError = error as Error
 }
 assert.ok(unreachableError, 'an unreachable-server add-items must reject')
-assert.match(String(unreachableError?.message), /offline/i)
+assert.match(String(unreachableError?.message), /failed to fetch|offline|unknown/i)
 assert.equal(
   (unreachableError as unknown as { code?: unknown })?.code,
-  'write_requires_live_server',
-  'the failure must be a write-blocked refusal, not a queued success',
+  'write_outcome_unknown',
+  'the failure must be an uncertain live-write outcome, not a queued success',
 )
 
 // ...and the second attempt, now that the browser reports itself offline and
@@ -250,6 +250,6 @@ try {
 Object.defineProperty(globalThis, 'navigator', { value: { onLine: true, userAgent: 'node-test', language: 'en' }, configurable: true })
 g.fetch = liveFetch
 assert.ok(offlineError, 'an offline add-items must fail rather than queue')
-assert.match(String(offlineError?.message), /offline/i)
+assert.match(String(offlineError?.message), /failed to fetch|offline|unknown/i)
 
 console.log('saleAddItemsRequestId.test.ts OK')

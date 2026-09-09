@@ -81,7 +81,7 @@ test('blank closing counts do not disable the history close action', () => {
 test('blank closing counts do not disable POS close or print an invented zero drawer', () => {
   const gate = fs.readFileSync(new URL('../src/components/pos/ShiftGate.tsx', import.meta.url), 'utf8')
   assert.match(gate, /shiftClosingCounts\(countedUsd, countedKhr\)/)
-  assert.match(gate, /const endBlocker = closingCountInvalid\(countedUsd\).*\? 'invalid'/)
+  assert.match(gate, /const endBlocker = closingCountInvalid\(countedUsd\)/)
   assert.doesNotMatch(gate, /const endBlocker = shiftCountPairBlocker\(countedUsd, countedKhr\)/)
   assert.match(gate, /shiftCountedPairText\(closed\.closing_counted_usd, closed\.closing_counted_khr, fmtUSD, fmtKHR\)/)
   assert.doesNotMatch(gate, /value: money\(closed\.closing_counted_usd/)

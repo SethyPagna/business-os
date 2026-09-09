@@ -52,7 +52,7 @@ await runTest('POS checkout keeps client, API, and backend duplicate guards', ()
   assert.match(salesTransport, /skipWriteDedupe: true/)
 
   assert.match(salesRoute, /function normalizeClientRequestId\(value: unknown\)/)
-  assert.match(salesRoute, /const existingSale = await db[\s\S]*WHERE client_request_id = \?[\s\S]*if \(existingSale\) return c\.json\(\{ id: existingSale\.id, receiptNumber: existingSale\.receipt_number, duplicate: true \}\)/)
+  assert.match(salesRoute, /const existingSale = await db[\s\S]*WHERE client_request_id = \?[\s\S]*if \(existingSale\) \{[\s\S]*sale_incomplete[\s\S]*return c\.json\(\{ id: existingSale\.id, receiptNumber: existingSale\.receipt_number, duplicate: true \}\)/)
   assert.match(salesRoute, /INSERT INTO sales \([\s\S]*receipt_number, client_request_id/)
 })
 
@@ -570,7 +570,7 @@ await runTest('canonical branch metadata edits and transfers use shared guards',
   assert.match(branchForm, /id="branch-default"[\s\S]*?onChange=\{\(event\) => set\('is_default'/)
 
   assert.match(transfer, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
-  assert.match(transfer, /const TRANSFER_STOCK_MUTATION_TIMEOUT_MS = 12000/)
+  assert.match(transfer, /const TRANSFER_STOCK_MUTATION_TIMEOUT_MS = 45000/)
   assert.match(transfer, /const transferInFlightRef = useRef\(false\)/)
   assert.match(transfer, /if \(!beginSingleAction\(transferInFlightRef, \{ blocked: saving \}\)\) return/)
   assert.match(transfer, /function getTransferApi\(\): TransferApi/)
