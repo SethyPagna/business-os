@@ -192,15 +192,17 @@ test('secondary controls stay on the Stats-chip row whether the strip is folded 
   // regardless of open state.
   assert.ok(/\{rangeActions\}\s*\{actions\}/.test(strip), 'row 1 renders rangeActions + actions together on the chip row')
   assert.ok(!strip.includes('PRESETS.map'), 'the shared strip no longer renders preset chips')
-  // Sales feeds History+Manage through the slot; Returns feeds Export+History
-  // there while its Add button stays a PRIMARY action with an always-visible
-  // label.
+  // Sales, Returns and Expenses feed Shift/export/history through the slot
+  // while their primary add actions stay separate and labelled.
   assert.ok(read('src/components/sales/Sales.tsx').includes('rangeActions={('), 'Sales wires History/Manage as rangeActions')
   const returns = read('src/components/returns/Returns.tsx')
   assert.ok(returns.includes('rangeActions={('), 'Returns wires Export/History as rangeActions')
+  assert.ok(returns.includes('<ShiftHistoryModal'), 'Returns wires Shift through the stats row')
   assert.ok(returns.includes("tr('add_return', 'Add Return')"), 'Returns add button says Add Return')
   assert.ok(returns.includes("tr('add_supplier_return', 'Add Supplier Return')"), 'supplier scope says Add Supplier Return')
   assert.ok(!/hidden sm:inline">\{tr\('add_return'/.test(returns), 'the add label never hides on phones')
+  const fees = read('src/components/fees/FeesPage.tsx')
+  assert.ok(fees.includes('<ShiftHistoryModal') && !fees.includes('<CurrentShiftSummary'), 'Expenses wires Shift through the stats row')
 })
 
 test('Part 548: report figures remain visible on every viewport without duplicate Overview prose', () => {

@@ -43,7 +43,7 @@ import {
 import FeeForm, { FEE_TYPE_OPTIONS, feeFormDraftBaseKey, feeFormWorkKey } from './FeeForm.tsx'
 import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
-import CurrentShiftSummary from '../shifts/CurrentShiftSummary.tsx'
+import ShiftHistoryModal from '../shifts/ShiftHistoryModal.tsx'
 import ExportMenu from '../shared/ExportMenu.tsx'
 import SectionExportAction from '../shared/SectionExportAction.tsx'
 import { makeReportMoneyFormatter } from '../../utils/reportMoney.ts'
@@ -574,7 +574,6 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
 
   return (
     <div className={`${embedded ? '' : 'page-scroll '}flex flex-col p-3 sm:p-6`}>
-      <CurrentShiftSummary className="mb-3" />
       {/* Page title removed (Aug 19 2026 UI request): no other page in the
           app repeats its own name in an h1 here -- the sidebar nav item
           already names the page -- so Fees having one was the odd one out,
@@ -592,6 +591,10 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
         t={t}
         rangeActions={(
           <>
+            <ShiftHistoryModal
+              label={tr('shift_code', 'Shift')}
+              buttonClassName="btn-secondary inline-flex h-11 min-w-11 items-center justify-center px-2.5 py-0 text-xs md:h-8 md:min-w-0"
+            />
             <SectionExportAction>
               <ExportMenu
                 label={tr('export', 'Export')}

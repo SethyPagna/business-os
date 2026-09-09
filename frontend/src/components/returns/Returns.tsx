@@ -52,6 +52,7 @@ import {
 } from '../../api/returnsReadTransport.ts'
 import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
+import ShiftHistoryModal from '../shifts/ShiftHistoryModal.tsx'
 import { EMPTY_DATE_TIME_RANGE, type DateTimeRange } from '../shared/DateTimeRangePicker'
 import ReturnsListSurface from './ReturnsListSurface'
 import { RETURN_BULK_LIMIT, type ReturnBulkPayload, type ReturnBulkResult } from './helpers/returnBulkAction.ts'
@@ -1300,6 +1301,10 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
         // are not many like only two ... just merge with the stats").
         rangeActions={(
           <>
+            <ShiftHistoryModal
+              label={tr('shift_code', 'Shift')}
+              buttonClassName="btn-secondary inline-flex h-11 min-w-11 items-center justify-center px-2.5 py-0 text-xs md:h-8 md:min-w-0"
+            />
             {canExportReturns ? (
               <SectionExportAction>
                 <ExportMenu
