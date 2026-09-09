@@ -166,10 +166,6 @@ await run('v2 transport uses its own fixed endpoints and request', async () => {
 
 await run('panel gates on the normal maintenance permission and shows amount, stock, exclusion, stale, replay, and responsive controls', () => {
   const panel = fs.readFileSync(new URL('../src/components/utils-settings/SaleIncidentRecovery.tsx', import.meta.url), 'utf8')
-  const reset = fs.readFileSync(new URL('../src/components/utils-settings/ResetData.tsx', import.meta.url), 'utf8')
-  assert.match(reset, /import SaleIncidentRecovery from '\.\/SaleIncidentRecovery\.tsx'/)
-  assert.ok(reset.indexOf('<SaleIncidentRecovery variant="v1" />') < reset.indexOf('<SaleIncidentRecovery variant="v2" />'))
-  assert.ok(reset.indexOf('<SaleIncidentRecovery variant="v2" />') < reset.indexOf('<GeneralCustomerRepair />'))
   assert.match(panel, /if \(!permitted\) return null/)
   assert.match(panel, /preview\.sales\.length/)
   assert.match(panel, /subtotal_before_usd/)

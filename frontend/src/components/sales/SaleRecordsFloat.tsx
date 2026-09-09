@@ -75,6 +75,7 @@ const KIND_FALLBACKS: Record<string, string> = {
   record_kind_payment_settled: 'Payment settled',
   record_kind_cancelled: 'Sale cancelled',
   record_kind_sale_items_recovered: 'Recovered missing sale products',
+  record_kind_sale_stock_corrected: 'Corrected stock for Not Paid sale',
   record_kind_legacy_sale_change: 'Earlier sale change',
 }
 
@@ -100,6 +101,7 @@ const FIELD_FALLBACKS: Record<string, string> = {
   removed_items: 'Removed products',
   added_items: 'Added products',
   product_lines: 'Product lines',
+  held_units: 'Stock units',
   recovery_stock_action: 'Stock action',
   membership: 'Membership',
   delivery: 'Delivery',
