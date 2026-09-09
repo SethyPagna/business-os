@@ -20,10 +20,33 @@ function source(path: string): string {
 // Material stock writes must have one review/confirmation before the request
 // and a visible outcome afterwards. Navigation, search, filters, and opening
 // details deliberately do not confirm: they make no state change.
-runTest('single branch transfer permits direct FIFO quantity entry and confirms the exact action', () => {
+runTest('single branch transfer caps explicit lots by aggregate stock and retains FIFO', () => {
   const transfer = source('branches/TransferModal.tsx')
   assert.match(transfer, /const hasBatchLots =/)
-  assert.match(transfer, /const transferAvailable = selectedBatch[\s\S]*?: Number\(selectedProduct\?\.branch_quantity \|\| 0\)/)
+  assert.match(
+    transfer,
+    /const sourceBranchAvailable = Math\.max\(0, Number\(selectedProduct\?\.branch_quantity \|\| 0\)\)/,
+    'the UI limit must retain the source branch aggregate used by the Worker',
+  )
+  assert.match(
+    transfer,
+    /const selectedBatchAvailable = selectedBatch[\s\S]*?Math\.max\(0, Number\(selectedBatch\.quantity \|\| 0\)\)[\s\S]*?: null/,
+    'a selected lot must contribute its own positive availability limit',
+  )
+  assert.match(
+    transfer,
+    /const transferAvailable = selectedBatchAvailable == null[\s\S]*?sourceBranchAvailable[\s\S]*?: Math\.min\(selectedBatchAvailable, sourceBranchAvailable\)/,
+    'a selected lot must never expose more than the source branch aggregate',
+  )
+  // Production exposed the boundary case: a selected lot can be one unit
+  // above the source aggregate while the Worker correctly checks both. The
+  // modal must therefore show/accept five, not the lot's stale six.
+  assert.equal(Math.min(Math.max(0, 6), Math.max(0, 5)), 5)
+  assert.match(transfer, /max=\{transferAvailable\}/)
+  assert.match(transfer, /onClick=\{\(\) => setQuantity\(String\(transferAvailable\)\)\}/)
+  const validationAt = transfer.indexOf('if (qty > transferAvailable)')
+  const requestAt = transfer.indexOf('getTransferApi().transferStock({', validationAt)
+  assert.ok(validationAt > 0 && requestAt > validationAt, 'the aggregate-aware limit must reject before the single transfer request')
   assert.match(transfer, /batchId: selectedBatchId/)
   assert.doesNotMatch(transfer, /transfer_pick_batch_first/)
   assert.doesNotMatch(transfer, /disabled=\{hasBatchLots && !selectedBatchId\}/)

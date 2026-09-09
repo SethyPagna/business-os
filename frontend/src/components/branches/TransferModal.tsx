@@ -834,13 +834,18 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
     setPendingTransfer(buildPendingTransfer('entire_branch', everything))
   }
 
-  // A selected lot caps the request to that lot. With no selected lot, the
-  // whole branch quantity is available and the server performs FIFO allocation.
+  // The Worker validates aggregate branch stock before an explicit lot's
+  // stock. These ledgers can briefly disagree, so the UI must enforce both.
+  // Automatic mode stays aggregate-bound and lets the Worker allocate FIFO.
   const selectedBatch = productBatches.find((batch) => batch.id === selectedBatchId) || null
   const hasBatchLots = !!selectedProduct && trackedBatchProductIds.has(Number(selectedProduct.id))
-  const transferAvailable = selectedBatch
-    ? Number(selectedBatch.quantity || 0)
-    : Number(selectedProduct?.branch_quantity || 0)
+  const sourceBranchAvailable = Math.max(0, Number(selectedProduct?.branch_quantity || 0))
+  const selectedBatchAvailable = selectedBatch
+    ? Math.max(0, Number(selectedBatch.quantity || 0))
+    : null
+  const transferAvailable = selectedBatchAvailable == null
+    ? sourceBranchAvailable
+    : Math.min(selectedBatchAvailable, sourceBranchAvailable)
 
   /**
    * 5. Transfer Action
