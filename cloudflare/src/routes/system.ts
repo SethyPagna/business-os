@@ -40,6 +40,7 @@ const MAX_IMAGE_DELETES_PER_RESET = 500
 
 const SALE_RECORD_RESET_GUARD_KEY = 'sale_record_events_reset_guard'
 const SALE_INCIDENT_RECOVERY_RESET_GUARD_KEY = 'sale_incident_recovery_reset_guard'
+const SALE_NOT_PAID_STOCK_RECOVERY_RESET_GUARD_KEY = 'sale_not_paid_stock_recovery_reset_guard'
 
 type ResetStatement = { sql: string; params?: Record<string, unknown> }
 
@@ -61,7 +62,19 @@ function guardSaleRecordReset(statements: ResetStatement[]): ResetStatement[] {
             ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=CURRENT_TIMESTAMP`,
       params: { key: SALE_INCIDENT_RECOVERY_RESET_GUARD_KEY, token },
     },
+    {
+      sql: `INSERT INTO system_flags(key,value,updated_at)
+            VALUES(@key,json_object('mode','reset','token',@token),CURRENT_TIMESTAMP)
+            ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=CURRENT_TIMESTAMP`,
+      params: { key: SALE_NOT_PAID_STOCK_RECOVERY_RESET_GUARD_KEY, token },
+    },
     ...statements,
+    {
+      sql: `DELETE FROM system_flags
+            WHERE key=@key AND json_extract(value,'$.mode')='reset'
+              AND json_extract(value,'$.token')=@token`,
+      params: { key: SALE_NOT_PAID_STOCK_RECOVERY_RESET_GUARD_KEY, token },
+    },
     {
       sql: `DELETE FROM system_flags
             WHERE key=@key AND json_extract(value,'$.mode')='reset'
@@ -410,6 +423,8 @@ app.post('/reset-data', async (c) => {
   try {
     const statements: Array<{ sql: string }> = [
       { sql: 'DELETE FROM sale_record_events' },
+      { sql: 'DELETE FROM sale_not_paid_stock_recovery_members' },
+      { sql: 'DELETE FROM sale_not_paid_stock_recovery_receipts' },
       { sql: 'DELETE FROM sale_incident_recovery_members' },
       { sql: 'DELETE FROM sale_incident_recovery_receipts' },
       { sql: 'DELETE FROM return_mutation_receipts' },
@@ -960,6 +975,120 @@ app.post('/sale-incident-recovery-20260909-v2/apply', async (c) => {
       return c.json({ success: false, error: error.message }, 409)
     }
     return c.json({ success: false, error: 'Sale 16954 recovery failed. The atomic D1 batch changed no data.' }, 500)
+  }
+})
+
+app.get('/sale-not-paid-stock-recovery-20260909/preview', async (c) => {
+  c.header('Cache-Control', 'no-store')
+  const denied = denyUnlessRestorePermission(c)
+  if (denied) return denied
+  if (await rateLimited(c, 'sale_not_paid_stock_recovery_preview', 10, 600)) {
+    return c.json({ success: false, error: 'Too many Not Paid stock correction previews. Wait a few minutes and try again.' }, 429)
+  }
+  const recovery = await import('../lib/saleNotPaidStockRecovery')
+  const user = c.get('user')
+  try {
+    return c.json(await recovery.previewSaleNotPaidStockRecovery(getDb(c.env), {
+      id: user?.id,
+      name: actorSnapshot(user),
+    }))
+  } catch (error) {
+    if (error instanceof recovery.SaleNotPaidStockRecoveryValidationError) {
+      return c.json({ success: false, error: error.message }, 400)
+    }
+    if (error instanceof recovery.SaleNotPaidStockRecoveryConflictError) {
+      return c.json({ success: false, error: error.message }, 409)
+    }
+    return c.json({ success: false, error: 'Could not preview the fixed Not Paid stock correction. No data was changed.' }, 500)
+  }
+})
+
+app.post('/sale-not-paid-stock-recovery-20260909/apply', async (c) => {
+  c.header('Cache-Control', 'no-store')
+  const denied = denyUnlessRestorePermission(c)
+  if (denied) return denied
+  const crossOrigin = denyCrossOriginMaintenanceRequest(c, true)
+  if (crossOrigin) return crossOrigin
+  const advertisedBytes = Number(c.req.header('Content-Length') || 0)
+  if (Number.isFinite(advertisedBytes) && advertisedBytes > 4096) {
+    return c.json({ success: false, error: 'Not Paid stock correction request body is too large.' }, 413)
+  }
+  if (await rateLimited(c, 'sale_not_paid_stock_recovery_apply', 5, 600)) {
+    return c.json({ success: false, error: 'Too many Not Paid stock correction attempts. Wait a few minutes and try again.' }, 429)
+  }
+  const rawBody = await c.req.text()
+  if (new TextEncoder().encode(rawBody).byteLength > 4096) {
+    return c.json({ success: false, error: 'Not Paid stock correction request body is too large.' }, 413)
+  }
+  let body: unknown
+  try { body = JSON.parse(rawBody) } catch { return c.json({ success: false, error: 'Not Paid stock correction request must be valid JSON.' }, 400) }
+
+  const recovery = await import('../lib/saleNotPaidStockRecovery')
+  const db = getDb(c.env)
+  const user = c.get('user')
+  let plan
+  try {
+    plan = await recovery.prepareSaleNotPaidStockRecovery(db, body, {
+      id: user?.id,
+      name: actorSnapshot(user),
+    })
+  } catch (error) {
+    if (error instanceof recovery.SaleNotPaidStockRecoveryValidationError) {
+      return c.json({ success: false, error: error.message }, 400)
+    }
+    if (error instanceof recovery.SaleNotPaidStockRecoveryConflictError) {
+      return c.json({ success: false, error: error.message }, 409)
+    }
+    return c.json({ success: false, error: 'Could not validate the fixed Not Paid stock correction. No data was changed.' }, 500)
+  }
+
+  if (plan.outcome === 'apply') {
+    try {
+      await createSectionBackup(c.env, recovery.SALE_NOT_PAID_STOCK_RECOVERY_BACKUP_TABLES, 'manual')
+    } catch {
+      return c.json({ success: false, error: 'Aborted: could not create the Not Paid stock correction backup first. No data was changed.' }, 500)
+    }
+  }
+
+  try {
+    const result = await recovery.applySaleNotPaidStockRecovery(db, plan)
+    const refreshes = await Promise.allSettled([
+      bumpVersion(c.env, 'sales'),
+      bumpVersion(c.env, 'products'),
+      bumpVersion(c.env, 'audit_log'),
+      broadcast(c.env, 'sales', { action: 'update', recovery: recovery.SALE_NOT_PAID_STOCK_RECOVERY_TARGET }),
+      broadcast(c.env, 'products', { action: 'update', recovery: recovery.SALE_NOT_PAID_STOCK_RECOVERY_TARGET }),
+    ])
+    const cacheInvalidated = refreshes.slice(0, 3).every((entry) => entry.status === 'fulfilled')
+    const refreshPending = refreshes.some((entry) => entry.status === 'rejected')
+    return c.json({
+      ...result,
+      verification_pending: Boolean(result.verification_pending),
+      cache_invalidated: cacheInvalidated,
+      refresh_pending: refreshPending,
+      broadcast_requested: true,
+      message: result.outcome === 'applied'
+        ? 'Corrected the three Not Paid sales to hold their four recovered items in one guarded transaction.'
+        : 'This exact Not Paid stock correction was already applied. No sale, allocation, stock, movement, audit, history or backup row changed; cache refresh was retried.',
+    })
+  } catch (error) {
+    if (error instanceof recovery.SaleNotPaidStockRecoveryUncertainError) {
+      return c.json({
+        success: false,
+        outcome: 'uncertain',
+        operation_id: error.operationId,
+        manifest_sha256: error.manifestSha256,
+        verification_pending: true,
+        cache_invalidated: false,
+        refresh_pending: true,
+        broadcast_requested: false,
+        message: error.message,
+      }, 202)
+    }
+    if (error instanceof recovery.SaleNotPaidStockRecoveryConflictError) {
+      return c.json({ success: false, error: error.message }, 409)
+    }
+    return c.json({ success: false, error: 'Not Paid stock correction failed before a durable receipt was recorded. No correction was applied.' }, 500)
   }
 })
 

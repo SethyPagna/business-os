@@ -416,6 +416,9 @@ export const FACTORY_RESET_TABLES = [
   'sale_incident_recovery_members',
   'sale_incident_recovery_receipts',
   'sale_incident_recovery_guards',
+  'sale_not_paid_stock_recovery_members',
+  'sale_not_paid_stock_recovery_receipts',
+  'sale_not_paid_stock_recovery_guards',
   // Receipt children must go before their product/lot/movement/history parents.
   // Keep revision tombstones: reused identities must never resurrect old guards.
   'stock_session_members',

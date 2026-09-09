@@ -102,6 +102,7 @@ export const SALE_RECORD_KINDS = [
   'payment_settled',
   'cancelled',
   'sale_items_recovered',
+  'sale_stock_corrected',
   'legacy_sale_change',
 ] as const
 export type SaleRecordKind = (typeof SALE_RECORD_KINDS)[number]
@@ -132,6 +133,7 @@ export const SALE_RECORD_FIELDS = [
   'cancel_reason',
   'cancel_note',
   'item_count',
+  'held_units',
   'stock_effect',
 ] as const
 export type SaleRecordField = (typeof SALE_RECORD_FIELDS)[number]
@@ -797,6 +799,33 @@ export function auditRecord(row: SaleRecordAuditRow): SaleRecord | null {
     }
   }
 
+  if (action === 'correct_awaiting_payment_stock_hold') {
+    const beforeState = parseDetails(row.old_value)
+    const afterState = parseDetails(row.new_value)
+    const beforeUnits = beforeState?.held_units
+    const afterUnits = afterState?.held_units
+    if (details.kind !== 'sale_stock_corrected' || beforeUnits !== 0
+      || typeof afterUnits !== 'number' || !Number.isSafeInteger(afterUnits) || afterUnits < 1
+      || beforeState?.stock_effect !== 'released_allocation_only' || afterState?.stock_effect !== 'deducted_now') {
+      return {
+        ...base,
+        kind: 'legacy_sale_change',
+        subject: null,
+        summary: 'Earlier sale change',
+        before: null,
+        after: null,
+      }
+    }
+    return {
+      ...base,
+      kind: 'sale_stock_corrected',
+      subject: null,
+      summary: 'Not Paid stock hold corrected',
+      before: { held_units: beforeUnits, stock_effect: 'released_allocation_only' },
+      after: { held_units: afterUnits, stock_effect: 'deducted_now' },
+    }
+  }
+
   if (action === 'sale_settlement') {
     const beforeState = details.before && typeof details.before === 'object'
       ? details.before as Record<string, unknown> : {}
@@ -1377,6 +1406,11 @@ function publicRecord(record: SaleRecord): SaleRecord {
   } else if (record.kind === 'sale_items_recovered') {
     addChange(changes, 'item_count', fieldState(record, 'before', 'item_count'), fieldState(record, 'after', 'item_count'), true)
     if (record.after && (record.after.stock_effect === 'deducted_now' || record.after.stock_effect === 'released_allocation_only')) {
+      addChange(changes, 'stock_effect', fieldState(record, 'before', 'stock_effect'), fieldState(record, 'after', 'stock_effect'), true)
+    }
+  } else if (record.kind === 'sale_stock_corrected') {
+    addChange(changes, 'held_units', fieldState(record, 'before', 'held_units'), fieldState(record, 'after', 'held_units'), true)
+    if (record.before?.stock_effect === 'released_allocation_only' && record.after?.stock_effect === 'deducted_now') {
       addChange(changes, 'stock_effect', fieldState(record, 'before', 'stock_effect'), fieldState(record, 'after', 'stock_effect'), true)
     }
   }
