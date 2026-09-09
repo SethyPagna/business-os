@@ -5,7 +5,7 @@
 -- they are the authoritative replay record for this one guarded incident repair.
 CREATE TABLE sale_incident_recovery_receipts (
   id TEXT PRIMARY KEY,
-  incident_key TEXT NOT NULL UNIQUE CHECK(incident_key = 'sale-zero-items-20260909-v1'),
+  incident_key TEXT NOT NULL UNIQUE CHECK(incident_key IN ('sale-zero-items-20260909-v1', 'sale-zero-items-20260909-v2')),
   actor_id INTEGER NOT NULL,
   actor_name TEXT NOT NULL,
   request_digest TEXT NOT NULL,
@@ -20,7 +20,7 @@ CREATE TABLE sale_incident_recovery_receipts (
 
 CREATE TABLE sale_incident_recovery_members (
   operation_id TEXT NOT NULL REFERENCES sale_incident_recovery_receipts(id),
-  sale_id INTEGER NOT NULL UNIQUE CHECK(sale_id IN (16951, 16952, 16953)),
+  sale_id INTEGER NOT NULL UNIQUE CHECK(sale_id IN (16951, 16952, 16953, 16954)),
   history_id INTEGER NOT NULL REFERENCES action_history(id),
   before_json TEXT NOT NULL,
   after_json TEXT NOT NULL,
