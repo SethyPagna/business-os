@@ -488,6 +488,90 @@ runTest('a customer swap reports both ids', () => {
   assert.strictEqual(record.after.membership_number, 'M-0009')
 })
 
+runTest('fixed recovery audits expose only item counts and the allowlisted stock effect', () => {
+  const recovered = buildSaleRecords({
+    sale: SALE,
+    audit: [{
+      id: 530,
+      action: 'recover_missing_sale_items',
+      user_name: 'recovery_admin',
+      created_at: '2026-09-09 07:19:33',
+      details: JSON.stringify({
+        kind: 'sale-zero-items-20260909-v1',
+        operation_id: 'must-not-cross-api',
+        manifest_sha256: 'must-not-cross-api',
+        source: 'must-not-cross-api',
+        allocation_basis: 'must-not-cross-api',
+        stock_effect: 'deducted_now',
+      }),
+      old_value: JSON.stringify({ item_count: 0, revision: 1 }),
+      new_value: JSON.stringify({ item_count: 1, revision: 3 }),
+    }, {
+      id: 531,
+      action: 'recover_missing_sale_items',
+      user_name: 'recovery_admin',
+      created_at: '2026-09-09 07:30:00',
+      details: JSON.stringify({
+        kind: 'sale-zero-items-20260909-v2',
+        cost_evidence: { artifact: 'must-not-cross-api' },
+        stock_effect: 'released_allocation_only',
+      }),
+      old_value: JSON.stringify({ item_count: 0, revision: 1 }),
+      new_value: JSON.stringify({ item_count: 1, revision: 3 }),
+    }],
+  }).filter((record) => record.kind === 'sale_items_recovered')
+  assert.strictEqual(recovered.length, 2)
+  assert.deepStrictEqual(recovered.map((record) => record.summary), ['Sale items recovered', 'Sale items recovered'])
+  assert.deepStrictEqual(recovered.map((record) => record.changes), [[
+    { field: 'item_count', before: { state: 'known_value', value: 0 }, after: { state: 'known_value', value: 1 } },
+    { field: 'stock_effect', before: { state: 'known_none' }, after: { state: 'known_value', value: 'deducted_now' } },
+  ], [
+    { field: 'item_count', before: { state: 'known_value', value: 0 }, after: { state: 'known_value', value: 1 } },
+    { field: 'stock_effect', before: { state: 'known_none' }, after: { state: 'known_value', value: 'released_allocation_only' } },
+  ]])
+  const serialized = JSON.stringify(recovered)
+  for (const forbidden of ['operation_id', 'manifest_sha256', 'cost_evidence', 'allocation_basis', 'revision']) {
+    assert.ok(!serialized.includes(forbidden), `${forbidden} must not cross the Records API`)
+  }
+})
+
+runTest('recovery audit validation fails closed on malformed counts and stock tokens', () => {
+  const invalidCounts = [
+    { old_value: '{', new_value: JSON.stringify({ item_count: 1 }) },
+    { old_value: JSON.stringify({ item_count: -1 }), new_value: JSON.stringify({ item_count: 1 }) },
+    { old_value: JSON.stringify({ item_count: 0 }), new_value: JSON.stringify({ item_count: '1' }) },
+    { old_value: JSON.stringify({ item_count: 0 }), new_value: JSON.stringify({ item_count: -1 }) },
+    { old_value: JSON.stringify({ item_count: 0 }), new_value: JSON.stringify({ item_count: 1.5 }) },
+    { old_value: JSON.stringify({ item_count: 0 }), new_value: JSON.stringify({ item_count: Number.MAX_SAFE_INTEGER + 1 }) },
+  ]
+  for (const [index, values] of invalidCounts.entries()) {
+    const malformed = auditRecord({
+      id: 532 + index,
+      action: 'recover_missing_sale_items',
+      details: JSON.stringify({ stock_effect: 'deduct_stock_again' }),
+      ...values,
+    })
+    assert.strictEqual(malformed.kind, 'legacy_sale_change')
+    assert.deepStrictEqual(malformed.after, null)
+  }
+
+  const noStockToken = buildSaleRecords({
+    sale: SALE,
+    audit: [{
+      id: 533,
+      action: 'recover_missing_sale_items',
+      details: JSON.stringify({ stock_effect: 'deduct_stock_again' }),
+      old_value: JSON.stringify({ item_count: 0, revision: 1 }),
+      new_value: JSON.stringify({ item_count: 1, revision: 3 }),
+    }],
+  }).find((record) => record.kind === 'sale_items_recovered')
+  assert.ok(noStockToken)
+  assert.deepStrictEqual(noStockToken.changes, [
+    { field: 'item_count', before: { state: 'known_value', value: 0 }, after: { state: 'known_value', value: 1 } },
+  ])
+
+})
+
 runTest('an undo/redo replay that writes no ledger entry is the one thing kind "undone" is for', () => {
   const record = auditRecord({
     id: 506, action: 'action_undo', user_name: 'admin', created_at: '2026-09-06 14:00:00',
@@ -915,6 +999,28 @@ runTest('the list-row count equals the number of lines the float shows, for both
   sqlite.close()
 })
 
+runTest('the existing list count already includes one recovery audit as one record', () => {
+  const sqlite = setup(true)
+  sqlite.prepare("INSERT INTO sales(id,receipt_number,sale_status,cashier_name,total_usd,created_at) VALUES(77,'S-77','awaiting_payment','admin',185,'2026-09-09 06:02:29')").run()
+  sqlite.prepare(`INSERT INTO audit_logs(id,user_name,action,entity,entity_id,details,old_value,new_value,created_at)
+    VALUES(540,'recovery_admin','recover_missing_sale_items','sale','77',@details,@old,@next,'2026-09-09 07:19:33')`).run({
+    details: JSON.stringify({ stock_effect: 'released_allocation_only' }),
+    old: JSON.stringify({ item_count: 0, revision: 1 }),
+    next: JSON.stringify({ item_count: 1, revision: 3 }),
+  })
+  const count = Number(sqlite.prepare(buildSaleRecordsCountSql('?')).get(77).n) + SALE_RECORDS_SELF_COUNT
+  const detail = buildSaleRecords({ sale: SALE, audit: [{
+    id: 540, user_name: 'recovery_admin', action: 'recover_missing_sale_items',
+    details: JSON.stringify({ stock_effect: 'released_allocation_only' }),
+    old_value: JSON.stringify({ item_count: 0, revision: 1 }),
+    new_value: JSON.stringify({ item_count: 1, revision: 3 }),
+    created_at: '2026-09-09 07:19:33',
+  }] })
+  assert.strictEqual(count, 2)
+  assert.strictEqual(detail.length, count)
+  sqlite.close()
+})
+
 runTest('the applier this module suppresses is spelled the way undoAppliers.ts spells it', () => {
   // The suppression is a string match on details.applier. Import is impossible
   // here (undoAppliers.ts pulls in the D1 binding), so the two spellings are
@@ -986,7 +1092,8 @@ runTest('the public field vocabulary is exact and closed', () => {
     'customer', 'membership', 'item', 'quantity', 'removed_items', 'added_items',
     'delivery_fee_usd', 'actual_delivery_cost_usd', 'is_delivery', 'driver',
     'payment_method', 'payment_details', 'amount_paid_usd', 'amount_paid_khr',
-    'change_usd', 'change_khr', 'cancel_reason', 'cancel_note',
+    'change_usd', 'change_khr', 'cancel_reason', 'cancel_note', 'item_count',
+    'stock_effect',
   ])
   const records = buildSaleRecords({ sale: SALE, ledger: LEDGER, audit: AUDIT, bulk: BULK })
   for (const record of records) {
@@ -994,6 +1101,11 @@ runTest('the public field vocabulary is exact and closed', () => {
       assert.ok(SALE_RECORD_FIELDS.includes(change.field), `${change.field} is not a declared field`)
     }
   }
+})
+
+runTest('the durable event vocabulary recognizes only the recovery projector fields', () => {
+  const eventsSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'saleRecordEvents.ts'), 'utf8')
+  assert.match(eventsSource, /sale_items_recovered:\s*\['item_count',\s*'stock_effect'\]/)
 })
 
 runTest('the public contract is changed-only and distinguishes General from unknown history', () => {
@@ -1157,6 +1269,8 @@ runTest('the records route is gated on READING a sale, not on amending one', () 
   // Every durable source needed by the union and creation reconstruction.
   assert.match(body, /FROM sale_amendments/)
   assert.match(body, /FROM audit_logs/)
+  assert.match(body, /SELECT id, action, details, old_value, new_value, user_name, created_at/,
+    'recovery Records must read the applied audit count snapshots without exposing raw metadata')
   assert.doesNotMatch(body, /SELECT product_name, quantity, applied_price_usd, total_usd\s+FROM sale_items/,
     'mutable sale-item names are not evidence of the creation basket')
   assert.match(body, /payment_method, payment_details, amount_paid_usd, amount_paid_khr/)
