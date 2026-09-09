@@ -1,3 +1,9 @@
+## Three incident receipts recovered and verified — September 9
+
+Normal AdminUI operationc2620a5d-84d8-4eca-a117-94a7368acef8 applied07:19:33UTC fromfreshdigestb828c09a8ef1ef0288a93e0ba9aade8676c635f21d49f6e74ce4c183bb550278 afterbackup. D1postread:16951oneitem36units342, product4208stock252/Shop60/batch60, exactlyone-36movement;16952oneitem299bothdeliveryfields2.7;16953twoitems40. Threehistories/threeaudits, guardempty. UIlistand16951detailsnowshowproductsandquantities.
+
+16954stillunrepaired, v2candidate9c343f75underreview withpre-salecost170/0proved. NewrecoveryauditcurrentlyrendersgenericEarlier sale change/Historical details unavailable; underlyingauditcomplete, projectorfixqueued. Livefbdunchanged, all108tasksretained.
+
 ## V1 recovery checkpoint LIVE; reviewed operation submitted — September 9
 
 Livefbd48c7c446deff6982d1244c38496602e31c87e at100%, Workera0a92169-f3d4-4507-91e9-165cb0f783f6, deploymentd1081b35-f183-4cb1-b2b1-96ed76c104f1 at2026-09-09T07:12:45.179367Z. Independentbackendreview, focusedbackend/UItests, types/i18n/build, clean dryrun/deploypassed; fix-scopedcommitspushed. Migration145appliedandrecorded07:11:24; all businesscounts/sumsunchanged,3newrecoverytablesempty. Pre-migrationbookmark00001463-00000062-000050e1-7f7e44292617d873a224be2d0df92cea retained.
