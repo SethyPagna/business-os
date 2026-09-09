@@ -551,7 +551,7 @@ export async function removeStockFromBatch(db: D1Compat, input: {
 // nothing extra to "rename" or reorder here.
 export async function resolveDestinationBatch(
   db: D1Compat,
-  sourceBatch: { lot_code: string | null; expiry_date: string | null; notes: string | null },
+  sourceBatch: { lot_code: string | null; expiry_date: string | null; received_at?: string | null; notes: string | null },
   destProductId: number,
   options?: { writeGuard?: { sql: string; params?: Record<string, unknown> } },
 ): Promise<number> {
@@ -577,12 +577,13 @@ export async function resolveDestinationBatch(
   const batchKey = lotCode || generateBatchKey()
   const insertStatement = {
     sql: `INSERT INTO product_batches (variant_product_id, batch_key, lot_code, expiry_date, received_at, is_active, notes, batch_number)
-      VALUES (@productId, @batchKey, @lotCode, @expiryDate, datetime('now'), 1, @notes, @batchNumber)`,
+      VALUES (@productId, @batchKey, @lotCode, @expiryDate, @receivedAt, 1, @notes, @batchNumber)`,
     params: {
       productId: destProductId,
       batchKey,
       lotCode,
       expiryDate: sourceBatch.expiry_date || null,
+      receivedAt: sourceBatch.received_at || null,
       notes: sourceBatch.notes || null,
       batchNumber,
     },
@@ -643,6 +644,8 @@ export function incrementBatchStockStatement(batchId: number, branchId: number, 
 export type FifoLotAvailability = {
   batchId: number
   lotCode: string | null
+  /** Operator-facing received date source; lotCode remains a wire/storage alias. */
+  receivedAt?: string | null
   expiryDate: string | null
   available: number
 }
@@ -652,15 +655,16 @@ export type FifoLotAvailability = {
 // after every dated one), then batch_number/id for a stable tiebreak.
 export async function readFifoLotAvailability(db: D1Compat, productId: number, branchId: number): Promise<FifoLotAvailability[]> {
   const rows = await db.prepare(`
-    SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date, bbs.quantity AS available
+    SELECT pb.id AS batch_id, pb.lot_code, pb.received_at, pb.expiry_date, bbs.quantity AS available
     FROM product_batches pb
     JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id AND bbs.branch_id = @branchId
     WHERE pb.variant_product_id = @productId AND pb.is_active = 1 AND bbs.quantity > 0
     ORDER BY (pb.received_at IS NULL) ASC, pb.received_at ASC, pb.batch_number ASC, pb.id ASC
-  `).all<{ batch_id: number; lot_code: string | null; expiry_date: string | null; available: number }>({ productId, branchId })
+  `).all<{ batch_id: number; lot_code: string | null; received_at: string | null; expiry_date: string | null; available: number }>({ productId, branchId })
   return rows.map((row) => ({
     batchId: Number(row.batch_id),
     lotCode: row.lot_code ?? null,
+    receivedAt: row.received_at ?? null,
     expiryDate: row.expiry_date ?? null,
     available: Math.max(0, Number(row.available) || 0),
   }))
@@ -684,7 +688,7 @@ export async function readFifoLotAvailabilityForCart(
   // product ids (branches are few, usually one POS branch).
   const rows = await selectInChunks(productIds, branchIds.length, (chunk) => db.prepare(`
     SELECT pb.variant_product_id AS product_id, bbs.branch_id AS branch_id,
-           pb.id AS batch_id, pb.lot_code, pb.expiry_date, bbs.quantity AS available
+           pb.id AS batch_id, pb.lot_code, pb.received_at, pb.expiry_date, bbs.quantity AS available
     FROM product_batches pb
     JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id
     WHERE pb.variant_product_id IN (${chunk.map(() => '?').join(',')})
@@ -692,13 +696,14 @@ export async function readFifoLotAvailabilityForCart(
       AND pb.is_active = 1 AND bbs.quantity > 0
     ORDER BY pb.variant_product_id ASC, bbs.branch_id ASC,
              (pb.received_at IS NULL) ASC, pb.received_at ASC, pb.batch_number ASC, pb.id ASC
-  `).all<{ product_id: number; branch_id: number; batch_id: number; lot_code: string | null; expiry_date: string | null; available: number }>([...chunk, ...branchIds]))
+  `).all<{ product_id: number; branch_id: number; batch_id: number; lot_code: string | null; received_at: string | null; expiry_date: string | null; available: number }>([...chunk, ...branchIds]))
   for (const row of rows) {
     const key = `${Number(row.product_id)}:${Number(row.branch_id)}`
     const list = map.get(key) || []
     list.push({
       batchId: Number(row.batch_id),
       lotCode: row.lot_code ?? null,
+      receivedAt: row.received_at ?? null,
       expiryDate: row.expiry_date ?? null,
       available: Math.max(0, Number(row.available) || 0),
     })
@@ -707,7 +712,7 @@ export async function readFifoLotAvailabilityForCart(
   return map
 }
 
-export type FifoLotTake = { batchId: number; lotCode: string | null; expiryDate: string | null; quantity: number }
+export type FifoLotTake = { batchId: number; lotCode: string | null; receivedAt?: string | null; expiryDate: string | null; quantity: number }
 
 // Pure split of `quantity` across the lots in the given (already FIFO)
 // order, clamped to each lot's availability. Any remainder beyond what the
@@ -721,7 +726,7 @@ export function allocateAcrossLots(lots: FifoLotAvailability[], quantity: number
     if (remaining <= 0) break
     const take = Math.min(lot.available, remaining)
     if (take <= 0) continue
-    takes.push({ batchId: lot.batchId, lotCode: lot.lotCode, expiryDate: lot.expiryDate, quantity: take })
+    takes.push({ batchId: lot.batchId, lotCode: lot.lotCode, receivedAt: lot.receivedAt, expiryDate: lot.expiryDate, quantity: take })
     remaining -= take
   }
   return { takes, uncovered: remaining }

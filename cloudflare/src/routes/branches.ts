@@ -404,11 +404,11 @@ app.post('/transfer', async (c) => {
   const available = fromStock ? Number(fromStock.quantity) || 0 : 0
   if (quantity > available) return c.json({ error: 'Insufficient stock in source branch' }, 400)
 
-  let sourceBatch: { id: number; lot_code: string | null; expiry_date: string | null; notes: string | null } | null = null
+  let sourceBatch: { id: number; lot_code: string | null; received_at: string | null; expiry_date: string | null; notes: string | null } | null = null
   if (batchId) {
     sourceBatch = (await db.prepare(
-      `SELECT id, lot_code, expiry_date, notes FROM product_batches WHERE id = @batchId AND variant_product_id = @productId AND is_active = 1`,
-    ).get<{ id: number; lot_code: string | null; expiry_date: string | null; notes: string | null }>({ batchId, productId })) ?? null
+      `SELECT id, lot_code, received_at, expiry_date, notes FROM product_batches WHERE id = @batchId AND variant_product_id = @productId AND is_active = 1`,
+    ).get<{ id: number; lot_code: string | null; received_at: string | null; expiry_date: string | null; notes: string | null }>({ batchId, productId })) ?? null
     if (!sourceBatch) return c.json({ error: 'Received date not found for this product' }, 404)
     const batchStock = await db.prepare(
       'SELECT quantity FROM branch_batch_stock WHERE batch_id = @batchId AND branch_id = @branchId',
@@ -545,7 +545,7 @@ app.post('/transfer', async (c) => {
     const { takes } = allocateAcrossLots(sourceLots, quantity)
     for (const take of takes) {
       const destLotId = mergeTarget
-        ? await resolveDestinationBatch(db, { lot_code: take.lotCode, expiry_date: take.expiryDate, notes: null }, destProductId, {
+        ? await resolveDestinationBatch(db, { lot_code: take.lotCode, expiry_date: take.expiryDate, received_at: take.receivedAt, notes: null }, destProductId, {
             writeGuard: canonicalTransferAuthorityGuardStatement(fromBranchId, toBranchId),
           })
         : take.batchId
@@ -586,7 +586,7 @@ app.post('/transfer', async (c) => {
       lines: formatTransferTelegramLines({
         fromBranch: fromBranch?.name || null, toBranch: toBranch?.name || null, note: reason, by: actorSnapshot(user),
         items: [{
-          product: product.name, quantity, lot: sourceBatch?.lot_code || null, mergedInto: mergeTarget ? destProductName : null,
+          product: product.name, quantity, receivedDate: sourceBatch?.received_at || null, lot: sourceBatch?.lot_code || null, mergedInto: mergeTarget ? destProductName : null,
           fromOnHand: fromRow ? Number(fromRow.quantity) || 0 : null, toOnHand: toRow ? Number(toRow.quantity) || 0 : null,
           totalOnHand: totalRow ? Number(totalRow.stock_quantity) || 0 : null,
         }],
@@ -773,14 +773,14 @@ app.post('/transfer-bulk', async (c) => {
   const mergeTargets = await findIdentityMatches(db, products)
 
   const batchItems = items.filter((item): item is typeof item & { batchId: number } => item.batchId != null)
-  const batchById = new Map<number, { id: number; lot_code: string | null; expiry_date: string | null; notes: string | null }>()
+  const batchById = new Map<number, { id: number; lot_code: string | null; received_at: string | null; expiry_date: string | null; notes: string | null }>()
   if (batchItems.length) {
     const batchIds = [...new Set(batchItems.map((item) => item.batchId))]
     const [batchRows, batchStockRows] = await Promise.all([
       selectInChunks(batchIds, 0, (chunk) => {
         const { sql, params } = buildInClause('bid', chunk)
-        return db.prepare(`SELECT id, variant_product_id, lot_code, expiry_date, notes FROM product_batches WHERE id IN (${sql}) AND is_active = 1`)
-          .all<{ id: number; variant_product_id: number; lot_code: string | null; expiry_date: string | null; notes: string | null }>(params)
+        return db.prepare(`SELECT id, variant_product_id, lot_code, received_at, expiry_date, notes FROM product_batches WHERE id IN (${sql}) AND is_active = 1`)
+          .all<{ id: number; variant_product_id: number; lot_code: string | null; received_at: string | null; expiry_date: string | null; notes: string | null }>(params)
       }),
       selectInChunks(batchIds, 1, (chunk) => {
         const { sql, params } = buildInClause('bid', chunk)
@@ -799,7 +799,7 @@ app.post('/transfer-bulk', async (c) => {
       if (item.quantity > batchAvailable) {
         return c.json({ error: `Insufficient stock for ${productById.get(item.productId)?.name || `#${item.productId}`} (need ${item.quantity}, have ${batchAvailable})` }, 400)
       }
-      batchById.set(item.batchId, { id: batchRow.id, lot_code: batchRow.lot_code, expiry_date: batchRow.expiry_date, notes: batchRow.notes })
+      batchById.set(item.batchId, { id: batchRow.id, lot_code: batchRow.lot_code, received_at: batchRow.received_at, expiry_date: batchRow.expiry_date, notes: batchRow.notes })
     }
   }
 
@@ -812,7 +812,9 @@ app.post('/transfer-bulk', async (c) => {
     transferReceiptStatement({ actorId: user.id, requestId: clientRequestId!, digest: requestDigest, requestJson, responseJson: JSON.stringify(responsePayload) }),
     transferIntentAuditStatement({ actorId: user.id, actorName: actorSnapshot(user), requestId: clientRequestId!, requestJson, digest: requestDigest, bulk: true }),
   ]
-  for (const item of items) {
+  const receivedDateByItemIndex = new Map<number, string | null>()
+  const lotCodeByItemIndex = new Map<number, string | null>()
+  for (const [itemIndex, item] of items.entries()) {
     const product = productById.get(item.productId)!
     const mergeTarget = mergeTargets.get(item.productId)
     const destProductId = mergeTarget?.id ?? item.productId
@@ -824,6 +826,8 @@ app.post('/transfer-bulk', async (c) => {
     // Resolved BEFORE the movement inserts so both legs can stamp their
     // lot (0084) -- same values the branch_batch_stock statements below use.
     const sourceBatchForItem = item.batchId != null ? batchById.get(item.batchId)! : null
+    if (sourceBatchForItem?.received_at) receivedDateByItemIndex.set(itemIndex, sourceBatchForItem.received_at)
+    if (sourceBatchForItem?.lot_code) lotCodeByItemIndex.set(itemIndex, sourceBatchForItem.lot_code)
     const destBatchIdForItem = sourceBatchForItem
       ? (mergeTarget ? await resolveDestinationBatch(db, sourceBatchForItem, destProductId, {
           writeGuard: canonicalTransferAuthorityGuardStatement(fromBranchId, toBranchId),
@@ -895,9 +899,13 @@ app.post('/transfer-bulk', async (c) => {
       // drain abort-and-retry rather than mint per-lot drift.
       const sourceLots = await readFifoLotAvailability(db, item.productId, fromBranchId)
       const { takes } = allocateAcrossLots(sourceLots, item.quantity)
+      const receivedDates = new Set(takes.map((take) => String(take.receivedAt || '').trim()).filter(Boolean))
+      if (receivedDates.size === 1) receivedDateByItemIndex.set(itemIndex, [...receivedDates][0])
+      const lotCodes = new Set(takes.map((take) => String(take.lotCode || '').trim()).filter(Boolean))
+      if (lotCodes.size === 1) lotCodeByItemIndex.set(itemIndex, [...lotCodes][0])
       for (const take of takes) {
         const destLotId = mergeTarget
-          ? await resolveDestinationBatch(db, { lot_code: take.lotCode, expiry_date: take.expiryDate, notes: null }, destProductId, {
+          ? await resolveDestinationBatch(db, { lot_code: take.lotCode, expiry_date: take.expiryDate, received_at: take.receivedAt, notes: null }, destProductId, {
               writeGuard: canonicalTransferAuthorityGuardStatement(fromBranchId, toBranchId),
             })
           : take.batchId
@@ -935,7 +943,7 @@ app.post('/transfer-bulk', async (c) => {
   // (the builder caps the list and states the remainder).
   c.executionCtx.waitUntil((async () => {
     const mergedInto = new Map(merges.map((merge) => [merge.productId, merge]))
-    const lines = await Promise.all(items.map(async (item) => {
+    const lines = await Promise.all(items.map(async (item, itemIndex) => {
       const destProductId = mergedInto.get(item.productId)?.mergedIntoProductId ?? item.productId
       const [fromRow, toRow, totalRow] = await Promise.all([
         db.prepare('SELECT quantity FROM branch_stock WHERE product_id = @productId AND branch_id = @branchId').get<{ quantity: number }>({ productId: item.productId, branchId: fromBranchId }),
@@ -944,6 +952,8 @@ app.post('/transfer-bulk', async (c) => {
       ])
       return {
         product: productById.get(item.productId)?.name || `#${item.productId}`, quantity: item.quantity,
+        receivedDate: receivedDateByItemIndex.get(itemIndex) || null,
+        lot: lotCodeByItemIndex.get(itemIndex) || null,
         mergedInto: mergedInto.get(item.productId)?.mergedIntoProductName || null,
         fromOnHand: fromRow ? Number(fromRow.quantity) || 0 : null, toOnHand: toRow ? Number(toRow.quantity) || 0 : null,
         totalOnHand: totalRow ? Number(totalRow.stock_quantity) || 0 : null,

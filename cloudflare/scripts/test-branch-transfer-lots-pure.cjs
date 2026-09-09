@@ -264,7 +264,7 @@ await check('an explicit-lot concurrent drain rolls back aggregate and lot effec
 await check('a destination-lot clone is guarded against a concurrent ambiguous branch identity', async () => {
   const db = freshDb()
   const compat = wrapDb(db)
-  const source = { lot_code: 'C', expiry_date: '2027-01-01', notes: 'guarded clone' }
+  const source = { lot_code: 'C', expiry_date: '2027-01-01', received_at: '2026-08-01', notes: 'guarded clone' }
   const guard = identity.canonicalTransferAuthorityGuardStatement(1, 2)
 
   db.prepare("INSERT INTO branches(id,name,is_active) VALUES (3,' shop ',1)").run()
@@ -278,8 +278,8 @@ await check('a destination-lot clone is guarded against a concurrent ambiguous b
   const insertedId = await productBatches.resolveDestinationBatch(compat, source, 2, { writeGuard: guard })
   assert.ok(insertedId > 0)
   assert.deepStrictEqual(
-    db.prepare('SELECT variant_product_id,lot_code,expiry_date,notes FROM product_batches WHERE id=?').get(insertedId),
-    { variant_product_id: 2, lot_code: 'C', expiry_date: '2027-01-01', notes: 'guarded clone' },
+    db.prepare('SELECT variant_product_id,lot_code,expiry_date,received_at,notes FROM product_batches WHERE id=?').get(insertedId),
+    { variant_product_id: 2, lot_code: 'C', expiry_date: '2027-01-01', received_at: '2026-08-01', notes: 'guarded clone' },
   )
 })
 
