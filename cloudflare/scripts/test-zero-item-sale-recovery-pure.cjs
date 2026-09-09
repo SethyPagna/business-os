@@ -150,6 +150,14 @@ function state(db) {
 
 ;(async () => {
   {
+    const db = openDb(loadAll())
+    const history = db.prepare("INSERT INTO action_history(label,reversible,status) VALUES('future v2 schema proof',0,'recorded')").run()
+    db.prepare(`INSERT INTO sale_incident_recovery_receipts(id,incident_key,actor_id,actor_name,request_digest,request_json,before_json,after_json,response_json,backup_created) VALUES('v2-proof','sale-zero-items-20260909-v2',91,'Recovery Admin','digest','{}','{}','{}','{}',1)`).run()
+    db.prepare(`INSERT INTO sale_incident_recovery_members(operation_id,sale_id,history_id,before_json,after_json) VALUES('v2-proof',16954,@history,'{}','{}')`).run({ history: Number(history.meta.last_row_id) })
+    assert.equal(db.prepare('SELECT sale_id FROM sale_incident_recovery_members').get().sale_id, 16954)
+    console.log('PASS migration 0145 reserves a separate v2 receipt for blocked sale 16954 without adding it to v1')
+  }
+  {
     const f = fixture()
     currentUser = { ...USER, permissions: '{}' }
     const denied = await call(f.env, '/sale-incident-recovery-20260909/preview')
