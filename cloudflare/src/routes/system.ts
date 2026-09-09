@@ -850,6 +850,119 @@ app.post('/sale-incident-recovery-20260909/apply', async (c) => {
   }
 })
 
+app.get('/sale-incident-recovery-20260909-v2/preview', async (c) => {
+  c.header('Cache-Control', 'no-store')
+  const denied = denyUnlessRestorePermission(c)
+  if (denied) return denied
+  if (await rateLimited(c, 'sale_incident_recovery_v2_preview', 10, 600)) {
+    return c.json({ success: false, error: 'Too many sale 16954 recovery previews. Wait a few minutes and try again.' }, 429)
+  }
+  const recovery = await import('../lib/saleIncidentRecoveryV2')
+  const user = c.get('user')
+  try {
+    return c.json(await recovery.previewSaleIncidentRecoveryV2(getDb(c.env), {
+      id: user?.id,
+      name: actorSnapshot(user),
+    }))
+  } catch (error) {
+    if (error instanceof recovery.SaleIncidentRecoveryV2ValidationError) {
+      return c.json({ success: false, error: error.message }, 400)
+    }
+    if (error instanceof recovery.SaleIncidentRecoveryV2ConflictError) {
+      return c.json({ success: false, error: error.message }, 409)
+    }
+    return c.json({ success: false, error: 'Could not preview the fixed sale 16954 recovery. No data was changed.' }, 500)
+  }
+})
+
+app.post('/sale-incident-recovery-20260909-v2/apply', async (c) => {
+  c.header('Cache-Control', 'no-store')
+  const denied = denyUnlessRestorePermission(c)
+  if (denied) return denied
+  const crossOrigin = denyCrossOriginMaintenanceRequest(c, true)
+  if (crossOrigin) return crossOrigin
+  const advertisedBytes = Number(c.req.header('Content-Length') || 0)
+  if (Number.isFinite(advertisedBytes) && advertisedBytes > 4096) {
+    return c.json({ success: false, error: 'Sale 16954 recovery request body is too large.' }, 413)
+  }
+  if (await rateLimited(c, 'sale_incident_recovery_v2_apply', 5, 600)) {
+    return c.json({ success: false, error: 'Too many sale 16954 recovery attempts. Wait a few minutes and try again.' }, 429)
+  }
+  const rawBody = await c.req.text()
+  if (new TextEncoder().encode(rawBody).byteLength > 4096) {
+    return c.json({ success: false, error: 'Sale 16954 recovery request body is too large.' }, 413)
+  }
+  let body: unknown
+  try { body = JSON.parse(rawBody) } catch { return c.json({ success: false, error: 'Sale 16954 recovery request must be valid JSON.' }, 400) }
+
+  const recovery = await import('../lib/saleIncidentRecoveryV2')
+  const db = getDb(c.env)
+  const user = c.get('user')
+  let plan
+  try {
+    plan = await recovery.prepareSaleIncidentRecoveryV2(db, body, {
+      id: user?.id,
+      name: actorSnapshot(user),
+    })
+  } catch (error) {
+    if (error instanceof recovery.SaleIncidentRecoveryV2ValidationError) {
+      return c.json({ success: false, error: error.message }, 400)
+    }
+    if (error instanceof recovery.SaleIncidentRecoveryV2ConflictError) {
+      return c.json({ success: false, error: error.message }, 409)
+    }
+    return c.json({ success: false, error: 'Could not validate the fixed sale 16954 recovery. No data was changed.' }, 500)
+  }
+
+  if (plan.outcome === 'apply') {
+    try {
+      await createSectionBackup(c.env, recovery.SALE_INCIDENT_RECOVERY_V2_BACKUP_TABLES, 'manual')
+    } catch {
+      return c.json({ success: false, error: 'Aborted: could not create the sale 16954 recovery backup first. No data was changed.' }, 500)
+    }
+  }
+
+  try {
+    const result = await recovery.applySaleIncidentRecoveryV2(db, plan)
+    const refreshes = await Promise.allSettled([
+      bumpVersion(c.env, 'sales'),
+      bumpVersion(c.env, 'products'),
+      broadcast(c.env, 'sales', { action: 'update', recovery: recovery.SALE_INCIDENT_RECOVERY_V2_TARGET }),
+      broadcast(c.env, 'products', { action: 'update', recovery: recovery.SALE_INCIDENT_RECOVERY_V2_TARGET }),
+    ])
+    const cacheInvalidated = refreshes[0].status === 'fulfilled' && refreshes[1].status === 'fulfilled'
+    const refreshPending = refreshes.some((entry) => entry.status === 'rejected')
+    return c.json({
+      ...result,
+      verification_pending: Boolean(result.verification_pending),
+      cache_invalidated: cacheInvalidated,
+      refresh_pending: refreshPending,
+      broadcast_requested: true,
+      message: result.outcome === 'applied'
+        ? 'Recovered the proven persisted line for sale 16954 in one guarded transaction.'
+        : 'This exact sale 16954 recovery was already applied. No sale, stock, audit, history or backup row changed; cache refresh was retried.',
+    })
+  } catch (error) {
+    if (error instanceof recovery.SaleIncidentRecoveryV2UncertainError) {
+      return c.json({
+        success: false,
+        outcome: 'uncertain',
+        operation_id: error.operationId,
+        manifest_sha256: error.manifestSha256,
+        verification_pending: true,
+        cache_invalidated: false,
+        refresh_pending: true,
+        broadcast_requested: false,
+        message: error.message,
+      }, 202)
+    }
+    if (error instanceof recovery.SaleIncidentRecoveryV2ConflictError) {
+      return c.json({ success: false, error: error.message }, 409)
+    }
+    return c.json({ success: false, error: 'Sale 16954 recovery failed. The atomic D1 batch changed no data.' }, 500)
+  }
+})
+
 app.get('/legacy-subtotal-repair/preview', async (c) => {
   c.header('Cache-Control', 'no-store')
   const denied = denyUnlessRestorePermission(c)
