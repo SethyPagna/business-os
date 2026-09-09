@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "task_id": "sale-records-recovery-display-backend-20260909",
+  "agent": {
+    "provider": "codex",
+    "role": "implementation_worker",
+    "session_id": "/root/general_backend"
+  },
+  "status": "completed",
+  "summary": "Sales Records now maps the fixed recovery audit to a closed sale_items_recovered event with a proven item count and an optional allowlisted stock effect. Malformed count evidence falls back to the generic legacy record, and recovery provenance remains private.",
+  "base_sha": "8037cb668b2c92ad3aca5aa9733e862fca320f68",
+  "head_sha": "54dd991f8402a79e958af0b8c909547c01d425c1",
+  "workspace": {
+    "branch": "codex/sale-records-recovery-display-20260909",
+    "worktree": "C:/Users/mrkl6/Downloads/bos-sale-records-recovery-display-20260909",
+    "dirty_before": [],
+    "dirty_after": []
+  },
+  "changes": [
+    "cloudflare/src/lib/saleRecords.ts recognizes only recover_missing_sale_items as sale_items_recovered, requires an exact 0 to positive-safe-integer item count, and exposes only item_count plus the two approved stock-effect tokens.",
+    "cloudflare/src/routes/sales.ts selects old_value and new_value for sale audit rows so the projector can validate the durable recovery counts.",
+    "cloudflare/src/lib/saleRecordEvents.ts adds the new kind's exhaustive field allowlist without adding a source rule or event writer.",
+    "cloudflare/scripts/test-sale-records-pure.cjs covers V1 and V2 recovery shapes, malformed evidence, raw-metadata suppression, count parity, route selection, and the closed event vocabulary."
+  ],
+  "commits": [
+    "54dd991f8402a79e958af0b8c909547c01d425c1"
+  ],
+  "evidence": [
+    {
+      "claim": "Only the fixed recovery action produces the new public record kind.",
+      "source": "cloudflare/src/lib/saleRecords.ts",
+      "locator": "auditRecord branch near line 772",
+      "observed": "The branch matches recover_missing_sale_items and returns kind sale_items_recovered only after validating item_count 0 to a positive safe integer."
+    },
+    {
+      "claim": "The public recovery payload excludes raw recovery provenance and revisions.",
+      "source": "cloudflare/src/lib/saleRecords.ts",
+      "locator": "publicRecord branch near line 1377",
+      "observed": "Changes contain required item_count and optional stock_effect only; before/after source objects are stripped from the public result."
+    },
+    {
+      "claim": "The route reads the durable count snapshots needed for validation.",
+      "source": "cloudflare/src/routes/sales.ts",
+      "locator": "GET /:id/records audit query near line 3229",
+      "observed": "The audit SELECT includes old_value and new_value while retaining the existing entity and sale-id predicate."
+    },
+    {
+      "claim": "The new kind does not gain a general durable-event writer path.",
+      "source": "cloudflare/src/lib/saleRecordEvents.ts",
+      "locator": "FIELDS_BY_KIND near line 73 and unchanged SOURCE_RULES",
+      "observed": "The exhaustive map admits item_count and stock_effect, while no source rule includes sale_items_recovered."
+    }
+  ],
+  "verification": [
+    {
+      "command": "node scripts/test-sale-records-pure.cjs",
+      "scope": "Cloudflare focused Sales Records projector, SQL count, and route contract at runtime commit 54dd991f",
+      "exit_code": 0,
+      "expected": "All focused Sales Records cases pass.",
+      "observed": "All cases passed, including recovery V1/V2, malformed evidence, closed vocabulary, count parity, and route selection."
+    },
+    {
+      "command": "npm run typecheck",
+      "scope": "Cloudflare Worker at runtime commit 54dd991f",
+      "exit_code": 0,
+      "expected": "TypeScript completes without errors.",
+      "observed": "tsc --noEmit passed."
+    },
+    {
+      "command": "git show --check --oneline --stat HEAD; git status --porcelain=v1",
+      "scope": "Isolated runtime commit",
+      "exit_code": 0,
+      "expected": "No whitespace errors and no uncommitted runtime changes.",
+      "observed": "Commit 54dd991f passed git show --check; the worktree was clean before creating this result artifact."
+    }
+  ],
+  "risks": [
+    "The normalizer intentionally treats missing or malformed count evidence as legacy_sale_change, so an invalid audit remains generic rather than being presented as a recovery.",
+    "The new event kind is presentation-only; SOURCE_RULES intentionally provides no general writer path for it."
+  ],
+  "blockers": [],
+  "not_done": [
+    "No audit rows were mutated or backfilled.",
+    "No migration, deployment, remote command, or production write was performed.",
+    "Frontend rendering is owned and committed separately by the Records UI worker."
+  ],
+  "handoff": "Cherry-pick runtime commit 54dd991f8402a79e958af0b8c909547c01d425c1. Pair it with the frontend Records commit 04e75b33aec835c2eba69c8dd19616b25f0db9d8, then run the focused backend test and Worker typecheck on the integrated head."
+}
