@@ -6393,7 +6393,7 @@
   "sale_incident_recovery_status_awaiting_payment": "Awaiting payment",
   "sale_incident_recovery_status_completed": "Completed",
   "sale_incident_recovery_stock_deduct": "Deduct stock now",
-  "sale_incident_recovery_stock_released": "Allocation was already released",
+  "sale_incident_recovery_stock_released": "Released allocation; no stock deduction",
   "sale_incident_recovery_success": "Receipt recovery completed.",
   "sale_incident_recovery_table_label": "Fixed receipt rows in this recovery",
   "sale_incident_recovery_target": "Recovery target",

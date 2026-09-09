@@ -6393,7 +6393,7 @@
   "sale_incident_recovery_status_awaiting_payment": "កំពុងរង់ចាំការទូទាត់",
   "sale_incident_recovery_status_completed": "បានបញ្ចប់",
   "sale_incident_recovery_stock_deduct": "កាត់ស្តុកឥឡូវនេះ",
-  "sale_incident_recovery_stock_released": "ការបែងចែកត្រូវបានដោះលែងរួចហើយ",
+  "sale_incident_recovery_stock_released": "បានដោះលែងការបែងចែក; មិនកាត់ស្តុក",
   "sale_incident_recovery_success": "ការសង្គ្រោះបង្កាន់ដៃបានបញ្ចប់។",
   "sale_incident_recovery_table_label": "បន្ទាត់បង្កាន់ដៃថេរ ក្នុងការសង្គ្រោះនេះ",
   "sale_incident_recovery_target": "គោលដៅសង្គ្រោះ",

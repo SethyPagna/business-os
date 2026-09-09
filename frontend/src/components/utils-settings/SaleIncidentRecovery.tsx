@@ -9,7 +9,7 @@ import {
   applySaleIncidentRecovery,
   previewSaleIncidentRecovery,
   saleIncidentRecoveryIsComplete,
-  type SaleIncidentRecoveryApplyResponse,
+  type SaleIncidentRecoveryApplyResult,
   type SaleIncidentRecoveryPreview,
 } from '../../utils/saleIncidentRecovery.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
@@ -32,7 +32,7 @@ function SaleIncidentRecovery() {
   const T = (key: string, fallback: string) => (typeof t === 'function' ? t(key, fallback) || fallback : fallback)
   const permitted = hasPermission('backup_restore')
   const [preview, setPreview] = useState<SaleIncidentRecoveryPreview | null>(null)
-  const [result, setResult] = useState<SaleIncidentRecoveryApplyResponse | null>(null)
+  const [result, setResult] = useState<SaleIncidentRecoveryApplyResult | null>(null)
   const [failure, setFailure] = useState<Failure | null>(null)
   const [needsNewPreview, setNeedsNewPreview] = useState(false)
   const [acknowledged, setAcknowledged] = useState(false)
@@ -69,6 +69,10 @@ function SaleIncidentRecovery() {
     try {
       const next = await applySaleIncidentRecovery(preview.request)
       setResult(next)
+      if (!next.success) {
+        setFailure({ message: next.message, uncertain: true })
+        return
+      }
       if (saleIncidentRecoveryIsComplete(next)) {
         refreshAppData(['sales', 'products', 'inventory', 'audit_log'], { reason: 'sale-incident-recovery' })
         notify(next.message || T('sale_incident_recovery_success', 'Receipt recovery completed.'), 'success')
