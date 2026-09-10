@@ -168,7 +168,7 @@ check("Full audit_log grant -> tier 'full' AND hasPermission true (all users + p
 })
 check("routes/compat.ts: audit-logs read is tier-aware + own-scopes view (userId=self)", () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'compat.ts'), 'utf8')
-  assert.match(src, /const tier = getPermissionTier\(user, 'audit_log'\)/)
+  assert.match(src, /const tier = getActionTier\(user, 'audit_log', 'view'\)/)
   assert.match(src, /const ownOnly = tier === 'view'/)
   assert.match(src, /userId: ownOnly \? String\(user\?\.id \?\? ''\) : c\.req\.query\('userId'\)/)
   // Purge + deleted-sales ledger stay strict (Full only).

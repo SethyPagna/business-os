@@ -136,7 +136,13 @@ check('the editor writes the override rather than only rendering a badge', () =>
 
 check('the app-wide action gate applies overrides too', () => {
   const ctx = fs.readFileSync(path.join(repoRoot, 'frontend', 'src', 'AppContext.tsx'), 'utf8')
-  assert.match(ctx, /isActionOverriddenOff\(getPermissions\(\), section, action\)/, 'can() must consult overrides or the UI and API disagree')
+  const authority = fs.readFileSync(path.join(repoRoot, 'frontend', 'src', 'utils', 'permissions.ts'), 'utf8')
+  assert.match(ctx, /const authority = useMemo\(\(\) => effectivePermissions\(user\), \[user\]\)/,
+    'AppContext must derive every permission decision from the shared effective authority')
+  assert.match(ctx, /return authority\.can\(permissionKey, actionKey\)/,
+    'AppContext can() must delegate to the shared action-aware authority')
+  assert.match(authority, /isActionOverriddenOff\(merged, key, operation\)/,
+    'the shared authority must apply explicit action overrides after role/user merging')
 })
 
 fs.rmSync(tmpDir, { recursive: true, force: true })

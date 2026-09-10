@@ -147,8 +147,11 @@ async function main() {
   const foldWrites = counters.writes - beforeFolds.writes
   const foldBatches = counters.batches - beforeFolds.batches
   const foldAdapterCalls = foldReads + foldWrites + foldBatches
-  assert.equal(foldAdapterCalls, 25 * 4, 'each fold performs exactly four bounded D1 batch calls')
-  assert.equal(foldReads, 0, 'batch insert metadata eliminates dependent history/fingerprint-ready reads')
+  assert.equal(foldAdapterCalls, 25 * 5, 'each fold performs one provenance read plus exactly four bounded D1 batch calls')
+  assert.equal(foldReads, 25, 'each fold checks once for immutable transfer provenance before changing either product identity')
+  assert.match(fs.readFileSync(path.join(srcRoot, 'routes', 'products.ts'), 'utf8'),
+    /SELECT receipt_id FROM transfer_operation_members\s+WHERE source_product_id IN \(@keeper,@duplicate\) OR destination_product_id IN \(@keeper,@duplicate\) LIMIT 1/,
+    'the single per-fold read must remain the bounded transfer-provenance guard')
   assert.equal(foldBatches, 25 * 4, 'each fold batches snapshot, writes, fingerprint and history finalization')
   const foldBatchSizes = counters.batchStatementCounts.slice(beforeFolds.batchStatementCounts.length)
   assert.deepEqual(

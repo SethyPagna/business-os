@@ -196,6 +196,7 @@ async function main() {
 
   await check('route and replay surfaces enforce before queue and through the atomic writer', () => {
     const route = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'branches.ts'), 'utf8')
+    const transferOperation = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'transferOperation.ts'), 'utf8')
     const review = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'reviewApply.ts'), 'utf8')
     const undo = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'undoAppliers.ts'), 'utf8')
     const post = route.slice(route.indexOf("app.post('/'"), route.indexOf("app.put('/:id'"))
@@ -211,7 +212,13 @@ async function main() {
     assert.match(undo, /branchUpdateStatements\(id, fields, existing\)/)
     assert.equal((review.match(/assertCanonicalBranchSetMutationAllowed\(\)/g) || []).length, 2)
     assert.equal((route.match(/resolveCanonicalTransferPair\(/g) || []).length, 2)
-    assert.equal((route.match(/canonicalTransferAuthorityGuardStatement\(/g) || []).length, 6, 'two final transfer batches plus four conditional destination-lot clone guards')
+    assert.equal((route.match(/await planTransferOperation\(/g) || []).length, 2, 'both branch transfer routes delegate their final atomic plan')
+    assert.equal((transferOperation.match(/canonicalTransferAuthorityGuardStatement\(/g) || []).length, 2,
+      'the centralized planner guards both the forward batch and every undo/redo batch')
+    assert.match(transferOperation, /const statements: Statement\[\] = \[canonicalTransferAuthorityGuardStatement\(args\.fromBranchId, args\.toBranchId\)/,
+      'the canonical authority check must remain the first forward transfer statement')
+    assert.match(undo, /await import\('\.\/transferOperation'\)/,
+      'undo/redo must resolve through the same centralized transfer operation')
   })
 
   console.log(`\n${passed} canonical branch identity checks passed.`)

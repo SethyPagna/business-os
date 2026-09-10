@@ -148,6 +148,7 @@ const productImagePermission = loadReal('lib/productImagePermission.ts', {
 const pendingActions = loadReal('lib/pendingActions.ts', { ...dbStub, '../index': {} })
 // N13: the shared actor / branch kernels these routes now import.
 const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
+const feeOperationReceiptKernel = loadReal('lib/feeOperationReceipt.ts')
 const reviewGate = loadReal('lib/reviewGate.ts', {
   './actorSnapshot': actorSnapshotKernel,
   './permissions': permissions,
@@ -231,6 +232,8 @@ const feesRoute = loadReal('routes/fees.ts', {
   ...broadcastStub,
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', CURRENT_USER); return next() } },
   '../lib/permissions': permissions,
+  '../lib/actorSnapshot': actorSnapshotKernel,
+  '../lib/feeOperationReceipt': feeOperationReceiptKernel,
   '../lib/reviewGate': reviewGate,
   '../lib/branchRoles': branchRoles,
   // fee_date is a TYPED date now, read day-first through the shared kernel,

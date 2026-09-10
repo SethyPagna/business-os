@@ -44,9 +44,16 @@ function todayReturnsSql(source) {
   const marker = 'SELECT COUNT(*) AS count, COALESCE(SUM(total_refund_usd), 0) AS total_usd'
   const at = source.indexOf(marker)
   if (at < 0) throw new Error('compat.ts dashboard-summary returns query not found')
-  const end = source.indexOf('`)', at)
-  return source.slice(at, end)
-    .replace("${localDateRangeClause('created_at')}", win.localDateRangeClause('created_at'))
+  const templateStart = source.lastIndexOf('db.prepare(`', at)
+  if (templateStart < 0) throw new Error('compat.ts returns query is not inside db.prepare template SQL')
+  let templateEnd = -1
+  for (let index = at; index < source.length; index += 1) {
+    if (source[index] === '`' && source[index - 1] !== '\\') { templateEnd = index; break }
+  }
+  if (templateEnd < 0) throw new Error('compat.ts dashboard-summary returns SQL template is unterminated')
+  return source.slice(at, templateEnd)
+    .replace(/\$\{range\.allTime \? '1 = 1' : localDateRangeClause\('created_at'\)\}/,
+      win.localDateRangeClause('created_at'))
     .replace("${saleBranchClause('returns')}", '')
     .trim()
 }
