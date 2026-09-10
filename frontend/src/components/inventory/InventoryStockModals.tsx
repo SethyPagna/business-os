@@ -2,10 +2,11 @@ import { useEffect, useState, type Dispatch, type ReactNode, type SetStateAction
 import { createPortal } from 'react-dom'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import Info from 'lucide-react/dist/esm/icons/info.js'
+import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect'
 import { getProductBatches, type ProductBatch } from '../../api/batchesTransport.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
-import { dateToBatchCode } from '../../utils/batchCode.ts'
+import { dateEntryDisplayValue } from '../../utils/dateEntry.ts'
 import SupplierPickerField from '../shared/SupplierPickerField.tsx'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
 import { isBatchPickerVisible, isSetDownSubmission, isStockInSubmission } from '../../utils/stockReceiptFields.ts'
@@ -14,6 +15,7 @@ import { useFormDirty } from '../../utils/formDirty.ts'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
 import UnsavedChangesPrompt, { type UnsavedChangesPromptItem } from '../shared/UnsavedChangesPrompt.tsx'
 import MinimizeButton from '../shared/MinimizeButton.tsx'
+import { TOOLBAR_BUTTON_BASE, toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
 
 type MoneyFormatter = (value: number) => string
 
@@ -180,7 +182,6 @@ export default function InventoryStockModals({
   adjustTargetSelectOptions,
   branchCount,
   branchWithPlaceholderOptions,
-  defaultAddQuantity,
   fmtKHR,
   fmtUSD,
   getStockQty,
@@ -204,7 +205,6 @@ export default function InventoryStockModals({
   transferSourceBranchOptions,
   usdSymbol,
 }: InventoryStockModalsProps) {
-  const addQuantityChoices = [...new Set([1, defaultAddQuantity, 5, 10, 20].filter((n) => n > 0))]
   const requestedSetTotal = Number(adjustForm.quantity)
   const setDifference = Number.isFinite(requestedSetTotal) ? requestedSetTotal - adjustCurrentQuantity : null
   const changeTransferSource = onTransferSourceChange || ((branchId: string) => {
@@ -254,9 +254,15 @@ export default function InventoryStockModals({
   // received-date / supplier / cost / payment fields an explicit add does.
   const isStockIn = isStockInSubmission(adjustForm.type, adjustForm.quantity, adjustCurrentQuantity)
   const creditDueMissing = adjustForm.payment_status === 'credit' && String(adjustForm.credit_due_date || '').trim() === ''
+  const receivedDateInputVisible = isStockIn
+    && (unlockPricing || adjustForm.type === 'set' || (showBatchPicker && adjustForm.batch_id === 'new'))
 
   const [batchOptions, setBatchOptions] = useState<ProductBatch[]>([])
   const [batchLoading, setBatchLoading] = useState(false)
+  const [receivedDateOptionsOpen, setReceivedDateOptionsOpen] = useState(false)
+  useEffect(() => {
+    setReceivedDateOptionsOpen(false)
+  }, [adjustModal?.id, adjustForm.type])
   useEffect(() => {
     if (!showBatchPicker || !adjustTargetId || !adjustBranchId) {
       setBatchOptions([])
@@ -321,6 +327,16 @@ export default function InventoryStockModals({
     ? batchOptions.find((batch) => String(batch.id) === String(adjustForm.batch_id)) || null
     : null
   const adjustLotAttributedName = selectedAdjustLot?.supplier_name?.trim() || null
+  const selectedBatchOption = adjustForm.batch_id !== '' && adjustForm.batch_id !== 'new'
+    ? batchOptions.find((batch) => String(batch.id) === String(adjustForm.batch_id)) || null
+    : null
+  const receivedDateOptionSummary = selectedBatchOption
+    ? batchDisplayLabel(selectedBatchOption, tr('batch', 'Received date'))
+    : receivedDateInputVisible && adjustForm.received_date
+      ? dateEntryDisplayValue(adjustForm.received_date)
+      : adjustForm.batch_id === 'new'
+        ? tr('new_batch', '+ New received date')
+        : tr('choose_received_date', 'Choose a received date')
   // Keep the form honest: a locked lot clears any previously typed choice,
   // so what Inventory.tsx's onAdjust puts on the wire is exactly what the
   // person saw on screen.
@@ -357,13 +373,14 @@ export default function InventoryStockModals({
         <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center sm:p-4" onClick={requestCloseAdjust}>
           <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-md sm:rounded-2xl" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 <h2 className="font-bold text-gray-900 dark:text-white">{t('adjust_stock')}</h2>
-                <div className="truncate text-xs text-gray-400 mt-0.5">{adjustModal.name} - Current: {adjustCurrentQuantity} {adjustModal.unit}</div>
+                <div className="scroll-x-clean mt-0.5 max-w-full whitespace-nowrap text-xs font-medium text-gray-600 dark:text-gray-300" title={adjustModal.name}>{adjustModal.name}</div>
+                <div className="mt-0.5 text-[11px] tabular-nums text-gray-400">{t('current_stock') || 'Current stock'}: {adjustCurrentQuantity} {adjustModal.unit}</div>
               </div>
               <div className="flex shrink-0 items-center gap-1">
                 {onMinimizeAdjust ? <MinimizeButton disabled={adjustSaving} tr={tr} onMinimize={onMinimizeAdjust} /> : null}
-                <button type="button" onClick={requestCloseAdjust} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600" aria-label={t('close') || 'Close'}>
+                <button type="button" onClick={requestCloseAdjust} className={toolbarIconButtonClassName} aria-label={t('close') || 'Close'}>
                   <X className="h-4 w-4" />
                 </button>
               </div>
@@ -386,8 +403,8 @@ export default function InventoryStockModals({
               ) : null}
               <div className="grid grid-cols-3 gap-2">
                 {([['add', t('adjust_add') || 'Add'], ['remove', t('adjust_remove') || 'Remove'], ['set', t('adjust_set') || 'Set']] as [string, string][]).map(([v,lbl]) => (
-                  <button key={v} onClick={() => setAdjustForm(f=>({...f, type:v}))}
-                    className={`py-2 rounded-xl border-2 text-xs font-medium ${adjustForm.type===v ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400'}`}>
+                  <button key={v} type="button" onClick={() => setAdjustForm(f=>({...f, type:v}))}
+                    className={`${TOOLBAR_BUTTON_BASE} border-2 ${adjustForm.type===v ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400'}`}>
                     {lbl}
                   </button>
                 ))}
@@ -429,18 +446,6 @@ export default function InventoryStockModals({
                     ) : null}
                   </div>
                 ) : null}
-                <div className="mt-1.5 flex flex-wrap gap-1">
-                  {addQuantityChoices.map((n) => (
-                    <button
-                      key={n}
-                      type="button"
-                      className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${Number(adjustForm.quantity) === n ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'}`}
-                      onClick={() => setAdjustForm(f => ({ ...f, quantity: n }))}
-                    >
-                      {n}
-                    </button>
-                  ))}
-                </div>
               </div>
               {adjustForm.type === 'add' ? (
                 <div className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
@@ -525,71 +530,80 @@ export default function InventoryStockModals({
                   ) : null}
                 </div>
               ) : null}
-              {showBatchPicker ? (
-                <div>
-                  <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">
-                    {adjustForm.type === 'add' ? tr('batch', 'Received date') : tr('batch_to_remove_from', 'Received date to remove from')} *
-                  </label>
-                  {batchLoading ? (
-                    <div className="text-xs text-gray-400">{t('loading') || 'Loading...'}</div>
-                  ) : (
-                    <div className="flex flex-wrap gap-1.5">
-                      {adjustForm.type === 'add' ? (
-                        <button
-                          type="button"
-                          className={`rounded-full px-2.5 py-1 text-[11px] font-medium border ${adjustForm.batch_id === 'new' ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}
-                          onClick={() => setAdjustForm((f) => ({ ...f, batch_id: 'new' }))}
-                        >
-                          {tr('new_batch', '+ New received date')}
-                        </button>
+              {(showBatchPicker || receivedDateInputVisible || (adjustForm.type === 'add' && unlockPricing)) ? (
+                <div className="rounded-xl border border-gray-200 dark:border-gray-700" data-stock-received-date-options="true">
+                  <button
+                    type="button"
+                    className="flex h-10 w-full min-w-0 items-center justify-between gap-2 rounded-xl px-3 text-left text-sm font-semibold text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-700/40"
+                    onClick={() => setReceivedDateOptionsOpen((open) => !open)}
+                    aria-expanded={receivedDateOptionsOpen}
+                  >
+                    <span className="shrink-0">{tr('options', 'Options', 'ជម្រើស')}</span>
+                    <span className="min-w-0 flex-1 truncate text-right text-xs font-normal tabular-nums text-gray-500 dark:text-gray-400">{receivedDateOptionSummary}</span>
+                    <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${receivedDateOptionsOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
+                  </button>
+                  {receivedDateOptionsOpen ? (
+                    <div className="space-y-3 border-t border-gray-200 p-3 dark:border-gray-700">
+                      {showBatchPicker ? (
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
+                            {adjustForm.type === 'add' ? tr('batch', 'Received date') : tr('batch_to_remove_from', 'Received date to remove from')} *
+                          </label>
+                          {batchLoading ? (
+                            <div className="text-xs text-gray-400">{t('loading') || 'Loading...'}</div>
+                          ) : (
+                            <div className="flex flex-wrap gap-1.5">
+                              {adjustForm.type === 'add' ? (
+                                <button
+                                  type="button"
+                                  className={`rounded-full border px-2.5 py-1 text-[11px] font-medium ${adjustForm.batch_id === 'new' ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}
+                                  onClick={() => setAdjustForm((f) => ({ ...f, batch_id: 'new' }))}
+                                >
+                                  {tr('new_batch', '+ New received date')}
+                                </button>
+                              ) : null}
+                              {batchOptions.map((batch) => (
+                                <button
+                                  key={batch.id}
+                                  type="button"
+                                  className={`rounded-full border px-2.5 py-1 text-[11px] font-medium ${String(adjustForm.batch_id) === String(batch.id) ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}
+                                  onClick={() => setAdjustForm((f) => ({ ...f, batch_id: batch.id }))}
+                                >
+                                  {batchDisplayLabel(batch, tr('batch', 'Received date'))} ({batch.quantity})
+                                </button>
+                              ))}
+                              {!batchOptions.length && adjustForm.type === 'remove' ? (
+                                <div className="text-xs text-gray-400">{tr('no_batches_with_stock', 'No received dates with stock in this branch')}</div>
+                              ) : null}
+                            </div>
+                          )}
+                        </div>
                       ) : null}
-                      {batchOptions.map((batch) => (
-                        <button
-                          key={batch.id}
-                          type="button"
-                          className={`rounded-full px-2.5 py-1 text-[11px] font-medium border ${String(adjustForm.batch_id) === String(batch.id) ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}
-                          onClick={() => setAdjustForm((f) => ({ ...f, batch_id: batch.id }))}
-                        >
-                          {batchDisplayLabel(batch, tr('batch', 'Received date'))} ({batch.quantity})
-                        </button>
-                      ))}
-                      {!batchOptions.length && adjustForm.type === 'remove' ? (
-                        <div className="text-xs text-gray-400">{tr('no_batches_with_stock', 'No received dates with stock in this branch')}</div>
+                      {adjustForm.type === 'add' && unlockPricing ? (
+                        <div className="text-[11px] text-gray-400">
+                          {tr('batch_auto_new_unlocked', 'A new received date is created automatically for unlocked-pricing receipts.')}
+                        </div>
+                      ) : null}
+                      {/* The field keeps canonical ISO state while the shared
+                          DateEntryInput renders and accepts dd/mm/yyyy. The
+                          former MMDDYYYY code preview was an internal lot key
+                          duplicated beside the real date, so it is not shown. */}
+                      {receivedDateInputVisible ? (
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('received_date', 'Received date')}</label>
+                          <DateEntryInput
+                            id="inventory-adjust-received-date"
+                            name="inventory_adjust_received_date"
+                            className="text-sm"
+                            t={t}
+                            ariaLabel={tr('received_date', 'Received date')}
+                            value={adjustForm.received_date}
+                            onChange={iso => setAdjustForm(f => ({ ...f, received_date: iso }))}
+                          />
+                        </div>
                       ) : null}
                     </div>
-                  )}
-                </div>
-              ) : null}
-              {adjustForm.type === 'add' && unlockPricing ? (
-                <div className="text-[11px] text-gray-400">
-                  {tr('batch_auto_new_unlocked', 'A new received date is created automatically for unlocked-pricing receipts.')}
-                </div>
-              ) : null}
-              {/* D4 (11.28): recording stock late may carry the REAL
-                  received date -- same field + default ReceiveBatchModal
-                  has. Shown only when this add creates a lot ("New batch",
-                  or unlocked pricing which always makes a fresh one); an
-                  existing lot keeps its own date. The code preview matters
-                  because the date DERIVES the lot code, and a matching code
-                  tops up that lot instead of creating a twin. */}
-              {isStockIn && (unlockPricing || adjustForm.type === 'set' || (showBatchPicker && adjustForm.batch_id === 'new')) ? (
-                <div>
-                  <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{tr('received_date', 'Received date')}</label>
-                  {/* Typed, not a native picker (Sep 3): staff key the date
-                      on a numeric pad, so 9032026 has to land as 09/03/2026
-                      -- and this IS the add/remove/set stock dialog's date. */}
-                  <DateEntryInput
-                    id="inventory-adjust-received-date"
-                    name="inventory_adjust_received_date"
-                    className="text-sm"
-                    t={t}
-                    ariaLabel={tr('received_date', 'Received date')}
-                    value={adjustForm.received_date}
-                    onChange={iso => setAdjustForm(f => ({ ...f, received_date: iso }))}
-                  />
-                  <div className="mt-1 text-[11px] text-gray-400">
-                    {tr('batch_code_preview', 'Received date code', 'កូដថ្ងៃចូល')}: {dateToBatchCode(adjustForm.received_date) || '--'}
-                  </div>
+                  ) : null}
                 </div>
               ) : null}
               {/* D5a: supplier attribution for the lot this receipt creates or
@@ -750,8 +764,8 @@ export default function InventoryStockModals({
                 without being the last thing behind a scroll. There is no
                 second Save beside the ✕ any more. */}
             <div className="flex flex-shrink-0 gap-2 border-t border-gray-200 p-4 dark:border-gray-700">
-              <button onClick={onAdjust} className="btn-primary flex-1 text-sm" disabled={adjustSaving}>{adjustSaving ? (t('saving') || 'Saving...') : (adjustSubmitLabel || t('save'))}</button>
-              <button onClick={requestCloseAdjust} className="btn-secondary text-sm" disabled={adjustSaving}>{t('cancel')}</button>
+              <button type="button" onClick={onAdjust} className={`btn-primary ${TOOLBAR_BUTTON_BASE} flex-1`} disabled={adjustSaving}>{adjustSaving ? (t('saving') || 'Saving...') : (adjustSubmitLabel || t('save'))}</button>
+              <button type="button" onClick={requestCloseAdjust} className={`btn-secondary ${TOOLBAR_BUTTON_BASE}`} disabled={adjustSaving}>{t('cancel')}</button>
             </div>
           </div>
           <UnsavedChangesPrompt guard={adjustGuard} items={adjustDiscardItems} />
@@ -767,7 +781,7 @@ export default function InventoryStockModals({
                 <div className="mt-0.5 truncate text-xs text-gray-400">{transferModal.name} - {getStockQty(transferModal)} {transferModal.unit}</div>
               </div>
               <div className="flex shrink-0 items-center gap-1">
-                <button type="button" onClick={requestCloseTransfer} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600" aria-label={t('close') || 'Close'}>
+                <button type="button" onClick={requestCloseTransfer} className={toolbarIconButtonClassName} aria-label={t('close') || 'Close'}>
                   <X className="h-4 w-4" />
                 </button>
               </div>
@@ -832,10 +846,10 @@ export default function InventoryStockModals({
                 without being the last thing behind a scroll. There is no
                 second Save beside the ✕ any more. */}
             <div className="flex flex-shrink-0 gap-2 border-t border-gray-200 p-4 dark:border-gray-700">
-              <button type="button" onClick={onTransfer} className="btn-primary flex-1 text-sm" disabled={transferSaving}>
+              <button type="button" onClick={onTransfer} className={`btn-primary ${TOOLBAR_BUTTON_BASE} flex-1`} disabled={transferSaving}>
                 {transferSaving ? (t('saving') || 'Saving...') : tr('transfer', 'Transfer')}
               </button>
-              <button type="button" onClick={requestCloseTransfer} className="btn-secondary text-sm" disabled={transferSaving}>
+              <button type="button" onClick={requestCloseTransfer} className={`btn-secondary ${TOOLBAR_BUTTON_BASE}`} disabled={transferSaving}>
                 {t('cancel') || 'Cancel'}
               </button>
             </div>

@@ -16,6 +16,7 @@ import { ADMIN_MAX_PRODUCT_GALLERY_IMAGES } from '../helpers/productGalleryHelpe
 import { useLowStockConfig } from '../../../AppContext'
 import { effectiveLowStockThreshold } from '../../../utils/lowStockSettings.ts'
 import EntityLink, { type EntityNavigate } from '../../shared/EntityLink.tsx'
+import { TOOLBAR_BUTTON_BASE, toolbarIconButtonClassName } from '../../shared/toolbarButtonStyles.ts'
 
 const ProductDescriptionDetailModal = lazyRetry(() => import('./ProductDescriptionDetailModal'), 'products-description-detail-modal')
 // D3 (Part 422): the detail page's report sections (batch summary,
@@ -112,6 +113,11 @@ type DetailRowProps = {
   children: ReactNode
 }
 
+type PriceCellProps = {
+  label: string
+  children: ReactNode
+}
+
 const MS_PER_DAY = 86400000
 
 export default function ProductDetailModal({
@@ -195,6 +201,12 @@ export default function ProductDetailModal({
       <span className="min-w-0 flex-1 text-sm text-gray-800 dark:text-gray-200">{children}</span>
     </div>
   )
+  const PriceCell = ({ label, children }: PriceCellProps) => (
+    <div className="min-w-0 rounded-lg bg-gray-50 px-2.5 py-2 dark:bg-gray-700/40">
+      <div className="text-[11px] leading-tight text-gray-400">{label}</div>
+      <div className="mt-0.5 min-w-0 text-sm font-medium tabular-nums">{children}</div>
+    </div>
+  )
 
   // Click-to-view row, same pattern as Inventory's own ProductDetailModal
   // "View stock history" row -- a summary count plus a chevron that opens the
@@ -269,7 +281,7 @@ export default function ProductDetailModal({
               </div>
             </div>
           </div>
-          <button type="button" onClick={onClose} aria-label={T('close', 'Close')} className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-gray-400 hover:text-gray-600">
+          <button type="button" onClick={onClose} aria-label={T('close', 'Close')} className={toolbarIconButtonClassName}>
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -313,15 +325,14 @@ export default function ProductDetailModal({
                 </div>
 
                 {(p.branch_stock || []).length > 0 ? (
-                  <div className="border-t border-gray-100 pt-2 dark:border-gray-700">
-                    <div className="mb-1.5 text-xs text-gray-400">{T('label_branches', 'Branch Stock')}</div>
-                    <div className="flex flex-wrap gap-1.5">
+                  <Row label={T('branch', 'Branch')}>
+                    <div className="scroll-x-clean flex min-w-0 flex-nowrap gap-1.5">
                       {(p.branch_stock || []).map((bs) => {
                         const branchQuantity = Number(bs.quantity || 0)
                         return (
                         <span
                           key={bs.branch_id || bs.branch_name}
-                          className={`rounded-full px-2 py-0.5 text-xs ${
+                          className={`shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-xs ${
                             branchQuantity > 0
                               ? 'bg-green-100 text-green-700 dark:bg-green-900/30'
                               : 'bg-gray-100 text-gray-400 dark:bg-gray-700'
@@ -332,7 +343,7 @@ export default function ProductDetailModal({
                         )
                       })}
                     </div>
-                  </div>
+                  </Row>
                 ) : null}
 
                 {/* Desktop keeps all four related actions in this left-side
@@ -375,22 +386,34 @@ export default function ProductDetailModal({
                   </div>
                 ) : null}
 
-                <Row label={T('label_cost', 'Cost')}>
-                  <span className="text-red-600">{fmtUSD(purchaseUsd)}</span>
-                  {purchaseKhr > 0 ? <span className="ml-2 text-xs text-gray-400">{fmtKHR(purchaseKhr)}</span> : null}
-                </Row>
-                <Row label={T('label_selling_price', 'Selling price')}>
-                  <span className="text-base font-semibold text-green-600">{fmtUSD(sellingUsd)}</span>
-                  {sellingKhr > 0 ? <span className="ml-2 text-xs text-gray-400">{fmtKHR(sellingKhr)}</span> : null}
-                </Row>
-                {purchaseUsd > 0 && sellingUsd > 0 ? (
-                  <Row label={T('label_margin', 'Margin')}>
-                    <span className={`font-medium ${marginUsd >= 0 ? 'text-blue-600' : 'text-yellow-600'}`}>
-                      {fmtUSD(marginUsd)}
-                    </span>
-                    <span className="ml-2 text-xs text-gray-400">{marginPct.toFixed(1)}%</span>
-                  </Row>
-                ) : null}
+                <div className="grid grid-cols-2 gap-2" data-detail-price-row="cost-wholesale">
+                  <PriceCell label={T('label_cost', 'Cost')}>
+                    <span className="text-red-600">{fmtUSD(purchaseUsd)}</span>
+                    {purchaseKhr > 0 ? <span className="ml-2 text-xs font-normal text-gray-400">{fmtKHR(purchaseKhr)}</span> : null}
+                  </PriceCell>
+                  <PriceCell label={T('wholesale_price', 'Wholesale price')}>
+                    {(wholesaleUsd > 0 || wholesaleKhr > 0) ? (
+                      <>
+                        <span className="text-indigo-600 dark:text-indigo-300">{fmtUSD(wholesaleUsd)}</span>
+                        {wholesaleKhr > 0 ? <span className="ml-2 text-xs font-normal text-gray-400">{fmtKHR(wholesaleKhr)}</span> : null}
+                      </>
+                    ) : <span className="text-gray-300 dark:text-gray-600">—</span>}
+                  </PriceCell>
+                </div>
+                <div className="grid grid-cols-2 gap-2" data-detail-price-row="selling-margin">
+                  <PriceCell label={T('label_selling_price', 'Selling price')}>
+                    <span className="text-green-600">{fmtUSD(sellingUsd)}</span>
+                    {sellingKhr > 0 ? <span className="ml-2 text-xs font-normal text-gray-400">{fmtKHR(sellingKhr)}</span> : null}
+                  </PriceCell>
+                  <PriceCell label={T('label_margin', 'Margin')}>
+                    {purchaseUsd > 0 && sellingUsd > 0 ? (
+                      <>
+                        <span className={marginUsd >= 0 ? 'text-blue-600' : 'text-yellow-600'}>{fmtUSD(marginUsd)}</span>
+                        <span className="ml-2 text-xs font-normal text-gray-400">{marginPct.toFixed(1)}%</span>
+                      </>
+                    ) : <span className="text-gray-300 dark:text-gray-600">—</span>}
+                  </PriceCell>
+                </div>
                 {/* Stock + Status directly after Margin (Aug 30 ask). */}
                 <Row label={T('label_stock', 'Stock')}>
                     <strong className="text-gray-900 dark:text-white">{stockQuantity}</strong>
@@ -419,12 +442,6 @@ export default function ProductDetailModal({
                     2026-09-04 ruling -- that tier was the wholesale price
                     misnamed, and the Wholesale row directly below now shows
                     the very numbers it used to (migration 0111 moved them). */}
-                {(wholesaleUsd > 0 || wholesaleKhr > 0) ? (
-                  <Row label={T('wholesale_price', 'Wholesale price')}>
-                    <span className="text-indigo-600 dark:text-indigo-300">{fmtUSD(wholesaleUsd)}</span>
-                    {wholesaleKhr > 0 ? <span className="ml-2 text-xs text-gray-400">{fmtKHR(wholesaleKhr)}</span> : null}
-                  </Row>
-                ) : null}
                 {promotion.active ? (
                   <Row label={T('product_discount', 'Discounts')}>
                     <span className="text-rose-600 dark:text-rose-300">{fmtUSD(promotion.applied_price_usd)}</span>
@@ -472,7 +489,7 @@ export default function ProductDetailModal({
             {onAddVariant ? (
               <button
                 type="button"
-                className="btn-secondary flex min-h-11 min-w-0 flex-1 basis-[calc(50%_-_0.25rem)] items-center justify-center gap-1.5 truncate px-3 py-2 text-xs sm:min-h-0 sm:basis-0 sm:text-sm"
+                className={`btn-secondary ${TOOLBAR_BUTTON_BASE} min-w-0 flex-1 basis-[calc(50%_-_0.25rem)] truncate sm:basis-0`}
                 onClick={onAddVariant}
                 aria-label={T('add_variant', 'Add variant')}
                 title={T('add_variant', 'Add variant')}
@@ -484,7 +501,7 @@ export default function ProductDetailModal({
             {onAdjustStock ? (
               <button
                 type="button"
-                className="btn-secondary flex min-h-11 min-w-0 flex-1 basis-[calc(50%_-_0.25rem)] items-center justify-center gap-1.5 truncate px-3 py-2 text-xs sm:min-h-0 sm:basis-0 sm:text-sm"
+                className={`btn-secondary ${TOOLBAR_BUTTON_BASE} min-w-0 flex-1 basis-[calc(50%_-_0.25rem)] truncate sm:basis-0`}
                 onClick={onAdjustStock}
                 aria-label={T('adjust_stock', 'Adjust stock')}
                 title={T('adjust_stock', 'Adjust stock')}
@@ -495,7 +512,7 @@ export default function ProductDetailModal({
             ) : null}
             <button
               type="button"
-              className="btn-primary flex min-h-11 min-w-0 flex-1 basis-[calc(50%_-_0.25rem)] items-center justify-center gap-1.5 truncate px-3 py-2 text-xs sm:min-h-0 sm:basis-0 sm:text-sm"
+              className={`btn-primary ${TOOLBAR_BUTTON_BASE} min-w-0 flex-1 basis-[calc(50%_-_0.25rem)] truncate sm:basis-0`}
               onClick={onEdit}
               aria-label={T('edit', 'Edit')}
               title={T('edit', 'Edit')}
