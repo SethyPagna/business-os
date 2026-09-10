@@ -554,11 +554,11 @@ console.log('PASS 9 -- recorded returns refuse every amendment, whatever the sta
 
 // ---- 10: the edit window ---------------------------------------------------
 {
-  assert.strictEqual(DEFAULT_AMENDMENT_WINDOW_MINUTES, 120)
-  assert.strictEqual(resolveAmendmentWindowMinutes(''), 120, 'blank falls back')
-  assert.strictEqual(resolveAmendmentWindowMinutes(null), 120)
-  assert.strictEqual(resolveAmendmentWindowMinutes('not a number'), 120)
-  assert.strictEqual(resolveAmendmentWindowMinutes('-5'), 120, 'garbage falls back')
+  assert.strictEqual(DEFAULT_AMENDMENT_WINDOW_MINUTES, 0)
+  assert.strictEqual(resolveAmendmentWindowMinutes(''), 0, 'blank falls back to unlimited')
+  assert.strictEqual(resolveAmendmentWindowMinutes(null), 0)
+  assert.strictEqual(resolveAmendmentWindowMinutes('not a number'), 0)
+  assert.strictEqual(resolveAmendmentWindowMinutes('-5'), 0, 'garbage falls back to unlimited')
   assert.strictEqual(resolveAmendmentWindowMinutes('30'), 30)
   assert.strictEqual(resolveAmendmentWindowMinutes('0'), 0, '0 means "admin only" and is honoured, not treated as unset')
 
@@ -597,10 +597,10 @@ console.log('PASS 9 -- recorded returns refuse every amendment, whatever the sta
   assert.strictEqual(broken.ok, false, 'a row with no usable timestamp is treated as outside the window, not inside it')
   assert.strictEqual(guardSaleAmendment({ ...base, saleCreatedAt: 'not a date', isAdmin: true, nowMs: at('2026-09-04T10:00:01Z') }).ok, true)
 
-  // windowMinutes 0: nobody but an admin, and the message says so.
-  const noWindow = guardSaleAmendment({ ...base, windowMinutes: 0, isAdmin: false, nowMs: at('2026-09-04T10:00:01Z') })
-  assert.strictEqual(noWindow.ok, false)
-  assert.match(noWindow.error, /admin/i)
+  // windowMinutes 0: the default is unlimited for permitted employees.
+  const noWindow = guardSaleAmendment({ ...base, windowMinutes: 0, isAdmin: false, nowMs: at('2026-09-08T10:00:01Z') })
+  assert.strictEqual(noWindow.ok, true)
+  assert.strictEqual(noWindow.outsideWindow, false)
 
   // Status and returns are checked BEFORE the window: a sale that can never be
   // amended must not send a cashier off to find an admin who would be refused too.
@@ -911,7 +911,7 @@ console.log('PASS 13 -- an oversell aborts the batch, nothing half-applies, no l
 // ---- 14: summarizeAmendments -----------------------------------------------
 {
   assert.deepStrictEqual([...AMENDMENT_KINDS], [
-    'line_added', 'line_quantity_increased', 'line_quantity_decreased', 'line_removed', 'delivery_fee_changed', 'delivery_actual_cost_changed', 'delivery_added',
+    'line_added', 'line_quantity_increased', 'line_quantity_decreased', 'line_removed', 'line_updated', 'delivery_fee_changed', 'delivery_actual_cost_changed', 'delivery_added',
   ])
   assert.strictEqual(reversingKind('line_added'), 'line_removed')
   assert.strictEqual(reversingKind('line_removed'), 'line_added')

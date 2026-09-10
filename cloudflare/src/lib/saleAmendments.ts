@@ -144,6 +144,7 @@ export const AMENDMENT_KINDS = [
   'line_quantity_increased',
   'line_quantity_decreased',
   'line_removed',
+  'line_updated',
   'delivery_fee_changed',
   'delivery_actual_cost_changed',
   'delivery_added',
@@ -164,32 +165,19 @@ export const SALE_STATUSES_ACCEPTING_AMENDMENTS: ReadonlySet<string> = new Set<s
 // aloud, not specifying. So it is built, but configurable rather than
 // hard-coded, and an admin can always amend outside it.
 //
-// DEFAULT: 120 minutes, measured from the sale's OWN created_at.
-//
-// Why 120 and not 15 or 1440: the two scenarios the owner actually described
-// are the customer who turns around at the counter and the delivery whose cost
-// came back wrong -- the first is minutes, the second is the length of one
-// delivery run. Two hours covers both comfortably while still meaning that by
-// the time the shop cashes up, yesterday's sales are no longer editable by
-// whoever happens to be on the till. A window measured from the sale rather
-// than from the last amendment is deliberate: measuring from the last
-// amendment would let a chain of small edits keep a sale open indefinitely,
-// which is the same thing as having no window.
-//
-// An admin (isAdminControlUser, the existing gate -- no new role invented)
-// amends outside the window, because the real correction that arrives late is
-// exactly the one that needs a decision-maker rather than a timer.
+// DEFAULT: 0 (unlimited), measured from the sale's own created_at when a
+// positive window is configured. Employees with the scoped sales:amend grant
+// can edit by default; an administrator can still edit when a positive window
+// has elapsed.
 // ---------------------------------------------------------------------------
-export const DEFAULT_AMENDMENT_WINDOW_MINUTES = 120
+export const DEFAULT_AMENDMENT_WINDOW_MINUTES = 0
 export const AMENDMENT_WINDOW_SETTING_KEY = 'sale_amendment_window_minutes'
 
 /**
  * Resolve the `sale_amendment_window_minutes` setting.
  *
- * Blank/absent/garbage -> the default. A value of 0 means "no window at all"
- * (every amendment needs an admin), which is a legitimate configuration for a
- * shop that wants every correction signed off, so 0 is honoured rather than
- * treated as unset. Negative values are garbage and fall back.
+ * Blank/absent/garbage -> the default. A value of 0 means the edit window is
+ * unlimited. Negative values are garbage and fall back.
  */
 export function resolveAmendmentWindowMinutes(rawSetting: unknown): number {
   const parsed = parseFloat(String(rawSetting ?? '').trim())
@@ -264,15 +252,14 @@ export function guardSaleAmendment(input: AmendmentGuardInput): AmendmentGuardRe
   // An unparseable created_at must not silently grant an unlimited window.
   // Treated as outside the window, so an admin can still fix the sale and a
   // cashier is told plainly why they cannot.
-  const outsideWindow = !Number.isFinite(createdMs) || (nowMs - createdMs) > windowMinutes * 60_000
+  // Zero is the explicit unlimited setting.
+  const outsideWindow = windowMinutes > 0 && (!Number.isFinite(createdMs) || (nowMs - createdMs) > windowMinutes * 60_000)
 
   if (outsideWindow && !input.isAdmin) {
     return {
       ok: false,
       code: 'window',
-      error: windowMinutes > 0
-        ? `The ${formatWindow(windowMinutes)} window for editing this sale has closed. An admin can still amend it.`
-        : 'Sales can only be amended by an admin at this shop.',
+      error: `The ${formatWindow(windowMinutes)} window for editing this sale has closed. An admin can still amend it.`,
     }
   }
   return { ok: true, outsideWindow }
@@ -1208,6 +1195,7 @@ export function reversingKind(kind: AmendmentKind): AmendmentKind {
   if (kind === 'line_quantity_decreased') return 'line_quantity_increased'
   if (kind === 'delivery_actual_cost_changed') return 'delivery_actual_cost_changed'
   if (kind === 'delivery_added') return 'delivery_added'
+  if (kind === 'line_updated') return 'line_updated'
   return 'delivery_fee_changed'
 }
 

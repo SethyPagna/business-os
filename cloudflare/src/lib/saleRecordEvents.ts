@@ -63,6 +63,7 @@ const FIELDS_BY_KIND: Record<Exclude<SaleRecordKind, 'legacy_sale_change'>, read
   item_added: ['item', 'quantity', 'total_usd'],
   item_removed: ['item', 'quantity', 'total_usd'],
   item_quantity_changed: ['item', 'quantity', 'total_usd'],
+  item_price_changed: ['item', 'unit_price_usd', 'total_usd'],
   items_replaced: ['removed_items', 'added_items', 'total_usd'],
   customer_changed: ['customer', 'membership'],
   membership_changed: ['membership'],

@@ -80,6 +80,7 @@ import {
   TAX_ENABLED_SETTING_KEY,
   TAX_RATE_SETTING_KEY,
   type AmendableSaleRow,
+  type AmendmentPlan,
   type AmendedTaxResult,
   type LedgerRow,
   type LineAllocation,
@@ -3376,11 +3377,11 @@ app.get('/:id/records', async (c) => {
 // goods (`add_items`) or changing a status (`status`) -- a shop may well want
 // a senior cashier who can add a forgotten item but cannot take one off.
 //
-// NOT BUILT here, on purpose, and each one is named with its reason in
-// lib/saleAmendments.ts's DECISION 2: a line's unit price, the manual and
-// membership discounts, tax, and the tender.
+// Manual and membership discounts, tax, and the tender remain separate
+// concerns. A line's final selling price and quantity are corrected together
+// through `line_updated`, so the resulting sale total is recomputed once.
 // ---------------------------------------------------------------------------
-const AMENDMENT_REQUEST_KINDS = new Set(['line_quantity_increased', 'line_quantity_decreased', 'line_removed', 'line_replaced', 'delivery_fee_changed', 'delivery_actual_cost_changed', 'delivery_added'])
+const AMENDMENT_REQUEST_KINDS = new Set(['line_quantity_increased', 'line_quantity_decreased', 'line_removed', 'line_updated', 'line_replaced', 'delivery_fee_changed', 'delivery_actual_cost_changed', 'delivery_added'])
 
 app.post('/:id/amendments', async (c) => {
   const db = getDb(c.env)
@@ -3393,6 +3394,7 @@ app.post('/:id/amendments', async (c) => {
     kind?: string
     sale_item_id?: number
     quantity?: number
+    applied_price_usd?: number | string
     delivery_fee_usd?: number
     delivery_actual_cost_usd?: number | string | null
     delivery_contact_id?: number
@@ -3426,6 +3428,7 @@ app.post('/:id/amendments', async (c) => {
     kind,
     sale_item_id: body.sale_item_id ?? null,
     quantity: body.quantity ?? null,
+    applied_price_usd: body.applied_price_usd ?? null,
     delivery_fee_usd: body.delivery_fee_usd ?? null,
     delivery_actual_cost_usd: body.delivery_actual_cost_usd ?? null,
     delivery_contact_id: body.delivery_contact_id ?? null,
@@ -3527,7 +3530,7 @@ app.post('/:id/amendments', async (c) => {
     FROM sale_items WHERE sale_id=? ORDER BY id
   `).all<Record<string, unknown>>([saleId])
   const lineMoneyBefore = captureSaleLineKhrSnapshot(lineMoneyRowsBefore)
-  const lineMoneyAfterAtLatestRate = rebaseSaleLineKhrSnapshot(lineMoneyRowsBefore, exchangeRate)
+  let lineMoneyAfterAtLatestRate = rebaseSaleLineKhrSnapshot(lineMoneyRowsBefore, exchangeRate)
   const mutationStamp = new Date().toISOString()
   const mutationOperationId = crypto.randomUUID()
   const moneyBeforeSnapshot = amendmentMoneyBefore(sale)
@@ -3894,9 +3897,13 @@ app.post('/:id/amendments', async (c) => {
   const lineId = Number(body.sale_item_id)
   if (!Number.isFinite(lineId) || lineId <= 0) return c.json({ error: 'Which line is being amended?' }, 400)
   const line = await db.prepare(`
-    SELECT id, product_id, product_name, quantity, applied_price_usd, cost_price_usd, cost_price_khr, branch_id
+    SELECT id, product_id, product_name, quantity, applied_price_usd, applied_price_khr,
+      cost_price_usd, cost_price_khr, branch_id, base_price_usd, base_price_khr,
+      product_discount_usd, product_discount_khr, manual_discount_type,
+      manual_discount_value, manual_discount_usd, manual_discount_khr, price_mode,
+      total_usd, total_khr
     FROM sale_items WHERE id = ? AND sale_id = ?
-  `).get<{ id: number; product_id: number | null; product_name: string | null; quantity: number; applied_price_usd: number; cost_price_usd: number; cost_price_khr: number; branch_id: number | null }>([lineId, saleId])
+  `).get<{ id: number; product_id: number | null; product_name: string | null; quantity: number; applied_price_usd: number; applied_price_khr: number; cost_price_usd: number; cost_price_khr: number; branch_id: number | null; base_price_usd?: number; base_price_khr?: number; product_discount_usd?: number; product_discount_khr?: number; manual_discount_type?: string | null; manual_discount_value?: number; manual_discount_usd?: number; manual_discount_khr?: number; price_mode?: string | null; total_usd?: number; total_khr?: number }>([lineId, saleId])
   if (!line) return c.json({ error: 'That line is not on this sale.' }, 404)
   if (Number(line.branch_id) !== saleHeaderBranchId) {
     return c.json({ error: 'The sale header and every amended line must use the same Shop branch.' }, 400)
@@ -3914,6 +3921,150 @@ app.post('/:id/amendments', async (c) => {
   const groupId = crypto.randomUUID()
   let subtotalDeltaUsd = 0
   let unitsMoved = 0
+
+  // A single reviewed edit can change the line's quantity and its final
+  // selling price. Quantity movement still uses the exact FIFO/stock plans
+  // below; the price statement then rewrites the line's canonical charge and
+  // clears stale discount metadata so totals and discount reporting cannot
+  // disagree with the price the cashier explicitly entered.
+  if (kind === 'line_updated') {
+    const requestedPrice = Number(body.applied_price_usd)
+    if (!Number.isFinite(requestedPrice) || requestedPrice < 0) {
+      return c.json({ error: 'Selling price must be a non-negative number.' }, 400)
+    }
+    const nextPrice = round2(requestedPrice)
+    const currentQuantity = Number(line.quantity) || 0
+    const nextQuantity = body.quantity === undefined || body.quantity === null || String(body.quantity).trim() === ''
+      ? currentQuantity
+      : Number(body.quantity)
+    if (!Number.isFinite(nextQuantity) || nextQuantity < 0) return c.json({ error: 'Quantity must be a non-negative number.' }, 400)
+    const nextQty = round2(nextQuantity)
+    if (nextQty <= 0) return c.json({ error: 'Use Remove when a line should be taken off the sale.' }, 400)
+    const oldPrice = round2(Number(line.applied_price_usd) || 0)
+    const quantityChanged = Math.abs(nextQty - currentQuantity) > 0.000001
+    const priceChanged = Math.abs(nextPrice - oldPrice) > 0.000001
+    if (!quantityChanged && !priceChanged) return c.json({ error: 'Enter a new quantity or selling price.' }, 400)
+
+    const workingLine = { ...line, applied_price_usd: nextPrice }
+    let quantityPlan: AmendmentPlan | null = null
+    if (quantityChanged) {
+      const quantityDelta = nextQty - currentQuantity
+      if (quantityDelta > 0) {
+        const lots = line.branch_id
+          ? (await readFifoLotAvailabilityForCart(db, [{ productId: Number(line.product_id), branchId: line.branch_id }])).get(`${line.product_id}:${line.branch_id}`) || []
+          : []
+        if (movesStock && line.branch_id) {
+          const have = await db.prepare('SELECT quantity FROM branch_stock WHERE branch_id = ? AND product_id = ?')
+            .get<{ quantity: number }>([line.branch_id, line.product_id])
+          if (quantityDelta > (Number(have?.quantity) || 0)) {
+            return c.json({ error: `Insufficient stock for ${line.product_name || 'this product'}: requested ${quantityDelta}, available ${Number(have?.quantity) || 0}` }, 409)
+          }
+        }
+        quantityPlan = planLineQuantityIncrease({
+          saleId, sale, line: workingLine, addedQuantity: quantityDelta, lots, exchangeRate,
+          userId: user?.id ?? null, userName: actorSnapshot(user),
+        })
+      } else {
+        const removed = Math.abs(quantityDelta)
+        if (removed >= currentQuantity) return c.json({ error: 'Use Remove when a line should be taken off the sale.' }, 400)
+        quantityPlan = planLineQuantityDecrease({
+          saleId, sale, line: workingLine, removedQuantity: removed, allocations, exchangeRate,
+          reason: `Quantity changed on sale #${saleId}`,
+          userId: user?.id ?? null, userName: actorSnapshot(user),
+        })
+      }
+      statements.push(...quantityPlan.statements)
+      unitsMoved += quantityPlan.unitsMoved
+    }
+
+    const finalTotalUsd = round2(nextPrice * nextQty)
+    const finalTotalKhr = receiptKhrFromUsd(finalTotalUsd, exchangeRate) || 0
+    // A quantity-only edit must retain the line's existing discount facts.
+    // Editing the selling price is an explicit override, so it clears stale
+    // product/manual discount metadata rather than displaying a discount that
+    // no longer explains the entered price. This keeps a quantity change
+    // revenue-neutral while making a price change intentional and auditable.
+    const keepDiscounts = !priceChanged
+    const nextProductDiscountUsd = keepDiscounts ? (Number(line.product_discount_usd) || 0) : 0
+    const nextProductDiscountKhr = keepDiscounts ? (Number(line.product_discount_khr) || 0) : 0
+    const nextManualDiscountType = keepDiscounts ? (line.manual_discount_type ?? null) : null
+    const nextManualDiscountValue = keepDiscounts ? (Number(line.manual_discount_value) || 0) : 0
+    const nextManualDiscountUsd = keepDiscounts ? (Number(line.manual_discount_usd) || 0) : 0
+    const nextManualDiscountKhr = keepDiscounts ? (Number(line.manual_discount_khr) || 0) : 0
+    const existingBasePriceUsd = line.base_price_usd == null ? null : Number(line.base_price_usd)
+    const existingBasePriceKhr = line.base_price_khr == null ? null : Number(line.base_price_khr)
+    const nextBasePriceUsd = keepDiscounts
+      ? (Number.isFinite(existingBasePriceUsd) ? existingBasePriceUsd : oldPrice + nextProductDiscountUsd + nextManualDiscountUsd)
+      : nextPrice
+    const nextBasePriceKhr = keepDiscounts
+      ? (Number.isFinite(existingBasePriceKhr) ? existingBasePriceKhr : receiptKhrFromUsd(nextBasePriceUsd, exchangeRate) || 0)
+      : receiptKhrFromUsd(nextPrice, exchangeRate) || 0
+    statements.push({
+      sql: `UPDATE sale_items SET
+              applied_price_usd=@price_usd, applied_price_khr=@price_khr,
+              base_price_usd=@base_price_usd, base_price_khr=@base_price_khr,
+              product_discount_usd=@product_discount_usd, product_discount_khr=@product_discount_khr,
+              manual_discount_type=@manual_discount_type, manual_discount_value=@manual_discount_value,
+              manual_discount_usd=@manual_discount_usd, manual_discount_khr=@manual_discount_khr,
+              price_mode=@price_mode, total_usd=@total_usd, total_khr=@total_khr
+            WHERE id=@id AND sale_id=@sale_id`,
+      params: {
+        id: line.id, sale_id: saleId, price_usd: nextPrice, price_khr: receiptKhrFromUsd(nextPrice, exchangeRate) || 0,
+        base_price_usd: nextBasePriceUsd, base_price_khr: nextBasePriceKhr,
+        product_discount_usd: nextProductDiscountUsd, product_discount_khr: nextProductDiscountKhr,
+        manual_discount_type: nextManualDiscountType, manual_discount_value: nextManualDiscountValue,
+        manual_discount_usd: nextManualDiscountUsd, manual_discount_khr: nextManualDiscountKhr,
+        price_mode: keepDiscounts ? (line.price_mode ?? 'selling') : 'selling',
+        total_usd: finalTotalUsd, total_khr: finalTotalKhr,
+      },
+    })
+    lineMoneyAfterAtLatestRate = lineMoneyAfterAtLatestRate.map((snapshot) => snapshot.id === line.id
+      ? {
+          ...snapshot,
+          applied_price_khr: receiptKhrFromUsd(nextPrice, exchangeRate),
+          total_khr: receiptKhrFromUsd(finalTotalUsd, exchangeRate),
+          product_discount_khr: nextProductDiscountKhr,
+          base_price_khr: nextBasePriceKhr,
+          manual_discount_khr: nextManualDiscountKhr,
+        }
+      : snapshot)
+    subtotalDeltaUsd = round2(finalTotalUsd - (Number(line.total_usd) || oldPrice * currentQuantity))
+    ledgerEntries.push({
+      saleId,
+      kind: 'line_updated',
+      groupId,
+      saleItemId: line.id,
+      productId: line.product_id,
+      productName: line.product_name,
+      quantityBefore: currentQuantity,
+      quantityAfter: nextQty,
+      amountBeforeUsd: oldPrice,
+      amountAfterUsd: nextPrice,
+      totalBeforeUsd,
+      totalAfterUsd: 0,
+      unitsMoved,
+      stockSkipped,
+      note,
+      before: {
+        quantity: currentQuantity,
+        unit_price_usd: oldPrice,
+        base_price_usd: Number.isFinite(existingBasePriceUsd) ? existingBasePriceUsd : oldPrice,
+        product_discount_usd: Number(line.product_discount_usd) || 0,
+        manual_discount_usd: Number(line.manual_discount_usd) || 0,
+        total_usd: Number(line.total_usd) || round2(oldPrice * currentQuantity),
+      },
+      after: {
+        quantity: nextQty,
+        unit_price_usd: nextPrice,
+        base_price_usd: nextBasePriceUsd,
+        product_discount_usd: nextProductDiscountUsd,
+        manual_discount_usd: nextManualDiscountUsd,
+        total_usd: finalTotalUsd,
+      },
+      userId: user?.id ?? null,
+      userName: actorSnapshot(user),
+    })
+  }
 
   // --- increase / the "add to existing" case, and the add half of a replace ---
   const needsLots = kind === 'line_quantity_increased'

@@ -246,6 +246,20 @@ runTest('before/after is money for the delivery kinds and units for a line', () 
   assert.strictEqual(cost.kind, 'delivery_cost_changed')
   assert.deepStrictEqual(cost.before, { amount_usd: null, total_usd: 15.5 })
   assert.deepStrictEqual(cost.after, { amount_usd: 0.75, total_usd: 15.5 })
+
+  const price = ledgerRecord({
+    id: 15, kind: 'line_updated', product_name: 'Serum',
+    quantity_before: 2, quantity_after: 2,
+    amount_before_usd: 3, amount_after_usd: 4.5,
+    total_before_usd: 6, total_after_usd: 9,
+    before_json: JSON.stringify({ quantity: 2, unit_price_usd: 3 }),
+    after_json: JSON.stringify({ quantity: 2, unit_price_usd: 4.5 }),
+    units_moved: 0, stock_skipped: 0, via: 'amend', user_name: 'sokha',
+    created_at: '2026-09-06 11:45:00',
+  })
+  assert.strictEqual(price.kind, 'item_price_changed')
+  assert.deepStrictEqual(price.before, { quantity: 2, unit_price_usd: 3, total_usd: 6 })
+  assert.deepStrictEqual(price.after, { quantity: 2, unit_price_usd: 4.5, total_usd: 9 })
 })
 
 runTest('adding delivery is one truthful record with driver and complete USD/KHR snapshots', () => {
@@ -1089,7 +1103,7 @@ runTest('the ledger kind 0129 ships is the one this module maps, not a name it i
 runTest('the public field vocabulary is exact and closed', () => {
   assert.deepStrictEqual(SALE_RECORD_FIELDS, [
     'receipt_number', 'sale_status', 'items', 'total_usd', 'payment', 'delivery',
-    'customer', 'membership', 'item', 'quantity', 'removed_items', 'added_items',
+    'customer', 'membership', 'item', 'quantity', 'unit_price_usd', 'removed_items', 'added_items',
     'delivery_fee_usd', 'actual_delivery_cost_usd', 'is_delivery', 'driver',
     'payment_method', 'payment_details', 'amount_paid_usd', 'amount_paid_khr',
     'change_usd', 'change_khr', 'cancel_reason', 'cancel_note', 'item_count',

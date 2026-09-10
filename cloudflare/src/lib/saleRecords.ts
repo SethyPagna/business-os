@@ -91,6 +91,7 @@ export const SALE_RECORD_KINDS = [
   'item_added',
   'item_removed',
   'item_quantity_changed',
+  'item_price_changed',
   'items_replaced',
   'driver_changed',
   'delivery_fee_changed',
@@ -118,6 +119,7 @@ export const SALE_RECORD_FIELDS = [
   'membership',
   'item',
   'quantity',
+  'unit_price_usd',
   'removed_items',
   'added_items',
   'delivery_fee_usd',
@@ -651,6 +653,7 @@ const LEDGER_KIND_TO_RECORD_KIND: Record<string, SaleRecordKind> = {
   line_removed: 'item_removed',
   line_quantity_increased: 'item_quantity_changed',
   line_quantity_decreased: 'item_quantity_changed',
+  line_updated: 'item_quantity_changed',
   delivery_fee_changed: 'delivery_fee_changed',
   // Codex's 0129 named the LEDGER kind 'delivery_actual_cost_changed'. The
   // RECORD kind is the shorter 'delivery_cost_changed': the float's labels are
@@ -664,10 +667,22 @@ const DELIVERY_SUBJECT = 'delivery'
 
 export function ledgerRecord(row: SaleRecordLedgerRow): SaleRecord {
   const ledgerKind = String(row.kind || '')
-  const kind = LEDGER_KIND_TO_RECORD_KIND[ledgerKind] || 'legacy_sale_change'
+  const mappedKind = LEDGER_KIND_TO_RECORD_KIND[ledgerKind] || 'legacy_sale_change'
+  // A line_updated amendment can change quantity, price, or both. Keep a
+  // price-only correction distinct in Records so its label and detail are
+  // precise; combined edits remain quantity changes with the price snapshot
+  // shown alongside them in the sale detail.
+  const beforeSnapshot = parseDetails(row.before_json)
+  const afterSnapshot = parseDetails(row.after_json)
+  const kind: SaleRecordKind = ledgerKind === 'line_updated'
+    && beforeSnapshot?.quantity !== undefined
+    && afterSnapshot?.quantity !== undefined
+    && Number(beforeSnapshot.quantity) === Number(afterSnapshot.quantity)
+    ? 'item_price_changed'
+    : mappedKind
   if (ledgerKind === 'delivery_added') {
-    const before = parseDetails(row.before_json)
-    const after = parseDetails(row.after_json)
+    const before = beforeSnapshot
+    const after = afterSnapshot
     return {
       id: `amendment:${row.id}`,
       source: 'ledger',
@@ -687,10 +702,16 @@ export function ledgerRecord(row: SaleRecordLedgerRow): SaleRecord {
   const subject = money ? DELIVERY_SUBJECT : text(row.product_name)
   const before: Record<string, unknown> = money
     ? { amount_usd: numberOrNull(row.amount_before_usd) }
-    : { quantity: numberOrNull(row.quantity_before) }
+    : {
+      quantity: numberOrNull(row.quantity_before),
+      ...(ledgerKind === 'line_updated' ? { unit_price_usd: numberOrNull(row.amount_before_usd) } : {}),
+    }
   const after: Record<string, unknown> = money
     ? { amount_usd: numberOrNull(row.amount_after_usd) }
-    : { quantity: numberOrNull(row.quantity_after) }
+    : {
+      quantity: numberOrNull(row.quantity_after),
+      ...(ledgerKind === 'line_updated' ? { unit_price_usd: numberOrNull(row.amount_after_usd) } : {}),
+    }
   // The sale's own total either side is stored on every ledger row (0115 stores
   // it rather than deriving it, precisely so a later entry cannot restate it),
   // so the detail view can always answer "and what did the customer owe?".
@@ -707,7 +728,9 @@ export function ledgerRecord(row: SaleRecordLedgerRow): SaleRecord {
     subject,
     summary: money
       ? `${ledgerKind === 'delivery_actual_cost_changed' ? 'Actual delivery cost' : 'Delivery fee'} ${fmt(row.amount_before_usd)} to ${fmt(row.amount_after_usd)}`
-      : `${text(row.product_name) || 'Line'} ${numberOrNull(row.quantity_before) ?? 0} to ${numberOrNull(row.quantity_after) ?? 0}`,
+      : ledgerKind === 'line_updated'
+        ? `${text(row.product_name) || 'Line'} updated`
+        : `${text(row.product_name) || 'Line'} ${numberOrNull(row.quantity_before) ?? 0} to ${numberOrNull(row.quantity_after) ?? 0}`,
     before,
     after,
   }
@@ -1365,11 +1388,14 @@ function publicRecord(record: SaleRecord): SaleRecord {
       compositeState(record, 'after', ['customer_id'], customerValue), true)
     addChange(changes, 'membership', beforeNone,
       compositeState(record, 'after', ['membership_number'], membershipValue), true)
-  } else if (record.kind === 'item_added' || record.kind === 'item_removed' || record.kind === 'item_quantity_changed') {
+  } else if (record.kind === 'item_added' || record.kind === 'item_removed' || record.kind === 'item_quantity_changed' || record.kind === 'item_price_changed') {
     addChange(changes, 'item',
       compositeState(record, 'before', ['product_name'], (snapshot) => itemValue(record, snapshot)),
       compositeState(record, 'after', ['product_name'], (snapshot) => itemValue(record, snapshot)), true)
     addChange(changes, 'quantity', fieldState(record, 'before', 'quantity'), fieldState(record, 'after', 'quantity'))
+    if (record.kind === 'item_price_changed' || record.before?.unit_price_usd !== undefined || record.after?.unit_price_usd !== undefined) {
+      addChange(changes, 'unit_price_usd', fieldState(record, 'before', 'unit_price_usd'), fieldState(record, 'after', 'unit_price_usd'))
+    }
     addChange(changes, 'total_usd', fieldState(record, 'before', 'total_usd'), fieldState(record, 'after', 'total_usd'))
   } else if (record.kind === 'items_replaced') {
     for (const field of ['removed_items', 'added_items', 'total_usd'] as const) {
