@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import ts from 'typescript'
+import { todayStr } from '../src/utils/dateHelpers.ts'
 import { buildMovementGroups, getMovementGroupPage, movementColorClass, movementColorClassForRecord, normalizeMovementTimestamp } from '../src/components/inventory/movementGroups.ts'
 import { formatHistoryReference, historyGroupReference } from '../src/utils/historyRowModel.ts'
 
@@ -16,6 +19,34 @@ async function runTest(name: string, fn: TestCallback): Promise<void> {
     console.error(error)
   }
 }
+
+await runTest('movement dates initialize once to Cambodia Today and exports inherit explicit Clear', () => {
+  const source = readFileSync(new URL('../src/components/inventory/Inventory.tsx', import.meta.url), 'utf8')
+  const ast = ts.createSourceFile('Inventory.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  const initializers: string[] = []
+  const visit = (node: ts.Node) => {
+    if (ts.isVariableDeclaration(node) && ts.isArrayBindingPattern(node.name)
+      && ['movementStartDate', 'movementEndDate'].includes(node.name.elements[0].getText(ast))) {
+      initializers.push((node.initializer as ts.CallExpression).arguments[0].getText(ast))
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(ast)
+  assert.deepEqual(initializers, ['todayIsoDate', 'todayIsoDate'])
+  const RealDate = Date
+  class FixedDate extends RealDate {
+    constructor(value?: string | number) { super(value === undefined ? '2026-09-10T17:30:00Z' : value) }
+  }
+  try {
+    globalThis.Date = FixedDate as DateConstructor
+    const todayIsoDate = new Function('todayStr', `${source.match(/function todayIsoDate\(\): string \{[\s\S]*?\n\}/)![0].replace(': string', '')}; return todayIsoDate`)(todayStr)
+    assert.deepEqual(initializers.map((initializer) => new Function('todayIsoDate', `return (${initializer})()`)(todayIsoDate)), ['2026-09-11', '2026-09-11'])
+  } finally { globalThis.Date = RealDate }
+  assert.match(source, /setMovementExportRange\(\{ startDate: movementStartDate, endDate: movementEndDate \}\)/)
+  assert.match(source, /startDate: movementStartDate \|\| undefined,[\s\S]*?endDate: movementEndDate \|\| undefined/)
+  const surface = readFileSync(new URL('../src/components/inventory/InventoryMovementsSurface.tsx', import.meta.url), 'utf8')
+  assert.match(surface, /setMovementStartDate\(''\)[\s\S]*?setMovementEndDate\(''\)/)
+})
 
 await runTest('transfer in and out rows with same reference become one net-zero group', () => {
   const groups = buildMovementGroups([

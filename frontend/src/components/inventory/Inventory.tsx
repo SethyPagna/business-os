@@ -68,6 +68,7 @@ function todayIsoDate(): string {
 }
 import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.ts'
+import { effectivePermissions } from '../../utils/permissions.ts'
 import { cloneHistorySnapshot } from '../../utils/historyHelpers.ts'
 import { buildTimeActionSections, toggleIdSet } from '../../utils/groupedRecords.ts'
 import { pruneSelectionToVisibleIds } from '../../utils/rowSelection.ts'
@@ -527,10 +528,9 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   const [movFilter,     setMovFilter]     = useState('all')
   const [movementUserFilter, setMovementUserFilter] = useState('all')
   const [userOptions, setUserOptions] = useState<InventoryUserOption[]>([])
-  // Movements opens across all time. A pre-filled "today" range hid older
-  // history before the person had chosen to filter it.
-  const [movementStartDate, setMovementStartDate] = useState('')
-  const [movementEndDate, setMovementEndDate] = useState('')
+  // Initialize to the Cambodia business day; an explicit Clear stays all-time.
+  const [movementStartDate, setMovementStartDate] = useState(todayIsoDate)
+  const [movementEndDate, setMovementEndDate] = useState(todayIsoDate)
   // The Start → End range picker is the ONE date control on Movements now
   // (user, Aug 31: "remove [All time]; the date is default, and start date
   // and end date for customizing which is for many sections and pages
@@ -694,17 +694,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   // wrap... show only time for rows") -- the date lives once on each day's
   // divider header, so rows need only their clock time.
   const movementTimeMode = 'day'
-  const isAdmin = useMemo(() => {
-    const roleCode = String(user?.role_code || '').toLowerCase()
-    const username = String(user?.username || '').toLowerCase()
-    let permissions = user?.permissions || {}
-    try {
-      permissions = typeof permissions === 'string' ? JSON.parse(permissions || '{}') : permissions
-    } catch {
-      permissions = {}
-    }
-    return username === 'admin' || roleCode === 'admin' || !!permissions.all
-  }, [user])
+  const isAdmin = useMemo(() => effectivePermissions(user).isAdmin, [user])
   const branchesById = useMemo(() => new Map(
     (Array.isArray(branches) ? branches : []).map((branch) => [String(branch?.id), branch]),
   ), [branches])

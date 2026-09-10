@@ -7,6 +7,7 @@ import {
 } from './loaders'
 import { resolveReplayAction } from './actionReplay'
 import { scopedWorkDraftKey } from './workDrafts.ts'
+import { effectivePermissions } from './permissions.ts'
 
 type ActionDirection = 'undo' | 'redo'
 type ActionHistoryId = string | number
@@ -18,6 +19,7 @@ type ActionHistoryUser = {
   name?: unknown
   username?: unknown
   role_code?: unknown
+  role_permissions?: unknown
   permissions?: unknown
 }
 
@@ -184,18 +186,6 @@ function normalizeEntry(entry: ActionHistoryInput = {}, index = 0): ActionHistor
   }
 }
 
-function parsePermissions(value: unknown): { all?: unknown } {
-  if (typeof value === 'string') {
-    try {
-      const parsed = JSON.parse(value || '{}')
-      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
-    } catch {
-      return {}
-    }
-  }
-  return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
-}
-
 function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : String(error || fallback)
 }
@@ -258,12 +248,7 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
   const [userOptions, setUserOptions] = useState<UserOption[]>([])
   const historyRequestRef = useRef(0)
   const usersRequestRef = useRef(0)
-  const isAdmin = useMemo(() => {
-    const roleCode = String(user?.role_code || '').toLowerCase()
-    const username = String(user?.username || '').toLowerCase()
-    const permissions = parsePermissions(user?.permissions)
-    return username === 'admin' || roleCode === 'admin' || !!permissions.all
-  }, [user])
+  const isAdmin = useMemo(() => effectivePermissions(user).isAdmin, [user])
 
   const refreshServerItems = useCallback((): Promise<void> => {
     const requestScope = actorScope
