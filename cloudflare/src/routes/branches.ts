@@ -6,7 +6,7 @@ import { paginateProductFamilies } from '../lib/familyPagination'
 import { getFamilyStockStats } from '../lib/familyStockStats'
 import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
 import { requireAuth, type SessionUser } from '../lib/auth'
-import { getPermissionTier, getActionTier } from '../lib/permissions'
+import { getActionTier } from '../lib/permissions'
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
@@ -133,7 +133,7 @@ app.get('/summary', async (c) => {
   // hasPermission() boolean, which would have 403'd a Review Required
   // user out of a plain read, same class of bug Parts 152-156 already
   // fixed for products/inventory/returns/contacts/library.
-  if (getPermissionTier(c.get('user'), 'branches') === 'none') {
+  if (getActionTier(c.get('user'), 'branches', 'view') === 'none') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const db = getDb(c.env)
@@ -182,7 +182,7 @@ app.get('/summary', async (c) => {
 // integrity issue. Earlier code treated every such row as "misplaced" and
 // could move valid transferred/received inventory back to Main.
 app.get('/stock-integrity', async (c) => {
-  if (getPermissionTier(c.get('user'), 'branches') === 'none') {
+  if (getActionTier(c.get('user'), 'branches', 'view') === 'none') {
     return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: 'branches' }, 403)
   }
   const db = getDb(c.env)
@@ -847,6 +847,12 @@ function buildBranchStockWhere(c: any, branchId: number, lowStock: LowStockConfi
 }
 
 app.get('/:id/stock', async (c) => {
+  // Ordinary catalog/branch quantities are also available to Inventory
+  // readers. This does not grant transfer planning or mutation authority.
+  const user = c.get('user')
+  if (getActionTier(user, 'branches', 'view') === 'none' && getActionTier(user, 'inventory', 'view') === 'none') {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
   const id = c.req.param('id')
   const db = getDb(c.env)
   const wantsPaged = PAGED_STOCK_QUERY_KEYS.some((key) => c.req.query(key) !== undefined)

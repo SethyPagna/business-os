@@ -269,7 +269,7 @@ const { hasPermission, hasAnyPermission, isAdminControlUser, getActionTier, getP
   const branchesSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'branches.ts'), 'utf8')
   assert.doesNotMatch(branchesSrc, /import \{ hasPermission[^}]*\} from '\.\.\/lib\/permissions'/, "branches.ts should no longer import the strict hasPermission() -- every check must be tier-aware via getPermissionTier('branches')")
   assert.doesNotMatch(branchesSrc, /if \(!hasPermission\(/, 'branches.ts should have no remaining strict hasPermission() gate checks')
-  assert.match(branchesSrc, /getPermissionTier\(c\.get\('user'\), 'branches'\) === 'none'/, 'branches.ts GET /summary must be tier-aware so a Review Required user can still view it')
+  assert.match(branchesSrc, /getActionTier\(c\.get\('user'\), 'branches', 'view'\) === 'none'/, 'branches.ts GET /summary must honor effective view while retaining Review Required reads')
   assert.doesNotMatch(branchesSrc, /maybeQueueForReview\(c\.env, user, 'branches', \{\s*\n\s*actionType: 'create'/, 'fixed branch identities must never queue a create')
   assert.match(branchesSrc, /maybeQueueForReview\(c\.env, user, 'branches', \{\s*\n\s*actionType: 'update'/, 'branches.ts PUT /:id must queue for review too')
   assert.doesNotMatch(branchesSrc, /maybeQueueForReview\(c\.env, user, 'branches', \{\s*\n\s*actionType: 'delete'/, 'fixed branch identities must never queue a delete')

@@ -265,16 +265,16 @@ export function shouldLoadProductBootstrapMetadata(raw: unknown): boolean {
 /** Null when allowed; an error message when this user may not read that surface. */
 export function productSurfaceDenialReason(user: SessionUser, surface: ProductReadSurface): string | null {
   if (surface === 'pos') {
-    return hasPermission(user, 'pos') || hasPermission(user, 'sales')
+    return hasPermission(user, 'pos') || getActionTier(user, 'sales', 'view') === 'full'
       ? null
       : 'You do not have permission to use POS'
   }
   if (surface === 'inventory') {
-    return getPermissionTier(user, 'inventory') !== 'none'
+    return getActionTier(user, 'inventory', 'view') !== 'none'
       ? null
       : 'You do not have permission to view Inventory'
   }
-  return getPermissionTier(user, 'products') !== 'none' || hasPermission(user, 'products_image_only')
+  return getActionTier(user, 'products', 'view') !== 'none' || hasPermission(user, 'products_image_only')
     ? null
     : 'You do not have permission to view Products'
 }
@@ -287,7 +287,7 @@ export function productSurfaceDenialReason(user: SessionUser, surface: ProductRe
 function isImageOnlyRead(user: SessionUser, surface: ProductReadSurface): boolean {
   if (surface !== 'products') return false
   if (!hasPermission(user, 'products_image_only')) return false
-  return getPermissionTier(user, 'products') === 'none'
+  return getActionTier(user, 'products', 'view') === 'none'
 }
 
 function restrictListPayloadForImageOnly<T extends { items?: unknown }>(payload: T, user: SessionUser): T {
@@ -1084,7 +1084,7 @@ app.get('/bootstrap', async (c) => {
 function catalogVocabularyDenialReason(user: SessionUser): string | null {
   const surfaces: ProductReadSurface[] = ['products', 'pos', 'inventory']
   if (surfaces.some((surface) => productSurfaceDenialReason(user, surface) === null)) return null
-  if (getPermissionTier(user, 'promotions') !== 'none') return null
+  if (getActionTier(user, 'promotions', 'view') !== 'none') return null
   return 'You do not have permission to view the product catalog'
 }
 
@@ -1116,8 +1116,7 @@ const SUPPLIER_KEY_SQL =
 // movements section the /stock-ledger read.
 app.get('/:id/detail-report', async (c) => {
   const user = c.get('user')
-  const allowed = getPermissionTier(user, 'products') !== 'none'
-    || getPermissionTier(user, 'inventory') !== 'none'
+  const allowed = canReadProductDetail(user)
   if (!allowed) {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
@@ -1192,7 +1191,7 @@ app.get('/:id/detail-report', async (c) => {
 // product-scoped, and their filters mirror /detail-report's own aggregates so
 // the drilled numbers can never disagree with the row that opened them.
 function canReadProductDetail(user: SessionUser): boolean {
-  return getPermissionTier(user, 'products') !== 'none' || getPermissionTier(user, 'inventory') !== 'none'
+  return getActionTier(user, 'products', 'view') !== 'none' || getActionTier(user, 'inventory', 'view') !== 'none'
 }
 
 // Individual sales of this product within ONE day or month (the period a row on
@@ -1334,7 +1333,7 @@ app.post('/:id/suppliers/backfill', async (c) => {
 // be split at a movement-page boundary. Lines load only when a group opens.
 app.get('/stock-in-sessions', async (c) => {
   const user = c.get('user')
-  const allowed = getPermissionTier(user, 'products') !== 'none' || getPermissionTier(user, 'inventory') !== 'none'
+  const allowed = canReadProductDetail(user)
   if (!allowed) return c.json({ error: 'You do not have permission to perform this action' }, 403)
   const page = clampInt(c.req.query('page'), 1, 1, 100000)
   const pageSize = clampInt(c.req.query('pageSize'), 30, 1, 100)
@@ -1361,7 +1360,7 @@ app.get('/stock-in-sessions', async (c) => {
 
 app.get('/stock-in-session-lines', async (c) => {
   const user = c.get('user')
-  const allowed = getPermissionTier(user, 'products') !== 'none' || getPermissionTier(user, 'inventory') !== 'none'
+  const allowed = canReadProductDetail(user)
   if (!allowed) return c.json({ error: 'You do not have permission to perform this action' }, 403)
   const sessionKey = String(c.req.query('key') || '').trim()
   if (!sessionKey || sessionKey.length > 300) return c.json({ error: 'A valid stock-in session key is required' }, 400)
@@ -1424,12 +1423,10 @@ app.get('/stock-in-session-lines', async (c) => {
 
 app.get('/stock-ledger', async (c) => {
   const user = c.get('user')
-  // A REAL products or inventory tier is required. products_image_only on
-  // its own never qualifies: that flag only exists for users whose
-  // products tier is 'none' (see isImageOnlyRead above), so this check
-  // already turns them away without naming the flag.
-  const allowed = getPermissionTier(user, 'products') !== 'none'
-    || getPermissionTier(user, 'inventory') !== 'none'
+  // Effective Products or Inventory view is required. The image-only
+  // catalog grant never authorizes movement/cost history, including when
+  // a user's coarse Products tier exists but its view action is revoked.
+  const allowed = canReadProductDetail(user)
   if (!allowed) {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
@@ -1718,10 +1715,10 @@ app.get('/auto-merges/:productId', async (c) => {
   // authenticated account (a POS-only cashier, a products_image_only uploader)
   // could walk product ids and read supplier + cost_price out of losing_json.
   // Gate it like the sibling /detail-report: an internal products/inventory
-  // reader only. products_image_only resolves to tier 'none' here, so it is
-  // correctly excluded from the cost/supplier data.
+  // reader only. The image-only alternate grant cannot expose cost/supplier
+  // data after the Products view action has been revoked.
   const user = c.get('user')
-  if (getPermissionTier(user, 'products') === 'none' && getPermissionTier(user, 'inventory') === 'none') {
+  if (!canReadProductDetail(user)) {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const productId = Number(c.req.param('productId'))
@@ -2138,7 +2135,7 @@ app.post('/bulk-delete-jobs', async (c) => {
 // row read, no join, so polling every second or two is fine.
 app.get('/bulk-delete-jobs/:id', async (c) => {
   const user = c.get('user')
-  if (getPermissionTier(user, 'products') === 'none') return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  if (getActionTier(user, 'products', 'view') === 'none') return c.json({ error: 'You do not have permission to perform this action' }, 403)
   await reapStalledBulkDeleteJobs(c.env)
   const job = await getBulkDeleteJob(c.env, c.req.param('id'))
   if (!job) return c.json({ error: 'Bulk delete job not found' }, 404)
@@ -7641,7 +7638,7 @@ function buildLookupUsageEntries(
 // admin screen (shows how many products reference each value before you
 // bulk-rename or delete one) -- had no Cloudflare route at all before this.
 app.get('/lookups/usage', async (c) => {
-  if (!hasPermission(c.get('user'), 'products')) {
+  if (getActionTier(c.get('user'), 'products', 'view') !== 'full') {
     return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: 'products' }, 403)
   }
   try {
