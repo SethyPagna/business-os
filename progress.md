@@ -12301,3 +12301,22 @@ frontend typecheck, i18n (**5,706 keys / 589 files**), Vite build, and the full
 frontend utility chain **348/348**. No production data or migration was
 changed by this follow-up. Deployment is pending the fix-scoped commit and
 release upload.
+
+## Shift close usability follow-up deployed — September 10, 2026
+
+Fix-scoped commit **3f9a6b562042** is live at 100% in Worker version
+**36747a14-7171-4f81-9dff-3a3874987b61**. The provenance wrapper stamped build
+hash **68de7c7a450a17a9** and built at **2026-09-10T15:07:58.151Z UTC**. The
+upload completed successfully with the configured custom domains, legacy
+routes, queues, D1 databases, R2, Images, and scheduled trigger. No migration
+or secret synchronization ran, and no production data was changed.
+
+The deployed close popup pre-fills its required local close timestamp while
+leaving closing cash and difference inputs optional. Blank counts remain NULL;
+unequal counts close and appear only in the report breakdown. The server still
+enforces ownership, permissions, revision, branch, timestamp, and interval
+integrity. Local verification remains **348/348** frontend utility tests,
+11/11 Worker shift pure suites, frontend typecheck, i18n **5,706/589**, Vite
+build, Worker typecheck, and `git diff --check`. Direct unauthenticated
+runtime probing remains blocked by Cloudflare's bot challenge, so the Wrangler
+version and upload output are the deployment provenance.
