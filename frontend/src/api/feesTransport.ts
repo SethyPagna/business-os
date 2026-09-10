@@ -1,5 +1,6 @@
 import { apiFetch, route } from './http.ts'
 import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
+import { dispatchResolvedSyncError } from '../utils/syncProblemLifecycle.ts'
 
 // Frontend transport for the Fees page (cloudflare/src/routes/fees.ts).
 // No local/offline mirror -- same reasoning as notesTransport.ts: a failed
@@ -90,6 +91,15 @@ export type PendingFeeCreate = {
   actor_id: string
   client_request_id: string
   body: FeeCreateBody
+  sync_problem?: PendingFeeCreateSyncProblem
+}
+
+export type PendingFeeCreateSyncProblem = {
+  actor_id: string
+  client_request_id: string
+  errorId: string
+  channel: string
+  code: string
 }
 
 type FeeCreateStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
@@ -112,6 +122,16 @@ export class FeeCreatePendingRequestError extends Error {
     super('A previous expense request still has an unknown result. Retry the original request or discard it before starting another.')
     this.name = 'FeeCreatePendingRequestError'
     this.pending = pending
+  }
+}
+
+export class FeeCreateVerificationError extends Error {
+  code = 'write_outcome_unknown'
+  outcome = 'unknown'
+
+  constructor() {
+    super('The server response did not contain authoritative evidence for this expense. Retry the exact saved request.')
+    this.name = 'FeeCreateVerificationError'
   }
 }
 
@@ -169,7 +189,27 @@ function readPendingFeeCreate(storage: FeeCreateStorage, actorId: string): Pendi
     const parsed = JSON.parse(storage.getItem(pendingFeeCreateStorageKey(actorId)) || 'null') as PendingFeeCreate | null
     const requestId = String(parsed?.client_request_id || '').trim()
     if (!parsed || parsed.actor_id !== actorId || !/^[A-Za-z0-9_-]{8,120}$/.test(requestId) || !parsed.body) return null
-    return { actor_id: actorId, client_request_id: requestId, body: normalizeFeeCreateBody(parsed.body) }
+    const syncProblem = parsed.sync_problem
+    const normalizedProblem = syncProblem
+      && syncProblem.actor_id === actorId
+      && syncProblem.client_request_id === requestId
+      && String(syncProblem.errorId || '').trim()
+      && String(syncProblem.channel || '').trim()
+      && String(syncProblem.code || '').trim()
+      ? {
+          actor_id: actorId,
+          client_request_id: requestId,
+          errorId: String(syncProblem.errorId).trim(),
+          channel: String(syncProblem.channel).trim(),
+          code: String(syncProblem.code).trim(),
+        }
+      : undefined
+    return {
+      actor_id: actorId,
+      client_request_id: requestId,
+      body: normalizeFeeCreateBody(parsed.body),
+      ...(normalizedProblem ? { sync_problem: normalizedProblem } : {}),
+    }
   } catch {
     return null
   }
@@ -232,6 +272,61 @@ export function clearPendingFeeCreate(
 }
 
 export const discardPendingFeeCreate = clearPendingFeeCreate
+
+/** A successful status alone is insufficient: an edge/proxy or malformed
+ * Worker response must not make the browser forget an unresolved request.
+ * The returned row carries server-only identity/timestamps and must match
+ * every normalized intent field plus the authenticated actor. */
+export function isAuthoritativeFeeCreateResponse(
+  response: unknown,
+  pending: PendingFeeCreate,
+): response is { fee: FeeRecord } {
+  const fee = (response as { fee?: Partial<FeeRecord> } | null)?.fee
+  const body = pending.body
+  if (!fee || typeof fee !== 'object') return false
+  if (!Number.isSafeInteger(fee.id) || Number(fee.id) <= 0) return false
+  if (!Number.isFinite(Date.parse(String(fee.created_at || ''))) || !Number.isFinite(Date.parse(String(fee.updated_at || '')))) return false
+  if (fee.created_at !== fee.updated_at) return false
+  if (fee.created_by !== Number(pending.actor_id)) return false
+  if (fee.created_by_name !== null && typeof fee.created_by_name !== 'string') return false
+  if (fee.fee_type !== body.fee_type || fee.label !== body.label || fee.fee_date !== body.fee_date || fee.notes !== body.notes) return false
+  if (typeof fee.amount_usd !== 'number' || fee.amount_usd !== body.amount_usd) return false
+  if (typeof fee.amount_khr !== 'number' || fee.amount_khr !== body.amount_khr) return false
+  if (fee.sale_id !== body.sale_id || fee.delivery_contact_id !== body.delivery_contact_id) return false
+  if (body.branch_id == null) return Number.isSafeInteger(Number(fee.branch_id)) && Number(fee.branch_id) > 0
+  return fee.branch_id === body.branch_id
+}
+
+function rememberPendingFeeCreateProblem(
+  pending: PendingFeeCreate,
+  error: unknown,
+  storage: FeeCreateStorage | null,
+): void {
+  if (!storage || (error as { outcome?: unknown } | null)?.outcome !== 'unknown') return
+  const value = error as { syncErrorId?: unknown; syncErrorChannel?: unknown; code?: unknown }
+  const errorId = String(value.syncErrorId || '').trim()
+  const channel = String(value.syncErrorChannel || '').trim()
+  const code = String(value.code || '').trim()
+  if (!errorId || !channel || !code) return
+  const current = readPendingFeeCreate(storage, pending.actor_id)
+  if (!current || current.client_request_id !== pending.client_request_id) return
+  const next: PendingFeeCreate = {
+    ...current,
+    sync_problem: {
+      actor_id: pending.actor_id,
+      client_request_id: pending.client_request_id,
+      errorId,
+      channel,
+      code,
+    },
+  }
+  try {
+    storage.setItem(pendingFeeCreateStorageKey(pending.actor_id), JSON.stringify(next))
+  } catch {
+    // The original immutable request remains durable even if enriching it
+    // with banner identity fails; never discard the safer retry state.
+  }
+}
 
 export function getFees(params: FeeListParams = {}): Promise<FeeListResult> {
   const query = buildQueryString(params as QueryParams)
@@ -356,14 +451,28 @@ export function getFeesReport(params: QueryParams = {}): Promise<unknown> {
 }
 
 export async function createFee(payload: FeePayload, actorId: number | string | null | undefined): Promise<{ fee: FeeRecord }> {
-  const prepared = prepareFeeCreatePayload(payload, actorId)
-  const response = await route(
-    `fees:create:${actorId}:${prepared.client_request_id}`,
-    () => apiFetch('POST', '/api/fees', prepared),
-    null,
-    true,
-  ) as { fee: FeeRecord }
-  clearPendingFeeCreate(actorId, prepared.client_request_id)
+  const storage = feeCreateStorage()
+  const prepared = prepareFeeCreatePayload(payload, actorId, storage)
+  const pending = getPendingFeeCreate(actorId, storage)
+  if (!pending || pending.client_request_id !== prepared.client_request_id) throw new FeeCreatePersistenceError()
+  let response: { fee: FeeRecord }
+  try {
+    response = await route(
+      `fees:create:${pending.actor_id}:${pending.client_request_id}`,
+      async () => {
+        const result = await apiFetch('POST', '/api/fees', prepared)
+        if (!isAuthoritativeFeeCreateResponse(result, pending)) throw new FeeCreateVerificationError()
+        return result
+      },
+      null,
+      true,
+    ) as { fee: FeeRecord }
+  } catch (error) {
+    rememberPendingFeeCreateProblem(pending, error, storage)
+    throw error
+  }
+  clearPendingFeeCreate(pending.actor_id, pending.client_request_id, storage)
+  dispatchResolvedSyncError(pending.sync_problem)
   return response
 }
 
