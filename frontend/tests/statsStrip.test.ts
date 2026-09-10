@@ -100,7 +100,7 @@ const REPORT_VIEW_FILES = [
   'src/components/sales/reports/ExpensesReport.tsx',
 ]
 
-test('date/time picker owns all-time/today presets and exposes time only where endpoints honor it', () => {
+test('shared stats controls own all-time/today presets and expose time only where endpoints honor it', () => {
   const picker = read('src/components/shared/DateTimeRangePicker.tsx')
   const presets = read('src/components/shared/statsStripPresets.ts')
   assert.ok(picker.includes("{ id: 'all'") && picker.includes("{ id: 'today'"), 'All time and Today live inside the shared picker')
@@ -110,7 +110,7 @@ test('date/time picker owns all-time/today presets and exposes time only where e
   assert.ok(picker.includes('Quick range') && picker.includes('quickRanges.map'), 'quick presets are folded into the opened date/time picker')
 
   const sales = read('src/components/sales/Sales.tsx')
-  assert.match(sales, /<StatsRangeRow[^>]*showTime/, 'Sales exposes the 24-hour control')
+  assert.match(sales, /<StatsStrip[\s\S]{0,300}range=\{stripRange\}[\s\S]{0,80}onRangeChange=\{setStripRange\}[\s\S]{0,80}showTime/, 'Sales exposes the shared StatsStrip 24-hour control')
   assert.match(sales, /getSalesStatsStrip\(\{[\s\S]{0,180}startTime: stripRange\.startTime[\s\S]{0,80}endTime: stripRange\.endTime/, 'Sales threads the selected time window into its stats request')
 
   const reports = read('src/components/sales/ReportsHub.tsx')
@@ -379,45 +379,37 @@ test('old bespoke stat surfaces are really gone (no zombie tile grids)', () => {
   assert.ok(!inventory.includes("getReturns({ scope: 'all' })"), 'the all-rows client-side returns sum is gone (range endpoints instead)')
 })
 
-test('Part 560: the Start→End date row is lifted OUT of the stats fold into a StatsRangeRow above the search bar', () => {
-  // User, Aug 31: "fish out the start date and end date from the stats
-  // button ... this should be right above the search bar row ... make sure
-  // this applies to all section, mini sections, and pages ... stats can be
-  // placed at the top ... but of course the start and end date will also
-  // apply to it." The picker moved into the shared StatsRangeRow,
-  // which each list page renders directly above its search bar (inside the
-  // pinned wrapper, per the sticky search+date rule); the page stops passing
-  // range/onRangeChange to StatsStrip and keeps feeding the strip's cards
-  // from the SAME stripRange state. StatsStrip is left backward-compatible on
-  // purpose (its internal date row still renders for a caller that passes the
-  // props) so pages migrate one at a time across parallel sessions —
-  // Inventory's stats live on their own section chip and migrate in the lane
-  // that owns that file.
+test('Part 560: StatsStrip owns one stable date/action row and a one-row preset rail', () => {
+  // The shared strip owns the range surface for migrated data pages. It
+  // delegates that surface to StatsRangeRow itself, so pages cannot drift by
+  // composing another page-owned row beside it. Presets stay visible while
+  // Stats is folded and scroll in one non-wrapping rail on narrow screens.
   const rangeRow = read('src/components/shared/StatsRangeRow.tsx')
   assert.ok(rangeRow.includes('<DateTimeRangePicker'), 'StatsRangeRow carries the shared Start→End picker')
   assert.ok(rangeRow.includes('STATS_PRESETS.map') && rangeRow.includes('overflow-x-auto'), 'presets are restored in a single scroll rail')
   assert.ok(rangeRow.includes('flex-nowrap'), 'date controls and presets never wrap')
   const strip = read('src/components/shared/StatsStrip.tsx')
+  assert.match(strip, /<StatsRangeRow range=\{range\} onRangeChange=\{onRangeChange\}/, 'StatsStrip owns the shared date row when its range contract is supplied')
   assert.ok(strip.includes('leading={statsTrigger}') && !strip.includes('statsOpen && range'), 'range stays visible beside Stats while cards are folded')
-  // Sales/Returns/Fees place it above the search bar; Inventory's stats sit on
-  // their own section chip so its row leads the stats section instead — but all
-  // four render the shared row wired to stripRange and drop the props from the
-  // strip.
+  assert.match(strip, /showTime=\{showTime\} showPresets=\{showPresets\}/, 'StatsStrip forwards the clock and preset contract to the shared row')
+  // Sales, Returns, and Expenses pass their one range state to StatsStrip and
+  // no longer render a sibling StatsRangeRow. Inventory retains a separate
+  // range surface for its mixed embedded/product modes and is not used as a
+  // reason to pin the obsolete page-owned pattern onto migrated pages.
   for (const rel of [
     'src/components/sales/Sales.tsx',
     'src/components/returns/Returns.tsx',
     'src/components/fees/FeesPage.tsx',
-    'src/components/inventory/Inventory.tsx',
   ]) {
     const src = read(rel)
-    // Rendered above the search bar and wired to the strip's range state
-    // (single-line StatsRangeRow form).
-    assert.ok(/<StatsRangeRow[^>]*range=\{stripRange\}[^>]*onRangeChange=\{(?:setStripRange|handleStripRangeChange)\}/.test(src), `${rel} renders StatsRangeRow wired to stripRange`)
-    // The strip on these pages no longer owns the range: the old multi-line
-    // `range={stripRange}` / `onRangeChange={setStripRange}` prop pair passed
-    // into <StatsStrip> (each on its own line) is gone. The new StatsRangeRow
-    // form keeps both on ONE line, so this only catches the removed strip props.
-    assert.ok(!/range=\{stripRange\}\s*\n\s*onRangeChange=\{setStripRange\}/.test(src), `${rel} no longer passes the range into StatsStrip`)
+    const statsAt = src.indexOf('<StatsStrip')
+    assert.ok(statsAt >= 0, `${rel} renders StatsStrip`)
+    const statsEnd = src.indexOf('\n      />', statsAt)
+    assert.ok(statsEnd > statsAt, `${rel} closes its StatsStrip call at page indentation`)
+    const statsCall = src.slice(statsAt, statsEnd + '\n      />'.length)
+    assert.match(statsCall, /range=\{stripRange\}/, `${rel} gives StatsStrip the list/stats range`)
+    assert.match(statsCall, /onRangeChange=\{setStripRange\}/, `${rel} lets StatsStrip change the shared range`)
+    assert.doesNotMatch(src, /<StatsRangeRow[^>]*range=\{stripRange\}/, `${rel} must not restore a sibling page-owned range row`)
   }
 })
 

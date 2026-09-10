@@ -208,16 +208,20 @@ assert.doesNotMatch(transfer, /entireBranchItems\(filteredMulti\)/, 'a search bo
 assert.match(transfer, /const TRANSFER_BULK_CHUNK_SIZE = 200/, 'the client cap must mirror the Worker MAX_BULK_TRANSFER_ITEMS')
 assert.match(transfer, /transfer_entire_branch_note/, 'the confirm must say a multi-request run is not one undoable step')
 assert.match(transfer, /transfer_bulk_partial/, 'a run that stops partway must report how much already landed')
-assert.match(transfer, /if \(transferred > 0\) onDone\(\)/, 'a partial run must refresh -- the on-screen quantities are now wrong')
+const retryRun = transfer.slice(transfer.indexOf('const runPendingTransfer'), transfer.indexOf('const discardSavedTransfer'))
+assert.match(retryRun, /const completed = await executeTransferRun\(run, \(next\) => \{[\s\S]*saveTransferRun\(next\.actorId, next\)[\s\S]*setSavedRun\(next\)/, 'every completed chunk checkpoints the exact remaining retry state')
+assert.match(retryRun, /saveTransferRun\(completed\.actorId, null\)[\s\S]*setSavedRun\(null\)[\s\S]*onDone\(\)/, 'only a fully completed run clears retry state and reports done')
+const retryCatch = retryRun.slice(retryRun.indexOf('} catch (error)'), retryRun.indexOf('} finally'))
+assert.doesNotMatch(retryCatch, /setSavedRun\(null\)|onDone\(\)/, 'partial completion must remain retryable instead of being treated as full completion')
+assert.match(transfer, /savedRun\.transferred > 0[\s\S]*transfer_bulk_partial[\s\S]*onClick=\{\(\) => \{ void runPendingTransfer\(null\) \}\}/, 'the partial state tells the operator what landed and retries the frozen remainder')
+assert.match(transfer, /Refresh stock\/history after an explicit discard, including partial commits\.[\s\S]*onDone\(\)/, 'discard is the explicit path that refreshes after abandoning a partial retry')
 
-// The write path: one confirmed entry point, on-brand, translated.
-// The live bulk path must not use a native confirm. One window.confirm does
-// remain in the file, inside the unreachable mode === 'single' handler that is
-// deliberately left physically intact rather than adding deletion churn to a
-// live deploy; if that block is ever removed, drop the expected count to 0.
-const liveTransferPath = transfer.slice(transfer.indexOf('const handleBulkTransfer'))
+// The write path: one confirmed entry point, on-brand, translated. Starting a
+// bulk transfer uses the shared review dialog. Native confirmation remains only
+// in the dormant single-mode handler and the explicit discard-retry action.
+const liveTransferPath = transfer.slice(transfer.indexOf('const handleBulkTransfer'), transfer.indexOf('const discardSavedTransfer'))
 assert.doesNotMatch(liveTransferPath, /window\.confirm/, 'no native confirm on the live transfer path -- off-brand and untranslatable')
-assert.equal((transfer.match(/window\.confirm/g) || []).length, 1, 'the only window.confirm left must be the dormant single-mode handler')
+assert.equal((transfer.match(/window\.confirm/g) || []).length, 2, 'native confirmation is limited to dormant single mode and explicit retry discard')
 assert.match(transfer, /<ConfirmDialog/, 'the shared review dialog asks instead')
 assert.match(transfer, /danger=\{pendingTransfer\.scope === 'entire_branch'\}/, 'emptying a branch must get the destructive treatment')
 assert.match(transfer, /confirm_bulk_transfer_details/, 'the existing pack key survives the move off window.confirm')
@@ -225,7 +229,7 @@ assert.match(transfer, /confirm_bulk_transfer_details/, 'the existing pack key s
 // Small screens: the panel must render its real content from first paint
 // instead of showing branch selects and then jumping to full height.
 assert.doesNotMatch(transfer, /\{fromBranch && mode === 'multiple' \?/, 'the picker must not be gated behind picking a branch')
-assert.match(transfer, /className="modal-scroll space-y-4 p-4 sm:p-5"/, 'one iOS-safe scroll region, not flex-1 overflow-auto')
+assert.match(transfer, /className=\{`modal-scroll min-w-0 space-y-4 p-4 sm:p-5/, 'one width-bounded iOS-safe scroll region, not flex-1 overflow-auto')
 assert.match(transfer, /grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3/, 'branch selects must stack before they clip their own names')
 assert.match(transfer, /sm:max-h-64 sm:overflow-auto/, 'the row list must not nest a second scroller inside the sheet on phones')
 assert.match(transfer, /flex flex-wrap items-center gap-x-3 gap-y-1\.5 px-3 py-2\.5 sm:flex-nowrap/, 'a row must restack rather than squeeze its quantity box away at 375px')
