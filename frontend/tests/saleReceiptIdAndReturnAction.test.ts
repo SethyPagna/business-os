@@ -25,6 +25,7 @@ import { getSaleReturnBlockReason } from '../src/utils/saleReturnGuard.ts'
 const read = (rel: string): string => readFileSync(new URL(`../${rel}`, import.meta.url), 'utf8')
 
 const copyableId = read('src/components/shared/CopyableId.tsx')
+const textAffordances = read('src/components/shared/textAffordances.ts')
 const saleDetail = read('src/components/sales/SaleDetailModal.tsx')
 const sales = read('src/components/sales/Sales.tsx')
 const salesList = read('src/components/sales/SalesListSurface.tsx')
@@ -35,18 +36,24 @@ const printReceipt = read('src/utils/printReceipt.ts')
 const en = JSON.parse(read('src/lang/en.json')) as Record<string, string>
 const km = JSON.parse(read('src/lang/km.json')) as Record<string, string>
 
-// --- 1. the shared id element wraps, stays selectable, and copies ---------
+// --- 1. the shared id stays plain/selectable and delegates copy gestures ---
 
 assert.match(copyableId, /whitespace-normal break-all/, 'CopyableId must wrap the id instead of clipping or scrolling it')
-assert.match(copyableId, /select-all/, 'the id must stay selectable in one tap')
-assert.match(copyableId, /navigator\.clipboard\?\.writeText/, 'CopyableId must copy through the browser clipboard API')
-assert.match(copyableId, /setCopied\(true\)/, 'CopyableId must show a brief copied state')
+assert.match(copyableId, /\[COPY_ATTR\]: String\(copyValue \?\? value\)/, 'CopyableId delegates its exact copy value to the shared controller')
+assert.match(copyableId, /data-copy-success=\{copiedLabel\}/, 'CopyableId supplies localized success feedback')
+assert.match(copyableId, /role="button"[\s\S]*tabIndex=\{0\}/, 'Enter and Space remain reachable from the keyboard')
+assert.doesNotMatch(copyableId, /<button\b|navigator\.clipboard|setCopied|onClick=/, 'CopyableId must stay plain text with no local copy button or click takeover')
 // Class usage only -- the prose above the component is allowed to say the
 // word "truncate" while explaining why it is not used.
 const classAttributes = (source: string): string => (source.match(/className=(?:"[^"]*"|\{`[^`]*`\})/g) || []).join('\n')
 assert.doesNotMatch(classAttributes(copyableId), /\btruncate\b|detail-scroll-text|overflow-x-auto/, 'an id is never truncated and never a horizontal scroll container')
+assert.doesNotMatch(classAttributes(copyableId), /\bunderline\b|text-blue-/, 'copyability must not recolor or underline the visible value')
+assert.match(textAffordances, /createLongPressHandlers\([\s\S]*onLongPress/, 'copy hold uses the one shared long-press controller')
+assert.match(textAffordances, /event\.key !== 'Enter' && event\.key !== ' '/, 'the shared controller accepts Enter and Space')
+assert.match(textAffordances, /navigator\.clipboard\.writeText\(text\)/, 'the shared controller performs the clipboard write')
+assert.match(textAffordances, /valueNode\.textContent = success[\s\S]*host\.style\.pointerEvents = 'none'/, 'Copied feedback is visible and nonblocking only after clipboard success')
 
-console.log('PASS CopyableId wraps, selects, and copies the identifier with a copied state')
+console.log('PASS CopyableId stays plain and wraps while shared hold/keyboard gestures copy with nonblocking feedback')
 
 // --- 2. the sale detail receipt id remains explicit in its compact header --
 
@@ -134,8 +141,9 @@ console.log('PASS the shared sale-return guard blocks cancelled and fully-return
 const mobileCardStart = salesList.indexOf('<div className="space-y-2 md:hidden">')
 assert.ok(mobileCardStart > 0, 'expected to find the md:hidden phone card list in SalesListSurface')
 const mobileCard = salesList.slice(mobileCardStart)
-assert.match(mobileCard, /whitespace-normal break-all font-mono text-sm font-semibold[^"]*text-blue-600/, 'the phone sales card must wrap the receipt id')
+assert.match(mobileCard, /<CopyableId value=\{sale\.receipt_number \|\| ''\}[\s\S]*className="font-mono text-sm font-semibold text-gray-900 dark:text-white"/, 'the phone sales card must use the plain shared wrapping receipt id')
 assert.doesNotMatch(mobileCard, /truncate font-mono text-sm font-semibold text-blue-600/, 'the phone sales card must not ellipsise the receipt id')
+assert.doesNotMatch(mobileCard, /<CopyableId[^>]*className="[^"]*(?:text-blue-|underline)/, 'copyability must not change the receipt value styling')
 
 // The desktop row itself and its receipt number already open the detail. Keep
 // the actions cell for Print only instead of repeating that action with an eye.

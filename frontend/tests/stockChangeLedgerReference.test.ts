@@ -238,6 +238,7 @@ for (const props of rowReceipts) {
 // keep the copy gesture out of the row's own click, or the two rules above are
 // satisfied only on paper.
 const copyable = read('components/shared/CopyableId.tsx').replace(/\r\n/g, '\n')
+const copyController = read('components/shared/textAffordances.ts').replace(/\r\n/g, '\n')
 assert.match(copyable, /whitespace-normal break-all/, 'CopyableId must wrap the id rather than clip it')
 // Its own prose uses the word 'truncation'; what matters is that no rendered
 // class clips the id, so this reads the code with its comments stripped.
@@ -246,30 +247,12 @@ assert.ok(
   !/\btruncate\b|line-clamp/.test(copyableCode),
   'CopyableId must never clip -- truncation is not legitimate for an identifier',
 )
-assert.match(
-  copyable,
-  /const handleCopy = \(event: \{ stopPropagation: \(\) => void \}\): void => \{\n\s*event\.stopPropagation\(\)/,
-  'copying an id must not also fire the click of the row that contains it',
-)
-assert.match(copyable, /onClick=\{\(event\) => event\.stopPropagation\(\)\}/, 'selecting the id must not open the row either')
-// ...and the compact variant the two ledger rows ask for must still be
-// PRESSABLE. 'compact' shrinks the copy button's visual box to 16px so a dense
-// row keeps its height -- but the mobile card renders that same button at 375px,
-// on a touch surface, where a 16px target is under every published minimum (24px
-// WCAG 2.2 AA, 44px Apple). The fix belongs here rather than at the two call
-// sites, so "dense visual, touch-sized target" is one rule with one
-// implementation: the icon carries a negative-margin padding ring that grows the
-// pressable region to 24px WITHOUT growing the button's box or the row's height.
-assert.match(
-  copyable,
-  /compact \?[^:]*(?:-inset|-m-1)/,
-  'the compact copy button is a 16px touch target: its hit area must be expanded past its visual box',
-)
-assert.match(
-  copyable,
-  /\$\{compact \? 'h-4 w-4' : 'h-6 w-6'\}/,
-  'the expander must not inflate the compact button itself -- the dense row keeps its 16px visual box',
-)
+assert.match(copyable, /\[COPY_ATTR\]: String\(copyValue \?\? value\)/, 'the bare receipt copyValue must reach the shared gesture controller')
+assert.match(copyable, /data-copy-success=\{copiedLabel\}/, 'the shared controller receives localized Copied feedback')
+assert.doesNotMatch(copyableCode, /<button\b|onClick=|navigator\.clipboard|\bunderline\b|text-blue-/, 'ledger references remain plain unchanged text with no visible copy icon or click takeover')
+assert.match(copyController, /createLongPressHandlers\([\s\S]*onLongPress/, 'touch copying uses the shared long-press behavior')
+assert.match(copyController, /event\.key !== 'Enter' && event\.key !== ' '/, 'keyboard copying supports Enter and Space')
+assert.match(copyController, /valueNode\.textContent = success[\s\S]*host\.style\.pointerEvents = 'none'/, 'Copied feedback is nonblocking and appears only after success')
 // The receipt must not go back through a clipping wrapper on either surface.
 assert.ok(
   !/<TruncatedText text=\{referenceText\(row\)\}/.test(sc),

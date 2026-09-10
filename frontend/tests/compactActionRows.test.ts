@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import { TOOLBAR_BUTTON_BASE } from '../src/components/shared/toolbarButtonStyles.ts'
 
 // N4 -- action rows that pushed their own buttons out of bounds at 320/375.
 //
@@ -47,6 +48,18 @@ function classNear(source: string, marker: string): string {
   const end = source.indexOf('"', start)
   return source.slice(start, end)
 }
+
+function templateClassNear(source: string, marker: string): string {
+  const at = source.indexOf(marker)
+  assert.ok(at > 0, `marker not found in source: ${marker}`)
+  const open = source.lastIndexOf('className={`', at)
+  assert.ok(open > 0, `no template className before marker: ${marker}`)
+  const start = open + 'className={`'.length
+  const end = source.indexOf('`}', start)
+  return source.slice(start, end)
+}
+
+const expandSharedToolbarClass = (classes: string): string => classes.replace('${TOOLBAR_BUTTON_BASE}', TOOLBAR_BUTTON_BASE)
 
 // The row that CONTAINS a marker: the nearest enclosing <div className="...">.
 function rowClassAround(source: string, marker: string): string {
@@ -167,7 +180,7 @@ runTest('the label-width judge fails three-across at 320 and passes the wrapped 
   const oldWidth = labelWidth(320, OLD_DETAIL_ROW, OLD_DETAIL_BUTTON, 3)
   assert.ok(oldWidth < MIN_LABEL, `three buttons across a 320px row leave ${oldWidth.toFixed(1)}px of label`)
   const newRow = 'flex flex-wrap items-center gap-2 border-t border-gray-200 p-3 dark:border-gray-700'
-  const newButton = 'btn-secondary flex min-h-11 min-w-0 flex-1 basis-[calc(50%_-_0.25rem)] items-center justify-center gap-1.5 truncate px-3 py-2 text-xs sm:min-h-0 sm:basis-0 sm:text-sm'
+  const newButton = `btn-secondary ${TOOLBAR_BUTTON_BASE} min-w-0 flex-1 basis-[calc(50%_-_0.25rem)] truncate sm:basis-0`
   const width = labelWidth(320, newRow, newButton, 3)
   assert.ok(width >= MIN_LABEL, `wrapping to two per row leaves ${width.toFixed(1)}px of label`)
 })
@@ -202,21 +215,23 @@ runTest('DatedStockReconciliationModal footer keeps Back and the step action ins
   }
 })
 
-runTest('ProductDetailModal actions keep a legible label and a 44px target at 320', () => {
+runTest('ProductDetailModal actions keep a legible label and the shared 40px target at 320', () => {
   const source = read('components/products/surfaces/ProductDetailModal.tsx')
   const row = rowClassAround(source, '<PlusCircle className=')
-  const buttons = [
-    classNear(source, '<PlusCircle className='),
-    classNear(source, '<SlidersHorizontal className='),
-    classNear(source, '<Pencil className='),
+  const rawButtons = [
+    templateClassNear(source, '<PlusCircle className='),
+    templateClassNear(source, '<SlidersHorizontal className='),
+    templateClassNear(source, '<Pencil className='),
   ]
+  const buttons = rawButtons.map(expandSharedToolbarClass)
+  assert.match(TOOLBAR_BUTTON_BASE, /\bh-10\b[\s\S]*\bmin-h-10\b/, 'the shared Manage-aligned toolbar contract is exactly 40px high')
+  assert.doesNotMatch(TOOLBAR_BUTTON_BASE, /\bmin-h-11\b|\bh-11\b/, 'the obsolete 44px exception must not return')
+  for (const raw of rawButtons) assert.match(raw, /\$\{TOOLBAR_BUTTON_BASE\}/, 'every detail action must consume the shared toolbar height')
   assert.ok(rowIsBounded(row, buttons), `unbounded row: ${row}`)
   for (const button of buttons) {
     const width = labelWidth(320, row, button, buttons.length)
     assert.ok(width >= MIN_LABEL, `only ${width.toFixed(1)}px of label survives: ${button}`)
-    // Touch target: min-h-11 is 44px, and it is released only from sm up,
-    // where the row is no longer a phone row.
-    assert.match(button, /\bmin-h-11\b/, `no 44px tap target: ${button}`)
+    assert.match(button, /\bh-10\b[\s\S]*\bmin-h-10\b/, `not using the shared 40px target: ${button}`)
   }
   // The fix is wrapping, not hiding: no label is dropped below sm.
   assert.doesNotMatch(row, /hidden/, 'the row must not hide an action to fit')

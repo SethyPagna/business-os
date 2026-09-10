@@ -72,8 +72,8 @@ assert.match(sectionSwitcher, /section-switcher max-w-full min-w-0/, 'shared sec
 assert.match(sectionSwitcher, /flex min-w-0 flex-wrap/, 'shared section switcher must wrap without horizontal scrolling')
 
 const pagination = read('components/shared/PaginationControls.tsx')
-// The storefront's centered pager keeps Back/Next visible at 375px; the
-// compact admin pill still collapses them because it shares a denser row.
+// Back/Next remain visible at 375px in both centered and compact pagers. The
+// directional icons reinforce the action instead of replacing its label.
 for (const [name, from, to] of [
   ['compact range-as-page-size', '  if (compact && rangeAsPageSize)', '  if (compact)'],
 ] as const) {
@@ -81,12 +81,9 @@ for (const [name, from, to] of [
   const end = pagination.indexOf(to, start + from.length)
   assert.ok(start > 0 && end > start, `pagination pill branch '${name}' must still be findable`)
   const branch = pagination.slice(start, end)
-  assert.equal(
-    (branch.match(/hidden sm:inline">\{(?:back|next)Label\}/g) || []).length,
-    2,
-    `${name} pager labels must collapse to icon-only on narrow screens`,
-  )
-  assert.doesNotMatch(branch, /<span>\{(?:back|next)Label\}<\/span>/, `${name} pager must not render an always-on Back/Next word`)
+  assert.equal((branch.match(/<span(?:\s+className="[^"]*")?>\{(?:back|next)Label\}<\/span>/g) || []).length, 2, `${name} pager must render both Back and Next words`)
+  assert.doesNotMatch(branch, /hidden sm:inline/, `${name} pager labels must not disappear on narrow screens`)
+  assert.match(branch, /<ChevronLeft[^>]*>[\s\S]*\{backLabel\}[\s\S]*\{nextLabel\}[\s\S]*<ChevronRight/, `${name} pager keeps labels paired with directional icons`)
 }
 const centeredStart = pagination.indexOf("  if (layout === 'centered')")
 const centeredEnd = pagination.indexOf('  if (compact && rangeAsPageSize)', centeredStart)
