@@ -59,7 +59,7 @@ import {
 } from '../../api/returnsReadTransport.ts'
 import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
 import ShiftHistoryModal from '../shifts/ShiftHistoryModal.tsx'
-import { EMPTY_DATE_TIME_RANGE, type DateTimeRange } from '../shared/DateTimeRangePicker'
+import { todayDateTimeRange, type DateTimeRange } from '../shared/DateTimeRangePicker'
 import { manageToolbarButtonClassName, primaryToolbarButtonClassName, toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
 import ReturnsListSurface from './ReturnsListSurface'
 import { RETURN_BULK_LIMIT, type ReturnBulkPayload, type ReturnBulkResult } from './helpers/returnBulkAction.ts'
@@ -375,7 +375,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
   // stats strip AND the returns list — no separate year/month period control.
   // Starts all-time. Quick choices (Today / 7 days / week / month / year)
   // live inside the shared date/time picker so there is one range control.
-  const [stripRange, setStripRange] = useState<DateTimeRange>(() => ({ ...EMPTY_DATE_TIME_RANGE }))
+  const [stripRange, setStripRange] = useState<DateTimeRange>(() => todayDateTimeRange())
   const [typeFilter, setTypeFilter] = useState('all')
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set())
   // 11.1/11.2 (B6): same selection model as Products/Inventory/Sales --

@@ -3,7 +3,7 @@
 // stats ... based on date range. default per day ... do so for all
 // pages"). Tests the pure range-preset helpers, then pins the rollout:
 // every data page renders the SAME shared component (never a bespoke tile
-// grid again). Sales/Returns/Fees start all-time; Reports begins on an
+// grid again). Sales/Returns/Fees start Today; Reports begins on an
 // actionable Today range so every chosen report has concrete endpoints.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -133,7 +133,7 @@ test('data pages render the ONE shared StatsStrip and use their intended initial
   for (const [label, rel] of pages) {
     const src = read(rel)
     assert.ok(src.includes('<StatsStrip'), `${label} must render the shared strip`)
-    assert.ok(src.includes("startDate: '', endDate: ''") || src.includes('EMPTY_DATE_TIME_RANGE'), `${label} starts unfiltered instead of silently limiting records to today`)
+    assert.match(src, /useState<DateTimeRange>\(\(\) => (?:todayDateTimeRange\(\)|statsPresetRange\('today'\))\)/, `${label} starts on the current business Today`)
   }
   const reports = read('src/components/sales/ReportsHub.tsx')
   assert.ok(reports.includes('todayDateTimeRange'), 'Reports hub imports the shared business-day range helper')

@@ -21,7 +21,7 @@ assert.doesNotMatch(
 )
 assert.match(
   dashboard,
-  /const dashboardRange = useMemo<DateTimeRange>[\s\S]{0,180}startDate: customStart[\s\S]{0,80}endDate: customEnd/,
+  /const dashboardRange = useMemo\(\(\) => resolveDashboardFilterRange\(filterPrefs\)[\s\S]{0,140}const customStart = dashboardRange.startDate[\s\S]{0,80}const customEnd = dashboardRange.endDate/,
   'the visible shared date range is derived from the canonical dashboard dates',
 )
 assert.match(

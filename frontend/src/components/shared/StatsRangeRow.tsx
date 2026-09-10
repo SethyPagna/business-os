@@ -1,5 +1,5 @@
 import { type ReactNode } from 'react'
-import DateTimeRangePicker, { type DateTimeRange } from './DateTimeRangePicker.tsx'
+import DateTimeRangePicker, { type DateTimeRange, type DateTimeRangeSource } from './DateTimeRangePicker.tsx'
 import { activeStatsPreset, statsPresetRange, STATS_PRESETS } from './statsStripPresets.ts'
 
 type TranslateFn = (key: string) => string | undefined
@@ -10,7 +10,7 @@ export default function StatsRangeRow({
   showPresets = true, className = '',
 }: {
   range: DateTimeRange
-  onRangeChange: (range: DateTimeRange) => void
+  onRangeChange: (range: DateTimeRange, source?: DateTimeRangeSource) => void
   t: TranslateFn
   leading?: ReactNode
   actions?: ReactNode
@@ -39,7 +39,7 @@ export default function StatsRangeRow({
                 className={`h-10 shrink-0 whitespace-nowrap rounded-lg px-3 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 ${active === id ? 'bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900' : 'bg-gray-100 text-gray-600 dark:bg-zinc-800 dark:text-gray-300'}`}
                 onClick={() => {
                   const next = statsPresetRange(id)
-                  onRangeChange(showTime ? next : { ...next, startTime: '', endTime: '' })
+                  onRangeChange(showTime ? next : { ...next, startTime: '', endTime: '' }, id)
                 }}>
                 {label && label !== key ? label : fallback}
               </button>

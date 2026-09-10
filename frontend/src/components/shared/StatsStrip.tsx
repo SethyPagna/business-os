@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import BarChart3 from 'lucide-react/dist/esm/icons/bar-chart-3.js'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
-import { type DateTimeRange } from './DateTimeRangePicker.tsx'
+import { type DateTimeRange, type DateTimeRangeSource } from './DateTimeRangePicker.tsx'
 import StatsRangeRow from './StatsRangeRow.tsx'
 import InfoHint from './InfoHint.tsx'
 import Modal from './Modal.tsx'
@@ -87,7 +87,7 @@ export default function StatsStrip({
   loading?: boolean
   /** Omit both range props to control the range from the page (Dashboard). */
   range?: DateTimeRange
-  onRangeChange?: (range: DateTimeRange) => void
+  onRangeChange?: (range: DateTimeRange, source?: DateTimeRangeSource) => void
   /** PRIMARY page actions (Add buttons) — always on the chip row, so the
    * page's main action stays reachable whether stats are open or folded
    * ("make add button clear", user Aug 31: explicit labels, always

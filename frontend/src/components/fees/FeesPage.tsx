@@ -46,7 +46,7 @@ import ShiftHistoryModal from '../shifts/ShiftHistoryModal.tsx'
 import ExportMenu from '../shared/ExportMenu.tsx'
 import SectionExportAction from '../shared/SectionExportAction.tsx'
 import { makeReportMoneyFormatter } from '../../utils/reportMoney.ts'
-import { EMPTY_DATE_TIME_RANGE, type DateTimeRange } from '../shared/DateTimeRangePicker'
+import { todayDateTimeRange, type DateTimeRange } from '../shared/DateTimeRangePicker'
 import { fmtClock24 } from '../../utils/formatters.ts'
 import { columnsFromRows } from '../../utils/exportOptions.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
@@ -200,7 +200,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
   // stats strip AND the expenses list — there is no separate Filters-menu date
   // range that could disagree with it. Starts all-time; presets are inside
   // the shared date/time picker. (Strip data state is declared further down.)
-  const [stripRange, setStripRange] = useState<DateTimeRange>(() => ({ ...EMPTY_DATE_TIME_RANGE }))
+  const [stripRange, setStripRange] = useState<DateTimeRange>(() => todayDateTimeRange())
   const [branchFilter, setBranchFilter] = useState('')
   const [branches, setBranches] = useState<FeeBranchOption[]>([])
   const [page, setPage] = useState(1)
