@@ -23,6 +23,7 @@ const assert = require('node:assert/strict')
 const path = require('node:path')
 const fs = require('node:fs')
 const Database = require('better-sqlite3')
+const { transpile } = require('typescript')
 
 const db = new Database(':memory:')
 db.exec(`
@@ -53,6 +54,32 @@ let passed = 0
 const check = (label, cond) => { assert.ok(cond, label); passed++; console.log(`PASS ${label}`) }
 const ids = (where, params) => db.prepare(`SELECT id FROM sales WHERE ${where} ORDER BY id`).all(params || {}).map((r) => r.id)
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
+
+// Execute the shipped parser, including two successive business days. A
+// complete explicit marker is the only request that opts out of Today.
+{
+  const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'compat.ts'), 'utf8')
+  const parser = src.slice(src.indexOf('function dateRange('), src.indexOf('function emptySummary('))
+  assert.ok(parser.includes('query.rangeScope'), 'actual Worker date parser is located')
+  let day = '2026-09-11'
+  const parse = new Function('businessToday', `${transpile(parser)}; return dateRange`)(() => day)
+  const defaultQueries = [{}, { startDate: '', endDate: '' }, { rangeScope: 'all' },
+    { rangeScope: 'all', startDate: '' }, { rangeScope: 'all', endDate: '' },
+    { rangeScope: '', startDate: '', endDate: '' }, { rangeScope: 'custom', startDate: '', endDate: '' }]
+  for (day of ['2026-09-11', '2026-09-12']) {
+    for (const query of defaultQueries) {
+      const result = parse(query)
+      check(`parser ${day}: incomplete/default ${JSON.stringify(query)} stays Today`,
+        result.startDate === day && result.endDate === day && result.allTime === false)
+    }
+    const explicit = parse({ rangeScope: 'all', startDate: '', endDate: '' })
+    check(`parser ${day}: complete explicit All-time marker stays unbounded`,
+      explicit.allTime === true && explicit.startDate === '' && explicit.endDate === '')
+    const bounded = parse({ startDate: day, endDate: day })
+    check(`parser ${day}: explicit Today equals the default window`,
+      same(bounded, parse({})))
+  }
+}
 
 // The UTC-date form the fix REPLACED (proves the behavior changed, not just moved).
 const OLD_BT = 'date(created_at) BETWEEN date(@startDate) AND date(@endDate)'

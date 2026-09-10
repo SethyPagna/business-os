@@ -53,6 +53,9 @@ export interface DateTimeRange {
   endTime: string
 }
 
+/** Explicit selection identity; manual dates may equal a relative preset. */
+export type DateTimeRangeSource = StatsPresetKey | 'custom'
+
 export const EMPTY_DATE_TIME_RANGE: DateTimeRange = { startDate: '', endDate: '', startTime: '', endTime: '' }
 
 export function isDateTimeRangeActive(range: DateTimeRange | null | undefined): boolean {
@@ -61,7 +64,7 @@ export function isDateTimeRangeActive(range: DateTimeRange | null | undefined): 
 
 interface DateTimeRangePickerProps {
   value: DateTimeRange
-  onChange: (range: DateTimeRange) => void
+  onChange: (range: DateTimeRange, source?: DateTimeRangeSource) => void
   t: (key: string) => string | undefined
   // Time row is optional per surface -- the Sales daily report wants it,
   // a plain list filter may not.
@@ -189,7 +192,7 @@ export default function DateTimeRangePicker({
       return
     }
     setRangeInvalid(false)
-    onChange(next)
+    onChange(next, 'custom')
   }
 
   // Day clicks alternate start -> end -> start... via an explicit phase
@@ -304,7 +307,7 @@ export default function DateTimeRangePicker({
   const applyQuickRange = (preset: StatsPresetKey) => {
     setRangeInvalid(false)
     const next = statsPresetRange(preset)
-    onChange(showTime ? next : { ...next, startTime: '', endTime: '' })
+    onChange(showTime ? next : { ...next, startTime: '', endTime: '' }, preset)
     const anchor = next.startDate || today
     setViewYear(Number(anchor.slice(0, 4)))
     setViewMonth(Number(anchor.slice(5, 7)))
@@ -415,7 +418,7 @@ export default function DateTimeRangePicker({
               <button
                 type="button"
                 className="ml-auto text-xs font-medium text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline dark:text-slate-400 dark:hover:text-slate-200"
-                onClick={() => onChange({ ...EMPTY_DATE_TIME_RANGE })}
+                onClick={() => onChange({ ...EMPTY_DATE_TIME_RANGE }, 'all')}
               >
                 {t('clear') || 'Clear'}
               </button>

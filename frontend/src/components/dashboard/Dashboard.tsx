@@ -226,6 +226,7 @@ interface DashboardAnalytics {
 }
 
 interface DashboardFilterPrefs {
+  version: 2
   rangeId: DashboardRangeId
   customStart: string
   customEnd: string
@@ -275,7 +276,6 @@ function getErrorMessage(error: unknown, fallback: string): string {
 }
 
 const DASHBOARD_FILTER_STORAGE_PREFIX = 'bos_dashboard_filters:'
-const DASHBOARD_FILTER_STORAGE_FALLBACK_KEY = `${DASHBOARD_FILTER_STORAGE_PREFIX}last`
 const DASHBOARD_CHART_POINT_LIMIT = 180
 const DASHBOARD_SUMMARY_TIMEOUT_MS = 30000
 const DASHBOARD_ANALYTICS_TIMEOUT_MS = 30000
@@ -333,30 +333,42 @@ const DASHBOARD_INVENTORY_FOCUS_KEY = 'bos:dashboard:inventory-focus'
 const CARD_LIST_BODY = 'flex-1 min-h-[8rem] max-h-[16rem] overflow-y-auto'
 
 function getDashboardFilterStorageKey(user?: AppUser | null): string {
-  const userKey = user?.id || user?.username || user?.email || 'guest'
-  return `${DASHBOARD_FILTER_STORAGE_PREFIX}${userKey}`
+  const userKey = user?.id ?? user?.username ?? user?.email
+  return userKey == null || String(userKey).trim() === '' ? '' : `${DASHBOARD_FILTER_STORAGE_PREFIX}${userKey}`
 }
 
-function readDashboardFilterPrefs(storageKeys: string | string[]): DashboardFilterPrefs | null {
-  if (typeof window === 'undefined') return null
+function todayDashboardFilterPrefs(): DashboardFilterPrefs {
+  return { version: 2, rangeId: 'today', customStart: '', customEnd: '' }
+}
+
+function validDashboardCustomDates(start: unknown, end: unknown): boolean {
+  const valid = (value: unknown): value is string => {
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+    const parsed = new Date(`${value}T00:00:00.000Z`)
+    return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value
+      && value >= '1970-01-01' && value <= '2999-12-31'
+  }
+  return valid(start) && valid(end) && start <= end
+}
+
+function readDashboardFilterPrefs(storageKey: string): DashboardFilterPrefs {
+  if (typeof window === 'undefined' || !storageKey) return todayDashboardFilterPrefs()
   try {
-    const keys = Array.isArray(storageKeys)
-      ? storageKeys.filter(Boolean)
-      : [storageKeys].filter(Boolean)
-    for (const key of keys) {
-      const raw = window.localStorage.getItem(key)
-      if (!raw) continue
-      const parsed = JSON.parse(raw)
-      if (!parsed || typeof parsed !== 'object') continue
-      return {
-        rangeId: typeof parsed.rangeId === 'string' ? normalizeDashboardRangeId(parsed.rangeId) : 'custom',
-        customStart: typeof parsed.customStart === 'string' ? parsed.customStart : '',
-        customEnd: typeof parsed.customEnd === 'string' ? parsed.customEnd : '',
-      }
+    const parsed = JSON.parse(window.localStorage.getItem(storageKey) || 'null')
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return todayDashboardFilterPrefs()
+    const rangeId = normalizeDashboardRangeId(parsed.rangeId)
+    if (!rangeId || (parsed.version !== undefined && parsed.version !== 2)) return todayDashboardFilterPrefs()
+    // Legacy custom dates may have been written automatically for Today;
+    // legacy empty dates cannot prove an intentional All-time selection.
+    if (parsed.version !== 2 && (rangeId === 'all' || rangeId === 'custom')) return todayDashboardFilterPrefs()
+    if (rangeId === 'custom') {
+      return validDashboardCustomDates(parsed.customStart, parsed.customEnd)
+        ? { version: 2, rangeId, customStart: parsed.customStart, customEnd: parsed.customEnd }
+        : todayDashboardFilterPrefs()
     }
-    return null
+    return { version: 2, rangeId, customStart: '', customEnd: '' }
   } catch {
-    return null
+    return todayDashboardFilterPrefs()
   }
 }
 
@@ -371,10 +383,9 @@ function downsampleChartRows(rows: DashboardPeriodRow[] = [], limit = DASHBOARD_
   return sampled
 }
 
-function normalizeDashboardRangeId(rangeId: unknown): DashboardRangeId {
-  if (rangeId === '90d') return 'year'
+function normalizeDashboardRangeId(rangeId: unknown): DashboardRangeId | null {
   if (rangeId === 'all' || rangeId === 'today' || rangeId === 'yesterday' || rangeId === '7d' || rangeId === '30d' || rangeId === 'week' || rangeId === 'month' || rangeId === 'year' || rangeId === 'custom') return rangeId
-  return 'custom'
+  return null
 }
 
 function resolveDashboardFilterRange(prefs: DashboardFilterPrefs | null): DateTimeRange {
@@ -387,6 +398,15 @@ function resolveDashboardFilterRange(prefs: DashboardFilterPrefs | null): DateTi
   }
   const preset = statsPresetRange(prefs.rangeId)
   return { ...preset, startTime: '', endTime: '' }
+}
+
+function dashboardPrefsForSelection(nextRange: DateTimeRange, source: DashboardRangeId = 'custom'): DashboardFilterPrefs | null {
+  if (!normalizeDashboardRangeId(source)) return null
+  if (source === 'custom') {
+    if (!validDashboardCustomDates(nextRange.startDate, nextRange.endDate)) return null
+    return { version: 2, rangeId: 'custom', customStart: nextRange.startDate, customEnd: nextRange.endDate }
+  }
+  return { version: 2, rangeId: source, customStart: '', customEnd: '' }
 }
 
 function compactDashboardMetaParts(parts: unknown[] = []): string[] {
@@ -667,17 +687,9 @@ export default function Dashboard() {
   // `close` key already used everywhere else in the app.
   const closeLabel = translateOr('close', 'Close')
   const dashboardFilterStorageKey = useMemo(() => getDashboardFilterStorageKey(user), [user?.email, user?.id, user?.username])
-  const dashboardFilterStorageKeys = useMemo(
-    () => [dashboardFilterStorageKey, DASHBOARD_FILTER_STORAGE_FALLBACK_KEY],
-    [dashboardFilterStorageKey],
-  )
   const initialFilterPrefs = useMemo(
-    () => readDashboardFilterPrefs(dashboardFilterStorageKeys),
-    [dashboardFilterStorageKeys],
-  )
-  const initialDashboardRange = useMemo(
-    () => resolveDashboardFilterRange(initialFilterPrefs),
-    [initialFilterPrefs],
+    () => readDashboardFilterPrefs(dashboardFilterStorageKey),
+    [dashboardFilterStorageKey],
   )
 
   // Small-screen section chips. Labels use translateOr (the same guarded-
@@ -701,8 +713,14 @@ export default function Dashboard() {
   // user starts on TODAY; a saved all-time range deliberately restores as two
   // empty endpoints. The range governs the flow cards only; stock and alert
   // cards stay catalog-wide whatever the range (see compat.ts).
-  const [customStart, setCustomStart] = useState(() => initialDashboardRange.startDate)
-  const [customEnd, setCustomEnd]     = useState(() => initialDashboardRange.endDate)
+  const [filterSelection, setFilterSelection] = useState(() => ({ storageKey: dashboardFilterStorageKey, prefs: initialFilterPrefs }))
+  // Account changes resolve synchronously, before either the first request or
+  // persistence effect can reuse the previous account's selection.
+  const filterPrefs = filterSelection.storageKey === dashboardFilterStorageKey ? filterSelection.prefs : initialFilterPrefs
+  const businessDay = todayStr()
+  const dashboardRange = useMemo(() => resolveDashboardFilterRange(filterPrefs), [filterPrefs, businessDay])
+  const customStart = dashboardRange.startDate
+  const customEnd = dashboardRange.endDate
   const [activeChart, setActiveChart] = useState<DashboardChartMode>('revenue')
   const [topMode, setTopMode]         = useState<DashboardTopMode>('revenue')
   const [customerDetail, setCustomerDetail]     = useState<DashboardCustomer | null>(null)
@@ -743,7 +761,6 @@ export default function Dashboard() {
   const analyticsLoadingRef = useRef(true)
   const startupLoadingRef = useRef(false)
   const startupAttemptedRef = useRef(false)
-  const filterStorageKeyRef = useRef(dashboardFilterStorageKey)
   const dashboardExportModulePromiseRef = useRef<Promise<DashboardExportModule> | null>(null)
 
   const invalidateStockAlertPageRequests = useCallback(() => {
@@ -785,16 +802,10 @@ export default function Dashboard() {
   const getCurrentDashboardRange = useCallback(() => {
     return { start: customStart, end: customEnd, granularity: 'day' as DashboardGranularity }
   }, [customEnd, customStart])
-  const dashboardRange = useMemo<DateTimeRange>(() => ({
-    startDate: customStart,
-    endDate: customEnd,
-    startTime: '',
-    endTime: '',
-  }), [customEnd, customStart])
-  const handleDashboardRangeChange = useCallback((nextRange: DateTimeRange) => {
-    setCustomStart(nextRange.startDate || '')
-    setCustomEnd(nextRange.endDate || '')
-  }, [])
+  const handleDashboardRangeChange = useCallback((nextRange: DateTimeRange, source?: DashboardRangeId) => {
+    const prefs = dashboardPrefsForSelection(nextRange, source)
+    if (prefs) setFilterSelection({ storageKey: dashboardFilterStorageKey, prefs })
+  }, [dashboardFilterStorageKey])
 
   const loadDashboardStartup = useCallback(async () => {
     const requestId = beginTrackedRequest(startupRequestRef)
@@ -967,28 +978,14 @@ export default function Dashboard() {
   }, [getCurrentDashboardRange, setAnalyticsLoading])
 
   useEffect(() => {
-    if (filterStorageKeyRef.current === dashboardFilterStorageKey) return
-    filterStorageKeyRef.current = dashboardFilterStorageKey
-    const nextPrefs = readDashboardFilterPrefs([dashboardFilterStorageKey, DASHBOARD_FILTER_STORAGE_FALLBACK_KEY])
-    const nextRange = resolveDashboardFilterRange(nextPrefs)
-    setCustomStart(nextRange.startDate)
-    setCustomEnd(nextRange.endDate)
-  }, [dashboardFilterStorageKey])
-
-  useEffect(() => {
     if (typeof window === 'undefined' || !dashboardFilterStorageKey) return
     try {
-      const serialized = JSON.stringify({
-        rangeId: 'custom',
-        customStart,
-        customEnd,
-      })
+      const serialized = JSON.stringify(filterPrefs)
       window.localStorage.setItem(dashboardFilterStorageKey, serialized)
-      window.localStorage.setItem(DASHBOARD_FILTER_STORAGE_FALLBACK_KEY, serialized)
     } catch {
       // Ignore persistence failures and keep the dashboard usable.
     }
-  }, [customEnd, customStart, dashboardFilterStorageKey])
+  }, [filterPrefs, dashboardFilterStorageKey])
 
   useEffect(() => {
     if (!isActive) {

@@ -7,7 +7,7 @@ import Package from 'lucide-react/dist/esm/icons/package.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import { useIsPageActive } from '../shared/pageActivity'
 import HubSectionNav, { type HubSectionDef } from '../shared/HubSectionNav.tsx'
-import type { DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
+import { todayDateTimeRange, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
 
 // Branches is one hub with one navigation layer. Overview owns branch cards;
 // Products owns the branch-scoped stock list; Transfer owns
@@ -65,12 +65,7 @@ export default function BranchesHubPage() {
   // remove those figures, it made them answer all-time while the section
   // beside them answered the picked window (N10). Stock quantities and the
   // stock-value cards stay unscoped on purpose: stock is a right-now fact.
-  const [sharedDateRange, setSharedDateRange] = useState<DateTimeRange>(() => ({
-    startDate: '',
-    endDate: '',
-    startTime: '',
-    endTime: '',
-  }))
+  const [sharedDateRange, setSharedDateRange] = useState<DateTimeRange>(() => todayDateTimeRange())
   const isActive = useIsPageActive('branches')
 
   useEffect(() => {
