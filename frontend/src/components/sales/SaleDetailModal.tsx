@@ -23,6 +23,7 @@ import {
 } from '../../utils/saleAmendments.ts'
 import { receiptTotalsFigures } from '../../utils/receiptTotals.ts'
 import CopyableId from '../shared/CopyableId.tsx'
+import EntityLink from '../shared/EntityLink.tsx'
 import { DetailRow, DetailRowGroup, MoneyRow } from '../shared/DetailRows.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
 import StatusBadge, { getStatusLabel } from './StatusBadge.tsx'
@@ -40,7 +41,7 @@ import ProductOptionSheet from '../shared/ProductOptionSheet.tsx'
 // read with -- the same rule saleAddLines.ts caps a staged line by.
 import ProductCard from '../pos/ProductCard.tsx'
 import { branchStockQuantity } from '../pos/productSheetState.ts'
-import { useLowStockConfig } from '../../AppContext'
+import { useApp, useLowStockConfig } from '../../AppContext'
 import { getTrackedBatchProductIds } from '../../api/batchesTransport.ts'
 import SaleStatusWorkflow from './SaleStatusWorkflow.tsx'
 import { sanitizeSaleDetailText } from './saleDetailText.ts'
@@ -80,6 +81,9 @@ interface SaleLineItem {
   price?: number | string | null
   branch_name?: string | null
   branch_id?: number | string | null
+  barcode?: string | null
+  unit?: string | null
+  supplier?: string | null
   returned_quantity?: number | string | null
 }
 
@@ -115,6 +119,7 @@ interface SaleDetail {
   device_name?: string | null
   customer_name?: string | null
   customer_phone?: string | null
+  customer_id?: number | string | null
   customer_address?: string | null
   notes?: string | null
   // Cancellation record (migration 0066) -- present only on cancelled
@@ -152,6 +157,7 @@ interface SaleDetail {
   delivery_actual_cost_khr?: number | string | null
   delivery_contact_name?: string | null
   delivery_contact_phone?: string | null
+  delivery_contact_id?: number | string | null
   delivery_contact_address?: string | null
   credit_due_date?: string | null
   payment_correction_allowed?: number | boolean | null
@@ -336,6 +342,7 @@ export default function SaleDetailModal({
   fmtUSD,
   fmtKHR,
 }: SaleDetailModalProps) {
+  const { navigateTo } = useApp() as { navigateTo?: (page: string, anchor?: string) => void }
   const [newStatus, setNewStatus] = useState(sale?.sale_status || 'completed')
   const [statusNotes, setStatusNotes] = useState('')
   const [statusSaving, setStatusSaving] = useState(false)
@@ -1215,7 +1222,7 @@ export default function SaleDetailModal({
                 />
                 <span aria-hidden="true" className="sm:hidden">|</span>
                 <span className="shrink-0 sm:hidden">{fmtTime(sale.created_at)}</span>
-                {sale.branch_name ? <><span aria-hidden="true" className="sm:hidden">|</span><span className="sm:hidden" aria-label={`${t('branch') || 'Branch'}: ${sale.branch_name}`}>{sale.branch_name}</span></> : null}
+                {sale.branch_name ? <><span aria-hidden="true" className="sm:hidden">|</span><span className="sm:hidden" aria-label={`${t('branch') || 'Branch'}: ${sale.branch_name}`}><EntityLink page="branches" anchor="hub:branches:overview" navigate={navigateTo} title={t('open_branch') || 'Open branch'}>{sale.branch_name}</EntityLink></span></> : null}
                 {sale.cashier_name ? <><span aria-hidden="true" className="sm:hidden">|</span><span className="font-bold text-gray-700 dark:text-gray-200 sm:hidden" aria-label={`${t('cashier') || 'Cashier'}: ${sale.cashier_name}`}>{sale.cashier_name}</span></> : null}
               </div>
               <StatusBadge status={currentStatus} t={t} />
@@ -1275,12 +1282,16 @@ export default function SaleDetailModal({
                      subValue). One fact, one row. */
                   <DetailRow label={t('payment_method') || 'Payment method'}>
                     <span className="block">
-                      <span className="badge-blue text-xs">{sale.payment_method}</span>
+                      {sale.payment_method ? (
+                        <EntityLink page="settings" anchor="hub:settings:settings" navigate={navigateTo} title={translateOr('open_payment_settings', 'Open payment settings', 'បើកការកំណត់វិធីទូទាត់')}>
+                          <span className="badge-blue text-xs">{sale.payment_method}</span>
+                        </EntityLink>
+                      ) : <span className="badge-blue text-xs">{t('none') || 'None'}</span>}
                       {paymentDetails.length > 1 ? (
                         <span className="mt-1 block space-y-0.5">
                           {paymentDetails.map((detail, index) => (
                             <span key={`${detail.method}-${index}`} className="flex justify-between gap-3 text-xs font-normal text-gray-500 dark:text-gray-400">
-                              <span className="min-w-0 flex-1 break-words">{detail.method}</span>
+                              <EntityLink page="settings" anchor="hub:settings:settings" navigate={navigateTo} title={translateOr('open_payment_settings', 'Open payment settings', 'បើកការកំណត់វិធីទូទាត់')} className="min-w-0 flex-1 break-words">{detail.method}</EntityLink>
                               <span className="shrink-0 tabular-nums">{fmtUSD(detail.amount_usd)}{detail.amount_khr > 0 ? ` · ${fmtKHR(detail.amount_khr)}` : ''}</span>
                             </span>
                           ))}
@@ -1289,7 +1300,7 @@ export default function SaleDetailModal({
                     </span>
                   </DetailRow>
                 )}
-                <div className="hidden sm:block"><DetailRow label={t('branch') || 'Branch'} value={sale.branch_name} /></div>
+                <div className="hidden sm:block"><DetailRow label={t('branch') || 'Branch'}>{sale.branch_name ? <EntityLink page="branches" anchor="hub:branches:overview" navigate={navigateTo}>{sale.branch_name}</EntityLink> : null}</DetailRow></div>
                 <DetailRow label={t('status') || 'Status'} value={getStatusLabel(currentStatus, t)} />
                 {sale.source_return_id ? (
                   <DetailRow label={translateOr('replacement_for_return', 'Replacement for return', 'ការលក់ជំនួសសម្រាប់ការបង្វិលត្រឡប់')} value={`#${sale.source_return_id}`} mono />
@@ -1302,11 +1313,17 @@ export default function SaleDetailModal({
                     phone, exactly as the Customer card does below. */}
                 {(!customerIsAnonymous && sale.customer_phone) || deliveryDriverName || deliveryDriverPhone ? (
                   <div data-sale-detail-mobile-contact="" className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 py-1.5 text-xs text-gray-500 sm:hidden">
-                    {!customerIsAnonymous && sale.customer_phone ? <span>{sale.customer_phone}</span> : null}
+                    {!customerIsAnonymous && sale.customer_phone ? <EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_phone} navigate={navigateTo} title={t('open_customer') || 'Open customer'}>{sale.customer_phone}</EntityLink> : null}
                     {!customerIsAnonymous && sale.customer_phone && (deliveryDriverName || deliveryDriverPhone) ? <span aria-hidden="true">|</span> : null}
                     {deliveryDriverName || deliveryDriverPhone ? (
                       <span aria-label={`${translateOr('delivery', 'Delivery', 'ការដឹកជញ្ជូន')}: ${[deliveryDriverName, deliveryDriverPhone].filter(Boolean).join(' · ')}`}>
-                        {[deliveryDriverName, deliveryDriverPhone].filter(Boolean).join(' · ')}
+                        {deliveryDriverName ? <EntityLink page="contacts" anchor="hub:contacts:delivery" search={deliveryDriverName} navigate={navigateTo} title={translateOr('open_delivery_contact', 'Open delivery contact', 'បើកទំនាក់ទំនងអ្នកដឹក')}>
+                          {deliveryDriverName}
+                        </EntityLink> : null}
+                        {deliveryDriverName && deliveryDriverPhone ? ' · ' : null}
+                        {deliveryDriverPhone ? <EntityLink page="contacts" anchor="hub:contacts:delivery" search={deliveryDriverPhone} navigate={navigateTo} title={translateOr('open_delivery_contact', 'Open delivery contact', 'បើកទំនាក់ទំនងអ្នកដឹក')}>
+                          {deliveryDriverPhone}
+                        </EntityLink> : null}
                       </span>
                     ) : null}
                   </div>
@@ -1317,8 +1334,8 @@ export default function SaleDetailModal({
                     walk-in sale is unchanged and a free delivery still names
                     its driver, which the fee row could not do when the fee was
                     zero and the row did not render. */}
-                <div className="hidden sm:block"><DetailRow label={translateOr('driver', 'Driver', 'អ្នកដឹកជញ្ជូន')} value={deliveryDriverName} /></div>
-                <div className="hidden sm:block"><DetailRow label={translateOr('driver_phone', 'Driver phone', 'ទូរស័ព្ទអ្នកដឹក')} value={deliveryDriverPhone} /></div>
+                <div className="hidden sm:block"><DetailRow label={translateOr('driver', 'Driver', 'អ្នកដឹកជញ្ជូន')} value={deliveryDriverName} valueLink={deliveryDriverName ? <EntityLink page="contacts" anchor="hub:contacts:delivery" search={deliveryDriverName} navigate={navigateTo}>{deliveryDriverName}</EntityLink> : undefined} /></div>
+                <div className="hidden sm:block"><DetailRow label={translateOr('driver_phone', 'Driver phone', 'ទូរស័ព្ទអ្នកដឹក')} value={deliveryDriverPhone} valueLink={deliveryDriverPhone ? <EntityLink page="contacts" anchor="hub:contacts:delivery" search={deliveryDriverPhone} navigate={navigateTo}>{deliveryDriverPhone}</EntityLink> : undefined} /></div>
                 {!toNumber(sale.is_delivery) && canAmendThisSale ? (
                   <div className="py-1.5">
                     <button
@@ -1497,8 +1514,10 @@ export default function SaleDetailModal({
 
             <SectionCard title={t('customer') || 'Customer'} action={onCustomerAction ? <button type="button" className="btn-secondary text-xs" onClick={() => onCustomerAction(sale)}>{t('sale_customer_edit_entry') || 'Edit customer'}</button> : null}>
               <DetailRowGroup>
-                <DetailRow label={t('customer_name') || 'Customer'} value={customerIsAnonymous ? (t('walk_in') || 'Walk-in') : sale.customer_name} />
-                {!customerIsAnonymous ? <div className="hidden sm:block"><DetailRow label={t('phone') || 'Phone'} value={sale.customer_phone} /></div> : null}
+                <DetailRow label={t('customer_name') || 'Customer'}>
+                  {customerIsAnonymous ? (t('walk_in') || 'Walk-in') : sale.customer_name ? <EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_name} navigate={navigateTo}>{sale.customer_name}</EntityLink> : null}
+                </DetailRow>
+                {!customerIsAnonymous ? <div className="hidden sm:block"><DetailRow label={t('phone') || 'Phone'}>{sale.customer_phone ? <EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_phone} navigate={navigateTo}>{sale.customer_phone}</EntityLink> : null}</DetailRow></div> : null}
                 <DetailRow label={t('address') || 'Address'} value={customerAddress} />
                 {customerIsAnonymous ? null : onAttachMembership ? (
                   <DetailRow label={t('membership') || 'Membership'}>
@@ -1587,11 +1606,20 @@ export default function SaleDetailModal({
                       <Fragment key={`${item.product_id || item.id || index}-${index}`}>
                       <tr>
                         <td className="px-1.5 py-1.5 align-top sm:px-2">
-                          <div className="break-words font-medium text-gray-900 dark:text-white">{item.product_name || item.name}</div>
+                          <div className="break-words font-medium text-gray-900 dark:text-white">
+                            {item.product_name || item.name ? (
+                              <EntityLink page="products" anchor="hub:products:products" search={item.product_name || item.name || undefined} navigate={navigateTo} title={t('open_product') || 'Open product'}>
+                                {item.product_name || item.name}
+                              </EntityLink>
+                            ) : null}
+                          </div>
+                          {item.barcode ? <div className="text-[11px] text-gray-400"><EntityLink page="products" anchor="hub:products:products" search={item.barcode} navigate={navigateTo}>{item.barcode}</EntityLink></div> : null}
+                          {item.unit ? <div className="text-[11px] text-gray-400"><EntityLink page="products" anchor="hub:products:products" focus={{ unit: item.unit }} navigate={navigateTo}>{item.unit}</EntityLink></div> : null}
+                          {item.supplier ? <div className="text-[11px] text-gray-400"><EntityLink page="contacts" anchor="hub:contacts:suppliers" search={item.supplier} navigate={navigateTo}>{item.supplier}</EntityLink></div> : null}
                           {toNumber(item.returned_quantity) > 0 ? (
                             <div className="mt-0.5 inline-flex rounded bg-orange-100 px-1.5 py-0.5 text-[10px] font-semibold text-orange-700 dark:bg-orange-900/40 dark:text-orange-300">↩ {toNumber(item.returned_quantity)} {t('returned_quantity_tag') || 'returned'}</div>
                           ) : null}
-                          {item.branch_name ? <div className="break-words text-[11px] text-gray-400">{item.branch_name}</div> : null}
+                          {item.branch_name ? <div className="break-words text-[11px] text-gray-400"><EntityLink page="branches" anchor="hub:branches:overview" navigate={navigateTo}>{item.branch_name}</EntityLink></div> : null}
                         </td>
                         <td className="whitespace-nowrap px-1.5 py-1.5 text-right align-top sm:px-2 tabular-nums text-gray-700 dark:text-gray-200">{qty}</td>
                         <td className="whitespace-nowrap px-1.5 py-1.5 text-right align-top sm:px-2 tabular-nums text-gray-700 dark:text-gray-200">

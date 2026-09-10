@@ -38,10 +38,13 @@ interface DetailRowProps {
   mono?: boolean
   /** Render `value` inside the app's blue pill (payment method, etc.). */
   badge?: boolean
+  /** Optional linked rendering for a plain value without changing the row's
+   *  label/value contract. */
+  valueLink?: ReactNode
   valueClassName?: string
 }
 
-export function DetailRow({ label, value, children, mono = false, badge = false, valueClassName = '' }: DetailRowProps) {
+export function DetailRow({ label, value, children, mono = false, badge = false, valueLink, valueClassName = '' }: DetailRowProps) {
   const hasChildren = children != null && children !== false
   if (!hasChildren && (value == null || value === '')) return null
   return (
@@ -52,7 +55,7 @@ export function DetailRow({ label, value, children, mono = false, badge = false,
           the value itself. */}
       <span className="w-[6.5rem] flex-shrink-0 text-xs text-gray-400 sm:w-28">{label}</span>
       <div className={`min-w-0 flex-1 break-words text-sm font-medium text-gray-800 dark:text-gray-200 ${mono ? 'font-mono' : ''} ${valueClassName}`}>
-        {hasChildren ? children : (badge ? <span className="badge-blue text-xs">{value}</span> : value)}
+        {hasChildren ? children : valueLink != null ? valueLink : (badge ? <span className="badge-blue text-xs">{value}</span> : value)}
       </div>
     </div>
   )

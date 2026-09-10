@@ -4695,6 +4695,7 @@ app.get('/', async (c) => {
 
     const itemRows = await selectInChunks(saleIds, 0, (chunk) => db.prepare(`
       SELECT si.*, b.name AS branch_name, p.barcode AS barcode, p.category AS category,
+        p.unit AS unit, p.supplier AS supplier,
         COALESCE((
           SELECT SUM(ri.quantity)
           FROM return_items ri

@@ -3,6 +3,7 @@ import { useCopyFloat } from '../../shared/CopyFloat.tsx'
 import { calculateProductDiscount } from '../../../utils/pricing.ts'
 import { buildBatchPreview } from '../../../utils/productBatches.ts'
 import { batchDisplayLabel } from '../../../utils/batchLabel.ts'
+import EntityLink, { type EntityNavigate } from '../../shared/EntityLink.tsx'
 
 type BranchId = string | number
 type Translate = (key: string, fallback?: string, khmerFallback?: string) => string
@@ -61,6 +62,7 @@ type ProductDetailsCellProps = {
   renderMetaPill: (item: MetaPill) => ReactNode
   tr: Translate
   fmtUSD: MoneyFormatter
+  navigateTo?: EntityNavigate
 }
 
 export function ProductDiscountBadge({
@@ -136,6 +138,7 @@ export function ProductDetailsCell({
   renderMetaPill,
   tr,
   fmtUSD,
+  navigateTo,
 }: ProductDetailsCellProps) {
   // Supplier is the one of the four copyable product fields (name, brand,
   // supplier, barcode) that renders in THIS cell -- the Products list keeps
@@ -181,7 +184,9 @@ export function ProductDetailsCell({
           // this wrapper carries the gesture attributes and no box of its
           // own beyond the inline-flex the pill already sat in.
           <span key="supplier-copy" className="inline-flex min-w-0 max-w-full" {...copy(product.supplier)}>
-            {renderMetaPill(item)}
+            <EntityLink page="contacts" anchor="hub:contacts:suppliers" search={product.supplier} navigate={navigateTo} title={tr('open_supplier', 'Open supplier', 'បើកអ្នកផ្គត់ផ្គង់')}>
+              {renderMetaPill(item)}
+            </EntityLink>
           </span>
         ) : renderMetaPill(item)))}
         <ProductDiscountBadge product={product} promotion={promotion} fmtUSD={fmtUSD} label={tr('discounts', 'Discounts', 'Discounts')} />

@@ -1,7 +1,7 @@
 import { getHubDestinations, useHubSection } from '../shared/hubNavigation.ts'
 import type { ComponentType, SVGProps } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
-import { Suspense, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import Truck from 'lucide-react/dist/esm/icons/truck.js'
 import Users from 'lucide-react/dist/esm/icons/users.js'
 import Warehouse from 'lucide-react/dist/esm/icons/warehouse.js'
@@ -157,6 +157,33 @@ export default function Contacts() {
   // switching tabs manually doesn't leave a stale search behind on a
   // tab the operator didn't ask to jump to.
   const [resolveSearch, setResolveSearch] = useState<Partial<Record<ContactTabId, string>>>({})
+  // EntityLink queues the exact name/phone before guarded navigation. Consume
+  // it once the Contacts hub is active so customer, supplier, and delivery
+  // links land on the matching tab and search result instead of the default
+  // Customers view.
+  useEffect(() => {
+    if (!isActive || typeof window === 'undefined') return
+    const consumeFocus = () => {
+      const raw = window.sessionStorage.getItem('bos:contacts:focus')
+      if (!raw) return
+      try {
+        const payload = JSON.parse(raw) as { tab?: unknown; search?: unknown }
+        const requestedTab = String(payload?.tab || '') as ContactTabId
+        const validTabs: ContactTabId[] = canSeeSuppliers ? ['customers', 'suppliers', 'delivery'] : ['customers', 'delivery']
+        const targetTab = validTabs.includes(requestedTab) ? requestedTab : 'customers'
+        const search = String(payload?.search || '').trim()
+        if (search) setResolveSearch((current) => ({ ...current, [targetTab]: search }))
+        setTab(targetTab)
+      } catch {
+        // A malformed handoff must not block the Contacts page.
+      } finally {
+        window.sessionStorage.removeItem('bos:contacts:focus')
+      }
+    }
+    consumeFocus()
+    window.addEventListener('bos:entity-focus', consumeFocus)
+    return () => window.removeEventListener('bos:entity-focus', consumeFocus)
+  }, [canSeeSuppliers, isActive, setTab])
   const resolveContact = (targetTab: ContactTabId, name: string): void => {
     setResolveSearch((current) => ({ ...current, [targetTab]: name }))
     setTab(targetTab)

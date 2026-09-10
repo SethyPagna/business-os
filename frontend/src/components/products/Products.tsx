@@ -38,6 +38,7 @@ import DeleteConfirmModal from './DeleteConfirmModal'
 import { summarizeDeleteImpact } from '../../utils/deleteImpactSummary'
 import ProductsHeaderActions from './surfaces/HeaderActions'
 import { useCopyFloat } from '../shared/CopyFloat.tsx'
+import EntityLink from '../shared/EntityLink.tsx'
 import { COPY_SELECTOR, deferCopySurfaceAction } from '../shared/textAffordances.ts'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
 import type { PortalMenuItem } from '../shared/PortalMenu'
@@ -787,20 +788,37 @@ function ProductsFullEditor() {
   // inventory-focus payload as this key, carrying the stock filter.
   useEffect(() => {
     if (!isActive || typeof window === 'undefined') return
-    const raw = window.sessionStorage.getItem('bos:dashboard:products-focus')
-    if (!raw) return
-    try {
-      const payload = JSON.parse(raw) as { stockFilter?: unknown }
-      const stockState = String(payload?.stockFilter || '')
-      if (stockState === 'low' || stockState === 'out' || stockState === 'in_stock') {
-        setStockFilter(stockState)
+    const consumeFocus = () => {
+      const raw = window.sessionStorage.getItem('bos:dashboard:products-focus')
+      if (!raw) return
+      try {
+        const payload = JSON.parse(raw) as { stockFilter?: unknown; search?: unknown; unit?: unknown; brand?: unknown; category?: unknown }
+        const stockState = String(payload?.stockFilter || '')
+        if (stockState === 'low' || stockState === 'out' || stockState === 'in_stock') setStockFilter(stockState)
+        const focusSearch = String(payload?.search || '').trim()
+        if (focusSearch) setSearch(focusSearch)
+        const focusUnit = String(payload?.unit || '').trim()
+        if (focusUnit) setUnitFilter(focusUnit)
+        const focusBrand = String(payload?.brand || '').trim()
+        if (focusBrand) {
+          setBrandFilter(new Set([focusBrand]))
+          setSearch('')
+        }
+        const focusCategory = String(payload?.category || '').trim()
+        if (focusCategory) {
+          setCatFilter(new Set([focusCategory]))
+          setSearch('')
+        }
+        setActiveProductSection('products')
+      } catch {
+        // Malformed handoff -- keep the current view state.
+      } finally {
+        window.sessionStorage.removeItem('bos:dashboard:products-focus')
       }
-      setActiveProductSection('products')
-    } catch {
-      // Malformed handoff -- keep the current view state.
-    } finally {
-      window.sessionStorage.removeItem('bos:dashboard:products-focus')
     }
+    consumeFocus()
+    window.addEventListener('bos:entity-focus', consumeFocus)
+    return () => window.removeEventListener('bos:entity-focus', consumeFocus)
   }, [isActive])
   const [productSortDirection, setProductSortDirection] = useState<ProductSortDirection>('name_asc')
   const [search,       setSearch]       = useState('')
@@ -2492,14 +2510,11 @@ function ProductsFullEditor() {
   const renderUnitChip = (unitName: string | undefined) => {
     if (!unitName) return null
     const color = unitMap[unitName]?.color
-    if (!color) return <span {...getKhmerTextProps(unitName, 'ml-1 shrink-0 whitespace-nowrap text-xs font-normal text-gray-400')}>{unitName}</span>
+    if (!color) return <EntityLink page="products" anchor="hub:products:products" focus={{ unit: unitName }} navigate={navigateTo} title={tr('open_unit_products', 'Open products using this unit', 'បើកផលិតផលដែលប្រើឯកតានេះ')} className="ml-1 text-inherit no-underline hover:text-inherit"><span {...getKhmerTextProps(unitName, 'shrink-0 whitespace-nowrap text-xs font-normal text-gray-400')}>{unitName}</span></EntityLink>
     return (
-      <span
-        {...getKhmerTextProps(unitName, 'ml-1 inline-flex shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold')}
-        style={{ background: color, color: getContrastingTextColor(color) }}
-      >
-        {unitName}
-      </span>
+      <EntityLink page="products" anchor="hub:products:products" focus={{ unit: unitName }} navigate={navigateTo} title={tr('open_unit_products', 'Open products using this unit', 'បើកផលិតផលដែលប្រើឯកតានេះ')} className="ml-1 text-inherit no-underline hover:text-inherit">
+        <span {...getKhmerTextProps(unitName, 'inline-flex shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold')} style={{ background: color, color: getContrastingTextColor(color) }}>{unitName}</span>
+      </EntityLink>
     )
   }
 
@@ -3674,10 +3689,17 @@ function ProductsFullEditor() {
                   // inline-flex span with no box of its own, so the meta line
                   // lays out exactly as it did.
                   const metaKey = String(item?.key || '')
-                  if (!pill || (metaKey !== 'barcode' && metaKey !== 'brand')) return pill
+                  if (!pill || (metaKey !== 'barcode' && metaKey !== 'brand' && metaKey !== 'category')) return pill
+                  const focus = metaKey === 'brand'
+                    ? { brand: String(item?.label || '') }
+                    : metaKey === 'category'
+                      ? { category: String(item?.label || '') }
+                      : undefined
                   return (
                     <span key={`${metaKey}-copy`} className={`inline-flex min-w-0 ${metaKey === 'barcode' ? 'shrink-0' : 'max-w-full'}`} {...copy(item?.label)}>
-                      {pill}
+                      <EntityLink page="products" anchor="hub:products:products" search={metaKey === 'barcode' ? String(item?.label || '') : undefined} focus={focus} navigate={navigateTo} title={tr('open_product', 'Open product', 'បើកផលិតផល')}>
+                        {pill}
+                      </EntityLink>
                     </span>
                   )
                 })}
@@ -3698,7 +3720,11 @@ function ProductsFullEditor() {
                   inside its cell. .scroll-x-clean is the ONE shared class for
                   every product-name cell on every surface (styles/main.css)
                   -- no per-file scroll CSS. */}
-              <div {...getKhmerTextProps(productName, `scroll-x-clean text-gray-900 dark:text-white ${indented ? 'font-medium' : 'font-semibold'}`)} {...copy(productName)}>{productName}</div>
+              <div {...getKhmerTextProps(productName, `scroll-x-clean text-gray-900 dark:text-white ${indented ? 'font-medium' : 'font-semibold'}`)} {...copy(productName)}>
+                <EntityLink page="products" anchor="hub:products:products" search={productName} navigate={navigateTo} title={tr('open_product', 'Open product', 'បើកផលិតផល')}>
+                  {productName}
+                </EntityLink>
+              </div>
             </div>
             {dupInfo ? (
               <DuplicateResolverControl
@@ -3725,6 +3751,7 @@ function ProductsFullEditor() {
             renderMetaPill={renderMetaPill}
             tr={tr}
             fmtUSD={fmtUSD}
+            navigateTo={navigateTo}
           />
         </td>
         <td className="px-3 py-2 text-right col-highlight-red">
@@ -3924,7 +3951,9 @@ function ProductsFullEditor() {
                     leaves touch-action alone so a vertical swipe starting on a
                     name still scrolls the list. */}
                 <div {...getKhmerTextProps(productName, 'scroll-x-clean text-sm font-semibold text-gray-900 dark:text-white')} {...copy(productName)}>
-                  {productName}
+                  <EntityLink page="products" anchor="hub:products:products" search={productName} navigate={navigateTo} title={tr('open_product', 'Open product', 'បើកផលិតផល')}>
+                    {productName}
+                  </EntityLink>
                 </div>
               </div>
               {/* Batch count rides the name row as a small YELLOW badge
@@ -3958,7 +3987,7 @@ function ProductsFullEditor() {
                   {...copy(barcode)}
                   title={barcode}
                 >
-                  {barcode}
+                    <EntityLink page="products" anchor="hub:products:products" search={barcode} navigate={navigateTo} title={tr('open_product', 'Open product', 'បើកផលិតផល')}>{barcode}</EntityLink>
                 </span>
               ) : null}
               {brandName ? (
@@ -3971,7 +4000,7 @@ function ProductsFullEditor() {
                   {...copy(brandName)}
                   title={brandName}
                 >
-                  {brandName}
+                  <EntityLink page="products" anchor="hub:products:products" search={brandName} navigate={navigateTo} title={tr('open_product', 'Open product', 'បើកផលិតផល')}>{brandName}</EntityLink>
                 </span>
               ) : null}
             </div>
@@ -4868,6 +4897,7 @@ function ProductsFullEditor() {
             unitMap={unitMap}
             brandColorMap={brandColorMap}
             fmtUSD={fmtUSD}
+            navigateTo={navigateTo}
             fmtKHR={fmtKHR}
             t={t}
             onEdit={()=>{setDetailProduct(null);openProductFormTab(detailProduct, 'basic')}}

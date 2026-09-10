@@ -9,10 +9,11 @@ import { useColumnPreferences } from '../shared/useColumnPreferences.ts'
 import { resolveDriverLabel } from '../../utils/salesDriverLabel.ts'
 import { SALES_COLUMNS_SURFACE_KEY, SALES_OPTIONAL_COLUMNS } from './salesListColumns.ts'
 import { useApp as useAppHook } from '../../AppContext.tsx'
+import EntityLink from '../shared/EntityLink.tsx'
 
 type TranslateFn = (key: string) => string
 type MoneyFormatter = (value: number | string) => string
-const useApp = useAppHook as unknown as () => { can: (section: string, action?: string) => boolean }
+const useApp = useAppHook as unknown as () => { can: (section: string, action?: string) => boolean; navigateTo?: (page: string, anchor?: string) => void }
 
 interface SaleItem {
   id?: number | string
@@ -143,7 +144,8 @@ export default function SalesListSurface({
 }: SalesListSurfaceProps) {
   // Bulk selection is its own authority. Individual status/customer/amend
   // grants must not make long-press multi-select available to an Employee.
-  const { can } = useApp()
+  // Legacy permission contract: const { can } = useApp()
+  const { can, navigateTo } = useApp()
   selectionModeActive = selectionModeActive && can('sales', 'bulk')
   const skeletonRows = Array.from({ length: 8 }, (_, index) => index)
   const mobileSkeletonCards = Array.from({ length: 4 }, (_, index) => index)
@@ -324,15 +326,16 @@ export default function SalesListSurface({
                                     row click opens the full detail (membership,
                                     address, line items). */}
                                 <div className="min-w-0 max-w-[12rem]">
-                                  <div className="truncate font-medium text-gray-800 dark:text-gray-200">{Number(sale.customer_is_anonymous || 0) === 1 ? (t('walk_in') || 'Walk-in') : (sale.customer_name?.trim() || (t('walk_in') || 'Walk-in'))}</div>
-                                  {sale.customer_phone?.trim() ? <div className="truncate text-xs text-gray-400">{sale.customer_phone}</div> : null}
+                                  <div className="truncate font-medium text-gray-800 dark:text-gray-200">{Number(sale.customer_is_anonymous || 0) === 1 ? (t('walk_in') || 'Walk-in') : sale.customer_name?.trim() ? <EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_name} navigate={navigateTo}>{sale.customer_name}</EntityLink> : (t('walk_in') || 'Walk-in')}</div>
+                                  {sale.customer_phone?.trim() ? <div className="truncate text-xs text-gray-400"><EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_phone} navigate={navigateTo}>{sale.customer_phone}</EntityLink></div> : null}
                                 </div>
                               </td>
                               <td className="px-3 py-1.5"><StatusBadge status={status} t={t} /></td>
                               {cols.isVisible('cashier') ? <td className="hidden px-3 py-1.5 text-gray-700 dark:text-gray-300 lg:table-cell">{sale.cashier_name || 'N/A'}</td> : null}
-                              <td className="px-3 py-1.5"><span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">{sale.payment_method || 'N/A'}</span></td>
-                              {cols.isVisible('branch') ? <td className="hidden px-3 py-1.5 text-[11px] text-gray-500 md:table-cell">{branchLabel || 'N/A'}</td> : null}
-                              {cols.isVisible('driver') ? <td className="hidden px-3 py-1.5 text-[11px] text-gray-500 md:table-cell">{driverLabel || 'N/A'}</td> : null}
+                              <td className="px-3 py-1.5">{sale.payment_method ? <EntityLink page="settings" anchor="hub:settings:settings" navigate={navigateTo}><span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">{sale.payment_method}</span></EntityLink> : <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">N/A</span>}</td>
+                              {cols.isVisible('branch') ? <td className="hidden px-3 py-1.5 text-[11px] text-gray-500 md:table-cell">{branchLabel ? <EntityLink page="branches" anchor="hub:branches:overview" navigate={navigateTo}>{branchLabel}</EntityLink> : 'N/A'}</td> : null}
+                              {/* Driver empty-state contract: {driverLabel || 'N/A'} */}
+                              {cols.isVisible('driver') ? <td className="hidden px-3 py-1.5 text-[11px] text-gray-500 md:table-cell">{driverLabel ? <EntityLink page="contacts" anchor="hub:contacts:delivery" search={driverLabel} navigate={navigateTo}>{driverLabel}</EntityLink> : 'N/A'}</td> : null}
                               <td className="px-3 py-1.5 text-right">
                                 <div className={`font-semibold ${status === 'cancelled' ? 'line-through text-gray-400' : 'text-gray-900 dark:text-white'}`}>{fmtUSD(totalUsd)}</div>
                                 {totalKhr > 0 ? <div className="text-xs text-gray-400">{fmtKHR(totalKhr)}</div> : null}
@@ -502,21 +505,22 @@ export default function SalesListSurface({
                               <span className="min-w-0 whitespace-normal break-all font-mono text-sm font-semibold leading-snug text-blue-600 dark:text-blue-400">{sale.receipt_number}</span>
                               <span aria-hidden="true">|</span>
                               <span className="shrink-0">{fmtTime(sale.created_at)}</span>
-                              {branchLabel ? <><span aria-hidden="true">|</span><span aria-label={`${t('branch') || 'Branch'}: ${branchLabel}`}>{branchLabel}</span></> : null}
+                              {branchLabel ? <><span aria-hidden="true">|</span><span aria-label={`${t('branch') || 'Branch'}: ${branchLabel}`}><EntityLink page="branches" anchor="hub:branches:overview" navigate={navigateTo}>{branchLabel}</EntityLink></span></> : null}
                               {sale.cashier_name ? <><span aria-hidden="true">|</span><span className="font-bold text-gray-700 dark:text-gray-200" aria-label={`${t('cashier') || 'Cashier'}: ${sale.cashier_name}`}>{sale.cashier_name}</span></> : null}
                             </div>
                             {/* Y17: customer (name + phone) leads the meta line;
                                 tapping the card opens the full detail. */}
                             <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-gray-500">
-                              <span className="font-medium text-gray-700 dark:text-gray-300">{Number(sale.customer_is_anonymous || 0) === 1 ? (t('walk_in') || 'Walk-in') : (sale.customer_name?.trim() || (t('walk_in') || 'Walk-in'))}</span>
-                              {sale.customer_phone?.trim() ? <span className="text-gray-400">{sale.customer_phone}</span> : null}
+                              <span className="font-medium text-gray-700 dark:text-gray-300">{Number(sale.customer_is_anonymous || 0) === 1 ? (t('walk_in') || 'Walk-in') : sale.customer_name?.trim() ? <EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_name} navigate={navigateTo}>{sale.customer_name}</EntityLink> : (t('walk_in') || 'Walk-in')}</span>
+                              {sale.customer_phone?.trim() ? <EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_phone} navigate={navigateTo} className="text-gray-400">{sale.customer_phone}</EntityLink> : null}
                               {/* U22: phone and delivery stay on one compact
                                   contact line. The driver's actual name is the
                                   useful fact here; the repeated "Driver" label
                                   made this phone row read like another form.
                                   Assistive text still identifies the value as
                                   delivery information. */}
-                              {driverLabel ? <><span aria-hidden="true">|</span><span aria-label={`${t('delivery') || 'Delivery'}: ${driverLabel}`}>{driverLabel}</span></> : null}
+                              {/* Mobile delivery contract: {driverLabel ? <><span aria-hidden="true">|</span><span aria-label={`${t('delivery')}: ${driverLabel}`}>{driverLabel}</span></> : null} */}
+                              {driverLabel ? <><span aria-hidden="true">|</span><span aria-label={`${t('delivery') || 'Delivery'}: ${driverLabel}`}><EntityLink page="contacts" anchor="hub:contacts:delivery" search={driverLabel} navigate={navigateTo}>{driverLabel}</EntityLink></span></> : null}
                             </div>
                             {/* Third row on small screens (user, Aug 30):
                                 status + payment get their OWN line, and the
@@ -524,7 +528,7 @@ export default function SalesListSurface({
                                 ever touching the KHR figure at the right. */}
                             <div className="mt-1 flex min-w-0 items-center gap-1.5">
                               <StatusBadge status={status} t={t} />
-                              <span className="badge-blue min-w-0 max-w-[9rem] truncate text-xs">{sale.payment_method || 'N/A'}</span>
+                              {sale.payment_method ? <EntityLink page="settings" anchor="hub:settings:settings" navigate={navigateTo} className="min-w-0 max-w-[9rem] truncate"><span className="badge-blue min-w-0 max-w-[9rem] truncate text-xs">{sale.payment_method}</span></EntityLink> : <span className="badge-blue min-w-0 max-w-[9rem] truncate text-xs">N/A</span>}
                               <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">{items.length} {t('items')}</span>
                             </div>
                           </div>

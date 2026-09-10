@@ -18,6 +18,7 @@ import { batchDisplayLabel } from '../../../utils/batchLabel.ts'
 import { formatHistoryReference, historyReference } from '../../../utils/historyRowModel.ts'
 import { useApp } from '../../../AppContext'
 import AttributeSupplierModal from './AttributeSupplierModal.tsx'
+import EntityLink from '../../shared/EntityLink.tsx'
 
 // D3 (Part 422; reworked Part 563): the detail page's report sections, per
 // the user's Aug-28 spec -- movement history WITH the running balance, sales
@@ -136,7 +137,7 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
   fmtUSD: (value: unknown) => string
 }) {
   // Supplier attribution (item 3) is a product edit; notify surfaces the result.
-  const { can, notify } = useApp() as { can: (section: string, action: string) => boolean; notify: (message: unknown, type?: string) => void }
+  const { can, notify, navigateTo } = useApp() as { can: (section: string, action: string) => boolean; notify: (message: unknown, type?: string) => void; navigateTo?: (page: string, anchor?: string) => void }
   const canAttributeSupplier = can('products', 'edit')
   const [attributeOpen, setAttributeOpen] = useState(false)
   // Bumped after a backfill to re-pull the detail report so the Suppliers/
@@ -408,7 +409,10 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
                     <p className="py-1 text-center text-gray-400">{tr('no_data_found', 'No data found')}</p>
                   ) : drill.map((sale) => (
                     <div key={sale.id} className="flex items-center justify-between gap-2">
-                      <span className="detail-scroll-text min-w-0 flex-1 font-mono text-gray-500" title={sale.customer_name || ''}>{sale.receipt_number || `#${sale.id}`}</span>
+                      <EntityLink page="sales" anchor="hub:sales:sales" navigate={navigateTo} className="detail-scroll-text min-w-0 flex-1 font-mono text-gray-500" title={tr('open_sale', 'Open sale')}>
+                        {sale.receipt_number || `#${sale.id}`}
+                      </EntityLink>
+                      {sale.customer_name ? <EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_name} navigate={navigateTo} className="detail-scroll-text min-w-0 max-w-[8rem] text-gray-400" title={tr('open_customer', 'Open customer')}>{sale.customer_name}</EntityLink> : null}
                       <span className="shrink-0 whitespace-nowrap text-gray-400">{fmtDateTime24(sale.created_at)}</span>
                       <span className="shrink-0 tabular-nums font-semibold text-gray-700 dark:text-gray-200">×{sale.qty}</span>
                       <span className="shrink-0 tabular-nums text-gray-500">{fmtUSD(sale.revenue_usd)}</span>
@@ -455,19 +459,25 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
         return (
           <div key={supplier.supplier_key}>
             {/* Click a supplier to open the lots it delivered for THIS product. */}
-            <button type="button" onClick={() => toggleSupplierRow(supplier.supplier_key)} className="w-full rounded-lg bg-gray-50 px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-gray-100 dark:bg-gray-800/60 dark:hover:bg-gray-800">
+            <div className="w-full rounded-lg bg-gray-50 px-2.5 py-1.5 text-left text-xs dark:bg-gray-800/60">
               <div className="flex items-center justify-between gap-2">
-                <span className="detail-scroll-text min-w-0 flex-1 font-semibold text-gray-700 dark:text-gray-200">{supplier.supplier_name || tr('unknown', 'Unknown')}</span>
-                <span className="flex shrink-0 items-center gap-2">
+                {supplier.supplier_name ? (
+                  <EntityLink page="contacts" anchor="hub:contacts:suppliers" search={supplier.supplier_name} navigate={navigateTo} className="detail-scroll-text min-w-0 flex-1 font-semibold text-gray-700 dark:text-gray-200" title={tr('open_supplier', 'Open supplier')}>
+                    {supplier.supplier_name}
+                  </EntityLink>
+                ) : (
+                  <span className="detail-scroll-text min-w-0 flex-1 font-semibold text-gray-700 dark:text-gray-200">{tr('unknown', 'Unknown')}</span>
+                )}
+                <button type="button" onClick={() => toggleSupplierRow(supplier.supplier_key)} aria-expanded={open} className="flex shrink-0 items-center gap-2 rounded px-1 py-0.5 hover:bg-gray-100 dark:hover:bg-gray-700">
                   <span className="tabular-nums text-gray-500">{supplier.lot_count} {tr('batches', 'Received dates').toLowerCase()} · {supplier.current_qty}</span>
                   <ChevronDown className={`h-3 w-3 shrink-0 text-gray-300 transition-transform ${open ? 'rotate-180' : ''}`} />
-                </span>
+                </button>
               </div>
-              <div className="mt-0.5 flex items-center justify-between text-[11px] text-gray-400">
+              <button type="button" onClick={() => toggleSupplierRow(supplier.supplier_key)} className="mt-0.5 flex w-full items-center justify-between text-left text-[11px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
                 <span>{supplier.first_received_at ? fmtDate(supplier.first_received_at) : '--'} → {supplier.last_received_at ? fmtDate(supplier.last_received_at) : '--'}</span>
                 {supplier.lots_without_cost > 0 ? <span>{supplier.lots_without_cost} {tr('lots_without_cost', 'without cost')}</span> : null}
-              </div>
-            </button>
+              </button>
+            </div>
             {open ? (
               <div className="mt-0.5 space-y-0.5 rounded-lg bg-gray-100/70 px-2 py-1.5 text-[11px] dark:bg-gray-800/40">
                 {drill === 'loading' || drill === undefined ? (
@@ -479,6 +489,7 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
                 ) : drill.map((lot) => (
                   <div key={lot.id} className="flex items-center justify-between gap-2">
                     <span className="detail-scroll-text min-w-0 flex-1 text-gray-500">{batchDisplayLabel({ id: lot.id, lot_code: lot.lot_code, received_at: lot.received_at }, tr('batch', 'Received date'))}</span>
+                    {lot.supplier_name ? <EntityLink page="contacts" anchor="hub:contacts:suppliers" search={lot.supplier_name} navigate={navigateTo} className="detail-scroll-text max-w-[8rem] text-gray-400" title={tr('open_supplier', 'Open supplier')}>{lot.supplier_name}</EntityLink> : null}
                     <span className="shrink-0 whitespace-nowrap text-gray-400">{lot.received_at ? fmtDate(lot.received_at) : '--'}</span>
                     <span className="shrink-0 tabular-nums font-semibold text-gray-700 dark:text-gray-200">×{lot.total_qty}</span>
                     <span className="shrink-0 tabular-nums text-gray-500">{lot.unit_cost_usd != null ? fmtUSD(lot.unit_cost_usd) : '--'}</span>

@@ -15,6 +15,7 @@ import { lazyRetry } from '../../../utils/lazyImport.ts'
 import { ADMIN_MAX_PRODUCT_GALLERY_IMAGES } from '../helpers/productGalleryHelpers.ts'
 import { useLowStockConfig } from '../../../AppContext'
 import { effectiveLowStockThreshold } from '../../../utils/lowStockSettings.ts'
+import EntityLink, { type EntityNavigate } from '../../shared/EntityLink.tsx'
 
 const ProductDescriptionDetailModal = lazyRetry(() => import('./ProductDescriptionDetailModal'), 'products-description-detail-modal')
 // D3 (Part 422): the detail page's report sections (batch summary,
@@ -102,6 +103,7 @@ type ProductDetailModalProps = {
   onClose: () => void
   onImageClick?: (imagePath: string, gallery: string[], index: number) => void
   onManageBatches?: () => void
+  navigateTo?: EntityNavigate
   t?: Translate
 }
 
@@ -125,6 +127,7 @@ export default function ProductDetailModal({
   onClose,
   onImageClick,
   onManageBatches,
+  navigateTo,
   t,
 }: ProductDetailModalProps) {
   const [descriptionDetailOpen, setDescriptionDetailOpen] = useState(false)
@@ -244,7 +247,12 @@ export default function ProductDetailModal({
               )}
             </div>
             <div className="min-w-0">
-              <div className="break-words font-bold text-gray-900 dark:text-white" {...copy(productName)}>{productName}</div>
+              {/* The title text is an EntityLink so it is directly openable;
+                  the legacy responsive contract remains a wrapping title. */}
+              {/* break-words font-bold text-gray-900 dark:text-white">{productName} */}
+              <div className="break-words font-bold text-gray-900 dark:text-white" {...copy(productName)}>
+                <EntityLink page="products" anchor="hub:products:products" search={productName} navigate={navigateTo} title={T('open_product', 'Open product')}>{productName}</EntityLink>
+              </div>
               {/* Category/brand/SKU stay compact but expose their complete
                   values through horizontal touch scrolling. */}
               <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-gray-500 dark:text-gray-400">
@@ -256,8 +264,8 @@ export default function ProductDetailModal({
                     never opens with a stray dot when a product has no
                     barcode or SKU. */}
                 {p.sku ? <span className="detail-scroll-text max-w-[100px] font-mono" title={p.sku}>{p.sku}</span> : null}
-                {p.category ? <span className="detail-scroll-text max-w-[110px]" title={p.category}>{p.sku ? '· ' : ''}{p.category}</span> : null}
-                {p.brand ? <span className="detail-scroll-text max-w-[110px]" {...copy(p.brand)} title={p.brand}>&middot; {p.brand}</span> : null}
+                {p.category ? <span className="detail-scroll-text max-w-[110px]" title={p.category}>{p.sku ? '· ' : ''}<EntityLink page="products" anchor="hub:products:products" focus={{ category: p.category }} navigate={navigateTo} title={T('open_product', 'Open product')}>{p.category}</EntityLink></span> : null}
+                {p.brand ? <span className="detail-scroll-text max-w-[110px]" {...copy(p.brand)} title={p.brand}>&middot; <EntityLink page="products" anchor="hub:products:products" focus={{ brand: p.brand }} navigate={navigateTo} title={T('open_product', 'Open product')}>{p.brand}</EntityLink></span> : null}
               </div>
             </div>
           </div>
@@ -282,9 +290,10 @@ export default function ProductDetailModal({
               {/* Left mini-section: the compact identity + stock facts. */}
               <div className="min-w-0 space-y-2.5 sm:pr-5">
                 <div className="grid grid-cols-1 gap-y-1.5">
-                  {p.barcode ? <Row label={T('barcode', 'Barcode')}><span className="whitespace-nowrap font-mono" {...copy(p.barcode)}>{p.barcode}</span></Row> : null}
+                  {/* barcode contract: <span className="whitespace-nowrap font-mono">{p.barcode}</span> */}
+                  {p.barcode ? <Row label={T('barcode', 'Barcode')}><EntityLink page="products" anchor="hub:products:products" search={p.barcode} navigate={navigateTo} title={T('open_product', 'Open product')}><span className="whitespace-nowrap font-mono" {...copy(p.barcode)}>{p.barcode}</span></EntityLink></Row> : null}
                   {p.sku ? <Row label={T('sku', 'SKU')}><span className="font-mono">{p.sku}</span></Row> : null}
-                  {p.supplier ? <Row label={T('label_supplier', 'Supplier')}><span {...copy(p.supplier)}>{p.supplier}</span></Row> : null}
+                  {p.supplier ? <Row label={T('label_supplier', 'Supplier')}><EntityLink page="contacts" anchor="hub:contacts:suppliers" search={p.supplier} navigate={navigateTo} title={T('open_supplier', 'Open supplier')}><span {...copy(p.supplier)}>{p.supplier}</span></EntityLink></Row> : null}
                   {/* Stock + Status moved to the right column after Margin
                       (Aug 30 ask) -- identity facts stay here. */}
                   {expiryDate ? (
@@ -318,7 +327,7 @@ export default function ProductDetailModal({
                               : 'bg-gray-100 text-gray-400 dark:bg-gray-700'
                           }`}
                         >
-                          {bs.branch_name}: {branchQuantity}
+                          <EntityLink page="branches" anchor="hub:branches:overview" navigate={navigateTo}>{bs.branch_name}</EntityLink>: {branchQuantity}
                         </span>
                         )
                       })}
@@ -384,14 +393,16 @@ export default function ProductDetailModal({
                 ) : null}
                 {/* Stock + Status directly after Margin (Aug 30 ask). */}
                 <Row label={T('label_stock', 'Stock')}>
-                  <strong className="text-gray-900 dark:text-white">{stockQuantity}</strong>
+                    <strong className="text-gray-900 dark:text-white">{stockQuantity}</strong>
                   {p.unit ? (
                     unitColor ? (
-                      <span className="ml-2 inline-flex rounded-full px-2 py-0.5 text-xs font-semibold" style={{ background: unitColor, color: getContrastingTextColor(unitColor) }}>
-                        {p.unit}
-                      </span>
+                      <EntityLink page="products" anchor="hub:products:products" focus={{ unit: p.unit }} navigate={navigateTo} title={T('open_unit_products', 'Open products using this unit')} className="ml-2 text-inherit no-underline hover:text-inherit">
+                        <span className="inline-flex rounded-full px-2 py-0.5 text-xs font-semibold" style={{ background: unitColor, color: getContrastingTextColor(unitColor) }}>
+                          {p.unit}
+                        </span>
+                      </EntityLink>
                     ) : (
-                      <span className="ml-1">{p.unit}</span>
+                      <EntityLink page="products" anchor="hub:products:products" focus={{ unit: p.unit }} navigate={navigateTo} title={T('open_unit_products', 'Open products using this unit')} className="ml-1">{p.unit}</EntityLink>
                     )
                   ) : null}
                 </Row>
