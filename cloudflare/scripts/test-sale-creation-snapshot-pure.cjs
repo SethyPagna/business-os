@@ -188,6 +188,10 @@ for (const [file, origin] of [
   assert.match(writer, /creation_snapshot_json/, `${file} must persist the envelope in the sale insert`)
   assert.match(writer, /customerSnapshot:/, `${file} must decide captured customer evidence explicitly`)
   assert.match(writer, /membershipSnapshot:/, `${file} must decide captured membership evidence explicitly`)
+  if (file === 'routes/sales.ts') {
+    assert.match(writer, /search_normalized, items, creation_snapshot_json/, 'POS sale inserts must persist compatibility items JSON')
+    assert.match(writer, /items:\s*JSON\.stringify\(priced\.map/, 'POS compatibility items must be built from server-priced lines')
+  }
 }
 assert.match(source('lib/backup.ts'), /export const BACKUP_TABLES = \[[\s\S]*?'sales'/, 'sales snapshot column rides the existing sales backup')
 

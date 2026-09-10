@@ -146,20 +146,6 @@ function num(value: unknown): number {
   return Number.isFinite(n) ? n : 0
 }
 
-function saleItemCount(value: unknown): number {
-  let rows: unknown = value
-  if (typeof rows === 'string') {
-    try { rows = JSON.parse(rows) } catch { return 0 }
-  }
-  if (!Array.isArray(rows)) return 0
-  return rows.reduce((total, item) => {
-    if (!item || typeof item !== 'object') return total
-    const row = item as Record<string, unknown>
-    const quantity = num(row.quantity ?? row.qty ?? 1)
-    return total + Math.max(0, quantity)
-  }, 0)
-}
-
 function clampInt(value: unknown, fallback: number, min: number, max: number): number {
   const n = Number.parseInt(String(value ?? ''), 10)
   if (!Number.isFinite(n)) return fallback
@@ -308,7 +294,8 @@ async function dashboardSummary(env: Env, query: Record<string, string>) {
       WHERE p.is_active = 1 AND expiry_date IS NOT NULL AND date(expiry_date) <= date('now', '+' || COALESCE(expiry_alert_days, 30) || ' day')
     `).get(params),
     db.prepare(`
-      SELECT id, receipt_number, created_at, sale_status, branch_name, customer_name, cashier_name, total_usd, total_khr, items
+      SELECT id, receipt_number, created_at, sale_status, branch_name, customer_name, cashier_name, total_usd, total_khr,
+        (SELECT COALESCE(SUM(quantity), 0) FROM sale_items WHERE sale_id = sales.id) AS item_count
       FROM sales
       WHERE ${localDateRangeClause('created_at')}${saleBranchClause('sales')}
       ORDER BY created_at DESC, id DESC
@@ -341,7 +328,10 @@ async function dashboardSummary(env: Env, query: Record<string, string>) {
     expiring_count: num((expiringCount as Record<string, unknown>)?.count),
     recent_sales: (recentSales || []).map((sale) => ({
       ...sale,
-      item_count: saleItemCount((sale as Record<string, unknown>).items),
+      // The relational sale_items table is canonical.  Do not derive this
+      // from the legacy sales.items JSON, which was empty for older and some
+      // recent writes and caused real sales to display as 0 items.
+      item_count: num((sale as Record<string, unknown>).item_count),
     })),
   }
 }

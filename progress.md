@@ -12367,3 +12367,47 @@ rollback, replay, permission, offline-request, and paged-history suites also
 passed. These are repository and pure-kernel checks; they do not replace the
 owner's physical iOS/PWA/camera run or authenticated browser smoke, which remain
 blocked by the Cloudflare bot challenge/device availability.
+
+## Backend production data audit and sale-item compatibility repair — September 11, 2026
+
+Read-only audit was run against the live `business-os` D1 primary in HKG/APAC
+through the authenticated Wrangler wrapper. Every query reported
+`changed_db: false`, `rows_written: 0`, and the database size remained
+`168,497,152` bytes. No production row, migration, stock count, customer link,
+duplicate, or image record was changed.
+
+The audit confirmed the main cause of the reported “0 items but a sale total”
+display: **146 sales have relational `sale_items` lines while legacy
+`sales.items` is an empty JSON array**. The POST sale writer inserted the
+canonical lines but omitted the compatibility `items` column, and the dashboard
+compatibility summary counted that stale JSON. The writer now persists a
+server-priced compatibility projection, and the dashboard summary now derives
+`item_count` from canonical `sale_items`. The focused sale-creation snapshot and
+dashboard date-range suites pass, as does Worker typecheck.
+
+The following invariants were clean in the same audit: malformed sale JSON 0;
+non-empty JSON without relational lines 0; sale subtotal mismatches 0; duplicate
+receipt numbers 0; duplicate sale client request keys 0; sale/customer,
+sale-item/product, return/sale, and record-event/sale orphans 0; negative sale
+money 0; invalid sale statuses 0; negative branch stock 0; duplicate branch or
+batch stock keys 0; invalid return quantities/money 0; invalid transfer rows 0;
+and malformed record payloads 0. There are 10 expected `Delivery service`
+sale-item rows with no product id, not product orphans.
+
+The remaining production findings are evidence-bound and were deliberately not
+rewritten: one completed sale (id 16896) has a null header branch and three
+mixed Shop/other branch lines; two zero-line sales carry only a delivery fee;
+six active products disagree with branch-stock totals and 17 disagree with
+batch-stock totals; duplicate candidate groups remain for products (exact and
+leading-zero barcode/name candidates), three customer phone groups, and
+name-only supplier clusters; “General” is split between one anonymous walk-in
+and three membership-bearing profiles; 71 legacy sales have a non-delivery flag
+with a non-zero delivery fee; and 50 product plus 50 gallery image references do
+not exactly match `file_assets` metadata. These require source evidence or an
+owner-approved mapping before any merge, stock correction, branch assignment,
+customer relink, or R2 deletion. No blind cleanup was run.
+
+The compatibility repair is committed separately from release batches. It still
+needs the normal Worker release upload before it can affect new sales; existing
+historical rows remain readable through the canonical `/api/sales` relational
+join, while the dashboard has a correct relational count in the patched build.

@@ -222,6 +222,9 @@ const NEW_TODAY = `date(created_at, '+7 hours') = date('now', '+7 hours') AND cr
   }
   check('compat.ts returns the field names consumed by the dashboard',
     /AS return_count/.test(src) && /AS items_returned/.test(src) && /AS loss_usd/.test(src))
+  check('compat.ts derives recent-sale item counts from canonical sale_items rows',
+    /SUM\(quantity\), 0\) FROM sale_items WHERE sale_id = sales\.id/.test(src)
+    && /item_count: num\(\(sale as Record<string, unknown>\)\.item_count\)/.test(src))
   check('compat.ts breakdowns share the canonical recognized net-sale formula',
     /recognizedExpr\(`\$\{alias\}\.`\)/.test(src) && /netSaleExpr\('s\.'\)/.test(src) && /CUSTOMER_REFUND_JOIN/.test(src))
   // The default window is the business day itself, matching every list page

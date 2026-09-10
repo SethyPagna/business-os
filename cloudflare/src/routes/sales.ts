@@ -978,7 +978,7 @@ app.post('/', async (c) => {
         is_delivery, delivery_contact_id, delivery_contact_name, delivery_contact_phone, delivery_contact_address,
         delivery_fee_usd, delivery_fee_khr, delivery_fee_paid_by,
         delivery_actual_cost_usd, delivery_actual_cost_khr,
-        loyalty_accrual, sale_status, search_normalized, creation_snapshot_json, created_at, updated_at
+        loyalty_accrual, sale_status, search_normalized, items, creation_snapshot_json, created_at, updated_at
       ) SELECT @receipt_number, @client_request_id, @cashier_id, @cashier_name, @branch_id, @branch_name,
         @customer_id, @customer_name, @customer_phone, @customer_address,
         @payment_method, @payment_details, @payment_currency, @exchange_rate,
@@ -988,7 +988,7 @@ app.post('/', async (c) => {
         @is_delivery, @delivery_contact_id, @delivery_contact_name, @delivery_contact_phone, @delivery_contact_address,
         @delivery_fee_usd, @delivery_fee_khr, @delivery_fee_paid_by,
         @delivery_actual_cost_usd, @delivery_actual_cost_khr,
-        @loyalty_accrual, @sale_status, @search_normalized, @creation_snapshot_json, COALESCE(@created_at, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP
+        @loyalty_accrual, @sale_status, @search_normalized, @items, @creation_snapshot_json, COALESCE(@created_at, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP
       WHERE @customer_guard_id IS NULL OR EXISTS (
         SELECT 1 FROM customers
         WHERE id = @customer_guard_id
@@ -1035,6 +1035,32 @@ app.post('/', async (c) => {
           .join(' '),
       ),
       creation_snapshot_json: creationSnapshotJson,
+      // Keep the legacy compatibility projection in sync with the canonical
+      // sale_items rows.  The Sales list joins sale_items directly, but the
+      // dashboard/export compatibility endpoint still reads this column for
+      // older clients.  Build it from server-priced values so stale or
+      // client-supplied totals can never leak into the compatibility view.
+      items: JSON.stringify(priced.map((item) => ({
+        product_id: item.product_id,
+        product_name: item.product_name,
+        quantity: item.quantity,
+        applied_price_usd: item.canonicalMoney.appliedPriceUsd,
+        applied_price_khr: item.canonicalMoney.appliedPriceKhr,
+        base_price_usd: item.canonicalMoney.basePriceUsd,
+        base_price_khr: item.canonicalMoney.basePriceKhr,
+        product_discount_usd: Number(item.product_discount_usd) || 0,
+        product_discount_khr: Number(item.product_discount_khr) || 0,
+        manual_discount_usd: item.canonicalMoney.manualDiscountUsd,
+        manual_discount_khr: item.canonicalMoney.manualDiscountKhr,
+        total_usd: item.lineTotalUsd,
+        total_khr: Math.round(item.lineTotalUsd * exchangeRate),
+        cost_price_usd: item.costPriceUsd,
+        cost_price_khr: item.costPriceKhr,
+        branch_id: item.branch_id,
+        batch_id: item.batch_id || null,
+        batch_label: item.batch_label || null,
+        batch_expiry_date: item.batch_expiry_date || null,
+      }))),
       payment_method: paymentMethod,
       payment_details: JSON.stringify(effectivePaymentDetails),
       payment_currency: body.payment_currency || 'USD',
