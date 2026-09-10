@@ -45,14 +45,48 @@ insert.run(4, 'action_undo', 'return', '{"kind":"return.fields.bulk"}', old)
 insert.run(5, 'action_redo', 'return', '{"kind":"return.fields.bulk"}', old)
 insert.run(6, 'action_redo', 'product', '{"kind":"return.fields.bulk"}', old)
 insert.run(7, 'update', 'sale', '{}', '2026-09-07 00:00:00')
+const requestId = 'shift_request_123456'
+const request = { id: requestId, target: 17, canonical: JSON.stringify({ client_request_id: requestId, expected_revision: 2 }) }
+for (const [offset, action] of ['shift.close', 'shift.reopen', 'shift.amend', 'shift.cancel'].entries()) {
+  insert.run(8 + offset, action, 'shift_session', JSON.stringify({ request }), old)
+}
+// The route accepts numeric-string revisions too. Retention recognizes its
+// receipt envelope, not a stricter reimplementation of request validation.
+insert.run(99, 'shift.close', 'shift_session', JSON.stringify({ request: { ...request,
+  canonical: JSON.stringify({ client_request_id: requestId, expected_revision: '2' }),
+} }), old)
+const ordinaryShiftRows = [
+  ['shift.close', 'shift_session', '{}'],
+  ['shift.open', 'shift_session', JSON.stringify({ request })],
+  ['shift.open_after_cancel', 'shift_session', JSON.stringify({ request })],
+  ['shift.close', 'sale', JSON.stringify({ request })],
+  ['shift.close', 'shift_session', '{broken'],
+  ['shift.close', 'shift_session', null],
+  ...[
+    { ...request, id: 'short' },
+    { ...request, id: 'invalid request id' },
+    { ...request, target: null },
+    { ...request, target: 0 },
+    { ...request, canonical: null },
+    { ...request, canonical: '{broken' },
+    { ...request, canonical: '{}' },
+    { ...request, canonical: JSON.stringify({ client_request_id: 'different_request_id', expected_revision: 2 }) },
+    { ...request, canonical: JSON.stringify({ client_request_id: null }) },
+  ].map(request => ['shift.close', 'shift_session', JSON.stringify({ request })]),
+]
+for (const [offset, row] of ordinaryShiftRows.entries()) insert.run(12 + offset, ...row, old)
 
 const result = sqlite.prepare(sql).run({ cutoff: '2026-09-01 00:00:00' })
-assert.equal(result.changes, 4, 'only unrelated old audit rows are deleted')
+assert.equal(result.changes, 4 + ordinaryShiftRows.length, 'ordinary, legacy, malformed and unrelated Shift audits still expire')
 assert.deepEqual(
   sqlite.prepare('SELECT id FROM audit_logs ORDER BY id').all().map((row) => row.id),
-  [4, 5, 7],
-  'only Return bulk undo/redo actor/time evidence bypasses age retention',
+  [4, 5, 7, 8, 9, 10, 11, 99],
+  'only Return bulk replay and exact Shift lifecycle receipts bypass age retention',
 )
+for (const id of [8, 9, 10, 11]) {
+  assert.deepEqual(JSON.parse(sqlite.prepare('SELECT details FROM audit_logs WHERE id=?').get(id).details).request, request,
+    'retention preserves byte-equivalent request identity for later exact replay')
+}
 sqlite.close()
 
 const compatSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'compat.ts'), 'utf8')
@@ -65,4 +99,4 @@ assert.match(compatSource, /prepare\(buildAuditLogRetentionDeleteSql\(\)\)/,
 assert.doesNotMatch(compatSource, /DELETE FROM audit_logs WHERE id IN \(SELECT id FROM audit_logs WHERE created_at < @cutoff LIMIT 5000\)/,
   'manual retention must not retain its old blanket deletion path')
 
-console.log('audit retention: Return bulk replay provenance preserved narrowly')
+console.log('audit retention: Return bulk provenance and exact Shift lifecycle receipts preserved narrowly')
