@@ -47,7 +47,7 @@ const ExportRangeDialog = lazyRetry(() => import('../shared/ExportRangeDialog'),
 import { buildMovementGroups, getMovementGroupPage, movementColorClass, movementColorClassForRecord, movementGroupHaystack, translateMovementType } from './movementGroups'
 import { buildStockHealthSegments } from './stockHealthSummary'
 import { buildInventoryProductsSearchParams } from './inventoryProductsQuery.ts'
-import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
+import StatsStrip, { statsPresetRange, type StatCardDef } from '../shared/StatsStrip.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
 import { type DateTimeRange } from '../shared/DateTimeRangePicker'
 import { getSalesStatsStrip } from '../../api/salesTransport.ts'
@@ -419,7 +419,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   // Dashboard and Reports for the same dates.
   type InventoryStripKernel = { totals?: Record<string, number> }
   type InventoryStripReturns = { totals?: { count?: number; refund_usd?: number; compensation_usd?: number; loss_usd?: number }; by_type?: Array<{ return_type?: string; count?: number }> }
-  const [localStripRange, setLocalStripRange] = useState<DateTimeRange>(() => ({ startDate: '', endDate: '', startTime: '', endTime: '' }))
+  const [localStripRange, setLocalStripRange] = useState<DateTimeRange>(() => statsPresetRange('today'))
   const stripRange = dateRange ?? localStripRange
   const handleStripRangeChange = onDateRangeChange ?? setLocalStripRange
   const [stripKernel, setStripKernel] = useState<InventoryStripKernel | null>(null)
@@ -428,8 +428,15 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   const [stripLoading, setStripLoading] = useState(false)
   const stripRequestRef = useRef(0)
   const loadStatsStrip = useCallback(async (): Promise<void> => {
-    if (!isActive || !stripRange.startDate || !stripRange.endDate) return
+    if (!isActive) return
     const requestId = ++stripRequestRef.current
+    if (!stripRange.startDate || !stripRange.endDate) {
+      setStripKernel(null)
+      setStripCustomerReturns(null)
+      setStripSupplierReturns(null)
+      setStripLoading(false)
+      return
+    }
     setStripLoading(true)
     const dates = { startDate: stripRange.startDate, endDate: stripRange.endDate }
     try {
@@ -1985,8 +1992,9 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   // reading stockStats -- shelf counts are "as of now", not range-scoped.
   const kernelTotals = (stripKernel?.totals || {}) as Record<string, number>
   const stripDisplayTotals = normalizeDashboardGrossMetrics(kernelTotals)
-  const stripMoney = (value: number): string => (stripLoading ? '···' : fmtUSD(value))
-  const stripCount = (value: number): string => (stripLoading ? '···' : String(value))
+  const stripHasRange = !!stripRange.startDate && !!stripRange.endDate
+  const stripMoney = (value: number): string => (!stripHasRange ? '—' : stripLoading ? '···' : fmtUSD(value))
+  const stripCount = (value: number): string => (!stripHasRange ? '—' : stripLoading ? '···' : String(value))
   const stripRevenue = Number(kernelTotals.revenue_usd) || 0
   const stripCogs = Number(kernelTotals.cost_usd) || 0
   const stripProfit = Number(kernelTotals.profit_usd) || 0
@@ -2125,6 +2133,11 @@ ${inventoryFeesFormulaText}`,
       ],
     },
   )
+  // The sales kernel requires concrete endpoints. Mask the whole flow card,
+  // including an already-open detail, immediately when All time is selected.
+  const displayedStripCards = stripCards.map((card) => stripHasRange || ['products', 'stock-value'].includes(card.key)
+    ? card
+    : { ...card, value: '—', sub: undefined, details: undefined, tone: undefined })
   const selectedMovementGroups = useMemo(
     () => visibleMovementGroups.filter((group) => selectedMovementIds.has(group.id)),
     [selectedMovementIds, visibleMovementGroups],
@@ -2197,14 +2210,15 @@ ${inventoryFeesFormulaText}`,
   // stockStats and are labelled as current-state, not range-scoped.
   const [statsExportRange, setStatsExportRange] = useState<{ startDate: string; endDate: string } | null>(null)
   const runRangedStatsExport = useCallback(async (range: { startDate: string; endDate: string }) => {
-    const startDate = range.startDate || stripRange.startDate || ''
-    const endDate = range.endDate || stripRange.endDate || ''
+    const startDate = range.startDate
+    const endDate = range.endDate
     const dates = { startDate, endDate }
-    const [kernel, customer, supplier] = await Promise.all([
+    const hasRange = !!startDate && !!endDate
+    const [kernel, customer, supplier] = await Promise.all(hasRange ? [
       getSalesStatsStrip(dates).catch(() => null),
       getReturnsReport({ ...dates, scope: 'customer' }).catch(() => null),
       getReturnsReport({ ...dates, scope: 'supplier' }).catch(() => null),
-    ]) as Array<Record<string, any> | null>
+    ] : [null, null, null]) as Array<Record<string, any> | null>
     const totals = (kernel?.totals || {}) as Record<string, number>
     const cust = (customer?.totals || {}) as Record<string, number>
     const supp = (supplier?.totals || {}) as Record<string, number>
@@ -2230,7 +2244,8 @@ ${inventoryFeesFormulaText}`,
       { metric: 'customer_refund_usd', value: Number(cust.refund_usd) || 0 },
       { metric: 'supplier_returns', value: Number(supp.count) || 0 },
       { metric: 'supplier_loss_usd', value: Number(supp.loss_usd) || 0 },
-    ])
+    ].map((row) => !hasRange && !row.metric.endsWith('_current') && !row.metric.startsWith('range_')
+      ? { ...row, value: '—' } : row))
   }, [inStockCount, lowStockCount, outStockCount, stripRange.endDate, stripRange.startDate, totalProducts, totalValue])
 
   const inventoryExportItems = useMemo<any[]>(() => {
@@ -2537,7 +2552,7 @@ ${inventoryFeesFormulaText}`,
             )}
           />
           <StatsStrip
-            cards={stripCards}
+            cards={displayedStripCards}
             t={t}
           />
         </div>

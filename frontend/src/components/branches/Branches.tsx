@@ -20,7 +20,7 @@ import Modal from '../shared/Modal'
 import InfoHint from '../shared/InfoHint.tsx'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import FilterMenu from '../shared/FilterMenu'
-import type { DateTimeRange } from '../shared/DateTimeRangePicker'
+import { todayDateTimeRange, type DateTimeRange } from '../shared/DateTimeRangePicker'
 import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
@@ -523,12 +523,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
   // One page-level date scope. Current-stock branch cards are intentionally
   // snapshots, while every dated branch surface (transfer history and its
   // export) reads this same range.
-  const [localBranchDateRange, setLocalBranchDateRange] = useState<DateTimeRange>(() => ({
-    startDate: '',
-    endDate: '',
-    startTime: '',
-    endTime: '',
-  }))
+  const [localBranchDateRange, setLocalBranchDateRange] = useState<DateTimeRange>(() => todayDateTimeRange())
   const branchDateRange = dateRange ?? localBranchDateRange
   const handleBranchDateRangeChange = onDateRangeChange ?? setLocalBranchDateRange
   const [statDetail, setStatDetail] = useState<StatDetail | null>(null)

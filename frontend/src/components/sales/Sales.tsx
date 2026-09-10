@@ -34,7 +34,7 @@ import RenameCascadeModal, { type RenameCascadeChoice, type RenameCascadeRequest
 import { getFeesReport } from '../../api/feesTransport.ts'
 import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
 import ShiftHistoryModal from '../shifts/ShiftHistoryModal.tsx'
-import { EMPTY_DATE_TIME_RANGE, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
+import { todayDateTimeRange, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
 import { getUsers as fetchUsers } from '../../api/userReadTransport.ts'
 import {
   beginTrackedRequest,
@@ -392,7 +392,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // stats strip AND the receipts list — there is no separate hidden Period
   // filter. Receipts initially show all time; quick ranges are chosen inside
   // the opened date/time picker rather than silently pre-filtering to Today.
-  const [stripRange, setStripRange] = useState<DateTimeRange>(() => ({ ...EMPTY_DATE_TIME_RANGE }))
+  const [stripRange, setStripRange] = useState<DateTimeRange>(() => todayDateTimeRange())
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set())
   // The by-day report moved out to its own top-level Reports hub section
   // (ReportsHub.tsx); Sales now shows only the receipts list.
