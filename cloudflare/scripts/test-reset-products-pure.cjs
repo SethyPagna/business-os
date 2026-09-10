@@ -178,6 +178,8 @@ function seed() {
         DELETE FROM return_mutation_receipts;
         DELETE FROM return_create_receipts;
         DELETE FROM return_create_guards;
+        DELETE FROM transfer_operation_members;
+        DELETE FROM transfer_operation_receipts;
         DELETE FROM system_flags WHERE key='sale_record_events_reset_guard';`)
   const wipe = [
     'product_conflict_action_group_members', 'product_remove_operations',
@@ -250,6 +252,8 @@ function seed() {
   rawDbHandle.prepare("INSERT INTO stock_session_operations (id, actor_id, request_id, mode, request_json) VALUES ('reset-fixture', 1, 'reset-fixture', 'stock_in', '{}')").run()
   rawDbHandle.prepare("INSERT INTO stock_session_members (operation_id, line_id, command_kind, product_id, product_created, branch_id, batch_id, movement_id, quantity, unit_cost_usd) VALUES ('reset-fixture', 'line-1', 'receive', 1, 0, 1, 1, 1, 10, 2)").run()
   rawDbHandle.prepare('INSERT INTO stock_session_guards (id, guard_value) VALUES (1, 1)').run()
+  rawDbHandle.prepare("INSERT INTO transfer_operation_receipts(id,actor_id,request_id,request_digest,request_json,status,operation_id,provenance_version) VALUES(1,1,'reset-transfer','digest','{}','planning','reset-transfer-operation',1)").run()
+  rawDbHandle.prepare("INSERT INTO transfer_operation_members(receipt_id,ordinal,source_product_id,destination_product_id,source_branch_id,destination_branch_id,quantity,untracked_quantity,source_snapshot,destination_snapshot,allocations_json) VALUES(1,0,1,1,1,2,1,1,'{}','{}','[]')").run()
 
   // Untouched-by-products-reset control rows, to prove the "keep
   // everything else" half of the spec, not just the "delete products"

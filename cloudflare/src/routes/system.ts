@@ -329,7 +329,7 @@ app.post('/reset-data', async (c) => {
       }
 
       const deletes = tablesToClear.map((table) => ({ sql: `DELETE FROM "${table}"` }))
-      await db.batch(includeSales ? guardSaleRecordReset(deletes) : deletes)
+      await db.batch(guardSaleRecordReset(deletes))
       // Deliberately NOT touched by either toggle: customers, suppliers,
       // delivery_contacts, custom_fields, import job history, and every
       // settings/user/branch/category/unit table.
@@ -422,6 +422,8 @@ app.post('/reset-data', async (c) => {
 
   try {
     const statements: Array<{ sql: string }> = [
+      { sql: 'DELETE FROM transfer_operation_members' },
+      { sql: 'DELETE FROM transfer_operation_receipts' },
       { sql: 'DELETE FROM sale_record_events' },
       { sql: 'DELETE FROM sale_not_paid_stock_recovery_members' },
       { sql: 'DELETE FROM sale_not_paid_stock_recovery_receipts' },

@@ -38,6 +38,7 @@ import {
 } from '../lib/canonicalBranchIdentity'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
+import { planTransferOperation } from '../lib/transferOperation'
 import { RESOLVED_BRANCH_NAME_COLUMN, movementBranchNameSql, withResolvedBranchName } from '../lib/movementBranchName'
 import { RESOLVED_ACTOR_NAME_COLUMN, movementActorNameSql, withResolvedActorName } from '../lib/movementActorName'
 import { movementReferenceSelectSql } from '../lib/movementReference'
@@ -2005,42 +2006,11 @@ app.post('/transfer', async (c) => {
   const movementBatchId = takes.length === 1 && uncovered === 0 ? takes[0].batchId : null
 
   const responsePayload = { success: true, fromBranchId, toBranchId, quantity, replayed: false }
-  const statements: Array<{ sql: string; params?: Record<string, unknown> }> = [
-    // Re-check canonical branch identity before the receipt/audit or stock
-    // writes. If an administrator changes branch roles between the read
-    // preflight and this batch, the guard aborts before any durable side
-    // effect is even attempted.
-    canonicalTransferAuthorityGuardStatement(fromBranchId, toBranchId),
-    transferReceiptStatement({ actorId: user.id, requestId: clientRequestId!, digest: requestDigest, requestJson, responseJson: JSON.stringify(responsePayload) }),
-    transferIntentAuditStatement({ actorId: user.id, actorName: actorSnapshot(user), requestId: clientRequestId!, requestJson, digest: requestDigest, bulk: false }),
-    transferStockGuardStatement(productId, fromBranchId, quantity),
-    { sql: 'UPDATE branch_stock SET quantity = quantity - @quantity WHERE product_id = @productId AND branch_id = @branchId', params: { quantity, productId, branchId: fromBranchId } },
-    {
-      sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@productId, @branchId, @quantity)
-            ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = quantity + excluded.quantity`,
-      params: { productId, branchId: toBranchId, quantity },
-    },
-    ...takes.flatMap((take) => [
-      transferLotGuardStatement(productId, take.batchId, fromBranchId, take.quantity),
-      decrementBatchStockStrictStatement(take.batchId, fromBranchId, take.quantity),
-      incrementBatchStockStatement(take.batchId, toBranchId, take.quantity),
-    ]),
-    {
-      sql: `INSERT INTO stock_transfers (product_id, product_name, from_branch_id, to_branch_id, quantity, notes, user_id, user_name, created_at, client_request_id)
-            VALUES (@productId, @productName, @fromBranchId, @toBranchId, @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @clientRequestId)`,
-      params: { productId, productName: product.name, fromBranchId, toBranchId, quantity, reason, userId: user?.id ?? null, userName: actorSnapshot(user), clientRequestId },
-    },
-    {
-      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
-            VALUES (@productId, @productName, @branchId, @branchName, 'transfer_out', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
-      params: { productId, productName: product.name, branchId: fromBranchId, branchName: fromBranch?.name || null, quantity, reason, userId: user?.id ?? null, userName: actorSnapshot(user), batchId: movementBatchId },
-    },
-    {
-      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
-            VALUES (@productId, @productName, @branchId, @branchName, 'transfer_in', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
-      params: { productId, productName: product.name, branchId: toBranchId, branchName: toBranch?.name || null, quantity, reason, userId: user?.id ?? null, userName: actorSnapshot(user), batchId: movementBatchId },
-    },
-  ]
+  const { statements } = await planTransferOperation(db, {
+    user, requestId: clientRequestId, requestJson, digest: requestDigest, scope: 'inventory',
+    fromBranchId, toBranchId, reason,
+    lines: [{ productId, destProductId: productId, quantity }], response: responsePayload,
+  })
   try {
     await db.batch(statements)
   } catch (error) {
@@ -2080,7 +2050,7 @@ app.post('/transfer', async (c) => {
     })
   })().catch((error) => console.error('[telegram] transfer notification failed', error)))
   // See the matching note in /adjust above -- same missing-`success`-field bug.
-  return c.json(responsePayload)
+  return c.json(transferReceiptResponse((await findTransferReceipt(db, user.id, clientRequestId))!))
 })
 
 // DEPRECATED as a UI entry point: InventoryStockModals.tsx no longer has a

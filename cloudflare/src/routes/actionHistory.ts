@@ -12,6 +12,7 @@ import { notifyReturnBulkAction, RETURN_BULK_ACTION_KIND } from '../lib/returnBu
 import { notifySaleSettlementAction, SALE_SETTLEMENT_ACTION_KIND } from '../lib/saleSettlementAction'
 import { STOCK_SESSION_KIND, canReplayStockSessionPayload, notifyStockSession } from '../lib/stockSession'
 import { actorSnapshot } from '../lib/actorSnapshot'
+import { TRANSFER_OPERATION_KIND, canReplayTransferPayload, notifyTransferOperation } from '../lib/transferOperation'
 
 const SERVER_SALE_BULK_KINDS = new Set([BULK_STATUS_KIND, ...SALE_BULK_UPDATE_KINDS])
 const SERVER_BULK_KINDS = new Set([...SERVER_SALE_BULK_KINDS, RETURN_BULK_ACTION_KIND, STOCK_SESSION_KIND, SALE_SETTLEMENT_ACTION_KIND])
@@ -84,7 +85,10 @@ function canReadAllHistory(user: SessionUser, requestedAll = false): boolean {
 function canOperateHistoryRow(user: SessionUser, row: ActionHistoryRow | null | undefined): boolean {
   if (!row) return false
   if (isAdminControlUser(user)) return true
-  const permission = permissionForActionHistory(row)
+  const transferPayload = parseJson(row.undo_payload)
+  const permission = transferPayload.applier === TRANSFER_OPERATION_KIND
+    && (transferPayload.permission === 'branches' || transferPayload.permission === 'inventory')
+    ? transferPayload.permission : permissionForActionHistory(row)
   if (permission && !hasPermission(user, permission)) return false
   const payload = { ...parseJson(row.undo_payload), ...parseJson(row.redo_payload) }
   if (isSensitiveActionHistory({ ...row, payload })) return false
@@ -101,7 +105,9 @@ function canOperateHistoryRow(user: SessionUser, row: ActionHistoryRow | null | 
 function canUseNamedAppliers(user: SessionUser, payloads: Array<unknown>): boolean {
   for (const raw of payloads) {
     const applier = resolveUndoApplier(raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null)
-    if (applier?.name === STOCK_SESSION_KIND) {
+    if (applier?.name === TRANSFER_OPERATION_KIND) {
+      if (!canReplayTransferPayload(user, raw as Record<string, unknown>)) return false
+    } else if (applier?.name === STOCK_SESSION_KIND) {
       const payload = raw as Record<string, unknown>
       if (payload.snapshot_version !== 2 || !canReplayStockSessionPayload(user, payload)) return false
     } else if (applier && applierPermissionTier(user, applier) !== 'full') return false
@@ -113,7 +119,7 @@ function isServerManagedPayload(value: unknown): boolean {
   if (!value || typeof value !== 'object') return false
   const payload = value as Record<string, unknown>
   const kind = String(payload.applier || '')
-  return SERVER_BULK_KINDS.has(kind) || kind === PRODUCT_MERGE_GROUP_ACTION_KIND || kind === PRODUCT_REMOVE_ACTION_KIND
+  return kind === TRANSFER_OPERATION_KIND || SERVER_BULK_KINDS.has(kind) || kind === PRODUCT_MERGE_GROUP_ACTION_KIND || kind === PRODUCT_REMOVE_ACTION_KIND
     || (kind === SALE_ADD_ITEMS_ACTION_KIND && typeof payload.operation_id === 'string' && payload.operation_id.length > 0)
 }
 
@@ -357,7 +363,8 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     const stockReplay = parseJson(existing.undo_payload)?.applier === STOCK_SESSION_KIND
     const groupReplay = parseJson(existing.undo_payload)?.applier === PRODUCT_MERGE_GROUP_ACTION_KIND
     const productRemoveReplay = parseJson(existing.undo_payload)?.applier === PRODUCT_REMOVE_ACTION_KIND
-    if (currentStatus !== expected && !stockReplay && !groupReplay && !productRemoveReplay) {
+    const transferReplay = parseJson(existing.undo_payload)?.applier === TRANSFER_OPERATION_KIND
+    if (currentStatus !== expected && !stockReplay && !groupReplay && !productRemoveReplay && !transferReplay) {
       return c.json({ success: false, error: `Action is not ${direction === 'undo' ? 'undoable' : 'redoable'} right now` }, 409)
     }
 
@@ -376,7 +383,9 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     // rows written before this gate existed, or by a user since demoted,
     // must not replay on the strength of the row alone). Runs before any
     // status flip so a refusal changes nothing.
-    if (applier && (applier.name === STOCK_SESSION_KIND
+    if (applier && (applier.name === TRANSFER_OPERATION_KIND
+      ? !canReplayTransferPayload(user, payload)
+      : applier.name === STOCK_SESSION_KIND
       ? !canReplayStockSessionPayload(user, payload)
       : applierPermissionTier(user, applier) !== 'full'
         || (replayChangesProductImages && getActionTier(user, 'products', 'image') !== 'full'))) {
@@ -409,7 +418,9 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     }
 
     if (serverManagedReplay && applier) {
-      if (applier.name !== SALE_ADD_ITEMS_ACTION_KIND && applier.name !== PRODUCT_MERGE_GROUP_ACTION_KIND) c.executionCtx.waitUntil(applier.name === STOCK_SESSION_KIND
+      if (applier.name !== SALE_ADD_ITEMS_ACTION_KIND && applier.name !== PRODUCT_MERGE_GROUP_ACTION_KIND) c.executionCtx.waitUntil(applier.name === TRANSFER_OPERATION_KIND
+        ? notifyTransferOperation(c.env)
+        : applier.name === STOCK_SESSION_KIND
         ? notifyStockSession(c.env, { operationId: String(payload.operation_id) })
         : applier.name === SALE_SETTLEMENT_ACTION_KIND
           ? notifySaleSettlementAction(c.env)

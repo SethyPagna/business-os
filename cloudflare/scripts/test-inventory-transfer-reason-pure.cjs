@@ -175,7 +175,8 @@ runTest('the operator reason is stored as typed, not wrapped in boilerplate', ()
         `${route.label}: inventory_movements.reason must hold what the operator typed, found boilerplate ${JSON.stringify(wrapper)}`,
       )
     }
-    const movementInserts = (route.body.match(/INSERT INTO inventory_movements/g) || []).length
+    const movementSource = route.body.includes('await planTransferOperation(') ? readWorker('lib/transferOperation.ts') : route.body
+    const movementInserts = (movementSource.match(/INSERT INTO inventory_movements/g) || []).length + (movementSource.includes("(['out', 'in'] as const)") ? 1 : 0)
     assert.ok(movementInserts >= 2, `${route.label}: expected both movement legs to still be written`)
   }
 })

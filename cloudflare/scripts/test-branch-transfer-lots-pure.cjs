@@ -283,32 +283,16 @@ await check('a destination-lot clone is guarded against a concurrent ambiguous b
   )
 })
 
-await check('source lock: BOTH /transfer and /transfer-bulk auto-allocate FIFO for the no-batchId path (strict decrement, materializing the destination lot)', () => {
-  const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'branches.ts'), 'utf8')
-
-  const single = routeBody(src, "app.post('/transfer',")
-  assert.ok(/readFifoLotAvailability\(db, productId, fromBranchId\)/.test(single), '/transfer must read source-lot availability for the no-batch path')
-  assert.ok(/allocateAcrossLots\(sourceLots, quantity\)/.test(single), '/transfer must allocate FIFO across the source lots')
-  assert.ok(/incrementBatchStockStatement\(destLotId, toBranchId, take\.quantity\)/.test(single), '/transfer must materialize the destination lot per take')
-
-  const bulk = routeBody(src, "app.post('/transfer-bulk',")
-  assert.ok(/readFifoLotAvailability\(db, item\.productId, fromBranchId\)/.test(bulk), '/transfer-bulk must read source-lot availability per no-batch item')
-  assert.ok(/allocateAcrossLots\(sourceLots, item\.quantity\)/.test(bulk), '/transfer-bulk must allocate FIFO across the source lots')
-  assert.ok(/incrementBatchStockStatement\(destLotId, toBranchId, take\.quantity\)/.test(bulk), '/transfer-bulk must materialize the destination lot per take')
-
-  // The FIFO legs use the STRICT decrement (their availability read is outside
-  // the atomic batch, so a concurrent drain must abort-and-retry, not clamp
-  // into per-lot drift). Guards against a future edit swapping the clamped form
-  // back in and silently re-opening the race.
-  assert.ok(/decrementBatchStockStrictStatement\(take\.batchId, fromBranchId, take\.quantity\)/.test(single), '/transfer no-batch decrement must be the STRICT statement')
-  assert.ok(/decrementBatchStockStrictStatement\(take\.batchId, fromBranchId, take\.quantity\)/.test(bulk), '/transfer-bulk no-batch decrement must be the STRICT statement')
-  // The explicit-batch legs are strict too: their availability reads also
-  // occur before the final batch, so a concurrent drain must abort atomically.
-  assert.ok(/decrementBatchStockStrictStatement\(sourceBatch\.id, fromBranchId, quantity\)/.test(single), '/transfer explicit-batch leg is strict')
-  assert.ok(/decrementBatchStockStrictStatement\(sourceBatchForItem\.id, fromBranchId, item\.quantity\)/.test(bulk), '/transfer-bulk explicit-batch leg is strict')
-  assert.equal((single.match(/writeGuard: canonicalTransferAuthorityGuardStatement\(fromBranchId, toBranchId\)/g) || []).length, 2, '/transfer guards explicit and FIFO destination-lot clones')
-  assert.equal((bulk.match(/writeGuard: canonicalTransferAuthorityGuardStatement\(fromBranchId, toBranchId\)/g) || []).length, 2, '/transfer-bulk guards explicit and FIFO destination-lot clones')
+await check('both transfer routes use the shared read-only provenance planner and one atomic batch', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'src/routes/branches.ts'), 'utf8')
+  for (const marker of ["app.post('/transfer',", "app.post('/transfer-bulk',"]) {
+    const body = routeBody(src, marker)
+    assert.match(body, /await planTransferOperation\(db,/)
+    assert.match(body, /await db.batch\(statements\)/)
+    assert.doesNotMatch(body, /await resolveDestinationBatch\(/)
+  }
 })
+
 
 }
 

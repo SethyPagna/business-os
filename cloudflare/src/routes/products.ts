@@ -2843,6 +2843,10 @@ export async function foldDuplicateProductInto(
   reversal: MergeReversal
 }> {
   const writeOffStock = stockDisposition === 'write_off'
+  const transferReference = await db.prepare(`SELECT receipt_id FROM transfer_operation_members
+    WHERE source_product_id IN (@keeper,@duplicate) OR destination_product_id IN (@keeper,@duplicate) LIMIT 1`)
+    .get({ keeper: canonical.id, duplicate: dup.id })
+  if (transferReference) throw new Error('merge_state_conflict: Product has immutable transfer provenance and cannot be merged.')
   const canonicalId = canonical.id
   const canonicalName = canonical.name
   const adjustmentMovementMarker = atomicHistory ? `[merge:${atomicHistory.operationId}]` : ''

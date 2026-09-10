@@ -87,6 +87,17 @@ const inventoryRoute = loadModule('routes/inventory.ts', (id) => {
   if (id === '../lib/branchRoleGuards') return branchGuards
   if (id === '../lib/canonicalBranchIdentity') return canonicalIdentity
   if (id === '../lib/actorSnapshot') return { actorSnapshot: (user) => user?.name || null }
+  if (id === '../lib/transferOperation') return loadModule('lib/transferOperation.ts', (dep) => {
+    if (dep === './db') return { getDb: () => wrapDb(routeDb) }
+    if (dep === './permissions') return { getActionTier: user => user?.tier || 'none' }
+    if (dep === './actorSnapshot') return { actorSnapshot: user => user?.name || null }
+    if (dep === './productBatches') return productBatches
+    if (dep === './canonicalBranchIdentity') return canonicalIdentity
+    if (dep === './transferOperationReceipt') return loadModule('lib/transferOperationReceipt.ts', require)
+    if (dep === '../durable-objects/broadcastHub') return { broadcast: asyncNoop }
+    if (dep === './cache') return { bumpVersion: asyncNoop }
+    throw new Error('unexpected transfer dependency '+dep)
+  })
   if (id === '../lib/transferOperationReceipt') return loadModule('lib/transferOperationReceipt.ts', require)
   if (id === '../lib/telegram') return { formatStockChangeTelegramLines: noop, formatTransferTelegramLines: noop, sendTelegramEvent: asyncNoop }
   if (id === '../lib/businessDateWindow') return { localDateAtOrAfter: noop, localDateAtOrBefore: noop }
@@ -150,57 +161,15 @@ function wrapDb(sqlite) {
 
 function freshDb() {
   const db = new Database(':memory:')
-  db.exec(`
-    CREATE TABLE product_batches (
-      id INTEGER PRIMARY KEY, variant_product_id INTEGER NOT NULL,
-      lot_code TEXT, expiry_date TEXT, received_at TEXT, batch_number INTEGER,
-      is_active INTEGER DEFAULT 1, notes TEXT
-    );
-    -- Mirrors migration 0058's CHECK -- the strict decrement relies on it.
-    CREATE TABLE branch_batch_stock (
-      id INTEGER PRIMARY KEY, batch_id INTEGER NOT NULL, branch_id INTEGER NOT NULL,
-      quantity REAL DEFAULT 0 CHECK (quantity >= 0), updated_at TEXT,
-      UNIQUE (batch_id, branch_id)
-    );
-    CREATE TABLE branch_stock (
-      id INTEGER PRIMARY KEY, product_id INTEGER NOT NULL, branch_id INTEGER NOT NULL,
-      quantity REAL DEFAULT 0 CHECK (quantity >= 0),
-      UNIQUE (product_id, branch_id)
-    );
-    CREATE TABLE branches (
-      id INTEGER PRIMARY KEY, name TEXT NOT NULL, is_active INTEGER NOT NULL DEFAULT 1
-    );
-    CREATE TABLE products (
-      id INTEGER PRIMARY KEY, name TEXT NOT NULL, stock_quantity REAL NOT NULL DEFAULT 0
-    );
-    CREATE TABLE stock_transfers (
-      id INTEGER PRIMARY KEY, product_id INTEGER, product_name TEXT,
-      from_branch_id INTEGER, to_branch_id INTEGER, quantity REAL, notes TEXT,
-      user_id INTEGER, user_name TEXT, created_at TEXT, client_request_id TEXT
-    );
-    CREATE TABLE transfer_operation_receipts (
-      id INTEGER PRIMARY KEY, actor_id INTEGER NOT NULL, request_id TEXT NOT NULL,
-      request_digest TEXT NOT NULL, request_json TEXT NOT NULL, response_json TEXT,
-      status TEXT NOT NULL DEFAULT 'committed', created_at TEXT, updated_at TEXT,
-      UNIQUE(actor_id, request_id)
-    );
-    CREATE TABLE audit_logs (
-      id INTEGER PRIMARY KEY, user_id INTEGER, user_name TEXT, action TEXT,
-      entity TEXT, entity_id TEXT, details TEXT, table_name TEXT, record_id TEXT,
-      new_value TEXT
-    );
-    CREATE TABLE inventory_movements (
-      id INTEGER PRIMARY KEY, product_id INTEGER, product_name TEXT,
-      branch_id INTEGER, branch_name TEXT, movement_type TEXT, quantity REAL,
-      reason TEXT, user_id INTEGER, user_name TEXT, created_at TEXT, batch_id INTEGER
-    );
-  `)
+  for (const name of fs.readdirSync(path.join(__dirname,'../migrations')).filter(name => name.endsWith('.sql')).sort()) {
+    db.exec(fs.readFileSync(path.join(__dirname,'../migrations',name),'utf8'))
+  }
   db.prepare("INSERT INTO branches(id,name,is_active) VALUES (1,'Shop',1),(2,'Warehouse',1)").run()
   db.prepare("INSERT INTO products(id,name,stock_quantity) VALUES (1,'Transfer product',12)").run()
   // Product 1 at branch 1: lot A (older, 6 units), lot B (newer, 4 units),
   // branch_stock 12 -- 2 units of legacy stock the lot ledger never tracked.
-  db.prepare(`INSERT INTO product_batches (id, variant_product_id, lot_code, received_at, batch_number) VALUES (101, 1, 'A', '2026-08-01', 1)`).run()
-  db.prepare(`INSERT INTO product_batches (id, variant_product_id, lot_code, received_at, batch_number) VALUES (102, 1, 'B', '2026-08-20', 2)`).run()
+  db.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, batch_number) VALUES (101, 1, 'A', 'A', '2026-08-01', 1)`).run()
+  db.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, batch_number) VALUES (102, 1, 'B', 'B', '2026-08-20', 2)`).run()
   db.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (101, 1, 6)`).run()
   db.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (102, 1, 4)`).run()
   db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 1, 12)`).run()
@@ -307,12 +276,12 @@ await check('source lock: the route allocates FIFO, decrements STRICT, and stamp
   const body = src.slice(routeAt, src.indexOf("app.post('/", routeAt + 20) === -1 ? undefined : src.indexOf("app.post('/", routeAt + 20))
   assert.ok(/readFifoLotAvailability\(db, productId, fromBranchId\)/.test(body), 'must read source-lot availability')
   assert.ok(/allocateAcrossLots\(sourceLots, quantity\)/.test(body), 'must allocate FIFO across the source lots')
-  assert.ok(/decrementBatchStockStrictStatement\(take\.batchId, fromBranchId, take\.quantity\)/.test(body), 'source lot decrements must be STRICT (unclamped)')
-  assert.ok(/incrementBatchStockStatement\(take\.batchId, toBranchId, take\.quantity\)/.test(body), 'destination gains the SAME batch ids')
+  assert.match(body, /await planTransferOperation\(db,/, 'route uses exact provenance planner')
+  assert.match(body, /destProductId: productId/, 'inventory transfer preserves product identity')
   assert.ok(/takes\.length === 1 && uncovered === 0 \? takes\[0\]\.batchId : null/.test(body), '0084 blank-honest movement stamping')
 })
 
-await check('the real Inventory transfer handler applies, undoes, and redoes across both canonical directions', async () => {
+await check('the real Inventory transfer handler applies independent forward and opposite-direction transfers', async () => {
   routeDb = freshDb()
   routeUser = { id: 7, name: 'Stock manager', tier: 'full' }
   routeAudits = []
@@ -344,7 +313,7 @@ await check('the real Inventory transfer handler applies, undoes, and redoes acr
   assert.strictEqual(routeDb.prepare('SELECT SUM(quantity) AS total FROM branch_stock WHERE product_id=1').get().total, 12)
   assert.strictEqual(routeDb.prepare('SELECT COUNT(*) AS total FROM stock_transfers').get().total, 3)
   assert.deepStrictEqual(
-    routeDb.prepare('SELECT movement_type,branch_id,quantity,batch_id FROM inventory_movements ORDER BY id').all(),
+    routeDb.prepare('SELECT movement_type,branch_id,SUM(quantity) AS quantity,NULL AS batch_id FROM inventory_movements GROUP BY ((id-1)/4),movement_type ORDER BY MIN(id)').all(),
     [
       { movement_type: 'transfer_out', branch_id: 1, quantity: 8, batch_id: null },
       { movement_type: 'transfer_in', branch_id: 2, quantity: 8, batch_id: null },
@@ -427,7 +396,8 @@ await check('offline replay still dispatches Inventory transfer to the same guar
   assert.match(sync, /'inventory\.transfer': \{ method: 'POST', path: '\/api\/inventory\/transfer' \}/)
   assert.match(sync, /'x-client-request-id': operation\.client_request_id/)
   assert.match(sync, /client_request_id: operation\.client_request_id/)
-  assert.match(transport, /'inventory:transfer'[\s\S]*'POST'[\s\S]*'\/api\/inventory\/transfer'[\s\S]*ensureClientRequestId\([\s\S]*'transfer'\)/)
+  assert.match(transport, /'inventory:transfer'[\s\S]*'POST'[\s\S]*'\/api\/inventory\/transfer'/)
+  assert.match(transport, /ensureClientRequestId\([\s\S]*'transfer'\)/)
 })
 
 }

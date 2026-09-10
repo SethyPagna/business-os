@@ -1970,6 +1970,14 @@ async function replayProductRemove(payload: Record<string, unknown>, ctx: UndoAp
 }
 
 const APPLIERS: Record<string, UndoApplierDef> = {
+  'stock.transfer': {
+    permission: 'branches', action: 'transfer',
+    run: async (payload, ctx) => {
+      if (!ctx.user || !ctx.historyId) throw new UndoConflictError('Transfer history context is required.')
+      const { replayTransferOperation } = await import('./transferOperation')
+      await replayTransferOperation(ctx.env, ctx.user, ctx.direction, ctx.historyId, ctx.generation, payload)
+    },
+  },
   [STOCK_SESSION_KIND]: {
     permission: 'inventory',
     action: 'adjust',
