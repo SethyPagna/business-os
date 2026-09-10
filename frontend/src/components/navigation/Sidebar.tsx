@@ -48,8 +48,8 @@ const QuickPreferenceToggles = lazyRetry(() => import('../shared/QuickPreference
 function QuickPreferenceTogglesFallback() {
   return (
     <div className="flex items-center gap-2" aria-hidden="true">
-      <div className="h-10 w-10 rounded-xl border border-gray-200 bg-white/85 dark:border-slate-700 dark:bg-slate-900/70" />
-      <div className="h-10 w-10 rounded-xl border border-gray-200 bg-white/85 dark:border-slate-700 dark:bg-slate-900/70" />
+      <div className="h-10 w-10 rounded-full bg-transparent" />
+      <div className="h-10 w-10 rounded-full bg-transparent" />
     </div>
   )
 }

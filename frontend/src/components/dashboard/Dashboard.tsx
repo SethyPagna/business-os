@@ -13,7 +13,8 @@ import { fmtTime } from '../../utils/formatters'
 import { todayStr } from '../../utils/dateHelpers'
 import { buildEquation, revenueTerms, profitTerms } from '../../utils/statsFormulas'
 import Download from 'lucide-react/dist/esm/icons/download.js'
-import DateTimeRangePicker, { type DateTimeRange } from '../shared/DateTimeRangePicker'
+import type { DateTimeRange } from '../shared/DateTimeRangePicker'
+import { toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
 import { useIsPageActive } from '../shared/pageActivity'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.ts'
@@ -681,13 +682,12 @@ export default function Dashboard() {
   const [silentRefresh, setSilentRefresh] = useState(false)
   const [summaryError, setSummaryError] = useState('')
   const [analyticsError, setAnalyticsError] = useState('')
-  // Preset chips are gone. A user-edited custom range remains; everyone else
-  // starts on TODAY, the business day (user, 2026-09-03) -- the same default
-  // every list page uses. The range governs the flow cards only; the stock and
-  // alert cards stay catalog-wide whatever the range (see compat.ts).
-  const [rangeId, setRangeId]     = useState<DashboardRangeId>('custom')
-  const [customStart, setCustomStart] = useState(() => initialFilterPrefs?.rangeId === 'custom' && initialFilterPrefs.customStart ? initialFilterPrefs.customStart : todayStr())
-  const [customEnd, setCustomEnd]     = useState(() => initialFilterPrefs?.rangeId === 'custom' && initialFilterPrefs.customEnd ? initialFilterPrefs.customEnd : todayStr())
+  // The shared preset rail and custom picker both write these dates. A new
+  // user starts on TODAY; a saved all-time range deliberately restores as two
+  // empty endpoints. The range governs the flow cards only; stock and alert
+  // cards stay catalog-wide whatever the range (see compat.ts).
+  const [customStart, setCustomStart] = useState(() => initialFilterPrefs ? initialFilterPrefs.customStart : todayStr())
+  const [customEnd, setCustomEnd]     = useState(() => initialFilterPrefs ? initialFilterPrefs.customEnd : todayStr())
   const [activeChart, setActiveChart] = useState<DashboardChartMode>('revenue')
   const [topMode, setTopMode]         = useState<DashboardTopMode>('revenue')
   const [customerDetail, setCustomerDetail]     = useState<DashboardCustomer | null>(null)
@@ -770,6 +770,16 @@ export default function Dashboard() {
   const getCurrentDashboardRange = useCallback(() => {
     return { start: customStart, end: customEnd, granularity: 'day' as DashboardGranularity }
   }, [customEnd, customStart])
+  const dashboardRange = useMemo<DateTimeRange>(() => ({
+    startDate: customStart,
+    endDate: customEnd,
+    startTime: '',
+    endTime: '',
+  }), [customEnd, customStart])
+  const handleDashboardRangeChange = useCallback((nextRange: DateTimeRange) => {
+    setCustomStart(nextRange.startDate || '')
+    setCustomEnd(nextRange.endDate || '')
+  }, [])
 
   const loadDashboardStartup = useCallback(async () => {
     const requestId = beginTrackedRequest(startupRequestRef)
@@ -945,16 +955,15 @@ export default function Dashboard() {
     if (filterStorageKeyRef.current === dashboardFilterStorageKey) return
     filterStorageKeyRef.current = dashboardFilterStorageKey
     const nextPrefs = readDashboardFilterPrefs([dashboardFilterStorageKey, DASHBOARD_FILTER_STORAGE_FALLBACK_KEY])
-    setRangeId('custom')
-    setCustomStart(nextPrefs?.rangeId === 'custom' && nextPrefs.customStart ? nextPrefs.customStart : todayStr())
-    setCustomEnd(nextPrefs?.rangeId === 'custom' && nextPrefs.customEnd ? nextPrefs.customEnd : todayStr())
+    setCustomStart(nextPrefs ? nextPrefs.customStart : todayStr())
+    setCustomEnd(nextPrefs ? nextPrefs.customEnd : todayStr())
   }, [dashboardFilterStorageKey])
 
   useEffect(() => {
     if (typeof window === 'undefined' || !dashboardFilterStorageKey) return
     try {
       const serialized = JSON.stringify({
-        rangeId,
+        rangeId: 'custom',
         customStart,
         customEnd,
       })
@@ -963,7 +972,7 @@ export default function Dashboard() {
     } catch {
       // Ignore persistence failures and keep the dashboard usable.
     }
-  }, [customEnd, customStart, dashboardFilterStorageKey, rangeId])
+  }, [customEnd, customStart, dashboardFilterStorageKey])
 
   useEffect(() => {
     if (!isActive) {
@@ -1246,13 +1255,13 @@ export default function Dashboard() {
   const returnsFormulaText = translateOr('dashboard_formula_returns', 'Returns decrease net revenue and loyalty points')
   const revenueExampleText = `${fmtUSD(aRevenue)} = ${fmtUSD(aGrossSales)} - ${fmtUSD(aDiscounts)} - ${fmtUSD(aKernelRefund)}`
   const collectedExampleText = `${fmtUSD(aRevenue + aTax + aDelivery)} = ${fmtUSD(aRevenue)} + ${fmtUSD(aTax)} + ${fmtUSD(aDelivery)}`
-  const rangeLabel = (() => {
-    return `${customStart} - ${customEnd}`
-  })()
+  const rangeLabel = !customStart && !customEnd
+    ? translateOr('all_time', 'All time')
+    : `${customStart || '…'} - ${customEnd || '…'}`
 
   const periodShort = customStart === todayStr() && customEnd === todayStr()
     ? translateOr('range_today', 'Today')
-    : `${customStart} - ${customEnd}`
+    : rangeLabel
   const lowShortLabel = translateOr('low_stock_short', 'Low')
   const outShortLabel = translateOr('out_of_stock_short', 'Out')
   const matchStockShortLabel = translateOr('matching_stock_short', 'Matching')
@@ -1748,93 +1757,51 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
         </div>
       ) : null}
 
-      {/* Range selector -- one picker, no preset chips. */}
-      <div className="px-0.5">
-        <div className="flex min-w-0 items-center gap-2">
-          {/* Label + range value + export all share one row -- the range
-              value pill previously grew (flex-1) to fill the row on its own
-              with nothing but blank pill background to its right; export
-              now sits in that same slack space instead of getting its own
-              near-empty row below the date picker. */}
-          <div className="flex min-w-0 flex-1 items-center gap-2 lg:max-w-[22rem]">
-            {/* Y19: the Start → End box both SHOWS the effective range and IS
-                the custom editor -- editing it switches to
-                the 'custom' rangeId. No "Range:" label: the rectangular,
-                full-width box reads as the range on its own. */}
-            <div className="min-w-0 flex-1">
-              <DateTimeRangePicker
-                value={{ startDate: getCurrentDashboardRange().start, endDate: getCurrentDashboardRange().end, startTime: '', endTime: '' } as DateTimeRange}
-                onChange={(r) => {
-                  setRangeId('custom')
-                  setCustomStart(r.startDate || '')
-                  setCustomEnd(r.endDate || '')
-                }}
-                t={t}
-                showTime={false}
-                triggerClassName="flex w-full min-w-0 items-center justify-center gap-1.5 rounded-lg px-2 py-1 !min-h-9 sm:px-3"
-              />
+      {/* One shared control surface keeps Stats, the effective date range and
+          Export on a stable non-wrapping row. Its preset rail remains directly
+          below and every change writes the same dates used by fetches and
+          export context. */}
+      <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-2 dark:border-blue-900/40 dark:bg-blue-950/20 sm:p-2.5">
+        <StatsStrip
+          t={(key: string) => t(key)}
+          range={dashboardRange}
+          onRangeChange={handleDashboardRangeChange}
+          showTime={false}
+          loading={analyticsPending}
+          rangeActions={hasPermission('dashboard_export') ? (
+            <button
+              type="button"
+              onClick={() => setExportChoicesOpen(true)}
+              className={toolbarIconButtonClassName}
+              aria-label={exportLabel}
+              title={exportLabel}
+            >
+              <Download className="h-5 w-5" aria-hidden="true" />
+            </button>
+          ) : null}
+          cards={periodKpis.map((kpi): StatCardDef => ({
+            key: kpi.id,
+            label: String(kpi.label),
+            value: kpi.value,
+            sub: kpi.sub,
+            trend: kpi.trend,
+            hint: (kpi as { info?: string }).info,
+            tone: /green|emerald/.test(String(kpi.color || '')) ? 'ok'
+              : /red|rose/.test(String(kpi.color || '')) ? 'crit'
+                : /amber|orange|yellow/.test(String(kpi.color || '')) ? 'warn'
+                  : /blue|purple|indigo|violet/.test(String(kpi.color || '')) ? 'accent'
+                    : undefined,
+            details: (kpi.details || []).map((row) => ({ label: String(row.label), value: row.value })),
+          }))}
+        />
+        {analyticsUnavailable ? (
+          <div className="mt-2 rounded-xl border border-amber-200 bg-white px-3 py-4 text-center text-sm text-amber-900 dark:border-amber-800/70 dark:bg-slate-900 dark:text-amber-100">
+            <div className="font-semibold">Analytics unavailable</div>
+            <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              {analyticsError || 'The dashboard analytics could not be loaded for this range.'}
             </div>
           </div>
-          <div className="flex shrink-0 items-center justify-end gap-1">
-            {/* Opens the float export-choices dialog -- no direct downloads
-                off a toolbar menu. */}
-            {hasPermission('dashboard_export') && (
-              <button
-                type="button"
-                onClick={() => setExportChoicesOpen(true)}
-                className="inline-flex shrink-0 min-h-7 items-center gap-1 whitespace-nowrap rounded-md border border-gray-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-gray-600 transition-colors hover:border-blue-300 hover:text-blue-600 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:border-blue-500 dark:hover:text-blue-400 sm:min-h-8 sm:px-3 sm:text-xs"
-                aria-label={exportLabel}
-              >
-                <Download className="h-3.5 w-3.5" aria-hidden="true" />
-                {exportLabel}
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Period KPI cards */}
-        <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-2 dark:border-blue-900/40 dark:bg-blue-950/20 sm:p-2.5">
-          {/* No "PERIOD STATS + preset pill + range text" header any more
-              (user, Aug 30 2026): the KPIs always cover exactly the selected
-              date range, so the header only restated the range box above it.
-              periodShort/rangeLabel still exist -- exports and the KPI drill
-              panel use them. */}
-          {analyticsPending ? (
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-4 sm:gap-2.5">
-              {[...Array(8)].map((_, i) => <div key={i} className="card h-16 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-700" />)}
-            </div>
-          ) : analyticsUnavailable ? (
-            <div className="rounded-xl border border-amber-200 bg-white px-3 py-4 text-center text-sm text-amber-900 dark:border-amber-800/70 dark:bg-slate-900 dark:text-amber-100">
-              <div className="font-semibold">Analytics unavailable</div>
-              <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                {analyticsError || 'The dashboard analytics could not be loaded for this range.'}
-              </div>
-            </div>
-          ) : (
-            // The foldable stats strip (shared StatsStrip, the app-wide
-            // stats pattern): the same KPI set, but tapping a card folds
-            // its breakdown open INLINE instead of a portal sheet. The
-            // range stays the dashboard's own range card above, so no
-            // range props are passed here.
-            <StatsStrip
-              t={(key: string) => t(key)}
-              cards={periodKpis.map((kpi): StatCardDef => ({
-                key: kpi.id,
-                label: String(kpi.label),
-                value: kpi.value,
-                sub: kpi.sub,
-                trend: kpi.trend,
-                hint: (kpi as { info?: string }).info,
-                tone: /green|emerald/.test(String(kpi.color || '')) ? 'ok'
-                  : /red|rose/.test(String(kpi.color || '')) ? 'crit'
-                    : /amber|orange|yellow/.test(String(kpi.color || '')) ? 'warn'
-                      : /blue|purple|indigo|violet/.test(String(kpi.color || '')) ? 'accent'
-                        : undefined,
-                details: (kpi.details || []).map((row) => ({ label: String(row.label), value: row.value })),
-              }))}
-            />
-        )}
+        ) : null}
       </div>
 
       {/* Small-screen section switcher -- splits the long card stack into
