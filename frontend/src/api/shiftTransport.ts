@@ -1,4 +1,82 @@
 import { apiFetch, route } from './http.ts'
+import { dispatchResolvedSyncError, type SyncProblemReference } from '../utils/syncProblemLifecycle.ts'
+
+const unresolvedShiftWrites = new Map<string, SyncProblemReference>()
+async function shiftWrite<T>(channel: string, send: () => Promise<T>, local: null, isWrite: true): Promise<T | null> {
+  try {
+    const result = await route<T>(channel, send, local, isWrite)
+    dispatchResolvedSyncError(unresolvedShiftWrites.get(channel))
+    unresolvedShiftWrites.delete(channel)
+    return result
+  } catch (cause) {
+    const error = cause as { syncErrorId?: string; syncErrorChannel?: string; code?: string }
+    if (error.code === 'shift_request_superseded') {
+      dispatchResolvedSyncError(unresolvedShiftWrites.get(channel))
+      unresolvedShiftWrites.delete(channel)
+    }
+    if (error.syncErrorId) unresolvedShiftWrites.set(channel, { errorId: error.syncErrorId, channel: error.syncErrorChannel, code: error.code })
+    throw cause
+  }
+}
+
+type ShiftMutationBody = Record<string, unknown>
+export function freezeShiftMutation(body: ShiftMutationBody): ShiftMutationBody {
+  return JSON.parse(JSON.stringify({ ...body, client_request_id: body.client_request_id || crypto.randomUUID() }))
+}
+
+export function pendingShiftMutation(actorId: number | string | undefined, id: number) {
+  if (!actorId || typeof window === 'undefined') return null
+  for (const action of ['edit', 'close', 'reopen', 'cancel'] as const) {
+    const method = action === 'edit' ? 'PATCH' : 'POST'
+    const path = `/api/shifts/${id}${action === 'edit' ? '' : `/${action}`}`
+    const raw = window.sessionStorage.getItem(`businessos_shift_request_v1:${actorId}:${method}:${path}`)
+    if (raw) return { action, body: JSON.parse(raw) as ShiftMutationBody }
+  }
+  return null
+}
+
+/** Saved before I/O, scoped to the signed-in actor and exact endpoint. A new
+ * draft cannot replace a request whose acknowledgement has been lost. */
+async function shiftMutationFetch(method: string, path: string, body: ShiftMutationBody, actorId?: number | string) {
+  if (!actorId) throw new Error('The signed-in shift operator is required')
+  const key = `businessos_shift_request_v1:${actorId}:${method}:${path}`
+  const storage = window.sessionStorage
+  const prior = storage.getItem(key)
+  const frozen = prior ? JSON.parse(prior) as ShiftMutationBody : freezeShiftMutation(body)
+  const serialized = JSON.stringify(frozen)
+  storage.setItem(key, serialized)
+  if (storage.getItem(key) !== serialized) throw new Error('Could not save the shift retry request')
+  let uncertain = !!prior
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const result = await apiFetch(method, path, frozen, 45_000, { skipWriteDedupe: true })
+      const targetId = Number(path.match(/\/shifts\/(\d+)/)?.[1])
+      const exactTarget = path.endsWith('/reopen')
+        ? result?.reopened_from_shift_id === targetId && result?.shift?.parent_shift_id === targetId
+        : result?.shift?.id === targetId
+      if (!exactTarget) throw Object.assign(new Error('Could not verify the committed shift'), { outcome: 'unknown' })
+      storage.removeItem(key)
+      return result
+    } catch (cause) {
+      const error = cause as Error & { status?: number; outcome?: string; code?: string }
+      if (error.code === 'shift_request_superseded') {
+        storage.removeItem(key)
+        error.outcome = 'rejected'
+        throw error
+      }
+      const unknown = error.outcome === 'unknown' || !error.status || error.status >= 500
+      uncertain ||= unknown
+      if (!uncertain) storage.removeItem(key)
+      if (unknown && attempt === 0) continue // exact receipt replay reconciles a lost response
+      if (uncertain) error.outcome = 'unknown'
+      throw error
+    }
+  }
+}
+
+export function shiftTimestampIsFuture(value: string, now = Date.now()): boolean {
+  return new Date(value).getTime() > now
+}
 
 // Cash-drawer shift registration (see cloudflare/src/routes/shifts.ts +
 // migration 0116).
@@ -242,6 +320,7 @@ export function shiftLocalDateTimeToIso(value: string): string {
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(normalized)) throw new Error('A shift date and time is required')
   const parsed = new Date(`${normalized}:00+07:00`)
   if (Number.isNaN(parsed.getTime())) throw new Error('Invalid shift date and time')
+  if (new Date(parsed.getTime() + 7 * 60 * 60 * 1000).toISOString().slice(0, 16) !== normalized) throw new Error('Invalid shift date and time')
   return parsed.toISOString()
 }
 
@@ -304,6 +383,10 @@ export async function openShift(input: OpenShiftInput): Promise<ShiftState> {
 }
 
 export type CloseShiftInput = {
+  shiftId?: number
+  expectedRevision?: number
+  actorId?: number | string
+  closedAt?: string
   branchId?: number | null
   // Null is "not counted" and is accepted by the Worker: ending a shift is
   // never gated on the drawer count. See shiftClosingCounts.
@@ -317,16 +400,18 @@ export type CloseShiftInput = {
 export async function closeShift(input: CloseShiftInput): Promise<ShiftState> {
   const closingCountedUsd = optionalShiftCount(input.closingCountedUsd, 'Closing USD count')
   const closingCountedKhr = optionalShiftCount(input.closingCountedKhr, 'Closing KHR count')
-  const state = await route<ShiftState>(
-    'shifts:close',
-    () => apiFetch('POST', '/api/shifts/close', {
-      branch_id: input.branchId ?? null,
+  if (!input.shiftId || input.expectedRevision == null) throw new Error('The exact shift and revision are required')
+  const state = await shiftWrite<ShiftState>(
+    `shifts:close:${input.shiftId}`,
+    () => shiftMutationFetch('POST', `/api/shifts/${input.shiftId}/close`, {
+      expected_revision: input.expectedRevision,
+      closed_at: input.closedAt || new Date().toISOString(),
       closing_counted_usd: closingCountedUsd,
       closing_counted_khr: closingCountedKhr,
       ...(input.additionalCashUsd !== undefined ? { additional_cash_usd: optionalShiftCount(input.additionalCashUsd, 'Additional USD cash') } : {}),
       ...(input.additionalCashKhr !== undefined ? { additional_cash_khr: optionalShiftCount(input.additionalCashKhr, 'Additional KHR cash') } : {}),
       closing_note: input.closingNote ?? null,
-    }),
+    }, input.actorId),
     null,
     true,
   )
@@ -362,12 +447,13 @@ export async function listShifts(filters: {
 }
 
 export async function fetchShiftHistory(id: number): Promise<ShiftHistoryResult> {
-  const result = await route<ShiftHistoryResult>(`shifts:history:${id}`, () => apiFetch('GET', `/api/shifts/${id}/history`), null)
+  const result = await apiFetch('GET', `/api/shifts/${id}/history`) as ShiftHistoryResult
   if (!result) throw new Error('Could not read shift amendments')
   return result
 }
 
 export type AmendShiftInput = {
+  actorId?: number | string
   expectedRevision: number
   reason: string
   openedAt: string
@@ -383,6 +469,7 @@ export type AmendShiftInput = {
 }
 
 export async function amendShift(id: number, input: AmendShiftInput): Promise<{ shift: Shift }> {
+  if (shiftTimestampIsFuture(input.openedAt) || (input.closedAt && shiftTimestampIsFuture(input.closedAt))) throw new Error('Shift time cannot be in the future.')
   const openingFloatUsd = optionalShiftCount(input.openingFloatUsd, 'Opening USD count')
   const openingFloatKhr = optionalShiftCount(input.openingFloatKhr, 'Opening KHR count')
   // Optional even on a closed shift: a shift ended without a count keeps that
@@ -393,9 +480,9 @@ export async function amendShift(id: number, input: AmendShiftInput): Promise<{ 
   const closingCountedKhr = input.closedAt == null
     ? null
     : optionalShiftCount(input.closingCountedKhr, 'Closing KHR count')
-  const result = await route<{ shift: Shift }>(
+  const result = await shiftWrite<{ shift: Shift }>(
     `shifts:amend:${id}`,
-    () => apiFetch('PATCH', `/api/shifts/${id}`, {
+    () => shiftMutationFetch('PATCH', `/api/shifts/${id}`, {
       expected_revision: input.expectedRevision,
       reason: input.reason,
       opened_at: input.openedAt,
@@ -408,7 +495,7 @@ export async function amendShift(id: number, input: AmendShiftInput): Promise<{ 
       closing_counted_usd: closingCountedUsd,
       closing_counted_khr: closingCountedKhr,
       closing_note: input.closingNote ?? null,
-    }),
+    }, input.actorId),
     null,
     true,
   )
@@ -417,6 +504,7 @@ export async function amendShift(id: number, input: AmendShiftInput): Promise<{ 
 }
 
 export type CloseShiftByIdInput = {
+  actorId?: number | string
   expectedRevision: number
   closedAt: string
   // Optional for the same reason as CloseShiftInput's: the historic close in
@@ -435,11 +523,12 @@ export type CloseShiftByIdResult = {
 }
 
 export async function closeShiftById(id: number, input: CloseShiftByIdInput): Promise<CloseShiftByIdResult> {
+  if (shiftTimestampIsFuture(input.closedAt)) throw new Error('Closing time cannot be in the future.')
   const closingCountedUsd = optionalShiftCount(input.closingCountedUsd, 'Closing USD count')
   const closingCountedKhr = optionalShiftCount(input.closingCountedKhr, 'Closing KHR count')
-  const result = await route<CloseShiftByIdResult>(
+  const result = await shiftWrite<CloseShiftByIdResult>(
     `shifts:close:${id}`,
-    () => apiFetch('POST', `/api/shifts/${id}/close`, {
+    () => shiftMutationFetch('POST', `/api/shifts/${id}/close`, {
       expected_revision: input.expectedRevision,
       closed_at: input.closedAt,
       closing_counted_usd: closingCountedUsd,
@@ -447,7 +536,7 @@ export async function closeShiftById(id: number, input: CloseShiftByIdInput): Pr
       additional_cash_usd: optionalShiftCount(input.additionalCashUsd, 'Additional USD cash'),
       additional_cash_khr: optionalShiftCount(input.additionalCashKhr, 'Additional KHR cash'),
       closing_note: input.closingNote ?? null,
-    }),
+    }, input.actorId),
     null,
     true,
   )
@@ -456,6 +545,7 @@ export async function closeShiftById(id: number, input: CloseShiftByIdInput): Pr
 }
 
 export type ReopenShiftInput = {
+  actorId?: number | string
   expectedRevision: number
   reason: string
   openingFloatUsd: number | null
@@ -471,15 +561,15 @@ export type ReopenShiftResult = {
 export async function reopenShift(id: number, input: ReopenShiftInput): Promise<ReopenShiftResult> {
   const openingFloatUsd = optionalShiftCount(input.openingFloatUsd, 'Opening USD count')
   const openingFloatKhr = optionalShiftCount(input.openingFloatKhr, 'Opening KHR count')
-  const result = await route<ReopenShiftResult>(
+  const result = await shiftWrite<ReopenShiftResult>(
     `shifts:reopen:${id}`,
-    () => apiFetch('POST', `/api/shifts/${id}/reopen`, {
+    () => shiftMutationFetch('POST', `/api/shifts/${id}/reopen`, {
       expected_revision: input.expectedRevision,
       reason: input.reason,
       opening_float_usd: openingFloatUsd,
       opening_float_khr: openingFloatKhr,
       opening_note: input.openingNote ?? null,
-    }),
+    }, input.actorId),
     null,
     true,
   )
@@ -492,13 +582,13 @@ export type CancelShiftResult = {
   cancelled: true
 }
 
-export async function cancelShift(id: number, expectedRevision: number, reason: string): Promise<CancelShiftResult> {
-  const result = await route<CancelShiftResult>(
+export async function cancelShift(id: number, expectedRevision: number, reason: string, actorId?: number | string): Promise<CancelShiftResult> {
+  const result = await shiftWrite<CancelShiftResult>(
     `shifts:cancel:${id}`,
-    () => apiFetch('POST', `/api/shifts/${id}/cancel`, {
+    () => shiftMutationFetch('POST', `/api/shifts/${id}/cancel`, {
       expected_revision: expectedRevision,
       reason,
-    }),
+    }, actorId),
     null,
     true,
   )

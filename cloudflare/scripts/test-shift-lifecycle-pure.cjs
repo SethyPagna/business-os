@@ -391,6 +391,69 @@ async function main() {
     closing_counted_usd: 1, closing_counted_khr: 1,
   })).status, 409, 'historic close cannot overlap the next existing shift')
 
+  // Real route + transactional SQLite: a lost ack is simulated by ignoring
+  // the first success, reopening elsewhere, then replaying the frozen body.
+  user = { id: 40, name: 'Retry owner', username: 'retry', permissions: JSON.stringify({ pos: true }) }
+  const retryOpened = (await (await call('POST', '/open', { branch_id: 1 })).json()).shift
+  const exactClose = { client_request_id: 'shift-close-exact-0001', expected_revision: retryOpened.revision,
+    closed_at: new Date().toISOString(), closing_counted_usd: null, closing_counted_khr: 0 }
+  assert.equal((await call('POST', `/${retryOpened.id}/close`, exactClose)).status, 200)
+  const exactReopen = { client_request_id: 'shift-reopen-exact-0001', expected_revision: 1, reason: 'Second device', opening_float_usd: 7 }
+  const retryChildResponse = await call('POST', `/${retryOpened.id}/reopen`, exactReopen)
+  assert.equal(retryChildResponse.status, 201)
+  const retryChild = (await retryChildResponse.json()).shift
+  const auditCount = () => sqlite.prepare('SELECT COUNT(*) n FROM audit_logs').get().n
+  const historyCount = () => sqlite.prepare('SELECT COUNT(*) n FROM shift_session_amendments').get().n
+  const proofBefore = [auditCount(), historyCount(), sent.length]
+  const replayClose = await call('POST', `/${retryOpened.id}/close`, exactClose)
+  assert.equal(replayClose.status, 200)
+  assert.equal((await replayClose.json()).shift.id, retryOpened.id, 'lost close ack resolves its original segment')
+  assert.equal(sqlite.prepare('SELECT closed_at FROM shift_sessions WHERE id=?').get(retryChild.id).closed_at, null,
+    'old close counts can never close a continuation created on another device')
+  const replayReopen = await call('POST', `/${retryOpened.id}/reopen`, exactReopen)
+  assert.equal(replayReopen.status, 200)
+  assert.equal((await replayReopen.json()).shift.id, retryChild.id)
+  assert.deepEqual([auditCount(), historyCount(), sent.length], proofBefore, 'exact replays add no audit, history or Telegram work')
+  assert.equal((await call('POST', `/${retryOpened.id}/close`, { ...exactClose, closing_counted_usd: 99 })).status, 409,
+    'reusing a receipt identity with changed counts is rejected')
+  assert.equal((await call('POST', `/${retryChild.id}/close`, exactClose)).status, 409, 'a receipt cannot target another shift')
+  const exactAmend = { client_request_id: 'shift-amend-exact-0001', expected_revision: 0, reason: 'Count correction', opening_float_usd: 9 }
+  const beforeAmendNotice = sent.length
+  assert.equal((await call('PATCH', `/${retryChild.id}`, exactAmend)).status, 200)
+  assert.equal(sent.length, beforeAmendNotice + 1, 'amendments schedule the same report refresh as other transitions')
+  const afterAmendProof = [auditCount(), historyCount(), sent.length]
+  assert.equal((await call('PATCH', `/${retryChild.id}`, exactAmend)).status, 200)
+  assert.deepEqual([auditCount(), historyCount(), sent.length], afterAmendProof)
+  assert.equal((await call('PATCH', `/${retryChild.id}`, { ...exactAmend, client_request_id: 'shift-amend-stale-0001' })).status, 409)
+  const future = new Date(Date.now() + 60_000).toISOString()
+  assert.equal((await call('PATCH', `/${retryChild.id}`, { expected_revision: 1, reason: 'Future open', opened_at: future })).status, 400)
+  assert.equal((await call('PATCH', `/${retryOpened.id}`, { expected_revision: 1, reason: 'Future close', closed_at: future })).status, 400)
+  user = { ...user, permissions: '{}' }
+  assert.equal((await call('PATCH', `/${retryChild.id}`, exactAmend)).status, 403, 'receipt replay rechecks revoked action permissions')
+  user = { id: 1, name: 'Admin', username: 'admin', role_code: 'admin', permissions: '{}' }
+  const exactCancel = { client_request_id: 'shift-cancel-exact-0001', expected_revision: 1, reason: 'Wrong drawer' }
+  const cancelProof = [auditCount(), historyCount(), sent.length]
+  const cancelRace = await Promise.all([call('POST', `/${retryChild.id}/cancel`, exactCancel), call('POST', `/${retryChild.id}/cancel`, exactCancel)])
+  assert.deepEqual(cancelRace.map((response) => response.status), [200, 200], 'concurrent identical requests both receive the one commit receipt')
+  assert.deepEqual([auditCount(), historyCount(), sent.length], cancelProof.map((n) => n + 1))
+  assert.equal((await call('POST', `/${retryChild.id}/cancel`, exactCancel)).status, 200)
+  console.log('PASS exact close/reopen/amend/cancel receipts, lost ack plus another-device reopen, changed identity, stale/revoked requests and future-time guards')
+
+  user = { id: 41, name: 'Legacy owner', username: 'legacy', permissions: JSON.stringify({ pos: true }) }
+  const legacyRoot = (await (await call('POST', '/open', { branch_id: 1 })).json()).shift
+  const legacyInput = { shift_id: legacyRoot.id, expected_revision: legacyRoot.revision, client_request_id: 'legacy-safe-close-0001', branch_id: 1, closing_counted_usd: 12 }
+  assert.equal((await call('POST', '/close', { branch_id: 1, closing_counted_usd: 12 })).status, 400, 'old unpinned close requests fail closed')
+  assert.equal((await call('POST', '/close', legacyInput)).status, 200)
+  const legacyChild = (await (await call('POST', `/${legacyRoot.id}/reopen`, { expected_revision: 1, reason: 'Other device', opening_float_usd: 2 })).json()).shift
+  const legacyProof = [auditCount(), historyCount(), sent.length]
+  const legacyReplay = await call('POST', '/close', legacyInput)
+  assert.equal(legacyReplay.status, 200)
+  assert.equal((await legacyReplay.json()).shift.id, legacyRoot.id)
+  assert.equal(sqlite.prepare('SELECT closed_at FROM shift_sessions WHERE id=?').get(legacyChild.id).closed_at, null)
+  assert.deepEqual([auditCount(), historyCount(), sent.length], legacyProof)
+  assert.equal((await call('POST', '/close', { ...legacyInput, shift_id: legacyChild.id })).status, 409)
+  console.log('PASS legacy close rejects missing identity and pins receipt replay across another-device reopen')
+
   const backupSource = fs.readFileSync(path.join(root, 'src', 'lib', 'backup.ts'), 'utf8')
   assert.match(backupSource, /'shift_sessions'/)
   assert.match(backupSource, /SELECT \* FROM \$\{qid\(table\)\}/,

@@ -254,6 +254,28 @@ const NOW = Date.parse('2026-09-06T08:00:00.000Z')
   assert.equal(open.expected.usd > 0, true, 'but it still has an expectation, reported up to now')
   console.log('PASS scope: shop-wide widens to the branch, and an open shift reports an expectation without inventing a count')
 
+  // A later settlement changes the sale's original window, never the later
+  // drawer. This documents the current creation-time attribution invariant;
+  // it deliberately does not invent a collection timestamp from an update.
+  const laterShift = { ...SHIFT, opened_at: SHIFT.closed_at, closed_at: '2026-09-06T08:00:00.000Z' }
+  sql.prepare(`INSERT INTO sales(id,created_at,sale_status,branch_id,cashier_id,payment_method,total_usd)
+    VALUES (50,'2026-09-06 05:30:00','awaiting_payment',2,7,'Cash',17)`).run()
+  const originalBeforeSettlement = await recon.loadShiftReconciliation({}, SHIFT, NOW)
+  const laterBeforeSettlement = await recon.loadShiftReconciliation({}, laterShift, NOW)
+  sql.prepare("UPDATE sales SET sale_status='completed',amount_paid_usd=17 WHERE id=50").run()
+  const originalAfterSettlement = await recon.loadShiftReconciliation({}, SHIFT, NOW)
+  const laterAfterSettlement = await recon.loadShiftReconciliation({}, laterShift, NOW)
+  assert.equal(originalAfterSettlement.cash_sales.usd - originalBeforeSettlement.cash_sales.usd, 17)
+  assert.deepEqual(laterAfterSettlement.cash_sales, laterBeforeSettlement.cash_sales)
+  sql.prepare(`INSERT INTO returns(id,created_at,branch_id,cashier_id,status,return_scope,total_refund_usd)
+    VALUES (50,'2026-09-06 07:00:00',2,7,'completed','customer',2)`).run()
+  sql.prepare(`INSERT INTO fees(id,created_at,branch_id,created_by,fee_type,amount_usd)
+    VALUES (50,'2026-09-06 07:00:00',2,7,'expense',3)`).run()
+  const laterWithOutflows = await recon.loadShiftReconciliation({}, laterShift, NOW)
+  assert.equal(laterWithOutflows.refunds.usd - laterAfterSettlement.refunds.usd, 2)
+  assert.equal(laterWithOutflows.expenses.usd - laterAfterSettlement.expenses.usd, 3)
+  console.log('PASS attribution: later settlement stays with sale creation; returns and fees use their own recorded windows')
+
   // --- 6. the pure arithmetic on its own -----------------------------------
 
   const pure = recon.computeShiftReconciliation({

@@ -186,7 +186,8 @@ async function main() {
   ok(waited.length === 1, 'the opening notification is handed to executionCtx.waitUntil')
 
   // ---- 2. Closing sends the report, exactly once ---------------------------
-  const closed = await post('/close', { closing_counted_usd: 412.5, closing_counted_khr: 350000 })
+  const closeInput = { shift_id: openedBody.shift.id, expected_revision: openedBody.shift.revision, client_request_id: 'telegram-close-exact-0001', closing_counted_usd: 412.5, closing_counted_khr: 350000 }
+  const closed = await post('/close', closeInput)
   const closedBody = await closed.json()
   ok(closed.status === 200 && closedBody.shift.closed_at, 'the close writes closed_at')
   ok(closedBody.already_closed === false, 'and reports itself as the close that won')
@@ -207,7 +208,7 @@ async function main() {
   // deliberate no-op), so the 200 is not evidence that anything should have
   // been sent. The guard is `changed > 0`, which is the same UPDATE ... AND
   // closed_at IS NULL that makes "end only once" true.
-  const again = await post('/close', { closing_counted_usd: 999, closing_counted_khr: 1 })
+  const again = await post('/close', closeInput)
   const againBody = await again.json()
   ok(again.status === 200 && againBody.already_closed === true,
     'a second close is a no-op that still answers 200')
@@ -230,10 +231,12 @@ async function main() {
   currentUserId = 8
   const reopened = await post('/open', { opening_float_usd: 20, opening_float_khr: 0 })
   ok(reopened.status === 201, 'a fresh shift is open for the race')
+  const raceShift = (await reopened.json()).shift
+  const raceInput = { shift_id: raceShift.id, expected_revision: raceShift.revision, client_request_id: 'telegram-close-race-0001', closing_counted_usd: 100, closing_counted_khr: 0 }
   sent.length = 0
   const [raceA, raceB] = await Promise.all([
-    post('/close', { closing_counted_usd: 100, closing_counted_khr: 0 }),
-    post('/close', { closing_counted_usd: 100, closing_counted_khr: 0 }),
+    post('/close', raceInput),
+    post('/close', raceInput),
   ])
   const [bodyA, bodyB] = [await raceA.json(), await raceB.json()]
   const winners = [bodyA, bodyB].filter((body) => body.already_closed === false)
@@ -258,7 +261,7 @@ async function main() {
       return primaryD1.batch(items)
     },
   }
-  const losingClosePromise = post('/close', { closing_counted_usd: 30, closing_counted_khr: 0 })
+  const losingClosePromise = post('/close', { shift_id: openForAmendRaceBody.shift.id, expected_revision: openForAmendRaceBody.shift.revision, client_request_id: 'telegram-close-loses-0001', closing_counted_usd: 30, closing_counted_khr: 0 })
   await closeBatchReached
   const winningAmend = await request('PATCH', `/${openForAmendRaceBody.shift.id}`, {
     expected_revision: openForAmendRaceBody.shift.revision,
@@ -305,7 +308,7 @@ async function main() {
   })
   const strangerApp = stranger.default || stranger
   const missing = await strangerApp.fetch(
-    new Request('http://till.local/close', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }),
+    new Request('http://till.local/close', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ shift_id: 999, expected_revision: 0, client_request_id: 'telegram-close-missing-0001' }) }),
     env,
     ctx,
   )

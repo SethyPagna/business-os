@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import Modal from '../shared/Modal'
 import { useApp } from '../../AppContext'
 import { fmtDateTime24, parseServerTimestampMs } from '../../utils/formatters.ts'
-import { closeShift, fetchCurrentShift, openShift, shiftClosingCounts, shiftCountPairBlocker, shiftOpeningCounts, type Shift, type ShiftState } from '../../api/shiftTransport.ts'
+import { closeShift, fetchCurrentShift, openShift, pendingShiftMutation, shiftClosingCounts, shiftCountPairBlocker, shiftOpeningCounts, type Shift, type ShiftState } from '../../api/shiftTransport.ts'
 import ShiftCashBreakdown from '../shifts/ShiftCashBreakdown.tsx'
 import ShiftCountPair, { ShiftSubmitRow, shiftCountBlockerKey } from '../shifts/ShiftCountFields.tsx'
 import { shiftCountedPairText } from '../shifts/shiftReportModel.ts'
@@ -392,20 +392,25 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
   // that actually returned a shift, and it is what keeps the panel mounted
   // once `can_end` has gone false.
   const [closed, setClosed] = useState<Shift | null>(null)
+  const [target, setTarget] = useState<Shift | null>(null)
+  const [pending, setPending] = useState(false)
 
   const now = useWallClock(open && !closed)
-  const shift = closed || state?.shift || null
+  const shift = closed || target || state?.shift || null
   const canCloseCurrent = state?.is_open === true && state.shift?.capabilities.can_close === true
   const endBlocker = closingCountInvalid(countedUsd) || closingCountInvalid(countedKhr)
     || closingCountInvalid(additionalUsd) || closingCountInvalid(additionalKhr) ? 'invalid' as const : null
 
   const submitClose = async () => {
-    if (busy) return
+    if (busy || !target) return
     const counts = shiftClosingCounts(countedUsd, countedKhr)
     if (endBlocker) return
     setBusy(true)
     try {
       const next = await closeShift({
+        shiftId: target.id,
+        expectedRevision: target.revision,
+        actorId: user?.id ?? undefined,
         branchId,
         // The accounting transport accepts null as "not counted". Casts keep
         // this component compatible with the pre-integration type surface.
@@ -415,7 +420,10 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
         additionalCashKhr: additionalKhr.trim() === '' ? null : Number(additionalKhr),
         closingNote: note.trim() || null,
       })
-      publish(next)
+      setPending(false)
+      // A continuation may already exist on another device. Refresh the
+      // current segment separately; this receipt belongs only to target.
+      window.dispatchEvent(new Event(SHIFT_STATE_CHANGED_EVENT))
       // Stay open on the summary. A shift with no row back (a shape the
       // transport permits but the route does not produce) has nothing to
       // summarise, so that one case closes as before rather than showing an
@@ -427,6 +435,8 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
         : t('shift_ended'))
       onEnded?.()
     } catch (e) {
+      setPending((e as { outcome?: string })?.outcome === 'unknown')
+      if ((e as { outcome?: string })?.outcome === 'unknown') return // shared banner owns the unresolved warning
       notify(e instanceof Error ? e.message : t('shift_end_failed'), 'error')
     } finally {
       setBusy(false)
@@ -434,13 +444,29 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
   }
 
   const dismiss = () => {
+    if (busy) return
     setOpen(false)
     setClosed(null)
+    setTarget(null)
     setCountedUsd('')
     setCountedKhr('')
     setAdditionalUsd('')
     setAdditionalKhr('')
     setNote('')
+  }
+
+  const beginClose = () => {
+    if (!state?.shift || busy) return
+    setTarget(state.shift)
+    const saved = pendingShiftMutation(user?.id ?? undefined, state.shift.id)
+    setPending(saved?.action === 'close')
+    if (saved?.action === 'close') {
+      const value = (key: string) => saved.body[key] == null ? '' : String(saved.body[key])
+      setCountedUsd(value('closing_counted_usd')); setCountedKhr(value('closing_counted_khr'))
+      setAdditionalUsd(value('additional_cash_usd')); setAdditionalKhr(value('additional_cash_khr'))
+      setNote(value('closing_note'))
+    }
+    setOpen(true)
   }
 
   // What the cashier has typed so far, preserving two blanks as unknown -- shown beside the
@@ -453,13 +479,13 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
     : shiftCountedPairText(typedCounts.usd, typedCounts.khr, fmtUSD, fmtKHR)
 
   // No open shift AND no summary to show: this control has nothing to do.
-  if (!canCloseCurrent && !closed) return null
+  if (!canCloseCurrent && !closed && !open) return null
 
   return (
     <>
       {canCloseCurrent && (
         <button
-          type="button" onClick={() => setOpen(true)}
+          type="button" onClick={beginClose}
           className="rounded border px-3 py-1.5 text-sm font-medium"
           title={state.shift?.opened_at ? `${t('shift_opened_at')}: ${fmtDateTime24(state.shift.opened_at)}` : undefined}
         >
@@ -471,6 +497,7 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
           title={closed ? t('shift_summary_title') : t('shift_end')}
           size="sm"
           onClose={dismiss}
+          closeDisabled={busy}
           // Once the close is written there is nothing unsaved left to lose,
           // so dismissing the summary must not raise a discard prompt.
           unsavedChanges={{ dirty: !closed && (countedUsd.trim() !== '' || countedKhr.trim() !== '' || additionalUsd.trim() !== '' || additionalKhr.trim() !== '' || note.trim() !== '') }}
@@ -517,13 +544,13 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
             {!closed && (
               <>
                 <ShiftCountPair
-                  dense autoFocus disabled={busy}
+                  dense autoFocus disabled={busy || pending}
                   label={t('shift_counted_cash')} usdLabel={t('shift_counted_usd')} khrLabel={t('shift_counted_khr')}
                   hint={t('shift_registered_cash_hint')}
                   usd={countedUsd} khr={countedKhr} onUsd={setCountedUsd} onKhr={setCountedKhr}
                 />
                 <ShiftCountPair
-                  dense disabled={busy}
+                  dense disabled={busy || pending}
                   label={t('shift_additional_cash')} usdLabel={t('shift_additional_usd')} khrLabel={t('shift_additional_khr')}
                   hint={t('shift_additional_cash_hint')}
                   usd={additionalUsd} khr={additionalKhr} onUsd={setAdditionalUsd} onKhr={setAdditionalKhr}
@@ -535,7 +562,7 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
                   ]}
                   />
                 )}
-                <NoteFold note={note} onChange={setNote} disabled={busy} />
+                <NoteFold note={note} onChange={setNote} disabled={busy || pending} />
               </>
             )}
 
@@ -546,7 +573,7 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
               // End cannot proceed, the same row says why.
               <ShiftSubmitRow
                 reason={endBlocker ? t(shiftCountBlockerKey(endBlocker)) : null}
-                busy={busy} label={t('shift_end')} onClick={() => void submitClose()}
+                busy={busy} label={pending ? t('retry') : t('shift_end')} onClick={() => void submitClose()}
                 buttonClassName={DENSE_BUTTON}
               />
             )}

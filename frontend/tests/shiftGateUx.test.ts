@@ -23,6 +23,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import ts from 'typescript'
 import { openShift, shiftCountPairBlocker, shiftOpeningCounts } from '../src/api/shiftTransport.ts'
 import {
   __resetApiHealthForTests,
@@ -154,4 +155,139 @@ ok(/t\('shift_register_hint'\)/.test(gate), 'the register modal still explains i
 ok(!/needsRegistration && !dismissed|needsRegistration && !snoozed|localStorage[^\n]*shift_register/.test(gate),
   'no dismiss / snooze / remembered flag was introduced')
 
+// Execute the actual POS component callbacks with a hook renderer. This
+// covers state transitions, without claiming CSS or physical-device proof.
+type RenderNode = { type: unknown; props: Record<string, any> }
+const slots: any[] = []
+let cursor = 0
+const effectQueue: Array<() => void> = []
+const hooks = {
+  useState(initial: any) {
+    const slot = cursor++
+    if (!(slot in slots)) slots[slot] = typeof initial === 'function' ? initial() : initial
+    return [slots[slot], (value: any) => { slots[slot] = typeof value === 'function' ? value(slots[slot]) : value }]
+  },
+  useEffect(effect: () => void, deps: any[]) {
+    const slot = cursor++
+    if (!slots[slot] || deps.some((value, i) => !Object.is(value, slots[slot][i]))) { slots[slot] = deps; effectQueue.push(effect) }
+  },
+  useCallback(callback: any, deps: any[]) {
+    const slot = cursor++
+    if (!slots[slot] || deps.some((value, i) => !Object.is(value, slots[slot].deps[i]))) slots[slot] = { callback, deps }
+    return slots[slot].callback
+  },
+  useRef(initial: any) { const slot = cursor++; return slots[slot] ||= { current: initial } },
+}
+const ModalMarker = () => null
+const SubmitMarker = () => null
+let currentShift: any = { shift: { id: 71, revision: 3, opened_at: '2026-09-05T01:00:00.000Z', capabilities: { can_close: true } }, is_open: true }
+let resolveClose: (value: any) => void = () => {}
+let submitted: any
+const oldWindow = globalThis.window
+globalThis.window = Object.assign(new EventTarget(), { setInterval: () => 1, clearInterval: () => {}, sessionStorage: { getItem: () => null } }) as unknown as Window & typeof globalThis
+const jsx = (type: unknown, props: Record<string, any>) => ({ type, props })
+const compiled = ts.transpileModule(gate, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText
+const gateModule: any = { exports: {} }
+new Function('require', 'module', 'exports', compiled)((name: string) => {
+  if (name === 'react') return hooks
+  if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx, Fragment: 'fragment' }
+  if (name.includes('shared/Modal')) return { default: ModalMarker }
+  if (name.includes('AppContext')) return { useApp: () => ({ t: (key: string) => key, notify: () => {}, user: { id: 4 }, settings: {}, fmtUSD: String, fmtKHR: String }) }
+  if (name.includes('formatters')) return { fmtDateTime24: String, parseServerTimestampMs: Date.parse }
+  if (name.includes('shiftTransport')) return { fetchCurrentShift: async () => currentShift, pendingShiftMutation: () => null,
+    shiftClosingCounts: (usd: string, khr: string) => ({ usd: usd === '' ? null : Number(usd), khr: khr === '' ? null : Number(khr) }),
+    closeShift: (input: any) => { submitted = input; return new Promise((resolve) => { resolveClose = resolve }) } }
+  if (name.includes('ShiftCountFields')) return { default: () => null, ShiftSubmitRow: SubmitMarker }
+  if (name.includes('shiftReportModel')) return { shiftCountedPairText: () => '—' }
+  return { default: () => null }
+}, gateModule, gateModule.exports)
+const render = () => {
+  cursor = 0
+  const tree = gateModule.exports.EndShiftButton({ branchId: 1 })
+  effectQueue.splice(0).forEach((effect) => effect())
+  return tree
+}
+function nodes(tree: any): RenderNode[] {
+  if (Array.isArray(tree)) return tree.flatMap(nodes)
+  if (!tree || typeof tree !== 'object') return []
+  return [tree, ...nodes(tree.props?.children)]
+}
+try {
+  gateModule.exports.publishShift('4:1:per_account', currentShift)
+  let tree = render()
+  nodes(tree).find((node) => node.type === 'button')!.props.onClick()
+  tree = render()
+  assert.equal(nodes(tree).find((node) => node.type === ModalMarker)!.props.closeDisabled, false)
+  nodes(tree).find((node) => node.type === SubmitMarker)!.props.onClick()
+  tree = render()
+  const busyModal = nodes(tree).find((node) => node.type === ModalMarker)!
+  assert.equal(busyModal.props.closeDisabled, true, 'X/Escape/discard are guarded while close is in flight')
+  busyModal.props.onClose()
+  assert.ok(nodes(render()).some((node) => node.type === ModalMarker), 'direct dismiss cannot discard the in-flight panel')
+  assert.equal(submitted.shiftId, 71)
+  assert.equal(submitted.expectedRevision, 3)
+  currentShift = { shift: { id: 72, revision: 0, opened_at: '2026-09-05T09:00:00.000Z', capabilities: { can_close: true } }, is_open: true }
+  resolveClose({ shift: { id: 71, closed_at: '2026-09-05T09:00:00.000Z' } })
+  await Promise.resolve(); await Promise.resolve()
+  tree = render()
+  const summary = nodes(tree).find((node) => node.type === ModalMarker)!
+  assert.equal(summary.props.title, 'shift_summary_title')
+  assert.equal(summary.props.closeDisabled, false)
+  summary.props.onClose()
+  assert.equal(nodes(render()).some((node) => node.type === ModalMarker), false, 'successful summary dismisses cleanly')
+  checks += 8
+  slots.length = 0
+  effectQueue.length = 0
+  const actualTransport = await import('../src/api/shiftTransport.ts')
+  const historyShift: any = { ...currentShift.shift, id: 81, revision: 2, business_date: '2026-09-05', shift_code: 'SHIFT-81',
+    opened_at: '2026-09-05T01:00:00.000Z', closed_at: null, capabilities: { can_edit: true, can_close: true, can_cancel: true } }
+  let historyResult = historyShift
+  let resolveHistoryClose: (value: any) => void = () => {}
+  const historyModule: any = { exports: {} }
+  const compiledHistory = ts.transpileModule(modal, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText
+  new Function('require', 'module', 'exports', compiledHistory)((name: string) => {
+    if (name === 'react') return hooks
+    if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx, Fragment: 'fragment' }
+    if (name.includes('shared/Modal')) return { default: ModalMarker }
+    if (name.includes('AppContext')) return { useApp: () => ({ t: (key: string) => key, user: { id: 4 } }) }
+    if (name.includes('constants')) return { BUSINESS_TIME_ZONE: 'Asia/Phnom_Penh' }
+    if (name.includes('formatters')) return { fmtDateOnly: String }
+    if (name.includes('shiftTransport')) return { ...actualTransport, pendingShiftMutation: () => null,
+      listShifts: async () => ({ shifts: [historyShift], scope: 'own' }), fetchShiftHistory: async () => ({ shift: historyResult, amendments: [] }),
+      closeShiftById: () => new Promise((resolve) => { resolveHistoryClose = resolve }) }
+    if (name.includes('ShiftCountFields')) return { default: () => null, ShiftSubmitRow: SubmitMarker }
+    return { default: () => null }
+  }, historyModule, historyModule.exports)
+  const renderHistory = () => {
+    cursor = 0
+    const tree = historyModule.exports.default({ branchId: 1 })
+    effectQueue.splice(0).forEach((effect) => effect())
+    return tree
+  }
+  tree = renderHistory()
+  nodes(tree).find((node) => node.type === 'button')!.props.onClick()
+  renderHistory(); await Promise.resolve()
+  tree = renderHistory()
+  nodes(tree).find((node) => node.type === 'button' && node.props.children?.props?.shift)!.props.onClick()
+  await Promise.resolve()
+  tree = renderHistory()
+  nodes(tree).find((node) => node.type === 'button' && node.props.children === 'shift_action_close')!.props.onClick()
+  tree = renderHistory()
+  nodes(tree).find((node) => node.type === SubmitMarker)!.props.onClick()
+  tree = renderHistory()
+  const historyBusy = nodes(tree).find((node) => node.type === ModalMarker)!
+  assert.equal(historyBusy.props.closeDisabled, true)
+  historyBusy.props.onClose()
+  assert.ok(nodes(renderHistory()).some((node) => node.type === ModalMarker))
+  const backButton = nodes(tree).find((node) => node.type === 'button' && Array.isArray(node.props.children) && node.props.children.includes('back'))!
+  assert.equal(backButton.props.disabled, true, 'history Back cannot leave the in-flight action')
+  assert.ok(nodes(tree).filter((node) => node.type === 'fieldset').every((node) => node.props.disabled), 'all submitted fields are frozen')
+  historyResult = { ...historyShift, closed_at: '2026-09-05T09:00:00.000Z', revision: 3 }
+  resolveHistoryClose({ shift: historyResult })
+  await Promise.resolve(); await Promise.resolve(); await Promise.resolve()
+  tree = renderHistory()
+  assert.equal(nodes(tree).find((node) => node.type === ModalMarker)!.props.closeDisabled, false)
+  assert.equal(nodes(tree).some((node) => node.type === SubmitMarker), false, 'committed history close exits the draft')
+  checks += 6
+} finally { globalThis.window = oldWindow }
 console.log(`\nshiftGateUx: all ${checks} checks passed`)
