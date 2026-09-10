@@ -12161,3 +12161,40 @@ were changed.
   post-deploy listing and direct authenticated API smoke remain blocked by
   the existing Cloudflare bot challenge; deployment output itself is the
   provenance record. Physical iOS/PWA hardware validation is unavailable.
+
+## Sales amendment and uncertain-write release candidate — September 10, 2026
+
+Five fix-scoped commits are prepared on `codex/sale-create-trigger-release-20260909`:
+`c6291bef` (audited quantity/price line amendments and migration 0149), `4ae55d56`
+(detail discounts and typed Records rows), `f7f92185` (authoritative refresh and
+unknown-write reconciliation), `451b8808` (employee edit-window setting and
+compact payment controls), and `b00f1943` (receipt product-discount derivation
+compatibility). The release preserves the canonical stock rule: Completed and
+Not Paid/Awaiting Payment deduct stock exactly once; cancelled/returned paths
+use the existing reversal ledger.
+
+The detail modal now edits selling price and quantity atomically, keeps existing
+discounts for quantity-only edits, clears stale discount metadata when the price
+changes, and records typed before/after quantity, price, discount, delivery,
+payment, customer, and status changes. Exact sale re-reads bypass cached zero-line
+payloads after opening or an uncertain write. Status, add-item, and amendment
+requests reconcile against the authoritative row before an error banner is kept;
+request budgets are 45 seconds. The settings policy defaults to an unlimited
+amendment window (`0`) and lets an administrator choose a positive employee
+window. Settlement method controls are compact and remain inside the mobile
+sheet bounds.
+
+Verification for this exact candidate: frontend `test:utils` **348/348**, focused
+sale amendment/records/detail/discount/settlement/reconciliation/stock tests pass;
+frontend typecheck, i18n verification (**5,706 keys / 589 files**), production
+Vite build, Worker typecheck, migration-chain fresh test, full Worker pure-script
+sweep, and `git diff --check` pass. No production migration or data mutation has
+run yet in this candidate. Deployment is the next authorized action; capture the
+Wrangler revision, Worker version, build hash, migration result, and an
+unauthenticated health check in the follow-up entry.
+
+Open work remains evidence-blocked or separately tracked: historical duplicate
+cleanup and missing-line/driver evidence, physical iOS/PWA/camera validation,
+transfer reliability/UI polish, public/customer-portal polish, and paused offline
+work. The Cloudflare bot challenge prevents authenticated browser smoke from
+being a substitute for the local contract gates.
