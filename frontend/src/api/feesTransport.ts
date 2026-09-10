@@ -71,6 +71,73 @@ export type FeePayload = {
   delivery_contact_id?: number | null
   notes?: string | null
   expectedUpdatedAt?: string | null
+  client_request_id?: string
+}
+
+type FeeCreateStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
+const PENDING_FEE_CREATE_KEY = 'businessos_pending_fee_create_v1'
+
+export class FeeCreatePersistenceError extends Error {
+  code = 'pending_request_persistence_failed'
+
+  constructor() {
+    super('This expense was not sent because its exact retry request could not be saved. Clear browser site storage, then try again.')
+    this.name = 'FeeCreatePersistenceError'
+  }
+}
+
+function feeCreateStorage(): FeeCreateStorage | null {
+  try {
+    return typeof sessionStorage === 'undefined' ? null : sessionStorage
+  } catch {
+    return null
+  }
+}
+
+function readPendingFeeCreate(storage: FeeCreateStorage): FeePayload | null {
+  try {
+    const parsed = JSON.parse(storage.getItem(PENDING_FEE_CREATE_KEY) || 'null') as FeePayload | null
+    const requestId = String(parsed?.client_request_id || '').trim()
+    return requestId ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+/** Persist one stable request identity before POST /api/fees can start. */
+export function prepareFeeCreatePayload(
+  payload: FeePayload,
+  storage: FeeCreateStorage | null = feeCreateStorage(),
+  createRequestId: () => string = () => crypto.randomUUID(),
+): FeePayload & { client_request_id: string } {
+  if (!storage) throw new FeeCreatePersistenceError()
+  try {
+    const pending = readPendingFeeCreate(storage)
+    const requestId = String(payload.client_request_id || pending?.client_request_id || createRequestId()).trim()
+    if (!requestId) throw new Error('missing request id')
+    const prepared = JSON.parse(JSON.stringify({ ...payload, client_request_id: requestId })) as FeePayload & { client_request_id: string }
+    const serialized = JSON.stringify(prepared)
+    storage.setItem(PENDING_FEE_CREATE_KEY, serialized)
+    if (storage.getItem(PENDING_FEE_CREATE_KEY) !== serialized) throw new Error('pending request read-back failed')
+    return prepared
+  } catch (error) {
+    if (error instanceof FeeCreatePersistenceError) throw error
+    throw new FeeCreatePersistenceError()
+  }
+}
+
+export function clearPendingFeeCreate(
+  requestId: string,
+  storage: FeeCreateStorage | null = feeCreateStorage(),
+): void {
+  if (!storage) return
+  try {
+    const pending = readPendingFeeCreate(storage)
+    if (pending?.client_request_id === requestId) storage.removeItem(PENDING_FEE_CREATE_KEY)
+  } catch {
+    // A confirmed server receipt is authoritative. A stale local slot is
+    // harmless because its request id will replay rather than duplicate.
+  }
 }
 
 export function getFees(params: FeeListParams = {}): Promise<FeeListResult> {
@@ -195,13 +262,25 @@ export function getFeesReport(params: QueryParams = {}): Promise<unknown> {
   )
 }
 
-export function createFee(payload: FeePayload): Promise<{ fee: FeeRecord }> {
-  return route(
-    'fees:create',
-    () => apiFetch('POST', '/api/fees', payload),
-    null,
-    true,
-  ) as Promise<{ fee: FeeRecord }>
+export async function createFee(payload: FeePayload): Promise<{ fee: FeeRecord }> {
+  const prepared = prepareFeeCreatePayload(payload)
+  try {
+    const response = await route(
+      `fees:create:${prepared.client_request_id}`,
+      () => apiFetch('POST', '/api/fees', prepared),
+      null,
+      true,
+    ) as { fee: FeeRecord }
+    clearPendingFeeCreate(prepared.client_request_id)
+    return response
+  } catch (error) {
+    const status = Number((error as { status?: unknown } | null)?.status)
+    // A readable 4xx proves this attempt was rejected. This includes an
+    // idempotency conflict, which proves the same request id already has a
+    // committed receipt. Timeouts/network/5xx keep the exact slot for retry.
+    if (status >= 400 && status < 500) clearPendingFeeCreate(prepared.client_request_id)
+    throw error
+  }
 }
 
 export function updateFee(id: number, payload: FeePayload): Promise<{ fee: FeeRecord }> {

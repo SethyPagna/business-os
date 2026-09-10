@@ -674,22 +674,19 @@ test('the hub persists view / style / options under the model\'s storage keys an
 
 test('the control row keeps every control at each width: nothing is dropped, nothing is doubled', () => {
   const hub = read(HUB)
-  // ControlRow renders `overflow` INSTEAD of filters/sort/actions from 1023px
-  // down. Passing a tail that held only the export menu silently deleted the
-  // view picker and the filter selects between 768 and 1023 -- the tail has to
-  // be unconditional.
-  assert.ok(/overflow=\{collapsedTail\}/.test(hub), 'the collapsed tail is passed at every width, not only when compact')
-  assert.ok(/actions=\{collapsedTail\}/.test(hub), 'the wide tier renders the SAME tail, so no control exists at only one width')
-  const tail = hub.slice(hub.indexOf('const collapsedTail'), hub.indexOf('const body'))
-  assert.ok(tail.includes('{filtersButton}'), 'the tail carries the filter menu')
-
-  // The one picker lives beside the active report title and is never duplicated
-  // into either the desktop toolbar or compact primary row.
-  assert.ok(!tail.includes('viewPicker'), 'the picker is not in the tail any more (it would double up with the search slot)')
-  assert.ok(/titleControl: viewPicker/.test(hub), 'the active report title owns the view picker')
+  // Every report receives one compound active-title row. Clicking the title
+  // opens the complete permission-scoped option list, while Filters and Show
+  // remain beside it at every viewport tier.
+  const control = hub.slice(hub.indexOf('const reportControlRow'), hub.indexOf('const viewProps'))
+  assert.ok(control.includes('{viewPicker}') && control.includes('{filtersButton}'), 'report option and Filters share one row')
+  assert.ok(control.includes("trh('show', 'Show')"), 'Show shares the report option row')
+  assert.ok(/titleControl: reportControlRow/.test(hub), 'every report view receives the same compound title row')
   assert.match(hub, /const viewPicker = \(\s*<AppSelect[\s\S]*?ariaLabel=\{trh\('view', 'View'\)\}/, 'the menu view picker retains AppSelect keyboard semantics and its accessible name')
   assert.ok(/reports-mobile-primary">\{rangePicker\}/.test(hub), 'the compact primary row keeps only the range')
-  assert.equal((hub.match(/titleControl: viewPicker/g) || []).length, 1, 'the picker has one render reference, on the active report title')
+  assert.equal((hub.match(/titleControl: reportControlRow/g) || []).length, 1, 'the compound active title has one render reference')
+  const frame = read('src/components/sales/reports/ReportFrame.tsx')
+  assert.match(frame, /const activeTitle = titleControl \?\? title/, 'the selectable title replaces the static title instead of duplicating it')
+  assert.doesNotMatch(hub, /const collapsedTail/, 'Filters is not duplicated in a second toolbar tail')
 
   // The four controls Part 586 folded into the one menu must not come back as
   // separate control-row citizens -- that crowding is what hid the search box.
@@ -739,9 +736,9 @@ test('compact report filters match the stacked mobile control contract', () => {
   assert.ok(hub.includes('aria-pressed={selectedMobilePreset === preset.id}'), 'quick ranges expose their selected state')
   assert.ok(hub.includes("trh('show', 'Show')"), 'compact controls have a primary Show action')
   assert.match(css, /\.reports-mobile-controls\s*\{[\s\S]*display:\s*grid/, 'mobile controls stack in a scoped grid')
-  assert.match(css, /\.reports-mobile-presets\s*\{[\s\S]*flex-wrap:\s*wrap/, 'quick ranges wrap instead of scrolling horizontally')
+  assert.match(css, /\.reports-mobile-presets\s*\{[\s\S]*flex-wrap:\s*nowrap[\s\S]*overflow-x:\s*auto/, 'quick ranges stay in one horizontal scrolling rail')
   assert.match(css, /\.reports-mobile-range\s*\{[^}]*\bmin-height:\s*44px\s*;/, 'the combined date/calendar target is at least 44px, regardless of declaration order')
-  assert.match(css, /\.reports-mobile-show\s*\{[^}]*width:\s*auto[^}]*min-width:\s*5\.5rem[^}]*min-height:\s*44px/, 'Show is compact while retaining its 44px target')
+  assert.match(css, /\.reports-show-action\s*\{[^}]*min-height:\s*40px[^}]*height:\s*40px/, 'Show follows the compact action-height contract')
   assert.match(css, /font-variant-numeric:\s*tabular-nums/, 'report amounts use tabular numerals')
   assert.match(css, /overflow-x:\s*clip/, 'the report surface cannot create page-level horizontal overflow')
 })

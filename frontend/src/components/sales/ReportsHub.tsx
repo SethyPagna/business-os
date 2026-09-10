@@ -265,7 +265,7 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
       options={views.map((v) => ({ value: v.id, label: trh(v.labelKey, v.fallback) }))}
       onChange={(value) => { if (isReportViewId(value)) setViewId(value) }}
       ariaLabel={trh('view', 'View')}
-      buttonClassName="h-8 w-full min-w-0 py-0 px-2 text-[12px]"
+      buttonClassName="h-10 w-full min-w-0 py-0 px-2 text-[12px]"
       showChevron
     />
   )
@@ -303,6 +303,21 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
     </span>
   )
 
+  const showReports = () => {
+    setSearch(searchText.trim())
+    setOptionsOpen(false)
+    if (compact) setControlsFolded(true)
+  }
+  const reportControlRow = (
+    <span className="reports-title-actions">
+      <span className="min-w-0 flex-1">{viewPicker}</span>
+      {filtersButton}
+      <Button className="reports-show-action" onClick={showReports}>
+        {trh('show', 'Show')}
+      </Button>
+    </span>
+  )
+
   const viewProps: ReportViewProps | null = view ? {
     view,
     filters,
@@ -317,12 +332,8 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
     compact,
     onDrill,
     onOptionsChange,
-    titleControl: viewPicker,
+    titleControl: reportControlRow,
   } : null
-
-  // One tail for every tier: the menu is the ONLY thing that can move, and it
-  // never disappears. The view picker lives inside that menu at every tier.
-  const collapsedTail = <>{filtersButton}</>
 
   const mobilePresets: Array<{ id: MobileRangePreset; label: string }> = [
     { id: 'all', label: trh('all_time', 'All time') },
@@ -367,12 +378,9 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
           : view.id === 'expenses' ? <ExpensesReport {...viewProps} />
             : <GroupedReport key={view.id} {...viewProps} />
 
-  // One line standing in for the folded card: what is showing, for which
-  // range, and the Filters button (which also keeps the menu's
-  // anchor mounted). The whole line is the handle. The fold shrinks the
-  // CONTENT, never the tap area: the handle and the Filters button keep the
-  // tier's 44px height (a2 measured 18-20px targets on the first cut, Sep 6
-  // 2026), the glyphs stay their size.
+  // Once Show is pressed, only the date/search card folds. The active report
+  // title and Filters/Show stay together in the report header below, so the
+  // selected title is never repeated in this handle.
   const foldedControls = (
     <section className="reports-mobile-controls" aria-label={trh('filters', 'Report filters')}>
       <div className="flex min-w-0 items-center gap-2">
@@ -384,10 +392,8 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
           onClick={() => setControlsFolded(false)}
         >
           <ChevronDown className="h-4 w-4 shrink-0 text-[var(--ui-ink-3)]" />
-          <span className="min-w-0 truncate text-[length:var(--ui-size-body)] font-medium">{view ? trh(view.labelKey, view.fallback) : trh('reports', 'Reports')}</span>
           <span className="min-w-0 truncate text-[length:var(--ui-size-meta)] text-[var(--ui-ink-2)]">{rangeSubtitle(filters, trh)}</span>
         </button>
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center [&_button]:h-11 [&_button]:w-11">{filtersButton}</div>
       </div>
     </section>
   )
@@ -399,16 +405,10 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
           {searchInput}
           <div className="reports-mobile-primary">{rangePicker}</div>
           {presetControls}
-          <div className="reports-mobile-actions">
-            {filtersButton}
-            <Button className="reports-mobile-show" onClick={() => { setSearch(searchText.trim()); setOptionsOpen(false); setControlsFolded(true) }}>
-              {trh('show', 'Show')}
-            </Button>
-          </div>
         </section>
       )) : (
         <div className="reports-desktop-controls report-segment">
-          <ControlRow className="reports-desktop-primary" sticky search={searchSlot} range={rangePicker} filters={null} actions={collapsedTail} overflow={collapsedTail} />
+          <ControlRow className="reports-desktop-primary" sticky search={searchSlot} range={rangePicker} filters={null} actions={null} overflow={null} />
           {presetControls}
         </div>
       )}

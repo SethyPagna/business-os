@@ -34,24 +34,28 @@ const frame = overviewRender.indexOf('<ReportFrame')
 assert.ok(tabs >= 0 && tabs < frame, 'Overview breakdown tabs precede the statement frame')
 assert.doesNotMatch(overviewRender, /summary=\{|summaryNote=/, 'Overview does not render the redundant summary prose')
 
-// Compact tier: Show folds the card; the folded line is a handle that
-// unfolds it, names the view and the range, and keeps the Filters button
-// (the options fold anchors to it).
+// Compact tier: Show folds only the date/search card. The one active title,
+// Filters and Show remain together in every report frame.
 assert.match(hub, /const \[controlsFolded, setControlsFolded\] = useState\(false\)/, 'the card starts open')
-assert.match(hub, /setSearch\(searchText\.trim\(\)\); setOptionsOpen\(false\); setControlsFolded\(true\)/, 'Show folds the card')
+assert.match(hub, /if \(compact\) setControlsFolded\(true\)/, 'Show folds the compact date card')
 assert.match(hub, /\{compact \? \(controlsFolded \? foldedControls : \(/, 'only the compact tier folds')
 const folded = hub.slice(hub.indexOf('const foldedControls'), hub.indexOf('  return (', hub.indexOf('const foldedControls')))
 assert.match(folded, /className="reports-mobile-controls"/, 'the folded line keeps the sticky card chrome')
 assert.match(folded, /aria-expanded=\{false\}/)
 assert.match(folded, /onClick=\{\(\) => setControlsFolded\(false\)\}/, 'the handle unfolds')
-assert.match(folded, /trh\(view\.labelKey, view\.fallback\)/, 'the folded line names the view')
 assert.match(folded, /rangeSubtitle\(filters, trh\)/, 'and the range, through the shared subtitle helper')
-assert.match(folded, /\{filtersButton\}/, 'the Filters button stays mounted while folded')
+assert.doesNotMatch(folded, /view\.labelKey|\{filtersButton\}/, 'the folded date handle does not duplicate the active title or Filters')
 // The fold shrinks the content, never the tap area: 44px like the rest of
 // the compact tier (a2 measured 18-20px targets on the first cut, Sep 6 2026).
 assert.match(folded, /<button\s+type="button"\s+className="flex min-h-\[44px\] min-w-0 flex-1/, 'the handle keeps a 44px tap height')
-assert.match(folded, /<div className="flex h-11 w-11 shrink-0 items-center justify-center \[&_button\]:h-11 \[&_button\]:w-11">\{filtersButton\}<\/div>/, 'the folded Filters button is a 44px square')
 assert.match(hub, /import \{[^}]*rangeSubtitle[^}]*\} from '\.\/reports\/reportTypes\.ts'/)
+
+const reportControl = hub.slice(hub.indexOf('const reportControlRow'), hub.indexOf('const viewProps'))
+assert.match(reportControl, /\{viewPicker\}[\s\S]*\{filtersButton\}[\s\S]*trh\('show', 'Show'\)/, 'option title, Filters and Show are in one ordered row')
+assert.match(hub, /titleControl: reportControlRow/, 'all report types receive that same row')
+const frameSource = read('src/components/sales/reports/ReportFrame.tsx')
+assert.match(frameSource, /const activeTitle = titleControl \?\? title/)
+assert.match(frameSource, /title=\{activeTitle\}/)
 
 // The desktop tier is untouched: sticky ControlRow plus the preset row.
 assert.match(hub, /<ControlRow className="reports-desktop-primary" sticky/)

@@ -431,6 +431,10 @@ export const FACTORY_RESET_TABLES = [
   'sale_item_batch_allocations',
   'return_items',
   'returns',
+  // Expense receipts must be cleared before fees so their immutable replay
+  // provenance lasts until the reset guard authorizes the complete reset.
+  'fee_operation_receipts',
+  'fees',
   'sale_items',
   'sales',
   'rfid_session_items',
