@@ -24,6 +24,7 @@ import type { DateTimeRange } from '../shared/DateTimeRangePicker'
 import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
+import BarChart3 from 'lucide-react/dist/esm/icons/bar-chart-3.js'
 import MinimizeButton from '../shared/MinimizeButton.tsx'
 import { useIsPageActive } from '../shared/pageActivity'
 import BranchForm, { branchFormDraftBaseKey, branchFormWorkKey } from './BranchForm'
@@ -55,6 +56,7 @@ import {
   getBranches as getBranchesRequest,
   getBranchStock as getBranchStockRequest,
   getTransfers as getTransfersRequest,
+  getBranchSummary,
   updateBranch as updateBranchRequest,
 } from '../../api/branchTransport.ts'
 
@@ -351,6 +353,22 @@ export default function Branches({ embedded = false, view, showSectionNavigation
    * 2.2 UI selection/expansion state.
    */
   const [branches, setBranches] = useState<BranchRecord[]>([])
+  const [statsOpen, setStatsOpen] = useState(false)
+  const [branchSummary, setBranchSummary] = useState<Record<string, number> | null>(null)
+  const [statsLoading, setStatsLoading] = useState(false)
+  const [statsError, setStatsError] = useState('')
+  const [statsRefresh, setStatsRefresh] = useState(0)
+  useEffect(() => {
+    if (!statsOpen || !isActive) return
+    let current = true
+    setStatsLoading(true)
+    setStatsError('')
+    void withLoaderTimeout(() => getBranchSummary(), 'Branch summary', BRANCHES_LIST_TIMEOUT_MS)
+      .then((summary) => { if (current) setBranchSummary(summary as Record<string, number>) })
+      .catch((error) => { if (current) { setBranchSummary(null); setStatsError(getErrorMessage(error, tr('failed_to_load_data', 'Failed to load data'))) } })
+      .finally(() => { if (current) setStatsLoading(false) })
+    return () => { current = false }
+  }, [statsOpen, isActive, statsRefresh, syncChannel?.ts, tr])
   const [internalTab, setInternalTab] = useState<BranchTab>('branches')
   const tab = view ?? internalTab
   const setTab = useCallback((nextTab: BranchTab) => {
@@ -1040,24 +1058,20 @@ export default function Branches({ embedded = false, view, showSectionNavigation
   const branchExportButton = (
     <button
       type="button"
-      className="inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-lg border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:border-emerald-400 hover:bg-emerald-50/60 hover:text-emerald-700 disabled:cursor-wait disabled:opacity-60 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-emerald-500 dark:hover:bg-slate-700/80 dark:hover:text-emerald-300"
+      className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-slate-700 transition-colors hover:bg-emerald-50 disabled:cursor-wait disabled:opacity-60 dark:text-slate-200 dark:hover:bg-slate-700"
       onClick={() => { void openBranchExport() }}
       disabled={branchExportLoading}
       title={tab === 'transfers' ? tr('export_transfer_history', 'Export transfer history') : tr('export_branch_stock', 'Export per-branch stock')}
       aria-label={tab === 'transfers' ? tr('export_transfer_history', 'Export transfer history') : tr('export_branch_stock', 'Export per-branch stock')}
     >
       <Download className="h-4 w-4 shrink-0" />
-      <span className="truncate">{branchExportLoading ? tr('exporting', 'Exporting…') : tr('export', 'Export')}</span>
+      <span className="sr-only">{branchExportLoading ? tr('exporting', 'Exporting…') : tr('export', 'Export')}</span>
     </button>
   )
 
   return (
     <div className={`flex min-h-0 flex-col ${embedded ? 'flex-1 px-3 pb-3 pt-1 sm:px-6 sm:pb-6 sm:pt-2' : 'page-scroll p-3 sm:p-6'}`}>
-      {/* The aggregate Branches / Items / Value stat cards that used to sit
-          here (above the Branches / Transfer History tabs) were removed
-          (user, Aug 29: "remove the stats above the branches/transfers
-          section"). The per-branch stat tiles inside each expanded branch
-          below are kept, and the Inventory-moved "Stats" hub section is kept. */}
+      {/* Current stock totals stay independent of the transfer-history range. */}
 
       {loadError && !loading && !branches.length && !transfers.length ? (
         <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
@@ -1114,12 +1128,18 @@ export default function Branches({ embedded = false, view, showSectionNavigation
               setTransferPage(1)
             }}
             t={t}
+            leading={tab === 'branches' ? (
+              <button type="button" aria-expanded={statsOpen} aria-controls="branch-overview-stats" onClick={() => setStatsOpen((open) => !open)}
+                className={`inline-flex h-10 shrink-0 items-center gap-1 rounded-lg px-2 text-xs font-semibold ${statsOpen ? 'bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900' : 'bg-gray-100 text-gray-600 dark:bg-zinc-800 dark:text-gray-300'}`}>
+                <BarChart3 className="h-4 w-4" />{tr('stats', 'Stats')}
+              </button>
+            ) : undefined}
+            actions={branchExportButton}
             className="min-w-0"
           />
         ) : null}
         <div className="flex min-w-0 items-center gap-1 overflow-x-auto border-b border-gray-200 pt-0.5 dark:border-gray-700">
           {showDateRange ? <ActionHistoryBar history={actionHistory as unknown as ActionHistoryProp} t={t} className="w-auto shrink-0" showLabel dense /> : null}
-          {showDateRange ? branchExportButton : null}
           {showSectionNavigation ? <div className="flex gap-1 overflow-x-auto">
             {[
               { id: 'branches' as BranchTab, label: tr('branches', 'Branches') },
@@ -1160,6 +1180,21 @@ export default function Branches({ embedded = false, view, showSectionNavigation
           </div>
         </div>
       </div>
+
+      {tab === 'branches' && statsOpen ? (
+        <section id="branch-overview-stats" className="mb-3 space-y-2" aria-label={tr('current_stock', 'Current Stock')}>
+          <p className="text-xs text-slate-500">{tr('current_stock', 'Current Stock')}</p>
+          {statsLoading ? <p role="status">{tr('loading', 'Loading')}…</p> : statsError ? (
+            <div role="status"><p>{statsError}</p><button type="button" className="btn-secondary h-10" onClick={() => setStatsRefresh((value) => value + 1)}>{tr('retry', 'Retry')}</button></div>
+          ) : branchSummary ? (
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              <BranchStatTile label={tr('branches', 'Branches')} value={branchSummary.branch_count ?? 0} />
+              <BranchStatTile label={tr('products', 'Products')} value={branchSummary.total_products ?? 0} />
+              <BranchStatTile label={tr('stock_value', 'Stock Value')} value={fmtUSD(branchSummary.stock_value_usd ?? 0)} />
+            </div>
+          ) : null}
+        </section>
+      ) : null}
 
       {tab === 'branches' ? (
         <div className="space-y-3">
@@ -1614,6 +1649,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
               setModal(null)
               load()
               setBranchStocks({})
+              setStatsRefresh((value) => value + 1)
             }}
             user={user || undefined}
             notify={notify}

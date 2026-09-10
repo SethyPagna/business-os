@@ -12,7 +12,7 @@ test('Branches exposes one compact standalone date range and one Export action',
   assert.doesNotMatch(source, /<DateTimeRangePicker/)
   assert.equal((source.match(/onClick=\{\(\) => \{ void openBranchExport\(\) \}\}/g) || []).length, 1)
   assert.match(source, /showDateRange \? \([\s\S]*?<StatsRangeRow/)
-  assert.match(source, /\{showDateRange \? branchExportButton : null\}/)
+  assert.match(source, /actions=\{branchExportButton\}/)
 })
 
 // N10 reverses the earlier contract this test used to pin. Products showed
@@ -89,7 +89,9 @@ test('embedded Branches removes its duplicate picker and keeps actions on one ro
   assert.match(source, /\{!showDateRange \? <div className="flex min-w-0 items-stretch gap-1 overflow-x-auto pt-1">[\s\S]*?\{branchExportButton\}/)
   assert.equal((source.match(/const branchExportButton = \(/g) || []).length, 1)
   assert.ok((hubSource.match(/showDateRange/g) || []).length >= 2)
-  assert.match(source, /\{showDateRange \? <ActionHistoryBar[\s\S]{0,300}\{showDateRange \? branchExportButton : null\}/)
+  assert.match(source, /\{showDateRange \? <ActionHistoryBar/)
+  assert.match(source, /leading=\{tab === 'branches'[\s\S]*?aria-expanded=\{statsOpen\}/)
+  assert.match(source, /actions=\{branchExportButton\}/)
 })
 
 test('Export follows the visible branch section and transfer remains icon plus label', () => {

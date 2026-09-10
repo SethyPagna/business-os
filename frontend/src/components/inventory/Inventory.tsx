@@ -73,9 +73,11 @@ import { pruneSelectionToVisibleIds } from '../../utils/rowSelection.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { adjustBranchQuantity, isStockInSubmission, isStockReceiptCreditIncomplete, stockReceiptWire, stockAdjustBatchWire, stockReceiptGateCode, stockAdjustQuantityError, STOCK_ADJUST_QUANTITY_FALLBACKS, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../utils/stockReceiptFields.ts'
 import { isApiVersionMismatchError } from '../../api/http.ts'
+import { dispatchResolvedSyncError } from '../../utils/syncProblemLifecycle.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import { branchCanBeTransferSource, branchCanTransferBetween } from '../../utils/branchRoles.ts'
 import type { QueryParams } from '../../api/query.ts'
+import type { PendingInventoryTransfer } from '../../api/inventoryWriteTransport.ts'
 import {
   beginTrackedRequest,
   getFirstLoaderError,
@@ -549,6 +551,9 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   const [loadError,     setLoadError]     = useState<string | null>(null)
   const [adjustSaving,  setAdjustSaving]  = useState(false)
   const [transferSaving, setTransferSaving] = useState(false)
+  const [pendingTransfer, setPendingTransfer] = useState<PendingInventoryTransfer | null>(null)
+  const [transferRetryError, setTransferRetryError] = useState('')
+  const [transferRetryReady, setTransferRetryReady] = useState(false)
   const [showImport, setShowImport] = useState(false)
   // F2 (Part 419): the fast per-shipment stock-in flow -- see
   // FastStockInModal.tsx; writes ride the same receive kernel as every
@@ -574,6 +579,25 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   const adjustStockInFlightRef = useRef(false)
   const transferStockInFlightRef = useRef(false)
   const actionHistory = useActionHistory({ limit: 10, notify, scope: 'inventory', enabled: historyReady, user })
+  const transferAuthorityRef = useRef({ actorId: String(user?.id ?? ''), allowed: canTransferStock })
+  transferAuthorityRef.current = { actorId: String(user?.id ?? ''), allowed: canTransferStock }
+  const transferHistoryRef = useRef(actionHistory)
+  transferHistoryRef.current = actionHistory
+  const registeredTransfersRef = useRef(new Set<string>())
+  useEffect(() => {
+    let current = true
+    setTransferRetryReady(false)
+    setPendingTransfer(null)
+    setTransferModal(null)
+    setTransferRetryError('')
+    void loadInventoryWriteTransport().then((api) => {
+      const saved = api.loadInventoryTransfer(user?.id)
+      if (current) { setPendingTransfer(saved); setTransferRetryReady(true) }
+    }).catch((error: unknown) => {
+      if (current) setTransferRetryError(error instanceof Error ? error.message : 'Transfer retry unavailable')
+    })
+    return () => { current = false }
+  }, [user?.id])
   const runInventoryMutation = useCallback((loader: InventoryLoader, label: string): Promise<any> => (
     withLoaderTimeout(loader, label, INVENTORY_STOCK_MUTATION_TIMEOUT_MS)
   ), [])
@@ -1444,6 +1468,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   }
 
   const openTransfer = (p: InventoryProduct) => {
+    if (!canTransferStock || !transferRetryReady || pendingTransfer || transferStockInFlightRef.current) return
     void ensureInventoryReasonsLoaded()
     const branchStock = Array.isArray(p?.branch_stock) ? p.branch_stock : []
     const firstStockBranch = branchStock.find((item: LegacyInventoryRecord) => Number(item?.quantity || 0) > 0)?.branch_id
@@ -1554,9 +1579,106 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   }, [t])
 
 
+  const transferErrorMessage = (error: unknown) => localizeBranchRuleError(
+    error instanceof Error ? error.message : tr('stock_transfer_failed', 'Stock transfer failed'), (key) => tr(key, ''),
+  ) || tr('stock_transfer_failed', 'Stock transfer failed')
+
+  const completeInventoryTransfer = async (run: PendingInventoryTransfer, recoveredHistory = false) => {
+    if (transferAuthorityRef.current.actorId !== run.actorId || !transferAuthorityRef.current.allowed) throw new Error(tr('access_denied', 'Access denied'))
+    const api = await loadInventoryWriteTransport()
+    if (transferAuthorityRef.current.actorId !== run.actorId || !transferAuthorityRef.current.allowed) throw new Error(tr('access_denied', 'Access denied'))
+    const actorId = run.actorId
+    const checkpoint = (next: PendingInventoryTransfer) => {
+      api.saveInventoryTransfer(actorId, next)
+      if (transferAuthorityRef.current.actorId === actorId) setPendingTransfer(next)
+    }
+    const completed = await api.executeInventoryTransfer(run, checkpoint)
+    if (transferAuthorityRef.current.actorId !== actorId || !transferAuthorityRef.current.allowed) return
+    const { context } = completed
+    if (context.kind === 'submit' && !registeredTransfersRef.current.has(context.entryId)) {
+      const original = context.original
+      transferHistoryRef.current.pushAction({
+        id: context.entryId,
+        label: `${tr('transfer', 'Transfer')}: ${context.productName}`,
+        undo: () => runInventoryTransferIntent('undo', {
+          ...original, fromBranchId: original.toBranchId, toBranchId: original.fromBranchId,
+          reason: `Undo: ${original.reason}`,
+        }, context),
+        redo: () => runInventoryTransferIntent('redo', { ...original, reason: `Redo: ${original.reason}` }, context),
+      })
+      registeredTransfersRef.current.add(context.entryId)
+    } else if (context.kind !== 'submit' && recoveredHistory && context.serverId) {
+      // Reload loses local closures. Reconcile the same history row only after
+      // the immutable transfer receipt proves the compensating movement.
+      const historyApi = await import('../../api/actionHistoryTransport.ts')
+      await historyApi.updateActionHistory(context.serverId, { status: context.kind === 'undo' ? 'redoable' : 'undoable' })
+      await transferHistoryRef.current.refreshServerItems()
+    }
+    api.saveInventoryTransfer(actorId, null)
+    setPendingTransfer(null)
+    setTransferRetryError('')
+    setTransferModal(null)
+    notify(tr('stock_transferred_details', 'Transferred {quantity} of {product} from {from} to {to}.')
+      .replace('{quantity}', String(completed.requests[0].body.quantity))
+      .replace('{product}', context.productName)
+      .replace('{from}', branchesById.get(String(completed.requests[0].body.fromBranchId))?.name || String(completed.requests[0].body.fromBranchId))
+      .replace('{to}', branchesById.get(String(completed.requests[0].body.toBranchId))?.name || String(completed.requests[0].body.toBranchId)))
+    // A refresh failure cannot turn a confirmed movement into a retryable write.
+    await load(true).catch(() => {})
+  }
+
+  const runInventoryTransferIntent = async (
+    kind: PendingInventoryTransfer['context']['kind'], body: Record<string, unknown>,
+    context: Omit<PendingInventoryTransfer['context'], 'kind' | 'entryId'> & { entryId?: string },
+  ) => {
+    if (!transferAuthorityRef.current.allowed || !transferAuthorityRef.current.actorId) throw new Error(tr('access_denied', 'Access denied'))
+    if (!beginSingleAction(transferStockInFlightRef, { blocked: transferSaving })) throw new Error(tr('loading', 'Loading...'))
+    const actorId = transferAuthorityRef.current.actorId
+    if (String(body.userId ?? '') !== actorId) {
+      finishSingleAction(transferStockInFlightRef)
+      throw new Error(tr('access_denied', 'Access denied'))
+    }
+    setTransferSaving(true)
+    try {
+      const api = await loadInventoryWriteTransport()
+      const saved = api.loadInventoryTransfer(actorId)
+      if (saved && (saved.context.kind !== kind || (kind !== 'submit' && saved.context.entryId !== context.entryId))) {
+        throw new Error(tr('sale_bulk_pending', 'Resolve the pending operation first.'))
+      }
+      const entry = [...transferHistoryRef.current.undoItems, ...transferHistoryRef.current.redoItems].find((item) => item.id === context.entryId)
+      const run = saved || api.prepareInventoryTransfer(actorId, body, { ...context, kind, serverId: entry?.serverId ?? context.serverId })
+      api.saveInventoryTransfer(actorId, run)
+      setPendingTransfer(run)
+      setTransferModal(null)
+      if (transferAuthorityRef.current.actorId !== actorId || !transferAuthorityRef.current.allowed) throw new Error(tr('access_denied', 'Access denied'))
+      await completeInventoryTransfer(run)
+    } catch (error) {
+      if (transferAuthorityRef.current.actorId === actorId) setTransferRetryError(transferErrorMessage(error))
+      throw new Error(transferErrorMessage(error), { cause: error })
+    } finally {
+      finishSingleAction(transferStockInFlightRef)
+      setTransferSaving(false)
+    }
+  }
+
+  const retryInventoryTransfer = async () => {
+    if (!pendingTransfer || !canTransferStock || transferSaving) return
+    const run = pendingTransfer
+    const history = transferHistoryRef.current
+    if (run.context.kind !== 'submit' && [...history.undoItems, ...history.redoItems].some((item) => item.id === run.context.entryId)) {
+      await history[run.context.kind](run.context.entryId)
+      return
+    }
+    if (!beginSingleAction(transferStockInFlightRef, { blocked: transferSaving })) return
+    setTransferSaving(true)
+    try { await completeInventoryTransfer(run, true) }
+    catch (error) { setTransferRetryError(transferErrorMessage(error)) }
+    finally { finishSingleAction(transferStockInFlightRef); setTransferSaving(false) }
+  }
+
   const handleTransferStock = async () => {
-    if (transferSaving || !transferModal) return
-    const quantity = Number.parseFloat(String(transferForm.quantity))
+    if (transferSaving || !transferModal || pendingTransfer || !transferRetryReady || !canTransferStock) return
+    const quantity = Number(transferForm.quantity)
     if (!transferForm.from_branch_id || !transferForm.to_branch_id) {
       notify(tr('select_transfer_branches', 'Choose both source and destination branches.'), 'error')
       return
@@ -1583,7 +1705,10 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       notify(tr('transfer_canonical_pair_only', 'Transfers move stock only between Shop and Warehouse.'), 'error')
       return
     }
-    if (!beginSingleAction(transferStockInFlightRef, { blocked: transferSaving })) return
+    if (branches.filter((branch) => branchCanBeTransferSource(branch.name)).length !== 2) {
+      notify(tr('transfer_canonical_pair_only', 'Transfers move stock only between Shop and Warehouse.'), 'error')
+      return
+    }
     const confirmation = tr(
       'confirm_transfer_stock_details',
       'Transfer {quantity} of {product} from {from} to {to}? This posts a traceable stock movement.',
@@ -1593,13 +1718,11 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       .replace('{from}', fromBranch.name || '')
       .replace('{to}', toBranch.name || '')
     if (!window.confirm(confirmation)) {
-      finishSingleAction(transferStockInFlightRef)
       return
     }
 
-    setTransferSaving(true)
     try {
-      const result = await runInventoryMutation(() => getInventoryApi().transferInventoryStock({
+      const original = {
         productId: transferModal.id,
         fromBranchId: transferForm.from_branch_id,
         toBranchId: transferForm.to_branch_id,
@@ -1607,52 +1730,10 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
         reason: transferForm.reason,
         userId: user?.id,
         userName: user?.name || user?.username,
-      }), 'Transfer inventory stock')
-      // The direction rule lives on POST /inventory/transfer too. Both
-      // canonical directions are accepted, while a stale noncanonical pair
-      // comes back as the same localized pack sentence used by the pickers.
-      if (result?.success === false) throw new Error(localizeBranchRuleError(result?.error, (key) => tr(key, '')) || tr('stock_transfer_failed', 'Stock transfer failed'))
-      actionHistory.pushAction({
-        label: `${tr('transfer', 'Transfer')}: ${transferModal.name}`,
-        undo: async () => {
-          const undoResult = await runInventoryMutation(() => getInventoryApi().transferInventoryStock({
-            productId: transferModal.id,
-            fromBranchId: transferForm.to_branch_id,
-            toBranchId: transferForm.from_branch_id,
-            quantity,
-            reason: `Undo: ${transferForm.reason}`,
-            userId: user?.id,
-            userName: user?.name || user?.username,
-          }), 'Undo inventory stock transfer')
-          if (undoResult?.success === false) throw new Error(localizeBranchRuleError(undoResult?.error, (key) => tr(key, '')) || tr('undo_failed', 'Undo failed'))
-          await load(true)
-        },
-        redo: async () => {
-          const redoResult = await runInventoryMutation(() => getInventoryApi().transferInventoryStock({
-            productId: transferModal.id,
-            fromBranchId: transferForm.from_branch_id,
-            toBranchId: transferForm.to_branch_id,
-            quantity,
-            reason: `Redo: ${transferForm.reason}`,
-            userId: user?.id,
-            userName: user?.name || user?.username,
-          }), 'Redo inventory stock transfer')
-          if (redoResult?.success === false) throw new Error(localizeBranchRuleError(redoResult?.error, (key) => tr(key, '')) || tr('redo_failed', 'Redo failed'))
-          await load(true)
-        },
-      })
-      notify(tr('stock_transferred_details', 'Transferred {quantity} of {product} from {from} to {to}.')
-        .replace('{quantity}', String(quantity))
-        .replace('{product}', transferModal.name || '')
-        .replace('{from}', fromBranch.name || '')
-        .replace('{to}', toBranch.name || ''))
-      setTransferModal(null)
-      await load(true)
+      }
+      await runInventoryTransferIntent('submit', original, { original, productName: transferModal.name || '' })
     } catch (error: unknown) {
       notify(error instanceof Error ? error.message : tr('stock_transfer_failed', 'Stock transfer failed'), 'error')
-    } finally {
-      finishSingleAction(transferStockInFlightRef)
-      setTransferSaving(false)
     }
   }
 
@@ -2354,9 +2435,32 @@ ${inventoryFeesFormulaText}`,
     if (['products', 'movements', 'rfid'].includes(nextSection)) setTab(nextSection)
   }
 
+  const transferRetryPanel = pendingTransfer || transferRetryError ? (
+    <section role="status" className="mb-3 rounded-xl border border-amber-300 bg-amber-50 p-3 dark:bg-amber-950/30 dark:border-amber-800">
+      <p className="font-semibold">{tr('sale_bulk_pending', 'Pending operation')}</p>
+      {pendingTransfer ? <p className="mt-1 break-words text-sm">{pendingTransfer.context.productName} · {String(pendingTransfer.requests[0].body.fromBranchId)} → {String(pendingTransfer.requests[0].body.toBranchId)} · {String(pendingTransfer.requests[0].body.quantity)} · {String(pendingTransfer.requests[0].body.reason)}</p> : null}
+      {transferRetryError ? <p className="mt-1 text-sm text-red-700 dark:text-red-300">{transferRetryError}</p> : null}
+      {pendingTransfer ? <div className="mt-2 flex flex-wrap gap-2">
+        <button type="button" className="btn-primary h-10" disabled={transferSaving || !canTransferStock} onClick={() => { void retryInventoryTransfer() }}>{transferSaving ? tr('loading', 'Loading...') : tr('retry', 'Retry')}</button>
+        <button type="button" className="btn-secondary h-10" disabled={transferSaving} onClick={async () => {
+          if (transferStockInFlightRef.current || !window.confirm(tr('sale_bulk_pending', 'Retry the original request or discard it before starting another.'))) return
+          try {
+            const api = await loadInventoryWriteTransport()
+            api.saveInventoryTransfer(pendingTransfer.actorId, null)
+            dispatchResolvedSyncError(pendingTransfer.syncProblem)
+            setPendingTransfer(null)
+            setTransferRetryError('')
+            await load(true)
+          } catch (error) { setTransferRetryError(error instanceof Error ? error.message : tr('stock_transfer_failed', 'Stock transfer failed')) }
+        }}>{tr('discard', 'Discard')}</button>
+      </div> : null}
+    </section>
+  ) : null
+
   if (loadError && !loading && !movements.length) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center gap-4 p-8">
+        {transferRetryPanel}
         <div className="text-4xl">!</div>
         <p className="text-center font-medium text-red-600 dark:text-red-400">{loadError}</p>
         <button type="button" onClick={() => load(false)} className="btn-primary">
@@ -2368,6 +2472,7 @@ ${inventoryFeesFormulaText}`,
 
   return (
     <div className={embedded ? 'px-3 pt-3 pb-1 sm:px-6 sm:pt-6 sm:pb-2' : 'page-scroll p-3 sm:p-6'}>
+      {transferRetryPanel}
       {/* E1: when the Branches hub is driving (hostSection set), its chip
           row replaces this internal picker -- rendering both would be two
           competing section controls. Standalone use keeps it, including its
@@ -2691,13 +2796,13 @@ ${inventoryFeesFormulaText}`,
             onAdjust={handleAdjust}
             onCloseAdjust={closeAdjustAndDiscardDraft}
             onMinimizeAdjust={adjustModal ? preserveAndMinimizeAdjust : undefined}
-            onCloseTransfer={() => setTransferModal(null)}
+            onCloseTransfer={() => { if (!transferStockInFlightRef.current) setTransferModal(null) }}
             onTransfer={handleTransferStock}
             onTransferSourceChange={handleTransferSourceChange}
             reasonsByType={reasonsByType}
             setAdjustForm={setAdjustForm}
             setReasonManager={setReasonManager}
-            setTransferForm={setTransferForm}
+            setTransferForm={(next: typeof transferForm) => { if (!transferStockInFlightRef.current && !pendingTransfer) setTransferForm(next) }}
             t={t}
             tr={tr}
             transferForm={transferForm}

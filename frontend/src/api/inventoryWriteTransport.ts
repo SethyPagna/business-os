@@ -1,8 +1,40 @@
 import { apiFetch, route } from './http.ts'
 import { ensureClientRequestId } from './requestIds.ts'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
+import { executeTransferRun, loadTransferRun, prepareTransferRun, saveTransferRun, type PendingTransferRun } from './branchTransport.ts'
 
 type InventoryPayload = Record<string, unknown>
+
+export type PendingInventoryTransfer = PendingTransferRun & {
+  context: { kind: 'submit' | 'undo' | 'redo'; original: InventoryPayload; productName: string; entryId: string; serverId?: string | number | null }
+}
+
+// Separate actor-scoped storage prevents a Branch modal replaying an Inventory
+// request against a different endpoint. Keep the entire frozen intent on reload.
+function inventoryTransferStore(storage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> = window.sessionStorage) {
+  return {
+    getItem: (key: string) => storage.getItem(`inventory:${key}`),
+    setItem: (key: string, value: string) => storage.setItem(`inventory:${key}`, value),
+    removeItem: (key: string) => storage.removeItem(`inventory:${key}`),
+  }
+}
+export function loadInventoryTransfer(actorId: unknown, storage?: Storage): PendingInventoryTransfer | null {
+  const run = loadTransferRun(actorId, inventoryTransferStore(storage)) as PendingInventoryTransfer | null
+  if (run && (!run.context || !['submit', 'undo', 'redo'].includes(run.context.kind) || !run.context.entryId || !run.context.original || run.requests.length !== 1 || run.requests[0].bulk)) {
+    throw new Error('The saved transfer cannot be read. Check transfer history before clearing browser storage.')
+  }
+  return run
+}
+export function saveInventoryTransfer(actorId: unknown, run: PendingInventoryTransfer | null, storage?: Storage): void {
+  saveTransferRun(actorId, run, inventoryTransferStore(storage))
+}
+export function prepareInventoryTransfer(actorId: unknown, body: InventoryPayload, context: Omit<PendingInventoryTransfer['context'], 'entryId'> & { entryId?: string }): PendingInventoryTransfer {
+  const run = prepareTransferRun(actorId, [{ bulk: false, body }])
+  return { ...run, context: JSON.parse(JSON.stringify({ ...context, entryId: context.entryId || run.requests[0].body.client_request_id })) }
+}
+export function executeInventoryTransfer(run: PendingInventoryTransfer, checkpoint: (next: PendingInventoryTransfer) => void): Promise<PendingInventoryTransfer> {
+  return executeTransferRun(run, (next) => checkpoint(next as PendingInventoryTransfer), (request) => transferInventoryStock(request.body)) as Promise<PendingInventoryTransfer>
+}
 
 export type InventoryStockSessionProduct = Record<string, unknown>
 
@@ -117,12 +149,13 @@ export function editStockMovementReason(id: number, reason: string): Promise<unk
 }
 
 export function transferInventoryStock(payload: InventoryPayload = {}): Promise<unknown> {
+  const body = payload.client_request_id ? JSON.parse(JSON.stringify(payload)) : ensureClientRequestId({ ...getDevicePayload(), ...(payload || {}) }, 'transfer')
   return route(
     'inventory:transfer',
     () => apiFetch(
       'POST',
       '/api/inventory/transfer',
-      ensureClientRequestId({ ...getDevicePayload(), ...(payload || {}) }, 'transfer'),
+      body,
     ),
     null,
     true,

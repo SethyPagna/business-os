@@ -15,6 +15,8 @@ import {
   getBranchStock as getBranchStockRequest,
   transferStock as transferStockRequest,
   transferStockBulk as transferStockBulkRequest,
+  prepareTransferRun, loadTransferRun, saveTransferRun, executeTransferRun,
+  type PendingTransferRun,
 } from '../../api/branchTransport.ts'
 import { getProductBatches, getTrackedBatchProductIds } from '../../api/batchesTransport.ts'
 import type { ProductBatch } from '../../api/batchesTransport.ts'
@@ -28,6 +30,7 @@ import ProductOptionSheet from '../shared/ProductOptionSheet.tsx'
 import { branchCanBeTransferDestination, branchCanBeTransferSource, branchCanTransferBetween, branchRoleFromName } from '../../utils/branchRoles.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
+import { dispatchResolvedSyncError } from '../../utils/syncProblemLifecycle.ts'
 
 const TRANSFER_STOCK_LOAD_TIMEOUT_MS = 12000
 // Transfers can allocate and materialize many lot rows in one D1 batch. Keep
@@ -76,6 +79,7 @@ type NotifyFunction = (message: string, type?: string) => void
 type BranchOption = {
   id: string | number
   name: string
+  is_active?: boolean | number
 }
 
 type TransferProduct = {
@@ -152,6 +156,7 @@ type TransferModalProps = {
 type AppContextValue = {
   t: TranslateFunction
   settings?: { language?: string }
+  can: (page: string, action: string) => boolean
 }
 
 type TransferApi = {
@@ -212,7 +217,17 @@ function normalizeTransferStockRows(stock: unknown): TransferProduct[] {
  * - Surface transfer results through notifications.
  */
 export default function TransferModal({ branches, onClose, onDone, user, notify }: TransferModalProps) {
-  const { t, settings } = useApp()
+  const { t, settings, can } = useApp()
+  const canTransferStock = can('branches', 'transfer')
+  const transferAuthorityRef = useRef({ allowed: canTransferStock, actorId: String(user?.id) })
+  transferAuthorityRef.current = { allowed: canTransferStock, actorId: String(user?.id) }
+  const [savedRun, setSavedRun] = useState<PendingTransferRun | null>(null)
+  const [retryError, setRetryError] = useState('')
+  const [retryStorageError, setRetryStorageError] = useState('')
+  useEffect(() => {
+    try { setSavedRun(loadTransferRun(user?.id)); setRetryStorageError('') }
+    catch (error) { setRetryStorageError(getErrorMessage(error, t('transfer_failed'))) }
+  }, [user?.id])
 
   /**
    * 2. UI State
@@ -296,7 +311,8 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   const transferDirty = Boolean(fromBranch) || Boolean(toBranch)
     || Boolean(quantity.trim()) || Boolean(reason.trim())
     || Object.values(selectedQuantities).some((value) => String(value || '').trim().length > 0)
-  const closeGuard = useCloseGuard({ dirty: transferDirty }, onClose)
+  // A saved request survives closing: it must never be discarded as a form draft.
+  const closeGuard = useCloseGuard({ dirty: transferDirty && !savedRun }, onClose)
 
   // Only set while a multi-request whole-branch move is running, so the
   // operator can see it is partway through rather than hung.
@@ -340,8 +356,8 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   // Warehouse. Other and same-role destinations stay visible but inert so a
   // stale or ambiguous branch list cannot create a stock-action identity.
   const hasCanonicalTransferPair = useMemo(
-    () => branches.some((branch) => branchRoleFromName(branch.name) === 'shop')
-      && branches.some((branch) => branchRoleFromName(branch.name) === 'warehouse'),
+    () => branches.filter((branch) => branchRoleFromName(branch.name) === 'shop').length === 1
+      && branches.filter((branch) => branchRoleFromName(branch.name) === 'warehouse').length === 1,
     [branches],
   )
 
@@ -355,9 +371,9 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
     ...branches.map((branch) => ({
       value: branch.id,
       label: branch.name,
-      disabled: !branchCanBeTransferSource(branch.name),
+      disabled: !branchCanBeTransferSource(branch.name) || branch.is_active === false || branch.is_active === 0 || !hasCanonicalTransferPair,
     })),
-  ], [branches, t])
+  ], [branches, hasCanonicalTransferPair, t])
 
   const destinationBranchOptions = useMemo<AppSelectOption[]>(() => [
     { value: '', label: t('select_destination') || 'Select destination branch' },
@@ -366,7 +382,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
       .map((branch) => ({
         value: branch.id,
         label: branch.name,
-        disabled: !branchCanBeTransferDestination(branch.name)
+        disabled: !branchCanBeTransferDestination(branch.name) || branch.is_active === false || branch.is_active === 0
           || !branchCanTransferBetween(selectedSourceBranch?.name, branch.name),
       })),
   ], [branches, fromBranch, selectedSourceBranch, t])
@@ -379,11 +395,14 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   }, [branches, toBranch])
 
   const requireCanonicalTransferDirection = useCallback((): boolean => {
+    if (!canTransferStock) { notify(t('permission_denied') || 'Permission denied', 'error'); return false }
     const destinationBranch = branches.find((branch) => String(branch.id) === String(toBranch))
-    if (branchCanTransferBetween(selectedSourceBranch?.name, destinationBranch?.name)) return true
+    if (hasCanonicalTransferPair && selectedSourceBranch?.is_active !== false && selectedSourceBranch?.is_active !== 0
+      && destinationBranch?.is_active !== false && destinationBranch?.is_active !== 0
+      && branchCanTransferBetween(selectedSourceBranch?.name, destinationBranch?.name)) return true
     notify(t('transfer_canonical_pair_only') || 'Transfers move stock only between Shop and Warehouse.', 'error')
     return false
-  }, [branches, notify, selectedSourceBranch, t, toBranch])
+  }, [branches, canTransferStock, hasCanonicalTransferPair, notify, selectedSourceBranch, t, toBranch])
 
   const invalidQuantityText = settings?.language === 'km'
     ? 'ចំនួនផ្ទេរត្រូវតែធំជាងសូន្យ។'
@@ -812,6 +831,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
    * branch" means. Nothing is written here; this only parks the confirm.
    */
   const handleTransferEntireBranch = () => {
+    if (savedRun || savingBulk || retryStorageError) return
     if (!fromBranch || !toBranch) {
       notify(t('select_transfer_branches') || 'Choose both source and destination branches.', 'error')
       return
@@ -844,6 +864,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   const selectedBatch = productBatches.find((batch) => batch.id === selectedBatchId) || null
   const hasBatchLots = !!selectedProduct && trackedBatchProductIds.has(Number(selectedProduct.id))
   const finiteStockAvailable = (value: unknown) => {
+    if (typeof value !== 'number' && typeof value !== 'string') return 0
     const quantity = Number(value)
     return Number.isFinite(quantity) ? Math.max(0, quantity) : 0
   }
@@ -861,6 +882,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
    * 5.2 Write transfer row via API.
    */
   const handleTransfer = async () => {
+    if (savedRun || retryStorageError || !canTransferStock) return
     if (!fromBranch || !toBranch || !selectedProduct || !quantity) return
 
     if (Number.parseInt(fromBranch, 10) === Number.parseInt(toBranch, 10)) {
@@ -898,7 +920,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
     if (!beginSingleAction(transferInFlightRef, { blocked: saving })) return
     setSaving(true)
     try {
-      const res = await withLoaderTimeout<TransferResult>(() => getTransferApi().transferStock({
+      const run = prepareTransferRun(user?.id, [{ bulk: false, body: {
         fromBranchId: Number.parseInt(fromBranch, 10),
         toBranchId: Number.parseInt(toBranch, 10),
         productId: selectedProduct.id,
@@ -908,7 +930,21 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
         userId: user?.id,
         userName: user?.name,
         batchId: selectedBatchId,
-      }), 'Transfer branch stock', TRANSFER_STOCK_MUTATION_TIMEOUT_MS)
+      } }])
+      saveTransferRun(user?.id, run)
+      setSavedRun(run)
+      let res: TransferResult = {}
+      await executeTransferRun(run, (next) => {
+        saveTransferRun(run.actorId, next)
+        if (aliveRef.current && transferAuthorityRef.current.actorId === run.actorId) setSavedRun(next)
+      }, async (request) => {
+        if (!transferAuthorityRef.current.allowed || transferAuthorityRef.current.actorId !== run.actorId) throw new Error(t('permission_denied'))
+        res = await transferStockRequest(request.body) as TransferResult
+        return res
+      })
+      saveTransferRun(run.actorId, null)
+      if (!aliveRef.current || transferAuthorityRef.current.actorId !== run.actorId) return
+      setSavedRun(null)
 
       // The single-transfer endpoint returns the moved lot ({ destBatchId } or a
       // merge summary) with NO `success` flag -- a real failure is thrown by
@@ -939,6 +975,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
       // rather than surfacing as the English the server happened to send.
       notify(localizeBranchRuleError(res?.error, t) || (t('transfer_failed') || 'Transfer failed'), 'error')
     } catch (error) {
+      if (!aliveRef.current || transferAuthorityRef.current.actorId !== String(user?.id)) return
       notify(localizeBranchRuleError(getErrorMessage(error, t('transfer_failed') || 'Transfer failed'), t), 'error')
     } finally {
       finishSingleAction(transferInFlightRef)
@@ -955,6 +992,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
    * everything itself -- this is a UX shortcut, not the source of truth.
    */
   const handleBulkTransfer = () => {
+    if (savedRun || savingBulk || retryStorageError) return
     if (!fromBranch || !toBranch) return
     if (Number.parseInt(fromBranch, 10) === Number.parseInt(toBranch, 10)) {
       notify(t('transfer_same_branch_error') || 'Source and destination cannot be the same', 'error')
@@ -973,9 +1011,9 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
         notify(`${product?.name || productId}: ${invalidQuantityText}`, 'error')
         return
       }
-      if (product && qty > Number(product.branch_quantity || 0)) {
-        const message = (t('transfer_only_available') || 'Only {n} available').replace('{n}', String(product.branch_quantity))
-        notify(`${product.name || productId}: ${message} ${product.unit || ''}`.trim(), 'error')
+      if (!product || qty > finiteStockAvailable(product.branch_quantity)) {
+        const message = (t('transfer_only_available') || 'Only {n} available').replace('{n}', String(finiteStockAvailable(product?.branch_quantity)))
+        notify(`${product?.name || productId}: ${message} ${product?.unit || ''}`.trim(), 'error')
         return
       }
       items.push({ productId, quantity: qty })
@@ -992,11 +1030,10 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
    * D1 db.batch()). Chunking is what makes a whole-branch move possible at
    * all, but it means a multi-chunk run is NOT one undoable step -- the
    * confirm dialog says so before the operator commits, and a stop partway
-   * reports exactly how far it got. Re-running is the documented recovery and
-   * is safe: rows already moved have no stock left in the source branch, so
-   * they are simply absent from the next run's item list.
+   * reports exactly how far it got. Retrying resumes the saved chunk and its
+   * original request key; only confirmed chunks advance the checkpoint.
    *
-   * requireTransferReason() runs FIRST here, not only at the two call sites
+   * New intent rechecks requireTransferReason() before locking, not only at the two call sites
    * that arm pendingTransfer synchronously (handleBulkTransfer,
    * handleTransferEntireBranch's already-loaded path). Transfer entire
    * branch has a THIRD, deferred path: when the branch listing hasn't
@@ -1007,84 +1044,76 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
    * fetch is in flight, so it can be cleared before the effect parks the
    * confirm dialog, and ConfirmDialog's own onConfirm never re-validates
    * anything -- it just calls this function. Checking here, in the one
-   * actual write path, covers every arming site (present and future) with
-   * no per-caller duplication.
+   * actual write path, covers every arming site. A saved retry already has
+   * its required reason frozen; an empty reopened form must not replace it.
    */
-  const runPendingTransfer = async (pending: PendingTransfer) => {
-    if (!requireTransferReason()) return
+  const runPendingTransfer = async (pending: PendingTransfer | null) => {
+    if (!canTransferStock || retryStorageError) return
+    if (!savedRun && (!pending || !requireTransferReason() || !requireCanonicalTransferDirection())) return
     if (!beginSingleAction(transferBulkInFlightRef, { blocked: savingBulk })) return
     setSavingBulk(true)
-    const chunks: PendingTransferItem[][] = []
-    for (let index = 0; index < pending.items.length; index += TRANSFER_BULK_CHUNK_SIZE) {
-      chunks.push(pending.items.slice(index, index + TRANSFER_BULK_CHUNK_SIZE))
-    }
-    let transferred = 0
-    let mergeCount = 0
-    let stoppedReason = ''
     try {
-      for (let index = 0; index < chunks.length; index += 1) {
-        // Only meaningful for a run that takes more than one request; a
-        // single-chunk transfer keeps the plain saving state it always had.
-        if (chunks.length > 1) setChunkProgress({ done: index, total: chunks.length })
-        let res: TransferBulkResult
-        try {
-          res = await withLoaderTimeout<TransferBulkResult>(() => getTransferApi().transferStockBulk({
-            fromBranchId: Number.parseInt(fromBranch, 10),
-            toBranchId: Number.parseInt(toBranch, 10),
-            reason,
-            items: chunks[index],
-            userId: user?.id,
-            userName: user?.name,
-          }), 'Bulk transfer branch stock', TRANSFER_STOCK_BULK_MUTATION_TIMEOUT_MS)
-        } catch (error) {
-          stoppedReason = localizeBranchRuleError(getErrorMessage(error, t('transfer_bulk_failed') || 'Bulk transfer failed'), t)
-          break
+      let run = savedRun
+      if (!run && pending) {
+        const requests = []
+        for (let index = 0; index < pending.items.length; index += TRANSFER_BULK_CHUNK_SIZE) {
+          requests.push({ bulk: true, body: {
+            fromBranchId: Number.parseInt(fromBranch, 10), toBranchId: Number.parseInt(toBranch, 10),
+            reason, items: pending.items.slice(index, index + TRANSFER_BULK_CHUNK_SIZE), userId: user?.id, userName: user?.name,
+          } })
         }
-        if (res?.success !== false) {
-          transferred += res.transferredCount ?? chunks[index].length
-          // Same identity-match redirect as the single-item handler above,
-          // just per-item -- summarize how many redirected rather than
-          // naming each one (could be thousands across a whole branch).
-          mergeCount += res.merges?.length ?? 0
-          continue
+        run = prepareTransferRun(user?.id, requests)
+        // Persistence must succeed before the first request goes out.
+        saveTransferRun(user?.id, run)
+        setSavedRun(run)
+      }
+      if (!run || run.actorId !== String(user?.id)) return
+      setPendingTransfer(null)
+      setRetryError('')
+      setChunkProgress({ done: run.next, total: run.requests.length })
+      const completed = await executeTransferRun(run, (next) => {
+        saveTransferRun(next.actorId, next)
+        if (aliveRef.current && transferAuthorityRef.current.actorId === next.actorId) {
+          setSavedRun(next)
+          setChunkProgress({ done: next.next, total: next.requests.length })
         }
-        stoppedReason = localizeBranchRuleError(res?.error, t) || (t('transfer_bulk_failed') || 'Bulk transfer failed')
-        break
-      }
-
-      if (stoppedReason) {
-        // Never let a partial run look like a clean failure: earlier chunks
-        // have already landed and the operator has to know that before they
-        // decide what to do next.
-        notify(transferred > 0
-          ? (t('transfer_bulk_partial') || 'Transferred {done} of {total} products, then stopped: {reason}')
-            .replace('{done}', String(transferred))
-            .replace('{total}', String(pending.items.length))
-            .replace('{reason}', stoppedReason)
-          : stoppedReason, 'error')
-        // Whatever did land makes the on-screen quantities wrong, so refresh
-        // rather than leaving stale numbers to act on.
-        if (transferred > 0) onDone()
-        return
-      }
-
-      const message = (t('transfer_bulk_success') || 'Transferred {n} products').replace('{n}', String(transferred))
-      const finalMessage = mergeCount > 0
-        ? `${message} ${(t('transfer_bulk_merged_note') || '({n} merged into existing products)').replace('{n}', String(mergeCount))}`
-        : message
-      notify(finalMessage)
+      }, (request) => {
+        if (!transferAuthorityRef.current.allowed || transferAuthorityRef.current.actorId !== run.actorId) {
+          throw new Error(t('permission_denied') || 'Permission denied')
+        }
+        return request.bulk ? transferStockBulkRequest(request.body) : transferStockRequest(request.body)
+      })
+      saveTransferRun(completed.actorId, null)
+      if (!aliveRef.current || transferAuthorityRef.current.actorId !== completed.actorId) return
+      setSavedRun(null)
+      const message = (t('transfer_bulk_success') || 'Transferred {n} products').replace('{n}', String(completed.transferred))
+      notify(completed.merges > 0
+        ? `${message} ${(t('transfer_bulk_merged_note') || '({n} merged into existing products)').replace('{n}', String(completed.merges))}`
+        : message)
       onDone()
     } catch (error) {
-      // The per-chunk try already turns a failed request into stoppedReason,
-      // so reaching here means something else threw. Report it rather than
-      // letting an unawaited rejection leave the dialog sitting there.
-      notify(getErrorMessage(error, t('transfer_bulk_failed') || 'Bulk transfer failed'), 'error')
-      if (transferred > 0) onDone()
+      // A lost committed response retains the original chunk/key for receipt replay.
+      if (!aliveRef.current || transferAuthorityRef.current.actorId !== String(user?.id)) return
+      setRetryError(localizeBranchRuleError(getErrorMessage(error, t('transfer_bulk_failed') || 'Bulk transfer failed'), t))
     } finally {
       finishSingleAction(transferBulkInFlightRef)
       setSavingBulk(false)
       setChunkProgress(null)
-      setPendingTransfer(null)
+    }
+  }
+
+  const discardSavedTransfer = () => {
+    if (savingBulk || saving) return
+    if (!window.confirm(t('sale_bulk_pending'))) return
+    try {
+      saveTransferRun(user?.id, null)
+      dispatchResolvedSyncError(savedRun?.syncProblem)
+      setSavedRun(null)
+      setRetryError('')
+      // Refresh stock/history after an explicit discard, including partial commits.
+      onDone()
+    } catch (error) {
+      setRetryError(getErrorMessage(error, t('transfer_failed')))
     }
   }
 
@@ -1097,7 +1126,8 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
             <button
               type="button"
               onClick={closeGuard.requestClose}
-              className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700"
+              disabled={saving || savingBulk}
+              className="flex h-10 w-10 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 disabled:opacity-50 dark:hover:bg-gray-700"
               aria-label={t('close') || 'Close'}
             >
               <X className="h-4 w-4" />
@@ -1105,7 +1135,26 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
           </div>
         </div>
 
-        <div className="modal-scroll space-y-4 p-4 sm:p-5">
+        {savedRun || retryError || retryStorageError ? (
+          <div role="status" className="m-4 space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-100">
+            <p className="min-w-0 break-words">{savedRun ? t('sale_bulk_pending') : retryError || retryStorageError}</p>
+            {savedRun ? <>
+              <p className="break-words text-xs">{t('from_branch')}: {branchNameById(String(savedRun.requests[0].body.fromBranchId))} → {branchNameById(String(savedRun.requests[0].body.toBranchId))} · {t('transfer_reason')}: {String(savedRun.requests[0].body.reason || '')}</p>
+              <p className="text-xs">{t('transfer_chunk_progress').replace('{done}', String(savedRun.next)).replace('{total}', String(savedRun.requests.length))}</p>
+              {retryError ? <p className="break-words text-xs">{savedRun.transferred > 0
+                ? t('transfer_bulk_partial').replace('{done}', String(savedRun.transferred))
+                  .replace('{total}', String(savedRun.requests.reduce((total, request) => total + (request.bulk ? (request.body.items as unknown[]).length : 1), 0)))
+                  .replace('{reason}', retryError)
+                : retryError}</p> : null}
+              <div className="flex flex-wrap gap-2">
+                <button type="button" className="btn-primary min-h-10" disabled={saving || savingBulk || !canTransferStock || !!retryStorageError} onClick={() => { void runPendingTransfer(null) }}>{savingBulk ? t('saving') : t('retry')}</button>
+                <button type="button" className="btn-secondary min-h-10" disabled={saving || savingBulk} onClick={discardSavedTransfer}>{t('discard')}</button>
+              </div>
+            </> : null}
+          </div>
+        ) : null}
+        <fieldset disabled={saving || savingBulk || !!savedRun || !!retryStorageError || !canTransferStock}
+          className={`modal-scroll min-w-0 space-y-4 p-4 sm:p-5 ${saving || savingBulk || savedRun || retryStorageError || !canTransferStock ? 'pointer-events-none opacity-60' : ''}`}>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3">
             <div>
               <label htmlFor="transfer-from-branch" className="mb-1 block text-sm font-semibold text-gray-700 dark:text-gray-300">
@@ -1541,14 +1590,14 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
               </div>
             </div>
           ) : null}
-        </div>
+        </fieldset>
 
         <div className="flex gap-3 border-t border-gray-200 p-4 dark:border-gray-700 sm:p-5">
           <button
             className="btn-primary flex-1"
             type="button"
             onClick={handleBulkTransfer}
-            disabled={savingBulk || loadingMultiProducts || !fromBranch || !toBranch || selectedCount === 0}
+            disabled={!canTransferStock || !!savedRun || !!retryStorageError || savingBulk || loadingMultiProducts || !fromBranch || !toBranch || selectedCount === 0}
           >
             {savingBulk
               ? (chunkProgress
@@ -1563,7 +1612,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
 
       {/* A run that takes more than one request is not one undoable step, and
           the operator has to be told that before committing, not after. */}
-      {pendingTransfer ? (
+      {pendingTransfer && !savedRun ? (
         <ConfirmDialog
           title={pendingTransfer.scope === 'entire_branch'
             ? (t('transfer_entire_branch') || 'Transfer entire branch')
