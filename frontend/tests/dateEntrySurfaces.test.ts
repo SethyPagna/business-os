@@ -325,11 +325,13 @@ runTest('the shared field is 13px on desktop and >=16px under 768px', () => {
 
 runTest('the range picker still scopes list and stats through the same onChange', () => {
   const source = read('components/shared/DateTimeRangePicker.tsx')
-  // Only the ENTRY changed. The range contract -- one apply() that keeps
-  // start <= end and calls the caller's onChange with the whole range -- is
-  // what every page uses to scope its list AND its stats together.
+  // One apply() keeps start <= end and returns the complete range plus an
+  // explicit custom source. Every page uses that same value to scope its list
+  // and stats; preset identity must not be inferred from coincident dates.
+  assert.ok(source.includes("export type DateTimeRangeSource = StatsPresetKey | 'custom'"), 'range changes must carry explicit preset/custom identity')
+  assert.ok(source.includes('onChange: (range: DateTimeRange, source?: DateTimeRangeSource) => void'), 'the public callback must receive the complete range and its source')
   assert.ok(/const apply = \(patch: Partial<DateTimeRange>\) => \{/.test(source), 'apply(patch) must survive')
-  assert.ok(source.includes('onChange(next)'), 'apply must still hand the whole range back to the caller')
+  assert.ok(source.includes("onChange(next, 'custom')"), 'manual and calendar changes must hand the whole range back as custom')
   assert.ok(/next\.endDate < next\.startDate/.test(source), 'the start<=end swap must survive')
   assert.ok(source.includes('commitManual'), 'the typed endpoints must still commit through commitManual')
   assert.ok(source.includes('<DateEntryInput'), 'the endpoint boxes must use the shared field')
@@ -344,6 +346,9 @@ runTest('the range picker exposes the exact ordered presets above the date field
   for (const label of ['All time', 'Today', 'Yesterday', 'Last 7 days', 'Last 30 days', 'This month']) {
     assert.ok(quickRanges.includes(`'${label}'`), `picker must render the ${label} fallback label`)
   }
+  assert.match(source, /const applyQuickRange = \(preset: StatsPresetKey\) => \{[\s\S]*?const next = statsPresetRange\(preset\)[\s\S]*?onChange\(showTime \? next : \{ \.\.\.next, startTime: '', endTime: '' \}, preset\)/, 'a preset must return the complete canonical range with its exact identity')
+  assert.match(source, /onClick=\{\(\) => applyQuickRange\(preset\.id\)\}/, 'each rendered preset must commit its own identity')
+  assert.match(source, /onClick=\{\(\) => onChange\(\{ \.\.\.EMPTY_DATE_TIME_RANGE \}, 'all'\)\}/, 'Clear must return the complete empty range with all-time identity')
 
   const renderedPresets = source.indexOf('{quickRanges.map((preset) => (')
   const renderedStart = source.indexOf("{renderEndpointBox('start')}")
