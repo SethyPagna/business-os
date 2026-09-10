@@ -209,7 +209,7 @@ function buildDashboardTopProductRows(products: DashboardExportProduct[] = []): 
 function buildDashboardTopCustomerRows(ctx: DashboardExportContext): Row[] {
   return (ctx.analytics?.topCustomers || []).map((c, i) => ({
     Rank: i + 1,
-    Customer: c.customer_name || '',
+    Customer: c.customer_name || ctx.translateOr('walk_in', 'General'),
     Sales: c.sale_count || 0,
     Gross: priceCsv(c.gross_revenue_usd),
     Store_Discounts: priceCsv(c.store_discount_usd),
@@ -256,7 +256,7 @@ function buildDashboardRecentRows(ctx: DashboardExportContext): Row[] {
     Receipt: sale.receipt_number || '',
     Created_At: sale.created_at || '',
     Branch: sale.branch_name || '',
-    Customer: sale.customer_name || '',
+    Customer: sale.customer_name || ctx.translateOr('walk_in', 'General'),
     Total_USD: priceCsv(sale.total_usd || sale.total),
     Total_KHR: priceCsv(sale.total_khr),
   }))

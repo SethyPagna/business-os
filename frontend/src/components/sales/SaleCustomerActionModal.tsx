@@ -73,7 +73,7 @@ export default function SaleCustomerActionModal({
     <Modal title={`${translate('sale_customer_edit_title', 'Edit customer')} — ${saleLabel}`} onClose={onClose} closeDisabled={saving} unsavedChanges="read-only" size="sm">
       <div className="space-y-3">
         <div className="rounded-lg bg-gray-50 p-3 text-sm dark:bg-gray-800">
-          <span className="font-medium">{translate('sale_customer_general_label', 'General (anonymous)')}</span>
+          <span className="font-medium">{translate('walk_in', 'General')}</span>
           <p className="mt-1 text-gray-500 dark:text-gray-400">
             {translate('sale_customer_general_scope', 'General has no customer profile. Enter a phone number to find and assign an existing customer. The sale and its linked returns will use that customer; unrelated transactions stay unchanged.')}
           </p>

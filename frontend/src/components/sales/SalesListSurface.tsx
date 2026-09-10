@@ -343,7 +343,7 @@ export default function SalesListSurface({
                                     row click opens the full detail (membership,
                                     address, line items). */}
                                 <div className="min-w-0 max-w-[12rem]">
-                                  <div className="truncate font-medium text-gray-800 dark:text-gray-200">{Number(sale.customer_is_anonymous || 0) === 1 ? (t('walk_in') || 'Walk-in') : sale.customer_name?.trim() ? <EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_name} navigate={navigateTo}>{sale.customer_name}</EntityLink> : (t('walk_in') || 'Walk-in')}</div>
+                                  <div className="truncate font-medium text-gray-800 dark:text-gray-200">{Number(sale.customer_is_anonymous || 0) === 1 ? (t('walk_in') || 'General') : sale.customer_name?.trim() ? <EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_name} navigate={navigateTo}>{sale.customer_name}</EntityLink> : (t('walk_in') || 'General')}</div>
                                   {sale.customer_phone?.trim() ? <div className="truncate text-xs text-gray-400"><EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_phone} navigate={navigateTo}>{sale.customer_phone}</EntityLink></div> : null}
                                 </div>
                               </td>
@@ -528,7 +528,7 @@ export default function SalesListSurface({
                             {/* Y17: customer (name + phone) leads the meta line;
                                 tapping the card opens the full detail. */}
                             <div className="mt-0.5 flex items-center gap-x-2 overflow-x-auto whitespace-nowrap text-xs text-gray-500">
-                              <span className="font-medium text-gray-700 dark:text-gray-300">{Number(sale.customer_is_anonymous || 0) === 1 ? (t('walk_in') || 'Walk-in') : sale.customer_name?.trim() ? <EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_name} navigate={navigateTo}>{sale.customer_name}</EntityLink> : (t('walk_in') || 'Walk-in')}</span>
+                              <span className="font-medium text-gray-700 dark:text-gray-300">{Number(sale.customer_is_anonymous || 0) === 1 ? (t('walk_in') || 'General') : sale.customer_name?.trim() ? <EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_name} navigate={navigateTo}>{sale.customer_name}</EntityLink> : (t('walk_in') || 'General')}</span>
                               {sale.customer_phone?.trim() ? <EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_phone} navigate={navigateTo} className="text-gray-400">{sale.customer_phone}</EntityLink> : null}
                               {/* U22: phone and delivery stay on one compact
                                   contact line. The driver's actual name is the

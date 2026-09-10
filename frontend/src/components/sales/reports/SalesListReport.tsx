@@ -132,7 +132,7 @@ export default function SalesListReport(p: ReportViewProps) {
     const list: Array<ReportColumn<SaleRow> | null> = [
       { key: 'receipt_number', label: tr('receipt', 'Receipt'), primary: true, value: (r) => r.receipt_number },
       { key: 'date', label: tr('date', 'Date'), kind: 'datetime', value: (r) => r.date, sortDir: 'desc' },
-      { key: 'customer', label: tr('customer', 'Customer'), value: (r) => r.customer || tr('walk_in', 'Walk-in') },
+      { key: 'customer', label: tr('customer', 'Customer'), value: (r) => r.customer || tr('walk_in', 'General') },
       { key: 'customer_phone', label: tr('rpt_phone', 'Phone'), value: (r) => r.customer_phone, defaultVisible: false },
       { key: 'cashier', label: tr('cashier', 'Cashier'), value: (r) => r.cashier },
       { key: 'branch', label: tr('branch', 'Branch'), value: (r) => r.branch, defaultVisible: false },
@@ -174,7 +174,7 @@ export default function SalesListReport(p: ReportViewProps) {
 
   const detailLines = (r: SaleRow) => [
     { key: 'date', label: tr('date', 'Date'), value: fmtDateTime24(r.date), kind: 'info' as const },
-    { key: 'customer', label: tr('customer', 'Customer'), value: r.customer || tr('walk_in', 'Walk-in'), kind: 'info' as const },
+    { key: 'customer', label: tr('customer', 'Customer'), value: r.customer || tr('walk_in', 'General'), kind: 'info' as const },
     ...(r.customer_phone ? [{ key: 'phone', label: tr('rpt_phone', 'Phone'), value: r.customer_phone, kind: 'info' as const }] : []),
     { key: 'cashier', label: tr('cashier', 'Cashier'), value: r.cashier || '—', kind: 'info' as const },
     ...(r.branch ? [{ key: 'branch', label: tr('branch', 'Branch'), value: r.branch, kind: 'info' as const }] : []),

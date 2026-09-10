@@ -144,7 +144,7 @@ export default function ReturnsReport(p: ReportViewProps) {
     { key: 'return_number', label: tr('rpt_return_no', 'Return #'), primary: true, value: (r) => r.return_number },
     { key: 'date', label: tr('date', 'Date'), kind: 'datetime', value: (r) => r.date, sortDir: 'desc' },
     { key: 'sale_receipt_number', label: tr('receipt', 'Receipt'), value: (r) => r.sale_receipt_number },
-    { key: 'party', label: tr('customer', 'Customer'), value: (r) => r.party || tr('walk_in', 'Walk-in') },
+    { key: 'party', label: tr('customer', 'Customer'), value: (r) => r.party || tr('walk_in', 'General') },
     { key: 'type', label: tr('type', 'Type'), value: (r) => humanize(r.type) },
     { key: 'reason', label: tr('reason', 'Reason'), value: (r) => r.reason },
     { key: 'status', label: tr('status', 'Status'), value: (r) => humanize(r.status), defaultVisible: false },
@@ -222,7 +222,7 @@ export default function ReturnsReport(p: ReportViewProps) {
                 lines: [
                   { label: tr('date', 'Date'), value: fmtDateTime24(openRow.date), kind: 'info' },
                   { label: tr('receipt', 'Receipt'), value: openRow.sale_receipt_number || '—', kind: 'info' },
-                  { label: tr('customer', 'Customer'), value: openRow.party || tr('walk_in', 'Walk-in'), kind: 'info' },
+                  { label: tr('customer', 'Customer'), value: openRow.party || tr('walk_in', 'General'), kind: 'info' },
                   { label: tr('type', 'Type'), value: humanize(openRow.type), kind: 'info' },
                   { label: tr('reason', 'Reason'), value: openRow.reason || '—', kind: 'info' },
                   { label: tr('status', 'Status'), value: humanize(openRow.status), kind: 'info' },

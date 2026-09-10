@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import { buildSalesImportRows } from '../src/utils/salesImportContract.ts'
 import { createRequire } from 'node:module'
 import { transformSync } from 'esbuild'
 import {
   filterSelectableCustomerRows,
+  customerDisplayName,
   isAnonymousCustomerIdentity,
   resolveSaleCustomerEditorRoute,
   resolveSelectableCustomerById,
@@ -14,6 +16,12 @@ const React = require('react')
 const renderToStaticMarkup = require('react-dom/server').renderToStaticMarkup as (node: unknown) => string
 
 assert.equal(isAnonymousCustomerIdentity({ is_anonymous: 1 }), true)
+for (const label of ['General', 'អតិថិជនទូទៅ']) {
+  assert.equal(customerDisplayName({ customer_name: 'old shared name', customer_is_anonymous: 1 }, label), label)
+  assert.equal(customerDisplayName({ customer_name: null }, label), label)
+  assert.equal(customerDisplayName({ customer_name: 'General', customer_is_anonymous: 0 }, label), 'General')
+  assert.equal(customerDisplayName({ customer_name: 'Walk-in', customer_is_anonymous: 0 }, label), 'Walk-in')
+}
 assert.equal(isAnonymousCustomerIdentity({ customer_is_anonymous: true }), true)
 for (const ordinary of [
   { id: 24969, name: 'General', phone: '', membership_number: 'LC-04971', is_anonymous: 0 },
@@ -64,16 +72,37 @@ const baseSale = {
   customer_phone: '012345678', customer_address: 'Historical address', customer_membership_number: 'LC-04971',
   total_usd: 0, subtotal_usd: 0, discount_usd: 0, tax_usd: 0, amount_paid_usd: 0, items: [],
 }
+const anonymousExport = buildSalesImportRows([{ ...baseSale, customer_is_anonymous: 1, items: [{ product_name: 'Item', quantity: 1 }] }])[0]
+assert.equal(anonymousExport.customer_name, '', 'interchange retains anonymous identity instead of importing localized General as a name')
+assert.equal(anonymousExport.customer_phone, '')
+assert.equal(buildSalesImportRows([{ ...baseSale, customer_is_anonymous: 0, items: [{ product_name: 'Item', quantity: 1 }] }])[0].customer_name, 'General')
 const settings = { business_name: 'Shop', receipt_template: JSON.stringify({ show_customer_name: true, show_customer_phone: true, show_customer_address: true, show_customer_membership: true }) }
 const render = (sale: Record<string, unknown>) => renderToStaticMarkup(React.createElement(Receipt, { sale, settings, onClose: () => {}, _previewMode: true }))
 const ordinaryHtml = render({ ...baseSale, customer_is_anonymous: 0 })
 assert.match(ordinaryHtml, /012345678/)
 assert.match(ordinaryHtml, /LC-04971/)
 const anonymousHtml = render({ ...baseSale, customer_is_anonymous: 1 })
-assert.doesNotMatch(anonymousHtml, /General/)
+assert.match(anonymousHtml, /General/)
 assert.match(anonymousHtml, /Historical address/)
 assert.doesNotMatch(anonymousHtml, /012345678/)
 assert.doesNotMatch(anonymousHtml, /LC-04971/)
+
+// Exercise the actual human-facing worksheet formatter in both languages.
+const dashboardSource = fs.readFileSync(new URL('../src/components/dashboard/dashboardExport.ts', import.meta.url), 'utf8')
+const dashboardModule = { exports: {} as Record<string, (ctx: unknown) => void> }
+let worksheetRows: Array<Record<string, unknown>> = []
+new Function('require', 'module', 'exports', transformSync(dashboardSource, { loader: 'ts', format: 'cjs' }).code)((id: string) => {
+  if (id.includes('xlsxExport')) return { downloadXLSX: (_name: string, rows: Array<Record<string, unknown>>) => { worksheetRows = rows } }
+  if (id.includes('pricing')) return { formatPriceNumber: (value: unknown) => Number(value || 0).toFixed(2) }
+  return {}
+}, dashboardModule, dashboardModule.exports)
+for (const general of ['General', 'អតិថិជនទូទៅ']) {
+  dashboardModule.exports.exportDashboardTopCustomers({
+    summary: {}, analytics: { topCustomers: [{ customer_name: '' }, { customer_name: 'General' }, { customer_name: 'Walk-in' }] },
+    translateOr: () => general, exportStamp: 'fixture',
+  })
+  assert.deepEqual(worksheetRows.map(row => row.Customer), [general, 'General', 'Walk-in'])
+}
 
 const saleDetail = fs.readFileSync(new URL('../src/components/sales/SaleDetailModal.tsx', import.meta.url), 'utf8')
 assert.match(saleDetail, /customer_is_anonymous\?: number \| boolean \| null/)

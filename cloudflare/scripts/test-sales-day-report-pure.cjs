@@ -55,6 +55,7 @@ function liftFrom(file, tableName) {
 }
 const lift = (tableName) => liftFrom('0001_init.sql', tableName)
 const db = new Database(':memory:')
+db.exec('CREATE TABLE customers(id INTEGER PRIMARY KEY, is_anonymous INTEGER DEFAULT 0)')
 db.exec(lift('sales'))
 db.exec(lift('sale_items'))
 db.exec('ALTER TABLE sale_items ADD COLUMN manual_discount_usd REAL DEFAULT 0')

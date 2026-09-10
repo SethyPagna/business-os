@@ -1,6 +1,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentProps, ReactNode } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
+import { customerDisplayName } from '../../utils/customerIdentity.ts'
 import { toggleMultiValue, isMultiActive, matchesMulti } from '../../utils/multiSelect'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import { buildProductSearchTerms } from '../../utils/searchTerms.ts'
@@ -124,6 +125,7 @@ interface ReturnRow extends Record<string, unknown> {
   receipt_number?: string | null
   cashier_name?: string | null
   customer_name?: string | null
+  customer_is_anonymous?: number | boolean
   supplier_name?: string | null
   reason?: string | null
   notes?: string | null
@@ -295,7 +297,7 @@ function exportReturnRows(rows: ReturnRow[] = [], tr: TranslateFn): Array<Record
     Scope: normalizeScope(ret.return_scope),
     Date: ret.created_at || '',
     Receipt: ret.receipt_number || '',
-    Customer: ret.customer_name || '',
+    Customer: normalizeScope(ret.return_scope) === SUPPLIER_SCOPE ? '' : customerDisplayName(ret, tr('walk_in', 'General')),
     Supplier: ret.supplier_name || '',
     Reason: ret.reason || '',
     Type: getReturnTypeLabel(ret, tr),

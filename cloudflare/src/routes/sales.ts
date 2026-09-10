@@ -5411,7 +5411,8 @@ app.get('/export', async (c) => {
   // ISO and space-separated shapes.
   const pageRows = await db.prepare(`
     SELECT s.id, s.receipt_number, s.created_at, s.branch_name, s.cashier_name,
-           s.customer_name, s.customer_phone, s.customer_address,
+           CASE WHEN EXISTS (SELECT 1 FROM customers ic WHERE ic.id=s.customer_id AND ic.is_anonymous=1) THEN '' ELSE s.customer_name END AS customer_name,
+           CASE WHEN EXISTS (SELECT 1 FROM customers ic WHERE ic.id=s.customer_id AND ic.is_anonymous=1) THEN '' ELSE s.customer_phone END AS customer_phone, s.customer_address,
            s.payment_method, s.payment_currency, s.exchange_rate, s.sale_status,
            s.subtotal_usd, s.subtotal_khr, s.discount_usd, s.discount_khr,
            s.membership_discount_usd, s.membership_discount_khr, s.membership_points_redeemed,

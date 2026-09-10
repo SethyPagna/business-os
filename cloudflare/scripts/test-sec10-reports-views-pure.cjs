@@ -129,7 +129,7 @@ db.exec(`
     created_at TEXT,
     branch_id INTEGER
   );
-  CREATE TABLE customers (id INTEGER PRIMARY KEY, membership_number TEXT, phone TEXT, gender TEXT);
+  CREATE TABLE customers (id INTEGER PRIMARY KEY, membership_number TEXT, phone TEXT, gender TEXT, is_anonymous INTEGER DEFAULT 0);
   CREATE TABLE delivery_contacts (id INTEGER PRIMARY KEY, name TEXT);
   -- The catalog side of the product ranking (category / barcode / on-hand,
   -- Sep 6 2026). Empty here: the ranking must still report every sold
@@ -217,7 +217,7 @@ insRet.run(1, 3, 10, 'completed', 'customer', UTC(24, 8), 1) // customer refund 
   const byCustomer = await kernel.getSalesGroupedTotals(env, filters, 'customer')
   const alice = byCustomer.find((r) => r.key === 'id:1')
   const bob = byCustomer.find((r) => r.key === 'id:2')
-  const walkIn = byCustomer.find((r) => r.key === 'name:walk in')
+  const walkIn = byCustomer.find((r) => r.key === 'general')
   check('customer: Alice keyed by id ("id:1"), labelled by name, entity_id 1', !!alice && alice.label === 'Alice' && alice.entity_id === 1)
   check('customer: Alice revenue 90 (the cancelled 999 sale never counts)', !!alice && near(alice.revenue_usd, 90))
   check('customer: Bob revenue 110 (80 + 40 awaiting - 10 refund), Not Paid 40 shown separately', !!bob && near(bob.revenue_usd, 110) && near(bob.pending_revenue_usd, 40))

@@ -5438,7 +5438,7 @@
   "discount_rate": "Discount rate",
   "status_stock_effect_cue": "Stock effect by status",
   "status_stock_effect_label": "What each sale status does to stock",
-  "walk_in": "Walk-in",
+  "walk_in": "General",
   "credit_awaiting_payment": "Not Paid",
   "change_given": "Change given",
   "use_computed": "Use computed",

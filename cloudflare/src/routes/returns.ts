@@ -640,7 +640,7 @@ app.get('/', async (c) => {
   }
 
   const returns = await db.prepare(`
-    SELECT r.*, replacement_sale.receipt_number AS replacement_receipt_number,
+    SELECT r.*, EXISTS (SELECT 1 FROM customers ic WHERE ic.id=r.customer_id AND ic.is_anonymous=1) AS customer_is_anonymous, replacement_sale.receipt_number AS replacement_receipt_number,
       ${DAMAGED_ITEM_COUNT_SQL}
     FROM returns r
     LEFT JOIN sales replacement_sale ON replacement_sale.id = r.replacement_sale_id
@@ -973,7 +973,7 @@ app.get('/:id', async (c) => {
   const db = getDb(c.env)
   const id = c.req.param('id')
   const row = await db.prepare(`
-    SELECT r.*, replacement_sale.receipt_number AS replacement_receipt_number,
+    SELECT r.*, EXISTS (SELECT 1 FROM customers ic WHERE ic.id=r.customer_id AND ic.is_anonymous=1) AS customer_is_anonymous, replacement_sale.receipt_number AS replacement_receipt_number,
       ${DAMAGED_ITEM_COUNT_SQL}
     FROM returns r
     LEFT JOIN sales replacement_sale ON replacement_sale.id = r.replacement_sale_id

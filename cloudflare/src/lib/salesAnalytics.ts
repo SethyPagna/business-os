@@ -1540,7 +1540,7 @@ export async function getSalesDayReport(
     // single day of one shop never approaches 1000 receipts.
     db.prepare(`
       SELECT sales.id AS id, receipt_number, created_at,
-             COALESCE(NULLIF(TRIM(customer_name), ''), '') AS customer_name,
+             ${reportCustomerNameExpr('sales.')} AS customer_name,
              COALESCE(NULLIF(TRIM(payment_method), ''), 'Unknown') AS payment_method,
              COALESCE(sale_status, 'completed') AS sale_status,
              -- Canonical net-sales revenue, per sale: recognized sales only
@@ -1697,10 +1697,20 @@ export interface SalesGroupedRow extends SalesTotals {
  * and counting a nameless receipt as a new customer inflates acquisition.
  * They are reported separately, as unregistered_count.
  */
+// Read-time identity normalization only. Persisted snapshots and foreign keys
+// remain intact; an explicit customer marker is the sole anonymity authority.
+export function identifiedCustomerExpr(prefix: string): string {
+  return `CASE WHEN EXISTS (SELECT 1 FROM customers identity_customer WHERE identity_customer.id = ${prefix}customer_id AND identity_customer.is_anonymous = 1) THEN NULL ELSE ${prefix}customer_id END`
+}
+
+export function reportCustomerNameExpr(prefix: string): string {
+  return `CASE WHEN EXISTS (SELECT 1 FROM customers identity_customer WHERE identity_customer.id = ${prefix}customer_id AND identity_customer.is_anonymous = 1) THEN '' ELSE COALESCE(${prefix}customer_name, '') END`
+}
+
 const FIRST_SALE_CTE = `WITH first_sale AS (
   SELECT customer_id, MIN(datetime(created_at)) AS first_at
   FROM sales
-  WHERE customer_id IS NOT NULL AND ${recognizedExpr('')}
+  WHERE ${identifiedCustomerExpr('sales.')} IS NOT NULL AND ${recognizedExpr('')}
   GROUP BY customer_id
 )`
 
@@ -1714,7 +1724,7 @@ async function cohortCountsByGroup(env: Env, f: SalesFilters, keyExpr: string): 
     SELECT ${keyExpr} AS grp_key,
            COUNT(DISTINCT CASE WHEN sales.customer_id IS NOT NULL AND datetime(sales.created_at) = fs.first_at THEN sales.customer_id END) AS new_customer_count,
            COUNT(DISTINCT CASE WHEN sales.customer_id IS NOT NULL AND datetime(sales.created_at) > fs.first_at THEN sales.customer_id END) AS return_customer_count,
-           COALESCE(SUM(CASE WHEN sales.customer_id IS NULL THEN 1 ELSE 0 END), 0) AS unregistered_count,
+           COALESCE(SUM(CASE WHEN ${identifiedCustomerExpr('sales.')} IS NULL THEN 1 ELSE 0 END), 0) AS unregistered_count,
            COALESCE(SUM(CASE WHEN ${collectedSaleExpr('sales.')} THEN 1 ELSE 0 END), 0) AS paid_tx_count
     FROM sales
     LEFT JOIN first_sale fs ON fs.customer_id = sales.customer_id
@@ -1743,8 +1753,8 @@ async function customerIdentityByGroup(env: Env, f: SalesFilters, keyExpr: strin
     ${FIRST_SALE_CTE}
     SELECT ${keyExpr} AS grp_key,
            MAX(CASE WHEN sales.customer_id IS NOT NULL AND datetime(sales.created_at) = fs.first_at THEN 1 ELSE 0 END) AS is_new,
-           MAX(COALESCE(NULLIF(TRIM(c.gender), ''), '')) AS gender,
-           MAX(COALESCE(NULLIF(TRIM(c.phone), ''), NULLIF(TRIM(sales.customer_phone), ''), '')) AS phone
+           MAX(CASE WHEN ${identifiedCustomerExpr('sales.')} IS NULL THEN '' ELSE COALESCE(NULLIF(TRIM(c.gender), ''), '') END) AS gender,
+           MAX(CASE WHEN ${identifiedCustomerExpr('sales.')} IS NULL THEN '' ELSE COALESCE(NULLIF(TRIM(c.phone), ''), NULLIF(TRIM(sales.customer_phone), ''), '') END) AS phone
     FROM sales
     LEFT JOIN first_sale fs ON fs.customer_id = sales.customer_id
     LEFT JOIN customers c ON c.id = sales.customer_id
@@ -1768,7 +1778,7 @@ async function branchActivityByGroup(env: Env, f: SalesFilters, levelKey: string
   const { sql: whereJoined, params: paramsJoined } = whereActiveSales('s', f)
   const [customerRows, itemRows] = await Promise.all([
     db.prepare(`
-      SELECT ${levelKey} AS grp_key, COUNT(DISTINCT sales.customer_id) AS customer_count
+      SELECT ${levelKey} AS grp_key, COUNT(DISTINCT ${identifiedCustomerExpr('sales.')}) AS customer_count
       FROM sales WHERE ${whereLevel} GROUP BY grp_key
     `).all<Record<string, unknown>>(paramsLevel),
     db.prepare(`
@@ -1797,9 +1807,9 @@ function salesGroupExprs(alias: string, groupBy: SalesGroupKey): { key: string; 
       // The customer id is the identity (a rename cascades to customer_name
       // snapshots); legacy sales without an id fall back to the name.
       return {
-        key: `CASE WHEN ${a}customer_id IS NOT NULL THEN 'id:' || ${a}customer_id ELSE 'name:' || lower(trim(COALESCE(${a}customer_name, ''))) END`,
-        label: `MAX(COALESCE(NULLIF(trim(${a}customer_name), ''), ''))`,
-        id: `MAX(${a}customer_id)`,
+        key: `CASE WHEN ${identifiedCustomerExpr(a)} IS NOT NULL THEN 'id:' || ${a}customer_id ELSE 'general' END`,
+        label: `MAX(CASE WHEN ${identifiedCustomerExpr(a)} IS NULL THEN '' ELSE COALESCE(NULLIF(trim(${a}customer_name), ''), '') END)`,
+        id: `MAX(${identifiedCustomerExpr(a)})`,
       }
     case 'cashier':
       return {

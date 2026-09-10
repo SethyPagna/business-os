@@ -11,6 +11,12 @@ export function isAnonymousCustomerIdentity(customer: CustomerIdentityFields): b
   return marker === true || marker === 1
 }
 
+/** Presentation only: never use a placeholder-looking name as identity authority. */
+export function customerDisplayName(customer: CustomerIdentityFields & { customer_name?: unknown }, generalLabel: string): string {
+  if (isAnonymousCustomerIdentity(customer)) return generalLabel
+  return String(customer?.customer_name ?? '').trim() || generalLabel
+}
+
 export function isSelectableCustomerIdentity(customer: CustomerIdentityFields): boolean {
   return !isAnonymousCustomerIdentity(customer)
 }

@@ -22,7 +22,7 @@ import {
   RECEIPT_ROW_GRID_TEMPLATE,
   receiptItemGridTemplate,
 } from '../../utils/receiptItemColumns.ts'
-import { isAnonymousCustomerIdentity } from '../../utils/customerIdentity.ts'
+import { customerDisplayName as displayCustomerName, isAnonymousCustomerIdentity } from '../../utils/customerIdentity.ts'
 
 type LanguageMode = 'en' | 'km' | 'both'
 // N4 (owner, Sep 6 2026): "Open PDF" is removed -- it opened the same document
@@ -503,7 +503,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   const exchangeRateText = tpl.show_exchange_rate ? `1 USD = ${Number(exchangeRate).toLocaleString()} ${khrSymbol}` : ''
   const showMembershipId = tpl.show_customer_membership !== false
   const customerIsAnonymous = isAnonymousCustomerIdentity(sale)
-  const customerDisplayName = customerIsAnonymous ? '' : sale.customer_name
+  const customerDisplayName = displayCustomerName(sale, lang === 'km' ? 'អតិថិជនទូទៅ' : 'General')
   // N21: sales.customer_address may hold the Contact Options JSON that was
   // snapshotted raw out of customers.address. Rendering it through the shared
   // kernel (contactOptionUtils.ts, twinned in cloudflare/src/lib/contactOptions.ts)
