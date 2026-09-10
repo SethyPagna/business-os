@@ -152,17 +152,33 @@ function clampInt(value: unknown, fallback: number, min: number, max: number): n
   return Math.min(max, Math.max(min, n))
 }
 
-// The dashboard's default window is TODAY -- the business day in
-// Asia/Phnom_Penh, the same default every list page uses (user, 2026-09-03).
-// The caller widens it freely; it governs only the flow figures (sales,
-// returns, the charts, the recent-sales feed), never the stock/alert cards.
-function dateRange(query: Record<string, string>) {
+type DashboardDateRange = {
+  startDate: string
+  endDate: string
+  granularity: string
+  allTime: boolean
+}
+
+// Missing dates retain the legacy TODAY default. An explicit rangeScope=all
+// is different: it is emitted only when the Dashboard deliberately selects
+// All time and leaves both endpoints empty, so it must stay unbounded instead
+// of being silently relabelled Today.
+function dateRange(query: Record<string, string>): DashboardDateRange {
   const today = businessToday()
-  return {
+  const allTime = String(query.rangeScope || '').trim().toLowerCase() === 'all'
+    && query.startDate === ''
+    && query.endDate === ''
+  const range: DashboardDateRange = {
     startDate: String(query.startDate || today).slice(0, 10),
     endDate: String(query.endDate || today).slice(0, 10),
     granularity: ['week', 'month'].includes(String(query.granularity || 'day')) ? String(query.granularity) : 'day',
+    allTime,
   }
+  if (allTime) {
+    range.startDate = ''
+    range.endDate = ''
+  }
+  return range
 }
 
 function emptySummary() {
@@ -215,9 +231,12 @@ async function dashboardSummary(env: Env, query: Record<string, string>) {
   // two are rendered together on Dashboard.tsx, so they must be built from
   // the same number or the card contradicts its own heading.
   const lowStockConfig = await loadLowStockConfig(env)
-  const { startDate, endDate } = dateRange(query)
+  const range = dateRange(query)
+  const { startDate, endDate } = range
   const branchId = query.branchId || null
-  const params = branchId ? { startDate, endDate, branchId } : { startDate, endDate }
+  const params = range.allTime
+    ? (branchId ? { branchId } : {})
+    : (branchId ? { startDate, endDate, branchId } : { startDate, endDate })
   const saleBranchClause = (alias: string) => branchId ? ` AND ${alias}.branch_id = @branchId` : ''
   // The selected Start->End range scopes everything that is a MOVEMENT:
   // sales, returns and the recent-sales feed. It deliberately does NOT
@@ -247,12 +266,12 @@ async function dashboardSummary(env: Env, query: Record<string, string>) {
     db.prepare(`
       SELECT COUNT(*) AS count, COALESCE(SUM(total_usd), 0) AS total_usd, COALESCE(SUM(total_khr), 0) AS total_khr
       FROM sales
-      WHERE ${localDateRangeClause('created_at')} AND COALESCE(sale_status, 'completed') <> 'cancelled'${saleBranchClause('sales')}
+      WHERE ${range.allTime ? '1 = 1' : localDateRangeClause('created_at')} AND COALESCE(sale_status, 'completed') <> 'cancelled'${saleBranchClause('sales')}
     `).get(params),
     db.prepare(`
       SELECT COALESCE(SUM(total_usd), 0) AS total_usd, COALESCE(SUM(total_khr), 0) AS total_khr
       FROM sales
-      WHERE ${localDateRangeClause('created_at')} AND COALESCE(sale_status, 'completed') <> 'cancelled'${saleBranchClause('sales')}
+      WHERE ${range.allTime ? '1 = 1' : localDateRangeClause('created_at')} AND COALESCE(sale_status, 'completed') <> 'cancelled'${saleBranchClause('sales')}
     `).get(params),
     // RETURN-DATE ACTIVITY, customer scope only: "how many refunds were
     // processed in this window, and for how much". It is NOT the kernel
@@ -267,7 +286,7 @@ async function dashboardSummary(env: Env, query: Record<string, string>) {
     db.prepare(`
       SELECT COUNT(*) AS count, COALESCE(SUM(total_refund_usd), 0) AS total_usd
       FROM returns
-      WHERE ${localDateRangeClause('created_at')}
+      WHERE ${range.allTime ? '1 = 1' : localDateRangeClause('created_at')}
         AND COALESCE(return_scope, 'customer') = 'customer'
         AND COALESCE(status, 'completed') <> 'cancelled'${saleBranchClause('returns')}
     `).get(params),
@@ -297,7 +316,7 @@ async function dashboardSummary(env: Env, query: Record<string, string>) {
       SELECT id, receipt_number, created_at, sale_status, branch_name, customer_name, cashier_name, total_usd, total_khr,
         (SELECT COALESCE(SUM(quantity), 0) FROM sale_items WHERE sale_id = sales.id) AS item_count
       FROM sales
-      WHERE ${localDateRangeClause('created_at')}${saleBranchClause('sales')}
+      WHERE ${range.allTime ? '1 = 1' : localDateRangeClause('created_at')}${saleBranchClause('sales')}
       ORDER BY created_at DESC, id DESC
       LIMIT 10
     `).all(params),
@@ -338,12 +357,13 @@ async function dashboardSummary(env: Env, query: Record<string, string>) {
 
 async function dashboardAnalytics(env: Env, query: Record<string, string>) {
   const db = getDb(env)
-  const { startDate, endDate, granularity } = dateRange(query)
-  const params = { startDate, endDate }
+  const range = dateRange(query)
+  const { startDate, endDate, granularity } = range
+  const params = range.allTime ? {} : { startDate, endDate }
   const filters = { startDate, endDate, branchId: query.branchId || null }
   const analyticsParams = filters.branchId ? { ...params, branchId: filters.branchId } : params
   const branchClause = (alias: string) => filters.branchId ? ` AND ${alias}.branch_id = @branchId` : ''
-  const activeSalesClause = (alias: string) => `${localDateRangeClause(`${alias}.created_at`)} AND ${recognizedExpr(`${alias}.`)}${branchClause(alias)}`
+  const activeSalesClause = (alias: string) => `${range.allTime ? '1 = 1' : localDateRangeClause(`${alias}.created_at`)} AND ${recognizedExpr(`${alias}.`)}${branchClause(alias)}`
   // Apportions a sale's net revenue across its lines by each line's share of
   // subtotal_usd. The > 0 guard avoids a divide-by-zero.
   //
@@ -374,13 +394,13 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>) {
     hourlyDist,
   ] = await Promise.all([
     getSalesTotals(env, filters),
-    getSalesTotals(env, previousPeriodFilters(filters)),
+    range.allTime ? Promise.resolve({}) : getSalesTotals(env, previousPeriodFilters(filters)),
     getSalesPeriodSeries(env, filters, granularity as 'day' | 'week' | 'month'),
     db.prepare(`
       WITH matching_returns AS (
         SELECT r.id, r.total_refund_usd
         FROM returns r
-        WHERE ${localDateRangeClause('r.created_at')}
+        WHERE ${range.allTime ? '1 = 1' : localDateRangeClause('r.created_at')}
           AND COALESCE(r.return_scope, 'customer') = 'customer'
           AND COALESCE(r.status, 'completed') <> 'cancelled'${branchClause('r')}
       )
@@ -394,7 +414,7 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>) {
              COALESCE(SUM(r.supplier_compensation_usd), 0) AS supplier_compensation_usd,
              COALESCE(SUM(r.supplier_loss_usd), 0) AS loss_usd
       FROM returns r
-      WHERE ${localDateRangeClause('r.created_at')}
+      WHERE ${range.allTime ? '1 = 1' : localDateRangeClause('r.created_at')}
         AND COALESCE(r.return_scope, 'customer') = 'supplier'
         AND COALESCE(r.status, 'completed') <> 'cancelled'${branchClause('r')}
     `).get(analyticsParams),

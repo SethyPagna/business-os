@@ -406,7 +406,7 @@ export default function DateTimeRangePicker({
 
       {open ? (
         <div
-          className={`absolute top-full z-40 mt-2 w-[21rem] max-w-[92vw] rounded-lg border border-slate-200 bg-white p-2.5 shadow-xl dark:border-slate-700 dark:bg-slate-900 ${align === 'right' ? 'right-0' : 'left-0'}`}
+          className={`absolute left-1/2 top-full z-40 mt-2 w-[21rem] max-w-[calc(100vw-1rem)] -translate-x-1/2 rounded-lg border border-slate-200 bg-white p-2.5 shadow-xl dark:border-slate-700 dark:bg-slate-900 sm:translate-x-0 ${align === 'right' ? 'sm:left-auto sm:right-0' : 'sm:left-0 sm:right-auto'}`}
         >
           {/* Header: Clear (when anything is set) + the red close ✕. */}
           <div className="mb-2 flex items-center gap-2">

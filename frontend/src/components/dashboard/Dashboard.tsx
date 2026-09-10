@@ -8,7 +8,7 @@ import { useMemo } from 'react'
 import { useRef } from 'react'
 import LayoutDashboard from 'lucide-react/dist/esm/icons/layout-dashboard.js'
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
-import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
+import StatsStrip, { statsPresetRange, type StatCardDef, type StatsPresetKey } from '../shared/StatsStrip.tsx'
 import { fmtTime } from '../../utils/formatters'
 import { todayStr } from '../../utils/dateHelpers'
 import { buildEquation, revenueTerms, profitTerms } from '../../utils/statsFormulas'
@@ -38,7 +38,7 @@ type TranslateFn = (key: string) => string
 type FormatMoneyFn = (value: unknown) => string
 type NavigateFn = (page: string) => void
 type EntityId = string | number
-type DashboardRangeId = 'today' | '7d' | 'month' | 'year' | 'custom'
+type DashboardRangeId = StatsPresetKey | 'custom'
 type DashboardGranularity = 'day' | 'week' | 'month'
 type DashboardChartMode = 'revenue' | 'profit' | 'volume'
 type DashboardTopMode = 'revenue' | 'qty'
@@ -372,10 +372,21 @@ function downsampleChartRows(rows: DashboardPeriodRow[] = [], limit = DASHBOARD_
 }
 
 function normalizeDashboardRangeId(rangeId: unknown): DashboardRangeId {
-  if (rangeId === '30d') return 'month'
   if (rangeId === '90d') return 'year'
-  if (rangeId === 'today' || rangeId === '7d' || rangeId === 'month' || rangeId === 'year' || rangeId === 'custom') return rangeId
+  if (rangeId === 'all' || rangeId === 'today' || rangeId === 'yesterday' || rangeId === '7d' || rangeId === '30d' || rangeId === 'week' || rangeId === 'month' || rangeId === 'year' || rangeId === 'custom') return rangeId
   return 'custom'
+}
+
+function resolveDashboardFilterRange(prefs: DashboardFilterPrefs | null): DateTimeRange {
+  if (!prefs) {
+    const today = todayStr()
+    return { startDate: today, endDate: today, startTime: '', endTime: '' }
+  }
+  if (prefs.rangeId === 'custom') {
+    return { startDate: prefs.customStart, endDate: prefs.customEnd, startTime: '', endTime: '' }
+  }
+  const preset = statsPresetRange(prefs.rangeId)
+  return { ...preset, startTime: '', endTime: '' }
 }
 
 function compactDashboardMetaParts(parts: unknown[] = []): string[] {
@@ -664,6 +675,10 @@ export default function Dashboard() {
     () => readDashboardFilterPrefs(dashboardFilterStorageKeys),
     [dashboardFilterStorageKeys],
   )
+  const initialDashboardRange = useMemo(
+    () => resolveDashboardFilterRange(initialFilterPrefs),
+    [initialFilterPrefs],
+  )
 
   // Small-screen section chips. Labels use translateOr (the same guarded-
   // fallback path uses) so no lang-pack edit is needed: 'overview'
@@ -686,8 +701,8 @@ export default function Dashboard() {
   // user starts on TODAY; a saved all-time range deliberately restores as two
   // empty endpoints. The range governs the flow cards only; stock and alert
   // cards stay catalog-wide whatever the range (see compat.ts).
-  const [customStart, setCustomStart] = useState(() => initialFilterPrefs ? initialFilterPrefs.customStart : todayStr())
-  const [customEnd, setCustomEnd]     = useState(() => initialFilterPrefs ? initialFilterPrefs.customEnd : todayStr())
+  const [customStart, setCustomStart] = useState(() => initialDashboardRange.startDate)
+  const [customEnd, setCustomEnd]     = useState(() => initialDashboardRange.endDate)
   const [activeChart, setActiveChart] = useState<DashboardChartMode>('revenue')
   const [topMode, setTopMode]         = useState<DashboardTopMode>('revenue')
   const [customerDetail, setCustomerDetail]     = useState<DashboardCustomer | null>(null)
@@ -955,8 +970,9 @@ export default function Dashboard() {
     if (filterStorageKeyRef.current === dashboardFilterStorageKey) return
     filterStorageKeyRef.current = dashboardFilterStorageKey
     const nextPrefs = readDashboardFilterPrefs([dashboardFilterStorageKey, DASHBOARD_FILTER_STORAGE_FALLBACK_KEY])
-    setCustomStart(nextPrefs ? nextPrefs.customStart : todayStr())
-    setCustomEnd(nextPrefs ? nextPrefs.customEnd : todayStr())
+    const nextRange = resolveDashboardFilterRange(nextPrefs)
+    setCustomStart(nextRange.startDate)
+    setCustomEnd(nextRange.endDate)
   }, [dashboardFilterStorageKey])
 
   useEffect(() => {
