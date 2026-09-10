@@ -337,6 +337,9 @@ export default function Branches({ embedded = false, view, showSectionNavigation
   // metadata edits remain available here.
   const canTransferStock = can('branches', 'transfer')
   const canEditBranch = can('branches', 'edit')
+  const canExportBranch = can('branches', 'export')
+  const branchExportAuthorityRef = useRef({ actorId: String(user?.id ?? ''), allowed: canExportBranch })
+  branchExportAuthorityRef.current = { actorId: String(user?.id ?? ''), allowed: canExportBranch }
   // Same grant Inventory's own adjust/receive affordances check, because
   // POST /api/batches sits behind 'inventory' server-side -- a button the
   // server would 403 is worse than no button.
@@ -984,10 +987,15 @@ export default function Branches({ embedded = false, view, showSectionNavigation
   // its quantity for that branch in one response, so no page loop; one
   // fetch per active branch, flattened into Branch-per-row records for the
   // shared options dialog.
-  const [exportDialog, setExportDialog] = useState<{ rows: Array<Record<string, unknown>>; baseName: string } | null>(null)
+  const [exportDialog, setExportDialog] = useState<{ rows: Array<Record<string, unknown>>; baseName: string; actorId: string } | null>(null)
   const [branchExportLoading, setBranchExportLoading] = useState(false)
+  const branchExportInFlightRef = useRef(false)
+  useEffect(() => { setExportDialog(null) }, [canExportBranch, user?.id])
   const openBranchExport = useCallback(async () => {
-    if (branchExportLoading) return
+    if (!branchExportAuthorityRef.current.allowed || branchExportInFlightRef.current) return
+    const actorId = branchExportAuthorityRef.current.actorId
+    const isExportCurrent = () => branchExportAuthorityRef.current.allowed && branchExportAuthorityRef.current.actorId === actorId
+    branchExportInFlightRef.current = true
     setBranchExportLoading(true)
     try {
       if (tab === 'transfers') {
@@ -997,6 +1005,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
         let totalPages = 1
 
         do {
+          if (!isExportCurrent()) return
           const response = await branchApi.getTransfers({
             startDate: branchDateRange.startDate || undefined,
             endDate: branchDateRange.endDate || undefined,
@@ -1029,7 +1038,8 @@ export default function Branches({ embedded = false, view, showSectionNavigation
           notify(tr('no_data_to_export', 'No data to export'), 'error')
           return
         }
-        setExportDialog({ rows: exportRows, baseName: 'branch-transfers' })
+        if (!isExportCurrent()) return
+        setExportDialog({ rows: exportRows, baseName: 'branch-transfers', actorId })
         return
       }
 
@@ -1038,9 +1048,13 @@ export default function Branches({ embedded = false, view, showSectionNavigation
       // unbounded burst when an account has many branches.
       const stockLoad = await runConcurrentTasks<BranchRecord, Array<Record<string, unknown>> | null>(
         branches,
-        async (branch: BranchRecord) => getBranchStockRequest(branch.id, {}) as Promise<Array<Record<string, unknown>> | null>,
+        async (branch: BranchRecord) => {
+          if (!isExportCurrent()) return null
+          return getBranchStockRequest(branch.id, {}) as Promise<Array<Record<string, unknown>> | null>
+        },
         { concurrency: 4 },
       )
+      if (!isExportCurrent()) return
       if (stockLoad.failures.length) throw stockLoad.failures[0]?.error
       for (const { item: branch, value: stock } of stockLoad.successes) {
         for (const product of Array.isArray(stock) ? stock : []) {
@@ -1062,27 +1076,28 @@ export default function Branches({ embedded = false, view, showSectionNavigation
         notify(tr('no_data_to_export', 'No data to export'), 'error')
         return
       }
-      setExportDialog({ rows, baseName: 'branch-stock' })
+      if (isExportCurrent()) setExportDialog({ rows, baseName: 'branch-stock', actorId })
     } catch (error) {
-      notify(error instanceof Error && error.message ? error.message : tr('export_failed', 'Export failed.'), 'error')
+      if (isExportCurrent()) notify(error instanceof Error && error.message ? error.message : tr('export_failed', 'Export failed.'), 'error')
     } finally {
+      branchExportInFlightRef.current = false
       setBranchExportLoading(false)
     }
   }, [branchApi, branchDateRange.endDate, branchDateRange.startDate, branchExportLoading, branches, notify, tab, transferFromFilter, transferToFilter, tr])
 
-  const branchExportButton = (
+  const branchExportButton = canExportBranch ? (
     <button
       type="button"
       className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-slate-700 transition-colors hover:bg-emerald-50 disabled:cursor-wait disabled:opacity-60 dark:text-slate-200 dark:hover:bg-slate-700"
       onClick={() => { void openBranchExport() }}
-      disabled={branchExportLoading}
+      disabled={branchExportLoading || !canExportBranch}
       title={tab === 'transfers' ? tr('export_transfer_history', 'Export transfer history') : tr('export_branch_stock', 'Export per-branch stock')}
       aria-label={tab === 'transfers' ? tr('export_transfer_history', 'Export transfer history') : tr('export_branch_stock', 'Export per-branch stock')}
     >
       <Download className="h-4 w-4 shrink-0" />
       <span className="sr-only">{branchExportLoading ? tr('exporting', 'Exporting…') : tr('export', 'Export')}</span>
     </button>
-  )
+  ) : null
 
   return (
     <div className={`flex min-h-0 flex-col ${embedded ? 'flex-1 px-3 pb-3 pt-1 sm:px-6 sm:pb-6 sm:pt-2' : 'page-scroll p-3 sm:p-6'}`}>
@@ -1641,7 +1656,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
         </Modal>
       ) : null}
 
-      {exportDialog ? (
+      {exportDialog && canExportBranch && exportDialog.actorId === String(user?.id ?? '') ? (
         <Suspense fallback={null}>
           <ExportOptionsDialog
             title={t('export_options_title') || 'Export options'}
@@ -1649,6 +1664,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
             columns={columnsFromRows(exportDialog.rows)}
             rows={exportDialog.rows}
             rememberKey="branches"
+            canExport={() => branchExportAuthorityRef.current.allowed && branchExportAuthorityRef.current.actorId === exportDialog.actorId}
             t={t}
             notify={notify}
             onClose={() => setExportDialog(null)}
