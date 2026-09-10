@@ -197,7 +197,7 @@ runTest('every field the sale detail used to show is still rendered', () => {
 runTest('every field the return detail used to show is still rendered', () => {
   const fields = [
     'return_scope', 'typeLabel', 'ret.receipt_number', 'ret.replacement_receipt_number',
-    'ret.supplier_name', 'ret.customer_name', 'ret.branch_name', 'ret.cashier_name',
+    'ret.supplier_name', 'ret.branch_name', 'ret.cashier_name',
     'ret.reason', 'ret.notes', 'item.product_name', 'item.quantity', 'item.total_usd',
     'item.total_khr', 'stock_action', 'replacement_items', 'settlement_mode',
     'settlement_diff_usd', 'supplier_compensation_usd', 'supplier_loss_usd',
@@ -206,6 +206,11 @@ runTest('every field the return detail used to show is still rendered', () => {
   for (const field of fields) {
     assert.ok(returnDetail.includes(field), `the return detail no longer renders ${field}`)
   }
+  assert.match(
+    returnDetail,
+    /customerDisplayName\(ret, tr\('walk_in', 'General'\)\)/,
+    'the return detail must preserve the customer field through anonymous-safe General normalization',
+  )
   // The money summary must appear ONCE. It used to be repeated: a flex block
   // at the bottom of the modal, unconnected to the amounts it summed.
   assert.equal((returnDetail.match(/total_refunded/g) || []).length, 1, 'the refund total must be stated once, in the items table footer')

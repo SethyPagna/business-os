@@ -261,7 +261,8 @@ try {
   await act(async () => root.render(React.createElement(RoutedCustomerEditor, {
     sale: { id: 72, customer_id: 24969, customer_name: 'General', customer_is_anonymous: 1 },
   })))
-  assert.match(container.textContent, /General \(anonymous\)/, 'a mounted positive-id marked sale opens assignment')
+  assert.match(container.textContent, /General/, 'a mounted positive-id marked sale opens assignment with the unified General label')
+  assert.doesNotMatch(container.textContent, /Walk-in|General \(anonymous\)/)
   await act(async () => root.render(React.createElement(RoutedCustomerEditor, {
     sale: { id: 73, customer_id: 22305, customer_name: 'General', customer_is_anonymous: 0 },
     currentCustomer: { id: 22305, name: 'General', phone: '086897171', is_anonymous: 0 },
@@ -269,7 +270,8 @@ try {
   assert.match(container.textContent, /Phone is this customer’s primary identity/, 'a mounted unmarked real General opens profile editing')
 
   await act(async () => root.render(React.createElement(actionModule.default, { ...common, key: 'no-contacts-view' })))
-  assert.match(container.textContent, /General \(anonymous\)/)
+  assert.match(container.textContent, /General/)
+  assert.doesNotMatch(container.textContent, /Walk-in|General \(anonymous\)/)
   assert.match(container.textContent, /Assigning an existing customer needs Contacts view permission/)
   assert.doesNotMatch(container.textContent, /Replace customer|Create customer|Remove link/)
 
