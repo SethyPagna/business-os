@@ -38,7 +38,17 @@ export default function ReportFrame({ title, titleControl, count, hint, actions,
     // shared .report-segment class in reports-surface.css, applied here so no
     // view has to (and none can drift out of) the treatment.
     <section className={['report-segment min-w-0 space-y-1.5', className].join(' ').trim()}>
-      <SectionHeader className={titleControl ? 'reports-frame-header' : ''} title={activeTitle} count={count} infoHint={hint ? <InfoHint text={hint.text} label={hint.label} /> : undefined} actions={actions} />
+      {/* The report picker already exposes the selected report name. Reusing
+          that same text as the adjacent info button's accessible name made
+          assistive/browser trees look like a second report-option control.
+          Keep the explanation, but give its trigger one unambiguous purpose. */}
+      <SectionHeader
+        className={titleControl ? 'reports-frame-header' : ''}
+        title={activeTitle}
+        count={count}
+        infoHint={hint ? <InfoHint text={hint.text} label="About this report" /> : undefined}
+        actions={actions}
+      />
       {summary ? (
         <p className="min-w-0 text-[length:var(--ui-size-meta)] leading-5 text-[var(--ui-ink-2)] [font-variant-numeric:tabular-nums]" data-report-summary="">
           {summary}

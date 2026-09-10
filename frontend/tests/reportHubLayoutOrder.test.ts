@@ -51,10 +51,24 @@ assert.match(folded, /<button\s+type="button"\s+className="flex min-h-\[44px\] m
 assert.match(hub, /import \{[^}]*rangeSubtitle[^}]*\} from '\.\/reports\/reportTypes\.ts'/)
 
 const reportControl = hub.slice(hub.indexOf('const reportControlRow'), hub.indexOf('const viewProps'))
+const viewPicker = hub.slice(hub.indexOf('const viewPicker'), hub.indexOf('const searchSlot'))
+assert.match(viewPicker, /options=\{views\.map\(/, 'the title picker exposes every permission-scoped report option')
+assert.match(viewPicker, /onChange=\{\(value\) => \{ if \(isReportViewId\(value\)\) setViewId\(value\) \}\}/, 'every valid report option selects its corresponding report view')
 assert.match(reportControl, /\{viewPicker\}[\s\S]*\{filtersButton\}[\s\S]*trh\('show', 'Show'\)/, 'option title, Filters and Show are in one ordered row')
 assert.match(hub, /titleControl: reportControlRow/, 'all report types receive that same row')
+assert.equal((reportControl.match(/\{viewPicker\}/g) || []).length, 1, 'the report header renders one report-option control')
 const frameSource = read('src/components/sales/reports/ReportFrame.tsx')
 assert.match(frameSource, /const activeTitle = titleControl \?\? title/)
+assert.match(
+  frameSource,
+  /InfoHint text=\{hint\.text\} label="About this report"/,
+  'the adjacent info trigger has its own purpose instead of repeating the selected report option name',
+)
+assert.doesNotMatch(
+  frameSource,
+  /InfoHint text=\{hint\.text\} label=\{hint\.label\}/,
+  'the report title is not exposed a second time as the info-button label',
+)
 assert.match(frameSource, /title=\{activeTitle\}/)
 
 // The desktop tier is untouched: sticky ControlRow plus the preset row.
