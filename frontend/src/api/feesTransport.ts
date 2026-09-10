@@ -271,7 +271,28 @@ export function clearPendingFeeCreate(
   }
 }
 
-export const discardPendingFeeCreate = clearPendingFeeCreate
+/** Explicit operator discard owns both pieces of the same unresolved work:
+ * remove only the exact actor/request envelope, then resolve only the warning
+ * identity stored on that envelope. A mismatched request is a no-op, and a
+ * failed removal cannot dismiss a warning while its retry remains pending. */
+export function discardPendingFeeCreate(
+  actorIdValue: number | string | null | undefined,
+  requestId: string,
+  storage: FeeCreateStorage | null = feeCreateStorage(),
+): boolean {
+  const actorId = feeCreateActorId(actorIdValue)
+  if (!actorId || !storage) return false
+  const pending = readPendingFeeCreate(storage, actorId)
+  if (!pending || pending.client_request_id !== requestId) return false
+  try {
+    storage.removeItem(pendingFeeCreateStorageKey(actorId))
+    if (readPendingFeeCreate(storage, actorId)?.client_request_id === requestId) return false
+  } catch {
+    return false
+  }
+  dispatchResolvedSyncError(pending.sync_problem)
+  return true
+}
 
 /** A successful status alone is insufficient: an edge/proxy or malformed
  * Worker response must not make the browser forget an unresolved request.
