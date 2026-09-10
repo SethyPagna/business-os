@@ -12226,3 +12226,43 @@ version ID, stamped revision, and migration result are the deployment provenance
 Authenticated browser and physical iOS/PWA/camera certification therefore remain
 pending. Historical duplicate/evidence cleanup, transfer/UI/public portal polish,
 and paused offline work remain open in their existing ledger entries.
+
+## Current status snapshot after 2afca7ec deployment — September 10, 2026
+
+This snapshot is the current coordinator view; older Part tables below are
+historical evidence and may say `needs deploy` for work later included in a newer
+100% deployment entry.
+
+**Done and live:** canonical entity links and destination focus; operator
+English/Khmer vocabulary (including Received date / ថ្ងៃចូល, Cost price /
+ថ្លៃដើម, Selling price / តម្លៃលក់, Delivery fee / ថ្លៃដឹក, Actual delivery
+cost / ថ្លៃដឹកដើម, and Not Paid / ប្រាក់ជំពាក់); shared General customer
+membership cleanup; audited sale Records; status/payment/add-item/amendment
+reconciliation; atomic sale quantity and selling-price edits; per-line and total
+discounts; detail refresh that prevents the receipt-versus-zero-items mismatch;
+compact settlement controls; unlimited-by-default employee edit window; and
+migration 0149. The current provenance is the deployment entry immediately
+above this snapshot.
+
+**Built or verified in the repository but still needing a focused production
+smoke or separate release:** transfer operation reliability (including Shop →
+Warehouse), remaining transfer/report/UI compaction, public storefront and
+customer-portal polish/legal/accessibility review, product/library performance
+and upload/camera behavior, broader Contacts/Supplier duplicate guards, and
+remaining mobile subpage icon/layout work. These areas were not silently
+claimed as fixed by the sales release.
+
+**Evidence-blocked or deferred:** historical duplicate/customer/supplier merges,
+missing sale-line/driver/fee records, and negative-census repairs require exact
+identity or source evidence; no production data was changed for them. Physical
+iOS/PWA/camera certification requires the owner's device. Offline work is
+paused by request. Cloudflare's bot challenge currently blocks authenticated
+browser smoke and deployment-list refresh from this environment; local gates
+and Wrangler upload provenance remain the available evidence.
+
+**Verification ledger for this release:** 348/348 frontend utility files green;
+focused sale amendment, records, discounts, settlement, reconciliation, and
+stock tests green; frontend and Worker typechecks green; i18n 5,706/589 green;
+Vite build green; migration-chain and full Worker pure-script sweeps green;
+`git diff --check` green; remote migration 0149 clean; Worker version
+1265b5b0-3dbd-4a45-a4a0-47dfc34950a2 at 100%.
