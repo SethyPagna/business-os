@@ -28,12 +28,19 @@ equal(shiftCountPairBlocker('', 'bad', { blankMeansUncounted: true }), 'invalid'
   'invalid text remains a blocker')
 
 const originalFetch = globalThis.fetch
+const originalWindow = globalThis.window
+const sessionValues = new Map<string, string>()
+globalThis.window = Object.assign(new EventTarget(), { sessionStorage: {
+  getItem: (key: string) => sessionValues.get(key) ?? null,
+  setItem: (key: string, value: string) => { sessionValues.set(key, value) },
+  removeItem: (key: string) => { sessionValues.delete(key) },
+} }) as unknown as Window & typeof globalThis
 const originalServerUrl = getSyncServerUrl()
 const postedBodies: Array<Record<string, unknown>> = []
 globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
   postedBodies.push(JSON.parse(String(init?.body || '{}')) as Record<string, unknown>)
   return new Response(JSON.stringify({
-    shift: null,
+    shift: { id: 17 },
     policy: { scope_mode: 'per_account', admin_exempt: true },
     exempt: false,
     needs_registration: false,
@@ -48,6 +55,7 @@ try {
   setSyncServerUrl('https://sync.example.test')
   const counts = shiftClosingCounts('', '120000')
   await closeShift({
+    shiftId: 17, expectedRevision: 0, actorId: 4,
     branchId: 2,
     closingCountedUsd: counts.usd,
     closingCountedKhr: counts.khr,
@@ -61,6 +69,7 @@ try {
   equal(opened?.opening_float_usd, null, 'transport posts blank opening USD as null')
   equal(opened?.opening_float_khr, 0, 'transport posts explicit opening KHR zero as zero')
 } finally {
+  globalThis.window = originalWindow
   globalThis.fetch = originalFetch
   setSyncServerUrl(originalServerUrl)
   __resetApiHealthForTests()

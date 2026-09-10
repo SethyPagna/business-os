@@ -12,6 +12,68 @@ import type { Env } from '../index'
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
 
+// The existing immutable audit row is the receipt, committed in the same D1
+// batch as the transition. No separate receipt write can lose a committed ack.
+function mutationRequest(body: Record<string, unknown>, target: number) {
+  if (typeof body.client_request_id !== 'string') return undefined
+  const canonical = JSON.stringify(Object.fromEntries(Object.entries(body).sort(([a], [b]) => a.localeCompare(b))))
+  return { id: body.client_request_id, target, canonical }
+}
+
+app.use('*', async (c, next) => {
+  const match = c.req.path.match(/\/(\d+)(?:\/(close|reopen|cancel))?$/)
+  const legacyClose = c.req.method === 'POST' && (c.req.path === '/close' || c.req.path.endsWith('/shifts/close'))
+  if ((!match && !legacyClose) || !['POST', 'PATCH'].includes(c.req.method)) return next()
+  const action = legacyClose ? 'close' : match?.[2] || (c.req.method === 'PATCH' ? 'amend' : '')
+  if (!action) return next()
+  const body = await c.req.json().catch(() => ({})) as Record<string, unknown>
+  const user = c.get('user'); const denied = shiftPermissionError(c, user); if (denied) return denied
+  if (legacyClose && (!Number.isInteger(body.shift_id) || Number(body.shift_id) <= 0 || !Number.isInteger(body.expected_revision) || Number(body.expected_revision) < 0 || !body.client_request_id)) {
+    return c.json({ error: 'Refresh the app before closing. The exact shift, revision and request identity are required.', code: 'client_request_id_required' }, 400)
+  }
+  if (body.client_request_id == null) return next() // older clients retain revision protection
+  if (typeof body.client_request_id !== 'string' || !/^[a-zA-Z0-9_-]{16,128}$/.test(body.client_request_id)) {
+    return c.json({ error: 'Invalid shift request identity.' }, 400)
+  }
+  const db = getDb(c.env); const target = await readShiftById(db, legacyClose ? Number(body.shift_id) : Number(match?.[1]))
+  if (!target) return c.json({ error: 'Shift not found.' }, 404)
+  if (!canMutateShift(user, target) || (action === 'cancel' && !canManageShifts(user))) return c.json({ error: 'Shift permission is required.' }, 403)
+  if (target.branch_id != null && !(await resolveBranch(db, target.branch_id))) return c.json({ error: 'Shift not found.' }, 404)
+  const replay = async () => {
+    const receipt = await db.prepare(`SELECT entity_id, details FROM audit_logs
+      WHERE user_id=@actor AND action=@action AND json_valid(details)
+        AND json_extract(details,'$.request.id')=@requestId ORDER BY id DESC LIMIT 1`)
+      .get<{ entity_id: string; details: string }>({ actor: user.id, action: `shift.${action}`, requestId: body.client_request_id })
+    if (!receipt) return null
+    const request = JSON.parse(receipt.details).request
+    if (JSON.stringify(request) !== JSON.stringify(mutationRequest(body, target.id))) return c.json({ error: 'Shift request identity was reused with different values.' }, 409)
+    const saved = await readShiftById(db, Number(receipt.entity_id))
+    if (!saved) return c.json({ error: 'Committed shift could not be read back.' }, 503)
+    return c.json({ shift: await reconciledShift(c.env, user, saved), mutation_committed: true,
+      ...(action === 'close' ? { already_closed: true, is_open: false } : {}),
+      ...(action === 'cancel' ? { cancelled: true } : {}),
+      ...(action === 'reopen' ? { reopened_from_shift_id: target.id } : {}),
+    }, 200)
+  }
+  const prior = await replay(); if (prior) return prior
+  await next()
+  // A concurrent exact retry may reach the revision guard before its peer's
+  // commit is visible. Re-read the immutable receipt after the handler.
+  if (c.res.status >= 409) {
+    const committed = await replay()
+    if (committed) c.res = committed
+    else if (c.res.status === 409) {
+      const latest = await readShiftById(db, target.id)
+      // A different committed revision (or existing continuation) makes the
+      // frozen CAS impossible. This is authoritative rejection, not an
+      // endlessly pending timeout that traps the operator in Retry.
+      if (latest && (latest.revision !== Number(body.expected_revision) || (action === 'reopen' && latest.has_reopened_child))) {
+        c.res = c.json({ error: 'Shift changed concurrently. Reload and try again.', code: 'shift_request_superseded', outcome: 'rejected' }, 409)
+      }
+    }
+  }
+})
+
 export type ShiftScopeMode = 'per_account' | 'shop_wide'
 export type ShiftPolicy = { scope_mode: ShiftScopeMode; admin_exempt: boolean }
 export type ShiftRow = {
@@ -246,6 +308,7 @@ async function intervalError(db: D1Compat, shift: ShiftRow, openedAt: string, cl
 async function writeContinuation(db: D1Compat, user: SessionUser, parent: ShiftDbRow, input: {
   reason: string; floatUsd: number | null; floatKhr: number | null; note: string | null; deviceName: string | null
   afterCancellation: boolean; auditAction: 'shift.reopen' | 'shift.open_after_cancel'
+  request?: ReturnType<typeof mutationRequest>
 }): Promise<{ changed: boolean; shift?: ShiftDbRow; conflict: boolean }> {
   const nowIso = new Date().toISOString(); const actorName = displayName(user); const childCode = shiftCode(nowIso)
   const child = { shiftCode: childCode, parentId: parent.id, expectedRevision: parent.revision, reason: input.reason,
@@ -282,7 +345,7 @@ async function writeContinuation(db: D1Compat, user: SessionUser, parent: ShiftD
         params: { shiftCode: child.shiftCode, actorId: user.id, actorName, reason: input.reason,
           beforeJson: JSON.stringify(parentStored), afterJson: JSON.stringify(childSnapshot), createdAt: nowIso } },
       { sql: continuationAuditSql(), params: { action: input.auditAction, shiftCode: child.shiftCode,
-        actorId: user.id, actorName, details: JSON.stringify({ reason: input.reason, parent_shift_id: parent.id }),
+        actorId: user.id, actorName, details: JSON.stringify({ reason: input.reason, parent_shift_id: parent.id, request: input.request }),
         oldValue: JSON.stringify(parentStored), newValue: JSON.stringify(childSnapshot), deviceName: input.deviceName } },
     ])
   } catch (error) {
@@ -474,6 +537,7 @@ async function writeClose(db: D1Compat, user: SessionUser, row: ShiftDbRow, inpu
   closedAt: string; recordedAt: string; countedUsd: number | null; countedKhr: number | null
   additionalUsd: number; additionalKhr: number
   note: string | null; deviceName: string | null; reason: string
+  request?: ReturnType<typeof mutationRequest>
 }): Promise<{ changed: boolean; shift: ShiftDbRow | undefined }> {
   const shift = storedShift(row)
   const after = { ...shift, closed_at: input.closedAt, closing_counted_usd: input.countedUsd,
@@ -497,7 +561,7 @@ async function writeClose(db: D1Compat, user: SessionUser, row: ShiftDbRow, inpu
       params: { id: shift.id, actorId: user.id, actorName, reason: input.reason, beforeJson: JSON.stringify(shift),
         afterJson: JSON.stringify(after), createdAt: input.recordedAt, newRevision: after.revision } },
     { sql: transitionAuditSql(), params: { actorId: user.id, actorName, action: 'shift.close', shiftId: shift.id,
-        details: JSON.stringify({ reason: input.reason, revision: after.revision }), oldValue: JSON.stringify(shift),
+        details: JSON.stringify({ reason: input.reason, revision: after.revision, request: input.request }), oldValue: JSON.stringify(shift),
         newValue: JSON.stringify(after), deviceName: input.deviceName } },
   ])
   const changed = batchChanges(results[0]) === 1
@@ -511,12 +575,12 @@ app.post('/close', async (c) => {
   if (body.branch_id != null && String(body.branch_id).trim() !== '' && branchId == null) return c.json({ error: 'Invalid branch id.' }, 400)
   const db = getDb(c.env)
   if (branchId != null && !(await resolveBranch(db, branchId))) return c.json({ error: 'Branch not found or inactive.' }, 400)
-  const policy = await readShiftPolicy(db)
-  const shift = await readCurrent(db, policy, user.id, branchId)
-  if (!shift) return c.json({ error: 'No shift is registered for today. Register the opening float first.' }, 404)
+  const shift = await readShiftById(db, Number(body.shift_id))
+  if (!shift) return c.json({ error: 'Shift not found.' }, 404)
+  if (body.branch_id != null && shift.branch_id !== branchId) return c.json({ error: 'Shift branch does not match the requested branch.' }, 400)
   if (shift.cancelled_at) return c.json({ error: 'This shift was cancelled. Register a replacement opening first.' }, 409)
   if (!canMutateShift(user, shift)) return c.json({ error: 'Only the shift owner or an administrator can close this shift.' }, 403)
-  if (shift.closed_at) return c.json({ shift: await reconciledShift(c.env, user, shift), already_closed: true, is_open: false }, 200)
+  if (shift.revision !== Number(body.expected_revision) || shift.closed_at) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
   // Blank is "not counted", not a refusal -- see countedMoney.
   const countedUsd = countedMoney(body.closing_counted_usd); const countedKhr = countedMoney(body.closing_counted_khr)
   if (!countedUsd.ok || !countedKhr.ok) return c.json({ error: 'Closing counts must be 0 or more, or left blank.' }, 400)
@@ -528,14 +592,11 @@ app.post('/close', async (c) => {
   const result = await writeClose(db, user, shift, { closedAt, recordedAt: closedAt,
     countedUsd: countedUsd.value, countedKhr: countedKhr.value,
     additionalUsd: additionalUsd.value, additionalKhr: additionalKhr.value,
-    note: optionalText(body.closing_note), deviceName: c.req.header('X-Device-Name') || null, reason: 'Manual shift close' })
+    note: optionalText(body.closing_note), deviceName: c.req.header('X-Device-Name') || null, reason: 'Manual shift close', request: mutationRequest(body, shift.id) })
   if (result.changed) {
     const report = sendTelegramShiftReport(c.env, shift.id)
     try { c.executionCtx.waitUntil(report) } catch { void report }
     return c.json({ shift: result.shift ? await reconciledShift(c.env, user, result.shift) : null, already_closed: false, is_open: false }, 200)
-  }
-  if (result.shift?.closed_at) {
-    return c.json({ shift: await reconciledShift(c.env, user, result.shift), already_closed: true, is_open: false }, 200)
   }
   return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
 })
@@ -567,7 +628,7 @@ app.post('/:id/close', async (c) => {
   const result = await writeClose(db, user, shift, { closedAt, recordedAt: new Date().toISOString(),
     countedUsd: countedUsd.value, countedKhr: countedKhr.value,
     additionalUsd: additionalUsd.value, additionalKhr: additionalKhr.value,
-    note: optionalText(body.closing_note), deviceName: c.req.header('X-Device-Name') || null, reason: 'Historic manual close' })
+    note: optionalText(body.closing_note), deviceName: c.req.header('X-Device-Name') || null, reason: 'Historic manual close', request: mutationRequest(body, id) })
   if (!result.changed || !result.shift) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
   const report = sendTelegramShiftReport(c.env, shift.id)
   try { c.executionCtx.waitUntil(report) } catch { void report }
@@ -603,7 +664,7 @@ app.post('/:id/cancel', async (c) => {
       params: { id, actorId: user.id, actorName, reason, beforeJson: JSON.stringify(beforeStored),
         afterJson: JSON.stringify(after), createdAt: nowIso, newRevision: after.revision } },
     { sql: transitionAuditSql(), params: { actorId: user.id, actorName, action: 'shift.cancel', shiftId: id,
-      details: JSON.stringify({ reason, revision: after.revision }), oldValue: JSON.stringify(beforeStored),
+      details: JSON.stringify({ reason, revision: after.revision, request: mutationRequest(body, id) }), oldValue: JSON.stringify(beforeStored),
       newValue: JSON.stringify(after), deviceName: c.req.header('X-Device-Name') || null } },
   ])
   if (batchChanges(results[0]) !== 1) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
@@ -637,7 +698,7 @@ app.post('/:id/reopen', async (c) => {
   if (overlap) return c.json({ error: overlap }, 409)
   const continuation = await writeContinuation(db, user, parent, { reason, floatUsd, floatKhr,
     note: optionalText(body.opening_note), deviceName: c.req.header('X-Device-Name') || null,
-    afterCancellation: false, auditAction: 'shift.reopen' })
+    afterCancellation: false, auditAction: 'shift.reopen', request: mutationRequest(body, id) })
   if (!continuation.changed || !continuation.shift) return c.json({ error: 'This shift segment was already reopened or changed concurrently.' }, 409)
   const reopened = continuation.shift
   const report = sendTelegramShiftReport(c.env, reopened.id)
@@ -667,6 +728,8 @@ app.patch('/:id', async (c) => {
   }
   const openedAt = iso('opened_at', before.opened_at); const closedAt = iso('closed_at', before.closed_at)
   if (!openedAt || closedAt === undefined) return c.json({ error: 'Invalid shift timestamp.' }, 400)
+  const now = Date.now()
+  if (new Date(openedAt).getTime() > now || (closedAt && new Date(closedAt).getTime() > now)) return c.json({ error: 'Shift time cannot be in the future.' }, 400)
   if (businessDateFor(openedAt) !== before.business_date) return c.json({ error: 'Opening time must remain within the shift business date.' }, 400)
   if (before.closed_at && !closedAt) return c.json({ error: 'Closed shifts cannot be reopened.' }, 400)
   if (!before.closed_at && closedAt) return c.json({ error: 'Open shifts must be closed through the close action.' }, 400)
@@ -744,13 +807,15 @@ app.patch('/:id', async (c) => {
       params: { id, actorId: user.id, actorName, reason, beforeJson: JSON.stringify(beforeStored),
         afterJson: JSON.stringify(after), createdAt: nowIso, newRevision: after.revision } },
     { sql: transitionAuditSql(), params: { actorId: user.id, actorName, action: 'shift.amend', shiftId: id,
-        details: JSON.stringify({ reason, revision: after.revision }), oldValue: JSON.stringify(beforeStored),
+        details: JSON.stringify({ reason, revision: after.revision, request: mutationRequest(body, id) }), oldValue: JSON.stringify(beforeStored),
         newValue: JSON.stringify(after), deviceName: c.req.header('X-Device-Name') || null } },
   ])
   const changed = batchChanges(results[0])
   if (changed !== 1) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
   const saved = await readShiftById(db, id)
   if (!saved || saved.revision !== after.revision) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
+  const report = sendTelegramShiftReport(c.env, saved.id)
+  try { c.executionCtx.waitUntil(report) } catch { void report }
   return c.json({ shift: responseShift(user, saved) }, 200)
 })
 

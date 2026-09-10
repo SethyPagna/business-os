@@ -161,7 +161,8 @@ const round2 = (n) => Math.round(n * 100) / 100
 
   // ---- 1. the End shift press -----------------------------------------------
   telegramReportsFor = []
-  const closed = await call('POST', '/close', { branch_id: 1, closing_counted_usd: 100, closing_counted_khr: 150000 })
+  const closeInput = { shift_id: openedShift.id, expected_revision: openedShift.revision, client_request_id: 'legacy-close-chain-0001', branch_id: 1, closing_counted_usd: 100, closing_counted_khr: 150000 }
+  const closed = await call('POST', '/close', closeInput)
   assert.equal(closed.status, 200, 'POST /api/shifts/close answers the POS End shift button')
   const body = await closed.json()
   assert.equal(body.is_open, false)
@@ -224,7 +225,8 @@ const round2 = (n) => Math.round(n * 100) / 100
 
   // ---- 5. a second press is safe -------------------------------------------
   telegramReportsFor = []
-  const again = await call('POST', '/close', { branch_id: 1, closing_counted_usd: 999, closing_counted_khr: 999 })
+  assert.equal((await call('POST', '/close', { branch_id: 1, closing_counted_usd: 999 })).status, 400, 'unidentified old clients fail closed')
+  const again = await call('POST', '/close', closeInput)
   assert.equal(again.status, 200)
   const againBody = await again.json()
   assert.equal(againBody.already_closed, true)

@@ -157,10 +157,16 @@ function scenario() {
     '../lib/shiftReconciliation': { ...recon, loadShiftReconciliation: reconciliationFor },
   })
   const app = route.default || route
-  const call = (method, url, body) => app.fetch(new Request(`http://test${url}`, {
+  const call = (method, url, body) => {
+    if (url === '/close') {
+      const selected = sqlite.prepare('SELECT id,revision FROM shift_sessions ORDER BY id DESC LIMIT 1').get()
+      body = { shift_id: selected?.id, expected_revision: selected?.revision, client_request_id: crypto.randomUUID(), ...body }
+    }
+    return app.fetch(new Request(`http://test${url}`, {
     method, headers: body === undefined ? {} : { 'content-type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
-  }), {}, { waitUntil() {}, passThroughOnException() {} })
+    }), {}, { waitUntil() {}, passThroughOnException() {} })
+  }
   const row = (id) => sqlite.prepare('SELECT * FROM shift_sessions WHERE id=?').get(id)
   const open = async () => {
     const res = await call('POST', '/open', { branch_id: 1, opening_float_usd: 10, opening_float_khr: 10000 })

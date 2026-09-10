@@ -18,6 +18,7 @@ import {
   listShifts,
   orderShiftRows,
   parseShiftCount,
+  pendingShiftMutation,
   reopenShift,
   shiftClosingCounts,
   shiftCountPairBlocker,
@@ -170,7 +171,7 @@ function AmendmentList({ rows }: { rows: ShiftAmendment[] }) {
 }
 
 export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer = 'default', label, buttonClassName = 'btn-secondary min-h-11 text-xs', notify }: Props) {
-  const app = useApp() as { t: (key: string) => string; notify?: (message: string, tone?: string) => void }
+  const app = useApp() as { user?: { id: number | string }; t: (key: string) => string; notify?: (message: string, tone?: string) => void }
   const { t } = app
   const sendNotice = notify || app.notify
   const listRequest = useRef(0)
@@ -192,6 +193,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
   const [reopen, setReopen] = useState<ReopenDraft>(blankReopen)
   const [cancelReason, setCancelReason] = useState('')
   const [saving, setSaving] = useState(false)
+  const [pending, setPending] = useState(false)
 
   useEffect(() => {
     if (branchId !== undefined || !open) return
@@ -229,6 +231,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
   }, [load, open])
 
   const resetAction = () => {
+    setPending(false)
     setAction(null)
     setClose(blankClose())
     setReopen(blankReopen())
@@ -249,6 +252,16 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
         setSelected(result.shift)
         setEdit(editDraft(result.shift))
         setAmendments(result.amendments)
+        const saved = pendingShiftMutation(app.user?.id, shift.id)
+        if (saved) {
+          const value = (key: string) => saved.body[key] == null ? '' : String(saved.body[key])
+          setPending(true)
+          setAction(saved.action)
+          if (saved.action === 'close') setClose({ closedAt: dateTimeLocal(value('closed_at')), closingUsd: value('closing_counted_usd'), closingKhr: value('closing_counted_khr'), additionalUsd: value('additional_cash_usd'), additionalKhr: value('additional_cash_khr'), closingNote: value('closing_note') })
+          if (saved.action === 'reopen') setReopen({ reason: value('reason'), openingUsd: value('opening_float_usd'), openingKhr: value('opening_float_khr'), openingNote: value('opening_note') })
+          if (saved.action === 'cancel') setCancelReason(value('reason'))
+          if (saved.action === 'edit') setEdit({ expectedRevision: Number(saved.body.expected_revision), reason: value('reason'), openedAt: dateTimeLocal(value('opened_at')), closedAt: dateTimeLocal(value('closed_at')), openingUsd: value('opening_float_usd'), openingKhr: value('opening_float_khr'), additionalUsd: value('additional_cash_usd'), additionalKhr: value('additional_cash_khr'), closingUsd: value('closing_counted_usd'), closingKhr: value('closing_counted_khr'), openingNote: value('opening_note'), closingNote: value('closing_note') })
+        } else setPending(false)
       }
     } catch (cause) {
       if (requestId === detailsRequest.current) setDetailsError(cause instanceof Error ? cause.message : t('shift_history_failed'))
@@ -281,8 +294,10 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
   }
 
   const reportSaveError = (cause: unknown, fallbackKey: string) => {
+    setPending((cause as { outcome?: string })?.outcome === 'unknown')
+    if ((cause as { outcome?: string })?.outcome === 'unknown') return // shared banner owns the unresolved warning
     const message = cause instanceof Error ? cause.message : t(fallbackKey)
-    if (Number((cause as { status?: unknown } | null)?.status) === 409) setDetailsError(message)
+    if ((cause as { outcome?: string })?.outcome !== 'unknown' && Number((cause as { status?: unknown } | null)?.status) === 409) setDetailsError(message)
     sendNotice?.(message, 'error')
   }
 
@@ -296,6 +311,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
     setSaving(true)
     try {
       const result = await amendShift(selected.id, {
+        actorId: app.user?.id,
         expectedRevision: edit.expectedRevision,
         reason: edit.reason.trim(),
         openedAt: shiftLocalDateTimeToIso(edit.openedAt),
@@ -327,6 +343,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
     setSaving(true)
     try {
       const result = await closeShiftById(selected.id, {
+        actorId: app.user?.id,
         expectedRevision: selected.revision,
         closedAt: shiftLocalDateTimeToIso(close.closedAt),
         // The accounting transport accepts null as "not counted". Casts
@@ -354,6 +371,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
     setSaving(true)
     try {
       const result = await reopenShift(selected.id, {
+        actorId: app.user?.id,
         expectedRevision: selected.revision,
         reason: reopen.reason.trim(),
         openingFloatUsd: opening.usd,
@@ -376,7 +394,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
     if (!selected || !cancelReason.trim() || saving) return
     setSaving(true)
     try {
-      const result = await cancelShift(selected.id, selected.revision, cancelReason.trim())
+      const result = await cancelShift(selected.id, selected.revision, cancelReason.trim(), app.user?.id)
       replaceRow(result.shift)
       resetAction()
       refreshMountedShiftState()
@@ -414,7 +432,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
   const reopenReason = !reopen.reason.trim() ? t('shift_reopen_reason')
     : reopenCountBlocker ? t(shiftCountBlockerKey(reopenCountBlocker))
       : null
-  const cancelAction = <button type="button" className="btn-secondary" onClick={resetAction} disabled={saving}>{t('shift_action_cancel')}</button>
+  const cancelAction = <button type="button" className="btn-secondary" onClick={resetAction} disabled={saving || pending}>{t('shift_action_cancel')}</button>
   const dismiss = () => {
     if (saving) return
     setOpen(false)
@@ -431,6 +449,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
         <Modal
           title={selected ? `${fmtDateOnly(selected.business_date)} · ${selected.shift_code}` : t('shift_history')}
           onClose={dismiss}
+          closeDisabled={saving}
           size="xl"
           layer={layer}
           unsavedChanges={{ dirty }}
@@ -444,19 +463,19 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
               {detailsLoading ? <p role="status" className="text-sm text-gray-500">{t('shift_current_loading')}</p> : null}
               {detailsError ? <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-300"><span>{detailsError}</span><button type="button" className="btn-secondary min-h-11 px-3 text-xs" disabled={saving} onClick={() => { if (selected) void openDetails(selected) }}>{t('refresh')}</button></div> : null}
 
-              {!detailsLoading && !detailsError && (selected.capabilities.can_edit || selected.capabilities.can_close || selected.capabilities.can_reopen || selected.capabilities.can_cancel) ? (
+              {!detailsLoading && !detailsError && (pending || selected.capabilities.can_edit || selected.capabilities.can_close || selected.capabilities.can_reopen || selected.capabilities.can_cancel) ? (
                 <section className="space-y-3" aria-label={t('shift_actions')}>
                   <div className="flex flex-wrap gap-2">
-                    {selected.capabilities.can_edit ? <button type="button" className="btn-secondary min-h-11 px-3 text-xs" disabled={dirty && action !== 'edit'} onClick={() => { if (action === 'edit') resetAction(); else { setEdit(editDraft(selected)); setAction('edit') } }}><Pencil className="mr-1 inline h-3.5 w-3.5" />{t('shift_action_edit')}</button> : null}
-                    {selected.capabilities.can_close ? <button type="button" className="min-h-11 rounded-lg bg-amber-600 px-3 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50" disabled={dirty && action !== 'close'} onClick={() => { if (action === 'close') resetAction(); else { setClose(blankClose()); setAction('close') } }}>{t('shift_action_close')}</button> : null}
-                    {selected.capabilities.can_reopen ? <button type="button" className="btn-secondary min-h-11 px-3 text-xs" disabled={dirty && action !== 'reopen'} onClick={() => { if (action === 'reopen') resetAction(); else { setReopen(blankReopen()); setAction('reopen') } }}>{t('shift_action_reopen')}</button> : null}
-                    {selected.capabilities.can_cancel ? <button type="button" className="btn-danger min-h-11 px-3 text-xs" disabled={dirty && action !== 'cancel'} onClick={() => { if (action === 'cancel') resetAction(); else { setCancelReason(''); setAction('cancel') } }}>{t('shift_action_cancel_shift')}</button> : null}
+                    {selected.capabilities.can_edit ? <button type="button" className="btn-secondary min-h-11 px-3 text-xs" disabled={saving || pending || dirty && action !== 'edit'} onClick={() => { if (action === 'edit') resetAction(); else { setEdit(editDraft(selected)); setAction('edit') } }}><Pencil className="mr-1 inline h-3.5 w-3.5" />{t('shift_action_edit')}</button> : null}
+                    {selected.capabilities.can_close ? <button type="button" className="min-h-11 rounded-lg bg-amber-600 px-3 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50" disabled={saving || pending || dirty && action !== 'close'} onClick={() => { if (action === 'close') resetAction(); else { setClose(blankClose()); setAction('close') } }}>{t('shift_action_close')}</button> : null}
+                    {selected.capabilities.can_reopen ? <button type="button" className="btn-secondary min-h-11 px-3 text-xs" disabled={saving || pending || dirty && action !== 'reopen'} onClick={() => { if (action === 'reopen') resetAction(); else { setReopen(blankReopen()); setAction('reopen') } }}>{t('shift_action_reopen')}</button> : null}
+                    {selected.capabilities.can_cancel ? <button type="button" className="btn-danger min-h-11 px-3 text-xs" disabled={saving || pending || dirty && action !== 'cancel'} onClick={() => { if (action === 'cancel') resetAction(); else { setCancelReason(''); setAction('cancel') } }}>{t('shift_action_cancel_shift')}</button> : null}
                   </div>
 
                   {action === 'edit' && edit ? (
                     <div className="space-y-3 rounded-xl border border-gray-200 p-3 dark:border-zinc-700">
                       <h3 className="text-sm font-semibold">{t('shift_amend')}</h3>
-                      <fieldset disabled={saving} className="grid min-w-0 gap-3 sm:grid-cols-2 [&_input]:min-w-0 [&_input]:max-w-full">
+                      <fieldset disabled={saving || pending} className="grid min-w-0 gap-3 sm:grid-cols-2 [&_input]:min-w-0 [&_input]:max-w-full">
                         <div className="text-xs"><span className="block">{t('shift_opened_at')}</span><DateTimeEntryInput className="mt-1" value={edit.openedAt} onChange={(next) => setEdit({ ...edit, openedAt: next })} t={t} dateAriaLabel={`${t('shift_opened_at')} · ${t('date')}`} timeAriaLabel={`${t('shift_opened_at')} · ${t('time')}`} /></div>
                         <div className="text-xs"><span className="block">{t('shift_closed_at')}</span><DateTimeEntryInput className="mt-1" value={edit.closedAt} disabled={!selected.closed_at} onChange={(next) => setEdit({ ...edit, closedAt: next })} t={t} dateAriaLabel={`${t('shift_closed_at')} · ${t('date')}`} timeAriaLabel={`${t('shift_closed_at')} · ${t('time')}`} /></div>
                         <ShiftCountPair className="sm:col-span-2" label={t('shift_opening_cash')} usdLabel={t('shift_float_usd')} khrLabel={t('shift_float_khr')} usd={edit.openingUsd} khr={edit.openingKhr} onUsd={(value) => setEdit({ ...edit, openingUsd: value })} onKhr={(value) => setEdit({ ...edit, openingKhr: value })} />
@@ -466,40 +485,40 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
                         <label className="text-xs sm:col-span-2">{t('shift_closing_note')}<input className="input mt-1" value={edit.closingNote} disabled={!edit.closedAt} onChange={(event) => setEdit({ ...edit, closingNote: event.target.value })} /></label>
                         <label className="text-xs font-semibold sm:col-span-2">{t('shift_reason_required')}<textarea className="input mt-1 min-h-20" required value={edit.reason} onChange={(event) => setEdit({ ...edit, reason: event.target.value })} /></label>
                       </fieldset>
-                      <ShiftSubmitRow reason={editReason} busy={saving} label={t('shift_save_amendment')} onClick={() => void saveEdit()} secondary={cancelAction} />
+                      <ShiftSubmitRow reason={editReason} busy={saving} label={pending ? t('retry') : t('shift_save_amendment')} onClick={() => void saveEdit()} secondary={cancelAction} />
                     </div>
                   ) : null}
 
                   {action === 'close' ? (
                     <div className="space-y-3 rounded-xl border border-amber-200 bg-amber-50/60 p-3 dark:border-amber-900 dark:bg-amber-950/20">
                       <div><h3 className="text-sm font-semibold">{t('shift_close_title')}</h3><p className="mt-1 text-xs leading-relaxed text-gray-600 dark:text-gray-300">{t('shift_close_time_hint')}</p></div>
-                      <fieldset disabled={saving} className="grid min-w-0 gap-3 sm:grid-cols-2 [&_input]:min-w-0 [&_input]:max-w-full">
+                      <fieldset disabled={saving || pending} className="grid min-w-0 gap-3 sm:grid-cols-2 [&_input]:min-w-0 [&_input]:max-w-full">
                         <div className="text-xs font-semibold sm:col-span-2"><span className="block">{t('shift_close_time_required')}</span><DateTimeEntryInput className="mt-1" value={close.closedAt} onChange={(next) => setClose({ ...close, closedAt: next })} t={t} dateAriaLabel={`${t('shift_close_time_required')} · ${t('date')}`} timeAriaLabel={`${t('shift_close_time_required')} · ${t('time')}`} /></div>
                         <ShiftCountPair className="sm:col-span-2" label={t('shift_counted_cash')} usdLabel={t('shift_counted_usd')} khrLabel={t('shift_counted_khr')} hint={t('shift_registered_cash_hint')} usd={close.closingUsd} khr={close.closingKhr} onUsd={(value) => setClose({ ...close, closingUsd: value })} onKhr={(value) => setClose({ ...close, closingKhr: value })} />
                         <ShiftCountPair className="sm:col-span-2" label={t('shift_additional_cash')} usdLabel={t('shift_additional_usd')} khrLabel={t('shift_additional_khr')} hint={t('shift_additional_cash_hint')} usd={close.additionalUsd} khr={close.additionalKhr} onUsd={(value) => setClose({ ...close, additionalUsd: value })} onKhr={(value) => setClose({ ...close, additionalKhr: value })} />
                         <label className="text-xs sm:col-span-2">{t('shift_closing_note')}<input className="input mt-1" value={close.closingNote} onChange={(event) => setClose({ ...close, closingNote: event.target.value })} /></label>
                       </fieldset>
-                      <ShiftSubmitRow reason={closeReason} busy={saving} label={t('shift_action_close')} onClick={() => void saveClose()} secondary={cancelAction} buttonClassName="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white" />
+                      <ShiftSubmitRow reason={closeReason} busy={saving} label={pending ? t('retry') : t('shift_action_close')} onClick={() => void saveClose()} secondary={cancelAction} buttonClassName="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white" />
                     </div>
                   ) : null}
 
                   {action === 'reopen' ? (
                     <div className="space-y-3 rounded-xl border border-blue-200 bg-blue-50/50 p-3 dark:border-blue-900 dark:bg-blue-950/20">
                       <div><h3 className="text-sm font-semibold">{t('shift_reopen_title')}</h3><p className="mt-1 text-xs leading-relaxed text-gray-600 dark:text-gray-300">{t('shift_reopen_hint')}</p></div>
-                      <fieldset disabled={saving} className="grid min-w-0 gap-3 sm:grid-cols-2 [&_input]:min-w-0 [&_input]:max-w-full">
+                      <fieldset disabled={saving || pending} className="grid min-w-0 gap-3 sm:grid-cols-2 [&_input]:min-w-0 [&_input]:max-w-full">
                         <label className="text-xs font-semibold sm:col-span-2">{t('shift_reopen_reason')}<textarea className="input mt-1 min-h-20" required value={reopen.reason} onChange={(event) => setReopen({ ...reopen, reason: event.target.value })} /></label>
                         <ShiftCountPair className="sm:col-span-2" label={t('shift_opening_cash')} usdLabel={t('shift_float_usd')} khrLabel={t('shift_float_khr')} usd={reopen.openingUsd} khr={reopen.openingKhr} onUsd={(value) => setReopen({ ...reopen, openingUsd: value })} onKhr={(value) => setReopen({ ...reopen, openingKhr: value })} />
                         <label className="text-xs sm:col-span-2">{t('shift_opening_note')}<input className="input mt-1" value={reopen.openingNote} onChange={(event) => setReopen({ ...reopen, openingNote: event.target.value })} /></label>
                       </fieldset>
-                      <ShiftSubmitRow reason={reopenReason} busy={saving} label={t('shift_action_reopen')} onClick={() => void saveReopen()} secondary={cancelAction} />
+                      <ShiftSubmitRow reason={reopenReason} busy={saving} label={pending ? t('retry') : t('shift_action_reopen')} onClick={() => void saveReopen()} secondary={cancelAction} />
                     </div>
                   ) : null}
 
                   {action === 'cancel' ? (
                     <div className="space-y-3 rounded-xl border border-red-200 bg-red-50/60 p-3 dark:border-red-900 dark:bg-red-950/20">
                       <div><h3 className="text-sm font-semibold">{t('shift_cancel_title')}</h3><p className="mt-1 text-xs leading-relaxed text-gray-600 dark:text-gray-300">{t('shift_cancel_hint')}</p></div>
-                      <label className="block text-xs font-semibold">{t('shift_cancel_reason')}<textarea className="input mt-1 min-h-20" required maxLength={500} value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} /></label>
-                      <div className="flex justify-end gap-2"><button type="button" className="btn-secondary" onClick={resetAction} disabled={saving}>{t('shift_action_cancel')}</button><button type="button" className="btn-danger" disabled={saving || !cancelReason.trim()} onClick={() => void saveCancel()}>{saving ? t('saving_label') : t('shift_action_cancel_shift')}</button></div>
+                      <label className="block text-xs font-semibold">{t('shift_cancel_reason')}<textarea className="input mt-1 min-h-20" required maxLength={500} disabled={saving || pending} value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} /></label>
+                      <div className="flex justify-end gap-2"><button type="button" className="btn-secondary" onClick={resetAction} disabled={saving || pending}>{t('shift_action_cancel')}</button><button type="button" className="btn-danger" disabled={saving || !cancelReason.trim()} onClick={() => void saveCancel()}>{saving ? t('saving_label') : t('shift_action_cancel_shift')}</button></div>
                     </div>
                   ) : null}
                 </section>

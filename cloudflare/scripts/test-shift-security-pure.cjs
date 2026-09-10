@@ -179,8 +179,9 @@ async function main() {
   user = { id: 21, username: 'za', name: 'Roune Rath', permissions: JSON.stringify({ pos: true }) }
   const named = await call('POST', '/open', { opening_float_usd: 3, opening_float_khr: 0 })
   assert.equal(named.status, 201)
-  assert.equal((await named.json()).shift.user_name, 'za', 'the shift actor snapshot stores the username, not the display name')
-  const namedClose = await call('POST', '/close', { closing_counted_usd: 3, closing_counted_khr: 0 })
+  const namedShift = (await named.json()).shift
+  assert.equal(namedShift.user_name, 'za', 'the shift actor snapshot stores the username, not the display name')
+  const namedClose = await call('POST', '/close', { shift_id: namedShift.id, expected_revision: namedShift.revision, client_request_id: 'legacy-named-close-0001', closing_counted_usd: 3, closing_counted_khr: 0 })
   assert.equal(namedClose.status, 200)
   const namedCloseBody = await namedClose.json()
   assert.equal(namedCloseBody.shift.closed_by_user_name, 'za', 'the closer snapshot stores the username too')
@@ -204,10 +205,12 @@ async function main() {
   assert.equal(shopWideBody.shifts.some((shift) => shift.shift_code === 'S-SHOP'), true, 'shop-wide shifts are visible to the branch staff')
   assert.equal(shopWideBody.shifts.some((shift) => shift.id === foreignId), false,
     'a per_account row of another cashier stays hidden even under a shop-wide policy')
-  assert.equal((await call('POST', '/close', { branch_id: 1, closing_counted_usd: 10, closing_counted_khr: 10000 })).status, 403,
+  const shopShift = shopWideBody.shifts.find((shift) => shift.shift_code === 'S-SHOP')
+  const shopCloseInput = { shift_id: shopShift.id, expected_revision: shopShift.revision, client_request_id: 'legacy-shop-close-0001', branch_id: 1, closing_counted_usd: 10, closing_counted_khr: 10000 }
+  assert.equal((await call('POST', '/close', shopCloseInput)).status, 403,
     'shop-wide current close no longer lets another POS user close the opener shift')
   user = { id: 1, username: 'admin', role_code: 'admin' }
-  const adminShopClose = await call('POST', '/close', { branch_id: 1, closing_counted_usd: 10, closing_counted_khr: 10000 })
+  const adminShopClose = await call('POST', '/close', shopCloseInput)
   assert.equal(adminShopClose.status, 200, 'admin override can close a shop-wide shift even when admin-exempt')
   assert.throws(() => sqlite.prepare('DELETE FROM shift_session_amendments').run(), /immutable/, 'ordinary code cannot delete amendment history')
   sqlite.prepare("INSERT INTO system_flags(key,value) VALUES ('maintenance', ?)").run(JSON.stringify({ mode: 'restore', token: 'test' }))

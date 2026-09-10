@@ -46,6 +46,12 @@
  * (lib/paymentMethodRegistry.ts), never from a literal method name -- see the
  * long note there on why renaming "Cash" used to empty the drawer silently.
  *
+ * Attribution invariant (not a collection-time ledger): sale tender and
+ * courier payouts belong to sale.created_at. Settling an older Not Paid sale
+ * later therefore updates its original shift's report; it does not move cash
+ * into the later shift. Returns and fees use their own created_at. Changing
+ * this requires an explicit collection-time business rule and event source.
+ *
  * Everything above `loadShiftReconciliation` is pure so
  * scripts/test-shift-reconciliation-pure.cjs can execute the arithmetic
  * instead of pattern-matching a route.

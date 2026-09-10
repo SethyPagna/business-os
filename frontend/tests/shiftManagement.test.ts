@@ -8,6 +8,8 @@ import {
   closeShiftById,
   orderShiftRows,
   parseShiftCount,
+  pendingShiftMutation,
+  shiftTimestampIsFuture,
   reopenShift,
   shiftLocalDateTimeToIso,
   type AmendShiftInput,
@@ -185,7 +187,7 @@ ok(/row\.id !== result\.shift\.id/.test(modal) && /setSelected\(result\.shift\)/
 ok((modal.match(/await refreshDetails\(result\.shift\)/g) || []).length >= 4 && !/setAmendments\(\[\]\)[\s\S]{0,180}shift_reopen_saved/.test(modal), 'all lifecycle saves reload amendments, including close and reopen')
 ok(/amendmentFields\.filter/.test(modal) && /before\[field\].*after\[field\]/.test(modal), 'amendment detail renders whitelisted before-to-after field changes')
 ok(/selected\.capabilities\.can_cancel/.test(modal) && /maxLength=\{500\}/.test(modal), 'only the server can_cancel capability reveals the bounded reason form')
-ok(/cancelShift\(selected\.id, selected\.revision, cancelReason\.trim\(\)\)/.test(modal), 'cancel submits the selected revision and required reason without replacement values')
+ok(/cancelShift\(selected\.id, selected\.revision, cancelReason\.trim\(\), app\.user\?\.id\)/.test(modal), 'cancel submits the selected revision, required reason and authenticated retry scope')
 ok(/refreshMountedShiftState\(\)/.test(modal) && /SHIFT_STATE_CHANGED_EVENT/.test(modal), 'popup lifecycle writes refresh mounted current-shift consumers')
 ok(/status\?\: unknown[\s\S]{0,160}=== 409/.test(modal) && /detailsError[\s\S]{0,500}t\('refresh'\)/.test(modal), 'a stale write exposes an explicit detail reload path')
 ok(/shift\.cancelled_at/.test(summary) && /shift_cancel_preserved_hint/.test(summary), 'cancelled detail is labelled closed out and keeps recorded facts visible')
@@ -206,7 +208,7 @@ ok(/view\.id === 'shift' \? <ShiftReport/.test(reports) && !/<CurrentShiftSummar
 // cloudflare/scripts/test-shift-close-chain-pure.cjs.
 ok(/onClick=\{\(\) => void submitClose\(\)\}/.test(gate) && /await closeShift\(\{/.test(gate),
   'the End shift button submits through the close transport, not a local state flip')
-ok(/POST', '\/api\/shifts\/close'/.test(transport), 'the close transport posts to the shift close route')
+ok(transport.includes('`/api/shifts/${input.shiftId}/close`'), 'the close transport pins the exact shift route')
 ok(/publish\(next\)/.test(gate) && /if \(next\.shift\) setClosed\(next\.shift\)/.test(gate),
   'the closed row the server returned is what the summary renders')
 ok(/<ShiftCashBreakdown reconciliation=\{shift\.reconciliation\}/.test(gate),
@@ -246,13 +248,20 @@ ok(/expected cash/i.test(en.shift_difference_hint) && !/opening cash\./i.test(en
 // proves a stale draft reaches the server with its original revision and is
 // rejected instead of silently overwriting the first change.
 const originalFetch = globalThis.fetch
+const originalWindow = globalThis.window
+const sessionValues = new Map<string, string>()
+globalThis.window = Object.assign(new EventTarget(), { sessionStorage: {
+  getItem: (key: string) => sessionValues.get(key) ?? null,
+  setItem: (key: string, value: string) => { sessionValues.set(key, value) },
+  removeItem: (key: string) => { sessionValues.delete(key) },
+} }) as unknown as Window & typeof globalThis
 const originalServerUrl = getSyncServerUrl()
 const transportCalls: Array<{ url: string; body: Record<string, unknown> }> = []
 let serverRevision = 4
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const body = JSON.parse(String(init?.body || '{}')) as Record<string, unknown>
   transportCalls.push({ url: String(input), body })
-  if (String(input).endsWith('/api/shifts/close')) {
+  if (String(input).endsWith('/api/shifts/17/close')) {
     return new Response(JSON.stringify({
       shift: { ...fixture(17, '2026-09-05', '2026-09-05T01:00:00.000Z', '2026-09-05T09:00:00.000Z'), reconciliation: reconciled },
       policy: { scope_mode: 'per_account', admin_exempt: true },
@@ -272,6 +281,7 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 }) as typeof fetch
 
 const amendInput: AmendShiftInput = {
+  actorId: 4,
   expectedRevision: 4,
   reason: 'Correct count',
   openedAt: '2026-09-05T01:00:00.000Z',
@@ -299,15 +309,63 @@ try {
 
   // The close transport, driven for real: it must POST to the shift close
   // route and hand back the server's reconciliation untouched.
-  const closeState = await closeShift({ branchId: 2, closingCountedUsd: 13.5, closingCountedKhr: 135_000 })
+  const closedAt = '2026-09-05T09:00:00.000Z'
+  const closeState = await closeShift({ shiftId: 17, expectedRevision: 6, actorId: 4, closedAt, branchId: 2, closingCountedUsd: 13.5, closingCountedKhr: 135_000 })
   const closeCall = transportCalls[transportCalls.length - 1]
-  assert.ok(closeCall.url.endsWith('/api/shifts/close'), `close posted to ${closeCall.url}`)
+  assert.ok(closeCall.url.endsWith('/api/shifts/17/close'), `close posted to ${closeCall.url}`)
   assert.deepEqual(closeCall.body, {
-    branch_id: 2, closing_counted_usd: 13.5, closing_counted_khr: 135_000, closing_note: null,
+    expected_revision: 6, closed_at: closedAt, client_request_id: closeCall.body.client_request_id,
+    closing_counted_usd: 13.5, closing_counted_khr: 135_000, closing_note: null,
   })
   assert.deepEqual(closeState.shift?.reconciliation, reconciled)
   assert.deepEqual(closeState.shift?.reconciliation?.difference, { usd: -28, khr: 55_000 })
   checks += 4
+
+  // Execute the actual transport through lost acknowledgements and reloads.
+  const lostBodies: Record<string, unknown>[] = []
+  const receipts = new Map<string, object>()
+  let effects = 0
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body))
+    lostBodies.push(body)
+    assert.ok(sessionValues.size > 0, 'request is durably frozen before fetch')
+    const requestId = String(body.client_request_id)
+    if (!receipts.has(requestId)) {
+      effects += 1
+      receipts.set(requestId, { shift: { ...fixture(18, '2026-09-05', '2026-09-05T01:00:00.000Z', closedAt), revision: 1 }, already_closed: true, is_open: false })
+      throw new TypeError('Lost response after commit')
+    }
+    return new Response(JSON.stringify(receipts.get(requestId)), { status: 200 })
+  }) as typeof fetch
+  const lostInput = { actorId: 4, expectedRevision: 0, closedAt, closingCountedUsd: null, closingCountedKhr: 0 }
+  const reconciledClose = await closeShiftById(18, lostInput)
+  assert.equal(reconciledClose.shift.id, 18)
+  assert.equal(effects, 1)
+  assert.deepEqual(lostBodies[0], lostBodies[1], 'automatic reconciliation replays the exact identity and body')
+  assert.equal(pendingShiftMutation(4, 18), null, 'proven commit clears the durable retry')
+  globalThis.fetch = (async () => { throw new TypeError('Still offline') }) as typeof fetch
+  await assert.rejects(() => closeShiftById(19, lostInput))
+  const saved = pendingShiftMutation(4, 19)
+  assert.equal(saved?.action, 'close')
+  assert.equal(saved?.body.closing_counted_usd, null)
+  assert.equal(pendingShiftMutation(5, 19), null, 'retry state is isolated from a different signed-in operator')
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body))
+    assert.deepEqual(body, saved?.body, 'reopening the form cannot replace its unresolved request with changed counts')
+    return new Response(JSON.stringify({ shift: { ...fixture(19, '2026-09-05', '2026-09-05T01:00:00.000Z', closedAt), revision: 1 } }), { status: 200 })
+  }) as typeof fetch
+  await closeShiftById(19, { ...lostInput, closingCountedUsd: 999 })
+  assert.equal(pendingShiftMutation(4, 19), null)
+  globalThis.fetch = (async () => { throw new TypeError('No acknowledgement') }) as typeof fetch
+  await assert.rejects(() => closeShiftById(20, lostInput))
+  globalThis.fetch = (async () => new Response(JSON.stringify({ error: 'Reload the changed shift', code: 'shift_request_superseded', outcome: 'rejected' }), { status: 409 })) as typeof fetch
+  await assert.rejects(() => closeShiftById(20, lostInput), (error: any) => error.outcome === 'rejected')
+  assert.equal(pendingShiftMutation(4, 20), null, 'authoritatively superseded CAS releases the pending draft for refresh')
+  assert.equal(shiftTimestampIsFuture('2026-09-05T09:01:00.000Z', Date.parse(closedAt)), true)
+  assert.equal(shiftTimestampIsFuture(closedAt, Date.parse(closedAt)), false)
+  assert.throws(() => shiftLocalDateTimeToIso('2026-02-30T12:00'), /Invalid/)
+  await assert.rejects(() => amendShift(19, { ...amendInput, openedAt: new Date(Date.now() + 60_000).toISOString() }), /future/)
+  checks += 16
 
   const callsBeforeInvalidCounts = transportCalls.length
   await assert.rejects(
@@ -329,6 +387,7 @@ try {
   assert.equal(transportCalls.length, callsBeforeInvalidCounts, 'invalid counts must fail before fetch')
   checks += 5
 } finally {
+  globalThis.window = originalWindow
   globalThis.fetch = originalFetch
   setSyncServerUrl(originalServerUrl)
   __resetApiWriteDedupeForTests()
