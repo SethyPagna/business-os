@@ -10,7 +10,15 @@ export type PermissionUser = {
 } | null | undefined
 
 export function getEffectivePermissionMap(user: PermissionUser): Record<string, PermissionValue> {
-  return { ...normalizePermissionState(user?.role_permissions), ...normalizePermissionState(user?.permissions) }
+  const merged = { ...parsePermissionMap(user?.role_permissions), ...parsePermissionMap(user?.permissions) }
+  const normalized = normalizePermissionState(merged)
+  // Worker action overrides narrow only on explicit false. Interpret them
+  // after merging: a user's junk/no-op value still replaces a role's false.
+  // Section grants keep the strict normalizer and cannot become truthy grants.
+  for (const [key, value] of Object.entries(merged)) {
+    if (key.includes(':') && value !== true && value !== false) delete normalized[key]
+  }
+  return normalized
 }
 
 /** Reserved identities and the effective all grant match Worker authority. */
