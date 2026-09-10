@@ -1285,8 +1285,28 @@ assert.match(
 )
 assert.match(
   actionHistory,
-  /if \(!isTrackedRequestCurrent\(historyRequestRef, requestId\)\) return[\s\S]*const record = result as \{ items\?: ServerHistoryItem\[\] \} \| null[\s\S]*const items = Array\.isArray\(record\?\.items\) \? record\.items : \[\][\s\S]*setServerItems\(items\)/,
-  'action history should ignore stale history responses before updating rows',
+  /if \(!isTrackedRequestCurrent\(historyRequestRef, requestId\) \|\| actorScopeRef.current !== requestScope\) return[\s\S]*const record = result as \{ items\?: ServerHistoryItem\[\] \} \| null[\s\S]*const items = Array\.isArray\(record\?\.items\) \? record\.items : \[\][\s\S]*setServerItems\(items\)/,
+  'action history should ignore superseded requests and previous-actor responses before updating rows or cache',
+)
+assert.match(
+  actionHistory,
+  /const requestScope = actorScope[\s\S]*const requestId = beginTrackedRequest\(historyRequestRef\)/,
+  'history reads must capture both actor scope and request generation before starting',
+)
+assert.match(
+  actionHistory,
+  /return `\$\{ACTION_HISTORY_CACHE_PREFIX\}\$\{scopedWorkDraftKey\(scope\)\}`/,
+  'instant-paint history cache keys must remain actor-scoped',
+)
+assert.match(
+  actionHistory,
+  /useState<ServerHistoryItem\[\]>\(\(\) => readCachedServerItems\(scope\)\)/,
+  'the actor-scoped cache should hydrate synchronously before the delayed refresh',
+)
+assert.match(
+  actionHistory,
+  /if \(cachedScopeRef.current === actorScope\) return[\s\S]*setUndoStack\(\[\]\)[\s\S]*setRedoStack\(\[\]\)[\s\S]*setServerItems\(readCachedServerItems\(scope\)\)/,
+  'an actor/scope change must replace cached history and remove the previous actor undo closures',
 )
 assert.match(
   actionHistory,
@@ -1455,8 +1475,8 @@ assert.match(
 assert.doesNotMatch(branches, /BRANCHES_HISTORY_READY_DELAY_MS|window\.setTimeout\(\(\) => \{\s*setHistoryReady\(true\)/, 'Branches background history should not add a fixed post-load delay')
 assert.match(
   branches,
-  /useActionHistory\(\{ limit: 3, notify, enabled: historyReady, user \}\)/,
-  'Branches should not fetch server action history during first route load',
+  /useActionHistory\(\{ limit: 3, notify, enabled: historyReady, user, scope: 'branches' \}\)/,
+  'Branches should load its server-owned transfer history scope only after first route load',
 )
 assert.match(
   branches,
