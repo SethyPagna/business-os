@@ -32,7 +32,8 @@ assert.doesNotMatch(header, /onReturn\(sale\)|onPrint\(sale\)/, 'Return and Prin
 // label. The labelled table rows remain desktop-only.
 const mobileContactStart = detail.indexOf('data-sale-detail-mobile-contact=""')
 const mobileContact = detail.slice(mobileContactStart, detail.indexOf('</div>', mobileContactStart))
-assert.match(mobileContact, /customerIsAnonymous[\s\S]*?sale\.customer_phone[\s\S]*?aria-hidden="true">\|<\/span>[\s\S]*?translateOr\('delivery', 'Delivery'/)
+assert.match(mobileContact, /customerIsAnonymous[\s\S]*?\{sale\.customer_phone \? <EntityLink[\s\S]*?aria-hidden="true">\|<\/span>[\s\S]*?translateOr\('delivery', 'Delivery'/)
+assert.doesNotMatch(mobileContact, /!customerIsAnonymous && sale\.customer_phone/, 'a General sale keeps its sale-specific phone in the compact row')
 assert.match(mobileContact, /\[deliveryDriverName, deliveryDriverPhone\]\.filter\(Boolean\)\.join\(' · '\)/)
 assert.doesNotMatch(mobileContact, /translateOr\('driver'|translateOr\('driver_phone'/, 'the phone contact row shows the delivery values directly')
 assert.match(detail, /className="hidden sm:block"><DetailRow label=\{t\('cashier'\)/, 'the labelled cashier row remains on wider screens')

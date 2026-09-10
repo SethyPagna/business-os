@@ -107,7 +107,8 @@ for (const general of ['General', 'អតិថិជនទូទៅ']) {
 const saleDetail = fs.readFileSync(new URL('../src/components/sales/SaleDetailModal.tsx', import.meta.url), 'utf8')
 assert.match(saleDetail, /customer_is_anonymous\?: number \| boolean \| null/)
 assert.match(saleDetail, /const customerIsAnonymous = isAnonymousCustomerIdentity\(sale\)/)
-assert.match(saleDetail, /!customerIsAnonymous && sale\.customer_phone/)
+assert.match(saleDetail, /\{sale\.customer_phone \? <EntityLink[\s\S]*?\{sale\.customer_phone\}<\/EntityLink> : null\}/)
+assert.doesNotMatch(saleDetail, /!customerIsAnonymous && sale\.customer_phone/, 'General keeps its sale-specific phone without gaining a customer identity')
 assert.match(saleDetail, /customerIsAnonymous \? null : onAttachMembership/)
 assert.match(saleDetail, /onClick=\{\(\) => onCustomerAction\(sale\)\}/, 'the single Edit action remains for the parent to route to attach-contact')
 

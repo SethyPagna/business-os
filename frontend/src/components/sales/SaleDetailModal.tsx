@@ -1367,12 +1367,13 @@ export default function SaleDetailModal({
                     compact line, with the driver's name shown directly rather
                     than behind a repeated Driver label. Labeled rows remain on
                     wider screens where the Sale card has room for its table
-                    rhythm. Anonymous customer identity still suppresses the
-                    phone, exactly as the Customer card does below. */}
+                    rhythm. A General sale can still carry its own contact
+                    phone, so keep that copyable snapshot visible without
+                    turning it into a customer profile or membership link. */}
                   <div data-sale-detail-mobile-contact="" className="flex items-center gap-x-1.5 overflow-x-auto whitespace-nowrap py-1.5 text-xs text-gray-500 sm:hidden">
                     <span className="font-medium">{customerIsAnonymous ? (t('walk_in') || 'General') : sale.customer_name ? <EntityLink page="contacts">{sale.customer_name}</EntityLink> : (t('walk_in') || 'General')}</span>
-                    {!customerIsAnonymous && sale.customer_phone ? <EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_phone} navigate={navigateTo} title={t('open_customer') || 'Open customer'}>{sale.customer_phone}</EntityLink> : null}
-                    {!customerIsAnonymous && sale.customer_phone && (deliveryDriverName || deliveryDriverPhone) ? <span aria-hidden="true">|</span> : null}
+                    {sale.customer_phone ? <EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_phone} navigate={navigateTo} title={t('copy') || 'Copy'}>{sale.customer_phone}</EntityLink> : null}
+                    {sale.customer_phone && (deliveryDriverName || deliveryDriverPhone) ? <span aria-hidden="true">|</span> : null}
                     {deliveryDriverName || deliveryDriverPhone ? (
                       <span aria-label={`${translateOr('delivery', 'Delivery', 'ការដឹកជញ្ជូន')}: ${[deliveryDriverName, deliveryDriverPhone].filter(Boolean).join(' · ')}`}>
                         {deliveryDriverName ? <EntityLink page="contacts" anchor="hub:contacts:delivery" search={deliveryDriverName} navigate={navigateTo} title={translateOr('open_delivery_contact', 'Open delivery contact', 'បើកទំនាក់ទំនងអ្នកដឹក')}>
@@ -1525,7 +1526,7 @@ export default function SaleDetailModal({
                 <div className="hidden sm:block"><DetailRow label={t('customer_name') || 'Customer'}>
                   {customerIsAnonymous ? (t('walk_in') || 'General') : sale.customer_name ? <EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_name} navigate={navigateTo}>{sale.customer_name}</EntityLink> : (t('walk_in') || 'General')}
                 </DetailRow></div>
-                {!customerIsAnonymous ? <div className="hidden sm:block"><DetailRow label={t('phone') || 'Phone'}>{sale.customer_phone ? <EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_phone} navigate={navigateTo}>{sale.customer_phone}</EntityLink> : null}</DetailRow></div> : null}
+                {sale.customer_phone ? <div className="hidden sm:block"><DetailRow label={t('phone') || 'Phone'}><EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_phone} navigate={navigateTo}>{sale.customer_phone}</EntityLink></DetailRow></div> : null}
                 <DetailRow label={t('address') || 'Address'} value={customerAddress} />
                 {customerIsAnonymous ? null : onAttachMembership ? (
                   <DetailRow label={t('membership') || 'Membership'}>
