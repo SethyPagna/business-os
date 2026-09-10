@@ -16,7 +16,8 @@
 //   4. Every sibling with the same two-currency count pattern (the Shifts
 //      popup's amend / close / reopen forms) uses the same shared fields.
 //   5. None of this touches the daily prompt: the register modal is still
-//      driven by needs_registration and still cannot be dismissed.
+//      driven by needs_registration, cannot be dismissed, and exposes no
+//      enabled no-op Close control to keyboard or screen-reader users.
 //
 // Run: node tests/shiftGateUx.test.ts
 import assert from 'node:assert/strict'
@@ -147,11 +148,15 @@ for (const key of ['shift_blank_count_hint', 'shift_count_needed', 'shift_count_
 ok(/\b0\b/.test(en.shift_blank_count_hint) && /0/.test(km.shift_blank_count_hint), 'the hint literally names 0 in both packs')
 
 // ---- 7. The daily prompt is untouched -------------------------------------
+const registrationStart = gate.indexOf('{needsRegistration &&')
+const registrationModal = gate.slice(registrationStart, gate.indexOf('</Modal>', registrationStart))
 ok(/const needsRegistration = state\?\.needs_registration === true/.test(gate),
   'the register step is still driven by the server\'s needs_registration')
-ok(/\{needsRegistration && \(\s*<Modal/.test(gate), 'needs_registration still renders the register modal')
-ok(/onClose=\{\(\) => \{ \/\* intentionally not dismissible/.test(gate), 'the register modal still cannot be dismissed')
-ok(/t\('shift_register_hint'\)/.test(gate), 'the register modal still explains itself')
+ok(/\{needsRegistration && \(\s*<Modal/.test(registrationModal), 'needs_registration still renders the register modal')
+ok(/onClose=\{\(\) => \{ \/\* intentionally not dismissible/.test(registrationModal), 'the register modal still cannot be dismissed')
+ok(/closeAffordance="omitted"/.test(registrationModal),
+  'the mandatory register modal explicitly omits the inaccessible no-op Close affordance')
+ok(/t\('shift_register_hint'\)/.test(registrationModal), 'the register modal still explains itself')
 ok(!/needsRegistration && !dismissed|needsRegistration && !snoozed|localStorage[^\n]*shift_register/.test(gate),
   'no dismiss / snooze / remembered flag was introduced')
 

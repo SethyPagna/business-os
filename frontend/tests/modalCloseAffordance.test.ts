@@ -1,8 +1,10 @@
 // One close affordance per modal: the header ✕, and nothing else.
 //
-// The shared Modal (src/components/shared/Modal.tsx) always renders an
-// aria-label="Close" ✕ wired to the same onClose the panel was given. A modal
-// that then draws its own Close button has two of them, and on a read-only
+// The shared Modal (src/components/shared/Modal.tsx) renders an accessible
+// aria-label="Close" ✕ by default, wired to the same guarded close path the
+// panel was given. A mandatory workflow may explicitly omit that affordance;
+// it must not render an enabled button whose action is a no-op. A modal that
+// then draws its own Close button has two of them, and on a read-only
 // report -- where there is no save, no submit, nothing else a footer could
 // hold -- the second one arrives full-width and styled `btn-primary`, so the
 // panel's most prominent control is "dismiss this". SupplierPurchasesModal had
@@ -18,6 +20,7 @@
 // Run: node tests/modalCloseAffordance.test.ts
 import assert from 'node:assert/strict'
 import { readdirSync, readFileSync } from 'node:fs'
+import ts from 'typescript'
 
 const CLOSE_LABEL = /(?:t|tr)\(\s*'close'|>\s*Close\s*</
 const CLOSES_THE_PANEL = /onClick=\{\s*onClose\s*\}/
@@ -98,5 +101,70 @@ for (const sibling of ['contacts/SupplierPurchasesModal.tsx', 'contacts/Customer
   assert.match(source, /<Modal[\s\S]*?onClose=\{onClose\}/, `${sibling} must close through the shared Modal header`)
   assert.deepEqual(lonesomeCloseButtons(source), [], `${sibling} must offer one way out, not two`)
 }
+
+// Execute the actual shared Modal so this test proves its accessible tree,
+// rather than only matching the spelling of the new prop. Ordinary callers
+// keep one named Close control; mandatory callers omit it entirely; and a
+// temporary busy guard retains the same visible-but-disabled control.
+type RenderNode = { type: unknown; props: Record<string, any> }
+const modalSource = readFileSync(new URL('../src/components/shared/Modal.tsx', import.meta.url), 'utf8')
+const jsx = (type: unknown, props: Record<string, any>) => ({ type, props: props || {} })
+const hooks = {
+  useRef: (initial: unknown) => ({ current: initial }),
+  useState: (initial: unknown) => [typeof initial === 'function' ? (initial as () => unknown)() : initial, () => {}],
+}
+let guardedCloseRequests = 0
+const requestClose = () => { guardedCloseRequests += 1 }
+const compiled = ts.transpileModule(modalSource, {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
+}).outputText
+const modalModule: any = { exports: {} }
+new Function('require', 'module', 'exports', compiled)((name: string) => {
+  if (name === 'react') return hooks
+  if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx, Fragment: 'fragment' }
+  if (name === 'react-dom') return { createPortal: (node: unknown) => node }
+  if (name.includes('lucide-react')) return { default: () => null }
+  if (name.includes('AppContextCore')) return { useApp: () => ({ t: (key: string) => key }) }
+  if (name.includes('useCloseGuard')) return { useCloseGuard: () => ({ requestClose }) }
+  if (name.includes('modalCloseContext')) return { ModalCloseContext: { Provider: 'close-context-provider' } }
+  if (name.includes('UnsavedChangesPrompt')) return { default: () => null }
+  return {}
+}, modalModule, modalModule.exports)
+
+function nodes(tree: any): RenderNode[] {
+  if (Array.isArray(tree)) return tree.flatMap(nodes)
+  if (!tree || typeof tree !== 'object') return []
+  return [tree, ...nodes(tree.props?.children)]
+}
+
+const SharedModal = modalModule.exports.default
+const renderModal = (props: Record<string, unknown>) => SharedModal({
+  title: 'Test modal',
+  onClose: () => {},
+  children: 'Body',
+  unsavedChanges: 'read-only',
+  ...props,
+})
+
+const ordinaryClose = nodes(renderModal({})).find((node) => node.type === 'button' && node.props['aria-label'] === 'Close')
+assert.ok(ordinaryClose, 'an ordinary modal exposes its named Close control by default')
+assert.equal(ordinaryClose.props.disabled, false, 'ordinary Close remains enabled')
+ordinaryClose.props.onClick()
+assert.equal(guardedCloseRequests, 1, 'ordinary Close retains the shared guarded close path')
+
+const busyClose = nodes(renderModal({ closeDisabled: true })).find((node) => node.type === 'button' && node.props['aria-label'] === 'Close')
+assert.ok(busyClose, 'busy state keeps the familiar Close control visible')
+assert.equal(busyClose.props.disabled, true, 'busy state still disables Close')
+busyClose.props.onClick()
+assert.equal(guardedCloseRequests, 1, 'disabled/busy Close remains inert without bypassing the guard')
+
+const minimize = jsx('button', { type: 'button', 'aria-label': 'Minimize' })
+const mandatoryButtons = nodes(renderModal({ closeAffordance: 'omitted', headerExtra: minimize }))
+  .filter((node) => node.type === 'button')
+assert.deepEqual(
+  mandatoryButtons.map((node) => node.props['aria-label']),
+  ['Minimize'],
+  'omitting Close removes it from the accessible tree without removing independent header controls',
+)
 
 console.log(`PASS ${files.length} components: no modal repeats its header ✕ with a lone Close button`)

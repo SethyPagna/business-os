@@ -26,9 +26,10 @@ function closingCountInvalid(value: string): boolean {
  *    per the standing no-progressive-float rule.
  *  - It does not let the operator dismiss the prompt. There is no ✕ and no
  *    backdrop-close, because "will prompt until it is registered" is the whole
- *    requirement -- a closable prompt is one the till never registers. Modal's
- *    onClose is wired to a no-op rather than removed, so the component keeps
- *    the shared chrome and does not grow its own.
+ *    requirement -- a closable prompt is one the till never registers. The
+ *    shared Modal explicitly omits its Close affordance for this mandatory
+ *    workflow, so keyboard and screen-reader users are not offered an enabled
+ *    control that cannot act.
  *
  * And one thing it stopped doing on 2026-09-06: refusing silently. The Start
  * and End buttons used to be `disabled` until BOTH currencies were typed, with
@@ -314,6 +315,7 @@ export default function ShiftGate({ children, branchId = null, branchName = null
           title={t('shift_register_title')}
           size="sm"
           onClose={() => { /* intentionally not dismissible -- see the file comment */ }}
+          closeAffordance="omitted"
           unsavedChanges={{ dirty: floatUsd.trim() !== '' || floatKhr.trim() !== '' || note.trim() !== '' }}
         >
           <div className="space-y-3">

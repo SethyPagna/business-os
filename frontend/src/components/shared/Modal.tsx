@@ -27,6 +27,13 @@ type ModalProps = {
   // what allows the unsaved prompt to show a minimize control; dirty/workKey
   // declarations alone never imply that navigation can preserve a draft.
   onMinimize?: DraftPreservingMinimize
+  /**
+   * Omit the header Close control only when the surrounding workflow is
+   * intentionally mandatory and offers no dismissal at all. Ordinary modals
+   * keep the accessible Close button by default; use closeDisabled when a
+   * temporary in-flight operation, rather than the workflow itself, blocks it.
+   */
+  closeAffordance?: 'visible' | 'omitted'
   /** Blocks every dismissal affordance while a child operation must finish. */
   closeDisabled?: boolean
   wide?: boolean
@@ -56,7 +63,7 @@ type ModalProps = {
   unsavedChanges: UnsavedChangesDeclaration
 }
 
-export default function Modal({ title, onClose, children, wide, size, draggable, headerExtra, onMinimize, closeDisabled = false, layer = 'default', unsavedChanges }: ModalProps) {
+export default function Modal({ title, onClose, children, wide, size, draggable, headerExtra, onMinimize, closeAffordance = 'visible', closeDisabled = false, layer = 'default', unsavedChanges }: ModalProps) {
   const { t } = useApp()
   const tr = (key: string, fallback: string): string => {
     const value = t(key)
@@ -176,16 +183,18 @@ export default function Modal({ title, onClose, children, wide, size, draggable,
           <h2 className="detail-scroll-text min-w-0 flex-1 text-base font-bold text-gray-900 dark:text-white sm:text-lg" title={typeof title === 'string' ? title : undefined}>{title}</h2>
           <div className="flex shrink-0 items-center gap-1">
           {headerExtra}
-          <button
-            type="button"
-            onClick={requestClose}
-            disabled={closeDisabled}
-            aria-label={tr('close', 'Close')}
-            /* Z5: the ✕ was text-gray-400 (~2.5:1 on white, fails WCAG AA);
-               gray-600/gray-300 gives a legible close affordance in both
-               themes. */
-            className="text-gray-600 hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-40 dark:text-gray-300 dark:hover:text-white w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
-          ><X className="h-4 w-4" /></button>
+          {closeAffordance === 'visible' ? (
+            <button
+              type="button"
+              onClick={requestClose}
+              disabled={closeDisabled}
+              aria-label={tr('close', 'Close')}
+              /* Z5: the ✕ was text-gray-400 (~2.5:1 on white, fails WCAG AA);
+                 gray-600/gray-300 gives a legible close affordance in both
+                 themes. */
+              className="text-gray-600 hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-40 dark:text-gray-300 dark:hover:text-white w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
+            ><X className="h-4 w-4" /></button>
+          ) : null}
           </div>
         </div>
         {/* The guarded close is published to the content so a Cancel button
