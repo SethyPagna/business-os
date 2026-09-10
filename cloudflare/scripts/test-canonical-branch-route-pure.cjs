@@ -114,6 +114,17 @@ const branchRoute = loadModule('routes/branches.ts', (id) => {
   }
   if (id === '../lib/cache') return { bumpVersion: async () => {} }
   if (id === '../lib/audit') return { audit: async (...args) => { audits.push(args) } }
+  if (id === '../lib/transferOperation') return loadModule('lib/transferOperation.ts', dep => {
+    if (dep === './db') return {getDb:dbCompat}
+    if (dep === './permissions') return {getActionTier:user=>user?.tier || 'none'}
+    if (dep === './actorSnapshot') return {actorSnapshot:user=>user?.name || null}
+    if (dep === './productBatches') return {readFifoLotAvailability:async()=>[],allocateAcrossLots:(_lots,quantity)=>({takes:[],uncovered:quantity})}
+    if (dep === './canonicalBranchIdentity') return identity
+    if (dep === './transferOperationReceipt') return transferReceipts
+    if (dep === './cache') return {bumpVersion:async()=>{}}
+    if (dep === '../durable-objects/broadcastHub') return {broadcast:async()=>{}}
+    throw new Error('unexpected transfer dependency '+dep)
+  })
   if (id === '../lib/transferOperationReceipt') return transferReceipts
   if (id === '../lib/telegram') return { formatTransferTelegramLines: noop, sendTelegramEvent: async () => {} }
   if (id === '../lib/conflictControl') return {
@@ -147,48 +158,8 @@ app.onError(() => new Response(JSON.stringify({ error: 'Internal error' }), {
 
 function reset() {
   sqlite = new Database(':memory:')
+  for (const file of fs.readdirSync(path.join(__dirname,'../migrations')).filter(file => file.endsWith('.sql')).sort()) sqlite.exec(fs.readFileSync(path.join(__dirname,'../migrations',file),'utf8'))
   sqlite.exec(`
-    CREATE TABLE branches (
-      id INTEGER PRIMARY KEY, name TEXT NOT NULL, location TEXT, phone TEXT,
-      manager TEXT, notes TEXT, is_default INTEGER NOT NULL DEFAULT 0,
-      is_active INTEGER NOT NULL DEFAULT 1, updated_at TEXT
-    );
-    CREATE TABLE sales (branch_id INTEGER, branch_name TEXT, updated_at TEXT);
-    CREATE TABLE inventory_movements (
-      id INTEGER PRIMARY KEY, product_id INTEGER, product_name TEXT,
-      branch_id INTEGER, branch_name TEXT, movement_type TEXT, quantity REAL,
-      reason TEXT, user_id INTEGER, user_name TEXT, created_at TEXT, batch_id INTEGER
-    );
-    CREATE TABLE returns (branch_id INTEGER, branch_name TEXT);
-    CREATE TABLE stock_row_moves (branch_id INTEGER, branch_name TEXT);
-    CREATE TABLE pending_actions (id INTEGER PRIMARY KEY, status TEXT);
-    CREATE TABLE products (
-      id INTEGER PRIMARY KEY, name TEXT NOT NULL, barcode TEXT,
-      cost_price_usd REAL, cost_price_khr REAL,
-      purchase_price_usd REAL, purchase_price_khr REAL,
-      selling_price_usd REAL, selling_price_khr REAL,
-      stock_quantity REAL NOT NULL DEFAULT 0, updated_at TEXT
-    );
-    CREATE TABLE branch_stock (
-      id INTEGER PRIMARY KEY, product_id INTEGER NOT NULL, branch_id INTEGER NOT NULL,
-      quantity REAL NOT NULL DEFAULT 0, UNIQUE(product_id, branch_id)
-    );
-    CREATE TABLE stock_transfers (
-      id INTEGER PRIMARY KEY, product_id INTEGER, product_name TEXT,
-      from_branch_id INTEGER, to_branch_id INTEGER, quantity REAL, notes TEXT,
-      user_id INTEGER, user_name TEXT, created_at TEXT, client_request_id TEXT
-    );
-    CREATE TABLE transfer_operation_receipts (
-      id INTEGER PRIMARY KEY, actor_id INTEGER NOT NULL, request_id TEXT NOT NULL,
-      request_digest TEXT NOT NULL, request_json TEXT NOT NULL, response_json TEXT,
-      status TEXT NOT NULL DEFAULT 'committed', created_at TEXT, updated_at TEXT,
-      UNIQUE(actor_id, request_id)
-    );
-    CREATE TABLE audit_logs (
-      id INTEGER PRIMARY KEY, user_id INTEGER, user_name TEXT, action TEXT,
-      entity TEXT, entity_id TEXT, details TEXT, table_name TEXT, record_id TEXT,
-      new_value TEXT
-    );
     INSERT INTO branches(id,name,location,is_default,is_active,updated_at) VALUES
       (1,'Shop','shop old',1,1,'2026-09-08 00:00:00'),
       (2,'Warehouse','warehouse old',0,1,'2026-09-08 00:00:00');

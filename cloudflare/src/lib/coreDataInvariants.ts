@@ -391,6 +391,8 @@ export function ensureCoreDataInvariantsOnce(env: Env): Promise<CoreDataInvarian
 // by it. Confirmed with an in-memory D1-equivalent test seeded with a
 // non-default org/branch/admin before wiping these tables too.
 export const FACTORY_RESET_TABLES = [
+  'transfer_operation_members',
+  'transfer_operation_receipts',
   // Immutable Sales Records must be cleared before their sales/receipt
   // parents, under the atomic reset guard in routes/system.ts.
   'sale_record_events',
@@ -505,6 +507,8 @@ export const FACTORY_RESET_TABLES = [
 // collected (image paths) or cleared before 'products' itself, since this
 // D1 schema has no FK/cascade to do it automatically.
 export const PRODUCTS_RESET_TABLES = [
+  'transfer_operation_members',
+  'transfer_operation_receipts',
   // Global reviewed-action receipts bind immutable product identities and
   // graph snapshots, so products reset clears them child-first as well.
   'product_conflict_action_group_members',

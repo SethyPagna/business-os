@@ -5,7 +5,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 const ts = require('typescript')
 const Database = require('better-sqlite3')
-let sqlite, beforeBatch = null, waits = []
+let sqlite, beforeBatch = null, waits = [], mergeTarget = null, failStatement = null
 let user = { id: 7, name: 'Operator', permissions: JSON.stringify({ branches: true, inventory: true }) }
 const modules = new Map()
 function wrapDb() {
@@ -16,11 +16,14 @@ function wrapDb() {
     },
     async batch(statements) {
       if (beforeBatch) { const mutate = beforeBatch; beforeBatch = null; mutate() }
-      return sqlite.transaction(() => statements.map(({ sql, params }) => sqlite.prepare(sql).run(params || {})))()
+      return sqlite.transaction(() => statements.map(({ sql, params }) => {
+        if (failStatement && sql.includes(failStatement)) throw new Error('injected statement failure')
+        return sqlite.prepare(sql).run(params || {})
+      }))()
     },
   }
 }
-const realLibraries = new Set(['db', 'sqlBinding', 'batchCode', 'productBatches', 'branchRoles', 'branchRoleGuards', 'canonicalBranchIdentity', 'transferOperationReceipt', 'permissions', 'actorSnapshot'])
+const realLibraries = new Set(['db', 'sqlBinding', 'batchCode', 'productBatches', 'branchRoles', 'branchRoleGuards', 'canonicalBranchIdentity', 'transferOperationReceipt', 'transferOperation', 'permissions', 'actorSnapshot', 'undoAppliers'])
 function load(relative) {
   if (modules.has(relative)) return modules.get(relative)
   const module = { exports: {} }
@@ -31,10 +34,16 @@ function load(relative) {
   new Function('exports', 'require', 'module', code)(module.exports, (id) => {
     if (id === 'hono') return require('hono')
     const name = id.split('/').at(-1)
-    if (name === 'db' && relative.startsWith('routes/')) return { ...load('lib/db.ts'), getDb: wrapDb }
+    if (name === 'db') return { ...load('lib/db.ts'), getDb: wrapDb }
     if (name === 'auth') return { requireAuth: async (c, next) => { c.set('user', user); return next() } }
     if (realLibraries.has(name)) return load(`lib/${name}.ts`)
-    if (name === 'productIdentity') return { findIdentityMatch: async () => null, findIdentityMatches: async () => new Map() }
+    if (name === 'productIdentity') return { findIdentityMatch: async () => mergeTarget, findIdentityMatches: async () => new Map() }
+    if (name === 'saleBulkUpdate') return { SALE_BULK_UPDATE_KINDS: new Set(['sale.fields.bulk']), BULK_UPDATE_KIND: 'sale.fields.bulk', BULK_CUSTOMER_UPDATE_KIND: 'sale.customer.bulk', MULTI_CUSTOMER_UPDATE_KIND: 'sale.customer.v2.bulk', SINGLE_CUSTOMER_UPDATE_KIND: 'sale.customer.single' }
+    if (name === 'saleBulkStatus') return { BULK_STATUS_KIND: 'sale.status.bulk' }
+    if (name === 'returnBulkAction') return { RETURN_BULK_ACTION_KIND: 'return.fields.bulk' }
+    if (name === 'stockSession') return { STOCK_SESSION_KIND: 'stock.session' }
+    if (name === 'saleSettlementAction') return { SALE_SETTLEMENT_ACTION_KIND: 'sale.settlement' }
+    if (name === 'productDelete') return { PRODUCT_REMOVE_ACTION_KIND: 'product.remove' }
     if (name === 'broadcastHub') return { broadcast: async () => {} }
     if (name === 'cache') return { bumpVersion: async () => {} }
     if (name === 'telegram') return { formatTransferTelegramLines: () => [], sendTelegramEvent: async () => {} }
@@ -49,29 +58,20 @@ for (const app of Object.values(apps)) app.onError((error, c) => c.json({ error:
 
 function fresh(count = 3, from = 1) {
   sqlite = new Database(':memory:')
-  sqlite.exec(`
-    CREATE TABLE branches(id INTEGER PRIMARY KEY,name TEXT NOT NULL,is_active INTEGER DEFAULT 1);
-    CREATE TABLE products(id INTEGER PRIMARY KEY,name TEXT,barcode TEXT,cost_price_usd REAL,cost_price_khr REAL,purchase_price_usd REAL,purchase_price_khr REAL,selling_price_usd REAL,selling_price_khr REAL,stock_quantity REAL,updated_at TEXT);
-    CREATE TABLE branch_stock(product_id INTEGER,branch_id INTEGER,quantity REAL CHECK(quantity>=0),UNIQUE(product_id,branch_id));
-    CREATE TABLE product_batches(id INTEGER PRIMARY KEY,variant_product_id INTEGER,lot_code TEXT,received_at TEXT,expiry_date TEXT,batch_number INTEGER,is_active INTEGER DEFAULT 1,notes TEXT);
-    CREATE TABLE branch_batch_stock(batch_id INTEGER,branch_id INTEGER,quantity REAL CHECK(quantity>=0),updated_at TEXT,UNIQUE(batch_id,branch_id));
-    CREATE TABLE transfer_operation_receipts(id INTEGER PRIMARY KEY,actor_id INTEGER,request_id TEXT,request_digest TEXT,request_json TEXT,response_json TEXT,status TEXT,created_at TEXT,updated_at TEXT,UNIQUE(actor_id,request_id));
-    CREATE TABLE audit_logs(id INTEGER PRIMARY KEY,user_id INTEGER,user_name TEXT,action TEXT,entity TEXT,entity_id TEXT,details TEXT,table_name TEXT,record_id TEXT,new_value TEXT);
-    CREATE TABLE stock_transfers(id INTEGER PRIMARY KEY,product_id INTEGER,product_name TEXT,from_branch_id INTEGER,to_branch_id INTEGER,quantity REAL,notes TEXT,user_id INTEGER,user_name TEXT,created_at TEXT,client_request_id TEXT);
-    CREATE TABLE inventory_movements(id INTEGER PRIMARY KEY,product_id INTEGER,product_name TEXT,branch_id INTEGER,branch_name TEXT,movement_type TEXT,quantity REAL,reason TEXT,user_id INTEGER,user_name TEXT,created_at TEXT,batch_id INTEGER);
-    INSERT INTO branches VALUES(1,'Shop',1),(2,'Warehouse',1),(3,'Other',1);
-  `)
+  const migrations = fs.readdirSync(path.join(__dirname, '../migrations')).filter(file => file.endsWith('.sql')).sort()
+  for (const file of migrations) sqlite.exec(fs.readFileSync(path.join(__dirname, '../migrations', file), 'utf8'))
+  sqlite.exec("INSERT INTO branches(id,name,is_active) VALUES(1,'Shop',1),(2,'Warehouse',1),(3,'Other',1)")
   for (let id = 1; id <= count; id++) {
     sqlite.prepare('INSERT INTO products(id,name,stock_quantity) VALUES(?,?,10)').run(id, `Product ${id}`)
-    sqlite.prepare('INSERT INTO branch_stock VALUES(?,?,10)').run(id, from)
-    sqlite.prepare("INSERT INTO product_batches(id,variant_product_id,lot_code,received_at) VALUES(?,?,?,'2026-09-01')").run(id, id, `lot-${id}`)
+    sqlite.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,10)').run(id, from)
+    sqlite.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at) VALUES(?,?,?,?,'2026-09-01')").run(id, id, `lot-${id}`, `lot-${id}`)
     sqlite.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,?,10)').run(id, from)
   }
-  beforeBatch = null; waits = []
+  beforeBatch = null; waits = []; mergeTarget = null; failStatement = null
   user = { id: 7, name: 'Operator', permissions: JSON.stringify({ branches: true, inventory: true }) }
 }
-async function request(app, route, body) {
-  const response = await apps[app].request(route, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, {}, {
+async function request(app, route, body, method = 'POST') {
+  const response = await apps[app].request(route, { method, headers: { 'Content-Type': 'application/json' }, body: method === 'GET' ? undefined : JSON.stringify(body) }, {}, {
     waitUntil: (promise) => { waits.push(Promise.resolve(promise)) }, passThroughOnException: () => {},
   })
   await Promise.all(waits.splice(0))
@@ -166,4 +166,11 @@ async function main() {
   })
   console.log(`${checks} transfer operation route scenarios passed`)
 }
-main().catch((error) => { console.error(error); process.exitCode = 1 })
+module.exports = { fresh, request, intent, counts, load, wrapDb, apps,
+  getDb: () => sqlite,
+  setUser: value => { user = value },
+  setMerge: value => { mergeTarget = value },
+  failAt: value => { failStatement = value },
+  beforeBatch: value => { beforeBatch = value },
+}
+if (require.main === module) main().catch((error) => { console.error(error); process.exitCode = 1 })

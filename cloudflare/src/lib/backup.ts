@@ -184,6 +184,8 @@ export const BACKUP_TABLES = [
   'import_stock_action_guards',
   'google_drive_sync_entries',
   'action_history',
+  'transfer_operation_receipts',
+  'transfer_operation_members',
   'undo_snapshots',
   // A global conflict review owns its groups and independent-removal
   // receipts. Keep these after every referenced product/history/snapshot
@@ -1107,6 +1109,7 @@ export const SALE_REPLAY_RESTORE_BUNDLE = [
   'product_conflict_merge_runs', 'product_conflict_merge_run_cases',
   'sale_record_events',
   'stock_session_revisions', 'stock_session_operations', 'stock_session_members',
+  'transfer_operation_receipts', 'transfer_operation_members', 'stock_transfers',
 ] as const
 
 function restoreSafeSectionTables(tables: readonly string[]): Set<string> {

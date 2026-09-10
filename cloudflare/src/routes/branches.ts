@@ -38,6 +38,7 @@ import { TRANSFER_DIRECTION_ERROR, transferDirectionError } from '../lib/branchR
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/productSearchQuery'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
+import { planTransferOperation } from '../lib/transferOperation'
 import { transferStockGuardStatement, transferLotGuardStatement, findTransferReceipt, normalizeTransferRequestId, transferIntentAuditStatement, transferReceiptResponse, transferReceiptStatement, transferRequestDigest } from '../lib/transferOperationReceipt'
 
 async function sha256Hex(input: string): Promise<string> {
@@ -447,117 +448,15 @@ app.post('/transfer', async (c) => {
   const mergedNote = mergeTarget ? `Added to existing product "${destProductName}" (#${destProductId}) at ${toBranch?.name || 'destination'}` : null
   const combinedNote = [reason, mergedNote].filter(Boolean).join(' -- ') || null
 
-  // Same batch when the destination product wasn't redirected (the lot
-  // itself hasn't changed, only which branch's branch_batch_stock has the
-  // quantity); resolved/cloned into an equivalent batch on destProductId
-  // when it was.
-  const destBatchId = sourceBatch
-    ? (mergeTarget ? await resolveDestinationBatch(db, sourceBatch, destProductId, {
-        writeGuard: canonicalTransferAuthorityGuardStatement(fromBranchId, toBranchId),
-      }) : sourceBatch.id)
-    : null
-
+  const destBatchId = sourceBatch && !mergeTarget ? sourceBatch.id : null
   const responsePayload = mergeTarget
     ? { success: true, mergedIntoProductId: destProductId, mergedIntoProductName: destProductName, destBatchId, replayed: false }
     : { success: true, destBatchId, replayed: false }
-  const statements: Array<{ sql: string; params?: Record<string, unknown> }> = [
-    // Authoritative branch identity is the first statement in the atomic
-    // batch, before the receipt/audit and stock effects it protects.
-    canonicalTransferAuthorityGuardStatement(fromBranchId, toBranchId),
-    transferReceiptStatement({ actorId: user.id, requestId: clientRequestId!, digest: requestDigest, requestJson, responseJson: JSON.stringify(responsePayload) }),
-    transferIntentAuditStatement({ actorId: user.id, actorName: actorSnapshot(user), requestId: clientRequestId!, requestJson, digest: requestDigest, bulk: false }),
-    transferStockGuardStatement(productId, fromBranchId, quantity),
-    { sql: 'UPDATE branch_stock SET quantity = quantity - @quantity WHERE product_id = @productId AND branch_id = @branchId', params: { quantity, productId, branchId: fromBranchId } },
-    {
-      sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@productId, @branchId, @quantity)
-            ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = quantity + excluded.quantity`,
-      params: { productId: destProductId, branchId: toBranchId, quantity },
-    },
-    {
-      sql: `INSERT INTO stock_transfers (product_id, product_name, from_branch_id, to_branch_id, quantity, notes, user_id, user_name, created_at, client_request_id)
-            VALUES (@productId, @productName, @fromBranchId, @toBranchId, @quantity, @note, @userId, @userName, CURRENT_TIMESTAMP, @clientRequestId)`,
-      params: { productId, productName: product.name, fromBranchId, toBranchId, quantity, note: combinedNote, userId: user?.id ?? null, userName: actorSnapshot(user), clientRequestId },
-    },
-    {
-      // 0084: a lot-scoped transfer stamps its lot on both legs (out = the
-      // source lot, in = the same/cloned destination lot); an aggregate
-      // transfer touched no specific lot and stays NULL.
-      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
-            VALUES (@productId, @productName, @branchId, @branchName, 'transfer_out', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
-      params: { productId, productName: product.name, branchId: fromBranchId, branchName: fromBranch?.name || null, quantity, reason, userId: user?.id ?? null, userName: actorSnapshot(user), batchId: sourceBatch?.id ?? null },
-    },
-    {
-      // Recorded against destProductId -- this is a real per-product stock
-      // audit trail (used to reconcile that product's own stock_quantity),
-      // so it has to reflect whichever row's branch_stock actually gained
-      // the quantity, not necessarily the row the operator picked.
-      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
-            VALUES (@productId, @productName, @branchId, @branchName, 'transfer_in', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
-      params: { productId: destProductId, productName: destProductName, branchId: toBranchId, branchName: toBranch?.name || null, quantity, reason, userId: user?.id ?? null, userName: actorSnapshot(user), batchId: destBatchId },
-    },
-  ]
-  // Track A/C audit (part 53) found this was missing: when the transfer
-  // crosses a merge (destProductId !== productId), branch_stock's total for
-  // *productId* actually decreases and *destProductId*'s actually increases
-  // -- unlike a same-product branch-to-branch move, which is zero-sum for
-  // the product's own total and needs no update here. Every other writer of
-  // branch_stock (products.ts, returns.ts, inventory.ts, stock-integrity/
-  // repair) recomputes/adjusts products.stock_quantity in the same batch;
-  // this route never did for the merge case, so a merged transfer left both
-  // products' denormalized stock_quantity stale -- wrong on the low-stock
-  // notification (notifications.ts reads stock_quantity directly), the
-  // Dashboard/Inventory stat tiles (getFamilyStockStats' global qtyExpr is
-  // also `p.stock_quantity`), and POS's stock badge, until someone happened
-  // to run the unrelated stock-integrity/repair tool.
-  if (mergeTarget) {
-    statements.push(
-      { sql: 'UPDATE products SET stock_quantity = MAX(0, COALESCE(stock_quantity, 0) - @quantity), updated_at = CURRENT_TIMESTAMP WHERE id = @productId', params: { quantity, productId } },
-      { sql: 'UPDATE products SET stock_quantity = COALESCE(stock_quantity, 0) + @quantity, updated_at = CURRENT_TIMESTAMP WHERE id = @destProductId', params: { quantity, destProductId } },
-    )
-  }
-  if (sourceBatch && destBatchId != null) {
-    statements.push(
-      transferLotGuardStatement(productId, sourceBatch.id, fromBranchId, quantity),
-      decrementBatchStockStrictStatement(sourceBatch.id, fromBranchId, quantity),
-      incrementBatchStockStatement(destBatchId, toBranchId, quantity),
-    )
-  } else if (!sourceBatch) {
-    // C1 fix: no lot was picked (the multi-select flow never picks one, and
-    // any caller that omits batchId lands here). Moving only branch_stock
-    // above would strand every source lot in place and give the destination
-    // no branch_batch_stock rows -- the per-lot ledger drifts from the branch
-    // total and the moved units lose their lot identity. Auto-allocate the
-    // quantity across the source branch's active lots FIFO -- the SAME policy
-    // inventory.ts POST /transfer uses for an unpicked line -- and move each
-    // take's branch_batch_stock alongside, materializing the matching lot at
-    // the destination (its own lot when same-product, the resolved/cloned lot
-    // when the transfer merges into an identity match). Any `uncovered`
-    // remainder is legacy stock the lot ledger never tracked; it moves on
-    // branch_stock alone, exactly as before. Strict (unclamped) source
-    // decrements, matching inventory.ts /transfer's FIFO leg: readFifoLot-
-    // Availability runs OUTSIDE the db.batch() below, so a concurrent sale
-    // that drains a lot between the read and the write would let a clamped
-    // decrement floor the source at 0 while the destination still gained the
-    // full take -- minting the exact per-lot drift this fix exists to prevent.
-    // Strict instead violates branch_batch_stock's CHECK(quantity >= 0) and
-    // aborts the whole atomic batch, so the transfer cleanly fails and retries
-    // on fresh availability. The explicit-batch leg above is strict for the
-    // same reason: its availability check also precedes this atomic batch.
-    const sourceLots = await readFifoLotAvailability(db, productId, fromBranchId)
-    const { takes } = allocateAcrossLots(sourceLots, quantity)
-    for (const take of takes) {
-      const destLotId = mergeTarget
-        ? await resolveDestinationBatch(db, { lot_code: take.lotCode, expiry_date: take.expiryDate, received_at: take.receivedAt, notes: null }, destProductId, {
-            writeGuard: canonicalTransferAuthorityGuardStatement(fromBranchId, toBranchId),
-          })
-        : take.batchId
-      statements.push(
-        transferLotGuardStatement(productId, take.batchId, fromBranchId, take.quantity),
-        decrementBatchStockStrictStatement(take.batchId, fromBranchId, take.quantity),
-        incrementBatchStockStatement(destLotId, toBranchId, take.quantity),
-      )
-    }
-  }
+  const { statements } = await planTransferOperation(db, {
+    user, requestId: clientRequestId, requestJson, digest: requestDigest, scope: 'branches',
+    fromBranchId, toBranchId, reason,
+    lines: [{ productId, destProductId, quantity, batchId }], response: responsePayload,
+  })
 
   try {
     await db.batch(statements)
@@ -596,7 +495,7 @@ app.post('/transfer', async (c) => {
       }),
     })
   })().catch((error) => console.error('[telegram] transfer notification failed', error)))
-  return c.json(responsePayload)
+  return c.json(transferReceiptResponse((await findTransferReceipt(db, user.id, clientRequestId))!))
 })
 
 // POST /api/branches/transfer-bulk -- same product-quantity move as
@@ -806,128 +705,23 @@ app.post('/transfer-bulk', async (c) => {
     }
   }
 
-  const merges: Array<{ productId: number; productName: string | null; mergedIntoProductId: number; mergedIntoProductName: string | null }> = []
+  const merges = items.flatMap(item => {
+    const target = mergeTargets.get(item.productId)
+    return target ? [{ productId: item.productId, productName: productById.get(item.productId)?.name || null, mergedIntoProductId: target.id, mergedIntoProductName: target.name }] : []
+  })
   const responsePayload = { success: true, transferredCount: items.length, merges, replayed: false }
-  const statements: Array<{ sql: string; params?: Record<string, unknown> }> = [
-    // The shared identity guard must run before the bulk receipt/audit and
-    // every per-item stock write in this transaction.
-    canonicalTransferAuthorityGuardStatement(fromBranchId, toBranchId),
-    transferReceiptStatement({ actorId: user.id, requestId: clientRequestId!, digest: requestDigest, requestJson, responseJson: JSON.stringify(responsePayload) }),
-    transferIntentAuditStatement({ actorId: user.id, actorName: actorSnapshot(user), requestId: clientRequestId!, requestJson, digest: requestDigest, bulk: true }),
-  ]
   const receivedDateByItemIndex = new Map<number, string | null>()
   const lotCodeByItemIndex = new Map<number, string | null>()
-  for (const [itemIndex, item] of items.entries()) {
-    const product = productById.get(item.productId)!
-    const mergeTarget = mergeTargets.get(item.productId)
-    const destProductId = mergeTarget?.id ?? item.productId
-    const destProductName = mergeTarget?.name ?? product.name
-    const mergedNote = mergeTarget ? `Added to existing product "${destProductName}" (#${destProductId}) at ${toBranch?.name || 'destination'}` : null
-    const combinedNote = [reason, mergedNote].filter(Boolean).join(' -- ') || null
-    if (mergeTarget) merges.push({ productId: item.productId, productName: product.name, mergedIntoProductId: destProductId, mergedIntoProductName: destProductName })
-
-    // Resolved BEFORE the movement inserts so both legs can stamp their
-    // lot (0084) -- same values the branch_batch_stock statements below use.
-    const sourceBatchForItem = item.batchId != null ? batchById.get(item.batchId)! : null
-    if (sourceBatchForItem?.received_at) receivedDateByItemIndex.set(itemIndex, sourceBatchForItem.received_at)
-    if (sourceBatchForItem?.lot_code) lotCodeByItemIndex.set(itemIndex, sourceBatchForItem.lot_code)
-    const destBatchIdForItem = sourceBatchForItem
-      ? (mergeTarget ? await resolveDestinationBatch(db, sourceBatchForItem, destProductId, {
-          writeGuard: canonicalTransferAuthorityGuardStatement(fromBranchId, toBranchId),
-        }) : sourceBatchForItem.id)
-      : null
-
-    statements.push(
-      transferStockGuardStatement(item.productId, fromBranchId, item.quantity),
-      { sql: 'UPDATE branch_stock SET quantity = quantity - @quantity WHERE product_id = @productId AND branch_id = @branchId', params: { quantity: item.quantity, productId: item.productId, branchId: fromBranchId } },
-      {
-        sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@productId, @branchId, @quantity)
-              ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = quantity + excluded.quantity`,
-        params: { productId: destProductId, branchId: toBranchId, quantity: item.quantity },
-      },
-      {
-        sql: `INSERT INTO stock_transfers (product_id, product_name, from_branch_id, to_branch_id, quantity, notes, user_id, user_name, created_at, client_request_id)
-              VALUES (@productId, @productName, @fromBranchId, @toBranchId, @quantity, @note, @userId, @userName, CURRENT_TIMESTAMP, @clientRequestId)`,
-        params: { productId: item.productId, productName: product.name, fromBranchId, toBranchId, quantity: item.quantity, note: combinedNote, userId: user?.id ?? null, userName: actorSnapshot(user), clientRequestId: `${clientRequestId.slice(0, 100)}:${item.productId}` },
-      },
-      {
-        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
-              VALUES (@productId, @productName, @branchId, @branchName, 'transfer_out', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
-        params: { productId: item.productId, productName: product.name, branchId: fromBranchId, branchName: fromBranch?.name || null, quantity: item.quantity, reason, userId: user?.id ?? null, userName: actorSnapshot(user), batchId: sourceBatchForItem?.id ?? null },
-      },
-      {
-        // Recorded against destProductId, same as the single-item route --
-        // this is a real per-product stock audit trail, so it has to
-        // reflect whichever row's branch_stock actually gained the
-        // quantity, not necessarily the row the operator selected.
-        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
-              VALUES (@productId, @productName, @branchId, @branchName, 'transfer_in', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
-        params: { productId: destProductId, productName: destProductName, branchId: toBranchId, branchName: toBranch?.name || null, quantity: item.quantity, reason, userId: user?.id ?? null, userName: actorSnapshot(user), batchId: destBatchIdForItem },
-      },
-    )
-
-    // Same fix as the single-item /transfer route above, applied per item:
-    // a merge crossing item.productId -> destProductId is not zero-sum for
-    // either product's own stock_quantity, so it needs its own explicit
-    // update. This bulk route's per-item loop never had this -- found while
-    // auditing this route against /transfer's contract/behavior for the
-    // frontend<->backend payload-shape diff (progress.md), not from a
-    // separate report, since the bug is identical and was easy to miss
-    // here: unlike /transfer's single pair of statements, this loop pushes
-    // per-item statements into one shared array across every item in the
-    // request, so a merge-case fix has to be scoped to the right item
-    // instead of just appended once at the end.
-    if (mergeTarget) {
-      statements.push(
-        { sql: 'UPDATE products SET stock_quantity = MAX(0, COALESCE(stock_quantity, 0) - @quantity), updated_at = CURRENT_TIMESTAMP WHERE id = @productId', params: { quantity: item.quantity, productId: item.productId } },
-        { sql: 'UPDATE products SET stock_quantity = COALESCE(stock_quantity, 0) + @quantity, updated_at = CURRENT_TIMESTAMP WHERE id = @destProductId', params: { quantity: item.quantity, destProductId } },
-      )
-    }
-
-    if (sourceBatchForItem && destBatchIdForItem != null) {
-      statements.push(
-        transferLotGuardStatement(item.productId, sourceBatchForItem.id, fromBranchId, item.quantity),
-        decrementBatchStockStrictStatement(sourceBatchForItem.id, fromBranchId, item.quantity),
-        incrementBatchStockStatement(destBatchIdForItem, toBranchId, item.quantity),
-      )
-    } else if (item.batchId == null) {
-      // C1 fix (mirrors the single /transfer route above): an item with no
-      // picked lot -- every item in the multi-select flow -- must still move
-      // its branch_batch_stock, or a batch-tracked product's per-lot ledger
-      // drifts from the branch total and the destination loses lot identity.
-      // Auto-allocate FIFO across the source branch's active lots and move each
-      // take, materializing the matching destination lot (its own lot when
-      // same-product, the resolved/cloned lot on an identity-match merge). Any
-      // uncovered legacy stock moves on branch_stock alone. Strict (unclamped)
-      // source decrement, same rationale as the single /transfer route above:
-      // the FIFO read is outside this batch, so strict makes a concurrent
-      // drain abort-and-retry rather than mint per-lot drift.
-      const sourceLots = await readFifoLotAvailability(db, item.productId, fromBranchId)
-      const { takes } = allocateAcrossLots(sourceLots, item.quantity)
-      const receivedDates = new Set(takes.map((take) => String(take.receivedAt || '').trim()).filter(Boolean))
-      if (receivedDates.size === 1) receivedDateByItemIndex.set(itemIndex, [...receivedDates][0])
-      const lotCodes = new Set(takes.map((take) => String(take.lotCode || '').trim()).filter(Boolean))
-      if (lotCodes.size === 1) lotCodeByItemIndex.set(itemIndex, [...lotCodes][0])
-      for (const take of takes) {
-        const destLotId = mergeTarget
-          ? await resolveDestinationBatch(db, { lot_code: take.lotCode, expiry_date: take.expiryDate, received_at: take.receivedAt, notes: null }, destProductId, {
-              writeGuard: canonicalTransferAuthorityGuardStatement(fromBranchId, toBranchId),
-            })
-          : take.batchId
-        statements.push(
-          transferLotGuardStatement(item.productId, take.batchId, fromBranchId, take.quantity),
-          decrementBatchStockStrictStatement(take.batchId, fromBranchId, take.quantity),
-          incrementBatchStockStatement(destLotId, toBranchId, take.quantity),
-        )
-      }
-    }
+  for (const [index, item] of items.entries()) {
+    const lot = item.batchId == null ? null : batchById.get(item.batchId)
+    if (lot) { receivedDateByItemIndex.set(index, lot.received_at); lotCodeByItemIndex.set(index, lot.lot_code) }
   }
-
-  responsePayload.merges = merges
-  // Keep the canonical identity guard first. The receipt is the second
-  // statement; replacing index 0 would silently remove the guard from bulk
-  // transfers and allow a duplicate receipt failure to surface as a 500.
-  statements[1] = transferReceiptStatement({ actorId: user.id, requestId: clientRequestId!, digest: requestDigest, requestJson, responseJson: JSON.stringify(responsePayload) })
+  const { statements } = await planTransferOperation(db, {
+    user, requestId: clientRequestId, requestJson, digest: requestDigest, scope: 'branches',
+    fromBranchId, toBranchId, reason,
+    lines: items.map(item => ({ ...item, destProductId: mergeTargets.get(item.productId)?.id ?? item.productId })),
+    response: responsePayload,
+  })
   try {
     await db.batch(statements)
   } catch (error) {
@@ -970,7 +764,7 @@ app.post('/transfer-bulk', async (c) => {
       lines: formatTransferTelegramLines({ fromBranch: fromBranch?.name || null, toBranch: toBranch?.name || null, note: reason, by: actorSnapshot(user), items: lines }),
     })
   })().catch((error) => console.error('[telegram] bulk transfer notification failed', error)))
-  return c.json(responsePayload)
+  return c.json(transferReceiptResponse((await findTransferReceipt(db, user.id, clientRequestId))!))
 })
 
 
