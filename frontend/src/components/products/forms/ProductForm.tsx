@@ -38,8 +38,7 @@ import {
   withLoaderTimeout,
 } from '../../../utils/loaders.ts'
 import { ADMIN_MAX_PRODUCT_GALLERY_IMAGES, MAX_PRODUCT_GALLERY_IMAGES } from '../helpers/productGalleryHelpers.ts'
-import { getPermissionTierFromMap, parsePermissionMap } from '../../../utils/permissions.ts'
-import { actionAllowed, isActionOverriddenOff } from '../../../utils/permissionActions.ts'
+import { effectivePermissions, isAdminControlUser } from '../../../utils/permissions.ts'
 
 // The server's "same name + same barcode (leading zeros folded) is the same
 // product -- merge into it instead of creating a twin" 409, unpacked into the
@@ -292,39 +291,8 @@ function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback
 }
 
-function hasAllPermission(value: unknown): boolean {
-  if (value && typeof value === 'object') return (value as { all?: unknown }).all === true
-  if (typeof value !== 'string' || !value.trim()) return false
-  try {
-    const parsed = JSON.parse(value) as { all?: unknown }
-    return parsed?.all === true
-  } catch {
-    return false
-  }
-}
-
-function isAdminProductUser(user?: ProductUser | null): boolean {
-  return String(user?.username || '').trim().toLowerCase() === 'admin'
-    || String(user?.role_code || '').trim().toLowerCase() === 'admin'
-    || hasAllPermission(user?.permissions)
-    || hasAllPermission(user?.role_permissions)
-}
-
 function canManageProductImages(user?: ProductUser | null): boolean {
-  if (!user) return false
-  const merged = {
-    ...parsePermissionMap(user.role_permissions),
-    ...parsePermissionMap(user.permissions),
-  }
-  const admin = isAdminProductUser(user)
-  const hasKey = (key: string): boolean => getPermissionTierFromMap(merged, key, admin) === 'full'
-  return actionAllowed(
-    'products',
-    'image',
-    getPermissionTierFromMap(merged, 'products', admin),
-    hasKey,
-    (section, action) => isActionOverriddenOff(merged, section, action),
-  )
+  return effectivePermissions(user).can('products', 'image')
 }
 
 function normalizeGallery(product?: ProductFormState | null, limit = MAX_PRODUCT_GALLERY_IMAGES): string[] {
@@ -533,7 +501,7 @@ export default function ProductForm({
   const currentProductId = Number(product?.id || 0)
   const isCreateMode = !product?.id
   const isEditMode = !isCreateMode
-  const imageLimit = isAdminProductUser(user) ? ADMIN_MAX_PRODUCT_GALLERY_IMAGES : MAX_PRODUCT_GALLERY_IMAGES
+  const imageLimit = isAdminControlUser(user) ? ADMIN_MAX_PRODUCT_GALLERY_IMAGES : MAX_PRODUCT_GALLERY_IMAGES
   const draftKey = scopedWorkDraftKey(productFormDraftBaseKey(product?.id, draftScope))
   const legacyDraftBaseKey = legacyStandaloneProductDraftBaseKey(product?.id, draftScope)
   const legacyDraftKey = legacyDraftBaseKey ? scopedWorkDraftKey(legacyDraftBaseKey) : null

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import ts from 'typescript'
-import { parsePermissionMap, normalizePermissionState, saleAmendmentWindowAllows, getPermissionTierFromMap } from '../src/utils/permissions.ts'
+import { parsePermissionMap, normalizePermissionState, saleAmendmentWindowAllows, effectivePermissions, isAdminControlUser } from '../src/utils/permissions.ts'
 import { actionAllowed, isActionOverriddenOff } from '../src/utils/permissionActions.ts'
 
 assert.deepEqual(parsePermissionMap('{"products":true,"inventory":false}'), {
@@ -52,7 +52,7 @@ const workerAmendments = workerModule('../../cloudflare/src/lib/saleAmendments.t
 ], { RETURN_STATUSES: workerStatus.RETURN_STATUSES })
 const salesSource = readFileSync(new URL('../src/components/sales/Sales.tsx', import.meta.url), 'utf8')
 const adminExpression = salesSource.slice(salesSource.indexOf('const isAdmin = ') + 'const isAdmin = '.length, salesSource.indexOf('  const cleanFallback')).trim()
-const frontendAdmin = new Function('user', 'getPermissionTier', `return (${adminExpression})`)
+const frontendAdmin = new Function('user', 'isAdminControlUser', `return (${adminExpression})`)
 const roles = [
   { role: { all: true }, user: {} },
   { role: { sales: true, 'sales:amend': true }, user: {} },
@@ -62,12 +62,11 @@ const roles = [
 ]
 for (const permissions of roles) {
   const user = { username: 'custom-manager', role_code: 'shop-manager', role_permissions: JSON.stringify(permissions.role), permissions: JSON.stringify(permissions.user) }
-  const merged = { ...parsePermissionMap(user.role_permissions), ...parsePermissionMap(user.permissions) }
-  const tier = (key: string) => getPermissionTierFromMap(merged, key, merged.all === true)
-  const admin = frontendAdmin(user, tier)
+  const authority = effectivePermissions(user)
+  const admin = frontendAdmin(user, isAdminControlUser)
   assert.equal(admin, workerPermissions.isAdminControlUser(user), 'role-only administrator authority matches the Worker')
   for (const minutes of [0, 120]) for (const createdAt of ['2026-09-11 09:59:59', '2026-09-11 10:00:00', 'invalid']) {
-    const frontendAllowed = actionAllowed('sales', 'amend', tier('sales'), () => false, (section, action) => isActionOverriddenOff(merged, section, action))
+    const frontendAllowed = authority.can('sales', 'amend')
       && saleAmendmentWindowAllows(minutes, createdAt, admin, now)
     const workerAllowed = workerPermissions.getActionTier(user, 'sales', 'amend') === 'full'
       && workerAmendments.guardSaleAmendment({ saleStatus: 'completed', hasRecordedReturns: false, saleCreatedAt: createdAt, windowMinutes: workerAmendments.resolveAmendmentWindowMinutes(minutes), isAdmin: workerPermissions.isAdminControlUser(user), nowMs: now }).ok
@@ -75,3 +74,29 @@ for (const permissions of roles) {
   }
 }
 console.log('PASS production Sales administrator expression and Worker amendment gates agree for custom role-only managers, overrides and zero/positive windows')
+
+for (const raw of ['false', 'true', 1, -1, [], {}, 'review', 'view', null]) {
+  const user = { role_permissions: { all: true, products: true }, permissions: { all: raw, products: raw } }
+  const authority = effectivePermissions(user)
+  assert.equal(authority.isAdmin, false, `malformed all ${JSON.stringify(raw)} must revoke a role grant`)
+  assert.equal(authority.getPermissionTier('products'), raw === 'review' ? 'review' : 'none')
+}
+for (const products of [false, 'review', true] as const) for (const blocked of [false, true]) {
+  const user = { role_permissions: { all: true }, permissions: { all: false, products, 'products:add': !blocked } }
+  const authority = effectivePermissions(user)
+  assert.equal(authority.isAdmin, false)
+  assert.equal(authority.can('products', 'add'), products !== false && !blocked)
+  assert.equal(authority.getPermissionTier('products'), products === true ? 'full' : products === 'review' ? 'review' : 'none')
+}
+for (const identity of [{ username: ' ADMIN ' }, { role_code: ' AdMiN ' }, { role_permissions: { all: true } }]) {
+  const actor = { ...identity, permissions: { products: false, 'products:add': false } }
+  assert.equal(effectivePermissions(actor).can('products', 'add'), true, 'administrator bypasses narrowing')
+}
+for (const sales of [false, 'view', true] as const) {
+  const authority = effectivePermissions({ permissions: { sales, 'sales:status': true } })
+  assert.equal(authority.can('sales', 'view'), sales !== false)
+  assert.equal(authority.can('sales', 'status'), sales === true, 'override cannot widen the selected tier')
+}
+assert.equal(effectivePermissions(null).can('products', 'add'), false)
+assert.equal(effectivePermissions({ permissions: { settings: true } }).hasPermission(' BUSINESS_IDENTITY '), true)
+console.log('PASS strict effective-user/admin/action matrix, override precedence and reserved identities')

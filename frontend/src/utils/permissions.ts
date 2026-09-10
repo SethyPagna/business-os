@@ -1,4 +1,44 @@
+import { actionAllowed, isActionOverriddenOff } from './permissionActions.ts'
+
 type PermissionMap = Record<string, unknown>
+
+export type PermissionUser = {
+  username?: unknown
+  role_code?: unknown
+  role_permissions?: unknown
+  permissions?: unknown
+} | null | undefined
+
+export function getEffectivePermissionMap(user: PermissionUser): Record<string, PermissionValue> {
+  return { ...normalizePermissionState(user?.role_permissions), ...normalizePermissionState(user?.permissions) }
+}
+
+/** Reserved identities and the effective all grant match Worker authority. */
+export function isAdminControlUser(user: PermissionUser): boolean {
+  if (!user) return false
+  return String(user.username || '').trim().toLowerCase() === 'admin'
+    || String(user.role_code || '').trim().toLowerCase() === 'admin'
+    || getEffectivePermissionMap(user).all === true
+}
+
+/** Shared runtime authority; user overrides win before administrator detection. */
+export function effectivePermissions(user: PermissionUser) {
+  const merged = getEffectivePermissionMap(user)
+  const isAdmin = isAdminControlUser(user)
+  const getPermissionTier = (key: string): PermissionTier => getPermissionTierFromMap(merged, key, isAdmin)
+  const hasPermission = (key: string): boolean => {
+    if (!user) return false
+    const normalized = String(key || '').trim().toLowerCase()
+    if (!normalized || isAdmin) return true
+    return merged[normalized] === true
+      || (['drive_credentials', 'business_identity', 'sales_policy'].includes(normalized) && merged.settings === true)
+  }
+  const can = (section: string, action: string): boolean => !!user && (isAdmin || actionAllowed(
+    section, action, getPermissionTier(section), hasPermission,
+    (key, operation) => isActionOverriddenOff(merged, key, operation),
+  ))
+  return { merged, isAdmin, getPermissionTier, hasPermission, can }
+}
 
 function isPermissionMap(value: unknown): value is PermissionMap {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)

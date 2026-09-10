@@ -100,8 +100,9 @@ await runTest('destinations retain section permission gates and never expose uns
   assert.deepEqual(ids('settings', { backup: 'view' }, ['all']), ['users', 'backup'])
   assert.deepEqual(ids('review', { audit_log: 'view' }), ['audit'])
   assert.deepEqual(ids('review', { audit_log: 'full' }), ['audit', 'deleted'])
-  assert.deepEqual(ids('contacts', {}), ['customers', 'delivery', 'duplicates'])
-  assert.deepEqual(ids('contacts', {}, ['contacts_suppliers']), ['customers', 'suppliers', 'delivery', 'duplicates'])
+  assert.deepEqual(ids('contacts', {}), [])
+  assert.deepEqual(ids('contacts', { contacts: 'review' }), ['customers', 'delivery', 'duplicates'])
+  assert.deepEqual(ids('contacts', { contacts: 'full' }, ['contacts_suppliers']), ['customers', 'suppliers', 'delivery', 'duplicates'])
   assert.deepEqual(ids('promotions', { customer_portal: 'view' }), ['loyalty'])
   assert.deepEqual(ids('promotions', { products: 'review' }), ['discounts'])
   assert.deepEqual(ids('inventory', { inventory: 'full' }), [])
@@ -114,14 +115,18 @@ await runTest('destinations retain section permission gates and never expose uns
   // tile the page would then refuse to render.
   const withActions = (tiers: Record<string, string>, actions: string[]) => ({
     ...restricted(tiers),
-    can: (permissionKey: string, actionKey: string) => actions.includes(`${permissionKey}:${actionKey}`),
+    can: (permissionKey: string, actionKey: string) => actionKey === 'view'
+      ? !!tiers[permissionKey] && tiers[permissionKey] !== 'none' && !actions.includes(`${permissionKey}:deny_view`)
+      : actions.includes(`${permissionKey}:${actionKey}`),
   })
   const actionIds = (tiers: Record<string, string>, actions: string[]) => getHubDestinations('products', withActions(tiers, actions)).map((item) => item.id)
   assert.deepEqual(ids('products', { products: 'full', inventory: 'full' }), ['products', 'stock_changes'], 'action-gated sections stay hidden from a caller with no per-action grant')
   assert.deepEqual(actionIds({ products: 'full', inventory: 'full' }, ['inventory:adjust', 'products:merge_duplicates']), ['products', 'stock_changes', 'stock_in_sessions', 'duplicates'])
   assert.deepEqual(actionIds({ products: 'full' }, ['products:merge_duplicates']), ['products', 'stock_changes', 'duplicates'])
-  assert.deepEqual(actionIds({ inventory: 'full' }, ['inventory:adjust']), ['products', 'stock_changes', 'stock_in_sessions'])
-  assert.deepEqual(actionIds({}, []), ['products', 'stock_changes'])
+  assert.deepEqual(actionIds({ inventory: 'full' }, ['inventory:adjust']), [])
+  assert.deepEqual(actionIds({}, []), [])
+  assert.deepEqual(actionIds({ products: 'full', inventory: 'full' }, ['products:deny_view', 'inventory:adjust', 'products:merge_duplicates']), [])
+  assert.deepEqual(getHubDestinations('contacts', withActions({ contacts: 'full' }, ['contacts:deny_view'])), [])
   assert.deepEqual(
     getHubDestinations('products', withActions({ products: 'full', inventory: 'full' }, ['inventory:adjust', 'products:merge_duplicates'])).map((item) => item.key),
     ['products', 'stock_change_ledger', 'stock_in_sessions', 'product_duplicates_section'],

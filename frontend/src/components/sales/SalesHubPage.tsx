@@ -27,6 +27,7 @@ type SalesHubAppContext = {
   hasPermission: (key: string) => boolean
   t: (key: string, fallback?: string) => string
   getPermissionTier: (key: string) => string
+  can: (key: string, action: string) => boolean
 }
 const useApp = useAppHook as unknown as () => SalesHubAppContext
 
@@ -51,16 +52,16 @@ function initialSection(canSales: boolean, canReturns: boolean, canFees: boolean
 }
 
 export default function SalesHubPage() {
-  const { t, getPermissionTier, hasPermission, navigateTo } = useApp()
+  const { t, getPermissionTier, hasPermission, can, navigateTo } = useApp()
   // t() returns the KEY on a miss (stale/failed pack) -- guard so chips fall back to readable English, never snake_case keys.
   const trh = (key: string, fallback: string): string => { const v = t(key); return v && v !== key ? v : fallback }
-  const canSales = getPermissionTier('sales') !== 'none'
-  const canReturns = getPermissionTier('returns') !== 'none'
-  const canFees = getPermissionTier('fees') !== 'none'
+  const canSales = can('sales', 'view')
+  const canReturns = can('returns', 'view')
+  const canFees = can('fees', 'view')
   // Reports draws on all three areas, so anyone who can see any one of them
   // gets the tab (the hub then only offers the report types they can view).
   const canReports = canSales || canReturns || canFees
-  const [section, setSection] = useHubSection<SalesHubSection>('sales', () => initialSection(canSales, canReturns, canFees), getHubDestinations('sales', { getPermissionTier, hasPermission }).map((item) => item.id), navigateTo)
+  const [section, setSection] = useHubSection<SalesHubSection>('sales', () => initialSection(canSales, canReturns, canFees), getHubDestinations('sales', { getPermissionTier, hasPermission, can }).map((item) => item.id), navigateTo)
 
   const tabs: HubSectionDef[] = [
     { id: 'sales', label: trh('sales', 'Sales'), icon: BadgeDollarSign, hidden: !canSales, description: trh('hub_desc_sales_sales', 'Ring up and record sales') },
@@ -90,7 +91,7 @@ export default function SalesHubPage() {
             : section === 'reports' && canReports ? <ReportsSection embedded />
             : canSales ? <SalesSection embedded />
             : canReturns ? <ReturnsSection embedded />
-            : <FeesSection embedded />}
+            : canFees ? <FeesSection embedded /> : null}
         </Suspense>
       </div>
       </HubSectionNav>

@@ -659,15 +659,14 @@ function toLightboxState(value: ReturnType<typeof updateProductLightboxIndex>, f
 // shape/state); a completely separate lightweight view can't accidentally
 // break on a field this restricted role never receives.
 export default function Products() {
-  const { hasPermission } = useProductsApp()
+  const { getPermissionTier, can } = useProductsApp()
   // Mirrors AppContext.tsx's canAccessPage()/the backend's isImageOnlyUser()
   // shape: only the user whose ONE route into this page is
   // 'products_image_only' gets the restricted view. Anyone with real
   // `products` access renders the full editor exactly as before, even if
   // 'products_image_only' also happens to be set on their role --
-  // `hasPermission('products')` covers both the 'full' and 'review' tiers
-  // here (the tier value itself only matters once inside the full editor).
-  const isImageOnlyUser = !hasPermission('products') && hasPermission('products_image_only')
+  // Review users keep the full editor with its existing approval workflow.
+  const isImageOnlyUser = getPermissionTier('products') === 'none' && can('products_image_only', 'view')
   if (isImageOnlyUser) {
     return (
       <Suspense fallback={<div className="page-scroll flex flex-1 items-center justify-center p-8 text-gray-400">...</div>}>
@@ -675,7 +674,7 @@ export default function Products() {
       </Suspense>
     )
   }
-  return <ProductsFullEditor />
+  return can('products', 'view') ? <ProductsFullEditor /> : null
 }
 
 function ProductsFullEditor() {

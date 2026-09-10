@@ -19,6 +19,7 @@ type BranchesHubAppContext = {
   hasPermission: (key: string) => boolean
   t: (key: string, fallback?: string) => string
   getPermissionTier: (key: string) => string
+  can: (key: string, action: string) => boolean
   navigateTo: (pageId: string, anchor?: string) => void
 }
 const useApp = useAppHook as unknown as () => BranchesHubAppContext
@@ -52,11 +53,11 @@ function initialSection(canBranchList: boolean, canInventory: boolean): Branches
 }
 
 export default function BranchesHubPage() {
-  const { t, getPermissionTier, navigateTo, hasPermission } = useApp()
+  const { t, getPermissionTier, navigateTo, hasPermission, can } = useApp()
   const trh = (key: string, fallback: string): string => { const value = t(key); return value && value !== key ? value : fallback }
-  const canBranchList = getPermissionTier('branches') !== 'none'
-  const canInventory = getPermissionTier('inventory') !== 'none'
-  const [section, setSection] = useHubSection<BranchesHubSection>('branches', () => initialSection(canBranchList, canInventory), getHubDestinations('branches', { getPermissionTier, hasPermission }).map((item) => item.id), navigateTo)
+  const canBranchList = can('branches', 'view')
+  const canInventory = can('inventory', 'view')
+  const [section, setSection] = useHubSection<BranchesHubSection>('branches', () => initialSection(canBranchList, canInventory), getHubDestinations('branches', { getPermissionTier, hasPermission, can }).map((item) => item.id), navigateTo)
   // The hub owns ONE range and all three data sections read it: Overview,
   // Products and Transfer History. Products was originally left out on the
   // theory that a stock list carries no dated statistics -- but its Net sold,
