@@ -1,26 +1,22 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentProps, ReactNode } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
-import Download from 'lucide-react/dist/esm/icons/download.js'
 import { toggleMultiValue, isMultiActive, matchesMulti } from '../../utils/multiSelect'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import { buildProductSearchTerms } from '../../utils/searchTerms.ts'
 import { matchesSearchTermGroups } from '../../utils/searchMatch.ts'
-import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import SearchInput from '../shared/SearchInput'
 import ScanSearchButton from '../shared/ScanSearchButton'
 import Undo2 from 'lucide-react/dist/esm/icons/undo-2.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
-import { fmtTime } from '../../utils/formatters'
+import { fmtClock24 } from '../../utils/formatters'
 import ExportMenu from '../shared/ExportMenu'
 import SectionExportAction from '../shared/SectionExportAction.tsx'
 import FilterMenu from '../shared/FilterMenu'
-import SortChip from '../shared/SortChip'
 import { loadSortSpec, saveSortSpec, sortRecords, type SortField, type SortSpec } from '../../utils/listSort'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
-import InfoHint from '../shared/InfoHint.tsx'
 import PaginationControls, { paginateItems } from '../shared/PaginationControls'
 import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.ts'
@@ -46,14 +42,24 @@ import {
   type PendingDirectMutation,
 } from '../../utils/directMutationRequest.ts'
 import {
+  RESTORE_WORK_EVENT,
+  canRestoreMinimizedWork,
+  consumePendingRestore,
+  markRestoreHandled,
+  minimizeWork,
+  removeMinimizedWork,
+  reparkDeniedRestore,
+  type MinimizedWorkEntry,
+} from '../../utils/minimizedWork.ts'
+import {
   getReturn as fetchReturnDetail,
   getReturns as fetchReturns,
   getReturnsReport,
 } from '../../api/returnsReadTransport.ts'
 import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
-import StatsRangeRow from '../shared/StatsRangeRow.tsx'
 import ShiftHistoryModal from '../shifts/ShiftHistoryModal.tsx'
 import { EMPTY_DATE_TIME_RANGE, type DateTimeRange } from '../shared/DateTimeRangePicker'
+import { manageToolbarButtonClassName, primaryToolbarButtonClassName, toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
 import ReturnsListSurface from './ReturnsListSurface'
 import { RETURN_BULK_LIMIT, type ReturnBulkPayload, type ReturnBulkResult } from './helpers/returnBulkAction.ts'
 import type { PreparedReturnUpdateRequest } from '../../api/returnsTransport.ts'
@@ -81,6 +87,10 @@ let returnsWriteTransportPromise: Promise<ReturnsWriteTransportModule> | null = 
 function loadReturnsWriteTransport(): Promise<ReturnsWriteTransportModule> {
   if (!returnsWriteTransportPromise) returnsWriteTransportPromise = import('../../api/returnsTransport.ts')
   return returnsWriteTransportPromise
+}
+
+function returnDetailWorkKey(id: number | string): string {
+  return `return-detail-${id}`
 }
 
 type ReturnScope = typeof CUSTOMER_SCOPE | typeof SUPPLIER_SCOPE
@@ -324,6 +334,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
   // returned 403 on click. Creating a return is deliberately NOT gated here:
   // that tier is allowed to create directly, and the route has no extra check.
   const canEditReturn = can('returns', 'edit')
+  const canViewReturns = can('returns', 'view')
   const canBulkReturns = can('returns', 'bulk')
   const canExportReturns = can('returns', 'export')
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
@@ -699,6 +710,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
   // view flow now does too -- open instantly on the list row so the modal is
   // never a blank wait, then fill the line items in.
   const openReturnDetail = useCallback(async (ret: ReturnRow): Promise<void> => {
+    removeMinimizedWork(returnDetailWorkKey(ret.id))
     setDetailRet(ret)
     const requestId = beginTrackedRequest(detailRequestRef)
     try {
@@ -716,6 +728,69 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
       // already on it, so a failed hydrate must not blank the modal.
     }
   }, [])
+
+  const restoreReturnDetail = useCallback(async (entry: MinimizedWorkEntry): Promise<boolean> => {
+    if (!canViewReturns || !canRestoreMinimizedWork(entry, can)) {
+      reparkDeniedRestore(entry)
+      notify(tr('access_denied', 'Access denied', 'គ្មានសិទ្ធិចូលប្រើ'), 'warning')
+      return false
+    }
+    const returnId = Number(entry.payload?.returnId)
+    if (!Number.isFinite(returnId) || returnId <= 0) {
+      reparkDeniedRestore(entry)
+      notify(tr('failed_to_load_data', 'Failed to load data', 'មិនអាចផ្ទុកទិន្នន័យបានទេ'), 'warning')
+      return false
+    }
+    try {
+      const fresh = await withLoaderTimeout(
+        () => fetchReturnDetail(returnId),
+        'Return details',
+        RETURNS_DETAIL_TIMEOUT_MS,
+      )
+      if (!fresh) throw new Error('return missing')
+      setDetailRet(fresh as ReturnRow)
+      return true
+    } catch {
+      reparkDeniedRestore(entry)
+      notify(tr('failed_to_load_data', 'Failed to load data', 'មិនអាចផ្ទុកទិន្នន័យបានទេ'), 'warning')
+      return false
+    }
+  }, [can, canViewReturns, notify, tr])
+
+  useEffect(() => {
+    const pending = consumePendingRestore('return_detail')
+    if (pending) {
+      void restoreReturnDetail(pending).then((restored) => {
+        if (restored) markRestoreHandled('return_detail')
+      })
+    }
+    const onRestore = (event: Event) => {
+      const detail = (event as CustomEvent).detail
+      if (detail?.kind !== 'return_detail') return
+      const entry = detail.entry as MinimizedWorkEntry | undefined
+      if (!entry) return
+      void restoreReturnDetail(entry).then((restored) => {
+        if (restored) markRestoreHandled('return_detail')
+      })
+    }
+    window.addEventListener(RESTORE_WORK_EVENT, onRestore)
+    return () => window.removeEventListener(RESTORE_WORK_EVENT, onRestore)
+  }, [restoreReturnDetail])
+
+  const minimizeReturnDetail = useCallback((ret: ReturnRow): void => {
+    const returnId = Number(ret.id)
+    if (!Number.isFinite(returnId) || returnId <= 0) return
+    minimizeWork({
+      key: returnDetailWorkKey(returnId),
+      kind: 'return_detail',
+      pageId: 'sales',
+      anchor: 'hub:sales:returns',
+      label: `${tr('return', 'Return', 'ការប្រគល់មកវិញ')} — ${ret.return_number || `#${returnId}`}`,
+      payload: { returnId },
+      requiredPermission: { permissionKey: 'returns', actionKey: 'view' },
+    })
+    setDetailRet(null)
+  }, [tr])
 
   const handleOpenEdit = async (ret: ReturnRow): Promise<void> => {
     const requestId = beginTrackedRequest(editRequestRef)
@@ -962,21 +1037,8 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
     return RETURN_SORT_FIELD_DEFS.map((field) => ({ ...field, label: labels[field.id] || field.id }))
   }, [tr])
 
-  const buildSortedReturnSection = useCallback((items: ReturnRow[]): ReturnSection[] => {
-    const label = returnSortFields.find((field) => field.id === returnSortSpec.field)?.label || ''
-    const ids = items.map((ret) => Number(ret?.id)).filter((id) => Number.isFinite(id))
-    return [{
-      id: 'sorted',
-      label,
-      ids,
-      items,
-      groups: [{ id: 'sorted:all', actionKey: 'all', label, ids, items, sortTime: 0, synthetic: true }],
-    }] as unknown as ReturnSection[]
-  }, [returnSortFields, returnSortSpec.field])
-
-  const allReturnSections = useMemo<ReturnSection[]>(() => returnSortSpec.field !== 'date'
-    ? buildSortedReturnSection(sortRecords(filtered, returnSortSpec, returnSortFields))
-    : buildTimeActionSections(filtered, {
+  const buildReturnSections = useCallback((items: ReturnRow[]): ReturnSection[] => {
+    const sections = buildTimeActionSections(items, {
       getDate: (ret) => ret?.created_at,
       getItemId: (ret) => Number(ret?.id),
       getActionKey: (ret) => getReturnTypeKey(ret),
@@ -988,7 +1050,33 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
       timeMode,
       groupMode: returnGroupMode,
       sortDirection: returnSortDirection,
-    }), [buildSortedReturnSection, filtered, returnGroupMode, returnSortDirection, returnSortFields, returnSortSpec, timeMode, tr])
+    }) as ReturnSection[]
+    if (returnSortSpec.field === 'date') return sections
+    // Every return remains under its business-day heading. Non-date choices
+    // arrange records *inside* each day instead of replacing those headings
+    // with one synthetic all-results section.
+    return sections.map((section) => {
+      const sortedItems = sortRecords(section.items, returnSortSpec, returnSortFields)
+      return {
+        ...section,
+        ids: sortedItems.map((ret) => Number(ret.id)).filter(Number.isFinite),
+        items: sortedItems,
+        groups: section.groups.map((group) => {
+          const groupItems = sortRecords(group.items, returnSortSpec, returnSortFields)
+          return {
+            ...group,
+            ids: groupItems.map((ret) => Number(ret.id)).filter(Number.isFinite),
+            items: groupItems,
+          }
+        }),
+      }
+    })
+  }, [returnGroupMode, returnSortDirection, returnSortFields, returnSortSpec, timeMode, tr])
+
+  const allReturnSections = useMemo<ReturnSection[]>(
+    () => buildReturnSections(filtered),
+    [buildReturnSections, filtered],
+  )
 
   useEffect(() => {
     setReturnPage(1)
@@ -1004,20 +1092,10 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
     [allVisibleReturns, returnPage, returnPageSize],
   )
 
-  const returnSections = useMemo<ReturnSection[]>(() => returnSortSpec.field !== 'date'
-    // Already flat-sorted upstream; the page slice keeps that order.
-    ? buildSortedReturnSection(pagedReturns)
-    : buildTimeActionSections(pagedReturns, {
-      getDate: (ret) => ret?.created_at,
-      getItemId: (ret) => Number(ret?.id),
-      getActionKey: (ret) => getReturnTypeKey(ret),
-      getActionLabel: (ret) => getReturnTypeLabel(ret, tr),
-      year: 'all',
-      month: 'all',
-      timeMode,
-      groupMode: returnGroupMode,
-      sortDirection: returnSortDirection,
-    }), [buildSortedReturnSection, pagedReturns, returnGroupMode, returnSortDirection, returnSortSpec.field, timeMode, tr])
+  const returnSections = useMemo<ReturnSection[]>(
+    () => buildReturnSections(pagedReturns),
+    [buildReturnSections, pagedReturns],
+  )
 
   const visibleReturns = useMemo(
     () => returnSections.flatMap((section) => section.groups.flatMap((group) => group.items)),
@@ -1205,19 +1283,43 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
           { id: 'time-action', label: tr('group_by_time_action', 'Time + type'), active: returnGroupMode === 'time+action', onClick: () => setReturnGroupMode('time+action') },
         ],
       },
+      {
+        id: 'sort',
+        label: tr('sort', 'Sort', 'តម្រៀប'),
+        options: returnSortFields.flatMap((field) => {
+          const descendingLabel = field.id === 'date'
+            ? tr('sort_newest_first', 'Newest first', 'ថ្មីៗមុន')
+            : field.kind === 'text'
+              ? `${field.label}: Z → A`
+              : `${field.label}: ${isKhmer ? 'ច្រើន → តិច' : 'high → low'}`
+          const ascendingLabel = field.id === 'date'
+            ? tr('sort_oldest_first', 'Oldest first', 'ចាស់ៗមុន')
+            : field.kind === 'text'
+              ? `${field.label}: A → Z`
+              : `${field.label}: ${isKhmer ? 'តិច → ច្រើន' : 'low → high'}`
+          return [
+            { id: `${field.id}-desc`, label: descendingLabel, active: returnSortSpec.field === field.id && returnSortSpec.direction === 'desc', onClick: () => setReturnSortSpec({ field: field.id, direction: 'desc' }) },
+            { id: `${field.id}-asc`, label: ascendingLabel, active: returnSortSpec.field === field.id && returnSortSpec.direction === 'asc', onClick: () => setReturnSortSpec({ field: field.id, direction: 'asc' }) },
+          ]
+        }),
+      },
       // The period filter is gone from this menu: the Start→End range row above
       // the search bar (stripRange) is the single date scope now and drives the
       // list directly, so a second date control here would only disagree.
     ]
-  }, [isReturnsFilterMenuOpen, returnGroupMode, scope, tr, typeFilter, typeOptions])
+  }, [isKhmer, isReturnsFilterMenuOpen, returnGroupMode, returnSortFields, returnSortSpec, scope, tr, typeFilter, typeOptions])
 
   // Scope (customer vs supplier) is a VIEW, not a filter: it's a mandatory
   // one-of-two with no neutral "all", so being on the supplier view must
   // not light up "Filters (1)" -- and Clear must not teleport the user
   // back to the customer view (see FilterMenu onClear below).
   const activeFilterCount = useMemo(
-    () => countActiveFlags([typeFilter !== 'all', returnGroupMode !== 'time']),
-    [returnGroupMode, typeFilter],
+    () => countActiveFlags([
+      typeFilter !== 'all',
+      returnGroupMode !== 'time',
+      returnSortSpec.field !== 'date' || returnSortSpec.direction !== 'desc',
+    ]),
+    [returnGroupMode, returnSortSpec.direction, returnSortSpec.field, typeFilter],
   )
   const showReturnActionGroups = returnGroupMode === 'time+action'
 
@@ -1295,6 +1397,10 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
         cards={stripCards}
         loading={stripLoading}
         t={t}
+        range={stripRange}
+        onRangeChange={setStripRange}
+        showTime={false}
+        showPresets
         // Export + History are SECONDARY controls (Part 548): Returns has
         // only 2-3 stat cards, so when the strip is open they merge into
         // the STATS row's spare width rather than the date row ("if stats
@@ -1303,28 +1409,27 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
           <>
             <ShiftHistoryModal
               label={tr('shift_code', 'Shift')}
-              buttonClassName="btn-secondary inline-flex h-11 min-w-11 items-center justify-center px-2.5 py-0 text-xs md:h-8 md:min-w-0"
+              buttonClassName={manageToolbarButtonClassName}
             />
             {canExportReturns ? (
               <SectionExportAction>
                 <ExportMenu
                   label={tr('export', 'Export')}
                   items={exportItems}
-                  mobileIconOnly
-                  triggerClassName="!h-8 !min-w-0 !px-2.5 md:!w-auto md:!min-w-[5.75rem]"
+                  iconOnly
+                  triggerClassName={toolbarIconButtonClassName}
                 />
               </SectionExportAction>
             ) : null}
             {canEditReturn ? (
-              <button type="button" className="btn-secondary inline-flex h-8 items-center gap-1 px-2.5 py-0 text-xs" onClick={() => setShowReasonManager(true)} title={tr('manage_return_reasons', 'Manage return reasons')}>
+              <button type="button" className={manageToolbarButtonClassName} onClick={() => setShowReasonManager(true)} title={tr('manage_return_reasons', 'Manage return reasons')}>
                 <Settings2 className="h-3.5 w-3.5" />
                 <span>{tr('reasons', 'Reasons')}</span>
               </button>
             ) : null}
-            {/* dense: pin History to a true 32px so it matches the h-8 Export
-                button beside it on the Stats row (btn-secondary's 40px
-                min-height would otherwise make it taller). */}
-            <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} t={t} className="min-w-0" dense />
+            {/* History keeps its compact icon treatment while the local trigger
+                adopts the same 40px hit target as the peer toolbar actions. */}
+            <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} t={t} className="min-w-0 [&_button]:!h-10 [&_button]:!min-h-10" dense />
           </>
         )}
         actions={(
@@ -1336,14 +1441,14 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
           // Products "Add product" button which shows just "Product" beside its
           // PackagePlus. The full "Add …" phrasing stays as the aria-label/title.
           scope === SUPPLIER_SCOPE ? (
-            <button onClick={() => setShowSupplierForm(true)} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-blue-600 px-2.5 text-xs font-semibold text-white transition-colors hover:bg-blue-700" aria-label={tr('add_supplier_return', 'Add Supplier Return')} title={tr('add_supplier_return', 'Add Supplier Return')}>
+            <button onClick={() => setShowSupplierForm(true)} className={primaryToolbarButtonClassName} aria-label={tr('add_supplier_return', 'Add Supplier Return')} title={tr('add_supplier_return', 'Add Supplier Return')}>
               <ReturnPlusIcon className="h-4 w-4" />
-              <span>{tr('supplier_return', 'Supplier Return')}</span>
+              <span>{tr('supplier_return', 'Supplier Return').replace(/^ការ/u, '')}</span>
             </button>
           ) : (
-            <button onClick={() => setShowCustomerForm(true)} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-blue-600 px-2.5 text-xs font-semibold text-white transition-colors hover:bg-blue-700" aria-label={tr('add_return', 'Add Return')} title={tr('add_return', 'Add Return')}>
+            <button onClick={() => setShowCustomerForm(true)} className={primaryToolbarButtonClassName} aria-label={tr('add_return', 'Add Return')} title={tr('add_return', 'Add Return')}>
               <ReturnPlusIcon className="h-4 w-4" />
-              <span>{tr('return', 'Return')}</span>
+              <span>{tr('return', 'Return').replace(/^ការ/u, '')}</span>
             </button>
           )
         )}
@@ -1358,19 +1463,14 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
           lives per-section inside ReturnsListSurface, and the "N selected"
           banner above the stat cards already has its own fixed position
           above them -- so only the search+filter row needs the wrapper. */}
-      <div className="sticky top-2 z-30 -mx-1 space-y-2 bg-gray-50/95 pb-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
-        {/* The Start→End range that scopes the stats strip above now leads
-            this pinned toolbar as its own row, directly above the search bar
-            (user, Aug 31: "fish out the start date and end date from the stats
-            button ... right above the search bar row"). Same range state
-            (stripRange) still feeds the strip's cards. */}
-        <StatsRangeRow className="pt-1" range={stripRange} onRangeChange={setStripRange} t={t} />
-        <div className="flex flex-wrap items-center gap-2">
+      <div className="sticky top-2 z-30 -mx-1 bg-gray-50/95 pb-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
+        <div className="flex min-w-0 flex-nowrap items-center gap-2">
           <SearchInput
             id="returns-search"
             name="returns_search"
             value={search}
             onChange={setSearch}
+            className="min-w-0 flex-1"
             placeholder={tr('search_returns_placeholder', 'Search divide by comma, any order: return ID, return number, receipt, customer, product name, barcode/sku, brand')}
           />
           {/* Placeholder above already advertises barcode/sku as a
@@ -1378,12 +1478,6 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
               POS.tsx expose a camera-scan shortcut for. Added here (and to
               Sales.tsx) to match; same onDetected={setSearch} wiring. */}
           <ScanSearchButton onDetected={setSearch} t={(key: string) => t(key) || key} />
-          <SortChip
-            spec={returnSortSpec}
-            fields={returnSortFields}
-            onChange={setReturnSortSpec}
-            label={tr('sort', 'Sort')}
-          />
           <FilterMenu
             label={tr('filters', 'Filters')}
             activeCount={activeFilterCount}
@@ -1399,14 +1493,10 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
         </div>
       </div>
 
-      {/* The "tap a record" hint used to sit on its own row above the pager
-          (two rows of vertical space for one idea); merged onto the pager's
-          own row instead -- hint on the left, pager on the right -- so the
-          page keeps the same footprint (user, Sep 3: "same row as the page
-          back and forth ... so left of screen ... try not to push anothing
-          up or down"). */}
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <p className="min-w-0 truncate text-xs text-gray-400">{tr('tap_to_view_details', 'Tap a record to view details.')}</p>
+      {/* The first centered pager sits directly below the search/filter row;
+          the list follows immediately so neither control is displaced by
+          secondary explanatory copy. */}
+      <div className="mb-3 flex justify-center">
         <PaginationControls
           compact
           rangeAsPageSize
@@ -1420,14 +1510,13 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
             setReturnPageSize(size)
             setReturnPage(1)
           }}
-          className="shrink-0"
         />
       </div>
       <ReturnsListSurface
         collapsedReturnSections={collapsedReturnSections}
         CUSTOMER_SCOPE={CUSTOMER_SCOPE}
         filtered={filtered as ReturnsListSurfaceProps['filtered']}
-        fmtTime={fmtTime}
+        fmtTime={fmtClock24}
         isSelectionScopeFullySelected={isSelectionScopeFullySelected}
         isSelectionScopePartiallySelected={isSelectionScopePartiallySelected}
         loading={loading}
@@ -1477,6 +1566,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
           <ReturnDetailModal
             ret={detailRet}
             onClose={() => setDetailRet(null)}
+            onMinimize={() => minimizeReturnDetail(detailRet)}
             onEdit={canEditReturn && normalizeScope(detailRet.return_scope) === CUSTOMER_SCOPE ? () => handleOpenEdit(detailRet) : undefined}
             fmtUSD={fmtUSD}
             fmtKHR={fmtKHR}

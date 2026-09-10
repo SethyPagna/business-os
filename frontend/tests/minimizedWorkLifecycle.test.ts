@@ -144,6 +144,25 @@ assert.equal(getMinimizedWork()[0]?.draftKey, receiveDraftKey)
 assert.equal(consumePendingRestore('receive_batch'), null)
 removeMinimizedWork(receiveEntry.key)
 
+// Read-only return details still need a durable tray handle: minimize closes
+// the float, restore navigates to the Returns hub and re-fetches the live row.
+minimizeWork({
+  key: 'return-detail-88',
+  kind: 'return_detail',
+  pageId: 'sales',
+  anchor: 'hub:sales:returns',
+  label: 'Return — RET-88',
+  payload: { returnId: 88 },
+})
+const returnDetailEntry = getMinimizedWork()[0]!
+assert.equal(canRestoreMinimizedWork(returnDetailEntry, () => false), false, 'legacy return-detail chips require current Returns view permission')
+assert.equal(canRestoreMinimizedWork(returnDetailEntry, (permission, action) => permission === 'returns' && action === 'view'), true)
+dispatchRestore(returnDetailEntry)
+assert.deepEqual(getMinimizedWork(), [], 'return detail dispatch removes the tray chip while its host accepts the restore')
+assert.equal(peekPendingRestore('return_detail')?.payload?.returnId, 88)
+assert.equal(consumePendingRestore('return_detail')?.key, 'return-detail-88')
+assert.equal(consumePendingRestore('return_detail'), null, 'return detail restore stays one-shot')
+
 // Product edits are an exact-entity contract. Even if a legacy chip is missing
 // explicit permission metadata, the registry must enforce products:edit.
 const productEditDraftKey = scopedWorkDraftKey('product_edit_777')
@@ -256,6 +275,8 @@ const stockChangeSource = readFileSync(new URL('../src/components/products/Stock
 const inventorySource = readFileSync(new URL('../src/components/inventory/Inventory.tsx', import.meta.url), 'utf8')
 const stockSessionsSource = readFileSync(new URL('../src/components/products/StockInSessionsSection.tsx', import.meta.url), 'utf8')
 const feesPageSource = readFileSync(new URL('../src/components/fees/FeesPage.tsx', import.meta.url), 'utf8')
+const returnsSource = readFileSync(new URL('../src/components/returns/Returns.tsx', import.meta.url), 'utf8')
+const returnDetailSource = readFileSync(new URL('../src/components/returns/ReturnDetailModal.tsx', import.meta.url), 'utf8')
 const productsSource = readFileSync(new URL('../src/components/products/Products.tsx', import.meta.url), 'utf8')
 const stockAdjustSource = readFileSync(new URL('../src/components/products/forms/StockAdjustModal.tsx', import.meta.url), 'utf8')
 const inventoryStockModalSource = readFileSync(new URL('../src/components/inventory/InventoryStockModals.tsx', import.meta.url), 'utf8')
@@ -265,6 +286,7 @@ assert.match(traySource, /receive_batch: null/, 'per-product receive drafts must
 assert.match(traySource, /if \(!canRestoreMinimizedWork\(entry, can\)\) \{[\s\S]*?return[\s\S]*?\}\s*navigateTo\(entry\.pageId, entry\.anchor\)/, 'permission must be rechecked before exact page/section navigation and dispatch')
 assert.match(traySource, /edit_product: null/, 'per-product edit drafts must never use a family-wide fallback clear')
 assert.match(traySource, /stock_adjust: null/, 'per-product stock drafts must never use a family-wide fallback clear')
+assert.match(traySource, /return_detail: null/, 'read-only return details must never guess at a draft to clear')
 assert.match(traySource, /entry\.kind === 'stock_adjust'[\s\S]*?discardStockAdjustDraft\(draftKey, user\?\.id \?\? user\?\.username \?\? null\)/, 'dismissing a stock-adjust chip discards its exact failed-attempt handle in the current user scope')
 assert.match(inventoryStockModalSource, /useCloseGuard\(\{ dirty: adjustDirty\.dirty \|\| Boolean\(adjustRestoredDirty\) \}, onCloseAdjust, onMinimizeAdjust\)/, 'X must keep the close guard while its prompt gains the same preserve capability')
 assert.match(inventoryStockModalSource, /<MinimizeButton disabled=\{adjustSaving\} tr=\{tr\} onMinimize=\{onMinimizeAdjust\} \/>/, 'the header minus calls preserve directly, never the X handler')
@@ -301,5 +323,10 @@ assert.match(feeFormSource, /const saleId = form\.sale_id\.trim\(\)/, 'a restore
 assert.match(feesPageSource, /const result = await getFeeRequest\(feeId\)[\s\S]*?setSelected\(result\.fee\)/, 'fee edit restore must fetch the current server row before mounting the draft')
 assert.match(feesPageSource, /kind: 'fee_form'[\s\S]*?pageId: 'sales',[\s\S]*?anchor: 'hub:sales:fees',[\s\S]*?requiredPermission: \{ permissionKey: 'fees', actionKey: isEdit \? 'edit' : 'add' \}/, 'fee chips must restore the exact Sales section with the current add/edit grant')
 assert.match(feesPageSource, /onMinimize=\{canMinimizeFeeForm \? preserveFeeForm : undefined\}[\s\S]*?<MinimizeButton/, 'fee form must show a permission-aware minus beside Close')
+assert.match(returnsSource, /kind: 'return_detail'[\s\S]*?pageId: 'sales',[\s\S]*?anchor: 'hub:sales:returns',[\s\S]*?requiredPermission: \{ permissionKey: 'returns', actionKey: 'view' \}/, 'return detail chips should target the exact Returns hub and carry the current view grant')
+assert.match(returnsSource, /const restoreReturnDetail = useCallback[\s\S]*?fetchReturnDetail\(returnId\)[\s\S]*?setDetailRet\(fresh as ReturnRow\)/, 'the Returns host should restore detail from current server truth')
+assert.match(returnsSource, /consumePendingRestore\('return_detail'\)/, 'the Returns host should accept a restore dispatched before its section mounted')
+assert.match(returnsSource, /if \(!canViewReturns \|\| !canRestoreMinimizedWork\(entry, can\)\)[\s\S]*?reparkDeniedRestore\(entry\)/, 'permission revocation should repark the exact return detail chip')
+assert.match(returnDetailSource, /<MinimizeButton onMinimize=\{onMinimize\} tr=\{tr\} \/>[\s\S]*?aria-label=\{tr\('close', 'Close'\)\}/, 'return detail should put the durable minimize action directly beside Close')
 
 console.log('PASS minimized work is actor-scoped, exact-draft, one-shot and accessible')

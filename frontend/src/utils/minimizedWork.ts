@@ -23,6 +23,7 @@ export type MinimizedWorkKind =
   | 'branch_form'
   | 'fee_form'
   | 'product_detail'
+  | 'return_detail'
 
 export type MinimizedWorkPermission = {
   permissionKey: string
@@ -78,6 +79,7 @@ const FALLBACK_PERMISSION_BY_KIND: Partial<Record<MinimizedWorkKind, MinimizedWo
   edit_product: { permissionKey: 'products', actionKey: 'edit' },
   fast_stockin: { permissionKey: 'inventory', actionKey: 'adjust' },
   stock_adjust: { permissionKey: 'inventory', actionKey: 'adjust' },
+  return_detail: { permissionKey: 'returns', actionKey: 'view' },
 }
 
 /** Fast stock-in has one canonical restore host. Older builds parked it on

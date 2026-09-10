@@ -35,6 +35,8 @@ const LEGACY_DRAFT_BASE_BY_KIND: Record<MinimizedWorkKind, string | null> = {
   fee_form: null,
   // detail tabs manage their own keyed drafts; nothing global to clear
   product_detail: null,
+  // Return details are read-only live records, so there is no draft to clear.
+  return_detail: null,
 }
 
 const useApp = useAppHook as unknown as () => {
