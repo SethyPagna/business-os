@@ -87,7 +87,7 @@ test('the shared branch range scopes both transfer history and its export', () =
 
 test('embedded Branches removes its duplicate picker and keeps actions on one row', () => {
   assert.match(source, /\{!showDateRange \? <div className="flex min-w-0 items-stretch gap-1 overflow-x-auto pt-1">[\s\S]*?\{branchExportButton\}/)
-  assert.equal((source.match(/const branchExportButton = \(/g) || []).length, 1)
+  assert.equal((source.match(/const branchExportButton = canExportBranch \? \(/g) || []).length, 1)
   assert.ok((hubSource.match(/showDateRange/g) || []).length >= 2)
   assert.match(source, /\{showDateRange \? <ActionHistoryBar/)
   assert.match(source, /leading=\{tab === 'branches'[\s\S]*?aria-expanded=\{statsOpen\}/)
