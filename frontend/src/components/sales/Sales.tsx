@@ -594,19 +594,11 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // dd/mm/yyyy, so year+month+day all read off every section header
   // instead of the old bare-year buckets.
   const timeGroupingMode = 'day' as const
-  const isAdmin = useMemo(() => {
-    const roleCode = String(user?.role_code || '').toLowerCase()
-    const username = String(user?.username || '').toLowerCase()
-    let permissions: Record<string, unknown> = {}
-    try {
-      permissions = typeof user?.permissions === 'string'
-        ? JSON.parse(user.permissions || '{}') as Record<string, unknown>
-        : (user?.permissions && typeof user.permissions === 'object' ? user.permissions as Record<string, unknown> : {})
-    } catch {
-      permissions = {}
-    }
-    return username === 'admin' || roleCode === 'admin' || permissions.all === true
-  }, [user])
+  // AppContext uses the normalized role + user permission map. Raw user-only
+  // permissions miss custom roles carrying all:true and wrongly expire edits.
+  const isAdmin = String(user?.username || '').trim().toLowerCase() === 'admin'
+    || String(user?.role_code || '').trim().toLowerCase() === 'admin'
+    || getPermissionTier('all') === 'full'
 
   const cleanFallback = useCallback((fallbackEn: string, fallbackKm?: string) => {
     const candidate = fallbackKm || fallbackEn
@@ -959,7 +951,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     const current = receipt
       ? await readAuthoritativeSale(saleId, (row) => mutationVersionAtLeast(row.updated_at, receipt.updated_at))
       : null
-    const applied = !!receipt
+    const applied = !!receipt && !!current
     if (!applied) return false
     const unknown = error as { syncErrorId?: string; syncErrorChannel?: string; code?: string }
     // Dismiss only the error attached to this exact request. A later error
@@ -1096,26 +1088,21 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         actionKind?: string | null
         updated_at?: string | null
       } | null
-      savePendingDirectStatus(saleId, null)
       const hasServerSettlementHistory = mutationResult?.actionKind === 'sale.settlement'
         && mutationResult.actionHistoryId != null
       const statusUpdatedAt = String(mutationResult?.updated_at || '').trim()
-      if (statusUpdatedAt) {
-        const currentRows = salesRef.current
-        const nextRows = currentRows.map((entry) => Number(entry?.id || 0) === numericId
-          ? { ...entry, sale_status: newStatus, updated_at: statusUpdatedAt }
-          : entry)
-        salesRef.current = nextRows
-        setSales(nextRows)
-      }
-      notify(`${t('status_updated') || 'Status updated'}: ${getStatusLabel(newStatus, t)}`)
       await loadSales(true)
       const committedSale = await readAuthoritativeSale(numericId, (row) => mutationVersionAtLeast(row.updated_at, statusUpdatedAt))
+      // A successful write/replay is not a refreshed receipt display. Keep the
+      // frozen request and modal guard until its authoritative row is visible.
+      if (!committedSale) return { settlementError: translateOr('sale_bulk_pending', 'A previous request has an unknown outcome. Retry the original request or discard it before starting another.') }
       if (committedSale) {
         salesRef.current = salesRef.current.map((row) => Number(row.id) === numericId ? committedSale : row)
         setSales(salesRef.current)
         setDetailSale((row) => Number(row?.id) === numericId ? committedSale : row)
       }
+      savePendingDirectStatus(saleId, null)
+      notify(`${t('status_updated') || 'Status updated'}: ${getStatusLabel(newStatus, t)}`)
       void loadSalesStats() // Z3a: refresh the summary aggregate immediately, not only via the sync round-trip
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'products' } }))

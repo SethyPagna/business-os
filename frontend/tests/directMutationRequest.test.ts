@@ -238,7 +238,7 @@ await test('direct-write UI exposes manual exact retry and freezes return edits 
   assert.match(editReturn, /retry_original_request[\s\S]*discard_retry/)
   assert.match(editReturn, /useEffect\(\(\) => \{\s*setPendingRequest\(loadPendingDirectMutation<PreparedReturnUpdateRequest>\('return-edit', user\?\.id, ret\.id\)\)[\s\S]*\}, \[ret\.id, user\?\.id\]\)/)
   assert.match(sales, /salesRef\.current\.find/)
-  assert.match(sales, /const statusUpdatedAt = String\(mutationResult\?\.updated_at[\s\S]*salesRef\.current = nextRows[\s\S]*setSales\(nextRows\)/)
+  assert.match(sales, /const statusUpdatedAt = String\(mutationResult\?\.updated_at[\s\S]*if \(!committedSale\) return[\s\S]*setDetailSale[\s\S]*savePendingDirectStatus\(saleId, null\)/, 'a response alone cannot clear the pending guard before display convergence')
   assert.match(sales, /loadPendingDirectMutationSlot<PreparedSaleStatusRequest>\('sale-status', user\?\.id\)[\s\S]*pendingDirectStatusRef\.current = pending/)
   assert.match(sales, /const replaySaleStatusHistory[\s\S]*await handleStatusChange\([\s\S]*throw new Error/)
   assert.match(sales, /undo: \(\) => replaySaleStatusHistory[\s\S]*redo: \(\) => replaySaleStatusHistory/)
@@ -255,7 +255,8 @@ await test('production send and banner paths derive current actor and entity sco
 
   assert.match(sales, /const currentPendingDirectStatus = useCallback\(\(\) => \([\s\S]*pendingDirectMutationForScope\(pendingDirectStatusRef\.current, user\?\.id\)[\s\S]*loadPendingDirectMutationSlot<PreparedSaleStatusRequest>\('sale-status', user\?\.id\)/)
   assert.ok((sales.match(/currentPendingDirectStatus\(\)/g) || []).length >= 3)
-  assert.match(sales, /\{activePendingDirectStatus \? \(/)
+  assert.match(sales, /!directStatusSaving && activePendingDirectStatus && String\(detailSale\?\.id\) !== activePendingDirectStatus\.entityId \? \(/, 'the actor-scoped page recovery is visible only when the matching detail does not own it')
+  assert.match(sales, /pendingStatus=\{!directStatusSaving && activePendingDirectStatus\?\.entityId === String\(detailSale\.id\)\}/, 'the matching modal receives the same actor-scoped pending guard')
   assert.doesNotMatch(sales, /\{pendingDirectStatus \? \(/)
 
   assert.match(returns, /const currentPendingHistoryRequest = useCallback\(\(\) => \([\s\S]*pendingDirectMutationForScope\(pendingHistoryRequestRef\.current, user\?\.id\)[\s\S]*loadPendingDirectMutationSlot<PreparedReturnUpdateRequest>\('return-history', user\?\.id\)/)

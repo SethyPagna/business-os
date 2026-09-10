@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { transformSync } from 'esbuild'
 import {
   advanceSettlementReviewVersion,
   buildSettlementPayload,
@@ -60,6 +61,85 @@ assert.equal(loadPendingDirectMutationSlot('sale-status', 7, storage), null)
 const statusCatch = salesSource.slice(salesSource.indexOf('const problem = error as { syncErrorId'))
 assert.ok(statusCatch.indexOf('savePendingDirectStatus(saleId, null)') < statusCatch.indexOf("code === 'exchange_rate_changed'"), 'known rejection clears the original pending body before the rate-review early return')
 assert.doesNotMatch(salesSource, /clearSyncError\?\.\(/, 'unrelated sync errors must survive recovery/discard')
+
+// Execute the production callbacks, not a second implementation of their
+// pending-state decisions. The fake server retains one actor/request receipt.
+function salesCallback(name: string, endMarker: string, dependencies: Record<string, unknown>, hook = false): (...args: any[]) => Promise<any> {
+  const source = salesSource.replace(/\r\n/g, '\n')
+  const marker = `const ${name} = ${hook ? 'useCallback(' : ''}`
+  const start = source.indexOf(marker) + marker.length
+  const end = source.indexOf(endMarker, start)
+  assert.ok(start >= marker.length && end > start)
+  const callback = source.slice(start, end) + (hook ? '\n  }' : '')
+  const compiled = transformSync(`const callback = ${callback}`, { loader: 'ts', format: 'cjs' }).code
+  return new Function(...Object.keys(dependencies), `${compiled}\nreturn callback`)(...Object.values(dependencies))
+}
+
+for (const unreadable of ['stale', 'null'] as const) {
+  let readMode: string = unreadable
+  const before = { id: 171258, receipt_number: '20260910-171258', sale_status: 'awaiting_payment', updated_at: frozen.expected_updated_at, amount_paid_usd: 0 }
+  let server = { ...before }
+  const receipts = new Map<string, Record<string, unknown>>()
+  let stock = 11, recognizedRevenue = 7, auditRows = 0, moneyEffects = 0, sends = 0, resolvedErrors = 0
+  const requests: unknown[] = []
+  let detail = { ...before }
+  const rows = { current: [{ ...before }] }
+  savePendingDirectMutationSlot('sale-status', 7, 171258, frozen, storage)
+  const readSale = async (_id: number, accept = (_row: typeof before) => true) => readCommittedMutationState(async () => readMode === 'null' ? null : readMode === 'stale' ? { ...before } : { ...server }, accept)
+  const deps: Record<string, unknown> = {
+    canChangeSaleStatus: true,
+    currentPendingDirectStatus: () => loadPendingDirectMutationSlot('sale-status', 7, storage),
+    salesRef: rows, pendingStatusProblemRef: { current: null }, statusActionRef: { current: new Set() },
+    beginKeyedAction: () => true, finishKeyedAction: () => {}, setDirectStatusSaving: () => {},
+    savePendingDirectStatus: (id: number, body: typeof frozen | null) => savePendingDirectMutationSlot('sale-status', 7, id, body, storage),
+    runSaleStatusMutation: async (_id: number, body: typeof frozen) => {
+      sends += 1
+      requests.push(freezeDirectMutationBody(body))
+      const key = `actor:7:request:${body.client_request_id}`
+      if (!receipts.has(key)) {
+        server = { ...server, sale_status: 'completed', updated_at: '2026-09-10 10:13:00', amount_paid_usd: 7 }
+        receipts.set(key, { id: server.id, sale_status: server.sale_status, updated_at: server.updated_at, actionKind: 'sale.settlement', actionHistoryId: 1 })
+        auditRows += 1; moneyEffects += 1
+        throw { code: 'request_timeout', syncErrorId: 'aba-seven-lost', syncErrorChannel: 'sales:updateStatus' }
+      }
+      return receipts.get(key)
+    },
+    getSaleStatusReceipt: async (_id: number, body: typeof frozen) => ({ committed: true, response: receipts.get(`actor:7:request:${body.client_request_id}`) }),
+    reconcileDirectMutationReceipt, mutationVersionAtLeast, readAuthoritativeSale: readSale,
+    directMutationOutcomeIsUnknown, freezeDirectMutationBody,
+    dispatchResolvedSyncError: () => { resolvedErrors += 1 },
+    loadSales: async () => { rows.current = [{ ...before }] },
+    setSales: (next: typeof rows.current) => { rows.current = next },
+    setDetailSale: (update: (row: typeof detail) => typeof detail) => { detail = update(detail) },
+    loadSalesStats: async () => {}, actionHistory: { refreshServerItems: async () => {}, pushAction: () => { throw new Error('settlement must not add duplicate local history') } },
+    window: { setTimeout: (callback: () => void) => callback(), dispatchEvent: () => {} },
+    notify: () => {}, t: (key: string) => key, translateOr: (_key: string, fallback: string) => fallback,
+    getStatusLabel: (value: string) => value, getErrorMessage: (error: unknown) => String(error), isWriteConflict: () => false,
+  }
+  deps.resolveUnknownSaleWrite = salesCallback('resolveUnknownSaleWrite', '\n  }, [actionHistory', deps, true)
+  const handle = salesCallback('handleStatusChange', '\n  const replaySaleStatusHistory', deps)
+  const result = await handle(171258, 'completed', '', true, frozen, true, frozen)
+  assert.ok(result.settlementError, `${unreadable}: exact receipt alone keeps recovery open`)
+  assert.equal(resolvedErrors, 0, 'no global error resolution before visible state converges')
+  assert.deepEqual(loadPendingDirectMutationSlot('sale-status', 7, storage)?.body, frozen)
+  assert.equal(detail.sale_status, 'awaiting_payment')
+  assert.equal(await handle(171258, 'completed', '', true, frozen, true), false, 'new work is blocked while original recovery is pending')
+  assert.equal(sends, 1)
+  const replayWhileStale = await handle(171258, 'completed', '', true, frozen, true, frozen)
+  assert.ok(replayWhileStale.settlementError, 'even a successful idempotent replay retains the convergence guard')
+  assert.ok(loadPendingDirectMutationSlot('sale-status', 7, storage))
+  readMode = 'fresh'
+  const recovered = await handle(171258, 'completed', '', true, frozen, true, frozen)
+  assert.equal(recovered.statusUpdatedAt, server.updated_at)
+  assert.equal(loadPendingDirectMutationSlot('sale-status', 7, storage), null)
+  assert.deepEqual(rows.current[0], server)
+  assert.deepEqual(detail, server)
+  assert.equal(server.amount_paid_usd, 7)
+  assert.equal(stock, 11); assert.equal(recognizedRevenue, 7)
+  assert.equal(auditRows, 1); assert.equal(moneyEffects, 1)
+  assert.ok(requests.every((body) => JSON.stringify(body) === JSON.stringify(frozen)), 'every retry retains exact tender, request and expected version')
+}
+console.log('PASS production Sales callbacks retain exact ABA $7 recovery across stale/null reads and idempotent replay until list/detail converge')
 
 const confirmedResult = createSingleUseResult<{ statusUpdatedAt: string } | false>()
 assert.equal(confirmedResult.isPending(), true)
