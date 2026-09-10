@@ -118,12 +118,27 @@ function paymentDetailsMatch(row: SaleRecord, requested: unknown): boolean {
     try { actual = JSON.parse(actual) } catch { return false }
   }
   if (!Array.isArray(actual) || actual.length !== requested.length) return false
-  return requested.every((entry, index) => {
-    const expected = entry && typeof entry === 'object' ? entry as Record<string, unknown> : {}
-    const received = actual[index] && typeof actual[index] === 'object' ? actual[index] as Record<string, unknown> : {}
-    return String(received.method || '').trim() === String(expected.method || '').trim()
+  // Settlement normalization preserves tender rows, but a read may return
+  // them in a different order after a retry/replay. Compare the canonical
+  // multiset instead of the array position so an applied write cannot remain
+  // stuck behind the unknown-outcome banner merely because row order changed.
+  const canonical = (entry: unknown) => {
+    const value = entry && typeof entry === 'object' ? entry as Record<string, unknown> : {}
+    return {
+      method: String(value.method || '').trim(),
+      amount_usd: Number(value.amount_usd || 0),
+      amount_khr: Number(value.amount_khr || 0),
+    }
+  }
+  const expectedRows = requested.map(canonical)
+  const receivedRows = actual.map(canonical)
+  return expectedRows.every((expected) => {
+    const index = receivedRows.findIndex((received) => received.method === expected.method
       && numberClose(received.amount_usd, expected.amount_usd, 0.01)
-      && numberClose(received.amount_khr, expected.amount_khr, 1)
+      && numberClose(received.amount_khr, expected.amount_khr, 1))
+    if (index < 0) return false
+    receivedRows.splice(index, 1)
+    return true
   })
 }
 
@@ -305,6 +320,7 @@ interface AppContextValue {
   user?: AppUser | null
   getPermissionTier: (key: string) => string
   can: (permissionKey: string, actionKey: string) => boolean
+  clearSyncError?: () => void
 }
 
 interface SyncContextValue {
@@ -439,7 +455,7 @@ export function isKnownUncommittedSaleCustomerChangeError(error: unknown): boole
 }
 
 export default function Sales({ embedded = false }: { embedded?: boolean }) {
-  const { t, settings, fmtUSD, fmtKHR, notify, user, can, getPermissionTier } = useApp()
+  const { t, settings, fmtUSD, fmtKHR, notify, user, can, getPermissionTier, clearSyncError } = useApp()
   // Part 557 slice 2: 'sales' is a view-tier section. A View-only grant reads
   // the list/stats/reports/export but every write (cancel, change status, edit
   // customer, import) is hidden here and refused by the backend. Full only.
@@ -1018,12 +1034,22 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   ), [])
 
   const readAuthoritativeSale = useCallback(async (saleId: number): Promise<SaleRecord | null> => {
-    try {
-      const payload = await fetchSales({ id: String(saleId), limit: 2, _detail: String(Date.now()) }, { timeoutMs: 8000 })
-      return normalizeSaleRows(payload).find((entry) => Number(entry?.id || 0) === saleId) || null
-    } catch {
-      return null
+    // A just-committed D1 write can be briefly hidden behind an edge/read
+    // retry. Probe a few times before declaring the outcome unresolved; each
+    // request has a unique cache key and remains bounded below the write
+    // deadline, so this cannot turn a failed action into an unbounded spinner.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const payload = await fetchSales({ id: String(saleId), limit: 2, _detail: `${Date.now()}-${attempt}` }, { timeoutMs: 8000 })
+        const sale = normalizeSaleRows(payload).find((entry) => Number(entry?.id || 0) === saleId) || null
+        if (sale) return sale
+      } catch {
+        // Retry a transient read once more; the original write remains
+        // durable in the pending slot until this check proves its state.
+      }
+      if (attempt < 2) await new Promise((resolve) => window.setTimeout(resolve, 250 * (attempt + 1)))
     }
+    return null
   }, [])
 
   const resolveUnknownSaleWrite = useCallback(async (
@@ -1039,6 +1065,13 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       : saleAmendmentApplied(current, previousSale, request as SaleAmendmentRequest)
     if (!applied) return false
     const unknown = error as { syncErrorId?: string; syncErrorChannel?: string; code?: string }
+    // The authoritative read is the proof that this exact mutation landed.
+    // Clear the global banner as well as the local pending slot. The banner
+    // may have been replaced by a later edge error and therefore not carry
+    // the original error id; the scoped sale check is still the stronger
+    // signal and avoids leaving the operator blocked after a successful
+    // settlement.
+    clearSyncError?.()
     dispatchResolvedSyncError({
       errorId: unknown.syncErrorId,
       channel: unknown.syncErrorChannel || (kind === 'status' ? 'sales:updateStatus' : 'sales:amendment'),
@@ -1051,7 +1084,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'products' } }))
     window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
     return true
-  }, [actionHistory, loadSales, loadSalesStats, readAuthoritativeSale])
+  }, [actionHistory, clearSyncError, loadSales, loadSalesStats, readAuthoritativeSale])
 
   // `extra` carries the full reviewed tender snapshot when SaleDetailModal
   // settles an awaiting-payment sale. That write returns a durable server
