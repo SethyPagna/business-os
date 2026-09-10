@@ -2,6 +2,34 @@ import type { D1Compat } from './db'
 
 export const TRANSFER_REQUEST_ID_PATTERN = /^[A-Za-z0-9_-]{8,120}$/
 
+/** A missing source row must abort just like an exhausted source row. */
+export function transferStockGuardStatement(productId: number, branchId: number, quantity: number): { sql: string; params: Record<string, unknown> } {
+  return {
+    // Same NOT NULL assertion mechanism as the canonical branch guard. Runs
+    // inside the transfer transaction, so a failed assertion rolls back its receipt.
+    sql: `INSERT INTO branches (name) SELECT NULL WHERE NOT EXISTS (
+      SELECT 1 FROM branch_stock
+      WHERE product_id=@guardProduct AND branch_id=@guardBranch
+        AND typeof(quantity) IN ('integer','real') AND quantity >= @guardQuantity
+        AND quantity <= 1.7976931348623157e308
+    )`,
+    params: { guardProduct: productId, guardBranch: branchId, guardQuantity: quantity },
+  }
+}
+
+export function transferLotGuardStatement(productId: number, batchId: number, branchId: number, quantity: number): { sql: string; params: Record<string, unknown> } {
+  return {
+    sql: `INSERT INTO branches (name) SELECT NULL WHERE NOT EXISTS (
+      SELECT 1 FROM branch_batch_stock bs JOIN product_batches b ON b.id=bs.batch_id
+      WHERE bs.batch_id=@guardBatch AND bs.branch_id=@guardBranch
+        AND b.variant_product_id=@guardProduct AND b.is_active=1
+        AND typeof(bs.quantity) IN ('integer','real') AND bs.quantity >= @guardQuantity
+        AND bs.quantity <= 1.7976931348623157e308
+    )`,
+    params: { guardProduct: productId, guardBatch: batchId, guardBranch: branchId, guardQuantity: quantity },
+  }
+}
+
 export type TransferReceiptRow = {
   actor_id: number
   request_id: string

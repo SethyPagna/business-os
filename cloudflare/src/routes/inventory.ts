@@ -42,7 +42,7 @@ import { RESOLVED_BRANCH_NAME_COLUMN, movementBranchNameSql, withResolvedBranchN
 import { RESOLVED_ACTOR_NAME_COLUMN, movementActorNameSql, withResolvedActorName } from '../lib/movementActorName'
 import { movementReferenceSelectSql } from '../lib/movementReference'
 import { movementSearchHaystackSql } from '../lib/movementSearch'
-import { findTransferReceipt, normalizeTransferRequestId, transferIntentAuditStatement, transferReceiptResponse, transferReceiptStatement, transferRequestDigest } from '../lib/transferOperationReceipt'
+import { transferStockGuardStatement, transferLotGuardStatement, findTransferReceipt, normalizeTransferRequestId, transferIntentAuditStatement, transferReceiptResponse, transferReceiptStatement, transferRequestDigest } from '../lib/transferOperationReceipt'
 
 // Inventory routes, ported from backend/src/routes/inventory.ts.
 //
@@ -2013,6 +2013,7 @@ app.post('/transfer', async (c) => {
     canonicalTransferAuthorityGuardStatement(fromBranchId, toBranchId),
     transferReceiptStatement({ actorId: user.id, requestId: clientRequestId!, digest: requestDigest, requestJson, responseJson: JSON.stringify(responsePayload) }),
     transferIntentAuditStatement({ actorId: user.id, actorName: actorSnapshot(user), requestId: clientRequestId!, requestJson, digest: requestDigest, bulk: false }),
+    transferStockGuardStatement(productId, fromBranchId, quantity),
     { sql: 'UPDATE branch_stock SET quantity = quantity - @quantity WHERE product_id = @productId AND branch_id = @branchId', params: { quantity, productId, branchId: fromBranchId } },
     {
       sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@productId, @branchId, @quantity)
@@ -2020,6 +2021,7 @@ app.post('/transfer', async (c) => {
       params: { productId, branchId: toBranchId, quantity },
     },
     ...takes.flatMap((take) => [
+      transferLotGuardStatement(productId, take.batchId, fromBranchId, take.quantity),
       decrementBatchStockStrictStatement(take.batchId, fromBranchId, take.quantity),
       incrementBatchStockStatement(take.batchId, toBranchId, take.quantity),
     ]),

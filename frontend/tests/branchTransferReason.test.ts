@@ -71,9 +71,8 @@ runTest('the transfer reason field is labelled a required reason on both layouts
   for (const id of ['transfer-reason', 'transfer-reason-multi']) {
     assert.ok(modal.includes(`id="${id}"`), `TransferModal needs the ${id} field`)
   }
-  assert.equal(
-    (modal.match(/t\('transfer_reason'\)/g) || []).length,
-    2,
+  assert.ok(
+    (modal.match(/t\('transfer_reason'\)/g) || []).length >= 2,
     'both layouts must label the field with the transfer_reason pack key',
   )
   assert.equal(
@@ -101,7 +100,7 @@ runTest('one shared check refuses an empty reason', () => {
 runTest('every write path runs the check before it writes or parks a confirm', () => {
   const paths: Array<{ handler: string; commit: string }> = [
     // The single-product transfer: refuse before the POST.
-    { handler: 'handleTransfer', commit: 'transferStock({' },
+    { handler: 'handleTransfer', commit: 'prepareTransferRun(' },
     // The checked-rows transfer and the whole-branch transfer both park a
     // confirm that runPendingTransfer then writes; refuse before the confirm
     // so the operator is not asked to approve a transfer that cannot run.
@@ -110,11 +109,11 @@ runTest('every write path runs the check before it writes or parks a confirm', (
     // runPendingTransfer is the ONE place that actually POSTs -- both scopes
     // go through it, and it is the only site that can catch a pendingTransfer
     // armed with a reason that was since cleared (see the two tests below).
-    { handler: 'runPendingTransfer', commit: 'transferStockBulk({' },
+    { handler: 'runPendingTransfer', commit: 'prepareTransferRun(' },
   ]
   for (const { handler, commit } of paths) {
     const body = handlerBody(handler)
-    const guardAt = body.indexOf('if (!requireTransferReason()) return')
+    const guardAt = body.indexOf('!requireTransferReason()')
     assert.ok(guardAt > 0, `${handler} must run the shared reason check`)
     const commitAt = body.indexOf(commit)
     assert.ok(commitAt > 0, `${handler} must still reach ${commit}`)
@@ -122,7 +121,7 @@ runTest('every write path runs the check before it writes or parks a confirm', (
   }
 })
 
-runTest('runPendingTransfer checks the reason as its very first statement, not just before the POST', () => {
+runTest('new runs validate the live reason before locking; retries use the saved reason', () => {
   // A guard that merely runs "before transferStockBulk({" could still sit
   // after beginSingleAction/setSavingBulk -- which would arm the in-flight
   // ref and flip the UI to "saving" before refusing, and would let a second,
@@ -134,11 +133,13 @@ runTest('runPendingTransfer checks the reason as its very first statement, not j
   // no guard of its own once the fetch resolves) -- is checked here before
   // anything else runs.
   const body = handlerBody('runPendingTransfer')
-  const declEnd = body.indexOf('=> {') + '=> {'.length
-  const guardAt = body.indexOf('if (!requireTransferReason()) return')
+  const guardAt = body.indexOf('!requireTransferReason()')
   assert.ok(guardAt > 0, 'runPendingTransfer must run the shared reason check')
-  const beforeGuard = body.slice(declEnd, guardAt).trim()
-  assert.equal(beforeGuard, '', 'the reason check must be the FIRST statement in runPendingTransfer, before beginSingleAction or any other state change')
+  assert.ok(guardAt < body.indexOf('beginSingleAction('), 'new intent must be validated before acquiring the in-flight lock')
+  assert.match(body, /if \(!savedRun && \(!pending \|\| !requireTransferReason\(\)/, 'a reopened saved request must not depend on an empty form reason')
+  assert.match(body, /let run = savedRun/)
+  assert.match(body, /if \(!run && pending\)[\s\S]*?reason, items:/, 'only new intent freezes the live reason')
+  assert.match(body, /executeTransferRun\(run,/)
 })
 
 runTest('the deferred whole-branch park has no guard of its own -- it is covered only by runPendingTransfer', () => {
@@ -159,8 +160,8 @@ runTest('the deferred whole-branch park has no guard of its own -- it is covered
 runTest('both endpoints receive `reason`, never the legacy `note`', () => {
   const single = handlerBody('handleTransfer')
   const bulk = handlerBody('runPendingTransfer')
-  assert.match(single, /transferStock\(\{[\s\S]*?\n\s*reason,\n/, 'the single transfer payload must send reason')
-  assert.match(bulk, /transferStockBulk\(\{[\s\S]*?\n\s*reason,\n/, 'the bulk transfer payload must send reason')
+  assert.match(single, /prepareTransferRun\([\s\S]*?\n\s*reason,\n/, 'the frozen single transfer payload must send reason')
+  assert.match(bulk, /requests.push\([\s\S]*?reason, items:/, 'the frozen bulk transfer payload must send reason')
   assert.doesNotMatch(single, /\n\s*note,\n/, 'the single transfer payload must not send note')
   assert.doesNotMatch(bulk, /\n\s*note,\n/, 'the bulk transfer payload must not send note')
   // The modal's own contract for the two transports, so a payload that

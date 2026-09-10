@@ -136,7 +136,7 @@ runTest('the surfaces that enforce the rule reach it through this helper', () =>
   assert.match(inventory, /disabled: !branchCanBeTransferSource\(branch\.name\)/)
   assert.match(inventory, /disabled: !branchCanTransferBetween\(selectedSource\?\.name, branch\.name\)/)
   assert.match(inventory, /if \(!branchCanTransferBetween\(fromBranch\.name, toBranch\.name\)\)/)
-  assert.match(inventory, /fromBranchId: transferForm\.to_branch_id[\s\S]*toBranchId: transferForm\.from_branch_id/, 'Inventory undo must post the exact opposite canonical direction')
+  assert.match(inventory, /undo: \(\) => runInventoryTransferIntent\('undo',[\s\S]*fromBranchId: original\.toBranchId, toBranchId: original\.fromBranchId/, 'Inventory undo must post the exact opposite frozen canonical direction')
   const inventoryModals = read('../src/components/inventory/InventoryStockModals.tsx')
   assert.match(inventoryModals, /destinationBranchOptions = transferDestinationBranchOptions \|\| branchWithPlaceholderOptions \|\| \[\]/)
   assert.match(inventoryModals, /options=\{destinationBranchOptions\}/)

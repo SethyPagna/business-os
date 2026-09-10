@@ -38,7 +38,7 @@ import { TRANSFER_DIRECTION_ERROR, transferDirectionError } from '../lib/branchR
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/productSearchQuery'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
-import { findTransferReceipt, normalizeTransferRequestId, transferIntentAuditStatement, transferReceiptResponse, transferReceiptStatement, transferRequestDigest } from '../lib/transferOperationReceipt'
+import { transferStockGuardStatement, transferLotGuardStatement, findTransferReceipt, normalizeTransferRequestId, transferIntentAuditStatement, transferReceiptResponse, transferReceiptStatement, transferRequestDigest } from '../lib/transferOperationReceipt'
 
 async function sha256Hex(input: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input))
@@ -466,6 +466,7 @@ app.post('/transfer', async (c) => {
     canonicalTransferAuthorityGuardStatement(fromBranchId, toBranchId),
     transferReceiptStatement({ actorId: user.id, requestId: clientRequestId!, digest: requestDigest, requestJson, responseJson: JSON.stringify(responsePayload) }),
     transferIntentAuditStatement({ actorId: user.id, actorName: actorSnapshot(user), requestId: clientRequestId!, requestJson, digest: requestDigest, bulk: false }),
+    transferStockGuardStatement(productId, fromBranchId, quantity),
     { sql: 'UPDATE branch_stock SET quantity = quantity - @quantity WHERE product_id = @productId AND branch_id = @branchId', params: { quantity, productId, branchId: fromBranchId } },
     {
       sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@productId, @branchId, @quantity)
@@ -516,6 +517,7 @@ app.post('/transfer', async (c) => {
   }
   if (sourceBatch && destBatchId != null) {
     statements.push(
+      transferLotGuardStatement(productId, sourceBatch.id, fromBranchId, quantity),
       decrementBatchStockStrictStatement(sourceBatch.id, fromBranchId, quantity),
       incrementBatchStockStatement(destBatchId, toBranchId, quantity),
     )
@@ -550,6 +552,7 @@ app.post('/transfer', async (c) => {
           })
         : take.batchId
       statements.push(
+        transferLotGuardStatement(productId, take.batchId, fromBranchId, take.quantity),
         decrementBatchStockStrictStatement(take.batchId, fromBranchId, take.quantity),
         incrementBatchStockStatement(destLotId, toBranchId, take.quantity),
       )
@@ -835,6 +838,7 @@ app.post('/transfer-bulk', async (c) => {
       : null
 
     statements.push(
+      transferStockGuardStatement(item.productId, fromBranchId, item.quantity),
       { sql: 'UPDATE branch_stock SET quantity = quantity - @quantity WHERE product_id = @productId AND branch_id = @branchId', params: { quantity: item.quantity, productId: item.productId, branchId: fromBranchId } },
       {
         sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@productId, @branchId, @quantity)
@@ -882,6 +886,7 @@ app.post('/transfer-bulk', async (c) => {
 
     if (sourceBatchForItem && destBatchIdForItem != null) {
       statements.push(
+        transferLotGuardStatement(item.productId, sourceBatchForItem.id, fromBranchId, item.quantity),
         decrementBatchStockStrictStatement(sourceBatchForItem.id, fromBranchId, item.quantity),
         incrementBatchStockStatement(destBatchIdForItem, toBranchId, item.quantity),
       )
@@ -910,6 +915,7 @@ app.post('/transfer-bulk', async (c) => {
             })
           : take.batchId
         statements.push(
+          transferLotGuardStatement(item.productId, take.batchId, fromBranchId, take.quantity),
           decrementBatchStockStrictStatement(take.batchId, fromBranchId, take.quantity),
           incrementBatchStockStatement(destLotId, toBranchId, take.quantity),
         )

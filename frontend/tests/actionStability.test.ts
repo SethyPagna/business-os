@@ -574,7 +574,8 @@ await runTest('canonical branch metadata edits and transfers use shared guards',
   assert.match(transfer, /const transferInFlightRef = useRef\(false\)/)
   assert.match(transfer, /if \(!beginSingleAction\(transferInFlightRef, \{ blocked: saving \}\)\) return/)
   assert.match(transfer, /function getTransferApi\(\): TransferApi/)
-  assert.match(transfer, /withLoaderTimeout<TransferResult>\(\(\) => getTransferApi\(\)\.transferStock\(\{[\s\S]*'Transfer branch stock', TRANSFER_STOCK_MUTATION_TIMEOUT_MS\)/)
+  assert.match(transfer, /saveTransferRun\(user\?\.id, run\)[\s\S]*executeTransferRun\(run/)
+  assert.match(readFrontend('src/api/branchTransport.ts'), /apiFetch\('POST', '\/api\/branches\/transfer-bulk', body, 90_000\)/)
   assert.match(transfer, /finally \{[\s\S]*finishSingleAction\(transferInFlightRef\)[\s\S]*setSaving\(false\)/)
 })
 
@@ -604,7 +605,9 @@ await runTest('inventory adjust, transfer, and batch actions use shared guards a
   assert.match(source, /if \(!beginSingleAction\(transferStockInFlightRef, \{ blocked: transferSaving \}\)\) return/)
   assert.match(source, /finally \{[\s\S]*finishSingleAction\(adjustStockInFlightRef\)[\s\S]*setAdjustSaving\(false\)/)
   assert.match(source, /finally \{[\s\S]*finishSingleAction\(transferStockInFlightRef\)[\s\S]*setTransferSaving\(false\)/)
-  assert.ok(mutationLines.length >= 2, 'inventory should still call adjust + transfer stock mutation APIs through the bounded runInventoryMutation wrapper')
+  assert.ok(mutationLines.length >= 1, 'inventory adjustment must keep its bounded mutation wrapper')
+  assert.match(source, /api\.executeInventoryTransfer\(run, checkpoint\)/, 'transfer uses the durable executor and shared HTTP deadline')
+  assert.match(source, /api\.saveInventoryTransfer\(actorId, run\)/, 'freeze and persist before transfer dispatch')
 
   // ManageBatchesModal owns per-batch edits since Part 562 relocated them out
   // of Inventory; its save must keep a synchronous ref guard (state alone is
