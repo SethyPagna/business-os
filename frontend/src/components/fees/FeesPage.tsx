@@ -80,6 +80,7 @@ interface FeesAppContextValue {
   khrToUsd: (value: unknown) => number
   usdToKhr: (value: unknown) => number
   displayCurrency: string
+  user?: { id?: number | string | null } | null
 }
 
 interface FeesSyncContextValue {
@@ -159,7 +160,7 @@ export function buildFeeExportRows(rows: FeeRecord[], feeTypeLabel: (type: strin
 }
 
 export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
-  const { can, getPermissionTier, t, notify, fmtUSD, fmtKHR, khrToUsd, usdToKhr, displayCurrency } = useApp()
+  const { can, getPermissionTier, t, notify, fmtUSD, fmtKHR, khrToUsd, usdToKhr, displayCurrency, user } = useApp()
   // Display-currency-aware money formatter (see utils/reportMoney.ts) —
   // honors the display_currency setting without touching stored data.
   const fmtMoney = useMemo(
@@ -207,6 +208,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
 
   const [modal, setModal] = useState<FeeModal>(null)
   const [selected, setSelected] = useState<FeeRecord | null>(null)
+  const [feeFormLocked, setFeeFormLocked] = useState(false)
   const [deletingId, setDeletingId] = useState<number | null>(null)
   const [exportDialog, setExportDialog] = useState<{ rows: Array<Record<string, unknown>>; baseName: string } | null>(null)
   const [showLabelManager, setShowLabelManager] = useState(false)
@@ -423,9 +425,9 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
     { label: tr('export_all', 'Export all expenses'), onClick: () => { void openFeeExport('all') } },
   ]), [openFeeExport, tr])
 
-  const openAdd = () => { if (canAddFee) { setSelected(null); setModal('form') } }
-  const openEdit = (fee: FeeRecord) => { if (canEditFee) { setSelected(fee); setModal('form') } }
-  const closeModal = () => { setModal(null); setSelected(null) }
+  const openAdd = () => { if (canAddFee) { setFeeFormLocked(false); setSelected(null); setModal('form') } }
+  const openEdit = (fee: FeeRecord) => { if (canEditFee) { setFeeFormLocked(false); setSelected(fee); setModal('form') } }
+  const closeModal = () => { setFeeFormLocked(false); setModal(null); setSelected(null) }
 
   const restoreFeeForm = useCallback(async (entry: MinimizedWorkEntry): Promise<boolean> => {
     const rawFeeId = entry.payload?.feeId
@@ -437,6 +439,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
       return false
     }
     if (!isEdit) {
+      setFeeFormLocked(false)
       setSelected(null)
       setModal('form')
       return true
@@ -444,6 +447,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
     try {
       const result = await getFeeRequest(feeId)
       if (!result?.fee) throw new Error('fee missing')
+      setFeeFormLocked(false)
       setSelected(result.fee)
       setModal('form')
       return true
@@ -484,11 +488,11 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
         )
         notify(tr('fee_updated', 'Expense updated'), 'success')
       } else {
-        await withLoaderTimeout(
-          () => createFeeRequest(payload),
-          'fees:create',
-          FEES_MUTATION_TIMEOUT_MS,
-        )
+        // createFee owns its uncertain-outcome lifecycle. Wrapping it in a
+        // UI timeout would reject while the underlying request kept running,
+        // allowing a late success to clear the receipt behind an "unknown"
+        // form and turn the next Save into a duplicate request.
+        await createFeeRequest(payload, user?.id)
         notify(tr('fee_created', 'Expense added'), 'success')
       }
       await load(true)
@@ -511,6 +515,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
   const feeDraftKey = scopedWorkDraftKey(feeFormDraftBaseKey(selected?.id))
   const canMinimizeFeeForm = selected ? canEditFee : canAddFee
   const preserveFeeForm = () => {
+    if (feeFormLocked) return
     flushPendingWorkDraft(feeDraftKey)
     const isEdit = selected != null
     minimizeWork({
@@ -727,7 +732,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
               not consistent breakdown"). */}
           <div className="dense-data-shell hidden overflow-x-auto md:block">
             <table className="dense-data-table min-w-[720px]">
-              <colgroup><col className="w-[7rem]" /><col className="w-[7rem]" /><col /><col className="w-[9rem]" /><col className="w-[12rem]" /><col className="w-[4.5rem]" /></colgroup>
+              <colgroup><col className="w-[7rem]" /><col className="w-[7rem]" /><col /><col className="w-[9rem]" /><col className="w-[12rem]" /><col className="w-[5.25rem]" /></colgroup>
               <thead>
                 <tr>
                   <th>{tr('time', 'Time')}</th>
@@ -763,8 +768,14 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
                             <span className="truncate">{fee.sale_receipt_number ? `${fee.sale_receipt_number} · Sale ID #${fee.sale_id}` : `Sale ID #${fee.sale_id}`}</span>
                           </span>
                         ) : null}
+                        {fee.created_by_name ? (
+                          <span className="truncate text-[11px] text-slate-400">{fee.created_by_name}</span>
+                        ) : null}
                         {fee.branch_name ? (
                           <span className="truncate text-[11px] text-slate-400">{fee.branch_name}</span>
+                        ) : null}
+                        {fee.delivery_contact_name ? (
+                          <span className="truncate text-[11px] text-slate-400">{fee.delivery_contact_name}</span>
                         ) : null}
                       </div>
                     </td>
@@ -775,7 +786,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
                           onClick={(event) => { event.stopPropagation(); openEdit(fee) }}
                           aria-label={tr('edit', 'Edit')}
                           title={tr('edit', 'Edit')}
-                          className="flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-700"
+                          className="flex h-10 w-10 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-700"
                         >
                           <Pencil className="h-3.5 w-3.5" />
                         </button> : null}
@@ -785,7 +796,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
                           disabled={deletingId === fee.id}
                           aria-label={feesNeedsApproval ? tr('delete_needs_approval', 'Delete (needs approval)') : tr('delete', 'Delete')}
                           title={feesNeedsApproval ? tr('delete_needs_approval', 'Delete (needs approval)') : tr('delete', 'Delete')}
-                          className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-red-50 hover:text-red-500 disabled:opacity-50 dark:hover:bg-red-950"
+                          className="flex h-10 w-10 items-center justify-center rounded-md text-slate-400 hover:bg-red-50 hover:text-red-500 disabled:opacity-50 dark:hover:bg-red-950"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
@@ -821,10 +832,10 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
                     {fmtMoney(Number(fee.amount_usd) || 0, Number(fee.amount_khr) || 0)}
                   </span>
                   <div className="flex shrink-0 items-center gap-0.5">
-                    {canEditFee ? <button type="button" onClick={() => openEdit(fee)} aria-label={tr('edit', 'Edit')} className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700">
+                    {canEditFee ? <button type="button" onClick={() => openEdit(fee)} aria-label={tr('edit', 'Edit')} className="flex h-10 w-10 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700">
                       <Pencil className="h-3.5 w-3.5" />
                     </button> : null}
-                    <button type="button" onClick={() => handleDelete(fee)} disabled={deletingId === fee.id} aria-label={feesNeedsApproval ? tr('delete_needs_approval', 'Delete (needs approval)') : tr('delete', 'Delete')} title={feesNeedsApproval ? tr('delete_needs_approval', 'Delete (needs approval)') : tr('delete', 'Delete')} className="rounded-full p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-500 disabled:opacity-50 dark:hover:bg-red-950">
+                    <button type="button" onClick={() => handleDelete(fee)} disabled={deletingId === fee.id} aria-label={feesNeedsApproval ? tr('delete_needs_approval', 'Delete (needs approval)') : tr('delete', 'Delete')} title={feesNeedsApproval ? tr('delete_needs_approval', 'Delete (needs approval)') : tr('delete', 'Delete')} className="flex h-10 w-10 items-center justify-center rounded-full text-slate-400 hover:bg-red-50 hover:text-red-500 disabled:opacity-50 dark:hover:bg-red-950">
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
                   </div>
@@ -834,7 +845,9 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
                     {feeTypeLabel(fee.fee_type)}
                   </span>
                   <span className="min-w-0 flex-1 truncate font-medium text-slate-700 dark:text-slate-200">{fee.label || ''}</span>
+                  {fee.created_by_name ? <span className="max-w-[25%] truncate text-slate-400">{fee.created_by_name}</span> : null}
                   {fee.branch_name ? <span className="max-w-[35%] truncate text-slate-400">{fee.branch_name}</span> : null}
+                  {fee.delivery_contact_name ? <span className="max-w-[25%] truncate text-slate-400">{fee.delivery_contact_name}</span> : null}
                 </div>
               </div>
                 ))}
@@ -861,16 +874,20 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
         <Modal
           title={selected ? tr('edit_fee', 'Edit Expense') : tr('add_fee', 'Add Expense')}
           onClose={closeModal}
-          onMinimize={canMinimizeFeeForm ? preserveFeeForm : undefined}
-          headerExtra={canMinimizeFeeForm ? <MinimizeButton tr={(key, fallback) => tr(key, fallback)} onMinimize={preserveFeeForm} /> : null}
+          closeDisabled={feeFormLocked}
+          onMinimize={canMinimizeFeeForm && !feeFormLocked ? preserveFeeForm : undefined}
+          headerExtra={canMinimizeFeeForm ? <MinimizeButton tr={(key, fallback) => tr(key, fallback)} onMinimize={preserveFeeForm} disabled={feeFormLocked} /> : null}
           size="sm"
           unsavedChanges={{ workKey: feeFormWorkKey(selected?.id) }}
         >
           <FeeForm
+            key={`${selected?.id ?? 'new'}:${user?.id ?? 'anonymous'}`}
             fee={selected}
+            actorId={user?.id}
             labelSuggestions={[...new Set(fees.map((row) => String(row.label || '').trim()).filter(Boolean))].sort()}
             onSave={handleSave}
             onClose={closeModal}
+            onInteractionLockChange={setFeeFormLocked}
           />
         </Modal>
       ) : null}

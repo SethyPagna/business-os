@@ -84,6 +84,8 @@ function dbCompat() {
 }
 
 const conflictControl = loadReal('lib/conflictControl.ts')
+const actorSnapshot = loadReal('lib/actorSnapshot.ts')
+const feeOperationReceipt = loadReal('lib/feeOperationReceipt.ts')
 const feeRoute = loadReal('routes/fees.ts', {
   hono: require('hono'),
   '../lib/db': { getDb: dbCompat },
@@ -97,6 +99,8 @@ const feeRoute = loadReal('routes/fees.ts', {
   '../lib/permissions': { getPermissionTier: () => 'full', getActionTier: () => 'full' },
   '../durable-objects/broadcastHub': { broadcast: async (...args) => { broadcasts.push(args) } },
   '../lib/conflictControl': conflictControl,
+  '../lib/actorSnapshot': actorSnapshot,
+  '../lib/feeOperationReceipt': feeOperationReceipt,
   '../lib/reviewGate': { maybeQueueForReview: async () => null },
   '../lib/businessDateWindow': { businessToday: () => '2026-09-08' },
   '../lib/telegram': { sendTelegramEvent: async () => {}, telegramMoney: () => '' },

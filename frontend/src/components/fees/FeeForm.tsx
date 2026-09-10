@@ -14,7 +14,16 @@ import AppSelect from '../shared/AppSelect.tsx'
 import SearchInput from '../shared/SearchInput.tsx'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
 import { normalizePriceValue } from '../../utils/pricing.ts'
-import { getFeeLabels, type FeeLabelSuggestion, type FeeRecord, type FeeType } from '../../api/feesTransport.ts'
+import {
+  discardPendingFeeCreate,
+  getFeeLabels,
+  getPendingFeeCreate,
+  type FeeCreateBody,
+  type FeeLabelSuggestion,
+  type FeeRecord,
+  type FeeType,
+  type PendingFeeCreate,
+} from '../../api/feesTransport.ts'
 import { todayStr } from '../../utils/dateHelpers.ts'
 import { branchCanSell } from '../../utils/branchRoles.ts'
 
@@ -134,6 +143,7 @@ export function feeToFormState(fee?: FeeRecord | null): FeeFormState {
 
 type FeeFormProps = {
   fee?: FeeRecord | null
+  actorId?: number | string | null
   /** Distinct labels already used on saved fees — offered as suggestions so
    *  a recurring reason ("Boost", "ទឹកភ្លើង") is picked, not retyped. */
   labelSuggestions?: string[]
@@ -148,6 +158,7 @@ type FeeFormProps = {
     notes: string | null
   }) => Promise<void> | void
   onClose: () => void
+  onInteractionLockChange?: (locked: boolean) => void
 }
 
 // S4-21: the registry key for this form's unsaved work, exported so the
@@ -180,24 +191,51 @@ function restoreFeeForm(base: FeeFormState, draft?: Partial<FeeFormState> | null
   }
 }
 
-export default function FeeForm({ fee, labelSuggestions = [], onSave, onClose }: FeeFormProps) {
+export function feeCreateBodyToFormState(body: FeeCreateBody): FeeFormState {
+  return {
+    fee_type: body.fee_type,
+    label: body.label || '',
+    amount_usd: body.amount_usd ? String(body.amount_usd) : '',
+    amount_khr: body.amount_khr ? String(body.amount_khr) : '',
+    fee_date: body.fee_date,
+    sale_id: body.sale_id == null ? '' : String(body.sale_id),
+    branch_id: body.branch_id == null ? '' : String(body.branch_id),
+    notes: body.notes || '',
+  }
+}
+
+export function feeFormInteractionLocked(saving: boolean, pending: PendingFeeCreate | null): boolean {
+  return saving || pending != null
+}
+
+export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, onClose, onInteractionLockChange }: FeeFormProps) {
   const { t } = useApp()
   const draftKey = scopedWorkDraftKey(feeFormDraftBaseKey(fee?.id))
+  const initialPendingRef = useRef<PendingFeeCreate | null>(fee ? null : getPendingFeeCreate(actorId))
   const restoredDraftRef = useRef<ReturnType<typeof readWorkDraft<Partial<FeeFormState>>> | undefined>(undefined)
   if (restoredDraftRef.current === undefined) {
     restoredDraftRef.current = readWorkDraft<Partial<FeeFormState>>(draftKey, {
       notOlderThanMs: fee?.updated_at ? Date.parse(fee.updated_at) || 0 : 0,
     })
   }
-  const [form, setForm] = useState<FeeFormState>(() => restoreFeeForm(feeToFormState(fee), restoredDraftRef.current?.data))
+  const [form, setForm] = useState<FeeFormState>(() => initialPendingRef.current
+    ? feeCreateBodyToFormState(initialPendingRef.current.body)
+    : restoreFeeForm(feeToFormState(fee), restoredDraftRef.current?.data))
   const [saving, setSaving] = useState(false)
+  const savingRef = useRef(false)
+  const [pendingCreate, setPendingCreate] = useState<PendingFeeCreate | null>(initialPendingRef.current)
+  const interactionLocked = feeFormInteractionLocked(saving, pendingCreate)
+  useEffect(() => {
+    onInteractionLockChange?.(interactionLocked)
+    return () => onInteractionLockChange?.(false)
+  }, [interactionLocked, onInteractionLockChange])
   // One declaration; the ✕ above, the navigation guard, beforeunload, the
   // sidebar dot and the update gate all read it. Latched off on a real
   // save so closing after saving never prompts.
   const { dirty } = useFormDirty(form, String(fee?.id ?? 'new'))
   const savedRef = useRef(false)
   const dirtyRef = useRef(false)
-  dirtyRef.current = (dirty || !!restoredDraftRef.current) && !savedRef.current
+  dirtyRef.current = (dirty || !!restoredDraftRef.current || !!pendingCreate) && !savedRef.current
   const requestClose = useModalClose(onClose)
   useEffect(() => registerDirtyWork({
     key: feeFormWorkKey(fee?.id),
@@ -325,6 +363,7 @@ export default function FeeForm({ fee, labelSuggestions = [], onSave, onClose }:
   }, [])
 
   const set = <K extends keyof FeeFormState>(key: K, value: FeeFormState[K]) => {
+    if (interactionLocked) return
     setForm((prev) => ({ ...prev, [key]: value }))
   }
 
@@ -341,11 +380,13 @@ export default function FeeForm({ fee, labelSuggestions = [], onSave, onClose }:
   })()
 
   const handleSave = async () => {
+    if (savingRef.current) return
     setTouched(true)
     if (amountsInvalid || dateInvalid || !form.branch_id.trim()) return
     const saleId = form.sale_id.trim() ? Number(form.sale_id.trim()) : null
     const branchId = form.branch_id.trim() ? Number(form.branch_id.trim()) : null
     try {
+      savingRef.current = true
       setSaving(true)
       await onSave({
         fee_type: form.fee_type,
@@ -364,9 +405,24 @@ export default function FeeForm({ fee, labelSuggestions = [], onSave, onClose }:
       restoredDraftRef.current = null
       clearWorkDraft(draftKey)
       onClose()
+    } catch {
+      if (!fee) {
+        const pending = getPendingFeeCreate(actorId)
+        setPendingCreate(pending)
+        if (pending) setForm(feeCreateBodyToFormState(pending.body))
+      }
     } finally {
+      savingRef.current = false
       setSaving(false)
     }
+  }
+
+  const discardPending = () => {
+    if (!pendingCreate || savingRef.current || !actorId) return
+    const warning = `${t('write_outcome_unknown') || 'The previous save may already have succeeded.'} ${t('discard_changes') || 'Discard changes'}?`
+    if (!window.confirm(warning)) return
+    discardPendingFeeCreate(actorId, pendingCreate.client_request_id)
+    setPendingCreate(null)
   }
 
   return (
@@ -377,6 +433,13 @@ export default function FeeForm({ fee, labelSuggestions = [], onSave, onClose }:
         void handleSave()
       }}
     >
+      {pendingCreate ? (
+        <div role="alert" className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100">
+          <p className="font-semibold">{t('write_outcome_unknown_title') || 'Save outcome unknown'}</p>
+          <p className="mt-1 text-xs">{t('write_outcome_unknown') || 'The previous save may already have succeeded. Retry the exact original request or discard it before making changes.'}</p>
+        </div>
+      ) : null}
+      <fieldset disabled={interactionLocked} className="space-y-4 disabled:opacity-70">
       {/* Type + label genuinely share one row (the old comment claimed this
           while the JSX still stacked them). The label input suggests every
           label already saved on a fee, so recurring reasons are reusable
@@ -575,6 +638,7 @@ export default function FeeForm({ fee, labelSuggestions = [], onSave, onClose }:
           maxLength={2000}
         />
       </div>
+      </fieldset>
 
       {/* Sticky footer: pinned to the bottom of Modal.tsx's scrollable area
           (.modal-scroll) so Save/Cancel stay reachable without scrolling to
@@ -583,13 +647,23 @@ export default function FeeForm({ fee, labelSuggestions = [], onSave, onClose }:
           against the bottom edge; px-5 pb-5 pt-4 puts it back inside the bar. */}
       <div className="sticky bottom-0 -mx-5 -mb-5 flex gap-3 border-t border-gray-200 bg-white px-5 pb-5 pt-4 dark:border-gray-700 dark:bg-gray-800">
         <button className="btn-primary flex-1" type="submit" disabled={saving}>
-          {saving ? (t('saving') || 'Saving...') : (t('save_fee') || 'Save Expense')}
+          {saving
+            ? (t('saving') || 'Saving...')
+            : pendingCreate
+              ? (t('retry_original_request') || 'Retry original request')
+              : (t('save_fee') || 'Save Expense')}
         </button>
-        {/* Cancel is a dismissal: through the modal's guard, not straight
-            to onClose (S4-21). */}
-        <button className="btn-secondary" type="button" onClick={requestClose}>
-          {t('cancel') || 'Cancel'}
-        </button>
+        {pendingCreate ? (
+          <button className="btn-secondary" type="button" disabled={saving} onClick={discardPending}>
+            {t('discard_retry') || 'Discard retry'}
+          </button>
+        ) : (
+          /* Cancel is a dismissal: through the modal's guard, not straight
+             to onClose (S4-21). */
+          <button className="btn-secondary" type="button" disabled={saving} onClick={requestClose}>
+            {t('cancel') || 'Cancel'}
+          </button>
+        )}
       </div>
     </form>
   )
