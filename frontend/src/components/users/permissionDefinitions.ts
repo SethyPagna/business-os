@@ -332,20 +332,11 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'branches',
     tKey: 'perm_section_branches',
     label: 'Branches',
-    description: 'Branch records and inter-branch stock movement.',
+    description: 'Canonical Shop and Warehouse records, their editable details, exports, and inter-branch stock movement.',
     permissions: [
-      // tier: true -- Branch used to be folded into the 'inventory' key
-      // above; split into its own key so it can be granted independently
-      // (see cloudflare/src/lib/permissions.ts's ENTITY_PERMISSION_MAP
-      // comment for the backend half of this split). Review Required tier
-      // is wired end to end: create/update queue directly (no live-state
-      // risk), delete also queues but its applier re-checks "not the
-      // default branch" / "no stock left" at approval time, not just at
-      // request time. Transferring stock and repairing misplaced stock
-      // both move real quantities and are deliberately Full-Access-only
-      // for now -- a Review Required user can view branches and submit a
-      // create/edit/delete for approval, but cannot transfer stock between
-      // branches.
+      // Canonical branch identities are fixed: the editor therefore exposes
+      // no create/delete claim. Review Required can view/export and submit
+      // detail edits for approval; stock transfer and repair remain Full-only.
       {
         key: 'branches',
         tKey: 'perm_branches',
@@ -353,7 +344,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         sensitivity: 'high',
         tier: true,
         reviewTKey: 'perm_branches_review_desc',
-        reviewDescription: 'Under Review Required, viewing branches works directly. Creating, editing, or deleting a branch goes to the Review/Approval queue for an admin to approve or reject. Transferring stock between branches and repairing misplaced stock both require Full Access.',
+        reviewDescription: 'Under Review Required, viewing and exporting branches works directly. Editing canonical branch details goes to the Review/Approval queue. Transferring stock and repairing misplaced stock require Full Access.',
       },
     ],
   },
@@ -429,7 +420,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         sensitivity: 'high',
         tier: true,
         reviewTKey: 'perm_fees_review_desc',
-        reviewDescription: 'Under Review Required, create, edit, and search all work directly. Only delete goes to the Review/Approval queue for an admin to approve or reject.',
+        reviewDescription: 'Under Review Required, create, edit, search, and export work directly. Only delete goes to the Review/Approval queue for an admin to approve or reject.',
       },
     ],
   },

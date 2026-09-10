@@ -90,6 +90,14 @@ export interface ReportPermissions {
   sales: boolean
   returns: boolean
   fees: boolean
+  /** Strict Full Sales-or-POS authority, matching the Worker Shift surface. */
+  shift: boolean
+}
+
+export interface ReportExportPermissions {
+  sales: boolean
+  returns: boolean
+  fees: boolean
 }
 
 export function isReportViewId(value: unknown): value is ReportViewId {
@@ -103,8 +111,33 @@ export function getReportView(id: ReportViewId): ReportViewDef {
 }
 
 export function viewAllowed(def: ReportViewDef, perm: ReportPermissions): boolean {
+  if (def.id === 'shift') return perm.shift
   if (def.area === 'any') return perm.sales || perm.returns || perm.fees
   return perm[def.area]
+}
+
+/**
+ * Export authority for one report. Overview contains every readable domain,
+ * so it may leave the app only when every included domain is exportable.
+ * Shift and every other sales-derived view use the Sales export switch even
+ * when Full POS alone made Shift visible.
+ */
+export function reportExportAllowed(
+  def: ReportViewDef,
+  readable: ReportPermissions,
+  exportable: ReportExportPermissions,
+): boolean {
+  if (!viewAllowed(def, readable)) return false
+  if (def.id === 'overview') {
+    const anyIncluded = readable.sales || readable.returns || readable.fees
+    return anyIncluded
+      && (!readable.sales || exportable.sales)
+      && (!readable.returns || exportable.returns)
+      && (!readable.fees || exportable.fees)
+  }
+  if (def.area === 'returns') return exportable.returns
+  if (def.area === 'fees') return exportable.fees
+  return exportable.sales
 }
 
 export function visibleReportViews(perm: ReportPermissions): ReportViewDef[] {

@@ -179,6 +179,14 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
   const feesNeedsApproval = getPermissionTier('fees') === 'review'
   const canAddFee = can('fees', 'add')
   const canEditFee = can('fees', 'edit')
+  const canDeleteFee = can('fees', 'delete')
+  const canExportFee = can('fees', 'export')
+  const canEditFeeRef = useRef(canEditFee)
+  const canDeleteFeeRef = useRef(canDeleteFee)
+  const canExportFeeRef = useRef(canExportFee)
+  canEditFeeRef.current = canEditFee
+  canDeleteFeeRef.current = canDeleteFee
+  canExportFeeRef.current = canExportFee
   const { syncChannel } = useSync()
   // E2: Fees renders as a SECTION of the Sales hub now (see Returns.tsx's
   // matching re-key note).
@@ -216,6 +224,11 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
   const loadRequestRef = useRef(0)
   const deleteActionRef = useRef<Set<string>>(new Set())
   const exportInFlightRef = useRef(false)
+
+  useEffect(() => {
+    if (!canExportFee) setExportDialog(null)
+    if (!canEditFee) setShowLabelManager(false)
+  }, [canEditFee, canExportFee])
 
   const load = useCallback(async (silent = false) => {
     const requestId = beginTrackedRequest(loadRequestRef)
@@ -392,7 +405,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
   const openFeeExport = useCallback(async (
     scope: 'visible' | 'filtered' | 'all',
   ): Promise<void> => {
-    if (exportInFlightRef.current) return
+    if (!canExportFeeRef.current || exportInFlightRef.current) return
     exportInFlightRef.current = true
     try {
       const sourceRows = scope === 'visible'
@@ -404,6 +417,9 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
           to: stripRange.endDate || undefined,
           branch_id: branchFilter || undefined,
         } : {})
+      // A fetch begun while allowed must not open an export result after the
+      // permission is revoked. The live ref also protects a stale menu callback.
+      if (!canExportFeeRef.current) return
       if (!sourceRows.length) {
         notify(tr('no_data_to_export', 'No data to export'), 'error')
         return
@@ -413,7 +429,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
         baseName: scope === 'all' ? 'expenses-all' : scope === 'filtered' ? 'expenses-filtered' : 'expenses-visible',
       })
     } catch (error) {
-      notify(error instanceof Error ? error.message : String(error || ''), 'error')
+      if (canExportFeeRef.current) notify(error instanceof Error ? error.message : String(error || ''), 'error')
     } finally {
       exportInFlightRef.current = false
     }
@@ -427,6 +443,9 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
 
   const openAdd = () => { if (canAddFee) { setFeeFormLocked(false); setSelected(null); setModal('form') } }
   const openEdit = (fee: FeeRecord) => { if (canEditFee) { setFeeFormLocked(false); setSelected(fee); setModal('form') } }
+  const openLabelManager = useCallback(() => {
+    if (canEditFeeRef.current) setShowLabelManager(true)
+  }, [])
   const closeModal = () => { setFeeFormLocked(false); setModal(null); setSelected(null) }
 
   const restoreFeeForm = useCallback(async (entry: MinimizedWorkEntry): Promise<boolean> => {
@@ -534,7 +553,9 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
   }
 
   const handleDelete = async (fee: FeeRecord) => {
+    if (!canDeleteFeeRef.current) return
     if (!window.confirm(tr('delete_fee_confirm', 'Delete this expense record? This cannot be undone.'))) return
+    if (!canDeleteFeeRef.current) return
     if (!beginKeyedAction(deleteActionRef, fee.id)) return
     setDeletingId(fee.id)
     try {
@@ -613,18 +634,18 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
               label={tr('shift_code', 'Shift')}
               buttonClassName="btn-secondary inline-flex h-10 min-w-10 items-center justify-center px-2.5 py-0 text-xs md:min-w-0"
             />
-            <SectionExportAction>
+            {canExportFee ? <SectionExportAction>
               <ExportMenu
                 label={tr('export', 'Export')}
                 items={exportItems}
                 iconOnly
                 triggerClassName={`${toolbarIconButtonClassName} !h-10 !min-h-10 !w-10 !rounded-full !border-0 !bg-transparent !p-0`}
               />
-            </SectionExportAction>
-            <button type="button" className="btn-secondary inline-flex h-10 items-center gap-1 px-2.5 py-0 text-xs" onClick={() => setShowLabelManager(true)} title={tr('manage_expense_labels', 'Manage expense labels')}>
+            </SectionExportAction> : null}
+            {canEditFee ? <button type="button" className="btn-secondary inline-flex h-10 items-center gap-1 px-2.5 py-0 text-xs" onClick={openLabelManager} title={tr('manage_expense_labels', 'Manage expense labels')}>
               <Tags className="h-3.5 w-3.5" />
               <span>{tr('labels', 'Labels')}</span>
-            </button>
+            </button> : null}
           </>
         )}
         actions={canAddFee ? (
@@ -645,7 +666,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
         onRangeChange={setStripRange}
       />
 
-      {exportDialog ? (
+      {exportDialog && canExportFee ? (
         <Suspense fallback={null}>
           <ExportOptionsDialog
             title={tr('export_options_title', 'Export options')}
@@ -790,7 +811,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
                         >
                           <Pencil className="h-3.5 w-3.5" />
                         </button> : null}
-                        <button
+                        {canDeleteFee ? <button
                           type="button"
                           onClick={(event) => { event.stopPropagation(); void handleDelete(fee) }}
                           disabled={deletingId === fee.id}
@@ -799,7 +820,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
                           className="flex h-10 w-10 items-center justify-center rounded-md text-slate-400 hover:bg-red-50 hover:text-red-500 disabled:opacity-50 dark:hover:bg-red-950"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
-                        </button>
+                        </button> : null}
                       </div>
                     </td>
                   </tr>
@@ -835,9 +856,9 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
                     {canEditFee ? <button type="button" onClick={() => openEdit(fee)} aria-label={tr('edit', 'Edit')} className="flex h-10 w-10 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700">
                       <Pencil className="h-3.5 w-3.5" />
                     </button> : null}
-                    <button type="button" onClick={() => handleDelete(fee)} disabled={deletingId === fee.id} aria-label={feesNeedsApproval ? tr('delete_needs_approval', 'Delete (needs approval)') : tr('delete', 'Delete')} title={feesNeedsApproval ? tr('delete_needs_approval', 'Delete (needs approval)') : tr('delete', 'Delete')} className="flex h-10 w-10 items-center justify-center rounded-full text-slate-400 hover:bg-red-50 hover:text-red-500 disabled:opacity-50 dark:hover:bg-red-950">
+                    {canDeleteFee ? <button type="button" onClick={() => { void handleDelete(fee) }} disabled={deletingId === fee.id} aria-label={feesNeedsApproval ? tr('delete_needs_approval', 'Delete (needs approval)') : tr('delete', 'Delete')} title={feesNeedsApproval ? tr('delete_needs_approval', 'Delete (needs approval)') : tr('delete', 'Delete')} className="flex h-10 w-10 items-center justify-center rounded-full text-slate-400 hover:bg-red-50 hover:text-red-500 disabled:opacity-50 dark:hover:bg-red-950">
                       <Trash2 className="h-3.5 w-3.5" />
-                    </button>
+                    </button> : null}
                   </div>
                 </div>
                 <div data-expense-line="secondary" className="mt-1 flex min-w-0 items-center gap-1.5 text-xs">
@@ -892,9 +913,10 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
         </Modal>
       ) : null}
 
-      {showLabelManager ? (
+      {showLabelManager && canEditFee ? (
         <Suspense fallback={null}>
           <ExpenseLabelManagerModal
+            canEdit={() => canEditFeeRef.current}
             onClose={() => setShowLabelManager(false)}
             onChanged={() => load(true)}
             notify={notify}

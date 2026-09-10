@@ -57,12 +57,12 @@ export default function ShiftReport(p: ReportViewProps) {
       titleControl={p.titleControl}
       count={shift?.shift_code}
       hint={{ label: tr('shift_report', 'Shift Report'), text: tr('shift_report_hint', 'Registered OPEN and END cash is report-only. Business results come from sales, COGS, profit, delivery, expenses, refunds, and positive Not Paid.') }}
-      actions={shift ? (
+      actions={(
         <div className="flex items-center gap-2">
           <ShiftHistoryPanel branchId={branchId} compact label={tr('shift_history', 'Shift history')} />
-          <OverflowMenu label={tr('export', 'Export')} items={exportMenuItems(tr, exportCsv, exportPrint, { csv: <Download className="h-3.5 w-3.5" />, print: <Printer className="h-3.5 w-3.5" /> })} />
+          {shift && p.canExport() ? <OverflowMenu label={tr('export', 'Export')} items={exportMenuItems(tr, p.canExport, exportCsv, exportPrint, { csv: <Download className="h-3.5 w-3.5" />, print: <Printer className="h-3.5 w-3.5" /> })} /> : null}
         </div>
-      ) : <ShiftHistoryPanel branchId={branchId} compact label={tr('shift_history', 'Shift history')} />}
+      )}
       summary={shift ? `${shift.user_name || tr('shift_staff', 'Staff')} · ${shift.branch_name || tr('all_branches', 'All branches')}` : ''}
       error={state.error}
       onRetry={state.reload}

@@ -143,15 +143,14 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
   // cloudflare/src/routes/branches.ts
   branches: [
     { key: 'view', tKey: 'perm_act_branches_view', label: 'View and search', review: 'allow' },
-    { key: 'add', tKey: 'perm_act_branches_add', label: 'Add branch', review: 'queue' },
     { key: 'edit', tKey: 'perm_act_branches_edit', label: 'Edit branch', review: 'queue' },
-    // Queues, and the applier re-checks "not default" / "no stock left"
-    // at approval time rather than trusting the request-time check.
-    { key: 'delete', tKey: 'perm_act_branches_delete', label: 'Delete branch', review: 'queue' },
     // POST /transfer, /transfer-bulk -> 403 for review (branches.ts ~281, ~443)
     { key: 'transfer', tKey: 'perm_act_branches_transfer', label: 'Transfer stock between branches', review: 'block' },
     // POST /stock-integrity/repair -> 403 for review (branches.ts ~164)
     { key: 'repair_stock', tKey: 'perm_act_branches_repair_stock', label: 'Repair misplaced stock', review: 'block' },
+    // Client-side export preserves the existing Full/Review behavior while
+    // giving an administrator a real one-way switch to narrow it.
+    { key: 'export', tKey: 'export', label: 'Export', review: 'allow' },
   ],
 
   // cloudflare/src/routes/returns.ts
@@ -185,6 +184,9 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     // DELETE /:id -> maybeQueueForReview (fees.ts ~263). The only Fees
     // action that does not apply directly.
     { key: 'delete', tKey: 'perm_act_fees_delete', label: 'Delete fee', review: 'queue' },
+    // Export packages rows the caller may already read. Keep that historical
+    // Full/Review default and allow an explicit false override to narrow it.
+    { key: 'export', tKey: 'export', label: 'Export', review: 'allow' },
   ],
 
   // cloudflare/src/routes/contacts.ts (all three tabs share this key),

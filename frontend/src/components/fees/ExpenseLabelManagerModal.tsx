@@ -14,13 +14,14 @@ import {
 import { FEE_TYPE_OPTIONS } from './FeeForm.tsx'
 
 type Props = {
+  canEdit: () => boolean
   onClose: () => void
   onChanged: () => void | Promise<void>
   notify: (message: string, type?: string) => void
   t: (key: string) => string | undefined
 }
 
-export default function ExpenseLabelManagerModal({ onClose, onChanged, notify, t }: Props) {
+export default function ExpenseLabelManagerModal({ canEdit, onClose, onChanged, notify, t }: Props) {
   const [labels, setLabels] = useState<FeeLabelSuggestion[]>([])
   const [loading, setLoading] = useState(true)
   const [renaming, setRenaming] = useState<string | null>(null)
@@ -45,17 +46,21 @@ export default function ExpenseLabelManagerModal({ onClose, onChanged, notify, t
   useEffect(() => { void load() }, [load])
 
   const rename = async (entry: FeeLabelSuggestion) => {
+    if (!canEdit()) return
     const to = window.prompt(tr('rename_expense_label', 'Rename or merge expense label'), entry.label)?.trim().replace(/\s+/g, ' ')
     if (!to || to.toLocaleLowerCase() === entry.label.toLocaleLowerCase()) return
     setRenaming(entry.label)
     try {
       const impact = await getFeeLabelImpact(entry.label, to) as { linked_records?: number; target_exists?: boolean }
+      if (!canEdit()) return
       const linked = Number(impact.linked_records || 0)
       const mergeNote = impact.target_exists ? ` "${to}" already exists, so these labels will merge.` : ''
       if (!window.confirm(
         `${linked} live expense record${linked === 1 ? '' : 's'} use "${entry.label}".${mergeNote}\n\nReplace only those exact matches with "${to}"? Audit history remains unchanged.`,
       )) return
+      if (!canEdit()) return
       await replaceFeeLabel(entry.label, to)
+      if (!canEdit()) return
       notify(impact.target_exists ? 'Expense labels merged.' : 'Expense label and linked records updated.', 'success')
       await Promise.all([load(), Promise.resolve(onChanged())])
     } catch (error) {
@@ -66,10 +71,12 @@ export default function ExpenseLabelManagerModal({ onClose, onChanged, notify, t
   }
 
   const classify = async (entry: FeeLabelSuggestion, feeType: FeeType) => {
+    if (!canEdit()) return
     if (feeType === entry.fee_type && (entry.type_counts?.length || 1) === 1) return
     setClassifying(entry.label)
     try {
       const impact = await getFeeLabelTypeImpact(entry.label)
+      if (!canEdit()) return
       const linked = Number(impact.linked_records || 0)
       const typeLabel = FEE_TYPE_OPTIONS.find((option) => option.value === feeType)
       const nextLabel = typeLabel ? (t(typeLabel.labelKey) || typeLabel.fallback) : feeType
@@ -79,7 +86,9 @@ export default function ExpenseLabelManagerModal({ onClose, onChanged, notify, t
       if (!window.confirm(
         `${linked} live expense record${linked === 1 ? '' : 's'} use "${entry.label}"${current ? ` (${current})` : ''}.\n\nClassify every exact label match as ${nextLabel}? The source label and audit history remain unchanged.`,
       )) return
+      if (!canEdit()) return
       const result = await classifyFeeLabel(entry.label, feeType)
+      if (!canEdit()) return
       notify(`${Number(result.changed) || 0} expense record${Number(result.changed) === 1 ? '' : 's'} classified as ${nextLabel}.`, 'success')
       await Promise.all([load(), Promise.resolve(onChanged())])
     } catch (error) {

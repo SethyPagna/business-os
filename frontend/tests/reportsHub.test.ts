@@ -542,20 +542,33 @@ test('reportQueryParams: clock window only for timestamp-backed views; status/pa
 })
 
 test('views: permissions gate the picker, the stored view survives only while allowed', () => {
-  const all = { sales: true, returns: true, fees: true }
+  const all = { sales: true, returns: true, fees: true, shift: true }
   assert.equal(visibleReportViews(all).length, REPORT_VIEWS.length)
-  const feesOnly = visibleReportViews({ sales: false, returns: false, fees: true }).map((v) => v.id)
+  const feesOnly = visibleReportViews({ sales: false, returns: false, fees: true, shift: false }).map((v) => v.id)
   assert.deepEqual(feesOnly, ['overview', 'expenses'], 'the Overview is visible with any one area; sales views are not')
+  const posShiftOnly = visibleReportViews({ sales: false, returns: false, fees: false, shift: true }).map((v) => v.id)
+  assert.deepEqual(posShiftOnly, ['shift'], 'Full POS opens Shift without exposing Sales-derived reports')
+  const salesViewOnly = visibleReportViews({ sales: true, returns: false, fees: false, shift: false }).map((v) => v.id)
+  assert.ok(!salesViewOnly.includes('shift'), 'Sales view-only never exposes a Shift request surface')
   assert.equal(resolveReportView('products', all), 'products')
-  assert.equal(resolveReportView('products', { sales: false, returns: true, fees: false }), 'overview', 'a no-longer-allowed stored view falls back to the first allowed one')
+  assert.equal(resolveReportView('products', { sales: false, returns: true, fees: false, shift: false }), 'overview', 'a no-longer-allowed stored view falls back to the first allowed one')
   assert.equal(resolveReportView('bogus', all), 'overview')
-  assert.equal(resolveReportView('sales', { sales: false, returns: false, fees: false }), null, 'nothing readable -> null (the hub shows its EmptyState)')
+  assert.equal(resolveReportView('sales', { sales: false, returns: false, fees: false, shift: false }), null, 'nothing readable -> null (the hub shows its EmptyState)')
   for (const v of REPORT_VIEWS) {
     assert.equal(v.supportsTime, v.id !== 'shift', `${v.id} exposes only filters its endpoint understands`)
     if (v.groupedBy) assert.ok(v.area === 'sales', `${v.id} grouped views are sales-gated`)
   }
   const ids = REPORT_VIEWS.map((v) => v.id)
   assert.equal(new Set(ids).size, ids.length, 'view ids are unique')
+})
+
+test('ReportsHub reads effective view authority and synchronously resolves revoked Shift', () => {
+  const hub = read('src/components/sales/ReportsHub.tsx')
+  for (const section of ['sales', 'returns', 'fees']) {
+    assert.ok(hub.includes(`const can${section[0].toUpperCase()}${section.slice(1)} = can('${section}', 'view')`), `${section} visibility uses its explicit view switch`)
+  }
+  assert.match(hub, /const canShift = getPermissionTier\('sales'\) === 'full' \|\| getPermissionTier\('pos'\) === 'full'/)
+  assert.match(hub, /const resolvedViewId = resolveReportView\(viewId, perms\)[\s\S]*const view = resolvedViewId \? getReportView\(resolvedViewId\) : null/, 'revocation is resolved during render, before the Shift child can issue a request')
 })
 
 test('options / style persistence is tolerant of garbage and round-trips through storage', () => {
