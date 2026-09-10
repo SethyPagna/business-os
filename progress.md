@@ -12411,3 +12411,12 @@ The compatibility repair is committed separately from release batches. It still
 needs the normal Worker release upload before it can affect new sales; existing
 historical rows remain readable through the canonical `/api/sales` relational
 join, while the dashboard has a correct relational count in the patched build.
+
+### Compatibility repair deployed — September 11, 2026
+
+Fix-scoped commit **0e02859b6e08** is live at 100% in Worker version
+**b7f55d99-21f3-486a-959e-519429b62204**. The Worker bundle was stamped revision
+`0e02859b6e08`, hash `bd3fb9934e9ac597`, built at
+`2026-09-10T17:27:53.671Z UTC`. This was a code-only upload: no migration,
+secret synchronization, or D1/R2 production data write ran. The deploy output
+reported no updated static assets and completed successfully.
