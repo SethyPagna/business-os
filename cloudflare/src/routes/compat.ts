@@ -10,7 +10,7 @@ import { audit, buildAuditLogRetentionDeleteSql } from '../lib/audit'
 import { buildAuditLogFilters } from '../lib/auditLogQuery'
 import { putObject, getObject, deleteObject } from '../lib/r2'
 import { getGoogleLoginPublicConfig } from '../lib/googleOauth'
-import { CUSTOMER_REFUND_JOIN, getSalesTotals, getSalesPeriodSeries, netRefundExpr, netSaleExpr, previousPeriodFilters, recognizedExpr } from '../lib/salesAnalytics'
+import { CUSTOMER_REFUND_JOIN, getSalesTotals, getSalesPeriodSeries, identifiedCustomerExpr, reportCustomerNameExpr, netRefundExpr, netSaleExpr, previousPeriodFilters, recognizedExpr } from '../lib/salesAnalytics'
 import { getFamilyStockAlertPage, getFamilyStockStats, type FamilyStockAlertState } from '../lib/familyStockStats'
 import { loadLowStockConfig } from '../lib/lowStockSettings'
 import { businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localHourExpr, localTimeRangeClause } from '../lib/businessDateWindow'
@@ -313,7 +313,7 @@ async function dashboardSummary(env: Env, query: Record<string, string>) {
       WHERE p.is_active = 1 AND expiry_date IS NOT NULL AND date(expiry_date) <= date('now', '+' || COALESCE(expiry_alert_days, 30) || ' day')
     `).get(params),
     db.prepare(`
-      SELECT id, receipt_number, created_at, sale_status, branch_name, customer_name, cashier_name, total_usd, total_khr,
+      SELECT id, receipt_number, created_at, sale_status, branch_name, ${reportCustomerNameExpr('sales.')} AS customer_name, cashier_name, total_usd, total_khr,
         (SELECT COALESCE(SUM(quantity), 0) FROM sale_items WHERE sale_id = sales.id) AS item_count
       FROM sales
       WHERE ${range.allTime ? '1 = 1' : localDateRangeClause('created_at')}${saleBranchClause('sales')}
@@ -462,7 +462,7 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>) {
       LIMIT 20
     `).all(analyticsParams),
     db.prepare(`
-      SELECT COALESCE(NULLIF(TRIM(s.customer_name), ''), 'Walk-in') AS customer_name, COUNT(*) AS sale_count,
+      SELECT MAX(CASE WHEN ${identifiedCustomerExpr('s.')} IS NULL THEN '' ELSE ${reportCustomerNameExpr('s.')} END) AS customer_name, COUNT(*) AS sale_count,
              COALESCE(SUM(s.subtotal_usd), 0) AS gross_revenue_usd,
              COALESCE(SUM(s.discount_usd), 0) AS store_discount_usd,
              COALESCE(SUM(s.membership_discount_usd), 0) AS membership_discount_usd,
@@ -470,7 +470,7 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>) {
       FROM sales s
       ${CUSTOMER_REFUND_JOIN}s.id
       WHERE ${activeSalesClause('s')}
-      GROUP BY COALESCE(NULLIF(TRIM(s.customer_name), ''), 'Walk-in')
+      GROUP BY ${identifiedCustomerExpr('s.')}
       ORDER BY net_revenue_usd DESC
       LIMIT 20
     `).all(analyticsParams),

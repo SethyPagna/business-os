@@ -9,6 +9,8 @@ import { DetailRow, DetailRowGroup, MoneyRow } from '../shared/DetailRows.tsx'
 import { getReturn as fetchReturnDetail } from '../../api/returnsReadTransport.ts'
 import { normalizeStockAction, stockActionOption } from './helpers/returnOptions.ts'
 
+import { customerDisplayName } from '../../utils/customerIdentity.ts'
+
 const CUSTOMER_SCOPE = 'customer'
 const SUPPLIER_SCOPE = 'supplier'
 
@@ -46,6 +48,7 @@ interface ReturnDetail {
   replacement_receipt_number?: string | null
   supplier_name?: string | null
   customer_name?: string | null
+  customer_is_anonymous?: number | boolean
   branch_name?: string | null
   cashier_name?: string | null
   reason?: string | null
@@ -203,7 +206,7 @@ export default function ReturnDetailModal({ ret, onClose, onMinimize, onEdit, fm
               ) : null}
               <DetailRow
                 label={isSupplier ? tr('supplier', 'Supplier') : tr('customer', 'Customer')}
-                value={(isSupplier ? ret.supplier_name : ret.customer_name) || '-'}
+                value={isSupplier ? ret.supplier_name || '-' : customerDisplayName(ret, tr('walk_in', 'General'))}
               />
               <DetailRow label={tr('branch', 'Branch')} value={ret.branch_name || '-'} />
               <DetailRow label={tr('cashier', 'Cashier')} value={ret.cashier_name || '-'} />

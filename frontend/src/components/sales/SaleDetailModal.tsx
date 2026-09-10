@@ -1369,9 +1369,8 @@ export default function SaleDetailModal({
                     wider screens where the Sale card has room for its table
                     rhythm. Anonymous customer identity still suppresses the
                     phone, exactly as the Customer card does below. */}
-                {customerIsAnonymous || sale.customer_name || sale.customer_phone || deliveryDriverName || deliveryDriverPhone ? (
                   <div data-sale-detail-mobile-contact="" className="flex items-center gap-x-1.5 overflow-x-auto whitespace-nowrap py-1.5 text-xs text-gray-500 sm:hidden">
-                    <span className="font-medium">{customerIsAnonymous ? (t('walk_in') || 'Walk-in') : sale.customer_name ? <EntityLink page="contacts">{sale.customer_name}</EntityLink> : null}</span>
+                    <span className="font-medium">{customerIsAnonymous ? (t('walk_in') || 'General') : sale.customer_name ? <EntityLink page="contacts">{sale.customer_name}</EntityLink> : (t('walk_in') || 'General')}</span>
                     {!customerIsAnonymous && sale.customer_phone ? <EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_phone} navigate={navigateTo} title={t('open_customer') || 'Open customer'}>{sale.customer_phone}</EntityLink> : null}
                     {!customerIsAnonymous && sale.customer_phone && (deliveryDriverName || deliveryDriverPhone) ? <span aria-hidden="true">|</span> : null}
                     {deliveryDriverName || deliveryDriverPhone ? (
@@ -1386,7 +1385,6 @@ export default function SaleDetailModal({
                       </span>
                     ) : null}
                   </div>
-                ) : null}
                 {/* Driver, compact, in the section that describes the sale --
                     not in the money block and not in a card of its own. Each
                     row hides itself when empty (DetailRow's own rule), so a
@@ -1525,7 +1523,7 @@ export default function SaleDetailModal({
             <SectionCard title={t('customer') || 'Customer'} action={onCustomerAction ? <button type="button" className="btn-secondary text-xs" onClick={() => onCustomerAction(sale)}>{t('sale_customer_edit_entry') || 'Edit customer'}</button> : null}>
               <DetailRowGroup>
                 <div className="hidden sm:block"><DetailRow label={t('customer_name') || 'Customer'}>
-                  {customerIsAnonymous ? (t('walk_in') || 'Walk-in') : sale.customer_name ? <EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_name} navigate={navigateTo}>{sale.customer_name}</EntityLink> : null}
+                  {customerIsAnonymous ? (t('walk_in') || 'General') : sale.customer_name ? <EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_name} navigate={navigateTo}>{sale.customer_name}</EntityLink> : (t('walk_in') || 'General')}
                 </DetailRow></div>
                 {!customerIsAnonymous ? <div className="hidden sm:block"><DetailRow label={t('phone') || 'Phone'}>{sale.customer_phone ? <EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_phone} navigate={navigateTo}>{sale.customer_phone}</EntityLink> : null}</DetailRow></div> : null}
                 <DetailRow label={t('address') || 'Address'} value={customerAddress} />

@@ -3,6 +3,7 @@ import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import { consumeLongPressClick, createLongPressHandlers, type LongPressState } from '../../utils/longPress.ts'
 import ColumnChooser from '../shared/ColumnChooser.tsx'
+import { customerDisplayName } from '../../utils/customerIdentity.ts'
 import CopyableId from '../shared/CopyableId.tsx'
 import { useColumnPreferences } from '../shared/useColumnPreferences.ts'
 import type { TableColumnDef } from '../shared/columnPreferences.ts'
@@ -42,6 +43,7 @@ interface ReturnRecord {
   return_type?: string
   supplier_name?: string
   customer_name?: string
+  customer_is_anonymous?: number | boolean
   reason?: string
   status?: string
   cashier_name?: string
@@ -373,7 +375,7 @@ export default function ReturnsListSurface({
                                     />
                                   : <span className="text-xs text-gray-400">{tr('manual_return', 'Manual')}</span>}
                               </td>
-                              <td className="text-gray-700 dark:text-gray-300"><span className="dense-cell-truncate" title={retScope === SUPPLIER_SCOPE ? (ret.supplier_name || '-') : (ret.customer_name || '-')}>{retScope === SUPPLIER_SCOPE ? (ret.supplier_name || '-') : (ret.customer_name || '-')}</span></td>
+                              <td className="text-gray-700 dark:text-gray-300"><span className="dense-cell-truncate" title={retScope === SUPPLIER_SCOPE ? (ret.supplier_name || '-') : customerDisplayName(ret, tr('walk_in', 'General'))}>{retScope === SUPPLIER_SCOPE ? (ret.supplier_name || '-') : customerDisplayName(ret, tr('walk_in', 'General'))}</span></td>
                               <td className="text-gray-700 dark:text-gray-300"><span className="dense-cell-truncate" title={ret.reason || '-'}>{ret.reason || '-'}</span></td>
                               <td>
                                 <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700 dark:bg-zinc-700 dark:text-gray-200">{typeLabel}</span>
@@ -540,7 +542,7 @@ export default function ReturnsListSurface({
                           <span aria-hidden="true" className="shrink-0">·</span>
                           <span className="min-w-0 truncate" aria-label={`${tr('branch', 'Branch')}: ${ret.branch_name || '-'}`}>{ret.branch_name || '-'}</span>
                           <span aria-hidden="true" className="shrink-0">·</span>
-                          <span className="min-w-0 truncate" aria-label={`${retScope === SUPPLIER_SCOPE ? tr('supplier', 'Supplier') : tr('customer', 'Customer')}: ${retScope === SUPPLIER_SCOPE ? (ret.supplier_name || '-') : (ret.customer_name || '-')}`}>{retScope === SUPPLIER_SCOPE ? (ret.supplier_name || '-') : (ret.customer_name || '-')}</span>
+                          <span className="min-w-0 truncate" aria-label={`${retScope === SUPPLIER_SCOPE ? tr('supplier', 'Supplier') : tr('customer', 'Customer')}: ${retScope === SUPPLIER_SCOPE ? (ret.supplier_name || '-') : customerDisplayName(ret, tr('walk_in', 'General'))}`}>{retScope === SUPPLIER_SCOPE ? (ret.supplier_name || '-') : customerDisplayName(ret, tr('walk_in', 'General'))}</span>
                           <span aria-hidden="true" className="shrink-0">·</span>
                           <span className="min-w-0 flex-1 truncate" aria-label={`${tr('reason', 'Reason')}: ${ret.reason || '-'}`}>{ret.reason || '-'}</span>
                         </div>

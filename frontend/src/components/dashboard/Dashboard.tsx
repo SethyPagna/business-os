@@ -517,7 +517,7 @@ function RecentSalesCard({ summary, t, translateOr, fmtUSD, fmtKHR, formatStatus
       <div className={`divide-y divide-gray-100 dark:divide-gray-700 ${CARD_LIST_BODY}`}>
         {!sales.length ? <p className="p-4 text-center text-sm text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : sales.map((sale) => (
           <button key={sale.id} type="button" className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50 sm:px-4" onClick={() => onOpenSale(sale)}>
-            <div className="min-w-0"><p className="truncate text-sm font-medium text-gray-700 dark:text-gray-300">{sale.receipt_number}</p><p className="truncate text-xs text-gray-400">{compactDashboardMetaParts([fmtTime(sale.created_at), sale.branch_name, sale.customer_name]).join(' | ')}</p></div>
+            <div className="min-w-0"><p className="truncate text-sm font-medium text-gray-700 dark:text-gray-300">{sale.receipt_number}</p><p className="truncate text-xs text-gray-400">{compactDashboardMetaParts([fmtTime(sale.created_at), sale.branch_name, sale.customer_name || t('walk_in') || 'General']).join(' | ')}</p></div>
             <div className="shrink-0 text-right"><div className="flex items-baseline justify-end gap-1 whitespace-nowrap"><span className="font-semibold text-green-600">{fmtUSD(sale.total_usd || sale.total || 0)}</span>{(sale.total_khr || 0) > 0 ? <span className="text-[10px] text-gray-400">{fmtKHR(sale.total_khr || 0)}</span> : null}</div><div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${getDashboardSaleStatusTone(sale.sale_status)}`}>{formatStatus(sale.sale_status)}</div></div>
           </button>
         ))}
@@ -2037,7 +2037,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
                                   <div className="flex justify-between text-xs mb-0.5">
                                     <div className="flex items-center gap-1.5">
                                       <span className="text-gray-400 w-4 text-right">{i+1}.</span>
-                                      <span className="text-gray-700 dark:text-gray-300 truncate max-w-36">{c.customer_name}</span>
+                                      <span className="text-gray-700 dark:text-gray-300 truncate max-w-36">{c.customer_name || t('walk_in') || 'General'}</span>
                                     </div>
                                     <span className="font-medium text-green-700 dark:text-green-400">{fmtUSD(c.net_revenue_usd || 0)}</span>
                                   </div>
@@ -2256,7 +2256,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
                   <div className="min-w-0">
                     <div className="detail-scroll-text text-sm font-semibold text-gray-800 dark:text-gray-100">{sale.receipt_number || `#${sale.id}`}</div>
                     <div className="detail-scroll-text text-xs text-gray-400">
-                      {compactDashboardMetaParts([fmtTime(sale.created_at), sale.branch_name, sale.customer_name]).join(' | ')}
+                      {compactDashboardMetaParts([fmtTime(sale.created_at), sale.branch_name, sale.customer_name || t('walk_in') || 'General']).join(' | ')}
                     </div>
                   </div>
                   <div className="shrink-0 text-right">
@@ -2289,7 +2289,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
                 { label: t('total') || 'Total', value: fmtUSD(recentSaleDetail.total_usd || recentSaleDetail.total || 0) },
                 { label: 'KHR', value: fmtKHR(recentSaleDetail.total_khr || 0) },
                 { label: t('branch') || 'Branch', value: recentSaleDetail.branch_name || '--' },
-                { label: t('customer') || 'Customer', value: recentSaleDetail.customer_name || '--' },
+                { label: t('customer') || 'Customer', value: recentSaleDetail.customer_name || t('walk_in') || 'General' },
                 { label: t('cashier') || 'Cashier', value: recentSaleDetail.cashier_name || '--' },
                 { label: t('items') || 'Items', value: String(getDashboardSaleItemCount(recentSaleDetail)) },
               ] as Array<{ label: ReactNode; value: ReactNode } | null>).filter((item): item is { label: ReactNode; value: ReactNode } => Boolean(item)).map((item, index) => (
@@ -2394,7 +2394,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
             <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
               <div className="min-w-0 flex-1">
                 <h2 className="font-bold text-gray-900 dark:text-white">{t('customer_details')}</h2>
-                <div className="detail-scroll-text text-xs text-gray-400 mt-0.5">{customerDetail.customer_name}</div>
+                <div className="detail-scroll-text text-xs text-gray-400 mt-0.5">{customerDetail.customer_name || t('walk_in') || 'General'}</div>
               </div>
               <button onClick={() => setCustomerDetail(null)} className="text-gray-400 hover:text-gray-600 text-sm w-8 h-8 flex items-center justify-center">{closeLabel}</button>
             </div>

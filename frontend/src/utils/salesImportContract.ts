@@ -4,6 +4,7 @@ import { fmtBusinessIsoDateTime } from './formatters.ts'
 // on-screen reader does -- a CSV cell full of machine text is the same defect
 // in a different container.
 import { contactDisplayAddress } from '../components/contacts/contactOptionUtils.ts'
+import { isAnonymousCustomerIdentity } from './customerIdentity.ts'
 
 export const SALES_IMPORT_COLUMNS = [
   'receipt_number', 'sale_date', 'sale_status', 'payment_method', 'payment_currency', 'exchange_rate',
@@ -58,8 +59,10 @@ function headerFields(sale: DataRow): DataRow {
     payment_currency: value(sale, 'payment_currency', 'USD'),
     exchange_rate: value(sale, 'exchange_rate', 4100),
     branch: value(sale, 'branch_name'),
-    customer_name: value(sale, 'customer_name'),
-    customer_phone: value(sale, 'customer_phone'),
+    // This is an import-compatible interchange, not a display report. A
+    // localized General placeholder would become a real name on re-import.
+    customer_name: isAnonymousCustomerIdentity(sale) ? '' : value(sale, 'customer_name'),
+    customer_phone: isAnonymousCustomerIdentity(sale) ? '' : value(sale, 'customer_phone'),
     customer_address: contactDisplayAddress(value(sale, 'customer_address')),
     cashier_name: value(sale, 'cashier_name'),
     discount_usd: value(sale, 'discount_usd', 0),

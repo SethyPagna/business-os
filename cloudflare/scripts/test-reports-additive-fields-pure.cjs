@@ -65,7 +65,7 @@ db.exec(`
     supplier_compensation_usd REAL, supplier_loss_usd REAL, reason TEXT);
   CREATE TABLE return_items (id INTEGER PRIMARY KEY, return_id INTEGER, quantity REAL, cost_price_usd REAL,
     return_to_stock INTEGER, stock_action TEXT);
-  CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT, phone TEXT, gender TEXT);
+  CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT, phone TEXT, gender TEXT, is_anonymous INTEGER DEFAULT 0);
   CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, barcode TEXT, category TEXT, stock_quantity REAL);
   CREATE TABLE categories (id INTEGER PRIMARY KEY, name TEXT);
   CREATE TABLE branch_stock (id INTEGER PRIMARY KEY, product_id INTEGER, branch_id INTEGER, quantity REAL);
@@ -163,7 +163,7 @@ check('a product with no row in branch_stock reads 0 there, not its catalog tota
 const customers = await lib.getSalesGroupedTotals(env, AUG, 'customer')
 const alice = byKey(customers, 'id:10')
 const bob = byKey(customers, 'id:11')
-const walkIn = byKey(customers, 'name:walk-in')
+const walkIn = byKey(customers, 'general')
 check('Bob, whose first sale ever is inside the window, is new', bob.is_new === true)
 check('Alice, who first bought in July, is NOT new in August', alice.is_new === false)
 // POSITIVE CONTROL: the reading this is defined against.
@@ -240,5 +240,35 @@ check('DeriveTotalsOptions.itemDiscountUsd is REQUIRED, so a new caller cannot s
 check('and every kernel entry point passes it',
   (src.match(/itemDiscountUsd:/g) || []).length >= 5)
 
+// Marker authority changes identity accounting only, never transaction money.
+db.prepare("INSERT INTO customers(id,name,phone,gender,is_anonymous) VALUES(12,'General','stale-phone','other',1),(13,'General','013','f',0),(14,'Walk-in','014','m',0)").run()
+for (const [id, customer_id, customer_name] of [[20,12,'Shared historical name'],[21,null,null],[22,13,'General'],[23,14,'Walk-in']]) {
+  sale({ id, created_at: AT(9, 5), sale_status: 'completed', subtotal_usd: 7, branch_id: 1, branch_name: 'shop', customer_id, customer_name, cashier_id: 1, cashier_name: 'aza' })
+}
+const SEP = { startDate: '2026-09-01', endDate: '2026-09-30' }
+const beforeRows = db.prepare('SELECT * FROM sales ORDER BY id').all()
+const sepTotals = await lib.getSalesTotals(env, SEP)
+const grouped = await lib.getSalesGroupedTotals(env, SEP, 'customer')
+assert.equal(grouped.length, 3)
+const general = byKey(grouped, 'general')
+assert.equal(general.tx_count, 2)
+assert.equal(general.revenue_usd, 14)
+assert.equal(general.label, '')
+assert.equal(general.phone, '')
+assert.equal(general.is_new, false)
+assert.equal(byKey(grouped, 'id:13').label, 'General')
+assert.equal(byKey(grouped, 'id:13').phone, '013')
+assert.equal(byKey(grouped, 'id:14').label, 'Walk-in')
+assert.equal(byKey(grouped, 'id:14').phone, '014')
+const sepCashier = (await lib.getSalesGroupedTotals(env, SEP, 'cashier'))[0]
+assert.equal(sepCashier.new_customer_count, 2)
+assert.equal(sepCashier.return_customer_count, 0)
+assert.equal(sepCashier.unregistered_count, 2)
+assert.equal((await lib.getSalesGroupedTotals(env, SEP, 'branch'))[0].customer_count, 2)
+assert.equal(grouped.reduce((n, r) => n + r.revenue_usd, 0), sepTotals.revenue_usd)
+assert.equal(sepTotals.revenue_usd, 28)
+assert.deepEqual(db.prepare('SELECT * FROM sales ORDER BY id').all(), beforeRows)
+assert.deepEqual(db.prepare(`SELECT ${lib.reportCustomerNameExpr('sales.')} AS name FROM sales WHERE id>=20 ORDER BY id`).all().map(r=>r.name), ['', '', 'General', 'Walk-in'])
+check('marked General and null group together; real names retain identity; money and stored rows remain exact', true)
 console.log(`\nALL ${passed} CHECKS PASSED`)
 })().catch((e) => { console.error(e); process.exit(1) })

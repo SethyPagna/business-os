@@ -82,7 +82,7 @@ export function groupRowLabel(by: ReportGroupBy, row: { key: string; label: stri
     const def = WEEKDAY_LABEL_KEYS[Number(row.key)]
     return def ? tr(def.key, def.fallback) : row.key
   }
-  if (!row.label) return by === 'customer' ? tr('walk_in', 'Walk-in') : by === 'branch' ? '—' : tr('unknown', 'Unknown')
+  if (!row.label) return by === 'customer' ? tr('walk_in', 'General') : by === 'branch' ? '—' : tr('unknown', 'Unknown')
   return row.label
 }
 

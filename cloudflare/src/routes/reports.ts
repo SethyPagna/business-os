@@ -8,6 +8,7 @@ import {
   getSalesTotals,
   getDeliveryContactTotals,
   getSalesGroupedTotals,
+  reportCustomerNameExpr,
   getProductSalesRanking,
   previousPeriodFilters,
   SALES_GROUP_KEYS,
@@ -508,7 +509,8 @@ for (const kind of ['sales', 'returns', 'expenses'] as const) {
         CASE WHEN ${recognizedValued} THEN (SELECT COUNT(*) FROM sale_items si WHERE si.sale_id=s.id AND si.cost_price_usd IS NULL) ELSE 0 END AS cost_missing_snapshot_lines,
         CASE WHEN ${recognized} THEN ${net}-${refund}+${customerDeliveryFeeExpr('s.')}-${deliveryActualCostExpr('s.')} ELSE 0 END - ${costCol} AS gross_profit_usd` : ''
       select = `s.id, s.created_at AS cursor_at, s.created_at AS date, ${localDateExpr('s.created_at')} AS business_date,
-        s.receipt_number, s.branch_name AS branch, s.cashier_name AS cashier, s.customer_name AS customer, s.customer_phone,
+        s.receipt_number, s.branch_name AS branch, s.cashier_name AS cashier, ${reportCustomerNameExpr('s.')} AS customer,
+        CASE WHEN EXISTS (SELECT 1 FROM customers ic WHERE ic.id=s.customer_id AND ic.is_anonymous=1) THEN '' ELSE s.customer_phone END AS customer_phone,
         s.payment_method, ${saleStatusExpr('s.')} AS status, COALESCE(s.subtotal_usd,0) AS gross_sales_usd,
         COALESCE(s.discount_usd,0) AS store_discount_usd, COALESCE(s.membership_discount_usd,0) AS membership_discount_usd,
         COALESCE(s.tax_usd,0) AS tax_usd, ${customerDeliveryFeeExpr('s.')} AS delivery_usd,
@@ -519,7 +521,7 @@ for (const kind of ['sales', 'returns', 'expenses'] as const) {
       joins = `${CUSTOMER_REFUND_JOIN}s.id`
     } else if (kind === 'returns') {
       select = `r.id, r.created_at AS cursor_at, r.created_at AS date, ${localDateExpr('r.created_at')} AS business_date,
-        r.return_number, r.receipt_number AS sale_receipt_number, r.customer_name AS party, r.return_scope AS scope,
+        r.return_number, r.receipt_number AS sale_receipt_number, ${reportCustomerNameExpr('r.')} AS party, r.return_scope AS scope,
         r.return_type AS type, r.reason, r.status, r.total_refund_usd AS refund_usd, r.total_refund_khr AS refund_khr`
     } else {
       select = `f.id, f.created_at AS cursor_at, f.created_at, f.fee_date AS date, f.fee_type AS type, f.label,

@@ -6,14 +6,15 @@ const Database = require('better-sqlite3')
 const root = path.join(__dirname, '..')
 const sql = new Database(':memory:')
 sql.exec(`
+CREATE TABLE customers(id INTEGER PRIMARY KEY, is_anonymous INTEGER DEFAULT 0);
 CREATE TABLE sales(id INTEGER PRIMARY KEY, created_at TEXT, sale_status TEXT, branch_id INTEGER, branch_name TEXT,
- cashier_name TEXT, cashier_id INTEGER, customer_name TEXT, customer_phone TEXT, receipt_number TEXT, payment_method TEXT,
+ cashier_name TEXT, cashier_id INTEGER, customer_id INTEGER, customer_name TEXT, customer_phone TEXT, receipt_number TEXT, payment_method TEXT,
  subtotal_usd REAL, discount_usd REAL DEFAULT 0, membership_discount_usd REAL DEFAULT 0, tax_usd REAL DEFAULT 0,
  total_usd REAL, delivery_fee_usd REAL DEFAULT 0, delivery_fee_paid_by TEXT DEFAULT 'customer', delivery_actual_cost_usd REAL,
  is_delivery INTEGER DEFAULT 0, source_return_id INTEGER, amount_paid_usd REAL);
 CREATE TABLE sale_items(id INTEGER PRIMARY KEY, sale_id INTEGER, cost_price_usd REAL, quantity REAL);
 CREATE TABLE returns(id INTEGER PRIMARY KEY, sale_id INTEGER, created_at TEXT, branch_id INTEGER, return_number TEXT,
- receipt_number TEXT, customer_name TEXT, return_scope TEXT DEFAULT 'customer', return_type TEXT, reason TEXT,
+ receipt_number TEXT, customer_id INTEGER, customer_name TEXT, return_scope TEXT DEFAULT 'customer', return_type TEXT, reason TEXT,
  status TEXT DEFAULT 'completed', total_refund_usd REAL DEFAULT 0, total_refund_khr REAL DEFAULT 0);
 CREATE TABLE return_items(id INTEGER PRIMARY KEY, return_id INTEGER, cost_price_usd REAL, quantity REAL, stock_action TEXT, return_to_stock INTEGER);
 CREATE TABLE fees(id INTEGER PRIMARY KEY, created_at TEXT, fee_date TEXT, branch_id INTEGER, sale_id INTEGER, fee_type TEXT,
@@ -190,6 +191,15 @@ async function overview(query='',scope='all'){const res=await app.request('http:
  assert.equal(canonical.unvalued_tx_count,2,'the held-out receipts are counted rather than hidden -- R5 and the header-less id 99 inserted above')
  assert.equal(canonical.unvalued_cost_usd,45)
  await assertCanonical()
+ sql.exec("INSERT INTO customers VALUES(101,1),(102,0); UPDATE sales SET customer_id=101,customer_name='Old shared name' WHERE id=1; UPDATE sales SET customer_id=102,customer_name='General' WHERE id=2; UPDATE returns SET customer_id=101 WHERE id=1")
+ const identities=(await get('sales','')).body.rows
+ assert.equal(identities.find(r=>r.id===1).customer,'')
+ assert.equal(identities.find(r=>r.id===1).customer_phone,'')
+ assert.equal(identities.find(r=>r.id===2).customer,'General')
+ assert.equal(identities.find(r=>r.id===2).customer_phone,'0456')
+ assert.equal((await get('returns','')).body.rows.find(r=>r.id===1).party,'')
+ assert.equal(sql.prepare('SELECT customer_name FROM sales WHERE id=1').get().customer_name,'Old shared name')
+ console.log('PASS marker-based report names and phones preserve stored snapshots and real General identity')
  console.log('PASS report routes: real Hono/SQLite, all three readers, permissions, canonical refund/profit/credit, search/filter, mixed-time cursor and frozen insertion bound')
  console.log('PASS shift expenses: real grouped SQL, complete overflow totals, branch/employee policy, mixed timestamps and exclusive closing bound')
 })().catch(e=>{console.error(e);process.exitCode=1}).finally(()=>sql.close())
