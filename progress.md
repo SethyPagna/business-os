@@ -12357,3 +12357,13 @@ source syntax, and public-runtime checks), focused `resolvedSyncError.test.ts`,
 `directMutationRequest.test.ts`, and `git diff --check` passed. Authenticated
 browser smoke remains blocked by Cloudflare's bot challenge; Wrangler upload
 and version output are the deployment provenance.
+
+### Post-deploy parity recheck — September 10, 2026
+
+Worker typecheck passed. The shift report, reconciliation, Telegram layout,
+optional closing-count, additional-cash, bilingual, and shared-difference
+suites passed end to end. The Shop ↔ Warehouse transfer lot, reason, atomic
+rollback, replay, permission, offline-request, and paged-history suites also
+passed. These are repository and pure-kernel checks; they do not replace the
+owner's physical iOS/PWA/camera run or authenticated browser smoke, which remain
+blocked by the Cloudflare bot challenge/device availability.
