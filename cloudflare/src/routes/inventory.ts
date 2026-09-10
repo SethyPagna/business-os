@@ -94,7 +94,11 @@ app.use('*', async (c, next) => {
     && ['/sessions', '/api/inventory/sessions'].includes(c.req.path)
     && getActionTier(user, 'products', 'add') === 'full'
   if (productOnlySessionEntry) return next()
-  if (getPermissionTier(user, 'inventory') === 'none') return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  // View revocation narrows reads only; writes keep their own action gates.
+  const tier = c.req.method === 'GET' || c.req.method === 'HEAD'
+    ? getActionTier(user, 'inventory', 'view')
+    : getPermissionTier(user, 'inventory')
+  if (tier === 'none') return c.json({ error: 'You do not have permission to perform this action' }, 403)
   return next()
 })
 

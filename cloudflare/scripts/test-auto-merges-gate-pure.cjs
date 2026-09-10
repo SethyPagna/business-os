@@ -30,9 +30,10 @@ const handler = nextRoute > 0 ? rest.slice(0, nextRoute) : rest
 
 check('handler reads the caller user', /const user = c\.get\('user'\)/.test(handler))
 check(
-  'handler denies when both products and inventory tiers are none',
-  /getPermissionTier\(user, 'products'\) === 'none'[\s\S]*getPermissionTier\(user, 'inventory'\) === 'none'[\s\S]*return c\.json\(\s*\{\s*error:[\s\S]*\},\s*403\s*\)/.test(handler),
+  'handler denies without the shared effective detail read grant',
+  /if \(!canReadProductDetail\(user\)\)[\s\S]*return c\.json\(\s*\{\s*error:[\s\S]*\},\s*403\s*\)/.test(handler),
 )
-check('the gate sits before the productId is parsed', handler.indexOf("getPermissionTier(user, 'products')") < handler.indexOf('Number(c.req.param'))
+check('the shared gate honors Products or Inventory effective view', /function canReadProductDetail\(user: SessionUser\): boolean \{\s*return getActionTier\(user, 'products', 'view'\) !== 'none' \|\| getActionTier\(user, 'inventory', 'view'\) !== 'none'/.test(src))
+check('the gate sits before the productId is parsed', handler.indexOf('!canReadProductDetail(user)') >= 0 && handler.indexOf('!canReadProductDetail(user)') < handler.indexOf('Number(c.req.param'))
 
 console.log(`\nALL ${passed} CHECKS PASSED`)
