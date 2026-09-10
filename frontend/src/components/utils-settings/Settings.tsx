@@ -1300,6 +1300,12 @@ export default function Settings() {
               onChange={(event) => setValue('pos_show_item_discount', event.target.checked ? 'true' : 'false')}
             />
           </label>
+          <div className="mt-3 max-w-md">
+            {field('sale_amendment_window_minutes', t('sale_amendment_window_minutes') || 'Sale edit window (minutes)', 'number', '0')}
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {t('sale_amendment_window_minutes_desc') || '0 keeps employee sale edits open at all times. A positive value limits edits to that many minutes after the sale.'}
+            </p>
+          </div>
           {/* The "wholesale only > N" automation deferred by migration 0093.
               Note the ?? 'false' default -- every other toggle on this page
               defaults ON when unset, but an automation that changes what a

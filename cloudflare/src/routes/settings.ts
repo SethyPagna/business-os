@@ -188,6 +188,9 @@ const SALES_POLICY_KEYS = new Set([
   'display_currency',
   'pos_show_item_discount',
   'pos_payment_methods',
+  // Recorded-sale edits are available to permitted employees by default.
+  // Set a positive number to impose a window; 0 keeps the window open.
+  'sale_amendment_window_minutes',
   // The wholesale auto-apply automation ("wholesale only > N", 2026-09-04).
   // It decides what a customer is charged, so it belongs with tax_rate and
   // the exchange rates under sales_policy rather than the blanket `settings`
@@ -894,6 +897,20 @@ app.post('/', async (c) => {
           : 'Low stock alert switch must be on or off.',
       code: lowStockError,
     }, 400)
+  }
+
+  if (attemptedKeys.includes('sale_amendment_window_minutes')) {
+    const rawWindow = body.sale_amendment_window_minutes
+    const parsedWindow = typeof rawWindow === 'number'
+      ? rawWindow
+      : Number(String(rawWindow ?? '').trim())
+    if (!Number.isFinite(parsedWindow) || parsedWindow < 0 || parsedWindow > 525600 || !Number.isInteger(parsedWindow)) {
+      return c.json({
+        error: 'Sale edit window must be a whole number of minutes from 0 (always open) to 525600.',
+        code: 'invalid_sale_amendment_window',
+      }, 400)
+    }
+    body.sale_amendment_window_minutes = String(parsedWindow)
   }
 
   // The ordinary Settings save may add, remove, or reorder methods, but it

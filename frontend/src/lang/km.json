@@ -5078,6 +5078,8 @@
   "tax_included": "ពន្ធរួមបញ្ចូល",
   "tax_rate": "អត្រាពន្ធ (%)",
   "tax_short": "ពន្ធ",
+  "sale_amendment_window_minutes": "រយៈពេលកែការលក់ (នាទី)",
+  "sale_amendment_window_minutes_desc": "0 អនុញ្ញាតឱ្យបុគ្គលិកកែការលក់បានគ្រប់ពេល។ បញ្ចូលលេខវិជ្ជមាន ដើម្បីកំណត់នាទីក្រោយពេលលក់។",
   "telegram": "Telegram",
   "telegram_action_failed": "សកម្មភាព Telegram មិនបានសម្រេច",
   "telegram_automation_desc": "ផ្ញើសកម្មភាពអាជីវកម្មទៅកាន់ជជែក Telegram របស់ម្ចាស់/អ្នកគ្រប់គ្រងតែមួយ។ ប្រភេទនីមួយៗបើកជាលំនាំដើម សូមបិទប្រភេទណាដែលអ្នកមិនចង់បាន។",

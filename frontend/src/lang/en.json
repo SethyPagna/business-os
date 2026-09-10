@@ -5082,6 +5082,8 @@
   "tax_included": "Tax Included",
   "tax_rate": "Tax Rate (%)",
   "tax_short": "Tax",
+  "sale_amendment_window_minutes": "Sale edit window (minutes)",
+  "sale_amendment_window_minutes_desc": "0 keeps employee sale edits open at all times. A positive value limits edits to that many minutes after the sale.",
   "telegram": "Telegram",
   "telegram_action_failed": "Telegram action failed",
   "telegram_automation_desc": "Send business activity to one owner/manager Telegram chat. Every category is on by default; turn off any category you do not want.",

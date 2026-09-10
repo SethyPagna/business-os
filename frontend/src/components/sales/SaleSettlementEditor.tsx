@@ -60,19 +60,19 @@ export default function SaleSettlementEditor({ rows, configuredMethods, exchange
           : translate('sale_settlement_rate_hint', 'Current rate: 1 USD = {rate} KHR. Recorded USD and KHR amounts stay in their original currency.', 'អត្រាបច្ចុប្បន្ន៖ 1 USD = {rate} រៀល។ ចំនួន USD និង KHR ដែលបានកត់ត្រា នៅតែរក្សារូបិយប័ណ្ណដើម។')).replace('{rate}', rateText)}
       </p>
 
-      <div className="mt-3 flex flex-wrap gap-2" aria-label={translate('payment_methods', 'Payment methods', 'វិធីទូទាត់')}>
+      <div className="mt-3 flex max-w-full flex-wrap items-center gap-1.5" aria-label={translate('payment_methods', 'Payment methods', 'វិធីទូទាត់')}>
         {configuredMethods.map((method) => {
           const selected = rows.some((row) => paymentMethodIdentity(row.method) === paymentMethodIdentity(method))
           return (
             <button
               key={method}
               type="button"
-              className={`min-h-11 rounded-full border px-3 py-2 text-sm font-medium ${selected ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-gray-300 bg-white text-gray-700 hover:border-emerald-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200'}`}
+              className={`min-h-8 max-w-full rounded-lg border px-2 py-1 text-xs font-medium leading-tight ${selected ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-gray-300 bg-white text-gray-700 hover:border-emerald-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200'}`}
               aria-label={`${translate('add_payment_method', 'Add payment method', 'បន្ថែមវិធីទូទាត់')}: ${method}`}
               disabled={saving || rows.length >= MAX_SETTLEMENT_ROWS}
               onClick={() => addMethod(method)}
             >
-              <span className="inline-flex items-center gap-1.5"><Plus className="h-4 w-4" aria-hidden="true" />{method}</span>
+              <span className="inline-flex min-w-0 items-center gap-1"><Plus className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span className="truncate">{method}</span></span>
             </button>
           )
         })}
