@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { groupByBusinessDay } from '../src/utils/businessDayGroups.ts'
+import { fmtClock24, fmtDate } from '../src/utils/formatters.ts'
 
 const returnsSource = readFileSync(new URL('../src/components/returns/Returns.tsx', import.meta.url), 'utf8')
 const returnsSurfaceSource = readFileSync(new URL('../src/components/returns/ReturnsListSurface.tsx', import.meta.url), 'utf8')
@@ -34,10 +36,24 @@ assert.match(columnChooserSource, /menuRef\.current\?\.contains\(target\)/, 'cli
 assert.match(returnsSource, /<StatsStrip[\s\S]*?range=\{stripRange\}[\s\S]*?onRangeChange=\{setStripRange\}[\s\S]*?showPresets/, 'StatsStrip should own the Returns date range and preset rail')
 assert.doesNotMatch(returnsSource, /<StatsRangeRow\b/, 'Returns should not repeat the date range in a separate row')
 assert.match(returnsSource, /<ExportMenu[\s\S]*?iconOnly[\s\S]*?triggerClassName=\{toolbarIconButtonClassName\}/, 'Export should use the shared borderless icon-only header action')
-assert.match(returnsSource, /className=\{primaryToolbarButtonClassName\}/, 'Add Return actions should use the shared 40px Manage-height contract')
-assert.match(returnsSource, /className=\{manageToolbarButtonClassName\}/, 'Returns secondary toolbar actions should use the shared 40px Manage-height contract')
+assert.match(returnsSource, /className=\{`\$\{primaryToolbarButtonClassName\}[^`]*!flex-none`\}/, 'Add Return actions should use the shared 40px Manage-height contract without stretching the rail')
+assert.match(returnsSource, /buttonClassName=\{`\$\{manageToolbarButtonClassName\}[^`]*!flex-none`\}/, 'Returns secondary toolbar actions should use the shared 40px Manage-height contract')
 assert.match(returnsSource, /tr\('return', 'Return'\)\.replace\(\/\^ការ\/u, ''\)/, 'visible Khmer Return action should drop only the redundant nominal prefix')
 assert.match(returnsSource, /aria-label=\{tr\('add_return', 'Add Return'\)\}/, 'the compact Add Return copy should retain its full accessible label')
+
+const statsStripStart = returnsSource.indexOf('<StatsStrip')
+const secondaryActionsStart = returnsSource.indexOf('data-returns-secondary-actions', statsStripStart)
+const searchRowStart = returnsSource.indexOf('id="returns-search"', secondaryActionsStart)
+const primaryActionsSource = returnsSource.slice(statsStripStart, secondaryActionsStart)
+const secondaryActionsSource = returnsSource.slice(secondaryActionsStart, searchRowStart)
+assert.match(primaryActionsSource, /rangeActions=\{\([\s\S]*?<ExportMenu/, 'Stats/date/Export should remain together on the primary row')
+assert.doesNotMatch(primaryActionsSource, /<SectionExportAction/, 'Returns Export should stay in the primary Stats/date row at 320px rather than portal away')
+assert.doesNotMatch(primaryActionsSource, /<ShiftHistoryModal|<ActionHistoryBar|setShowReasonManager|setShowCustomerForm|setShowSupplierForm/, 'longer Returns actions should not compete for width on the primary row')
+assert.match(secondaryActionsSource, /max-w-full min-w-0 overflow-x-auto overscroll-x-contain/, 'the secondary action rail should contain overflow within the 320px page')
+assert.match(secondaryActionsSource, /flex w-max min-w-full flex-nowrap/, 'English and Khmer action labels should remain on one horizontally scrollable row')
+for (const action of ['<ShiftHistoryModal', 'setShowReasonManager', '<ActionHistoryBar', 'setShowCustomerForm', 'setShowSupplierForm']) {
+  assert.ok(secondaryActionsSource.includes(action), `secondary action rail should retain ${action}`)
+}
 
 const filterSectionsStart = returnsSource.indexOf('const filterSections = useMemo')
 const filterSectionsEnd = returnsSource.indexOf('const activeFilterCount', filterSectionsStart)
@@ -47,10 +63,22 @@ assert.doesNotMatch(returnsSource, /<SortChip\b/, 'Returns should not reserve se
 assert.match(returnsSource, /className="min-w-0 flex-1"[\s\S]*?placeholder=\{tr\('search_returns_placeholder'/, 'Search should explicitly occupy the width freed by arrange-by')
 
 assert.match(returnsSource, /const buildReturnSections = useCallback/, 'Returns should use one business-day section builder for every arrangement')
+assert.match(returnsSource, /groupByBusinessDay\(orderedByTime, \(ret\) => ret\.created_at\)/, 'Returns day headings must use the shared Phnom Penh business-day grouper')
 assert.doesNotMatch(returnsSource, /id: 'sorted'/, 'non-date arrangements must not replace business-day headings with a synthetic all-results section')
 assert.match(returnsSource, /fmtTime=\{fmtClock24\}/, 'grouped return rows should receive the 24-hour time-only formatter')
 assert.match(returnsSurfaceSource, /tr\('time', 'Time'\)/, 'the desktop grouped row column should be labelled Time, not Date')
 assert.doesNotMatch(returnsSurfaceSource, /text-blue-600 dark:text-blue-400[^\n]*ret\.receipt_number/, 'receipt references should not use link-like blue styling')
+
+const businessBoundaryRows = [
+  { id: 1, created_at: '2026-09-02T16:59:59Z' },
+  { id: 2, created_at: '2026-09-02T17:00:00Z' },
+  { id: 3, created_at: '2026-09-02T22:00:00Z' },
+]
+const businessBoundaryGroups = groupByBusinessDay(businessBoundaryRows, (row) => row.created_at)
+assert.deepEqual(businessBoundaryGroups.map((group) => group.rows.map((row) => row.id)), [[1], [2, 3]], '17:00 UTC must begin the next Phnom Penh return day')
+assert.equal(businessBoundaryGroups[0]?.key, fmtDate(businessBoundaryRows[0]?.created_at), 'return heading must use the same business date formatter')
+assert.equal(fmtClock24(businessBoundaryRows[0]?.created_at), '23:59', 'the row time immediately before the boundary must remain on the same business day')
+assert.equal(fmtClock24(businessBoundaryRows[1]?.created_at), '00:00', 'the row time at the boundary must begin the next business day')
 
 const primaryMetaAt = returnsSurfaceSource.indexOf('data-return-primary-meta')
 const secondaryMetaAt = returnsSurfaceSource.indexOf('data-return-secondary-meta')
