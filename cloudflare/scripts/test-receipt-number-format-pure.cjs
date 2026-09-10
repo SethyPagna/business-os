@@ -338,7 +338,11 @@ function mintsAtReceipt(line) {
   if (code.startsWith('//') || code.startsWith('*')) return false
   const interpolatedAtId = /`[^`\n]*\$\{[^`\n]*\}@/.test(line)
   const receiptIdentityContext = /\b(?:receipt[A-Za-z_]*|invoice(?:No|Number)?)\b/i.test(line)
-  return /receipt[A-Za-z_]*\s*[:=]\s*[`'"][^`'"\n]*@/i.test(line)
+  const assigned = line.match(/\breceipt[A-Za-z_]*\s*[:=]\s*[`'"]([^`'"\n]*)/i)
+  // SQL named parameters use @identifier (for example @operation). Receipt
+  // identities use @ followed by a date/digit or another interpolation.
+  const assignedAtId = Boolean(assigned && /@(?![A-Za-z_][A-Za-z0-9_]*)/.test(assigned[1]))
+  return assignedAtId
     || (interpolatedAtId && receiptIdentityContext)
 }
 
@@ -351,6 +355,7 @@ check('the @-minting detector is not vacuous', () => {
   assert.equal(mintsAtReceipt('  fingerprint: `v1|${candidate.id}@${candidate.version}`,'), false)
   assert.equal(mintsAtReceipt('  // historical receipts looked like 4351@2026-08-28'), false)
   assert.equal(mintsAtReceipt('  const receiptNumber = businessDateTimeId()'), false)
+  assert.equal(mintsAtReceipt('  const receiptSql = `SELECT id FROM receipts WHERE operation_id=@operation`'), false)
 })
 
 check('no writer under cloudflare/src mints an @ receipt number', () => {

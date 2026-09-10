@@ -137,9 +137,12 @@ check('inventory.ts stock stats are the plain active catalog',
     && /endDate: String\(query\.endDate \|\| today\)/.test(compat)
     && !/defaultStart/.test(compat))
   const dashboard = read('..', 'frontend', 'src', 'components', 'dashboard', 'Dashboard.tsx')
-  check('Dashboard.tsx defaults its range to today at both initialisation sites',
+  check('Dashboard.tsx defaults persisted and missing range state to the Today preset',
     !/offsetDate\(-6\)/.test(dashboard)
-    && (dashboard.match(/customStart \? [a-zA-Z]+\.customStart : todayStr\(\)/g) || []).length === 2)
+    && /return \{ version: 2, rangeId: 'today', customStart: '', customEnd: '' \}/.test(dashboard)
+    && /if \(!prefs\) \{\s*const today = todayStr\(\)\s*return \{ startDate: today, endDate: today, startTime: '', endTime: '' \}/.test(dashboard)
+    && /readDashboardFilterPrefs\(dashboardFilterStorageKey\)/.test(dashboard)
+    && /resolveDashboardFilterRange\(filterPrefs\)/.test(dashboard))
 }
 
 console.log(`\nALL ${passed} CHECKS PASSED`)

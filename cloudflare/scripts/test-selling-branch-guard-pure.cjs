@@ -172,6 +172,7 @@ const returnsSource = read('src/routes/returns.ts')
 const salesImportSource = read('src/lib/salesImportCommit.ts')
 const branchesSource = read('src/routes/branches.ts')
 const inventorySource = read('src/routes/inventory.ts')
+const transferOperationSource = read('src/lib/transferOperation.ts')
 
 runTest('every path that writes a sale line asks the guard first', () => {
   // Checkout, add-items-to-a-sale, and a replaced-in product: three writers,
@@ -225,8 +226,13 @@ runTest('ALL THREE transfer routes check the direction', () => {
   assert.match(inventorySource, /from '\.\.\/lib\/branchRoleGuards'/)
   assert.equal((branchesSource.match(/resolveCanonicalTransferPair\(/g) || []).length, 2, 'both branch transfer routes require an unambiguous active pair')
   assert.equal((inventorySource.match(/resolveCanonicalTransferPair\(/g) || []).length, 1, 'the inventory transfer requires an unambiguous active pair')
-  assert.equal((branchesSource.match(/canonicalTransferAuthorityGuardStatement\(/g) || []).length, 6, 'both final transfer batches and four conditional lot-clone writes re-check authority atomically')
-  assert.equal((inventorySource.match(/canonicalTransferAuthorityGuardStatement\(/g) || []).length, 1, 'the inventory transfer batch re-checks authority atomically')
+  assert.equal((branchesSource.match(/await planTransferOperation\(/g) || []).length, 2, 'both branch transfer routes use the centralized atomic writer')
+  assert.equal((inventorySource.match(/await planTransferOperation\(/g) || []).length, 1, 'the inventory transfer uses the centralized atomic writer')
+  assert.equal((transferOperationSource.match(/canonicalTransferAuthorityGuardStatement\(/g) || []).length, 2,
+    'the centralized writer re-checks authority in forward and replay batches')
+  assert.match(transferOperationSource,
+    /const statements: Statement\[\] = \[canonicalTransferAuthorityGuardStatement\(args\.fromBranchId, args\.toBranchId\)/,
+    'the authoritative identity guard must be the first statement in the forward transfer batch')
   assert.match(branchesSource, /CANONICAL_BRANCH_CONFIGURATION_CODE \}, 409\)/)
   assert.match(inventorySource, /CANONICAL_BRANCH_CONFIGURATION_CODE \}, 409\)/)
 })
@@ -238,13 +244,11 @@ runTest('the inventory transfer is refused before its atomic write', () => {
   const routeAt = inventorySource.indexOf("app.post('/transfer'")
   assert.ok(routeAt > 0, 'the inventory transfer route must still exist')
   const guardAt = inventorySource.indexOf('transferDirectionError(', routeAt)
-  const atomicGuardAt = inventorySource.indexOf('canonicalTransferAuthorityGuardStatement(', routeAt)
-  const statementsAt = inventorySource.indexOf('const statements', routeAt)
+  const planAt = inventorySource.indexOf('await planTransferOperation(', routeAt)
+  const batchAt = inventorySource.indexOf('await db.batch(statements)', routeAt)
   assert.ok(guardAt > routeAt, 'the guard must live inside the transfer route')
-  assert.ok(statementsAt > routeAt)
-  assert.ok(guardAt < statementsAt, 'the direction check must precede construction of the atomic write')
-  const stockUpdateAt = inventorySource.indexOf("UPDATE branch_stock SET quantity = quantity - @quantity", routeAt)
-  assert.ok(atomicGuardAt > statementsAt && atomicGuardAt < stockUpdateAt, 'the authoritative identity guard must be the first statement inside the atomic transfer batch')
+  assert.ok(planAt > routeAt && batchAt > planAt)
+  assert.ok(guardAt < planAt, 'the direction check must precede construction of the atomic write')
 })
 
 if (failures) {

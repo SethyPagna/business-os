@@ -126,6 +126,8 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   // inventory.ts imports this TypeScript-only helper; load it through the
   // harness rather than asking Node to resolve a non-existent .js sibling.
   '../lib/transferOperationReceipt': loadReal('lib/transferOperationReceipt.ts'),
+  // Supplier attribution uses receive/adjust only; transfer has its own suite.
+  '../lib/transferOperation': { planTransferOperation: async () => { throw new Error('unrelated transfer path invoked') } },
   // REAL, not stubbed: POST /inventory/transfer now refuses a shop -> warehouse
   // move through this guard, so the fixtures here run through the rejection
   // instead of opting out of it.

@@ -194,6 +194,8 @@ const RECEIPT_SNAPSHOTS = new Map([
   ['product_conflict_merge_run_cases.merged_product_id', 'durable receipt: the product selected for retirement'],
   ['product_conflict_action_group_members.product_id', 'durable receipt: the product reviewed as a group member'],
   ['product_remove_operations.product_id', 'durable receipt: the product selected for reversible removal'],
+  ['transfer_operation_members.source_product_id', 'durable transfer provenance: the exact product stock left'],
+  ['transfer_operation_members.destination_product_id', 'durable transfer provenance: the exact product stock entered'],
 ])
 
 async function fkSweep() {
@@ -287,13 +289,16 @@ async function main() {
     assert.deepEqual(unaccounted, [], `these product FKs would be orphaned by a merge: ${unaccounted.join(', ')}`)
   })
 
-  await check('selected merge receipt product ids stay immutable historical evidence', () => {
+  await check('durable merge and transfer receipt product ids stay immutable historical evidence', () => {
     const selectedMergeReceiptMigration = fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0136_product_conflict_merge_runs.sql'), 'utf8')
     const globalActionReceiptMigration = fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0138_product_conflict_action_groups.sql'), 'utf8')
+    const transferReceiptMigration = fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0151_transfer_provenance_replay.sql'), 'utf8')
     assert.match(selectedMergeReceiptMigration, /Durable receipts for Products > Conflicts selected merge runs/)
     assert.match(selectedMergeReceiptMigration, /Never drop receipt rows/)
     assert.match(globalActionReceiptMigration, /Durable draft receipts for one global Products > Conflicts action review/)
     assert.match(globalActionReceiptMigration, /Never drop receipt rows/)
+    assert.match(transferReceiptMigration, /immutable provenance/)
+    assert.match(transferReceiptMigration, /Product and lot identities cannot be removed\/reparented while replay evidence exists/)
     for (const key of RECEIPT_SNAPSHOTS.keys()) {
       assert.ok(found.has(key), `${key} must remain visible to the migration FK sweep`)
       assert.ok(!reparented.has(key), `${key} must not be rewritten by the product merge fold`)

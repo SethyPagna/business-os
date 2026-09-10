@@ -115,6 +115,8 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   // inventory.ts imports this TypeScript-only helper; load it through the
   // harness rather than asking Node to resolve a non-existent .js sibling.
   '../lib/transferOperationReceipt': loadReal('lib/transferOperationReceipt.ts'),
+  // This contract exercises /adjust; fail loudly if it ever reaches transfer.
+  '../lib/transferOperation': { planTransferOperation: async () => { throw new Error('unrelated transfer path invoked') } },
   '../lib/branchRoleGuards': loadReal('lib/branchRoleGuards.ts', { './branchRoles': loadReal('lib/branchRoles.ts') }),
   '../lib/canonicalBranchIdentity': canonicalBranchIdentity,
   '../lib/actorSnapshot': actorSnapshotKernel,

@@ -149,6 +149,9 @@ const LOT_WRITER_CLASSIFICATION = {
   // supplier_id, no supplier_name and no unit_cost_usd, so it states nothing
   // the gate could check and invents nothing either.
   'src/lib/productWrites.ts': 'not-a-receipt: records no supplier and no cost',
+  // A transfer clones immutable lot identity onto the destination product. It
+  // does not receive goods, attribute a supplier, or establish a new cost.
+  'src/lib/transferOperation.ts': 'not-a-receipt: preserves transferred lot provenance',
 }
 assert.deepEqual(lotWriters, Object.keys(LOT_WRITER_CLASSIFICATION).sort(),
   'a file that INSERTs a product_batches row appeared or vanished -- classify it in LOT_WRITER_CLASSIFICATION (gated, or declared not-a-receipt with the reason) before this census can be believed again')
