@@ -46,12 +46,32 @@ assert.throws(() => buildReturnBulkPayload({ rows: oversized, field: 'status', s
 
 const pageSource = fs.readFileSync(path.join(root, 'src/components/returns/Returns.tsx'), 'utf8')
 const transportSource = fs.readFileSync(path.join(root, 'src/api/returnsTransport.ts'), 'utf8')
+const statsStripStart = pageSource.indexOf('<StatsStrip')
+const secondaryActionsStart = pageSource.indexOf('<div data-returns-secondary-actions', statsStripStart)
+const searchToolbarStart = pageSource.indexOf('{/* Search + filter', secondaryActionsStart)
+assert.ok(statsStripStart >= 0 && secondaryActionsStart > statsStripStart && searchToolbarStart > secondaryActionsStart, 'Returns should keep distinct primary stats and secondary action surfaces')
+const primaryStatsRowSource = pageSource.slice(statsStripStart, secondaryActionsStart)
+const secondaryActionRailSource = pageSource.slice(secondaryActionsStart, searchToolbarStart)
 assert.match(pageSource, /sessionStorage\.setItem\(bulkRetryKey, JSON\.stringify\(request\)\)/)
 assert.match(pageSource, /const canBulkReturns = can\('returns', 'bulk'\)/)
 assert.match(pageSource, /const canExportReturns = can\('returns', 'export'\)/)
 assert.match(pageSource, /if \(!canBulkReturns\) throw new Error[\s\S]*applyBulkAction\(pendingBulkRequest\)/)
 assert.match(pageSource, /savePendingBulkRequest\(null\)/)
-assert.match(pageSource, /canExportReturns \?[\s\S]{0,400}SectionExportAction/)
+assert.match(
+  primaryStatsRowSource,
+  /range=\{stripRange\}[\s\S]*onRangeChange=\{setStripRange\}[\s\S]*rangeActions=\{\(\s*canExportReturns \? \(\s*<ExportMenu[\s\S]*items=\{exportItems\}[\s\S]*iconOnly[\s\S]*triggerClassName=\{toolbarIconButtonClassName\}/,
+  'permission-gated Export should occupy the primary Stats/date row as its icon-only range action',
+)
+assert.match(
+  secondaryActionRailSource,
+  /data-returns-secondary-actions className="[^"]*max-w-full[^"]*min-w-0[^"]*overflow-x-auto[^"]*"[\s\S]*className="flex w-max min-w-full flex-nowrap/,
+  'long Returns actions should stay inside the contained non-wrapping secondary rail',
+)
+assert.doesNotMatch(
+  secondaryActionRailSource,
+  /ExportMenu|exportItems|canExportReturns/,
+  'Export must not re-enter the secondary action rail',
+)
 assert.match(pageSource, /selectionEnabled=\{canBulkReturns\}/)
 assert.match(pageSource, /canBulkReturns && pendingBulkRequest/)
 assert.match(pageSource, /canBulkReturns && bulkActionSnapshot\?\.rows\.length/)
