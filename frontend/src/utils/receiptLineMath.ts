@@ -83,9 +83,14 @@ export function receiptLineFigures(
   const baseUnitUsd = num(item.base_price_usd)
   const productSavingsUsd = num(item.product_discount_usd)
   const manualSavingsUsd = num(item.manual_discount_usd)
-  const originalUnitUsd = baseUnitUsd > 0
-    ? baseUnitUsd + productSavingsUsd + manualSavingsUsd
-    : num(item.price_usd ?? item.price) + manualSavingsUsd
+  // Keep the product-level list price derivation explicit; manual discounts
+  // are an additional sale-level reduction layered on top of that amount.
+  // This distinction matters for legacy lines where either component may be
+  // absent, and keeps the receipt's before/after audit math deterministic.
+  const productListUnitUsd = baseUnitUsd > 0
+    ? baseUnitUsd + num(item.product_discount_usd)
+    : num(item.price_usd ?? item.price)
+  const originalUnitUsd = productListUnitUsd + manualSavingsUsd
 
   const hasDiscount = showItemDiscount
     && originalUnitUsd > 0
