@@ -12412,6 +12412,71 @@ needs the normal Worker release upload before it can affect new sales; existing
 historical rows remain readable through the canonical `/api/sales` relational
 join, while the dashboard has a correct relational count in the patched build.
 
+## Unified sales-workflow and responsive UI candidate — September 11, 2026
+
+The coordinated implementation is integrated on `codex/ui-consistency-20260911`
+through runtime commit **d2c71203**. It is a local candidate only: no Worker or
+frontend deployment, remote D1 command, secret sync, or production-data write
+ran. Migration **0151_transfer_provenance_replay.sql** is included and verified
+locally but remains unapplied remotely.
+
+The candidate standardizes 40px action controls, borderless header actions,
+larger theme/language glyphs, compact Sales/Returns/Expenses rows and details,
+two-position labelled pagination (`Back` / `Next`) above and below lists, one-row
+stats/date/action controls, and horizontally scrollable date presets. Every
+user-facing operational date-range owner now starts at the Cambodia business
+**Today** range; explicit custom and All-time choices remain supported. Reports
+has one report picker beside Filters and Show, with all scoped report options
+retained. Branch Overview has its Stats control restored.
+
+Sales status/payment writes now reconcile exact authoritative receipt state and
+freeze genuinely unknown outcomes behind the original-request retry/discard
+workflow. Employee sale amendments use the existing setting/permission gate;
+zero minutes means no time limit and 120 minutes remains available as the
+toggle-on policy. Sale item quantity, price, delivery fee, and actual delivery
+cost use compact direct editors. Shift close, modal close/minimize/discard/back,
+transfer drafts, and transfer replay paths have focused lifecycle coverage.
+
+Transfers now persist exact source/destination lot provenance, use actor-scoped
+operation identity, create destination lots atomically, and replay undo/redo on
+the server without choosing a new FIFO allocation. Backup/reset and product
+identity guards cover the transfer receipt/provenance tables. Both canonical
+Shop→Warehouse and Warehouse→Shop directions, single/multi/all transfer routes,
+duplicate responses, conflicts, permission changes, and reload recovery were
+exercised in focused Worker and frontend suites.
+
+The shared anonymous customer is presented as **General** in English and
+`អតិថិជនទូទៅ` in Khmer across Sales, receipts, Returns, Dashboard, reports, and
+human-facing worksheets. Marked General and null checkout identities share the
+anonymous analytics group and never gain a membership/profile identity; an
+unmarked real customer named General or Walk-in remains a real distinct
+customer. Sale-specific phone snapshots remain visible and hold-to-copy. The
+import-compatible detailed-sales CSV intentionally keeps anonymous identity
+blank so round-trip import cannot manufacture a name-only customer. No customer
+row, membership, receipt, money, stock, or return total was rewritten.
+
+Final combined local evidence: frontend utility chain **361/361**, frontend and
+Worker typechecks, i18n **5,711 keys / 589 source files**, and the 1,123-module
+production build pass. The four-lane Worker sweep covered all **332** scripts:
+316 passed directly; 16 stale harness/source-census checks were reconciled with
+the centralized permission/transfer architecture and all 16 plus adjacent
+transfer, permission, product-merge, and migration gates pass. Effective-view
+route matrices passed **586** core-surface and **539** route requests; an
+independent serialized frontend/Worker permission matrix passed **124,848**
+combinations. Focused General analytics passed 33 additive checks, 117 report
+view checks, 29 day-report checks, 61 Dashboard/date checks, and real report,
+return lookup, export/round-trip, and sale snapshot fixtures.
+
+A local 375×812 browser run with mocked read-only API fixtures verified the
+compact Sales, Returns, Expenses, and Reports layouts; Today is selected by
+default; Sales displays General + phone + driver in one compact row; opened sale
+details retain General and the phone without a membership identity; Returns
+minimize restores a tray entry and discard is available; both pagers use labelled
+Back/Next controls; Reports shows one picker and every report option. The mocks
+were used because the private copied local D1 could not advance past the existing
+0098 SQLite compound-select limit. This visual run did not touch shared or
+production data.
+
 ### Compatibility repair deployed — September 11, 2026
 
 Fix-scoped commit **0e02859b6e08** is live at 100% in Worker version

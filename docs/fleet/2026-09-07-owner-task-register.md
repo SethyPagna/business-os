@@ -283,6 +283,18 @@ Remaining: F46 combined conflict review/execution and truthful saved run/undo st
 | F55 | English, Khmer, and wire variables must describe the same stock and delivery concepts; received-date records must not render as lot/batch, and sale-record fields must not fall back to raw variables. | Deployed 1d8c5813; independent PASS | 5,682 bilingual keys, placeholder parity, Worker/browser sale-kind and field parity, Khmer glossary, Telegram, receipt, merge, and record rendering checks pass. Legacy CSV column names and the internal multi-line Batch session remain compatibility exceptions. |
 | F56 | Transfers must preserve the source received date when cloning or FIFO-allocating a product batch; Telegram transfer/return lines must show the same date. | Deployed 0a0f2865 / 1d8c5813; independent PASS | `received_at` is copied or kept unknown, never replaced with transfer time; branch-transfer regression 6/6 and Telegram message suites pass. |
 
+## September 11 coordinated UI and workflow candidate
+
+| Workstream | State | Evidence / release boundary |
+| --- | --- | --- |
+| Sales, Returns, Expenses, Reports responsive consistency | Integrated locally through d2c71203; verified | Compact grouped rows/details, shared 40px actions, one-row stats/date/actions, horizontal presets, labelled Back/Next pagination at both positions, single Reports picker, restored Branch Stats. 375×812 mocked-read browser pass plus frontend 361/361. |
+| Default date range | Integrated locally; verified | Every visible operational range owner starts at Cambodia business Today. Explicit All time/custom remain available. Date-default and Dashboard/Worker boundary suites pass. |
+| General anonymous customer | Integrated locally; verified | Marker-based General normalization across UI/human reports and analytics; real customers with the same name stay distinct; membership/profile identity remains suppressed; sale phone snapshot stays visible/copyable. Import-compatible CSV keeps the anonymous fields blank by design. |
+| Sale status/payment/amendment reliability | Integrated locally; verified | Exact receipt-state reconciliation, frozen unknown outcomes, original-request retry/discard, role/user parity, and configurable unlimited/120-minute amendment policy pass focused route/UI tests. |
+| Shop↔Warehouse transfer operations | Integrated locally; verified, migration unapplied | Exact lot provenance, atomic destination lots, actor-scoped receipts, server replay, backup/reset, minimize/reload drafts, single/multi/all routes. Migration 0151 remains local and unapplied. |
+| Permissions/current pages | Integrated locally; verified | Strict effective view/action enforcement on frontend and Worker; 586 core-surface + 539 route requests and 124,848 independent parity combinations pass. |
+| Release | **Not deployed** | Local branch `codex/ui-consistency-20260911`; no remote migration, production data write, secret sync, or release upload. |
+
 ## Freshness follow-up candidate — September 8
 
 Production remains c2eb9d57/Worker3931ea55,100%. Next isolated release includes F53 permission-refresh coalescing and session-generation isolation (independent review PASS); F54 HTTP invalidation/in-flight ownership and authoritative server-cache precedence (69 focused checks plus512 independent timing schedules); U05 selected positive profit headline stays green in both themes. Source b2299a2b is integrated, not deployed. Existing callbacks that write persistent queryCache/IndexedDB and already-started caller results are outside F54's proven shared-HTTP-cache boundary. No backend source or migration changes in this follow-up.
