@@ -4,6 +4,7 @@ import { useApp as useAppHook } from '../../AppContext.tsx'
 import {
   canRestoreMinimizedWork, dispatchRestore, getMinimizedWork, removeMinimizedWork, subscribeMinimizedWork,
   type MinimizedWorkEntry, type MinimizedWorkKind,
+  discardTransferDraft,
 } from '../../utils/minimizedWork.ts'
 import { discardStockAdjustDraft } from '../../utils/stockAdjustDraft.ts'
 import { clearWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
@@ -37,6 +38,8 @@ const LEGACY_DRAFT_BASE_BY_KIND: Record<MinimizedWorkKind, string | null> = {
   product_detail: null,
   // Return details are read-only live records, so there is no draft to clear.
   return_detail: null,
+  branch_transfer: null,
+  inventory_transfer: null,
 }
 
 const useApp = useAppHook as unknown as () => {
@@ -67,6 +70,10 @@ export default function MinimizedWorkTray({ variant }: { variant: 'mobile' | 'de
     dispatchRestore(entry)
   }
   const dismiss = (entry: MinimizedWorkEntry) => {
+    if (entry.kind === 'branch_transfer' || entry.kind === 'inventory_transfer') {
+      if (entry.draftKey) discardTransferDraft(entry.kind, user?.id, entry.draftKey)
+      return
+    }
     removeMinimizedWork(entry.key)
     const legacyDraftBase = LEGACY_DRAFT_BASE_BY_KIND[entry.kind]
     const draftKey = entry.draftKey || (legacyDraftBase ? scopedWorkDraftKey(legacyDraftBase) : null)

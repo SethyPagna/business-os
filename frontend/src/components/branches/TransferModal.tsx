@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import X from 'lucide-react/dist/esm/icons/x.js'
+import MinimizeButton from '../shared/MinimizeButton.tsx'
+import { transferDraftKey, readTransferDraft, writeTransferDraft, discardTransferDraft, completeTransferDraft, parkTransferDraft, markRestoreHandled } from '../../utils/minimizedWork.ts'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
+import { registerDirtyWork } from '../../utils/dirtyWork.ts'
 import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import {
@@ -30,7 +33,6 @@ import ProductOptionSheet from '../shared/ProductOptionSheet.tsx'
 import { branchCanBeTransferDestination, branchCanBeTransferSource, branchCanTransferBetween, branchRoleFromName } from '../../utils/branchRoles.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
-import { dispatchResolvedSyncError } from '../../utils/syncProblemLifecycle.ts'
 
 const TRANSFER_STOCK_LOAD_TIMEOUT_MS = 12000
 // Transfers can allocate and materialize many lot rows in one D1 batch. Keep
@@ -233,15 +235,17 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
    * 2. UI State
    * 2.1 Form inputs and branch-scoped product cache.
    */
-  const [fromBranch, setFromBranch] = useState('')
-  const [toBranch, setToBranch] = useState('')
-  const [search, setSearch] = useState('')
+  const draftKey = transferDraftKey('branch_transfer')
+  const [initialDraft] = useState(() => readTransferDraft<{ fromBranch: string; toBranch: string; search: string; reason: string; selectedQuantities: Record<string, string>; showAllProducts: boolean; showSelectedOnly: boolean }>('branch_transfer', user?.id))
+  const [fromBranch, setFromBranch] = useState(initialDraft?.fromBranch || '')
+  const [toBranch, setToBranch] = useState(initialDraft?.toBranch || '')
+  const [search, setSearch] = useState(initialDraft?.search || '')
   const debouncedSearch = useDebouncedValue(search, TRANSFER_SEARCH_DEBOUNCE_MS)
   const [products, setProducts] = useState<TransferProduct[]>([])
   const [selectedProduct, setSelectedProduct] = useState<TransferProduct | null>(null)
   const [quantity, setQuantity] = useState('')
   // The transfer's documented cause. Required -- see requireTransferReason.
-  const [reason, setReason] = useState('')
+  const [reason, setReason] = useState(initialDraft?.reason || '')
   const [saving, setSaving] = useState(false)
   const [loadingProducts, setLoadingProducts] = useState(false)
   const [loadingMoreProducts, setLoadingMoreProducts] = useState(false)
@@ -291,12 +295,12 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   const [mode] = useState<TransferMode>('multiple')
   const [multiProducts, setMultiProducts] = useState<TransferProduct[]>([])
   const [loadingMultiProducts, setLoadingMultiProducts] = useState(false)
-  const [showAllProducts, setShowAllProducts] = useState(false)
-  const [selectedQuantities, setSelectedQuantities] = useState<Record<string, string>>({})
+  const [showAllProducts, setShowAllProducts] = useState(initialDraft?.showAllProducts || false)
+  const [selectedQuantities, setSelectedQuantities] = useState<Record<string, string>>(initialDraft?.selectedQuantities || {})
   // Multi mode: view filter that narrows the (whole-catalog) list to just
   // the checked rows, so the picked set can be reviewed/adjusted in one
   // screen instead of hunting scattered highlighted rows through thousands.
-  const [showSelectedOnly, setShowSelectedOnly] = useState(false)
+  const [showSelectedOnly, setShowSelectedOnly] = useState(initialDraft?.showSelectedOnly || false)
   const [savingBulk, setSavingBulk] = useState(false)
   // A transfer parked for confirmation. Both the checked-rows transfer and
   // the whole-branch transfer go through this one shape, so there is exactly
@@ -311,8 +315,47 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   const transferDirty = Boolean(fromBranch) || Boolean(toBranch)
     || Boolean(quantity.trim()) || Boolean(reason.trim())
     || Object.values(selectedQuantities).some((value) => String(value || '').trim().length > 0)
-  // A saved request survives closing: it must never be discarded as a form draft.
-  const closeGuard = useCloseGuard({ dirty: transferDirty && !savedRun }, onClose)
+  const draftFinishedRef = useRef(false)
+  const draftGuardRef = useRef({ dirty: transferDirty, pending: !!savedRun, busy: saving || savingBulk })
+  draftGuardRef.current = { dirty: transferDirty, pending: !!savedRun, busy: saving || savingBulk }
+  const draftState = { fromBranch, toBranch, search, reason, selectedQuantities, showAllProducts, showSelectedOnly }
+  const draftLifecycleRef = useRef({ draftKey, actorId: user?.id, dirty: transferDirty, form: draftState })
+  draftLifecycleRef.current = { draftKey, actorId: user?.id, dirty: transferDirty, form: draftState }
+  useEffect(() => {
+    if (transferDirty && !draftFinishedRef.current) writeTransferDraft('branch_transfer', user?.id, draftKey, draftState)
+  }, [draftKey, user?.id, fromBranch, toBranch, search, reason, selectedQuantities, showAllProducts, showSelectedOnly, transferDirty])
+  useEffect(() => {
+    markRestoreHandled('branch_transfer')
+    const preserve = () => {
+      const latest = draftLifecycleRef.current
+      if (!draftFinishedRef.current && latest.dirty) {
+        writeTransferDraft('branch_transfer', latest.actorId, latest.draftKey, latest.form)
+        parkTransferDraft('branch_transfer', latest.actorId, latest.draftKey, t('stock_transfer'))
+      }
+    }
+    window.addEventListener('pagehide', preserve)
+    return () => { window.removeEventListener('pagehide', preserve); preserve() }
+  }, [])
+  useEffect(() => registerDirtyWork({
+    key: draftKey, pageId: 'branches', label: t('stock_transfer'),
+    isDirty: () => !draftFinishedRef.current && (draftGuardRef.current.busy || (draftGuardRef.current.dirty && !draftGuardRef.current.pending)),
+    discard: () => {
+      if (draftGuardRef.current.busy || draftGuardRef.current.pending) return
+      draftFinishedRef.current = discardTransferDraft('branch_transfer', user?.id, draftKey)
+    },
+  }), [draftKey, user?.id])
+  const preserveAndMinimize = () => {
+    if (saving || savingBulk || !canTransferStock) return
+    if (!writeTransferDraft('branch_transfer', user?.id, draftKey, draftState)) { notify(t('save_failed'), 'error'); return }
+    parkTransferDraft('branch_transfer', user?.id, draftKey, t('stock_transfer'))
+    onClose()
+  }
+  const closeGuard = useCloseGuard({ workKey: draftKey }, () => {
+    if (saving || savingBulk) return
+    if (!savedRun) draftFinishedRef.current = discardTransferDraft('branch_transfer', user?.id, draftKey)
+    onClose()
+  }, preserveAndMinimize)
+  const requestClose = () => { if (!saving && !savingBulk) closeGuard.requestClose() }
 
   // Only set while a multi-request whole-branch move is running, so the
   // operator can see it is partway through rather than hung.
@@ -604,13 +647,12 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
       entireBranchAfterLoadRef.current = false
       return undefined
     }
-    const catalogRequested = Boolean(debouncedSearch.trim()) || showAllProducts
+    const catalogRequested = Boolean(debouncedSearch.trim()) || showAllProducts || Object.keys(selectedQuantities).length > 0
     if (!catalogRequested) return undefined
     if (multiProductsBranchRef.current === String(fromBranch)) return undefined
 
     const requestId = beginTrackedRequest(multiStockRequestRef)
     setMultiProducts([])
-    setSelectedQuantities({})
     setLoadingMultiProducts(true)
     async function loadAllStock() {
       try {
@@ -653,7 +695,10 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   // Switching source branch invalidates whatever was picked under the old
   // branch, in both modes -- a selection made against branch A's stock
   // levels has no meaning once fromBranch changes to B.
+  const previousSourceRef = useRef(fromBranch)
   useEffect(() => {
+    if (previousSourceRef.current === fromBranch) return
+    previousSourceRef.current = fromBranch
     setSelectedQuantities({})
     setShowSelectedOnly(false)
     setShowAllProducts(false)
@@ -943,6 +988,8 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
         return res
       })
       saveTransferRun(run.actorId, null)
+      completeTransferDraft(run.actorId, draftKey)
+      draftFinishedRef.current = true
       if (!aliveRef.current || transferAuthorityRef.current.actorId !== run.actorId) return
       setSavedRun(null)
 
@@ -1084,6 +1131,8 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
         return request.bulk ? transferStockBulkRequest(request.body) : transferStockRequest(request.body)
       })
       saveTransferRun(completed.actorId, null)
+      completeTransferDraft(completed.actorId, draftKey)
+      draftFinishedRef.current = true
       if (!aliveRef.current || transferAuthorityRef.current.actorId !== completed.actorId) return
       setSavedRun(null)
       const message = (t('transfer_bulk_success') || 'Transferred {n} products').replace('{n}', String(completed.transferred))
@@ -1102,30 +1151,16 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
     }
   }
 
-  const discardSavedTransfer = () => {
-    if (savingBulk || saving) return
-    if (!window.confirm(t('sale_bulk_pending'))) return
-    try {
-      saveTransferRun(user?.id, null)
-      dispatchResolvedSyncError(savedRun?.syncProblem)
-      setSavedRun(null)
-      setRetryError('')
-      // Refresh stock/history after an explicit discard, including partial commits.
-      onDone()
-    } catch (error) {
-      setRetryError(getErrorMessage(error, t('transfer_failed')))
-    }
-  }
-
   return createPortal(
-    <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center">
-      <div className="modal-panel-safe fade-in flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-2xl sm:rounded-2xl">
+    <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center" onClick={() => { if (!saving && !savingBulk) closeGuard.requestClose() }}>
+      <div className="modal-panel-safe fade-in flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-2xl sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700 sm:p-5">
           <h2 className="min-w-0 truncate text-lg font-bold text-gray-900 dark:text-white">{t('stock_transfer') || 'Stock Transfer'}</h2>
           <div className="flex shrink-0 items-center gap-1">
+            <MinimizeButton onMinimize={preserveAndMinimize} tr={(key, fallback) => t(key) || fallback} disabled={saving || savingBulk || !canTransferStock} />
             <button
               type="button"
-              onClick={closeGuard.requestClose}
+              onClick={requestClose}
               disabled={saving || savingBulk}
               className="flex h-10 w-10 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 disabled:opacity-50 dark:hover:bg-gray-700"
               aria-label={t('close') || 'Close'}
@@ -1148,7 +1183,6 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                 : retryError}</p> : null}
               <div className="flex flex-wrap gap-2">
                 <button type="button" className="btn-primary min-h-10" disabled={saving || savingBulk || !canTransferStock || !!retryStorageError} onClick={() => { void runPendingTransfer(null) }}>{savingBulk ? t('saving') : t('retry')}</button>
-                <button type="button" className="btn-secondary min-h-10" disabled={saving || savingBulk} onClick={discardSavedTransfer}>{t('discard')}</button>
               </div>
             </> : null}
           </div>

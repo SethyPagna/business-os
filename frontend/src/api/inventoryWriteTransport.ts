@@ -33,6 +33,9 @@ export function prepareInventoryTransfer(actorId: unknown, body: InventoryPayloa
   return { ...run, context: JSON.parse(JSON.stringify({ ...context, entryId: context.entryId || run.requests[0].body.client_request_id })) }
 }
 export function executeInventoryTransfer(run: PendingInventoryTransfer, checkpoint: (next: PendingInventoryTransfer) => void): Promise<PendingInventoryTransfer> {
+  // Old browser drafts contain reverse FIFO bodies with no lot provenance.
+  // Keep the saved evidence, but never submit that legacy reversal again.
+  if (run.context.kind !== 'submit') return Promise.reject(new Error('This legacy transfer reversal cannot be replayed. Check transfer history.'))
   return executeTransferRun(run, (next) => checkpoint(next as PendingInventoryTransfer), (request) => transferInventoryStock(request.body)) as Promise<PendingInventoryTransfer>
 }
 

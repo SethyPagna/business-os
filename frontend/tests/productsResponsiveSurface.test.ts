@@ -208,20 +208,21 @@ assert.doesNotMatch(transfer, /entireBranchItems\(filteredMulti\)/, 'a search bo
 assert.match(transfer, /const TRANSFER_BULK_CHUNK_SIZE = 200/, 'the client cap must mirror the Worker MAX_BULK_TRANSFER_ITEMS')
 assert.match(transfer, /transfer_entire_branch_note/, 'the confirm must say a multi-request run is not one undoable step')
 assert.match(transfer, /transfer_bulk_partial/, 'a run that stops partway must report how much already landed')
-const retryRun = transfer.slice(transfer.indexOf('const runPendingTransfer'), transfer.indexOf('const discardSavedTransfer'))
+const retryRun = transfer.slice(transfer.indexOf('const runPendingTransfer'), transfer.indexOf('return createPortal'))
 assert.match(retryRun, /const completed = await executeTransferRun\(run, \(next\) => \{[\s\S]*saveTransferRun\(next\.actorId, next\)[\s\S]*setSavedRun\(next\)/, 'every completed chunk checkpoints the exact remaining retry state')
 assert.match(retryRun, /saveTransferRun\(completed\.actorId, null\)[\s\S]*setSavedRun\(null\)[\s\S]*onDone\(\)/, 'only a fully completed run clears retry state and reports done')
 const retryCatch = retryRun.slice(retryRun.indexOf('} catch (error)'), retryRun.indexOf('} finally'))
 assert.doesNotMatch(retryCatch, /setSavedRun\(null\)|onDone\(\)/, 'partial completion must remain retryable instead of being treated as full completion')
 assert.match(transfer, /savedRun\.transferred > 0[\s\S]*transfer_bulk_partial[\s\S]*onClick=\{\(\) => \{ void runPendingTransfer\(null\) \}\}/, 'the partial state tells the operator what landed and retries the frozen remainder')
-assert.match(transfer, /Refresh stock\/history after an explicit discard, including partial commits\.[\s\S]*onDone\(\)/, 'discard is the explicit path that refreshes after abandoning a partial retry')
+assert.doesNotMatch(transfer, /const discardSavedTransfer|onClick=\{discardSavedTransfer\}/, 'an unresolved transfer cannot be discarded and lose its exact retry identity')
+assert.match(transfer, /if \(!savedRun\) draftFinishedRef.current = discardTransferDraft/, 'closing may discard only a draft with no unresolved transfer')
 
 // The write path: one confirmed entry point, on-brand, translated. Starting a
 // bulk transfer uses the shared review dialog. Native confirmation remains only
-// in the dormant single-mode handler and the explicit discard-retry action.
-const liveTransferPath = transfer.slice(transfer.indexOf('const handleBulkTransfer'), transfer.indexOf('const discardSavedTransfer'))
+// in the dormant single-mode handler.
+const liveTransferPath = transfer.slice(transfer.indexOf('const handleBulkTransfer'), transfer.indexOf('return createPortal'))
 assert.doesNotMatch(liveTransferPath, /window\.confirm/, 'no native confirm on the live transfer path -- off-brand and untranslatable')
-assert.equal((transfer.match(/window\.confirm/g) || []).length, 2, 'native confirmation is limited to dormant single mode and explicit retry discard')
+assert.equal((transfer.match(/window\.confirm/g) || []).length, 1, 'native confirmation is limited to dormant single mode')
 assert.match(transfer, /<ConfirmDialog/, 'the shared review dialog asks instead')
 assert.match(transfer, /danger=\{pendingTransfer\.scope === 'entire_branch'\}/, 'emptying a branch must get the destructive treatment')
 assert.match(transfer, /confirm_bulk_transfer_details/, 'the existing pack key survives the move off window.confirm')

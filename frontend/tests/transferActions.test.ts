@@ -25,7 +25,7 @@ function store() {
 }
 
 for (const kind of ['submit', 'undo', 'redo']) for (const direction of [[1, 2], [2, 1]]) {
-  test(`Inventory ${kind} ${direction.join(' → ')} survives lost commit, reload and exact replay`, async () => {
+  test(`Inventory ${kind} ${direction.join(' → ')} ${kind === 'submit' ? 'survives lost commit, reload and exact replay' : 'legacy reverse transfer stays blocked after reload'}`, async () => {
     const storage = store()
     const inv = { exports: {} as any }
     const receipts = new Map<string, string>()
@@ -60,6 +60,13 @@ for (const kind of ['submit', 'undo', 'redo']) for (const direction of [[1, 2], 
     const frozen = JSON.stringify(run.requests[0].body)
     original.quantity = 99
     const checkpoint = (next: unknown) => api.saveInventoryTransfer(7, next, storage)
+    if (kind !== 'submit') {
+      await assert.rejects(api.executeInventoryTransfer(api.loadInventoryTransfer(7, storage), checkpoint), /legacy transfer reversal/)
+      assert.equal(commits, 0)
+      assert.equal(bodies.length, 0)
+      assert.equal(api.loadInventoryTransfer(7, storage).context.kind, kind, 'retain legacy evidence for history review')
+      return
+    }
     await assert.rejects(api.executeInventoryTransfer(run, checkpoint), /Lost committed response/)
     assert.equal(loadTransferRun(7, storage), null, 'Branch recovery must never see an Inventory request')
     assert.equal(api.loadInventoryTransfer(8, storage), null, 'actor isolation')

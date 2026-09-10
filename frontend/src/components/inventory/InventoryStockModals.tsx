@@ -15,6 +15,7 @@ import { useFormDirty } from '../../utils/formDirty.ts'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
 import UnsavedChangesPrompt, { type UnsavedChangesPromptItem } from '../shared/UnsavedChangesPrompt.tsx'
 import MinimizeButton from '../shared/MinimizeButton.tsx'
+import { markRestoreHandled } from '../../utils/minimizedWork.ts'
 import { TOOLBAR_BUTTON_BASE, toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
 
 type MoneyFormatter = (value: number) => string
@@ -152,6 +153,10 @@ type InventoryStockModalsProps = {
   onMinimizeAdjust?: () => void
   adjustRestoredDirty?: boolean
   onCloseTransfer: () => void
+  onMinimizeTransfer?: () => void
+  transferRestoredDirty?: boolean
+  transferPending?: boolean
+  transferWorkKey?: string
   onTransfer: () => void
   onTransferSourceChange?: (branchId: string) => void
   reasonsByType: InventoryReasonGroups
@@ -190,6 +195,10 @@ export default function InventoryStockModals({
   onMinimizeAdjust,
   adjustRestoredDirty = false,
   onCloseTransfer,
+  onMinimizeTransfer,
+  transferRestoredDirty = false,
+  transferPending = false,
+  transferWorkKey,
   onTransfer,
   onTransferSourceChange,
   reasonsByType,
@@ -205,6 +214,7 @@ export default function InventoryStockModals({
   transferSourceBranchOptions,
   usdSymbol,
 }: InventoryStockModalsProps) {
+  useEffect(() => { if (transferModal) markRestoreHandled('inventory_transfer') }, [transferModal?.id])
   const requestedSetTotal = Number(adjustForm.quantity)
   const setDifference = Number.isFinite(requestedSetTotal) ? requestedSetTotal - adjustCurrentQuantity : null
   const changeTransferSource = onTransferSourceChange || ((branchId: string) => {
@@ -358,7 +368,7 @@ export default function InventoryStockModals({
   // The backdrop, the ✕ and Cancel all reach the same prop today; each is
   // routed through the guard so none of the three can slip past it.
   const adjustGuard = useCloseGuard({ dirty: adjustDirty.dirty || Boolean(adjustRestoredDirty) }, onCloseAdjust, onMinimizeAdjust)
-  const transferGuard = useCloseGuard({ dirty: transferDirty.dirty }, onCloseTransfer)
+  const transferGuard = useCloseGuard(transferWorkKey ? { workKey: transferWorkKey } : { dirty: !transferPending && (transferDirty.dirty || transferRestoredDirty) }, onCloseTransfer, onMinimizeTransfer)
   // Same in-flight rule the other stock modals use: a dismissal during a
   // save is ignored outright rather than raising a prompt about a form the
   // request is still reading.
@@ -781,12 +791,13 @@ export default function InventoryStockModals({
                 <div className="mt-0.5 truncate text-xs text-gray-400">{transferModal.name} - {getStockQty(transferModal)} {transferModal.unit}</div>
               </div>
               <div className="flex shrink-0 items-center gap-1">
-                <button type="button" onClick={requestCloseTransfer} className={toolbarIconButtonClassName} aria-label={t('close') || 'Close'}>
+                {onMinimizeTransfer ? <MinimizeButton onMinimize={onMinimizeTransfer} tr={tr} disabled={transferSaving} /> : null}
+                <button type="button" onClick={requestCloseTransfer} disabled={transferSaving} className={toolbarIconButtonClassName} aria-label={t('close') || 'Close'}>
                   <X className="h-4 w-4" />
                 </button>
               </div>
             </div>
-            <div className="modal-scroll space-y-3 p-4">
+            <fieldset disabled={transferSaving || transferPending} className={`modal-scroll min-w-0 space-y-3 p-4 ${transferSaving || transferPending ? 'pointer-events-none opacity-60' : ''}`}>
               <label className="block">
                 <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('source_branch', 'Source branch')}</span>
                 <AppSelect
@@ -840,13 +851,13 @@ export default function InventoryStockModals({
                 ) : null}
                 <textarea className="input min-h-[84px] text-sm" value={transferForm.reason} onChange={(event) => setTransferForm((current) => ({ ...current, reason: event.target.value }))} placeholder={tr('transfer_reason_placeholder')} />
               </label>
-            </div>
+            </fieldset>
             {/* S4-20: the actions live at the END of the form -- outside
                 .modal-scroll, so they are the last thing in the panel
                 without being the last thing behind a scroll. There is no
                 second Save beside the ✕ any more. */}
             <div className="flex flex-shrink-0 gap-2 border-t border-gray-200 p-4 dark:border-gray-700">
-              <button type="button" onClick={onTransfer} className={`btn-primary ${TOOLBAR_BUTTON_BASE} flex-1`} disabled={transferSaving}>
+              <button type="button" onClick={onTransfer} className={`btn-primary ${TOOLBAR_BUTTON_BASE} min-w-0 flex-1`} disabled={transferSaving || transferPending}>
                 {transferSaving ? (t('saving') || 'Saving...') : tr('transfer', 'Transfer')}
               </button>
               <button type="button" onClick={requestCloseTransfer} className={`btn-secondary ${TOOLBAR_BUTTON_BASE}`} disabled={transferSaving}>

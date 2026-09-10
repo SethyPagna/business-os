@@ -15,6 +15,7 @@ export type PendingTransferRun = {
   next: number
   transferred: number
   merges: number
+  historyReceipts?: Array<{ operation_id: string; action_history_id: number; generation: number; provenance_version: 1 }>
   syncProblem?: SyncProblemReference
 }
 
@@ -75,7 +76,7 @@ export async function executeTransferRun(
   let current = run
   while (current.next < current.requests.length) {
     const request = current.requests[current.next]
-    let result: { success?: boolean; error?: string; transferredCount?: number; merges?: unknown[] }
+    let result: { success?: boolean; error?: string; transferredCount?: number; merges?: unknown[]; operation_id?: string; action_history_id?: number; generation?: number; provenance_version?: number }
     try { result = await send(request) as typeof result }
     catch (error) {
       const problem = error as { syncErrorId?: string; syncErrorChannel?: string; code?: string }
@@ -85,7 +86,9 @@ export async function executeTransferRun(
     if (!result || result.success === false) throw new Error(result?.error || 'Transfer failed')
     const next = { ...current, next: current.next + 1,
       transferred: current.transferred + (result.transferredCount ?? (request.bulk ? (request.body.items as unknown[]).length : 1)),
-      merges: current.merges + (result.merges?.length ?? 0) }
+      merges: current.merges + (result.merges?.length ?? 0),
+      historyReceipts: [...(current.historyReceipts || []), ...(result.provenance_version === 1 && result.operation_id && result.action_history_id != null && Number.isInteger(result.generation)
+        ? [{ operation_id: result.operation_id, action_history_id: result.action_history_id, generation: result.generation!, provenance_version: 1 as const }] : [])] }
     checkpoint(next)
     dispatchResolvedSyncError(current.syncProblem)
     current = next
