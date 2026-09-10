@@ -36,6 +36,24 @@ function requestArgs(source: string, callee: string): string[] {
   return find(source, (node) => ts.isCallExpression(node) && node.expression.getText().endsWith(callee))
     .map((node) => (node as ts.CallExpression).arguments[0].getText())
 }
+function stateCell(source: string, stateName: string, context: Record<string, unknown> = {}) {
+  let current: any
+  const useState = (initializer: any) => {
+    current = typeof initializer === 'function' ? initializer() : initializer
+    return [current, (next: any) => { current = typeof next === 'function' ? next(current) : next }]
+  }
+  const [initial, set] = evaluate(variable(source, stateName), { useState, ...context })
+  return { initial, set, current: () => current }
+}
+function jsxHandler(source: string, attributeName: string, contains: string): string {
+  const attribute = find(source, (node) => ts.isJsxAttribute(node)
+    && node.name.getText() === attributeName
+    && Boolean(node.initializer?.getText().includes(contains)))[0] as ts.JsxAttribute
+  if (!attribute?.initializer || !ts.isJsxExpression(attribute.initializer) || !attribute.initializer.expression) {
+    throw new Error(`production ${attributeName} handler containing ${contains} exists`)
+  }
+  return attribute.initializer.expression.getText()
+}
 const hooks = { useMemo: (fn: () => unknown) => fn(), useCallback: (fn: unknown) => fn }
 let now = new Date(2026, 8, 11, 12)
 const preset = (id: Parameters<typeof statsPresetRange>[0]) => statsPresetRange(id, now)
@@ -156,6 +174,151 @@ for (const [file, stateName] of pages) {
 const common = { search: '', debouncedSearch: '', typeFilter: 'all', scope: 'customer', branchFilter: '',
   page: 1, pageSize: 20, exportPage: 1, exportPageSize: 500, transferPage: 1, transferPageSize: 20, transferFromFilter: 'all', transferToFilter: 'all',
   deferredSearch: '', searchMode: 'auto', productsPage: 1, productsPageSize: 20 }
+
+// Secondary list/report surfaces execute the same Today policy on first
+// render. Each request expression below is production code evaluated with a
+// fixed business-day helper; clear/custom controls and paging cursors are
+// exercised separately so a default correction cannot erase those paths.
+function todayPair(file: string, fromState: string, toState: string) {
+  const source = read(file)
+  const initialToday = evaluate(variable(source, 'initialToday'), { todayStr: () => day1 })
+  assert.equal(initialToday, day1, `${file} gets Today from the business calendar helper`)
+  const from = stateCell(source, fromState, { initialToday })
+  const to = stateCell(source, toState, { initialToday })
+  assert.equal(from.initial, day1, `${file} start initializer is Today`)
+  assert.equal(to.initial, day1, `${file} end initializer is Today`)
+  return { source, from: from.initial, to: to.initial }
+}
+
+const stockLedger = todayPair('products/StockChangeSection.tsx', '[startDate, setStartDate]', '[endDate, setEndDate]')
+const stockLedgerRequest = evaluate(requestArgs(stockLedger.source, 'getStockLedger')[0], {
+  view: 'all', page: 1, PAGE_SIZE: 20, debouncedSearch: '', branchId: 0,
+  startDate: stockLedger.from, endDate: stockLedger.to, supplierId: 0,
+})
+assert.deepEqual([stockLedgerRequest.startDate, stockLedgerRequest.endDate], [day1, day1])
+
+const products = todayPair('products/Products.tsx', '[createdDateFrom, setCreatedDateFrom]', '[createdDateTo, setCreatedDateTo]')
+const productQuery = evaluate(variable(products.source, 'productQuery'), {
+  productPage: 1, productPageSize: 20, cleanedSearchQuery: '', searchMode: 'AND',
+  catFilter: new Set(), brandFilter: new Set(), supplierFilter: new Set(), unitFilter: '',
+  branchFilter: 'all', effectiveStockState: 'all', groupFilter: 'all', initialFilter: 'all',
+  createdDateFrom: products.from, createdDateTo: products.to, issueFilter: 'all',
+  promoFilter: 'all', mergedFilter: 'all', productSortDirection: 'name_asc',
+})
+const productRequest = evaluate(requestArgs(products.source, 'searchProducts').at(-1)!, { productQuery })
+assert.deepEqual([productRequest.batchDateFrom, productRequest.batchDateTo], [day1, day1])
+
+const invoiceSurfaces = [
+  { file: 'contacts/ArInvoicesSection.tsx', endpoint: 'getCustomerReceivables', context: { customer: 'all', status: 'all' } },
+  { file: 'contacts/ApInvoicesSection.tsx', endpoint: 'getSupplierApInvoices', context: { branch: 'all', supplier: 'all', status: 'all' } },
+  { file: 'contacts/StockInInvoicesSection.tsx', endpoint: 'getStockInInvoiceReport', context: { branchId: 'all', supplierKey: 'all' } },
+  { file: 'review/LegacyDeletedSalesSection.tsx', endpoint: 'getLegacyDeletedSales', context: { search: '', cashier: 'all' } },
+] as const
+for (const surface of invoiceSurfaces) {
+  const dates = todayPair(surface.file, '[fromDate, setFromDate]', '[toDate, setToDate]')
+  const request = evaluate(requestArgs(dates.source, surface.endpoint)[0], {
+    ...surface.context, fromDate: dates.from, toDate: dates.to, page: 1, pageSize: 20,
+  })
+  assert.deepEqual([request.from, request.to], [day1, day1], `${surface.endpoint} first request is Today`)
+}
+
+const audit = todayPair('utils-settings/AuditLog.tsx', '[rangeStart, setRangeStart]', '[rangeEnd, setRangeEnd]')
+const effectiveDateRange = evaluate(variable(audit.source, 'effectiveDateRange'), {
+  ...hooks, rangeStart: audit.from, rangeEnd: audit.to, auditDateRange: {},
+})
+const auditParams = evaluate(variable(audit.source, 'params'), {
+  page: 1, pageSize: 20, search: '', actionFilter: 'all', entityFilter: 'all',
+  isAdmin: true, userFilter: 'all', effectiveDateRange,
+})
+const auditRequest = evaluate(requestArgs(audit.source, 'getAuditLogsRequest')[0], { params: auditParams })
+assert.deepEqual([auditRequest.startDate, auditRequest.endDate], [day1, day1])
+
+for (const [file, endpoint, idKey] of [
+  ['contacts/CustomerPurchasesReportModal.tsx', 'getCustomerSalesReport', 'customerId'],
+  ['contacts/DeliveryContactReportModal.tsx', 'getDeliveryContactReport', 'contactId'],
+] as const) {
+  const source = read(file)
+  const cell = stateCell(source, '[range, setRange]', { todayDateTimeRange: () => preset('today') })
+  expectDates(cell.initial, day1)
+  const params = evaluate(variable(source, 'params'), { range: cell.initial, [idKey]: 17 })
+  const request = evaluate(requestArgs(source, endpoint)[0], { params })
+  assert.deepEqual([request.startDate, request.endDate], [day1, day1], `${endpoint} first request is Today`)
+  cell.set({ startDate: '2026-08-01', endDate: '2026-08-31', startTime: '', endTime: '' })
+  expectDates(cell.current(), '2026-08-01', '2026-08-31')
+  cell.set(preset('all'))
+  expectDates(cell.current(), '')
+}
+
+const salesExport = read('sales/ExportModal.tsx')
+const exportPeriod = stateCell(salesExport, '[period, setPeriod]')
+const exportStart = stateCell(salesExport, '[startDate, setStartDate]')
+const exportEnd = stateCell(salesExport, '[endDate, setEndDate]')
+assert.equal(exportPeriod.initial, 'daily')
+assert.equal(exportStart.initial, '', 'custom export start remains an empty data-entry field')
+assert.equal(exportEnd.initial, '', 'custom export end remains an empty data-entry field')
+const computeExportDates = evaluate(variable(salesExport, 'computeDates'), {
+  todayStr: () => day1, businessYear: () => 2026, businessMonth: () => 9,
+  startDate: exportStart.initial, endDate: exportEnd.initial,
+})
+const initialExportDates = evaluate(variable(salesExport, 'previewDates'), {
+  ...hooks, computeDates: computeExportDates, period: exportPeriod.initial,
+  startDate: exportStart.initial, endDate: exportEnd.initial,
+})
+assert.deepEqual(initialExportDates, { start: day1, end: day1 })
+const detailedExportRequest = evaluate(requestArgs(salesExport, 'getSalesExport')[1], { dates: initialExportDates })
+assert.deepEqual([detailedExportRequest.startDate, detailedExportRequest.endDate], [day1, day1])
+assert.equal(detailedExportRequest.detailsOnly, 'true')
+assert.deepEqual(evaluate(variable(salesExport, 'computeDates'), {
+  todayStr: () => day1, businessYear: () => 2026, businessMonth: () => 9,
+  startDate: '2026-08-01', endDate: '2026-08-31',
+})('custom'), { start: '2026-08-01', end: '2026-08-31' })
+const cursorRequest = evaluate(requestArgs(salesExport, 'getSalesExport')[2], {
+  dates: initialExportDates, page: { snapshot_max_id: 91 }, cursor: { created_at: '2026-09-11T04:00:00Z', id: 44 },
+})
+assert.deepEqual([cursorRequest.snapshotMaxId, cursorRequest.afterCreatedAt, cursorRequest.afterId],
+  ['91', '2026-09-11T04:00:00Z', '44'], 'export paging cursor remains independent from the default range')
+
+const stockInSource = read('contacts/StockInInvoicesSection.tsx')
+const lineRequest = evaluate(requestArgs(stockInSource, 'getStockInInvoiceLines')[0], {
+  group: { supplier_key: 'supplier:7', received_day: '2026-08-31' }, branchId: 'all',
+  linePage: 3, LINE_PAGE_SIZE: 100,
+})
+assert.deepEqual([lineRequest.day, lineRequest.page], ['2026-08-31', 3], 'expanded invoice cursor/date stays group-owned')
+
+for (const [file, fromSetter, toSetter] of [
+  ['products/StockChangeSection.tsx', 'setStartDate', 'setEndDate'],
+  ['contacts/ArInvoicesSection.tsx', 'setFromDate', 'setToDate'],
+  ['contacts/ApInvoicesSection.tsx', 'setFromDate', 'setToDate'],
+  ['contacts/StockInInvoicesSection.tsx', 'setFromDate', 'setToDate'],
+  ['utils-settings/AuditLog.tsx', 'setRangeStart', 'setRangeEnd'],
+  ['review/LegacyDeletedSalesSection.tsx', 'setFromDate', 'setToDate'],
+] as const) {
+  const source = read(file)
+  let from = day1
+  let to = day1
+  const handler = evaluate(jsxHandler(source, 'onChange', fromSetter), {
+    changeFilter: (apply: () => void) => apply(),
+    [fromSetter]: (value: string) => { from = value },
+    [toSetter]: (value: string) => { to = value },
+  })
+  handler({ startDate: '', endDate: '' })
+  assert.deepEqual([from, to], ['', ''], `${file} picker still clears to All time`)
+}
+
+let clearedProductFrom = day1
+let clearedProductTo = day1
+const noop = () => {}
+evaluate(variable(products.source, 'clearAllFilters'), {
+  ...hooks, setCatFilter: noop, setBrandFilter: noop, setBranchFilter: noop,
+  setSupplierFilter: noop, setUnitFilter: noop, setStockFilter: noop, setGroupFilter: noop,
+  setIssueFilter: noop, setPromoFilter: noop, setMergedFilter: noop,
+  setCreatedDateFrom: (value: string) => { clearedProductFrom = value },
+  setCreatedDateTo: (value: string) => { clearedProductTo = value },
+  setProductSortDirection: noop, setSearchMode: noop, setHideZeroStockRows: noop,
+})()
+assert.deepEqual([clearedProductFrom, clearedProductTo], ['', ''], 'Products Clear Filters remains explicitly all-time')
+console.log('PASS ten secondary Today initializers and first requests; clear/custom and cursor paths preserved')
+
 for (const range of [preset('today'), preset('all')]) {
   const bounded = !!range.startDate
   const checkWire = (params: any, start = 'startDate', end = 'endDate') => {

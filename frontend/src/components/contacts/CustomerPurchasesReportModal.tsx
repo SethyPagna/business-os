@@ -6,8 +6,7 @@ import { getCustomerSalesReport } from '../../api/salesTransport.ts'
 // X4 (Part 395): the customer leg of the per-contact drills -- purchase
 // totals for one customer over a range (suppliers: D5 Purchases; couriers:
 // X3 Deliveries). Backed by /api/sales/customer-report from the shared
-// salesAnalytics kernel. Defaults to a wide range so the first open reads
-// as "lifetime with this shop" (sales data starts 2024).
+// salesAnalytics kernel. The first open follows the app-wide Today default.
 
 type TranslateFn = (key: string) => string | undefined
 
@@ -37,10 +36,9 @@ function money(value: unknown): string {
 }
 
 export default function CustomerPurchasesReportModal({ customerId, customerName, t, onClose }: CustomerPurchasesReportModalProps) {
-  // An empty range returned before making a request but left the modal in its
-  // loading state. This is a purchase-history drill, so open on the complete
-  // known sales window rather than a misleading empty "today" result.
-  const [range, setRange] = useState<DateTimeRange>(() => ({ ...todayDateTimeRange(), startDate: '2024-01-01' }))
+  // Keep the loader's complete-range invariant while opening on Cambodia's
+  // current business day. The picker continues to own later custom ranges.
+  const [range, setRange] = useState<DateTimeRange>(() => todayDateTimeRange())
   const [totals, setTotals] = useState<CustomerSalesTotals | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')

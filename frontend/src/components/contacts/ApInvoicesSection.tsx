@@ -6,6 +6,7 @@ import DateTimeRangePicker from '../shared/DateTimeRangePicker'
 // business timezone (an fmtDateOnly UTC slice would show the previous day
 // for anything before 07:00 Bangkok).
 import { fmtDate } from '../../utils/formatters'
+import { todayStr } from '../../utils/dateHelpers.ts'
 import { getSupplierApInvoices } from '../../api/contactReadTransport.ts'
 import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import InvoiceLedgerSummary from './InvoiceLedgerSummary.tsx'
@@ -62,8 +63,9 @@ export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
   const [branch, setBranch] = useState('all')
   const [supplier, setSupplier] = useState('all')
   const [status, setStatus] = useState('all')
-  const [fromDate, setFromDate] = useState('')
-  const [toDate, setToDate] = useState('')
+  const initialToday = todayStr()
+  const [fromDate, setFromDate] = useState(initialToday)
+  const [toDate, setToDate] = useState(initialToday)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [refreshToken, setRefreshToken] = useState(0)

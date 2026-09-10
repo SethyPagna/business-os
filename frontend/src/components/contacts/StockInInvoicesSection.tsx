@@ -4,6 +4,7 @@ import AppSelect from '../shared/AppSelect.tsx'
 import DateTimeRangePicker from '../shared/DateTimeRangePicker'
 import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import { fmtDateOnly } from '../../utils/formatters'
+import { todayStr } from '../../utils/dateHelpers.ts'
 import { getStockInInvoiceLines, getStockInInvoiceReport } from '../../api/contactReadTransport.ts'
 import InvoiceLedgerSummary from './InvoiceLedgerSummary.tsx'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
@@ -98,8 +99,9 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
   const tr = (key: string, fallback: string): string => t(key) || fallback
   const [branchId, setBranchId] = useState('all')
   const [supplierKey, setSupplierKey] = useState('all')
-  const [fromDate, setFromDate] = useState('')
-  const [toDate, setToDate] = useState('')
+  const initialToday = todayStr()
+  const [fromDate, setFromDate] = useState(initialToday)
+  const [toDate, setToDate] = useState(initialToday)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [refreshToken, setRefreshToken] = useState(0)

@@ -29,6 +29,7 @@ import InfoHint from '../shared/InfoHint'
 import CopyableId from '../shared/CopyableId.tsx'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
 import Undo2 from 'lucide-react/dist/esm/icons/undo-2.js'
+import { todayStr } from '../../utils/dateHelpers.ts'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import {
   FAST_STOCK_IN_RESTORE_HOST,
@@ -218,8 +219,9 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   const [branches, setBranches] = useState<BranchOption[]>([])
   const [supplierId, setSupplierId] = useState(0)
   const [suppliers, setSuppliers] = useState<Array<{ id: number; name: string }>>([])
-  const [startDate, setStartDate] = useState('')
-  const [endDate, setEndDate] = useState('')
+  const initialToday = todayStr()
+  const [startDate, setStartDate] = useState(initialToday)
+  const [endDate, setEndDate] = useState(initialToday)
   const [rows, setRows] = useState<LedgerRow[]>([])
   const [total, setTotal] = useState(0)
   const [summary, setSummary] = useState<LedgerSummary>(EMPTY_SUMMARY)

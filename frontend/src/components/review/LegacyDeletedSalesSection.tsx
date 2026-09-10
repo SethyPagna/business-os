@@ -3,6 +3,7 @@ import AppSelect from '../shared/AppSelect.tsx'
 import DateTimeRangePicker from '../shared/DateTimeRangePicker'
 import SearchInput from '../shared/SearchInput'
 import { fmtDateTime24 } from '../../utils/formatters'
+import { todayStr } from '../../utils/dateHelpers.ts'
 import { getLegacyDeletedSales } from '../../api/auditLogTransport.ts'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
@@ -60,8 +61,9 @@ export default function LegacyDeletedSalesSection() {
   const tr = (key: string, fallback: string): string => t(key) || fallback
   const [search, setSearch] = useState('')
   const [cashier, setCashier] = useState('all')
-  const [fromDate, setFromDate] = useState('')
-  const [toDate, setToDate] = useState('')
+  const initialToday = todayStr()
+  const [fromDate, setFromDate] = useState(initialToday)
+  const [toDate, setToDate] = useState(initialToday)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [refreshToken, setRefreshToken] = useState(0)
