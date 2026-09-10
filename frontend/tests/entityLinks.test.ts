@@ -45,7 +45,7 @@ for (const expected of [
 }
 assert.match(saleDetail, /search=\{sale\.customer_phone\}/, 'customer phone must link to customer search')
 assert.match(saleDetail, /search=\{deliveryDriverName\}/, 'delivery driver must link to delivery contact search')
-assert.match(saleDetail, /focus=\{\{ unit: item\.unit \}\}/, 'sale item units must link to the exact unit filter')
+assert.doesNotMatch(saleDetail, /focus=\{\{ unit: item\.unit \}\}/, 'the compact receipt line must not grow a separate unit field')
 assert.match(saleDetail, /search=\{item\.barcode\}/, 'sale item barcodes must link to product search')
 
 assert.match(productDetail, /search=\{p\.barcode\}/, 'product detail barcode must link back to Products')
