@@ -11,9 +11,8 @@ import Undo2 from 'lucide-react/dist/esm/icons/undo-2.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
-import { fmtClock24 } from '../../utils/formatters'
+import { fmtClock24, parseServerTimestampMs } from '../../utils/formatters'
 import ExportMenu from '../shared/ExportMenu'
-import SectionExportAction from '../shared/SectionExportAction.tsx'
 import FilterMenu from '../shared/FilterMenu'
 import { loadSortSpec, saveSortSpec, sortRecords, type SortField, type SortSpec } from '../../utils/listSort'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
@@ -21,7 +20,8 @@ import PaginationControls, { paginateItems } from '../shared/PaginationControls'
 import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot } from '../../utils/historyHelpers.ts'
-import { buildTimeActionSections, toggleIdSet } from '../../utils/groupedRecords.ts'
+import { toggleIdSet } from '../../utils/groupedRecords.ts'
+import { groupByBusinessDay } from '../../utils/businessDayGroups.ts'
 import { createLongPressState, type LongPressState } from '../../utils/longPress.ts'
 import { exportColumnLabel } from '../../utils/exportOptions.ts'
 import {
@@ -52,6 +52,7 @@ import {
   type MinimizedWorkEntry,
 } from '../../utils/minimizedWork.ts'
 import {
+  createLatestReturnDetailRestoreRunner,
   getReturn as fetchReturnDetail,
   getReturns as fetchReturns,
   getReturnsReport,
@@ -186,9 +187,11 @@ interface ReturnMutation {
 
 interface ReturnGroup {
   id: string
+  actionKey?: string
   label: string
   ids: number[]
   items: ReturnRow[]
+  synthetic?: boolean
 }
 
 interface ReturnSection {
@@ -308,6 +311,19 @@ function getInitialReturnPageSize(): number {
   return 50
 }
 
+function sortReturnRowsByTime(items: ReturnRow[], direction: SortDirection): ReturnRow[] {
+  const multiplier = direction === 'asc' ? 1 : -1
+  return [...items].sort((left, right) => {
+    const leftParsed = parseServerTimestampMs(left.created_at)
+    const rightParsed = parseServerTimestampMs(right.created_at)
+    const leftTime = Number.isFinite(leftParsed) ? leftParsed : 0
+    const rightTime = Number.isFinite(rightParsed) ? rightParsed : 0
+    const timeDelta = (leftTime - rightTime) * multiplier
+    if (timeDelta !== 0) return timeDelta
+    return (Number(left.id) - Number(right.id)) * multiplier
+  })
+}
+
 // The "Add Return" button's icon: a return arrow (Undo2) with a small "+"
 // built onto its empty top-right corner (user, Aug 31: "an add icon built on
 // the icon ... similar to Add product's add icon product icon" — the Products
@@ -401,6 +417,14 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
   const returnsRequestRef = useRef(0)
   const editRequestRef = useRef(0)
   const detailRequestRef = useRef(0)
+  const returnDetailRestoreRunnerRef = useRef<ReturnType<typeof createLatestReturnDetailRestoreRunner> | null>(null)
+  if (!returnDetailRestoreRunnerRef.current) {
+    returnDetailRestoreRunnerRef.current = createLatestReturnDetailRestoreRunner()
+  }
+  const canRef = useRef(can)
+  canRef.current = can
+  const canViewReturnsRef = useRef(canViewReturns)
+  canViewReturnsRef.current = canViewReturns
   const historyRestoreInFlightRef = useRef(false)
   const [historyRestoreSaving, setHistoryRestoreSaving] = useState(false)
   const bulkActionInFlightRef = useRef(false)
@@ -466,10 +490,6 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
   // useDeferredValue-for-local-filter + separate-hand-rolled-350ms-debounce-
   // for-the-fetch pattern, not something specific to Sales.
   const debouncedSearch = useDebouncedValue(search, 180)
-  // Day-based grouping always now that the date scope is a Start→End window
-  // filtered server-side (the year/month client grouping retired with the
-  // year/month filter).
-  const timeMode = 'day' as const
   const returnsDateRange = useMemo(() => {
     const startDate = String(stripRange.startDate || '').trim()
     const endDate = String(stripRange.endDate || '').trim()
@@ -710,6 +730,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
   // view flow now does too -- open instantly on the list row so the modal is
   // never a blank wait, then fill the line items in.
   const openReturnDetail = useCallback(async (ret: ReturnRow): Promise<void> => {
+    returnDetailRestoreRunnerRef.current?.invalidate()
     removeMinimizedWork(returnDetailWorkKey(ret.id))
     setDetailRet(ret)
     const requestId = beginTrackedRequest(detailRequestRef)
@@ -729,55 +750,94 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
     }
   }, [])
 
-  const restoreReturnDetail = useCallback(async (entry: MinimizedWorkEntry): Promise<boolean> => {
-    if (!canViewReturns || !canRestoreMinimizedWork(entry, can)) {
-      reparkDeniedRestore(entry)
-      notify(tr('access_denied', 'Access denied', 'គ្មានសិទ្ធិចូលប្រើ'), 'warning')
-      return false
-    }
+  const returnDetailRestoreAllowed = useCallback((entry: MinimizedWorkEntry): boolean => (
+    canViewReturnsRef.current && canRestoreMinimizedWork(entry, (permissionKey, actionKey) => (
+      canRef.current(permissionKey, actionKey)
+    ))
+  ), [])
+
+  const reparkInvalidatedReturnDetail = useCallback((entry: MinimizedWorkEntry): void => {
+    if (entry.kind !== 'return_detail') return
+    minimizeWork({
+      key: entry.key,
+      kind: 'return_detail',
+      pageId: entry.pageId,
+      anchor: entry.anchor,
+      label: entry.label,
+      payload: entry.payload,
+      draftKey: entry.draftKey,
+      requiredPermission: entry.requiredPermission,
+    })
+  }, [])
+
+  const restoreReturnDetail = useCallback(async (entry: MinimizedWorkEntry): Promise<void> => {
     const returnId = Number(entry.payload?.returnId)
     if (!Number.isFinite(returnId) || returnId <= 0) {
       reparkDeniedRestore(entry)
       notify(tr('failed_to_load_data', 'Failed to load data', 'មិនអាចផ្ទុកទិន្នន័យបានទេ'), 'warning')
-      return false
+      return
     }
-    try {
-      const fresh = await withLoaderTimeout(
-        () => fetchReturnDetail(returnId),
+    await returnDetailRestoreRunnerRef.current!.restore<ReturnRow>({
+      readFresh: (signal) => withLoaderTimeout(
+        () => fetchReturnDetail(returnId, { fresh: true, signal }) as Promise<ReturnRow | null>,
         'Return details',
         RETURNS_DETAIL_TIMEOUT_MS,
-      )
-      if (!fresh) throw new Error('return missing')
-      setDetailRet(fresh as ReturnRow)
-      return true
-    } catch {
-      reparkDeniedRestore(entry)
-      notify(tr('failed_to_load_data', 'Failed to load data', 'មិនអាចផ្ទុកទិន្នន័យបានទេ'), 'warning')
-      return false
-    }
-  }, [can, canViewReturns, notify, tr])
+      ),
+      isAllowed: () => returnDetailRestoreAllowed(entry),
+      commit: (fresh) => {
+        // The runner rechecks the current permission immediately before this
+        // commit boundary. Open and consume are intentionally adjacent.
+        setDetailRet(fresh)
+        markRestoreHandled('return_detail')
+      },
+      onDenied: () => {
+        reparkDeniedRestore(entry)
+        notify(tr('access_denied', 'Access denied', 'គ្មានសិទ្ធិចូលប្រើ'), 'warning')
+      },
+      onFailure: () => {
+        reparkDeniedRestore(entry)
+        notify(tr('failed_to_load_data', 'Failed to load data', 'មិនអាចផ្ទុកទិន្នន័យបានទេ'), 'warning')
+      },
+      onInvalidate: (reason) => {
+        // A newer restore has already installed its own pending entry, so it
+        // must not be consumed while the older chip is put back. Direct
+        // close/minimize/unmount invalidation, by contrast, clears this
+        // attempt's pending replay before reparking it.
+        if (reason === 'superseded') reparkInvalidatedReturnDetail(entry)
+        else reparkDeniedRestore(entry)
+      },
+    })
+  }, [notify, reparkInvalidatedReturnDetail, returnDetailRestoreAllowed, tr])
 
   useEffect(() => {
     const pending = consumePendingRestore('return_detail')
     if (pending) {
-      void restoreReturnDetail(pending).then((restored) => {
-        if (restored) markRestoreHandled('return_detail')
-      })
+      void restoreReturnDetail(pending)
     }
     const onRestore = (event: Event) => {
       const detail = (event as CustomEvent).detail
       if (detail?.kind !== 'return_detail') return
       const entry = detail.entry as MinimizedWorkEntry | undefined
       if (!entry) return
-      void restoreReturnDetail(entry).then((restored) => {
-        if (restored) markRestoreHandled('return_detail')
-      })
+      void restoreReturnDetail(entry)
     }
     window.addEventListener(RESTORE_WORK_EVENT, onRestore)
     return () => window.removeEventListener(RESTORE_WORK_EVENT, onRestore)
   }, [restoreReturnDetail])
 
+  useEffect(() => () => {
+    returnDetailRestoreRunnerRef.current?.invalidate()
+  }, [])
+
+  const closeReturnDetail = useCallback((): void => {
+    returnDetailRestoreRunnerRef.current?.invalidate()
+    invalidateTrackedRequest(detailRequestRef)
+    setDetailRet(null)
+  }, [])
+
   const minimizeReturnDetail = useCallback((ret: ReturnRow): void => {
+    returnDetailRestoreRunnerRef.current?.invalidate()
+    invalidateTrackedRequest(detailRequestRef)
     const returnId = Number(ret.id)
     if (!Number.isFinite(returnId) || returnId <= 0) return
     minimizeWork({
@@ -1038,40 +1098,71 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
   }, [tr])
 
   const buildReturnSections = useCallback((items: ReturnRow[]): ReturnSection[] => {
-    const sections = buildTimeActionSections(items, {
-      getDate: (ret) => ret?.created_at,
-      getItemId: (ret) => Number(ret?.id),
-      getActionKey: (ret) => getReturnTypeKey(ret),
-      getActionLabel: (ret) => getReturnTypeLabel(ret, tr),
-      // Date narrowing happens server-side via returnsDateRange now, so the
-      // client grouper only buckets by day (year/month 'all').
-      year: 'all',
-      month: 'all',
-      timeMode,
-      groupMode: returnGroupMode,
-      sortDirection: returnSortDirection,
-    }) as ReturnSection[]
-    if (returnSortSpec.field === 'date') return sections
-    // Every return remains under its business-day heading. Non-date choices
-    // arrange records *inside* each day instead of replacing those headings
-    // with one synthetic all-results section.
-    return sections.map((section) => {
-      const sortedItems = sortRecords(section.items, returnSortSpec, returnSortFields)
-      return {
-        ...section,
-        ids: sortedItems.map((ret) => Number(ret.id)).filter(Number.isFinite),
-        items: sortedItems,
-        groups: section.groups.map((group) => {
-          const groupItems = sortRecords(group.items, returnSortSpec, returnSortFields)
-          return {
-            ...group,
-            ids: groupItems.map((ret) => Number(ret.id)).filter(Number.isFinite),
-            items: groupItems,
-          }
-        }),
+    // The generic grouped-record helper derives day boundaries from the
+    // viewer's device timezone. Returns are business records, so establish
+    // their day sections with the same Asia/Phnom_Penh formatter used by the
+    // row's fmtClock24 value. Sort by the original instant first; the business
+    // grouper preserves that day and within-day order.
+    const orderedByTime = sortReturnRowsByTime(items, returnSortDirection)
+    return groupByBusinessDay(orderedByTime, (ret) => ret.created_at).map((day) => {
+      const sectionId = `business-day:${day.key}`
+      const sortedItems = returnSortSpec.field === 'date'
+        ? day.rows
+        : sortRecords(day.rows, returnSortSpec, returnSortFields)
+      const ids = sortedItems.map((ret) => Number(ret.id)).filter(Number.isFinite)
+      if (returnGroupMode === 'time') {
+        return {
+          id: sectionId,
+          label: day.key,
+          ids,
+          items: sortedItems,
+          groups: [{
+            id: `${sectionId}:all`,
+            actionKey: 'all',
+            label: day.key,
+            ids,
+            items: sortedItems,
+            synthetic: true,
+          }],
+        } as ReturnSection
       }
+
+      const byAction = new Map<string, ReturnRow[]>()
+      for (const ret of day.rows) {
+        const actionKey = getReturnTypeKey(ret)
+        byAction.set(actionKey, [...(byAction.get(actionKey) || []), ret])
+      }
+      const groups = [...byAction.entries()].map(([actionKey, actionItems]) => {
+        const groupItems = returnSortSpec.field === 'date'
+          ? actionItems
+          : sortRecords(actionItems, returnSortSpec, returnSortFields)
+        return {
+          id: `${sectionId}:${actionKey}`,
+          actionKey,
+          label: getReturnTypeLabel(actionItems[0], tr),
+          ids: groupItems.map((ret) => Number(ret.id)).filter(Number.isFinite),
+          items: groupItems,
+          sortTime: Math.max(...actionItems.map((ret) => {
+            const parsed = parseServerTimestampMs(ret.created_at)
+            return Number.isFinite(parsed) ? parsed : 0
+          })),
+        }
+      }).sort((left, right) => {
+        const delta = returnSortDirection === 'asc'
+          ? left.sortTime - right.sortTime
+          : right.sortTime - left.sortTime
+        return delta || left.label.localeCompare(right.label)
+      }).map(({ sortTime: _sortTime, ...group }) => group)
+
+      return {
+        id: sectionId,
+        label: day.key,
+        ids,
+        items: sortedItems,
+        groups,
+      } as ReturnSection
     })
-  }, [returnGroupMode, returnSortDirection, returnSortFields, returnSortSpec, timeMode, tr])
+  }, [returnGroupMode, returnSortDirection, returnSortFields, returnSortSpec, tr])
 
   const allReturnSections = useMemo<ReturnSection[]>(
     () => buildReturnSections(filtered),
@@ -1401,59 +1492,49 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
         onRangeChange={setStripRange}
         showTime={false}
         showPresets
-        // Export + History are SECONDARY controls (Part 548): Returns has
-        // only 2-3 stat cards, so when the strip is open they merge into
-        // the STATS row's spare width rather than the date row ("if stats
-        // are not many like only two ... just merge with the stats").
+        // Keep the range row bounded at 320px: Stats + date consume the
+        // flexible space and the icon-only Export keeps one fixed 40px slot.
         rangeActions={(
-          <>
-            <ShiftHistoryModal
-              label={tr('shift_code', 'Shift')}
-              buttonClassName={manageToolbarButtonClassName}
+          canExportReturns ? (
+            <ExportMenu
+              label={tr('export', 'Export')}
+              items={exportItems}
+              iconOnly
+              triggerClassName={toolbarIconButtonClassName}
             />
-            {canExportReturns ? (
-              <SectionExportAction>
-                <ExportMenu
-                  label={tr('export', 'Export')}
-                  items={exportItems}
-                  iconOnly
-                  triggerClassName={toolbarIconButtonClassName}
-                />
-              </SectionExportAction>
-            ) : null}
-            {canEditReturn ? (
-              <button type="button" className={manageToolbarButtonClassName} onClick={() => setShowReasonManager(true)} title={tr('manage_return_reasons', 'Manage return reasons')}>
-                <Settings2 className="h-3.5 w-3.5" />
-                <span>{tr('reasons', 'Reasons')}</span>
-              </button>
-            ) : null}
-            {/* History keeps its compact icon treatment while the local trigger
-                adopts the same 40px hit target as the peer toolbar actions. */}
-            <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} t={t} className="min-w-0 [&_button]:!h-10 [&_button]:!min-h-10" dense />
-          </>
+          ) : null
         )}
-        actions={(
-          // The PRIMARY add action: explicit, always-visible label ("make
-          // add button clear... add return", Part 548 — the label used to
-          // vanish below the sm breakpoint, leaving a bare icon).
-          // Icon = the composite return+"+" glyph (ReturnPlusIcon); the visible
-          // word is the short noun ("Return" / "Supplier Return"), mirroring the
-          // Products "Add product" button which shows just "Product" beside its
-          // PackagePlus. The full "Add …" phrasing stays as the aria-label/title.
-          scope === SUPPLIER_SCOPE ? (
-            <button onClick={() => setShowSupplierForm(true)} className={primaryToolbarButtonClassName} aria-label={tr('add_supplier_return', 'Add Supplier Return')} title={tr('add_supplier_return', 'Add Supplier Return')}>
+      />
+
+      {/* Longer bilingual actions get their own contained, non-wrapping rail.
+          It scrolls inside the page at phone widths instead of widening the
+          viewport or starving the date trigger on the primary row. */}
+      <div data-returns-secondary-actions className="mb-3 max-w-full min-w-0 overflow-x-auto overscroll-x-contain pb-1">
+        <div className="flex w-max min-w-full flex-nowrap items-center gap-1">
+          <ShiftHistoryModal
+            label={tr('shift_code', 'Shift')}
+            buttonClassName={`${manageToolbarButtonClassName} shrink-0 !flex-none`}
+          />
+          {canEditReturn ? (
+            <button type="button" className={`${manageToolbarButtonClassName} shrink-0 !flex-none`} onClick={() => setShowReasonManager(true)} title={tr('manage_return_reasons', 'Manage return reasons')}>
+              <Settings2 className="h-3.5 w-3.5" />
+              <span>{tr('reasons', 'Reasons')}</span>
+            </button>
+          ) : null}
+          <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} t={t} className="shrink-0 [&_button]:!h-10 [&_button]:!min-h-10 [&_button]:!flex-none" dense />
+          {scope === SUPPLIER_SCOPE ? (
+            <button onClick={() => setShowSupplierForm(true)} className={`${primaryToolbarButtonClassName} ml-auto shrink-0 !flex-none`} aria-label={tr('add_supplier_return', 'Add Supplier Return')} title={tr('add_supplier_return', 'Add Supplier Return')}>
               <ReturnPlusIcon className="h-4 w-4" />
               <span>{tr('supplier_return', 'Supplier Return').replace(/^ការ/u, '')}</span>
             </button>
           ) : (
-            <button onClick={() => setShowCustomerForm(true)} className={primaryToolbarButtonClassName} aria-label={tr('add_return', 'Add Return')} title={tr('add_return', 'Add Return')}>
+            <button onClick={() => setShowCustomerForm(true)} className={`${primaryToolbarButtonClassName} ml-auto shrink-0 !flex-none`} aria-label={tr('add_return', 'Add Return')} title={tr('add_return', 'Add Return')}>
               <ReturnPlusIcon className="h-4 w-4" />
               <span>{tr('return', 'Return').replace(/^ការ/u, '')}</span>
             </button>
-          )
-        )}
-      />
-
+          )}
+        </div>
+      </div>
 
       {/* Search + filter pin to the top of the page's scroll container while
           scrolling -- same `sticky top-2` treatment as Products/Inventory/
@@ -1565,7 +1646,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
         <Suspense fallback={null}>
           <ReturnDetailModal
             ret={detailRet}
-            onClose={() => setDetailRet(null)}
+            onClose={closeReturnDetail}
             onMinimize={() => minimizeReturnDetail(detailRet)}
             onEdit={canEditReturn && normalizeScope(detailRet.return_scope) === CUSTOMER_SCOPE ? () => handleOpenEdit(detailRet) : undefined}
             fmtUSD={fmtUSD}

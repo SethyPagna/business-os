@@ -5,6 +5,98 @@ function encodeId(id: number | string): string {
   return encodeURIComponent(String(id))
 }
 
+export type ReturnDetailReadOptions = {
+  /** Bypass the shared 20-second read cache for an explicit restore/refresh. */
+  fresh?: boolean
+  signal?: AbortSignal
+}
+
+export type ReturnDetailRestoreOutcome = 'opened' | 'denied' | 'failed' | 'stale'
+export type ReturnDetailRestoreInvalidation = 'superseded' | 'invalidated'
+
+export type ReturnDetailRestoreAttempt<T> = {
+  readFresh: (signal: AbortSignal) => Promise<T | null>
+  isAllowed: () => boolean
+  commit: (fresh: T) => void
+  onDenied: () => void
+  onFailure: () => void
+  /** Put a dispatched chip back when a later operator intent supersedes it. */
+  onInvalidate?: (reason: ReturnDetailRestoreInvalidation) => void
+}
+
+export type LatestReturnDetailRestoreRunner = {
+  invalidate: () => void
+  restore: <T>(attempt: ReturnDetailRestoreAttempt<T>) => Promise<ReturnDetailRestoreOutcome>
+}
+
+/**
+ * Coordinates return-detail restores independently of React so the actual race
+ * rules are executable in a focused test. Every new intent cancels and
+ * invalidates the preceding one. Authority is checked once before I/O and
+ * again at the final commit boundary, immediately before the host opens and
+ * consumes the restore.
+ */
+export function createLatestReturnDetailRestoreRunner(): LatestReturnDetailRestoreRunner {
+  let intent = 0
+  let active: {
+    intent: number
+    controller: AbortController
+    onInvalidate?: (reason: ReturnDetailRestoreInvalidation) => void
+  } | null = null
+
+  const invalidateActive = (reason: ReturnDetailRestoreInvalidation): void => {
+    intent += 1
+    const previous = active
+    active = null
+    if (!previous) return
+    previous.controller.abort()
+    previous.onInvalidate?.(reason)
+  }
+  const invalidate = (): void => invalidateActive('invalidated')
+
+  const restore = async <T>(attempt: ReturnDetailRestoreAttempt<T>): Promise<ReturnDetailRestoreOutcome> => {
+    invalidateActive('superseded')
+    const currentIntent = intent
+    const controller = new AbortController()
+    active = { intent: currentIntent, controller, onInvalidate: attempt.onInvalidate }
+    const isCurrent = (): boolean => (
+      intent === currentIntent
+      && active?.intent === currentIntent
+      && !controller.signal.aborted
+    )
+    const finishCurrent = (): void => {
+      if (active?.intent === currentIntent) active = null
+    }
+
+    if (!attempt.isAllowed()) {
+      finishCurrent()
+      attempt.onDenied()
+      return 'denied'
+    }
+
+    try {
+      const fresh = await attempt.readFresh(controller.signal)
+      if (!isCurrent()) return 'stale'
+      if (!attempt.isAllowed()) {
+        finishCurrent()
+        attempt.onDenied()
+        return 'denied'
+      }
+      if (fresh == null) throw new Error('return missing')
+      finishCurrent()
+      attempt.commit(fresh)
+      return 'opened'
+    } catch {
+      if (!isCurrent()) return 'stale'
+      finishCurrent()
+      attempt.onFailure()
+      return 'failed'
+    }
+  }
+
+  return { invalidate, restore }
+}
+
 export function getReturns(params: QueryParams = {}): Promise<unknown> {
   const query = buildQueryString(params, { skipEmpty: false })
   const cacheKey = query ? `returns:get:${query}` : 'returns:get'
@@ -15,15 +107,20 @@ export function getReturns(params: QueryParams = {}): Promise<unknown> {
   )
 }
 
-export function getReturn(id: number | string): Promise<unknown> {
+export function getReturn(id: number | string, options: ReturnDetailReadOptions = {}): Promise<unknown> {
   // Per-id cache/dedupe key: a constant 'returns:getOne' made every return
   // share one 20s cache slot, so opening return B within the window rendered
   // return A. Write-invalidation is by 'returns' prefix, so per-id keys still
   // clear. (See feesTransport.getFee for the full reasoning.)
+  const path = `/api/returns/${encodeId(id)}`
+  if (options.fresh) {
+    return apiFetch('GET', path, undefined, undefined, { signal: options.signal })
+  }
   return route(
     `returns:getOne:${encodeId(id)}`,
-    () => apiFetch('GET', `/api/returns/${encodeId(id)}`),
+    (signal) => apiFetch('GET', path, undefined, undefined, { signal }),
     () => null,
+    { signal: options.signal },
   )
 }
 

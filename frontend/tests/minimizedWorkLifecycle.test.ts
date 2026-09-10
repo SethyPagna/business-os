@@ -324,9 +324,11 @@ assert.match(feesPageSource, /const result = await getFeeRequest\(feeId\)[\s\S]*
 assert.match(feesPageSource, /kind: 'fee_form'[\s\S]*?pageId: 'sales',[\s\S]*?anchor: 'hub:sales:fees',[\s\S]*?requiredPermission: \{ permissionKey: 'fees', actionKey: isEdit \? 'edit' : 'add' \}/, 'fee chips must restore the exact Sales section with the current add/edit grant')
 assert.match(feesPageSource, /onMinimize=\{canMinimizeFeeForm \? preserveFeeForm : undefined\}[\s\S]*?<MinimizeButton/, 'fee form must show a permission-aware minus beside Close')
 assert.match(returnsSource, /kind: 'return_detail'[\s\S]*?pageId: 'sales',[\s\S]*?anchor: 'hub:sales:returns',[\s\S]*?requiredPermission: \{ permissionKey: 'returns', actionKey: 'view' \}/, 'return detail chips should target the exact Returns hub and carry the current view grant')
-assert.match(returnsSource, /const restoreReturnDetail = useCallback[\s\S]*?fetchReturnDetail\(returnId\)[\s\S]*?setDetailRet\(fresh as ReturnRow\)/, 'the Returns host should restore detail from current server truth')
+assert.match(returnsSource, /const restoreReturnDetail = useCallback[\s\S]*?fetchReturnDetail\(returnId, \{ fresh: true, signal \}\)[\s\S]*?setDetailRet\(fresh\)[\s\S]*?markRestoreHandled\('return_detail'\)/, 'the Returns host should bypass the read cache and consume only the freshly opened detail')
+assert.match(returnsSource, /returnDetailRestoreRunnerRef\.current\?\.invalidate\(\)[\s\S]*?setDetailRet\(null\)/, 'Close and Minimize should invalidate an unfinished return-detail restore')
+assert.match(returnsSource, /canViewReturnsRef\.current && canRestoreMinimizedWork[\s\S]*?isAllowed: \(\) => returnDetailRestoreAllowed\(entry\)/, 'the restore commit boundary should read the current permission rather than a pre-fetch render snapshot')
 assert.match(returnsSource, /consumePendingRestore\('return_detail'\)/, 'the Returns host should accept a restore dispatched before its section mounted')
-assert.match(returnsSource, /if \(!canViewReturns \|\| !canRestoreMinimizedWork\(entry, can\)\)[\s\S]*?reparkDeniedRestore\(entry\)/, 'permission revocation should repark the exact return detail chip')
+assert.match(returnsSource, /onDenied: \(\) => \{[\s\S]*?reparkDeniedRestore\(entry\)/, 'permission revocation should repark the exact return detail chip')
 assert.match(returnDetailSource, /<MinimizeButton onMinimize=\{onMinimize\} tr=\{tr\} \/>[\s\S]*?aria-label=\{tr\('close', 'Close'\)\}/, 'return detail should put the durable minimize action directly beside Close')
 
 console.log('PASS minimized work is actor-scoped, exact-draft, one-shot and accessible')
