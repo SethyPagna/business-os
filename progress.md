@@ -12132,8 +12132,12 @@ Evidence artifact: `output/historical-evidence-followup-20260910.json`. These ar
 
 ## Entity links and destination focus — September 10, 2026
 
-Fix-scoped link commit **047c5192** is prepared for this release; the
-independent compatibility correction is committed immediately after it.
+Fix-scoped link commit **047c5192** and independent compatibility commit
+**f4778f89** are deployed together at 100% in Worker version
+**27abc222-c1ff-4667-9f1d-8ed0b9c633e8**. Wrangler stamped revision
+**f4778f89456e**, build hash **7db1fc304e43b827**, built
+**2026-09-10T05:52:29.260Z**; no migrations, secrets, or production data
+were changed.
 
 - Added one guarded `EntityLink` primitive for real same-tab anchors with
   canonical admin `href`s. Normal clicks use AppContext navigation (so page
@@ -12153,6 +12157,7 @@ independent compatibility correction is committed immediately after it.
 - Verification: full frontend utility chain **348/348**, all **326** backend
   pure suites, focused entity-link/product responsive/driver/record tests,
   frontend and Worker typechecks, i18n verification (**5,704 keys / 589
-  files**), Vite production build, and `git diff --check` pass. Authenticated
-  production UI smoke remains limited to the existing Cloudflare challenge;
-  physical iOS/PWA hardware validation is unavailable.
+  files**), Vite production build, and `git diff --check` pass. Wrangler's
+  post-deploy listing and direct authenticated API smoke remain blocked by
+  the existing Cloudflare bot challenge; deployment output itself is the
+  provenance record. Physical iOS/PWA hardware validation is unavailable.
