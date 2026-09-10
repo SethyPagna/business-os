@@ -2,7 +2,6 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import ts from 'typescript'
 import { parsePermissionMap, normalizePermissionState, saleAmendmentWindowAllows, effectivePermissions, isAdminControlUser } from '../src/utils/permissions.ts'
-import { actionAllowed, isActionOverriddenOff } from '../src/utils/permissionActions.ts'
 
 assert.deepEqual(parsePermissionMap('{"products":true,"inventory":false}'), {
   products: true,
@@ -100,3 +99,30 @@ for (const sales of [false, 'view', true] as const) {
 assert.equal(effectivePermissions(null).can('products', 'add'), false)
 assert.equal(effectivePermissions({ permissions: { settings: true } }).hasPermission(' BUSINESS_IDENTITY '), true)
 console.log('PASS strict effective-user/admin/action matrix, override precedence and reserved identities')
+
+const absent = Symbol('absent')
+const overrides = [absent, false, true, 'false', 'true', 0, 1, [], {}, null, 'review', 'view']
+let overrideCases = 0
+for (const roleValue of overrides) for (const userValue of overrides) {
+  const role = { sales: true, ...(roleValue === absent ? {} : { 'sales:status': roleValue }) }
+  const personal = userValue === absent ? {} : { 'sales:status': userValue }
+  const effective = userValue === absent ? roleValue : userValue
+  for (const encode of [false, true]) {
+    const actor = {
+      role_permissions: encode ? JSON.stringify(role) : role,
+      permissions: encode ? JSON.stringify(personal) : personal,
+    }
+    const authority = effectivePermissions(actor)
+    const workerActor = { role_permissions: JSON.stringify(role), permissions: JSON.stringify(personal) }
+    assert.equal(authority.can('sales', 'status'), effective !== false, 'only the effective explicit false blocks')
+    assert.equal(authority.can('sales', 'status'), workerPermissions.getActionTier(workerActor, 'sales', 'status') === 'full', 'raw role/user action semantics match Worker')
+    assert.equal(authority.merged['sales:status'], effective === true || effective === false ? effective : undefined)
+    // A no-op action value cannot widen a denied or read-only section.
+    for (const sales of [false, 'false', 1, 'view']) {
+      assert.equal(effectivePermissions({ ...actor, permissions: { ...personal, sales } }).can('sales', 'status'), false)
+    }
+    assert.equal(effectivePermissions({ ...actor, username: ' ADMIN ' }).can('sales', 'status'), true)
+    overrideCases++
+  }
+}
+console.log(`PASS ${overrideCases} role/user action-override cases match Worker; junk is no opinion, section grants stay strict, admin bypasses`)
