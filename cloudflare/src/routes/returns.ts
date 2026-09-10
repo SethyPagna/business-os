@@ -63,6 +63,11 @@ app.use('*', requireAuth)
 app.use('*', async (c, next) => {
   const user = c.get('user')
   if (getPermissionTier(user, 'returns') === 'none') return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  // Read revocation is independent of create/edit authority. HEAD executes
+  // the GET handler in Hono and must have the same read gate.
+  if ((c.req.method === 'GET' || c.req.method === 'HEAD') && getActionTier(user, 'returns', 'view') === 'none') {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
   return next()
 })
 

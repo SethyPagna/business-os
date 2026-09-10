@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
-import { getPermissionTier, isAdminControlUser } from '../lib/permissions'
+import { getActionTier, isAdminControlUser } from '../lib/permissions'
 import { round2 } from '../lib/saleTotals'
 import {
   getBusinessSummaryDayRows,
@@ -57,13 +57,13 @@ const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
 
 function canReadSales(user: SessionUser): boolean {
-  return getPermissionTier(user, 'sales') !== 'none'
+  return getActionTier(user, 'sales', 'view') !== 'none'
 }
 function canReadReturns(user: SessionUser): boolean {
-  return getPermissionTier(user, 'returns') !== 'none'
+  return getActionTier(user, 'returns', 'view') !== 'none'
 }
 function canReadFees(user: SessionUser): boolean {
-  return getPermissionTier(user, 'fees') !== 'none'
+  return getActionTier(user, 'fees', 'view') !== 'none'
 }
 
 function num(v: unknown): number {

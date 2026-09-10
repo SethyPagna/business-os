@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
-import { hasPermission, isActionBlocked } from '../lib/permissions'
+import { hasPermission, getActionTier, isActionBlocked } from '../lib/permissions'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { getTrackedProductIds, listBatchesForProduct, receiveBatchStock } from '../lib/productBatches'
@@ -35,7 +35,7 @@ app.use('*', async (c, next) => {
   //
   // Reading which lots exist is not a privileged action -- it is strictly
   // less than the product/price data 'pos' already grants.
-  const isRead = c.req.method === 'GET'
+  const isRead = c.req.method === 'GET' || c.req.method === 'HEAD'
   // products_image_only_show_batches (K6): the image-only role's opt-in
   // lot VIEW -- read-only by construction (writes stay inventory-only),
   // and note batch rows carry unit_cost_usd, so this grant is the
@@ -44,7 +44,7 @@ app.use('*', async (c, next) => {
   // ride the 'inventory:adjust' per-action override (Part 546) -- the same
   // action key Branches.tsx's canReceiveStock reads via can().
   const allowed = isRead
-    ? (hasPermission(user, 'inventory') || hasPermission(user, 'pos') || hasPermission(user, 'sales') || hasPermission(user, 'products_image_only_show_batches'))
+    ? (getActionTier(user, 'inventory', 'view') === 'full' || hasPermission(user, 'pos') || getActionTier(user, 'sales', 'view') === 'full' || hasPermission(user, 'products_image_only_show_batches'))
     : hasPermission(user, 'inventory') && !isActionBlocked(user, 'inventory', 'adjust')
   if (!allowed) return c.json({ error: 'You do not have permission to perform this action' }, 403)
   return next()
@@ -104,7 +104,7 @@ app.get('/', async (c) => {
   // lots -- code, expiry, quantity, supplier NAME -- but never the money
   // terms: unit cost and paid/credit state stay with the roles that manage
   // purchasing. Same name-only supplier rule batches follow everywhere.
-  const moneyBlind = !hasPermission(user, 'inventory') && !hasPermission(user, 'pos') && !hasPermission(user, 'sales')
+  const moneyBlind = getActionTier(user, 'inventory', 'view') !== 'full' && !hasPermission(user, 'pos') && getActionTier(user, 'sales', 'view') !== 'full'
   const payload = moneyBlind
     ? (batches as Array<Record<string, unknown>>).map(({ unit_cost_usd: _c, payment_status: _p, credit_due_date: _d, ...rest }) => rest)
     : batches

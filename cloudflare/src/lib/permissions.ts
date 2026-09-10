@@ -20,7 +20,7 @@ export function parseJsonObject(value: string | null | undefined): Record<string
   if (!value) return {}
   try {
     const parsed = JSON.parse(value)
-    return parsed && typeof parsed === 'object' ? parsed : {}
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
   } catch (_) {
     return {}
   }
@@ -67,7 +67,7 @@ export function isAdminControlUser(user: PermissionUser): boolean {
   const username = String(user.username || '').trim().toLowerCase()
   const roleCode = String(user.role_code || '').trim().toLowerCase()
   const merged = getMergedPermissions(user)
-  return username === 'admin' || roleCode === 'admin' || !!merged.all
+  return username === 'admin' || roleCode === 'admin' || merged.all === true
 }
 
 // Mirrors the original's special-cased aliases for the *settings* sub-

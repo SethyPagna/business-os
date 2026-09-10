@@ -144,7 +144,7 @@ const { hasPermission, hasAnyPermission, isAdminControlUser, getActionTier, getP
 {
   const branchReviewer = { role_permissions: JSON.stringify({ branches: 'review' }), permissions: null, username: 'br1', role_code: 'reviewer' }
   const inventoryReviewer = { role_permissions: JSON.stringify({ inventory: 'review' }), permissions: null, username: 'ir1', role_code: 'reviewer' }
-  const mayReadTransferHistory = (user) => getPermissionTier(user, 'inventory') !== 'none' || getPermissionTier(user, 'branches') !== 'none'
+  const mayReadTransferHistory = (user) => getActionTier(user, 'inventory', 'view') !== 'none' || getActionTier(user, 'branches', 'view') !== 'none'
   assert.equal(mayReadTransferHistory(branchReviewer), true)
   assert.equal(mayReadTransferHistory(inventoryReviewer), true)
   assert.equal(mayReadTransferHistory({ role_permissions: '{}', permissions: null, username: 'none', role_code: 'staff' }), false)
@@ -342,7 +342,7 @@ const { hasPermission, hasAnyPermission, isAdminControlUser, getActionTier, getP
   // the form Hono actually matches, which also covers the bare `/prefix`.
   assert.match(compatSrc, /for \(const prefix of \[[\s\S]*?'\/dashboard'[\s\S]*?\]\) \{\s*\n\s*app\.use\(`\$\{prefix\}\/\*`, requireAuth\)/, "compat.ts must require a session on the /dashboard subtree using the `${prefix}/*` form Hono actually matches")
   assert.doesNotMatch(compatSrc, /^app\.use\('\/[a-z-]+\*',/m, "compat.ts must not use the bare-trailing-`*` middleware form -- it matches nothing in Hono and silently leaves routes unguarded")
-  assert.match(compatSrc, /app\.get\('\/transfers', async \(c\) => \{[\s\S]*?getPermissionTier\(user, 'inventory'\) === 'none' && getPermissionTier\(user, 'branches'\) === 'none'/, 'compat.ts GET /transfers must admit either tier-aware read permission while denying users with neither')
+  assert.match(compatSrc, /app\.get\('\/transfers', async \(c\) => \{[\s\S]*?getActionTier\(user, 'inventory', 'view'\) === 'none' && getActionTier\(user, 'branches', 'view'\) === 'none'/, 'compat.ts GET /transfers must admit either effective read permission while honoring view revocations')
   console.log("PASS routes/compat.ts's dashboard/analytics/dashboard-startup endpoints all check the 'dashboard' permission")
 }
 
