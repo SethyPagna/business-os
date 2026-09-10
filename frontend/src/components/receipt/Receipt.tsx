@@ -511,7 +511,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   // RESOLVED value stops a row that resolves to nothing forcing an empty
   // customer block onto the paper.
   const customerAddress = contactDisplayAddress(sale.customer_address)
-  const hasCustomer = customerDisplayName || (!customerIsAnonymous && sale.customer_phone) || customerAddress || (!customerIsAnonymous && showMembershipId && sale.customer_membership_number)
+  const hasCustomer = customerDisplayName || sale.customer_phone || customerAddress || (!customerIsAnonymous && showMembershipId && sale.customer_membership_number)
   const hasDelivery = !!sale.is_delivery && (sale.delivery_contact_name || sale.delivery_contact_phone || sale.delivery_contact_address)
   const showDeliveryContactSection = tpl.delivery_show_contact !== false
   const showDeliveryDriverName = showDeliveryContactSection && tpl.delivery_show_driver_name !== false
@@ -572,7 +572,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
     customer: hasCustomer ? (
       <div key="customer" className="mt-2 border-t border-dashed border-gray-300 pt-2">
         {tpl.show_customer_name && customerDisplayName ? <Row label={labelFor(lang, 'customer')} value={customerDisplayName} /> : null}
-        {!customerIsAnonymous && tpl.show_customer_phone && sale.customer_phone ? <Row label={labelFor(lang, 'phone')} value={sale.customer_phone} /> : null}
+        {tpl.show_customer_phone && sale.customer_phone ? <Row label={labelFor(lang, 'phone')} value={sale.customer_phone} /> : null}
         {tpl.show_customer_address && customerAddress ? <Row label={labelFor(lang, 'address')} value={customerAddress} /> : null}
         {!customerIsAnonymous && showMembershipId && sale.customer_membership_number ? <Row label={labelFor(lang, 'membership')} value={sale.customer_membership_number} /> : null}
       </div>
@@ -856,7 +856,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
       {settings.business_phone ? <div className="text-center">{settings.business_phone}</div> : null}
       <div className="border-t border-gray-300 pt-1">
         <Row label={labelFor(lang, 'date')} value={dateStr} />
-        {!customerIsAnonymous && sale.customer_phone ? <Row label={labelFor(lang, 'phone')} value={sale.customer_phone} /> : null}
+        {sale.customer_phone ? <Row label={labelFor(lang, 'phone')} value={sale.customer_phone} /> : null}
         {customerAddress ? <Row label={labelFor(lang, 'address')} value={customerAddress} /> : null}
       </div>
       <div className="border-y border-gray-900 py-1">

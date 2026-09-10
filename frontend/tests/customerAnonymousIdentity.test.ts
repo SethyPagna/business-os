@@ -84,7 +84,7 @@ assert.match(ordinaryHtml, /LC-04971/)
 const anonymousHtml = render({ ...baseSale, customer_is_anonymous: 1 })
 assert.match(anonymousHtml, /General/)
 assert.match(anonymousHtml, /Historical address/)
-assert.doesNotMatch(anonymousHtml, /012345678/)
+assert.match(anonymousHtml, /012345678/, 'the receipt keeps the sale-specific General phone snapshot')
 assert.doesNotMatch(anonymousHtml, /LC-04971/)
 
 // Exercise the actual human-facing worksheet formatter in both languages.

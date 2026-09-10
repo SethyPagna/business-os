@@ -510,7 +510,7 @@ for (const kind of ['sales', 'returns', 'expenses'] as const) {
         CASE WHEN ${recognized} THEN ${net}-${refund}+${customerDeliveryFeeExpr('s.')}-${deliveryActualCostExpr('s.')} ELSE 0 END - ${costCol} AS gross_profit_usd` : ''
       select = `s.id, s.created_at AS cursor_at, s.created_at AS date, ${localDateExpr('s.created_at')} AS business_date,
         s.receipt_number, s.branch_name AS branch, s.cashier_name AS cashier, ${reportCustomerNameExpr('s.')} AS customer,
-        CASE WHEN EXISTS (SELECT 1 FROM customers ic WHERE ic.id=s.customer_id AND ic.is_anonymous=1) THEN '' ELSE s.customer_phone END AS customer_phone,
+        s.customer_phone,
         s.payment_method, ${saleStatusExpr('s.')} AS status, COALESCE(s.subtotal_usd,0) AS gross_sales_usd,
         COALESCE(s.discount_usd,0) AS store_discount_usd, COALESCE(s.membership_discount_usd,0) AS membership_discount_usd,
         COALESCE(s.tax_usd,0) AS tax_usd, ${customerDeliveryFeeExpr('s.')} AS delivery_usd,
