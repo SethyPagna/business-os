@@ -290,6 +290,31 @@
   color: var(--ui-ink);
 }
 
+/* One active report control for every view: the selected option is the
+   heading and sits with Filters + Show. ReportFrame replaces its static
+   title with this row, so Overview never renders a second title beside
+   "Overview (all)". */
+.reports-frame-header > :first-child,
+.reports-frame-header > :first-child > h2,
+.reports-title-actions {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.reports-frame-header > :first-child > h2 { overflow: visible; }
+
+.reports-title-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  white-space: nowrap;
+}
+
+.reports-title-actions > :first-child { min-width: 0; flex: 1 1 auto; }
+.reports-title-actions > :not(:first-child) { flex: 0 0 auto; }
+.reports-show-action { min-height: 40px; height: 40px; flex: 0 0 auto; }
+
 /* Overview breakdowns are navigation-like buttons directly after the filter
    controls. Long English/Khmer labels scroll inside this strip rather than
    widening the document or the report frame. */
@@ -384,13 +409,17 @@
 
 .reports-mobile-presets {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 6px;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: thin;
 }
 
 .reports-mobile-preset {
   min-height: 36px;
-  flex: 1 1 calc(20% - 6px);
+  flex: 0 0 auto;
   border: 1px solid var(--ui-line-2);
   border-radius: 999px;
   padding: 5px 9px;
@@ -424,7 +453,6 @@
 .reports-desktop-controls .reports-mobile-preset { flex: 0 0 auto; font-size: 13px; }
 
 @media (max-width: 359px) {
-  .reports-mobile-preset { flex-basis: calc(50% - 6px); }
   .reports-mobile-range { font-size: 12px; gap: 4px; padding-inline: 8px; }
 }
 

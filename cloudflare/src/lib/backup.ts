@@ -166,6 +166,9 @@ export const BACKUP_TABLES = [
   'return_item_batch_allocations',
   'return_replacement_items',
   'fees',
+  // Manual-expense retry receipts identify fees and must survive with them;
+  // otherwise a restored browser retry could commit the same expense twice.
+  'fee_operation_receipts',
   'loyalty_point_adjustments',
   'inventory_movements',
   'stock_transfers',
@@ -1088,7 +1091,7 @@ export const SALE_REPLAY_RESTORE_BUNDLE = [
   'pending_actions', 'branches', 'suppliers', 'file_assets', 'product_images',
   'products', 'product_batches', 'branch_stock', 'branch_batch_stock', 'damaged_stock_lots',
   'sales', 'sale_items', 'sale_item_batch_allocations', 'returns', 'return_items',
-  'return_item_batch_allocations', 'fees', 'inventory_movements', 'action_history',
+  'return_item_batch_allocations', 'fees', 'fee_operation_receipts', 'inventory_movements', 'action_history',
   'undo_snapshots', 'sale_amendments', 'sale_write_revisions', 'sale_bulk_operations', 'sale_bulk_members',
   'sale_mutation_receipts', 'sale_mutation_members',
   'sale_incident_recovery_receipts', 'sale_incident_recovery_members',

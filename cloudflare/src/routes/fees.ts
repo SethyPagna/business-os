@@ -10,6 +10,17 @@ import { businessToday } from '../lib/businessDateWindow'
 import { sendTelegramEvent, telegramMoney } from '../lib/telegram'
 import { branchCanSell } from '../lib/branchRoles'
 import { normalizeTypedDate } from '../lib/batchCode'
+import { actorSnapshot } from '../lib/actorSnapshot'
+import {
+  canonicalFeeCreateRequest,
+  feeCreateAuditStatement,
+  feeOperationReceiptResponse,
+  feeOperationReceiptStatement,
+  feeRequestDigest,
+  findFeeOperationReceipt,
+  normalizeFeeRequestId,
+  type FeeCreateIntent,
+} from '../lib/feeOperationReceipt'
 import type { Env } from '../index'
 
 // Standalone Fees page (migrations/0018_fees.sql) -- manual-entry fee
@@ -428,17 +439,65 @@ app.post('/', async (c) => {
   // narrowing into the ordinary tier answer.
   if (getActionTier(user, 'fees', 'add') === 'none') return c.json({ error: 'You do not have permission to perform this action' }, 403)
   const db = getDb(c.env)
-  const body = await c.req.json().catch(() => ({} as Record<string, unknown>))
+  const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
+
+  // A manual expense is a money-bearing write. The browser persists this
+  // identity before network I/O and reuses it after an unknown outcome; the
+  // receipt below makes that retry return the first commit instead of
+  // inserting a second expense. Missing/invalid identities fail before any
+  // validation query or write so an older client cannot silently retain the
+  // former duplicate-on-timeout behavior.
+  const clientRequestId = normalizeFeeRequestId(body.client_request_id)
+  if (!clientRequestId) {
+    return c.json({ error: 'client_request_id is required when creating an expense.', code: 'client_request_id_required' }, 400)
+  }
 
   const feeType = normalizeFeeType(body.fee_type ?? body.feeType)
   const label = normalizeFeeLabel(body.label)
   const amountUsd = round2(Math.max(toNumber(body.amount_usd ?? body.amountUsd), 0))
   const amountKhr = round2(Math.max(toNumber(body.amount_khr ?? body.amountKhr), 0))
   const feeDate = normalizeDate(body.fee_date ?? body.feeDate)
+  const requestedSaleId = optionalPositiveId(body.sale_id)
+  const requestedBranchId = optionalPositiveId(body.branch_id)
+  const requestedDeliveryContactId = optionalPositiveId(body.delivery_contact_id ?? body.deliveryContactId)
+  if (body.sale_id !== undefined && body.sale_id !== null && body.sale_id !== '' && requestedSaleId == null) {
+    return c.json({ error: 'Choose an existing sale recorded at the Shop.' }, 400)
+  }
+  if (body.branch_id !== undefined && body.branch_id !== null && body.branch_id !== '' && requestedBranchId == null) {
+    return c.json({ error: 'Every expense must use the active Shop branch.' }, 400)
+  }
+  if ((body.delivery_contact_id !== undefined || body.deliveryContactId !== undefined)
+    && (body.delivery_contact_id ?? body.deliveryContactId) !== null
+    && (body.delivery_contact_id ?? body.deliveryContactId) !== ''
+    && requestedDeliveryContactId == null) {
+    return c.json({ error: 'Invalid delivery contact' }, 400)
+  }
+  const notes = normalizeText(body.notes, 2000)
+  const intent: FeeCreateIntent = {
+    fee_type: feeType,
+    label,
+    amount_usd: amountUsd,
+    amount_khr: amountKhr,
+    fee_date: feeDate,
+    sale_id: requestedSaleId,
+    branch_id: requestedBranchId,
+    delivery_contact_id: requestedDeliveryContactId,
+    notes,
+  }
+  const requestJson = canonicalFeeCreateRequest(intent)
+  const requestDigest = await feeRequestDigest(requestJson)
+  const priorReceipt = await findFeeOperationReceipt(db, Number(user.id), clientRequestId)
+  if (priorReceipt) {
+    if (priorReceipt.request_digest !== requestDigest) {
+      return c.json({ error: 'client_request_id was already used with different expense data.', code: 'idempotency_conflict' }, 409)
+    }
+    return c.json(feeOperationReceiptResponse(priorReceipt))
+  }
+
   let saleId: number | null
   let branchId: number
   try {
-    ({ saleId, branchId } = await resolveFeeLink(db, body.sale_id, body.branch_id))
+    ({ saleId, branchId } = await resolveFeeLink(db, requestedSaleId, requestedBranchId))
   } catch (error) {
     const code = (error as Error).message
     if (code === 'SALE_BRANCH_MISMATCH') return c.json({ error: 'The linked sale and expense must use the same Shop branch.' }, 400)
@@ -447,30 +506,61 @@ app.post('/', async (c) => {
   }
   let deliveryContactId: number | null
   try {
-    deliveryContactId = await requireDeliveryContact(db, body.delivery_contact_id ?? body.deliveryContactId)
+    deliveryContactId = await requireDeliveryContact(db, requestedDeliveryContactId)
   } catch {
     return c.json({ error: 'Invalid delivery contact' }, 400)
   }
-  const notes = normalizeText(body.notes, 2000)
   const now = new Date().toISOString()
+  const actorName = actorSnapshot(user)
+  const receiptId = crypto.randomUUID()
+  try {
+    await db.batch([
+      {
+        sql: `INSERT INTO fees (fee_type, label, amount_usd, amount_khr, fee_date, sale_id, branch_id, delivery_contact_id, notes, created_by, created_by_name, created_at, updated_at)
+          VALUES (@feeType, @label, @amountUsd, @amountKhr, @feeDate, @saleId, @branchId, @deliveryContactId, @notes, @createdBy, @createdByName, @now, @now)`,
+        params: {
+          feeType, label, amountUsd, amountKhr, feeDate, saleId, branchId,
+          deliveryContactId, notes, createdBy: user.id, createdByName: actorName, now,
+        },
+      },
+      feeOperationReceiptStatement({
+        receiptId,
+        actorId: Number(user.id),
+        actorName,
+        requestId: clientRequestId,
+        digest: requestDigest,
+        requestJson,
+        occurredAt: now,
+        intent: { ...intent, sale_id: saleId, delivery_contact_id: deliveryContactId },
+        resolvedBranchId: branchId,
+      }),
+      feeCreateAuditStatement({
+        actorId: Number(user.id),
+        actorName,
+        requestId: clientRequestId,
+        digest: requestDigest,
+        resolvedBranchId: branchId,
+      }),
+    ])
+  } catch (error) {
+    // Two equal requests can race past the pre-read. The receipt uniqueness
+    // constraint rolls the losing fee+audit batch back; read and return the
+    // winner. A different digest is an explicit conflict, never equality by
+    // amount/date/label guesswork.
+    const racedReceipt = await findFeeOperationReceipt(db, Number(user.id), clientRequestId)
+    if (racedReceipt) {
+      if (racedReceipt.request_digest === requestDigest) return c.json(feeOperationReceiptResponse(racedReceipt))
+      return c.json({ error: 'client_request_id was already used with different expense data.', code: 'idempotency_conflict' }, 409)
+    }
+    throw error
+  }
 
-  const result = await db.prepare(`
-    INSERT INTO fees (fee_type, label, amount_usd, amount_khr, fee_date, sale_id, branch_id, delivery_contact_id, notes, created_by, created_by_name, created_at, updated_at)
-    VALUES (@feeType, @label, @amountUsd, @amountKhr, @feeDate, @saleId, @branchId, @deliveryContactId, @notes, @createdBy, @createdByName, @now, @now)
-  `).run({
-    feeType, label, amountUsd, amountKhr, feeDate,
-    saleId,
-    branchId,
-    deliveryContactId, notes, createdBy: user.id, createdByName: user.username || null, now,
-  })
-
-  const fee = await db.prepare(`SELECT * FROM fees WHERE id = @id`).get<FeeRow>({ id: result.lastInsertRowid })
-  await audit(c.env, user.id, user.username || null, 'create', 'fee', result.lastInsertRowid, {
-    after: fee,
-    sale_id: saleId,
-    branch_id: branchId,
-  })
-  await broadcast(c.env, 'fees', { type: 'created', id: result.lastInsertRowid })
+  const committedReceipt = await findFeeOperationReceipt(db, Number(user.id), clientRequestId)
+  if (!committedReceipt || committedReceipt.request_digest !== requestDigest) {
+    return c.json({ error: 'Expense commit could not be verified. Retry the exact saved request.', code: 'write_outcome_unknown' }, 503)
+  }
+  const response = feeOperationReceiptResponse(committedReceipt)
+  await broadcast(c.env, 'fees', { type: 'created', id: committedReceipt.fee_id })
   c.executionCtx.waitUntil(sendTelegramEvent(c.env, {
     type: 'fees',
     lines: [
@@ -481,7 +571,7 @@ app.post('/', async (c) => {
       notes ? `Note: ${notes}` : '',
     ],
   }).catch((error) => console.error('[telegram] fee notification failed', error)))
-  return c.json({ fee }, 201)
+  return c.json(response, 201)
 })
 
 // PUT /api/fees/:id -- edit, with the same optimistic-concurrency pattern

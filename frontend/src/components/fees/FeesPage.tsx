@@ -42,14 +42,15 @@ import {
 } from '../../api/feesTransport.ts'
 import FeeForm, { FEE_TYPE_OPTIONS, feeFormDraftBaseKey, feeFormWorkKey } from './FeeForm.tsx'
 import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
-import StatsRangeRow from '../shared/StatsRangeRow.tsx'
 import ShiftHistoryModal from '../shifts/ShiftHistoryModal.tsx'
 import ExportMenu from '../shared/ExportMenu.tsx'
 import SectionExportAction from '../shared/SectionExportAction.tsx'
 import { makeReportMoneyFormatter } from '../../utils/reportMoney.ts'
 import { EMPTY_DATE_TIME_RANGE, type DateTimeRange } from '../shared/DateTimeRangePicker'
+import { fmtClock24 } from '../../utils/formatters.ts'
 import { columnsFromRows } from '../../utils/exportOptions.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
+import { toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
 import {
   RESTORE_WORK_EVENT,
   consumePendingRestore,
@@ -117,6 +118,17 @@ function formatFeeDate(value: string | null | undefined): string {
   const dd = String(date.getDate()).padStart(2, '0')
   const mm = String(date.getMonth() + 1).padStart(2, '0')
   return `${dd}/${mm}/${date.getFullYear()}`
+}
+
+export function groupFeesByDate(rows: readonly FeeRecord[]): Array<{ date: string; rows: FeeRecord[] }> {
+  const groups: Array<{ date: string; rows: FeeRecord[] }> = []
+  for (const row of rows) {
+    const date = String(row.fee_date || '')
+    const current = groups[groups.length - 1]
+    if (!current || current.date !== date) groups.push({ date, rows: [row] })
+    else current.rows.push(row)
+  }
+  return groups
 }
 
 export function feeTypeToneClass(type: string): string {
@@ -368,6 +380,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
   }, [])
 
   const fees = result.fees || []
+  const feeDayGroups = useMemo(() => groupFeesByDate(fees), [fees])
 
   const feeTypeLabel = useCallback((type: string): string => {
     const option = FEE_TYPE_OPTIONS.find((opt) => opt.value === type)
@@ -486,7 +499,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
       // here would double it up. Reload instead so the list reflects the
       // latest server state, same pattern Sales.tsx/EditReturnModal.tsx
       // already use for this case.
-      if (isWriteConflictError(error)) {
+      if (isWriteConflictError(error) || String((error as { code?: unknown } | null)?.code || '') === 'idempotency_conflict') {
         await load(true)
       } else {
         notify(error instanceof Error ? error.message : String(error || ''), 'error')
@@ -593,17 +606,17 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
           <>
             <ShiftHistoryModal
               label={tr('shift_code', 'Shift')}
-              buttonClassName="btn-secondary inline-flex h-11 min-w-11 items-center justify-center px-2.5 py-0 text-xs md:h-8 md:min-w-0"
+              buttonClassName="btn-secondary inline-flex h-10 min-w-10 items-center justify-center px-2.5 py-0 text-xs md:min-w-0"
             />
             <SectionExportAction>
               <ExportMenu
                 label={tr('export', 'Export')}
                 items={exportItems}
-                mobileIconOnly
-                triggerClassName="!h-8 !min-w-0 !px-2.5 md:!w-auto md:!min-w-[5.75rem]"
+                iconOnly
+                triggerClassName={`${toolbarIconButtonClassName} !h-10 !min-h-10 !w-10 !rounded-full !border-0 !bg-transparent !p-0`}
               />
             </SectionExportAction>
-            <button type="button" className="btn-secondary inline-flex h-8 items-center gap-1 px-2.5 py-0 text-xs" onClick={() => setShowLabelManager(true)} title={tr('manage_expense_labels', 'Manage expense labels')}>
+            <button type="button" className="btn-secondary inline-flex h-10 items-center gap-1 px-2.5 py-0 text-xs" onClick={() => setShowLabelManager(true)} title={tr('manage_expense_labels', 'Manage expense labels')}>
               <Tags className="h-3.5 w-3.5" />
               <span>{tr('labels', 'Labels')}</span>
             </button>
@@ -615,13 +628,16 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
           // the range row to save a row.
           <button
             type="button"
-            className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg bg-blue-600 px-2.5 text-xs font-semibold text-white transition-colors hover:bg-blue-700"
+            className={`${toolbarIconButtonClassName} text-blue-700 hover:text-blue-800 dark:text-blue-300`}
             onClick={openAdd}
+            aria-label={tr('add_fee', 'Add Expense')}
+            title={tr('add_fee', 'Add Expense')}
           >
-            <Plus className="h-3.5 w-3.5 shrink-0" />
-            {tr('add_fee', 'Add Expense')}
+            <Plus className="h-5 w-5" />
           </button>
         ) : null}
+        range={stripRange}
+        onRangeChange={setStripRange}
       />
 
       {exportDialog ? (
@@ -639,13 +655,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
         </Suspense>
       ) : null}
 
-      <div className="sticky top-2 z-30 -mx-1 mb-4 space-y-3 bg-gray-50/95 pb-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
-        {/* The Start→End range that scopes the stats strip above now leads
-            this pinned toolbar as its own row, directly above the search bar
-            (user, Aug 31: "fish out the start date and end date from the stats
-            button ... right above the search bar row"). Same range state
-            (stripRange) still feeds the strip's cards. */}
-        <StatsRangeRow className="pt-1" range={stripRange} onRangeChange={setStripRange} t={t} />
+      <div className="sticky top-2 z-30 -mx-1 mb-4 space-y-2 bg-gray-50/95 pb-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
         <div className="flex min-w-0 flex-wrap items-center gap-1.5 sm:flex-nowrap">
           <SearchInput
             id="fees-search"
@@ -662,8 +672,19 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
             onClear={() => { setTypeFilter('all'); setBranchFilter('') }}
             compact
           />
-          {/* Add Fee moved into the stats strip's range row above ("date
-              start and end date is one row with the add buttons"). */}
+          {/* Add Fee lives in the stats strip's shared range/action row. */}
+        </div>
+        <div className="flex justify-center">
+          <PaginationControls
+            compact
+            rangeAsPageSize
+            page={page}
+            pageSize={pageSize}
+            totalItems={result.total}
+            t={t}
+            onPageChange={setPage}
+            onPageSizeChange={(size) => { setPageSize(size); setPage(1) }}
+          />
         </div>
       </div>
 
@@ -709,7 +730,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
               <colgroup><col className="w-[7rem]" /><col className="w-[7rem]" /><col /><col className="w-[9rem]" /><col className="w-[12rem]" /><col className="w-[4.5rem]" /></colgroup>
               <thead>
                 <tr>
-                  <th>{tr('date', 'Date')}</th>
+                  <th>{tr('time', 'Time')}</th>
                   <th data-tone="violet">{tr('type', 'Type')}</th>
                   <th data-tone="blue">{tr('expense_category', 'Category')}</th>
                   <th data-tone="emerald" className="text-right">{tr('amount', 'Amount')}</th>
@@ -717,10 +738,14 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
                   <th className="text-right">{tr('actions', 'Actions')}</th>
                 </tr>
               </thead>
-              <tbody>
-                {fees.map((fee) => (
+              {feeDayGroups.map((group) => (
+                <tbody key={group.date || 'unknown'}>
+                  <tr className="bg-slate-50/90 dark:bg-slate-800/80">
+                    <td colSpan={6} className="!py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-200">{formatFeeDate(group.date)}</td>
+                  </tr>
+                  {group.rows.map((fee) => (
                   <tr key={fee.id} data-clickable={canEditFee ? 'true' : undefined} tabIndex={canEditFee ? 0 : undefined} onClick={() => openEdit(fee)} onKeyDown={(event) => { if (canEditFee && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); openEdit(fee) } }}>
-                    <td className="whitespace-nowrap text-slate-500 dark:text-slate-400">{formatFeeDate(fee.fee_date)}</td>
+                    <td className="whitespace-nowrap text-slate-500 dark:text-slate-400">{fmtClock24(fee.created_at)}</td>
                     <td className="whitespace-nowrap">
                       <span className={`inline-flex rounded-full px-1.5 py-0.5 text-[11px] font-semibold ${feeTypeToneClass(fee.fee_type)}`}>
                         {feeTypeLabel(fee.fee_type)}
@@ -767,31 +792,35 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
                       </div>
                     </td>
                   </tr>
-                ))}
-              </tbody>
+                  ))}
+                </tbody>
+              ))}
             </table>
           </div>
 
           {/* Card layout for narrow screens -- the 7-column table doesn't
               fit comfortably below sm, same pattern as the other list pages
               in this app (Branches, Returns). */}
-          <div className="space-y-2 md:hidden">
-            {fees.map((fee) => (
-              <div key={fee.id} className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${feeTypeToneClass(fee.fee_type)}`}>
-                        {feeTypeLabel(fee.fee_type)}
-                      </span>
-                      <span className="text-xs text-slate-400">{formatFeeDate(fee.fee_date)}</span>
-                    </div>
-                    <p className="mt-1 truncate text-sm font-medium text-slate-700 dark:text-slate-200">{fee.label || '--'}</p>
-                    {fee.branch_name ? (
-                      <p className="mt-0.5 truncate text-xs text-slate-400">{fee.branch_name}</p>
-                    ) : null}
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1">
+          <div className="space-y-3 md:hidden">
+            {feeDayGroups.map((group) => (
+              <section key={group.date || 'unknown'} className="space-y-1.5" aria-label={formatFeeDate(group.date)}>
+                <div className="sticky top-[7.25rem] z-10 rounded-md bg-slate-100/95 px-2 py-1 text-xs font-semibold text-slate-600 backdrop-blur dark:bg-slate-800/95 dark:text-slate-200">
+                  {formatFeeDate(group.date)}
+                </div>
+                {group.rows.map((fee) => (
+              <div key={fee.id} data-expense-card="" className="rounded-xl border border-slate-200 bg-white px-2.5 py-2 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+                <div data-expense-line="primary" className="flex min-w-0 items-center gap-1.5">
+                  {fee.sale_receipt_number || fee.sale_id ? (
+                    <span className="inline-flex min-w-0 items-center gap-1 rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                      <Receipt className="h-3 w-3 shrink-0" />
+                      <span className="truncate">{fee.sale_receipt_number ? `${fee.sale_receipt_number} · #${fee.sale_id}` : `#${fee.sale_id}`}</span>
+                    </span>
+                  ) : null}
+                  <span className="shrink-0 text-xs text-slate-400">{fmtClock24(fee.created_at)}</span>
+                  <span className="ml-auto shrink-0 text-sm font-semibold text-emerald-700 dark:text-emerald-300">
+                    {fmtMoney(Number(fee.amount_usd) || 0, Number(fee.amount_khr) || 0)}
+                  </span>
+                  <div className="flex shrink-0 items-center gap-0.5">
                     {canEditFee ? <button type="button" onClick={() => openEdit(fee)} aria-label={tr('edit', 'Edit')} className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700">
                       <Pencil className="h-3.5 w-3.5" />
                     </button> : null}
@@ -800,18 +829,16 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
                     </button>
                   </div>
                 </div>
-                <div className="mt-2 flex items-center justify-between gap-2 text-sm">
-                  <span className="font-semibold text-slate-700 dark:text-slate-200">
-                    {fmtMoney(Number(fee.amount_usd) || 0, Number(fee.amount_khr) || 0)}
+                <div data-expense-line="secondary" className="mt-1 flex min-w-0 items-center gap-1.5 text-xs">
+                  <span className={`shrink-0 rounded-full px-1.5 py-0.5 font-semibold ${feeTypeToneClass(fee.fee_type)}`}>
+                    {feeTypeLabel(fee.fee_type)}
                   </span>
-                  {fee.sale_receipt_number || fee.sale_id ? (
-                    <span className="inline-flex min-w-0 items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[11px] text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                      <Receipt className="h-3 w-3 shrink-0" />
-                      <span className="truncate">{fee.sale_receipt_number ? `${fee.sale_receipt_number} · Sale ID #${fee.sale_id}` : `Sale ID #${fee.sale_id}`}</span>
-                    </span>
-                  ) : null}
+                  <span className="min-w-0 flex-1 truncate font-medium text-slate-700 dark:text-slate-200">{fee.label || ''}</span>
+                  {fee.branch_name ? <span className="max-w-[35%] truncate text-slate-400">{fee.branch_name}</span> : null}
                 </div>
               </div>
+                ))}
+              </section>
             ))}
           </div>
 
