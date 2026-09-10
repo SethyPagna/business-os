@@ -4,6 +4,7 @@
 import { Suspense, useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import type { ReactNode, MouseEvent as ReactMouseEvent } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
+import { todayStr } from '../../utils/dateHelpers.ts'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import PackageSearch from 'lucide-react/dist/esm/icons/package-search.js'
@@ -748,11 +749,12 @@ function ProductsFullEditor() {
   // it hid.
   const [hideZeroStockRows, setHideZeroStockRows] = useState(false)
   const [promotionRules, setPromotionRules] = useState<PromotionRule[]>([])
-  // The Products section has no date filter. Keep these empty compatibility
-  // values for the shared query/export helpers, so product results are never
-  // silently restricted to the current day.
-  const [createdDateFrom, setCreatedDateFrom] = useState('')
-  const [createdDateTo, setCreatedDateTo] = useState('')
+  // The received-date facet opens on the current Cambodia business day, in
+  // parity with the other operational ledgers. Clear Filters still writes
+  // empty bounds explicitly for an all-time product list.
+  const initialToday = todayStr()
+  const [createdDateFrom, setCreatedDateFrom] = useState(initialToday)
+  const [createdDateTo, setCreatedDateTo] = useState(initialToday)
   // Y15: the page is chip-sectioned like Promotions -- a switcher in the
   // header flips between the product listing and the Stock Changes ledger,
   // which used to be a folded card at the bottom of the same scroll.

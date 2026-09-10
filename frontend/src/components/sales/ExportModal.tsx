@@ -89,7 +89,7 @@ function getErrorMessage(error: unknown, fallback: string): string {
 }
 
 export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
-  const [period, setPeriod] = useState<ExportPeriod>('monthly')
+  const [period, setPeriod] = useState<ExportPeriod>('daily')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [loading, setLoading] = useState(false)

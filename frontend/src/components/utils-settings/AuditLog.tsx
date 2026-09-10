@@ -30,6 +30,7 @@ import {
 } from '../../api/auditLogTransport.ts'
 import { buildAuditFieldDiff } from '../../utils/auditLogFieldDiff.ts'
 import { fmtDayFirst, fmtTimezoneLabel } from '../../utils/formatters.ts'
+import { todayStr } from '../../utils/dateHelpers.ts'
 // N13: the Audit Log answers the same "who did this, and why" as the stock
 // ledgers, so it renders through the one shared history row model instead of
 // its own '--' placeholder.
@@ -360,8 +361,9 @@ export default function AuditLog() {
   // the year/month period chips stay as the grouping period and as the
   // fallback date range when no explicit range is typed. Native date inputs
   // carry ISO yyyy-mm-dd, exactly the shape the server already accepts.
-  const [rangeStart, setRangeStart] = useState('')
-  const [rangeEnd, setRangeEnd] = useState('')
+  const initialToday = todayStr()
+  const [rangeStart, setRangeStart] = useState(initialToday)
+  const [rangeEnd, setRangeEnd] = useState(initialToday)
   const [actionFilter, setActionFilter] = useState('all')
   // I2: filter by the record's entity ("page"/area) -- entity or legacy
   // table_name server-side, comma-joined multi-select like action/user.

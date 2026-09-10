@@ -49,10 +49,9 @@ function expenseMoney(usd: unknown, khr: unknown): string {
 }
 
 export default function DeliveryContactReportModal({ contactId, contactName, t, onClose }: DeliveryContactReportModalProps) {
-  // The loader needs a complete range. Open on the complete known sales
-  // window, so a courier's historical deliveries appear immediately instead
-  // of looking empty merely because none happened today.
-  const [range, setRange] = useState<DateTimeRange>(() => ({ ...todayDateTimeRange(), startDate: '2024-01-01' }))
+  // Keep the loader's complete-range invariant while opening on Cambodia's
+  // current business day. The picker continues to own later custom ranges.
+  const [range, setRange] = useState<DateTimeRange>(() => todayDateTimeRange())
   const [row, setRow] = useState<DeliveryContactReportRow | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
