@@ -11,6 +11,7 @@ import { buildBatchPreview, getVisibleProductBatches } from '../../utils/product
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { useLowStockConfig } from '../../AppContext'
 import { effectiveLowStockThreshold } from '../../utils/lowStockSettings.ts'
+import { TOOLBAR_BUTTON_BASE, toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
 
 type TranslateFn = (key: string) => string | undefined
 type MoneyFormatter = (value: number) => string
@@ -48,6 +49,8 @@ interface InventoryProduct {
   purchase_price_khr?: number
   selling_price_usd?: number
   selling_price_khr?: number
+  wholesale_price_usd?: number
+  wholesale_price_khr?: number
   // No special_price_*: the "VIP" tier it backed was deleted on 2026-09-04.
   qty_sold?: number
   revenue_usd?: number
@@ -93,6 +96,8 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
   const costPriceKhr = Number(p.purchase_price_khr || 0)
   const sellingPriceUsd = Number(p.selling_price_usd || 0)
   const sellingPriceKhr = Number(p.selling_price_khr || 0)
+  const wholesalePriceUsd = Number(p.wholesale_price_usd || 0)
+  const wholesalePriceKhr = Number(p.wholesale_price_khr || 0)
   // The special_price_* ("VIP") tier is deleted by the 2026-09-04 ruling, so
   // there is no longer a second tier that can override the shelf price here.
   // "Active price" is therefore simply the selling price: wholesale is a tier
@@ -151,7 +156,7 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
               {p.barcode ? <span className="shrink-0 whitespace-nowrap font-mono text-xs text-gray-400" {...copy(p.barcode)}>&middot; {p.barcode}</span> : null}
             </div>
           </div>
-          <button type="button" onClick={onClose} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600" aria-label={T('close', 'Close')}><X className="h-4 w-4" /></button>
+          <button type="button" onClick={onClose} className={toolbarIconButtonClassName} aria-label={T('close', 'Close')}><X className="h-4 w-4" /></button>
         </div>
 
         <div className="modal-scroll space-y-3 p-4">
@@ -196,21 +201,30 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
             {/* Fixed at two columns now that the third tile (the "Special
                 Price" / VIP tier) is deleted by the 2026-09-04 ruling -- the
                 grid used to widen to three whenever that tier had a value. */}
-            <div className="grid grid-cols-2 gap-2 sm:gap-3">
+            <div className="grid grid-cols-2 gap-2 sm:gap-3" data-detail-price-row="cost-wholesale">
               <div className="rounded-xl bg-red-50 p-3 dark:bg-red-900/20">
                 <div className="mb-1 text-xs font-semibold text-red-600 dark:text-red-400">{T('label_cost_purchase', 'Cost Price')}</div>
-                <div className="font-bold text-red-700 dark:text-red-300">{fmtUSD(costPriceUsd)}</div>
+                <div className="text-sm font-semibold tabular-nums text-red-700 dark:text-red-300">{fmtUSD(costPriceUsd)}</div>
                 {costPriceKhr > 0 ? <div className="text-xs text-gray-400">{fmtKHR(costPriceKhr)}</div> : null}
               </div>
+              <div className="rounded-xl bg-indigo-50 p-3 dark:bg-indigo-900/20">
+                <div className="mb-1 text-xs font-semibold text-indigo-600 dark:text-indigo-400">{T('wholesale_price', 'Wholesale price')}</div>
+                <div className="text-sm font-semibold tabular-nums text-indigo-700 dark:text-indigo-300">{wholesalePriceUsd > 0 ? fmtUSD(wholesalePriceUsd) : '—'}</div>
+                {wholesalePriceKhr > 0 ? <div className="text-xs text-gray-400">{fmtKHR(wholesalePriceKhr)}</div> : null}
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2 sm:gap-3" data-detail-price-row="selling-margin">
               <div className="rounded-xl bg-green-50 p-3 dark:bg-green-900/20">
                 <div className="mb-1 text-xs font-semibold text-green-600 dark:text-green-400">{T('label_selling_price', 'Selling price')}</div>
-                <div className="font-bold text-green-700 dark:text-green-300">{fmtUSD(sellingPriceUsd)}</div>
+                <div className="text-sm font-semibold tabular-nums text-green-700 dark:text-green-300">{fmtUSD(sellingPriceUsd)}</div>
                 {sellingPriceKhr > 0 ? <div className="text-xs text-gray-400">{fmtKHR(sellingPriceKhr)}</div> : null}
               </div>
-              {/* The "Special Price" tile is deleted (2026-09-04 ruling): that
-                  tier was the wholesale price under the wrong name, migration
-                  0111 moved its values to wholesale_price_*, and this inventory
-                  panel is a cost/stock view that never carried wholesale. */}
+              <div className="rounded-xl bg-emerald-50 p-3 dark:bg-emerald-900/20">
+                <div className="mb-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400">{T('margin', 'Margin')}</div>
+                <div className="text-sm font-semibold tabular-nums text-emerald-700 dark:text-emerald-300">
+                  {fmtUSD(marginUsd)}{costPriceUsd > 0 ? <span className="ml-1 text-xs font-normal text-gray-400">{Math.round(marginPct)}%</span> : null}
+                </div>
+              </div>
             </div>
             <div className="grid grid-cols-4 gap-1.5 text-center sm:gap-2">
               {[
@@ -279,6 +293,7 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
                   <div
                     key={getBranchStockKey(branchStock, index)}
                     className={`flex justify-between py-1 text-sm ${index < branchCount - 1 ? 'border-b border-gray-100 dark:border-gray-700' : ''}`}
+                    data-detail-branch-row="true"
                   >
                     <span className="text-gray-700 dark:text-gray-300">{branchStock.branch_name}</span>
                     <span className="font-medium text-gray-900 dark:text-white">{branchStock?.quantity ?? 0} {p.unit}</span>
@@ -325,7 +340,7 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
             <button
               type="button"
               onClick={() => { onClose(); onAdjust(p) }}
-              className="btn-primary flex w-full items-center justify-center gap-1.5 truncate px-1 py-2.5 text-xs leading-tight sm:text-sm"
+              className={`btn-primary ${TOOLBAR_BUTTON_BASE} w-full truncate px-1 leading-tight`}
               aria-label={T('adjust_stock', 'Adjust Stock')}
               title={T('adjust_stock', 'Adjust Stock')}
             >
@@ -337,7 +352,7 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
             <button
               type="button"
               onClick={() => { onClose(); onTransfer(p) }}
-              className="btn-secondary flex w-full items-center justify-center gap-1.5 truncate px-1 py-2.5 text-xs leading-tight sm:text-sm"
+              className={`btn-secondary ${TOOLBAR_BUTTON_BASE} w-full truncate px-1 leading-tight`}
               aria-label={T('transfer', 'Transfer')}
               title={T('transfer', 'Transfer')}
             >
@@ -349,7 +364,7 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
             <button
               type="button"
               onClick={() => { onClose(); onManageBatches(p) }}
-              className="btn-secondary flex w-full items-center justify-center gap-1.5 truncate px-1 py-2.5 text-xs leading-tight sm:text-sm"
+              className={`btn-secondary ${TOOLBAR_BUTTON_BASE} w-full truncate px-1 leading-tight`}
               aria-label={T('manage_batches', 'Manage Received Dates')}
               title={T('manage_batches', 'Manage Received Dates')}
             >

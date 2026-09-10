@@ -3649,8 +3649,8 @@ function ProductsFullEditor() {
                 }}
               >
                 {thumbnailState.hasImage
-                  ? <ProductImg src={thumbnailState.thumbnail} alt={productName} className="h-16 w-16 rounded-lg bg-slate-50 object-contain p-0.5 cursor-zoom-in hover:ring-2 hover:ring-primary-400 dark:bg-slate-800" />
-                  : <ProductImagePlaceholder className="h-16 w-16 rounded-lg" compact />}
+                  ? <ProductImg src={thumbnailState.thumbnail} alt={productName} className="h-12 w-12 rounded-lg bg-slate-50 object-contain p-0.5 cursor-zoom-in hover:ring-2 hover:ring-primary-400 dark:bg-slate-800" />
+                  : <ProductImagePlaceholder className="h-12 w-12 rounded-lg" compact />}
               </button>
           )}
         </td>
@@ -3914,11 +3914,9 @@ function ProductsFullEditor() {
               (rather than rendering it empty) lets the parent's gap-3
               close the space up instead of leaving a gap-sized empty box. */}
           {indented ? null : (
-            // The thumbnail fills the card's VERTICAL space at a fixed NARROW
-            // width (user, Aug 31: "take advantage of space = up/down, not the
-            // empty right side" -- a wide square ate the room barcode/brand/
-            // price need). self-stretch grows it to the card's height; w-16
-            // keeps it narrow so the text column keeps its width.
+            // A compact fixed square keeps every card's image footprint equal.
+            // The former self-stretch/min-h-[5rem] slot let image content set
+            // the card height, producing visibly uneven rows.
             <button
               type="button"
               className="relative flex-shrink-0 self-stretch rounded-xl text-left"
@@ -3932,8 +3930,8 @@ function ProductsFullEditor() {
               }}
             >
               {thumbnailState.hasImage
-                ? <ProductImg src={thumbnailState.thumbnail} alt={productName} className="h-full min-h-[5rem] w-16 rounded-xl bg-slate-50 object-contain p-0.5 cursor-zoom-in dark:bg-slate-800" />
-                : <ProductImagePlaceholder className="h-full min-h-[5rem] w-16 rounded-xl" />}
+                ? <ProductImg src={thumbnailState.thumbnail} alt={productName} className="h-12 w-12 rounded-xl bg-slate-50 object-contain p-0.5 cursor-zoom-in dark:bg-slate-800" />
+                : <ProductImagePlaceholder className="h-12 w-12 rounded-xl" />}
               <ProductDiscountBadge product={p} promotion={promotion} fmtUSD={fmtUSD} label={tr('discounts', 'Discounts')} overlay />
             </button>
           )}
@@ -4098,14 +4096,9 @@ function ProductsFullEditor() {
   // showed up was liable to change just from reordering/adding variants.
   // Uploading is still done from the lead product's own edit form -- this
   // only changes which image the collapsed header reflects.
-  // Mobile-first sizing (h-20 w-20, matching a standalone card's own
-  // image -- see renderMobileProductCard; enlarged from h-16 on Aug 31 to
-  // use the card's spare vertical space) that adjusts at the
-  // `sm:` breakpoint where the desktop table takes over (its row image is
-  // the larger h-14 w-14, and this header sits inline next to the group
-  // title/chevron rather than as its own block, so it stays a touch smaller
-  // there at sm:h-12 sm:w-12 -- both enlarged from the previous tiny w-10/w-8
-  // per user request that desktop thumbnails were too small).
+  // One compact 48px square on every viewport, matching standalone rows.
+  // Keeping group and standalone footprints identical prevents either shape
+  // from stretching its row/card or shifting the shared title rail.
   const renderGroupThumbnail = useCallback((group: { rows?: ProductRecord[]; leadProduct?: ProductRecord }) => {
     const state = buildGroupThumbnailState(group.rows, group.leadProduct)
     const title = String(group.leadProduct?.name || group.rows?.[0]?.name || '')
@@ -4118,9 +4111,9 @@ function ProductsFullEditor() {
           onTouchStart={(event) => event.stopPropagation()}
           onClick={(event) => { event.stopPropagation(); openLightbox(state.gallery, 0, title) }}
         >
-          <ProductImg src={state.thumbnail} alt={title} className="h-20 w-16 rounded-xl bg-slate-50 object-contain p-0.5 cursor-zoom-in sm:h-12 sm:w-12 sm:rounded-lg dark:bg-slate-800" />
+          <ProductImg src={state.thumbnail} alt={title} className="h-12 w-12 rounded-xl bg-slate-50 object-contain p-0.5 cursor-zoom-in sm:rounded-lg dark:bg-slate-800" />
         </button>
-      : <ProductImagePlaceholder className="h-20 w-16 rounded-xl sm:h-12 sm:w-12 sm:rounded-lg" compact />
+      : <ProductImagePlaceholder className="h-12 w-12 rounded-xl sm:rounded-lg" compact />
   }, [openLightbox, tr])
 
   // Group-title three-dot menu: "Add child row" (opens the variant modal,

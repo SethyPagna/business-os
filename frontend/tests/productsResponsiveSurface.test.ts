@@ -80,6 +80,9 @@ assert.doesNotMatch(products, /Product names are content[\s\S]{0,600}break-words
 assert.match(products, /shrink-0 whitespace-nowrap rounded-full bg-slate-100[\s\S]*\{barcode\}/, 'the mobile barcode pill must show every digit on one line rather than truncating or wrapping')
 assert.match(products, /aria-disabled=\{!thumbnailState\.hasImage\}[\s\S]*if \(thumbnailState\.hasImage\) openLightbox\(thumbnailState\.gallery, 0, productName\)/, 'product image slots must isolate row detail clicks and only open the gallery when an image exists')
 assert.match(products, /const renderGroupThumbnail[\s\S]*?aria-label=\{`\$\{tr\('view_image', 'View image'\)\}: \$\{title\}`\}[\s\S]*?openLightbox\(state\.gallery, 0, title\)/, 'grouped product thumbnails must also open their gallery without bubbling to product details')
+assert.equal((products.match(/<ProductImg[^>]*className="h-12 w-12[^>]*object-contain/g) || []).length, 3, 'desktop, mobile, and grouped thumbnails must share one compact 48px square')
+assert.equal((products.match(/<ProductImagePlaceholder className="h-12 w-12/g) || []).length, 3, 'image placeholders must reserve the same compact square as loaded thumbnails')
+assert.doesNotMatch(products, /h-full min-h-\[5rem\][^"\n]*w-16|h-20 w-16/, 'thumbnail height must not stretch with product-row content')
 assert.match(products, /import StockInSessionsSection from '\.\/StockInSessionsSection\.tsx'/, 'Stock-in Sessions must ship with Products instead of failing as a navigation-time lazy chunk')
 assert.doesNotMatch(products, /lazyRetry\(\(\) => import\('\.\/StockInSessionsSection/, 'Stock-in Sessions must not restore the crash-prone secondary chunk')
 assert.match(stockSessions, /Array\.isArray\(payload\.sessions\)/, 'Stock-in Sessions must reject an invalid successful response without crashing the page')
@@ -96,14 +99,12 @@ assert.match(
   'batch edit actions must remain reachable while the modal body scrolls',
 )
 
-// Detail footer actions must be allowed to shrink AND to wrap: three
-// icon+label buttons across a 320px row leave ~47px of label, so below sm
-// each takes a half-width cell instead. The width arithmetic and the 44px
-// tap target are judged in compactActionRows.test.ts; the shrink tokens are
-// pinned here so a later edit cannot quietly make the cells rigid again.
-assert.match(detail, /btn-secondary flex[^"]*min-w-0[^"]*flex-1/, 'detail footer actions must be allowed to shrink on narrow screens')
+// Detail footer actions use the shared 40px toolbar contract while retaining
+// their responsive half-width wrapping behavior.
+assert.match(detail, /className=\{`btn-secondary \$\{TOOLBAR_BUTTON_BASE\}[^`]*min-w-0[^`]*flex-1/, 'detail footer actions must share the canonical height and shrink on narrow screens')
 assert.match(detail, /flex flex-wrap items-center gap-2 border-t border-gray-200 p-3/, 'detail footer row must wrap instead of squeezing its labels away')
-assert.match(detail, /btn-primary flex[^"]*min-w-0[^"]*flex-1/, 'the primary detail action must be allowed to shrink on narrow screens')
+assert.match(detail, /className=\{`btn-primary \$\{TOOLBAR_BUTTON_BASE\}[^`]*min-w-0[^`]*flex-1/, 'the primary detail action must share the canonical height and shrink on narrow screens')
+assert.match(detail, /className=\{toolbarIconButtonClassName\}/, 'the product detail close action must use the shared 40px icon contract')
 assert.match(detail, /import \{ createPortal \} from 'react-dom'/, 'the product detail sheet must render outside the Products page stacking context')
 assert.match(detail, /modal-viewport-safe[\s\S]*z-\[1050\][\s\S]*overflow-y-auto/, 'the product detail overlay must sit above fixed app bars and remain scrollable')
 assert.match(detail, /modal-panel-safe flex w-full flex-col/, 'the product detail panel must remain within the usable viewport and safe areas')
@@ -117,6 +118,11 @@ assert.match(detail, /break-words font-bold text-gray-900 dark:text-white"[^>]*>
 assert.match(detail, /whitespace-nowrap font-mono"[^>]*>\{p\.barcode\}/, 'product detail barcodes must remain on one line without truncation')
 assert.match(inventoryDetail, /break-words font-bold text-gray-900 dark:text-white"[^>]*>\{p\.name\}/, 'inventory product-detail titles must wrap in full')
 assert.match(inventoryDetail, /shrink-0 whitespace-nowrap font-mono text-xs text-gray-400"[^>]*>&middot; \{p\.barcode\}/, 'inventory product-detail barcodes must remain on one line')
+assert.match(detail, /<Row label=\{T\('branch', 'Branch'\)\}>[\s\S]*scroll-x-clean flex min-w-0 flex-nowrap/, 'product detail must keep Branch and its values on one row')
+assert.match(detail, /data-detail-price-row="cost-wholesale"[\s\S]*PriceCell label=\{T\('label_cost'[\s\S]*PriceCell label=\{T\('wholesale_price'/, 'Cost and Wholesale must share one detail row')
+assert.match(detail, /data-detail-price-row="selling-margin"[\s\S]*PriceCell label=\{T\('label_selling_price'[\s\S]*PriceCell label=\{T\('label_margin'/, 'Selling and Margin must share one detail row')
+assert.match(detail, /text-sm font-medium tabular-nums/, 'peer product-detail numeric values must share typography')
+assert.match(inventoryDetail, /data-detail-price-row="cost-wholesale"[\s\S]*data-detail-price-row="selling-margin"/, 'inventory detail must mirror the paired pricing rows')
 // S4-20: the primary action belongs at the END of the panel, never beside the
 // ✕. These lines used to pin the exact opposite -- a phone-only Save copied
 // into each fixed header -- and they were not wrong at the time: the reason
