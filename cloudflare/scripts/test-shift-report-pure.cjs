@@ -180,7 +180,7 @@ const ORDER = [
   'Sales', 'Profit', 'Expenses', 'Delivery fee', 'Not Paid',
   'Invoices',
   'Opening cash', 'Closing cash',
-  'Additional cash', 'Delivery cost', 'Other expenses', 'Expected cash', 'Difference',
+  'Additional cash', 'Actual delivery cost', 'Other expenses', 'Expected cash', 'Difference',
 ]
 let cursor = -1
 for (const english of ORDER) {
@@ -211,7 +211,7 @@ assert.equal(valueOf('ID'), 'S-20260904-0815')
 assert.equal(valueOf('Sales'), '$210.00')
 assert.equal(valueOf('Profit'), '$93.00')
 assert.equal(valueOf('Delivery fee'), '$6.00')
-assert.equal(valueOf('Delivery cost'), '$3.50')
+assert.equal(valueOf('Actual delivery cost'), '$3.50')
 assert.equal(valueOf('Other expenses'), '$4.00')
 assert.equal(valueOf('Invoices'), '12')
 
@@ -266,7 +266,7 @@ console.log('PASS readout: registered opening and closing cash, no alarm wording
 const noCost = telegram.formatShiftReport('Shop', CLOSED, {
   ...FIGURES, deliveryCostUsd: 0, deliveryCostRecorded: 0,
 }, NOW)
-assert.ok(!noCost.includes('Delivery cost'), 'a shift with no recorded courier cost must not print a $0.00 cost')
+assert.ok(!noCost.includes('Actual delivery cost'), 'a shift with no recorded courier cost must not print a $0.00 cost')
 const noCostLines = noCost.split('\n')
 assert.ok(noCostLines.some((line) => line.startsWith(`Delivery fee${SEP}`) && line.endsWith(': $6.00')), 'the charged fee is still reported')
 assert.ok(noCostLines.find((line) => line.startsWith(`Expenses${SEP}`)).endsWith(': $4.00'),
@@ -473,7 +473,7 @@ assert.ok(!/NaN|undefined|null/.test(empty), `an empty shift produced a broken v
 // while every optional line is gone.
 assert.ok(emptyLines.find((line) => line.startsWith(`Sales${SEP}`)).endsWith(': $0.00'))
 assert.ok(emptyLines.find((line) => line.startsWith(`Profit${SEP}`)).endsWith(': $0.00'))
-for (const dropped of ['Expenses', 'Delivery fee', 'Not Paid', 'Cancelled', 'Edited', 'Delivery cost', 'Other expenses', 'Refunds']) {
+for (const dropped of ['Expenses', 'Delivery fee', 'Not Paid', 'Cancelled', 'Edited', 'Actual delivery cost', 'Other expenses', 'Refunds']) {
   assert.ok(!emptyLines.some((line) => line.startsWith(`${dropped}${SEP}`)), `a quiet shift still printed a zero "${dropped}" line`)
 }
 // The float is still in the drawer and nothing was taken out of it.
@@ -677,7 +677,7 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
   assert.equal(mappedValue('Other expenses'), '$4.00', 'the expense total comes from the grouped query')
   assert.equal(mappedValue('Not Paid'), '$18.00', 'credit must read pending_revenue_usd, not the refund')
   assert.equal(mappedValue('Delivery fee'), '$6.00', 'the customer-paid delivery fee')
-  assert.equal(mappedValue('Delivery cost'), '$3.50', 'the courier money actually paid out')
+  assert.equal(mappedValue('Actual delivery cost'), '$3.50', 'the courier money actually paid out')
   // 4.00 other + 3.50 courier, the two lines under it.
   assert.equal(mappedValue('Expenses'), '$7.50', 'the header expense total is its own two lines')
   assert.equal(mappedValue('Invoices'), '12')

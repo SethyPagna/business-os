@@ -726,7 +726,12 @@ export function allocateAcrossLots(lots: FifoLotAvailability[], quantity: number
     if (remaining <= 0) break
     const take = Math.min(lot.available, remaining)
     if (take <= 0) continue
-    takes.push({ batchId: lot.batchId, lotCode: lot.lotCode, receivedAt: lot.receivedAt, expiryDate: lot.expiryDate, quantity: take })
+    const allocation: FifoLotTake = { batchId: lot.batchId, lotCode: lot.lotCode, expiryDate: lot.expiryDate, quantity: take }
+    // Keep optional metadata absent when the caller supplied no received-date
+    // field. This preserves the pure allocator's minimal shape while real DB
+    // rows still carry their nullable receivedAt value for audit/returns.
+    if (lot.receivedAt !== undefined) allocation.receivedAt = lot.receivedAt
+    takes.push(allocation)
     remaining -= take
   }
   return { takes, uncovered: remaining }

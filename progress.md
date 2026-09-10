@@ -12129,3 +12129,30 @@ Evidence artifact: `output/historical-evidence-followup-20260910.json`. These ar
 - The first response was uncertain after the backup phase. A fresh app preview showed the membership empty; an exact same-request replay then returned **already applied** and confirmed the single receipt/audit with no second mutation. This is now the recorded production result.
 - Historical sales **16917** and **16827** remain evidence-only zero-line records outside the fixed recovery allowlist. Broader customer/supplier duplicate candidates, missing drivers, unlinked fees, and other zero-line history still require exact evidence and are not silently changed.
 - Verification: focused membership repair **4/4**, general-customer route **7/7**, general-customer pure **8/8**, frontend utility chain **347/347**, frontend typecheck, i18n verification (**5,696 keys / 587 files**), production build, Worker typecheck, and `git diff --check` all passed. Authenticated UI confirmed the empty membership state, preserved link counts, and exact replay message.
+
+## Entity links and destination focus — September 10, 2026
+
+Fix-scoped link commit **047c5192** is prepared for this release; the
+independent compatibility correction is committed immediately after it.
+
+- Added one guarded `EntityLink` primitive for real same-tab anchors with
+  canonical admin `href`s. Normal clicks use AppContext navigation (so page
+  permissions and unsaved-work guards still apply); modified/middle clicks
+  retain browser link behavior for copy/open-in-new-tab workflows.
+- Wired links across Sales and Products surfaces: customer names/phones,
+  delivery contacts, branches, payment methods, product names/barcodes,
+  suppliers, units, brands, and categories. Product and Contact hubs consume
+  a one-shot session focus payload so a link opens the correct tab and exact
+  search/filter instead of an unrelated default list. Sale item reads now
+  include unit and supplier fields needed by those links.
+- Corrected the FIFO allocator's optional `receivedAt` shape (undefined
+  metadata is omitted; real nullable database values remain preserved) and
+  aligned the pure shift-report contract with the canonical “Actual delivery
+  cost / ថ្លៃដឹកដើម” label. These are compatibility-safe fixes with no schema,
+  migration, secret, or production-data mutation.
+- Verification: full frontend utility chain **348/348**, all **326** backend
+  pure suites, focused entity-link/product responsive/driver/record tests,
+  frontend and Worker typechecks, i18n verification (**5,704 keys / 589
+  files**), Vite production build, and `git diff --check` pass. Authenticated
+  production UI smoke remains limited to the existing Cloudflare challenge;
+  physical iOS/PWA hardware validation is unavailable.
