@@ -63,6 +63,7 @@ assert.match(transport, /fees:create:\$\{pending\.actor_id\}:\$\{pending\.client
 assert.doesNotMatch(transport, /status >= 400 && status < 500/, '409 and other rejected retries must not erase an unresolved request')
 assert.match(transport, /isAuthoritativeFeeCreateResponse\(result, pending\)/, 'response evidence is checked inside route() before it can report success')
 assert.match(transport, /clearPendingFeeCreate\([\s\S]*dispatchResolvedSyncError\(pending\.sync_problem\)/, 'only confirmed success clears pending state and resolves its exact warning')
+assert.match(transport, /export function discardPendingFeeCreate[\s\S]*pending\.client_request_id !== requestId[\s\S]*removeItem[\s\S]*dispatchResolvedSyncError\(pending\.sync_problem\)/, 'explicit discard removes and resolves only one exact pending envelope')
 
 const payload: FeePayload = {
   fee_type: 'expense',
@@ -222,8 +223,27 @@ try {
   assert.ok(getPendingFeeCreate(11), 'a truly unknown malformed response remains retryable after another request succeeds')
   assert.ok(getPendingFeeCreate(12), 'another actor request remains isolated after successful replay')
 
+  const discardedUnknown = getPendingFeeCreate(11)
+  assert.ok(discardedUnknown?.sync_problem, 'the explicitly discarded unknown request carries its matching warning identity')
+  assert.equal(discardPendingFeeCreate(11, 'wrong-request-id'), false, 'mismatched discard is a no-op')
+  assert.deepEqual(getPendingFeeCreate(11), discardedUnknown, 'mismatched discard cannot remove the exact pending request')
+  assert.equal(discardPendingFeeCreate(12, discardedUnknown.client_request_id), false, 'another actor cannot discard this request identity')
+  assert.equal(getPendingFeeCreate(12)?.client_request_id, 'wrong-proof-request', 'cross-actor discard cannot remove the other actor envelope')
+  assert.equal(resolvedSyncErrors.length, 1, 'mismatched discard cannot resolve any warning')
+  assert.equal(discardPendingFeeCreate(11, discardedUnknown.client_request_id), true, 'exact explicit discard removes the pending request')
+  assert.equal(getPendingFeeCreate(11), null)
+  assert.equal(resolvedSyncErrors.length, 2, 'exact explicit discard resolves one matching warning')
+  assert.deepEqual(resolvedSyncErrors[1], {
+    errorId: discardedUnknown.sync_problem.errorId,
+    channel: discardedUnknown.sync_problem.channel,
+    code: discardedUnknown.sync_problem.code,
+  })
+  assert.equal(shouldClearResolvedSyncError(unrelatedWarning, resolvedSyncErrors[1]), false, 'discard resolution leaves another actor warning untouched')
+  assert.equal(getPendingFeeCreate(12)?.client_request_id, 'wrong-proof-request', 'discard resolution leaves another actor request untouched')
+
   discardPendingFeeCreate(9, 'revoked-request')
   assert.equal(getPendingFeeCreate(9), null, 'explicit discard clears only the matching actor request')
+  assert.equal(resolvedSyncErrors.length, 2, 'discard without a stored unknown warning emits no unrelated resolution')
   assert.ok(getPendingFeeCreate(10), 'discarding another actor cannot clear a stale request')
 } finally {
   globalThis.fetch = originalFetch
