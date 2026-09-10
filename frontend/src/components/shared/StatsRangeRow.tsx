@@ -31,7 +31,7 @@ export default function StatsRangeRow({
         {actions ? <div className="ml-auto flex shrink-0 flex-nowrap items-center gap-1">{actions}</div> : null}
       </div>
       {showPresets ? (
-        <div className="mt-1 flex min-w-0 flex-nowrap gap-1 overflow-x-auto overscroll-x-contain pb-1" data-date-presets>
+        <div className="stats-date-presets mt-1 flex min-w-0 flex-nowrap gap-1 overflow-x-auto overscroll-x-contain pb-1" data-date-presets>
           {STATS_PRESETS.map(({ id, key, fallback }) => {
             const label = t(key)
             return (

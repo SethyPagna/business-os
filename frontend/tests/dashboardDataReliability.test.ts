@@ -8,6 +8,8 @@ const products = fs.readFileSync(new URL('../src/components/products/Products.ts
 const methods = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
 const transport = fs.readFileSync(new URL('../src/api/dashboardTransport.ts', import.meta.url), 'utf8')
 const compat = fs.readFileSync(new URL('../../cloudflare/src/routes/compat.ts', import.meta.url), 'utf8')
+const statsRangeRow = fs.readFileSync(new URL('../src/components/shared/StatsRangeRow.tsx', import.meta.url), 'utf8')
+const toolbarStyles = fs.readFileSync(new URL('../src/components/shared/toolbarButtonStyles.ts', import.meta.url), 'utf8')
 
 assert.doesNotMatch(methods, /getDashboard[\s\S]{0,120}\(\)\s*=>\s*\(\{\}\)/, 'dashboard reads should not fall back to an empty object that looks like real data')
 assert.doesNotMatch(methods, /getAnalytics[\s\S]{0,200}\(\)\s*=>\s*\(\{\}\)/, 'analytics reads should not fall back to an empty object that looks like real data')
@@ -37,9 +39,10 @@ assert.match(dashboard, /DASHBOARD_STOCK_ALERT_SCROLL_THRESHOLD_PX/, 'dashboard 
 assert.match(dashboard, /getDashboardStockAlerts\(\{ state, page, pageSize: DASHBOARD_STOCK_ALERT_PAGE_SIZE \}\)/, 'dashboard-only users must load stock alert pages through the dashboard-authorized endpoint')
 assert.match(dashboard, /lowStockListRef\.current\.scrollTop = 0[\s\S]{0,120}outOfStockListRef\.current\.scrollTop = 0/, 'leaving an alert page must reset both scroll positions')
 assert.match(dashboard, /setLowStockRows\(\[\]\)[\s\S]{0,120}setOutOfStockRows\(\[\]\)/, 'leaving the dashboard must clear both alert lists')
-assert.match(dashboard, /triggerClassName="flex w-full min-w-0 items-center justify-center gap-1\.5 rounded-lg px-2 py-1 !min-h-9 sm:px-3"/, 'dashboard date picker should stay compact on mobile')
-assert.match(dashboard, /min-h-7[^"]*px-2\.5 py-1 text-\[11px\] font-semibold/, 'dashboard export control should stay compact on mobile')
-assert.doesNotMatch(dashboard, /RANGE_PRESETS/, 'dashboard should not restore the removed preset-chip controls')
+assert.match(statsRangeRow, /triggerClassName="flex h-10 !min-h-10 min-w-0 w-full/, 'the shared dashboard date picker should use the canonical toolbar height')
+assert.match(dashboard, /className=\{toolbarIconButtonClassName\}/, 'dashboard export should use the canonical icon action style')
+assert.match(toolbarStyles, /toolbarIconButtonClassName = 'inline-flex h-10 min-h-10 w-10/, 'the shared export action should use the canonical toolbar dimensions')
+assert.match(statsRangeRow, /data-date-presets/, 'dashboard presets should be owned by the shared Stats row')
 // The dashboard's default window is TODAY -- the business day, exactly like
 // the list pages (user, 2026-09-03) -- and it governs the FLOW cards only.
 assert.doesNotMatch(dashboard, /offsetDate\(-6\)/, 'dashboard must not default to a rolling seven-day window')

@@ -665,8 +665,17 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
     height: 100%;
     -webkit-overflow-scrolling: touch;
     overscroll-behavior-y: contain;
-    touch-action: pan-y;
+    /* Permit opt-in horizontal scrollers such as the date-preset rail to
+       negotiate pan-x. The page itself remains overflow-x-hidden. */
+    touch-action: pan-x pan-y;
     padding-bottom: 1.5rem;
+  }
+
+  .stats-date-presets {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: thin;
+    touch-action: pan-x;
   }
   @media (max-width: 767px) {
     .page-scroll {
