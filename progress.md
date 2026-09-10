@@ -12338,3 +12338,22 @@ and `directMutationRequest.test.ts` passed; frontend typecheck and Vite build
 passed; `git diff --check` passed. No production data, migration, or secret
 was changed. Authenticated browser smoke remains blocked by Cloudflare's bot
 challenge; Wrangler upload/version output is the deployment provenance.
+
+## Pending-write duplicate toast follow-up deployed — September 10, 2026
+
+Fix-scoped commit **23916844** is live at 100% in Worker version
+**f308b29a-c528-450e-be41-2c49e568ee4c**. The Sales page no longer emits a
+second red error toast when an unresolved single-sale status request is already
+shown in the inline retry card; the write remains frozen until the operator
+explicitly retries the exact body or discards it. Discard now also clears the
+matching global unknown-outcome banner, so a resolved retry cannot leave a
+stale alert over the settlement modal. Frontend build hash is **7ee2e2fbfbc2cf36**
+(built **2026-09-10T16:38:16.553Z UTC**). The upload completed with the configured
+custom domains, routes, bindings, queues, D1, R2, Images, and scheduled
+trigger. No migration, secret sync, or production data mutation ran.
+
+Verification: the full frontend utility chain **348/348** (including typecheck,
+source syntax, and public-runtime checks), focused `resolvedSyncError.test.ts`,
+`directMutationRequest.test.ts`, and `git diff --check` passed. Authenticated
+browser smoke remains blocked by Cloudflare's bot challenge; Wrangler upload
+and version output are the deployment provenance.
