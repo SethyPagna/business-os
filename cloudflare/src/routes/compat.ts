@@ -5,7 +5,7 @@ import type { Env } from '../index'
 import { getSystemJob, listCloudflareBackups, listSystemJobs, storeSystemJob } from '../lib/backup'
 import { buildDriveOauthStartUrl, completeDriveOauth, consumeDriveOauthState, disconnectDrive, driveSyncStatus, updateDrivePreferences } from '../lib/googleDrive'
 import { enqueueDriveRestoreStageJob, enqueueDriveSyncJob } from '../lib/driveSyncQueue'
-import { hasPermission, hasAnyPermission, isAdminControlUser, getPermissionTier } from '../lib/permissions'
+import { hasPermission, hasAnyPermission, isAdminControlUser, getActionTier } from '../lib/permissions'
 import { audit, buildAuditLogRetentionDeleteSql } from '../lib/audit'
 import { buildAuditLogFilters } from '../lib/auditLogQuery'
 import { putObject, getObject, deleteObject } from '../lib/r2'
@@ -575,7 +575,7 @@ app.get('/system/audit-logs', requireAuth, async (c) => {
   // (or an admin-control user) sees everyone's and may filter by user. A 'view'
   // value fails the old strict denyUnless('audit_log'), so gate on the tier.
   const user = c.get('user')
-  const tier = getPermissionTier(user, 'audit_log')
+  const tier = getActionTier(user, 'audit_log', 'view')
   if (tier === 'none') return c.json({ error: 'You do not have permission to perform this action' }, 403)
   const ownOnly = tier === 'view'
   const page = Math.max(1, Number.parseInt(c.req.query('page') || '1', 10) || 1)
@@ -1126,7 +1126,7 @@ app.get('/transfers', async (c) => {
   // Transfer history is a read surface shared by Inventory and Branches.
   // Review-tier users may read both parent pages, so requiring a strict Full
   // grant here made the history panel fail with 403 after the page opened.
-  if (getPermissionTier(user, 'inventory') === 'none' && getPermissionTier(user, 'branches') === 'none') {
+  if (getActionTier(user, 'inventory', 'view') === 'none' && getActionTier(user, 'branches', 'view') === 'none') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
 

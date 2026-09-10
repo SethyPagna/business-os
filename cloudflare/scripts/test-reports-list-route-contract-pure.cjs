@@ -57,8 +57,12 @@ const analytics=load('lib/salesAnalytics.ts',{'./db':{getDb:()=>db},'./businessD
 const app=load('routes/reports.ts',{
  '../lib/db':{getDb:()=>db},'../lib/businessDateWindow':dates,'../lib/salesAnalytics':analytics,
  '../lib/saleTotals':load('lib/saleTotals.ts'),
- '../lib/auth':{requireAuth:async(c,next)=>{c.set('user',{scope:c.req.header('scope')||'all'});await next()}},
- '../lib/permissions':{getPermissionTier:(u,area)=>u.scope==='all'||u.scope===area?'read':'none',isAdminControlUser:u=>u.scope==='all'},
+ '../lib/auth':{requireAuth:async(c,next)=>{
+   const scope=c.req.header('scope')||'all'
+   c.set('user',{username:'fixture',role_code:'fixture',role_permissions:JSON.stringify({[scope]:true}),permissions:'{}'})
+   await next()
+ }},
+ '../lib/permissions':load('lib/permissions.ts'),
 }).default
 const base='http://local/business-summary/'
 async function get(kind,query='',scope='all'){const res=await app.request(base+kind+'?startDate=2026-09-04&endDate=2026-09-04&branchId=2&'+query,{headers:{scope}},{});return {status:res.status,body:await res.json()}}

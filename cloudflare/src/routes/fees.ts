@@ -47,6 +47,10 @@ app.use('*', async (c, next) => {
   // directly under that tier (see the DELETE handler below for the one
   // exception). Only 'none' 403s here; 'full' and 'review' both pass.
   if (getPermissionTier(user, 'fees') === 'none') return c.json({ error: 'Forbidden' }, 403)
+  // A hidden read action does not revoke independently allowed writes.
+  if ((c.req.method === 'GET' || c.req.method === 'HEAD') && getActionTier(user, 'fees', 'view') === 'none') {
+    return c.json({ error: 'Forbidden' }, 403)
+  }
   await next()
 })
 
