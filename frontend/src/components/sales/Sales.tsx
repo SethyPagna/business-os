@@ -77,6 +77,7 @@ import {
   type DirectMutationHistoryContext,
   type PendingDirectMutation,
 } from '../../utils/directMutationRequest.ts'
+import { dispatchResolvedSyncError } from '../../utils/syncProblemLifecycle.ts'
 
 const SALES_USER_OPTIONS_TIMEOUT_MS = 8000
 // A status settlement writes the sale, every paired KHR line snapshot, the
@@ -91,7 +92,106 @@ const SALES_BULK_LINKED_SEARCH_DEBOUNCE_MS = 180
 // S4-24b: adding lines deducts stock and rewrites the sale's totals in one
 // atomic batch -- a longer ceiling than a status flip, but still bounded so a
 // stalled request cannot leave the cashier staring at a spinner.
-const SALES_ADD_ITEMS_MUTATION_TIMEOUT_MS = 20000
+const SALES_ADD_ITEMS_MUTATION_TIMEOUT_MS = 45000
+
+function parseSaleItemsForReconciliation(raw: SaleRecord['items']): SaleItemRecord[] {
+  if (Array.isArray(raw)) return raw
+  if (typeof raw !== 'string' || !raw.trim()) return []
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed.filter((item): item is SaleItemRecord => !!item && typeof item === 'object') : []
+  } catch {
+    return []
+  }
+}
+
+function numberClose(left: unknown, right: unknown, epsilon = 0.005): boolean {
+  const a = Number(left)
+  const b = Number(right)
+  return Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) <= epsilon
+}
+
+function paymentDetailsMatch(row: SaleRecord, requested: unknown): boolean {
+  if (!Array.isArray(requested)) return true
+  let actual: unknown = row.payment_details
+  if (typeof actual === 'string') {
+    try { actual = JSON.parse(actual) } catch { return false }
+  }
+  if (!Array.isArray(actual) || actual.length !== requested.length) return false
+  return requested.every((entry, index) => {
+    const expected = entry && typeof entry === 'object' ? entry as Record<string, unknown> : {}
+    const received = actual[index] && typeof actual[index] === 'object' ? actual[index] as Record<string, unknown> : {}
+    return String(received.method || '').trim() === String(expected.method || '').trim()
+      && numberClose(received.amount_usd, expected.amount_usd, 0.01)
+      && numberClose(received.amount_khr, expected.amount_khr, 1)
+  })
+}
+
+function saleStatusRequestApplied(row: SaleRecord | null, request: PreparedSaleStatusRequest): boolean {
+  if (!row || String(row.sale_status || '') !== String(request.sale_status || '')) return false
+  if (!paymentDetailsMatch(row, (request as Record<string, unknown>).payment_details)) return false
+  const requestedDetails = (request as Record<string, unknown>).payment_details
+  if (Array.isArray(requestedDetails)) {
+    const totalUsd = requestedDetails.reduce((sum, entry) => sum + Number((entry as Record<string, unknown>)?.amount_usd || 0), 0)
+    const totalKhr = requestedDetails.reduce((sum, entry) => sum + Number((entry as Record<string, unknown>)?.amount_khr || 0), 0)
+    if (!numberClose(row.amount_paid_usd, totalUsd, 0.01) || !numberClose(row.amount_paid_khr, totalKhr, 1)) return false
+  }
+  return true
+}
+
+function saleAmendmentApplied(row: SaleRecord | null, previous: SaleRecord | null, request: SaleAmendmentRequest): boolean {
+  if (!row) return false
+  const currentItems = parseSaleItemsForReconciliation(row.items)
+  const beforeItems = parseSaleItemsForReconciliation(previous?.items)
+  const lineId = Number(request.sale_item_id || 0)
+  const currentLine = currentItems.find((item) => Number(item.id) === lineId)
+  const beforeLine = beforeItems.find((item) => Number(item.id) === lineId)
+  switch (request.kind) {
+    case 'line_updated':
+      return !!currentLine
+        && numberClose(currentLine.quantity, request.quantity, 0.0001)
+        && numberClose(currentLine.applied_price_usd, request.applied_price_usd, 0.005)
+    case 'line_quantity_increased':
+      return !!currentLine && !!beforeLine && numberClose(Number(currentLine.quantity) - Number(beforeLine.quantity), request.quantity, 0.0001)
+    case 'line_quantity_decreased':
+      return !!currentLine && !!beforeLine && numberClose(Number(beforeLine.quantity) - Number(currentLine.quantity), request.quantity, 0.0001)
+    case 'line_removed':
+      return !currentLine
+    case 'line_replaced': {
+      const replacement = request.replacement
+      return !currentLine && !!replacement && currentItems.some((item) => Number(item.product_id) === Number(replacement.product_id)
+        && numberClose(item.quantity, replacement.quantity, 0.0001)
+        && (replacement.applied_price_usd === undefined || numberClose(item.applied_price_usd, replacement.applied_price_usd, 0.005)))
+    }
+    case 'delivery_fee_changed':
+      return numberClose(row.delivery_fee_usd, request.delivery_fee_usd, 0.005)
+    case 'delivery_actual_cost_changed':
+      return request.delivery_actual_cost_usd == null
+        ? row.delivery_actual_cost_usd == null || String(row.delivery_actual_cost_usd).trim() === ''
+        : numberClose(row.delivery_actual_cost_usd, request.delivery_actual_cost_usd, 0.005)
+    case 'delivery_added':
+      return Number(row.is_delivery || 0) === 1
+        && Number(row.delivery_contact_id || 0) === Number(request.delivery_contact_id || 0)
+        && numberClose(row.delivery_fee_usd, request.delivery_fee_usd, 0.005)
+    default:
+      return false
+  }
+}
+
+function saleAddItemsApplied(row: SaleRecord | null, previous: SaleRecord | null, items: SaleItemAddition[]): boolean {
+  if (!row || !previous || !items.length) return false
+  const quantities = (sale: SaleRecord) => parseSaleItemsForReconciliation(sale.items).reduce((map, item) => {
+    const key = String(item.product_id || item.product_name || '')
+    map.set(key, (map.get(key) || 0) + Number(item.quantity || 0))
+    return map
+  }, new Map<string, number>())
+  const before = quantities(previous)
+  const current = quantities(row)
+  return items.every((item) => {
+    const key = String(item.product_id)
+    return (current.get(key) || 0) >= (before.get(key) || 0) + Number(item.quantity || 0) - 0.0001
+  })
+}
 
 // S4-2: which statuses hold units OUT of stock -- the same set
 // lib/saleTransitions.ts's heldQuantity() uses (STOCK_DEDUCTED_STATUSES
@@ -917,6 +1017,42 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     )
   ), [])
 
+  const readAuthoritativeSale = useCallback(async (saleId: number): Promise<SaleRecord | null> => {
+    try {
+      const payload = await fetchSales({ id: String(saleId), limit: 2, _detail: String(Date.now()) }, { timeoutMs: 8000 })
+      return normalizeSaleRows(payload).find((entry) => Number(entry?.id || 0) === saleId) || null
+    } catch {
+      return null
+    }
+  }, [])
+
+  const resolveUnknownSaleWrite = useCallback(async (
+    saleId: number,
+    request: PreparedSaleStatusRequest | SaleAmendmentRequest,
+    previousSale: SaleRecord | null,
+    kind: 'status' | 'amendment',
+    error: unknown,
+  ): Promise<boolean> => {
+    const current = await readAuthoritativeSale(saleId)
+    const applied = kind === 'status'
+      ? saleStatusRequestApplied(current, request as PreparedSaleStatusRequest)
+      : saleAmendmentApplied(current, previousSale, request as SaleAmendmentRequest)
+    if (!applied) return false
+    const unknown = error as { syncErrorId?: string; syncErrorChannel?: string; code?: string }
+    dispatchResolvedSyncError({
+      errorId: unknown.syncErrorId,
+      channel: unknown.syncErrorChannel || (kind === 'status' ? 'sales:updateStatus' : 'sales:amendment'),
+      code: unknown.code || 'write_outcome_unknown',
+    })
+    await loadSales(true)
+    void loadSalesStats()
+    actionHistory.refreshServerItems()
+    window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
+    window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'products' } }))
+    window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
+    return true
+  }, [actionHistory, loadSales, loadSalesStats, readAuthoritativeSale])
+
   // `extra` carries the full reviewed tender snapshot when SaleDetailModal
   // settles an awaiting-payment sale. That write returns a durable server
   // history row; ordinary status changes keep the local reversible entry.
@@ -1001,6 +1137,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     // as a plain status change and silently dropped its tender rows.
     const isSettlementRequest = Array.isArray((extra as { payment_details?: unknown } | null)?.payment_details)
       || Array.isArray((preparedRetry as { payment_details?: unknown } | null)?.payment_details)
+    let attemptedRequest: PreparedSaleStatusRequest | null = preparedRetry || null
     try {
       const preparedRequest = preparedRetry || freezeDirectMutationBody(await getSalesApi().prepareSaleStatusRequest(
         saleId,
@@ -1013,6 +1150,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
             : {}),
         },
       ))
+      attemptedRequest = preparedRequest
       // Persist the exact frozen body before the network call for BOTH plain
       // status changes and payment settlements. If the edge times out after
       // the batch commits, the Sales page can tell the operator to check the
@@ -1073,6 +1211,14 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         // network/timeout outcome must keep the exact request available for
         // an explicit check-and-retry. The global banner carries the same
         // localized wording, while the modal keeps the actionable detail.
+        if (directMutationOutcomeIsUnknown(error) && attemptedRequest) {
+          const applied = await resolveUnknownSaleWrite(numericId, attemptedRequest, previousSale || null, 'status', error)
+          if (applied) {
+            savePendingDirectStatus(saleId, null)
+            notify(`${t('status_updated') || 'Status updated'}: ${getStatusLabel(newStatus, t)}`)
+            return { statusUpdatedAt: String((await readAuthoritativeSale(numericId))?.updated_at || '') }
+          }
+        }
         if (!directMutationOutcomeIsUnknown(error) && (error as { code?: unknown } | null)?.code !== 'pending_request_persistence_failed') {
           savePendingDirectStatus(saleId, null)
         }
@@ -1083,6 +1229,14 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
             ? translateOr('customer_state_conflict', 'The selected customer changed before the sale was saved. Review the customer and try again.', 'អតិថិជនដែលបានជ្រើសបានផ្លាស់ប្តូរ មុនពេលរក្សាទុកការលក់។ សូមពិនិត្យអតិថិជន ហើយសាកល្បងម្ដងទៀត។')
             : getErrorMessage(error, String(error || translateOr('sale_settlement_failed', 'Unable to record this payment. Review the sale and try again.', 'មិនអាចកត់ត្រាការទូទាត់នេះបានទេ។ សូមពិនិត្យការលក់ ហើយសាកល្បងម្ដងទៀត។')))
         return { settlementError: detail }
+      }
+      if (directMutationOutcomeIsUnknown(error) && attemptedRequest) {
+        const applied = await resolveUnknownSaleWrite(numericId, attemptedRequest, previousSale || null, 'status', error)
+        if (applied) {
+          savePendingDirectStatus(saleId, null)
+          notify(`${t('status_updated') || 'Status updated'}: ${getStatusLabel(newStatus, t)}`)
+          return { statusUpdatedAt: String((await readAuthoritativeSale(numericId))?.updated_at || '') }
+        }
       }
       if (!directMutationOutcomeIsUnknown(error) && (error as { code?: unknown } | null)?.code !== 'pending_request_persistence_failed') savePendingDirectStatus(saleId, null)
       if (isWriteConflict(error)) {
@@ -1145,6 +1299,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     }
     const numericId = Number(saleId)
     if (!Number.isFinite(numericId) || !items.length) return false
+    const previousSale = salesRef.current.find((entry) => Number(entry?.id || 0) === numericId) || null
     try {
       const result = await withLoaderTimeout(
         () => getSalesApi().addSaleItems(saleId, items, '', review),
@@ -1172,6 +1327,24 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         const exchangeRateChanged = current && typeof current === 'object' ? Number((current as { exchange_rate?: unknown }).exchange_rate) : NaN
         if (Number.isFinite(exchangeRateChanged) && exchangeRateChanged > 0) return { exchangeRateChanged }
       }
+      if (directMutationOutcomeIsUnknown(error)) {
+        const current = await readAuthoritativeSale(numericId)
+        if (saleAddItemsApplied(current, previousSale, items)) {
+          dispatchResolvedSyncError({
+            errorId: (error as { syncErrorId?: string }).syncErrorId,
+            channel: (error as { syncErrorChannel?: string }).syncErrorChannel || 'sales:addItems',
+            code: (error as { code?: string }).code || 'write_outcome_unknown',
+          })
+          await loadSales(true)
+          void loadSalesStats()
+          actionHistory.refreshServerItems()
+          window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
+          window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'products' } }))
+          window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
+          notify(translateOr('sale_items_added', 'Items were added to the sale.'))
+          return true
+        }
+      }
       if (isWriteConflict(error)) {
         await loadSales()
         return false
@@ -1192,6 +1365,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     }
     const numericId = Number(saleId)
     if (!Number.isFinite(numericId)) return false
+    const previousSale = salesRef.current.find((entry) => Number(entry?.id || 0) === numericId) || null
     try {
       const result = await withLoaderTimeout(
         () => getSalesApi().amendSale(saleId, request),
@@ -1221,6 +1395,13 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         const current = (error as { current?: unknown }).current
         const exchangeRateChanged = current && typeof current === 'object' ? Number((current as { exchange_rate?: unknown }).exchange_rate) : NaN
         if (Number.isFinite(exchangeRateChanged) && exchangeRateChanged > 0) return { exchangeRateChanged }
+      }
+      if (directMutationOutcomeIsUnknown(error)) {
+        const applied = await resolveUnknownSaleWrite(numericId, request, previousSale, 'amendment', error)
+        if (applied) {
+          notify(translateOr('sale_amended', 'Sale updated.'))
+          return true
+        }
       }
       if (isWriteConflict(error)) {
         await loadSales()
@@ -1379,6 +1560,21 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     () => normalizeFiniteIdsFrom(visibleSales, (sale) => sale.id),
     [visibleSales],
   )
+
+  const openSaleDetail = useCallback((sale: SaleRecord): void => {
+    setDetailSale(sale)
+    const numericId = Number(sale.id)
+    if (!Number.isFinite(numericId)) return
+    // The list payload normally includes its grouped sale_items. Re-read the
+    // selected row by exact id as well so a cached/legacy list row can never
+    // open a detail modal that shows a price but an empty item list. The fresh
+    // row is adopted only while this same sale remains open.
+    void readAuthoritativeSale(numericId).then((fresh) => {
+      if (!fresh) return
+      setDetailSale((current) => current && Number(current.id) === numericId ? fresh : current)
+      setSelectedSale((current) => current && Number(current.id) === numericId ? fresh : current)
+    })
+  }, [readAuthoritativeSale])
 
   useEffect(() => {
     const validIds = new Set<number>(filteredIds)
@@ -2410,7 +2606,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
         selectedIds={selectedIds}
         selectionModeActive={selectionModeActive}
         getSaleLongPressState={getSaleLongPressState}
-        setDetailSale={(sale) => setDetailSale(sale as SaleRecord)}
+        setDetailSale={(sale) => openSaleDetail(sale as SaleRecord)}
         setSelectedSale={(sale) => setSelectedSale(sale as SaleRecord)}
         showSalesActionGroups={showSalesActionGroups}
         t={t}
@@ -2516,12 +2712,12 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
       {recordsSale ? (
         <Suspense fallback={null}>
           <SaleRecordsFloat
-            sale={recordsSale}
-            onClose={() => {
-              const sale = recordsSale
-              setRecordsSale(null)
-              setDetailSale(sale)
-            }}
+              sale={recordsSale}
+              onClose={() => {
+                const sale = recordsSale
+                setRecordsSale(null)
+                openSaleDetail(sale)
+              }}
             t={t}
             fmtUSD={fmtUSD}
             fmtKHR={fmtKHR}
