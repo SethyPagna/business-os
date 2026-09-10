@@ -42,6 +42,8 @@ import {
   minimizeWork,
   reparkDeniedRestore,
   type MinimizedWorkEntry,
+  transferDraftKey,
+  peekPendingRestore,
 } from '../../utils/minimizedWork.ts'
 import { flushPendingWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
 import {
@@ -536,7 +538,25 @@ export default function Branches({ embedded = false, view, showSectionNavigation
   const loadPromiseRef = useRef<Promise<unknown> | null>(null)
   const loadPromiseModeRef = useRef('')
   const saveInFlightRef = useRef(false)
-  const actionHistory = useActionHistory({ limit: 3, notify, enabled: historyReady, user })
+  const actionHistory = useActionHistory({ limit: 3, notify, enabled: historyReady, user, scope: 'branches' })
+  useEffect(() => {
+    const restore = (entry: MinimizedWorkEntry) => {
+      if (!canTransferStock || entry.draftKey !== transferDraftKey('branch_transfer') || String(entry.payload?.actorId) !== String(user?.id)) {
+        reparkDeniedRestore(entry)
+        return
+      }
+      setModal('transfer')
+    }
+    const pending = peekPendingRestore('branch_transfer')
+    if (pending) restore(pending)
+    const listener = (event: Event) => {
+      const detail = (event as CustomEvent).detail
+      if (detail?.kind === 'branch_transfer' && detail.entry) restore(detail.entry)
+    }
+    window.addEventListener(RESTORE_WORK_EVENT, listener)
+    return () => window.removeEventListener(RESTORE_WORK_EVENT, listener)
+  }, [canTransferStock, user?.id])
+  useEffect(() => { if (!isActive || !canTransferStock) setModal((current) => current === 'transfer' ? null : current) }, [isActive, canTransferStock])
 
   /**
    * 3. Data Loading
@@ -1638,6 +1658,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
       {modal === 'transfer' ? (
         <Suspense fallback={null}>
           <LazyTransferModal
+            key={`transfer-${user?.id}`}
             branches={transferBranchOptions}
             onClose={() => setModal(null)}
             onDone={() => {
@@ -1645,6 +1666,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
               load()
               setBranchStocks({})
               setStatsRefresh((value) => value + 1)
+              actionHistory.refreshServerItems()
             }}
             user={user || undefined}
             notify={notify}

@@ -24,6 +24,8 @@ export type MinimizedWorkKind =
   | 'fee_form'
   | 'product_detail'
   | 'return_detail'
+  | 'branch_transfer'
+  | 'inventory_transfer'
 
 export type MinimizedWorkPermission = {
   permissionKey: string
@@ -80,6 +82,49 @@ const FALLBACK_PERMISSION_BY_KIND: Partial<Record<MinimizedWorkKind, MinimizedWo
   fast_stockin: { permissionKey: 'inventory', actionKey: 'adjust' },
   stock_adjust: { permissionKey: 'inventory', actionKey: 'adjust' },
   return_detail: { permissionKey: 'returns', actionKey: 'view' },
+  branch_transfer: { permissionKey: 'branches', actionKey: 'transfer' },
+  inventory_transfer: { permissionKey: 'inventory', actionKey: 'transfer' },
+}
+
+export type TransferDraftKind = 'branch_transfer' | 'inventory_transfer'
+export function transferDraftKey(kind: TransferDraftKind): string { return scopedWorkDraftKey(kind) }
+export function readTransferDraft<T>(kind: TransferDraftKind, actorId: unknown): T | null {
+  const saved = readWorkDraft<{ actorId: string; form: T }>(transferDraftKey(kind))?.data
+  return saved?.actorId === String(actorId ?? '') ? saved.form : null
+}
+export function writeTransferDraft<T>(kind: TransferDraftKind, actorId: unknown, key: string, form: T): boolean {
+  if (!String(actorId ?? '') || key !== transferDraftKey(kind)) return false
+  writeWorkDraft(key, { actorId: String(actorId), form })
+  const saved = readWorkDraft<{ actorId: string; form: T }>(key)?.data
+  return saved?.actorId === String(actorId) && JSON.stringify(saved.form) === JSON.stringify(form)
+}
+export function hasUnresolvedTransfer(kind: TransferDraftKind, actorId: unknown): boolean {
+  try {
+    const prefix = kind === 'inventory_transfer' ? 'inventory:' : ''
+    return sessionStorage.getItem(`${prefix}businessos_pending_transfer_v1:${actorId}`) != null
+  } catch { return true }
+}
+export function discardTransferDraft(kind: TransferDraftKind, actorId: unknown, key: string): boolean {
+  if (key !== transferDraftKey(kind) || hasUnresolvedTransfer(kind, actorId)) return false
+  clearWorkDraft(key)
+  removeMinimizedWork(key)
+  return true
+}
+/** A confirmed write may finish after its actor navigated away. Clear only the captured owner's draft. */
+export function completeTransferDraft(actorId: unknown, key: string): void {
+  const saved = readWorkDraft<{ actorId: string }>(key)?.data
+  if (saved?.actorId !== String(actorId ?? '')) return
+  clearWorkDraft(key)
+  removeMinimizedWork(key)
+}
+export function parkTransferDraft(kind: TransferDraftKind, actorId: unknown, key: string, label: string): void {
+  if (key !== transferDraftKey(kind)) return
+  minimizeWork({ key, kind, draftKey: key, label,
+    pageId: 'branches',
+    anchor: kind === 'branch_transfer' ? 'hub:branches:transfers' : 'hub:branches:products',
+    payload: { actorId: String(actorId) },
+    requiredPermission: FALLBACK_PERMISSION_BY_KIND[kind],
+  })
 }
 
 /** Fast stock-in has one canonical restore host. Older builds parked it on
@@ -172,7 +217,7 @@ let pendingRestoreScope: string | null = null
 export function dispatchRestore(entry: MinimizedWorkEntry): void {
   const storeKey = ensureCurrentScope()
   const normalized = normalizeEntry(entry)
-  if (normalized.kind !== 'fast_stockin' && normalized.kind !== 'stock_adjust') removeMinimizedWork(normalized.key)
+  if (normalized.kind !== 'fast_stockin' && normalized.kind !== 'stock_adjust' && normalized.kind !== 'branch_transfer' && normalized.kind !== 'inventory_transfer') removeMinimizedWork(normalized.key)
   pendingRestore = normalized
   pendingRestoreScope = storeKey
   window.dispatchEvent(new CustomEvent(RESTORE_WORK_EVENT, {
@@ -214,7 +259,7 @@ export function markRestoreHandled(kind: MinimizedWorkKind): void {
     const handled = pendingRestore
     pendingRestore = null
     pendingRestoreScope = null
-    if (kind === 'fast_stockin' || kind === 'stock_adjust') removeMinimizedWork(handled.key)
+    if (kind === 'fast_stockin' || kind === 'stock_adjust' || kind === 'branch_transfer' || kind === 'inventory_transfer') removeMinimizedWork(handled.key)
   }
 }
 
@@ -226,6 +271,7 @@ export function markRestoreHandled(kind: MinimizedWorkKind): void {
  */
 export function reparkDeniedRestore(entry: MinimizedWorkEntry): void {
   ensureCurrentScope()
+  if ((entry.kind === 'branch_transfer' || entry.kind === 'inventory_transfer') && entry.draftKey !== transferDraftKey(entry.kind)) return
   if (pendingRestore?.kind === entry.kind) {
     pendingRestore = null
     pendingRestoreScope = null

@@ -34,9 +34,10 @@ const InventoryStockModals = lazyRetry(() => import('./InventoryStockModals'), '
 const FastStockInModal = lazyRetry(() => import('./FastStockInModal'), 'inventory-fast-stock-in-modal') as any
 // Fast Stock-in can still launch here, but its minimized chip resumes through
 // the canonical Products -> Stock Changes host. This retained Inventory body
-// must not listen for the shared restore event and reopen a hidden modal.
-import { FAST_STOCK_IN_RESTORE_HOST, minimizeWork } from '../../utils/minimizedWork.ts'
+// accepts only its own transfer restore, never the Products stock-in event.
+import { FAST_STOCK_IN_RESTORE_HOST, minimizeWork, transferDraftKey, readTransferDraft, writeTransferDraft, discardTransferDraft, completeTransferDraft, parkTransferDraft, RESTORE_WORK_EVENT, peekPendingRestore, reparkDeniedRestore, type MinimizedWorkEntry } from '../../utils/minimizedWork.ts'
 import { clearWorkDraft, scopedWorkDraftKey, writeWorkDraft } from '../../utils/workDrafts.ts'
+import { registerDirtyWork } from '../../utils/dirtyWork.ts'
 import { STOCK_ADJUST_RESTORE_HOST, stockAdjustDraftKey, type StockAdjustDraft } from '../../utils/stockAdjustDraft.ts'
 const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'inventory-export-options') as any
 const ManageBatchesModal = lazyRetry(() => import('./ManageBatchesModal'), 'inventory-manage-batches-modal') as any
@@ -73,7 +74,6 @@ import { pruneSelectionToVisibleIds } from '../../utils/rowSelection.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { adjustBranchQuantity, isStockInSubmission, isStockReceiptCreditIncomplete, stockReceiptWire, stockAdjustBatchWire, stockReceiptGateCode, stockAdjustQuantityError, STOCK_ADJUST_QUANTITY_FALLBACKS, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../utils/stockReceiptFields.ts'
 import { isApiVersionMismatchError } from '../../api/http.ts'
-import { dispatchResolvedSyncError } from '../../utils/syncProblemLifecycle.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import { branchCanBeTransferSource, branchCanTransferBetween } from '../../utils/branchRoles.ts'
 import type { QueryParams } from '../../api/query.ts'
@@ -590,7 +590,89 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   transferAuthorityRef.current = { actorId: String(user?.id ?? ''), allowed: canTransferStock }
   const transferHistoryRef = useRef(actionHistory)
   transferHistoryRef.current = actionHistory
-  const registeredTransfersRef = useRef(new Set<string>())
+  const transferDraft = transferDraftKey('inventory_transfer')
+  const [transferRestoredDirty, setTransferRestoredDirty] = useState(false)
+  const transferDraftOwnerRef = useRef({ key: transferDraft, actorId: String(user?.id ?? '') })
+  const transferDraftSnapshotRef = useRef<{ key: string; actorId: string; product: InventoryProduct; form: TransferForm } | null>(null)
+  const transferDraftGuardRef = useRef({ busy: transferSaving, pending: !!pendingTransfer })
+  transferDraftGuardRef.current = { busy: transferSaving, pending: !!pendingTransfer }
+  useEffect(() => {
+    if (!transferModal || transferDraftOwnerRef.current.actorId !== String(user?.id ?? '')) return
+    const snapshot = { ...transferDraftOwnerRef.current, product: transferModal, form: transferForm }
+    transferDraftSnapshotRef.current = snapshot
+    writeTransferDraft('inventory_transfer', snapshot.actorId, snapshot.key, { product: snapshot.product, form: snapshot.form })
+  }, [transferModal, transferForm, user?.id])
+  const parkCurrentTransfer = useCallback(() => {
+    const snapshot = transferDraftSnapshotRef.current
+    if (!snapshot) return false
+    if (!writeTransferDraft('inventory_transfer', snapshot.actorId, snapshot.key, { product: snapshot.product, form: snapshot.form })) return false
+    parkTransferDraft('inventory_transfer', snapshot.actorId, snapshot.key, `${tr('transfer', 'Transfer')} — ${snapshot.product.name || ''}`)
+    return true
+  }, [tr])
+  useEffect(() => {
+    window.addEventListener('pagehide', parkCurrentTransfer)
+    return () => { window.removeEventListener('pagehide', parkCurrentTransfer); parkCurrentTransfer() }
+  }, [parkCurrentTransfer])
+  const restoreInventoryTransfer = useCallback(async (entry?: MinimizedWorkEntry) => {
+    const actorId = String(user?.id ?? '')
+    const key = transferDraftKey('inventory_transfer')
+    if (entry && (entry.draftKey !== key || String(entry.payload?.actorId) !== actorId)) return
+    if (!canTransferStock) { if (entry) reparkDeniedRestore(entry); return }
+    const draft = readTransferDraft<{ product: InventoryProduct; form: TransferForm }>('inventory_transfer', actorId)
+    if (!draft?.product?.id) return
+    try {
+      const result = await getInventoryApi().getProductsByIds([draft.product.id], { include: 'branch_stock' })
+      if (transferAuthorityRef.current.actorId !== actorId || !transferAuthorityRef.current.allowed) {
+        if (entry) reparkDeniedRestore(entry)
+        return
+      }
+      const product = result?.items?.find((row: InventoryProduct) => String(row.id) === String(draft.product.id))
+      if (!product) throw new Error(tr('product_not_found', 'Product not found'))
+      transferDraftOwnerRef.current = { key, actorId }
+      setTransferRestoredDirty(true)
+      setTransferForm(draft.form)
+      setTransferModal(product)
+    } catch (error) { notify(error instanceof Error ? error.message : tr('failed_to_load_data', 'Failed to load data'), 'error') }
+  }, [canTransferStock, user?.id, notify, tr])
+  useEffect(() => {
+    const pending = peekPendingRestore('inventory_transfer')
+    if (pending) void restoreInventoryTransfer(pending)
+    const listener = (event: Event) => {
+      const detail = (event as CustomEvent).detail
+      if (detail?.kind === 'inventory_transfer' && detail.entry) void restoreInventoryTransfer(detail.entry)
+    }
+    window.addEventListener(RESTORE_WORK_EVENT, listener)
+    return () => window.removeEventListener(RESTORE_WORK_EVENT, listener)
+  }, [restoreInventoryTransfer])
+  useEffect(() => {
+    if (!isActive || !canTransferStock) { parkCurrentTransfer(); setTransferModal(null) }
+  }, [isActive, canTransferStock, parkCurrentTransfer])
+  const closeTransferDraft = () => {
+    if (transferStockInFlightRef.current || transferSaving) return
+    if (!pendingTransfer) {
+      discardTransferDraft('inventory_transfer', user?.id, transferDraftOwnerRef.current.key)
+      transferDraftSnapshotRef.current = null
+    } else parkCurrentTransfer()
+    setTransferModal(null)
+  }
+  const minimizeTransferDraft = () => {
+    if (transferStockInFlightRef.current || transferSaving || !canTransferStock) return
+    if (!parkCurrentTransfer()) { notify(tr('save_failed', 'Save failed'), 'error'); return }
+    setTransferModal(null)
+  }
+  useEffect(() => {
+    if (!transferModal) return
+    const key = transferDraftOwnerRef.current.key
+    const actorId = transferDraftOwnerRef.current.actorId
+    return registerDirtyWork({
+      key, pageId: 'branches', label: tr('transfer', 'Transfer'),
+      isDirty: () => transferDraftGuardRef.current.busy || (!transferDraftGuardRef.current.pending && !!transferDraftSnapshotRef.current),
+      discard: () => {
+        if (transferDraftGuardRef.current.busy || transferDraftGuardRef.current.pending) return
+        if (discardTransferDraft('inventory_transfer', actorId, key)) transferDraftSnapshotRef.current = null
+      },
+    })
+  }, [transferModal?.id, user?.id, tr])
   useEffect(() => {
     let current = true
     setTransferRetryReady(false)
@@ -1476,6 +1558,9 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
 
   const openTransfer = (p: InventoryProduct) => {
     if (!canTransferStock || !transferRetryReady || pendingTransfer || transferStockInFlightRef.current) return
+    if (readTransferDraft('inventory_transfer', user?.id)) { void restoreInventoryTransfer(); return }
+    transferDraftOwnerRef.current = { key: transferDraftKey('inventory_transfer'), actorId: String(user?.id ?? '') }
+    setTransferRestoredDirty(false)
     void ensureInventoryReasonsLoaded()
     const branchStock = Array.isArray(p?.branch_stock) ? p.branch_stock : []
     const firstStockBranch = branchStock.find((item: LegacyInventoryRecord) => Number(item?.quantity || 0) > 0)?.branch_id
@@ -1590,38 +1675,24 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     error instanceof Error ? error.message : tr('stock_transfer_failed', 'Stock transfer failed'), (key) => tr(key, ''),
   ) || tr('stock_transfer_failed', 'Stock transfer failed')
 
-  const completeInventoryTransfer = async (run: PendingInventoryTransfer, recoveredHistory = false) => {
+  const completeInventoryTransfer = async (run: PendingInventoryTransfer) => {
     if (transferAuthorityRef.current.actorId !== run.actorId || !transferAuthorityRef.current.allowed) throw new Error(tr('access_denied', 'Access denied'))
     const api = await loadInventoryWriteTransport()
     if (transferAuthorityRef.current.actorId !== run.actorId || !transferAuthorityRef.current.allowed) throw new Error(tr('access_denied', 'Access denied'))
     const actorId = run.actorId
+    const completedDraftKey = transferDraftKey('inventory_transfer')
     const checkpoint = (next: PendingInventoryTransfer) => {
       api.saveInventoryTransfer(actorId, next)
       if (transferAuthorityRef.current.actorId === actorId) setPendingTransfer(next)
     }
     const completed = await api.executeInventoryTransfer(run, checkpoint)
+    api.saveInventoryTransfer(actorId, null)
+    completeTransferDraft(actorId, completedDraftKey)
     if (transferAuthorityRef.current.actorId !== actorId || !transferAuthorityRef.current.allowed) return
     const { context } = completed
-    if (context.kind === 'submit' && !registeredTransfersRef.current.has(context.entryId)) {
-      const original = context.original
-      transferHistoryRef.current.pushAction({
-        id: context.entryId,
-        label: `${tr('transfer', 'Transfer')}: ${context.productName}`,
-        undo: () => runInventoryTransferIntent('undo', {
-          ...original, fromBranchId: original.toBranchId, toBranchId: original.fromBranchId,
-          reason: `Undo: ${original.reason}`,
-        }, context),
-        redo: () => runInventoryTransferIntent('redo', { ...original, reason: `Redo: ${original.reason}` }, context),
-      })
-      registeredTransfersRef.current.add(context.entryId)
-    } else if (context.kind !== 'submit' && recoveredHistory && context.serverId) {
-      // Reload loses local closures. Reconcile the same history row only after
-      // the immutable transfer receipt proves the compensating movement.
-      const historyApi = await import('../../api/actionHistoryTransport.ts')
-      await historyApi.updateActionHistory(context.serverId, { status: context.kind === 'undo' ? 'redoable' : 'undoable' })
-      await transferHistoryRef.current.refreshServerItems()
-    }
-    api.saveInventoryTransfer(actorId, null)
+    // The Worker created the provenance-backed history in the stock transaction.
+    void transferHistoryRef.current.refreshServerItems()
+    transferDraftSnapshotRef.current = null
     setPendingTransfer(null)
     setTransferRetryError('')
     setTransferModal(null)
@@ -1652,11 +1723,9 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       if (saved && (saved.context.kind !== kind || (kind !== 'submit' && saved.context.entryId !== context.entryId))) {
         throw new Error(tr('sale_bulk_pending', 'Resolve the pending operation first.'))
       }
-      const entry = [...transferHistoryRef.current.undoItems, ...transferHistoryRef.current.redoItems].find((item) => item.id === context.entryId)
-      const run = saved || api.prepareInventoryTransfer(actorId, body, { ...context, kind, serverId: entry?.serverId ?? context.serverId })
+      const run = saved || api.prepareInventoryTransfer(actorId, body, { ...context, kind })
       api.saveInventoryTransfer(actorId, run)
       setPendingTransfer(run)
-      setTransferModal(null)
       if (transferAuthorityRef.current.actorId !== actorId || !transferAuthorityRef.current.allowed) throw new Error(tr('access_denied', 'Access denied'))
       await completeInventoryTransfer(run)
     } catch (error) {
@@ -1671,14 +1740,9 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   const retryInventoryTransfer = async () => {
     if (!pendingTransfer || !canTransferStock || transferSaving) return
     const run = pendingTransfer
-    const history = transferHistoryRef.current
-    if (run.context.kind !== 'submit' && [...history.undoItems, ...history.redoItems].some((item) => item.id === run.context.entryId)) {
-      await history[run.context.kind](run.context.entryId)
-      return
-    }
     if (!beginSingleAction(transferStockInFlightRef, { blocked: transferSaving })) return
     setTransferSaving(true)
-    try { await completeInventoryTransfer(run, true) }
+    try { await completeInventoryTransfer(run) }
     catch (error) { setTransferRetryError(transferErrorMessage(error)) }
     finally { finishSingleAction(transferStockInFlightRef); setTransferSaving(false) }
   }
@@ -2457,17 +2521,6 @@ ${inventoryFeesFormulaText}`,
       {transferRetryError ? <p className="mt-1 text-sm text-red-700 dark:text-red-300">{transferRetryError}</p> : null}
       {pendingTransfer ? <div className="mt-2 flex flex-wrap gap-2">
         <button type="button" className="btn-primary h-10" disabled={transferSaving || !canTransferStock} onClick={() => { void retryInventoryTransfer() }}>{transferSaving ? tr('loading', 'Loading...') : tr('retry', 'Retry')}</button>
-        <button type="button" className="btn-secondary h-10" disabled={transferSaving} onClick={async () => {
-          if (transferStockInFlightRef.current || !window.confirm(tr('sale_bulk_pending', 'Retry the original request or discard it before starting another.'))) return
-          try {
-            const api = await loadInventoryWriteTransport()
-            api.saveInventoryTransfer(pendingTransfer.actorId, null)
-            dispatchResolvedSyncError(pendingTransfer.syncProblem)
-            setPendingTransfer(null)
-            setTransferRetryError('')
-            await load(true)
-          } catch (error) { setTransferRetryError(error instanceof Error ? error.message : tr('stock_transfer_failed', 'Stock transfer failed')) }
-        }}>{tr('discard', 'Discard')}</button>
       </div> : null}
     </section>
   ) : null
@@ -2811,12 +2864,16 @@ ${inventoryFeesFormulaText}`,
             onAdjust={handleAdjust}
             onCloseAdjust={closeAdjustAndDiscardDraft}
             onMinimizeAdjust={adjustModal ? preserveAndMinimizeAdjust : undefined}
-            onCloseTransfer={() => { if (!transferStockInFlightRef.current) setTransferModal(null) }}
+            onCloseTransfer={closeTransferDraft}
+            onMinimizeTransfer={minimizeTransferDraft}
+            transferRestoredDirty={transferRestoredDirty}
+            transferPending={!!pendingTransfer}
+            transferWorkKey={transferDraftOwnerRef.current.key}
             onTransfer={handleTransferStock}
             onTransferSourceChange={handleTransferSourceChange}
             reasonsByType={reasonsByType}
             setAdjustForm={setAdjustForm}
-            setReasonManager={setReasonManager}
+            setReasonManager={(next: typeof reasonManager) => { if (!transferStockInFlightRef.current && !pendingTransfer) setReasonManager(next) }}
             setTransferForm={(next: typeof transferForm) => { if (!transferStockInFlightRef.current && !pendingTransfer) setTransferForm(next) }}
             t={t}
             tr={tr}

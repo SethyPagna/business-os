@@ -6,6 +6,7 @@ import {
   withLoaderTimeout,
 } from './loaders'
 import { resolveReplayAction } from './actionReplay'
+import { scopedWorkDraftKey } from './workDrafts.ts'
 
 type ActionDirection = 'undo' | 'redo'
 type ActionHistoryId = string | number
@@ -70,10 +71,46 @@ export function buildServerReplayRequest(payload: Record<string, unknown> | unde
     || applier === 'sale.customer.single'
     || applier === 'product.merge.group'
     || applier === 'product.remove'
+    || applier === 'stock.transfer'
   return {
     require_applied: true,
     ...(generationGuarded && payload?.generation != null ? { expected_generation: payload.generation } : {}),
   }
+}
+
+export type PendingTransferReplay = { serverId: ActionHistoryId; direction: ActionDirection; operationId: string; generation: number }
+
+/** Persist the exact transition before I/O. A lost response must never adopt a newer generation. */
+export async function executeTransferReplay(
+  storage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>,
+  key: string,
+  requested: PendingTransferReplay,
+  send: (pending: PendingTransferReplay, body: { require_applied: true; expected_generation: number }) => Promise<unknown>,
+): Promise<unknown> {
+  const raw = storage.getItem(key)
+  const pending = raw ? JSON.parse(raw) as PendingTransferReplay : requested
+  if (String(pending.serverId) !== String(requested.serverId) || pending.operationId !== requested.operationId) {
+    throw new Error('Resolve the pending transfer history action first.')
+  }
+  if (!pending.operationId || !Number.isInteger(pending.generation) || pending.generation < 0
+    || !['undo', 'redo'].includes(pending.direction)) throw new Error('Transfer history provenance is unavailable.')
+  const serialized = JSON.stringify(pending)
+  storage.setItem(key, serialized)
+  if (storage.getItem(key) !== serialized) throw new Error('The history retry could not be saved. No request was sent.')
+  let response: unknown
+  try { response = await send(pending, { require_applied: true, expected_generation: pending.generation }) }
+  catch (error) {
+    const refusal = error as { status?: number; transientGateway?: boolean; code?: string }
+    // These application refusals are authoritative no-ops. Transport/edge/5xx
+    // failures remain uncertain and must retain the exact request identity.
+    if ((refusal.status === 409 || refusal.status === 403) && !refusal.transientGateway && refusal.code !== 'edge_interference') storage.removeItem(key)
+    throw error
+  }
+  if (!(response && typeof response === 'object' && (response as { applied?: unknown }).applied === true)) {
+    throw new Error('Transfer history was not applied.')
+  }
+  storage.removeItem(key)
+  return response
 }
 
 type UserOption = {
@@ -183,7 +220,7 @@ function getErrorMessage(error: unknown, fallback: string): string {
 const ACTION_HISTORY_CACHE_PREFIX = 'actionHistory:cache:'
 
 function cacheKeyFor(scope: string): string {
-  return `${ACTION_HISTORY_CACHE_PREFIX}${scope}`
+  return `${ACTION_HISTORY_CACHE_PREFIX}${scopedWorkDraftKey(scope)}`
 }
 
 function readCachedServerItems(scope: string): ServerHistoryItem[] {
@@ -209,10 +246,13 @@ function writeCachedServerItems(scope: string, items: ServerHistoryItem[]): void
 }
 
 export function useActionHistory({ limit = 10, notify, scope = 'global', enabled = true, user = null }: ActionHistoryOptions = {}) {
+  const actorScope = scopedWorkDraftKey(`history_${scope}`)
+  const actorScopeRef = useRef(actorScope)
+  actorScopeRef.current = actorScope
   const [undoStack, setUndoStack] = useState<ActionHistoryEntry[]>([])
   const [redoStack, setRedoStack] = useState<ActionHistoryEntry[]>([])
   const [serverItems, setServerItems] = useState<ServerHistoryItem[]>(() => readCachedServerItems(scope))
-  const cachedScopeRef = useRef(scope)
+  const cachedScopeRef = useRef(actorScope)
   const [busy, setBusy] = useState<ActionDirection | ''>('')
   const [userFilter, setUserFilter] = useState('all')
   const [userOptions, setUserOptions] = useState<UserOption[]>([])
@@ -226,6 +266,7 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
   }, [user])
 
   const refreshServerItems = useCallback((): Promise<void> => {
+    const requestScope = actorScope
     const requestId = beginTrackedRequest(historyRequestRef)
     return withLoaderTimeout(
       async () => (await loadActionHistoryTransport()).getActionHistory(scope, Math.max(3, limit), {
@@ -236,7 +277,7 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
       ACTION_HISTORY_LOAD_TIMEOUT_MS,
     )
       .then((result) => {
-        if (!isTrackedRequestCurrent(historyRequestRef, requestId)) return
+        if (!isTrackedRequestCurrent(historyRequestRef, requestId) || actorScopeRef.current !== requestScope) return
         const record = result as { items?: ServerHistoryItem[] } | null
         const items = Array.isArray(record?.items) ? record.items : []
         setServerItems(items)
@@ -246,17 +287,19 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
         if (!isAdmin || userFilter === 'all') writeCachedServerItems(scope, items)
       })
       .catch(() => {})
-  }, [isAdmin, limit, scope, userFilter])
+  }, [actorScope, isAdmin, limit, scope, userFilter])
 
   // Re-hydrate from the new scope's cache immediately when `scope` changes
   // -- the useState initializer above only runs on first mount, so without
   // this a scope change would otherwise show a stale previous-scope list
   // (or an empty one) until the network fetch below catches up.
   useEffect(() => {
-    if (cachedScopeRef.current === scope) return
-    cachedScopeRef.current = scope
+    if (cachedScopeRef.current === actorScope) return
+    cachedScopeRef.current = actorScope
+    setUndoStack([])
+    setRedoStack([])
     setServerItems(readCachedServerItems(scope))
-  }, [scope])
+  }, [actorScope, scope])
 
   useEffect(() => {
     if (!enabled) return
@@ -381,32 +424,41 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
   // closure is needed (there is none to have -- that's the point).
   const runServerEntry = useCallback(async (direction: ActionDirection, serverId: ActionHistoryId, label = ''): Promise<boolean> => {
     if (!serverId || busy) return false
+    const requestScope = actorScope
     setBusy(direction)
     try {
       const api = await loadActionHistoryTransport()
+      if (actorScopeRef.current !== requestScope) return false
       if (navigator.onLine === false) throw new Error('Connect to the server to replay history.')
       const item = serverItems.find(item => String(item.id) === String(serverId))
       const payload = item?.[direction === 'undo' ? 'undo_payload' : 'redo_payload'] as Record<string, unknown> | undefined
       const replayRequest = buildServerReplayRequest(payload)
-      const response = direction === 'undo'
-        ? await api.undoActionHistory(serverId, replayRequest)
-        : await api.redoActionHistory(serverId, replayRequest)
+      const response = payload?.applier === 'stock.transfer'
+        ? await executeTransferReplay(window.sessionStorage, scopedWorkDraftKey('transfer_history_pending'), {
+          serverId, direction, operationId: String(payload.operation_id || ''), generation: Number(payload.generation),
+        }, (pending, body) => pending.direction === 'undo'
+          ? api.undoActionHistory(pending.serverId, body) : api.redoActionHistory(pending.serverId, body))
+        : direction === 'undo'
+          ? await api.undoActionHistory(serverId, replayRequest)
+          : await api.redoActionHistory(serverId, replayRequest)
       const applied = !!(response && typeof response === 'object' && (response as { applied?: unknown }).applied)
-      refreshServerItems()
+      if (actorScopeRef.current !== requestScope) return false
       if (!applied) {
         notify?.(`Unable to ${direction} that action right now.`, 'error')
         return false
       }
+      const updated = (response as { item?: ServerHistoryItem }).item
+      if (updated) setServerItems((current) => current.map((row) => String(row.id) === String(updated.id) ? updated : row))
+      refreshServerItems()
       if (label) notify?.(label)
       return true
     } catch (error) {
-      refreshServerItems()
       notify?.(getErrorMessage(error, `Unable to ${direction} that action right now.`), 'error')
       return false
     } finally {
       setBusy('')
     }
-  }, [busy, notify, refreshServerItems, serverItems])
+  }, [actorScope, busy, notify, refreshServerItems, serverItems])
 
   const undoServer = useCallback((serverId: ActionHistoryId, label = '') => runServerEntry('undo', serverId, label), [runServerEntry])
   const redoServer = useCallback((serverId: ActionHistoryId, label = '') => runServerEntry('redo', serverId, label), [runServerEntry])
