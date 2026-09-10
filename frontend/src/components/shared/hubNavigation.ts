@@ -15,7 +15,7 @@ export type HubDestination = { id: string; key: string; label: string }
 
 /** These are the existing host section ids, not additional page routes. */
 export function getHubDestinations(page: string, access: HubAccess): HubDestination[] {
-  const can = (key: string) => access.getPermissionTier(key) !== 'none'
+  const can = (key: string) => access.can ? access.can(key, 'view') : access.getPermissionTier(key) !== 'none'
   const act = (key: string, action: string) => access.can ? access.can(key, action) : false
   const rows: Array<[string, string, string, boolean]> = page === 'branches' ? [
     ['overview', 'overview', 'Overview', can('branches')],
@@ -28,10 +28,10 @@ export function getHubDestinations(page: string, access: HubAccess): HubDestinat
     ['fees', 'fees', 'Expenses', can('fees')],
     ['reports', 'reports', 'Reports', can('sales') || can('returns') || can('fees')],
   ] : page === 'contacts' ? [
-    ['customers', 'customers', 'Customers', true],
-    ['suppliers', 'suppliers', 'Suppliers', access.hasPermission('contacts_suppliers')],
-    ['delivery', 'pos_delivery', 'Delivery', true],
-    ['duplicates', 'possible_duplicates', 'Conflicts', true],
+    ['customers', 'customers', 'Customers', can('contacts')],
+    ['suppliers', 'suppliers', 'Suppliers', can('contacts') && access.hasPermission('contacts_suppliers')],
+    ['delivery', 'pos_delivery', 'Delivery', can('contacts')],
+    ['duplicates', 'possible_duplicates', 'Conflicts', can('contacts')],
   ] : page === 'promotions' ? [
     ['rules', 'promo_tab_rules', 'Rules', can('promotions')],
     ['discounts', 'promo_tab_discounts', 'Discounts', can('products')],
@@ -47,14 +47,14 @@ export function getHubDestinations(page: string, access: HubAccess): HubDestinat
     // tier; the other two mirror the page's per-action gates exactly --
     // canAdjustInventoryStock = can('inventory', 'adjust') and
     // canMergeDuplicates = can('products', 'merge_duplicates').
-    ['products', 'products', 'Products', true],
-    ['stock_changes', 'stock_change_ledger', 'Stock Changes', true],
-    ['stock_in_sessions', 'stock_in_sessions', 'Stock-in Sessions', act('inventory', 'adjust')],
-    ['duplicates', 'product_duplicates_section', 'Duplicates', act('products', 'merge_duplicates')],
+    ['products', 'products', 'Products', can('products')],
+    ['stock_changes', 'stock_change_ledger', 'Stock Changes', can('products')],
+    ['stock_in_sessions', 'stock_in_sessions', 'Stock-in Sessions', can('products') && act('inventory', 'adjust')],
+    ['duplicates', 'product_duplicates_section', 'Duplicates', can('products') && act('products', 'merge_duplicates')],
   ] : page === 'review' ? [
     ['review', 'review_queue', 'Review queue', can('review')],
     ['audit', 'audit_log', 'Audit Log', can('audit_log')],
-    ['deleted', 'legacy_deleted_sales', 'Deleted sales (old system)', access.getPermissionTier('audit_log') === 'full'],
+    ['deleted', 'legacy_deleted_sales', 'Deleted sales (old system)', can('audit_log') && access.getPermissionTier('audit_log') === 'full'],
   ] : []
   return rows.filter((row) => row[3]).map(([id, key, label]) => ({ id, key, label }))
 }

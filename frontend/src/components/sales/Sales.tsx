@@ -79,7 +79,7 @@ import {
 import { dispatchResolvedSyncError } from '../../utils/syncProblemLifecycle.ts'
 import { getAuthoritativeSale, getSaleStatusReceipt, getSaleLineReceipt } from '../../api/salesTransport.ts'
 import { mutationVersionAtLeast, reconcileDirectMutationReceipt, readCommittedMutationState } from '../../utils/directMutationRequest.ts'
-import { saleAmendmentWindowAllows } from '../../utils/permissions.ts'
+import { isAdminControlUser, saleAmendmentWindowAllows } from '../../utils/permissions.ts'
 
 const SALES_USER_OPTIONS_TIMEOUT_MS = 8000
 // A status settlement writes the sale, every paired KHR line snapshot, the
@@ -596,9 +596,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   const timeGroupingMode = 'day' as const
   // AppContext uses the normalized role + user permission map. Raw user-only
   // permissions miss custom roles carrying all:true and wrongly expire edits.
-  const isAdmin = String(user?.username || '').trim().toLowerCase() === 'admin'
-    || String(user?.role_code || '').trim().toLowerCase() === 'admin'
-    || getPermissionTier('all') === 'full'
+  const isAdmin = isAdminControlUser(user)
 
   const cleanFallback = useCallback((fallbackEn: string, fallbackKm?: string) => {
     const candidate = fallbackKm || fallbackEn

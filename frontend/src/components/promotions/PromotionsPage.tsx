@@ -178,20 +178,20 @@ export default function PromotionsPage() {
   const { t, notify, fmtUSD, getPermissionTier, can, hasPermission, navigateTo } = useApp()
   // G2 section gates: the page door admits either grant (see
   // AppContext.canAccessPage); each section still needs its own.
-  const canPromotions = getPermissionTier('promotions') !== 'none'
+  const canPromotions = can('promotions', 'view')
   // Part 557 slice 4: 'promotions' is a view-tier section. A View-only grant
   // reads the rule list but every write (new/edit/delete rule) is hidden here
   // and refused by the backend (writes keep requireKey('promotions')). Full only.
-  const canManagePromotions = can('promotions', 'manage')
+  const canManagePromotions = canPromotions && can('promotions', 'manage')
   // The Discounts sub-section edits PER-PRODUCT discounts via updateProduct(),
   // which the backend gates on 'products' (not 'promotions'). It was coupled to
   // canPromotions, so a promotions user without products access saw a discount
   // editor whose every save 403'd -- a fake control this view-tier slice would
   // otherwise widen to view users. Gate it on its REAL capability instead: the
   // products tier (review or full can write; review queues for approval).
-  const canManageDiscounts = getPermissionTier('products') !== 'none'
-  const canLoyalty = getPermissionTier('customer_portal') !== 'none'
-  const [activeSection, setActiveSection] = useHubSection<PromotionsSection>('promotions', canPromotions ? 'rules' : 'loyalty', getHubDestinations('promotions', { getPermissionTier, hasPermission }).map((item) => item.id), navigateTo)
+  const canManageDiscounts = can('products', 'view')
+  const canLoyalty = can('customer_portal', 'view')
+  const [activeSection, setActiveSection] = useHubSection<PromotionsSection>('promotions', canPromotions ? 'rules' : 'loyalty', getHubDestinations('promotions', { getPermissionTier, hasPermission, can }).map((item) => item.id), navigateTo)
   const [rules, setRules] = useState<PromotionRuleRow[]>([])
   const [rulesLoading, setRulesLoading] = useState(true)
   const [rulesError, setRulesError] = useState('')
@@ -495,7 +495,7 @@ export default function PromotionsPage() {
           storageKey="bos:hub:promotions:active"
           pageId="promotions"
         >
-        {activeSection === 'loyalty' ? (
+        {activeSection === 'loyalty' && canLoyalty ? (
           // G2: the whole former Loyalty Points page, embedded (its own
           // header/sections/logic untouched -- one implementation, new home).
           <Suspense fallback={<p className="py-4 text-sm text-gray-500">{t('loading') || 'Loading'}...</p>}>
@@ -751,7 +751,7 @@ export default function PromotionsPage() {
         ) : null}
         </HubSectionNav>
 
-        {draft ? (
+        {draft && canManagePromotions ? (
           <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-start justify-center overflow-y-auto bg-black/40" onClick={requestCloseRule}>
             <div className="modal-panel-safe my-auto w-full max-w-lg space-y-3 overflow-y-auto rounded-2xl bg-white p-4 shadow-xl dark:bg-gray-900" onClick={(event) => event.stopPropagation()}>
               <h2 className="text-base font-semibold">
@@ -987,7 +987,7 @@ export default function PromotionsPage() {
           </div>
         ) : null}
 
-        {discountDraft ? (
+        {discountDraft && canManageDiscounts ? (
           <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-start justify-center overflow-y-auto bg-black/40" onClick={requestCloseDiscount}>
             <div className="modal-panel-safe my-auto w-full max-w-lg space-y-3 overflow-y-auto rounded-2xl bg-white p-4 shadow-xl dark:bg-gray-900" onClick={(event) => event.stopPropagation()}>
               <h2 className="truncate text-base font-semibold">

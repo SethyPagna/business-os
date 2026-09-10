@@ -16,8 +16,7 @@ import { APP_NAVIGATION_EVENT, getAdminPageFromPath, getAdminPathForPage, resolv
 import { getClientDeviceInfo } from './utils/deviceInfo.ts'
 import { getDirtyWork, hasDirtyWork, type DirtyWorkEntry } from './utils/dirtyWork.ts'
 import { flushPendingWorkDrafts } from './utils/workDrafts.ts'
-import { parsePermissionMap, getPermissionTierFromMap, type PermissionTier } from './utils/permissions.ts'
-import { actionAllowed, isActionOverriddenOff } from './utils/permissionActions.ts'
+import { effectivePermissions, type PermissionTier } from './utils/permissions.ts'
 import { normalizePriceValue } from './utils/pricing.ts'
 import { fmtDayFirst } from './utils/formatters.ts'
 import { withLoaderTimeout } from './utils/loaders.ts'
@@ -2031,29 +2030,18 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   // "I only see Dashboard and Notes after logging in": those two are the
   // only nav items with permission: null (see navigationConfig.ts), so
   // they're the only ones that don't depend on this merge.
-  const getMergedPermissionsRaw = useCallback((): Record<string, unknown> => {
-    if (!user) return {}
-    try {
-      const rolePermissions = parsePermissionMap((user as { role_permissions?: unknown }).role_permissions)
-      const userPermissions = parsePermissionMap(user.permissions)
-      return { ...rolePermissions, ...userPermissions }
-    } catch {
-      return {}
-    }
-  }, [user])
+  const authority = useMemo(() => effectivePermissions(user), [user])
 
   const getPermissions = useCallback((): Record<string, boolean> => {
-    const merged = getMergedPermissionsRaw()
+    const merged = authority.merged
     return Object.fromEntries(
       Object.entries(merged).map(([key, value]) => [key, value === true]),
     )
-  }, [getMergedPermissionsRaw])
+  }, [authority])
 
   const hasPermission = useCallback((key: string) => {
-    if (!user) return false
-    const p = getPermissions()
-    return !!(p.all || p[key])
-  }, [user, getPermissions])
+    return authority.hasPermission(key)
+  }, [authority])
 
   // Tier-aware read for REVIEW_TIER_KEYS sections (see utils/permissions.ts)
   // -- 'full' behaves exactly like hasPermission()===true, 'none' exactly
@@ -2067,9 +2055,8 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   // from 'none' by design (see permissions.ts's own comment on why that's
   // deliberate on the backend too).
   const getPermissionTier = useCallback((key: string): PermissionTier => {
-    const merged = getMergedPermissionsRaw()
-    return getPermissionTierFromMap(merged, key, merged.all === true)
-  }, [getMergedPermissionsRaw])
+    return authority.getPermissionTier(key)
+  }, [authority])
 
   // Per-ACTION gate: "may this role press this specific button?"
   //
@@ -2090,15 +2077,8 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   // cloudflare/src/lib/permissions.ts's getActionTier, so a control hidden
   // here is genuinely refused by the API rather than merely hidden.
   const can = useCallback((permissionKey: string, actionKey: string): boolean => {
-    if (!user) return false
-    return actionAllowed(
-      permissionKey,
-      actionKey,
-      getPermissionTier(permissionKey),
-      hasPermission,
-      (section, action) => isActionOverriddenOff(getPermissions(), section, action),
-    )
-  }, [user, getPermissionTier, hasPermission, getPermissions])
+    return authority.can(permissionKey, actionKey)
+  }, [authority])
 
   const canAccessPage = useCallback((pageId: string) => {
     if (!user) return false
@@ -2108,6 +2088,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     // top-of-file comment for the backend-side half of this rule; the
     // page's own upload/download/rename/delete controls still self-gate
     // on real Full Access to `library` (FilesPage.tsx's `canManageLibrary`).
+    if (!Object.hasOwn(PAGE_PERMISSIONS, pageId)) return false
     const required = PAGE_PERMISSIONS[pageId]
     if (required == null) return true
     // Tier-aware, not hasPermission(): a Review Required user for a
@@ -2116,12 +2097,12 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     // page. hasPermission() is strict-boolean by design and would 403 a
     // 'review'-tier user out of the page entirely, same class of bug the
     // backend's own permissions.ts comment warns callers about.
-    if (getPermissionTier(required) !== 'none') return true
+    if (can(required, 'view')) return true
     // Part 557 slice 8: the storefront editor (catalog page) is split into
     // per-area write grants. Any of posts/FAQ/About opens the page -- the
     // config grant is already covered by the `customer_portal` check above --
     // and CatalogPage then self-gates each section to what the role can save.
-    if (pageId === 'catalog' && (hasPermission('portal_posts') || hasPermission('portal_faq') || hasPermission('portal_about'))) return true
+    if (pageId === 'catalog' && ['portal_posts', 'portal_faq', 'portal_about'].some((key) => can(key, 'view'))) return true
     // 'products_image_only' (Part 241): a restricted role with no real
     // `products` tier of its own still needs into the Products page --
     // it just gets the lightweight image-only view once there (see
@@ -2129,31 +2110,31 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     // shape (cloudflare/src/routes/products.ts): only relevant when the
     // real tier is 'none', since anyone with actual products access
     // already passed the check above.
-    if (pageId === 'products' && hasPermission('products_image_only')) return true
+    if (pageId === 'products' && getPermissionTier('products') === 'none' && can('products_image_only', 'view')) return true
     // G2: Loyalty Points lives INSIDE the Promotions page now. A user
     // whose only grant is customer_portal (the old Loyalty page's gate)
     // must still reach the page for its Loyalty section -- the promo
     // sections inside self-gate on the real 'promotions' tier, so this
     // widens the door, not the controls.
-    if (pageId === 'promotions' && getPermissionTier('customer_portal') !== 'none') return true
+    if (pageId === 'promotions' && (can('customer_portal', 'view') || can('products', 'view'))) return true
     // E3/E4 (Part 403): audit_log, users and backup retired as standalone
     // pages -- their components are sections of Review & Logs / Settings
     // now. A grant on any absorbed section opens its host page; each
     // section still self-gates on its own key inside, so this widens the
     // door, never the controls.
-    if (pageId === 'review' && getPermissionTier('audit_log') !== 'none') return true
+    if (pageId === 'review' && can('audit_log', 'view')) return true
     // Users is admin-only now (Part 557 slice 3) -- it carries no per-role
     // `users` grant, so only the backup section can open Settings for a
     // non-admin here; admins reach it via the tier-aware check above.
-    if (pageId === 'settings' && getPermissionTier('backup') !== 'none') return true
+    if (pageId === 'settings' && can('backup', 'view')) return true
     // E2: returns and fees retired as standalone pages into the Sales hub,
     // same contract as above -- a returns- or fees-only grant still opens
     // the Sales page, whose sections self-gate on their own keys inside.
-    if (pageId === 'sales' && (getPermissionTier('returns') !== 'none' || getPermissionTier('fees') !== 'none')) return true
+    if (pageId === 'sales' && (can('returns', 'view') || can('fees', 'view'))) return true
     // E1: inventory retired as a standalone page into the Branches hub --
     // an inventory-only grant still opens the Branches page, whose chips
     // self-gate ('branches' for the branch list, 'inventory' for the rest).
-    if (pageId === 'branches' && getPermissionTier('inventory') !== 'none') return true
+    if (pageId === 'branches' && can('inventory', 'view')) return true
     // 'settings'/'receipt_settings' page (this session, alongside
     // routes/settings.ts's new per-field business_identity/sales_policy
     // gating): a user granted only one of the narrower settings
@@ -2167,11 +2148,11 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     // still applies once inside -- this only controls whether the page
     // itself opens, same as the tier-aware check just above.
     if ((pageId === 'settings' || pageId === 'receipt_settings') &&
-      (hasPermission('business_identity') || hasPermission('sales_policy') || hasPermission('drive_credentials'))) {
+      ['business_identity', 'sales_policy', 'drive_credentials'].some((key) => can(key, 'view'))) {
       return true
     }
     return false
-  }, [user, getPermissionTier, hasPermission])
+  }, [user, getPermissionTier, can])
 
   const committedLocationRef = useRef(typeof window === 'undefined' ? null : {
     href: window.location.href,

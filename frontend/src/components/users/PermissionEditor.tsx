@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import InfoHint from '../shared/InfoHint.tsx'
 import { PERMISSION_SECTIONS, type PermissionDefinition, type PermissionSection, type PermissionSensitivity } from './permissionDefinitions'
-import { REVIEW_TIER_KEYS, VIEW_TIER_KEYS, type PermissionValue } from '../../utils/permissions.ts'
+import { normalizePermissionState, type PermissionValue } from '../../utils/permissions.ts'
 import { actionOverrideKey, actionsForKey, isActionOverriddenOff, outcomeAt, type ActionOutcome } from '../../utils/permissionActions.ts'
 
 type PermissionState = Record<string, PermissionValue>
@@ -40,21 +40,7 @@ interface PermissionEditorProps {
 // tier to Full Access the moment this editor mounted, even before the
 // admin touched anything.
 function parsePermissionState(permissions: PermissionEditorProps['permissions']): PermissionState {
-  let value: unknown = permissions
-  if (typeof value === 'string') {
-    try {
-      value = JSON.parse(value || '{}')
-    } catch {
-      return {}
-    }
-  }
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
-  return Object.entries(value as Record<string, unknown>).reduce<PermissionState>((acc, [key, raw]) => {
-    acc[key] = raw === 'review' && REVIEW_TIER_KEYS.has(key) ? 'review'
-      : raw === 'view' && VIEW_TIER_KEYS.has(key) ? 'view'
-        : Boolean(raw)
-    return acc
-  }, {})
+  return normalizePermissionState(permissions)
 }
 
 function tierOf(value: PermissionValue | undefined): Tier {

@@ -21,8 +21,7 @@ import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { todayStr } from '../../utils/dateHelpers.ts'
 import { buildProductGroups, type ProductGroup, type ProductRecord } from '../../utils/productGrouping.ts'
 import ProductOptionSheet from '../shared/ProductOptionSheet.tsx'
-import { getPermissionTierFromMap, parsePermissionMap } from '../../utils/permissions.ts'
-import { isActionOverriddenOff } from '../../utils/permissionActions.ts'
+import { effectivePermissions } from '../../utils/permissions.ts'
 import { readWorkDraft, scheduleWorkDraftWrite, clearWorkDraft, writeWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
 import { registerDirtyWork } from '../../utils/dirtyWork.ts'
 import { stockReceiptGateCode, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../utils/stockReceiptFields.ts'
@@ -178,26 +177,9 @@ function stockSessionErrorCode(error: unknown): string {
   return String((error as { code?: unknown } | null)?.code || '')
 }
 
-function hasAllPermission(value: unknown): boolean {
-  const parsed = parsePermissionMap(value)
-  return parsed.all === true
-}
-
 function canCommitProductCreateInStockSession(user?: ProductUser | null): boolean {
-  // Runtime callers always provide the actor. Keep the permissive fallback
-  // only for older/test callers that predate this prop; a real Review-tier
-  // actor must continue through the ordinary product review workflow.
-  if (!user) return true
-  const merged = {
-    ...parsePermissionMap(user.role_permissions),
-    ...parsePermissionMap(user.permissions),
-  }
-  const admin = String(user.username || '').trim().toLowerCase() === 'admin'
-    || String(user.role_code || '').trim().toLowerCase() === 'admin'
-    || hasAllPermission(user.role_permissions)
-    || hasAllPermission(user.permissions)
-  return getPermissionTierFromMap(merged, 'products', admin) === 'full'
-    && !isActionOverriddenOff(merged, 'products', 'add')
+  const authority = effectivePermissions(user)
+  return authority.getPermissionTier('products') === 'full' && authority.can('products', 'add')
 }
 
 function legacyLines(rows: CreateProductsSessionRow[] = []): SessionLine[] {
@@ -580,13 +562,19 @@ export default function CreateProductsSessionModal({
     if (findSessionProductDuplicate(rows, { name, barcode })) {
       throw new Error(tr('create_products_session_duplicate', 'Duplicate: You added this item already.'))
     }
+    if (!effectivePermissions(user).can('products', 'add') || (quantity > 0 && !canReceiveStock)) {
+      throw new Error(tr('no_permission', 'You do not have permission to make this change.'))
+    }
     setSaving(true)
     try {
-      if (quantity === 0 && !canCommitProductAdd) {
+      if (!canCommitProductAdd) {
         // Review-tier product creation must keep using the registered product
         // review workflow. The atomic session endpoint deliberately requires
         // Full products:add and must never bypass that approval boundary.
-        const productId = await onCreateProduct({ ...payload, stock_quantity: 0 })
+        // The registered review applier seeds opening stock after approval.
+        // Keep that intent in the queued product payload; never prepare a live
+        // atomic create merely because Inventory is Full.
+        const productId = await onCreateProduct({ ...payload, stock_quantity: quantity })
         const row: SessionLine = {
           lineId: `created_${String(productId)}_${Date.now()}`, kind: 'created_zero', productId: Number(productId) || null, product: null,
           name, barcode, brand: String(payload.brand ?? header.brand ?? '').trim(), supplierId: null,
@@ -620,6 +608,7 @@ export default function CreateProductsSessionModal({
 
   const saveEditedNewLine = async (lineId: string, payload: Record<string, unknown>) => {
     if (saving || submissionLocked) throw new Error(tr('saving_label', 'Saving…'))
+    if (!canCommitProductAdd) throw new Error(tr('no_permission', 'You do not have permission to make this change.'))
     const current = rows.find((row) => row.lineId === lineId && row.kind === 'create_receive' && row.status === 'queued')
     if (!current) throw new Error(tr('failed', 'Failed'))
     const quantity = Number(payload.stock_quantity)
@@ -730,6 +719,10 @@ export default function CreateProductsSessionModal({
       clearWorkDraft(draftKey); if (rows.length) onDone(); onClose(); return
     }
     const attemptItems = submittedItems || pending.map(sessionLine)
+    if (attemptItems.some((item) => item.kind === 'create_receive') && !canCommitProductAdd) {
+      const message = tr('no_permission', 'You do not have permission to make this change.')
+      setCommitError(message); notify(message, 'error'); return
+    }
     const attemptPayload = {
       client_request_id: sessionRequestIdRef.current,
       mode: 'stock_in' as const,

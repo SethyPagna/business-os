@@ -17,7 +17,7 @@ import { fmtDate } from '../../utils/formatters'
 import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import { PERMISSION_DEFS } from './permissionDefinitions'
 import { ROLE_PRESETS } from './rolePresetDefaults'
-import { normalizePermissionState, type PermissionValue } from '../../utils/permissions.ts'
+import { isAdminControlUser, normalizePermissionState, type PermissionValue } from '../../utils/permissions.ts'
 import { useIsPageActive } from '../shared/pageActivity'
 import { APP_NAVIGATION_EVENT } from '../../app/pathRouting.ts'
 import { useActionHistory } from '../../utils/actionHistory.ts'
@@ -414,9 +414,7 @@ export default function Users() {
    *     primary admin account (explicit user decision, Sep 1 2026). Server-side
    *     canManageTarget() enforces the same rule.
    */
-  const canManage = hasPermission('all')
-    || String(currentUser?.role_code || '').trim().toLowerCase() === 'admin'
-    || String(currentUser?.username || '').trim().toLowerCase() === 'admin'
+  const canManage = isAdminControlUser(currentUser)
   const canManageTargetUser = (targetUser: UserRecord | null | undefined): boolean => {
     return canManage && !!targetUser
   }

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
+import { isAdminControlUser } from '../../utils/permissions.ts'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import { BUSINESS_TIME_ZONE } from '../../constants.ts'
 import { fmtDayFirst, fmtTimezoneLabel } from '../../utils/formatters.ts'
@@ -617,24 +618,7 @@ export default function Settings() {
     return () => window.clearInterval(timer)
   }, [])
 
-  const isAdmin = useMemo(() => {
-    // Same semantics as Sales/Inventory/actionHistory admin checks, plus the
-    // role_permissions merge (a role-granted admin carries all:true on
-    // user.role_permissions while user.permissions stays "{}").
-    try {
-      const parse = (value: unknown): Record<string, unknown> =>
-        typeof value === 'string' ? JSON.parse(value || '{}') : ((value || {}) as Record<string, unknown>)
-      const merged = {
-        ...parse(user?.role_permissions),
-        ...parse(user?.permissions),
-      }
-      const roleCode = String(user?.role_code || '').toLowerCase()
-      const username = String(user?.username || '').toLowerCase()
-      return username === 'admin' || roleCode === 'admin' || merged.all === true
-    } catch {
-      return false
-    }
-  }, [user])
+  const isAdmin = isAdminControlUser(user)
 
   // The low-stock alert switch/amount/scope, resolved through the one rule the
   // rest of the app reads them by, so this form can never render a state the

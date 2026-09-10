@@ -20,6 +20,7 @@ type SettingsHubAppContext = {
   navigateTo: (pageId: string, anchor?: string) => void
   t: (key: string, fallback?: string) => string
   getPermissionTier: (key: string) => string
+  can: (key: string, action: string) => boolean
   hasPermission: (key: string) => boolean
 }
 const useApp = useAppHook as unknown as () => SettingsHubAppContext
@@ -44,23 +45,20 @@ function initialSection(canSettings: boolean, canUsers: boolean, canBackup: bool
 }
 
 export default function SettingsHubPage() {
-  const { t, getPermissionTier, hasPermission, navigateTo } = useApp()
+  const { t, getPermissionTier, hasPermission, can, navigateTo } = useApp()
   // The settings SECTION door matches the old page's own nuances: the
   // narrower per-field grants (business_identity / sales_policy /
   // drive_credentials) open Settings too -- Settings.tsx self-gates which
   // fields render once inside, exactly as before the merge.
-  const canSettings = getPermissionTier('settings') !== 'none'
-    || getPermissionTier('business_identity') !== 'none'
-    || getPermissionTier('sales_policy') !== 'none'
-    || getPermissionTier('drive_credentials') !== 'none'
+  const canSettings = ['settings', 'business_identity', 'sales_policy', 'drive_credentials'].some((key) => can(key, 'view'))
   // Users management is admin-only (Part 557 slice 3): the whole
   // routes/users.ts surface gates on isAdminControlUser and Users.tsx's
   // canManage is hasPermission('all'), so the section door must match --
   // gating on the (backend-unchecked) `users` key would show a stale grant
   // holder an empty, no-op section. hasPermission('all') === isAdminControlUser.
   const canUsers = hasPermission('all')
-  const canBackup = getPermissionTier('backup') !== 'none'
-  const [section, setSection] = useHubSection<SettingsHubSection>('settings', () => initialSection(canSettings, canUsers, canBackup), getHubDestinations('settings', { getPermissionTier, hasPermission }).map((item) => item.id), navigateTo)
+  const canBackup = can('backup', 'view')
+  const [section, setSection] = useHubSection<SettingsHubSection>('settings', () => initialSection(canSettings, canUsers, canBackup), getHubDestinations('settings', { getPermissionTier, hasPermission, can }).map((item) => item.id), navigateTo)
 
   const tabs: HubSectionDef[] = [
     { id: 'settings', label: t('settings') || 'Settings', icon: SettingsIcon, hidden: !canSettings, description: t('hub_desc_settings_settings') || 'Business and app preferences' },
@@ -85,7 +83,7 @@ export default function SettingsHubPage() {
           : section === 'backup' && canBackup ? <BackupSection />
           : canSettings ? <SettingsSection />
           : canUsers ? <UsersSection />
-          : <BackupSection />}
+          : canBackup ? <BackupSection /> : null}
       </Suspense>
       </HubSectionNav>
     </div>

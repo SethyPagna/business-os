@@ -1,5 +1,6 @@
 import { Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
+import { isAdminControlUser } from '../../utils/permissions.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
@@ -346,7 +347,7 @@ function DetailRow({ label, value, mono = false }: DetailRowProps) {
 }
 
 export default function AuditLog() {
-  const { t, user, hasPermission } = useApp()
+  const { t, user } = useApp()
   // E3: renders inside Review & Logs now -- lifecycle keys on that page.
   const isActive = useIsPageActive('review')
   const [logs, setLogs] = useState<AuditLogRow[]>([])
@@ -394,11 +395,7 @@ export default function AuditLog() {
   const loadWatchdogRef = useRef<number | null>(null)
   const selectAllRef = useRef<HTMLInputElement | null>(null)
   const aliveRef = useRef(true)
-  const isAdmin = useMemo(() => {
-    const roleCode = String(user?.role_code || '').toLowerCase()
-    const username = String(user?.username || '').toLowerCase()
-    return username === 'admin' || roleCode === 'admin' || hasPermission?.('all')
-  }, [hasPermission, user])
+  const isAdmin = isAdminControlUser(user)
   const timeMode = useMemo(() => getTimeGroupingMode(yearFilter, monthFilter), [monthFilter, yearFilter])
 
   const actionLabels = useMemo<Record<string, string>>(() => ({

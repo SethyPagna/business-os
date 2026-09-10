@@ -26,6 +26,7 @@ type ReviewLogsAppContext = {
   hasPermission: (key: string) => boolean
   t: (key: string, fallback?: string) => string
   getPermissionTier: (key: string) => string
+  can: (key: string, action: string) => boolean
 }
 const useApp = useAppHook as unknown as () => ReviewLogsAppContext
 
@@ -41,15 +42,15 @@ function initialSection(canReview: boolean, canAudit: boolean): ReviewLogsSectio
 }
 
 export default function ReviewLogsPage() {
-  const { t, getPermissionTier, hasPermission, navigateTo } = useApp()
-  const canReview = getPermissionTier('review') !== 'none'
-  const canAudit = getPermissionTier('audit_log') !== 'none'
+  const { t, getPermissionTier, hasPermission, can, navigateTo } = useApp()
+  const canReview = can('review', 'view')
+  const canAudit = can('audit_log', 'view')
   // audit_log view tier (Part 557 slice 7): 'view' sees the main Audit Log
   // scoped to their OWN actions; the legacy deleted-sale ledger is a
   // cross-user evidence view whose endpoint stays Full-only (denyUnless), so
   // that chip/section shows only for 'full'.
-  const canAuditAll = getPermissionTier('audit_log') === 'full'
-  const [section, setSection] = useHubSection<ReviewLogsSection>('review', () => initialSection(canReview, canAudit), getHubDestinations('review', { getPermissionTier, hasPermission }).map((item) => item.id), navigateTo)
+  const canAuditAll = canAudit && getPermissionTier('audit_log') === 'full'
+  const [section, setSection] = useHubSection<ReviewLogsSection>('review', () => initialSection(canReview, canAudit), getHubDestinations('review', { getPermissionTier, hasPermission, can }).map((item) => item.id), navigateTo)
 
   // No per-chip active hue, and no forked desktop row. Review used to
   // paint its open chip blue / teal / rose while every other hub picked its
@@ -85,9 +86,9 @@ export default function ReviewLogsPage() {
           <AuditLogSection />
         ) : canReview ? (
           <ReviewQueueSection />
-        ) : (
+        ) : canAudit ? (
           <AuditLogSection />
-        )}
+        ) : null}
       </Suspense>
       </HubSectionNav>
     </div>

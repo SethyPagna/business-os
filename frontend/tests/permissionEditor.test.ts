@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import ts from 'typescript'
+import { normalizePermissionState } from '../src/utils/permissions.ts'
 
 const source = fs.readFileSync(new URL('../src/components/users/PermissionEditor.tsx', import.meta.url), 'utf8')
 const definitions = fs.readFileSync(new URL('../src/components/users/permissionDefinitions.ts', import.meta.url), 'utf8')
@@ -60,10 +62,20 @@ console.log('PASS PermissionEditor exposes page/action-sensitive permission grou
 // parsePermissionState instead of collapsing it to Boolean(value), the
 // same bug class Users.tsx's normalizePermissionState was fixed for.
 assert.match(source, /from '\.\.\/\.\.\/utils\/permissions\.ts'/)
-assert.match(source, /REVIEW_TIER_KEYS/)
+assert.match(source, /normalizePermissionState/)
 assert.match(source, /permission\.tier/)
 assert.match(source, /setTier/)
-assert.match(source, /raw === 'review' && REVIEW_TIER_KEYS\.has\(key\)/)
+const ast = ts.createSourceFile('PermissionEditor.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+const parser = ast.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === 'parsePermissionState')!
+const compiled = ts.transpileModule(parser.getText(ast), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText
+const parseEditor = new Function('normalizePermissionState', `${compiled}; return parsePermissionState`)(normalizePermissionState)
+for (const raw of ['false', 'true', 1, [], {}, null]) {
+  for (const value of [{ all: raw, products: raw }, JSON.stringify({ all: raw, products: raw })]) {
+    assert.deepEqual(parseEditor(value), { all: false, products: false })
+  }
+}
+assert.deepEqual(parseEditor({ products: 'review', sales: 'view', pos: true }), { products: 'review', sales: 'view', pos: true })
+assert.deepEqual(parseEditor('[true]'), {})
 assert.match(source, /review_required/)
 assert.match(source, /label_full_access/)
 
