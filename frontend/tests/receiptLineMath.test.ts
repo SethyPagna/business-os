@@ -134,6 +134,19 @@ const sale16433 = {
   const promo = receiptLineFigures({ quantity: 1, applied_price_usd: 8, base_price_usd: 9, product_discount_usd: 1 }, true, RATE)
   assert.equal(promo.sellingUnitUsd, 10)
   assert.equal(promo.savingsUsd, 2)
+
+  // A manual POS discount is additive to a product promotion. The receipt
+  // must show the original selling price and count both cuts exactly once.
+  const manual = receiptLineFigures({
+    quantity: 2,
+    applied_price_usd: 7,
+    base_price_usd: 8,
+    product_discount_usd: 1,
+    manual_discount_usd: 1,
+  }, true, RATE)
+  assert.equal(manual.sellingUnitUsd, 10)
+  assert.equal(manual.unitSavingsUsd, 3)
+  assert.equal(manual.savingsUsd, 6)
 }
 
 // --- riel column tells the same story as the dollar column ------------------

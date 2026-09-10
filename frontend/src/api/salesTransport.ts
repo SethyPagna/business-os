@@ -288,9 +288,10 @@ export async function addSaleItems(
 }
 
 export interface SaleAmendmentRequest {
-  kind: 'line_quantity_increased' | 'line_quantity_decreased' | 'line_removed' | 'line_replaced' | 'delivery_fee_changed' | 'delivery_actual_cost_changed' | 'delivery_added'
+  kind: 'line_quantity_increased' | 'line_quantity_decreased' | 'line_removed' | 'line_updated' | 'line_replaced' | 'delivery_fee_changed' | 'delivery_actual_cost_changed' | 'delivery_added'
   sale_item_id?: number
   quantity?: number
+  applied_price_usd?: number
   delivery_fee_usd?: number
   delivery_actual_cost_usd?: number | string | null
   delivery_contact_id?: number

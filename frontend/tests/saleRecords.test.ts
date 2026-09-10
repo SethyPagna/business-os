@@ -46,7 +46,7 @@ const RECORDS: SaleRecord[] = [
 test('browser kind vocabulary is the frozen v2 contract and every label is localized', () => {
   assert.deepEqual(SALE_RECORD_KINDS, [
     'sale_created', 'driver_changed', 'delivery_cost_changed', 'delivery_fee_changed', 'delivery_added',
-    'item_added', 'item_removed', 'item_quantity_changed', 'items_replaced', 'customer_changed',
+    'item_added', 'item_removed', 'item_quantity_changed', 'item_price_changed', 'items_replaced', 'customer_changed',
     'membership_changed', 'status_changed', 'payment_changed', 'payment_settled', 'cancelled', 'sale_items_recovered', 'sale_stock_corrected', 'legacy_sale_change',
   ])
   const en = JSON.parse(read('../src/lang/en.json')) as Record<string, string>
@@ -63,6 +63,18 @@ test('unknown kinds close to one meaningful legacy kind, never raw snake case', 
   assert.equal(saleRecordKind('driver_changed'), 'driver_changed')
   assert.equal(saleRecordKind('something_invented_later'), 'legacy_sale_change')
   assert.equal(saleRecordKind(undefined), 'legacy_sale_change')
+})
+
+test('selling-price records have a typed money field', () => {
+  const record: SaleRecord = { id: 'amendment:price', kind: 'item_price_changed', changes: [
+    change('item', value({ name: 'Serum' }), value({ name: 'Serum' })),
+    change('unit_price_usd', value(3), value(4.5)),
+    change('total_usd', value(6), value(9)),
+  ] }
+  const rows = saleRecordFieldRows(record)
+  assert.deepEqual(rows.map((row) => [row.field, row.format]), [
+    ['unit_price_usd', 'money'], ['total_usd', 'money'],
+  ])
 })
 
 test('detail rows consume only tri-state changes and omit unchanged context', () => {

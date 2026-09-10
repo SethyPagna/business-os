@@ -22,6 +22,7 @@ import {
   type SaleAmendmentRow,
 } from '../../utils/saleAmendments.ts'
 import { receiptTotalsFigures } from '../../utils/receiptTotals.ts'
+import { receiptLineFigures } from '../../utils/receiptLineMath.ts'
 import CopyableId from '../shared/CopyableId.tsx'
 import EntityLink from '../shared/EntityLink.tsx'
 import { DetailRow, DetailRowGroup, MoneyRow } from '../shared/DetailRows.tsx'
@@ -76,6 +77,14 @@ interface SaleLineItem {
   qty?: number | string | null
   applied_price_usd?: number | string | null
   applied_price_khr?: number | string | null
+  total_usd?: number | string | null
+  total_khr?: number | string | null
+  base_price_usd?: number | string | null
+  base_price_khr?: number | string | null
+  product_discount_usd?: number | string | null
+  product_discount_khr?: number | string | null
+  manual_discount_usd?: number | string | null
+  manual_discount_khr?: number | string | null
   price_usd?: number | string | null
   price_khr?: number | string | null
   price?: number | string | null
@@ -175,9 +184,10 @@ type AddProductCandidate = SaleAddCandidate
 // api/salesTransport.ts's SaleAmendmentRequest -- one shape, so the button and
 // the request cannot drift.
 interface SaleAmendmentRequest {
-  kind: 'line_quantity_increased' | 'line_quantity_decreased' | 'line_removed' | 'line_replaced' | 'delivery_fee_changed' | 'delivery_actual_cost_changed' | 'delivery_added'
+  kind: 'line_quantity_increased' | 'line_quantity_decreased' | 'line_removed' | 'line_updated' | 'line_replaced' | 'delivery_fee_changed' | 'delivery_actual_cost_changed' | 'delivery_added'
   sale_item_id?: number
   quantity?: number
+  applied_price_usd?: number
   delivery_fee_usd?: number
   delivery_actual_cost_usd?: number | string | null
   delivery_contact_id?: number
@@ -502,6 +512,7 @@ export default function SaleDetailModal({
   // Which line's inline amend controls are open, and what is typed in them.
   const [amendLineId, setAmendLineId] = useState<number | null>(null)
   const [amendQtyText, setAmendQtyText] = useState('')
+  const [amendPriceText, setAmendPriceText] = useState('')
   const [amendSaving, setAmendSaving] = useState(false)
   const [amendConfirm, setAmendConfirm] = useState<{ request: SaleAmendmentRequest; title: string; summary: string } | null>(null)
   // The delivery fee editor: the CORRECTED value, not a delta. A cashier
@@ -715,7 +726,8 @@ export default function SaleDetailModal({
         setDeliveryAdding(false)
         setDeliveryContact(null)
         setDeliverySearch('')
-        setAmendQtyText('')
+    setAmendQtyText('')
+    setAmendPriceText('')
         setAmendConfirm(null)
         setAmendReloadToken((token) => token + 1)
       }
@@ -725,10 +737,11 @@ export default function SaleDetailModal({
   }
 
   /** Open the amend controls on one line, prefilled with its current quantity. */
-  const startAmendLine = (lineId: number, currentQuantity: number): void => {
+  const startAmendLine = (lineId: number, currentQuantity: number, currentPrice: number): void => {
     setAmendLineId(lineId)
     setReplaceLineId(null)
     setAmendQtyText(String(currentQuantity))
+    setAmendPriceText(String(currentPrice))
   }
 
   /**
@@ -757,6 +770,31 @@ export default function SaleDetailModal({
         ? translateOr('amend_increase_title', 'Add to this line?', 'បន្ថែមទៅជួរនេះ?')
         : translateOr('amend_decrease_title', 'Reduce this line?', 'បន្ថយជួរនេះ?'),
       summary: `${name}: ${currentQuantity} → ${next}`,
+    })
+  }
+
+  /** Stage quantity and final selling-price edits as one atomic amendment. */
+  const stageLineUpdate = (lineId: number, currentQuantity: number, currentPrice: number, name: string): void => {
+    const nextQuantity = Number(amendQtyText)
+    const nextPrice = Number(amendPriceText)
+    if (!Number.isFinite(nextQuantity) || nextQuantity <= 0) {
+      setAmendMutationError(translateOr('amend_quantity_positive', 'Quantity must be greater than zero. Use Remove to delete a line.', 'ចំនួនត្រូវធំជាងសូន្យ។ សូមប្រើ ដកចេញ ដើម្បីលុបជួរ។'))
+      return
+    }
+    if (!Number.isFinite(nextPrice) || nextPrice < 0) {
+      setAmendMutationError(translateOr('amend_price_nonnegative', 'Selling price must be zero or more.', 'តម្លៃលក់ត្រូវសូន្យ ឬខ្ពស់ជាងនេះ។'))
+      return
+    }
+    if (Math.abs(nextQuantity - currentQuantity) < 0.000001 && Math.abs(nextPrice - currentPrice) < 0.000001) {
+      setAmendMutationError(translateOr('amend_no_change', 'Enter a new quantity or selling price.', 'សូមបញ្ចូលចំនួន ឬតម្លៃលក់ថ្មី។'))
+      return
+    }
+    amendRequestIdRef.current = createSettlementRequestId()
+    setAmendMutationError('')
+    setAmendConfirm({
+      request: { kind: 'line_updated', sale_item_id: lineId, quantity: nextQuantity, applied_price_usd: nextPrice },
+      title: translateOr('amend_line_update_title', 'Update this item?', 'ធ្វើបច្ចុប្បន្នភាពទំនិញនេះ?'),
+      summary: `${name}: ${currentQuantity} → ${nextQuantity} · ${fmtUSD(currentPrice)} → ${fmtUSD(nextPrice)}`,
     })
   }
 
@@ -949,12 +987,16 @@ export default function SaleDetailModal({
   // on fixtures rather than a reader trusting that it does.
   const totals = receiptTotalsFigures(sale)
   const totalUsd = totals.totalUsd
-  const totalKhr = toNumber(sale.total_khr)
+  const totalKhr = totals.totalKhr
   const refundUsd = totals.refundUsd
   const refundKhr = totals.refundKhr
   const membershipDiscountUsd = totals.membershipDiscountUsd
-  const membershipDiscountKhr = toNumber(sale.membership_discount_khr)
+  const membershipDiscountKhr = totals.membershipDiscountKhr
   const baseDiscountUsd = totals.discountUsd
+  const itemDiscountUsd = totals.itemDiscountUsd
+  const itemDiscountKhr = totals.itemDiscountKhr
+  const totalDiscountUsd = totals.totalDiscountUsd
+  const totalDiscountKhr = Math.round(totalDiscountUsd * totals.exchangeRate)
   const taxUsd = totals.taxUsd
   const subtotalUsd = totals.subtotalUsd
   // subtotal_khr was already returned by GET /api/sales and already stored by
@@ -962,13 +1004,13 @@ export default function SaleDetailModal({
   // the total while leaving the subtotal USD-only -- so the riel column had a
   // hole in it right at the top. It is shown now for the same reason the rest
   // are: the KHR column has to read straight down.
-  const subtotalKhr = toNumber(sale.subtotal_khr)
+  const subtotalKhr = totals.subtotalKhr
   const amountPaidUsd = totals.paidUsd
   const amountPaidKhr = totals.paidKhr
   const changeUsd = totals.changeUsd
   const changeKhr = totals.changeKhr
-  const discountKhr = toNumber(sale.discount_khr)
-  const taxKhr = toNumber(sale.tax_khr)
+  const discountKhr = totals.discountKhr
+  const taxKhr = totals.taxKhr
   // The fee AS STORED -- what the Edit control corrects -- plus the split by
   // who actually paid it. `total_usd` only ever carries a CUSTOMER-paid fee,
   // so printing the stored figure whoever paid it left this column over by
@@ -1595,8 +1637,20 @@ export default function SaleDetailModal({
                     const qty = toNumber(item.quantity || item.qty || 1) || 1
                     const unitUsd = toNumber(item.applied_price_usd ?? item.price_usd ?? item.price)
                     const unitKhr = toNumber(item.applied_price_khr ?? item.price_khr)
-                    const lineUsd = unitUsd * qty
-                    const lineKhr = unitKhr * qty
+                    const storedLineUsd = Number(item.total_usd)
+                    const storedLineKhr = Number(item.total_khr)
+                    const lineUsd = Number.isFinite(storedLineUsd) ? storedLineUsd : unitUsd * qty
+                    const lineKhr = Number.isFinite(storedLineKhr) ? storedLineKhr : unitKhr * qty
+                    const baseUnitUsd = toNumber(item.base_price_usd)
+                    const productDiscountUsd = toNumber(item.product_discount_usd)
+                    const manualDiscountUsd = toNumber(item.manual_discount_usd)
+                    const lineDiscountUsd = productDiscountUsd + manualDiscountUsd
+                    const lineFigures = receiptLineFigures(item, true, totals.exchangeRate)
+                    const originalUnitUsd = lineFigures.hasDiscount
+                      ? lineFigures.sellingUnitUsd
+                      : (baseUnitUsd > unitUsd ? baseUnitUsd : unitUsd + lineDiscountUsd)
+                    const hasLineDiscount = originalUnitUsd > unitUsd + 0.005 && lineDiscountUsd > 0
+                    const originalLineUsd = hasLineDiscount ? originalUnitUsd * qty : lineUsd
                     // The sale_items row id, which every amendment addresses.
                     // A legacy row without one gets no controls rather than a
                     // button that would 404 -- the sale is still fully
@@ -1623,11 +1677,18 @@ export default function SaleDetailModal({
                         </td>
                         <td className="whitespace-nowrap px-1.5 py-1.5 text-right align-top sm:px-2 tabular-nums text-gray-700 dark:text-gray-200">{qty}</td>
                         <td className="whitespace-nowrap px-1.5 py-1.5 text-right align-top sm:px-2 tabular-nums text-gray-700 dark:text-gray-200">
-                          {fmtUSD(unitUsd)}
+                          {hasLineDiscount ? <div className="text-[11px] text-gray-400 line-through">{fmtUSD(originalUnitUsd)}</div> : null}
+                          <div>{fmtUSD(unitUsd)}</div>
                           {unitKhr > 0 ? <div className="text-[11px] text-gray-400">{fmtKHR(unitKhr)}</div> : null}
+                          {hasLineDiscount ? (
+                            <div className="text-[11px] font-medium text-amber-600 dark:text-amber-400">
+                              -{fmtUSD(lineDiscountUsd)} {translateOr('discount', 'discount', 'បញ្ចុះតម្លៃ')}
+                            </div>
+                          ) : null}
                         </td>
                         <td className="whitespace-nowrap px-1.5 py-1.5 text-right align-top sm:px-2 font-semibold tabular-nums text-gray-900 dark:text-white">
-                          {fmtUSD(lineUsd)}
+                          {hasLineDiscount ? <div className="text-[11px] font-normal text-gray-400 line-through">{fmtUSD(originalLineUsd)}</div> : null}
+                          <div>{fmtUSD(lineUsd)}</div>
                           {lineKhr > 0 ? <div className="text-[11px] font-normal text-gray-400">{fmtKHR(lineKhr)}</div> : null}
                         </td>
                         {/* S4-30: the amend affordance. Inline rather than in a
@@ -1648,7 +1709,7 @@ export default function SaleDetailModal({
                             {lineId > 0 ? (
                               <button
                                 type="button"
-                                onClick={() => (amendLineId === lineId ? setAmendLineId(null) : startAmendLine(lineId, qty))}
+                                onClick={() => (amendLineId === lineId ? setAmendLineId(null) : startAmendLine(lineId, qty, unitUsd))}
                                 className="rounded border border-gray-200 px-2 py-1 text-[11px] font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
                               >
                                 {amendLineId === lineId
@@ -1676,10 +1737,23 @@ export default function SaleDetailModal({
                                 onChange={(event) => setAmendQtyText(event.target.value)}
                                 className="w-20 rounded border border-gray-300 px-2 py-1 text-sm tabular-nums dark:border-gray-600 dark:bg-gray-800 dark:text-white"
                               />
+                              <label className="text-[11px] font-medium text-gray-600 dark:text-gray-300" htmlFor={`amend-price-${lineId}`}>
+                                {t('selling_price') || 'Selling price'}
+                              </label>
+                              <input
+                                id={`amend-price-${lineId}`}
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                inputMode="decimal"
+                                value={amendPriceText}
+                                onChange={(event) => setAmendPriceText(event.target.value)}
+                                className="w-24 rounded border border-gray-300 px-2 py-1 text-sm tabular-nums dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                              />
                               <button
                                 type="button"
                                 disabled={amendSaving}
-                                onClick={() => stageQuantityAmendment(lineId, qty, String(item.product_name || item.name || ''))}
+                                onClick={() => stageLineUpdate(lineId, qty, unitUsd, String(item.product_name || item.name || ''))}
                                 className="rounded bg-blue-600 px-2.5 py-1 text-[11px] font-semibold text-white disabled:opacity-50"
                               >
                                 {translateOr('amend_apply', 'Apply', 'អនុវត្ត')}
@@ -1784,12 +1858,28 @@ export default function SaleDetailModal({
                       sub={discountKhr > 0 ? `-${fmtKHR(discountKhr)}` : null}
                     />
                   ) : null}
+                  {itemDiscountUsd > 0 ? (
+                    <MoneyRow
+                      label={translateOr('item_discount', 'Item discount', 'បញ្ចុះតម្លៃទំនិញ')}
+                      tone="discount"
+                      amount={`-${fmtUSD(itemDiscountUsd)}`}
+                      sub={itemDiscountKhr > 0 ? `-${fmtKHR(itemDiscountKhr)}` : null}
+                    />
+                  ) : null}
                   {membershipDiscountUsd > 0 ? (
                     <MoneyRow
                       label={t('membership_discount') || 'Membership discount'}
                       tone="credit"
                       amount={`-${fmtUSD(membershipDiscountUsd)}`}
                       sub={membershipDiscountKhr > 0 ? `-${fmtKHR(membershipDiscountKhr)}` : null}
+                    />
+                  ) : null}
+                  {[itemDiscountUsd, baseDiscountUsd, membershipDiscountUsd].filter((value) => value > 0).length > 1 ? (
+                    <MoneyRow
+                      label={translateOr('total_discount', 'Total discount', 'បញ្ចុះតម្លៃសរុប')}
+                      tone="discount"
+                      amount={`-${fmtUSD(totalDiscountUsd)}`}
+                      sub={totalDiscountKhr > 0 ? `-${fmtKHR(totalDiscountKhr)}` : null}
                     />
                   ) : null}
                   {/* S4-24: "Points redeemed" is gone. It is not money -- it
@@ -2222,6 +2312,15 @@ export default function SaleDetailModal({
                             </span>
                           </div>
                         )}
+                        {entry.type === 'single' && entry.row.priceBeforeText ? (
+                          <div className="mt-1 flex flex-wrap items-baseline gap-x-2 text-[11px] text-gray-500 dark:text-gray-400">
+                            <span>{translateOr('selling_price', 'Selling price', 'តម្លៃលក់')}:</span>
+                            <span className="tabular-nums">{entry.row.priceBeforeText}</span>
+                            <span aria-hidden="true">→</span>
+                            <span className="tabular-nums font-semibold text-gray-800 dark:text-gray-200">{entry.row.priceAfterText}</span>
+                            <span className="tabular-nums">({entry.row.priceDeltaText})</span>
+                          </div>
+                        ) : null}
                         {head.via !== 'amend' ? (
                           <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
                             {head.via === 'undo'

@@ -96,6 +96,8 @@ export interface ReceiptTotalsFigures {
   subtotalKhr: number
   /** The per-line cuts. Already inside subtotalUsd; reported, never re-applied. */
   itemDiscountUsd: number
+  /** The same per-line cuts expressed at the sale's booked rate. */
+  itemDiscountKhr: number
   /** The order-level cut the cashier typed. */
   discountUsd: number
   discountKhr: number
@@ -182,6 +184,7 @@ export function receiptTotalsFigures(
     subtotalUsd,
     subtotalKhr: num(sale.subtotal_khr) || Math.round(subtotalUsd * exchangeRate),
     itemDiscountUsd,
+    itemDiscountKhr: Math.round(itemDiscountUsd * exchangeRate),
     discountUsd,
     discountKhr: num(sale.discount_khr) || Math.round(discountUsd * exchangeRate),
     membershipDiscountUsd,

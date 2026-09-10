@@ -40,6 +40,8 @@ export interface ReceiptLineInput {
   base_price_khr?: number | string | null
   product_discount_usd?: number | string | null
   product_discount_khr?: number | string | null
+  manual_discount_usd?: number | string | null
+  manual_discount_khr?: number | string | null
 }
 
 const num = (value: unknown): number => {
@@ -79,9 +81,11 @@ export function receiptLineFigures(
   const chargedUnitUsd = num(item.applied_price_usd ?? item.price_usd ?? item.price)
   const chargedUnitKhr = num(item.applied_price_khr ?? item.price_khr)
   const baseUnitUsd = num(item.base_price_usd)
+  const productSavingsUsd = num(item.product_discount_usd)
+  const manualSavingsUsd = num(item.manual_discount_usd)
   const originalUnitUsd = baseUnitUsd > 0
-    ? baseUnitUsd + num(item.product_discount_usd)
-    : num(item.price_usd ?? item.price)
+    ? baseUnitUsd + productSavingsUsd + manualSavingsUsd
+    : num(item.price_usd ?? item.price) + manualSavingsUsd
 
   const hasDiscount = showItemDiscount
     && originalUnitUsd > 0
@@ -99,7 +103,7 @@ export function receiptLineFigures(
   let sellingUnitKhr = chargedUnitKhr
   if (hasDiscount) {
     const baseUnitKhr = num(item.base_price_khr)
-    if (baseUnitKhr > 0) sellingUnitKhr = baseUnitKhr + num(item.product_discount_khr)
+    if (baseUnitKhr > 0) sellingUnitKhr = baseUnitKhr + num(item.product_discount_khr) + num(item.manual_discount_khr)
     else if (chargedUnitKhr > 0 && chargedUnitUsd > 0) sellingUnitKhr = chargedUnitKhr * (sellingUnitUsd / chargedUnitUsd)
     else sellingUnitKhr = sellingUnitUsd * exchangeRate
   }

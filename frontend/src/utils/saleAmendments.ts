@@ -63,6 +63,10 @@ export interface AmendmentDisplayRow {
   afterText: string
   /** e.g. "+1" / "-$0.50" -- the add-on-top the owner asked to see. */
   deltaText: string
+  /** Present for a combined quantity + selling-price correction. */
+  priceBeforeText?: string
+  priceAfterText?: string
+  priceDeltaText?: string
   /** True for a rise, false for a fall. Drives the colour, not the wording. */
   isIncrease: boolean
   /** The line is gone from the sale entirely -- the receipt will not show it. */
@@ -165,6 +169,7 @@ export function toAmendmentDisplayRow(
     }
   }
   const family: 'quantity' | 'money' = MONEY_KINDS.has(kind) ? 'money' : 'quantity'
+  const isLineUpdate = kind === 'line_updated'
   const isRemoval = kind === 'line_removed'
 
   const before = family === 'money' ? num(row.amount_before_usd) : num(row.quantity_before)
@@ -197,6 +202,11 @@ export function toAmendmentDisplayRow(
     deltaText: family === 'money'
       ? `${delta > 0 ? '+' : delta < 0 ? '-' : ''}${fmtUSD(Math.abs(delta))}`
       : formatSignedUnits(delta),
+    ...(isLineUpdate ? {
+      priceBeforeText: fmtUSD(num(row.amount_before_usd)),
+      priceAfterText: fmtUSD(num(row.amount_after_usd)),
+      priceDeltaText: `${num(row.amount_after_usd) - num(row.amount_before_usd) > 0 ? '+' : num(row.amount_after_usd) - num(row.amount_before_usd) < 0 ? '-' : ''}${fmtUSD(Math.abs(num(row.amount_after_usd) - num(row.amount_before_usd)))}`,
+    } : {}),
     isIncrease: delta > 0,
     isRemoval,
     unitsMoved,
