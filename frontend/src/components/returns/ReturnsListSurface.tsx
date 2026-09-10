@@ -3,6 +3,7 @@ import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import { consumeLongPressClick, createLongPressHandlers, type LongPressState } from '../../utils/longPress.ts'
 import ColumnChooser from '../shared/ColumnChooser.tsx'
+import CopyableId from '../shared/CopyableId.tsx'
 import { useColumnPreferences } from '../shared/useColumnPreferences.ts'
 import type { TableColumnDef } from '../shared/columnPreferences.ts'
 
@@ -218,7 +219,7 @@ export default function ReturnsListSurface({
                   ) : null}
                 </th>
                 <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('return_number', 'Return #')}</th>
-                <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('date', 'Date')}</th>
+                <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('time', 'Time')}</th>
                 <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('reference', 'Reference')}</th>
                 <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{scope === SUPPLIER_SCOPE ? tr('supplier', 'Supplier') : tr('customer', 'Customer')}</th>
                 <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('reason', 'Reason')}</th>
@@ -343,8 +344,13 @@ export default function ReturnsListSurface({
                                 />
                                 ) : null}
                               </td>
-                              <td className="dense-id whitespace-nowrap font-medium text-orange-600 dark:text-orange-400">
-                                {ret.return_number}
+                              <td className="dense-id whitespace-nowrap font-medium text-gray-900 dark:text-white">
+                                <CopyableId
+                                  value={ret.return_number || ''}
+                                  copyLabel={tr('copy_return_id', 'Copy return ID')}
+                                  copiedLabel={tr('copied', 'Copied')}
+                                  valueClassName="font-mono text-sm font-semibold text-gray-900 dark:text-white"
+                                />
                                 {(ret.damaged_item_count || 0) > 0 ? (
                                   <span
                                     data-tag="damaged"
@@ -358,7 +364,13 @@ export default function ReturnsListSurface({
                               <td className="whitespace-nowrap text-gray-500">{fmtTime(ret.created_at)}</td>
                               <td>
                                 {ret.receipt_number
-                                  ? <span className="dense-cell-truncate dense-id text-blue-600 dark:text-blue-400" title={ret.receipt_number}>{ret.receipt_number}</span>
+                                  ? <CopyableId
+                                      value={ret.receipt_number}
+                                      copyLabel={tr('copy_receipt_number', 'Copy receipt number')}
+                                      copiedLabel={tr('copied', 'Copied')}
+                                      className="dense-cell-truncate dense-id"
+                                      valueClassName="font-mono text-gray-700 dark:text-gray-300"
+                                    />
                                   : <span className="text-xs text-gray-400">{tr('manual_return', 'Manual')}</span>}
                               </td>
                               <td className="text-gray-700 dark:text-gray-300"><span className="dense-cell-truncate" title={retScope === SUPPLIER_SCOPE ? (ret.supplier_name || '-') : (ret.customer_name || '-')}>{retScope === SUPPLIER_SCOPE ? (ret.supplier_name || '-') : (ret.customer_name || '-')}</span></td>
@@ -486,10 +498,31 @@ export default function ReturnsListSurface({
                           />
                         </div>
                         ) : null}
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              <span className="font-mono text-sm font-semibold text-orange-600 dark:text-orange-400">{ret.return_number}</span>
+                        <div className="flex min-w-0 items-center justify-between gap-2">
+                          <div data-return-primary-meta className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden text-xs text-gray-500 dark:text-gray-400">
+                            <CopyableId
+                              value={ret.return_number || ''}
+                              copyLabel={tr('copy_return_id', 'Copy return ID')}
+                              copiedLabel={tr('copied', 'Copied')}
+                              className="max-w-[42%] shrink"
+                              valueClassName="truncate font-mono text-sm font-semibold text-gray-900 dark:text-white"
+                            />
+                            {ret.receipt_number ? (
+                              <>
+                                <span aria-hidden="true" className="shrink-0">·</span>
+                                <CopyableId
+                                  value={ret.receipt_number}
+                                  copyLabel={tr('copy_receipt_number', 'Copy receipt number')}
+                                  copiedLabel={tr('copied', 'Copied')}
+                                  className="min-w-0 shrink"
+                                  valueClassName="truncate font-mono text-gray-700 dark:text-gray-300"
+                                />
+                              </>
+                            ) : null}
+                            <span aria-hidden="true" className="shrink-0">·</span>
+                            <span className="shrink-0 tabular-nums">{fmtTime(ret.created_at)}</span>
+                          </div>
+                          <div className="flex shrink-0 items-center gap-1.5">
                               {(ret.damaged_item_count || 0) > 0 ? (
                                 <span
                                   data-tag="damaged"
@@ -499,22 +532,17 @@ export default function ReturnsListSurface({
                                   {ret.damaged_item_count} {tr('damaged_items_tag', 'damaged')}
                                 </span>
                               ) : null}
-                            </div>
-                            <div className="text-xs text-gray-400">{fmtTime(ret.created_at)}</div>
-                            <div className="mt-0.5 truncate text-xs text-gray-600 dark:text-gray-400">{ret.reason}</div>
-                            <div className="mt-0.5 text-xs text-gray-400">{retScope === SUPPLIER_SCOPE ? (ret.supplier_name || '-') : (ret.customer_name || '-')}</div>
-                            {/* N13: branch + cashier shown consistently with
-                                the sales phone card's meta line. */}
-                            {ret.branch_name || ret.cashier_name ? (
-                              <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-xs text-gray-400">
-                                {ret.branch_name ? <span>{ret.branch_name}</span> : null}
-                                {ret.cashier_name ? <span>{ret.branch_name ? '| ' : ''}{ret.cashier_name}</span> : null}
-                              </div>
-                            ) : null}
-                          </div>
-                          <div className="flex-shrink-0 text-right">
                             {renderAmount(ret)}
                           </div>
+                        </div>
+                        <div data-return-secondary-meta className="mt-1 flex min-w-0 flex-nowrap items-center gap-1.5 overflow-hidden text-[11px] leading-4 text-gray-500 dark:text-gray-400">
+                          <span className="min-w-0 truncate" aria-label={`${tr('cashier', 'Cashier')}: ${ret.cashier_name || '-'}`}>{ret.cashier_name || '-'}</span>
+                          <span aria-hidden="true" className="shrink-0">·</span>
+                          <span className="min-w-0 truncate" aria-label={`${tr('branch', 'Branch')}: ${ret.branch_name || '-'}`}>{ret.branch_name || '-'}</span>
+                          <span aria-hidden="true" className="shrink-0">·</span>
+                          <span className="min-w-0 truncate" aria-label={`${retScope === SUPPLIER_SCOPE ? tr('supplier', 'Supplier') : tr('customer', 'Customer')}: ${retScope === SUPPLIER_SCOPE ? (ret.supplier_name || '-') : (ret.customer_name || '-')}`}>{retScope === SUPPLIER_SCOPE ? (ret.supplier_name || '-') : (ret.customer_name || '-')}</span>
+                          <span aria-hidden="true" className="shrink-0">·</span>
+                          <span className="min-w-0 flex-1 truncate" aria-label={`${tr('reason', 'Reason')}: ${ret.reason || '-'}`}>{ret.reason || '-'}</span>
                         </div>
                       </div>
                     )

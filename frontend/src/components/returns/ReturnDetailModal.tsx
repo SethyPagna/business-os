@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import { fmtTime } from '../../utils/formatters.ts'
 import CopyableId from '../shared/CopyableId.tsx'
+import MinimizeButton from '../shared/MinimizeButton.tsx'
 import { DetailRow, DetailRowGroup, MoneyRow } from '../shared/DetailRows.tsx'
 import { getReturn as fetchReturnDetail } from '../../api/returnsReadTransport.ts'
 import { normalizeStockAction, stockActionOption } from './helpers/returnOptions.ts'
@@ -64,6 +65,7 @@ interface ReturnDetail {
 interface ReturnDetailModalProps {
   ret?: ReturnDetail | null
   onClose: () => void
+  onMinimize: () => void
   onEdit?: () => void
   fmtUSD: (value: number | string) => string
   fmtKHR: (value: number | string) => string
@@ -85,7 +87,7 @@ function isPositiveMoney(value: number | string | null | undefined): boolean {
   return Number(value || 0) > 0
 }
 
-export default function ReturnDetailModal({ ret, onClose, onEdit, fmtUSD, fmtKHR }: ReturnDetailModalProps) {
+export default function ReturnDetailModal({ ret, onClose, onMinimize, onEdit, fmtUSD, fmtKHR }: ReturnDetailModalProps) {
   const { t } = useApp()
   const tr = (key: string, fallback: string): string => {
     const value = t?.(key)
@@ -137,15 +139,16 @@ export default function ReturnDetailModal({ ret, onClose, onEdit, fmtUSD, fmtKHR
   return createPortal(
     <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center" onClick={onClose}>
       <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl sm:max-w-2xl sm:rounded-2xl dark:bg-gray-800" onClick={(event) => event.stopPropagation()}>
-        {/* Same treatment as the sale receipt id: below sm the return id takes
-            a full-width row of its own and wraps rather than being clipped or
-            scrolled, with a one-tap copy control. */}
-        <div className="flex flex-col gap-2 border-b border-gray-200 p-4 dark:border-gray-700 sm:flex-row sm:items-start sm:justify-between">
+        {/* Identity and window controls stay in one unbroken header row. The
+            receipt may wrap inside the remaining width, but minimize and close
+            always retain their full touch targets. */}
+        <div data-return-detail-header className="flex items-start justify-between gap-2 border-b border-gray-200 p-3 dark:border-gray-700 sm:p-4">
           <div className="min-w-0 flex-1">
             <CopyableId
               value={ret.return_number || ''}
               copyLabel={tr('copy_return_id', 'Copy return ID')}
               copiedLabel={tr('copied', 'Copied')}
+              className="max-w-full"
               valueClassName="font-mono text-base font-bold text-gray-900 dark:text-white"
             />
             <div className="mt-1 text-xs text-gray-400">{fmtTime(ret.created_at)}</div>
@@ -155,8 +158,9 @@ export default function ReturnDetailModal({ ret, onClose, onEdit, fmtUSD, fmtKHR
               the same treatment the sale detail got, so the two records do not
               disagree about where a record's actions live. X stays: it is how
               you leave, not something you do to the return. */}
-          <div className="flex shrink-0 items-center gap-2">
-            <button type="button" onClick={onClose} aria-label={tr('close', 'Close')} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600"><X className="h-4 w-4" /></button>
+          <div className="flex shrink-0 items-center gap-0.5">
+            <MinimizeButton onMinimize={onMinimize} tr={tr} />
+            <button type="button" onClick={onClose} aria-label={tr('close', 'Close')} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700"><X className="h-4 w-4" /></button>
           </div>
         </div>
 
@@ -181,7 +185,8 @@ export default function ReturnDetailModal({ ret, onClose, onEdit, fmtUSD, fmtKHR
                     value={ret.receipt_number}
                     copyLabel={tr('copy_receipt_number', 'Copy receipt number')}
                     copiedLabel={tr('copied', 'Copied')}
-                    valueClassName="font-mono text-sm text-blue-600 dark:text-blue-400"
+                    className="max-w-full"
+                    valueClassName="font-mono text-sm text-gray-800 dark:text-gray-200"
                   />
                 </DetailRow>
               ) : null}
@@ -191,7 +196,8 @@ export default function ReturnDetailModal({ ret, onClose, onEdit, fmtUSD, fmtKHR
                     value={ret.replacement_receipt_number}
                     copyLabel={tr('copy_receipt_number', 'Copy receipt number')}
                     copiedLabel={tr('copied', 'Copied')}
-                    valueClassName="font-mono text-sm font-semibold text-emerald-600 dark:text-emerald-400"
+                    className="max-w-full"
+                    valueClassName="font-mono text-sm font-semibold text-gray-800 dark:text-gray-200"
                   />
                 </DetailRow>
               ) : null}
@@ -235,7 +241,13 @@ export default function ReturnDetailModal({ ret, onClose, onEdit, fmtUSD, fmtKHR
                             instead of the flag that keeps the units out of
                             sellable stock. */}
                         <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="break-words font-medium text-gray-800 dark:text-gray-200">{item.product_name || '-'}</span>
+                          <CopyableId
+                            value={item.product_name || '-'}
+                            copyLabel={`${tr('copy', 'Copy')} ${tr('product', 'Product')}`}
+                            copiedLabel={tr('copied', 'Copied')}
+                            className="max-w-full"
+                            valueClassName="break-words font-medium text-gray-800 dark:text-gray-200"
+                          />
                           {!isSupplier && normalizeStockAction({ stock_action: item.stock_action, return_to_stock: item.return_to_stock !== 0 && item.return_to_stock !== false }) === 'damaged' ? (
                             <span
                               data-tag="damaged"
@@ -315,7 +327,15 @@ export default function ReturnDetailModal({ ret, onClose, onEdit, fmtUSD, fmtKHR
                   <tbody className="divide-y divide-emerald-100 dark:divide-emerald-800/60">
                     {replacementItems.map((line, index) => (
                       <tr key={`${line.id || 'replacement'}-${index}`}>
-                        <td className="break-words px-1.5 py-1.5 align-top sm:px-2 text-gray-700 dark:text-gray-300">{line.product_name || '-'}</td>
+                        <td className="break-words px-1.5 py-1.5 align-top sm:px-2 text-gray-700 dark:text-gray-300">
+                          <CopyableId
+                            value={line.product_name || '-'}
+                            copyLabel={`${tr('copy', 'Copy')} ${tr('product', 'Product')}`}
+                            copiedLabel={tr('copied', 'Copied')}
+                            className="max-w-full"
+                            valueClassName="break-words text-gray-700 dark:text-gray-300"
+                          />
+                        </td>
                         <td className="whitespace-nowrap px-1.5 py-1.5 text-right align-top sm:px-2 tabular-nums text-gray-700 dark:text-gray-300">{line.quantity || 0}</td>
                         <td className="whitespace-nowrap px-1.5 py-1.5 text-right align-top sm:px-2 font-medium tabular-nums text-gray-900 dark:text-white">
                           {fmtUSD(coerceMoney(line.total_usd))}
