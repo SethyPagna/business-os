@@ -12198,3 +12198,31 @@ cleanup and missing-line/driver evidence, physical iOS/PWA/camera validation,
 transfer reliability/UI polish, public/customer-portal polish, and paused offline
 work. The Cloudflare bot challenge prevents authenticated browser smoke from
 being a substitute for the local contract gates.
+
+## Sales amendment and uncertain-write release deployed — September 10, 2026
+
+The release candidate was deployed after a successful remote D1 migration. Migration
+**0149_sale_line_updates.sql** applied cleanly to `business-os` (17 commands,
+zero errors). The provenance wrapper deployed source commit **2afca7ece997** at
+100% traffic with build hash **d840b8d99c9f95f5**, built **2026-09-10T13:36:51.699Z
+UTC**, as Worker version **1265b5b0-3dbd-4a45-a4a0-47dfc34950a2**. No secrets
+were synced or changed. The deployment uploaded 204 assets and completed with
+all configured routes and consumers intact.
+
+The live bundle contains atomic selling-price/quantity amendments, discount-aware
+receipt/detail totals, typed before/after Records events, authoritative exact
+sale refreshes, uncertain-write reconciliation for status/add/amend actions,
+45-second write budgets, the unlimited-by-default employee edit window setting,
+and compact payment controls. Not Paid/Awaiting Payment stock deduction semantics
+remain intact and line quantity/price updates use the existing stock ledger.
+
+Post-deploy verification: local frontend utility chain **348/348**, frontend
+and Worker typechecks, i18n verification (**5,706 keys / 589 files**), Vite
+production build, migration-chain fresh test, full Worker pure-script sweep,
+and `git diff --check` passed before deployment. A direct unauthenticated request
+to `/api/runtime/version` and Wrangler deployment-list refresh were blocked by
+Cloudflare's account bot challenge (HTTP 403); the successful Wrangler upload,
+version ID, stamped revision, and migration result are the deployment provenance.
+Authenticated browser and physical iOS/PWA/camera certification therefore remain
+pending. Historical duplicate/evidence cleanup, transfer/UI/public portal polish,
+and paused offline work remain open in their existing ledger entries.
