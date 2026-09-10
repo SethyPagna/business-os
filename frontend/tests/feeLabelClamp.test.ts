@@ -123,7 +123,9 @@ check('Expenses keeps reliable filtered paging and responsive dense rows', () =>
   assert.match(feesPageSource, /\.\.\.\(branchFilter \? \{ branchId: branchFilter \} : \{\}\)/, 'report totals must follow the branch filter')
   assert.match(feesPageSource, /className="dense-data-table min-w-\[720px\]"/, 'desktop must use the shared dense table')
   assert.match(feesPageSource, /dense-data-shell hidden overflow-x-auto md:block/, 'the table must start at the safe desktop breakpoint')
-  assert.match(feesPageSource, /space-y-2 md:hidden/, 'mobile must retain dedicated cards')
+  assert.match(feesPageSource, /space-y-3 md:hidden/, 'mobile must retain dedicated cards')
+  assert.match(feesPageSource, /fee\.created_by_name[\s\S]*fee\.branch_name[\s\S]*fee\.delivery_contact_name/, 'compact metadata keeps creator, branch and delivery in its frozen order')
+  assert.ok((feesPageSource.match(/h-10 w-10/g) || []).length >= 4, 'compact Edit/Delete controls retain 40px targets')
   assert.match(feesPageSource, /data-tone="violet"[\s\S]*data-tone="blue"[\s\S]*data-tone="emerald"/, 'type, category and amount headers must use semantic tones')
 })
 

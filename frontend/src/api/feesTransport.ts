@@ -74,8 +74,26 @@ export type FeePayload = {
   client_request_id?: string
 }
 
+export type FeeCreateBody = {
+  fee_type: FeeType
+  label: string | null
+  amount_usd: number
+  amount_khr: number
+  fee_date: string
+  sale_id: number | null
+  branch_id: number | null
+  delivery_contact_id: number | null
+  notes: string | null
+}
+
+export type PendingFeeCreate = {
+  actor_id: string
+  client_request_id: string
+  body: FeeCreateBody
+}
+
 type FeeCreateStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
-const PENDING_FEE_CREATE_KEY = 'businessos_pending_fee_create_v1'
+const PENDING_FEE_CREATE_PREFIX = 'businessos_pending_fee_create_v2:'
 
 export class FeeCreatePersistenceError extends Error {
   code = 'pending_request_persistence_failed'
@@ -86,59 +104,134 @@ export class FeeCreatePersistenceError extends Error {
   }
 }
 
+export class FeeCreatePendingRequestError extends Error {
+  code = 'pending_fee_create_exists'
+  pending: PendingFeeCreate
+
+  constructor(pending: PendingFeeCreate) {
+    super('A previous expense request still has an unknown result. Retry the original request or discard it before starting another.')
+    this.name = 'FeeCreatePendingRequestError'
+    this.pending = pending
+  }
+}
+
+function feeCreateActorId(value: number | string | null | undefined): string | null {
+  const actorId = Number(String(value ?? '').trim())
+  return Number.isSafeInteger(actorId) && actorId > 0 ? String(actorId) : null
+}
+
+export function pendingFeeCreateStorageKey(actorId: number | string): string {
+  return `${PENDING_FEE_CREATE_PREFIX}${encodeURIComponent(String(actorId).trim())}`
+}
+
 function feeCreateStorage(): FeeCreateStorage | null {
   try {
-    return typeof sessionStorage === 'undefined' ? null : sessionStorage
+    return typeof window === 'undefined' ? null : window.sessionStorage
   } catch {
     return null
   }
 }
 
-function readPendingFeeCreate(storage: FeeCreateStorage): FeePayload | null {
+function roundFeeMoney(value: unknown): number {
+  const numeric = Number(value)
+  const nonNegative = Number.isFinite(numeric) ? Math.max(numeric, 0) : 0
+  return Math.round((nonNegative + Number.EPSILON) * 100) / 100
+}
+
+function optionalFeeId(value: unknown): number | null {
+  if (value == null || value === '') return null
+  const numeric = Number(value)
+  return Number.isSafeInteger(numeric) && numeric > 0 ? numeric : null
+}
+
+/** Match the normalized intent the Worker hashes; transient UI-only fields
+ * and caller-supplied request IDs are deliberately excluded. */
+export function normalizeFeeCreateBody(payload: FeePayload): FeeCreateBody {
+  const type = String(payload.fee_type || '').trim().toLowerCase()
+  const rawLabel = typeof payload.label === 'string' ? payload.label.trim().replace(/\s+/g, ' ') : ''
+  const label = rawLabel.split(' ').slice(0, 6).join(' ').slice(0, 60).trim()
+  const notes = typeof payload.notes === 'string' ? payload.notes.trim() : ''
+  return {
+    fee_type: (['tax', 'delivery', 'change', 'expense', 'other'].includes(type) ? type : 'other') as FeeType,
+    label: label || null,
+    amount_usd: roundFeeMoney(payload.amount_usd),
+    amount_khr: roundFeeMoney(payload.amount_khr),
+    fee_date: String(payload.fee_date || '').trim(),
+    sale_id: optionalFeeId(payload.sale_id),
+    branch_id: optionalFeeId(payload.branch_id),
+    delivery_contact_id: optionalFeeId(payload.delivery_contact_id),
+    notes: notes ? notes.slice(0, 2000) : null,
+  }
+}
+
+function readPendingFeeCreate(storage: FeeCreateStorage, actorId: string): PendingFeeCreate | null {
   try {
-    const parsed = JSON.parse(storage.getItem(PENDING_FEE_CREATE_KEY) || 'null') as FeePayload | null
+    const parsed = JSON.parse(storage.getItem(pendingFeeCreateStorageKey(actorId)) || 'null') as PendingFeeCreate | null
     const requestId = String(parsed?.client_request_id || '').trim()
-    return requestId ? parsed : null
+    if (!parsed || parsed.actor_id !== actorId || !/^[A-Za-z0-9_-]{8,120}$/.test(requestId) || !parsed.body) return null
+    return { actor_id: actorId, client_request_id: requestId, body: normalizeFeeCreateBody(parsed.body) }
   } catch {
     return null
   }
 }
 
-/** Persist one stable request identity before POST /api/fees can start. */
+export function getPendingFeeCreate(
+  actorIdValue: number | string | null | undefined,
+  storage: FeeCreateStorage | null = feeCreateStorage(),
+): PendingFeeCreate | null {
+  const actorId = feeCreateActorId(actorIdValue)
+  return actorId && storage ? readPendingFeeCreate(storage, actorId) : null
+}
+
+/** Persist one actor-scoped stable identity and its original normalized body
+ * before POST /api/fees can start. A changed draft can neither replace the
+ * body nor borrow its request ID. */
 export function prepareFeeCreatePayload(
   payload: FeePayload,
+  actorIdValue: number | string | null | undefined,
   storage: FeeCreateStorage | null = feeCreateStorage(),
   createRequestId: () => string = () => crypto.randomUUID(),
 ): FeePayload & { client_request_id: string } {
-  if (!storage) throw new FeeCreatePersistenceError()
+  const actorId = feeCreateActorId(actorIdValue)
+  if (!actorId || !storage) throw new FeeCreatePersistenceError()
   try {
-    const pending = readPendingFeeCreate(storage)
-    const requestId = String(payload.client_request_id || pending?.client_request_id || createRequestId()).trim()
-    if (!requestId) throw new Error('missing request id')
-    const prepared = JSON.parse(JSON.stringify({ ...payload, client_request_id: requestId })) as FeePayload & { client_request_id: string }
-    const serialized = JSON.stringify(prepared)
-    storage.setItem(PENDING_FEE_CREATE_KEY, serialized)
-    if (storage.getItem(PENDING_FEE_CREATE_KEY) !== serialized) throw new Error('pending request read-back failed')
-    return prepared
+    const body = normalizeFeeCreateBody(payload)
+    const pending = readPendingFeeCreate(storage, actorId)
+    if (pending) {
+      if (JSON.stringify(pending.body) !== JSON.stringify(body)) throw new FeeCreatePendingRequestError(pending)
+      return { ...pending.body, client_request_id: pending.client_request_id }
+    }
+    const requestId = String(payload.client_request_id || createRequestId()).trim()
+    if (!/^[A-Za-z0-9_-]{8,120}$/.test(requestId)) throw new Error('invalid request id')
+    const envelope: PendingFeeCreate = { actor_id: actorId, client_request_id: requestId, body }
+    const serialized = JSON.stringify(envelope)
+    const key = pendingFeeCreateStorageKey(actorId)
+    storage.setItem(key, serialized)
+    if (storage.getItem(key) !== serialized) throw new Error('pending request read-back failed')
+    return { ...body, client_request_id: requestId }
   } catch (error) {
-    if (error instanceof FeeCreatePersistenceError) throw error
+    if (error instanceof FeeCreatePersistenceError || error instanceof FeeCreatePendingRequestError) throw error
     throw new FeeCreatePersistenceError()
   }
 }
 
 export function clearPendingFeeCreate(
+  actorIdValue: number | string | null | undefined,
   requestId: string,
   storage: FeeCreateStorage | null = feeCreateStorage(),
 ): void {
-  if (!storage) return
+  const actorId = feeCreateActorId(actorIdValue)
+  if (!actorId || !storage) return
   try {
-    const pending = readPendingFeeCreate(storage)
-    if (pending?.client_request_id === requestId) storage.removeItem(PENDING_FEE_CREATE_KEY)
+    const pending = readPendingFeeCreate(storage, actorId)
+    if (pending?.client_request_id === requestId) storage.removeItem(pendingFeeCreateStorageKey(actorId))
   } catch {
     // A confirmed server receipt is authoritative. A stale local slot is
     // harmless because its request id will replay rather than duplicate.
   }
 }
+
+export const discardPendingFeeCreate = clearPendingFeeCreate
 
 export function getFees(params: FeeListParams = {}): Promise<FeeListResult> {
   const query = buildQueryString(params as QueryParams)
@@ -262,25 +355,16 @@ export function getFeesReport(params: QueryParams = {}): Promise<unknown> {
   )
 }
 
-export async function createFee(payload: FeePayload): Promise<{ fee: FeeRecord }> {
-  const prepared = prepareFeeCreatePayload(payload)
-  try {
-    const response = await route(
-      `fees:create:${prepared.client_request_id}`,
-      () => apiFetch('POST', '/api/fees', prepared),
-      null,
-      true,
-    ) as { fee: FeeRecord }
-    clearPendingFeeCreate(prepared.client_request_id)
-    return response
-  } catch (error) {
-    const status = Number((error as { status?: unknown } | null)?.status)
-    // A readable 4xx proves this attempt was rejected. This includes an
-    // idempotency conflict, which proves the same request id already has a
-    // committed receipt. Timeouts/network/5xx keep the exact slot for retry.
-    if (status >= 400 && status < 500) clearPendingFeeCreate(prepared.client_request_id)
-    throw error
-  }
+export async function createFee(payload: FeePayload, actorId: number | string | null | undefined): Promise<{ fee: FeeRecord }> {
+  const prepared = prepareFeeCreatePayload(payload, actorId)
+  const response = await route(
+    `fees:create:${actorId}:${prepared.client_request_id}`,
+    () => apiFetch('POST', '/api/fees', prepared),
+    null,
+    true,
+  ) as { fee: FeeRecord }
+  clearPendingFeeCreate(actorId, prepared.client_request_id)
+  return response
 }
 
 export function updateFee(id: number, payload: FeePayload): Promise<{ fee: FeeRecord }> {
