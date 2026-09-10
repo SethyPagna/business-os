@@ -255,9 +255,9 @@ export default function PaginationControls({
     // so the numbers read as one set; the prev/next arrows are the strongest
     // element (darker, bolder stroke, solid hover) so the primary action --
     // paging -- stands out and the disabled edge is unmistakable.
-    const arrowButtonClass = 'inline-flex h-7 shrink-0 items-center gap-0.5 px-2 text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:bg-transparent disabled:text-slate-300 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white dark:disabled:text-slate-600'
+    const arrowButtonClass = 'inline-flex h-10 shrink-0 items-center gap-0.5 px-1 text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:bg-transparent disabled:text-slate-300 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white dark:disabled:text-slate-600'
     return (
-      <div className={`inline-flex max-w-full items-center overflow-hidden rounded-full border border-slate-300 bg-white text-xs font-semibold text-slate-800 shadow-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100 ${className}`}>
+      <div className={`mx-auto flex w-fit max-w-full items-center rounded-full border border-slate-300 bg-white text-xs font-semibold text-slate-800 shadow-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100 ${className}`}>
         <button
           type="button"
           className={arrowButtonClass}
@@ -266,9 +266,9 @@ export default function PaginationControls({
           aria-label={backLabel}
         >
           <ChevronLeft className="h-4 w-4" strokeWidth={2.5} />
-          <span className="hidden sm:inline">{backLabel}</span>
+          <span className="whitespace-nowrap">{backLabel}</span>
         </button>
-        <div className="inline-flex min-w-0 items-center gap-1.5 px-1.5">
+        <div className="inline-flex min-w-0 items-center gap-0.5 px-0.5">
           {/* Order per request: the item-range chip (per-page trigger) FIRST,
               then the editable page number, then the total page count. */}
           {onPageSizeChange ? <PageSizeSelect
@@ -280,7 +280,7 @@ export default function PaginationControls({
             hideCaret
             buttonContent={`${start.toLocaleString()}-${end.toLocaleString()}`}
             className="min-w-0"
-            buttonClassName="h-6 rounded-full border border-slate-200 bg-slate-100 px-2.5 py-0 text-xs font-semibold text-slate-800 shadow-none hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+            buttonClassName="h-10 rounded-full border border-slate-200 bg-slate-100 px-1 py-0 text-xs font-semibold text-slate-800 shadow-none hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
             menuClassName="min-w-[9rem]"
             optionClassName="text-xs"
           /> : <span className="h-6 rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">{start.toLocaleString()}-{end.toLocaleString()}</span>}
@@ -291,7 +291,7 @@ export default function PaginationControls({
                 type="text"
                 inputMode="numeric"
                 aria-label={pageLabel}
-                className="h-7 w-9 border-0 bg-transparent px-0 text-center text-xs font-semibold text-slate-800 outline-none dark:text-slate-100"
+                className="h-10 w-8 border-0 bg-transparent px-0 text-center text-xs font-semibold text-slate-800 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 dark:text-slate-100"
                 value={pageDraft}
                 onChange={(event) => setPageDraft(event.target.value.replace(/[^\d]/g, '') || '')}
                 onBlur={(event) => commitPageDraft(event.currentTarget.value)}
@@ -310,7 +310,7 @@ export default function PaginationControls({
           onClick={() => onPageChange?.(safePage + 1)}
           aria-label={nextLabel}
         >
-          <span className="hidden sm:inline">{nextLabel}</span>
+          <span className="whitespace-nowrap">{nextLabel}</span>
           <ChevronRight className="h-4 w-4" strokeWidth={2.5} />
         </button>
       </div>

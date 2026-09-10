@@ -249,6 +249,15 @@ assert.equal((productsPage.match(/deferCopySurfaceAction\(copyTarget/g) || []).l
  * the gesture the row does NOT use.
  * ---------------------------------------------------------------- */
 
+const copiedValues: string[] = []
+let rejectClipboard = false
+const priorClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
+Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
+  writeText: async (value: string) => {
+    if (rejectClipboard) throw new Error('clipboard denied')
+    copiedValues.push(value)
+  },
+} })
 const dom = installAffordanceDom()
 ensureTextAffordances({ copy: 'Copy', copied: 'Copied' })
 const host = dom.host()
@@ -280,8 +289,10 @@ assert.equal(host.hidden, true, 'and a press inside a row it does not own opens 
 // same panel through press-and-hold; both land on the one 'gesture' intent.)
 const doubleClick = dom.fire('dblclick', { target: pill })
 assert.equal(doubleClick.stopped, true, 'the copy field owns the double-click')
+await wait(0)
 assert.equal(host.hidden, false, 'double-click opens the copy panel on the pill')
-assert.equal(String(host.childNodes[0]?.textContent || ''), 'Sok Heng Trading')
+assert.equal(String(host.childNodes[0]?.textContent || ''), 'Copied')
+assert.equal(copiedValues.at(-1), 'Sok Heng Trading')
 dom.fire('keydown', { key: 'Escape' })
 assert.equal(host.hidden, true, 'Escape closes it')
 
@@ -290,9 +301,9 @@ assert.equal(host.hidden, true, 'Escape closes it')
 const modalValue = dom.el('span', { [COPY_ATTR]: '8850123456789' })
 buildPlainBlock(dom, modalValue)
 const modalClick = dom.fire('click', { target: modalValue })
-assert.equal(modalClick.stopped, true, 'with nothing underneath, the copy field takes the click')
-assert.equal(host.hidden, false, 'and a plain click opens the panel in the detail modals')
-assert.equal(String(host.childNodes[0]?.textContent || ''), '8850123456789')
+assert.equal(modalClick.stopped, false, 'ordinary clicks remain ordinary text/row interaction')
+assert.equal(host.hidden, true, 'a plain click does not open copy chrome')
+assert.equal(copiedValues.length, 1, 'plain click did not copy')
 dom.fire('keydown', { key: 'Escape' })
 assert.equal(host.hidden, true)
 
@@ -312,7 +323,8 @@ const holdPress = dom.fire('mousedown', { target: held, clientX: 40, clientY: 12
 assert.equal(holdPress.stopped, true, 'with nothing underneath, the copy field takes the press')
 await wait(LONG_PRESS_THRESHOLD_MS + 80)
 assert.equal(host.hidden, false, 'press-and-hold opens the copy panel on a pointer device')
-assert.equal(String(host.childNodes[0]?.textContent || ''), 'Sok Heng Trading Co., Ltd.')
+assert.equal(String(host.childNodes[0]?.textContent || ''), 'Copied')
+assert.equal(copiedValues.at(-1), 'Sok Heng Trading Co., Ltd.')
 dom.fire('mouseup', { target: held })
 assert.equal(host.hidden, false, 'releasing the hold leaves the panel up')
 dom.fire('keydown', { key: 'Escape' })
@@ -342,7 +354,8 @@ const touchPress = dom.fire('touchstart', { target: touchPill, touches: [{ clien
 assert.equal(touchPress.stopped, true, 'the copy field owns the hold on touch, or one hold would mean two things')
 await wait(LONG_PRESS_THRESHOLD_MS + 80)
 assert.equal(host.hidden, false, 'press-and-hold opens the copy panel on touch')
-assert.equal(String(host.childNodes[0]?.textContent || ''), '8850123456789')
+assert.equal(String(host.childNodes[0]?.textContent || ''), 'Copied')
+assert.equal(copiedValues.at(-1), '8850123456789')
 const heldRelease = dom.fire('touchend', { target: touchPill })
 assert.equal(heldRelease.stopped, true, 'the release that ends a fired hold belongs to the copy field')
 // Mobile Safari/Chrome now synthesize mouse events for that same touch. They
@@ -437,6 +450,33 @@ assert.equal(gestureOn(plainTwin, scroll), 0, 'control: a scroll opens nothing t
 await wait(LONG_PRESS_THRESHOLD_MS + 80)
 assert.equal(host.hidden, true, 'none of those four gestures was a hold, so no panel opened')
 
+// Keyboard copy remains reachable even inside a clickable record row.
+const beforeKeyboard = copiedValues.length
+const keyboard = dom.fire('keydown', { target: pill, key: 'Enter' })
+await wait(0)
+assert.equal(keyboard.stopped, true)
+assert.equal(keyboard.defaulted, true)
+assert.equal(copiedValues.length, beforeKeyboard + 1)
+assert.equal(copiedValues.at(-1), 'Sok Heng Trading')
+assert.equal(host.childNodes[1]?.hidden, true, 'success has no separate Copy button')
+assert.equal(host.style.pointerEvents, 'none', 'confirmation does not block the page')
+dom.fire('keydown', { key: 'Escape' })
+rejectClipboard = true
+dom.fire('keydown', { target: pill, key: ' ' })
+await wait(0)
+assert.equal(host.hidden, true, 'clipboard failure cannot show success')
+assert.equal(copiedValues.length, beforeKeyboard + 1)
+rejectClipboard = false
+dom.fire('keydown', { key: 'Escape' })
+// Cancelling a touch (OS gesture/interruption) never copies.
+const beforeCancel = copiedValues.length
+dom.fire('touchstart', { target: pill, touches: [{ clientX: 10, clientY: 10 }] })
+dom.fire('touchcancel', { target: pill })
+await wait(LONG_PRESS_THRESHOLD_MS + 80)
+assert.equal(copiedValues.length, beforeCancel)
+dom.fire('keydown', { key: 'Escape' })
+if (priorClipboard) Object.defineProperty(navigator, 'clipboard', priorClipboard)
+else Reflect.deleteProperty(navigator, 'clipboard')
 dom.restore()
 
 console.log('PASS product name/brand/supplier/barcode copy through one shared float')

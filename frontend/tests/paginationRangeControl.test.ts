@@ -78,6 +78,11 @@ runTest('the merged pager keeps the editable page number and total-page count', 
   const branchStart = pagination.indexOf('if (compact && rangeAsPageSize)')
   const branchEnd = pagination.indexOf('if (compact) {', branchStart)
   const branch = pagination.slice(branchStart, branchEnd)
+  assert.ok(!branch.includes('hidden sm:inline'), 'Back and Next remain visible on phones')
+  assert.ok(branch.includes('mx-auto flex w-fit'), 'pager centers without relying on page-specific alignment')
+  assert.ok(branch.includes('h-10'), 'pager controls share the 40px target')
+  assert.ok(branch.indexOf('{backLabel}</span>') < branch.indexOf('<PageSizeSelect'), 'Back precedes items per page')
+  assert.ok(branch.indexOf('<PageSizeSelect') < branch.indexOf('aria-label={pageLabel}'), 'items per page precede the current page')
   // "‹ page (1-20) / total ›": an editable current page, then the range, then
   // "/ totalPages", bracketed by the prev/next arrows.
   assert.match(branch, /onKeyDown=\{handlePageInputKeyDown\}/, 'the current page must stay editable')

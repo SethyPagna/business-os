@@ -9,7 +9,7 @@ type Translate = (key: string, fallback: string, khmerFallback?: string) => stri
 export type CopyFloatLabels = AffordanceLabels & { hint: string }
 
 /** Attributes that turn any element into a copy-float trigger. */
-export type CopyFloatProps = Record<string, string> | Record<string, never>
+export type CopyFloatProps = { 'data-copy-value'?: string; 'data-copy-success'?: string; title?: string; tabIndex?: number; role?: string; 'aria-label'?: string }
 
 // Copy affordance for a product's NAME, BRAND, SUPPLIER and BARCODE:
 // double-click on a pointer device, press-and-hold on touch, both opening
@@ -62,7 +62,7 @@ export function useCopyFloat(t: Translate): (value: unknown) => CopyFloatProps {
     // An empty field gets no affordance rather than a gesture that opens an
     // empty panel.
     if (!text) return {}
-    return { [COPY_ATTR]: text, title: labels.hint }
+    return { [COPY_ATTR]: text, 'data-copy-success': labels.copied, title: labels.hint, tabIndex: 0, role: 'button', 'aria-label': `${labels.copy}: ${text}` }
   }, [labels])
 }
 

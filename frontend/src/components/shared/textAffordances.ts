@@ -1,5 +1,5 @@
-// The ONE text-affordance layer: a single floating panel that either reveals
-// a clipped value in full, or offers to copy it.
+// Shared text gestures: reveal clipped values, or copy directly and display
+// a short, non-interactive success message after clipboard confirmation.
 //
 // Why one delegated controller instead of per-cell React state.
 //
@@ -258,6 +258,7 @@ let pressKind: AffordanceKind = 'copy'
 // synthetic mousedown as a new outside press dismissed the panel opened by a
 // long-press before the user could use it.
 let ignoreCompatibilityMouseUntil = 0
+let suppressCompatibilityClick = false
 const COMPATIBILITY_MOUSE_WINDOW_MS = 800
 const isCompatibilityMouse = (): boolean => Date.now() < ignoreCompatibilityMouseUntil
 
@@ -305,25 +306,25 @@ const buildHost = (): void => {
 }
 
 const runCopy = (): void => {
-  if (!state || state.kind !== 'copy' || !copyButton || !liveNode) return
-  const text = textFor(state.element, 'copy')
+  if (!state || state.kind !== 'copy') return
+  const target = state.element
+  const requestState = state
+  const text = textFor(target, 'copy')
+  const success = target.getAttribute('data-copy-success') || labels.copied
   if (!text || typeof navigator === 'undefined' || !navigator.clipboard?.writeText) return
   void navigator.clipboard.writeText(text)
     .then(() => {
-      if (!copyButton || !liveNode) return
-      copyButton.textContent = labels.copied
-      copyButton.dataset.copied = 'true'
-      liveNode.textContent = labels.copied
+      // A late clipboard response must not replace a newer reveal or copy.
+      if (state !== requestState || target.isConnected === false || !host || !valueNode || !liveNode) return
+      valueNode.textContent = success
+      liveNode.textContent = success
+      host.hidden = false
+      host.style.pointerEvents = 'none'
+      position()
       if (copiedTimer) clearTimeout(copiedTimer)
-      copiedTimer = setTimeout(() => {
-        if (!copyButton || !liveNode) return
-        copyButton.textContent = labels.copy
-        delete copyButton.dataset.copied
-        liveNode.textContent = ''
-      }, COPIED_RESET_MS)
+      copiedTimer = setTimeout(() => apply({ type: 'dismiss' }), COPIED_RESET_MS)
     })
-    // A blocked clipboard still leaves the value selectable in the panel.
-    .catch(() => { /* no-op */ })
+    .catch(() => { /* No success message; the original value remains selectable. */ })
 }
 
 const position = (): void => {
@@ -350,13 +351,15 @@ const render = (previous: FloatState<HTMLElement> | null): void => {
   parkTitle(state.element)
   valueNode.textContent = textFor(state.element, state.kind)
   if (state.kind === 'copy') {
-    copyButton.hidden = false
-    copyButton.textContent = labels.copy
-    delete copyButton.dataset.copied
+    copyButton.hidden = true
+    host.hidden = true
+    runCopy()
+    return
   } else {
     copyButton.hidden = true
   }
   liveNode.textContent = ''
+  host.style.pointerEvents = ''
   host.hidden = false
   position()
 }
@@ -373,6 +376,8 @@ const apply = (intent: FloatIntent<HTMLElement>): void => {
   const previous = state
   const next = nextFloatState(previous, intent)
   if (next === previous) return
+  if (copiedTimer) clearTimeout(copiedTimer)
+  copiedTimer = null
   state = next
   render(previous)
 }
@@ -457,10 +462,13 @@ export function ensureTextAffordances(next?: Partial<AffordanceLabels>): void {
   // layer above the record the tap had just opened, pointing at a cell that
   // view now covers. Declining the click means declining the reveal.
   document.addEventListener('click', (event) => {
-    if (isCompatibilityMouse()) return
+    if (isCompatibilityMouse()) {
+      if (suppressCompatibilityClick) { event.stopPropagation(); event.preventDefault() }
+      return
+    }
     if (insideFloat(event.target)) return
     const found = targetFrom(event.target)
-    if (!found || !eligible(found)) { cancelHover(); return }
+    if (!found || !eligible(found) || found.kind === 'copy') { cancelHover(); return }
     if (!claimsClick(found.kind, insideClickableSurface(found.element))) { cancelHover(); return }
     event.stopPropagation()
     apply({ type: 'click', element: found.element, kind: found.kind })
@@ -560,7 +568,12 @@ export function ensureTextAffordances(next?: Partial<AffordanceLabels>): void {
     pressElement = null
   }, true)
 
+  document.addEventListener('mousemove', (event) => {
+    if (pressElement && (Math.abs(event.clientX - pressState.startX) > 18 || Math.abs(event.clientY - pressState.startY) > 18)) press.onMouseLeave()
+  }, true)
+
   document.addEventListener('touchstart', (event) => {
+    suppressCompatibilityClick = false
     if (insideFloat(event.target)) return
     // Same as `mousedown`: a finger on the glass ends any dwell, including
     // the synthetic one a previous tap left behind.
@@ -633,7 +646,8 @@ export function ensureTextAffordances(next?: Partial<AffordanceLabels>): void {
     // release is ours); tap -> the row opens the record (the release is
     // theirs); scroll -> nothing at all (the release is ours, and dropped).
     const cancelled = pressState.cancelled
-    if (pressState.fired || cancelled) event.stopPropagation()
+    suppressCompatibilityClick = pressState.fired || cancelled
+    if (suppressCompatibilityClick) { event.stopPropagation(); event.preventDefault() }
     press.onTouchEnd()
     pressElement = null
   }, true)
@@ -654,7 +668,7 @@ export function ensureTextAffordances(next?: Partial<AffordanceLabels>): void {
     // opening its record keeps that key. (It rarely reaches here anyway --
     // those rows carry the tabIndex, so the focused element is the row, not
     // the cell -- but the rule must not depend on which one has focus.)
-    if (!claimsClick(found.kind, insideClickableSurface(found.element))) return
+    if (found.kind !== 'copy' && !claimsClick(found.kind, insideClickableSurface(found.element))) return
     // Keyboard reach for the same panel: a focused clipped cell opens it,
     // a focused copy field copies. Space would otherwise scroll the page.
     event.preventDefault()
@@ -663,5 +677,13 @@ export function ensureTextAffordances(next?: Partial<AffordanceLabels>): void {
   }, true)
 
   window.addEventListener('resize', position)
-  window.addEventListener('scroll', position, true)
+  document.addEventListener('touchcancel', () => {
+    press.onMouseLeave()
+    pressElement = null
+  }, true)
+  window.addEventListener('scroll', () => {
+    // Scrolling a parent container cancels a stationary finger's pending hold too.
+    press.onMouseLeave()
+    position()
+  }, true)
 }

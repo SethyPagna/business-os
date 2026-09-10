@@ -1,7 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import BarChart3 from 'lucide-react/dist/esm/icons/bar-chart-3.js'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
-import DateTimeRangePicker, { type DateTimeRange } from './DateTimeRangePicker.tsx'
+import { type DateTimeRange } from './DateTimeRangePicker.tsx'
+import StatsRangeRow from './StatsRangeRow.tsx'
 import InfoHint from './InfoHint.tsx'
 import Modal from './Modal.tsx'
 import TruncatedText from './TruncatedText.tsx'
@@ -76,6 +77,8 @@ export default function StatsStrip({
   onRangeChange,
   actions,
   rangeActions,
+  showTime = false,
+  showPresets = true,
   summary,
   className = '',
 }: {
@@ -90,14 +93,10 @@ export default function StatsStrip({
    * ("make add button clear", user Aug 31: explicit labels, always
    * visible). */
   actions?: ReactNode
-  /** SECONDARY controls (History / Export / Manage). Folded: they sit on
-   * the chip row beside `actions`. Open: they move to the dedicated
-   * full-width date row ("start and end date can do one row fully plus
-   * history icon/button — make use of full row", user Aug 31) — UNLESS the
-   * page has only a few stat cards (≤3), in which case they merge into the
-   * stats row instead ("if stats are not many like only two, no need merge
-   * the history/export buttons in date, just merge with the stats"). */
+  /** Secondary actions always stay beside the range and primary actions. */
   rangeActions?: ReactNode
+  showTime?: boolean
+  showPresets?: boolean
   /** A one-line headline (e.g. "42 sales · $1,204") shown next to the Stats
    * chip and visible whether the cards are folded or open — "stats can show
    * outside button stats" (user, Aug 31): the key figure stays on screen
@@ -129,64 +128,28 @@ export default function StatsStrip({
   // chip row keeps them put. The date row and cards row therefore carry only
   // their own content.
 
+  const statsTrigger = (
+    <button type="button" aria-expanded={statsOpen}
+      onClick={() => setStatsOpen((current) => !current)}
+      className={`inline-flex h-10 min-h-10 shrink-0 items-center gap-1 rounded-lg px-2 text-xs font-semibold ${statsOpen ? 'bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900' : 'bg-gray-100 text-gray-600 dark:bg-zinc-800 dark:text-gray-300'}`}>
+      <BarChart3 className="h-4 w-4 shrink-0" />
+      {tr('stats', 'Stats')}
+    </button>
+  )
+  const toolbarActions = <>{rangeActions}{actions}</>
   return (
     <div className={`min-w-0 ${className}`}>
-      {/* Row 1 (always): the Stats chip + the secondary controls (History/
-          Manage/Export) + the PRIMARY page actions. Everything on this row
-          stays put whether the strip is folded or open — expanding the strip
-          only adds rows BELOW it, it never relocates these controls. */}
-      <div className="flex min-w-0 flex-wrap items-center gap-1">
-        <button
-          type="button"
-          aria-expanded={statsOpen}
-          onClick={() => setStatsOpen((current) => !current)}
-          // h-8/px-2.5/text-xs matches the History/Manage/Add buttons that
-          // share this row -- the chip used to be its own smaller size
-          // (px-1.5/text-[11px], no fixed height), which read as the tiny
-          // odd one out beside them (user, Sep 3: "buttons ... add, history,
-          // manage, stats can be made a bit wider and consistent width/
-          // height, no need too tiny").
-          className={`inline-flex h-8 shrink-0 items-center gap-1 rounded-lg px-2.5 text-xs font-semibold transition-colors ${
-            statsOpen
-              ? 'bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900'
-              : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-zinc-800 dark:text-gray-300 dark:hover:bg-zinc-700'
-          }`}
-        >
-          <BarChart3 className="h-3.5 w-3.5 shrink-0" />
-          {tr('stats', 'Stats')}
-        </button>
-        {summary ? (
-          <span className="min-w-0 truncate text-[11px] text-gray-500 dark:text-gray-400">{summary}</span>
-        ) : null}
-        {rangeActions || actions ? (
-          <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1">
-            {rangeActions}
-            {actions}
-          </div>
-        ) : null}
-      </div>
-
-      {statsOpen && range && onRangeChange ? (
-        // The date row carries the one range picker, sized to content and
-        // left-aligned. The secondary buttons live on the chip row above,
-        // not here — expanding the strip never moves them (user, Aug 31).
-        <div className="mt-1.5 flex min-w-0 items-center gap-1">
-          {/* Same full-width-on-small-screens treatment as StatsRangeRow (user,
-              Aug 31: "the date range should take the whole row" on small
-              screens): the picker is a full-width flex item below `sm`, so the
-              control settles back to the compact pill from `sm` up. Kept identical to
-              StatsRangeRow so the inline (Inventory/Dashboard) and lifted-out
-              (Sales/Returns/Fees) date rows read the same. */}
-          <DateTimeRangePicker
-            value={range}
-            onChange={onRangeChange}
-            t={t}
-            showTime={false}
-            className="min-w-0 flex-1 sm:flex-none"
-            triggerClassName="flex min-w-0 w-full items-center justify-center gap-1.5 rounded-md px-2 py-1 !min-h-9 sm:inline-flex sm:w-auto sm:justify-start sm:gap-2 sm:px-3 sm:min-w-[17rem]"
-          />
+      {range && onRangeChange ? (
+        <StatsRangeRow range={range} onRangeChange={onRangeChange} t={t}
+          leading={statsTrigger} actions={toolbarActions}
+          showTime={showTime} showPresets={showPresets} />
+      ) : (
+        <div className="flex min-w-0 flex-nowrap items-center gap-1">
+          {statsTrigger}
+          <div className="ml-auto flex shrink-0 flex-nowrap items-center gap-1">{toolbarActions}</div>
         </div>
-      ) : null}
+      )}
+      {summary ? <div className="mt-1 min-w-0 truncate text-[11px] text-gray-500 dark:text-gray-400">{summary}</div> : null}
 
       {statsOpen ? (
         // ONE cards row for every card count. Each card is sized to its own

@@ -64,14 +64,15 @@ export default function QuickPreferenceToggles({ className = '' }: QuickPreferen
           : tr('switch_to_dark_mode', 'Switch to dark mode')}
         onClick={toggleTheme}
       >
-        {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+        {darkMode ? <Sun className="h-6 w-6" /> : <Moon className="h-6 w-6" />}
       </ToggleButton>
       <ToggleButton
         active={khmerActive}
         label={nextLanguageLabel}
         onClick={toggleLanguage}
       >
-        <Globe className="h-4 w-4" />
+        <span className="relative inline-flex h-6 w-6 items-center justify-center">
+        <Globe className="h-6 w-6" />
         {/* Previously a generic "Languages" glyph that looked identical
             regardless of which language was active -- swapped for Globe
             (matching the icon already used for language elsewhere, e.g.
@@ -81,11 +82,12 @@ export default function QuickPreferenceToggles({ className = '' }: QuickPreferen
         <span
           aria-hidden="true"
           className={[
-            'pointer-events-none absolute -bottom-1 -right-1 rounded-full border px-1 text-[9px] font-bold leading-[13px]',
+            'pointer-events-none absolute -bottom-1 left-1/2 -translate-x-1/2 rounded-full border px-1 text-[9px] font-bold leading-[13px]',
             'border-white bg-blue-600 text-white dark:border-slate-900',
           ].join(' ')}
         >
           {khmerActive ? 'KM' : 'EN'}
+        </span>
         </span>
       </ToggleButton>
     </div>

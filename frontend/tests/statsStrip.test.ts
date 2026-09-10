@@ -9,6 +9,8 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
+import { createRequire } from 'node:module'
+import { transformSync } from 'esbuild'
 import { statsPresetRange, activeStatsPreset } from '../src/components/shared/statsStripPresets.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -75,13 +77,13 @@ test('activeStatsPreset round-trips every preset and rejects a custom range', ()
   assert.equal(activeStatsPreset({ startDate: '2026-08-01', endDate: '2026-08-15', startTime: '', endTime: '' }, now), null)
 })
 
-test('activeStatsPreset: 30d follows common precedence and ignores custom times', () => {
+test('activeStatsPreset: 30d follows common precedence and rejects custom times', () => {
   const ordinaryNow = new Date(2026, 7, 26)
   const thirtyDays = statsPresetRange('30d', ordinaryNow)
   assert.equal(
     activeStatsPreset({ ...thirtyDays, startTime: '08:15', endTime: '17:45' }, ordinaryNow),
-    '30d',
-    'custom times do not suppress the active preset, matching every existing preset',
+    null,
+    'a partial day must not highlight a full-day preset',
   )
 
   const monthCollision = new Date(2026, 3, 30)
@@ -393,7 +395,10 @@ test('Part 560: the Start→End date row is lifted OUT of the stats fold into a 
   // that owns that file.
   const rangeRow = read('src/components/shared/StatsRangeRow.tsx')
   assert.ok(rangeRow.includes('<DateTimeRangePicker'), 'StatsRangeRow carries the shared Start→End picker')
-  assert.ok(!rangeRow.includes('PRESETS.map'), 'StatsRangeRow does not render preset chips')
+  assert.ok(rangeRow.includes('STATS_PRESETS.map') && rangeRow.includes('overflow-x-auto'), 'presets are restored in a single scroll rail')
+  assert.ok(rangeRow.includes('flex-nowrap'), 'date controls and presets never wrap')
+  const strip = read('src/components/shared/StatsStrip.tsx')
+  assert.ok(strip.includes('leading={statsTrigger}') && !strip.includes('statsOpen && range'), 'range stays visible beside Stats while cards are folded')
   // Sales/Returns/Fees place it above the search bar; Inventory's stats sit on
   // their own section chip so its row leads the stats section instead — but all
   // four render the shared row wired to stripRange and drop the props from the
@@ -413,6 +418,28 @@ test('Part 560: the Start→End date row is lifted OUT of the stats fold into a 
     // into <StatsStrip> (each on its own line) is gone. The new StatsRangeRow
     // form keeps both on ONE line, so this only catches the removed strip props.
     assert.ok(!/range=\{stripRange\}\s*\n\s*onRangeChange=\{setStripRange\}/.test(src), `${rel} no longer passes the range into StatsStrip`)
+  }
+})
+
+test('preset buttons execute the shared date-only and timestamp range callbacks', () => {
+  const require = createRequire(import.meta.url)
+  const mod = { exports: {} as Record<string, any> }
+  const compiled = transformSync(read('src/components/shared/StatsRangeRow.tsx'), { loader: 'tsx', format: 'cjs', jsx: 'automatic' }).code
+  new Function('require', 'module', 'exports', compiled)((id: string) => {
+    if (id.includes('DateTimeRangePicker')) return () => null
+    if (id.includes('statsStripPresets')) return require('../src/components/shared/statsStripPresets.ts')
+    return require(id)
+  }, mod, mod.exports)
+  for (const showTime of [false, true]) {
+    let changed: ReturnType<typeof statsPresetRange> | null = null
+    const tree = mod.exports.default({ range: statsPresetRange('all'), t: (key: string) => key, showTime, onRangeChange: (value: ReturnType<typeof statsPresetRange>) => { changed = value } })
+    const rail = tree.props.children[1]
+    const buttons = rail.props.children
+    assert.equal(buttons.length, 8)
+    buttons[1].props.onClick()
+    assert.deepEqual(changed, showTime ? statsPresetRange('today') : { ...statsPresetRange('today'), startTime: '', endTime: '' })
+    buttons[0].props.onClick()
+    assert.deepEqual(changed, statsPresetRange('all'))
   }
 })
 
