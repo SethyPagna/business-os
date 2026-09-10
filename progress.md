@@ -12415,7 +12415,7 @@ join, while the dashboard has a correct relational count in the patched build.
 ## Unified sales-workflow and responsive UI candidate — September 11, 2026
 
 The coordinated implementation is integrated on `codex/ui-consistency-20260911`
-through runtime commit **d2c71203**. It is a local candidate only: no Worker or
+through runtime commit **c776cbbe**. It is a local candidate only: no Worker or
 frontend deployment, remote D1 command, secret sync, or production-data write
 ran. Migration **0151_transfer_provenance_replay.sql** is included and verified
 locally but remains unapplied remotely.
@@ -12450,7 +12450,9 @@ The shared anonymous customer is presented as **General** in English and
 human-facing worksheets. Marked General and null checkout identities share the
 anonymous analytics group and never gain a membership/profile identity; an
 unmarked real customer named General or Walk-in remains a real distinct
-customer. Sale-specific phone snapshots remain visible and hold-to-copy. The
+customer. Sale-specific phone snapshots remain visible on the list, opened
+detail, printed receipt, and human reports; interactive list/detail values keep
+the plain hold-to-copy behavior while print/report output stays selectable. The
 import-compatible detailed-sales CSV intentionally keeps anonymous identity
 blank so round-trip import cannot manufacture a name-only customer. No customer
 row, membership, receipt, money, stock, or return total was rewritten.
