@@ -140,6 +140,22 @@ export function getSales(params: QueryParams = {}, options: SalesReadOptions = {
 
 export type PreparedSaleStatusRequest = ExpectedUpdatedAtPayload & { client_request_id: string }
 
+export type SaleStatusReceipt = { committed: boolean; response?: Record<string, unknown> }
+
+/** No cache or local fallback: this read is used to converge after a receipt. */
+export function getAuthoritativeSale(id: number | string): Promise<unknown> {
+  return apiFetch('GET', `/api/sales?id=${encodeId(id)}&limit=2&_detail=${Date.now()}-${Math.random()}`, undefined, 8000)
+}
+
+/** Authoritative actor/request receipt check; does not submit another mutation. */
+export function getSaleStatusReceipt(id: number | string, payload: PreparedSaleStatusRequest): Promise<SaleStatusReceipt> {
+  return apiFetch('POST', `/api/sales/${encodeId(id)}/status-receipt`, payload, 8000, { skipWriteDedupe: true }) as Promise<SaleStatusReceipt>
+}
+
+export function getSaleLineReceipt(id: number | string, kind: 'add_items' | 'amendment', payload: Record<string, unknown>): Promise<SaleStatusReceipt> {
+  return apiFetch('POST', `/api/sales/${encodeId(id)}/line-receipt/${kind}`, payload, 8000, { skipWriteDedupe: true }) as Promise<SaleStatusReceipt>
+}
+
 export async function prepareSaleStatusRequest(
   id: number | string,
   saleStatus: unknown,

@@ -13,6 +13,7 @@ import {
   type SettlementRow,
 } from '../src/components/sales/saleSettlement.ts'
 import { createSingleUseResult } from '../src/components/sales/saleStatusConfirmation.ts'
+import { directMutationOutcomeIsUnknown, freezeDirectMutationBody, loadPendingDirectMutationSlot, mutationVersionAtLeast, reconcileDirectMutationReceipt, readCommittedMutationState, savePendingDirectMutationSlot } from '../src/utils/directMutationRequest.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const read = (relative: string) => fs.readFileSync(path.resolve(here, relative), 'utf8')
@@ -22,6 +23,43 @@ const salesSource = read('../src/components/sales/Sales.tsx')
 const historySource = read('../src/utils/actionHistory.ts')
 const workflowSource = read('../src/components/sales/SaleStatusWorkflow.tsx')
 const paymentSettlementSource = read('../../cloudflare/src/lib/paymentSettlement.ts')
+
+// Screenshot: sale 20260910-171258, Not Paid -> Completed, ABA $7.
+const storageRows = new Map<string, string>()
+const storage = { get length() { return storageRows.size }, key: (index: number) => [...storageRows.keys()][index] ?? null, getItem: (key: string) => storageRows.get(key) ?? null, setItem: (key: string, value: string) => { storageRows.set(key, value) }, removeItem: (key: string) => { storageRows.delete(key) } }
+const frozen = freezeDirectMutationBody({ client_request_id: 'screenshot-aba-seven', sale_status: 'completed', expected_updated_at: '2026-09-10 10:12:58', expected_exchange_rate: 4100, payment_details: [{ method: 'ABA', amount_usd: 7, amount_khr: 0 }] })
+savePendingDirectMutationSlot('sale-status', 7, 171258, frozen, storage)
+assert.equal(loadPendingDirectMutationSlot('sale-status', 8, storage), null, 'another actor cannot inherit the request')
+let probes = 0
+const committed = await reconcileDirectMutationReceipt(async () => {
+  probes++
+  return probes < 3 ? { committed: false } : { committed: true, response: { id: 171258, updated_at: '2026-09-10 10:13:00' } }
+})
+assert.equal(probes, 3, 'a stale/missing receipt must not stop the bounded probes')
+assert.equal(committed?.id, 171258)
+assert.equal(mutationVersionAtLeast('2026-09-10 10:12:58', committed?.updated_at), false)
+assert.equal(mutationVersionAtLeast('2026-09-10T10:13:00.000Z', committed?.updated_at), true)
+let rowProbes = 0
+const authoritativeRow = await readCommittedMutationState(async () => {
+  rowProbes += 1
+  return rowProbes < 3
+    ? { id: 7, sale_status: 'awaiting_payment', updated_at: '2026-09-10 10:12:58' }
+    : { id: 7, sale_status: 'completed', updated_at: '2026-09-10T10:13:00.000Z' }
+}, (row) => mutationVersionAtLeast(row.updated_at, committed?.updated_at))
+assert.equal(rowProbes, 3, 'an existing stale row must not terminate reconciliation')
+assert.equal(authoritativeRow?.sale_status, 'completed', 'list and detail consume the same authoritative committed row')
+assert.equal(await readCommittedMutationState(async () => ({ updated_at: '2026-09-10 10:12:58' }), (row) => mutationVersionAtLeast(row.updated_at, committed?.updated_at)), null, 'persistent stale reads never fabricate convergence')
+assert.equal(await reconcileDirectMutationReceipt(async () => ({ committed: false })), null, 'uncommitted lost response stays unresolved')
+assert.deepEqual(loadPendingDirectMutationSlot('sale-status', 7, storage)?.body, frozen, 'read-only reconciliation never changes the frozen tender')
+assert.equal(await reconcileDirectMutationReceipt(async () => { throw { status: 409, code: 'idempotency_conflict' } }), null, 'same ID with changed content is not a receipt')
+assert.equal(await reconcileDirectMutationReceipt(async () => { throw { status: 403 } }), null, 'revoked permission never acknowledges the write')
+assert.equal(directMutationOutcomeIsUnknown({ status: 409, code: 'exchange_rate_changed' }), false)
+assert.equal(directMutationOutcomeIsUnknown({ code: 'request_timeout' }), true)
+savePendingDirectMutationSlot('sale-status', 7, 171258, null, storage)
+assert.equal(loadPendingDirectMutationSlot('sale-status', 7, storage), null)
+const statusCatch = salesSource.slice(salesSource.indexOf('const problem = error as { syncErrorId'))
+assert.ok(statusCatch.indexOf('savePendingDirectStatus(saleId, null)') < statusCatch.indexOf("code === 'exchange_rate_changed'"), 'known rejection clears the original pending body before the rate-review early return')
+assert.doesNotMatch(salesSource, /clearSyncError\?\.\(/, 'unrelated sync errors must survive recovery/discard')
 
 const confirmedResult = createSingleUseResult<{ statusUpdatedAt: string } | false>()
 assert.equal(confirmedResult.isPending(), true)
@@ -181,7 +219,7 @@ assert.match(editorSource, /exchangeRate\.toLocaleString\(undefined, \{ maximumF
 assert.match(editorSource, /sale_settlement_rows_limit/, 'legacy records above the server row limit have a localized review message')
 assert.match(editorSource, /rows\.length > MAX_SETTLEMENT_ROWS\s*\? rowsLimitMessage/, 'the row-limit message becomes the blocking review error')
 assert.doesNotMatch(editorSource, /rows\.(?:slice|splice)\(/, 'legacy payment rows must never be truncated to fit the limit')
-assert.match(modalSource, /confirmDisabled=\{needsPaymentEntry && settlementRows\.length > MAX_SETTLEMENT_ROWS\}/, 'a legacy record above the backend limit cannot submit an impossible review')
+assert.match(modalSource, /confirmDisabled=\{pendingStatus \|\| \(needsPaymentEntry && settlementRows\.length > MAX_SETTLEMENT_ROWS\)\}/, 'unknown outcomes and legacy records above the backend limit cannot submit a new review')
 assert.match(workflowSource, /disabled=\{saving \|\| confirmDisabled \|\| selectedStatus === currentStatus\}/, 'the workflow disables a blocked settlement confirmation')
 assert.match(modalSource, /client_request_id:\s*settlementRequestIdRef\.current/, 'retries reuse one reviewed request id')
 assert.match(modalSource, /expected_exchange_rate:\s*settlementSession\.exchangeRate/, 'the server guards the reviewed exchange-rate quote')
@@ -210,7 +248,7 @@ assert.doesNotMatch(statusConfirmSurface, /if \(statusPrompt\.mode === 'single'\
 assert.match(salesSource, /useEffect\(\(\) => \(\) => \{\s*pendingStatusResultRef\.current\?\.settle\(false\)\s*pendingStatusResultRef\.current = null/, 'Sales unmount releases an open confirmation request before clearing page state')
 assert.match(modalSource, /setSettlementSession\(\(current\) => advanceSettlementReviewVersion\(current, result\)\)/, 'the next same-modal payment review advances to the committed status version')
 assert.match(modalSource, /settlementSession\.exchangeRate/, 'the editor and coverage preview use the frozen settings rate')
-assert.match(modalSource, /useCloseGuard\(\{ dirty: settlementDirty \}/, 'edited tender rows are protected by the standard close guard')
+assert.match(modalSource, /useCloseGuard\(\{ dirty: settlementDirty \|\| addLines.length > 0/, 'edited tender, item and amendment rows are protected by the standard close guard')
 assert.match(modalSource, /setStatusReviewRequestId\(\(requestId\) => requestId \+ 1\)/, 'Record payment explicitly opens the status review step')
 assert.match(workflowSource, /reviewRequestId > 0\) setStep\('review'\)/, 'the workflow honors an external review request without changing its normal destination flow')
 assert.doesNotMatch(modalSource, /payment_method:\s*method[\s\S]{0,120}amount_paid_usd/, 'settlement no longer sends derived payment aggregates')

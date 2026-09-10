@@ -17,7 +17,7 @@ import { fmtDate } from '../../utils/formatters'
 import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import { PERMISSION_DEFS } from './permissionDefinitions'
 import { ROLE_PRESETS } from './rolePresetDefaults'
-import { REVIEW_TIER_KEYS, type PermissionValue } from '../../utils/permissions.ts'
+import { normalizePermissionState, type PermissionValue } from '../../utils/permissions.ts'
 import { useIsPageActive } from '../shared/pageActivity'
 import { APP_NAVIGATION_EVENT } from '../../app/pathRouting.ts'
 import { useActionHistory } from '../../utils/actionHistory.ts'
@@ -188,37 +188,6 @@ function normalizeUsers(value: unknown): UserRecord[] {
 
 function normalizeRoles(value: unknown): RoleRecord[] {
   return Array.isArray(value) ? value as RoleRecord[] : []
-}
-
-// Preserves the 'review' tier value for REVIEW_TIER_KEYS sections instead
-// of collapsing it to a plain boolean -- normalizePermissionState used to
-// run every value through Boolean(enabled), which silently turned a
-// hand-set 'review' string (e.g. on 'fees', set directly in the DB since
-// this editor didn't offer a tier picker yet) into `true` the moment a
-// role was opened for editing, so saving ANY unrelated change to that
-// role (renaming it, touching a different permission) would silently
-// upgrade Review Required to Full Access. Every other key keeps the old
-// strict-boolean behavior; only a REVIEW_TIER_KEYS key preserves the
-// literal string 'review', matching the backend's own strict
-// interpretation in getPermissionTier() (a 'review' string on any other
-// key is never valid and still collapses to boolean).
-function normalizePermissionState(value: unknown): PermissionState {
-  if (typeof value === 'string') {
-    try {
-      return normalizePermissionState(JSON.parse(value || '{}'))
-    } catch {
-      return {}
-    }
-  }
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
-  return Object.entries(value as Record<string, unknown>).reduce<PermissionState>((permissions, [key, enabled]) => {
-    if (enabled === 'review' && REVIEW_TIER_KEYS.has(key)) {
-      permissions[key] = 'review'
-    } else {
-      permissions[key] = Boolean(enabled)
-    }
-    return permissions
-  }, {})
 }
 
 function getErrorMessage(error: unknown, fallback: string): string {
@@ -754,7 +723,7 @@ export default function Users() {
       .map((key) => {
         const perm = PERMISSION_DEFS.find((item) => item.key === key)
         const label = tr(perm?.tKey || key, perm?.label || key)
-        return value[key] === 'review' ? `${label} (${tr('review_required', 'Partial Access')})` : label
+        return value[key] === 'review' ? `${label} (${tr('review_required', 'Partial Access')})` : value[key] === 'view' ? `${label} (${tr('view_only', 'View only')})` : label
       })
       .join(', ')
   }
@@ -1313,7 +1282,7 @@ export default function Users() {
                       {permissionKeys.map((key) => (
                         <span key={key} className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600 dark:bg-gray-700 dark:text-gray-300">
                           {PERMISSION_DEFS.find((item) => item.key === key)?.label || key}
-                          {getRolePermissionValue(role, key) === 'review' ? ` (${tr('review_required', 'Partial Access')})` : ''}
+                          {getRolePermissionValue(role, key) === 'review' ? ` (${tr('review_required', 'Partial Access')})` : getRolePermissionValue(role, key) === 'view' ? ` (${tr('view_only', 'View only')})` : ''}
                         </span>
                       ))}
                     </div>

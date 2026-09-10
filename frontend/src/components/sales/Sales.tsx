@@ -18,7 +18,7 @@ import ScanSearchButton from '../shared/ScanSearchButton'
 import { loadSortSpec, saveSortSpec, type SortField, type SortSpec } from '../../utils/listSort'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
-import { ALL_STATUSES, getStatusLabel } from './StatusBadge'
+import { ALL_STATUSES, getStatusBadgeLabel as getStatusLabel } from './StatusBadge'
 import type { SaleCancelPayload } from './CancelSaleModal'
 import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.ts'
@@ -33,7 +33,6 @@ import { getCustomerRenameImpact, updateCustomer } from '../../api/contactWriteT
 import RenameCascadeModal, { type RenameCascadeChoice, type RenameCascadeRequest } from '../shared/RenameCascadeModal.tsx'
 import { getFeesReport } from '../../api/feesTransport.ts'
 import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
-import StatsRangeRow from '../shared/StatsRangeRow.tsx'
 import ShiftHistoryModal from '../shifts/ShiftHistoryModal.tsx'
 import { EMPTY_DATE_TIME_RANGE, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
 import { getUsers as fetchUsers } from '../../api/userReadTransport.ts'
@@ -78,6 +77,9 @@ import {
   type PendingDirectMutation,
 } from '../../utils/directMutationRequest.ts'
 import { dispatchResolvedSyncError } from '../../utils/syncProblemLifecycle.ts'
+import { getAuthoritativeSale, getSaleStatusReceipt, getSaleLineReceipt } from '../../api/salesTransport.ts'
+import { mutationVersionAtLeast, reconcileDirectMutationReceipt, readCommittedMutationState } from '../../utils/directMutationRequest.ts'
+import { saleAmendmentWindowAllows } from '../../utils/permissions.ts'
 
 const SALES_USER_OPTIONS_TIMEOUT_MS = 8000
 // A status settlement writes the sale, every paired KHR line snapshot, the
@@ -94,119 +96,6 @@ const SALES_BULK_LINKED_SEARCH_DEBOUNCE_MS = 180
 // stalled request cannot leave the cashier staring at a spinner.
 const SALES_ADD_ITEMS_MUTATION_TIMEOUT_MS = 45000
 
-function parseSaleItemsForReconciliation(raw: SaleRecord['items']): SaleItemRecord[] {
-  if (Array.isArray(raw)) return raw
-  if (typeof raw !== 'string' || !raw.trim()) return []
-  try {
-    const parsed: unknown = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed.filter((item): item is SaleItemRecord => !!item && typeof item === 'object') : []
-  } catch {
-    return []
-  }
-}
-
-function numberClose(left: unknown, right: unknown, epsilon = 0.005): boolean {
-  const a = Number(left)
-  const b = Number(right)
-  return Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) <= epsilon
-}
-
-function paymentDetailsMatch(row: SaleRecord, requested: unknown): boolean {
-  if (!Array.isArray(requested)) return true
-  let actual: unknown = row.payment_details
-  if (typeof actual === 'string') {
-    try { actual = JSON.parse(actual) } catch { return false }
-  }
-  if (!Array.isArray(actual) || actual.length !== requested.length) return false
-  // Settlement normalization preserves tender rows, but a read may return
-  // them in a different order after a retry/replay. Compare the canonical
-  // multiset instead of the array position so an applied write cannot remain
-  // stuck behind the unknown-outcome banner merely because row order changed.
-  const canonical = (entry: unknown) => {
-    const value = entry && typeof entry === 'object' ? entry as Record<string, unknown> : {}
-    return {
-      method: String(value.method || '').trim(),
-      amount_usd: Number(value.amount_usd || 0),
-      amount_khr: Number(value.amount_khr || 0),
-    }
-  }
-  const expectedRows = requested.map(canonical)
-  const receivedRows = actual.map(canonical)
-  return expectedRows.every((expected) => {
-    const index = receivedRows.findIndex((received) => received.method === expected.method
-      && numberClose(received.amount_usd, expected.amount_usd, 0.01)
-      && numberClose(received.amount_khr, expected.amount_khr, 1))
-    if (index < 0) return false
-    receivedRows.splice(index, 1)
-    return true
-  })
-}
-
-function saleStatusRequestApplied(row: SaleRecord | null, request: PreparedSaleStatusRequest): boolean {
-  if (!row || String(row.sale_status || '') !== String(request.sale_status || '')) return false
-  if (!paymentDetailsMatch(row, (request as Record<string, unknown>).payment_details)) return false
-  const requestedDetails = (request as Record<string, unknown>).payment_details
-  if (Array.isArray(requestedDetails)) {
-    const totalUsd = requestedDetails.reduce((sum, entry) => sum + Number((entry as Record<string, unknown>)?.amount_usd || 0), 0)
-    const totalKhr = requestedDetails.reduce((sum, entry) => sum + Number((entry as Record<string, unknown>)?.amount_khr || 0), 0)
-    if (!numberClose(row.amount_paid_usd, totalUsd, 0.01) || !numberClose(row.amount_paid_khr, totalKhr, 1)) return false
-  }
-  return true
-}
-
-function saleAmendmentApplied(row: SaleRecord | null, previous: SaleRecord | null, request: SaleAmendmentRequest): boolean {
-  if (!row) return false
-  const currentItems = parseSaleItemsForReconciliation(row.items)
-  const beforeItems = parseSaleItemsForReconciliation(previous?.items)
-  const lineId = Number(request.sale_item_id || 0)
-  const currentLine = currentItems.find((item) => Number(item.id) === lineId)
-  const beforeLine = beforeItems.find((item) => Number(item.id) === lineId)
-  switch (request.kind) {
-    case 'line_updated':
-      return !!currentLine
-        && numberClose(currentLine.quantity, request.quantity, 0.0001)
-        && numberClose(currentLine.applied_price_usd, request.applied_price_usd, 0.005)
-    case 'line_quantity_increased':
-      return !!currentLine && !!beforeLine && numberClose(Number(currentLine.quantity) - Number(beforeLine.quantity), request.quantity, 0.0001)
-    case 'line_quantity_decreased':
-      return !!currentLine && !!beforeLine && numberClose(Number(beforeLine.quantity) - Number(currentLine.quantity), request.quantity, 0.0001)
-    case 'line_removed':
-      return !currentLine
-    case 'line_replaced': {
-      const replacement = request.replacement
-      return !currentLine && !!replacement && currentItems.some((item) => Number(item.product_id) === Number(replacement.product_id)
-        && numberClose(item.quantity, replacement.quantity, 0.0001)
-        && (replacement.applied_price_usd === undefined || numberClose(item.applied_price_usd, replacement.applied_price_usd, 0.005)))
-    }
-    case 'delivery_fee_changed':
-      return numberClose(row.delivery_fee_usd, request.delivery_fee_usd, 0.005)
-    case 'delivery_actual_cost_changed':
-      return request.delivery_actual_cost_usd == null
-        ? row.delivery_actual_cost_usd == null || String(row.delivery_actual_cost_usd).trim() === ''
-        : numberClose(row.delivery_actual_cost_usd, request.delivery_actual_cost_usd, 0.005)
-    case 'delivery_added':
-      return Number(row.is_delivery || 0) === 1
-        && Number(row.delivery_contact_id || 0) === Number(request.delivery_contact_id || 0)
-        && numberClose(row.delivery_fee_usd, request.delivery_fee_usd, 0.005)
-    default:
-      return false
-  }
-}
-
-function saleAddItemsApplied(row: SaleRecord | null, previous: SaleRecord | null, items: SaleItemAddition[]): boolean {
-  if (!row || !previous || !items.length) return false
-  const quantities = (sale: SaleRecord) => parseSaleItemsForReconciliation(sale.items).reduce((map, item) => {
-    const key = String(item.product_id || item.product_name || '')
-    map.set(key, (map.get(key) || 0) + Number(item.quantity || 0))
-    return map
-  }, new Map<string, number>())
-  const before = quantities(previous)
-  const current = quantities(row)
-  return items.every((item) => {
-    const key = String(item.product_id)
-    return (current.get(key) || 0) >= (before.get(key) || 0) + Number(item.quantity || 0) - 0.0001
-  })
-}
 
 // S4-2: which statuses hold units OUT of stock -- the same set
 // lib/saleTransitions.ts's heldQuantity() uses (STOCK_DEDUCTED_STATUSES
@@ -455,7 +344,7 @@ export function isKnownUncommittedSaleCustomerChangeError(error: unknown): boole
 }
 
 export default function Sales({ embedded = false }: { embedded?: boolean }) {
-  const { t, settings, fmtUSD, fmtKHR, notify, user, can, getPermissionTier, clearSyncError } = useApp()
+  const { t, settings, fmtUSD, fmtKHR, notify, user, can, getPermissionTier } = useApp()
   // Part 557 slice 2: 'sales' is a view-tier section. A View-only grant reads
   // the list/stats/reports/export but every write (cancel, change status, edit
   // customer, import) is hidden here and refused by the backend. Full only.
@@ -480,6 +369,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   const canExportSales = can('sales', 'export')
   const canBulkSales = can('sales', 'bulk')
   const canViewSales = can('sales', 'view')
+  const canUseShifts = getPermissionTier('pos') === 'full' || getPermissionTier('sales') === 'full'
   const canViewFees = can('fees', 'view')
   // Returning straight from the receipt is still a RETURNS write, so it is
   // gated on the returns section's own create action -- the same
@@ -588,13 +478,16 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   >(null)
   const pendingStatusResultRef = useRef<SingleUseResult<SaleStatusUiResult> | null>(null)
   const [statusConfirmSaving, setStatusConfirmSaving] = useState(false)
+  const [directStatusSaving, setDirectStatusSaving] = useState(false)
   const initialPendingDirectStatus = loadPendingDirectMutationSlot<PreparedSaleStatusRequest>('sale-status', user?.id)
   const [pendingDirectStatus, setPendingDirectStatus] = useState<PendingDirectMutation<PreparedSaleStatusRequest> | null>(initialPendingDirectStatus)
   const pendingDirectStatusRef = useRef<PendingDirectMutation<PreparedSaleStatusRequest> | null>(initialPendingDirectStatus)
+  const pendingStatusProblemRef = useRef<{ errorId?: string; channel?: string; code?: string } | null>(null)
   useEffect(() => {
     const pending = loadPendingDirectMutationSlot<PreparedSaleStatusRequest>('sale-status', user?.id)
     pendingDirectStatusRef.current = pending
     setPendingDirectStatus(pending)
+    pendingStatusProblemRef.current = null
   }, [user?.id])
   const currentPendingDirectStatus = useCallback(() => (
     pendingDirectMutationForScope(pendingDirectStatusRef.current, user?.id)
@@ -610,6 +503,10 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     const pending = savePendingDirectMutationSlot('sale-status', user?.id, saleId, body, undefined, history)
     pendingDirectStatusRef.current = pending
     setPendingDirectStatus(pending)
+    if (!body) {
+      dispatchResolvedSyncError(pendingStatusProblemRef.current)
+      pendingStatusProblemRef.current = null
+    }
   }, [user?.id])
   // Group-by dropped (user, Aug 31: "the group by seems a bit redundant
   // with the arrange by") — the list always groups by day; sorting by a
@@ -708,7 +605,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     } catch {
       permissions = {}
     }
-    return username === 'admin' || roleCode === 'admin' || !!permissions.all
+    return username === 'admin' || roleCode === 'admin' || permissions.all === true
   }, [user])
 
   const cleanFallback = useCallback((fallbackEn: string, fallbackKm?: string) => {
@@ -1033,58 +930,58 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     )
   ), [])
 
-  const readAuthoritativeSale = useCallback(async (saleId: number): Promise<SaleRecord | null> => {
+  const readAuthoritativeSale = useCallback(async (saleId: number, accept: (sale: SaleRecord) => boolean = () => true): Promise<SaleRecord | null> => {
     // A just-committed D1 write can be briefly hidden behind an edge/read
     // retry. Probe a few times before declaring the outcome unresolved; each
     // request has a unique cache key and remains bounded below the write
     // deadline, so this cannot turn a failed action into an unbounded spinner.
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      try {
-        const payload = await fetchSales({ id: String(saleId), limit: 2, _detail: `${Date.now()}-${attempt}` }, { timeoutMs: 8000 })
-        const sale = normalizeSaleRows(payload).find((entry) => Number(entry?.id || 0) === saleId) || null
-        if (sale) return sale
-      } catch {
-        // Retry a transient read once more; the original write remains
-        // durable in the pending slot until this check proves its state.
-      }
-      if (attempt < 2) await new Promise((resolve) => window.setTimeout(resolve, 250 * (attempt + 1)))
-    }
-    return null
+    return readCommittedMutationState(async () => {
+        const payload = await getAuthoritativeSale(saleId)
+        return normalizeSaleRows(payload).find((entry) => Number(entry?.id || 0) === saleId) || null
+      }, accept, (attempt) => new Promise((resolve) => window.setTimeout(resolve, 250 * (attempt + 1))))
   }, [])
 
   const resolveUnknownSaleWrite = useCallback(async (
     saleId: number,
     request: PreparedSaleStatusRequest | SaleAmendmentRequest,
-    previousSale: SaleRecord | null,
     kind: 'status' | 'amendment',
     error: unknown,
   ): Promise<boolean> => {
-    const current = await readAuthoritativeSale(saleId)
-    const applied = kind === 'status'
-      ? saleStatusRequestApplied(current, request as PreparedSaleStatusRequest)
-      : saleAmendmentApplied(current, previousSale, request as SaleAmendmentRequest)
+    const receipt = kind === 'status' ? await reconcileDirectMutationReceipt(
+      () => getSaleStatusReceipt(saleId, request as PreparedSaleStatusRequest),
+      (attempt) => new Promise((resolve) => window.setTimeout(resolve, 250 * (attempt + 1))),
+    ) : await reconcileDirectMutationReceipt(
+      () => getSaleLineReceipt(saleId, 'amendment', { ...request }),
+      (attempt) => new Promise((resolve) => window.setTimeout(resolve, 250 * (attempt + 1))),
+    )
+    // Receipt identity proves the request, while the fresh row drives display.
+    // Never acknowledge a request from status/payment field coincidence.
+    const current = receipt
+      ? await readAuthoritativeSale(saleId, (row) => mutationVersionAtLeast(row.updated_at, receipt.updated_at))
+      : null
+    const applied = !!receipt
     if (!applied) return false
     const unknown = error as { syncErrorId?: string; syncErrorChannel?: string; code?: string }
-    // The authoritative read is the proof that this exact mutation landed.
-    // Clear the global banner as well as the local pending slot. The banner
-    // may have been replaced by a later edge error and therefore not carry
-    // the original error id; the scoped sale check is still the stronger
-    // signal and avoids leaving the operator blocked after a successful
-    // settlement.
-    clearSyncError?.()
+    // Dismiss only the error attached to this exact request. A later error
+    // from another sale or section remains visible.
     dispatchResolvedSyncError({
       errorId: unknown.syncErrorId,
       channel: unknown.syncErrorChannel || (kind === 'status' ? 'sales:updateStatus' : 'sales:amendment'),
       code: unknown.code || 'write_outcome_unknown',
     })
     await loadSales(true)
+    if (current) {
+      salesRef.current = salesRef.current.map((row) => Number(row.id) === saleId ? current : row)
+      setSales(salesRef.current)
+      setDetailSale((row) => Number(row?.id) === saleId ? current : row)
+    }
     void loadSalesStats()
     actionHistory.refreshServerItems()
     window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
     window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'products' } }))
     window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
     return true
-  }, [actionHistory, clearSyncError, loadSales, loadSalesStats, readAuthoritativeSale])
+  }, [actionHistory, loadSales, loadSalesStats, readAuthoritativeSale])
 
   // `extra` carries the full reviewed tender snapshot when SaleDetailModal
   // settles an awaiting-payment sale. That write returns a durable server
@@ -1168,6 +1065,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     }
     const actionKey = String(numericId)
     if (!beginKeyedAction(statusActionRef, actionKey)) return false
+    setDirectStatusSaving(true)
     // A retry is allowed to come from the durable pending slot, so the
     // settlement shape must be detected from the frozen request too. The old
     // check only looked at `extra`; a retried payment was therefore treated
@@ -1212,6 +1110,12 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       }
       notify(`${t('status_updated') || 'Status updated'}: ${getStatusLabel(newStatus, t)}`)
       await loadSales(true)
+      const committedSale = await readAuthoritativeSale(numericId, (row) => mutationVersionAtLeast(row.updated_at, statusUpdatedAt))
+      if (committedSale) {
+        salesRef.current = salesRef.current.map((row) => Number(row.id) === numericId ? committedSale : row)
+        setSales(salesRef.current)
+        setDetailSale((row) => Number(row?.id) === numericId ? committedSale : row)
+      }
       void loadSalesStats() // Z3a: refresh the summary aggregate immediately, not only via the sync round-trip
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'products' } }))
@@ -1236,6 +1140,11 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       }
       return statusUpdatedAt ? { statusUpdatedAt } : true
     } catch (error) {
+      const problem = error as { syncErrorId?: string; syncErrorChannel?: string; code?: string }
+      if (attemptedRequest) pendingStatusProblemRef.current = { errorId: problem.syncErrorId, channel: problem.syncErrorChannel, code: problem.code }
+      // A definitive rejection releases the frozen body before rate/conflict UI
+      // returns, allowing a newly reviewed request to receive a new identity.
+      if (attemptedRequest && !directMutationOutcomeIsUnknown(error) && problem.code !== 'pending_request_persistence_failed') savePendingDirectStatus(saleId, null)
       if (error && typeof error === 'object' && (error as { code?: unknown }).code === 'exchange_rate_changed') {
         const current = (error as { current?: unknown }).current
         const exchangeRateChanged = current && typeof current === 'object'
@@ -1249,7 +1158,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         // an explicit check-and-retry. The global banner carries the same
         // localized wording, while the modal keeps the actionable detail.
         if (directMutationOutcomeIsUnknown(error) && attemptedRequest) {
-          const applied = await resolveUnknownSaleWrite(numericId, attemptedRequest, previousSale || null, 'status', error)
+          const applied = await resolveUnknownSaleWrite(numericId, attemptedRequest, 'status', error)
           if (applied) {
             savePendingDirectStatus(saleId, null)
             notify(`${t('status_updated') || 'Status updated'}: ${getStatusLabel(newStatus, t)}`)
@@ -1268,7 +1177,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         return { settlementError: detail }
       }
       if (directMutationOutcomeIsUnknown(error) && attemptedRequest) {
-        const applied = await resolveUnknownSaleWrite(numericId, attemptedRequest, previousSale || null, 'status', error)
+        const applied = await resolveUnknownSaleWrite(numericId, attemptedRequest, 'status', error)
         if (applied) {
           savePendingDirectStatus(saleId, null)
           notify(`${t('status_updated') || 'Status updated'}: ${getStatusLabel(newStatus, t)}`)
@@ -1284,6 +1193,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       return false
     } finally {
       finishKeyedAction(statusActionRef, actionKey)
+      setDirectStatusSaving(false)
     }
   }
 
@@ -1310,7 +1220,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         return
       }
     }
-    await handleStatusChange(
+    const result = await handleStatusChange(
       pending.entityId,
       String(pending.body.sale_status || ''),
       String(pending.body.notes || ''),
@@ -1320,6 +1230,17 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       pending.body,
       history,
     )
+    if (result === true || (result && typeof result === 'object' && 'statusUpdatedAt' in result)) {
+      setDetailSale((sale) => String(sale?.id) === pending.entityId ? null : sale)
+    }
+  }
+
+  const discardPendingDirectStatus = (): void => {
+    const pending = currentPendingDirectStatus()
+    if (!pending || statusActionRef.current.size > 0) return
+    if (!window.confirm(translateOr('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.'))) return
+    try { savePendingDirectStatus(pending.entityId, null) }
+    catch (error) { notify(getErrorMessage(error, 'Unable to discard the pending retry.'), 'error') }
   }
 
   // S4-24b: add product lines to a sale that already exists. The server does
@@ -1336,7 +1257,6 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     }
     const numericId = Number(saleId)
     if (!Number.isFinite(numericId) || !items.length) return false
-    const previousSale = salesRef.current.find((entry) => Number(entry?.id || 0) === numericId) || null
     try {
       const result = await withLoaderTimeout(
         () => getSalesApi().addSaleItems(saleId, items, '', review),
@@ -1365,14 +1285,23 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         if (Number.isFinite(exchangeRateChanged) && exchangeRateChanged > 0) return { exchangeRateChanged }
       }
       if (directMutationOutcomeIsUnknown(error)) {
-        const current = await readAuthoritativeSale(numericId)
-        if (saleAddItemsApplied(current, previousSale, items)) {
+        const receipt = await reconcileDirectMutationReceipt(
+          () => getSaleLineReceipt(numericId, 'add_items', { items, notes: '', ...review }),
+          (attempt) => new Promise((resolve) => window.setTimeout(resolve, 250 * (attempt + 1))),
+        )
+        if (receipt) {
           dispatchResolvedSyncError({
             errorId: (error as { syncErrorId?: string }).syncErrorId,
             channel: (error as { syncErrorChannel?: string }).syncErrorChannel || 'sales:addItems',
             code: (error as { code?: string }).code || 'write_outcome_unknown',
           })
           await loadSales(true)
+          const committedSale = await readAuthoritativeSale(numericId, (row) => mutationVersionAtLeast(row.updated_at, receipt.updated_at))
+          if (committedSale) {
+            salesRef.current = salesRef.current.map((row) => Number(row.id) === numericId ? committedSale : row)
+            setSales(salesRef.current)
+            setDetailSale((row) => Number(row?.id) === numericId ? committedSale : row)
+          }
           void loadSalesStats()
           actionHistory.refreshServerItems()
           window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
@@ -1434,7 +1363,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         if (Number.isFinite(exchangeRateChanged) && exchangeRateChanged > 0) return { exchangeRateChanged }
       }
       if (directMutationOutcomeIsUnknown(error)) {
-        const applied = await resolveUnknownSaleWrite(numericId, request, previousSale, 'amendment', error)
+        const applied = await resolveUnknownSaleWrite(numericId, request, 'amendment', error)
         if (applied) {
           notify(translateOr('sale_amended', 'Sale updated.'))
           return true
@@ -1926,6 +1855,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
 
   const openBulkChange = async (field: BulkSaleField) => {
     if (!canBulkSales) return
+    if (!(field === 'status' ? canChangeSaleStatus : field === 'customer' ? canChangeSaleCustomer : canAmendSales)) return
     if (!selectedSales.length) return
     if (selectedSales.length > 25) {
       notify(translateOr('sale_bulk_limit', 'Select at most 25 sales for one change.'), 'error')
@@ -2122,6 +2052,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
 
   const submitBulkFieldChange = async (field: Exclude<BulkSaleField, 'status'>, source: BulkSaleChoice, target: BulkSaleChoice, matched: BulkSaleChangeRow[], frozenSales: SaleRecord[], retryRequest?: BulkSaleUpdatePayload) => {
     if (!canBulkSales) return
+    if (!(field === 'customer' ? canChangeSaleCustomer : canAmendSales)) return
     if (!retryRequest && !matched.length) return
     if (!beginSingleAction(bulkStatusInFlightRef, { blocked: bulkFieldSaving })) return
     setBulkFieldSaving(true)
@@ -2419,12 +2350,8 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
           standalone action row and the centered pagination row are gone;
           the pager now rides the sticky search row below. */}
       <div className="mt-3 mb-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
-        <p className="min-w-0 break-words">
-          {translateOr('sales_strip_period_scope', 'Period totals · list search, status and cashier filters do not apply.', 'សរុបតាមរយៈពេល · មិនអនុវត្តការស្វែងរក តម្រងស្ថានភាព និងអ្នកគិតលុយក្នុងបញ្ជីទេ។')}
-        </p>
         <span role="status" aria-live="polite">
-          {stripStatus === 'no-range' ? translateOr('sales_strip_choose_range', 'Select both dates to see totals.', 'ជ្រើសកាលបរិច្ឆេទទាំងពីរ ដើម្បីមើលចំនួនសរុប។')
-            : stripStatus === 'loading' ? translateOr('sales_strip_loading', 'Loading period totals…', 'កំពុងផ្ទុកចំនួនសរុបតាមរយៈពេល…')
+          {stripStatus === 'loading' ? translateOr('sales_strip_loading', 'Loading period totals…', 'កំពុងផ្ទុកចំនួនសរុបតាមរយៈពេល…')
               : stripStatus === 'error' ? translateOr('sales_strip_failed', 'Period totals unavailable.', 'មិនអាចផ្ទុកចំនួនសរុបតាមរយៈពេលបានទេ។')
                 : stripStatus === 'unavailable' ? translateOr('sales_strip_unavailable', 'Period totals are not available in this view.', 'មិនអាចមើលចំនួនសរុបតាមរយៈពេលនៅទីនេះបានទេ។') : null}
         </span>
@@ -2441,6 +2368,9 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
         cards={stripCards}
         loading={stripLoading}
         t={t}
+        range={stripRange}
+        onRangeChange={setStripRange}
+        showTime
         // No `summary` beside the Stats chip on Sales: the outside "N sales ·
         // $revenue" duplicated the strip's own Sales + Revenue cards (user,
         // Aug 31: "the outside stats is redundant with the stat in the stat
@@ -2450,16 +2380,16 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
         // longer relocates them (user, Aug 31).
         rangeActions={(
           <>
-            <ShiftHistoryModal
+            {canUseShifts ? <ShiftHistoryModal
               label={translateOr('shift', 'Shift')}
-              buttonClassName="btn-secondary inline-flex h-11 min-w-11 items-center justify-center px-2.5 py-0 text-xs md:h-8 md:min-w-0"
-            />
+              buttonClassName="btn-secondary inline-flex h-10 min-w-10 items-center justify-center px-2.5 py-0 text-xs"
+            /> : null}
             {canExportSales ? (
               <SectionExportAction>
                 <LazyPortalMenu
                   align="auto"
                   menuClassName="max-h-[70vh] overflow-auto"
-                  trigger={<button type="button" className="btn-secondary inline-flex h-11 min-w-11 items-center justify-center gap-1 px-2.5 py-0 text-xs md:h-8 md:min-w-0" aria-label={translateOr('export', 'Export')} title={translateOr('export', 'Export')}><Download className="h-4 w-4 shrink-0" /><span className="hidden md:inline">{translateOr('export', 'Export')}</span></button>}
+                  trigger={<button type="button" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800" aria-label={translateOr('export', 'Export')} title={translateOr('export', 'Export')}><Download className="h-5 w-5 shrink-0" /></button>}
                   items={(salesExportItems || []).filter((item): item is PortalMenuItem => Boolean(item)).map((item) => item === 'divider' ? item : ({ ...item, icon: item.icon ?? <Download className="h-4 w-4 shrink-0" /> }))}
                 />
               </SectionExportAction>
@@ -2467,14 +2397,14 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
             {/* dense: pin History to a true 32px so it matches the h-8 Manage
                 button beside it on the Stats row (btn-secondary's 40px
                 min-height would otherwise make it taller). */}
-            <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} t={t} className="min-w-0" dense />
+            <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} t={t} className="min-w-0" />
             {canImportSales ? <LazyPortalMenu
               align="auto"
               menuClassName="max-h-[70vh] overflow-auto"
               trigger={(
                 <button
                   type="button"
-                  className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border border-gray-200 bg-white px-2.5 text-xs font-semibold text-gray-700 transition-colors hover:border-blue-300 hover:text-blue-700 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200"
+                  className="inline-flex h-10 shrink-0 items-center gap-1 rounded-lg border border-gray-200 bg-white px-2.5 text-xs font-semibold text-gray-700 transition-colors hover:border-blue-300 hover:text-blue-700 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200"
                   aria-haspopup="true"
                   aria-label={translateOr('manage', 'Manage')}
                   title={translateOr('manage', 'Manage')}
@@ -2513,7 +2443,6 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
             (user, Aug 31: "fish out the start date and end date from the stats
             button ... right above the search bar row"). Same range state
             (stripRange) still feeds the strip's cards. */}
-        <StatsRangeRow className="pt-1" range={stripRange} onRangeChange={setStripRange} t={t} showTime />
         <div className="flex flex-wrap items-center gap-2">
           <SearchInput
             id="sales-search"
@@ -2546,28 +2475,36 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
 
       </div>
 
-      {activePendingDirectStatus ? (
-        <div data-needs-reconciliation={activePendingDirectStatus.needsReconciliation || undefined} className="mb-2 flex flex-wrap items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-100">
-          <span className="min-w-0 flex-1">{activePendingDirectStatus.needsReconciliation
+      {/* Pagination on its own row directly BELOW the search row (user,
+          Aug 31: "page back and forth ... below the search bar row"), matching
+          Returns/Fees in this hub — never on the date row or the search row
+          itself. The list's own footer keeps its pager too. */}
+      <div className="mb-3 flex justify-center">
+        <PaginationControls
+          compact
+          rangeAsPageSize
+          page={salesPage}
+          pageSize={salesPageSize}
+          totalItems={totalSalesCount}
+          label={t('sales') || 'sales'}
+          t={t}
+          onPageChange={setSalesPage}
+          onPageSizeChange={(size) => {
+            setSalesPageSize(size)
+            setSalesPage(1)
+          }}
+        />
+      </div>
+
+      {!directStatusSaving && activePendingDirectStatus && String(detailSale?.id) !== activePendingDirectStatus.entityId ? (
+        <div role="status" data-needs-reconciliation={activePendingDirectStatus.needsReconciliation || undefined} className="mb-2 grid min-w-0 grid-cols-1 gap-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-100">
+          <span className="min-w-0 break-words">{activePendingDirectStatus.needsReconciliation
             ? translateOr('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.')
             : translateOr('sale_bulk_pending', 'A previous request has an unknown outcome. Retry the original request or discard it before starting another.')}</span>
           <button type="button" className="btn-secondary" disabled={statusActionRef.current.size > 0 || !canChangeSaleStatus} onClick={() => {
             void retryPendingDirectStatusRequest()
           }}>{translateOr('retry_original_request', 'Retry original request')}</button>
-          <button type="button" className="btn-secondary" disabled={statusActionRef.current.size > 0} onClick={() => {
-            if (window.confirm(translateOr('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.'))) {
-              try {
-                savePendingDirectStatus(activePendingDirectStatus.entityId, null)
-                // Discarding the exact pending request also dismisses the
-                // global unknown-outcome banner for this page. The inline
-                // card is removed by savePendingDirectStatus above; leaving
-                // the global banner behind made the discarded request look
-                // like it was still active after the operator had resolved it.
-                clearSyncError?.()
-              }
-              catch (error) { notify(getErrorMessage(error, 'Unable to discard the pending retry.'), 'error') }
-            }
-          }}>{translateOr('discard_retry', 'Discard retry')}</button>
+          <button type="button" className="btn-secondary" disabled={statusActionRef.current.size > 0} onClick={discardPendingDirectStatus}>{translateOr('discard_retry', 'Discard retry')}</button>
         </div>
       ) : null}
       {canBulkSales && pendingBulkRequest ? (
@@ -2596,27 +2533,6 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
             </button>
           </div>
         ) : null}
-
-      {/* Pagination on its own row directly BELOW the search row (user,
-          Aug 31: "page back and forth ... below the search bar row"), matching
-          Returns/Fees in this hub — never on the date row or the search row
-          itself. The list's own footer keeps its pager too. */}
-      <div className="mb-3 flex justify-center">
-        <PaginationControls
-          compact
-          rangeAsPageSize
-          page={salesPage}
-          pageSize={salesPageSize}
-          totalItems={totalSalesCount}
-          label={t('sales') || 'sales'}
-          t={t}
-          onPageChange={setSalesPage}
-          onPageSizeChange={(size) => {
-            setSalesPageSize(size)
-            setSalesPage(1)
-          }}
-        />
-      </div>
 
       {loadError && !loading ? (
         <div role="alert" className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300">
@@ -2661,6 +2577,10 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
         toggleSelectionScope={toggleSelectionScope}
       />
 
+      <div data-sales-bottom-pager="" className="mt-3 flex justify-center">
+        <PaginationControls compact rangeAsPageSize page={salesPage} pageSize={salesPageSize} totalItems={totalSalesCount} label={t('sales') || 'sales'} t={t} onPageChange={setSalesPage} onPageSizeChange={(size) => { setSalesPageSize(size); setSalesPage(1) }} />
+      </div>
+
       {exportDialog ? (
         <Suspense fallback={null}>
           <ExportOptionsDialog
@@ -2680,6 +2600,10 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
         <Suspense fallback={null}>
           <SaleDetailModal
             sale={detailSale}
+            pendingStatus={!directStatusSaving && activePendingDirectStatus?.entityId === String(detailSale.id)}
+            statusRecoveryOwner={isActive && activePendingDirectStatus && pendingStatusProblemRef.current ? { actorId: activePendingDirectStatus.actorId, requestId: activePendingDirectStatus.body.client_request_id, problem: pendingStatusProblemRef.current } : null}
+            onRetryStatus={canChangeSaleStatus ? retryPendingDirectStatusRequest : undefined}
+            onDiscardStatus={discardPendingDirectStatus}
             settings={settings}
             onClose={() => setDetailSale(null)}
             // View-only (Part 557): omit the write callbacks so the modal hides
@@ -2694,7 +2618,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
             // this modal uses. The HISTORY read is not gated here -- anyone who
             // can open the sale can see how it got that way (the Worker
             // gates it on read access), so it is passed unconditionally.
-            onAmend={canAmendSales ? handleAmendSale : undefined}
+            onAmend={canAmendSales && saleAmendmentWindowAllows(settings?.sale_amendment_window_minutes, detailSale.created_at, isAdmin) ? handleAmendSale : undefined}
             onLoadAmendments={loadSaleAmendments}
             onOpenRecords={(sale) => {
               setRecordsSale(sale as SaleRecord)

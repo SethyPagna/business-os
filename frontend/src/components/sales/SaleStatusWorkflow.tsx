@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
-import { ALL_STATUSES, getStatusLabel } from './StatusBadge.tsx'
+import { ALL_STATUSES, getStatusBadgeLabel as getStatusLabel } from './StatusBadge.tsx'
 
 type TranslateFn = (key: string) => string
 
@@ -77,13 +77,13 @@ export default function SaleStatusWorkflow({
           </div>
           {showNotes ? <div>
             <label htmlFor="sale-status-notes" className="mb-1 block text-xs text-gray-400">{t('notes') || 'Notes'}</label>
-            <textarea id="sale-status-notes" className="input min-h-[80px] resize-none text-sm" value={notes} onChange={(event) => onNotesChange(event.target.value)} placeholder={t('status_notes_placeholder') || 'Optional notes about this status change'} />
+            <textarea id="sale-status-notes" disabled={saving} className="input min-h-[80px] resize-none text-sm" value={notes} onChange={(event) => onNotesChange(event.target.value)} placeholder={t('status_notes_placeholder') || 'Optional notes about this status change'} />
           </div> : null}
           {children}
         </>
       )}
       <div data-sale-status-review-actions="" className="flex items-stretch gap-2">
-        <button type="button" className="btn-secondary inline-flex min-h-11 min-w-0 flex-1 items-center justify-center gap-1 px-2 text-sm font-semibold" onClick={() => setStep(step === 'review' ? 'destination' : 'closed')}>
+        <button type="button" disabled={saving} className="btn-secondary inline-flex min-h-11 min-w-0 flex-1 items-center justify-center gap-1 px-2 text-sm font-semibold" onClick={() => setStep(step === 'review' ? 'destination' : 'closed')}>
           <ChevronLeft className="h-4 w-4" aria-hidden="true" />
           {step === 'review' ? (t('back') || 'Back') : (t('cancel') || 'Cancel')}
         </button>

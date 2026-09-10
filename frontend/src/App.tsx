@@ -1,6 +1,6 @@
 import { useMobileSectionNavMode } from './utils/sectionNavPreference.ts'
 import { getHubPageFromLocation } from './components/shared/hubNavigation.ts'
-import { Component, Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
+import { Component, Suspense, lazy, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { ComponentType, ErrorInfo, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import ArrowDown from 'lucide-react/dist/esm/icons/arrow-down.js'
@@ -24,7 +24,7 @@ import { claimChunkReload, clearChunkReloadMarker } from './utils/chunkReloadGua
 import { hasDirtyWork } from './utils/dirtyWork.ts'
 import { withLoaderTimeout } from './utils/loaders.ts'
 import { flushPendingWorkDrafts } from './utils/workDrafts.ts'
-import { shouldClearResolvedSyncError, SYNC_ERROR_RESOLVED_EVENT, type SyncProblemReference } from './utils/syncProblemLifecycle.ts'
+import { hasLocalSyncProblemPresentation, subscribeSyncProblemPresentation, shouldClearResolvedSyncError, SYNC_ERROR_RESOLVED_EVENT, type SyncProblemReference } from './utils/syncProblemLifecycle.ts'
 import { presentWriteError } from './utils/writeErrorPresentation.ts'
 
 declare const __FRONTEND_BUILD_HASH__: string | undefined
@@ -1203,9 +1203,12 @@ function AppUpdateBanner({ update, onDismiss }: AppUpdateBannerProps) {
 }
 
 function SyncErrorBanner({ error, onDismiss, onGoToServer }: SyncErrorBannerProps) {
-  const { t, canAccessPage } = useApp()
+  const { t, canAccessPage, user } = useApp()
+  const locallyPresented = useSyncExternalStore(subscribeSyncProblemPresentation,
+    () => hasLocalSyncProblemPresentation(error, user?.id), () => false)
   if (!error) return null
   const presentation = presentWriteError(error, t)
+  if (presentation.unknownOutcome && locallyPresented) return null
   // navigateTo('server') (App.tsx's onGoToServer -> AppContext.tsx's
   // navigateTo) already silently no-ops for a user without the 'settings'
   // permission the Server Sync page requires (same gate PageSlot's render

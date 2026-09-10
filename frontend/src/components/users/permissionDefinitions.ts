@@ -122,7 +122,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'full_access',
     tKey: 'perm_section_full_access',
     label: 'Full Administrator Access',
-    description: 'Overrides every section below -- full access to every page and action, with nothing gated.',
+    description: 'Overrides every section below. Administrator control also manages all Shifts, including cancellation and cross-account review; server capability flags remain authoritative.',
     permissions: [
       { key: 'all', tKey: 'perm_all', label: 'Administrator (full access)', sensitivity: 'critical' },
     ],
@@ -191,7 +191,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'pos',
     tKey: 'perm_section_pos',
     label: 'POS',
-    description: 'Full Access or None only -- no partial tier for checkout itself.',
+    description: 'Full Access or None for checkout. Full POS also opens Shifts: staff can close, reopen or amend their own eligible shifts, and see shop-wide shifts when configured. Cancellation and cross-account review require administrator control; server capability flags decide each action.',
     permissions: [
       { key: 'pos', tKey: 'perm_pos', label: 'POS', sensitivity: 'normal' },
     ],
@@ -361,7 +361,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'sales',
     tKey: 'perm_section_sales',
     label: 'Sales',
-    description: 'None / View only / Full. View only shows every sale, stat, report and export but blocks writes (cancel, change status, edit customer, import).',
+    description: 'None / View only / Full. View only permits reading Sales but blocks writes and does not open Shifts. Full Sales also opens Shifts with own-shift actions and configured shop-wide visibility; administrator control is required for cancellation and cross-account review. Server capability flags remain authoritative.',
     permissions: [
       // View-tier section (Part 557 slice 2): all sales READS
       // (list/stats/reports/export) admit a 'view' grant; the writes

@@ -22,6 +22,76 @@ function load(rel) {
 
 const { planSaleSettlement, renameSalePaymentMethod, SettlementValidationError } = load('lib/paymentSettlement.ts')
 
+// Execute the actual receipt route callbacks and canonicalizers against an
+// actor-scoped receipt store. No HTTP/auth or SQL mutation is substituted here.
+async function verifyReceiptRoutes() {
+  const routeText = fs.readFileSync(path.join(root, 'src/routes/sales.ts'), 'utf8')
+  const ast = ts.createSourceFile('sales.ts', routeText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+  const helperNames = new Set(['normalizeClientRequestId', 'saleMutationDigest', 'saleStatusReceiptCanonical', 'saleLineReceiptCanonical'])
+  const routePaths = new Set(['/:id/status-receipt', '/:id/line-receipt/:kind'])
+  const extracted = ast.statements.filter(statement => {
+    if (ts.isFunctionDeclaration(statement)) return helperNames.has(statement.name?.text)
+    if (!ts.isExpressionStatement(statement) || !ts.isCallExpression(statement.expression)) return false
+    const call = statement.expression
+    return ts.isPropertyAccessExpression(call.expression) && call.expression.expression.getText(ast) === 'app'
+      && call.expression.name.text === 'post' && ts.isStringLiteral(call.arguments[0]) && routePaths.has(call.arguments[0].text)
+  }).map(statement => statement.getText(ast)).join('\n')
+  const output = ts.transpileModule(extracted, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
+  const handlers = new Map(), receipts = new Map(), exported = {}
+  let reads = 0
+  const db = { prepare(sql) {
+    assert.match(sql, /^SELECT /, 'receipt lookup must never write data')
+    return { async get(params) {
+      reads++
+      const actor = params.actor ?? Number(params.source.match(/^actor:(\d+):/)[1])
+      const request = params.request ?? params.source.split(':request:')[1]
+      const kind = params.kind ?? (sql.includes('sale_record_events') ? 'status' : 'settlement')
+      return receipts.get(`${actor}:${kind}:${request}`) ?? null
+    } }
+  } }
+  const { getActionTier } = load('lib/permissions.ts')
+  const { getExpectedUpdatedAt } = load('lib/conflictControl.ts')
+  const { normalizeCancelReason } = load('lib/saleTransitions.ts')
+  const { round2 } = load('lib/saleTotals.ts')
+  new Function('exports', 'app', 'getDb', 'getActionTier', 'getExpectedUpdatedAt', 'normalizeCancelReason', 'round2', output)(exported, { post: (name, fn) => handlers.set(name, fn) }, () => db, getActionTier, getExpectedUpdatedAt, normalizeCancelReason, round2)
+  const digest = async value => Buffer.from(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(value)))).toString('hex')
+  const actor = { id: 7, username: 'cashier', role_code: 'employee', permissions: { sales: true } }
+  const request = { client_request_id: 'screenshot-20260910-171258', sale_status: 'completed', payment_details: [{ method: 'ABA', amount_usd: 7, amount_khr: 0 }], expected_exchange_rate: 4100 }
+  const invoke = async (body = request, user = actor, kind = null, id = 171258) => {
+    const headers = {}
+    const result = await handlers.get(kind ? '/:id/line-receipt/:kind' : '/:id/status-receipt')({
+      env: {}, get: () => ({ ...user, permissions: JSON.stringify(user.permissions) }), req: { json: async () => body, param: name => name === 'id' ? String(id) : kind },
+      header: (name, value) => { headers[name] = value }, json: (body, status = 200) => ({ body, status }),
+    })
+    return { ...result, headers }
+  }
+  assert.deepEqual((await invoke()).body, { committed: false }, 'uncommitted/lost response stays unknown')
+  const snapshot = { id: 171258, sale_status: 'completed', updated_at: '2026-09-10 10:13:00', actionHistoryId: 77 }
+  receipts.set(`7:settlement:${request.client_request_id}`, { request_digest: await digest(exported.saleStatusReceiptCanonical(171258, request)), response_json: JSON.stringify(snapshot) })
+  assert.deepEqual((await invoke()).body, { committed: true, response: snapshot }, 'committed ABA $7 lost response resolves by receipt')
+  assert.equal((await invoke()).headers['Cache-Control'], 'no-store')
+  assert.deepEqual((await invoke(request, { ...actor, id: 8 })).body, { committed: false }, 'another actor with identical sale fields cannot claim the receipt')
+  assert.equal((await invoke({ ...request, payment_details: [{ method: 'ABA', amount_usd: 8, amount_khr: 0 }] })).status, 409)
+  assert.equal((await invoke(request, actor, null, 999)).status, 409, 'same request on a different sale conflicts')
+  const beforeDenied = reads
+  assert.equal((await invoke(request, { ...actor, permissions: { sales: true, 'sales:status': false } })).status, 403)
+  assert.equal(reads, beforeDenied, 'revocation is enforced before receipt access')
+  const statusRequest = { client_request_id: 'plain-status', sale_status: 'awaiting_payment', expected_updated_at: snapshot.updated_at, notes: 'Correction' }
+  receipts.set('7:status:plain-status', { request_digest: await digest(exported.saleStatusReceiptCanonical(171258, statusRequest)), response_json: JSON.stringify(snapshot) })
+  assert.equal((await invoke(statusRequest)).body.committed, true)
+  assert.equal((await invoke({ ...statusRequest, notes: 'Different operation' })).status, 409)
+  for (const kind of ['add_items', 'amendment']) {
+    const line = { client_request_id: kind, kind: 'line_updated', sale_item_id: 4, quantity: 2, applied_price_usd: 7, items: [{ product_id: 4, quantity: 2 }], expected_exchange_rate: 4100 }
+    receipts.set(`7:${kind}:${kind}`, { request_digest: await digest(exported.saleLineReceiptCanonical(171258, kind, line)), response_json: JSON.stringify(snapshot) })
+    assert.equal((await invoke(line, actor, kind)).body.committed, true)
+    assert.equal((await invoke({ ...line, expected_exchange_rate: 4200 }, actor, kind)).status, 409)
+    const action = kind === 'add_items' ? 'add_items' : 'amend'
+    assert.equal((await invoke(line, { ...actor, permissions: { sales: true, [`sales:${action}`]: false } }, kind)).status, 403)
+  }
+  console.log('PASS actual receipt routes: screenshot ABA $7, committed/uncommitted lost response, actor isolation, same-ID conflict, revocation and line receipt parity')
+}
+verifyReceiptRoutes().catch(error => { console.error(error); process.exitCode = 1 })
+
 const plan = planSaleSettlement({
   configuredMethodsRaw: '["Cash","ABA Bank"]',
   paymentDetailsRaw: [

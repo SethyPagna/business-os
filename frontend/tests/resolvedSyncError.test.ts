@@ -2,6 +2,9 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import {
   dispatchResolvedSyncError,
+  claimSyncProblemPresentation,
+  hasLocalSyncProblemPresentation,
+  subscribeSyncProblemPresentation,
   shouldClearResolvedSyncError,
   SYNC_ERROR_RESOLVED_EVENT,
 } from '../src/utils/syncProblemLifecycle.ts'
@@ -30,6 +33,33 @@ assert.deepEqual(resolved, current)
 assert.equal(dispatchResolvedSyncError({ errorId: 'failure-1', channel: 'customers:create' }), false)
 globalRecord.window = previousWindow
 
+const statusProblem = { errorId: 'sale-timeout-1', channel: 'sales:status', code: 'write_outcome_unknown' }
+let leaseChanges = 0
+const unsubscribe = subscribeSyncProblemPresentation(() => { leaseChanges += 1 })
+for (const owner of [
+  { actorId: '', requestId: 'request-1', problem: statusProblem },
+  { actorId: 'actor-1', requestId: '', problem: statusProblem },
+  { actorId: 'actor-1', requestId: 'request-1', problem: { errorId: 'sale-timeout-1' } },
+]) {
+  const release = claimSyncProblemPresentation(owner)
+  assert.equal(hasLocalSyncProblemPresentation(statusProblem, 'actor-1'), false, 'missing identity cannot suppress a banner')
+  release()
+}
+const releaseFirst = claimSyncProblemPresentation({ actorId: 'actor-1', requestId: 'request-1', problem: statusProblem })
+assert.equal(hasLocalSyncProblemPresentation(statusProblem, 'actor-1'), true, 'mounted modal owns only the matching error')
+assert.equal(hasLocalSyncProblemPresentation(statusProblem, 'actor-2'), false, 'actor switch restores the global warning')
+assert.equal(hasLocalSyncProblemPresentation({ ...statusProblem, errorId: 'sale-timeout-2' }, 'actor-1'), false)
+assert.equal(hasLocalSyncProblemPresentation({ ...statusProblem, channel: 'sales:amend' }, 'actor-1'), false)
+assert.equal(hasLocalSyncProblemPresentation({ ...statusProblem, code: 'other' }, 'actor-1'), false)
+const releaseSecond = claimSyncProblemPresentation({ actorId: 'actor-1', requestId: 'request-1', problem: statusProblem })
+releaseFirst()
+releaseFirst()
+assert.equal(hasLocalSyncProblemPresentation(statusProblem, 'actor-1'), true, 'stale cleanup cannot release another surface token')
+releaseSecond()
+assert.equal(hasLocalSyncProblemPresentation(statusProblem, 'actor-1'), false, 'closing the modal restores the unresolved banner')
+assert.equal(leaseChanges, 4)
+unsubscribe()
+
 const httpSource = read('../src/api/http.ts')
 const appSource = read('../src/App.tsx')
 const contactSource = read('../src/components/contacts/contactDuplicates.ts')
@@ -42,6 +72,9 @@ assert.match(httpSource, /const errorId = createSyncErrorId\(\)[\s\S]*e\.syncErr
 assert.match(appSource, /setSyncError\(\(current\) => shouldClearResolvedSyncError\(current, detail\) \? null : current\)/)
 assert.match(appSource, /addEventListener\(SYNC_ERROR_RESOLVED_EVENT, onSyncErrorResolved\)/)
 assert.match(appSource, /removeEventListener\(SYNC_ERROR_RESOLVED_EVENT, onSyncErrorResolved\)/)
+assert.match(appSource, /presentation\.unknownOutcome && locallyPresented\) return null/, 'only presentation is suppressed, never underlying error state')
+const salesDetailSource = read('../src/components/sales/SaleDetailModal.tsx')
+assert.match(salesDetailSource, /return claimSyncProblemPresentation\(statusRecoveryOwner\)/, 'modal lease is released by effect cleanup')
 assert.match(contactSource, /matches: check\.matches\.map\(\(match\) => \(\{ \.\.\.match, syncProblem \}\)\)/)
 assert.match(contactSource, /dispatchResolvedSyncError\(value\?\.syncProblem\)/)
 

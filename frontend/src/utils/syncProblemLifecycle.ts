@@ -39,3 +39,38 @@ export function dispatchResolvedSyncError(problem: SyncProblemReference | null |
   window.dispatchEvent(new CustomEvent(SYNC_ERROR_RESOLVED_EVENT, { detail }))
   return true
 }
+
+export type SyncProblemPresentationOwner = {
+  actorId: string
+  requestId: string
+  problem: SyncProblemReference
+}
+
+const presentationOwners = new Map<symbol, SyncProblemPresentationOwner>()
+const presentationListeners = new Set<() => void>()
+
+export function subscribeSyncProblemPresentation(listener: () => void): () => void {
+  presentationListeners.add(listener)
+  return () => { presentationListeners.delete(listener) }
+}
+
+/** A mounted recovery surface owns presentation only; the error is not cleared. */
+export function claimSyncProblemPresentation(owner: SyncProblemPresentationOwner): () => void {
+  const actorId = String(owner.actorId || '').trim()
+  const requestId = String(owner.requestId || '').trim()
+  const problem = normalizedReference(owner.problem)
+  if (!actorId || !requestId || !problem) return () => {}
+  const token = Symbol('sync-problem-presentation')
+  presentationOwners.set(token, { actorId, requestId, problem })
+  presentationListeners.forEach(listener => listener())
+  return () => {
+    if (!presentationOwners.delete(token)) return
+    presentationListeners.forEach(listener => listener())
+  }
+}
+
+export function hasLocalSyncProblemPresentation(problem: SyncProblemReference | null | undefined, actorId: unknown): boolean {
+  const actor = String(actorId || '').trim()
+  if (!actor) return false
+  return [...presentationOwners.values()].some(owner => owner.actorId === actor && shouldClearResolvedSyncError(problem, owner.problem))
+}
