@@ -236,11 +236,11 @@ await test('period scope ignores list search/status/cashier and fees remain date
   assert.match(card(h.render(), 'expenses').label, /[\u1780-\u17ff]/)
 })
 
-await test('visible scope, availability and touch-safe retry use bilingual local fallbacks', () => {
-  for (const key of ['period_scope', 'choose_range', 'loading', 'failed', 'unavailable', 'retry', 'expenses_whole_days', 'expenses_time_hint']) {
+await test('availability and touch-safe retry use bilingual local fallbacks without repeated period prose', () => {
+  for (const key of ['loading', 'failed', 'unavailable', 'retry', 'expenses_whole_days', 'expenses_time_hint']) {
     assert.match(source, new RegExp(`translateOr\\('sales_strip_${key}', '[^']+', '[^']*[\\u1780-\\u17ff][^']*'\\)`))
   }
-  assert.match(source, /<p[^>]*>[\s\S]*?translateOr\('sales_strip_period_scope', 'Period totals · list search, status and cashier filters do not apply\.'/)
+  assert.doesNotMatch(source, /sales_strip_(?:period_scope|choose_range)/, 'the compact strip must not repeat range instructions already expressed by its controls')
   assert.match(source, /role="status" aria-live="polite"/)
   assert.match(source, /stripStatus === 'error' \? \([\s\S]{0,200}min-h-\[44px\][\s\S]{0,120}onClick=\{\(\) => \{ void loadStatsStrip\(\)/)
   assert.match(source, /loading=\{stripLoading\}/)

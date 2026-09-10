@@ -6,22 +6,24 @@ const detail = read('src/components/sales/SaleDetailModal.tsx')
 const workflow = read('src/components/sales/SaleStatusWorkflow.tsx')
 const list = read('src/components/sales/SalesListSurface.tsx')
 const sales = read('src/components/sales/Sales.tsx')
+const copyable = read('src/components/shared/CopyableId.tsx')
 
-// U22: compact, readable identity keeps an explicit copy button. On phones,
-// receipt/time/branch/cashier share the primary metadata row; wider screens
-// retain the complete business date/time below.
+// U22: compact identity uses two rows: receipt + status, then
+// time / cashier / branch. Copy stays a plain hold/keyboard affordance.
 const header = detail.slice(detail.indexOf('Compact record identity:'), detail.indexOf('modal-scroll'))
 assert.ok(header.length > 300, 'sale detail header is identifiable')
 const detailPrimaryStart = header.indexOf('data-sale-detail-primary-meta=""')
 const detailPrimary = header.slice(detailPrimaryStart, header.indexOf('</div>', detailPrimaryStart))
 const detailReceiptAt = detailPrimary.indexOf('<CopyableId')
-const detailTimeAt = detailPrimary.indexOf('{fmtTime(sale.created_at)}')
-const detailBranchAt = detailPrimary.indexOf('{sale.branch_name ?')
-const detailCashierAt = detailPrimary.indexOf('{sale.cashier_name ?')
-assert.ok(detailReceiptAt >= 0 && detailReceiptAt < detailTimeAt && detailTimeAt < detailBranchAt && detailBranchAt < detailCashierAt, 'detail phone metadata order is receipt, time, branch, cashier')
-assert.equal((detailPrimary.match(/className="sm:hidden"/g) || []).length >= 3, true, 'time, branch and cashier additions are phone-only')
-assert.match(header, /className="mt-1 hidden text-xs text-gray-400 sm:block">\{fmtTime\(sale\.created_at\)}/, 'desktop keeps the full timestamp beneath the receipt')
-assert.match(header, /<StatusBadge status=\{currentStatus\} t=\{t\} \/>/, 'status remains visible beside the compact identity')
+const detailStatusAt = header.indexOf('<StatusBadge', detailPrimaryStart)
+assert.ok(detailReceiptAt >= 0 && detailStatusAt > detailPrimaryStart, 'receipt and status share the primary detail row')
+const detailSecondaryStart = header.indexOf('data-sale-detail-secondary-meta=""')
+const detailSecondary = header.slice(detailSecondaryStart, header.indexOf('</div>', detailSecondaryStart))
+const detailTimeAt = detailSecondary.indexOf('{fmtTime(sale.created_at)}')
+const detailCashierAt = detailSecondary.indexOf('{sale.cashier_name ?')
+const detailBranchAt = detailSecondary.indexOf('{sale.branch_name ?')
+assert.ok(detailTimeAt >= 0 && detailTimeAt < detailCashierAt && detailCashierAt < detailBranchAt, 'detail secondary metadata is time, cashier, branch')
+assert.match(detailSecondary, /overflow-x-auto whitespace-nowrap/, 'detail secondary metadata remains a single horizontally scrollable row')
 assert.match(header, /aria-label=\{t\('close'\) \|\| 'Close'\}/, 'the top close remains keyboard and screen-reader named')
 assert.doesNotMatch(header, /onReturn\(sale\)|onPrint\(sale\)/, 'Return and Print stay out of the compact header')
 
@@ -73,17 +75,22 @@ assert.match(footer, /\{onPrint \? \([\s\S]*?onPrint\(sale\)/, 'Print remains hi
 assert.match(footer, /onClick=\{closeGuard\.requestClose\}[\s\S]*?\{t\('close'\) \|\| 'Close'\}/)
 
 // U15: the collapsed card's primary metadata row reads receipt | time |
-// branch | cashier. Long ids may still wrap, and the cashier is emphasized.
+// cashier | branch. Long ids stay one nonshrinking value in the row's own
+// horizontal scroller, and the cashier is emphasized.
 const primaryStart = list.indexOf('data-sales-card-primary-meta=""')
 const primaryMeta = list.slice(primaryStart, list.indexOf('</div>', primaryStart))
-const receiptAt = primaryMeta.indexOf('{sale.receipt_number}')
+const receiptAt = primaryMeta.indexOf("value={sale.receipt_number || ''}")
 const timeAt = primaryMeta.indexOf('{fmtTime(sale.created_at)}')
 const branchAt = primaryMeta.indexOf('{branchLabel ?')
 const cashierAt = primaryMeta.indexOf('{sale.cashier_name ?')
-assert.ok(receiptAt >= 0 && receiptAt < timeAt && timeAt < branchAt && branchAt < cashierAt, 'collapsed metadata order is receipt, time, branch, cashier')
+assert.ok(receiptAt >= 0 && receiptAt < timeAt && timeAt < cashierAt && cashierAt < branchAt, 'collapsed metadata order is receipt, time, cashier, branch')
 assert.equal((primaryMeta.match(/<span aria-hidden="true">\|<\/span>/g) || []).length, 3, 'the four facts use visible pipe separators')
-assert.match(primaryMeta, /whitespace-normal break-all/, 'the complete receipt id remains readable instead of ellipsized')
+assert.match(primaryMeta, /className="shrink-0 whitespace-nowrap font-mono/, 'the complete receipt id stays single-line and does not shrink')
+assert.match(primaryMeta, /overflow-x-auto whitespace-nowrap/, 'the primary metadata row owns horizontal overflow')
+assert.doesNotMatch(primaryMeta, /text-blue|underline/, 'the receipt remains plain information rather than a link')
 assert.match(primaryMeta, /font-bold text-gray-700 dark:text-gray-200[\s\S]*?aria-label=\{`\$\{t\('cashier'\)/, 'cashier is bold and explicitly identified to assistive technology')
+assert.match(copyable, /data-copyable-id="true"[\s\S]*?role="button"[\s\S]*?tabIndex=\{0\}/, 'plain receipt text remains keyboard-copyable')
+assert.doesNotMatch(copyable, /onClick=|Copy\s*className|Clipboard/, 'CopyableId must not bring back a visible copy button or take ordinary clicks')
 
 const contactMetaStart = list.indexOf("{/* Y17: customer (name + phone) leads the meta line;")
 const contactMeta = list.slice(contactMetaStart, list.indexOf('</div>', contactMetaStart))

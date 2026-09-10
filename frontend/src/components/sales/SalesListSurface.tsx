@@ -515,11 +515,11 @@ export default function SalesListSurface({
                                 aria-label={`Select ${sale.receipt_number}`}
                               />
                               ) : null}
-                              {/* The card layout is the phone one (<768px), so
-                                  the receipt id must never be ellipsised here
-                                  -- it wraps onto a second line inside the
-                                  card instead (user, Sep 3 2026). */}
-                              <CopyableId value={sale.receipt_number || ''} copyLabel={t('copy_receipt_number') || 'Copy receipt number'} copiedLabel={t('copied') || 'Copied'} className="font-mono text-sm font-semibold text-gray-900 dark:text-white" />
+                              {/* The card layout is the phone one (<768px). Keep
+                                  the complete receipt id as one nonshrinking
+                                  value; this metadata row owns horizontal scroll
+                                  when an unusually long id does not fit. */}
+                              <CopyableId value={sale.receipt_number || ''} copyLabel={t('copy_receipt_number') || 'Copy receipt number'} copiedLabel={t('copied') || 'Copied'} className="shrink-0 whitespace-nowrap font-mono text-sm font-semibold text-gray-900 dark:text-white" />
                               <span aria-hidden="true">|</span>
                               <span className="shrink-0">{fmtTime(sale.created_at)}</span>
                               {sale.cashier_name ? <><span aria-hidden="true">|</span><span className="font-bold text-gray-700 dark:text-gray-200" aria-label={`${t('cashier') || 'Cashier'}: ${sale.cashier_name}`}>{sale.cashier_name}</span></> : null}

@@ -129,7 +129,6 @@ assert.equal((detail.match(/className="pos-product-grid/g) || []).length, 2)
 // modal, a copy has been made.
 const cardMarkup = [
   'relative w-full aspect-square rounded-lg bg-gray-100',
-  'line-clamp-2',
   'ProductDiscountBadge',
   'promotionBadgeForProduct',
   'computeExpiryStatus',
@@ -138,6 +137,7 @@ for (const fragment of cardMarkup) {
   assert.ok(productCard.includes(fragment), `ProductCard.tsx lost the POS card's ${fragment}`)
   assert.ok(!detail.includes(fragment), `components/sales/SaleDetailModal.tsx re-implements the POS card: ${fragment}`)
 }
+assert.match(detail, /<div className="line-clamp-2 break-words font-medium/, 'compact receipt product names remain readable across two lines')
 // POS.tsx keeps promotionBadgeForProduct for its one-tap gate, but nothing
 // of the card body: no badge component of its own, no expiry read, no
 // inline card markup.

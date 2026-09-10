@@ -84,14 +84,23 @@ for (const [name, source] of [['sale detail', saleDetail], ['return detail', ret
     const tableStart = source.indexOf('<table className="w-full text-sm">')
     assert.ok(tableStart > 0, `${name} must render its line items as a table`)
     assert.match(source, /<tfoot[^>]*>[\s\S]*?<MoneyRow/, `${name} money rows must sit in the items table's tfoot`)
-    // The numeric item cells are right-aligned and tabular so a column of
-    // amounts reads straight down into the summary beneath it.
-    // Matched as a set, not as one literal class string: the phone padding
-    // (px-1.5 ... sm:px-2) sits between these tokens in the real className.
-    const numericCells = source.match(/className="[^"]*text-right[^"]*align-top[^"]*"/g) || []
-    assert.ok(numericCells.length > 0, `${name} must have right-aligned numeric item cells`)
-    assert.ok(numericCells.every((cls) => cls.includes('tabular-nums')), `${name} item amounts must be tabular so a column of figures lines up`)
-    assert.ok(numericCells.every((cls) => cls.includes('whitespace-nowrap')), `${name} item amounts must not wrap mid-figure`)
+    if (name === 'sale detail') {
+      // At narrow widths each product line spans the compact four-column table
+      // and presents Qty / Price / Total in one labelled, tabular strip.
+      assert.match(source, /<td colSpan=\{4\} className="px-1\.5 py-1\.5 align-top/, 'a sale product line must span the compact four-column table')
+      const valuesAt = source.indexOf('data-sale-line-values=""')
+      const values = source.slice(valuesAt, source.indexOf('</div>', valuesAt))
+      assert.ok(valuesAt > 0 && values.length > 300, 'the compact sale line values must be identifiable')
+      assert.match(values, /t\('qty_short'\)[\s\S]*?t\('price'\)[\s\S]*?t\('total'\)/, 'sale lines must present Qty, Price and Total in order')
+      assert.match(values, /text-xs tabular-nums/, 'sale line figures must stay tabular')
+      assert.doesNotMatch(values, /fmtKHR\(/, 'compact sale lines keep their figures USD-only')
+      assert.match(source, /line-clamp-2 break-words font-medium/, 'long product names remain readable across two lines')
+    } else {
+      const numericCells = source.match(/className="[^"]*text-right[^"]*align-top[^"]*"/g) || []
+      assert.ok(numericCells.length > 0, `${name} must have right-aligned numeric item cells`)
+      assert.ok(numericCells.every((cls) => cls.includes('tabular-nums')), `${name} item amounts must be tabular so a column of figures lines up`)
+      assert.ok(numericCells.every((cls) => cls.includes('whitespace-nowrap')), `${name} item amounts must not wrap mid-figure`)
+    }
     // A wide table may scroll inside its own box, but never the page.
     assert.match(source, /<div className="overflow-x-auto">\s*<table/, `${name} table must own its horizontal scroll`)
     // The old width floor starved the product column to 151px at 1280.
@@ -118,13 +127,15 @@ for (const [name, source] of [['sale detail', saleDetail], ['return detail', ret
 
 // --- 5. the sale's money rows keep every line, in order, signed correctly --
 
-runTest('the sale money summary keeps every line it used to show', () => {
+runTest('the sale money summary keeps the accepted compact receipt lines', () => {
   const foot = saleDetail.slice(saleDetail.indexOf('<tfoot'), saleDetail.indexOf('</tfoot>'))
   assert.ok(foot.length > 500, 'expected to find the sale money summary')
   const expected = [
     "t('subtotal')",
     "t('discount')",
+    "'item_discount'",
     "t('membership_discount')",
+    "'total_discount'",
     "t('tax')",
     "'delivery_fee'",
     "t('returns_refunded')",
@@ -142,24 +153,19 @@ runTest('the sale money summary keeps every line it used to show', () => {
   }
   // Exactly one grand total, and it is the one that gets the heavier type.
   assert.equal((foot.match(/\bstrong\b/g) || []).length, 1, 'exactly one row is the grand total')
-  // Sign parity: a row whose USD is negative must carry a negative KHR too.
-  // The membership-discount and refund rows used to show "-$4.00" over a
-  // positive "16,400.00៛", which reads as money ADDED.
-  for (const [row, khrSource] of [
-    ['membership_discount', 'membershipDiscountKhr'],
-    ['returns_refunded', 'refundKhr'],
-    ['discount', 'discountKhr'],
-  ] as const) {
+  // Discounts are compact USD-only reductions. Subtotal/tax/total retain paired
+  // KHR figures, and a separately recorded KHR refund keeps its own sign.
+  for (const row of ['discount', 'item_discount', 'membership_discount', 'total_discount'] as const) {
     const at = foot.indexOf(row)
     assert.ok(at >= 0, `expected the ${row} row`)
-    const block = foot.slice(at, at + 420)
+    const block = foot.slice(at, foot.indexOf('/>', at) + 2)
     assert.match(block, /amount=\{`-\$\{fmtUSD\(/, `${row} must show its USD as a deduction`)
-    assert.match(
-      block,
-      new RegExp(`sub=\\{${khrSource} > 0 \\? \`-\\$\\{fmtKHR\\(`),
-      `${row} must show its KHR as a deduction too, not as a positive figure`,
-    )
+    assert.doesNotMatch(block, /\bsub=/, `${row} must remain a single USD reduction line`)
   }
+  const refundAt = foot.indexOf("t('returns_refunded')")
+  const refundRow = foot.slice(refundAt, foot.indexOf('/>', refundAt) + 2)
+  assert.match(refundRow, /amount=\{`-\$\{fmtUSD\(refundUsd\)/, 'the refund remains a signed USD deduction')
+  assert.match(refundRow, /sub=\{refundKhr > 0 \? `-\$\{fmtKHR\(refundKhr\)/, 'a separately recorded KHR refund keeps its sign')
   // The riel column has no hole at the top any more.
   assert.match(foot, /sub=\{subtotalKhr > 0 \? fmtKHR\(subtotalKhr\) : null\}/, 'the subtotal must carry its KHR like every other money row')
 })
@@ -324,7 +330,7 @@ runTest('the sale detail has no separate Delivery card', () => {
 
 // --- 9b. one Edit column, one Edit label -----------------------------------
 
-runTest('every amend control on the items table sits in one aligned column', () => {
+runTest('sale amendments use direct gated editors inside the compact rows', () => {
   // User, Sep 4 2026: "the current edit in click to view detail is placed all
   // over the place..you can align it with the edit volumn...for products,
   // delivery etc... just call it 'Edit'."
@@ -349,29 +355,14 @@ runTest('every amend control on the items table sits in one aligned column', () 
     else if (token === '</td') cellDepth -= 1
     else if (token === '<div') assert.ok(cellDepth > 0, 'a <div> in the money summary must live inside a table cell')
   }
-  // MoneyRow can carry a control, in a trailing cell that lines up with the
-  // per-line Edit buttons above it.
-  assert.match(rows, /action\?: ReactNode/, 'MoneyRow must accept a row-level action')
-  assert.match(rows, /\{action \? <td className="[^"]*text-right[^"]*">\{action\}<\/td> : null\}/, 'the action must render as a trailing cell')
-  // The column has a visible header, not an sr-only one.
-  assert.ok(
-    !/<th[^>]*><span className="sr-only">\{translateOr\('amend_line'/.test(saleDetail),
-    'the Edit column header must be visible, not screen-reader-only',
-  )
-  // And one label everywhere: "Edit". Not "Edit line", not "Correct delivery
-  // fee" -- the user named it once.
-  assert.ok(!saleDetail.includes("'Edit line'"), 'the per-line control must just say Edit')
-  assert.ok(!saleDetail.includes("'Correct delivery fee'"), 'the delivery-fee control must just say Edit')
-  assert.equal(en.amend_line, 'Edit', 'the English pack must say Edit')
-  assert.ok(km.amend_line && km.amend_line !== 'Edit', 'the Khmer pack must carry its own word for Edit')
-  // The fee editor opens from that column and renders as a full-width row.
-  // N41 renamed the gate: `canAmendDeliveryMoney` is `canAmendThisSale` AND the
-  // sale's own is_delivery flag, which is the exact test the Worker's
-  // guardDeliveryFeeAmendment applies. Both delivery money editors share it, so
-  // neither can offer a control whose save the route is certain to refuse.
+  assert.match(saleDetail, /\{canAmendThisSale && lineId \? <input id=\{`amend-qty-\$\{lineId\}`\}/, 'quantity is directly editable only with line amendment authority')
+  assert.match(saleDetail, /\{canAmendThisSale && lineId \? <>[\s\S]{0,180}<input id=\{`amend-price-\$\{lineId\}`\}/, 'price is directly editable only with line amendment authority')
+  assert.match(saleDetail, /amount=\{canAmendDeliveryMoney \? <span[\s\S]{0,300}id="amend-delivery-fee"/, 'delivery fee is directly editable only with delivery amendment authority')
+  assert.match(saleDetail, /data-sale-actual-cost=""[\s\S]{0,500}\{canAmendDeliveryMoney \? <>[\s\S]{0,220}id="amend-delivery-actual-cost"/, 'actual cost is directly editable only with delivery amendment authority')
+  // Applying a changed fee still renders a valid full-width table row.
   const feeAt = saleDetail.indexOf('canAmendDeliveryMoney && feeEditing')
   assert.ok(feeAt >= 0, 'the fee editor must be gated on the Edit control being open')
-  assert.match(saleDetail.slice(feeAt, feeAt + 320), /<tr className=[\s\S]*?<td colSpan=\{5\}/, 'the fee editor must be a spanning table row')
+  assert.match(saleDetail.slice(feeAt, feeAt + 320), /<tr className=[\s\S]*?<td colSpan=\{4\}/, 'the fee editor must span the compact four-column table')
 })
 
 // --- 9c. the note the cashier typed is a field of the sale -----------------
@@ -449,9 +440,9 @@ runTest('the sale detail shows what a receipt shows, and stops there', () => {
   // Locate the rendered staff-only row itself. F32 also uses this translation
   // key in the amendment-history formatter and in the add-delivery review
   // form, so the first key occurrence no longer says where the row lives.
-  const costAt = saleDetail.indexOf("<DetailRow label={translateOr('delivery_actual_cost'")
+  const costAt = saleDetail.indexOf('data-sale-actual-cost=""')
   const driverPhoneAt = saleDetail.indexOf("translateOr('driver_phone'")
-  assert.ok(costAt >= 0, 'the courier cost row must exist -- the owner asked to see and edit it (N41)')
+  assert.ok(costAt >= 0, 'the compact courier cost row must exist -- the owner asked to see and edit it (N41)')
   assert.ok(driverPhoneAt >= 0 && costAt > driverPhoneAt, 'the courier cost belongs with the driver it was paid to')
   assert.ok(costAt < saleDetail.indexOf('<tfoot'), 'the courier cost must sit ABOVE the receipt-shaped totals, not inside them')
   // Shown AND editable, which is the whole of the Sep-6 ask. The editor is the
