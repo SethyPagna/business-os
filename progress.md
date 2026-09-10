@@ -12266,3 +12266,16 @@ stock tests green; frontend and Worker typechecks green; i18n 5,706/589 green;
 Vite build green; migration-chain and full Worker pure-script sweeps green;
 `git diff --check` green; remote migration 0149 clean; Worker version
 1265b5b0-3dbd-4a45-a4a0-47dfc34950a2 at 100%.
+
+### Post-deploy focused recheck — September 10, 2026
+
+After deployment, the settlement kernel, amendment ledger, Records projector,
+status skip-stock guard, and bulk-status transaction suite were each run again
+against the release worktree. All passed, including configured payment-method
+normalization and exact tender coverage; quantity/price FIFO edits and awaiting-
+payment stock behavior; typed before/after delivery, payment, customer and line
+records; cancellation/uncancel stock and fee reversals; sticky skip-stock
+permissions; idempotency and concurrent bulk guards. The bulk suite's intentional
+failure-injection stack trace was caught by its rollback assertion and the suite
+exited 0. No live sale, customer, inventory, or payment row was written during
+these checks.
