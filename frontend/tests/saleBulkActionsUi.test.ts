@@ -48,7 +48,7 @@ assert.match(sales, /items: frozenSales\.map/, 'field updates send the whole fro
 assert.match(sales, /statusPrompt\.requestSales/, 'status confirmation retains the whole frozen selection while reviewing matching rows')
 assert.match(sales, /cancel: buildBulkSaleCancelInput\(draft\)/, 'each frozen status item carries its own reviewed cancellation answers')
 assert.match(sales, /SectionExportAction/, 'Sales exports register with the section/title action host')
-assert.match(sales, /hidden md:inline/, 'the mobile title-bar export keeps an icon-only 44px trigger')
+assert.match(sales, /trigger=\{<button[^\n]+h-10 w-10[^\n]+aria-label=\{translateOr\('export'/, 'the export uses a labeled icon-only action at the shared control height')
 const selectedToolbar = sales.slice(sales.indexOf('{selectedSales.length > 0 ? ('), sales.indexOf('{/* Pagination on its own row'))
 assert.doesNotMatch(selectedToolbar, /handleExportSelected|translateOr\('export'/, 'selected-sales toolbar does not duplicate the top Export menu')
 

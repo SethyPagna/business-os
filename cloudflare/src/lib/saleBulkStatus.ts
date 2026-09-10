@@ -105,7 +105,7 @@ export function saleMovementFingerprint(idSql: string) {
     return `(SELECT CASE WHEN COUNT(*)>${BULK_STATUS_MOVEMENT_LIMIT} THEN NULL ELSE json_group_array(json_array(id,product_id,branch_id,batch_id,movement_type,quantity,unit_cost_usd,unit_cost_khr)) END FROM (SELECT id,product_id,branch_id,batch_id,movement_type,quantity,unit_cost_usd,unit_cost_khr FROM inventory_movements WHERE reference_id=${idSql} AND movement_type IN ('sale','return','damage_in','damage_out') ORDER BY id LIMIT ${BULK_STATUS_MOVEMENT_LIMIT + 1}))`;
 }
 function fail(message: string): never { throw new SaleBulkError(message); }
-function permission(user: SessionUser) { if (getActionTier(user, 'sales', 'bulk') !== 'full')
+function permission(user: SessionUser) { if (getActionTier(user, 'sales', 'bulk') !== 'full' || getActionTier(user, 'sales', 'status') !== 'full')
     throw new SaleBulkError('No permission to change multiple sales.', 403); }
 export function bulkAssertion(predicate: string, params: Row = {}): StockStatement {
     return { sql: `INSERT INTO sale_bulk_guards(guard_value) SELECT CASE WHEN (${predicate}) THEN 1 ELSE 0 END`, params };

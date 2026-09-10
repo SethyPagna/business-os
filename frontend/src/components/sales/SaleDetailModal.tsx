@@ -24,10 +24,10 @@ import {
 import { receiptTotalsFigures } from '../../utils/receiptTotals.ts'
 import { receiptLineFigures } from '../../utils/receiptLineMath.ts'
 import CopyableId from '../shared/CopyableId.tsx'
-import EntityLink from '../shared/EntityLink.tsx'
+import { SaleCopyValue as EntityLink } from './SalesListSurface.tsx'
 import { DetailRow, DetailRowGroup, MoneyRow } from '../shared/DetailRows.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
-import StatusBadge, { getStatusLabel } from './StatusBadge.tsx'
+import StatusBadge, { getStatusBadgeLabel as getStatusLabel } from './StatusBadge.tsx'
 import {
   mergeStagedAddLine,
   stagedAddLineKey,
@@ -45,6 +45,7 @@ import { branchStockQuantity } from '../pos/productSheetState.ts'
 import { useApp, useLowStockConfig } from '../../AppContext'
 import { getTrackedBatchProductIds } from '../../api/batchesTransport.ts'
 import SaleStatusWorkflow from './SaleStatusWorkflow.tsx'
+import { claimSyncProblemPresentation, type SyncProblemPresentationOwner } from '../../utils/syncProblemLifecycle.ts'
 import { sanitizeSaleDetailText } from './saleDetailText.ts'
 import SaleSettlementEditor, { MAX_SETTLEMENT_ROWS } from './SaleSettlementEditor.tsx'
 import {
@@ -270,6 +271,10 @@ interface SaleDetailModalProps {
   sale?: SaleDetail | null
   settings?: unknown
   onClose: () => void
+  pendingStatus?: boolean
+  statusRecoveryOwner?: SyncProblemPresentationOwner | null
+  onRetryStatus?: () => Promise<void>
+  onDiscardStatus?: () => void
   // recordHistory/extra mirror Sales.tsx's handleStatusChange -- `extra`
   // carries the reviewed full tender when settling an awaiting-payment sale.
   onStatusChange?: (saleId: string | number, status: string, notes: string, recordHistory?: boolean, extra?: Record<string, unknown> | null) => Promise<unknown> | unknown
@@ -339,6 +344,10 @@ export default function SaleDetailModal({
   sale,
   settings,
   onClose,
+  pendingStatus = false,
+  statusRecoveryOwner,
+  onRetryStatus,
+  onDiscardStatus,
   onStatusChange,
   onAttachMembership,
   onCustomerAction,
@@ -352,6 +361,10 @@ export default function SaleDetailModal({
   fmtUSD,
   fmtKHR,
 }: SaleDetailModalProps) {
+  useEffect(() => {
+    if (!pendingStatus || !statusRecoveryOwner) return
+    return claimSyncProblemPresentation(statusRecoveryOwner)
+  }, [pendingStatus, statusRecoveryOwner?.actorId, statusRecoveryOwner?.requestId, statusRecoveryOwner?.problem.errorId, statusRecoveryOwner?.problem.channel, statusRecoveryOwner?.problem.code])
   const { navigateTo } = useApp() as { navigateTo?: (page: string, anchor?: string) => void }
   const [newStatus, setNewStatus] = useState(sale?.sale_status || 'completed')
   const [statusNotes, setStatusNotes] = useState('')
@@ -926,7 +939,9 @@ export default function SaleDetailModal({
   const settlementDirty = sale?.sale_status === 'awaiting_payment'
     && (newStatus === 'completed' || newStatus === 'awaiting_delivery')
     && !settlementRowsEqual(settlementRows, settlementBaselineRef.current)
-  const closeGuard = useCloseGuard({ dirty: settlementDirty }, onClose)
+  const saleWriteBusy = statusSaving || addSaving || amendSaving
+  const baseCloseGuard = useCloseGuard({ dirty: settlementDirty || addLines.length > 0 || amendLineId !== null || feeEditing || actualCostEditing || deliveryAdding || !!statusNotes.trim() }, () => { if (!saleWriteBusy) onClose() })
+  const closeGuard = { ...baseCloseGuard, requestClose: () => { if (!saleWriteBusy) baseCloseGuard.requestClose() } }
 
   useEffect(() => {
     if (!saleId) return
@@ -1262,18 +1277,19 @@ export default function SaleDetailModal({
                   className="!w-auto max-w-full flex-none sm:min-w-0 sm:flex-1"
                   valueClassName="font-mono text-sm font-bold text-gray-900 dark:text-white sm:text-base"
                 />
-                <span aria-hidden="true" className="sm:hidden">|</span>
-                <span className="shrink-0 sm:hidden">{fmtTime(sale.created_at)}</span>
-                {sale.branch_name ? <><span aria-hidden="true" className="sm:hidden">|</span><span className="sm:hidden" aria-label={`${t('branch') || 'Branch'}: ${sale.branch_name}`}><EntityLink page="branches" anchor="hub:branches:overview" navigate={navigateTo} title={t('open_branch') || 'Open branch'}>{sale.branch_name}</EntityLink></span></> : null}
-                {sale.cashier_name ? <><span aria-hidden="true" className="sm:hidden">|</span><span className="font-bold text-gray-700 dark:text-gray-200 sm:hidden" aria-label={`${t('cashier') || 'Cashier'}: ${sale.cashier_name}`}>{sale.cashier_name}</span></> : null}
               </div>
               <StatusBadge status={currentStatus} t={t} />
             </div>
-            <div className="mt-1 hidden text-xs text-gray-400 sm:block">{fmtTime(sale.created_at)}</div>
+            <div data-sale-detail-secondary-meta="" className="mt-1 flex min-w-0 items-center gap-2 overflow-x-auto whitespace-nowrap text-xs text-gray-500">
+              <span>{fmtTime(sale.created_at)}</span>
+              {sale.cashier_name ? <span aria-label={`${t('cashier') || 'Cashier'}: ${sale.cashier_name}`}>{sale.cashier_name}</span> : null}
+              {sale.branch_name ? <span aria-label={`${t('branch') || 'Branch'}: ${sale.branch_name}`}>{sale.branch_name}</span> : null}
+            </div>
           </div>
           <button
             ref={closeButtonRef}
             type="button"
+            disabled={saleWriteBusy}
             onClick={closeGuard.requestClose}
             className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700"
             aria-label={t('close') || 'Close'}
@@ -1353,8 +1369,9 @@ export default function SaleDetailModal({
                     wider screens where the Sale card has room for its table
                     rhythm. Anonymous customer identity still suppresses the
                     phone, exactly as the Customer card does below. */}
-                {(!customerIsAnonymous && sale.customer_phone) || deliveryDriverName || deliveryDriverPhone ? (
-                  <div data-sale-detail-mobile-contact="" className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 py-1.5 text-xs text-gray-500 sm:hidden">
+                {customerIsAnonymous || sale.customer_name || sale.customer_phone || deliveryDriverName || deliveryDriverPhone ? (
+                  <div data-sale-detail-mobile-contact="" className="flex items-center gap-x-1.5 overflow-x-auto whitespace-nowrap py-1.5 text-xs text-gray-500 sm:hidden">
+                    <span className="font-medium">{customerIsAnonymous ? (t('walk_in') || 'Walk-in') : sale.customer_name ? <EntityLink page="contacts">{sale.customer_name}</EntityLink> : null}</span>
                     {!customerIsAnonymous && sale.customer_phone ? <EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_phone} navigate={navigateTo} title={t('open_customer') || 'Open customer'}>{sale.customer_phone}</EntityLink> : null}
                     {!customerIsAnonymous && sale.customer_phone && (deliveryDriverName || deliveryDriverPhone) ? <span aria-hidden="true">|</span> : null}
                     {deliveryDriverName || deliveryDriverPhone ? (
@@ -1467,74 +1484,25 @@ export default function SaleDetailModal({
                     summary is untouched, and a customer-facing surface still
                     never sees it. */}
                 {isDelivery ? (
-                  <DetailRow label={translateOr('delivery_actual_cost', 'Actual delivery cost', 'ថ្លៃដឹកដើម')}>
-                    <span className="flex flex-wrap items-center gap-2">
-                      <span className="tabular-nums">
-                        {actualCostUsd === null ? (
-                          <span className="text-gray-400">{translateOr('not_recorded', 'Not recorded', 'មិនទាន់កត់ត្រា')}</span>
-                        ) : fmtUSD(actualCostUsd)}
-                        {actualCostKhr !== null && actualCostKhr > 0 ? (
-                          <span className="ml-1 text-[11px] font-normal text-gray-400 dark:text-gray-500">{fmtKHR(actualCostKhr)}</span>
-                        ) : null}
-                      </span>
-                      {canAmendDeliveryMoney ? (
-                        <button
-                          type="button"
-                          onClick={() => { if (!actualCostEditing) setActualCostText(actualCostUsd === null ? '' : String(actualCostUsd)); setAmendMutationError(''); setActualCostEditing(!actualCostEditing) }}
-                          className="rounded border border-gray-200 px-2 py-1 text-[11px] font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
-                        >
-                          {actualCostEditing ? (t('cancel') || 'Cancel') : translateOr('amend_line', 'Edit', 'កែ')}
-                        </button>
-                      ) : null}
-                    </span>
-                    {/* The editor is the row's own detail, not a floating block:
-                        it opens under the value it edits and inside the same
-                        DetailRow, so it cannot drift away from its label the way
-                        the fee editor once drifted out of the totals table. */}
-                    {canAmendDeliveryMoney && actualCostEditing ? (
-                      <span className="mt-2 block">
-                        <span className="flex flex-wrap items-center gap-2">
-                          <label className="text-[11px] font-medium text-gray-600 dark:text-gray-300" htmlFor="amend-delivery-actual-cost">
-                            {translateOr('amend_actual_cost_new', 'New actual delivery cost', 'ថ្លៃដឹកដើមថ្មី')}
-                          </label>
-                          <input
-                            id="amend-delivery-actual-cost"
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            inputMode="decimal"
-                            value={actualCostText}
-                            onChange={(event) => setActualCostText(event.target.value)}
-                            placeholder="0.00"
-                            className="w-24 rounded border border-gray-300 px-2 py-1 text-sm tabular-nums dark:border-gray-600 dark:bg-gray-800 dark:text-white"
-                          />
-                          <button
-                            type="button"
-                            disabled={amendSaving}
-                            onClick={() => stageActualDeliveryCostAmendment(actualCostUsd)}
-                            className="rounded bg-blue-600 px-2.5 py-1 text-[11px] font-semibold text-white disabled:opacity-50"
-                          >
-                            {translateOr('amend_apply', 'Apply', 'អនុវត្ត')}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setActualCostEditing(false)}
-                            className="rounded border border-gray-300 px-2.5 py-1 text-[11px] font-medium text-gray-600 dark:border-gray-600 dark:text-gray-300"
-                          >
-                            {t('cancel') || 'Cancel'}
-                          </button>
-                        </span>
-                        {/* Same refusal line as the fee editor in the totals
-                            table, for the same reason -- sibling parity in the
-                            same commit set. A staging refusal never opens the
-                            ConfirmDialog, so if the reason did not render here
-                            there would be nowhere at all for it to appear. */}
-                        {amendMutationError && !amendConfirm ? (
-                          <span role="alert" className="mt-1 block text-[11px] font-medium text-red-600 dark:text-red-400">{amendMutationError}</span>
-                        ) : null}
-                      </span>
-                    ) : null}
-                  </DetailRow>
+                  <div data-sale-actual-cost="" className="min-w-0 space-y-1">
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      <label htmlFor="amend-delivery-actual-cost" className="min-w-0 flex-1 text-xs leading-relaxed text-gray-500">
+                        {actualCostEditing ? translateOr('amend_actual_cost_new', 'New actual delivery cost', 'ថ្លៃដឹកដើមថ្មី') : translateOr('delivery_actual_cost', 'Actual delivery cost', 'ថ្លៃដឹកដើម')}
+                      </label>
+                      {canAmendDeliveryMoney ? <>
+                        <span className="text-xs" aria-hidden="true">$</span>
+                        <input id="amend-delivery-actual-cost" type="number" min="0" step="0.01" inputMode="decimal"
+                          value={actualCostEditing ? actualCostText : actualCostUsd ?? ''}
+                          onChange={(event) => { setActualCostText(event.target.value); setActualCostEditing(true); setAmendMutationError('') }}
+                          disabled={amendSaving} placeholder="0.00" className="w-16 shrink-0 rounded border border-gray-300 px-1 py-1 text-sm tabular-nums dark:border-gray-600 dark:bg-gray-800" />
+                        {actualCostEditing ? <>
+                          <button type="button" disabled={amendSaving} onClick={() => stageActualDeliveryCostAmendment(actualCostUsd)} className="min-h-10 shrink-0 rounded px-1 text-xs font-semibold text-blue-700 dark:text-blue-300">{translateOr('amend_apply', 'Apply', 'អនុវត្ត')}</button>
+                          <button type="button" disabled={amendSaving} onClick={() => setActualCostEditing(false)} className="min-h-10 shrink-0 rounded px-1 text-xs">{t('cancel') || 'Cancel'}</button>
+                        </> : null}
+                      </> : <span className="text-sm tabular-nums">{actualCostUsd === null ? translateOr('not_recorded', 'Not recorded', 'មិនទាន់កត់ត្រា') : fmtUSD(actualCostUsd)}</span>}
+                    </div>
+                    {amendMutationError && actualCostEditing && !amendConfirm ? <p role="alert" className="text-xs text-red-600">{amendMutationError}</p> : null}
+                  </div>
                 ) : null}
                 {/* The note the cashier typed at checkout. It used to be a
                     SectionCard of its own ABOVE the items -- user, Sep 4 2026:
@@ -1556,9 +1524,9 @@ export default function SaleDetailModal({
 
             <SectionCard title={t('customer') || 'Customer'} action={onCustomerAction ? <button type="button" className="btn-secondary text-xs" onClick={() => onCustomerAction(sale)}>{t('sale_customer_edit_entry') || 'Edit customer'}</button> : null}>
               <DetailRowGroup>
-                <DetailRow label={t('customer_name') || 'Customer'}>
+                <div className="hidden sm:block"><DetailRow label={t('customer_name') || 'Customer'}>
                   {customerIsAnonymous ? (t('walk_in') || 'Walk-in') : sale.customer_name ? <EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_name} navigate={navigateTo}>{sale.customer_name}</EntityLink> : null}
-                </DetailRow>
+                </DetailRow></div>
                 {!customerIsAnonymous ? <div className="hidden sm:block"><DetailRow label={t('phone') || 'Phone'}>{sale.customer_phone ? <EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_phone} navigate={navigateTo}>{sale.customer_phone}</EntityLink> : null}</DetailRow></div> : null}
                 <DetailRow label={t('address') || 'Address'} value={customerAddress} />
                 {customerIsAnonymous ? null : onAttachMembership ? (
@@ -1614,7 +1582,7 @@ export default function SaleDetailModal({
           <SectionCard title={`${t('items') || 'Items'} (${items.length})`}>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="border-y border-gray-200 bg-gray-50 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:border-gray-700 dark:bg-gray-900/35 dark:text-gray-400">
+                <thead className="sr-only">
                   <tr>
                     <th className="px-1.5 py-1.5 text-left sm:px-2">{t('product') || 'Product'}</th>
                     <th className="px-1.5 py-1.5 text-right sm:px-2">{t('qty_short') || 'Qty'}</th>
@@ -1625,13 +1593,12 @@ export default function SaleDetailModal({
                         the delivery fee alike -- puts its control here. An
                         sr-only header described a column the eye could not
                         find. */}
-                    {canAmendThisSale ? <th className="px-1.5 py-1.5 text-right sm:px-2">{translateOr('amend_line', 'Edit', 'កែ')}</th> : null}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
                   {items.length === 0 ? (
                     <tr>
-                      <td colSpan={canAmendThisSale ? 5 : 4} className="px-2 py-3 text-sm text-gray-400">{t('no_item_details') || 'No item details available.'}</td>
+                      <td colSpan={4} className="px-2 py-3 text-sm text-gray-400">{t('no_item_details') || 'No item details available.'}</td>
                     </tr>
                   ) : items.map((item, index) => {
                     const qty = toNumber(item.quantity || item.qty || 1) || 1
@@ -1659,8 +1626,8 @@ export default function SaleDetailModal({
                     return (
                       <Fragment key={`${item.product_id || item.id || index}-${index}`}>
                       <tr>
-                        <td className="px-1.5 py-1.5 align-top sm:px-2">
-                          <div className="break-words font-medium text-gray-900 dark:text-white">
+                        <td colSpan={4} className="px-1.5 py-1.5 align-top sm:px-2">
+                          <div className="line-clamp-2 break-words font-medium text-gray-900 dark:text-white">
                             {item.product_name || item.name ? (
                               <EntityLink page="products" anchor="hub:products:products" search={item.product_name || item.name || undefined} navigate={navigateTo} title={t('open_product') || 'Open product'}>
                                 {item.product_name || item.name}
@@ -1668,28 +1635,16 @@ export default function SaleDetailModal({
                             ) : null}
                           </div>
                           {item.barcode ? <div className="text-[11px] text-gray-400"><EntityLink page="products" anchor="hub:products:products" search={item.barcode} navigate={navigateTo}>{item.barcode}</EntityLink></div> : null}
-                          {item.unit ? <div className="text-[11px] text-gray-400"><EntityLink page="products" anchor="hub:products:products" focus={{ unit: item.unit }} navigate={navigateTo}>{item.unit}</EntityLink></div> : null}
                           {item.supplier ? <div className="text-[11px] text-gray-400"><EntityLink page="contacts" anchor="hub:contacts:suppliers" search={item.supplier} navigate={navigateTo}>{item.supplier}</EntityLink></div> : null}
                           {toNumber(item.returned_quantity) > 0 ? (
                             <div className="mt-0.5 inline-flex rounded bg-orange-100 px-1.5 py-0.5 text-[10px] font-semibold text-orange-700 dark:bg-orange-900/40 dark:text-orange-300">↩ {toNumber(item.returned_quantity)} {t('returned_quantity_tag') || 'returned'}</div>
                           ) : null}
                           {item.branch_name ? <div className="break-words text-[11px] text-gray-400"><EntityLink page="branches" anchor="hub:branches:overview" navigate={navigateTo}>{item.branch_name}</EntityLink></div> : null}
-                        </td>
-                        <td className="whitespace-nowrap px-1.5 py-1.5 text-right align-top sm:px-2 tabular-nums text-gray-700 dark:text-gray-200">{qty}</td>
-                        <td className="whitespace-nowrap px-1.5 py-1.5 text-right align-top sm:px-2 tabular-nums text-gray-700 dark:text-gray-200">
-                          {hasLineDiscount ? <div className="text-[11px] text-gray-400 line-through">{fmtUSD(originalUnitUsd)}</div> : null}
-                          <div>{fmtUSD(unitUsd)}</div>
-                          {unitKhr > 0 ? <div className="text-[11px] text-gray-400">{fmtKHR(unitKhr)}</div> : null}
-                          {hasLineDiscount ? (
-                            <div className="text-[11px] font-medium text-amber-600 dark:text-amber-400">
-                              -{fmtUSD(lineDiscountUsd)} {translateOr('discount', 'discount', 'បញ្ចុះតម្លៃ')}
-                            </div>
-                          ) : null}
-                        </td>
-                        <td className="whitespace-nowrap px-1.5 py-1.5 text-right align-top sm:px-2 font-semibold tabular-nums text-gray-900 dark:text-white">
-                          {hasLineDiscount ? <div className="text-[11px] font-normal text-gray-400 line-through">{fmtUSD(originalLineUsd)}</div> : null}
-                          <div>{fmtUSD(lineUsd)}</div>
-                          {lineKhr > 0 ? <div className="text-[11px] font-normal text-gray-400">{fmtKHR(lineKhr)}</div> : null}
+                          <div data-sale-line-values="" className="mt-1 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs tabular-nums">
+                            <label className="inline-flex items-center gap-1">{t('qty_short') || 'Qty'}: {canAmendThisSale && lineId ? <input id={`amend-qty-${lineId}`} aria-label={t('qty_short') || 'Qty'} type="number" min="0" step="any" inputMode="decimal" disabled={amendSaving} value={amendLineId === lineId ? amendQtyText : qty} onChange={(event) => { if (amendLineId !== lineId) startAmendLine(lineId, qty, unitUsd); setAmendQtyText(event.target.value) }} className="w-12 rounded border border-gray-200 bg-transparent px-1 py-1 dark:border-gray-600" /> : qty}</label>
+                            <label className="inline-flex flex-wrap items-center gap-1">{t('price') || 'Price'}: {canAmendThisSale && lineId ? <><span aria-hidden="true">$</span><input id={`amend-price-${lineId}`} aria-label={t('selling_price') || 'Selling price'} type="number" min="0" step="0.01" inputMode="decimal" disabled={amendSaving} value={amendLineId === lineId ? amendPriceText : unitUsd} onChange={(event) => { if (amendLineId !== lineId) startAmendLine(lineId, qty, unitUsd); setAmendPriceText(event.target.value) }} className="w-16 rounded border border-gray-200 bg-transparent px-1 py-1 dark:border-gray-600" /></> : fmtUSD(unitUsd)}{hasLineDiscount ? <span className="text-amber-700 dark:text-amber-400">(-{fmtUSD(lineDiscountUsd)})</span> : null}</label>
+                            <span className="font-semibold">{t('total') || 'Total'}: {fmtUSD(lineUsd)}</span>
+                          </div>
                         </td>
                         {/* S4-30: the amend affordance. Inline rather than in a
                             menu, because "the customer changed their mind" is a
@@ -1704,52 +1659,11 @@ export default function SaleDetailModal({
                             right-aligned cell in this table, and a control cell
                             that opted out would weaken the lock for the money
                             columns beside it. */}
-                        {canAmendThisSale ? (
-                          <td className="whitespace-nowrap px-1.5 py-1.5 text-right align-top tabular-nums sm:px-2">
-                            {lineId > 0 ? (
-                              <button
-                                type="button"
-                                onClick={() => (amendLineId === lineId ? setAmendLineId(null) : startAmendLine(lineId, qty, unitUsd))}
-                                className="rounded border border-gray-200 px-2 py-1 text-[11px] font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
-                              >
-                                {amendLineId === lineId
-                                  ? (t('cancel') || 'Cancel')
-                                  : translateOr('amend_line', 'Edit', 'កែ')}
-                              </button>
-                            ) : null}
-                          </td>
-                        ) : null}
                       </tr>
                       {canAmendThisSale && amendLineId === lineId && lineId > 0 ? (
                         <tr className="bg-gray-50 dark:bg-gray-900/40">
-                          <td colSpan={5} className="px-1.5 py-2 sm:px-2">
+                          <td colSpan={4} className="px-1.5 py-2 sm:px-2">
                             <div className="flex flex-wrap items-center gap-2">
-                              <label className="text-[11px] font-medium text-gray-600 dark:text-gray-300" htmlFor={`amend-qty-${lineId}`}>
-                                {translateOr('amend_new_quantity', 'New quantity', 'ចំនួនថ្មី')}
-                              </label>
-                              <input
-                                id={`amend-qty-${lineId}`}
-                                type="number"
-                                min="0"
-                                step="any"
-                                inputMode="decimal"
-                                value={amendQtyText}
-                                onChange={(event) => setAmendQtyText(event.target.value)}
-                                className="w-20 rounded border border-gray-300 px-2 py-1 text-sm tabular-nums dark:border-gray-600 dark:bg-gray-800 dark:text-white"
-                              />
-                              <label className="text-[11px] font-medium text-gray-600 dark:text-gray-300" htmlFor={`amend-price-${lineId}`}>
-                                {t('selling_price') || 'Selling price'}
-                              </label>
-                              <input
-                                id={`amend-price-${lineId}`}
-                                type="number"
-                                min="0"
-                                step="0.01"
-                                inputMode="decimal"
-                                value={amendPriceText}
-                                onChange={(event) => setAmendPriceText(event.target.value)}
-                                className="w-24 rounded border border-gray-300 px-2 py-1 text-sm tabular-nums dark:border-gray-600 dark:bg-gray-800 dark:text-white"
-                              />
                               <button
                                 type="button"
                                 disabled={amendSaving}
@@ -1758,6 +1672,7 @@ export default function SaleDetailModal({
                               >
                                 {translateOr('amend_apply', 'Apply', 'អនុវត្ត')}
                               </button>
+                              <button type="button" disabled={amendSaving} onClick={() => { setAmendLineId(null); setReplaceLineId(null) }} className="min-h-10 rounded px-2 text-xs">{t('cancel') || 'Cancel'}</button>
                               <button
                                 type="button"
                                 disabled={amendSaving}
@@ -1855,7 +1770,6 @@ export default function SaleDetailModal({
                       label={t('discount') || 'Store discount'}
                       tone="discount"
                       amount={`-${fmtUSD(baseDiscountUsd)}`}
-                      sub={discountKhr > 0 ? `-${fmtKHR(discountKhr)}` : null}
                     />
                   ) : null}
                   {itemDiscountUsd > 0 ? (
@@ -1863,7 +1777,6 @@ export default function SaleDetailModal({
                       label={translateOr('item_discount', 'Item discount', 'បញ្ចុះតម្លៃទំនិញ')}
                       tone="discount"
                       amount={`-${fmtUSD(itemDiscountUsd)}`}
-                      sub={itemDiscountKhr > 0 ? `-${fmtKHR(itemDiscountKhr)}` : null}
                     />
                   ) : null}
                   {membershipDiscountUsd > 0 ? (
@@ -1871,7 +1784,6 @@ export default function SaleDetailModal({
                       label={t('membership_discount') || 'Membership discount'}
                       tone="credit"
                       amount={`-${fmtUSD(membershipDiscountUsd)}`}
-                      sub={membershipDiscountKhr > 0 ? `-${fmtKHR(membershipDiscountKhr)}` : null}
                     />
                   ) : null}
                   {[itemDiscountUsd, baseDiscountUsd, membershipDiscountUsd].filter((value) => value > 0).length > 1 ? (
@@ -1879,7 +1791,6 @@ export default function SaleDetailModal({
                       label={translateOr('total_discount', 'Total discount', 'បញ្ចុះតម្លៃសរុប')}
                       tone="discount"
                       amount={`-${fmtUSD(totalDiscountUsd)}`}
-                      sub={totalDiscountKhr > 0 ? `-${fmtKHR(totalDiscountKhr)}` : null}
                     />
                   ) : null}
                   {/* S4-24: "Points redeemed" is gone. It is not money -- it
@@ -1902,7 +1813,7 @@ export default function SaleDetailModal({
                          struck through -- the same wording the receipt prints.
                          Free is what total_usd already assumed; the struck
                          figure still says what the delivery was worth. */
-                      amount={deliveryPaidByStore ? (
+                      amount={canAmendDeliveryMoney ? <label className="inline-flex items-center gap-1"><span aria-hidden="true">$</span><input id="amend-delivery-fee" aria-label={t('delivery_fee') || 'Delivery fee'} type="number" min="0" step="0.01" inputMode="decimal" disabled={amendSaving} value={feeEditing ? feeText : deliveryFeeUsd} onChange={(event) => { setFeeText(event.target.value); setFeeEditing(true); setAmendMutationError('') }} className="w-20 rounded border border-gray-200 bg-transparent px-1 py-1 text-sm tabular-nums dark:border-gray-600" /></label> : deliveryPaidByStore ? (
                         <>
                           {translateOr('delivery_free', 'Free', 'ឥតគិតថ្លៃ')}{' '}
                           <span className="font-normal text-gray-400 line-through">{fmtUSD(deliveryFeeUsd)}</span>
@@ -1911,15 +1822,6 @@ export default function SaleDetailModal({
                       sub={deliveryFeeKhr > 0
                         ? (deliveryPaidByStore ? <span className="line-through">{fmtKHR(deliveryFeeKhr)}</span> : fmtKHR(deliveryFeeKhr))
                         : null}
-                      action={canAmendDeliveryMoney ? (
-                        <button
-                          type="button"
-                          onClick={() => { if (!feeEditing) setFeeText(String(deliveryFeeUsd)); setAmendMutationError(''); setFeeEditing(!feeEditing) }}
-                          className="rounded border border-gray-200 px-2 py-1 text-[11px] font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
-                        >
-                          {feeEditing ? (t('cancel') || 'Cancel') : translateOr('amend_line', 'Edit', 'កែ')}
-                        </button>
-                      ) : null}
                     />
                   ) : null}
                   {/* The owner's own example: "before 1.5 dollar delivery,
@@ -1939,21 +1841,8 @@ export default function SaleDetailModal({
                       same way from the same place. */}
                   {canAmendDeliveryMoney && feeEditing ? (
                     <tr className="bg-gray-50 dark:bg-gray-900/40">
-                      <td colSpan={5} className="px-1.5 py-2 sm:px-2">
+                      <td colSpan={4} className="px-1.5 py-2 sm:px-2">
                         <div className="flex flex-wrap items-center justify-end gap-2">
-                          <label className="text-[11px] font-medium text-gray-600 dark:text-gray-300" htmlFor="amend-delivery-fee">
-                            {translateOr('amend_fee_new_total', 'New delivery fee', 'ថ្លៃដឹកជញ្ជូនថ្មី')}
-                          </label>
-                          <input
-                            id="amend-delivery-fee"
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            inputMode="decimal"
-                            value={feeText}
-                            onChange={(event) => setFeeText(event.target.value)}
-                            className="w-24 rounded border border-gray-300 px-2 py-1 text-sm tabular-nums dark:border-gray-600 dark:bg-gray-800 dark:text-white"
-                          />
                           <button
                             type="button"
                             disabled={amendSaving}
@@ -2020,8 +1909,7 @@ export default function SaleDetailModal({
                     <MoneyRow
                       label={t('amount_paid') || 'Amount paid'}
                       tone="muted"
-                      amount={fmtUSD(amountPaidUsd)}
-                      sub={amountPaidKhr > 0 ? fmtKHR(amountPaidKhr) : null}
+                      amount={fmtUSD(amountPaidUsd + amountPaidKhr / totals.exchangeRate)}
                     />
                   ) : null}
                   {outstandingUsd > 0 && currentStatus !== 'cancelled' ? (
@@ -2037,7 +1925,6 @@ export default function SaleDetailModal({
                       label={t('change') || 'Change'}
                       tone="change"
                       amount={fmtUSD(changeUsd)}
-                      sub={changeKhr > 0 ? fmtKHR(changeKhr) : null}
                     />
                   ) : null}
                   {/* S4-24: "Actual delivery cost" is gone from this summary.
@@ -2407,7 +2294,7 @@ export default function SaleDetailModal({
             </section>
           ) : null}
 
-          {!['returned', 'cancelled'].includes(currentStatus) ? (
+          {pendingStatus || (onStatusChange && !['returned', 'cancelled'].includes(currentStatus)) ? (
             <section ref={statusSectionRef} className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
               <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                 {t('update_status') || 'Update status'}
@@ -2416,7 +2303,7 @@ export default function SaleDetailModal({
                 currentStatus={currentStatus}
                 selectedStatus={newStatus}
                 notes={statusNotes}
-                saving={statusSaving}
+                saving={statusSaving || pendingStatus}
                 t={t}
                 onSelect={(status) => {
                   setNewStatus(status)
@@ -2427,11 +2314,19 @@ export default function SaleDetailModal({
                   settlementRequestIdRef.current = createSettlementRequestId()
                 }}
                 onConfirm={handleStatusUpdate}
-                reviewRequestId={statusReviewRequestId}
-                confirmDisabled={needsPaymentEntry && settlementRows.length > MAX_SETTLEMENT_ROWS}
+                reviewRequestId={pendingStatus ? Math.max(1, statusReviewRequestId) : statusReviewRequestId}
+                confirmDisabled={pendingStatus || (needsPaymentEntry && settlementRows.length > MAX_SETTLEMENT_ROWS)}
                 showNotes={!needsPaymentEntry}
               >
-              {needsPaymentEntry ? (
+              {pendingStatus ? (
+                <div role="status" data-sale-status-recovery="" className="grid min-w-0 grid-cols-1 gap-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-900/20 dark:text-amber-100">
+                  <p className="break-words leading-relaxed">{translateOr('sale_bulk_pending', 'A previous request has an unknown outcome. Retry the original request or discard it before starting another.')}</p>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" disabled={statusSaving || !onRetryStatus} onClick={async () => { setStatusSaving(true); try { await onRetryStatus?.() } finally { setStatusSaving(false) } }} className="btn-secondary min-w-0 flex-1 text-xs">{translateOr('retry_original_request', 'Retry original request')}</button>
+                    <button type="button" disabled={statusSaving} onClick={onDiscardStatus} className="btn-secondary min-w-0 flex-1 text-xs">{translateOr('discard_retry', 'Discard retry')}</button>
+                  </div>
+                </div>
+              ) : needsPaymentEntry ? (
                 <SaleSettlementEditor
                   rows={settlementRows}
                   configuredMethods={settlementSession.configuredMethods}

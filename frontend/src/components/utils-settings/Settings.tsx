@@ -1301,6 +1301,10 @@ export default function Settings() {
             />
           </label>
           <div className="mt-3 max-w-md">
+            <label className="mb-2 flex items-center justify-between gap-3 text-sm">
+              <span>{t('sale_amendment_window_minutes') || 'Sale edit window (minutes)'}</span>
+              <input type="checkbox" checked={Number(form.sale_amendment_window_minutes || 0) > 0} onChange={(event) => setValue('sale_amendment_window_minutes', event.target.checked ? '120' : '0')} />
+            </label>
             {field('sale_amendment_window_minutes', t('sale_amendment_window_minutes') || 'Sale edit window (minutes)', 'number', '0')}
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
               {t('sale_amendment_window_minutes_desc') || '0 keeps employee sale edits open at all times. A positive value limits edits to that many minutes after the sale.'}

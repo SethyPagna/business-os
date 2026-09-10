@@ -38,6 +38,41 @@ execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${
 const lib = require(path.join(tmpDir, 'permissions.js'))
 const { hasPermission, hasAnyPermission, isAdminControlUser, getActionTier, getPermissionTier } = lib
 
+{
+  const viewOnly = { username: 'viewer', role_code: 'viewer', permissions: JSON.stringify({ sales: 'view' }) }
+  assert.equal(hasAnyPermission(viewOnly, ['pos', 'sales']), false, 'Sales view-only cannot open Shifts')
+  const shiftsSource = fs.readFileSync(path.join(__dirname, '..', 'src/routes/shifts.ts'), 'utf8')
+  assert.match(shiftsSource, /hasAnyPermission\(user, \['pos', 'sales'\]\)/, 'Shift entry must continue to require full POS or Sales')
+}
+
+// Execute each bulk library's real permission function, including the same
+// function reused during Undo/Redo, with independently revoked action grants.
+{
+  const ts = require('typescript')
+  const readGuard = (name) => {
+    const file = path.join(__dirname, '..', 'src/lib', name)
+    const source = fs.readFileSync(file, 'utf8')
+    const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true)
+    const statement = ast.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'permission')
+    assert.ok(statement)
+    const output = ts.transpileModule(`${statement.getText(ast)}\nmodule.exports = permission`, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
+    const mod = { exports: null }
+    class Denied extends Error { constructor(message, status) { super(message); this.status = status } }
+    new Function('module', 'getActionTier', 'SaleBulkError', 'fail', output)(mod, getActionTier, Denied, (message, status) => { throw new Denied(message, status) })
+    return mod.exports
+  }
+  const statusGuard = readGuard('saleBulkStatus.ts'), fieldGuard = readGuard('saleBulkUpdate.ts')
+  const staff = permissions => ({ id: 7, username: 'employee', role_code: 'employee', permissions: JSON.stringify(permissions) })
+  for (const denied of ['bulk', 'status']) assert.throws(() => statusGuard(staff({ sales: true, [`sales:${denied}`]: false })), error => error.status === 403)
+  for (const kind of ['customer', 'payment_method', 'delivery_contact']) {
+    const underlying = kind === 'customer' ? 'customer' : 'amend'
+    for (const denied of ['bulk', underlying]) assert.throws(() => fieldGuard(staff({ sales: true, [`sales:${denied}`]: false }), { kind }, 2), error => error.status === 403)
+    assert.doesNotThrow(() => fieldGuard(staff({ sales: true }), { kind }, 2))
+  }
+  assert.doesNotThrow(() => fieldGuard(staff({ sales: true, 'sales:bulk': false }), { kind: 'customer' }, 1), 'single customer assignment retains its independently granted authority')
+  console.log('PASS executable single/multi/Undo permission intersection for status, customer, payment and driver changes')
+}
+
 // ---- scenario: POS-only cashier (role grants { pos: true } only) ----
 {
   const posOnlyUser = { role_permissions: JSON.stringify({ pos: true }), permissions: null, username: 'cashier1', role_code: 'cashier' }

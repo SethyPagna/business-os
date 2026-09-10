@@ -1,4 +1,4 @@
-import { Fragment, type RefObject } from 'react'
+import { Fragment, Children, isValidElement, useEffect, type ReactNode, type ComponentProps, type RefObject } from 'react'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import Printer from 'lucide-react/dist/esm/icons/printer.js'
@@ -9,7 +9,24 @@ import { useColumnPreferences } from '../shared/useColumnPreferences.ts'
 import { resolveDriverLabel } from '../../utils/salesDriverLabel.ts'
 import { SALES_COLUMNS_SURFACE_KEY, SALES_OPTIONAL_COLUMNS } from './salesListColumns.ts'
 import { useApp as useAppHook } from '../../AppContext.tsx'
-import EntityLink from '../shared/EntityLink.tsx'
+import type OriginalEntityLink from '../shared/EntityLink.tsx'
+import CopyableId from '../shared/CopyableId.tsx'
+import { ensureTextAffordances } from '../shared/textAffordances.ts'
+
+function copyText(node: ReactNode): string {
+  return Children.toArray(node).map((child) => typeof child === 'string' || typeof child === 'number'
+    ? String(child) : isValidElement<{ children?: ReactNode }>(child) ? copyText(child.props.children) : '').join('')
+}
+
+/** Sale metadata is plain information; hold or keyboard activation copies it. */
+export function SaleCopyValue({ children, className = '' }: ComponentProps<typeof OriginalEntityLink>) {
+  const { t } = useAppHook() as { t: (key: string) => string }
+  const label = t('copy') || 'Copy'
+  const copied = t('copied') || 'Copied'
+  useEffect(() => { ensureTextAffordances({ copy: label, copied }) }, [label, copied])
+  return <span data-copy-value={copyText(children)} data-copy-success={copied} role="button" tabIndex={0} aria-label={`${label}: ${copyText(children)}`} className={`select-text text-inherit focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${className}`}>{children}</span>
+}
+const EntityLink = SaleCopyValue
 
 type TranslateFn = (key: string) => string
 type MoneyFormatter = (value: number | string) => string
@@ -487,7 +504,7 @@ export default function SalesListSurface({
                       >
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0 flex-1">
-                            <div data-sales-card-primary-meta="" className="mb-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-gray-400">
+                            <div data-sales-card-primary-meta="" className="mb-1 flex items-center gap-x-1.5 overflow-x-auto whitespace-nowrap text-xs text-gray-400">
                               {selectionModeActive ? (
                               <input
                                 type="checkbox"
@@ -502,15 +519,15 @@ export default function SalesListSurface({
                                   the receipt id must never be ellipsised here
                                   -- it wraps onto a second line inside the
                                   card instead (user, Sep 3 2026). */}
-                              <span className="min-w-0 whitespace-normal break-all font-mono text-sm font-semibold leading-snug text-blue-600 dark:text-blue-400">{sale.receipt_number}</span>
+                              <CopyableId value={sale.receipt_number || ''} copyLabel={t('copy_receipt_number') || 'Copy receipt number'} copiedLabel={t('copied') || 'Copied'} className="font-mono text-sm font-semibold text-gray-900 dark:text-white" />
                               <span aria-hidden="true">|</span>
                               <span className="shrink-0">{fmtTime(sale.created_at)}</span>
-                              {branchLabel ? <><span aria-hidden="true">|</span><span aria-label={`${t('branch') || 'Branch'}: ${branchLabel}`}><EntityLink page="branches" anchor="hub:branches:overview" navigate={navigateTo}>{branchLabel}</EntityLink></span></> : null}
                               {sale.cashier_name ? <><span aria-hidden="true">|</span><span className="font-bold text-gray-700 dark:text-gray-200" aria-label={`${t('cashier') || 'Cashier'}: ${sale.cashier_name}`}>{sale.cashier_name}</span></> : null}
+                              {branchLabel ? <><span aria-hidden="true">|</span><span aria-label={`${t('branch') || 'Branch'}: ${branchLabel}`}><EntityLink page="branches" anchor="hub:branches:overview" navigate={navigateTo}>{branchLabel}</EntityLink></span></> : null}
                             </div>
                             {/* Y17: customer (name + phone) leads the meta line;
                                 tapping the card opens the full detail. */}
-                            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-gray-500">
+                            <div className="mt-0.5 flex items-center gap-x-2 overflow-x-auto whitespace-nowrap text-xs text-gray-500">
                               <span className="font-medium text-gray-700 dark:text-gray-300">{Number(sale.customer_is_anonymous || 0) === 1 ? (t('walk_in') || 'Walk-in') : sale.customer_name?.trim() ? <EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_name} navigate={navigateTo}>{sale.customer_name}</EntityLink> : (t('walk_in') || 'Walk-in')}</span>
                               {sale.customer_phone?.trim() ? <EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_phone} navigate={navigateTo} className="text-gray-400">{sale.customer_phone}</EntityLink> : null}
                               {/* U22: phone and delivery stay on one compact

@@ -93,7 +93,8 @@ function optionalId(value: unknown, label: string): number | null {
 
 function permission(user: SessionUser, action: SaleBulkUpdateAction, itemCount: number): void {
   const actionKey = action.kind === 'customer' && itemCount === 1 ? 'customer' : 'bulk'
-  if (getActionTier(user, 'sales', actionKey) !== 'full') {
+  const underlyingAction = action.kind === 'customer' ? 'customer' : 'amend'
+  if (getActionTier(user, 'sales', actionKey) !== 'full' || getActionTier(user, 'sales', underlyingAction) !== 'full') {
     fail('No permission to change the selected sales.', 403)
   }
 }

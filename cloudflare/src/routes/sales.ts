@@ -1594,6 +1594,80 @@ app.post('/bulk-update', async (c) => {
   }
 })
 
+// The receipt lookup and mutation must hash precisely the same request.
+export function saleStatusReceiptCanonical(id: number, body: Record<string, unknown>): Record<string, unknown> {
+  const saleStatus = String(body.sale_status || '')
+  if (body.payment_details !== undefined) return {
+    sale_id: id, sale_status: saleStatus, payment_details: body.payment_details,
+    expected_exchange_rate: body.expected_exchange_rate,
+    replace_existing_payment: body.replace_existing_payment === true,
+  }
+  return {
+    sale_id: id, sale_status: saleStatus,
+    expected_updated_at: getExpectedUpdatedAt(body) ?? null,
+    notes_present: body.notes !== undefined,
+    notes: body.notes === undefined ? null : body.notes == null ? null : String(body.notes),
+    cancel_reason: saleStatus === 'cancelled' ? normalizeCancelReason(body.cancel_reason) : null,
+    cancel_note: saleStatus === 'cancelled' ? String(body.cancel_note || '').trim() || null : null,
+    cancel_fee_usd: saleStatus === 'cancelled' ? round2(Math.max(0, Number(body.cancel_fee_usd) || 0)) : 0,
+    cancel_fee_khr: saleStatus === 'cancelled' ? Math.max(0, Math.round(Number(body.cancel_fee_khr) || 0)) : 0,
+    cancel_fee_note: saleStatus === 'cancelled' ? String(body.cancel_fee_note || '').trim() || null : null,
+    skip_stock: body.skip_stock === true || String(body.skip_stock ?? '') === 'true',
+  }
+}
+
+// POST carries the frozen body privately, but this endpoint only reads receipts.
+// A missing receipt is unresolved: the original request may still be running.
+app.post('/:id/status-receipt', async (c) => {
+  const user = c.get('user')
+  if (getActionTier(user, 'sales', 'status') !== 'full') return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  const body = await c.req.json<Record<string, unknown>>()
+  const requestId = normalizeClientRequestId(body.client_request_id)
+  const id = Number(c.req.param('id'))
+  if (!requestId || !Number.isSafeInteger(id) || id <= 0) return c.json({ error: 'A sale and request identity are required.' }, 400)
+  const db = getDb(c.env)
+  const settlement = body.payment_details !== undefined
+  const digest = await saleMutationDigest(saleStatusReceiptCanonical(id, body))
+  const receipt = settlement
+    ? await db.prepare(`SELECT request_digest,response_json FROM sale_mutation_receipts WHERE actor_id=@actor AND mutation_kind='settlement' AND request_id=@request`)
+      .get<{ request_digest: string; response_json: string }>({ actor: user.id, request: requestId })
+    : await db.prepare(`SELECT request_digest,response_json FROM sale_record_events WHERE source_kind='sale_status' AND source_id=@source AND generation=0`)
+      .get<{ request_digest: string; response_json: string }>({ source: `actor:${Number(user.id)}:request:${requestId}` })
+  c.header('Cache-Control', 'no-store')
+  if (!receipt) return c.json({ committed: false })
+  if (receipt.request_digest !== digest) return c.json({ error: 'Request identity was used for different sale data.', code: 'idempotency_conflict' }, 409)
+  return c.json({ committed: true, response: JSON.parse(receipt.response_json || '{}') })
+})
+
+export function saleLineReceiptCanonical(id: number, kind: 'add_items' | 'amendment', body: Record<string, unknown>): Record<string, unknown> {
+  const shared = { notes: String(body.notes || '').trim().slice(0, 500) || null, expected_exchange_rate: body.expected_exchange_rate }
+  if (kind === 'add_items') return { sale_id: id, items: body.items ?? null, ...shared }
+  return {
+    sale_id: id, kind: String(body.kind || ''), sale_item_id: body.sale_item_id ?? null,
+    quantity: body.quantity ?? null, applied_price_usd: body.applied_price_usd ?? null,
+    delivery_fee_usd: body.delivery_fee_usd ?? null, delivery_actual_cost_usd: body.delivery_actual_cost_usd ?? null,
+    delivery_contact_id: body.delivery_contact_id ?? null, replacement: body.replacement ?? null, ...shared,
+  }
+}
+
+app.post('/:id/line-receipt/:kind', async (c) => {
+  const kind = c.req.param('kind')
+  if (kind !== 'add_items' && kind !== 'amendment') return c.json({ error: 'Invalid receipt kind.' }, 400)
+  const user = c.get('user')
+  if (getActionTier(user, 'sales', kind === 'add_items' ? 'add_items' : 'amend') !== 'full') return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  const body = await c.req.json<Record<string, unknown>>()
+  const id = Number(c.req.param('id'))
+  const requestId = normalizeClientRequestId(body.client_request_id)
+  if (!requestId || !Number.isSafeInteger(id) || id <= 0) return c.json({ error: 'A sale and request identity are required.' }, 400)
+  const digest = await saleMutationDigest(saleLineReceiptCanonical(id, kind, body))
+  const receipt = await getDb(c.env).prepare(`SELECT request_digest,response_json FROM sale_mutation_receipts WHERE actor_id=@actor AND mutation_kind=@kind AND request_id=@request`)
+    .get<{ request_digest: string; response_json: string }>({ actor: user.id, kind, request: requestId })
+  c.header('Cache-Control', 'no-store')
+  if (!receipt) return c.json({ committed: false })
+  if (receipt.request_digest !== digest) return c.json({ error: 'Request identity was used for different sale data.', code: 'idempotency_conflict' }, 409)
+  return c.json({ committed: true, response: JSON.parse(receipt.response_json || '{}') })
+})
+
 app.patch('/:id/status', async (c) => {
   const db = getDb(c.env)
   const user = c.get('user')
@@ -1661,19 +1735,7 @@ app.patch('/:id/status', async (c) => {
   }
   const statusRequestId = paymentFieldsSent ? null : normalizeClientRequestId(body.client_request_id)
   const statusSourceId = statusRequestId ? `actor:${Number(user.id)}:request:${statusRequestId}` : null
-  const statusCanonical = statusRequestId ? JSON.stringify({
-    sale_id: Number(id),
-    sale_status: saleStatus,
-    expected_updated_at: getExpectedUpdatedAt(body) ?? null,
-    notes_present: body.notes !== undefined,
-    notes: body.notes === undefined ? null : body.notes == null ? null : String(body.notes),
-    cancel_reason: saleStatus === 'cancelled' ? normalizeCancelReason(body.cancel_reason) : null,
-    cancel_note: saleStatus === 'cancelled' ? String(body.cancel_note || '').trim() || null : null,
-    cancel_fee_usd: saleStatus === 'cancelled' ? round2(Math.max(0, Number(body.cancel_fee_usd) || 0)) : 0,
-    cancel_fee_khr: saleStatus === 'cancelled' ? Math.max(0, Math.round(Number(body.cancel_fee_khr) || 0)) : 0,
-    cancel_fee_note: saleStatus === 'cancelled' ? String(body.cancel_fee_note || '').trim() || null : null,
-    skip_stock: skipStockRequested,
-  }) : null
+  const statusCanonical = statusRequestId ? JSON.stringify(saleStatusReceiptCanonical(Number(id), body)) : null
   const statusDigest = statusCanonical ? await saleMutationDigest(JSON.parse(statusCanonical)) : null
   if (statusSourceId && statusDigest) {
     const previous = await db.prepare(`
@@ -1687,13 +1749,7 @@ app.patch('/:id/status', async (c) => {
       return c.json(JSON.parse(previous.response_json || '{}') as Record<string, unknown>)
     }
   }
-  const settlementCanonical = paymentFieldsSent ? JSON.stringify({
-    sale_id: Number(id),
-    sale_status: saleStatus,
-    payment_details: body.payment_details,
-    expected_exchange_rate: body.expected_exchange_rate,
-    replace_existing_payment: body.replace_existing_payment === true,
-  }) : null
+  const settlementCanonical = paymentFieldsSent ? JSON.stringify(saleStatusReceiptCanonical(Number(id), body)) : null
   const settlementDigest = settlementCanonical ? await saleMutationDigest(JSON.parse(settlementCanonical)) : null
   if (settlementRequestId && settlementDigest) {
     const previous = await db.prepare(`
@@ -2680,12 +2736,7 @@ app.post('/:id/items', async (c) => {
 
   const addItemsRequestId = normalizeClientRequestId(body.client_request_id)
   if (!addItemsRequestId) return c.json({ error: 'client_request_id is required when adding sale items.', code: 'client_request_id_required' }, 400)
-  const addItemsCanonical = JSON.stringify({
-    sale_id: Number(id),
-    items: body.items ?? null,
-    notes: String(body.notes || '').trim().slice(0, 500) || null,
-    expected_exchange_rate: body.expected_exchange_rate,
-  })
+  const addItemsCanonical = JSON.stringify(saleLineReceiptCanonical(Number(id), 'add_items', body))
   const addItemsDigest = await saleMutationDigest(JSON.parse(addItemsCanonical))
   const priorAddition = await db.prepare(`SELECT request_digest,response_json FROM sale_mutation_receipts
     WHERE actor_id=@actor AND mutation_kind='add_items' AND request_id=@request`)
@@ -3449,19 +3500,7 @@ app.post('/:id/amendments', async (c) => {
 
   const amendmentRequestId = normalizeClientRequestId(body.client_request_id)
   if (!amendmentRequestId) return c.json({ error: 'client_request_id is required for a sale amendment.', code: 'client_request_id_required' }, 400)
-  const amendmentCanonical = JSON.stringify({
-    sale_id: Number(c.req.param('id')),
-    kind,
-    sale_item_id: body.sale_item_id ?? null,
-    quantity: body.quantity ?? null,
-    applied_price_usd: body.applied_price_usd ?? null,
-    delivery_fee_usd: body.delivery_fee_usd ?? null,
-    delivery_actual_cost_usd: body.delivery_actual_cost_usd ?? null,
-    delivery_contact_id: body.delivery_contact_id ?? null,
-    replacement: body.replacement ?? null,
-    notes: String(body.notes || '').trim().slice(0, 500) || null,
-    expected_exchange_rate: body.expected_exchange_rate,
-  })
+  const amendmentCanonical = JSON.stringify(saleLineReceiptCanonical(Number(c.req.param('id')), 'amendment', body))
   const amendmentDigest = await saleMutationDigest(JSON.parse(amendmentCanonical))
   const priorAmendment = await db.prepare(`
     SELECT request_digest,response_json FROM sale_mutation_receipts

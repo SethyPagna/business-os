@@ -283,3 +283,45 @@ export function directMutationOutcomeIsUnknown(error: unknown): boolean {
   if (String(row.name || '') === 'AbortError') return false
   return true
 }
+
+/** Missing receipts and stale reads never prove a mutation committed. */
+export async function reconcileDirectMutationReceipt(
+  read: () => Promise<{ committed: boolean; response?: Record<string, unknown> }>,
+  pause: (attempt: number) => Promise<void> = async () => {},
+): Promise<Record<string, unknown> | null> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const receipt = await read()
+      if (receipt.committed === true && receipt.response) return receipt.response
+    } catch (error) {
+      if (!directMutationOutcomeIsUnknown(error)) return null
+    }
+    if (attempt < 2) await pause(attempt)
+  }
+  return null
+}
+
+export function mutationVersionAtLeast(actual: unknown, committed: unknown): boolean {
+  if (!committed) return true
+  if (actual === committed) return true
+  const stamp = (value: unknown) => Date.parse(String(value || '').replace(' ', 'T').replace(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?)$/, '$1Z'))
+  const left = stamp(actual)
+  const right = stamp(committed)
+  return Number.isFinite(left) && Number.isFinite(right) && left >= right
+}
+
+/** A present but stale row is not a reason to stop the bounded read loop. */
+export async function readCommittedMutationState<T>(
+  read: () => Promise<T | null>,
+  accept: (value: T) => boolean,
+  pause: (attempt: number) => Promise<void> = async () => {},
+): Promise<T | null> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const value = await read()
+      if (value && accept(value)) return value
+    } catch { /* A failed read never fabricates an authoritative row. */ }
+    if (attempt < 2) await pause(attempt)
+  }
+  return null
+}
