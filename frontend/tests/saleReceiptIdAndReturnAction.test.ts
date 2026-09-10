@@ -48,6 +48,8 @@ assert.doesNotMatch(copyableId, /<button\b|navigator\.clipboard|setCopied|onClic
 const classAttributes = (source: string): string => (source.match(/className=(?:"[^"]*"|\{`[^`]*`\})/g) || []).join('\n')
 assert.doesNotMatch(classAttributes(copyableId), /\btruncate\b|detail-scroll-text|overflow-x-auto/, 'an id is never truncated and never a horizontal scroll container')
 assert.doesNotMatch(classAttributes(copyableId), /\bunderline\b|text-blue-/, 'copyability must not recolor or underline the visible value')
+assert.doesNotMatch(classAttributes(copyableId), /\bselect-all\b/, 'CopyableId must not select the whole value as a hidden click behavior')
+assert.doesNotMatch(copyableId, /lucide-react|<Copy\b|<Check\b/, 'plain CopyableId must not restore local copy/check icon internals')
 assert.match(textAffordances, /createLongPressHandlers\([\s\S]*onLongPress/, 'copy hold uses the one shared long-press controller')
 assert.match(textAffordances, /event\.key !== 'Enter' && event\.key !== ' '/, 'the shared controller accepts Enter and Space')
 assert.match(textAffordances, /navigator\.clipboard\.writeText\(text\)/, 'the shared controller performs the clipboard write')
@@ -141,7 +143,7 @@ console.log('PASS the shared sale-return guard blocks cancelled and fully-return
 const mobileCardStart = salesList.indexOf('<div className="space-y-2 md:hidden">')
 assert.ok(mobileCardStart > 0, 'expected to find the md:hidden phone card list in SalesListSurface')
 const mobileCard = salesList.slice(mobileCardStart)
-assert.match(mobileCard, /<CopyableId value=\{sale\.receipt_number \|\| ''\}[\s\S]*className="font-mono text-sm font-semibold text-gray-900 dark:text-white"/, 'the phone sales card must use the plain shared wrapping receipt id')
+assert.match(mobileCard, /<CopyableId value=\{sale\.receipt_number \|\| ''\}[\s\S]*className="shrink-0 whitespace-nowrap font-mono text-sm font-semibold text-gray-900 dark:text-white"/, 'the compact phone receipt id must stay plain, complete, and nonshrinking inside its metadata rail')
 assert.doesNotMatch(mobileCard, /truncate font-mono text-sm font-semibold text-blue-600/, 'the phone sales card must not ellipsise the receipt id')
 assert.doesNotMatch(mobileCard, /<CopyableId[^>]*className="[^"]*(?:text-blue-|underline)/, 'copyability must not change the receipt value styling')
 

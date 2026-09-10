@@ -125,7 +125,8 @@ console.log('PASS damaged is a tag beside the name on every returns surface, nev
 // The chooser lives only on the returns surface, which is itself gated on the
 // 'returns' permission...
 assert.match(newReturn, /STOCK_ACTION_OPTIONS\.map/, 'the restock/damaged chooser lives on the internal returns surface')
-assert.match(salesHub, /getPermissionTier\('returns'\) !== 'none'/, "the returns surface is gated on the 'returns' permission")
+assert.match(salesHub, /const canReturns = can\('returns', 'view'\)/, "the Returns hub must use the shared action-aware returns:view decision")
+assert.match(salesHub, /\{section === 'returns' && canReturns \? <ReturnsSection embedded \/>/, 'the internal Returns surface must not render when that effective view grant is absent')
 // ...and nothing about it reaches anything the customer is handed. This is a
 // payload fact, not a CSS one: the words are absent from the receipt sources
 // entirely, so there is nothing to hide.

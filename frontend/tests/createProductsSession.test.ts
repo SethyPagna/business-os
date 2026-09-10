@@ -363,10 +363,12 @@ runTest('definitive no-write failures unlock correction under the same request i
   assert.doesNotMatch(modalSource, /sessionRequestIdRef\.current\s*=/, 'correction must reuse the known-unused identity')
 })
 
-runTest('full-access zero-stock New queues in the atomic session while Review keeps its approval workflow', () => {
+runTest('only effective full products:add queues New in the atomic session while Review keeps its approval workflow', () => {
+  assert.match(modalSource, /import \{ effectivePermissions \} from '\.\.\/\.\.\/utils\/permissions\.ts'/, 'the session must consume shared role-plus-user authority')
+  assert.match(modalSource, /function canCommitProductCreateInStockSession[\s\S]*?const authority = effectivePermissions\(user\)[\s\S]*?authority\.getPermissionTier\('products'\) === 'full' && authority\.can\('products', 'add'\)/, 'atomic product creation requires both the effective full tier and products:add action')
   assert.match(modalSource, /const canCommitProductAdd = canCommitProductCreateInStockSession\(user\)/)
-  assert.match(modalSource, /if \(quantity === 0 && !canCommitProductAdd\)/)
-  assert.match(modalSource, /await onCreateProduct\(\{ \.\.\.payload, stock_quantity: 0 \}\)/)
+  assert.match(modalSource, /if \(!effectivePermissions\(user\)\.can\('products', 'add'\) \|\| \(quantity > 0 && !canReceiveStock\)\)/, 'neither None-tier creation nor stock receipt without inventory authority may enter either path')
+  assert.match(modalSource, /if \(!canCommitProductAdd\)[\s\S]*?await onCreateProduct\(\{ \.\.\.payload, stock_quantity: quantity \}\)/, 'Review must preserve the requested opening quantity for the registered approval applier instead of bypassing it')
   assert.match(modalSource, /Review-tier product creation must keep using the registered product[\s\S]*review workflow/)
   assert.match(modalSource, /if \(quantity > 0 && !canReceiveStock\)/)
   assert.match(modalSource, /kind: 'create_receive'/)

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { passwordPersistenceNotice, persistChangedPassword } from '../src/utils/passwordManager.ts'
+import { isAdminControlUser } from '../src/utils/permissions.ts'
 
 type TestCallback = () => void | Promise<void>
 let failed = 0
@@ -178,7 +179,12 @@ await runTest('profile OTP dialog is a fixed overlay above the profile dialog', 
 await runTest('peer-admin reset uses dedicated admin endpoint and permits managing any admin, including the primary admin (explicit user decision Sep 1 2026)', () => {
   assert.match(transportSource, /\/api\/users\/\$\{encodeId\(id\)\}\/reset-password/)
   assert.match(usersSource, /getUsersApi\(\)\.resetPassword\(selectedUser\.id/)
-  assert.match(usersSource, /String\(currentUser\?\.role_code \|\| ''\)\.trim\(\)\.toLowerCase\(\) === 'admin'/)
+  assert.match(usersSource, /import \{ isAdminControlUser,[\s\S]*?\} from '\.\.\/\.\.\/utils\/permissions\.ts'/, 'Users must consume the shared frontend/backend-parity admin authority')
+  assert.match(usersSource, /const canManage = isAdminControlUser\(currentUser\)/, 'peer-admin management must use the effective shared admin decision')
+  assert.equal(isAdminControlUser({ role_code: 'admin' }), true, 'the admin role remains an administrator')
+  assert.equal(isAdminControlUser({ username: 'admin' }), true, 'the reserved admin identity remains an administrator')
+  assert.equal(isAdminControlUser({ role_code: 'employee', role_permissions: { all: true } }), true, 'effective role-level all access remains administrative')
+  assert.equal(isAdminControlUser({ role_code: 'employee', role_permissions: { all: true }, permissions: { all: false } }), false, 'an explicit user override must narrow a role-level all grant')
   assert.match(usersSource, /return canManage && !!targetUser/)
   assert.doesNotMatch(usersSource, /return !targetUser\.is_primary_admin/)
   assert.doesNotMatch(usersSource, /return !targetUser\.has_admin_access/)
