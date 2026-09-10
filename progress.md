@@ -12320,3 +12320,21 @@ integrity. Local verification remains **348/348** frontend utility tests,
 build, Worker typecheck, and `git diff --check`. Direct unauthenticated
 runtime probing remains blocked by Cloudflare's bot challenge, so the Wrangler
 version and upload output are the deployment provenance.
+
+## Sale unknown-outcome reconciliation deployed — September 10, 2026
+
+Fix-scoped commit **f65829a1099b** is live at 100% in Worker version
+**29e9626a-c86e-4475-b605-4de03a146124**. The frontend build was stamped
+**598d146f7dcc8d32** and built at **2026-09-10T16:12:47.137Z UTC**. The
+settlement/status path now retries the authoritative sale read up to three
+bounded times, matches tender rows as a canonical multiset (so server replay
+ordering cannot leave a committed payment marked unknown), and clears the
+global unknown-outcome banner once that exact sale state is proven. The
+original durable retry remains until proof, so a genuinely unresolved write is
+still safe to retry or discard.
+
+Focused verification: `resolvedSyncError.test.ts`, `saleSettlementUi.test.ts`,
+and `directMutationRequest.test.ts` passed; frontend typecheck and Vite build
+passed; `git diff --check` passed. No production data, migration, or secret
+was changed. Authenticated browser smoke remains blocked by Cloudflare's bot
+challenge; Wrangler upload/version output is the deployment provenance.
