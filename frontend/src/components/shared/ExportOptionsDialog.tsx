@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Modal from './Modal'
 import {
   exportColumnLabel,
@@ -29,6 +29,8 @@ interface ExportOptionsDialogProps {
   t: TranslateFn
   onClose: () => void
   notify?: (message: string, tone?: string) => void
+  /** Optional live authority check; guarded callers recheck after lazy imports. */
+  canExport?: () => boolean
 }
 
 function tr(t: TranslateFn, key: string, fallback: string): string {
@@ -44,7 +46,13 @@ export default function ExportOptionsDialog({
   t,
   onClose,
   notify,
+  canExport,
 }: ExportOptionsDialogProps) {
+  const exportAuthorityRef = useRef(canExport)
+  exportAuthorityRef.current = canExport
+  const mountedRef = useRef(true)
+  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false } }, [])
+  const exportAllowed = () => !exportAuthorityRef.current || (mountedRef.current && exportAuthorityRef.current())
   const defaults = useMemo(
     () => new Set(columns.filter((column) => column.defaultSelected !== false).map((column) => column.key)),
     [columns],
@@ -63,6 +71,7 @@ export default function ExportOptionsDialog({
   }
 
   const runExport = async () => {
+    if (!exportAllowed()) return
     if (!selected.size) {
       notify?.(tr(t, 'export_pick_columns', 'Pick at least one column.'), 'error')
       return
@@ -74,12 +83,15 @@ export default function ExportOptionsDialog({
       const filename = `${fileBaseName}-${stamp}`
       if (format === 'csv') {
         const { downloadCSV } = await import('../../utils/csv.ts')
+        if (!exportAllowed()) return
         downloadCSV(`${filename}.csv`, projected)
       } else if (format === 'xlsx') {
         const { downloadXLSX } = await import('../../utils/xlsxExport.ts')
+        if (!exportAllowed()) return
         downloadXLSX(`${filename}.xlsx`, projected)
       } else {
         const headers = columns.filter((column) => selected.has(column.key)).map((column) => column.label)
+        if (!exportAllowed()) return
         const opened = openPrintExport({
           title,
           subtitle: `${rows.length} ${tr(t, 'records', 'records')} · ${stamp}`,
@@ -159,7 +171,7 @@ export default function ExportOptionsDialog({
             <button type="button" className="btn-secondary px-4 py-2 text-sm" onClick={onClose} disabled={busy}>
               {tr(t, 'cancel', 'Cancel')}
             </button>
-            <button type="button" className="btn-primary px-4 py-2 text-sm" onClick={runExport} disabled={busy || rows.length === 0}>
+            <button type="button" className="btn-primary px-4 py-2 text-sm" onClick={runExport} disabled={busy || rows.length === 0 || !exportAllowed()}>
               {busy ? tr(t, 'exporting', 'Exporting…') : tr(t, 'export', 'Export')}
             </button>
           </div>
