@@ -1114,7 +1114,11 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       && storedPending.history.direction === historyContext.direction
     const preparedRetry = preparedRetryInput || (storedHistoryMatches ? storedPending?.body || null : null)
     if (storedPending && !preparedRetry) {
-      notify(translateOr('sale_bulk_pending', 'A previous request has an unknown outcome. Retry the original request or discard it before starting another.'), 'error')
+      // The inline pending-retry card is already visible above the list. A
+      // second red toast used to repeat the same message over the settlement
+      // modal (the screenshot reported as "ERR A previous request...").
+      // Keep the write frozen, but let that one persistent card be the only
+      // instruction so it cannot be mistaken for a second failed request.
       return false
     }
     const previousSale = salesRef.current.find((entry) => Number(entry?.id || 0) === numericId)
@@ -2552,7 +2556,15 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
           }}>{translateOr('retry_original_request', 'Retry original request')}</button>
           <button type="button" className="btn-secondary" disabled={statusActionRef.current.size > 0} onClick={() => {
             if (window.confirm(translateOr('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.'))) {
-              try { savePendingDirectStatus(activePendingDirectStatus.entityId, null) }
+              try {
+                savePendingDirectStatus(activePendingDirectStatus.entityId, null)
+                // Discarding the exact pending request also dismisses the
+                // global unknown-outcome banner for this page. The inline
+                // card is removed by savePendingDirectStatus above; leaving
+                // the global banner behind made the discarded request look
+                // like it was still active after the operator had resolved it.
+                clearSyncError?.()
+              }
               catch (error) { notify(getErrorMessage(error, 'Unable to discard the pending retry.'), 'error') }
             }
           }}>{translateOr('discard_retry', 'Discard retry')}</button>
