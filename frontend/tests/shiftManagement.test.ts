@@ -176,8 +176,9 @@ ok(/shiftOpeningCounts\(edit\.openingUsd, edit\.openingKhr\)/.test(modal)
 // control's `required` attribute went with it and is not missed -- nothing here
 // submits a <form>, so the only thing that ever gated the save is the
 // closeReason blocker printed beside the button, which is asserted instead.
-ok(/useState<CloseDraft>\(blankClose\)/.test(modal) && /<DateTimeEntryInput[^>]*value=\{close\.closedAt\}/.test(modal), 'historic close starts without a guessed timestamp and is typed through the shared date+time field')
-ok(/const closeReason = !close\.closedAt \? t\('shift_close_time_required'\)/.test(modal), 'an unentered close time still blocks the save with a printed reason, not a bare disabled button')
+ok(/useState<CloseDraft>\(blankClose\)/.test(modal) && /<DateTimeEntryInput[^>]*value=\{close\.closedAt\}/.test(modal), 'historic close uses the shared date+time field and preserves the current local minute by default')
+ok(/const blankClose = \(\): CloseDraft => \(\{ closedAt: dateTimeLocal\(new Date\(\)\.toISOString\(\)\)/.test(modal), 'historic close pre-fills its required timestamp while leaving report-only counts blank')
+ok(/const closeReason = !close\.closedAt \? t\('shift_close_time_required'\)/.test(modal), 'only a missing/invalid close timestamp blocks the save; drawer counts never gate it')
 ok(!/type="datetime-local"/.test(modal), 'no shift timestamp may fall back to the native control that rejects a typed 9032026')
 ok(/shiftLocalDateTimeToIso\(close\.closedAt\)/.test(modal), 'entered historical close time is converted from Phnom Penh wall time to explicit ISO')
 ok(/row\.id !== result\.shift\.id/.test(modal) && /setSelected\(result\.shift\)/.test(modal), 'reopen adds the linked child without replacing the preserved parent')

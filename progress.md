@@ -12279,3 +12279,25 @@ permissions; idempotency and concurrent bulk guards. The bulk suite's intentiona
 failure-injection stack trace was caught by its rollback assertion and the suite
 exited 0. No live sale, customer, inventory, or payment row was written during
 these checks.
+
+## Shift close usability follow-up — September 10, 2026
+
+The shift close rule is explicit in both layers: closing cash and the
+calculated difference are report-only values. Blank counts remain NULL and a
+mismatch never blocks the close; only malformed non-negative money values are
+refused. The Worker close routes already enforced that contract, and the POS
+close path already submitted nullable counts. The remaining user-facing block
+was the historical shift popup opening its required close timestamp blank. It
+now pre-fills the current Phnom Penh local minute when Close shift is opened,
+while leaving closing cash, additional cash, and closing note blank. The
+operator can close immediately or adjust the timestamp; the server still
+validates the timestamp, ownership, revision, interval, and branch.
+
+Focused verification: `shiftManagement.test.ts` **112/112**,
+`shiftClosingCounts.test.ts` **14/14**, `shiftGate.test.ts` **60/60**, all 11
+Worker shift pure suites green (including blank, unequal, malformed, historic,
+concurrent, lifecycle, reconciliation, Telegram, and permission paths),
+frontend typecheck, i18n (**5,706 keys / 589 files**), Vite build, and the full
+frontend utility chain **348/348**. No production data or migration was
+changed by this follow-up. Deployment is pending the fix-scoped commit and
+release upload.

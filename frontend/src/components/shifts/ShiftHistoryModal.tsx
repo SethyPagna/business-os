@@ -60,7 +60,12 @@ type CloseDraft = { closedAt: string; closingUsd: string; closingKhr: string; ad
 type ReopenDraft = { reason: string; openingUsd: string; openingKhr: string; openingNote: string }
 type ActionMode = 'edit' | 'close' | 'reopen' | 'cancel' | null
 
-const blankClose = (): CloseDraft => ({ closedAt: '', closingUsd: '', closingKhr: '', additionalUsd: '', additionalKhr: '', closingNote: '' })
+// A historic close still needs an explicit closing timestamp so the server can
+// place it in the correct interval.  The drawer counts are report-only and
+// remain blank by default.  Starting the timestamp at the current local
+// minute prevents an otherwise valid close from looking blocked simply
+// because the operator did not retype the time shown by the open shift.
+const blankClose = (): CloseDraft => ({ closedAt: dateTimeLocal(new Date().toISOString()), closingUsd: '', closingKhr: '', additionalUsd: '', additionalKhr: '', closingNote: '' })
 const blankReopen = (): ReopenDraft => ({ reason: '', openingUsd: '', openingKhr: '', openingNote: '' })
 const refreshMountedShiftState = () => window.dispatchEvent(new Event(SHIFT_STATE_CHANGED_EVENT))
 
