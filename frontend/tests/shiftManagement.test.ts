@@ -250,11 +250,15 @@ ok(/expected cash/i.test(en.shift_difference_hint) && !/opening cash\./i.test(en
 const originalFetch = globalThis.fetch
 const originalWindow = globalThis.window
 const sessionValues = new Map<string, string>()
+const warnings: Array<{ errorId: string; channel: string; code: string; outcome?: string }> = []
+const resolvedWarnings: Array<{ errorId: string; channel: string; code: string }> = []
 globalThis.window = Object.assign(new EventTarget(), { sessionStorage: {
   getItem: (key: string) => sessionValues.get(key) ?? null,
   setItem: (key: string, value: string) => { sessionValues.set(key, value) },
   removeItem: (key: string) => { sessionValues.delete(key) },
 } }) as unknown as Window & typeof globalThis
+window.addEventListener('sync:error', (event) => warnings.push((event as CustomEvent).detail))
+window.addEventListener('sync:error-resolved', (event) => resolvedWarnings.push((event as CustomEvent).detail))
 const originalServerUrl = getSyncServerUrl()
 const transportCalls: Array<{ url: string; body: Record<string, unknown> }> = []
 let serverRevision = 4
@@ -361,6 +365,60 @@ try {
   globalThis.fetch = (async () => new Response(JSON.stringify({ error: 'Reload the changed shift', code: 'shift_request_superseded', outcome: 'rejected' }), { status: 409 })) as typeof fetch
   await assert.rejects(() => closeShiftById(20, lostInput), (error: any) => error.outcome === 'rejected')
   assert.equal(pendingShiftMutation(4, 20), null, 'authoritatively superseded CAS releases the pending draft for refresh')
+
+  // A prior unknown must not poison a later final rejection. Drive the real
+  // apiFetch + route path and verify exact warning and actor/request isolation.
+  for (const status of [403, 400, 404]) {
+    const id = 100 + status
+    globalThis.fetch = (async () => { throw new TypeError('No acknowledgement') }) as typeof fetch
+    await assert.rejects(() => closeShiftById(id, lostInput), (error: any) => error.outcome === 'unknown')
+    const priorWarning = warnings.at(-1)!
+    const exactBody = pendingShiftMutation(4, id)!.body
+    await assert.rejects(() => closeShiftById(id, { ...lostInput, actorId: 5 }))
+    const otherActorWarning = warnings.at(-1)!
+    const otherActorBody = pendingShiftMutation(5, id)!.body
+    await assert.rejects(() => closeShiftById(id + 1, lostInput))
+    const otherShiftWarning = warnings.at(-1)!
+    const warningsBefore = warnings.length
+    const resolvedBefore = resolvedWarnings.length
+    let attempts = 0
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      attempts += 1
+      assert.deepEqual(JSON.parse(String(init?.body)), exactBody, 'final rejection uses the saved body, never the changed draft')
+      return new Response(JSON.stringify({ error: 'Shift request rejected', code: `shift_rejected_${status}` }), { status })
+    }) as typeof fetch
+    await assert.rejects(() => closeShiftById(id, { ...lostInput, closingCountedUsd: 999 }),
+      (error: any) => error.status === status && error.outcome === 'rejected' && error.code === `shift_rejected_${status}`)
+    assert.equal(attempts, 1, 'a final rejection is never automatically retried')
+    assert.equal(pendingShiftMutation(4, id), null)
+    assert.deepEqual(pendingShiftMutation(5, id)?.body, otherActorBody)
+    assert.ok(pendingShiftMutation(4, id + 1), 'another endpoint remains pending')
+    assert.deepEqual(resolvedWarnings.slice(resolvedBefore), [{ errorId: priorWarning.errorId, channel: priorWarning.channel, code: priorWarning.code }])
+    assert.ok(!resolvedWarnings.some(row => row.errorId === otherActorWarning.errorId || row.errorId === otherShiftWarning.errorId))
+    assert.ok(warnings.slice(warningsBefore).every(row => row.outcome !== 'unknown'), 'final rejection does not emit another unknown warning')
+    checks += 10
+  }
+  for (const status of [408, 429, 503]) {
+    const id = 1000 + status
+    globalThis.fetch = (async () => { throw new TypeError('No acknowledgement') }) as typeof fetch
+    await assert.rejects(() => closeShiftById(id, lostInput))
+    const savedBody = pendingShiftMutation(4, id)!.body
+    const resolvedBefore = resolvedWarnings.length
+    globalThis.fetch = (async () => new Response(JSON.stringify({ error: 'Try later' }), { status })) as typeof fetch
+    await assert.rejects(() => closeShiftById(id, lostInput), (error: any) => error.outcome === 'unknown')
+    assert.deepEqual(pendingShiftMutation(4, id)?.body, savedBody, 'retryable outcome retains exact pending request')
+    assert.equal(resolvedWarnings.length, resolvedBefore, 'retryable outcome cannot resolve a warning')
+    checks += 3
+  }
+  // A newer saved identity in the same slot must survive an older response.
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body))
+    sessionValues.set('businessos_shift_request_v1:4:POST:/api/shifts/9999/close', JSON.stringify({ ...body, client_request_id: 'newer_request_9999' }))
+    return new Response(JSON.stringify({ error: 'Shift request rejected' }), { status: 400 })
+  }) as typeof fetch
+  await assert.rejects(() => closeShiftById(9999, lostInput))
+  assert.equal(pendingShiftMutation(4, 9999)?.body.client_request_id, 'newer_request_9999')
+  checks += 1
   assert.equal(shiftTimestampIsFuture('2026-09-05T09:01:00.000Z', Date.parse(closedAt)), true)
   assert.equal(shiftTimestampIsFuture(closedAt, Date.parse(closedAt)), false)
   assert.throws(() => shiftLocalDateTimeToIso('2026-02-30T12:00'), /Invalid/)

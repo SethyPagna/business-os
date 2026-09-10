@@ -2,19 +2,21 @@ import { apiFetch, route } from './http.ts'
 import { dispatchResolvedSyncError, type SyncProblemReference } from '../utils/syncProblemLifecycle.ts'
 
 const unresolvedShiftWrites = new Map<string, SyncProblemReference>()
-async function shiftWrite<T>(channel: string, send: () => Promise<T>, local: null, isWrite: true): Promise<T | null> {
+async function shiftWrite<T>(channel: string, send: () => Promise<T>, local: null, isWrite: true, actorId?: number | string): Promise<T | null> {
+  const warningKey = `${actorId}:${channel}`
+  const previous = unresolvedShiftWrites.get(warningKey)
+  const resolvePrevious = () => {
+    dispatchResolvedSyncError(previous)
+    if (unresolvedShiftWrites.get(warningKey) === previous) unresolvedShiftWrites.delete(warningKey)
+  }
   try {
     const result = await route<T>(channel, send, local, isWrite)
-    dispatchResolvedSyncError(unresolvedShiftWrites.get(channel))
-    unresolvedShiftWrites.delete(channel)
+    resolvePrevious()
     return result
   } catch (cause) {
-    const error = cause as { syncErrorId?: string; syncErrorChannel?: string; code?: string }
-    if (error.code === 'shift_request_superseded') {
-      dispatchResolvedSyncError(unresolvedShiftWrites.get(channel))
-      unresolvedShiftWrites.delete(channel)
-    }
-    if (error.syncErrorId) unresolvedShiftWrites.set(channel, { errorId: error.syncErrorId, channel: error.syncErrorChannel, code: error.code })
+    const error = cause as { syncErrorId?: string; syncErrorChannel?: string; code?: string; outcome?: string }
+    if (error.outcome === 'rejected') resolvePrevious()
+    if (error.outcome === 'unknown' && error.syncErrorId) unresolvedShiftWrites.set(warningKey, { errorId: error.syncErrorId, channel: error.syncErrorChannel, code: error.code })
     throw cause
   }
 }
@@ -46,7 +48,9 @@ async function shiftMutationFetch(method: string, path: string, body: ShiftMutat
   const serialized = JSON.stringify(frozen)
   storage.setItem(key, serialized)
   if (storage.getItem(key) !== serialized) throw new Error('Could not save the shift retry request')
-  let uncertain = !!prior
+  const clearExactPending = () => {
+    if (storage.getItem(key) === serialized) storage.removeItem(key)
+  }
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       const result = await apiFetch(method, path, frozen, 45_000, { skipWriteDedupe: true })
@@ -55,20 +59,24 @@ async function shiftMutationFetch(method: string, path: string, body: ShiftMutat
         ? result?.reopened_from_shift_id === targetId && result?.shift?.parent_shift_id === targetId
         : result?.shift?.id === targetId
       if (!exactTarget) throw Object.assign(new Error('Could not verify the committed shift'), { outcome: 'unknown' })
-      storage.removeItem(key)
+      clearExactPending()
       return result
     } catch (cause) {
       const error = cause as Error & { status?: number; outcome?: string; code?: string }
-      if (error.code === 'shift_request_superseded') {
-        storage.removeItem(key)
+      const status = Number(error.status)
+      // A previous timeout cannot turn a readable, final rejection into an
+      // unknown result forever. Edge interference already carries unknown;
+      // timeout/throttling responses keep the exact request for a later retry.
+      const rejected = error.code === 'shift_request_superseded'
+        || (status >= 400 && status < 500 && status !== 408 && status !== 429 && error.outcome !== 'unknown')
+      if (rejected) {
+        clearExactPending()
         error.outcome = 'rejected'
         throw error
       }
-      const unknown = error.outcome === 'unknown' || !error.status || error.status >= 500
-      uncertain ||= unknown
-      if (!uncertain) storage.removeItem(key)
+      const unknown = error.outcome === 'unknown' || !status || status >= 500 || status === 408 || status === 429
       if (unknown && attempt === 0) continue // exact receipt replay reconciles a lost response
-      if (uncertain) error.outcome = 'unknown'
+      if (unknown) error.outcome = 'unknown'
       throw error
     }
   }
@@ -414,6 +422,7 @@ export async function closeShift(input: CloseShiftInput): Promise<ShiftState> {
     }, input.actorId),
     null,
     true,
+    input.actorId,
   )
   // already_closed is likewise not an error -- the shift was already ended and
   // the first count stands untouched. The caller just stops showing End Shift.
@@ -498,6 +507,7 @@ export async function amendShift(id: number, input: AmendShiftInput): Promise<{ 
     }, input.actorId),
     null,
     true,
+    input.actorId,
   )
   if (!result?.shift) throw new Error('Could not amend shift')
   return result
@@ -539,6 +549,7 @@ export async function closeShiftById(id: number, input: CloseShiftByIdInput): Pr
     }, input.actorId),
     null,
     true,
+    input.actorId,
   )
   if (!result?.shift) throw new Error('Could not close shift')
   return result
@@ -572,6 +583,7 @@ export async function reopenShift(id: number, input: ReopenShiftInput): Promise<
     }, input.actorId),
     null,
     true,
+    input.actorId,
   )
   if (!result?.shift) throw new Error('Could not reopen shift')
   return result
@@ -591,6 +603,7 @@ export async function cancelShift(id: number, expectedRevision: number, reason: 
     }, actorId),
     null,
     true,
+    actorId,
   )
   if (!result?.shift) throw new Error('Could not cancel shift')
   return result

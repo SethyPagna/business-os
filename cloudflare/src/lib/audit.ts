@@ -21,18 +21,33 @@ const AUDIT_LOG_RETENTION_MIN_INTERVAL_MS = 24 * 60 * 60 * 1000
 // Return bulk undo/redo audit rows are the only durable source of the actor
 // and timestamp for those replays. The operation receipt retains the status
 // transition and generation, but it cannot identify who replayed it or when.
+// Shift lifecycle requests also use their atomic audit row as the durable
+// replay receipt. Only the four exact-request lifecycle actions qualify;
+// ordinary Shift logs and legacy writes without request identity still age out.
 // Keep this predicate narrow: ordinary audit data, the original bulk receipt,
 // and unrelated undo/redo rows continue to follow the configured retention.
 export function buildAuditLogRetentionDeleteSql(): string {
   return `DELETE FROM audit_logs WHERE id IN (
     SELECT id FROM audit_logs
     WHERE created_at < @cutoff
-      AND NOT (
-        entity = 'return'
+      AND NOT COALESCE(CASE WHEN json_valid(details) THEN (
+        (entity = 'return'
         AND action IN ('action_undo','action_redo')
-        AND json_valid(details)
         AND json_extract(details, '$.kind') = 'return.fields.bulk'
-      )
+        ) OR (
+          entity = 'shift_session'
+          AND action IN ('shift.close','shift.reopen','shift.amend','shift.cancel')
+          AND json_type(details, '$.request.id') = 'text'
+          AND length(json_extract(details, '$.request.id')) BETWEEN 16 AND 128
+          AND json_extract(details, '$.request.id') NOT GLOB '*[^a-zA-Z0-9_-]*'
+          AND json_type(details, '$.request.target') = 'integer'
+          AND json_extract(details, '$.request.target') > 0
+          AND json_type(details, '$.request.canonical') = 'text'
+          AND CASE WHEN json_valid(json_extract(details, '$.request.canonical')) THEN
+            json_extract(json_extract(details, '$.request.canonical'), '$.client_request_id') = json_extract(details, '$.request.id')
+          ELSE 0 END
+        )
+      ) ELSE 0 END, 0)
     LIMIT 5000
   )`
 }
