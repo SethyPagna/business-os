@@ -111,9 +111,9 @@ export default function GroupedReport(p: ReportViewProps) {
   const [sort, setSort] = useState<SortState | null>(null)
   const anchorRef = useRef<HTMLElement | null>(null)
   const [openKey, setOpenKey] = useState<string | null>(null)
-  const exportMenu = (onCsv: () => void, onPrint: () => void) => (
-    <OverflowMenu label={tr('export', 'Export')} items={exportMenuItems(tr, onCsv, onPrint, { csv: <Download className="h-3.5 w-3.5" />, print: <Printer className="h-3.5 w-3.5" /> })} />
-  )
+  const exportMenu = (onCsv: () => void, onPrint: () => void) => p.canExport()
+    ? <OverflowMenu label={tr('export', 'Export')} items={exportMenuItems(tr, p.canExport, onCsv, onPrint, { csv: <Download className="h-3.5 w-3.5" />, print: <Printer className="h-3.5 w-3.5" /> })} />
+    : null
   const printTitle = `${tr('reports', 'Reports')} · ${title}`
   const subtitle = rangeSubtitle(filters, tr)
 

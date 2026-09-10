@@ -33,6 +33,8 @@ export interface ReportViewProps {
   tr: Tr
   t: (key: string) => string
   perms: ReportPermissions
+  /** Live authority getter; export callbacks must re-check it when invoked. */
+  canExport: () => boolean
   compact: boolean
   onDrill: (patch: DrillPatch) => void
   onOptionsChange: (patch: Partial<ReportOptions>) => void
@@ -55,9 +57,9 @@ export function rangeSubtitle(filters: { startDate: string; endDate: string; sta
   return `${dates}${times}`
 }
 
-export function exportMenuItems(tr: Tr, onCsv: () => void, onPrint: () => void, icons: { csv: OverflowMenuItem['icon']; print: OverflowMenuItem['icon'] }): OverflowMenuItem[] {
+export function exportMenuItems(tr: Tr, canExport: () => boolean, onCsv: () => void, onPrint: () => void, icons: { csv: OverflowMenuItem['icon']; print: OverflowMenuItem['icon'] }): OverflowMenuItem[] {
   return [
-    { label: tr('export_csv', 'Export CSV'), icon: icons.csv, onSelect: onCsv },
-    { label: tr('print', 'Print'), icon: icons.print, onSelect: onPrint },
+    { label: tr('export_csv', 'Export CSV'), icon: icons.csv, onSelect: () => { if (canExport()) onCsv() } },
+    { label: tr('print', 'Print'), icon: icons.print, onSelect: () => { if (canExport()) onPrint() } },
   ]
 }

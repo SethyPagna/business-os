@@ -53,10 +53,12 @@ import {
   persistReportStyleChoice,
   readStoredJson,
   resolveReportView,
+  reportExportAllowed,
   visibleReportViews,
   writeStoredJson,
   type ReportFilters,
   type ReportOptions,
+  type ReportExportPermissions,
   type ReportPermissions,
   type ReportStyle,
   type ReportViewId,
@@ -70,6 +72,7 @@ type ReportsHubAppContext = {
   khrToUsd: (value: unknown) => number
   usdToKhr: (value: unknown) => number
   getPermissionTier: (key: string) => string
+  can: (permissionKey: string, actionKey: string) => boolean
   settings?: { pos_payment_methods?: unknown }
 }
 const useApp = useAppHook as unknown as () => ReportsHubAppContext
@@ -114,15 +117,27 @@ export function parsePaymentMethods(raw: unknown): string[] {
 // SalesHubPage still passes the compatibility `embedded` prop. Layout no
 // longer branches on it: the gutter is unconditional in reports-surface.css.
 export default function ReportsHub(_props: { embedded?: boolean } = {}) {
-  const { t, fmtUSD, fmtKHR, khrToUsd, usdToKhr, getPermissionTier, settings } = useApp()
+  const { t, fmtUSD, fmtKHR, khrToUsd, usdToKhr, getPermissionTier, can, settings } = useApp()
   const trh = useCallback((key: string, fallback: string): string => { const v = t(key); return v && v !== key ? v : fallback }, [t])
   const tStr = useCallback((key: string): string => { const v = t(key); return v == null ? key : v }, [t])
   const compact = useIsCompactViewport()
 
-  const canSales = getPermissionTier('sales') !== 'none'
-  const canReturns = getPermissionTier('returns') !== 'none'
-  const canFees = getPermissionTier('fees') !== 'none'
-  const perms = useMemo<ReportPermissions>(() => ({ sales: canSales, returns: canReturns, fees: canFees }), [canSales, canReturns, canFees])
+  // Read effective action authority, not just the coarse tier: an explicit
+  // section:view=false must remove that domain's tabs and Overview block.
+  const canSales = can('sales', 'view')
+  const canReturns = can('returns', 'view')
+  const canFees = can('fees', 'view')
+  const canShift = getPermissionTier('sales') === 'full' || getPermissionTier('pos') === 'full'
+  const perms = useMemo<ReportPermissions>(() => ({ sales: canSales, returns: canReturns, fees: canFees, shift: canShift }), [canFees, canReturns, canSales, canShift])
+  const exportPermissions = useMemo<ReportExportPermissions>(() => ({
+    sales: can('sales', 'export'),
+    returns: can('returns', 'export'),
+    fees: can('fees', 'export'),
+  }), [can])
+  const permsRef = useRef(perms)
+  const exportPermissionsRef = useRef(exportPermissions)
+  permsRef.current = perms
+  exportPermissionsRef.current = exportPermissions
   const views = useMemo(() => visibleReportViews(perms), [perms])
 
   // ---- persisted choices (view, style, calculation options) ----
@@ -131,11 +146,18 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
   const [styleChoice, setStyleChoice] = useState<ReportStyle | null>(() => readStoredJson(storage, REPORT_STORAGE_KEYS.style, normalizeReportStyle))
   const [options, setOptions] = useState<ReportOptions>(() => readStoredJson(storage, REPORT_STORAGE_KEYS.options, normalizeReportOptions))
   const style: ReportStyle = styleChoice ?? defaultReportStyle(compact)
+  const resolvedViewId = resolveReportView(viewId, perms)
   useEffect(() => { setViewId((cur) => resolveReportView(cur, perms)) }, [perms])
-  useEffect(() => { if (viewId) writeStoredJson(storage, REPORT_STORAGE_KEYS.view, viewId) }, [viewId, storage])
+  useEffect(() => { if (resolvedViewId) writeStoredJson(storage, REPORT_STORAGE_KEYS.view, resolvedViewId) }, [resolvedViewId, storage])
   useEffect(() => { persistReportStyleChoice(storage, styleChoice) }, [styleChoice, storage])
   useEffect(() => { writeStoredJson(storage, REPORT_STORAGE_KEYS.options, options) }, [options, storage])
-  const view = viewId ? getReportView(viewId) : null
+  // Resolve synchronously as well as in the state effect. That prevents a
+  // revoked Shift view from rendering long enough to issue one stale request.
+  const view = resolvedViewId ? getReportView(resolvedViewId) : null
+  const canExportReport = useCallback(
+    () => !!view && reportExportAllowed(view, permsRef.current, exportPermissionsRef.current),
+    [view],
+  )
   const supportsTime = !!view?.supportsTime
   const supportsSaleFilters = !!view?.supportsSaleFilters
   const supportsSearch = !!view?.supportsSearch
@@ -261,7 +283,7 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
 
   const viewPicker = (
     <AppSelect
-      value={viewId || ''}
+      value={resolvedViewId || ''}
       options={views.map((v) => ({ value: v.id, label: trh(v.labelKey, v.fallback) }))}
       onChange={(value) => { if (isReportViewId(value)) setViewId(value) }}
       ariaLabel={trh('view', 'View')}
@@ -329,6 +351,7 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
     tr: trh,
     t: tStr,
     perms,
+    canExport: canExportReport,
     compact,
     onDrill,
     onOptionsChange,

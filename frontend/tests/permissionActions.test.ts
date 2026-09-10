@@ -94,6 +94,23 @@ assert.equal(actionAllowed('promotions', 'manage', 'view'), false)
 assert.equal(actionAllowed('fees', 'add', 'review'), true)
 assert.equal(actionAllowed('fees', 'edit', 'review'), true)
 assert.equal(outcomeAt(actionsForKey('fees').find((a) => a.key === 'delete')!, 'review'), 'queue')
+assert.equal(actionAllowed('fees', 'export', 'review'), true, 'Fees export preserves the existing Review default')
+assert.equal(actionAllowed('fees', 'export', 'full'), true, 'Fees export preserves the existing Full default')
+
+// Canonical Shop/Warehouse identities cannot be created or deleted. Their
+// editor rows must not claim otherwise; export remains available by default.
+const branchActionKeys = actionsForKey('branches').map((action) => action.key)
+assert.ok(!branchActionKeys.includes('add') && !branchActionKeys.includes('delete'))
+assert.equal(actionAllowed('branches', 'export', 'review'), true)
+assert.equal(actionAllowed('branches', 'export', 'full'), true)
+
+for (const section of ['fees', 'branches']) {
+  assert.equal(
+    actionAllowed(section, 'export', 'full', () => false, (candidate, action) => candidate === section && action === 'export'),
+    false,
+    `${section}:export explicit false narrows the default`,
+  )
+}
 
 // Returns allows create directly but never edit.
 assert.equal(outcomeAt(actionsForKey('returns').find((a) => a.key === 'add')!, 'review'), 'allow')
