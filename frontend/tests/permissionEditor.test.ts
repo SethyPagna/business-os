@@ -11,6 +11,11 @@ assert.match(source, /PERMISSION_SECTIONS/)
 assert.match(source, /from '\.\/permissionDefinitions'/)
 assert.match(source, /permission_sensitive_critical/)
 assert.match(source, /section\.permissions\.map/)
+assert.match(
+  source,
+  /translate\(`\$\{section\.tKey\}_desc`, section\.description\)/,
+  'section descriptions must resolve their dynamic language-pack key before using the English fallback',
+)
 assert.match(definitions, /backup_restore/)
 assert.match(definitions, /drive_credentials/)
 assert.match(definitions, /business_identity/)
@@ -34,6 +39,16 @@ const requiredKeys = [
 for (const key of requiredKeys) {
   assert.ok(en[key], `English permission label missing: ${key}`)
   assert.ok(km[key], `Khmer permission label missing: ${key}`)
+}
+
+for (const key of [
+  'perm_section_full_access_desc',
+  'perm_section_pos_desc',
+  'perm_section_sales_desc',
+]) {
+  assert.ok(en[key], `English permission-section description missing: ${key}`)
+  assert.ok(km[key], `Khmer permission-section description missing: ${key}`)
+  assert.notEqual(km[key], en[key], `Khmer permission-section description falls back to English: ${key}`)
 }
 
 console.log('PASS PermissionEditor exposes page/action-sensitive permission groups with English/Khmer labels')

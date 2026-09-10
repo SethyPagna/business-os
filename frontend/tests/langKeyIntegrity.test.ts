@@ -36,6 +36,24 @@ assert.deepEqual(missingInKm, [], 'every English key needs a Khmer entry')
 assert.deepEqual(missingInEn, [], 'km.json has keys en.json does not -- likely a stale key left behind')
 console.log(`PASS en.json and km.json share the same ${enKeys.size} keys`)
 
+// Template-generated lookups such as `${section.tKey}_desc` are invisible to
+// the static source regex below. Shared date presets also need top-level keys:
+// the same names nested under a feature object do not satisfy t('key').
+const requiredPairedTopLevelKeys = [
+  'last_7_days',
+  'last_30_days',
+  'perm_section_full_access_desc',
+  'perm_section_pos_desc',
+  'perm_section_sales_desc',
+]
+
+for (const key of requiredPairedTopLevelKeys) {
+  assert.equal(typeof en[key], 'string', `English top-level translation missing: ${key}`)
+  assert.equal(typeof km[key], 'string', `Khmer top-level translation missing: ${key}`)
+  assert.notEqual(km[key], en[key], `Khmer top-level translation falls back to English: ${key}`)
+}
+console.log('PASS shared date presets and dynamic permission descriptions have paired top-level translations')
+
 // --- 2. every key the source asks for actually exists --------------------
 
 function collectSources(dir: string, out: string[] = []): string[] {
