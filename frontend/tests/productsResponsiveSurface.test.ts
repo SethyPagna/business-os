@@ -119,6 +119,13 @@ assert.match(detail, /whitespace-nowrap font-mono"[^>]*>\{p\.barcode\}/, 'produc
 assert.match(inventoryDetail, /break-words font-bold text-gray-900 dark:text-white"[^>]*>\{p\.name\}/, 'inventory product-detail titles must wrap in full')
 assert.match(inventoryDetail, /shrink-0 whitespace-nowrap font-mono text-xs text-gray-400"[^>]*>&middot; \{p\.barcode\}/, 'inventory product-detail barcodes must remain on one line')
 assert.match(detail, /<Row label=\{T\('branch', 'Branch'\)\}>[\s\S]*scroll-x-clean flex min-w-0 flex-nowrap/, 'product detail must keep Branch and its values on one row')
+// 320px source geometry, EN + KM: after the sheet's 32px inline padding,
+// the fixed 4rem label and 0.5rem gap leave 216px for values. Long English
+// and Khmer names therefore cannot safely share a justify-between row with
+// quantity; the value lane must own the remaining width and scroll, while
+// each complete name:value chip stays nowrap and shrink-proof.
+assert.match(inventoryDetail, /className="flex min-w-0 gap-2" data-detail-branch-row="true">[\s\S]*w-16 flex-shrink-0 whitespace-nowrap[\s\S]*T\('branch', 'Branch'\)/, 'inventory detail must keep the Branch label inline and fixed at 320px in English and Khmer')
+assert.match(inventoryDetail, /scroll-x-clean flex min-w-0 flex-1 flex-nowrap gap-1\.5[\s\S]*shrink-0 whitespace-nowrap rounded-full[\s\S]*\{branchStock\.branch_name\}: [\s\S]*\{branchStock\?\.quantity \?\? 0\} \{p\.unit\}/, 'inventory detail must horizontally scroll complete English/Khmer branch name, quantity, and unit chips at 320px')
 assert.match(detail, /data-detail-price-row="cost-wholesale"[\s\S]*PriceCell label=\{T\('label_cost'[\s\S]*PriceCell label=\{T\('wholesale_price'/, 'Cost and Wholesale must share one detail row')
 assert.match(detail, /data-detail-price-row="selling-margin"[\s\S]*PriceCell label=\{T\('label_selling_price'[\s\S]*PriceCell label=\{T\('label_margin'/, 'Selling and Margin must share one detail row')
 assert.match(detail, /text-sm font-medium tabular-nums/, 'peer product-detail numeric values must share typography')

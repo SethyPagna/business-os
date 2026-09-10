@@ -286,18 +286,21 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
           ) : null}
 
           {branchStock.length > 0 ? (
-            <div>
-              <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-gray-500">{T('branch_stock', 'Branch Stock')}</div>
-              <div className="space-y-1">
+            // Match the primary Products detail row: the label keeps a
+            // predictable narrow column while every complete branch value
+            // stays on one chip in a single horizontally scrollable lane.
+            // At 320px this prevents long English or Khmer names from
+            // wrapping away from their quantity or colliding with the label.
+            <div className="flex min-w-0 gap-2" data-detail-branch-row="true">
+              <span className="w-16 flex-shrink-0 whitespace-nowrap pt-0.5 text-xs text-gray-400 sm:w-20">{T('branch', 'Branch')}</span>
+              <div className="scroll-x-clean flex min-w-0 flex-1 flex-nowrap gap-1.5">
                 {branchStock.map((branchStock, index) => (
-                  <div
+                  <span
                     key={getBranchStockKey(branchStock, index)}
-                    className={`flex justify-between py-1 text-sm ${index < branchCount - 1 ? 'border-b border-gray-100 dark:border-gray-700' : ''}`}
-                    data-detail-branch-row="true"
+                    className="shrink-0 whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-700 dark:bg-gray-700 dark:text-gray-300"
                   >
-                    <span className="text-gray-700 dark:text-gray-300">{branchStock.branch_name}</span>
-                    <span className="font-medium text-gray-900 dark:text-white">{branchStock?.quantity ?? 0} {p.unit}</span>
-                  </div>
+                    {branchStock.branch_name}: <span className="font-medium text-gray-900 dark:text-white">{branchStock?.quantity ?? 0} {p.unit}</span>
+                  </span>
                 ))}
               </div>
             </div>
