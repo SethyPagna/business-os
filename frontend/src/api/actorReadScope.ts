@@ -8,10 +8,67 @@ let authorityId = 0
 let allRevision = 0
 const revisions = new Map<string, number>()
 const resultScopes = new WeakMap<object, ActorReadScope>()
+let expectedMarker: string | null | undefined
+let quarantined = false
+let quarantineStatus = 'checking'
+const quarantineListeners = new Set<() => void>()
+export const ACTOR_SESSION_RETRY_EVENT = 'auth:read-session-retry'
+
+function sessionMarker(): string | null {
+  try { return window.localStorage.getItem(SESSION_MARKER) } catch { return null }
+}
+
+function observeSessionMarker(): void {
+  const marker = sessionMarker()
+  if (expectedMarker === undefined) { expectedMarker = marker; return }
+  if (marker === expectedMarker) return
+  expectedMarker = marker
+  localSession++
+  quarantined = true
+  quarantineStatus = 'checking'
+  quarantineListeners.forEach((listener) => listener())
+}
+
+if (typeof window !== 'undefined') {
+  expectedMarker = sessionMarker()
+  window.addEventListener('storage', (event) => {
+    if (event.key === SESSION_MARKER || event.key === null) observeSessionMarker()
+  })
+}
+
+export function subscribeActorSessionQuarantine(listener: () => void): () => void {
+  quarantineListeners.add(listener)
+  return () => { quarantineListeners.delete(listener) }
+}
+
+export function isActorSessionQuarantined(): boolean { observeSessionMarker(); return quarantined }
+export function assertActorSessionDispatchAllowed(scope?: ActorReadScope): void {
+  if (isActorSessionQuarantined() || (scope && !isActorReadScopeCurrent(scope, false))) {
+    throw Object.assign(new Error('The sign-in changed. Resolve the locked session before retrying this action.'), {
+      code: 'actor_session_quarantined', status: 409, outcome: 'not_dispatched',
+    })
+  }
+}
+export function actorSessionQuarantineStatus(): string { return quarantineStatus }
+export function actorSessionReconciliationMarker(): string | null { observeSessionMarker(); return expectedMarker ?? null }
+export function setActorSessionQuarantineStatus(status: string): void {
+  quarantineStatus = status
+  quarantineListeners.forEach((listener) => listener())
+}
+export function completeActorSessionReconciliation(marker: string | null): boolean {
+  observeSessionMarker()
+  if (marker !== expectedMarker) return false
+  quarantined = false
+  quarantineStatus = 'ready'
+  localSession++
+  quarantineListeners.forEach((listener) => listener())
+  return true
+}
 
 export type ActorReadScope = { authority: string; channel: string; revision: string }
 
 function authority(): string {
+  observeSessionMarker()
   let identity = getSyncServerUrl()
   try {
     if (typeof window !== 'undefined') {
@@ -33,7 +90,9 @@ function authority(): string {
  * also fences other tabs sharing the same cookie-based authenticated session. */
 export function resetActorReadSession(): void {
   localSession++
-  try { window.localStorage.setItem(SESSION_MARKER, globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`) } catch {}
+  const marker = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`
+  expectedMarker = marker
+  try { window.localStorage.setItem(SESSION_MARKER, marker) } catch { expectedMarker = sessionMarker() }
 }
 
 export function invalidateActorReadChannel(prefix: string): void {
@@ -46,13 +105,13 @@ export function captureActorReadScope(channel = ''): ActorReadScope {
   return { authority: authority(), channel, revision: `${allRevision}:${revisions.get(channel.split(':')[0]) || 0}` }
 }
 
-export function isActorReadScopeCurrent(scope: ActorReadScope, includeInvalidation = true): boolean {
+export function isActorReadScopeCurrent(scope: ActorReadScope, includeInvalidation = true, allowQuarantine = false): boolean {
   const current = captureActorReadScope(scope.channel)
-  return current.authority === scope.authority && (!includeInvalidation || current.revision === scope.revision)
+  return (allowQuarantine || !quarantined) && current.authority === scope.authority && (!includeInvalidation || current.revision === scope.revision)
 }
 
-export function assertActorReadScope(scope: ActorReadScope, includeInvalidation = true): void {
-  if (!isActorReadScopeCurrent(scope, includeInvalidation)) {
+export function assertActorReadScope(scope: ActorReadScope, includeInvalidation = true, allowQuarantine = false): void {
+  if (!isActorReadScopeCurrent(scope, includeInvalidation, allowQuarantine)) {
     throw Object.assign(new Error('Read belongs to an earlier account or refresh. Please try again.'), { name: 'AbortError', code: 'stale_read_scope' })
   }
 }
