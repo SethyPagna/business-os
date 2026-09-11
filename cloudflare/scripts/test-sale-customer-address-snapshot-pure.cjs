@@ -35,6 +35,7 @@ const cache = new Map()
 // import it does not name, and a stubbed kernel would make every address here
 // resolve to undefined -- a test that agrees with itself and proves nothing.
 const actual = new Set([
+  'saleCustomerAssignmentGuard',
   'actorSnapshot', 'movementBranchName', 'db', 'permissions', 'saleBulkStatus', 'saleBulkUpdate',
   'saleTransitions', 'saleTotals', 'sqlBinding', 'productBatches', 'batchCode', 'salesStatus',
   'conflictControl', 'searchMatch', 'financialPrecision', 'paymentMethodRegistry',
