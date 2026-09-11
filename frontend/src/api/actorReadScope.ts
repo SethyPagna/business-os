@@ -13,6 +13,79 @@ let quarantined = false
 let quarantineStatus = 'checking'
 const quarantineListeners = new Set<() => void>()
 export const ACTOR_SESSION_RETRY_EVENT = 'auth:read-session-retry'
+const AUTH_PENDING_PREFIX = 'auth-pending:'
+const OAUTH_COOKIE_OWNER = 'businessos_oauth_cookie_owner'
+const cookieUsers = new WeakMap<object, string>()
+
+export function isActorCookieMutationPending(): boolean {
+  return String(sessionMarker() || '').startsWith(AUTH_PENDING_PREFIX)
+}
+
+/** Call immediately before the browser request that can change the shared
+ * HttpOnly cookie. No elapsed-time lease may release an unfinished request. */
+export function beginActorCookieMutation(): string {
+  assertActorSessionDispatchAllowed()
+  const marker = AUTH_PENDING_PREFIX + (globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`)
+  if (typeof window === 'undefined') return marker
+  // Storage failure is fail-closed: other tabs could not be fenced.
+  window.localStorage.setItem(SESSION_MARKER, marker)
+  expectedMarker = marker
+  localSession++
+  return marker
+}
+
+/** Only the owner of the current pending marker may settle it. Called from
+ * the actual fetch lifecycle, never a UI deadline that leaves fetch running. */
+export function finishActorCookieMutation(marker: string, ownerReconciliation = false, user?: object): boolean {
+  if (typeof window === 'undefined') return true
+  if (sessionMarker() !== marker || !marker.startsWith(AUTH_PENDING_PREFIX)) return false
+  const settled = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`
+  window.localStorage.setItem(SESSION_MARKER, settled)
+  expectedMarker = settled
+  localSession++
+  if (ownerReconciliation) {
+    if (user) cookieUsers.set(user, settled)
+    quarantined = true
+    quarantineStatus = 'checking'
+    quarantineListeners.forEach((listener) => listener())
+  }
+  return true
+}
+
+/** Only the exact user object returned by this runtime's completed login may
+ * authorize the normal explicit sign-in handoff. A late, unconsumed result
+ * leaves old UI quarantined; no timer assumes the caller applied it. */
+export function acknowledgeActorCookieUser(user: unknown): boolean {
+  if (!user || typeof user !== 'object' || cookieUsers.get(user) !== sessionMarker() || isActorCookieMutationPending()) return false
+  cookieUsers.delete(user)
+  quarantined = false
+  quarantineStatus = 'ready'
+  localSession++
+  quarantineListeners.forEach((listener) => listener())
+  return true
+}
+
+/** The opaque owner marker travels through the server-signed return URL;
+ * sessionStorage retains ownership across this tab's full-page redirect. */
+export function prepareActorOauthCookieRedirect(marker: string, redirectTo: string): string {
+  const url = new URL(redirectTo)
+  url.searchParams.set('auth_mode', 'login')
+  url.searchParams.set('auth_provider', 'google')
+  url.searchParams.set('auth_session_intent', marker)
+  window.sessionStorage.setItem(OAUTH_COOKIE_OWNER, marker)
+  window.localStorage.removeItem('businessos_oauth_callback_result')
+  return url.toString()
+}
+
+export function finishActorOauthCookieRedirect(returnedMarker: string | null): boolean {
+  const owned = window.sessionStorage.getItem(OAUTH_COOKIE_OWNER)
+  if (!owned || owned !== returnedMarker || !finishActorCookieMutation(owned)) return false
+  window.sessionStorage.removeItem(OAUTH_COOKIE_OWNER)
+  quarantined = false
+  quarantineStatus = 'ready'
+  quarantineListeners.forEach((listener) => listener())
+  return true
+}
 
 function sessionMarker(): string | null {
   try { return window.localStorage.getItem(SESSION_MARKER) } catch { return null }
@@ -31,6 +104,7 @@ function observeSessionMarker(): void {
 
 if (typeof window !== 'undefined') {
   expectedMarker = sessionMarker()
+  if (isActorCookieMutationPending()) quarantined = true
   window.addEventListener('storage', (event) => {
     if (event.key === SESSION_MARKER || event.key === null) observeSessionMarker()
   })
@@ -43,7 +117,7 @@ export function subscribeActorSessionQuarantine(listener: () => void): () => voi
 
 export function isActorSessionQuarantined(): boolean { observeSessionMarker(); return quarantined }
 export function assertActorSessionDispatchAllowed(scope?: ActorReadScope): void {
-  if (isActorSessionQuarantined() || (scope && !isActorReadScopeCurrent(scope, false))) {
+  if (isActorSessionQuarantined() || isActorCookieMutationPending() || (scope && !isActorReadScopeCurrent(scope, false))) {
     throw Object.assign(new Error('The sign-in changed. Resolve the locked session before retrying this action.'), {
       code: 'actor_session_quarantined', status: 409, outcome: 'not_dispatched',
     })
@@ -57,7 +131,7 @@ export function setActorSessionQuarantineStatus(status: string): void {
 }
 export function completeActorSessionReconciliation(marker: string | null): boolean {
   observeSessionMarker()
-  if (marker !== expectedMarker) return false
+  if (marker !== expectedMarker || isActorCookieMutationPending()) return false
   quarantined = false
   quarantineStatus = 'ready'
   localSession++
@@ -90,6 +164,9 @@ function authority(): string {
  * also fences other tabs sharing the same cookie-based authenticated session. */
 export function resetActorReadSession(): void {
   localSession++
+  // A generic cache/logout/bootstrap reset must not erase the fence belonging
+  // to a cookie-changing request that is still running in any tab.
+  if (isActorCookieMutationPending()) return
   const marker = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`
   expectedMarker = marker
   try { window.localStorage.setItem(SESSION_MARKER, marker) } catch { expectedMarker = sessionMarker() }

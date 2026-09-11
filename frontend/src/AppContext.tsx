@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback, useRef, useMemo, startTransition } fr
 import type { ReactNode } from 'react'
 import { BUSINESS_TIME_ZONE, STORAGE_KEYS, SYNC } from './constants'
 import { cacheClearAll, ensureSyncUpdateCacheListener, FRONTEND_BUILD_INFO, isTransientGatewayError, pingServerHealth, primeServerHealthFromRuntime, startHealthCheck } from './api/http.ts'
-import { ACTOR_SESSION_RETRY_EVENT, actorSessionReconciliationMarker, completeActorSessionReconciliation, isActorSessionQuarantined, resetActorReadSession, setActorSessionQuarantineStatus, subscribeActorSessionQuarantine } from './api/actorReadScope.ts'
+import { ACTOR_SESSION_RETRY_EVENT, acknowledgeActorCookieUser, actorSessionReconciliationMarker, completeActorSessionReconciliation, isActorCookieMutationPending, isActorSessionQuarantined, resetActorReadSession, setActorSessionQuarantineStatus, subscribeActorSessionQuarantine } from './api/actorReadScope.ts'
 import { readActorSessionRecoveryBootstrap } from './api/http.ts'
 import {
   normalizeRuntimeDescriptor,
@@ -971,6 +971,10 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       if (marker !== actorSessionReconciliationMarker()) return
       disconnectWS()
       setAuthReady(false)
+      if (isActorCookieMutationPending()) {
+        setActorSessionQuarantineStatus('authentication-pending')
+        return
+      }
       setActorSessionQuarantineStatus('checking')
       try {
         const payload = await readActorSessionRecoveryBootstrap() as BootstrapPayload
@@ -1715,7 +1719,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
 
   // Authentication helpers.
   const persistAuthenticatedUser = useCallback(async (nextUser: AppUser, sessionDuration = 'session', sessionExpiresAt = ''): Promise<void> => {
-    if (isActorSessionQuarantined()) throw new Error('Resolve the changed session before signing in here.')
+    if (isActorSessionQuarantined() && !acknowledgeActorCookieUser(nextUser)) throw new Error('Resolve the changed session before signing in here.')
     resetActorReadSession()
     const expiryTime = computeSessionExpiryMs(sessionDuration, sessionExpiresAt)
 

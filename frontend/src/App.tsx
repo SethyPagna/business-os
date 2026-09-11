@@ -1728,9 +1728,10 @@ export function installActorSessionQuarantineDom(): () => void {
     if (blocked) {
       hideOldUi()
       const status = actorSessionQuarantineStatus()
-      message.textContent = status === 'checking' ? 'Checking the current session…'
-        : status === 'different-account' ? 'Another account is signed in. Sign back into the original account in the other tab, then retry. Reload only when no unfinished editor work remains.'
-          : 'This screen remains locked because the current session could not be safely restored. Retry, or reload when no unfinished editor work remains.'
+      message.textContent = status === 'authentication-pending' ? 'Sign-in is still in progress in another tab. Finish it there, then retry. / ការចូលគណនីនៅកំពុងដំណើរការក្នុងផ្ទាំងផ្សេង។ សូមបញ្ចប់នៅទីនោះ រួចព្យាយាមម្ដងទៀត។'
+        : status === 'checking' ? 'Checking the current session… / កំពុងពិនិត្យវគ្គចូលគណនីបច្ចុប្បន្ន…'
+          : status === 'different-account' ? 'Another account is signed in. Sign back into the original account in the other tab, then retry. Reload only when no unfinished editor work remains. / គណនីផ្សេងបានចូល។ សូមចូលគណនីដើមវិញក្នុងផ្ទាំងផ្សេង រួចព្យាយាមម្ដងទៀត។ ផ្ទុកឡើងវិញតែពេលគ្មានការកែប្រែមិនទាន់បញ្ចប់។'
+            : 'This screen remains locked because the current session could not be safely restored. Retry, or reload when no unfinished editor work remains. / អេក្រង់នេះនៅតែចាក់សោ ព្រោះមិនអាចស្ដារវគ្គចូលគណនីដោយសុវត្ថិភាពបាន។ សូមព្យាយាមម្ដងទៀត ឬផ្ទុកឡើងវិញពេលគ្មានការកែប្រែមិនទាន់បញ្ចប់។'
       if (!wasBlocked) retry.focus()
     } else restore()
     wasBlocked = blocked
@@ -1740,7 +1741,7 @@ export function installActorSessionQuarantineDom(): () => void {
     if (button?.dataset.sessionAction === 'reload') {
       flushPendingWorkDrafts()
       if (hasDirtyWork()) {
-        message.textContent = 'Unfinished editors are still retained here. Sign back into the original account and retry; this tab will not discard them.'
+        message.textContent = 'Unfinished editors are still retained here. Sign back into the original account and retry; this tab will not discard them. / ការកែប្រែមិនទាន់បញ្ចប់នៅតែរក្សាទុកនៅទីនេះ។ សូមចូលគណនីដើមវិញ ហើយព្យាយាមម្ដងទៀត។ ផ្ទាំងនេះនឹងមិនលុបការកែប្រែទាំងនោះទេ។'
         return
       }
       window.location.reload()

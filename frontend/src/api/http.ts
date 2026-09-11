@@ -14,7 +14,7 @@
 import { SYNC } from '../constants.ts'
 import { getClientMetaHeaders as sharedGetClientMetaHeaders } from '../utils/deviceInfo.ts'
 import { createSyncErrorId } from '../utils/syncProblemLifecycle.ts'
-import { assertActorReadScope, assertActorSessionDispatchAllowed, captureActorReadScope, invalidateActorReadChannel, isActorReadScopeCurrent, markActorReadResult, type ActorReadScope } from './actorReadScope.ts'
+import { assertActorReadScope, assertActorSessionDispatchAllowed, beginActorCookieMutation, finishActorCookieMutation, prepareActorOauthCookieRedirect, isActorCookieMutationPending, captureActorReadScope, invalidateActorReadChannel, isActorReadScopeCurrent, markActorReadResult, type ActorReadScope } from './actorReadScope.ts'
 import {
   getSyncServerUrl,
   getSyncToken,
@@ -52,6 +52,7 @@ type ApiFetchOptions = { skipWriteDedupe?: boolean; signal?: AbortSignal; actorR
 /** The sole quarantine exception: no shared route cache, local fallback,
  * embedded bootstrap, mutation or general private-read bypass. */
 export function readActorSessionRecoveryBootstrap(): Promise<any> {
+  if (isActorCookieMutationPending()) return Promise.reject(Object.assign(new Error('Authentication is still in progress in another tab.'), { code: 'actor_session_quarantined', outcome: 'not_dispatched' }))
   return apiFetch('GET', '/api/auth/bootstrap', undefined, 8000, { actorRecovery: ACTOR_RECOVERY_READ })
 }
 type RouteOptions = {
@@ -800,6 +801,12 @@ export async function apiFetch(method: unknown, path: string, body?: unknown, ti
     else externalSignal.addEventListener('abort', onExternalAbort, { once: true })
   }
 
+  let cookieMutation: string | null = null
+  let holdCookieAcrossRedirect = false
+  const oauthLogin = normalizedMethod === 'POST' && path === '/api/auth/oauth/start' && String((body as { mode?: unknown } | null)?.mode || 'login').trim().toLowerCase() !== 'link'
+  const establishesActor = normalizedMethod === 'POST' && ['/api/auth/login', '/api/auth/otp/verify'].includes(path)
+  let ownerReconciliation = establishesActor
+  let cookieUser: object | undefined
   try {
     const requestInit: RequestInitWithBody = {
       method: normalizedMethod,
@@ -811,7 +818,15 @@ export async function apiFetch(method: unknown, path: string, body?: unknown, ti
     if (methodAllowsRequestBody(normalizedMethod) && body !== undefined) {
       requestInit.body = JSON.stringify(body)
     }
+    if (oauthLogin || (normalizedMethod === 'POST' && ['/api/auth/login', '/api/auth/otp/verify', '/api/auth/logout', '/api/auth/session-duration'].includes(path))) {
+      cookieMutation = beginActorCookieMutation()
+    }
+    if (oauthLogin && cookieMutation) {
+      const payload = (body || {}) as Record<string, unknown>
+      requestInit.body = JSON.stringify({ ...payload, redirectTo: prepareActorOauthCookieRedirect(cookieMutation, String(payload.redirectTo || window.location.href)) })
+    }
     const res = await fetch(`${base}${path}`, requestInit)
+    if (establishesActor && res.status >= 400 && res.status < 500) ownerReconciliation = false
     if (readScope) assertActorReadScope(readScope, false, recoveryRead)
     if (isCloudflareAccessRedirectResponse(res)) {
       const accessError = createCloudflareAccessError(path)
@@ -849,7 +864,13 @@ export async function apiFetch(method: unknown, path: string, body?: unknown, ti
       }
       throw apiError || new Error(msg || `HTTP ${res.status}`)
     }
-    return await res.json()
+    const result = await res.json()
+    if (establishesActor) {
+      cookieUser = result?.user && typeof result.user === 'object' ? result.user : undefined
+      ownerReconciliation = !!cookieUser
+    }
+    if (oauthLogin && result?.success !== false && result?.url) holdCookieAcrossRedirect = true
+    return result
   } catch (e: any) {
     if (e?.code === 'stale_read_scope') throw e
     clearTimeout(timer)
@@ -878,6 +899,7 @@ export async function apiFetch(method: unknown, path: string, body?: unknown, ti
     }
     throw e
   } finally {
+    if (cookieMutation && !holdCookieAcrossRedirect) finishActorCookieMutation(cookieMutation, ownerReconciliation, cookieUser)
     clearTimeout(timer)
     if (externalSignal) externalSignal.removeEventListener('abort', onExternalAbort)
   }
