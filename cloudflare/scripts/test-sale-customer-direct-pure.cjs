@@ -10,6 +10,7 @@ const recordContract = JSON.parse(fs.readFileSync(path.join(root, '..', 'outputs
 let user = { id: 1, name: 'Admin', username: 'admin', role_code: 'admin', permissions: { all: true } }
 const cache = new Map()
 const actual = new Set([
+  'saleCustomerAssignmentGuard',
   'actorSnapshot', 'movementBranchName', 'db', 'permissions', 'saleBulkStatus', 'saleBulkUpdate',
   'saleRecordEvents', 'saleTransitions', 'sqlBinding', 'productBatches', 'batchCode', 'salesStatus',
   'undoAppliers', 'branchWrites', 'conflictControl', 'searchMatch', 'paymentMethodRegistry', 'contactOptions', 'anonymousCustomer',
@@ -164,6 +165,26 @@ async function run() {
   assert.deepEqual(missingChanges.find((change) => change.field === 'membership').before, { state: 'unknown' })
   assert.deepEqual(missingChanges.find((change) => change.field === 'membership').after, { state: 'known_none' })
   console.log('PASS missing historical source membership stays unknown without current-profile fabrication')
+  const guardDb = { prepare: sql => ({
+    get: async params => f.sql.prepare(sql).get(params || {}),
+    all: async params => f.sql.prepare(sql).all(params || {}),
+  }) }
+  await assert.rejects(() => load('lib/saleCustomerAssignmentGuard.ts').prepareCustomerAssignments(guardDb, [{ id: 3, sourceId: 3, targetId: 99 }]), error => error.statusCode === 409,
+    'the replay guard must never restore a deleted destination')
+  for (const [label, setup] of [
+    ['usd', 'UPDATE sales SET total_usd=50 WHERE id=3'],
+    ['khr', 'UPDATE sales SET total_khr=205000 WHERE id=3'],
+    ['redemption', 'UPDATE sales SET membership_points_redeemed=100 WHERE id=3'],
+    ['refund', "INSERT INTO returns(id,return_number,sale_id,customer_id,total_refund_usd) VALUES(9,'ORPHAN-REFUND',3,99,50)"],
+    ['other-return-account', "INSERT INTO returns(id,return_number,sale_id,customer_id,total_refund_usd) VALUES(9,'OTHER-ACCOUNT',3,1,0)"],
+  ]) {
+    f=fixture();f.sql.exec(setup)
+    const before=JSON.stringify(['sales','returns','sale_record_events','sale_write_revisions'].map(table=>f.sql.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()))
+    const result=await f.call(3,request({client_request_id:'orphan-'+label,expected_updated_at:'sale-3-v1',customerId:3}))
+    assert.equal(result.status,409,JSON.stringify(result))
+    assert.equal(JSON.stringify(['sales','returns','sale_record_events','sale_write_revisions'].map(table=>f.sql.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all())),before)
+  }
+  console.log('PASS orphan repair is zero-value/source-only; earned, redeemed, refund and mismatched-return cases stay unchanged; deleted replay target rejected')
 
   f = fixture()
   f.sql.prepare('UPDATE customers SET is_anonymous=1 WHERE id=1').run()
