@@ -868,7 +868,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
                     {fmtMoney(Number(fee.amount_usd) || 0, Number(fee.amount_khr) || 0)}
                   </span>
                 </div>
-                <div data-expense-line="secondary" className="mt-1 flex min-w-0 items-center gap-1.5 text-sm font-normal text-slate-500 dark:text-slate-400">
+                <div data-expense-line="secondary" className="mt-1 flex min-w-0 items-center gap-1.5 text-sm font-normal text-slate-700 dark:text-slate-200">
                   {fee.created_by_name ? <span className="min-w-0 truncate" aria-label={`${tr('cashier', 'Cashier')}: ${fee.created_by_name}`}>{fee.created_by_name}</span> : null}
                   {fee.created_by_name && fee.branch_name ? <span aria-hidden="true" className="shrink-0">·</span> : null}
                   {fee.branch_name ? <span className="min-w-0 truncate" aria-label={`${tr('branch', 'Branch')}: ${fee.branch_name}`}>{fee.branch_name}</span> : null}
@@ -931,8 +931,8 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
               <dt className="text-slate-500 dark:text-slate-400">{tr('receipt', 'Receipt')}</dt>
               <dd className="min-w-0 break-all font-mono text-slate-800 dark:text-slate-100">
                 {selected.sale_receipt_number
-                  ? `${selected.sale_receipt_number}${selected.sale_id ? ` · Sale ID #${selected.sale_id}` : ''}`
-                  : selected.sale_id ? `Sale ID #${selected.sale_id}` : '—'}
+                  ? `${selected.sale_receipt_number}${selected.sale_id ? ` · ${tr('sale', 'Sale')} #${selected.sale_id}` : ''}`
+                  : selected.sale_id ? `${tr('sale', 'Sale')} #${selected.sale_id}` : '—'}
               </dd>
               <dt className="text-slate-500 dark:text-slate-400">{tr('delivery', 'Delivery')}</dt>
               <dd className="min-w-0 break-words text-slate-800 dark:text-slate-100">{selected.delivery_contact_name || '—'}</dd>
