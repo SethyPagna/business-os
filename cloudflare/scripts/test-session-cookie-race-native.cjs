@@ -94,6 +94,16 @@ async function main() {
       if (mode !== 'changed') assert.equal((await call('/protected',{headers:{cookie:'bos_session=old-a'}})).status,401)
     }
     console.log('PASS native atomic renewal rejects revoked, expired and concurrently changed expiry rows')
+    // Isolate the database-clock guard from CAS: the observed expiry is NOT
+    // changed, it simply elapses while the background UPDATE is held.
+    const deadline = new Date(Date.now() + 1500).toISOString()
+    await db.prepare('UPDATE user_sessions SET revoked_at=NULL,created_at=?,expires_at=? WHERE token_hash=?').bind(new Date(Date.now()-10000).toISOString(),deadline,hash('old-a')).run()
+    held = await beginHeld()
+    await new Promise(resolve => setTimeout(resolve, Math.max(0, Date.parse(deadline)-Date.now()+150)))
+    await call('/release', { method: 'POST' }); await held.request
+    assert.equal((await db.prepare('SELECT expires_at FROM user_sessions WHERE token_hash=?').bind(hash('old-a')).first()).expires_at, deadline)
+    assert.equal((await call('/protected',{headers:{cookie:'bos_session=old-a'}})).status,401)
+    console.log('PASS native elapsed deadline cannot be resurrected even when observed-expiry CAS still matches')
     const tokenB = browserCookie.slice(browserCookie.indexOf('=')+1)
     await db.prepare('UPDATE user_sessions SET expires_at=? WHERE token_hash=?').bind(new Date(Date.now()-1000).toISOString(),hash(tokenB)).run()
     assert.equal((await call('/protected',{headers:{cookie:browserCookie}})).status,401,'retained browser token never authenticates after D1 expiry')
