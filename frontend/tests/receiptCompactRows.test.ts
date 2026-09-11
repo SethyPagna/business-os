@@ -151,6 +151,31 @@ function occurrences(haystack: string, needle: string): number {
   return haystack.split(needle).length - 1
 }
 
+await runTest('structured receipt values stay intact while free text remains wrappable', () => {
+  const html = renderReceipt(
+    { receipt_language: 'both', show_total_khr: true },
+    {},
+    {
+      receipt_number: '20260911-182059',
+      created_at: '2026-09-11T11:20:00Z',
+      customer_phone: '098 388 811',
+      customer_address: 'a long delivery address remains ordinary wrapping text',
+      customer_membership_number: 'LC-05008',
+      total_usd: 35,
+      exchange_rate: 4065,
+    },
+  )
+  const dateRow = html.split('data-receipt-line="true"').find((row) => row.includes('11/09/2026 18:20')) || ''
+  const phoneRow = html.split('data-receipt-line="true"').find((row) => row.includes('098 388 811')) || ''
+  const addressRow = html.split('data-receipt-line="true"').find((row) => row.includes('long delivery address')) || ''
+  const totalRow = html.split('data-receipt-line="true"').find((row) => row.includes('$35.00') && row.includes('៛')) || ''
+  assert.match(dateRow, /whitespace-nowrap/, 'date and time remain one structured value')
+  assert.match(phoneRow, /whitespace-nowrap/, 'phone digits remain one structured value')
+  assert.doesNotMatch(addressRow, /whitespace-nowrap/, 'free-form address may wrap and grow its row')
+  assert.match(totalRow, /whitespace-nowrap/, 'USD/KHR figures never separate their symbol onto another line')
+  assert.ok(html.includes('20260911-182059'), 'the complete receipt identifier survives rendering')
+})
+
 // --- 1. the exchange rate rides the cashier row, unlabelled -----------------
 
 await runTest('the rate prints as a bare value on the cashier row, in every language', () => {

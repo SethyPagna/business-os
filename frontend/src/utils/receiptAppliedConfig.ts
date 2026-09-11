@@ -164,10 +164,13 @@ export function normalizeReceiptPrintSettings(value: unknown): ReceiptPrintSetti
     highContrastBold: storedHighContrast === undefined
       ? DEFAULT_RECEIPT_PRINT_SETTINGS.highContrastBold
       : storedHighContrast === true || storedHighContrast === 1 || String(storedHighContrast).toLowerCase() === 'true',
-    marginTop: String(parsed.marginTop || DEFAULT_RECEIPT_PRINT_SETTINGS.marginTop),
-    marginRight: String(parsed.marginRight || DEFAULT_RECEIPT_PRINT_SETTINGS.marginRight),
-    marginBottom: String(parsed.marginBottom || DEFAULT_RECEIPT_PRINT_SETTINGS.marginBottom),
-    marginLeft: String(parsed.marginLeft || DEFAULT_RECEIPT_PRINT_SETTINGS.marginLeft),
+    // Zero is a valid physical margin. Settings UI writes strings, but API,
+    // import and older clients may send numeric 0; `||` silently changed
+    // that to the 4mm default on the next normalize/save cycle.
+    marginTop: String(parsed.marginTop ?? DEFAULT_RECEIPT_PRINT_SETTINGS.marginTop),
+    marginRight: String(parsed.marginRight ?? DEFAULT_RECEIPT_PRINT_SETTINGS.marginRight),
+    marginBottom: String(parsed.marginBottom ?? DEFAULT_RECEIPT_PRINT_SETTINGS.marginBottom),
+    marginLeft: String(parsed.marginLeft ?? DEFAULT_RECEIPT_PRINT_SETTINGS.marginLeft),
     scale: String(parsed.scale || DEFAULT_RECEIPT_PRINT_SETTINGS.scale),
     customWidth: String(parsed.customWidth || DEFAULT_RECEIPT_PRINT_SETTINGS.customWidth),
     customHeight: String(parsed.customHeight || DEFAULT_RECEIPT_PRINT_SETTINGS.customHeight),

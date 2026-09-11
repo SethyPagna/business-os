@@ -3699,6 +3699,8 @@
   "print_dark_bold_enabled": "Dark print enabled",
   "print_dark_bold_title": "Receipt Text Darkness",
   "print_auto_save_note": "🖨️ Settings saved automatically and applied every time you print from POS or Sales.",
+  "print_driver_size_note": "For physical printing, select the same paper size in Chrome and the printer driver, use 100% / Actual size, browser margins None, and disable headers and footers.",
+  "print_effective_dimensions": "Paper {paper}mm · content {content}mm",
   "print_bottom": "Bottom",
   "print_height_mm": "Height (mm)",
   "print_left": "Left",

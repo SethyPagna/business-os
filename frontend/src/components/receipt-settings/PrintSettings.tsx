@@ -6,8 +6,9 @@ import Printer from 'lucide-react/dist/esm/icons/printer.js'
 import Ruler from 'lucide-react/dist/esm/icons/ruler.js'
 import Scaling from 'lucide-react/dist/esm/icons/scaling.js'
 import TestTube2 from 'lucide-react/dist/esm/icons/test-tube-2.js'
-import { downloadReceiptPdf, getPrintSettings, openReceiptPdf, savePrintSettings, PRINT_DEFAULTS } from '../../utils/printReceipt'
+import { downloadReceiptPdf, getPaperWidthMm, getPrintSettings, openReceiptPdf, savePrintSettings, PRINT_DEFAULTS } from '../../utils/printReceipt'
 import { normalizeReceiptTemplate } from '../../utils/receiptAppliedConfig'
+import { RECEIPT_SHELL_HORIZONTAL_PADDING_PX } from '../../utils/receiptItemColumns.ts'
 import type { ReceiptPrintSettings } from '../../types/receiptContracts'
 
 type Translate = (key: string, fallback?: string) => string | undefined
@@ -166,6 +167,19 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null, setti
     ['marginBottom', T('print_bottom', 'Bottom')],
     ['marginLeft', T('print_left', 'Left')],
   ]
+  const paperWidthMm = getPaperWidthMm(ps)
+  const marginNumber = (value: unknown): number => {
+    const parsed = Number.parseFloat(String(value ?? ''))
+    return Number.isFinite(parsed) ? Math.max(0, parsed) : 0
+  }
+  // The fixed 80x50 card overrides normal margins to zero when it exports,
+  // but its shell still owns the same 16px design padding on each side. Show
+  // that real content width instead of incorrectly promising all 80mm.
+  const fixedCardPaddingMm = RECEIPT_SHELL_HORIZONTAL_PADDING_PX * 25.4 / 96
+  const effectiveLeftMm = ps.paperSize === '80x50mm' ? fixedCardPaddingMm / 2 : marginNumber(ps.marginLeft)
+  const effectiveRightMm = ps.paperSize === '80x50mm' ? fixedCardPaddingMm / 2 : marginNumber(ps.marginRight)
+  const contentWidthMm = Math.max(0, paperWidthMm - effectiveLeftMm - effectiveRightMm)
+  const mm = (value: number): string => Number.isInteger(value) ? String(value) : value.toFixed(1)
 
   // Only the fallback synthetic HTML (buildFallbackPreviewHtml) reads this --
   // the real preview DOM branch already carries its own contrast attribute.
@@ -215,6 +229,16 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null, setti
             </div>
           </div>
         ) : null}
+        <div className="mt-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs leading-relaxed text-blue-800 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-200">
+          <div className="font-semibold">
+            {T('print_effective_dimensions', 'Paper {paper}mm · content {content}mm')
+              .replace('{paper}', mm(paperWidthMm))
+              .replace('{content}', mm(contentWidthMm))}
+          </div>
+          <div className="mt-1">
+            {T('print_driver_size_note', 'For physical printing, select the same paper size in Chrome and the printer driver, use 100% / Actual size, browser margins None, and disable headers and footers.')}
+          </div>
+        </div>
       </Section>
 
       <Section icon={Printer} title={T('print_dark_bold_title', 'Receipt Text Darkness')}>

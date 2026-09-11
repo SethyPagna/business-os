@@ -17,7 +17,9 @@ async function runTest(name: string, fn: TestCallback): Promise<void> {
 }
 
 // N9(b) + N4 (owner, Sep 6 2026): "receipt action row order mirrored (Back on
-// the left, Print/Image on the right; drop Open PDF)". Receipt.tsx owns the ONE
+// the left, Print/Image on the right; drop the redundant Open PDF action)".
+// Download PDF is a distinct deterministic file export: unlike the HTML print
+// popup, its physical MediaBox cannot be reflowed by Chrome.
 // action row every receipt render site shows -- POS after-sale, the Sales sale
 // detail, and reprint from the Sales list all mount this component.
 const receiptSource = fs.readFileSync(new URL('../src/components/receipt/Receipt.tsx', import.meta.url), 'utf8')
@@ -40,8 +42,10 @@ await runTest('no receipt action row still renders Open PDF', () => {
   assert.doesNotMatch(receiptSource, /openReceiptPdf/, 'the Open PDF action must be gone, not just its label')
   assert.doesNotMatch(receiptSource, /exportReceiptPdf\('open'/)
   assert.doesNotMatch(receiptSource, /exportBothSeparately\('open'\)/)
-  assert.match(receiptSource, /type ReceiptExportMode = 'print' \| 'image'/,
-    "the 'open' export mode must be retired, not left as an unreachable branch")
+  assert.match(receiptSource, /type ReceiptExportMode = 'print' \| 'pdf' \| 'image'/,
+    "the retired 'open' mode must not be confused with the deterministic PDF download")
+  assert.match(receiptSource, /printTools\.downloadReceiptPdf/)
+  assert.match(receiptSource, /exportReceiptPdf\('pdf'/)
 })
 
 await runTest('the retired open_pdf key is gone from BOTH language packs', () => {
@@ -52,15 +56,18 @@ await runTest('the retired open_pdf key is gone from BOTH language packs', () =>
   assert.ok(kmPack.open_test_pdf)
 })
 
-await runTest('the action row is mirrored: Back on the left, Print and Image on the right', () => {
+await runTest('the action row is mirrored: Back on the left, Print, PDF and Image on the right', () => {
   const backIdx = receiptSource.indexOf('onClick={onClose}')
   const printIdx = receiptSource.indexOf('<Printer className="h-4 w-4 shrink-0" />')
+  const pdfIdx = receiptSource.indexOf('<FileText className="h-4 w-4 shrink-0" />')
   const imageIdx = receiptSource.indexOf('<ImageDown className="h-4 w-4 shrink-0" />')
   assert.ok(backIdx > 0, 'the Back button must exist')
   assert.ok(printIdx > 0, 'the Print action must exist')
+  assert.ok(pdfIdx > 0, 'the deterministic PDF action must exist')
   assert.ok(imageIdx > 0, 'the Image action must exist')
   assert.ok(backIdx < printIdx, 'Back must precede Print in the toolbar')
-  assert.ok(printIdx < imageIdx, 'Print must precede Image on the right side')
+  assert.ok(printIdx < pdfIdx, 'Print must precede PDF on the right side')
+  assert.ok(pdfIdx < imageIdx, 'PDF must precede Image on the right side')
   assert.match(receiptSource, /className="ml-auto flex min-w-0 items-center justify-end gap-1\.5 sm:gap-2"/,
     'the export actions must be pushed to the right edge of the row')
 })
@@ -73,7 +80,7 @@ await runTest('the row cannot overflow on small screens', () => {
   // Every action label collapses below sm; the icon and the 40px-class
   // btn-primary/btn-secondary hit target stay.
   const labels = toolbar.match(/<span className="[^"]*truncate[^"]*">/g) || []
-  assert.ok(labels.length >= 3, `expected the Print/Image/Back labels, found ${labels.length}`)
+  assert.ok(labels.length >= 4, `expected the Print/PDF/Image/Back labels, found ${labels.length}`)
   labels.forEach((label) => {
     assert.match(label, /hidden [^"]*sm:inline/, `a toolbar label stays visible below sm: ${label}`)
   })

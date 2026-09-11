@@ -122,6 +122,8 @@ await runTest('thermal print keeps configured margins inside paper and uses one 
     'continuous receipt margins should replace the screen-shell padding')
   assert.match(source, /descendant\.style\.height = 'auto'/,
     'wrapped receipt rows must be allowed to grow in the printable clone')
+  assert.match(source, /line\.style\.gridTemplateRows = 'none'/,
+    'computed pixel grid tracks must not freeze a wrapped print row at one line')
 })
 
 await runTest('fixed 80x50 PDF layout keeps exact dimensions and fits tall content proportionally', () => {

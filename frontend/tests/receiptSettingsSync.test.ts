@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import { normalizeReceiptPrintSettings } from '../src/utils/receiptAppliedConfig.ts'
 
 const appContextSource = fs.readFileSync(new URL('../src/AppContext.tsx', import.meta.url), 'utf8')
 const receiptSettingsSource = fs.readFileSync(new URL('../src/components/receipt-settings/ReceiptSettings.tsx', import.meta.url), 'utf8')
@@ -60,6 +61,17 @@ assert.match(printUtilSource, /sourceSettings && typeof sourceSettings === 'obje
 assert.match(receiptConfigSource, /export const DEFAULT_RECEIPT_TEMPLATE/)
 assert.match(receiptConfigSource, /export const DEFAULT_RECEIPT_PRINT_SETTINGS/)
 assert.match(receiptConfigSource, /export function buildAppliedReceiptConfig/)
+assert.match(receiptConfigSource, /parsed\.marginTop \?\? DEFAULT_RECEIPT_PRINT_SETTINGS\.marginTop/)
+assert.match(receiptConfigSource, /parsed\.marginLeft \?\? DEFAULT_RECEIPT_PRINT_SETTINGS\.marginLeft/)
+assert.doesNotMatch(receiptConfigSource, /parsed\.margin(?:Top|Right|Bottom|Left) \|\|/,
+  'numeric zero margins must survive normalization')
+assert.deepEqual(
+  normalizeReceiptPrintSettings({ marginTop: 0, marginRight: 0, marginBottom: 0, marginLeft: 0 }),
+  { ...normalizeReceiptPrintSettings({}), marginTop: '0', marginRight: '0', marginBottom: '0', marginLeft: '0' },
+  'API/import numeric zero margins remain deliberate zero margins',
+)
+assert.match(printSettingsSource, /print_effective_dimensions/)
+assert.match(printSettingsSource, /print_driver_size_note/)
 assert.match(settingsWriteOptionsSource, /export function normalizeSettingsWriteOptions/)
 
 console.log('PASS receipt settings sync contract')

@@ -221,6 +221,15 @@ export function normalizeReceiptContentWidth<T>(root: T): T {
       line.style.height = 'auto'
       line.style.minHeight = '0'
       line.style.maxHeight = 'none'
+      // getComputedStyle() resolves an implicit grid row to a concrete pixel
+      // track (for example `16.5px`). cloneElementWithInlineStyles carries
+      // that value into the printable clone. If a different paper/driver
+      // width then wraps the value, clearing height alone is not enough: the
+      // explicit grid track stays one line tall and the extra lines paint
+      // through the following receipt rows. Restore implicit auto sizing so
+      // identifiers, dates, phone numbers and Khmer money can make the row
+      // grow without overlap.
+      line.style.gridTemplateRows = 'none'
       line.style.overflow = 'visible'
       const hasQty = Boolean(line.querySelector('[data-receipt-cell="qty"]'))
       const hasPrice = Boolean(line.querySelector('[data-receipt-cell="price"]'))

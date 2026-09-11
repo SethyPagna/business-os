@@ -25,9 +25,11 @@ import {
 import { customerDisplayName as displayCustomerName, isAnonymousCustomerIdentity } from '../../utils/customerIdentity.ts'
 
 type LanguageMode = 'en' | 'km' | 'both'
-// N4 (owner, Sep 6 2026): "Open PDF" is removed -- it opened the same document
-// Print already produces -- so the receipt exports in exactly two modes.
-type ReceiptExportMode = 'print' | 'image'
+// PDF is a deterministic physical-size artifact. Unlike the HTML Print
+// preview, its MediaBox cannot be re-laid out by Chrome when the selected
+// printer advertises a different paper size (the driver may still scale it
+// unless the operator selects Actual size).
+type ReceiptExportMode = 'print' | 'pdf' | 'image'
 type ReceiptLabelKey = keyof typeof LABELS.en
 type ReceiptPrintModule = typeof import('../../utils/printReceipt')
 type TranslateFn = (key: string) => string | undefined
@@ -146,6 +148,7 @@ interface RowProps {
   bold?: boolean
   tone?: string
   breakAll?: boolean
+  nowrap?: boolean
 }
 
 const useApp = useAppHook as () => {
@@ -307,7 +310,7 @@ function labelFor(mode: LanguageMode, key: ReceiptLabelKey): string {
   return `${stripTrailingColon(kmLabel)} / ${stripTrailingColon(enLabel)}${endsWithColon ? ':' : ''}`
 }
 
-function Row({ label, value, subValue, bold = false, tone = '', breakAll = false }: RowProps) {
+function Row({ label, value, subValue, bold = false, tone = '', breakAll = false, nowrap = false }: RowProps) {
   return (
     // The value track comes from utils/receiptItemColumns, the ONE place that
     // owns the receipt's grid geometry, so printReceipt.ts's paper re-layout
@@ -320,9 +323,9 @@ function Row({ label, value, subValue, bold = false, tone = '', breakAll = false
           wrap at, so on a narrow paper width (or a phone) `break-words`
           alone can leave it overflowing the column. It must wrap onto a
           second line -- never clip, never scroll. */}
-      <div className={`min-w-0 whitespace-normal text-right leading-snug ${breakAll ? 'break-all' : 'break-words'}`}>
+      <div className={`min-w-0 text-right leading-snug ${nowrap ? 'whitespace-nowrap' : `whitespace-normal ${breakAll ? 'break-all' : 'break-words'}`}`}>
         <div className={`${bold ? 'font-semibold' : ''}`}>{value}</div>
-        {subValue ? <div className="text-[10px] text-gray-500">{subValue}</div> : null}
+        {subValue ? <div className="whitespace-nowrap text-[10px] text-gray-500">{subValue}</div> : null}
       </div>
     </div>
   )
@@ -541,7 +544,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
     order_info: (
       <div key="order_info">
         {tpl.show_receipt_number ? <Row label={labelFor(lang, 'receiptNum')} value={rNum} bold breakAll /> : null}
-        {tpl.show_date ? <Row label={labelFor(lang, 'date')} value={dateStr} /> : null}
+        {tpl.show_date ? <Row label={labelFor(lang, 'date')} value={dateStr} nowrap /> : null}
         {/* N33 (owner, Sep 6 2026, reading a printed 80mm receipt): "the
             exchange rate just show the rate, no need 'Exchange Rate: n' just
             'n' ... and merge into same row as cashier." So the rate is no
@@ -572,9 +575,9 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
     customer: hasCustomer ? (
       <div key="customer" className="mt-2 border-t border-dashed border-gray-300 pt-2">
         {tpl.show_customer_name && customerDisplayName ? <Row label={labelFor(lang, 'customer')} value={customerDisplayName} /> : null}
-        {tpl.show_customer_phone && sale.customer_phone ? <Row label={labelFor(lang, 'phone')} value={sale.customer_phone} /> : null}
+        {tpl.show_customer_phone && sale.customer_phone ? <Row label={labelFor(lang, 'phone')} value={sale.customer_phone} nowrap /> : null}
         {tpl.show_customer_address && customerAddress ? <Row label={labelFor(lang, 'address')} value={customerAddress} /> : null}
-        {!customerIsAnonymous && showMembershipId && sale.customer_membership_number ? <Row label={labelFor(lang, 'membership')} value={sale.customer_membership_number} /> : null}
+        {!customerIsAnonymous && showMembershipId && sale.customer_membership_number ? <Row label={labelFor(lang, 'membership')} value={sale.customer_membership_number} nowrap /> : null}
       </div>
     ) : null,
     // N33 (owner, Sep 6 2026): "the delivery fee is shown twice in a row, by
@@ -692,18 +695,18 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
     // The per-line cut, by name. Hidden when there is none, so an
     // undiscounted sale does not print a row of zeroes.
     item_discount: showItemDiscount && lineSavingsUsd > 0 ? (
-      <Row key="item_discount" label={labelFor(lang, 'itemDiscount')} value={`-${fmtUSD(lineSavingsUsd)}`} tone="text-red-600" />
+      <Row key="item_discount" label={labelFor(lang, 'itemDiscount')} value={`-${fmtUSD(lineSavingsUsd)}`} tone="text-red-600" nowrap />
     ) : null,
-    subtotal: tpl.show_subtotal ? <Row key="subtotal" label={labelFor(lang, 'subtotal')} value={fmtUSD(displayedSubtotalUsd)} /> : null,
+    subtotal: tpl.show_subtotal ? <Row key="subtotal" label={labelFor(lang, 'subtotal')} value={fmtUSD(displayedSubtotalUsd)} nowrap /> : null,
     // Every cut on the sale in one figure. Only printed when it says
     // something the rows above did not already say on their own -- i.e.
     // when more than one kind of discount is present.
     total_discount: tpl.show_discount !== false && totalDiscountUsd > 0
       && [lineSavingsUsd, displayedDiscountUsd, membershipDiscountUsd].filter((v) => v > 0).length > 1 ? (
-      <Row key="total_discount" label={labelFor(lang, 'totalDiscount')} value={`-${fmtUSD(totalDiscountUsd)}`} tone="text-red-600" bold />
+      <Row key="total_discount" label={labelFor(lang, 'totalDiscount')} value={`-${fmtUSD(totalDiscountUsd)}`} tone="text-red-600" bold nowrap />
     ) : null,
     discount: tpl.show_discount && displayedDiscountUsd > 0 ? (
-      <Row key="discount" label={labelFor(lang, 'discount')} value={`-${fmtUSD(displayedDiscountUsd)}`} subValue={tpl.show_discount_khr !== false && displayedDiscountKhr > 0 ? `-${fmtKHR(displayedDiscountKhr)}` : ''} tone="text-red-600" />
+      <Row key="discount" label={labelFor(lang, 'discount')} value={`-${fmtUSD(displayedDiscountUsd)}`} subValue={tpl.show_discount_khr !== false && displayedDiscountKhr > 0 ? `-${fmtKHR(displayedDiscountKhr)}` : ''} tone="text-red-600" nowrap />
     ) : null,
     membership_discount: tpl.show_membership_discount !== false && membershipDiscountUsd > 0 ? (
       <Row
@@ -712,13 +715,14 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
         value={`-${fmtUSD(membershipDiscountUsd)}`}
         subValue={tpl.show_membership_discount_khr !== false && membershipDiscountKhr > 0 ? `-${fmtKHR(membershipDiscountKhr)}` : ''}
         tone="text-emerald-600"
+        nowrap
       />
     ) : null,
     membership_points: tpl.show_membership_points !== false && membershipPointsRedeemed > 0 ? (
       <Row key="membership_points" label={labelFor(lang, 'pointsRedeemed')} value={membershipPointsRedeemed.toLocaleString()} />
     ) : null,
     tax: tpl.show_tax && taxUsd > 0 ? (
-      <Row key="tax" label={labelFor(lang, 'tax')} value={fmtUSD(taxUsd)} subValue={taxKhr > 0 ? fmtKHR(taxKhr) : ''} />
+      <Row key="tax" label={labelFor(lang, 'tax')} value={fmtUSD(taxUsd)} subValue={taxKhr > 0 ? fmtKHR(taxKhr) : ''} nowrap />
     ) : null,
     delivery_fee: tpl.show_delivery !== false && tpl.delivery_show_fee !== false && deliveryFeeUsd > 0 ? (
       <Row
@@ -732,11 +736,12 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
         subValue={tpl.show_delivery_khr !== false && deliveryFeeKhr > 0 ? (
           deliveryPaidByStore ? <span className="line-through">{fmtKHR(deliveryFeeKhr)}</span> : fmtKHR(deliveryFeeKhr)
         ) : ''}
+        nowrap
       />
     ) : null,
     total: (
       <div key="total" className="my-2 border-y-2 border-black py-2">
-        <Row label={labelFor(lang, 'total')} value={fmtUSD(totalUsd)} subValue={tpl.show_total_khr ? fmtKHR(totalKhr) : ''} bold />
+        <Row label={labelFor(lang, 'total')} value={fmtUSD(totalUsd)} subValue={tpl.show_total_khr ? fmtKHR(totalKhr) : ''} bold nowrap />
       </div>
     ),
     // Returns booked against this sale, then what the customer is left with.
@@ -746,8 +751,8 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
     // Net total states the result so both halves foot.
     refund: refundUsd > 0 ? (
       <div key="refund">
-        <Row label={labelFor(lang, 'refunded')} value={`-${fmtUSD(refundUsd)}`} subValue={refundKhr > 0 ? `-${fmtKHR(refundKhr)}` : ''} tone="text-orange-600" />
-        <Row label={labelFor(lang, 'netTotal')} value={fmtUSD(netTotalUsd)} subValue={tpl.show_total_khr && netTotalKhr > 0 ? fmtKHR(netTotalKhr) : ''} bold />
+        <Row label={labelFor(lang, 'refunded')} value={`-${fmtUSD(refundUsd)}`} subValue={refundKhr > 0 ? `-${fmtKHR(refundKhr)}` : ''} tone="text-orange-600" nowrap />
+        <Row label={labelFor(lang, 'netTotal')} value={fmtUSD(netTotalUsd)} subValue={tpl.show_total_khr && netTotalKhr > 0 ? fmtKHR(netTotalKhr) : ''} bold nowrap />
       </div>
     ) : null,
     payment: tpl.show_amount_paid ? (
@@ -757,6 +762,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
             label={`${labelFor(lang, 'paid')}${tpl.show_payment_method ? ` ${paymentMethodText}` : ''}`}
             value={paidUsd > 0 ? fmtUSD(paidUsd) : fmtKHR(paidKhr)}
             subValue={paidUsd > 0 && paidKhr > 0 ? fmtKHR(paidKhr) : ''}
+            nowrap
           />
         ) : null}
         {/* What is still owed. A credit / awaiting-payment sale printed a
@@ -770,12 +776,13 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
             subValue={tpl.show_total_khr && outstandingKhr > 0 ? fmtKHR(outstandingKhr) : ''}
             bold
             tone="text-red-600"
+            nowrap
           />
         ) : null}
       </div>
     ) : null,
     change: tpl.show_change && (changeUsd > 0 || changeKhr > 0) ? (
-      <Row key="change" label={labelFor(lang, 'change')} value={changeUsd > 0 ? fmtUSD(changeUsd) : fmtKHR(changeKhr)} subValue={changeUsd > 0 && changeKhr > 0 ? fmtKHR(changeKhr) : ''} bold />
+      <Row key="change" label={labelFor(lang, 'change')} value={changeUsd > 0 ? fmtUSD(changeUsd) : fmtKHR(changeKhr)} subValue={changeUsd > 0 && changeKhr > 0 ? fmtKHR(changeKhr) : ''} bold nowrap />
     ) : null,
     footer: (
       <div key="footer" className="mt-2">
@@ -855,12 +862,12 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
       {settings.business_name ? <div className="text-center text-sm font-bold">{settings.business_name}</div> : null}
       {settings.business_phone ? <div className="text-center">{settings.business_phone}</div> : null}
       <div className="border-t border-gray-300 pt-1">
-        <Row label={labelFor(lang, 'date')} value={dateStr} />
-        {sale.customer_phone ? <Row label={labelFor(lang, 'phone')} value={sale.customer_phone} /> : null}
+        <Row label={labelFor(lang, 'date')} value={dateStr} nowrap />
+        {sale.customer_phone ? <Row label={labelFor(lang, 'phone')} value={sale.customer_phone} nowrap /> : null}
         {customerAddress ? <Row label={labelFor(lang, 'address')} value={customerAddress} /> : null}
       </div>
       <div className="border-y border-gray-900 py-1">
-        <Row label={labelFor(lang, 'total')} value={fmtUSD(totalUsd)} subValue={fmtKHR(totalKhr)} bold />
+        <Row label={labelFor(lang, 'total')} value={fmtUSD(totalUsd)} subValue={fmtKHR(totalKhr)} bold nowrap />
       </div>
       {tpl.sales_receipt_aba_account_name || tpl.sales_receipt_aba_account_number ? (
         <div className="text-center">
@@ -898,6 +905,12 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
         // computed styles); keeps that fallback pure black too when Maximum
         // is set.
         textColor: contrastTextColor,
+      })
+    } else if (mode === 'pdf') {
+      await printTools.downloadReceiptPdf(target, {
+        title,
+        fileName: title,
+        printSettings: variantSettings,
       })
     } else {
       await printTools.printReceipt(target, {
@@ -984,8 +997,9 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
       {/* ONE compact toolbar row (user, Aug 30: the buttons stacked into
           multiple rows here, "not compact one row"). N9(b) + N4 (owner, Sep 6
           2026) MIRRORED it -- Back on the LEFT, Print and Image on the RIGHT --
-          and dropped "Open PDF": it opened the very document Print already
-          produces, so it was a second name for one action. Below sm every
+          and dropped "Open PDF": the replacement here is Download PDF, a
+          deterministic exact-size file rather than another print-preview
+          alias. Below sm every
           label collapses to its icon so the row stays a single line on a
           320px phone; btn-primary/btn-secondary keep the 40px hit target. */}
       <div className="flex flex-shrink-0 items-center gap-1.5 overflow-x-auto border-b border-gray-200 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-800 sm:gap-2 sm:py-3">
@@ -1088,6 +1102,35 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
             <span className="hidden truncate sm:inline">{pdfBusy === 'print' ? (t?.('preparing_pdf') || 'Preparing PDF...') : (t?.('print') || 'Print')}</span>
           </span>
         </button>
+        )}
+        {compactSalesReceipt ? (
+          <LazyPortalMenu
+            align="auto"
+            compact
+            triggerWrapperClassName="min-w-0"
+            menuClassName="min-w-[11rem]"
+            trigger={(
+              <button type="button" className="btn-secondary min-w-0 justify-center px-2.5 py-2 text-sm sm:px-3" disabled={pdfBusy !== ''} aria-haspopup="true" aria-label={t?.('download_pdf') || 'Download PDF'} title={t?.('download_pdf') || 'Download PDF'}>
+                <span className="inline-flex min-w-0 items-center justify-center gap-1.5"><FileText className="h-4 w-4 shrink-0" /><span className="hidden truncate sm:inline">{pdfBusy === 'pdf' ? (t?.('preparing_pdf') || 'Preparing PDF...') : (t?.('download_pdf') || 'Download PDF')}</span><ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-80" /></span>
+              </button>
+            )}
+            items={[
+              { label: `${fullReceiptWidthMm} mm`, disabled: pdfBusy !== '', onClick: () => { void exportReceiptPdf('pdf', 'full') } },
+              { label: '80 × 50 mm', disabled: pdfBusy !== '', onClick: () => { void exportReceiptPdf('pdf', 'compact') } },
+              { label: t?.('all') || 'All', disabled: pdfBusy !== '', onClick: () => { void exportBothSeparately('pdf') } },
+            ]}
+          />
+        ) : (
+          <button
+            type="button"
+            className="btn-secondary min-w-0 justify-center px-2.5 py-2 text-sm sm:px-3"
+            onClick={() => exportReceiptPdf('pdf')}
+            disabled={pdfBusy !== ''}
+            title={t?.('download_pdf') || 'Download PDF'}
+            aria-label={t?.('download_pdf') || 'Download PDF'}
+          >
+            <span className="inline-flex min-w-0 items-center justify-center gap-1.5"><FileText className="h-4 w-4 shrink-0" /><span className="hidden truncate sm:inline">{pdfBusy === 'pdf' ? (t?.('preparing_pdf') || 'Preparing PDF...') : (t?.('download_pdf') || 'Download PDF')}</span></span>
+          </button>
         )}
         {compactSalesReceipt ? (
           <LazyPortalMenu
