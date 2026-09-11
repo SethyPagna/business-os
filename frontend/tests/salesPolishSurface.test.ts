@@ -32,9 +32,10 @@ assert.match(detail, /modal-viewport-safe[\s\S]*modal-panel-safe/, 'sale detail 
 // and the phone fork silently dropped the Qty and Unit price columns (and the
 // unit KHR) that the desktop table showed. The invariant that mattered --
 // "the phone must not be handed a wide desktop table that scrolls the page"
-// -- is now met by the table wrapping its own scroll container and dropping
-// the width floor, so it fits 375 with no scroll at all.
-assert.match(detail, /<div className="overflow-x-auto">\s*<table className="w-full text-sm">/, 'sale detail items must be a table inside its own horizontal-scroll container')
+// -- is now met by the table wrapping its own scroll container. Read-only
+// rows use the available width; an open compact editor may widen the table,
+// but the overflow remains local instead of widening the page.
+assert.match(detail, /<div className="overflow-x-auto">\s*<table className="w-full text-\[11px\]">/, 'sale detail items must be a compact table inside its own horizontal-scroll container')
 assert.doesNotMatch(detail, /min-w-\[34rem\]/, 'the items table must not carry a width floor that starves the product column')
 assert.doesNotMatch(detail, /data-sale-detail-mobile-items|space-y-2 sm:hidden/, 'the sale detail must not fork a phone-only item list that drops columns')
 assert.match(detail, /data-sale-detail-mobile-contact=""[\s\S]*?sm:hidden/, 'the approved compact phone row is metadata, separate from the one shared items table')
@@ -110,6 +111,11 @@ assert.match(detail, /data-sale-detail-secondary-meta=""[^\n]*overflow-x-auto wh
 assert.match(detail, /data-sale-line-qty=""/)
 assert.match(detail, /data-sale-line-price=""/)
 assert.match(detail, /data-sale-line-total=""/)
+assert.match(detail, /data-sale-line-edit=""/)
+assert.match(detail, /t\('qty_short'\)[\s\S]*t\('price'\)[\s\S]*t\('total'\)[\s\S]*t\('edit'\)/, 'Edit must be the final visible item-table column')
+assert.match(detail, /data-sale-line-editor=""[^\n]*inline-flex[^\n]*flex-nowrap/, 'quantity, price and discount editing stays on one compact table row')
+assert.match(detail, /balancedSaleItemNameLines\(productName\)/)
+assert.doesNotMatch(detail, /data-sale-line-name=""[\s\S]{0,500}line-clamp-2/)
 assert.match(detail, /batchDisplayLabel\([^\n]+, ''\)\.trim\(\)/, 'the compact supplier/date row omits the Received date label')
 assert.match(detail, /id=\{`amend-qty-\$\{lineId\}`\}[^\n]*type="number"/)
 assert.match(detail, /id=\{`amend-price-\$\{lineId\}`\}[^\n]*type="number"/)
