@@ -53,6 +53,12 @@ browser.navigator = {}
 await assert.rejects(a.beginActorCookieMutation(), (e: any) => e.code === 'auth_lock_unavailable' && e.outcome === 'not_dispatched')
 assert.equal(a.isActorCookieMutationPending(), false)
 browser.navigator = { locks }
+browser.localStorage = { getItem: () => { throw new Error('Storage blocked') } }
+assert.equal(a.isActorCookieMutationPending(), true, 'unreadable storage cannot prove the absence of another auth owner')
+assert.equal(a.completeActorSessionReconciliation(a.actorSessionReconciliationMarker()), false)
+await assert.rejects(a.beginActorCookieMutation(), (e: any) => e.outcome === 'not_dispatched')
+browser.localStorage = store
+a.completeActorSessionReconciliation(a.actorSessionReconciliationMarker())
 
 // Execute actual runtime reset with only its DB import replaced by controlled
 // deferred I/O. Coordination keys remain live, not stale-restored snapshots.

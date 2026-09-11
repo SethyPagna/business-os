@@ -25,10 +25,15 @@ export function isActorCookieMutationPending(): boolean {
 }
 
 function pendingCookieOwner(): string | null {
+  if (typeof window === 'undefined') return null
   try {
     return window.localStorage.getItem(AUTH_PENDING_OWNER)
       || (String(sessionMarker() || '').startsWith(AUTH_PENDING_PREFIX) ? sessionMarker() : null)
-  } catch { return null }
+  } catch {
+    // Unreadable coordination storage is not proof that no other tab owns
+    // the cookie phase. Keep dispatch/recovery closed until it is readable.
+    return AUTH_PENDING_PREFIX + 'storage-unavailable'
+  }
 }
 
 /** Call immediately before the browser request that can change the shared
