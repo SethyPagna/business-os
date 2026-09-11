@@ -2,6 +2,8 @@ import { apiFetch, isInvalidSessionError } from './http.ts'
 import type { QueryParams } from './query.ts'
 import { filterSelectableCustomerRows } from '../utils/customerIdentity.ts'
 import { salesCustomerPickerFallbackMatches } from './customerPickerMatch.ts'
+import { assertActorReadScope, captureActorReadScope, invalidateActorReadChannel, isActorReadScopeCurrent, type ActorReadScope } from './actorReadScope.ts'
+import { getSyncServerUrl } from './httpState.ts'
 
 type ContactTableName = 'customers' | 'suppliers' | 'delivery_contacts'
 
@@ -14,6 +16,7 @@ type ContactReadConfig = {
 type CacheEntry = {
   data: unknown
   ts: number
+  scope: ActorReadScope
 }
 
 type IdleCallback = (deadline?: unknown) => void
@@ -40,7 +43,22 @@ const SUPPLIER_READ = {
 } satisfies ContactReadConfig
 
 const readCache = new Map<string, CacheEntry>()
-const inflightReads = new Map<string, Promise<unknown>>()
+const inflightReads = new Map<string, { promise: Promise<unknown>; scope: ActorReadScope }>()
+// Legacy table rows have no actor provenance. Only a completed mirror owned
+// by this still-current session can authorize their offline fallback.
+const localMirrorScopes = new Map<ContactTableName, ActorReadScope>()
+
+function canUseLocalContactMirror(): boolean {
+  if (getSyncServerUrl()) return false
+  try {
+    if (typeof window !== 'undefined' && (
+      /^https?:/.test(window.location?.origin || '')
+      || window.sessionStorage?.getItem('businessos_user')
+      || window.localStorage?.getItem('businessos_user')
+    )) return false
+  } catch { return false }
+  return true
+}
 // One AbortController per contact table (customers/suppliers/delivery
 // contacts), separate from the per-query `cacheKey` above -- that key is
 // unique per query string on purpose (so distinct searches don't collide),
@@ -94,70 +112,83 @@ function appendQuery(path: string, query: string): string {
 
 function getCachedRead(cacheKey: string): unknown | null {
   const record = readCache.get(cacheKey)
-  if (!record || Date.now() - record.ts > CONTACT_READ_CACHE_MS) return null
+  if (!record || !isActorReadScopeCurrent(record.scope) || Date.now() - record.ts > CONTACT_READ_CACHE_MS) return null
   return record.data
 }
 
-function setCachedRead(cacheKey: string, data: unknown): unknown {
-  readCache.set(cacheKey, { data, ts: Date.now() })
+function setCachedRead(cacheKey: string, data: unknown, scope: ActorReadScope): unknown {
+  assertActorReadScope(scope)
+  readCache.set(cacheKey, { data, ts: Date.now(), scope })
   return data
 }
 
-function scheduleLateMirror(config: ContactReadConfig, data: unknown): void {
-  if (typeof window === 'undefined') return
+function scheduleLateMirror(config: ContactReadConfig, data: unknown, scope: ActorReadScope): void {
+  if (typeof window === 'undefined' || !canUseLocalContactMirror()) return
   window.setTimeout(() => {
     const run = async () => {
-      const { mirrorTable } = await import('./localMirrors.ts')
-      mirrorTable(config.tableName)(data).catch(() => {})
+      if (!isActorReadScopeCurrent(scope)) return
+      const { mirrorTable, shouldPersistLocalMirror } = await import('./localMirrors.ts')
+      if (!isActorReadScopeCurrent(scope) || !canUseLocalContactMirror() || !shouldPersistLocalMirror(config.tableName)) return
+      await mirrorTable(config.tableName, scope)(data)
+      if (isActorReadScopeCurrent(scope) && canUseLocalContactMirror() && shouldPersistLocalMirror(config.tableName)) localMirrorScopes.set(config.tableName, scope)
     }
     const idle = (window as unknown as { requestIdleCallback?: (callback: IdleCallback, options?: { timeout?: number }) => number }).requestIdleCallback
     if (typeof idle === 'function') {
-      idle(run, { timeout: CONTACT_MIRROR_DELAY_MS })
+      idle(() => { void run().catch(() => {}) }, { timeout: CONTACT_MIRROR_DELAY_MS })
       return
     }
-    run()
+    void run().catch(() => {})
   }, CONTACT_MIRROR_DELAY_MS)
 }
 
 function readContacts(config: ContactReadConfig, params: QueryParams = {}): Promise<unknown> {
+  const scope = captureActorReadScope(config.routeKey)
   const query = buildQueryString(params)
   const cacheKey = `${config.routeKey}:${query}`
   const cached = getCachedRead(cacheKey)
-  if (cached !== null) return Promise.resolve(cached)
+  if (cached !== null) return Promise.resolve().then(() => { assertActorReadScope(scope); return cached })
 
   const existing = inflightReads.get(cacheKey)
-  if (existing) return existing
+  if (existing && isActorReadScopeCurrent(existing.scope)) return existing.promise.then((data) => { assertActorReadScope(scope); return data })
 
   const groupCtrl = beginContactSearchGroup(config.tableName)
   const promise = apiFetch('GET', appendQuery(config.endpoint, query), undefined, undefined, { signal: groupCtrl.signal })
     .then((data) => {
-      setCachedRead(cacheKey, data)
-      if (!query) scheduleLateMirror(config, data)
+      assertActorReadScope(scope)
+      setCachedRead(cacheKey, data, scope)
+      if (!query) scheduleLateMirror(config, data, scope)
       return data
     })
     .catch(async (error) => {
-      if (isInvalidSessionError(error)) throw error
+      assertActorReadScope(scope)
+      const status = Number((error as { status?: unknown } | null)?.status)
+      if (status === 401 || status === 403 || isInvalidSessionError(error)) throw error
       if (isAbortError(error)) {
         // Superseded by a newer search in this same tab -- not a real
         // failure, and reading local data for a query the user has
         // already moved on from would be pure waste, so just propagate.
         throw error
       }
+      const provenance = localMirrorScopes.get(config.tableName)
+      if (!canUseLocalContactMirror() || !provenance || !isActorReadScopeCurrent(provenance)) throw error
       const localRows = await readLocalContacts(config.tableName)
-      setCachedRead(cacheKey, localRows)
+      assertActorReadScope(scope)
+      setCachedRead(cacheKey, localRows, scope)
       return localRows
     })
     .finally(() => {
-      inflightReads.delete(cacheKey)
+      if (inflightReads.get(cacheKey)?.promise === promise) inflightReads.delete(cacheKey)
       endContactSearchGroup(config.tableName, groupCtrl)
     })
 
-  inflightReads.set(cacheKey, promise)
+  inflightReads.set(cacheKey, { promise, scope })
   return promise
 }
 
 export function getCustomers(params: QueryParams = {}): Promise<unknown> {
+  const scope = captureActorReadScope(CUSTOMER_READ.routeKey)
   return readContacts(CUSTOMER_READ, params).then((data) => {
+    assertActorReadScope(scope)
     if (Array.isArray(data)) return filterSelectableCustomerRows(data)
     if (!data || typeof data !== 'object') return data
     const payload = data as Record<string, unknown>
@@ -175,6 +206,7 @@ export function getCustomerIdentityById(id: number | string): Promise<unknown> {
 }
 
 export function invalidateCustomerReadCache(): void {
+  invalidateActorReadChannel(CUSTOMER_READ.routeKey)
   for (const key of readCache.keys()) {
     if (key === CUSTOMER_READ.routeKey || key.startsWith(`${CUSTOMER_READ.routeKey}:`)) readCache.delete(key)
   }
@@ -186,12 +218,18 @@ export function invalidateCustomerReadCache(): void {
 // and directory-only fields; an offline fallback is projected to the same
 // allowlist so a cached directory row cannot widen the picker response.
 export async function getSalesCustomerPicker(params: QueryParams = {}, options: { requireFresh?: boolean; signal?: AbortSignal } = {}): Promise<unknown> {
+  const scope = captureActorReadScope(CUSTOMER_READ.routeKey)
   const query = buildQueryString({ ...params, fields: 'sales_picker' })
   try {
-    return await apiFetch('GET', appendQuery(CUSTOMER_READ.endpoint, query), undefined, undefined, { signal: options.signal })
+    const result = await apiFetch('GET', appendQuery(CUSTOMER_READ.endpoint, query), undefined, undefined, { signal: options.signal })
+    assertActorReadScope(scope)
+    return result
   } catch (error) {
+    assertActorReadScope(scope)
     const status = Number((error as { status?: unknown } | null)?.status)
     if (options.requireFresh || status === 401 || status === 403 || isInvalidSessionError(error) || isAbortError(error)) throw error
+    const provenance = localMirrorScopes.get('customers')
+    if (!canUseLocalContactMirror() || !provenance || !isActorReadScopeCurrent(provenance)) throw error
     const search = String(params.search || params.q || '').trim()
     const ids = new Set(String(params.ids || '').split(',').map((value) => value.trim()).filter(Boolean))
     const rows = (await readLocalContacts('customers'))
@@ -207,6 +245,7 @@ export async function getSalesCustomerPicker(params: QueryParams = {}, options: 
         const value = row as Record<string, unknown>
         return Object.fromEntries(['id', 'name', 'phone', 'email', 'address', 'membership_number', 'updated_at', 'is_anonymous'].map((key) => [key, value[key]]))
       })
+    assertActorReadScope(scope)
     return { items: rows, limit: rows.length }
   }
 }
