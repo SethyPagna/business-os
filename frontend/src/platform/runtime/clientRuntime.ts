@@ -268,6 +268,7 @@ export async function resetClientRuntimeState(options: RuntimeResetOptions = {})
   // Nonsecret shared-cookie session fence: another tab must still observe the
   // logout/login boundary after this storage reset finishes.
   localPreserveKeys.add('businessos_read_session')
+  localPreserveKeys.add('businessos_auth_cookie_pending')
   if (preserveAuth) {
     localPreserveKeys.add(STORAGE_KEYS.USER)
     localPreserveKeys.add(STORAGE_KEYS.USER_EXPIRY)
@@ -276,7 +277,9 @@ export async function resetClientRuntimeState(options: RuntimeResetOptions = {})
   }
 
   const keptLocal = canUseBrowserStorage() ? [
-    ...snapshotStorage(window.localStorage, localPreserveKeys),
+    // Live coordination keys are never removed, and must never be restored
+    // from a snapshot after asynchronous cleanup: their owner may have changed.
+    ...snapshotStorage(window.localStorage, localPreserveKeys).filter(([key]) => key !== 'businessos_read_session' && key !== 'businessos_auth_cookie_pending'),
     ...(options.preserveUiDrafts === true ? snapshotStoragePrefixes(window.localStorage, ['businessos_draft_']) : []),
   ] : []
   const keptSession = canUseBrowserStorage() ? snapshotStorage(window.sessionStorage, sessionPreserveKeys) : []
