@@ -38,7 +38,7 @@ async function apply(app, review, digest, actor = user) {
   })
 }
 
-async function prepareThreeMemberReview() {
+async function prepareThreeMemberReview(parentChain = false) {
   const { d1, groups } = seed(1)
   d1.db.prepare(`INSERT INTO products
     (id,name,name_key,barcode,category,brand,unit,is_active,is_group,stock_quantity,cost_price_usd,cost_price_khr,
@@ -51,6 +51,23 @@ async function prepareThreeMemberReview() {
     VALUES(99003,10002,'receipt-b','LOT-C','2027-03-01','2026-09-03',1,'third receipt',1,43,'Supplier C',8,'paid',NULL,4,1,32)`).run()
   d1.db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(99003,1,4)').run()
   groups[0].member_ids = [10000, 10001, 10002]
+  if(parentChain) {
+    d1.db.exec(`INSERT INTO products(id,name,name_key,barcode,category,brand,unit,is_active,is_group,stock_quantity,cost_price_usd,
+      selling_price_usd,wholesale_price_usd,updated_at,parent_id)
+      VALUES(10003,'Fourth','fourth','000700000','D','Four','pack',1,0,1,8,10,9,'2026-09-08 01:00:00',10002);
+      UPDATE products SET parent_id=10001 WHERE id=10002;
+      UPDATE products SET parent_id=10000 WHERE id=10001;
+      INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(10003,1,1);
+      INSERT INTO product_batches(id,variant_product_id,batch_key,received_at,is_active,unit_cost_usd,received_quantity,received_cost_usd)
+      VALUES(99004,10003,'fourth-lot','2026-09-04',1,8,1,8);
+      INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(99004,1,1);`)
+    if(parentChain==='shared') d1.db.exec('UPDATE products SET parent_id=10001 WHERE id=10003')
+    d1.db.exec(`INSERT INTO sales(id,branch_id) VALUES(17000,1);
+      INSERT INTO sale_items(id,sale_id,product_id,quantity,branch_id) VALUES(17001,17000,10002,1,1);
+      INSERT INTO sale_item_batch_allocations(id,sale_item_id,batch_id,branch_id,quantity,lot_code,expiry_date)
+      VALUES(17002,17001,99003,1,1,'LOT-C','2027-03-01');`)
+    groups[0].member_ids.push(10003)
+  }
   const loaded = loadRoute(d1, true)
   const review = await post(loaded.app, {
     manifest_version: 1, resolution_version: 2, client_request_id: 'apply_three_member_001', merge_groups: groups, remove_rows: [],
@@ -62,7 +79,7 @@ async function prepareThreeMemberReview() {
   })
   assert.equal(finalized.status, 200)
   const storedPlan = JSON.parse(d1.db.prepare('SELECT final_plan_json FROM product_conflict_action_groups WHERE review_id=?').get(review.body.review_id).final_plan_json)
-  assert.deepEqual(storedPlan.projected_result.lot_dispositions.map((row) => ({ source: row.source_batch_id,
+  assert.deepEqual(storedPlan.projected_result.lot_dispositions.slice(0,2).map((row) => ({ source: row.source_batch_id,
     target: row.target_batch_id, collision: row.collision, supplier: row.supplier_name, received: row.received_at })), [
     { source: 99002, target: 99002, collision: 'reparent', supplier: 'Supplier B', received: '2026-09-02' },
     { source: 99003, target: 99002, collision: 'fold', supplier: 'Supplier C', received: '2026-09-03' },
@@ -83,6 +100,96 @@ function catalogState(d1) {
 }
 
 async function main() {
+  const chainState = (d1) => ({
+    products:d1.db.prepare('SELECT id,name,barcode,parent_id,is_active,stock_quantity,cost_price_usd FROM products WHERE id BETWEEN 10000 AND 10003 ORDER BY id').all(),
+    lots:d1.db.prepare('SELECT id,variant_product_id,is_active,received_at,unit_cost_usd,received_quantity,received_cost_usd FROM product_batches WHERE id BETWEEN 99001 AND 99004 ORDER BY id').all(),
+    stock:d1.db.prepare('SELECT product_id,branch_id,quantity FROM branch_stock WHERE product_id BETWEEN 10000 AND 10003 ORDER BY product_id,branch_id').all(),
+    lotStock:d1.db.prepare('SELECT batch_id,branch_id,quantity FROM branch_batch_stock WHERE batch_id BETWEEN 99001 AND 99004 ORDER BY batch_id,branch_id').all(),
+    allocations:d1.db.prepare('SELECT * FROM sale_item_batch_allocations ORDER BY id').all(),
+  })
+  const interruptChain = async (fixture) => {
+    const realNow=Date.now,baseNow=realNow();let wrote=false
+    fixture.controls.beforeNextWriteBatch=()=>{wrote=true}
+    Date.now=()=>baseNow+(wrote?19000:0)
+    let result
+    try { result=await apply(fixture.app,fixture.review,fixture.finalized.manifest_digest) } finally {Date.now=realNow}
+    assert.equal(result.body.counts.committed_folds,1,JSON.stringify(result.body))
+    assert.equal(result.body.interruption_code,'merge_budget_reached')
+  }
+  {
+    const fixture=await prepareThreeMemberReview(true),before=chainState(fixture.d1)
+    await interruptChain(fixture)
+    assert.equal(fixture.d1.db.prepare('SELECT parent_id FROM products WHERE id=10002').get().parent_id,10000)
+    const completed=await apply(fixture.app,fixture.review,fixture.finalized.manifest_digest)
+    assert.equal(completed.body.status,'completed',JSON.stringify(completed.body))
+    assert.equal(completed.body.counts.committed_folds,3)
+    const merged=chainState(fixture.d1)
+    const history=fixture.d1.db.prepare("SELECT id,undo_payload FROM action_history WHERE json_extract(undo_payload,'$.applier')='product.merge.group'").get()
+    const undoPayload=JSON.parse(history.undo_payload),applier=fixture.undo.resolveUndoApplier(undoPayload)
+    for(let child=0;child<3;child++) {
+      const undo=await applier.run(undoPayload,{env:{},user,direction:'undo',historyId:history.id,generation:0})
+      assert.equal(undo.complete,child===2)
+    }
+    assert.deepEqual(chainState(fixture.d1),before,'all four member parents, stock, receipt dates/costs/allocations restore')
+    const redoPayload=JSON.parse(fixture.d1.db.prepare('SELECT redo_payload FROM action_history WHERE id=?').get(history.id).redo_payload)
+    for(let child=0;child<3;child++) {
+      const redo=await applier.run(redoPayload,{env:{},user,direction:'redo',historyId:history.id,generation:1})
+      assert.equal(redo.complete,child===2)
+    }
+    assert.deepEqual(chainState(fixture.d1),merged,'redo retains exact merge result')
+  }
+  for(const [label,mutation] of [
+    ['parent',"UPDATE products SET parent_id=99999 WHERE id=10002"],
+    ['name',"UPDATE products SET name='Outside edit' WHERE id=10002"],
+    ['barcode',"UPDATE products SET barcode='outside' WHERE id=10002"],
+    ['stock',"UPDATE branch_stock SET quantity=99 WHERE product_id=10002"],
+    ['received date',"UPDATE product_batches SET received_at='2026-09-10' WHERE id=99003"],
+    ['foreign operation certificate',"UPDATE undo_snapshots SET payload_json=json_set(payload_json,'$.operationId','foreign-operation') WHERE kind='product.merge.group.child'"],
+  ]) {
+    const fixture=await prepareThreeMemberReview(true);await interruptChain(fixture)
+    fixture.d1.db.exec(mutation)
+    const before=chainState(fixture.d1)
+    const result=await apply(fixture.app,fixture.review,fixture.finalized.manifest_digest)
+    assert.equal(result.status,409,label+JSON.stringify(result.body))
+    assert.deepEqual(chainState(fixture.d1),before,label+' external edit is not certified as our prior effect')
+  }
+  {
+    const fixture=await prepareThreeMemberReview('shared')
+    const completed=await apply(fixture.app,fixture.review,fixture.finalized.manifest_digest)
+    assert.equal(completed.body.status,'completed',JSON.stringify(completed.body))
+    assert.equal(completed.body.counts.committed_folds,3,'third fold accepts a certified effect from the first, not just the immediately previous member')
+  }
+  {
+    const fixture=await prepareThreeMemberReview(true);await interruptChain(fixture)
+    const history=fixture.d1.db.prepare("SELECT id,undo_payload FROM action_history WHERE json_extract(undo_payload,'$.applier')='product.merge.group'").get()
+    const payload=JSON.parse(history.undo_payload),applier=fixture.undo.resolveUndoApplier(payload)
+    assert.equal((await applier.run(payload,{env:{},user,direction:'undo',historyId:history.id,generation:0})).complete,true)
+    const redoPayload=JSON.parse(fixture.d1.db.prepare('SELECT redo_payload FROM action_history WHERE id=?').get(history.id).redo_payload)
+    assert.equal((await applier.run(redoPayload,{env:{},user,direction:'redo',historyId:history.id,generation:1})).complete,true)
+    const resumed=await apply(fixture.app,fixture.review,fixture.finalized.manifest_digest)
+    assert.equal(resumed.body.status,'completed',JSON.stringify(resumed.body))
+    assert.equal(resumed.body.counts.committed_folds,3,'parent effect certificate is refreshed in the current generation after prefix redo')
+  }
+  {
+    const fixture=await prepareThreeMemberReview(true);await interruptChain(fixture)
+    const before=chainState(fixture.d1)
+    fixture.controls.beforeNextWriteBatch=()=>fixture.d1.db.exec("UPDATE products SET parent_id=99999 WHERE id=10002")
+    const race=await apply(fixture.app,fixture.review,fixture.finalized.manifest_digest)
+    assert.equal(race.status,409,JSON.stringify(race.body))
+    const after=chainState(fixture.d1);after.products.find(row=>row.id===10002).parent_id=before.products.find(row=>row.id===10002).parent_id
+    assert.deepEqual(after,before,'external parent race after read cannot slip through CAS')
+  }
+  {
+    const fixture=await prepareThreeMemberReview(true);await interruptChain(fixture)
+    const before=chainState(fixture.d1)
+    fixture.d1.db.exec(`CREATE TRIGGER reject_chain_fold BEFORE INSERT ON audit_logs WHEN NEW.action='merge_duplicate' AND NEW.entity_id='10002'
+      BEGIN SELECT RAISE(ABORT,'D1 DB is overloaded: injected chain fold'); END;`)
+    const failed=await apply(fixture.app,fixture.review,fixture.finalized.manifest_digest)
+    assert.equal(failed.status,500,JSON.stringify(failed.body));assert.deepEqual(chainState(fixture.d1),before)
+    fixture.d1.db.exec('DROP TRIGGER reject_chain_fold')
+    const retried=await apply(fixture.app,fixture.review,fixture.finalized.manifest_digest)
+    assert.equal(retried.body.status,'completed',JSON.stringify(retried.body))
+  }
   {
     const fixture = await prepareThreeMemberReview()
     const applied = await apply(fixture.app, fixture.review, fixture.finalized.manifest_digest)
