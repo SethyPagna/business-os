@@ -3,7 +3,8 @@ import { useState, useEffect, useCallback, useRef, useMemo, startTransition } fr
 import type { ReactNode } from 'react'
 import { BUSINESS_TIME_ZONE, STORAGE_KEYS, SYNC } from './constants'
 import { cacheClearAll, ensureSyncUpdateCacheListener, FRONTEND_BUILD_INFO, isTransientGatewayError, pingServerHealth, primeServerHealthFromRuntime, startHealthCheck } from './api/http.ts'
-import { resetActorReadSession } from './api/actorReadScope.ts'
+import { ACTOR_SESSION_RETRY_EVENT, actorSessionReconciliationMarker, completeActorSessionReconciliation, isActorSessionQuarantined, resetActorReadSession, setActorSessionQuarantineStatus, subscribeActorSessionQuarantine } from './api/actorReadScope.ts'
+import { readActorSessionRecoveryBootstrap } from './api/http.ts'
 import {
   normalizeRuntimeDescriptor,
   readStoredRuntimeDescriptor,
@@ -799,6 +800,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     preserveOfflineWork?: boolean
     preserveUiDrafts?: boolean
   } = {}) => {
+    if (isActorSessionQuarantined()) return
     resetActorReadSession()
     await resetClientRuntimeState({
   // Authentication helpers.
@@ -816,6 +818,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   }, [])
 
   const handleUnauthorizedSession = useCallback(async (message = 'Please sign in again to continue.'): Promise<void> => {
+    if (isActorSessionQuarantined()) return
     disconnectWS()
     await clearLocalBusinessState({
       clearAuth: true,
@@ -825,6 +828,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       preserveOfflineWork: true,
       preserveUiDrafts: true,
     })
+    if (isActorSessionQuarantined()) return
     setUser(null)
     setPage('dashboard')
     setAuthReady(true)
@@ -836,7 +840,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
 
   const applyBootstrapPayload = useCallback(async (
     payload: BootstrapPayload | null,
-    options: { fallbackUser?: AppUser | null } = {},
+    options: { fallbackUser?: AppUser | null; actorReconciliation?: boolean } = {},
   ): Promise<{
     group: OrganizationPayload | null
     organization: OrganizationPayload | null
@@ -844,6 +848,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     system: BootstrapSystemPayload | null
     user: AppUser | null
   }> => {
+    if (isActorSessionQuarantined() && !options.actorReconciliation) throw new Error('Session reconciliation is required.')
     const safePayload = payload || {}
     const fallbackUser = options.fallbackUser || null
     const nextUser = safePayload?.user || fallbackUser || null
@@ -855,6 +860,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
         preserveSyncServer: true,
         preserveSessionDuration: true,
       })
+      if (isActorSessionQuarantined()) throw new Error('Session reconciliation is required.')
     }
     writeStoredRuntimeDescriptor(runtimeDescriptor)
 
@@ -898,8 +904,10 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       persistAuthState({ user: nextUser, expiryTime, sessionDuration })
       setUser(nextUser)
       getAppApi().ensureSessionRecoveryListeners?.()
-      resumeWS()
-      startHealthCheck()
+      if (!options?.actorReconciliation) {
+        resumeWS()
+        startHealthCheck()
+      }
     }
 
     const organization = safePayload?.organization
@@ -933,6 +941,64 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       group: group || null,
     }
   }, [clearLocalBusinessState])
+
+  const reconciledActorRef = useRef<{ marker: string | null; user: AppUser } | null>(null)
+  useEffect(() => {
+    const reconciled = reconciledActorRef.current
+    if (!reconciled || reconciled.user !== user) return
+    reconciledActorRef.current = null
+    if (completeActorSessionReconciliation(reconciled.marker)) {
+      setAuthReady(true)
+      resumeWS()
+      startHealthCheck()
+    }
+  }, [user])
+
+  useEffect(() => {
+    if (publicMode) return
+    let disposed = false
+    let running = 0
+    let requestedMarker: string | null | undefined
+    const reconcile = async (force = false) => {
+      if (!isActorSessionQuarantined()) return
+      const marker = actorSessionReconciliationMarker()
+      if (!force && requestedMarker === marker) return
+      requestedMarker = marker
+      const request = ++running
+      // Save registered work locally, never submit/replay it. Old components
+      // remain mounted and hidden by App's independent quarantine surface.
+      flushPendingWorkDrafts()
+      if (marker !== actorSessionReconciliationMarker()) return
+      disconnectWS()
+      setAuthReady(false)
+      setActorSessionQuarantineStatus('checking')
+      try {
+        const payload = await readActorSessionRecoveryBootstrap() as BootstrapPayload
+        if (disposed || request !== running || marker !== actorSessionReconciliationMarker()) return
+        const nextUser = payload?.user
+        const sameActor = !!user?.id && String(nextUser?.id) === String(user.id)
+          && String(nextUser?.organization_id || nextUser?.organization_slug || '') === String(user.organization_id || user.organization_slug || '')
+        if (!sameActor) { setActorSessionQuarantineStatus('different-account'); return }
+        if (shouldResetForRuntimeChange(readStoredRuntimeDescriptor(), buildRuntimeDescriptorFromBootstrap(payload))) {
+          setActorSessionQuarantineStatus('reload-required'); return
+        }
+        // Same actor only. React must commit the refreshed permission snapshot
+        // before the effect above removes the overlay or re-enables dispatch.
+        reconciledActorRef.current = { marker, user: nextUser! }
+        await applyBootstrapPayload(payload, { actorReconciliation: true })
+        if (marker !== actorSessionReconciliationMarker()) reconciledActorRef.current = null
+      } catch {
+        if (!disposed && request === running && marker === actorSessionReconciliationMarker()) {
+          setActorSessionQuarantineStatus('unavailable')
+        }
+      }
+    }
+    const unsubscribe = subscribeActorSessionQuarantine(() => { void reconcile() })
+    const retry = () => { void reconcile(true) }
+    window.addEventListener(ACTOR_SESSION_RETRY_EVENT, retry)
+    void reconcile()
+    return () => { disposed = true; running++; unsubscribe(); window.removeEventListener(ACTOR_SESSION_RETRY_EVENT, retry) }
+  }, [applyBootstrapPayload, publicMode, user])
 
   // Sync event listeners (loadSettings is defined above).
   const debounceRef = useRef<Record<string, number>>({})
@@ -1270,6 +1336,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   // OTP login event listener.
   useEffect(() => {
     const handleOtpLogin = async (e: Event) => {
+      if (isActorSessionQuarantined()) return
       const otpUser = eventDetail<AppUser & { sessionDuration?: string; sessionExpiresAt?: string; password?: unknown; otp_secret?: unknown }>(e)
       if (!otpUser) return
       const retiredTokenKey = `auth${'Token'}`
@@ -1316,6 +1383,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
 
   useEffect(() => {
     const handleUserUpdated = (e: Event) => {
+      if (isActorSessionQuarantined()) return
       const nextUser = eventDetail<AppUser>(e)
       if (!nextUser) return
       setUser((prev: AppUser | null) => {
@@ -1647,6 +1715,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
 
   // Authentication helpers.
   const persistAuthenticatedUser = useCallback(async (nextUser: AppUser, sessionDuration = 'session', sessionExpiresAt = ''): Promise<void> => {
+    if (isActorSessionQuarantined()) throw new Error('Resolve the changed session before signing in here.')
     resetActorReadSession()
     const expiryTime = computeSessionExpiryMs(sessionDuration, sessionExpiresAt)
 
@@ -1731,12 +1800,14 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   }, [persistAuthenticatedUser])
 
   const logout = useCallback(async () => {
+    if (isActorSessionQuarantined()) return
     resetActorReadSession()
     disconnectWS()
     try {
       const api = getAppApi()
       await withLoaderTimeout(() => api.logout?.(), 'Logout', APP_LOGOUT_TIMEOUT_MS)
     } catch (_) {}
+    if (isActorSessionQuarantined()) return
     await clearLocalBusinessState({
       clearAuth: true,
       preserveSyncServer: true,
@@ -1744,6 +1815,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       preserveRuntimeMeta: true,
       preserveOfflineWork: true,
     })
+    if (isActorSessionQuarantined()) return
     setUser(null)
     setAuthReady(true)
     setPage('dashboard')
@@ -2372,7 +2444,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     return fmtDayFirst(date, resolved)
   }, [displayTimezone])
 
-  const canWriteToServer = !!syncUrl && !syncServerUnreachable
+  const canWriteToServer = !!syncUrl && !syncServerUnreachable && !isActorSessionQuarantined()
 
   const appValue: AppContextValue = {
     user, login, logout, persistAuthenticatedUser,
