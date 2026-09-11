@@ -9,6 +9,7 @@ import {
   buildAllocationStatements,
   buildOperationAllocationStatements,
   planSaleLineAddition,
+  planUnlottedSaleLineGuards,
   planSaleLineRemoval,
   plannedLineFromRecord,
   saleLineKhrSnapshotStatement,
@@ -716,6 +717,7 @@ async function replayAtomicSaleAddItems(
   const stamp = new Date().toISOString()
   const statements: ReplayStatement[] = [
     { sql: 'DELETE FROM sale_mutation_guards', params: {} },
+    { sql: 'DELETE FROM sale_bulk_guards', params: {} },
     guard,
   ]
 
@@ -753,6 +755,7 @@ async function replayAtomicSaleAddItems(
       userName: actorSnapshot(ctx.user),
     })
     const redoGroupId = crypto.randomUUID()
+    statements.push(...planUnlottedSaleLineGuards(plan.lines))
     const ordinalByStatement = new Map(plan.saleItemStatementIndexByLine.map((statementIndex, ordinal) => [statementIndex, ordinal]))
     for (const [statementIndex, statement] of plan.statements.entries()) {
       statements.push(statement)
@@ -807,6 +810,7 @@ async function replayAtomicSaleAddItems(
     },
     saleAddItemsAuditStatement(ctx.user, saleId, ctx.direction, operationId, lines.length),
     { sql: 'DELETE FROM sale_mutation_guards', params: {} },
+    { sql: 'DELETE FROM sale_bulk_guards', params: {} },
   )
   try {
     await db.batch(statements)
@@ -2152,7 +2156,10 @@ const APPLIERS: Record<string, UndoApplierDef> = {
         // removed, added back" rather than quietly returning to a state it
         // never explains.
         const redoGroupId = crypto.randomUUID()
+        const residualGuards = planUnlottedSaleLineGuards(plan.lines)
         const results = await db.batch([
+          { sql: 'DELETE FROM sale_bulk_guards', params: {} },
+          ...residualGuards,
           ...plan.statements,
           saleMoneyUpdateStatement(saleId, reversal.moneyAfter),
           ...(reversal.lineMoneyAfter
@@ -2174,9 +2181,10 @@ const APPLIERS: Record<string, UndoApplierDef> = {
             userId: ctx.user?.id ?? null,
             userName: actorSnapshot(ctx.user),
           })),
+          { sql: 'DELETE FROM sale_bulk_guards', params: {} },
         ]) as Array<{ meta?: { last_row_id?: number } }>
         const saleItemIdByLine = plan.lines.map((_line, lineIndex) => {
-          const statementIndex = plan.saleItemStatementIndexByLine[lineIndex]
+          const statementIndex = 1 + residualGuards.length + plan.saleItemStatementIndexByLine[lineIndex]
           return Number(results[statementIndex]?.meta?.last_row_id || 0) || null
         })
         const allocationStatements = buildAllocationStatements(plan.lines, saleItemIdByLine)
