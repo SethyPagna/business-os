@@ -2812,6 +2812,7 @@ export async function foldDuplicateProductInto(
     preparedDependentLotSnapshots?: Map<number, ProductMergeLotSnapshot>
     reviewedPlan?: ProductConflictActionFinalPlan
     reviewedRedo?: boolean
+    reviewedMemberParentEffect?: { parentId: number; updatedAt: string }
     reviewedCatalogBefore?: MergeReversal['keeperCatalogBefore']
     groupCompletionStatements?: (reversal: MergeReversal) => AtomicMergeStatement[]
   },
@@ -2865,7 +2866,7 @@ export async function foldDuplicateProductInto(
   const canonicalStockBefore = snapshot.canonicalStockBefore
   // Keeper's image_path BEFORE the fold: the fold adopts the dup's image only
   // when the keeper had none, so undo restores this captured value verbatim.
-  type MergeProductPricingRow = { id: number; name: string | null; barcode: string | null; image_path?: string | null; is_active: number; updated_at: string | null; selling_price_usd: number | null; selling_price_khr: number | null; wholesale_price_usd: number | null; wholesale_price_khr: number | null; cost_price_usd: number | null; cost_price_khr: number | null }
+  type MergeProductPricingRow = { id: number; name: string | null; barcode: string | null; parent_id?: number | null; image_path?: string | null; is_active: number; updated_at: string | null; selling_price_usd: number | null; selling_price_khr: number | null; wholesale_price_usd: number | null; wholesale_price_khr: number | null; cost_price_usd: number | null; cost_price_khr: number | null }
   const canonicalBefore = snapshot.canonicalProduct as MergeProductPricingRow | undefined
   const dupPricing = snapshot.duplicateProduct as MergeProductPricingRow | undefined
   const reviewedPlan = atomicHistory?.reviewedPlan
@@ -2887,9 +2888,15 @@ export async function foldDuplicateProductInto(
       : atomicHistory.resumedCluster
         ? productMergePlanKeeperMatches(plan, canonicalBefore)
         : productMergePlanSourceMemberMatches(plan, canonicalBefore)
+    const parentEffect = reviewedAuthorityValid ? atomicHistory.reviewedMemberParentEffect : undefined
+    // The prepared pricing projection omits parent_id. The reviewed caller
+    // validates it against the certificate and pins it in the atomic guard.
+    const sourceMember = parentEffect && dupPricing.updated_at === parentEffect.updatedAt
+      ? { ...dupPricing, updated_at: plan.members.find((member) => member.id === dup.id)?.updated_at }
+      : dupPricing
     const duplicateMatches = atomicHistory.reviewedRedo
       ? reviewedRedoSourceMatches(dupPricing)
-      : productMergePlanSourceMemberMatches(plan, dupPricing)
+      : productMergePlanSourceMemberMatches(plan, sourceMember)
     if (!keeperMatches || !duplicateMatches) {
       throw new Error('merge_cluster_plan_conflict')
     }
@@ -6091,16 +6098,71 @@ function productConflictOriginalMemberMatches(
   detail: ProductConflictActionGroupPlan,
   productId: number,
   row: Record<string, unknown> | undefined,
+  parentEffect?: { parentId: number; updatedAt: string },
 ): boolean {
   const expected = detail.members.find((candidate) => Number(candidate.id) === Number(productId))
   if (!expected || !row) return false
   const textFields = ['name', 'barcode', 'category', 'categories', 'brand', 'brands', 'brand_compact',
     'unit', 'unit_normalized', 'image_path', 'updated_at'] as const
   const moneyFields = [...MERGE_COST_FIELDS, ...MERGE_PRICE_FIELDS]
-  const textMatch = textFields.every((field) => String(row[field] ?? '') === String(expected[field] ?? ''))
+  const textMatch = textFields.every((field) => String(row[field] ?? '') === String(
+    field === 'updated_at' && parentEffect ? parentEffect.updatedAt : expected[field] ?? ''))
   const moneyMatch = moneyFields.every((field) => Number(row[field] ?? 0) === Number(expected[field] ?? 0))
   return textMatch && moneyMatch
+    && (!parentEffect || Number(row.parent_id) === parentEffect.parentId)
     && Number(row.is_active) === 1 && Number(row.is_group) === 0
+}
+
+// A preceding fold may have reparented this still-pending member. Admit only
+// the exact parent/timestamp in that fold's certified after-image, attached to
+// this action's currently applied prefix/generation. Never infer it from the
+// current product row or drop its ordinary identity and stock assertions.
+async function productConflictCommittedParentEffect(
+  db: ReturnType<typeof getDb>, reviewId: string, group: ProductConflictActionStoredGroupRow,
+  plan: ProductConflictActionFinalPlan, member: ProductConflictActionMemberReceipt,
+  members: ProductConflictActionMemberReceipt[],
+): Promise<{ parentId: number; updatedAt: string; assertion: AtomicMergeStatement } | undefined> {
+  const certificate = await db.prepare(`SELECT m.member_ordinal,m.product_id,m.operation_id,m.undo_snapshot_id,s.payload_json,
+    (SELECT payload_json FROM undo_snapshots WHERE id=(SELECT CAST(json_extract(undo_payload,'$.snapshot_id') AS INTEGER)
+      FROM action_history WHERE id=@history) AND kind=@groupKind AND status='applied') AS group_payload
+    FROM product_conflict_action_group_members m JOIN undo_snapshots s ON s.id=m.undo_snapshot_id
+    WHERE m.review_id=@review AND m.group_ordinal=@ordinal AND m.role='merged' AND m.status='undo_ready'
+      AND m.member_ordinal<@memberOrdinal AND s.kind=@childKind AND s.status='applied'
+      AND EXISTS(SELECT 1 FROM json_each(s.payload_json,'$.reparentedChildProductIds') WHERE value=@product)
+    ORDER BY m.member_ordinal DESC LIMIT 1`).get<{
+      member_ordinal: number; product_id: number; operation_id: string; undo_snapshot_id: number; payload_json: string; group_payload: string
+    }>({ review: reviewId, ordinal: group.ordinal, memberOrdinal: member.member_ordinal, product: member.product_id,
+      history: group.action_history_id, childKind: PRODUCT_MERGE_GROUP_CHILD_KIND, groupKind: PRODUCT_MERGE_GROUP_ACTION_KIND })
+  if (!certificate) return undefined
+  const fail = () => new ProductConflictActionApplyStop('merge_state_conflict', 'The prior member parent change is not certified for this merge generation.', 409)
+  try {
+    const reversal = JSON.parse(certificate.payload_json)
+    const prefix = JSON.parse(certificate.group_payload)
+    const ids = members.filter((candidate) => candidate.role==='merged' && candidate.status==='undo_ready' && candidate.undo_snapshot_id)
+      .map((candidate) => Number(candidate.undo_snapshot_id))
+    if (reversal.operationId!==certificate.operation_id || Number(reversal.dupId)!==Number(certificate.product_id)
+      || Number(reversal.keeperId)!==plan.keeper_id || reversal.fingerprintPending!==false
+      || reversal.selectedConflictContext?.review_id!==reviewId || reversal.selectedConflictContext?.group_key!==group.group_key
+      || prefix.review_id!==reviewId || prefix.group_key!==group.group_key || Number(prefix.generation)!==Number(group.reversal_generation||0)
+      || JSON.stringify(prefix.child_snapshot_ids)!==JSON.stringify(ids)
+      || prefix.prefix_fingerprint!==await productMergeGroupPrefixFingerprint(reviewId,group.group_key,ids,Number(group.reversal_generation||0))) throw fail()
+    const effect = JSON.parse(reversal.mergedStateFingerprint).childProducts?.find((row: Record<string, unknown>) => Number(row.id)===member.product_id)
+    if (!effect || Number(effect.parent_id)!==plan.keeper_id || typeof effect.updated_at!=='string') throw fail()
+    return { parentId: plan.keeper_id, updatedAt: effect.updated_at, assertion: {
+      sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM products WHERE id=@product AND parent_id=@parent AND updated_at=@stamp)
+        AND EXISTS(SELECT 1 FROM product_conflict_action_group_members m JOIN undo_snapshots s ON s.id=m.undo_snapshot_id
+          WHERE m.review_id=@review AND m.group_ordinal=@ordinal AND m.member_ordinal=@sourceOrdinal AND m.product_id=@sourceProduct
+            AND m.operation_id=@operation AND m.status='undo_ready' AND m.undo_snapshot_id=@snapshot
+            AND s.kind=@childKind AND s.status='applied' AND s.payload_json=@payload)
+        AND EXISTS(SELECT 1 FROM undo_snapshots WHERE id=(SELECT CAST(json_extract(undo_payload,'$.snapshot_id') AS INTEGER)
+          FROM action_history WHERE id=@history) AND kind=@groupKind AND status='applied' AND payload_json=@prefix)
+        THEN 1 ELSE json_extract('', '$') END AS product_conflict_certified_parent_guard`,
+      params: { product: member.product_id, parent: plan.keeper_id, stamp: effect.updated_at, review: reviewId, ordinal: group.ordinal,
+        sourceOrdinal: certificate.member_ordinal, sourceProduct: certificate.product_id, operation: certificate.operation_id,
+        snapshot: certificate.undo_snapshot_id, childKind: PRODUCT_MERGE_GROUP_CHILD_KIND, payload: certificate.payload_json,
+        history: group.action_history_id, groupKind: PRODUCT_MERGE_GROUP_ACTION_KIND, prefix: certificate.group_payload },
+    } }
+  } catch { throw fail() }
 }
 
 function productConflictKeeperPostFoldMatches(plan: ProductConflictActionFinalPlan, row: Record<string, unknown> | undefined): boolean {
@@ -6596,7 +6658,8 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
     }
   }
   const expectedKeeperStock = productConflictActionExpectedKeeperStock(detail, plan.keeper_id, members)
-  if (!productConflictOriginalMemberMatches(detail, member.product_id, duplicate)
+  const parentEffect = firstFold ? undefined : await productConflictCommittedParentEffect(db, review.id, group, plan, member, members)
+  if (!productConflictOriginalMemberMatches(detail, member.product_id, duplicate, parentEffect)
     || (firstFold
       ? !productConflictOriginalMemberMatches(detail, plan.keeper_id, keeper)
       : !productConflictKeeperPostFoldMatches(plan, keeper))
@@ -6634,12 +6697,14 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
   productConflictActionStockStateAssertion(member.product_id, preparedSnapshot.duplicateStockRows),
   productConflictActionKeeperLotStateAssertion(plan.keeper_id, preparedSnapshot)]
   if (firstFold) preStatements.push(productConflictActionSourceStateAssertion(detail, plan.keeper_id))
+  if (parentEffect) preStatements.push(parentEffect.assertion)
   let foldResult: Awaited<ReturnType<typeof foldDuplicateProductInto>>
   try {
     foldResult = await foldDuplicateProductInto(c.env, db, user, keeper, duplicate, branchNameById,
       'reviewed product conflict group', 'merge', resolveProductMergeClusterPlanEconomics(plan.cluster_plan), {
         operationId: member.operation_id, bulkClusterPlan: plan.cluster_plan, resumedCluster: !firstFold,
         reviewedPlan: plan, reviewedCatalogBefore: reviewedKeeperCatalogBefore(detail, plan, firstFold),
+        reviewedMemberParentEffect: parentEffect,
         preparedSnapshot,
         preStatements, groupCompletionStatements: productConflictActionForwardStatements({ user, review, group, plan, member, firstFold }),
         snapshotContext: { review_id: review.id, group_key: group.group_key, authority: plan.authority },
