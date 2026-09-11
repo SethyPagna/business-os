@@ -555,7 +555,7 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
             >
               <ChevronLeft className={`h-5 w-5 transition-transform ${moreOpen ? 'rotate-90' : ''}`} />
             </button>
-            <div className="bos-nav-title min-w-0 flex-1 truncate text-sm font-semibold" title={mobileTitle}>
+            <div className="bos-nav-title min-w-0 flex-1 overflow-x-auto whitespace-nowrap text-sm font-semibold [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden" title={mobileTitle} tabIndex={0}>
               {mobileTitle}
             </div>
           </div>
