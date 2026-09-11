@@ -43,7 +43,8 @@ assert.match(formSource, /filter\(\(row\) => row\.is_active !== false && branchC
 assert.match(formSource, /return \[\{ value: '', label: t\('select_branch'\) \|\| 'Select Shop' \}, \.\.\.options\]/, 'manual expenses cannot save an unassigned branch from the picker')
 assert.match(formSource, /if \(amountsInvalid \|\| dateInvalid \|\| !form\.branch_id\.trim\(\)\) return/, 'the form refuses a manual expense until its Shop is selected')
 
-assert.equal((pageSource.match(/Sale ID #\$\{fee\.sale_id\}/g) || []).length, 2, 'desktop expense details display a linked sale id in both receipt and id-only cases')
+const detailSource = pageSource.slice(pageSource.indexOf('data-expense-detail=""'), pageSource.indexOf("{modal === 'form'"))
+assert.equal((detailSource.match(/Sale ID #\$\{selected\.sale_id\}/g) || []).length, 2, 'expense detail displays a linked sale id in both receipt and id-only cases')
 assert.match(formSource, /if \(savingRef\.current\) return/, 'a synchronous ref rejects duplicate Save before another request can start')
 assert.match(formSource, /<fieldset disabled=\{interactionLocked\}/, 'busy or unresolved forms disable every editable field')
 assert.match(formSource, /pendingCreate[\s\S]*retry_original_request[\s\S]*discard_retry/, 'unknown outcome offers only exact retry or explicit discard')

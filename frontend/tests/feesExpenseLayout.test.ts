@@ -27,6 +27,20 @@ const read = (path: string) => fs.readFileSync(new URL(`../src/${path}`, import.
 const page = read('components/fees/FeesPage.tsx')
 const transport = read('api/feesTransport.ts')
 
+const deleteSource = page.slice(page.indexOf('export async function performExpenseDelete'), page.indexOf('function formatFeeDate'))
+const performExpenseDelete = new Function(`${stripTypeScriptTypes(deleteSource.replace('export ', ''))}; return performExpenseDelete`)() as (
+  operation: {
+    canDelete: () => boolean
+    confirmDelete: () => boolean
+    begin: () => boolean
+    remove: () => Promise<unknown>
+    onStart: () => void
+    onSuccess: () => Promise<void>
+    onError: (error: unknown) => void
+    onFinish: () => void
+  },
+) => Promise<boolean>
+
 const groupSource = page.slice(page.indexOf('export function groupFeesByDate'), page.indexOf('export function feeTypeToneClass'))
 const groupFeesByDate = new Function(`${stripTypeScriptTypes(groupSource.replace('export ', ''))}; return groupFeesByDate`)() as (
   rows: Array<{ fee_date: string; id: number }>,
@@ -44,18 +58,66 @@ assert.equal(fmtClock24('2026-09-10T17:00:00.000Z'), '00:00', 'row time uses the
 
 assert.doesNotMatch(page, /import StatsRangeRow/, 'Expenses does not render a second standalone date row')
 assert.match(page, /<StatsStrip[\s\S]*?range=\{stripRange\}[\s\S]*?onRangeChange=\{setStripRange\}/, 'Stats owns the shared date/actions row and preset rail')
+assert.match(page, /<StatsStrip[\s\S]*?iconOnly[\s\S]*?compactRange/, 'Stats/date controls use the compact icon treatment without squeezing range endpoints')
 assert.match(page, /toolbarIconButtonClassName/, 'Add and Export use the shared icon-only toolbar height contract')
 assert.match(page, /aria-label=\{tr\('add_fee', 'Add Expense'\)\}/)
+assert.match(page, /border-blue-600 bg-blue-600 text-white/, 'Add Expense is the solid blue plus action on the date row')
 assert.match(page, /<ExportMenu[\s\S]*?iconOnly/, 'Export is icon-only with its accessible label retained')
 assert.equal((page.match(/<PaginationControls/g) || []).length, 2, 'the same compact pager appears above and below results')
+assert.equal((page.match(/compactCentered/g) || []).length, 2, 'both top and bottom pagers use the centered compact geometry')
+const pagerRow = page.slice(page.indexOf('<PagerActionRow'), page.indexOf('</PagerActionRow>'))
+assert.match(pagerRow, /<ShiftHistoryModal[\s\S]*<History[\s\S]*sr-only[\s\S]*tr\('shift_code', 'Shift'\)/, 'Shift moves to the leading track as a compact icon with an accessible name')
+assert.match(pagerRow, /trailing=\{canEditFee[\s\S]*aria-label=\{tr\('manage_expense_labels'[\s\S]*<Tags/, 'Labels is an accessible icon action on the trailing track')
+assert.match(pagerRow, /<PaginationControls[\s\S]*compactCentered/, 'the shared row centers its compact pager between the action tracks')
 assert.match(page, /group\.rows\.map\(\(fee\)/, 'desktop and mobile render day-group rows')
 assert.match(page, /\{fmtClock24\(fee\.created_at\)\}/, 'rows show time rather than repeating their group date')
 assert.equal((page.match(/data-expense-line=/g) || []).length, 2, 'a narrow expense card has at most two information rows')
-assert.match(page, /fee\.sale_receipt_number \|\| fee\.sale_id/, 'linked rows expose receipt/sale identity')
+const primaryLine = page.slice(page.indexOf('data-expense-line="primary"'), page.indexOf('data-expense-line="secondary"'))
+assert.ok(primaryLine.indexOf('fmtClock24(fee.created_at)') < primaryLine.indexOf('feeTypeLabel(fee.fee_type)') && primaryLine.indexOf('feeTypeLabel(fee.fee_type)') < primaryLine.indexOf("fee.label || ''") && primaryLine.indexOf("fee.label || ''") < primaryLine.indexOf('fmtMoney('), 'compact primary row is time, category, label, then amount')
+const secondaryLine = page.slice(page.indexOf('data-expense-line="secondary"'), page.indexOf('</button>', page.indexOf('data-expense-line="secondary"')))
+assert.ok(secondaryLine.indexOf('fee.created_by_name') < secondaryLine.indexOf('fee.branch_name'), 'compact secondary row is cashier then branch')
+assert.doesNotMatch(secondaryLine, /fee\.delivery_contact_name|feeTypeLabel|fee\.label/, 'secondary row stays focused on normal cashier and branch text')
+assert.match(page, /onClick=\{\(\) => openDetail\(fee\)\}/, 'compact and desktop rows open the detail surface')
+const listSource = page.slice(page.indexOf('<div className="dense-data-shell'), page.indexOf("{modal === 'detail'"))
+assert.doesNotMatch(listSource, /<Pencil|<Trash2|tr\('actions'/, 'Edit/Delete controls and the Actions column are absent from the list')
+assert.match(page, /data-expense-detail=""[\s\S]*selected\.sale_receipt_number[\s\S]*selected\.delivery_contact_name[\s\S]*selected\.notes/, 'detail preserves linked receipt, delivery and notes metadata')
 assert.match(page, /fee\.branch_name \?/, 'branch metadata is conditional so unavailable manual metadata stays omitted')
-assert.match(page, /fee\.created_by_name[\s\S]*fee\.branch_name[\s\S]*fee\.delivery_contact_name/, 'available creator, branch, then delivery metadata keeps its frozen order')
-assert.ok((page.match(/h-10 w-10/g) || []).length >= 4, 'desktop and mobile Edit/Delete use 40px targets')
+assert.match(page, /data-expense-detail-actions=""[\s\S]*min-h-10[\s\S]*min-h-10/, 'detail Edit/Delete retain usable action heights')
 assert.doesNotMatch(page, /customer_name/, 'compact expense metadata does not invent unavailable customer data')
+
+const deleteEvents: string[] = []
+const deleteOperation = (overrides: Partial<Parameters<typeof performExpenseDelete>[0]> = {}): Parameters<typeof performExpenseDelete>[0] => ({
+  canDelete: () => { deleteEvents.push('permission'); return true },
+  confirmDelete: () => { deleteEvents.push('confirm'); return true },
+  begin: () => { deleteEvents.push('begin'); return true },
+  remove: async () => { deleteEvents.push('remove') },
+  onStart: () => { deleteEvents.push('start') },
+  onSuccess: async () => { deleteEvents.push('success') },
+  onError: () => { deleteEvents.push('error') },
+  onFinish: () => { deleteEvents.push('finish') },
+  ...overrides,
+})
+
+deleteEvents.length = 0
+assert.equal(await performExpenseDelete(deleteOperation({ canDelete: () => false })), false)
+assert.deepEqual([...deleteEvents], [], 'permission denial performs no confirmation or mutation')
+
+deleteEvents.length = 0
+assert.equal(await performExpenseDelete(deleteOperation({ confirmDelete: () => { deleteEvents.push('cancel'); return false } })), false)
+assert.deepEqual([...deleteEvents], ['permission', 'cancel'], 'cancelling confirmation performs no delete')
+
+deleteEvents.length = 0
+let permissionChecks = 0
+assert.equal(await performExpenseDelete(deleteOperation({ canDelete: () => { deleteEvents.push('permission'); permissionChecks += 1; return permissionChecks === 1 } })), false)
+assert.deepEqual([...deleteEvents], ['permission', 'confirm', 'permission'], 'authority is rechecked after confirmation and revocation blocks the write')
+
+deleteEvents.length = 0
+assert.equal(await performExpenseDelete(deleteOperation()), true)
+assert.deepEqual([...deleteEvents], ['permission', 'confirm', 'permission', 'begin', 'start', 'remove', 'success', 'finish'], 'confirmed authorized delete finishes and permits the detail to close')
+
+deleteEvents.length = 0
+assert.equal(await performExpenseDelete(deleteOperation({ remove: async () => { deleteEvents.push('remove'); throw new Error('failed') } })), false)
+assert.deepEqual([...deleteEvents], ['permission', 'confirm', 'permission', 'begin', 'start', 'remove', 'error', 'finish'], 'failed delete keeps detail open and releases the in-flight guard')
 
 assert.match(transport, /PENDING_FEE_CREATE_PREFIX/)
 assert.match(transport, /storage\.setItem\(key, serialized\)/, 'request envelope is persisted before route() starts')
@@ -253,4 +315,4 @@ try {
   __resetApiWriteDedupeForTests()
 }
 
-console.log('PASS expense grouping, metadata, 40px actions and actor-scoped exact create recovery')
+console.log('PASS expense grouping, detail actions, guarded delete/cancel and actor-scoped exact create recovery')

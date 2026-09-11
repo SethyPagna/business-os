@@ -10,6 +10,7 @@ function loadBranchModule(): Promise<BranchModule> {
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Receipt from 'lucide-react/dist/esm/icons/receipt.js'
+import History from 'lucide-react/dist/esm/icons/history.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import Tags from 'lucide-react/dist/esm/icons/tags.js'
 import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
@@ -18,6 +19,7 @@ import MinimizeButton from '../shared/MinimizeButton.tsx'
 import SearchInput from '../shared/SearchInput'
 import FilterMenu, { type FilterOption } from '../shared/FilterMenu'
 import PaginationControls, { DEFAULT_PAGE_SIZE, clampPage } from '../shared/PaginationControls'
+import PagerActionRow from '../shared/PagerActionRow.tsx'
 import { useIsPageActive } from '../shared/pageActivity'
 import {
   beginTrackedRequest,
@@ -107,8 +109,37 @@ const useSync = useSyncHook as unknown as () => FeesSyncContextValue
 const FEES_LOAD_TIMEOUT_MS = 12000
 const FEES_MUTATION_TIMEOUT_MS = 12000
 
-type FeeModal = 'form' | null
+type FeeModal = 'detail' | 'form' | null
 type FeeTypeFilter = FeeType | 'all'
+
+type ExpenseDeleteOperation = {
+  canDelete: () => boolean
+  confirmDelete: () => boolean
+  begin: () => boolean
+  remove: () => Promise<unknown>
+  onStart: () => void
+  onSuccess: () => Promise<void>
+  onError: (error: unknown) => void
+  onFinish: () => void
+}
+
+export async function performExpenseDelete(operation: ExpenseDeleteOperation): Promise<boolean> {
+  if (!operation.canDelete()) return false
+  if (!operation.confirmDelete()) return false
+  if (!operation.canDelete()) return false
+  if (!operation.begin()) return false
+  operation.onStart()
+  try {
+    await operation.remove()
+    await operation.onSuccess()
+    return true
+  } catch (error) {
+    operation.onError(error)
+    return false
+  } finally {
+    operation.onFinish()
+  }
+}
 
 
 function formatFeeDate(value: string | null | undefined): string {
@@ -442,7 +473,8 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
   ]), [openFeeExport, tr])
 
   const openAdd = () => { if (canAddFee) { setFeeFormLocked(false); setSelected(null); setModal('form') } }
-  const openEdit = (fee: FeeRecord) => { if (canEditFee) { setFeeFormLocked(false); setSelected(fee); setModal('form') } }
+  const openDetail = (fee: FeeRecord) => { setSelected(fee); setModal('detail') }
+  const openEdit = (fee: FeeRecord) => { if (canEditFeeRef.current) { setFeeFormLocked(false); setSelected(fee); setModal('form') } }
   const openLabelManager = useCallback(() => {
     if (canEditFeeRef.current) setShowLabelManager(true)
   }, [])
@@ -552,26 +584,27 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
     closeModal()
   }
 
-  const handleDelete = async (fee: FeeRecord) => {
-    if (!canDeleteFeeRef.current) return
-    if (!window.confirm(tr('delete_fee_confirm', 'Delete this expense record? This cannot be undone.'))) return
-    if (!canDeleteFeeRef.current) return
-    if (!beginKeyedAction(deleteActionRef, fee.id)) return
-    setDeletingId(fee.id)
-    try {
-      await withLoaderTimeout(
+  const handleDelete = async (fee: FeeRecord): Promise<boolean> => {
+    return performExpenseDelete({
+      canDelete: () => canDeleteFeeRef.current,
+      confirmDelete: () => window.confirm(tr('delete_fee_confirm', 'Delete this expense record? This cannot be undone.')),
+      begin: () => beginKeyedAction(deleteActionRef, fee.id),
+      onStart: () => setDeletingId(fee.id),
+      remove: () => withLoaderTimeout(
         () => deleteFeeRequest(fee.id),
         'fees:delete',
         FEES_MUTATION_TIMEOUT_MS,
-      )
-      notify(tr('fee_deleted', 'Expense deleted'), 'success')
-      await load(true)
-    } catch (error) {
-      notify(error instanceof Error ? error.message : String(error || ''), 'error')
-    } finally {
-      finishKeyedAction(deleteActionRef, fee.id)
-      setDeletingId(null)
-    }
+      ),
+      onSuccess: async () => {
+        notify(tr('fee_deleted', 'Expense deleted'), 'success')
+        await load(true)
+      },
+      onError: (error) => notify(error instanceof Error ? error.message : String(error || ''), 'error'),
+      onFinish: () => {
+        finishKeyedAction(deleteActionRef, fee.id)
+        setDeletingId(null)
+      },
+    })
   }
 
   const activeFilterCount = useMemo(
@@ -628,12 +661,10 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
         cards={stripCards}
         loading={stripLoading}
         t={t}
+        iconOnly
+        compactRange
         rangeActions={(
           <>
-            <ShiftHistoryModal
-              label={tr('shift_code', 'Shift')}
-              buttonClassName="btn-secondary inline-flex h-10 min-w-10 items-center justify-center px-2.5 py-0 text-xs md:min-w-0"
-            />
             {canExportFee ? <SectionExportAction>
               <ExportMenu
                 label={tr('export', 'Export')}
@@ -642,10 +673,6 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
                 triggerClassName={`${toolbarIconButtonClassName} !h-10 !min-h-10 !w-10 !rounded-full !border-0 !bg-transparent !p-0`}
               />
             </SectionExportAction> : null}
-            {canEditFee ? <button type="button" className="btn-secondary inline-flex h-10 items-center gap-1 px-2.5 py-0 text-xs" onClick={openLabelManager} title={tr('manage_expense_labels', 'Manage expense labels')}>
-              <Tags className="h-3.5 w-3.5" />
-              <span>{tr('labels', 'Labels')}</span>
-            </button> : null}
           </>
         )}
         actions={canAddFee ? (
@@ -654,7 +681,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
           // the range row to save a row.
           <button
             type="button"
-            className={`${toolbarIconButtonClassName} text-blue-700 hover:text-blue-800 dark:text-blue-300`}
+            className={`${toolbarIconButtonClassName} border-blue-600 bg-blue-600 text-white hover:border-blue-700 hover:bg-blue-700 dark:border-blue-500 dark:bg-blue-600 dark:text-white dark:hover:bg-blue-500`}
             onClick={openAdd}
             aria-label={tr('add_fee', 'Add Expense')}
             title={tr('add_fee', 'Add Expense')}
@@ -700,10 +727,29 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
           />
           {/* Add Fee lives in the stats strip's shared range/action row. */}
         </div>
-        <div className="flex justify-center">
+        <PagerActionRow
+          leading={(
+            <ShiftHistoryModal
+              label={<><History className="h-4 w-4" aria-hidden="true" /><span className="sr-only">{tr('shift_code', 'Shift')}</span></>}
+              buttonClassName="btn-secondary inline-flex h-10 w-10 min-w-10 items-center justify-center p-0"
+            />
+          )}
+          trailing={canEditFee ? (
+            <button
+              type="button"
+              className={toolbarIconButtonClassName}
+              onClick={openLabelManager}
+              aria-label={tr('manage_expense_labels', 'Manage expense labels')}
+              title={tr('manage_expense_labels', 'Manage expense labels')}
+            >
+              <Tags className="h-4 w-4" />
+            </button>
+          ) : null}
+        >
           <PaginationControls
             compact
             rangeAsPageSize
+            compactCentered
             page={page}
             pageSize={pageSize}
             totalItems={result.total}
@@ -711,7 +757,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
             onPageChange={setPage}
             onPageSizeChange={(size) => { setPageSize(size); setPage(1) }}
           />
-        </div>
+        </PagerActionRow>
       </div>
 
       {loadError ? (
@@ -744,16 +790,11 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
         </div>
       ) : (
         <>
-          {/* One Amount column (display-currency aware, the raw USD/KHR pair
-              folded by reportMoney) and one Details column (receipt-style
-              sale chip + branch, stacked, simply BLANK when unset) replace
-              the old USD / KHR / Sale ID / Branch four-some -- almost every
-              imported row has no branch, no sale and only one currency, so
-              that layout was mostly "--" cells (user: "no need such weird
-              not consistent breakdown"). */}
+          {/* Rows open a single read-only detail surface. Mutating actions live
+              there rather than competing with the record facts in this list. */}
           <div className="dense-data-shell hidden overflow-x-auto md:block">
             <table className="dense-data-table min-w-[720px]">
-              <colgroup><col className="w-[7rem]" /><col className="w-[7rem]" /><col /><col className="w-[9rem]" /><col className="w-[12rem]" /><col className="w-[5.25rem]" /></colgroup>
+              <colgroup><col className="w-[7rem]" /><col className="w-[7rem]" /><col /><col className="w-[9rem]" /><col className="w-[12rem]" /></colgroup>
               <thead>
                 <tr>
                   <th>{tr('time', 'Time')}</th>
@@ -761,16 +802,15 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
                   <th data-tone="blue">{tr('expense_category', 'Category')}</th>
                   <th data-tone="emerald" className="text-right">{tr('amount', 'Amount')}</th>
                   <th>{tr('details', 'Details')}</th>
-                  <th className="text-right">{tr('actions', 'Actions')}</th>
                 </tr>
               </thead>
               {feeDayGroups.map((group) => (
                 <tbody key={group.date || 'unknown'}>
                   <tr className="bg-slate-50/90 dark:bg-slate-800/80">
-                    <td colSpan={6} className="!py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-200">{formatFeeDate(group.date)}</td>
+                    <td colSpan={5} className="!py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-200">{formatFeeDate(group.date)}</td>
                   </tr>
                   {group.rows.map((fee) => (
-                  <tr key={fee.id} data-clickable={canEditFee ? 'true' : undefined} tabIndex={canEditFee ? 0 : undefined} onClick={() => openEdit(fee)} onKeyDown={(event) => { if (canEditFee && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); openEdit(fee) } }}>
+                  <tr key={fee.id} data-clickable="true" tabIndex={0} onClick={() => openDetail(fee)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openDetail(fee) } }}>
                     <td className="whitespace-nowrap text-slate-500 dark:text-slate-400">{fmtClock24(fee.created_at)}</td>
                     <td className="whitespace-nowrap">
                       <span className={`inline-flex rounded-full px-1.5 py-0.5 text-[11px] font-semibold ${feeTypeToneClass(fee.fee_type)}`}>
@@ -800,29 +840,6 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
                         ) : null}
                       </div>
                     </td>
-                    <td>
-                      <div className="flex flex-nowrap items-center justify-end gap-0.5">
-                        {canEditFee ? <button
-                          type="button"
-                          onClick={(event) => { event.stopPropagation(); openEdit(fee) }}
-                          aria-label={tr('edit', 'Edit')}
-                          title={tr('edit', 'Edit')}
-                          className="flex h-10 w-10 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-700"
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </button> : null}
-                        {canDeleteFee ? <button
-                          type="button"
-                          onClick={(event) => { event.stopPropagation(); void handleDelete(fee) }}
-                          disabled={deletingId === fee.id}
-                          aria-label={feesNeedsApproval ? tr('delete_needs_approval', 'Delete (needs approval)') : tr('delete', 'Delete')}
-                          title={feesNeedsApproval ? tr('delete_needs_approval', 'Delete (needs approval)') : tr('delete', 'Delete')}
-                          className="flex h-10 w-10 items-center justify-center rounded-md text-slate-400 hover:bg-red-50 hover:text-red-500 disabled:opacity-50 dark:hover:bg-red-950"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button> : null}
-                      </div>
-                    </td>
                   </tr>
                   ))}
                 </tbody>
@@ -830,7 +847,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
             </table>
           </div>
 
-          {/* Card layout for narrow screens -- the 7-column table doesn't
+          {/* Card layout for narrow screens -- the dense table doesn't
               fit comfortably below sm, same pattern as the other list pages
               in this app (Branches, Returns). */}
           <div className="space-y-3 md:hidden">
@@ -840,37 +857,23 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
                   {formatFeeDate(group.date)}
                 </div>
                 {group.rows.map((fee) => (
-              <div key={fee.id} data-expense-card="" className="rounded-xl border border-slate-200 bg-white px-2.5 py-2 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+              <button type="button" key={fee.id} data-expense-card="" onClick={() => openDetail(fee)} className="block w-full rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-left shadow-sm transition hover:border-blue-300 hover:bg-blue-50/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-blue-700 dark:hover:bg-blue-950/20">
                 <div data-expense-line="primary" className="flex min-w-0 items-center gap-1.5">
-                  {fee.sale_receipt_number || fee.sale_id ? (
-                    <span className="inline-flex min-w-0 items-center gap-1 rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                      <Receipt className="h-3 w-3 shrink-0" />
-                      <span className="truncate">{fee.sale_receipt_number ? `${fee.sale_receipt_number} · #${fee.sale_id}` : `#${fee.sale_id}`}</span>
-                    </span>
-                  ) : null}
                   <span className="shrink-0 text-xs text-slate-400">{fmtClock24(fee.created_at)}</span>
+                  <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-xs font-semibold ${feeTypeToneClass(fee.fee_type)}`}>
+                    {feeTypeLabel(fee.fee_type)}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-700 dark:text-slate-200">{fee.label || ''}</span>
                   <span className="ml-auto shrink-0 text-sm font-semibold text-emerald-700 dark:text-emerald-300">
                     {fmtMoney(Number(fee.amount_usd) || 0, Number(fee.amount_khr) || 0)}
                   </span>
-                  <div className="flex shrink-0 items-center gap-0.5">
-                    {canEditFee ? <button type="button" onClick={() => openEdit(fee)} aria-label={tr('edit', 'Edit')} className="flex h-10 w-10 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700">
-                      <Pencil className="h-3.5 w-3.5" />
-                    </button> : null}
-                    {canDeleteFee ? <button type="button" onClick={() => { void handleDelete(fee) }} disabled={deletingId === fee.id} aria-label={feesNeedsApproval ? tr('delete_needs_approval', 'Delete (needs approval)') : tr('delete', 'Delete')} title={feesNeedsApproval ? tr('delete_needs_approval', 'Delete (needs approval)') : tr('delete', 'Delete')} className="flex h-10 w-10 items-center justify-center rounded-full text-slate-400 hover:bg-red-50 hover:text-red-500 disabled:opacity-50 dark:hover:bg-red-950">
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button> : null}
-                  </div>
                 </div>
-                <div data-expense-line="secondary" className="mt-1 flex min-w-0 items-center gap-1.5 text-xs">
-                  <span className={`shrink-0 rounded-full px-1.5 py-0.5 font-semibold ${feeTypeToneClass(fee.fee_type)}`}>
-                    {feeTypeLabel(fee.fee_type)}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate font-medium text-slate-700 dark:text-slate-200">{fee.label || ''}</span>
-                  {fee.created_by_name ? <span className="max-w-[25%] truncate text-slate-400">{fee.created_by_name}</span> : null}
-                  {fee.branch_name ? <span className="max-w-[35%] truncate text-slate-400">{fee.branch_name}</span> : null}
-                  {fee.delivery_contact_name ? <span className="max-w-[25%] truncate text-slate-400">{fee.delivery_contact_name}</span> : null}
+                <div data-expense-line="secondary" className="mt-1 flex min-w-0 items-center gap-1.5 text-sm font-normal text-slate-500 dark:text-slate-400">
+                  {fee.created_by_name ? <span className="min-w-0 truncate" aria-label={`${tr('cashier', 'Cashier')}: ${fee.created_by_name}`}>{fee.created_by_name}</span> : null}
+                  {fee.created_by_name && fee.branch_name ? <span aria-hidden="true" className="shrink-0">·</span> : null}
+                  {fee.branch_name ? <span className="min-w-0 truncate" aria-label={`${tr('branch', 'Branch')}: ${fee.branch_name}`}>{fee.branch_name}</span> : null}
                 </div>
-              </div>
+              </button>
                 ))}
               </section>
             ))}
@@ -880,6 +883,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
             <PaginationControls
               compact
               rangeAsPageSize
+              compactCentered
               page={page}
               pageSize={pageSize}
               totalItems={result.total}
@@ -890,6 +894,76 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
           </div>
         </>
       )}
+
+      {modal === 'detail' && selected ? (
+        <Modal
+          title={tr('details', 'Details')}
+          onClose={closeModal}
+          size="sm"
+          closeDisabled={deletingId === selected.id}
+          unsavedChanges="read-only"
+        >
+          <div data-expense-detail="" className="space-y-4">
+            <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-700 dark:bg-slate-900/50">
+              <div className="flex min-w-0 items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-xs font-semibold ${feeTypeToneClass(selected.fee_type)}`}>
+                      {feeTypeLabel(selected.fee_type)}
+                    </span>
+                    <span className="min-w-0 break-words text-sm font-semibold text-slate-800 dark:text-slate-100">{selected.label || '—'}</span>
+                  </div>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                    {formatFeeDate(selected.fee_date)} · {fmtClock24(selected.created_at)}
+                  </p>
+                </div>
+                <span className="shrink-0 text-base font-bold text-emerald-700 dark:text-emerald-300">
+                  {fmtMoney(Number(selected.amount_usd) || 0, Number(selected.amount_khr) || 0)}
+                </span>
+              </div>
+            </div>
+
+            <dl className="grid grid-cols-[minmax(0,7rem)_minmax(0,1fr)] gap-x-3 gap-y-2 text-sm">
+              <dt className="text-slate-500 dark:text-slate-400">{tr('cashier', 'Cashier')}</dt>
+              <dd className="min-w-0 break-words text-slate-800 dark:text-slate-100">{selected.created_by_name || '—'}</dd>
+              <dt className="text-slate-500 dark:text-slate-400">{tr('branch', 'Branch')}</dt>
+              <dd className="min-w-0 break-words text-slate-800 dark:text-slate-100">{selected.branch_name || '—'}</dd>
+              <dt className="text-slate-500 dark:text-slate-400">{tr('receipt', 'Receipt')}</dt>
+              <dd className="min-w-0 break-all font-mono text-slate-800 dark:text-slate-100">
+                {selected.sale_receipt_number
+                  ? `${selected.sale_receipt_number}${selected.sale_id ? ` · Sale ID #${selected.sale_id}` : ''}`
+                  : selected.sale_id ? `Sale ID #${selected.sale_id}` : '—'}
+              </dd>
+              <dt className="text-slate-500 dark:text-slate-400">{tr('delivery', 'Delivery')}</dt>
+              <dd className="min-w-0 break-words text-slate-800 dark:text-slate-100">{selected.delivery_contact_name || '—'}</dd>
+              <dt className="text-slate-500 dark:text-slate-400">{tr('notes', 'Notes')}</dt>
+              <dd className="min-w-0 whitespace-pre-wrap break-words text-slate-800 dark:text-slate-100">{selected.notes || '—'}</dd>
+            </dl>
+
+            <div data-expense-detail-actions="" className="flex items-stretch justify-end gap-2 border-t border-slate-200 pt-3 dark:border-slate-700">
+              {canEditFee ? (
+                <button type="button" onClick={() => openEdit(selected)} disabled={deletingId === selected.id} className="btn-secondary inline-flex min-h-10 items-center justify-center gap-1.5 px-3 disabled:cursor-not-allowed disabled:opacity-50">
+                  <Pencil className="h-4 w-4" />
+                  <span>{tr('edit', 'Edit')}</span>
+                </button>
+              ) : null}
+              {canDeleteFee ? (
+                <button
+                  type="button"
+                  onClick={() => { void handleDelete(selected).then((accepted) => { if (accepted) closeModal() }) }}
+                  disabled={deletingId === selected.id}
+                  className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg border border-red-200 px-3 text-sm font-medium text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950/40"
+                  aria-label={feesNeedsApproval ? tr('delete_needs_approval', 'Delete (needs approval)') : tr('delete', 'Delete')}
+                  title={feesNeedsApproval ? tr('delete_needs_approval', 'Delete (needs approval)') : tr('delete', 'Delete')}
+                >
+                  <Trash2 className="h-4 w-4" />
+                  <span>{feesNeedsApproval ? tr('delete_needs_approval', 'Delete (needs approval)') : tr('delete', 'Delete')}</span>
+                </button>
+              ) : null}
+            </div>
+          </div>
+        </Modal>
+      ) : null}
 
       {modal === 'form' ? (
         <Modal
