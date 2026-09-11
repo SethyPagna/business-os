@@ -486,8 +486,22 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
                               withheld -- see permissionActions.ts for why
                               that is what makes it safe to enforce. A row
                               the tier already blocks is therefore inert. */}
+                          {permission.key === 'sales' ? (
+                            <label className="mb-2 block px-1 text-xs text-gray-700 dark:text-gray-200">
+                              {translate('perm_sales_customer_mode', 'Edit customer mode')}
+                              <select
+                                className="input mt-1 w-full text-xs"
+                                disabled={tier !== 'full' || isActionOverriddenOff(perms as Record<string, unknown>, 'sales', 'customer')}
+                                value={isActionOverriddenOff(perms as Record<string, unknown>, 'sales', 'customer_reassign') ? 'name-only' : 'assignment'}
+                                onChange={() => toggleActionOverride('sales', 'customer_reassign')}
+                              >
+                                <option value="assignment">{translate('perm_sales_customer_assignment', 'Choose another customer (default)')}</option>
+                                <option value="name-only">{translate('perm_sales_customer_name_only', 'Edit this sale’s name only')}</option>
+                              </select>
+                            </label>
+                          ) : null}
                           <ul className="grid gap-x-4 gap-y-0.5 sm:grid-cols-2">
-                            {actionsForKey(permission.key).map((action) => {
+                            {actionsForKey(permission.key).filter((action) => permission.key !== 'sales' || action.key !== 'customer_reassign').map((action) => {
                               const tierOutcome = outcomeAt(action, tier)
                               const overriddenOff = isActionOverriddenOff(perms as Record<string, unknown>, permission.key, action.key)
                               const meta = outcomeMeta(overriddenOff ? 'block' : tierOutcome)

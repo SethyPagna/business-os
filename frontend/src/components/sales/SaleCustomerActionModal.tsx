@@ -35,6 +35,10 @@ export function useDebouncedSaleCustomerSearch(query: string, onSearch?: (query:
 export default function SaleCustomerActionModal({
   saleLabel,
   choices,
+  currentCustomerName,
+  resultsQuery = '',
+  loading = false,
+  error = '',
   saving,
   pendingOutcome = false,
   translate,
@@ -46,6 +50,10 @@ export default function SaleCustomerActionModal({
 }: {
   saleLabel: string
   choices: SaleCustomerChoice[]
+  currentCustomerName?: string
+  resultsQuery?: string
+  loading?: boolean
+  error?: string
   saving: boolean
   pendingOutcome?: boolean
   translate: TranslateFn
@@ -61,21 +69,17 @@ export default function SaleCustomerActionModal({
   const normalizedQuery = query.trim().toLocaleLowerCase('en-US')
   const queryDigits = canonicalizeSaleCustomerPhone(query)
   const hasQuery = normalizedQuery.length >= 2 || queryDigits.length >= 3
-  const matchingChoices = hasQuery
-    ? choices.filter((customer) => {
-      const name = String(customer.name || '').toLocaleLowerCase('en-US')
-      const phone = canonicalizeSaleCustomerPhone(customer.phone)
-      return (normalizedQuery && name.includes(normalizedQuery)) || (queryDigits.length >= 3 && phone.includes(queryDigits))
-    })
-    : []
+  // The server owns POS name/phone matching. A second substring filter hides
+  // valid word-order/phone matches. Never show the preceding query's results.
+  const matchingChoices = hasQuery && query.trim() === resultsQuery && !loading && !error ? choices : []
 
   return (
     <Modal title={`${translate('sale_customer_edit_title', 'Edit customer')} — ${saleLabel}`} onClose={onClose} closeDisabled={saving} unsavedChanges="read-only" size="sm">
       <div className="space-y-3">
         <div className="rounded-lg bg-gray-50 p-3 text-sm dark:bg-gray-800">
-          <span className="font-medium">{translate('walk_in', 'General')}</span>
+          <span className="font-medium">{currentCustomerName || translate('walk_in', 'General')}</span>
           <p className="mt-1 text-gray-500 dark:text-gray-400">
-            {translate('sale_customer_general_scope', 'General has no customer profile. Enter a phone number to find and assign an existing customer. The sale and its linked returns will use that customer; unrelated transactions stay unchanged.')}
+            {translate('sale_customer_assignment_scope', 'Choose another customer for this sale and its linked returns. The old customer profile and unrelated transactions stay unchanged.')}
           </p>
         </div>
 
@@ -102,6 +106,7 @@ export default function SaleCustomerActionModal({
                 placeholder={translate('sale_customer_lookup', 'Search by name or phone')}
                 autoComplete="off"
                 autoFocus
+                disabled={blocked}
               />
               <p className="mt-1 text-xs text-gray-500">{translate('sale_customer_lookup_hint', 'Phone is the primary match. You can also search by name and choose the matching customer.')}</p>
             </div>
@@ -123,14 +128,16 @@ export default function SaleCustomerActionModal({
                   </span>
                 </button>
               ))}
-              {hasQuery && !matchingChoices.length ? (
-                <p className="px-2 py-3 text-sm text-gray-500">{translate('sale_customer_not_found', 'No existing customer was found. Add the customer in Contacts, then return here and search again.')}</p>
+              {loading ? <p role="status" className="px-2 py-3 text-sm text-gray-500">{translate('loading', 'Loading...')}</p> : null}
+              {error ? <div role="alert" className="px-2 py-3 text-sm text-red-600">{error}<button type="button" className="btn-secondary ml-2" disabled={blocked} onClick={() => onSearch?.(query.trim())}>{translate('retry', 'Retry')}</button></div> : null}
+              {hasQuery && query.trim() === resultsQuery && !loading && !error && !matchingChoices.length ? (
+                <p className="px-2 py-3 text-sm text-gray-500">{translate('sale_customer_create_contacts', 'No existing customer was found. Creating a new customer requires Contacts add access, as in POS. Add the customer in Contacts, then search again.')}</p>
               ) : null}
             </div>
           </>
         ) : (
           <p className="rounded-lg border p-3 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
-            {translate('sale_customer_assignment_permission', 'Assigning an existing customer needs Contacts view permission.')}
+            {translate('perm_view_only_action', 'You do not have permission to perform this action.')}
           </p>
         )}
       </div>

@@ -27,10 +27,8 @@ import { createLongPressState, type LongPressState } from '../../utils/longPress
 import { buildTimeActionSections, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.ts'
 import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { buildBulkSaleCancelInput, getSales as fetchSales, getSalesStats as fetchSalesStats, getSalesStatsStrip, SALES_LIST_REQUEST_TIMEOUT_MS, updateSalesBulkField, updateSalesBulkStatus, type BulkSaleStatusItem, type BulkSaleStatusPayload, type BulkSaleUpdatePayload, type PreparedSaleStatusRequest, type SaleAmendmentRequest } from '../../api/salesTransport.ts'
-import { getCustomerIdentityById, getSalesCustomerPicker, getDeliveryContacts } from '../../api/contactReadTransport.ts'
-import { resolveSaleCustomerEditorRoute } from '../../utils/customerIdentity.ts'
-import { getCustomerRenameImpact, updateCustomer } from '../../api/contactWriteTransport.ts'
-import RenameCascadeModal, { type RenameCascadeChoice, type RenameCascadeRequest } from '../shared/RenameCascadeModal.tsx'
+import { getSalesCustomerPicker, getDeliveryContacts } from '../../api/contactReadTransport.ts'
+import { customerRequestIsCurrent, saleCustomerMode } from '../../utils/saleCustomerMode.ts'
 import { getFeesReport } from '../../api/feesTransport.ts'
 import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
 import ShiftHistoryModal from '../shifts/ShiftHistoryModal.tsx'
@@ -359,9 +357,8 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // customer, import) is hidden here and refused by the backend. Full only.
   const canChangeSaleStatus = can('sales', 'status')
   const canChangeSaleCustomer = can('sales', 'customer')
-  const canBrowseCustomers = can('contacts', 'view')
-  const canEditCustomerName = can('contacts', 'edit')
-  const canEditCustomerMembership = canEditCustomerName && getPermissionTier('contacts') === 'full'
+  const customerEditMode = saleCustomerMode(canChangeSaleCustomer, can('sales', 'customer_reassign'))
+  const canReassignSaleCustomer = customerEditMode === 'assignment'
   // S4-24b: adding goods to a recorded sale is its own grant -- it moves
   // stock and raises what the customer owes, so it is not covered by the
   // section tier and is not the same act as changing a status. The Worker
@@ -427,13 +424,28 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // a legacy row carries no receipt number.
   const [returnForSale, setReturnForSale] = useState<SaleRecord | null>(null)
   const [detailSale, setDetailSale] = useState<SaleRecord | null>(null)
-  const [saleCustomerPrompt, setSaleCustomerPrompt] = useState<{ sale: SaleRecord; choices: Array<{ id: number; name: string; phone?: string | null; membershipNumber?: string | null }> } | null>(null)
+  const [saleCustomerPrompt, setSaleCustomerPrompt] = useState<{ sale: SaleRecord; choices: Array<{ id: number; name: string; phone?: string | null; membershipNumber?: string | null }>; loading?: boolean; error?: string; resultsQuery?: string } | null>(null)
   const [saleCustomerSaving, setSaleCustomerSaving] = useState(false)
-  const [saleCustomerNameForm, setSaleCustomerNameForm] = useState<{ sale: SaleRecord; id: number; name: string; phone: string; membershipNumber: string; updatedAt: string } | null>(null)
-  const [saleCustomerNameSaving, setSaleCustomerNameSaving] = useState(false)
-  const [saleCustomerRename, setSaleCustomerRename] = useState<RenameCascadeRequest | null>(null)
-  const saleCustomerRenameResolveRef = useRef<((choice: RenameCascadeChoice) => void) | null>(null)
+  const [saleCustomerNameForm, setSaleCustomerNameForm] = useState<{ sale: SaleRecord; name: string; phone: string } | null>(null)
   const saleCustomerSearchVersionRef = useRef(0)
+  const saleCustomerGenerationRef = useRef(0)
+  const saleCustomerOpenRef = useRef<number | null>(null)
+  const saleCustomerSearchAbortRef = useRef<AbortController | null>(null)
+  const customerModeRef = useRef(customerEditMode)
+  customerModeRef.current = customerEditMode
+  useEffect(() => {
+    saleCustomerGenerationRef.current += 1
+    saleCustomerOpenRef.current = null
+    saleCustomerSearchVersionRef.current += 1
+    saleCustomerSearchAbortRef.current?.abort()
+    setSaleCustomerPrompt(null)
+    setSaleCustomerNameForm(null)
+    return () => {
+      saleCustomerGenerationRef.current += 1
+      saleCustomerSearchVersionRef.current += 1
+      saleCustomerSearchAbortRef.current?.abort()
+    }
+  }, [statusSecurityScope])
   // N41: the sale whose Records float is open. Its own state rather than a
   // mode of detailSale -- the list row's Records line opens it WITHOUT opening
   // the detail modal, which is the whole point of putting the line on the row.
@@ -1943,7 +1955,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
 
   const openBulkChange = async (field: BulkSaleField) => {
     if (!canBulkSales) return
-    if (!(field === 'status' ? canChangeSaleStatus : field === 'customer' ? canChangeSaleCustomer : canAmendSales)) return
+    if (!(field === 'status' ? canChangeSaleStatus : field === 'customer' ? canReassignSaleCustomer : canAmendSales)) return
     if (!selectedSales.length) return
     if (selectedSales.length > 25) {
       notify(translateOr('sale_bulk_limit', 'Select at most 25 sales for one change.'), 'error')
@@ -2140,7 +2152,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
 
   const submitBulkFieldChange = async (field: Exclude<BulkSaleField, 'status'>, source: BulkSaleChoice, target: BulkSaleChoice, matched: BulkSaleChangeRow[], frozenSales: SaleRecord[], retryRequest?: BulkSaleUpdatePayload) => {
     if (!canBulkSales) return
-    if (!(field === 'customer' ? canChangeSaleCustomer : canAmendSales)) return
+    if (!(field === 'customer' ? canReassignSaleCustomer : canAmendSales)) return
     if (!retryRequest && !matched.length) return
     if (!beginSingleAction(bulkStatusInFlightRef, { blocked: bulkFieldSaving })) return
     setBulkFieldSaving(true)
@@ -2173,26 +2185,37 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
     return Array.isArray(result) ? result as Array<Record<string, unknown>> : Array.isArray(record.data) ? record.data as Array<Record<string, unknown>> : Array.isArray(record.items) ? record.items as Array<Record<string, unknown>> : []
   }
   const loadSaleCustomerChoices = async (sale: SaleRecord, search = '') => {
+    if (customerModeRef.current !== 'assignment' || statusSecurityScope !== statusSecurityRef.current || saleCustomerOpenRef.current !== Number(sale.id)) return
+    const ticket = { security: statusSecurityScope, generation: saleCustomerGenerationRef.current }
+    const current = () => customerRequestIsCurrent(ticket, statusSecurityRef.current, saleCustomerGenerationRef.current)
     const searchVersion = ++saleCustomerSearchVersionRef.current
+    saleCustomerSearchAbortRef.current?.abort()
+    const controller = new AbortController()
+    saleCustomerSearchAbortRef.current = controller
     const normalizedSearch = String(search || '').trim()
     if (normalizedSearch.length < 2 && normalizedSearch.replace(/\D/g, '').length < 3) {
-      setSaleCustomerPrompt((current) => current?.sale.id === sale.id ? { ...current, choices: [] } : current)
+      setSaleCustomerPrompt((row) => row?.sale.id === sale.id ? { ...row, choices: [], loading: false, error: '' } : row)
       return
     }
-    const result = await getSalesCustomerPicker({ ...(normalizedSearch ? { search: normalizedSearch } : {}), page: 1, pageSize: SALES_BULK_LINKED_PAGE_SIZE })
-    const choices = customerRows(result).map((row) => ({
-      id: Number(row.id),
-      name: String(row.name || `#${row.id}`),
-      phone: typeof row.phone === 'string' ? row.phone : null,
-      membershipNumber: typeof row.membership_number === 'string' ? row.membership_number : null,
-    })).filter((row) => Number.isFinite(row.id) && row.id > 0)
-    if (searchVersion !== saleCustomerSearchVersionRef.current) return
-    setSaleCustomerPrompt((current) => current?.sale.id === sale.id ? { ...current, choices } : { sale: { ...sale }, choices })
+    setSaleCustomerPrompt((row) => row?.sale.id === sale.id ? { ...row, choices: [], loading: true, error: '' } : row)
+    try {
+      const result = await getSalesCustomerPicker({ search: normalizedSearch, page: 1, pageSize: SALES_BULK_LINKED_PAGE_SIZE }, { requireFresh: true, signal: controller.signal })
+      const choices = customerRows(result).map((row) => ({
+        id: Number(row.id),
+        name: String(row.name || `#${row.id}`),
+        phone: typeof row.phone === 'string' ? row.phone : null,
+        membershipNumber: typeof row.membership_number === 'string' ? row.membership_number : null,
+      })).filter((row) => Number.isFinite(row.id) && row.id > 0)
+      if (!current() || searchVersion !== saleCustomerSearchVersionRef.current) return
+      setSaleCustomerPrompt((row) => row?.sale.id === sale.id ? { ...row, choices, loading: false, resultsQuery: normalizedSearch } : row)
+    } catch (error) {
+      if (!current() || searchVersion !== saleCustomerSearchVersionRef.current || controller.signal.aborted) return
+      setSaleCustomerPrompt((row) => row?.sale.id === sale.id ? { ...row, choices: [], loading: false, error: getErrorMessage(error, translateOr('sale_customer_choices_load_failed', 'Unable to search customers.')) } : row)
+    }
   }
   const openSaleCustomerEdit = (sale: SaleRecord) => {
-    const customerId = Number(sale.customer_id)
-    const initialRoute = resolveSaleCustomerEditorRoute(sale)
-    const pendingBelongsToSale = pendingBulkFieldRequest?.action.kind === 'customer'
+    if (!authReady || statusSecurityScope !== statusSecurityRef.current || customerModeRef.current === 'denied') return
+    const pendingBelongsToSale = (pendingBulkFieldRequest?.action.kind === 'customer' || pendingBulkFieldRequest?.action.kind === 'customer_name')
       && pendingBulkFieldRequest.items.length === 1
       && Number(pendingBulkFieldRequest.items[0]?.id) === Number(sale.id)
     if (pendingBulkFieldRequest && !pendingBelongsToSale) {
@@ -2200,37 +2223,33 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
       return
     }
     saleCustomerSearchVersionRef.current += 1
-    if (initialRoute === 'load-profile') {
-      void getCustomerIdentityById(customerId).then((result) => {
-        const customer = customerRows(result).find((row) => Number(row.id) === customerId)
-        if (!customer) throw new Error(translateOr('sale_customer_current_unavailable', 'The current customer is unavailable.'))
-        if (resolveSaleCustomerEditorRoute(sale, customer) === 'assignment') {
-          setSaleCustomerPrompt({ sale: { ...sale }, choices: [] })
-          return
-        }
-        if (!canEditCustomerName) {
-          throw new Error(translateOr('sale_customer_profile_permission', 'Editing a linked customer needs Contacts edit permission.'))
-        }
-        const updatedAt = String(customer.updated_at || '').trim()
-        if (!updatedAt) throw new Error(translateOr('sale_customer_current_load_failed', 'Unable to load the current customer.'))
-        setSaleCustomerNameForm({
-          sale: { ...sale },
-          id: customerId,
-          name: String(customer.name || sale.customer_name || `#${customerId}`),
-          phone: String(customer.phone || sale.customer_phone || ''),
-          membershipNumber: String(customer.membership_number || sale.customer_membership_number || ''),
-          updatedAt,
-        })
-      }).catch((error) => notify(getErrorMessage(error, translateOr('sale_customer_current_load_failed', 'Unable to load the current customer.')), 'error'))
+    saleCustomerGenerationRef.current += 1
+    saleCustomerOpenRef.current = Number(sale.id)
+    saleCustomerSearchAbortRef.current?.abort()
+    setSaleCustomerNameForm(null)
+    setSaleCustomerPrompt(null)
+    if (pendingBelongsToSale && pendingBulkFieldRequest?.action.kind === 'customer') {
+      setSaleCustomerPrompt({ sale: { ...sale }, choices: [] })
       return
     }
-    setSaleCustomerPrompt({ sale: { ...sale }, choices: [] })
+    if (customerModeRef.current === 'name-only') {
+      setSaleCustomerNameForm({ sale: { ...sale }, name: String(sale.customer_name || ''), phone: String(sale.customer_phone || '') })
+      return
+    }
+    if (pendingBulkFieldRequest?.action.kind === 'customer_name') {
+      setSaleCustomerNameForm({ sale: { ...sale }, name: String(sale.customer_name || ''), phone: String(sale.customer_phone || '') })
+    } else setSaleCustomerPrompt({ sale: { ...sale }, choices: [] })
   }
   const refreshSaleCustomerViews = async () => {
     await Promise.all([loadSales(true), actionHistory.refreshServerItems()])
     window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
   }
-  const submitSaleCustomerChange = async (sale: SaleRecord, target: { id: number; name: string } | null, retryRequest?: BulkSaleUpdatePayload) => {
+  const submitSaleCustomerChange = async (sale: SaleRecord, target: { id: number; name: string } | null, retryRequest?: BulkSaleUpdatePayload, name?: string) => {
+    const nameOnly = name !== undefined || retryRequest?.action.kind === 'customer_name'
+    if (!authReady || statusSecurityScope !== statusSecurityRef.current || customerModeRef.current === 'denied' || (!nameOnly && customerModeRef.current !== 'assignment') || saleCustomerOpenRef.current !== Number(sale.id)) return false
+    const ticket = { security: statusSecurityScope, generation: saleCustomerGenerationRef.current }
+    const current = () => customerRequestIsCurrent(ticket, statusSecurityRef.current, saleCustomerGenerationRef.current)
+    if (retryRequest && (retryRequest !== pendingBulkFieldRequest || retryRequest.items.length !== 1 || Number(retryRequest.items[0]?.id) !== Number(sale.id) || !['customer', 'customer_name'].includes(retryRequest.action.kind))) return false
     if (pendingBulkFieldRequest && !retryRequest) {
       notify(translateOr('sale_bulk_pending', 'A previous request has an unknown outcome. Retry the original request or discard it before starting another.'), 'error')
       return false
@@ -2240,80 +2259,46 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
     const payload: BulkSaleUpdatePayload = retryRequest || {
       client_request_id: crypto.randomUUID(),
       items: [{ id: Number(sale.id), expected_updated_at: sale.updated_at == null ? null : String(sale.updated_at) }],
-      action: { kind: 'customer', source_id: sale.customer_id == null ? null : Number(sale.customer_id), target_id: target?.id ?? null },
+      action: nameOnly ? { kind: 'customer_name', name: String(name || '').trim() } : { kind: 'customer', source_id: sale.customer_id == null ? null : Number(sale.customer_id), target_id: target?.id ?? null },
     }
     try {
       // Save before sending and never replace this body while its outcome is
       // unknown. The bulk endpoint owns receipt-backed exact-request replay.
       savePendingBulkFieldRequest(payload)
       const result = await updateSalesBulkField(payload)
+      if (!current()) return false
       if (result.changedCount === 0) {
         savePendingBulkFieldRequest(null)
         setSaleCustomerPrompt(null)
+        setSaleCustomerNameForm(null)
         setDetailSale(null)
         await refreshSaleCustomerViews()
+        if (!current()) return false
         notify(translateOr('sale_customer_conflict', 'This sale changed before the customer link could be saved. Refresh and review it.'), 'error')
         return false
       }
       savePendingBulkFieldRequest(null)
       await refreshSaleCustomerViews()
+      if (!current()) return false
       // The refreshed sale can leave the active search/page after assignment.
       // Close the old detail instead of combining a new id/name with stale
       // phone, address, or membership snapshots.
       setDetailSale(null)
       setSaleCustomerPrompt(null)
+      setSaleCustomerNameForm(null)
       notify(translateOr('sale_bulk_status_result', 'Updated {changed} sales; {unchanged} unchanged.').replace('{changed}', String(result.changedCount)).replace('{unchanged}', String(result.unchangedCount)), 'success')
       return true
     } catch (error) {
-      if (isKnownUncommittedSaleCustomerChangeError(error)) savePendingBulkFieldRequest(null)
-      notify(getErrorMessage(error, translateOr('update_failed', 'Unable to update the selected sales.')), 'error')
+      if (!current()) return false
+      // A rejected first attempt is known not to have committed. A rejected
+      // retry (especially permission denial before receipt lookup) says
+      // nothing about the original attempt: keep its exact recovery body.
+      if (!retryRequest && isKnownUncommittedSaleCustomerChangeError(error)) savePendingBulkFieldRequest(null)
+      notify((error as { code?: string } | null)?.code === 'loyalty_reassignment_requires_reconciliation'
+        ? translateOr('sale_customer_loyalty_blocked', 'This customer change affects loyalty points and needs reconciliation. The sale was not changed. Ask an administrator to review it.')
+        : getErrorMessage(error, translateOr('update_failed', 'Unable to update the selected sales.')), 'error')
       return false
     } finally { finishSingleAction(bulkStatusInFlightRef); setBulkFieldSaving(false); setSaleCustomerSaving(false) }
-  }
-  const askSaleCustomerRename = (request: RenameCascadeRequest) => new Promise<RenameCascadeChoice>((resolve) => { saleCustomerRenameResolveRef.current = resolve; setSaleCustomerRename(request) })
-  const closeSaleCustomerRename = (choice: RenameCascadeChoice) => { setSaleCustomerRename(null); const resolve = saleCustomerRenameResolveRef.current; saleCustomerRenameResolveRef.current = null; resolve?.(choice) }
-  const saveSaleCustomerProfile = async ({ name: afterInput, membershipNumber: membershipInput }: { name: string; membershipNumber: string }) => {
-    const form = saleCustomerNameForm
-    if (!form) return false
-    const before = form.name.trim(); const after = afterInput.trim()
-    const beforeMembership = form.membershipNumber.trim().toUpperCase()
-    const afterMembership = membershipInput.trim().toUpperCase()
-    if (!after) throw new Error(translateOr('name_required', 'Name is required'))
-    const nameChanged = before.toLocaleLowerCase() !== after.toLocaleLowerCase()
-    const membershipChanged = !beforeMembership && afterMembership !== beforeMembership
-    if (membershipChanged && !canEditCustomerMembership) {
-      throw new Error(translateOr('sale_customer_membership_permission', 'Assigning membership needs Full Contacts permission.'))
-    }
-    if (!nameChanged && !membershipChanged) {
-      setSaleCustomerNameForm(null)
-      return true
-    }
-    let renameChoice: RenameCascadeChoice = 'only'
-    if (nameChanged) {
-      const impact = await getCustomerRenameImpact(String(form.id), after)
-      if (impact.target_exists) throw new Error(translateOr('sale_customer_name_exists', 'A customer with this name already exists. Resolve the duplicate in Contacts.'))
-      renameChoice = await askSaleCustomerRename({ kind: 'customer', from: before, to: after, impact, choices: ['carry', 'only'] })
-      if (renameChoice === 'cancel') return false
-    }
-    setSaleCustomerNameSaving(true)
-    try {
-      const payload: Record<string, unknown> = { expectedUpdatedAt: form.updatedAt }
-      if (nameChanged) {
-        payload.name = after
-        payload.__rename_cascade = renameChoice === 'carry' ? 'carry' : 'record_only'
-      }
-      if (membershipChanged) payload.membership_number = afterMembership
-      const result = await updateCustomer(String(form.id), payload) as Record<string, unknown>
-      if (result?.success === false) throw new Error(String(result.error || translateOr('sale_customer_profile_update_failed', 'Unable to update the customer.')))
-      setSaleCustomerNameForm(null)
-      setSaleCustomerPrompt(null)
-      setDetailSale(null)
-      await refreshSaleCustomerViews()
-      notify(translateOr('sale_customer_profile_updated', 'Customer updated.'), 'success')
-      return true
-    } finally {
-      setSaleCustomerNameSaving(false)
-    }
   }
   const exportVisibleSales = useCallback(async (rows: SaleRecord[] = filtered, filePrefix = 'sales-visible') => {
     openExportOptions(rows, filePrefix)
@@ -2618,7 +2603,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
             ) : null}
             {canAmendSales ? <button type="button" className="btn-secondary px-2.5 py-1 text-xs" onClick={() => { void openBulkChange('payment_method') }} disabled={selectedSales.length > 25 || bulkFieldSaving}>{translateOr('payment_method', 'Payment method')}</button> : null}
             {canAmendSales ? <button type="button" className="btn-secondary px-2.5 py-1 text-xs" onClick={() => { void openBulkChange('delivery_contact') }} disabled={selectedSales.length > 25 || bulkFieldSaving}>{translateOr('delivery_contact', 'Driver')}</button> : null}
-            {canChangeSaleCustomer ? <button type="button" className="btn-secondary px-2.5 py-1 text-xs" onClick={() => { void openBulkChange('customer') }} disabled={selectedSales.length > 25 || bulkFieldSaving}>{translateOr('customer', 'Customer')}</button> : null}
+            {canReassignSaleCustomer ? <button type="button" className="btn-secondary px-2.5 py-1 text-xs" onClick={() => { void openBulkChange('customer') }} disabled={selectedSales.length > 25 || bulkFieldSaving}>{translateOr('customer', 'Customer')}</button> : null}
             <button type="button" className="ml-auto rounded-lg px-2 py-1 text-xs font-medium text-gray-500 hover:bg-white/70 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-slate-700/60 dark:hover:text-gray-200" onClick={() => setSelectedIds(new Set<number>())}>
               {translateOr('clear', 'Clear')}
             </button>
@@ -2730,21 +2715,27 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
       {saleCustomerPrompt ? (
         <Suspense fallback={null}>
           <SaleCustomerActionModal
+            key={`${statusSecurityScope}:${saleCustomerPrompt.sale.id}`}
             saleLabel={String(saleCustomerPrompt.sale.receipt_number || `#${saleCustomerPrompt.sale.id}`)}
             choices={saleCustomerPrompt.choices}
+            currentCustomerName={String(saleCustomerPrompt.sale.customer_name || '')}
+            resultsQuery={saleCustomerPrompt.resultsQuery}
+            loading={saleCustomerPrompt.loading}
+            error={saleCustomerPrompt.error}
             saving={saleCustomerSaving || bulkFieldSaving}
             pendingOutcome={!!saleCustomerPendingRequest}
             translate={translateOr}
             onClose={() => {
               if (saleCustomerSaving || bulkFieldSaving) return
               saleCustomerSearchVersionRef.current += 1
+              saleCustomerGenerationRef.current += 1
+              saleCustomerOpenRef.current = null
+              saleCustomerSearchAbortRef.current?.abort()
               setSaleCustomerPrompt(null)
             }}
-            onSearch={canBrowseCustomers ? (query) => { void loadSaleCustomerChoices(saleCustomerPrompt.sale, query).catch((error) => {
-              if ((error as { name?: string } | null)?.name !== 'AbortError') notify(getErrorMessage(error, translateOr('sale_customer_choices_load_failed', 'Unable to search customers.')), 'error')
-            }) } : undefined}
+            onSearch={canReassignSaleCustomer ? (query) => { void loadSaleCustomerChoices(saleCustomerPrompt.sale, query) } : undefined}
             onAssign={(customer) => { void submitSaleCustomerChange(saleCustomerPrompt.sale, customer) }}
-            onRetryPending={saleCustomerPendingRequest ? () => {
+            onRetryPending={saleCustomerPendingRequest && canReassignSaleCustomer ? () => {
               const targetId = saleCustomerPendingRequest.action.kind === 'customer' ? saleCustomerPendingRequest.action.target_id : null
               const target = targetId == null ? null : saleCustomerPrompt.choices.find((choice) => choice.id === targetId) || { id: targetId, name: `#${targetId}` }
               void submitSaleCustomerChange(saleCustomerPrompt.sale, target, saleCustomerPendingRequest)
@@ -2758,17 +2749,27 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
       {saleCustomerNameForm ? (
         <Suspense fallback={null}>
           <SaleCustomerNameModal
+            key={`${statusSecurityScope}:${saleCustomerNameForm.sale.id}`}
             currentName={saleCustomerNameForm.name}
             currentPhone={saleCustomerNameForm.phone}
-            currentMembershipNumber={saleCustomerNameForm.membershipNumber}
-            canAssignMembership={canEditCustomerMembership}
+            pendingName={pendingBulkFieldRequest?.action.kind === 'customer_name' ? pendingBulkFieldRequest.action.name : undefined}
+            saving={saleCustomerSaving || bulkFieldSaving}
+            pendingOutcome={pendingBulkFieldRequest?.action.kind === 'customer_name'}
             translate={translateOr}
-            onSave={saveSaleCustomerProfile}
-            onClose={() => { if (!saleCustomerNameSaving && !saleCustomerRename) setSaleCustomerNameForm(null) }}
+            onSave={({ name }) => submitSaleCustomerChange(saleCustomerNameForm.sale, null, undefined, name)}
+            onRetryPending={pendingBulkFieldRequest?.action.kind === 'customer_name' ? () => { void submitSaleCustomerChange(saleCustomerNameForm.sale, null, pendingBulkFieldRequest) } : undefined}
+            onDiscardPending={pendingBulkFieldRequest?.action.kind === 'customer_name' ? () => {
+              if (window.confirm(translateOr('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.'))) savePendingBulkFieldRequest(null)
+            } : undefined}
+            onClose={() => {
+              if (saleCustomerSaving || bulkFieldSaving) return
+              saleCustomerGenerationRef.current += 1
+              saleCustomerOpenRef.current = null
+              setSaleCustomerNameForm(null)
+            }}
           />
         </Suspense>
       ) : null}
-      <RenameCascadeModal request={saleCustomerRename} busy={saleCustomerNameSaving} layer="nested" t={(key, fallback) => t(key) || fallback || key} onChoose={closeSaleCustomerRename} />
 
       {recordsSale ? (
         <Suspense fallback={null}>
@@ -2860,7 +2861,14 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
       {canBulkSales && pendingBulkFieldRequest ? (
         <div role="status" className="mb-2 flex flex-wrap items-center gap-2 rounded-xl border p-3 text-sm">
           <span>{translateOr('sale_bulk_pending', 'A previous request has an unknown outcome. Retry the original request or discard it before starting another.')}</span>
-          <button type="button" className="btn-secondary" disabled={bulkFieldSaving} onClick={() => { const kind = pendingBulkFieldRequest.action.kind; void submitBulkFieldChange(kind, { key: '', label: '' }, { key: '', label: '' }, [], [], pendingBulkFieldRequest) }}>{translateOr('sale_bulk_retry', 'Retry original request')}</button>
+          <button type="button" className="btn-secondary" disabled={bulkFieldSaving} onClick={() => {
+            const kind = pendingBulkFieldRequest.action.kind
+            if (kind === 'customer_name') {
+              const sale = salesRef.current.find((row) => Number(row.id) === Number(pendingBulkFieldRequest.items[0]?.id))
+              if (sale) openSaleCustomerEdit(sale)
+              else notify(translateOr('sale_customer_retry_find', 'Find and open the original sale to review this pending customer-name change.'), 'error')
+            } else void submitBulkFieldChange(kind, { key: '', label: '' }, { key: '', label: '' }, [], [], pendingBulkFieldRequest)
+          }}>{translateOr('sale_bulk_retry', 'Retry original request')}</button>
           <button type="button" className="btn-secondary" disabled={bulkFieldSaving} onClick={() => { if (window.confirm(translateOr('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.'))) savePendingBulkFieldRequest(null) }}>{translateOr('sale_bulk_discard', 'Discard retry')}</button>
         </div>
       ) : null}

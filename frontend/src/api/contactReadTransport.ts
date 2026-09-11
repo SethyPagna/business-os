@@ -184,12 +184,13 @@ export function invalidateCustomerReadCache(): void {
 // Sales/POS-only customer identity shape. The server omits Contacts finance
 // and directory-only fields; an offline fallback is projected to the same
 // allowlist so a cached directory row cannot widen the picker response.
-export async function getSalesCustomerPicker(params: QueryParams = {}): Promise<unknown> {
+export async function getSalesCustomerPicker(params: QueryParams = {}, options: { requireFresh?: boolean; signal?: AbortSignal } = {}): Promise<unknown> {
   const query = buildQueryString({ ...params, fields: 'sales_picker' })
   try {
-    return await apiFetch('GET', appendQuery(CUSTOMER_READ.endpoint, query))
+    return await apiFetch('GET', appendQuery(CUSTOMER_READ.endpoint, query), undefined, undefined, { signal: options.signal })
   } catch (error) {
-    if (isInvalidSessionError(error) || isAbortError(error)) throw error
+    const status = Number((error as { status?: unknown } | null)?.status)
+    if (options.requireFresh || status === 401 || status === 403 || isInvalidSessionError(error) || isAbortError(error)) throw error
     const search = String(params.search || params.q || '').trim().toLocaleLowerCase('en-US')
     const ids = new Set(String(params.ids || '').split(',').map((value) => value.trim()).filter(Boolean))
     const rows = (await readLocalContacts('customers'))
