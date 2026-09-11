@@ -113,6 +113,12 @@ await runTest('explicit 80x50 card remains one fitted sheet', () => {
   assert.equal(height.toFixed(2), '141.73')
   assert.equal(x.toFixed(2), '77.95')
   assert.equal(y, 0)
+
+  const receiptSource = fs.readFileSync(new URL('../src/components/receipt/Receipt.tsx', import.meta.url), 'utf8')
+  assert.match(receiptSource, /const compactPrintSettings = \{[^\n]+paperSize: '80x50mm'/,
+    'the actual compact Print/PDF caller preserves the named single-card intent')
+  assert.doesNotMatch(receiptSource, /const compactPrintSettings = \{[^\n]+paperSize: 'custom'/,
+    'the compact caller cannot be confused with an arbitrary custom document')
 })
 
 await runTest('direct continuous print delegates page length to the driver while retaining receipt width', () => {

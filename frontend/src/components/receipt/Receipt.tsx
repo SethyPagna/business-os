@@ -364,7 +364,10 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   // the layout); the full receipt prints on the continuous roll -- an
   // '80x50mm' paper setting maps to the 80mm roll for it, any other
   // configured size is kept as the operator set it.
-  const compactPrintSettings = { ...appliedPrintSettings, paperSize: 'custom', customWidth: '80', customHeight: '50', marginTop: '0', marginRight: '0', marginBottom: '0', marginLeft: '0' }
+  // Keep the named preset on the object passed to printReceipt. That is the
+  // explicit single-card intent; an arbitrary custom 80 x 50 document must
+  // remain a normal paginated document rather than being inferred as compact.
+  const compactPrintSettings = { ...appliedPrintSettings, paperSize: '80x50mm', customWidth: '80', customHeight: '50', marginTop: '0', marginRight: '0', marginBottom: '0', marginLeft: '0' }
   const fullPrintSettings = String(appliedPrintSettings.paperSize || '').toLowerCase() === '80x50mm'
     ? { ...appliedPrintSettings, paperSize: '80mm' }
     : appliedPrintSettings
