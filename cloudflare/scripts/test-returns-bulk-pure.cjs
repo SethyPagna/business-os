@@ -37,6 +37,7 @@ function fixture() {
     sql.exec(fs.readFileSync(path.join(root, 'migrations', file), 'utf8'))
   }
   let batches = 0
+  let failAt = null
   const env = { DB: {
     prepare(text) {
       return { bind(...params) {
@@ -52,12 +53,13 @@ function fixture() {
     async batch(statements) {
       batches += 1
       return sql.transaction(() => statements.map(statement => {
+        if (failAt && statement.text.includes(failAt)) throw new Error('injected failure')
         const result = sql.prepare(statement.text).run(...statement.params)
         return { meta: { changes: result.changes, last_row_id: Number(result.lastInsertRowid) } }
       }))()
     },
   } }
-  return { sql, env, batches: () => batches }
+  return { sql, env, batches: () => batches, fail: value => { failAt = value } }
 }
 
 function seed(f) {
@@ -91,7 +93,7 @@ function request(f, ids, field, source, target, key) {
 }
 
 function snapshot(f) {
-  return JSON.stringify(['returns','products','branch_stock','branch_batch_stock','damaged_stock_lots','inventory_movements','undo_snapshots','action_history','return_bulk_operations','return_bulk_members','return_write_revisions','audit_logs','sale_record_events'].map(table => [table, f.sql.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()]))
+  return JSON.stringify(['returns','return_items','return_item_batch_allocations','sales','products','product_batches','branch_stock','branch_batch_stock','damaged_stock_lots','inventory_movements','undo_snapshots','action_history','return_bulk_operations','return_bulk_members','return_write_revisions','audit_logs','sale_record_events'].map(table => [table, f.sql.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()]))
 }
 
 function saleRecordEvents(f, sourceId) {
@@ -107,6 +109,42 @@ async function replay(f, historyId, direction, generation) {
 }
 
 async function run() {
+  for(const scope of ['customer','supplier']) for(const restoringFirst of [true,false]) {
+    const f=fixture();seed(f)
+    const id=scope==='customer'?1:3, batch=scope==='customer'?1:2, quantity=scope==='customer'?2:3
+    const source=(scope==='customer')===restoringFirst?'cancelled':'completed'
+    const target=source==='cancelled'?'completed':'cancelled'
+    f.sql.exec(`UPDATE returns SET sale_id=NULL,status='${source}' WHERE id=${id};
+      UPDATE branch_batch_stock SET quantity=${restoringFirst?0:quantity} WHERE batch_id=${batch};
+      UPDATE product_batches SET is_active=${restoringFirst?0:1},received_at='2026-09-03' WHERE id=${batch};
+      CREATE TRIGGER test_active_lot_insert BEFORE INSERT ON branch_batch_stock WHEN NEW.quantity>0
+        AND NOT EXISTS(SELECT 1 FROM product_batches WHERE id=NEW.batch_id AND is_active=1)
+        BEGIN SELECT RAISE(ABORT,'constraint failed: inactive parent'); END;
+      CREATE TRIGGER test_active_lot_update BEFORE UPDATE OF quantity ON branch_batch_stock WHEN NEW.quantity>0
+        AND NOT EXISTS(SELECT 1 FROM product_batches WHERE id=NEW.batch_id AND is_active=1)
+        BEGIN SELECT RAISE(ABORT,'constraint failed: inactive parent'); END;`)
+    const metadata=()=>{const {is_active,...row}=f.sql.prepare('SELECT * FROM product_batches WHERE id=?').get(batch);return row}
+    const originalMetadata=metadata(), allocations=f.sql.prepare('SELECT * FROM return_item_batch_allocations ORDER BY id').all()
+    const req=request(f,[id],'status',source,target,`archived-${scope}-${restoringFirst}`)
+    const before=snapshot(f);f.fail('INSERT INTO audit_logs')
+    await assert.rejects(()=>helper.applyReturnBulkAction(f.env,user,req),/injected failure/)
+    assert.equal(snapshot(f),before)
+    f.fail(null)
+    const applied=await helper.applyReturnBulkAction(f.env,user,req)
+    for(const [direction,generation,positive] of [['undo',0,!restoringFirst],['redo',1,restoringFirst]]) {
+      if(positive) f.sql.prepare('UPDATE product_batches SET is_active=0 WHERE id=?').run(batch)
+      const beforeReplay=snapshot(f);f.fail('INSERT INTO audit_logs')
+      await assert.rejects(()=>replay(f,applied.actionHistoryId,direction,generation),/injected failure/)
+      assert.equal(snapshot(f),beforeReplay,'failed replay must roll back activation, quantities, history and audit')
+      f.fail(null)
+      await replay(f,applied.actionHistoryId,direction,generation)
+      assert.equal(f.sql.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=?').get(batch).quantity,positive?quantity:0)
+      assert.equal(f.sql.prepare('SELECT is_active FROM product_batches WHERE id=?').get(batch).is_active,1)
+      assert.deepEqual(metadata(),originalMetadata)
+      assert.deepEqual(f.sql.prepare('SELECT * FROM return_item_batch_allocations ORDER BY id').all(),allocations)
+    }
+  }
+  console.log('PASS archived customer/supplier lot activation in both directions and apply/undo/redo, exact metadata/allocations, full failure rollback')
   let f = fixture(); seed(f)
   const blockedUser = { id: 2, name: 'Employee', username: 'employee', role_code: 'employee', permissions: { returns: true, 'returns:bulk': false } }
   const blockedState = snapshot(f)
