@@ -26,6 +26,9 @@ import {
 const read = (path: string) => fs.readFileSync(new URL(`../src/${path}`, import.meta.url), 'utf8')
 const page = read('components/fees/FeesPage.tsx')
 const transport = read('api/feesTransport.ts')
+const primaryAddAction = page.slice(page.indexOf('actions={canAddFee'), page.indexOf('range={stripRange}'))
+assert.match(primaryAddAction, /bg-blue-600 text-white/, 'expense Add uses the requested blue primary appearance')
+assert.doesNotMatch(primaryAddAction, /toolbarIconButtonClassName|bg-transparent/, 'primary Add must not inherit conflicting transparent icon-button styles')
 
 const deleteSource = page.slice(page.indexOf('export async function performExpenseDelete'), page.indexOf('function formatFeeDate'))
 const performExpenseDelete = new Function(`${stripTypeScriptTypes(deleteSource.replace('export ', ''))}; return performExpenseDelete`)() as (

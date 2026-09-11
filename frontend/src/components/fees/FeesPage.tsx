@@ -693,7 +693,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
           // the range row to save a row.
           <button
             type="button"
-            className={`${toolbarIconButtonClassName} border-blue-600 bg-blue-600 text-white hover:border-blue-700 hover:bg-blue-700 dark:border-blue-500 dark:bg-blue-600 dark:text-white dark:hover:bg-blue-500`}
+            className="inline-flex h-10 min-h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-blue-600 bg-blue-600 text-white hover:border-blue-700 hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-blue-500 dark:bg-blue-600 dark:text-white dark:hover:bg-blue-500"
             onClick={openAdd}
             aria-label={tr('add_fee', 'Add Expense')}
             title={tr('add_fee', 'Add Expense')}
