@@ -4,6 +4,7 @@ import ts from 'typescript'
 import * as scopes from '../src/api/actorReadScope.ts'
 import * as http from '../src/api/http.ts'
 import * as query from '../src/api/query.ts'
+import { mirrorTable, shouldPersistLocalMirror } from '../src/api/localMirrors.ts'
 
 const storage = new Map<string, string>()
 const browserStorage = {
@@ -127,6 +128,8 @@ const sameActor = scopes.captureActorReadScope(key)
 scopes.resetActorReadSession()
 assert.equal(scopes.isActorReadScopeCurrent(sameActor), false, 'same actor reauthentication fences old reads')
 assert.ok(!queryCache.buildQueryCacheStorageKey(key).includes('businessos_user'), 'opaque key does not contain auth storage')
+assert.equal(shouldPersistLocalMirror('branches'), false, 'live read cannot write legacy unscoped lookup mirror')
+assert.deepEqual(await mirrorTable('branches')([{ id: 2 }]), [], 'suppressed mirror does not import/write/clear IndexedDB')
 
 http.cacheClearAll()
 const deniedLater = deferred<unknown>()
