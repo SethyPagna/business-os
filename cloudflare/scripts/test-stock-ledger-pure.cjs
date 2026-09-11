@@ -224,7 +224,12 @@ ok(true, 'supplier filter matches a name-only attributed lot (D1b identity rule)
 {
   const migrationsDir = path.join(cloudflareRoot, 'migrations')
   const files = fs.readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort()
-  const pre = files.filter((f) => !f.startsWith('0084'))
+  // Build the schema exactly as it existed immediately before 0084. The old
+  // exclusion-only filter also loaded 0085+, so migration 0153 referenced
+  // inventory_movements.batch_id before 0084 had added that column.
+  const pre = files.filter((f) => Number.parseInt(f.slice(0, 4), 10) < 84)
+  const migration0084 = files.find((f) => f.startsWith('0084'))
+  assert.ok(migration0084, '0084 migration fixture located')
   const db2 = openDb(pre.map((f) => fs.readFileSync(path.join(migrationsDir, f), 'utf8')))
   db2.prepare(`INSERT INTO products (id, name, unit, stock_quantity, is_active) VALUES (9101, 'Backfill Test', 'pcs', 0, 1)`).run({})
   const mv = (id, qty) => db2.prepare(`INSERT INTO inventory_movements
@@ -237,7 +242,7 @@ ok(true, 'supplier filter matches a name-only attributed lot (D1b identity rule)
   act(101, 601, -5)              // one lot, full coverage -> backfilled
   act(102, 601, -4); act(102, 602, -2) // two lots -> NULL
   act(103, 601, -3)              // one lot, PARTIAL coverage (shortfall) -> NULL
-  db2.exec(fs.readFileSync(path.join(migrationsDir, files.find((f) => f.startsWith('0084'))), 'utf8'))
+  db2.exec(fs.readFileSync(path.join(migrationsDir, migration0084), 'utf8'))
   const got = Object.fromEntries(
     db2.prepare('SELECT id, batch_id FROM inventory_movements WHERE id IN (101, 102, 103)').all({}).map((r) => [r.id, r.batch_id]),
   )

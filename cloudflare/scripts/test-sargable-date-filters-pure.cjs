@@ -329,6 +329,25 @@ const WRAP_RE = /(?<![A-Za-z0-9_])(date|datetime|strftime)\(\s*(?:'[^']*'\s*,\s*
 
 const FILTER_CONTEXT_RE = /(>=|<=|!=|<>|=|<|>|\bBETWEEN\b|\bORDER\s+BY\b)/i
 
+// The source line can contain JavaScript syntax before the SQL literal, for
+// example `const row = await db.prepare(`SELECT date(col) ...`)`. Treating the
+// assignment `=` as SQL filter context turns a harmless SELECT projection
+// into a false predicate finding. Identify the SQL clause at the function
+// call first; a wrapped indexed column in SELECT is not used to find/order
+// rows, while the same expression in WHERE/ON/HAVING/ORDER remains eligible
+// for the sargability check below.
+const SQL_CLAUSE_RE = /\b(SELECT|FROM|WHERE|JOIN|ON|HAVING|ORDER\s+BY|GROUP\s+BY|LIMIT|UNION)\b/gi
+
+function isSelectListProjection(chunkText, matchOffset) {
+  let clause = ''
+  let m
+  SQL_CLAUSE_RE.lastIndex = 0
+  while ((m = SQL_CLAUSE_RE.exec(chunkText)) && m.index < matchOffset) {
+    clause = m[1].toUpperCase().replace(/\s+/g, ' ')
+  }
+  return clause === 'SELECT'
+}
+
 function lineAt(text, offset) {
   let line = 1
   for (let i = 0; i < offset; i++) if (text[i] === '\n') line++
@@ -495,12 +514,18 @@ function scanFile(absPath, relPath, tableIndexLeadingCols, knownTables) {
       const line = lineAt(text, matchOffset)
       const lineText = lineTextAt(text, matchOffset)
 
+      // Tightest-scope-first resolution starts with the statement chunk
+      // bounded by `.prepare(`. Use that same chunk to distinguish SELECT
+      // projection from a predicate before looking for comparison tokens on
+      // the surrounding TypeScript line.
+      const chunk = chunks.find((c) => m.index >= c.start && m.index < c.start + c.text.length) || { start: 0, text: '' }
+      if (isSelectListProjection(chunk.text, m.index - chunk.start)) continue
+
       if (!FILTER_CONTEXT_RE.test(lineText)) continue // SELECT-list/GROUP-BY-only expression, not our defect class
 
       // Tightest-scope-first resolution: the statement chunk (bounded by
       // `.prepare(` calls) containing this match, falling back to the
       // whole route/function scope. See resolveTable's doc comment.
-      const chunk = chunks.find((c) => m.index >= c.start && m.index < c.start + c.text.length) || { text: '' }
       const chunkInfo = buildAliasMap(chunk.text, knownTables)
       const { table, reason: resolution } = resolveTable(alias, column, chunkInfo, scopeInfo)
 
@@ -559,6 +584,19 @@ function main() {
       && /FROM json_each\(@rows\)/.test(legacySubtotalRepairSource)
       && /FROM expected e JOIN sales s ON s\.id=e\.id WHERE/.test(legacySubtotalRepairSource)
       && /FROM sales s WHERE s\.id IN \(SELECT value FROM json_each\(@ids\)\)/.test(legacySubtotalRepairSource),
+  )
+
+  const projectionProbe = "SELECT r.*, date(r.created_at, '+7 hours') AS business_date FROM returns r WHERE r.id = ?"
+  const predicateProbe = "SELECT r.* FROM returns r WHERE date(r.created_at, '+7 hours') = ?"
+  check(
+    'scanner distinguishes SELECT date projection from a wrapped date predicate',
+    isSelectListProjection(projectionProbe, projectionProbe.indexOf('date('))
+      && !isSelectListProjection(predicateProbe, predicateProbe.indexOf('date(')),
+  )
+  const returnsSource = fs.readFileSync(path.join(SRC_DIR, 'routes', 'returns.ts'), 'utf8')
+  check(
+    'returns received-business-date projection remains primary-key bounded',
+    /SELECT\s+r\.\*,\s*date\(r\.created_at\s*,\s*'\+7 hours'\)\s+AS\s+received_business_date[\s\S]{0,180}?FROM\s+returns\s+r[\s\S]{0,180}?WHERE\s+r\.id\s*=\s*\?/i.test(returnsSource),
   )
 
   const files = walkTsFiles(SRC_DIR)
