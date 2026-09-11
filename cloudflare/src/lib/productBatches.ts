@@ -694,7 +694,7 @@ export function restoreBatchStockStatements(batchId: number, branchId: number, q
   if (!Number.isFinite(quantity) || quantity <= 0) return []
   return [
     {
-      sql: `UPDATE product_batches SET is_active = 1, updated_at = datetime('now') WHERE id = @batchId AND is_active != 1`,
+      sql: `UPDATE product_batches SET is_active = 1, updated_at = datetime('now') WHERE id = @batchId AND is_active IS NOT 1`,
       params: { batchId },
     },
     incrementBatchStockStatement(batchId, branchId, quantity),

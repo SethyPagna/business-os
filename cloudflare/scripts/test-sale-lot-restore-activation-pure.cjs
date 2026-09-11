@@ -65,6 +65,25 @@ function stock(db, expected) {
   assert.equal(db.prepare('SELECT total_usd FROM sales WHERE id=1').get().total_usd, 15)
 }
 async function main() {
+  {
+    const db = fixture()
+    db.exec('UPDATE product_batches SET is_active=NULL WHERE id=1')
+    await db.batch(transition().statements)
+    stock(db, 3)
+    assert.equal((await batches.listBatchesForProduct(db, 1, 1, { onlyAvailable: true }))[0].id, 1)
+    assert.equal(db.prepare('SELECT released_quantity FROM sale_item_batch_allocations WHERE id=1').get().released_quantity, 3)
+  }
+  {
+    const db = fixture()
+    db.exec('UPDATE product_batches SET is_active=NULL WHERE id=1')
+    await assert.rejects(db.batch([...transition().statements,
+      { sql: 'INSERT INTO sale_bulk_guards(guard_value) VALUES(0)' }]), /constraint/i)
+    stock(db, 0)
+    assert.equal(db.prepare('SELECT is_active FROM product_batches WHERE id=1').get().is_active, null)
+    assert.equal(db.prepare('SELECT released_quantity FROM sale_item_batch_allocations WHERE id=1').get().released_quantity, 0)
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM inventory_movements').get().n, 0)
+  }
+  console.log('PASS nullable legacy active flag: cancellation activates original dated lot and failure restores NULL atomically')
   for (const oldStatus of ['completed', 'awaiting_payment', 'awaiting_delivery', 'partial_return']) {
     const db = fixture()
     await db.batch(transition({ oldStatus }).statements)
