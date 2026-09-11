@@ -1513,7 +1513,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
                 />
               </SectionExportAction>
             ) : null}
-            <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} t={t} className="h-8 w-8 shrink-0" dense />
+            <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} t={t} align="right" className="h-8 w-8 shrink-0" dense />
             {scope === SUPPLIER_SCOPE ? (
               <button onClick={() => setShowSupplierForm(true)} className="btn-primary inline-flex h-10 min-h-10 w-10 shrink-0 items-center justify-center gap-1 px-0 text-xs sm:w-auto sm:px-2" aria-label={tr('add_supplier_return', 'Add Supplier Return')} title={tr('add_supplier_return', 'Add Supplier Return')}>
                 <ReturnPlusIcon className="h-4 w-4 shrink-0" />

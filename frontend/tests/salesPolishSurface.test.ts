@@ -82,7 +82,7 @@ assert.equal((salesPage.match(/<ShiftHistoryModal/g) || []).length, 1, 'the comp
 assert.match(salesPage, /<StatsStrip[\s\S]*?iconOnly[\s\S]*?compactRange[\s\S]*?rangeActions=\{\([\s\S]*?<SectionExportAction>[\s\S]*?<LazyPortalMenu/, 'Sales uses compact icon Stats and keeps Export/Manage in the date row')
 const salesPagerRow = salesPage.slice(salesPage.indexOf('<PagerActionRow'), salesPage.indexOf('</PagerActionRow>') + '</PagerActionRow>'.length)
 assert.match(salesPagerRow, /leading=\{canUseShifts[\s\S]*?<ShiftHistoryModal/, 'permission-gated Shift leads the centered top pager')
-assert.match(salesPagerRow, /trailing=\{<ActionHistoryBar[\s\S]*?dense/, 'icon-only History trails the centered top pager')
+assert.match(salesPagerRow, /trailing=\{<ActionHistoryBar[\s\S]*?align="right"[\s\S]*?dense/, 'icon-only History trails the centered top pager and opens inward')
 assert.doesNotMatch(salesPagerRow, /<SectionExportAction|translateOr\('manage'/, 'Export and Manage stay with the date range instead of crowding the pager')
 
 assert.match(contactsShared, /border-collapse text-xs/)

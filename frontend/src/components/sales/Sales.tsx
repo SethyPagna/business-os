@@ -2524,7 +2524,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
             buttonClassName="btn-secondary inline-flex h-10 min-h-10 w-10 items-center justify-center overflow-hidden px-0 py-0 text-[10px]"
           />
         ) : null}
-        trailing={<ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} t={t} className="h-8 w-8" dense />}
+        trailing={<ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} t={t} align="right" className="h-8 w-8" dense />}
       >
         <PaginationControls
           compact
