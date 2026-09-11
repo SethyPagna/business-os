@@ -118,9 +118,15 @@ type ExpenseDeleteOperation = {
   begin: () => boolean
   remove: () => Promise<unknown>
   onStart: () => void
-  onSuccess: () => Promise<void>
+  onSuccess: (outcome: 'deleted' | 'pending') => Promise<void>
   onError: (error: unknown) => void
   onFinish: () => void
+}
+
+export function expenseSaleLabel(receipt: string | null | undefined, saleId: number | null | undefined, saleLabel: string): string {
+  const id = Number(saleId)
+  const linkedId = Number.isSafeInteger(id) && id > 0 ? `${saleLabel} #${id}` : ''
+  return [String(receipt || '').trim(), linkedId].filter(Boolean).join(' · ')
 }
 
 export async function performExpenseDelete(operation: ExpenseDeleteOperation): Promise<boolean> {
@@ -130,8 +136,12 @@ export async function performExpenseDelete(operation: ExpenseDeleteOperation): P
   if (!operation.begin()) return false
   operation.onStart()
   try {
-    await operation.remove()
-    await operation.onSuccess()
+    const result = await operation.remove()
+    if (!result || typeof result !== 'object' || !('success' in result) || result.success !== true) {
+      throw new Error('The server did not confirm the expense deletion request.')
+    }
+    const pending = 'pending' in result && result.pending === true
+    await operation.onSuccess(pending ? 'pending' : 'deleted')
     return true
   } catch (error) {
     operation.onError(error)
@@ -595,8 +605,10 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
         'fees:delete',
         FEES_MUTATION_TIMEOUT_MS,
       ),
-      onSuccess: async () => {
-        notify(tr('fee_deleted', 'Expense deleted'), 'success')
+      onSuccess: async (outcome) => {
+        notify(outcome === 'pending'
+          ? tr('reason_submitted_for_review', 'Submitted for review -- changes will appear once approved.')
+          : tr('fee_deleted', 'Expense deleted'), 'success')
         await load(true)
       },
       onError: (error) => notify(error instanceof Error ? error.message : String(error || ''), 'error'),
@@ -826,7 +838,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
                         {fee.sale_receipt_number || fee.sale_id ? (
                           <span className="inline-flex min-w-0 items-center gap-1 rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                             <Receipt className="h-3 w-3 shrink-0" />
-                            <span className="truncate">{fee.sale_receipt_number ? `${fee.sale_receipt_number} · Sale ID #${fee.sale_id}` : `Sale ID #${fee.sale_id}`}</span>
+                            <span className="truncate">{expenseSaleLabel(fee.sale_receipt_number, fee.sale_id, tr('sale', 'Sale'))}</span>
                           </span>
                         ) : null}
                         {fee.created_by_name ? (
@@ -930,9 +942,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
               <dd className="min-w-0 break-words text-slate-800 dark:text-slate-100">{selected.branch_name || '—'}</dd>
               <dt className="text-slate-500 dark:text-slate-400">{tr('receipt', 'Receipt')}</dt>
               <dd className="min-w-0 break-all font-mono text-slate-800 dark:text-slate-100">
-                {selected.sale_receipt_number
-                  ? `${selected.sale_receipt_number}${selected.sale_id ? ` · ${tr('sale', 'Sale')} #${selected.sale_id}` : ''}`
-                  : selected.sale_id ? `${tr('sale', 'Sale')} #${selected.sale_id}` : '—'}
+                {expenseSaleLabel(selected.sale_receipt_number, selected.sale_id, tr('sale', 'Sale')) || '—'}
               </dd>
               <dt className="text-slate-500 dark:text-slate-400">{tr('delivery', 'Delivery')}</dt>
               <dd className="min-w-0 break-words text-slate-800 dark:text-slate-100">{selected.delivery_contact_name || '—'}</dd>
