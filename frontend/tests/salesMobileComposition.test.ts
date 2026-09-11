@@ -75,19 +75,19 @@ assert.match(footer, /\{onReturn \? \([\s\S]*?onReturn\(sale\)/, 'Return remains
 assert.match(footer, /\{onPrint \? \([\s\S]*?onPrint\(sale\)/, 'Print remains hidden when its callback is absent')
 assert.match(footer, /onClick=\{closeGuard\.requestClose\}[\s\S]*?\{t\('close'\) \|\| 'Close'\}/)
 
-// U15: the collapsed card's primary metadata row reads receipt | time |
-// cashier | branch. Long ids stay one nonshrinking value in the row's own
-// horizontal scroller, and the cashier is emphasized.
+// The collapsed card's primary metadata row reads receipt, time, cashier.
+// Branch moves to the third status/payment/items row. Long values still pan
+// horizontally, but the browser scrollbar itself stays hidden.
 const primaryStart = list.indexOf('data-sales-card-primary-meta=""')
 const primaryMeta = list.slice(primaryStart, list.indexOf('</div>', primaryStart))
 const receiptAt = primaryMeta.indexOf("value={sale.receipt_number || ''}")
 const timeAt = primaryMeta.indexOf('{fmtTime(sale.created_at)}')
-const branchAt = primaryMeta.indexOf('{branchLabel ?')
 const cashierAt = primaryMeta.indexOf('{sale.cashier_name ?')
-assert.ok(receiptAt >= 0 && receiptAt < timeAt && timeAt < cashierAt && cashierAt < branchAt, 'collapsed metadata order is receipt, time, cashier, branch')
-assert.equal((primaryMeta.match(/<span aria-hidden="true">\|<\/span>/g) || []).length, 3, 'the four facts use visible pipe separators')
+assert.ok(receiptAt >= 0 && receiptAt < timeAt && timeAt < cashierAt, 'collapsed metadata order is receipt, time, cashier')
+assert.doesNotMatch(primaryMeta, /\{branchLabel \?/, 'branch no longer consumes the first metadata row')
+assert.doesNotMatch(primaryMeta, /aria-hidden="true">\|<\/span>/, 'primary facts use compact spacing rather than visible pipe separators')
 assert.match(primaryMeta, /className="shrink-0 whitespace-nowrap font-mono/, 'the complete receipt id stays single-line and does not shrink')
-assert.match(primaryMeta, /overflow-x-auto whitespace-nowrap/, 'the primary metadata row owns horizontal overflow')
+assert.match(primaryMeta, /overflow-x-auto[^"]*whitespace-nowrap[^"]*\[scrollbar-width:none\][^"]*\[&::\-webkit-scrollbar\]:hidden/, 'the primary metadata row pans without showing a horizontal scrollbar')
 assert.doesNotMatch(primaryMeta, /text-blue|underline/, 'the receipt remains plain information rather than a link')
 assert.match(primaryMeta, /font-bold text-gray-700 dark:text-gray-200[\s\S]*?aria-label=\{`\$\{t\('cashier'\)/, 'cashier is bold and explicitly identified to assistive technology')
 assert.match(copyable, /data-copyable-id="true"[\s\S]*?role="button"[\s\S]*?tabIndex=\{0\}/, 'plain receipt text remains keyboard-copyable')
@@ -96,7 +96,17 @@ assert.doesNotMatch(copyable, /onClick=|Copy\s*className|Clipboard/, 'CopyableId
 const contactMetaStart = list.indexOf("{/* Y17: customer (name + phone) leads the meta line;")
 const contactMeta = list.slice(contactMetaStart, list.indexOf('</div>', contactMetaStart))
 assert.match(contactMeta, /sale\.customer_phone[\s\S]*?aria-hidden="true">\|<\/span>[\s\S]*?aria-label=\{`\$\{t\('delivery'\)/, 'phone and delivery share the compact contact row')
+assert.match(contactMeta, /overflow-x-auto[^"]*\[scrollbar-width:none\][^"]*\[&::\-webkit-scrollbar\]:hidden/, 'the contact rail also hides its scrollbar without losing overflow access')
 assert.doesNotMatch(contactMeta, /\{t\('driver'\)\}:/, 'the driver name is shown directly without a visible Driver prefix')
+
+const statusMetaStart = list.indexOf('data-sales-card-status-meta=""')
+const statusMeta = list.slice(statusMetaStart, list.indexOf('</div>', statusMetaStart))
+const statusBranchAt = statusMeta.indexOf('{branchLabel ?')
+const statusBadgeAt = statusMeta.indexOf('<StatusBadge')
+const paymentAt = statusMeta.indexOf('{sale.payment_method ?')
+const itemsAt = statusMeta.indexOf('{items.length}')
+assert.ok(statusBranchAt >= 0 && statusBranchAt < statusBadgeAt && statusBadgeAt < paymentAt && paymentAt < itemsAt, 'third row is branch, status, payment, items')
+assert.match(statusMeta, /overflow-x-auto[^"]*\[scrollbar-width:none\][^"]*\[&::\-webkit-scrollbar\]:hidden/, 'the third metadata row preserves flex scrolling while hiding the scrollbar')
 
 // F75 authority must survive this presentation-only edit.
 assert.match(list, /import \{ useApp as useAppHook \} from '\.\.\/\.\.\/AppContext\.tsx'/)

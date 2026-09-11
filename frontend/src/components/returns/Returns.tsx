@@ -61,7 +61,9 @@ import {
 import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
 import ShiftHistoryModal from '../shifts/ShiftHistoryModal.tsx'
 import { todayDateTimeRange, type DateTimeRange } from '../shared/DateTimeRangePicker'
-import { manageToolbarButtonClassName, primaryToolbarButtonClassName, toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
+import { toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
+import SectionExportAction from '../shared/SectionExportAction.tsx'
+import PagerActionRow from '../shared/PagerActionRow.tsx'
 import ReturnsListSurface from './ReturnsListSurface'
 import { RETURN_BULK_LIMIT, type ReturnBulkPayload, type ReturnBulkResult } from './helpers/returnBulkAction.ts'
 import type { PreparedReturnUpdateRequest } from '../../api/returnsTransport.ts'
@@ -1494,49 +1496,38 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
         onRangeChange={setStripRange}
         showTime={false}
         showPresets
-        // Keep the range row bounded at 320px: Stats + date consume the
-        // flexible space and the icon-only Export keeps one fixed 40px slot.
+        iconOnly
+        compactRange
+        // Compact phone actions leave the flexible space to the full date;
+        // Export moves to the existing mobile title host while History and
+        // Add Return retain fixed icon slots in this range row.
         rangeActions={(
-          canExportReturns ? (
-            <ExportMenu
-              label={tr('export', 'Export')}
-              items={exportItems}
-              iconOnly
-              triggerClassName={toolbarIconButtonClassName}
-            />
-          ) : null
+          <>
+            {canExportReturns ? (
+              <SectionExportAction>
+                <ExportMenu
+                  label={tr('export', 'Export')}
+                  items={exportItems}
+                  iconOnly
+                  triggerClassName={toolbarIconButtonClassName}
+                />
+              </SectionExportAction>
+            ) : null}
+            <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} t={t} className="h-8 w-8 shrink-0" dense />
+            {scope === SUPPLIER_SCOPE ? (
+              <button onClick={() => setShowSupplierForm(true)} className="btn-primary inline-flex h-10 min-h-10 w-10 shrink-0 items-center justify-center gap-1 px-0 text-xs sm:w-auto sm:px-2" aria-label={tr('add_supplier_return', 'Add Supplier Return')} title={tr('add_supplier_return', 'Add Supplier Return')}>
+                <ReturnPlusIcon className="h-4 w-4 shrink-0" />
+                <span className="hidden sm:inline">{tr('supplier_return', 'Supplier Return').replace(/^ការ/u, '')}</span>
+              </button>
+            ) : (
+              <button onClick={() => setShowCustomerForm(true)} className="btn-primary inline-flex h-10 min-h-10 w-10 shrink-0 items-center justify-center gap-1 px-0 text-xs sm:w-auto sm:px-2" aria-label={tr('add_return', 'Add Return')} title={tr('add_return', 'Add Return')}>
+                <ReturnPlusIcon className="h-4 w-4 shrink-0" />
+                <span className="hidden sm:inline">{tr('return', 'Return').replace(/^ការ/u, '')}</span>
+              </button>
+            )}
+          </>
         )}
       />
-
-      {/* Longer bilingual actions get their own contained, non-wrapping rail.
-          It scrolls inside the page at phone widths instead of widening the
-          viewport or starving the date trigger on the primary row. */}
-      <div data-returns-secondary-actions className="mb-3 max-w-full min-w-0 overflow-x-auto overscroll-x-contain pb-1">
-        <div className="flex w-max min-w-full flex-nowrap items-center gap-1">
-          <ShiftHistoryModal
-            label={tr('shift_code', 'Shift')}
-            buttonClassName={`${manageToolbarButtonClassName} shrink-0 !flex-none`}
-          />
-          {canEditReturn ? (
-            <button type="button" className={`${manageToolbarButtonClassName} shrink-0 !flex-none`} onClick={() => setShowReasonManager(true)} title={tr('manage_return_reasons', 'Manage return reasons')}>
-              <Settings2 className="h-3.5 w-3.5" />
-              <span>{tr('reasons', 'Reasons')}</span>
-            </button>
-          ) : null}
-          <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} t={t} className="shrink-0 [&_button]:!h-10 [&_button]:!min-h-10 [&_button]:!flex-none" dense />
-          {scope === SUPPLIER_SCOPE ? (
-            <button onClick={() => setShowSupplierForm(true)} className={`${primaryToolbarButtonClassName} ml-auto shrink-0 !flex-none`} aria-label={tr('add_supplier_return', 'Add Supplier Return')} title={tr('add_supplier_return', 'Add Supplier Return')}>
-              <ReturnPlusIcon className="h-4 w-4" />
-              <span>{tr('supplier_return', 'Supplier Return').replace(/^ការ/u, '')}</span>
-            </button>
-          ) : (
-            <button onClick={() => setShowCustomerForm(true)} className={`${primaryToolbarButtonClassName} ml-auto shrink-0 !flex-none`} aria-label={tr('add_return', 'Add Return')} title={tr('add_return', 'Add Return')}>
-              <ReturnPlusIcon className="h-4 w-4" />
-              <span>{tr('return', 'Return').replace(/^ការ/u, '')}</span>
-            </button>
-          )}
-        </div>
-      </div>
 
       {/* Search + filter pin to the top of the page's scroll container while
           scrolling -- same `sticky top-2` treatment as Products/Inventory/
@@ -1579,10 +1570,24 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
       {/* The first centered pager sits directly below the search/filter row;
           the list follows immediately so neither control is displaced by
           secondary explanatory copy. */}
-      <div className="mb-3 flex justify-center">
+      <PagerActionRow
+        className="mb-3"
+        leading={(
+          <ShiftHistoryModal
+            label={tr('shift_code', 'Shift')}
+            buttonClassName="btn-secondary inline-flex h-10 min-h-10 w-10 items-center justify-center overflow-hidden px-0 py-0 text-[10px]"
+          />
+        )}
+        trailing={canEditReturn ? (
+          <button type="button" className="btn-secondary inline-flex h-8 min-h-8 w-8 items-center justify-center p-0" onClick={() => setShowReasonManager(true)} aria-label={tr('manage_return_reasons', 'Manage return reasons')} title={tr('manage_return_reasons', 'Manage return reasons')}>
+            <Settings2 className="h-3.5 w-3.5" />
+          </button>
+        ) : null}
+      >
         <PaginationControls
           compact
           rangeAsPageSize
+          compactCentered
           page={returnPage}
           pageSize={returnPageSize}
           totalItems={allVisibleReturns.length}
@@ -1594,7 +1599,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
             setReturnPage(1)
           }}
         />
-      </div>
+      </PagerActionRow>
       <ReturnsListSurface
         collapsedReturnSections={collapsedReturnSections}
         CUSTOMER_SCOPE={CUSTOMER_SCOPE}
@@ -1626,7 +1631,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
       />
 
       <div className="mt-3 flex justify-center">
-        <PaginationControls compact rangeAsPageSize page={returnPage} pageSize={returnPageSize} totalItems={allVisibleReturns.length} label={tr('returns_count', 'returns')} t={t} onPageChange={setReturnPage} onPageSizeChange={(size) => { setReturnPageSize(size); setReturnPage(1) }} />
+        <PaginationControls compact rangeAsPageSize compactCentered page={returnPage} pageSize={returnPageSize} totalItems={allVisibleReturns.length} label={tr('returns_count', 'returns')} t={t} onPageChange={setReturnPage} onPageSizeChange={(size) => { setReturnPageSize(size); setReturnPage(1) }} />
       </div>
 
       {canExportReturns && exportDialog ? (

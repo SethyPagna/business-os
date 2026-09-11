@@ -502,6 +502,8 @@ export default function ReturnsListSurface({
                         ) : null}
                         <div className="flex min-w-0 items-center justify-between gap-2">
                           <div data-return-primary-meta className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden text-xs text-gray-500 dark:text-gray-400">
+                            <span className="shrink-0 tabular-nums">{fmtTime(ret.created_at)}</span>
+                            <span aria-hidden="true" className="shrink-0">·</span>
                             <CopyableId
                               value={ret.return_number || ''}
                               copyLabel={tr('copy_return_id', 'Copy return ID')}
@@ -509,20 +511,6 @@ export default function ReturnsListSurface({
                               className="max-w-[42%] shrink"
                               valueClassName="truncate font-mono text-sm font-semibold text-gray-900 dark:text-white"
                             />
-                            {ret.receipt_number ? (
-                              <>
-                                <span aria-hidden="true" className="shrink-0">·</span>
-                                <CopyableId
-                                  value={ret.receipt_number}
-                                  copyLabel={tr('copy_receipt_number', 'Copy receipt number')}
-                                  copiedLabel={tr('copied', 'Copied')}
-                                  className="min-w-0 shrink"
-                                  valueClassName="truncate font-mono text-gray-700 dark:text-gray-300"
-                                />
-                              </>
-                            ) : null}
-                            <span aria-hidden="true" className="shrink-0">·</span>
-                            <span className="shrink-0 tabular-nums">{fmtTime(ret.created_at)}</span>
                           </div>
                           <div className="flex shrink-0 items-center gap-1.5">
                               {(ret.damaged_item_count || 0) > 0 ? (
@@ -537,6 +525,17 @@ export default function ReturnsListSurface({
                             {renderAmount(ret)}
                           </div>
                         </div>
+                        {ret.receipt_number ? (
+                          <div data-return-receipt-meta className="mt-1 flex min-w-0 flex-nowrap items-center overflow-x-auto overscroll-x-contain whitespace-nowrap text-[11px] leading-4 text-gray-500 dark:text-gray-400 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                            <CopyableId
+                              value={ret.receipt_number}
+                              copyLabel={tr('copy_receipt_number', 'Copy receipt number')}
+                              copiedLabel={tr('copied', 'Copied')}
+                              className="shrink-0"
+                              valueClassName="font-mono text-gray-700 dark:text-gray-300"
+                            />
+                          </div>
+                        ) : null}
                         <div data-return-secondary-meta className="mt-1 flex min-w-0 flex-nowrap items-center gap-1.5 overflow-hidden text-[11px] leading-4 text-gray-500 dark:text-gray-400">
                           <span className="min-w-0 truncate" aria-label={`${tr('cashier', 'Cashier')}: ${ret.cashier_name || '-'}`}>{ret.cashier_name || '-'}</span>
                           <span aria-hidden="true" className="shrink-0">·</span>
