@@ -50,7 +50,7 @@ import SaleStatusWorkflow from './SaleStatusWorkflow.tsx'
 import { claimSyncProblemPresentation, type SyncProblemPresentationOwner } from '../../utils/syncProblemLifecycle.ts'
 import { sanitizeSaleDetailText } from './saleDetailText.ts'
 import SaleSettlementEditor, { MAX_SETTLEMENT_ROWS } from './SaleSettlementEditor.tsx'
-import { readSettlementConfig, startSettlementConfigRead, type SettlementConfig } from './saleSettlementConfig.ts'
+import { advanceSaleSecurityScope, saleSecurityFingerprint, readSettlementConfig, startSettlementConfigRead, type SettlementConfig, type SaleSecurityUser } from './saleSettlementConfig.ts'
 import {
   advanceSettlementReviewVersion,
   buildSettlementPayload,
@@ -379,8 +379,10 @@ export default function SaleDetailModal({
     if (!pendingStatus || !statusRecoveryOwner) return
     return claimSyncProblemPresentation(statusRecoveryOwner)
   }, [pendingStatus, statusRecoveryOwner?.actorId, statusRecoveryOwner?.requestId, statusRecoveryOwner?.problem.errorId, statusRecoveryOwner?.problem.channel, statusRecoveryOwner?.problem.code])
-  const { navigateTo, user } = useApp() as { navigateTo?: (page: string, anchor?: string) => void; user?: { id?: string | number } | null }
-  const detailScope = `${user?.id ?? 'anonymous'}:${sale?.id ?? ''}`
+  const { navigateTo, user, authReady } = useApp() as { navigateTo?: (page: string, anchor?: string) => void; user?: SaleSecurityUser | null; authReady: boolean }
+  const securityFingerprint = saleSecurityFingerprint(user, authReady)
+  const securityGenerationRef = useRef({ fingerprint: securityFingerprint, generation: 0 })
+  const detailScope = `${advanceSaleSecurityScope(securityGenerationRef.current, securityFingerprint)}:${sale?.id ?? ''}`
   const detailScopeRef = useRef(detailScope)
   detailScopeRef.current = detailScope
   const detailAliveRef = useRef(true)
@@ -587,10 +589,11 @@ export default function SaleDetailModal({
   const saleId = sale?.id
   useEffect(() => {
     setPaymentConfig((current) => ({ ...current, scope: detailScope, status: 'loading' }))
+    if (!authReady) return
     return startSettlementConfigRead(readSettlementConfig, (value) => {
       setPaymentConfig({ scope: detailScope, status: 'ready', value })
     }, () => { setPaymentConfig((current) => ({ ...current, scope: detailScope, status: 'failed' })) })
-  }, [detailScope, rawMethodsVersion, rawRateVersion, paymentConfigReload])
+  }, [detailScope, authReady, rawMethodsVersion, rawRateVersion, paymentConfigReload])
 
   useEffect(() => {
     if (!paymentConfigLoaded || !paymentConfig.value || statusSaving || pendingStatus) return
@@ -1281,7 +1284,7 @@ export default function SaleDetailModal({
   }
 
   const handleStatusUpdate = async (): Promise<void> => {
-    if (!onStatusChange || newStatus === currentStatus || settlementFrozenRef.current) return
+    if (!authReady || !onStatusChange || newStatus === currentStatus || settlementFrozenRef.current) return
     if (needsPaymentEntry && !paymentConfigReady) return
     const requestScope = detailScope
     let extra: Record<string, unknown> | null = null

@@ -2,15 +2,16 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { transformSync } from 'esbuild'
 import { configuredSettlementMethods } from '../src/components/sales/saleSettlement.ts'
+import { effectivePermissions } from '../src/utils/permissions.ts'
 
 const source = fs.readFileSync(new URL('../src/components/sales/SaleDetailModal.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const helper = fs.readFileSync(new URL('../src/components/sales/saleSettlementConfig.ts', import.meta.url), 'utf8')
 const module = { exports: {} as any }
 const requests: any[] = []
 new Function('require', 'module', 'exports', transformSync(helper, { loader: 'ts', format: 'cjs' }).code)(
-  (name: string) => name.includes('saleSettlement') ? { configuredSettlementMethods } : { apiFetch: (...args: any[]) => { requests.push(args); return Promise.resolve({ pos_payment_methods: '["Cash","ABA"]', exchange_rate: '4100' }) } }, module, module.exports,
+  (name: string) => name.includes('permissions') ? { effectivePermissions } : name.includes('saleSettlement') ? { configuredSettlementMethods } : { apiFetch: (...args: any[]) => { requests.push(args); return Promise.resolve({ pos_payment_methods: '["Cash","ABA"]', exchange_rate: '4100' }) } }, module, module.exports,
 )
-const { parseSettlementConfig, readSettlementConfig, startSettlementConfigRead } = module.exports
+const { parseSettlementConfig, readSettlementConfig, startSettlementConfigRead, saleSecurityFingerprint, advanceSaleSecurityScope } = module.exports
 const flush = async () => { for (let i = 0; i < 6; i++) await Promise.resolve() }
 const deferred = () => { let resolve!: (value: any) => void; let reject!: (value: any) => void; const promise = new Promise((yes, no) => { resolve = yes; reject = no }); return { promise, resolve, reject } }
 
@@ -42,7 +43,7 @@ assert.equal(requests[0][3], 8000); assert.equal(requests[0][4].signal, signal)
 let request = deferred()
 let aborted = false
 const configEnv: any = {
-  detailScope: 'actor1:sale1', rawMethodsVersion: '', rawRateVersion: '', paymentConfigReload: 0,
+  detailScope: 'actor1:sale1', authReady: true, rawMethodsVersion: '', rawRateVersion: '', paymentConfigReload: 0,
   paymentConfig: { scope: 'actor1:sale1', status: 'loading' },
   setPaymentConfig(value: any) { this.paymentConfig = typeof value === 'function' ? value(this.paymentConfig) : value },
   readSettlementConfig: (signal: AbortSignal) => { signal.addEventListener('abort', () => { aborted = true }); return request.promise },
@@ -115,7 +116,7 @@ let statusWrites = 0
 let closed = 0
 const statusRequest = deferred()
 const submitEnv: any = {
-  newStatus: 'completed', currentStatus: 'awaiting_payment', settlementFrozenRef: { current: false },
+  newStatus: 'completed', currentStatus: 'awaiting_payment', authReady: true, settlementFrozenRef: { current: false },
   needsPaymentEntry: true, paymentConfigReady: false, detailScope: 'actor1:sale1',
   detailScopeRef: { current: 'actor1:sale1' }, detailAliveRef: { current: true },
   sale: { id: 1 }, statusNotes: '', onStatusChange: () => { statusWrites++; return statusRequest.promise },
@@ -147,4 +148,42 @@ assert.equal(trackedReads, 1, 'unchanged capability does not refetch tracked IDs
 trackedEnv.sale = { branch_id: 3 }; trackedEffect.render(); await flush()
 assert.equal(trackedReads, 2, 'branch change still revalidates tracking')
 trackedEffect.unmount()
+
+const actor = { id: 7, name: 'Before', organization_id: 1, permissions: { sales: true, 'sales:status': true, products: true } }
+const fingerprint = saleSecurityFingerprint(actor, true)
+assert.equal(saleSecurityFingerprint({ ...actor, name: 'After', permissions: '{"products":true,"sales:status":true,"sales":true}' }, true), fingerprint, 'profile and normalized permission ordering are stable')
+const revoked = saleSecurityFingerprint({ ...actor, permissions: { ...actor.permissions, 'sales:status': false } }, true)
+assert.notEqual(revoked, fingerprint)
+assert.notEqual(saleSecurityFingerprint({ ...actor, role_code: 'admin' }, true), fingerprint)
+assert.notEqual(saleSecurityFingerprint({ ...actor, organization_id: 2 }, true), fingerprint)
+const securityState = { fingerprint, generation: 0 }
+const originalScope = advanceSaleSecurityScope(securityState, fingerprint)
+assert.equal(advanceSaleSecurityScope(securityState, saleSecurityFingerprint({ ...actor, name: 'After' }, true)), originalScope)
+assert.notEqual(advanceSaleSecurityScope(securityState, revoked), originalScope)
+assert.notEqual(advanceSaleSecurityScope(securityState, fingerprint), originalScope, 'restored permission does not resurrect earlier generation')
+const beforeReauth = advanceSaleSecurityScope(securityState, fingerprint)
+advanceSaleSecurityScope(securityState, saleSecurityFingerprint(actor, false))
+assert.notEqual(advanceSaleSecurityScope(securityState, fingerprint), beforeReauth, 'same-ID reauthentication is a new generation')
+
+// Re-run production read and submit with a same-ID permission change, not an actor swap.
+const staleConfigRequest = deferred()
+const sameActorEnv: any = { ...configEnv, detailScope: `${originalScope}:sale1`, paymentConfig: { status: 'loading' }, readSettlementConfig: () => staleConfigRequest.promise }
+sameActorEnv.setPaymentConfig = (value: any) => { sameActorEnv.paymentConfig = typeof value === 'function' ? value(sameActorEnv.paymentConfig) : value }
+const sameActorEffect = effect('setPaymentConfig((current) => ({ ...current, scope: detailScope, status:', sameActorEnv)
+sameActorEffect.render()
+sameActorEnv.detailScope = `${advanceSaleSecurityScope(securityState, revoked)}:sale1`
+const freshConfigRequest = deferred(); sameActorEnv.readSettlementConfig = () => freshConfigRequest.promise
+sameActorEffect.render()
+staleConfigRequest.resolve(parseSettlementConfig({ pos_payment_methods: '["STALE"]' })); await flush()
+assert.equal(sameActorEnv.paymentConfig.status, 'loading', 'old same-ID permission scope cannot hydrate registry')
+freshConfigRequest.resolve(parseSettlementConfig({ pos_payment_methods: '["Cash"]' })); await flush()
+assert.deepEqual(sameActorEnv.paymentConfig.value.configuredMethods, ['Cash'])
+sameActorEffect.unmount()
+const sameActorRequest = deferred()
+const sameActorSubmitEnv = { ...submitEnv, detailScope: originalScope, detailScopeRef: { current: originalScope }, settlementFrozenRef: { current: false }, onStatusChange: () => sameActorRequest.promise, setPayError: () => { throw new Error('old security response must not update error') } }
+const sameActorSubmit = new Function('env', `with (env) { ${submitCode}; return handleStatusUpdate }`)(sameActorSubmitEnv)
+const sameActorWrite = sameActorSubmit()
+sameActorSubmitEnv.detailScopeRef.current = advanceSaleSecurityScope(securityState, revoked)
+sameActorRequest.resolve({ settlementError: 'old-session error' }); await sameActorWrite
+assert.equal(closed, 0)
 console.log('saleDetailLifecycle: actual configuration/status/history effects PASS')

@@ -1,5 +1,30 @@
 import { apiFetch } from '../../api/http.ts'
 import { configuredSettlementMethods } from './saleSettlement.ts'
+import { effectivePermissions, type PermissionUser } from '../../utils/permissions.ts'
+
+export type SaleSecurityUser = NonNullable<PermissionUser> & {
+  id?: unknown; organization_id?: unknown; organization_group_id?: unknown; organization_public_id?: unknown
+}
+
+/** Stable authority, never object identity or credentials. Profile/name refreshes
+ * must not remount an in-progress review. authReady changes mark reauthentication. */
+export function saleSecurityFingerprint(user: SaleSecurityUser | null | undefined, authReady: boolean): string {
+  const authority = effectivePermissions(user)
+  const permissions = Object.entries(authority.merged)
+    .filter(([key]) => /^(all|sales|pos|products|inventory|returns|contacts|fees|branches|settings)(:|$)/.test(key))
+    .sort(([left], [right]) => left.localeCompare(right))
+  return JSON.stringify([
+    authReady, String(user?.id ?? ''), String(user?.organization_id ?? ''),
+    String(user?.organization_group_id ?? ''), String(user?.organization_public_id ?? ''),
+    authority.isAdmin, permissions,
+  ])
+}
+
+export function advanceSaleSecurityScope(state: { fingerprint: string; generation: number }, fingerprint: string): string {
+  if (state.fingerprint !== fingerprint) { state.fingerprint = fingerprint; state.generation++ }
+  // Generation prevents a revoked-and-restored grant accepting the first request.
+  return `${state.generation}:${fingerprint}`
+}
 
 export type SettlementConfig = { configuredMethods: string[]; exchangeRate: number }
 

@@ -56,9 +56,12 @@ let writes = 0
 let active = pending
 let actor = '7'
 let outcome: any = { state: 'recovered', sale: fresh }
-const callback = new Function('currentPendingDirectStatus', 'reconcilePendingStatus', 'statusActorRef', 'handleStatusChange', 'setDetailSale', 'actionHistory', `${code}; return callback`)(
+let security = 'security:7:0'
+let revokeDuringRead = false
+const callback = new Function('statusSecurityScope', 'statusSecurityRef', 'authReady', 'currentPendingDirectStatus', 'reconcilePendingStatus', 'statusActorRef', 'handleStatusChange', 'setDetailSale', 'actionHistory', `${code}; return callback`)(
+  security, { get current() { return security } }, true,
   () => active,
-  async () => outcome,
+  async () => { if (revokeDuringRead) security = 'security:7:1'; return outcome },
   { get current() { return actor } },
   async (...args: any[]) => { writes++; assert.strictEqual(args[6], pending.body); return true },
   () => {}, {},
@@ -78,4 +81,10 @@ actor = '7'
 outcome = { state: 'superseded' }
 await callback()
 assert.equal(writes, 1, 'superseded operation never submits')
+outcome = { state: 'pending', committed: false }
+revokeDuringRead = true
+await callback()
+assert.equal(writes, 1, 'same-ID permission change while reading proof cannot replay an old closure')
+await callback()
+assert.equal(writes, 1, 'stale retry callback remains invalid even before its first read')
 console.log('PASS bounded read-only sale recovery, stale/missing proof, late responses, actor guards and production retry callback')
