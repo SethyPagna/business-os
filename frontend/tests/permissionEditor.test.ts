@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import ts from 'typescript'
+import { isActionOverriddenOff } from '../src/utils/permissionActions.ts'
 import { normalizePermissionState } from '../src/utils/permissions.ts'
 
 const source = fs.readFileSync(new URL('../src/components/users/PermissionEditor.tsx', import.meta.url), 'utf8')
@@ -13,6 +14,32 @@ assert.match(source, /PERMISSION_SECTIONS/)
 assert.match(source, /from '\.\/permissionDefinitions'/)
 assert.match(source, /permission_sensitive_critical/)
 assert.match(source, /section\.permissions\.map/)
+assert.doesNotMatch(source, /<select\b/, 'permission choices use the shared dropdown, not a forbidden native select')
+assert.match(source, /<AppSelect[\s\S]*ariaLabel=\{translate\('perm_sales_customer_mode'/, 'customer mode uses an accessible shared AppSelect')
+const parsedEditor = ts.createSourceFile('PermissionEditor.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+let customerModeCallback = ''
+function findModeCallback(node: ts.Node): void {
+  if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(parsedEditor) === 'AppSelect') {
+    const change = node.attributes.properties.find((prop) => ts.isJsxAttribute(prop) && prop.name.getText(parsedEditor) === 'onChange')
+    if (change && ts.isJsxAttribute(change) && change.initializer && ts.isJsxExpression(change.initializer) && change.initializer.expression) {
+      customerModeCallback = change.initializer.expression.getText(parsedEditor)
+    }
+  }
+  ts.forEachChild(node, findModeCallback)
+}
+findModeCallback(parsedEditor)
+assert.ok(customerModeCallback, 'the actual shared control has a mode callback')
+const modeCallbackJs = ts.transpileModule(`const callback = ${customerModeCallback}`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
+for (const nameOnly of [false, true]) {
+  const changes: unknown[] = []
+  const callback = new Function('perms', 'isActionOverriddenOff', 'toggleActionOverride', `${modeCallbackJs}; return callback`)(
+    nameOnly ? { 'sales:customer_reassign': false } : {}, isActionOverriddenOff, (...args: unknown[]) => changes.push(args),
+  )
+  callback(nameOnly ? 'name-only' : 'assignment')
+  assert.equal(changes.length, 0, 'reselecting the current AppSelect option must not invert permission')
+  callback(nameOnly ? 'assignment' : 'name-only')
+  assert.deepEqual(changes, [['sales', 'customer_reassign']], 'changing option flips only the narrowing override')
+}
 assert.match(
   source,
   /translate\(`\$\{section\.tKey\}_desc`, section\.description\)/,

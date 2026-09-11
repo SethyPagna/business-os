@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import InfoHint from '../shared/InfoHint.tsx'
+import AppSelect from '../shared/AppSelect.tsx'
 import { PERMISSION_SECTIONS, type PermissionDefinition, type PermissionSection, type PermissionSensitivity } from './permissionDefinitions'
 import { normalizePermissionState, type PermissionValue } from '../../utils/permissions.ts'
 import { actionOverrideKey, actionsForKey, isActionOverriddenOff, outcomeAt, type ActionOutcome } from '../../utils/permissionActions.ts'
@@ -489,15 +490,21 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
                           {permission.key === 'sales' ? (
                             <label className="mb-2 block px-1 text-xs text-gray-700 dark:text-gray-200">
                               {translate('perm_sales_customer_mode', 'Edit customer mode')}
-                              <select
-                                className="input mt-1 w-full text-xs"
+                              <AppSelect
+                                className="mt-1 w-full"
+                                buttonClassName="input w-full text-xs"
+                                ariaLabel={translate('perm_sales_customer_mode', 'Edit customer mode')}
                                 disabled={tier !== 'full' || isActionOverriddenOff(perms as Record<string, unknown>, 'sales', 'customer')}
                                 value={isActionOverriddenOff(perms as Record<string, unknown>, 'sales', 'customer_reassign') ? 'name-only' : 'assignment'}
-                                onChange={() => toggleActionOverride('sales', 'customer_reassign')}
-                              >
-                                <option value="assignment">{translate('perm_sales_customer_assignment', 'Choose another customer (default)')}</option>
-                                <option value="name-only">{translate('perm_sales_customer_name_only', 'Edit this sale’s name only')}</option>
-                              </select>
+                                onChange={(value) => {
+                                  const nameOnly = isActionOverriddenOff(perms as Record<string, unknown>, 'sales', 'customer_reassign')
+                                  if ((value === 'name-only') !== nameOnly) toggleActionOverride('sales', 'customer_reassign')
+                                }}
+                                options={[
+                                  { value: 'assignment', label: translate('perm_sales_customer_assignment', 'Choose another customer (default)') },
+                                  { value: 'name-only', label: translate('perm_sales_customer_name_only', 'Edit this sale’s name only') },
+                                ]}
+                              />
                             </label>
                           ) : null}
                           <ul className="grid gap-x-4 gap-y-0.5 sm:grid-cols-2">
