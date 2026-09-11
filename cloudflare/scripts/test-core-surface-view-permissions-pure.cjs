@@ -118,7 +118,7 @@ async function main() {
   for (const section of ['inventory', 'branches']) {
     for (const tier of ['review', 'view']) await denied(`/${section}/transfer`, staff({ [section]: tier }), 'POST')
     await denied(`/${section}/transfer`, staff({ [section]: true }, { [`${section}:transfer`]: false }), 'POST')
-    const response = await request(`/${section}/transfer`, staff({ [section]: true }, revoked), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+    const response = await request(`/${section}/transfer`, staff({ [section]: true }, revoked), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"transfer_provenance_version":1}' })
     assert.equal(response.status, 400, `${section}: view denial must not revoke independently authorized transfer`)
     assert.equal(opens, 0)
   }
