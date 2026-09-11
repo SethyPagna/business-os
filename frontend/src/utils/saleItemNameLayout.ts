@@ -26,5 +26,9 @@ export function balancedSaleItemNameLines(value: string, splitAfter = 32): reado
 
 /** Keep compact number controls only as wide as their current editable text. */
 export function saleEditorInputWidth(value: string, minimumCharacters = 5): string {
-  return `${Math.max(minimumCharacters, Array.from(value).length + 3)}ch`
+  // One character is reserved beyond the visible value/padding allowance for
+  // the native number-input controls. Without it, Chromium's inner text box
+  // is about 4px too narrow for realistic decimal quantities and prices even
+  // though the outer input appears wide enough.
+  return `${Math.max(minimumCharacters, Array.from(value).length + 4)}ch`
 }

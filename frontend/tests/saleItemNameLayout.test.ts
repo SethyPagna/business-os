@@ -22,7 +22,7 @@ assert.ok(khmerBalanced.length <= 2)
 assert.equal(khmerBalanced.join(''), khmerWords, 'Khmer whitespace boundaries must also retain the exact original text')
 
 assert.equal(saleEditorInputWidth('3'), '5ch', 'short values keep a compact usable floor')
-assert.equal(saleEditorInputWidth('12345.67'), '11ch', 'long values grow instead of clipping inside a fixed-width input')
-assert.equal(saleEditorInputWidth('១២៣៤៥.៦៧'), '11ch', 'Khmer digits use the same character-aware fit')
+assert.equal(saleEditorInputWidth('12345.67'), '12ch', 'long values include the native number-control allowance instead of clipping')
+assert.equal(saleEditorInputWidth('១២៣៤៥.៦៧'), '12ch', 'Khmer digits use the same character-aware fit')
 
 console.log('sale item name balancing tests passed')
