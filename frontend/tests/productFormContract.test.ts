@@ -38,7 +38,7 @@ assert.doesNotMatch(stockSection, /product-barcode|BranchStockAdjuster/, 'Stock 
 assert.match(products, /setAdjustStockProduct\(detailProduct\)/, 'Product detail Adjust stock must open the floating adjustment flow')
 assert.doesNotMatch(products, /onAdjustStock=\{\(\) => \{ setDetailProduct\(null\); openProductFormTab\(detailProduct, 'stock'\)/, 'Adjust stock must not open ProductForm Stock tab')
 assert.match(products, /<StockAdjustModal[\s\S]*?initialProduct=\{adjustStockProduct\}/, 'floating adjust modal must receive the selected product')
-assert.match(adjust, /getProductsByIds\(\[id\]\)/, 'floating adjust flow must refresh the exact product before writing stock')
+assert.match(adjust, /getProductsByIds\(\[id\], \{ surface: 'inventory' \}\)/, 'floating adjust flow must refresh the exact product through the inventory read surface before writing stock')
 
 assert.doesNotMatch(variant, /id="variant-form-sku"|name="variant_sku"/, 'Add-row/variant flow must not expose SKU either')
 assert.doesNotMatch(variant, /parent_id:/, 'new same-name rows must not create stored parent-child links')
