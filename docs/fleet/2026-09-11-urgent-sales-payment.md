@@ -21,4 +21,8 @@ Base: a55c2444; deployed source at intake: 648804c0cce5. Main shared worktree is
 
 ## Verification and release state
 
-In progress. No new production mutation or deployment performed at this checkpoint. A prior passing utility suite did not exercise the production GLOB limit; native schema and route execution are required for this repair.
+Migration 0156 from integrated commit f853a921 was applied remotely on 11 September 2026 around 10:44 UTC (49 statements, 85.26 ms). Recovery bookmark: `000014d8-0000004a-000050e3-796346c7ac819f191d3e96821c991497`. Independent review verified all five table metadata, no inbound foreign keys, unchanged indexes/triggers, and 15,360 input mutations with identical validation acceptance. Actual Wrangler local migration testing verified populated copies and complete rollback on final-ledger conflict. Native Hono settlement reproduced pre-fix failure and post-fix payment/record/receipt success with duplicate replay protection.
+
+Remote pre/post counters identical: sales 15,174 / USD 1,903,223.801 / KHR 7,740,848,075.05; returns 5 / USD 173 / KHR 701,820; sale items 36,513 / quantity 59,146 / USD 1,895,080.7514; branch-stock and branch-lot totals both 24,589. All five rebuilt tables had zero rows before and after, indexes/triggers were identical, no long GLOB patterns or helper objects remained, and quick_check returned ok. The exact-token maintenance hold was cleared (one row, zero remaining). Sale 17000 stayed awaiting_payment with paid 0 and total 54; no payment method was invented. Existing production Worker remains 648804c0cce5 until the subsequent app release.
+
+Frontend recovery and the remaining editor/product fixes are still in progress. A prior passing utility suite did not exercise the production GLOB limit; native schema and route execution are required for this repair.
