@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import ts from 'typescript'
 import {
   PERMISSION_ACTIONS,
   actionsForKey,
@@ -203,7 +204,31 @@ assert.match(salesRoute, /getActionTier\(c\.get\('user'\), 'sales', 'export'\) =
 const bulkStatus = readFileSync(new URL('../../cloudflare/src/lib/saleBulkStatus.ts', import.meta.url), 'utf8')
 const bulkUpdate = readFileSync(new URL('../../cloudflare/src/lib/saleBulkUpdate.ts', import.meta.url), 'utf8')
 assert.match(bulkStatus, /getActionTier\(user, 'sales', 'bulk'\) !== 'full'/)
-assert.match(bulkUpdate, /action\.kind === 'customer' && itemCount === 1 \? 'customer' : 'bulk'/)
+// Execute the actual Worker permission function rather than pinning its old
+// ternary spelling. Both single-sale customer actions share the common gate;
+// only relationship reassignment additionally requires customer_reassign.
+const permissionStart = bulkUpdate.indexOf('function permission(')
+const permissionEnd = bulkUpdate.indexOf('function parseRequest(', permissionStart)
+assert.ok(permissionStart >= 0 && permissionEnd > permissionStart)
+const permissionCode = ts.transpileModule(bulkUpdate.slice(permissionStart, permissionEnd), {
+  compilerOptions: { target: ts.ScriptTarget.ES2022 },
+}).outputText
+const checkCustomerPermission = new Function('getActionTier', 'fail', `${permissionCode}; return permission`)(
+  (grants: Record<string, string>, section: string, action: string) => grants[`${section}:${action}`] || 'none',
+  (message: string, status: number) => { throw Object.assign(new Error(message), { status }) },
+)
+const customerFull = { 'sales:customer': 'full', 'sales:customer_reassign': 'full' }
+const customerName = { 'sales:customer': 'full' }
+for (const kind of ['customer', 'customer_name']) {
+  assert.doesNotThrow(() => checkCustomerPermission(customerFull, { kind }, 1), `${kind} single-sale does not require bulk/Contacts`)
+  for (const tier of ['none', 'view', 'review']) {
+    assert.throws(() => checkCustomerPermission({ ...customerFull, 'sales:customer': tier }, { kind }, 1), (error: { status?: number }) => error.status === 403, `${kind} requires common customer Full`)
+  }
+  assert.throws(() => checkCustomerPermission(customerFull, { kind }, 2), (error: { status?: number }) => error.status === 403, `${kind} cannot bypass bulk authority`)
+}
+assert.doesNotThrow(() => checkCustomerPermission(customerName, { kind: 'customer_name' }, 1), 'name-only remains allowed without reassignment')
+assert.throws(() => checkCustomerPermission(customerName, { kind: 'customer' }, 1), (error: { status?: number }) => error.status === 403, 'name-only cannot change relationship')
+assert.doesNotThrow(() => checkCustomerPermission({ ...customerFull, 'sales:bulk': 'full' }, { kind: 'customer' }, 2), 'bulk assignment needs all three capabilities')
 
 const returnBulk = readFileSync(new URL('../../cloudflare/src/lib/returnBulkAction.ts', import.meta.url), 'utf8')
 const undoAppliers = readFileSync(new URL('../../cloudflare/src/lib/undoAppliers.ts', import.meta.url), 'utf8')
