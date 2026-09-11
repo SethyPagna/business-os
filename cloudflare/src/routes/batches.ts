@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
-import { hasPermission, getActionTier, isActionBlocked } from '../lib/permissions'
+import { hasPermission, getActionTier, getPermissionTier, isActionBlocked } from '../lib/permissions'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { getTrackedProductIds, listBatchesForProduct, receiveBatchStock } from '../lib/productBatches'
@@ -33,6 +33,37 @@ function activeBatchStockError(quantity: number): string {
 }
 
 app.use('*', requireAuth)
+// Deliberately before the general batch gate: return creators need stock
+// provenance, not the supplier/cost/payment metadata on inventory reads.
+// This handler terminates only its exact GET/HEAD route; other reads and all
+// writes still use the unchanged general permission gate below.
+app.get('/picker-lots', async (c) => {
+  const user = c.get('user')
+  const returnAdd = getActionTier(user, 'returns', 'add')
+  const canCreateReturn = getPermissionTier(user, 'returns') !== 'none' && (returnAdd === 'full' || returnAdd === 'review')
+  if (!(hasPermission(user, 'pos') || getActionTier(user, 'sales', 'view') === 'full' || canCreateReturn)) {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
+  const productId = Number(c.req.query('productId'))
+  const branchId = Number(c.req.query('branchId'))
+  if (!Number.isSafeInteger(productId) || productId <= 0 || !Number.isSafeInteger(branchId) || branchId <= 0) {
+    return c.json({ error: 'Positive integer productId and branchId are required' }, 400)
+  }
+  const db = getDb(c.env)
+  const rows = await listBatchesForProduct(db, productId, branchId)
+  const knownPositive = await db.prepare(`
+    SELECT COALESCE(SUM(bbs.quantity), 0) AS quantity
+    FROM branch_batch_stock bbs JOIN product_batches pb ON pb.id = bbs.batch_id
+    WHERE pb.variant_product_id = ? AND bbs.branch_id = ? AND bbs.quantity > 0
+  `).get<{ quantity: number }>([productId, branchId])
+  c.header('Cache-Control', 'private, no-store')
+  return c.json({
+    batches: rows.map(({ id, lot_code, received_at, expiry_date, is_active, quantity, batch_number }) => ({
+      id, lot_code, received_at, expiry_date, is_active, quantity, batch_number,
+    })),
+    known_positive_quantity: Math.max(0, Number(knownPositive?.quantity) || 0),
+  })
+})
 app.use('*', async (c, next) => {
   const user = c.get('user')
   // Receiving or correcting batch stock is a stock adjustment, so WRITES

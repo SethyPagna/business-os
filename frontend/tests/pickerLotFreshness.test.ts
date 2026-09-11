@@ -18,16 +18,30 @@ const ctrl = new AbortController()
 await readFreshPickerLots(3263, '2', ctrl.signal)
 await readFreshPickerLots(3263, '2', ctrl.signal)
 assert.equal(requests[0][0], 'GET')
+assert.ok(requests[0][1].startsWith('/api/batches/picker-lots?'))
 assert.match(requests[0][1], /productId=3263&branchId=2&_picker=/)
 assert.notEqual(requests[0][1], requests[1][1], 'fresh reads never use a stale route key')
 assert.equal(requests[0][3], 8000)
 assert.equal(requests[0][4].signal, ctrl.signal)
 
 const source = readFileSync(new URL('../src/components/pos/ProductDetailSheet.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+const actorCode = source.slice(source.indexOf('  const { user, authReady } = useApp()'), source.indexOf('  const variants = getVariantChoices(product)'))
+let actorRef: any
+const actorUser = { id: 7 }
+const actorKey = (user: { id: number } | null, authReady = true) => compile(actorCode, {
+  useApp: () => ({ user, authReady }),
+  useRef: (initial: unknown) => (actorRef ||= { current: initial }),
+}, 'actorScope')
+const initialActorScope = actorKey(actorUser)
+assert.equal(actorKey(actorUser), initialActorScope, 'unrelated renders retain the same verification scope')
+assert.notEqual(actorKey({ id: 7 }), initialActorScope, 'same-user authenticated session replacement increments actual generation')
+assert.notEqual(actorKey(null, false), initialActorScope, 'sign-out invalidates authenticated scope')
+assert.match(source, /requireFreshLots, actorScope\]\)/, 'lot effect reloads on actor generation changes')
 const deriveCode = source.slice(source.indexOf('const requireFreshLots ='), source.indexOf('  const branchOptions = sheetState.branchOptions'))
 const product = { id: 3263, name: 'Kerastase Conditioner Genesis75ml', barcode: '03474637319687', stock_quantity: 3, branch_stock: [{ branch_id: 2, branch_name: 'Shop', quantity: 3 }] }
 const lot = { id: 56957, is_active: 1, quantity: 3, received_at: '2026-09-02T15:30:00.000Z', lot_code: 'ADJ09/02/2026' }
 const base = {
+  actorScope: 'true:7:0',
   product, variants: [], groupProduct: false, selectedBranchId: null, activeBranchId: 2, selectedVariantId: null,
   trackedBatchProductIds: new Set(), trackedBatchLookupUnavailable: false,
   hideReceivedDates: false, intent: 'sell', batches: [], knownPositiveQuantityByProduct: {}, selectedBatchId: null,
@@ -44,6 +58,8 @@ assert.equal(pending.sheetState.pickAllowed, false)
 const loaded = { batches: [lot], knownPositiveQuantityByProduct: { 3263: 3 }, loadedLotScope: pending.currentLotScope }
 assert.equal(state(loaded).sheetState.pickAllowed, false, 'successful lookup still requires a deliberate lot choice')
 assert.equal(state({ ...loaded, selectedBatchId: 56957 }).sheetState.pickAllowed, true)
+assert.equal(state({ ...loaded, selectedBatchId: 56957, actorScope: 'true:8:1' }).sheetState.pickAllowed, false, 'actor change immediately hides old proof before effect cleanup')
+assert.equal(state({ ...loaded, selectedBatchId: 56957, actorScope: 'true:7:1' }).sheetState.pickAllowed, false, 'same actor reauthentication cannot reuse a prior session choice')
 assert.equal(state({ ...loaded, batches: [{ ...lot, quantity: 0 }], selectedBatchId: 56957 }).sheetState.pickAllowed, false)
 assert.equal(state({ ...loaded, selectedBatchId: 56957, product: { ...product, id: 999 } }).sheetState.pickAllowed, false, 'old lot cannot enable a new product before effects clean up')
 assert.equal(state({ ...loaded, selectedBatchId: 56957, activeBranchId: 3, product: { ...product, branch_stock: [{ branch_id: 3, branch_name: 'Shop', quantity: 3 }] } }).sheetState.pickAllowed, false)

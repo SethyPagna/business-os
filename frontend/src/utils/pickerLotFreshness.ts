@@ -5,7 +5,7 @@ import type { ProductBatchListResponse } from '../api/batchesTransport.ts'
  * route-cache answer. The branch and product identify the actual stock source. */
 export function readFreshPickerLots(productId: number, branchId: string, signal: AbortSignal): Promise<ProductBatchListResponse> {
   const query = new URLSearchParams({ productId: String(productId), branchId, _picker: `${Date.now()}-${Math.random()}` })
-  return apiFetch('GET', `/api/batches?${query}`, undefined, 8000, { signal })
+  return apiFetch('GET', `/api/batches/picker-lots?${query}`, undefined, 8000, { signal })
 }
 
 /** Own one effect generation. Cancellation and a partial group failure cannot
