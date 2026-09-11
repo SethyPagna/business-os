@@ -531,10 +531,12 @@ function toPosCustomerRows(data: unknown): CustomerRecord[] {
   return Array.isArray(items) ? filterSelectableCustomerRows(items as CustomerRecord[]) : []
 }
 
-export function authoritativePosCustomerSuggestions(customers: CustomerRecord[]): CustomerRecord[] {
+export function authoritativePosCustomerSuggestions(customers: CustomerRecord[], resultsQuery = '', inputQuery = resultsQuery): CustomerRecord[] {
   // `sales_picker` already applies the server's canonical name-word and phone
   // matching. Re-filtering that page with raw substring rules hides valid
-  // reordered-name and formatted-phone matches.
+  // reordered-name and formatted-phone matches. Query ownership still matters:
+  // a completed page for A must disappear as soon as the input becomes B.
+  if (!inputQuery.trim() || resultsQuery.trim() !== inputQuery.trim()) return []
   return customers.slice(0, LAYOUT.AUTOCOMPLETE_MAX_RESULTS)
 }
 
@@ -899,6 +901,7 @@ export default function POS() {
 
 // Autocomplete suggestions (UI-level, not per-order)
   const [customerSuggestions,  setCustomerSuggestions]  = useState<CustomerRecord[]>([])
+  const [customerResultsQuery, setCustomerResultsQuery] = useState('')
   const [deliverySuggestions,  setDeliverySuggestions]  = useState<DeliveryContactRecord[]>([])
   const [showCustomerDrop,     setShowCustomerDrop]     = useState(false)
   const [showDeliveryDrop,     setShowDeliveryDrop]     = useState(false)
@@ -1411,6 +1414,7 @@ export default function POS() {
       if (!isTrackedRequestCurrent(customerRequestRef, requestId)) return null
       const nextCustomers = Array.isArray(rows) ? rows : []
       setCustomers(nextCustomers)
+      setCustomerResultsQuery(search.trim())
       customerOptionsLoadedRef.current = true
       return nextCustomers
     } catch (error) {
@@ -1715,9 +1719,18 @@ export default function POS() {
 
 // Customer autocomplete
   useEffect(() => {
-    if (!(active?.customerSearch || '').trim()) { setCustomerSuggestions([]); return }
-    setCustomerSuggestions(authoritativePosCustomerSuggestions(customers))
-  }, [active?.customerSearch, customers])
+    setCustomerSuggestions(authoritativePosCustomerSuggestions(customers, customerResultsQuery, active?.customerSearch || ''))
+  }, [active?.customerSearch, customerResultsQuery, customers])
+
+  const changeCustomerSearch = (value: string): void => {
+    // Invalidate before the debounce starts the next request. Otherwise the
+    // preceding query's row remains selectable during the debounce/network gap.
+    invalidateTrackedRequest(customerRequestRef)
+    setCustomerResultsQuery('')
+    setCustomerSuggestions([])
+    patchActive({ customerSearch: value, customer: { ...active.customer, name: value } })
+    setShowCustomerDrop(true)
+  }
 
 // Delivery autocomplete
   useEffect(() => {
@@ -3488,7 +3501,7 @@ export default function POS() {
                   <div className="relative">
                     <label htmlFor="pos-customer-search" className="sr-only">{t('search_customer')}</label>
                     <input id="pos-customer-search" name="pos_customer_search" autoComplete="name" className="input text-xs py-1.5 pr-8" placeholder={t('search_customer')} value={active.customerSearch || ''}
-                      onChange={e => { patchActive({ customerSearch: e.target.value, customer: { ...active.customer, name: e.target.value } }); setShowCustomerDrop(true) }}
+                      onChange={e => changeCustomerSearch(e.target.value)}
                       onFocus={() => setShowCustomerDrop(true)} />
                     {active.customerSearch && <button className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500" onClick={clearCustomer}>{t('clear')||'Clear'}</button>}
                     {showCustomerDrop && customerSuggestions.length > 0 && (
