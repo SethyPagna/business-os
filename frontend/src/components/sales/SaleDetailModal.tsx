@@ -2180,7 +2180,7 @@ export default function SaleDetailModal({
                 autoComplete="off"
               />
               {trackedBatchLookupState === 'loading' ? (
-                <p role="status" className="mt-1.5 text-[11px] text-gray-500 dark:text-gray-400">
+                <p role="status" aria-live="polite" aria-atomic="true" className="sr-only">
                   {translateOr('loading', 'Checking received dates…', 'កំពុងពិនិត្យថ្ងៃចូល…')}
                 </p>
               ) : trackedBatchLookupState === 'failed' ? (
