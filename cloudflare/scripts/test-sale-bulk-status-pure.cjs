@@ -73,10 +73,10 @@ function snapshot(f) {
 }
 async function replay(f,id,direction='undo',generation=0) {return f.call(history,`/${id}/${direction}`,{require_applied:true,expected_generation:generation})}
 async function run() {
-  for (const restoringFirst of [true, false]) {
+  for (const inactiveSql of ['0', 'NULL']) for (const restoringFirst of [true, false]) {
     const f=fixture();seed(f,1)
     f.sql.exec(`UPDATE sales SET sale_status='${restoringFirst?'completed':'cancelled'}',status_before_cancel='completed' WHERE id=1;
-      INSERT INTO product_batches(id,variant_product_id,batch_key,received_at,is_active) VALUES(1,1,'archived-lot','2026-09-03',${restoringFirst?0:1});
+      INSERT INTO product_batches(id,variant_product_id,batch_key,received_at,is_active) VALUES(1,1,'archived-lot','2026-09-03',${restoringFirst?inactiveSql:1});
       INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(1,1,${restoringFirst?0:2});
       UPDATE sale_items SET batch_id=1,cost_price_usd=4 WHERE id=1;
       INSERT INTO sale_item_batch_allocations(id,sale_item_id,batch_id,branch_id,quantity,released_quantity,released_at)
@@ -98,7 +98,7 @@ async function run() {
     const applied=await f.call(sales,'/bulk-status',req)
     assert.equal(applied.status,200,JSON.stringify(applied))
     for(const [direction,generation,positive] of [['undo',0,!restoringFirst],['redo',1,restoringFirst]]) {
-      if(positive) f.sql.exec('UPDATE product_batches SET is_active=0 WHERE id=1')
+      if(positive) f.sql.exec(`UPDATE product_batches SET is_active=${inactiveSql} WHERE id=1`)
       const beforeReplay=snapshot(f);f.fail('INSERT INTO audit_logs')
       const historyRow=f.sql.prepare('SELECT undo_payload,redo_payload FROM action_history WHERE id=?').get(applied.body.actionHistoryId)
       const payload=JSON.parse(historyRow[direction==='undo'?'undo_payload':'redo_payload'])
@@ -112,7 +112,7 @@ async function run() {
       if(direction==='undo') assert.deepEqual(f.sql.prepare('SELECT * FROM sale_item_batch_allocations').all(),originalAllocation)
     }
   }
-  console.log('PASS archived sale lot activation precedes stock restore for apply/undo/redo, preserves metadata and rolls back on failure')
+  console.log('PASS archived and NULL-flag sale lot activation precedes stock restore for apply/undo/redo, preserves metadata and rolls back on failure')
   // Append 0120 to a populated pre-0120 fixture as well as the full fresh chain.
   let legacy=fixture(false);seed(legacy)
   // Prove this is really a pre-0120 tree before testing the populated

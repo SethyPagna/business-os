@@ -109,14 +109,14 @@ async function replay(f, historyId, direction, generation) {
 }
 
 async function run() {
-  for(const scope of ['customer','supplier']) for(const restoringFirst of [true,false]) {
+  for(const inactiveSql of ['0','NULL']) for(const scope of ['customer','supplier']) for(const restoringFirst of [true,false]) {
     const f=fixture();seed(f)
     const id=scope==='customer'?1:3, batch=scope==='customer'?1:2, quantity=scope==='customer'?2:3
     const source=(scope==='customer')===restoringFirst?'cancelled':'completed'
     const target=source==='cancelled'?'completed':'cancelled'
     f.sql.exec(`UPDATE returns SET sale_id=NULL,status='${source}' WHERE id=${id};
       UPDATE branch_batch_stock SET quantity=${restoringFirst?0:quantity} WHERE batch_id=${batch};
-      UPDATE product_batches SET is_active=${restoringFirst?0:1},received_at='2026-09-03' WHERE id=${batch};
+      UPDATE product_batches SET is_active=${restoringFirst?inactiveSql:1},received_at='2026-09-03' WHERE id=${batch};
       CREATE TRIGGER test_active_lot_insert BEFORE INSERT ON branch_batch_stock WHEN NEW.quantity>0
         AND NOT EXISTS(SELECT 1 FROM product_batches WHERE id=NEW.batch_id AND is_active=1)
         BEGIN SELECT RAISE(ABORT,'constraint failed: inactive parent'); END;
@@ -132,7 +132,7 @@ async function run() {
     f.fail(null)
     const applied=await helper.applyReturnBulkAction(f.env,user,req)
     for(const [direction,generation,positive] of [['undo',0,!restoringFirst],['redo',1,restoringFirst]]) {
-      if(positive) f.sql.prepare('UPDATE product_batches SET is_active=0 WHERE id=?').run(batch)
+      if(positive) f.sql.prepare(`UPDATE product_batches SET is_active=${inactiveSql} WHERE id=?`).run(batch)
       const beforeReplay=snapshot(f);f.fail('INSERT INTO audit_logs')
       await assert.rejects(()=>replay(f,applied.actionHistoryId,direction,generation),/injected failure/)
       assert.equal(snapshot(f),beforeReplay,'failed replay must roll back activation, quantities, history and audit')
@@ -144,7 +144,7 @@ async function run() {
       assert.deepEqual(f.sql.prepare('SELECT * FROM return_item_batch_allocations ORDER BY id').all(),allocations)
     }
   }
-  console.log('PASS archived customer/supplier lot activation in both directions and apply/undo/redo, exact metadata/allocations, full failure rollback')
+  console.log('PASS archived and NULL-flag customer/supplier lot activation in both directions and apply/undo/redo, exact metadata/allocations, full failure rollback')
   let f = fixture(); seed(f)
   const blockedUser = { id: 2, name: 'Employee', username: 'employee', role_code: 'employee', permissions: { returns: true, 'returns:bulk': false } }
   const blockedState = snapshot(f)
