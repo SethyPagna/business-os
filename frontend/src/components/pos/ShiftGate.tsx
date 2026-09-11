@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import Modal from '../shared/Modal'
+import { actorReadStorageKey, captureActorReadScope, isActorReadScopeCurrent, type ActorReadScope } from '../../api/actorReadScope.ts'
 import { useApp } from '../../AppContext'
 import { fmtDateTime24, parseServerTimestampMs } from '../../utils/formatters.ts'
 import { closeShift, fetchCurrentShift, openShift, pendingShiftMutation, shiftClosingCounts, shiftCountPairBlocker, shiftOpeningCounts, type Shift, type ShiftState } from '../../api/shiftTransport.ts'
@@ -81,6 +82,7 @@ const shiftSubscribers = new Set<(key: string, next: ShiftState | null) => void>
 // De-dupes the mount fetch: both components mount together on POS open, and
 // without this they would each ask the Worker for the same row.
 const shiftInflight = new Map<string, Promise<void>>()
+const shiftScopes = new Map<string, ActorReadScope>()
 export const SHIFT_BRANCH_CHANGED_EVENT = 'business-os:pos-branch-changed'
 export const SHIFT_STATE_CHANGED_EVENT = 'business-os:shift-state-changed'
 
@@ -88,11 +90,16 @@ export function shiftCacheKey(userId: unknown, branchId: number | null, scopeMod
   const user = String(userId ?? 'anonymous')
   const branch = branchId == null ? 'request-branch' : String(branchId)
   const mode = scopeMode === 'shop_wide' ? 'shop_wide' : 'per_account'
-  return `${user}:${branch}:${mode}`
+  const scope = captureActorReadScope('shifts')
+  const key = actorReadStorageKey(`${user}:${branch}:${mode}`, scope)
+  shiftScopes.set(key, scope)
+  return key
 }
 
 /** Publish a new shift state to every mounted consumer. Writes call this. */
 export function publishShift(key: string, next: ShiftState | null) {
+  const scope = shiftScopes.get(key)
+  if (!scope || !isActorReadScopeCurrent(scope)) return
   sharedShifts.set(key, next)
   for (const notify of shiftSubscribers) notify(key, next)
 }
@@ -121,14 +128,16 @@ export function useSharedShift(branchId: number | null, userId: unknown, scopeMo
   }, [key])
 
   const refresh = useCallback(() => {
+    const scope = shiftScopes.get(key)
+    if (!scope || !isActorReadScopeCurrent(scope)) return Promise.resolve()
     setLoading(true)
     if (!shiftInflight.has(key)) {
       const request = fetchCurrentShift(branchId)
-        .then((next) => { sharedShiftFailures.delete(key); publishShift(key, next) })
+        .then((next) => { if (!isActorReadScopeCurrent(scope)) return; sharedShiftFailures.delete(key); publishShift(key, next) })
         // Leave the shared state null. A read failure must NOT be treated as
         // "registered" -- that would silently skip the prompt for the whole
         // day. Null shows nothing yet and the next open re-asks.
-        .catch(() => { sharedShiftFailures.add(key); publishShift(key, null) })
+        .catch(() => { if (!isActorReadScopeCurrent(scope)) return; sharedShiftFailures.add(key); publishShift(key, null) })
         .finally(() => { shiftInflight.delete(key) })
       shiftInflight.set(key, request)
     }
@@ -143,6 +152,8 @@ export function useSharedShift(branchId: number | null, userId: unknown, scopeMo
   }, [refresh])
 
   const publish = (next: ShiftState | null) => {
+    const scope = shiftScopes.get(key)
+    if (!scope || !isActorReadScopeCurrent(scope)) return
     sharedShiftFailures.delete(key)
     publishShift(key, next)
   }

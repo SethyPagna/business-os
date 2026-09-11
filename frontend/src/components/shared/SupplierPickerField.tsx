@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import InfoHint from './InfoHint.tsx'
+import { captureActorReadScope, assertActorReadScope, isActorReadScopeCurrent, invalidateActorReadChannel, type ActorReadScope } from '../../api/actorReadScope.ts'
 import SuggestionTextInput, { type SuggestionOption } from './SuggestionTextInput.tsx'
 
 // D5a: the one supplier picker every manual add-stock/receive surface
@@ -33,12 +34,13 @@ export type SupplierChoice = {
 
 type SupplierNameRow = { id: number; name: string }
 
-let supplierNamesCache: { rows: SupplierNameRow[]; at: number } | null = null
+let supplierNamesCache: { rows: SupplierNameRow[]; at: number; scope: ActorReadScope } | null = null
 const SUPPLIER_NAMES_TTL_MS = 60_000
 let supplierSyncListenerInstalled = false
 
 export function invalidateSupplierNamesCache(): void {
   supplierNamesCache = null
+  invalidateActorReadChannel('suppliers')
 }
 
 function ensureSupplierSyncCacheListener(): void {
@@ -55,17 +57,20 @@ function ensureSupplierSyncCacheListener(): void {
 // re-fetching or re-implementing it.
 export async function loadSupplierNames(): Promise<SupplierNameRow[]> {
   ensureSupplierSyncCacheListener()
-  if (supplierNamesCache && Date.now() - supplierNamesCache.at < SUPPLIER_NAMES_TTL_MS) {
+  const scope = captureActorReadScope('suppliers')
+  if (supplierNamesCache && isActorReadScopeCurrent(supplierNamesCache.scope) && Date.now() - supplierNamesCache.at < SUPPLIER_NAMES_TTL_MS) {
     return supplierNamesCache.rows
   }
   const mod = await import('../../api/contactsTransport.ts')
+  assertActorReadScope(scope)
   const data = await mod.getSuppliers({ fields: 'names' })
+  assertActorReadScope(scope)
   const rows = Array.isArray(data)
     ? (data as Array<Record<string, unknown>>)
         .map((row) => ({ id: Number(row.id), name: String(row.name || '').trim() }))
         .filter((row) => Number.isFinite(row.id) && row.id > 0 && row.name !== '')
     : []
-  supplierNamesCache = { rows, at: Date.now() }
+  supplierNamesCache = { rows, at: Date.now(), scope }
   return rows
 }
 
@@ -98,6 +103,7 @@ export default function SupplierPickerField({
   idPrefix,
 }: SupplierPickerFieldProps) {
   const [rows, setRows] = useState<SupplierNameRow[]>([])
+  const rowsScope = useRef<ActorReadScope | null>(null)
   const [loading, setLoading] = useState(false)
   const aliveRef = useRef(true)
   useEffect(() => {
@@ -119,12 +125,14 @@ export default function SupplierPickerField({
   }, [])
 
   const ensureLoaded = () => {
-    if (rows.length || loading) return
+    if (rowsScope.current && isActorReadScopeCurrent(rowsScope.current) && (rows.length || loading)) return
+    const scope = captureActorReadScope('suppliers')
+    rowsScope.current = scope
     setLoading(true)
     loadSupplierNames()
-      .then((loaded) => { if (aliveRef.current) setRows(loaded) })
+      .then((loaded) => { if (aliveRef.current && isActorReadScopeCurrent(scope)) setRows(loaded) })
       .catch(() => { /* suggestions unavailable -- free text still works */ })
-      .finally(() => { if (aliveRef.current) setLoading(false) })
+      .finally(() => { if (aliveRef.current && rowsScope.current === scope) setLoading(false) })
   }
 
   const label = tr('supplier', 'Supplier')
@@ -169,7 +177,7 @@ export default function SupplierPickerField({
       <SuggestionTextInput
         id={`${idPrefix}-supplier`}
         value={value.supplierName}
-        options={suggestionOptions}
+        options={rowsScope.current && isActorReadScopeCurrent(rowsScope.current) ? suggestionOptions : []}
         limit={8}
         disabled={disabled}
         loading={loading}

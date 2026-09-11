@@ -8,6 +8,7 @@ import {
 import { resolveReplayAction } from './actionReplay'
 import { scopedWorkDraftKey } from './workDrafts.ts'
 import { effectivePermissions } from './permissions.ts'
+import { actorReadStorageKey, captureActorReadScope, assertActorReadScope, isActorReadScopeCurrent, type ActorReadScope } from '../api/actorReadScope.ts'
 
 type ActionDirection = 'undo' | 'redo'
 type ActionHistoryId = string | number
@@ -209,26 +210,28 @@ function getErrorMessage(error: unknown, fallback: string): string {
 // exactly as before and overwrites the cache with the authoritative data.
 const ACTION_HISTORY_CACHE_PREFIX = 'actionHistory:cache:'
 
-function cacheKeyFor(scope: string): string {
-  return `${ACTION_HISTORY_CACHE_PREFIX}${scopedWorkDraftKey(scope)}`
+function cacheKeyFor(scope: string, authority: ActorReadScope): string {
+  return actorReadStorageKey(`${ACTION_HISTORY_CACHE_PREFIX}${scope}`, authority)
 }
 
-function readCachedServerItems(scope: string): ServerHistoryItem[] {
+export function readCachedServerItems(scope: string, authority: ActorReadScope): ServerHistoryItem[] {
+  if (!isActorReadScopeCurrent(authority)) return []
   if (typeof window === 'undefined' || !window.sessionStorage) return []
   try {
-    const raw = window.sessionStorage.getItem(cacheKeyFor(scope))
+    const raw = window.sessionStorage.getItem(cacheKeyFor(scope, authority))
     if (!raw) return []
     const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed : []
+    return Number.isFinite(parsed?.at) && Date.now() - parsed.at >= 0 && Date.now() - parsed.at < 60_000 && Array.isArray(parsed.items) ? parsed.items : []
   } catch {
     return []
   }
 }
 
-function writeCachedServerItems(scope: string, items: ServerHistoryItem[]): void {
+export function writeCachedServerItems(scope: string, items: ServerHistoryItem[], authority: ActorReadScope): void {
+  if (!isActorReadScopeCurrent(authority)) return
   if (typeof window === 'undefined' || !window.sessionStorage) return
   try {
-    window.sessionStorage.setItem(cacheKeyFor(scope), JSON.stringify(items.slice(0, 20)))
+    window.sessionStorage.setItem(cacheKeyFor(scope, authority), JSON.stringify({ at: Date.now(), items: items.slice(0, 20) }))
   } catch {
     // Storage full/unavailable (private browsing, etc.) -- the bar still
     // works, it just goes back to a brief loading gap on refresh.
@@ -236,12 +239,13 @@ function writeCachedServerItems(scope: string, items: ServerHistoryItem[]): void
 }
 
 export function useActionHistory({ limit = 10, notify, scope = 'global', enabled = true, user = null }: ActionHistoryOptions = {}) {
-  const actorScope = scopedWorkDraftKey(`history_${scope}`)
+  const readScope = captureActorReadScope('actionHistory')
+  const actorScope = actorReadStorageKey(`${scopedWorkDraftKey(`history_${scope}`)}:${JSON.stringify(effectivePermissions(user))}:${enabled}`, readScope)
   const actorScopeRef = useRef(actorScope)
   actorScopeRef.current = actorScope
   const [undoStack, setUndoStack] = useState<ActionHistoryEntry[]>([])
   const [redoStack, setRedoStack] = useState<ActionHistoryEntry[]>([])
-  const [serverItems, setServerItems] = useState<ServerHistoryItem[]>(() => readCachedServerItems(scope))
+  const [serverItems, setServerItems] = useState<ServerHistoryItem[]>(() => enabled ? readCachedServerItems(actorScope, readScope) : [])
   const cachedScopeRef = useRef(actorScope)
   const [busy, setBusy] = useState<ActionDirection | ''>('')
   const [userFilter, setUserFilter] = useState('all')
@@ -251,28 +255,40 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
   const isAdmin = useMemo(() => effectivePermissions(user).isAdmin, [user])
 
   const refreshServerItems = useCallback((): Promise<void> => {
+    if (!enabled || actorScopeRef.current !== actorScope || !isActorReadScopeCurrent(readScope)) return Promise.resolve()
     const requestScope = actorScope
+    const authority = readScope
     const requestId = beginTrackedRequest(historyRequestRef)
     return withLoaderTimeout(
-      async () => (await loadActionHistoryTransport()).getActionHistory(scope, Math.max(3, limit), {
-        all: isAdmin ? 1 : undefined,
-        userId: isAdmin && userFilter !== 'all' ? userFilter : undefined,
-      }),
+      async () => {
+        const api = await loadActionHistoryTransport()
+        assertActorReadScope(authority)
+        return api.getActionHistory(scope, Math.max(3, limit), {
+          all: isAdmin ? 1 : undefined,
+          userId: isAdmin && userFilter !== 'all' ? userFilter : undefined,
+        })
+      },
       'Action history',
       ACTION_HISTORY_LOAD_TIMEOUT_MS,
     )
       .then((result) => {
-        if (!isTrackedRequestCurrent(historyRequestRef, requestId) || actorScopeRef.current !== requestScope) return
+        if (!isActorReadScopeCurrent(authority) || !isTrackedRequestCurrent(historyRequestRef, requestId) || actorScopeRef.current !== requestScope) return
         const record = result as { items?: ServerHistoryItem[] } | null
         const items = Array.isArray(record?.items) ? record.items : []
         setServerItems(items)
         // Only cache the unfiltered, default view -- an admin's per-user
         // filter result isn't what the next mount (or a different user)
         // should see flashed in before the real fetch resolves.
-        if (!isAdmin || userFilter === 'all') writeCachedServerItems(scope, items)
+        if (!isAdmin || userFilter === 'all') writeCachedServerItems(actorScope, items, authority)
       })
-      .catch(() => {})
-  }, [actorScope, isAdmin, limit, scope, userFilter])
+      .catch((error: unknown) => {
+        if (!isActorReadScopeCurrent(authority) || !isTrackedRequestCurrent(historyRequestRef, requestId) || actorScopeRef.current !== requestScope) return
+        if ([401, 403].includes(Number((error as { status?: unknown })?.status))) {
+          setServerItems([])
+          writeCachedServerItems(actorScope, [], authority)
+        }
+      })
+  }, [actorScope, enabled, isAdmin, limit, scope, userFilter])
 
   // Re-hydrate from the new scope's cache immediately when `scope` changes
   // -- the useState initializer above only runs on first mount, so without
@@ -283,7 +299,9 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
     cachedScopeRef.current = actorScope
     setUndoStack([])
     setRedoStack([])
-    setServerItems(readCachedServerItems(scope))
+    setServerItems(enabled ? readCachedServerItems(actorScope, readScope) : [])
+    setUserOptions([])
+    setUserFilter('all')
   }, [actorScope, scope])
 
   useEffect(() => {
@@ -297,23 +315,31 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
     if (!enabled) return
     if (!isAdmin) return
     const cancelScheduledRead = scheduleActionHistoryRead(() => {
+      const authority = readScope
+      if (actorScopeRef.current !== actorScope || !isActorReadScopeCurrent(authority)) return
       const requestId = beginTrackedRequest(usersRequestRef)
       withLoaderTimeout(
-        async () => (await loadActionHistoryTransport()).getActionHistoryUsers(),
+        async () => {
+          const api = await loadActionHistoryTransport()
+          assertActorReadScope(authority)
+          return api.getActionHistoryUsers()
+        },
         'Action history users',
         ACTION_HISTORY_USERS_TIMEOUT_MS,
       )
         .then((rows) => {
-          if (!isTrackedRequestCurrent(usersRequestRef, requestId)) return
+          if (actorScopeRef.current !== actorScope || !isActorReadScopeCurrent(authority) || !isTrackedRequestCurrent(usersRequestRef, requestId)) return
           setUserOptions(Array.isArray(rows) ? rows : [])
         })
-        .catch(() => {})
+        .catch((error: unknown) => {
+          if (isActorReadScopeCurrent(authority) && isTrackedRequestCurrent(usersRequestRef, requestId) && [401, 403].includes(Number((error as { status?: unknown })?.status))) setUserOptions([])
+        })
     })
     return () => {
       cancelScheduledRead()
       invalidateTrackedRequest(usersRequestRef)
     }
-  }, [enabled, isAdmin])
+  }, [actorScope, enabled, isAdmin])
 
   useEffect(() => () => {
     invalidateTrackedRequest(historyRequestRef)
@@ -456,16 +482,16 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
     lastRedoLabel: redoStack[redoStack.length - 1]?.label || '',
     undoItems: undoStack,
     redoItems: redoStack,
-    serverItems,
+    serverItems: enabled && cachedScopeRef.current === actorScope && isActorReadScopeCurrent(readScope) ? serverItems : [],
     isAdmin,
     userFilter,
     setUserFilter,
-    userOptions,
+    userOptions: enabled && isAdmin && cachedScopeRef.current === actorScope && isActorReadScopeCurrent(readScope) ? userOptions : [],
     refreshServerItems,
     pushAction,
     undo,
     redo,
     undoServer,
     redoServer,
-  }), [busy, isAdmin, pushAction, redo, redoServer, redoStack, refreshServerItems, serverItems, undo, undoServer, undoStack, userFilter, userOptions])
+  }), [actorScope, enabled, busy, isAdmin, pushAction, redo, redoServer, redoStack, refreshServerItems, serverItems, undo, undoServer, undoStack, userFilter, userOptions])
 }
