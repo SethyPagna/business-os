@@ -62,7 +62,10 @@ function migrationText() {
 if (process.argv.includes('--print-migration-patch')) {
   console.log('*** Begin Patch\n*** Add File: ' + path.join(migrations, migrationName).replaceAll('\\', '/') + '\n' + migrationText().split('\n').map(l => '+' + l).join('\n') + '\n*** End Patch')
 } else if (require.main === module) {
-  main().catch(e => { console.error(e); process.exitCode = 1 })
+  const run = process.argv.includes('--routes-only')
+    ? verifyRealSettlementRoute(fs.readFileSync(path.join(migrations,migrationName),'utf8'))
+    : main()
+  run.catch(e => { console.error(e); process.exitCode = 1 })
 }
 
 async function main() {
@@ -193,11 +196,19 @@ async function verifyRealSettlementRoute(migration) {
   // Reuse only the existing real-Hono route loader and seed, replacing its
   // instantaneous SQLite D1 adapter with native workerd for every DB call.
   const source = fs.readFileSync(path.join(__dirname, 'test-payment-fx-pure.cjs'), 'utf8').split('async function run() {')[0]
-  const { sales, fixture, seed, request } = new Function('require','__dirname', source + '\nreturn { sales, fixture, seed, request };')(require,__dirname)
+    .replace('if (actual.has(path.posix.basename(name))) return load(target)', 'return load(target)')
+    .replace('sendTelegramEvent: async () => {}', 'sendTelegramEvent: async () => {}, sendReturnTelegramEvent: async () => {}')
+  const { sales, fixture, seed, request, load, settlementAction } = new Function('require','__dirname', source + '\nreturn { sales, fixture, seed, request, load, settlementAction };')(require,__dirname)
+  const fees = load('routes/fees.ts').default
+  const returns = load('routes/returns.ts').default
   const f = fixture(); seed(f)
+  // Historical migration0098 seeds 4,240 unrelated fees. This isolated route
+  // fixture starts with no expenses so one request has an exact cardinality.
+  f.sql.exec('DELETE FROM fees')
   f.sql.exec("INSERT INTO users(id,username,name,password) VALUES(1,'admin','Admin','test')")
   const original = oldSchema()
-  const required = new Set([...tables,'sales','sale_items','users','returns','return_items','settings','sale_item_batch_allocations','sale_write_revisions','sale_mutation_receipts','sale_mutation_guards','sale_bulk_guards','action_history','audit_logs','system_flags','products','branches','branch_stock','inventory_movements'])
+  const required = new Set([...tables,'sales','sale_items','users','returns','return_items','settings','sale_item_batch_allocations','sale_write_revisions','sale_mutation_receipts','sale_mutation_guards','sale_bulk_guards','action_history','audit_logs','system_flags','products','branches','branch_stock','inventory_movements','fees','delivery_contacts','return_write_revisions','return_bulk_guards','return_item_batch_allocations','return_replacement_items','damaged_stock_lots','product_batches','branch_batch_stock','transfer_operation_receipts'])
+  required.add('customers')
   // Preserve all transitive foreign-key targets instead of turning FK checks off.
   for (const name of required) for (const fk of original.prepare(`PRAGMA foreign_key_list(${name})`).all()) required.add(fk.table)
   const objects = original.prepare("SELECT name,tbl_name,type,sql FROM sqlite_master WHERE sql IS NOT NULL").all().filter(o => required.has(o.tbl_name))
@@ -214,7 +225,7 @@ async function verifyRealSettlementRoute(migration) {
     // Product search/activation triggers belong to other surfaces and reference
     // their own tables; this route never writes products. Keep every trigger
     // on settlement-mutated tables, including the real revision guards.
-    await db.batch(objects.filter(o => o.type === 'index' || (o.type === 'trigger' && [...tables,'sales','sale_items'].includes(o.tbl_name))).map(o => db.prepare(o.sql)))
+    await db.batch(objects.filter(o => o.type === 'index' || (o.type === 'trigger' && ([...tables,'sales','sale_items','returns','return_items','return_item_batch_allocations'].includes(o.tbl_name) || o.name==='transfer_receipts_require_provenance_insert'))).map(o => db.prepare(o.sql)))
     const context = { waitUntil() {}, passThroughOnException() {} }
     const call = async body => {
       const response = await sales.request('/1/status',{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify(body)},{DB:db},context)
@@ -250,6 +261,52 @@ async function verifyRealSettlementRoute(migration) {
     assert.deepEqual(await db.prepare('SELECT quantity,applied_price_usd,total_usd,base_price_usd,manual_discount_usd FROM sale_items WHERE sale_id=1').first(),{quantity:2,applied_price_usd:27,total_usd:54,base_price_usd:30,manual_discount_usd:3})
     assert.equal((await db.prepare('SELECT COUNT(*) n FROM inventory_movements').first()).n,0)
     console.log('PASS native $54 unpaid discounted-line settlement records ABA payment without changing quantities, unit discounts, USD totals or stock')
+    const actor = {id:1,username:'admin',name:'Admin',role_code:'admin',permissions:{all:true}}
+    await settlementAction.replaySaleSettlementAction({DB:db},actor,'undo',screenshot.body.actionHistoryId,0,{operation_id:screenshot.body.operationId})
+    assert.equal((await db.prepare('SELECT sale_status FROM sales WHERE id=1').first()).sale_status,'awaiting_payment')
+    await settlementAction.replaySaleSettlementAction({DB:db},actor,'redo',screenshot.body.actionHistoryId,1,{operation_id:screenshot.body.operationId})
+    assert.equal((await db.prepare('SELECT amount_paid_usd FROM sales WHERE id=1').first()).amount_paid_usd,54)
+    const reopen = await call({client_request_id:'native-reopen-payment',sale_status:'awaiting_payment'})
+    assert.equal(reopen.status,200,JSON.stringify(reopen))
+    const corrected = await call({client_request_id:'native-correct-payment',sale_status:'completed',replace_existing_payment:true,expected_exchange_rate:4200,payment_details:[{method:'ABA Bank',amount_usd:20,amount_khr:142800}]})
+    assert.equal(corrected.status,200,JSON.stringify(corrected))
+    assert.equal(corrected.body.paymentCorrection,true)
+    assert.equal(corrected.body.amount_paid_usd,20)
+    assert.equal(corrected.body.amount_paid_khr,142800)
+    console.log('PASS native settlement undo/redo, plain status reopen, mixed USD/KHR correction and immutable replay events')
+    const invoke = async (route,url,method,body) => {
+      let batchError
+      const observedDb={prepare:sql=>db.prepare(sql),batch:async statements=>{try{return await db.batch(statements)}catch(error){batchError=error.message;throw error}}}
+      const response=await route.request(url,{method,headers:{'content-type':'application/json'},body:JSON.stringify(body)},{DB:observedDb},context)
+      const text=await response.text();let result;try{result=JSON.parse(text)}catch{result={error:text}}
+      return {status:response.status,body:result,...(batchError?{batchError}:{})}
+    }
+    const feeBody={client_request_id:'native-fee-create',fee_type:'expense',label:'Packing tape',amount_usd:2.5,amount_khr:0,fee_date:'2026-09-11',branch_id:1,delivery_contact_id:null}
+    const fee=await invoke(fees,'/','POST',feeBody)
+    assert.equal(fee.status,201,JSON.stringify(fee))
+    const feeRetry=await invoke(fees,'/','POST',feeBody)
+    assert.equal(feeRetry.status,200,JSON.stringify(feeRetry))
+    assert.equal(feeRetry.body.fee.id,fee.body.fee.id)
+    assert.equal((await db.prepare('SELECT COUNT(*) n FROM fee_operation_receipts').first()).n,1)
+    assert.equal((await invoke(fees,'/','POST',{...feeBody,amount_usd:3})).status,409)
+    console.log('PASS native actual fee create, exact retry and changed-request conflict preserve one fee/receipt')
+    const returnBody={client_request_id:'native-return-create',sale_id:1,reason:'Wrong size',branch_id:1,items:[{sale_item_id:1,product_id:1,quantity:1,applied_price_usd:27,stock_action:'none',branch_id:1}]}
+    const returned=await invoke(returns,'/','POST',returnBody)
+    assert.equal(returned.status,200,JSON.stringify(returned))
+    const returnRetry=await invoke(returns,'/','POST',returnBody)
+    assert.equal(returnRetry.status,200,JSON.stringify(returnRetry))
+    assert.equal(returnRetry.body.id,returned.body.id)
+    const row=await db.prepare('SELECT * FROM returns WHERE id=?').bind(returned.body.id).first()
+    const editBody={client_request_id:'native-return-edit',expected_updated_at:row.updated_at,reason:'Customer changed mind'}
+    const edited=await invoke(returns,'/'+row.id,'PATCH',editBody)
+    assert.equal(edited.status,200,JSON.stringify(edited))
+    const editRetry=await invoke(returns,'/'+row.id,'PATCH',editBody)
+    assert.equal(editRetry.status,200,JSON.stringify(editRetry))
+    assert.deepEqual(editRetry.body,edited.body)
+    assert.equal((await db.prepare('SELECT COUNT(*) n FROM return_create_receipts').first()).n,1)
+    assert.equal((await db.prepare('SELECT COUNT(*) n FROM return_mutation_receipts').first()).n,1)
+    assert.equal((await db.prepare('SELECT COUNT(*) n FROM inventory_movements').first()).n,0)
+    console.log('PASS native actual linked return create/edit, exact retries and immutable receipts with no stock action')
   } finally { f.sql.close(); original.close(); await mf.dispose() }
 }
 
