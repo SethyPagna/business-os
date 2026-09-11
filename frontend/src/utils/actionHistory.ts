@@ -439,7 +439,7 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
     setBusy(direction)
     try {
       const api = await loadActionHistoryTransport()
-      if (actorScopeRef.current !== requestScope) return false
+      if (actorScopeRef.current !== requestScope || !isActorReadScopeCurrent(readScope)) return false
       if (navigator.onLine === false) throw new Error('Connect to the server to replay history.')
       const item = serverItems.find(item => String(item.id) === String(serverId))
       const payload = item?.[direction === 'undo' ? 'undo_payload' : 'redo_payload'] as Record<string, unknown> | undefined
@@ -453,7 +453,7 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
           ? await api.undoActionHistory(serverId, replayRequest)
           : await api.redoActionHistory(serverId, replayRequest)
       const applied = !!(response && typeof response === 'object' && (response as { applied?: unknown }).applied)
-      if (actorScopeRef.current !== requestScope) return false
+      if (actorScopeRef.current !== requestScope || !isActorReadScopeCurrent(readScope)) return false
       if (!applied) {
         notify?.(`Unable to ${direction} that action right now.`, 'error')
         return false
