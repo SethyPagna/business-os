@@ -41,7 +41,7 @@
 // to the status the sale was in when cancelled.
 
 import { RETURN_STATUSES, STOCK_DEDUCTED_STATUSES } from './salesStatus'
-import { decrementBatchStockStrictStatement, incrementBatchStockStatement } from './productBatches'
+import { decrementBatchStockStrictStatement, restoreBatchStockStatements } from './productBatches'
 
 export const CANCEL_REASONS = ['mistake', 'buyer_refused', 'other'] as const
 export type CancelReason = (typeof CANCEL_REASONS)[number]
@@ -357,7 +357,7 @@ export function planSaleStockTransition(input: {
           const outstanding = Math.max(0, (Number(alloc.quantity) || 0) - (Number(alloc.released_quantity) || 0))
           const give = Math.min(outstanding, remaining)
           if (give <= 0) continue
-          statements.push(incrementBatchStockStatement(alloc.batch_id, item.branch_id, give))
+          statements.push(...restoreBatchStockStatements(alloc.batch_id, item.branch_id, give))
           restoredLots.push({ batchId: alloc.batch_id, quantity: give })
           statements.push({
             sql: `UPDATE sale_item_batch_allocations
@@ -369,7 +369,7 @@ export function planSaleStockTransition(input: {
           remaining -= give
         }
       } else if (item.batch_id) {
-        statements.push(incrementBatchStockStatement(item.batch_id, item.branch_id, restore))
+        statements.push(...restoreBatchStockStatements(item.batch_id, item.branch_id, restore))
         restoredLots.push({ batchId: item.batch_id, quantity: restore })
         statements.push({
           sql: `UPDATE sale_item_batch_allocations SET released_at = datetime('now'), released_quantity = quantity

@@ -50,7 +50,7 @@ import { heldQuantity } from './saleTransitions'
 import {
   allocateAcrossLots,
   decrementBatchStockStrictStatement,
-  incrementBatchStockStatement,
+  restoreBatchStockStatements,
   type FifoLotAvailability,
   type FifoLotTake,
 } from './productBatches'
@@ -726,7 +726,7 @@ export function planSaleLineRemoval(input: {
       for (let index = line.takes.length - 1; index >= 0; index -= 1) {
         const take = line.takes[index]
         if (take.quantity <= 0) continue
-        statements.push(incrementBatchStockStatement(take.batchId, line.branchId, take.quantity))
+        statements.push(...restoreBatchStockStatements(take.batchId, line.branchId, take.quantity))
         restoredLots.push({ batchId: take.batchId, quantity: take.quantity })
       }
       statements.push({

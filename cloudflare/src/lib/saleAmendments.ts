@@ -73,7 +73,7 @@ import { heldQuantity } from './saleTransitions'
 import {
   allocateAcrossLots,
   decrementBatchStockStrictStatement,
-  incrementBatchStockStatement,
+  restoreBatchStockStatements,
   type FifoLotAvailability,
   type FifoLotTake,
 } from './productBatches'
@@ -548,7 +548,7 @@ export function planLineQuantityDecrease(input: {
     const releasedGivenUp = Math.max(0, taken - Math.min(taken, stillHeld))
 
     if (returnsToShelf > 0 && allocation.branch_id) {
-      statements.push(incrementBatchStockStatement(allocation.batch_id, allocation.branch_id, returnsToShelf))
+      statements.push(...restoreBatchStockStatements(allocation.batch_id, allocation.branch_id, returnsToShelf))
       unitsReturnedToShelf += returnsToShelf
       takes.push({ batchId: allocation.batch_id, lotCode: null, expiryDate: null, quantity: returnsToShelf })
     }

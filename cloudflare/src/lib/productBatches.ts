@@ -686,6 +686,21 @@ export function incrementBatchStockStatement(batchId: number, branchId: number, 
   }
 }
 
+// Restoring real, previously allocated sale stock makes its original lot
+// selectable again. Keep both statements in the caller's atomic db.batch:
+// activating first also satisfies the inactive-positive-stock invariant.
+// Neither statement rewrites the lot's received date, cost or identity.
+export function restoreBatchStockStatements(batchId: number, branchId: number, quantity: number): Array<{ sql: string; params: Record<string, unknown> }> {
+  if (!Number.isFinite(quantity) || quantity <= 0) return []
+  return [
+    {
+      sql: `UPDATE product_batches SET is_active = 1, updated_at = datetime('now') WHERE id = @batchId AND is_active != 1`,
+      params: { batchId },
+    },
+    incrementBatchStockStatement(batchId, branchId, quantity),
+  ]
+}
+
 // ---------------------------------------------------------------------------
 // Z0: FIFO lot allocation for sales that did not explicitly pick a batch.
 // The user's rule -- "returns and cancels must return stock to the SAME
