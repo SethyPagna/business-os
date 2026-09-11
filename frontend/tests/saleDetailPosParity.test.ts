@@ -184,7 +184,7 @@ for (const file of fs.readdirSync(salesDir)) {
 //    product ids so the sheet's OWN received-date step can engage. Without
 //    them that step could never appear -- which is exactly why a second modal
 //    had to ask the lot question.
-assert.match(detail, /<ProductOptionSheet[\s\S]{0,900}intent="sell"[\s\S]{0,500}trackedBatchProductIds=\{trackedBatchProductIds\}/)
+assert.match(detail, /<ProductOptionSheet[\s\S]{0,900}intent="sell"[\s\S]{0,500}trackedBatchProductIds=\{trackedIdsForAddSheet\}/)
 assert.match(detail, /activeBranchId=\{sale\.branch_id \?\? null\}/)
 assert.match(detail, /getTrackedBatchProductIds\(sale\?\.branch_id \?\? null\)/)
 // A FAILED lookup must not collapse into "nothing is batch-tracked" -- that

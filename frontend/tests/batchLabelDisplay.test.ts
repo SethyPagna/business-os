@@ -48,8 +48,9 @@ check('a date-derived lot code renders as its date, not the raw code', () => {
   assert.equal(batchDisplayLabel({ id: 3, lot_code: '08242026', received_at: '2026-08-28 09:00:00' }), '28/08/2026')
 })
 
-check('a genuine custom lot code still renders AS a code', () => {
-  assert.equal(batchDisplayLabel({ id: 4, lot_code: 'LOT-A123', received_at: '2026-08-24 10:00:00' }), 'LOT-A123')
+check('received_at wins; a genuine custom lot code is the no-date fallback', () => {
+  assert.equal(batchDisplayLabel({ id: 4, lot_code: 'LOT-A123', received_at: '2026-08-24 10:00:00' }), '24/08/2026')
+  assert.equal(batchDisplayLabel({ id: 8, lot_code: 'LOT-A123', received_at: null }), 'LOT-A123')
 })
 
 check('no lot code falls back to the received date, then Received date n, then id', () => {

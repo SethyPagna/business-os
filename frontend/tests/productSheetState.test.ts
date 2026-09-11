@@ -242,7 +242,7 @@ await runTest('every product picker mounts the shared option sheet', () => {
   // answers it, which is why the tracked ids now reach the sheet.
   assert.doesNotMatch(saleDetail, /addPicking/, 'the private line-form modal must be gone, not merely unused')
   assert.equal(fs.existsSync(new URL('../src/components/sales/SaleDetailProductPicker.tsx', import.meta.url)), false)
-  assert.match(saleDetail, /trackedBatchProductIds=\{trackedBatchProductIds\}/, 'the sheet must be able to ask the received-date question itself')
+  assert.match(saleDetail, /trackedBatchProductIds=\{trackedIdsForAddSheet\}/, 'the sheet must ask the received-date question and fail closed when tracking metadata is unavailable')
   // The branch the sheet resolved has to survive all the way onto the wire.
   // It reached the line form and stopped there: the lots were loaded at ONE
   // branch and the batch was then posted with no branch at all, so the Worker

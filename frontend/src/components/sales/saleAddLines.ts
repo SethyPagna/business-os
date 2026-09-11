@@ -72,6 +72,7 @@ export type StagedAddLine = {
   batchReceivedAt: string
   batchExpiryDate: string
   batchQuantity: number | null
+  unlottedStock: boolean
 }
 
 // What ProductDetailSheet hands back through onPick -- structurally the
@@ -79,13 +80,21 @@ export type StagedAddLine = {
 // on the transport layer for a shape it only reads.
 export type SaleAddSheetSelection = {
   branchId: string | null
-  batch?: {
+  batch?: ({
     batchId: number
+    unlottedStock?: false
     batchLabel?: string | null
     batchExpiryDate?: string | null
     batchReceivedAt?: string | null
     quantity?: number | string | null
-  }
+  } | {
+    batchId?: never
+    unlottedStock: true
+    batchLabel?: never
+    batchExpiryDate?: never
+    batchReceivedAt?: never
+    quantity: number | string
+  })
 }
 
 function toNumber(value: unknown): number {
@@ -100,8 +109,8 @@ function toNumber(value: unknown): number {
  * two movements) and the branch joins the key too -- two picks at different
  * branches take units off two different shelves.
  */
-export function stagedAddLineKey(line: Pick<StagedAddLine, 'productId' | 'branchId' | 'batchId'>): string {
-  return `${line.productId}:${line.branchId ?? 'any'}:${line.batchId ?? 'stock'}`
+export function stagedAddLineKey(line: Pick<StagedAddLine, 'productId' | 'branchId' | 'batchId' | 'unlottedStock'>): string {
+  return `${line.productId}:${line.branchId ?? 'any'}:${line.batchId ?? (line.unlottedStock ? 'unlotted' : 'stock')}`
 }
 
 /**
@@ -121,6 +130,7 @@ export function stagedLineFromSheetPick(
 
   const batch = selection?.batch ?? null
   const batchQuantity = batch ? toNumber(batch.quantity) : null
+  const unlottedStock = batch?.unlottedStock === true
   // On-hand comes from branch_stock; the lot ledger only NARROWS it once a
   // specific received date is picked. Same order productSheetState.ts uses
   // for the number it prints above the pick button, so the staged row and
@@ -139,11 +149,12 @@ export function stagedLineFromSheetPick(
     stockQuantity,
     barcode: String(picked.barcode || ''),
     branchId,
-    batchId: batch ? Number(batch.batchId) : null,
-    batchLabel: batch ? String(batch.batchLabel || '') : '',
-    batchReceivedAt: batch ? String(batch.batchReceivedAt || '') : '',
-    batchExpiryDate: batch ? String(batch.batchExpiryDate || '') : '',
+    batchId: batch && !unlottedStock ? Number(batch.batchId) : null,
+    batchLabel: batch && !unlottedStock ? String(batch.batchLabel || '') : '',
+    batchReceivedAt: batch && !unlottedStock ? String(batch.batchReceivedAt || '') : '',
+    batchExpiryDate: batch && !unlottedStock ? String(batch.batchExpiryDate || '') : '',
     batchQuantity,
+    unlottedStock,
   }
 }
 

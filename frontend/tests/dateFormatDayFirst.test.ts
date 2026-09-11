@@ -257,6 +257,7 @@ await runTest("IDENTIFIER: migration 0108's ADJ lot codes render verbatim", () =
   // code) and batchDisplayLabel must pass them straight through.
   assert.equal(lotCodeAsDate('ADJ09/02/2026'), null)
   assert.equal(batchDisplayLabel({ id: 7, lot_code: 'ADJ09/02/2026' }), 'ADJ09/02/2026')
+  assert.equal(batchDisplayLabel({ id: 7, lot_code: 'ADJ09/02/2026', received_at: '2026-09-02' }), '02/09/2026', 'a valid stored received date outranks the synthetic code')
 })
 
 // ---------------------------------------------------------------------------

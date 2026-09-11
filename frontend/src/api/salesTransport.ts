@@ -247,6 +247,12 @@ export type SaleItemAddition = {
   quantity: number
   applied_price_usd?: number
   branch_id?: number | null
+  batch_id?: number
+  batch_label?: string
+  batch_expiry_date?: string
+  // Explicitly selects branch stock that is not represented by a received-
+  // date lot. Omitting this is a different instruction: normal server FIFO.
+  unlotted_stock?: boolean
 }
 
 /**

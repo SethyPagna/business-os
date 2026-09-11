@@ -7,7 +7,7 @@ import { searchProducts } from '../../api/methods.ts'
 import { getSaleDeliveryOptions } from '../../api/salesTransport.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
-import { fmtDateTime24, fmtTime } from '../../utils/formatters.ts'
+import { fmtDateOnly, fmtDateTime24, fmtTime } from '../../utils/formatters.ts'
 import { getSaleReturnBlockReason } from '../../utils/saleReturnGuard.ts'
 import { DELIVERY_AMOUNT_ERROR_KEYS, deliveryAmountChanged, parseDeliveryAmountUsd } from '../../utils/deliveryAmounts.ts'
 import { buildProductGroups } from '../../utils/productGrouping.ts'
@@ -44,6 +44,7 @@ import ProductCard from '../pos/ProductCard.tsx'
 import { branchStockQuantity } from '../pos/productSheetState.ts'
 import { useApp, useLowStockConfig } from '../../AppContext'
 import { getTrackedBatchProductIds } from '../../api/batchesTransport.ts'
+import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import SaleStatusWorkflow from './SaleStatusWorkflow.tsx'
 import { claimSyncProblemPresentation, type SyncProblemPresentationOwner } from '../../utils/syncProblemLifecycle.ts'
 import { sanitizeSaleDetailText } from './saleDetailText.ts'
@@ -95,6 +96,11 @@ interface SaleLineItem {
   unit?: string | null
   supplier?: string | null
   returned_quantity?: number | string | null
+  batch_id?: number | string | null
+  batch_label?: string | null
+  batch_expiry_date?: string | null
+  batch_received_at?: string | null
+  lot_allocation_count?: number | string | null
 }
 
 interface SaleDetail {
@@ -290,7 +296,7 @@ interface SaleDetailModalProps {
   // when the signed-in user lacks `sales:add_items` -- the same
   // hide-by-omission gate as the write callbacks above, and the Worker
   // enforces the identical action server-side.
-  onAddItems?: (saleId: string | number, items: Array<{ product_id: number; quantity: number; applied_price_usd?: number; batch_id?: number; batch_label?: string; batch_expiry_date?: string }>, review: SaleMutationReview) => Promise<SaleMutationUiResult> | SaleMutationUiResult
+  onAddItems?: (saleId: string | number, items: Array<{ product_id: number; quantity: number; applied_price_usd?: number; branch_id?: number; batch_id?: number; batch_label?: string; batch_expiry_date?: string; unlotted_stock?: boolean }>, review: SaleMutationReview) => Promise<SaleMutationUiResult> | SaleMutationUiResult
   // S4-30: amend this already-recorded sale -- change a line's quantity,
   // remove a line, replace one product with another, or correct the customer
   // delivery fee / staff-paid actual courier cost. Omitted entirely when the signed-in user lacks `sales:amend`, the
@@ -448,6 +454,9 @@ export default function SaleDetailModal({
   // sheet's own received-date step can never engage, which is precisely why a
   // second modal had to ask the lot question with a list of its own.
   const [trackedBatchProductIds, setTrackedBatchProductIds] = useState<Set<number>>(new Set())
+  const [trackedBatchLookupState, setTrackedBatchLookupState] = useState<'loading' | 'ready' | 'failed'>('loading')
+  const [trackedBatchLookupError, setTrackedBatchLookupError] = useState('')
+  const [trackedBatchReloadKey, setTrackedBatchReloadKey] = useState(0)
   // Replace used to be a flat list that committed the swap on the first tap,
   // with no branch quantity and no way to say WHICH option or received date.
   // It now opens the same option sheet every other picker opens.
@@ -618,16 +627,22 @@ export default function SaleDetailModal({
   useEffect(() => {
     if (!onAddItems) return undefined
     let cancelled = false
+    setTrackedBatchLookupState('loading')
+    setTrackedBatchLookupError('')
     getTrackedBatchProductIds(sale?.branch_id ?? null)
       .then((res) => {
         if (cancelled) return
         setTrackedBatchProductIds(new Set((res?.productIds || []).map((id) => Number(id))))
+        setTrackedBatchLookupState('ready')
       })
       .catch((error: unknown) => {
-        if (!cancelled) console.error('[SaleDetailModal] batch tracking lookup failed:', error)
+        if (cancelled) return
+        console.error('[SaleDetailModal] batch tracking lookup failed:', error)
+        setTrackedBatchLookupState('failed')
+        setTrackedBatchLookupError(error instanceof Error && error.message ? error.message : 'Could not verify received-date tracking.')
       })
     return () => { cancelled = true }
-  }, [onAddItems, sale?.branch_id])
+  }, [onAddItems, sale?.branch_id, trackedBatchReloadKey])
 
   useEffect(() => {
     const text = addQuery.trim()
@@ -670,6 +685,25 @@ export default function SaleDetailModal({
     setAddCandidates([])
     setAddLines((current) => mergeStagedAddLine(current, line))
   }
+  // If the tracking-index lookup is unavailable, treat every row currently in
+  // the picker as tracked. The sheet then asks for a concrete lot or explicit
+  // unrecorded stock instead of silently taking the no-lot path.
+  const trackedIdsForAddSheet = useMemo(() => {
+    if (trackedBatchLookupState === 'ready') return trackedBatchProductIds
+    const conservative = new Set(trackedBatchProductIds)
+    const rows = [
+      ...addCandidates,
+      ...(addSheetGroup?.__groupChoices || []),
+      ...(replacePicking?.__groupChoices || []),
+      ...(addSheetGroup ? [addSheetGroup] : []),
+      ...(replacePicking ? [replacePicking] : []),
+    ]
+    for (const row of rows) {
+      const id = Number(row?.id)
+      if (Number.isFinite(id) && id > 0) conservative.add(id)
+    }
+    return conservative
+  }, [trackedBatchLookupState, trackedBatchProductIds, addCandidates, addSheetGroup, replacePicking])
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
   const translateOr = (key: string, fallbackEn: string, fallbackKm = fallbackEn): string => {
     const value = t(key)
@@ -1134,6 +1168,7 @@ export default function SaleDetailModal({
         ...(line.batchId != null ? { batch_id: line.batchId } : {}),
         ...(line.batchLabel ? { batch_label: line.batchLabel } : {}),
         ...(line.batchExpiryDate ? { batch_expiry_date: line.batchExpiryDate } : {}),
+        ...(line.unlottedStock ? { unlotted_stock: true } : {}),
       })), {
         client_request_id: addRequestIdRef.current,
         expected_exchange_rate: mutationExchangeRate,
@@ -1622,6 +1657,12 @@ export default function SaleDetailModal({
                     // button that would 404 -- the sale is still fully
                     // readable, which is the important part.
                     const lineId = Number(item.id) || 0
+                    const allocationCount = Math.max(0, toNumber(item.lot_allocation_count))
+                    const allocationLabel = item.batch_label || item.batch_received_at
+                      ? batchDisplayLabel({ id: item.batch_id || lineId || index, lot_code: item.batch_label, received_at: item.batch_received_at })
+                      : item.batch_id
+                        ? `${t('batch') || 'Received date'} #${item.batch_id}`
+                        : ''
                     return (
                       <Fragment key={`${item.product_id || item.id || index}-${index}`}>
                       <tr>
@@ -1635,6 +1676,14 @@ export default function SaleDetailModal({
                           </div>
                           {item.barcode ? <div className="text-[11px] text-gray-400"><EntityLink page="products" anchor="hub:products:products" search={item.barcode} navigate={navigateTo}>{item.barcode}</EntityLink></div> : null}
                           {item.supplier ? <div className="text-[11px] text-gray-400"><EntityLink page="contacts" anchor="hub:contacts:suppliers" search={item.supplier} navigate={navigateTo}>{item.supplier}</EntityLink></div> : null}
+                          {allocationLabel ? (
+                            <div className="text-[11px] text-gray-500 dark:text-gray-400">
+                              {t('received_date') || 'Received date'}: {allocationLabel}
+                              {item.batch_expiry_date ? ` · ${t('expiry_date') || 'Expiry date'}: ${fmtDateOnly(item.batch_expiry_date)}` : ''}
+                            </div>
+                          ) : allocationCount > 0 ? (
+                            <div className="text-[11px] text-gray-500 dark:text-gray-400">{t('batches') || 'Received dates'}: {allocationCount}</div>
+                          ) : null}
                           {toNumber(item.returned_quantity) > 0 ? (
                             <div className="mt-0.5 inline-flex rounded bg-orange-100 px-1.5 py-0.5 text-[10px] font-semibold text-orange-700 dark:bg-orange-900/40 dark:text-orange-300">↩ {toNumber(item.returned_quantity)} {t('returned_quantity_tag') || 'returned'}</div>
                           ) : null}
@@ -1966,6 +2015,20 @@ export default function SaleDetailModal({
                 placeholder={translateOr('add_items_search_placeholder', 'Search by name or barcode', 'ស្វែងរកតាមឈ្មោះ ឬបាកូដ')}
                 autoComplete="off"
               />
+              {trackedBatchLookupState === 'loading' ? (
+                <p role="status" className="mt-1.5 text-[11px] text-gray-500 dark:text-gray-400">
+                  {translateOr('loading', 'Checking received dates…', 'កំពុងពិនិត្យថ្ងៃចូល…')}
+                </p>
+              ) : trackedBatchLookupState === 'failed' ? (
+                <div role="alert" className="mt-1.5 flex items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-200">
+                  <span className="min-w-0 flex-1 truncate" title={trackedBatchLookupError}>
+                    {translateOr('received_dates_load_failed', 'Could not verify received dates. A stock source will be required.', 'មិនអាចពិនិត្យថ្ងៃចូលបានទេ។ ត្រូវជ្រើសប្រភពស្តុក។')}
+                  </span>
+                  <button type="button" className="shrink-0 rounded px-2 py-1 font-semibold underline underline-offset-2" onClick={() => setTrackedBatchReloadKey((key) => key + 1)}>
+                    {t('retry') || translateOr('retry', 'Retry', 'ព្យាយាមម្ដងទៀត')}
+                  </button>
+                </div>
+              ) : null}
               {addSearching ? (
                 <p className="mt-2 text-xs text-gray-400">{t('loading') || 'Loading'}</p>
               ) : addQuery.trim().length >= 2 && addCandidates.length === 0 ? (
@@ -2000,7 +2063,7 @@ export default function SaleDetailModal({
                   activeBranchId={sale.branch_id ?? null}
                   // The lot question belongs to THIS sheet -- the POS's own
                   // received-date step -- not to a second modal of our own.
-                  trackedBatchProductIds={trackedBatchProductIds}
+                  trackedBatchProductIds={trackedIdsForAddSheet}
                   pickLabel={t('add') || 'Add'}
                   onClose={closeAddPicker}
                   onPick={(picked, selection) => {
@@ -2023,7 +2086,7 @@ export default function SaleDetailModal({
                           <span className="min-w-0 flex-1 break-words text-sm font-medium text-gray-900 dark:text-white">
                             {line.name}
                             {line.barcode ? <span className="mt-0.5 block font-mono text-[11px] font-normal text-gray-400">{line.barcode}</span> : null}
-                            {line.batchLabel ? <span className="mt-0.5 block text-[11px] font-normal text-blue-700 dark:text-blue-300">{stagedLineBatchCaption(line, t)}</span> : null}
+                            {line.batchLabel ? <span className="mt-0.5 block text-[11px] font-normal text-blue-700 dark:text-blue-300">{stagedLineBatchCaption(line, t)}</span> : line.unlottedStock ? <span className="mt-0.5 block text-[11px] font-normal text-amber-700 dark:text-amber-300">{translateOr('received_date_not_recorded', 'Received date not recorded', 'មិនបានកត់ត្រាថ្ងៃចូល')}</span> : null}
                           </span>
                           <span className="flex items-center gap-1">
                             <label htmlFor={`sale-add-qty-${stagedLineKey(line)}`} className="text-[11px] text-gray-400">{t('qty_short') || 'Qty'}</label>

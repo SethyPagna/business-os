@@ -86,6 +86,13 @@ check('POS tracks the failure explicitly and forces the detail sheet for every p
   )
 })
 
+check('POS passes the unavailable state into the sheet so the extra tap cannot bypass lot selection', () => {
+  assert.ok(
+    /trackedBatchLookupUnavailable=\{trackedBatchLoadFailed\}/.test(pos),
+    'forcing the detail sheet is insufficient unless the sheet also knows tracking metadata is unavailable',
+  )
+})
+
 check('POS surfaces the failure to the cashier instead of failing silently', () => {
   assert.ok(
     /trackedBatchLoadFailed && \(/.test(pos),

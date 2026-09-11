@@ -43,6 +43,11 @@ export type SheetDamagedLotLike = {
   quantity_remaining?: string | number
 }
 
+export type SheetUnlottedStockOption = {
+  productId: number
+  quantity: number
+}
+
 // One branch pill. `quantity` is the RESOLVED row's stock at that branch
 // (the number the Add buttons enforce once you pick it), `groupQuantity`
 // the whole group's -- the two differ whenever a name group carries
@@ -85,6 +90,9 @@ export type ProductSheetStateInput = {
   activeBranchId?: string | number | null
   selectedVariantId?: string | null
   trackedBatchProductIds?: Set<number> | null
+  // A failed metadata request makes absence from the last-known set
+  // inconclusive. Treat every row in this sheet as tracked until retry.
+  trackedBatchLookupUnavailable?: boolean
   // Some hosts cannot honour a received date at all: a sale line's
   // REPLACEMENT is planned server-side with batchId null and drawn by FIFO
   // (cloudflare/src/routes/sales.ts, the line_replaced branch), so offering
@@ -102,6 +110,10 @@ export type ProductSheetStateInput = {
   knownPositiveBatchQuantityByProduct?: Readonly<Record<number, number | null>>
   selectedBatchId?: number | null
   selectedUnlottedStock?: boolean
+  // In a merged indistinguishable group, more than one underlying product row
+  // can own unrecorded stock. The id makes that choice explicit; the legacy
+  // boolean remains as the flat/single-row shorthand used by existing hosts.
+  selectedUnlottedProductId?: number | null
   damagedLots?: readonly SheetDamagedLotLike[]
   selectedDamagedLotId?: number | null
   intent?: SheetIntent
@@ -137,6 +149,8 @@ export type ProductSheetState = {
   receivedDateOptions: SheetBatchLike[]
   receivedDateTotal: number
   unlottedStockQuantity: number
+  unlottedStockOptions: SheetUnlottedStockOption[]
+  selectedUnlottedProductId: number | null
   // TRUE when the branch holds units in branch_stock but the lot ledger
   // has nothing to draw them from. The sheet used to render this as
   // "Stock: 0" beside a branch line saying 28 -- two ledgers contradicting
@@ -284,25 +298,30 @@ export function deriveProductSheetState(input: ProductSheetStateInput): ProductS
     activeBranchId = null,
     selectedVariantId = null,
     trackedBatchProductIds: trackedBatchProductIdsInput = null,
+    trackedBatchLookupUnavailable = false,
     receivedDateStepHidden = false,
     batches = [],
     selectedBatchId = null,
     selectedUnlottedStock = false,
+    selectedUnlottedProductId: selectedUnlottedProductIdInput = null,
     damagedLots = [],
     selectedDamagedLotId = null,
     intent = 'sell',
     getDisplayStock = defaultDisplayStock,
   } = input
-  // A hidden step is an ABSENT step, not an unanswered one: with no tracked
-  // ids the received-date gate never engages, so the pick is not blocked on a
-  // question this surface deliberately refuses to ask.
-  const trackedBatchProductIds = receivedDateStepHidden ? null : trackedBatchProductIdsInput
-
   // A flat product is a one-row group. Every derivation below walks THIS
   // pool, never `variants` directly -- the old code walked `variants` for
   // the resolved row and `variants.length ? variants : [product]` for the
   // branch list, so a flat product got branch options but no resolved row.
   const rowPool: SheetProductLike[] = variants.length ? [...variants] : [product]
+  // A hidden step is an ABSENT step, not an unanswered one. A failed lookup
+  // is the opposite: tracking is unknown, so conservatively require a stock
+  // source for every row until a successful retry clears the failure flag.
+  const trackedBatchProductIds = receivedDateStepHidden
+    ? null
+    : trackedBatchLookupUnavailable
+      ? new Set(rowPool.map((row) => Number(row.id)).filter((id) => Number.isFinite(id) && id > 0))
+      : trackedBatchProductIdsInput
 
   const branchNames = new Map<string, string>()
   const branchGroupTotals = new Map<string, number>()
@@ -338,9 +357,23 @@ export function deriveProductSheetState(input: ProductSheetStateInput): ProductS
     return narrowed.length ? narrowed : rowPool
   }
 
-  const resolveRow = (pool: SheetProductLike[]): SheetProductLike | null => (
-    pool.find((row) => String(row.id) === String(selectedVariantId)) || pool[0] || null
-  )
+  const rowsMergeIntoLotList = (pool: SheetProductLike[]): boolean => groupProduct
+    && pool.length > 1
+    && input.optionStepTitleFor?.(pool) === 'Option'
+    && pool.every((row) => trackedBatchProductIds?.has(Number(row.id)) ?? false)
+
+  const resolveRow = (pool: SheetProductLike[], branchId: string | null = null): SheetProductLike | null => {
+    const selected = pool.find((row) => String(row.id) === String(selectedVariantId))
+    if (selected) return selected
+    // Once the internal-id-only option step is removed, opening on pool[0]
+    // can strand a group on a zero-stock row while an indistinguishable row
+    // has sellable Shop stock. Prefer the highest-stock row until the cashier
+    // makes an explicit lot/unrecorded-stock choice.
+    if (rowsMergeIntoLotList(pool) && branchId != null) {
+      return [...pool].sort((a, b) => stockAtBranch(b, branchId) - stockAtBranch(a, branchId))[0] || null
+    }
+    return pool[0] || null
+  }
 
   const branchOptions: SheetBranchOption[] = branchIds.map((id) => {
     const name = String(branchNames.get(id) ?? id)
@@ -352,7 +385,9 @@ export function deriveProductSheetState(input: ProductSheetStateInput): ProductS
       // The pill's number is the row the sheet WOULD resolve to at that
       // branch, so a pill can never read "in stock" while the row the Add
       // button is capped by has nothing there.
-      quantity: stockAtBranch(resolveRow(poolAtBranch(id)), id),
+      quantity: rowsMergeIntoLotList(poolAtBranch(id))
+        ? (branchGroupTotals.get(id) || 0)
+        : stockAtBranch(resolveRow(poolAtBranch(id), id), id),
       groupQuantity: branchGroupTotals.get(id) || 0,
       role,
       selectable: sellable,
@@ -374,15 +409,10 @@ export function deriveProductSheetState(input: ProductSheetStateInput): ProductS
     : fallbackBranchId
 
   const candidatePool = poolAtBranch(effectiveBranchId)
-  const effectiveVariant = resolveRow(candidatePool)
+  const effectiveVariant = resolveRow(candidatePool, effectiveBranchId)
   const effectiveVariantStock = stockAtBranch(effectiveVariant, effectiveBranchId)
 
-  const optionStepIsIndistinguishable = groupProduct
-    && candidatePool.length > 1
-    && input.optionStepTitleFor?.(candidatePool) === 'Option'
-  const everyCandidateBatchTracked = candidatePool.length > 0
-    && candidatePool.every((row) => trackedBatchProductIds?.has(Number(row.id)) ?? false)
-  const mergeRowsIntoLotList = optionStepIsIndistinguishable && everyCandidateBatchTracked
+  const mergeRowsIntoLotList = rowsMergeIntoLotList(candidatePool)
 
   const resolvedProduct = groupProduct ? effectiveVariant : product
   const isBatchTracked = mergeRowsIntoLotList
@@ -391,21 +421,36 @@ export function deriveProductSheetState(input: ProductSheetStateInput): ProductS
   const receivedDateOptions = sortBatchesForPicker(batches as readonly SheetBatchLike[]) as SheetBatchLike[]
   const receivedDateTotal = receivedDateOptions.reduce((sum, batch) => sum + toNumber(batch.quantity), 0)
   const selectedBatch = receivedDateOptions.find((batch) => batch.id === selectedBatchId) || null
-  const authoritativeKnownQuantity = input.knownPositiveBatchQuantityByProduct
-    ? input.knownPositiveBatchQuantityByProduct[Number(effectiveVariant?.id ?? product.id)]
-    : undefined
-  const knownPositiveBatchQuantity = authoritativeKnownQuantity === undefined
-    ? (input.knownPositiveBatchQuantityByProduct === undefined ? receivedDateTotal : null)
-    : (authoritativeKnownQuantity == null ? null : Math.max(0, toNumber(authoritativeKnownQuantity)))
-  const unlottedStockQuantity = knownPositiveBatchQuantity == null
-    ? 0
-    : Math.max(0, effectiveVariantStock - knownPositiveBatchQuantity)
+  const unlottedSourceRows = mergeRowsIntoLotList ? candidatePool : (effectiveVariant ? [effectiveVariant] : [])
+  const unlottedStockOptions = unlottedSourceRows.flatMap((row): SheetUnlottedStockOption[] => {
+    const rowId = Number(row.id)
+    if (!Number.isFinite(rowId) || rowId <= 0) return []
+    const authoritativeKnownQuantity = input.knownPositiveBatchQuantityByProduct
+      ? input.knownPositiveBatchQuantityByProduct[rowId]
+      : undefined
+    const rowBatchesTotal = receivedDateOptions
+      .filter((batch) => !mergeRowsIntoLotList || Number(batch.__productId) === rowId)
+      .reduce((sum, batch) => sum + toNumber(batch.quantity), 0)
+    const knownPositiveBatchQuantity = authoritativeKnownQuantity === undefined
+      ? (input.knownPositiveBatchQuantityByProduct === undefined ? rowBatchesTotal : null)
+      : (authoritativeKnownQuantity == null ? null : Math.max(0, toNumber(authoritativeKnownQuantity)))
+    if (knownPositiveBatchQuantity == null) return []
+    const quantity = Math.max(0, stockAtBranch(row, effectiveBranchId) - knownPositiveBatchQuantity)
+    return quantity > 0 ? [{ productId: rowId, quantity }] : []
+  })
+  const legacySelectedUnlottedProductId = selectedUnlottedStock
+    ? Number(effectiveVariant?.id ?? product.id)
+    : null
+  const selectedUnlottedProductId = selectedUnlottedProductIdInput ?? legacySelectedUnlottedProductId
+  const selectedUnlottedOption = unlottedStockOptions.find((option) => option.productId === selectedUnlottedProductId) || null
+  const effectiveUnlottedOption = unlottedStockOptions.find((option) => option.productId === Number(effectiveVariant?.id ?? product.id)) || null
+  const unlottedStockQuantity = selectedUnlottedOption?.quantity ?? effectiveUnlottedOption?.quantity ?? 0
   const selectedDamagedLot = damagedLots.find((lot) => lot.id === selectedDamagedLotId) || null
 
   const batchSelectionRequired = isBatchTracked
   const batchReadyToSell = selectedDamagedLot != null
     ? toNumber(selectedDamagedLot.quantity_remaining) > 0
-    : (!batchSelectionRequired || (selectedBatch != null && toNumber(selectedBatch.quantity) > 0) || (selectedUnlottedStock && unlottedStockQuantity > 0))
+    : (!batchSelectionRequired || (selectedBatch != null && toNumber(selectedBatch.quantity) > 0) || selectedUnlottedOption != null)
 
   // On-hand comes from branch_stock, the ledger that answers "how many
   // units are at this branch". The lot ledger answers a different
@@ -415,7 +460,7 @@ export function deriveProductSheetState(input: ProductSheetStateInput): ProductS
     ? toNumber(selectedDamagedLot.quantity_remaining)
     : selectedBatch
       ? toNumber(selectedBatch.quantity)
-      : selectedUnlottedStock
+      : selectedUnlottedOption
         ? unlottedStockQuantity
         : effectiveVariantStock
 
@@ -449,8 +494,9 @@ export function deriveProductSheetState(input: ProductSheetStateInput): ProductS
     receivedDateOptions,
     receivedDateTotal,
     unlottedStockQuantity,
+    unlottedStockOptions,
+    selectedUnlottedProductId: selectedUnlottedOption?.productId ?? null,
     stockWithoutReceivedDate: batchSelectionRequired
-      && knownPositiveBatchQuantity === 0
-      && effectiveVariantStock > 0,
+      && unlottedStockOptions.length > 0,
   }
 }
