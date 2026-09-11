@@ -281,15 +281,19 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
     </div>
   ) : null
 
+  const viewOptions = views.map((v) => ({ value: v.id, label: trh(v.labelKey, v.fallback) }))
+  const selectedViewLabel = String(viewOptions.find((option) => option.value === resolvedViewId)?.label ?? '')
   const viewPicker = (
-    <AppSelect
-      value={resolvedViewId || ''}
-      options={views.map((v) => ({ value: v.id, label: trh(v.labelKey, v.fallback) }))}
-      onChange={(value) => { if (isReportViewId(value)) setViewId(value) }}
-      ariaLabel={trh('view', 'View')}
-      buttonClassName="h-10 w-full min-w-0 py-0 px-2 text-[12px]"
-      showChevron
-    />
+    <span className="reports-view-picker" title={selectedViewLabel}>
+      <AppSelect
+        value={resolvedViewId || ''}
+        options={viewOptions}
+        onChange={(value) => { if (isReportViewId(value)) setViewId(value) }}
+        ariaLabel={`${trh('view', 'View')}: ${selectedViewLabel}`}
+        buttonClassName="h-10 w-full min-w-0 py-0 px-2 text-[12px]"
+        showChevron
+      />
+    </span>
   )
   const searchSlot = searchInput ? <div className="min-w-[9rem] flex-1 sm:max-w-[22rem]">{searchInput}</div> : null
 
@@ -332,7 +336,7 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
   }
   const reportControlRow = (
     <span className="reports-title-actions">
-      <span className="min-w-0 flex-1">{viewPicker}</span>
+      {viewPicker}
       {filtersButton}
       <Button className="reports-show-action" onClick={showReports}>
         {trh('show', 'Show')}

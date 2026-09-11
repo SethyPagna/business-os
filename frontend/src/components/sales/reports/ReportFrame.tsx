@@ -1,12 +1,11 @@
 // ReportFrame -- the one section shell every Reports view renders inside:
-// kit SectionHeader (title + count + InfoHint + the view's own controls on
+// kit SectionHeader (title + count + the view's own controls on
 // the title row, ml-auto) and the text summary line under it ("N sales |
 // Revenue $X | Profit $Y" -- the app's no-stat-tiles convention), then the
 // body. Also home to useReportData, the small load/reload hook the views
 // share so loading, error and retry look identical everywhere.
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
-import InfoHint from '../../shared/InfoHint.tsx'
 import { Button, SectionHeader } from '../../shared/kit'
 
 export interface ReportFrameProps {
@@ -27,7 +26,7 @@ export interface ReportFrameProps {
   className?: string
 }
 
-export default function ReportFrame({ title, titleControl, count, hint, actions, summary, summaryNote, error, onRetry, retryLabel = 'Retry', children, className = '' }: ReportFrameProps) {
+export default function ReportFrame({ title, titleControl, count, actions, summary, summaryNote, error, onRetry, retryLabel = 'Retry', children, className = '' }: ReportFrameProps) {
   // The selectable active report title replaces (rather than sits beside)
   // the static title. This prevents the former "Overview" +
   // "Overview (all)" double heading and gives every report type one
@@ -38,15 +37,13 @@ export default function ReportFrame({ title, titleControl, count, hint, actions,
     // shared .report-segment class in reports-surface.css, applied here so no
     // view has to (and none can drift out of) the treatment.
     <section className={['report-segment min-w-0 space-y-1.5', className].join(' ').trim()}>
-      {/* The report picker already exposes the selected report name. Reusing
-          that same text as the adjacent info button's accessible name made
-          assistive/browser trees look like a second report-option control.
-          Keep the explanation, but give its trigger one unambiguous purpose. */}
+      {/* Report explanations remain available to exports and future detail
+          surfaces, but the title row intentionally has no separate Info
+          trigger: the active report picker is the only report-name control. */}
       <SectionHeader
         className={titleControl ? 'reports-frame-header' : ''}
         title={activeTitle}
         count={count}
-        infoHint={hint ? <InfoHint text={hint.text} label="About this report" /> : undefined}
         actions={actions}
       />
       {summary ? (
