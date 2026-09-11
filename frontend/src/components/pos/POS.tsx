@@ -31,6 +31,8 @@ import {
   createEmptyOrder,
 } from '../../constants'
 import ProductCard from './ProductCard.tsx'
+import { createPosTrackingOwner, needsPosTrackingSheet, posTrackingFingerprint, type PosTrackingState } from './posProductTracking.ts'
+import { readFreshPickerLots } from '../../utils/pickerLotFreshness.ts'
 import CartItem     from './CartItem'
 import ShiftGate, { EndShiftButton } from './ShiftGate'
 import { SHIFT_BRANCH_CHANGED_EVENT } from './ShiftGate'
@@ -178,7 +180,8 @@ type AppContextValue = {
   settings: AppSettings
   t: (key: string) => string
   usdSymbol: string
-  user: { id?: string | number; name?: string } | null
+  user: { id?: string | number; name?: string; permissions?: string | Record<string, unknown>; role_permissions?: string | Record<string, unknown>; role_code?: string; organization_id?: number } | null
+  authReady: boolean
 }
 
 type SyncContextValue = {
@@ -661,7 +664,7 @@ function paymentMethodSummary(details: PaymentDetail[]): string {
 }
 
 export default function POS() {
-  const { t, user, notify, settings, fmtUSD, fmtKHR, usdSymbol, khrSymbol, exchangeRate } = useApp() as AppContextValue
+  const { t, user, authReady, notify, settings, fmtUSD, fmtKHR, usdSymbol, khrSymbol, exchangeRate } = useApp() as AppContextValue
   // Settings > Stock Alerts. The till colours its grid and answers its stock
   // pills by the owner's number, offline included (the config rides the
   // settings map, which the offline snapshot already carries).
@@ -734,12 +737,17 @@ export default function POS() {
   // current branch filter -- see batchesTransport.ts. Drives whether
   // tapping a product forces the detail sheet's batch-picker step (see
   // openProductCard) instead of the normal one-tap/detail-sheet flow.
-  const [trackedBatchProductIds, setTrackedBatchProductIds] = useState<Set<number>>(new Set())
+  const [batchTracking, setBatchTracking] = useState<PosTrackingState>({ scope: '', status: 'loading', ids: new Set() })
+  const trackingOwner = useRef(createPosTrackingOwner())
+  const trackingScope = trackingOwner.current.scope(posTrackingFingerprint(user, authReady, branchFilter))
+  const trackingScopeRef = useRef(trackingScope)
+  trackingScopeRef.current = trackingScope
+  const trackedBatchProductIds = batchTracking.scope === trackingScope ? batchTracking.ids : new Set<number>()
   // True when the tracked-ids lookup above actually FAILED, as opposed to
   // legitimately returning nothing. Drives the conservative routing in
   // openProductCard plus a visible warning, so a cashier is never quietly
   // handed a one-tap add for stock that needed a lot chosen.
-  const [trackedBatchLoadFailed, setTrackedBatchLoadFailed] = useState(false)
+  const trackedBatchLoadFailed = batchTracking.scope === trackingScope && batchTracking.status === 'failed'
   // Bumped by the warning banner's "Try again" to re-run the lookup effect
   // below without needing the branch filter to change.
   const [batchTrackingReloadKey, setBatchTrackingReloadKey] = useState(0)
@@ -2048,17 +2056,22 @@ export default function POS() {
   // one-tap add.
   useEffect(() => {
     let cancelled = false
+    const scope = trackingScope
+    setBatchTracking({ scope, status: 'loading', ids: new Set() })
+    if (!authReady || !user) return
     getTrackedBatchProductIds(primaryBranchFilterId ?? undefined).then((res) => {
-      if (cancelled) return
-      setTrackedBatchProductIds(new Set((res?.productIds || []).map((id) => Number(id))))
-      setTrackedBatchLoadFailed(false)
+      if (cancelled || scope !== trackingScopeRef.current) return
+      if (!Array.isArray(res?.productIds)) throw new Error('Invalid batch tracking response')
+      setBatchTracking({ scope, status: 'ready', ids: new Set(res.productIds.map((id) => Number(id))) })
     }).catch((error) => {
-      if (cancelled) return
+      if (cancelled || scope !== trackingScopeRef.current) return
       console.error('[POS] batch tracking lookup failed:', getErrorMessage(error))
-      setTrackedBatchLoadFailed(true)
+      setBatchTracking({ scope, status: 'failed', ids: new Set() })
     })
     return () => { cancelled = true }
-  }, [primaryBranchFilterId, batchTrackingReloadKey])
+  }, [primaryBranchFilterId, batchTrackingReloadKey, trackingScope, authReady])
+
+  useEffect(() => () => trackingOwner.current.cancel(), [])
 
   // Self-heal for that lookup (user report, Aug 31: the amber "Batch and
   // expiry tracking could not be loaded" banner was showing). The failure
@@ -2365,7 +2378,8 @@ export default function POS() {
   }, [primaryBranchFilterId])
 
   const openProductCard = useCallback((product: ProductRecord, { groupProduct = false, inStock = false }: { groupProduct?: boolean; inStock?: boolean } = {}) => {
-    if (!product) return
+    if (!product || !authReady || !user || trackingScope !== trackingScopeRef.current) return
+    trackingOwner.current.cancel()
     // Wholesale is the only alternate tier a product can carry now (the VIP
     // tier was retired by the 2026-09-04 ruling), so it alone decides whether
     // a one-tap add has to divert to the detail sheet's price picker.
@@ -2379,17 +2393,25 @@ export default function POS() {
     // are tracked, so EVERY product takes the detail-sheet path. One extra
     // tap on an untracked product is a far better error than silently
     // one-tapping a tracked one past its lot picker.
-    const isBatchTracked = trackedBatchLoadFailed || trackedBatchProductIds.has(Number(product.id))
+    const isBatchTracked = needsPosTrackingSheet(batchTracking, trackingScope, Number(product.id))
     if (groupProduct || hasWholesale || hasPromotion || isBatchTracked) {
       setDetailProduct(product)
       return
     }
     if (inStock) {
-      addToCart(product, 'selling')
+      const branch = resolveSaleBranch(product as never, { activeBranchFilterId: primaryBranchFilterId, defaultBranchId })
+      if (branch.blocked || !branch.branchId) { setDetailProduct(product); return }
+      void trackingOwner.current.prove(
+        (signal) => readFreshPickerLots(Number(product.id), String(branch.branchId), signal),
+        (untracked) => {
+          if (untracked) addToCart(product, 'selling', undefined, branch.branchId)
+          else setDetailProduct(product)
+        },
+      )
       return
     }
     setDetailProduct(product)
-  }, [addToCart, exchangeRate, promotionRules, trackedBatchProductIds, trackedBatchLoadFailed])
+  }, [addToCart, exchangeRate, promotionRules, batchTracking, trackingScope, authReady, user, primaryBranchFilterId, defaultBranchId])
 
   /** Open shared image lightbox from POS product cards/detail sheet. */
   const openImageLightbox = useCallback((product: ProductRecord, startIndex = 0) => {
@@ -3192,7 +3214,7 @@ export default function POS() {
                 </span>
                 <button
                   type="button"
-                  onClick={() => { setTrackedBatchLoadFailed(false); setBatchTrackingReloadKey((key) => key + 1) }}
+                  onClick={() => { setBatchTracking({ scope: trackingScope, status: 'loading', ids: new Set() }); setBatchTrackingReloadKey((key) => key + 1) }}
                   className="rounded-lg bg-amber-600 px-3 py-1 text-xs font-medium text-white hover:bg-amber-700"
                 >
                   {posCopy('Try again', 'ព្យាយាមម្តងទៀត')}
@@ -4013,7 +4035,7 @@ export default function POS() {
             posCopy={posCopy}
             activeBranchId={primaryBranchFilterId ?? pickBestBranchId(detailProduct)}
             trackedBatchProductIds={trackedBatchProductIds}
-            trackedBatchLookupUnavailable={trackedBatchLoadFailed}
+            trackedBatchLookupUnavailable={batchTracking.scope !== trackingScope || batchTracking.status !== 'ready'}
             getDisplayStock={getDisplayStock}
             getPrimaryProductImage={getPrimaryProductImage}
             getVariantChoices={getVariantChoices}
