@@ -449,7 +449,7 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
     const id = initial?.id
     if (!initial || id == null) return
     let cancelled = false
-    getProductsByIds([id])
+    getProductsByIds([id], { surface: 'inventory' })
       .then((raw) => {
         if (cancelled) return
         const rows = Array.isArray(raw)
