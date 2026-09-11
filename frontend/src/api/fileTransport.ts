@@ -1,6 +1,7 @@
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
 import { getCurrentUserContext } from './actorQuery.ts'
+import { assertActorSessionDispatchAllowed, captureActorReadScope } from './actorReadScope.ts'
 import {
   apiFetch,
   getSyncServerUrl,
@@ -175,6 +176,7 @@ export async function getFiles(params: FileListParams = {}, options: FileListReq
 }
 
 export async function uploadFileAsset(payload: FileUploadPayload = {}): Promise<unknown> {
+  const scope = captureActorReadScope('files')
   const { file, signal, onProgress, compressOptions } = payload
   if (!(file instanceof File)) throw new Error('Choose a file first')
   requireLiveServerWrite('files:upload', {
@@ -249,6 +251,7 @@ export async function uploadFileAsset(payload: FileUploadPayload = {}): Promise<
       signal.addEventListener('abort', abortListener, { once: true })
     }
 
+    try { assertActorSessionDispatchAllowed(scope) } catch (error) { finish(reject, error); return }
     xhr.send(form)
   })
 }
@@ -315,6 +318,7 @@ export function renameFileAsset(id: string | number, originalName: string): Prom
 }
 
 export async function uploadUserAvatar({ filePath, fileName, file }: AvatarUploadPayload): Promise<unknown> {
+  const scope = captureActorReadScope('users')
   if (file instanceof File) {
     const { userId, userName } = getCurrentUserContext()
     const asset = await uploadFileAsset({ file, userId, userName }) as { public_path?: string } | null
@@ -338,6 +342,7 @@ export async function uploadUserAvatar({ filePath, fileName, file }: AvatarUploa
   form.append('image', compressed, compressed.name || fileName || 'avatar.jpg')
 
   const base = getSyncServerUrl().replace(/\/$/, '')
+  assertActorSessionDispatchAllowed(scope)
   const res = await fetch(`${base}/api/users/avatar-upload`, {
     method: 'POST',
     headers: { 'bypass-tunnel-reminder': 'true' },
