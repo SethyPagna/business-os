@@ -260,8 +260,19 @@ export default function PaginationControls({
     // paging -- stands out and the disabled edge is unmistakable.
     const arrowButtonClass = `inline-flex h-10 shrink-0 items-center gap-0.5 text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:bg-transparent disabled:text-slate-300 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white dark:disabled:text-slate-600 ${compactCentered ? 'px-0.5 text-[10px]' : 'px-1'}`
     const arrowIconClass = compactCentered ? 'h-3 w-3' : 'h-4 w-4'
+    // The centered pager has only the middle 216px at a 320px viewport once
+    // PagerActionRow reserves its equal 40px side slots. A full item range
+    // such as "3,541-3,555" used to be silently flex-clipped by the old 200px
+    // cap. Show the selected page-size count in this constrained variant;
+    // the full range remains in its accessible name. This is a deliberate
+    // compact representation, not text hidden by overflow.
+    const rangeText = compactCentered ? safePageSize.toLocaleString() : `${start.toLocaleString()}-${end.toLocaleString()}`
+    const rangeAriaLabel = compactCentered
+      ? `${perPageLabel}: ${safePageSize.toLocaleString()}. ${showingLabel} ${start.toLocaleString()}-${end.toLocaleString()} ${ofLabel} ${total.toLocaleString()} ${label}`
+      : perPageLabel
+    const compactPageDigits = Math.max(1, String(editablePageInput ? pageDraft : safePage).length)
     return (
-      <div className={`mx-auto flex w-fit items-center rounded-full border border-slate-300 bg-white font-semibold text-slate-800 shadow-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100 ${compactCentered ? 'max-w-[12.5rem] text-[10px]' : 'max-w-full text-xs'} ${className}`}>
+      <div className={`mx-auto flex w-fit max-w-full items-center rounded-full border border-slate-300 bg-white font-semibold text-slate-800 shadow-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100 ${compactCentered ? 'text-[10px]' : 'text-xs'} ${className}`}>
         <button
           type="button"
           className={arrowButtonClass}
@@ -279,10 +290,10 @@ export default function PaginationControls({
             value={safePageSize}
             options={pageSizeOptions}
             onChange={(nextValue) => onPageSizeChange?.(nextValue)}
-            ariaLabel={perPageLabel}
+            ariaLabel={rangeAriaLabel}
             allowCustom={editablePageSizeInput}
             hideCaret
-            buttonContent={`${start.toLocaleString()}-${end.toLocaleString()}`}
+            buttonContent={rangeText}
             className="min-w-0"
             buttonClassName={`h-10 rounded-full border border-slate-200 bg-slate-100 py-0 font-semibold text-slate-800 shadow-none hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700 ${compactCentered ? 'px-0.5 text-[10px]' : 'px-1 text-xs'}`}
             menuClassName="min-w-[9rem]"
@@ -295,7 +306,8 @@ export default function PaginationControls({
                 type="text"
                 inputMode="numeric"
                 aria-label={pageLabel}
-                className={`h-10 border-0 bg-transparent px-0 text-center font-semibold text-slate-800 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 dark:text-slate-100 ${compactCentered ? 'w-6 text-[10px]' : 'w-8 text-xs'}`}
+                style={compactCentered ? { width: `max(1.75rem, calc(${compactPageDigits}ch + 0.75rem))` } : undefined}
+                className={`h-10 border-0 bg-transparent px-0 text-center font-semibold text-slate-800 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 dark:text-slate-100 ${compactCentered ? 'min-w-7 shrink-0 text-[10px]' : 'w-8 text-xs'}`}
                 value={pageDraft}
                 onChange={(event) => setPageDraft(event.target.value.replace(/[^\d]/g, '') || '')}
                 onBlur={(event) => commitPageDraft(event.currentTarget.value)}
