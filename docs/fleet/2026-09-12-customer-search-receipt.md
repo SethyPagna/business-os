@@ -1,6 +1,6 @@
 # September12 follow-up: long receipts, customer reassignment, employee search
 
-Status: active investigation/implementation, not certified or deployed. Base84c73529; prior live70c81aa0ec1e. Preserve all earlier registers. Root integration is codex/customer-search-receipt-followup-20260912, separate from dirty shared checkout; writers use their own worktrees and durable claims.
+Status: scoped combined release deployed at 877893912fea, with physical-printer and explicitly listed verification boundaries below. Base84c73529; prior live70c81aa0ec1e. Preserve all earlier registers. Root integration is codex/customer-search-receipt-followup-20260912, separate from dirty shared checkout; writers use their own worktrees and durable claims.
 
 ## Requirements and acceptance
 
@@ -34,6 +34,6 @@ Full backend sweep: 353/355 first-pass, two recorded failures corrected and pass
 
 Independent continuous receipt review matches integration 943e9884: all nine actual bilingual Receipt combinations (58/72/80 mm; 1/10/25 items) remain one page when CSS size is respected. Native 80 mm width stays 227.04 pt; heights 481.92/833.04/1417.92 pt. Actual raster PDF width is 226.77 pt with increasing heights 478.52/829.17/1413.58 pt; compact card is separately 226.77 x 141.73 pt. Items, totals and QR retained. Pre-existing small raster QR-caption clipping advisory is not claimed fixed. Forced 98 x 148 mm media remains outside this guarantee. This workstation exposes only Microsoft Print to PDF and OneNote, not the physical thermal printer; physical output cannot be certified here.
 
-Pre-release live runtime read remains 70c81aa0ec1e / b27cb8bde999183c. No September 12 deployment yet; record actual new provenance only after successful promotion.
+Pre-release live runtime was 70c81aa0ec1e / b27cb8bde999183c. Release 877893912fea is now live: Worker version 32831a7e-5c37-46b8-80a0-ac7368751135, Worker hash e0aebc53c1d1ee10, frontend hash 1e9b7326a54beef0. Deployment exited 0; remote /api/runtime/version and /business-os-build.json independently match the release revision. Authenticated in-app browser opens Leang Cosmetics and shows Today selected. No financial transactions, permission changes, migrations, secret synchronization, or production data repairs were performed during smoke testing. Branch was pushed before deployment; this later ledger-only commit is not a new runtime deployment.
 
 Focused failing reproductions -> bounded isolated changes -> independent read-only adversarial review -> integrated typecheck/i18n/build/fullfrontend and affected native backend suites -> real EN/KM responsive and1/10/25 receipt browser matrix -> record provenance if deployed under user approval. Never claim physical printer, employee device freshness, loyalty reconciliation, or production writes tested from synthetic source assertions alone.
