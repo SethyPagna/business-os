@@ -80,6 +80,7 @@ import { dispatchResolvedSyncError } from '../../utils/syncProblemLifecycle.ts'
 import { getAuthoritativeSale, getSaleStatusReceipt, getSaleLineReceipt } from '../../api/salesTransport.ts'
 import { mutationVersionAtLeast, reconcileDirectMutationReceipt, readCommittedMutationState } from '../../utils/directMutationRequest.ts'
 import { isAdminControlUser, saleAmendmentWindowAllows } from '../../utils/permissions.ts'
+import { recoverSaleStatus, type SaleStatusRecoveryResult } from '../../utils/saleStatusRecovery.ts'
 
 const SALES_USER_OPTIONS_TIMEOUT_MS = 8000
 // A status settlement writes the sale, every paired KHR line snapshot, the
@@ -483,6 +484,9 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   const [pendingDirectStatus, setPendingDirectStatus] = useState<PendingDirectMutation<PreparedSaleStatusRequest> | null>(initialPendingDirectStatus)
   const pendingDirectStatusRef = useRef<PendingDirectMutation<PreparedSaleStatusRequest> | null>(initialPendingDirectStatus)
   const pendingStatusProblemRef = useRef<{ errorId?: string; channel?: string; code?: string } | null>(null)
+  const statusActorRef = useRef(String(user?.id || ''))
+  statusActorRef.current = String(user?.id || '')
+  const statusRecoveryRef = useRef<{ key: string; promise: Promise<SaleStatusRecoveryResult<SaleRecord>> } | null>(null)
   useEffect(() => {
     const pending = loadPendingDirectMutationSlot<PreparedSaleStatusRequest>('sale-status', user?.id)
     pendingDirectStatusRef.current = pending
@@ -973,6 +977,52 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     return true
   }, [actionHistory, loadSales, loadSalesStats, readAuthoritativeSale])
 
+  const reconcilePendingStatus = useCallback((pending: PendingDirectMutation<PreparedSaleStatusRequest>): Promise<SaleStatusRecoveryResult<SaleRecord>> => {
+    const key = `${pending.actorId}:${pending.entityId}:${pending.body.client_request_id}`
+    if (statusRecoveryRef.current?.key === key) return statusRecoveryRef.current.promise
+    const isCurrent = () => {
+      const current = pendingDirectStatusRef.current
+      return aliveRef.current && statusActorRef.current === pending.actorId
+        && current?.actorId === pending.actorId && current.entityId === pending.entityId
+        && current.body.client_request_id === pending.body.client_request_id
+    }
+    const promise = recoverSaleStatus<SaleRecord>({
+      isCurrent,
+      readReceipt: () => getSaleStatusReceipt(pending.entityId, pending.body),
+      readSale: async () => normalizeSaleRows(await getAuthoritativeSale(pending.entityId))
+        .find((row) => String(row.id) === pending.entityId) || null,
+    }).then((result) => {
+      if (!isCurrent()) return { state: 'superseded' } as const
+      if (result.state === 'recovered') {
+        const fresh = result.sale
+        salesRef.current = salesRef.current.map((row) => String(row.id) === pending.entityId ? fresh : row)
+        setSales(salesRef.current)
+        setDetailSale((row) => String(row?.id) === pending.entityId ? fresh : row)
+        savePendingDirectStatus(pending.entityId, null)
+        void loadSalesStats()
+        void actionHistory.refreshServerItems()
+        window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
+        window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
+      }
+      return result
+    }).finally(() => {
+      if (statusRecoveryRef.current?.promise === promise) statusRecoveryRef.current = null
+    })
+    statusRecoveryRef.current = { key, promise }
+    return promise
+  }, [savePendingDirectStatus, loadSalesStats, actionHistory])
+
+  // Reopening Sales or a receipt checks the retained operation without sending
+  // another write. Missing proof leaves the existing retry card actionable.
+  useEffect(() => {
+    if (!isActive || statusActionRef.current.size > 0) return
+    const pending = currentPendingDirectStatus()
+    if (pending) void reconcilePendingStatus(pending).catch(() => {})
+    // Trigger only on navigation/identity, not on pending state created by an
+    // active mutation or on incidental callback identity changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isActive, user?.id, detailSale?.id])
+
   // `extra` carries the full reviewed tender snapshot when SaleDetailModal
   // settles an awaiting-payment sale. That write returns a durable server
   // history row; ordinary status changes keep the local reversible entry.
@@ -1197,6 +1247,14 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   const retryPendingDirectStatusRequest = async (): Promise<void> => {
     const pending = currentPendingDirectStatus()
     if (!pending) return
+    const recovery = await reconcilePendingStatus(pending)
+    if (recovery.state !== 'pending') return
+    // The exact receipt already proves commit: only the display read remains.
+    // Resubmitting cannot fix that read and would restart a needless write wait.
+    if (recovery.committed) return
+    const current = currentPendingDirectStatus()
+    if (statusActorRef.current !== pending.actorId || current?.actorId !== pending.actorId
+      || current.entityId !== pending.entityId || current.body.client_request_id !== pending.body.client_request_id) return
     const history = pending.history
     if (history) {
       const source = history.direction === 'undo' ? actionHistory.undoItems : actionHistory.redoItems
