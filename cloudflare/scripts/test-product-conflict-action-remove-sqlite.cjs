@@ -52,6 +52,34 @@ function productGraph(d1) {
 async function main() {
   {
     const fixture = setup()
+    assert.equal(fixture.d1.db.prepare("SELECT COUNT(*) n FROM sqlite_master WHERE type='trigger' AND name='positive_lot_require_active_update_0154'").get().n,1)
+    fixture.d1.db.exec(`UPDATE branch_stock SET quantity=3 WHERE product_id=10000 AND branch_id=2;
+      INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(99001,2,3);
+      UPDATE products SET stock_quantity=5 WHERE id=10000;
+      UPDATE product_batches SET received_at='2026-08-17',expiry_date='2028-08-17',unit_cost_usd=4.25,
+        received_quantity=5,received_cost_usd=21.25 WHERE id=99001;`)
+    const source = productGraph(fixture.d1)
+    const removed = await remove(fixture.app,10000,{reason:'Multi-branch replay',client_request_id:'multi_branch_replay'})
+    assert.equal(removed.status,200,JSON.stringify(removed.body))
+    const history=fixture.d1.db.prepare('SELECT id,undo_payload FROM action_history WHERE id=?').get(removed.body.action_history_id)
+    const payload=JSON.parse(history.undo_payload)
+    const applier=fixture.undo.resolveUndoApplier(payload)
+    const graphBeforeFailure=productGraph(fixture.d1)
+    const ledgerTables=['product_remove_operations','undo_snapshots','action_history','inventory_movements','audit_logs']
+    const ledgersBefore=Object.fromEntries(ledgerTables.map(t=>[t,fixture.d1.db.prepare('SELECT * FROM '+t).all()]))
+    fixture.d1.db.exec(`CREATE TRIGGER reject_remove_stock_restore BEFORE UPDATE ON branch_batch_stock
+      WHEN NEW.batch_id=99001 AND NEW.branch_id=2 AND NEW.quantity>0
+      BEGIN SELECT RAISE(ABORT,'injected replay stock failure'); END;`)
+    await assert.rejects(()=>applier.run(payload,{env:{},user:{id:900,username:'owner'},direction:'undo',historyId:history.id,generation:0}),/injected replay stock failure/)
+    assert.deepEqual(productGraph(fixture.d1),graphBeforeFailure,'failure after parent reactivation rolls back both branches and exact lot state')
+    for(const t of ledgerTables) assert.deepEqual(fixture.d1.db.prepare('SELECT * FROM '+t).all(),ledgersBefore[t],t+' unchanged on failed undo')
+    fixture.d1.db.exec('DROP TRIGGER reject_remove_stock_restore')
+    const restored=await applier.run(payload,{env:{},user:{id:900,username:'owner'},direction:'undo',historyId:history.id,generation:0})
+    assert.equal(restored.complete,true)
+    assert.deepEqual(productGraph(fixture.d1),source,'retry restores all saved dates/costs/stock and inactive zero-stock lot exactly')
+  }
+  {
+    const fixture = setup()
     const sourceGraph = productGraph(fixture.d1)
     const body = { reason: 'Independent duplicate', expectedUpdatedAt: '2026-09-08 01:00:00', client_request_id: 'direct_remove_10000' }
     const first = await remove(fixture.app, 10000, body)

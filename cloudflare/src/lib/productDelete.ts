@@ -572,17 +572,20 @@ export function productRemoveReplayStatements(args: {
       WHERE product_id=@product`,
     params: { rows: JSON.stringify(plan.branch_stock), product: plan.product_id },
   }, {
-    sql: `UPDATE branch_batch_stock SET
-      quantity=(SELECT json_extract(value,'$.quantity') FROM json_each(@rows) WHERE json_extract(value,'$.id')=branch_batch_stock.id),
-      updated_at=(SELECT json_extract(value,'$.updated_at') FROM json_each(@rows) WHERE json_extract(value,'$.id')=branch_batch_stock.id)
-      WHERE batch_id IN (SELECT id FROM product_batches WHERE variant_product_id=@product)`,
-    params: { rows: JSON.stringify(plan.branch_batch_stock), product: plan.product_id },
-  }, {
+    // Restore each saved parent state before its positive stock. Empty
+    // historical lots retain their saved inactive state; the graph guards
+    // already require all untouched received-date/cost metadata to match.
     sql: `UPDATE product_batches SET
       is_active=(SELECT json_extract(value,'$.is_active') FROM json_each(@rows) WHERE json_extract(value,'$.id')=product_batches.id),
       updated_at=(SELECT json_extract(value,'$.updated_at') FROM json_each(@rows) WHERE json_extract(value,'$.id')=product_batches.id)
       WHERE variant_product_id=@product`,
     params: { rows: JSON.stringify(plan.batches), product: plan.product_id },
+  }, {
+    sql: `UPDATE branch_batch_stock SET
+      quantity=(SELECT json_extract(value,'$.quantity') FROM json_each(@rows) WHERE json_extract(value,'$.id')=branch_batch_stock.id),
+      updated_at=(SELECT json_extract(value,'$.updated_at') FROM json_each(@rows) WHERE json_extract(value,'$.id')=branch_batch_stock.id)
+      WHERE batch_id IN (SELECT id FROM product_batches WHERE variant_product_id=@product)`,
+    params: { rows: JSON.stringify(plan.branch_batch_stock), product: plan.product_id },
   }] : [{
     sql: `UPDATE products SET is_active=0,stock_quantity=0,rfid_confirmed_qty=0,updated_at=@stamp WHERE id=@product`,
     params: { stamp: args.transitionStamp, product: plan.product_id },
