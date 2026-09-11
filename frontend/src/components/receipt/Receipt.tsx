@@ -148,7 +148,6 @@ interface RowProps {
   bold?: boolean
   tone?: string
   breakAll?: boolean
-  nowrap?: boolean
 }
 
 const useApp = useAppHook as () => {
@@ -310,7 +309,7 @@ function labelFor(mode: LanguageMode, key: ReceiptLabelKey): string {
   return `${stripTrailingColon(kmLabel)} / ${stripTrailingColon(enLabel)}${endsWithColon ? ':' : ''}`
 }
 
-function Row({ label, value, subValue, bold = false, tone = '', breakAll = false, nowrap = false }: RowProps) {
+function Row({ label, value, subValue, bold = false, tone = '', breakAll = false }: RowProps) {
   return (
     // The value track comes from utils/receiptItemColumns, the ONE place that
     // owns the receipt's grid geometry, so printReceipt.ts's paper re-layout
@@ -322,10 +321,13 @@ function Row({ label, value, subValue, bold = false, tone = '', breakAll = false
       {/* `breakAll` is for identifiers: a receipt number has no spaces to
           wrap at, so on a narrow paper width (or a phone) `break-words`
           alone can leave it overflowing the column. It must wrap onto a
-          second line -- never clip, never scroll. */}
-      <div className={`min-w-0 text-right leading-snug ${nowrap ? 'whitespace-nowrap' : `whitespace-normal ${breakAll ? 'break-all' : 'break-words'}`}`}>
+          second line -- never clip, never scroll. Every other structured
+          value may also wrap when its complete token is wider than the value
+          track. `overflow-wrap:anywhere` makes that width pressure visible to
+          grid sizing; the printable clone then grows its implicit row. */}
+      <div className={`min-w-0 whitespace-normal text-right leading-snug [overflow-wrap:anywhere] ${breakAll ? 'break-all' : 'break-words'}`}>
         <div className={`${bold ? 'font-semibold' : ''}`}>{value}</div>
-        {subValue ? <div className="whitespace-nowrap text-[10px] text-gray-500">{subValue}</div> : null}
+        {subValue ? <div className="whitespace-normal break-words text-[10px] text-gray-500 [overflow-wrap:anywhere]">{subValue}</div> : null}
       </div>
     </div>
   )
@@ -544,7 +546,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
     order_info: (
       <div key="order_info">
         {tpl.show_receipt_number ? <Row label={labelFor(lang, 'receiptNum')} value={rNum} bold breakAll /> : null}
-        {tpl.show_date ? <Row label={labelFor(lang, 'date')} value={dateStr} nowrap /> : null}
+        {tpl.show_date ? <Row label={labelFor(lang, 'date')} value={dateStr} /> : null}
         {/* N33 (owner, Sep 6 2026, reading a printed 80mm receipt): "the
             exchange rate just show the rate, no need 'Exchange Rate: n' just
             'n' ... and merge into same row as cashier." So the rate is no
@@ -575,9 +577,9 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
     customer: hasCustomer ? (
       <div key="customer" className="mt-2 border-t border-dashed border-gray-300 pt-2">
         {tpl.show_customer_name && customerDisplayName ? <Row label={labelFor(lang, 'customer')} value={customerDisplayName} /> : null}
-        {tpl.show_customer_phone && sale.customer_phone ? <Row label={labelFor(lang, 'phone')} value={sale.customer_phone} nowrap /> : null}
+        {tpl.show_customer_phone && sale.customer_phone ? <Row label={labelFor(lang, 'phone')} value={sale.customer_phone} /> : null}
         {tpl.show_customer_address && customerAddress ? <Row label={labelFor(lang, 'address')} value={customerAddress} /> : null}
-        {!customerIsAnonymous && showMembershipId && sale.customer_membership_number ? <Row label={labelFor(lang, 'membership')} value={sale.customer_membership_number} nowrap /> : null}
+        {!customerIsAnonymous && showMembershipId && sale.customer_membership_number ? <Row label={labelFor(lang, 'membership')} value={sale.customer_membership_number} /> : null}
       </div>
     ) : null,
     // N33 (owner, Sep 6 2026): "the delivery fee is shown twice in a row, by
@@ -695,18 +697,18 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
     // The per-line cut, by name. Hidden when there is none, so an
     // undiscounted sale does not print a row of zeroes.
     item_discount: showItemDiscount && lineSavingsUsd > 0 ? (
-      <Row key="item_discount" label={labelFor(lang, 'itemDiscount')} value={`-${fmtUSD(lineSavingsUsd)}`} tone="text-red-600" nowrap />
+      <Row key="item_discount" label={labelFor(lang, 'itemDiscount')} value={`-${fmtUSD(lineSavingsUsd)}`} tone="text-red-600" />
     ) : null,
-    subtotal: tpl.show_subtotal ? <Row key="subtotal" label={labelFor(lang, 'subtotal')} value={fmtUSD(displayedSubtotalUsd)} nowrap /> : null,
+    subtotal: tpl.show_subtotal ? <Row key="subtotal" label={labelFor(lang, 'subtotal')} value={fmtUSD(displayedSubtotalUsd)} /> : null,
     // Every cut on the sale in one figure. Only printed when it says
     // something the rows above did not already say on their own -- i.e.
     // when more than one kind of discount is present.
     total_discount: tpl.show_discount !== false && totalDiscountUsd > 0
       && [lineSavingsUsd, displayedDiscountUsd, membershipDiscountUsd].filter((v) => v > 0).length > 1 ? (
-      <Row key="total_discount" label={labelFor(lang, 'totalDiscount')} value={`-${fmtUSD(totalDiscountUsd)}`} tone="text-red-600" bold nowrap />
+      <Row key="total_discount" label={labelFor(lang, 'totalDiscount')} value={`-${fmtUSD(totalDiscountUsd)}`} tone="text-red-600" bold />
     ) : null,
     discount: tpl.show_discount && displayedDiscountUsd > 0 ? (
-      <Row key="discount" label={labelFor(lang, 'discount')} value={`-${fmtUSD(displayedDiscountUsd)}`} subValue={tpl.show_discount_khr !== false && displayedDiscountKhr > 0 ? `-${fmtKHR(displayedDiscountKhr)}` : ''} tone="text-red-600" nowrap />
+      <Row key="discount" label={labelFor(lang, 'discount')} value={`-${fmtUSD(displayedDiscountUsd)}`} subValue={tpl.show_discount_khr !== false && displayedDiscountKhr > 0 ? `-${fmtKHR(displayedDiscountKhr)}` : ''} tone="text-red-600" />
     ) : null,
     membership_discount: tpl.show_membership_discount !== false && membershipDiscountUsd > 0 ? (
       <Row
@@ -715,14 +717,13 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
         value={`-${fmtUSD(membershipDiscountUsd)}`}
         subValue={tpl.show_membership_discount_khr !== false && membershipDiscountKhr > 0 ? `-${fmtKHR(membershipDiscountKhr)}` : ''}
         tone="text-emerald-600"
-        nowrap
       />
     ) : null,
     membership_points: tpl.show_membership_points !== false && membershipPointsRedeemed > 0 ? (
       <Row key="membership_points" label={labelFor(lang, 'pointsRedeemed')} value={membershipPointsRedeemed.toLocaleString()} />
     ) : null,
     tax: tpl.show_tax && taxUsd > 0 ? (
-      <Row key="tax" label={labelFor(lang, 'tax')} value={fmtUSD(taxUsd)} subValue={taxKhr > 0 ? fmtKHR(taxKhr) : ''} nowrap />
+      <Row key="tax" label={labelFor(lang, 'tax')} value={fmtUSD(taxUsd)} subValue={taxKhr > 0 ? fmtKHR(taxKhr) : ''} />
     ) : null,
     delivery_fee: tpl.show_delivery !== false && tpl.delivery_show_fee !== false && deliveryFeeUsd > 0 ? (
       <Row
@@ -736,12 +737,11 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
         subValue={tpl.show_delivery_khr !== false && deliveryFeeKhr > 0 ? (
           deliveryPaidByStore ? <span className="line-through">{fmtKHR(deliveryFeeKhr)}</span> : fmtKHR(deliveryFeeKhr)
         ) : ''}
-        nowrap
       />
     ) : null,
     total: (
       <div key="total" className="my-2 border-y-2 border-black py-2">
-        <Row label={labelFor(lang, 'total')} value={fmtUSD(totalUsd)} subValue={tpl.show_total_khr ? fmtKHR(totalKhr) : ''} bold nowrap />
+        <Row label={labelFor(lang, 'total')} value={fmtUSD(totalUsd)} subValue={tpl.show_total_khr ? fmtKHR(totalKhr) : ''} bold />
       </div>
     ),
     // Returns booked against this sale, then what the customer is left with.
@@ -751,8 +751,8 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
     // Net total states the result so both halves foot.
     refund: refundUsd > 0 ? (
       <div key="refund">
-        <Row label={labelFor(lang, 'refunded')} value={`-${fmtUSD(refundUsd)}`} subValue={refundKhr > 0 ? `-${fmtKHR(refundKhr)}` : ''} tone="text-orange-600" nowrap />
-        <Row label={labelFor(lang, 'netTotal')} value={fmtUSD(netTotalUsd)} subValue={tpl.show_total_khr && netTotalKhr > 0 ? fmtKHR(netTotalKhr) : ''} bold nowrap />
+        <Row label={labelFor(lang, 'refunded')} value={`-${fmtUSD(refundUsd)}`} subValue={refundKhr > 0 ? `-${fmtKHR(refundKhr)}` : ''} tone="text-orange-600" />
+        <Row label={labelFor(lang, 'netTotal')} value={fmtUSD(netTotalUsd)} subValue={tpl.show_total_khr && netTotalKhr > 0 ? fmtKHR(netTotalKhr) : ''} bold />
       </div>
     ) : null,
     payment: tpl.show_amount_paid ? (
@@ -762,7 +762,6 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
             label={`${labelFor(lang, 'paid')}${tpl.show_payment_method ? ` ${paymentMethodText}` : ''}`}
             value={paidUsd > 0 ? fmtUSD(paidUsd) : fmtKHR(paidKhr)}
             subValue={paidUsd > 0 && paidKhr > 0 ? fmtKHR(paidKhr) : ''}
-            nowrap
           />
         ) : null}
         {/* What is still owed. A credit / awaiting-payment sale printed a
@@ -776,13 +775,12 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
             subValue={tpl.show_total_khr && outstandingKhr > 0 ? fmtKHR(outstandingKhr) : ''}
             bold
             tone="text-red-600"
-            nowrap
           />
         ) : null}
       </div>
     ) : null,
     change: tpl.show_change && (changeUsd > 0 || changeKhr > 0) ? (
-      <Row key="change" label={labelFor(lang, 'change')} value={changeUsd > 0 ? fmtUSD(changeUsd) : fmtKHR(changeKhr)} subValue={changeUsd > 0 && changeKhr > 0 ? fmtKHR(changeKhr) : ''} bold nowrap />
+      <Row key="change" label={labelFor(lang, 'change')} value={changeUsd > 0 ? fmtUSD(changeUsd) : fmtKHR(changeKhr)} subValue={changeUsd > 0 && changeKhr > 0 ? fmtKHR(changeKhr) : ''} bold />
     ) : null,
     footer: (
       <div key="footer" className="mt-2">
@@ -862,12 +860,12 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
       {settings.business_name ? <div className="text-center text-sm font-bold">{settings.business_name}</div> : null}
       {settings.business_phone ? <div className="text-center">{settings.business_phone}</div> : null}
       <div className="border-t border-gray-300 pt-1">
-        <Row label={labelFor(lang, 'date')} value={dateStr} nowrap />
-        {sale.customer_phone ? <Row label={labelFor(lang, 'phone')} value={sale.customer_phone} nowrap /> : null}
+        <Row label={labelFor(lang, 'date')} value={dateStr} />
+        {sale.customer_phone ? <Row label={labelFor(lang, 'phone')} value={sale.customer_phone} /> : null}
         {customerAddress ? <Row label={labelFor(lang, 'address')} value={customerAddress} /> : null}
       </div>
       <div className="border-y border-gray-900 py-1">
-        <Row label={labelFor(lang, 'total')} value={fmtUSD(totalUsd)} subValue={fmtKHR(totalKhr)} bold nowrap />
+        <Row label={labelFor(lang, 'total')} value={fmtUSD(totalUsd)} subValue={fmtKHR(totalKhr)} bold />
       </div>
       {tpl.sales_receipt_aba_account_name || tpl.sales_receipt_aba_account_number ? (
         <div className="text-center">
