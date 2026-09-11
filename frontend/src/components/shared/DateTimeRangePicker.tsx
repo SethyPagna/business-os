@@ -71,6 +71,8 @@ interface DateTimeRangePickerProps {
   showTime?: boolean
   /** Hide only the decorative trigger icon on space-constrained surfaces. */
   showCalendarIcon?: boolean
+  /** Keep both trigger endpoints fully visible at a smaller toolbar size. */
+  compactTriggerLabels?: boolean
   /** Reports use continuous endpoints; other callers may use recurring hours. */
   continuous?: boolean
   align?: 'left' | 'right'
@@ -126,7 +128,8 @@ export default function DateTimeRangePicker({
   onChange,
   t,
   showTime = true,
-  showCalendarIcon = true,
+  showCalendarIcon = false,
+  compactTriggerLabels = false,
   continuous = false,
   align = 'left',
   className = '',
@@ -402,9 +405,9 @@ export default function DateTimeRangePicker({
         aria-label={t('date_time_range') || 'Date and time range'}
       >
         {showCalendarIcon && <CalendarDays className="h-4 w-4 shrink-0 text-blue-500 dark:text-blue-400" />}
-        <span className={`min-w-0 truncate ${hasSelection ? '' : 'text-slate-400 dark:text-slate-500'}`}>{startTriggerLabel}</span>
+        <span className={`${compactTriggerLabels ? 'shrink-0 whitespace-nowrap text-[11px]' : 'min-w-0 truncate'} ${hasSelection ? '' : 'text-slate-400 dark:text-slate-500'}`}>{startTriggerLabel}</span>
         <ArrowRight className="h-5 w-5 shrink-0 text-blue-500 dark:text-blue-400" strokeWidth={2.5} />
-        <span className={`min-w-0 truncate ${hasSelection ? '' : 'text-slate-400 dark:text-slate-500'}`}>{endTriggerLabel}</span>
+        <span className={`${compactTriggerLabels ? 'shrink-0 whitespace-nowrap text-[11px]' : 'min-w-0 truncate'} ${hasSelection ? '' : 'text-slate-400 dark:text-slate-500'}`}>{endTriggerLabel}</span>
       </button>
 
       {open ? (

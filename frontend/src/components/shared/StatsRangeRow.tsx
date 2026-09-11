@@ -7,7 +7,7 @@ type TranslateFn = (key: string) => string | undefined
 /** One stable control row; presets remain reachable while Stats is folded. */
 export default function StatsRangeRow({
   range, onRangeChange, t, leading, actions, showTime = false,
-  showPresets = true, className = '',
+  showPresets = true, compactRange = false, className = '',
 }: {
   range: DateTimeRange
   onRangeChange: (range: DateTimeRange, source?: DateTimeRangeSource) => void
@@ -16,6 +16,7 @@ export default function StatsRangeRow({
   actions?: ReactNode
   showTime?: boolean
   showPresets?: boolean
+  compactRange?: boolean
   className?: string
 }) {
   const active = activeStatsPreset(range)
@@ -25,8 +26,12 @@ export default function StatsRangeRow({
         {leading}
         <DateTimeRangePicker
           value={range} onChange={onRangeChange} t={t} showTime={showTime}
+          showCalendarIcon={false}
+          compactTriggerLabels={compactRange}
           className="min-w-0 flex-1"
-          triggerClassName="flex h-10 !min-h-10 min-w-0 w-full items-center justify-center gap-1 rounded-md px-1 py-0 sm:gap-2 sm:px-3"
+          triggerClassName={compactRange
+            ? 'flex h-10 !min-h-10 min-w-fit w-full items-center justify-center gap-1 rounded-md px-1 py-0 text-[11px]'
+            : 'flex h-10 !min-h-10 min-w-0 w-full items-center justify-center gap-1 rounded-md px-1 py-0 sm:gap-2 sm:px-3'}
         />
         {actions ? <div className="ml-auto flex shrink-0 flex-nowrap items-center gap-1">{actions}</div> : null}
       </div>

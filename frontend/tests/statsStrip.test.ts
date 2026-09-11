@@ -177,6 +177,22 @@ test('the whole strip hides behind a click-to-open Stats chip; cards wrap, never
   assert.ok(!/grid-cols-\d.*grid-cols-6|xl:grid-cols-6/.test(strip), 'no fixed 6-track grid that strands empty tracks on few-card pages')
 })
 
+test('compact Stats and range chrome are opt-in, accessible, and preserve full endpoints', () => {
+  const strip = read('src/components/shared/StatsStrip.tsx')
+  const row = read('src/components/shared/StatsRangeRow.tsx')
+  const picker = read('src/components/shared/DateTimeRangePicker.tsx')
+  assert.match(strip, /iconOnly = false/, 'existing StatsStrip callers retain their visible label')
+  assert.match(strip, /compactRange = false/, 'existing range layout remains the default')
+  assert.match(strip, /aria-label=\{iconOnly \? tr\('stats', 'Stats'\) : undefined\}/, 'icon-only Stats keeps a localized accessible name')
+  assert.match(strip, /\{iconOnly \? null : tr\('stats', 'Stats'\)\}/, 'only opted-in callers hide the visible Stats word')
+  assert.match(strip, /compactRange=\{compactRange\}/, 'StatsStrip forwards the compact range contract')
+  assert.match(row, /showCalendarIcon=\{false\}/, 'the shared stats range has no leading calendar')
+  assert.match(row, /compactTriggerLabels=\{compactRange\}/, 'compact endpoint rendering reaches the picker')
+  assert.match(picker, /showCalendarIcon = false/, 'calendar chrome is absent by default across range triggers')
+  assert.match(picker, /compactTriggerLabels \? 'shrink-0 whitespace-nowrap text-\[11px\]'/, 'compact endpoints are smaller and never truncated')
+  assert.match(picker, /showTimes \? ` \$\{value\.startTime \|\| '00:00'\}` : ''/, 'selected time remains part of the full start endpoint')
+})
+
 test('secondary controls stay on the Stats-chip row whether the strip is folded or open', () => {
   // User, Aug 31 (superseding the earlier "merge onto the cards row" pin):
   // "move [the buttons] to same row as the stats so when stat button expands
