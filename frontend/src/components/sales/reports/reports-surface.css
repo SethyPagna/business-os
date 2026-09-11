@@ -330,6 +330,7 @@
   flex: 1 1 auto;
 }
 
+.reports-frame-header { width: 100%; flex-wrap: nowrap; }
 .reports-frame-header > :first-child > h2 { overflow: visible; }
 
 .reports-title-actions {
@@ -343,14 +344,44 @@
 .reports-view-picker {
   display: inline-flex;
   min-width: 0;
-  width: clamp(7rem, 28vw, 14rem);
-  flex: 0 0 clamp(7rem, 28vw, 14rem);
+  width: clamp(5.5rem, 28vw, 14rem);
+  flex: 0 0 clamp(5.5rem, 28vw, 14rem);
 }
 
 .reports-view-picker > [data-app-select-root='true'] { width: 100%; }
+.reports-view-picker [data-app-select-selected='true'] {
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  text-overflow: clip;
+  scrollbar-width: none;
+  touch-action: pan-x;
+}
+.reports-view-picker [data-app-select-selected='true']::-webkit-scrollbar { display: none; }
 .reports-title-actions > :first-child { min-width: 0; }
 .reports-title-actions > :not(:first-child) { flex: 0 0 auto; }
 .reports-show-action { min-height: 40px; height: 40px; flex: 0 0 auto; }
+
+.reports-frame-menu,
+.reports-frame-menu button {
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  min-height: 40px;
+  flex: 0 0 40px;
+}
+
+.reports-frame-secondary-actions {
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: thin;
+}
+
+.reports-frame-secondary-actions > * { flex: 0 0 auto; }
 
 /* The kit's overflow menu stays horizontal everywhere else. Reports alone
    use the vertical convention requested for their export/action menu. */
@@ -696,4 +727,9 @@ body.lang-km [data-reports-fold] .text-sm {
 body.lang-km [data-reports-hub] td.truncate,
 body.lang-km [data-reports-hub] .truncate {
   padding-block: 2px;
+}
+
+body.lang-km [data-reports-hub] .reports-view-picker [data-app-select-selected='true'] {
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
 }
