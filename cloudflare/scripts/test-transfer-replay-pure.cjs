@@ -100,7 +100,22 @@ async function main() {
   })
   await check('product/lot delete, deactivate, reparent and member rewrites fail closed',async()=>{
     await forward()
-    for(const mutation of ['DELETE FROM products WHERE id=1','UPDATE products SET is_active=0 WHERE id=1','DELETE FROM product_batches WHERE id=1','UPDATE product_batches SET variant_product_id=2 WHERE id=1','UPDATE transfer_operation_members SET quantity=20','DELETE FROM transfer_operation_members']) assert.throws(()=>sql().exec(mutation),/provenance|immutable/)
+    const before=snapshot()
+    const mutations = [
+      ['DELETE FROM products WHERE id=1', /provenance|immutable/],
+      ['UPDATE products SET is_active=0 WHERE id=1', /provenance|immutable/],
+      // 0155's stocked-parent invariant runs before the older 0151
+      // provenance guard. Either invariant is an intentional fail-closed
+      // denial; neither may change the replay snapshot.
+      ['DELETE FROM product_batches WHERE id=1', /provenance|immutable|Cannot delete a received lot with positive branch stock/],
+      ['UPDATE product_batches SET variant_product_id=2 WHERE id=1', /provenance|immutable/],
+      ['UPDATE transfer_operation_members SET quantity=20', /provenance|immutable/],
+      ['DELETE FROM transfer_operation_members', /provenance|immutable/],
+    ]
+    for(const [mutation, expectedError] of mutations) {
+      assert.throws(()=>sql().exec(mutation),expectedError)
+      assert.deepEqual(snapshot(),before,`${mutation} must leave every replay table unchanged`)
+    }
   })
   await check('reload exposes server history and simultaneous lost-ack undo applies one generation',async()=>{
     const result=await forward()
