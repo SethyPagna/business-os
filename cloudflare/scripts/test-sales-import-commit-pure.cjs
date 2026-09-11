@@ -292,7 +292,12 @@ function customerMatch(overrides = {}) {
     [0, (sqlite) => {
       sqlite.prepare(`INSERT INTO products (id, name, sku, stock_quantity) VALUES (11, 'Other', 'SKU-2', 0)`).run()
     }, saleData({ items: [{ ...saleData().items[0], product_id: 11, product_name: 'Other', sku: 'SKU-2' }] })],
-    [1, (sqlite) => sqlite.prepare(`UPDATE product_batches SET is_active = 0 WHERE id = 20`).run()],
+    [1, (sqlite) => {
+      // 0154 permits deactivation only after the lot is empty. This remains an
+      // invalid selected lot without manufacturing inactive-positive state.
+      sqlite.prepare(`UPDATE branch_batch_stock SET quantity = 0 WHERE batch_id = 20 AND branch_id = 1`).run()
+      sqlite.prepare(`UPDATE product_batches SET is_active = 0 WHERE id = 20`).run()
+    }],
     [2, (sqlite) => sqlite.prepare(`UPDATE product_batches SET lot_code = 'LOT-RENAMED' WHERE id = 20`).run()],
     [3, (sqlite) => sqlite.prepare(`DELETE FROM branch_batch_stock WHERE batch_id = 20 AND branch_id = 1`).run()],
     [4, (sqlite) => {
@@ -316,6 +321,9 @@ function customerMatch(overrides = {}) {
   // must make the entire transaction a no-op, including its commit marker.
   const racedBatch = setup()
   racedBatch.setBeforeBatch(() => {
+    // Model a valid current-schema race: another writer empties the lot, then
+    // deactivates it between the authoritative pre-read and atomic commit.
+    racedBatch.sqlite.prepare(`UPDATE branch_batch_stock SET quantity = 0 WHERE batch_id = 20 AND branch_id = 1`).run()
     racedBatch.sqlite.prepare(`UPDATE product_batches SET is_active = 0 WHERE id = 20`).run()
   })
   const racedReturn = saleData({ sale_status: 'partial_return', items: [{ ...saleData().items[0], returned_quantity: 1 }] })
@@ -327,7 +335,8 @@ function customerMatch(overrides = {}) {
   assert.equal(racedBatch.sqlite.prepare('SELECT COUNT(*) n FROM sale_items').get().n, 0)
   assert.equal(racedBatch.sqlite.prepare('SELECT COUNT(*) n FROM import_sales_commits').get().n, 0)
   assert.equal(racedBatch.sqlite.prepare('SELECT stock_quantity FROM products WHERE id = 10').get().stock_quantity, 5)
-  assert.equal(racedBatch.sqlite.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id = 20 AND branch_id = 1').get().quantity, 5)
+  assert.equal(racedBatch.sqlite.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id = 20 AND branch_id = 1').get().quantity, 0, 'the external empty-lot race remains, but the rejected import writes nothing')
+  assert.equal(racedBatch.sqlite.prepare('SELECT is_active FROM product_batches WHERE id = 20').get().is_active, 0)
 
   const racedDuplicateBatch = setup()
   racedDuplicateBatch.setBeforeBatch(() => {

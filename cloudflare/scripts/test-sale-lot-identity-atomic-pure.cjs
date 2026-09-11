@@ -12,6 +12,12 @@ const ts = require('typescript')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
+const migrationsDir = path.join(__dirname, '..', 'migrations')
+const legacyMigrationsThrough0153 = fs.readdirSync(migrationsDir)
+  .filter((file) => file.endsWith('.sql') && Number.parseInt(file.slice(0, 4), 10) <= 153)
+  .sort()
+  .map((file) => fs.readFileSync(path.join(migrationsDir, file), 'utf8'))
+
 const moduleCache = new Map()
 const USER = {
   id: 51,
@@ -127,8 +133,8 @@ async function postSale(db, items, suffix, overrides = {}, hooks = {}) {
   return { status: response.status, body: text ? JSON.parse(text) : null }
 }
 
-function fixture() {
-  const db = openDb(loadAll())
+function fixture({ legacyThrough0153 = false } = {}) {
+  const db = openDb(legacyThrough0153 ? legacyMigrationsThrough0153 : loadAll())
   run(db, `INSERT INTO branches(id,name,is_default,is_active) VALUES(1,'Shop',1,1)`)
   run(db, `INSERT INTO products(id,name,sku,stock_quantity,selling_price_usd,selling_price_khr,cost_price_usd,cost_price_khr,is_active)
            VALUES(10,'Serum','SERUM',10,5,20000,2,8000,1)`)
@@ -292,10 +298,26 @@ function counts(db) {
     assert.equal(refused.status, 409, JSON.stringify(refused.body))
   }
 
-  // An inactive lot is still known provenance. It cannot be reclassified as
-  // the unrecorded remainder merely because FIFO correctly ignores it.
+  // Current migration 0154 rejects creation of inactive-positive lots. Keep
+  // that enforcement explicit instead of weakening the fixture to manufacture
+  // an impossible current-schema transition.
   {
     const db = fixture()
+    const before = counts(db)
+    assert.throws(
+      () => run(db, 'UPDATE product_batches SET is_active=0 WHERE id=500'),
+      /Cannot deactivate a received lot with positive branch stock/,
+    )
+    assert.equal(get(db, 'SELECT is_active FROM product_batches WHERE id=500').is_active, 1)
+    assert.deepEqual(counts(db), before)
+  }
+
+  // Historical state through migration 0153 could contain inactive-positive
+  // lots. The current writer must still count that known provenance and must
+  // not reclassify it as the unrecorded remainder merely because FIFO ignores
+  // inactive lots.
+  {
+    const db = fixture({ legacyThrough0153: true })
     const before = counts(db)
     run(db, 'UPDATE product_batches SET is_active=0 WHERE id=500')
     const result = await postSale(db, [{ product_id: 10, quantity: 4, branch_id: 1, unlotted_stock: true }], 'unlotted-inactive-known-lot')
