@@ -45,26 +45,60 @@ export type FixedSheetFit = {
 }
 
 /**
- * The tallest fixed sheet that counts as ONE physical piece of paper.
- *
- * A card or label -- the 80x50 sales summary, or a small custom size the
- * operator typed -- is a single ticket: content that does not fit is not
- * carried onto a second page, it is a wasted label and a lost line, so it has
- * to be scaled to fit. A document page (A4 297mm, Letter 279.4mm, or a custom
- * size as tall as one) is the opposite: a 60-item receipt is legitimately two
- * pages there, and squeezing it onto one would make it unreadable. The test is
- * the sheet's own height rather than a list of paper-size names, so a custom
- * 60mm card and a custom 297mm page each behave like what they physically are.
+ * Only the named compact sales-summary format is one physical card whose
+ * complete contents must be fitted onto one sheet. A custom height is a page
+ * size, not an implicit card: for example, the 98 x 148 mm media exposed by a
+ * thermal-printer driver must paginate a long receipt at full scale. Inferring
+ * this from an arbitrary height threshold made that common 148 mm page shrink
+ * every 10/20-item receipt onto one tiny sheet.
  */
-export const SINGLE_SHEET_MAX_HEIGHT_MM = 150
+export function isSingleSheetPaperSize(paperSize: unknown): boolean {
+  return String(paperSize || '').trim().toLowerCase() === '80x50mm'
+}
+
+export type ImagePageSegment = {
+  startPx: number
+  endPx: number
+}
 
 /**
- * True when a fixed sheet has to hold the whole receipt on one page. Continuous
- * rolls (null height) are never single sheets -- their page simply grows.
+ * Split a top-to-bottom receipt raster into fixed-height pages. Candidate
+ * offsets are the bottoms of real receipt rows; preferring the last candidate
+ * before a page edge keeps an item/value row together and leaves intentional
+ * white space rather than slicing text between pages. An over-tall block still
+ * advances by one full page so malformed input cannot stall pagination.
  */
-export function isSingleSheetHeight(sheetHeightMm: number | null | undefined): boolean {
-  if (sheetHeightMm == null || !Number.isFinite(sheetHeightMm) || sheetHeightMm <= 0) return false
-  return sheetHeightMm <= SINGLE_SHEET_MAX_HEIGHT_MM
+export function computeImagePageSegments({
+  imageHeightPx,
+  pageCapacityPx,
+  breakOffsetsPx = [],
+}: {
+  imageHeightPx: number
+  pageCapacityPx: number
+  breakOffsetsPx?: number[]
+}): ImagePageSegment[] {
+  const height = Math.max(1, Number.isFinite(imageHeightPx) ? imageHeightPx : 1)
+  const capacity = Math.max(1, Number.isFinite(pageCapacityPx) ? pageCapacityPx : 1)
+  const candidates = Array.from(new Set(breakOffsetsPx
+    .filter((value) => Number.isFinite(value) && value > 0 && value < height)
+    .map((value) => Math.max(0, Math.min(height, value)))))
+    .sort((a, b) => a - b)
+  const pages: ImagePageSegment[] = []
+  let startPx = 0
+  while (startPx < height - 1e-6) {
+    const limitPx = Math.min(height, startPx + capacity)
+    if (limitPx >= height - 1e-6) {
+      pages.push({ startPx, endPx: height })
+      break
+    }
+    const safeEndPx = candidates.reduce((best, value) => (
+      value > startPx + 1e-6 && value <= limitPx + 1e-6 ? value : best
+    ), 0)
+    const endPx = safeEndPx > startPx ? safeEndPx : limitPx
+    pages.push({ startPx, endPx })
+    startPx = endPx
+  }
+  return pages.length ? pages : [{ startPx: 0, endPx: height }]
 }
 
 /**
