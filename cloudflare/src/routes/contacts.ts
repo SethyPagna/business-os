@@ -1,5 +1,6 @@
 import { Hono, type Context, type Next } from 'hono'
 import { getDb } from '../lib/db'
+import { loyaltyAffectingSaleSql, LOYALTY_REASSIGNMENT_CODE, LOYALTY_REASSIGNMENT_MESSAGE } from '../lib/saleCustomerAssignmentGuard'
 import { chunkForBinding } from '../lib/sqlBinding'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
@@ -2395,6 +2396,7 @@ app.post('/customers/link-conflicts/relink', async (c) => {
   const user = c.get('user')
   const denied = denyUnlessFullContactAction(c, 'resolve_conflicts')
   if (denied) return denied
+  if (getActionTier(user, 'sales', 'customer') !== 'full' || getActionTier(user, 'sales', 'customer_reassign') !== 'full') return c.json({ error: 'No permission to reassign sale customers.' }, 403)
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
   const currentId = Number(body.customer_id)
   const phoneKey = String(body.phone_key || '').trim()
@@ -2406,18 +2408,24 @@ app.post('/customers/link-conflicts/relink', async (c) => {
   const target = await db.prepare('SELECT id, name, is_anonymous FROM customers WHERE id = ?').get<{ id: number; name: string | null; is_anonymous: number }>([targetId])
   if (!target) return c.json({ error: 'Target customer not found.' }, 404)
   if (isAnonymousCustomer(target)) return anonymousCustomerMutationResponse(c)
+  const loyaltyPredicate = `EXISTS(SELECT 1 FROM sales s WHERE s.customer_id=@currentId AND ${PHONE_KEY_SQL('s.customer_phone')}=@phoneKey AND ${loyaltyAffectingSaleSql()})`
+  const loyaltyParams = { currentId, phoneKey }
+  const loyaltyBlocked = () => db.prepare(`SELECT 1 WHERE ${loyaltyPredicate}`).get(loyaltyParams)
+  if (await loyaltyBlocked()) return c.json({ error: LOYALTY_REASSIGNMENT_MESSAGE, code: LOYALTY_REASSIGNMENT_CODE }, 409)
   let result
   try {
     const results = await db.batch([
       anonymousCustomerGuardStatement(targetId, 'targetId'),
+      { sql: `SELECT CASE WHEN NOT (${loyaltyPredicate}) THEN 1 ELSE json_extract('${LOYALTY_REASSIGNMENT_CODE}','$') END`, params: loyaltyParams },
       {
         sql: `UPDATE sales SET customer_id = @targetId, updated_at = CURRENT_TIMESTAMP
           WHERE customer_id = @currentId AND ${PHONE_KEY_SQL('customer_phone')} = @phoneKey`,
         params: { targetId, currentId, phoneKey },
       },
     ])
-    result = results[1]
+    result = results[2]
   } catch (error) {
+    if (await loyaltyBlocked()) return c.json({ error: LOYALTY_REASSIGNMENT_MESSAGE, code: LOYALTY_REASSIGNMENT_CODE }, 409)
     if ((await anonymousCustomerIds(db, [targetId])).has(targetId)) return anonymousCustomerMutationResponse(c)
     throw error
   }
@@ -2436,6 +2444,7 @@ app.post('/customers/link-conflicts/resolve-missing', async (c) => {
   const user = c.get('user')
   const denied = denyUnlessFullContactAction(c, 'resolve_conflicts')
   if (denied) return denied
+  if (getActionTier(user, 'sales', 'customer') !== 'full' || getActionTier(user, 'sales', 'customer_reassign') !== 'full') return c.json({ error: 'No permission to reassign sale customers.' }, 403)
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
   const name = String(body.name || '').trim()
   const phone = String(body.phone || '').trim()
@@ -2443,6 +2452,14 @@ app.post('/customers/link-conflicts/resolve-missing', async (c) => {
   const requestedTarget = Number(body.target_customer_id)
   if (!name && !phone) return c.json({ error: 'The group’s name or phone is required' }, 400)
   const db = getDb(c.env)
+
+  // Check before creating any directory row, and again atomically with relink.
+  const loyaltyPredicate = `EXISTS(SELECT 1 FROM sales s WHERE s.customer_id IS NULL
+    AND lower(trim(COALESCE(s.customer_name,'')))=lower(@name)
+    AND ${PHONE_KEY_SQL('s.customer_phone')}=@phoneKey AND ${loyaltyAffectingSaleSql()})`
+  const loyaltyParams = { name, phoneKey }
+  const loyaltyBlocked = () => db.prepare(`SELECT 1 WHERE ${loyaltyPredicate}`).get(loyaltyParams)
+  if (await loyaltyBlocked()) return c.json({ error: LOYALTY_REASSIGNMENT_MESSAGE, code: LOYALTY_REASSIGNMENT_CODE }, 409)
 
   let targetId: number
   let created = false
@@ -2482,6 +2499,7 @@ app.post('/customers/link-conflicts/resolve-missing', async (c) => {
   try {
     const results = await db.batch([
       anonymousCustomerGuardStatement(targetId, 'targetId'),
+      { sql: `SELECT CASE WHEN NOT (${loyaltyPredicate}) THEN 1 ELSE json_extract('${LOYALTY_REASSIGNMENT_CODE}','$') END`, params: loyaltyParams },
       {
         sql: `UPDATE sales SET customer_id = @targetId, updated_at = CURRENT_TIMESTAMP
           WHERE customer_id IS NULL
@@ -2490,8 +2508,9 @@ app.post('/customers/link-conflicts/resolve-missing', async (c) => {
         params: { targetId, name, phoneKey },
       },
     ])
-    result = results[1]
+    result = results[2]
   } catch (error) {
+    if (await loyaltyBlocked()) return c.json({ error: LOYALTY_REASSIGNMENT_MESSAGE, code: LOYALTY_REASSIGNMENT_CODE }, 409)
     if ((await anonymousCustomerIds(db, [targetId])).has(targetId)) return anonymousCustomerMutationResponse(c)
     throw error
   }

@@ -8,6 +8,7 @@ import { PRODUCT_REMOVE_ACTION_KIND } from '../lib/productDelete'
 import type { Env } from '../index'
 import { BULK_STATUS_KIND, notifyBulkStatus } from '../lib/saleBulkStatus'
 import { notifySaleBulkUpdate, SALE_BULK_UPDATE_KINDS } from '../lib/saleBulkUpdate'
+import { isLoyaltyAssignmentError, LOYALTY_REASSIGNMENT_CODE } from '../lib/saleCustomerAssignmentGuard'
 import { notifyReturnBulkAction, RETURN_BULK_ACTION_KIND } from '../lib/returnBulkAction'
 import { notifySaleSettlementAction, SALE_SETTLEMENT_ACTION_KIND } from '../lib/saleSettlementAction'
 import { STOCK_SESSION_KIND, canReplayStockSessionPayload, notifyStockSession } from '../lib/stockSession'
@@ -412,8 +413,9 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
         if (!serverManagedReplay) await db.prepare('UPDATE action_history SET last_error = @last_error, updated_at = CURRENT_TIMESTAMP WHERE id = @id')
           .run({ last_error: (error as Error)?.message || `Failed to ${direction}`, id: existing.id })
         const code = Number((error as Error & { statusCode?: number })?.statusCode) // Preserve statusCode 409 as a conflict.
-        const status = stockReplay && (code === 400 || code === 403) ? code : code === 409 ? 409 : 500
-        return c.json({ success: false, error: (error as Error)?.message || `Failed to ${direction} this action` }, status)
+        const saleCustomerReplay = SALE_BULK_UPDATE_KINDS.has(applier.name) && (payload.action === 'customer' || payload.action === 'customer_name')
+        const status = (stockReplay || saleCustomerReplay) && (code === 400 || code === 403) ? code : code === 409 ? 409 : 500
+        return c.json({ success: false, error: (error as Error)?.message || `Failed to ${direction} this action`, ...(isLoyaltyAssignmentError(error) ? { code: LOYALTY_REASSIGNMENT_CODE } : {}) }, status)
       }
     }
 
