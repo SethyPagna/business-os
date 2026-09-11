@@ -355,7 +355,7 @@ export default function CreateProductsSessionModal({
     const text = query.trim()
     const timer = window.setTimeout(() => {
       setSearching(true); setSearchFailed(false)
-      void searchProducts({ query: text, pageSize: 8 })
+      void searchProducts({ query: text, pageSize: 8, surface: 'inventory' })
         .then((payload) => {
           if (seq !== searchSeqRef.current) return
           const items = (payload as { items?: ProductCandidate[] })?.items

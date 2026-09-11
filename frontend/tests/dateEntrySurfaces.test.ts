@@ -41,7 +41,6 @@ const SURFACES: Array<{ file: string; what: string }> = [
   { file: 'components/products/forms/BulkAddStockModal.tsx', what: 'bulk add-stock received date' },
   { file: 'components/products/forms/ProductForm.tsx', what: 'product expiry date' },
   { file: 'components/products/StockInSessionsSection.tsx', what: 'stock-in session received date and credit due date' },
-  { file: 'components/products/CreatedDateFilterOptions.tsx', what: 'the Products "Created" from/to range' },
   { file: 'components/fees/FeeForm.tsx', what: 'the Expenses record date' },
   { file: 'components/sales/ExportModal.tsx', what: 'the sales export custom range' },
   { file: 'components/promotions/PromotionsPage.tsx', what: 'promotion and discount start/end' },

@@ -147,19 +147,12 @@ runTest('the props the builder declares are the props it renders', () => {
 })
 
 // ---------------------------------------------------------------------------
-// 3. The report can be date-ranged
+// 3. The catalogue is all-time
 // ---------------------------------------------------------------------------
 
-runTest('the catalogue report keeps a working Created date range', () => {
-  assert.match(products, /import \{ buildCreatedDateFilterSection \}/, 'Products must build the Created (batch received-date) range section')
-  assert.match(
-    products,
-    /createdSection: buildCreatedDateFilterSection\(\{[\s\S]{0,240}setCreatedDateFrom,[\s\S]{0,120}setCreatedDateTo,/,
-    'the Created range must be wired to its own setters, not left as orphaned state',
-  )
-  // The server-side half must stay wired to the same state, or the control
-  // would filter nothing.
-  assert.match(products, /batchDateFrom: createdDateFrom \|\| ''/, 'the Created range must still reach the server as batchDateFrom')
+runTest('the catalogue report is independent of received dates', () => {
+  assert.doesNotMatch(products, /buildCreatedDateFilterSection|createdDateFrom|createdDateTo/, 'Products must not own a received-date range')
+  assert.doesNotMatch(products, /batchDateFrom|batchDateTo/, 'catalog requests and exports must not carry lot received-date bounds')
 })
 
 // ---------------------------------------------------------------------------

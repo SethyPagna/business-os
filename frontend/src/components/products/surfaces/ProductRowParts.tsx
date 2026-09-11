@@ -184,7 +184,7 @@ export function ProductDetailsCell({
           // this wrapper carries the gesture attributes and no box of its
           // own beyond the inline-flex the pill already sat in.
           <span key="supplier-copy" className="inline-flex min-w-0 max-w-full" {...copy(product.supplier)}>
-            <EntityLink page="contacts" anchor="hub:contacts:suppliers" search={product.supplier} navigate={navigateTo} title={tr('open_supplier', 'Open supplier', 'បើកអ្នកផ្គត់ផ្គង់')}>
+            <EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="contacts" anchor="hub:contacts:suppliers" search={product.supplier} navigate={navigateTo} title={tr('open_supplier', 'Open supplier', 'បើកអ្នកផ្គត់ផ្គង់')}>
               {renderMetaPill(item)}
             </EntityLink>
           </span>

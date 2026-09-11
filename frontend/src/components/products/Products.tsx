@@ -4,7 +4,6 @@
 import { Suspense, useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import type { ReactNode, MouseEvent as ReactMouseEvent } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
-import { todayStr } from '../../utils/dateHelpers.ts'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import PackageSearch from 'lucide-react/dist/esm/icons/package-search.js'
@@ -136,7 +135,6 @@ import { buildHierarchicalCategoryFilterOptions } from '../shared/CategoryFilter
 import { buildAvailabilityFilterSection } from '../shared/AvailabilityFilterOptions.tsx'
 import { buildSearchModeFilterSection } from '../shared/SearchModeFilterOptions.tsx'
 import { buildAutoMergedFilterSection } from './AutoMergedFilterOptions.tsx'
-import { buildCreatedDateFilterSection } from './CreatedDateFilterOptions.tsx'
 import { RESTORE_WORK_EVENT, canRestoreMinimizedWork, consumePendingRestore, markRestoreHandled, minimizeWork, peekPendingRestore, reparkDeniedRestore, type MinimizedWorkEntry, type MinimizedWorkKind } from '../../utils/minimizedWork.ts'
 import { clearWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
 import { readStockAdjustDraft, STOCK_ADJUST_RESTORE_HOST } from '../../utils/stockAdjustDraft.ts'
@@ -749,12 +747,6 @@ function ProductsFullEditor() {
   // it hid.
   const [hideZeroStockRows, setHideZeroStockRows] = useState(false)
   const [promotionRules, setPromotionRules] = useState<PromotionRule[]>([])
-  // The received-date facet opens on the current Cambodia business day, in
-  // parity with the other operational ledgers. Clear Filters still writes
-  // empty bounds explicitly for an all-time product list.
-  const initialToday = todayStr()
-  const [createdDateFrom, setCreatedDateFrom] = useState(initialToday)
-  const [createdDateTo, setCreatedDateTo] = useState(initialToday)
   // Y15: the page is chip-sectioned like Promotions -- a switcher in the
   // header flips between the product listing and the Stock Changes ledger,
   // which used to be a folded card at the bottom of the same scroll.
@@ -1138,16 +1130,6 @@ function ProductsFullEditor() {
           stockState: effectiveStockState === 'all' ? '' : effectiveStockState,
           groupState: groupFilter === 'all' ? '' : groupFilter,
           initial: initialFilter === 'all' ? '' : initialFilter,
-          // Real server-side "Created" filter -- scopes to products with at
-          // least one batch received in this range (product_batches.received_at
-          // via an EXISTS join, see buildSearchFilters in cloudflare/src/routes/
-          // products.ts), replacing the old client-only year/month pill picker
-          // that only re-filtered against product.created_at on the already-
-          // fetched page (never sent to the server, never affected total/
-          // pagination -- see progress.md's "Created section reworked to filter
-          // by batch date" item for the full history).
-          batchDateFrom: createdDateFrom || '',
-          batchDateTo: createdDateTo || '',
           // "Issues" quick filter -- see buildIssueStateClauses in
           // cloudflare/src/lib/searchMatch.ts. Multi-value, OR'd.
           issueState: issueFilter === 'all' ? '' : issueFilter,
@@ -1275,7 +1257,7 @@ function ProductsFullEditor() {
     })
     loadPromiseRef.current = wrappedPromise
     return wrappedPromise
-  }, [branchFilter, brandFilter, catFilter, cleanedSearchQuery, createdDateFrom, createdDateTo, effectiveStockState, groupFilter, initialFilter, issueFilter, mergedFilter, notify, productPage, productPageSize, productSortDirection, promoFilter, searchMode, supplierFilter, t, tr, unitFilter])
+  }, [branchFilter, brandFilter, catFilter, cleanedSearchQuery, effectiveStockState, groupFilter, initialFilter, issueFilter, mergedFilter, notify, productPage, productPageSize, productSortDirection, promoFilter, searchMode, supplierFilter, t, tr, unitFilter])
 
   useEffect(() => {
     latestLoadRef.current = load
@@ -2627,7 +2609,7 @@ function ProductsFullEditor() {
 
   useEffect(() => {
     setProductPage(1)
-  }, [brandFilter, branchFilter, catFilter, createdDateFrom, createdDateTo, groupFilter, hideZeroStockRows, initialFilter, issueFilter, productSortDirection, search, searchMode, stockFilter, supplierFilter])
+  }, [brandFilter, branchFilter, catFilter, groupFilter, hideZeroStockRows, initialFilter, issueFilter, productSortDirection, search, searchMode, stockFilter, supplierFilter])
 
   const visibleProducts = useMemo<ProductRecord[]>(
     () => allVisibleProducts,
@@ -2786,15 +2768,13 @@ function ProductsFullEditor() {
     brandFilter,
     branchFilter,
     catFilter,
-    createdDateFrom,
-    createdDateTo,
     filtered,
     products,
     selectedProducts,
     stockFilter,
     supplierFilter,
     tr,
-  }), [brandFilter, branchFilter, catFilter, createdDateFrom, createdDateTo, filtered, products, selectedProducts, stockFilter, supplierFilter, tr])
+  }), [brandFilter, branchFilter, catFilter, filtered, products, selectedProducts, stockFilter, supplierFilter, tr])
 
   const suppliers = useMemo(
     () => buildProductSupplierOptions(productFilterMeta.suppliers),
@@ -2805,8 +2785,6 @@ function ProductsFullEditor() {
     brandFilter,
     branchFilter,
     catFilter,
-    createdDateFrom,
-    createdDateTo,
     groupFilter,
     initialFilter,
     issueFilter,
@@ -2832,8 +2810,6 @@ function ProductsFullEditor() {
     setMergedFilter('all')
     // setInitialFilter('all') removed -- no setter exists anymore, and
     // initialFilter is permanently 'all' already (see its declaration).
-    setCreatedDateFrom('')
-    setCreatedDateTo('')
     // Name A-Z is the actual default sort for this page (see the initial
     // useState below) -- this previously reset to 'desc' (Newest first)
     // instead, so "clear filters" silently changed the sort order rather
@@ -3439,23 +3415,6 @@ function ProductsFullEditor() {
       branchFilter,
       setBranchFilter,
     }),
-    // The "Created" batch-received-date range. Y13 moved it out of this
-    // menu onto its own row below the search row; 85294c21 ("unify product
-    // grouping and complete exports") then deleted that row and never
-    // rehomed the control, leaving `createdDateFrom`/`createdDateTo`, the
-    // clear-all reset, the activeFilters term and the server's
-    // batchDateFrom/batchDateTo query all wired to a filter with no UI --
-    // the catalogue report could not be date-ranged at all. It comes back
-    // HERE rather than as a toolbar row because the standing rule is that a
-    // chosen filter lives inside FilterMenu instead of spending a page row
-    // (and the row the user did ask about was the pager's, which stays put).
-    createdSection: buildCreatedDateFilterSection({
-      t,
-      createdDateFrom,
-      setCreatedDateFrom,
-      createdDateTo,
-      setCreatedDateTo,
-    }),
     issuesSection: buildIssuesFilterSection({
       t,
       issueFilter,
@@ -3485,8 +3444,6 @@ function ProductsFullEditor() {
       brandFilter,
       branchFilter,
       catFilter,
-      createdDateFrom,
-      createdDateTo,
       groupFilter,
       hideZeroStockRows,
       issueFilter,
@@ -3507,7 +3464,7 @@ function ProductsFullEditor() {
     setSupplierFilter,
     suppliers,
     t,
-  }), [branches, brandFilter, branchFilter, brandOptions, catFilter, categoryFilterOptions, createdDateFrom, createdDateTo, groupFilter, hideZeroStockRows, hierarchicalCategoryOptions, isProductFilterMenuOpen, issueFilter, mergedFilter, productSortDirection, promoFilter, searchMode, setSearchMode, stockFilter, supplierFilter, suppliers, t])
+  }), [branches, brandFilter, branchFilter, brandOptions, catFilter, categoryFilterOptions, groupFilter, hideZeroStockRows, hierarchicalCategoryOptions, isProductFilterMenuOpen, issueFilter, mergedFilter, productSortDirection, promoFilter, searchMode, setSearchMode, stockFilter, supplierFilter, suppliers, t])
 
   const renderDesktopProductRow = useCallback((p: ProductRecord, { indented = false }: { indented?: boolean } = {}) => {
     const productId = p.id ?? 0
@@ -3643,7 +3600,9 @@ function ProductsFullEditor() {
                 aria-label={thumbnailState.hasImage ? `${tr('view_image', 'View image')}: ${productName}` : undefined}
                 aria-disabled={!thumbnailState.hasImage}
                 onMouseDown={(event) => event.stopPropagation()}
+                onMouseUp={(event) => event.stopPropagation()}
                 onTouchStart={(event) => event.stopPropagation()}
+                onTouchEnd={(event) => event.stopPropagation()}
                 onClick={(event) => {
                   event.stopPropagation()
                   if (thumbnailState.hasImage) openLightbox(thumbnailState.gallery, 0, productName)
@@ -3698,7 +3657,7 @@ function ProductsFullEditor() {
                       : undefined
                   return (
                     <span key={`${metaKey}-copy`} className={`inline-flex min-w-0 ${metaKey === 'barcode' ? 'shrink-0' : 'max-w-full'}`} {...copy(item?.label)}>
-                      <EntityLink page="products" anchor="hub:products:products" search={metaKey === 'barcode' ? String(item?.label || '') : undefined} focus={focus} navigate={navigateTo} title={tr('open_product', 'Open product', 'បើកផលិតផល')}>
+                      <EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="products" anchor="hub:products:products" search={metaKey === 'barcode' ? String(item?.label || '') : undefined} focus={focus} navigate={navigateTo} title={tr('open_product', 'Open product', 'បើកផលិតផល')}>
                         {pill}
                       </EntityLink>
                     </span>
@@ -3722,7 +3681,7 @@ function ProductsFullEditor() {
                   every product-name cell on every surface (styles/main.css)
                   -- no per-file scroll CSS. */}
               <div {...getKhmerTextProps(productName, `scroll-x-clean text-gray-900 dark:text-white ${indented ? 'font-medium' : 'font-semibold'}`)} {...copy(productName)}>
-                <EntityLink page="products" anchor="hub:products:products" search={productName} navigate={navigateTo} title={tr('open_product', 'Open product', 'បើកផលិតផល')}>
+                <EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="products" anchor="hub:products:products" search={productName} navigate={navigateTo} title={tr('open_product', 'Open product', 'បើកផលិតផល')}>
                   {productName}
                 </EntityLink>
               </div>
@@ -3763,10 +3722,8 @@ function ProductsFullEditor() {
           <div className="font-semibold text-green-700 dark:text-green-400">{fmtUSD(sellingUsd)}</div>
           {sellingKhr > 0 && <div className="text-xs text-gray-400">{fmtKHR(sellingKhr)}</div>}
           {wholesaleUsd > 0 || wholesaleKhr > 0 ? (
-            // Label was a hardcoded "VIP"; it is translated now because the
-            // surviving tier has a real key in both packs (wholesale_price).
             <div className="mt-0.5 text-[10px] text-primary-600 dark:text-primary-400">
-              {tr('wholesale_price', 'Wholesale price', 'តម្លៃបោះដុំ')} {fmtUSD(wholesaleUsd || sellingUsd)}
+              {fmtUSD(wholesaleUsd || sellingUsd)}
               {wholesaleKhr > 0 ? ` / ${fmtKHR(wholesaleKhr)}` : ''}
             </div>
           ) : null}
@@ -3924,7 +3881,9 @@ function ProductsFullEditor() {
               aria-label={thumbnailState.hasImage ? `${tr('view_image', 'View image')}: ${productName}` : undefined}
               aria-disabled={!thumbnailState.hasImage}
               onMouseDown={(event) => event.stopPropagation()}
+              onMouseUp={(event) => event.stopPropagation()}
               onTouchStart={(event) => event.stopPropagation()}
+              onTouchEnd={(event) => event.stopPropagation()}
               onClick={(event) => {
                 event.stopPropagation()
                 if (thumbnailState.hasImage) openLightbox(thumbnailState.gallery, 0, productName)
@@ -3950,7 +3909,7 @@ function ProductsFullEditor() {
                     leaves touch-action alone so a vertical swipe starting on a
                     name still scrolls the list. */}
                 <div {...getKhmerTextProps(productName, 'scroll-x-clean text-sm font-semibold text-gray-900 dark:text-white')} {...copy(productName)}>
-                  <EntityLink page="products" anchor="hub:products:products" search={productName} navigate={navigateTo} title={tr('open_product', 'Open product', 'បើកផលិតផល')}>
+                  <EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="products" anchor="hub:products:products" search={productName} navigate={navigateTo} title={tr('open_product', 'Open product', 'បើកផលិតផល')}>
                     {productName}
                   </EntityLink>
                 </div>
@@ -3986,7 +3945,7 @@ function ProductsFullEditor() {
                   {...copy(barcode)}
                   title={barcode}
                 >
-                    <EntityLink page="products" anchor="hub:products:products" search={barcode} navigate={navigateTo} title={tr('open_product', 'Open product', 'បើកផលិតផល')}>{barcode}</EntityLink>
+                    <EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="products" anchor="hub:products:products" search={barcode} navigate={navigateTo} title={tr('open_product', 'Open product', 'បើកផលិតផល')}>{barcode}</EntityLink>
                 </span>
               ) : null}
               {brandName ? (
@@ -3999,7 +3958,7 @@ function ProductsFullEditor() {
                   {...copy(brandName)}
                   title={brandName}
                 >
-                  <EntityLink page="products" anchor="hub:products:products" search={brandName} navigate={navigateTo} title={tr('open_product', 'Open product', 'បើកផលិតផល')}>{brandName}</EntityLink>
+                  <EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="products" anchor="hub:products:products" search={brandName} navigate={navigateTo} title={tr('open_product', 'Open product', 'បើកផលិតផល')}>{brandName}</EntityLink>
                 </span>
               ) : null}
             </div>
@@ -4109,7 +4068,9 @@ function ProductsFullEditor() {
           className="block rounded-xl text-left sm:rounded-lg"
           aria-label={`${tr('view_image', 'View image')}: ${title}`}
           onMouseDown={(event) => event.stopPropagation()}
+          onMouseUp={(event) => event.stopPropagation()}
           onTouchStart={(event) => event.stopPropagation()}
+          onTouchEnd={(event) => event.stopPropagation()}
           onClick={(event) => { event.stopPropagation(); openLightbox(state.gallery, 0, title) }}
         >
           <ProductImg src={state.thumbnail} alt={title} className="h-12 w-12 rounded-xl bg-slate-50 object-contain p-0.5 cursor-zoom-in sm:rounded-lg dark:bg-slate-800" />

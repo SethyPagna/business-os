@@ -301,7 +301,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     const seq = ++searchSeqRef.current
     const timer = window.setTimeout(async () => {
       try {
-        const payload = await searchProducts({ query: text, pageSize: 8 }) as { items?: ProductCandidate[] }
+        const payload = await searchProducts({ query: text, pageSize: 8, surface: 'inventory' }) as { items?: ProductCandidate[] }
         if (seq !== searchSeqRef.current) return
         setCandidates(Array.isArray(payload?.items) ? payload.items : [])
         setSearchCompleteFor(text)

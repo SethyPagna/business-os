@@ -197,16 +197,17 @@ const stockLedgerRequest = evaluate(requestArgs(stockLedger.source, 'getStockLed
 })
 assert.deepEqual([stockLedgerRequest.startDate, stockLedgerRequest.endDate], [day1, day1])
 
-const products = todayPair('products/Products.tsx', '[createdDateFrom, setCreatedDateFrom]', '[createdDateTo, setCreatedDateTo]')
-const productQuery = evaluate(variable(products.source, 'productQuery'), {
+const products = read('products/Products.tsx')
+const productQuery = evaluate(variable(products, 'productQuery'), {
   productPage: 1, productPageSize: 20, cleanedSearchQuery: '', searchMode: 'AND',
   catFilter: new Set(), brandFilter: new Set(), supplierFilter: new Set(), unitFilter: '',
   branchFilter: 'all', effectiveStockState: 'all', groupFilter: 'all', initialFilter: 'all',
-  createdDateFrom: products.from, createdDateTo: products.to, issueFilter: 'all',
-  promoFilter: 'all', mergedFilter: 'all', productSortDirection: 'name_asc',
+  issueFilter: 'all', promoFilter: 'all', mergedFilter: 'all', productSortDirection: 'name_asc',
 })
-const productRequest = evaluate(requestArgs(products.source, 'searchProducts').at(-1)!, { productQuery })
-assert.deepEqual([productRequest.batchDateFrom, productRequest.batchDateTo], [day1, day1])
+const productRequest = evaluate(requestArgs(products, 'searchProducts').at(-1)!, { productQuery })
+assert.ok(!('batchDateFrom' in productRequest), 'Products catalog request is all-time, not Today-scoped')
+assert.ok(!('batchDateTo' in productRequest), 'Products catalog request carries no received-date upper bound')
+assert.doesNotMatch(products, /createdDateFrom|createdDateTo|CreatedDateFilter/, 'Products owns no received-date filter state or UI')
 
 const invoiceSurfaces = [
   { file: 'contacts/ArInvoicesSection.tsx', endpoint: 'getCustomerReceivables', context: { customer: 'all', status: 'all' } },
@@ -305,19 +306,7 @@ for (const [file, fromSetter, toSetter] of [
   assert.deepEqual([from, to], ['', ''], `${file} picker still clears to All time`)
 }
 
-let clearedProductFrom = day1
-let clearedProductTo = day1
-const noop = () => {}
-evaluate(variable(products.source, 'clearAllFilters'), {
-  ...hooks, setCatFilter: noop, setBrandFilter: noop, setBranchFilter: noop,
-  setSupplierFilter: noop, setUnitFilter: noop, setStockFilter: noop, setGroupFilter: noop,
-  setIssueFilter: noop, setPromoFilter: noop, setMergedFilter: noop,
-  setCreatedDateFrom: (value: string) => { clearedProductFrom = value },
-  setCreatedDateTo: (value: string) => { clearedProductTo = value },
-  setProductSortDirection: noop, setSearchMode: noop, setHideZeroStockRows: noop,
-})()
-assert.deepEqual([clearedProductFrom, clearedProductTo], ['', ''], 'Products Clear Filters remains explicitly all-time')
-console.log('PASS ten secondary Today initializers and first requests; clear/custom and cursor paths preserved')
+console.log('PASS secondary operational Today initializers and first requests; Products remains all-time; clear/custom and cursor paths preserved')
 
 for (const range of [preset('today'), preset('all')]) {
   const bounded = !!range.startDate
