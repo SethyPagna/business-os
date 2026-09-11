@@ -1280,12 +1280,12 @@ assert.match(
 )
 assert.match(
   actionHistory,
-  /withLoaderTimeout\(\s*async \(\) => \(await loadActionHistoryTransport\(\)\)\.getActionHistory\(scope, Math\.max\(3, limit\), \{[\s\S]*'Action history',\s*ACTION_HISTORY_LOAD_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*async \(\) => \{\s*const api = await loadActionHistoryTransport\(\)\s*assertActorReadScope\(authority\)\s*return api\.getActionHistory\(scope, Math\.max\(3, limit\), \{[\s\S]*'Action history',\s*ACTION_HISTORY_LOAD_TIMEOUT_MS,\s*\)/,
   'action history server reads should timeout slow history requests',
 )
 assert.match(
   actionHistory,
-  /if \(!isTrackedRequestCurrent\(historyRequestRef, requestId\) \|\| actorScopeRef.current !== requestScope\) return[\s\S]*const record = result as \{ items\?: ServerHistoryItem\[\] \} \| null[\s\S]*const items = Array\.isArray\(record\?\.items\) \? record\.items : \[\][\s\S]*setServerItems\(items\)/,
+  /if \(!isActorReadScopeCurrent\(authority\) \|\| !isTrackedRequestCurrent\(historyRequestRef, requestId\) \|\| actorScopeRef.current !== requestScope\) return[\s\S]*const record = result as \{ items\?: ServerHistoryItem\[\] \} \| null[\s\S]*const items = Array\.isArray\(record\?\.items\) \? record\.items : \[\][\s\S]*setServerItems\(items\)/,
   'action history should ignore superseded requests and previous-actor responses before updating rows or cache',
 )
 assert.match(
@@ -1295,32 +1295,32 @@ assert.match(
 )
 assert.match(
   actionHistory,
-  /return `\$\{ACTION_HISTORY_CACHE_PREFIX\}\$\{scopedWorkDraftKey\(scope\)\}`/,
-  'instant-paint history cache keys must remain actor-scoped',
+  /function cacheKeyFor\(scope: string, authority: ActorReadScope\): string \{\s*return actorReadStorageKey\(`\$\{ACTION_HISTORY_CACHE_PREFIX\}\$\{scope\}`, authority\)/,
+  'instant-paint history cache keys must include opaque actor/session/server authority',
 )
 assert.match(
   actionHistory,
-  /useState<ServerHistoryItem\[\]>\(\(\) => readCachedServerItems\(scope\)\)/,
-  'the actor-scoped cache should hydrate synchronously before the delayed refresh',
+  /useState<ServerHistoryItem\[\]>\(\(\) => enabled \? readCachedServerItems\(actorScope, readScope\) : \[\]\)/,
+  'enabled history should hydrate the current authority cache synchronously before the delayed refresh',
 )
 assert.match(
   actionHistory,
-  /if \(cachedScopeRef.current === actorScope\) return[\s\S]*setUndoStack\(\[\]\)[\s\S]*setRedoStack\(\[\]\)[\s\S]*setServerItems\(readCachedServerItems\(scope\)\)/,
+  /if \(cachedScopeRef.current === actorScope\) return[\s\S]*setUndoStack\(\[\]\)[\s\S]*setRedoStack\(\[\]\)[\s\S]*setServerItems\(enabled \? readCachedServerItems\(actorScope, readScope\) : \[\]\)/,
   'an actor/scope change must replace cached history and remove the previous actor undo closures',
 )
 assert.match(
   actionHistory,
-  /if \(!isAdmin \|\| userFilter === 'all'\) writeCachedServerItems\(scope, items\)/,
+  /if \(!isAdmin \|\| userFilter === 'all'\) writeCachedServerItems\(actorScope, items, authority\)/,
   'action history should cache only the unfiltered default view so a per-user admin filter never leaks into the next mount\'s instant-paint cache',
 )
 assert.match(
   actionHistory,
-  /withLoaderTimeout\(\s*async \(\) => \(await loadActionHistoryTransport\(\)\)\.getActionHistoryUsers\(\),\s*'Action history users',\s*ACTION_HISTORY_USERS_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*async \(\) => \{\s*const api = await loadActionHistoryTransport\(\)\s*assertActorReadScope\(authority\)\s*return api\.getActionHistoryUsers\(\)\s*\},\s*'Action history users',\s*ACTION_HISTORY_USERS_TIMEOUT_MS,\s*\)/,
   'action history admin user options should timeout slow user reads',
 )
 assert.match(
   actionHistory,
-  /if \(!isTrackedRequestCurrent\(usersRequestRef, requestId\)\) return[\s\S]*setUserOptions\(Array\.isArray\(rows\) \? rows : \[\]\)/,
+  /if \(actorScopeRef.current !== actorScope \|\| !isActorReadScopeCurrent\(authority\) \|\| !isTrackedRequestCurrent\(usersRequestRef, requestId\)\) return[\s\S]*setUserOptions\(Array\.isArray\(rows\) \? rows : \[\]\)/,
   'action history should ignore stale user option responses before updating options',
 )
 assert.doesNotMatch(
