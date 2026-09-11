@@ -26,6 +26,19 @@ export type BatchLike = {
 export function formatBatchReceivedDate(receivedAt: string | null | undefined): string | null {
   const raw = String(receivedAt || '').trim()
   if (!raw) return null
+  // A received DATE is a calendar value, not an instant. Parsing YYYY-MM-DD
+  // through Date would reinterpret it at midnight UTC and show the previous
+  // day west of UTC. Keep date-only values literal and validate them in UTC;
+  // timestamp values below retain the existing local-time display behaviour.
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw)
+  if (dateOnly) {
+    const yyyy = Number(dateOnly[1])
+    const mm = Number(dateOnly[2])
+    const dd = Number(dateOnly[3])
+    const candidate = new Date(Date.UTC(yyyy, mm - 1, dd))
+    if (candidate.getUTCFullYear() !== yyyy || candidate.getUTCMonth() + 1 !== mm || candidate.getUTCDate() !== dd) return null
+    return `${dateOnly[3]}/${dateOnly[2]}/${dateOnly[1]}`
+  }
   const isoish = raw.includes('T') ? raw : `${raw.replace(' ', 'T')}Z`
   const date = new Date(isoish)
   if (Number.isNaN(date.getTime())) return null
@@ -105,13 +118,14 @@ export function lotCodeToIsoDate(lotCode: string | null | undefined): string | n
 // a pill/row is never blank.
 export function batchDisplayLabel(batch: BatchLike, batchWord = 'Received date'): string {
   const codeAsDate = lotCodeAsDate(batch.lot_code)
-  // A real custom code (has a lot_code that is NOT an MMDDYYYY date) shows as
-  // the code.
-  if (batch.lot_code && !codeAsDate) return batch.lot_code
-  // Otherwise show the received date: the stored received_at, or the code
-  // decoded to a date.
-  const dateLabel = formatBatchReceivedDate(batch.received_at) || codeAsDate
+  // received_at is the authoritative inventory date, including for synthetic
+  // adjustment codes such as ADJ09/02/2026. A genuine custom code is only the
+  // fallback when no valid date exists; letting it win hid real received dates
+  // on POS, Sales and Inventory rows.
+  const dateLabel = formatBatchReceivedDate(batch.received_at)
   if (dateLabel) return dateLabel
+  if (codeAsDate) return codeAsDate
+  if (batch.lot_code) return batch.lot_code
   const defaultLabel = formatDefaultBatchLabel(batch.batch_number, batch.received_at)
   if (defaultLabel) return `${batchWord} ${defaultLabel}`
   return `${batchWord} #${batch.id}`

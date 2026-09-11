@@ -3998,6 +3998,7 @@ export default function POS() {
             posCopy={posCopy}
             activeBranchId={primaryBranchFilterId ?? pickBestBranchId(detailProduct)}
             trackedBatchProductIds={trackedBatchProductIds}
+            trackedBatchLookupUnavailable={trackedBatchLoadFailed}
             getDisplayStock={getDisplayStock}
             getPrimaryProductImage={getPrimaryProductImage}
             getVariantChoices={getVariantChoices}

@@ -126,7 +126,9 @@ for (const key of ['product_duplicates_hint', 'merge_stock_choice_merge_hint', '
 
 const batchLabel = read('src/utils/batchLabel.ts')
 assert.match(batchLabel, /received_at\?\: string \| null/)
-assert.match(batchLabel, /const dateLabel = formatBatchReceivedDate\(batch\.received_at\) \|\| codeAsDate/)
+assert.match(batchLabel, /const dateLabel = formatBatchReceivedDate\(batch\.received_at\)/)
+assert.match(batchLabel, /if \(codeAsDate\) return codeAsDate/)
+assert.ok(batchLabel.indexOf('if (dateLabel) return dateLabel') < batchLabel.indexOf('if (batch.lot_code) return batch.lot_code'), 'received_at must win before a custom lot-code fallback')
 assert.match(batchLabel, /export function lotCodeAsDate/)
 assert.match(batchLabel, /export function batchDisplayLabel/)
 assert.match(batchLabel, /batchWord = 'Received date'/)

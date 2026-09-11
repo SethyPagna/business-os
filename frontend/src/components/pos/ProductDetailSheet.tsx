@@ -209,6 +209,7 @@ interface ProductDetailSheetProps {
   // product's Branch/Barcode steps can resolve to a *different* row on
   // every pick, and each row can be tracked independently of the others.
   trackedBatchProductIds?: Set<number>
+  trackedBatchLookupUnavailable?: boolean
   getDisplayStock: (product: ProductRecord | undefined, cartItem?: { branch_id?: string | number | null } | null) => number
   getPrimaryProductImage: (product: ProductRecord) => string
   getVariantChoices: (product: ProductRecord) => ProductRecord[]
@@ -262,6 +263,7 @@ export default function ProductDetailSheet({
   posCopy,
   activeBranchId = null,
   trackedBatchProductIds,
+  trackedBatchLookupUnavailable = false,
   getDisplayStock,
   getPrimaryProductImage,
   getVariantChoices,
@@ -319,8 +321,9 @@ export default function ProductDetailSheet({
   // Non-empty when the lot lookup FAILED, as opposed to succeeding with no
   // lots. The two must not render the same way -- see the fetch below.
   const [batchesError, setBatchesError] = useState('')
+  const [batchesReloadKey, setBatchesReloadKey] = useState(0)
   const [selectedBatchId, setSelectedBatchId] = useState<number | null>(null)
-  const [selectedUnlottedStock, setSelectedUnlottedStock] = useState(false)
+  const [selectedUnlottedProductId, setSelectedUnlottedProductId] = useState<number | null>(null)
   const [batchChoicesOpen, setBatchChoicesOpen] = useState(false)
   // 11.9: open damaged lots for the resolved row/branch -- the Damage
   // source option shown beside the sellable lots. A failed fetch shows no
@@ -338,7 +341,7 @@ export default function ProductDetailSheet({
     setBranchPage(0)
     setBarcodePage(0)
     setSelectedBatchId(null)
-    setSelectedUnlottedStock(false)
+    setSelectedUnlottedProductId(null)
     setKnownPositiveQuantityByProduct({})
     setBatchChoicesOpen(false)
     setBatchPage(0)
@@ -359,11 +362,13 @@ export default function ProductDetailSheet({
     activeBranchId,
     selectedVariantId,
     trackedBatchProductIds,
+    trackedBatchLookupUnavailable,
     receivedDateStepHidden: hideReceivedDates,
     batches,
     knownPositiveBatchQuantityByProduct: knownPositiveQuantityByProduct,
     selectedBatchId,
-    selectedUnlottedStock,
+    selectedUnlottedStock: selectedUnlottedProductId != null,
+    selectedUnlottedProductId,
     damagedLots,
     selectedDamagedLotId,
     intent,
@@ -509,7 +514,7 @@ export default function ProductDetailSheet({
     }).finally(() => { if (!cancelled) setBatchesLoading(false) })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isBatchTracked, lotSourceKey, resolvedBranchId])
+  }, [isBatchTracked, lotSourceKey, resolvedBranchId, batchesReloadKey])
   // A Branch/Barcode change can resolve to a different (or differently-
   // tracked) row, so a lot picked under the previous row must not silently
   // carry over -- same "don't leak a stale pick into the next selection"
@@ -531,6 +536,7 @@ export default function ProductDetailSheet({
   // resolved row's id, so this behaves exactly as before.
   useEffect(() => {
     setSelectedBatchId(null)
+    setSelectedUnlottedProductId(null)
     setSelectedDamagedLotId(null)
     setBatchPage(0)
     setBatchChoicesOpen(false)
@@ -555,7 +561,8 @@ export default function ProductDetailSheet({
     // Kept on one line: "picking a lot clears the damaged-lot pick and closes
     // the list" is a contract both tests/returnOptions.test.ts and
     // tests/productsResponsiveSurface.test.ts assert on the source text.
-    setSelectedBatchId(batch.id); setSelectedUnlottedStock(false); setSelectedDamagedLotId(null); setBatchChoicesOpen(false)
+    if (Number(batch.quantity || 0) <= 0) return
+    setSelectedBatchId(batch.id); setSelectedUnlottedProductId(null); setSelectedDamagedLotId(null); setBatchChoicesOpen(false)
     if (mergeRowsIntoLotList && batch.__productId != null) setSelectedVariantId(String(batch.__productId))
   }
   // Requires an in-stock lot to be picked before the price buttons below
@@ -569,6 +576,7 @@ export default function ProductDetailSheet({
   const batchSelectionRequired = sheetState.batchSelectionRequired
   const batchReadyToSell = sheetState.batchReadyToSell
   const unlottedStockQuantity = sheetState.unlottedStockQuantity
+  const unlottedStockOptions = sheetState.unlottedStockOptions
   const pickAllowed = sheetState.pickAllowed
   const pickBlockedReason = sheetState.pickBlockedReason
   // The ONE stock number this sheet shows, from productSheetState.ts:
@@ -589,7 +597,7 @@ export default function ProductDetailSheet({
   const buildBatchSelection = (): BatchSelection | undefined => {
     if (selectedDamagedLot) return undefined
     if (!batchSelectionRequired) return undefined
-    if (selectedUnlottedStock && unlottedStockQuantity > 0) return { unlottedStock: true, quantity: unlottedStockQuantity }
+    if (sheetState.selectedUnlottedProductId != null && unlottedStockQuantity > 0) return { unlottedStock: true, quantity: unlottedStockQuantity }
     if (!selectedBatch) return undefined
     return {
       batchId: selectedBatch.id,
@@ -622,6 +630,24 @@ export default function ProductDetailSheet({
     onPick?.(nextProduct, { branchId: effectiveBranchId, batch: buildBatchSelection() })
   }
   const pickButtonLabel = pickLabel || t('select') || 'Select'
+  const batchLoadFailure = (
+    <div role="alert" className="flex items-center justify-between gap-2 rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-xs text-red-700 dark:border-red-900/60 dark:bg-red-950/20 dark:text-red-300">
+      <span className="min-w-0 flex-1 truncate" title={batchesError}>{batchesError || posCopy('Could not load received dates', 'មិនអាចផ្ទុកថ្ងៃចូលបានទេ')}</span>
+      <button type="button" className="shrink-0 rounded px-2 py-1 font-semibold underline underline-offset-2" onClick={() => setBatchesReloadKey((key) => key + 1)}>
+        {t('retry') || posCopy('Retry', 'ព្យាយាមម្ដងទៀត')}
+      </button>
+    </div>
+  )
+
+  const chooseUnlottedStock = (productId: number): void => {
+    const option = unlottedStockOptions.find((row) => row.productId === productId)
+    if (!option || option.quantity <= 0) return
+    setSelectedBatchId(null)
+    setSelectedUnlottedProductId(productId)
+    setSelectedDamagedLotId(null)
+    setBatchChoicesOpen(false)
+    if (mergeRowsIntoLotList) setSelectedVariantId(String(productId))
+  }
   // The gate is DERIVED (productSheetState's pickAllowed), not re-decided
   // here. This button used to refuse anything out of stock on every host,
   // which quietly broke the hosts whose entire job is to raise a quantity:
@@ -869,7 +895,7 @@ export default function ProductDetailSheet({
                       {batchesLoading ? (
                         <div className="text-xs text-gray-400">{t('loading') || 'Loading…'}</div>
                       ) : batchesError ? (
-                        <div className="text-xs font-medium text-red-500">{batchesError}</div>
+                        batchLoadFailure
                       ) : orderedBatches.length === 0 ? (
                         <div className="text-xs text-gray-400">{t('received_dates_none') || 'No received dates at this branch'}</div>
                       ) : (
@@ -894,6 +920,8 @@ export default function ProductDetailSheet({
                                 <button
                                   key={batch.id}
                                   type="button"
+                                  disabled={batchOut}
+                                  aria-disabled={batchOut}
                                   className={pillClass(batch.id === selectedBatchId, batchOut)}
                                   onClick={() => chooseBatch(batch)}
                                 >
@@ -908,12 +936,14 @@ export default function ProductDetailSheet({
                           </> : null}
                         </>
                       )}
-                      {unlottedStockQuantity > 0 ? <button type="button"
-                        className={pillClass(selectedUnlottedStock, false)}
-                        onClick={() => { setSelectedBatchId(null); setSelectedUnlottedStock(true); setSelectedDamagedLotId(null); setBatchChoicesOpen(false) }}>
-                        <span>{posCopy('Received date not recorded', 'មិនបានកត់ត្រាកាលបរិច្ឆេទទទួល')}</span>
-                        <span className="ml-1 text-[10px] font-normal opacity-75">({unlottedStockQuantity} {effectiveVariant.unit})</span>
-                      </button> : null}
+                      {unlottedStockOptions.map((option, optionIndex) => <button type="button"
+                        key={`unlotted-${option.productId}`}
+                        aria-pressed={sheetState.selectedUnlottedProductId === option.productId}
+                        className={pillClass(sheetState.selectedUnlottedProductId === option.productId, false)}
+                        onClick={() => chooseUnlottedStock(option.productId)}>
+                        <span>{posCopy('Received date not recorded', 'មិនបានកត់ត្រាកាលបរិច្ឆេទទទួល')}{unlottedStockOptions.length > 1 ? ` ${optionIndex + 1}` : ''}</span>
+                        <span className="ml-1 text-[10px] font-normal opacity-75">({option.quantity} {effectiveVariant.unit})</span>
+                      </button>)}
                     </div>
                   ) : null}
                   {damagedLots.length > 0 ? (
@@ -922,8 +952,10 @@ export default function ProductDetailSheet({
                       <div className="flex flex-wrap gap-1.5">
                         {damagedLots.map((lot) => (
                           <button key={lot.id} type="button"
+                            disabled={Number(lot.quantity_remaining || 0) <= 0}
+                            aria-disabled={Number(lot.quantity_remaining || 0) <= 0}
                             className={pillClass(lot.id === selectedDamagedLotId, Number(lot.quantity_remaining || 0) <= 0)}
-                            onClick={() => { setSelectedDamagedLotId(lot.id === selectedDamagedLotId ? null : lot.id); setSelectedBatchId(null) }}>
+                            onClick={() => { if (Number(lot.quantity_remaining || 0) <= 0) return; setSelectedDamagedLotId(lot.id === selectedDamagedLotId ? null : lot.id); setSelectedBatchId(null); setSelectedUnlottedProductId(null) }}>
                             <span className="font-mono">{damagedLotLabel(lot)}</span>
                             <span className="ml-1 text-[10px] font-normal opacity-75">({lot.quantity_remaining})</span>
                           </button>
@@ -934,7 +966,7 @@ export default function ProductDetailSheet({
                   <div className="flex flex-wrap gap-1.5">
                     {onPick ? renderPickButton(effectiveVariant) : null}
                     {onPick ? null : <button className="btn-primary flex-1 text-xs" disabled={!effectiveVariantInStock || !batchReadyToSell} onClick={() => closeAfterAdd(effectiveVariant, 'selling')}>
-                      {batchSelectionRequired && !selectedBatch && !selectedUnlottedStock ? t('pick_received_date_first') || 'Pick a received date first' : `${t('selling_price') || 'Selling'} ${fmtUSD(asNumber(effectiveVariant.selling_price_usd || 0))}`}
+                      {batchSelectionRequired && !selectedBatch && sheetState.selectedUnlottedProductId == null ? t('pick_received_date_first') || 'Pick a received date first' : `${t('selling_price') || 'Selling'} ${fmtUSD(asNumber(effectiveVariant.selling_price_usd || 0))}`}
                     </button>}
                     {/* The variant's VIP add-to-cart button is deleted by the
                         2026-09-04 ruling; the Wholesale button beside it now
@@ -971,7 +1003,7 @@ export default function ProductDetailSheet({
                 {batchesLoading ? (
                   <div className="text-xs text-gray-400">{t('loading') || 'Loading…'}</div>
                 ) : batchesError ? (
-                  <div className="text-xs font-medium text-red-500">{batchesError}</div>
+                  batchLoadFailure
                 ) : orderedBatches.length === 0 ? (
                   <div className="text-xs text-gray-400">{t('received_dates_none') || 'No received dates at this branch'}</div>
                 ) : (
@@ -996,6 +1028,8 @@ export default function ProductDetailSheet({
                           <button
                             key={batch.id}
                             type="button"
+                            disabled={batchOut}
+                            aria-disabled={batchOut}
                             className={pillClass(batch.id === selectedBatchId, batchOut)}
                             onClick={() => chooseBatch(batch)}
                           >
@@ -1010,12 +1044,14 @@ export default function ProductDetailSheet({
                     </> : null}
                   </>
                 )}
-                {unlottedStockQuantity > 0 ? <button type="button"
-                  className={pillClass(selectedUnlottedStock, false)}
-                  onClick={() => { setSelectedBatchId(null); setSelectedUnlottedStock(true); setSelectedDamagedLotId(null); setBatchChoicesOpen(false) }}>
+                {unlottedStockOptions.map((option) => <button type="button"
+                  key={`unlotted-${option.productId}`}
+                  aria-pressed={sheetState.selectedUnlottedProductId === option.productId}
+                  className={pillClass(sheetState.selectedUnlottedProductId === option.productId, false)}
+                  onClick={() => chooseUnlottedStock(option.productId)}>
                   <span>{posCopy('Received date not recorded', 'មិនបានកត់ត្រាកាលបរិច្ឆេទទទួល')}</span>
-                  <span className="ml-1 text-[10px] font-normal opacity-75">({unlottedStockQuantity} {product.unit})</span>
-                </button> : null}
+                  <span className="ml-1 text-[10px] font-normal opacity-75">({option.quantity} {product.unit})</span>
+                </button>)}
               </div>
             ) : null}
             {damagedLots.length > 0 ? (
@@ -1024,8 +1060,10 @@ export default function ProductDetailSheet({
                 <div className="flex flex-wrap gap-1.5">
                   {damagedLots.map((lot) => (
                     <button key={lot.id} type="button"
+                      disabled={Number(lot.quantity_remaining || 0) <= 0}
+                      aria-disabled={Number(lot.quantity_remaining || 0) <= 0}
                       className={pillClass(lot.id === selectedDamagedLotId, Number(lot.quantity_remaining || 0) <= 0)}
-                      onClick={() => { setSelectedDamagedLotId(lot.id === selectedDamagedLotId ? null : lot.id); setSelectedBatchId(null) }}>
+                      onClick={() => { if (Number(lot.quantity_remaining || 0) <= 0) return; setSelectedDamagedLotId(lot.id === selectedDamagedLotId ? null : lot.id); setSelectedBatchId(null); setSelectedUnlottedProductId(null) }}>
                       <span className="font-mono">{damagedLotLabel(lot)}</span>
                       <span className="ml-1 text-[10px] font-normal opacity-75">({lot.quantity_remaining})</span>
                     </button>
@@ -1036,7 +1074,7 @@ export default function ProductDetailSheet({
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
               {onPick ? renderPickButton(product) : null}
               {onPick ? null : <button className="btn-primary flex-1" disabled={displayedStock <= asNumber(product.out_of_stock_threshold) || !batchReadyToSell} onClick={() => closeAfterAdd(product, 'selling')}>
-                {displayedStock <= asNumber(product.out_of_stock_threshold) ? t('out_of_stock') : batchSelectionRequired && !selectedBatch && !selectedUnlottedStock ? t('pick_received_date_first') || 'Pick a received date first' : `${t('selling_price') || 'Selling'} ${fmtUSD(asNumber(product.selling_price_usd || 0))}`}
+                {displayedStock <= asNumber(product.out_of_stock_threshold) ? t('out_of_stock') : batchSelectionRequired && !selectedBatch && sheetState.selectedUnlottedProductId == null ? t('pick_received_date_first') || 'Pick a received date first' : `${t('selling_price') || 'Selling'} ${fmtUSD(asNumber(product.selling_price_usd || 0))}`}
               </button>}
               {!onPick && promotion.active ? (
                 <button className="btn-secondary flex-1 border-rose-200 text-rose-700 dark:border-rose-800 dark:text-rose-200" disabled={displayedStock <= asNumber(product.out_of_stock_threshold) || !batchReadyToSell} onClick={() => closeAfterAdd(product, 'promotion')}>

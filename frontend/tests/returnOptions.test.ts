@@ -225,7 +225,7 @@ runTest('K2/11.9: the POS damage source option is wired end to end', () => {
   // other (a line has exactly ONE source)
   assert.match(sheetSource, /getDamagedLots\(resolvedProduct\.id, resolvedBranchId\)/)
   assert.match(sheetSource, /setSelectedDamagedLotId\(lot\.id === selectedDamagedLotId \? null : lot\.id\); setSelectedBatchId\(null\)/)
-  assert.match(sheetSource, /setSelectedBatchId\(batch\.id\); setSelectedUnlottedStock\(false\); setSelectedDamagedLotId\(null\)/)
+  assert.match(sheetSource, /setSelectedBatchId\(batch\.id\); setSelectedUnlottedProductId\(null\); setSelectedDamagedLotId\(null\)/)
   // A damaged pick satisfies the lot gate and caps the shown stock. Both
   // derivations moved out of this component and into the pure module every
   // picker now shares (components/pos/productSheetState.ts), so they are
