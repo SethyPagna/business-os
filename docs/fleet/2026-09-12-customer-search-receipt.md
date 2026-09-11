@@ -20,4 +20,20 @@ Status: active investigation/implementation, not certified or deployed. Base84c7
 
 ## Verification plan
 
+### Owner correction: continuous 80 mm roll (latest, supersedes pagination proposal)
+
+80 mm denotes width only. Height must grow with receipt contents; normal thermal receipts must be one continuous strip, never app-paginated or shrunk to a fixed sheet. Explicit 80 x 50 mm remains a separate compact format. The proposed `@page:auto` direct-print pagination is rejected and must not deploy. Restore measured-height continuous HTML and verify one exact-width, variable-height PDF for 1/10/25+ items. A forced 98 x 148 mm printer destination can still override requested media; do not claim browser code can control driver settings or certify physical output without evidence.
+
+Initial combined frontend gate at cd070fb6: 368/372 files passed; four stale-contract failures were repaired without weakening the revised requirements. Final frontend gate at 943e9884: 373/373 files pass, including typecheck/source/public-runtime preflights. i18n resolves 5722 keys across 597 sources; production build and Worker typecheck pass. Customer permission selector uses AppSelect; executable backend permission-routing tests cover reassignment versus name-only.
+
+Independent picker certification at 9042770a closes stale selectable POS query rows, primary/secondary phone formatting and +855 matching, and reordered-name/primary-phone fallback matching. Offline remains paused; secondary option-phone fallback is not implemented offline. Customer name-only edits are sale-snapshot-only, never a global-profile rename. Existing Contacts creation permission remains unchanged.
+
+Independent actual native D1 financial certification at a36edddf passes eight groups; direct customer suite passes nine. Scope includes safe selected-sale/linked-return assignment, exact retry, audit rollback, undo, grouped balance guards, and completed POS redemption concurrency. Missing source-profile repair requires zero sale USD/KHR/redemption and zero linked refunds; missing target is rejected. Pending/Not Paid redemption reservations remain unchanged. Legacy imported receivables without authoritative sale linkage remain untouched.
+
+Full backend sweep: 353/355 first-pass, two recorded failures corrected and passed on rerun: missing frontend dependency junction and address-snapshot harness real-helper allowlist (a7d9dfb6). Final effective 355/355. Root reran direct assignment, native phone picker and loyalty-accrual suites against integration successfully. No migrations or production data repairs are part of this release.
+
+Independent continuous receipt review matches integration 943e9884: all nine actual bilingual Receipt combinations (58/72/80 mm; 1/10/25 items) remain one page when CSS size is respected. Native 80 mm width stays 227.04 pt; heights 481.92/833.04/1417.92 pt. Actual raster PDF width is 226.77 pt with increasing heights 478.52/829.17/1413.58 pt; compact card is separately 226.77 x 141.73 pt. Items, totals and QR retained. Pre-existing small raster QR-caption clipping advisory is not claimed fixed. Forced 98 x 148 mm media remains outside this guarantee. This workstation exposes only Microsoft Print to PDF and OneNote, not the physical thermal printer; physical output cannot be certified here.
+
+Pre-release live runtime read remains 70c81aa0ec1e / b27cb8bde999183c. No September 12 deployment yet; record actual new provenance only after successful promotion.
+
 Focused failing reproductions -> bounded isolated changes -> independent read-only adversarial review -> integrated typecheck/i18n/build/fullfrontend and affected native backend suites -> real EN/KM responsive and1/10/25 receipt browser matrix -> record provenance if deployed under user approval. Never claim physical printer, employee device freshness, loyalty reconciliation, or production writes tested from synthetic source assertions alone.
