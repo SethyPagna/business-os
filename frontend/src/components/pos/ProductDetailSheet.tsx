@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
@@ -12,7 +12,7 @@ import { readFreshPickerLots, startPickerLotRead } from '../../utils/pickerLotFr
 import { getDamagedLots, type DamagedLot } from '../../api/damagedLotsTransport.ts'
 import type { BatchSelection, ProductBatch } from '../../api/batchesTransport.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
-import { useLowStockConfig } from '../../AppContext'
+import { useApp, useLowStockConfig } from '../../AppContext'
 import { effectiveLowStockThreshold } from '../../utils/lowStockSettings.ts'
 import { buildVariantOptionLabels, computeExpiryStatus, sortBatchesForPicker } from './posCore.ts'
 import { branchStockQuantity, deriveProductSheetState, type SheetIntent, type SheetProductLike } from './productSheetState.ts'
@@ -282,6 +282,14 @@ export default function ProductDetailSheet({
   // Settings > Stock Alerts -- the same number the POS grid behind this sheet
   // colours by, so the sheet and the card can never disagree about a product.
   const lowStockConfig = useLowStockConfig()
+  const { user, authReady } = useApp() as { user: { id?: string | number } | null; authReady: boolean }
+  // A new authenticated-user snapshot includes reauthentication as well as
+  // actor/permission changes. Never reuse another session's selectable proof.
+  const actorGeneration = useRef({ user, epoch: 0 })
+  if (actorGeneration.current.user !== user) {
+    actorGeneration.current = { user, epoch: actorGeneration.current.epoch + 1 }
+  }
+  const actorScope = `${authReady}:${user?.id ?? 'anonymous'}:${actorGeneration.current.epoch}`
   const variants = getVariantChoices(product)
   const groupProduct = hasVariantChoices(product)
   const groupMeta = product.__groupMeta || null
@@ -347,7 +355,7 @@ export default function ProductDetailSheet({
     setKnownPositiveQuantityByProduct({})
     setBatchChoicesOpen(false)
     setBatchPage(0)
-  }, [product?.id])
+  }, [product?.id, actorScope])
 
   // Everything this sheet derives -- which branches it offers and how many
   // units each holds, which product ROW the steps resolve to, the ONE stock
@@ -384,7 +392,7 @@ export default function ProductDetailSheet({
   const sourceRows = provisionalState.mergeRowsIntoLotList
     ? provisionalState.candidatePool
     : [groupProduct ? provisionalState.effectiveVariant : product].filter(Boolean)
-  const currentLotScope = `${provisionalState.effectiveBranchId}:${sourceRows.map((row) => row?.id).join(',')}`
+  const currentLotScope = `${actorScope}:${provisionalState.effectiveBranchId}:${sourceRows.map((row) => row?.id).join(',')}`
   // Branch/variant changes invalidate the old result synchronously, before
   // React runs effect cleanup. Old selected IDs must not enable a new pick.
   const visibleBatches = loadedLotScope === currentLotScope ? batches : []
@@ -536,7 +544,7 @@ export default function ProductDetailSheet({
       setBatchesLoading(false)
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isBatchTracked, lotSourceKey, resolvedBranchId, batchesReloadKey, requireFreshLots])
+  }, [isBatchTracked, lotSourceKey, resolvedBranchId, batchesReloadKey, requireFreshLots, actorScope])
   // A Branch/Barcode change can resolve to a different (or differently-
   // tracked) row, so a lot picked under the previous row must not silently
   // carry over -- same "don't leak a stale pick into the next selection"
@@ -551,7 +559,7 @@ export default function ProductDetailSheet({
     }).catch(() => { if (!cancelled) setDamagedLots([]) })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resolvedProduct?.id, resolvedBranchId])
+  }, [resolvedProduct?.id, resolvedBranchId, actorScope])
   // Keyed on the lot list's OWN identity (which rows it is drawn from, at
   // which branch), not on the resolved row: in merged mode picking a lot is
   // what moves the resolved row, and resetting on that would clear the pick
@@ -563,7 +571,7 @@ export default function ProductDetailSheet({
     setSelectedDamagedLotId(null)
     setBatchPage(0)
     setBatchChoicesOpen(false)
-  }, [lotSourceKey, resolvedBranchId])
+  }, [lotSourceKey, resolvedBranchId, actorScope])
 
   // The cashier's order: available lots first, each group earliest received
   // date to latest. See posCore.ts's sortBatchesForPicker -- the server's
