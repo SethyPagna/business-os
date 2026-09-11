@@ -3147,6 +3147,16 @@ export async function foldDuplicateProductInto(
       if (!lotSnapshot) throw new Error('merge_snapshot_incomplete')
       const dupBatchStockRows = lotSnapshot.duplicateStockRows
       const keeperBatchStockBefore = lotSnapshot.keeperStockBefore
+      // An archived same-key keeper can still own stock. Activate it before
+      // folding positive quantities so the committed stock stays selectable.
+      // Empty historical lots keep their prior state; dates/costs do not change.
+      statements.push({
+        sql: `UPDATE product_batches SET is_active = 1, updated_at = CURRENT_TIMESTAMP
+              WHERE id = @keeperBatchId AND COALESCE(is_active, 0) <> 1
+                AND EXISTS (SELECT 1 FROM branch_batch_stock
+                            WHERE batch_id IN (@keeperBatchId, @dupBatchId) AND quantity > 0)`,
+        params: { keeperBatchId: existingCanonicalBatchId, dupBatchId: batchRow.id },
+      })
       for (const bbs of dupBatchStockRows) {
         const qty = Number(bbs.quantity) || 0
         if (!qty) continue
@@ -3171,7 +3181,10 @@ export async function foldDuplicateProductInto(
       batchesFoldedThisDup += 1
     } else {
       statements.push({
-        sql: 'UPDATE product_batches SET variant_product_id = @canonicalId, batch_number = @batchNumber, updated_at = CURRENT_TIMESTAMP WHERE id = @id',
+        sql: `UPDATE product_batches SET variant_product_id = @canonicalId, batch_number = @batchNumber,
+              is_active = CASE WHEN EXISTS (SELECT 1 FROM branch_batch_stock WHERE batch_id = @id AND quantity > 0)
+                               THEN 1 ELSE is_active END,
+              updated_at = CURRENT_TIMESTAMP WHERE id = @id`,
         params: { canonicalId, batchNumber: nextCanonicalBatchNumber, id: batchRow.id },
       })
       canonicalBatchIdByKey.set(batchRow.batch_key, batchRow.id)
@@ -4493,7 +4506,7 @@ function selectedConflictStatementEstimate(
       statements += 2
     } else if (keeperBatchByKey.has(batch.batch_key)) {
       const lot = dependentLots.get(Number(batch.id))
-      statements += (lot?.duplicateStockRows.filter((row) => Number(row.quantity)).length || 0) + 4
+      statements += (lot?.duplicateStockRows.filter((row) => Number(row.quantity)).length || 0) + 5
     } else {
       statements += 1
     }
@@ -4776,7 +4789,7 @@ function selectedConflictLightStatementEstimate(
     if (keeperBatchId == null) mergeBatchStatements += 1
     else {
       collisionBatchIds.add(Number(batch.id))
-      mergeBatchStatements += batchStock.filter((row) => Number(row.batch_id) === Number(batch.id) && Number(row.quantity)).length + 4
+      mergeBatchStatements += batchStock.filter((row) => Number(row.batch_id) === Number(batch.id) && Number(row.quantity)).length + 5
     }
   }
   const common = 1 + SELECTED_CONFLICT_FINGERPRINT_STATEMENT_COUNT + 1 // product CAS, selected-state guards, discarded stock clear

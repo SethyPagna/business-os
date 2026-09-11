@@ -237,6 +237,88 @@ const tableCounts = (d1) => Object.fromEntries(d1.db.prepare(`SELECT name FROM s
   .map(({ name }) => [name, d1.db.prepare(`SELECT COUNT(*) n FROM "${name}"`).get().n]))
 
 async function main() {
+  // Positive stock must stay selectable after either merge disposition.
+  // Exercise the real route/transaction, including inactive lots at both
+  // branches, an empty source with retained keeper stock, and late rollback.
+  for (const collision of [true, false]) {
+    for (const rollback of [false, true]) {
+      const lots = seed()
+      lots.db.exec(`
+        UPDATE product_batches SET received_at='2026-08-21',expiry_date='2028-01-01',
+          unit_cost_usd=4,received_quantity=9,received_cost_usd=36 WHERE id=9301;
+        UPDATE product_batches SET received_at='2026-08-22',expiry_date='2029-01-01',
+          unit_cost_usd=6,received_quantity=5,received_cost_usd=30,is_active=0 WHERE id=9302;
+        INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(9101,902,4),(9102,902,3);
+        INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(9301,902,4),(9302,902,3);
+        UPDATE products SET stock_quantity=9 WHERE id=9101;
+        UPDATE products SET stock_quantity=5 WHERE id=9102;
+        INSERT INTO sales(id,branch_id) VALUES(9701,901);
+        INSERT INTO sale_items(id,sale_id,product_id,quantity,branch_id) VALUES(9702,9701,9102,1,901);
+        INSERT INTO returns(id,sale_id,branch_id) VALUES(9703,9701,901);
+        INSERT INTO return_items(id,return_id,sale_item_id,product_id,quantity,branch_id) VALUES(9704,9703,9702,9102,1,901);
+        INSERT INTO sale_item_batch_allocations(id,sale_item_id,batch_id,branch_id,quantity,lot_code,expiry_date)
+          VALUES(9705,9702,9302,901,1,'D1','2029-01-01');
+        INSERT INTO return_item_batch_allocations(id,return_item_id,sale_item_id,batch_id,branch_id,quantity,lot_code,expiry_date)
+          VALUES(9706,9704,9702,9302,901,1,'D1','2029-01-01');
+      `)
+      if (collision) lots.db.exec("UPDATE product_batches SET batch_key='keeper-lot' WHERE id=9302; UPDATE product_batches SET is_active=0 WHERE id=9301")
+      // Proves activation occurs before the stock write, not just eventually.
+      lots.db.exec(`CREATE TRIGGER require_active_merge_destination BEFORE INSERT ON branch_batch_stock
+        WHEN NEW.quantity>0 AND NOT EXISTS(SELECT 1 FROM product_batches WHERE id=NEW.batch_id AND is_active=1)
+        BEGIN SELECT RAISE(ABORT,'positive merge destination is inactive'); END;`)
+      const tracked = ['products','branch_stock','product_batches','branch_batch_stock','sale_items','return_items','sale_item_batch_allocations','return_item_batch_allocations']
+      const before = Object.fromEntries(tracked.map(t=>[t,lots.db.prepare('SELECT * FROM '+t+' ORDER BY id').all()]))
+      const { app: lotApp } = loadRoute(lots)
+      const preview = await call(lotApp, '/possible-duplicates/merge-batch/preview', { cases: [{case_key:'barcode:1111',cluster_type:'barcode',cluster_value:'1111',product_ids:[9101,9102]}] })
+      assert.equal(preview.status,200)
+      if(rollback) lots.db.exec(`CREATE TRIGGER fail_lot_merge_late BEFORE INSERT ON audit_logs
+        WHEN NEW.action='merge_duplicate' BEGIN SELECT RAISE(ABORT,'D1 DB is overloaded: injected lot failure'); END;`)
+      const applied=await call(lotApp,'/possible-duplicates/merge-batch',{
+        client_request_id:`active_lot_${collision}_${rollback}`,manifest_version:1,manifest_digest:preview.body.manifest_digest,
+        cases:preview.body.cases.map((item,ordinal)=>({ordinal,case_key:item.case_key,keep_id:item.keep_id,merge_id:item.merge_id,state_digest:item.state_digest,stock:'merge'})),
+      })
+      if(rollback) {
+        assert.equal(applied.body.complete,false)
+        for(const t of tracked) assert.deepEqual(lots.db.prepare('SELECT * FROM '+t+' ORDER BY id').all(),before[t],t+' rolls back with activation')
+        assert.equal(lots.db.prepare("SELECT COUNT(*) n FROM audit_logs WHERE action='merge_duplicate'").get().n,0)
+        continue
+      }
+      assert.equal(applied.body.complete,true,JSON.stringify(applied.body))
+      assert.equal(lots.db.prepare(`SELECT COUNT(*) n FROM branch_batch_stock b JOIN product_batches p ON p.id=b.batch_id
+        WHERE p.variant_product_id=9101 AND b.quantity>0 AND COALESCE(p.is_active,0)<>1`).get().n,0)
+      assert.deepEqual(lots.db.prepare('SELECT branch_id,quantity FROM branch_stock WHERE product_id=9101 ORDER BY branch_id').all().map(row=>({...row})),[{branch_id:901,quantity:7},{branch_id:902,quantity:7}])
+      for(const row of before.product_batches) {
+        const after=lots.db.prepare('SELECT * FROM product_batches WHERE id=?').get(row.id)
+        for(const key of ['received_at','expiry_date','unit_cost_usd','received_quantity','received_cost_usd','lot_code']) assert.equal(after[key],row[key],key+' preserved')
+      }
+      for(const t of ['sale_item_batch_allocations','return_item_batch_allocations']) {
+        const expected=before[t].map(row=>({...row,batch_id:collision?9301:9302}))
+        assert.deepEqual(lots.db.prepare('SELECT * FROM '+t+' ORDER BY id').all().map(row=>({...row})),expected,'allocation provenance preserved')
+      }
+      assert.equal(lots.db.prepare('SELECT is_active FROM product_batches WHERE id=?').get(collision?9301:9302).is_active,1)
+      const counts=tableCounts(lots)
+      console.log(`PASS ${collision?'same-key inactive keeper':'inactive reparented source'}: multi-branch stock active, provenance intact (${counts.product_batches} lots)`)
+    }
+  }
+  for(const keeperQuantity of [0,5]) {
+    const lots=seed()
+    lots.db.exec(`UPDATE product_batches SET is_active=0;
+      UPDATE product_batches SET batch_key='keeper-lot' WHERE id=9302;
+      UPDATE branch_stock SET quantity=0 WHERE product_id=9102;
+      UPDATE branch_batch_stock SET quantity=0 WHERE batch_id=9302;
+      UPDATE products SET stock_quantity=0 WHERE id=9102;
+      UPDATE branch_stock SET quantity=${keeperQuantity} WHERE product_id=9101;
+      UPDATE branch_batch_stock SET quantity=${keeperQuantity} WHERE batch_id=9301;
+      UPDATE products SET stock_quantity=${keeperQuantity} WHERE id=9101;`)
+    const {app:lotApp}=loadRoute(lots)
+    const preview=await call(lotApp,'/possible-duplicates/merge-batch/preview',{cases:[{case_key:'barcode:1111',cluster_type:'barcode',cluster_value:'1111',product_ids:[9101,9102]}]})
+    const applied=await call(lotApp,'/possible-duplicates/merge-batch',{
+      client_request_id:`active_keeper_only_${keeperQuantity}`,manifest_version:1,manifest_digest:preview.body.manifest_digest,
+      cases:preview.body.cases.map((item,ordinal)=>({ordinal,case_key:item.case_key,keep_id:item.keep_id,merge_id:item.merge_id,state_digest:item.state_digest,stock:item.needs_stock_choice?'merge':null})),
+    })
+    assert.equal(applied.body.complete,true,JSON.stringify(applied.body))
+    assert.equal(lots.db.prepare('SELECT is_active FROM product_batches WHERE id=9301').get().is_active,keeperQuantity>0?1:0,'retained positive keeper activates; empty historical keeper stays inactive')
+  }
   // Exact local-browser fixture metadata: 11 selected exact pairs among 12
   // detected clusters (the remaining three-member cluster is client-blocked).
   // Enforcing local D1's observed five-term compound ceiling makes the former
