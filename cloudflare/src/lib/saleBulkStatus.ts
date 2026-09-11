@@ -242,6 +242,10 @@ function stockStatements(member: Member, sign: number, user: SessionUser, stamp:
     for (const move of member.batches) {
         const p = { ...move, q: move.quantity * sign, stamp };
         out.push(bulkAssertion('EXISTS(SELECT 1 FROM product_batches WHERE id=@batch AND variant_product_id=@product) AND (@q>=0 OR EXISTS(SELECT 1 FROM branch_batch_stock WHERE batch_id=@batch AND branch_id=@branch AND quantity+@q>=0))', p));
+        // A depleted lot may have been archived. Restore its selectable parent
+        // before the positive stock write, in this same guarded transaction.
+        if (p.q > 0)
+            out.push({ sql: 'UPDATE product_batches SET is_active=1 WHERE id=@batch AND variant_product_id=@product AND is_active!=1', params: p });
         out.push({ sql: p.q < 0 ? 'UPDATE branch_batch_stock SET quantity=quantity+@q, updated_at=@stamp WHERE batch_id=@batch AND branch_id=@branch' : 'INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(@batch,@branch,@q) ON CONFLICT(batch_id,branch_id) DO UPDATE SET quantity=quantity+@q,updated_at=@stamp', params: p });
     }
     for (const a of member.allocations) {

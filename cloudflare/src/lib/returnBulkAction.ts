@@ -208,6 +208,9 @@ function stockStatements(member: Member, direction: 1 | -1, user: SessionUser, s
       out.push({ sql: 'UPDATE products SET stock_quantity=stock_quantity+@quantity, updated_at=@stamp WHERE id=@product', params })
       if (delta.batchId) {
         out.push(guard('EXISTS(SELECT 1 FROM product_batches WHERE id=@batch AND variant_product_id=@product) AND (@quantity>=0 OR EXISTS(SELECT 1 FROM branch_batch_stock WHERE batch_id=@batch AND branch_id=@branch AND quantity+@quantity>=0))', params))
+        // Customer restores and supplier-return reversals must make the exact
+        // archived lot selectable before adding stock, including undo/redo.
+        if (quantity > 0) out.push({ sql: 'UPDATE product_batches SET is_active=1 WHERE id=@batch AND variant_product_id=@product AND is_active!=1', params })
         out.push({
           sql: quantity < 0
             ? 'UPDATE branch_batch_stock SET quantity=quantity+@quantity,updated_at=@stamp WHERE batch_id=@batch AND branch_id=@branch'

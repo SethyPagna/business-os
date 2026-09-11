@@ -69,10 +69,50 @@ function request(f,target='completed',key='request-0001') {
   return {client_request_id:key,target_status:target,items:f.sql.prepare('SELECT id,sale_status expected_status,updated_at expected_updated_at FROM sales ORDER BY id').all(),...(target==='cancelled'?{cancel_reason:'mistake'}:{})}
 }
 function snapshot(f) {
-  return JSON.stringify(['sales','sale_items','products','branch_stock','branch_batch_stock','sale_item_batch_allocations','damaged_stock_lots','fees','inventory_movements','undo_snapshots','action_history','sale_bulk_operations','sale_bulk_members','sale_record_events','sale_write_revisions','audit_logs'].map(t=>[t,f.sql.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all()]))
+  return JSON.stringify(['sales','sale_items','products','product_batches','branch_stock','branch_batch_stock','sale_item_batch_allocations','damaged_stock_lots','fees','inventory_movements','undo_snapshots','action_history','sale_bulk_operations','sale_bulk_members','sale_record_events','sale_write_revisions','audit_logs'].map(t=>[t,f.sql.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all()]))
 }
 async function replay(f,id,direction='undo',generation=0) {return f.call(history,`/${id}/${direction}`,{require_applied:true,expected_generation:generation})}
 async function run() {
+  for (const restoringFirst of [true, false]) {
+    const f=fixture();seed(f,1)
+    f.sql.exec(`UPDATE sales SET sale_status='${restoringFirst?'completed':'cancelled'}',status_before_cancel='completed' WHERE id=1;
+      INSERT INTO product_batches(id,variant_product_id,batch_key,received_at,is_active) VALUES(1,1,'archived-lot','2026-09-03',${restoringFirst?0:1});
+      INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(1,1,${restoringFirst?0:2});
+      UPDATE sale_items SET batch_id=1,cost_price_usd=4 WHERE id=1;
+      INSERT INTO sale_item_batch_allocations(id,sale_item_id,batch_id,branch_id,quantity,released_quantity,released_at)
+        VALUES(1,1,1,1,2,${restoringFirst?0:2},${restoringFirst?'NULL':"'released'"});
+      CREATE TRIGGER test_active_lot_insert BEFORE INSERT ON branch_batch_stock WHEN NEW.quantity>0
+        AND NOT EXISTS(SELECT 1 FROM product_batches WHERE id=NEW.batch_id AND is_active=1)
+        BEGIN SELECT RAISE(ABORT,'constraint failed: inactive parent'); END;
+      CREATE TRIGGER test_active_lot_update BEFORE UPDATE OF quantity ON branch_batch_stock WHEN NEW.quantity>0
+        AND NOT EXISTS(SELECT 1 FROM product_batches WHERE id=NEW.batch_id AND is_active=1)
+        BEGIN SELECT RAISE(ABORT,'constraint failed: inactive parent'); END;`)
+    const metadata=()=>{const {is_active,...row}=f.sql.prepare('SELECT * FROM product_batches WHERE id=1').get();return row}
+    const originalMetadata=metadata()
+    const originalAllocation=f.sql.prepare('SELECT * FROM sale_item_batch_allocations').all()
+    const req=request(f,restoringFirst?'cancelled':'completed',`archived-sale-${restoringFirst}`)
+    const before=snapshot(f);f.fail('INSERT INTO audit_logs')
+    assert.equal((await f.call(sales,'/bulk-status',req)).status,500)
+    assert.equal(snapshot(f),before,'apply failure must roll back parent activation and all stock/history')
+    f.fail(null)
+    const applied=await f.call(sales,'/bulk-status',req)
+    assert.equal(applied.status,200,JSON.stringify(applied))
+    for(const [direction,generation,positive] of [['undo',0,!restoringFirst],['redo',1,restoringFirst]]) {
+      if(positive) f.sql.exec('UPDATE product_batches SET is_active=0 WHERE id=1')
+      const beforeReplay=snapshot(f);f.fail('INSERT INTO audit_logs')
+      const historyRow=f.sql.prepare('SELECT undo_payload,redo_payload FROM action_history WHERE id=?').get(applied.body.actionHistoryId)
+      const payload=JSON.parse(historyRow[direction==='undo'?'undo_payload':'redo_payload'])
+      await assert.rejects(()=>helper.replaySaleBulkStatus(f.env,user,direction,applied.body.actionHistoryId,generation,payload),/injected failure/)
+      assert.equal(snapshot(f),beforeReplay,'failed replay must roll back activation, quantities, history and audit')
+      f.fail(null)
+      assert.equal((await replay(f,applied.body.actionHistoryId,direction,generation)).status,200)
+      assert.equal(f.sql.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=1').get().quantity,positive?2:0)
+      assert.equal(f.sql.prepare('SELECT is_active FROM product_batches WHERE id=1').get().is_active,1)
+      assert.deepEqual(metadata(),originalMetadata,'activation must preserve every date/cost/identity field')
+      if(direction==='undo') assert.deepEqual(f.sql.prepare('SELECT * FROM sale_item_batch_allocations').all(),originalAllocation)
+    }
+  }
+  console.log('PASS archived sale lot activation precedes stock restore for apply/undo/redo, preserves metadata and rolls back on failure')
   // Append 0120 to a populated pre-0120 fixture as well as the full fresh chain.
   let legacy=fixture(false);seed(legacy)
   // Prove this is really a pre-0120 tree before testing the populated
