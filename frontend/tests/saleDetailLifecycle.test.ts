@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import { transformSync } from 'esbuild'
 import { configuredSettlementMethods } from '../src/components/sales/saleSettlement.ts'
 import { effectivePermissions } from '../src/utils/permissions.ts'
+import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../src/utils/loaders.ts'
 
 const source = fs.readFileSync(new URL('../src/components/sales/SaleDetailModal.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const helper = fs.readFileSync(new URL('../src/components/sales/saleSettlementConfig.ts', import.meta.url), 'utf8')
@@ -186,4 +187,81 @@ const sameActorWrite = sameActorSubmit()
 sameActorSubmitEnv.detailScopeRef.current = advanceSaleSecurityScope(securityState, revoked)
 sameActorRequest.resolve({ settlementError: 'old-session error' }); await sameActorWrite
 assert.equal(closed, 0)
+
+// Execute Sales' own read callback: caller-side fences are too late if this
+// callback has already published the old response during its awaited refresh.
+const salesSource = fs.readFileSync(new URL('../src/components/sales/Sales.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+function salesReadCallback(name: string, env: Record<string, unknown>) {
+  const start = salesSource.indexOf(`const ${name} = useCallback`)
+  const end = salesSource.indexOf('\n\n  useEffect', start)
+  const code = transformSync(salesSource.slice(start, end), { loader: 'tsx' }).code
+  return new Function(...Object.keys(env), `${code}; return ${name}`)(...Object.values(env))
+}
+let listRequest = deferred()
+const listSignals: AbortSignal[] = []
+const published: unknown[] = []
+const errors: unknown[] = []
+const loadingStates: boolean[] = []
+let watchdogClears = 0
+const readEnv: any = {
+  useCallback: (callback: unknown) => callback, authReady: true, canViewSales: true, statusSecurityScope: 'scope1',
+  statusSecurityRef: { current: 'scope1' }, loadSecurityRef: { current: 'scope1' }, aliveRef: { current: true },
+  loadPromiseRef: { current: null }, pendingLoadRef: { current: null }, loadAbortRef: { current: null },
+  loadRequestRef: { current: 0 }, loadedOnceRef: { current: false }, loadWatchdogRef: { current: undefined }, latestLoadRef: { current: null },
+  beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent,
+  clearLoadWatchdog: () => { watchdogClears++ }, setLoading: (value: boolean) => loadingStates.push(value), setLoadError: (value: unknown) => errors.push(value),
+  window: { setTimeout: () => 1 }, isAdmin: false, userFilter: 'all', statusFilter: 'all', debouncedSearch: '',
+  salesDateRange: {}, salesPage: 1, salesPageSize: 25, salesSortSpec: { field: 'date', direction: 'desc' },
+  fetchSales: (_params: unknown, options: { signal: AbortSignal }) => { listSignals.push(options.signal); return listRequest.promise },
+  withLoaderTimeout: (read: () => Promise<unknown>) => read(), SALES_LIST_REQUEST_TIMEOUT_MS: 8000,
+  normalizeSaleRows: (rows: unknown) => rows, setSales: (rows: unknown) => published.push(rows),
+  getErrorMessage: (error: unknown) => String(error), translateOr: (_key: string, fallback: string) => fallback,
+  resolvePendingSalesLoad: (pending: unknown, success: boolean) => success ? pending : null,
+}
+const oldLoad = salesReadCallback('loadSales', readEnv)
+const oldRead = oldLoad(false)
+const oldListRequest = listRequest
+readEnv.statusSecurityRef.current = 'scope2'
+listRequest = deferred()
+const freshLoad = salesReadCallback('loadSales', { ...readEnv, statusSecurityScope: 'scope2' })
+readEnv.latestLoadRef.current = freshLoad
+const freshRead = freshLoad(false)
+assert.equal(listSignals.length, 2, 'new authority starts immediately instead of coalescing behind prior read')
+assert.equal(listSignals[0].aborted, true)
+const freshPromise = readEnv.loadPromiseRef.current
+const freshQueue = { silent: true }; readEnv.pendingLoadRef.current = freshQueue
+const clearsBeforeOld = watchdogClears
+oldListRequest.resolve([{ id: 'old-private-sale' }]); await oldRead
+assert.deepEqual(published, [], 'old result cannot publish before mutation caller resumes')
+assert.equal(readEnv.loadPromiseRef.current, freshPromise)
+assert.equal(readEnv.pendingLoadRef.current, freshQueue, 'old finally cannot consume new authority queue')
+assert.equal(watchdogClears, clearsBeforeOld, 'old finally cannot clear new authority watchdog')
+assert.equal(loadingStates.at(-1), true)
+readEnv.pendingLoadRef.current = null
+listRequest.resolve([{ id: 'current-sale' }]); await freshRead
+assert.deepEqual(published, [[{ id: 'current-sale' }]])
+assert.equal(loadingStates.at(-1), false)
+await oldLoad(false)
+assert.equal(listSignals.length, 2, 'retained old closure cannot send a new read')
+
+let statsRequest = deferred()
+const stats: unknown[] = []
+const statsEnv = { ...readEnv, isActive: true, salesStatsRequestRef: { current: 0 }, fetchSalesStats: () => statsRequest.promise, setSalesStats: (value: unknown) => stats.push(value) }
+const oldStats = salesReadCallback('loadSalesStats', { ...statsEnv, statusSecurityScope: 'scope2' })()
+readEnv.statusSecurityRef.current = 'scope3'
+statsRequest.resolve({ total_count: 100 }); await oldStats
+assert.deepEqual(stats, [], 'old same-user aggregate cannot publish after permission change')
+statsRequest = deferred()
+const freshStats = salesReadCallback('loadSalesStats', { ...statsEnv, statusSecurityScope: 'scope3' })()
+statsRequest.resolve({ total_count: 2 }); await freshStats
+assert.equal((stats[0] as any).total_count, 2)
+listRequest = deferred()
+const rejectedRead = salesReadCallback('loadSales', { ...readEnv, statusSecurityScope: 'scope3' })(false)
+readEnv.statusSecurityRef.current = 'scope4'
+const errorCount = errors.length
+listRequest.reject(new Error('old-authority failure')); await rejectedRead
+assert.equal(errors.length, errorCount, 'late old-scope failure cannot replace current error state')
+const readCount = listSignals.length
+await salesReadCallback('loadSales', { ...readEnv, authReady: false, statusSecurityScope: 'scope4' })(false)
+assert.equal(listSignals.length, readCount, 'reauthentication cannot start a read')
 console.log('saleDetailLifecycle: actual configuration/status/history effects PASS')
