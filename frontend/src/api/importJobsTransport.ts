@@ -4,6 +4,7 @@ import { apiFormPost, buildMultipartHeaders, withImportDeviceInfo } from './impo
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 import { compressImageFile, isCompressibleImageFile } from '../utils/imageCompression.ts'
 import { resolvePublicAssetUrl } from '../utils/publicAssetUrls.ts'
+import { assertActorReadScope, assertActorSessionDispatchAllowed, captureActorReadScope, isActorReadScopeCurrent, type ActorReadScope } from './actorReadScope.ts'
 
 type ImportJobPayload = Record<string, unknown>
 type ImportJobOptions = {
@@ -44,7 +45,7 @@ type ZipExtractedImage = {
   public_path?: string
 }
 
-const lastImportJobsByQuery = new Map<string, unknown>()
+const lastImportJobsByQuery = new Map<string, { data: unknown; scope: ActorReadScope }>()
 
 // preflightImportJob and approveImportJob both land on a route that runs a
 // real synchronous classify pass server-side (importEngine.ts's
@@ -108,15 +109,28 @@ export function createImportJob(payload: ImportJobPayload = {}): Promise<unknown
 }
 
 export function listImportJobs(params: QueryParams = {}): Promise<unknown> {
+  const scope = captureActorReadScope('importJobs')
+  let permissionFailure: unknown = null
   const query = buildQueryString(params)
   return route(
     `importJobs:list:${query}`,
     async () => {
-      const result = await apiFetch('GET', appendQuery('/api/import-jobs', query))
-      lastImportJobsByQuery.set(query, result)
+      assertActorReadScope(scope)
+      const result = await apiFetch('GET', appendQuery('/api/import-jobs', query)).catch((error: unknown) => {
+        const status = Number((error as { status?: unknown } | null)?.status)
+        if (status === 401 || status === 403) permissionFailure = error
+        throw error
+      })
+      assertActorReadScope(scope)
+      lastImportJobsByQuery.set(query, { data: result, scope })
       return result
     },
-    () => lastImportJobsByQuery.get(query) || { jobs: [], unavailable: true, transient: true },
+    () => {
+      assertActorReadScope(scope)
+      if (permissionFailure) throw permissionFailure
+      const cached = lastImportJobsByQuery.get(query)
+      return cached && isActorReadScopeCurrent(cached.scope) ? cached.data : { jobs: [], unavailable: true, transient: true }
+    },
   )
 }
 
@@ -319,14 +333,22 @@ export function getImportQueueStatus(): Promise<unknown> {
 }
 
 export async function downloadImportJobErrors(jobId: string | number): Promise<unknown> {
+  const scope = captureActorReadScope('importJobs')
   const base = getSyncServerUrl().replace(/\/$/, '')
+  assertActorSessionDispatchAllowed(scope)
   const res = await fetch(`${base}/api/import-jobs/${encodeId(jobId)}/errors.csv`, {
     method: 'GET',
     headers: buildMultipartHeaders(),
     credentials: 'include',
   })
-  if (!res.ok) throw new Error(await res.text().catch(() => 'Failed to download import errors'))
+  assertActorReadScope(scope)
+  if (!res.ok) {
+    const message = await res.text().catch(() => 'Failed to download import errors')
+    assertActorReadScope(scope)
+    throw new Error(message)
+  }
   const blob = await res.blob()
+  assertActorReadScope(scope)
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a')
   anchor.href = url
@@ -384,6 +406,7 @@ export async function uploadImportJobImages({
   onProgress,
   batchSize = 100,
 }: ImportJobImagePayload): Promise<unknown[]> {
+  const scope = captureActorReadScope('importJobs')
   notifyImportJobActivity('upload-images', jobId)
   const browserFiles: BrowserImageEntry[] = []
   for (const entry of Array.isArray(files) ? files : []) {
@@ -391,6 +414,7 @@ export async function uploadImportJobImages({
   }
 
   const uploaded: unknown[] = []
+  let completedBatches = 0
   for (let offset = 0; offset < browserFiles.length; offset += batchSize) {
     const batch = browserFiles.slice(offset, offset + batchSize)
     const form = new FormData()
@@ -413,7 +437,18 @@ export async function uploadImportJobImages({
     form.append('relative_paths', JSON.stringify(relativePaths))
     appendDeviceFields(form)
 
-    const result = await apiFormPost(`/api/import-jobs/${jobId}/images`, form, 'importJobs:images') as { files?: unknown[] } | null
+    let result: { files?: unknown[] } | null
+    try {
+      result = await apiFormPost(`/api/import-jobs/${jobId}/images`, form, 'importJobs:images', scope) as { files?: unknown[] } | null
+    } catch (error) {
+      if (completedBatches > 0 && (error as { outcome?: unknown } | null)?.outcome === 'not_dispatched') {
+        throw Object.assign(new Error('The session changed after part of this upload completed. Review the uploaded files before retrying.'), {
+          code: 'import_upload_interrupted', outcome: 'partially_dispatched', completedBatches, uploaded,
+        })
+      }
+      throw error
+    }
+    completedBatches++
     uploaded.push(...(Array.isArray(result?.files) ? result.files : []))
     onProgress?.({
       progress: browserFiles.length ? Math.round(((offset + batch.length) / browserFiles.length) * 100) : 100,
@@ -431,7 +466,7 @@ export async function uploadImportJobImages({
 // can't just happen server-side). Not exported for direct use by callers
 // other than recompressImportJobZipImages below; kept as its own function
 // mainly so a single image's failure/skip is independently reportable.
-async function recompressImportJobImage(jobId: string | number, fileId: string | number, file: File): Promise<{ applied: boolean }> {
+async function recompressImportJobImage(jobId: string | number, fileId: string | number, file: File, scope: ActorReadScope): Promise<{ applied: boolean }> {
   const form = new FormData()
   form.append('file', file, file.name || 'image')
   appendDeviceFields(form)
@@ -439,6 +474,7 @@ async function recompressImportJobImage(jobId: string | number, fileId: string |
     `/api/import-jobs/${encodeId(jobId)}/images/${encodeId(fileId)}/recompress`,
     form,
     'importJobs:imageRecompress',
+    scope,
   ) as { applied?: boolean } | null
   return { applied: !!result?.applied }
 }
@@ -457,6 +493,7 @@ export async function recompressImportJobZipImages(
   images: ZipExtractedImage[] = [],
   onProgress?: (progress: { done: number; total: number }) => void,
 ): Promise<{ attempted: number; compressed: number; savedBytes: number }> {
+  const scope = captureActorReadScope('importJobs')
   const candidates = (Array.isArray(images) ? images : []).filter(
     (image) => image?.id != null && image.public_path && isCompressibleImageFile({ name: String(image.original_name || ''), type: '' }),
   )
@@ -465,12 +502,14 @@ export async function recompressImportJobZipImages(
   for (let index = 0; index < candidates.length; index += 1) {
     const image = candidates[index]
     try {
+      assertActorSessionDispatchAllowed(scope)
       const response = await fetch(resolvePublicAssetUrl(image.public_path), {
         headers: { 'bypass-tunnel-reminder': 'true' },
         credentials: 'include',
       })
       if (!response.ok) continue
       const blob = await response.blob()
+      assertActorReadScope(scope, false)
       const originalName = image.original_name || 'image'
       const original = new File([blob], originalName, { type: blob.type })
       const recompressedFile = await compressImageFile(original)
@@ -478,7 +517,7 @@ export async function recompressImportJobZipImages(
       // worth it (or the original, renamed-only, otherwise) -- skip the
       // round-trip upload entirely when nothing was actually saved.
       if (recompressedFile.size >= original.size) continue
-      const outcome = await recompressImportJobImage(jobId, image.id as string | number, recompressedFile)
+      const outcome = await recompressImportJobImage(jobId, image.id as string | number, recompressedFile, scope)
       if (outcome.applied) {
         compressed += 1
         savedBytes += Math.max(0, original.size - recompressedFile.size)
