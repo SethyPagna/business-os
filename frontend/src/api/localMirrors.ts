@@ -56,6 +56,14 @@ export function routeMirrored<TResult>(
 }
 
 export function shouldPersistLocalMirror(tableName: string): boolean {
+  // Offline work is paused. These legacy tables are not actor-keyed: even an
+  // inside-transaction final check cannot prevent an account change between
+  // that check and IndexedDB commit. Live/browser reads use scoped queryCache
+  // instead; never publish authenticated payloads into an unscoped table.
+  if (getSyncServerUrl()) return false
+  try {
+    if (typeof window !== 'undefined' && /^https?:/.test(window.location?.origin || '')) return false
+  } catch { return false }
   return shouldPersistLocalMirrorByPolicy(tableName, getSyncServerUrl())
 }
 
@@ -74,10 +82,12 @@ export async function purgeSensitiveLiveServerMirrors(): Promise<void> {
 export function mirrorTable(tableName: string, scope: ActorReadScope = captureActorReadScope(tableName)) {
   return async (rows: unknown): Promise<unknown> => {
     const resultScope = actorReadResultScope(rows, scope)
-    const { dexieDb, clearLocalMirrorTables, replaceTableContents } = await getLocalDbModule()
+    if (!isActorReadScopeCurrent(resultScope) || !shouldPersistLocalMirror(tableName)) return []
+    const { dexieDb, replaceTableContents } = await getLocalDbModule()
     if (!isActorReadScopeCurrent(resultScope)) return []
     if (!shouldPersistLocalMirror(tableName)) {
-      await clearLocalMirrorTables([tableName]).catch(() => {})
+      // Auth reset owns cleanup. A late callback must not clear a newer
+      // actor's state, and must never touch outbox/vault/drafts.
       return []
     }
     const incomingRows: MirrorRows[] = []
