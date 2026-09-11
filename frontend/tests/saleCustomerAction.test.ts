@@ -255,6 +255,12 @@ try {
   await act(async () => propsOf(findNode((node) => propsOf(node).name === 'sale_customer_lookup')!).onChange({ target: { value: 'Different' } }))
   assert.doesNotMatch(container.textContent, /Sok Dara/, 'typing immediately hides preceding query choices before debounce')
 
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 360)) })
+  await act(async () => root.render(React.createElement(actionModule.default, { ...livePicker, error: 'Lookup failed' })))
+  assert.match(container.textContent, /Lookup failed/, 'the failure for the latest issued query is visible')
+  await act(async () => propsOf(findNode((node) => propsOf(node).name === 'sale_customer_lookup')!).onChange({ target: { value: 'Different again' } }))
+  assert.doesNotMatch(container.textContent, /Lookup failed/, 'typing a new query immediately hides the preceding query error')
+
   const edits: unknown[] = []
   let releaseSave!: (value: boolean) => void
   const pendingSave = new Promise<boolean>((resolve) => { releaseSave = resolve })

@@ -64,11 +64,17 @@ export default function SaleCustomerActionModal({
   onDiscardPending?: () => void
 }) {
   const [query, setQuery] = useState('')
-  useDebouncedSaleCustomerSearch(query, onSearch)
+  const requestedQueryRef = useRef('')
+  const runSearch = (value: string): void => {
+    requestedQueryRef.current = value
+    onSearch?.(value)
+  }
+  useDebouncedSaleCustomerSearch(query, onSearch ? runSearch : undefined)
   const blocked = saving || pendingOutcome
   const normalizedQuery = query.trim().toLocaleLowerCase('en-US')
   const queryDigits = canonicalizeSaleCustomerPhone(query)
   const hasQuery = normalizedQuery.length >= 2 || queryDigits.length >= 3
+  const errorMatchesQuery = !!error && query.trim() === requestedQueryRef.current
   // The server owns POS name/phone matching. A second substring filter hides
   // valid word-order/phone matches. Never show the preceding query's results.
   const matchingChoices = hasQuery && query.trim() === resultsQuery && !loading && !error ? choices : []
@@ -129,7 +135,7 @@ export default function SaleCustomerActionModal({
                 </button>
               ))}
               {loading ? <p role="status" className="px-2 py-3 text-sm text-gray-500">{translate('loading', 'Loading...')}</p> : null}
-              {error ? <div role="alert" className="px-2 py-3 text-sm text-red-600">{error}<button type="button" className="btn-secondary ml-2" disabled={blocked} onClick={() => onSearch?.(query.trim())}>{translate('retry', 'Retry')}</button></div> : null}
+              {errorMatchesQuery ? <div role="alert" className="px-2 py-3 text-sm text-red-600">{error}<button type="button" className="btn-secondary ml-2" disabled={blocked} onClick={() => runSearch(query.trim())}>{translate('retry', 'Retry')}</button></div> : null}
               {hasQuery && query.trim() === resultsQuery && !loading && !error && !matchingChoices.length ? (
                 <p className="px-2 py-3 text-sm text-gray-500">{translate('sale_customer_create_contacts', 'No existing customer was found. Creating a new customer requires Contacts add access, as in POS. Add the customer in Contacts, then search again.')}</p>
               ) : null}
