@@ -3,7 +3,7 @@ const { loadRoute, seed, post } = require('./test-product-conflict-action-groups
 const user = { id: 900, username: 'reviewer' }
 const pause = () => new Promise((resolve) => setTimeout(resolve, 1100))
 
-async function setup() {
+async function setup(single = false) {
   const { d1, groups } = seed(1)
   for (const id of [10002, 10003]) {
     d1.db.prepare(`INSERT INTO products(id,name,name_key,barcode,category,brand,unit,is_active,is_group,stock_quantity,
@@ -12,10 +12,19 @@ async function setup() {
     d1.db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,1,1)').run(id)
   }
   groups[0].member_ids = [10000, 10001, 10002, 10003]
+  if (single) groups[0].member_ids = [10000, 10001]
   d1.db.prepare(`INSERT INTO products(id,name,is_active,parent_id,updated_at)
     VALUES(10004,'Unmerged child',1,10001,'2026-09-01 00:00:00')`).run()
   d1.db.prepare(`INSERT INTO promotion_rules(title,product_ids,updated_at)
     VALUES('Shared member offer','[10001,10002,10003]','2026-09-01 00:00:00')`).run()
+  d1.db.exec(`UPDATE product_batches SET batch_key='receipt-a' WHERE id=99002;
+    INSERT INTO sales(id,branch_id) VALUES(17000,1);
+    INSERT INTO sale_items(id,sale_id,product_id,quantity,branch_id) VALUES(17001,17000,10001,1,1);
+    INSERT INTO sale_item_batch_allocations(id,sale_item_id,batch_id,branch_id,quantity) VALUES(17002,17001,99002,1,1);
+    INSERT INTO returns(id,sale_id,branch_id) VALUES(17003,17000,1);
+    INSERT INTO return_items(id,return_id,sale_item_id,product_id,quantity,branch_id) VALUES(17004,17003,17001,10001,1,1);
+    INSERT INTO return_item_batch_allocations(id,return_item_id,sale_item_id,batch_id,branch_id,quantity)
+      VALUES(17005,17004,17001,99002,1,1);`)
   const f = { d1, ...loadRoute(d1, true) }
   const preview = await post(f.app, { manifest_version: 1, resolution_version: 2,
     client_request_id: 'delayed_group_undo', merge_groups: groups, remove_rows: [] })
@@ -48,11 +57,55 @@ async function setup() {
     audits: d1.db.prepare('SELECT * FROM audit_logs ORDER BY id').all(),
     promotions: d1.db.prepare('SELECT * FROM promotion_rules ORDER BY id').all(),
     batches: d1.db.prepare('SELECT * FROM product_batches ORDER BY id').all(),
-    batchStock: d1.db.prepare('SELECT * FROM branch_batch_stock ORDER BY id').all() })
+    batchStock: d1.db.prepare('SELECT * FROM branch_batch_stock ORDER BY id').all(),
+    sales: d1.db.prepare('SELECT * FROM sale_items ORDER BY id').all(),
+    returns: d1.db.prepare('SELECT * FROM return_items ORDER BY id').all(),
+    allocations: d1.db.prepare('SELECT * FROM sale_item_batch_allocations ORDER BY id').all(),
+    returnAllocations: d1.db.prepare('SELECT * FROM return_item_batch_allocations ORDER BY id').all(),
+    movements: d1.db.prepare('SELECT * FROM inventory_movements ORDER BY id').all() })
   return f
 }
 
 async function main() {
+  for (const single of [false, true]) {
+    for (const [label, sql] of [
+      ['cost/timestamp', "UPDATE products SET cost_price_usd=777,updated_at='2099-01-01' WHERE id=10000"],
+      ['name', "UPDATE products SET name='Concurrent' WHERE id=10000"],
+      ['barcode', "UPDATE products SET barcode='NEW-CODE' WHERE id=10000"],
+      ['parent', 'UPDATE products SET parent_id=10003 WHERE id=10000'],
+      ['branch quantity', 'UPDATE branch_stock SET quantity=777 WHERE product_id=10000'],
+      ['added branch row', 'INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(10000,2,1)'],
+      ['lot quantity', 'UPDATE branch_batch_stock SET quantity=777 WHERE batch_id=99001'],
+      ['lot date', "UPDATE product_batches SET received_at='2099-01-01' WHERE id=99001"],
+      ['lot cost', 'UPDATE product_batches SET unit_cost_usd=777 WHERE id=99001'],
+      ['lot key', "UPDATE product_batches SET batch_key='new-key' WHERE id=99001"],
+      ['removed lot row', 'DELETE FROM branch_batch_stock WHERE batch_id=99001'],
+      ['sale allocation', 'UPDATE sale_item_batch_allocations SET quantity=0.5 WHERE id=17002'],
+      ['return allocation', 'UPDATE return_item_batch_allocations SET quantity=0.5 WHERE id=17005'],
+      ['promotion', "UPDATE promotion_rules SET title='Concurrent offer'"],
+      ['empty images scope', "INSERT INTO product_images(product_id,image_path) VALUES(10000,'concurrent.png')"],
+      ['child parent', 'UPDATE products SET parent_id=10003 WHERE id=10004'],
+    ]) {
+      const f = await setup(single)
+      if (!single) { await f.run('undo', 0); await f.run('undo', 0) }
+      let expected
+      f.controls.beforeNextWriteBatch = () => {
+        f.d1.db.exec(sql)
+        expected = f.state()
+      }
+      await assert.rejects(() => f.run('undo', 0), /changed concurrently/, `${single ? 'single' : 'final'} ${label}`)
+      assert.equal(f.state(), expected, `${label}: entire undo graph, history and audit remain untouched`)
+    }
+    const retry = await setup(single)
+    if (!single) { await retry.run('undo', 0); await retry.run('undo', 0) }
+    const before = retry.state()
+    retry.controls.beforeNextWriteBatch = () => { retry.controls.failNextBatch = true }
+    await assert.rejects(() => retry.run('undo', 0), /missing_atomic_guard/)
+    assert.equal(retry.state(), before)
+    assert.equal((await retry.run('undo', 0)).complete, true)
+    assert.equal((await retry.run('undo', 0)).processed_children, 0)
+    console.log(`PASS ${single ? 'single' : 'final'} child: 16 transaction races and rollback/retry`)
+  }
   for (const delayed of [true, false]) {
     const f = await setup()
     const fingerprints = f.d1.db.prepare("SELECT id,json_extract(payload_json,'$.mergedStateFingerprint') fp FROM undo_snapshots WHERE kind='product.merge.group.child' ORDER BY id").all()
