@@ -17,7 +17,7 @@ export default function PagerActionRow({
   className?: string
 }) {
   return (
-    <div className={`grid w-full min-w-0 grid-cols-[2.5rem_minmax(0,1fr)_2.5rem] items-center ${className}`}>
+    <div className={`grid w-full min-w-0 grid-cols-[2.5rem_minmax(0,1fr)_2.5rem] gap-0 items-center ${className}`}>
       <div className="flex w-10 min-w-0 items-center justify-start">{leading}</div>
       <div className="flex min-w-0 items-center justify-center">{children}</div>
       <div className="flex w-10 min-w-0 items-center justify-end">{trailing}</div>
