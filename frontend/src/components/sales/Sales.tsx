@@ -546,6 +546,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   const loadRequestRef = useRef(0)
   const salesStatsRequestRef = useRef(0)
   const loadPromiseRef = useRef<Promise<void> | null>(null)
+  const loadSecurityRef = useRef(statusSecurityScope)
   const loadAbortRef = useRef<AbortController | null>(null)
   // A filter/search change can arrive while the initial Sales request is
   // still in flight. Returning that older promise without scheduling the
@@ -643,6 +644,20 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   }, [])
 
   const loadSales = useCallback(async (silent = false): Promise<void> => {
+    const requestSecurity = statusSecurityScope
+    if (requestSecurity !== statusSecurityRef.current) return
+    if (loadSecurityRef.current !== requestSecurity) {
+      // Detach the prior authority's read before coalescing. Its finally must
+      // not consume this scope's queue or clear its watchdog.
+      loadSecurityRef.current = requestSecurity
+      loadAbortRef.current?.abort()
+      loadAbortRef.current = null
+      invalidateTrackedRequest(loadRequestRef)
+      loadPromiseRef.current = null
+      pendingLoadRef.current = null
+      clearLoadWatchdog()
+    }
+    if (!authReady || !canViewSales) { setLoading(false); return }
     if (loadPromiseRef.current) {
       const pending = pendingLoadRef.current || { silent: true }
       pending.silent = pending.silent && silent
@@ -660,7 +675,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         clearLoadWatchdog()
         if (!loadedOnceRef.current) {
           loadWatchdogRef.current = window.setTimeout(() => {
-            if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
+            if (!aliveRef.current || requestSecurity !== statusSecurityRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
             setLoadError(translateOr('sales_load_slow', 'Sales are taking longer than expected. Tap Refresh or revisit the page in a moment.'))
           }, 15000)
         }
@@ -681,7 +696,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
           'Sales',
           SALES_LIST_REQUEST_TIMEOUT_MS,
         )
-        if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
+        if (!aliveRef.current || requestSecurity !== statusSecurityRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
         const rows = normalizeSaleRows(result)
         if (rows.length || Array.isArray(result)) {
           setSales(rows)
@@ -690,7 +705,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
           completedSuccessfully = true
         }
       } catch (error) {
-        if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
+        if (!aliveRef.current || requestSecurity !== statusSecurityRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
         console.error('[Sales] load failed:', getErrorMessage(error, 'Unknown sales load error'))
         if (!silent && !loadedOnceRef.current) {
           setLoadError(getErrorMessage(error, translateOr('sales_load_failed', 'Failed to load sales')))
@@ -702,21 +717,25 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         // deadline wins. apiFetch forwards this signal to the real fetch, so
         // a timed-out request cannot keep running and later refill the cache.
         controller.abort()
-        if (loadAbortRef.current === controller) loadAbortRef.current = null
-        clearLoadWatchdog()
-        if (!silent && aliveRef.current && isTrackedRequestCurrent(loadRequestRef, requestId)) {
+        if (loadAbortRef.current === controller) {
+          loadAbortRef.current = null
+          clearLoadWatchdog()
+        }
+        if (!silent && aliveRef.current && requestSecurity === statusSecurityRef.current && isTrackedRequestCurrent(loadRequestRef, requestId)) {
           setLoading(false)
         }
       }
     })()
     const wrappedPromise = promise.finally(() => {
-      if (loadPromiseRef.current === wrappedPromise) loadPromiseRef.current = null
+      if (loadPromiseRef.current !== wrappedPromise) return
+      loadPromiseRef.current = null
       const pending = resolvePendingSalesLoad(pendingLoadRef.current, completedSuccessfully)
       // Always consume a queued automatic load. On failure, the visible Retry
       // action starts one deliberate request with the latest filters instead.
       pendingLoadRef.current = null
-      if (pending) {
+      if (pending && requestSecurity === statusSecurityRef.current) {
         queueMicrotask(() => {
+          if (requestSecurity !== statusSecurityRef.current) return
           const nextLoad = latestLoadRef.current || loadSales
           nextLoad(Boolean(pending.silent)).catch(() => {})
         })
@@ -724,7 +743,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     })
     loadPromiseRef.current = wrappedPromise
     return wrappedPromise
-  }, [clearLoadWatchdog, debouncedSearch, isAdmin, salesDateRange, salesPage, salesPageSize, salesSortSpec.direction, salesSortSpec.field, statusFilter, translateOr, userFilter])
+  }, [authReady, canViewSales, statusSecurityScope, clearLoadWatchdog, debouncedSearch, isAdmin, salesDateRange, salesPage, salesPageSize, salesSortSpec.direction, salesSortSpec.field, statusFilter, translateOr, userFilter])
 
   useEffect(() => {
     latestLoadRef.current = loadSales
@@ -743,7 +762,8 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // list -- previously it went stale (a cancelled sale kept counting toward
   // the "N sales | $revenue" header until a filter change forced a refetch).
   const loadSalesStats = useCallback(async (): Promise<void> => {
-    if (!isActive) return
+    const requestSecurity = statusSecurityScope
+    if (!isActive || !authReady || !canViewSales || requestSecurity !== statusSecurityRef.current) return
     const requestId = beginTrackedRequest(salesStatsRequestRef)
     const params = {
       ...(isAdmin && userFilter !== 'all' ? { userId: userFilter } : {}),
@@ -753,7 +773,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     }
     try {
       const result = await fetchSalesStats(params)
-      if (!aliveRef.current || !isTrackedRequestCurrent(salesStatsRequestRef, requestId)) return
+      if (!aliveRef.current || requestSecurity !== statusSecurityRef.current || !isTrackedRequestCurrent(salesStatsRequestRef, requestId)) return
       const row = (result || {}) as Record<string, unknown>
       setSalesStats({
         revenue_usd: Number(row.revenue_usd) || 0,
@@ -763,10 +783,10 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         truncated_in_list: Boolean(row.truncated_in_list),
       })
     } catch {
-      if (!aliveRef.current || !isTrackedRequestCurrent(salesStatsRequestRef, requestId)) return
+      if (!aliveRef.current || requestSecurity !== statusSecurityRef.current || !isTrackedRequestCurrent(salesStatsRequestRef, requestId)) return
       setSalesStats(null)
     }
-  }, [debouncedSearch, isActive, isAdmin, salesDateRange, statusFilter, userFilter])
+  }, [authReady, canViewSales, statusSecurityScope, debouncedSearch, isActive, isAdmin, salesDateRange, statusFilter, userFilter])
 
   useEffect(() => {
     let cancelled = false
