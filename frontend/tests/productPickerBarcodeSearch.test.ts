@@ -133,6 +133,7 @@ assert.match(
 const PICKER_SURFACES: Array<[string, string]> = [
   ['StockAdjustModal (Change stock)', '../src/components/products/forms/StockAdjustModal.tsx'],
   ['FastStockInModal (receive)', '../src/components/inventory/FastStockInModal.tsx'],
+  ['CreateProductsSessionModal (add existing)', '../src/components/products/CreateProductsSessionModal.tsx'],
   ['Promotions rule picker', '../src/components/promotions/PromotionsPage.tsx'],
   ['NewReturnModal replacement lookup', '../src/components/returns/NewReturnModal.tsx'],
   ['Products page', '../src/components/products/Products.tsx'],
@@ -153,12 +154,23 @@ for (const [label, relPath] of PICKER_SURFACES) {
   )
 }
 
+for (const relPath of [
+  '../src/components/products/forms/StockAdjustModal.tsx',
+  '../src/components/inventory/FastStockInModal.tsx',
+  '../src/components/products/CreateProductsSessionModal.tsx',
+]) {
+  const source = readFileSync(new URL(relPath, import.meta.url), 'utf8')
+  assert.match(source, /searchProducts\(\{[^}]*surface: 'inventory'[^}]*\}\)/, `${relPath} must authorize product reads through the inventory surface`)
+  assert.doesNotMatch(source, /batchDateFrom|batchDateTo/, `${relPath} product eligibility must not depend on received date`)
+}
+
 const transferModal = readFileSync(new URL('../src/components/branches/TransferModal.tsx', import.meta.url), 'utf8')
 assert.match(
   transferModal,
   /\{ query: debouncedSearch\.trim\(\) \}/,
   'TransferModal must send its picker term to the branch-stock endpoint as `query`',
 )
+assert.doesNotMatch(transferModal, /batchDateFrom|batchDateTo/, 'Transfer product eligibility must not depend on received date')
 assert.match(
   transferModal,
   /fuzzyTextMatches\(\[product\.name, product\.sku, product\.barcode\]/,

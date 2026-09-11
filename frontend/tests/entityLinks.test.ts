@@ -50,8 +50,11 @@ assert.match(saleDetail, /search=\{item\.barcode\}/, 'sale item barcodes must li
 
 assert.match(productDetail, /search=\{p\.barcode\}/, 'product detail barcode must link back to Products')
 assert.match(productDetail, /search=\{p\.supplier\}/, 'product detail supplier must link to Suppliers')
+assert.match(productDetail, /className="text-inherit no-underline hover:text-inherit hover:no-underline" page="products"/, 'copyable product detail links must retain navigation with inherited text styling')
+assert.doesNotMatch(productDetail, /underline-offset-2 hover:text-blue-700 hover:underline/, 'description opener must read as ordinary inherited detail text')
 assert.match(productDetail, /focus=\{\{ unit: p\.unit \}\}/, 'product detail unit must link to the exact unit filter')
 assert.match(productRows, /hub:contacts:suppliers/, 'product list supplier must link to Suppliers')
+assert.match(productRows, /className="text-inherit no-underline hover:text-inherit hover:no-underline" page="contacts"/, 'copyable supplier links must inherit their metadata pill styling')
 assert.match(productReport, /hub:sales:sales/, 'product report sale drill-down must link to Sales')
 assert.match(productReport, /hub:contacts:suppliers/, 'product report supplier drill-down must link to Suppliers')
 assert.match(salesList, /hub:contacts:customers/, 'sales list customer name and phone must link to Customers')

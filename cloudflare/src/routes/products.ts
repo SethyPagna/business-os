@@ -970,30 +970,6 @@ function buildSearchFilters(query: Record<string, string>, lowStock: LowStockCon
     else where.push(groupedExpr) // group / groups / grouped / parent
   }
 
-  // "Created" filter (Products.tsx's Created filter section) -- scopes to
-  // products with at least one active batch received in the given range,
-  // via product_batches.received_at (see migration 0001_init.sql). Dates
-  // come from <input type="date"> (YYYY-MM-DD), so the upper bound is
-  // widened to end-of-day so a same-day batch (which carries a full
-  // timestamp) isn't excluded by a plain string-vs-date-only compare.
-  // variant_product_id = p.id covers both flat and grouped products --
-  // every row in `products` (grouped or not) is itself a "variant" that
-  // batches attach to directly, see lib/productBatches.ts.
-  const batchDateFrom = String(query.batchDateFrom || query.batch_date_from || '').trim()
-  const batchDateTo = String(query.batchDateTo || query.batch_date_to || '').trim()
-  if (batchDateFrom || batchDateTo) {
-    const batchConditions = ['pb.variant_product_id = p.id', 'pb.is_active = 1']
-    if (batchDateFrom) {
-      params.batchDateFrom = batchDateFrom
-      batchConditions.push('pb.received_at >= @batchDateFrom')
-    }
-    if (batchDateTo) {
-      params.batchDateTo = `${batchDateTo} 23:59:59`
-      batchConditions.push('pb.received_at <= @batchDateTo')
-    }
-    where.push(`EXISTS (SELECT 1 FROM product_batches pb WHERE ${batchConditions.join(' AND ')})`)
-  }
-
   if (searchWhereClause) where.push(searchWhereClause)
 
   return { where, joins, params, stockExpr, matchRankSql, matchTierSql, titleOnly, hasSearchTerm }

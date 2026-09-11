@@ -149,9 +149,14 @@ function buildMatchTierSql(
   if (nameKey) {
     const normalizedName = normalizedNameSql(opts.nameNormalizedColumn, opts.nameColumn)
     params[`${opts.prefix}nameExactKey`] = nameKey
-    params[`${opts.prefix}namePrefixKey`] = `${nameKey}%`
     branches.push(`WHEN ${normalizedName} = @${opts.prefix}nameExactKey THEN ${MATCH_TIER_EXACT_NAME}`)
-    branches.push(`WHEN ${normalizedName} LIKE @${opts.prefix}namePrefixKey THEN ${MATCH_TIER_NAME_PREFIX}`)
+    // D1 caps a bound LIKE pattern at 50 characters. A full product name can
+    // legitimately exceed that (for example "Clarins Super Restorative
+    // Decollete And Neck Concentrate 75ml"), so binding `${nameKey}%` made
+    // an otherwise valid exact-name search fail before FTS results could be
+    // returned. `instr(...)=1` is the same literal-prefix test here because
+    // normalizeSearchText has already removed LIKE metacharacters.
+    branches.push(`WHEN instr(${normalizedName}, @${opts.prefix}nameExactKey) = 1 THEN ${MATCH_TIER_NAME_PREFIX}`)
   }
   if (!branches.length) return undefined
   return `(CASE ${branches.join(' ')} ELSE ${MATCH_TIER_OTHER} END)`
@@ -180,6 +185,11 @@ export function buildProductSearchQuery(
   const mode = String(options.mode || 'AND').toUpperCase() === 'OR' ? 'OR' : 'AND'
   const termGroups = tokenizeSearchTermGroups(rawSearchText, 6, 8)
   if (!termGroups.length) return { hasSearchTerm: false, titleOnly }
+  // Every LIKE fallback adds surrounding `%` characters. Keep pathological
+  // uninterrupted tokens above D1's 50-character pattern ceiling on the
+  // FTS paths instead of producing a query D1 will reject. Normal product
+  // name words remain eligible for the tolerant partial/short-word nets.
+  const likeSafeTermGroups = termGroups.filter((words) => words.every((word) => word.length <= 48))
 
   // A checked UPC-E/UPC-A query is an exact scanner lookup. Letting it also
   // enter FTS/trigram matching would re-admit an unrelated seven-digit
@@ -210,8 +220,8 @@ export function buildProductSearchQuery(
     const allWords = termGroups.flat()
     const wordClauses = allWords.map((word, index) => {
       const key = `${prefix}fallbackSearch${index}`
-      params[key] = `%${String(word).toLowerCase()}%`
-      return `(${fallbackColumns.map((column) => `lower(COALESCE(${column}, '')) LIKE @${key}`).join(' OR ')})`
+      params[key] = String(word).toLowerCase()
+      return `(${fallbackColumns.map((column) => `instr(lower(COALESCE(${column}, '')), @${key}) > 0`).join(' OR ')})`
     })
     if (!wordClauses.length) return { hasSearchTerm: true, titleOnly }
     // The exact-barcode tier needs its own bound value on this path too
@@ -251,7 +261,7 @@ export function buildProductSearchQuery(
 
   // 4. Mixed group (one comma-group holding both a word and a code
   // fragment), which neither table resolves alone.
-  const hybridMatch = titleOnly ? undefined : buildHybridMatchClause(termGroups, mode, `${prefix}hyb`, PRODUCT_SEARCH_COLUMNS)
+  const hybridMatch = titleOnly ? undefined : buildHybridMatchClause(likeSafeTermGroups, mode, `${prefix}hyb`, PRODUCT_SEARCH_COLUMNS)
   if (hybridMatch) {
     Object.assign(params, hybridMatch.params)
     matchClauses.push(hybridMatch.sql)
@@ -259,11 +269,11 @@ export function buildProductSearchQuery(
 
   // 5. Sub-3-character words (FTS5's trigram tokenizer emits nothing below
   // 3 chars), name only, on the precomputed normalized column.
-  const shortWordMatch = buildShortWordFallbackClause(termGroups, mode, [nameNormalizedColumn], params, `${prefix}shortw`, true)
+  const shortWordMatch = buildShortWordFallbackClause(likeSafeTermGroups, mode, [nameNormalizedColumn], params, `${prefix}shortw`, true)
   if (shortWordMatch) matchClauses.push(shortWordMatch)
 
   // 6. Long (4+ word) queries, partial-word, name only.
-  const partialMatch = buildPartialWordMatchClause(termGroups, mode, [nameNormalizedColumn], params, `${prefix}partialw`, 4, true)
+  const partialMatch = buildPartialWordMatchClause(likeSafeTermGroups, mode, [nameNormalizedColumn], params, `${prefix}partialw`, 4, true)
   if (partialMatch) matchClauses.push(partialMatch)
 
   // 7. Exact barcode with leading zeros folded on both sides (the

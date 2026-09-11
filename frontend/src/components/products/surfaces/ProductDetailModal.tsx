@@ -263,7 +263,7 @@ export default function ProductDetailModal({
                   the legacy responsive contract remains a wrapping title. */}
               {/* break-words font-bold text-gray-900 dark:text-white">{productName} */}
               <div className="break-words font-bold text-gray-900 dark:text-white" {...copy(productName)}>
-                <EntityLink page="products" anchor="hub:products:products" search={productName} navigate={navigateTo} title={T('open_product', 'Open product')}>{productName}</EntityLink>
+                <EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="products" anchor="hub:products:products" search={productName} navigate={navigateTo} title={T('open_product', 'Open product')}>{productName}</EntityLink>
               </div>
               {/* Category/brand/SKU stay compact but expose their complete
                   values through horizontal touch scrolling. */}
@@ -277,7 +277,7 @@ export default function ProductDetailModal({
                     barcode or SKU. */}
                 {p.sku ? <span className="detail-scroll-text max-w-[100px] font-mono" title={p.sku}>{p.sku}</span> : null}
                 {p.category ? <span className="detail-scroll-text max-w-[110px]" title={p.category}>{p.sku ? '· ' : ''}<EntityLink page="products" anchor="hub:products:products" focus={{ category: p.category }} navigate={navigateTo} title={T('open_product', 'Open product')}>{p.category}</EntityLink></span> : null}
-                {p.brand ? <span className="detail-scroll-text max-w-[110px]" {...copy(p.brand)} title={p.brand}>&middot; <EntityLink page="products" anchor="hub:products:products" focus={{ brand: p.brand }} navigate={navigateTo} title={T('open_product', 'Open product')}>{p.brand}</EntityLink></span> : null}
+                {p.brand ? <span className="detail-scroll-text max-w-[110px]" {...copy(p.brand)} title={p.brand}>&middot; <EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="products" anchor="hub:products:products" focus={{ brand: p.brand }} navigate={navigateTo} title={T('open_product', 'Open product')}>{p.brand}</EntityLink></span> : null}
               </div>
             </div>
           </div>
@@ -303,9 +303,9 @@ export default function ProductDetailModal({
               <div className="min-w-0 space-y-2.5 sm:pr-5">
                 <div className="grid grid-cols-1 gap-y-1.5">
                   {/* barcode contract: <span className="whitespace-nowrap font-mono">{p.barcode}</span> */}
-                  {p.barcode ? <Row label={T('barcode', 'Barcode')}><EntityLink page="products" anchor="hub:products:products" search={p.barcode} navigate={navigateTo} title={T('open_product', 'Open product')}><span className="whitespace-nowrap font-mono" {...copy(p.barcode)}>{p.barcode}</span></EntityLink></Row> : null}
+                  {p.barcode ? <Row label={T('barcode', 'Barcode')}><EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="products" anchor="hub:products:products" search={p.barcode} navigate={navigateTo} title={T('open_product', 'Open product')}><span className="whitespace-nowrap font-mono" {...copy(p.barcode)}>{p.barcode}</span></EntityLink></Row> : null}
                   {p.sku ? <Row label={T('sku', 'SKU')}><span className="font-mono">{p.sku}</span></Row> : null}
-                  {p.supplier ? <Row label={T('label_supplier', 'Supplier')}><EntityLink page="contacts" anchor="hub:contacts:suppliers" search={p.supplier} navigate={navigateTo} title={T('open_supplier', 'Open supplier')}><span {...copy(p.supplier)}>{p.supplier}</span></EntityLink></Row> : null}
+                  {p.supplier ? <Row label={T('label_supplier', 'Supplier')}><EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="contacts" anchor="hub:contacts:suppliers" search={p.supplier} navigate={navigateTo} title={T('open_supplier', 'Open supplier')}><span {...copy(p.supplier)}>{p.supplier}</span></EntityLink></Row> : null}
                   {/* Stock + Status moved to the right column after Margin
                       (Aug 30 ask) -- identity facts stay here. */}
                   {expiryDate ? (
@@ -378,7 +378,7 @@ export default function ProductDetailModal({
                     <button
                       type="button"
                       onClick={() => setDescriptionDetailOpen(true)}
-                      className="detail-scroll-text min-w-0 flex-1 rounded text-left text-sm text-gray-800 underline-offset-2 hover:text-blue-700 hover:underline dark:text-gray-200 dark:hover:text-blue-300"
+                      className="detail-scroll-text min-w-0 flex-1 rounded text-left text-sm text-gray-800 dark:text-gray-200"
                       title={T('view_full_description', 'View full description')}
                     >
                       {p.description}

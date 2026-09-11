@@ -237,7 +237,7 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
     // 3348901770569 still showed "Abercrombie Authantic 10ml"). The
     // transport now canonicalizes the key for every caller
     // (api/productReadTransport.ts) -- this spells it correctly regardless.
-    searchProducts({ query: debouncedSearch, pageSize: 20, include: 'branch_stock' })
+    searchProducts({ query: debouncedSearch, pageSize: 20, include: 'branch_stock', surface: 'inventory' })
       .then((raw) => {
         if (cancelled) return
         const rows = Array.isArray(raw)
