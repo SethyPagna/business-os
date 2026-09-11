@@ -12540,3 +12540,59 @@ source hash, and build time above; its static build manifest also returned
 revision `7e57b0ce3cb5`. Deployment/version metadata, D1 invariants, local
 real-route Hono/SQLite scenarios, and responsive mocked-browser checks are the
 recorded release evidence.
+
+## Received-date provenance and POS saleability repair deployed — September 11, 2026
+
+The received-date/lot repair is deployed from exact source commit
+**648804c0cce51bc11c562bbe268ddc0a28284792** on branch
+`codex/received-date-pos-fix-20260911`. Cloudflare reports Worker version
+**e71f2458-2cd1-410a-b99f-32b795e4c1d4** in deployment
+**f465ea0c-654a-4fdf-bed1-b8da1a2b8d09** at **100%**. The retained production
+route reports revision **648804c0cce5**, source hash **6d9f3ea7602bcaaf**, and
+build time **2026-09-11T09:51:42.973Z UTC**; `/health` returned `status: ok`
+after release.
+
+Primary D1 migrations **0153_reconcile_received_date_saleability.sql**,
+**0154_enforce_active_positive_lot_invariant.sql**, and
+**0155_enforce_positive_lot_parent_invariant.sql** are applied and Wrangler
+reports no pending migrations. Migration 0153 reconciled the evidence-backed
+stock/lot/sale/return links; 0154 and 0155 install eight guards that reject
+positive inactive or orphaned lots and parent mutations that would create
+orphans. The final recovery bookmark before 0154/0155 was
+`000014d8-0000000c-000050e3-f1bd1cfb8a584bd813419f52be981350`.
+Two earlier remote attempts failed at D1 statement parsing: the first was an
+exact no-op, while the flattened 0153 attempt applied only 0153 before 0154
+failed. Each outcome was reconciled against the migration ledger and full data
+invariants while the token-scoped maintenance hold remained active. The two
+incompatible `SELECT CASE ... RAISE` guards were then replaced by D1-compatible
+conditional `SELECT RAISE(...) WHERE ...` guards, locally certified through
+native Wrangler, and the remaining migrations applied cleanly. The exact-token
+maintenance row was removed only after database and authenticated-browser
+postflight; zero maintenance rows remain.
+
+Production postflight reports **0** active products with positive stock but no
+dated active positive lot, **0** missing or invalid positive-lot received dates,
+**0** positive inactive lots, **0** positive orphan lots, **0** null active
+flags, and **0** active product/branch positive-lot mismatches. `PRAGMA
+quick_check` returned `ok`. Sales, returns, sale-item quantities, return-item
+quantities, and their money totals stayed unchanged. The repair added nine
+audited correction movements and restored the evidence-backed sale/return lot
+allocations. Product 7091 remains intentionally inactive because historical
+deletion/ownership evidence is ambiguous; it was not blindly reactivated.
+
+The two reported production cases now have saleable dated lots. **Olay Serum
+Body Lotion 547ml** has Shop lots dated **03/09/2026 (7)** and **05/09/2026
+(10)** plus Warehouse **05/09/2026 (10)**. **Clarins Super Restorative
+Decollete And Neck Concentrate 75ml** has Shop **03/09/2026 (1)** and Warehouse
+**02/09/2026 (4)**. An authenticated production POS run searched each product,
+opened its received-date options, selected the repaired Shop lot, staged it in
+the cart, and cleared the cart without completing a sale. A final reload after
+maintenance release showed the normal empty POS cart and enabled application
+shell; no test sale or stock mutation was created.
+
+Certification includes frontend **363/363** utility checks, backend **346/346**
+scripts (two Windows native crashes passed on isolated retry), both TypeScript
+gates, i18n **5,711 keys / 589 source files**, the 1,123-module production
+build, full 151-migration local chain, trigger-body LF checks, native Wrangler
+atomic rollback/ledger scenarios, exact-commit independent verification, and
+the authenticated production POS smoke above.
