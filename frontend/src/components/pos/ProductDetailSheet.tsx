@@ -8,13 +8,14 @@ import X from 'lucide-react/dist/esm/icons/x.js'
 import { promotionBadgeForProduct, evaluatePromotionPricing, type PromotionRule } from '../../utils/promotionRules.ts'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 import { getProductBatches } from '../../api/batchesTransport.ts'
+import { readFreshPickerLots, startPickerLotRead } from '../../utils/pickerLotFreshness.ts'
 import { getDamagedLots, type DamagedLot } from '../../api/damagedLotsTransport.ts'
 import type { BatchSelection, ProductBatch } from '../../api/batchesTransport.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { useLowStockConfig } from '../../AppContext'
 import { effectiveLowStockThreshold } from '../../utils/lowStockSettings.ts'
 import { buildVariantOptionLabels, computeExpiryStatus, sortBatchesForPicker } from './posCore.ts'
-import { branchStockQuantity, deriveProductSheetState, type SheetIntent } from './productSheetState.ts'
+import { branchStockQuantity, deriveProductSheetState, type SheetIntent, type SheetProductLike } from './productSheetState.ts'
 import ProductImage from './ProductImage'
 
 type ProductGroupMeta = {
@@ -313,6 +314,7 @@ export default function ProductDetailSheet({
   // Reset alongside the other step state whenever a different product's
   // sheet opens, same as branch/barcode above.
   const [batches, setBatches] = useState<PickerBatch[]>([])
+  const [loadedLotScope, setLoadedLotScope] = useState('')
   // Separate from the active-lot array: this scalar includes inactive known
   // lots, which are never rendered as received-date choices but do reduce
   // the date-less Shop remainder.
@@ -354,7 +356,8 @@ export default function ProductDetailSheet({
   // here, which is exactly why a flat product could read "Stock 0" (and
   // refuse the sale) while its own branch_stock said 28 and every test in
   // the repo stayed green: they were all regexes over this file's text.
-  const sheetState = deriveProductSheetState({
+  const requireFreshLots = intent === 'sell' && !hideReceivedDates
+  const sheetInput = {
     product,
     variants,
     groupProduct,
@@ -362,7 +365,9 @@ export default function ProductDetailSheet({
     activeBranchId,
     selectedVariantId,
     trackedBatchProductIds,
-    trackedBatchLookupUnavailable,
+    // The global index is an optimization, never evidence that this opened
+    // product has no received dates. Every sell pick verifies its own source.
+    trackedBatchLookupUnavailable: trackedBatchLookupUnavailable || requireFreshLots,
     receivedDateStepHidden: hideReceivedDates,
     batches,
     knownPositiveBatchQuantityByProduct: knownPositiveQuantityByProduct,
@@ -372,8 +377,22 @@ export default function ProductDetailSheet({
     damagedLots,
     selectedDamagedLotId,
     intent,
-    getDisplayStock: (row) => getDisplayStock(row as ProductRecord),
-    optionStepTitleFor: (pool) => buildVariantOptionLabels(pool as ProductRecord[], (value) => fmtUSD(value)).stepTitle,
+    getDisplayStock: (row: SheetProductLike | undefined) => getDisplayStock(row as ProductRecord),
+    optionStepTitleFor: (pool: readonly SheetProductLike[]) => buildVariantOptionLabels(pool as ProductRecord[], (value) => fmtUSD(value)).stepTitle,
+  }
+  const provisionalState = deriveProductSheetState(sheetInput)
+  const sourceRows = provisionalState.mergeRowsIntoLotList
+    ? provisionalState.candidatePool
+    : [groupProduct ? provisionalState.effectiveVariant : product].filter(Boolean)
+  const currentLotScope = `${provisionalState.effectiveBranchId}:${sourceRows.map((row) => row?.id).join(',')}`
+  // Branch/variant changes invalidate the old result synchronously, before
+  // React runs effect cleanup. Old selected IDs must not enable a new pick.
+  const visibleBatches = loadedLotScope === currentLotScope ? batches : []
+  const sheetState = deriveProductSheetState({
+    ...sheetInput,
+    batches: visibleBatches,
+    knownPositiveBatchQuantityByProduct: loadedLotScope === currentLotScope ? knownPositiveQuantityByProduct : {},
+    selectedDamagedLotId: !requireFreshLots || loadedLotScope === currentLotScope ? selectedDamagedLotId : null,
   })
   const branchOptions = sheetState.branchOptions
   const effectiveBranchId = sheetState.effectiveBranchId
@@ -478,7 +497,7 @@ export default function ProductDetailSheet({
   useEffect(() => {
     if (!isBatchTracked || lotSourceProductIds.length === 0) { setBatches([]); setKnownPositiveQuantityByProduct({}); return }
     if (resolvedBranchId == null) { setBatches([]); setKnownPositiveQuantityByProduct({}); setBatchesLoading(false); return }
-    let cancelled = false
+    setLoadedLotScope('')
     setBatchesLoading(true)
     setBatchesError('')
     // Promise.all, not allSettled, on purpose: a partially-loaded lot list is
@@ -486,20 +505,24 @@ export default function ProductDetailSheet({
     // "the oldest lot" out of a list that quietly lost half its rows sells
     // the wrong stock. One failed row fails the whole list, which the error
     // branch below renders as an error and which keeps the sale blocked.
-    Promise.all(lotSourceProductIds.map((productId) => getProductBatches(productId, resolvedBranchId)
+    return startPickerLotRead(lotSourceProductIds, (productId, signal) => (
+      requireFreshLots ? readFreshPickerLots(productId, resolvedBranchId, signal) : getProductBatches(productId, resolvedBranchId)
+    )
       .then((res) => ({
         productId,
         batches: (Array.isArray(res?.batches) ? res.batches : [])
+          .filter((batch) => Number(batch.is_active) === 1)
           .map((batch) => ({ ...batch, __productId: productId } as PickerBatch)),
-        knownPositiveQuantity: Number.isFinite(Number(res?.known_positive_quantity))
+        knownPositiveQuantity: res?.known_positive_quantity != null && Number.isFinite(Number(res.known_positive_quantity))
           ? Math.max(0, Number(res.known_positive_quantity))
           : null,
-      })))).then((lists) => {
-      if (cancelled) return
+      })), (lists) => {
       setBatches(lists.flatMap((list) => list.batches))
       setKnownPositiveQuantityByProduct(Object.fromEntries(lists.map((list) => [list.productId, list.knownPositiveQuantity])))
       setBatchesError('')
-    }).catch((error: unknown) => {
+      setLoadedLotScope(currentLotScope)
+      setBatchesLoading(false)
+    }, (error: unknown) => {
       // A failed lot fetch is NOT "this product has no lots here". The old
       // `catch(() => setBatches([]))` rendered the two identically, so a
       // 403/500/timeout showed the definitive-sounding "No lots available
@@ -507,14 +530,13 @@ export default function ProductDetailSheet({
       // Record the error so the picker can say so and keep the sale
       // blocked -- selling batch-tracked stock without a lot is worse than
       // refusing the sale.
-      if (cancelled) return
       setBatches([])
       setKnownPositiveQuantityByProduct({})
       setBatchesError(error instanceof Error && error.message ? error.message : 'Could not load received dates')
-    }).finally(() => { if (!cancelled) setBatchesLoading(false) })
-    return () => { cancelled = true }
+      setBatchesLoading(false)
+    })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isBatchTracked, lotSourceKey, resolvedBranchId, batchesReloadKey])
+  }, [isBatchTracked, lotSourceKey, resolvedBranchId, batchesReloadKey, requireFreshLots])
   // A Branch/Barcode change can resolve to a different (or differently-
   // tracked) row, so a lot picked under the previous row must not silently
   // carry over -- same "don't leak a stale pick into the next selection"
@@ -522,6 +544,7 @@ export default function ProductDetailSheet({
   // themselves.
   useEffect(() => {
     if (resolvedProduct == null || resolvedBranchId == null) { setDamagedLots([]); return }
+    setDamagedLots([])
     let cancelled = false
     getDamagedLots(resolvedProduct.id, resolvedBranchId).then((res) => {
       if (!cancelled) setDamagedLots(Array.isArray(res?.lots) ? res.lots : [])
@@ -548,7 +571,7 @@ export default function ProductDetailSheet({
   // ones. Ordered here at render (rather than when the fetch lands) so the
   // list can never be shown in the raw transport order.
   const batchWord = t('batch') || 'Received date'
-  const orderedBatches = sortBatchesForPicker(batches)
+  const orderedBatches = sortBatchesForPicker(visibleBatches)
   const batchPageCount = Math.max(1, Math.ceil(orderedBatches.length / BATCH_CHOICES_PAGE_SIZE))
   const clampedBatchPage = Math.min(batchPage, batchPageCount - 1)
   const pagedBatches = orderedBatches.slice(clampedBatchPage * BATCH_CHOICES_PAGE_SIZE, clampedBatchPage * BATCH_CHOICES_PAGE_SIZE + BATCH_CHOICES_PAGE_SIZE)
@@ -627,6 +650,7 @@ export default function ProductDetailSheet({
   // the line form it gates never opened and the pick appeared to do nothing.
   // The host closes the sheet from inside its own onPick.
   const confirmPick = (nextProduct: ProductRecord) => {
+    if (!pickAllowed) return
     onPick?.(nextProduct, { branchId: effectiveBranchId, batch: buildBatchSelection() })
   }
   const pickButtonLabel = pickLabel || t('select') || 'Select'
