@@ -21,6 +21,18 @@
 //
 // Run: node tests/shiftGateUx.test.ts
 import assert from 'node:assert/strict'
+// These transport tests model a browser with readable coordination storage.
+function createReadableStorage(): Storage {
+  const values = new Map<string, string>()
+  return {
+    get length() { return values.size },
+    clear: () => { values.clear() },
+    key: (index: number) => [...values.keys()][index] ?? null,
+    getItem: (key: string) => values.get(String(key)) ?? null,
+    setItem: (key: string, value: string) => { values.set(String(key), String(value)) },
+    removeItem: (key: string) => { values.delete(String(key)) },
+  }
+}
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -190,7 +202,7 @@ let currentShift: any = { shift: { id: 71, revision: 3, opened_at: '2026-09-05T0
 let resolveClose: (value: any) => void = () => {}
 let submitted: any
 const oldWindow = globalThis.window
-globalThis.window = Object.assign(new EventTarget(), { setInterval: () => 1, clearInterval: () => {}, sessionStorage: { getItem: () => null } }) as unknown as Window & typeof globalThis
+globalThis.window = Object.assign(new EventTarget(), { setInterval: () => 1, clearInterval: () => {}, localStorage: createReadableStorage(), sessionStorage: createReadableStorage() }) as unknown as Window & typeof globalThis
 const jsx = (type: unknown, props: Record<string, any>) => ({ type, props })
 const compiled = ts.transpileModule(gate, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText
 const gateModule: any = { exports: {} }

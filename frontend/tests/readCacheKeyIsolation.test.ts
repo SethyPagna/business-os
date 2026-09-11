@@ -21,6 +21,18 @@
 // per-id entry -- asserted below.
 
 import assert from 'node:assert/strict'
+// These transport tests model a browser with readable coordination storage.
+function createReadableStorage(): Storage {
+  const values = new Map<string, string>()
+  return {
+    get length() { return values.size },
+    clear: () => { values.clear() },
+    key: (index: number) => [...values.keys()][index] ?? null,
+    getItem: (key: string) => values.get(String(key)) ?? null,
+    setItem: (key: string, value: string) => { values.set(String(key), String(value)) },
+    removeItem: (key: string) => { values.delete(String(key)) },
+  }
+}
 import {
   __resetApiHealthForTests,
   __resetApiWriteDedupeForTests,
@@ -65,6 +77,8 @@ function resetApiState() {
 function installWindow(): () => void {
   const originalWindow = (globalThis as { window?: unknown }).window
   ;(globalThis as { window?: unknown }).window = {
+    localStorage: createReadableStorage(),
+    sessionStorage: createReadableStorage(),
     setTimeout,
     clearTimeout,
     dispatchEvent: () => true,
