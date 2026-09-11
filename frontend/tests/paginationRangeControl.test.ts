@@ -107,6 +107,20 @@ runTest('PageSizeSelect renders buttonContent over the size, but only when given
   )
 })
 
+runTest('the opt-in centered pager stays under 200px without dropping Back or Next', () => {
+  const branchStart = pagination.indexOf('if (compact && rangeAsPageSize)')
+  const branchEnd = pagination.indexOf('if (compact) {', branchStart)
+  const branch = pagination.slice(branchStart, branchEnd)
+  assert.match(pagination, /compactCentered = false/, 'other compact pager consumers retain their established density')
+  assert.match(branch, /max-w-\[12\.5rem\]/, 'the opted-in visual pager is capped at 200px')
+  assert.match(branch, /compactCentered \? 'px-0\.5 text-\[10px\]'/, 'the compact form reduces padding and type rather than removing controls')
+  assert.match(branch, /<span className="whitespace-nowrap">\{backLabel\}<\/span>/, 'localized Back text remains visible')
+  assert.match(branch, /<span className="whitespace-nowrap">\{nextLabel\}<\/span>/, 'localized Next text remains visible')
+  assert.match(branch, /inline-flex h-10/, 'smaller visuals retain the 40px click target')
+  assert.match(branch, /aria-label=\{backLabel\}/)
+  assert.match(branch, /aria-label=\{nextLabel\}/)
+})
+
 if (failed > 0) {
   console.error(`\n${failed} test(s) failed`)
   process.exit(1)

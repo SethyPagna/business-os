@@ -79,6 +79,8 @@ export default function StatsStrip({
   rangeActions,
   showTime = false,
   showPresets = true,
+  iconOnly = false,
+  compactRange = false,
   summary,
   className = '',
 }: {
@@ -97,6 +99,10 @@ export default function StatsStrip({
   rangeActions?: ReactNode
   showTime?: boolean
   showPresets?: boolean
+  /** Render the Stats trigger as one accessible icon square. */
+  iconOnly?: boolean
+  /** Use full, smaller range labels without decorative calendar chrome. */
+  compactRange?: boolean
   /** A one-line headline (e.g. "42 sales · $1,204") shown next to the Stats
    * chip and visible whether the cards are folded or open — "stats can show
    * outside button stats" (user, Aug 31): the key figure stays on screen
@@ -130,10 +136,12 @@ export default function StatsStrip({
 
   const statsTrigger = (
     <button type="button" aria-expanded={statsOpen}
+      aria-label={iconOnly ? tr('stats', 'Stats') : undefined}
+      title={iconOnly ? tr('stats', 'Stats') : undefined}
       onClick={() => setStatsOpen((current) => !current)}
-      className={`inline-flex h-10 min-h-10 shrink-0 items-center gap-1 rounded-lg px-2 text-xs font-semibold ${statsOpen ? 'bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900' : 'bg-gray-100 text-gray-600 dark:bg-zinc-800 dark:text-gray-300'}`}>
+      className={`inline-flex h-10 min-h-10 shrink-0 items-center justify-center rounded-lg text-xs font-semibold ${iconOnly ? 'w-10 px-0' : 'gap-1 px-2'} ${statsOpen ? 'bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900' : 'bg-gray-100 text-gray-600 dark:bg-zinc-800 dark:text-gray-300'}`}>
       <BarChart3 className="h-4 w-4 shrink-0" />
-      {tr('stats', 'Stats')}
+      {iconOnly ? null : tr('stats', 'Stats')}
     </button>
   )
   const toolbarActions = <>{rangeActions}{actions}</>
@@ -142,7 +150,7 @@ export default function StatsStrip({
       {range && onRangeChange ? (
         <StatsRangeRow range={range} onRangeChange={onRangeChange} t={t}
           leading={statsTrigger} actions={toolbarActions}
-          showTime={showTime} showPresets={showPresets} />
+          showTime={showTime} showPresets={showPresets} compactRange={compactRange} />
       ) : (
         <div className="flex min-w-0 flex-nowrap items-center gap-1">
           {statsTrigger}
