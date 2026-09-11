@@ -1845,6 +1845,86 @@ function productMergeGroupCompletionStatements(args: {
   ]
 }
 
+/** Restore only replay-written timestamps needed by the next older child.
+ * The fingerprints remain immutable and include updated_at. Exact current-row
+ * guards reject races; exact predecessor non-time fields must match AFTER the
+ * reversal, before any timestamp is restored. Never bless a new fingerprint.
+ */
+function productMergeGroupPredecessorTimestamps(child: ProductMergeGroupChild, predecessor?: ProductMergeGroupChild): {
+  before: AtomicMergeStatement[]; after: AtomicMergeStatement[]
+} {
+  const before: AtomicMergeStatement[] = []
+  const after: AtomicMergeStatement[] = []
+  if (!predecessor) return { before, after }
+  const parse = (value: string | undefined): Record<string, unknown> => {
+    try {
+      const parsed = JSON.parse(value || '')
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed
+    } catch { /* Fail closed rather than weakening a missing fingerprint. */ }
+    throw new UndoConflictError('A group merge predecessor fingerprint is unavailable.')
+  }
+  const current = parse(child.reversal.mergedStateFingerprint)
+  const prior = parse(predecessor.reversal.mergedStateFingerprint)
+  const readRows = (fingerprint: Record<string, unknown>, keys: string[]): Map<number, Record<string, unknown>> => {
+    const rows = new Map<number, Record<string, unknown>>()
+    for (const key of keys) {
+      if (!Array.isArray(fingerprint[key])) throw new UndoConflictError('A group merge fingerprint has invalid rows.')
+      for (const value of fingerprint[key]) {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) throw new UndoConflictError('Invalid group merge fingerprint row.')
+        const row = value as Record<string, unknown>
+        if (!Number.isSafeInteger(row.id) || Number(row.id) <= 0 || !Object.hasOwn(row, 'updated_at')
+          || Object.keys(row).some((field) => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(field))) {
+          throw new UndoConflictError('Invalid group merge timestamp provenance.')
+        }
+        // Full product rows take precedence over the child-product projection.
+        if (!rows.has(Number(row.id))) rows.set(Number(row.id), row)
+      }
+    }
+    return rows
+  }
+  const rowGuards = (table: string, rows: Record<string, unknown>[], omitTimestamp: boolean): AtomicMergeStatement[] => {
+    const shapes = new Map<string, Record<string, unknown>[]>()
+    for (const row of rows) {
+      const key = JSON.stringify(Object.keys(row).filter((field) => !omitTimestamp || field !== 'updated_at').sort())
+      const group = shapes.get(key) || []
+      group.push(row)
+      shapes.set(key, group)
+    }
+    return [...shapes].map(([shape, values]) => ({
+      sql: `SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM json_each(@rows) saved WHERE NOT EXISTS(
+        SELECT 1 FROM ${table} live WHERE ${(JSON.parse(shape) as string[])
+          .map((field) => `live."${field}" IS json_extract(saved.value,'$.${field}')`).join(' AND ')}
+      )) THEN 1 ELSE json_extract('', '$') END AS product_merge_group_timestamp_guard`,
+      params: { rows: JSON.stringify(values) },
+    }))
+  }
+  before.push({
+    sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM undo_snapshots
+      WHERE id=@id AND kind=@kind AND status='applied' AND payload_json=@payload)
+      THEN 1 ELSE json_extract('', '$') END AS product_merge_group_predecessor_guard`,
+    params: { id: predecessor.id, kind: PRODUCT_MERGE_GROUP_CHILD_KIND, payload: predecessor.payload_json },
+  })
+  for (const [table, keys, affected] of [
+    ['products', ['products', 'childProducts'], [child.reversal.keeperId, child.reversal.dupId, ...intIds(child.reversal.reparentedChildProductIds)]],
+    ['promotion_rules', ['promotionRules'], (child.reversal.promotionRulesBefore || []).map((row) => row.id)],
+  ] as const) {
+    const currentRows = readRows(current, [...keys])
+    const priorRows = readRows(prior, [...keys])
+    const targetIds = [...new Set(affected.map(Number))].filter((id) => priorRows.has(id))
+    if (!targetIds.length) continue
+    if (targetIds.some((id) => !currentRows.has(id))) throw new UndoConflictError('Missing current group merge timestamp provenance.')
+    before.push(...rowGuards(table, targetIds.map((id) => currentRows.get(id)!), false))
+    const savedRows = targetIds.map((id) => priorRows.get(id)!)
+    after.push(...rowGuards(table, savedRows, true), {
+      sql: `UPDATE ${table} SET updated_at=(SELECT json_extract(value,'$.updated_at') FROM json_each(@rows)
+        WHERE json_extract(value,'$.id')=${table}.id)
+        WHERE id IN (SELECT json_extract(value,'$.id') FROM json_each(@rows))`,
+      params: { rows: JSON.stringify(savedRows.map(({ id, updated_at }) => ({ id, updated_at }))) },
+    })
+  }
+  return { before, after }
+}
+
 async function replayProductMergeGroup(payload: Record<string, unknown>, ctx: UndoApplierContext): Promise<UndoApplierOutcome> {
   if (!ctx.user || !ctx.historyId) throw new UndoConflictError('Authoritative group history identity is required.')
   const expectedGeneration = Number(ctx.generation)
@@ -1875,12 +1955,13 @@ async function replayProductMergeGroup(payload: Record<string, unknown>, ctx: Un
   if (ctx.direction === 'undo') {
     await assertMergeStateUnchanged(db, [child.reversal], child.reversal.mergedStateFingerprint)
     const statements = await buildMergeReversalStatements(ctx.env, child.reversal, getActionTier(ctx.user, 'products', 'image') === 'full')
+    const timestamps = productMergeGroupPredecessorTimestamps(child, children[targetIndex - 1])
     const completion = productMergeGroupCompletionStatements({
       direction: ctx.direction, user: ctx.user, historyId: Number(ctx.historyId), groupSnapshotId: pointer.snapshotId,
       groupSnapshot, association, child, generation, final, nextPrefixFingerprint,
     })
-    statements.unshift(completion[0])
-    statements.push(...completion.slice(1))
+    statements.unshift(completion[0], ...timestamps.before)
+    statements.push(...timestamps.after, ...completion.slice(1))
     try { await db.batch(statements) } catch (error) {
       if (/malformed JSON|product_merge_group_guard|constraint/i.test(String(error))) {
         throw new UndoConflictError('This group merge changed concurrently. Nothing was reversed.')
