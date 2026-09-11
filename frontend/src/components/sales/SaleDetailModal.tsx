@@ -69,6 +69,12 @@ import { contactDisplayAddress } from '../contacts/contactOptionUtils.ts'
 import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 import { saleRecordsCount } from '../../utils/saleRecords.ts'
 import { isAnonymousCustomerIdentity } from '../../utils/customerIdentity.ts'
+import {
+  mergeSaleProductSearchCandidates,
+  normalizeSaleProductSearchPage,
+  SALE_DETAIL_PRODUCT_PAGE_SIZE,
+  saleProductSearchHasMore,
+} from './saleProductSearch.ts'
 
 type TranslateFn = (key: string) => string
 type MoneyFormatter = (value: number | string) => string
@@ -462,6 +468,10 @@ export default function SaleDetailModal({
   const [addQuery, setAddQuery] = useState('')
   const [addCandidates, setAddCandidates] = useState<AddProductCandidate[]>([])
   const [addSearching, setAddSearching] = useState(false)
+  const [addLoadingMore, setAddLoadingMore] = useState(false)
+  const [addSearchError, setAddSearchError] = useState('')
+  const [addSearchFailedPage, setAddSearchFailedPage] = useState(1)
+  const [addSearchPage, setAddSearchPage] = useState({ page: 1, pageSize: SALE_DETAIL_PRODUCT_PAGE_SIZE, total: 0, totalPages: 1 })
   const [addLines, setAddLines] = useState<StagedAddLine[]>([])
   const [addSaving, setAddSaving] = useState(false)
   const [addConfirmOpen, setAddConfirmOpen] = useState(false)
@@ -520,6 +530,9 @@ export default function SaleDetailModal({
       __groupMaxPrice: group.maxSellingPriceUsd,
     } satisfies AddProductCandidate
   }), [addCandidates, cardStock])
+  const addSearchVisible = addCandidateGroups.length
+  const addSearchTotal = Math.max(addSearchVisible, addSearchPage.total)
+  const addSearchCanLoadMore = saleProductSearchHasMore(addSearchPage)
   /**
    * One search result, described as a POS card. Both product searches on this
    * screen spread this, so they cannot answer the same query differently --
@@ -705,29 +718,63 @@ export default function SaleDetailModal({
     return () => { cancelled = true }
   }, [canLoadAddItems, detailScope, sale?.branch_id, trackedBatchReloadKey])
 
-  useEffect(() => {
+  const loadAddProductSearchPage = async (text: string, page: number, append: boolean): Promise<void> => {
+    const query = text.trim()
+    if (!canLoadAddItems || query.length < 2) return
     const seq = ++addSearchSeqRef.current
-    const text = addQuery.trim()
-    if (!canLoadAddItems || text.length < 2) { setAddCandidates([]); setAddSearching(false); return }
-    setAddSearching(true)
-    const timer = window.setTimeout(async () => {
-      try {
-        // The endpoint paginates product FAMILIES, not raw child rows, and a
-        // text search expands every matched family/name sibling before this
-        // payload returns (routes/products.ts). Eight therefore bounds the
-        // visible groups without truncating the options inside any one group.
-        const payload = await searchProducts({ query: text, pageSize: 8, branchId: sale?.branch_id ?? undefined }) as { items?: AddProductCandidate[] }
-        if (seq !== addSearchSeqRef.current) return
-        setAddCandidates(Array.isArray(payload?.items) ? payload.items : [])
-      } catch {
-        // Suggestions only -- typing again retries. Never a blocking error:
-        // the write itself is what has to be reliable, not the picker.
-        if (seq === addSearchSeqRef.current) setAddCandidates([])
-      } finally {
-        if (seq === addSearchSeqRef.current) setAddSearching(false)
+    const requestScope = detailScope
+    if (append) setAddLoadingMore(true)
+    else setAddSearching(true)
+    setAddSearchError('')
+    try {
+      // This is a POS operation performed from a sale, not a Products-page
+      // read. `surface=pos` preserves the existing Worker contract that a
+      // cashier with POS or full Sales access can add/replace sale lines even
+      // when Products-page access is absent. The endpoint paginates product
+      // FAMILIES; matched siblings may expand `items` beyond pageSize.
+      const payload = await searchProducts({
+        query,
+        page,
+        pageSize: SALE_DETAIL_PRODUCT_PAGE_SIZE,
+        branchId: sale?.branch_id ?? undefined,
+        surface: 'pos',
+      })
+      if (!detailAliveRef.current || detailScopeRef.current !== requestScope || seq !== addSearchSeqRef.current) return
+      const result = normalizeSaleProductSearchPage<AddProductCandidate>(payload, page)
+      setAddCandidates((current) => append ? mergeSaleProductSearchCandidates(current, result.items) : result.items)
+      setAddSearchPage({ page: result.page, pageSize: result.pageSize, total: result.total, totalPages: result.totalPages })
+      setAddSearchFailedPage(1)
+    } catch (error: unknown) {
+      if (!detailAliveRef.current || detailScopeRef.current !== requestScope || seq !== addSearchSeqRef.current) return
+      if (!append) setAddCandidates([])
+      setAddSearchFailedPage(page)
+      setAddSearchError(error instanceof Error && error.message ? error.message : 'Could not load products.')
+    } finally {
+      if (detailAliveRef.current && detailScopeRef.current === requestScope && seq === addSearchSeqRef.current) {
+        setAddSearching(false)
+        setAddLoadingMore(false)
       }
-    }, 300)
+    }
+  }
+
+  useEffect(() => {
+    ++addSearchSeqRef.current
+    const text = addQuery.trim()
+    setAddSearchError('')
+    setAddSearchFailedPage(1)
+    setAddSearchPage({ page: 1, pageSize: SALE_DETAIL_PRODUCT_PAGE_SIZE, total: 0, totalPages: 1 })
+    if (!canLoadAddItems || text.length < 2) {
+      setAddCandidates([])
+      setAddSearching(false)
+      setAddLoadingMore(false)
+      return undefined
+    }
+    setAddCandidates([])
+    const timer = window.setTimeout(() => { void loadAddProductSearchPage(text, 1, false) }, 300)
     return () => { window.clearTimeout(timer); ++addSearchSeqRef.current }
+    // The request function deliberately belongs to this effect's render. Its
+    // scope/query are captured and independently checked before publication.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [addQuery, canLoadAddItems, detailScope, sale?.branch_id])
 
   // What makes two staged lines the SAME line, and how a pick folds into
@@ -1223,6 +1270,24 @@ export default function SaleDetailModal({
   const canOfferAddItems = !!onAddItems
     && STATUSES_ACCEPTING_ADDED_ITEMS.includes(currentStatus)
     && !hasRecordedReturns
+  const retryAddProductSearch = (): void => {
+    const text = addQuery.trim()
+    if (text.length < 2) return
+    void loadAddProductSearchPage(text, addSearchFailedPage, addSearchFailedPage > 1)
+  }
+  const loadMoreAddProducts = (): void => {
+    const text = addQuery.trim()
+    if (text.length < 2 || !addSearchCanLoadMore || addSearching || addLoadingMore) return
+    void loadAddProductSearchPage(text, addSearchPage.page + 1, true)
+  }
+  const changeAddQuery = (value: string): void => {
+    // Invalidate immediately, before React commits the next render/effect.
+    // This closes the small window in which an older query could resolve
+    // after the user has already typed a different value.
+    ++addSearchSeqRef.current
+    setAddQuery(value)
+  }
+  const searchProgressLabel = `${t('showing') || 'Showing'} ${addSearchVisible} ${t('of') || 'of'} ${addSearchTotal} ${t('products') || 'products'}`
   const addedSubtotalUsd = Math.round(addLines.reduce((sum, line) => sum + line.unitPriceUsd * line.quantity, 0) * 100) / 100
   // Every other money field is frozen by the server (see
   // lib/saleLineAddition.ts's decision 3), so the new total is exactly the
@@ -1495,37 +1560,14 @@ export default function SaleDetailModal({
                 {sale.source_return_id ? (
                   <DetailRow label={translateOr('replacement_for_return', 'Replacement for return', 'ការលក់ជំនួសសម្រាប់ការបង្វិលត្រឡប់')} value={`#${sale.source_return_id}`} mono />
                 ) : null}
-                {/* On phones the customer phone and delivery contact share one
-                    compact line, with the driver's name shown directly rather
-                    than behind a repeated Driver label. Labeled rows remain on
-                    wider screens where the Sale card has room for its table
-                    rhythm. A General sale can still carry its own contact
-                    phone, so keep that copyable snapshot visible without
-                    turning it into a customer profile or membership link. */}
-                  <div data-sale-detail-mobile-contact="" className="flex items-center gap-x-1.5 overflow-x-auto whitespace-nowrap py-1.5 text-xs text-gray-500 sm:hidden">
-                    <span className="font-medium">{customerIsAnonymous ? (t('walk_in') || 'General') : sale.customer_name ? <EntityLink page="contacts">{sale.customer_name}</EntityLink> : (t('walk_in') || 'General')}</span>
-                    {sale.customer_phone ? <EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_phone} navigate={navigateTo} title={t('copy') || 'Copy'}>{sale.customer_phone}</EntityLink> : null}
-                    {sale.customer_phone && (deliveryDriverName || deliveryDriverPhone) ? <span aria-hidden="true">|</span> : null}
-                    {deliveryDriverName || deliveryDriverPhone ? (
-                      <span aria-label={`${translateOr('delivery', 'Delivery', 'ការដឹកជញ្ជូន')}: ${[deliveryDriverName, deliveryDriverPhone].filter(Boolean).join(' · ')}`}>
-                        {deliveryDriverName ? <EntityLink page="contacts" anchor="hub:contacts:delivery" search={deliveryDriverName} navigate={navigateTo} title={translateOr('open_delivery_contact', 'Open delivery contact', 'បើកទំនាក់ទំនងអ្នកដឹក')}>
-                          {deliveryDriverName}
-                        </EntityLink> : null}
-                        {deliveryDriverName && deliveryDriverPhone ? ' · ' : null}
-                        {deliveryDriverPhone ? <EntityLink page="contacts" anchor="hub:contacts:delivery" search={deliveryDriverPhone} navigate={navigateTo} title={translateOr('open_delivery_contact', 'Open delivery contact', 'បើកទំនាក់ទំនងអ្នកដឹក')}>
-                          {deliveryDriverPhone}
-                        </EntityLink> : null}
-                      </span>
-                    ) : null}
-                  </div>
                 {/* Driver, compact, in the section that describes the sale --
                     not in the money block and not in a card of its own. Each
                     row hides itself when empty (DetailRow's own rule), so a
                     walk-in sale is unchanged and a free delivery still names
                     its driver, which the fee row could not do when the fee was
                     zero and the row did not render. */}
-                <div className="hidden sm:block"><DetailRow label={translateOr('driver', 'Driver', 'អ្នកដឹកជញ្ជូន')} value={deliveryDriverName} valueLink={deliveryDriverName ? <EntityLink page="contacts" anchor="hub:contacts:delivery" search={deliveryDriverName} navigate={navigateTo}>{deliveryDriverName}</EntityLink> : undefined} /></div>
-                <div className="hidden sm:block"><DetailRow label={translateOr('driver_phone', 'Driver phone', 'ទូរស័ព្ទអ្នកដឹក')} value={deliveryDriverPhone} valueLink={deliveryDriverPhone ? <EntityLink page="contacts" anchor="hub:contacts:delivery" search={deliveryDriverPhone} navigate={navigateTo}>{deliveryDriverPhone}</EntityLink> : undefined} /></div>
+                <DetailRow label={translateOr('driver', 'Driver', 'អ្នកដឹកជញ្ជូន')} value={deliveryDriverName} valueLink={deliveryDriverName ? <EntityLink page="contacts" anchor="hub:contacts:delivery" search={deliveryDriverName} navigate={navigateTo}>{deliveryDriverName}</EntityLink> : undefined} />
+                <DetailRow label={translateOr('driver_phone', 'Driver phone', 'ទូរស័ព្ទអ្នកដឹក')} value={deliveryDriverPhone} valueLink={deliveryDriverPhone ? <EntityLink page="contacts" anchor="hub:contacts:delivery" search={deliveryDriverPhone} navigate={navigateTo}>{deliveryDriverPhone}</EntityLink> : undefined} />
                 {!toNumber(sale.is_delivery) && canAmendThisSale ? (
                   <div className="py-1.5">
                     <button
@@ -1656,10 +1698,10 @@ export default function SaleDetailModal({
 
             <SectionCard title={t('customer') || 'Customer'} action={onCustomerAction ? <button type="button" className="btn-secondary text-xs" onClick={() => onCustomerAction(sale)}>{t('sale_customer_edit_entry') || 'Edit customer'}</button> : null}>
               <DetailRowGroup>
-                <div className="hidden sm:block"><DetailRow label={t('customer_name') || 'Customer'}>
+                <DetailRow label={t('customer_name') || 'Customer'}>
                   {customerIsAnonymous ? (t('walk_in') || 'General') : sale.customer_name ? <EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_name} navigate={navigateTo}>{sale.customer_name}</EntityLink> : (t('walk_in') || 'General')}
-                </DetailRow></div>
-                {sale.customer_phone ? <div className="hidden sm:block"><DetailRow label={t('phone') || 'Phone'}><EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_phone} navigate={navigateTo}>{sale.customer_phone}</EntityLink></DetailRow></div> : null}
+                </DetailRow>
+                {sale.customer_phone ? <DetailRow label={t('phone') || 'Phone'}><EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_phone} navigate={navigateTo}>{sale.customer_phone}</EntityLink></DetailRow> : null}
                 <DetailRow label={t('address') || 'Address'} value={customerAddress} />
                 {customerIsAnonymous ? null : onAttachMembership ? (
                   <DetailRow label={t('membership') || 'Membership'}>
@@ -1807,7 +1849,7 @@ export default function SaleDetailModal({
                               <input id={`amend-discount-${lineId}`} aria-label={t('discount') || 'Discount'} type="number" min="0" step="0.01" inputMode="decimal" disabled={amendSaving} value={amendDiscountText} onChange={(event) => { if (!amendDiscountType) setAmendDiscountType('fixed'); setAmendDiscountText(event.target.value) }} style={{ width: saleEditorInputWidth(amendDiscountText) }} className="h-7 min-w-10 rounded border border-amber-300 bg-white px-1 py-0.5 text-right text-[11px] dark:border-amber-700 dark:bg-gray-800" />
                               <button type="button" disabled={amendSaving} aria-label={translateOr('clear_discount', 'Clear discount', 'លុបការបញ្ចុះតម្លៃ')} onClick={() => { setAmendDiscountType(null); setAmendDiscountText('0') }} className="rounded px-1 py-0.5">×</button>
                             </div>
-                          </div> : <>{fmtUSD(displayPrice)}{displayDiscount > 0 ? <div className="text-[11px] text-amber-700 dark:text-amber-400">(-{fmtUSD(displayDiscount)})</div> : null}</>}
+                          </div> : <span className="inline-flex items-baseline gap-1">{fmtUSD(displayPrice)}{displayDiscount > 0 ? <span className="text-[10px] text-amber-700 dark:text-amber-400">(-{fmtUSD(displayDiscount)})</span> : null}</span>}
                         </td>
                         <td data-sale-line-total="" className="whitespace-nowrap px-1.5 py-1.5 text-right align-top text-[11px] font-semibold tabular-nums sm:px-2">{fmtUSD(displayTotal)}</td>
                         <td data-sale-line-edit="" className="whitespace-nowrap px-1.5 py-1.5 text-right align-top sm:px-2">
@@ -1857,13 +1899,20 @@ export default function SaleDetailModal({
                                 <input
                                   type="search"
                                   value={addQuery}
-                                  onChange={(event) => setAddQuery(event.target.value)}
+                                  onChange={(event) => changeAddQuery(event.target.value)}
                                   placeholder={translateOr('add_items_search_placeholder', 'Search by name or barcode', 'ស្វែងរកតាមឈ្មោះ ឬបាកូដ')}
                                   className="w-full rounded border border-gray-300 px-2 py-1 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-white"
                                 />
-                                {addSearching ? (
+                                {addSearching && addCandidates.length === 0 ? (
                                   <div className="mt-1 text-[11px] text-gray-400">{t('loading') || 'Loading'}</div>
-                                ) : addCandidates.length ? (
+                                ) : null}
+                                {addSearchError ? (
+                                  <div role="alert" className="mt-1.5 flex items-start justify-between gap-2 rounded border border-red-200 bg-red-50 px-2 py-1.5 text-[11px] text-red-700 dark:border-red-900 dark:bg-red-950/20 dark:text-red-300">
+                                    <span className="min-w-0 flex-1 break-words">{addSearchError}</span>
+                                    <button type="button" disabled={addSearching || addLoadingMore} onClick={retryAddProductSearch} className="min-h-7 shrink-0 rounded px-1.5 font-semibold underline underline-offset-2">{t('retry') || 'Retry'}</button>
+                                  </div>
+                                ) : null}
+                                {addCandidates.length ? (
                                   <div className="pos-product-grid mt-1 max-h-64 overflow-y-auto pr-0.5">
                                     {addCandidateGroups.map((candidate) => (
                                       <ProductCard
@@ -1873,9 +1922,13 @@ export default function SaleDetailModal({
                                       />
                                     ))}
                                   </div>
-                                ) : addQuery.trim().length >= 2 ? (
+                                ) : !addSearching && !addSearchError && addQuery.trim().length >= 2 ? (
                                   <div className="mt-1 text-[11px] text-gray-400">{translateOr('add_items_no_matches', 'No products matched.', 'រកមិនឃើញផលិតផលទេ។')}</div>
                                 ) : null}
+                                {addCandidates.length ? <div data-sale-product-search-progress="" className="mt-1.5 flex items-center justify-between gap-2 text-[11px] text-gray-500 dark:text-gray-400">
+                                  <span>{searchProgressLabel}</span>
+                                  {addSearchCanLoadMore ? <button type="button" disabled={addSearching || addLoadingMore} onClick={loadMoreAddProducts} className="min-h-8 rounded border border-gray-300 px-2 font-semibold text-blue-700 disabled:opacity-50 dark:border-gray-600 dark:text-blue-300">{addLoadingMore ? (t('loading') || 'Loading') : (t('load_more') || 'Load more')}</button> : null}
+                                </div> : null}
                                 {replacePicking ? (
                                   <ProductOptionSheet
                                     product={replacePicking as never}
@@ -2122,7 +2175,7 @@ export default function SaleDetailModal({
                 ref={addSearchInputRef}
                 className="input h-10 text-sm"
                 value={addQuery}
-                onChange={(event) => setAddQuery(event.target.value)}
+                onChange={(event) => changeAddQuery(event.target.value)}
                 placeholder={translateOr('add_items_search_placeholder', 'Search by name or barcode', 'ស្វែងរកតាមឈ្មោះ ឬបាកូដ')}
                 autoComplete="off"
               />
@@ -2140,9 +2193,16 @@ export default function SaleDetailModal({
                   </button>
                 </div>
               ) : null}
-              {addSearching ? (
+              {addSearching && addCandidates.length === 0 ? (
                 <p className="mt-2 text-xs text-gray-400">{t('loading') || 'Loading'}</p>
-              ) : addQuery.trim().length >= 2 && addCandidates.length === 0 ? (
+              ) : null}
+              {addSearchError ? (
+                <div role="alert" className="mt-2 flex items-start justify-between gap-2 rounded-lg border border-red-200 bg-red-50 px-2.5 py-2 text-xs text-red-700 dark:border-red-900 dark:bg-red-950/20 dark:text-red-300">
+                  <span className="min-w-0 flex-1 break-words">{addSearchError}</span>
+                  <button type="button" disabled={addSearching || addLoadingMore} onClick={retryAddProductSearch} className="min-h-8 shrink-0 rounded px-2 font-semibold underline underline-offset-2">{t('retry') || 'Retry'}</button>
+                </div>
+              ) : null}
+              {!addSearching && !addSearchError && addQuery.trim().length >= 2 && addCandidates.length === 0 ? (
                 <p className="mt-2 text-xs text-gray-400">
                   {translateOr('add_items_no_matches', 'No products matched.', 'រកមិនឃើញផលិតផលទេ។')}
                 </p>
@@ -2159,6 +2219,16 @@ export default function SaleDetailModal({
                       onOpen={() => setAddSheetGroup(candidate)}
                     />
                   ))}
+                </div>
+              ) : null}
+              {addCandidates.length > 0 ? (
+                <div data-sale-product-search-progress="" className="mt-2 flex items-center justify-between gap-2 text-xs text-gray-500 dark:text-gray-400">
+                  <span>{searchProgressLabel}</span>
+                  {addSearchCanLoadMore ? (
+                    <button type="button" disabled={addSearching || addLoadingMore} onClick={loadMoreAddProducts} className="min-h-9 rounded-lg border border-gray-300 px-2.5 font-semibold text-blue-700 disabled:opacity-50 dark:border-gray-600 dark:text-blue-300">
+                      {addLoadingMore ? (t('loading') || 'Loading') : (t('load_more') || 'Load more')}
+                    </button>
+                  ) : null}
                 </div>
               ) : null}
               {addSheetGroup ? (

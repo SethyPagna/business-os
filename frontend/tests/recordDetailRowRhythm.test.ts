@@ -92,6 +92,9 @@ for (const [name, source] of [['sale detail', saleDetail], ['return detail', ret
       assert.match(source, /balancedSaleItemNameLines\(productName\)/, 'long product names must be split without dropping text')
       assert.match(source, /data-sale-line-name=""[\s\S]{0,900}overflow-x-auto[\s\S]{0,900}productNameLines\.map/, 'the complete one-or-two-row name must own a horizontal scroller')
       assert.doesNotMatch(source, /line-clamp-2[^\n]*product|data-sale-line-name=""[\s\S]{0,500}line-clamp-2/, 'the full product name must not be hidden by a visual clamp')
+      const priceCell = source.slice(source.indexOf('data-sale-line-price=""'), source.indexOf('data-sale-line-total=""'))
+      assert.match(priceCell, /<span className="inline-flex items-baseline gap-1">[\s\S]*?<span className="text-\[10px\]/, 'read-only price and discount share one compact line')
+      assert.doesNotMatch(priceCell, /displayDiscount > 0 \? <div/, 'read-only discount must not drop beneath its price')
     } else {
       const numericCells = source.match(/className="[^"]*text-right[^"]*align-top[^"]*"/g) || []
       assert.ok(numericCells.length > 0, `${name} must have right-aligned numeric item cells`)
@@ -327,6 +330,17 @@ runTest('the sale detail has no separate Delivery card', () => {
     !saleDetail.includes('sameAddressText') && !saleDetail.includes('deliveryAddressToShow'),
     'the difference-only derivation must be gone with the row it fed',
   )
+})
+
+runTest('customer identity stays in the Customer section at every width', () => {
+  assert.doesNotMatch(saleDetail, /data-sale-detail-mobile-contact/, 'customer identity must not be folded into Sale/driver metadata on phones')
+  const customerStart = saleDetail.indexOf("<SectionCard title={t('customer')")
+  const customerEnd = saleDetail.indexOf("<SectionCard title={`${t('items')", customerStart)
+  const customerCard = saleDetail.slice(customerStart, customerEnd)
+  assert.ok(customerStart >= 0 && customerEnd > customerStart, 'Customer section must remain present')
+  assert.match(customerCard, /<DetailRow label=\{t\('customer_name'\)/, 'Customer name uses the compact shared row')
+  assert.match(customerCard, /<DetailRow label=\{t\('phone'\)/, 'Customer phone uses the compact shared row')
+  assert.doesNotMatch(customerCard, /hidden sm:block/, 'Customer name and phone are not desktop-only')
 })
 
 // --- 9b. one Edit column, one Edit label -----------------------------------
