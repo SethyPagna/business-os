@@ -91,7 +91,7 @@ import { planSaleLinePriceEdit } from '../lib/saleLineEdit'
 import { DELIVERY_AMOUNT_ERROR_MESSAGES, deliveryAmountChanged, parseDeliveryAmountUsd } from '../lib/deliveryAmounts'
 import { applySaleBulkStatus, bulkAssertion, notifyBulkStatus, SaleBulkError, saleRevisionGuard } from '../lib/saleBulkStatus'
 import { applySaleBulkUpdate, notifySaleBulkUpdate } from '../lib/saleBulkUpdate'
-import { assertCustomerAssignmentSafe, customerAssignmentGuard, isLoyaltyAssignmentError, LOYALTY_REASSIGNMENT_CODE, LOYALTY_REASSIGNMENT_MESSAGE } from '../lib/saleCustomerAssignmentGuard'
+import { prepareCustomerAssignments, preparePointsRedemption, isLoyaltyAssignmentError, LOYALTY_REASSIGNMENT_CODE, LOYALTY_REASSIGNMENT_MESSAGE } from '../lib/saleCustomerAssignmentGuard'
 import {
   buildSaleRecords,
   buildSaleRecordsCountSql,
@@ -722,6 +722,7 @@ app.post('/', async (c) => {
     `SELECT value FROM settings WHERE key = 'loyalty_points_enabled'`,
   ).get<{ value: string }>()
   const loyaltyPointsEnabled = !['0', 'false', 'no', 'off'].includes(String(loyaltyEnabledRow?.value ?? '').trim().toLowerCase())
+  let redemptionGuard: Awaited<ReturnType<typeof preparePointsRedemption>> | null = null
 
   if (membershipPointsRedeemed > 0) {
     if (!customer) {
@@ -733,53 +734,11 @@ app.post('/', async (c) => {
     if (!loyaltyPointsEnabled) {
       return c.json({ error: 'Membership points are turned off in Settings, so points cannot be redeemed.' }, 400)
     }
-    const settingsRows = await db.prepare(
-      `SELECT key, value FROM settings WHERE key IN ('customer_portal_points_basis', 'customer_portal_points_per_usd')`,
-    ).all<{ key: string; value: string }>()
-    const settingsMap = Object.fromEntries(settingsRows.map((r) => [r.key, r.value]))
-    const pointsBasis = String(settingsMap.customer_portal_points_basis || 'usd').toLowerCase() === 'khr' ? 'khr' : 'usd'
-    const pointsPerUsd = Number(settingsMap.customer_portal_points_per_usd) || 1
-    const pointsPerKhr = pointsPerUsd > 0 && exchangeRate > 0 ? pointsPerUsd / exchangeRate : 0
-
-    const salesAgg = await db.prepare(
-      `SELECT
-         COALESCE(SUM(CASE WHEN COALESCE(sale_status, 'completed') NOT IN ('cancelled', 'awaiting_payment') AND COALESCE(loyalty_accrual, 1) = 1 THEN total_usd ELSE 0 END), 0) AS earned_usd,
-         COALESCE(SUM(CASE WHEN COALESCE(sale_status, 'completed') NOT IN ('cancelled', 'awaiting_payment') AND COALESCE(loyalty_accrual, 1) = 1 THEN total_khr ELSE 0 END), 0) AS earned_khr,
-         COALESCE(SUM(CASE WHEN COALESCE(sale_status, 'completed') NOT IN ('cancelled', 'awaiting_payment') THEN membership_points_redeemed ELSE 0 END), 0) AS redeemed
-       FROM sales WHERE customer_id = ?`,
-    ).get<{ earned_usd: number; earned_khr: number; redeemed: number }>([customer.id])
-    const returnsAgg = await db.prepare(
-      `SELECT
-         COALESCE(SUM(CASE WHEN COALESCE(status, 'completed') != 'cancelled' THEN total_refund_usd ELSE 0 END), 0) AS refund_usd,
-         COALESCE(SUM(CASE WHEN COALESCE(status, 'completed') != 'cancelled' THEN total_refund_khr ELSE 0 END), 0) AS refund_khr
-       FROM returns WHERE customer_id = ?`,
-    ).get<{ refund_usd: number; refund_khr: number }>([customer.id])
-    const rewardedAgg = await db.prepare(
-      // `reward_points_voided_at IS NULL` (migration 0116) -- the same clause
-      // contacts.ts's bulk read applies. This re-validation and the balance
-      // POS displays MUST see the same ledger; the Part-77 note below is the
-      // record of what happens when one of them omits a term.
-      `SELECT COALESCE(SUM(reward_points), 0) AS rewarded FROM customer_share_submissions WHERE customer_id = ? AND status = 'approved' AND reward_points_voided_at IS NULL`,
-    ).get<{ rewarded: number }>([customer.id])
-    // Manual awards (Part-77, MEDIUM): summarizePoints -- the balance POS
-    // DISPLAYS -- adds loyalty_point_adjustments, but this re-validation
-    // didn't, so a customer whose points were manually awarded saw a
-    // redeemable balance and then got "Insufficient points balance" at
-    // checkout. Same term, same sign (adjustments are positive awards by
-    // CHECK constraint).
-    const adjustedAgg = await db.prepare(
-      `SELECT COALESCE(SUM(points), 0) AS adjusted FROM loyalty_point_adjustments WHERE customer_id = ? AND voided_at IS NULL`,
-    ).get<{ adjusted: number }>([customer.id])
-
-    const earned = pointsBasis === 'khr' ? (salesAgg?.earned_khr || 0) * pointsPerKhr : (salesAgg?.earned_usd || 0) * pointsPerUsd
-    const deducted = pointsBasis === 'khr' ? (returnsAgg?.refund_khr || 0) * pointsPerKhr : (returnsAgg?.refund_usd || 0) * pointsPerUsd
-    const alreadyRedeemed = salesAgg?.redeemed || 0
-    const rewarded = rewardedAgg?.rewarded || 0
-    const manuallyAwarded = adjustedAgg?.adjusted || 0
-    const balance = Math.max(0, earned - deducted - alreadyRedeemed + rewarded + manuallyAwarded)
-
-    if (membershipPointsRedeemed > balance + 0.005) {
-      return c.json({ error: `Insufficient points balance: requested ${membershipPointsRedeemed}, available ${Math.floor(balance)}` }, 409)
+    try {
+      redemptionGuard = await preparePointsRedemption(db, customer.id, membershipPointsRedeemed)
+    } catch (error) {
+      if (error instanceof SaleBulkError) return c.json({ error: error.message, code: 'loyalty_redemption_conflict' }, error.statusCode)
+      throw error
     }
   } else {
     membershipDiscountUsd = 0
@@ -1113,6 +1072,7 @@ app.post('/', async (c) => {
   let resolvedReceiptNumber = receiptNumber
   try {
     const statements: Array<{ sql: string; params: Record<string, unknown> }> = [
+      ...(redemptionGuard ? [redemptionGuard] : []),
       saleInsertStatement,
       {
         // D1 batch rolls back only on an exception, not a zero-row INSERT.
@@ -1451,6 +1411,9 @@ app.post('/', async (c) => {
           error: 'This sale was not completely recorded. Keep the original sale details and ask an administrator to recover it.',
           code: 'sale_incomplete',
         }, 409)
+      }
+      if (redemptionGuard && /malformed JSON/i.test(message)) {
+        return c.json({ error: 'Membership points or checkout state changed before the sale was recorded. Refresh and try again.', code: 'loyalty_redemption_conflict' }, 409)
       }
       if (customerStateGuard) {
         const currentCustomer = await db.prepare('SELECT is_anonymous FROM customers WHERE id=?')
@@ -2555,8 +2518,9 @@ app.patch('/:id/customer', async (c) => {
   if (assignmentUnchanged) {
     return c.json({ id: saleId, updated_at: sale.updated_at || expectedUpdatedAt })
   }
+  let assignmentPlan: Awaited<ReturnType<typeof prepareCustomerAssignments>>
   try {
-    await assertCustomerAssignmentSafe(db, saleId, customer?.id ?? null)
+    assignmentPlan = await prepareCustomerAssignments(db, [{ id: saleId, sourceId: sale.customer_id, targetId: customer?.id ?? null }])
   } catch (error) {
     if (isLoyaltyAssignmentError(error)) return c.json({ error: LOYALTY_REASSIGNMENT_MESSAGE, code: LOYALTY_REASSIGNMENT_CODE }, 409)
     throw error
@@ -2637,7 +2601,7 @@ app.patch('/:id/customer', async (c) => {
 
   try {
     await db.batch([
-      customerAssignmentGuard(saleId, customer?.id ?? null),
+      ...(assignmentPlan ? [assignmentPlan.pre] : []),
       saleRevisionGuard(Number(saleId), Number(sale.write_revision)),
       ...(sourceReferenceGuard ? [sourceReferenceGuard] : []),
       ...(customerReferenceGuard ? [customerReferenceGuard] : []),
@@ -2662,16 +2626,12 @@ app.patch('/:id/customer', async (c) => {
       sql: `UPDATE returns SET customer_id = @customer_id, customer_name = @customer_name, updated_at = @updated_at WHERE sale_id = @sale_id`,
       params: { customer_id: customer?.id ?? null, customer_name: customer?.name ?? null, updated_at: mutationStamp, sale_id: saleId },
       },
+      ...(assignmentPlan ? [assignmentPlan.post] : []),
       eventInsert.statement,
       { sql: 'DELETE FROM sale_bulk_guards', params: {} },
     ])
   } catch (error) {
-    try {
-      await assertCustomerAssignmentSafe(db, saleId, customer?.id ?? null)
-    } catch (loyaltyError) {
-      if (isLoyaltyAssignmentError(loyaltyError)) return c.json({ error: LOYALTY_REASSIGNMENT_MESSAGE, code: LOYALTY_REASSIGNMENT_CODE }, 409)
-      throw loyaltyError
-    }
+    if (assignmentPlan && /malformed JSON/i.test(String(error))) return c.json({ error: LOYALTY_REASSIGNMENT_MESSAGE, code: LOYALTY_REASSIGNMENT_CODE }, 409)
     if (/constraint/i.test(String(error))) {
       const replay = await db.prepare(`
         SELECT request_digest,response_json FROM sale_record_events
