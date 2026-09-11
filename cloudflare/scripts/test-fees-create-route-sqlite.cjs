@@ -110,7 +110,6 @@ const feeOperationReceipt = loadReal('lib/feeOperationReceipt.ts')
 const route = loadReal('routes/fees.ts', {
   hono: require('hono'),
   '../lib/db': { getDb: () => db },
-  '../lib/operationWriteReadiness': loadReal('lib/operationWriteReadiness.ts'),
   '../lib/auth': {
     requireAuth: async (c, next) => {
       c.set('user', { id: 7, username: 'fee-cashier', name: 'Fee Cashier' })
