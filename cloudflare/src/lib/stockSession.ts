@@ -847,6 +847,16 @@ const REPLAY_TABLES = {
   movements: ['inventory_movements', 'id IN (SELECT movement_id FROM m)'],
 } as const
 
+// Migration 0154 enforces the parent/child active-stock invariant at every
+// statement boundary inside a D1 batch. Undo must remove positive lot stock
+// before deactivating a newly retained lot; redo must reactivate the saved lot
+// metadata before restoring that stock. Keep the remaining dependency order
+// explicit as well so replay stays valid if these tables gain similar guards.
+const REPLAY_MUTATION_ORDER = {
+  undo: ['branchBatchStock', 'branchStock', 'batches', 'products'],
+  redo: ['products', 'batches', 'branchStock', 'branchBatchStock'],
+} as const
+
 async function stockReplayStateSql(env: Env): Promise<string> {
   const fields: string[] = []
   for (const [key, [table, where]] of Object.entries(REPLAY_TABLES)) {
@@ -945,8 +955,8 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
       AND h.status=@status AND s.payload_json=@snapshot)`, { id: op.id, history: historyId, generation, status: expectedStatus, snapshot: op.payload_json }),
     assertion(`${stateSql}=(SELECT json_extract(payload_json,'$.expected') FROM undo_snapshots WHERE id=@snapshotId)`, { id: op.id, snapshotId: op.snapshot_id }),
   ]
-  for (const [key, [table]] of Object.entries(REPLAY_TABLES)) {
-    if (key === 'images' || key === 'members' || key === 'movements') continue // Original links/ledger rows are immutable during replay.
+  for (const key of REPLAY_MUTATION_ORDER[direction]) {
+    const [table] = REPLAY_TABLES[key]
     for (const row of after[key]) {
       const original = (before[key] || []).find(r => r.id === row.id)
       const created = members.some(m => m.product_created === 1 && m.product_id === (key === 'products' ? row.id : row.product_id))
