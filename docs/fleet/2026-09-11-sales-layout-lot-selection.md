@@ -30,7 +30,10 @@ Owner: root. Integration: `codex/sales-layout-lot-selection-20260911`, isolated 
 - Actual Chromium full date endpoints fit at320/360/390/1280. Normal EN/KM pager center delta <=0.008px and no document overflow. Reviewer found legitimate large ranges/page numbers clipped by200px cap; correction required before release.
 - Frontend broad gate initially363/367 files green; four failures are stale source-contract assertions after deliberate layout/scope changes. Updating assertions without removing behavioral invariants, then rerun whole gate.
 - Independent Fees review caught queued-approval delete being described as completed deletion (pre-existing behavior carried into new detail); correction required before release.
-- Final typechecks/i18n/build, integrated regression rerun, pager remeasurement, Fees re-review, deployment/provenance and live smoke remain pending. Do not mark task fully verified yet.
+- Frontend full gate atb302a88c:367/367 files PASS, typecheck/public-runtime/source syntax PASS. i18n5711keys592sources and production build1126modules PASS (existing chunk warnings).
+- Fees queued-delete fixec420beb independently verified against actual server202 review contract and callback tests: pending approval is truthfully notified; accepted queued requests close/reload without claiming deletion. Localized receipt labels no longer expose undefined IDs.
+- Pagerb302a88c deliberately shows selected page-size count, with full range in accessible label, and sizes page input for its digits. Repeated independent browser checks exposed global mobile `.grid {gap:0.75rem!important}` overriding normal AND important utility classes. Final67c28edd uses full-width inline-grid to avoid that selector. Actual rebuilt CSS/Chromium40/40 EN/KM x320/360/390/1280 xpages1/178/500/5000/61729 PASS. Gap0, no pager/root/document overflow, no label/input clipping; center delta<=0.008px. AtKM320page61729 pager187.05px; page-size client=scroll11px, inputclient=scroll40px. Full date endpoints remain visible.
+- Remaining release gates: final frozen candidate build/focused regression, broad backend sweep completion/retry, deployment/provenance and live read-only smoke. No deployment claimed yet.
 
 ## Scope and safety notes
 
