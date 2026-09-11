@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { getDb, type D1Compat } from '../lib/db'
+import { operationWritesReady } from '../lib/operationWriteReadiness'
 import { localDateAtOrAfter, localDateAtOrBefore } from '../lib/businessDateWindow'
 import { attachBatchCounts } from '../lib/productBatches'
 import { paginateProductFamilies } from '../lib/familyPagination'
@@ -1914,6 +1915,7 @@ app.post('/transfer', async (c) => {
     return c.json({ error: 'Branch transfers require Full Access to Inventory -- Review Required support for this action is not built yet.' }, 403)
   }
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
+  if (body.transfer_provenance_version !== 1) return c.json({ error: 'Refresh the app before transferring stock.', code: 'client_upgrade_required' }, 409)
   const productId = Number.parseInt(String(body.productId ?? body.product_id ?? ''), 10)
   const fromBranchId = Number.parseInt(String(body.fromBranchId ?? body.from_branch_id ?? ''), 10)
   const toBranchId = Number.parseInt(String(body.toBranchId ?? body.to_branch_id ?? ''), 10)
@@ -1944,6 +1946,7 @@ app.post('/transfer', async (c) => {
   if (!reason) return c.json({ error: 'A transfer reason is required.' }, 400)
 
   const db = getDb(c.env)
+  if (!await operationWritesReady(db)) return c.json({ error: 'An app upgrade is in progress. Please try again shortly.', code: 'release_upgrade_in_progress' }, 503)
   const requestJson = JSON.stringify({ version: 1, kind: 'inventory-transfer', productId, fromBranchId, toBranchId, quantity, reason })
   const requestDigest = await transferRequestDigest(requestJson)
   const previousReceipt = await findTransferReceipt(db, user.id, clientRequestId)

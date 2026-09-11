@@ -34,7 +34,7 @@ export function prepareTransferRun(actorId: unknown, payloads: Array<{ bulk: boo
   return JSON.parse(JSON.stringify({
     version: 1, actorId: String(actorId), next: 0, transferred: 0, merges: 0,
     requests: payloads.map(({ bulk, body }) => ({
-      bulk, body: ensureClientRequestId({ ...getDevicePayload(), ...body }, bulk ? 'transfer-bulk' : 'transfer'),
+      bulk, body: ensureClientRequestId({ ...getDevicePayload(), ...body, transfer_provenance_version: 1 }, bulk ? 'transfer-bulk' : 'transfer'),
     })),
   })) as PendingTransferRun
 }
@@ -199,6 +199,7 @@ export function getTransfers(params: QueryParams = {}): Promise<unknown> {
 // the reason for exactly that reason. Nothing new should send `note`.
 export function transferStock(payload: BranchPayload = {}): Promise<unknown> {
   const body = payload.client_request_id ? JSON.parse(JSON.stringify(payload)) : ensureClientRequestId({ ...getDevicePayload(), ...(payload || {}) }, 'transfer')
+  body.transfer_provenance_version = 1
   return route(
     'branches:transfer',
     () => apiFetch('POST', '/api/branches/transfer', body),
@@ -209,6 +210,7 @@ export function transferStock(payload: BranchPayload = {}): Promise<unknown> {
 
 export function transferStockBulk(payload: BranchPayload = {}): Promise<unknown> {
   const body = payload.client_request_id ? JSON.parse(JSON.stringify(payload)) : ensureClientRequestId({ ...getDevicePayload(), ...(payload || {}) }, 'transfer-bulk')
+  body.transfer_provenance_version = 1
   return route(
     'branches:transfer-bulk',
     () => apiFetch('POST', '/api/branches/transfer-bulk', body, 90_000),

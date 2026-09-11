@@ -67,7 +67,13 @@ db.exec(`
     fee_date TEXT, sale_id INTEGER, branch_id INTEGER, delivery_contact_id INTEGER, created_by INTEGER, created_at TEXT);
   CREATE TABLE inventory_movements (id INTEGER PRIMARY KEY, movement_type TEXT, quantity REAL, created_at TEXT);
   CREATE TABLE delivery_contacts (id INTEGER PRIMARY KEY, name TEXT);
-  CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT, phone TEXT, gender TEXT);
+  CREATE TABLE customers (
+    id INTEGER PRIMARY KEY,
+    name TEXT,
+    phone TEXT,
+    gender TEXT,
+    is_anonymous INTEGER NOT NULL DEFAULT 0 CHECK (is_anonymous IN (0, 1))
+  );
   CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, barcode TEXT, category TEXT, stock_quantity REAL);
   CREATE TABLE categories (id INTEGER PRIMARY KEY, name TEXT);
   CREATE TABLE branch_stock (id INTEGER PRIMARY KEY, product_id INTEGER, branch_id INTEGER, quantity REAL);

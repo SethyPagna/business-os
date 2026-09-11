@@ -106,7 +106,11 @@ db.exec(`
     return_to_stock INTEGER,
     stock_action TEXT
   );
-  CREATE TABLE customers (id INTEGER PRIMARY KEY, membership_number TEXT);
+  CREATE TABLE customers (
+    id INTEGER PRIMARY KEY,
+    membership_number TEXT,
+    is_anonymous INTEGER NOT NULL DEFAULT 0 CHECK (is_anonymous IN (0, 1))
+  );
   -- getDeliveryContactTotals also folds courier expense rows (fees linked to a
   -- delivery contact via 0105) into the day report; the columns it reads.
   CREATE TABLE delivery_contacts (id INTEGER PRIMARY KEY, name TEXT);

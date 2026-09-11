@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { getDb } from '../lib/db'
+import { operationWritesReady } from '../lib/operationWriteReadiness'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
 import { getPermissionTier, getActionTier } from '../lib/permissions'
@@ -455,6 +456,7 @@ app.post('/', async (c) => {
   if (!clientRequestId) {
     return c.json({ error: 'client_request_id is required when creating an expense.', code: 'client_request_id_required' }, 400)
   }
+  if (!await operationWritesReady(db)) return c.json({ error: 'An app upgrade is in progress. Please try again shortly.', code: 'release_upgrade_in_progress' }, 503)
 
   const feeType = normalizeFeeType(body.fee_type ?? body.feeType)
   const label = normalizeFeeLabel(body.label)
@@ -463,7 +465,13 @@ app.post('/', async (c) => {
   const feeDate = normalizeDate(body.fee_date ?? body.feeDate)
   const requestedSaleId = optionalPositiveId(body.sale_id)
   const requestedBranchId = optionalPositiveId(body.branch_id)
-  const requestedDeliveryContactId = optionalPositiveId(body.delivery_contact_id ?? body.deliveryContactId)
+  // Preserve an explicit snake_case null from the normal frontend. Using
+  // `??` here previously fell through to the absent legacy camelCase field,
+  // turning that valid null into undefined and then rejecting it below.
+  const deliveryContactValue = body.delivery_contact_id !== undefined
+    ? body.delivery_contact_id
+    : body.deliveryContactId
+  const requestedDeliveryContactId = optionalPositiveId(deliveryContactValue)
   if (body.sale_id !== undefined && body.sale_id !== null && body.sale_id !== '' && requestedSaleId == null) {
     return c.json({ error: 'Choose an existing sale recorded at the Shop.' }, 400)
   }
@@ -471,8 +479,8 @@ app.post('/', async (c) => {
     return c.json({ error: 'Every expense must use the active Shop branch.' }, 400)
   }
   if ((body.delivery_contact_id !== undefined || body.deliveryContactId !== undefined)
-    && (body.delivery_contact_id ?? body.deliveryContactId) !== null
-    && (body.delivery_contact_id ?? body.deliveryContactId) !== ''
+    && deliveryContactValue !== null
+    && deliveryContactValue !== ''
     && requestedDeliveryContactId == null) {
     return c.json({ error: 'Invalid delivery contact' }, 400)
   }

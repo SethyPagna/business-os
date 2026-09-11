@@ -87,6 +87,7 @@ const inventoryRoute = loadModule('routes/inventory.ts', (id) => {
   if (id === '../lib/branchRoleGuards') return branchGuards
   if (id === '../lib/canonicalBranchIdentity') return canonicalIdentity
   if (id === '../lib/actorSnapshot') return { actorSnapshot: (user) => user?.name || null }
+  if (id === '../lib/operationWriteReadiness') return loadModule('lib/operationWriteReadiness.ts', require)
   if (id === '../lib/transferOperation') return loadModule('lib/transferOperation.ts', (dep) => {
     if (dep === './db') return { getDb: () => wrapDb(routeDb) }
     if (dep === './permissions') return { getActionTier: user => user?.tier || 'none' }
@@ -180,7 +181,7 @@ async function routeRequest(body) {
   const response = await inventoryApp.request('/transfer', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ transfer_provenance_version: 1, ...body }),
   }, {}, {
     waitUntil: (promise) => { routeWaits.push(Promise.resolve(promise)) },
     passThroughOnException: () => {},

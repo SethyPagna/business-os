@@ -23,7 +23,7 @@ function wrapDb() {
     },
   }
 }
-const realLibraries = new Set(['db', 'sqlBinding', 'batchCode', 'productBatches', 'branchRoles', 'branchRoleGuards', 'canonicalBranchIdentity', 'transferOperationReceipt', 'transferOperation', 'permissions', 'actorSnapshot', 'undoAppliers'])
+const realLibraries = new Set(['operationWriteReadiness', 'db', 'sqlBinding', 'batchCode', 'productBatches', 'branchRoles', 'branchRoleGuards', 'canonicalBranchIdentity', 'transferOperationReceipt', 'transferOperation', 'permissions', 'actorSnapshot', 'undoAppliers'])
 function load(relative) {
   if (modules.has(relative)) return modules.get(relative)
   const module = { exports: {} }
@@ -56,9 +56,9 @@ function load(relative) {
 const apps = { branches: load('routes/branches.ts').default, inventory: load('routes/inventory.ts').default }
 for (const app of Object.values(apps)) app.onError((error, c) => c.json({ error: error.message }, 500))
 
-function fresh(count = 3, from = 1) {
+function fresh(count = 3, from = 1, beforeMigration = null) {
   sqlite = new Database(':memory:')
-  const migrations = fs.readdirSync(path.join(__dirname, '../migrations')).filter(file => file.endsWith('.sql')).sort()
+  const migrations = fs.readdirSync(path.join(__dirname, '../migrations')).filter(file => file.endsWith('.sql') && (!beforeMigration || file < beforeMigration)).sort()
   for (const file of migrations) sqlite.exec(fs.readFileSync(path.join(__dirname, '../migrations', file), 'utf8'))
   sqlite.exec("INSERT INTO branches(id,name,is_active) VALUES(1,'Shop',1),(2,'Warehouse',1),(3,'Other',1)")
   for (let id = 1; id <= count; id++) {
@@ -78,7 +78,7 @@ async function request(app, route, body, method = 'POST') {
   return { status: response.status, body: await response.json() }
 }
 function intent(from, count, key = 'transfer_test_001', bulk = true) {
-  const common = { fromBranchId: from, toBranchId: from === 1 ? 2 : 1, reason: 'Restock', client_request_id: key }
+  const common = { transfer_provenance_version: 1, fromBranchId: from, toBranchId: from === 1 ? 2 : 1, reason: 'Restock', client_request_id: key }
   return bulk ? { ...common, items: Array.from({ length: count }, (_, index) => ({ productId: index + 1, quantity: 2.5 })) } : { ...common, productId: 1, quantity: 2.5 }
 }
 function counts() {

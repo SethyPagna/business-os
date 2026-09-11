@@ -153,6 +153,7 @@ export function editStockMovementReason(id: number, reason: string): Promise<unk
 
 export function transferInventoryStock(payload: InventoryPayload = {}): Promise<unknown> {
   const body = payload.client_request_id ? JSON.parse(JSON.stringify(payload)) : ensureClientRequestId({ ...getDevicePayload(), ...(payload || {}) }, 'transfer')
+  body.transfer_provenance_version = 1
   return route(
     'inventory:transfer',
     () => apiFetch(

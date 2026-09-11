@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { getDb } from '../lib/db'
+import { operationWritesReady } from '../lib/operationWriteReadiness'
 import { buildInClause, chunkForBinding, selectInChunks } from '../lib/sqlBinding'
 import type { D1Compat } from '../lib/db'
 import { paginateProductFamilies } from '../lib/familyPagination'
@@ -353,6 +354,7 @@ app.post('/transfer', async (c) => {
     return c.json({ error: 'Transferring stock requires Full Access to Branches -- Review Required support for this action is not built.' }, 403)
   }
   const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
+  if (body.transfer_provenance_version !== 1) return c.json({ error: 'Refresh the app before transferring stock.', code: 'client_upgrade_required' }, 409)
   const productId = Number.parseInt(String(body.productId ?? ''), 10)
   const fromBranchId = Number.parseInt(String(body.fromBranchId ?? ''), 10)
   const toBranchId = Number.parseInt(String(body.toBranchId ?? ''), 10)
@@ -388,6 +390,7 @@ app.post('/transfer', async (c) => {
 
   const db = getDb(c.env)
   const requestJson = JSON.stringify({ version: 1, kind: 'transfer', productId, fromBranchId, toBranchId, quantity, reason, batchId })
+  if (!await operationWritesReady(db)) return c.json({ error: 'An app upgrade is in progress. Please try again shortly.', code: 'release_upgrade_in_progress' }, 503)
   const requestDigest = await transferRequestDigest(requestJson)
   const previousReceipt = await findTransferReceipt(db, user.id, clientRequestId)
   if (previousReceipt) {
@@ -542,6 +545,7 @@ app.post('/transfer-bulk', async (c) => {
     return c.json({ error: 'Transferring stock requires Full Access to Branches -- Review Required support for this action is not built.' }, 403)
   }
   const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
+  if (body.transfer_provenance_version !== 1) return c.json({ error: 'Refresh the app before transferring stock.', code: 'client_upgrade_required' }, 409)
   const fromBranchId = Number.parseInt(String(body.fromBranchId ?? ''), 10)
   const toBranchId = Number.parseInt(String(body.toBranchId ?? ''), 10)
   // The operator's own reason. `reason` is what every current client sends;
@@ -595,6 +599,7 @@ app.post('/transfer-bulk', async (c) => {
 
   const db = getDb(c.env)
   const requestJson = JSON.stringify({ version: 1, kind: 'transfer-bulk', fromBranchId, toBranchId, reason, items })
+  if (!await operationWritesReady(db)) return c.json({ error: 'An app upgrade is in progress. Please try again shortly.', code: 'release_upgrade_in_progress' }, 503)
   const requestDigest = await transferRequestDigest(requestJson)
   const previousReceipt = await findTransferReceipt(db, user.id, clientRequestId)
   if (previousReceipt) {
