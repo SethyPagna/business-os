@@ -4,6 +4,8 @@ const path = require('node:path')
 const Database = require('better-sqlite3')
 const dir = path.join(__dirname, '../migrations')
 const sql = fs.readFileSync(path.join(dir, '0153_received_date_saleability_repair.sql'), 'utf8')
+// D1 migrations apply owns the entire file transaction, including its ledger.
+const apply = db => db.transaction(() => db.exec(sql))()
 const manifest = [
   [165,9,0,56007,46189,16786,40033,'14:48:57'],
   [238,0,0,51164,46194,16795,40058,'14:49:00'],
@@ -62,11 +64,21 @@ let passed=0
 function check(name,fn) { fn(); passed++; console.log(`PASS ${name}`) }
 check('LF-only migration applies and reruns without data on fresh installation', () => {
   assert(!sql.includes('\r'))
-  const db=dbNew(); const before=snapshot(db); db.exec(sql); db.exec(sql)
+  assert.doesNotMatch(sql, /CREATE\s+TRIGGER|\bRAISE\s*\(|\bCASE\b/)
+  const db=dbNew(); const before=snapshot(db); apply(db); apply(db)
   assert.deepEqual(snapshot(db),before); db.close()
 })
+check('non-incident installation freezes no-op mode and leaves unrelated data unchanged', () => {
+  const db=dbNew()
+  db.exec("INSERT INTO products(id,name,stock_quantity) VALUES(900001,'Unrelated product',7); INSERT INTO branches(id,name) VALUES(900001,'Unrelated branch'); INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(900001,900001,7)")
+  const before=snapshot(db)
+  apply(db); apply(db)
+  assert.deepEqual(snapshot(db),before)
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM sqlite_master WHERE name LIKE '_received_date_%_0153'").get().n,0)
+  db.close()
+})
 check('exact incident repair restores nine units and connects all 11 active Shop products', () => {
-  const db=seeded(); const before=snapshot(db); db.exec(sql)
+  const db=seeded(); const before=snapshot(db); apply(db)
   for(const [product,stock,shop] of manifest) {
     assert.equal(db.prepare('SELECT stock_quantity q FROM products WHERE id=?').get(product).q,stock+1)
     assert.equal(db.prepare('SELECT quantity q FROM branch_stock WHERE product_id=? AND branch_id=2').get(product).q,shop+1)
@@ -100,7 +112,7 @@ check('exact incident repair restores nine units and connects all 11 active Shop
   assert.deepEqual(db.prepare('SELECT * FROM branch_stock WHERE branch_id=1 ORDER BY id').all(),before.branch_stock.filter(r=>r.branch_id===1))
   assert.equal(db.prepare('SELECT COUNT(*) n FROM products WHERE id=7091').get().n,0)
   assert.equal(db.prepare('PRAGMA integrity_check').get().integrity_check,'ok')
-  const after=snapshot(db); db.exec(sql); assert.deepEqual(snapshot(db),after,'retry changes nothing')
+  const after=snapshot(db); apply(db); assert.deepEqual(snapshot(db),after,'retry changes nothing')
   db.close()
 })
 check('Clarins and Olay next ordinals ignore legacy text and never collide with numeric lots',()=>{
@@ -113,7 +125,7 @@ check('Clarins and Olay next ordinals ignore legacy text and never collide with 
   // INTEGER affinity stores well-formed numeric text numerically already.
   assert.equal(db.prepare("SELECT typeof(batch_number) t FROM product_batches WHERE variant_product_id=1244 AND batch_key='numeric-text'").get().t,'integer')
   const before=db.prepare('SELECT id,batch_number FROM product_batches ORDER BY id').all()
-  db.exec(sql)
+  apply(db)
   const repaired=db.prepare("SELECT id,variant_product_id,batch_number FROM product_batches WHERE id=61020 OR batch_key='repair-0153-return-1-item-3'").all()
   assert.equal(repaired.length,2)
   for(const row of repaired) {
@@ -142,29 +154,29 @@ const staleCases=[
 ]
 for(const [name,mutation] of staleCases) check(`stale ${name} aborts without business writes`,()=>{
   const db=seeded();db.exec(mutation);const before=snapshot(db)
-  assert.throws(()=>db.exec(sql),/0153:/);assert.deepEqual(snapshot(db),before);db.close()
+  assert.throws(()=>apply(db),/0153:/);assert.deepEqual(snapshot(db),before);db.close()
 })
 check('an isolated partial signature never masquerades as fresh empty data',()=>{
   for(const mutation of ["INSERT INTO products(id,name) VALUES(165,'partial')","INSERT INTO sales(id) VALUES(16790)","INSERT INTO inventory_movements(id) VALUES(46189)","INSERT INTO returns(id) VALUES(1)"]) {
     const db=dbNew();db.exec(mutation);const before=snapshot(db)
-    assert.throws(()=>db.exec(sql),/0153:/);assert.deepEqual(snapshot(db),before);db.close()
+    assert.throws(()=>apply(db),/0153:/);assert.deepEqual(snapshot(db),before);db.close()
   }
 })
 check('postcondition failure rolls back ALL writes including audit, lots and allocations',()=>{
   const db=seeded()
   db.exec("CREATE TRIGGER test_0153_corrupt AFTER INSERT ON sale_item_batch_allocations BEGIN UPDATE branch_stock SET quantity=quantity+1 WHERE product_id=1244 AND branch_id=1; END;")
-  const before=snapshot(db);assert.throws(()=>db.exec(sql),/0153:/);assert.deepEqual(snapshot(db),before);db.close()
+  const before=snapshot(db);assert.throws(()=>apply(db),/0153:/);assert.deepEqual(snapshot(db),before);db.close()
 })
 check('a completion marker cannot hide partial repair or recovered quantities',()=>{
   for(const mutate of ["INSERT INTO audit_logs(action,entity_id) VALUES('received_date_saleability_repair','0153')",null]) {
     const db=seeded()
     if(mutate) db.exec(mutate)
-    else { db.exec(sql);db.exec('UPDATE branch_batch_stock SET quantity=8 WHERE id=77792') }
-    const before=snapshot(db);assert.throws(()=>db.exec(sql),/0153: completed/);assert.deepEqual(snapshot(db),before);db.close()
+    else { apply(db);db.exec('UPDATE branch_batch_stock SET quantity=8 WHERE id=77792') }
+    const before=snapshot(db);assert.throws(()=>apply(db),/0153: completed/);assert.deepEqual(snapshot(db),before);db.close()
   }
 })
 check('audit snapshots support exact stock/lot/financial recovery during the write pause',()=>{
-  const db=seeded();const before=snapshot(db);db.exec(sql)
+  const db=seeded();const before=snapshot(db);apply(db)
   const audit=db.prepare("SELECT * FROM audit_logs WHERE action='received_date_saleability_repair'").get()
   const old=JSON.parse(audit.old_value),added=JSON.parse(audit.new_value)
   db.transaction(()=>{

@@ -1,6 +1,5 @@
 // Exercise the installed Wrangler parser AND `d1 migrations apply --local`.
-// better-sqlite3.exec alone cannot detect Wrangler's whitespace-sensitive CASE
-// stack. Bootstrap the pre-0153 schema directly so unrelated historical data
+// Bootstrap the pre-0153 schema directly so unrelated historical data
 // migrations (including 0098's compound SELECT limit) do not mask this test.
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
@@ -43,7 +42,7 @@ async function main() {
   }
   const schema = sqlite.prepare("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' AND name NOT IN (SELECT name FROM pragma_table_list WHERE type='shadow') ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 ELSE 2 END, rowid").all()
   const seed = { branches: sqlite.prepare('SELECT * FROM branches ORDER BY id').all(), ...snapshot(sqlite) }
-  for (const file of files) sqlite.exec(fs.readFileSync(path.join(dir, file), 'utf8'))
+  for (const file of files) sqlite.transaction(() => sqlite.exec(fs.readFileSync(path.join(dir, file), 'utf8')))()
   const expected = snapshot(sqlite)
   // Generated correction/audit timestamps differ between the two runtimes;
   // the pure repair suite separately verifies every existing timestamp.
@@ -56,26 +55,64 @@ async function main() {
     await db.batch(Object.entries(seed).flatMap(([table, rows]) => rows.map(row =>
       db.prepare(`INSERT INTO ${table} (${Object.keys(row).join(',')}) VALUES (${Object.keys(row).map(() => '?').join(',')})`).bind(...Object.values(row)),
     )))
+    await db.prepare("CREATE TRIGGER test_native_postguard AFTER INSERT ON sale_item_batch_allocations BEGIN UPDATE branch_stock SET quantity=quantity+1 WHERE product_id=1244 AND branch_id=1; END;").run()
   } finally { await mf.dispose() }
 
+  const postguardFailed = run('d1', 'migrations', 'apply', 'migration-parser-test')
+  assert.notEqual(postguardFailed.status, 0, postguardFailed.output)
+  assert.match(postguardFailed.output, /0153: final aggregate\/dated Shop coverage mismatch/)
+  async function assertRolledBack(db) {
+    for (const table of Object.keys(expected)) {
+      const actual = (await db.prepare(`SELECT * FROM ${table} ORDER BY id`).all()).results
+      assert.deepEqual(actual, seed[table], `${table}: all writes and timestamps must roll back`)
+    }
+    assert.equal((await db.prepare('SELECT COUNT(*) n FROM d1_migrations').first()).n, 0)
+    assert.equal((await db.prepare("SELECT COUNT(*) n FROM sqlite_master WHERE name LIKE '_received_date_%_0153'").first()).n, 0)
+  }
+  mf = local()
+  try {
+    const db = await mf.getD1Database('DB')
+    await assertRolledBack(db)
+    await db.prepare('DROP TRIGGER test_native_postguard').run()
+    // Insert a conflicting ledger row during the repair, after Wrangler has
+    // selected pending files. Only the final appended ledger INSERT fails.
+    await db.prepare('CREATE UNIQUE INDEX test_native_ledger_unique ON d1_migrations(name)').run()
+    await db.prepare(`CREATE TRIGGER test_native_ledger_conflict AFTER INSERT ON audit_logs
+      WHEN NEW.action='received_date_saleability_repair' AND NEW.entity_id='0153'
+      BEGIN INSERT INTO d1_migrations(name) VALUES('${files[0]}'); END;`).run()
+  } finally { await mf.dispose() }
+  console.log('PASS actual local runner postcondition failure rolls back all 12 business tables, helper DDL and ledger')
+  const ledgerFailed = run('d1', 'migrations', 'apply', 'migration-parser-test')
+  assert.notEqual(ledgerFailed.status, 0, ledgerFailed.output)
+  assert.match(ledgerFailed.output, /UNIQUE constraint failed: d1_migrations.name/)
+  mf = local()
+  try {
+    const db = await mf.getD1Database('DB')
+    await assertRolledBack(db)
+    await db.prepare('DROP TRIGGER test_native_ledger_conflict').run()
+    await db.prepare('DROP INDEX test_native_ledger_unique').run()
+  } finally { await mf.dispose() }
+  console.log('PASS actual local runner final-ledger failure rolls back the completed repair and helpers')
   const applied = run('d1', 'migrations', 'apply', 'migration-parser-test')
   assert.equal(applied.status, 0, applied.output)
 
+  const replayBefore = {}
   mf = local()
   try {
     const db = await mf.getD1Database('DB')
     const names = (await db.prepare('SELECT name FROM d1_migrations ORDER BY name').all()).results.map(row => row.name)
     assert.deepEqual(names, files)
     console.log('PASS actual Wrangler local migration runner applies and records 0153, 0154 and 0155')
-    for (const [index, count] of [11, 7, 5].entries()) {
+    for (const [index, count] of [40, 7, 5].entries()) {
       const sql = fs.readFileSync(path.join(dir, files[index]), 'utf8')
       const chunks = split(sql)
-      assert.equal(chunks.length, count, `${files[index]} must retain complete trigger statements`)
+      assert.equal(chunks.length, count, `${files[index]} must retain complete statements`)
+      if (index === 0) assert.doesNotMatch(chunks.join('\n'), /\b(?:TRIGGER|CASE|RAISE)\b/)
       // Installed buildMigrationQuery appends this ledger INSERT to the file.
       const withLedger = `${sql}\nINSERT INTO d1_migrations (name)\nvalues ('${files[index]}');`
       assert.equal(split(withLedger).length, count + 1, `${files[index]} ledger must remain a separate final statement`)
     }
-    console.log('PASS installed Wrangler splitter: raw 11 / 7 / 5; with migration ledger 12 / 8 / 6 statements')
+    console.log('PASS installed Wrangler splitter: raw 40 / 7 / 5; with migration ledger 41 / 8 / 6 statements; 0153 has no compound statements')
     assert.equal((await db.prepare("SELECT COUNT(*) n FROM sqlite_master WHERE type='trigger' AND (name LIKE '%0154' OR name LIKE '%0155')").first()).n, 8)
     assert.equal((await db.prepare("SELECT COUNT(*) n FROM sqlite_master WHERE name LIKE '%0153%'").first()).n, 0)
     for (const [table, rows] of Object.entries(expected)) {
@@ -100,12 +137,23 @@ async function main() {
     assert.equal((await db.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=900001').first()).quantity, 1)
     console.log('PASS migration ledger, helper cleanup and native D1 activation/parent guards')
 
+    for (const table of Object.keys(expected)) replayBefore[table] = (await db.prepare(`SELECT * FROM ${table} ORDER BY id`).all()).results
+    await db.prepare('DELETE FROM d1_migrations WHERE name=?').bind(files[0]).run()
+  } finally { await mf.dispose() }
+  const replayed = run('d1', 'migrations', 'apply', 'migration-parser-test')
+  assert.equal(replayed.status, 0, replayed.output)
+  mf = local()
+  try {
+    const db = await mf.getD1Database('DB')
+    for (const table of Object.keys(expected)) assert.deepEqual((await db.prepare(`SELECT * FROM ${table} ORDER BY id`).all()).results, replayBefore[table], `${table}: valid replay must write nothing`)
+    assert.equal((await db.prepare('SELECT COUNT(*) n FROM d1_migrations').first()).n, 3)
     // A partial incident must reach 0153's guard (not a parser error), roll
     // back helper DDL/data and omit its ledger entry through the real runner.
     await db.prepare('DELETE FROM d1_migrations WHERE name=?').bind(files[0]).run()
     await db.prepare("DELETE FROM audit_logs WHERE action='received_date_saleability_repair' AND entity_id='0153'").run()
     await db.prepare("UPDATE branches SET name='Changed Shop' WHERE id=2").run()
   } finally { await mf.dispose() }
+  console.log('PASS actual local runner validates completion marker and replays without business writes')
   const rejected = run('d1', 'migrations', 'apply', 'migration-parser-test')
   assert.notEqual(rejected.status, 0, rejected.output)
   assert.match(rejected.output, /0153: Shop identity changed/)
