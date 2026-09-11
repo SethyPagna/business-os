@@ -26,14 +26,20 @@ sqlite.prepare(`INSERT INTO sales (receipt_number, customer_id, total_usd, total
 const defaulted = sqlite.prepare(`SELECT loyalty_accrual FROM sales WHERE receipt_number = 'R-3'`).get()
 assert.equal(defaulted.loyalty_accrual, 1, 'omitting the column must default to accruing (old writers unaffected)')
 
-// ---- 2. The redemption-check aggregation SQL, taken from the route source ----
+// ---- 2. The shared redemption/assignment SQL, extracted from production ----
 const salesRoute = read(path.join('routes', 'sales.ts'))
-const aggMatch = salesRoute.match(/`(SELECT\s*\n\s*COALESCE\(SUM\(CASE WHEN[\s\S]*?FROM sales WHERE customer_id = \?)`/)
-assert.ok(aggMatch, 'routes/sales.ts still contains the earned/redeemed aggregation')
-const agg = sqlite.prepare(aggMatch[1]).get(7)
-assert.equal(agg.earned_usd, 12, 'earned skips the accrual=0 sale ($10 + $2, not the $90 historical)')
-assert.equal(agg.earned_khr, 49200, 'earned_khr skips the accrual=0 sale too')
-assert.equal(agg.redeemed, 5, 'points redeemed on a non-accruing sale still count as spent')
+const pointsSource = read(path.join('lib', 'saleCustomerAssignmentGuard.ts'))
+const rawStart = pointsSource.indexOf('function rawPointsSql(')
+const rawEnd = pointsSource.indexOf('\nfunction configCte(', rawStart)
+assert.ok(rawStart >= 0 && rawEnd > rawStart, 'shared production raw balance function exists')
+const rawOutput = ts.transpileModule(pointsSource.slice(rawStart, rawEnd), {compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText
+const rawPointsSql = new Function(rawOutput+';return rawPointsSql;')()
+const rawBalance = (basis='usd', usd=1, khr=0) => sqlite.prepare(`WITH cfg AS (SELECT ? AS basis,? AS usd,? AS khr) SELECT ${rawPointsSql('7')} AS raw FROM cfg`).get(basis,usd,khr).raw
+assert.equal(rawBalance(), 7, 'raw USD is earned12 minus redeemed5, excluding historical90 accrual')
+assert.equal(rawBalance('khr',0,1), 49195, 'raw KHR is earned49200 minus redeemed5, excluding historical369000 accrual')
+assert.equal(rawBalance('usd',0,0), -5, 'redemption still counts when earning rate is zero; negative raw is not clamped')
+assert.match(salesRoute, /preparePointsRedemption\(db, customer.id, membershipPointsRedeemed\)/, 'checkout uses the tested shared balance')
+assert.match(salesRoute, /redemptionGuard \? \[redemptionGuard\] : \[\][\s\S]{0,30}saleInsertStatement/, 'checkout rechecks balance atomically before insertion')
 
 // ---- 3. The notifications aggregation SQL, same treatment ----
 const notifications = read(path.join('routes', 'notifications.ts'))
@@ -103,8 +109,8 @@ for (const flag of [true, false]) assert.equal(posAccrual({ loyaltyAccrual: flag
 sqlite.prepare(`INSERT INTO loyalty_point_adjustments (customer_id, points, note) VALUES (7, 50, 'welcome bonus')`).run()
 const adjustedRow = sqlite.prepare(`SELECT COALESCE(SUM(points), 0) AS adjusted FROM loyalty_point_adjustments WHERE customer_id = 7`).get()
 assert.equal(adjustedRow.adjusted, 50, 'the aggregation the route runs sees the manual award')
-assert.match(salesRoute, /SUM\(points\), 0\) AS adjusted FROM loyalty_point_adjustments WHERE customer_id = \?/, 'checkout re-validation reads manual awards')
-assert.match(salesRoute, /\+ rewarded \+ manuallyAwarded\)/, 'checkout balance includes the manual-award term')
+assert.equal(rawBalance(),57,'shared checkout raw balance includes the manual award')
+assert.match(pointsSource, /SUM\(points\) FROM loyalty_point_adjustments/, 'shared checkout re-validation reads manual awards')
 const portalRoute = read(path.join('routes', 'portal.ts'))
 assert.match(portalRoute, /\+ rewarded \+ manuallyAwarded\)/, 'summarizePoints keeps the same term (display/checkout parity)')
 
@@ -207,7 +213,7 @@ assert.match(pos, /membershipInfo\?\.points\?\.redeemableUnits/, 'the POS reads 
 for (const [label, source, needles] of [
   ['contacts', contacts, [/FROM loyalty_point_adjustments[^`]*voided_at IS NULL/, /customer_share_submissions[^`]*reward_points_voided_at IS NULL/]],
   ['notifications', notifications, [/customer_share_submissions[^`]*reward_points_voided_at IS NULL/]],
-  ['sales checkout', salesRoute, [/FROM loyalty_point_adjustments[^`]*voided_at IS NULL/, /customer_share_submissions[^`]*reward_points_voided_at IS NULL/]],
+  ['sales checkout', pointsSource, [/FROM loyalty_point_adjustments[^`]*voided_at IS NULL/, /customer_share_submissions[^`]*reward_points_voided_at IS NULL/]],
 ]) {
   for (const needle of needles) {
     assert.match(source, needle, `${label} still counts voided ledger rows -- a reset would not hold there`)

@@ -21,7 +21,7 @@ import { contactDisplayAddress } from './contactOptions'
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from './saleRecordEvents'
 import type { SaleRecordChange, SaleRecordKind, SaleRecordValueState } from './saleRecords'
 import { ANONYMOUS_CUSTOMER_MUTATION_ERROR, isAnonymousCustomer } from './anonymousCustomer'
-import { assertCustomerAssignmentSafe, customerAssignmentGuard } from './saleCustomerAssignmentGuard'
+import { prepareCustomerAssignments, LOYALTY_REASSIGNMENT_MESSAGE } from './saleCustomerAssignmentGuard'
 
 export const BULK_UPDATE_KIND = 'sale.fields.bulk'
 // Historical customer groups, including one-sale assignments recorded before
@@ -542,11 +542,6 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, raw: Row)
       if (sourceMatched && anonymousSourceGuard) guards.push(anonymousSourceGuard)
     }
     const changed = sourceMatched && JSON.stringify(before) !== JSON.stringify(after)
-    if (changed && request.action.kind === 'customer') {
-      const targetId = after.customer_id == null ? null : Number(after.customer_id)
-      await assertCustomerAssignmentSafe(db, expected.id, targetId)
-      guards.push(customerAssignmentGuard(expected.id, targetId))
-    }
     members.push({
       id: expected.id,
       receipt: String(sale.receipt_number || expected.id),
@@ -558,6 +553,10 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, raw: Row)
       returnsAfter,
     })
   }
+  const assignmentPlan = request.action.kind === 'customer'
+    ? await prepareCustomerAssignments(db, members.filter(member => member.changed).map(member => ({ id: member.id, sourceId: member.before.customer_id == null ? null : Number(member.before.customer_id), targetId: member.after.customer_id == null ? null : Number(member.after.customer_id) })))
+    : null
+  if (assignmentPlan) guards.push(assignmentPlan.pre)
   const changedReference = members.find((member) => member.changed)
   if (changedReference) {
     for (const state of [referenceState(request.action, sourceReference), referenceState(request.action, request.action.kind === 'customer' ? targetCustomer : targetContact)]) {
@@ -593,6 +592,7 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, raw: Row)
     { sql: 'INSERT INTO sale_bulk_operations(id,actor_id,request_id,request_json,receipt_json) VALUES(@id,@actor,@request,@canonical,@receipt)', params: { id: operationId, actor: user.id, request: request.client_request_id, canonical, receipt: JSON.stringify(receipt) } },
   ]
   for (const member of members) statements.push(...saleUpdateStatement(member, request.action, 1, stamp))
+  if (assignmentPlan) statements.push(assignmentPlan.post)
   const recordEvents = bulkUpdateRecordEvents(snapshot, 0, 'apply', user, stamp)
   if (recordEvents) statements.push(recordEvents.statement)
   statements.push({ sql: 'INSERT INTO undo_snapshots(kind,payload_json,created_by_id,created_by_name) VALUES(@kind,@payload,@actor,@name)', params: { kind: BULK_UPDATE_KIND, payload: JSON.stringify(snapshot), actor: user.id, name: actorSnapshot(user) } })
@@ -619,7 +619,7 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, raw: Row)
   } catch (error) {
     const retry = await db.prepare('SELECT request_json,receipt_json FROM sale_bulk_operations WHERE actor_id=@actor AND request_id=@request').get<Row>({ actor: user.id, request: request.client_request_id })
     if (retry?.request_json === canonical) return JSON.parse(String(retry.receipt_json))
-    if (request.action.kind === 'customer') for (const member of members.filter((m) => m.changed)) await assertCustomerAssignmentSafe(db, member.id, member.after.customer_id == null ? null : Number(member.after.customer_id))
+    if (assignmentPlan && /malformed JSON/i.test(String(error))) fail(LOYALTY_REASSIGNMENT_MESSAGE)
     if (/constraint/i.test(String(error))) fail('A sale or linked record changed. Nothing in the group was applied.')
     throw error
   }
@@ -641,12 +641,13 @@ export async function replaySaleBulkUpdate(env: Env, user: SessionUser, directio
   const next = direction === 'undo' ? 'redoable' : 'undoable'
   const stamp = new Date().toISOString()
   const statements: StockStatement[] = [bulkAssertion("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore') AND EXISTS(SELECT 1 FROM sale_bulk_operations o JOIN action_history h ON h.id=o.history_id JOIN undo_snapshots s ON s.id=o.snapshot_id WHERE o.id=@op AND o.generation=@generation AND h.id=@history AND h.status=@expected AND s.kind=@kind AND s.status=@snap AND s.payload_json=@payload)", { op: op.id, generation, history: historyId, expected, kind: BULK_UPDATE_KIND, snap: direction === 'undo' ? 'applied' : 'reversed', payload: op.payload_json })]
-  if (snapshot.action.kind === 'customer') for (const member of snapshot.members.filter((m) => m.changed)) {
-    const target = direction === 'undo' ? member.before : member.after
-    const targetId = target.customer_id == null ? null : Number(target.customer_id)
-    await assertCustomerAssignmentSafe(db, member.id, targetId)
-    statements.push(customerAssignmentGuard(member.id, targetId))
-  }
+  const assignmentPlan = snapshot.action.kind === 'customer'
+    ? await prepareCustomerAssignments(db, snapshot.members.filter(member => member.changed).map(member => {
+      const source = direction === 'undo' ? member.after : member.before
+      const target = direction === 'undo' ? member.before : member.after
+      return { id: member.id, sourceId: source.customer_id == null ? null : Number(source.customer_id), targetId: target.customer_id == null ? null : Number(target.customer_id) }
+    })) : null
+  if (assignmentPlan) statements.push(assignmentPlan.pre)
   for (const member of snapshot.members.filter((candidate) => candidate.changed)) {
     statements.push(bulkAssertion(`EXISTS(SELECT 1 FROM sales s JOIN sale_bulk_members m ON m.sale_id=s.id WHERE m.operation_id=@op AND s.id=@id AND m.revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=s.id),0) AND m.movement_fingerprint=${saleMovementFingerprint('s.id')})`, { op: op.id, id: member.id }))
   }
@@ -665,6 +666,7 @@ export async function replaySaleBulkUpdate(env: Env, user: SessionUser, directio
     if (guard) statements.push(guard)
   }
   for (const member of snapshot.members) statements.push(...saleUpdateStatement(member, snapshot.action, sign, stamp))
+  if (assignmentPlan) statements.push(assignmentPlan.post)
   const nextGeneration = Number(generation) + 1
   const recordEvents = bulkUpdateRecordEvents(snapshot, nextGeneration, direction, user, stamp)
   if (recordEvents) statements.push(recordEvents.statement)
@@ -680,10 +682,7 @@ export async function replaySaleBulkUpdate(env: Env, user: SessionUser, directio
   try {
     await db.batch(statements)
   } catch (error) {
-    if (snapshot.action.kind === 'customer') for (const member of snapshot.members.filter((m) => m.changed)) {
-      const target = direction === 'undo' ? member.before : member.after
-      await assertCustomerAssignmentSafe(db, member.id, target.customer_id == null ? null : Number(target.customer_id))
-    }
+    if (assignmentPlan && /malformed JSON/i.test(String(error))) fail(LOYALTY_REASSIGNMENT_MESSAGE)
     if (/constraint/i.test(String(error))) fail('A sale, linked record, or this replay changed. Nothing in the group was applied.')
     throw error
   }

@@ -415,7 +415,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
         const code = Number((error as Error & { statusCode?: number })?.statusCode) // Preserve statusCode 409 as a conflict.
         const saleCustomerReplay = SALE_BULK_UPDATE_KINDS.has(applier.name) && (payload.action === 'customer' || payload.action === 'customer_name')
         const status = (stockReplay || saleCustomerReplay) && (code === 400 || code === 403) ? code : code === 409 ? 409 : 500
-        return c.json({ success: false, error: (error as Error)?.message || `Failed to ${direction} this action`, ...(isLoyaltyAssignmentError(error) ? { code: LOYALTY_REASSIGNMENT_CODE } : {}) }, status)
+        return c.json({ success: false, error: (error as Error)?.message || `Failed to ${direction} this action`, ...(saleCustomerReplay && isLoyaltyAssignmentError(error) ? { code: LOYALTY_REASSIGNMENT_CODE } : {}) }, status)
       }
     }
 

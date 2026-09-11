@@ -171,6 +171,7 @@ async function run(){
 
   f=fixture()
   f.sql.prepare("UPDATE sales SET customer_id=NULL,customer_name=NULL,customer_phone=NULL,customer_address=NULL,updated_at='general-time' WHERE id=3").run()
+  f.sql.prepare('UPDATE returns SET customer_id=NULL,customer_name=NULL WHERE sale_id=3').run()
   const fromGeneral=await f.call(sales,'/bulk-update',request(f,{kind:'customer',source_id:null,target_id:3},'customer-general-1',[3]))
   assert.equal(fromGeneral.status,200,JSON.stringify(fromGeneral))
   const generalReceipt=JSON.parse(f.sql.prepare('SELECT receipt_json FROM sale_bulk_operations WHERE id=?').get(fromGeneral.body.operationId).receipt_json)
