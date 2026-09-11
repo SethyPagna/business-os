@@ -91,6 +91,7 @@ import { planSaleLinePriceEdit } from '../lib/saleLineEdit'
 import { DELIVERY_AMOUNT_ERROR_MESSAGES, deliveryAmountChanged, parseDeliveryAmountUsd } from '../lib/deliveryAmounts'
 import { applySaleBulkStatus, bulkAssertion, notifyBulkStatus, SaleBulkError, saleRevisionGuard } from '../lib/saleBulkStatus'
 import { applySaleBulkUpdate, notifySaleBulkUpdate } from '../lib/saleBulkUpdate'
+import { assertCustomerAssignmentSafe, customerAssignmentGuard, isLoyaltyAssignmentError, LOYALTY_REASSIGNMENT_CODE, LOYALTY_REASSIGNMENT_MESSAGE } from '../lib/saleCustomerAssignmentGuard'
 import {
   buildSaleRecords,
   buildSaleRecordsCountSql,
@@ -1592,6 +1593,7 @@ app.post('/bulk-update', async (c) => {
     c.executionCtx.waitUntil(notifySaleBulkUpdate(c.env, result.action?.kind))
     return c.json(result)
   } catch (error) {
+    if (isLoyaltyAssignmentError(error)) return c.json({ error: LOYALTY_REASSIGNMENT_MESSAGE, code: LOYALTY_REASSIGNMENT_CODE }, 409)
     return c.json({ error: (error as Error).message }, error instanceof SaleBulkError ? error.statusCode : error instanceof SyntaxError ? 400 : 500)
   }
 })
@@ -2451,7 +2453,7 @@ app.patch('/:id/customer', async (c) => {
   const user = c.get('user')
   // Same reasoning as PATCH /:id/status above -- only reachable from the
   // 'sales'-gated Sales page (Sales.tsx's attachSaleCustomer caller).
-  if (getActionTier(user, 'sales', 'customer') !== 'full') {
+  if (getActionTier(user, 'sales', 'customer') !== 'full' || getActionTier(user, 'sales', 'customer_reassign') !== 'full') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const saleId = Number(c.req.param('id'))
@@ -2553,6 +2555,12 @@ app.patch('/:id/customer', async (c) => {
   if (assignmentUnchanged) {
     return c.json({ id: saleId, updated_at: sale.updated_at || expectedUpdatedAt })
   }
+  try {
+    await assertCustomerAssignmentSafe(db, saleId, customer?.id ?? null)
+  } catch (error) {
+    if (isLoyaltyAssignmentError(error)) return c.json({ error: LOYALTY_REASSIGNMENT_MESSAGE, code: LOYALTY_REASSIGNMENT_CODE }, 409)
+    throw error
+  }
 
   const identityState = (id: number | null, name: string | null): SaleRecordChange['before'] => {
     const normalizedName = String(name || '').trim() || null
@@ -2629,6 +2637,7 @@ app.patch('/:id/customer', async (c) => {
 
   try {
     await db.batch([
+      customerAssignmentGuard(saleId, customer?.id ?? null),
       saleRevisionGuard(Number(saleId), Number(sale.write_revision)),
       ...(sourceReferenceGuard ? [sourceReferenceGuard] : []),
       ...(customerReferenceGuard ? [customerReferenceGuard] : []),
@@ -2657,6 +2666,12 @@ app.patch('/:id/customer', async (c) => {
       { sql: 'DELETE FROM sale_bulk_guards', params: {} },
     ])
   } catch (error) {
+    try {
+      await assertCustomerAssignmentSafe(db, saleId, customer?.id ?? null)
+    } catch (loyaltyError) {
+      if (isLoyaltyAssignmentError(loyaltyError)) return c.json({ error: LOYALTY_REASSIGNMENT_MESSAGE, code: LOYALTY_REASSIGNMENT_CODE }, 409)
+      throw loyaltyError
+    }
     if (/constraint/i.test(String(error))) {
       const replay = await db.prepare(`
         SELECT request_digest,response_json FROM sale_record_events

@@ -8,7 +8,7 @@ const root = path.join(__dirname, '..')
 const recordContract = JSON.parse(fs.readFileSync(path.join(root, '..', 'outputs', 'takeover-20260908', 'f74-sales-records-backend-contract.json'), 'utf8'))
 let user = { id: 1, name: 'Admin', username: 'admin', role_code: 'admin', permissions: { all: true } }
 const cache = new Map()
-const actual = new Set(['actorSnapshot','anonymousCustomer','movementBranchName','db','permissions','saleBulkStatus','saleBulkUpdate','saleRecordEvents','saleTransitions','sqlBinding','productBatches','batchCode','salesStatus','undoAppliers','branchWrites','conflictControl','searchMatch','paymentMethodRegistry','contactOptions'])
+const actual = new Set(['saleCustomerAssignmentGuard','actorSnapshot','anonymousCustomer','movementBranchName','db','permissions','saleBulkStatus','saleBulkUpdate','saleRecordEvents','saleTransitions','sqlBinding','productBatches','batchCode','salesStatus','undoAppliers','branchWrites','conflictControl','searchMatch','paymentMethodRegistry','contactOptions'])
 function load(rel) {
   if (cache.has(rel)) return cache.get(rel).exports
   const mod = { exports: {} }; cache.set(rel,mod)

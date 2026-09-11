@@ -21,6 +21,7 @@ import { contactDisplayAddress } from './contactOptions'
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from './saleRecordEvents'
 import type { SaleRecordChange, SaleRecordKind, SaleRecordValueState } from './saleRecords'
 import { ANONYMOUS_CUSTOMER_MUTATION_ERROR, isAnonymousCustomer } from './anonymousCustomer'
+import { assertCustomerAssignmentSafe, customerAssignmentGuard } from './saleCustomerAssignmentGuard'
 
 export const BULK_UPDATE_KIND = 'sale.fields.bulk'
 // Historical customer groups, including one-sale assignments recorded before
@@ -37,6 +38,7 @@ export type SaleBulkUpdateAction =
   | { kind: 'payment_method'; source: string | null; target: string }
   | { kind: 'delivery_contact'; source_id: number | null; target_id: number | null }
   | { kind: 'customer'; source_id: number | null; target_id: number | null }
+  | { kind: 'customer_name'; name: string }
 
 export type SaleBulkUpdateRequest = {
   client_request_id: string
@@ -45,7 +47,7 @@ export type SaleBulkUpdateRequest = {
 }
 
 export function saleBulkUpdateApplier(action: SaleBulkUpdateAction, itemCount = 2): string {
-  return action.kind === 'customer'
+  return action.kind === 'customer' || action.kind === 'customer_name'
     ? itemCount === 1 ? SINGLE_CUSTOMER_UPDATE_KIND : MULTI_CUSTOMER_UPDATE_KIND
     : BULK_UPDATE_KIND
 }
@@ -92,11 +94,13 @@ function optionalId(value: unknown, label: string): number | null {
 }
 
 function permission(user: SessionUser, action: SaleBulkUpdateAction, itemCount: number): void {
-  const actionKey = action.kind === 'customer' && itemCount === 1 ? 'customer' : 'bulk'
-  const underlyingAction = action.kind === 'customer' ? 'customer' : 'amend'
+  const customerAction = action.kind === 'customer' || action.kind === 'customer_name'
+  const actionKey = customerAction && itemCount === 1 ? 'customer' : 'bulk'
+  const underlyingAction = customerAction ? 'customer' : 'amend'
   if (getActionTier(user, 'sales', actionKey) !== 'full' || getActionTier(user, 'sales', underlyingAction) !== 'full') {
     fail('No permission to change the selected sales.', 403)
   }
+  if (action.kind === 'customer' && getActionTier(user, 'sales', 'customer_reassign') !== 'full') fail('No permission to reassign sale customers.', 403)
 }
 
 function parseRequest(raw: Row): SaleBulkUpdateRequest {
@@ -127,6 +131,10 @@ function parseRequest(raw: Row): SaleBulkUpdateRequest {
     const target = String(input.target || '').trim()
     if (!target || target.length > 80 || String(input.source ?? '').length > 160) fail('Payment method must contain 1 to 80 characters.', 400)
     action = { kind, source: input.source === null ? null : String(input.source).trim(), target }
+  } else if (kind === 'customer_name') {
+    if (items.length !== 1 || Object.keys(input).some((key) => !['kind', 'name'].includes(key))
+      || typeof input.name !== 'string' || !input.name.trim() || input.name.trim().length > 200) fail('One sale and a customer name of 1 to 200 characters are required.', 400)
+    action = { kind, name: input.name.trim() }
   } else if (kind === 'delivery_contact' || kind === 'customer') {
     if (Object.keys(input).some((key) => !['kind', 'source_id', 'target_id'].includes(key))) fail('Unsupported reassignment field.', 400)
     action = { kind, source_id: optionalId(input.source_id, 'Source'), target_id: optionalId(input.target_id, 'Target') }
@@ -202,6 +210,7 @@ function paymentDetailsState(value: unknown): SaleRecordValueState {
 }
 
 function updateChanges(action: SaleBulkUpdateAction, before: Row, after: Row): SaleRecordChange[] {
+  if (action.kind === 'customer_name') return [{ field: 'customer', before: customerState(before), after: customerState(after) }]
   const pairs: Array<{ field: SaleRecordChange['field']; before: SaleRecordValueState; after: SaleRecordValueState }> = action.kind === 'customer'
     ? [{ field: 'customer', before: customerState(before), after: customerState(after) }, { field: 'membership', before: membershipState(before), after: membershipState(after) }]
     : action.kind === 'delivery_contact'
@@ -211,7 +220,7 @@ function updateChanges(action: SaleBulkUpdateAction, before: Row, after: Row): S
 }
 
 function bulkUpdateRecordEvents(snapshot: BulkUpdateSnapshot, generation: number, via: 'apply' | 'undo' | 'redo', user: SessionUser, stamp: string) {
-  const kind: SaleRecordKind = snapshot.action.kind === 'customer' ? 'customer_changed'
+  const kind: SaleRecordKind = snapshot.action.kind === 'customer' || snapshot.action.kind === 'customer_name' ? 'customer_changed'
     : snapshot.action.kind === 'delivery_contact' ? 'driver_changed' : 'payment_changed'
   return buildSaleRecordEventsInsert(snapshot.members.filter(member => member.changed).map(member => {
     const before = via === 'undo' ? member.after : member.before
@@ -254,7 +263,9 @@ function saleUpdateStatement(member: BulkUpdateMember, action: SaleBulkUpdateAct
   if (!member.changed) return []
   const target = direction > 0 ? member.after : member.before
   const statements: StockStatement[] = []
-  if (action.kind === 'payment_method') {
+  if (action.kind === 'customer_name') {
+    statements.push({ sql: 'UPDATE sales SET customer_name=@customer_name,search_normalized=@search_normalized,updated_at=@stamp WHERE id=@id', params: { customer_name: target.customer_name, search_normalized: target.search_normalized, id: member.id, stamp } })
+  } else if (action.kind === 'payment_method') {
     statements.push({
       sql: 'UPDATE sales SET payment_method=@payment_method,payment_details=@payment_details,search_normalized=@search_normalized,updated_at=@stamp WHERE id=@id',
       params: { ...target, id: member.id, stamp },
@@ -288,7 +299,7 @@ function auditStatement(user: SessionUser, operationId: string, direction: strin
 }
 
 function referenceGuard(action: SaleBulkUpdateAction, state: Row): StockStatement | null {
-  if (action.kind === 'payment_method') return null
+  if (action.kind === 'payment_method' || action.kind === 'customer_name') return null
   const id = state[action.kind === 'customer' ? 'customer_id' : 'delivery_contact_id']
   if (id == null) return null
   if (action.kind === 'customer') {
@@ -303,7 +314,7 @@ function referenceGuard(action: SaleBulkUpdateAction, state: Row): StockStatemen
 }
 
 function referenceState(action: SaleBulkUpdateAction, row: Row | null): Row | null {
-  if (!row || action.kind === 'payment_method') return null
+  if (!row || action.kind === 'payment_method' || action.kind === 'customer_name') return null
   if (action.kind === 'customer') {
     return {
       customer_id: row.id,
@@ -373,7 +384,9 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, raw: Row)
     const sale = sales.find((row) => Number(row.id) === expected.id)
     if (!sale) fail(`Sale ${expected.id} was not found.`)
     let matches = false
-    if (request.action.kind === 'payment_method') {
+    if (request.action.kind === 'customer_name') {
+      matches = true
+    } else if (request.action.kind === 'payment_method') {
       const source = normalized(request.action.source)
       const topLevelMatched = normalized(sale.payment_method) === source
       const hasDetails = sale.payment_details != null && String(sale.payment_details).trim() !== ''
@@ -418,7 +431,7 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, raw: Row)
     if (isAnonymousCustomer(targetCustomer)) fail(ANONYMOUS_CUSTOMER_MUTATION_ERROR, 400)
   }
   let sourceReference: Row | null = null
-  if (sourceMatchedIds.length && request.action.kind !== 'payment_method' && request.action.source_id !== null) {
+  if (sourceMatchedIds.length && request.action.kind !== 'payment_method' && request.action.kind !== 'customer_name' && request.action.source_id !== null) {
     const table = request.action.kind === 'customer' ? 'customers' : 'delivery_contacts'
     const columns = request.action.kind === 'customer' ? 'id,name,membership_number,phone,address,is_anonymous' : 'id,name,phone,area,address'
     sourceReference = await db.prepare(`SELECT ${columns} FROM ${table} WHERE id=?`).get<Row>([request.action.source_id]) || null
@@ -446,7 +459,11 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, raw: Row)
     const memberReturnRows = returnRows.filter((row) => row.sale_id === expected.id)
     const returnsBefore = memberReturnRows.map(({ id, customer_id, customer_name, search_normalized }) => ({ id, customer_id, customer_name, search_normalized }))
     let returnsAfter: ReturnCustomerSnapshot[] = []
-    if (request.action.kind === 'payment_method') {
+    if (request.action.kind === 'customer_name') {
+      sourceMatched = matchedAtRead
+      before = { customer_id: sale.customer_id ?? null, customer_name: sale.customer_name ?? null, customer_phone: sale.customer_phone ?? null, customer_address: sale.customer_address ?? null, search_normalized: sale.search_normalized ?? null }
+      after = { ...before, customer_name: request.action.name, search_normalized: searchSnapshot(sale, { customerName: request.action.name }) }
+    } else if (request.action.kind === 'payment_method') {
       const targetMethod = request.action.target
       before = { payment_method: sale.payment_method ?? null, payment_details: sale.payment_details ?? null, search_normalized: sale.search_normalized ?? null }
       const source = normalized(request.action.source)
@@ -525,6 +542,11 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, raw: Row)
       if (sourceMatched && anonymousSourceGuard) guards.push(anonymousSourceGuard)
     }
     const changed = sourceMatched && JSON.stringify(before) !== JSON.stringify(after)
+    if (changed && request.action.kind === 'customer') {
+      const targetId = after.customer_id == null ? null : Number(after.customer_id)
+      await assertCustomerAssignmentSafe(db, expected.id, targetId)
+      guards.push(customerAssignmentGuard(expected.id, targetId))
+    }
     members.push({
       id: expected.id,
       receipt: String(sale.receipt_number || expected.id),
@@ -597,6 +619,7 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, raw: Row)
   } catch (error) {
     const retry = await db.prepare('SELECT request_json,receipt_json FROM sale_bulk_operations WHERE actor_id=@actor AND request_id=@request').get<Row>({ actor: user.id, request: request.client_request_id })
     if (retry?.request_json === canonical) return JSON.parse(String(retry.receipt_json))
+    if (request.action.kind === 'customer') for (const member of members.filter((m) => m.changed)) await assertCustomerAssignmentSafe(db, member.id, member.after.customer_id == null ? null : Number(member.after.customer_id))
     if (/constraint/i.test(String(error))) fail('A sale or linked record changed. Nothing in the group was applied.')
     throw error
   }
@@ -618,6 +641,12 @@ export async function replaySaleBulkUpdate(env: Env, user: SessionUser, directio
   const next = direction === 'undo' ? 'redoable' : 'undoable'
   const stamp = new Date().toISOString()
   const statements: StockStatement[] = [bulkAssertion("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore') AND EXISTS(SELECT 1 FROM sale_bulk_operations o JOIN action_history h ON h.id=o.history_id JOIN undo_snapshots s ON s.id=o.snapshot_id WHERE o.id=@op AND o.generation=@generation AND h.id=@history AND h.status=@expected AND s.kind=@kind AND s.status=@snap AND s.payload_json=@payload)", { op: op.id, generation, history: historyId, expected, kind: BULK_UPDATE_KIND, snap: direction === 'undo' ? 'applied' : 'reversed', payload: op.payload_json })]
+  if (snapshot.action.kind === 'customer') for (const member of snapshot.members.filter((m) => m.changed)) {
+    const target = direction === 'undo' ? member.before : member.after
+    const targetId = target.customer_id == null ? null : Number(target.customer_id)
+    await assertCustomerAssignmentSafe(db, member.id, targetId)
+    statements.push(customerAssignmentGuard(member.id, targetId))
+  }
   for (const member of snapshot.members.filter((candidate) => candidate.changed)) {
     statements.push(bulkAssertion(`EXISTS(SELECT 1 FROM sales s JOIN sale_bulk_members m ON m.sale_id=s.id WHERE m.operation_id=@op AND s.id=@id AND m.revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=s.id),0) AND m.movement_fingerprint=${saleMovementFingerprint('s.id')})`, { op: op.id, id: member.id }))
   }
@@ -651,6 +680,10 @@ export async function replaySaleBulkUpdate(env: Env, user: SessionUser, directio
   try {
     await db.batch(statements)
   } catch (error) {
+    if (snapshot.action.kind === 'customer') for (const member of snapshot.members.filter((m) => m.changed)) {
+      const target = direction === 'undo' ? member.before : member.after
+      await assertCustomerAssignmentSafe(db, member.id, target.customer_id == null ? null : Number(target.customer_id))
+    }
     if (/constraint/i.test(String(error))) fail('A sale, linked record, or this replay changed. Nothing in the group was applied.')
     throw error
   }
