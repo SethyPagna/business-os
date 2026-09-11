@@ -27,25 +27,27 @@ assert.match(detailSecondary, /overflow-x-auto whitespace-nowrap/, 'detail secon
 assert.match(header, /aria-label=\{t\('close'\) \|\| 'Close'\}/, 'the top close remains keyboard and screen-reader named')
 assert.doesNotMatch(header, /onReturn\(sale\)|onPrint\(sale\)/, 'Return and Print stay out of the compact header')
 
-// Phone contact metadata is one line: customer phone, then the delivery
-// contact's name/phone with an accessible Delivery name and no visible Driver
-// label. The labelled table rows remain desktop-only.
-const mobileContactStart = detail.indexOf('data-sale-detail-mobile-contact=""')
-const mobileContact = detail.slice(mobileContactStart, detail.indexOf('</div>', mobileContactStart))
-assert.match(mobileContact, /customerIsAnonymous[\s\S]*?\{sale\.customer_phone \? <EntityLink[\s\S]*?aria-hidden="true">\|<\/span>[\s\S]*?translateOr\('delivery', 'Delivery'/)
-assert.doesNotMatch(mobileContact, /!customerIsAnonymous && sale\.customer_phone/, 'a General sale keeps its sale-specific phone in the compact row')
-assert.match(mobileContact, /\[deliveryDriverName, deliveryDriverPhone\]\.filter\(Boolean\)\.join\(' · '\)/)
-assert.doesNotMatch(mobileContact, /translateOr\('driver'|translateOr\('driver_phone'/, 'the phone contact row shows the delivery values directly')
+// Detail sections do not change ownership on phones: customer identity stays
+// in Customer, while driver identity stays in Sale. The removed combined
+// mobile row made customer name/phone look like delivery metadata.
+assert.doesNotMatch(detail, /data-sale-detail-mobile-contact/, 'detail must not create a combined customer/driver phone row')
+const saleCardStart = detail.indexOf("<SectionCard title={t('sale')")
+const saleCard = detail.slice(saleCardStart, detail.indexOf('</SectionCard>', saleCardStart))
+assert.doesNotMatch(saleCard, /sale\.customer_name|sale\.customer_phone/, 'customer identity belongs only to the Customer section')
+assert.match(saleCard, /<DetailRow label=\{translateOr\('driver', 'Driver'/)
+assert.match(saleCard, /<DetailRow label=\{translateOr\('driver_phone', 'Driver phone'/)
+assert.doesNotMatch(saleCard, /hidden sm:block"><DetailRow label=\{translateOr\('driver'/, 'driver rows remain visible on phones')
 assert.match(detail, /className="hidden sm:block"><DetailRow label=\{t\('cashier'\)/, 'the labelled cashier row remains on wider screens')
 assert.match(detail, /className="hidden sm:block"><DetailRow label=\{t\('branch'\)/, 'the labelled branch row remains on wider screens')
-assert.match(detail, /className="hidden sm:block"><DetailRow label=\{translateOr\('driver'/, 'the labelled driver row remains on wider screens')
-assert.match(detail, /<div className="hidden sm:block"><DetailRow label=\{t\('phone'\)/, 'the customer phone is not duplicated below the compact phone row')
 
 // F72 override: the sale exposes one customer mutation entry. Membership is
 // read-only in the detail card and is edited, with its own Contacts scope, in
 // the unified Edit customer flow.
 const customerCardStart = detail.indexOf("<SectionCard title={t('customer')")
 const customerCard = detail.slice(customerCardStart, detail.indexOf('</SectionCard>', customerCardStart))
+assert.match(customerCard, /<DetailRow label=\{t\('customer_name'\)/, 'customer name remains in Customer on phones and desktop')
+assert.match(customerCard, /<DetailRow label=\{t\('phone'\)/, 'customer phone remains in Customer on phones and desktop')
+assert.doesNotMatch(customerCard, /hidden sm:block/, 'Customer identity rows are not desktop-only')
 assert.match(customerCard, /t\('sale_customer_edit_entry'\) \|\| 'Edit customer'/)
 assert.match(customerCard, /<DetailRow label=\{t\('membership'\)[\s\S]*?value=\{sale\.customer_membership_number\} mono/, 'the stored membership remains readable in the detail card')
 assert.doesNotMatch(sales, /onAttachMembership=/, 'the standalone membership mutation is no longer mounted from Sales')
