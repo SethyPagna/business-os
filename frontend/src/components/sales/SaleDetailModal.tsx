@@ -2379,11 +2379,14 @@ export default function SaleDetailModal({
               whether the viewer may amend: reading what happened is a
               different capability from doing it, and hiding the trail from
               whoever is reconciling the till would defeat the point. */}
-          {amendmentsLoading || amendmentsFailed || amendmentGroups.length > 0 ? (
+          {amendmentsLoading ? (
+            <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+              {t('loading') || 'Loading'}
+            </div>
+          ) : null}
+          {amendmentsFailed || amendmentGroups.length > 0 ? (
             <SectionCard title={translateOr('amendment_history', 'Changes after the sale', 'ការកែប្រែក្រោយការលក់')}>
-              {amendmentsLoading ? (
-                <div className="text-xs text-gray-400">{t('loading') || 'Loading'}</div>
-              ) : amendmentsFailed ? (
+              {amendmentsFailed ? (
                 /* "Could not load" and "never amended" are different answers,
                    and printing the second when the first is true would be a
                    lie about the record. */
