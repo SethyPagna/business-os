@@ -24,6 +24,8 @@ async function main(){
       [5,'Alternate','012.345.680',null,0],
     ]
     for(const row of fixtures)await db.prepare("INSERT INTO customers(id,name,phone,phone_normalized,is_anonymous,notes) VALUES(?,?,?,?,?,'private note')").bind(...row).run()
+    await db.prepare("INSERT INTO customers(id,name,phone,address) VALUES(6,'Secondary','099 111 222',?), (7,'Not a phone','098 111 222',?), (8,'Legacy text','097 111 222','not JSON 012 333 444'), (9,'Scalar options','096 111 222',?)")
+      .bind(JSON.stringify([{label:'Home',phone:'012 333 444'}]),JSON.stringify([{label:'012 333 444',address:'012 333 444',email:'012 333 444'}]),JSON.stringify(['012 333 444',12333444,null])).run()
     const call=async(search,permissions={pos:true},suffix='')=>{
       const r=await mf.dispatchFetch('http://local/customers?fields=sales_picker&search='+encodeURIComponent(search)+suffix,{headers:{'x-test-permissions':JSON.stringify(permissions)}})
       return {status:r.status,body:await r.json()}
@@ -43,6 +45,12 @@ async function main(){
     // FTS-only unformatted phrase: the compatibility union is picker-only.
     const raw=(await db.prepare("SELECT rowid FROM customers_fts_phone WHERE customers_fts_phone MATCH '012345678'").all()).results
     assert.deepEqual(raw,[])
+    for(const search of ['012333444','+85512333444','855 12 333 444']){
+      for(const permissions of [{pos:true},{sales:true},{all:true}]){
+        const result=await call(search,permissions);assert.equal(result.status,200,JSON.stringify(result));assert.deepEqual(result.body.items.map(r=>r.id),[6],search)
+      }
+    }
+    console.log('PASS secondary Contact Option phone canonical variants; malformed/plain/scalar JSON and non-phone digits do not enter the new compatibility match')
     console.log('PASS native Sales/POS picker finds formatted/local/+855 phones and names, including missing normalized cache; permissions/projection/ID filtering/limits/General exclusion unchanged')
   }finally{schema.close();await mf.dispose()}
 }
