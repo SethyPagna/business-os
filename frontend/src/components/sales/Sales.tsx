@@ -66,6 +66,7 @@ import { exportColumnLabel } from '../../utils/exportOptions.ts'
 import BulkSaleChangeModal, { type BulkSaleChangeRow, type BulkSaleChoice, type BulkSaleField } from './BulkSaleChangeModal.tsx'
 import BulkSaleCancelModal, { type BulkSaleCancelDraft } from './BulkSaleCancelModal.tsx'
 import SectionExportAction from '../shared/SectionExportAction.tsx'
+import PagerActionRow from '../shared/PagerActionRow.tsx'
 import { createSingleUseResult, type SingleUseResult } from './saleStatusConfirmation.ts'
 import {
   directMutationOutcomeIsUnknown,
@@ -2414,19 +2415,16 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
         range={stripRange}
         onRangeChange={setStripRange}
         showTime
+        iconOnly
+        compactRange
         // No `summary` beside the Stats chip on Sales: the outside "N sales ·
         // $revenue" duplicated the strip's own Sales + Revenue cards (user,
         // Aug 31: "the outside stats is redundant with the stat in the stat
         // button"). Open the Stats chip to see the same figures.
-        // History + Manage are SECONDARY controls that stay on the Stats-chip
-        // row whether the strip is folded or open — expanding the strip no
-        // longer relocates them (user, Aug 31).
+        // Export + Manage stay beside the range whether the strip is folded
+        // or open. History now occupies the stable trailing pager slot below.
         rangeActions={(
           <>
-            {canUseShifts ? <ShiftHistoryModal
-              label={translateOr('shift', 'Shift')}
-              buttonClassName="btn-secondary inline-flex h-10 min-w-10 items-center justify-center px-2.5 py-0 text-xs"
-            /> : null}
             {canExportSales ? (
               <SectionExportAction>
                 <LazyPortalMenu
@@ -2437,23 +2435,19 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
                 />
               </SectionExportAction>
             ) : null}
-            {/* dense: pin History to a true 32px so it matches the h-8 Manage
-                button beside it on the Stats row (btn-secondary's 40px
-                min-height would otherwise make it taller). */}
-            <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} t={t} className="min-w-0" />
             {canImportSales ? <LazyPortalMenu
               align="auto"
               menuClassName="max-h-[70vh] overflow-auto"
               trigger={(
                 <button
                   type="button"
-                  className="inline-flex h-10 shrink-0 items-center gap-1 rounded-lg border border-gray-200 bg-white px-2.5 text-xs font-semibold text-gray-700 transition-colors hover:border-blue-300 hover:text-blue-700 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200"
+                  className="inline-flex h-10 w-10 shrink-0 items-center justify-center gap-1 rounded-lg border border-gray-200 bg-white px-0 text-xs font-semibold text-gray-700 transition-colors hover:border-blue-300 hover:text-blue-700 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200 sm:w-auto sm:px-2.5"
                   aria-haspopup="true"
                   aria-label={translateOr('manage', 'Manage')}
                   title={translateOr('manage', 'Manage')}
                 >
                   <Settings2 className="h-3.5 w-3.5 shrink-0" />
-                  <span className="truncate">{translateOr('manage', 'Manage')}</span>
+                  <span className="hidden truncate sm:inline">{translateOr('manage', 'Manage')}</span>
                 </button>
               )}
               items={([
@@ -2522,10 +2516,20 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
           Aug 31: "page back and forth ... below the search bar row"), matching
           Returns/Fees in this hub — never on the date row or the search row
           itself. The list's own footer keeps its pager too. */}
-      <div className="mb-3 flex justify-center">
+      <PagerActionRow
+        className="mb-3"
+        leading={canUseShifts ? (
+          <ShiftHistoryModal
+            label={translateOr('shift', 'Shift')}
+            buttonClassName="btn-secondary inline-flex h-10 min-h-10 w-10 items-center justify-center overflow-hidden px-0 py-0 text-[10px]"
+          />
+        ) : null}
+        trailing={<ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} t={t} className="h-8 w-8" dense />}
+      >
         <PaginationControls
           compact
           rangeAsPageSize
+          compactCentered
           page={salesPage}
           pageSize={salesPageSize}
           totalItems={totalSalesCount}
@@ -2537,7 +2541,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
             setSalesPage(1)
           }}
         />
-      </div>
+      </PagerActionRow>
 
       {!directStatusSaving && activePendingDirectStatus && String(detailSale?.id) !== activePendingDirectStatus.entityId ? (
         <div role="status" data-needs-reconciliation={activePendingDirectStatus.needsReconciliation || undefined} className="mb-2 grid min-w-0 grid-cols-1 gap-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-100">
@@ -2621,7 +2625,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
       />
 
       <div data-sales-bottom-pager="" className="mt-3 flex justify-center">
-        <PaginationControls compact rangeAsPageSize page={salesPage} pageSize={salesPageSize} totalItems={totalSalesCount} label={t('sales') || 'sales'} t={t} onPageChange={setSalesPage} onPageSizeChange={(size) => { setSalesPageSize(size); setSalesPage(1) }} />
+        <PaginationControls compact rangeAsPageSize compactCentered page={salesPage} pageSize={salesPageSize} totalItems={totalSalesCount} label={t('sales') || 'sales'} t={t} onPageChange={setSalesPage} onPageSizeChange={(size) => { setSalesPageSize(size); setSalesPage(1) }} />
       </div>
 
       {exportDialog ? (

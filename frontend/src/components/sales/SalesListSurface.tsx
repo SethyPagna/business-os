@@ -504,7 +504,7 @@ export default function SalesListSurface({
                       >
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0 flex-1">
-                            <div data-sales-card-primary-meta="" className="mb-1 flex items-center gap-x-1.5 overflow-x-auto whitespace-nowrap text-xs text-gray-400">
+                            <div data-sales-card-primary-meta="" className="mb-1 flex min-w-0 flex-nowrap items-center gap-x-1.5 overflow-x-auto overscroll-x-contain whitespace-nowrap text-xs text-gray-400 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                               {selectionModeActive ? (
                               <input
                                 type="checkbox"
@@ -520,14 +520,12 @@ export default function SalesListSurface({
                                   value; this metadata row owns horizontal scroll
                                   when an unusually long id does not fit. */}
                               <CopyableId value={sale.receipt_number || ''} copyLabel={t('copy_receipt_number') || 'Copy receipt number'} copiedLabel={t('copied') || 'Copied'} className="shrink-0 whitespace-nowrap font-mono text-sm font-semibold text-gray-900 dark:text-white" />
-                              <span aria-hidden="true">|</span>
                               <span className="shrink-0">{fmtTime(sale.created_at)}</span>
-                              {sale.cashier_name ? <><span aria-hidden="true">|</span><span className="font-bold text-gray-700 dark:text-gray-200" aria-label={`${t('cashier') || 'Cashier'}: ${sale.cashier_name}`}>{sale.cashier_name}</span></> : null}
-                              {branchLabel ? <><span aria-hidden="true">|</span><span aria-label={`${t('branch') || 'Branch'}: ${branchLabel}`}><EntityLink page="branches" anchor="hub:branches:overview" navigate={navigateTo}>{branchLabel}</EntityLink></span></> : null}
+                              {sale.cashier_name ? <span className="shrink-0 font-bold text-gray-700 dark:text-gray-200" aria-label={`${t('cashier') || 'Cashier'}: ${sale.cashier_name}`}>{sale.cashier_name}</span> : null}
                             </div>
                             {/* Y17: customer (name + phone) leads the meta line;
                                 tapping the card opens the full detail. */}
-                            <div className="mt-0.5 flex items-center gap-x-2 overflow-x-auto whitespace-nowrap text-xs text-gray-500">
+                            <div className="mt-0.5 flex min-w-0 flex-nowrap items-center gap-x-2 overflow-x-auto overscroll-x-contain whitespace-nowrap text-xs text-gray-500 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                               <span className="font-medium text-gray-700 dark:text-gray-300">{Number(sale.customer_is_anonymous || 0) === 1 ? (t('walk_in') || 'General') : sale.customer_name?.trim() ? <EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_name} navigate={navigateTo}>{sale.customer_name}</EntityLink> : (t('walk_in') || 'General')}</span>
                               {sale.customer_phone?.trim() ? <EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_phone} navigate={navigateTo} className="text-gray-400">{sale.customer_phone}</EntityLink> : null}
                               {/* U22: phone and delivery stay on one compact
@@ -539,11 +537,12 @@ export default function SalesListSurface({
                               {/* Mobile delivery contract: {driverLabel ? <><span aria-hidden="true">|</span><span aria-label={`${t('delivery')}: ${driverLabel}`}>{driverLabel}</span></> : null} */}
                               {driverLabel ? <><span aria-hidden="true">|</span><span aria-label={`${t('delivery') || 'Delivery'}: ${driverLabel}`}><EntityLink page="contacts" anchor="hub:contacts:delivery" search={driverLabel} navigate={navigateTo}>{driverLabel}</EntityLink></span></> : null}
                             </div>
-                            {/* Third row on small screens (user, Aug 30):
-                                status + payment get their OWN line, and the
+                            {/* Third row on small screens: branch, status,
+                                payment and item count get their own line. The
                                 payment badge truncates with "…" instead of
                                 ever touching the KHR figure at the right. */}
-                            <div className="mt-1 flex min-w-0 items-center gap-1.5">
+                            <div data-sales-card-status-meta="" className="mt-1 flex min-w-0 flex-nowrap items-center gap-1.5 overflow-x-auto overscroll-x-contain whitespace-nowrap [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                              {branchLabel ? <span className="shrink-0" aria-label={`${t('branch') || 'Branch'}: ${branchLabel}`}><EntityLink page="branches" anchor="hub:branches:overview" navigate={navigateTo}>{branchLabel}</EntityLink></span> : null}
                               <StatusBadge status={status} t={t} />
                               {sale.payment_method ? <EntityLink page="settings" anchor="hub:settings:settings" navigate={navigateTo} className="min-w-0 max-w-[9rem] truncate"><span className="badge-blue min-w-0 max-w-[9rem] truncate text-xs">{sale.payment_method}</span></EntityLink> : <span className="badge-blue min-w-0 max-w-[9rem] truncate text-xs">N/A</span>}
                               <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">{items.length} {t('items')}</span>

@@ -79,7 +79,11 @@ assert.match(salesSurface, /<td className="w-10 px-1 py-1\.5 text-right"[\s\S]*?
 assert.doesNotMatch(salesSurface, /<td className="hidden lg:table-cell"\s*\/>/, 'each rendered sale row has no orphan chooser cell after the print cell')
 assert.doesNotMatch(salesPage, /CurrentShiftSummary/, 'the full current-shift block no longer occupies the space above sales stats')
 assert.equal((salesPage.match(/<ShiftHistoryModal/g) || []).length, 1, 'the compact header exposes one Shift action')
-assert.match(salesPage, /rangeActions=\{\([\s\S]*?<ShiftHistoryModal[\s\S]*?<SectionExportAction>/, 'Shift and export stay together in the responsive stats-header actions')
+assert.match(salesPage, /<StatsStrip[\s\S]*?iconOnly[\s\S]*?compactRange[\s\S]*?rangeActions=\{\([\s\S]*?<SectionExportAction>[\s\S]*?<LazyPortalMenu/, 'Sales uses compact icon Stats and keeps Export/Manage in the date row')
+const salesPagerRow = salesPage.slice(salesPage.indexOf('<PagerActionRow'), salesPage.indexOf('</PagerActionRow>') + '</PagerActionRow>'.length)
+assert.match(salesPagerRow, /leading=\{canUseShifts[\s\S]*?<ShiftHistoryModal/, 'permission-gated Shift leads the centered top pager')
+assert.match(salesPagerRow, /trailing=\{<ActionHistoryBar[\s\S]*?dense/, 'icon-only History trails the centered top pager')
+assert.doesNotMatch(salesPagerRow, /<SectionExportAction|translateOr\('manage'/, 'Export and Manage stay with the date range instead of crowding the pager')
 
 assert.match(contactsShared, /border-collapse text-xs/)
 assert.match(contactsShared, /space-y-2 md:hidden/, 'contact mobile cards remain separate from the dense desktop table')
@@ -98,6 +102,7 @@ console.log('PASS dense Sales, Contacts, and Promotions desktop tables preserve 
 assert.match(salesPage, /onRangeChange=\{setStripRange\}\s*showTime/, 'Sales retains its supported 24-hour date range controls')
 
 assert.equal((salesPage.match(/<PaginationControls/g) || []).length, 2, 'Sales exposes a top and bottom labeled pager')
+assert.equal((salesPage.match(/compactCentered/g) || []).length, 2, 'both Sales pagers opt into the narrow centered contract')
 assert.match(salesPage, /range=\{stripRange\}[\s\S]*?onRangeChange=\{setStripRange\}/)
 assert.doesNotMatch(salesPage, /translateOr\('sales_strip_period_scope'|translateOr\('sales_strip_choose_range'/)
 assert.match(salesSurface, /data-copy-value=\{copyText\(children\)\}/, 'related sale metadata supports plain hold/keyboard copy')
