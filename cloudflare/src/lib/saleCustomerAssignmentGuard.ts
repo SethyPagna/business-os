@@ -86,8 +86,15 @@ export async function prepareCustomerAssignments(db: D1Compat, input: CustomerAs
     balances AS (SELECT accounts.id,${rawPointsSql('accounts.id')} AS raw FROM accounts CROSS JOIN cfg)`
   const params = { ...configParams(config), moves: JSON.stringify(moves), accounts: JSON.stringify(accounts) }
   const nonnegative = `NOT EXISTS(SELECT 1 FROM balances WHERE raw IS NULL OR raw < -0.0000001)`
+  // Retain the legacy direct repair of an entirely zero-value orphan source.
+  // A missing destination is never valid (including replay), and a nonzero
+  // sale/redemption/refund cannot gain attribution through this exception.
   const predicate = `${settingsMatch} AND ${nonnegative}
-    AND NOT EXISTS(SELECT 1 FROM accounts a LEFT JOIN customers c ON c.id=a.id WHERE c.id IS NULL)
+    AND NOT EXISTS(SELECT 1 FROM accounts a LEFT JOIN customers c ON c.id=a.id WHERE c.id IS NULL
+      AND EXISTS(SELECT 1 FROM moves m JOIN sales s ON s.id=m.id WHERE m.target_id=a.id
+        OR (m.source_id=a.id AND (COALESCE(s.total_usd,0)<>0 OR COALESCE(s.total_khr,0)<>0
+          OR COALESCE(s.membership_points_redeemed,0)<>0
+          OR EXISTS(SELECT 1 FROM returns r WHERE r.sale_id=s.id AND (COALESCE(r.total_refund_usd,0)<>0 OR COALESCE(r.total_refund_khr,0)<>0))))))
     AND NOT EXISTS(SELECT 1 FROM moves m LEFT JOIN sales s ON s.id=m.id WHERE s.id IS NULL OR s.customer_id IS NOT m.source_id
       OR (COALESCE(s.membership_points_redeemed,0)<>0 AND (m.source_id IS NULL OR m.target_id IS NULL
         OR EXISTS(SELECT 1 FROM customers c WHERE c.id IN (m.source_id,m.target_id) AND COALESCE(c.is_anonymous,0)<>0))))
