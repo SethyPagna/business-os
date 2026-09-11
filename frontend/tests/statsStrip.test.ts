@@ -327,21 +327,23 @@ test('Part 564: headline + day-group counts count only what the money counts', (
   assert.ok(/section\.items\.filter\(isCountedReturn\)/.test(returnsSurface), 'Returns day headers exclude cancelled from the count')
 })
 
-test('Part 552: report section controls ride the title row; hub tabs fit; branch merges', () => {
-  // Each report section places its controls on the hub-provided title row
-  // (user: "the sales, returns and fees, sections the card title can be
-  // moved to title row"): the section owns a `titleNode` prop and ReportsHub
-  // stops rendering a standalone title.
-  // Since the Reports redesign each view is a ReportFrame whose title row
-  // (SectionHeader) carries the view's own controls in `actions`; the hub
-  // renders no standalone title of its own.
+test('Part 552: report headers keep exactly four controls; hub tabs fit; branch merges', () => {
+  // The active report selector replaces the static title and shares one row
+  // with Filter, Show, and the report's overflow menu. View-specific mode and
+  // history controls remain functional on the secondary rail below.
   for (const rel of REPORT_VIEW_FILES) {
     const src = read(rel)
     assert.ok(src.includes('<ReportFrame'), `${rel} renders inside a ReportFrame`)
-    assert.ok(/<ReportFrame[\s\S]{0,600}actions=\{/.test(src), `${rel} places its controls on the title row`)
+    assert.ok(!/<ReportFrame[\s\S]{0,800}\bactions=\{/.test(src), `${rel} does not put a mixed action group in the four-control header`)
   }
   const hub = read('src/components/sales/ReportsHub.tsx')
   assert.ok(!/<Icon className="h-4 w-4" \/> \{label\}/.test(hub), 'ReportsHub no longer renders its own standalone section title row')
+  const compoundTitle = hub.slice(hub.indexOf('const reportControlRow'), hub.indexOf('const viewProps'))
+  assert.match(compoundTitle, /\{viewPicker\}[\s\S]*\{filtersButton\}[\s\S]*trh\('show', 'Show'\)/, 'the shared report title contributes selector, Filter, and Show in order')
+  assert.match(hub, /titleControl: reportControlRow/, 'every report receives the shared compound title')
+  const frame = read('src/components/sales/reports/ReportFrame.tsx')
+  assert.match(frame, /actions=\{menuAction \? <span className="reports-frame-menu">\{menuAction\}<\/span> : undefined\}/, 'the fourth header control is only the report overflow menu')
+  assert.match(frame, /secondaryActions \? <div className="reports-frame-secondary-actions">\{secondaryActions\}<\/div> : null/, 'mode and history controls remain on the secondary rail')
   // The branch select rides the shared control row's filters slot, not its own line.
   assert.ok(/const filterSelects = \([\s\S]{0,120}branches\.length \? <AppSelect/.test(hub), 'the branch select is part of the control-row filters')
   // Part 586: the selects no longer sit inline on wide screens at all -- they
