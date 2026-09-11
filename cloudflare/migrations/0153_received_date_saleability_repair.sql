@@ -15,6 +15,8 @@
 -- to force a rerun. Application rollback requires no data reversal.
 -- All business changes execute inside ONE trigger invocation: RAISE(ABORT)
 -- rolls them all back even when SQL is executed without an outer transaction.
+-- Wrangler's splitter requires whitespace before CASE and after END, even
+-- inside expressions. Keep these token boundaries when editing this trigger.
 
 CREATE TABLE IF NOT EXISTS _received_date_repair_0153 (id INTEGER PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS _received_date_manifest_0153 (
@@ -138,11 +140,13 @@ BEGIN
  '0153: reverse duplicate historical status deduction; original movement '||im.id,im.reference_id,'System repair 0153'
  FROM inventory_movements im JOIN _received_date_manifest_0153 f ON f.movement_id=im.id;
 
+ -- Legacy RECON text must not win MAX and coerce the next ordinal to 1.
+ -- INTEGER affinity already stores well-formed numeric text numerically.
  INSERT INTO product_batches(variant_product_id,batch_key,lot_code,received_at,is_active,notes,synthetic,batch_number,
  unit_cost_usd,received_quantity,received_branch_id,received_cost_usd,created_at,updated_at)
  SELECT 1244,'repair-0153-return-1-item-3',NULL,'2026-09-03',1,
  'Customer return received 2026-09-03 (return 1, item 3, movement 46187). Original supplier received date unknown.',
- 1,COALESCE((SELECT MAX(batch_number) FROM product_batches WHERE variant_product_id=1244),0)+1,
+ 1,COALESCE((SELECT MAX(batch_number) FROM product_batches WHERE variant_product_id=1244 AND typeof(batch_number) IN ('integer','real')),0)+1,
  cost_price_usd,0,2,0,'2026-09-03 07:19:07','2026-09-03 07:19:07'
  FROM return_items WHERE id=3;
  INSERT INTO branch_batch_stock(batch_id,branch_id,quantity)
@@ -153,7 +157,7 @@ BEGIN
  UPDATE inventory_movements SET batch_id=(SELECT batch_id FROM return_items WHERE id=3) WHERE id=46187;
 
  UPDATE product_batches SET variant_product_id=4758,
- batch_number=(SELECT COALESCE(MAX(batch_number),0)+1 FROM product_batches WHERE variant_product_id=4758)
+ batch_number=(SELECT COALESCE(MAX(batch_number),0)+1 FROM product_batches WHERE variant_product_id=4758 AND typeof(batch_number) IN ('integer','real'))
  WHERE id=61020;
  UPDATE branch_batch_stock SET quantity=7 WHERE id=77792;
  UPDATE sale_items SET batch_id=61020,batch_label='09032026',batch_expiry_date='2029' WHERE id IN (40261,40286);
@@ -209,15 +213,17 @@ BEGIN
  JOIN branch_stock current ON current.id=json_extract(old.value,'$.id')
  WHERE log.action='received_date_saleability_repair' AND log.entity_id='0153'
  AND current.quantity!=json_extract(old.value,'$.quantity')+
- CASE WHEN current.branch_id=2 AND current.product_id IN (SELECT product_id FROM _received_date_manifest_0153) THEN 1 ELSE 0 END)
+ CASE WHEN current.branch_id=2 AND current.product_id IN (SELECT product_id FROM _received_date_manifest_0153) THEN 1 ELSE 0 END )
  OR EXISTS(SELECT 1 FROM audit_logs log,json_each(log.old_value,'$.branch_batch_stock') old
  JOIN branch_batch_stock current ON current.id=json_extract(old.value,'$.id')
  WHERE log.action='received_date_saleability_repair' AND log.entity_id='0153'
- AND current.quantity!=CASE WHEN current.id=77792 THEN 7 ELSE json_extract(old.value,'$.quantity') END)
+ AND current.quantity!= CASE WHEN current.id=77792 THEN 7 ELSE json_extract(old.value,'$.quantity') END )
  THEN RAISE(ABORT,'0153: unrelated branch quantity changed') END;
+ -- D1 limits LIKE patterns to 50 bytes; use exact prefixes for our generated
+ -- correction reasons here and in the replay guard below.
  UPDATE audit_logs SET new_value=json_object(
  'return_batch_id',(SELECT batch_id FROM return_items WHERE id=3),
- 'correction_movement_ids',(SELECT json_group_array(id) FROM inventory_movements WHERE user_name='System repair 0153' AND reason LIKE '0153: reverse duplicate historical status deduction;%'),
+ 'correction_movement_ids',(SELECT json_group_array(id) FROM inventory_movements WHERE user_name='System repair 0153' AND instr(reason,'0153: reverse duplicate historical status deduction;')=1),
  'sale_allocation_ids',(SELECT json_group_array(id) FROM sale_item_batch_allocations WHERE sale_item_id IN (40261,40286)),
  'return_allocation_ids',(SELECT json_group_array(id) FROM return_item_batch_allocations WHERE return_item_id=3),
  'stock_delta',9,'olay_sold_quantity',21,'original_supplier_received_date_known',json('false'))
@@ -247,7 +253,7 @@ BEGIN
  WHERE ri.id=3 AND pb.batch_key='repair-0153-return-1-item-3' AND pb.received_at='2026-09-03'
  AND a.quantity=1 AND a.branch_id=2 AND a.reversed_at IS NULL)!=1
  OR (SELECT COUNT(*) FROM inventory_movements WHERE user_name='System repair 0153'
- AND reason LIKE '0153: reverse duplicate historical status deduction;%')!=9
+ AND instr(reason,'0153: reverse duplicate historical status deduction;')=1)!=9
  THEN RAISE(ABORT,'0153: completed repair has changed; investigate before replay') END;
 END;
 

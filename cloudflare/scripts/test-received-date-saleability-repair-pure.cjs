@@ -56,6 +56,8 @@ function seeded() {
   insert(db,'branch_stock',{product_id:99999,branch_id:2,quantity:3})
   return db
 }
+if (require.main !== module) module.exports = { seeded, snapshot }
+else {
 let passed=0
 function check(name,fn) { fn(); passed++; console.log(`PASS ${name}`) }
 check('LF-only migration applies and reruns without data on fresh installation', () => {
@@ -99,6 +101,26 @@ check('exact incident repair restores nine units and connects all 11 active Shop
   assert.equal(db.prepare('SELECT COUNT(*) n FROM products WHERE id=7091').get().n,0)
   assert.equal(db.prepare('PRAGMA integrity_check').get().integrity_check,'ok')
   const after=snapshot(db); db.exec(sql); assert.deepEqual(snapshot(db),after,'retry changes nothing')
+  db.close()
+})
+check('Clarins and Olay next ordinals ignore legacy text and never collide with numeric lots',()=>{
+  const db=seeded()
+  for(const product of [1244,4758]) {
+    for(const [key,number] of [['legacy-text','RECON-20260903'],['integer',8],['real',9.5],['numeric-text','12']]) {
+      insert(db,'product_batches',{variant_product_id:product,batch_key:key,batch_number:number,is_active:0})
+    }
+  }
+  // INTEGER affinity stores well-formed numeric text numerically already.
+  assert.equal(db.prepare("SELECT typeof(batch_number) t FROM product_batches WHERE variant_product_id=1244 AND batch_key='numeric-text'").get().t,'integer')
+  const before=db.prepare('SELECT id,batch_number FROM product_batches ORDER BY id').all()
+  db.exec(sql)
+  const repaired=db.prepare("SELECT id,variant_product_id,batch_number FROM product_batches WHERE id=61020 OR batch_key='repair-0153-return-1-item-3'").all()
+  assert.equal(repaired.length,2)
+  for(const row of repaired) {
+    assert.equal(row.batch_number,13)
+    assert.equal(db.prepare('SELECT COUNT(*) n FROM product_batches WHERE variant_product_id=? AND batch_number=?').get(row.variant_product_id,row.batch_number).n,1)
+  }
+  for(const row of before.filter(row=>row.id!==61020)) assert.deepEqual(db.prepare('SELECT id,batch_number FROM product_batches WHERE id=?').get(row.id),row)
   db.close()
 })
 const staleCases=[
@@ -160,3 +182,4 @@ check('audit snapshots support exact stock/lot/financial recovery during the wri
   db.close()
 })
 console.log(`\n${passed} received-date repair scenarios passed`)
+}
