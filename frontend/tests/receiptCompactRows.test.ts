@@ -151,28 +151,38 @@ function occurrences(haystack: string, needle: string): number {
   return haystack.split(needle).length - 1
 }
 
-await runTest('structured receipt values stay intact while free text remains wrappable', () => {
+await runTest('structured receipt values stay intact and may reflow on every supported narrow paper', () => {
+  const membership = 'MEMBERSHIP-20260911-000001'
+  const phone = '+855 96 123 456 789'
   const html = renderReceipt(
     { receipt_language: 'both', show_total_khr: true },
-    {},
+    { paperSize: '58mm', marginLeft: '4', marginRight: '4' },
     {
       receipt_number: '20260911-182059',
       created_at: '2026-09-11T11:20:00Z',
-      customer_phone: '098 388 811',
+      customer_id: 99,
+      customer_name: 'Long-field customer',
+      customer_phone: phone,
       customer_address: 'a long delivery address remains ordinary wrapping text',
-      customer_membership_number: 'LC-05008',
-      total_usd: 35,
+      customer_membership_number: membership,
+      subtotal_usd: 123456789,
+      total_usd: 123456789,
       exchange_rate: 4065,
     },
   )
   const dateRow = html.split('data-receipt-line="true"').find((row) => row.includes('11/09/2026 18:20')) || ''
-  const phoneRow = html.split('data-receipt-line="true"').find((row) => row.includes('098 388 811')) || ''
+  const phoneRow = html.split('data-receipt-line="true"').find((row) => row.includes(phone)) || ''
+  const membershipRow = html.split('data-receipt-line="true"').find((row) => row.includes(membership)) || ''
   const addressRow = html.split('data-receipt-line="true"').find((row) => row.includes('long delivery address')) || ''
-  const totalRow = html.split('data-receipt-line="true"').find((row) => row.includes('$35.00') && row.includes('៛')) || ''
-  assert.match(dateRow, /whitespace-nowrap/, 'date and time remain one structured value')
-  assert.match(phoneRow, /whitespace-nowrap/, 'phone digits remain one structured value')
-  assert.doesNotMatch(addressRow, /whitespace-nowrap/, 'free-form address may wrap and grow its row')
-  assert.match(totalRow, /whitespace-nowrap/, 'USD/KHR figures never separate their symbol onto another line')
+  const totalRow = html.split('data-receipt-line="true"').find((row) => row.includes('$123456789.00') && row.includes('៛')) || ''
+  for (const [name, row] of [['date', dateRow], ['phone', phoneRow], ['membership', membershipRow], ['address', addressRow], ['total', totalRow]] as const) {
+    assert.ok(row, `${name} row renders`)
+    assert.match(row, /overflow-wrap:anywhere/, `${name} may shrink its min-content width and grow the grid row`)
+    assert.doesNotMatch(row, /whitespace-nowrap/, `${name} must not force a supported 58 mm receipt wider than its paper`)
+  }
+  assert.ok(html.includes(phone), 'the complete phone survives rendering')
+  assert.ok(html.includes(membership), 'the complete membership identifier survives rendering')
+  assert.ok(html.includes('$123456789.00'), 'the complete high-value USD figure survives rendering')
   assert.ok(html.includes('20260911-182059'), 'the complete receipt identifier survives rendering')
 })
 
