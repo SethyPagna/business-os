@@ -550,6 +550,27 @@ export function normalizedHaystackSql(expr: string, alreadyNormalized = false): 
   return `lower(${foldJoinersSql(foldDiacriticsSql(expr))})`
 }
 
+// D1 measures SQLITE_MAX_LIKE_PATTERN_LENGTH in UTF-8 bytes, not JS string
+// length. Keep the common LIKE shape for safe patterns, but retain
+// the exact same literal-substring semantics with instr() when a normalized
+// word plus its two `%` wildcards would exceed D1's 50-byte ceiling.
+const SEARCH_PATTERN_ENCODER = new TextEncoder()
+
+function buildBoundSubstringClause(
+  word: string,
+  normalizedCols: readonly string[],
+  params: Record<string, unknown>,
+  key: string,
+): string {
+  const pattern = `%${word}%`
+  const fitsD1LikePattern = SEARCH_PATTERN_ENCODER.encode(pattern).byteLength <= 50
+  params[key] = fitsD1LikePattern ? pattern : word
+  const clauses = normalizedCols.map((col) => fitsD1LikePattern
+    ? `${col} LIKE @${key}`
+    : `instr(${col}, @${key}) > 0`)
+  return clauses.length > 1 ? `(${clauses.join(' OR ')})` : clauses[0]
+}
+
 // Same pipeline as normalizedHaystackSql, plus a final space-strip --
 // the SQL-side counterpart of compactSearchText above. Needed for a real,
 // confirmed gap normalizedHaystackSql alone can't close: a brand stored
@@ -987,8 +1008,8 @@ function buildCompactColumnMatchClause(
   paramKey: string,
   alreadyNormalized = false,
 ): string {
-  params[paramKey] = `%${word}%`
-  return `p.id IN (SELECT id FROM products p WHERE p.is_active = 1 AND ${compactHaystackSql(columnExpr, alreadyNormalized)} LIKE @${paramKey} LIMIT 200)`
+  const match = buildBoundSubstringClause(word, [compactHaystackSql(columnExpr, alreadyNormalized)], params, paramKey)
+  return `p.id IN (SELECT id FROM products p WHERE p.is_active = 1 AND ${match} LIMIT 200)`
 }
 
 // Standalone top-level clause for the common single-word case (buildHybrid
@@ -1062,9 +1083,8 @@ export function buildPartialWordMatchClause(
     const threshold = Math.min(3, words.length - 1)
     const hitTerms = words.map((word) => {
       const key = `${paramKeyBase}_${idx++}`
-      params[key] = `%${word}%`
-      const colOrs = normalizedCols.map((col) => `${col} LIKE @${key}`).join(' OR ')
-      return `(CASE WHEN (${colOrs}) THEN 1 ELSE 0 END)`
+      const match = buildBoundSubstringClause(word, normalizedCols, params, key)
+      return `(CASE WHEN (${match}) THEN 1 ELSE 0 END)`
     })
     return `p.id IN (SELECT id FROM products p WHERE p.is_active = 1 AND (${hitTerms.join(' + ')}) >= ${threshold} LIMIT 200)`
   })
@@ -1171,9 +1191,7 @@ export function buildLikeAliasClause(
   const candidateClauses = candidateForms.map((formWords) => {
     const perWordClauses = formWords.map((w) => {
       const key = `${paramKeyBase}_${idx++}`
-      params[key] = `%${w}%`
-      const colOrs = normalizedCols.map((col) => `${col} LIKE @${key}`)
-      return colOrs.length > 1 ? `(${colOrs.join(' OR ')})` : colOrs[0]
+      return buildBoundSubstringClause(w, normalizedCols, params, key)
     })
     return perWordClauses.length > 1 ? `(${perWordClauses.join(' AND ')})` : perWordClauses[0]
   })

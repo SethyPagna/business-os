@@ -205,6 +205,11 @@ assert.match(
   /const handleProductScan[\s\S]{0,400}setSearch\(barcode\)/,
   'a scan in the Change-stock picker must only fill the search box',
 )
+assert.match(
+  stockAdjustModal,
+  /getProductsByIds\(\[id\], \{ surface: 'inventory' \}\)/,
+  'the Change-stock by-id refresh must retain the inventory read surface',
+)
 assert.ok(
   !/setSelectedProduct\([^)]*results\[0\]/.test(stockAdjustModal),
   'the Change-stock picker must never auto-select the first/only result',
