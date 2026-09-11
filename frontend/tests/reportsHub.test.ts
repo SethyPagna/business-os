@@ -754,7 +754,11 @@ test('compact report filters match the stacked mobile control contract', () => {
   assert.match(css, /\.reports-show-action\s*\{[^}]*min-height:\s*40px[^}]*height:\s*40px/, 'Show follows the compact action-height contract')
   assert.match(css, /\.reports-filter-trigger\s*\{[^}]*min-height:\s*40px[^}]*height:\s*40px/, 'Filters follows the shared Manage-aligned 40px control height')
   assert.match(css, /@media \(max-width: 767px\)\s*\{\s*\.reports-filter-trigger\s*\{[^}]*width:\s*40px[^}]*min-width:\s*40px[^}]*max-width:\s*40px[^}]*flex:\s*0 0 40px/, 'compact Filters remains an explicit 40px square when the shared control-height token is absent')
-  assert.match(css, /\.reports-view-picker\s*\{[^}]*width:\s*clamp\(7rem, 28vw, 14rem\)[^}]*flex:\s*0 0 clamp\(7rem, 28vw, 14rem\)/, 'short and long report labels retain one responsive picker width with a phone-safe floor')
+  assert.match(css, /\.reports-view-picker\s*\{[^}]*width:\s*clamp\(5\.5rem, 28vw, 14rem\)[^}]*flex:\s*0 0 clamp\(5\.5rem, 28vw, 14rem\)/, 'short and long report labels retain one responsive picker width with a phone-safe floor')
+  assert.match(css, /\.reports-view-picker \[data-app-select-selected='true'\]\s*\{[^}]*overflow-x:\s*auto !important[^}]*text-overflow:\s*clip/, 'the complete selected report name is horizontally reachable without an ellipsis')
+  assert.match(css, /body\.lang-km \[data-reports-hub\] \.reports-view-picker \[data-app-select-selected='true'\][^}]*overflow-x:\s*auto !important/, 'the report-name scroller outranks the global Khmer truncate clip rule')
+  assert.match(css, /\.reports-frame-menu,[\s\S]*?\.reports-frame-menu button\s*\{[^}]*width:\s*40px[^}]*height:\s*40px/, 'the report overflow action completes the header with a 40px square')
+  assert.match(css, /\.reports-frame-secondary-actions\s*\{[^}]*display:\s*flex[^}]*overflow-x:\s*auto/, 'view-specific mode and history controls retain a separate scrolling rail')
   assert.match(css, /\[data-reports-hub\] \.lucide-more-horizontal\s*\{[^}]*transform:\s*rotate\(90deg\)/, 'only report overflow dots rotate to the vertical convention')
   assert.match(css, /font-variant-numeric:\s*tabular-nums/, 'report amounts use tabular numerals')
   assert.match(css, /overflow-x:\s*clip/, 'the report surface cannot create page-level horizontal overflow')
@@ -785,6 +789,25 @@ test('every --ui-* token the reports surface reads is declared, and the density 
 test('report title rows omit the redundant report Info button', () => {
   const frame = read('src/components/sales/reports/ReportFrame.tsx')
   assert.doesNotMatch(frame, /import InfoHint|infoHint=\{/, 'ReportFrame does not render an Info trigger beside the report picker')
+  assert.doesNotMatch(frame, /count=\{count\}/, 'ReportFrame does not render a result count beside the report picker')
+  assert.match(frame, /actions=\{menuAction \? <span className="reports-frame-menu">\{menuAction\}<\/span> : undefined\}/, 'the header action slot contains only the report overflow menu')
+  assert.match(frame, /secondaryActions \? <div className="reports-frame-secondary-actions">\{secondaryActions\}<\/div> : null/, 'other view controls render below the header')
+})
+
+test('every report keeps export in the four-control header and relocates other actions', () => {
+  for (const rel of VIEW_FILES) {
+    const source = read(rel)
+    assert.doesNotMatch(source, /<ReportFrame[\s\S]{0,420}?\bcount=\{/, `${rel} does not send a count into the report header`)
+    assert.doesNotMatch(source, /<ReportFrame[\s\S]{0,800}?\bactions=\{/, `${rel} does not send a mixed action group into the report header`)
+  }
+  for (const rel of [
+    'src/components/sales/reports/PeriodReport.tsx',
+    'src/components/sales/reports/ReturnsReport.tsx',
+    'src/components/sales/reports/ExpensesReport.tsx',
+    'src/components/sales/reports/ShiftReport.tsx',
+  ]) {
+    assert.match(read(rel), /secondaryActions=\{/, `${rel} preserves its non-export controls below the header`)
+  }
 })
 
 test('the excel table hugs its columns and pays for density with padding, never with the line box', () => {

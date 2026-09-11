@@ -207,9 +207,8 @@ export default function SalesListReport(p: ReportViewProps) {
     <ReportFrame
       title={tr(view.labelKey, view.fallback)}
       titleControl={p.titleControl}
-      count={rows.length ? `${fmtInt(rows.length)}${paged.hasMore ? '+' : ''}` : undefined}
       hint={{ label: tr(view.labelKey, view.fallback), text: tr('rpt_hint_sales_list', 'One row per receipt, newest first, 250 at a time. Revenue per receipt = net sale minus its refunds; Not Paid sales are recognized and only cancelled rows show 0.') }}
-      actions={p.canExport() ? <OverflowMenu label={tr('export', 'Export')} items={exportMenuItems(tr, p.canExport, exportCsv, exportPrint, { csv: <Download className="h-3.5 w-3.5" />, print: <Printer className="h-3.5 w-3.5" /> })} /> : null}
+      menuAction={p.canExport() ? <OverflowMenu label={tr('export', 'Export')} items={exportMenuItems(tr, p.canExport, exportCsv, exportPrint, { csv: <Download className="h-3.5 w-3.5" />, print: <Printer className="h-3.5 w-3.5" /> })} /> : null}
       summary={summary}
       error={paged.error}
       onRetry={paged.reload}

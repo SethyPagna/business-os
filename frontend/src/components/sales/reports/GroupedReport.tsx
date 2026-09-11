@@ -202,9 +202,8 @@ export default function GroupedReport(p: ReportViewProps) {
       <ReportFrame
         title={title}
         titleControl={p.titleControl}
-        count={productRows.length ? fmtInt(productRows.length) : undefined}
         hint={{ label: title, text: tr('rpt_hint_products', 'Line sales = item line totals after line discounts, before order-level discounts, over recognized sales only. Ranked by line sales; top 500.') }}
-        actions={exportMenu(() => downloadCSV(reportFileName('products', filters, 'csv'), csv()), () => openPrintExport({ title: printTitle, subtitle, headers: columns.map((c) => c.label), rows: csv() }))}
+        menuAction={exportMenu(() => downloadCSV(reportFileName('products', filters, 'csv'), csv()), () => openPrintExport({ title: printTitle, subtitle, headers: columns.map((c) => c.label), rows: csv() }))}
         summary={productRows.length ? joinSummary([countLabel(productRows.length, REPORT_NOUNS.product, tr), `${fmtQty(totalQty)} ${tr('quantity', 'Quantity').toLowerCase()}`, `${tr('rpt_line_sales', 'Line sales')} ${fmtMoney(totalLine)}`, totalProfit != null ? `${tr('rpt_gross_profit', 'Gross profit')} ${fmtMoney(totalProfit)} (${fmtPct(pct(totalProfit, totalLine))})` : null]) : ''}
         error={state.error}
         onRetry={state.reload}
@@ -274,9 +273,8 @@ export default function GroupedReport(p: ReportViewProps) {
       <ReportFrame
         title={title}
         titleControl={p.titleControl}
-        count={courierRows.length ? fmtInt(courierRows.length) : undefined}
         hint={{ label: title, text: tr('rpt_hint_couriers', 'Delivery sales per courier: what customers were charged, what the store absorbed, the recorded actual cost (only deliveries with a cost recorded) and the resulting margin.') }}
-        actions={exportMenu(() => downloadCSV(reportFileName('couriers', filters, 'csv'), csv()), () => openPrintExport({ title: printTitle, subtitle, headers: columns.map((c) => c.label), rows: csv() }))}
+        menuAction={exportMenu(() => downloadCSV(reportFileName('couriers', filters, 'csv'), csv()), () => openPrintExport({ title: printTitle, subtitle, headers: columns.map((c) => c.label), rows: csv() }))}
         summary={courierRows.length ? joinSummary([countLabel(sum('deliveries'), REPORT_NOUNS.delivery, tr), `${tr('rpt_delivery_charged', 'Delivery fee charged')} ${fmtMoney(sum('charged_fee_usd'))}`, `${tr('rpt_store_delivery', 'Store-paid delivery fee')} ${fmtMoney(sum('absorbed_fee_usd'))}`, `${tr('rpt_delivery_cost', 'Actual delivery cost')} ${fmtMoney(sum('actual_cost_usd'))}`, `${tr('rpt_delivery_margin', 'Delivery profit')} ${fmtMoney(sum('margin_usd'))}`]) : ''}
         error={state.error}
         onRetry={state.reload}
@@ -332,9 +330,8 @@ export default function GroupedReport(p: ReportViewProps) {
     <ReportFrame
       title={title}
       titleControl={p.titleControl}
-      count={groupRows.length ? fmtInt(groupRows.length) : undefined}
       hint={{ label: title, text: tr('rpt_hint_grouped', 'Each row is the full revenue calculation for that group (same definition as the Overview), so the rows add up to the totals line. Share = the row’s basis figure as a percentage of the total.') }}
-      actions={exportMenu(() => downloadCSV(reportFileName(view.id, filters, 'csv'), csv()), () => openPrintExport({ title: printTitle, subtitle, headers: columns.map((c) => c.label), rows: csv() }))}
+      menuAction={exportMenu(() => downloadCSV(reportFileName(view.id, filters, 'csv'), csv()), () => openPrintExport({ title: printTitle, subtitle, headers: columns.map((c) => c.label), rows: csv() }))}
       summary={groupRows.length ? joinSummary([countLabel(groupRows.length, REPORT_NOUNS[by], tr), countLabel(totals.tx_count, REPORT_NOUNS.sale, tr), `${basisLabel} ${fmtMoney(totalBasis)}`, totals.refund_usd ? `${tr('refunds', 'Refunds')} ${fmtMoney(totals.refund_usd)}` : null, hasProfit(totals) ? `${tr('rpt_gross_profit', 'Gross profit')} ${fmtMoney(totals.profit_usd)} (${fmtPct(pct(totals.profit_usd, totalBasis))})` : null]) : ''}
       error={state.error}
       onRetry={state.reload}

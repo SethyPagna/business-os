@@ -12,9 +12,11 @@ export interface ReportFrameProps {
   title: ReactNode
   /** Compact selector rendered beside the active report heading. */
   titleControl?: ReactNode
-  count?: ReactNode
   hint?: { text: string; label: string } | null
-  actions?: ReactNode
+  /** The one overflow action that completes the four-control title row. */
+  menuAction?: ReactNode
+  /** View-specific chips/history live below the title row without crowding it. */
+  secondaryActions?: ReactNode
   /** The " | "-joined summary string (may be empty while loading). */
   summary?: string
   /** Secondary summary line (e.g. the previous period) -- muted. */
@@ -26,7 +28,7 @@ export interface ReportFrameProps {
   className?: string
 }
 
-export default function ReportFrame({ title, titleControl, count, actions, summary, summaryNote, error, onRetry, retryLabel = 'Retry', children, className = '' }: ReportFrameProps) {
+export default function ReportFrame({ title, titleControl, menuAction, secondaryActions, summary, summaryNote, error, onRetry, retryLabel = 'Retry', children, className = '' }: ReportFrameProps) {
   // The selectable active report title replaces (rather than sits beside)
   // the static title. This prevents the former "Overview" +
   // "Overview (all)" double heading and gives every report type one
@@ -43,9 +45,9 @@ export default function ReportFrame({ title, titleControl, count, actions, summa
       <SectionHeader
         className={titleControl ? 'reports-frame-header' : ''}
         title={activeTitle}
-        count={count}
-        actions={actions}
+        actions={menuAction ? <span className="reports-frame-menu">{menuAction}</span> : undefined}
       />
+      {secondaryActions ? <div className="reports-frame-secondary-actions">{secondaryActions}</div> : null}
       {summary ? (
         <p className="min-w-0 text-[length:var(--ui-size-meta)] leading-5 text-[var(--ui-ink-2)] [font-variant-numeric:tabular-nums]" data-report-summary="">
           {summary}

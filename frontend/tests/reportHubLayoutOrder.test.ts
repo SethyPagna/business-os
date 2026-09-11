@@ -66,6 +66,9 @@ assert.doesNotMatch(
   /import InfoHint|infoHint=\{/,
   'the removed report Info trigger does not return beside the selected report option',
 )
+assert.doesNotMatch(frameSource, /count=\{count\}/, 'result counts stay out of the four-control report header')
+assert.match(frameSource, /actions=\{menuAction \? <span className="reports-frame-menu">\{menuAction\}<\/span> : undefined\}/, 'only the overflow menu occupies the header action slot')
+assert.match(frameSource, /secondaryActions \? <div className="reports-frame-secondary-actions">/, 'mode chips and Shift History move to the secondary rail')
 assert.match(frameSource, /title=\{activeTitle\}/)
 
 // The desktop tier is untouched: sticky ControlRow plus the preset row.
