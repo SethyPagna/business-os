@@ -52,22 +52,19 @@ assert.match(hub, /import \{[^}]*rangeSubtitle[^}]*\} from '\.\/reports\/reportT
 
 const reportControl = hub.slice(hub.indexOf('const reportControlRow'), hub.indexOf('const viewProps'))
 const viewPicker = hub.slice(hub.indexOf('const viewPicker'), hub.indexOf('const searchSlot'))
-assert.match(viewPicker, /options=\{views\.map\(/, 'the title picker exposes every permission-scoped report option')
+assert.match(hub, /const views = useMemo\(\(\) => visibleReportViews\(perms\), \[perms\]\)/, 'report views remain derived from effective permissions')
+assert.match(hub, /const viewOptions = views\.map\(\(v\) => \(\{ value: v\.id, label: trh\(v\.labelKey, v\.fallback\) \}\)\)/, 'picker options preserve every permission-scoped view and its translated label')
+assert.match(viewPicker, /options=\{viewOptions\}/, 'the title picker receives the permission-scoped report options')
 assert.match(viewPicker, /onChange=\{\(value\) => \{ if \(isReportViewId\(value\)\) setViewId\(value\) \}\}/, 'every valid report option selects its corresponding report view')
 assert.match(reportControl, /\{viewPicker\}[\s\S]*\{filtersButton\}[\s\S]*trh\('show', 'Show'\)/, 'option title, Filters and Show are in one ordered row')
 assert.match(hub, /titleControl: reportControlRow/, 'all report types receive that same row')
 assert.equal((reportControl.match(/\{viewPicker\}/g) || []).length, 1, 'the report header renders one report-option control')
 const frameSource = read('src/components/sales/reports/ReportFrame.tsx')
 assert.match(frameSource, /const activeTitle = titleControl \?\? title/)
-assert.match(
-  frameSource,
-  /InfoHint text=\{hint\.text\} label="About this report"/,
-  'the adjacent info trigger has its own purpose instead of repeating the selected report option name',
-)
 assert.doesNotMatch(
   frameSource,
-  /InfoHint text=\{hint\.text\} label=\{hint\.label\}/,
-  'the report title is not exposed a second time as the info-button label',
+  /import InfoHint|infoHint=\{/,
+  'the removed report Info trigger does not return beside the selected report option',
 )
 assert.match(frameSource, /title=\{activeTitle\}/)
 
