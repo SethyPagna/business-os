@@ -270,6 +270,43 @@ async function reqAs(user, method, url, body) {
 }
 
 async function main() {
+  await check('legacy-sale event lots use the return business date and failed lot writes roll back create/edit/retry', async () => {
+    seed()
+    rawDb.prepare('INSERT INTO sale_items(id,sale_id,product_id,quantity,batch_id) VALUES(1,1,1,5,NULL)').run()
+    const body = { client_request_id: 'legacy-return-provenance', sale_id: 1, branch_id: 1, reason: 'Legacy',
+      items: [{ sale_item_id: 1, product_id: 1, quantity: 3, stock_action: 'restock' }] }
+    rawDb.exec("CREATE TRIGGER fail_test_return_lot BEFORE INSERT ON product_batches BEGIN SELECT RAISE(ABORT,'test lot storage failure'); END")
+    const failed = await req('POST', '/', body)
+    assert.ok([409, 500].includes(failed.status), JSON.stringify(failed.json))
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM returns').get().n, 0)
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM branch_stock').get().n, 0)
+    rawDb.exec('DROP TRIGGER fail_test_return_lot')
+    const created = await req('POST', '/', body)
+    assert.strictEqual(created.status, 200, JSON.stringify(created.json))
+    const lot = rawDb.prepare('SELECT pb.id,pb.received_at FROM product_batches pb JOIN return_items ri ON ri.batch_id=pb.id WHERE ri.return_id=?').get([created.json.id])
+    const retried = await req('POST', '/', body)
+    assert.deepStrictEqual(retried.json, created.json)
+    assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=?').get([lot.id]).quantity, 3)
+    // A historical return edited today retains its own UTC+7 receipt day.
+    rawDb.prepare("UPDATE returns SET created_at='2026-01-01T18:30:00Z' WHERE id=?").run([created.json.id])
+    rawDb.exec("CREATE TRIGGER fail_test_return_lot BEFORE INSERT ON product_batches BEGIN SELECT RAISE(ABORT,'test lot storage failure'); END")
+    const editBody = { client_request_id: 'legacy-return-edit', reason: 'One returned',
+      expected_updated_at: rawDb.prepare('SELECT updated_at FROM returns WHERE id=?').get([created.json.id]).updated_at,
+      items: [{ sale_item_id: 1, product_id: 1, quantity: 1, stock_action: 'restock', branch_id: 1 }] }
+    const editFailed = await req('PATCH', `/${created.json.id}`, editBody)
+    assert.ok([409, 500].includes(editFailed.status), JSON.stringify(editFailed.json))
+    assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=?').get([lot.id]).quantity, 3)
+    assert.strictEqual(rawDb.prepare('SELECT quantity FROM return_items WHERE return_id=?').get([created.json.id]).quantity, 3)
+    rawDb.exec('DROP TRIGGER fail_test_return_lot')
+    const edited = await req('PATCH', `/${created.json.id}`, editBody)
+    assert.strictEqual(edited.status, 200, JSON.stringify(edited.json))
+    const editedLot = rawDb.prepare('SELECT pb.received_at FROM product_batches pb JOIN return_items ri ON ri.batch_id=pb.id WHERE ri.return_id=?').get([created.json.id])
+    assert.strictEqual(editedLot.received_at, '2026-01-02')
+    const editRetry = await req('PATCH', `/${created.json.id}`, editBody)
+    assert.deepStrictEqual(editRetry.json, edited.json)
+    assert.strictEqual(rawDb.prepare('SELECT SUM(quantity) n FROM branch_batch_stock').get().n, 1)
+    assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity, 1)
+  })
   await check('return with a batch-tracked sale_item restocks into that exact batch, not just the aggregate', async () => {
     seed()
     // A prior sale drew 5 units from a specific batch (as sales.ts's own
@@ -298,7 +335,7 @@ async function main() {
     assert.strictEqual(storedBatchId, batch.batchId, 'the return_items row should record which batch it restocked into')
   })
 
-  await check('return with no resolvable batch (no sale_item_id) falls back to the plain branch_stock bump', async () => {
+  await check('return with no resolvable batch creates a dated return receipt lot', async () => {
     seed()
     const { status, json } = await req('POST', '/', {
       items: [{ product_id: 1, quantity: 4, return_to_stock: true, applied_price_usd: 10, branch_id: 1 }],
@@ -308,7 +345,12 @@ async function main() {
     const aggregateQty = rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id = 1 AND branch_id = 1').get().quantity
     assert.strictEqual(aggregateQty, 4)
     const storedBatchId = rawDb.prepare('SELECT batch_id FROM return_items WHERE return_id = @returnId').get({ returnId: json.id }).batch_id
-    assert.strictEqual(storedBatchId, null, 'no batch could be resolved, so batch_id should stay null')
+    assert.ok(storedBatchId > 0, 'newly received return stock has an explicit lot')
+    const lot = rawDb.prepare('SELECT received_at,notes FROM product_batches WHERE id=?').get([storedBatchId])
+    assert.match(lot.received_at, /^\d{4}-\d{2}-\d{2}$/)
+    assert.match(lot.notes, /original received date unavailable/)
+    assert.strictEqual(rawDb.prepare('SELECT SUM(quantity) n FROM return_item_batch_allocations WHERE batch_id=?').get([storedBatchId]).n, 4)
+    assert.strictEqual(rawDb.prepare("SELECT batch_id FROM inventory_movements WHERE movement_type='return' AND reference_id=?").get([json.id]).batch_id, storedBatchId)
   })
 
   await check('editing a return reverses the SAME batch it originally restocked, not the aggregate blindly', async () => {
@@ -935,7 +977,7 @@ async function main() {
     assert.strictEqual(line.total_usd, 15)
   })
 
-  await check('a lot-tracked line the sale cannot place is REFUSED until the operator names a lot', async () => {
+  await check('a legacy sale return receives an event lot while an explicit pick still uses its named lot', async () => {
     seed()
     // The product HAS lots, but this sale line predates lot tracking: no
     // batch_id and no allocations. The old code silently bumped the branch
@@ -948,15 +990,14 @@ async function main() {
       items: [{ sale_item_id: 1, product_id: 1, quantity: 3, return_to_stock: true, branch_id: 1, applied_price_usd: 10 }],
       reason: 'Legacy line, lot unknown',
     })
-    assert.strictEqual(refused.status, 400, JSON.stringify(refused.json))
-    assert.strictEqual(refused.json.code, 'return_lot_required')
-    assert.match(refused.json.error, /Widget/)
-    // refused BEFORE any write -- no return, no stock movement
-    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) AS n FROM returns').get().n, 0)
+    assert.strictEqual(refused.status, 200, JSON.stringify(refused.json))
+    const received = rawDb.prepare('SELECT pb.id,pb.received_at FROM product_batches pb JOIN return_items ri ON ri.batch_id=pb.id WHERE ri.return_id=?').get([refused.json.id])
+    assert.ok(received.id !== batch.batchId)
+    assert.match(received.received_at, /^\d{4}-\d{2}-\d{2}$/)
     assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id = @batchId AND branch_id = 1').get({ batchId: batch.batchId }).quantity, 4)
 
     // Naming the lot lets it through, and the units land in THAT lot.
-    const named = await req('POST', '/', {
+    const named = await req('PATCH', `/${refused.json.id}`, {
       sale_id: 1,
       items: [{ sale_item_id: 1, product_id: 1, quantity: 3, return_to_stock: true, branch_id: 1, applied_price_usd: 10, batch_id: batch.batchId }],
       reason: 'Legacy line, lot named',
@@ -1131,7 +1172,7 @@ async function main() {
     assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id = @batchId AND branch_id = 1').get({ batchId: batch.batchId }).quantity, 5)
   })
 
-  await check('Part-77: a lot-blocked EDIT refuses before touching any stock (the gate is still hoisted)', async () => {
+  await check('a lot-blocked EDIT refuses atomically before touching stock', async () => {
     seed()
     // A lot-backed sale and a return that restocked into that lot.
     const batch = await productBatches.receiveBatchStock(db, { productId: 1, branchId: 1, quantity: 10, lotCode: 'LOT-E' })
@@ -1156,11 +1197,11 @@ async function main() {
     // 400'd -- corrupting stock on a mere validation refusal. Refusing
     // untouched is the invariant, whatever the reason for the refusal.
     const edited = await req('PATCH', `/${created.json.id}`, {
-      items: [{ product_id: 1, quantity: 1, return_to_stock: true, branch_id: 1, applied_price_usd: 10 }],
+      items: [{ product_id: 1, quantity: 1, return_to_stock: true, branch_id: 1, applied_price_usd: 10, batch_id: 999999 }],
       reason: 'Shrinking the returned side',
     })
-    assert.strictEqual(edited.status, 400, JSON.stringify(edited.json))
-    assert.strictEqual(edited.json.code, 'return_lot_required')
+    assert.strictEqual(edited.status, 409, JSON.stringify(edited.json))
+    assert.strictEqual(edited.json.code, 'write_conflict')
 
     assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id = @batchId AND branch_id = 1').get({ batchId: batch.batchId }).quantity, lotBefore, 'the lot must be untouched by a refused edit')
     assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id = 1 AND branch_id = 1').get().quantity, stockBefore, 'the aggregate must be untouched by a refused edit')

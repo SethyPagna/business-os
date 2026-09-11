@@ -26,6 +26,7 @@
 import { COST_OUTLIER_RATIO, identityBarcodeKey, normalizeProductGroupName, productDetailSignature, productIdentitySignature, resolveMergedCostDetail, resolveMergedPricing } from './productDetailRule'
 import type { MergedCostOutlier } from './productDetailRule'
 import { sanitizeImportedDescription } from './productDescriptionSections'
+import { planReconcileBranchSnapshot } from './productBatches'
 // per-row mode system now, just via a different channel than
 // decisionsByRowNumber/policy_json -- BulkImportModal.tsx's review step
 // bakes the reviewer's per-row choice (IMPORT_DECISION_OPTIONS) directly
@@ -4456,6 +4457,7 @@ type DuplicateProductSnapshotGroup = {
   branch_id: number
   expected_quantity: number
   created_in_job: number
+  received_date: string
 }
 
 // A catalog snapshot may legitimately contain more than one row for the same
@@ -4480,6 +4482,7 @@ export async function reconcileDuplicateProductSnapshotRows(db: D1Compat, jobId:
         ) AS INTEGER) AS product_id,
         CAST(json_extract(result_json, '$.data.branch_id') AS INTEGER) AS branch_id,
         CAST(COALESCE(json_extract(result_json, '$.data.stock_quantity'), 0) AS REAL) AS quantity,
+        json_extract(result_json, '$.data.received_date') AS received_date,
         action
       FROM import_job_rows
       WHERE job_id = @id
@@ -4491,6 +4494,7 @@ export async function reconcileDuplicateProductSnapshotRows(db: D1Compat, jobId:
       product_id,
       branch_id,
       SUM(quantity) AS expected_quantity,
+      MIN(received_date) AS received_date,
       SUM(CASE WHEN action = 'create' THEN 1 ELSE 0 END) AS created_in_job
     FROM normalized
     WHERE product_id IS NOT NULL AND branch_id IS NOT NULL
@@ -4504,39 +4508,12 @@ export async function reconcileDuplicateProductSnapshotRows(db: D1Compat, jobId:
   if (branchAuthorityError) throw new Error(branchAuthorityError)
   const guardedDb = withCanonicalImportBranchWriteGuard(db, branchIds)
 
-  // Only a product created by this job owns an opening "Received via product
-  // import" lot from this write path. Existing-product snapshot updates have
-  // intentionally never fabricated/rewritten lots, so keep that contract.
-  // One corrected product+branch snapshot is one batch: branch stock, its
-  // opening lot when owned by this job, and aggregate product stock cannot
-  // be separated by a concurrent branch rename/deactivation.
-  const correctionGroups = groups.map((group) => {
-    const statements: Array<{ sql: string; params: Record<string, unknown> }> = [{
-      sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@productId, @branchId, @quantity)
-            ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = excluded.quantity`,
-      params: { productId: group.product_id, branchId: group.branch_id, quantity: group.expected_quantity },
-    }]
-    if (group.created_in_job > 0) {
-      statements.push({
-        sql: `INSERT INTO branch_batch_stock (batch_id, branch_id, quantity)
-              SELECT id, @branchId, @quantity
-              FROM product_batches
-              WHERE variant_product_id = @productId AND notes = 'Received via product import'
-              ORDER BY id ASC LIMIT 1
-              ON CONFLICT(batch_id, branch_id) DO UPDATE SET quantity = excluded.quantity, updated_at = datetime('now')`,
-        params: { productId: group.product_id, branchId: group.branch_id, quantity: group.expected_quantity },
-      })
-    }
-    statements.push({
-      sql: `UPDATE products
-            SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @productId),
-                updated_at = CURRENT_TIMESTAMP
-            WHERE id = @productId`,
-      params: { productId: group.product_id },
-    })
-    return statements
-  })
-  await runD1BatchGroupsInChunks(guardedDb, correctionGroups)
+  // Duplicate snapshot rows use the same atomic lot/branch reconciliation
+  // as an ordinary matched row, including products that predate this job.
+  await runD1BatchGroupsInChunks(guardedDb, groups.map((group) => planReconcileBranchSnapshot({
+    productId: Number(group.product_id), branchId: Number(group.branch_id),
+    quantity: Number(group.expected_quantity), receivedDate: group.received_date,
+  }).map((statement) => ({ sql: statement.sql, params: statement.params as Record<string, unknown> }))))
   return groups.length
 }
 
@@ -5638,7 +5615,8 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       // the create path -- so they need to be counted here too, not just
       // createRows.length, or two such rows in the same chunk would both
       // try to claim the same next id.
-      const updateRowsNeedingBatch = actionable.filter((r) => r.action === 'update' && r.existingId && (r.plannedMode === 'merge_stock' || r.plannedMode === 'override_add'))
+      const updateRowsNeedingBatch = actionable.filter((r) => r.action === 'update' && r.existingId
+        && (r.plannedMode === 'merge_stock' || r.plannedMode === 'override_add' || !r.plannedMode))
       if (createRows.length || updateRowsNeedingBatch.length) {
         const maxBatchIdRow = await db.prepare(`SELECT COALESCE(MAX(id), 0) AS maxId FROM product_batches`).get<{ maxId: number }>()
         nextBatchId = maxBatchIdRow?.maxId || 0
@@ -5652,7 +5630,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       // used to look anything up, so re-importing the same named batch
       // (e.g. "Batch 12") for a product that already has it created a
       // second, duplicate batch instead of topping up the existing one and
-      // refreshing its received date, unlike every other batch-receiving
+      // preserving its received date, unlike every other batch-receiving
       // path in the app (the manual Receive Stock modal, the mandatory
       // add-stock picker). Only fetched when there's at least one
       // lot-code-carrying update row worth matching, and only active
@@ -5887,7 +5865,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
             // batch/received-stock row, exactly like a manual Receive
             // Stock action would -- unlike the legacy/default branch
             // below, which replaces the branch's quantity outright and
-            // never touches product_batches. Only fires when the CSV
+            // reconciles product_batches. Only fires when the CSV
             // named an explicit branch (same guard as the legacy path)
             // and actually carries a positive quantity to add; a zero/
             // blank quantity is a no-op, not a request to zero out stock.
@@ -5913,15 +5891,10 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
               const matchedBatch = lotKey ? batchByProductAndLot.get(lotKey) : null
               if (matchedBatch) {
                 // Same lot code already exists (active) on this product --
-                // top it up instead of creating a duplicate, and refresh
-                // its received date to this import's, same as a manual
-                // re-receive of the same lot would (receiveBatchStock
-                // reactivates + lets a fresh call's fields override the
-                // stored ones). Name/received-date now stay consistent
-                // across every import that names the same batch, instead
-                // of forking into a new unrelated row each time.
+                // top it up without replacing its first received date.
+                // A legacy blank may be filled from this explicit receipt.
                 group.push({
-                  sql: `UPDATE product_batches SET received_at = @receivedAt, is_active = 1,
+                  sql: `UPDATE product_batches SET received_at = COALESCE(NULLIF(received_at,''), @receivedAt), is_active = 1,
                           unit_cost_usd = COALESCE(unit_cost_usd, @unitCostUsd),
                           received_quantity = COALESCE(received_quantity, 0) + @qty,
                           received_cost_usd = COALESCE(received_cost_usd, 0) + (@qty * COALESCE(@unitCostUsd, 0)),
@@ -6005,11 +5978,8 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
             // Legacy/default: no plannedMode was set (every non-products
             // import, every row imported before this feature existed, or
             // any `_action` value this engine doesn't recognize as one of
-            // the three modes above). Unchanged from the original
-            // behavior -- REPLACES the named branch's quantity outright
-            // (not an add) and never touches product_batches. Kept exactly
-            // as-is so existing tests/imports that predate plannedMode
-            // keep writing identically.
+            // the three modes above). This is an absolute branch snapshot;
+            // reconcile dated lots and the aggregate in the same row group.
             //
             // NOTE: stock_quantity is intentionally NOT part of the
             // products UPDATE above. products.stock_quantity is a
@@ -6023,11 +5993,13 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
             // aggregate is recomputed below from branch_stock after the
             // branch-specific row is written.
             if (d.branch_id_explicit && d.branch_id != null) {
-              rowWriteGroup.push({
-                sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@id, @branchId, @qty)
-                      ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = excluded.quantity`,
-                params: { id: r.existingId, branchId: d.branch_id, qty: d.stock_quantity },
-              })
+              // Reserve from the same allocator as new/import-add lots;
+              // auto IDs here could collide with a later row in this chunk.
+              nextBatchId += 1
+              rowWriteGroup.push(...planReconcileBranchSnapshot({
+                productId: Number(r.existingId), branchId: Number(d.branch_id),
+                quantity: Number(d.stock_quantity), receivedDate: String(d.received_date), batchId: nextBatchId,
+              }).map((statement) => ({ sql: statement.sql, params: statement.params as Record<string, unknown> })))
             }
             // Re-derive the aggregate total from branch_stock every time
             // (not just when this row touched a branch) so any

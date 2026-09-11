@@ -761,7 +761,7 @@ console.log('PASS resolveRowImagePath matches explicit filenames and falls back 
   assert.ok(/WHERE is_active = 1 AND lot_code/.test(source), 'the lot lookup should only match ACTIVE batches, same as receiveBatchStock reactivating on an explicit match rather than matching a deactivated lot silently')
 
   assert.ok(/const matchedBatch = lotKey \? batchByProductAndLot\.get\(lotKey\) : null/.test(block), 'the restock branch should check the lot lookup before deciding whether to top up or create')
-  assert.ok(/UPDATE product_batches SET received_at = @receivedAt, is_active = 1,[\s\S]*updated_at = @updatedAt WHERE id = @id/.test(block), 'a matched lot code must refresh received_at on the SAME existing batch row, not just leave the original untouched')
+  assert.ok(/UPDATE product_batches SET received_at = COALESCE\(NULLIF\(received_at,''\), @receivedAt\), is_active = 1,[\s\S]*updated_at = @updatedAt WHERE id = @id/.test(block), 'exact-lot top-ups retain first received date, filling only a missing value')
   assert.ok(/received_cost_usd = COALESCE\(received_cost_usd, 0\) \+ \(@qty \* COALESCE\(@unitCostUsd, 0\)\)/.test(block), 'same-batch top-ups must accumulate each receipt cost instead of overwriting catalog cost')
   assert.ok(/INSERT INTO inventory_movements[\s\S]*unit_cost_usd, total_cost_usd/.test(block), 'each receipt row must retain its own historical cost movement')
   assert.ok(/ON CONFLICT\(batch_id, branch_id\) DO UPDATE SET quantity = quantity \+ excluded\.quantity/.test(block), 'a matched lot code must ADD to its existing branch_batch_stock row, not insert a second row for the same batch+branch')
@@ -816,10 +816,10 @@ console.log('PASS resolveRowImagePath matches explicit filenames and falls back 
   assert.ok(/GROUP BY product_id, branch_id[\s\S]*HAVING COUNT\(\*\) > 1/.test(block), 'only duplicate resolved product+branch groups should be aggregated')
   assert.ok(/SUM\(quantity\) AS expected_quantity/.test(block), 'duplicate snapshot quantities must SUM rather than let the last row win')
   assert.ok(/json_extract\(result_json, '\$\.plannedMode'\) IS NULL/.test(block), 'explicit restock/override modes must not be reinterpreted as a snapshot total')
-  assert.ok(/ON CONFLICT\(product_id, branch_id\) DO UPDATE SET quantity = excluded\.quantity/.test(block), 'the grouped snapshot total should replace that branch count exactly')
-  assert.ok(/notes = 'Received via product import'/.test(block), 'new-product opening lots should be synchronized with the grouped snapshot quantity')
+  assert.ok(/planReconcileBranchSnapshot/.test(block), 'duplicate and single snapshot rows share the executable lot/branch reconciliation planner')
+  assert.ok(/receivedDate: group.received_date/.test(block), 'snapshot reconciliation carries the explicit import receipt date')
   assert.ok(/snapshotGroupsAggregated/.test(source), 'the completed import summary should expose how many duplicate snapshot groups were corrected')
-  assert.ok(/runD1BatchGroupsInChunks\(guardedDb, correctionGroups\)/.test(block), 'each duplicate snapshot correction keeps branch, lot, and aggregate writes in one guarded batch group')
+  assert.ok(/runD1BatchGroupsInChunks\(guardedDb, groups.map/.test(block), 'each duplicate snapshot correction keeps branch, lot, and aggregate writes in one guarded batch group')
   console.log('PASS duplicate product snapshot rows aggregate their quantities per resolved product+branch, exclude movement modes, sync new opening lots, and report the corrected group count')
 }
 

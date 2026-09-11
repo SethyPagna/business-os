@@ -42,6 +42,7 @@ import { allocateAcrossLots, decrementBatchStockStatement, decrementBatchStockSt
 // POST /:id/items below and scripts/test-sale-add-items-pure.cjs.
 import {
   allocateNewSaleLines,
+  planUnlottedSaleLineGuards,
   buildOperationAllocationStatements,
   guardSaleLineAddition,
   planSaleLineAddition,
@@ -2727,6 +2728,7 @@ app.post('/:id/items', async (c) => {
       batch_id?: number | null
       batch_label?: string | null
       batch_expiry_date?: string | null
+      unlotted_stock?: boolean
     }>
     notes?: string
     client_request_id?: string
@@ -2805,6 +2807,7 @@ app.post('/:id/items', async (c) => {
     batchId: number | null
     batchLabel: string | null
     batchExpiryDate: string | null
+    unlottedStock: boolean
   }> = []
   const saleHeaderBranchId = Number(sale.branch_id)
   if (!Number.isSafeInteger(saleHeaderBranchId) || saleHeaderBranchId <= 0) {
@@ -2812,6 +2815,12 @@ app.post('/:id/items', async (c) => {
   }
   for (let index = 0; index < rawItems.length; index += 1) {
     const item = rawItems[index] || {}
+    if (item.unlotted_stock !== undefined && typeof item.unlotted_stock !== 'boolean') {
+      return c.json({ error: `Added item #${index + 1} has an invalid unlotted_stock flag` }, 400)
+    }
+    if (item.unlotted_stock === true && item.batch_id != null) {
+      return c.json({ error: `Added item #${index + 1} cannot select both a received date and stock without a received date` }, 400)
+    }
     const productId = Number(item.product_id || item.id)
     if (!Number.isFinite(productId) || productId <= 0) {
       return c.json({ error: `Added item #${index + 1} is missing a product` }, 400)
@@ -2838,6 +2847,7 @@ app.post('/:id/items', async (c) => {
       batchId: Number(item.batch_id) || null,
       batchLabel: item.batch_label ? String(item.batch_label) : null,
       batchExpiryDate: item.batch_expiry_date ? String(item.batch_expiry_date) : null,
+      unlottedStock: item.unlotted_stock === true,
     })
   }
 
@@ -2895,6 +2905,7 @@ app.post('/:id/items', async (c) => {
       batchId: item.batchId,
       batchLabel: item.batchLabel,
       batchExpiryDate: item.batchExpiryDate,
+      unlottedStock: item.unlottedStock,
     }
   })
   const explicitBatchResolution = resolveExplicitSaleLineBatches(candidateLines, lotsByKey)
@@ -3118,6 +3129,7 @@ app.post('/:id/items', async (c) => {
         after: { money: moneyAfter, lines: lineMoneyAfter },
         response: baseResponse, stamp: addItemsStamp,
       }),
+      ...planUnlottedSaleLineGuards(plan.lines),
       ...statementsForPlan,
       ...buildOperationAllocationStatements(plan.lines, addItemsOperationId, addItemsStamp),
       ...taxPlan.statements,

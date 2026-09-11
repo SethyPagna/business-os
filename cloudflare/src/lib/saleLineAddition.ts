@@ -143,6 +143,7 @@ export type NewSaleLineInput = {
   batchId?: number | null
   batchLabel?: string | null
   batchExpiryDate?: string | null
+  unlottedStock?: boolean
 }
 
 export type ExplicitBatchResolution =
@@ -165,6 +166,7 @@ export function resolveExplicitSaleLineBatches(
   const resolved: NewSaleLineInput[] = []
 
   for (const [index, line] of lines.entries()) {
+    if (line.unlottedStock && line.batchId) return { ok: false, error: `Added item #${index + 1} cannot select both a received date and stock without a received date.` }
     if (!line.batchId) {
       resolved.push(line)
       continue
@@ -242,7 +244,7 @@ export function allocateNewSaleLines(
     const unitPriceUsd = Number(line.unitPriceUsd) || 0
     const heldUnits = skipStock ? 0 : heldQuantity(saleStatus, quantity, 0)
     let takes: FifoLotTake[] = []
-    if (line.branchId && quantity > 0) {
+    if (line.branchId && quantity > 0 && !line.unlottedStock) {
       if (line.batchId) {
         takes = [{
           batchId: Number(line.batchId),
@@ -275,6 +277,27 @@ export function allocateNewSaleLines(
       movementBatchId: takes.length === 1 && takes[0].quantity === quantity ? takes[0].batchId : null,
     }
   })
+}
+
+// Recheck every uncovered unit under the same transaction as the deduction.
+// Count inactive lots too: an inactive date does not make its stock unlotted.
+export function planUnlottedSaleLineGuards(lines: PlannedSaleLine[]): StockStatement[] {
+  const requests = new Map<string, { productId: number; branchId: number; quantity: number }>()
+  for (const line of lines) {
+    const uncovered = line.heldUnits > 0 ? Math.max(0, line.heldUnits - line.takes.reduce((sum, take) => sum + take.quantity, 0)) : 0
+    if (!line.branchId || !uncovered) continue
+    const key = `${line.productId}:${line.branchId}`
+    const request = requests.get(key) || { productId: line.productId, branchId: line.branchId, quantity: 0 }
+    request.quantity += uncovered
+    requests.set(key, request)
+  }
+  return [...requests.values()].map((params) => ({
+    sql: `INSERT INTO sale_bulk_guards(guard_value) SELECT CASE WHEN
+      COALESCE((SELECT quantity FROM branch_stock WHERE product_id=@productId AND branch_id=@branchId),0)
+      - COALESCE((SELECT SUM(MAX(0,bbs.quantity)) FROM branch_batch_stock bbs JOIN product_batches pb ON pb.id=bbs.batch_id
+        WHERE pb.variant_product_id=@productId AND bbs.branch_id=@branchId),0) >= @quantity THEN 1 ELSE 0 END`,
+    params,
+  }))
 }
 
 export type SaleLineAdditionPlan = {
