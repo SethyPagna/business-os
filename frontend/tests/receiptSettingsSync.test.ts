@@ -45,7 +45,10 @@ assert.match(receiptSource, /const appliedConfig = useMemo\(\(\) => buildApplied
 // an 80 x 50mm, zero-margin effective print configuration. The printable
 // path must receive that resolved object, not the untouched stored settings.
 assert.match(receiptSource, /const effectivePrintSettings = compactSalesReceipt/)
-assert.match(receiptSource, /paperSize: 'custom', customWidth: '80', customHeight: '50'/)
+assert.match(receiptSource, /paperSize: '80x50mm', customWidth: '80', customHeight: '50'/,
+  'the compact caller must preserve the named single-card intent')
+assert.doesNotMatch(receiptSource, /const compactPrintSettings = \{[^\n]+paperSize: 'custom'/,
+  'an arbitrary custom document must not be treated as the 80x50 card')
 // B5: the printable path receives the RESOLVED per-variant object -- the
 // forced 80x50 zero-margin configuration for the card, the roll settings
 // for the full receipt (an '80x50mm' stored size maps to the 80mm roll).
@@ -57,6 +60,10 @@ assert.match(printUtilSource, /RECEIPT_PRINT_SETTINGS_STORAGE_KEY/)
 assert.match(printUtilSource, /normalizeReceiptPrintSettings/)
 assert.match(printUtilSource, /applyHighContrastBold\(host, printSettings\)/)
 assert.match(printUtilSource, /sourceSettings && typeof sourceSettings === 'object' && sourceSettings\.receipt_print_settings/)
+assert.match(printUtilSource, /const pageSizeCss = `\$\{widthMm\}mm \$\{pageHeightMm\.toFixed\(2\)\}mm`/,
+  'width-only thermal media uses one explicit measured-height CSS page')
+assert.doesNotMatch(printUtilSource, /const pageSizeCss = continuousRoll \? 'auto'/,
+  'continuous receipt printing must not delegate page breaks to fixed driver media')
 
 assert.match(receiptConfigSource, /export const DEFAULT_RECEIPT_TEMPLATE/)
 assert.match(receiptConfigSource, /export const DEFAULT_RECEIPT_PRINT_SETTINGS/)

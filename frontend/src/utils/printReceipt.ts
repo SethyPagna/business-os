@@ -1097,9 +1097,10 @@ async function createPrintableReceiptMarkup(content: ReceiptContent, options: Re
     const measuredHeightMm = renderedHeightPx * (widthMm / renderedWidthPx)
     const fixedHeightMm = getPaperHeightMm(printSettings)
     const continuousRoll = fixedHeightMm == null
-    // The measured roll height remains the deterministic PDF/image height. The
-    // direct browser print path deliberately does NOT turn it into one CSS page:
-    // the selected printer media owns pagination there.
+    // A continuous roll is width-only media: its one logical page grows with
+    // the complete receipt. Keep this measured height for both HTML Print and
+    // PDF/Image so item count can never trigger pagination or fit-to-page
+    // shrinking inside the app.
     const pageHeightMm = fixedHeightMm ?? Math.max(1, measuredHeightMm + 1)
 
     const clone = normalizePrintableRoot(cloneElementWithInlineStyles(host), widthMm)
@@ -1119,23 +1120,24 @@ async function createPrintableReceiptMarkup(content: ReceiptContent, options: Re
   }, printSettings)
 }
 
-function buildPrintablePreviewDocument(layout: PrintableReceiptLayout, options: ReceiptPrintOptions = {}): string {
+export function buildPrintablePreviewDocument(layout: PrintableReceiptLayout, options: ReceiptPrintOptions = {}): string {
   const { markup, widthMm, pageHeightMm, continuousRoll, singleSheet } = layout
-  // Three page semantics, not two. Direct printing of a continuous roll keeps
-  // the receipt at its configured width but delegates page length to the driver.
+  // Three page semantics, not two. A continuous roll is one variable-height
+  // logical page whose length is the measured receipt content.
   // A DOCUMENT page (A4, Letter, custom) is a stack of pages, so a long receipt
   // legitimately continues onto page 2. Only the explicit 80x50 summary is one
   // physical card: withReceiptElement has already fitted it to that height, and
   // clipping here prevents rounding from spilling a second card.
   const clipToOnePage = singleSheet && !continuousRoll
   const pageOverflow = clipToOnePage ? 'hidden' : 'visible'
-  // A roll's physical page length belongs to the printer driver. Declaring
-  // one CSS page as tall as the complete receipt makes Chrome fit that entire
-  // page onto a fixed driver sheet (for example 98 x 148 mm), progressively
-  // shrinking 10/20-item receipts into a narrow strip. Keep the receipt itself
-  // at the configured width, but let the selected driver media paginate it.
-  const pageSizeCss = continuousRoll ? 'auto' : `${widthMm}mm ${pageHeightMm.toFixed(2)}mm`
-  const documentHeightCss = clipToOnePage
+  // An explicit width x measured-height @page is the browser contract for a
+  // continuous strip. The printer driver must expose matching roll/custom
+  // media and use Actual size. If it forces a fixed sheet such as 98 x 148 mm,
+  // the web page cannot prevent the native print pipeline from shrinking or
+  // clipping; switching to `auto` here would instead insert page breaks, which
+  // violates continuous-receipt semantics.
+  const pageSizeCss = `${widthMm}mm ${pageHeightMm.toFixed(2)}mm`
+  const documentHeightCss = continuousRoll || clipToOnePage
     ? `height: ${pageHeightMm.toFixed(2)}mm !important;
           min-height: ${pageHeightMm.toFixed(2)}mm !important;`
     : `height: auto !important;
