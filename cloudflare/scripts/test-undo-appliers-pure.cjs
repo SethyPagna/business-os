@@ -330,8 +330,20 @@ async function productMergeGroupFixture() {
     reparentedSaleItemIds: [], reparentedMovementIds: [], adjustmentMovementIds: [], operationId: `op-${dupId}`,
   })
   const childIds = [11, 12]
-  db.prepare("INSERT INTO undo_snapshots VALUES(11,'product.merge.group.child','applied',?,7,NULL)").run(JSON.stringify(reversal(2, 'Old A')))
-  db.prepare("INSERT INTO undo_snapshots VALUES(12,'product.merge.group.child','applied',?,7,NULL)").run(JSON.stringify(reversal(3, 'Old B')))
+  // Capture the actual consecutive after-images rather than omitting safety
+  // fingerprints. The second reversal restores the first child's catalog;
+  // the predecessor timestamp guard must certify that exact state.
+  const predecessor = reversal(2, 'Old A')
+  const latest = reversal(3, 'Old B')
+  const finalKeeper = db.prepare('SELECT * FROM products WHERE id=1').get()
+  const setKeeperCatalog = db.prepare(`UPDATE products SET category=@category,categories=@categories,
+    brand=@brand,brands=@brands,unit=@unit,unit_normalized=@unit_normalized,brand_compact=@brand_compact WHERE id=1`)
+  setKeeperCatalog.run(latest.keeperCatalogBefore)
+  predecessor.mergedStateFingerprint = await undoAppliers.mergeStateFingerprint(wrapDb(db), [predecessor])
+  setKeeperCatalog.run(finalKeeper)
+  latest.mergedStateFingerprint = await undoAppliers.mergeStateFingerprint(wrapDb(db), [latest])
+  db.prepare("INSERT INTO undo_snapshots VALUES(11,'product.merge.group.child','applied',?,7,NULL)").run(JSON.stringify(predecessor))
+  db.prepare("INSERT INTO undo_snapshots VALUES(12,'product.merge.group.child','applied',?,7,NULL)").run(JSON.stringify(latest))
   const groupSnapshot = {
     version: 1, review_id: 'review-1', group_key: 'group-1', child_snapshot_ids: childIds,
     prefix_fingerprint: await productMergeGroupPrefixFingerprint('review-1', 'group-1', childIds, 0), generation: 0,
@@ -573,6 +585,16 @@ await check('product.merge.group redo is forward-order, resumable, and stale gen
 
 await check('product.merge.group rejects duplicate, missing, foreign-actor, and mismatched-member children', async () => {
   for (const mutate of [
+    db => {
+      const snap = JSON.parse(db.prepare('SELECT payload_json FROM undo_snapshots WHERE id=11').get().payload_json)
+      delete snap.mergedStateFingerprint
+      db.prepare('UPDATE undo_snapshots SET payload_json=? WHERE id=11').run(JSON.stringify(snap))
+    },
+    db => {
+      const snap = JSON.parse(db.prepare('SELECT payload_json FROM undo_snapshots WHERE id=11').get().payload_json)
+      snap.mergedStateFingerprint = 'invalid fingerprint'
+      db.prepare('UPDATE undo_snapshots SET payload_json=? WHERE id=11').run(JSON.stringify(snap))
+    },
     db => {
       const snap = JSON.parse(db.prepare('SELECT payload_json FROM undo_snapshots WHERE id=10').get().payload_json)
       snap.prefix_fingerprint = `sha256-${'f'.repeat(64)}`
