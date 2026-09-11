@@ -1,6 +1,6 @@
 # Account cache, employee received dates, and reopened SaleDetail flashing
 
-Base: live 877893912fea, ledger-only successor 4fd6883b. This follow-up is not deployed. Preserve earlier September 11/12 registers and evidence; do not equate passing gates with all user incidents resolved.
+Base: previous live877893912fea, ledger-only successor4fd6883b. This follow-up is deployed as b935bf63b05b. Preserve earlier September11/12 registers and evidence; do not equate passing gates with all user incidents resolved.
 
 ## Latest owner report and acceptance
 
@@ -40,7 +40,7 @@ Update currently updates/reloads application shell, not persistent business cach
 
 Root owns this register and integration only. Isolated client-cache owner owns API/cache helpers and auth lifecycle; isolated POS owner owns tracking readiness; flash investigator remains read-only pending evidence. No overlapping shared-worktree edits. Before promotion: independent adversarial reviews, focused reproductions, integrated frontend/type/i18n/build gates and affected backend parity checks. No production data repair inferred from screenshots.
 
-## Integrated findings and corrections (release still held)
+## Integrated findings and corrections
 
 - Core actor/session/server-scoped opaque read keys and delayed write fences cover HTTP/query/product caches; authenticated legacy unscoped mirror writes/fallbacks are suppressed while offline remains paused. Contacts and import-job private caches required separate fixes; supplier, shared shift and history caches are also now scoped. Legacy history read entries are ignored, not confused with work drafts. 401/403 fail closed.
 - Raw import/image/avatar upload and error-download callers now check authority before dispatch. Already-dispatched results and partial-batch upload receipts are retained, not relabeled as never sent.
@@ -51,3 +51,9 @@ Root owns this register and integration only. Isolated client-cache owner owns A
 - The deterministic simultaneous-admission race is fixed using origin-level Web Locks and separate durable pending ownership. Independent native Edge two-tab testing observed exactly one authentication dispatch; the loser was not dispatched. Unreadable storage or missing locks fail closed. Generic reset preserves coordination keys without snapshotting/restoring stale values. Final independent security verdict:37857866-e515-4a7c-ab7a-fd11d645ea16. Orphaned OAuth pending remains intentionally locked; automatic unsafe expiry/unlock was not added. Unobserved server-side permission changes are not instantaneously detectable.
 - Final integration1922f6c9: frontend381/381 test files pass, plus standalone privateReadCaches.test.cjs. Both TypeScript checks pass; i18n5722 keys/599 source files resolves in EN/KM; production build1133 modules succeeds (circular/manual chunk and size advisories remain). Seven legacy partial-window storage fixtures were corrected without changing assertions after the new fail-closed behavior exposed them.
 - Backend source unchanged since230e0d68: focused authentication10/10 and effective full356/356 scripts pass. Three first attempts failed in native tooling (two nested Wrangler ETIMEDOUT, one Windows0xC0000409); each isolated retry passed. Original failures and retry logs retained in cloudflare/output/backend-auth-cert-230e0d68. Native oldA/newB cookie race, expiry/revocation/CAS independently pass. No production data mutations or migrations are included.
+
+## Deployment and remaining confirmation
+
+Authorized follow-up deployed from clean b935bf63b05b with Wrangler4.116.0 using npm run deploy only, after production-coordination claim and successful dry run. Worker version23e118a9-089e-4c66-9e3f-4065fc461c5c; runtime hashb479cd831f711915; built2026-09-11T23:02:55.028Z. Live runtime endpoint independently and directly matches. Live frontend build revision also b935bf63b05b, hash06c606d69e75c910, built2026-09-11T22:58:08.820Z. Branch pushed. No migrations, secret sync, stock/payment/customer data writes, or cleanup of user drafts.
+
+Post-deployment authenticated UI smoke was safely blocked: available computer inventory contained no browser or authenticated tab. No credentials were invented or login/logout performed. Exact employee-device received-date behavior and the owner's remaining flashing observation still require live confirmation; synthetic role/lot and actual mounted-browser tests are evidence of the specific fixes, not a substitute for that observation. Physical printer output remains separately unresolved. Durable smoke result: .git/agent-team/release-b935bf63-authenticated-smoke-20260912.json. This documentation successor does not represent another deployment.
