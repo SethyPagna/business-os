@@ -24,6 +24,7 @@ import { claimChunkReload, clearChunkReloadMarker } from './utils/chunkReloadGua
 import { hasDirtyWork } from './utils/dirtyWork.ts'
 import { withLoaderTimeout } from './utils/loaders.ts'
 import { flushPendingWorkDrafts } from './utils/workDrafts.ts'
+import { ACTOR_SESSION_RETRY_EVENT, actorSessionQuarantineStatus, isActorSessionQuarantined, subscribeActorSessionQuarantine } from './api/actorReadScope.ts'
 import { hasLocalSyncProblemPresentation, subscribeSyncProblemPresentation, shouldClearResolvedSyncError, SYNC_ERROR_RESOLVED_EVENT, type SyncProblemReference } from './utils/syncProblemLifecycle.ts'
 import { presentWriteError } from './utils/writeErrorPresentation.ts'
 
@@ -1676,7 +1677,101 @@ function PublicCatalogView() {
   )
 }
 
+/** Imperative boundary deliberately lives outside the mounted app/portal tree.
+ * It changes visibility/inertness, never unmounts an editor or clears a draft. */
+export function installActorSessionQuarantineDom(): () => void {
+  const host = document.createElement('div')
+  host.id = 'businessos-session-quarantine'
+  host.setAttribute('role', 'alertdialog')
+  host.setAttribute('aria-modal', 'true')
+  host.setAttribute('aria-label', 'Sign-in changed')
+  host.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:#fff;color:#111;padding:32px;display:none;overflow:auto;'
+  const title = document.createElement('h2')
+  title.textContent = 'Sign-in changed / ការចូលគណនីបានផ្លាស់ប្ដូរ'
+  const message = document.createElement('p')
+  const note = document.createElement('p')
+  note.textContent = 'Existing drafts remain in this tab. Nothing will be submitted automatically. / សេចក្ដីព្រាងនៅតែរក្សាទុកក្នុងផ្ទាំងនេះ។'
+  const retry = document.createElement('button')
+  retry.type = 'button'; retry.textContent = 'Retry / ព្យាយាមម្ដងទៀត'; retry.dataset.sessionAction = 'retry'
+  const reload = document.createElement('button')
+  reload.type = 'button'; reload.textContent = 'Reload / ផ្ទុកឡើងវិញ'; reload.dataset.sessionAction = 'reload'
+  for (const button of [retry, reload]) button.style.cssText = 'padding:12px 20px;margin:12px 12px 0 0;border:1px solid #999;border-radius:8px;background:#f5f5f5;color:#111;'
+  host.append(title, message, note, retry, reload)
+  document.body.append(host)
+  const hidden = new Map<HTMLElement, { inert: boolean; visibility: string; priority: string; content: string; contentPriority: string; aria: string | null }>()
+  let wasBlocked = false
+  const hideOldUi = () => {
+    for (const node of Array.from(document.body.children)) {
+      if (!(node instanceof HTMLElement) || node === host || hidden.has(node)) continue
+      hidden.set(node, { inert: node.inert, visibility: node.style.getPropertyValue('visibility'), priority: node.style.getPropertyPriority('visibility'), content: node.style.getPropertyValue('content-visibility'), contentPriority: node.style.getPropertyPriority('content-visibility'), aria: node.getAttribute('aria-hidden') })
+      node.inert = true
+      node.style.setProperty('visibility', 'hidden', 'important')
+      node.style.setProperty('content-visibility', 'hidden', 'important')
+      node.setAttribute('aria-hidden', 'true')
+    }
+  }
+  const restore = () => {
+    hidden.forEach((before, node) => {
+      node.inert = before.inert
+      if (before.visibility) node.style.setProperty('visibility', before.visibility, before.priority)
+      else node.style.removeProperty('visibility')
+      if (before.content) node.style.setProperty('content-visibility', before.content, before.contentPriority)
+      else node.style.removeProperty('content-visibility')
+      if (before.aria === null) node.removeAttribute('aria-hidden')
+      else node.setAttribute('aria-hidden', before.aria)
+    })
+    hidden.clear()
+  }
+  const update = () => {
+    const blocked = isActorSessionQuarantined()
+    host.style.display = blocked ? 'block' : 'none'
+    if (blocked) {
+      hideOldUi()
+      const status = actorSessionQuarantineStatus()
+      message.textContent = status === 'checking' ? 'Checking the current session…'
+        : status === 'different-account' ? 'Another account is signed in. Sign back into the original account in the other tab, then retry. Reload only when no unfinished editor work remains.'
+          : 'This screen remains locked because the current session could not be safely restored. Retry, or reload when no unfinished editor work remains.'
+      if (!wasBlocked) retry.focus()
+    } else restore()
+    wasBlocked = blocked
+  }
+  const act = (button: HTMLElement | null) => {
+    if (button?.dataset.sessionAction === 'retry') window.dispatchEvent(new CustomEvent(ACTOR_SESSION_RETRY_EVENT))
+    if (button?.dataset.sessionAction === 'reload') {
+      flushPendingWorkDrafts()
+      if (hasDirtyWork()) {
+        message.textContent = 'Unfinished editors are still retained here. Sign back into the original account and retry; this tab will not discard them.'
+        return
+      }
+      window.location.reload()
+    }
+  }
+  const blockInput = (event: Event) => {
+    if (!isActorSessionQuarantined()) return
+    const target = event.target instanceof HTMLElement ? event.target : null
+    event.preventDefault(); event.stopImmediatePropagation()
+    if (!target || !host.contains(target)) return
+    if (event.type === 'click') act(target.closest('button'))
+    if (event instanceof KeyboardEvent && event.type === 'keydown') {
+      if (event.key === 'Tab') (document.activeElement === retry ? reload : retry).focus()
+      else if (event.key === 'Enter' || event.key === ' ') act(target.closest('button'))
+    }
+  }
+  const events = ['keydown', 'keyup', 'keypress', 'click', 'dblclick', 'pointerdown', 'pointerup', 'touchstart', 'touchend', 'contextmenu', 'submit', 'input', 'change']
+  events.forEach((name) => window.addEventListener(name, blockInput, { capture: true, passive: false }))
+  const observer = new MutationObserver(() => { if (isActorSessionQuarantined()) hideOldUi() })
+  observer.observe(document.body, { childList: true })
+  const unsubscribe = subscribeActorSessionQuarantine(update)
+  update()
+  return () => {
+    unsubscribe(); observer.disconnect()
+    events.forEach((name) => window.removeEventListener(name, blockInput, true))
+    restore(); host.remove()
+  }
+}
+
 export default function App() {
+  useEffect(() => installActorSessionQuarantineDom(), [])
   const {
     user,
     authReady,

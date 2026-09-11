@@ -14,7 +14,7 @@
 import { SYNC } from '../constants.ts'
 import { getClientMetaHeaders as sharedGetClientMetaHeaders } from '../utils/deviceInfo.ts'
 import { createSyncErrorId } from '../utils/syncProblemLifecycle.ts'
-import { assertActorReadScope, captureActorReadScope, invalidateActorReadChannel, isActorReadScopeCurrent, markActorReadResult, type ActorReadScope } from './actorReadScope.ts'
+import { assertActorReadScope, assertActorSessionDispatchAllowed, captureActorReadScope, invalidateActorReadChannel, isActorReadScopeCurrent, markActorReadResult, type ActorReadScope } from './actorReadScope.ts'
 import {
   getSyncServerUrl,
   getSyncToken,
@@ -46,7 +46,14 @@ type InflightWrite = { promise: Promise<any>; startedAt: number }
 // expected -- so this is additive and doesn't require touching every
 // existing route() caller, only the ones that opt into a searchGroup.
 type RouteFn<T = any> = (signal?: AbortSignal) => T | Promise<T>
-type ApiFetchOptions = { skipWriteDedupe?: boolean; signal?: AbortSignal }
+const ACTOR_RECOVERY_READ = Symbol('actor-recovery-read')
+type ApiFetchOptions = { skipWriteDedupe?: boolean; signal?: AbortSignal; actorRecovery?: symbol }
+
+/** The sole quarantine exception: no shared route cache, local fallback,
+ * embedded bootstrap, mutation or general private-read bypass. */
+export function readActorSessionRecoveryBootstrap(): Promise<any> {
+  return apiFetch('GET', '/api/auth/bootstrap', undefined, 8000, { actorRecovery: ACTOR_RECOVERY_READ })
+}
 type RouteOptions = {
   isWrite?: boolean
   raceLocalFallback?: boolean
@@ -737,6 +744,9 @@ export const WRITE_REQUEST_TIMEOUT_MS = 45_000
 
 export async function apiFetch(method: unknown, path: string, body?: unknown, timeoutMs?: number, options: ApiFetchOptions = {}): Promise<any> {
   const readScope = ['GET', 'HEAD'].includes(String(method || 'GET').toUpperCase()) ? captureActorReadScope() : null
+  const sideEffectScope = readScope || captureActorReadScope()
+  const recoveryRead = options.actorRecovery === ACTOR_RECOVERY_READ && method === 'GET' && path === '/api/auth/bootstrap'
+  if (!recoveryRead) assertActorSessionDispatchAllowed()
   const normalizedMethod = String(method || 'GET').toUpperCase()
   const isMutation = !['GET', 'HEAD', 'OPTIONS'].includes(normalizedMethod)
   timeoutMs = timeoutMs ?? (isMutation ? WRITE_REQUEST_TIMEOUT_MS : SYNC.REQUEST_TIMEOUT_MS)
@@ -802,10 +812,10 @@ export async function apiFetch(method: unknown, path: string, body?: unknown, ti
       requestInit.body = JSON.stringify(body)
     }
     const res = await fetch(`${base}${path}`, requestInit)
-    if (readScope) assertActorReadScope(readScope, false)
+    if (readScope) assertActorReadScope(readScope, false, recoveryRead)
     if (isCloudflareAccessRedirectResponse(res)) {
       const accessError = createCloudflareAccessError(path)
-      dispatchUnauthorized({
+      if (!recoveryRead && isActorReadScopeCurrent(sideEffectScope, false)) dispatchUnauthorized({
         code: accessError.code,
         error: accessError.message,
         reason: accessError.reason,
@@ -815,7 +825,7 @@ export async function apiFetch(method: unknown, path: string, body?: unknown, ti
     }
     if (!res.ok) {
       const text = await res.text().catch(() => '')
-      if (readScope) assertActorReadScope(readScope, false)
+      if (readScope) assertActorReadScope(readScope, false, recoveryRead)
       const parsed = (() => { try { return JSON.parse(text) } catch { return null } })()
       if (res.status === 404 && normalizedMethod === 'GET' && isRequiredRuntimeApiPath(path)) {
         throw markApiVersionMismatch(path, res.status)
@@ -829,7 +839,7 @@ export async function apiFetch(method: unknown, path: string, body?: unknown, ti
       }
       const msg  = parsed?.error || text
       const apiError = createApiError(res.status, parsed, text)
-      if (typeof window !== 'undefined' && shouldDispatchUnauthorized(path, res.status, parsed)) {
+      if (!recoveryRead && isActorReadScopeCurrent(sideEffectScope, false) && typeof window !== 'undefined' && shouldDispatchUnauthorized(path, res.status, parsed)) {
         dispatchUnauthorized({
           code: parsed?.code || 'invalid_session',
           error: parsed?.error || 'Please sign in again to continue.',
@@ -885,7 +895,7 @@ export async function apiFetch(method: unknown, path: string, body?: unknown, ti
 
   if (!readScope) return requestPromise
   const result = await requestPromise
-  assertActorReadScope(readScope, false)
+  assertActorReadScope(readScope, false, recoveryRead)
   return markActorReadResult(result, readScope)
 }
 

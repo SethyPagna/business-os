@@ -127,6 +127,7 @@ assert.equal(scopes.isActorReadScopeCurrent(ownScope), false, 'other-tab session
 const sameActor = scopes.captureActorReadScope(key)
 scopes.resetActorReadSession()
 assert.equal(scopes.isActorReadScopeCurrent(sameActor), false, 'same actor reauthentication fences old reads')
+scopes.completeActorSessionReconciliation(scopes.actorSessionReconciliationMarker())
 assert.ok(!queryCache.buildQueryCacheStorageKey(key).includes('businessos_user'), 'opaque key does not contain auth storage')
 assert.equal(shouldPersistLocalMirror('branches'), false, 'live read cannot write legacy unscoped lookup mirror')
 assert.deepEqual(await mirrorTable('branches')([{ id: 2 }]), [], 'suppressed mirror does not import/write/clear IndexedDB')
