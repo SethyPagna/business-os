@@ -236,6 +236,17 @@ async function call(app, path, body, user = { id: 900, username: 'reviewer' }) {
 const tableCounts = (d1) => Object.fromEntries(d1.db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name`).all()
   .map(({ name }) => [name, d1.db.prepare(`SELECT COUNT(*) n FROM "${name}"`).get().n]))
 
+function seedPre0154LegacyLots(d1, setup) {
+  assert.throws(() => d1.db.exec('UPDATE product_batches SET is_active=0 WHERE id=9301'),
+    /Cannot deactivate a received lot/, 'current schema rejects positive-lot deactivation')
+  // Reproduce pre-0154 corruption for merge recovery coverage. All current
+  // guards are restored before the route runs, including rollback scenarios.
+  const guards = d1.db.prepare("SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name IN ('positive_lot_require_active_insert_0154','positive_lot_require_active_update_0154','positive_lot_reject_inactive_insert_0154','positive_lot_reject_inactive_update_0154')").all()
+  assert.equal(guards.length, 4)
+  for (const guard of guards) d1.db.exec('DROP TRIGGER ' + guard.name)
+  try { setup() } finally { for (const guard of guards) d1.db.exec(guard.sql) }
+}
+
 async function main() {
   // Positive stock must stay selectable after either merge disposition.
   // Exercise the real route/transaction, including inactive lots at both
@@ -243,7 +254,8 @@ async function main() {
   for (const collision of [true, false]) {
     for (const rollback of [false, true]) {
       const lots = seed()
-      lots.db.exec(`
+      seedPre0154LegacyLots(lots, () => {
+        lots.db.exec(`
         UPDATE product_batches SET received_at='2026-08-21',expiry_date='2028-01-01',
           unit_cost_usd=4,received_quantity=9,received_cost_usd=36 WHERE id=9301;
         UPDATE product_batches SET received_at='2026-08-22',expiry_date='2029-01-01',
@@ -262,6 +274,7 @@ async function main() {
           VALUES(9706,9704,9702,9302,901,1,'D1','2029-01-01');
       `)
       if (collision) lots.db.exec("UPDATE product_batches SET batch_key='keeper-lot' WHERE id=9302; UPDATE product_batches SET is_active=0 WHERE id=9301")
+      })
       // Proves activation occurs before the stock write, not just eventually.
       lots.db.exec(`CREATE TRIGGER require_active_merge_destination BEFORE INSERT ON branch_batch_stock
         WHEN NEW.quantity>0 AND NOT EXISTS(SELECT 1 FROM product_batches WHERE id=NEW.batch_id AND is_active=1)
@@ -302,14 +315,14 @@ async function main() {
   }
   for(const keeperQuantity of [0,5]) {
     const lots=seed()
-    lots.db.exec(`UPDATE product_batches SET is_active=0;
+    seedPre0154LegacyLots(lots, () => lots.db.exec(`UPDATE product_batches SET is_active=0;
       UPDATE product_batches SET batch_key='keeper-lot' WHERE id=9302;
       UPDATE branch_stock SET quantity=0 WHERE product_id=9102;
       UPDATE branch_batch_stock SET quantity=0 WHERE batch_id=9302;
       UPDATE products SET stock_quantity=0 WHERE id=9102;
       UPDATE branch_stock SET quantity=${keeperQuantity} WHERE product_id=9101;
       UPDATE branch_batch_stock SET quantity=${keeperQuantity} WHERE batch_id=9301;
-      UPDATE products SET stock_quantity=${keeperQuantity} WHERE id=9101;`)
+      UPDATE products SET stock_quantity=${keeperQuantity} WHERE id=9101;`))
     const {app:lotApp}=loadRoute(lots)
     const preview=await call(lotApp,'/possible-duplicates/merge-batch/preview',{cases:[{case_key:'barcode:1111',cluster_type:'barcode',cluster_value:'1111',product_ids:[9101,9102]}]})
     const applied=await call(lotApp,'/possible-duplicates/merge-batch',{

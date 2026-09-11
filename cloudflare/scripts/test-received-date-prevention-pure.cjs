@@ -101,7 +101,13 @@ async function main() {
   await db.batch(additions.planUnlottedSaleLineGuards(planned))
   const duplicate = additions.allocateNewSaleLines([input, input], availableLots, 'completed')
   await assert.rejects(db.batch(additions.planUnlottedSaleLineGuards(duplicate)), /constraint/i, 'duplicate lines share one residual capacity')
-  db.prepare('UPDATE product_batches SET is_active=0 WHERE id=?').run([returnLot.id])
+  const deactivate = () => db.prepare('UPDATE product_batches SET is_active=0 WHERE id=?').run([returnLot.id])
+  assert.throws(deactivate, /Cannot deactivate a received lot/, '0154 rejects new inactive positive stock')
+  // Reconstruct pre-0154 corruption solely to exercise the residual guard.
+  // Restore the current database guard before executing production code.
+  const activationGuard = db.prepare("SELECT sql FROM sqlite_master WHERE name='positive_lot_reject_inactive_update_0154'").get().sql
+  db.exec('DROP TRIGGER positive_lot_reject_inactive_update_0154')
+  try { deactivate() } finally { db.exec(activationGuard) }
   await assert.rejects(db.batch(additions.planUnlottedSaleLineGuards(duplicate)), /constraint/i, 'inactive lot stock remains attributed')
   db.prepare('UPDATE branch_stock SET quantity=quantity-2 WHERE product_id=1 AND branch_id=1').run()
   await assert.rejects(db.batch(additions.planUnlottedSaleLineGuards(planned)), /constraint/i, 'racing residual change fails closed')

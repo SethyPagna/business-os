@@ -22,6 +22,15 @@ const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
 const rawDb = openDb(loadAll())
+function deactivatePre0154LegacyLot(batchId) {
+  const deactivate = () => rawDb.prepare('UPDATE product_batches SET is_active=0 WHERE id=?').run([batchId])
+  assert.throws(deactivate, /Cannot deactivate a received lot/, 'current schema rejects positive-lot deactivation')
+  // Legacy-corruption fixture only: preserve route refusal/race coverage even
+  // though 0154 now prevents another writer from creating this state.
+  const guard = rawDb.prepare("SELECT sql FROM sqlite_master WHERE name='positive_lot_reject_inactive_update_0154'").get().sql
+  rawDb.exec('DROP TRIGGER positive_lot_reject_inactive_update_0154')
+  try { deactivate() } finally { rawDb.exec(guard) }
+}
 let beforeBatchHook = null
 let corruptNextReturnReceipt = false
 let corruptNextReturnCreateReceipt = false
@@ -1355,7 +1364,7 @@ async function main() {
     seed()
     rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity) VALUES(1,1,1,'Widget',1)").run()
     const lot = await productBatches.receiveBatchStock(db, { productId: 2, branchId: 1, quantity: 2, lotCode: 'INACTIVE-LOT' })
-    rawDb.prepare('UPDATE product_batches SET is_active=0 WHERE id=?').run([lot.batchId])
+    deactivatePre0154LegacyLot(lot.batchId)
     const inactiveLot = await reqExact('POST', '/', {
       client_request_id: 'return-create-inactive-lot', return_number: 'RET-INACTIVE-LOT', sale_id: 1,
       reason: 'Exchange', items: [{ sale_item_id: 1, product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1 }],
@@ -1385,7 +1394,7 @@ async function main() {
     seed()
     rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity) VALUES(1,1,1,'Widget',1)").run()
     const lot = await productBatches.receiveBatchStock(db, { productId: 2, branchId: 1, quantity: 2, lotCode: 'RACE-LOT' })
-    beforeBatchHook = async () => { rawDb.prepare('UPDATE product_batches SET is_active=0 WHERE id=?').run([lot.batchId]) }
+    beforeBatchHook = async () => { deactivatePre0154LegacyLot(lot.batchId) }
     const lotRace = await reqExact('POST', '/', {
       client_request_id: 'return-create-lot-active-race', return_number: 'RET-LOT-ACTIVE-RACE', sale_id: 1,
       reason: 'Exchange', items: [{ sale_item_id: 1, product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1 }],
