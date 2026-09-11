@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import ts from 'typescript'
 import { fileURLToPath } from 'node:url'
+import { captureActorReadScope, isActorReadScopeCurrent, invalidateActorReadChannel } from '../src/api/actorReadScope.ts'
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 const source = fs.readFileSync(path.join(root, 'src/components/sales/Sales.tsx'), 'utf8')
@@ -89,8 +90,9 @@ const clearInflightStart=http.indexOf('function clearInflight(')
 assert.ok(cacheStateStart>=0 && cacheStateEnd>cacheStateStart && clearInflightStart>=0)
 const cacheState=http.slice(cacheStateStart,cacheStateEnd)
 const clearInflight=http.slice(clearInflightStart,http.indexOf('\n}',clearInflightStart)+2)
-const cache=new Function(ts.transpileModule(`${cacheState}; const CACHE_TTL=20000; ${clearInflight}; ${cacheCode.replace(/export /g,'')}; return {cacheGet,cacheSet,cacheInvalidate,_inflight,_inflightStartedAt,_readCacheTokens}`,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText)()
+const cache=new Function('captureActorReadScope','isActorReadScopeCurrent','invalidateActorReadChannel',ts.transpileModule(`${cacheState}; const CACHE_TTL=20000; ${clearInflight}; ${cacheCode.replace(/export /g,'')}; return {cacheGet,cacheSet,cacheInvalidate,_inflight,_inflightStartedAt,_readCacheTokens}`,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText)(captureActorReadScope,isActorReadScopeCurrent,invalidateActorReadChannel)
 cache.cacheSet('actionHistory:get:sales',[])
+assert.deepEqual(cache.cacheGet('actionHistory:get:sales'),[], 'history cache is genuinely warm under the actual actor scope before the mutation')
 cache._inflight['actionHistory:get:sales']=Promise.resolve([])
 cache._inflightStartedAt['actionHistory:get:sales']=Date.now()
 const historyRead={channel:'actionHistory:get:sales',valid:true,pending:1}

@@ -25,6 +25,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
+import * as actorReadScope from '../src/api/actorReadScope.ts'
 import { openShift, shiftCountPairBlocker, shiftOpeningCounts } from '../src/api/shiftTransport.ts'
 import {
   __resetApiHealthForTests,
@@ -195,6 +196,7 @@ const compiled = ts.transpileModule(gate, { compilerOptions: { module: ts.Module
 const gateModule: any = { exports: {} }
 new Function('require', 'module', 'exports', compiled)((name: string) => {
   if (name === 'react') return hooks
+  if (name.includes('actorReadScope')) return actorReadScope
   if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx, Fragment: 'fragment' }
   if (name.includes('shared/Modal')) return { default: ModalMarker }
   if (name.includes('AppContext')) return { useApp: () => ({ t: (key: string) => key, notify: () => {}, user: { id: 4 }, settings: {}, fmtUSD: String, fmtKHR: String }) }
@@ -218,7 +220,7 @@ function nodes(tree: any): RenderNode[] {
   return [tree, ...nodes(tree.props?.children)]
 }
 try {
-  gateModule.exports.publishShift('4:1:per_account', currentShift)
+  gateModule.exports.publishShift(gateModule.exports.shiftCacheKey(4, 1, 'per_account'), currentShift)
   let tree = render()
   nodes(tree).find((node) => node.type === 'button')!.props.onClick()
   tree = render()
