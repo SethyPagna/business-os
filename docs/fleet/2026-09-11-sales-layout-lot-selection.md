@@ -33,7 +33,18 @@ Owner: root. Integration: `codex/sales-layout-lot-selection-20260911`, isolated 
 - Frontend full gate atb302a88c:367/367 files PASS, typecheck/public-runtime/source syntax PASS. i18n5711keys592sources and production build1126modules PASS (existing chunk warnings).
 - Fees queued-delete fixec420beb independently verified against actual server202 review contract and callback tests: pending approval is truthfully notified; accepted queued requests close/reload without claiming deletion. Localized receipt labels no longer expose undefined IDs.
 - Pagerb302a88c deliberately shows selected page-size count, with full range in accessible label, and sizes page input for its digits. Repeated independent browser checks exposed global mobile `.grid {gap:0.75rem!important}` overriding normal AND important utility classes. Final67c28edd uses full-width inline-grid to avoid that selector. Actual rebuilt CSS/Chromium40/40 EN/KM x320/360/390/1280 xpages1/178/500/5000/61729 PASS. Gap0, no pager/root/document overflow, no label/input clipping; center delta<=0.008px. AtKM320page61729 pager187.05px; page-size client=scroll11px, inputclient=scroll40px. Full date endpoints remain visible.
-- Remaining release gates: final frozen candidate build/focused regression, broad backend sweep completion/retry, deployment/provenance and live read-only smoke. No deployment claimed yet.
+- Final backend sweep:353/353 scripts ultimately PASS. First pass352pass/1 Windows native0xC0000409 crash in test-catalog-live-stock-native.cjs with no assertion/output; isolated retry PASS4115ms. Backend source remained frozen. Logs/results in output/backend-certification-20260911/.
+- Final focused frontend layout/scope gate12/12 PASS after pager correction; final Fees-only gate4/4 PASS after color correction. Production build PASS1126modules on final revision; existing circular/large-chunk warnings remain.
+
+## Deployment and live read-only smoke
+
+- First releaseb0b63feb36df went live with Worker55027960-284d-4cbe-8cc3-c2ad07e5508f. Live visual check then caught Expense Add inheriting a transparent background from the shared icon class, despite appended blue classes. Follow-up3c002325 removes conflicting background tokens; independent actual built CSS confirms40x40 blue/white in EN/KM light/dark and correct hover colors.
+- FINAL LIVE source revision `3c002325f719`, Worker version `6f8f31f9-7f4b-4e0d-9967-c699a8c97da6`. Backend hash `1dc60702ad6f95c5`, built2026-09-11T14:24:26.785Z. Frontend same revision, hash `7a79c9a7e7af4e2c`, built2026-09-11T14:21:38.748Z. Both live runtime/version and business-os-build.json verified after deployment. Branch pushed; dirty shared checkout preserved.
+- Live Sales: full dates, icon Stats/Manage, Shift/center pager/History, new compact row arrangement and hidden row scrollbars observed. Today selected.
+- Live exact barcode03474637319687 in sale add-item search: Kerastase Conditioner Genesis75ml showsShop3/Warehouse0; date dropdown includes enabled02/09/2026(3), zero-quantity alternatives disabled. Selecting the date enables Add. Picker closed WITHOUT clicking Add or saving sale. Existing sale/product/stock not mutated by smoke.
+- Live Expenses: Today, both pagers, two-row records, row opens detail with authorized Edit/Delete inside, Close works. Final deployed blue Add visually confirmed. No edit/delete actions submitted.
+- Live Returns: app-title Export, iconStats/date/History/Add row, Shift/center pager/Reasons, time+ReturnID row1, receiptrow2, metadatarow3 observed using existing records. Filter restored toToday. No returns created/edited.
+- No migrations, stock/date data writes, or secret sync performed. Existing auth material copied only to gitignored release runtime for authorized deployment.
 
 ## Scope and safety notes
 
