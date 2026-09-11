@@ -531,6 +531,13 @@ function toPosCustomerRows(data: unknown): CustomerRecord[] {
   return Array.isArray(items) ? filterSelectableCustomerRows(items as CustomerRecord[]) : []
 }
 
+export function authoritativePosCustomerSuggestions(customers: CustomerRecord[]): CustomerRecord[] {
+  // `sales_picker` already applies the server's canonical name-word and phone
+  // matching. Re-filtering that page with raw substring rules hides valid
+  // reordered-name and formatted-phone matches.
+  return customers.slice(0, LAYOUT.AUTOCOMPLETE_MAX_RESULTS)
+}
+
 async function searchPosCustomers(search: string): Promise<CustomerRecord[]> {
   const { getSalesCustomerPicker } = await getContactReadTransport()
   const data = await getSalesCustomerPicker({
@@ -1708,13 +1715,8 @@ export default function POS() {
 
 // Customer autocomplete
   useEffect(() => {
-    const q = (active?.customerSearch || '').toLowerCase().trim()
-    if (!q) { setCustomerSuggestions([]); return }
-    setCustomerSuggestions(
-      customers
-        .filter(c => c.name.toLowerCase().includes(q) || (c.phone || '').includes(q))
-        .slice(0, LAYOUT.AUTOCOMPLETE_MAX_RESULTS)
-    )
+    if (!(active?.customerSearch || '').trim()) { setCustomerSuggestions([]); return }
+    setCustomerSuggestions(authoritativePosCustomerSuggestions(customers))
   }, [active?.customerSearch, customers])
 
 // Delivery autocomplete
