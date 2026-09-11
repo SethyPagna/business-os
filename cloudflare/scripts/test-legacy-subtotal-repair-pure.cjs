@@ -232,6 +232,7 @@ function resetHarness() {
     DELETE FROM audit_logs;
     DELETE FROM branch_stock;
     DELETE FROM branch_batch_stock;
+    DELETE FROM product_batches WHERE id=9001;
     DELETE FROM system_flags WHERE key='maintenance';
   `)
   const insertSale = rawDbHandle.prepare(`
@@ -261,6 +262,10 @@ function resetHarness() {
   // schema fires revision triggers, so remove those synthetic test revisions.
   exec('DELETE FROM sale_write_revisions;')
   exec('INSERT INTO branch_stock(id,product_id,branch_id,quantity) VALUES(9001,9001,9001,17);')
+  // This sentinel stock proves the repair leaves unrelated inventory intact.
+  // Migration 0154 correctly requires every positive lot row to reference an
+  // active received lot, so model that valid parent before seeding the stock.
+  exec("INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active) VALUES(9001,9001,'legacy-subtotal-sentinel','LEGACY-SUBTOTAL-SENTINEL','2026-09-02 00:00:00',1);")
   exec('INSERT INTO branch_batch_stock(id,batch_id,branch_id,quantity) VALUES(9001,9001,9001,9);')
   cache.clear()
   backupShouldFail = false
