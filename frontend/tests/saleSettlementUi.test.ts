@@ -87,6 +87,7 @@ for (const unreadable of ['stale', 'null'] as const) {
   savePendingDirectMutationSlot('sale-status', 7, 171258, frozen, storage)
   const readSale = async (_id: number, accept = (_row: typeof before) => true) => readCommittedMutationState(async () => readMode === 'null' ? null : readMode === 'stale' ? { ...before } : { ...server }, accept)
   const deps: Record<string, unknown> = {
+    authReady: true, statusSecurityScope: 'security:7:0', statusSecurityRef: { current: 'security:7:0' },
     canChangeSaleStatus: true,
     currentPendingDirectStatus: () => loadPendingDirectMutationSlot('sale-status', 7, storage),
     salesRef: rows, pendingStatusProblemRef: { current: null }, statusActionRef: { current: new Set() },
@@ -138,6 +139,21 @@ for (const unreadable of ['stale', 'null'] as const) {
   assert.equal(stock, 11); assert.equal(recognizedRevenue, 7)
   assert.equal(auditRows, 1); assert.equal(moneyEffects, 1)
   assert.ok(requests.every((body) => JSON.stringify(body) === JSON.stringify(frozen)), 'every retry retains exact tender, request and expected version')
+  savePendingDirectMutationSlot('sale-status', 7, 171258, frozen, storage)
+  let staleReply!: (value: unknown) => void
+  const staleDeps = {
+    ...deps,
+    runSaleStatusMutation: () => new Promise((resolve) => { staleReply = resolve }),
+    loadSales: async () => { throw new Error('old permission scope must not refresh current data') },
+    notify: () => { throw new Error('old permission scope must not notify current actor') },
+  }
+  const staleHandle = salesCallback('handleStatusChange', '\n  const replaySaleStatusHistory', staleDeps)
+  const staleWrite = staleHandle(171258, 'completed', '', true, frozen, true, frozen)
+  ;(deps.statusSecurityRef as { current: string }).current = 'security:7:1'
+  staleReply({ updated_at: server.updated_at })
+  assert.equal(await staleWrite, false, 'same-ID permission change rejects deferred parent response')
+  assert.deepEqual(loadPendingDirectMutationSlot('sale-status', 7, storage)?.body, frozen, 'old completion never clears or rewrites original actor recovery')
+  savePendingDirectMutationSlot('sale-status', 7, 171258, null, storage)
 }
 console.log('PASS production Sales callbacks retain exact ABA $7 recovery across stale/null reads and idempotent replay until list/detail converge')
 
