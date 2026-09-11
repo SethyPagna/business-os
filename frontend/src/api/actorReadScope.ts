@@ -14,34 +14,54 @@ let quarantineStatus = 'checking'
 const quarantineListeners = new Set<() => void>()
 export const ACTOR_SESSION_RETRY_EVENT = 'auth:read-session-retry'
 const AUTH_PENDING_PREFIX = 'auth-pending:'
+const AUTH_PENDING_OWNER = 'businessos_auth_cookie_pending'
+const AUTH_ADMISSION_LOCK = 'businessos-auth-cookie-admission'
+let expectedPending: string | null = null
 const OAUTH_COOKIE_OWNER = 'businessos_oauth_cookie_owner'
 const cookieUsers = new WeakMap<object, string>()
 
 export function isActorCookieMutationPending(): boolean {
-  return String(sessionMarker() || '').startsWith(AUTH_PENDING_PREFIX)
+  return !!pendingCookieOwner()
+}
+
+function pendingCookieOwner(): string | null {
+  try {
+    return window.localStorage.getItem(AUTH_PENDING_OWNER)
+      || (String(sessionMarker() || '').startsWith(AUTH_PENDING_PREFIX) ? sessionMarker() : null)
+  } catch { return null }
 }
 
 /** Call immediately before the browser request that can change the shared
  * HttpOnly cookie. No elapsed-time lease may release an unfinished request. */
-export function beginActorCookieMutation(): string {
-  assertActorSessionDispatchAllowed()
-  const marker = AUTH_PENDING_PREFIX + (globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`)
-  if (typeof window === 'undefined') return marker
-  // Storage failure is fail-closed: other tabs could not be fenced.
-  window.localStorage.setItem(SESSION_MARKER, marker)
-  expectedMarker = marker
-  localSession++
-  return marker
+export async function beginActorCookieMutation(): Promise<string> {
+  const beforeAdmission = captureActorReadScope()
+  if (typeof window === 'undefined') return AUTH_PENDING_PREFIX + runtimeId
+  const locks = window.navigator?.locks
+  if (!locks?.request) throw Object.assign(new Error('Secure cross-tab sign-in is unavailable in this browser. Use a supported browser. / ការចូលគណនីដោយសុវត្ថិភាពរវាងផ្ទាំងមិនអាចប្រើបានទេ។ សូមប្រើកម្មវិធីរុករកដែលគាំទ្រ។'), { code: 'auth_lock_unavailable', status: 409, outcome: 'not_dispatched' })
+  return locks.request(AUTH_ADMISSION_LOCK, { mode: 'exclusive' }, () => {
+    assertActorSessionDispatchAllowed(beforeAdmission)
+    const marker = AUTH_PENDING_PREFIX + (globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`)
+    // Independent of generic generation resets: they cannot erase this
+    // durable owner while fetch or a full-page OAuth redirect is pending.
+    window.localStorage.setItem(AUTH_PENDING_OWNER, marker)
+    expectedPending = marker
+    window.localStorage.setItem(SESSION_MARKER, marker)
+    expectedMarker = marker
+    localSession++
+    return marker
+  })
 }
 
 /** Only the owner of the current pending marker may settle it. Called from
  * the actual fetch lifecycle, never a UI deadline that leaves fetch running. */
 export function finishActorCookieMutation(marker: string, ownerReconciliation = false, user?: object): boolean {
   if (typeof window === 'undefined') return true
-  if (sessionMarker() !== marker || !marker.startsWith(AUTH_PENDING_PREFIX)) return false
+  if (pendingCookieOwner() !== marker || !marker.startsWith(AUTH_PENDING_PREFIX)) return false
   const settled = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`
   window.localStorage.setItem(SESSION_MARKER, settled)
   expectedMarker = settled
+  expectedPending = null
+  window.localStorage.removeItem(AUTH_PENDING_OWNER)
   localSession++
   if (ownerReconciliation) {
     if (user) cookieUsers.set(user, settled)
@@ -93,9 +113,11 @@ function sessionMarker(): string | null {
 
 function observeSessionMarker(): void {
   const marker = sessionMarker()
+  const pending = pendingCookieOwner()
   if (expectedMarker === undefined) { expectedMarker = marker; return }
-  if (marker === expectedMarker) return
+  if (marker === expectedMarker && pending === expectedPending) return
   expectedMarker = marker
+  expectedPending = pending
   localSession++
   quarantined = true
   quarantineStatus = 'checking'
@@ -104,9 +126,10 @@ function observeSessionMarker(): void {
 
 if (typeof window !== 'undefined') {
   expectedMarker = sessionMarker()
+  expectedPending = pendingCookieOwner()
   if (isActorCookieMutationPending()) quarantined = true
   window.addEventListener('storage', (event) => {
-    if (event.key === SESSION_MARKER || event.key === null) observeSessionMarker()
+    if (event.key === SESSION_MARKER || event.key === AUTH_PENDING_OWNER || event.key === null) observeSessionMarker()
   })
 }
 
@@ -124,7 +147,7 @@ export function assertActorSessionDispatchAllowed(scope?: ActorReadScope): void 
   }
 }
 export function actorSessionQuarantineStatus(): string { return quarantineStatus }
-export function actorSessionReconciliationMarker(): string | null { observeSessionMarker(); return expectedMarker ?? null }
+export function actorSessionReconciliationMarker(): string | null { observeSessionMarker(); return pendingCookieOwner() || expectedMarker || null }
 export function setActorSessionQuarantineStatus(status: string): void {
   quarantineStatus = status
   quarantineListeners.forEach((listener) => listener())

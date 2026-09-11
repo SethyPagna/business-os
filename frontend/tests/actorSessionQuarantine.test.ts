@@ -4,9 +4,16 @@ import ts from 'typescript'
 
 const data = new Map<string, string>([['businessos_user', JSON.stringify({ id: 1 })]])
 const events = new EventTarget()
+let admissionQueue = Promise.resolve()
+const locks = { request: (_name: string, _options: unknown, action: () => unknown) => {
+  const next = admissionQueue.then(action)
+  admissionQueue = next.then(() => undefined, () => undefined)
+  return next
+} }
 Object.assign(globalThis, { window: {
   location: { origin: 'https://quarantine.test' },
-  localStorage: { getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => data.set(k, v) },
+  localStorage: { getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => data.set(k, v), removeItem: (k: string) => data.delete(k) },
+  navigator: { locks },
   sessionStorage: { getItem: () => null },
   addEventListener: events.addEventListener.bind(events), removeEventListener: events.removeEventListener.bind(events),
   dispatchEvent: events.dispatchEvent.bind(events), setTimeout, clearTimeout,
@@ -129,6 +136,7 @@ try {
       return cookieResponse.promise
     }) as typeof fetch
     const authenticating = http.apiFetch('POST', path, { fixture: true })
+    await flush()
     assert.equal(observerScope.isActorSessionQuarantined(), true)
     assert.equal(observerScope.completeActorSessionReconciliation(observerScope.actorSessionReconciliationMarker()), false)
     await assert.rejects(http.readActorSessionRecoveryBootstrap(), (e: any) => e.outcome === 'not_dispatched')
@@ -151,10 +159,12 @@ try {
     assert.equal(observerScope.isActorSessionQuarantined(), true, 'settlement still requires authoritative reconciliation in old tab')
     assert.equal(observerScope.completeActorSessionReconciliation(observerScope.actorSessionReconciliationMarker()), true)
   }
-  const ownerMarker = scope.beginActorCookieMutation()
+  const ownerMarker = await scope.beginActorCookieMutation()
   data.set('businessos_read_session', 'auth-pending:newer-owner')
+  data.set('businessos_auth_cookie_pending', 'auth-pending:newer-owner')
   assert.equal(scope.finishActorCookieMutation(ownerMarker), false, 'old completion cannot unlock a newer auth request')
   assert.equal(data.get('businessos_read_session'), 'auth-pending:newer-owner')
+  data.delete('businessos_auth_cookie_pending')
   externalChange()
   scope.completeActorSessionReconciliation(scope.actorSessionReconciliationMarker())
 } finally { globalThis.fetch = originalFetch }

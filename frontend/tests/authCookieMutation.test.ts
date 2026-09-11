@@ -6,7 +6,14 @@ const local = new Map<string, string>()
 const session = new Map<string, string>()
 const storage = (map: Map<string, string>) => ({ getItem: (k: string) => map.get(k) ?? null, setItem: (k: string, v: string) => map.set(k, v), removeItem: (k: string) => map.delete(k) })
 const events = new EventTarget()
+let admissionQueue = Promise.resolve()
+const locks = { request: (_name: string, _options: unknown, action: () => unknown) => {
+  const next = admissionQueue.then(action)
+  admissionQueue = next.then(() => undefined, () => undefined)
+  return next
+} }
 Object.assign(globalThis, { window: { location: { origin: 'https://auth-phase.test' }, localStorage: storage(local), sessionStorage: storage(session),
+  navigator: { locks },
   addEventListener: events.addEventListener.bind(events), removeEventListener: events.removeEventListener.bind(events), dispatchEvent: events.dispatchEvent.bind(events) } })
 const scope = await import('../src/api/actorReadScope.ts')
 const http = await import('../src/api/http.ts')

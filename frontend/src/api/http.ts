@@ -819,7 +819,7 @@ export async function apiFetch(method: unknown, path: string, body?: unknown, ti
       requestInit.body = JSON.stringify(body)
     }
     if (oauthLogin || (normalizedMethod === 'POST' && ['/api/auth/login', '/api/auth/otp/verify', '/api/auth/logout', '/api/auth/session-duration'].includes(path))) {
-      cookieMutation = beginActorCookieMutation()
+      cookieMutation = await beginActorCookieMutation()
     }
     if (oauthLogin && cookieMutation) {
       const payload = (body || {}) as Record<string, unknown>
