@@ -50,6 +50,7 @@ import SaleStatusWorkflow from './SaleStatusWorkflow.tsx'
 import { claimSyncProblemPresentation, type SyncProblemPresentationOwner } from '../../utils/syncProblemLifecycle.ts'
 import { sanitizeSaleDetailText } from './saleDetailText.ts'
 import SaleSettlementEditor, { MAX_SETTLEMENT_ROWS } from './SaleSettlementEditor.tsx'
+import { readSettlementConfig, startSettlementConfigRead, type SettlementConfig } from './saleSettlementConfig.ts'
 import {
   advanceSettlementReviewVersion,
   buildSettlementPayload,
@@ -378,10 +379,20 @@ export default function SaleDetailModal({
     if (!pendingStatus || !statusRecoveryOwner) return
     return claimSyncProblemPresentation(statusRecoveryOwner)
   }, [pendingStatus, statusRecoveryOwner?.actorId, statusRecoveryOwner?.requestId, statusRecoveryOwner?.problem.errorId, statusRecoveryOwner?.problem.channel, statusRecoveryOwner?.problem.code])
-  const { navigateTo } = useApp() as { navigateTo?: (page: string, anchor?: string) => void }
+  const { navigateTo, user } = useApp() as { navigateTo?: (page: string, anchor?: string) => void; user?: { id?: string | number } | null }
+  const detailScope = `${user?.id ?? 'anonymous'}:${sale?.id ?? ''}`
+  const detailScopeRef = useRef(detailScope)
+  detailScopeRef.current = detailScope
+  const detailAliveRef = useRef(true)
+  useEffect(() => { detailAliveRef.current = true; return () => { detailAliveRef.current = false } }, [])
   const [newStatus, setNewStatus] = useState(sale?.sale_status || 'completed')
   const [statusNotes, setStatusNotes] = useState('')
   const [statusSaving, setStatusSaving] = useState(false)
+  const [paymentConfig, setPaymentConfig] = useState<{ scope: string; status: 'loading' | 'ready' | 'failed'; value?: SettlementConfig }>({ scope: detailScope, status: 'loading' })
+  const [paymentConfigReload, setPaymentConfigReload] = useState(0)
+  const rawMethodsVersion = settings && typeof settings === 'object' ? String((settings as Record<string, unknown>).pos_payment_methods ?? '') : ''
+  const rawRateVersion = settings && typeof settings === 'object' ? String((settings as Record<string, unknown>).exchange_rate ?? '') : ''
+  const paymentConfigLoaded = paymentConfig.scope === detailScope && paymentConfig.status === 'ready'
   const settlementSnapshot = (selectedSale: SaleDetail | null | undefined) => {
     const rawSettings = settings && typeof settings === 'object' ? settings as Record<string, unknown> : {}
     const configuredMethods = configuredSettlementMethods(rawSettings.pos_payment_methods)
@@ -411,12 +422,17 @@ export default function SaleDetailModal({
     }
   }
   const [settlementSession, setSettlementSession] = useState(() => settlementSnapshot(sale))
+  const paymentConfigReady = paymentConfigLoaded && !!paymentConfig.value &&
+    JSON.stringify(settlementSession.configuredMethods) === JSON.stringify(paymentConfig.value.configuredMethods) &&
+    settlementSession.exchangeRate === paymentConfig.value.exchangeRate
   const [settlementRows, setSettlementRows] = useState<SettlementRow[]>(settlementSession.rows)
   const settlementBaselineRef = useRef<SettlementRow[]>(settlementSession.rows)
   const settlementRequestIdRef = useRef(createSettlementRequestId())
   const addRequestIdRef = useRef(createSettlementRequestId())
   const amendRequestIdRef = useRef(createSettlementRequestId())
   const [mutationExchangeRate, setMutationExchangeRate] = useState(settlementSession.exchangeRate)
+  const settlementFrozenRef = useRef(false)
+  settlementFrozenRef.current = statusSaving || pendingStatus
   const [addMutationError, setAddMutationError] = useState('')
   const [amendMutationError, setAmendMutationError] = useState('')
   const modalPanelRef = useRef<HTMLDivElement | null>(null)
@@ -570,6 +586,29 @@ export default function SaleDetailModal({
 
   const saleId = sale?.id
   useEffect(() => {
+    setPaymentConfig((current) => ({ ...current, scope: detailScope, status: 'loading' }))
+    return startSettlementConfigRead(readSettlementConfig, (value) => {
+      setPaymentConfig({ scope: detailScope, status: 'ready', value })
+    }, () => { setPaymentConfig((current) => ({ ...current, scope: detailScope, status: 'failed' })) })
+  }, [detailScope, rawMethodsVersion, rawRateVersion, paymentConfigReload])
+
+  useEffect(() => {
+    if (!paymentConfigLoaded || !paymentConfig.value || statusSaving || pendingStatus) return
+    // Eligibility and rate may hydrate after open. Never replace typed tender
+    // rows, baseline, or request identity here; pending requests stay exact.
+    setSettlementSession((current) => ({ ...current, ...paymentConfig.value }))
+  }, [paymentConfig, paymentConfigLoaded, statusSaving, pendingStatus])
+
+  const lastServerStatusRef = useRef(`${detailScope}:${sale?.sale_status || 'completed'}`)
+  useEffect(() => {
+    if (statusSaving || pendingStatus) return
+    const serverStatus = `${detailScope}:${sale?.sale_status || 'completed'}`
+    if (lastServerStatusRef.current === serverStatus) return
+    lastServerStatusRef.current = serverStatus
+    setNewStatus(sale?.sale_status || 'completed')
+  }, [detailScope, sale?.sale_status, statusSaving, pendingStatus])
+
+  useEffect(() => {
     const next = settlementSnapshot(sale)
     setSettlementSession(next)
     setSettlementRows(next.rows)
@@ -593,10 +632,10 @@ export default function SaleDetailModal({
     setDeliveryContact(null)
     setDeliveryContactsError('')
     setPayError('')
-    // Settings changes while this sale is open deliberately do not alter the
-    // reviewed rate/method snapshot. A different sale starts a new review.
+    // Sale identity starts a new draft. Configuration has a separate guarded
+    // hydration lifecycle, so opening before settings load cannot freeze [].
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [saleId])
+  }, [detailScope])
 
   useEffect(() => {
     if (!deliveryAdding) return
@@ -617,29 +656,33 @@ export default function SaleDetailModal({
         .finally(() => { if (!cancelled) setDeliveryContactsLoading(false) })
     }, 200)
     return () => { cancelled = true; window.clearTimeout(timer) }
-  }, [deliveryAdding, deliverySearch])
+  }, [deliveryAdding, deliverySearch, detailScope])
+  const amendmentsLoaderRef = useRef(onLoadAmendments)
+  amendmentsLoaderRef.current = onLoadAmendments
+  const hasAmendmentsLoader = !!onLoadAmendments
   useEffect(() => {
-    if (!onLoadAmendments || saleId === undefined || saleId === null) return
+    if (!hasAmendmentsLoader || saleId === undefined || saleId === null) return
     let cancelled = false
-    setAmendmentsLoading(true)
+    setAmendmentsLoading(amendments === null)
     setAmendmentsFailed(false)
     void (async () => {
-      const rows = await onLoadAmendments(saleId)
+      const rows = await amendmentsLoaderRef.current!(saleId).catch(() => null)
       if (cancelled) return
       setAmendments(rows)
       setAmendmentsFailed(rows === null)
       setAmendmentsLoading(false)
     })()
     return () => { cancelled = true }
-  }, [onLoadAmendments, saleId, amendReloadToken])
+  }, [hasAmendmentsLoader, detailScope, amendReloadToken])
 
   // The POS's own tracked-ids lookup, scoped to this sale's branch. A FAILED
   // lookup must not collapse into "nothing is batch-tracked" -- that would
   // drop the received-date step from an addition that genuinely needs one and
   // move stock with no lot recorded -- so the last known set is kept and the
   // failure is logged, exactly as POS.tsx and TransferModal.tsx do.
+  const canLoadAddItems = !!onAddItems
   useEffect(() => {
-    if (!onAddItems) return undefined
+    if (!canLoadAddItems) return undefined
     let cancelled = false
     setTrackedBatchLookupState('loading')
     setTrackedBatchLookupError('')
@@ -656,12 +699,12 @@ export default function SaleDetailModal({
         setTrackedBatchLookupError(error instanceof Error && error.message ? error.message : 'Could not verify received-date tracking.')
       })
     return () => { cancelled = true }
-  }, [onAddItems, sale?.branch_id, trackedBatchReloadKey])
+  }, [canLoadAddItems, detailScope, sale?.branch_id, trackedBatchReloadKey])
 
   useEffect(() => {
-    const text = addQuery.trim()
-    if (!onAddItems || text.length < 2) { setAddCandidates([]); setAddSearching(false); return }
     const seq = ++addSearchSeqRef.current
+    const text = addQuery.trim()
+    if (!canLoadAddItems || text.length < 2) { setAddCandidates([]); setAddSearching(false); return }
     setAddSearching(true)
     const timer = window.setTimeout(async () => {
       try {
@@ -680,8 +723,8 @@ export default function SaleDetailModal({
         if (seq === addSearchSeqRef.current) setAddSearching(false)
       }
     }, 300)
-    return () => window.clearTimeout(timer)
-  }, [addQuery, onAddItems, sale?.branch_id])
+    return () => { window.clearTimeout(timer); ++addSearchSeqRef.current }
+  }, [addQuery, canLoadAddItems, detailScope, sale?.branch_id])
 
   // What makes two staged lines the SAME line, and how a pick folds into
   // what is already staged, both live in saleAddLines.ts -- one rule, tested
@@ -1238,7 +1281,9 @@ export default function SaleDetailModal({
   }
 
   const handleStatusUpdate = async (): Promise<void> => {
-    if (!onStatusChange || newStatus === currentStatus) return
+    if (!onStatusChange || newStatus === currentStatus || settlementFrozenRef.current) return
+    if (needsPaymentEntry && !paymentConfigReady) return
+    const requestScope = detailScope
     let extra: Record<string, unknown> | null = null
     if (needsPaymentEntry) {
       if (!paymentCorrection && settlementSession.recordedIssue === 'malformed') {
@@ -1281,9 +1326,11 @@ export default function SaleDetailModal({
         replace_existing_payment: paymentCorrection,
       }
     }
+    settlementFrozenRef.current = true
     setStatusSaving(true)
     try {
       const result = await onStatusChange(sale.id, newStatus, statusNotes, true, extra)
+      if (!detailAliveRef.current || detailScopeRef.current !== requestScope) return
       const changedRate = result && typeof result === 'object'
         ? Number((result as { exchangeRateChanged?: unknown }).exchangeRateChanged)
         : NaN
@@ -1292,6 +1339,7 @@ export default function SaleDetailModal({
         : ''
       if (Number.isFinite(changedRate) && changedRate > 0) {
         setSettlementSession((current) => ({ ...current, exchangeRate: changedRate }))
+        setPaymentConfigReload((value) => value + 1)
         settlementRequestIdRef.current = createSettlementRequestId()
         setPayError(translateOr('sale_settlement_rate_changed', 'The exchange rate changed. Review the updated balance, then confirm again.', 'អត្រាប្តូរប្រាក់បានផ្លាស់ប្តូរ។ សូមពិនិត្យសមតុល្យថ្មី ហើយបញ្ជាក់ម្តងទៀត។'))
       } else if (settlementError) {
@@ -1307,7 +1355,10 @@ export default function SaleDetailModal({
         onClose()
       }
     } finally {
-      setStatusSaving(false)
+      if (detailAliveRef.current && detailScopeRef.current === requestScope) {
+        settlementFrozenRef.current = false
+        setStatusSaving(false)
+      }
     }
   }
 
@@ -2427,7 +2478,7 @@ export default function SaleDetailModal({
                 }}
                 onConfirm={handleStatusUpdate}
                 reviewRequestId={pendingStatus ? Math.max(1, statusReviewRequestId) : statusReviewRequestId}
-                confirmDisabled={pendingStatus || (needsPaymentEntry && settlementRows.length > MAX_SETTLEMENT_ROWS)}
+                confirmDisabled={pendingStatus || (needsPaymentEntry && (!paymentConfigReady || settlementRows.length > MAX_SETTLEMENT_ROWS))}
                 showNotes={!needsPaymentEntry}
               >
               {pendingStatus ? (
@@ -2439,12 +2490,18 @@ export default function SaleDetailModal({
                   </div>
                 </div>
               ) : needsPaymentEntry ? (
+                <>
+                {!paymentConfigReady ? <div role="status" className="mb-2 text-sm text-amber-700 dark:text-amber-300">
+                  <span>{paymentConfig.status === 'failed' ? translateOr('load_error', 'Could not load payment methods.') : (t('loading') || 'Loading')}</span>
+                  {paymentConfig.status === 'failed' ? <button type="button" className="btn-secondary ml-2 text-xs" onClick={() => setPaymentConfigReload((value) => value + 1)}>{t('retry') || 'Retry'}</button> : null}
+                </div> : null}
+                {paymentConfigReady || (paymentConfig.scope === detailScope && paymentConfig.value && settlementSession.configuredMethods.length > 0) ? (
                 <SaleSettlementEditor
                   rows={settlementRows}
                   configuredMethods={settlementSession.configuredMethods}
                   exchangeRate={settlementSession.exchangeRate}
                   totalUsd={totalUsd}
-                  saving={statusSaving}
+                  saving={statusSaving || !paymentConfigReady}
                   error={payError}
                   recordedIssue={settlementSession.recordedIssue}
                   allowRecordedEdits={paymentCorrection}
@@ -2457,6 +2514,8 @@ export default function SaleDetailModal({
                     setPayError('')
                   }}
                 />
+                ) : null}
+                </>
               ) : null}
               </SaleStatusWorkflow>
             </section>

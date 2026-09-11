@@ -299,7 +299,7 @@ assert.match(editorSource, /exchangeRate\.toLocaleString\(undefined, \{ maximumF
 assert.match(editorSource, /sale_settlement_rows_limit/, 'legacy records above the server row limit have a localized review message')
 assert.match(editorSource, /rows\.length > MAX_SETTLEMENT_ROWS\s*\? rowsLimitMessage/, 'the row-limit message becomes the blocking review error')
 assert.doesNotMatch(editorSource, /rows\.(?:slice|splice)\(/, 'legacy payment rows must never be truncated to fit the limit')
-assert.match(modalSource, /confirmDisabled=\{pendingStatus \|\| \(needsPaymentEntry && settlementRows\.length > MAX_SETTLEMENT_ROWS\)\}/, 'unknown outcomes and legacy records above the backend limit cannot submit a new review')
+assert.match(modalSource, /confirmDisabled=\{pendingStatus \|\| \(needsPaymentEntry && \(!paymentConfigReady \|\| settlementRows\.length > MAX_SETTLEMENT_ROWS\)\)\}/, 'unknown outcomes, unverified configuration and legacy records above the backend limit cannot submit a new review')
 assert.match(workflowSource, /disabled=\{saving \|\| confirmDisabled \|\| selectedStatus === currentStatus\}/, 'the workflow disables a blocked settlement confirmation')
 assert.match(modalSource, /client_request_id:\s*settlementRequestIdRef\.current/, 'retries reuse one reviewed request id')
 assert.match(modalSource, /expected_exchange_rate:\s*settlementSession\.exchangeRate/, 'the server guards the reviewed exchange-rate quote')
