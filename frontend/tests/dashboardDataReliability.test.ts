@@ -39,7 +39,7 @@ assert.match(dashboard, /DASHBOARD_STOCK_ALERT_SCROLL_THRESHOLD_PX/, 'dashboard 
 assert.match(dashboard, /getDashboardStockAlerts\(\{ state, page, pageSize: DASHBOARD_STOCK_ALERT_PAGE_SIZE \}\)/, 'dashboard-only users must load stock alert pages through the dashboard-authorized endpoint')
 assert.match(dashboard, /lowStockListRef\.current\.scrollTop = 0[\s\S]{0,120}outOfStockListRef\.current\.scrollTop = 0/, 'leaving an alert page must reset both scroll positions')
 assert.match(dashboard, /setLowStockRows\(\[\]\)[\s\S]{0,120}setOutOfStockRows\(\[\]\)/, 'leaving the dashboard must clear both alert lists')
-assert.match(statsRangeRow, /triggerClassName="flex h-10 !min-h-10 min-w-0 w-full/, 'the shared dashboard date picker should use the canonical toolbar height')
+assert.match(statsRangeRow, /triggerClassName=\{compact[\s\S]*?flex h-10 !min-h-10 min-w-fit w-full[\s\S]*?flex h-10 !min-h-10 min-w-0 w-full/, 'both compact and standard shared date pickers use the canonical toolbar height')
 assert.match(dashboard, /className=\{toolbarIconButtonClassName\}/, 'dashboard export should use the canonical icon action style')
 assert.match(toolbarStyles, /toolbarIconButtonClassName = 'inline-flex h-10 min-h-10 w-10/, 'the shared export action should use the canonical toolbar dimensions')
 assert.match(statsRangeRow, /data-date-presets/, 'dashboard presets should be owned by the shared Stats row')

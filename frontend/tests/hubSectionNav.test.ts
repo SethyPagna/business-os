@@ -153,7 +153,7 @@ await runTest('pages mode uses one compact header and its inline group drawer wi
   assert.match(sidebar, /\{!inline \? \(\s*<nav className="safe-area-inset-bottom fixed bottom-0/, 'legacy bottom navigation should render only outside pages mode')
   assert.match(sidebar, /inline \? 'bottom-0 pb-\[env\(safe-area-inset-bottom\)\]' : 'bottom-\[calc\(3\.55rem\+env\(safe-area-inset-bottom\)\)\]'/, 'pages drawer should reclaim the bottom safe area while legacy keeps its nav offset')
   assert.doesNotMatch(sidebar, /h-28|7rem|flex-wrap content-center gap-y-1/, 'pages mode should not force a second header row')
-  assert.match(sidebar, /mobileTitle[\s\S]*?truncate text-sm font-semibold/, 'one-row pages title should stay readable without overflowing')
+  assert.match(sidebar, /mobileTitle[\s\S]*?overflow-x-auto[\s\S]*?whitespace-nowrap[\s\S]*?text-sm font-semibold/, 'one-row pages title remains readable through horizontal scrolling rather than ellipsis')
   assert.match(sidebar, /inline \? null : \([\s\S]*?<MinimizedWorkTray variant="mobile"/, 'wide minimized-work chips should leave the one-row pages header')
   assert.match(sidebar, /\{notificationSlot\}\s*\{showQuickPreferences \? \([\s\S]*?<QuickPreferenceToggles \/>[\s\S]*?<div className="relative z-50/, 'theme and language controls should stay directly in the one-row header between notification and account')
   assert.match(sidebar, /\{inline \? \(\s*<div className="[^"]*\[&>div\]:flex-wrap[^"]*">[\s\S]*?<MinimizedWorkTray variant="mobile"/, 'pages-mode minimized work should remain reachable in the account panel and wrap without horizontal overflow')

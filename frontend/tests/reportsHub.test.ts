@@ -725,8 +725,8 @@ test('the control row keeps every control at each width: nothing is dropped, not
   // the trigger becomes a full-width field whose labels can truncate.
   assert.ok(hub.includes("triggerClassName={compact ? 'reports-mobile-range flex w-full min-w-0"), 'the range trigger goes full-width and shrinkable on phones')
   const picker = read('src/components/shared/DateTimeRangePicker.tsx')
-  const spans = picker.match(/className=\{`min-w-0 truncate /g) || []
-  assert.equal(spans.length, 2, 'both endpoint labels can actually truncate (min-w-0, not truncate alone)')
+  const spans = picker.match(/compactTriggerLabels \? 'shrink-0 whitespace-nowrap text-\[11px\]' : 'min-w-0 truncate'/g) || []
+  assert.equal(spans.length, 2, 'both endpoints retain shrinkable report labels and support untruncated compact toolbar labels')
 })
 
 // --- Part 586: density, and the Khmer line box ----------------------------
