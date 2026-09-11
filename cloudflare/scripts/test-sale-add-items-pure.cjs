@@ -91,6 +91,8 @@ function setup() {
   sqlite.exec(`
     CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, stock_quantity REAL DEFAULT 0, updated_at TEXT);
     CREATE TABLE branch_stock (product_id INTEGER, branch_id INTEGER, quantity REAL DEFAULT 0 CHECK(quantity >= 0), UNIQUE(product_id, branch_id));
+    CREATE TABLE product_batches (id INTEGER PRIMARY KEY, is_active INTEGER DEFAULT 1, updated_at TEXT);
+    INSERT INTO product_batches(id) VALUES(501),(502);
     CREATE TABLE branch_batch_stock (batch_id INTEGER, branch_id INTEGER, quantity REAL DEFAULT 0 CHECK(quantity >= 0), updated_at TEXT, UNIQUE(batch_id, branch_id));
     CREATE TABLE sale_item_batch_allocations (id INTEGER PRIMARY KEY AUTOINCREMENT, sale_item_id INTEGER, batch_id INTEGER,
       branch_id INTEGER, quantity REAL, lot_code TEXT, expiry_date TEXT, released_at TEXT, released_quantity REAL NOT NULL DEFAULT 0);
