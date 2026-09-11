@@ -265,6 +265,9 @@ export async function resetClientRuntimeState(options: RuntimeResetOptions = {})
   // has to be re-approved on the very next login. See utils/deviceInfo.ts's
   // own comment on this key for the full reasoning.
   localPreserveKeys.add(STORAGE_KEYS.DEVICE_ID)
+  // Nonsecret shared-cookie session fence: another tab must still observe the
+  // logout/login boundary after this storage reset finishes.
+  localPreserveKeys.add('businessos_read_session')
   if (preserveAuth) {
     localPreserveKeys.add(STORAGE_KEYS.USER)
     localPreserveKeys.add(STORAGE_KEYS.USER_EXPIRY)

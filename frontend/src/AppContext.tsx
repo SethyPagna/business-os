@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useRef, useMemo, startTransition } fr
 import type { ReactNode } from 'react'
 import { BUSINESS_TIME_ZONE, STORAGE_KEYS, SYNC } from './constants'
 import { cacheClearAll, ensureSyncUpdateCacheListener, FRONTEND_BUILD_INFO, isTransientGatewayError, pingServerHealth, primeServerHealthFromRuntime, startHealthCheck } from './api/http.ts'
+import { resetActorReadSession } from './api/actorReadScope.ts'
 import {
   normalizeRuntimeDescriptor,
   readStoredRuntimeDescriptor,
@@ -798,6 +799,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     preserveOfflineWork?: boolean
     preserveUiDrafts?: boolean
   } = {}) => {
+    resetActorReadSession()
     await resetClientRuntimeState({
   // Authentication helpers.
       preserveDeviceSettings: true,
@@ -1645,6 +1647,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
 
   // Authentication helpers.
   const persistAuthenticatedUser = useCallback(async (nextUser: AppUser, sessionDuration = 'session', sessionExpiresAt = ''): Promise<void> => {
+    resetActorReadSession()
     const expiryTime = computeSessionExpiryMs(sessionDuration, sessionExpiresAt)
 
     try {
@@ -1728,6 +1731,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   }, [persistAuthenticatedUser])
 
   const logout = useCallback(async () => {
+    resetActorReadSession()
     disconnectWS()
     try {
       const api = getAppApi()

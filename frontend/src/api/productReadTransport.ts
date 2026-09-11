@@ -1,5 +1,6 @@
 import { apiFetch, cacheInvalidateWithDerived, requireLiveServerWrite, route } from './http.ts'
 import { appendQuery, buildQueryString, normalizePositiveUniqueIds, type QueryParams } from './query.ts'
+import { captureActorReadScope, isActorReadScopeCurrent, type ActorReadScope } from './actorReadScope.ts'
 
 type LookupReplacementPayload = {
   type?: unknown
@@ -11,10 +12,11 @@ type LookupReplacementPayload = {
 
 const PRODUCT_READ_CACHE_WRITE_DELAY_MS = 10_000
 
-function scheduleProductCacheWrite(cacheKey: string, result: unknown): void {
+function scheduleProductCacheWrite(cacheKey: string, result: unknown, scope: ActorReadScope): void {
   const run = (): void => {
+    if (!isActorReadScopeCurrent(scope)) return
     import('./queryCache.ts')
-      .then(({ writeCachedQueryResult }) => writeCachedQueryResult(cacheKey, result))
+      .then(({ writeCachedQueryResult }) => isActorReadScopeCurrent(scope) ? writeCachedQueryResult(cacheKey, result, scope) : undefined)
       .catch(() => {})
   }
   if (typeof window === 'undefined') {
@@ -24,10 +26,11 @@ function scheduleProductCacheWrite(cacheKey: string, result: unknown): void {
   window.setTimeout(run, PRODUCT_READ_CACHE_WRITE_DELAY_MS)
 }
 
-function scheduleProductsMirror(rows: unknown): void {
+function scheduleProductsMirror(rows: unknown, scope: ActorReadScope): void {
   const run = (): void => {
+    if (!isActorReadScopeCurrent(scope)) return
     import('./localMirrors.ts')
-      .then(({ mirrorTable }) => mirrorTable('products')(rows))
+      .then(({ mirrorTable }) => isActorReadScopeCurrent(scope) ? mirrorTable('products', scope)(rows) : undefined)
       .catch(() => {})
   }
   if (typeof window === 'undefined') {
@@ -45,8 +48,9 @@ function routeCachedProductQuery(cacheKey: string, path: string, searchGroup?: s
   return route(
     cacheKey,
     async (signal?: AbortSignal) => {
+      const scope = captureActorReadScope(cacheKey)
       const result = await apiFetch('GET', path, undefined, undefined, { signal })
-      scheduleProductCacheWrite(cacheKey, result)
+      scheduleProductCacheWrite(cacheKey, result, scope)
       return result
     },
     () => readProductCache(cacheKey),
@@ -58,8 +62,9 @@ export function getProducts(): Promise<unknown> {
   return route(
     'products:get',
     async () => {
+      const scope = captureActorReadScope('products:get')
       const result = await apiFetch('GET', '/api/products')
-      scheduleProductsMirror(result)
+      scheduleProductsMirror(result, scope)
       return result
     },
     async () => {

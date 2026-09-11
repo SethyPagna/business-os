@@ -43,6 +43,7 @@ import { mirrorReadResult } from '../src/api/localMirrors.ts'
 import { fetchJsonWithTimeout, getPortalBaseUrl } from '../src/api/portalHttp.ts'
 import { appendQuery, buildQueryString, normalizePositiveUniqueIds } from '../src/api/query.ts'
 import { buildQueryCacheStorageKey } from '../src/api/queryCache.ts'
+import { resetActorReadSession } from '../src/api/actorReadScope.ts'
 import { createClientRequestId, ensureClientRequestId } from '../src/api/requestIds.ts'
 import { dispatchSyncUpdates, emitSyncQueueChanged } from '../src/api/syncRuntime.ts'
 import { PENDING_SYNC_PREVIEW_LIMIT, serializePendingSyncPreview } from '../src/api/syncPreview.ts'
@@ -901,7 +902,12 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   const systemRuntimeSource = fs.readFileSync(new URL('../src/api/systemRuntime.ts', import.meta.url), 'utf8')
   const driveSyncSource = fs.readFileSync(new URL('../src/api/driveSync.ts', import.meta.url), 'utf8')
   const notificationSummarySource = fs.readFileSync(new URL('../src/api/notificationSummary.ts', import.meta.url), 'utf8')
-  assert.equal(buildQueryCacheStorageKey(' products:search:x '), 'read_cache:products:search:x')
+  const scopedKey = buildQueryCacheStorageKey(' products:search:x ')
+  assert.match(scopedKey, /^read_cache:v2:/)
+  assert.ok(scopedKey.endsWith(':products:search:x'))
+  assert.equal(scopedKey, buildQueryCacheStorageKey('products:search:x'), 'same runtime authority reuses the same key')
+  resetActorReadSession()
+  assert.notEqual(scopedKey, buildQueryCacheStorageKey('products:search:x'), 'new authenticated session cannot reuse prior persisted data')
   assert.doesNotMatch(source, /from '\.\/actorQuery\.ts'/)
   assert.doesNotMatch(source, /from '\.\/lookupTransport\.ts'/)
   assert.match(source, /function loadLookupTransport\(\) \{[\s\S]*import\('\.\/lookupTransport\.ts'\)/)

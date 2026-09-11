@@ -14,6 +14,7 @@
 import { SYNC } from '../constants.ts'
 import { getClientMetaHeaders as sharedGetClientMetaHeaders } from '../utils/deviceInfo.ts'
 import { createSyncErrorId } from '../utils/syncProblemLifecycle.ts'
+import { assertActorReadScope, captureActorReadScope, invalidateActorReadChannel, isActorReadScopeCurrent, markActorReadResult, type ActorReadScope } from './actorReadScope.ts'
 import {
   getSyncServerUrl,
   getSyncToken,
@@ -33,9 +34,9 @@ declare const __FRONTEND_BUILD_REVISION__: string | undefined
 
 type LooseRecord = Record<string, any>
 type ApiRuntimeError = Error & LooseRecord
-type CacheEntry = { data: any; ts: number }
+type CacheEntry = { data: any; ts: number; scope: ActorReadScope }
 type CacheState = { data: any; stale: boolean }
-type ReadCacheToken = { channel: string; valid: boolean; pending: number }
+type ReadCacheToken = { channel: string; valid: boolean; pending: number; scope: ActorReadScope }
 type InflightWrite = { promise: Promise<any>; startedAt: number }
 // RouteFn optionally receives the AbortSignal for the search group it was
 // dispatched under (see `searchGroup` on RouteOptions below and
@@ -108,6 +109,7 @@ const RECONNECT_REFRESH_CHANNELS = [
 const _cache: Record<string, CacheEntry> = {}
 const _inflight: Record<string, Promise<any>> = {}  // Track in-flight requests to dedupe
 const _inflightStartedAt: Record<string, number> = {}
+const _inflightScopes = new WeakMap<Promise<any>, ActorReadScope>()
 // Every local contender (including deduped callers) observes the same server
 // acceptance boundary. Weak ownership retains no completed request history.
 const _successfulServerReads = new WeakSet<Promise<any>>()
@@ -243,9 +245,9 @@ export function markApiVersionMismatch(path: unknown, status = 404): ApiRuntimeE
 
 export function cacheGet(key: string): any {
   const e = _cache[key]
-  return (e && Date.now() - e.ts < CACHE_TTL) ? e.data : null
+  return (e && isActorReadScopeCurrent(e.scope) && Date.now() - e.ts < CACHE_TTL) ? e.data : null
 }
-export function cacheSet(key: string, data: any): void  { _cache[key] = { data, ts: Date.now() } }
+export function cacheSet(key: string, data: any): void  { _cache[key] = { data, ts: Date.now(), scope: captureActorReadScope(key) } }
 async function trackCacheRead<T>(token: ReadCacheToken, work: () => T | Promise<T>): Promise<T> {
   token.pending++
   if (token.valid) _readCacheTokens.add(token)
@@ -257,12 +259,13 @@ async function trackCacheRead<T>(token: ReadCacheToken, work: () => T | Promise<
 }
 
 function cacheReadResult(token: ReadCacheToken, data: any): boolean {
-  if (!token.valid) return false
+  if (!token.valid || !isActorReadScopeCurrent(token.scope)) return false
   cacheSet(token.channel, data)
   return true
 }
 
 export function cacheInvalidate(prefix: string): void {
+  invalidateActorReadChannel(prefix)
   Object.keys(_cache).forEach(k => { if (k.startsWith(prefix)) delete _cache[k] })
   Object.keys(_inflight).forEach(k => { if (k.startsWith(prefix)) clearInflight(k) })
   for (const token of _readCacheTokens) {
@@ -550,6 +553,10 @@ export function isInvalidSessionError(error: any): boolean {
   ))
 }
 
+export function isReadAuthorizationError(error: any): boolean {
+  return Number(error?.status) === 401 || Number(error?.status) === 403 || isInvalidSessionError(error)
+}
+
 export function requireLiveServerWrite(channel: string, options: { notConfiguredMessage?: string; offlineMessage?: string } = {}): true {
   const syncServerUrl = getSyncServerUrl()
   if (!syncServerUrl) {
@@ -729,6 +736,7 @@ export function __resetApiHealthForTests(): void {
 export const WRITE_REQUEST_TIMEOUT_MS = 45_000
 
 export async function apiFetch(method: unknown, path: string, body?: unknown, timeoutMs?: number, options: ApiFetchOptions = {}): Promise<any> {
+  const readScope = ['GET', 'HEAD'].includes(String(method || 'GET').toUpperCase()) ? captureActorReadScope() : null
   const normalizedMethod = String(method || 'GET').toUpperCase()
   const isMutation = !['GET', 'HEAD', 'OPTIONS'].includes(normalizedMethod)
   timeoutMs = timeoutMs ?? (isMutation ? WRITE_REQUEST_TIMEOUT_MS : SYNC.REQUEST_TIMEOUT_MS)
@@ -794,6 +802,7 @@ export async function apiFetch(method: unknown, path: string, body?: unknown, ti
       requestInit.body = JSON.stringify(body)
     }
     const res = await fetch(`${base}${path}`, requestInit)
+    if (readScope) assertActorReadScope(readScope, false)
     if (isCloudflareAccessRedirectResponse(res)) {
       const accessError = createCloudflareAccessError(path)
       dispatchUnauthorized({
@@ -806,6 +815,7 @@ export async function apiFetch(method: unknown, path: string, body?: unknown, ti
     }
     if (!res.ok) {
       const text = await res.text().catch(() => '')
+      if (readScope) assertActorReadScope(readScope, false)
       const parsed = (() => { try { return JSON.parse(text) } catch { return null } })()
       if (res.status === 404 && normalizedMethod === 'GET' && isRequiredRuntimeApiPath(path)) {
         throw markApiVersionMismatch(path, res.status)
@@ -831,6 +841,7 @@ export async function apiFetch(method: unknown, path: string, body?: unknown, ti
     }
     return await res.json()
   } catch (e: any) {
+    if (e?.code === 'stale_read_scope') throw e
     clearTimeout(timer)
     if (externallyAborted) {
       // Cancelled because a newer request in the same search group took
@@ -872,7 +883,10 @@ export async function apiFetch(method: unknown, path: string, body?: unknown, ti
     }).catch(() => {})
   }
 
-  return requestPromise
+  if (!readScope) return requestPromise
+  const result = await requestPromise
+  assertActorReadScope(readScope, false)
+  return markActorReadResult(result, readScope)
 }
 
 export function isNetErr(e: any): boolean {
@@ -1071,7 +1085,7 @@ const FRESH_TTL   = CACHE_TTL // 20 s ??treat as fresh, skip server
 
 export function cacheGetStale(key: string): CacheState {
   const e = _cache[key]
-  if (!e) return { data: null, stale: false }
+  if (!e || !isActorReadScopeCurrent(e.scope)) return { data: null, stale: false }
   const age = Date.now() - e.ts
   if (age < FRESH_TTL) return { data: e.data, stale: false }
   if (age < STALE_TTL) return { data: e.data, stale: true  }
@@ -1131,6 +1145,8 @@ function isAbortError(e: any): boolean {
 
 function hasReusableInflight(channel: string): boolean {
   if (!_inflight[channel]) return false
+  const scope = _inflightScopes.get(_inflight[channel])
+  if (scope && !isActorReadScopeCurrent(scope)) { clearInflight(channel); return false }
   const startedAt = _inflightStartedAt[channel] || 0
   if (startedAt && Date.now() - startedAt > INFLIGHT_REUSE_WINDOW_MS) {
     clearInflight(channel)
@@ -1222,7 +1238,7 @@ async function raceServerReadWithLocalFallback<T>(
       logCall(channel, 'api-version-mismatch', Date.now() - t0, false)
       throw error
     }
-    if (isInvalidSessionError(error)) {
+    if (isReadAuthorizationError(error)) {
       logCall(channel, 'auth-required', Date.now() - t0, false)
       throw error
     }
@@ -1269,8 +1285,13 @@ export async function route<T = any>(
   const syncServerUrl = getSyncServerUrl()
   const readServerBaseUrl = getReadServerBaseUrl()
   const isWrite = typeof options === 'boolean' ? options : !!options?.isWrite
-  const raceLocalFallback = typeof options === 'boolean' ? true : options?.raceLocalFallback !== false
-  const staleWhileRevalidate = typeof options === 'boolean' ? true : options?.staleWhileRevalidate !== false
+  // An authenticated read must observe the server's permission decision before
+  // considering offline data; a fast mirror must not beat a later 401/403.
+  // Cookie-authenticated cold starts may not have recreated their JS session
+  // marker yet. A browser origin is therefore private-read capable as well.
+  const privateRead = hasStoredAuthSession() || !!getSameOriginApiBaseUrl()
+  const raceLocalFallback = !privateRead && (typeof options === 'boolean' ? true : options?.raceLocalFallback !== false)
+  const staleWhileRevalidate = !privateRead && (typeof options === 'boolean' ? true : options?.staleWhileRevalidate !== false)
   const retryTimedOutRead = typeof options === 'boolean' ? true : options?.retryTimedOutRead !== false
   const callerSignal = typeof options === 'boolean' ? undefined : options?.signal
   throwIfRequestAborted(callerSignal)
@@ -1278,10 +1299,24 @@ export async function route<T = any>(
 
   // ?€?€ Reads ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
   if (!isWrite) {
+    const scope = captureActorReadScope(channel)
+    const guard = (fn: RouteFn<T>): RouteFn<T> => async (signal) => {
+      assertActorReadScope(scope, false)
+      let result: T
+      try { result = await fn(signal) } catch (error) {
+        assertActorReadScope(scope, false)
+        if (isReadAuthorizationError(error)) cacheInvalidate(channel)
+        throw error
+      }
+      assertActorReadScope(scope, false)
+      return markActorReadResult(result, scope)
+    }
+    serverFn = guard(serverFn)
+    if (localFn) localFn = guard(localFn)
     // Invalidation detaches cache ownership, without canceling the original
     // caller or adding automatic retries. Detached background/local work keeps
     // the token alive until its final cache write boundary has passed.
-    const token: ReadCacheToken = { channel, valid: true, pending: 0 }
+    const token: ReadCacheToken = { channel, valid: true, pending: 0, scope }
     return trackCacheRead(token, async () => {
       if (readServerBaseUrl) {
         const { data: cached, stale } = cacheGetStale(channel)
@@ -1339,6 +1374,7 @@ export async function route<T = any>(
           }))
 
           _inflight[channel] = promise
+          _inflightScopes.set(promise, scope)
           _inflightStartedAt[channel] = Date.now()
 
           if (localFn && raceLocalFallback) {
@@ -1361,7 +1397,7 @@ export async function route<T = any>(
                 logCall(channel, 'api-version-mismatch', Date.now() - t0, false)
                 throw e
               }
-              if (isInvalidSessionError(e)) {
+              if (isReadAuthorizationError(e)) {
                 logCall(channel, 'auth-required', Date.now() - t0, false)
                 throw e
               }

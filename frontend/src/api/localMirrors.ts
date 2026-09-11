@@ -1,5 +1,6 @@
 import { shouldPersistLocalMirror as shouldPersistLocalMirrorByPolicy, LIVE_SERVER_SENSITIVE_MIRROR_TABLES } from '../platform/storage/storagePolicy.ts'
 import { getSyncServerUrl, route } from './http.ts'
+import { actorReadResultScope, assertActorReadScope, captureActorReadScope, isActorReadScopeCurrent, type ActorReadScope } from './actorReadScope.ts'
 
 type MirrorRows = Record<string, unknown>
 type MirrorFn<TResult> = (result: TResult) => unknown | Promise<unknown>
@@ -30,11 +31,12 @@ function scheduleMirrorWrite(run: () => void): void {
   }, MIRROR_WRITE_IDLE_DELAY_MS)
 }
 
-export function mirrorReadResult<TResult>(mirrorFn: MirrorFn<TResult> | null | undefined, result: TResult): TResult {
+export function mirrorReadResult<TResult>(mirrorFn: MirrorFn<TResult> | null | undefined, result: TResult, scope = captureActorReadScope()): TResult {
+  scope = actorReadResultScope(result, scope)
   if (typeof mirrorFn === 'function') {
     scheduleMirrorWrite(() => {
       Promise.resolve()
-        .then(() => mirrorFn(result))
+        .then(() => isActorReadScopeCurrent(scope) ? mirrorFn(result) : undefined)
         .catch(() => {})
     })
   }
@@ -47,7 +49,10 @@ export function routeMirrored<TResult>(
   localFn?: RouteFn<TResult>,
   mirrorFn?: MirrorFn<TResult>,
 ): Promise<TResult | null> {
-  return route(channel, async () => mirrorReadResult(mirrorFn, await serverFn()), localFn)
+  return route(channel, async () => {
+    const scope = captureActorReadScope(channel)
+    return mirrorReadResult(mirrorFn, await serverFn(), scope)
+  }, localFn)
 }
 
 export function shouldPersistLocalMirror(tableName: string): boolean {
@@ -66,9 +71,11 @@ export async function purgeSensitiveLiveServerMirrors(): Promise<void> {
   await sensitiveMirrorPurgePromise
 }
 
-export function mirrorTable(tableName: string) {
+export function mirrorTable(tableName: string, scope: ActorReadScope = captureActorReadScope(tableName)) {
   return async (rows: unknown): Promise<unknown> => {
-    const { clearLocalMirrorTables, replaceTableContents } = await getLocalDbModule()
+    const resultScope = actorReadResultScope(rows, scope)
+    const { dexieDb, clearLocalMirrorTables, replaceTableContents } = await getLocalDbModule()
+    if (!isActorReadScopeCurrent(resultScope)) return []
     if (!shouldPersistLocalMirror(tableName)) {
       await clearLocalMirrorTables([tableName]).catch(() => {})
       return []
@@ -77,6 +84,13 @@ export function mirrorTable(tableName: string) {
     for (const row of Array.isArray(rows) ? rows : []) {
       incomingRows.push({ ...(row || {}) })
     }
-    return replaceTableContents(tableName, incomingRows)
+    // Keep the final authority check INSIDE the IndexedDB transaction: throwing
+    // after a queued put rolls it back instead of publishing into a new actor.
+    return dexieDb.transaction('rw', dexieDb.table(tableName), async () => {
+      assertActorReadScope(resultScope)
+      const result = await replaceTableContents(tableName, incomingRows)
+      assertActorReadScope(resultScope)
+      return result
+    })
   }
 }
