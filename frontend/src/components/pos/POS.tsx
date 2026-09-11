@@ -739,7 +739,7 @@ export default function POS() {
   // openProductCard) instead of the normal one-tap/detail-sheet flow.
   const [batchTracking, setBatchTracking] = useState<PosTrackingState>({ scope: '', status: 'loading', ids: new Set() })
   const trackingOwner = useRef(createPosTrackingOwner())
-  const trackingScope = trackingOwner.current.scope(posTrackingFingerprint(user, authReady, branchFilter))
+  const trackingScope = trackingOwner.current.scope(JSON.stringify([isActive, posTrackingFingerprint(user, authReady, branchFilter)]))
   const trackingScopeRef = useRef(trackingScope)
   trackingScopeRef.current = trackingScope
   const trackedBatchProductIds = batchTracking.scope === trackingScope ? batchTracking.ids : new Set<number>()
@@ -2058,7 +2058,7 @@ export default function POS() {
     let cancelled = false
     const scope = trackingScope
     setBatchTracking({ scope, status: 'loading', ids: new Set() })
-    if (!authReady || !user) return
+    if (!isActive || !authReady || !user) return
     getTrackedBatchProductIds(primaryBranchFilterId ?? undefined).then((res) => {
       if (cancelled || scope !== trackingScopeRef.current) return
       if (!Array.isArray(res?.productIds)) throw new Error('Invalid batch tracking response')
@@ -2069,7 +2069,7 @@ export default function POS() {
       setBatchTracking({ scope, status: 'failed', ids: new Set() })
     })
     return () => { cancelled = true }
-  }, [primaryBranchFilterId, batchTrackingReloadKey, trackingScope, authReady])
+  }, [primaryBranchFilterId, batchTrackingReloadKey, trackingScope, authReady, isActive])
 
   useEffect(() => () => trackingOwner.current.cancel(), [])
 
@@ -2378,7 +2378,7 @@ export default function POS() {
   }, [primaryBranchFilterId])
 
   const openProductCard = useCallback((product: ProductRecord, { groupProduct = false, inStock = false }: { groupProduct?: boolean; inStock?: boolean } = {}) => {
-    if (!product || !authReady || !user || trackingScope !== trackingScopeRef.current) return
+    if (!product || !isActive || !authReady || !user || trackingScope !== trackingScopeRef.current) return
     trackingOwner.current.cancel()
     // Wholesale is the only alternate tier a product can carry now (the VIP
     // tier was retired by the 2026-09-04 ruling), so it alone decides whether
@@ -2411,7 +2411,7 @@ export default function POS() {
       return
     }
     setDetailProduct(product)
-  }, [addToCart, exchangeRate, promotionRules, batchTracking, trackingScope, authReady, user, primaryBranchFilterId, defaultBranchId])
+  }, [addToCart, exchangeRate, promotionRules, batchTracking, trackingScope, authReady, user, primaryBranchFilterId, defaultBranchId, isActive])
 
   /** Open shared image lightbox from POS product cards/detail sheet. */
   const openImageLightbox = useCallback((product: ProductRecord, startIndex = 0) => {

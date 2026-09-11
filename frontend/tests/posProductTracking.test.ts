@@ -35,7 +35,7 @@ const flush = async () => { await Promise.resolve(); await Promise.resolve(); aw
     const current = { current: 'first' }; let cleanup: (() => void) | undefined
     const deps = {
       useEffect: (fn: () => (() => void) | undefined) => { cleanup = fn() },
-      trackingScope: 'first', trackingScopeRef: current, authReady: true, user,
+      trackingScope: 'first', trackingScopeRef: current, authReady: true, isActive: true, user,
       primaryBranchFilterId: 2, batchTrackingReloadKey: 0,
       setBatchTracking: (state: PosTrackingState) => states.push(state),
       getTrackedBatchProductIds: () => response.promise, getErrorMessage: String,
@@ -60,7 +60,7 @@ function fixture(status: PosTrackingState['status'] = 'ready') {
   const added: unknown[][] = [], sheets: unknown[] = []
   const dependencies = {
     trackingOwner, trackingScope, trackingScopeRef: { current: trackingScope }, batchTracking: { scope: trackingScope, status, ids: new Set() },
-    authReady: true, user, primaryBranchFilterId: 2, defaultBranchId: 2,
+    authReady: true, isActive: true, user, primaryBranchFilterId: 2, defaultBranchId: 2,
     useCallback: (fn: unknown) => fn, asNumber: Number, promotionRules: [], exchangeRate: 4100,
     promotionBadgeForProduct: (p: { promotion?: boolean }) => ({ active: p.promotion }),
     needsPosTrackingSheet, setDetailProduct: (p: unknown) => sheets.push(p),
@@ -113,3 +113,21 @@ for (const alternate of [{ ...product, wholesale_price_usd: 5 }, { ...product, p
   assert.equal(f.added.length, 0); assert.equal(f.sheets.length, 1)
 }
 console.log('PASS POS actual card callback: tracking readiness, fresh empty proof, target dated lot, actor/branch/session races, errors and alternate-price/group/out-of-stock parity')
+
+// PageSlot hides rather than unmounts POS. Execute the real render-time scope
+// expression to prove both leaving and away/back invalidate a pending card.
+const scopeLine = source.split('\n').find(line => line.includes('const trackingScope = trackingOwner.current.scope('))!
+assert.ok(scopeLine.includes('isActive'))
+for (const returnToPage of [false, true]) {
+  const f = fixture()
+  const render = (isActive: boolean) => new Function('trackingOwner', 'isActive', 'posTrackingFingerprint', 'user', 'authReady', 'branchFilter', `${scopeLine}; return trackingScope`)(f.trackingOwner, isActive, posTrackingFingerprint, user, true, '2')
+  // Match the callback fixture's scope first; either transition must retire it.
+  f.open(product, { inStock: true })
+  render(false)
+  if (returnToPage) render(true)
+  assert.ok(f.reads[0].signal.aborted)
+  f.reads[0].response.resolve({ batches: [], known_positive_quantity: 0 }); await flush()
+  assert.equal(f.added.length, 0, 'hidden/returned page cannot publish an old fast-add')
+  assert.equal(f.sheets.length, 0)
+}
+console.log('PASS retained POS PageSlot inactive and away/back cancel pending fresh-lot intent')
