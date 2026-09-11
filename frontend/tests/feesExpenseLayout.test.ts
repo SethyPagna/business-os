@@ -35,7 +35,7 @@ const performExpenseDelete = new Function(`${stripTypeScriptTypes(deleteSource.r
     begin: () => boolean
     remove: () => Promise<unknown>
     onStart: () => void
-    onSuccess: () => Promise<void>
+    onSuccess: (outcome: 'deleted' | 'pending') => Promise<void>
     onError: (error: unknown) => void
     onFinish: () => void
   },
@@ -90,7 +90,7 @@ const deleteOperation = (overrides: Partial<Parameters<typeof performExpenseDele
   canDelete: () => { deleteEvents.push('permission'); return true },
   confirmDelete: () => { deleteEvents.push('confirm'); return true },
   begin: () => { deleteEvents.push('begin'); return true },
-  remove: async () => { deleteEvents.push('remove') },
+  remove: async () => { deleteEvents.push('remove'); return { success: true } },
   onStart: () => { deleteEvents.push('start') },
   onSuccess: async () => { deleteEvents.push('success') },
   onError: () => { deleteEvents.push('error') },
@@ -114,6 +114,30 @@ assert.deepEqual([...deleteEvents], ['permission', 'confirm', 'permission'], 'au
 deleteEvents.length = 0
 assert.equal(await performExpenseDelete(deleteOperation()), true)
 assert.deepEqual([...deleteEvents], ['permission', 'confirm', 'permission', 'begin', 'start', 'remove', 'success', 'finish'], 'confirmed authorized delete finishes and permits the detail to close')
+
+// Execute the real page success callback: an accepted approval request may
+// close detail, but it must reload the server list and never claim deletion.
+const successStart = page.indexOf('onSuccess: async (outcome)')
+const successEnd = page.indexOf('      onError:', successStart)
+const successExpression = page.slice(successStart + 'onSuccess: '.length, successEnd).trim().replace(/,$/, '')
+const notices: string[] = []
+let reloads = 0
+const successCallback = new Function('notify', 'tr', 'load', `return (${stripTypeScriptTypes(successExpression)})`)(
+  (message: string) => notices.push(message), (key: string) => key, async (silent: boolean) => { assert.equal(silent, true); reloads++ },
+)
+assert.equal(await performExpenseDelete(deleteOperation({ remove: async () => ({ success: true, pending: true, pendingActionId: 93 }), onSuccess: successCallback })), true)
+assert.deepEqual(notices, ['reason_submitted_for_review'])
+assert.equal(reloads, 1, 'queued row remains server-owned; no optimistic deletion')
+notices.length = 0
+assert.equal(await performExpenseDelete(deleteOperation({ remove: async () => ({ success: true }), onSuccess: successCallback })), true)
+assert.deepEqual(notices, ['fee_deleted'])
+assert.equal(reloads, 2)
+notices.length = 0
+assert.equal(await performExpenseDelete(deleteOperation({ remove: async () => ({ success: false }), onSuccess: successCallback })), false)
+assert.deepEqual(notices, [], 'unconfirmed response never emits a completion toast or permits close')
+deleteEvents.length = 0
+assert.equal(await performExpenseDelete(deleteOperation({ begin: () => false })), false)
+assert.deepEqual(deleteEvents, ['permission', 'confirm', 'permission'], 'duplicate in-flight delete never starts another write')
 
 deleteEvents.length = 0
 assert.equal(await performExpenseDelete(deleteOperation({ remove: async () => { deleteEvents.push('remove'); throw new Error('failed') } })), false)
