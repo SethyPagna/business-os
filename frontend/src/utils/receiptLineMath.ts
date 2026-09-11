@@ -90,11 +90,17 @@ export function receiptLineFigures(
   const productListUnitUsd = baseUnitUsd > 0
     ? baseUnitUsd + num(item.product_discount_usd)
     : num(item.price_usd ?? item.price)
-  const originalUnitUsd = productListUnitUsd + manualSavingsUsd
+  // base_price is already the price BEFORE the manual cut. Adding the manual
+  // saving here counted it once in the base and a second time in the displayed
+  // saving: base 30, applied 27, manual 3 became an invented list price of 33
+  // and a $6 cut. The actual selling/list price is base + the product-level
+  // cut; applied is base - the manual cut, so their difference naturally
+  // contains product + manual exactly once.
+  const originalUnitUsd = productListUnitUsd
 
   const hasDiscount = showItemDiscount
     && originalUnitUsd > 0
-    && chargedUnitUsd > 0
+    && chargedUnitUsd >= 0
     && originalUnitUsd > chargedUnitUsd + 0.005
     && item.applied_price_usd != null
 
@@ -108,7 +114,9 @@ export function receiptLineFigures(
   let sellingUnitKhr = chargedUnitKhr
   if (hasDiscount) {
     const baseUnitKhr = num(item.base_price_khr)
-    if (baseUnitKhr > 0) sellingUnitKhr = baseUnitKhr + num(item.product_discount_khr) + num(item.manual_discount_khr)
+    // As in USD, base_price_khr is already before the manual cut. Adding the
+    // manual amount here would invent a second copy of the same discount.
+    if (baseUnitKhr > 0) sellingUnitKhr = baseUnitKhr + num(item.product_discount_khr)
     else if (chargedUnitKhr > 0 && chargedUnitUsd > 0) sellingUnitKhr = chargedUnitKhr * (sellingUnitUsd / chargedUnitUsd)
     else sellingUnitKhr = sellingUnitUsd * exchangeRate
   }

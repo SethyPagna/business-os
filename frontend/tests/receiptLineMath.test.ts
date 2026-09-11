@@ -144,9 +144,28 @@ const sale16433 = {
     product_discount_usd: 1,
     manual_discount_usd: 1,
   }, true, RATE)
-  assert.equal(manual.sellingUnitUsd, 10)
-  assert.equal(manual.unitSavingsUsd, 3)
-  assert.equal(manual.savingsUsd, 6)
+  assert.equal(manual.sellingUnitUsd, 9)
+  assert.equal(manual.unitSavingsUsd, 2)
+  assert.equal(manual.savingsUsd, 4)
+
+  // Live sale 17000 lines 40492/40493: each line stored base $30,
+  // applied $27 and manual discount $3. The old helper invented $33 as the
+  // selling price and counted $6 per line, producing the reported $12 item
+  // discount. Each line saves exactly $3, so the pair saves $6.
+  const live17000 = [
+    { quantity: 1, base_price_usd: 30, applied_price_usd: 27, manual_discount_usd: 3, product_discount_usd: 0 },
+    { quantity: 1, base_price_usd: 30, applied_price_usd: 27, manual_discount_usd: 3, product_discount_usd: 0 },
+  ]
+  assert.equal(receiptLineSavingsUsd(live17000, true, RATE), 6)
+  assert.deepEqual(live17000.map((line) => receiptLineFigures(line, true, RATE).sellingUnitUsd), [30, 30])
+
+  // A full POS discount still has a real selling price and saving even though
+  // the customer was charged zero. The explicit applied-price snapshot is what
+  // distinguishes it from a missing/legacy amount.
+  const free = receiptLineFigures({ quantity: 1, base_price_usd: 30, applied_price_usd: 0, manual_discount_usd: 30 }, true, RATE)
+  assert.equal(free.hasDiscount, true)
+  assert.equal(free.sellingUnitUsd, 30)
+  assert.equal(free.unitSavingsUsd, 30)
 }
 
 // --- riel column tells the same story as the dollar column ------------------
@@ -158,6 +177,26 @@ const sale16433 = {
     RATE,
   )
   assert.equal(real.sellingUnitKhr, 217300)
+
+  // Native KHR snapshots follow the same price layers as USD. base already
+  // sits before the manual cut, so manual_discount_khr must not be added again.
+  const manualKhr = receiptLineFigures(
+    {
+      quantity: 1,
+      applied_price_usd: 27,
+      applied_price_khr: 108000,
+      base_price_usd: 30,
+      base_price_khr: 120000,
+      product_discount_usd: 0,
+      product_discount_khr: 0,
+      manual_discount_usd: 3,
+      manual_discount_khr: 12000,
+    },
+    true,
+    4000,
+  )
+  assert.equal(manualKhr.sellingUnitUsd, 30)
+  assert.equal(manualKhr.sellingUnitKhr, 120000, 'KHR must not count the manual discount twice')
 
   // No base riel: scale the charged riel by the same ratio as the dollars.
   const scaled = receiptLineFigures(

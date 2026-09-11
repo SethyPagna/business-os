@@ -212,15 +212,15 @@ runTest('both editors are OFFERED under the same test the route accepts them und
     /const canAmendDeliveryMoney = canAmendThisSale && !!toNumber\(sale\.is_delivery\)/,
     'the browser write gate must ask exactly what the Worker guards ask',
   )
-  // The accepted compact surface exposes the numeric editors directly. Both
-  // inputs still sit behind the shared route-parity gate, so a view-only or
-  // legacy unflagged delivery never receives a write affordance.
-  assert.match(modal, /amount=\{canAmendDeliveryMoney \? <span[^>]*><label[\s\S]{0,500}id="amend-delivery-fee"/, 'the direct delivery-fee editor must use the shared write gate')
-  const feeAmount = modal.slice(modal.indexOf('amount={canAmendDeliveryMoney'), modal.indexOf('sub={deliveryFeeKhr'))
-  assert.match(feeAmount, /deliveryPaidByStore \? <span[^>]*>\{translateOr\('delivery_free', 'Free'/, 'an editable store-paid fee must keep its truthful Free annotation')
+  // Both values are plain by default. Their explicit Edit buttons retain the
+  // same route-parity gate, and only the open state mounts a numeric input.
+  assert.match(modal, /amount=\{feeEditing \? <span[^>]*><label[\s\S]{0,500}id="amend-delivery-fee"/, 'the delivery-fee input must require its Edit state')
+  const feeAmount = modal.slice(modal.indexOf('amount={feeEditing'), modal.indexOf('sub={deliveryFeeKhr'))
+  assert.match(feeAmount, /canAmendDeliveryMoney \? <button[\s\S]{0,300}setFeeEditing\(true\)/, 'the delivery-fee Edit button must use the shared write gate')
+  assert.match(feeAmount, /deliveryPaidByStore \? \(/, 'a store-paid fee must keep its truthful Free annotation')
   const actualCostRow = modal.slice(modal.indexOf('data-sale-actual-cost=""'), modal.indexOf('{/* The note the cashier'))
-  assert.match(actualCostRow, /\{canAmendDeliveryMoney \? <>[\s\S]*?id="amend-delivery-actual-cost"/, 'the direct courier-cost editor must use the shared write gate')
-  assert.match(actualCostRow, /actualCostEditing \? <>[\s\S]*?stageActualDeliveryCostAmendment/, 'Apply remains conditional on an actual edit')
+  assert.match(actualCostRow, /\{actualCostEditing \? <>[\s\S]*?id="amend-delivery-actual-cost"/, 'the courier-cost input must require its Edit state')
+  assert.match(actualCostRow, /canAmendDeliveryMoney \? <button[\s\S]{0,350}setActualCostEditing\(true\)/, 'the courier-cost Edit button must use the shared write gate')
   // The looser DISPLAY test still exists -- it is what keeps a driver visible
   // on an unflagged sale (S4-25). This is about which of the two governs a
   // WRITE, not about deleting the other.

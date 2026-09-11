@@ -87,6 +87,7 @@ import {
   type LineAllocation,
   type TaxSettings,
 } from '../lib/saleAmendments'
+import { planSaleLinePriceEdit } from '../lib/saleLineEdit'
 import { DELIVERY_AMOUNT_ERROR_MESSAGES, deliveryAmountChanged, parseDeliveryAmountUsd } from '../lib/deliveryAmounts'
 import { applySaleBulkStatus, bulkAssertion, notifyBulkStatus, SaleBulkError, saleRevisionGuard } from '../lib/saleBulkStatus'
 import { applySaleBulkUpdate, notifySaleBulkUpdate } from '../lib/saleBulkUpdate'
@@ -1642,10 +1643,18 @@ app.post('/:id/status-receipt', async (c) => {
 
 export function saleLineReceiptCanonical(id: number, kind: 'add_items' | 'amendment', body: Record<string, unknown>): Record<string, unknown> {
   const shared = { notes: String(body.notes || '').trim().slice(0, 500) || null, expected_exchange_rate: body.expected_exchange_rate }
+  const optional = (key: string): { present: boolean; value: unknown } => ({
+    present: Object.prototype.hasOwnProperty.call(body, key),
+    value: Object.prototype.hasOwnProperty.call(body, key) ? body[key] : null,
+  })
   if (kind === 'add_items') return { sale_id: id, items: body.items ?? null, ...shared }
   return {
     sale_id: id, kind: String(body.kind || ''), sale_item_id: body.sale_item_id ?? null,
     quantity: body.quantity ?? null, applied_price_usd: body.applied_price_usd ?? null,
+    base_price_usd: optional('base_price_usd'),
+    manual_discount_type: optional('manual_discount_type'),
+    manual_discount_value: optional('manual_discount_value'),
+    manual_discount_usd: optional('manual_discount_usd'),
     delivery_fee_usd: body.delivery_fee_usd ?? null, delivery_actual_cost_usd: body.delivery_actual_cost_usd ?? null,
     delivery_contact_id: body.delivery_contact_id ?? null, replacement: body.replacement ?? null, ...shared,
   }
@@ -3484,6 +3493,10 @@ app.post('/:id/amendments', async (c) => {
     sale_item_id?: number
     quantity?: number
     applied_price_usd?: number | string
+    base_price_usd?: number | string
+    manual_discount_type?: string | null
+    manual_discount_value?: number | string
+    manual_discount_usd?: number | string
     delivery_fee_usd?: number
     delivery_actual_cost_usd?: number | string | null
     delivery_contact_id?: number
@@ -4009,7 +4022,39 @@ app.post('/:id/amendments', async (c) => {
     if (!Number.isFinite(requestedPrice) || requestedPrice < 0) {
       return c.json({ error: 'Selling price must be a non-negative number.' }, 400)
     }
-    const nextPrice = round2(requestedPrice)
+    const hasLayeredPriceEdit = body.base_price_usd !== undefined
+      || body.manual_discount_type !== undefined
+      || body.manual_discount_value !== undefined
+      || body.manual_discount_usd !== undefined
+    const oldPrice = round2(Number(line.applied_price_usd) || 0)
+    const oldBasePrice = line.base_price_usd == null ? oldPrice + (Number(line.manual_discount_usd) || 0) : round2(Number(line.base_price_usd) || 0)
+    const oldDiscountType: 'percent' | 'fixed' | null = line.manual_discount_type === 'percent' || line.manual_discount_type === 'fixed'
+      ? line.manual_discount_type
+      : Number(line.manual_discount_usd) > 0 ? 'fixed' : null
+    const oldDiscountValue = oldDiscountType === 'percent'
+      ? round2(Number(line.manual_discount_value) || 0)
+      : round2(Number(line.manual_discount_value) || Number(line.manual_discount_usd) || 0)
+
+    let nextBasePrice = oldBasePrice
+    let nextDiscountType = oldDiscountType
+    let nextDiscountValue = oldDiscountValue
+    let nextManualDiscountUsd = Number(line.manual_discount_usd) || 0
+    let nextPrice = round2(requestedPrice)
+    if (hasLayeredPriceEdit) {
+      const pricePlan = planSaleLinePriceEdit({
+        basePriceUsd: body.base_price_usd === undefined ? oldBasePrice : body.base_price_usd,
+        discountType: body.manual_discount_type === undefined ? oldDiscountType : body.manual_discount_type,
+        discountValue: body.manual_discount_value === undefined ? oldDiscountValue : body.manual_discount_value,
+        claimedManualDiscountUsd: body.manual_discount_usd,
+        claimedAppliedPriceUsd: body.applied_price_usd,
+      })
+      if (!pricePlan.ok) return c.json({ error: pricePlan.error }, 400)
+      nextBasePrice = pricePlan.basePriceUsd
+      nextDiscountType = pricePlan.discountType
+      nextDiscountValue = pricePlan.discountValue
+      nextManualDiscountUsd = pricePlan.manualDiscountUsd
+      nextPrice = pricePlan.appliedPriceUsd
+    }
     const currentQuantity = Number(line.quantity) || 0
     const nextQuantity = body.quantity === undefined || body.quantity === null || String(body.quantity).trim() === ''
       ? currentQuantity
@@ -4017,10 +4062,14 @@ app.post('/:id/amendments', async (c) => {
     if (!Number.isFinite(nextQuantity) || nextQuantity < 0) return c.json({ error: 'Quantity must be a non-negative number.' }, 400)
     const nextQty = round2(nextQuantity)
     if (nextQty <= 0) return c.json({ error: 'Use Remove when a line should be taken off the sale.' }, 400)
-    const oldPrice = round2(Number(line.applied_price_usd) || 0)
     const quantityChanged = Math.abs(nextQty - currentQuantity) > 0.000001
     const priceChanged = Math.abs(nextPrice - oldPrice) > 0.000001
-    if (!quantityChanged && !priceChanged) return c.json({ error: 'Enter a new quantity or selling price.' }, 400)
+    const priceLayersChanged = hasLayeredPriceEdit && (
+      Math.abs(nextBasePrice - oldBasePrice) > 0.000001
+      || nextDiscountType !== oldDiscountType
+      || Math.abs(nextDiscountValue - oldDiscountValue) > 0.000001
+    )
+    if (!quantityChanged && !priceChanged && !priceLayersChanged) return c.json({ error: 'Enter a new quantity, selling price, or discount.' }, 400)
 
     const workingLine = { ...line, applied_price_usd: nextPrice }
     let quantityPlan: AmendmentPlan | null = null
@@ -4061,21 +4110,26 @@ app.post('/:id/amendments', async (c) => {
     // product/manual discount metadata rather than displaying a discount that
     // no longer explains the entered price. This keeps a quantity change
     // revenue-neutral while making a price change intentional and auditable.
-    const keepDiscounts = !priceChanged
+    const keepDiscounts = hasLayeredPriceEdit || !priceChanged
     const nextProductDiscountUsd = keepDiscounts ? (Number(line.product_discount_usd) || 0) : 0
     const nextProductDiscountKhr = keepDiscounts ? (Number(line.product_discount_khr) || 0) : 0
-    const nextManualDiscountType = keepDiscounts ? (line.manual_discount_type ?? null) : null
-    const nextManualDiscountValue = keepDiscounts ? (Number(line.manual_discount_value) || 0) : 0
-    const nextManualDiscountUsd = keepDiscounts ? (Number(line.manual_discount_usd) || 0) : 0
+    const nextManualDiscountType = hasLayeredPriceEdit ? nextDiscountType : keepDiscounts ? (line.manual_discount_type ?? null) : null
+    const nextManualDiscountValue = hasLayeredPriceEdit ? nextDiscountValue : keepDiscounts ? (Number(line.manual_discount_value) || 0) : 0
+    nextManualDiscountUsd = hasLayeredPriceEdit ? nextManualDiscountUsd : keepDiscounts ? (Number(line.manual_discount_usd) || 0) : 0
     const nextManualDiscountKhr = keepDiscounts ? (Number(line.manual_discount_khr) || 0) : 0
     const existingBasePriceUsd = line.base_price_usd == null ? null : Number(line.base_price_usd)
     const existingBasePriceKhr = line.base_price_khr == null ? null : Number(line.base_price_khr)
-    const nextBasePriceUsd = keepDiscounts
+    const nextBasePriceUsd = hasLayeredPriceEdit
+      ? nextBasePrice
+      : keepDiscounts
       ? (Number.isFinite(existingBasePriceUsd) ? existingBasePriceUsd : oldPrice + nextProductDiscountUsd + nextManualDiscountUsd)
       : nextPrice
-    const nextBasePriceKhr = keepDiscounts
+    const nextBasePriceKhr = hasLayeredPriceEdit
+      ? (receiptKhrFromUsd(nextBasePriceUsd, exchangeRate) || 0)
+      : keepDiscounts
       ? (Number.isFinite(existingBasePriceKhr) ? existingBasePriceKhr : receiptKhrFromUsd(nextBasePriceUsd, exchangeRate) || 0)
       : receiptKhrFromUsd(nextPrice, exchangeRate) || 0
+    const normalizedManualDiscountKhr = hasLayeredPriceEdit ? (receiptKhrFromUsd(nextManualDiscountUsd, exchangeRate) || 0) : nextManualDiscountKhr
     statements.push({
       sql: `UPDATE sale_items SET
               applied_price_usd=@price_usd, applied_price_khr=@price_khr,
@@ -4090,7 +4144,7 @@ app.post('/:id/amendments', async (c) => {
         base_price_usd: nextBasePriceUsd, base_price_khr: nextBasePriceKhr,
         product_discount_usd: nextProductDiscountUsd, product_discount_khr: nextProductDiscountKhr,
         manual_discount_type: nextManualDiscountType, manual_discount_value: nextManualDiscountValue,
-        manual_discount_usd: nextManualDiscountUsd, manual_discount_khr: nextManualDiscountKhr,
+        manual_discount_usd: nextManualDiscountUsd, manual_discount_khr: normalizedManualDiscountKhr,
         price_mode: keepDiscounts ? (line.price_mode ?? 'selling') : 'selling',
         total_usd: finalTotalUsd, total_khr: finalTotalKhr,
       },
@@ -4101,8 +4155,12 @@ app.post('/:id/amendments', async (c) => {
           applied_price_khr: receiptKhrFromUsd(nextPrice, exchangeRate),
           total_khr: receiptKhrFromUsd(finalTotalUsd, exchangeRate),
           product_discount_khr: nextProductDiscountKhr,
+          base_price_usd: nextBasePriceUsd,
           base_price_khr: nextBasePriceKhr,
-          manual_discount_khr: nextManualDiscountKhr,
+          applied_price_usd: nextPrice,
+          total_usd: finalTotalUsd,
+          manual_discount_usd: nextManualDiscountUsd,
+          manual_discount_khr: normalizedManualDiscountKhr,
         }
       : snapshot)
     subtotalDeltaUsd = round2(finalTotalUsd - (Number(line.total_usd) || oldPrice * currentQuantity))
@@ -4127,6 +4185,8 @@ app.post('/:id/amendments', async (c) => {
         unit_price_usd: oldPrice,
         base_price_usd: Number.isFinite(existingBasePriceUsd) ? existingBasePriceUsd : oldPrice,
         product_discount_usd: Number(line.product_discount_usd) || 0,
+        manual_discount_type: line.manual_discount_type ?? null,
+        manual_discount_value: Number(line.manual_discount_value) || 0,
         manual_discount_usd: Number(line.manual_discount_usd) || 0,
         total_usd: Number(line.total_usd) || round2(oldPrice * currentQuantity),
       },
@@ -4135,6 +4195,8 @@ app.post('/:id/amendments', async (c) => {
         unit_price_usd: nextPrice,
         base_price_usd: nextBasePriceUsd,
         product_discount_usd: nextProductDiscountUsd,
+        manual_discount_type: nextManualDiscountType,
+        manual_discount_value: nextManualDiscountValue,
         manual_discount_usd: nextManualDiscountUsd,
         total_usd: finalTotalUsd,
       },

@@ -674,6 +674,7 @@ export function ledgerRecord(row: SaleRecordLedgerRow): SaleRecord {
   // shown alongside them in the sale detail.
   const beforeSnapshot = parseDetails(row.before_json)
   const afterSnapshot = parseDetails(row.after_json)
+  const hasSnapshotField = (snapshot: Record<string, unknown> | null, field: string): boolean => !!snapshot && Object.prototype.hasOwnProperty.call(snapshot, field)
   const kind: SaleRecordKind = ledgerKind === 'line_updated'
     && beforeSnapshot?.quantity !== undefined
     && afterSnapshot?.quantity !== undefined
@@ -700,17 +701,35 @@ export function ledgerRecord(row: SaleRecordLedgerRow): SaleRecord {
   const money = kind === 'delivery_fee_changed' || kind === 'delivery_cost_changed'
   const at = text(row.created_at)
   const subject = money ? DELIVERY_SUBJECT : text(row.product_name)
+  const lineUpdateBefore = ledgerKind === 'line_updated' ? {
+    quantity: numberOrNull(beforeSnapshot?.quantity ?? row.quantity_before),
+    unit_price_usd: numberOrNull(beforeSnapshot?.unit_price_usd ?? row.amount_before_usd),
+    ...(hasSnapshotField(beforeSnapshot, 'base_price_usd') ? { base_price_usd: numberOrNull(beforeSnapshot?.base_price_usd) } : {}),
+    ...(hasSnapshotField(beforeSnapshot, 'product_discount_usd') ? { product_discount_usd: numberOrNull(beforeSnapshot?.product_discount_usd) } : {}),
+    ...(hasSnapshotField(beforeSnapshot, 'manual_discount_type') ? { manual_discount_type: beforeSnapshot?.manual_discount_type ?? null } : {}),
+    ...(hasSnapshotField(beforeSnapshot, 'manual_discount_value') ? { manual_discount_value: numberOrNull(beforeSnapshot?.manual_discount_value) } : {}),
+    ...(hasSnapshotField(beforeSnapshot, 'manual_discount_usd') ? { manual_discount_usd: numberOrNull(beforeSnapshot?.manual_discount_usd) } : {}),
+    ...(hasSnapshotField(beforeSnapshot, 'total_usd') ? { line_total_usd: numberOrNull(beforeSnapshot?.total_usd) } : {}),
+  } : null
+  const lineUpdateAfter = ledgerKind === 'line_updated' ? {
+    quantity: numberOrNull(afterSnapshot?.quantity ?? row.quantity_after),
+    unit_price_usd: numberOrNull(afterSnapshot?.unit_price_usd ?? row.amount_after_usd),
+    ...(hasSnapshotField(afterSnapshot, 'base_price_usd') ? { base_price_usd: numberOrNull(afterSnapshot?.base_price_usd) } : {}),
+    ...(hasSnapshotField(afterSnapshot, 'product_discount_usd') ? { product_discount_usd: numberOrNull(afterSnapshot?.product_discount_usd) } : {}),
+    ...(hasSnapshotField(afterSnapshot, 'manual_discount_type') ? { manual_discount_type: afterSnapshot?.manual_discount_type ?? null } : {}),
+    ...(hasSnapshotField(afterSnapshot, 'manual_discount_value') ? { manual_discount_value: numberOrNull(afterSnapshot?.manual_discount_value) } : {}),
+    ...(hasSnapshotField(afterSnapshot, 'manual_discount_usd') ? { manual_discount_usd: numberOrNull(afterSnapshot?.manual_discount_usd) } : {}),
+    ...(hasSnapshotField(afterSnapshot, 'total_usd') ? { line_total_usd: numberOrNull(afterSnapshot?.total_usd) } : {}),
+  } : null
   const before: Record<string, unknown> = money
     ? { amount_usd: numberOrNull(row.amount_before_usd) }
-    : {
+    : lineUpdateBefore || {
       quantity: numberOrNull(row.quantity_before),
-      ...(ledgerKind === 'line_updated' ? { unit_price_usd: numberOrNull(row.amount_before_usd) } : {}),
     }
   const after: Record<string, unknown> = money
     ? { amount_usd: numberOrNull(row.amount_after_usd) }
-    : {
+    : lineUpdateAfter || {
       quantity: numberOrNull(row.quantity_after),
-      ...(ledgerKind === 'line_updated' ? { unit_price_usd: numberOrNull(row.amount_after_usd) } : {}),
     }
   // The sale's own total either side is stored on every ledger row (0115 stores
   // it rather than deriving it, precisely so a later entry cannot restate it),
