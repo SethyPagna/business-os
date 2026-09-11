@@ -104,11 +104,15 @@ await runTest('print export normalizes receipt root width inside paper frame', (
 })
 
 
-await runTest('thermal print keeps configured margins inside paper and uses one measured page', () => {
+await runTest('thermal print keeps configured margins inside paper without forcing one tall driver page', () => {
   const source = fs.readFileSync(new URL('../src/utils/printReceipt.ts', import.meta.url), 'utf8')
   assert.match(source, /const measuredHeightMm = renderedHeightPx \* \(widthMm \/ renderedWidthPx\)/)
   assert.match(source, /const pageHeightMm = fixedHeightMm \?\? Math\.max\(1, measuredHeightMm \+ 1\)/)
-  assert.match(source, /size: \$\{widthMm\}mm \$\{pageHeightMm\.toFixed\(2\)\}mm;/)
+  assert.match(source, /const pageSizeCss = continuousRoll \? 'auto' : `\$\{widthMm\}mm \$\{pageHeightMm\.toFixed\(2\)\}mm`/)
+  assert.match(source, /size: \$\{pageSizeCss\};/,
+    'continuous print must let the selected driver media paginate instead of declaring one receipt-height page')
+  assert.match(source, /height: auto !important;[\s\S]*min-height: 0 !important;/,
+    'a continuous receipt must not pin html/body to the complete receipt height')
   assert.match(source, /clone\.style\.minWidth = `\$\{widthMm\}mm`/)
   assert.doesNotMatch(source, /clone\.style\.padding = '0'/)
   assert.doesNotMatch(source, /node\.style\.width = `\$\{widthMm\}mm`[\s\S]{0,120}node\.style\.maxWidth = `\$\{widthMm\}mm`/)

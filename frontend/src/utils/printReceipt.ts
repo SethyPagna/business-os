@@ -2,9 +2,9 @@ import {
   DEFAULT_RECEIPT_PRINT_SETTINGS,
   normalizeReceiptPrintSettings,
   RECEIPT_PRINT_SETTINGS_STORAGE_KEY,
-} from './receiptAppliedConfig'
+} from './receiptAppliedConfig.ts'
 import type { ReceiptPrintSettings } from '../types/receiptContracts'
-import { computeFixedSheetFit, computeImagePdfLayout, isSingleSheetHeight } from './receiptPdfLayout.ts'
+import { computeFixedSheetFit, computeImagePageSegments, computeImagePdfLayout, isSingleSheetPaperSize } from './receiptPdfLayout.ts'
 import { RECEIPT_ITEM_COLUMN_GAP_EM, RECEIPT_ROW_GRID_TEMPLATE, receiptItemGridTemplate } from './receiptItemColumns.ts'
 
 export const PRINT_DEFAULTS = { ...DEFAULT_RECEIPT_PRINT_SETTINGS }
@@ -40,12 +40,15 @@ type ImagePdfInput = {
   imageHeightPx: number
   pageWidthPt: number
   pageHeightPt?: number
+  singleSheet?: boolean
+  breakOffsetsPx?: number[]
   title?: string
 }
 type TextPdfInput = {
   lines: unknown[]
   pageWidthPt: number
   pageHeightPt?: number
+  singleSheet?: boolean
   title?: string
   bold?: boolean
 }
@@ -425,31 +428,8 @@ function buildPdfStream(dict: string, bodyBytes: ByteChunk): ByteChunk {
   ])
 }
 
-export function buildSingleImagePdf({ imageBytes, imageWidthPx, imageHeightPx, pageWidthPt, pageHeightPt: fixedHeightPt, title = 'Receipt' }: ImagePdfInput): ByteChunk {
+function serializePdfObjects(objects: ByteChunk[], infoObjectId: number): ByteChunk {
   const encoder = new TextEncoder()
-  // Continuous rolls wrap the complete rendered receipt. A fixed sheet keeps
-  // its exact physical MediaBox; oversized content is uniformly scaled down
-  // and centered instead of silently changing 80x50 into a taller page or
-  // clipping an edge at the printer driver.
-  const { pageHeightPt, drawWidthPt, drawHeightPt, drawXPt, drawYPt } = computeImagePdfLayout({
-    imageWidthPx,
-    imageHeightPx,
-    pageWidthPt,
-    fixedHeightPt,
-  })
-  const safeTitle = String(title === '' ? '' : (title || 'Receipt')).replace(/[()\\]/g, '')
-  const content = encoder.encode(`q\n${drawWidthPt.toFixed(2)} 0 0 ${drawHeightPt.toFixed(2)} ${drawXPt.toFixed(2)} ${drawYPt.toFixed(2)} cm\n/Im0 Do\nQ`)
-
-  const objects = [
-    encoder.encode(`<< /Type /Catalog /Pages 2 0 R /ViewerPreferences << /DisplayDocTitle true >> >>`),
-    encoder.encode(`<< /Type /Pages /Count 1 /Kids [3 0 R] >>`),
-    encoder.encode(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidthPt.toFixed(2)} ${pageHeightPt.toFixed(2)}] /Resources 4 0 R /Contents 6 0 R >>`),
-    encoder.encode(`<< /ProcSet [/PDF /ImageC] /XObject << /Im0 5 0 R >> >>`),
-    buildPdfStream(`<< /Type /XObject /Subtype /Image /Width ${imageWidthPx} /Height ${imageHeightPx} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${imageBytes.length} >>`, imageBytes),
-    buildPdfStream(`<< /Length ${content.length} >>`, content),
-    encoder.encode(`<< /Title (${safeTitle}) >>`),
-  ]
-
   const chunks: ByteChunk[] = [encoder.encode('%PDF-1.4\n%\xFF\xFF\xFF\xFF\n')]
   const offsets = [0]
   let position = chunks[0].length
@@ -468,8 +448,59 @@ export function buildSingleImagePdf({ imageBytes, imageWidthPx, imageHeightPx, p
     xrefLines.push(`${String(offsets[index]).padStart(10, '0')} 00000 n `)
   }
   chunks.push(encoder.encode(`${xrefLines.join('\n')}\n`))
-  chunks.push(encoder.encode(`trailer\n<< /Size ${objects.length + 1} /Root 1 0 R /Info 7 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`))
+  chunks.push(encoder.encode(`trailer\n<< /Size ${objects.length + 1} /Root 1 0 R /Info ${infoObjectId} 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`))
   return joinPdfChunks(chunks)
+}
+
+export function buildSingleImagePdf({ imageBytes, imageWidthPx, imageHeightPx, pageWidthPt, pageHeightPt: fixedHeightPt, singleSheet = false, breakOffsetsPx = [], title = 'Receipt' }: ImagePdfInput): ByteChunk {
+  const encoder = new TextEncoder()
+  // Continuous rolls wrap the complete rendered receipt. The explicit 80x50
+  // card keeps one exact MediaBox and is fitted there. Other fixed-height
+  // formats are document pages: draw the raster at full paper width on as many
+  // pages as it needs instead of shrinking a long receipt onto one page.
+  const { pageHeightPt, drawWidthPt, drawHeightPt, drawXPt, drawYPt } = computeImagePdfLayout({
+    imageWidthPx,
+    imageHeightPx,
+    pageWidthPt,
+    fixedHeightPt: singleSheet ? fixedHeightPt : undefined,
+  })
+  const safeTitle = String(title === '' ? '' : (title || 'Receipt')).replace(/[()\\]/g, '')
+  const documentPageHeightPt = fixedHeightPt != null && !singleSheet ? Math.max(36, fixedHeightPt) : pageHeightPt
+  const pageSegments = fixedHeightPt != null && !singleSheet
+    ? computeImagePageSegments({
+      imageHeightPx,
+      pageCapacityPx: documentPageHeightPt * imageWidthPx / pageWidthPt,
+      breakOffsetsPx,
+    })
+    : [{ startPx: 0, endPx: imageHeightPx }]
+  const pageCount = pageSegments.length
+  const pageObjectIds = Array.from({ length: pageCount }, (_, index) => 3 + index)
+  const resourcesObjectId = 3 + pageCount
+  const imageObjectId = resourcesObjectId + 1
+  const firstContentObjectId = imageObjectId + 1
+  const infoObjectId = firstContentObjectId + pageCount
+  const pageContents = pageSegments.map((segment) => {
+    const pxToPt = drawWidthPt / Math.max(1, imageWidthPx)
+    const segmentHeightPt = (segment.endPx - segment.startPx) * pxToPt
+    const clipY = Math.max(0, documentPageHeightPt - segmentHeightPt)
+    const offsetY = pageCount === 1
+      ? drawYPt
+      : documentPageHeightPt - drawHeightPt + segment.startPx * pxToPt
+    const clip = pageCount === 1
+      ? ''
+      : `0 ${clipY.toFixed(2)} ${pageWidthPt.toFixed(2)} ${segmentHeightPt.toFixed(2)} re W n\n`
+    return encoder.encode(`q\n${clip}${drawWidthPt.toFixed(2)} 0 0 ${drawHeightPt.toFixed(2)} ${drawXPt.toFixed(2)} ${offsetY.toFixed(2)} cm\n/Im0 Do\nQ`)
+  })
+  const objects: ByteChunk[] = [
+    encoder.encode(`<< /Type /Catalog /Pages 2 0 R /ViewerPreferences << /DisplayDocTitle true >> >>`),
+    encoder.encode(`<< /Type /Pages /Count ${pageCount} /Kids [${pageObjectIds.map((id) => `${id} 0 R`).join(' ')}] >>`),
+    ...pageObjectIds.map((_, pageIndex) => encoder.encode(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidthPt.toFixed(2)} ${documentPageHeightPt.toFixed(2)}] /Resources ${resourcesObjectId} 0 R /Contents ${firstContentObjectId + pageIndex} 0 R >>`)),
+    encoder.encode(`<< /ProcSet [/PDF /ImageC] /XObject << /Im0 ${imageObjectId} 0 R >> >>`),
+    buildPdfStream(`<< /Type /XObject /Subtype /Image /Width ${imageWidthPx} /Height ${imageHeightPx} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${imageBytes.length} >>`, imageBytes),
+    ...pageContents.map((content) => buildPdfStream(`<< /Length ${content.length} >>`, content)),
+    encoder.encode(`<< /Title (${safeTitle}) >>`),
+  ]
+  return serializePdfObjects(objects, infoObjectId)
 }
 
 function escapePdfText(value: unknown): string {
@@ -498,7 +529,7 @@ function wrapTextLine(text: unknown, maxChars = 54): string[] {
   return lines.length ? lines : ['']
 }
 
-function buildTextOnlyPdf({ lines, pageWidthPt, pageHeightPt: fixedHeightPt, title = 'Receipt', bold = false }: TextPdfInput): ByteChunk {
+function buildTextOnlyPdf({ lines, pageWidthPt, pageHeightPt: fixedHeightPt, singleSheet = false, title = 'Receipt', bold = false }: TextPdfInput): ByteChunk {
   const encoder = new TextEncoder()
   const safeTitle = String(title === '' ? '' : (title || 'Receipt')).replace(/[()\\]/g, '')
   const margin = 18
@@ -506,55 +537,46 @@ function buildTextOnlyPdf({ lines, pageWidthPt, pageHeightPt: fixedHeightPt, tit
   const lineHeight = 12
   const preparedLines = (Array.isArray(lines) ? lines : [''])
     .flatMap((line) => wrapTextLine(line, 54))
-    .slice(0, 260)
-
   const contentHeightPt = margin * 2 + preparedLines.length * lineHeight + 12
   const pageHeightPt = fixedHeightPt != null ? Math.max(72, fixedHeightPt) : Math.max(72, contentHeightPt)
-  const fixedContentScale = fixedHeightPt != null
+  const fixedContentScale = fixedHeightPt != null && singleSheet
     ? Math.min(1, Math.max(0.1, (pageHeightPt - margin * 2) / Math.max(1, preparedLines.length * lineHeight + 12)))
     : 1
   const fittedFontSize = fontSize * fixedContentScale
   const fittedLineHeight = lineHeight * fixedContentScale
-  const startY = pageHeightPt - margin - fittedFontSize
-  const contentLines = ['BT', `/F1 ${fittedFontSize.toFixed(2)} Tf`, `${margin} ${startY.toFixed(2)} Td`]
-
-  preparedLines.forEach((line, index) => {
-    const escaped = escapePdfText(line)
-    contentLines.push(`(${escaped}) Tj`)
-    if (index < preparedLines.length - 1) contentLines.push(`0 -${fittedLineHeight.toFixed(2)} Td`)
+  const isFixedDocument = fixedHeightPt != null && !singleSheet
+  const linesPerPage = isFixedDocument
+    ? Math.max(1, Math.floor((pageHeightPt - margin * 2 - 12) / fittedLineHeight))
+    : Math.max(1, preparedLines.length)
+  const pageLines: string[][] = []
+  for (let index = 0; index < Math.max(1, preparedLines.length); index += linesPerPage) {
+    pageLines.push(preparedLines.slice(index, index + linesPerPage))
+  }
+  if (!pageLines.length) pageLines.push([''])
+  const pageContents = pageLines.map((linesForPage) => {
+    const startY = pageHeightPt - margin - fittedFontSize
+    const contentLines = ['BT', `/F1 ${fittedFontSize.toFixed(2)} Tf`, `${margin} ${startY.toFixed(2)} Td`]
+    linesForPage.forEach((line, index) => {
+      contentLines.push(`(${escapePdfText(line)}) Tj`)
+      if (index < linesForPage.length - 1) contentLines.push(`0 -${fittedLineHeight.toFixed(2)} Td`)
+    })
+    contentLines.push('ET')
+    return encoder.encode(contentLines.join('\n'))
   })
-  contentLines.push('ET')
-
-  const content = encoder.encode(contentLines.join('\n'))
-  const objects = [
+  const pageCount = pageContents.length
+  const pageObjectIds = Array.from({ length: pageCount }, (_, index) => 3 + index)
+  const resourcesObjectId = 3 + pageCount
+  const firstContentObjectId = resourcesObjectId + 1
+  const infoObjectId = firstContentObjectId + pageCount
+  const objects: ByteChunk[] = [
     encoder.encode(`<< /Type /Catalog /Pages 2 0 R /ViewerPreferences << /DisplayDocTitle true >> >>`),
-    encoder.encode(`<< /Type /Pages /Count 1 /Kids [3 0 R] >>`),
-    encoder.encode(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidthPt.toFixed(2)} ${pageHeightPt.toFixed(2)}] /Resources 4 0 R /Contents 5 0 R >>`),
+    encoder.encode(`<< /Type /Pages /Count ${pageCount} /Kids [${pageObjectIds.map((id) => `${id} 0 R`).join(' ')}] >>`),
+    ...pageObjectIds.map((_, pageIndex) => encoder.encode(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidthPt.toFixed(2)} ${pageHeightPt.toFixed(2)}] /Resources ${resourcesObjectId} 0 R /Contents ${firstContentObjectId + pageIndex} 0 R >>`)),
     encoder.encode(`<< /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /${bold ? 'Helvetica-Bold' : 'Helvetica'} >> >> >>`),
-    buildPdfStream(`<< /Length ${content.length} >>`, content),
+    ...pageContents.map((content) => buildPdfStream(`<< /Length ${content.length} >>`, content)),
     encoder.encode(`<< /Title (${safeTitle}) >>`),
   ]
-
-  const chunks: ByteChunk[] = [encoder.encode('%PDF-1.4\n%\xFF\xFF\xFF\xFF\n')]
-  const offsets = [0]
-  let position = chunks[0].length
-
-  objects.forEach((objectBytes, index) => {
-    offsets.push(position)
-    const objectHeader = encoder.encode(`${index + 1} 0 obj\n`)
-    const objectFooter = encoder.encode('\nendobj\n')
-    chunks.push(objectHeader, objectBytes, objectFooter)
-    position += objectHeader.length + objectBytes.length + objectFooter.length
-  })
-
-  const xrefOffset = position
-  const xrefLines = ['xref', `0 ${objects.length + 1}`, '0000000000 65535 f ']
-  for (let index = 1; index < offsets.length; index += 1) {
-    xrefLines.push(`${String(offsets[index]).padStart(10, '0')} 00000 n `)
-  }
-  chunks.push(encoder.encode(`${xrefLines.join('\n')}\n`))
-  chunks.push(encoder.encode(`trailer\n<< /Size ${objects.length + 1} /Root 1 0 R /Info 6 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`))
-  return joinPdfChunks(chunks)
+  return serializePdfObjects(objects, infoObjectId)
 }
 
 function buildReceiptFileName(title = 'receipt', extension = 'pdf'): string {
@@ -827,7 +849,7 @@ async function waitForElementAssets(element: HTMLElement): Promise<void> {
   await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()))
 }
 
-async function renderElementToCanvas(element: HTMLElement): Promise<HTMLCanvasElement> {
+async function renderElementToCanvasResult(element: HTMLElement): Promise<{ canvas: HTMLCanvasElement; breakOffsetsPx: number[] }> {
   await waitForElementAssets(element)
 
   const rect = element.getBoundingClientRect()
@@ -883,7 +905,7 @@ async function renderElementToCanvas(element: HTMLElement): Promise<HTMLCanvasEl
       Math.ceil(cloned.scrollHeight || renderedRect.height || cloned.offsetHeight || sourceHeight),
     )
     const { default: html2canvas } = await import('html2canvas')
-    return await html2canvas(cloned, {
+    const canvas = await html2canvas(cloned, {
       backgroundColor: '#ffffff',
       scale,
       width,
@@ -896,9 +918,61 @@ async function renderElementToCanvas(element: HTMLElement): Promise<HTMLCanvasEl
       allowTaint: false,
       logging: false,
     })
+    return {
+      canvas,
+      // Measure boundaries on the exact normalized clone html2canvas painted.
+      // The live host can wrap one line differently after its computed styles
+      // are copied, which is enough to bisect the last item on a PDF page.
+      breakOffsetsPx: collectReceiptPageBreakOffsets(cloned, canvas.height),
+    }
   } finally {
     stage.remove()
   }
+}
+
+async function renderElementToCanvas(element: HTMLElement): Promise<HTMLCanvasElement> {
+  return (await renderElementToCanvasResult(element)).canvas
+}
+
+function collectReceiptPageBreakOffsets(element: HTMLElement, canvasHeightPx: number): number[] {
+  const rootRect = element.getBoundingClientRect()
+  const sourceHeightPx = Math.max(1, element.scrollHeight || rootRect.height || element.offsetHeight || 1)
+  const canvasScale = canvasHeightPx / sourceHeightPx
+  const offsets = new Set<number>()
+  const noteBoundary = (node: Element | null | undefined, edge: 'top' | 'bottom' | 'both' = 'bottom') => {
+    if (!(node instanceof HTMLElement)) return
+    const rect = node.getBoundingClientRect()
+    const top = Math.max(0, rect.top - rootRect.top) * canvasScale
+    // Include two CSS pixels of the element's following spacing. Rasterized
+    // glyph antialiasing and borders can paint just beyond getBoundingClientRect
+    // by a fraction; ending exactly at `bottom` visibly shaves a baseline even
+    // though the next page technically contains the remaining pixels.
+    const bottom = (Math.max(0, rect.bottom - rootRect.top) + 2) * canvasScale
+    if ((edge === 'top' || edge === 'both') && top > 0) offsets.add(top)
+    if ((edge === 'bottom' || edge === 'both') && bottom > 0) offsets.add(bottom)
+  }
+
+  element.querySelectorAll('[data-receipt-line="true"]').forEach((node) => {
+    // An item line sits inside a padded/separated wrapper. Its grid bottom is
+    // not the end of the visual item, so break after the wrapper instead.
+    const parent = node.parentElement
+    const atomicBlock = parent?.classList.contains('py-1.5') || parent?.classList.contains('border-y-2')
+      ? parent
+      : node
+    noteBoundary(atomicBlock)
+  })
+
+  // Keep a generated QR block together too. It has no receipt-line marker,
+  // so use the top-level receipt child that owns each image as an atomic block.
+  const receiptRoot = element.querySelector('[data-receipt-export-root="true"]') || element.firstElementChild
+  receiptRoot?.querySelectorAll('img').forEach((image) => {
+    let block: Element | null = image
+    while (block?.parentElement && block.parentElement !== receiptRoot) block = block.parentElement
+    noteBoundary(block, 'top')
+    noteBoundary(block, 'bottom')
+  })
+
+  return Array.from(offsets).sort((a, b) => a - b)
 }
 
 async function withReceiptElement<T>(
@@ -936,7 +1010,7 @@ async function withReceiptElement<T>(
   const fixedSheetHeightMm = getPaperHeightMm(printSettings)
   // Only a single card/label has to hold the whole receipt; A4/Letter and any
   // custom size as tall as a document page keep paginating at full size.
-  const fitToOneSheet = isSingleSheetHeight(fixedSheetHeightMm)
+  const fitToOneSheet = isSingleSheetPaperSize(printSettings.paperSize)
   if (isElementContent) {
     const cloned = normalizeReceiptContentWidth(cloneElementWithInlineStyles(content))
     // On continuous rolls the receipt shell's padding is the physical print
@@ -1023,9 +1097,9 @@ async function createPrintableReceiptMarkup(content: ReceiptContent, options: Re
     const measuredHeightMm = renderedHeightPx * (widthMm / renderedWidthPx)
     const fixedHeightMm = getPaperHeightMm(printSettings)
     const continuousRoll = fixedHeightMm == null
-    // A tiny tail allowance prevents sub-pixel/driver rounding from spilling a
-    // one-page thermal receipt onto a second blank/cut page. It is deliberately
-    // applied only to continuous rolls; fixed cards/sheets keep their exact size.
+    // The measured roll height remains the deterministic PDF/image height. The
+    // direct browser print path deliberately does NOT turn it into one CSS page:
+    // the selected printer media owns pagination there.
     const pageHeightMm = fixedHeightMm ?? Math.max(1, measuredHeightMm + 1)
 
     const clone = normalizePrintableRoot(cloneElementWithInlineStyles(host), widthMm)
@@ -1041,23 +1115,31 @@ async function createPrintableReceiptMarkup(content: ReceiptContent, options: Re
     clone.querySelectorAll('canvas, video').forEach((node) => node.remove())
     await inlineImageNodeSources(clone)
     await inlineStyleAssetUrls(clone)
-    return { markup: clone.outerHTML, widthMm, pageHeightMm, continuousRoll, singleSheet: isSingleSheetHeight(fixedHeightMm) }
+    return { markup: clone.outerHTML, widthMm, pageHeightMm, continuousRoll, singleSheet: isSingleSheetPaperSize(printSettings.paperSize) }
   }, printSettings)
 }
 
 function buildPrintablePreviewDocument(layout: PrintableReceiptLayout, options: ReceiptPrintOptions = {}): string {
   const { markup, widthMm, pageHeightMm, continuousRoll, singleSheet } = layout
-  // Three page semantics, not two. A continuous roll's page grows to the
-  // measured receipt, so overflow must stay visible. A DOCUMENT page (A4,
-  // Letter, a custom size as tall as one) is a stack of pages: a long receipt
-  // legitimately runs onto page 2 there, so it must stay visible too. A single
-  // sheet -- the 80x50 label, a small custom card -- is one physical ticket:
-  // withReceiptElement has already fitted its content to that exact height, and
-  // clipping here guarantees sub-millimetre driver rounding can never spill a
-  // second page. `continuousRoll` is read so a roll can never be clipped even
-  // if a future height resolver returns a tiny page for one.
+  // Three page semantics, not two. Direct printing of a continuous roll keeps
+  // the receipt at its configured width but delegates page length to the driver.
+  // A DOCUMENT page (A4, Letter, custom) is a stack of pages, so a long receipt
+  // legitimately continues onto page 2. Only the explicit 80x50 summary is one
+  // physical card: withReceiptElement has already fitted it to that height, and
+  // clipping here prevents rounding from spilling a second card.
   const clipToOnePage = singleSheet && !continuousRoll
   const pageOverflow = clipToOnePage ? 'hidden' : 'visible'
+  // A roll's physical page length belongs to the printer driver. Declaring
+  // one CSS page as tall as the complete receipt makes Chrome fit that entire
+  // page onto a fixed driver sheet (for example 98 x 148 mm), progressively
+  // shrinking 10/20-item receipts into a narrow strip. Keep the receipt itself
+  // at the configured width, but let the selected driver media paginate it.
+  const pageSizeCss = continuousRoll ? 'auto' : `${widthMm}mm ${pageHeightMm.toFixed(2)}mm`
+  const documentHeightCss = clipToOnePage
+    ? `height: ${pageHeightMm.toFixed(2)}mm !important;
+          min-height: ${pageHeightMm.toFixed(2)}mm !important;`
+    : `height: auto !important;
+          min-height: 0 !important;`
   const fixedFrameHeightCss = clipToOnePage
     ? `height: ${pageHeightMm.toFixed(2)}mm !important;
           max-height: ${pageHeightMm.toFixed(2)}mm !important;`
@@ -1178,7 +1260,7 @@ function buildPrintablePreviewDocument(layout: PrintableReceiptLayout, options: 
         word-break: break-word;
       }
       @page {
-        size: ${widthMm}mm ${pageHeightMm.toFixed(2)}mm;
+        size: ${pageSizeCss};
         margin: 0;
       }
       @media print {
@@ -1188,8 +1270,7 @@ function buildPrintablePreviewDocument(layout: PrintableReceiptLayout, options: 
           width: ${widthMm}mm !important;
           min-width: ${widthMm}mm !important;
           max-width: ${widthMm}mm !important;
-          height: ${pageHeightMm.toFixed(2)}mm !important;
-          min-height: ${pageHeightMm.toFixed(2)}mm !important;
+          ${documentHeightCss}
           background: #ffffff;
           overflow: ${pageOverflow} !important;
           -webkit-print-color-adjust: exact;
@@ -1227,6 +1308,11 @@ function buildPrintablePreviewDocument(layout: PrintableReceiptLayout, options: 
         }
         .receipt-frame > * {
           margin: 0 !important;
+          break-inside: avoid-page;
+          page-break-inside: avoid;
+        }
+        .receipt-frame [data-receipt-line="true"],
+        .receipt-frame img {
           break-inside: avoid-page;
           page-break-inside: avoid;
         }
@@ -1351,6 +1437,7 @@ export async function createReceiptPdfBlob(content: ReceiptContent, options: Rec
   const title = options.title === '' ? '' : (options.title || 'Receipt')
   const pageWidthPt = mmToPt(widthMm)
   const pageHeightPt = heightMm != null ? mmToPt(heightMm) : undefined
+  const singleSheet = isSingleSheetPaperSize(printSettings.paperSize)
   const allowTextFallback = Boolean(options.allowTextFallback || options.preferTextOnly)
   const buildTextOnlyReceiptBlob = () => {
     const fallbackLines = extractReceiptLines(content)
@@ -1358,6 +1445,7 @@ export async function createReceiptPdfBlob(content: ReceiptContent, options: Rec
       lines: fallbackLines,
       pageWidthPt,
       pageHeightPt,
+      singleSheet,
       title,
       bold: printSettings.highContrastBold,
     })
@@ -1369,7 +1457,8 @@ export async function createReceiptPdfBlob(content: ReceiptContent, options: Rec
   }
 
   const renderPdfBlob = async () => {
-    const canvas = await withReceiptElement(content, widthMm, renderElementToCanvas, printSettings)
+    const rendered = await withReceiptElement(content, widthMm, renderElementToCanvasResult, printSettings)
+    const { canvas, breakOffsetsPx } = rendered
     const jpegUrl = canvas.toDataURL('image/jpeg', 0.98)
     const jpegBytes = dataUrlToBytes(jpegUrl)
     const pdfBytes = buildSingleImagePdf({
@@ -1378,6 +1467,8 @@ export async function createReceiptPdfBlob(content: ReceiptContent, options: Rec
       imageHeightPx: canvas.height,
       pageWidthPt,
       pageHeightPt,
+      singleSheet,
+      breakOffsetsPx,
       title,
     })
     return new Blob([bytesToBlobPart(pdfBytes)], { type: 'application/pdf' })

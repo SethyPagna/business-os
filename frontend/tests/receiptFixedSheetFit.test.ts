@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import {
-  SINGLE_SHEET_MAX_HEIGHT_MM,
   computeFixedSheetFit,
   computeImagePdfLayout,
-  isSingleSheetHeight,
+  isSingleSheetPaperSize,
 } from '../src/utils/receiptPdfLayout.ts'
 
 let failed = 0
@@ -96,7 +95,7 @@ await runTest('a fitted 80x50 raster fills the PDF page instead of sitting in si
 })
 
 await runTest('Print, PDF and Image inherit ONE shared fixed-sheet fit step', () => {
-  assert.match(printSource, /import \{ computeFixedSheetFit, computeImagePdfLayout, isSingleSheetHeight \} from '\.\/receiptPdfLayout\.ts'/)
+  assert.match(printSource, /import \{ computeFixedSheetFit, computeImagePageSegments, computeImagePdfLayout, isSingleSheetPaperSize \} from '\.\/receiptPdfLayout\.ts'/)
   assert.match(printSource, /const fixedSheetHeightMm = getPaperHeightMm\(printSettings\)/,
     'withReceiptElement must resolve the sheet height once for every export path')
   assert.match(printSource, /const fit = computeFixedSheetFit\(\{ contentHeightMm, sheetHeightMm: fixedSheetHeightMm \}\)/)
@@ -130,28 +129,23 @@ await runTest('the print document consumes the layout flags so a single sheet ca
     'the printed page must not force overflow visible for a single sheet')
   assert.match(printSource, /const fixedFrameHeightCss = clipToOnePage/,
     'a single sheet pins the printed frame to the page height')
-  assert.match(printSource, /singleSheet: isSingleSheetHeight\(fixedHeightMm\)/,
+  assert.match(printSource, /singleSheet: isSingleSheetPaperSize\(printSettings\.paperSize\)/,
     'the layout must carry which kind of page this is')
 })
 
-await runTest('a document page keeps paginating instead of being squeezed onto one page', () => {
-  // A4 297mm / Letter 279.4mm are stacks of pages: a 60-item receipt is
-  // legitimately two pages there, and shrinking it to one would make it
-  // unreadable. Only a card/label is a single physical ticket.
-  assert.equal(isSingleSheetHeight(297), false, 'A4 must keep paginating')
-  assert.equal(isSingleSheetHeight(279.4), false, 'Letter must keep paginating')
-  assert.equal(isSingleSheetHeight(50), true, 'the 80x50 label is one physical ticket')
-  assert.equal(isSingleSheetHeight(SINGLE_SHEET_MAX_HEIGHT_MM), true)
-  assert.equal(isSingleSheetHeight(SINGLE_SHEET_MAX_HEIGHT_MM + 0.1), false)
-  // Continuous rolls (58/72/80mm) resolve to a null height: their page grows.
-  assert.equal(isSingleSheetHeight(null), false)
-  assert.equal(isSingleSheetHeight(undefined), false)
-  assert.equal(isSingleSheetHeight(0), false)
-  assert.equal(isSingleSheetHeight(Number.NaN), false)
+await runTest('only the explicit 80x50 preset is fitted onto one physical card', () => {
+  assert.equal(isSingleSheetPaperSize('80x50mm'), true)
+  assert.equal(isSingleSheetPaperSize('80X50MM'), true)
+  assert.equal(isSingleSheetPaperSize('custom'), false, 'custom 98x148 pages must paginate')
+  assert.equal(isSingleSheetPaperSize('A4'), false)
+  assert.equal(isSingleSheetPaperSize('letter'), false)
+  assert.equal(isSingleSheetPaperSize('80mm'), false, 'continuous rolls use driver page boundaries')
+  assert.equal(isSingleSheetPaperSize(null), false)
+  assert.equal(isSingleSheetPaperSize(undefined), false)
 
-  assert.match(printSource, /const fitToOneSheet = isSingleSheetHeight\(fixedSheetHeightMm\)/)
+  assert.match(printSource, /const fitToOneSheet = isSingleSheetPaperSize\(printSettings\.paperSize\)/)
   assert.match(printSource, /if \(fixedSheetHeightMm != null && fitToOneSheet\) \{/,
-    'the fit step must not run for A4/Letter, or a long receipt would be shrunk to one page')
+    'the fit step must not run for custom/A4/Letter, or a long receipt would be shrunk to one page')
 })
 
 await runTest('the fit is measured only after the card assets have settled', () => {
