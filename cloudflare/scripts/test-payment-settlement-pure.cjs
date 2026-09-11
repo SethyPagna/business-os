@@ -81,10 +81,19 @@ async function verifyReceiptRoutes() {
   assert.equal((await invoke(statusRequest)).body.committed, true)
   assert.equal((await invoke({ ...statusRequest, notes: 'Different operation' })).status, 409)
   for (const kind of ['add_items', 'amendment']) {
-    const line = { client_request_id: kind, kind: 'line_updated', sale_item_id: 4, quantity: 2, applied_price_usd: 7, items: [{ product_id: 4, quantity: 2 }], expected_exchange_rate: 4100 }
+    const line = {
+      client_request_id: kind, kind: 'line_updated', sale_item_id: 4, quantity: 2,
+      applied_price_usd: 27, ...(kind === 'amendment' ? {
+        base_price_usd: 30, manual_discount_type: 'fixed', manual_discount_value: 3, manual_discount_usd: 3,
+      } : {}),
+      items: [{ product_id: 4, quantity: 2 }], expected_exchange_rate: 4100,
+    }
     receipts.set(`7:${kind}:${kind}`, { request_digest: await digest(exported.saleLineReceiptCanonical(171258, kind, line)), response_json: JSON.stringify(snapshot) })
     assert.equal((await invoke(line, actor, kind)).body.committed, true)
     assert.equal((await invoke({ ...line, expected_exchange_rate: 4200 }, actor, kind)).status, 409)
+    if (kind === 'amendment') {
+      assert.equal((await invoke({ ...line, manual_discount_type: null }, actor, kind)).status, 409, 'omitted and explicit-null discount intent cannot share one receipt identity')
+    }
     const action = kind === 'add_items' ? 'add_items' : 'amend'
     assert.equal((await invoke(line, { ...actor, permissions: { sales: true, [`sales:${action}`]: false } }, kind)).status, 403)
   }

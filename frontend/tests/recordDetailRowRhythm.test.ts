@@ -85,16 +85,11 @@ for (const [name, source] of [['sale detail', saleDetail], ['return detail', ret
     assert.ok(tableStart > 0, `${name} must render its line items as a table`)
     assert.match(source, /<tfoot[^>]*>[\s\S]*?<MoneyRow/, `${name} money rows must sit in the items table's tfoot`)
     if (name === 'sale detail') {
-      // At narrow widths each product line spans the compact four-column table
-      // and presents Qty / Price / Total in one labelled, tabular strip.
-      assert.match(source, /<td colSpan=\{4\} className="px-1\.5 py-1\.5 align-top/, 'a sale product line must span the compact four-column table')
-      const valuesAt = source.indexOf('data-sale-line-values=""')
-      const values = source.slice(valuesAt, source.indexOf('</div>', valuesAt))
-      assert.ok(valuesAt > 0 && values.length > 300, 'the compact sale line values must be identifiable')
-      assert.match(values, /t\('qty_short'\)[\s\S]*?t\('price'\)[\s\S]*?t\('total'\)/, 'sale lines must present Qty, Price and Total in order')
-      assert.match(values, /text-xs tabular-nums/, 'sale line figures must stay tabular')
-      assert.doesNotMatch(values, /fmtKHR\(/, 'compact sale lines keep their figures USD-only')
-      assert.match(source, /line-clamp-2 break-words font-medium/, 'long product names remain readable across two lines')
+      assert.match(source, /<thead className="border-b[\s\S]*?t\('qty_short'\)[\s\S]*?t\('price'\)[\s\S]*?t\('total'\)/, 'Qty, Price and Total must be visible column headers in order')
+      for (const marker of ['data-sale-line-qty=""', 'data-sale-line-price=""', 'data-sale-line-total=""']) {
+        assert.match(source, new RegExp(marker), `${marker} must identify a real numeric cell`)
+      }
+      assert.match(source, /line-clamp-2 min-w-0 break-words font-medium/, 'long product names remain readable across two lines')
     } else {
       const numericCells = source.match(/className="[^"]*text-right[^"]*align-top[^"]*"/g) || []
       assert.ok(numericCells.length > 0, `${name} must have right-aligned numeric item cells`)
@@ -227,10 +222,9 @@ runTest('the new column and field labels ship in both language packs', () => {
     assert.ok(km[key].length <= 16, `km.json "${key}" is too long for a table header (${km[key].length} chars)`)
     assert.ok(en[key].length <= 16, `en.json "${key}" is too long for a table header (${en[key].length} chars)`)
   }
-  // The items table's last column no longer collides with the grand total row
-  // sitting directly beneath it in the same table -- both used to say "Total".
-  assert.match(saleDetail, /t\('line_total'\) \|\| 'Line total'/, 'the line-total column must have its own label')
-  assert.match(saleDetail, /t\('unit_price'\) \|\| 'Unit price'/, 'the unit-price column must use the unit_price key, not the generic price key')
+  assert.match(saleDetail, /t\('qty_short'\) \|\| 'Qty'/)
+  assert.match(saleDetail, /t\('price'\) \|\| 'Price'/)
+  assert.match(saleDetail, /t\('total'\) \|\| 'Total'/)
 })
 
 // --- 8. the return items table is actually reachable ----------------------
@@ -335,7 +329,7 @@ runTest('the sale detail has no separate Delivery card', () => {
 
 // --- 9b. one Edit column, one Edit label -----------------------------------
 
-runTest('sale amendments use direct gated editors inside the compact rows', () => {
+runTest('sale amendments use explicit gated Edit states inside the compact rows', () => {
   // User, Sep 4 2026: "the current edit in click to view detail is placed all
   // over the place..you can align it with the edit volumn...for products,
   // delivery etc... just call it 'Edit'."
@@ -360,10 +354,13 @@ runTest('sale amendments use direct gated editors inside the compact rows', () =
     else if (token === '</td') cellDepth -= 1
     else if (token === '<div') assert.ok(cellDepth > 0, 'a <div> in the money summary must live inside a table cell')
   }
-  assert.match(saleDetail, /\{canAmendThisSale && lineId \? <input id=\{`amend-qty-\$\{lineId\}`\}/, 'quantity is directly editable only with line amendment authority')
-  assert.match(saleDetail, /\{canAmendThisSale && lineId \? <>[\s\S]{0,180}<input id=\{`amend-price-\$\{lineId\}`\}/, 'price is directly editable only with line amendment authority')
-  assert.match(saleDetail, /amount=\{canAmendDeliveryMoney \? <span[\s\S]{0,300}id="amend-delivery-fee"/, 'delivery fee is directly editable only with delivery amendment authority')
-  assert.match(saleDetail, /data-sale-actual-cost=""[\s\S]{0,500}\{canAmendDeliveryMoney \? <>[\s\S]{0,220}id="amend-delivery-actual-cost"/, 'actual cost is directly editable only with delivery amendment authority')
+  assert.match(saleDetail, /canAmendThisSale && lineId > 0 && !editingLine[\s\S]{0,250}startAmendLine/, 'a permitted line must be plain until its Edit button is pressed')
+  assert.match(saleDetail, /editingLine \? <input id=\{`amend-qty-\$\{lineId\}`\}/, 'quantity input must exist only in the open editor')
+  const linePriceEditor = saleDetail.slice(saleDetail.indexOf('editingLine ? <div className="space-y-1">'), saleDetail.indexOf('</td>', saleDetail.indexOf('editingLine ? <div className="space-y-1">')))
+  assert.match(linePriceEditor, /id=\{`amend-price-\$\{lineId\}`\}/, 'price input must exist only in the open editor')
+  assert.match(linePriceEditor, /id=\{`amend-discount-\$\{lineId\}`\}/, 'discount input must exist only in the open editor')
+  assert.match(saleDetail, /amount=\{feeEditing \? <span[\s\S]{0,300}id="amend-delivery-fee"/, 'delivery fee input must exist only in its explicit Edit state')
+  assert.match(saleDetail, /data-sale-actual-cost=""[\s\S]{0,500}\{actualCostEditing \? <>[\s\S]{0,220}id="amend-delivery-actual-cost"/, 'actual cost input must exist only in its explicit Edit state')
   // Applying a changed fee still renders a valid full-width table row.
   const feeAt = saleDetail.indexOf('canAmendDeliveryMoney && feeEditing')
   assert.ok(feeAt >= 0, 'the fee editor must be gated on the Edit control being open')

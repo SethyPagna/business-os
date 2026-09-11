@@ -260,6 +260,27 @@ runTest('before/after is money for the delivery kinds and units for a line', () 
   assert.strictEqual(price.kind, 'item_price_changed')
   assert.deepStrictEqual(price.before, { quantity: 2, unit_price_usd: 3, total_usd: 6 })
   assert.deepStrictEqual(price.after, { quantity: 2, unit_price_usd: 4.5, total_usd: 9 })
+
+  const discounted = ledgerRecord({
+    id: 16, kind: 'line_updated', product_name: 'Cream',
+    quantity_before: 1, quantity_after: 2,
+    amount_before_usd: 27, amount_after_usd: 24,
+    total_before_usd: 27, total_after_usd: 48,
+    before_json: JSON.stringify({ quantity: 1, unit_price_usd: 27, base_price_usd: 30, product_discount_usd: 0, manual_discount_type: 'fixed', manual_discount_value: 3, manual_discount_usd: 3, total_usd: 27 }),
+    after_json: JSON.stringify({ quantity: 2, unit_price_usd: 24, base_price_usd: 30, product_discount_usd: 0, manual_discount_type: 'percent', manual_discount_value: 20, manual_discount_usd: 6, total_usd: 48 }),
+    units_moved: 1, stock_skipped: 0, via: 'amend', user_name: 'sokha',
+    created_at: '2026-09-11 10:00:00',
+  })
+  assert.deepStrictEqual(discounted.before, {
+    quantity: 1, unit_price_usd: 27, base_price_usd: 30, product_discount_usd: 0,
+    manual_discount_type: 'fixed', manual_discount_value: 3, manual_discount_usd: 3,
+    line_total_usd: 27, total_usd: 27,
+  })
+  assert.deepStrictEqual(discounted.after, {
+    quantity: 2, unit_price_usd: 24, base_price_usd: 30, product_discount_usd: 0,
+    manual_discount_type: 'percent', manual_discount_value: 20, manual_discount_usd: 6,
+    line_total_usd: 48, total_usd: 48,
+  })
 })
 
 runTest('adding delivery is one truthful record with driver and complete USD/KHR snapshots', () => {

@@ -314,6 +314,10 @@ export interface SaleAmendmentRequest {
   sale_item_id?: number
   quantity?: number
   applied_price_usd?: number
+  base_price_usd?: number
+  manual_discount_type?: 'percent' | 'fixed' | null
+  manual_discount_value?: number
+  manual_discount_usd?: number
   delivery_fee_usd?: number
   delivery_actual_cost_usd?: number | string | null
   delivery_contact_id?: number

@@ -23,6 +23,7 @@ import {
 } from '../../utils/saleAmendments.ts'
 import { receiptTotalsFigures } from '../../utils/receiptTotals.ts'
 import { receiptLineFigures } from '../../utils/receiptLineMath.ts'
+import { saleLineEditorResult } from '../../utils/saleLineEditor.ts'
 import CopyableId from '../shared/CopyableId.tsx'
 import { SaleCopyValue as EntityLink } from './SalesListSurface.tsx'
 import { DetailRow, DetailRowGroup, MoneyRow } from '../shared/DetailRows.tsx'
@@ -87,6 +88,8 @@ interface SaleLineItem {
   product_discount_khr?: number | string | null
   manual_discount_usd?: number | string | null
   manual_discount_khr?: number | string | null
+  manual_discount_type?: string | null
+  manual_discount_value?: number | string | null
   price_usd?: number | string | null
   price_khr?: number | string | null
   price?: number | string | null
@@ -195,6 +198,10 @@ interface SaleAmendmentRequest {
   sale_item_id?: number
   quantity?: number
   applied_price_usd?: number
+  base_price_usd?: number
+  manual_discount_usd?: number
+  manual_discount_type?: 'percent' | 'fixed' | null
+  manual_discount_value?: number
   delivery_fee_usd?: number
   delivery_actual_cost_usd?: number | string | null
   delivery_contact_id?: number
@@ -535,6 +542,8 @@ export default function SaleDetailModal({
   const [amendLineId, setAmendLineId] = useState<number | null>(null)
   const [amendQtyText, setAmendQtyText] = useState('')
   const [amendPriceText, setAmendPriceText] = useState('')
+  const [amendDiscountText, setAmendDiscountText] = useState('')
+  const [amendDiscountType, setAmendDiscountType] = useState<'percent' | 'fixed' | null>(null)
   const [amendSaving, setAmendSaving] = useState(false)
   const [amendConfirm, setAmendConfirm] = useState<{ request: SaleAmendmentRequest; title: string; summary: string } | null>(null)
   // The delivery fee editor: the CORRECTED value, not a delta. A cashier
@@ -573,6 +582,11 @@ export default function SaleDetailModal({
     setAmendMutationError('')
     setActualCostEditing(false)
     setActualCostText('')
+    setAmendLineId(null)
+    setAmendQtyText('')
+    setAmendPriceText('')
+    setAmendDiscountText('')
+    setAmendDiscountType(null)
     setDeliveryAdding(false)
     setDeliverySearch('')
     setDeliveryOptions([])
@@ -773,8 +787,10 @@ export default function SaleDetailModal({
         setDeliveryAdding(false)
         setDeliveryContact(null)
         setDeliverySearch('')
-    setAmendQtyText('')
-    setAmendPriceText('')
+        setAmendQtyText('')
+        setAmendPriceText('')
+        setAmendDiscountText('')
+        setAmendDiscountType(null)
         setAmendConfirm(null)
         setAmendReloadToken((token) => token + 1)
       }
@@ -784,11 +800,14 @@ export default function SaleDetailModal({
   }
 
   /** Open the amend controls on one line, prefilled with its current quantity. */
-  const startAmendLine = (lineId: number, currentQuantity: number, currentPrice: number): void => {
+  const startAmendLine = (lineId: number, currentQuantity: number, currentBasePrice: number, currentDiscountType: 'percent' | 'fixed' | null, currentDiscountValue: number): void => {
     setAmendLineId(lineId)
     setReplaceLineId(null)
     setAmendQtyText(String(currentQuantity))
-    setAmendPriceText(String(currentPrice))
+    setAmendPriceText(String(currentBasePrice))
+    setAmendDiscountType(currentDiscountType)
+    setAmendDiscountText(String(currentDiscountValue))
+    setAmendMutationError('')
   }
 
   /**
@@ -821,27 +840,50 @@ export default function SaleDetailModal({
   }
 
   /** Stage quantity and final selling-price edits as one atomic amendment. */
-  const stageLineUpdate = (lineId: number, currentQuantity: number, currentPrice: number, name: string): void => {
-    const nextQuantity = Number(amendQtyText)
-    const nextPrice = Number(amendPriceText)
-    if (!Number.isFinite(nextQuantity) || nextQuantity <= 0) {
+  const stageLineUpdate = (lineId: number, currentQuantity: number, currentBasePrice: number, currentDiscountType: 'percent' | 'fixed' | null, currentDiscountValue: number, currentManualDiscount: number, productDiscount: number, name: string): void => {
+    const preview = saleLineEditorResult({
+      quantity: amendQtyText,
+      basePriceUsd: amendPriceText,
+      manualDiscountType: amendDiscountType,
+      manualDiscountValue: amendDiscountText,
+      productDiscountUsd: productDiscount,
+    })
+    if (!preview.ok && preview.code === 'quantity') {
       setAmendMutationError(translateOr('amend_quantity_positive', 'Quantity must be greater than zero. Use Remove to delete a line.', 'ចំនួនត្រូវធំជាងសូន្យ។ សូមប្រើ ដកចេញ ដើម្បីលុបជួរ។'))
       return
     }
-    if (!Number.isFinite(nextPrice) || nextPrice < 0) {
+    if (!preview.ok && preview.code === 'price') {
       setAmendMutationError(translateOr('amend_price_nonnegative', 'Selling price must be zero or more.', 'តម្លៃលក់ត្រូវសូន្យ ឬខ្ពស់ជាងនេះ។'))
       return
     }
-    if (Math.abs(nextQuantity - currentQuantity) < 0.000001 && Math.abs(nextPrice - currentPrice) < 0.000001) {
-      setAmendMutationError(translateOr('amend_no_change', 'Enter a new quantity or selling price.', 'សូមបញ្ចូលចំនួន ឬតម្លៃលក់ថ្មី។'))
+    if (!preview.ok) {
+      setAmendMutationError(preview.code === 'discount_exceeds_price'
+        ? translateOr('discount_exceeds_price', 'Discount cannot be more than the price.', 'ការបញ្ចុះតម្លៃមិនអាចលើសតម្លៃបានទេ។')
+        : translateOr('discount_nonnegative', 'Discount must be zero or more.', 'ការបញ្ចុះតម្លៃត្រូវសូន្យ ឬខ្ពស់ជាងនេះ។'))
+      return
+    }
+    if (Math.abs(preview.quantity - currentQuantity) < 0.000001
+      && Math.abs(preview.basePriceUsd - currentBasePrice) < 0.000001
+      && preview.manualDiscountType === currentDiscountType
+      && Math.abs(preview.manualDiscountValue - currentDiscountValue) < 0.000001) {
+      setAmendMutationError(translateOr('amend_no_change', 'Enter a new quantity, price, or discount.', 'សូមបញ្ចូលចំនួន តម្លៃ ឬការបញ្ចុះតម្លៃថ្មី។'))
       return
     }
     amendRequestIdRef.current = createSettlementRequestId()
     setAmendMutationError('')
     setAmendConfirm({
-      request: { kind: 'line_updated', sale_item_id: lineId, quantity: nextQuantity, applied_price_usd: nextPrice },
+      request: {
+        kind: 'line_updated',
+        sale_item_id: lineId,
+        quantity: preview.quantity,
+        base_price_usd: preview.basePriceUsd,
+        manual_discount_type: preview.manualDiscountType,
+        manual_discount_value: preview.manualDiscountValue,
+        manual_discount_usd: preview.manualDiscountUsd,
+        applied_price_usd: preview.appliedPriceUsd,
+      },
       title: translateOr('amend_line_update_title', 'Update this item?', 'ធ្វើបច្ចុប្បន្នភាពទំនិញនេះ?'),
-      summary: `${name}: ${currentQuantity} → ${nextQuantity} · ${fmtUSD(currentPrice)} → ${fmtUSD(nextPrice)}`,
+      summary: `${name}: ${currentQuantity} → ${preview.quantity} · ${fmtUSD(currentBasePrice)} → ${fmtUSD(preview.basePriceUsd)} · ${translateOr('discount', 'Discount', 'បញ្ចុះតម្លៃ')} ${fmtUSD(currentManualDiscount)} → ${fmtUSD(preview.manualDiscountUsd)} · ${translateOr('total', 'Total', 'សរុប')} ${fmtUSD(preview.lineTotalUsd)}`,
     })
   }
 
@@ -1523,17 +1565,18 @@ export default function SaleDetailModal({
                       <label htmlFor="amend-delivery-actual-cost" className="min-w-0 flex-1 text-xs leading-relaxed text-gray-500">
                         {actualCostEditing ? translateOr('amend_actual_cost_new', 'New actual delivery cost', 'ថ្លៃដឹកដើមថ្មី') : translateOr('delivery_actual_cost', 'Actual delivery cost', 'ថ្លៃដឹកដើម')}
                       </label>
-                      {canAmendDeliveryMoney ? <>
+                      {actualCostEditing ? <>
                         <span className="text-xs" aria-hidden="true">$</span>
                         <input id="amend-delivery-actual-cost" type="number" min="0" step="0.01" inputMode="decimal"
-                          value={actualCostEditing ? actualCostText : actualCostUsd ?? ''}
-                          onChange={(event) => { setActualCostText(event.target.value); setActualCostEditing(true); setAmendMutationError('') }}
+                          value={actualCostText}
+                          onChange={(event) => { setActualCostText(event.target.value); setAmendMutationError('') }}
                           disabled={amendSaving} placeholder="0.00" className="w-16 shrink-0 rounded border border-gray-300 px-1 py-1 text-sm tabular-nums dark:border-gray-600 dark:bg-gray-800" />
-                        {actualCostEditing ? <>
                           <button type="button" disabled={amendSaving} onClick={() => stageActualDeliveryCostAmendment(actualCostUsd)} className="min-h-10 shrink-0 rounded px-1 text-xs font-semibold text-blue-700 dark:text-blue-300">{translateOr('amend_apply', 'Apply', 'អនុវត្ត')}</button>
                           <button type="button" disabled={amendSaving} onClick={() => setActualCostEditing(false)} className="min-h-10 shrink-0 rounded px-1 text-xs">{t('cancel') || 'Cancel'}</button>
-                        </> : null}
-                      </> : <span className="text-sm tabular-nums">{actualCostUsd === null ? translateOr('not_recorded', 'Not recorded', 'មិនទាន់កត់ត្រា') : fmtUSD(actualCostUsd)}</span>}
+                      </> : <>
+                        <span className="text-sm tabular-nums">{actualCostUsd === null ? translateOr('not_recorded', 'Not recorded', 'មិនទាន់កត់ត្រា') : fmtUSD(actualCostUsd)}</span>
+                        {canAmendDeliveryMoney ? <button type="button" disabled={amendSaving} onClick={() => { setActualCostText(actualCostUsd === null ? '' : String(actualCostUsd)); setActualCostEditing(true); setAmendMutationError('') }} className="min-h-10 shrink-0 rounded px-1 text-xs font-semibold text-blue-700 dark:text-blue-300">{t('edit') || 'Edit'}</button> : null}
+                      </>}
                     </div>
                     {amendMutationError && actualCostEditing && !amendConfirm ? <p role="alert" className="text-xs text-red-600">{amendMutationError}</p> : null}
                   </div>
@@ -1616,17 +1659,12 @@ export default function SaleDetailModal({
           <SectionCard title={`${t('items') || 'Items'} (${items.length})`}>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="sr-only">
+                <thead className="border-b border-gray-200 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:border-gray-700">
                   <tr>
-                    <th className="px-1.5 py-1.5 text-left sm:px-2">{t('product') || 'Product'}</th>
+                    <th className="px-1.5 py-1.5 text-left sm:px-2"><span className="sr-only">{t('product') || 'Product'}</span></th>
                     <th className="px-1.5 py-1.5 text-right sm:px-2">{t('qty_short') || 'Qty'}</th>
-                    <th className="px-1.5 py-1.5 text-right sm:px-2">{t('unit_price') || 'Unit price'}</th>
-                    <th className="px-1.5 py-1.5 text-right sm:px-2">{t('line_total') || 'Line total'}</th>
-                    {/* A visible header, because this is now a real column:
-                        every editable row on this table -- product lines and
-                        the delivery fee alike -- puts its control here. An
-                        sr-only header described a column the eye could not
-                        find. */}
+                    <th className="px-1.5 py-1.5 text-right sm:px-2">{t('price') || 'Price'}</th>
+                    <th className="px-1.5 py-1.5 text-right sm:px-2">{t('total') || 'Total'}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
@@ -1637,21 +1675,19 @@ export default function SaleDetailModal({
                   ) : items.map((item, index) => {
                     const qty = toNumber(item.quantity || item.qty || 1) || 1
                     const unitUsd = toNumber(item.applied_price_usd ?? item.price_usd ?? item.price)
-                    const unitKhr = toNumber(item.applied_price_khr ?? item.price_khr)
                     const storedLineUsd = Number(item.total_usd)
-                    const storedLineKhr = Number(item.total_khr)
                     const lineUsd = Number.isFinite(storedLineUsd) ? storedLineUsd : unitUsd * qty
-                    const lineKhr = Number.isFinite(storedLineKhr) ? storedLineKhr : unitKhr * qty
-                    const baseUnitUsd = toNumber(item.base_price_usd)
+                    const baseUnitUsd = item.base_price_usd == null ? unitUsd + toNumber(item.manual_discount_usd) : toNumber(item.base_price_usd)
                     const productDiscountUsd = toNumber(item.product_discount_usd)
                     const manualDiscountUsd = toNumber(item.manual_discount_usd)
-                    const lineDiscountUsd = productDiscountUsd + manualDiscountUsd
+                    const manualDiscountType: 'percent' | 'fixed' | null = item.manual_discount_type === 'percent' || item.manual_discount_type === 'fixed'
+                      ? item.manual_discount_type
+                      : manualDiscountUsd > 0 ? 'fixed' : null
+                    const storedDiscountValue = toNumber(item.manual_discount_value)
+                    const manualDiscountValue = manualDiscountType === 'percent'
+                      ? storedDiscountValue
+                      : (storedDiscountValue > 0 ? storedDiscountValue : manualDiscountUsd)
                     const lineFigures = receiptLineFigures(item, true, totals.exchangeRate)
-                    const originalUnitUsd = lineFigures.hasDiscount
-                      ? lineFigures.sellingUnitUsd
-                      : (baseUnitUsd > unitUsd ? baseUnitUsd : unitUsd + lineDiscountUsd)
-                    const hasLineDiscount = originalUnitUsd > unitUsd + 0.005 && lineDiscountUsd > 0
-                    const originalLineUsd = hasLineDiscount ? originalUnitUsd * qty : lineUsd
                     // The sale_items row id, which every amendment addresses.
                     // A legacy row without one gets no controls rather than a
                     // button that would 404 -- the sale is still fully
@@ -1659,68 +1695,81 @@ export default function SaleDetailModal({
                     const lineId = Number(item.id) || 0
                     const allocationCount = Math.max(0, toNumber(item.lot_allocation_count))
                     const allocationLabel = item.batch_label || item.batch_received_at
-                      ? batchDisplayLabel({ id: item.batch_id || lineId || index, lot_code: item.batch_label, received_at: item.batch_received_at })
+                      ? batchDisplayLabel({ id: item.batch_id || lineId || index, lot_code: item.batch_label, received_at: item.batch_received_at }, '').trim()
                       : item.batch_id
-                        ? `${t('batch') || 'Received date'} #${item.batch_id}`
+                        ? `#${item.batch_id}`
                         : ''
+                    const editor = amendLineId === lineId
+                      ? saleLineEditorResult({ quantity: amendQtyText, basePriceUsd: amendPriceText, manualDiscountType: amendDiscountType, manualDiscountValue: amendDiscountText, productDiscountUsd })
+                      : null
+                    const preview = editor?.ok ? editor : null
+                    const displayQty = preview?.quantity ?? qty
+                    const displayPrice = preview?.sellingPriceUsd ?? lineFigures.sellingUnitUsd
+                    const displayDiscount = preview?.totalDiscountUsd ?? lineFigures.unitSavingsUsd
+                    const displayTotal = preview?.lineTotalUsd ?? lineUsd
+                    const editingLine = canAmendThisSale && amendLineId === lineId && lineId > 0
                     return (
                       <Fragment key={`${item.product_id || item.id || index}-${index}`}>
                       <tr>
-                        <td colSpan={4} className="px-1.5 py-1.5 align-top sm:px-2">
-                          <div className="line-clamp-2 break-words font-medium text-gray-900 dark:text-white">
-                            {item.product_name || item.name ? (
-                              <EntityLink page="products" anchor="hub:products:products" search={item.product_name || item.name || undefined} navigate={navigateTo} title={t('open_product') || 'Open product'}>
-                                {item.product_name || item.name}
-                              </EntityLink>
+                        <td className="min-w-[10rem] px-1.5 py-2 align-top sm:px-2">
+                          <div className="flex min-w-0 items-start justify-between gap-2">
+                            <div className="line-clamp-2 min-w-0 break-words font-medium text-gray-900 dark:text-white">
+                              {item.product_name || item.name ? (
+                                <EntityLink page="products" anchor="hub:products:products" search={item.product_name || item.name || undefined} navigate={navigateTo} title={t('open_product') || 'Open product'}>
+                                  {item.product_name || item.name}
+                                </EntityLink>
+                              ) : null}
+                            </div>
+                            {canAmendThisSale && lineId > 0 && !editingLine ? (
+                              <button type="button" disabled={amendSaving} onClick={() => startAmendLine(lineId, qty, baseUnitUsd, manualDiscountType, manualDiscountValue)} className="shrink-0 rounded px-1.5 py-0.5 text-[11px] font-semibold text-blue-700 hover:bg-blue-50 disabled:opacity-50 dark:text-blue-300 dark:hover:bg-blue-950/30">
+                                {t('edit') || 'Edit'}
+                              </button>
                             ) : null}
                           </div>
-                          {item.barcode ? <div className="text-[11px] text-gray-400"><EntityLink page="products" anchor="hub:products:products" search={item.barcode} navigate={navigateTo}>{item.barcode}</EntityLink></div> : null}
-                          {item.supplier ? <div className="text-[11px] text-gray-400"><EntityLink page="contacts" anchor="hub:contacts:suppliers" search={item.supplier} navigate={navigateTo}>{item.supplier}</EntityLink></div> : null}
-                          {allocationLabel ? (
-                            <div className="text-[11px] text-gray-500 dark:text-gray-400">
-                              {t('received_date') || 'Received date'}: {allocationLabel}
-                              {item.batch_expiry_date ? ` · ${t('expiry_date') || 'Expiry date'}: ${fmtDateOnly(item.batch_expiry_date)}` : ''}
-                            </div>
-                          ) : allocationCount > 0 ? (
-                            <div className="text-[11px] text-gray-500 dark:text-gray-400">{t('batches') || 'Received dates'}: {allocationCount}</div>
-                          ) : null}
+                          {item.barcode || item.branch_name ? <div data-sale-line-barcode-branch="" className="flex min-w-0 flex-wrap items-center gap-x-1 text-[11px] text-gray-400">
+                            {item.barcode ? <EntityLink page="products" anchor="hub:products:products" search={item.barcode} navigate={navigateTo}>{item.barcode}</EntityLink> : null}
+                            {item.barcode && item.branch_name ? <span aria-hidden="true">|</span> : null}
+                            {item.branch_name ? <EntityLink page="branches" anchor="hub:branches:overview" navigate={navigateTo}>{item.branch_name}</EntityLink> : null}
+                          </div> : null}
+                          {item.supplier || allocationLabel || allocationCount > 0 ? <div data-sale-line-supplier-date="" className="flex min-w-0 flex-wrap items-center gap-x-1 text-[11px] text-gray-500 dark:text-gray-400">
+                            {item.supplier ? <EntityLink page="contacts" anchor="hub:contacts:suppliers" search={item.supplier} navigate={navigateTo}>{item.supplier}</EntityLink> : null}
+                            {item.supplier && (allocationLabel || allocationCount > 0) ? <span aria-hidden="true">|</span> : null}
+                            {allocationLabel || (allocationCount > 0 ? `${allocationCount} ${t('batches') || 'received dates'}` : null)}
+                            {item.batch_expiry_date ? <span>· {t('expiry_date') || 'Expiry date'}: {fmtDateOnly(item.batch_expiry_date)}</span> : null}
+                          </div> : null}
                           {toNumber(item.returned_quantity) > 0 ? (
                             <div className="mt-0.5 inline-flex rounded bg-orange-100 px-1.5 py-0.5 text-[10px] font-semibold text-orange-700 dark:bg-orange-900/40 dark:text-orange-300">↩ {toNumber(item.returned_quantity)} {t('returned_quantity_tag') || 'returned'}</div>
                           ) : null}
-                          {item.branch_name ? <div className="break-words text-[11px] text-gray-400"><EntityLink page="branches" anchor="hub:branches:overview" navigate={navigateTo}>{item.branch_name}</EntityLink></div> : null}
-                          <div data-sale-line-values="" className="mt-1 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs tabular-nums">
-                            <label className="inline-flex items-center gap-1">{t('qty_short') || 'Qty'}: {canAmendThisSale && lineId ? <input id={`amend-qty-${lineId}`} aria-label={t('qty_short') || 'Qty'} type="number" min="0" step="any" inputMode="decimal" disabled={amendSaving} value={amendLineId === lineId ? amendQtyText : qty} onChange={(event) => { if (amendLineId !== lineId) startAmendLine(lineId, qty, unitUsd); setAmendQtyText(event.target.value) }} className="w-12 rounded border border-gray-200 bg-transparent px-1 py-1 dark:border-gray-600" /> : qty}</label>
-                            <label className="inline-flex flex-wrap items-center gap-1">{t('price') || 'Price'}: {canAmendThisSale && lineId ? <><span aria-hidden="true">$</span><input id={`amend-price-${lineId}`} aria-label={t('selling_price') || 'Selling price'} type="number" min="0" step="0.01" inputMode="decimal" disabled={amendSaving} value={amendLineId === lineId ? amendPriceText : unitUsd} onChange={(event) => { if (amendLineId !== lineId) startAmendLine(lineId, qty, unitUsd); setAmendPriceText(event.target.value) }} className="w-16 rounded border border-gray-200 bg-transparent px-1 py-1 dark:border-gray-600" /></> : fmtUSD(unitUsd)}{hasLineDiscount ? <span className="text-amber-700 dark:text-amber-400">(-{fmtUSD(lineDiscountUsd)})</span> : null}</label>
-                            <span className="font-semibold">{t('total') || 'Total'}: {fmtUSD(lineUsd)}</span>
-                          </div>
                         </td>
-                        {/* S4-30: the amend affordance. Inline rather than in a
-                            menu, because "the customer changed their mind" is a
-                            thing that happens at the counter with someone
-                            waiting -- and the whole control set is on screen
-                            from first paint, never a stub that expands once a
-                            prerequisite field is answered. */}
-                        {/* The amend cell carries the same
-                            tabular-nums/whitespace-nowrap tokens as its numeric
-                            siblings even though it holds a button:
-                            recordDetailRowRhythm locks the shape of every
-                            right-aligned cell in this table, and a control cell
-                            that opted out would weaken the lock for the money
-                            columns beside it. */}
+                        <td data-sale-line-qty="" className="whitespace-nowrap px-1.5 py-2 text-right align-top tabular-nums sm:px-2">
+                          {editingLine ? <input id={`amend-qty-${lineId}`} aria-label={t('qty_short') || 'Qty'} type="number" min="0" step="any" inputMode="decimal" disabled={amendSaving} value={amendQtyText} onChange={(event) => setAmendQtyText(event.target.value)} className="w-12 rounded border border-gray-300 bg-white px-1 py-1 text-right dark:border-gray-600 dark:bg-gray-800" /> : displayQty}
+                        </td>
+                        <td data-sale-line-price="" className="whitespace-nowrap px-1.5 py-2 text-right align-top tabular-nums sm:px-2">
+                          {editingLine ? <div className="space-y-1">
+                            <label className="flex items-center justify-end gap-1"><span className="sr-only">{t('price') || 'Price'}</span><span aria-hidden="true">$</span><input id={`amend-price-${lineId}`} aria-label={t('price') || 'Price'} type="number" min="0" step="0.01" inputMode="decimal" disabled={amendSaving} value={amendPriceText} onChange={(event) => setAmendPriceText(event.target.value)} className="w-16 rounded border border-gray-300 bg-white px-1 py-1 text-right dark:border-gray-600 dark:bg-gray-800" /></label>
+                            <div className="flex items-center justify-end gap-0.5 text-[10px] text-amber-700 dark:text-amber-400">
+                              <span>{t('discount') || 'Discount'}</span>
+                              {(['percent', 'fixed'] as const).map((type) => <button key={type} type="button" disabled={amendSaving} aria-pressed={amendDiscountType === type} onClick={() => { if (amendDiscountType !== type) setAmendDiscountText('0'); setAmendDiscountType(type) }} className={`rounded px-1 py-0.5 font-semibold ${amendDiscountType === type ? 'bg-amber-100 dark:bg-amber-900/40' : ''}`}>{type === 'percent' ? '%' : '$'}</button>)}
+                              <input id={`amend-discount-${lineId}`} aria-label={t('discount') || 'Discount'} type="number" min="0" step="0.01" inputMode="decimal" disabled={amendSaving} value={amendDiscountText} onChange={(event) => { if (!amendDiscountType) setAmendDiscountType('fixed'); setAmendDiscountText(event.target.value) }} className="w-14 rounded border border-amber-300 bg-white px-1 py-1 text-right dark:border-amber-700 dark:bg-gray-800" />
+                              <button type="button" disabled={amendSaving} aria-label={translateOr('clear_discount', 'Clear discount', 'លុបការបញ្ចុះតម្លៃ')} onClick={() => { setAmendDiscountType(null); setAmendDiscountText('0') }} className="rounded px-1 py-0.5">×</button>
+                            </div>
+                          </div> : <>{fmtUSD(displayPrice)}{displayDiscount > 0 ? <div className="text-[11px] text-amber-700 dark:text-amber-400">(-{fmtUSD(displayDiscount)})</div> : null}</>}
+                        </td>
+                        <td data-sale-line-total="" className="whitespace-nowrap px-1.5 py-2 text-right align-top font-semibold tabular-nums sm:px-2">{fmtUSD(displayTotal)}</td>
                       </tr>
-                      {canAmendThisSale && amendLineId === lineId && lineId > 0 ? (
+                      {editingLine ? (
                         <tr className="bg-gray-50 dark:bg-gray-900/40">
                           <td colSpan={4} className="px-1.5 py-2 sm:px-2">
                             <div className="flex flex-wrap items-center gap-2">
                               <button
                                 type="button"
                                 disabled={amendSaving}
-                                onClick={() => stageLineUpdate(lineId, qty, unitUsd, String(item.product_name || item.name || ''))}
+                                onClick={() => stageLineUpdate(lineId, qty, baseUnitUsd, manualDiscountType, manualDiscountValue, manualDiscountUsd, productDiscountUsd, String(item.product_name || item.name || ''))}
                                 className="rounded bg-blue-600 px-2.5 py-1 text-[11px] font-semibold text-white disabled:opacity-50"
                               >
                                 {translateOr('amend_apply', 'Apply', 'អនុវត្ត')}
                               </button>
-                              <button type="button" disabled={amendSaving} onClick={() => { setAmendLineId(null); setReplaceLineId(null) }} className="min-h-10 rounded px-2 text-xs">{t('cancel') || 'Cancel'}</button>
+                              <button type="button" disabled={amendSaving} onClick={() => { setAmendLineId(null); setReplaceLineId(null); setAmendDiscountText('') }} className="min-h-10 rounded px-2 text-xs">{t('cancel') || 'Cancel'}</button>
                               <button
                                 type="button"
                                 disabled={amendSaving}
@@ -1861,12 +1910,13 @@ export default function SaleDetailModal({
                          struck through -- the same wording the receipt prints.
                          Free is what total_usd already assumed; the struck
                          figure still says what the delivery was worth. */
-                      amount={canAmendDeliveryMoney ? <span className="inline-flex items-center gap-1"><label className="inline-flex items-center gap-1"><span aria-hidden="true">$</span><input id="amend-delivery-fee" aria-label={t('delivery_fee') || 'Delivery fee'} type="number" min="0" step="0.01" inputMode="decimal" disabled={amendSaving} value={feeEditing ? feeText : deliveryFeeUsd} onChange={(event) => { setFeeText(event.target.value); setFeeEditing(true); setAmendMutationError('') }} className="w-20 rounded border border-gray-200 bg-transparent px-1 py-1 text-sm tabular-nums dark:border-gray-600" /></label>{deliveryPaidByStore ? <span className="shrink-0 text-xs font-medium text-gray-500 dark:text-gray-400">{translateOr('delivery_free', 'Free', 'ឥតគិតថ្លៃ')}</span> : null}</span> : deliveryPaidByStore ? (
+                      amount={feeEditing ? <span className="inline-flex items-center gap-1"><label className="inline-flex items-center gap-1"><span aria-hidden="true">$</span><input id="amend-delivery-fee" aria-label={t('delivery_fee') || 'Delivery fee'} type="number" min="0" step="0.01" inputMode="decimal" disabled={amendSaving} value={feeText} onChange={(event) => { setFeeText(event.target.value); setAmendMutationError('') }} className="w-20 rounded border border-gray-200 bg-transparent px-1 py-1 text-sm tabular-nums dark:border-gray-600" /></label>{deliveryPaidByStore ? <span className="shrink-0 text-xs font-medium text-gray-500 dark:text-gray-400">{translateOr('delivery_free', 'Free', 'ឥតគិតថ្លៃ')}</span> : null}</span> : deliveryPaidByStore ? (
                         <>
                           {translateOr('delivery_free', 'Free', 'ឥតគិតថ្លៃ')}{' '}
                           <span className="font-normal text-gray-400 line-through">{fmtUSD(deliveryFeeUsd)}</span>
+                          {canAmendDeliveryMoney ? <button type="button" disabled={amendSaving} onClick={() => { setFeeText(String(deliveryFeeUsd)); setFeeEditing(true); setAmendMutationError('') }} className="ml-1 rounded px-1 py-0.5 text-[11px] font-semibold text-blue-700 dark:text-blue-300">{t('edit') || 'Edit'}</button> : null}
                         </>
-                      ) : fmtUSD(deliveryFeeUsd)}
+                      ) : <span className="inline-flex items-center gap-1">{fmtUSD(deliveryFeeUsd)}{canAmendDeliveryMoney ? <button type="button" disabled={amendSaving} onClick={() => { setFeeText(String(deliveryFeeUsd)); setFeeEditing(true); setAmendMutationError('') }} className="rounded px-1 py-0.5 text-[11px] font-semibold text-blue-700 dark:text-blue-300">{t('edit') || 'Edit'}</button> : null}</span>}
                       sub={deliveryFeeKhr > 0
                         ? (deliveryPaidByStore ? <span className="line-through">{fmtKHR(deliveryFeeKhr)}</span> : fmtKHR(deliveryFeeKhr))
                         : null}
@@ -2365,7 +2415,7 @@ export default function SaleDetailModal({
                 currentStatus={currentStatus}
                 selectedStatus={newStatus}
                 notes={statusNotes}
-                saving={statusSaving || pendingStatus}
+                saving={statusSaving}
                 t={t}
                 onSelect={(status) => {
                   setNewStatus(status)

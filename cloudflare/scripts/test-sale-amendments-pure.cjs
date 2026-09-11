@@ -961,6 +961,11 @@ console.log('PASS 14 -- the detail summary describes the sale, not a moment in i
   assert.ok(/app\.post\('\/:id\/amendments'/.test(routes), 'the amendment endpoint must exist')
   assert.ok(/app\.get\('\/:id\/amendments'/.test(routes), 'the detail view needs a read endpoint')
   assert.ok(routes.includes("getActionTier(user, 'sales', 'amend')"), 'amendments must be gated on their own granular action')
+  const lineUpdateBlock = routes.slice(routes.indexOf("if (kind === 'line_updated')"), routes.indexOf('// --- increase /'))
+  assert.ok(lineUpdateBlock.includes('hasLayeredPriceEdit'), 'line_updated must distinguish the new layered POS price contract from legacy applied-price requests')
+  assert.ok(lineUpdateBlock.includes('planSaleLinePriceEdit({'), 'line_updated must delegate percent/fixed recomputation and claimed-price validation to the tested server kernel')
+  assert.ok(lineUpdateBlock.includes('priceLayersChanged'), 'a discount-only edit must be recognized even when the final applied price happens to stay unchanged')
+  assert.ok(routes.includes("base_price_usd: optional('base_price_usd')") && routes.includes("manual_discount_type: optional('manual_discount_type')"), 'idempotency digests must distinguish omitted layered fields from explicit clearing')
 
   // S4-24b is SUBSUMED, not duplicated: its endpoint writes a ledger entry, so
   // there is one way to add a line and one audit trail for it.
