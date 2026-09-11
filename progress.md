@@ -12495,6 +12495,8 @@ on branch `codex/ui-consistency-20260911`. Cloudflare reports Worker version
 **8df18b1b-8e44-4c79-82f3-311b45129898** at **100%**. The release used the
 verified production build and `npm run deploy`; it did not run secret sync,
 database import, remote cleanup, or R2 mutation.
+The live runtime reports revision **7e57b0ce3cb5**, source hash
+**2dc3f268567b5bd1**, and build time **2026-09-11T05:34:03.777Z**.
 
 Primary D1 migrations **0150_fee_operation_receipts.sql**,
 **0151_transfer_provenance_replay.sql**, and
@@ -12532,6 +12534,9 @@ certification except the already-certified route-loader compatibility repair.
 Unauthenticated Playwright reached both production custom domains, but
 Cloudflare's bot challenge returned 403 before the app shell. Therefore no
 authenticated production UI mutation or physical iOS/PWA/camera/printer test
-is claimed. Deployment/version metadata, D1 invariants, local real-route
-Hono/SQLite scenarios, and responsive mocked-browser checks are the recorded
-release evidence.
+is claimed. The retained production zone route independently returned HTTP 200
+for `/health`, and `/api/runtime/version` returned the exact deployed revision,
+source hash, and build time above; its static build manifest also returned
+revision `7e57b0ce3cb5`. Deployment/version metadata, D1 invariants, local
+real-route Hono/SQLite scenarios, and responsive mocked-browser checks are the
+recorded release evidence.
