@@ -21,6 +21,7 @@ const oldCalls = pos.slice(pos.indexOf('async function searchPosCustomers'), pos
 assert.doesNotMatch(oldCalls, /getCustomers\(/, 'POS customer identity reads must not use the Contacts directory payload')
 
 const suggestionBlock = pos.slice(pos.indexOf('export function authoritativePosCustomerSuggestions'), pos.indexOf('async function searchPosCustomers'))
+assert.match(suggestionBlock, /resultsQuery\.trim\(\) !== inputQuery\.trim\(\)/, 'suggestions retain explicit ownership by the query that produced them')
 assert.match(suggestionBlock, /return customers\.slice\(0, LAYOUT\.AUTOCOMPLETE_MAX_RESULTS\)/, 'the bounded authoritative picker response is preserved in server order')
 assert.doesNotMatch(suggestionBlock, /\.filter\([^)]*(?:name|phone)|\.includes\(/, 'POS must not raw-substring-filter the authoritative sales_picker response')
 const authoritativeResponse = [
@@ -30,12 +31,16 @@ const authoritativeResponse = [
 const vite = await createServer({ root: resolve(dirname(fileURLToPath(import.meta.url)), '..'), configFile: false, server: { middlewareMode: true }, plugins: [react()] })
 try {
   const module = await vite.ssrLoadModule('/src/components/pos/POS.tsx') as {
-    authoritativePosCustomerSuggestions: <T>(rows: T[]) => T[]
+    authoritativePosCustomerSuggestions: <T>(rows: T[], resultsQuery?: string, inputQuery?: string) => T[]
   }
-  assert.deepEqual(module.authoritativePosCustomerSuggestions(authoritativeResponse), authoritativeResponse, 'actual POS suggestion logic retains reordered-name and formatted-phone matches returned by the server')
+  assert.deepEqual(module.authoritativePosCustomerSuggestions(authoritativeResponse, 'Dara Sok', 'Dara Sok'), authoritativeResponse, 'actual POS suggestion logic retains reordered-name and formatted-phone matches returned by the server')
+  assert.deepEqual(module.authoritativePosCustomerSuggestions(authoritativeResponse, 'Dara Sok', 'New query'), [], 'typing query B synchronously makes query A rows unselectable')
 } finally {
   await vite.close()
 }
+
+assert.match(pos, /const changeCustomerSearch[\s\S]{0,500}invalidateTrackedRequest\(customerRequestRef\)[\s\S]{0,240}setCustomerSuggestions\(\[\]\)/, 'the input handler invalidates an in-flight old query and clears its visible rows synchronously')
+assert.match(pos, /onChange=\{e => changeCustomerSearch\(e\.target\.value\)\}/, 'the mounted POS input uses the guarded transition handler')
 
 assert.match(snapshot, /\/api\/customers\?fields=picker/, 'offline mirror stays on the bounded snapshot route')
 console.log('PASS POS search and exact-id refresh use the narrow picker; offline fallback keeps the same allowlist')
