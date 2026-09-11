@@ -753,6 +753,7 @@ test('compact report filters match the stacked mobile control contract', () => {
   assert.match(css, /\.reports-mobile-range\s*\{[^}]*\bmin-height:\s*44px\s*;/, 'the combined date/calendar target is at least 44px, regardless of declaration order')
   assert.match(css, /\.reports-show-action\s*\{[^}]*min-height:\s*40px[^}]*height:\s*40px/, 'Show follows the compact action-height contract')
   assert.match(css, /\.reports-filter-trigger\s*\{[^}]*min-height:\s*40px[^}]*height:\s*40px/, 'Filters follows the shared Manage-aligned 40px control height')
+  assert.match(css, /@media \(max-width: 767px\)\s*\{\s*\.reports-filter-trigger\s*\{[^}]*width:\s*40px[^}]*min-width:\s*40px[^}]*max-width:\s*40px[^}]*flex:\s*0 0 40px/, 'compact Filters remains an explicit 40px square when the shared control-height token is absent')
   assert.match(css, /\.reports-view-picker\s*\{[^}]*width:\s*clamp\(7rem, 28vw, 14rem\)[^}]*flex:\s*0 0 clamp\(7rem, 28vw, 14rem\)/, 'short and long report labels retain one responsive picker width with a phone-safe floor')
   assert.match(css, /\[data-reports-hub\] \.lucide-more-horizontal\s*\{[^}]*transform:\s*rotate\(90deg\)/, 'only report overflow dots rotate to the vertical convention')
   assert.match(css, /font-variant-numeric:\s*tabular-nums/, 'report amounts use tabular numerals')
