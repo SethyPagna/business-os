@@ -446,8 +446,10 @@ async function attachBranchStock(env: Env, products: Array<Record<string, unknow
   })
 
   const quantityByProductBranch = new Map<string, number>()
+  const quantityByProduct = new Map<number, number>()
   for (const row of stockRows) {
     quantityByProductBranch.set(`${row.product_id}:${row.branch_id}`, row.quantity)
+    quantityByProduct.set(row.product_id, (quantityByProduct.get(row.product_id) || 0) + (Number(row.quantity) || 0))
   }
   // Every active branch is listed for every product, present in
   // branch_stock or not -- that is what the previous LEFT JOIN produced,
@@ -457,6 +459,9 @@ async function attachBranchStock(env: Env, products: Array<Record<string, unknow
     const productId = Number(product.id)
     return {
       ...product,
+      // Preserve the all-branch total contract, including inactive branches.
+      // The cached product column can drift; reads already loaded this ledger.
+      stock_quantity: quantityByProduct.get(productId) || 0,
       branch_stock: branches.map((branch) => ({
         branch_id: branch.id,
         branch_name: branch.name,
@@ -799,7 +804,12 @@ function buildSearchFilters(query: Record<string, string>, lowStock: LowStockCon
     params.branchId = branchId
     joins.push('LEFT JOIN branch_stock selected_bs ON selected_bs.product_id = p.id AND selected_bs.branch_id = @branchId')
   }
-  const stockExpr = params.branchId ? 'COALESCE(selected_bs.quantity, 0)' : 'COALESCE(p.stock_quantity, 0)'
+  // Match the authoritative all-branch rollup used by stock writers. Do not
+  // exclude inactive branches here: only the displayed branch choices are
+  // active-only. The product_id-leading unique index bounds this correlated
+  // lookup without joining/fanning out the product-family pagination rows.
+  const stockExpr = params.branchId ? 'COALESCE(selected_bs.quantity, 0)'
+    : '(SELECT COALESCE(SUM(catalog_bs.quantity), 0) FROM branch_stock catalog_bs WHERE catalog_bs.product_id = p.id)'
 
   // `ids` is the by-id lookup the client transport has always sent
   // (frontend/src/api/productReadTransport.ts -> getProductsByIds, e.g.
