@@ -500,6 +500,38 @@ async function run() {
   assert.equal(additionRace.sql.prepare("SELECT COUNT(*) n FROM sale_mutation_receipts WHERE mutation_kind='add_items'").get().n, 0)
   assert.equal(additionRace.sql.prepare("SELECT COUNT(*) n FROM action_history WHERE entity='sale'").get().n, 0)
   console.log('PASS add-items settings race rejects core rows, history, allocations, and receipt together')
+
+  function unlottedFixture() {
+    const f = fixture(); seed(f)
+    f.sql.exec("INSERT INTO product_batches(id,variant_product_id,batch_key,is_active,received_at) VALUES(501,1,'dated',1,'2026-01-01'); INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(501,1,5)")
+    return f
+  }
+  const unlottedRequest = { ...additionRequest, client_request_id: 'explicit-unlotted', items: [{ product_id: 1, quantity: 2, unlotted_stock: true }] }
+  for (const status of ['completed', 'awaiting_payment', 'awaiting_delivery']) {
+    const f = unlottedFixture()
+    f.sql.prepare('UPDATE sales SET sale_status=? WHERE id=1').run(status)
+    const added = await f.call('/1/items', unlottedRequest, 'POST')
+    assert.equal(added.status, 200, JSON.stringify(added))
+    assert.equal(f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity, 6)
+    assert.equal(f.sql.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=501').get().quantity, 5)
+    assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM sale_item_batch_allocations').get().n, 0, 'explicit residual source never silently FIFO allocates')
+    assert.deepEqual(await f.call('/1/items', unlottedRequest, 'POST'), added)
+    assert.equal((await f.call('/1/items', { ...unlottedRequest, items: [{ product_id: 1, quantity: 2, unlotted_stock: false }] }, 'POST')).status, 409, 'source choice is in the retry digest')
+  }
+  for (const invalid of [{ unlotted_stock: 'true' }, { unlotted_stock: true, batch_id: 501 }]) {
+    const f = unlottedFixture()
+    assert.equal((await f.call('/1/items', { ...unlottedRequest, items: [{ product_id: 1, quantity: 1, ...invalid }] }, 'POST')).status, 400)
+    assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM sale_items').get().n, 1)
+  }
+  const duplicateResidual = unlottedFixture()
+  assert.equal((await duplicateResidual.call('/1/items', { ...unlottedRequest, items: [...unlottedRequest.items, ...unlottedRequest.items] }, 'POST')).status, 409)
+  assert.equal(duplicateResidual.sql.prepare('SELECT COUNT(*) n FROM sale_items').get().n, 1)
+  const residualRace = unlottedFixture()
+  residualRace.barrier(() => residualRace.sql.prepare('UPDATE branch_stock SET quantity=6 WHERE product_id=1 AND branch_id=1').run())
+  assert.equal((await residualRace.call('/1/items', unlottedRequest, 'POST')).status, 409)
+  assert.equal(residualRace.sql.prepare('SELECT COUNT(*) n FROM sale_items').get().n, 1)
+  assert.equal(residualRace.sql.prepare("SELECT COUNT(*) n FROM sale_mutation_receipts WHERE mutation_kind='add_items'").get().n, 0)
+  console.log('PASS add-items explicit unlotted source: three stock-holding statuses, exact retry, strict flags, duplicate capacity, and atomic race rejection')
 }
 
 run().catch((error) => { console.error(error); process.exitCode = 1 })

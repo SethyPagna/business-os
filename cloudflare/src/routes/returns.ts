@@ -10,7 +10,7 @@ import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, Writ
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { buildLikeAliasClause, tokenizeSearchTermGroups, normalizeSearchText } from '../lib/searchMatch'
-import { receiveBatchStock, removeStockFromBatch, InsufficientBatchStockError, planReceiveBatchStock, readFifoLotAvailabilityForCart, allocateAcrossLots, decrementBatchStockStatement, decrementBatchStockStrictStatement } from '../lib/productBatches'
+import { InsufficientBatchStockError, planReceiveBatchStock, planRemoveStockFromBatch, readFifoLotAvailabilityForCart, allocateAcrossLots, decrementBatchStockStatement, decrementBatchStockStrictStatement } from '../lib/productBatches'
 import {
   normalizeStockAction, resolveRefundUnitPrice, planReturnLot, ReturnLotRequiredError,
   createDamagedLot, createDamagedLotStatement, reverseDamagedLots, applyReplacementStock, planReplacementStock, listOpenDamagedLots,
@@ -153,17 +153,10 @@ async function loadReturnReasonPresets(env: Env): Promise<{ configured: boolean;
 //    routes/inventory.ts's own /adjust uses for a manual add. The resolved
 //    batch_id is stored on the return_items row itself (migration 0026) so
 //    a later PATCH /:id edit can reverse the *same* batch instead of
-//    guessing. Falls back to the old plain branch_stock bump only when no
-//    batch can be resolved -- no sale_item_id (a manual/no-sale return), or
-//    the sale predates the batch/lot system (sale_items.batch_id NULL,
-//    same as sale_items.batch_id already being nullable for the same
-//    reason). This does NOT implement the original backend's fuller
-//    sale_item_batch_allocations/return_item_batch_allocations tables (a
-//    sale line that itself FIFO-drained across *multiple* batches isn't
-//    split back across all of them on return -- it restocks the single
-//    batch sale_items.batch_id names) -- that finer-grained multi-batch
-//    allocation is still not ported, only the common single-batch-per-line
-//    case sales.ts's own POST / already produces.
+//    guessing. Multi-lot sale allocations are restored and recorded per lot.
+//    When provenance is unavailable, a distinct return-event lot records
+//    the return business date. Create and edit keep all stock, allocations,
+//    movements and the durable mutation receipt in one atomic batch.
 // 2. No returnsListCache (the original's 5s in-memory Map cache for GET
 //    /returns). A Worker isolate isn't guaranteed to live long enough for
 //    that cache to pay for itself, and D1 reads are already fast; dropped
@@ -1171,15 +1164,6 @@ app.post('/', async (c) => {
   const totalRefundUsd = Number(returnItems.reduce((sum, item, index) => sum + refundPrices[index].unitUsd * Number(item.quantity), 0).toFixed(2))
   const totalRefundKhr = Math.round(returnItems.reduce((sum, item, index) => sum + refundPrices[index].unitKhr * Number(item.quantity), 0))
 
-  const restockProductIds = [...new Set(returnItems
-    .filter((item) => normalizeStockAction(item) === 'restock' && Number(item.product_id) > 0)
-    .map((item) => Number(item.product_id)))]
-  const lotTrackedProducts = new Set<number>()
-  for (const productId of restockProductIds) {
-    if (await db.prepare('SELECT 1 found FROM product_batches WHERE variant_product_id=? AND is_active=1 LIMIT 1').get([productId])) {
-      lotTrackedProducts.add(productId)
-    }
-  }
   const returnLotPlans: Array<{ splits: Array<{ batchId: number; quantity: number }>; plainQuantity: number }> = []
   for (const item of returnItems) {
     const quantity = Number(item.quantity)
@@ -1193,7 +1177,8 @@ app.post('/', async (c) => {
       allocations: item.sale_item_id ? saleItemAllocations.get(Number(item.sale_item_id)) || [] : [],
       saleLineBatchId: item.sale_item_id ? saleItemBatchInfo.get(Number(item.sale_item_id))?.batch_id ?? null : null,
       operatorBatchId: Number(item.batch_id) > 0 ? Number(item.batch_id) : null,
-      quantity, lotTracked: lotTrackedProducts.has(productId),
+      // Unattributed units receive their own dated return-event lot below.
+      quantity, lotTracked: false,
     })
     if (plan.requiresLotPick) {
       const error = new ReturnLotRequiredError(item.product_name?.trim() || productMap.get(productId)?.name || `product #${productId}`, quantity)
@@ -1522,16 +1507,20 @@ app.post('/', async (c) => {
     const productName = item.product_name?.trim() || (productId ? productMap.get(productId)?.name : null) || null
     const stockAction = normalizeStockAction(item)
     const plan = returnLotPlans[index] || { splits: [], plainQuantity: 0 }
+    const returnReceivedDate = new Date(Date.parse(occurredAt) + 7 * 60 * 60 * 1000).toISOString().slice(0, 10)
+    const fallbackReceive = plan.plainQuantity > 0 && productId && itemBranchId ? planReceiveBatchStock({
+      productId, branchId: itemBranchId, quantity: plan.plainQuantity, receivedDate: returnReceivedDate,
+      provenanceKey: `return:${clientRequestId}:${index}`, notes: 'Received from customer return; original received date unavailable',
+    }) : null
+    const fallbackParams = fallbackReceive ? { returnBatchKey: fallbackReceive.batchKey } : {}
+    const fallbackBatchSql = '(SELECT id FROM product_batches WHERE variant_product_id=@product_id AND batch_key=@returnBatchKey)'
+    const recordedBatchSql = fallbackReceive && !plan.splits.length ? fallbackBatchSql : '@batch_id'
     if (stockAction === 'restock' && productId && itemBranchId) {
       for (const split of plan.splits) {
         const receive = planReceiveBatchStock({ productId, branchId: itemBranchId, quantity: split.quantity, batchId: split.batchId })
         statements.push(...receive.statements.map((statement) => ({ sql: statement.sql, params: statement.params as Record<string, unknown> })))
       }
-      if (plan.plainQuantity > 0) statements.push({
-        sql: `INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(@product_id,@branch_id,@quantity)
-              ON CONFLICT(product_id,branch_id) DO UPDATE SET quantity=branch_stock.quantity+excluded.quantity`,
-        params: { product_id: productId, branch_id: itemBranchId, quantity: plan.plainQuantity },
-      })
+      if (fallbackReceive) statements.push(...fallbackReceive.statements.map((statement) => ({ sql: statement.sql, params: statement.params as Record<string, unknown> })))
       touchedProducts.add(productId)
     }
     const originalBatchId = item.sale_item_id ? saleItemBatchInfo.get(Number(item.sale_item_id))?.batch_id ?? null : null
@@ -1561,14 +1550,14 @@ app.post('/', async (c) => {
       sql: `INSERT INTO return_items(return_id,sale_item_id,product_id,product_name,quantity,applied_price_usd,applied_price_khr,
         cost_price_usd,cost_price_khr,total_usd,total_khr,return_to_stock,stock_action,branch_id,batch_id)
         VALUES(${returnIdExpression},@sale_item_id,@product_id,@product_name,@quantity,@applied_price_usd,@applied_price_khr,
-        @cost_price_usd,@cost_price_khr,@total_usd,@total_khr,@return_to_stock,@stock_action,@branch_id,@batch_id)`,
+        @cost_price_usd,@cost_price_khr,@total_usd,@total_khr,@return_to_stock,@stock_action,@branch_id,${recordedBatchSql})`,
       params: {
         returnClientRequestId: clientRequestId, sale_item_id: item.sale_item_id || null, product_id: productId,
         product_name: productName, quantity, applied_price_usd: refund.unitUsd, applied_price_khr: refund.unitKhr,
         cost_price_usd: toNumber(item.cost_price_usd ?? item.unit_cost_usd), cost_price_khr: toNumber(item.cost_price_khr ?? item.unit_cost_khr),
         total_usd: Number((refund.unitUsd * quantity).toFixed(2)), total_khr: Math.round(refund.unitKhr * quantity),
         return_to_stock: stockAction === 'restock' ? 1 : 0, stock_action: stockAction,
-        branch_id: itemBranchId, batch_id: recordedBatchId,
+        branch_id: itemBranchId, batch_id: recordedBatchId, ...fallbackParams,
       },
     })
     for (const split of splits) {
@@ -1580,14 +1569,24 @@ app.post('/', async (c) => {
       })
       returnAllocationCount += 1
     }
+    if (fallbackReceive) {
+      statements.push({
+        sql: `INSERT INTO return_item_batch_allocations(return_item_id,sale_item_id,batch_id,branch_id,quantity)
+          VALUES((SELECT id FROM return_items WHERE return_id=${returnIdExpression} ORDER BY id DESC LIMIT 1),
+            @sale_item_id,${fallbackBatchSql},@branch_id,@quantity)`,
+        params: { returnClientRequestId: clientRequestId, sale_item_id: item.sale_item_id || null,
+          product_id: productId, branch_id: itemBranchId, quantity: plan.plainQuantity, ...fallbackParams },
+      })
+      returnAllocationCount += 1
+    }
     if (stockAction === 'restock' && productId && itemBranchId) {
       statements.push({
         sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,movement_type,quantity,unit_cost_usd,unit_cost_khr,reason,reference_id,user_id,user_name,batch_id)
-          VALUES(@product_id,@product_name,@branch_id,'return',@quantity,@unit_cost_usd,@unit_cost_khr,@reason,${returnIdExpression},@user_id,@user_name,@batch_id)`,
+          VALUES(@product_id,@product_name,@branch_id,'return',@quantity,@unit_cost_usd,@unit_cost_khr,@reason,${returnIdExpression},@user_id,@user_name,${recordedBatchSql})`,
         params: {
           returnClientRequestId: clientRequestId, product_id: productId, product_name: productName, branch_id: itemBranchId,
           quantity, unit_cost_usd: toNumber(item.cost_price_usd ?? item.unit_cost_usd), unit_cost_khr: toNumber(item.cost_price_khr ?? item.unit_cost_khr),
-          reason: `Return: ${reason}`, user_id: authenticatedActorId, user_name: actorSnapshot(user), batch_id: recordedBatchId,
+          reason: `Return: ${reason}`, user_id: authenticatedActorId, user_name: actorSnapshot(user), batch_id: recordedBatchId, ...fallbackParams,
         },
       })
       movementCount += 1
@@ -2156,8 +2155,8 @@ app.patch('/:id', async (c) => {
     return c.json(JSON.parse(previousReceipt.response_json) as { id: number; updated_at: string })
   }
 
-  const existing = await db.prepare(`SELECT r.*,COALESCE(v.revision,0) AS write_revision
-    FROM returns r LEFT JOIN return_write_revisions v ON v.return_id=r.id WHERE r.id=?`).get<ReturnRow & { write_revision: number }>([id])
+  const existing = await db.prepare(`SELECT r.*,date(r.created_at,'+7 hours') AS received_business_date,COALESCE(v.revision,0) AS write_revision
+    FROM returns r LEFT JOIN return_write_revisions v ON v.return_id=r.id WHERE r.id=?`).get<ReturnRow & { write_revision: number; received_business_date: string | null }>([id])
   if (!existing) return c.json({ error: 'Return not found' }, 404)
   if (normalizeScope(existing.return_scope, CUSTOMER_SCOPE) !== CUSTOMER_SCOPE) {
     return c.json({ error: 'Supplier returns cannot be edited from this form yet.' }, 400)
@@ -2215,15 +2214,6 @@ app.patch('/:id', async (c) => {
     postedKhr: toNumber(item.applied_price_khr, 0),
   }))
 
-  const editRestockProductIds = [...new Set(newItems
-    .filter((item) => normalizeStockAction(item) === 'restock' && Number(item.product_id) > 0)
-    .map((item) => Number(item.product_id)))]
-  const editLotTrackedProducts = new Set<number>()
-  for (const productId of editRestockProductIds) {
-    const row = await db.prepare('SELECT 1 AS found FROM product_batches WHERE variant_product_id = @productId AND is_active = 1 LIMIT 1')
-      .get<{ found: number }>({ productId })
-    if (row) editLotTrackedProducts.add(productId)
-  }
   const editLotPlans: Array<{ splits: Array<{ batchId: number; quantity: number }>; plainQuantity: number }> = []
   for (const item of newItems) {
     const quantity = Number(item.quantity) || 0
@@ -2239,7 +2229,7 @@ app.patch('/:id', async (c) => {
       saleLineBatchId: item.sale_item_id ? (saleItemBatchInfoForEdit.get(item.sale_item_id)?.batch_id ?? null) : null,
       operatorBatchId,
       quantity,
-      lotTracked: editLotTrackedProducts.has(productId),
+      lotTracked: false,
     })
     if (plan.requiresLotPick) {
       const fallbackName = (await db.prepare('SELECT name FROM products WHERE id = ?').get<{ name: string }>([productId]))?.name
@@ -2289,11 +2279,7 @@ app.patch('/:id', async (c) => {
   const fixedResponse = { id: returnId, updated_at: mutationStamp }
   let saleEventProvenance: { source_kind: 'return_edit'; source_id: string; generation: 0; sale_id: number } | null = null
 
-  // Compensation log (Part-77, same shape as POST /'s -- Part 523): every
-  // stock write that lands OUTSIDE the final atomic batch, so a failure
-  // anywhere in the edit can put the stock back exactly where it started.
-  const editReversedRestocks: Array<{ productId: number; batchId: number; branchId: number; quantity: number }> = []
-  const editReappliedRestocks: Array<{ productId: number; batchId: number; branchId: number; quantity: number }> = []
+  // Damaged stock reversals are planned with every sellable-stock change.
   let editReversedDamaged: Awaited<ReturnType<typeof reverseDamagedLots>> = []
 
   // 11.13: this return's damaged lots come back out before the re-apply.
@@ -2341,21 +2327,15 @@ app.patch('/:id', async (c) => {
     throw error
   }
 
-  // Everything from here through the atomic batch runs under ONE catch that
-  // compensates the per-lot writes (they commit individually) -- see the
-  // catch below. Interior deliberately not re-indented: the diff stays
-  // reviewable and the block boundaries are these two comments.
+  // Every reversal and restock below joins the guarded atomic edit batch.
   try {
 
   // Reverse the stock effect of every existing item that had been restocked.
   // Per-lot aware: a return that recorded its restock split into
   // return_item_batch_allocations (POST / and this edit both write it now)
-  // reverses each EXACT lot it put stock into via removeStockFromBatch;
-  // anything not covered by a recorded lot -- the plain-bump remainder, a lot
-  // that has since been sold down, or a legacy return created before per-lot
-  // recording -- falls back to the generic branch_stock aggregate. A legacy
-  // return with only a single return_items.batch_id still reverses that one
-  // lot, exactly as before.
+  // reverses each exact lot with strict transaction-time availability guards.
+  // Old aggregate-only returns may reverse only the actual unlotted residual;
+  // consumed/merged lot stock fails closed instead of taking unrelated units.
   const existingItemIds = existingItems.map((it) => Number(it.id)).filter((n) => Number.isFinite(n) && n > 0)
   const existingReturnAllocations = await fetchReturnItemBatchAllocations(db, existingItemIds)
   for (const item of existingItems) {
@@ -2372,33 +2352,31 @@ app.patch('/:id', async (c) => {
       for (const alloc of recordedAllocs) {
         const give = Math.min(alloc.quantity, plainRemainder)
         if (give <= 0) continue
-        try {
-          await removeStockFromBatch(db, { batchId: alloc.batch_id, productId, branchId: branchIdForItem, quantity: give })
+          statements.push(bulkAssertion(`EXISTS(SELECT 1 FROM product_batches pb JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id
+            WHERE pb.id=@batchId AND pb.variant_product_id=@productId AND bbs.branch_id=@branchId AND bbs.quantity>=@quantity)`,
+            { batchId: alloc.batch_id, productId, branchId: branchIdForItem, quantity: give }))
+          statements.push(...planRemoveStockFromBatch({ batchId: alloc.batch_id, productId, branchId: branchIdForItem, quantity: give }).statements
+            .map((statement) => ({ sql: statement.sql, params: statement.params as Record<string, unknown> })))
           reversalLots.push({ batchId: alloc.batch_id, quantity: give })
-          editReversedRestocks.push({ productId, batchId: alloc.batch_id, branchId: branchIdForItem, quantity: give })
           plainRemainder -= give
-        } catch (err) {
-          // That lot was sold/moved down since, or no longer belongs here;
-          // removeStockFromBatch throws before writing, so leave these units
-          // for the aggregate decrement below.
-          void err
-        }
       }
     } else if (item.batch_id != null) {
       // Legacy return (no recorded split): reverse its single recorded lot.
-      try {
-        await removeStockFromBatch(db, { batchId: item.batch_id, productId, branchId: branchIdForItem, quantity: plainRemainder })
+        statements.push(bulkAssertion(`EXISTS(SELECT 1 FROM product_batches pb JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id
+          WHERE pb.id=@batchId AND pb.variant_product_id=@productId AND bbs.branch_id=@branchId AND bbs.quantity>=@quantity)`,
+          { batchId: item.batch_id, productId, branchId: branchIdForItem, quantity: plainRemainder }))
+        statements.push(...planRemoveStockFromBatch({ batchId: item.batch_id, productId, branchId: branchIdForItem, quantity: plainRemainder }).statements
+          .map((statement) => ({ sql: statement.sql, params: statement.params as Record<string, unknown> })))
         reversalLots.push({ batchId: item.batch_id, quantity: plainRemainder })
-        editReversedRestocks.push({ productId, batchId: item.batch_id, branchId: branchIdForItem, quantity: plainRemainder })
         plainRemainder = 0
-      } catch (err) {
-        void err
-      }
     }
     if (plainRemainder > 0) {
+      statements.push(bulkAssertion(`COALESCE((SELECT quantity FROM branch_stock WHERE product_id=@productId AND branch_id=@branchId),0)
+        - COALESCE((SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs JOIN product_batches pb ON pb.id=bbs.batch_id
+          WHERE pb.variant_product_id=@productId AND bbs.branch_id=@branchId),0) >= @quantity`,
+        { productId, branchId: branchIdForItem, quantity: plainRemainder }))
       statements.push({
-        sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@product_id, @branch_id, 0)
-              ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = MAX(0, branch_stock.quantity - @quantity)`,
+        sql: `UPDATE branch_stock SET quantity=quantity-@quantity WHERE product_id=@product_id AND branch_id=@branch_id`,
         params: { product_id: productId, branch_id: branchIdForItem, quantity: plainRemainder },
       })
     }
@@ -2444,31 +2422,28 @@ app.patch('/:id', async (c) => {
 
     const itemSplits: ReturnBatchSplit[] = []
     let resolvedBatchId: number | null = null
+    const plan = editLotPlans[itemIndex] || { splits: [], plainQuantity: 0 }
+    const fallbackReceive = returnToStock && item.product_id && itemBranchId && plan.plainQuantity > 0 ? planReceiveBatchStock({
+      productId: item.product_id, branchId: itemBranchId, quantity: plan.plainQuantity,
+      receivedDate: existing.received_business_date || new Date(Date.parse(mutationStamp) + 7 * 60 * 60 * 1000).toISOString().slice(0, 10),
+      provenanceKey: `return-edit:${id}:${itemIndex}`, notes: 'Received from customer return; original received date unavailable',
+    }) : null
+    const fallbackParams = fallbackReceive ? { returnBatchKey: fallbackReceive.batchKey } : {}
+    const fallbackBatchSql = '(SELECT id FROM product_batches WHERE variant_product_id=@product_id AND batch_key=@returnBatchKey)'
+    const recordedBatchSql = fallbackReceive && !plan.splits.length ? fallbackBatchSql : '@batch_id'
     if (returnToStock && item.product_id && itemBranchId) {
       // The lots were decided above, before any write: the sale's own lots
       // (last-drawn first), the operator's pick, or a refusal. Nothing here
       // invents a destination.
-      const plan = editLotPlans[itemIndex] || { splits: [], plainQuantity: 0 }
-      let restockRemaining = plan.plainQuantity
       for (const split of plan.splits) {
-        try {
-          const received = await receiveBatchStock(db, { productId: item.product_id, branchId: itemBranchId, quantity: split.quantity, batchId: split.batchId })
-          if (resolvedBatchId == null) resolvedBatchId = received.batchId
-          itemSplits.push({ batchId: received.batchId, branchId: itemBranchId, quantity: split.quantity, saleItemId: item.sale_item_id ?? null })
-          editReappliedRestocks.push({ productId: item.product_id, batchId: received.batchId, branchId: itemBranchId, quantity: split.quantity })
-        } catch (_err) {
-          // Lot gone/merged since the sale -- leave for the aggregate bump.
-          restockRemaining += split.quantity
-        }
+        statements.push(bulkAssertion('EXISTS(SELECT 1 FROM product_batches WHERE id=@batchId AND variant_product_id=@productId)',
+          { batchId: split.batchId, productId: item.product_id }))
+        const received = planReceiveBatchStock({ productId: item.product_id, branchId: itemBranchId, quantity: split.quantity, batchId: split.batchId })
+        statements.push(...received.statements.map((statement) => ({ sql: statement.sql, params: statement.params as Record<string, unknown> })))
+        if (plan.splits.length === 1 && split.quantity === quantity) resolvedBatchId = split.batchId
+        itemSplits.push({ batchId: split.batchId, branchId: itemBranchId, quantity: split.quantity, saleItemId: item.sale_item_id ?? null })
       }
-      // Units not attributable to a lot land on the plain branch_stock total.
-      if (restockRemaining > 0) {
-        statements.push({
-          sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@product_id, @branch_id, @quantity)
-                ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = branch_stock.quantity + @quantity`,
-          params: { product_id: item.product_id, branch_id: itemBranchId, quantity: restockRemaining },
-        })
-      }
+      if (fallbackReceive) statements.push(...fallbackReceive.statements.map((statement) => ({ sql: statement.sql, params: statement.params as Record<string, unknown> })))
       touchedProductIds.add(item.product_id)
     }
 
@@ -2507,7 +2482,7 @@ app.patch('/:id', async (c) => {
 
     statements.push({
       sql: `INSERT INTO return_items (return_id, sale_item_id, product_id, product_name, quantity, applied_price_usd, applied_price_khr, cost_price_usd, cost_price_khr, total_usd, total_khr, return_to_stock, stock_action, branch_id, batch_id)
-            VALUES (@return_id, @sale_item_id, @product_id, @product_name, @quantity, @applied_price_usd, @applied_price_khr, @cost_price_usd, @cost_price_khr, @total_usd, @total_khr, @return_to_stock, @stock_action, @branch_id, @batch_id)`,
+            VALUES (@return_id, @sale_item_id, @product_id, @product_name, @quantity, @applied_price_usd, @applied_price_khr, @cost_price_usd, @cost_price_khr, @total_usd, @total_khr, @return_to_stock, @stock_action, @branch_id, ${recordedBatchSql})`,
       params: {
         return_id: id,
         stock_action: stockAction,
@@ -2523,7 +2498,7 @@ app.patch('/:id', async (c) => {
         total_khr: totalKhr,
         return_to_stock: returnToStock ? 1 : 0,
         branch_id: itemBranchId,
-        batch_id: resolvedBatchId,
+        batch_id: resolvedBatchId, ...fallbackParams,
       },
     })
 
@@ -2545,10 +2520,16 @@ app.patch('/:id', async (c) => {
       })
     }
 
+    if (fallbackReceive) statements.push({
+      sql: `INSERT INTO return_item_batch_allocations(return_item_id,sale_item_id,batch_id,branch_id,quantity)
+        VALUES((SELECT id FROM return_items WHERE return_id=@return_id ORDER BY id DESC LIMIT 1),@sale_item_id,${fallbackBatchSql},@branch_id,@quantity)`,
+      params: { return_id: id, sale_item_id: item.sale_item_id || null, product_id: item.product_id,
+        branch_id: itemBranchId, quantity: plan.plainQuantity, ...fallbackParams },
+    })
     if (returnToStock && item.product_id && itemBranchId) {
       statements.push({
         sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
-              VALUES (@product_id, @product_name, @branch_id, 'return', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
+              VALUES (@product_id, @product_name, @branch_id, 'return', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, ${recordedBatchSql})`,
         params: {
           product_id: item.product_id,
           product_name: item.product_name || null,
@@ -2561,7 +2542,7 @@ app.patch('/:id', async (c) => {
           user_id: user?.id ?? null,
           user_name: actorSnapshot(user),
           // 0084: same single-lot-covers-all rule as the create path.
-          batch_id: itemSplits.length === 1 && itemSplits[0].quantity === quantity ? itemSplits[0].batchId : null,
+          batch_id: itemSplits.length === 1 && itemSplits[0].quantity === quantity ? itemSplits[0].batchId : null, ...fallbackParams,
         },
       })
     }
@@ -2665,30 +2646,8 @@ app.patch('/:id', async (c) => {
   await db.batch(statements)
 
   } catch (error) {
-    // Put the stock back exactly where the edit found it (Part-77, same
-    // discipline as POST /'s catch -- Part 523). Everything in `statements`
-    // rolled back atomically with the failed batch (incl. the return_items
-    // rewrite, so the OLD rows are intact); only the per-lot writes above
-    // committed on their own. Best-effort per write and LOUDLY reported --
-    // anything unreversible reaches the audit log and the 500 message.
-    const unreversed: string[] = []
-    for (const applied of [...editReappliedRestocks].reverse()) {
-      try {
-        await removeStockFromBatch(db, { batchId: applied.batchId, productId: applied.productId, branchId: applied.branchId, quantity: applied.quantity })
-      } catch (_) {
-        unreversed.push(`re-applied restock of ${applied.quantity} into lot #${applied.batchId} (product #${applied.productId})`)
-      }
-    }
-    for (const reversed of [...editReversedRestocks].reverse()) {
-      try {
-        await receiveBatchStock(db, { productId: reversed.productId, branchId: reversed.branchId, quantity: reversed.quantity, batchId: reversed.batchId })
-      } catch (_) {
-        unreversed.push(`reversal of ${reversed.quantity} out of lot #${reversed.batchId} (product #${reversed.productId})`)
-      }
-    }
-    if (unreversed.length) {
-      await audit(c.env, user?.id ?? null, actorSnapshot(user), 'return_rollback_incomplete', 'return', id, { via: 'edit', unreversed })
-    }
+    // All lot, branch, return-item and receipt writes share db.batch; a
+    // conflict/storage failure rolls them all back before retry inspection.
     const retry = await db.prepare(`SELECT return_id,request_digest,response_json FROM return_mutation_receipts
       WHERE actor_id=@actor AND mutation_kind='edit' AND request_id=@request`)
       .get<{ return_id: number; request_digest: string; response_json: string }>({ actor: authenticatedActorId, request: requestId })
@@ -2705,10 +2664,7 @@ app.patch('/:id', async (c) => {
       return c.json({ error: 'Return or linked sale changed. Refresh before retrying.', code: 'write_conflict', conflict: true }, 409)
     }
     return c.json({
-      error: `Failed to update return: ${(error as Error).message}`
-        + (unreversed.length
-          ? ` -- WARNING: ${unreversed.length} stock write(s) could not be reversed (recorded in the audit log; run Verify Integrity): ${unreversed.join('; ')}`
-          : ''),
+      error: `Failed to update return: ${(error as Error).message}`,
     }, 500)
   }
 

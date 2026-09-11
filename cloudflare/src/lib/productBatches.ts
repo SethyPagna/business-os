@@ -143,6 +143,8 @@ export type ReceiveBatchPlanInput = {
   unitCostUsd?: number | null
   paymentStatus?: 'paid' | 'credit' | null
   creditDueDate?: string | null
+  /** Internal provenance key, e.g. a return event; never an operator lot code. */
+  provenanceKey?: string
 }
 
 export type ReceiveBatchStatementPlan = {
@@ -170,7 +172,7 @@ export function planReceiveBatchStock(input: ReceiveBatchPlanInput): ReceiveBatc
   if (!Number.isSafeInteger(branchId) || branchId <= 0) throw new Error('A valid branch is required')
   const receivedAt = normalizeTypedDate(input.receivedDate) || new Date().toISOString().slice(0, 10)
   const lotCode = dateToBatchCode(receivedAt) as string
-  const batchKey = lotCode
+  const batchKey = input.provenanceKey ? ` event:${input.provenanceKey}` : lotCode
   const unitCostUsd = unitCostForReceipt(input.unitCostUsd)
   const receivedCost = receiptCostUsd(unitCostUsd, quantity)
   const paymentStatus = input.paymentStatus === 'paid' || input.paymentStatus === 'credit' ? input.paymentStatus : null
@@ -277,6 +279,45 @@ export function planReceiveBatchStock(input: ReceiveBatchPlanInput): ReceiveBatc
       },
     ],
   }
+}
+
+// Absolute import counts retain the oldest dated lots up to the target count.
+// Only an uncovered increase gets an explicit snapshot-reconciliation lot;
+// its date is the import's receipt date, never the product's creation date.
+// SQL computes against the state inside the caller's atomic row group, so
+// repeated snapshots and two branches cannot add the same stock twice.
+export function planReconcileBranchSnapshot(input: {
+  productId: number; branchId: number; quantity: number; receivedDate: string; batchId?: number
+}): StockWriteStatement[] {
+  const receivedAt = normalizeTypedDate(input.receivedDate)
+  if (!receivedAt) throw new Error('A valid received date is required for a stock snapshot')
+  if (![input.productId, input.branchId].every((n) => Number.isSafeInteger(n) && n > 0)
+    || !Number.isFinite(input.quantity) || input.quantity < 0) throw new Error('Invalid stock snapshot')
+  const params = { ...input, batchId: input.batchId ?? null, receivedAt, batchKey: ` snapshot:${input.branchId}:${receivedAt}`, lotCode: dateToBatchCode(receivedAt) }
+  const available = `(SELECT COALESCE(SUM(bbs.quantity),0) FROM branch_batch_stock bbs
+    JOIN product_batches pb ON pb.id=bbs.batch_id WHERE pb.variant_product_id=@productId
+    AND pb.is_active=1 AND bbs.branch_id=@branchId)`
+  return [
+    { sql: `INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,notes,batch_number,received_branch_id)
+      SELECT @batchId,@productId,@batchKey,@lotCode,@receivedAt,1,'Stock reconciled from product import snapshot',
+        (SELECT COALESCE(MAX(batch_number),0)+1 FROM product_batches WHERE variant_product_id=@productId),@branchId
+      WHERE @quantity > ${available}
+      ON CONFLICT(variant_product_id,batch_key) DO UPDATE SET is_active=1`, params },
+    { sql: `INSERT INTO branch_batch_stock(batch_id,branch_id,quantity)
+      SELECT id,@branchId,@quantity-${available} FROM product_batches
+      WHERE variant_product_id=@productId AND batch_key=@batchKey AND @quantity > ${available}
+      ON CONFLICT(batch_id,branch_id) DO UPDATE SET quantity=branch_batch_stock.quantity+excluded.quantity,updated_at=CURRENT_TIMESTAMP`, params },
+    { sql: `WITH ranked AS MATERIALIZED (
+        SELECT bbs.batch_id,bbs.quantity,COALESCE(SUM(bbs.quantity) OVER (
+          ORDER BY (pb.received_at IS NULL),pb.received_at,pb.id ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING),0) AS prior
+        FROM branch_batch_stock bbs JOIN product_batches pb ON pb.id=bbs.batch_id
+        WHERE pb.variant_product_id=@productId AND pb.is_active=1 AND bbs.branch_id=@branchId
+      ) UPDATE branch_batch_stock SET quantity=(SELECT MIN(r.quantity,MAX(0,@quantity-r.prior)) FROM ranked r WHERE r.batch_id=branch_batch_stock.batch_id),updated_at=CURRENT_TIMESTAMP
+      WHERE branch_id=@branchId AND batch_id IN (SELECT batch_id FROM ranked)`, params },
+    { sql: `INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(@productId,@branchId,@quantity)
+      ON CONFLICT(product_id,branch_id) DO UPDATE SET quantity=excluded.quantity`, params },
+    { sql: `UPDATE products SET stock_quantity=(SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id=@productId),updated_at=CURRENT_TIMESTAMP WHERE id=@productId`, params },
+  ]
 }
 
 export async function getTrackedProductIds(db: D1Compat, branchId: number | null): Promise<number[]> {
