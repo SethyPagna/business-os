@@ -96,6 +96,10 @@ const posContactsApp = load('routes/contacts.ts', {
   '../lib/contactPicker': load('lib/contactPicker.ts'),
   '../lib/contactIds': load('lib/contactIds.ts'),
   '../lib/contactSearch': { buildContactMatchClause: () => undefined },
+  '../lib/salesCustomerSearch': load('lib/salesCustomerSearch.ts', {
+    './contactSearch': load('lib/contactSearch.ts', { './searchMatch': load('lib/searchMatch.ts') }),
+    './phone': load('lib/phone.ts'),
+  }),
 }).default
 
 async function assertDeniedBeforeRead(app, pathname) {

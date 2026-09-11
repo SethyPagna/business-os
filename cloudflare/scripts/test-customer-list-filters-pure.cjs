@@ -300,7 +300,7 @@ check('routes/contacts.ts wires the narrow Sales/POS picker without a full custo
   assert.match(branch, /buildSalesCustomerPickerSql\(predicates\)/)
   assert.match(branch, /clampInt\(query\.pageSize \?\? query\.limit, 50, 1, 100\)/)
   assert.match(branch, /parseContactIdFilter/)
-  assert.match(branch, /buildContactMatchClause/)
+  assert.match(branch, /buildSalesCustomerMatchClause/)
   assert.ok(!branch.includes('withPoints('), 'picker must not calculate loyalty history')
   assert.ok(!branch.includes('SELECT *'), 'picker must not expose the directory row')
   const accessStart = routeSource.indexOf('const requireContactsAccess')
