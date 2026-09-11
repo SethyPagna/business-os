@@ -33,6 +33,10 @@ function check(name, fn) { fn(); passed++; console.log(`PASS ${name}`) }
 
 check('LF-only migration applies to a fresh full schema without changing data', () => {
   assert(!sql.includes('\r'))
+  // Remote D1 rejected nested SELECT CASE/END guards despite local acceptance.
+  // Keep each body to a single conditional RAISE without nested compound SQL.
+  assert.doesNotMatch(sql, /\bCASE\b/)
+  assert.equal((sql.match(/SELECT RAISE\(ABORT,'Positive lot stock requires an active received lot'\)\s+WHERE NOT EXISTS/g) || []).length, 2)
   const db = new Database(schema)
   apply(db)
   assert.equal(db.prepare("SELECT COUNT(*) n FROM sqlite_master WHERE type='trigger' AND name LIKE '%0154'").get().n, 4)

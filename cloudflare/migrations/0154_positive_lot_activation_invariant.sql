@@ -26,16 +26,16 @@ CREATE TRIGGER positive_lot_require_active_insert_0154
 BEFORE INSERT ON branch_batch_stock
 WHEN NEW.quantity>0
 BEGIN
-  SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM product_batches WHERE id=NEW.batch_id AND is_active=1)
-    THEN RAISE(ABORT,'Positive lot stock requires an active received lot') END;
+  SELECT RAISE(ABORT,'Positive lot stock requires an active received lot')
+  WHERE NOT EXISTS (SELECT 1 FROM product_batches WHERE id=NEW.batch_id AND is_active=1);
 END;
 
 CREATE TRIGGER positive_lot_require_active_update_0154
 BEFORE UPDATE ON branch_batch_stock
 WHEN NEW.quantity>0
 BEGIN
-  SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM product_batches WHERE id=NEW.batch_id AND is_active=1)
-    THEN RAISE(ABORT,'Positive lot stock requires an active received lot') END;
+  SELECT RAISE(ABORT,'Positive lot stock requires an active received lot')
+  WHERE NOT EXISTS (SELECT 1 FROM product_batches WHERE id=NEW.batch_id AND is_active=1);
 END;
 
 -- Guard INSERT too: INSERT OR REPLACE must not bypass the update invariant.
