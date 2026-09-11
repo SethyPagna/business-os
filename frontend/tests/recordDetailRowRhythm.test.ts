@@ -81,15 +81,17 @@ for (const [name, source] of [['sale detail', saleDetail], ['return detail', ret
   // --- 3. the money summary is a tfoot of the items table -----------------
 
   runTest(`${name} puts its money summary in the same table as the line items`, () => {
-    const tableStart = source.indexOf('<table className="w-full text-sm">')
+    const tableStart = source.search(/<table className="w-full text-(?:sm|\[11px\])">/)
     assert.ok(tableStart > 0, `${name} must render its line items as a table`)
     assert.match(source, /<tfoot[^>]*>[\s\S]*?<MoneyRow/, `${name} money rows must sit in the items table's tfoot`)
     if (name === 'sale detail') {
-      assert.match(source, /<thead className="border-b[\s\S]*?t\('qty_short'\)[\s\S]*?t\('price'\)[\s\S]*?t\('total'\)/, 'Qty, Price and Total must be visible column headers in order')
-      for (const marker of ['data-sale-line-qty=""', 'data-sale-line-price=""', 'data-sale-line-total=""']) {
-        assert.match(source, new RegExp(marker), `${marker} must identify a real numeric cell`)
+      assert.match(source, /<thead className="border-b[\s\S]*?t\('qty_short'\)[\s\S]*?t\('price'\)[\s\S]*?t\('total'\)[\s\S]*?t\('edit'\)/, 'Qty, Price, Total and Edit must be visible column headers in order')
+      for (const marker of ['data-sale-line-qty=""', 'data-sale-line-price=""', 'data-sale-line-total=""', 'data-sale-line-edit=""']) {
+        assert.match(source, new RegExp(marker), `${marker} must identify its real table cell`)
       }
-      assert.match(source, /line-clamp-2 min-w-0 break-words font-medium/, 'long product names remain readable across two lines')
+      assert.match(source, /balancedSaleItemNameLines\(productName\)/, 'long product names must be split without dropping text')
+      assert.match(source, /data-sale-line-name=""[\s\S]{0,900}overflow-x-auto[\s\S]{0,900}productNameLines\.map/, 'the complete one-or-two-row name must own a horizontal scroller')
+      assert.doesNotMatch(source, /line-clamp-2[^\n]*product|data-sale-line-name=""[\s\S]{0,500}line-clamp-2/, 'the full product name must not be hidden by a visual clamp')
     } else {
       const numericCells = source.match(/className="[^"]*text-right[^"]*align-top[^"]*"/g) || []
       assert.ok(numericCells.length > 0, `${name} must have right-aligned numeric item cells`)
@@ -356,15 +358,20 @@ runTest('sale amendments use explicit gated Edit states inside the compact rows'
   }
   assert.match(saleDetail, /canAmendThisSale && lineId > 0 && !editingLine[\s\S]{0,250}startAmendLine/, 'a permitted line must be plain until its Edit button is pressed')
   assert.match(saleDetail, /editingLine \? <input id=\{`amend-qty-\$\{lineId\}`\}/, 'quantity input must exist only in the open editor')
-  const linePriceEditor = saleDetail.slice(saleDetail.indexOf('editingLine ? <div className="space-y-1">'), saleDetail.indexOf('</td>', saleDetail.indexOf('editingLine ? <div className="space-y-1">')))
+  const linePriceEditorAt = saleDetail.indexOf('editingLine ? <div data-sale-line-editor=""')
+  const linePriceEditor = saleDetail.slice(linePriceEditorAt, saleDetail.indexOf('</td>', linePriceEditorAt))
+  assert.ok(linePriceEditorAt >= 0, 'the price and discount editor must expose one compact row')
+  assert.match(linePriceEditor, /inline-flex min-w-max flex-nowrap items-center/, 'price and discount controls must not stack on desktop')
   assert.match(linePriceEditor, /id=\{`amend-price-\$\{lineId\}`\}/, 'price input must exist only in the open editor')
   assert.match(linePriceEditor, /id=\{`amend-discount-\$\{lineId\}`\}/, 'discount input must exist only in the open editor')
+  assert.match(saleDetail, /style=\{\{ width: saleEditorInputWidth\(amendQtyText\) \}\}/, 'quantity input must grow to preserve its complete value')
+  assert.match(linePriceEditor, /saleEditorInputWidth\(amendPriceText\)[\s\S]*saleEditorInputWidth\(amendDiscountText\)/, 'price and discount inputs must grow to preserve complete values')
   assert.match(saleDetail, /amount=\{feeEditing \? <span[\s\S]{0,300}id="amend-delivery-fee"/, 'delivery fee input must exist only in its explicit Edit state')
   assert.match(saleDetail, /data-sale-actual-cost=""[\s\S]{0,500}\{actualCostEditing \? <>[\s\S]{0,220}id="amend-delivery-actual-cost"/, 'actual cost input must exist only in its explicit Edit state')
   // Applying a changed fee still renders a valid full-width table row.
   const feeAt = saleDetail.indexOf('canAmendDeliveryMoney && feeEditing')
   assert.ok(feeAt >= 0, 'the fee editor must be gated on the Edit control being open')
-  assert.match(saleDetail.slice(feeAt, feeAt + 320), /<tr className=[\s\S]*?<td colSpan=\{4\}/, 'the fee editor must span the compact four-column table')
+  assert.match(saleDetail.slice(feeAt, feeAt + 320), /<tr className=[\s\S]*?<td colSpan=\{5\}/, 'the fee editor must span the compact five-column table')
 })
 
 // --- 9c. the note the cashier typed is a field of the sale -----------------

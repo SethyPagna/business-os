@@ -24,6 +24,7 @@ import {
 import { receiptTotalsFigures } from '../../utils/receiptTotals.ts'
 import { receiptLineFigures } from '../../utils/receiptLineMath.ts'
 import { saleLineEditorResult } from '../../utils/saleLineEditor.ts'
+import { balancedSaleItemNameLines, saleEditorInputWidth } from '../../utils/saleItemNameLayout.ts'
 import CopyableId from '../shared/CopyableId.tsx'
 import { SaleCopyValue as EntityLink } from './SalesListSurface.tsx'
 import { DetailRow, DetailRowGroup, MoneyRow } from '../shared/DetailRows.tsx'
@@ -1705,26 +1706,25 @@ export default function SaleDetailModal({
 
           {/* Items AND the money summary in ONE table: the tfoot amounts sit in
               the same column as the line totals above them, which is the whole
-              point of a row view -- the numbers can be read straight down. The
-              product name wraps instead of living in a 151px horizontal scroll
-              box (measured on the old shape at 1280), and the table keeps the
-              same shape at every width, so the phone no longer loses the Qty
-              and Unit price columns to a separate card list. */}
+              point of a row view -- the numbers can be read straight down.
+              Names use at most two balanced, untruncated rows inside their own
+              scroller; the table owns any remaining narrow-screen overflow. */}
           <SectionCard title={`${t('items') || 'Items'} (${items.length})`}>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-[11px]">
                 <thead className="border-b border-gray-200 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:border-gray-700">
                   <tr>
                     <th className="px-1.5 py-1.5 text-left sm:px-2"><span className="sr-only">{t('product') || 'Product'}</span></th>
                     <th className="px-1.5 py-1.5 text-right sm:px-2">{t('qty_short') || 'Qty'}</th>
                     <th className="px-1.5 py-1.5 text-right sm:px-2">{t('price') || 'Price'}</th>
                     <th className="px-1.5 py-1.5 text-right sm:px-2">{t('total') || 'Total'}</th>
+                    <th className="px-1.5 py-1.5 text-right sm:px-2">{t('edit') || 'Edit'}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
                   {items.length === 0 ? (
                     <tr>
-                      <td colSpan={4} className="px-2 py-3 text-sm text-gray-400">{t('no_item_details') || 'No item details available.'}</td>
+                      <td colSpan={5} className="px-2 py-3 text-sm text-gray-400">{t('no_item_details') || 'No item details available.'}</td>
                     </tr>
                   ) : items.map((item, index) => {
                     const qty = toNumber(item.quantity || item.qty || 1) || 1
@@ -1762,30 +1762,30 @@ export default function SaleDetailModal({
                     const displayDiscount = preview?.totalDiscountUsd ?? lineFigures.unitSavingsUsd
                     const displayTotal = preview?.lineTotalUsd ?? lineUsd
                     const editingLine = canAmendThisSale && amendLineId === lineId && lineId > 0
+                    const productName = String(item.product_name || item.name || '')
+                    const productNameLines = balancedSaleItemNameLines(productName)
                     return (
                       <Fragment key={`${item.product_id || item.id || index}-${index}`}>
                       <tr>
-                        <td className="min-w-[10rem] px-1.5 py-2 align-top sm:px-2">
-                          <div className="flex min-w-0 items-start justify-between gap-2">
-                            <div className="line-clamp-2 min-w-0 break-words font-medium text-gray-900 dark:text-white">
-                              {item.product_name || item.name ? (
-                                <EntityLink page="products" anchor="hub:products:products" search={item.product_name || item.name || undefined} navigate={navigateTo} title={t('open_product') || 'Open product'}>
-                                  {item.product_name || item.name}
-                                </EntityLink>
-                              ) : null}
-                            </div>
-                            {canAmendThisSale && lineId > 0 && !editingLine ? (
-                              <button type="button" disabled={amendSaving} onClick={() => startAmendLine(lineId, qty, baseUnitUsd, manualDiscountType, manualDiscountValue)} className="shrink-0 rounded px-1.5 py-0.5 text-[11px] font-semibold text-blue-700 hover:bg-blue-50 disabled:opacity-50 dark:text-blue-300 dark:hover:bg-blue-950/30">
-                                {t('edit') || 'Edit'}
-                              </button>
+                        <td className="w-full max-w-0 min-w-[8rem] px-1.5 py-1.5 align-top sm:px-2">
+                          <div data-sale-line-name="" className="min-w-0">
+                            {productName ? (
+                              <EntityLink
+                                page="products"
+                                className="block max-w-full overflow-x-auto overflow-y-hidden whitespace-nowrap text-[11px] font-medium leading-[1.35] text-gray-900 [scrollbar-width:thin] [overscroll-behavior-inline:contain] [&::-webkit-scrollbar]:h-[3px] dark:text-white"
+                              >
+                                <span className="inline-block min-w-full w-max">
+                                  {productNameLines.map((line, lineIndex) => <span key={lineIndex} className="block whitespace-nowrap">{line}</span>)}
+                                </span>
+                              </EntityLink>
                             ) : null}
                           </div>
-                          {item.barcode || item.branch_name ? <div data-sale-line-barcode-branch="" className="flex min-w-0 flex-wrap items-center gap-x-1 text-[11px] text-gray-400">
+                          {item.barcode || item.branch_name ? <div data-sale-line-barcode-branch="" className="flex min-w-0 flex-wrap items-center gap-x-1 text-[10px] text-gray-400">
                             {item.barcode ? <EntityLink page="products" anchor="hub:products:products" search={item.barcode} navigate={navigateTo}>{item.barcode}</EntityLink> : null}
                             {item.barcode && item.branch_name ? <span aria-hidden="true">|</span> : null}
                             {item.branch_name ? <EntityLink page="branches" anchor="hub:branches:overview" navigate={navigateTo}>{item.branch_name}</EntityLink> : null}
                           </div> : null}
-                          {item.supplier || allocationLabel || allocationCount > 0 ? <div data-sale-line-supplier-date="" className="flex min-w-0 flex-wrap items-center gap-x-1 text-[11px] text-gray-500 dark:text-gray-400">
+                          {item.supplier || allocationLabel || allocationCount > 0 ? <div data-sale-line-supplier-date="" className="flex min-w-0 flex-wrap items-center gap-x-1 text-[10px] text-gray-500 dark:text-gray-400">
                             {item.supplier ? <EntityLink page="contacts" anchor="hub:contacts:suppliers" search={item.supplier} navigate={navigateTo}>{item.supplier}</EntityLink> : null}
                             {item.supplier && (allocationLabel || allocationCount > 0) ? <span aria-hidden="true">|</span> : null}
                             {allocationLabel || (allocationCount > 0 ? `${allocationCount} ${t('batches') || 'received dates'}` : null)}
@@ -1795,25 +1795,32 @@ export default function SaleDetailModal({
                             <div className="mt-0.5 inline-flex rounded bg-orange-100 px-1.5 py-0.5 text-[10px] font-semibold text-orange-700 dark:bg-orange-900/40 dark:text-orange-300">↩ {toNumber(item.returned_quantity)} {t('returned_quantity_tag') || 'returned'}</div>
                           ) : null}
                         </td>
-                        <td data-sale-line-qty="" className="whitespace-nowrap px-1.5 py-2 text-right align-top tabular-nums sm:px-2">
-                          {editingLine ? <input id={`amend-qty-${lineId}`} aria-label={t('qty_short') || 'Qty'} type="number" min="0" step="any" inputMode="decimal" disabled={amendSaving} value={amendQtyText} onChange={(event) => setAmendQtyText(event.target.value)} className="w-12 rounded border border-gray-300 bg-white px-1 py-1 text-right dark:border-gray-600 dark:bg-gray-800" /> : displayQty}
+                        <td data-sale-line-qty="" className="whitespace-nowrap px-1.5 py-1.5 text-right align-top text-[11px] tabular-nums sm:px-2">
+                          {editingLine ? <input id={`amend-qty-${lineId}`} aria-label={t('qty_short') || 'Qty'} type="number" min="0" step="any" inputMode="decimal" disabled={amendSaving} value={amendQtyText} onChange={(event) => setAmendQtyText(event.target.value)} style={{ width: saleEditorInputWidth(amendQtyText) }} className="h-7 min-w-10 rounded border border-gray-300 bg-white px-1 py-0.5 text-right text-[11px] dark:border-gray-600 dark:bg-gray-800" /> : displayQty}
                         </td>
-                        <td data-sale-line-price="" className="whitespace-nowrap px-1.5 py-2 text-right align-top tabular-nums sm:px-2">
-                          {editingLine ? <div className="space-y-1">
-                            <label className="flex items-center justify-end gap-1"><span className="sr-only">{t('price') || 'Price'}</span><span aria-hidden="true">$</span><input id={`amend-price-${lineId}`} aria-label={t('price') || 'Price'} type="number" min="0" step="0.01" inputMode="decimal" disabled={amendSaving} value={amendPriceText} onChange={(event) => setAmendPriceText(event.target.value)} className="w-16 rounded border border-gray-300 bg-white px-1 py-1 text-right dark:border-gray-600 dark:bg-gray-800" /></label>
-                            <div className="flex items-center justify-end gap-0.5 text-[10px] text-amber-700 dark:text-amber-400">
+                        <td data-sale-line-price="" className="whitespace-nowrap px-1.5 py-1.5 text-right align-top text-[11px] tabular-nums sm:px-2">
+                          {editingLine ? <div data-sale-line-editor="" className="inline-flex min-w-max flex-nowrap items-center justify-end gap-1">
+                            <label className="inline-flex items-center justify-end gap-0.5"><span className="sr-only">{t('price') || 'Price'}</span><span aria-hidden="true">$</span><input id={`amend-price-${lineId}`} aria-label={t('price') || 'Price'} type="number" min="0" step="0.01" inputMode="decimal" disabled={amendSaving} value={amendPriceText} onChange={(event) => setAmendPriceText(event.target.value)} style={{ width: saleEditorInputWidth(amendPriceText) }} className="h-7 min-w-10 rounded border border-gray-300 bg-white px-1 py-0.5 text-right text-[11px] dark:border-gray-600 dark:bg-gray-800" /></label>
+                            <div className="inline-flex flex-nowrap items-center justify-end gap-0.5 text-[10px] text-amber-700 dark:text-amber-400">
                               <span>{t('discount') || 'Discount'}</span>
                               {(['percent', 'fixed'] as const).map((type) => <button key={type} type="button" disabled={amendSaving} aria-pressed={amendDiscountType === type} onClick={() => { if (amendDiscountType !== type) setAmendDiscountText('0'); setAmendDiscountType(type) }} className={`rounded px-1 py-0.5 font-semibold ${amendDiscountType === type ? 'bg-amber-100 dark:bg-amber-900/40' : ''}`}>{type === 'percent' ? '%' : '$'}</button>)}
-                              <input id={`amend-discount-${lineId}`} aria-label={t('discount') || 'Discount'} type="number" min="0" step="0.01" inputMode="decimal" disabled={amendSaving} value={amendDiscountText} onChange={(event) => { if (!amendDiscountType) setAmendDiscountType('fixed'); setAmendDiscountText(event.target.value) }} className="w-14 rounded border border-amber-300 bg-white px-1 py-1 text-right dark:border-amber-700 dark:bg-gray-800" />
+                              <input id={`amend-discount-${lineId}`} aria-label={t('discount') || 'Discount'} type="number" min="0" step="0.01" inputMode="decimal" disabled={amendSaving} value={amendDiscountText} onChange={(event) => { if (!amendDiscountType) setAmendDiscountType('fixed'); setAmendDiscountText(event.target.value) }} style={{ width: saleEditorInputWidth(amendDiscountText) }} className="h-7 min-w-10 rounded border border-amber-300 bg-white px-1 py-0.5 text-right text-[11px] dark:border-amber-700 dark:bg-gray-800" />
                               <button type="button" disabled={amendSaving} aria-label={translateOr('clear_discount', 'Clear discount', 'លុបការបញ្ចុះតម្លៃ')} onClick={() => { setAmendDiscountType(null); setAmendDiscountText('0') }} className="rounded px-1 py-0.5">×</button>
                             </div>
                           </div> : <>{fmtUSD(displayPrice)}{displayDiscount > 0 ? <div className="text-[11px] text-amber-700 dark:text-amber-400">(-{fmtUSD(displayDiscount)})</div> : null}</>}
                         </td>
-                        <td data-sale-line-total="" className="whitespace-nowrap px-1.5 py-2 text-right align-top font-semibold tabular-nums sm:px-2">{fmtUSD(displayTotal)}</td>
+                        <td data-sale-line-total="" className="whitespace-nowrap px-1.5 py-1.5 text-right align-top text-[11px] font-semibold tabular-nums sm:px-2">{fmtUSD(displayTotal)}</td>
+                        <td data-sale-line-edit="" className="whitespace-nowrap px-1.5 py-1.5 text-right align-top sm:px-2">
+                          {canAmendThisSale && lineId > 0 && !editingLine ? (
+                            <button type="button" disabled={amendSaving} onClick={() => startAmendLine(lineId, qty, baseUnitUsd, manualDiscountType, manualDiscountValue)} className="min-h-7 shrink-0 rounded px-1.5 py-0.5 text-[11px] font-semibold text-blue-700 hover:bg-blue-50 disabled:opacity-50 dark:text-blue-300 dark:hover:bg-blue-950/30">
+                              {t('edit') || 'Edit'}
+                            </button>
+                          ) : null}
+                        </td>
                       </tr>
                       {editingLine ? (
                         <tr className="bg-gray-50 dark:bg-gray-900/40">
-                          <td colSpan={4} className="px-1.5 py-2 sm:px-2">
+                          <td colSpan={5} className="px-1.5 py-2 sm:px-2">
                             <div className="flex flex-wrap items-center gap-2">
                               <button
                                 type="button"
@@ -1993,7 +2000,7 @@ export default function SaleDetailModal({
                       same way from the same place. */}
                   {canAmendDeliveryMoney && feeEditing ? (
                     <tr className="bg-gray-50 dark:bg-gray-900/40">
-                      <td colSpan={4} className="px-1.5 py-2 sm:px-2">
+                      <td colSpan={5} className="px-1.5 py-2 sm:px-2">
                         <div className="flex flex-wrap items-center justify-end gap-2">
                           <button
                             type="button"

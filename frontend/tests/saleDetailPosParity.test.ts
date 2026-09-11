@@ -139,9 +139,10 @@ for (const fragment of cardMarkup) {
 }
 assert.match(
   detail,
-  /<div className="(?=[^"]*\bline-clamp-2\b)(?=[^"]*\bbreak-words\b)(?=[^"]*\bfont-medium\b)[^"]*"/,
-  'compact receipt product names remain readable across two lines',
+  /balancedSaleItemNameLines\(productName\)[\s\S]*?data-sale-line-name=""[\s\S]*?overflow-x-auto[\s\S]*?productNameLines\.map/,
+  'compact receipt product names preserve every character in at most two horizontally reachable rows',
 )
+assert.doesNotMatch(detail, /data-sale-line-name=""[\s\S]{0,500}line-clamp-2/, 'receipt product names must not hide a third line behind a clamp')
 // POS.tsx keeps promotionBadgeForProduct for its one-tap gate, but nothing
 // of the card body: no badge component of its own, no expiry read, no
 // inline card markup.
