@@ -1,4 +1,16 @@
 import assert from 'node:assert/strict'
+// These transport tests model a browser with readable coordination storage.
+function createReadableStorage(): Storage {
+  const values = new Map<string, string>()
+  return {
+    get length() { return values.size },
+    clear: () => { values.clear() },
+    key: (index: number) => [...values.keys()][index] ?? null,
+    getItem: (key: string) => values.get(String(key)) ?? null,
+    setItem: (key: string, value: string) => { values.set(String(key), String(value)) },
+    removeItem: (key: string) => { values.delete(String(key)) },
+  }
+}
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -252,7 +264,7 @@ const originalWindow = globalThis.window
 const sessionValues = new Map<string, string>()
 const warnings: Array<{ errorId: string; channel: string; code: string; outcome?: string }> = []
 const resolvedWarnings: Array<{ errorId: string; channel: string; code: string }> = []
-globalThis.window = Object.assign(new EventTarget(), { sessionStorage: {
+globalThis.window = Object.assign(new EventTarget(), { localStorage: createReadableStorage(), sessionStorage: {
   getItem: (key: string) => sessionValues.get(key) ?? null,
   setItem: (key: string, value: string) => { sessionValues.set(key, value) },
   removeItem: (key: string) => { sessionValues.delete(key) },

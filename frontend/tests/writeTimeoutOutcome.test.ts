@@ -1,10 +1,22 @@
 import assert from 'node:assert/strict'
+// These transport tests model a browser with readable coordination storage.
+function createReadableStorage(): Storage {
+  const values = new Map<string, string>()
+  return {
+    get length() { return values.size },
+    clear: () => { values.clear() },
+    key: (index: number) => [...values.keys()][index] ?? null,
+    getItem: (key: string) => values.get(String(key)) ?? null,
+    setItem: (key: string, value: string) => { values.set(String(key), String(value)) },
+    removeItem: (key: string) => { values.delete(String(key)) },
+  }
+}
 import { apiFetch, route, setSyncServerUrl, __resetApiHealthForTests, __resetApiWriteDedupeForTests, WRITE_REQUEST_TIMEOUT_MS } from '../src/api/http.ts'
 
 const saved = { fetch: globalThis.fetch, window: globalThis.window, CustomEvent: globalThis.CustomEvent, setTimeout: globalThis.setTimeout }
 const events: any[] = []
 globalThis.CustomEvent = class extends Event { detail: unknown; constructor(type: string, init: any = {}) { super(type); this.detail = init.detail } } as any
-globalThis.window = { dispatchEvent: (event: any) => { events.push(event); return true }, addEventListener() {}, removeEventListener() {}, setTimeout, clearTimeout } as any
+globalThis.window = { localStorage: createReadableStorage(), sessionStorage: createReadableStorage(), dispatchEvent: (event: any) => { events.push(event); return true }, addEventListener() {}, removeEventListener() {}, setTimeout, clearTimeout } as any
 function reset() { events.length = 0; __resetApiHealthForTests(); __resetApiWriteDedupeForTests(); setSyncServerUrl('https://sync.example.test') }
 function aborted(signal: AbortSignal | null | undefined): Promise<any> { return new Promise((_, reject) => signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })), { once: true })) }
 try {

@@ -1,4 +1,16 @@
 import assert from 'node:assert/strict'
+// These transport tests model a browser with readable coordination storage.
+function createReadableStorage(): Storage {
+  const values = new Map<string, string>()
+  return {
+    get length() { return values.size },
+    clear: () => { values.clear() },
+    key: (index: number) => [...values.keys()][index] ?? null,
+    getItem: (key: string) => values.get(String(key)) ?? null,
+    setItem: (key: string, value: string) => { values.set(String(key), String(value)) },
+    removeItem: (key: string) => { values.delete(String(key)) },
+  }
+}
 import fs from 'node:fs'
 import { apiFetch, cacheClearAll, cacheGet, cacheSet, route, setSyncServerUrl } from '../src/api/http.ts'
 import { getSales } from '../src/api/salesTransport.ts'
@@ -13,6 +25,8 @@ const windowEvents = new EventTarget()
 Object.defineProperty(globalThis, 'window', {
   configurable: true,
   value: {
+    localStorage: createReadableStorage(),
+    sessionStorage: createReadableStorage(),
     setTimeout,
     clearTimeout,
     dispatchEvent: (event: Event) => windowEvents.dispatchEvent(event),

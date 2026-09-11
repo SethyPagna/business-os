@@ -1,4 +1,16 @@
 import assert from 'node:assert/strict'
+// These transport tests model a browser with readable coordination storage.
+function createReadableStorage(): Storage {
+  const values = new Map<string, string>()
+  return {
+    get length() { return values.size },
+    clear: () => { values.clear() },
+    key: (index: number) => [...values.keys()][index] ?? null,
+    getItem: (key: string) => values.get(String(key)) ?? null,
+    setItem: (key: string, value: string) => { values.set(String(key), String(value)) },
+    removeItem: (key: string) => { values.delete(String(key)) },
+  }
+}
 import fs from 'node:fs'
 import {
   __resetApiHealthForTests,
@@ -324,6 +336,8 @@ await runTest('a bare non-JSON 401 (edge interference, e.g. Cloudflare Access) d
     } as unknown as typeof CustomEvent
   }
   globalThis.window = {
+    localStorage: createReadableStorage(),
+    sessionStorage: createReadableStorage(),
     setTimeout,
     clearTimeout,
     dispatchEvent: (event: Event) => events.push(event),
@@ -371,6 +385,8 @@ await runTest('a real invalid_session 401 (proper app JSON error) still forces a
     } as unknown as typeof CustomEvent
   }
   globalThis.window = {
+    localStorage: createReadableStorage(),
+    sessionStorage: createReadableStorage(),
     setTimeout,
     clearTimeout,
     dispatchEvent: (event: Event) => events.push(event),
@@ -417,6 +433,8 @@ await runTest('read routes return fallback on transient gateway errors without s
     } as unknown as typeof CustomEvent
   }
   globalThis.window = {
+    localStorage: createReadableStorage(),
+    sessionStorage: createReadableStorage(),
     setTimeout,
     clearTimeout,
     dispatchEvent: (event: Event) => events.push(event),
@@ -667,6 +685,8 @@ await runTest('portal HTTP helper prefers browser origin and keeps fetch abort s
   const originalFetch = globalThis.fetch
   const calls: FetchCall[] = []
   globalThis.window = {
+    localStorage: createReadableStorage(),
+    sessionStorage: createReadableStorage(),
     location: { origin: 'https://browser.example.test/' },
   } as unknown as Window & typeof globalThis
   globalThis.fetch = ((...args: FetchCall) => {
@@ -733,6 +753,8 @@ await runTest('import job transport emits explicit activity events for lazy trac
   const events: Array<{ type: string; detail: Record<string, unknown> }> = []
   const listeners = new Map<string, Set<(event: Event) => void>>()
   globalThis.window = {
+    localStorage: createReadableStorage(),
+    sessionStorage: createReadableStorage(),
     dispatchEvent: (event: Event) => {
       events.push({
         type: event.type,
@@ -840,6 +862,8 @@ await runTest('sync runtime helpers emit compact window events with timestamps',
     } as unknown as typeof CustomEvent
   }
   globalThis.window = {
+    localStorage: createReadableStorage(),
+    sessionStorage: createReadableStorage(),
     dispatchEvent: (event: Event) => events.push(event),
   } as unknown as Window & typeof globalThis
 
@@ -1594,7 +1618,7 @@ await runTest('invalidated SWR completion cannot replace a newer foreground valu
   const originalNow = Date.now
   const originalWindow = globalThis.window
   const events: string[] = []
-  globalThis.window = { dispatchEvent: (event: Event) => { events.push(event.type); return true } } as unknown as Window & typeof globalThis
+  globalThis.window = { localStorage: createReadableStorage(), sessionStorage: createReadableStorage(), dispatchEvent: (event: Event) => { events.push(event.type); return true } } as unknown as Window & typeof globalThis
   const old = deferredRead<number>()
   try {
     cacheSet('products:swr-race', 0)
@@ -1637,6 +1661,8 @@ await runTest('local race winner cannot let late invalidated server overwrite fr
   const originalWindow = globalThis.window
   const events: string[] = []
   globalThis.window = {
+    localStorage: createReadableStorage(),
+    sessionStorage: createReadableStorage(),
     setTimeout: (fn: () => void) => setTimeout(fn, 0),
     clearTimeout: (id: ReturnType<typeof setTimeout>) => clearTimeout(id),
     dispatchEvent: (event: Event) => { events.push(event.type); return true },
@@ -1680,6 +1706,8 @@ await runTest('pending local loser remains invalidatable after the server wins',
   resetApiState(); cacheClearAll(); setSyncServerUrl('https://sync.example.test')
   const originalWindow = globalThis.window
   globalThis.window = {
+    localStorage: createReadableStorage(),
+    sessionStorage: createReadableStorage(),
     setTimeout: (fn: () => void) => setTimeout(fn, 0),
     clearTimeout: (id: ReturnType<typeof setTimeout>) => clearTimeout(id),
   } as unknown as Window & typeof globalThis
@@ -1708,7 +1736,7 @@ await runTest('non-invalidated SWR still caches and emits its refresh', async ()
   const originalNow = Date.now
   const originalWindow = globalThis.window
   const events: string[] = []
-  globalThis.window = { dispatchEvent: (event: Event) => { events.push(event.type); return true } } as unknown as Window & typeof globalThis
+  globalThis.window = { localStorage: createReadableStorage(), sessionStorage: createReadableStorage(), dispatchEvent: (event: Event) => { events.push(event.type); return true } } as unknown as Window & typeof globalThis
   const refresh = deferredRead<number>()
   try {
     cacheSet('products:swr-control', 0)
@@ -1730,6 +1758,8 @@ async function withImmediateFallbackTimers(work: () => Promise<void>) {
   resetApiState(); cacheClearAll(); setSyncServerUrl('https://sync.example.test')
   const originalWindow = globalThis.window
   globalThis.window = {
+    localStorage: createReadableStorage(),
+    sessionStorage: createReadableStorage(),
     setTimeout: (fn: () => void) => setTimeout(fn, 0),
     clearTimeout: (id: ReturnType<typeof setTimeout>) => clearTimeout(id),
     dispatchEvent: () => true,
