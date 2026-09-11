@@ -1430,14 +1430,14 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
    * was never amended" are opposite answers, and quietly showing the second
    * for the first would be the exact silent gap this feature exists to close.
    */
-  const loadSaleAmendments = async (saleId: number | string): Promise<SaleAmendmentRow[] | null> => {
+  const loadSaleAmendments = useCallback(async (saleId: number | string): Promise<SaleAmendmentRow[] | null> => {
     try {
       const result = await getSalesApi().getSaleAmendments(saleId) as { entries?: SaleAmendmentRow[] } | null
       return Array.isArray(result?.entries) ? result.entries : []
     } catch {
       return null
     }
-  }
+  }, [])
 
   // "also has the returns button right in the sales receipt directly in
   // addition to being in returns section" (user, Sep 3 2026). Both receipt
@@ -2646,6 +2646,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
       {detailSale ? (
         <Suspense fallback={null}>
           <SaleDetailModal
+            key={`${user?.id ?? 'anonymous'}:${detailSale.id}`}
             sale={detailSale}
             pendingStatus={!directStatusSaving && activePendingDirectStatus?.entityId === String(detailSale.id)}
             statusRecoveryOwner={isActive && activePendingDirectStatus && pendingStatusProblemRef.current ? { actorId: activePendingDirectStatus.actorId, requestId: activePendingDirectStatus.body.client_request_id, problem: pendingStatusProblemRef.current } : null}
