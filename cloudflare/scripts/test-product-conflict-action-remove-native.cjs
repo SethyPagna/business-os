@@ -65,6 +65,14 @@ async function main() {
       native.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(95201,1,5),(95202,1,0)'),
     ])
     const { app, controls, db, undo, productDelete } = loadRoute(native, true)
+    assert.equal((await db.prepare("SELECT COUNT(*) n FROM sqlite_master WHERE type='trigger' AND name='positive_lot_require_active_update_0154'").get()).n,1)
+    const graph = async () => ({
+      product: {...await db.prepare('SELECT * FROM products WHERE id=5201').get()},
+      stock: (await db.prepare('SELECT * FROM branch_stock WHERE product_id=5201 ORDER BY id').all()).map(row=>({...row})),
+      batches: (await db.prepare('SELECT * FROM product_batches WHERE variant_product_id=5201 ORDER BY id').all()).map(row=>({...row})),
+      batchStock: (await db.prepare('SELECT * FROM branch_batch_stock WHERE batch_id IN (95201,95202) ORDER BY id').all()).map(row=>({...row})),
+    })
+    const savedGraph = await graph()
     const body = { manifest_version: 1, resolution_version: 2, client_request_id: 'native_remove_review_001', merge_groups: [],
       remove_rows: [{ product_id: 5201, reason: 'Independent duplicate product' }] }
     reset(controls)
@@ -123,9 +131,21 @@ async function main() {
     const applyBounds = assertBounds(controls, 'native remove apply')
     const undoPayload = JSON.parse(history.undo_payload)
     const applier = undo.resolveUndoApplier(undoPayload)
+    const deletedGraph = await graph()
+    const operationBeforeFailure = {...await db.prepare('SELECT * FROM product_remove_operations WHERE operation_id=@id').get({id:storedOperation.operation_id})}
+    await native.prepare(`CREATE TRIGGER reject_native_remove_restore BEFORE UPDATE ON branch_batch_stock
+      WHEN NEW.batch_id=95201 AND NEW.quantity>0
+      BEGIN SELECT RAISE(ABORT,'injected native replay stock failure'); END`).run()
+    // Native D1 wraps constraint failures; the applier exposes its stable
+    // conflict message. Dropping only this trigger must make the same retry pass.
+    await assert.rejects(()=>applier.run(undoPayload,{env:{},user,direction:'undo',historyId:history.id,generation:0}),/Nothing was replayed|injected native replay stock failure/)
+    assert.deepEqual(await graph(),deletedGraph,'native D1 rollback restores deactivated lot and all stock')
+    assert.deepEqual({...await db.prepare('SELECT * FROM product_remove_operations WHERE operation_id=@id').get({id:storedOperation.operation_id})},operationBeforeFailure)
+    await native.prepare('DROP TRIGGER reject_native_remove_restore').run()
     reset(controls)
     const undone = await applier.run(undoPayload, { env: {}, user, direction: 'undo', historyId: history.id, generation: 0 })
     assert.equal(undone.complete, true)
+    assert.deepEqual(await graph(),savedGraph,'native undo restores exact saved dates, costs, supplier metadata, lot states and stock ids')
     assert.deepEqual({ ...(await db.prepare('SELECT is_active,stock_quantity,rfid_confirmed_qty FROM products WHERE id=5201').get()) },
       { is_active: 1, stock_quantity: 5, rfid_confirmed_qty: 1 })
     assert.deepEqual((await db.prepare('SELECT id,is_active,supplier_name FROM product_batches WHERE variant_product_id=5201 ORDER BY id').all()).map((row) => ({ ...row })), [
