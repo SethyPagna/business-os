@@ -297,25 +297,43 @@ export async function seedInitialBatchForNewProduct(
   const addedOn = new Date().toISOString().slice(0, 10)
   const batchKey = `initial:${id}`
   // batch_key stays `initial:<id>` (not the date code) so this insert
-  // remains idempotent regardless of what day it's retried on -- the
-  // ON CONFLICT DO NOTHING below only works because this key can't
-  // collide with anything else. lot_code (the operator-facing display)
+  // remains idempotent regardless of what day it's retried on. A retry may
+  // find this stable lot inactive (for example, after it was emptied), so
+  // the conflict branch explicitly reactivates the existing parent without
+  // replacing its original received date or display identity. lot_code
+  // (the operator-facing display)
   // is still the same date-derived code every other batch now gets (see
   // batchCode.ts's dateToBatchCode), so this default batch reads no
   // differently from one created through Receive Stock on day one.
-  await db.prepare(`
-    INSERT INTO product_batches (variant_product_id, batch_key, lot_code, received_at, is_active, notes, batch_number)
-    VALUES (@productId, @batchKey, @lotCode, datetime('now'), 1, @notes, 1)
-    ON CONFLICT(variant_product_id, batch_key) DO NOTHING
-  `).run({ productId: id, batchKey, lotCode: dateToBatchCode(addedOn), notes: 'Default received date created with product' })
-  if (chosenBranchId == null) return
-  const batch = await db.prepare('SELECT id FROM product_batches WHERE variant_product_id = @productId AND batch_key = @batchKey').get<{ id: number }>({ productId: id, batchKey })
-  if (!batch) return
-  await db.prepare(`
-    INSERT INTO branch_batch_stock (batch_id, branch_id, quantity)
-    VALUES (@batchId, @branchId, @quantity)
-    ON CONFLICT(batch_id, branch_id) DO NOTHING
-  `).run({ batchId: batch.id, branchId: chosenBranchId, quantity: Math.max(0, Number(chosenBranchQty) || 0) })
+  const params = {
+    productId: id,
+    batchKey,
+    lotCode: dateToBatchCode(addedOn),
+    notes: 'Default received date created with product',
+    branchId: chosenBranchId,
+    quantity: Math.max(0, Number(chosenBranchQty) || 0),
+  }
+  const statements = [{
+    sql: `INSERT INTO product_batches (variant_product_id, batch_key, lot_code, received_at, is_active, notes, batch_number)
+      VALUES (@productId, @batchKey, @lotCode, datetime('now'), 1, @notes, 1)
+      ON CONFLICT(variant_product_id, batch_key) DO UPDATE SET is_active = 1`,
+    params,
+  }]
+  if (chosenBranchId != null) {
+    statements.push({
+      // Resolve the stable id inside the same transaction that performs
+      // the activation above. This closes the read/activation/write race:
+      // a positive branch_batch_stock row is never written beneath an
+      // inactive initial lot, while retries remain quantity-idempotent.
+      sql: `INSERT INTO branch_batch_stock (batch_id, branch_id, quantity)
+        SELECT id, @branchId, @quantity
+        FROM product_batches
+        WHERE variant_product_id = @productId AND batch_key = @batchKey AND is_active = 1
+        ON CONFLICT(batch_id, branch_id) DO NOTHING`,
+      params,
+    })
+  }
+  await db.batch(statements)
 }
 
 // ---------------------------------------------------------------------------

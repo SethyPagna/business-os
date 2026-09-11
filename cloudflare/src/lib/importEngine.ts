@@ -530,6 +530,56 @@ function lower(value: unknown): string {
   return str(value).toLowerCase()
 }
 
+export type ImportRestockBatch = {
+  id: number
+  variant_product_id: number
+  batch_key: string
+  lot_code: string | null
+  received_at: string | null
+  is_active: number
+}
+
+export type ImportRestockBatchIndex = {
+  byExactKey: Map<string, ImportRestockBatch>
+  byNormalizedLot: Map<string, ImportRestockBatch>
+}
+
+// Additive product imports must see inactive lots as well as active ones.
+// An inactive row still owns its (product,batch_key) UNIQUE identity, and a
+// deliberate receipt into that identity reactivates it instead of creating a
+// replacement. Exact stored batch_key is authoritative; normalized lot_code
+// remains a compatibility fallback for older rows whose key/display differed.
+export function indexImportRestockBatches(rows: ImportRestockBatch[]): ImportRestockBatchIndex {
+  const byExactKey = new Map<string, ImportRestockBatch>()
+  const byNormalizedLot = new Map<string, ImportRestockBatch>()
+  for (const batch of rows) {
+    byExactKey.set(`${batch.variant_product_id}\u0001${batch.batch_key}`, batch)
+    if (!str(batch.lot_code)) continue
+    const normalizedLotKey = `${batch.variant_product_id}\u0001${lower(batch.lot_code)}`
+    const current = byNormalizedLot.get(normalizedLotKey)
+    // Prefer an already-active representative when several historical rows
+    // share a display-equivalent lot code. Stable id order makes the legacy
+    // fallback deterministic; exact unique-key selection still wins below.
+    if (!current || Number(batch.is_active) > Number(current.is_active)
+      || (Number(batch.is_active) === Number(current.is_active) && batch.id < current.id)) {
+      byNormalizedLot.set(normalizedLotKey, batch)
+    }
+  }
+  return { byExactKey, byNormalizedLot }
+}
+
+export function findImportRestockBatch(
+  index: ImportRestockBatchIndex,
+  productId: number,
+  importedLotCode: unknown,
+): ImportRestockBatch | null {
+  const lotCode = str(importedLotCode)
+  if (!lotCode) return null
+  return index.byExactKey.get(`${productId}\u0001${lotCode}`)
+    || index.byNormalizedLot.get(`${productId}\u0001${lower(lotCode)}`)
+    || null
+}
+
 function toBool01(value: unknown, fallback = 1): number {
   const text = lower(value)
   if (text === '') return fallback
@@ -5632,23 +5682,22 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       // second, duplicate batch instead of topping up the existing one and
       // preserving its received date, unlike every other batch-receiving
       // path in the app (the manual Receive Stock modal, the mandatory
-      // add-stock picker). Only fetched when there's at least one
-      // lot-code-carrying update row worth matching, and only active
-      // batches (a deactivated lot shouldn't silently reappear via import
-      // any more than it should via a manual receive -- receiveBatchStock
-      // itself DOES reactivate on an explicit id/lot match, so this mirrors
-      // that by reactivating on match below, same as a manual restock of a
-      // previously-emptied lot would).
+      // add-stock picker). Inactive lots MUST participate in this lookup:
+      // the unique key covers (variant_product_id, batch_key) regardless of
+      // is_active, so filtering an emptied/deactivated lot out made the
+      // later INSERT fail with a UNIQUE violation. An explicit additive
+      // receipt is allowed to reactivate that exact lot, and the matched
+      // branch below does so in the same atomic row group before adding
+      // positive branch_batch_stock. Exact batch_key wins over the legacy
+      // normalized lot-code match so a retry cannot drift to a different
+      // row when old data contains two display-equivalent lot codes.
       const lotMatchCandidates = updateRowsNeedingBatch.filter((r) => str((r.data as Record<string, unknown>).lot_code))
-      const batchByProductAndLot = new Map<string, { id: number; received_at: string | null }>()
+      let restockBatchIndex: ImportRestockBatchIndex = { byExactKey: new Map(), byNormalizedLot: new Map() }
       if (lotMatchCandidates.length) {
         const existingBatches = await db
-          .prepare(`SELECT id, variant_product_id, lot_code, received_at FROM product_batches WHERE is_active = 1 AND lot_code IS NOT NULL AND lot_code != ''`)
-          .all<{ id: number; variant_product_id: number; lot_code: string | null; received_at: string | null }>()
-        for (const batch of existingBatches) {
-          if (!str(batch.lot_code)) continue
-          batchByProductAndLot.set(`${batch.variant_product_id}\u0001${lower(batch.lot_code)}`, { id: batch.id, received_at: batch.received_at })
-        }
+          .prepare(`SELECT id, variant_product_id, batch_key, lot_code, received_at, is_active FROM product_batches`)
+          .all<ImportRestockBatch>()
+        restockBatchIndex = indexImportRestockBatches(existingBatches)
       }
       // seedCost* is the FIRST row's cost as the file wrote it, kept apart
       // from `data` because resolveMergedCost below rewrites data's cost to
@@ -5887,12 +5936,14 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
                 params: { id: r.existingId },
               })
               const importLotCode = str(d.lot_code)
-              const lotKey = importLotCode ? `${r.existingId}\u0001${lower(importLotCode)}` : null
-              const matchedBatch = lotKey ? batchByProductAndLot.get(lotKey) : null
+              const matchedBatch = findImportRestockBatch(restockBatchIndex, Number(r.existingId), importLotCode)
               if (matchedBatch) {
-                // Same lot code already exists (active) on this product --
-                // top it up without replacing its first received date.
-                // A legacy blank may be filled from this explicit receipt.
+                // Same batch key / lot code already exists on this product,
+                // including an inactive emptied lot. Reactivate it before
+                // the positive lot-stock write in this same atomic group,
+                // without replacing its first received date or established
+                // cost identity. A legacy blank may be filled from this
+                // explicit receipt.
                 group.push({
                   sql: `UPDATE product_batches SET received_at = COALESCE(NULLIF(received_at,''), @receivedAt), is_active = 1,
                           unit_cost_usd = COALESCE(unit_cost_usd, @unitCostUsd),
@@ -5951,7 +6002,16 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
                 // chunk start, so a guarded-skipped row's lot still
                 // matches for its later siblings.)
                 if (importLotCode) {
-                  batchByProductAndLot.set(`${r.existingId}\u0001${lower(importLotCode)}`, { id: batchId, received_at: d.received_date as string })
+                  const createdBatch: ImportRestockBatch = {
+                    id: batchId,
+                    variant_product_id: Number(r.existingId),
+                    batch_key: importLotCode,
+                    lot_code: importLotCode,
+                    received_at: d.received_date as string,
+                    is_active: 1,
+                  }
+                  restockBatchIndex.byExactKey.set(`${r.existingId}\u0001${importLotCode}`, createdBatch)
+                  restockBatchIndex.byNormalizedLot.set(`${r.existingId}\u0001${lower(importLotCode)}`, createdBatch)
                 }
               }
               // One movement per receipt row keeps its own cost even when
@@ -6091,7 +6151,16 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
                 params: { batchId, branchId: d.branch_id, qty: d.stock_quantity },
             })
             if (str(d.lot_code)) {
-              batchByProductAndLot.set(`${newId}\u0001${lower(d.lot_code)}`, { id: batchId, received_at: d.received_date as string })
+              const createdBatch: ImportRestockBatch = {
+                id: batchId,
+                variant_product_id: newId,
+                batch_key: str(d.lot_code),
+                lot_code: str(d.lot_code),
+                received_at: d.received_date as string,
+                is_active: 1,
+              }
+              restockBatchIndex.byExactKey.set(`${newId}\u0001${str(d.lot_code)}`, createdBatch)
+              restockBatchIndex.byNormalizedLot.set(`${newId}\u0001${lower(d.lot_code)}`, createdBatch)
             }
             // Seed every OTHER unambiguous active canonical branch at 0
             // (tracked, not absent) -- see productSeedBranchIds above.
