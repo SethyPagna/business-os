@@ -1,6 +1,6 @@
 # Sale detail stability, compact editing, and receipt sizing follow-up
 
-Status: integrated verification passed; deployment pending. Base8840379a; prior deployment3c002325. Work stays in isolated codex/sale-detail-stability-print-20260911, preserving the dirty shared checkout. This adds to, and does not replace, earlier task registers.
+Status: deployed70c81aa0ec1e with scoped verification passed. Base8840379a; prior deployment3c002325. Work stays in isolated codex/sale-detail-stability-print-20260911, preserving the dirty shared checkout. This adds to, and does not replace, earlier task registers.
 
 ## User requirements (September11 latest)
 
@@ -48,3 +48,11 @@ Status: integrated verification passed; deployment pending. Base8840379a; prior 
 - Receipt independent review rejected initial whole-value nowrap because supported58mm overflowed81px and80mm intruded into margins. Corrected90e5f227 uses safe text wrapping while keeping automatic grid rows. EN/KM/both across58/default,58/zero,80,98,80x50 now have zero root/row/value/label overflow, zero label intersections and no text outside paper. Complete date, phone, membership, large USD/KHR and long product names preserved. Frozen-row positive control overlaps29px; normalization produces4px gap. Fixed80x50 PDF MediaBox226.77x141.73pt verified.
 - Receipt Download PDF reuses existing exact-size renderer; numeric zero margins survive normalization; settings show effective paper/content widths and driver guidance. Website code cannot force a printer driver to advertise80mm or prevent driver scaling when98x148mm is selected. Physical thermal-printer result remains a hardware verification item, not certified from browser/PDF tests.
 - Independent durable results: lifecycle read fence via urgent_status_backend; receipt a2232c46-1503-4468-a283-a02cf73c949d; editor21085400-fef9-4e5d-b925-7d2994ec3a91. Root used orchestrate-team for isolated ownership and independent checks, Playwright skill for browser-verification workflow, and Wrangler skill for production provenance/deployment mechanics.
+
+## Deployment and live smoke check (September12 local time)
+
+- LIVE source70c81aa0ec1e; Worker version3e4ffb3c-1879-4e27-b1a6-3c17af37a52c. Worker hashb27cb8bde999183c/built2026-09-11T16:02:12.077Z. Frontend hash2e962087d187950e/built2026-09-11T16:00:33.442Z. Both runtime/version and business-os-build.json independently fetched after deployment and match70c81aa0ec1e.
+- Confirmed prior live3c002325 before promoting; pushed isolated branch, clean tracked tree, no source-revision override. Canonical admin domain challenges shell HTTP; configured legacy admin domain returned provenance. Normal authenticated in-app browser redirected to canonical admin successfully. No challenge bypass attempted.
+- Live authenticated smoke after update: Reports selected title/Filter/Show row, vertical dots, larger report figures and no header Info visibly confirmed. Sales opens19 business-day rows. Outstanding sale20260911-082702 shows all five configured methods ABA/Cash/ABA+Cash/ACLEDA/FCB and4065 rate, without false empty configuration. No payment submitted; Back and Cancel return normally.
+- Same live sale has complete two-line product names and Qty/Price/Total/Edit headers. Edit exposes stored1/$30/$2 inputs; actual boxes are40.656x28px and all have identical y393.094px. Cancel restores text-only values. No Apply, Update, Remove, Return or stock action was submitted. Temporary browser tab closed after modal dismissal.
+- Physical80mm printer/driver media mismatch is still not certified: exact PDF and safe reflow are fixed, but driver only offering98x148mm requires correct80mm/custom-paper driver configuration/Actual size. No production settings, stock, dates, customers or financial records were changed during this follow-up verification.
