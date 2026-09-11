@@ -33,6 +33,7 @@ import { normalizeMembershipNumber, withMintedMembershipNumber } from '../lib/me
 import { revokePortalSessionsForAccount } from '../lib/portalSession'
 import bcrypt from 'bcryptjs'
 import { buildContactMatchClause } from '../lib/contactSearch'
+import { buildSalesCustomerMatchClause } from '../lib/salesCustomerSearch'
 import { buildContactIdClause, parseContactIdFilter, CONTACT_ID_FILTER_MAX } from '../lib/contactIds'
 import { buildContactPickerSql, buildSalesCustomerPickerSql, CONTACT_PICKER_DEFAULT_LIMIT, CONTACT_PICKER_MAX_LIMIT } from '../lib/contactPicker'
 import { createBulkDeleteJob, getBulkDeleteJob, reapStalledBulkDeleteJobs, type BulkDeleteEntityType } from '../lib/bulkDeleteEngine'
@@ -713,7 +714,7 @@ function registerContactRoutes(config: ContactConfig) {
       const limit = clampInt(query.pageSize ?? query.limit, 50, 1, 100)
       const predicates: string[] = []
       const params: Record<string, unknown> = { limit }
-      const contactMatch = buildContactMatchClause('customers', String(query.search || query.q || ''), 'picker')
+      const contactMatch = buildSalesCustomerMatchClause(query.search || query.q || '')
       if (contactMatch) {
         predicates.push(contactMatch.sql)
         Object.assign(params, contactMatch.params)
