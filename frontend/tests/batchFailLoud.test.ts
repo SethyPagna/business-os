@@ -24,6 +24,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { needsPosTrackingSheet } from '../src/components/pos/posProductTracking.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 
@@ -79,18 +80,28 @@ check('POS does not clear the tracked-id set when the lookup fails', () => {
 })
 
 check('POS tracks the failure explicitly and forces the detail sheet for every product', () => {
-  assert.ok(/setTrackedBatchLoadFailed\(true\)/.test(pos), 'POS should record that the lookup failed')
+  assert.ok(/setBatchTracking\(\{ scope, status: 'failed', ids: new Set\(\) \}\)/.test(pos), 'POS should record an explicit scoped failed state, never a ready empty set')
+  assert.ok(/const trackedBatchLoadFailed = batchTracking.scope === trackingScope && batchTracking.status === 'failed'/.test(pos), 'only the current scope failure should drive the warning')
   assert.ok(
-    /const isBatchTracked = trackedBatchLoadFailed \|\| trackedBatchProductIds\.has/.test(pos),
+    /const isBatchTracked = needsPosTrackingSheet\(batchTracking, trackingScope, Number\(product.id\)\)/.test(pos),
     'while tracking is unknown, every product must route through the detail sheet rather than one-tap add',
   )
 })
 
 check('POS passes the unavailable state into the sheet so the extra tap cannot bypass lot selection', () => {
   assert.ok(
-    /trackedBatchLookupUnavailable=\{trackedBatchLoadFailed\}/.test(pos),
+    /trackedBatchLookupUnavailable=\{batchTracking.scope !== trackingScope \|\| batchTracking.status !== 'ready'\}/.test(pos),
     'forcing the detail sheet is insufficient unless the sheet also knows tracking metadata is unavailable',
   )
+})
+
+check('actual tracking readiness blocks failed, pending, and foreign-scope product adds', () => {
+  for (const status of ['loading', 'failed'] as const) {
+    assert.equal(needsPosTrackingSheet({ scope: 'current', status, ids: new Set() }, 'current', 7), true)
+  }
+  assert.equal(needsPosTrackingSheet({ scope: 'old', status: 'ready', ids: new Set() }, 'current', 7), true)
+  assert.equal(needsPosTrackingSheet({ scope: 'current', status: 'ready', ids: new Set([7]) }, 'current', 7), true)
+  assert.equal(needsPosTrackingSheet({ scope: 'current', status: 'ready', ids: new Set() }, 'current', 7), false)
 })
 
 check('POS surfaces the failure to the cashier instead of failing silently', () => {
