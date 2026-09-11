@@ -286,6 +286,8 @@ export function planReceiveBatchStock(input: ReceiveBatchPlanInput): ReceiveBatc
 // its date is the import's receipt date, never the product's creation date.
 // SQL computes against the state inside the caller's atomic row group, so
 // repeated snapshots and two branches cannot add the same stock twice.
+// Inactive lots still own their attributed units. Count and trim them too,
+// without reactivating them; growth belongs in an active reconciliation lot.
 export function planReconcileBranchSnapshot(input: {
   productId: number; branchId: number; quantity: number; receivedDate: string; batchId?: number
 }): StockWriteStatement[] {
@@ -296,22 +298,31 @@ export function planReconcileBranchSnapshot(input: {
   const params = { ...input, batchId: input.batchId ?? null, receivedAt, batchKey: ` snapshot:${input.branchId}:${receivedAt}`, lotCode: dateToBatchCode(receivedAt) }
   const available = `(SELECT COALESCE(SUM(bbs.quantity),0) FROM branch_batch_stock bbs
     JOIN product_batches pb ON pb.id=bbs.batch_id WHERE pb.variant_product_id=@productId
-    AND pb.is_active=1 AND bbs.branch_id=@branchId)`
+    AND bbs.branch_id=@branchId)`
+  // Reuse an active snapshot lot, but never unarchive a previous one. The
+  // fallback suffix is above every existing row id and is evaluated inside
+  // the atomic write group. After insertion this resolves to that active row.
+  const snapshotKey = `COALESCE((SELECT batch_key FROM product_batches
+    WHERE variant_product_id=@productId AND is_active=1
+      AND (batch_key=@batchKey OR substr(batch_key,1,length(@batchKey)+8)=@batchKey||':active:')
+    ORDER BY id DESC LIMIT 1), CASE WHEN EXISTS (
+      SELECT 1 FROM product_batches WHERE variant_product_id=@productId AND batch_key=@batchKey
+    ) THEN @batchKey||':active:'||(SELECT COALESCE(MAX(id),0)+1 FROM product_batches) ELSE @batchKey END)`
   return [
     { sql: `INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,notes,batch_number,received_branch_id)
-      SELECT @batchId,@productId,@batchKey,@lotCode,@receivedAt,1,'Stock reconciled from product import snapshot',
+      SELECT @batchId,@productId,${snapshotKey},@lotCode,@receivedAt,1,'Stock reconciled from product import snapshot',
         (SELECT COALESCE(MAX(batch_number),0)+1 FROM product_batches WHERE variant_product_id=@productId),@branchId
       WHERE @quantity > ${available}
-      ON CONFLICT(variant_product_id,batch_key) DO UPDATE SET is_active=1`, params },
+      ON CONFLICT(variant_product_id,batch_key) DO NOTHING`, params },
     { sql: `INSERT INTO branch_batch_stock(batch_id,branch_id,quantity)
       SELECT id,@branchId,@quantity-${available} FROM product_batches
-      WHERE variant_product_id=@productId AND batch_key=@batchKey AND @quantity > ${available}
+      WHERE variant_product_id=@productId AND is_active=1 AND batch_key=${snapshotKey} AND @quantity > ${available}
       ON CONFLICT(batch_id,branch_id) DO UPDATE SET quantity=branch_batch_stock.quantity+excluded.quantity,updated_at=CURRENT_TIMESTAMP`, params },
     { sql: `WITH ranked AS MATERIALIZED (
         SELECT bbs.batch_id,bbs.quantity,COALESCE(SUM(bbs.quantity) OVER (
           ORDER BY (pb.received_at IS NULL),pb.received_at,pb.id ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING),0) AS prior
         FROM branch_batch_stock bbs JOIN product_batches pb ON pb.id=bbs.batch_id
-        WHERE pb.variant_product_id=@productId AND pb.is_active=1 AND bbs.branch_id=@branchId
+        WHERE pb.variant_product_id=@productId AND bbs.branch_id=@branchId
       ) UPDATE branch_batch_stock SET quantity=(SELECT MIN(r.quantity,MAX(0,@quantity-r.prior)) FROM ranked r WHERE r.batch_id=branch_batch_stock.batch_id),updated_at=CURRENT_TIMESTAMP
       WHERE branch_id=@branchId AND batch_id IN (SELECT batch_id FROM ranked)`, params },
     { sql: `INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(@productId,@branchId,@quantity)
