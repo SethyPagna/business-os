@@ -1,6 +1,7 @@
 import { apiFetch, isInvalidSessionError } from './http.ts'
 import type { QueryParams } from './query.ts'
 import { filterSelectableCustomerRows } from '../utils/customerIdentity.ts'
+import { salesCustomerPickerFallbackMatches } from './customerPickerMatch.ts'
 
 type ContactTableName = 'customers' | 'suppliers' | 'delivery_contacts'
 
@@ -191,7 +192,7 @@ export async function getSalesCustomerPicker(params: QueryParams = {}, options: 
   } catch (error) {
     const status = Number((error as { status?: unknown } | null)?.status)
     if (options.requireFresh || status === 401 || status === 403 || isInvalidSessionError(error) || isAbortError(error)) throw error
-    const search = String(params.search || params.q || '').trim().toLocaleLowerCase('en-US')
+    const search = String(params.search || params.q || '').trim()
     const ids = new Set(String(params.ids || '').split(',').map((value) => value.trim()).filter(Boolean))
     const rows = (await readLocalContacts('customers'))
       .filter((row) => {
@@ -199,7 +200,7 @@ export async function getSalesCustomerPicker(params: QueryParams = {}, options: 
         if (Number(value.is_anonymous || 0) === 1) return false
         if (ids.size && !ids.has(String(value.id ?? ''))) return false
         if (!search) return true
-        return [value.name, value.phone, value.membership_number].some((candidate) => String(candidate || '').toLocaleLowerCase('en-US').includes(search))
+        return salesCustomerPickerFallbackMatches(value, search)
       })
       .slice(0, Math.max(1, Math.min(100, Number(params.pageSize || params.limit || 50) || 50)))
       .map((row) => {
