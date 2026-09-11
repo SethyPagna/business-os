@@ -745,7 +745,8 @@ console.log('PASS resolveRowImagePath matches explicit filenames and falls back 
 
 // -- Batch/lot-code consistency on restock imports: re-importing the same
 // named batch (lot code) for a product that already has it must top up
-// that SAME product_batches row (and refresh its received_at) instead of
+// that SAME product_batches row (while preserving its first received_at)
+// instead of
 // always inserting a fresh row keyed by a generated import-only key. This
 // is a source-text assertion (same "no fake-D1 harness yet" reasoning as
 // the guards above) that checks the shape of the merge_stock/override_add
@@ -756,20 +757,20 @@ console.log('PASS resolveRowImagePath matches explicit filenames and falls back 
   const branchEnd = source.indexOf('// Legacy/default:', branchStart)
   const block = source.slice(branchStart, branchEnd)
 
-  assert.ok(/const batchByProductAndLot = new Map/.test(source), 'runImportApply should build a product+lot -> existing active batch lookup for restock rows')
-  assert.ok(/lot_code IS NOT NULL AND lot_code != ''/.test(source), 'the lot lookup should only consider batches that actually carry a lot code')
-  assert.ok(/WHERE is_active = 1 AND lot_code/.test(source), 'the lot lookup should only match ACTIVE batches, same as receiveBatchStock reactivating on an explicit match rather than matching a deactivated lot silently')
+  assert.ok(/indexImportRestockBatches\(existingBatches\)/.test(source), 'runImportApply should index exact batch keys and normalized lot codes for restock rows')
+  assert.ok(/SELECT id, variant_product_id, batch_key, lot_code, received_at, is_active FROM product_batches`/.test(source), 'the lot lookup must include inactive rows because they still own their unique batch key')
+  assert.ok(!/SELECT id, variant_product_id, batch_key, lot_code, received_at, is_active FROM product_batches WHERE is_active = 1/.test(source), 'an inactive same-key lot must be found and reactivated instead of falling through to a duplicate INSERT')
 
-  assert.ok(/const matchedBatch = lotKey \? batchByProductAndLot\.get\(lotKey\) : null/.test(block), 'the restock branch should check the lot lookup before deciding whether to top up or create')
+  assert.ok(/const matchedBatch = findImportRestockBatch\(restockBatchIndex, Number\(r\.existingId\), importLotCode\)/.test(block), 'the restock branch should resolve the exact key before deciding whether to top up or create')
   assert.ok(/UPDATE product_batches SET received_at = COALESCE\(NULLIF\(received_at,''\), @receivedAt\), is_active = 1,[\s\S]*updated_at = @updatedAt WHERE id = @id/.test(block), 'exact-lot top-ups retain first received date, filling only a missing value')
   assert.ok(/received_cost_usd = COALESCE\(received_cost_usd, 0\) \+ \(@qty \* COALESCE\(@unitCostUsd, 0\)\)/.test(block), 'same-batch top-ups must accumulate each receipt cost instead of overwriting catalog cost')
   assert.ok(/INSERT INTO inventory_movements[\s\S]*unit_cost_usd, total_cost_usd/.test(block), 'each receipt row must retain its own historical cost movement')
   assert.ok(/ON CONFLICT\(batch_id, branch_id\) DO UPDATE SET quantity = quantity \+ excluded\.quantity/.test(block), 'a matched lot code must ADD to its existing branch_batch_stock row, not insert a second row for the same batch+branch')
 
   assert.ok(/batchKey: importLotCode \|\| `import:\$\{r\.existingId\}:\$\{nowIso\}:\$\{r\.rowNumber\}`/.test(block), 'a genuinely NEW batch created from a restock row should key itself by the lot code when one was given (so a later import or manual receive naming the same lot can match it too), falling back to the old unique generated key only when no lot code was supplied')
-  assert.ok(/batchByProductAndLot\.set\(`\$\{r\.existingId\}\\u0001/.test(block), 'a newly-created batch within this branch should be recorded in the lookup so a second row in the SAME chunk naming the same product+lot tops it up too, instead of also creating a duplicate')
+  assert.ok(/restockBatchIndex\.byExactKey\.set\(`\$\{r\.existingId\}\\u0001/.test(block), 'a newly-created batch within this branch should be recorded in the exact-key lookup so a second row in the SAME chunk naming the same product+lot tops it up too, instead of also creating a duplicate')
 
-  console.log('PASS restock imports (merge_stock/override_add) match an existing ACTIVE batch by product+lot code and top it up (refreshing received_at, adding to branch_batch_stock) instead of always creating a new batch row, with a new batch keyed consistently by its lot code for future imports to match')
+  console.log('PASS restock imports (merge_stock/override_add) reuse active or inactive exact lots, reactivate before adding lot stock, preserve first received_at, and index new lots for same-chunk reuse')
 }
 
 // -- Multi-branch new-product seeding: a brand-new product's CSV row only
