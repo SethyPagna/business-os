@@ -110,6 +110,13 @@ function wrapDb(sqlite) {
 // stubbing it would hide the very substitution the appliers depend on.
 const actorSnapshotKernel = loadModule('lib/actorSnapshot.ts', require)
 const productMergeKernel = loadModule('lib/productMerge.ts', require)
+const additionSource = fs.readFileSync(path.join(__dirname, '../src/lib/saleLineAddition.ts'), 'utf8')
+const additionAst = ts.createSourceFile('saleLineAddition.ts', additionSource, ts.ScriptTarget.Latest, true)
+const guardDeclaration = additionAst.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === 'planUnlottedSaleLineGuards')
+const guardExports = {}
+new Function('exports', ts.transpileModule(guardDeclaration.getText(additionAst), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+}).outputText)(guardExports)
 const undoAppliers = loadModule('lib/undoAppliers.ts', (id) => {
   if (id === './actorSnapshot') return actorSnapshotKernel
   if (id === './productMerge') return productMergeKernel
@@ -158,6 +165,7 @@ const undoAppliers = loadModule('lib/undoAppliers.ts', (id) => {
   // the real planners are driven against a live schema by
   // test-sale-add-items-pure.cjs, which is where that applier is proved.
   if (id === './saleLineAddition') return {
+    planUnlottedSaleLineGuards: guardExports.planUnlottedSaleLineGuards,
     buildAllocationStatements: () => [],
     buildOperationAllocationStatements: (_lines, operationId) => exerciseAtomicSaleItems ? [{
       sql: `INSERT INTO sale_item_batch_allocations(sale_item_id,quantity)
@@ -236,6 +244,10 @@ const atomicUser = { id: 7, name: 'Atomic verifier' }
 function atomicSaleItemsFixture() {
   const db = new Database(':memory:')
   db.exec(`
+    CREATE TABLE sale_bulk_guards(guard_value INTEGER CHECK(guard_value=1));
+    CREATE TABLE branch_stock(product_id INTEGER,branch_id INTEGER,quantity REAL);
+    CREATE TABLE product_batches(id INTEGER PRIMARY KEY,variant_product_id INTEGER,is_active INTEGER);
+    CREATE TABLE branch_batch_stock(batch_id INTEGER,branch_id INTEGER,quantity REAL);
     CREATE TABLE system_flags(key TEXT PRIMARY KEY,value TEXT);
     CREATE TABLE sales(id INTEGER PRIMARY KEY,sale_status TEXT,total_usd REAL);
     CREATE TABLE sale_items(id INTEGER PRIMARY KEY AUTOINCREMENT,sale_id INTEGER,product_id INTEGER,product_name TEXT,quantity REAL,total_usd REAL);
@@ -711,6 +723,29 @@ await check('sale.add_items atomically advances revision, receipt, snapshot, his
     exerciseAtomicSaleItems = false
     sharedDb = null
   }
+})
+
+await check('sale.add_items redo refuses a stale unlotted residual with its whole replay rolled back', async () => {
+  exerciseAtomicSaleItems = true
+  try {
+    const fixture = atomicSaleItemsFixture()
+    sharedDb = fixture.db
+    const resolved = resolveUndoApplier(fixture.payload)
+    await resolved.run(fixture.payload, { env: {}, user: atomicUser, direction: 'undo', historyId: 41, generation: 0 })
+    const snapshot = JSON.parse(fixture.db.prepare('SELECT payload_json FROM undo_snapshots WHERE id=1').get().payload_json)
+    snapshot.lines[0].takes = []
+    fixture.db.prepare('UPDATE undo_snapshots SET payload_json=? WHERE id=1').run(JSON.stringify(snapshot))
+    fixture.db.exec('INSERT INTO branch_stock VALUES(9,1,5); INSERT INTO product_batches VALUES(501,9,0); INSERT INTO branch_batch_stock VALUES(501,1,5)')
+    const redoPayload = JSON.parse(fixture.db.prepare('SELECT redo_payload FROM action_history WHERE id=41').get().redo_payload)
+    const before = atomicSaleItemsState(fixture.db)
+    await assert.rejects(() => resolved.run(redoPayload, { env: {}, user: atomicUser, direction: 'redo', historyId: 41, generation: 1 }), error => error?.statusCode === 409)
+    assert.deepEqual(atomicSaleItemsState(fixture.db), before)
+    assert.equal(fixture.db.prepare('SELECT COUNT(*) n FROM sale_bulk_guards').get().n, 0)
+    fixture.db.prepare('UPDATE branch_stock SET quantity=6').run()
+    await resolved.run(redoPayload, { env: {}, user: atomicUser, direction: 'redo', historyId: 41, generation: 1 })
+    assert.equal(fixture.db.prepare('SELECT status FROM action_history WHERE id=41').get().status, 'undoable')
+    assert.equal(fixture.db.prepare('SELECT COUNT(*) n FROM sale_bulk_guards').get().n, 0)
+  } finally { exerciseAtomicSaleItems = false; sharedDb = null }
 })
 
 await check('sale.add_items rejects stale and boundary races without partial replay writes', async () => {
