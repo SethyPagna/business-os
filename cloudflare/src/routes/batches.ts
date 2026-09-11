@@ -18,6 +18,20 @@ import { actorSnapshot } from '../lib/actorSnapshot'
 // routes/inventory.ts, since receiving/correcting batch stock is the same
 // class of action as any other stock adjustment.
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
+
+async function positiveBatchStock(db: ReturnType<typeof getDb>, batchId: number): Promise<number> {
+  const row = await db.prepare(`
+    SELECT COALESCE(SUM(CASE WHEN quantity > 0 THEN quantity ELSE 0 END), 0) AS total
+    FROM branch_batch_stock
+    WHERE batch_id = @batchId
+  `).get<{ total: number }>({ batchId })
+  return Math.max(0, Number(row?.total) || 0)
+}
+
+function activeBatchStockError(quantity: number): string {
+  return `This received date still has ${quantity} unit(s) of stock. Correct the quantity to 0 before deactivating.`
+}
+
 app.use('*', requireAuth)
 app.use('*', async (c, next) => {
   const user = c.get('user')
@@ -285,6 +299,7 @@ app.patch('/:id', async (c) => {
   const params: Record<string, unknown> = { id }
   if (body.expiry_date !== undefined) { updates.push('expiry_date = @expiry_date'); params.expiry_date = body.expiry_date || null }
   if (body.notes !== undefined) { updates.push('notes = @notes'); params.notes = body.notes || null }
+  const deactivating = body.is_active !== undefined && !body.is_active
   if (body.is_active !== undefined) { updates.push('is_active = @is_active'); params.is_active = body.is_active ? 1 : 0 }
   // received_at (the "batch date" -- when this lot actually came in) is
   // the ONLY thing that determines this batch's code now -- editing it
@@ -336,7 +351,18 @@ app.patch('/:id', async (c) => {
   if (!updates.length) return c.json({ error: 'No fields to update' }, 400)
   updates.push(`updated_at = datetime('now')`)
 
-  await db.prepare(`UPDATE product_batches SET ${updates.join(', ')} WHERE id = @id`).run(params)
+  // Deactivation and the positive-stock check are one SQL statement. A
+  // separate pre-read would allow a receipt/quantity correction to land in
+  // between the check and this UPDATE, hiding stock in an inactive lot.
+  const update = await db.prepare(`UPDATE product_batches SET ${updates.join(', ')} WHERE id = @id${deactivating
+    ? ` AND NOT EXISTS (
+          SELECT 1 FROM branch_batch_stock
+          WHERE batch_id = @id AND quantity > 0
+        )`
+    : ''}`).run(params)
+  if (deactivating && update.changes === 0) {
+    return c.json({ error: activeBatchStockError(await positiveBatchStock(db, id)) }, 400)
+  }
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'batch_update', 'product_batch', id, body)
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { type: 'batch_updated', batchId: id }))
   return c.json({ success: true })
@@ -373,13 +399,25 @@ app.patch('/:id/branches/:branchId', async (c) => {
   const previousQuantity = Number(existingRow?.quantity) || 0
   const delta = quantity - previousQuantity
 
-  const statements: Array<{ sql: string; params: Record<string, unknown> }> = [
-    {
+  const statements: Array<{ sql: string; params: Record<string, unknown> }> = []
+  if (quantity > 0) {
+    // Positive stock must always be reachable from POS/FIFO reads, all of
+    // which intentionally exclude inactive lots. Reactivation belongs in the
+    // same atomic batch as the quantity and aggregate corrections: whichever
+    // transaction wins against a concurrent deactivation leaves a valid
+    // state (positive => active; inactive => zero).
+    statements.push({
+      sql: `UPDATE product_batches
+            SET is_active = 1, updated_at = CURRENT_TIMESTAMP
+            WHERE id = @batchId`,
+      params: { batchId },
+    })
+  }
+  statements.push({
       sql: `INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (@batchId, @branchId, @quantity)
             ON CONFLICT(batch_id, branch_id) DO UPDATE SET quantity = @quantity, updated_at = datetime('now')`,
       params: { batchId, branchId, quantity },
-    },
-  ]
+  })
   if (delta !== 0) {
     // The branch_stock floor is DELIBERATE here (Part-77 clamp audit,
     // reviewed and kept): this is a stock-take CORRECTION -- the tool an
@@ -449,15 +487,21 @@ app.delete('/:id', async (c) => {
   // stranding it; the admin corrects the quantity to zero first (PATCH
   // .../branches/:branchId, which reconciles the aggregate down with it),
   // then deactivates.
-  const remaining = await db.prepare(
-    'SELECT COALESCE(SUM(quantity), 0) AS total FROM branch_batch_stock WHERE batch_id = ?',
-  ).get<{ total: number }>([id])
-  const remainingQty = Number(remaining?.total) || 0
-  if (remainingQty > 0) {
-    return c.json({ error: `This received date still has ${remainingQty} unit(s) of stock. Correct the quantity to 0 before deactivating.` }, 400)
+  // Keep the invariant atomic with the state change. If a receipt/correction
+  // committed first, this matches zero rows; if this committed first, every
+  // positive producer reactivates the lot in its own atomic write.
+  const deactivated = await db.prepare(`
+    UPDATE product_batches
+    SET is_active = 0, updated_at = datetime('now')
+    WHERE id = @id
+      AND NOT EXISTS (
+        SELECT 1 FROM branch_batch_stock
+        WHERE batch_id = @id AND quantity > 0
+      )
+  `).run({ id })
+  if (deactivated.changes === 0) {
+    return c.json({ error: activeBatchStockError(await positiveBatchStock(db, id)) }, 400)
   }
-
-  await db.prepare(`UPDATE product_batches SET is_active = 0, updated_at = datetime('now') WHERE id = ?`).run([id])
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'batch_deactivate', 'product_batch', id, null)
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { type: 'batch_updated', batchId: id }))
   return c.json({ success: true })

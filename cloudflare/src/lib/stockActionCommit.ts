@@ -313,12 +313,15 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
       // The add may land on an EXISTING lot (INSERT OR IGNORE above). A lot
       // with no supplier/cost yet adopts this row's; values already recorded
       // on the lot win — first attribution sticks, imports never rewrite it.
+      // A matching inactive lot is reactivated in this same atomic batch so
+      // the received stock remains reachable from POS/FIFO reads.
       sql: `UPDATE product_batches SET
+              is_active = 1,
               supplier_name = COALESCE(supplier_name, @supplierName),
               supplier_id = COALESCE(supplier_id, @supplierId),
               unit_cost_usd = COALESCE(unit_cost_usd, @costPriceUsd)
             WHERE variant_product_id = @productId AND batch_key = @batchKey
-              AND (@supplierName IS NOT NULL OR @costPriceUsd IS NOT NULL) AND ${guard}`,
+              AND ${guard}`,
       params,
     },
     {
