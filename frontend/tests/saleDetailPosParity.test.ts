@@ -137,7 +137,11 @@ for (const fragment of cardMarkup) {
   assert.ok(productCard.includes(fragment), `ProductCard.tsx lost the POS card's ${fragment}`)
   assert.ok(!detail.includes(fragment), `components/sales/SaleDetailModal.tsx re-implements the POS card: ${fragment}`)
 }
-assert.match(detail, /<div className="line-clamp-2 break-words font-medium/, 'compact receipt product names remain readable across two lines')
+assert.match(
+  detail,
+  /<div className="(?=[^"]*\bline-clamp-2\b)(?=[^"]*\bbreak-words\b)(?=[^"]*\bfont-medium\b)[^"]*"/,
+  'compact receipt product names remain readable across two lines',
+)
 // POS.tsx keeps promotionBadgeForProduct for its one-tap gate, but nothing
 // of the card body: no badge component of its own, no expiry read, no
 // inline card markup.
