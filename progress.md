@@ -12487,3 +12487,51 @@ Fix-scoped commit **0e02859b6e08** is live at 100% in Worker version
 `2026-09-10T17:27:53.671Z UTC`. This was a code-only upload: no migration,
 secret synchronization, or D1/R2 production data write ran. The deploy output
 reported no updated static assets and completed successfully.
+
+## Unified sales-workflow and responsive UI deployed — September 11, 2026
+
+The integrated candidate is deployed from exact commit **7e57b0ce3cb54d709eaa3c80d05520b80c7aba7d**
+on branch `codex/ui-consistency-20260911`. Cloudflare reports Worker version
+**8df18b1b-8e44-4c79-82f3-311b45129898** at **100%**. The release used the
+verified production build and `npm run deploy`; it did not run secret sync,
+database import, remote cleanup, or R2 mutation.
+
+Primary D1 migrations **0150_fee_operation_receipts.sql**,
+**0151_transfer_provenance_replay.sql**, and
+**0152_transfer_provenance_enforcement.sql** were applied in order under a
+token-scoped deployment maintenance hold. The recovery bookmark immediately
+before migration was
+`000014ce-00000238-000050e3-e3664467e8cd6b4cac5b9f4a40c91a3a`.
+The final Worker was established at 100% before the hold; fee and transfer
+writes failed closed on the old schema. Production fee, transfer, stock, lot,
+receipt, and product-batch counters then remained stable for longer than the
+90-second bulk-client timeout before migration.
+
+Pre/post assertions were identical: fees **4,305**, USD **135,136.6**, KHR
+**83,651,300**, fee-create audits **41**; stock transfers **109** totaling
+**644**; branch stock **20,218** rows totaling **24,542**; branch-batch stock
+**47,289** rows totaling **24,571**; transfer receipts **2**; product batches
+**36,097**. After migration, fee operation receipts were **0**, transfer
+members were **0**, both legacy transfer receipts were version 0 / recorded /
+generation 0 with no operation or history link, all 109 legacy transfer rows
+kept null provenance fields, the provenance enforcement trigger existed, and
+all three migration ledger rows existed. The token-matched maintenance flag
+was then removed and a follow-up migration check reported no pending primary
+D1 migrations.
+
+Release verification combined two independent verifier passes with the full
+frontend chain (**361/361**), both TypeScript gates, the 1,123-module Vite
+production build, Wrangler dry-run packaging, the complete Worker script sweep,
+and focused reruns for every harness discrepancy. Three stale in-memory test
+fixtures were aligned with the new transfer capability marker and migration
+0141 customer schema; their 12, 586, and 57 cases pass. The one transient
+native subtotal preview failure did not reproduce in three consecutive
+isolated Miniflare/workerd runs. No runtime file changed after independent
+certification except the already-certified route-loader compatibility repair.
+
+Unauthenticated Playwright reached both production custom domains, but
+Cloudflare's bot challenge returned 403 before the app shell. Therefore no
+authenticated production UI mutation or physical iOS/PWA/camera/printer test
+is claimed. Deployment/version metadata, D1 invariants, local real-route
+Hono/SQLite scenarios, and responsive mocked-browser checks are the recorded
+release evidence.
