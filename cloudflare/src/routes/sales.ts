@@ -4924,6 +4924,17 @@ app.get('/', async (c) => {
     const itemRows = await selectInChunks(saleIds, 0, (chunk) => db.prepare(`
       SELECT si.*, b.name AS branch_name, p.barcode AS barcode, p.category AS category,
         p.unit AS unit, p.supplier AS supplier,
+        -- A single received date is factual only for an explicit lot or a
+        -- fully allocated single-lot line. Keep multi-lot lines unsummarized;
+        -- lot_allocation_count below remains their separate UI indicator.
+        COALESCE(pb.received_at, (
+          SELECT CASE WHEN COUNT(DISTINCT sia.batch_id) = 1 AND SUM(sia.quantity) >= si.quantity
+            THEN MAX(allocated_batch.received_at) ELSE NULL END
+          FROM sale_item_batch_allocations sia
+          JOIN product_batches allocated_batch ON allocated_batch.id = sia.batch_id
+            AND allocated_batch.variant_product_id = si.product_id
+          WHERE sia.sale_item_id = si.id AND sia.quantity > 0
+        )) AS batch_received_at,
         COALESCE((
           SELECT SUM(ri.quantity)
           FROM return_items ri
@@ -4943,6 +4954,7 @@ app.get('/', async (c) => {
       FROM sale_items si
       LEFT JOIN branches b ON b.id = si.branch_id
       LEFT JOIN products p ON p.id = si.product_id
+      LEFT JOIN product_batches pb ON pb.id = si.batch_id AND pb.variant_product_id = si.product_id
       WHERE si.sale_id IN (${chunk.map(() => '?').join(',')})
       ORDER BY si.id ASC
     `).all<{ sale_id: number; [key: string]: unknown }>(chunk))
