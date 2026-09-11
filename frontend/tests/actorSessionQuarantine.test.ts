@@ -118,5 +118,44 @@ try {
   await ending
   assert.equal(logoutEnv.cleared, 0, 'old dispatched logout completion cannot clear new session locally')
   scope.completeActorSessionReconciliation(scope.actorSessionReconciliationMarker())
+  // Separate actual module instance represents another tab observing the same
+  // localStorage, while both tabs share a browser cookie jar.
+  const observerModule = '../src/api/actorReadScope.ts?observer'
+  const observerScope = await import(observerModule)
+  for (const path of ['/api/auth/login', '/api/auth/otp/verify', '/api/auth/logout', '/api/auth/session-duration']) {
+    const cookieResponse = deferred<Response>()
+    globalThis.fetch = (() => {
+      assert.equal(scope.isActorCookieMutationPending(), true, 'pending marker precedes cookie-capable fetch dispatch')
+      return cookieResponse.promise
+    }) as typeof fetch
+    const authenticating = http.apiFetch('POST', path, { fixture: true })
+    assert.equal(observerScope.isActorSessionQuarantined(), true)
+    assert.equal(observerScope.completeActorSessionReconciliation(observerScope.actorSessionReconciliationMarker()), false)
+    await assert.rejects(http.readActorSessionRecoveryBootstrap(), (e: any) => e.outcome === 'not_dispatched')
+    await assert.rejects(http.apiFetch('POST', '/api/sales', { fixture: true }), (e: any) => e.outcome === 'not_dispatched')
+    // An outer UI deadline is not completion of the still-running fetch.
+    await assert.rejects(Promise.race([authenticating, Promise.reject(new Error('UI deadline'))]))
+    assert.equal(scope.isActorCookieMutationPending(), true)
+    const pendingBeforeReset = data.get('businessos_read_session')
+    scope.resetActorReadSession()
+    assert.equal(data.get('businessos_read_session'), pendingBeforeReset, 'generic session reset cannot remove unfinished auth fence')
+    cookieResponse.resolve(new Response(JSON.stringify({ user: { id: 2 } })))
+    const authResult = await authenticating
+    assert.deepEqual(authResult, { user: { id: 2 } })
+    if (path.endsWith('/login') || path.endsWith('/verify')) {
+      assert.equal(scope.isActorSessionQuarantined(), true, 'unconsumed late auth result cannot enable stale owning UI')
+      assert.equal(scope.acknowledgeActorCookieUser({ id: 2 }), false, 'only exact returned object can acknowledge the explicit login')
+      assert.equal(scope.acknowledgeActorCookieUser(authResult.user), true)
+    }
+    assert.equal(scope.isActorCookieMutationPending(), false)
+    assert.equal(observerScope.isActorSessionQuarantined(), true, 'settlement still requires authoritative reconciliation in old tab')
+    assert.equal(observerScope.completeActorSessionReconciliation(observerScope.actorSessionReconciliationMarker()), true)
+  }
+  const ownerMarker = scope.beginActorCookieMutation()
+  data.set('businessos_read_session', 'auth-pending:newer-owner')
+  assert.equal(scope.finishActorCookieMutation(ownerMarker), false, 'old completion cannot unlock a newer auth request')
+  assert.equal(data.get('businessos_read_session'), 'auth-pending:newer-owner')
+  externalChange()
+  scope.completeActorSessionReconciliation(scope.actorSessionReconciliationMarker())
 } finally { globalThis.fetch = originalFetch }
 console.log('PASS quarantine dispatch, exact recovery401 isolation, preserved write receipts, actual AppContext effects and commit fence')

@@ -17,6 +17,7 @@ import { STORAGE_KEYS } from '../../constants'
 import { getClientDeviceInfo } from '../../utils/deviceInfo.ts'
 import { copyPasswordToClipboard, passwordPersistenceNotice, persistChangedPassword } from '../../utils/passwordManager.ts'
 import { getPortalConfig } from '../../api/portalPublicTransport.ts'
+import { finishActorOauthCookieRedirect, isActorCookieMutationPending } from '../../api/actorReadScope.ts'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -536,6 +537,11 @@ export default function Login() {
       && String(callbackResult.mode || '').trim().toLowerCase() === mode
       && (!provider || String(callbackResult.provider || '').trim().toLowerCase() === provider)
     if (!accessToken && !errorDescription && !matchingStoredCallback) return undefined
+    if (matchingStoredCallback && mode === 'login' && isActorCookieMutationPending()) {
+      // Only this tab's server-returned OAuth intent can complete the cookie
+      // phase; a stale/different callback never unlocks another login.
+      if (!finishActorOauthCookieRedirect(url.searchParams.get('auth_session_intent'))) return undefined
+    }
 
     const clearCallbackUrl = () => {
       const cleanUrl = `${url.origin}${url.pathname}`

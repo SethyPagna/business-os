@@ -98,7 +98,8 @@ test('AppContext records auth intent before the per-channel debounce can replace
 })
 
 async function runExtractedHandler(events: Array<{ channel: string; reason?: string; payload?: { id?: string | number } | null }>): Promise<number> {
-  const start = appContextSource.indexOf('    let disposed = false')
+  const syncSection = appContextSource.indexOf('  // Sync event listeners')
+  const start = appContextSource.indexOf('    let disposed = false', syncSection)
   const end = appContextSource.indexOf('    const onStatus = (e: Event) => {', start)
   assert.ok(start >= 0 && end > start, 'AppContext handler extraction boundaries changed')
   const handler = ts.transpileModule(
