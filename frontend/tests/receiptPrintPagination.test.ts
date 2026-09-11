@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { buildSingleImagePdf } from '../src/utils/printReceipt.ts'
+import { buildPrintablePreviewDocument, buildSingleImagePdf } from '../src/utils/printReceipt.ts'
 import { computeImagePageSegments } from '../src/utils/receiptPdfLayout.ts'
 
 let failed = 0
@@ -55,20 +55,29 @@ await runTest('98x148 PDF pages keep 1/10/25-item receipt rasters full width and
   }
 })
 
-await runTest('continuous 80mm PDF remains one exact content-height roll page', () => {
-  const text = pdfText(buildSingleImagePdf({
-    imageBytes: fakeJpeg,
-    imageWidthPx: 800,
-    imageHeightPx: 2400,
-    pageWidthPt: mmToPt(80),
-  }))
-  assert.equal(pageCount(text), 1)
-  assert.equal(mediaBoxes(text)[0], '0 0 226.77 680.31')
-  const [[width, height, x, y]] = drawMatrices(text)
-  assert.equal(width.toFixed(2), mmToPt(80).toFixed(2))
-  assert.equal(height.toFixed(2), '680.31')
-  assert.equal(x, 0)
-  assert.equal(y, 0)
+await runTest('continuous 80mm PDF remains one exact content-height roll page for 1/10/25 items', () => {
+  const samples = [
+    { items: 1, heightPx: 1248 },
+    { items: 10, heightPx: 2486 },
+    { items: 25, heightPx: 4550 },
+  ]
+  let previousHeight = 0
+  for (const sample of samples) {
+    const text = pdfText(buildSingleImagePdf({
+      imageBytes: fakeJpeg,
+      imageWidthPx: 800,
+      imageHeightPx: sample.heightPx,
+      pageWidthPt: mmToPt(80),
+    }))
+    assert.equal(pageCount(text), 1, `${sample.items} items remain one variable-height PDF page`)
+    const [[width, height, x, y]] = drawMatrices(text)
+    assert.equal(width.toFixed(2), mmToPt(80).toFixed(2))
+    assert.ok(height > previousHeight, 'page height grows with receipt content')
+    assert.equal(x, 0)
+    assert.equal(y, 0)
+    assert.equal(mediaBoxes(text)[0], `0 0 226.77 ${height.toFixed(2)}`)
+    previousHeight = height
+  }
 })
 
 await runTest('fixed document pages stop at receipt-row boundaries instead of slicing text', () => {
@@ -121,12 +130,35 @@ await runTest('explicit 80x50 card remains one fitted sheet', () => {
     'the compact caller cannot be confused with an arbitrary custom document')
 })
 
-await runTest('direct continuous print delegates page length to the driver while retaining receipt width', () => {
+await runTest('direct continuous print is one measured-height CSS page at constant width for 1/10/25 items', () => {
+  const samples = [
+    { items: 1, heightMm: 124.83 },
+    { items: 10, heightMm: 248.65 },
+    { items: 25, heightMm: 455.03 },
+  ]
+  for (const sample of samples) {
+    const itemIds = Array.from({ length: sample.items }, (_, index) => `ITEM-${index + 1}`)
+    const markup = `<section>${itemIds.join('|')}|TOTAL|QR-SYMBOL</section>`
+    const html = buildPrintablePreviewDocument({
+      markup,
+      widthMm: 80,
+      pageHeightMm: sample.heightMm,
+      continuousRoll: true,
+      singleSheet: false,
+    })
+    assert.match(html, new RegExp(`size: 80mm ${sample.heightMm.toFixed(2)}mm`))
+    assert.match(html, new RegExp(`height: ${sample.heightMm.toFixed(2)}mm !important`))
+    assert.match(html, /width: 80mm !important/)
+    assert.doesNotMatch(html, /size:\s*auto/)
+    assert.doesNotMatch(html, /transform:\s*scale\(/)
+    for (const id of itemIds) assert.ok(html.includes(id), `${id} is retained`)
+    assert.ok(html.includes('TOTAL'))
+    assert.ok(html.includes('QR-SYMBOL'))
+  }
+
   const source = fs.readFileSync(new URL('../src/utils/printReceipt.ts', import.meta.url), 'utf8')
-  assert.match(source, /const pageSizeCss = continuousRoll \? 'auto'/)
-  assert.match(source, /const documentHeightCss = clipToOnePage[\s\S]*height: auto !important;[\s\S]*min-height: 0 !important;/)
-  assert.match(source, /width: \$\{widthMm\}mm !important;/,
-    'the receipt content remains at its configured 58/72/80 mm width')
+  assert.match(source, /the web page cannot prevent the native print pipeline from shrinking or[\s\S]*clipping/,
+    'fixed driver media mismatch remains explicitly documented, not claimed solved')
   assert.doesNotMatch(source, /\.slice\(0, 260\)/,
     'the text fallback must not silently discard late receipt items or totals')
 })
