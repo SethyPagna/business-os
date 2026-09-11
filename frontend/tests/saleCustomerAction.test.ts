@@ -7,8 +7,8 @@ import { createRoot } from 'react-dom/client'
 import react from '@vitejs/plugin-react'
 import { createServer } from 'vite'
 import { updateSalesBulkField, type BulkSaleUpdatePayload } from '../src/api/salesTransport.ts'
-import { updateCustomer } from '../src/api/contactWriteTransport.ts'
-import { resolveSaleCustomerEditorRoute } from '../src/utils/customerIdentity.ts'
+import { getSalesCustomerPicker } from '../src/api/contactReadTransport.ts'
+import { saleCustomerMode } from '../src/utils/saleCustomerMode.ts'
 import { __resetApiHealthForTests, __resetApiWriteDedupeForTests, setSyncServerUrl, setSyncToken } from '../src/api/http.ts'
 
 const testDir = dirname(fileURLToPath(import.meta.url))
@@ -18,44 +18,11 @@ const detail = readFileSync(resolve(frontendRoot, 'src/components/sales/SaleDeta
 const modalSource = readFileSync(resolve(frontendRoot, 'src/components/sales/SaleCustomerActionModal.tsx'), 'utf8').replace(/\r\n?/g, '\n')
 const nameModalSource = readFileSync(resolve(frontendRoot, 'src/components/sales/SaleCustomerNameModal.tsx'), 'utf8').replace(/\r\n?/g, '\n')
 
-assert.match(sales, /const canBrowseCustomers = can\('contacts', 'view'\)/)
-assert.match(sales, /const canEditCustomerName = can\('contacts', 'edit'\)/)
-assert.match(sales, /const canEditCustomerMembership = canEditCustomerName && getPermissionTier\('contacts'\) === 'full'/)
-assert.match(sales, /const initialRoute = resolveSaleCustomerEditorRoute\(sale\)/)
-assert.match(sales, /getCustomerIdentityById\(customerId\)[\s\S]*resolveSaleCustomerEditorRoute\(sale, customer\) === 'assignment'[\s\S]*setSaleCustomerPrompt/)
-assert.match(sales, /resolveSaleCustomerEditorRoute\(sale, customer\) === 'assignment'[\s\S]*if \(!canEditCustomerName\)/, 'a marked current customer routes to assignment before profile edit permission is required')
-assert.match(sales, /setSaleCustomerPrompt\(\{ sale: \{ \.\.\.sale \}, choices: \[\] \}\)/, 'General opens the existing-contact assignment flow')
-assert.match(sales, /getCustomerIdentityById\(customerId\)/, 'the current linked identity is loaded without exposing anonymous rows to pickers')
-assert.match(sales, /const updatedAt = String\(customer\.updated_at \|\| ''\)\.trim\(\)[\s\S]{0,160}if \(!updatedAt\) throw/, 'a profile edit refuses to open without the exact server version')
-assert.match(sales, /const payload: Record<string, unknown> = \{ expectedUpdatedAt: form\.updatedAt \}/, 'the reviewed customer version is frozen into the profile PUT')
-assert.match(sales, /payload\.membership_number = afterMembership/, 'membership association is a scoped profile update')
-assert.match(sales, /payload\.__rename_cascade = renameChoice === 'carry' \? 'carry' : 'record_only'/, 'name edits preserve the explicit linked-record choice')
-assert.doesNotMatch(sales, /createCustomer|CustomerFormModal|saleCustomerCreateRecovery/, 'the sale flow cannot create a customer')
-assert.doesNotMatch(sales, /attachSaleCustomer|handleAttachMembership|runSaleMembershipMutation/, 'the removed direct membership writer has no mounted or dead caller')
-assert.doesNotMatch(modalSource, /Replace customer|Create customer|Remove link|onReplace|onCreate|onRemove/, 'the anonymous editor has no replace, create, or remove action')
-assert.match(detail, /t\('sale_customer_edit_entry'\)/, 'the Sale Detail entry point is one localized Edit customer action')
-assert.doesNotMatch(modalSource, /customer\.name[^\n]*includes/, 'server phone results are not hidden by a secondary name filter')
-assert.match(modalSource, /name\.includes\(normalizedQuery\)/, 'name search is available alongside phone matching')
-assert.match(modalSource, /phone\.includes\(queryDigits\)/, 'phone search uses canonical digits')
-assert.match(modalSource, /SALE_CUSTOMER_SEARCH_DEBOUNCE_MS = 300/, 'server search is debounced')
-assert.match(nameModalSource, /readOnly=\{!membershipCanChange\}/, 'existing membership and non-Full membership access remain read-only')
-assert.match(nameModalSource, /Phone is this customer’s primary identity/, 'the real-customer form states the phone identity boundary')
-assert.match(sales, /The refreshed sale can leave the active search\/page[\s\S]{0,220}setDetailSale\(null\)/, 'assignment closes an unrefreshable detail instead of showing stale contact snapshots')
-
-const zeroStart = sales.indexOf('if (result.changedCount === 0)')
-const zeroEnd = sales.indexOf('return false', zeroStart)
-const zeroBlock = sales.slice(zeroStart, zeroEnd)
-assert.ok(zeroStart >= 0)
-assert.ok(zeroBlock.indexOf('savePendingBulkFieldRequest(null)') < zeroBlock.indexOf('refreshSaleCustomerViews()'), 'known zero-change receipts clear the retry before refreshing')
-assert.match(zeroBlock, /setSaleCustomerPrompt\(null\)/)
-assert.match(sales, /if \(pendingBulkFieldRequest && !retryRequest\)[\s\S]{0,500}const payload: BulkSaleUpdatePayload = retryRequest \|\|/, 'a new link body cannot overwrite an unknown frozen request')
-
-assert.match(sales, /export function isKnownUncommittedSaleCustomerChangeError/)
-console.log('PASS one customer edit entry separates anonymous assignment from scoped real-customer edits')
-
-assert.equal(resolveSaleCustomerEditorRoute({ customer_id: 24969, customer_is_anonymous: 1 }), 'assignment', 'a marked positive customer id uses the assignment editor')
-assert.equal(resolveSaleCustomerEditorRoute({ customer_id: 22305, customer_is_anonymous: 0 }, { is_anonymous: 0 }), 'profile', 'an unmarked real customer named General remains profile-editable')
-console.log('PASS explicit markers route the sale customer editor without name inference')
+assert.doesNotMatch(sales, /updateCustomer\(|getCustomerIdentityById\(|RenameCascadeModal/, 'Sales never edits a global customer profile')
+assert.match(detail, /t\('sale_customer_edit_entry'\)/)
+assert.equal(saleCustomerMode(true, true), 'assignment')
+assert.equal(saleCustomerMode(true, false), 'name-only')
+assert.equal(saleCustomerMode(false, true), 'denied')
 
 // Exercise the real transport: the one-sale body and receipt id must arrive
 // unchanged at the durable bulk endpoint.
@@ -81,6 +48,10 @@ try {
   assert.equal(String(calls[0][0]), 'https://sync.example.test/api/sales/bulk-update')
   assert.equal(calls[0][1]?.method, 'POST')
   assert.deepEqual(JSON.parse(String(calls[0][1]?.body)), request)
+  const nameRequest: BulkSaleUpdatePayload = { ...request, client_request_id: 'f72-name-exact-request', action: { kind: 'customer_name', name: 'Receipt-only name' } }
+  await updateSalesBulkField(nameRequest)
+  assert.equal(String(calls[1][0]), 'https://sync.example.test/api/sales/bulk-update')
+  assert.deepEqual(JSON.parse(String(calls[1][1]?.body)), nameRequest, 'sale-only name uses the same durable envelope without contact identity fields')
 } finally {
   globalThis.fetch = originalFetch
   setSyncServerUrl('')
@@ -90,46 +61,17 @@ try {
 }
 console.log('PASS real sales transport preserves the exact one-sale customer request')
 
-// The customer profile write must use the version returned by the exact
-// stable-id server read. No local Dexie customer is seeded in this process;
-// the explicit token must reach the real PUT unchanged and a stale response
-// must surface without a second write.
-__resetApiWriteDedupeForTests()
-__resetApiHealthForTests()
-setSyncServerUrl('https://sync.example.test')
-setSyncToken('sale-customer-token')
-const profileCalls: Array<[RequestInfo | URL, RequestInit | undefined]> = []
-globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
-  profileCalls.push([input, init])
-  return Promise.resolve(new Response(JSON.stringify({
-    error: 'Customer changed on another device',
-    code: 'write_conflict',
-    conflict: true,
-  }), { status: 409, headers: { 'Content-Type': 'application/json' } }))
-}) as typeof fetch
-try {
-  const conflict = await updateCustomer(9, {
-    name: 'Alice Revised',
-    expectedUpdatedAt: '2026-09-08 12:34:56',
-  }).then(() => null, (error) => error as { status?: number; code?: string; conflict?: boolean })
-  assert.equal(profileCalls.length, 1)
-  assert.equal(String(profileCalls[0][0]), 'https://sync.example.test/api/customers/9')
-  assert.equal(profileCalls[0][1]?.method, 'PUT')
-  assert.deepEqual(JSON.parse(String(profileCalls[0][1]?.body)), {
-    name: 'Alice Revised',
-    expectedUpdatedAt: '2026-09-08 12:34:56',
-  })
-  assert.equal(conflict?.status, 409)
-  assert.equal(conflict?.code, 'write_conflict')
-  assert.equal(conflict?.conflict, true)
-} finally {
-  globalThis.fetch = originalFetch
-  setSyncServerUrl('')
-  setSyncToken('')
-  __resetApiWriteDedupeForTests()
+// Auth denial is never converted into cached identity choices, including POS
+// calls that do not request the stricter fresh-only Sales option.
+for (const status of [401, 403]) {
   __resetApiHealthForTests()
+  setSyncServerUrl('https://sync.example.test')
+  setSyncToken('customer-picker-test')
+  globalThis.fetch = (async () => new Response(JSON.stringify({ error: 'Permission denied' }), { status, headers: { 'Content-Type': 'application/json' } })) as typeof fetch
+  try { await assert.rejects(getSalesCustomerPicker({ search: 'Alice' }), (error: any) => Number(error.status) === status) }
+  finally { globalThis.fetch = originalFetch; setSyncServerUrl(''); setSyncToken(''); __resetApiHealthForTests() }
 }
-console.log('PASS exact customer version reaches the real PUT and stale conflict does not retry')
+console.log('PASS picker rejects auth/permission denial instead of offline fallback')
 
 class MemoryNode {
   nodeType: number
@@ -242,10 +184,15 @@ try {
   memoryDocument.body.appendChild(container)
   const root = createRoot(container as unknown as Element)
   const common = { saleLabel: 'S-72', choices: [], saving: false, translate, onClose() {}, onAssign() {} }
+  const propsOf = (node: MemoryNode): Record<string, any> => {
+    const key = Object.keys(node).find((key) => key.startsWith('__reactProps$'))
+    return key ? (node as unknown as Record<string, any>)[key] : {}
+  }
+  const findNode = (predicate: (node: MemoryNode) => boolean, node = container): MemoryNode | undefined => predicate(node) ? node : node.childNodes.map((child) => findNode(predicate, child)).find(Boolean)
 
-  function RoutedCustomerEditor({ sale, currentCustomer }: { sale: Record<string, unknown>; currentCustomer?: Record<string, unknown> }) {
-    const route = resolveSaleCustomerEditorRoute(sale, currentCustomer)
-    if (route === 'assignment') return React.createElement(actionModule.default, { ...common, key: 'routed-assignment' })
+  function RoutedCustomerEditor({ sale, currentCustomer, reassign = true }: { sale: Record<string, unknown>; currentCustomer?: Record<string, unknown>; reassign?: boolean }) {
+    const route = saleCustomerMode(true, reassign)
+    if (route === 'assignment') return React.createElement(actionModule.default, { ...common, key: 'routed-assignment', currentCustomerName: String(sale.customer_name || ''), onSearch() {} })
     return React.createElement(nameModule.default, {
       key: 'routed-profile',
       currentName: String(currentCustomer?.name || ''),
@@ -267,12 +214,12 @@ try {
     sale: { id: 73, customer_id: 22305, customer_name: 'General', customer_is_anonymous: 0 },
     currentCustomer: { id: 22305, name: 'General', phone: '086897171', is_anonymous: 0 },
   })))
-  assert.match(container.textContent, /Phone is this customer’s primary identity/, 'a mounted unmarked real General opens profile editing')
+  assert.match(container.textContent, /Choose another customer/, 'a linked real customer uses the same Sales picker by default')
 
   await act(async () => root.render(React.createElement(actionModule.default, { ...common, key: 'no-contacts-view' })))
   assert.match(container.textContent, /General/)
   assert.doesNotMatch(container.textContent, /Walk-in|General \(anonymous\)/)
-  assert.match(container.textContent, /Assigning an existing customer needs Contacts view permission/)
+  assert.match(container.textContent, /do not have permission/)
   assert.doesNotMatch(container.textContent, /Replace customer|Create customer|Remove link/)
 
   await act(async () => root.render(React.createElement(actionModule.default, {
@@ -298,6 +245,31 @@ try {
   assert.match(container.textContent, /Retry original request/)
   assert.match(container.textContent, /Discard retry/)
 
+  const assigned: unknown[] = []
+  const livePicker = { ...common, key: 'actual-picker-input', choices: [{ id: 9, name: 'Sok Dara', phone: '012345678' }], resultsQuery: 'Dara Sok', onSearch() {}, onAssign: (value: unknown) => assigned.push(value) }
+  await act(async () => root.render(React.createElement(actionModule.default, livePicker)))
+  await act(async () => propsOf(findNode((node) => propsOf(node).name === 'sale_customer_lookup')!).onChange({ target: { value: 'Dara Sok' } }))
+  assert.match(container.textContent, /Sok Dara/, 'actual input retains authoritative reordered-name result')
+  await act(async () => propsOf(findNode((node) => node.tagName === 'BUTTON' && node.textContent.includes('Sok Dara'))!).onClick())
+  assert.equal((assigned[0] as { id: number }).id, 9)
+  await act(async () => propsOf(findNode((node) => propsOf(node).name === 'sale_customer_lookup')!).onChange({ target: { value: 'Different' } }))
+  assert.doesNotMatch(container.textContent, /Sok Dara/, 'typing immediately hides preceding query choices before debounce')
+
+  const edits: unknown[] = []
+  let releaseSave!: (value: boolean) => void
+  const pendingSave = new Promise<boolean>((resolve) => { releaseSave = resolve })
+  await act(async () => root.render(React.createElement(nameModule.default, {
+    key: 'actual-name-input', currentName: 'Original', currentPhone: '012345678', translate,
+    onSave: (edit: unknown) => { edits.push(edit); return pendingSave }, onClose() {},
+  })))
+  assert.equal(findNode((node) => propsOf(node).name === 'sale_customer_membership'), undefined)
+  await act(async () => propsOf(findNode((node) => propsOf(node).name === 'sale_customer_name')!).onChange({ target: { value: '  Receipt name  ' } }))
+  const saveClick = propsOf(findNode((node) => node.tagName === 'BUTTON' && node.textContent === 'Save')!).onClick
+  await act(async () => { saveClick(); saveClick() })
+  assert.deepEqual(edits, [{ name: 'Receipt name' }], 'mounted save submits only name once, no profile or relationship fields')
+  assert.equal(propsOf(findNode((node) => propsOf(node).name === 'sale_customer_name')!).disabled, true)
+  await act(async () => { releaseSave(true); await pendingSave })
+
   const searchCalls: string[] = []
   const recordSearch = (query: string) => searchCalls.push(query)
   function SearchHarness({ query }: { query: string }) {
@@ -320,9 +292,9 @@ try {
     onSave: async () => true,
     onClose() {},
   })))
-  assert.match(container.textContent, /Phone is this customer’s primary identity/)
-  assert.match(container.textContent, /Name is the secondary display identity/)
-  assert.match(container.textContent, /existing membership number is preserved and cannot be changed here/)
+  assert.match(container.textContent, /Only the customer name saved on this sale changes/)
+  assert.doesNotMatch(container.textContent, /linked-record choice/)
+  assert.doesNotMatch(container.textContent, /Membership number/)
   await act(async () => root.render(React.createElement(nameModule.default, {
     currentName: 'No membership yet',
     currentPhone: '098 765 432',
@@ -332,12 +304,12 @@ try {
     onSave: async () => true,
     onClose() {},
   })))
-  assert.match(container.textContent, /Assigning membership needs Full Contacts permission/)
+  assert.match(container.textContent, /phone, membership, customer profile and other transactions stay unchanged/)
   await act(async () => root.unmount())
 } finally {
   await vite.close()
 }
-console.log('PASS mounted customer UI enforces one phone-first anonymous assignment and scoped real-customer editing')
+console.log('PASS mounted customer UI defaults to assignment and name-only never exposes profile/membership writes')
 
 for (const language of ['en', 'km']) {
   const labels = JSON.parse(readFileSync(resolve(frontendRoot, `src/lang/${language}.json`), 'utf8')) as Record<string, string>
@@ -354,3 +326,7 @@ for (const language of ['en', 'km']) {
   for (const key of keys) assert.ok(labels[key], `missing ${language} ${key}`)
 }
 console.log('PASS every F72 customer-action label exists in English and Khmer')
+
+// Included here so the existing utility gate also executes callback/security
+// regressions, not only the rendered modal/transport checks above.
+await import('./saleCustomerMode.test.ts')

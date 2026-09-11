@@ -89,6 +89,7 @@ export type BulkSaleUpdatePayload = {
   client_request_id: string
   items: Array<{ id: number; expected_updated_at: string | null }>
   action:
+    | { kind: 'customer_name'; name: string }
     | { kind: 'payment_method'; source: string | null; target: string }
     | { kind: 'delivery_contact' | 'customer'; source_id: number | null; target_id: number | null }
 }
