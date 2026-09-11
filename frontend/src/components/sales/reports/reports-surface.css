@@ -203,6 +203,21 @@
   --ui-font-display: inherit;
 }
 
+/* Screen reports are read as documents, so their text and tabular figures
+   run two pixels larger than the original dense spreadsheet scale. Keep the
+   override explicitly screen-only: receipt/report print geometry continues
+   to use the established tokens and line boxes. */
+@media screen {
+  [data-reports-hub],
+  .reports-fold-panel,
+  [data-reports-fold] {
+    --ui-size-body: calc(14px * var(--ui-km-boost, 1));
+    --ui-size-meta: calc(13px * var(--ui-km-boost, 1));
+    --ui-size-h2: calc(17px * var(--ui-km-boost, 1));
+    --ui-size-h3: calc(16px * var(--ui-km-boost, 1));
+  }
+}
+
 /* ---------------------------------------------------------------------------
    .report-segment -- THE segment shell (owner, Sep 6: "use borders for all
    segments like up down, left and right, so see line borders").
@@ -311,9 +326,21 @@
   white-space: nowrap;
 }
 
-.reports-title-actions > :first-child { min-width: 0; flex: 1 1 auto; }
+.reports-view-picker {
+  display: inline-flex;
+  min-width: 0;
+  width: clamp(7rem, 28vw, 14rem);
+  flex: 0 0 clamp(7rem, 28vw, 14rem);
+}
+
+.reports-view-picker > [data-app-select-root='true'] { width: 100%; }
+.reports-title-actions > :first-child { min-width: 0; }
 .reports-title-actions > :not(:first-child) { flex: 0 0 auto; }
 .reports-show-action { min-height: 40px; height: 40px; flex: 0 0 auto; }
+
+/* The kit's overflow menu stays horizontal everywhere else. Reports alone
+   use the vertical convention requested for their export/action menu. */
+[data-reports-hub] .lucide-more-horizontal { transform: rotate(90deg); }
 
 /* Overview breakdowns are navigation-like buttons directly after the filter
    controls. Long English/Khmer labels scroll inside this strip rather than
@@ -527,6 +554,17 @@
   [data-reports-hub] .reports-overview-statement {
     max-width: 34rem;
     margin-inline: auto;
+  }
+}
+
+@media screen and (min-width: 1024px) {
+  [data-reports-hub],
+  .reports-fold-panel,
+  [data-reports-fold] {
+    --ui-size-body: calc(16px * var(--ui-km-boost, 1));
+    --ui-size-meta: calc(15px * var(--ui-km-boost, 1));
+    --ui-size-h2: calc(19px * var(--ui-km-boost, 1));
+    --ui-size-h3: calc(17px * var(--ui-km-boost, 1));
   }
 }
 

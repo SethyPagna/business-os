@@ -694,7 +694,7 @@ test('the control row keeps every control at each width: nothing is dropped, not
   assert.ok(control.includes('{viewPicker}') && control.includes('{filtersButton}'), 'report option and Filters share one row')
   assert.ok(control.includes("trh('show', 'Show')"), 'Show shares the report option row')
   assert.ok(/titleControl: reportControlRow/.test(hub), 'every report view receives the same compound title row')
-  assert.match(hub, /const viewPicker = \(\s*<AppSelect[\s\S]*?ariaLabel=\{trh\('view', 'View'\)\}/, 'the menu view picker retains AppSelect keyboard semantics and its accessible name')
+  assert.match(hub, /const viewPicker = \(\s*<span className="reports-view-picker" title=\{selectedViewLabel\}>[\s\S]*?<AppSelect[\s\S]*?ariaLabel=\{`\$\{trh\('view', 'View'\)\}: \$\{selectedViewLabel\}`\}/, 'the fixed-width view picker retains keyboard semantics plus full selected-label tooltip and accessible name')
   assert.ok(/reports-mobile-primary">\{rangePicker\}/.test(hub), 'the compact primary row keeps only the range')
   assert.equal((hub.match(/titleControl: reportControlRow/g) || []).length, 1, 'the compound active title has one render reference')
   const frame = read('src/components/sales/reports/ReportFrame.tsx')
@@ -752,6 +752,9 @@ test('compact report filters match the stacked mobile control contract', () => {
   assert.match(css, /\.reports-mobile-presets\s*\{[\s\S]*flex-wrap:\s*nowrap[\s\S]*overflow-x:\s*auto/, 'quick ranges stay in one horizontal scrolling rail')
   assert.match(css, /\.reports-mobile-range\s*\{[^}]*\bmin-height:\s*44px\s*;/, 'the combined date/calendar target is at least 44px, regardless of declaration order')
   assert.match(css, /\.reports-show-action\s*\{[^}]*min-height:\s*40px[^}]*height:\s*40px/, 'Show follows the compact action-height contract')
+  assert.match(css, /\.reports-filter-trigger\s*\{[^}]*min-height:\s*40px[^}]*height:\s*40px/, 'Filters follows the shared Manage-aligned 40px control height')
+  assert.match(css, /\.reports-view-picker\s*\{[^}]*width:\s*clamp\(7rem, 28vw, 14rem\)[^}]*flex:\s*0 0 clamp\(7rem, 28vw, 14rem\)/, 'short and long report labels retain one responsive picker width with a phone-safe floor')
+  assert.match(css, /\[data-reports-hub\] \.lucide-more-horizontal\s*\{[^}]*transform:\s*rotate\(90deg\)/, 'only report overflow dots rotate to the vertical convention')
   assert.match(css, /font-variant-numeric:\s*tabular-nums/, 'report amounts use tabular numerals')
   assert.match(css, /overflow-x:\s*clip/, 'the report surface cannot create page-level horizontal overflow')
 })
@@ -774,6 +777,13 @@ test('every --ui-* token the reports surface reads is declared, and the density 
   assert.match(css, /--ui-size-body:\s*12px/, 'body text is 12px (was 13px)')
   assert.match(css, /--ui-size-meta:\s*11px/, 'meta text is 11px (was 12px)')
   assert.match(css, /--ui-cell-px:\s*6px/, 'cell padding is 6px a side (was 12px)')
+  assert.match(css, /@media screen\s*\{[\s\S]*?--ui-size-body:\s*calc\(14px \* var\(--ui-km-boost, 1\)\)[\s\S]*?--ui-size-meta:\s*calc\(13px \* var\(--ui-km-boost, 1\)\)/, 'screen report text and figures are two pixels larger at compact widths')
+  assert.match(css, /@media screen and \(min-width: 1024px\)\s*\{[\s\S]*?--ui-size-body:\s*calc\(16px \* var\(--ui-km-boost, 1\)\)[\s\S]*?--ui-size-meta:\s*calc\(15px \* var\(--ui-km-boost, 1\)\)/, 'screen report text and figures stay two pixels larger at desktop widths')
+})
+
+test('report title rows omit the redundant report Info button', () => {
+  const frame = read('src/components/sales/reports/ReportFrame.tsx')
+  assert.doesNotMatch(frame, /import InfoHint|infoHint=\{/, 'ReportFrame does not render an Info trigger beside the report picker')
 })
 
 test('the excel table hugs its columns and pays for density with padding, never with the line box', () => {
