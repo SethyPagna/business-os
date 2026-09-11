@@ -450,7 +450,9 @@ async function runMergeFingerprintReadBatch(
   ]))
 }
 
-export async function mergeStateFingerprint(db: ReturnType<typeof getDb>, reversals: MergeReversal[]): Promise<string> {
+export async function mergeStateFingerprint(
+  db: ReturnType<typeof getDb>, reversals: MergeReversal[], transactionGuards?: AtomicMergeStatement[],
+): Promise<string> {
   const productIds = [...new Set(reversals.flatMap((r) => [Number(r.keeperId), Number(r.dupId)]).filter((id) => Number.isInteger(id) && id > 0))].sort((a, b) => a - b)
   if (!productIds.length) return ''
   const products: Array<Record<string, unknown>> = []
@@ -485,6 +487,13 @@ export async function mergeStateFingerprint(db: ReturnType<typeof getDb>, revers
         params: ids,
       },
     )
+    // Old fingerprints intentionally project only lot identity/activation.
+    // Preserve that serialized contract, but lock the entire current lot row
+    // (received date, cost, supplier, etc.) against races during group undo.
+    if (transactionGuards) reads.push({
+      key: `casBatchMetadata:${index}`,
+      sql: `SELECT * FROM product_batches WHERE variant_product_id IN (${placeholders})`, params: ids,
+    })
   }
   const savedBatchIds = reversals.flatMap((r) => [
     ...(r.repointedBatches || []).map((b) => Number(b.id)),
@@ -534,6 +543,32 @@ export async function mergeStateFingerprint(db: ReturnType<typeof getDb>, revers
   for (const [index, ids] of chunk(allocationIds.returns, 80).entries()) reads.push({ key: `returnAllocations:${index}`, sql: `SELECT * FROM return_item_batch_allocations WHERE id IN (${ids.map(() => '?').join(',')})`, params: ids })
 
   const resultSets = await runMergeFingerprintReadBatch(db, reads)
+  if (transactionGuards) {
+    // Re-run the exact fingerprint projections inside the write transaction.
+    // Count + exact row equality protects additions/removals as well as edits,
+    // including empty scopes. Reuse these reads so CAS cannot drift from the
+    // saved fingerprint's products, lots, links, allocations or promotions.
+    for (const read of reads) {
+      const rows = resultSets.get(read.key)!
+      const columns = Object.keys(rows[0] || {})
+      if (columns.some((column) => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(column))) {
+        throw new UndoConflictError('Invalid merge fingerprint column.')
+      }
+      let index = 0
+      const query = read.sql.replace(/\?/g, () => `@fingerprintValue${index++}`)
+      if (index !== (read.params || []).length) throw new UndoConflictError('Invalid merge fingerprint bindings.')
+      const equality = columns.map((column) => `live."${column}" IS json_extract(saved.value,'$.${column}')`).join(' AND ')
+      transactionGuards.push({
+        sql: `WITH live AS MATERIALIZED (${query})
+          SELECT CASE WHEN (SELECT COUNT(*) FROM live)=json_array_length(@fingerprintRows)
+            ${columns.length ? `AND NOT EXISTS(SELECT 1 FROM json_each(@fingerprintRows) saved
+              WHERE NOT EXISTS(SELECT 1 FROM live WHERE ${equality}))` : ''}
+            THEN 1 ELSE json_extract('', '$') END AS product_merge_group_graph_guard`,
+        params: { fingerprintRows: JSON.stringify(rows),
+          ...Object.fromEntries((read.params || []).map((value, i) => [`fingerprintValue${i}`, value])) },
+      })
+    }
+  }
   for (const [key, rows] of resultSets) {
     if (key.startsWith('products:')) products.push(...rows)
     else if (key.startsWith('branchStock:')) branchStock.push(...rows)
@@ -581,14 +616,17 @@ export async function mergeStateFingerprint(db: ReturnType<typeof getDb>, revers
   return JSON.stringify({ products, branchStock, batches, batchStock, movementHeads, adjustmentRows, productImages, stockSessions, linkedRows, promotionRules, childProducts, saleAllocations, returnAllocations })
 }
 
-async function assertMergeStateUnchanged(db: ReturnType<typeof getDb>, reversals: MergeReversal[], expected?: string): Promise<void> {
+async function assertMergeStateUnchanged(
+  db: ReturnType<typeof getDb>, reversals: MergeReversal[], expected?: string, transactionGuards?: AtomicMergeStatement[],
+): Promise<void> {
   if (reversals.some((reversal) => reversal.fingerprintPending)) {
     throw new UndoConflictError('This merge is missing its completed safety fingerprint, so it cannot be replayed automatically.')
   }
   // Legacy snapshots predate fingerprints; keep them replayable under their
   // existing row-level guards. Every snapshot written by the atomic path has
   // fingerprintPending until a complete expected value is stored.
-  if (expected && await mergeStateFingerprint(db, reversals) !== expected) {
+  if (transactionGuards && !expected) throw new UndoConflictError('This group merge is missing its safety fingerprint.')
+  if (expected && await mergeStateFingerprint(db, reversals, transactionGuards) !== expected) {
     throw new UndoConflictError('This merge has later stock or batch activity, so it can no longer be undone safely.')
   }
 }
@@ -1953,14 +1991,15 @@ async function replayProductMergeGroup(payload: Record<string, unknown>, ctx: Un
     ? await productMergeGroupPrefixFingerprint(groupSnapshot.review_id, groupSnapshot.group_key, groupSnapshot.child_snapshot_ids, generation + 1)
     : groupSnapshot.prefix_fingerprint
   if (ctx.direction === 'undo') {
-    await assertMergeStateUnchanged(db, [child.reversal], child.reversal.mergedStateFingerprint)
+    const currentGraphGuards: AtomicMergeStatement[] = []
+    await assertMergeStateUnchanged(db, [child.reversal], child.reversal.mergedStateFingerprint, currentGraphGuards)
     const statements = await buildMergeReversalStatements(ctx.env, child.reversal, getActionTier(ctx.user, 'products', 'image') === 'full')
     const timestamps = productMergeGroupPredecessorTimestamps(child, children[targetIndex - 1])
     const completion = productMergeGroupCompletionStatements({
       direction: ctx.direction, user: ctx.user, historyId: Number(ctx.historyId), groupSnapshotId: pointer.snapshotId,
       groupSnapshot, association, child, generation, final, nextPrefixFingerprint,
     })
-    statements.unshift(completion[0], ...timestamps.before)
+    statements.unshift(completion[0], ...currentGraphGuards, ...timestamps.before)
     statements.push(...timestamps.after, ...completion.slice(1))
     try { await db.batch(statements) } catch (error) {
       if (/malformed JSON|product_merge_group_guard|constraint/i.test(String(error))) {

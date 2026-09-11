@@ -42,7 +42,7 @@ check('foreign actor, child kind, and member identity fail closed', () => {
 
 check('undo peels children in reverse and redo advances them forward through one atomic CAS contract', () => {
   assert.match(undo, /targetIndex = ctx\.direction === 'undo' \? appliedCount - 1 : appliedCount/)
-  assert.match(undo, /const completion = productMergeGroupCompletionStatements[\s\S]*statements\.unshift\(completion\[0\], \.\.\.timestamps.before\)/)
+  assert.match(undo, /const completion = productMergeGroupCompletionStatements[\s\S]*statements\.unshift\(completion\[0\], \.\.\.currentGraphGuards, \.\.\.timestamps.before\)/)
   assert.match(undo, /completionStatements: \(freshReversal\) => productMergeGroupCompletionStatements/)
   assert.match(undo, /product_merge_group_guard/)
   assert.match(undo, /undo_snapshot_id=@child AND status=@fromMember/)
