@@ -58,6 +58,29 @@ function bounded(value: Fraction): Fraction {
 }
 function money(value: DecimalInput): Fraction { return bounded(decimal(value)) }
 function plus(a: Fraction, b: Fraction): Fraction { return fraction(a.n * b.d + b.n * a.d, a.d * b.d) }
+/** Quantity coverage only: exact decimal subtraction, without money rounding or
+ * a monetary amount bound. Unsupported decimal resources fail explicitly. */
+export function subtractDecimalSum(total: DecimalInput, values: readonly DecimalInput[]): string {
+  if (values.length > MAX_MONEY_SUM_ITEMS) throw new MoneyPrecisionError('too_many_terms')
+  let result = decimal(total)
+  for (const value of values) {
+    const part = decimal(value)
+    result = plus(result, { n: -part.n, d: part.d })
+  }
+  if (result.n === 0n) return '0'
+  let scale = 0, power = 1n
+  while (power % result.d !== 0n && scale < 48) { scale++; power *= 10n }
+  if (power % result.d !== 0n) throw new MoneyPrecisionError('invalid_decimal')
+  const integer = abs(result.n) * (power / result.d)
+  const exponent = scale > 24 ? -24 : 0
+  const places = scale + exponent
+  const digits = String(integer).padStart(places + 1, '0')
+  const text = (result.n < 0n ? '-' : '') + (places
+    ? digits.slice(0, -places) + '.' + digits.slice(-places) : digits) + (exponent ? 'e-24' : '')
+  const restored = decimal(text)
+  if (restored.n * result.d !== result.n * restored.d) throw new MoneyPrecisionError('invalid_decimal')
+  return text
+}
 function units(value: Fraction, places: 2 | 4, mode: 'nearest' | 'ceil'): bigint {
   const scaled = value.n * (places === 4 ? 10_000n : 100n)
   let rounded = scaled / value.d
