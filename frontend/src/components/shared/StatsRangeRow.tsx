@@ -28,9 +28,10 @@ export default function StatsRangeRow({
           value={range} onChange={onRangeChange} t={t} showTime={showTime}
           showCalendarIcon={false}
           compactTriggerLabels={compactRange}
+          showQuickRanges={!showPresets}
           className="min-w-0 flex-1"
           triggerClassName={compactRange
-            ? 'flex h-10 !min-h-10 min-w-fit w-full items-center justify-center gap-1 rounded-md px-1 py-0 text-[11px]'
+            ? 'flex h-10 !min-h-10 min-w-0 w-full items-center justify-center gap-1 rounded-md px-1 py-0 text-[11px]'
             : 'flex h-10 !min-h-10 min-w-0 w-full items-center justify-center gap-1 rounded-md px-1 py-0 sm:gap-2 sm:px-3'}
         />
         {actions ? <div className="ml-auto flex shrink-0 flex-nowrap items-center gap-1">{actions}</div> : null}

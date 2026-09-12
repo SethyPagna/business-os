@@ -54,8 +54,8 @@ assert.match(mainCss, /\.page-scroll[\s\S]{0,520}touch-action: pan-x pan-y/, 'th
 assert.match(mainCss, /\.stats-date-presets[\s\S]{0,200}touch-action: pan-x/, 'the preset rail explicitly owns horizontal touch panning')
 assert.match(
   datePicker,
-  /left-1\/2[\s\S]{0,180}max-w-\[calc\(100vw-1rem\)\][\s\S]{0,80}-translate-x-1\/2[\s\S]{0,180}sm:translate-x-0/,
-  'the picker popover is centered and viewport-bounded on narrow screens before restoring desktop alignment',
+  /const width = Math\.max\(0, Math\.min\(336, viewportWidth - margin \* 2\)\)[\s\S]*?const left = Math\.min\(Math\.max\(margin, preferredLeft\)[\s\S]*?createPortal\([\s\S]*?className="fixed[^"\n]*overflow-y-auto/,
+  'the portaled picker popover is horizontally clamped and vertically scrollable inside the viewport',
 )
 assert.match(transport, /withDashboardRangeScope[\s\S]{0,420}rangeScope: 'all'/, 'dashboard transport marks explicit empty bounds as all-time')
 assert.deepEqual(

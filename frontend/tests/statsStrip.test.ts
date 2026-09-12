@@ -188,9 +188,13 @@ test('compact Stats and range chrome are opt-in, accessible, and preserve full e
   assert.match(strip, /compactRange=\{compactRange\}/, 'StatsStrip forwards the compact range contract')
   assert.match(row, /showCalendarIcon=\{false\}/, 'the shared stats range has no leading calendar')
   assert.match(row, /compactTriggerLabels=\{compactRange\}/, 'compact endpoint rendering reaches the picker')
+  assert.match(row, /showQuickRanges=\{!showPresets\}/, 'the picker hides its private presets exactly when the row already renders the external preset rail')
+  assert.doesNotMatch(row, /min-w-fit/, 'compact dates must be allowed to shrink inside action-heavy phone rows')
   assert.match(picker, /showCalendarIcon = false/, 'calendar chrome is absent by default across range triggers')
-  assert.match(picker, /compactTriggerLabels \? 'shrink-0 whitespace-nowrap text-\[11px\]'/, 'compact endpoints are smaller and never truncated')
-  assert.match(picker, /showTimes \? ` \$\{value\.startTime \|\| '00:00'\}` : ''/, 'selected time remains part of the full start endpoint')
+  assert.match(picker, /compactTriggerLabels \? 'text-\[clamp\(10px,2\.75vw,11px\)\]'/, 'compact endpoints use a readable bounded responsive size rather than an intrinsic-width floor')
+  assert.match(picker, /data-date-range-trigger-values/, 'both complete endpoint values share one shrinkable three-column track')
+  assert.match(picker, /triggerEndpoint\(startTriggerDate, value\.startTime \|\| '00:00'\)/, 'selected time remains visibly paired with the full start date')
+  assert.doesNotMatch(picker, /min-w-0 truncate/, 'range endpoints must not be silently ellipsized')
 })
 
 test('secondary controls stay on the Stats-chip row whether the strip is folded or open', () => {
