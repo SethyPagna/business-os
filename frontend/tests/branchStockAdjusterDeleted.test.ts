@@ -136,13 +136,14 @@ runTest('the live surface carries the ported branch-quantity rule (behaviour 1)'
     'StockAdjustModal must resolve the ADJUSTED branch\'s own figure, not the product total')
 })
 
-runTest('the live surface carries the ported set-raise receipt rule (behaviour 2)', () => {
+runTest('the live surface keeps receipts separate from explicit Set corrections (behaviour 2)', () => {
   const modals = fs.readFileSync(path.join(SRC, 'components', 'inventory', 'InventoryStockModals.tsx'), 'utf8')
   // The supplier and cost fields render on isStockIn -- exactly the predicate
-  // the receipt gate applies -- not on a narrower "row.type === 'add'" copy
-  // that would re-open the dead end a raising `set` used to hit.
-  assert.match(modals, /const isStockIn = isStockInSubmission\(adjustForm\.type, adjustForm\.quantity, adjustCurrentQuantity\)/)
-  assert.match(modals, /\{isStockIn \? \(\s*\n\s*<SupplierPickerField/, 'the supplier field must render on isStockIn, which covers a raising set')
+  // the receipt gate applies. The fourth argument is essential: an explicit
+  // lot/branch Set is a correction even when it raises stock, while legacy
+  // omitted-scope Set behavior remains available to old callers.
+  assert.match(modals, /const isStockIn = isStockInSubmission\(adjustForm\.type, adjustForm\.quantity, adjustCurrentQuantity, adjustForm\.set_scope\)/)
+  assert.match(modals, /\{isStockIn \? \(\s*\n\s*<SupplierPickerField/, 'the supplier field must render only for a real stock receipt')
   assert.ok(!modals.includes("adjustForm.type === 'add' && adjustForm.batch_id !== ''") , 'the supplier field must not be re-narrowed to adds only')
 })
 
