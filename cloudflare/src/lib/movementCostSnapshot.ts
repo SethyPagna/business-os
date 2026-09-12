@@ -1,4 +1,4 @@
-import { roundMoney4, sumProductsMoney4, weightedMeanMoney4 } from './moneyPrecision'
+import { roundMoney4, sumProductsMoney4, weightedMeanMoney4, subtractDecimalSum } from './moneyPrecision'
 
 export type MovementCostPair = {
   unitCostUsd: number | null
@@ -24,33 +24,25 @@ const money = (value: unknown): number | null => {
   return parsed
 }
 
-const finite = (value: number, message: string): number => {
-  if (!Number.isFinite(value)) throw new RangeError(message)
-  return value
-}
-
-const add = (left: number, right: number): number => finite(left + right, 'Movement cost sum exceeds the supported range')
-
 function resolveCurrency(
   quantity: number,
   components: MovementCostComponent[],
   field: 'unitCostUsd' | 'unitCostKhr',
   fallback: unknown,
+  remainder: string,
 ): { unit: number | null; total: number | null } {
   const fallbackCost = money(fallback)
-  let covered = 0
-  const terms: { amount: number; factor: number }[] = []
+  const terms: { amount: number; factor: number | string }[] = []
   for (const component of components) {
     const componentQuantity = Number(component.quantity)
     if (!(componentQuantity > 0)) continue
     const cost = money(component[field]) ?? fallbackCost
     if (cost == null) return { unit: null, total: null }
-    covered = add(covered, componentQuantity)
     terms.push({ amount: cost, factor: componentQuantity })
   }
-  if (covered + 0.000000001 < quantity) {
+  if (remainder !== '0') {
     if (fallbackCost == null) return { unit: null, total: null }
-    terms.push({ amount: fallbackCost, factor: quantity - covered })
+    terms.push({ amount: fallbackCost, factor: remainder })
   }
   const roundedTotal = sumProductsMoney4(terms)
   const distinctCosts = new Set(terms.map(term => term.amount))
@@ -77,7 +69,7 @@ export function resolveMovementCostSnapshot(input: {
   const quantity = Number(input.quantity)
   if (!Number.isFinite(quantity) || !(quantity > 0)) throw new RangeError('Movement quantity must be a finite positive number')
   const components = input.components || []
-  let covered = 0
+  const quantities: number[] = []
   for (const component of components) {
     const componentQuantity = Number(component.quantity)
     if (!Number.isFinite(componentQuantity) || componentQuantity < 0) {
@@ -87,12 +79,16 @@ export function resolveMovementCostSnapshot(input: {
     // because its row carried no quantity would make malformed plans latent.
     money(component.unitCostUsd)
     money(component.unitCostKhr)
-    covered = add(covered, componentQuantity)
+    quantities.push(componentQuantity)
   }
-  if (covered > quantity + 0.000000001) throw new RangeError('Movement cost components cannot exceed the movement quantity')
+  // Fixed tolerances can erase real money on high-cost or tiny-quantity lots.
+  // Compare decimal quantities exactly; retain every positive remainder as text
+  // so subtraction does not introduce a binary error before valuation.
+  const remainder = subtractDecimalSum(quantity, quantities)
+  if (remainder.startsWith('-')) throw new RangeError('Movement cost components cannot exceed the movement quantity')
   money(input.fallbackUnitCostUsd)
   money(input.fallbackUnitCostKhr)
-  const usd = resolveCurrency(quantity, components, 'unitCostUsd', input.fallbackUnitCostUsd)
-  const khr = resolveCurrency(quantity, components, 'unitCostKhr', input.fallbackUnitCostKhr)
+  const usd = resolveCurrency(quantity, components, 'unitCostUsd', input.fallbackUnitCostUsd, remainder)
+  const khr = resolveCurrency(quantity, components, 'unitCostKhr', input.fallbackUnitCostKhr, remainder)
   return { unitCostUsd: usd.unit, unitCostKhr: khr.unit, totalCostUsd: usd.total, totalCostKhr: khr.total }
 }
