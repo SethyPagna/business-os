@@ -67,6 +67,9 @@ interface DetailModalProps {
   // Optional extra buttons in the footer row, before Edit -- e.g. the
   // supplier detail's "Purchases" drill (Part 384 D5).
   extraButtons?: Array<{ label: string; onClick: () => void }>
+  // Supplier contact options can contain long unbroken emails/names. This is
+  // opt-in so other contact detail surfaces retain their current wrapping.
+  wrapValuesAnywhere?: boolean
 }
 
 interface ContactTableProps<T extends ContactRow> {
@@ -249,7 +252,7 @@ export function ThreeDotMenu({ onDetails, onEdit, onDelete }: ThreeDotMenuProps)
   )
 }
 
-export function DetailModal({ item, fields = [], onEdit, onDelete, onClose, t, extraButtons = [] }: DetailModalProps) {
+export function DetailModal({ item, fields = [], onEdit, onDelete, onClose, t, extraButtons = [], wrapValuesAnywhere = false }: DetailModalProps) {
   const title = item?.name || (typeof t === 'function' ? (t('details') || 'Details') : 'Details')
 
   return (
@@ -266,7 +269,7 @@ export function DetailModal({ item, fields = [], onEdit, onDelete, onClose, t, e
               className="grid grid-cols-[112px,1fr] gap-2 border-b border-gray-100 px-3 py-1.5 text-[13px] last:border-b-0 dark:border-zinc-800"
             >
               <div className="font-medium text-gray-500 dark:text-gray-400">{label || '-'}</div>
-              <div className="whitespace-pre-line break-words text-gray-800 dark:text-gray-200">{value || '-'}</div>
+              <div className={`whitespace-pre-line break-words text-gray-800 dark:text-gray-200 ${wrapValuesAnywhere ? 'min-w-0 [overflow-wrap:anywhere]' : ''}`}>{value || '-'}</div>
             </div>
           ))}
         </div>

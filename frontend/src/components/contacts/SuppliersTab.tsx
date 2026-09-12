@@ -155,6 +155,18 @@ interface SupplierApi {
 
 type ActionHistoryBarHistory = ComponentProps<typeof ActionHistoryBar>['history']
 
+function buildLocalizedSupplierContactOptionSummary(options: ContactOption[], tr: (key: string, fallbackEn: string, fallbackKm?: string) => string): string {
+  if (!options.length) return '-'
+  return options.map((option, index) => {
+    const rawLabel = String(option.label || '').trim()
+    // "Default" is canonical application copy stored by older forms. Keep
+    // user-entered labels verbatim; only localize the canonical label.
+    const label = rawLabel.toLowerCase() === 'default' ? tr('default', 'Default') : rawLabel
+    const parts = [option.name, option.phone, option.email, option.address].filter(Boolean)
+    return `#${index + 1} ${label ? `(${label}) ` : ''}${parts.join(' | ') || '-'}`
+  }).join('\n')
+}
+
 const useApp = useAppHook as () => AppContextValue
 const useSync = useSyncHook as () => SyncContextValue
 
@@ -1437,7 +1449,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
               [t('contact_person') || 'Contact', primaryOption.name || selected.contact_person],
               [t('gender') || 'Gender', selected.gender ? (tr(selected.gender, selected.gender)) : (tr('unspecified', 'Unspecified'))],
               [t('address'), primaryOption.address],
-              ['Contact Options', buildContactOptionSummary(options)],
+              [tr('contact_options', 'Contact options'), buildLocalizedSupplierContactOptionSummary(options, tr)],
               [t('notes'), selected.notes],
               [t('col_added') || t('added_on') || 'Added', fmtDateTime24(selected.created_at)],
             ]
@@ -1446,6 +1458,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
           onDelete={canDeleteContact ? () => handleDelete(selected) : undefined}
           onClose={() => { setModal(null); setSelected(null) }}
           t={t}
+          wrapValuesAnywhere
           extraButtons={[{ label: tr('supplier_purchases', 'Purchases'), onClick: () => setModal('purchases') }]}
         />
       ) : null}
