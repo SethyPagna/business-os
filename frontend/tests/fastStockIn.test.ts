@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { nullableMoney4, multiplyMoney4 } from '../src/utils/moneyPrecision.ts'
 
 // F2 (Part 419): fast stock-in -- "enter batch + supplier once, then
 // per-product name→details entry; Add appends and continues, Done
@@ -154,9 +155,18 @@ runTest('STK-06: creation reuses ProductForm and resumes without losing the stoc
 
 runTest('stock-in sessions reuse linked report data and preserve per-receipt costs', () => {
   assert.match(batchRouteSource, /unit_cost_usd, total_cost_usd, reason, reference_id/)
-  assert.match(batchRouteSource, /Math\.round\(Number\(body\.unit_cost_usd\) \* quantity \* 10000\) \/ 10000/)
-  assert.match(stockImportSource, /CASE WHEN @costPriceUsd IS NULL THEN NULL ELSE ROUND\(@quantity \* @costPriceUsd, 4\) END/,
-    'legacy stock-history imports must preserve each event cost on its movement')
+  assert.match(batchRouteSource, /unitCostUsd = nullableMoney4\(body\.unit_cost_usd\)/)
+  assert.match(batchRouteSource, /totalCostUsd = unitCostUsd == null \? null : multiplyMoney4\(unitCostUsd, quantity\)/)
+  assert.ok(batchRouteSource.indexOf('totalCostUsd = unitCostUsd') < batchRouteSource.indexOf('received = await receiveBatchStock'),
+    'receipt cost must be calculated and range-checked before stock mutation')
+  assert.match(stockImportSource, /totalCostUsd = costPriceUsd == null \? null : multiplyMoney4\(costPriceUsd, quantity\)/)
+  assert.match(stockImportSource, /@costPriceUsd,\s*@totalCostUsd,/,
+    'stock-history imports bind the exact per-event snapshot into the movement')
+  assert.equal(nullableMoney4(null), null, 'unknown cost is not zero')
+  assert.equal(nullableMoney4(0), 0, 'explicit zero remains known')
+  assert.equal(multiplyMoney4(.0003, .5), .0002, 'halfway event cost rounds nearest4, not binary Math.round')
+  assert.equal(multiplyMoney4(.3333, 3), .9999, 'per-receipt cost retains four decimals')
+  assert.throws(() => multiplyMoney4(1e11, 2), /money_overflow/, 'unsafe event totals refuse before writes')
   for (const field of ['p.brand', 'p.category', 'p.tag_label', 'm.unit_cost_usd', 'm.total_cost_usd', 'b.payment_status', 'b.credit_due_date', 'b.updated_at']) {
     assert.ok(ledgerSource.includes(field), `stock-session ledger should expose ${field}`)
   }
