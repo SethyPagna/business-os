@@ -229,7 +229,7 @@ assert.doesNotMatch(liveTransferPath, /window\.confirm/, 'no native confirm on t
 assert.equal((transfer.match(/window\.confirm/g) || []).length, 1, 'native confirmation is limited to dormant single mode')
 assert.match(transfer, /<ConfirmDialog/, 'the shared review dialog asks instead')
 assert.match(transfer, /danger=\{pendingTransfer\.scope === 'entire_branch'\}/, 'emptying a branch must get the destructive treatment')
-assert.match(transfer, /confirm_bulk_transfer_details/, 'the existing pack key survives the move off window.confirm')
+assert.match(transfer, /confirm_bulk_transfer_existing_lots/, 'confirmation describes the explicit existing lots being transferred')
 
 // Small screens: the panel must render its real content from first paint
 // instead of showing branch selects and then jumping to full height.

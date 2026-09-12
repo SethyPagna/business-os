@@ -61,7 +61,7 @@ runTest('single branch transfer caps explicit lots by aggregate stock and retain
   assert.doesNotMatch(transfer, /disabled=\{hasBatchLots && !selectedBatchId\}/)
   assert.match(transfer, /Automatic \(FIFO\)/)
   assert.match(transfer, /confirm_transfer_details/)
-  assert.match(transfer, /confirm_bulk_transfer_details/)
+  assert.match(transfer, /confirm_bulk_transfer_existing_lots/)
   assert.match(transfer, /notify\(finalMessage\)/)
 })
 
