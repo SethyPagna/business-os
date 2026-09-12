@@ -279,7 +279,13 @@ async function main() {
   const applyStart = source.indexOf('export async function runImportApply')
   const authorityIndex = source.indexOf('assertCurrentImportApplyAuthority(env, job)', applyStart)
   const materializeIndex = source.indexOf('ensureSourceRowsMaterialized(env, db, jobId', authorityIndex)
-  const classifyIndex = source.indexOf('const results = job.type ===', materializeIndex)
+  // Inventory cost-snapshot preservation intentionally reassigns the
+  // classified result array, so this binding can be either const or let.
+  // Keep this guard about authority ordering, not declaration syntax.
+  const classifyRelativeIndex = source.slice(materializeIndex).search(
+    /\b(?:const|let)\s+results\s*=\s*job\.type\s*===/,
+  )
+  const classifyIndex = classifyRelativeIndex === -1 ? -1 : materializeIndex + classifyRelativeIndex
   const composeIndex = source.indexOf('const statements: Array<', classifyIndex)
   assert.ok(
     applyStart !== -1 && authorityIndex !== -1 && materializeIndex !== -1
