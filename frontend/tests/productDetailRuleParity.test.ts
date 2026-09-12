@@ -1,4 +1,4 @@
-// Guard: the product identity rule must be byte-identical in both packages.
+// Guard: the rule is identical except the native-Node frontend import suffix.
 //
 // `frontend/` and `cloudflare/` are separate npm projects with no shared
 // package, so the rule that decides "are these two rows the same product?"
@@ -11,7 +11,7 @@
 // One copy is authoritative (cloudflare/src/lib/productDetailRule.ts); the
 // other is a verbatim duplicate. This test fails the moment they differ, so
 // a change to one is forced to be a change to both. The module is
-// deliberately dependency-free precisely so a plain copy is valid.
+// limited to the byte-identical portable money kernel in each package.
 //
 // If this fails: copy cloudflare/src/lib/productDetailRule.ts over
 // frontend/src/utils/productDetailRule.ts (or vice versa, whichever holds
@@ -23,6 +23,9 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createRequire } from 'node:module'
+import ts from 'typescript'
+import * as frontendRule from '../src/utils/productDetailRule.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.join(here, '..', '..')
@@ -50,14 +53,15 @@ check('both packages exist', () => {
 
 check('the product identity rule is identical in cloudflare/ and frontend/', () => {
   assert.equal(
-    read(frontendPath), read(backendPath),
+    read(frontendPath).replace("from './moneyPrecision.ts'", "from './moneyPrecision'"), read(backendPath),
     'productDetailRule.ts has diverged between the two packages -- copy the intended version over the other',
   )
 })
 
-check('the rule module stays dependency-free, so copying it remains valid', () => {
-  const text = read(backendPath)
-  assert.ok(!/^\s*import\s/m.test(text), 'productDetailRule.ts must not import anything -- it is duplicated verbatim across packages')
+check('only the exact portable money dependency is permitted', () => {
+  assert.deepEqual(read(backendPath).match(/^import .+$/gm), ["import { roundMoney4, meanMoney4 } from './moneyPrecision'"])
+  assert.deepEqual(read(frontendPath).match(/^import .+$/gm), ["import { roundMoney4, meanMoney4 } from './moneyPrecision.ts'"])
+  assert.equal(read(path.join(repoRoot, 'frontend/src/utils/moneyPrecision.ts')), read(path.join(repoRoot, 'cloudflare/src/lib/moneyPrecision.ts')))
 })
 
 check('the rule still says the barcode is the only detail, and says how cost and price merge', () => {
@@ -73,7 +77,7 @@ check('the rule still says the barcode is the only detail, and says how cost and
   assert.ok(!/wholesale_price/.test(sigBody), 'the wholesale price must NOT be part of the detail signature')
   assert.ok(!/special_price/.test(sigBody), 'nor the retired special_price_* pair it replaced')
   assert.ok(/export function resolveMergedCost/.test(text), 'cost must still be reconciled on merge -- by averaging, in resolveMergedCost')
-  assert.ok(/Math\.ceil/.test(text), 'the averaged cost must round UP, never down: rounding down overstates profit')
+  assert.ok(/merged\[field\] = meanMoney4\(values\)/.test(text), 'new means must use exact nearest4, not upward bias')
   assert.ok(/value > best/.test(text), 'merged pricing must resolve to the HIGHEST value')
   // S4-32: the merge rule must MERGE the live wholesale tier, not the zeroed
   // ballast migration 0111 left behind. Pointing this list back at
@@ -82,6 +86,25 @@ check('the rule still says the barcode is the only detail, and says how cost and
     "resolveMergedPricing must merge wholesale_price_usd/khr -- special_price_* was zeroed by migration 0111")
   assert.ok(!/special_price_usd\?/.test(text),
     'MergeablePricing must not declare the retired special_price_* fields')
+})
+
+check('both actual rule modules compute nearest4 over raw distinct costs', () => {
+  const require = createRequire(import.meta.url)
+  const mod = { exports: {} as typeof frontendRule }
+  const output = ts.transpileModule(read(backendPath), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
+  new Function('module', 'exports', 'require', output)(mod, mod.exports, (name: string) => {
+    assert.equal(name, './moneyPrecision', 'no unreviewed backend dependency')
+    return require(path.join(repoRoot, 'cloudflare/src/lib/moneyPrecision.ts'))
+  })
+  for (const rule of [frontendRule, mod.exports]) {
+    assert.equal(rule.roundCost4(1.00001), 1)
+    assert.equal(rule.roundCost4(1.00005), 1.0001)
+    assert.equal(rule.roundCost4(-1.00005), -1.0001)
+    assert.equal(rule.resolveMergedCost([1, 1.0001, 1.0003].map(cost_price_usd => ({ cost_price_usd }))).cost_price_usd, 1.0001)
+    assert.equal(rule.resolveMergedCost([1.00001, 1.00004, 1.00009].map(cost_price_usd => ({ cost_price_usd }))).cost_price_usd, 1, 'distinct before rounding; no pre-rounded duplicate collapse')
+    assert.equal(rule.resolveMergedCost([{ cost_price_usd: null }]).cost_price_usd, undefined)
+    assert.equal(rule.resolveMergedCost([{ cost_price_usd: 0 }]).cost_price_usd, 0)
+  }
 })
 
 console.log(`\n${passed} check(s) passed.`)

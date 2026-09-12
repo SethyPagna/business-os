@@ -1,10 +1,13 @@
-// The Sep-4-2026 cost rule, pinned end to end.
+// Cost identity remains the Sep-4 rule; its rounding policy is now nearest4.
 //
 // Until that date a differing cost forked a child row. The user's ruling
 // replaced that: "all products if cost is different add different costs
 // together and divide by the number different costs... keep 4 decimal digits
 // always round up to 4 decimal digits... so now only diffeerent barcode
 // creates new child row... rest merge".
+// The later explicit precision policy supersedes only upward cost rounding.
+// Backend historical v1 plans retain their recorded policy; this frontend
+// helper computes new proposals and never rewrites stored replay snapshots.
 //
 // So cost is no longer identity -- it is reconciled on merge. This file pins
 // the reconciliation itself; productDetailRuleParity.test.ts pins the fact
@@ -28,10 +31,12 @@ async function runTest(name: string, fn: TestCallback): Promise<void> {
   }
 }
 
-await runTest('roundCostUp4 rounds UP at the 4th decimal, never to nearest', () => {
-  assert.equal(roundCostUp4(1.00001), 1.0001, 'a hair over 1.0000 becomes 1.0001, not 1.0000')
+await runTest('compatibility roundCostUp4 export follows nearest4, ties away from zero', () => {
+  assert.equal(roundCostUp4(1.00001), 1, 'new cost policy does not add an upward bias')
   assert.equal(roundCostUp4(1.00009), 1.0001)
-  assert.equal(roundCostUp4(2.123401), 2.1235)
+  assert.equal(roundCostUp4(2.123401), 2.1234)
+  assert.equal(roundCostUp4(1.00005), 1.0001)
+  assert.equal(roundCostUp4(-1.00005), -1.0001)
 })
 
 await runTest('roundCostUp4 leaves a value that is already 4dp exactly alone', () => {
@@ -75,9 +80,15 @@ await runTest('resolveMergedCost keeps a single cost exactly as it was', () => {
   assert.equal(merged.cost_price_usd, 50.7, 'one distinct cost averages to itself')
 })
 
-await runTest('resolveMergedCost rounds the mean UP to 4 decimals', () => {
+await runTest('resolveMergedCost rounds the exact raw-distinct mean nearest4', () => {
   // 1 and 1.0001 average to 1.00005, which is not representable at 4dp and
-  // must land on the higher tick: an understated cost overstates profit.
+  // lands on the higher tick under the explicit half-away-from-zero rule.
+  assert.equal(resolveMergedCost([
+    { cost_price_usd: 1 }, { cost_price_usd: 1.0001 }, { cost_price_usd: 1.0003 },
+  ]).cost_price_usd, 1.0001, 'non-tie means may round down under nearest4')
+  assert.equal(resolveMergedCost([
+    { cost_price_usd: 1.00001 }, { cost_price_usd: 1.00004 }, { cost_price_usd: 1.00009 },
+  ]).cost_price_usd, 1, 'deduplicate raw costs, not rounded costs')
   assert.equal(resolveMergedCost([
     { cost_price_usd: 1 },
     { cost_price_usd: 1.0001 },
