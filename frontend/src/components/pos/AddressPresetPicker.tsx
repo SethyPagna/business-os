@@ -65,15 +65,15 @@ export default function AddressPresetPicker({ actorKey, currentAddress, previous
     setCanManage(false)
     try {
       const response = await getPosAddressPresets()
-      if (requestRef.current !== requestId || !isActorReadScopeCurrent(actorScope)) return
+      if (requestRef.current !== requestId || !isActorReadScopeCurrent(actorScope, false)) return
       setPresets(response.presets)
       setRevision(response.revision)
       setCanManage(response.can_manage === true)
     } catch (loadError) {
-      if (requestRef.current !== requestId || !isActorReadScopeCurrent(actorScope)) return
+      if (requestRef.current !== requestId || !isActorReadScopeCurrent(actorScope, false)) return
       setError(loadError instanceof Error ? loadError.message : tr('address_preset_load_failed', 'Failed to load saved address options.'))
     } finally {
-      if (requestRef.current === requestId && isActorReadScopeCurrent(actorScope)) setLoading(false)
+      if (requestRef.current === requestId && isActorReadScopeCurrent(actorScope, false)) setLoading(false)
     }
   }, [actorKey, tr])
 
@@ -100,19 +100,19 @@ export default function AddressPresetPicker({ actorKey, currentAddress, previous
     setError('')
     try {
       const response = await savePosAddressPresets(validated.presets, revision)
-      if (requestRef.current !== requestId || !isActorReadScopeCurrent(actorScope)) return false
+      if (requestRef.current !== requestId || !isActorReadScopeCurrent(actorScope, false)) return false
       setPresets(response.presets)
       setRevision(response.revision)
       return requestId
     } catch (saveError) {
-      if (requestRef.current !== requestId || !isActorReadScopeCurrent(actorScope)) return false
+      if (requestRef.current !== requestId || !isActorReadScopeCurrent(actorScope, false)) return false
       const conflict = saveError && typeof saveError === 'object' && (saveError as { code?: unknown }).code === 'write_conflict'
       setError(conflict
         ? tr('address_preset_conflict', 'Saved addresses changed on another device. Reload before saving again.')
         : saveError instanceof Error ? saveError.message : tr('address_preset_save_failed', 'Failed to save address options.'))
       return false
     } finally {
-      if (requestRef.current === requestId && isActorReadScopeCurrent(actorScope)) setSaving(false)
+      if (requestRef.current === requestId && isActorReadScopeCurrent(actorScope, false)) setSaving(false)
     }
   }
 
@@ -127,7 +127,7 @@ export default function AddressPresetPicker({ actorKey, currentAddress, previous
     const nextList = normalizeAddressPresetList([...presets[category], value])
     if (nextList.length === presets[category].length) return
     const completedRequestId = await persist({ ...presets, [category]: nextList })
-    if (completedRequestId && requestRef.current === completedRequestId && isActorReadScopeCurrent(callerScope)) {
+    if (completedRequestId && requestRef.current === completedRequestId && isActorReadScopeCurrent(callerScope, false)) {
       setDrafts((current) => ({ ...current, [category]: '' }))
       setSelected((current) => ({ ...current, [category]: value }))
     }
@@ -143,7 +143,7 @@ export default function AddressPresetPicker({ actorKey, currentAddress, previous
     }
     const nextList = normalizeAddressPresetList(presets[editing.category].map((item) => item === editing.original ? value : item))
     const completedRequestId = await persist({ ...presets, [editing.category]: nextList })
-    if (completedRequestId && requestRef.current === completedRequestId && isActorReadScopeCurrent(callerScope)) {
+    if (completedRequestId && requestRef.current === completedRequestId && isActorReadScopeCurrent(callerScope, false)) {
       setSelected((current) => current[editing.category] === editing.original ? { ...current, [editing.category]: value } : current)
       setEditing(null)
     }
@@ -153,7 +153,7 @@ export default function AddressPresetPicker({ actorKey, currentAddress, previous
     const callerScope = captureActorReadScope('pos:address-presets')
     const next = { ...presets, [category]: presets[category].filter((item) => item !== value) }
     const completedRequestId = await persist(next)
-    if (completedRequestId && requestRef.current === completedRequestId && isActorReadScopeCurrent(callerScope)) {
+    if (completedRequestId && requestRef.current === completedRequestId && isActorReadScopeCurrent(callerScope, false)) {
       setSelected((current) => current[category] === value ? { ...current, [category]: '' } : current)
       if (editing?.category === category && editing.original === value) setEditing(null)
       setPendingRemove('')
