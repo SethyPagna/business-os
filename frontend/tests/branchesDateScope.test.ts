@@ -47,14 +47,10 @@ test('the hub owns ONE range for Overview, Products and Transfers', () => {
 test('Branches overview stock cards no longer print a SKU line', () => {
   assert.doesNotMatch(source, /font-mono text-\[10px\] leading-tight text-gray-400">\{product\.sku\}/)
   assert.doesNotMatch(source, /\{product\.sku \? </, 'no conditional SKU sub-line is rendered in any card')
-  // The name line itself stays -- but N36 (owner, Sep 6 2026) moved every
-  // product-name cell off wrapping and onto the shared .scroll-x-clean class
-  // ("make it horizontal scroll instead of pushing rows"), so this pin now
-  // names that class. The paired doesNotMatch stops the superseded wrapping
-  // version coming back; what the class does is pinned in
-  // tests/productNameScrollCells.test.ts.
-  assert.match(source, /scroll-x-clean font-medium text-gray-800/, 'the product name line itself stays')
-  assert.doesNotMatch(source, /whitespace-normal break-words font-medium text-gray-800/, 'the superseded wrapping name line must not come back')
+  // The two-line rail preserves the original full name, including its suffix.
+  // Native full-tail/keyboard behavior is covered by productNameRail.test.ts.
+  assert.match(source, /className="min-w-0 font-medium text-gray-800 dark:text-gray-200"><ProductNameRail name=\{String\(\(product\.name\) \?\? ''\)\} \/>/, 'the stock card keeps its original product name and typography in the shared rail')
+  assert.doesNotMatch(source, /<ProductNameRail[^>]*(?:truncate|line-clamp-|\.slice\()/, 'the rail must receive full text without a local truncation contract')
   // The CSV export keeps its SKU column: an extract is data, not screen copy.
   assert.match(source, /SKU: product\.sku \|\| ''/)
 })
