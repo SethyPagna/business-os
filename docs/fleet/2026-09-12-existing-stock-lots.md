@@ -16,7 +16,11 @@ Independent native review caught old generic Revert subtracting a downward corre
 
 ## Verification gates
 
-Pending integrated frontend utilities, type/i18n/build and emitted zero-cycle gate, real built-browser scoped selection/preview checks, independent backend counterexamples and native migration preservation. Preserve original draft/retry payloads; never reinterpret legacy Set drafts silently. No remote migration, production stock mutation or deployment performed yet.
+Integrated frontend382/382 test files pass plus standalone executable transferExistingLots.test.cjs. Backend358 scripts executed sequentially: first357/358, one stale source assertion was corrected without runtime edits and passed isolated retry; effective358/358. Both typechecks, localization and production build pass. Actual emitted graph252 chunks zero cycles.
+
+Independent native review confirms down4→3 signs−1; generic Revert409 leaves all state unchanged; exact Undo restores4 and Redo3; unauthorized actor and intervening activity are refused. Real Chrome built-e820ba16 tests verify direct/Fast lot3 target5→branch12, branch10 target9→lot2, older/zero Add/Set choice, positive-only transfer selectedbatch71 request, Bulk scoped target and expectedquantity payload, Fast queued Set preserved after next action switched Add. Browser errors were fixture WebSocket errors only. Adversarial late Bulk mutation injection could not be completed under its confirmation overlay; normal payload and unit frozen-retry checks pass, not falsely certified as a completed browser injection. Subsequent commits through12b2a8c1 only update test contracts, not runtime.
+
+Preserve original draft/retry payloads; legacy Set drafts require explicit review and are not reinterpreted. No remote migration, production stock mutation or deployment performed. Release awaits explicit schema-migration/deployment approval; live remains02febdc976c5 as last verified. Browser evidence output/playwright/final-browser-review.md; backend logs cloudflare/output/backend-stock-lot-cert-e820ba16/.
 
 ## Migration recovery
 
