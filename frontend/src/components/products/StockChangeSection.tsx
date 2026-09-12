@@ -16,7 +16,7 @@ import type { StockMode } from '../inventory/FastStockInModal'
 // own Start → End range (user, Aug 31: "do the date range for all the
 // exports").
 const ExportRangeDialog = lazy(() => import('../shared/ExportRangeDialog'))
-import { movementColorClass, translateMovementType } from '../inventory/movementGroups.ts'
+import { isExactStockCorrectionMovement, movementColorClass, translateMovementType } from '../inventory/movementGroups.ts'
 import DateTimeRangePicker from '../shared/DateTimeRangePicker'
 import FilterMenu, { type FilterSection } from '../shared/FilterMenu'
 import Modal from '../shared/Modal'
@@ -111,6 +111,14 @@ type LedgerRow = {
   batch_unit_cost_usd?: number | null
   batch_received_cost_usd?: number | null
   batch_receipt_session_count?: number | null
+  correction_operation_id?: string | null
+  correction_history_id?: number | null
+  correction_set_scope?: 'lot' | 'branch' | null
+  correction_generation?: number | null
+  correction_lot_before?: number | null
+  correction_lot_after?: number | null
+  correction_branch_before?: number | null
+  correction_branch_after?: number | null
 }
 
 type LedgerSummary = {
@@ -460,6 +468,14 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
       batch_expiry: row.batch_expiry_date || '',
       payment_status: row.batch_payment_status || '',
       credit_due_date: row.batch_credit_due_date || '',
+      correction_scope: row.correction_set_scope || '',
+      correction_lot_before: row.correction_lot_before ?? '',
+      correction_lot_after: row.correction_lot_after ?? '',
+      correction_branch_before: row.correction_branch_before ?? '',
+      correction_branch_after: row.correction_branch_after ?? '',
+      correction_operation_id: row.correction_operation_id || '',
+      correction_history_id: row.correction_history_id ?? '',
+      correction_generation: row.correction_generation ?? '',
     })))
   }, [app, branchId, debouncedSearch, referenceText, supplierId, t, view])
 
@@ -467,7 +483,9 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   // reverted row stays -- the ledger is append-only -- and the new counter-
   // movement appears). Close the detail so the person sees the updated list.
   const doRevert = useCallback(async () => {
-    if (!detail) return
+    // Scoped corrections have an exact server-owned undo/redo history. A
+    // compensating movement would fork that history and the Worker rejects it.
+    if (!detail || isExactStockCorrectionMovement(detail)) return
     setRowBusy(true)
     try {
       const res = await revertStockMovement(detail.id) as { success?: boolean; error?: string } | undefined
@@ -1078,6 +1096,41 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                 {detail.batch_supplier_name ? <span className="text-gray-400"> · {detail.batch_supplier_name}</span> : null}
               </p>
             ) : null}
+            {isExactStockCorrectionMovement(detail) ? (
+              <div className="rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2 dark:border-blue-900/50 dark:bg-blue-950/20">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300">
+                  {tr(t, 'stock_correction_exact_history', 'Exact correction history')}
+                </div>
+                <dl className="mt-2 grid gap-2 text-xs sm:grid-cols-3">
+                  <div className="min-w-0">
+                    <dt className="uppercase tracking-wide text-gray-400">{tr(t, 'stock_set_scope', 'Set quantity for')}</dt>
+                    <dd className="mt-0.5 font-medium text-gray-700 dark:text-gray-200">
+                      {detail.correction_set_scope === 'branch'
+                        ? tr(t, 'stock_set_scope_branch', 'Branch total')
+                        : tr(t, 'stock_set_scope_lot', 'Selected received date')}
+                    </dd>
+                  </div>
+                  <div className="min-w-0">
+                    <dt className="uppercase tracking-wide text-gray-400">{tr(t, 'lot_quantity', 'Received-date quantity')}</dt>
+                    <dd className="mt-0.5 font-medium tabular-nums text-gray-700 dark:text-gray-200">
+                      {detail.correction_lot_before ?? '—'} → {detail.correction_lot_after ?? '—'}
+                    </dd>
+                  </div>
+                  <div className="min-w-0">
+                    <dt className="uppercase tracking-wide text-gray-400">{tr(t, 'branch_total', 'Branch total')}</dt>
+                    <dd className="mt-0.5 font-medium tabular-nums text-gray-700 dark:text-gray-200">
+                      {detail.correction_branch_before ?? '—'} → {detail.correction_branch_after ?? '—'}
+                    </dd>
+                  </div>
+                </dl>
+                {detail.correction_history_id != null ? (
+                  <p className="mt-2 text-[11px] text-blue-700 dark:text-blue-300">
+                    {tr(t, 'stock_correction_use_history', 'Use Undo/Redo history for this correction')} · #{detail.correction_history_id}
+                    {detail.correction_generation != null ? ` · ${tr(t, 'generation', 'Generation')} ${detail.correction_generation}` : ''}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
             {detail.barcode ? (
               <p className="rounded-xl bg-gray-50 px-3 py-2 text-sm text-gray-600 dark:bg-gray-800/60 dark:text-gray-300">
                 <span className="text-[11px] uppercase tracking-wide text-gray-400">{tr(t, 'barcode', 'Barcode')}: </span>
@@ -1164,7 +1217,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                     <Pencil className="h-4 w-4 shrink-0" aria-hidden="true" />
                     <span className="hidden sm:inline">{tr(t, 'edit_reason', 'Edit reason')}</span>
                   </button>
-                  {confirmRevert ? (
+                  {!isExactStockCorrectionMovement(detail) && confirmRevert ? (
                     <span className="inline-flex flex-wrap items-center gap-2 text-xs">
                       <span className="text-gray-500 dark:text-gray-400">{tr(t, 'confirm_revert', 'Revert this change?')}</span>
                       <button
@@ -1187,7 +1240,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                         {tr(t, 'cancel', 'Cancel')}
                       </button>
                     </span>
-                  ) : (
+                  ) : !isExactStockCorrectionMovement(detail) ? (
                     <button
                       type="button"
                       disabled={rowBusy}
@@ -1199,11 +1252,13 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                       <Undo2 className="h-4 w-4 shrink-0" aria-hidden="true" />
                       <span className="hidden sm:inline">{tr(t, 'revert', 'Revert')}</span>
                     </button>
-                  )}
-                  <InfoHint
-                    label={tr(t, 'revert', 'Revert')}
-                    text={tr(t, 'revert_info', 'Posts a compensating opposite movement — nothing is deleted, and the revert itself appears in the history. Only manual stock changes and imports can be reverted; sales, returns and transfers must be undone from their own records.')}
-                  />
+                  ) : null}
+                  {!isExactStockCorrectionMovement(detail) ? (
+                    <InfoHint
+                      label={tr(t, 'revert', 'Revert')}
+                      text={tr(t, 'revert_info', 'Posts a compensating opposite movement — nothing is deleted, and the revert itself appears in the history. Only manual stock changes and imports can be reverted; sales, returns and transfers must be undone from their own records.')}
+                    />
+                  ) : null}
                 </div>
               ) : (
                 <div className="flex flex-wrap items-center gap-2 border-t border-gray-100 pt-2 dark:border-gray-800">

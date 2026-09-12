@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import ts from 'typescript'
 import { todayStr } from '../src/utils/dateHelpers.ts'
-import { buildMovementGroups, getMovementGroupPage, movementColorClass, movementColorClassForRecord, normalizeMovementTimestamp } from '../src/components/inventory/movementGroups.ts'
+import { buildMovementGroups, getMovementGroupPage, isExactStockCorrectionMovement, movementColorClass, movementColorClassForRecord, normalizeMovementTimestamp, translateMovementType } from '../src/components/inventory/movementGroups.ts'
 import { formatHistoryReference, historyGroupReference } from '../src/utils/historyRowModel.ts'
 
 let failed = 0
@@ -126,6 +126,22 @@ await runTest('movementColorClassForRecord: derives the sign from movement_type 
   assert.match(saleRecord, /rose/)
   assert.match(purchaseRecord, /emerald/)
   assert.match(noOpSetRecord, /slate/)
+})
+
+await runTest('scoped corrections keep directional signs and use exact history only', () => {
+  const [out] = buildMovementGroups([{ id: 21, movement_type: 'correction_out', quantity: 4, reference_id: 'stock-set:12345678-1234-1234-1234-123456789012:0', created_at: '2026-09-12 10:00:00' }])
+  const [inside] = buildMovementGroups([{ id: 22, movement_type: 'correction_in', quantity: 6, correction_operation_id: '12345678-1234-1234-1234-123456789012', created_at: '2026-09-12 10:01:00' }])
+  assert.equal(out.signedQuantity, -4)
+  assert.equal(out.totalQuantityOut, 4)
+  assert.match(movementColorClassForRecord({ movement_type: 'correction_out', quantity: 4 }), /rose/)
+  assert.equal(inside.signedQuantity, 6)
+  assert.equal(inside.totalQuantityIn, 6)
+  assert.match(movementColorClassForRecord({ movement_type: 'correction_in', quantity: 6 }), /emerald/)
+  assert.equal(isExactStockCorrectionMovement(out.items[0]), true)
+  assert.equal(isExactStockCorrectionMovement(inside.items[0]), true)
+  assert.equal(isExactStockCorrectionMovement({ movement_type: 'add', reference_id: 'receipt:1' }), false)
+  assert.equal(translateMovementType('correction_in', (_key) => ''), 'Stock correction in')
+  assert.equal(translateMovementType('correction_out', (_key) => ''), 'Stock correction out')
 })
 
 // N13: the drill header and the /movements CSV both name the record a GROUP

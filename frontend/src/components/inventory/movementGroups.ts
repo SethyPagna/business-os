@@ -157,6 +157,8 @@ export function translateMovementType(type: unknown, t?: (key: string) => string
     // a second kind of movement. Migration 0128 rewrites the rows themselves;
     // this keeps the ledger honest for anything not yet normalised.
     stock_in: ['add_stock', 'Add Stock'],
+    correction_in: ['stock_correction_in', 'Stock correction in'],
+    correction_out: ['stock_correction_out', 'Stock correction out'],
   }
   const mapped = canonicalKey[key]
   if (mapped) return T(mapped[0], mapped[1])
@@ -176,8 +178,17 @@ export function translateMovementType(type: unknown, t?: (key: string) => string
 // as stock IN.
 function movementSign(type: unknown): -1 | 1 {
   const key = String(type || '').toLowerCase()
-  if (['remove', 'sale', 'supplier_return', 'return_reversal', 'transfer_out', 'row_move_out', 'move_out', 'write_off', 'damage_out', 'replacement_out', 'out'].includes(key)) return -1
+  if (['remove', 'sale', 'supplier_return', 'return_reversal', 'transfer_out', 'row_move_out', 'move_out', 'write_off', 'damage_out', 'replacement_out', 'out', 'correction_out'].includes(key)) return -1
   return 1
+}
+
+/** Scoped quantity corrections are undone/redone only through server history. */
+export function isExactStockCorrectionMovement(movement: MovementRecord = {}): boolean {
+  const type = String(movement.movement_type || '').toLowerCase()
+  return type === 'correction_in'
+    || type === 'correction_out'
+    || String(movement.reference_id || '').startsWith('stock-set:')
+    || String(movement.correction_operation_id || '').trim() !== ''
 }
 
 // Semantic stock-movement color map, replacing the old scheme of 13
