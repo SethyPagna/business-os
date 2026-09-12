@@ -29,6 +29,7 @@ import feesRoute from './routes/fees'
 import reportsRoute from './routes/reports'
 import telegramRoute from './routes/telegram'
 import reviewQueueRoute from './routes/reviewQueue'
+import posRoute from './routes/pos'
 import { createSyncRoute } from './routes/sync'
 import { getSessionUser } from './lib/auth'
 import { hasPermission, isAdminControlUser } from './lib/permissions'
@@ -339,6 +340,7 @@ app.route('/api/fees', feesRoute)
 app.route('/api/reports', reportsRoute)
 app.route('/api/telegram', telegramRoute)
 app.route('/api/review', reviewQueueRoute)
+app.route('/api/pos', posRoute)
 app.route('/api', usersRoute)
 app.route('/api', compatRoute)
 app.route('/api/sync', createSyncRoute(app))
