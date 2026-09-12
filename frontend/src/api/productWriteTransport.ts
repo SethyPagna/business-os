@@ -32,7 +32,18 @@ export type MergeDuplicateProductsChunkResult = {
   refusals: Array<{ caseKey: string; keeperId: number; mergedId: number; mergedName: string | null; code: string; error: string }>
 }
 
-export type MergeDuplicateProductsOptions = { requestId?: string; signal?: AbortSignal }
+export type LeadingZeroMergeManifest = {
+  scope: 'leading_zero'
+  manifest_version: 1
+  manifest_digest: string
+  groups: Array<{ keeper_id: number; member_ids: number[] }>
+}
+
+export type MergeDuplicateProductsOptions = {
+  requestId?: string
+  signal?: AbortSignal
+  manifest?: LeadingZeroMergeManifest
+}
 
 const MERGE_DUPLICATES_CHUNK_TIMEOUT_MS = 120_000
 export const MERGE_DUPLICATES_PREVIEW_TIMEOUT_MS = 30_000
@@ -455,7 +466,10 @@ export function createProductVariant(payload: ProductPayload = {}): Promise<unkn
 export function mergeDuplicateProducts(options: MergeDuplicateProductsOptions = {}): Promise<MergeDuplicateProductsChunkResult> {
   // One request id is retained by the caller for the entire bounded run. The
   // same body also lets apiFetch share an in-flight retry after a double tap.
-  const body = ensureClientRequestId({ ...getDevicePayload(), client_request_id: options.requestId }, 'product-merge')
+  const body = ensureClientRequestId({
+    ...(options.manifest || getDevicePayload()),
+    client_request_id: options.requestId,
+  }, 'product-merge')
   return route(
     'products:mergeDuplicates',
     () => apiFetch('POST', '/api/products/merge-duplicates', body, MERGE_DUPLICATES_CHUNK_TIMEOUT_MS, { signal: options.signal }),
@@ -471,8 +485,9 @@ export function mergeDuplicateProducts(options: MergeDuplicateProductsOptions = 
 // machinery the way mergeDuplicateProducts() above is: this never mutates
 // anything, so there's nothing to replay if it fails offline -- a plain
 // apiFetch that the modal can just retry is the right shape for a GET.
-export function previewMergeDuplicateProducts(options: { signal?: AbortSignal } = {}): Promise<unknown> {
-  return apiFetch('GET', '/api/products/merge-duplicates/preview', undefined, MERGE_DUPLICATES_PREVIEW_TIMEOUT_MS, { signal: options.signal })
+export function previewMergeDuplicateProducts(options: { signal?: AbortSignal; scope?: 'leading_zero' } = {}): Promise<unknown> {
+  const suffix = options.scope === 'leading_zero' ? '?scope=leading_zero' : ''
+  return apiFetch('GET', `/api/products/merge-duplicates/preview${suffix}`, undefined, MERGE_DUPLICATES_PREVIEW_TIMEOUT_MS, { signal: options.signal })
 }
 
 // Products → Duplicates review section ("possibly the same" residue --

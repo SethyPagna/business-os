@@ -19,6 +19,13 @@ export type ValidatedMergeDuplicatesPreviewGroup = {
   mergeBlockers: Array<{ code: string; error: string }>
 }
 
+export type ValidatedLeadingZeroMergeManifest = {
+  scope: 'leading_zero'
+  manifest_version: 1
+  manifest_digest: string
+  groups: Array<{ keeper_id: number; member_ids: number[] }>
+}
+
 export type ValidatedMergeDuplicatesPreview = {
   groupCount: number
   duplicateProductCount: number
@@ -26,6 +33,8 @@ export type ValidatedMergeDuplicatesPreview = {
   blockedGroupCount: number
   groups: ValidatedMergeDuplicatesPreviewGroup[]
   costRefusalCount: number
+  scope?: 'leading_zero'
+  applyManifest?: ValidatedLeadingZeroMergeManifest
 }
 
 const ROOT_KEYS = new Set([
@@ -37,7 +46,11 @@ const ROOT_KEYS = new Set([
   'groups',
   'costRefusalCount',
   'batchLimit',
+  'scope',
+  'applyManifest',
 ])
+const MANIFEST_KEYS = new Set(['scope', 'manifest_version', 'manifest_digest', 'groups'])
+const MANIFEST_GROUP_KEYS = new Set(['keeper_id', 'member_ids'])
 const GROUP_KEYS = new Set([
   'caseKeys',
   'canonicalId',
@@ -277,6 +290,43 @@ export function validateMergeDuplicatesPreviewResponse(value: unknown): Validate
     invalid('batchLimit must be positive')
   }
 
+  let applyManifest: ValidatedLeadingZeroMergeManifest | undefined
+  if (root.scope !== undefined || root.applyManifest !== undefined) {
+    if (root.scope !== 'leading_zero') invalid('scope must be leading_zero')
+    const manifest = expectRecord(root.applyManifest, 'applyManifest')
+    expectOnlyKeys(manifest, MANIFEST_KEYS, 'applyManifest')
+    if (manifest.scope !== 'leading_zero' || manifest.manifest_version !== 1
+      || typeof manifest.manifest_digest !== 'string' || !/^sha256-[a-f0-9]{64}$/.test(manifest.manifest_digest)
+      || !Array.isArray(manifest.groups) || manifest.groups.length > 25) invalid('applyManifest is invalid')
+    let duplicateCount = 0
+    const seenIds = new Set<number>()
+    const manifestGroups = manifest.groups.map((raw, index) => {
+      const item = expectRecord(raw, `applyManifest.groups[${index}]`)
+      expectOnlyKeys(item, MANIFEST_GROUP_KEYS, `applyManifest.groups[${index}]`)
+      const keeperId = expectPositiveId(item.keeper_id, `applyManifest.groups[${index}].keeper_id`)
+      if (!Array.isArray(item.member_ids) || item.member_ids.length !== 2) invalid(`applyManifest.groups[${index}].member_ids must contain one pair`)
+      const memberIds = item.member_ids.map((id, memberIndex) => expectPositiveId(id, `applyManifest.groups[${index}].member_ids[${memberIndex}]`))
+      if (!memberIds.includes(keeperId) || new Set(memberIds).size !== memberIds.length || memberIds.some((id) => seenIds.has(id))) {
+        invalid(`applyManifest.groups[${index}] has overlapping or invalid members`)
+      }
+      memberIds.forEach((id) => seenIds.add(id))
+      duplicateCount += memberIds.length - 1
+      const previewGroup = groups.find((group) => group.canonicalId === keeperId)
+      const previewIds = previewGroup ? [previewGroup.canonicalId, ...previewGroup.duplicates.map((duplicate) => duplicate.id)].sort((a, b) => a - b) : []
+      const sortedIds = [...memberIds].sort((a, b) => a - b)
+      if (!previewGroup?.mergeable || previewIds.length !== sortedIds.length || previewIds.some((id, offset) => id !== sortedIds[offset])) {
+        invalid(`applyManifest.groups[${index}] is not an exact mergeable preview group`)
+      }
+      return { keeper_id: keeperId, member_ids: sortedIds }
+    })
+    if (duplicateCount > 25) invalid('applyManifest exceeds the duplicate batch limit')
+    applyManifest = {
+      scope: 'leading_zero', manifest_version: 1,
+      manifest_digest: manifest.manifest_digest,
+      groups: manifestGroups,
+    }
+  }
+
   return {
     groupCount,
     duplicateProductCount,
@@ -284,5 +334,6 @@ export function validateMergeDuplicatesPreviewResponse(value: unknown): Validate
     blockedGroupCount,
     groups,
     costRefusalCount,
+    ...(root.scope === 'leading_zero' && applyManifest ? { scope: 'leading_zero' as const, applyManifest } : {}),
   }
 }

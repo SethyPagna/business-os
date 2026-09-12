@@ -30,6 +30,8 @@ import StockInSessionsSection from './StockInSessionsSection.tsx'
 import MergeDuplicatesReviewModal from './MergeDuplicatesReviewModal'
 import type { MergeDuplicatesRecoveryNotice } from './MergeDuplicatesReviewModal'
 import { validateMergeDuplicatesPreviewResponse } from './mergeDuplicatesPreviewResponse.ts'
+import type { ValidatedLeadingZeroMergeManifest } from './mergeDuplicatesPreviewResponse.ts'
+import type { LeadingZeroMergeManifest } from '../../api/productWriteTransport.ts'
 import ZeroQuantityCleanupModal from './ZeroQuantityCleanupModal'
 import type { ZeroQuantityCandidate } from './ZeroQuantityCleanupModal'
 import WireImagesReviewModal from './WireImagesReviewModal'
@@ -349,7 +351,7 @@ type ProductApiResponse = Record<string, unknown> & {
   success?: boolean
 }
 
-type MergeDuplicateRequestOptions = { requestId?: string; signal?: AbortSignal }
+type MergeDuplicateRequestOptions = { requestId?: string; signal?: AbortSignal; manifest?: LeadingZeroMergeManifest }
 
 type MergeDuplicateProductsResult = ProductApiResponse & {
   complete?: boolean
@@ -404,7 +406,7 @@ type ProductApi = {
   getProductsByIds: (ids: number[], options?: Record<string, unknown>) => Promise<ProductRecord[]>
   getUnits: () => Promise<LookupRecord[]>
   mergeDuplicates: (options?: MergeDuplicateRequestOptions) => Promise<ProductApiResponse | undefined>
-  previewMergeDuplicates: (options?: { signal?: AbortSignal }) => Promise<ProductApiResponse | undefined>
+  previewMergeDuplicates: (options?: { signal?: AbortSignal; scope?: 'leading_zero' }) => Promise<ProductApiResponse | undefined>
   previewZeroQuantityCandidates: (thresholdDays?: number) => Promise<ProductApiResponse | undefined>
   deleteZeroQuantityProducts: (ids: number[]) => Promise<ProductApiResponse | undefined>
   previewWireImages: () => Promise<ProductApiResponse | undefined>
@@ -975,8 +977,12 @@ function ProductsFullEditor() {
   const [bulkActionBusy, setBulkActionBusy] = useState(false)
   const [mergeDuplicatesBusy, setMergeDuplicatesBusy] = useState(false)
   const [mergeDuplicatesReviewOpen, setMergeDuplicatesReviewOpen] = useState(false)
+  const [mergeDuplicatesScope, setMergeDuplicatesScope] = useState<'leading_zero' | null>(null)
   const [mergeDuplicatesRecovery, setMergeDuplicatesRecovery] = useState<MergeDuplicatesRecoveryNotice | null>(null)
   const mergeDuplicatesAbortRef = useRef<AbortController | null>(null)
+  const leadingZeroManifestRef = useRef<ValidatedLeadingZeroMergeManifest | null>(null)
+  const leadingZeroConfirmedGroupsRef = useRef<Map<number, string> | null>(null)
+  const leadingZeroWriteInFlightRef = useRef(false)
   // Exact-duplicate (same real barcode + same name) flagging for the list
   // rows -- user spec item #3. Single source of truth is the server sweep
   // the Duplicates review tab already uses (see utils/exactDuplicateProducts).
@@ -1970,6 +1976,16 @@ function ProductsFullEditor() {
   // a live preview of which products will merge yet.
   const openMergeDuplicatesReview = () => {
     if (mergeDuplicatesBusy) return
+    setMergeDuplicatesScope(null)
+    setMergeDuplicatesReviewOpen(true)
+  }
+
+  const openLeadingZeroMergeReview = () => {
+    if (mergeDuplicatesBusy) return
+    leadingZeroManifestRef.current = null
+    leadingZeroConfirmedGroupsRef.current = null
+    setMergeDuplicatesRecovery(null)
+    setMergeDuplicatesScope('leading_zero')
     setMergeDuplicatesReviewOpen(true)
   }
 
@@ -1982,9 +1998,83 @@ function ProductsFullEditor() {
   // there's one place (the ProductApi type above) that has to know the
   // transport layer exists.
   const loadMergeDuplicatesPreview = async (signal: AbortSignal) => {
-    return validateMergeDuplicatesPreviewResponse(
-      await productApi.previewMergeDuplicates({ signal }),
+    const preview = validateMergeDuplicatesPreviewResponse(
+      await productApi.previewMergeDuplicates({ signal, ...(mergeDuplicatesScope ? { scope: mergeDuplicatesScope } : {}) }),
     )
+    if (mergeDuplicatesScope === 'leading_zero') {
+      leadingZeroManifestRef.current = preview.applyManifest || null
+      if (!leadingZeroConfirmedGroupsRef.current) {
+        leadingZeroConfirmedGroupsRef.current = new Map(preview.groups
+          .filter((group) => group.mergeable)
+          .map((group) => [group.canonicalId, [group.canonicalId, ...group.duplicates.map((duplicate) => duplicate.id)].sort((a, b) => a - b).join(',')]))
+      }
+    }
+    return preview
+  }
+
+  const handleLeadingZeroMerge = async () => {
+    if (mergeDuplicatesBusy || leadingZeroWriteInFlightRef.current || mergeDuplicatesScope !== 'leading_zero') return
+    const initialAllowed = leadingZeroConfirmedGroupsRef.current
+    let manifest = leadingZeroManifestRef.current
+    if (!initialAllowed || !manifest?.groups.length) return
+    const controller = new AbortController()
+    mergeDuplicatesAbortRef.current = controller
+    const requestId = `product-leading-zero-merge_${globalThis.crypto?.randomUUID?.() || `${Date.now()}_${Math.random().toString(36).slice(2)}`}`
+    let mergedGroups = 0
+    let mergedProducts = 0
+    leadingZeroWriteInFlightRef.current = true
+    setMergeDuplicatesBusy(true)
+    const manifestWasConfirmed = (candidate: ValidatedLeadingZeroMergeManifest): boolean => candidate.groups.every((group) =>
+      initialAllowed.get(group.keeper_id) === [...group.member_ids].sort((a, b) => a - b).join(','))
+    try {
+      let calls = 0
+      while (manifest.groups.length) {
+        calls += 1
+        if (calls > initialAllowed.size || !manifestWasConfirmed(manifest)) {
+          throw new Error(t('merge_leading_zero_scope_changed') || 'The leading-zero candidate set changed. Review it again before continuing.')
+        }
+        const result = await productApi.mergeDuplicates({ requestId, signal: controller.signal, manifest }) as MergeDuplicateProductsResult | undefined
+        if (result?.success === false) throw new Error(result.error || 'Failed to merge leading-zero barcode duplicates')
+        mergedGroups += Math.max(0, Number(result?.mergedGroups || 0))
+        mergedProducts += Math.max(0, Number(result?.mergedProducts || 0))
+        if (result?.interrupted || Number(result?.undoPendingCount || 0) > 0 || (result?.refusals?.length || 0) > 0) {
+          notify(result?.error || result?.refusals?.[0]?.error
+            || 'The safe merge stopped. Review the refreshed candidates before continuing.', 'error')
+          await load(true)
+          setMergeDuplicatesReviewOpen(false)
+          setMergeDuplicatesScope(null)
+          return
+        }
+        const refreshed = validateMergeDuplicatesPreviewResponse(
+          await productApi.previewMergeDuplicates({ signal: controller.signal, scope: 'leading_zero' }),
+        )
+        if (refreshed.scope !== 'leading_zero' || !refreshed.applyManifest) {
+          throw new Error('The server did not return a scoped leading-zero preview.')
+        }
+        manifest = refreshed.applyManifest
+        leadingZeroManifestRef.current = manifest
+      }
+      notify(
+        (t('merged_duplicate_products_summary') || 'Merged {products} duplicate product(s) into {groups} row(s)')
+          .replace('{products}', String(mergedProducts))
+          .replace('{groups}', String(mergedGroups)),
+      )
+      await load(true)
+      setMergeDuplicatesReviewOpen(false)
+      setMergeDuplicatesScope(null)
+    } catch (error) {
+      const detail = getErrorMessage(error, 'The leading-zero merge stopped')
+      if (!controller.signal.aborted) notify(detail, 'error')
+      await productApi.invalidateProductReadCacheForReconciliation().catch(() => undefined)
+      await load(true).catch(() => undefined)
+      setMergeDuplicatesRecovery({ requestId, mergedGroups, mergedProducts, detail })
+      setMergeDuplicatesReviewOpen(false)
+      setMergeDuplicatesScope(null)
+    } finally {
+      leadingZeroWriteInFlightRef.current = false
+      if (mergeDuplicatesAbortRef.current === controller) mergeDuplicatesAbortRef.current = null
+      setMergeDuplicatesBusy(false)
+    }
   }
 
   const handleMergeDuplicates = async () => {
@@ -4832,7 +4922,12 @@ function ProductsFullEditor() {
       {activeProductSection === 'duplicates' && canMergeDuplicates && (
         <div className="mt-1">
           <Suspense fallback={<div className="py-6 text-center text-sm text-gray-400">{t('loading') || 'Loading'}...</div>}>
-            <ProductDuplicatesTab t={t} notify={notify} canRemoveProduct={canRemoveProduct} />
+            <ProductDuplicatesTab
+              t={t}
+              notify={notify}
+              canRemoveProduct={canRemoveProduct}
+              onMergeLeadingZero={openLeadingZeroMergeReview}
+            />
           </Suspense>
         </div>
       )}
@@ -5156,10 +5251,11 @@ function ProductsFullEditor() {
             setMergeDuplicatesReviewOpen(false)
             if (active) void load(true)
           }}
-          onConfirm={handleMergeDuplicates}
+          onConfirm={mergeDuplicatesScope === 'leading_zero' ? handleLeadingZeroMerge : handleMergeDuplicates}
           onLoadPreview={loadMergeDuplicatesPreview}
           recoveryNotice={mergeDuplicatesRecovery}
           working={mergeDuplicatesBusy}
+          scope={mergeDuplicatesScope}
         />
       )}
       {zeroQuantityCleanupOpen && (
