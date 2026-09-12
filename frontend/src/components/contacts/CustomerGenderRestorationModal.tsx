@@ -7,8 +7,10 @@ import { captureActorReadScope, isActorReadScopeCurrent } from '../../api/actorR
 import { effectivePermissions, type PermissionUser } from '../../utils/permissions.ts'
 import {
   CUSTOMER_GENDER_RESTORATION_CAMPAIGN,
+  CUSTOMER_GENDER_RESTORATION_CHUNKS,
   CUSTOMER_GENDER_RESTORATION_MAX_FILE_BYTES,
   CUSTOMER_GENDER_RESTORATION_TOTAL,
+  activateGenderRestorationLifecycle,
   appliedRecordCount,
   claimGenderRestorationAction,
   executeCustomerGenderRestorationChunk,
@@ -63,10 +65,7 @@ export default function CustomerGenderRestorationModal({ t, notify, user, onClos
   const [unknown, setUnknown] = useState(false)
   const [currentChunk, setCurrentChunk] = useState<number | null>(null)
 
-  useEffect(() => () => {
-    aliveRef.current = false
-    operationGenerationRef.current += 1
-  }, [])
+  useEffect(() => activateGenderRestorationLifecycle(aliveRef, operationGenerationRef), [])
 
   const isCallbackCurrent = (scope = openedScopeRef.current, generation = operationGenerationRef.current) =>
     aliveRef.current && generation === operationGenerationRef.current
@@ -210,7 +209,7 @@ export default function CustomerGenderRestorationModal({ t, notify, user, onClos
 
         {manifest ? (
           <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200">
-            <div className="flex items-center gap-2 font-semibold"><CheckCircle2 className="h-4 w-4" />{tr('customer_gender_restore_file_ready', 'Approved file structure loaded')}</div>
+            <div className="flex items-center gap-2 font-semibold"><CheckCircle2 className="h-4 w-4" />{tr('customer_gender_restore_file_ready', 'Restoration file loaded; server approval still required')}</div>
             <p className="mt-1 text-xs">{CUSTOMER_GENDER_RESTORATION_TOTAL.toLocaleString()} {tr('records', 'records')} · {manifest.chunks.length} {tr('chunks', 'chunks')}</p>
           </div>
         ) : null}
