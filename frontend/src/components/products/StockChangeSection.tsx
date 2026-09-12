@@ -24,6 +24,7 @@ import PaginationControls from '../shared/PaginationControls'
 import SearchInput from '../shared/SearchInput'
 import ScanSearchButton from '../shared/ScanSearchButton'
 import InfoHint from '../shared/InfoHint'
+import ProductNameRail from '../shared/ProductNameRail'
 // N13: a receipt id is never truncated -- it is shown in full and copied in
 // one tap, through the same component the Sale and Return detail modals use.
 import CopyableId from '../shared/CopyableId.tsx'
@@ -618,10 +619,13 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
         key={row.id}
         type="button"
         onClick={() => openDetail(row)}
-        className="flex w-full items-start justify-between gap-3 rounded-xl border border-gray-200 bg-white p-3 text-left shadow-sm transition hover:border-blue-300 hover:bg-blue-50/40 dark:border-gray-700 dark:bg-gray-900 dark:hover:border-blue-700 dark:hover:bg-blue-900/10"
+        className="block w-full min-w-0 rounded-xl border border-gray-200 bg-white p-3 text-left shadow-sm transition hover:border-blue-300 hover:bg-blue-50/40 dark:border-gray-700 dark:bg-gray-900 dark:hover:border-blue-700 dark:hover:bg-blue-900/10"
       >
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
+        {/* Mobile row 1: the action at a glance. The shared rail keeps the
+            complete product name available in at most two readable lines;
+            its stable wrapper does not change ledger semantics. */}
+        <div data-stock-mobile-row="primary" className="flex min-w-0 items-start gap-2">
+          <div className="flex min-w-0 flex-1 items-start gap-2">
             {/* Time only -- the day header above carries the date. A
                 legacy/imported row with no time of day shows a muted marker
                 (with an explanatory tooltip) rather than a fabricated 00:00. */}
@@ -631,64 +635,57 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
             >
               {timeUnknown ? '––:––' : clock}
             </span>
-            <span className="break-words text-[13px] font-semibold leading-4 text-gray-800 dark:text-gray-100" title={row.product_name}>{row.product_name}</span>
+            <span data-stock-mobile-product-name="true" className="min-w-0 flex-1">
+              <ProductNameRail name={row.product_name} className="text-[13px] font-semibold leading-4 text-gray-800 dark:text-gray-100" />
+            </span>
           </div>
-          {/* O3/N8: the barcode gets its OWN muted mono line directly under the
-              name -- never inline with it, and never sharing a wrapping row with
-              the branch/user/reason chips, where it used to push the amount
-              column around on a narrow card. */}
-          <div className="mt-0.5 break-all font-mono text-[10px] leading-[0.9rem] text-gray-400">{model.barcode}</div>
-          {/* N13 + owner ruling: the receipt gets the same first position on
-              the card that it has in the table's Reason cell -- the owner
-              reads this surface at 375px too, and "which sale was this" is the
-              whole question. Its OWN line rather than a chip in the wrapping
-              row below, because at 375px a receipt id needs the full width to
-              wrap into instead of being squeezed between a branch and a
-              reason -- and because the copy affordance belongs beside the id,
-              not floating in a chip row.  */}
+          <span className={`inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-0.5 text-xs font-semibold ${movementColorClass(row.movement_type, row.signed_quantity)}`}>
+            {signedLabel(row)}
+            <span className="font-normal opacity-80">{translateMovementType(row.movement_type, t)}</span>
+          </span>
+        </div>
+
+        {/* Mobile row 2: the source record and barcode form one horizontally
+            readable identity rail. Neither identifier is clipped; a long
+            receipt or barcode pans inside the card with no visible bar. */}
+        <div
+          data-stock-mobile-row="reference"
+          className="mt-1 flex min-w-0 max-w-full flex-nowrap items-center gap-1.5 overflow-x-auto overscroll-x-contain whitespace-nowrap text-[10px] text-gray-400 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
           {model.reference.label ? (
             <CopyableId
               compact
-              className="mt-1"
+              className="shrink-0"
               value={referenceText(row)}
               copyValue={model.reference.label}
               copyLabel={model.reference.kind === 'return'
                 ? tr(t, 'copy_return_id', 'Copy return ID')
                 : tr(t, 'copy_receipt_number', 'Copy receipt number')}
               copiedLabel={tr(t, 'copied', 'Copied')}
-              valueClassName="text-[11px] font-semibold text-gray-600 dark:text-gray-300"
+              valueClassName="!whitespace-nowrap !break-normal text-[11px] font-semibold text-gray-600 dark:text-gray-300"
             />
           ) : null}
-          {/* One row model: branch · user · reason, always in this order and
-              always present (an absent value shows the shared placeholder
-              instead of vanishing, which is what made a Sale row look broken). */}
-          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-400">
-            {row.batch_id ? (
-              <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-gray-500 dark:bg-gray-800 dark:text-gray-300">
-                {batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at }, tr(t, 'batch', 'Received date'))}
-              </span>
-            ) : null}
-            {row.batch_supplier_name ? <span className="break-words font-medium text-gray-500 dark:text-gray-300">{row.batch_supplier_name}</span> : null}
-            {model.isBare ? (
-              // Nothing was recorded at all: say so once, not three times.
-              <span className="break-words" title={`${tr(t, 'branch', 'Branch')} · ${tr(t, 'cashier_user', 'User')} · ${tr(t, 'reason', 'Reason')}`}>{model.branch}</span>
-            ) : (
-              <>
-                <span className="break-words" title={`${tr(t, 'branch', 'Branch')}: ${model.branch}`}>{model.branch}</span>
-                <span className="break-words" title={`${tr(t, 'cashier_user', 'User')}: ${model.actor}`}>· {model.actor}</span>
-                <span className="break-words text-gray-400" title={`${tr(t, 'reason', 'Reason')}: ${model.reason}`}>· {model.reason}</span>
-              </>
-            )}
-          </div>
+          {model.reference.label ? <span aria-hidden="true">·</span> : null}
+          <div className="shrink-0 font-mono leading-[0.9rem]">{model.barcode}</div>
         </div>
-        <div className="shrink-0 text-right">
-          <span className={`inline-flex items-center gap-1 rounded-lg px-2 py-0.5 text-xs font-semibold ${movementColorClass(row.movement_type, row.signed_quantity)}`}>
-            {signedLabel(row)}
-            <span className="font-normal opacity-80">{translateMovementType(row.movement_type, t)}</span>
-          </span>
-          <div className="mt-1 text-xs tabular-nums text-gray-500 dark:text-gray-400">
-            {row.before_qty} <span className="text-gray-300 dark:text-gray-600">→</span> <span className="font-semibold text-gray-800 dark:text-gray-100">{row.after_qty}</span>
-          </div>
+
+        {/* Mobile row 3: user leads in bold, followed by the lot's true
+            received date, branch and reason. The complete metadata remains
+            reachable by horizontal pan instead of growing the card through
+            an arbitrary number of wrapped reason lines. Supplier provenance
+            remains in the opened detail. */}
+        <div
+          data-stock-mobile-row="metadata"
+          className="mt-1 flex min-w-0 max-w-full flex-nowrap items-center gap-1.5 overflow-x-auto overscroll-x-contain whitespace-nowrap text-[11px] text-gray-400 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
+          <span className="shrink-0 font-bold text-gray-600 dark:text-gray-200" title={`${tr(t, 'cashier_user', 'User')}: ${model.actor}`}>{model.actor}</span>
+          {row.batch_id ? (
+            <span className="shrink-0 rounded-full bg-gray-100 px-1.5 py-0.5 text-gray-500 dark:bg-gray-800 dark:text-gray-300">
+              {batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at }, tr(t, 'batch', 'Received date'))}
+            </span>
+          ) : null}
+          <span className="shrink-0" title={`${tr(t, 'branch', 'Branch')}: ${model.branch}`}>· {model.branch}</span>
+          <span data-stock-mobile-reason="true" className="shrink-0 text-gray-400" title={`${tr(t, 'reason', 'Reason')}: ${model.reason}`}>· {model.reason}</span>
         </div>
       </button>
     )
@@ -1186,18 +1183,13 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
             </div>
             {/* Row context actions -- Edit reason + Revert -- only for a user
                 with Inventory adjust access (the server enforces the same).
-                Revert is a two-step inline confirm; its "what it does" note
-                (append-only, which types qualify) lives behind the InfoHint. */}
+                Revert remains a two-step inline confirmation. */}
             {canAdjust ? (
               editingReason == null ? (
                 <div className="flex flex-wrap items-center gap-2 border-t border-gray-100 pt-2 dark:border-gray-800">
-                  {/* N8: these were text links -- a bordered 24px chip next to a
-                      filled one, neither matching anything else in the app. They
-                      are now the shared button kit (.btn-secondary/.btn-danger:
-                      same 2.5rem height, same --ui-radius, same font-weight as
-                      every other row action), icon + label from sm up and
-                      icon-only with an aria-label below it, where a two-word
-                      label would wrap the rail. */}
+                  {/* Shared button-kit actions retain their accessible names.
+                      Revert keeps visible text at every width so the destructive
+                      action is never represented by an unexplained icon. */}
                   <button
                     type="button"
                     disabled={rowBusy}
@@ -1221,7 +1213,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                         className="btn-danger inline-flex items-center gap-1.5 px-3 text-sm disabled:opacity-50"
                       >
                         <Undo2 className="h-4 w-4 shrink-0" aria-hidden="true" />
-                        <span className="hidden sm:inline">{tr(t, 'revert', 'Revert')}</span>
+                        <span>{tr(t, 'revert', 'Revert')}</span>
                       </button>
                       <button
                         type="button"
@@ -1242,14 +1234,8 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                       className="btn-secondary inline-flex items-center gap-1.5 border-rose-300 px-3 text-sm text-rose-600 hover:bg-rose-50 disabled:opacity-50 dark:border-rose-900/60 dark:text-rose-300 dark:hover:bg-rose-900/20"
                     >
                       <Undo2 className="h-4 w-4 shrink-0" aria-hidden="true" />
-                      <span className="hidden sm:inline">{tr(t, 'revert', 'Revert')}</span>
+                      <span>{tr(t, 'revert', 'Revert')}</span>
                     </button>
-                  ) : null}
-                  {detailCanRevert ? (
-                    <InfoHint
-                      label={tr(t, 'revert', 'Revert')}
-                      text={tr(t, 'revert_info', 'Posts a compensating opposite movement — nothing is deleted, and the revert itself appears in the history. Only manual stock changes and imports can be reverted; sales, returns and transfers must be undone from their own records.')}
-                    />
                   ) : null}
                 </div>
               ) : (

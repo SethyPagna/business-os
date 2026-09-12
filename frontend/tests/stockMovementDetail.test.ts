@@ -101,4 +101,20 @@ test('detail labels missing action costs honestly and gates receipt-only lot acc
   assert.match(detail, /detailCanRevert && confirmRevert/)
 })
 
+test('detail keeps Revert explicit on mobile without the redundant info control', () => {
+  const source = readFileSync(new URL('../src/components/products/StockChangeSection.tsx', import.meta.url), 'utf8')
+  const start = source.indexOf('{detail ? (')
+  const end = source.indexOf('{adjustType ? (', start)
+  const detail = source.slice(start, end)
+  const revertButtons = detail.split('<button').slice(1).filter((button) => /aria-label=\{tr\(t, 'revert'/.test(button.slice(0, 900)))
+  assert.equal(revertButtons.length, 2, 'both the initial and confirmed Revert controls must be present')
+  for (const button of revertButtons) {
+    const head = button.slice(0, 900)
+    assert.match(head, /<span>\{tr\(t, 'revert', 'Revert'\)\}<\/span>/)
+    assert.doesNotMatch(head, /hidden sm:inline/)
+  }
+  assert.doesNotMatch(detail, /tr\(t, 'revert_info'/, 'the Revert action rail must not retain a separate info button')
+  assert.match(source, /<InfoHint[\s\S]*?failed_attempt_hint/, 'the unrelated unsaved-attempt explanation must remain available')
+})
+
 if (failed) process.exitCode = 1
