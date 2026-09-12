@@ -6501,7 +6501,7 @@
   "address_preset_province": "Province",
   "address_preset_district": "District",
   "address_preset_subdistrict": "Subdistrict",
-  "address_prefix": "House / street (kept as typed)",
+  "address_house_street": "House / street (kept as typed)",
   "address_preview": "Address preview",
   "apply_address": "Apply address",
   "manage_address_presets": "Manage saved address options",

@@ -6501,7 +6501,7 @@
   "address_preset_province": "ខេត្ត",
   "address_preset_district": "ខណ្ឌ",
   "address_preset_subdistrict": "សង្កាត់",
-  "address_prefix": "ផ្ទះ / ផ្លូវ (រក្សាតាមអ្វីដែលបានវាយ)",
+  "address_house_street": "ផ្ទះ / ផ្លូវ (រក្សាតាមអ្វីដែលបានវាយ)",
   "address_preview": "មើលអាសយដ្ឋានជាមុន",
   "apply_address": "ប្រើអាសយដ្ឋាននេះ",
   "manage_address_presets": "គ្រប់គ្រងជម្រើសអាសយដ្ឋានដែលបានរក្សាទុក",
