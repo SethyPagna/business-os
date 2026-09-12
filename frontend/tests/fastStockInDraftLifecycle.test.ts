@@ -29,10 +29,14 @@ assert.ok(discardBody.indexOf('clearWorkDraft(fastStockInDraftKey)') < discardBo
 assert.doesNotMatch(discardBody, /onMinimize/, 'Discard must not park a minimized chip')
 
 assert.match(modal, /freeGoods\?: boolean/)
-assert.match(modal, /batchChoice\?: 'new' \| number/)
+assert.match(modal, /batchChoice\?: '' \| 'new' \| number/)
+assert.match(modal, /setScope\?: StockSetScope/)
 assert.match(modal, /setFreeGoods\]\s*=\s*useState\(Boolean\(draft\?\.freeGoods\)\)/, 'free-goods choice must restore')
-assert.match(modal, /pendingBatchRestoreRef = useRef<'new' \| number \| null>\(draft\?\.batchChoice \?\? null\)/, 'a parked lot choice must be revalidated by the existing options effect')
-assert.match(modal, /unitCost, freeGoods, createPriceVariant, expiryDate, batchChoice, lines: received/, 'both debounced and synchronous drafts preserve in-progress receipt values')
+assert.match(modal, /pendingBatchRestoreRef = useRef<'' \| 'new' \| number \| null>\(draft\?\.batchChoice \?\? null\)/, 'a parked lot choice must be revalidated by the existing options effect')
+assert.match(modal, /unitCost, freeGoods, createPriceVariant, expiryDate, batchChoice, lines: received,[^]*?mode, setScope, createdProductIds/, 'both debounced and synchronous drafts preserve lot scope and in-progress receipt values')
+assert.match(modal, /setSetScope\(line\.mode === 'set' \? \(line\.setScope \|\| 'branch'\) : 'lot'\)/, 'legacy Set drafts retain their former branch-total intent while being reopened')
+assert.match(modal, /const restorableBatch = line\.mode === 'set' && !line\.setScope \? '' : line\.batchChoice/, 'legacy Set drafts must require a fresh explicit existing-lot choice')
+assert.match(modal, /const legacySet = pending\.find\(\(line\) => line\.mode === 'set' && \(!line\.setScope \|\| typeof line\.batchChoice !== 'number' \|\| !line\.clientRequestId\)\)/, 'pre-feature Set drafts are reviewed rather than silently reinterpreted')
 
 const createStart = modal.indexOf('  const createProductForScannedBarcode = async')
 const createEnd = modal.indexOf('  const addLine', createStart)

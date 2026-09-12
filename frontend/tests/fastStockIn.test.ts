@@ -192,9 +192,9 @@ runTest('the lot picker matches the sibling add-stock surfaces', () => {
   // Same affordance ReceiveBatchModal / InventoryStockModals already have:
   // a chip row scoped to the picked product and the shipment branch.
   assert.match(modalSource, /getProductBatches/, 'the fast modal reads lots like every other add-stock surface')
-  assert.match(modalSource, /getProductBatches\(productId, parsedBranchId, false\)/, 'add shows every active lot, empty ones included')
-  assert.match(modalSource, /\}, \[picked\?\.id, branchId\]\)/, 'lots refetch per picked product AND branch')
-  assert.match(modalSource, /setBatchChoice\('new'\)/, "a stale lot id can never ride to submit")
+  assert.match(modalSource, /getProductBatches\(productId, parsedBranchId, mode === 'remove'\)/, 'add/set include empty active lots while remove lists positive lots only')
+  assert.match(modalSource, /\}, \[picked\?\.id, branchId, mode, batchReloadKey\]\)/, 'lots refetch per product, branch, action, and explicit retry')
+  assert.match(modalSource, /setBatchChoice\(''\)/, 'a stale lot id can never ride to submit and no mode silently chooses New/FIFO')
   assert.match(modalSource, /batchDisplayLabel\(batch, tr\('batch', 'Received date'\)\)/, 'lot labels come from the shared helper')
   // A batch is identified by its DATE -- the code is previewed, never typed.
   assert.match(modalSource, /dateToBatchCode\(receivedDate\)/, 'the derived lot code is visible before commit')
@@ -210,6 +210,18 @@ runTest('the lot picker matches the sibling add-stock surfaces', () => {
   // effect re-keys on the product and would otherwise reset it to new.
   assert.match(modalSource, /pendingBatchRestoreRef/, 'the restore survives the refetch editLine triggers')
   assert.match(modalSource, /lots\.some\(\(lot\) => Number\(lot\.id\) === restore\)/, 'a lot that no longer exists here is not restored')
+  assert.match(modalSource, /batchError[\s\S]*role="alert"[\s\S]*setBatchReloadKey/, 'lot lookup failures stay distinct from an empty list and can be retried')
+})
+
+runTest('fast scoped Set freezes the reviewed lot intent and never reinterprets legacy drafts', () => {
+  assert.match(modalSource, /const \[setScope, setSetScope\] = useState<StockSetScope>\(draft\?\.setScope === 'branch' \? 'branch' : 'lot'\)/, 'new Set work defaults to selected-lot scope')
+  assert.match(modalSource, /\['branch', tr\('stock_set_scope_branch', 'Branch total'\)\]/, 'branch-total scope remains an explicit secondary choice')
+  for (const field of ['setScope', 'expectedLotQuantity', 'expectedBranchQuantity', 'clientRequestId']) {
+    assert.match(modalSource, new RegExp(`${field}:`), `queued lines freeze ${field}`)
+  }
+  assert.match(modalSource, /client_request_id: line\.clientRequestId/, 'the stable queued request id reaches every retry')
+  assert.match(modalSource, /const legacySet = pending\.find[\s\S]*editLine\(legacySet\)/, 'pre-feature Set lines are reopened for explicit review instead of being silently sent as lot scope')
+  assert.match(modalSource, /line\.mode === 'set' && !line\.setScope \? '' : line\.batchChoice/, 'editing a legacy branch-total Set preserves its intent but clears its invalid sentinel lot')
 })
 
 runTest('queueing a line and committing the session are visibly different actions', () => {

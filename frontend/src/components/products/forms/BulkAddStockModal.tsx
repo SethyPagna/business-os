@@ -6,27 +6,23 @@ import { withLoaderTimeout } from '../../../utils/loaders.ts'
 import AppSelect, { type AppSelectOption } from '../../shared/AppSelect.tsx'
 import DateEntryInput from '../../shared/DateEntryInput.tsx'
 import { getInventoryReasons, saveInventoryReasons } from '../../../api/methods.ts'
+import { getProductBatches, type ProductBatch } from '../../../api/batchesTransport.ts'
+import { createClientRequestId } from '../../../api/requestIds.ts'
 // Same saved-reason catalog + "Manage reasons" flow Inventory's own "Adjust
 // stock" modal already uses -- this bulk modal was the one place still
 // hardcoding `Bulk ${action} stock` as the reason with no way to pick or
-// type a real one. Batch selection is deliberately NOT a per-product
-// picker here (see the note above the batch-behavior panel below) -- a
-// bulk change can span many different products, each with its own
-// distinct batch list at the chosen branch, so a single picker doesn't
-// generalize the way it does for a one-product, multi-branch adjust form.
-// Instead this reuses the wire contract's own
-// auto-routing (routes/inventory.ts's /adjust already treats `batchId`
-// as optional: omitted on 'add' creates a fresh batch per product,
-// omitted on 'remove' FIFO-drains oldest batches first) and makes that
-// behavior visible/confirmable instead of leaving it silent.
+// type a real one. Every selected product has its own received-date list, so
+// this surface renders one explicit lot choice per row. A single shared picker
+// would silently apply one product's batch id to unrelated products.
 import InventoryReasonManagerModal from '../../inventory/InventoryReasonManagerModal.tsx'
 import SupplierPickerField from '../../shared/SupplierPickerField.tsx'
 import InfoHint from '../../shared/InfoHint.tsx'
-import { bulkActionCanReceive, bulkStockReceiptWire, stockReceiptGateCode, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../../utils/stockReceiptFields.ts'
+import { adjustBranchQuantity, bulkStockReceiptWire, scopedSetPreview, stockReceiptGateCode, type StockSetScope, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../../utils/stockReceiptFields.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../../shared/ConfirmDialog.tsx'
 import UnsavedChangesPrompt from '../../shared/UnsavedChangesPrompt.tsx'
 import { useCloseGuard } from '../../../utils/useCloseGuard.ts'
 import { dateToBatchCode } from '../../../utils/batchCode.ts'
+import { batchDisplayLabel } from '../../../utils/batchLabel.ts'
 import {
   applyRowOutcome,
   classifyStockAdjustFailure,
@@ -70,6 +66,8 @@ type Product = {
   name: string
   purchase_price_usd?: number
   purchase_price_khr?: number
+  stock_quantity?: number | string | null
+  branch_stock?: Array<{ branch_id?: number | string | null; quantity?: number | string | null }>
 }
 
 type User = {
@@ -95,11 +93,17 @@ type AdjustStockPayload = {
   receivedDate?: string
   supplierId?: number
   supplierName?: string
+  batchId?: number | 'new'
+  setScope?: StockSetScope
+  expectedLotQuantity?: number
+  expectedBranchQuantity?: number
+  client_request_id?: string
 }
 
 type ApiResult = {
   success?: boolean
   error?: string
+  action_history_id?: number
 }
 
 type ProductApi = {
@@ -113,6 +117,14 @@ type BulkAddStockResult = {
   failed: number
   updatedIds: number[]
   failedIds: number[]
+  action: StockAction
+  serverActionHistoryIds: number[]
+}
+
+type BulkLotSelection = {
+  batchId: number | 'new'
+  batchQuantity: number | null
+  batchLabel: string
 }
 
 type BulkAddStockModalProps = {
@@ -161,6 +173,7 @@ export default function BulkAddStockModal({ productIds, products, branches, user
   const defaultBranchId = branches.find((branch) => branch.is_default)?.id || branches[0]?.id || ''
   const [branchId, setBranchId] = useState(String(defaultBranchId))
   const [action, setAction] = useState<StockAction>(initialAction || 'add')
+  const [setScope, setSetScope] = useState<StockSetScope>('lot')
   const [qty, setQty] = useState(initialQuantity != null && initialQuantity !== '' ? String(initialQuantity) : '')
   // D4b: the received date IS the lot control in a bulk add -- there is no
   // per-product batch picker here (see the import comment above for why a
@@ -170,7 +183,13 @@ export default function BulkAddStockModal({ productIds, products, branches, user
   const [receivedDate, setReceivedDate] = useState(todayIsoDate())
   // Per-product outcomes of the last submit -- what succeeded (never retried),
   // what failed and why. Empty until the first commit.
-  const [rows, setRows] = useState<StockAdjustRow<{ productId: number; productName: string }>[]>([])
+  const [rows, setRows] = useState<StockAdjustRow<AdjustStockPayload>[]>([])
+  const [lotSelections, setLotSelections] = useState<Record<number, BulkLotSelection>>({})
+  const [lotOptions, setLotOptions] = useState<Record<number, ProductBatch[]>>({})
+  const [lotLoading, setLotLoading] = useState<Record<number, boolean>>({})
+  const [lotErrors, setLotErrors] = useState<Record<number, string>>({})
+  const [lotReloadKey, setLotReloadKey] = useState(0)
+  const [serverActionHistoryIds, setServerActionHistoryIds] = useState<number[]>([])
   // D5a: one supplier for the whole bulk receive event -- every lot this
   // add creates gets it; a lot that already has a supplier keeps its own
   // (COALESCE fill server-side, first attribution sticks). supplierId only
@@ -196,8 +215,42 @@ export default function BulkAddStockModal({ productIds, products, branches, user
   const [reasonDraft, setReasonDraft] = useState('')
   const [savingReasons, setSavingReasons] = useState(false)
   const saveInFlightRef = useRef(false)
-  const selectedProductIds = new Set(productIds.map((id) => String(id)))
-  const selectedProducts = products.filter((product) => selectedProductIds.has(String(product.id)))
+  const selectedProductIds = useMemo(() => new Set(productIds.map((id) => String(id))), [productIds])
+  const selectedProducts = useMemo(() => products.filter((product) => selectedProductIds.has(String(product.id))), [products, selectedProductIds])
+  const selectedProductSignature = useMemo(() => selectedProducts.map((product) => String(product.id)).sort().join(','), [selectedProducts])
+
+  // Every selected product owns a different lot list. Load them independently
+  // and fail loudly per row; an empty/error result must never turn into an
+  // implicit New/FIFO choice. Set includes active zero lots, Remove only lots
+  // with stock, and Add offers both explicit New and existing lots.
+  useEffect(() => {
+    const numericBranchId = normalizeBranchId(branchId)
+    setLotSelections({})
+    setLotOptions({})
+    setLotErrors({})
+    if (!numericBranchId || !selectedProducts.length) return
+    let cancelled = false
+    const initialLoading = Object.fromEntries(selectedProducts.map((product) => [normalizeProductId(product.id), true]))
+    setLotLoading(initialLoading)
+    for (const product of selectedProducts) {
+      const productId = normalizeProductId(product.id)
+      void getProductBatches(productId, numericBranchId, action === 'remove')
+        .then((response) => {
+          if (cancelled) return
+          setLotOptions((current) => ({ ...current, [productId]: response?.batches || [] }))
+        })
+        .catch((error: unknown) => {
+          if (cancelled) return
+          setLotErrors((current) => ({ ...current, [productId]: error instanceof Error ? error.message : (t('load_failed') || 'Failed to load') }))
+        })
+        .finally(() => {
+          if (!cancelled) setLotLoading((current) => ({ ...current, [productId]: false }))
+        })
+    }
+    return () => { cancelled = true }
+  // selectedProductSignature intentionally represents the selected rows.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [action, branchId, lotReloadKey, selectedProductSignature])
 
   useEffect(() => {
     let cancelled = false
@@ -266,12 +319,68 @@ export default function BulkAddStockModal({ productIds, products, branches, user
     remove: t('remove') || 'Remove',
     set: t('set') || 'Set',
   }
+  const rowsLocked = rows.length > 0
+  const productBranchQuantity = (product: Product): number => adjustBranchQuantity(product.branch_stock, branchId, product.stock_quantity)
+  const selectedLotFor = (product: Product): ProductBatch | null => {
+    const productId = normalizeProductId(product.id)
+    const selection = lotSelections[productId]
+    if (!selection || selection.batchId === 'new') return null
+    return (lotOptions[productId] || []).find((batch) => Number(batch.id) === Number(selection.batchId)) || null
+  }
+  const buildRowRequest = (product: Product, amount: number): AdjustStockPayload => {
+    const productId = normalizeProductId(product.id)
+    const selection = lotSelections[productId]
+    const selectedLot = selectedLotFor(product)
+    const base: AdjustStockPayload = {
+      productId: product.id,
+      productName: product.name,
+      type: action,
+      quantity: amount,
+      branchId: normalizeBranchId(branchId),
+      reason: reason.trim(),
+      userId: user?.id,
+      userName: user?.name,
+      batchId: selection?.batchId,
+    }
+    if (action === 'add') return { ...base, ...bulkStockReceiptWire('add', { unitCost, freeGoods, supplierId, supplierName, receivedDate }) }
+    if (action === 'set' && selectedLot) return {
+      ...base,
+      setScope,
+      batchId: Number(selectedLot.id),
+      expectedLotQuantity: Number(selectedLot.quantity || 0),
+      expectedBranchQuantity: productBranchQuantity(product),
+      client_request_id: createClientRequestId('stock-set'),
+    }
+    return base
+  }
+
+  const selectionProblem = (): string => {
+    if (selectedProducts.some((product) => lotLoading[normalizeProductId(product.id)])) return t('loading') || 'Received dates are still loading.'
+    const loadFailure = selectedProducts.find((product) => lotErrors[normalizeProductId(product.id)])
+    if (loadFailure) return `${t('load_failed') || 'Failed to load'}: ${loadFailure.name}`
+    const missing = selectedProducts.find((product) => !lotSelections[normalizeProductId(product.id)])
+    if (missing) return `${t('select_batch_required') || 'Select a received date first'}: ${missing.name}`
+    if (action !== 'add') {
+      const notExisting = selectedProducts.find((product) => lotSelections[normalizeProductId(product.id)]?.batchId === 'new')
+      if (notExisting) return `${t('select_batch_required') || 'Select an existing received date first'}: ${notExisting.name}`
+    }
+    if (action === 'set') {
+      const invalid = selectedProducts.find((product) => {
+        const lot = selectedLotFor(product)
+        return !lot || !scopedSetPreview({ scope: setScope, targetQuantity: qty, lotQuantity: lot.quantity, branchQuantity: productBranchQuantity(product) }).valid
+      })
+      if (invalid) return `${t('stock_set_lot_negative') || 'This correction would make the selected received date negative.'}: ${invalid.name}`
+    }
+    return ''
+  }
 
   // Part 563: validate, then open the review dialog. commitBulk runs the
   // actual per-product writes once the operator confirms.
   const handleSave = () => {
     if (saving) return
     if (parseQuantity(qty, action) === null) { setMsg('Enter a valid quantity'); return }
+    const lotProblem = selectionProblem()
+    if (lotProblem) { setMsg(lotProblem); return }
     // Same rule Inventory.tsx already enforces for every other
     // stock-adjustment surface -- routes/inventory.ts's /adjust
     // requires `reason` server-side too, this just fails fast client-side with
@@ -292,7 +401,12 @@ export default function BulkAddStockModal({ productIds, products, branches, user
     ]
     const trimmedReason = reason.trim()
     if (trimmedReason) items.push({ label: t('reason') || 'Reason', value: trimmedReason })
-    if (bulkActionCanReceive(action)) {
+    items.push({ label: t('selected_received_date') || 'Selected received date', value: String(Object.keys(lotSelections).length) })
+    if (action === 'set') items.push({
+      label: t('stock_set_scope') || 'Set quantity for',
+      value: setScope === 'lot' ? (t('stock_set_scope_lot') || 'Selected received date') : (t('stock_set_scope_branch') || 'Branch total'),
+    })
+    if (action === 'add') {
       if (supplierName.trim()) items.push({ label: t('supplier') || 'Supplier', value: supplierName.trim() })
       // The receipt cost is a claim about money; it belongs in the review the
       // operator confirms, not only in the field they typed it into.
@@ -313,13 +427,13 @@ export default function BulkAddStockModal({ productIds, products, branches, user
       setMsg('Enter a valid quantity')
       return
     }
-    // N14-D: the same rule routes/inventory.ts enforces on every row this loop
-    // submits (cloudflare/src/lib/stockReceiptGate.ts). Checked once, up front:
-    // a bulk add that would be refused row by row should not start at all.
-    // A 'set' counts: this surface sees no branch figures, so any row of it
-    // may be the raise the Worker gates as an add.
+    // N14-D: the same rule routes/inventory.ts enforces on every Add row this
+    // loop submits (cloudflare/src/lib/stockReceiptGate.ts). Checked once, up
+    // front so a bulk receipt that would be refused row by row never starts.
+    // Scoped Set is an inventory correction with its own optimistic snapshots,
+    // not a supplier receipt, even when its delta raises the selected lot.
     const receiptGate = stockReceiptGateCode({
-      isStockIn: bulkActionCanReceive(action),
+      isStockIn: action === 'add',
       supplierName,
       unitCostUsd: unitCost,
       freeGoods,
@@ -339,37 +453,23 @@ export default function BulkAddStockModal({ productIds, products, branches, user
       // non-idempotent write, so that exclusion is the guarantee.
       const startingRows = rows.length
         ? rows
-        : selectedProducts.map((product) => createRow({
-          productId: normalizeProductId(product.id),
-          productName: String(product.name || product.id),
-        }))
+        : selectedProducts.map((product) => createRow(buildRowRequest(product, amount)))
       let working = startingRows
+      let completedHistoryIds = [...serverActionHistoryIds]
       setRows(working)
       for (const row of rowsToSubmit(startingRows)) {
-        const product = selectedProducts.find((entry) => normalizeProductId(entry.id) === row.request.productId)
+        const product = selectedProducts.find((entry) => normalizeProductId(entry.id) === Number(row.request.productId))
         if (!product) continue
         working = applyRowOutcome(working, row.rowId, { status: 'saving' })
         setRows(working)
         try {
-          const result = await runBulkStockMutation(() => getProductApi().adjustStock({
-            productId: product.id,
-            productName: product.name,
-            type: action,
-            quantity: amount,
-            branchId: normalizeBranchId(branchId),
-            // N14-D: the receipt facts the operator typed for THIS event --
-            // the cost, the free-goods declaration, the supplier and the
-            // received date. Never `product.purchase_price_usd || 0`, which
-            // answered "what did this cost?" with the catalogue's price, or
-            // with a zero that reads as free goods nobody declared. Empty for
-            // a remove, and sent for a 'set' as well as an 'add' because a set
-            // that raises a row's stock is the add the Worker gates.
-            ...bulkStockReceiptWire(action, { unitCost, freeGoods, supplierId, supplierName, receivedDate }),
-            reason: reason.trim(),
-            userId: user?.id,
-            userName: user?.name,
-          }), 'Bulk adjust product stock')
+          const result = await runBulkStockMutation(() => getProductApi().adjustStock(row.request), 'Bulk adjust product stock')
           if (result?.success === false) throw new Error(result?.error || 'Failed to adjust stock')
+          const historyId = Number(result?.action_history_id || 0)
+          if (historyId > 0 && !completedHistoryIds.includes(historyId)) {
+            completedHistoryIds = [...completedHistoryIds, historyId]
+            setServerActionHistoryIds(completedHistoryIds)
+          }
           working = applyRowOutcome(working, row.rowId, { status: 'done' })
         } catch (error) {
           // Never swallow the reason -- the operator needs to know WHICH
@@ -383,8 +483,8 @@ export default function BulkAddStockModal({ productIds, products, branches, user
         setRows(working)
       }
       const counts = countRows(working)
-      const updatedIds = working.filter((row) => row.status === 'done').map((row) => row.request.productId)
-      const failedIds = working.filter((row) => row.status === 'failed').map((row) => row.request.productId)
+      const updatedIds = working.filter((row) => row.status === 'done').map((row) => Number(row.request.productId))
+      const failedIds = working.filter((row) => row.status === 'failed').map((row) => Number(row.request.productId))
       if (counts.failed > 0) {
         // THE RULE (user, Sep 3): a failure keeps this dialog open with every
         // typed value intact and the per-product reason on screen. Nothing is
@@ -392,7 +492,7 @@ export default function BulkAddStockModal({ productIds, products, branches, user
         setMsg(t('stock_rows_failed') || `${counts.failed} product(s) could not be saved. Fix them and retry.`)
         return
       }
-      if (counts.done) onDone({ quantity: amount, branchId, done: counts.done, failed: 0, updatedIds, failedIds })
+      if (counts.done) onDone({ quantity: amount, branchId, done: counts.done, failed: 0, updatedIds, failedIds, action, serverActionHistoryIds: completedHistoryIds })
       else setMsg('Failed to adjust stock')
     } finally {
       finishSingleAction(saveInFlightRef)
@@ -406,10 +506,10 @@ export default function BulkAddStockModal({ productIds, products, branches, user
   const reportAndClose = () => {
     const counts = countRows(rows)
     const amount = parseQuantity(qty, action)
-    const updatedIds = rows.filter((row) => row.status === 'done').map((row) => row.request.productId)
-    const failedIds = rows.filter((row) => row.status === 'failed').map((row) => row.request.productId)
+    const updatedIds = rows.filter((row) => row.status === 'done').map((row) => Number(row.request.productId))
+    const failedIds = rows.filter((row) => row.status === 'failed').map((row) => Number(row.request.productId))
     if (counts.done && amount !== null) {
-      onDone({ quantity: amount, branchId, done: counts.done, failed: counts.failed, updatedIds, failedIds })
+      onDone({ quantity: amount, branchId, done: counts.done, failed: counts.failed, updatedIds, failedIds, action, serverActionHistoryIds })
       return
     }
     onClose()
@@ -430,7 +530,7 @@ export default function BulkAddStockModal({ productIds, products, branches, user
     || reason.trim().length > 0
     || supplierName.trim().length > 0
     || supplierId !== null
-  const bulkDirty = hasUnsavedFailures(rows) || (rows.length === 0 && bulkHeaderTyped)
+  const bulkDirty = hasUnsavedFailures(rows) || (rows.length === 0 && (bulkHeaderTyped || Object.keys(lotSelections).length > 0))
   const closeGuard = useCloseGuard({ dirty: bulkDirty }, reportAndClose)
   const bulkPromptItems = bulkCounts.failed || bulkCounts.done
     ? [
@@ -464,13 +564,28 @@ export default function BulkAddStockModal({ productIds, products, branches, user
                 <button
                   key={value}
                   type="button"
-                  onClick={() => setAction(value)}
+                  disabled={rowsLocked}
+                  onClick={() => { setAction(value); if (value === 'set') setSetScope('lot') }}
                   className={`rounded-xl border-2 py-2 text-xs font-medium ${action === value ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400'}`}
                 >
                   {actionLabels[value]}
                 </button>
               ))}
             </div>
+            {action === 'set' ? (
+              <div className="mt-2 grid grid-cols-2 gap-2" role="group" aria-label={t('stock_set_scope') || 'Set quantity for'}>
+                {([
+                  ['lot', t('stock_set_scope_lot') || 'Selected received date'],
+                  ['branch', t('stock_set_scope_branch') || 'Branch total'],
+                ] as [StockSetScope, string][]).map(([scope, label]) => (
+                  <button key={scope} type="button" disabled={rowsLocked} aria-pressed={setScope === scope}
+                    onClick={() => setSetScope(scope)}
+                    className={`rounded-lg border-2 px-2 py-1.5 text-xs font-medium ${setScope === scope ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </div>
           {branches.length > 0 ? (
             <div>
@@ -483,17 +598,19 @@ export default function BulkAddStockModal({ productIds, products, branches, user
                 options={branchOptions}
                 onChange={setBranchId}
                 ariaLabel="Branch"
+                disabled={rowsLocked}
               />
             </div>
           ) : null}
           <div>
             <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('quantity') || 'Quantity'}</label>
-            <input className="input" type="number" min="0" step="any" value={qty} onChange={(event) => setQty(event.target.value)} placeholder="e.g. 10" autoFocus />
+            <input className="input" type="number" min="0" step="any" disabled={rowsLocked} value={qty} onChange={(event) => setQty(event.target.value)} placeholder="e.g. 10" autoFocus />
             <div className="mt-1.5 flex flex-wrap gap-1">
               {[1, 5, 10, 20].map((n) => (
                 <button
                   key={n}
                   type="button"
+                  disabled={rowsLocked}
                   className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${Number(qty) === n ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'}`}
                   onClick={() => setQty(String(n))}
                 >
@@ -502,34 +619,60 @@ export default function BulkAddStockModal({ productIds, products, branches, user
               ))}
             </div>
           </div>
-          {/* Batch behavior is made visible here rather than offered as a
-              per-product picker (see the import comment above for why a
-              single picker doesn't generalize across a mixed bulk
-              selection) -- this mirrors exactly what routes/inventory.ts's
-              /adjust already does server-side when no explicit batchId is
-              given. */}
-          {action !== 'set' ? (
-            <p className="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
-              {action === 'add'
-                ? (t('bulk_add_batch_note') || 'Each product is received under the received date below.')
-                : (t('bulk_remove_batch_note') || 'Stock is drawn from each product\u2019s oldest received date first (FIFO).')}
-            </p>
-          ) : null}
-          {/* N14-D: a 'set' shows these too. This surface applies one figure to
-              many products and can see none of their branch stock, so any row
-              of a set may be the raise routes/inventory.ts gates as an add --
-              and a receipt states its supplier and its cost. Rows that turn
-              out to lower stock ignore them. */}
-          {bulkActionCanReceive(action) ? (
+          <div data-bulk-lot-selection="true" className="max-h-64 space-y-2 overflow-y-auto rounded-xl border border-gray-200 p-2 dark:border-gray-700">
+            {selectedProducts.map((product) => {
+              const productId = normalizeProductId(product.id)
+              const selection = lotSelections[productId]
+              const selectedLot = selectedLotFor(product)
+              const preview = action === 'set' && selectedLot
+                ? scopedSetPreview({ scope: setScope, targetQuantity: qty, lotQuantity: selectedLot.quantity, branchQuantity: productBranchQuantity(product) })
+                : null
+              return (
+                <div key={productId} className="rounded-lg bg-gray-50 p-2 dark:bg-gray-900/30">
+                  <div className="mb-1 flex items-center justify-between gap-2 text-xs">
+                    <span className="min-w-0 break-words font-semibold text-gray-800 dark:text-gray-100">{product.name}</span>
+                    {action === 'set' ? <span className="shrink-0 tabular-nums text-gray-500">{t('branch_total') || 'Branch total'}: {productBranchQuantity(product)}</span> : null}
+                  </div>
+                  {lotLoading[productId] ? (
+                    <div className="text-xs text-gray-400">{t('loading') || 'Loading...'}</div>
+                  ) : lotErrors[productId] ? (
+                    <div role="alert" className="flex items-center justify-between gap-2 text-xs text-rose-700 dark:text-rose-300">
+                      <span className="min-w-0 break-words">{lotErrors[productId]}</span>
+                      <button type="button" className="btn-secondary shrink-0 px-2 py-1 text-[11px]" onClick={() => setLotReloadKey((value) => value + 1)}>{t('retry') || 'Retry'}</button>
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5">
+                      {action === 'add' ? (
+                        <button type="button" disabled={rowsLocked} aria-pressed={selection?.batchId === 'new'}
+                          className={`rounded-full border px-2 py-1 text-[11px] ${selection?.batchId === 'new' ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-300'}`}
+                          onClick={() => setLotSelections((current) => ({ ...current, [productId]: { batchId: 'new', batchQuantity: null, batchLabel: t('new_batch') || '+ New received date' } }))}>
+                          {t('new_batch') || '+ New received date'}
+                        </button>
+                      ) : null}
+                      {(lotOptions[productId] || []).map((batch) => (
+                        <button key={batch.id} type="button" disabled={rowsLocked} aria-pressed={Number(selection?.batchId) === Number(batch.id)}
+                          className={`rounded-full border px-2 py-1 text-[11px] ${Number(selection?.batchId) === Number(batch.id) ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-300'}`}
+                          onClick={() => setLotSelections((current) => ({ ...current, [productId]: { batchId: Number(batch.id), batchQuantity: Number(batch.quantity || 0), batchLabel: batchDisplayLabel(batch, t('batch') || 'Received date') } }))}>
+                          {batchDisplayLabel(batch, t('batch') || 'Received date')} ({batch.quantity})
+                        </button>
+                      ))}
+                      {!(lotOptions[productId] || []).length && action !== 'add' ? <span className="text-[11px] text-gray-400">{action === 'remove' ? (t('no_batches_with_stock') || 'No received dates with stock in this branch') : (t('no_batches_for_branch') || 'No received dates for this branch')}</span> : null}
+                    </div>
+                  )}
+                  {preview ? (
+                    <div className={`mt-1 text-[11px] tabular-nums ${preview.valid ? 'text-gray-500' : 'font-semibold text-rose-700 dark:text-rose-300'}`}>
+                      {t('lot_quantity') || 'Received-date quantity'}: {preview.beforeLotQuantity} → {preview.afterLotQuantity}; {t('branch_total') || 'Branch total'}: {preview.beforeBranchQuantity} → {preview.afterBranchQuantity}
+                    </div>
+                  ) : null}
+                </div>
+              )
+            })}
+          </div>
+          {/* Scoped Set is an inventory correction, not a supplier receipt. */}
+          {action === 'add' ? (
             <div>
               <label htmlFor="bulk-add-stock-received-date" className="mb-1 flex items-center gap-1 text-sm font-medium text-gray-700 dark:text-gray-300">
                 {t('received_date') || 'Received date'}
-                {action === 'set' ? (
-                  <InfoHint
-                    label={t('received_date') || 'Received date'}
-                    text={t('bulk_set_receipt_hint') || 'A set that raises a product’s stock receives goods, so it needs the supplier and unit cost. Rows where the set lowers stock ignore them.'}
-                  />
-                ) : null}
               </label>
               {/* Typed, not a native picker (Sep 3) -- the bulk add's own
                   received date, which derives every lot code it creates. */}
@@ -540,6 +683,7 @@ export default function BulkAddStockModal({ productIds, products, branches, user
                 ariaLabel={t('received_date') || 'Received date'}
                 value={receivedDate}
                 onChange={(iso) => setReceivedDate(iso)}
+                disabled={rowsLocked}
               />
               <div className="mt-1 text-[11px] text-gray-400">
                 {t('batch_code_preview') || 'Received date code'}: {dateToBatchCode(receivedDate) || '--'}
@@ -560,12 +704,12 @@ export default function BulkAddStockModal({ productIds, products, branches, user
                   min="0"
                   step="any"
                   required
-                  disabled={freeGoods}
+                  disabled={freeGoods || rowsLocked}
                   value={freeGoods ? '0' : unitCost}
                   onChange={(event) => setUnitCost(event.target.value)}
                 />
                 <span className="mt-1 flex items-center gap-1 text-[11px] text-gray-600 dark:text-gray-400">
-                  <input type="checkbox" className="h-3.5 w-3.5" checked={freeGoods} onChange={(event) => { setFreeGoods(event.target.checked); if (event.target.checked) setUnitCost('0') }} />
+                  <input type="checkbox" className="h-3.5 w-3.5" disabled={rowsLocked} checked={freeGoods} onChange={(event) => { setFreeGoods(event.target.checked); if (event.target.checked) setUnitCost('0') }} />
                   {t('stock_receipt_free_goods') || 'Free goods'}
                   <InfoHint label={t('stock_receipt_free_goods') || 'Free goods'} text={t('stock_receipt_free_goods_hint') || 'Tick only when the supplier gave these goods at no cost. The declaration is written onto the receipt.'} />
                 </span>
@@ -574,6 +718,7 @@ export default function BulkAddStockModal({ productIds, products, branches, user
                 <SupplierPickerField
                   idPrefix="bulk-add-stock"
                   value={{ supplierId, supplierName }}
+                  disabled={rowsLocked}
                   onChange={(next) => { setSupplierId(next.supplierId); setSupplierName(next.supplierName) }}
                   tr={(key, fallbackEn, _fallbackKm) => { const value = t(key); return value && value !== key ? value : (fallbackEn ?? key) }}
                   hint={t('supplier_bulk_hint') || 'Applies to every received date this bulk add creates or fills — received dates that already have a supplier keep theirs.'}
@@ -591,6 +736,7 @@ export default function BulkAddStockModal({ productIds, products, branches, user
                   <button
                     key={entry.id}
                     type="button"
+                    disabled={rowsLocked}
                     className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${reason === entry.label ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'}`}
                     onClick={() => setReason(entry.label)}
                   >
@@ -603,11 +749,13 @@ export default function BulkAddStockModal({ productIds, products, branches, user
               id="bulk-add-stock-reason"
               className="input text-sm"
               value={reason}
+              disabled={rowsLocked}
               onChange={(event) => setReason(event.target.value)}
               placeholder={t('reason_placeholder') || 'Choose a saved reason or type your own'}
             />
             <button
               type="button"
+              disabled={rowsLocked}
               className="mt-1 text-[11px] font-medium text-blue-600 hover:underline dark:text-blue-400"
               onClick={() => setReasonManager({ open: true, type: 'adjust' })}
             >
