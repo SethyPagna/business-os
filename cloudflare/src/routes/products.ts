@@ -153,6 +153,7 @@ import {
   normalizeMultiValue, validateProductImageGallery, validatePreservedProductImageGallery, ProductImageLimitError,
 } from '../lib/productWrites'
 import { actorSnapshot } from '../lib/actorSnapshot'
+import { prepareProductMoneyWrite, ProductMoneyWriteError } from '../lib/productWrites'
 export {
   PRODUCT_SKIP_KEYS, nowIso, tableColumns, clampNegativeStockQuantity,
   cleanPayload, insertRow, updateRow, syncProductImageGallery, defaultBranchId,
@@ -1585,6 +1586,10 @@ app.post('/', async (c) => {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
+  try { await prepareProductMoneyWrite(c.env, body, null) } catch (error) {
+    if (error instanceof ProductMoneyWriteError) return c.json({ error: error.message, code: error.code }, error.status as 400 | 409)
+    throw error
+  }
   const name = String(body.name || '').trim()
   if (!name) return c.json({ error: 'Product name is required' }, 400)
   const createBarcode = String(body.barcode ?? '').trim()
@@ -1811,6 +1816,10 @@ app.put('/:id', async (c) => {
     }
   }
 
+  try { await prepareProductMoneyWrite(c.env, body, Number(id)) } catch (error) {
+    if (error instanceof ProductMoneyWriteError) return c.json({ error: error.message, code: error.code }, error.status as 400 | 409)
+    throw error
+  }
   const imageLimitError = await validateImageGalleryPayload(c.env, user, body, id)
   if (imageLimitError) {
     return c.json({
@@ -1942,7 +1951,11 @@ app.put('/:id', async (c) => {
     if (normalizedBrands !== undefined) body.brands = normalizedBrands
   }
 
-  const changes = await updateRow(c.env, 'products', id, body)
+  let changes: number
+  try { changes = await updateRow(c.env, 'products', id, body) } catch (error) {
+    if (error instanceof ProductMoneyWriteError) return c.json({ error: error.message, code: error.code }, error.status as 400 | 409)
+    throw error
+  }
   // Real, latent gap this session found while wiring the image-only role's
   // gallery writes through this same handler: `image_gallery` is a virtual
   // key (see syncProductImageGallery's own comment) that updateRow's
@@ -2159,6 +2172,10 @@ app.post('/variant', async (c) => {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
+  try { await prepareProductMoneyWrite(c.env, body, null) } catch (error) {
+    if (error instanceof ProductMoneyWriteError) return c.json({ error: error.message, code: error.code }, error.status as 400 | 409)
+    throw error
+  }
   const name = String(body.name || '').trim()
   if (!name) return c.json({ error: 'Product name is required' }, 400)
   try {

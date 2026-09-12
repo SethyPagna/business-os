@@ -14,10 +14,107 @@ import { dateToBatchCode } from './batchCode'
 import { normalizeSearchText, compactSearchText } from './searchMatch'
 import { MAX_IMAGES_PER_PRODUCT } from './importImageMatch'
 import type { Env } from '../index'
+import { roundMoney4, sellingPriceCeilCent, subtractDecimalSum } from './moneyPrecision'
+
+export const PRODUCT_MONEY_VERSION = 'product_money_policy_version'
+export const PRODUCT_MONEY_PLAN = '_product_money_write_plan'
+const PRODUCT_MONEY_FIELDS = ['cost_price_usd', 'cost_price_khr', 'selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr'] as const
+type ProductMoneyField = typeof PRODUCT_MONEY_FIELDS[number]
+type MoneyBefore = Record<ProductMoneyField, number | null> & { updated_at: string | null }
+type MoneyPlan = { version: 1; kind: 'create' | 'update'; product_id: number | null; before: MoneyBefore | null; after: Partial<Record<ProductMoneyField, number | null>> }
+export class ProductMoneyWriteError extends Error {
+  constructor(readonly code: string, message: string, readonly status = 409) { super(message); this.name = 'ProductMoneyWriteError' }
+}
+function invalidMoneyPlan(): never {
+  throw new ProductMoneyWriteError('product_money_plan_invalid', 'The saved product price plan is invalid. Submit a new product edit.')
+}
+const owns = (object: object, key: string) => Object.prototype.hasOwnProperty.call(object, key)
+const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+function moneyInput(value: unknown): number | null {
+  if (value == null || (typeof value === 'string' && value.trim() === '')) return null
+  if ((typeof value !== 'number' && typeof value !== 'string') || !Number.isFinite(Number(value)) || Number(value) < 0) {
+    throw new ProductMoneyWriteError('product_money_invalid', 'Prices must be finite non-negative numbers.', 400)
+  }
+  return Number(value)
+}
+function nextMoney(field: ProductMoneyField, value: unknown, before?: number | null): number | null {
+  const parsed = moneyInput(value)
+  // A no-op must not reprice an authoritative historical value, even >4dp.
+  if (parsed === before && (parsed === null || typeof value === 'number')) return before ?? null
+  if (parsed == null) return null
+  try {
+    if (parsed === before && before != null && subtractDecimalSum(value as string, [before]) === '0') return before
+    // USD has cents. KHR catalog money is retained at nearest4, not forced
+    // into USD cents or a new physical-cash denomination convention.
+    return field === 'selling_price_usd' || field === 'wholesale_price_usd'
+      ? sellingPriceCeilCent(value as string | number) : roundMoney4(value as string | number)
+  } catch { throw new ProductMoneyWriteError('product_money_invalid', 'The price is outside the supported range.', 400) }
+}
+export function readProductMoneyPlan(body: Record<string, unknown>): MoneyPlan | null {
+  if (!owns(body, PRODUCT_MONEY_VERSION) && !owns(body, PRODUCT_MONEY_PLAN)) return null // historical queue/operation
+  if (body[PRODUCT_MONEY_VERSION] !== 1) return invalidMoneyPlan()
+  const raw = body[PRODUCT_MONEY_PLAN]
+  if (!isRecord(raw) || raw.version !== 1 || (raw.kind !== 'create' && raw.kind !== 'update') || !isRecord(raw.after)) return invalidMoneyPlan()
+  if (Object.keys(raw).sort().join(',') !== 'after,before,kind,product_id,version') return invalidMoneyPlan()
+  if (raw.kind === 'create' ? raw.product_id !== null || raw.before !== null : !Number.isSafeInteger(raw.product_id) || Number(raw.product_id) <= 0 || !isRecord(raw.before)) return invalidMoneyPlan()
+  if (raw.kind === 'update') {
+    const before = raw.before as Record<string, unknown>
+    if (Object.keys(before).sort().join(',') !== [...PRODUCT_MONEY_FIELDS, 'updated_at'].sort().join(',')) return invalidMoneyPlan()
+    if (!owns(before, 'updated_at') || (before.updated_at !== null && typeof before.updated_at !== 'string')) return invalidMoneyPlan()
+    for (const field of PRODUCT_MONEY_FIELDS) if (!owns(before, field) || (before[field] !== null && (typeof before[field] !== 'number' || !Number.isFinite(before[field])))) return invalidMoneyPlan()
+  }
+  if (!Object.keys(raw.after).length || Object.keys(raw.after).some(field => !(PRODUCT_MONEY_FIELDS as readonly string[]).includes(field))) return invalidMoneyPlan()
+  for (const field of PRODUCT_MONEY_FIELDS) {
+    if (owns(body, field) !== owns(raw.after, field)) return invalidMoneyPlan()
+    if (!owns(raw.after, field)) continue
+    const after = raw.after[field]
+    if (after !== null && (typeof after !== 'number' || !Number.isFinite(after) || after < 0)) return invalidMoneyPlan()
+    if (body[field] !== after || nextMoney(field, after, raw.kind === 'update' ? (raw.before as MoneyBefore)[field] : undefined) !== after) return invalidMoneyPlan()
+  }
+  return raw as unknown as MoneyPlan
+}
+/** New HTTP requests only. Never call this when replaying an old queued plan. */
+export async function prepareProductMoneyWrite(env: Env, body: Record<string, unknown>, productId: number | null): Promise<void> {
+  if (owns(body, PRODUCT_MONEY_PLAN) || (owns(body, PRODUCT_MONEY_VERSION) && body[PRODUCT_MONEY_VERSION] !== 1)) {
+    throw new ProductMoneyWriteError('product_money_version_invalid', 'Unsupported product price policy or client-supplied price plan.', 400)
+  }
+  const fields = PRODUCT_MONEY_FIELDS.filter(field => owns(body, field))
+  if (!fields.length) { delete body[PRODUCT_MONEY_VERSION]; return }
+  let before: MoneyBefore | null = null
+  let groupRename = false
+  if (productId != null) {
+    const current = await getDb(env).prepare(`SELECT ${PRODUCT_MONEY_FIELDS.join(',')}, updated_at, name FROM products WHERE id=@id`).get<MoneyBefore & { name: string | null }>({ id: productId })
+    if (!current) throw new ProductMoneyWriteError('product_money_state_conflict', 'The product no longer exists.')
+    const { name, ...snapshot } = current
+    before = snapshot
+    groupRename = body.__rename_scope === 'group' && body.name !== undefined && String(name || '').trim().toLowerCase() !== String(body.name).trim().toLowerCase()
+  }
+  const after: MoneyPlan['after'] = {}
+  for (const field of fields) after[field] = nextMoney(field, body[field], before?.[field])
+  if (groupRename) {
+    if (fields.some(field => after[field] !== before![field])) {
+      throw new ProductMoneyWriteError('product_money_group_rename_requires_separate_save', 'Save changed prices separately from a product-group rename.', 400)
+    }
+    // Equal form fields need no write. Leave the inherited group rename flow
+    // alone without creating a CAS conflict against its own updated_at change.
+    for (const field of fields) delete body[field]
+    delete body[PRODUCT_MONEY_VERSION]
+    return
+  }
+  for (const field of fields) body[field] = after[field]
+  body[PRODUCT_MONEY_VERSION] = 1
+  body[PRODUCT_MONEY_PLAN] = { version: 1, kind: productId == null ? 'create' : 'update', product_id: productId, before, after } satisfies MoneyPlan
+  readProductMoneyPlan(body)
+}
+
+export function hasProductMoneyPolicy(body: unknown): boolean {
+  return isRecord(body) && (owns(body, PRODUCT_MONEY_VERSION) || owns(body, PRODUCT_MONEY_PLAN))
+}
 
 export const PRODUCT_SKIP_KEYS = new Set([
   'id', 'expectedUpdatedAt', 'expected_updated_at', 'updatedAt', 'updated_at',
   'client_request_id', 'device_name', 'device_tz', 'client_time',
+  PRODUCT_MONEY_VERSION, PRODUCT_MONEY_PLAN,
 ])
 
 export function nowIso() {
@@ -93,6 +190,8 @@ export function buildInsertPayload(
   columns: Set<string>,
   required: Record<string, unknown> = {},
 ): Record<string, unknown> {
+  const moneyPlan = readProductMoneyPlan(body)
+  if (moneyPlan && moneyPlan.kind !== 'create') invalidMoneyPlan()
   const payload = { ...cleanPayload(body, columns), ...required }
   applySearchNormalizedColumns(payload, body, columns, true)
   if (columns.has('created_at') && payload.created_at == null) payload.created_at = nowIso()
@@ -133,6 +232,8 @@ export async function insertRow(env: Env, table: string, body: Record<string, un
 }
 
 export async function updateRow(env: Env, table: string, id: string | number, body: Record<string, unknown>) {
+  const moneyPlan = readProductMoneyPlan(body)
+  if (moneyPlan && (table !== 'products' || moneyPlan.kind !== 'update' || moneyPlan.product_id !== Number(id))) invalidMoneyPlan()
   const columns = await tableColumns(env, table)
   const payload = cleanPayload(body, columns)
   applySearchNormalizedColumns(payload, body, columns, false)
@@ -140,9 +241,12 @@ export async function updateRow(env: Env, table: string, id: string | number, bo
   const keys = Object.keys(payload).filter((key) => columns.has(key))
   if (!keys.length) return 0
   const assignments = keys.map((key) => `"${key}" = ?`).join(', ')
-  const result = await env.DB.prepare(`UPDATE "${table}" SET ${assignments} WHERE id = ?`)
-    .bind(...keys.map((key) => payload[key]), id)
+  const beforeKeys = [...PRODUCT_MONEY_FIELDS, 'updated_at'] as const
+  const guard = moneyPlan ? beforeKeys.map(field => ` AND "${field}" IS ?`).join('') : ''
+  const result = await env.DB.prepare(`UPDATE "${table}" SET ${assignments} WHERE id = ?${guard}`)
+    .bind(...keys.map((key) => payload[key]), id, ...(moneyPlan ? beforeKeys.map(field => moneyPlan.before![field]) : []))
     .run()
+  if (moneyPlan && !result.meta?.changes) throw new ProductMoneyWriteError('product_money_state_conflict', 'The product changed after the price plan was prepared. Submit a new edit.')
   return result.meta?.changes || 0
 }
 

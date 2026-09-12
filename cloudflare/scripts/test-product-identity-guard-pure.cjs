@@ -41,7 +41,7 @@ function loadTs(relPath, requireShim) {
   new Function('module', 'exports', 'require', outputText)(mod, mod.exports, req)
   return mod.exports
 }
-const detailRule = loadTs('lib/productDetailRule.ts', {})
+const detailRule = loadTs('lib/productDetailRule.ts', { './moneyPrecision': loadTs('lib/moneyPrecision.ts') })
 const { canonicalProductBarcode, pickSameIdentityRow, productsShareExactIdentity, resolveProductIdentityEdit } = loadTs('lib/productIdentity.ts', {
   './db': {},
   './sqlBinding': { buildInClause: () => ({ sql: '', params: {} }), selectInChunks: async () => [] },
