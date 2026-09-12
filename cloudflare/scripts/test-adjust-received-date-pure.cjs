@@ -25,6 +25,7 @@ const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
 const rawDb = openDb(loadAll())
+let afterDbBatchHook = null
 // Flatten node:sqlite's run() result the same way lib/db.ts's real
 // D1Compat.run() does -- productBatches.ts and inventory.ts rely on
 // `result.lastInsertRowid`/`result.changes` at the top level.
@@ -47,6 +48,7 @@ const db = {
       const r = stmt.run(item.params || {})
       results.push({ changes: r.meta?.changes ?? 0, lastInsertRowid: Number(r.meta?.last_row_id ?? 0) })
     }
+    if (afterDbBatchHook) await afterDbBatchHook(items)
     return results
   },
   async transaction(fn) { return fn(this) },
@@ -563,6 +565,27 @@ async function main() {
     assert.strictEqual(removed.status, 200, JSON.stringify(removed.json))
     const movement = rawDb.prepare("SELECT unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr FROM inventory_movements WHERE movement_type='remove' ORDER BY id DESC LIMIT 1").get()
     assert.deepStrictEqual({ ...movement }, { unit_cost_usd: 6, unit_cost_khr: 40000, total_cost_usd: 18, total_cost_khr: 120000 })
+  })
+
+  await check('remove cost is captured before the lot decrement and cannot race a later lot-cost edit', async () => {
+    seed()
+    const added = await req('POST', '/adjust', {
+      productId: 1, type: 'add', supplierName: 'Fixture Supplier', unitCostUsd: 4,
+      quantity: 3, reason: 'receipt', branchId: 1, batchId: 'new', receivedDate: '2026-07-03',
+    })
+    assert.strictEqual(added.status, 200, JSON.stringify(added.json))
+    const batchId = added.json.batchId
+    afterDbBatchHook = async (items) => {
+      if (!items.some((item) => /UPDATE branch_batch_stock SET quantity/i.test(item.sql))) return
+      afterDbBatchHook = null
+      rawDb.prepare('UPDATE product_batches SET unit_cost_usd=99 WHERE id=?').run([batchId])
+    }
+    const removed = await req('POST', '/adjust', { productId: 1, type: 'remove', quantity: 2, reason: 'race fixture', branchId: 1, batchId })
+    afterDbBatchHook = null
+    assert.strictEqual(removed.status, 200, JSON.stringify(removed.json))
+    assert.strictEqual(rawDb.prepare('SELECT unit_cost_usd FROM product_batches WHERE id=?').get([batchId]).unit_cost_usd, 99, 'fixture changed lot cost after decrement')
+    const movement = rawDb.prepare("SELECT unit_cost_usd,total_cost_usd FROM inventory_movements WHERE movement_type='remove' ORDER BY id DESC LIMIT 1").get()
+    assert.deepStrictEqual({ ...movement }, { unit_cost_usd: 4, total_cost_usd: 8 }, 'movement kept the pre-write lot cost')
   })
 
   await check('set-down and set-up store the plan-time product cost on their converted movements', async () => {

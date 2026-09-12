@@ -1642,12 +1642,51 @@ app.post('/adjust', async (c) => {
   let resolvedBatchId: number | null = batchIdRequested
   let lotCode: string | null = null
   let removedBatchQuantities: Array<{ batchId: number; quantity: number }> = []
+  let removalCostByBatch = new Map<number, number | null>()
+  let addMovementCost: ReturnType<typeof resolveMovementCostSnapshot> | null = null
   if (type === 'add') {
     delta = quantity
   } else {
     const current = await branchStockQty(c.env, targetProductId, branchId)
     if (quantity > current) return c.json({ error: `Cannot remove ${quantity} - only ${current} available in ${branch?.name || 'this branch'}` }, 400)
     delta = -quantity
+  }
+
+  // Capture the cost facts before any batch/aggregate mutation. Besides being
+  // the correct historical boundary, this prevents a concurrent lot metadata
+  // edit (or a test hook between the decrement and movement INSERT) from
+  // changing the cost recorded for stock that was already removed.
+  if (useBatchLedger && type === 'remove') {
+    const costRows = batchIdRequested != null
+      ? await db.prepare(`
+          SELECT pb.id, pb.unit_cost_usd
+          FROM product_batches pb
+          WHERE pb.id = @batchId AND pb.variant_product_id = @productId AND pb.is_active = 1
+        `).all<{ id: number; unit_cost_usd: number | null }>({ batchId: batchIdRequested, productId: targetProductId })
+      : await db.prepare(`
+          SELECT pb.id, pb.unit_cost_usd
+          FROM product_batches pb
+          JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id AND bbs.branch_id = @branchId
+          WHERE pb.variant_product_id = @productId AND pb.is_active = 1 AND bbs.quantity > 0
+          ORDER BY (pb.expiry_date IS NULL), pb.expiry_date ASC, pb.received_at ASC, pb.id ASC
+        `).all<{ id: number; unit_cost_usd: number | null }>({ branchId, productId: targetProductId })
+    removalCostByBatch = new Map(costRows.map((row) => [Number(row.id), row.unit_cost_usd ?? null]))
+    // Validate every captured cost and both fallbacks before removeStock* can
+    // write. Zero-quantity validation components do not claim allocation;
+    // the exact quantities returned by the shared remover are applied below.
+    resolveMovementCostSnapshot({
+      quantity,
+      components: [...removalCostByBatch.values()].map((unitCostUsd) => ({ quantity: 0, unitCostUsd })),
+      fallbackUnitCostUsd: productCostSnapshot?.cost_price_usd ?? null,
+      fallbackUnitCostKhr: productCostSnapshot?.cost_price_khr ?? null,
+    })
+  } else if (type === 'add') {
+    addMovementCost = resolveMovementCostSnapshot({
+      quantity,
+      components: [{ quantity, unitCostUsd: receiptUnitCostUsd, unitCostKhr: unitCostUsd === 0 && freeGoods ? 0 : null }],
+      fallbackUnitCostUsd: productCostSnapshot?.cost_price_usd ?? null,
+      fallbackUnitCostKhr: productCostSnapshot?.cost_price_khr ?? null,
+    })
   }
 
   if (useBatchLedger && type === 'add') {
@@ -1732,19 +1771,17 @@ app.post('/adjust', async (c) => {
         unitCostKhr: unitCostUsd === 0 && freeGoods ? 0 : null,
       }]
     } else if (removedBatchQuantities.length) {
-      const lotCosts = await Promise.all(removedBatchQuantities.map(async (entry) => ({
-        ...entry,
-        unitCostUsd: (await db.prepare('SELECT unit_cost_usd FROM product_batches WHERE id = @id')
-          .get<{ unit_cost_usd: number | null }>({ id: entry.batchId }))?.unit_cost_usd ?? null,
-      })))
-      costComponents = lotCosts.map((entry) => ({ quantity: entry.quantity, unitCostUsd: entry.unitCostUsd }))
+      costComponents = removedBatchQuantities.map((entry) => ({
+        quantity: entry.quantity,
+        unitCostUsd: removalCostByBatch.get(entry.batchId) ?? null,
+      }))
     }
-    const movementCost = resolveMovementCostSnapshot({
-      quantity: Math.abs(delta),
-      components: costComponents,
-      fallbackUnitCostUsd: productCostSnapshot?.cost_price_usd ?? null,
-      fallbackUnitCostKhr: productCostSnapshot?.cost_price_khr ?? null,
-    })
+    const movementCost = addMovementCost || resolveMovementCostSnapshot({
+        quantity: Math.abs(delta),
+        components: costComponents,
+        fallbackUnitCostUsd: productCostSnapshot?.cost_price_usd ?? null,
+        fallbackUnitCostKhr: productCostSnapshot?.cost_price_khr ?? null,
+      })
     await db.prepare(`
       INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity,
         unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name, created_at, batch_id)

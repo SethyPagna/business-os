@@ -30,4 +30,17 @@ assert.deepEqual(resolveMovementCostSnapshot({ quantity: 2 }), {
   unitCostUsd: null, unitCostKhr: null, totalCostUsd: null, totalCostKhr: null,
 }, 'an unsupported currency remains unknown instead of being invented')
 
-console.log('PASS movement cost snapshot explicit-zero, fallback, weighted-lot, and unknown semantics')
+for (const invalid of [
+  { quantity: Number.NaN },
+  { quantity: Number.POSITIVE_INFINITY },
+  { quantity: 1, components: [{ quantity: Number.NaN, unitCostUsd: 1 }] },
+  { quantity: 1, components: [{ quantity: -1, unitCostUsd: 1 }] },
+  { quantity: 1, components: [{ quantity: 1, unitCostUsd: -1 }] },
+  { quantity: 1, components: [{ quantity: 1, unitCostUsd: Number.POSITIVE_INFINITY }] },
+  { quantity: 1, fallbackUnitCostUsd: Number.POSITIVE_INFINITY },
+  { quantity: 1, components: [{ quantity: 1.01, unitCostUsd: 1 }] },
+]) {
+  assert.throws(() => resolveMovementCostSnapshot(invalid), RangeError)
+}
+
+console.log('PASS movement cost snapshot explicit-zero, fallback, weighted-lot, unknown, finite, and coverage semantics')
