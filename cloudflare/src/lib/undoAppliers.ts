@@ -2094,6 +2094,14 @@ async function replayProductRemove(payload: Record<string, unknown>, ctx: UndoAp
 }
 
 const APPLIERS: Record<string, UndoApplierDef> = {
+  'stock.quantity_set': {
+    permission: 'inventory', action: 'adjust',
+    run: async (payload, ctx) => {
+      if (!ctx.user || !ctx.historyId) throw new UndoConflictError('Stock correction history context is required.')
+      const { replayStockLotSet } = await import('./stockLotAdjustment')
+      await replayStockLotSet(ctx.env, ctx.user, ctx.direction, ctx.historyId, ctx.generation, payload)
+    },
+  },
   'stock.transfer': {
     permission: 'branches', action: 'transfer',
     run: async (payload, ctx) => {

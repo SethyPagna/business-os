@@ -14,6 +14,7 @@ import { notifySaleSettlementAction, SALE_SETTLEMENT_ACTION_KIND } from '../lib/
 import { STOCK_SESSION_KIND, canReplayStockSessionPayload, notifyStockSession } from '../lib/stockSession'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { TRANSFER_OPERATION_KIND, canReplayTransferPayload, notifyTransferOperation } from '../lib/transferOperation'
+const STOCK_LOT_SET_KIND = 'stock.quantity_set'
 
 const SERVER_SALE_BULK_KINDS = new Set([BULK_STATUS_KIND, ...SALE_BULK_UPDATE_KINDS])
 const SERVER_BULK_KINDS = new Set([...SERVER_SALE_BULK_KINDS, RETURN_BULK_ACTION_KIND, STOCK_SESSION_KIND, SALE_SETTLEMENT_ACTION_KIND])
@@ -120,7 +121,7 @@ function isServerManagedPayload(value: unknown): boolean {
   if (!value || typeof value !== 'object') return false
   const payload = value as Record<string, unknown>
   const kind = String(payload.applier || '')
-  return kind === TRANSFER_OPERATION_KIND || SERVER_BULK_KINDS.has(kind) || kind === PRODUCT_MERGE_GROUP_ACTION_KIND || kind === PRODUCT_REMOVE_ACTION_KIND
+  return kind === STOCK_LOT_SET_KIND || kind === TRANSFER_OPERATION_KIND || SERVER_BULK_KINDS.has(kind) || kind === PRODUCT_MERGE_GROUP_ACTION_KIND || kind === PRODUCT_REMOVE_ACTION_KIND
     || (kind === SALE_ADD_ITEMS_ACTION_KIND && typeof payload.operation_id === 'string' && payload.operation_id.length > 0)
 }
 
@@ -361,7 +362,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     const currentStatus = String(existing.status || '').toLowerCase()
     const expected = direction === 'undo' ? 'undoable' : 'redoable'
     const nextStatus = direction === 'undo' ? 'redoable' : 'undoable'
-    const stockReplay = parseJson(existing.undo_payload)?.applier === STOCK_SESSION_KIND
+    const stockReplay = [STOCK_SESSION_KIND, STOCK_LOT_SET_KIND].includes(String(parseJson(existing.undo_payload)?.applier))
     const groupReplay = parseJson(existing.undo_payload)?.applier === PRODUCT_MERGE_GROUP_ACTION_KIND
     const productRemoveReplay = parseJson(existing.undo_payload)?.applier === PRODUCT_REMOVE_ACTION_KIND
     const transferReplay = parseJson(existing.undo_payload)?.applier === TRANSFER_OPERATION_KIND
@@ -422,6 +423,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     if (serverManagedReplay && applier) {
       if (applier.name !== SALE_ADD_ITEMS_ACTION_KIND && applier.name !== PRODUCT_MERGE_GROUP_ACTION_KIND) c.executionCtx.waitUntil(applier.name === TRANSFER_OPERATION_KIND
         ? notifyTransferOperation(c.env)
+        : applier.name === STOCK_LOT_SET_KIND ? import('../lib/stockLotAdjustment').then(module => module.notifyStockLotSet(c.env))
         : applier.name === STOCK_SESSION_KIND
         ? notifyStockSession(c.env, { operationId: String(payload.operation_id) })
         : applier.name === SALE_SETTLEMENT_ACTION_KIND
