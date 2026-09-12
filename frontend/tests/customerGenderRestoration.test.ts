@@ -5,6 +5,7 @@ import {
   CUSTOMER_GENDER_RESTORATION_CAMPAIGN,
   CUSTOMER_GENDER_RESTORATION_CHUNKS,
   CUSTOMER_GENDER_RESTORATION_TOTAL,
+  activateGenderRestorationLifecycle,
   claimGenderRestorationAction,
   executeCustomerGenderRestorationChunk,
   parseCustomerGenderRestorationFile,
@@ -109,6 +110,19 @@ assert.equal(claimGenderRestorationAction(gate), true)
 assert.equal(claimGenderRestorationAction(gate), false, 'a second quick click cannot enter the callback')
 releaseGenderRestorationAction(gate)
 assert.equal(claimGenderRestorationAction(gate), true)
+
+// This is the exact effect callback mounted by the modal. React StrictMode
+// runs setup -> cleanup -> setup; the second setup must revive async work.
+const alive = { current: false }
+const lifecycleGeneration = { current: 0 }
+const firstCleanup = activateGenderRestorationLifecycle(alive, lifecycleGeneration)
+assert.equal(alive.current, true)
+firstCleanup()
+assert.equal(alive.current, false)
+assert.equal(lifecycleGeneration.current, 1)
+const secondCleanup = activateGenderRestorationLifecycle(alive, lifecycleGeneration)
+assert.equal(alive.current, true, 'StrictMode remount remains live')
+secondCleanup()
 
 const customers = readFileSync(new URL('../src/components/contacts/CustomersTab.tsx', import.meta.url), 'utf8')
 const modal = readFileSync(new URL('../src/components/contacts/CustomerGenderRestorationModal.tsx', import.meta.url), 'utf8')

@@ -120,6 +120,20 @@ export function releaseGenderRestorationAction(ref: { current: boolean }): void 
   ref.current = false
 }
 
+/** React StrictMode intentionally runs setup -> cleanup -> setup in development.
+ * Setup must revive this component instance rather than relying on a one-time
+ * ref initializer. */
+export function activateGenderRestorationLifecycle(
+  aliveRef: { current: boolean },
+  generationRef: { current: number },
+): () => void {
+  aliveRef.current = true
+  return () => {
+    aliveRef.current = false
+    generationRef.current += 1
+  }
+}
+
 type ExecuteChunkOptions = {
   chunk: GenderRestorationChunk
   isCurrent: () => boolean
