@@ -229,6 +229,11 @@ export type FailedAttemptRow = {
   branchId: number | null
   branchName: string
   batchId: number | string | null
+  setScope?: 'lot' | 'branch'
+  expectedLotQuantity?: number
+  expectedBranchQuantity?: number
+  batchLabel?: string
+  clientRequestId?: string
   receivedDate: string
   reason: string
   note: string

@@ -9,7 +9,7 @@ import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { dateEntryDisplayValue } from '../../utils/dateEntry.ts'
 import SupplierPickerField from '../shared/SupplierPickerField.tsx'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
-import { isBatchPickerVisible, isSetDownSubmission, isStockInSubmission } from '../../utils/stockReceiptFields.ts'
+import { isBatchPickerVisible, isSetDownSubmission, isStockInSubmission, normalizeStockSetScope, scopedSetPreview, type StockSetScope } from '../../utils/stockReceiptFields.ts'
 import InfoHint from '../shared/InfoHint.tsx'
 import { useFormDirty } from '../../utils/formDirty.ts'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
@@ -76,6 +76,10 @@ type AdjustForm = {
   // so it's left as-is (not reset) when the person flips that toggle --
   // the UI just stops asking for it.
   batch_id: InventoryId | ''
+  set_scope: StockSetScope
+  /** Quantity last read for batch_id; submitters use it only as a conflict expectation. */
+  batch_quantity: InventoryFormValue | ''
+  batch_label: string
   // D4 (11.28): the REAL received date for stock recorded late. Shown
   // only when this add creates a lot ("New batch", or unlocked pricing
   // which always makes a fresh one); Inventory.tsx only puts it on the
@@ -109,6 +113,9 @@ type TransferForm = {
   to_branch_id: InventoryId | ''
   quantity: InventoryFormValue
   reason: string
+  batch_id: InventoryId | ''
+  batch_quantity: InventoryFormValue | ''
+  batch_label: string
 }
 
 type ReasonManagerState = {
@@ -216,9 +223,8 @@ export default function InventoryStockModals({
 }: InventoryStockModalsProps) {
   useEffect(() => { if (transferModal) markRestoreHandled('inventory_transfer') }, [transferModal?.id])
   const requestedSetTotal = Number(adjustForm.quantity)
-  const setDifference = Number.isFinite(requestedSetTotal) ? requestedSetTotal - adjustCurrentQuantity : null
   const changeTransferSource = onTransferSourceChange || ((branchId: string) => {
-    setTransferForm((current) => ({ ...current, from_branch_id: branchId, to_branch_id: '' }))
+    setTransferForm((current) => ({ ...current, from_branch_id: branchId, to_branch_id: '', batch_id: '', batch_quantity: '', batch_label: '' }))
   })
   const destinationBranchOptions = transferDestinationBranchOptions || branchWithPlaceholderOptions || []
 
@@ -234,6 +240,7 @@ export default function InventoryStockModals({
   // selected, same as adjustCurrentQuantity/adjustCurrentPricing above.
   const adjustTargetId = adjustForm.product_id || adjustModal?.id
   const unlockPricing = adjustForm.type === 'add' && !adjustForm.pricingLocked
+  const setScope = normalizeStockSetScope(adjustForm.set_scope)
   // A batch is scoped to one branch's stock -- "No specific branch" (the
   // placeholder option in adjustBranchSelectOptions) has no branch to pick
   // a batch within, so the picker only shows once a real branch is
@@ -245,7 +252,7 @@ export default function InventoryStockModals({
   // remove drains the oldest lots FIFO -- the form was silently choosing which
   // lot the loss came out of. A set-down now offers the same batch picker an
   // explicit remove does, so the operator says which lot it leaves.
-  const isSetDown = isSetDownSubmission(adjustForm.type, adjustForm.quantity, adjustCurrentQuantity)
+  const isSetDown = isSetDownSubmission(adjustForm.type, adjustForm.quantity, adjustCurrentQuantity, adjustForm.set_scope)
   // One rule, shared with the two surfaces that submit this form
   // (Inventory.tsx and StockAdjustModal.tsx build their wire from it), so the
   // picker on screen and the lot on the wire can never disagree.
@@ -256,19 +263,23 @@ export default function InventoryStockModals({
     unlockPricing,
     branchId: adjustBranchId,
     batchId: adjustForm.batch_id,
+    setScope: adjustForm.set_scope,
   })
   // S4-16: a 'set' above the current figure IS a receipt -- routes/inventory.ts
   // turns it into an add of the difference and runs it through the same batch
   // ledger. It has no batch picker (nothing to pick against a total), so it
   // always creates or date-matches a lot, which is why it gates the same
   // received-date / supplier / cost / payment fields an explicit add does.
-  const isStockIn = isStockInSubmission(adjustForm.type, adjustForm.quantity, adjustCurrentQuantity)
+  const isStockIn = isStockInSubmission(adjustForm.type, adjustForm.quantity, adjustCurrentQuantity, adjustForm.set_scope)
   const creditDueMissing = adjustForm.payment_status === 'credit' && String(adjustForm.credit_due_date || '').trim() === ''
   const receivedDateInputVisible = isStockIn
-    && (unlockPricing || adjustForm.type === 'set' || (showBatchPicker && adjustForm.batch_id === 'new'))
+    && (unlockPricing || (showBatchPicker && adjustForm.batch_id === 'new'))
 
   const [batchOptions, setBatchOptions] = useState<ProductBatch[]>([])
   const [batchLoading, setBatchLoading] = useState(false)
+  const [transferBatchOptions, setTransferBatchOptions] = useState<ProductBatch[]>([])
+  const [transferBatchesLoading, setTransferBatchesLoading] = useState(false)
+  const [transferBatchesError, setTransferBatchesError] = useState('')
   const [receivedDateOptionsOpen, setReceivedDateOptionsOpen] = useState(false)
   useEffect(() => {
     setReceivedDateOptionsOpen(false)
@@ -280,7 +291,7 @@ export default function InventoryStockModals({
       // unlocked, the branch cleared). Whatever it had chosen belongs to the
       // submission it was showing for, so drop it rather than leaving a lot
       // id in the form that nothing on screen names any more.
-      setAdjustForm((current) => (current.batch_id === '' ? current : { ...current, batch_id: '' }))
+      setAdjustForm((current) => (current.batch_id === '' && current.batch_quantity === '' && current.batch_label === '' ? current : { ...current, batch_id: '', batch_quantity: '', batch_label: '' }))
       return
     }
     // Target/branch/type changed since the last fetch -- whatever was
@@ -289,7 +300,7 @@ export default function InventoryStockModals({
     // batches are eligible). Clear it so a stale id can't ride along to
     // submit; the "default to new batch" effect below re-fills it for
     // 'add' once the new list is in.
-    setAdjustForm((current) => (current.batch_id === '' ? current : { ...current, batch_id: '' }))
+    setAdjustForm((current) => (current.batch_id === '' && current.batch_quantity === '' && current.batch_label === '' ? current : { ...current, batch_id: '', batch_quantity: '', batch_label: '' }))
     let cancelled = false
     setBatchLoading(true)
     // 'remove' only offers batches that actually have stock at this
@@ -312,20 +323,42 @@ export default function InventoryStockModals({
       .finally(() => { if (!cancelled) setBatchLoading(false) })
     return () => { cancelled = true }
   }, [showBatchPicker, adjustTargetId, adjustBranchId, adjustForm.type, isSetDown, setAdjustForm])
-  // Default to "new batch" the first time the picker has something to
-  // show for an add -- matches the decided default ("Default batch
-  // `n+1: mm/dd/yyyy` stays the default for add stock"). That quote is from
-  // Sep 3; the label itself became day-first on Sep 4. Remove has no
-  // such default (no batch-less removals), so it's left blank until the
-  // person actually picks one. Only fires once per target/branch/type
-  // combo (guarded by the empty-string check) so it doesn't stomp a
-  // selection already made against the previous options.
-  useEffect(() => {
-    if (showBatchPicker && adjustForm.type === 'add' && adjustForm.batch_id === '') {
-      setAdjustForm((current) => (current.batch_id === '' ? { ...current, batch_id: 'new' } : current))
-    }
-  }, [showBatchPicker, adjustForm.type, adjustForm.batch_id, setAdjustForm])
 
+  useEffect(() => {
+    const productId = Number(transferModal?.id)
+    const sourceBranchId = Number(transferForm.from_branch_id)
+    // Source/product changes clear the selection in their handlers. Preserve a
+    // restored draft's frozen lot long enough to revalidate it against this
+    // fresh response; this prevents a retry from silently changing lots.
+    const restoredBatchId = transferForm.batch_id
+    setTransferBatchOptions([])
+    setTransferBatchesError('')
+    if (!(productId > 0) || !(sourceBranchId > 0)) return
+    let cancelled = false
+    setTransferBatchesLoading(true)
+    getProductBatches(productId, sourceBranchId, true)
+      .then((response) => {
+        if (cancelled) return
+        const batches = response?.batches || []
+        setTransferBatchOptions(batches)
+        if (restoredBatchId === '') return
+        const restored = batches.find((batch) => String(batch.id) === String(restoredBatchId))
+        setTransferForm((current) => {
+          if (String(current.batch_id) !== String(restoredBatchId)) return current
+          return restored && Number(restored.quantity || 0) > 0
+            ? { ...current, batch_quantity: Number(restored.quantity || 0), batch_label: batchDisplayLabel(restored, tr('batch', 'Received date')) }
+            : { ...current, batch_id: '', batch_quantity: '', batch_label: '' }
+        })
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return
+        setTransferBatchesError(error instanceof Error ? error.message : tr('load_failed', 'Failed to load'))
+      })
+      .finally(() => { if (!cancelled) setTransferBatchesLoading(false) })
+    return () => { cancelled = true }
+    // setTransferForm/tr are stable parent callbacks; re-key only on lot scope.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transferModal?.id, transferForm.from_branch_id])
   // D5a: same visibility-mirror rule as the received date. An existing lot
   // that already carries a supplier keeps it (first attribution sticks,
   // COALESCE server-side), so the picker locks to that name; an
@@ -339,6 +372,17 @@ export default function InventoryStockModals({
   const adjustLotAttributedName = selectedAdjustLot?.supplier_name?.trim() || null
   const selectedBatchOption = adjustForm.batch_id !== '' && adjustForm.batch_id !== 'new'
     ? batchOptions.find((batch) => String(batch.id) === String(adjustForm.batch_id)) || null
+    : null
+  const setPreview = adjustForm.type === 'set' && selectedBatchOption
+    ? scopedSetPreview({
+        scope: setScope,
+        targetQuantity: requestedSetTotal,
+        lotQuantity: selectedBatchOption.quantity,
+        branchQuantity: adjustCurrentQuantity,
+      })
+    : null
+  const selectedTransferBatch = transferForm.batch_id !== ''
+    ? transferBatchOptions.find((batch) => String(batch.id) === String(transferForm.batch_id)) || null
     : null
   const receivedDateOptionSummary = selectedBatchOption
     ? batchDisplayLabel(selectedBatchOption, tr('batch', 'Received date'))
@@ -413,16 +457,39 @@ export default function InventoryStockModals({
               ) : null}
               <div className="grid grid-cols-3 gap-2">
                 {([['add', t('adjust_add') || 'Add'], ['remove', t('adjust_remove') || 'Remove'], ['set', t('adjust_set') || 'Set']] as [string, string][]).map(([v,lbl]) => (
-                  <button key={v} type="button" onClick={() => setAdjustForm(f=>({...f, type:v}))}
+                  <button key={v} type="button" onClick={() => setAdjustForm(f=>({...f, type:v, set_scope: v === 'set' ? 'lot' : f.set_scope}))}
                     className={`${TOOLBAR_BUTTON_BASE} border-2 ${adjustForm.type===v ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400'}`}>
                     {lbl}
                   </button>
                 ))}
               </div>
+              {adjustForm.type === 'set' ? (
+                <div>
+                  <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('stock_set_scope', 'Set quantity for')}</span>
+                  <div className="grid grid-cols-2 gap-2" role="group" aria-label={tr('stock_set_scope', 'Set quantity for')}>
+                    {([
+                      ['lot', tr('stock_set_scope_lot', 'Selected received date')],
+                      ['branch', tr('stock_set_scope_branch', 'Branch total')],
+                    ] as [StockSetScope, string][]).map(([scope, label]) => (
+                      <button
+                        key={scope}
+                        type="button"
+                        aria-pressed={setScope === scope}
+                        onClick={() => setAdjustForm((current) => ({ ...current, set_scope: scope }))}
+                        className={`${TOOLBAR_BUTTON_BASE} border-2 ${setScope === scope ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
               <div>
                 <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">
                   {adjustForm.type === 'set'
-                    ? `${t('adjust_set') || 'Set'} ${t('stock') || 'Stock'} (${t('total') || 'Total'}) *`
+                    ? (setScope === 'lot'
+                        ? `${tr('stock_set_scope_lot', 'Selected received date')} — ${tr('target_quantity', 'Target quantity')} *`
+                        : `${tr('stock_set_scope_branch', 'Branch total')} — ${tr('target_quantity', 'Target quantity')} *`)
                     : `${t('quantity') || 'Quantity'} *`}
                 </label>
                 {/* A set may be typed down to 0 (an emptied branch); an add or a
@@ -437,24 +504,17 @@ export default function InventoryStockModals({
                   min={adjustForm.type === 'set' ? 0 : 1}
                   value={adjustForm.quantity}
                   onChange={e => setAdjustForm(f=>({...f, quantity:e.target.value}))} />
-                {adjustForm.type === 'set' && setDifference != null ? (
-                  <div className="mt-1 flex items-center gap-1 text-[11px] tabular-nums text-gray-500 dark:text-gray-400">
-                    <span>{t('current_stock') || 'Current stock'}: {adjustCurrentQuantity} → {t('total') || 'Total'}: {requestedSetTotal} (Δ {setDifference >= 0 ? '+' : ''}{setDifference})</span>
-                    {/* N14-E: the one place the operator can see that this set is a
-                        REMOVAL, so it is also where the reason the receipt fields
-                        vanished belongs -- as a hint, not a paragraph. */}
-                    {isSetDown ? (
-                      <InfoHint label={t('adjust_set') || 'Set'} text={t('stock_set_down_hint') || 'This set lowers the quantity, so it takes stock out: it has no supplier and no cost. Choose the received date to take it from, otherwise the oldest received dates are drained first.'} />
-                    ) : null}
-                    {/* N14-D: the mirror image -- a set that RAISES the figure is a
-                        receipt (routes/inventory.ts converts it into an add of the
-                        difference), which is why the supplier and cost fields appear
-                        below. Same isStockIn predicate those fields render on, so
-                        the hint can never show for a submission that owes neither. */}
-                    {isStockIn ? (
-                      <InfoHint label={t('adjust_set') || 'Set'} text={t('stock_set_up_hint') || 'This set raises the quantity, so it puts stock in: name the supplier it came from and the unit cost you paid, exactly as an add does.'} />
-                    ) : null}
-                  </div>
+                {adjustForm.type === 'set' ? (
+                  setPreview ? (
+                    <div className={`mt-1 rounded-lg px-2 py-1.5 text-[11px] tabular-nums ${setPreview.valid ? 'bg-gray-50 text-gray-600 dark:bg-gray-900/30 dark:text-gray-300' : 'bg-rose-50 text-rose-700 dark:bg-rose-950/30 dark:text-rose-300'}`}>
+                      <div>{tr('selected_received_date', 'Selected received date')}: {adjustForm.batch_label || tr('batch', 'Received date')}</div>
+                      <div>{tr('lot_quantity', 'Received-date quantity')}: {setPreview.beforeLotQuantity} → {setPreview.afterLotQuantity} (Δ {setPreview.delta >= 0 ? '+' : ''}{setPreview.delta})</div>
+                      <div>{tr('branch_total', 'Branch total')}: {setPreview.beforeBranchQuantity} → {setPreview.afterBranchQuantity}</div>
+                      {!setPreview.valid ? <div className="font-semibold">{tr('stock_set_lot_negative', 'This branch-total change would make the selected received date negative. Choose another received date or target.')}</div> : null}
+                    </div>
+                  ) : (
+                    <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">{tr('select_batch_required', 'Select a received date first')}</div>
+                  )
                 ) : null}
               </div>
               {adjustForm.type === 'add' ? (
@@ -557,7 +617,11 @@ export default function InventoryStockModals({
                       {showBatchPicker ? (
                         <div>
                           <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
-                            {adjustForm.type === 'add' ? tr('batch', 'Received date') : tr('batch_to_remove_from', 'Received date to remove from')} *
+                            {adjustForm.type === 'add'
+                              ? tr('batch', 'Received date')
+                              : adjustForm.type === 'set'
+                                ? tr('selected_received_date', 'Selected received date')
+                                : tr('batch_to_remove_from', 'Received date to remove from')} *
                           </label>
                           {batchLoading ? (
                             <div className="text-xs text-gray-400">{t('loading') || 'Loading...'}</div>
@@ -567,7 +631,7 @@ export default function InventoryStockModals({
                                 <button
                                   type="button"
                                   className={`rounded-full border px-2.5 py-1 text-[11px] font-medium ${adjustForm.batch_id === 'new' ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}
-                                  onClick={() => setAdjustForm((f) => ({ ...f, batch_id: 'new' }))}
+                                  onClick={() => setAdjustForm((f) => ({ ...f, batch_id: 'new', batch_quantity: '', batch_label: tr('new_batch', '+ New received date') }))}
                                 >
                                   {tr('new_batch', '+ New received date')}
                                 </button>
@@ -577,13 +641,15 @@ export default function InventoryStockModals({
                                   key={batch.id}
                                   type="button"
                                   className={`rounded-full border px-2.5 py-1 text-[11px] font-medium ${String(adjustForm.batch_id) === String(batch.id) ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}
-                                  onClick={() => setAdjustForm((f) => ({ ...f, batch_id: batch.id }))}
+                                  onClick={() => setAdjustForm((f) => ({ ...f, batch_id: batch.id, batch_quantity: Number(batch.quantity || 0), batch_label: batchDisplayLabel(batch, tr('batch', 'Received date')) }))}
                                 >
                                   {batchDisplayLabel(batch, tr('batch', 'Received date'))} ({batch.quantity})
                                 </button>
                               ))}
-                              {!batchOptions.length && adjustForm.type === 'remove' ? (
-                                <div className="text-xs text-gray-400">{tr('no_batches_with_stock', 'No received dates with stock in this branch')}</div>
+                              {!batchOptions.length && adjustForm.type !== 'add' ? (
+                                <div className="text-xs text-gray-400">{adjustForm.type === 'remove'
+                                  ? tr('no_batches_with_stock', 'No received dates with stock in this branch')
+                                  : tr('no_batches_for_branch', 'No received dates for this branch')}</div>
                               ) : null}
                             </div>
                           )}
@@ -824,6 +890,35 @@ export default function InventoryStockModals({
                   options={destinationBranchOptions}
                 />
               </label>
+              <div>
+                <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('selected_received_date', 'Selected received date')} *</span>
+                {transferBatchesLoading ? (
+                  <div className="text-xs text-gray-400">{t('loading') || 'Loading...'}</div>
+                ) : transferBatchesError ? (
+                  <div role="alert" className="rounded-lg bg-rose-50 px-2 py-1.5 text-xs text-rose-700 dark:bg-rose-950/30 dark:text-rose-300">{transferBatchesError}</div>
+                ) : transferBatchOptions.length ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {transferBatchOptions.map((batch) => (
+                      <button
+                        key={batch.id}
+                        type="button"
+                        aria-pressed={String(transferForm.batch_id) === String(batch.id)}
+                        className={`rounded-full border px-2.5 py-1 text-[11px] font-medium ${String(transferForm.batch_id) === String(batch.id) ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}
+                        onClick={() => setTransferForm((current) => ({ ...current, batch_id: batch.id, batch_quantity: Number(batch.quantity || 0), batch_label: batchDisplayLabel(batch, tr('batch', 'Received date')) }))}
+                      >
+                        {batchDisplayLabel(batch, tr('batch', 'Received date'))} ({batch.quantity})
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-xs text-gray-400">{tr('no_batches_with_stock', 'No received dates with stock in this branch')}</div>
+                )}
+                {selectedTransferBatch ? (
+                  <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                    {tr('available', 'Available')}: {selectedTransferBatch.quantity} {transferModal.unit}
+                  </div>
+                ) : null}
+              </div>
               <label className="block">
                 <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{t('quantity') || 'Quantity'} *</span>
                 <input className="input text-sm" type="number" min="0" step="any" value={transferForm.quantity} onChange={(event) => setTransferForm((current) => ({ ...current, quantity: event.target.value }))} />
