@@ -3452,6 +3452,7 @@ registerMergeFold(foldDuplicateProductInto)
 type DuplicatePreviewStockRow = { branch_id: number; quantity: number }
 type DuplicatePreviewCatalog = {
   moneyByProductId: Map<number, Record<string, unknown>>
+  cachedStockByProductId: Map<number, number>
   stockByProductId: Map<number, DuplicatePreviewStockRow[]>
   activeBatchCountByProductId: Map<number, number>
   complexLinkedProductIds: Set<number>
@@ -3549,7 +3550,7 @@ async function readDuplicatePreviewCatalog(
     const { sql, params } = buildInClause('id', chunk)
     return {
       sql: `
-      SELECT p.id, p.updated_at, ${[...MERGE_COST_FIELDS, ...MERGE_PRICE_FIELDS].map((field) => `p.${field}`).join(', ')},
+      SELECT p.id, p.updated_at, p.stock_quantity, ${[...MERGE_COST_FIELDS, ...MERGE_PRICE_FIELDS].map((field) => `p.${field}`).join(', ')},
              bs.branch_id, bs.quantity,
              (SELECT COUNT(*) FROM product_batches pb
               WHERE pb.variant_product_id=p.id AND pb.is_active=1) AS active_batch_count
@@ -3600,6 +3601,7 @@ async function readDuplicatePreviewCatalog(
     : [])
 
   const moneyByProductId = new Map<number, Record<string, unknown>>()
+  const cachedStockByProductId = new Map<number, number>()
   const stockByProductId = new Map<number, DuplicatePreviewStockRow[]>()
   const activeBatchCountByProductId = new Map<number, number>()
   const appliedPlansByKeeperId = new Map<number, ProductMergeClusterPlan[]>()
@@ -3618,6 +3620,7 @@ async function readDuplicatePreviewCatalog(
         updated_at: row.updated_at,
         ...Object.fromEntries([...MERGE_COST_FIELDS, ...MERGE_PRICE_FIELDS].map((field) => [field, row[field]])),
       })
+      cachedStockByProductId.set(productId, Number(row.stock_quantity) || 0)
       activeBatchCountByProductId.set(productId, Number(row.active_batch_count) || 0)
     }
     const branchId = Number(row.branch_id)
@@ -3652,9 +3655,116 @@ async function readDuplicatePreviewCatalog(
     }
   }
   return {
-    moneyByProductId, stockByProductId, activeBatchCountByProductId,
+    moneyByProductId, cachedStockByProductId, stockByProductId, activeBatchCountByProductId,
     complexLinkedProductIds, appliedPlansByKeeperId, planHistoryUnavailable,
   }
+}
+
+type DuplicateProductGroup = Awaited<ReturnType<typeof findDuplicateProductGroups>>[number]
+type LeadingZeroMergeManifestGroup = { keeper_id: number; member_ids: number[] }
+
+const LEADING_ZERO_MERGE_SCOPE = 'leading_zero'
+const LEADING_ZERO_MERGE_MANIFEST_VERSION = 1
+
+function isLeadingZeroDuplicateGroup(group: DuplicateProductGroup): boolean {
+  const members = [group.canonical, ...group.duplicates]
+  const rawBarcodes = new Set(members.map((row) => String(row.barcode ?? '').trim().toLowerCase()))
+  return rawBarcodes.size > 1
+    && new Set(members.map((row) => identityBarcodeKey(row.barcode))).size === 1
+}
+
+function duplicateGroupIdentityKey(group: DuplicateProductGroup): string {
+  return JSON.stringify([
+    normalizeProductGroupName(group.canonical.name),
+    identityBarcodeKey(group.canonical.barcode),
+  ])
+}
+
+async function readLeadingZeroCrossNameCollisionKeys(
+  db: ReturnType<typeof getDb>,
+  groups: readonly DuplicateProductGroup[],
+): Promise<Set<string>> {
+  const foldedBarcodes = [...new Set(groups.map((group) => identityBarcodeKey(group.canonical.barcode)).filter(Boolean))]
+  const rows = await selectInChunks(foldedBarcodes, 0, (chunk) => {
+    const { sql, params } = buildInClause('foldedBarcode', chunk)
+    return db.prepare(`SELECT id, name_key, barcode FROM products p
+      WHERE p.is_active=1 AND COALESCE(p.is_group,0)=0
+        AND ${identityBarcodeKeySql('p.barcode')} IN (${sql})`)
+      .all<{ id: number; name_key: string | null; barcode: string | null }>(params)
+  })
+  const namesByFoldedBarcode = new Map<string, Set<string>>()
+  for (const row of rows) {
+    const foldedBarcode = identityBarcodeKey(row.barcode)
+    if (!foldedBarcode) continue
+    const names = namesByFoldedBarcode.get(foldedBarcode) || new Set<string>()
+    names.add(String(row.name_key || ''))
+    namesByFoldedBarcode.set(foldedBarcode, names)
+  }
+  return new Set([...namesByFoldedBarcode].filter(([, names]) => names.size > 1).map(([foldedBarcode]) => foldedBarcode))
+}
+
+function hasCachedStockMismatch(group: DuplicateProductGroup, catalog: DuplicatePreviewCatalog): boolean {
+  return [group.canonical, ...group.duplicates].some((member) => {
+    const live = (catalog.stockByProductId.get(member.id) || []).reduce((sum, row) => sum + (Number(row.quantity) || 0), 0)
+    const cached = catalog.cachedStockByProductId.get(member.id) || 0
+    return Math.abs(live - cached) > 0.000001
+  })
+}
+
+function leadingZeroManifestState(
+  groups: readonly DuplicateProductGroup[],
+  catalog: DuplicatePreviewCatalog,
+): Record<string, unknown> {
+  return {
+    version: LEADING_ZERO_MERGE_MANIFEST_VERSION,
+    scope: LEADING_ZERO_MERGE_SCOPE,
+    groups: [...groups].sort((a, b) => a.canonical.id - b.canonical.id).map((group) => ({
+      keeper_id: group.canonical.id,
+      member_ids: [group.canonical.id, ...group.duplicates.map((member) => member.id)].sort((a, b) => a - b),
+      identity_key: duplicateGroupIdentityKey(group),
+      members: [group.canonical, ...group.duplicates]
+        .map((member) => {
+          const money = catalog.moneyByProductId.get(member.id) || {}
+          return {
+            id: member.id,
+            name: member.name ?? null,
+            barcode: member.barcode ?? null,
+            updated_at: money.updated_at ?? null,
+            cached_stock: catalog.cachedStockByProductId.get(member.id) || 0,
+            branch_stock: (catalog.stockByProductId.get(member.id) || [])
+              .map((row) => ({ branch_id: row.branch_id, quantity: row.quantity }))
+              .sort((a, b) => a.branch_id - b.branch_id),
+            ...Object.fromEntries([...MERGE_COST_FIELDS, ...MERGE_PRICE_FIELDS].map((field) => [field, money[field] ?? null])),
+          }
+        })
+        .sort((a, b) => a.id - b.id),
+    })),
+  }
+}
+
+function parseLeadingZeroManifestGroups(value: unknown): LeadingZeroMergeManifestGroup[] | null {
+  if (!Array.isArray(value) || !value.length || value.length > MERGE_DUPLICATES_MAX_PRODUCTS_PER_REQUEST) return null
+  const seen = new Set<number>()
+  let duplicateCount = 0
+  const groups: LeadingZeroMergeManifestGroup[] = []
+  for (const candidate of value) {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return null
+    const keys = Object.keys(candidate as Record<string, unknown>).sort()
+    if (keys.join(',') !== 'keeper_id,member_ids') return null
+    const keeperId = (candidate as Record<string, unknown>).keeper_id
+    const memberIds = (candidate as Record<string, unknown>).member_ids
+    if (!Number.isSafeInteger(keeperId) || Number(keeperId) <= 0 || !Array.isArray(memberIds)
+      || memberIds.length < 2 || memberIds.length > MERGE_DUPLICATES_MAX_DUPLICATES_PER_CLUSTER + 1
+      || memberIds.some((id) => !Number.isSafeInteger(id) || Number(id) <= 0)
+      || !memberIds.includes(keeperId)) return null
+    const normalized = memberIds.map(Number).sort((a, b) => a - b)
+    if (new Set(normalized).size !== normalized.length || normalized.some((id) => seen.has(id))) return null
+    normalized.forEach((id) => seen.add(id))
+    duplicateCount += normalized.length - 1
+    groups.push({ keeper_id: Number(keeperId), member_ids: normalized })
+  }
+  if (duplicateCount > MERGE_DUPLICATES_MAX_PRODUCTS_PER_REQUEST) return null
+  return groups.sort((a, b) => a.keeper_id - b.keeper_id)
 }
 
 app.get('/merge-duplicates/preview', async (c) => {
@@ -3663,14 +3773,27 @@ app.get('/merge-duplicates/preview', async (c) => {
     return c.json({ success: false, error: 'You do not have permission to perform this action' }, 403)
   }
   const db = getDb(c.env)
-  const groups = await findDuplicateProductGroups(db)
+  const rawScope = c.req?.query?.('scope')
+  if (rawScope !== undefined && rawScope !== LEADING_ZERO_MERGE_SCOPE) {
+    return c.json({ success: false, error: 'Unsupported duplicate merge scope.' }, 400)
+  }
+  const scope = rawScope === LEADING_ZERO_MERGE_SCOPE ? LEADING_ZERO_MERGE_SCOPE : null
+  const detectedGroups = await findDuplicateProductGroups(db)
+  const groups = scope ? detectedGroups.filter(isLeadingZeroDuplicateGroup) : detectedGroups
   if (!groups.length) {
-    return c.json({ success: true, groupCount: 0, duplicateProductCount: 0, groups: [] })
+    const applyManifest = scope ? {
+      scope,
+      manifest_version: LEADING_ZERO_MERGE_MANIFEST_VERSION,
+      manifest_digest: await productConflictSha256({ version: LEADING_ZERO_MERGE_MANIFEST_VERSION, scope, groups: [] }),
+      groups: [],
+    } : undefined
+    return c.json({ success: true, ...(scope ? { scope, applyManifest } : {}), groupCount: 0, duplicateProductCount: 0, groups: [] })
   }
 
   const branchRows = await db.prepare('SELECT id, name FROM branches').all<{ id: number; name: string }>({})
   const branchNameById = new Map<number, string>(branchRows.map((b) => [b.id, b.name]))
   const previewCatalog = await readDuplicatePreviewCatalog(db, groups)
+  const crossNameCollisionKeys = scope ? await readLeadingZeroCrossNameCollisionKeys(db, groups) : new Set<string>()
 
   const previewGroups = groups.map((group) => {
       const duplicateIds = group.duplicates.map((d) => d.id)
@@ -3730,7 +3853,14 @@ app.get('/merge-duplicates/preview', async (c) => {
         cost_price_khr: costUnavailable ? costBefore.cost_price_khr : Number(economics.merged.cost_price_khr ?? costBefore.cost_price_khr) || 0,
       }
       const groupMemberIds = [group.canonical.id, ...duplicateIds]
-      const mergeBlockers = previewCatalog.planHistoryUnavailable ? [{
+      const scopedMergeBlockers = scope && crossNameCollisionKeys.has(identityBarcodeKey(group.canonical.barcode)) ? [{
+          code: 'canonical_barcode_cross_name_collision',
+          error: 'This folded barcode belongs to more than one exact product name and requires manual review.',
+        }] : scope && hasCachedStockMismatch(group, previewCatalog) ? [{
+          code: 'cached_stock_mismatch',
+          error: 'Cached product stock does not match branch stock. Reconcile stock before merging this group.',
+        }] : []
+      const mergeBlockers = scopedMergeBlockers.length ? scopedMergeBlockers : previewCatalog.planHistoryUnavailable ? [{
           code: 'merge_plan_history_unavailable',
           error: 'Saved merge-plan history could not be read within its safety limit. This group remains unchanged until the history is repaired or reconciled.',
         }] : hasPlanConflict ? [{
@@ -3767,8 +3897,30 @@ app.get('/merge-duplicates/preview', async (c) => {
       }
     })
 
+  const manifestGroups: DuplicateProductGroup[] = []
+  if (scope) {
+    let duplicateCount = 0
+    for (const previewGroup of previewGroups) {
+      if (!previewGroup.mergeable) continue
+      const group = groups.find((candidate) => candidate.canonical.id === previewGroup.canonicalId)
+      if (!group || duplicateCount + group.duplicates.length > MERGE_DUPLICATES_MAX_PRODUCTS_PER_REQUEST) break
+      manifestGroups.push(group)
+      duplicateCount += group.duplicates.length
+    }
+  }
+  const applyManifest = scope ? {
+    scope,
+    manifest_version: LEADING_ZERO_MERGE_MANIFEST_VERSION,
+    manifest_digest: await productConflictSha256(leadingZeroManifestState(manifestGroups, previewCatalog)),
+    groups: [...manifestGroups].sort((a, b) => a.canonical.id - b.canonical.id).map((group) => ({
+      keeper_id: group.canonical.id,
+      member_ids: [group.canonical.id, ...group.duplicates.map((member) => member.id)].sort((a, b) => a - b),
+    })),
+  } : undefined
+
   return c.json({
     success: true,
+    ...(scope ? { scope } : {}),
     groupCount: previewGroups.length,
     duplicateProductCount: previewGroups.reduce((sum, g) => sum + g.duplicates.length, 0),
     mergeableDuplicateProductCount: previewGroups.reduce((sum, g) => sum + (g.mergeable ? g.duplicates.length : 0), 0),
@@ -3776,6 +3928,7 @@ app.get('/merge-duplicates/preview', async (c) => {
     groups: previewGroups,
     costRefusalCount: previewGroups.reduce((sum, g) => sum + g.costRefusals.length, 0),
     batchLimit: 25,
+    ...(scope ? { applyManifest } : {}),
   })
 })
 
@@ -3911,15 +4064,62 @@ app.post('/merge-duplicates', async (c) => {
   const countedDb = createCountedProductMergeDb(getDb(c.env))
   const db = countedDb.db
   const requestBody: Record<string, unknown> = await c.req.json<Record<string, unknown>>().catch(() => ({}))
+  const rawScope = requestBody.scope
+  if (rawScope !== undefined && rawScope !== LEADING_ZERO_MERGE_SCOPE) {
+    return c.json({ success: false, error: 'Unsupported duplicate merge scope.' }, 400)
+  }
+  const scope = rawScope === LEADING_ZERO_MERGE_SCOPE ? LEADING_ZERO_MERGE_SCOPE : null
+  let scopedManifestGroups: LeadingZeroMergeManifestGroup[] | null = null
+  let scopedManifestDigest: string | null = null
+  if (scope) {
+    const allowedKeys = new Set(['scope', 'manifest_version', 'manifest_digest', 'groups', 'client_request_id'])
+    const unknownKeys = Object.keys(requestBody).filter((key) => !allowedKeys.has(key))
+    scopedManifestGroups = parseLeadingZeroManifestGroups(requestBody.groups)
+    scopedManifestDigest = typeof requestBody.manifest_digest === 'string' ? requestBody.manifest_digest : null
+    if (unknownKeys.length || requestBody.manifest_version !== LEADING_ZERO_MERGE_MANIFEST_VERSION
+      || !scopedManifestGroups || !scopedManifestDigest || !/^sha256-[a-f0-9]{64}$/.test(scopedManifestDigest)) {
+      return c.json({ success: false, error: 'A valid bounded leading-zero preview manifest is required.' }, 400)
+    }
+  }
   const rawRequestId = String(requestBody.client_request_id || '').trim()
   const requestId = rawRequestId && rawRequestId.length <= 120 ? rawRequestId : null
   const requestStartedAt = Date.now()
-  const groups = await findDuplicateProductGroups(db)
+  const detectedGroups = await findDuplicateProductGroups(db)
+  let groups = detectedGroups
+  if (scope) {
+    const leadingZeroGroups = detectedGroups.filter(isLeadingZeroDuplicateGroup)
+    const byKeeperId = new Map(leadingZeroGroups.map((group) => [group.canonical.id, group]))
+    const requestedGroups: DuplicateProductGroup[] = []
+    for (const manifestGroup of scopedManifestGroups!) {
+      const group = byKeeperId.get(manifestGroup.keeper_id)
+      const currentMemberIds = group
+        ? [group.canonical.id, ...group.duplicates.map((member) => member.id)].sort((a, b) => a - b)
+        : []
+      if (!group || currentMemberIds.length !== manifestGroup.member_ids.length
+        || currentMemberIds.some((id, index) => id !== manifestGroup.member_ids[index])) {
+        return c.json({ success: false, error: 'The leading-zero merge group changed. Refresh the preview; nothing was merged.' }, 409)
+      }
+      requestedGroups.push(group)
+    }
+    const scopedCatalog = await readDuplicatePreviewCatalog(db, requestedGroups)
+    const crossNameCollisionKeys = await readLeadingZeroCrossNameCollisionKeys(db, requestedGroups)
+    if (requestedGroups.some((group) => crossNameCollisionKeys.has(identityBarcodeKey(group.canonical.barcode)))) {
+      return c.json({ success: false, error: 'A folded barcode now belongs to more than one exact product name. Nothing was merged.' }, 409)
+    }
+    if (requestedGroups.some((group) => hasCachedStockMismatch(group, scopedCatalog))) {
+      return c.json({ success: false, error: 'Cached product stock no longer matches branch stock. Nothing was merged.' }, 409)
+    }
+    const currentDigest = await productConflictSha256(leadingZeroManifestState(requestedGroups, scopedCatalog))
+    if (currentDigest !== scopedManifestDigest) {
+      return c.json({ success: false, error: 'The leading-zero merge preview is stale. Refresh it; nothing was merged.' }, 409)
+    }
+    groups = requestedGroups
+  }
   const remainingProductsBefore = groups.reduce((sum, group) => sum + group.duplicates.length, 0)
   if (!groups.length) {
     return c.json({
       success: true, complete: true, stalled: false, madeProgress: false,
-      batchLimit: 25, mergedGroups: 0, mergedProducts: 0,
+      ...(scope ? { scope } : {}), batchLimit: 25, mergedGroups: 0, mergedProducts: 0,
       remainingProductsBefore: 0, remainingProducts: 0,
       remainingGroupCount: 0, maxAdditionalRequests: 0, requestId, processedCaseKeys: [], actionHistoryIds: [], mergeOperationIds: [], undoPendingOperationIds: [], undoPendingCount: 0, groups: [], refusals: [],
     })
@@ -4148,7 +4348,10 @@ app.post('/merge-duplicates', async (c) => {
   let remainingGroups: Awaited<ReturnType<typeof findDuplicateProductGroups>> | null = null
   if (!interruptionCode) {
     try {
-      remainingGroups = await findDuplicateProductGroups(db)
+      const refreshedGroups = await findDuplicateProductGroups(db)
+      remainingGroups = scope
+        ? refreshedGroups.filter((group) => groups.some((selected) => selected.canonical.id === group.canonical.id))
+        : refreshedGroups
     } catch (error) {
       if (mergedProductsCount <= 0) throw error
       interruptionCode = 'merge_infrastructure_interrupted'
@@ -4171,6 +4374,7 @@ app.post('/merge-duplicates', async (c) => {
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'update' }))
   return c.json({
     success: true,
+    ...(scope ? { scope, requiresFreshPreview: true } : {}),
     complete,
     blockedOnly: onlyRefusedCasesRemain,
     interrupted: interruptionCode != null,
