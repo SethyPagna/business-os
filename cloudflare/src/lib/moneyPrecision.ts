@@ -101,6 +101,11 @@ export function multiplyMoney4(amount: DecimalInput, quantityOrRate: DecimalInpu
   const a = money(amount), factor = decimal(quantityOrRate)
   return output(fraction(a.n * factor.n, a.d * factor.d))
 }
+/** Percent retains its precision; divide by 100 before the sole rounding. */
+export function percentageMoney4(amount: DecimalInput, percent: DecimalInput): number {
+  const a = money(amount), factor = decimal(percent)
+  return output(fraction(a.n * factor.n, a.d * factor.d * 100n))
+}
 /** Divisors/rates retain their own decimal precision; zero always rejects. */
 export function divideMoney4(amount: DecimalInput, divisor: DecimalInput): number {
   const a = money(amount), b = decimal(divisor)
