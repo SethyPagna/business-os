@@ -112,6 +112,17 @@ function sum(values: readonly DecimalInput[]): Fraction {
 }
 /** Sum exact inputs, round once. Do not pass already display-rounded values. */
 export function sumMoney4(values: readonly DecimalInput[]): number { return output(sum(values)) }
+/** Allocation totals: sum raw products exactly, then quantize once. This differs
+ * from summing separately priced/quantized sale lines intentionally. */
+export function sumProductsMoney4(values: readonly { amount: DecimalInput; factor: DecimalInput }[]): number {
+  if (values.length > MAX_MONEY_SUM_ITEMS) throw new MoneyPrecisionError('too_many_terms')
+  let total: Fraction = { n: 0n, d: 1n }
+  for (const value of values) {
+    const amount = money(value.amount), factor = decimal(value.factor)
+    total = plus(total, fraction(amount.n * factor.n, amount.d * factor.d))
+  }
+  return output(total)
+}
 export function meanMoney4(values: readonly DecimalInput[]): number {
   if (!values.length) throw new MoneyPrecisionError('division_by_zero')
   const total = sum(values)
