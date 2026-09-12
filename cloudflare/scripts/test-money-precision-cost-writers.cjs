@@ -17,11 +17,18 @@ function load(relative) {
   cache.set(file, mod.exports); return mod.exports
 }
 const imports = load('lib/importNumbers.ts')
-assert.equal(imports.normalizeImportMoney('1.2345'), 1.2345)
-assert.equal(imports.normalizeImportMoney('0.00015'), 0.0002)
+assert.equal(imports.normalizeImportCost4('1.2345'), 1.2345)
+assert.equal(imports.normalizeImportCost4('0.00015'), 0.0002)
+assert.equal(imports.normalizeImportMoney('1.2345'), 1.24, 'legacy sale-import callers remain unchanged in StageA')
 assert.equal(imports.normalizeImportSellingPrice('1.2345'), 1.24)
 const { resolveMovementCostSnapshot: snapshot } = load('lib/movementCostSnapshot.ts')
 assert.equal(snapshot({ quantity: .5, fallbackUnitCostUsd: .0003 }).totalCostUsd, .0002)
+assert.equal(snapshot({ quantity: .5, fallbackUnitCostUsd: .0001 }).unitCostUsd, .0001, 'authoritative unit is not back-calculated from rounded total')
+assert.equal(snapshot({ quantity: .5, fallbackUnitCostUsd: .0001 }).totalCostUsd, .0001)
+assert.equal(snapshot({ quantity: .5, fallbackUnitCostUsd: 1.234567 }).unitCostUsd, 1.234567, 'captured historical unit is not silently rewritten')
+const weighted = snapshot({ quantity: .5, components: [{ quantity: .25, unitCostUsd: .0001 }, { quantity: .25, unitCostUsd: .0003 }] })
+assert.equal(weighted.unitCostUsd, .0002, 'weighted mean derives from raw numerator')
+assert.equal(weighted.totalCostUsd, .0001)
 assert.equal(snapshot({ quantity: 1, components: [
   { quantity: .5, unitCostUsd: .0001 }, { quantity: .5, unitCostUsd: .0001 },
 ] }).totalCostUsd, .0001, 'one movement allocation rounds once, not each lot')

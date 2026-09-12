@@ -135,9 +135,12 @@ function optionalMoney(value: unknown, sellingDefault = false): number | null {
 }
 
 function requiredMoney(value: unknown, field: string): number {
-  const parsed = optionalMoney(value)
-  if (parsed == null) throw new Error(`${field} is required`)
-  return parsed
+  // This is the existing sale-import price boundary, not a cost writer.
+  // Keep its legacy calculation until versioned sale settlement is audited.
+  if (value == null || value === '') throw new Error(`${field} is required`)
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed < 0) throw new Error('Price must be a non-negative finite number')
+  return Math.round(parsed * 100) / 100
 }
 
 function normalizedBatchLabel(value: unknown): string {

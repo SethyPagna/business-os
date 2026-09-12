@@ -27,6 +27,20 @@ const { loadAll } = require('./harness/load_migrations.cjs')
 
 const cloudflareRoot = path.join(__dirname, '..')
 const LIB_DIR = path.join(cloudflareRoot, 'src', 'lib')
+const actualDependencyCache = new Map()
+function loadActualDependency(file) {
+  if (actualDependencyCache.has(file)) return actualDependencyCache.get(file)
+  const mod = { exports: {} }; actualDependencyCache.set(file, mod.exports)
+  const output = ts.transpileModule(fs.readFileSync(file, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }, fileName: file,
+  }).outputText
+  const actualRequire = (request) => request.startsWith('.')
+    ? loadActualDependency(path.resolve(path.dirname(file), request + '.ts'))
+    : require(request)
+  new Function('exports', 'require', 'module', output)(mod.exports, actualRequire, mod)
+  actualDependencyCache.set(file, mod.exports)
+  return mod.exports
+}
 
 // --------------------------------------------------------------------------
 // Load the REAL lib/undoAppliers.ts with its dependencies stubbed. getDb is
@@ -89,6 +103,7 @@ function loadUndoAppliers(d1) {
     },
   }
   const stubs = {
+    './customerGenderRestoration': loadActualDependency(path.join(LIB_DIR, 'customerGenderRestoration.ts')),
     './actorSnapshot': loadRealActorSnapshot(),
     './productMerge': loadRealProductMerge(),
     // Bulk status replay is outside this suite; fail if it is invoked.

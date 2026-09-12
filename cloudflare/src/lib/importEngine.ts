@@ -69,7 +69,7 @@ import {
   findBlankHeaderIndexes,
   type ParsedCsvRow,
 } from './importCsv'
-import { parseImportNumericValue, normalizeImportMoney, normalizeImportSellingPrice } from './importNumbers'
+import { parseImportNumericValue, normalizeImportMoney, normalizeImportCost4, normalizeImportSellingPrice } from './importNumbers'
 import { createMembershipNumberAllocator, membershipGlob } from './membershipNumber'
 import { buildImportedContactState, contactDisplayAddress } from './contactOptions'
 import { collectContactPhones, contactDuplicateWriteGuardStatement, formatContactOptionPhones, formatPhoneP8, normalizeContactName } from './contactDuplicates'
@@ -1630,8 +1630,8 @@ export async function classifyProducts(
       // purchase_price_usd/khr and cost_usd/khr headers from files
       // exported before the product-cost fields were consolidated (see
       // migration 0016) -- an old export must still re-import cleanly.
-      cost_price_usd: normalizeImportMoney(rawCostUsd),
-      cost_price_khr: normalizeImportMoney(rawCostKhr),
+      cost_price_usd: normalizeImportCost4(rawCostUsd),
+      cost_price_khr: normalizeImportCost4(rawCostKhr),
       // Internal receipt-evidence flags: normalized product columns use 0
       // for a blank money cell, but batch/movement history must distinguish
       // "no recorded receipt cost" from an actual zero-cost receipt.
