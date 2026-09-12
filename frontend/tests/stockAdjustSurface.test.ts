@@ -20,9 +20,10 @@ assert.doesNotMatch(stockModals, /addQuantityChoices|setAdjustForm\(f => \(\{ \.
 
 assert.match(
   stockModals,
-  /scroll-x-clean mt-0\.5 max-w-full whitespace-nowrap[^>]*title=\{adjustModal\.name\}>\{adjustModal\.name\}<\/div>/,
-  'the full Adjust Stock product name must be horizontally scrollable and non-ellipsized',
+  /className="mt-0\.5 min-w-0 max-w-full text-xs font-medium text-gray-600 dark:text-gray-300" title=\{adjustModal\.name\}><ProductNameRail name=\{String\(adjustModal\.name \?\? ''\)\} \/><\/div>/,
+  'Adjust Stock keeps its original full name and title inside the shared two-line horizontal rail',
 )
+assert.doesNotMatch(stockModals, /<ProductNameRail[^>]*(?:truncate|line-clamp-|\.slice\()/, 'the full name must not be shortened before reaching the shared rail')
 assert.doesNotMatch(stockModals, /<div className="truncate[^>]*>\{adjustModal\.name\}/, 'the Adjust Stock product name must not be truncated')
 
 assert.match(stockModals, /TOOLBAR_BUTTON_BASE, toolbarIconButtonClassName/, 'Adjust Stock must consume the shared 40px button contracts')
