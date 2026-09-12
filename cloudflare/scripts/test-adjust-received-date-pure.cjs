@@ -105,6 +105,8 @@ const productSalesLedger = loadReal('lib/productSalesLedger.ts', { './salesAnaly
 // this override the transpiled module's './conflictControl' require resolves
 // against scripts/ and the whole test file dies at load time.
 const conflictControl = loadReal('lib/conflictControl.ts')
+const movementCostSnapshot = loadReal('lib/movementCostSnapshot.ts')
+let capturedRevertMovement = null
 
 const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ inventory: true }) }
 
@@ -204,7 +206,11 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   // Part 553 added the movement-revert path to inventory.ts; these tests
   // exercise receive/adjust, not revert, so an empty stub is honest (the type
   // import is compile-erased, only applyMovementRevert needs a runtime stub).
-  '../lib/stockRevert': { applyMovementRevert: async () => ({}) },
+  '../lib/stockRevert': { applyMovementRevert: async (_db, movement) => {
+    capturedRevertMovement = movement
+    return { ok: true, revertType: 'remove', quantity: Number(movement.quantity), usedBatchId: null, movementId: Number(movement.id) }
+  } },
+  '../lib/movementCostSnapshot': movementCostSnapshot,
 })
 
 const app = inventoryRoute.default
@@ -239,7 +245,7 @@ async function check(name, fn) {
 function seed() {
   rawDb.exec('DELETE FROM branch_batch_stock; DELETE FROM product_batches; DELETE FROM branch_stock; DELETE FROM products; DELETE FROM branches; DELETE FROM inventory_movements;')
   rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (1, 'Main', 1, 1)").run()
-  rawDb.prepare("INSERT INTO products (id, name, barcode, is_active, stock_quantity) VALUES (1, 'Widget', 'B123', 1, 0)").run()
+  rawDb.prepare("INSERT INTO products (id, name, barcode, is_active, stock_quantity, cost_price_usd, cost_price_khr) VALUES (1, 'Widget', 'B123', 1, 0, 10, 40000)").run()
 }
 
 const fakeExecutionCtx = { waitUntil: (p) => { p?.catch?.(() => {}) }, passThroughOnException: () => {} }
@@ -518,6 +524,88 @@ async function main() {
       [{ unit_cost_usd: 1, total_cost_usd: 2 }, { unit_cost_usd: 2.5, total_cost_usd: 7.5 }],
       'each receipt movement retains its own historical cost',
     )
+  })
+
+  await check('adjustment cost snapshots preserve explicit zero and distinguish a blank correction fallback', async () => {
+    seed()
+    const free = await req('POST', '/adjust', {
+      productId: 1, type: 'add', supplierName: 'Fixture Supplier', unitCostUsd: 0, freeGoods: true,
+      quantity: 1, reason: 'sample', branchId: 1, batchId: 'new', receivedDate: '2026-08-01',
+    })
+    assert.strictEqual(free.status, 200, JSON.stringify(free.json))
+    const correction = await req('POST', '/adjust', {
+      productId: 1, type: 'add', attribution: 'correction', quantity: 2, reason: 'count correction',
+      branchId: 1, batchId: 'new', receivedDate: '2026-08-02',
+    })
+    assert.strictEqual(correction.status, 200, JSON.stringify(correction.json))
+    assert.deepStrictEqual(
+      rawDb.prepare("SELECT unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr FROM inventory_movements WHERE movement_type='add' ORDER BY id").all().map((row) => ({ ...row })),
+      [
+        { unit_cost_usd: 0, unit_cost_khr: 0, total_cost_usd: 0, total_cost_khr: 0 },
+        { unit_cost_usd: 10, unit_cost_khr: 40000, total_cost_usd: 20, total_cost_khr: 80000 },
+      ],
+      'zero is an explicit action fact; blank correction uses the product cost captured before the write',
+    )
+  })
+
+  await check('remove snapshots the quantity-weighted FIFO lot cost and catalog KHR fallback', async () => {
+    seed()
+    for (const receipt of [
+      { quantity: 2, unitCostUsd: 4, receivedDate: '2026-07-01' },
+      { quantity: 2, unitCostUsd: 10, receivedDate: '2026-07-02' },
+    ]) {
+      const added = await req('POST', '/adjust', {
+        productId: 1, type: 'add', supplierName: 'Fixture Supplier', reason: 'receipt', branchId: 1, batchId: 'new', ...receipt,
+      })
+      assert.strictEqual(added.status, 200, JSON.stringify(added.json))
+    }
+    const removed = await req('POST', '/adjust', { productId: 1, type: 'remove', quantity: 3, reason: 'damaged', branchId: 1 })
+    assert.strictEqual(removed.status, 200, JSON.stringify(removed.json))
+    const movement = rawDb.prepare("SELECT unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr FROM inventory_movements WHERE movement_type='remove' ORDER BY id DESC LIMIT 1").get()
+    assert.deepStrictEqual({ ...movement }, { unit_cost_usd: 6, unit_cost_khr: 40000, total_cost_usd: 18, total_cost_khr: 120000 })
+  })
+
+  await check('set-down and set-up store the plan-time product cost on their converted movements', async () => {
+    seed()
+    const seeded = await req('POST', '/adjust', { productId: 1, type: 'add', quantity: 5, supplierName: 'Fixture Supplier', unitCostUsd: 10, reason: 'seed count', branchId: 1 })
+    assert.strictEqual(seeded.status, 200, JSON.stringify(seeded.json))
+    rawDb.prepare('DELETE FROM inventory_movements').run()
+    const down = await req('POST', '/adjust', { productId: 1, type: 'set', quantity: 2, reason: 'counted', branchId: 1 })
+    assert.strictEqual(down.status, 200, JSON.stringify(down.json))
+    const up = await req('POST', '/adjust', { productId: 1, type: 'set', quantity: 7, attribution: 'correction', reason: 'recounted', branchId: 1 })
+    assert.strictEqual(up.status, 200, JSON.stringify(up.json))
+    assert.deepStrictEqual(
+      rawDb.prepare("SELECT movement_type, quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr FROM inventory_movements ORDER BY id").all().map((row) => ({ ...row })),
+      [
+        { movement_type: 'remove', quantity: 3, unit_cost_usd: 10, unit_cost_khr: 40000, total_cost_usd: 30, total_cost_khr: 120000 },
+        { movement_type: 'add', quantity: 5, unit_cost_usd: 10, unit_cost_khr: 40000, total_cost_usd: 50, total_cost_khr: 200000 },
+      ],
+    )
+  })
+
+  await check('revert route loads the original cost snapshot and denies review-tier writes before any apply', async () => {
+    seed()
+    rawDb.prepare(`INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,unit_cost_usd,unit_cost_khr,total_cost_usd,total_cost_khr,reason)
+      VALUES(1,'Widget',1,'Main','add',2,3.5,14000,7,28000,'receipt')`).run()
+    const id = rawDb.prepare('SELECT id FROM inventory_movements ORDER BY id DESC LIMIT 1').get().id
+    capturedRevertMovement = null
+    const allowed = await req('POST', `/movements/${id}/revert`, {})
+    assert.strictEqual(allowed.status, 200, JSON.stringify(allowed.json))
+    assert.deepStrictEqual(
+      {
+        unit_cost_usd: capturedRevertMovement.unit_cost_usd,
+        unit_cost_khr: capturedRevertMovement.unit_cost_khr,
+        total_cost_usd: capturedRevertMovement.total_cost_usd,
+        total_cost_khr: capturedRevertMovement.total_cost_khr,
+      },
+      { unit_cost_usd: 3.5, unit_cost_khr: 14000, total_cost_usd: 7, total_cost_khr: 28000 },
+    )
+    capturedRevertMovement = null
+    FAKE_USER.permissions = JSON.stringify({ inventory: 'review' })
+    const denied = await req('POST', `/movements/${id}/revert`, {})
+    FAKE_USER.permissions = JSON.stringify({ inventory: true })
+    assert.strictEqual(denied.status, 403)
+    assert.strictEqual(capturedRevertMovement, null, 'permission refusal happens before the revert kernel')
   })
 
   await check('move-row drains the source lots and receives a fresh lot on the destination (no ledger drift)', async () => {
