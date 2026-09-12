@@ -9,8 +9,10 @@ const MAX_UNITS4 = 1_000_000_000_000_000n
 type Fraction = { n: bigint; d: bigint }
 
 export class MoneyPrecisionError extends RangeError {
-  constructor(readonly code: 'invalid_decimal' | 'money_overflow' | 'division_by_zero' | 'too_many_terms' | 'negative_selling_price') {
+  readonly code: 'invalid_decimal' | 'money_overflow' | 'division_by_zero' | 'too_many_terms' | 'negative_selling_price'
+  constructor(code: MoneyPrecisionError['code']) {
     super(code)
+    this.code = code
     this.name = 'MoneyPrecisionError'
   }
 }
