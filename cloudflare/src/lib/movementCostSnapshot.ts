@@ -14,7 +14,8 @@ export type MovementCostComponent = {
 const money = (value: unknown): number | null => {
   if (value == null || value === '') return null
   const parsed = typeof value === 'number' ? value : Number(value)
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null
+  if (!Number.isFinite(parsed) || parsed < 0) throw new RangeError('Movement costs must be finite non-negative numbers')
+  return parsed
 }
 
 const round4 = (value: number): number => Math.round(value * 10_000) / 10_000
@@ -59,8 +60,23 @@ export function resolveMovementCostSnapshot(input: {
   fallbackUnitCostKhr?: number | null
 }): MovementCostPair {
   const quantity = Number(input.quantity)
-  if (!(quantity > 0)) return { unitCostUsd: null, unitCostKhr: null, totalCostUsd: null, totalCostKhr: null }
+  if (!Number.isFinite(quantity) || !(quantity > 0)) throw new RangeError('Movement quantity must be a finite positive number')
   const components = input.components || []
+  let covered = 0
+  for (const component of components) {
+    const componentQuantity = Number(component.quantity)
+    if (!Number.isFinite(componentQuantity) || componentQuantity < 0) {
+      throw new RangeError('Movement cost component quantities must be finite non-negative numbers')
+    }
+    // Validate even zero-quantity component values; accepting Infinity merely
+    // because its row carried no quantity would make malformed plans latent.
+    money(component.unitCostUsd)
+    money(component.unitCostKhr)
+    covered += componentQuantity
+  }
+  if (covered > quantity + 0.000000001) throw new RangeError('Movement cost components cannot exceed the movement quantity')
+  money(input.fallbackUnitCostUsd)
+  money(input.fallbackUnitCostKhr)
   const usd = resolveCurrency(quantity, components, 'unitCostUsd', input.fallbackUnitCostUsd)
   const khr = resolveCurrency(quantity, components, 'unitCostKhr', input.fallbackUnitCostKhr)
   return { unitCostUsd: usd.unit, unitCostKhr: khr.unit, totalCostUsd: usd.total, totalCostKhr: khr.total }
