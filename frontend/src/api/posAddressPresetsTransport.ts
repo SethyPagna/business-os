@@ -9,12 +9,11 @@ export type PosAddressPresetsResponse = {
 }
 
 export function getPosAddressPresets(): Promise<PosAddressPresetsResponse> {
-  return route(
-    'pos:address-presets:get',
-    () => apiFetch('GET', '/api/pos/address-presets'),
-    null,
-    true,
-  ) as Promise<PosAddressPresetsResponse>
+  // This is a private server-authoritative read: no stale/shared route cache
+  // and no local fallback. apiFetch still applies its opaque actor/session
+  // guard, but a successful GET must not be misclassified as a write that
+  // invalidates the `pos` channel before its caller can publish the result.
+  return apiFetch('GET', '/api/pos/address-presets') as Promise<PosAddressPresetsResponse>
 }
 
 export function savePosAddressPresets(
