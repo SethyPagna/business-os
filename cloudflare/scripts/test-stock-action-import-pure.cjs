@@ -19,6 +19,7 @@ function loadCompiled(file, stubs) {
   const compiled = compile(file)
   const original = Module._load
   Module._load = function(request, parent, isMain) {
+    if (request === './moneyPrecision') return original.call(this, path.join(__dirname, '../src/lib/moneyPrecision.ts'), parent, isMain)
     if (Object.prototype.hasOwnProperty.call(stubs, request)) return stubs[request]
     return original.call(this, request, parent, isMain)
   }

@@ -1,3 +1,5 @@
+import { roundMoney4, meanMoney4 } from './moneyPrecision'
+
 // THE product identity rule. One definition, imported everywhere, so the
 // answer to "are these two rows the same product?" can never differ between
 // CSV import, branch transfer, merge-duplicates and the Products page.
@@ -35,9 +37,9 @@
 // barcode creates new child row... rest merge".
 //
 // So differing costs now MERGE, and the merged cost is the mean of the
-// DISTINCT costs (see resolveMergedCost), kept to 4 decimals and rounded up.
-// Rounded up, never down, so an averaged cost can never understate what was
-// actually paid and quietly overstate profit.
+// DISTINCT costs (see resolveMergedCost). The later precision policy supersedes
+// that historical rounding direction: NEW costs round nearest4, ties away from
+// zero; versioned previously approved merge plans retain their original policy.
 //
 // The averaging applies to costs that are ALIKE. The owner's follow-up ruling
 // (2026-09-04, verbatim): "the add and divide is only for those similar
@@ -237,25 +239,18 @@ export type MergeableCost = {
 }
 
 /**
- * Rounds UP to 4 decimal places. Up rather than nearest so an averaged cost
- * never lands below what was actually paid: understating cost overstates
- * profit, and this number feeds margin reporting.
- *
- * The 1e-9 nudge absorbs binary float error, so a value that is already
- * exactly 4dp (9.8765, or the 4dp mean of two 4dp costs) is not pushed up a
- * tick by its own representation -- without it, Math.ceil(9.8765 * 10000)
- * can be 98766 on a value whose double sits a hair above 98765.
- *
- * That same nudge is why the result is normalised at the end: Math.ceil of a
- * small negative is -0, so a cost of 0 would come back as -0 and be stored
- * and serialised as "-0". `|| 0` maps it back to 0 and touches nothing else,
- * every other falsy case having already returned above.
+ * New calculations use exact decimal nearest4, ties away from zero. Historical
+ * approved merge plans carry their own policy version in productMerge.ts;
+ * this helper never rewrites an existing approved plan or recorded cost.
  */
-export function roundCostUp4(value: unknown): number {
+export function roundCost4(value: unknown): number {
   const n = Number(value)
   if (!Number.isFinite(n)) return 0
-  return Math.ceil(n * 10000 - 1e-9) / 10000 || 0
+  return roundMoney4(n)
 }
+
+// Compatibility export; new cost policy is nearest4, not the former upward bias.
+export const roundCostUp4 = roundCost4
 
 /**
  * The ratio between the cheapest and the dearest DISTINCT recorded cost above
@@ -288,7 +283,7 @@ export type MergedCostOutlier = {
 
 /**
  * Resolves the cost for a merge: the mean of the DISTINCT costs across the
- * rows, per currency field, rounded up to 4 decimals -- and reports any field
+ * rows, per currency field, rounded nearest to 4 decimals -- and reports any field
  * where the guard below refused to average.
  *
  * Distinct, not per-row, because the user's rule is "add different costs
@@ -335,7 +330,7 @@ export function resolveMergedCostDetail(rows: MergeableCost[]): {
       const value = Number(raw)
       if (!Number.isFinite(value)) continue
       sawField = true
-      if (value > 0) distinct.add(roundCostUp4(value))
+      if (value > 0) distinct.add(value)
     }
     if (!sawField) continue
     if (!distinct.size) { merged[field] = 0; continue }
@@ -343,13 +338,11 @@ export function resolveMergedCostDetail(rows: MergeableCost[]): {
     const min = Math.min(...values)
     const max = Math.max(...values)
     if (values.length > 1 && max > min * COST_OUTLIER_RATIO) {
-      merged[field] = max
+      merged[field] = roundCost4(max)
       outliers.push({ field, min, max, chosen: max })
       continue
     }
-    let sum = 0
-    for (const value of values) sum += value
-    merged[field] = roundCostUp4(sum / values.length)
+    merged[field] = meanMoney4(values)
   }
   return { merged, outliers }
 }

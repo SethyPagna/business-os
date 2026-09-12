@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { roundMoney4 } from '../lib/moneyPrecision'
 import { enqueueImageNormalization } from '../lib/imageAudit'
 import { getDb } from '../lib/db'
 import { paginateProductFamilies } from '../lib/familyPagination'
@@ -2581,7 +2582,7 @@ export async function readMergePricingChange(
     const to = Number(economics.merged[field] ?? keeperRow?.[field] ?? 0) || 0
     before[field] = from
     after[field] = to
-    if (Math.round(from * 100) !== Math.round(to * 100)) changes.push({ field, from, to })
+    if (roundMoney4(from) !== roundMoney4(to)) changes.push({ field, from, to })
   }
   return { before, after, changes }
 }
@@ -2923,7 +2924,7 @@ export async function foldDuplicateProductInto(
     ['wholesale_price_khr', mergedPricing.wholesale_price_khr ?? canonicalBefore?.wholesale_price_khr ?? 0],
   ] as Array<[string, number]>)
     .map(([field, to]) => ({ field, from: Number((canonicalBefore as Record<string, number | null> | null)?.[field]) || 0, to: Number(to) || 0 }))
-    .filter((change) => Math.round(change.from * 100) !== Math.round(change.to * 100))
+    .filter((change) => roundMoney4(change.from) !== roundMoney4(change.to))
   const dupBatchRows = snapshot.duplicateBatchRows
   // Images were the one thing this merge silently threw away: branch_stock,
   // inventory_movements and product_batches were all carried over, but the

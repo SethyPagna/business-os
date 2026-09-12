@@ -12,6 +12,7 @@ import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, Writ
 import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, stockReceiptGateCode, stockReceiptGateMessage } from '../lib/stockReceiptGate'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
+import { nullableMoney4, multiplyMoney4 } from '../lib/moneyPrecision'
 
 // Batch / expiry-date tracking -- schema notes and design rationale live in
 // lib/productBatches.ts. Gated behind the same 'inventory' permission as
@@ -189,6 +190,15 @@ app.post('/', async (c) => {
   const quantity = Number(body.quantity)
   if (!productId || !branchId) return c.json({ error: 'product_id and branch_id are required' }, 400)
   if (!Number.isFinite(quantity) || quantity <= 0) return c.json({ error: 'quantity must be a positive number' }, 400)
+  let unitCostUsd: number | null
+  let totalCostUsd: number | null
+  try {
+    unitCostUsd = nullableMoney4(body.unit_cost_usd)
+    if (unitCostUsd != null && unitCostUsd < 0) throw new RangeError('Cost must be non-negative')
+    totalCostUsd = unitCostUsd == null ? null : multiplyMoney4(unitCostUsd, quantity)
+  } catch {
+    return c.json({ error: 'Invalid or out-of-range receipt cost' }, 400)
+  }
   // Paid vs on-credit (migration 0065). A credit purchase without a due
   // date has no reminder to fire, which defeats the point of recording it.
   const paymentStatus = body.payment_status === 'paid' || body.payment_status === 'credit' ? body.payment_status : null
@@ -232,7 +242,7 @@ app.post('/', async (c) => {
       notes: body.notes || null,
       supplierId: Number.isFinite(Number(body.supplier_id)) && Number(body.supplier_id) > 0 ? Number(body.supplier_id) : null,
       supplierName: body.supplier_name || null,
-      unitCostUsd: body.unit_cost_usd == null ? null : Number(body.unit_cost_usd),
+      unitCostUsd,
       paymentStatus,
       creditDueDate,
     })
@@ -271,10 +281,8 @@ app.post('/', async (c) => {
     // lot row. Same-day top-ups can share one product_batches row while
     // carrying different costs; movement snapshots let Stock-in Sessions
     // report each receipt accurately without mutating the product's cost.
-    unitCostUsd: Number.isFinite(Number(body.unit_cost_usd)) && Number(body.unit_cost_usd) >= 0 ? Number(body.unit_cost_usd) : null,
-    totalCostUsd: Number.isFinite(Number(body.unit_cost_usd)) && Number(body.unit_cost_usd) >= 0
-      ? Math.round(Number(body.unit_cost_usd) * quantity * 10000) / 10000
-      : null,
+    unitCostUsd,
+    totalCostUsd,
     reason: appendReceiptNotes(`Stock received (${lotCode})`, freeGoods ? [FREE_GOODS_REASON_NOTE] : []),
     referenceId: Number.isSafeInteger(Number(body.session_id)) && Number(body.session_id) > 0 ? Number(body.session_id) : null,
     userId: user?.id ?? null,
@@ -375,9 +383,15 @@ app.patch('/:id', async (c) => {
     params.supplier_id = Number.isFinite(Number(bodyExtra.supplier_id)) && Number(bodyExtra.supplier_id) > 0 ? Number(bodyExtra.supplier_id) : null
   }
   if (bodyExtra.unit_cost_usd !== undefined) {
-    const cost = Number(bodyExtra.unit_cost_usd)
+    let cost: number | null
+    try {
+      cost = nullableMoney4(bodyExtra.unit_cost_usd)
+      if (cost != null && cost < 0) throw new RangeError('Cost must be non-negative')
+    } catch {
+      return c.json({ error: 'Invalid or out-of-range batch cost' }, 400)
+    }
     updates.push('unit_cost_usd = @unit_cost_usd')
-    params.unit_cost_usd = Number.isFinite(cost) && cost >= 0 ? cost : null
+    params.unit_cost_usd = cost
   }
   if (!updates.length) return c.json({ error: 'No fields to update' }, 400)
   updates.push(`updated_at = datetime('now')`)

@@ -25,6 +25,7 @@ const branchRoleGuards = compile('branchRoleGuards.ts', { './branchRoles': branc
 const actorSnapshot = compile('actorSnapshot.ts')
 const saleCreationSnapshot = compile('saleCreationSnapshot.ts', { './actorSnapshot': actorSnapshot })
 const subject = compile('stockActionCommit.ts', {
+  './moneyPrecision': compile('moneyPrecision.ts'),
   './db': {},
   './batchCode': batchCode,
   './searchMatch': searchMatch,
@@ -221,6 +222,14 @@ function seedLot(sqlite, { supplierName = null, supplierId = null } = {}) {
   )
 
   const negativeCost = setup()
+  const fractionalCost = setup()
+  await subject.applyUnifiedStockAdd(fractionalCost.db, { ...input, quantity: .5, costPriceUsd: .0003 })
+  assert.deepStrictEqual(fractionalCost.sqlite.prepare('SELECT unit_cost_usd, total_cost_usd FROM inventory_movements').get(), {
+    unit_cost_usd: .0003, total_cost_usd: .0002,
+  }, 'actual atomic stock writer keeps unit4 and exact half-away total4')
+  const overflowCost = setup()
+  await assert.rejects(() => subject.applyUnifiedStockAdd(overflowCost.db, { ...input, quantity: 2, costPriceUsd: 1e11 }), /money_overflow/)
+  wroteNothing(overflowCost, 'overflow before transaction')
   await assert.rejects(
     () => subject.applyUnifiedStockAdd(negativeCost.db, { ...input, costPriceUsd: -2 }),
     /cannot be negative/,

@@ -59,7 +59,8 @@ function loadRealProductMerge() {
     fileName: 'productMerge.ts',
   })
   const mod = { exports: {} }
-  new Function('exports', 'require', 'module', outputText)(mod.exports, require, mod)
+  new Function('exports', 'require', 'module', outputText)(mod.exports,
+    (name) => name === './moneyPrecision' ? require(path.join(LIB_DIR, 'moneyPrecision.ts')) : require(name), mod)
   productMergeCache = mod.exports
   return productMergeCache
 }

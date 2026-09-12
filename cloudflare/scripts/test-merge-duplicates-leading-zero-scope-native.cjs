@@ -28,6 +28,7 @@ function loadTs(relPath, stubs = {}) {
   }).outputText
   const original = Module._load
   Module._load = (request, parent, isMain) => {
+    if (request === './moneyPrecision' || request === '../lib/moneyPrecision') return original.call(Module, path.join(SRC, 'lib/moneyPrecision.ts'), parent, isMain)
     if (Object.prototype.hasOwnProperty.call(stubs, request)) return stubs[request]
     if (request.startsWith('.') || request === 'hono') return permissive()
     return original.call(Module, request, parent, isMain)

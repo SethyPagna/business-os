@@ -23,6 +23,7 @@ const branchRoleGuards = compile('branchRoleGuards.ts', { './branchRoles': branc
 const actorSnapshot = compile('actorSnapshot.ts')
 const saleCreationSnapshot = compile('saleCreationSnapshot.ts', { './actorSnapshot': actorSnapshot })
 const subject = compile('stockActionCommit.ts', {
+  './moneyPrecision': compile('moneyPrecision.ts'),
   './db': {},
   './batchCode': batchCode,
   './searchMatch': searchMatch,
