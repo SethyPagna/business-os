@@ -6,6 +6,7 @@ import {
 import type { ReceiptPrintSettings } from '../types/receiptContracts'
 import { computeFixedSheetFit, computeImagePageSegments, computeImagePdfLayout, isSingleSheetPaperSize } from './receiptPdfLayout.ts'
 import { RECEIPT_ITEM_COLUMN_GAP_EM, RECEIPT_ROW_GRID_TEMPLATE, receiptItemGridTemplate } from './receiptItemColumns.ts'
+import { receiptPreviewDiagnosticLines, receiptPreviewSettings, type ReceiptPreviewSettings, type ReceiptPreviewTranslate } from './receiptPreviewDiagnostics.ts'
 
 export const PRINT_DEFAULTS = { ...DEFAULT_RECEIPT_PRINT_SETTINGS }
 const RECEIPT_ASSET_INLINE_CONCURRENCY = 3
@@ -26,6 +27,7 @@ type ReceiptPrintOptions = {
   previewFallback?: boolean
   autoPrintOnPreviewFallback?: boolean
   previewFallbackNote?: string
+  previewTranslate?: ReceiptPreviewTranslate
   // Text colour for the last-resort text-only canvas fallback in
   // createReceiptImageBlob (used only when the primary html2canvas render of
   // the already-styled DOM clone fails). Callers pass '#000000' when the
@@ -64,6 +66,7 @@ type PrintableReceiptLayout = {
   continuousRoll: boolean
   /** One physical card/label: the whole receipt has to land on this one page. */
   singleSheet: boolean
+  previewSettings?: ReceiptPreviewSettings
 }
 
 function parsePrintNumber(value: unknown, fallback: number): number {
@@ -1116,7 +1119,7 @@ async function createPrintableReceiptMarkup(content: ReceiptContent, options: Re
     clone.querySelectorAll('canvas, video').forEach((node) => node.remove())
     await inlineImageNodeSources(clone)
     await inlineStyleAssetUrls(clone)
-    return { markup: clone.outerHTML, widthMm, pageHeightMm, continuousRoll, singleSheet: isSingleSheetPaperSize(printSettings.paperSize) }
+    return { markup: clone.outerHTML, widthMm, pageHeightMm, continuousRoll, singleSheet: isSingleSheetPaperSize(printSettings.paperSize), previewSettings: receiptPreviewSettings(printSettings) }
   }, printSettings)
 }
 
@@ -1149,6 +1152,9 @@ export function buildPrintablePreviewDocument(layout: PrintableReceiptLayout, op
   const title = options.title === '' ? '' : (options.title || 'Receipt')
   const toolbarTitle = title || 'Receipt Preview'
   const note = options.note ? `<div class="receipt-note">${escapeHtml(options.note)}</div>` : ''
+  const diagnostics = receiptPreviewDiagnosticLines(layout,
+    layout.previewSettings || receiptPreviewSettings(options.printSettings || getPrintSettings()), options.previewTranslate)
+    .map((line) => `<p>${escapeHtml(line)}</p>`).join('')
 
   return `<!doctype html>
 <html lang="en">
@@ -1235,6 +1241,15 @@ export function buildPrintablePreviewDocument(layout: PrintableReceiptLayout, op
         font-size: 12px;
         line-height: 1.5;
       }
+      .receipt-print-diagnostics {
+        flex: 1 0 100%;
+        min-width: 0;
+        font-size: 12px;
+        line-height: 1.5;
+        color: #334155;
+        overflow-wrap: anywhere;
+      }
+      .receipt-print-diagnostics p { margin: 4px 0 0; }
       .receipt-stage {
         display: flex;
         justify-content: center;
@@ -1332,6 +1347,7 @@ export function buildPrintablePreviewDocument(layout: PrintableReceiptLayout, op
           <button type="button" data-receipt-action="print">Print</button>
           <button type="button" data-receipt-action="close">Close</button>
         </div>
+        <div class="receipt-print-diagnostics" data-receipt-print-diagnostics="true">${diagnostics}</div>
       </div>
       ${note}
       <div class="receipt-stage">
