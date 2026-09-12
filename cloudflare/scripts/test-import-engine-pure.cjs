@@ -1412,6 +1412,35 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     { unit_cost_usd: 1, unit_cost_khr: 0, total_cost_usd: 2, total_cost_khr: 0 },
     'apply uses the analyzed immutable valuation, including zero, after a catalogue price change',
   )
+  assert.throws(
+    () => applyAnalyzedInventoryCostSnapshots([
+      { ...reclassifiedAtApply, data: { ...reclassifiedAtApply.data, quantity: 1, signedQuantity: 1 } },
+    ], new Map([[1, reviewed]])),
+    /changed product, branch, direction, or quantity/,
+    'a Set/action delta that changed after review must be re-analyzed instead of combining a new quantity with the old total',
+  )
+  assert.throws(
+    () => applyAnalyzedInventoryCostSnapshots([
+      { ...reclassifiedAtApply, data: { ...reclassifiedAtApply.data, product_id: 2 } },
+    ], new Map([[1, reviewed]])),
+    /changed product, branch, direction, or quantity/,
+    'row number alone never authorizes a different product identity',
+  )
+  const legacyReviewed = { ...reviewed, data: { ...reviewed.data } }
+  delete legacyReviewed.data.unit_cost_usd
+  delete legacyReviewed.data.unit_cost_khr
+  delete legacyReviewed.data.total_cost_usd
+  delete legacyReviewed.data.total_cost_khr
+  assert.throws(
+    () => applyAnalyzedInventoryCostSnapshots([reclassifiedAtApply], new Map([[1, legacyReviewed]])),
+    /no reviewed cost snapshot/,
+    'a pre-snapshot analyzed row must be re-analyzed instead of taking a new current price at Apply',
+  )
+  assert.throws(
+    () => inventoryMovementCostSnapshot({ explicitUsd: 1e308, quantity: 2 }),
+    /outside the supported numeric range/,
+    'overflowing totals are rejected before JSON can turn Infinity into null',
+  )
 
   const blankWithDuplicateRole = await classifyInventory(makeDb([
     { id: 1, name: 'Shop', is_default: 1, is_active: 1 },
