@@ -1,4 +1,6 @@
 {
+  "customer_gender_restore_session_refreshed": "The secure session refreshed",
+  "customer_gender_restore_session_refreshed_help": "The selected file was cleared and no new request will be sent. Close and reopen this tool, check saved status, then reselect the approved file to continue.",
   "customer_gender_restore": "Restore customer gender",
   "customer_gender_restore_title": "Restore customer gender",
   "customer_gender_restore_help": "Use only the approved restoration manifest. The app sends one bounded chunk at a time and changes customer gender only. Names, phones, addresses, membership, balances, notes, and dates are not displayed here or changed.",
