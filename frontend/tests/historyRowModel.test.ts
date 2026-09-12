@@ -133,17 +133,22 @@ const inlineBarcode = sc.split('\n')
   .filter(([, line]) => /\{row\.product_name\}/.test(line) && /\{model\.barcode\}/.test(line))
 assert.deepEqual(inlineBarcode, [], `the barcode is rendered inline with the product name:\n${inlineBarcode.map(([n, l]) => `  ${n}: ${l.trim()}`).join('\n')}`)
 
-// (c) Mobile card: a dedicated mono barcode line, and it comes BEFORE the
-// branch . user . reason row rather than sharing that wrapping chip row.
+// (c) Mobile card: barcode shares the compact identity rail with the source
+// record, and both come BEFORE the user-led metadata rail. It must never move
+// back beside the product name, where it used to squeeze the quantity.
 const mobileBarcode = sc.search(/<div className="[^"]*font-mono[^"]*">\{model\.barcode\}<\/div>/)
 assert.ok(mobileBarcode > 0, 'the mobile card must give the barcode its own font-mono line')
 const mobileActor = sc.indexOf('{model.actor}</span>')
 assert.ok(mobileActor > 0, 'the mobile card must show the actor in the branch / user / reason row')
-assert.ok(mobileBarcode < mobileActor, 'the mobile barcode line must come before the branch / user / reason row, not inside it')
+assert.ok(mobileBarcode < mobileActor, 'the mobile barcode must come before the user / received date / branch / reason row')
+const referenceRail = sc.match(/data-stock-mobile-row="reference"[\s\S]*?<\/div>/)?.[0] || ''
+assert.match(referenceRail, /referenceText\(row\)/, 'the mobile identity rail must lead with the source receipt when present')
+assert.match(referenceRail, /\{model\.barcode\}/, 'the mobile identity rail must retain the exact barcode')
 
 // (d) Row actions are real buttons from the app kit, not text links: same
-// height / radius / weight as sibling actions, icon + label on desktop,
-// icon-only with an aria-label below sm.
+// height / radius / weight as sibling actions. Edit reason retains its compact
+// icon treatment; Revert is destructive and therefore keeps visible text at
+// every width as well as its accessible name.
 const buttons = sc.split('<button').slice(1)
 const ROW_ACTIONS: Array<[string, RegExp]> = [
   ['Edit reason', /aria-label=\{tr\(t, 'edit_reason'/],
@@ -154,12 +159,17 @@ for (const [label, aria] of ROW_ACTIONS) {
   assert.ok(matches.length > 0, `${label} row action must be a <button> carrying an aria-label`)
   for (const head of matches) {
     assert.match(head, /className="btn-(secondary|danger)\b/, `${label} must use the shared button kit (btn-secondary / btn-danger), not a text link`)
-    assert.match(head, /<span className="hidden sm:inline">/, `${label} must hide its label below sm and stay icon-only there`)
+    if (label === 'Revert') {
+      assert.match(head, /<span>\{tr\(t, 'revert', 'Revert'\)\}<\/span>/, 'Revert must keep visible explanatory text on mobile')
+      assert.doesNotMatch(head, /<span className="hidden sm:inline">/, 'Revert must not collapse to an icon-only mobile control')
+    } else {
+      assert.match(head, /<span className="hidden sm:inline">/, `${label} keeps its existing compact icon treatment below sm`)
+    }
     assert.doesNotMatch(head, /\bunderline\b/, `${label} must not be styled as a link`)
   }
   console.log(`PASS Stock Change ${label} is a button-kit action (${matches.length} site(s))`)
 }
-console.log('PASS Stock Change barcode has its own line on both the desktop table and the mobile card')
+console.log('PASS Stock Change barcode stays below the name and shares the compact mobile identity rail')
 
 // (e) Every truncated cell reveals itself. The dense row exists to fit six
 // columns, so `dense-cell-truncate` clips real values -- a lot code, a long
