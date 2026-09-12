@@ -86,10 +86,17 @@ export function parseImportNumericValue(
 }
 
 export function normalizeImportMoney(value: unknown, fallbackValue = 0): number {
+  // Legacy sale imports retain their existing policy until versioned sale
+  // settlement is activated. Cost writers opt into the explicit helper below.
+  const parsed = parseImportNumericValue(value, fallbackValue)
+  return parsed >= 0 ? Math.ceil(parsed * 100 - 1e-9) / 100 : Math.floor(parsed * 100 + 1e-9) / 100
+}
+
+export function normalizeImportCost4(value: unknown, fallbackValue = 0): number {
   return roundMoney4(parseImportNumericValue(value, fallbackValue))
 }
 
-/** Catalog selling/wholesale defaults only; costs/discounts use nearest4. */
+/** Catalog selling/wholesale defaults only; round original input directly. */
 export function normalizeImportSellingPrice(value: unknown, fallbackValue = 0): number {
   return sellingPriceCeilCent(parseImportNumericValue(value, fallbackValue))
 }

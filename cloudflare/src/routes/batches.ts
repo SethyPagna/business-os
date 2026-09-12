@@ -193,6 +193,7 @@ app.post('/', async (c) => {
   let unitCostUsd: number | null
   let totalCostUsd: number | null
   try {
+    if (body.unit_cost_usd != null && Number(body.unit_cost_usd) < 0) throw new RangeError('Cost must be non-negative')
     unitCostUsd = nullableMoney4(body.unit_cost_usd)
     if (unitCostUsd != null && unitCostUsd < 0) throw new RangeError('Cost must be non-negative')
     totalCostUsd = unitCostUsd == null ? null : multiplyMoney4(unitCostUsd, quantity)
@@ -385,6 +386,7 @@ app.patch('/:id', async (c) => {
   if (bodyExtra.unit_cost_usd !== undefined) {
     let cost: number | null
     try {
+      if (bodyExtra.unit_cost_usd != null && Number(bodyExtra.unit_cost_usd) < 0) throw new RangeError('Cost must be non-negative')
       cost = nullableMoney4(bodyExtra.unit_cost_usd)
       if (cost != null && cost < 0) throw new RangeError('Cost must be non-negative')
     } catch {

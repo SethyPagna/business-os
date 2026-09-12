@@ -3,7 +3,7 @@
 // targeted catalog/branch/stock rows needed for one bounded window.
 
 import { dateToBatchCode, normalizeToIsoDate } from './batchCode'
-import { parseImportNumericValue, normalizeImportMoney } from './importNumbers'
+import { parseImportNumericValue, normalizeImportCost4, normalizeImportSellingPrice } from './importNumbers'
 // The ONE fold. Imported from the rule module both packages carry verbatim, so
 // this path cannot reach a different verdict from the create/edit guard, the
 // Conflicts sweep, the merge tool or the client's own sheet review.
@@ -111,10 +111,10 @@ function optionalNumber(value: unknown, field: string): { value: number | null; 
   }
 }
 
-function optionalMoney(value: unknown, field: string): { value: number | null; error: string | null } {
+function optionalMoney(value: unknown, field: string, selling = false): { value: number | null; error: string | null } {
   if (!text(value)) return { value: null, error: null }
   const parsed = optionalNumber(value, field)
-  return parsed.error ? parsed : { value: normalizeImportMoney(parsed.value), error: null }
+  return parsed.error ? parsed : { value: selling ? normalizeImportSellingPrice(parsed.value) : normalizeImportCost4(parsed.value), error: null }
 }
 
 export function getUnifiedStockMode(policyJson: string | null | undefined): StockActionMode {
@@ -207,7 +207,7 @@ export function resolveUnifiedStockImportRows(
     const action = text(raw.action)
     const shop = optionalNumber(raw.shop, 'shop quantity')
     const warehouse = optionalNumber(raw.warehouse, 'warehouse quantity')
-    const selling = optionalMoney(raw.selling_price, 'selling price')
+    const selling = optionalMoney(raw.selling_price, 'selling price', true)
     // Wholesale price -- the sheet column renamed from vip_price by migration
     // 0111. The legacy vip_price / special_price spellings still resolve here:
     // per the owner's ruling that column always carried wholesale numbers, so
@@ -216,7 +216,7 @@ export function resolveUnifiedStockImportRows(
     // of a file exported before the rename. An explicit wholesale_price wins,
     // being the one header that unambiguously names the tier it means. Mirrors
     // unifiedStockImport.ts's HEADER_ALIASES on the frontend side.
-    const wholesale = optionalMoney(raw.wholesale_price ?? raw.vip_price ?? raw.special_price, 'Wholesale price')
+    const wholesale = optionalMoney(raw.wholesale_price ?? raw.vip_price ?? raw.special_price, 'Wholesale price', true)
     const cost = optionalMoney(raw.cost_price, 'cost price')
     const errors = [shop.error, warehouse.error, selling.error, wholesale.error, cost.error].filter((value): value is string => !!value)
     if (!name && !barcode) errors.push('Name or barcode is required.')

@@ -62,6 +62,12 @@ assert.strictEqual(subject.getUnifiedStockMode('{"stock_action_mode":"wrong"}'),
 const products = [{ id: 10, name: 'Serum', barcode: 'ABC', selling_price_usd: 12, wholesale_price_usd: 10, cost_price_usd: 5 }]
 const branches = [{ id: 1, name: 'Shop' }, { id: 2, name: 'Warehouse' }]
 const current = [{ productId: 10, branchId: 1, quantity: 8 }, { productId: 10, branchId: 2, quantity: 4 }]
+const precisionRows = subject.resolveUnifiedStockImportRows([
+  { name: 'Serum', barcode: 'ABC', shop: '1', date: '2026-08-27', action: 'add', selling_price: '1.23004', wholesale_price: '1.23004', cost_price: '1.23004' },
+], 'direct', products, branches, current)
+assert.strictEqual(precisionRows[0].sellingPriceUsd, 1.24, 'ceil original selling input, not its nearest4 truncation')
+assert.strictEqual(precisionRows[0].wholesalePriceUsd, 1.24)
+assert.strictEqual(precisionRows[0].costPriceUsd, 1.23)
 
 const direct = subject.resolveUnifiedStockImportRows([
   { _rowNumber: 2, name: 'Serum', barcode: 'ABC', shop: '2', warehouse: '0', date: '08/27/2026', action: 'add' },

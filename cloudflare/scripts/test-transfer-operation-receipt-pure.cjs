@@ -24,6 +24,7 @@ function wrapDb() {
   }
 }
 const realLibraries = new Set(['movementCostSnapshot', 'operationWriteReadiness', 'db', 'sqlBinding', 'batchCode', 'productBatches', 'branchRoles', 'branchRoleGuards', 'canonicalBranchIdentity', 'transferOperationReceipt', 'transferOperation', 'permissions', 'actorSnapshot', 'undoAppliers'])
+realLibraries.add('moneyPrecision')
 function load(relative) {
   if (modules.has(relative)) return modules.get(relative)
   const module = { exports: {} }

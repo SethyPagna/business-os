@@ -1,4 +1,4 @@
-import { divideMoney4, roundMoney4, sumProductsMoney4 } from './moneyPrecision'
+import { roundMoney4, sumProductsMoney4, weightedMeanMoney4 } from './moneyPrecision'
 
 export type MovementCostPair = {
   unitCostUsd: number | null
@@ -17,7 +17,11 @@ const money = (value: unknown): number | null => {
   if (value == null || value === '') return null
   const parsed = typeof value === 'number' ? value : Number(value)
   if (!Number.isFinite(parsed) || parsed < 0) throw new RangeError('Movement costs must be finite non-negative numbers')
-  return roundMoney4(parsed)
+  // Inputs here are authoritative captured lot/product costs, potentially from
+  // historical rows with more than four decimals. Validate range, not reprice.
+  // New user-input cost quantization belongs at the writer boundary.
+  roundMoney4(parsed)
+  return parsed
 }
 
 const finite = (value: number, message: string): number => {
@@ -49,7 +53,11 @@ function resolveCurrency(
     terms.push({ amount: fallbackCost, factor: quantity - covered })
   }
   const roundedTotal = sumProductsMoney4(terms)
-  return { unit: divideMoney4(roundedTotal, quantity), total: roundedTotal }
+  const distinctCosts = new Set(terms.map(term => term.amount))
+  const unit = distinctCosts.size === 1
+    ? terms[0].amount
+    : weightedMeanMoney4(terms, quantity)
+  return { unit, total: roundedTotal }
 }
 
 /**
