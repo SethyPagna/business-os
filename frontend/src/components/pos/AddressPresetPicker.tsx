@@ -103,7 +103,7 @@ export default function AddressPresetPicker({ actorKey, currentAddress, previous
       if (requestRef.current !== requestId || !isActorReadScopeCurrent(actorScope)) return false
       setPresets(response.presets)
       setRevision(response.revision)
-      return true
+      return requestId
     } catch (saveError) {
       if (requestRef.current !== requestId || !isActorReadScopeCurrent(actorScope)) return false
       const conflict = saveError && typeof saveError === 'object' && (saveError as { code?: unknown }).code === 'write_conflict'
@@ -117,6 +117,7 @@ export default function AddressPresetPicker({ actorKey, currentAddress, previous
   }
 
   const add = async (category: AddressPresetCategory) => {
+    const callerScope = captureActorReadScope('pos:address-presets')
     const value = normalizeAddressSegment(drafts[category])
     if (!value) return
     if (value.length > MAX_ADDRESS_PRESET_LENGTH) {
@@ -125,7 +126,8 @@ export default function AddressPresetPicker({ actorKey, currentAddress, previous
     }
     const nextList = normalizeAddressPresetList([...presets[category], value])
     if (nextList.length === presets[category].length) return
-    if (await persist({ ...presets, [category]: nextList })) {
+    const completedRequestId = await persist({ ...presets, [category]: nextList })
+    if (completedRequestId && requestRef.current === completedRequestId && isActorReadScopeCurrent(callerScope)) {
       setDrafts((current) => ({ ...current, [category]: '' }))
       setSelected((current) => ({ ...current, [category]: value }))
     }
@@ -133,21 +135,25 @@ export default function AddressPresetPicker({ actorKey, currentAddress, previous
 
   const saveEdit = async () => {
     if (!editing) return
+    const callerScope = captureActorReadScope('pos:address-presets')
     const value = normalizeAddressSegment(editing.value)
     if (!value || value.length > MAX_ADDRESS_PRESET_LENGTH) {
       setError(tr('address_preset_save_failed', 'That saved address is invalid.'))
       return
     }
     const nextList = normalizeAddressPresetList(presets[editing.category].map((item) => item === editing.original ? value : item))
-    if (await persist({ ...presets, [editing.category]: nextList })) {
+    const completedRequestId = await persist({ ...presets, [editing.category]: nextList })
+    if (completedRequestId && requestRef.current === completedRequestId && isActorReadScopeCurrent(callerScope)) {
       setSelected((current) => current[editing.category] === editing.original ? { ...current, [editing.category]: value } : current)
       setEditing(null)
     }
   }
 
   const remove = async (category: AddressPresetCategory, value: string) => {
+    const callerScope = captureActorReadScope('pos:address-presets')
     const next = { ...presets, [category]: presets[category].filter((item) => item !== value) }
-    if (await persist(next)) {
+    const completedRequestId = await persist(next)
+    if (completedRequestId && requestRef.current === completedRequestId && isActorReadScopeCurrent(callerScope)) {
       setSelected((current) => current[category] === value ? { ...current, [category]: '' } : current)
       if (editing?.category === category && editing.original === value) setEditing(null)
       setPendingRemove('')
@@ -159,7 +165,7 @@ export default function AddressPresetPicker({ actorKey, currentAddress, previous
     <Modal title={tr('address_presets', 'Saved address options')} onClose={onClose} size="md" unsavedChanges={{ dirty: false }}>
       <div className="space-y-3">
         <label className="block text-xs font-medium text-gray-600 dark:text-gray-300">
-          {tr('address_prefix', 'House / street (kept as typed)')}
+          {tr('address_house_street', 'House / street (kept as typed)')}
           <input className="input mt-1 w-full text-sm" value={prefix} onChange={(event) => setPrefix(event.target.value)} autoComplete="street-address" />
         </label>
 
