@@ -47,6 +47,11 @@ import { fmtDate, fmtClock24, fmtDateTime24 } from '../../utils/formatters'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { buildHistoryRowModel, formatHistoryReference, historyExportField, historyField } from '../../utils/historyRowModel.ts'
 import {
+  isRevertibleStockMovement,
+  recordedMovementCosts,
+  showReceiptAccounting,
+} from '../../utils/stockMovementDetail.ts'
+import {
   browserStockStorage,
   dropFailedStockAttempt,
   emitFailedAttemptsChanged,
@@ -164,6 +169,19 @@ function fmtOptionalUsd(value: unknown): string {
   const amount = Number(value)
   if (!Number.isFinite(amount)) return '—'
   return `$${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
+function fmtOptionalKhr(value: unknown): string {
+  const amount = Number(value)
+  if (!Number.isFinite(amount)) return '—'
+  return `${amount.toLocaleString('en-US', { maximumFractionDigits: 2 })}៛`
+}
+
+function recordedCostLabel(usd: number | null, khr: number | null, notRecorded: string): string {
+  const values: string[] = []
+  if (usd !== null) values.push(fmtOptionalUsd(usd))
+  if (khr !== null) values.push(fmtOptionalKhr(khr))
+  return values.length ? values.join(' · ') : notRecorded
 }
 
 type BranchOption = { id: number; name: string }
@@ -861,6 +879,10 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
     )
   }
 
+  const detailCosts = detail ? recordedMovementCosts(detail) : null
+  const detailShowsReceiptAccounting = detail ? showReceiptAccounting(detail.movement_type) : false
+  const detailCanRevert = detail ? isRevertibleStockMovement(detail.movement_type) : false
+
   return (
     <div className="space-y-3">
       {/* Rows 1+2 pin together while the ledger scrolls (user, Aug 31: "the
@@ -1051,24 +1073,38 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
       {detail ? (
         <Modal title={`${detail.product_name}`} onClose={closeDetail} unsavedChanges="read-only">
           <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {/* Identity belongs with the title. It is deliberately not another
+                fact card competing with the action summary below. */}
+            {detail.barcode ? (
+              <div className="-mt-1 break-all font-mono text-xs text-gray-500 dark:text-gray-400">
+                {detail.barcode}
+              </div>
+            ) : null}
+            <div className="grid grid-cols-2 gap-2">
               <div className="rounded-xl bg-gray-50 px-3 py-2 dark:bg-gray-800/60">
                 <div className="text-[11px] uppercase tracking-wide text-gray-400">{tr(t, 'date', 'Date')}</div>
-                <div className="mt-0.5 text-sm font-semibold text-gray-800 dark:text-gray-100" title={isDateOnlyStamp(detail.created_at) ? noTimeLabel : undefined}>
+                <div className="mt-0.5 break-words text-sm font-semibold text-gray-800 dark:text-gray-100" title={isDateOnlyStamp(detail.created_at) ? noTimeLabel : undefined}>
                   {isDateOnlyStamp(detail.created_at) ? fmtDate(detail.created_at) : fmtDateTime24(detail.created_at)}
                 </div>
               </div>
               <div className="rounded-xl bg-gray-50 px-3 py-2 dark:bg-gray-800/60">
-                <div className="text-[11px] uppercase tracking-wide text-gray-400">{beforeLabel}</div>
-                <div className="mt-0.5 text-sm font-semibold tabular-nums text-gray-800 dark:text-gray-100">{detail.before_qty}</div>
+                <div className="text-[11px] uppercase tracking-wide text-gray-400">{translateMovementType(detail.movement_type, t)}</div>
+                <div className={`mt-0.5 inline-flex max-w-full flex-wrap rounded-lg px-2 py-0.5 text-sm font-semibold ${movementColorClass(detail.movement_type, detail.signed_quantity)}`}>
+                  <span className="tabular-nums">{signedLabel(detail)}</span>
+                  {detail.unit ? <span className="ml-1 break-words font-normal opacity-80">{detail.unit}</span> : null}
+                </div>
               </div>
               <div className="rounded-xl bg-gray-50 px-3 py-2 dark:bg-gray-800/60">
-                <div className="text-[11px] uppercase tracking-wide text-gray-400">{translateMovementType(detail.movement_type, t)}</div>
-                <div className={`mt-0.5 inline-flex rounded-lg px-2 py-0.5 text-sm font-semibold ${movementColorClass(detail.movement_type, detail.signed_quantity)}`}>{signedLabel(detail)}</div>
+                <div className="text-[11px] uppercase tracking-wide text-gray-400">{beforeLabel}</div>
+                <div className="mt-0.5 break-words text-sm font-semibold tabular-nums text-gray-800 dark:text-gray-100">
+                  {detail.before_qty}{detail.unit ? <span className="ml-1 font-normal text-gray-500 dark:text-gray-400">{detail.unit}</span> : null}
+                </div>
               </div>
               <div className="rounded-xl bg-gray-50 px-3 py-2 dark:bg-gray-800/60">
                 <div className="text-[11px] uppercase tracking-wide text-gray-400">{afterLabel}</div>
-                <div className="mt-0.5 text-sm font-semibold tabular-nums text-gray-800 dark:text-gray-100">{detail.after_qty}</div>
+                <div className="mt-0.5 break-words text-sm font-semibold tabular-nums text-gray-800 dark:text-gray-100">
+                  {detail.after_qty}{detail.unit ? <span className="ml-1 font-normal text-gray-500 dark:text-gray-400">{detail.unit}</span> : null}
+                </div>
               </div>
             </div>
             {detail.batch_id ? (
@@ -1076,12 +1112,6 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                 <span className="text-[11px] uppercase tracking-wide text-gray-400">{tr(t, 'batch', 'Received date')}: </span>
                 {batchDisplayLabel({ id: detail.batch_id, lot_code: detail.batch_lot_code, received_at: detail.batch_received_at }, tr(t, 'batch', 'Received date'))}
                 {detail.batch_supplier_name ? <span className="text-gray-400"> · {detail.batch_supplier_name}</span> : null}
-              </p>
-            ) : null}
-            {detail.barcode ? (
-              <p className="rounded-xl bg-gray-50 px-3 py-2 text-sm text-gray-600 dark:bg-gray-800/60 dark:text-gray-300">
-                <span className="text-[11px] uppercase tracking-wide text-gray-400">{tr(t, 'barcode', 'Barcode')}: </span>
-                <span className="font-mono">{detail.barcode}</span>
               </p>
             ) : null}
             {/* N13: the record this movement belongs to. Shown as a fact of
@@ -1115,19 +1145,34 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                 {detail.reason}
               </p>
             ) : null}
-            <dl className="grid gap-2 rounded-xl bg-gray-50 px-3 py-2 text-xs dark:bg-gray-800/60 sm:grid-cols-2">
+            {/* These are costs recorded on THIS movement. A zero is real; a
+                missing snapshot is said plainly. Never substitute today's
+                product price or the lot's mutable aggregate valuation. */}
+            <dl className="grid grid-cols-2 gap-2 rounded-xl bg-gray-50 px-3 py-2 text-xs dark:bg-gray-800/60">
+              <div className="min-w-0">
+                <dt className="uppercase tracking-wide text-gray-400">{tr(t, 'cost_price', 'Cost price')}</dt>
+                <dd className="mt-0.5 break-words font-medium text-gray-700 dark:text-gray-200">
+                  {recordedCostLabel(detailCosts?.unitUsd ?? null, detailCosts?.unitKhr ?? null, tr(t, 'not_recorded', 'Not recorded'))}
+                </dd>
+              </div>
+              <div className="min-w-0">
+                <dt className="uppercase tracking-wide text-gray-400">{tr(t, 'total_cost', 'Total cost')}</dt>
+                <dd className="mt-0.5 break-words font-medium text-gray-700 dark:text-gray-200">
+                  {recordedCostLabel(detailCosts?.totalUsd ?? null, detailCosts?.totalKhr ?? null, tr(t, 'not_recorded', 'Not recorded'))}
+                </dd>
+              </div>
+            </dl>
+            <dl className="grid grid-cols-2 gap-2 rounded-xl bg-gray-50 px-3 py-2 text-xs dark:bg-gray-800/60">
               {([
-                [tr(t, 'reference', 'Reference'), detail.reference_id],
-                [tr(t, 'unit', 'Unit'), detail.unit],
                 [tr(t, 'category', 'Category'), detail.category],
                 [tr(t, 'brand', 'Brand'), detail.brand],
                 [tr(t, 'tag', 'Tag'), detail.tag_label],
-                [tr(t, 'cost_price', 'Cost price'), detail.unit_cost_usd != null || detail.batch_unit_cost_usd != null ? fmtOptionalUsd(detail.unit_cost_usd ?? detail.batch_unit_cost_usd) : null],
-                [tr(t, 'total_cost', 'Total cost'), detail.total_cost_usd != null || detail.batch_received_cost_usd != null ? fmtOptionalUsd(detail.total_cost_usd ?? detail.batch_received_cost_usd) : null],
                 [tr(t, 'expiry_date', 'Expiry'), detail.batch_expiry_date],
-                [tr(t, 'payment_status', 'Payment status'), detail.batch_payment_status],
-                [tr(t, 'credit_due_date', 'Not Paid due date'), detail.batch_credit_due_date],
-                [tr(t, 'receipt_sessions', 'Receipt sessions'), detail.batch_receipt_session_count],
+                ...(detailShowsReceiptAccounting ? [
+                  [tr(t, 'payment_status', 'Payment status'), detail.batch_payment_status],
+                  [tr(t, 'credit_due_date', 'Not Paid due date'), detail.batch_credit_due_date],
+                  [tr(t, 'receipt_sessions', 'Receipt sessions'), detail.batch_receipt_session_count],
+                ] : []),
               ] as Array<[string, string | number | null | undefined]>).filter(([, value]) => value !== null && value !== undefined && value !== '').map(([label, value]) => (
                 <div key={label} className="min-w-0">
                   <dt className="uppercase tracking-wide text-gray-400">{label}</dt>
@@ -1164,7 +1209,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                     <Pencil className="h-4 w-4 shrink-0" aria-hidden="true" />
                     <span className="hidden sm:inline">{tr(t, 'edit_reason', 'Edit reason')}</span>
                   </button>
-                  {confirmRevert ? (
+                  {detailCanRevert && confirmRevert ? (
                     <span className="inline-flex flex-wrap items-center gap-2 text-xs">
                       <span className="text-gray-500 dark:text-gray-400">{tr(t, 'confirm_revert', 'Revert this change?')}</span>
                       <button
@@ -1187,7 +1232,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                         {tr(t, 'cancel', 'Cancel')}
                       </button>
                     </span>
-                  ) : (
+                  ) : detailCanRevert ? (
                     <button
                       type="button"
                       disabled={rowBusy}
@@ -1199,11 +1244,13 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                       <Undo2 className="h-4 w-4 shrink-0" aria-hidden="true" />
                       <span className="hidden sm:inline">{tr(t, 'revert', 'Revert')}</span>
                     </button>
-                  )}
-                  <InfoHint
-                    label={tr(t, 'revert', 'Revert')}
-                    text={tr(t, 'revert_info', 'Posts a compensating opposite movement — nothing is deleted, and the revert itself appears in the history. Only manual stock changes and imports can be reverted; sales, returns and transfers must be undone from their own records.')}
-                  />
+                  ) : null}
+                  {detailCanRevert ? (
+                    <InfoHint
+                      label={tr(t, 'revert', 'Revert')}
+                      text={tr(t, 'revert_info', 'Posts a compensating opposite movement — nothing is deleted, and the revert itself appears in the history. Only manual stock changes and imports can be reverted; sales, returns and transfers must be undone from their own records.')}
+                    />
+                  ) : null}
                 </div>
               ) : (
                 <div className="flex flex-wrap items-center gap-2 border-t border-gray-100 pt-2 dark:border-gray-800">
