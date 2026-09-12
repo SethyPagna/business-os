@@ -187,6 +187,19 @@ try {
   await send('Runtime.enable')
   await waitFor(async () => (await pageState()).ids.length === 25 ? true : null)
 
+  const pagerSemantics = await evaluate<{ backText: string; nextText: string; backIconFirst: boolean; nextIconLast: boolean; hiddenIcons: number }>(`(() => {
+    const back = document.querySelector('[data-merge-preview-page=back]')
+    const next = document.querySelector('[data-merge-preview-page=next]')
+    return {
+      backText: back?.textContent?.trim() || '',
+      nextText: next?.textContent?.trim() || '',
+      backIconFirst: back?.firstElementChild?.tagName.toLowerCase() === 'svg',
+      nextIconLast: next?.lastElementChild?.tagName.toLowerCase() === 'svg',
+      hiddenIcons: document.querySelectorAll('[data-merge-preview-page] svg[aria-hidden=true]').length,
+    }
+  })()`)
+  assert.deepEqual(pagerSemantics, { backText: 'Back', nextText: 'Next', backIconFirst: true, nextIconLast: true, hiddenIcons: 2 }, 'pager keeps Back/Next text with directional icons hidden from the accessible name')
+
   const reached = new Set<number>()
   await evaluate(`document.querySelector('input[type=checkbox]').click()`)
   for (let page = 1; page <= 80; page += 1) {

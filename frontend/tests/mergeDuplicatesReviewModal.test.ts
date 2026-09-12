@@ -43,6 +43,8 @@ assert.match(modalSource, /setDetailPage\(\(current\) => Math\.min\(Math\.max\(c
 assert.match(modalSource, /T\('showing', 'Showing'\)/)
 assert.match(modalSource, /T\('back', 'Back'\)/)
 assert.match(modalSource, /T\('next', 'Next'\)/)
+assert.match(modalSource, /<ChevronLeft className="h-3\.5 w-3\.5" aria-hidden="true" \/>\s*\{T\('back', 'Back'\)\}/)
+assert.match(modalSource, /\{T\('next', 'Next'\)\}\s*<ChevronRight className="h-3\.5 w-3\.5" aria-hidden="true" \/>/)
 assert.match(modalSource, /onClick=\{onConfirm\}/, 'paging must not wrap or replace the existing confirmation callback')
 
 console.log('PASS merge duplicate preview has bounded detail paging, a scoped timeout, and stale-request guards')
