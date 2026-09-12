@@ -1,3 +1,4 @@
+import ProductNameRail from '../shared/ProductNameRail'
 // ProductsImageOnlyView
 //
 // Part 241: the rendered surface for a user whose ONE route into the
@@ -491,10 +492,8 @@ export default function ProductsImageOnlyView() {
                   onClick={() => setDetailsProduct(product)}
                   title={t('view_details') || 'Click to view details'}
                 >
-                  {/* N36: the product name scrolls inside its cell rather than
-                      wrapping to a second row -- the same shared .scroll-x-clean
-                      class every other product-name cell uses (styles/main.css). */}
-                  <p className="scroll-x-clean text-sm font-medium text-gray-800 dark:text-gray-100">{product.name}</p>
+                  {/* Product names wrap into two lines; the shared rail keeps the remaining text reachable. */}
+                  <p className="min-w-0 text-sm font-medium text-gray-800 dark:text-gray-100"><ProductNameRail name={String((product.name) ?? '')} /></p>
                   {showPrice ? (
                     // Named, not a bare figure. A number on its own next to a
                     // product could as easily be cost or a promotional price;

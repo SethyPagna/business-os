@@ -1,3 +1,4 @@
+import ProductNameRail from '../shared/ProductNameRail'
 import { useEffect, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react'
 import { createPortal } from 'react-dom'
 import X from 'lucide-react/dist/esm/icons/x.js'
@@ -385,7 +386,7 @@ export default function InventoryStockModals({
             <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
               <div className="min-w-0 flex-1">
                 <h2 className="font-bold text-gray-900 dark:text-white">{t('adjust_stock')}</h2>
-                <div className="scroll-x-clean mt-0.5 max-w-full whitespace-nowrap text-xs font-medium text-gray-600 dark:text-gray-300" title={adjustModal.name}>{adjustModal.name}</div>
+                <div className="mt-0.5 min-w-0 max-w-full text-xs font-medium text-gray-600 dark:text-gray-300" title={adjustModal.name}><ProductNameRail name={String(adjustModal.name ?? '')} /></div>
                 <div className="mt-0.5 text-[11px] tabular-nums text-gray-400">{t('current_stock') || 'Current stock'}: {adjustCurrentQuantity} {adjustModal.unit}</div>
               </div>
               <div className="flex shrink-0 items-center gap-1">

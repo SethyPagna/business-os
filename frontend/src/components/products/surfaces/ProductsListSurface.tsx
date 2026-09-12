@@ -1,3 +1,4 @@
+import ProductNameRail from '../../shared/ProductNameRail'
 import { Fragment } from 'react'
 import type { ReactNode } from 'react'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
@@ -411,17 +412,13 @@ export default function ProductsListSurface({
                                         starts, making the group title look "indented"
                                         relative to its own rows. The expand/collapse
                                         chevron lives on the trailing side instead. */}
-                                    {/* N36: a group title IS a product name, so it
-                                        follows the same rule as the rows under it --
-                                        .scroll-x-clean (the one shared class, see
-                                        styles/main.css) instead of an ellipsis whose
-                                        tail could not be read at all. */}
+                                    {/* Product names wrap into two lines; the shared rail keeps the remaining text reachable. */}
                                     <button
                                       type="button"
-                                      className="scroll-x-clean text-left text-sm font-semibold text-slate-700 dark:text-slate-100"
+                                      className="min-w-0 text-left text-sm font-semibold text-slate-700 dark:text-slate-100"
                                       onClick={() => toggleProductGroup(group.key)}
                                     >
-                                      {group.name}
+                                      <ProductNameRail name={String(group.name ?? '')} />
                                     </button>
                                     <div className="flex min-w-0 shrink-0 items-center justify-end gap-2">
                                       <div className="hidden xl:flex flex-wrap items-center justify-end gap-2 text-[11px] text-slate-500 dark:text-slate-300">
@@ -574,10 +571,10 @@ export default function ProductsListSurface({
                         <div className="flex min-w-0 items-start justify-between gap-2">
                           <button
                             type="button"
-                            className="scroll-x-clean flex-1 text-left text-sm font-semibold text-slate-800 dark:text-slate-100"
+                            className="min-w-0 flex-1 text-left text-sm font-semibold text-slate-800 dark:text-slate-100"
                             onClick={() => toggleProductGroup(group.key)}
                           >
-                            {group.name}
+                            <ProductNameRail name={String(group.name ?? '')} />
                           </button>
                           <div className="flex shrink-0 items-center gap-1">
                             {renderGroupActions ? renderGroupActions(group) : null}

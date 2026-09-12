@@ -1,3 +1,4 @@
+import ProductNameRail from '../shared/ProductNameRail'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import X from 'lucide-react/dist/esm/icons/x.js'
@@ -1270,7 +1271,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                       className="flex w-full items-center justify-between gap-2 px-4 py-2.5 text-left transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/50"
                     >
                       <div className="min-w-0 flex-1">
-                        <span className="scroll-x-clean text-sm font-medium text-gray-900 dark:text-white">{group.name}</span>
+                        <span className="min-w-0 text-sm font-medium text-gray-900 dark:text-white"><ProductNameRail name={String((group.name) ?? '')} /></span>
                         {rows.length > 1
                           ? <span className="ml-2 text-xs text-gray-400">{rows.length} {t('options') || 'Options'}</span>
                           : (lead?.sku ? <span className="ml-2 font-mono text-xs text-gray-400">{lead.sku}</span> : null)}
@@ -1327,7 +1328,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
             // and large". "Change" clears the pick, restoring the list.
             <div className="space-y-2.5 rounded-xl bg-blue-50 p-3 dark:bg-blue-900/20">
               <div className="flex min-w-0 items-center justify-between gap-2">
-                <span className="scroll-x-clean text-sm font-semibold text-blue-800 dark:text-blue-300">{selectedProduct.name}</span>
+                <span className="min-w-0 text-sm font-semibold text-blue-800 dark:text-blue-300"><ProductNameRail name={String((selectedProduct.name) ?? '')} /></span>
                 <span className="flex shrink-0 items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
                   {t('available') || 'Available'}: <strong>{selectedProduct.branch_quantity} {selectedProduct.unit}</strong>
                   <button
@@ -1566,7 +1567,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                           aria-label={product.name}
                         />
                         <div className="min-w-0 flex-1 basis-[60%] sm:basis-auto">
-                          <div className="scroll-x-clean text-sm font-medium text-gray-900 dark:text-white">{product.name}</div>
+                          <div className="min-w-0 text-sm font-medium text-gray-900 dark:text-white"><ProductNameRail name={String((product.name) ?? '')} /></div>
                           {product.sku ? <div className="break-all font-mono text-xs text-gray-400">{product.sku}</div> : null}
                         </div>
                         <span className="ml-auto shrink-0 text-xs text-gray-500 sm:ml-0 dark:text-gray-400">
@@ -1599,9 +1600,9 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                   return [
                     <div
                       key={`group-${group.key}`}
-                      className="scroll-x-clean bg-gray-50 px-4 py-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:bg-gray-800/60"
+                      className="min-w-0 bg-gray-50 px-4 py-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:bg-gray-800/60"
                     >
-                      {group.name} · {(t('transfer_group_variant_count') || '{n} variants').replace('{n}', String(group.rows.length))}
+                      <ProductNameRail name={String(group.name ?? '')} /> · {(t('transfer_group_variant_count') || '{n} variants').replace('{n}', String(group.rows.length))}
                     </div>,
                     ...rows,
                   ]

@@ -1,3 +1,4 @@
+import ProductNameRail from '../../shared/ProductNameRail'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import PlusCircle from 'lucide-react/dist/esm/icons/plus-circle.js'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
@@ -261,9 +262,8 @@ export default function ProductDetailModal({
             <div className="min-w-0">
               {/* The title text is an EntityLink so it is directly openable;
                   the legacy responsive contract remains a wrapping title. */}
-              {/* break-words font-bold text-gray-900 dark:text-white">{productName} */}
-              <div className="break-words font-bold text-gray-900 dark:text-white" {...copy(productName)}>
-                <EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="products" anchor="hub:products:products" search={productName} navigate={navigateTo} title={T('open_product', 'Open product')}>{productName}</EntityLink>
+              <div className="min-w-0 font-bold text-gray-900 dark:text-white" {...copy(productName)}>
+                <EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="products" anchor="hub:products:products" search={productName} navigate={navigateTo} title={T('open_product', 'Open product')}><ProductNameRail name={productName} /></EntityLink>
               </div>
               {/* Category/brand/SKU stay compact but expose their complete
                   values through horizontal touch scrolling. */}

@@ -75,8 +75,8 @@ assert.match(productRowParts, /mb-1 flex min-w-0 flex-wrap gap-1/, 'branch detai
 // list rows ragged. The pin stays, pointed at the new rule: names are still
 // content (never ellipsised away), they just scroll inside their own cell now.
 // The scroll behaviour itself is pinned in tests/productNameScrollCells.test.ts.
-assert.match(products, /Product names are content[\s\S]*scroll-x-clean text-sm font-semibold/, 'mobile product names must scroll horizontally inside their cell rather than wrapping to a second row')
-assert.doesNotMatch(products, /Product names are content[\s\S]{0,600}break-words text-sm font-semibold/, 'the superseded wrapping name cell must not come back')
+assert.match(products, /getKhmerTextProps\(productName, 'min-w-0 text-sm font-semibold[^\n]*\{\.\.\.copy\(productName\)\}>\s*<EntityLink[^>]*>\s*<ProductNameRail name=\{productName\} \/>/, 'mobile product names retain Khmer typography, copy and link wrappers around the full-text two-line rail')
+assert.equal((products.match(/<ProductNameRail name=\{productName\} \/>/g) || []).length, 2, 'desktop and mobile names share the same bounded full-text rail')
 assert.match(products, /shrink-0 whitespace-nowrap rounded-full bg-slate-100[\s\S]*\{barcode\}/, 'the mobile barcode pill must show every digit on one line rather than truncating or wrapping')
 assert.match(products, /aria-disabled=\{!thumbnailState\.hasImage\}[\s\S]*if \(thumbnailState\.hasImage\) openLightbox\(thumbnailState\.gallery, 0, productName\)/, 'product image slots must isolate row detail clicks and only open the gallery when an image exists')
 assert.match(products, /const renderGroupThumbnail[\s\S]*?aria-label=\{`\$\{tr\('view_image', 'View image'\)\}: \$\{title\}`\}[\s\S]*?openLightbox\(state\.gallery, 0, title\)/, 'grouped product thumbnails must also open their gallery without bubbling to product details')
@@ -118,9 +118,9 @@ assert.match(detail, /return createPortal\(modal, document\.body\)/, 'the produc
 // tests/copyFloat.test.ts). The layout property each line pins -- the title
 // wraps in full, the barcode stays on one line -- is unchanged, and is
 // still the class list itself.
-assert.match(detail, /break-words font-bold text-gray-900 dark:text-white"[^>]*>\{productName\}/, 'product detail titles must wrap in full')
+assert.match(detail, /min-w-0 font-bold text-gray-900 dark:text-white" \{\.\.\.copy\(productName\)\}>\s*<EntityLink[^>]*><ProductNameRail name=\{productName\} \/>/, 'product detail titles retain bold typography, copy and navigation around the full-name rail')
 assert.match(detail, /whitespace-nowrap font-mono"[^>]*>\{p\.barcode\}/, 'product detail barcodes must remain on one line without truncation')
-assert.match(inventoryDetail, /break-words font-bold text-gray-900 dark:text-white"[^>]*>\{p\.name\}/, 'inventory product-detail titles must wrap in full')
+assert.match(inventoryDetail, /min-w-0 font-bold text-gray-900 dark:text-white" \{\.\.\.copy\(p\.name\)\}><ProductNameRail name=\{String\(p\.name \?\? ''\)\} \/>/, 'inventory product-detail titles retain bold typography and copy around the full-name rail')
 assert.match(inventoryDetail, /shrink-0 whitespace-nowrap font-mono text-xs text-gray-400"[^>]*>&middot; \{p\.barcode\}/, 'inventory product-detail barcodes must remain on one line')
 assert.match(detail, /<Row label=\{T\('branch', 'Branch'\)\}>[\s\S]*scroll-x-clean flex min-w-0 flex-nowrap/, 'product detail must keep Branch and its values on one row')
 // 320px source geometry, EN + KM: after the sheet's 32px inline padding,
