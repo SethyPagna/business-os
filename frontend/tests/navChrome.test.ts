@@ -375,8 +375,8 @@ runTest('the bar, the tiles and the title carry the design language, not grey ut
 })
 
 runTest('compact density and touch targets survive the restyle', () => {
-  assert.match(sidebar, /bos-nav-section min-h-11 min-w-0 break-words rounded-lg px-2\.5 py-2 text-left text-\[13px\]/,
-    'section rows are 13px and at least 44px tall')
+  assert.match(sidebar, /bos-nav-section flex min-h-16 min-w-0 flex-col items-center justify-center gap-1\.5 break-words rounded-lg px-2 py-2\.5 text-center text-\[13px\]/,
+    'section tiles are compact, vertically composed, and comfortably above 44px')
   assert.match(sidebar, /bos-nav-tile relative flex min-h-16 min-w-0 flex-col items-center justify-center gap-1\.5 rounded-xl px-2 py-3 text-\[13px\]/,
     'tiles are 13px and comfortably above the touch minimum')
   assert.match(css, /--nav-row-h: 32px/, 'the compact row height is declared')

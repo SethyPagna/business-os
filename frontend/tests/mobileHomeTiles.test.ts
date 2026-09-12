@@ -6,6 +6,8 @@ import {
   mobileHomeSectionsPanelId,
 } from '../src/utils/mobileHomeTiles.ts'
 import { DEFAULT_MOBILE_SECTION_NAV_MODE } from '../src/utils/sectionNavPreference.ts'
+import { getMobileSectionIcon } from '../src/components/navigation/mobileSectionIcons.ts'
+import { getHubDestinations } from '../src/components/shared/hubNavigation.ts'
 
 let failed = 0
 const runTest = (name: string, fn: () => void): void => {
@@ -108,8 +110,25 @@ runTest('the compact home renders a 2-column tile grid whose sub-grid spans the 
   assert.match(sidebar, /col-span-2 grid min-w-0 grid-cols-2/, 'an unfolded tile\'s sections must be a full-width 2-column sub-grid')
   assert.equal((sidebar.match(/min-h-16/g) || []).length >= 1, true, 'tiles must stay comfortably above the 44px touch minimum')
   assert.match(sidebar, /data-bos-section=\{`\$\{entry\.ownerId\}:\$\{section\.id\}`\}/, 'section buttons keep their addressable test hook')
+  assert.match(sidebar, /const SectionIcon = getMobileSectionIcon\(entry\.ownerId, section\.id\)/, 'each permitted subpage resolves its semantic icon locally')
+  assert.match(sidebar, /<SectionIcon className="h-5 w-5 shrink-0" aria-hidden="true" \/>/, 'the decorative icon is above the translated title without duplicating its accessible name')
+  assert.match(sidebar, /<span className="min-w-0 max-w-full break-words text-center leading-tight">\{sectionLabel\(section\)\}<\/span>/, 'English and Khmer section titles may fully wrap')
   assert.match(sidebar, /id=\{mobileHomeSectionsPanelId\(entry\.ownerId\)\}/, 'the sub-grid id comes from the shared helper')
   assert.match(sidebar, /aria-controls=\{hasSections \? mobileHomeSectionsPanelId\(item\.id\) : undefined\}/, 'the tile points at that same id')
+})
+
+runTest('every permission-visible subpage has its own semantic icon', () => {
+  const access = { getPermissionTier: () => 'full', hasPermission: () => true, can: () => true }
+  const pairs = ['branches', 'sales', 'contacts', 'promotions', 'settings', 'products', 'review']
+    .flatMap((ownerId) => getHubDestinations(ownerId, access).map((section) => [ownerId, section.id] as const))
+  assert.equal(pairs.length, 25, 'the current seven section groups expose 25 fully permitted subpages')
+  const icons = pairs.map(([ownerId, sectionId]) => {
+    const icon = getMobileSectionIcon(ownerId, sectionId)
+    assert.ok(icon, `${ownerId}:${sectionId} has an icon`)
+    return icon
+  })
+  assert.equal(new Set(icons).size, pairs.length, 'each subpage has a distinct visual cue')
+  assert.equal(getMobileSectionIcon('sales', 'not-permitted'), null, 'unknown or withheld sections do not invent an icon')
 })
 
 runTest('the reshape keeps the guarded navigation hooks the lineage ships', () => {

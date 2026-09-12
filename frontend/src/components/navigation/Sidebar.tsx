@@ -37,6 +37,7 @@ import { ACCOUNT_NAV_IDS, DEFAULT_MOBILE_PINNED, NAV_ITEMS as NAV_CONFIG_ITEMS, 
 import { APP_PAGE_INTENT_EVENT } from '../../app/appShellUtils.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import MinimizedWorkTray from '../shared/MinimizedWorkTray.tsx'
+import { getMobileSectionIcon } from './mobileSectionIcons.ts'
 
 const QuickPreferenceToggles = lazyRetry(() => import('../shared/QuickPreferenceToggles'), 'quick-preference-toggles')
 
@@ -715,12 +716,14 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
                         // gold ink, semibold, leading rule), which nothing in
                         // this list used to do at all.
                         const isOpenSection = page === entry.ownerId && currentSectionId === section.id
+                        const SectionIcon = getMobileSectionIcon(entry.ownerId, section.id)
                         return (
                         <button key={section.id} type="button" data-bos-section={`${entry.ownerId}:${section.id}`}
                           aria-current={isOpenSection ? 'page' : undefined}
                           onClick={() => navigateTo(entry.ownerId, hubAnchor(entry.ownerId, section.id))}
-                          className={`bos-nav-section min-h-11 min-w-0 break-words rounded-lg px-2.5 py-2 text-left text-[13px] leading-snug transition-colors ${isOpenSection ? 'is-active' : ''}`}>
-                          {sectionLabel(section)}
+                          className={`bos-nav-section flex min-h-16 min-w-0 flex-col items-center justify-center gap-1.5 break-words rounded-lg px-2 py-2.5 text-center text-[13px] leading-snug transition-colors ${isOpenSection ? 'is-active' : ''}`}>
+                          {SectionIcon ? <SectionIcon className="h-5 w-5 shrink-0" aria-hidden="true" /> : null}
+                          <span className="min-w-0 max-w-full break-words text-center leading-tight">{sectionLabel(section)}</span>
                         </button>
                         )
                       })}
