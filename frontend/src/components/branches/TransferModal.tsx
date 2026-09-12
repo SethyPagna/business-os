@@ -1703,16 +1703,14 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                         {checked ? (
                           <div className="w-full pl-6">
                             <label htmlFor={`transfer-lot-${id}`} className="mb-1 block text-xs font-medium">{t('transfer_pick_batch')}</label>
-                            <select id={`transfer-lot-${id}`} className="input w-full text-sm" value={chosenLot?.id ?? ''} disabled={!lotsReady || !!loadedLots?.error}
-                              onChange={(event) => {
-                                const batchId = Number(event.target.value)
+                            <AppSelect id={`transfer-lot-${id}`} className="w-full" buttonClassName="input w-full text-sm" ariaLabel={`${t('transfer_pick_batch')} ${product.name || ''}`} value={chosenLot?.id ?? ''} disabled={!lotsReady || !!loadedLots?.error}
+                              options={[{ value: '', label: t('transfer_pick_batch_first') }, ...lots.map((lot) => ({ value: lot.id, label: `${batchDisplayLabel(lot, t('batch'))} · ${lot.quantity} ${product.unit || ''}` }))]}
+                              onChange={(value) => {
+                                const batchId = Number(value)
                                 const lot = lots.find((entry) => Number(entry.id) === batchId)
                                 setSelectedLots((current) => ({ ...current, [id]: lot ? batchId : 0 }))
                                 setProductQuantity(product.id, lot ? String(Math.min(Number(product.branch_quantity), Number(lot.quantity))) : '')
-                              }}>
-                              <option value="">{t('transfer_pick_batch_first')}</option>
-                              {lots.map((lot) => <option key={lot.id} value={lot.id}>{batchDisplayLabel(lot, t('batch'))} · {lot.quantity} {product.unit}</option>)}
-                            </select>
+                              }} />
                             {!lotsReady ? <p className="text-xs">{t('loading')}</p> : loadedLots?.error || !lots.length ? <p role="alert" className="text-xs text-red-600">{loadedLots?.error || t('transfer_no_batches')}</p> : null}
                           </div>
                         ) : null}

@@ -82,6 +82,8 @@ async function main() {
   assert.match(source,/max=\{chosenLot \? Math\.min\(Number\(product\.branch_quantity\), Number\(chosenLot\.quantity\)\) : 0\}/)
   assert.match(source,/items: items\.map\(\(\{ productId, quantity, batchId \}\) => \(\{ productId, quantity, batchId \}\)\)/)
   assert.match(source,/value=\{chosenLot\?\.id \?\? ''\}/,'live row selector has no automatic default')
+  assert.match(source,/<AppSelect id=\{`transfer-lot-\$\{id\}`\}/,'existing lots use the shared accessible selector')
+  assert.doesNotMatch(source,/<select\b/,'native dropdowns must not bypass the shared selector')
   console.log('PASS explicit existing transfer lots: selected/date/stock bounds, entire branch completeness, unique request packing, actual handlers and late branch reads')
 }
 main().catch(error=>{console.error(error);process.exitCode=1})
