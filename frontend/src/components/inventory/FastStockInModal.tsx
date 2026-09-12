@@ -6,6 +6,7 @@
 // Each outcome stays visible, so a partial failure can be fixed and retried.
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { normalizeInternalMoney } from '../../utils/pricing.ts'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import MinimizeButton from '../shared/MinimizeButton.tsx'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
@@ -1110,7 +1111,7 @@ function currentCost(product: ProductCandidate): number {
 
 function costChanged(product: ProductCandidate, next: string): boolean {
   if (next.trim() === '' || !Number.isFinite(Number(next))) return false
-  return Math.round(currentCost(product) * 100) !== Math.round(Number(next) * 100)
+  return normalizeInternalMoney(currentCost(product)) !== normalizeInternalMoney(next)
 }
 
 function pricingForVariant(product: ProductCandidate, costUsd: number): Record<string, unknown> {

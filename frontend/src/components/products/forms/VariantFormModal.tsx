@@ -3,7 +3,7 @@ import { useApp as useAppHook } from '../../../AppContext.tsx'
 import Modal from '../../shared/Modal'
 import { useFormDirty } from '../../../utils/formDirty.ts'
 import { parseNumericInput, sanitizeNumericInput } from '../shared/primitives'
-import { formatPriceNumber, normalizePriceValue } from '../../../utils/pricing.ts'
+import { editableMoneyValue, formatPriceNumber, normalizeInternalMoney, normalizePriceValue } from '../../../utils/pricing.ts'
 import { extractHistoryResultId } from '../../../utils/historyHelpers.ts'
 import { beginSingleAction, finishSingleAction } from '../../../utils/actionGuards.ts'
 import { withLoaderTimeout } from '../../../utils/loaders.ts'
@@ -141,8 +141,8 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
     barcode: '',
     description: '',
     supplier: parent.supplier || '',
-    cost_price_usd: formatPriceNumber(parent.cost_price_usd || 0),
-    cost_price_khr: formatPriceNumber(parent.cost_price_khr || 0),
+    cost_price_usd: editableMoneyValue(parent.cost_price_usd || 0),
+    cost_price_khr: editableMoneyValue(parent.cost_price_khr || 0),
     selling_price_usd: formatPriceNumber(parent.selling_price_usd || 0),
     selling_price_khr: formatPriceNumber(parent.selling_price_khr || 0),
     // No `?? parent.selling_price` fallback. A parent with no wholesale price
@@ -239,8 +239,8 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
         wholesale_price_usd: normalizePriceValue(parseNumericInput(form.wholesale_price_usd)),
         wholesale_price_khr: normalizePriceValue(parseNumericInput(form.wholesale_price_khr)),
         stock_quantity: parseNumericInput(form.stock_quantity),
-        cost_price_usd: normalizePriceValue(parseNumericInput(form.cost_price_usd)),
-        cost_price_khr: normalizePriceValue(parseNumericInput(form.cost_price_khr)),
+        cost_price_usd: normalizeInternalMoney(parseNumericInput(form.cost_price_usd)),
+        cost_price_khr: normalizeInternalMoney(parseNumericInput(form.cost_price_khr)),
         userId: user?.id,
         userName: user?.name,
       }), 'Create product variant')
@@ -268,8 +268,8 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
           selling_price_khr: normalizePriceValue(parseNumericInput(form.selling_price_khr)),
           wholesale_price_usd: normalizePriceValue(parseNumericInput(form.wholesale_price_usd)),
           wholesale_price_khr: normalizePriceValue(parseNumericInput(form.wholesale_price_khr)),
-          cost_price_usd: normalizePriceValue(parseNumericInput(form.cost_price_usd)),
-          cost_price_khr: normalizePriceValue(parseNumericInput(form.cost_price_khr)),
+          cost_price_usd: normalizeInternalMoney(parseNumericInput(form.cost_price_usd)),
+          cost_price_khr: normalizeInternalMoney(parseNumericInput(form.cost_price_khr)),
         },
       })
     } catch (error) {
