@@ -50,6 +50,10 @@ assert.match(pos, /actorKey=\{captureActorReadScope\('pos:address-presets'\)\.au
 
 assert.match(picker, /captureActorReadScope\('pos:address-presets'\)/)
 assert.match(picker, /isActorReadScopeCurrent\(actorScope\)/, 'late reads from an earlier account/session are ignored')
+assert.match(picker, /const persist = async[^]*?const requestId = \+\+requestRef\.current[^]*?const actorScope = captureActorReadScope\('pos:address-presets'\)[^]*?savePosAddressPresets[^]*?requestRef\.current !== requestId \|\| !isActorReadScopeCurrent\(actorScope\)[^]*?return false[^]*?setPresets\(response\.presets\)/, 'a deferred save cannot publish an earlier actor result')
+assert.match(picker, /catch \(saveError\) \{\s*if \(requestRef\.current !== requestId \|\| !isActorReadScopeCurrent\(actorScope\)\) return false/, 'an earlier actor save failure is also silent')
+assert.equal((picker.match(/if \(await persist\(/g) || []).length, 3, 'add, rename, and remove mutate caller state only after a current-actor save returns true')
+assert.match(picker, /setPendingRemove\(''\)\s*setSaving\(false\)\s*void load\(\)/, 'a new actor generation clears the old actor saving state')
 assert.match(picker, /response\.can_manage === true/)
 assert.match(picker, /disabled=\{!canManage\}/, 'read-only POS access cannot open management controls')
 assert.match(picker, /onApply\(preview\)/, 'selection changes only a preview until explicit Apply')
