@@ -109,6 +109,22 @@ async function loadAnonymousCustomerIds(db: D1Compat, ids: number[]): Promise<Se
 
 const NO_EXTRA_STATEMENTS = async () => []
 
+export function bulkDeleteWriteOffCosts(input: { quantity: number; unitCostUsd: number | null; unitCostKhr: number | null }) {
+  const quantity = Number(input.quantity)
+  const unitCostUsd = input.unitCostUsd == null ? null : Number(input.unitCostUsd)
+  const unitCostKhr = input.unitCostKhr == null ? null : Number(input.unitCostKhr)
+  const totalCostUsd = unitCostUsd == null ? null : unitCostUsd * quantity
+  const totalCostKhr = unitCostKhr == null ? null : unitCostKhr * quantity
+  if (!Number.isFinite(quantity)
+    || (unitCostUsd !== null && !Number.isFinite(unitCostUsd))
+    || (unitCostKhr !== null && !Number.isFinite(unitCostKhr))
+    || (totalCostUsd !== null && !Number.isFinite(totalCostUsd))
+    || (totalCostKhr !== null && !Number.isFinite(totalCostKhr))) {
+    throw new Error('Bulk-delete write-off cost is outside the supported numeric range.')
+  }
+  return { unitCostUsd, unitCostKhr, totalCostUsd, totalCostKhr }
+}
+
 export const ENTITY_CONFIGS: Record<BulkDeleteEntityType, EntityConfig> = {
   products: {
     table: 'products',
@@ -127,7 +143,12 @@ export const ENTITY_CONFIGS: Record<BulkDeleteEntityType, EntityConfig> = {
           SELECT bs.product_id AS productId, bs.branch_id AS branchId, bs.quantity AS quantity,
                  p.name AS productName,
                  COALESCE(p.cost_price_usd, (
-                   SELECT SUM(bbs.quantity * pb.unit_cost_usd) / NULLIF(SUM(bbs.quantity), 0)
+                   SELECT CASE
+                     WHEN SUM(bbs.quantity) = bs.quantity
+                      AND SUM(CASE WHEN pb.unit_cost_usd IS NULL THEN 1 ELSE 0 END) = 0
+                     THEN SUM(bbs.quantity * pb.unit_cost_usd) / NULLIF(SUM(bbs.quantity), 0)
+                     ELSE NULL
+                   END
                    FROM branch_batch_stock bbs
                    JOIN product_batches pb ON pb.id = bbs.batch_id
                    WHERE pb.variant_product_id = bs.product_id AND bbs.branch_id = bs.branch_id
@@ -141,19 +162,19 @@ export const ENTITY_CONFIGS: Record<BulkDeleteEntityType, EntityConfig> = {
           WHERE bs.product_id IN (${placeholders}) AND bs.quantity > 0
         `).all<{ productId: number; branchId: number; quantity: number; productName: string | null; branchName: string | null; unitCostUsd: number | null; unitCostKhr: number | null }>(slice)
       })
-      return stockRows.map((row) => ({
-        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, user_id, user_name, created_at)
-              VALUES (@productId, @productName, @branchId, @branchName, 'delete', @quantity, @unitCostUsd, @unitCostKhr, @totalCostUsd, @totalCostKhr, @reason, @userId, @userName, CURRENT_TIMESTAMP)`,
-        params: {
-          productId: row.productId, productName: row.productName, branchId: row.branchId, branchName: row.branchName,
-          quantity: row.quantity,
-          unitCostUsd: row.unitCostUsd,
-          unitCostKhr: row.unitCostKhr,
-          totalCostUsd: row.unitCostUsd == null ? null : Number(row.unitCostUsd) * Number(row.quantity),
-          totalCostKhr: row.unitCostKhr == null ? null : Number(row.unitCostKhr) * Number(row.quantity),
-          reason, userId: user.id, userName: actorSnapshot(user),
-        },
-      }))
+      return stockRows.map((row) => {
+        const costs = bulkDeleteWriteOffCosts(row)
+        return {
+          sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, user_id, user_name, created_at)
+                VALUES (@productId, @productName, @branchId, @branchName, 'delete', @quantity, @unitCostUsd, @unitCostKhr, @totalCostUsd, @totalCostKhr, @reason, @userId, @userName, CURRENT_TIMESTAMP)`,
+          params: {
+            productId: row.productId, productName: row.productName, branchId: row.branchId, branchName: row.branchName,
+            quantity: row.quantity,
+            ...costs,
+            reason, userId: user.id, userName: actorSnapshot(user),
+          },
+        }
+      })
     },
   },
   // Customers/suppliers/delivery_contacts (this session): hard-delete,

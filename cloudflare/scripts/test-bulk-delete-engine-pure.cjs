@@ -68,7 +68,7 @@ const moduleObj = { exports: {} }
 const wrapper = new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)
 wrapper(moduleObj.exports, stubRequire, moduleObj, sourcePath, path.dirname(sourcePath))
 
-const { buildCoreDeleteStatements, ENTITY_CONFIGS } = moduleObj.exports
+const { buildCoreDeleteStatements, ENTITY_CONFIGS, bulkDeleteWriteOffCosts } = moduleObj.exports
 
 {
   const statements = buildCoreDeleteStatements(ENTITY_CONFIGS.products, [1, 2, 3])
@@ -193,6 +193,19 @@ const { buildCoreDeleteStatements, ENTITY_CONFIGS } = moduleObj.exports
     const lotFallback = await ENTITY_CONFIGS.products.buildExtraStatements(rawDb, [42], 'Bulk cleanup', { id: 7, name: 'Sok' })
     assert.strictEqual(lotFallback[0].params.unitCostUsd, 6.5, 'blank product cost uses the plan-time quantity-weighted lot cost')
     assert.strictEqual(lotFallback[0].params.totalCostUsd, 26)
+
+    rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity, cost_price_usd) VALUES (43, 'Partly tracked item', 1, 5, NULL)").run()
+    rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (43, 2, 5)').run()
+    rawDb.prepare("INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, unit_cost_usd, is_active) VALUES (4301, 43, '43:a', 'a', '2026-01-01', 8, 1)").run()
+    rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (4301, 2, 4)').run()
+    const partialLotFallback = await ENTITY_CONFIGS.products.buildExtraStatements(rawDb, [43], 'Bulk cleanup', { id: 7, name: 'Sok' })
+    assert.strictEqual(partialLotFallback[0].params.unitCostUsd, null, 'priced lots covering only part of branch stock are unknown, not extrapolated')
+    assert.strictEqual(partialLotFallback[0].params.totalCostUsd, null)
+    assert.throws(
+      () => bulkDeleteWriteOffCosts({ quantity: 2, unitCostUsd: 1e308, unitCostKhr: null }),
+      /outside the supported numeric range/,
+      'an overflowing write-off total is rejected before a D1 statement is built',
+    )
     console.log('PASS product bulk-delete write-off snapshots zero/nonzero costs and total in the same movement statement')
   }
 

@@ -2615,16 +2615,25 @@ export function inventoryMovementCostSnapshot(input: {
   const finiteOrNull = (value: unknown): number | null => {
     if (value === null || value === undefined || value === '') return null
     const parsed = Number(value)
-    return Number.isFinite(parsed) ? parsed : null
+    if (!Number.isFinite(parsed)) {
+      throw new Error('Inventory movement cost is outside the supported numeric range. Correct the cost and analyze the import again.')
+    }
+    return parsed
   }
   const unitCostUsd = input.explicitUsd !== undefined ? finiteOrNull(input.explicitUsd) : finiteOrNull(input.fallbackUsd)
   const unitCostKhr = input.explicitKhr !== undefined ? finiteOrNull(input.explicitKhr) : finiteOrNull(input.fallbackKhr)
   const magnitude = Math.abs(Number(input.quantity) || 0)
+  const totalCostUsd = unitCostUsd === null ? null : unitCostUsd * magnitude
+  const totalCostKhr = unitCostKhr === null ? null : unitCostKhr * magnitude
+  if ((totalCostUsd !== null && !Number.isFinite(totalCostUsd))
+    || (totalCostKhr !== null && !Number.isFinite(totalCostKhr))) {
+    throw new Error('Inventory movement cost is outside the supported numeric range. Correct the cost and analyze the import again.')
+  }
   return {
     unitCostUsd,
     unitCostKhr,
-    totalCostUsd: unitCostUsd === null ? null : unitCostUsd * magnitude,
-    totalCostKhr: unitCostKhr === null ? null : unitCostKhr * magnitude,
+    totalCostUsd,
+    totalCostKhr,
   }
 }
 
@@ -2639,13 +2648,34 @@ export function applyAnalyzedInventoryCostSnapshots(
   return results.map((result) => {
     if (result.action !== 'create') return result
     const analyzed = analyzedByRow.get(result.rowNumber)
-    if (!analyzed || analyzed.action !== 'create') return result
+    if (!analyzed || analyzed.action !== 'create') {
+      throw new Error(`Inventory import row ${result.rowNumber} was not an approved stock action. Analyze the import again before applying.`)
+    }
     const plannedData = analyzed.data as Record<string, unknown>
-    const nextData = { ...(result.data as Record<string, unknown>) }
+    const currentData = result.data as Record<string, unknown>
+    const numericPlanFields = ['product_id', 'branch_id', 'quantity', 'signedQuantity'] as const
+    const staleNumericField = numericPlanFields.find((field) => Number(plannedData[field]) !== Number(currentData[field]))
+    const staleMovementType = String(plannedData.movement_type ?? '') !== String(currentData.movement_type ?? '')
+    if (staleNumericField || staleMovementType) {
+      throw new Error(`Inventory import row ${result.rowNumber} changed product, branch, direction, or quantity after review. Analyze the import again before applying.`)
+    }
+    const missingCostField = INVENTORY_MOVEMENT_COST_FIELDS.find((field) => !Object.prototype.hasOwnProperty.call(plannedData, field))
+    if (missingCostField) {
+      throw new Error(`Inventory import row ${result.rowNumber} has no reviewed cost snapshot. Analyze the import again before applying.`)
+    }
+    const plannedCosts = inventoryMovementCostSnapshot({
+      explicitUsd: plannedData.unit_cost_usd === null ? undefined : Number(plannedData.unit_cost_usd),
+      explicitKhr: plannedData.unit_cost_khr === null ? undefined : Number(plannedData.unit_cost_khr),
+      fallbackUsd: null,
+      fallbackKhr: null,
+      quantity: Number(plannedData.quantity),
+    })
+    if (plannedCosts.totalCostUsd !== plannedData.total_cost_usd || plannedCosts.totalCostKhr !== plannedData.total_cost_khr) {
+      throw new Error(`Inventory import row ${result.rowNumber} has an invalid reviewed cost total. Analyze the import again before applying.`)
+    }
+    const nextData = { ...currentData }
     for (const field of INVENTORY_MOVEMENT_COST_FIELDS) {
-      // Own-property presence distinguishes an intentionally planned NULL
-      // (cost was unavailable) from an old analyze row predating snapshots.
-      if (Object.prototype.hasOwnProperty.call(plannedData, field)) nextData[field] = plannedData[field]
+      nextData[field] = plannedData[field]
     }
     return { ...result, data: nextData }
   })
