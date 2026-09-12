@@ -56,6 +56,10 @@ export type ProductMergeLotSnapshot = {
 }
 
 type KeyedRead = { key: string; sql: string; params?: BindParams }
+export type ProductMergeReadPlan<T> = {
+  reads: KeyedRead[]
+  decode: (rows: Map<string, Array<Record<string, unknown>>>) => T
+}
 
 export const PRODUCT_MERGE_READ_BATCH_MAX_STATEMENTS = 80
 
@@ -100,6 +104,17 @@ export async function readProductMergeCaseSnapshot(
   duplicateId: number,
   reparentTables: readonly ProductMergeReparentTable[],
 ): Promise<ProductMergeCaseSnapshot> {
+  const plan = planProductMergeCaseSnapshot(keeperId, duplicateId, reparentTables)
+  return plan.decode(await runProductMergeReadBatch(db, plan.reads))
+}
+
+// Planning is pure: bulk preview can pool independent cases without copying
+// their SQL or changing the single-case callers' consistent read transaction.
+export function planProductMergeCaseSnapshot(
+  keeperId: number,
+  duplicateId: number,
+  reparentTables: readonly ProductMergeReparentTable[],
+): ProductMergeReadPlan<ProductMergeCaseSnapshot> {
   const reads: KeyedRead[] = [
     { key: 'canonicalBatches', sql: 'SELECT * FROM product_batches WHERE variant_product_id = @id ORDER BY id', params: { id: keeperId } },
     { key: 'canonicalBatchStock', sql: `SELECT bbs.* FROM branch_batch_stock bbs
@@ -131,28 +146,30 @@ export async function readProductMergeCaseSnapshot(
     { key: 'promotionRules', sql: 'SELECT id, product_ids FROM promotion_rules' },
     { key: 'childProducts', sql: 'SELECT id FROM products WHERE parent_id = @id', params: { id: duplicateId } },
   ]
-  const rows = await runProductMergeReadBatch(db, reads)
-  const asRows = <T>(key: string): T[] => (rows.get(key) || []) as T[]
-  const reparentedByTable = reparentTables.map(({ table, column }, index) => ({
-    table,
-    column,
-    ids: asRows<{ id: number }>(`reparent:${index}`).map((row) => Number(row.id)),
-  })).filter((entry) => entry.ids.length > 0)
+  const decode: ProductMergeReadPlan<ProductMergeCaseSnapshot>['decode'] = (rows) => {
+    const asRows = <T>(key: string): T[] => (rows.get(key) || []) as T[]
+    const reparentedByTable = reparentTables.map(({ table, column }, index) => ({
+      table,
+      column,
+      ids: asRows<{ id: number }>(`reparent:${index}`).map((row) => Number(row.id)),
+    })).filter((entry) => entry.ids.length > 0)
 
-  return {
-    canonicalBatchRows: asRows<ProductMergeBatchRow>('canonicalBatches'),
-    canonicalBatchStockRows: asRows<ProductMergeBatchStockRow>('canonicalBatchStock'),
-    duplicateStockRows: asRows<ProductMergeStockRow>('duplicateStock'),
-    canonicalStockBefore: asRows<ProductMergeStockRow>('canonicalStock'),
-    canonicalProduct: asRows<ProductMergeProductRow>('canonicalProduct')[0],
-    duplicateProduct: asRows<ProductMergeProductRow>('duplicateProduct')[0],
-    duplicateBatchRows: asRows<ProductMergeBatchRow>('duplicateBatches'),
-    duplicateImageRows: asRows<ProductMergeImageRow>('duplicateImages'),
-    canonicalImageRows: asRows<ProductMergeImageRow>('canonicalImages'),
-    reparentedByTable,
-    promotionRuleRows: asRows<{ id: number; product_ids: string | null }>('promotionRules'),
-    childProductRows: asRows<{ id: number }>('childProducts'),
+    return {
+      canonicalBatchRows: asRows<ProductMergeBatchRow>('canonicalBatches'),
+      canonicalBatchStockRows: asRows<ProductMergeBatchStockRow>('canonicalBatchStock'),
+      duplicateStockRows: asRows<ProductMergeStockRow>('duplicateStock'),
+      canonicalStockBefore: asRows<ProductMergeStockRow>('canonicalStock'),
+      canonicalProduct: asRows<ProductMergeProductRow>('canonicalProduct')[0],
+      duplicateProduct: asRows<ProductMergeProductRow>('duplicateProduct')[0],
+      duplicateBatchRows: asRows<ProductMergeBatchRow>('duplicateBatches'),
+      duplicateImageRows: asRows<ProductMergeImageRow>('duplicateImages'),
+      canonicalImageRows: asRows<ProductMergeImageRow>('canonicalImages'),
+      reparentedByTable,
+      promotionRuleRows: asRows<{ id: number; product_ids: string | null }>('promotionRules'),
+      childProductRows: asRows<{ id: number }>('childProducts'),
+    }
   }
+  return { reads, decode }
 }
 
 // Lot preimages depend on the first snapshot's batch-key comparison, so they
@@ -165,6 +182,15 @@ export async function readProductMergeDependentLotSnapshots(
   stockDisposition: 'merge' | 'write_off',
   maxStatements = PRODUCT_MERGE_READ_BATCH_MAX_STATEMENTS,
 ): Promise<Map<number, ProductMergeLotSnapshot>> {
+  const plan = planProductMergeDependentLotSnapshots(snapshot, stockDisposition, maxStatements)
+  return plan.decode(await runProductMergeReadBatch(db, plan.reads))
+}
+
+export function planProductMergeDependentLotSnapshots(
+  snapshot: ProductMergeCaseSnapshot,
+  stockDisposition: 'merge' | 'write_off',
+  maxStatements = PRODUCT_MERGE_READ_BATCH_MAX_STATEMENTS,
+): ProductMergeReadPlan<Map<number, ProductMergeLotSnapshot>> {
   const keeperBatchIdByKey = new Map(snapshot.canonicalBatchRows.map((row) => [row.batch_key, Number(row.id)]))
   const reads: KeyedRead[] = []
   const requested: Array<{ duplicateBatchId: number; keeperBatchId: number | null }> = []
@@ -186,19 +212,20 @@ export async function readProductMergeDependentLotSnapshots(
       )
     }
   }
-  if (!reads.length) return new Map()
-  if (!Number.isSafeInteger(maxStatements) || maxStatements <= 0 || reads.length > maxStatements) {
+  if (reads.length && (!Number.isSafeInteger(maxStatements) || maxStatements <= 0 || reads.length > maxStatements)) {
     throw new ProductMergeReadBatchLimitError(reads.length, maxStatements)
   }
-  const rows = await runProductMergeReadBatch(db, reads)
-  const result = new Map<number, ProductMergeLotSnapshot>()
-  for (const { duplicateBatchId, keeperBatchId } of requested) {
-    result.set(duplicateBatchId, {
-      duplicateStockRows: (rows.get(`dupStock:${duplicateBatchId}`) || []) as ProductMergeStockRow[],
-      keeperStockBefore: keeperBatchId == null ? [] : (rows.get(`keeperStock:${duplicateBatchId}`) || []) as ProductMergeStockRow[],
-      saleAllocationIds: keeperBatchId == null ? [] : (rows.get(`saleAllocations:${duplicateBatchId}`) || []).map((row) => Number(row.id)),
-      returnAllocationIds: keeperBatchId == null ? [] : (rows.get(`returnAllocations:${duplicateBatchId}`) || []).map((row) => Number(row.id)),
-    })
+  const decode: ProductMergeReadPlan<Map<number, ProductMergeLotSnapshot>>['decode'] = (rows) => {
+    const result = new Map<number, ProductMergeLotSnapshot>()
+    for (const { duplicateBatchId, keeperBatchId } of requested) {
+      result.set(duplicateBatchId, {
+        duplicateStockRows: (rows.get(`dupStock:${duplicateBatchId}`) || []) as ProductMergeStockRow[],
+        keeperStockBefore: keeperBatchId == null ? [] : (rows.get(`keeperStock:${duplicateBatchId}`) || []) as ProductMergeStockRow[],
+        saleAllocationIds: keeperBatchId == null ? [] : (rows.get(`saleAllocations:${duplicateBatchId}`) || []).map((row) => Number(row.id)),
+        returnAllocationIds: keeperBatchId == null ? [] : (rows.get(`returnAllocations:${duplicateBatchId}`) || []).map((row) => Number(row.id)),
+      })
+    }
+    return result
   }
-  return result
+  return { reads, decode }
 }
