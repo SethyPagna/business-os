@@ -6,6 +6,13 @@ const root = path.resolve(__dirname, '../..')
 const paths = ['cloudflare/src/lib/moneyPrecision.ts', 'frontend/src/utils/moneyPrecision.ts']
 const texts = paths.map(file => fs.readFileSync(path.join(root, file), 'utf8').replace(/\r\n/g, '\n'))
 assert.equal(texts[0], texts[1], 'portable twins must be identical, not merely expose the same API')
+// Frontend utility tests use Node's native strip-types loader, not transpilation.
+// Exercise that actual entrypoint so non-erasable TypeScript cannot slip through.
+for (const file of paths) {
+  const native = require(path.join(root, file))
+  assert.equal(native.roundMoney4('0.00015'), 0.0002)
+  assert.throws(() => native.roundMoney4('bad'), e => e instanceof native.MoneyPrecisionError && e.code === 'invalid_decimal')
+}
 function load(text) {
   const { outputText } = ts.transpileModule(text, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } })
   const mod = { exports: {} }
