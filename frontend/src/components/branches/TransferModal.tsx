@@ -33,6 +33,7 @@ import ProductOptionSheet from '../shared/ProductOptionSheet.tsx'
 import { branchCanBeTransferDestination, branchCanBeTransferSource, branchCanTransferBetween, branchRoleFromName } from '../../utils/branchRoles.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
+import { captureActorReadScope, assertActorReadScope, isActorReadScopeCurrent, type ActorReadScope } from '../../api/actorReadScope.ts'
 
 const TRANSFER_STOCK_LOAD_TIMEOUT_MS = 12000
 // Transfers can allocate and materialize many lot rows in one D1 batch. Keep
@@ -49,7 +50,7 @@ const TRANSFER_BULK_CHUNK_SIZE = 200
 const TRANSFER_SEARCH_DEBOUNCE_MS = 200
 const TRANSFER_STOCK_PAGE_SIZE = 50
 
-type PendingTransferItem = { productId: string | number; quantity: number }
+type PendingTransferItem = { productId: string | number; quantity: number; batchId?: number; batchLabel?: string; productName?: string }
 type PendingTransfer = {
   /** 'selected' = the checked rows. 'entire_branch' = every in-stock row. */
   scope: 'selected' | 'entire_branch'
@@ -59,6 +60,32 @@ type PendingTransfer = {
   toName: string
   /** How many requests this will take -- >1 means it is not one atomic step. */
   chunks: number
+  fromBranch: string
+  toBranch: string
+  authority: ActorReadScope
+}
+
+/** A bulk request permits one row per product. Multiple lots remain explicit
+ * across requests, with every body frozen by the existing receipt workflow. */
+export function packTransferLots(items: PendingTransferItem[]): PendingTransferItem[][] {
+  const chunks: PendingTransferItem[][] = []
+  for (const item of items) {
+    let chunk = chunks.find((rows) => rows.length < TRANSFER_BULK_CHUNK_SIZE && !rows.some((row) => String(row.productId) === String(item.productId)))
+    if (!chunk) { chunk = []; chunks.push(chunk) }
+    chunk.push(item)
+  }
+  return chunks
+}
+
+export function positiveTransferLots(batches: ProductBatch[]): ProductBatch[] {
+  return batches.filter((batch) => Number.isInteger(Number(batch.id)) && Number(batch.id) > 0 && Number(batch.is_active) === 1 && Number.isFinite(Number(batch.quantity)) && Number(batch.quantity) > 0 && !!batch.received_at)
+}
+
+export function selectedTransferLot(product: TransferProduct, batches: ProductBatch[], batchId: number | undefined, quantity: number): PendingTransferItem {
+  const batch = positiveTransferLots(batches).find((row) => Number(row.id) === batchId)
+  if (!batch) throw new Error('transfer_pick_batch_first')
+  if (!Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(Number(product.branch_quantity)) || quantity > Math.min(Number(product.branch_quantity), Number(batch.quantity))) throw new Error('transfer_invalid_quantity')
+  return { productId: product.id, quantity, batchId: Number(batch.id), productName: product.name, batchLabel: batchDisplayLabel(batch, '') }
 }
 
 /**
@@ -184,7 +211,7 @@ type TransferApi = {
     fromBranchId: number
     toBranchId: number
     reason: string
-    items: Array<{ productId: string | number; quantity: number }>
+    items: PendingTransferItem[]
     userId?: string | number
     userName?: string
   }) => Promise<TransferBulkResult>
@@ -236,7 +263,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
    * 2.1 Form inputs and branch-scoped product cache.
    */
   const draftKey = transferDraftKey('branch_transfer')
-  const [initialDraft] = useState(() => readTransferDraft<{ fromBranch: string; toBranch: string; search: string; reason: string; selectedQuantities: Record<string, string>; showAllProducts: boolean; showSelectedOnly: boolean }>('branch_transfer', user?.id))
+  const [initialDraft] = useState(() => readTransferDraft<{ fromBranch: string; toBranch: string; search: string; reason: string; selectedQuantities: Record<string, string>; selectedLots?: Record<string, number>; showAllProducts: boolean; showSelectedOnly: boolean }>('branch_transfer', user?.id))
   const [fromBranch, setFromBranch] = useState(initialDraft?.fromBranch || '')
   const [toBranch, setToBranch] = useState(initialDraft?.toBranch || '')
   const [search, setSearch] = useState(initialDraft?.search || '')
@@ -297,6 +324,71 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   const [loadingMultiProducts, setLoadingMultiProducts] = useState(false)
   const [showAllProducts, setShowAllProducts] = useState(initialDraft?.showAllProducts || false)
   const [selectedQuantities, setSelectedQuantities] = useState<Record<string, string>>(initialDraft?.selectedQuantities || {})
+  const [selectedLots, setSelectedLots] = useState<Record<string, number>>(initialDraft?.selectedLots || {})
+  const [rowLots, setRowLots] = useState<Record<string, { branch: string; authority: ActorReadScope; batches: ProductBatch[]; error?: string }>>({})
+  const [preparingLots, setPreparingLots] = useState(false)
+  const lotIntentRef = useRef(0)
+  const lotBranchRef = useRef(fromBranch)
+  lotBranchRef.current = fromBranch
+  const selectedLotProducts = Object.keys(selectedQuantities).sort().join(',')
+  useEffect(() => {
+    let cancelled = false
+    const branch = fromBranch
+    if (!branch) return
+    const authority = captureActorReadScope('batches')
+    const ids = Object.keys(selectedQuantities).filter((id) => !rowLots[id] || rowLots[id].error || !rowLots[id].batches.length || rowLots[id].branch !== branch || !isActorReadScopeCurrent(rowLots[id].authority))
+    let next = 0
+    void Promise.all(Array.from({ length: Math.min(4, ids.length) }, async () => {
+      while (!cancelled && next < ids.length) {
+        const id = ids[next++]
+        try {
+          assertActorReadScope(authority)
+          const result = await withLoaderTimeout(() => getProductBatches(Number(id), Number(branch)), 'Transfer received dates', TRANSFER_STOCK_LOAD_TIMEOUT_MS)
+          if (cancelled || lotBranchRef.current !== branch || !isActorReadScopeCurrent(authority)) return
+          setRowLots((current) => ({ ...current, [id]: { branch, authority, batches: positiveTransferLots(result.batches) } }))
+        } catch {
+          if (cancelled || lotBranchRef.current !== branch || !isActorReadScopeCurrent(authority)) return
+          setRowLots((current) => ({ ...current, [id]: { branch, authority, batches: [], error: t('failed_to_load_data') } }))
+        }
+      }
+    }))
+    return () => { cancelled = true }
+  }, [fromBranch, selectedLotProducts, user?.id])
+
+  const expandEntireBranchLots = async (items: PendingTransferItem[], products: TransferProduct[]) => {
+    const intent = ++lotIntentRef.current
+    const branch = fromBranch
+    const authority = captureActorReadScope('batches')
+    setPreparingLots(true)
+    let abandoned = false
+    try {
+      const expanded: PendingTransferItem[][] = new Array(items.length)
+      let next = 0
+      await Promise.all(Array.from({ length: Math.min(4, items.length) }, async () => {
+        while (!abandoned && next < items.length) {
+          const index = next++
+          assertActorReadScope(authority)
+          if (lotBranchRef.current !== branch || intent !== lotIntentRef.current) throw new Error('stale')
+          const item = items[index]
+          const result = await withLoaderTimeout(() => getProductBatches(Number(item.productId), Number(branch)), 'Transfer received dates', TRANSFER_STOCK_LOAD_TIMEOUT_MS)
+          if (abandoned) return
+          assertActorReadScope(authority)
+          const lots = positiveTransferLots(result.batches)
+          if (!lots.length) throw new Error(t('transfer_no_batches'))
+          if (Math.abs(lots.reduce((sum, lot) => sum + Number(lot.quantity), 0) - item.quantity) > 0.000001) throw new Error(t('transfer_lot_stock_mismatch'))
+          const product = products.find((row) => String(row.id) === String(item.productId))!
+          expanded[index] = lots.map((lot) => selectedTransferLot(product, lots, Number(lot.id), Number(lot.quantity)))
+        }
+      }))
+      if (!aliveRef.current || lotBranchRef.current !== branch || intent !== lotIntentRef.current) return null
+      assertActorReadScope(authority)
+      return expanded.flat()
+    } catch (error) {
+      abandoned = true
+      if (aliveRef.current && lotBranchRef.current === branch && isActorReadScopeCurrent(authority)) notify(getErrorMessage(error, t('failed_to_load_data')), 'error')
+      return null
+    } finally { if (intent === lotIntentRef.current) setPreparingLots(false) }
+  }
   // Multi mode: view filter that narrows the (whole-catalog) list to just
   // the checked rows, so the picked set can be reviewed/adjusted in one
   // screen instead of hunting scattered highlighted rows through thousands.
@@ -318,12 +410,12 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   const draftFinishedRef = useRef(false)
   const draftGuardRef = useRef({ dirty: transferDirty, pending: !!savedRun, busy: saving || savingBulk })
   draftGuardRef.current = { dirty: transferDirty, pending: !!savedRun, busy: saving || savingBulk }
-  const draftState = { fromBranch, toBranch, search, reason, selectedQuantities, showAllProducts, showSelectedOnly }
+  const draftState = { fromBranch, toBranch, search, reason, selectedQuantities, selectedLots, showAllProducts, showSelectedOnly }
   const draftLifecycleRef = useRef({ draftKey, actorId: user?.id, dirty: transferDirty, form: draftState })
   draftLifecycleRef.current = { draftKey, actorId: user?.id, dirty: transferDirty, form: draftState }
   useEffect(() => {
     if (transferDirty && !draftFinishedRef.current) writeTransferDraft('branch_transfer', user?.id, draftKey, draftState)
-  }, [draftKey, user?.id, fromBranch, toBranch, search, reason, selectedQuantities, showAllProducts, showSelectedOnly, transferDirty])
+  }, [draftKey, user?.id, fromBranch, toBranch, search, reason, selectedQuantities, selectedLots, showAllProducts, showSelectedOnly, transferDirty])
   useEffect(() => {
     markRestoreHandled('branch_transfer')
     const preserve = () => {
@@ -392,6 +484,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
       invalidateTrackedRequest(stockRequestRef)
       invalidateTrackedRequest(multiStockRequestRef)
       invalidateTrackedRequest(batchRequestRef)
+      lotIntentRef.current++
     }
   }, [])
 
@@ -669,7 +762,8 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
           entireBranchAfterLoadRef.current = false
           const everything = entireBranchItems(normalized)
           if (everything.length) {
-            setPendingTransfer(buildPendingTransfer('entire_branch', everything))
+            const lots = await expandEntireBranchLots(everything, normalized)
+            if (lots) setPendingTransfer(buildPendingTransfer('entire_branch', lots))
           } else {
             notify(t('transfer_no_stock_products') || 'No products with stock in this branch', 'error')
           }
@@ -699,6 +793,11 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   useEffect(() => {
     if (previousSourceRef.current === fromBranch) return
     previousSourceRef.current = fromBranch
+    lotIntentRef.current++
+    setPreparingLots(false)
+    setSelectedLots({})
+    setRowLots({})
+    setPendingTransfer(null)
     setSelectedQuantities({})
     setShowSelectedOnly(false)
     setShowAllProducts(false)
@@ -780,7 +879,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   )
 
   const selectedEntries = useMemo(
-    () => Object.entries(selectedQuantities).filter(([, value]) => value !== ''),
+    () => Object.entries(selectedQuantities),
     [selectedQuantities],
   )
   const selectedCount = selectedEntries.length
@@ -788,6 +887,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
     && filteredMulti.every((product) => String(product.id) in selectedQuantities)
 
   const toggleProductSelected = (product: TransferProduct) => {
+    setSelectedLots((current) => { const next = { ...current }; delete next[String(product.id)]; return next })
     setSelectedQuantities((current) => {
       const id = String(product.id)
       const next = { ...current }
@@ -813,6 +913,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
    * server's per-request limit.
    */
   const toggleSelectAllShown = () => {
+    setSelectedLots((current) => { const next = { ...current }; filteredMulti.forEach((product) => { delete next[String(product.id)] }); return next })
     setSelectedQuantities((current) => {
       if (allFilteredSelected) {
         // Only clear the rows currently visible under the active search --
@@ -833,10 +934,11 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   // for both scopes, so a whole-branch move is checked the same way a
   // three-row one is.
   const confirmReviewItems = (pending: PendingTransfer): ConfirmReviewItem[] => [
-    { label: t('products') || 'Products', value: String(pending.items.length) },
+    { label: t('products') || 'Products', value: String(new Set(pending.items.map((item) => String(item.productId))).size) },
     { label: t('transfer_total_units') || 'Total units', value: String(pending.totalUnits) },
     { label: t('from_branch') || 'From Branch', value: pending.fromName },
     { label: t('to_branch') || 'To Branch', value: pending.toName },
+    ...pending.items.map((item) => ({ label: item.productName || String(item.productId), value: `${item.batchLabel}: ${item.quantity}` })),
   ]
 
   const buildPendingTransfer = (scope: PendingTransfer['scope'], items: PendingTransferItem[]): PendingTransfer => ({
@@ -845,7 +947,8 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
     totalUnits: items.reduce((sum, item) => sum + item.quantity, 0),
     fromName: branchNameById(fromBranch) || t('source_branch') || 'source branch',
     toName: branchNameById(toBranch) || t('destination_branch') || 'destination branch',
-    chunks: Math.max(1, Math.ceil(items.length / TRANSFER_BULK_CHUNK_SIZE)),
+    chunks: packTransferLots(items).length,
+    fromBranch, toBranch, authority: captureActorReadScope('batches'),
   })
 
   /**
@@ -875,8 +978,8 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
    * search or the selected-only view must not quietly shrink what "entire
    * branch" means. Nothing is written here; this only parks the confirm.
    */
-  const handleTransferEntireBranch = () => {
-    if (savedRun || savingBulk || retryStorageError) return
+  const handleTransferEntireBranch = async () => {
+    if (savedRun || savingBulk || preparingLots || retryStorageError) return
     if (!fromBranch || !toBranch) {
       notify(t('select_transfer_branches') || 'Choose both source and destination branches.', 'error')
       return
@@ -900,7 +1003,8 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
       notify(t('transfer_no_stock_products') || 'No products with stock in this branch', 'error')
       return
     }
-    setPendingTransfer(buildPendingTransfer('entire_branch', everything))
+    const lots = await expandEntireBranchLots(everything, multiProducts)
+    if (lots) setPendingTransfer(buildPendingTransfer('entire_branch', lots))
   }
 
   // The Worker validates aggregate branch stock before an explicit lot's
@@ -1050,7 +1154,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
     if (!requireTransferReason()) return
 
     const productsById = new Map(multiProducts.map((product) => [String(product.id), product]))
-    const items: Array<{ productId: string | number; quantity: number }> = []
+    const items: PendingTransferItem[] = []
     for (const [productId, rawQuantity] of selectedEntries) {
       const product = productsById.get(productId)
       const qty = Number(rawQuantity)
@@ -1063,7 +1167,10 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
         notify(`${product?.name || productId}: ${message} ${product?.unit || ''}`.trim(), 'error')
         return
       }
-      items.push({ productId, quantity: qty })
+      const loaded = rowLots[productId]
+      if (!loaded || loaded.error || loaded.branch !== fromBranch || !isActorReadScopeCurrent(loaded.authority)) { notify(t('transfer_pick_batch_first'), 'error'); return }
+      try { items.push(selectedTransferLot(product, loaded.batches, selectedLots[productId], qty)) }
+      catch { notify(`${product.name}: ${t('transfer_pick_batch_first')} / ${t('transfer_only_available').replace('{n}', String(loaded.batches.find((lot) => Number(lot.id) === selectedLots[productId])?.quantity || 0))}`, 'error'); return }
     }
 
     setPendingTransfer(buildPendingTransfer('selected', items))
@@ -1097,16 +1204,17 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   const runPendingTransfer = async (pending: PendingTransfer | null) => {
     if (!canTransferStock || retryStorageError) return
     if (!savedRun && (!pending || !requireTransferReason() || !requireCanonicalTransferDirection())) return
+    if (!savedRun && pending && (pending.fromBranch !== fromBranch || pending.toBranch !== toBranch || !isActorReadScopeCurrent(pending.authority))) { setPendingTransfer(null); return }
     if (!beginSingleAction(transferBulkInFlightRef, { blocked: savingBulk })) return
     setSavingBulk(true)
     try {
       let run = savedRun
       if (!run && pending) {
         const requests = []
-        for (let index = 0; index < pending.items.length; index += TRANSFER_BULK_CHUNK_SIZE) {
+        for (const items of packTransferLots(pending.items)) {
           requests.push({ bulk: true, body: {
             fromBranchId: Number.parseInt(fromBranch, 10), toBranchId: Number.parseInt(toBranch, 10),
-            reason, items: pending.items.slice(index, index + TRANSFER_BULK_CHUNK_SIZE), userId: user?.id, userName: user?.name,
+            reason, items: items.map(({ productId, quantity, batchId }) => ({ productId, quantity, batchId })), userId: user?.id, userName: user?.name,
           } })
         }
         run = prepareTransferRun(user?.id, requests)
@@ -1187,7 +1295,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
             </> : null}
           </div>
         ) : null}
-        <fieldset disabled={saving || savingBulk || !!savedRun || !!retryStorageError || !canTransferStock}
+        <fieldset disabled={saving || savingBulk || !!savedRun || !!retryStorageError || !canTransferStock || preparingLots}
           className={`modal-scroll min-w-0 space-y-4 p-4 sm:p-5 ${saving || savingBulk || savedRun || retryStorageError || !canTransferStock ? 'pointer-events-none opacity-60' : ''}`}>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3">
             <div>
@@ -1529,10 +1637,10 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
               <button
                 type="button"
                 onClick={handleTransferEntireBranch}
-                disabled={savingBulk || loadingMultiProducts || !fromBranch || !toBranch}
+                disabled={savingBulk || preparingLots || loadingMultiProducts || !fromBranch || !toBranch}
                 className="mb-2 w-full rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-700 transition-colors hover:bg-red-50 disabled:opacity-50 dark:border-red-900/60 dark:text-red-300 dark:hover:bg-red-900/20"
               >
-                {t('transfer_entire_branch') || 'Transfer entire branch'}
+                {preparingLots ? t('loading') : t('transfer_entire_branch')}
               </button>
 
               <div className="divide-y divide-gray-100 rounded-xl border border-gray-200 sm:max-h-64 sm:overflow-auto dark:divide-gray-700 dark:border-gray-600">
@@ -1554,10 +1662,14 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                     const id = String(product.id)
                     const checked = id in selectedQuantities
                     const rowQuantity = selectedQuantities[id] ?? ''
+                    const loadedLots = rowLots[id]
+                    const lotsReady = loadedLots?.branch === fromBranch && isActorReadScopeCurrent(loadedLots.authority)
+                    const lots = lotsReady ? loadedLots.batches : []
+                    const chosenLot = lots.find((lot) => Number(lot.id) === selectedLots[id])
                     return (
                       <div
                         key={product.id}
-                        className={`flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2.5 sm:flex-nowrap sm:px-4 ${group.rows.length > 1 ? 'pl-6 sm:pl-8' : ''} ${checked ? 'bg-blue-50 dark:bg-blue-900/30' : ''}`}
+                        className={`flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2.5 sm:px-4 ${group.rows.length > 1 ? 'pl-6 sm:pl-8' : ''} ${checked ? 'bg-blue-50 dark:bg-blue-900/30' : ''}`}
                       >
                         <input
                           type="checkbox"
@@ -1577,13 +1689,30 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                             type="number"
                             className="input w-20 shrink-0 px-2 py-1 text-sm"
                             min="0.01"
-                            max={product.branch_quantity}
+                            max={chosenLot ? Math.min(Number(product.branch_quantity), Number(chosenLot.quantity)) : 0}
+                            disabled={!chosenLot}
                             step="any"
                             value={rowQuantity}
                             onChange={(event) => setProductQuantity(product.id, event.target.value)}
                             aria-label={`${t('quantity') || 'Quantity'} ${product.name}`}
                             aria-invalid={rowQuantity !== '' && (!Number.isFinite(Number(rowQuantity)) || Number(rowQuantity) <= 0) ? 'true' : 'false'}
                           />
+                        ) : null}
+                        {checked ? (
+                          <div className="w-full pl-6">
+                            <label htmlFor={`transfer-lot-${id}`} className="mb-1 block text-xs font-medium">{t('transfer_pick_batch')}</label>
+                            <select id={`transfer-lot-${id}`} className="input w-full text-sm" value={chosenLot?.id ?? ''} disabled={!lotsReady || !!loadedLots?.error}
+                              onChange={(event) => {
+                                const batchId = Number(event.target.value)
+                                const lot = lots.find((entry) => Number(entry.id) === batchId)
+                                setSelectedLots((current) => ({ ...current, [id]: lot ? batchId : 0 }))
+                                setProductQuantity(product.id, lot ? String(Math.min(Number(product.branch_quantity), Number(lot.quantity))) : '')
+                              }}>
+                              <option value="">{t('transfer_pick_batch_first')}</option>
+                              {lots.map((lot) => <option key={lot.id} value={lot.id}>{batchDisplayLabel(lot, t('batch'))} · {lot.quantity} {product.unit}</option>)}
+                            </select>
+                            {!lotsReady ? <p className="text-xs">{t('loading')}</p> : loadedLots?.error || !lots.length ? <p role="alert" className="text-xs text-red-600">{loadedLots?.error || t('transfer_no_batches')}</p> : null}
+                          </div>
                         ) : null}
                       </div>
                     )
@@ -1631,7 +1760,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
             className="btn-primary flex-1"
             type="button"
             onClick={handleBulkTransfer}
-            disabled={!canTransferStock || !!savedRun || !!retryStorageError || savingBulk || loadingMultiProducts || !fromBranch || !toBranch || selectedCount === 0}
+            disabled={!canTransferStock || !!savedRun || !!retryStorageError || savingBulk || preparingLots || loadingMultiProducts || !fromBranch || !toBranch || selectedCount === 0}
           >
             {savingBulk
               ? (chunkProgress
@@ -1651,8 +1780,8 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
           title={pendingTransfer.scope === 'entire_branch'
             ? (t('transfer_entire_branch') || 'Transfer entire branch')
             : (t('confirm_transfer') || 'Confirm Transfer')}
-          message={(t('confirm_bulk_transfer_details') || 'Transfer {products} products ({quantity} total units) from {from} to {to}? Available received dates will be allocated FIFO.')
-            .replace('{products}', String(pendingTransfer.items.length))
+          message={t('confirm_bulk_transfer_existing_lots')
+            .replace('{products}', String(new Set(pendingTransfer.items.map((item) => String(item.productId))).size))
             .replace('{quantity}', String(pendingTransfer.totalUnits))
             .replace('{from}', pendingTransfer.fromName)
             .replace('{to}', pendingTransfer.toName)}
