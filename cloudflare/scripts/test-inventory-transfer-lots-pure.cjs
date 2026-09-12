@@ -88,7 +88,9 @@ const inventoryRoute = loadModule('routes/inventory.ts', (id) => {
   if (id === '../lib/canonicalBranchIdentity') return canonicalIdentity
   if (id === '../lib/actorSnapshot') return { actorSnapshot: (user) => user?.name || null }
   if (id === '../lib/operationWriteReadiness') return loadModule('lib/operationWriteReadiness.ts', require)
+  if (id === '../lib/movementCostSnapshot') return loadModule('lib/movementCostSnapshot.ts', require)
   if (id === '../lib/transferOperation') return loadModule('lib/transferOperation.ts', (dep) => {
+    if (dep === './movementCostSnapshot') return loadModule('lib/movementCostSnapshot.ts', require)
     if (dep === './db') return { getDb: () => wrapDb(routeDb) }
     if (dep === './permissions') return { getActionTier: user => user?.tier || 'none' }
     if (dep === './actorSnapshot') return { actorSnapshot: user => user?.name || null }

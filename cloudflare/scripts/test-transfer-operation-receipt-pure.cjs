@@ -23,7 +23,7 @@ function wrapDb() {
     },
   }
 }
-const realLibraries = new Set(['operationWriteReadiness', 'db', 'sqlBinding', 'batchCode', 'productBatches', 'branchRoles', 'branchRoleGuards', 'canonicalBranchIdentity', 'transferOperationReceipt', 'transferOperation', 'permissions', 'actorSnapshot', 'undoAppliers'])
+const realLibraries = new Set(['movementCostSnapshot', 'operationWriteReadiness', 'db', 'sqlBinding', 'batchCode', 'productBatches', 'branchRoles', 'branchRoleGuards', 'canonicalBranchIdentity', 'transferOperationReceipt', 'transferOperation', 'permissions', 'actorSnapshot', 'undoAppliers'])
 function load(relative) {
   if (modules.has(relative)) return modules.get(relative)
   const module = { exports: {} }
