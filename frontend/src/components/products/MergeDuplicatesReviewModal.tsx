@@ -61,6 +61,8 @@ const COST_FIELD_LABEL: Record<string, [string, string]> = {
   cost_price_khr: ['cost_price_khr', 'Cost (KHR)'],
 }
 
+const DETAIL_PAGE_SIZE = 25
+
 function formatCost(field: string, value: number): string {
   const amount = Number(value) || 0
   return field.endsWith('_khr')
@@ -104,6 +106,7 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
   const [previewLoading, setPreviewLoading] = useState(true)
   const [previewError, setPreviewError] = useState<string | null>(null)
   const [preview, setPreview] = useState<PreviewResult | null>(null)
+  const [detailPage, setDetailPage] = useState(1)
   const [recoveryNeedsPreview, setRecoveryNeedsPreview] = useState(Boolean(recoveryNotice))
   const mountedRef = useRef(true)
   const firstLoadRef = useRef(true)
@@ -128,6 +131,7 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
       .then((result) => {
         if (!requestIsCurrent()) return
         setPreview(result)
+        setDetailPage(1)
         setAcknowledged(false)
         setRecoveryNeedsPreview(false)
       })
@@ -162,15 +166,25 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
     setPreviewError(null)
     setPreviewLoading(false)
     setAcknowledged(false)
+    setDetailPage(1)
     setRecoveryNeedsPreview(true)
   }, [recoveryNotice?.requestId])
 
   const groups = preview?.groups || []
+  const detailPageCount = Math.max(1, Math.ceil(groups.length / DETAIL_PAGE_SIZE))
+  const safeDetailPage = Math.min(Math.max(detailPage, 1), detailPageCount)
+  const detailStart = (safeDetailPage - 1) * DETAIL_PAGE_SIZE
+  const detailEnd = Math.min(detailStart + DETAIL_PAGE_SIZE, groups.length)
+  const visibleGroups = groups.slice(detailStart, detailEnd)
   const duplicateProductCount = preview?.duplicateProductCount || 0
   const mergeableDuplicateProductCount = preview?.mergeableDuplicateProductCount ?? duplicateProductCount
   const blockedGroupCount = preview?.blockedGroupCount || 0
   const costRefusalCount = preview?.costRefusalCount || 0
   const canMerge = !recoveryNeedsPreview && !previewLoading && !previewError && mergeableDuplicateProductCount > 0
+
+  useEffect(() => {
+    setDetailPage((current) => Math.min(Math.max(current, 1), detailPageCount))
+  }, [detailPageCount])
 
   return (
     <Modal title={scope === 'leading_zero'
@@ -346,9 +360,10 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
                 </p>
               )}
               <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
-                {groups.map((group) => (
+                {visibleGroups.map((group) => (
                   <div
                     key={group.canonicalId}
+                    data-merge-preview-group={group.canonicalId}
                     className="rounded-lg border border-gray-200 p-2.5 text-sm dark:border-gray-700"
                   >
                     <div className="flex flex-wrap items-center gap-1.5">
@@ -411,6 +426,37 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
                     )}
                   </div>
                 ))}
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500 dark:text-gray-400">
+                <span role="status" aria-live="polite">
+                  {T('showing', 'Showing')} {detailStart + 1}-{detailEnd} {T('of', 'of')} {groups.length}
+                  {' · '}{T('page', 'Page')} {safeDetailPage} {T('of', 'of')} {detailPageCount}
+                </span>
+                {detailPageCount > 1 && (
+                  <nav
+                    aria-label={`${T('page', 'Page')} ${safeDetailPage} ${T('of', 'of')} ${detailPageCount}`}
+                    className="flex items-center gap-2"
+                  >
+                    <button
+                      type="button"
+                      data-merge-preview-page="back"
+                      disabled={safeDetailPage <= 1}
+                      onClick={() => setDetailPage((current) => Math.max(1, current - 1))}
+                      className="min-h-9 rounded-lg border border-gray-300 px-3 text-gray-600 hover:bg-gray-50 disabled:opacity-40 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
+                    >
+                      {T('back', 'Back')}
+                    </button>
+                    <button
+                      type="button"
+                      data-merge-preview-page="next"
+                      disabled={safeDetailPage >= detailPageCount}
+                      onClick={() => setDetailPage((current) => Math.min(detailPageCount, current + 1))}
+                      className="min-h-9 rounded-lg border border-gray-300 px-3 text-gray-600 hover:bg-gray-50 disabled:opacity-40 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
+                    >
+                      {T('next', 'Next')}
+                    </button>
+                  </nav>
+                )}
               </div>
             </div>
           )}
