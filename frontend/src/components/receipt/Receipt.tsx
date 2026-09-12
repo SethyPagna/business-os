@@ -917,6 +917,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
       await printTools.printReceipt(target, {
         title,
         printSettings: variantSettings,
+        previewTranslate: t,
       })
     }
   }
