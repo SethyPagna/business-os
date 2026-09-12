@@ -79,6 +79,25 @@ console.log('PASS the shared row model names the record a movement belongs to, a
 
 const sc = read('components/products/StockChangeSection.tsx').replace(/\r\n/g, '\n')
 
+// Scoped corrections are not generic compensating movements. Their detail
+// uses the server's exact lot/branch snapshots and points to durable history;
+// both correction directions suppress the generic Revert controls.
+for (const field of [
+  'correction_operation_id', 'correction_history_id', 'correction_set_scope', 'correction_generation',
+  'correction_lot_before', 'correction_lot_after', 'correction_branch_before', 'correction_branch_after',
+]) {
+  assert.ok(sc.includes(field), `the correction detail must consume ${field}`)
+}
+assert.match(sc, /correction_set_scope === 'branch'[\s\S]*?stock_set_scope_branch[\s\S]*?stock_set_scope_lot/)
+assert.match(sc, /correction_lot_before \?\? '—'\} → \{detail\.correction_lot_after \?\? '—'/)
+assert.match(sc, /correction_branch_before \?\? '—'\} → \{detail\.correction_branch_after \?\? '—'/)
+assert.match(sc, /stock_correction_use_history[\s\S]*?correction_history_id/)
+assert.match(sc, /correction_scope: row\.correction_set_scope[\s\S]*?correction_lot_before:[\s\S]*?correction_branch_after:[\s\S]*?correction_operation_id:[\s\S]*?correction_history_id:/,
+  'the ledger CSV must retain the exact correction scope and snapshots shown in detail')
+assert.match(sc, /if \(!detail \|\| isExactStockCorrectionMovement\(detail\)\) return/, 'the write callback must also reject a stale correction detail')
+assert.ok((sc.match(/!isExactStockCorrectionMovement\(detail\)/g) || []).length >= 3,
+  'correction details must suppress confirm, trigger, and generic revert help')
+
 // The desktop Reason cell leads with the record and keeps the free text under
 // it -- that ORDER is the fix: the reason line was all there was before.
 // Anchored on the conditional itself rather than on the `<td>` that opens the
