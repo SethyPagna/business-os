@@ -10,6 +10,8 @@
     "dev": "vite",
     "prebuild": "npm run build:public-runtime",
     "build": "vite build",
+    "postbuild": "node ../ops/scripts/frontend/verify-built-startup.mjs",
+    "verify:built-startup": "node ../ops/scripts/frontend/verify-built-startup.mjs",
     "build:public-runtime": "node ../ops/scripts/frontend/build-public-runtime-scripts.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "check:source": "node tests/sourceSyntaxCheck.ts",
