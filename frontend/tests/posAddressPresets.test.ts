@@ -20,6 +20,7 @@ import { invalidateActorReadChannel } from '../src/api/actorReadScope.ts'
 
 const pos = readFileSync(new URL('../src/components/pos/POS.tsx', import.meta.url), 'utf8')
 const picker = readFileSync(new URL('../src/components/pos/AddressPresetPicker.tsx', import.meta.url), 'utf8')
+const quickAdd = readFileSync(new URL('../src/components/pos/POSQuickAddModals.tsx', import.meta.url), 'utf8')
 const transport = readFileSync(new URL('../src/api/posAddressPresetsTransport.ts', import.meta.url), 'utf8')
 const settingsSensitive = readFileSync(new URL('../../cloudflare/src/lib/settingsSensitive.ts', import.meta.url), 'utf8')
 
@@ -49,9 +50,50 @@ assert.equal(composeAddress('House  12 / Street  3', { province: 'Phnom Penh' })
 assert.equal(cartTotalQuantity([{ quantity: 2 }, { quantity: '3' }, { quantity: 0.5 }, { quantity: -1 }, { quantity: 'bad' }]), 5.5)
 assert.match(pos, /pos_item_line[\s\S]{0,300}pos_item_lines[\s\S]{0,240}pos_total_quantity/, 'singular/plural line count and total quantity share the cart summary row')
 assert.match(pos, /cartTotalQuantity\(active\.cart\)/)
-assert.match(pos, /pos-customer-address-inline[^]*?onClick=\{\(\) => setShowAddressPresets\(true\)\}/, 'clicking Address opens the picker without removing free-text onChange')
+assert.match(pos, /pos-customer-address-inline[^]*?onClick=\{\(\) => setAddressPresetTarget\('order'\)\}/, 'clicking the order Address opens its target without removing free-text onChange')
 assert.match(pos, /onApply=\{\(\{ address, suffix \}\) => \{[^]*?patchActive\(\{ customer: \{ \.\.\.active\.customer, address \} \}\)/)
 assert.match(pos, /actorKey=\{captureActorReadScope\('pos:address-presets'\)\.authority\}/, 'same-account relogin uses the opaque session authority, not an id/org cache key')
+assert.match(quickAdd, /pos-quick-customer-address[^]*?onChange=[^]*?onClick=\{onOpenCustomerAddressPresets\}[^]*?aria-haspopup="dialog"/, 'quick-add address remains free text and opens the shared picker explicitly')
+assert.match(pos, /addressPresetTarget === 'quick-customer' \? newCustomerForm\.address : \(active\.customer\.address \|\| ''\)/)
+assert.match(pos, /quickCustomerAddressSuffixRef\.current = suffix[^]*?setNewCustomerForm\(\(form\) => \(\{ \.\.\.form, address \}\)\)[^]*?appliedAddressSuffixRef\.current\[String\(active\.id\)\] = suffix/s, 'quick and order Apply paths update only their own address and suffix')
+assert.equal((pos.match(/resetQuickCustomerAddressPreset\(\)/g) || []).length, 4, 'new draft, cancel, successful create, and use-existing resolution clear the quick suffix')
+assert.match(pos, /if \(duplicateCheck\) \{ setCustomerDuplicateCheck\(duplicateCheck\); return \}/, 'duplicate review keeps the current quick draft and suffix until the flow resolves')
+
+const require = createRequire(import.meta.url)
+const quickModule = { exports: {} as any }
+const compiledQuickAdd = transformSync(quickAdd, { loader: 'tsx', format: 'cjs', jsx: 'automatic' }).code
+new Function('require', 'module', 'exports', compiledQuickAdd)((id: string) => {
+  if (id === 'react/jsx-runtime') return require(id)
+  if (id.includes('QuickAddModal')) return { __esModule: true, default: ({ children }: { children: React.ReactNode }) => React.createElement('div', null, children) }
+  if (id.includes('phoneInput')) return { formatPhoneInputElement: () => '', handlePhoneInputBeforeInput() {}, handlePhoneInputKeyDown() {} }
+  throw new Error(`Unexpected quick-add dependency ${id}`)
+}, quickModule, quickModule.exports)
+let quickAddressOpened = 0
+let normalQuickCreate = 0
+let quickForm = { name: 'Dara', phone: '', address: 'House 12', membership_number: '' }
+const quickTree = quickModule.exports.default({
+  closeAddCustomerModal() {}, closeAddDeliveryModal() {}, customerDuplicateCheck: null, deliveryDuplicateCheck: null,
+  clearCustomerDuplicateCheck() {}, clearDeliveryDuplicateCheck() {}, handleAddCustomer() { normalQuickCreate++ }, handleAddDelivery() {},
+  handleCreateSeparateCustomer() {}, handleCreateSeparateDelivery() {}, handleUseExistingCustomer() {}, handleUseExistingDelivery() {},
+  onOpenCustomerAddressPresets() { quickAddressOpened++ }, newCustomerForm: quickForm, newDeliveryForm: { name: '', phone: '', area: '' },
+  posCopy: (value: string) => value, savingCustomer: false, savingDelivery: false,
+  setNewCustomerForm(update: typeof quickForm | ((form: typeof quickForm) => typeof quickForm)) { quickForm = typeof update === 'function' ? update(quickForm) : update },
+  setNewDeliveryForm() {}, showAddCustomer: true, showAddDelivery: false, t: (key: string) => key,
+})
+function findElement(node: any, predicate: (element: any) => boolean): any {
+  if (Array.isArray(node)) return node.map((child) => findElement(child, predicate)).find(Boolean)
+  if (!React.isValidElement(node)) return null
+  if (predicate(node)) return node
+  return findElement((node.props as { children?: React.ReactNode }).children, predicate)
+}
+const quickAddressInput = findElement(quickTree, (element) => element.props?.id === 'pos-quick-customer-address')
+assert.ok(quickAddressInput, 'actual quick-add component retains its customer Address input')
+quickAddressInput.props.onClick()
+quickAddressInput.props.onChange({ target: { value: 'House 14' } })
+assert.equal(quickAddressOpened, 1)
+assert.equal(quickForm.address, 'House 14', 'picker access does not replace ordinary free-text editing')
+findElement(quickTree, (element) => typeof element.props?.onSave === 'function').props.onSave()
+assert.equal(normalQuickCreate, 1, 'normal quick customer creation remains wired')
 
 assert.match(picker, /captureActorReadScope\('pos:address-presets'\)/)
 assert.match(picker, /isActorReadScopeCurrent\(actorScope, false\)/, 'late reads guard actor authority while ignoring unrelated data revision invalidation')
@@ -72,7 +114,6 @@ assert.match(settingsSensitive, /'pos_address_presets_v1'/, 'the dedicated row i
 // Execute the actual transport module: GET is a direct private apiFetch while
 // PUT retains route()'s write handling. This catches the original accidental
 // `route(..., true)` GET classification rather than merely source-matching it.
-const require = createRequire(import.meta.url)
 const transportModule = { exports: {} as any }
 let routeCalls = 0
 const apiCalls: string[] = []
