@@ -26,6 +26,7 @@ const { loadAll } = require('./harness/load_migrations.cjs')
 
 const rawDb = openDb(loadAll())
 let afterDbBatchHook = null
+let beforeDbBatchHook = null
 // Flatten node:sqlite's run() result the same way lib/db.ts's real
 // D1Compat.run() does -- productBatches.ts and inventory.ts rely on
 // `result.lastInsertRowid`/`result.changes` at the top level.
@@ -42,6 +43,7 @@ const db = {
     }
   },
   async batch(items) {
+    if (beforeDbBatchHook) await beforeDbBatchHook(items)
     const results = []
     for (const item of items) {
       const stmt = rawDb.prepare(item.sql)
@@ -586,6 +588,56 @@ async function main() {
     assert.strictEqual(rawDb.prepare('SELECT unit_cost_usd FROM product_batches WHERE id=?').get([batchId]).unit_cost_usd, 99, 'fixture changed lot cost after decrement')
     const movement = rawDb.prepare("SELECT unit_cost_usd,total_cost_usd FROM inventory_movements WHERE movement_type='remove' ORDER BY id DESC LIMIT 1").get()
     assert.deepStrictEqual({ ...movement }, { unit_cost_usd: 4, total_cost_usd: 8 }, 'movement kept the pre-write lot cost')
+  })
+
+  await check('captured FIFO plan ignores a newly received earlier lot and keeps its original cost allocation', async () => {
+    seed()
+    const added = await req('POST', '/adjust', {
+      productId: 1, type: 'add', supplierName: 'Fixture Supplier', unitCostUsd: 4,
+      quantity: 3, reason: 'receipt', branchId: 1, batchId: 'new', receivedDate: '2026-07-03',
+    })
+    assert.strictEqual(added.status, 200, JSON.stringify(added.json))
+    const originalBatchId = added.json.batchId
+    beforeDbBatchHook = async (items) => {
+      if (!items.some((item) => /captured_batch_allocation_conflict/.test(item.sql))) return
+      beforeDbBatchHook = null
+      rawDb.prepare(`INSERT INTO product_batches(variant_product_id,batch_key,lot_code,received_at,is_active,batch_number,unit_cost_usd)
+        VALUES(1,'earlier','earlier','2026-01-01',1,99,99)`).run()
+      const newId = rawDb.prepare('SELECT last_insert_rowid() AS id').get().id
+      rawDb.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,1,1)').run([newId])
+      rawDb.prepare('UPDATE branch_stock SET quantity=quantity+1 WHERE product_id=1 AND branch_id=1').run()
+      rawDb.prepare('UPDATE products SET stock_quantity=stock_quantity+1 WHERE id=1').run()
+    }
+    const removed = await req('POST', '/adjust', { productId: 1, type: 'remove', quantity: 2, reason: 'new lot race', branchId: 1 })
+    beforeDbBatchHook = null
+    assert.strictEqual(removed.status, 200, JSON.stringify(removed.json))
+    assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=? AND branch_id=1').get([originalBatchId]).quantity, 1)
+    assert.strictEqual(rawDb.prepare("SELECT bbs.quantity FROM branch_batch_stock bbs JOIN product_batches pb ON pb.id=bbs.batch_id WHERE pb.batch_key='earlier'").get().quantity, 1, 'new FIFO lot was not silently substituted into the captured plan')
+    const movement = rawDb.prepare("SELECT unit_cost_usd,total_cost_usd FROM inventory_movements WHERE movement_type='remove' ORDER BY id DESC LIMIT 1").get()
+    assert.deepStrictEqual({ ...movement }, { unit_cost_usd: 4, total_cost_usd: 8 })
+  })
+
+  await check('captured FIFO availability conflict aborts its whole decrement batch before movement publication', async () => {
+    seed()
+    const added = await req('POST', '/adjust', {
+      productId: 1, type: 'add', supplierName: 'Fixture Supplier', unitCostUsd: 4,
+      quantity: 3, reason: 'receipt', branchId: 1, batchId: 'new', receivedDate: '2026-07-04',
+    })
+    assert.strictEqual(added.status, 200, JSON.stringify(added.json))
+    const batchId = added.json.batchId
+    beforeDbBatchHook = async (items) => {
+      if (!items.some((item) => /captured_batch_allocation_conflict/.test(item.sql))) return
+      beforeDbBatchHook = null
+      rawDb.prepare('UPDATE branch_batch_stock SET quantity=1 WHERE batch_id=? AND branch_id=1').run([batchId])
+      rawDb.prepare('UPDATE branch_stock SET quantity=1 WHERE product_id=1 AND branch_id=1').run()
+      rawDb.prepare('UPDATE products SET stock_quantity=1 WHERE id=1').run()
+    }
+    const beforeMovements = rawDb.prepare("SELECT COUNT(*) AS n FROM inventory_movements WHERE movement_type='remove'").get().n
+    const removed = await req('POST', '/adjust', { productId: 1, type: 'remove', quantity: 2, reason: 'availability race', branchId: 1 })
+    beforeDbBatchHook = null
+    assert.strictEqual(removed.status, 400)
+    assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=? AND branch_id=1').get([batchId]).quantity, 1, 'failed exact plan applied no partial decrement')
+    assert.strictEqual(rawDb.prepare("SELECT COUNT(*) AS n FROM inventory_movements WHERE movement_type='remove'").get().n, beforeMovements, 'failed exact plan published no movement')
   })
 
   await check('set-down and set-up store the plan-time product cost on their converted movements', async () => {

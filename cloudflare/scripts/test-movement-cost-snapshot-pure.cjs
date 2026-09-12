@@ -39,6 +39,8 @@ for (const invalid of [
   { quantity: 1, components: [{ quantity: 1, unitCostUsd: Number.POSITIVE_INFINITY }] },
   { quantity: 1, fallbackUnitCostUsd: Number.POSITIVE_INFINITY },
   { quantity: 1, components: [{ quantity: 1.01, unitCostUsd: 1 }] },
+  { quantity: 1, components: [{ quantity: 1, unitCostUsd: 1e308 }] },
+  { quantity: 1e308, components: [{ quantity: 1e308, unitCostUsd: 4 }] },
 ]) {
   assert.throws(() => resolveMovementCostSnapshot(invalid), RangeError)
 }

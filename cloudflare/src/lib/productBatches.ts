@@ -857,22 +857,52 @@ export async function removeStockAcrossBatches(db: D1Compat, input: {
   productId: number
   branchId: number
   quantity: number
+  /** Exact FIFO allocation captured by a caller that must bind metadata to it. */
+  allocations?: Array<{ batchId: number; quantity: number }>
 }): Promise<{ batchIds: number[]; batchQuantities: { batchId: number; quantity: number }[]; drained: number; remainder: number }> {
-  const batches = await listBatchesForProduct(db, input.productId, input.branchId, { onlyAvailable: true })
-
   let remaining = input.quantity
   const touched: { batchId: number; take: number }[] = []
-  for (const batch of batches) {
-    if (remaining <= 0) break
-    const take = Math.min(remaining, Number(batch.quantity) || 0)
-    if (take <= 0) continue
-    touched.push({ batchId: batch.id, take })
-    remaining -= take
+  if (input.allocations) {
+    const ids = new Set<number>()
+    for (const allocation of input.allocations) {
+      const batchId = Number(allocation.batchId)
+      const take = Number(allocation.quantity)
+      if (!Number.isSafeInteger(batchId) || batchId <= 0 || !Number.isFinite(take) || !(take > 0) || ids.has(batchId)) {
+        throw new Error('The captured received-date allocation is invalid. Refresh and try again.')
+      }
+      ids.add(batchId)
+      touched.push({ batchId, take })
+      remaining -= take
+    }
+    if (remaining < -0.000000001) throw new Error('The captured received-date allocation exceeds the stock removal.')
+    remaining = Math.max(0, remaining)
+  } else {
+    const batches = await listBatchesForProduct(db, input.productId, input.branchId, { onlyAvailable: true })
+    for (const batch of batches) {
+      if (remaining <= 0) break
+      const take = Math.min(remaining, Number(batch.quantity) || 0)
+      if (take <= 0) continue
+      touched.push({ batchId: batch.id, take })
+      remaining -= take
+    }
   }
   const drained = input.quantity - remaining
 
   if (touched.length) {
     await db.batch([
+      // The exact pre-read allocation and its cost snapshot travel together.
+      // Fail the entire D1 batch before any decrement if a concurrent write
+      // consumed/deleted/reassigned one of those lots. A newly inserted FIFO
+      // lot is deliberately irrelevant: this call applies only captured IDs.
+      ...(input.allocations ? touched.map(({ batchId, take }) => ({
+        sql: `SELECT CASE WHEN EXISTS(
+          SELECT 1 FROM branch_batch_stock bbs
+          JOIN product_batches pb ON pb.id=bbs.batch_id
+          WHERE bbs.batch_id=@batchId AND bbs.branch_id=@branchId
+            AND pb.variant_product_id=@productId AND pb.is_active=1 AND bbs.quantity>=@quantity
+        ) THEN 1 ELSE json_extract('captured_batch_allocation_conflict','$') END AS allocation_guard`,
+        params: { batchId, branchId: input.branchId, productId: input.productId, quantity: take },
+      })) : []),
       ...touched.map(({ batchId, take }) => decrementBatchStockStatement(batchId, input.branchId, take)),
       {
         sql: `UPDATE branch_stock SET quantity = MAX(0, quantity - @quantity) WHERE product_id = @productId AND branch_id = @branchId`,

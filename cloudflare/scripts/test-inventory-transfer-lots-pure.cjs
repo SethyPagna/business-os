@@ -44,6 +44,7 @@ const productBatches = loadModule('lib/productBatches.ts', (id) => {
   return require(id)
 })
 const { readFifoLotAvailability, allocateAcrossLots, decrementBatchStockStrictStatement, incrementBatchStockStatement } = productBatches
+const movementCostSnapshot = loadModule('lib/movementCostSnapshot.ts', require)
 const roles = loadModule('lib/branchRoles.ts', require)
 const branchGuards = loadModule('lib/branchRoleGuards.ts', (id) => {
   if (id === './branchRoles') return roles
@@ -112,6 +113,7 @@ const inventoryRoute = loadModule('routes/inventory.ts', (id) => {
   if (id === '../lib/searchMatch') return { buildIssueStateClauses: noop, buildLikeAliasClause: noop, runFuzzyFallbackMatch: asyncNoop, tokenizeSearchTermGroups: noop, tokenizeSearchWords: noop }
   if (id === '../lib/productSearchQuery') return { buildFamilyRelevanceOrderSql: noop, buildProductSearchQuery: noop }
   if (id === '../lib/stockRevert') return { applyMovementRevert: asyncNoop }
+  if (id === '../lib/movementCostSnapshot') return movementCostSnapshot
   if (id === '../lib/batchCode') return { ...batchCode, normalizeTypedDate: noop }
   if (id === '../lib/stockReceiptGate') return { appendReceiptNotes: noop, FREE_GOODS_REASON_NOTE: '', stockReceiptGateCode: noop, stockReceiptGateMessage: noop }
   if (id === '../lib/datedStockCountRoute') return { parseDatedStockCountEntries: noop, buildDatedStockCountPlan: asyncNoop }
