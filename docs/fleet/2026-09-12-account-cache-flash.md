@@ -54,6 +54,12 @@ Root owns this register and integration only. Isolated client-cache owner owns A
 
 ## Deployment and remaining confirmation
 
+### Blank-screen regression reopened September12
+
+Owner reported blank screen after b935bf63b05b. Exact released production bundle reproduced ReferenceError Cannot access S before initialization in app-auth, where S is STORAGE_KEYS at AppContext module initialization. Actor scope was bundled with app-api-methods, introducing a reverse HTTP dependency. Earlier unit/build certification did not run the existing emitted-bundle cycle gate and was insufficient; a successful build was not startup proof.
+
+Hotfix isolates constants, actorReadScope and permissions into neutral chunks (no business/auth logic changes). The rebuilt emitted graph passes all closure gates with252 chunks and zero cycles. Independent cold browser tests render Login with API401 and authenticated navigation/Notes with synthetic bootstrap, zero authenticated page errors; original TDZ absent. Existing non-blocking signed-out early-bootstrap rejection remains. No claim of full live employee workflow verification. This corrective release requires the same bundle gate and cold-browser checks before deployment.
+
 Authorized follow-up deployed from clean b935bf63b05b with Wrangler4.116.0 using npm run deploy only, after production-coordination claim and successful dry run. Worker version23e118a9-089e-4c66-9e3f-4065fc461c5c; runtime hashb479cd831f711915; built2026-09-11T23:02:55.028Z. Live runtime endpoint independently and directly matches. Live frontend build revision also b935bf63b05b, hash06c606d69e75c910, built2026-09-11T22:58:08.820Z. Branch pushed. No migrations, secret sync, stock/payment/customer data writes, or cleanup of user drafts.
 
 Post-deployment authenticated UI smoke was safely blocked: available computer inventory contained no browser or authenticated tab. No credentials were invented or login/logout performed. Exact employee-device received-date behavior and the owner's remaining flashing observation still require live confirmation; synthetic role/lot and actual mounted-browser tests are evidence of the specific fixes, not a substitute for that observation. Physical printer output remains separately unresolved. Durable smoke result: .git/agent-team/release-b935bf63-authenticated-smoke-20260912.json. This documentation successor does not represent another deployment.

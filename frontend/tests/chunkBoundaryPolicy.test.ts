@@ -15,6 +15,9 @@ const chunkFor = output.manualChunks as (id: string) => string | undefined
 // Exercise the real config's rule ordering, including Windows ids, rather than
 // accepting a correct helper that a later directory rule silently overrides.
 const boundaries: Array<[string, string]> = [
+  ['constants.ts', 'app-constants'],
+  ['api/actorReadScope.ts', 'actor-read-scope'],
+  ['utils/permissions.ts', 'permissions-core'],
   ['utils/workDrafts.ts', 'work-drafts'],
   ['utils/dirtyWork.ts', 'work-drafts'],
   ['components/shared/hubNavigation.ts', 'hub-navigation'],

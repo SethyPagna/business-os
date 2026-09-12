@@ -2,6 +2,11 @@
 // Keep these boundaries ahead of the feature/directory rules in vite.config.ts.
 // This is deliberately an exact module list, not another shared-directory bucket.
 const neutralChunks: ReadonlyArray<readonly [string, string]> = [
+  // Startup dependencies must never inherit a feature chunk: HTTP imports
+  // actor scope, while authentication reads storage constants at module load.
+  ['/src/constants.ts', 'app-constants'],
+  ['/src/api/actorReadScope.ts', 'actor-read-scope'],
+  ['/src/utils/permissions.ts', 'permissions-core'],
   ['/src/utils/workDrafts.ts', 'work-drafts'],
   ['/src/utils/dirtyWork.ts', 'work-drafts'],
   ['/src/components/shared/hubNavigation.ts', 'hub-navigation'],
