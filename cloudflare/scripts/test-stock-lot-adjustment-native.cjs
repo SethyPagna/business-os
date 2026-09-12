@@ -10,7 +10,9 @@ async function main() {
   const bundle = await build({ stdin: { contents: `
     import { Hono } from 'hono'; import inventory from './src/routes/inventory';
     import history from './src/routes/actionHistory';
-    const app=new Hono(); app.route('/api/inventory',inventory); app.route('/api/action-history',history); export default app;`,
+    import { getDb } from './src/lib/db'; import { buildStockLedgerQuery,attachBeforeQty } from './src/lib/stockLedgerQuery';
+    const app=new Hono(); app.route('/api/inventory',inventory); app.route('/api/action-history',history);
+    app.get('/test-ledger',async c=>{const query=buildStockLedgerQuery({productId:1});const db=getDb(c.env);return c.json({rows:attachBeforeQty(await db.prepare(query.rowsSql).all({...query.params,limit:100,offset:0})),summary:await db.prepare(query.summarySql).get(query.params)});});export default app;`,
     resolveDir: path.join(__dirname, '..'), loader: 'ts' }, bundle: true, write: false, format: 'esm', platform: 'browser', target: 'es2022',
     plugins: [{ name: 'fixture', setup(b) {
       b.onResolve({ filter: /lib\/auth$/ }, () => ({ path: 'auth', namespace: 'fixture' }))
@@ -35,7 +37,7 @@ async function main() {
     // native compound-SELECT limits; this is not a Wrangler migration claim.
     const schema = new Database(':memory:')
     for (const file of fs.readdirSync(path.join(__dirname, '../migrations')).filter(f=>f.endsWith('.sql')).sort()) schema.exec(fs.readFileSync(path.join(__dirname,'../migrations',file),'utf8'))
-    const tables = ['cache_versions','system_flags','branches','products','product_batches','branch_stock','branch_batch_stock','stock_session_revisions','stock_session_guards','inventory_movements','audit_logs','action_history','transfer_operation_receipts','transfer_operation_members','stock_transfers','fee_operation_receipts']
+    const tables = ['users','sales','returns','sale_items','return_items','cache_versions','system_flags','branches','products','product_batches','branch_stock','branch_batch_stock','stock_session_revisions','stock_session_guards','inventory_movements','audit_logs','action_history','transfer_operation_receipts','transfer_operation_members','stock_transfers','fee_operation_receipts']
     const objects = schema.prepare("SELECT name,type,tbl_name,sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 ELSE 2 END").all()
     for (const object of objects.filter(o=>tables.includes(o.tbl_name) && (o.type !== 'trigger' || o.name.startsWith('stock_revision_') || o.name.startsWith('positive_lot_') || o.name==='transfer_receipts_require_provenance_insert'))) await db.batch(split(object.sql).map(sql=>db.prepare(sql)))
     schema.close()
@@ -60,6 +62,15 @@ async function main() {
     assert.equal(first.json.before.lotQuantity,3); assert.equal(first.json.after.lotQuantity,5); assert.equal(first.json.after.branchQuantity,12)
     assert.equal((await db.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=11').first()).quantity,7)
     assert.equal((await db.prepare('SELECT received_at,supplier_name FROM product_batches WHERE id=10').first()).supplier_name,'Original supplier')
+    const ledger=async()=>await (await mf.dispatchFetch('http://local/test-ledger')).json()
+    let rows=(await ledger()).rows
+    assert.equal(rows[0].movement_type,'correction_in'); assert.equal(rows[0].signed_quantity,2)
+    assert.equal(rows[0].correction_lot_before,3);assert.equal(rows[0].correction_lot_after,5)
+    assert.equal(rows[0].correction_branch_before,10);assert.equal(rows[0].correction_branch_after,12)
+    assert.equal(rows[0].correction_history_id,first.json.action_history_id)
+    assert.equal(rows[0].batch_receipt_session_count,0,'correction is not a supplier receipt or purchase')
+    assert.equal(rows[0].unit_cost_usd,null)
+    assert.equal((await request({},'/api/inventory/movements/'+rows[0].id+'/revert')).status,409)
     assert.equal((await request(base)).json.replayed,true)
     assert.equal((await request({...base,setScope:'branch'})).status,409)
     assert.equal((await request({...base,client_request_id:'other-product',batchId:12})).status,409)
@@ -80,6 +91,13 @@ async function main() {
     let undo=await request({expected_generation:0},'/api/action-history/'+history+'/undo')
     assert.equal(undo.status,200,JSON.stringify(undo))
     assert.equal((await db.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=10').first()).quantity,3)
+    rows=(await ledger()).rows
+    assert.equal(rows[0].movement_type,'correction_out');assert.equal(rows[0].signed_quantity,-2)
+    assert.equal(rows[0].correction_generation,1);assert.equal(rows[0].correction_lot_before,5);assert.equal(rows[0].correction_lot_after,3)
+    const beforeGeneric=await stockState()
+    assert.equal((await request({},'/api/inventory/movements/'+rows[0].id+'/revert')).status,409)
+    assert.equal(await stockState(),beforeGeneric,'generic revert must not bypass exact correction history')
+    assert.equal((await ledger()).summary.out_qty,2)
     assert.equal((await request({expected_generation:0},'/api/action-history/'+history+'/undo')).status,200)
     assert.equal((await request({expected_generation:1},'/api/action-history/'+history+'/redo')).status,200)
     // An intervening update back to the same numeric value is still activity:
@@ -88,6 +106,10 @@ async function main() {
     assert.equal((await request({expected_generation:2},'/api/action-history/'+history+'/undo')).status,409)
     assert.equal((await request({...base,quantity:0,client_request_id:'set-zero'})).status,200)
     assert.equal((await db.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').first()).quantity,7)
+    rows=(await ledger()).rows
+    assert.equal(rows[0].movement_type,'correction_out');assert.equal(rows[0].correction_generation,0)
+    assert.equal(rows[0].correction_lot_after,0)
+    assert.equal((await request({},'/api/inventory/movements/'+rows[0].id+'/revert')).status,409)
     assert.equal((await request({...base,quantity:0,client_request_id:'set-noop'})).status,200)
     const branch=await request({...base,setScope:'branch',quantity:9,client_request_id:'set-branch'})
     assert.equal(branch.status,200,JSON.stringify(branch));assert.equal(branch.json.after.lotQuantity,2)

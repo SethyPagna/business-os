@@ -38,13 +38,14 @@ async function snapshot(db: D1Compat, request: Request): Promise<Snapshot> {
   return { ...row, productId: request.productId, branchId: request.branchId, batchId: request.batchId }
 }
 
-function effects(before: Snapshot, after: Snapshot, user: SessionUser, reason: string, operation: string, setScope: string): Statement[] {
+function effects(before: Snapshot, after: Snapshot, user: SessionUser, reason: string, operation: string, setScope: string, generation: number): Statement[] {
   const params = { product: before.productId, branch: before.branchId, batch: before.batchId,
     productSnapshot: before.product, branchSnapshot: before.branch, lotSnapshot: before.lot,
     oldBranch: before.branchQuantity, oldLot: before.lotQuantity, newBranch: after.branchQuantity, newLot: after.lotQuantity,
     actor: user.id, actorName: actorSnapshot(user), reason, operation, delta: Math.abs(after.lotQuantity - before.lotQuantity),
     before: JSON.stringify(before), after: JSON.stringify(after), setScope,
-    oldBranchExists: before.branchExists, oldLotExists: before.lotExists, newBranchExists: after.branchExists, newLotExists: after.lotExists }
+    oldBranchExists: before.branchExists, oldLotExists: before.lotExists, newBranchExists: after.branchExists, newLotExists: after.lotExists,
+    movementType: after.lotQuantity < before.lotQuantity ? 'correction_out' : 'correction_in', reference: `stock-set:${operation}:${generation}` }
   return [guard(`
     (SELECT ${productSql} FROM products WHERE id=@product)=@productSnapshot
     AND (SELECT ${branchSql} FROM branches WHERE id=@branch)=@branchSnapshot
@@ -60,8 +61,8 @@ function effects(before: Snapshot, after: Snapshot, user: SessionUser, reason: s
       ON CONFLICT(product_id,branch_id) DO UPDATE SET quantity=excluded.quantity`, params },
     { sql: `DELETE FROM branch_stock WHERE product_id=@product AND branch_id=@branch AND @newBranchExists=0`, params },
     { sql: `UPDATE products SET stock_quantity=(SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id=@product),updated_at=CURRENT_TIMESTAMP WHERE id=@product`, params },
-    { sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,batch_id,movement_type,quantity,reason,user_id,user_name)
-      SELECT @product,json_extract(@productSnapshot,'$.name'),@branch,json_extract(@branchSnapshot,'$.name'),@batch,'set',@delta,@reason,@actor,@actorName WHERE @delta>0`, params },
+    { sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,batch_id,movement_type,quantity,reason,user_id,user_name,reference_id,unit_cost_usd,unit_cost_khr,total_cost_usd,total_cost_khr)
+      SELECT @product,json_extract(@productSnapshot,'$.name'),@branch,json_extract(@branchSnapshot,'$.name'),@batch,@movementType,@delta,@reason,@actor,@actorName,@reference,NULL,NULL,NULL,NULL WHERE @delta>0`, params },
     { sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details)
       VALUES(@actor,@actorName,'stock_set','product',@product,json_object('operation_id',@operation,'setScope',@setScope,'reason',@reason,'before',json(@before),'after',json(@after)))`, params },
   ]
@@ -97,7 +98,7 @@ export async function applyStockLotSet(db: D1Compat, user: SessionUser, requestI
     guard(`${revisionsSql}=@revisions`, params),
     { sql: `INSERT INTO stock_lot_adjustment_operations(id,actor_id,request_id,request_json,request_digest,response_json,before_json,after_json,revision_json)
       VALUES(@operation,@actor,@requestId,@requestJson,@digest,@response,@before,@after,@revisions)`, params },
-    ...effects(before, after, user, request.reason, operation, request.setScope),
+    ...effects(before, after, user, request.reason, operation, request.setScope, 0),
     { sql: `INSERT INTO action_history(scope,entity,entity_id,label,reversible,status,undo_payload,redo_payload,created_by_id,created_by_name)
       VALUES('inventory','stock_quantity_set',@operation,@label,1,'undoable',@payload,@payload,@actor,@actorName)`, params },
     { sql: `UPDATE stock_lot_adjustment_operations SET history_id=last_insert_rowid(),response_json=json_set(response_json,'$.action_history_id',last_insert_rowid()),revision_json=${revisionsSql} WHERE id=@operation`, params },
@@ -131,7 +132,7 @@ export async function replayStockLotSet(env: Env, user: SessionUser, direction: 
     AND json_extract(h.undo_payload,'$.operation_id')=@operation AND json_extract(h.redo_payload,'$.operation_id')=@operation
     AND json_extract(h.undo_payload,'$.generation')=@generation AND json_extract(h.redo_payload,'$.generation')=@generation)`, params),
     guard(`${revisionsSql}=@revisions`, params),
-    ...effects(before, after, user, `${direction}: ${JSON.parse(row.request_json).reason}`, row.id, JSON.parse(row.request_json).setScope),
+    ...effects(before, after, user, `${direction}: ${JSON.parse(row.request_json).reason}`, row.id, JSON.parse(row.request_json).setScope, next),
     { sql: `UPDATE stock_lot_adjustment_operations SET generation=@next,state=@target,revision_json=${revisionsSql} WHERE id=@operation`, params },
     { sql: `UPDATE action_history SET status=@status,last_error=NULL,updated_at=CURRENT_TIMESTAMP,
       undo_payload=json_set(undo_payload,'$.generation',@next),redo_payload=json_set(redo_payload,'$.generation',@next) WHERE id=@history`, params },
