@@ -8,12 +8,13 @@ import { canonicalTransferAuthorityGuardStatement } from './canonicalBranchIdent
 import { transferIntentAuditStatement } from './transferOperationReceipt'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from './cache'
+import { resolveMovementCostSnapshot, type MovementCostPair } from './movementCostSnapshot'
 
 export const TRANSFER_OPERATION_KIND = 'stock.transfer'
 type Statement = { sql: string; params?: Record<string, unknown> }
 type Scope = 'branches' | 'inventory'
 type Lot = { id: number; variant_product_id: number; batch_key: string; lot_code: string | null; received_at: string | null; expiry_date: string | null; notes: string | null }
-type Allocation = { source_batch_id: number; destination_batch_id: number | null; destination_batch_key: string; quantity: number; source_snapshot: Lot; destination_snapshot: Lot | null }
+type Allocation = { source_batch_id: number; destination_batch_id: number | null; destination_batch_key: string; quantity: number; source_snapshot: Lot; destination_snapshot: Lot | null; cost_snapshot: MovementCostPair }
 type Member = { source_product_id: number; destination_product_id: number; source_branch_id: number; destination_branch_id: number; quantity: number; untracked_quantity: number; source_snapshot: string; destination_snapshot: string; allocations_json: string; ordinal: number }
 export type TransferLine = { productId: number; destProductId: number; quantity: number; batchId?: number | null }
 export class TransferConflictError extends Error { statusCode = 409 }
@@ -44,19 +45,30 @@ export async function planTransferOperation(db: D1Compat, args: {
   const members: Member[] = []
   const pendingLots = new Map<string, string>()
   for (const [ordinal, line] of args.lines.entries()) {
-    const sourceProduct = await db.prepare(`SELECT ${productSnapshotSql} AS snapshot FROM products WHERE id=@id AND is_active=1`).get<{ snapshot: string }>({ id: line.productId })
+    const sourceProduct = await db.prepare(`SELECT ${productSnapshotSql} AS snapshot,cost_price_usd,cost_price_khr FROM products WHERE id=@id AND is_active=1`).get<{ snapshot: string; cost_price_usd: number | null; cost_price_khr: number | null }>({ id: line.productId })
     const destinationProduct = line.productId === line.destProductId ? sourceProduct
       : await db.prepare(`SELECT ${productSnapshotSql} AS snapshot FROM products WHERE id=@id AND is_active=1`).get<{ snapshot: string }>({ id: line.destProductId })
     const snapshots = [sourceProduct, destinationProduct]
     if (snapshots.some(row => !row)) throw new TransferConflictError('A transfer product changed. Refresh and try again.')
+    // Only planning reads mutable catalog costs. Both movement directions and
+    // every later replay consume the same immutable source-cost provenance.
+    const fallback = { fallbackUnitCostUsd: sourceProduct!.cost_price_usd, fallbackUnitCostKhr: sourceProduct!.cost_price_khr }
+    statements.push(assert(`EXISTS(SELECT 1 FROM products WHERE id=@product AND cost_price_usd IS @usd AND cost_price_khr IS @khr)`,
+      { product: line.productId, usd: sourceProduct!.cost_price_usd, khr: sourceProduct!.cost_price_khr }))
     const lots = await readFifoLotAvailability(db, line.productId, args.fromBranchId)
     const selected = line.batchId == null ? lots : lots.filter(lot => lot.batchId === line.batchId)
     const { takes, uncovered } = allocateAcrossLots(selected, line.quantity)
     if (line.batchId != null && uncovered > 0) throw new TransferConflictError('The selected received date no longer has enough stock.')
     const allocations: Allocation[] = []
     for (const take of takes) {
-      const source = await db.prepare(`SELECT ${lotSnapshotSql} AS snapshot FROM product_batches WHERE id=@id AND is_active=1`).get<{ snapshot: string }>({ id: take.batchId })
+      const source = await db.prepare(`SELECT ${lotSnapshotSql} AS snapshot,unit_cost_usd FROM product_batches WHERE id=@id AND is_active=1`).get<{ snapshot: string; unit_cost_usd: number | null }>({ id: take.batchId })
       if (!source) throw new TransferConflictError('The source received date changed.')
+      const costSnapshot = resolveMovementCostSnapshot({ quantity: take.quantity,
+        // Lots store USD only. KHR uses the captured source product currency,
+        // never a guessed exchange rate or destination product's cost.
+        components: [{ quantity: take.quantity, unitCostUsd: source.unit_cost_usd }], ...fallback })
+      statements.push(assert(`EXISTS(SELECT 1 FROM product_batches WHERE id=@batch AND unit_cost_usd IS @usd)`,
+        { batch: take.batchId, usd: source.unit_cost_usd }))
       const sourceLot = JSON.parse(source.snapshot) as Lot
       let destination: Lot | null = sourceLot
       let key = sourceLot.batch_key
@@ -70,16 +82,19 @@ export async function planTransferOperation(db: D1Compat, args: {
         key = destination?.batch_key || pendingLots.get(pendingKey) || lotCode || `transfer-${crypto.randomUUID()}`
         if (!destination && !pendingLots.has(pendingKey)) {
           pendingLots.set(pendingKey, key)
-          statements.push({ sql: `INSERT INTO product_batches(variant_product_id,batch_key,lot_code,received_at,expiry_date,notes,is_active,batch_number)
-            SELECT @product,@key,@lot,@received,@expiry,@notes,1,COALESCE(MAX(batch_number),0)+1 FROM product_batches WHERE variant_product_id=@product`,
-          params: { product: line.destProductId, key, lot: lotCode, received: sourceLot.received_at, expiry: sourceLot.expiry_date, notes: sourceLot.notes } })
+          statements.push({ sql: `INSERT INTO product_batches(variant_product_id,batch_key,lot_code,received_at,expiry_date,notes,is_active,batch_number,unit_cost_usd)
+            SELECT @product,@key,@lot,@received,@expiry,@notes,1,COALESCE(MAX(batch_number),0)+1,@usd FROM product_batches WHERE variant_product_id=@product`,
+          params: { product: line.destProductId, key, lot: lotCode, received: sourceLot.received_at, expiry: sourceLot.expiry_date, notes: sourceLot.notes,
+            usd: costSnapshot.unitCostUsd } })
         }
       }
-      allocations.push({ source_batch_id: take.batchId, destination_batch_id: destination?.id ?? null, destination_batch_key: key, quantity: take.quantity, source_snapshot: sourceLot, destination_snapshot: destination })
+      allocations.push({ source_batch_id: take.batchId, destination_batch_id: destination?.id ?? null, destination_batch_key: key, quantity: take.quantity, source_snapshot: sourceLot, destination_snapshot: destination, cost_snapshot: costSnapshot })
     }
     const member: Member = { ordinal, source_product_id: line.productId, destination_product_id: line.destProductId,
       source_branch_id: args.fromBranchId, destination_branch_id: args.toBranchId, quantity: line.quantity,
-      untracked_quantity: uncovered, source_snapshot: snapshots[0]!.snapshot, destination_snapshot: snapshots[1]!.snapshot, allocations_json: JSON.stringify(allocations) }
+      untracked_quantity: uncovered, source_snapshot: JSON.stringify({ ...JSON.parse(snapshots[0]!.snapshot),
+        untracked_cost_snapshot: uncovered > 0 ? resolveMovementCostSnapshot({ quantity: uncovered, ...fallback }) : null }),
+      destination_snapshot: snapshots[1]!.snapshot, allocations_json: JSON.stringify(allocations) }
     members.push(member)
     statements.push({ sql: `INSERT INTO transfer_operation_members(receipt_id,ordinal,source_product_id,destination_product_id,source_branch_id,destination_branch_id,quantity,untracked_quantity,source_snapshot,destination_snapshot,allocations_json)
       SELECT ${receiptSql},@ordinal,@sourceProduct,@destProduct,@sourceBranch,@destBranch,@quantity,@untracked,@sourceSnapshot,@destSnapshot,
@@ -110,15 +125,15 @@ function transferEffectStatements(operation: string, reverse: boolean, generatio
     FROM transfer_operation_members m WHERE m.receipt_id=${receiptSql}`
   const allocations = `SELECT m.*,json_extract(a.value,'$.${from}_batch_id') AS from_batch,json_extract(a.value,'$.${to}_batch_id') AS to_batch,
     json_extract(a.value,'$.quantity') AS take_quantity,json_extract(a.value,'$.${from}_snapshot') AS from_lot_snapshot,
-    json_extract(a.value,'$.${to}_snapshot') AS to_lot_snapshot
+    json_extract(a.value,'$.${to}_snapshot') AS to_lot_snapshot,json_extract(a.value,'$.cost_snapshot') AS movement_cost
     FROM (${members}) m,json_each(m.allocations_json) a`
   const sources = `SELECT from_product,from_branch,SUM(quantity) AS quantity,SUM(untracked_quantity) AS untracked FROM (${members}) GROUP BY from_product,from_branch`
   const sourceLots = `SELECT from_product,from_branch,from_batch,SUM(take_quantity) AS quantity FROM (${allocations}) GROUP BY from_product,from_branch,from_batch`
   const params = { operation, generation, reason, actor: user.id, name: actorSnapshot(user) }
   return [
     assert(`NOT EXISTS(SELECT 1 FROM (${members}) m WHERE
-      COALESCE((SELECT ${productSnapshotSql} FROM products WHERE id=m.from_product)=m.from_snapshot,0)=0
-      OR COALESCE((SELECT ${productSnapshotSql} FROM products WHERE id=m.to_product)=m.to_snapshot,0)=0
+      COALESCE((SELECT ${productSnapshotSql} FROM products WHERE id=m.from_product)=json_remove(m.from_snapshot,'$.untracked_cost_snapshot'),0)=0
+      OR COALESCE((SELECT ${productSnapshotSql} FROM products WHERE id=m.to_product)=json_remove(m.to_snapshot,'$.untracked_cost_snapshot'),0)=0
       OR ABS((SELECT COALESCE(SUM(json_extract(value,'$.quantity')),0) FROM json_each(m.allocations_json))+m.untracked_quantity-m.quantity)>0.000000001)`, params),
     assert(`NOT EXISTS(SELECT 1 FROM (${sources}) m WHERE
       NOT EXISTS(SELECT 1 FROM branch_stock WHERE product_id=m.from_product AND branch_id=m.from_branch AND quantity>=m.quantity)
@@ -151,11 +166,15 @@ function transferEffectStatements(operation: string, reverse: boolean, generatio
         @actor,@name,@operation,receipt_id,ordinal,@generation FROM (${members})`, params },
     ...(['out', 'in'] as const).map(direction => {
       const side = direction === 'out' ? 'from' : 'to'
-      return { sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,reason,user_id,user_name,batch_id)
+      // Missing legacy provenance stays NULL: replay must never invent costs
+      // from today's product or lot, including on the reversed/incoming side.
+      const costColumns = (json: string) => ['unitCostUsd', 'unitCostKhr', 'totalCostUsd', 'totalCostKhr']
+        .map(field => `json_extract(${json},'$.${field}')`).join(',')
+      return { sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,reason,user_id,user_name,batch_id,unit_cost_usd,unit_cost_khr,total_cost_usd,total_cost_khr)
         SELECT ${side}_product,json_extract(${side}_snapshot,'$.name'),${side}_branch,(SELECT name FROM branches WHERE id=${side}_branch),
-          'transfer_${direction}',take_quantity,@reason,@actor,@name,${side}_batch FROM (${allocations})
+          'transfer_${direction}',take_quantity,@reason,@actor,@name,${side}_batch,${costColumns('movement_cost')} FROM (${allocations})
         UNION ALL SELECT ${side}_product,json_extract(${side}_snapshot,'$.name'),${side}_branch,(SELECT name FROM branches WHERE id=${side}_branch),
-          'transfer_${direction}',untracked_quantity,@reason,@actor,@name,NULL FROM (${members}) WHERE untracked_quantity>0`, params }
+          'transfer_${direction}',untracked_quantity,@reason,@actor,@name,NULL,${costColumns("json_extract(source_snapshot,'$.untracked_cost_snapshot')")} FROM (${members}) WHERE untracked_quantity>0`, params }
     }),
   ]
 }

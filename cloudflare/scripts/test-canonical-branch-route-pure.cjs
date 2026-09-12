@@ -115,6 +115,7 @@ const branchRoute = loadModule('routes/branches.ts', (id) => {
   if (id === '../lib/cache') return { bumpVersion: async () => {} }
   if (id === '../lib/audit') return { audit: async (...args) => { audits.push(args) } }
   if (id === '../lib/transferOperation') return loadModule('lib/transferOperation.ts', dep => {
+    if (dep === './movementCostSnapshot') return loadModule('lib/movementCostSnapshot.ts', require)
     if (dep === './db') return {getDb:dbCompat}
     if (dep === './permissions') return {getActionTier:user=>user?.tier || 'none'}
     if (dep === './actorSnapshot') return {actorSnapshot:user=>user?.name || null}
