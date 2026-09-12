@@ -1,5 +1,6 @@
 import { Hono, type Context, type Next } from 'hono'
 import { getDb } from '../lib/db'
+import { applyCustomerGenderRestoration, previewCustomerGenderRestoration, customerGenderRestorationStatus, notifyCustomerGenderRestoration, canRestoreCustomerGender, GENDER_RESTORATION_MAX_BYTES } from '../lib/customerGenderRestoration'
 import { loyaltyAffectingSaleSql, LOYALTY_REASSIGNMENT_CODE, LOYALTY_REASSIGNMENT_MESSAGE } from '../lib/saleCustomerAssignmentGuard'
 import { chunkForBinding } from '../lib/sqlBinding'
 import { requireAuth, type SessionUser } from '../lib/auth'
@@ -663,6 +664,35 @@ async function computeContactHistorySummaryMap(
   }
   return result
 }
+
+// Deliberately separate from general contact import/update: only server-approved
+// evidence chunks may change gender, and the service owns atomic audit/replay.
+for (const operation of ['preview', 'apply'] as const) {
+  app.post(`/customers/gender-restoration/${operation}`, async (c) => {
+    try {
+      if (!canRestoreCustomerGender(c.get('user'))) return c.json({ success: false, error: 'Administrator Contacts edit permission is required.' }, 403)
+      if (Number(c.req.header('content-length') || 0) > GENDER_RESTORATION_MAX_BYTES) return c.json({ success: false, error: 'Restoration chunk is too large.' }, 413)
+      const text = await c.req.text()
+      if (new TextEncoder().encode(text).byteLength > GENDER_RESTORATION_MAX_BYTES) return c.json({ success: false, error: 'Restoration chunk is too large.' }, 413)
+      let body: unknown
+      try { body = JSON.parse(text) } catch { return c.json({ success: false, error: 'Invalid restoration JSON.' }, 400) }
+      const result = await (operation === 'apply' ? applyCustomerGenderRestoration : previewCustomerGenderRestoration)(getDb(c.env), c.get('user'), body)
+      if (operation === 'apply') c.executionCtx.waitUntil(notifyCustomerGenderRestoration(c.env))
+      return c.json(result)
+    } catch (error) {
+      const code = Number((error as { statusCode?: number }).statusCode)
+      const status = ([400, 403, 404, 409, 413, 503].includes(code) ? code : 500) as 400 | 403 | 404 | 409 | 413 | 500 | 503
+      return c.json({ success: false, error: status === 500 ? 'Restoration outcome is uncertain. Check status before retrying.' : (error as Error).message }, status)
+    }
+  })
+}
+app.get('/customers/gender-restoration/status', async (c) => {
+  try { return c.json(await customerGenderRestorationStatus(getDb(c.env), c.get('user'), c.req.query('campaign_id') || '')) }
+  catch (error) {
+    const code = Number((error as { statusCode?: number }).statusCode)
+    return c.json({ success: false, error: (error as Error).message }, ([400, 403, 404, 409].includes(code) ? code : 500) as 400 | 403 | 404 | 409 | 500)
+  }
+})
 
 function registerContactRoutes(config: ContactConfig) {
   app.get(config.path, async (c) => {

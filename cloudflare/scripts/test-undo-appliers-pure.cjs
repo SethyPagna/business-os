@@ -211,6 +211,12 @@ const undoAppliers = loadModule('lib/undoAppliers.ts', (id) => {
     productRemovePlanDigest: async () => '',
     productRemoveReplayStatements: () => [],
   }
+  // The actual gender kernel and route replay are covered transactionally in
+  // test-customer-gender-restoration-native.cjs. Never silently fake its replay.
+  if (id === './customerGenderRestoration') return {
+    CUSTOMER_GENDER_RESTORATION_KIND: 'customer.gender_restore',
+    replayCustomerGenderRestoration: async () => { throw new Error('Use the native gender restoration harness') },
+  }
   return require(id)
 })
 const { resolveUndoApplier, registeredUndoAppliers, isServerReplayable, mergeReplayChangesProductImages, registerProductMergeGroupRedo, productMergeGroupPrefixFingerprint } = undoAppliers
@@ -462,6 +468,9 @@ await check('resolveUndoApplier recognizes a registered applier and falls throug
   assert.strictEqual(resolveUndoApplier({}), null)
   assert.strictEqual(resolveUndoApplier(null), null)
   assert.ok(registeredUndoAppliers().includes('branch.update'))
+  assert.ok(registeredUndoAppliers().includes('customer.gender_restore'))
+  assert.strictEqual(resolveUndoApplier({ applier: 'customer.gender_restore' }).permission, 'contacts')
+  assert.strictEqual(resolveUndoApplier({ applier: 'customer.gender_restore' }).action, 'edit')
   assert.ok(registeredUndoAppliers().includes('sale.fields.bulk'))
   assert.ok(registeredUndoAppliers().includes('sale.customer.bulk'))
   assert.ok(registeredUndoAppliers().includes('sale.customer.v2.bulk'))

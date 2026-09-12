@@ -27,6 +27,7 @@ import { RETURN_BULK_ACTION_KIND, replayReturnBulkAction } from './returnBulkAct
 import { SALE_SETTLEMENT_ACTION_KIND, replaySaleSettlementAction, saleMutationGuard } from './saleSettlementAction'
 import { STOCK_SESSION_KIND, replayStockSession } from './stockSession'
 import { actorSnapshot } from './actorSnapshot'
+import { CUSTOMER_GENDER_RESTORATION_KIND, replayCustomerGenderRestoration } from './customerGenderRestoration'
 import {
   parseProductMergeClusterPlan,
   resolveProductMergeClusterPlanEconomics,
@@ -2094,6 +2095,7 @@ async function replayProductRemove(payload: Record<string, unknown>, ctx: UndoAp
 }
 
 const APPLIERS: Record<string, UndoApplierDef> = {
+  [CUSTOMER_GENDER_RESTORATION_KIND]: { permission: 'contacts', action: 'edit', run: replayCustomerGenderRestoration },
   'stock.transfer': {
     permission: 'branches', action: 'transfer',
     run: async (payload, ctx) => {
