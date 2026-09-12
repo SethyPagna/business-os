@@ -6,7 +6,6 @@
 // first-attribution-sticks visible instead of silently ignored.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { bulkStockReceiptWire as bulkReceiptWire } from '../src/utils/stockReceiptFields.ts'
 
 let passed = 0
 function ok(label: string) {
@@ -86,32 +85,20 @@ assert.match(receiveModal, /supplierId: lotAttributedName \? null : supplierId/,
 ok('ReceiveBatchModal: locked lot sends nothing (visibility-mirror rule)')
 
 assert.match(inventoryModals, /supplier_id: '', supplier_name: ''/, 'InventoryStockModals clears supplier when an attributed lot is picked')
-// S4-16 widened "adds only" to "stock-ins only": a 'set' above the current
-// figure is converted to an add of the difference by routes/inventory.ts and
-// creates a real lot, so it attributes that lot exactly as an add does. A
-// remove -- and a set that lowers the figure -- still carries no supplier.
+// The wire follows the shared receipt predicate. Its explicit set_scope input
+// keeps a lot/branch Set correction out of receipt attribution even when the
+// correction increases quantity.
 assert.match(inventoryPage, /supplierId: isStockIn && adjustForm\.supplier_id !== ''/, 'Inventory.tsx sends supplier only for stock-ins')
 assert.match(inventoryPage, /supplierName: isStockIn && String\(adjustForm\.supplier_name \|\| ''\)\.trim\(\) !== ''/, 'Inventory.tsx name likewise stock-in only')
-assert.match(inventoryPage, /const isStockIn = isStockInSubmission\(adjustForm\.type, qty, previousQuantity\)/, 'Inventory.tsx derives that from the shared rule, not its own copy')
+assert.match(inventoryPage, /const isStockIn = isStockInSubmission\(adjustForm\.type, qty, previousQuantity, adjustForm\.set_scope\)/, 'Inventory.tsx derives receipt status from the shared scoped rule, not its own copy')
 ok('Inventory adjust: form cleared on attributed lots, wire is stock-in only')
 
-// N14-D widened "adds only" here too, and for the same reason S4-16 widened
-// it on Inventory.tsx: routes/inventory.ts converts a 'set' that RAISES a
-// row's stock into an add, and this surface -- one figure applied to many
-// products, with no branch quantity in sight -- cannot tell which rows those
-// are. So a bulk set states the supplier too; a remove still states none.
-// Asserted by evaluating the shared rule, not by matching the expression.
-assert.match(bulkModal, /bulkStockReceiptWire\(action, \{/, 'BulkAddStockModal builds its receipt half from the shared rule')
-assert.deepEqual(
-  bulkReceiptWire('remove', { unitCost: '3', freeGoods: false, supplierId: 9, supplierName: 'Bong Long', receivedDate: '2026-09-06' }),
-  {},
-  'a bulk remove carries no supplier and no cost',
-)
-assert.equal(
-  bulkReceiptWire('set', { unitCost: '3', freeGoods: false, supplierId: 9, supplierName: 'Bong Long', receivedDate: '2026-09-06' }).supplierId,
-  9,
-  'a bulk set can raise a row, and a raise is a receipt that names its supplier',
-)
+// Bulk Add is the only receipt mode. Explicit Bulk Set is an existing-lot
+// correction and must never collect/send supplier or receipt cost fields.
+assert.match(bulkModal, /if \(action === 'add'\) return \{ \.\.\.base, \.\.\.bulkStockReceiptWire\('add', \{/, 'BulkAddStockModal builds receipt facts only for Add')
+assert.match(bulkModal, /isStockIn: action === 'add'/, 'the bulk receipt gate must exclude scoped Set corrections')
+assert.match(bulkModal, /\{action === 'add' \? \([\s\S]*?<SupplierPickerField/, 'the supplier picker must be visible only for Add')
+assert.doesNotMatch(bulkModal, /bulkStockReceiptWire\('set'/, 'Bulk Set must not construct supplier/cost receipt facts')
 assert.match(bulkModal, /supplier_bulk_hint/, 'BulkAddStockModal explains the fill-not-rewrite semantics for existing lots')
 ok('BulkAddStockModal: one supplier per bulk event, receipts only, semantics explained')
 

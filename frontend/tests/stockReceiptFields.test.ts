@@ -402,22 +402,11 @@ runTest('a hidden batch picker chose nothing: a set-down lot cannot ride a set-u
   }
 })
 
-runTest('a bulk SET states its receipt facts, because a set that raises stock is a receipt (N14-D)', () => {
-  // BulkAddStockModal sees no branch figures, so it cannot tell which rows of
-  // a 'set' rise. routes/inventory.ts gates each of those rows as the add it
-  // becomes, so the form must offer -- and send -- the supplier and cost for
-  // a set as well as an add. It offered them for 'add' only, which meant a
-  // bulk set-up was refused row by row with nothing on screen to fix.
+runTest('bulk Add states receipt facts while scoped Bulk Set remains a correction', () => {
   assert.equal(bulkActionCanReceive('add'), true)
-  assert.equal(bulkActionCanReceive('set'), true)
   assert.equal(bulkActionCanReceive('remove'), false)
 
   const draft = { unitCost: '2.50', freeGoods: false, supplierId: 4, supplierName: ' Sok Supply ', receivedDate: '2026-09-06' }
-  // Old answer for a 'set': {} -- no supplier, no cost, so the Worker refused
-  // every raising row with supplier_required.
-  assert.deepEqual(bulkStockReceiptWire('set', draft), {
-    unitCostUsd: 2.5, supplierId: 4, supplierName: 'Sok Supply', receivedDate: '2026-09-06',
-  })
   assert.deepEqual(bulkStockReceiptWire('add', draft), {
     unitCostUsd: 2.5, supplierId: 4, supplierName: 'Sok Supply', receivedDate: '2026-09-06',
   })
@@ -435,8 +424,9 @@ runTest('a bulk SET states its receipt facts, because a set that raises stock is
 
   const bulk = source('components/products/forms/BulkAddStockModal.tsx')
   assert.ok(bulk.includes('bulkStockReceiptWire'), 'the bulk surface must build its receipt half from the shared rule')
-  assert.ok(bulk.includes('bulkActionCanReceive'), 'the bulk gate must cover a set as well as an add')
-  assert.ok(!bulk.includes("isStockIn: action === 'add'"), 'a bulk set-up is a stock-in the Worker gates; the form must gate it too')
+  assert.match(bulk, /if \(action === 'add'\) return \{ \.\.\.base, \.\.\.bulkStockReceiptWire\('add', \{/, 'only Add may attach receipt facts')
+  assert.ok(bulk.includes("isStockIn: action === 'add'"), 'the receipt gate must exclude explicit scoped Set corrections')
+  assert.ok(!bulk.includes("bulkStockReceiptWire('set'"), 'a scoped Bulk Set must not send supplier, cost, payment, or a new received date')
 })
 
 if (failed > 0) {
