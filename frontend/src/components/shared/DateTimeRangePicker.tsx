@@ -476,7 +476,7 @@ export default function DateTimeRangePicker({
           role="dialog"
           aria-label={t('date_time_range') || 'Date and time range'}
           style={panelPosition}
-          className="fixed z-[70] overflow-y-auto overscroll-contain rounded-lg border border-slate-200 bg-white p-2.5 shadow-xl dark:border-slate-700 dark:bg-slate-900"
+          className="fixed z-[1080] overflow-y-auto overscroll-contain rounded-lg border border-slate-200 bg-white p-2.5 shadow-xl dark:border-slate-700 dark:bg-slate-900"
         >
           {/* Header: Clear (when anything is set) + the red close ✕. */}
           <div className="mb-2 flex items-center gap-2">
