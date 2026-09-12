@@ -112,6 +112,7 @@ const productSalesLedger = loadReal('lib/productSalesLedger.ts', { './salesAnaly
 const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ inventory: true }) }
 
 const inventoryRoute = loadReal('routes/inventory.ts', {
+  '../lib/movementCostSnapshot': loadReal('lib/movementCostSnapshot.ts'),
   // inventory.ts imports this TypeScript-only helper; load it through the
   // harness rather than asking Node to resolve a non-existent .js sibling.
   '../lib/transferOperationReceipt': loadReal('lib/transferOperationReceipt.ts'),
