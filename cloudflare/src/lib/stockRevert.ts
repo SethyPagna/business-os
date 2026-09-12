@@ -35,6 +35,10 @@ export type RevertMovementRow = {
   branch_name: string | null
   movement_type: string
   quantity: number
+  unit_cost_usd: number | null
+  unit_cost_khr: number | null
+  total_cost_usd: number | null
+  total_cost_khr: number | null
   reason: string | null
   batch_id: number | null
 }
@@ -158,8 +162,12 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
 
   const revertReason = `Revert of #${m.id}${m.reason ? `: ${m.reason}` : ` (${m.movement_type})`}`
   await db.prepare(`
-    INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, reference_id, user_id, user_name, created_at, batch_id)
-    VALUES (@productId, @productName, @branchId, @branchName, @movementType, @quantity, @reason, @referenceId, @userId, @userName, CURRENT_TIMESTAMP, @batchId)
+    INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity,
+      unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr,
+      reason, reference_id, user_id, user_name, created_at, batch_id)
+    VALUES (@productId, @productName, @branchId, @branchName, @movementType, @quantity,
+      @unitCostUsd, @unitCostKhr, @totalCostUsd, @totalCostKhr,
+      @reason, @referenceId, @userId, @userName, CURRENT_TIMESTAMP, @batchId)
   `).run({
     productId,
     productName: m.product_name,
@@ -167,6 +175,13 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
     branchName: m.branch_name,
     movementType: revertType,
     quantity: magnitude,
+    // A revert is a compensating record for this exact historical movement.
+    // Copy its immutable snapshot (including explicit zero or NULL); looking
+    // up today's product/lot cost would rewrite history after a price change.
+    unitCostUsd: m.unit_cost_usd ?? null,
+    unitCostKhr: m.unit_cost_khr ?? null,
+    totalCostUsd: m.total_cost_usd ?? null,
+    totalCostKhr: m.total_cost_khr ?? null,
     reason: revertReason,
     referenceId: `revert:${m.id}`,
     userId: actor.userId ?? null,

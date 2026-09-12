@@ -80,10 +80,11 @@ async function counterFor(originalId) {
   // removeStockFromBatch) are covered by their own pure tests; this test
   // pins the NEW orchestration -- direction, aggregate move, counter-movement,
   // double-revert guard -- against the real schema.
-  db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (9201, 'Revert Cream', 'RC-1', 'pcs', 10, 1)`).run({})
+  db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, cost_price_usd, cost_price_khr, is_active) VALUES (9201, 'Revert Cream', 'RC-1', 'pcs', 10, 99, 396000, 1)`).run({})
   db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (9201, 1, 10)`).run({})
-  db.prepare(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_name, created_at)
-    VALUES (5001, 9201, 'Revert Cream', 1, 'Main Store', 'add', 10, 'received', 'tester', '2026-08-20 10:00:00')`).run({})
+  db.prepare(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, user_name, created_at)
+    VALUES (5001, 9201, 'Revert Cream', 1, 'Main Store', 'add', 10, 4.25, 17000, 42.5, 170000, 'received', 'tester', '2026-08-20 10:00:00')`).run({})
+  db.prepare(`UPDATE products SET cost_price_usd=123, cost_price_khr=492000 WHERE id=9201`).run({})
 
   const before1 = await stockOf(9201, 1)
   assert.deepEqual(before1, { product: 10, branch: 10 }, 'seeded add left 10 in stock (aggregate) before revert')
@@ -98,6 +99,11 @@ async function counterFor(originalId) {
   assert.ok(counter1, 'a counter-movement was recorded')
   assert.equal(counter1.movement_type, 'remove')
   assert.equal(Number(counter1.quantity), 10)
+  assert.deepEqual(
+    { unitUsd: counter1.unit_cost_usd, unitKhr: counter1.unit_cost_khr, totalUsd: counter1.total_cost_usd, totalKhr: counter1.total_cost_khr },
+    { unitUsd: 4.25, unitKhr: 17000, totalUsd: 42.5, totalKhr: 170000 },
+    'revert copies the original movement cost snapshot after catalog cost changes',
+  )
   assert.match(String(counter1.reason), /Revert of #5001/)
   assert.equal(String(counter1.reference_id), 'revert:5001')
   ok(true, 'add reverts by removing the same quantity; aggregate and counter-movement all correct')
@@ -111,8 +117,8 @@ async function counterFor(originalId) {
   // ---- case 2: revert a batch-less OUT (revert adds the stock back) ---------
   db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (9202, 'Revert Serum', 'RS-1', 'pcs', 5, 1)`).run({})
   db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (9202, 1, 5)`).run({})
-  db.prepare(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_name, created_at)
-    VALUES (5101, 9202, 'Revert Serum', 1, 'Main Store', 'out', 2, 'bulk import removal', 'tester', '2026-08-21 10:00:00')`).run({})
+  db.prepare(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, user_name, created_at)
+    VALUES (5101, 9202, 'Revert Serum', 1, 'Main Store', 'out', 2, NULL, NULL, NULL, NULL, 'bulk import removal', 'tester', '2026-08-21 10:00:00')`).run({})
   const orig2 = await movementById(5101)
   const r2 = await kernel.applyMovementRevert(db, orig2, actor)
   assert.equal(r2.ok, true)
@@ -122,6 +128,8 @@ async function counterFor(originalId) {
   const counter2 = await counterFor(5101)
   assert.equal(counter2.movement_type, 'add')
   assert.equal(Number(counter2.quantity), 2)
+  assert.equal(counter2.unit_cost_usd, null)
+  assert.equal(counter2.total_cost_usd, null)
   ok(true, 'batch-less outflow reverts by adding the stock back to the aggregate')
 
   // ---- case 3: non-revertible transactional type is refused ----------------
