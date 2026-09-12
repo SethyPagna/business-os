@@ -4,6 +4,7 @@ import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
 import { getActionTier, getPermissionTier, hasPermission, isAdminControlUser, isSensitiveActionHistory, permissionForActionHistory } from '../lib/permissions'
 import { SALE_ADD_ITEMS_ACTION_KIND, PRODUCT_MERGE_GROUP_ACTION_KIND, isServerReplayable, resolveUndoApplier, applierPermissionTier, mergeReplayChangesProductImages, type UndoApplierOutcome } from '../lib/undoAppliers'
+import { CUSTOMER_GENDER_RESTORATION_KIND, canRestoreCustomerGender, notifyCustomerGenderRestoration } from '../lib/customerGenderRestoration'
 import { PRODUCT_REMOVE_ACTION_KIND } from '../lib/productDelete'
 import type { Env } from '../index'
 import { BULK_STATUS_KIND, notifyBulkStatus } from '../lib/saleBulkStatus'
@@ -85,6 +86,7 @@ function canReadAllHistory(user: SessionUser, requestedAll = false): boolean {
 
 function canOperateHistoryRow(user: SessionUser, row: ActionHistoryRow | null | undefined): boolean {
   if (!row) return false
+  if (parseJson(row.undo_payload).applier === CUSTOMER_GENDER_RESTORATION_KIND) return canRestoreCustomerGender(user) && Number(row.created_by_id) === Number(user.id)
   if (isAdminControlUser(user)) return true
   const transferPayload = parseJson(row.undo_payload)
   const permission = transferPayload.applier === TRANSFER_OPERATION_KIND
@@ -111,6 +113,8 @@ function canUseNamedAppliers(user: SessionUser, payloads: Array<unknown>): boole
     } else if (applier?.name === STOCK_SESSION_KIND) {
       const payload = raw as Record<string, unknown>
       if (payload.snapshot_version !== 2 || !canReplayStockSessionPayload(user, payload)) return false
+    } else if (applier?.name === CUSTOMER_GENDER_RESTORATION_KIND) {
+      if (!canRestoreCustomerGender(user)) return false
     } else if (applier && applierPermissionTier(user, applier) !== 'full') return false
   }
   return true
@@ -120,7 +124,7 @@ function isServerManagedPayload(value: unknown): boolean {
   if (!value || typeof value !== 'object') return false
   const payload = value as Record<string, unknown>
   const kind = String(payload.applier || '')
-  return kind === TRANSFER_OPERATION_KIND || SERVER_BULK_KINDS.has(kind) || kind === PRODUCT_MERGE_GROUP_ACTION_KIND || kind === PRODUCT_REMOVE_ACTION_KIND
+  return kind === CUSTOMER_GENDER_RESTORATION_KIND || kind === TRANSFER_OPERATION_KIND || SERVER_BULK_KINDS.has(kind) || kind === PRODUCT_MERGE_GROUP_ACTION_KIND || kind === PRODUCT_REMOVE_ACTION_KIND
     || (kind === SALE_ADD_ITEMS_ACTION_KIND && typeof payload.operation_id === 'string' && payload.operation_id.length > 0)
 }
 
@@ -162,6 +166,7 @@ async function mapRow(row: ActionHistoryRow, user: SessionUser, env: Env) {
     redo_payload: redoPayload,
     server_replayable: !!(applier
       && canUseNamedAppliers(user, [undoPayload, redoPayload])
+      && (applier.name !== CUSTOMER_GENDER_RESTORATION_KIND || Number(row.created_by_id) === Number(user.id))
       && (!replayChangesImages || getActionTier(user, 'products', 'image') === 'full')),
   }
 }
@@ -365,7 +370,8 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     const groupReplay = parseJson(existing.undo_payload)?.applier === PRODUCT_MERGE_GROUP_ACTION_KIND
     const productRemoveReplay = parseJson(existing.undo_payload)?.applier === PRODUCT_REMOVE_ACTION_KIND
     const transferReplay = parseJson(existing.undo_payload)?.applier === TRANSFER_OPERATION_KIND
-    if (currentStatus !== expected && !stockReplay && !groupReplay && !productRemoveReplay && !transferReplay) {
+    const genderReplay = parseJson(existing.undo_payload)?.applier === CUSTOMER_GENDER_RESTORATION_KIND
+    if (currentStatus !== expected && !stockReplay && !groupReplay && !productRemoveReplay && !transferReplay && !genderReplay) {
       return c.json({ success: false, error: `Action is not ${direction === 'undo' ? 'undoable' : 'redoable'} right now` }, 409)
     }
 
@@ -384,6 +390,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     // rows written before this gate existed, or by a user since demoted,
     // must not replay on the strength of the row alone). Runs before any
     // status flip so a refusal changes nothing.
+    if (genderReplay && !canRestoreCustomerGender(user)) return c.json({ success: false, error: 'Administrator Contacts edit permission is required.' }, 403)
     if (applier && (applier.name === TRANSFER_OPERATION_KIND
       ? !canReplayTransferPayload(user, payload)
       : applier.name === STOCK_SESSION_KIND
@@ -414,13 +421,15 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
           .run({ last_error: (error as Error)?.message || `Failed to ${direction}`, id: existing.id })
         const code = Number((error as Error & { statusCode?: number })?.statusCode) // Preserve statusCode 409 as a conflict.
         const saleCustomerReplay = SALE_BULK_UPDATE_KINDS.has(applier.name) && (payload.action === 'customer' || payload.action === 'customer_name')
-        const status = (stockReplay || saleCustomerReplay) && (code === 400 || code === 403) ? code : code === 409 ? 409 : 500
+        const status = (stockReplay || saleCustomerReplay || genderReplay) && (code === 400 || code === 403 || code === 404) ? code : code === 409 ? 409 : 500
         return c.json({ success: false, error: (error as Error)?.message || `Failed to ${direction} this action`, ...(saleCustomerReplay && isLoyaltyAssignmentError(error) ? { code: LOYALTY_REASSIGNMENT_CODE } : {}) }, status)
       }
     }
 
     if (serverManagedReplay && applier) {
-      if (applier.name !== SALE_ADD_ITEMS_ACTION_KIND && applier.name !== PRODUCT_MERGE_GROUP_ACTION_KIND) c.executionCtx.waitUntil(applier.name === TRANSFER_OPERATION_KIND
+      if (applier.name !== SALE_ADD_ITEMS_ACTION_KIND && applier.name !== PRODUCT_MERGE_GROUP_ACTION_KIND) c.executionCtx.waitUntil(applier.name === CUSTOMER_GENDER_RESTORATION_KIND
+        ? notifyCustomerGenderRestoration(c.env)
+        : applier.name === TRANSFER_OPERATION_KIND
         ? notifyTransferOperation(c.env)
         : applier.name === STOCK_SESSION_KIND
         ? notifyStockSession(c.env, { operationId: String(payload.operation_id) })
@@ -437,7 +446,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
         applied: true,
         item: row ? await mapRow(row, user, c.env) : null,
         payload,
-        ...(applier.name === PRODUCT_MERGE_GROUP_ACTION_KIND
+        ...(applier.name === PRODUCT_MERGE_GROUP_ACTION_KIND || genderReplay
           ? (outcome || { complete: true, continuation_required: false, processed_children: 0, pending_children: 0, generation: Number(body.expected_generation || 0) })
           : {}),
       })
