@@ -56,6 +56,7 @@ import { RESOLVED_ACTOR_NAME_COLUMN, movementActorNameSql, withResolvedActorName
 import { movementReferenceSelectSql } from '../lib/movementReference'
 import { movementSearchHaystackSql } from '../lib/movementSearch'
 import { transferStockGuardStatement, transferLotGuardStatement, findTransferReceipt, normalizeTransferRequestId, transferIntentAuditStatement, transferReceiptResponse, transferReceiptStatement, transferRequestDigest } from '../lib/transferOperationReceipt'
+import { resolveMovementCostSnapshot, type MovementCostComponent } from '../lib/movementCostSnapshot'
 
 // Inventory routes, ported from backend/src/routes/inventory.ts.
 //
@@ -1577,6 +1578,14 @@ app.post('/adjust', async (c) => {
     }
   }
 
+  // Snapshot catalog cost before moving stock. It is only the fallback for a
+  // receipt/removal that has no more specific entered/lot cost; it is never
+  // consulted later when this historical row is displayed or reverted.
+  const productCostSnapshot = await db.prepare(`
+    SELECT cost_price_usd, cost_price_khr FROM products WHERE id = @id
+  `).get<{ cost_price_usd: number | null; cost_price_khr: number | null }>({ id: targetProductId })
+  const receiptUnitCostUsd = unitCostUsd ?? productCostSnapshot?.cost_price_usd ?? null
+
   // Mandatory batch selection (InventoryStockModals.tsx, add/remove on flat
   // rows) rides on this same endpoint rather than a separate one, so undo/
   // redo, action-history replay, and every other existing caller of POST
@@ -1632,6 +1641,7 @@ app.post('/adjust', async (c) => {
   let batchNumber: number | null = null
   let resolvedBatchId: number | null = batchIdRequested
   let lotCode: string | null = null
+  let removedBatchQuantities: Array<{ batchId: number; quantity: number }> = []
   if (type === 'add') {
     delta = quantity
   } else {
@@ -1661,7 +1671,7 @@ app.post('/adjust', async (c) => {
         // inside receiveBatchStock).
         supplierId,
         supplierName,
-        unitCostUsd,
+        unitCostUsd: receiptUnitCostUsd,
         paymentStatus,
         creditDueDate,
       })
@@ -1675,6 +1685,7 @@ app.post('/adjust', async (c) => {
     if (batchIdRequested != null) {
       try {
         await removeStockFromBatch(db, { batchId: batchIdRequested, productId: targetProductId, branchId, quantity })
+        removedBatchQuantities = [{ batchId: batchIdRequested, quantity }]
       } catch (err) {
         if (err instanceof InsufficientBatchStockError) return c.json({ error: err.message }, 400)
         return c.json({ error: err instanceof Error ? err.message : 'Failed to remove stock' }, 400)
@@ -1695,6 +1706,7 @@ app.post('/adjust', async (c) => {
       try {
         const drained = await removeStockAcrossBatches(db, { productId: targetProductId, branchId, quantity })
         autoBatchDrainIds = drained.batchIds
+        removedBatchQuantities = drained.batchQuantities.map((entry) => ({ batchId: entry.batchId, quantity: Math.abs(entry.quantity) }))
         // 0084: an auto-drain that ONE lot fully covered is attributable to
         // it; a multi-lot spread or a legacy-aggregate remainder is not.
         resolvedBatchId = drained.batchIds.length === 1 && drained.remainder === 0 ? drained.batchIds[0] : null
@@ -1708,11 +1720,36 @@ app.post('/adjust', async (c) => {
   }
 
   if (delta !== 0) {
+    let costComponents: MovementCostComponent[] = []
+    if (type === 'add') {
+      // An entered receipt cost, including an explicit free-goods zero, is
+      // the strongest action-time fact. KHR has no request/lot field; zero
+      // is defensible for explicitly free goods, otherwise use the catalog
+      // KHR snapshot without inventing an exchange conversion.
+      costComponents = [{
+        quantity: Math.abs(delta),
+        unitCostUsd: receiptUnitCostUsd,
+        unitCostKhr: unitCostUsd === 0 && freeGoods ? 0 : null,
+      }]
+    } else if (removedBatchQuantities.length) {
+      const lotCosts = await Promise.all(removedBatchQuantities.map(async (entry) => ({
+        ...entry,
+        unitCostUsd: (await db.prepare('SELECT unit_cost_usd FROM product_batches WHERE id = @id')
+          .get<{ unit_cost_usd: number | null }>({ id: entry.batchId }))?.unit_cost_usd ?? null,
+      })))
+      costComponents = lotCosts.map((entry) => ({ quantity: entry.quantity, unitCostUsd: entry.unitCostUsd }))
+    }
+    const movementCost = resolveMovementCostSnapshot({
+      quantity: Math.abs(delta),
+      components: costComponents,
+      fallbackUnitCostUsd: productCostSnapshot?.cost_price_usd ?? null,
+      fallbackUnitCostKhr: productCostSnapshot?.cost_price_khr ?? null,
+    })
     await db.prepare(`
       INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity,
-        unit_cost_usd, total_cost_usd, reason, reference_id, user_id, user_name, created_at, batch_id)
+        unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name, created_at, batch_id)
       VALUES (@productId, @productName, @branchId, @branchName, @movementType, @quantity,
-        @unitCostUsd, CASE WHEN @unitCostUsd IS NULL THEN NULL ELSE ROUND(@quantity * @unitCostUsd, 4) END,
+        @unitCostUsd, @unitCostKhr, @totalCostUsd, @totalCostKhr,
         @reason, @referenceId, @userId, @userName, CURRENT_TIMESTAMP, @batchId)
     `).run({
       productId: targetProductId,
@@ -1721,7 +1758,7 @@ app.post('/adjust', async (c) => {
       branchName: branch?.name || null,
       movementType,
       quantity: Math.abs(delta),
-      unitCostUsd: type === 'add' ? unitCostUsd : null,
+      ...movementCost,
       reason: appendReceiptNotes(createdSibling
         ? `${reason ? `${reason} - ` : ''}Auto-created row (barcode/cost differs from ${product.name})`
         : setToNote ? `${reason} (${setToNote})` : reason, reasonNotes),
@@ -2187,7 +2224,8 @@ app.post('/movements/:id/revert', async (c) => {
   if (!Number.isFinite(id) || id <= 0) return c.json({ error: 'Invalid movement id' }, 400)
   const db = getDb(c.env)
   const mv = await db.prepare(`
-    SELECT id, product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, batch_id
+    SELECT id, product_id, product_name, branch_id, branch_name, movement_type, quantity,
+      unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, batch_id
     FROM inventory_movements WHERE id = @id
   `).get<RevertMovementRow>({ id })
   if (!mv) return c.json({ error: 'Stock movement not found' }, 404)
