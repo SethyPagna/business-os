@@ -4,6 +4,8 @@ import Info from 'lucide-react/dist/esm/icons/info.js'
 import Loader2 from 'lucide-react/dist/esm/icons/loader-2.js'
 import AlertCircle from 'lucide-react/dist/esm/icons/alert-circle.js'
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
+import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
+import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import Modal from '../shared/Modal'
 import { costMoveRows } from './mergeConfirmationRule'
 import { createMergeDuplicatesPreviewRequestCoordinator } from './mergeDuplicatesPreviewRequest'
@@ -442,8 +444,9 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
                       data-merge-preview-page="back"
                       disabled={safeDetailPage <= 1}
                       onClick={() => setDetailPage((current) => Math.max(1, current - 1))}
-                      className="min-h-9 rounded-lg border border-gray-300 px-3 text-gray-600 hover:bg-gray-50 disabled:opacity-40 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
+                      className="flex min-h-9 items-center gap-1 rounded-lg border border-gray-300 px-2.5 text-gray-600 hover:bg-gray-50 disabled:opacity-40 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
                     >
+                      <ChevronLeft className="h-3.5 w-3.5" aria-hidden="true" />
                       {T('back', 'Back')}
                     </button>
                     <button
@@ -451,9 +454,10 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
                       data-merge-preview-page="next"
                       disabled={safeDetailPage >= detailPageCount}
                       onClick={() => setDetailPage((current) => Math.min(detailPageCount, current + 1))}
-                      className="min-h-9 rounded-lg border border-gray-300 px-3 text-gray-600 hover:bg-gray-50 disabled:opacity-40 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
+                      className="flex min-h-9 items-center gap-1 rounded-lg border border-gray-300 px-2.5 text-gray-600 hover:bg-gray-50 disabled:opacity-40 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
                     >
                       {T('next', 'Next')}
+                      <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
                     </button>
                   </nav>
                 )}
