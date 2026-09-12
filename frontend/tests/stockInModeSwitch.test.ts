@@ -109,19 +109,34 @@ runTest('a set can target zero; an add or a remove of nothing still cannot', () 
   assert.match(String(km.fast_stockin_set_qty), /[ក-៿]/)
 })
 
-runTest('the write honours the mode through the one adjust kernel; add keeps its receipt gate', () => {
-  // remove: the chosen lot or the oldest lots; no receipt fields
+runTest('the write honours explicit lots, and scoped Set is replay-safe', () => {
+  // Remove always carries the explicitly selected positive lot.
   assert.match(modalSource, /line\.mode === 'remove'\s*\? await adjustStock\(\{\s*productId: Number\(line\.product\.id\), type: 'remove', quantity: line\.quantity,[^]*?batchId: typeof line\.batchChoice === 'number' \? line\.batchChoice : null,[^]*?sessionId: sessionIdRef\.current,/)
-  // set: the branch total; receipt fields ride along because a set that
-  // raises stock is an add server-side
-  assert.match(modalSource, /line\.mode === 'set'\s*\? await adjustStock\(\{\s*productId: Number\(line\.product\.id\), type: 'set', quantity: line\.quantity,[^]*?supplierId: supplier\.supplierId, supplierName: supplier\.supplierName\.trim\(\) \|\| null,[^]*?sessionId: sessionIdRef\.current,/)
+  // Set defaults to the chosen lot, with branch-total as an explicit option.
+  assert.match(modalSource, /useState<StockSetScope>\(draft\?\.setScope === 'branch' \? 'branch' : 'lot'\)/)
+  assert.match(modalSource, /\['lot', tr\('stock_set_scope_lot'[^]*?\['branch', tr\('stock_set_scope_branch'[^]*?\.map\(\(\[scope, label\]\) =>/)
+  // Every reviewed Set freezes its selected lot, both optimistic snapshots,
+  // and one idempotency key. A retry submits those exact frozen values.
+  assert.match(modalSource, /setScope,[^]*?expectedLotQuantity: Number\(chosenLot\.quantity \|\| 0\),[^]*?expectedBranchQuantity: currentBranchQuantity,[^]*?clientRequestId:/)
+  assert.match(modalSource, /line\.mode === 'set'\s*\? await adjustStock\(\{[^]*?setScope: line\.setScope,[^]*?batchId: typeof line\.batchChoice === 'number' \? line\.batchChoice : null,[^]*?expectedLotQuantity: line\.expectedLotQuantity,[^]*?expectedBranchQuantity: line\.expectedBranchQuantity,[^]*?client_request_id: line\.clientRequestId,/)
   // add is unchanged: still exactly one receiveBatchStock call site
   assert.equal((modalSource.match(/receiveBatchStock\(/g) || []).length, 1)
-  // the gate guards adds as the line is queued -- and only adds; a remove
-  // has no supplier or cost to gate, a set's direction is decided server-side
+  // Only Adds carry supplier/cost receipt claims.
   assert.match(modalSource, /if \(mode === 'add'\) \{\s*const receiptGate = stockReceiptGateCode\(\{/)
-  // a remove never asks for a cost
-  assert.match(modalSource, /if \(mode !== 'remove' && paymentStatus === 'credit' && !creditDueDate\.trim\(\)\)/)
+  assert.match(modalSource, /unitCost: mode === 'add' \? unitCost : ''/)
+  assert.match(modalSource, /if \(pending\.some\(\(line\) => line\.mode === 'add'\) && paymentStatus === 'credit'/)
+})
+
+runTest('lot choices are explicit and mode-correct', () => {
+  assert.match(modalSource, /getProductBatches\(productId, parsedBranchId, mode === 'remove'\)/,
+    'remove loads positive lots; add/set load every active lot, including zero')
+  assert.match(modalSource, /const \[batchChoice, setBatchChoice\] = useState<'' \| 'new' \| number>\(''\)/)
+  assert.match(modalSource, /pendingBatchRestoreRef = useRef<'' \| 'new' \| number \| null>\(draft\?\.batchChoice \?\? null\)/,
+    'a restored choice is revalidated after the selected product lots load')
+  assert.match(modalSource, /if \(!variantWins && batchChoice === ''\)/,
+    'Add requires an explicit New/existing choice unless unlocked pricing necessarily creates New')
+  assert.match(modalSource, /if \(mode !== 'add' && typeof batchChoice !== 'number'/)
+  assert.match(modalSource, /setBatchReloadKey\(\(value\) => value \+ 1\)/, 'lot lookup failures stay visible and retryable')
 })
 
 runTest('the queue tags each line New / Existing from what this session created', () => {

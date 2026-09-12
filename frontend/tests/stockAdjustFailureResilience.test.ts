@@ -167,6 +167,10 @@ runTest('the bulk surface follows the same rule, row by row', () => {
   assert.match(bulkModal, /const closeGuard = useCloseGuard\(\{ dirty: bulkDirty \}, reportAndClose\)/)
   assert.match(bulkModal, /<UnsavedChangesPrompt guard=\{closeGuard\} items=\{bulkPromptItems\} \/>/)
   assert.match(bulkModal, /hasUnsavedFailures\(rows\) \|\|/, 'unsaved failures still count as dirty')
+  assert.match(bulkModal, /selectedProducts\.map\(\(product\) => createRow\(buildRowRequest\(product, amount\)\)\)/,
+    'the full reviewed lot/scope request is frozen before the first write')
+  assert.match(bulkModal, /getProductApi\(\)\.adjustStock\(row\.request\)/,
+    'retries replay the frozen row request instead of rebuilding it from edited controls')
 })
 
 runTest('fast stock-in already kept its lines -- that behaviour stays', () => {
