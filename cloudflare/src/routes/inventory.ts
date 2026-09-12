@@ -50,7 +50,7 @@ import {
 } from '../lib/canonicalBranchIdentity'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
-import { planTransferOperation } from '../lib/transferOperation'
+import { planTransferOperation, TransferConflictError } from '../lib/transferOperation'
 import { RESOLVED_BRANCH_NAME_COLUMN, movementBranchNameSql, withResolvedBranchName } from '../lib/movementBranchName'
 import { RESOLVED_ACTOR_NAME_COLUMN, movementActorNameSql, withResolvedActorName } from '../lib/movementActorName'
 import { movementReferenceSelectSql } from '../lib/movementReference'
@@ -1473,6 +1473,33 @@ app.post('/adjust', async (c) => {
   if (!branchId) return c.json({ error: 'An active branch is required before stock can be changed' }, 400)
   const branch = await db.prepare('SELECT id, name FROM branches WHERE id = @id').get<{ id: number; name: string }>({ id: branchId })
 
+  // Explicit scopes opt into exact, durable correction semantics. Omission is
+  // deliberately left on the historical branch-total path for old clients.
+  if (body.setScope !== undefined) {
+    const { applyStockLotSet, notifyStockLotSet, StockLotConflict } = await import('../lib/stockLotAdjustment')
+    if (type !== 'set' || (body.setScope !== 'lot' && body.setScope !== 'branch')) return c.json({ error: 'Invalid set scope.' }, 400)
+    const batchId = Number(body.batchId)
+    const requestId = normalizeTransferRequestId(body.client_request_id)
+    if (![body.productId, body.branchId].every(value => Number.isSafeInteger(Number(value)) && Number(value) > 0)) return c.json({ error: 'An explicit product and branch are required.' }, 400)
+    if (!Number.isSafeInteger(batchId) || batchId <= 0) return c.json({ error: 'An existing received date must be selected.' }, 400)
+    if (!requestId) return c.json({ error: 'client_request_id is required for a scoped stock correction.' }, 400)
+    for (const key of ['expectedLotQuantity', 'expectedBranchQuantity']) {
+      if (body[key] !== undefined && (typeof body[key] !== 'number' || !Number.isFinite(body[key]) || Number(body[key]) < 0)) return c.json({ error: 'Invalid expected stock quantity.' }, 400)
+    }
+    try {
+      const response = await applyStockLotSet(db, user, requestId, {
+        productId, branchId, batchId, quantity, setScope: body.setScope, reason,
+        ...(body.expectedLotQuantity === undefined ? {} : { expectedLotQuantity: Number(body.expectedLotQuantity) }),
+        ...(body.expectedBranchQuantity === undefined ? {} : { expectedBranchQuantity: Number(body.expectedBranchQuantity) }),
+      })
+      c.executionCtx.waitUntil(notifyStockLotSet(c.env))
+      return c.json(response)
+    } catch (error) {
+      if (error instanceof StockLotConflict) return c.json({ error: error.message, code: 'stock_conflict' }, 409)
+      throw error
+    }
+  }
+
   // 'set' ("Set stock to X") is a UI convenience only -- it has never had
   // its own real movement semantics (no batch concept, see the old
   // comment that used to sit on `movementType = 'set'` below) and used to
@@ -1936,6 +1963,10 @@ app.post('/transfer', async (c) => {
   // PWA build or a queued offline replay is not 400ed mid-release.
   const reason = String(body.reason ?? '').trim() || String(body.note ?? '').trim() || null
   const clientRequestId = normalizeTransferRequestId(body.client_request_id)
+  const batchId = body.batchId == null || body.batchId === '' ? null : Number(body.batchId)
+  if (batchId !== null && (!Number.isSafeInteger(batchId) || batchId <= 0)) {
+    return c.json({ error: 'An existing received date must be selected.', code: 'invalid_batch_id' }, 400)
+  }
 
   if (!productId || !fromBranchId || !toBranchId || !Number.isFinite(quantity)) return c.json({ error: 'Missing required fields' }, 400)
   if (fromBranchId === toBranchId) return c.json({ error: 'Source and destination cannot be the same' }, 400)
@@ -1958,7 +1989,9 @@ app.post('/transfer', async (c) => {
 
   const db = getDb(c.env)
   if (!await operationWritesReady(db)) return c.json({ error: 'An app upgrade is in progress. Please try again shortly.', code: 'release_upgrade_in_progress' }, 503)
-  const requestJson = JSON.stringify({ version: 1, kind: 'inventory-transfer', productId, fromBranchId, toBranchId, quantity, reason })
+  // Keep the exact legacy canonical body when no lot was selected so pending
+  // FIFO retries retain their original identity. Explicit selection is new data.
+  const requestJson = JSON.stringify({ version: 1, kind: 'inventory-transfer', productId, fromBranchId, toBranchId, quantity, reason, ...(batchId === null ? {} : { batchId }) })
   const requestDigest = await transferRequestDigest(requestJson)
   const previousReceipt = await findTransferReceipt(db, user.id, clientRequestId)
   if (previousReceipt) {
@@ -2018,18 +2051,20 @@ app.post('/transfer', async (c) => {
   // decrement here would floor the source lot at 0 while the destination
   // still gained the full take, minting stock out of a race.
   const sourceLots = await readFifoLotAvailability(db, productId, fromBranchId)
-  const { takes, uncovered } = allocateAcrossLots(sourceLots, quantity)
+  const selectedLots = batchId === null ? sourceLots : sourceLots.filter(lot => lot.batchId === batchId)
+  const { takes, uncovered } = allocateAcrossLots(selectedLots, quantity)
+  if (batchId !== null && uncovered > 0) return c.json({ error: 'The selected received date does not have enough stock at this branch.', code: 'selected_lot_unavailable' }, 409)
   // 0084 blank-honest stamping: one lot truthfully owning the whole
   // movement stamps it; a multi-lot or partly-untracked transfer stays NULL.
   const movementBatchId = takes.length === 1 && uncovered === 0 ? takes[0].batchId : null
 
   const responsePayload = { success: true, fromBranchId, toBranchId, quantity, replayed: false }
-  const { statements } = await planTransferOperation(db, {
-    user, requestId: clientRequestId, requestJson, digest: requestDigest, scope: 'inventory',
-    fromBranchId, toBranchId, reason,
-    lines: [{ productId, destProductId: productId, quantity }], response: responsePayload,
-  })
   try {
+    const { statements } = await planTransferOperation(db, {
+      user, requestId: clientRequestId, requestJson, digest: requestDigest, scope: 'inventory',
+      fromBranchId, toBranchId, reason,
+      lines: [{ productId, destProductId: productId, quantity, batchId }], response: responsePayload,
+    })
     await db.batch(statements)
   } catch (error) {
     const retryReceipt = await findTransferReceipt(db, user.id, clientRequestId)
@@ -2039,6 +2074,7 @@ app.post('/transfer', async (c) => {
       }
       return c.json({ ...(transferReceiptResponse(retryReceipt) as Record<string, unknown>), replayed: true })
     }
+    if (error instanceof TransferConflictError) return c.json({ error: error.message, code: 'stock_conflict' }, 409)
     throw error
   }
   c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'transfer' }))
