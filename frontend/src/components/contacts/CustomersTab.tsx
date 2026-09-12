@@ -43,10 +43,11 @@ import {
 } from './contactOptionUtils'
 import type { ContactOption } from './contactOptionUtils'
 import { readContactDuplicateDecisionError, resolveContactDuplicateSyncError, type ContactDuplicateMatch } from './contactDuplicates'
+import { effectivePermissions, type PermissionUser } from '../../utils/permissions.ts'
 
 type TranslateFn = (key: string) => string | undefined
 type NotifyFn = (message: string, tone?: string) => void
-type ContactModal = 'form' | 'import' | 'detail' | 'purchases' | null
+type ContactModal = 'form' | 'import' | 'gender-restoration' | 'detail' | 'purchases' | null
 type SortDirection = 'asc' | 'desc'
 type CustomerGroupMode = 'time' | 'alphabet'
 type CustomerPayload = Partial<CustomerRow> & {
@@ -78,7 +79,7 @@ interface CustomerMutationResult {
   data?: { id?: unknown } | null
 }
 
-interface AppUser {
+interface AppUser extends NonNullable<PermissionUser> {
   id?: string | number | null
   name?: string | null
 }
@@ -242,6 +243,7 @@ function tr(t: TranslateFn, key: string, fallback: string): string {
 }
 
 const ContactImportModal = lazyRetry(() => import('./ContactImportModal'), 'customers-contact-import')
+const CustomerGenderRestorationModal = lazyRetry(() => import('./CustomerGenderRestorationModal'), 'customers-gender-restoration')
 const CustomerFormModal = lazyRetry(() => import('./CustomerFormModal'), 'customers-form-modal')
 const CustomerPurchasesReportModal = lazyRetry(() => import('./CustomerPurchasesReportModal'), 'customers-purchases-report')
 const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'customers-export-options')
@@ -280,6 +282,16 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
   // the Suppliers/Delivery tabs and the Products precedent.
   const canExportContacts = can('contacts', 'export')
   const canViewFinancialHistory = can('contacts', 'financial_history')
+  // This evidence-backed repair is intentionally narrower than Import:
+  // administrator identity AND the Full contacts tier are both required.
+  // Review-tier edit can change names only, so can('contacts','edit') alone
+  // is not sufficient for this gender-only bulk restoration.
+  const permission = effectivePermissions(user)
+  const canRestoreCustomerGender = permission.isAdmin
+    && permission.getPermissionTier('contacts') === 'full'
+    && permission.can('contacts', 'edit')
+  const canRestoreCustomerGenderRef = useRef(canRestoreCustomerGender)
+  canRestoreCustomerGenderRef.current = canRestoreCustomerGender
 
   const { syncChannel } = useSync()
   const loadRequestRef = useRef(0)
@@ -966,7 +978,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
           button's label at narrow widths. */}
       <div className="flex min-w-0 items-stretch gap-1.5 overflow-x-auto pb-1">
         <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} summaryMode="compact" t={t} className="min-w-0 flex-1" showLabel dense />
-        {(canImportContacts || canExportContacts) ? (
+        {(canImportContacts || canExportContacts || canRestoreCustomerGender) ? (
         <LazyPortalMenu
           align="auto"
           triggerWrapperClassName="min-w-0 flex-1"
@@ -984,6 +996,12 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
           )}
           items={([
             ...(canImportContacts ? [{ label: tr(t, 'import_contacts', 'Import'), onClick: () => { if (!canImportContactsRef.current) return; setModal('import') }, color: 'blue' as const, icon: <Download className="h-4 w-4 shrink-0" /> }] : []),
+            ...(canRestoreCustomerGender ? [{
+              label: tr(t, 'customer_gender_restore', 'Restore customer gender'),
+              onClick: () => { if (!canRestoreCustomerGenderRef.current) return; setModal('gender-restoration') },
+              color: 'orange' as const,
+              icon: <Settings2 className="h-4 w-4 shrink-0" />,
+            }] : []),
             ...(canExportContacts ? [{
               label: tr(t, 'export', 'Export'),
               color: 'green',
@@ -1328,6 +1346,26 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
       {canImportContacts && modal === 'import' ? (
         <Suspense fallback={null}>
           <ContactImportModal type="customer" onClose={() => setModal(null)} onDone={() => load({ silent: true, label: 'Customers after import' })} />
+        </Suspense>
+      ) : null}
+      {canRestoreCustomerGender && modal === 'gender-restoration' ? (
+        <Suspense fallback={null}>
+          <CustomerGenderRestorationModal
+            t={t}
+            notify={notify}
+            user={user}
+            onClose={() => {
+              setModal(null)
+              void Promise.all([
+                load({ silent: true, label: 'Customers after gender restoration' }),
+                actionHistory.refreshServerItems(),
+              ])
+            }}
+            onDone={() => Promise.all([
+              load({ silent: true, label: 'Customers after gender restoration' }),
+              actionHistory.refreshServerItems(),
+            ]).then(() => undefined)}
+          />
         </Suspense>
       ) : null}
       {modal === 'detail' && selected ? (

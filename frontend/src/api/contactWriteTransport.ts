@@ -1,6 +1,11 @@
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 import { apiFetch, route } from './http.ts'
 import type { RenameImpact } from './renameCascadeTransport.ts'
+import type {
+  GenderRestorationChunk,
+  GenderRestorationReceipt,
+  GenderRestorationStatus,
+} from '../components/contacts/customerGenderRestorationFlow.ts'
 
 type ContactWritePayload = Record<string, unknown>
 type ContactTableName = 'customers' | 'suppliers' | 'delivery_contacts'
@@ -97,6 +102,19 @@ export function getCustomerRenameImpact(id: number | string, to: string): Promis
 
 export function deleteCustomer(id: number | string): Promise<unknown> {
   return deleteContact('customers', '/api/customers', 'customers', id)
+}
+
+export function previewCustomerGenderRestoration(chunk: GenderRestorationChunk): Promise<GenderRestorationReceipt> {
+  return apiFetch('POST', '/api/customers/gender-restoration/preview', chunk)
+}
+
+export function applyCustomerGenderRestoration(chunk: GenderRestorationChunk): Promise<GenderRestorationReceipt> {
+  return apiFetch('POST', '/api/customers/gender-restoration/apply', chunk)
+}
+
+export function getCustomerGenderRestorationStatus(campaignId: string): Promise<GenderRestorationStatus> {
+  const query = new URLSearchParams({ campaign_id: campaignId })
+  return apiFetch('GET', `/api/customers/gender-restoration/status?${query.toString()}`)
 }
 
 export function awardCustomerPoints(id: number | string, payload: { points: number; note?: string }): Promise<unknown> {
