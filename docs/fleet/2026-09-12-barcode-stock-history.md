@@ -5,7 +5,7 @@ Base eef73fc1 (previous receipt/POS/contact candidate, not deployed). Dirty main
 ## Status and scope
 
 - Suppliers: compact all-width cards/details implemented and locally verified in parent candidate; not deployed. Actual supplier records are not name-merged.
-- Gender: current production audit confirms5023 unspecified;3869 conservative candidates from original customer export. Latest-data/migration follow-up checked97 files/137 sheets/tables and found customer references but no gender field. No expansion and no customer writes. Original private matching artifacts remain ignored under prior live worktree output/customer-gender-review-20260912.
+- Gender: fresh read-only audit at12:19:53Z confirms5024 unspecified. Expanded original-source matching supports4162 (4130Female/32Male);862 quarantined, including4General profiles. Owner authorized all exceptGeneral; only verified identities may be restored, never gender inferred from names. Latest-data/migration follow-up checked97 files/137 sheets/tables and found customer references but no gender field. Normal contact import is unsafe for gender-only restoration (can alter blank address and lacks source-manifest binding/undo). Dedicated manifest-bound restoration is under separate implementation; no customer writes. Private evidence remains ignored under prior live worktree output/customer-gender-review-20260912.
 - Receipt: physical XP-K200L/browser-PDF long receipt still unresolved. Continuous80mm output must not shrink or split. Test-window blank was clarified by owner, not a proven app outage.
 - Prior scoped-stock0157 candidate remains separate and undeployed; do not infer its approval from this barcode request.
 
@@ -43,3 +43,13 @@ Scoped merge3bcaee87 is still blocked by independent review: preview graph/econo
 Owner has signed into the Codex in-app browser; tab6 /products#hub:products:duplicates visibly shows1535 leading-zero groups. No Apply clicked. Tab retained for reviewed execution after deployment/backup/guards. Logged-in dashboard briefly displayed stale-refresh warning; not a blank screen, not repaired in this slice.
 
 Economics parity audit confirmed separate existing import/selected-conflict drift (2,200 becomes200 rather than101; iterative4,5,6 yields5.25 rather than5). New scoped cleanup uses correct cluster kernel; do not claim global import economics fixed. Broader contributor-accumulator change is documented, not implemented.
+
+## Release gate checkpoint through f538648f
+
+Scoped backend38ea218d (source3a2bb5a8) supersedes the earlier manifest blocker: full graph/economics/lot metadata and stock are bound to preview and atomic per-pair assertions. Independent native counterexamples now reject price, outsider, historical-link and lot-cost changes without committing a pair. Thirteen affected backend conflict/merge/undo/preview suites and backend typecheck pass. Scope remains pairs only, not whole-manifest rollback; existing cached-stock discrepancy and triples are blocked.
+
+UI6de948d7 (source78991cfd) supersedes the cross-account callback blocker. Opaque actor authority, request generation and controller identity fence all continuations including preview/load/error/finally. Independent actual-callback adversarial tests and isolated headless built React review/confirm passed. Test-only followups ebea12f0/f538648f preserve runtime. Frontend389/389, typecheck, i18n5752keys/604files and build253chunks/zero static cycles pass. Evidence output-leading-zero-review-6de948d7.md; browser fixture does not certify production catalog disappearance or physical devices.
+
+Broad backend sweep executed360files,353first-pass successes. Seven failures were retained in logs; six pass recheck after precise fixture loader/source-contract corrections. Native remove intermittently exits nonzero with an empty log and remains under investigation, not waived or rerun-until-green. Deployment remains held pending this gate.
+
+Production still70bc5cfa-1f61-401a-94e2-fcb707d867e4 at100% (read-only Wrangler deployment listing). No current candidate deployment or product/gender writes. Full D1 export refused FTS5 virtual tables; physical-table export and Time Travel recovery bookmark are being captured instead. Never claim that failed export is a backup. Recovery must prefer per-pair guarded undo; whole-database Time Travel would overwrite intervening business activity and requires separate deliberate authorization.
