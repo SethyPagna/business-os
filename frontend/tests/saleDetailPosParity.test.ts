@@ -147,7 +147,7 @@ for (const fragment of cardMarkup) {
 }
 assert.match(
   detail,
-  /balancedSaleItemNameLines\(productName\)[\s\S]*?data-sale-line-name=""[\s\S]*?overflow-x-auto[\s\S]*?productNameLines\.map/,
+  /const productName = String\(item\.product_name \|\| item\.name \|\| ''\)[\s\S]*?data-sale-line-name=""[\s\S]*?<ProductNameRail name=\{productName\}/,
   'compact receipt product names preserve every character in at most two horizontally reachable rows',
 )
 assert.doesNotMatch(detail, /data-sale-line-name=""[\s\S]{0,500}line-clamp-2/, 'receipt product names must not hide a third line behind a clamp')
