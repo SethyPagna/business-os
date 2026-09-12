@@ -8,7 +8,7 @@
 // also lied in two directions (see testChainCoverage.test.ts): a file nobody
 // appended never ran, and the first red hid every file after it.
 //
-// This runner discovers every tests/*.test.ts by reading the directory, runs
+// This runner discovers tests/*.test.ts and tests/*.test.cjs, runs
 // the same preflight scripts the chain ran first, and keeps going after a red
 // so the summary names every failing file. `--bail` restores stop-at-first.
 //
@@ -50,8 +50,9 @@ if (!flags.has('--no-preflight') && terms.length === 0) {
 }
 
 const files = fs
-  .readdirSync(here)
-  .filter((f) => f.endsWith('.test.ts'))
+  .readdirSync(here, { withFileTypes: true })
+  .filter((entry) => entry.isFile() && /\.test\.(?:ts|cjs)$/.test(entry.name))
+  .map((entry) => entry.name)
   .filter((f) => terms.length === 0 || terms.some((t) => f.toLowerCase().includes(t)))
   .sort()
 
@@ -62,13 +63,15 @@ if (files.length === 0) {
 // A near-empty discovery means the directory read or the cwd broke, not that
 // the suite shrank; refuse to report a false green on a handful of files.
 if (terms.length === 0 && files.length < 50) {
-  console.log(`test:utils: found only ${files.length} tests/*.test.ts files, expected the full suite (50+); refusing to report a false green`)
+  console.log(`test:utils: found only ${files.length} tests/*.test.{ts,cjs} files, expected the full suite (50+); refusing to report a false green`)
   process.exit(1)
 }
 
 const reds: string[] = []
+let executed = 0
 const startedAll = Date.now()
 for (const f of files) {
+  executed += 1
   const started = Date.now()
   const result = spawnSync(process.execPath, [path.join(here, f)], {
     cwd: root,
@@ -94,8 +97,8 @@ for (const f of files) {
   }
 }
 
-const passed = files.length - reds.length
-console.log(`\ntest:utils: ${passed} passed, ${reds.length} red of ${files.length} files (${Date.now() - startedAll} ms)`)
+const passed = executed - reds.length
+console.log(`\ntest:utils: ${passed} passed, ${reds.length} red of ${executed} executed files (${files.length - executed} skipped; ${Date.now() - startedAll} ms)`)
 if (reds.length) {
   console.log(`RED files:\n  ${reds.join('\n  ')}`)
   process.exit(1)
