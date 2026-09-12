@@ -2,10 +2,10 @@
 // points outward/up (mirrors the Import icon's inward/down arrow -- see
 // the Import buttons across the app that use the down-pointing icon).
 import Upload from 'lucide-react/dist/esm/icons/upload.js'
-import { useCallback, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { PortalMenuItem } from './PortalMenu'
 import { isBrokenLocalizedString, useApp } from '../../AppContext.tsx'
+import { useIntentLoadedPortalMenu } from './LazyPortalMenu.tsx'
 
 type ExportMenuProps = {
   label?: string
@@ -24,8 +24,6 @@ type ExportMenuProps = {
   mobileIconOnly?: boolean
 }
 
-type PortalMenuComponent = typeof import('./PortalMenu').default
-
 export default function ExportMenu({
   label,
   items = [],
@@ -37,24 +35,9 @@ export default function ExportMenu({
   mobileIconOnly = false,
 }: ExportMenuProps) {
   const { t } = useApp() as { t?: (key: string) => string }
-  const portalMenuPromiseRef = useRef<Promise<PortalMenuComponent> | null>(null)
-  const [PortalMenu, setPortalMenu] = useState<PortalMenuComponent | null>(null)
-  const [openOnLoad, setOpenOnLoad] = useState(false)
+  const { PortalMenu, openOnLoad, preload, requestOpen, markClosed } = useIntentLoadedPortalMenu()
   const translatedExport = typeof t === 'function' ? t('export') : ''
   const resolvedLabel = label || (translatedExport && translatedExport !== 'export' && !isBrokenLocalizedString(translatedExport) ? translatedExport : 'Export')
-
-  const loadPortalMenu = useCallback((shouldOpen = false) => {
-    if (shouldOpen) setOpenOnLoad(true)
-    if (PortalMenu) return
-    if (!portalMenuPromiseRef.current) {
-      portalMenuPromiseRef.current = import('./PortalMenu').then((module) => module.default)
-    }
-    portalMenuPromiseRef.current
-      .then((component) => setPortalMenu(() => component))
-      .catch(() => {
-        if (shouldOpen) setOpenOnLoad(false)
-      })
-  }, [PortalMenu])
 
   const iconClassName = compact || iconOnly ? 'h-3.5 w-3.5' : 'h-4 w-4'
   const buttonClass = primary
@@ -75,9 +58,9 @@ export default function ExportMenu({
       title={iconOnly || mobileIconOnly ? resolvedLabel : undefined}
       aria-haspopup="true"
       aria-expanded={PortalMenu ? undefined : openOnLoad}
-      onPointerEnter={PortalMenu ? undefined : () => loadPortalMenu(false)}
-      onFocus={PortalMenu ? undefined : () => loadPortalMenu(false)}
-      onClick={PortalMenu ? undefined : () => loadPortalMenu(true)}
+      onPointerEnter={PortalMenu ? undefined : preload}
+      onFocus={PortalMenu ? undefined : preload}
+      onClick={PortalMenu ? undefined : requestOpen}
     >
       <Upload className={iconClassName} />
       {iconOnly ? null : (
@@ -99,7 +82,7 @@ export default function ExportMenu({
       defaultOpen={openOnLoad}
       triggerWrapperClassName={triggerWrapperClassName}
       onOpenChange={(open) => {
-        if (!open) setOpenOnLoad(false)
+        if (!open) markClosed()
       }}
       trigger={trigger}
     />
