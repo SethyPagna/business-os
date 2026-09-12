@@ -119,14 +119,22 @@ function sum(values: readonly DecimalInput[]): Fraction {
 export function sumMoney4(values: readonly DecimalInput[]): number { return output(sum(values)) }
 /** Allocation totals: sum raw products exactly, then quantize once. This differs
  * from summing separately priced/quantized sale lines intentionally. */
-export function sumProductsMoney4(values: readonly { amount: DecimalInput; factor: DecimalInput }[]): number {
+function sumProducts(values: readonly { amount: DecimalInput; factor: DecimalInput }[]): Fraction {
   if (values.length > MAX_MONEY_SUM_ITEMS) throw new MoneyPrecisionError('too_many_terms')
   let total: Fraction = { n: 0n, d: 1n }
   for (const value of values) {
     const amount = money(value.amount), factor = decimal(value.factor)
     total = plus(total, fraction(amount.n * factor.n, amount.d * factor.d))
   }
-  return output(total)
+  return total
+}
+export function sumProductsMoney4(values: readonly { amount: DecimalInput; factor: DecimalInput }[]): number {
+  return output(sumProducts(values))
+}
+/** Weighted unit cost uses the unrounded numerator, never the rounded total. */
+export function weightedMeanMoney4(values: readonly { amount: DecimalInput; factor: DecimalInput }[], totalWeight: DecimalInput): number {
+  const total = sumProducts(values), weight = decimal(totalWeight)
+  return output(fraction(total.n * weight.d, total.d * weight.n))
 }
 export function meanMoney4(values: readonly DecimalInput[]): number {
   if (!values.length) throw new MoneyPrecisionError('division_by_zero')
