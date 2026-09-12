@@ -107,6 +107,24 @@ export function appliedRecordCount(status: GenderRestorationStatus | null): numb
   return status?.receipts.reduce((sum, receipt) => sum + (receipt.status === 'applied' ? receipt.count : 0), 0) || 0
 }
 
+export function remainingGenderRestorationChunks(
+  manifest: GenderRestorationFile,
+  status: GenderRestorationStatus,
+): GenderRestorationChunk[] {
+  if (status.campaign_id !== manifest.campaign_id || status.total_count !== manifest.total_count
+    || status.chunk_count !== manifest.chunks.length) throw new Error('Saved restoration status does not match this file.')
+  const known = receiptMap(status)
+  if (known.size !== status.receipts.length || status.receipts.some((receipt) => receipt.chunk_index < 0 || receipt.chunk_index >= manifest.chunks.length)) {
+    throw new Error('Saved restoration receipts are malformed.')
+  }
+  if (status.receipts.some((receipt) => receipt.status === 'reversed')) {
+    throw new Error('A completed chunk was undone. Use Records to redo it before continuing.')
+  }
+  return [...manifest.chunks]
+    .sort((a, b) => a.chunk_index - b.chunk_index)
+    .filter((chunk) => known.get(chunk.chunk_index)?.status !== 'applied')
+}
+
 export type ExecuteChunkResult =
   | { kind: 'applied'; receipt: GenderRestorationReceipt; status?: GenderRestorationStatus }
   | { kind: 'stale' }

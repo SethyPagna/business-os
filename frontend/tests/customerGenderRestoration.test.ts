@@ -10,7 +10,9 @@ import {
   executeCustomerGenderRestorationChunk,
   parseCustomerGenderRestorationFile,
   releaseGenderRestorationAction,
+  remainingGenderRestorationChunks,
   type GenderRestorationChunk,
+  type GenderRestorationFile,
   type GenderRestorationReceipt,
   type GenderRestorationStatus,
 } from '../src/components/contacts/customerGenderRestorationFlow.ts'
@@ -44,6 +46,11 @@ assert.throws(() => parseCustomerGenderRestorationFile(JSON.stringify({ ...file,
 const chunk = chunks[0] as GenderRestorationChunk
 const receipt = (status: GenderRestorationReceipt['status']): GenderRestorationReceipt => ({ operation_id: 'op', chunk_index: 0, count: 50, status, generation: 0, history_id: status === 'ready' ? null : 42 })
 const status = (receipts: GenderRestorationReceipt[] = []): GenderRestorationStatus => ({ success: true, campaign_id: CUSTOMER_GENDER_RESTORATION_CAMPAIGN, total_count: 4162, chunk_count: 84, receipts })
+
+const first79 = chunks.slice(0, 79).map((item) => ({ ...receipt('applied'), operation_id: `op-${item.chunk_index}`, chunk_index: item.chunk_index, count: item.rows.length }))
+const remainingAfterLive79 = remainingGenderRestorationChunks(file as GenderRestorationFile, status(first79))
+assert.deepEqual(remainingAfterLive79.map((item) => item.chunk_index), [79, 80, 81, 82, 83])
+assert.equal(remainingAfterLive79.reduce((sum, item) => sum + item.rows.length, 0), 212, 'status recovery submits only the 212 records not covered by 79 applied receipts')
 
 // Actual callback sequencing: an A -> B -> A authority transition after the
 // preview invalidates the generation and must never dispatch apply.
@@ -138,6 +145,11 @@ assert.match(customers, /canRestoreCustomerGenderRef\.current[\s\S]*setModal\('g
 assert.match(modal, /type="file"[\s\S]*accept="\.json,application\/json"/)
 assert.match(modal, /executeCustomerGenderRestorationChunk\([\s\S]*preview: api\.previewCustomerGenderRestoration[\s\S]*apply: api\.applyCustomerGenderRestoration/)
 assert.match(modal, /isActorReadScopeCurrent\(scope, false\)/)
+assert.match(modal, /const scopeCurrent = isActorReadScopeCurrent\(openedScopeRef\.current, false\)/)
+assert.match(modal, /if \(scopeCurrent\) return[^]*?operationGenerationRef\.current \+= 1[^]*?setManifest\(null\)[^]*?setStatus\(null\)[^]*?setConfirmed\(false\)/, 'same-user authority refresh fences callbacks and clears private state')
+assert.match(modal, /if \(!scopeCurrent\) \{[^]*?customer_gender_restore_session_refreshed[^]*?onClick=\{onClose\}/, 'stale scope stays visibly closable instead of returning an invisible mounted modal')
+const staleView = modal.slice(modal.indexOf('if (!scopeCurrent) {'), modal.indexOf('\n\n  return (', modal.indexOf('if (!scopeCurrent) {')))
+assert.doesNotMatch(staleView, /loadTransport|refreshStatus|applyAll|previewCustomerGenderRestoration|applyCustomerGenderRestoration/, 'stale rendering never performs a recovery read or write automatically')
 assert.doesNotMatch(modal, /localStorage|sessionStorage|console\.|\.rows\.map\(/, 'manifest PII is neither persisted, logged, nor rendered')
 assert.match(transport, /apiFetch\('POST', '\/api\/customers\/gender-restoration\/preview'/)
 assert.match(transport, /apiFetch\('POST', '\/api\/customers\/gender-restoration\/apply'/)

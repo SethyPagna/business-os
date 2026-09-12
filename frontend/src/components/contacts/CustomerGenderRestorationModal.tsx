@@ -16,6 +16,7 @@ import {
   executeCustomerGenderRestorationChunk,
   parseCustomerGenderRestorationFile,
   receiptMap,
+  remainingGenderRestorationChunks,
   releaseGenderRestorationAction,
   type GenderRestorationFile,
   type GenderRestorationStatus,
@@ -64,8 +65,23 @@ export default function CustomerGenderRestorationModal({ t, notify, user, onClos
   const [error, setError] = useState('')
   const [unknown, setUnknown] = useState(false)
   const [currentChunk, setCurrentChunk] = useState<number | null>(null)
+  const scopeCurrent = isActorReadScopeCurrent(openedScopeRef.current, false)
 
   useEffect(() => activateGenderRestorationLifecycle(aliveRef, operationGenerationRef), [])
+  useEffect(() => {
+    if (scopeCurrent) return
+    // A same-user permission/bootstrap refresh deliberately rotates the
+    // opaque authority. Keep the old callback fenced, discard the private
+    // manifest immediately, and leave only a safe Close/reopen surface.
+    operationGenerationRef.current += 1
+    setManifest(null)
+    setStatus(null)
+    setConfirmed(false)
+    setError('')
+    setUnknown(false)
+    setCurrentChunk(null)
+    if (!inFlightRef.current) setBusy(false)
+  }, [scopeCurrent])
 
   const isCallbackCurrent = (scope = openedScopeRef.current, generation = operationGenerationRef.current) =>
     aliveRef.current && generation === operationGenerationRef.current
@@ -116,7 +132,9 @@ export default function CustomerGenderRestorationModal({ t, notify, user, onClos
       setError(message(cause, tr('customer_gender_restore_status_failed', 'Could not recover restoration status.')))
     } finally {
       releaseGenderRestorationAction(inFlightRef)
-      if (isCallbackCurrent(scope, generation)) setBusy(false)
+      // Busy is non-sensitive UI state. Clearing it after a stale callback
+      // is safe; result/status publication above remains actor-fenced.
+      if (aliveRef.current) setBusy(false)
     }
   }
 
@@ -134,11 +152,9 @@ export default function CustomerGenderRestorationModal({ t, notify, user, onClos
       if (!isCallbackCurrent(scope, generation)) return
       setStatus(latestStatus)
       const known = receiptMap(latestStatus)
-      for (const chunk of [...manifest.chunks].sort((a, b) => a.chunk_index - b.chunk_index)) {
+      const pendingChunks = remainingGenderRestorationChunks(manifest, latestStatus)
+      for (const chunk of pendingChunks) {
         if (!isCallbackCurrent(scope, generation)) return
-        const existing = known.get(chunk.chunk_index)
-        if (existing?.status === 'applied') continue
-        if (existing?.status === 'reversed') throw new Error(tr('customer_gender_restore_reversed_stop', 'A completed chunk was undone. Use Records to redo it before continuing.'))
         setCurrentChunk(chunk.chunk_index + 1)
         const result = await executeCustomerGenderRestorationChunk({
           chunk,
@@ -171,14 +187,29 @@ export default function CustomerGenderRestorationModal({ t, notify, user, onClos
       setError(message(cause, tr('customer_gender_restore_failed', 'Restoration stopped. No later chunks were submitted.')))
     } finally {
       releaseGenderRestorationAction(inFlightRef)
-      if (isCallbackCurrent(scope, generation)) {
+      if (aliveRef.current) {
         setBusy(false)
         setCurrentChunk(null)
       }
     }
   }
 
-  if (!allowed || !isActorReadScopeCurrent(openedScopeRef.current, false)) return null
+  if (!allowed) return null
+  if (!scopeCurrent) {
+    return (
+      <Modal title={tr('customer_gender_restore_title', 'Restore customer gender')} onClose={onClose} size="sm" unsavedChanges="read-only">
+        <div className="space-y-4">
+          <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+            <p className="font-semibold">{tr('customer_gender_restore_session_refreshed', 'The secure session refreshed')}</p>
+            <p className="mt-1">{tr('customer_gender_restore_session_refreshed_help', 'The selected file was cleared and no new request will be sent. Close and reopen this tool, check saved status, then reselect the approved file to continue.')}</p>
+          </div>
+          <div className="flex justify-end">
+            <button type="button" className="btn-secondary" onClick={onClose}>{tr('close', 'Close')}</button>
+          </div>
+        </div>
+      </Modal>
+    )
+  }
 
   return (
     <Modal
