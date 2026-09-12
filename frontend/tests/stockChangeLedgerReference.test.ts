@@ -99,6 +99,21 @@ assert.ok((sc.match(/referenceText\(row\)/g) || []).length >= 3, 'the desktop ro
 assert.match(sc, /<CopyableId/, 'the detail modal must show the receipt through the shared copyable-id component, never truncated')
 console.log('PASS the receipt reaches the table, the card, the detail modal and the CSV export from one composition')
 
+// The selected movement's product identity follows the same visual order as
+// the rows: full name in the modal title, then its barcode before any action
+// facts. A separate lower Barcode fact made the identity look like one of many
+// unrelated technical fields.
+const detailStart = sc.indexOf('{detail ? (')
+const detailEnd = sc.indexOf('{adjustType ? (', detailStart)
+const movementDetail = sc.slice(detailStart, detailEnd)
+assert.ok(detailStart > 0 && detailEnd > detailStart, 'stock movement detail located')
+assert.ok(
+  movementDetail.indexOf('{detail.barcode}') < movementDetail.indexOf("tr(t, 'date', 'Date')"),
+  'the barcode must sit directly under the product title, before the movement summary',
+)
+assert.doesNotMatch(movementDetail, /tr\(t, 'barcode', 'Barcode'\).*detail\.barcode/, 'barcode must not be repeated as a lower fact card')
+console.log('PASS stock movement detail keeps barcode directly under its product title')
+
 // ---- 3. the column budget --------------------------------------------------
 
 const colgroup = sc.match(/<colgroup>([\s\S]*?)<\/colgroup>/)
