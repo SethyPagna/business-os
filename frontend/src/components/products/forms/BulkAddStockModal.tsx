@@ -1,3 +1,4 @@
+import ProductNameRail from '../../shared/ProductNameRail'
 import { todayStr } from '../../../utils/dateHelpers.ts'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
@@ -635,7 +636,7 @@ export default function BulkAddStockModal({ productIds, products, branches, user
                         : (t('pending') || 'Pending')}
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate font-medium text-gray-800 dark:text-gray-100">{row.request.productName}</span>
+                    <ProductNameRail className="font-medium text-gray-800 dark:text-gray-100" name={row.request.productName} />
                     {row.failure ? (
                       <span className="block break-words text-rose-600 dark:text-rose-300">
                         {row.failure.message}

@@ -1,3 +1,4 @@
+import ProductNameRail from '../shared/ProductNameRail'
 import { Fragment } from 'react'
 import type { ComponentType, Dispatch, RefObject, SetStateAction } from 'react'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
@@ -291,11 +292,11 @@ export default function InventoryMovementsSurface({
                   <td className={cellClass}>
                     <button
                       type="button"
-                      className="max-w-[16rem] truncate text-left font-medium text-gray-900 hover:text-blue-600 hover:underline dark:text-white dark:hover:text-blue-300"
+                      className="min-w-0 max-w-[16rem] text-left font-medium text-gray-900 hover:text-blue-600 hover:underline dark:text-white dark:hover:text-blue-300"
                       onClick={() => openMovementProductDetail(movement)}
                       title={movement.product_name || ''}
                     >
-                      {movement.product_name || (t('product') || 'Product')}
+                      <ProductNameRail name={movement.product_name || (t('product') || 'Product')} />
                     </button>
                   </td>
                   <td className={`${cellClass} text-right font-semibold tabular-nums text-gray-900 dark:text-white`}>{movement.quantity}</td>

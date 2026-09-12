@@ -1,3 +1,4 @@
+import ProductNameRail from '../shared/ProductNameRail'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useFormDirty } from '../../utils/formDirty.ts'
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
@@ -224,7 +225,7 @@ function ClusterCard({
               <div className="flex items-center gap-2 text-sm">
                 <ProductImg src={product.image_path || ''} alt="" className="h-8 w-8 flex-shrink-0 rounded-lg object-cover" />
                 <div className="min-w-0 flex-1">
-                  <div className="scroll-x-clean font-medium text-gray-900 dark:text-white">{product.name || `#${product.id}`}</div>
+                  <div className="min-w-0 font-medium text-gray-900 dark:text-white"><ProductNameRail name={String((product.name || `#${product.id}`) ?? '')} /></div>
                   <div className="flex flex-wrap items-center gap-x-2 text-[11px] text-gray-500 dark:text-gray-400">
                     {cluster.type !== 'barcode' && product.barcode ? <span>{product.barcode}</span> : null}
                     <span>{money(product.cost_price_usd)} → {money(product.selling_price_usd)}</span>

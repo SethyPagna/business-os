@@ -1,3 +1,4 @@
+import ProductNameRail from '../shared/ProductNameRail'
 import { Fragment, useMemo, useState } from 'react'
 import ExternalLink from 'lucide-react/dist/esm/icons/external-link.js'
 import PaginationControls from '../shared/PaginationControls.tsx'
@@ -239,27 +240,14 @@ export default function InventoryProductsSurface({
               <Fragment key={group.key}>
                 {group.items.length > 1 ? (
                   <tr className="border-t border-slate-200 bg-slate-50/80 dark:border-slate-700 dark:bg-slate-800/50">
-                    {/* N36: the group title IS a product name (groupInventoryProducts
-                        sets `label: group.name`), so it scrolls like every other
-                        name cell. It needs the inner span rather than the class on
-                        the button, because this table is neither table-fixed nor
-                        colgroup'd: a nowrap block inside `colSpan={columnCount}`
-                        would push the whole 680px-min table wider. As a FLEX item
-                        the .scroll-x-clean span's `min-width: 0` lets it shrink
-                        below its text, so the row keeps its width and the name
-                        scrolls inside it. */}
-                    <td colSpan={columnCount} className="px-3 py-1.5 font-semibold text-slate-600 dark:text-slate-300"><button type="button" className="flex min-h-11 w-full items-center gap-1 text-left" aria-expanded={!collapsed.has(group.key)} onClick={() => toggle(group.key)}><span className="shrink-0">{collapsed.has(group.key) ? '▸' : '▾'}</span><span className="scroll-x-clean">{group.label}</span><span className="ml-1 shrink-0 font-normal text-slate-400">{group.items.length}</span></button></td>
+                    {/* Product names wrap into two lines; the shared rail keeps the remaining text reachable. */}
+                    <td colSpan={columnCount} className="px-3 py-1.5 font-semibold text-slate-600 dark:text-slate-300"><button type="button" className="flex min-h-11 w-full items-center gap-1 text-left" aria-expanded={!collapsed.has(group.key)} onClick={() => toggle(group.key)}><span className="shrink-0">{collapsed.has(group.key) ? '▸' : '▾'}</span><span className="min-w-0"><ProductNameRail name={String((group.label) ?? '')} /></span><span className="ml-1 shrink-0 font-normal text-slate-400">{group.items.length}</span></button></td>
                   </tr>
                 ) : null}
                 {!collapsed.has(group.key) && group.rows.map((product) => (
                   <tr key={String(product.id)} className="border-t border-slate-100 hover:bg-blue-50/60 dark:border-slate-800 dark:hover:bg-blue-900/10" onClick={() => { if (product.__mergedProductIds?.length <= 1) onOpenDetail(product) }}>
-                    {/* N36: the product NAME scrolls horizontally inside the cell
-                        (.scroll-x-clean, the one shared class in styles/main.css)
-                        instead of ending in an unreadable ellipsis -- same rule as
-                        the Products page and its group titles. The brand/category
-                        line under it is derived metadata, not the name, and keeps
-                        ordinary truncation. */}
-                    <td className="max-w-[18rem] px-3 py-1.5"><div className="flex min-w-0 items-start gap-1"><div className="min-w-0 flex-1"><div className="scroll-x-clean font-medium text-slate-800 dark:text-slate-100">{product.name || '—'}</div><div className="truncate text-[10px] text-slate-400">{[product.brand, product.category].filter(Boolean).join(' · ')}</div></div>{productMenu(product)}</div></td>
+                    {/* Product names wrap into two lines; the shared rail keeps the remaining text reachable. */}
+                    <td className="max-w-[18rem] px-3 py-1.5"><div className="flex min-w-0 items-start gap-1"><div className="min-w-0 flex-1"><div className="min-w-0 font-medium text-slate-800 dark:text-slate-100"><ProductNameRail name={String((product.name || '—') ?? '')} /></div><div className="truncate text-[10px] text-slate-400">{[product.brand, product.category].filter(Boolean).join(' · ')}</div></div>{productMenu(product)}</div></td>
                     <td className="px-3 py-1.5 font-mono text-slate-500">{product.barcode || '—'}</td>
                     <td className="px-3 py-1.5 text-right font-semibold">{quantity(product)}</td>
                     <td className="min-w-28 px-3 py-1.5 text-[11px]">{branchLines(product)}</td>
@@ -283,14 +271,11 @@ export default function InventoryProductsSurface({
           : error ? <div className="card p-6 text-center text-sm text-red-600">{error}</div>
             : groups.length === 0 ? <div className="card p-6 text-center text-sm text-gray-400">{t('no_data') || 'No data'}</div>
               : groups.map((group) => <div key={group.key} className="min-w-0 space-y-1">
-                {/* N36: same group-title rule as this surface's desktop table
-                    above -- the label is the product name, so it scrolls in place
-                    instead of wrapping to a second row. min-h-11 stays: it is the
-                    44px touch target, not a wrapping affordance. */}
-                {group.items.length > 1 ? <button type="button" className="min-h-11 w-full scroll-x-clean text-left text-sm font-semibold" aria-expanded={!collapsed.has(group.key)} onClick={() => toggle(group.key)}>{collapsed.has(group.key) ? '▸' : '▾'} {group.label} ({group.items.length})</button> : null}
+                {/* Product names wrap into two lines; the shared rail keeps the remaining text reachable. */}
+                {group.items.length > 1 ? <button type="button" className="min-h-11 w-full min-w-0 text-left text-sm font-semibold" aria-expanded={!collapsed.has(group.key)} onClick={() => toggle(group.key)}>{collapsed.has(group.key) ? '▸' : '▾'} <ProductNameRail name={`${group.label} (${group.items.length})`} /></button> : null}
                 {!collapsed.has(group.key) && group.rows.map((product) => <div key={String(product.id)} className="card min-w-0 p-2 text-sm">
-                  {/* N36: same shared class as this surface's desktop row above. */}
-                  <div className="flex min-w-0 items-start justify-between gap-2"><span className="scroll-x-clean font-medium">{product.name || '—'}</span><strong>{quantity(product)}</strong></div>
+                  {/* Product names wrap into two lines; the shared rail keeps the remaining text reachable. */}
+                  <div className="flex min-w-0 items-start justify-between gap-2"><span className="min-w-0 font-medium"><ProductNameRail name={String((product.name || '—') ?? '')} /></span><strong>{quantity(product)}</strong></div>
                   {/* Barcode only -- the SKU half of this line went with the column. */}
                   <p className="break-all text-[11px] text-slate-500">{product.barcode || '—'}</p>
                   <div className="my-1 text-xs">{branchLines(product)}</div>

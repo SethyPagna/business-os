@@ -1,3 +1,4 @@
+import ProductNameRail from '../shared/ProductNameRail'
 // Products
 // Main Products page; all sub-modals are imported from sibling files.
 
@@ -3800,16 +3801,10 @@ function ProductsFullEditor() {
                   row rather than one step below it -- per the Aug 19 2026
                   ask. Child rows under a group keep font-medium, same as
                   before. */}
-              {/* N36 (owner, Sep 6 2026): "for product names, make it
-                  horizontal scroll instead of pushing rows". A long name used
-                  to wrap and grow the row's height, which is what made the
-                  table ragged; it now stays on its own line and scrolls
-                  inside its cell. .scroll-x-clean is the ONE shared class for
-                  every product-name cell on every surface (styles/main.css)
-                  -- no per-file scroll CSS. */}
-              <div {...getKhmerTextProps(productName, `scroll-x-clean text-gray-900 dark:text-white ${indented ? 'font-medium' : 'font-semibold'}`)} {...copy(productName)}>
+              {/* Product names wrap into two lines; the shared rail keeps the remaining text reachable. */}
+              <div {...getKhmerTextProps(productName, `min-w-0 text-gray-900 dark:text-white ${indented ? 'font-medium' : 'font-semibold'}`)} {...copy(productName)}>
                 <EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="products" anchor="hub:products:products" search={productName} navigate={navigateTo} title={tr('open_product', 'Open product', 'បើកផលិតផល')}>
-                  {productName}
+                  <ProductNameRail name={productName} />
                 </EntityLink>
               </div>
             </div>
@@ -4025,19 +4020,10 @@ function ProductsFullEditor() {
           <div className="flex-1 min-w-0">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0 flex-1">
-                {/* Product names are content, not a label, so they are never
-                    clipped to an ellipsis. They no longer take a second row
-                    either: N36 (owner, Sep 6 2026) -- "for product names,
-                    make it horizontal scroll instead of pushing rows ... make
-                    sure it is smooth ios pwa and android pwa ... clean no need
-                    show the scroll bar". This SUPERSEDES the earlier "let them
-                    use a second row on small cards" rule. .scroll-x-clean is
-                    the one shared class (styles/main.css); it deliberately
-                    leaves touch-action alone so a vertical swipe starting on a
-                    name still scrolls the list. */}
-                <div {...getKhmerTextProps(productName, 'scroll-x-clean text-sm font-semibold text-gray-900 dark:text-white')} {...copy(productName)}>
+                {/* Product names wrap into two lines; the shared rail keeps the remaining text reachable. */}
+                <div {...getKhmerTextProps(productName, 'min-w-0 text-sm font-semibold text-gray-900 dark:text-white')} {...copy(productName)}>
                   <EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="products" anchor="hub:products:products" search={productName} navigate={navigateTo} title={tr('open_product', 'Open product', 'បើកផលិតផល')}>
-                    {productName}
+                    <ProductNameRail name={productName} />
                   </EntityLink>
                 </div>
               </div>

@@ -1,3 +1,4 @@
+import ProductNameRail from '../shared/ProductNameRail'
 /**
  * ONE product card. The POS grid's card, lifted out of POS.tsx so the other
  * surface that searches products for a SALE -- the sale detail modal's
@@ -161,8 +162,8 @@ export default function ProductCard({
       {/* The purple "Groups: N" chip that used to sit here was
           removed (user): it duplicated the "Options: N" count now
           shown on the bottom row below — same number twice. */}
-      <p {...getKhmerTextProps(displayName, 'text-xs font-medium text-gray-900 dark:text-white leading-tight mb-1 line-clamp-2')}>
-        {displayName}
+      <p {...getKhmerTextProps(displayName, 'text-xs font-medium text-gray-900 dark:text-white leading-tight mb-1')}>
+        <ProductNameRail name={displayName} />
         {/* P4: the operator's own memory-aid tag chip */}
         {tagLabel ? (
           <span className="ml-1 inline-flex items-center rounded-full bg-sky-100 px-1.5 py-0.5 align-middle text-[9px] font-semibold text-sky-700 dark:bg-sky-900/30 dark:text-sky-300">{tagLabel}</span>

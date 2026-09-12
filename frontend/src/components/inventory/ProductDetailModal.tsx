@@ -1,3 +1,4 @@
+import ProductNameRail from '../shared/ProductNameRail'
 import History from 'lucide-react/dist/esm/icons/history.js'
 import { createPortal } from 'react-dom'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
@@ -143,7 +144,7 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
       <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
         <div className="flex flex-shrink-0 items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
           <div className="min-w-0 flex-1">
-            <div className="break-words font-bold text-gray-900 dark:text-white" {...copy(p.name)}>{p.name}</div>
+            <div className="min-w-0 font-bold text-gray-900 dark:text-white" {...copy(p.name)}><ProductNameRail name={String(p.name ?? '')} /></div>
             <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
               {p.sku ? <span className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-xs text-gray-400 dark:bg-gray-700">{p.sku}</span> : null}
               {p.category ? <span className="text-xs text-blue-600 dark:text-blue-400">{p.category}</span> : null}
