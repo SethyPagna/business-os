@@ -1243,7 +1243,9 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
       draftFinishedRef.current = true
       if (!aliveRef.current || transferAuthorityRef.current.actorId !== completed.actorId) return
       setSavedRun(null)
-      const message = (t('transfer_bulk_success') || 'Transferred {n} products').replace('{n}', String(completed.transferred))
+      const completedProducts = new Set(completed.requests.flatMap((request) => request.bulk
+        ? (request.body.items as PendingTransferItem[]).map((item) => String(item.productId)) : [String(request.body.productId)])).size
+      const message = (t('transfer_bulk_success') || 'Transferred {n} products').replace('{n}', String(completedProducts))
       notify(completed.merges > 0
         ? `${message} ${(t('transfer_bulk_merged_note') || '({n} merged into existing products)').replace('{n}', String(completed.merges))}`
         : message)
