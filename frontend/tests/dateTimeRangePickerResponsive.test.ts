@@ -81,7 +81,8 @@ const vite = await createServer({
     load(id) { return id === virtualId ? fixtureSource : null },
     async transform(code, id) {
       if (id !== virtualId) return null
-      return await transformWithEsbuild(code, 'date-range-fixture.tsx', { loader: 'tsx', jsx: 'automatic' })
+      const transformed = await transformWithEsbuild(code, 'date-range-fixture.tsx', { loader: 'tsx', jsx: 'automatic' })
+      return { code: transformed.code, map: null }
     },
     configureServer(server) {
       server.middlewares.use('/date-range-fixture', async (_request, response) => {
@@ -161,7 +162,7 @@ try {
     await waitFor(async () => await evaluate<boolean>('Boolean(document.querySelector("[data-stats-range-controls]"))') ? true : null)
   } catch (error) {
     const diagnostics = await evaluate(`JSON.stringify({ error: document.body.dataset.fixtureError, body: document.body.textContent, html: document.documentElement.outerHTML.slice(0, 1000), resources: performance.getEntriesByType('resource').map((entry) => entry.name) })`)
-    throw new Error(`${error.message}: ${diagnostics}`)
+    throw new Error(`${error instanceof Error ? error.message : String(error)}: ${diagnostics}`)
   }
 
   for (const width of [320, 360, 390]) {

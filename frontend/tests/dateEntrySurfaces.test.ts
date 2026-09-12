@@ -362,7 +362,7 @@ runTest('the range panel is viewport-bound and offers separate month and year na
   const source = read('components/shared/DateTimeRangePicker.tsx')
   assert.match(source, /createPortal\([\s\S]*document\.body/, 'the panel must escape clipped and sticky report ancestors')
   assert.match(source, /data-date-time-range-panel/)
-  assert.match(source, /className="fixed[^"\n]*overflow-y-auto[^"\n]*overscroll-contain/, 'a tall panel must scroll inside the visible viewport')
+  assert.match(source, /className="fixed z-\[1080\][^"\n]*overflow-y-auto[^"\n]*overscroll-contain/, 'a tall panel must scroll inside the viewport above base and nested modal layers')
   assert.match(source, /window\.addEventListener\('scroll', position, true\)/, 'the portaled panel follows a scrolling trigger')
   assert.match(source, /panelRef\.current\?\.contains/, 'clicking the portaled panel must not trip the outside-click closer')
   assert.match(source, /data-date-range-nav="previous-year"[\s\S]*data-date-range-nav="previous-month"[\s\S]*data-date-range-nav="next-month"[\s\S]*data-date-range-nav="next-year"/, 'double-year and single-month controls retain their visual order')
