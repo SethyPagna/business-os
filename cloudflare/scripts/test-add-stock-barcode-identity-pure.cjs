@@ -142,6 +142,7 @@ const movementSearchKernel = loadReal('lib/movementSearch.ts', {
   './movementBranchName': movementBranchNameKernel,
 })
 const inventoryRoute = loadReal('routes/inventory.ts', {
+  '../lib/movementCostSnapshot': loadReal('lib/movementCostSnapshot.ts'),
   // inventory.ts imports this TypeScript-only helper; load it through the
   // harness rather than asking Node to resolve a non-existent .js sibling.
   '../lib/transferOperationReceipt': loadReal('lib/transferOperationReceipt.ts'),
