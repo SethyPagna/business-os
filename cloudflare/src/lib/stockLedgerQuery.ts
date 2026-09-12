@@ -35,6 +35,7 @@ import { STOCK_RECEIPT_MOVEMENT_TYPES } from './stockInSessionsQuery'
 export const LEDGER_OUT_TYPES = [
   'remove', 'sale', 'supplier_return', 'return_reversal', 'transfer_out',
   'row_move_out', 'move_out', 'write_off', 'damage_out', 'replacement_out', 'out',
+  'correction_out',
 ] as const
 
 // Part 553: the ledger is now a two-column In / Out split (user, Aug 31:
@@ -96,7 +97,9 @@ const RECEIPT_LIST = STOCK_RECEIPT_MOVEMENT_TYPES.map((t) => `'${t}'`).join(', '
 const LEDGER_FROM = `
     FROM inventory_movements m
     LEFT JOIN products p ON p.id = m.product_id
-    LEFT JOIN product_batches b ON b.id = m.batch_id`
+    LEFT JOIN product_batches b ON b.id = m.batch_id
+    LEFT JOIN stock_lot_adjustment_operations correction ON m.movement_type IN ('correction_in','correction_out')
+      AND m.reference_id LIKE 'stock-set:%' AND correction.id=substr(m.reference_id,11,36)`
 
 export function buildStockLedgerQuery(filters: StockLedgerFilters = {}): StockLedgerQuery {
   // Base filters: everything EXCEPT the In/Out view predicate, kept separate
@@ -183,6 +186,13 @@ export function buildStockLedgerQuery(filters: StockLedgerFilters = {}): StockLe
       CASE WHEN m.movement_type IN (${OUT_LIST}) THEN -ABS(COALESCE(m.quantity, 0)) ELSE ABS(COALESCE(m.quantity, 0)) END AS signed_quantity,
       m.unit_cost_usd, m.unit_cost_khr, m.total_cost_usd, m.total_cost_khr,
       m.reason, m.reference_id, ${movementActorNameSql('m')} AS user_name, m.created_at,
+      correction.id AS correction_operation_id, correction.history_id AS correction_history_id,
+      json_extract(correction.request_json,'$.setScope') AS correction_set_scope,
+      CASE WHEN correction.id IS NOT NULL THEN CAST(substr(m.reference_id,48) AS INTEGER) END AS correction_generation,
+      json_extract(CASE WHEN CAST(substr(m.reference_id,48) AS INTEGER)%2=1 THEN correction.after_json ELSE correction.before_json END,'$.lotQuantity') AS correction_lot_before,
+      json_extract(CASE WHEN CAST(substr(m.reference_id,48) AS INTEGER)%2=1 THEN correction.before_json ELSE correction.after_json END,'$.lotQuantity') AS correction_lot_after,
+      json_extract(CASE WHEN CAST(substr(m.reference_id,48) AS INTEGER)%2=1 THEN correction.after_json ELSE correction.before_json END,'$.branchQuantity') AS correction_branch_before,
+      json_extract(CASE WHEN CAST(substr(m.reference_id,48) AS INTEGER)%2=1 THEN correction.before_json ELSE correction.after_json END,'$.branchQuantity') AS correction_branch_after,
       ${movementReferenceSelectSql('m')},
       m.batch_id, b.lot_code AS batch_lot_code, b.received_at AS batch_received_at,
       b.supplier_id AS batch_supplier_id, b.supplier_name AS batch_supplier_name,

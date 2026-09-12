@@ -37,6 +37,7 @@ export type RevertMovementRow = {
   quantity: number
   reason: string | null
   batch_id: number | null
+  reference_id?: string | number | null
 }
 
 export type RevertActor = { userId: number | string | null; userName: string | null }
@@ -100,6 +101,9 @@ async function applyAggregateDelta(db: D1Compat, productId: number, branchId: nu
 // exceptions it swallows are the batch helpers' own (insufficient batch
 // stock), converted to a 400.
 export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, actor: RevertActor): Promise<RevertResult> {
+  if (m.movement_type === 'correction_in' || m.movement_type === 'correction_out' || String(m.reference_id || '').startsWith('stock-set:')) {
+    return { ok: false, status: 409, error: 'This stock correction has exact history. Use its history Undo/Redo; it cannot be reverted separately from the stock ledger.' }
+  }
   const productId = Number(m.product_id) || 0
   const branchId = Number(m.branch_id) || 0
   if (!productId || !branchId) {

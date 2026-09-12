@@ -2223,7 +2223,7 @@ app.post('/movements/:id/revert', async (c) => {
   if (!Number.isFinite(id) || id <= 0) return c.json({ error: 'Invalid movement id' }, 400)
   const db = getDb(c.env)
   const mv = await db.prepare(`
-    SELECT id, product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, batch_id
+    SELECT id, product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, batch_id, reference_id
     FROM inventory_movements WHERE id = @id
   `).get<RevertMovementRow>({ id })
   if (!mv) return c.json({ error: 'Stock movement not found' }, 404)
