@@ -18,7 +18,13 @@ const SENSITIVE_KEY_SUFFIXES = ['_refresh_token', '_access_token', '_secret', '_
 
 // Not secret itself, but it only exists to describe a stripped token and is
 // pure fingerprinting surface for everyone else.
-const SENSITIVE_KEYS = new Set(['drive_sync_access_token_expires_at'])
+const SENSITIVE_KEYS = new Set([
+  'drive_sync_access_token_expires_at',
+  // This shared business list has a dedicated POS-permission endpoint. Keep
+  // it out of the broad authenticated settings/bootstrap maps so an account
+  // without POS access cannot bypass that endpoint's actor boundary.
+  'pos_address_presets_v1',
+])
 
 export function isSensitiveSettingKey(key: string): boolean {
   const normalized = String(key || '').toLowerCase()
