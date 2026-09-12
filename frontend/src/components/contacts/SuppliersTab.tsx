@@ -642,7 +642,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
     },
     {
       id: 'group',
-      label: tr('group_by', 'Group by'),
+      label: tr('sort_by', 'Sort by'),
       options: [
         { id: 'group-time', label: tr('date', 'Date'), active: groupMode === 'time', onClick: () => setGroupMode('time') },
         { id: 'group-alphabet', label: 'A-Z / ខ្មែរ', active: groupMode === 'alphabet', onClick: () => setGroupMode('alphabet') },
@@ -1203,7 +1203,12 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
 
       <ContactTable
         loading={loading}
-        rows={displayRows}
+        // One compact card per persisted supplier. Time/alphabet sections
+        // still determine ordering, but their synthetic header rows are not
+        // rendered as extra entries in the supplier directory.
+        rows={visibleSuppliers}
+        cardsAtAllWidths
+        cardGridClassName="items-stretch"
         emptyLabel={refreshing ? (t('searching') || 'Searching...') : (t('no_suppliers') || 'No suppliers')}
         columns={supplierColumns}
         selectAll={selectAllProp}
@@ -1357,15 +1362,20 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
           const contactCount = options.length || ((supplier.phone || supplier.email) ? 1 : 0)
           const cardPhone = primaryOption.phone || supplier.phone || ''
           const cardEmail = primaryOption.email || supplier.email || ''
-          const cardContactPerson = primaryOption.name || supplier.contact_person || ''
-          const cardCompany = supplier.company || ''
           const cardMetaPrimary = [cardPhone, cardEmail].filter(Boolean).join(' · ')
-          const cardMetaSecondary = [cardContactPerson, cardCompany].filter(Boolean).join(' · ')
           return (
           <div
             key={supplier.id}
-            className={`card flex cursor-pointer select-none items-center gap-3 p-3 ${selectedIds.has(Number(supplier.id)) ? 'bg-blue-50 ring-2 ring-blue-400 dark:bg-blue-900/20' : ''}`}
+            role="button"
+            tabIndex={0}
+            aria-label={`${tr('details', 'Details')}: ${supplier.name || ''}`}
+            className={`card flex min-h-11 cursor-pointer select-none items-center gap-3 p-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${selectedIds.has(Number(supplier.id)) ? 'bg-blue-50 ring-2 ring-blue-400 dark:bg-blue-900/20' : ''}`}
             onClick={() => handleContactCellClick(supplier)}
+            onKeyDown={(event) => {
+              if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) return
+              event.preventDefault()
+              handleContactCellClick(supplier)
+            }}
             {...(canBulkContacts && !selectionModeActive ? cardLongPress : {})}
             onClickCapture={(event) => {
               if (consumeLongPressClick(cardLongPressState)) {
@@ -1393,7 +1403,6 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
                 ) : null}
               </div>
               {cardMetaPrimary ? <div className="mt-0.5 truncate text-[11px] text-gray-500">{cardMetaPrimary}</div> : null}
-              {cardMetaSecondary ? <div className="truncate text-[11px] text-gray-400">{cardMetaSecondary}</div> : null}
             </div>
           </div>
           )
