@@ -84,9 +84,22 @@ export function adjustBranchQuantity(
  * A 'set' is only a receipt when it raises the on-hand figure; a set that
  * lowers it becomes a 'remove' server-side and carries no supplier or cost.
  */
-export function isStockInSubmission(type: string, quantity: unknown, currentQuantity: unknown): boolean {
+export type StockSetScope = 'lot' | 'branch'
+
+export function normalizeStockSetScope(value: unknown): StockSetScope {
+  return value === 'branch' ? 'branch' : 'lot'
+}
+
+export function isScopedSetSubmission(type: string, setScope: unknown): boolean {
+  return type === 'set' && (setScope === 'lot' || setScope === 'branch')
+}
+
+export function isStockInSubmission(type: string, quantity: unknown, currentQuantity: unknown, setScope?: unknown): boolean {
   if (type === 'add') return true
   if (type !== 'set') return false
+  // An explicit scoped set is a correction, never a new receipt. The selected
+  // existing lot absorbs the correction and keeps its received date/supplier.
+  if (isScopedSetSubmission(type, setScope)) return false
   const requested = Number(quantity)
   const current = Number(currentQuantity)
   return Number.isFinite(requested) && Number.isFinite(current) && requested > current
@@ -99,8 +112,9 @@ export function isStockInSubmission(type: string, quantity: unknown, currentQuan
  * form offers the batch picker for it (N14-E) instead of letting the server
  * FIFO-drain whichever lots happen to be oldest.
  */
-export function isSetDownSubmission(type: string, quantity: unknown, currentQuantity: unknown): boolean {
+export function isSetDownSubmission(type: string, quantity: unknown, currentQuantity: unknown, setScope?: unknown): boolean {
   if (type !== 'set') return false
+  if (isScopedSetSubmission(type, setScope)) return false
   const requested = Number(quantity)
   const current = Number(currentQuantity)
   return Number.isFinite(requested) && Number.isFinite(current) && requested < current
@@ -115,6 +129,8 @@ export type StockAdjustBatchContext = {
   branchId: unknown
   /** Whatever the form is holding: '' (nothing picked), 'new', or a lot id. */
   batchId: string | number
+  /** Explicit correction scope for new set requests; omitted keeps legacy behavior. */
+  setScope?: StockSetScope
 }
 
 /**
@@ -132,7 +148,46 @@ export function isBatchPickerVisible(ctx: StockAdjustBatchContext): boolean {
   if (ctx.unlockPricing) return false
   if (!(Number(ctx.branchId) > 0)) return false
   if (ctx.type === 'add' || ctx.type === 'remove') return true
-  return isSetDownSubmission(ctx.type, ctx.quantity, ctx.currentQuantity)
+  if (isScopedSetSubmission(ctx.type, ctx.setScope)) return true
+  return isSetDownSubmission(ctx.type, ctx.quantity, ctx.currentQuantity, ctx.setScope)
+}
+
+export type ScopedSetPreview = {
+  scope: StockSetScope
+  targetQuantity: number
+  beforeLotQuantity: number
+  beforeBranchQuantity: number
+  delta: number
+  afterLotQuantity: number
+  afterBranchQuantity: number
+  valid: boolean
+}
+
+/** Pure mirror of the scoped-set contract used for review and early validation. */
+export function scopedSetPreview(input: {
+  scope: unknown
+  targetQuantity: unknown
+  lotQuantity: unknown
+  branchQuantity: unknown
+}): ScopedSetPreview {
+  const scope = normalizeStockSetScope(input.scope)
+  const targetQuantity = Number(input.targetQuantity)
+  const beforeLotQuantity = Number(input.lotQuantity)
+  const beforeBranchQuantity = Number(input.branchQuantity)
+  const finite = [targetQuantity, beforeLotQuantity, beforeBranchQuantity].every(Number.isFinite)
+  const delta = scope === 'lot' ? targetQuantity - beforeLotQuantity : targetQuantity - beforeBranchQuantity
+  const afterLotQuantity = beforeLotQuantity + delta
+  const afterBranchQuantity = beforeBranchQuantity + delta
+  return {
+    scope,
+    targetQuantity,
+    beforeLotQuantity,
+    beforeBranchQuantity,
+    delta,
+    afterLotQuantity,
+    afterBranchQuantity,
+    valid: finite && targetQuantity >= 0 && afterLotQuantity >= 0 && afterBranchQuantity >= 0,
+  }
 }
 
 /**

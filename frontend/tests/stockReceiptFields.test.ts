@@ -23,6 +23,7 @@ import {
   stockReceiptWire,
   stockReceiptGateCode,
   adjustBranchQuantity,
+  scopedSetPreview,
   STOCK_RECEIPT_GATE_CODES,
   STOCK_RECEIPT_GATE_KEYS,
 } from '../src/utils/stockReceiptFields.ts'
@@ -52,9 +53,24 @@ runTest('a stock-in is an add, or a set that RAISES the figure (S4-16)', () => {
   assert.equal(isStockInSubmission('set', 12, 4), true)
   assert.equal(isStockInSubmission('set', 4, 12), false, 'a set that lowers stock is a remove')
   assert.equal(isStockInSubmission('set', 7, 7), false, 'a set to the same figure writes nothing')
+  assert.equal(isStockInSubmission('set', 12, 4, 'lot'), false, 'an explicit lot correction is not a receipt')
+  assert.equal(isStockInSubmission('set', 12, 4, 'branch'), false, 'an explicit branch correction is not a receipt')
   // Half-typed input must not be read as a receipt.
   assert.equal(isStockInSubmission('set', '', 3), false)
   assert.equal(isStockInSubmission('set', 5, undefined), false)
+})
+
+runTest('explicit lot and branch Set previews mirror the server delta contract', () => {
+  assert.deepEqual(scopedSetPreview({ scope: 'lot', targetQuantity: 7, lotQuantity: 3, branchQuantity: 10 }), {
+    scope: 'lot', targetQuantity: 7, beforeLotQuantity: 3, beforeBranchQuantity: 10,
+    delta: 4, afterLotQuantity: 7, afterBranchQuantity: 14, valid: true,
+  })
+  assert.deepEqual(scopedSetPreview({ scope: 'branch', targetQuantity: 8, lotQuantity: 3, branchQuantity: 10 }), {
+    scope: 'branch', targetQuantity: 8, beforeLotQuantity: 3, beforeBranchQuantity: 10,
+    delta: -2, afterLotQuantity: 1, afterBranchQuantity: 8, valid: true,
+  })
+  assert.equal(scopedSetPreview({ scope: 'branch', targetQuantity: 5, lotQuantity: 3, branchQuantity: 10 }).valid, false,
+    'a branch correction cannot make the selected lot negative')
 })
 
 runTest('the adjust form measures against the BRANCH it is adjusting, not the page filter', () => {
@@ -174,7 +190,7 @@ runTest('the shared adjust form actually asks for the cost and the payment', () 
   const modals = source('components/inventory/InventoryStockModals.tsx')
   // The form gates on the shared rule, not on `type === 'add'`, so a
   // set-that-raises gets the same fields (S4-16).
-  assert.match(modals, /const isStockIn = isStockInSubmission\(adjustForm\.type, adjustForm\.quantity, adjustCurrentQuantity\)/)
+  assert.match(modals, /const isStockIn = isStockInSubmission\(adjustForm\.type, adjustForm\.quantity, adjustCurrentQuantity, adjustForm\.set_scope\)/)
   assert.match(modals, /id="inventory-adjust-unit-cost"/)
   assert.match(modals, /id="inventory-adjust-credit-due-date"/)
   assert.match(modals, /tr\('receipt_cost', 'Receipt cost'\)/)
@@ -193,7 +209,10 @@ runTest('both adjust surfaces send the receipt fields and a grouping session id'
     // supplier and received date follow the same stock-in rule now.
     assert.match(text, /supplierId: isStockIn && adjustForm\.supplier_id !== ''/, `${path} supplier must follow isStockIn`)
     assert.doesNotMatch(text, /supplierId: adjustForm\.type === 'add'/, `${path} must not gate supplier on 'add' alone`)
-    assert.match(text, /adjustForm\.type === 'set' \|\| \(Boolean\(numericBranchId\)/, `${path} received date must cover a set-increase`)
+    assert.doesNotMatch(text, /adjustForm\.type === 'set' \|\| \(Boolean\(numericBranchId\)/, `${path} scoped Set must not invent a receipt date`)
+    assert.match(text, /setScope:/, `${path} must identify the explicit Set scope`)
+    assert.match(text, /expectedLotQuantity:/, `${path} must freeze the selected lot quantity`)
+    assert.match(text, /expectedBranchQuantity:/, `${path} must freeze the branch total`)
     // The id is per modal opening, never a module constant.
     assert.match(text, /receiptSessionIdRef = useRef\(Date\.now\(\)\)/, `${path} must mint its own session id`)
   }
@@ -319,19 +338,16 @@ runTest('nothing invents a receipt cost any more', () => {
 // (isSetDown); a set that RAISES stock is just as much a departure from a
 // plain quantity edit -- the receipt fields (supplier + cost) appear right
 // below it -- so the operator needs the mirror-image "why", not silence.
-runTest('a set that RAISES stock explains itself at the Δ line, same as a set that lowers it', () => {
+runTest('an explicit set previews both the selected lot and branch totals', () => {
   const modals = source('components/inventory/InventoryStockModals.tsx')
-  const match = modals.match(/adjustForm\.type === 'set' && setDifference != null \? \(([\s\S]*?)\n {16}\) : null\}/)
-  assert.ok(match, 'the Δ line block must exist')
-  const deltaBlock = match![1]
-  assert.match(deltaBlock, /isSetDown \? \(/, 'the set-down hint must still be there')
-  assert.match(deltaBlock, /stock_set_down_hint/)
-  assert.match(deltaBlock, /isStockIn \? \(/, 'a set that raises stock must get its own hint at the same Δ line, gated on the SAME predicate the supplier/cost fields render on')
-  assert.match(deltaBlock, /stock_set_up_hint/, 'the up-hint uses the key both packs already carry')
+  assert.match(modals, /const setPreview = adjustForm\.type === 'set' && selectedBatchOption/)
+  assert.match(modals, /lot_quantity[\s\S]*?setPreview\.beforeLotQuantity[\s\S]*?setPreview\.afterLotQuantity/)
+  assert.match(modals, /branch_total[\s\S]*?setPreview\.beforeBranchQuantity[\s\S]*?setPreview\.afterBranchQuantity/)
+  assert.match(modals, /stock_set_lot_negative/)
 
   const en = JSON.parse(readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8')) as Record<string, string>
   const km = JSON.parse(readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8')) as Record<string, string>
-  for (const key of ['stock_set_up_hint', 'stock_set_down_hint']) {
+  for (const key of ['stock_set_scope', 'stock_set_scope_lot', 'stock_set_scope_branch', 'lot_quantity', 'branch_total']) {
     assert.ok(en[key] && km[key], `both packs need ${key}`)
     assert.notEqual(en[key], km[key], `${key} must be really translated`)
   }
@@ -351,6 +367,8 @@ runTest('a hidden batch picker chose nothing: a set-down lot cannot ride a set-u
   // unlocked add (always a fresh lot), nor with no branch to scope a lot to.
   assert.equal(isSetDownSubmission('set', 40, 10), false)
   assert.equal(isBatchPickerVisible({ ...base, type: 'set', quantity: 40, currentQuantity: 10 }), false)
+  assert.equal(isBatchPickerVisible({ ...base, type: 'set', setScope: 'lot', quantity: 40, currentQuantity: 10 }), true)
+  assert.equal(isBatchPickerVisible({ ...base, type: 'set', setScope: 'branch', quantity: 40, currentQuantity: 10 }), true)
   assert.equal(isBatchPickerVisible({ ...base, type: 'add', quantity: 5, currentQuantity: 10, unlockPricing: true }), false)
   assert.equal(isBatchPickerVisible({ ...base, type: 'add', quantity: 5, currentQuantity: 10, branchId: '' }), false)
 
