@@ -75,16 +75,19 @@ export function parseCustomerGenderRestorationFile(text: string): GenderRestorat
     indices.add(Number(rawChunk.chunk_index))
     rowCount += rawChunk.rows.length
     for (const rawRow of rawChunk.rows) {
-      if (!isObject(rawRow) || !exactKeys(rawRow, ['id', 'to_gender', 'before', 'match'])
+      if (!isObject(rawRow)) throw new Error('A restoration record is malformed or duplicated.')
+      const before = isObject(rawRow.before) ? rawRow.before : null
+      const match = isObject(rawRow.match) ? rawRow.match : null
+      if (!exactKeys(rawRow, ['id', 'to_gender', 'before', 'match'])
         || !Number.isSafeInteger(rawRow.id) || Number(rawRow.id) <= 0 || customerIds.has(Number(rawRow.id))
         || [22305, 24969].includes(Number(rawRow.id)) || !['female', 'male'].includes(String(rawRow.to_gender))
-        || !isObject(rawRow.before) || !exactKeys(rawRow.before, BEFORE_KEYS)
-        || !BEFORE_KEYS.every((key) => rawRow.before[key] === null || (key === 'is_anonymous' ? typeof rawRow.before[key] === 'number' && Number.isFinite(rawRow.before[key]) : typeof rawRow.before[key] === 'string'))
-        || Boolean(String(rawRow.before.gender || '').trim()) || Number(rawRow.before.is_anonymous || 0) !== 0
-        || String(rawRow.before.name || '').trim().toLowerCase() === 'general'
-        || !isObject(rawRow.match) || !exactKeys(rawRow.match, ['kind', 'key'])
-        || !['unique_phone', 'name_phone', 'name_address'].includes(String(rawRow.match.kind))
-        || typeof rawRow.match.key !== 'string' || !rawRow.match.key.length) {
+        || !before || !exactKeys(before, BEFORE_KEYS)
+        || !BEFORE_KEYS.every((key) => before[key] === null || (key === 'is_anonymous' ? typeof before[key] === 'number' && Number.isFinite(before[key]) : typeof before[key] === 'string'))
+        || Boolean(String(before.gender || '').trim()) || Number(before.is_anonymous || 0) !== 0
+        || String(before.name || '').trim().toLowerCase() === 'general'
+        || !match || !exactKeys(match, ['kind', 'key'])
+        || !['unique_phone', 'name_phone', 'name_address'].includes(String(match.kind))
+        || typeof match.key !== 'string' || !match.key.length) {
         throw new Error('A restoration record is malformed or duplicated.')
       }
       customerIds.add(Number(rawRow.id))

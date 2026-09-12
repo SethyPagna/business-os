@@ -210,7 +210,7 @@ export default function CustomerGenderRestorationModal({ t, notify, user, onClos
         {manifest ? (
           <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200">
             <div className="flex items-center gap-2 font-semibold"><CheckCircle2 className="h-4 w-4" />{tr('customer_gender_restore_file_ready', 'Restoration file loaded; server approval still required')}</div>
-            <p className="mt-1 text-xs">{CUSTOMER_GENDER_RESTORATION_TOTAL.toLocaleString()} {tr('records', 'records')} · {manifest.chunks.length} {tr('chunks', 'chunks')}</p>
+            <p className="mt-1 text-xs">{CUSTOMER_GENDER_RESTORATION_TOTAL.toLocaleString()} {tr('records', 'records')} · {manifest.chunks.length} × ≤50</p>
           </div>
         ) : null}
 
