@@ -45,6 +45,28 @@ const route = loadReal('routes/pos.ts', {
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
 }).default
 route.onError((_error, c) => c.json({ error: 'Internal Server Error' }, 500))
+const settingsRoute = loadReal('routes/settings.ts', {
+  '../lib/addressPresets': addressPresets,
+  '../lib/actorSnapshot': { actorSnapshot: (actor) => actor?.username || null },
+  '../lib/audit': { audit: async () => {} },
+  '../lib/auth': { requireAuth: async (c, next) => { c.set('user', user); return next() } },
+  '../lib/cache': { bumpVersion: async () => {} },
+  '../lib/conflictControl': {
+    assertUpdatedAtMatch: () => {},
+    getExpectedUpdatedAt: (body) => body?.expectedUpdatedAt || body?.expected_updated_at || null,
+    writeConflictResponse: () => ({ body: {}, status: 409 }),
+    WriteConflictError: class WriteConflictError extends Error {},
+  },
+  '../lib/db': { getDb: () => db },
+  '../lib/lowStockSettings': { MAX_LOW_STOCK_THRESHOLD: 1000000, validateLowStockSettingsWrite: () => null },
+  '../lib/paymentMethodRegistry': {},
+  '../lib/paymentSettlement': {},
+  '../lib/permissions': permissions,
+  '../lib/searchMatch': { normalizedHaystackSql: (expression) => expression },
+  '../lib/settingsSensitive': { stripSensitiveSettings: (value) => value },
+  '../durable-objects/broadcastHub': { broadcast: async () => {} },
+}).default
+settingsRoute.onError((_error, c) => c.json({ error: 'Internal Server Error' }, 500))
 
 const env = { DB: db }
 const context = { waitUntil(promise) { promise?.catch?.(() => {}) }, passThroughOnException() {} }
@@ -55,6 +77,14 @@ async function request(method, body) {
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   }, env, context)
   return { status: response.status, body: await response.json().catch(() => null) }
+}
+async function settingsRequest(body) {
+  const response = await settingsRoute.request('http://local/', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  }, env, context)
+  return { status: response.status, text: await response.text() }
 }
 
 async function main() {
@@ -85,6 +115,22 @@ async function main() {
   assert.ok(first.body.revision)
   assert.equal(Number(db.prepare("SELECT COUNT(*) n FROM audit_logs WHERE entity='pos_address_presets'").get({}).n), 1)
   console.log('PASS first full-POS write normalizes and atomically records its audit')
+
+  const storedBeforeGenericWrite = db.prepare("SELECT value FROM settings WHERE key='pos_address_presets_v1'").get({}).value
+  user = { id: 10, username: 'settings-only', role_permissions: JSON.stringify({ settings: true }) }
+  for (const key of ['pos_address_presets_v1', 'POS_ADDRESS_PRESETS_V1', ' pos_address_presets_v1 ']) {
+    const generic = await settingsRequest({ [key]: 'raw-secret-value', expectedUpdatedAt: 'stale-version' })
+    assert.equal(generic.status, 400)
+    assert.match(generic.text, /dedicated_setting_endpoint_required/)
+    assert.doesNotMatch(generic.text, /Phnom Penh|Chamkar Mon|Tonle Bassac|raw-secret-value/)
+  }
+  const mixedGeneric = await settingsRequest({ theme: 'dark', pos_address_presets_v1: 'raw-secret-value' })
+  assert.equal(mixedGeneric.status, 400)
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM settings WHERE key='theme'").get({}).n, 0, 'a mixed generic write rejects every key rather than partially saving')
+  assert.equal(db.prepare("SELECT value FROM settings WHERE key='pos_address_presets_v1'").get({}).value, storedBeforeGenericWrite)
+  assert.equal(Number(db.prepare("SELECT COUNT(*) n FROM settings WHERE lower(trim(key))='pos_address_presets_v1'").get({}).n), 1)
+  console.log('PASS generic settings aliases reject the reserved row before conflict reads or writes')
+  user = { id: 7, username: 'cashier', role_permissions: JSON.stringify({ pos: true }) }
 
   const stale = await request('PUT', {
     expected_revision: null,

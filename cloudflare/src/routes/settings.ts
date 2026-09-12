@@ -29,6 +29,7 @@ import { MAX_LOW_STOCK_THRESHOLD, validateLowStockSettingsWrite } from '../lib/l
 import { normalizedHaystackSql } from '../lib/searchMatch'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
+import { POS_ADDRESS_PRESETS_KEY } from '../lib/addressPresets'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 
@@ -128,6 +129,11 @@ app.get('/meta', async (c) => {
 // the body except expectedUpdatedAt/expected_updated_at/updatedAt is
 // treated as a setting to write.
 const METADATA_KEYS = new Set(['expectedUpdatedAt', 'expected_updated_at', 'updatedAt', 'updated_at'])
+const DEDICATED_ENDPOINT_SETTING_KEYS = new Set([POS_ADDRESS_PRESETS_KEY.toLowerCase()])
+
+function isDedicatedEndpointSettingKey(key: string): boolean {
+  return DEDICATED_ENDPOINT_SETTING_KEYS.has(String(key || '').trim().toLowerCase())
+}
 
 // Per-field settings permissions (this session). The Permission Editor has
 // long offered `business_identity`/`sales_policy` as independently
@@ -837,6 +843,19 @@ app.post('/', async (c) => {
   const attemptedKeys = Object.keys(body).filter((key) => !METADATA_KEYS.has(key))
   if (attemptedKeys.length === 0) {
     return c.json({ error: 'No settings provided' }, 400)
+  }
+
+  // Dedicated settings carry their own permission, validation, optimistic
+  // concurrency, and audit contract. Reject every case/whitespace alias here,
+  // before permission-specific lookups or conflict reads can expose the raw
+  // row through currentSettings. Sync's settings.update alias reaches this
+  // same handler, so it cannot bypass the dedicated POS endpoint either.
+  const dedicatedKey = attemptedKeys.find(isDedicatedEndpointSettingKey)
+  if (dedicatedKey) {
+    return c.json({
+      error: `"${dedicatedKey}" must be changed through its dedicated endpoint.`,
+      code: 'dedicated_setting_endpoint_required',
+    }, 400)
   }
 
   // No shortcuts on writes: this is an all-or-nothing check across every

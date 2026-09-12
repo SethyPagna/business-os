@@ -83,6 +83,7 @@ export default function AddressPresetPicker({ actorKey, currentAddress, previous
     setDrafts({ province: '', district: '', subdistrict: '' })
     setEditing(null)
     setPendingRemove('')
+    setSaving(false)
     void load()
     return () => { requestRef.current += 1 }
   }, [actorKey, initialPrefix, load])
@@ -93,21 +94,25 @@ export default function AddressPresetPicker({ actorKey, currentAddress, previous
       setError(tr('address_preset_save_failed', 'The saved address options are invalid.'))
       return false
     }
+    const requestId = ++requestRef.current
+    const actorScope = captureActorReadScope('pos:address-presets')
     setSaving(true)
     setError('')
     try {
       const response = await savePosAddressPresets(validated.presets, revision)
+      if (requestRef.current !== requestId || !isActorReadScopeCurrent(actorScope)) return false
       setPresets(response.presets)
       setRevision(response.revision)
       return true
     } catch (saveError) {
+      if (requestRef.current !== requestId || !isActorReadScopeCurrent(actorScope)) return false
       const conflict = saveError && typeof saveError === 'object' && (saveError as { code?: unknown }).code === 'write_conflict'
       setError(conflict
         ? tr('address_preset_conflict', 'Saved addresses changed on another device. Reload before saving again.')
         : saveError instanceof Error ? saveError.message : tr('address_preset_save_failed', 'Failed to save address options.'))
       return false
     } finally {
-      setSaving(false)
+      if (requestRef.current === requestId && isActorReadScopeCurrent(actorScope)) setSaving(false)
     }
   }
 
