@@ -371,7 +371,9 @@ test('Part 552: report headers keep exactly four controls; hub tabs fit; branch 
   assert.ok(!nav.includes('hub-section-pills flex max-w-full overflow-x-auto'), 'the chip row does not require horizontal scrolling')
   const sidebar = read('src/components/navigation/Sidebar.tsx')
   assert.ok(sidebar.includes('grid min-w-0 grid-cols-2'), 'inline mobile group children use two bounded columns')
-  assert.ok(sidebar.includes('min-h-11 min-w-0 break-words'), 'mobile leaf labels wrap in touch-safe buttons')
+  assert.ok(sidebar.includes('flex min-h-16 min-w-0 flex-col items-center justify-center'), 'mobile leaf tiles keep a 64px touch target with icon above title')
+  assert.ok(sidebar.includes('<SectionIcon className="h-5 w-5 shrink-0" aria-hidden="true" />'), 'subpage icons stay decorative inside the mobile page-selection menu')
+  assert.ok(sidebar.includes('<span className="min-w-0 max-w-full break-words text-center leading-tight">{sectionLabel(section)}</span>'), 'English and Khmer mobile leaf titles fully wrap instead of clipping')
   assert.ok(nav.includes('if (layered || visible.length <= 1) return <>{content}</>'), 'default mobile mode enters the stable keyed body directly, without another tile page')
 })
 
