@@ -269,7 +269,81 @@ async function main() {
       VALUES(100,1,'lot-100','L100',1,'2026-01-01','2030-01-01',1)`).run()
   })
 
+  await boundedPreviewCohorts()
+
   console.log(JSON.stringify({ status: 'PASS', manifestGroups: result.body.applyManifest.groups.length, digest: result.body.applyManifest.manifest_digest }))
+}
+
+async function boundedPreviewCohorts() {
+  const { d1, raw } = seed()
+  raw.exec('DELETE FROM branch_stock; DELETE FROM products;')
+  for (let i = 0; i < 12; i++) for (let member = 0; member < 2; member++) {
+    raw.prepare(`INSERT INTO products(id,name,barcode,is_active,is_group,stock_quantity,
+      cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,wholesale_price_usd,wholesale_price_khr)
+      VALUES(?,?,?,1,0,0,4,16000,10,40000,8,32000)`).run(
+      100 + i * 2 + member, `Cohort ${String(i).padStart(3, '0')}`, `${member ? '0' : ''}${100000 + i}`,
+    )
+  }
+  const base = adapter(d1)
+  let calls = 0
+  const counted = {
+    ...base,
+    prepare(sql) {
+      const statement = base.prepare(sql)
+      return Object.fromEntries(Object.entries(statement).map(([method, fn]) => [method, (...args) => {
+        calls += 1
+        return fn(...args)
+      }]))
+    },
+    async batch(statements) { calls += 1; return base.batch(statements) },
+  }
+  const app = loadRoute(counted)
+  const preview = app.routes.find(route => route.method === 'GET' && route.path === '/merge-duplicates/preview').handler
+  const apply = app.routes.find(route => route.method === 'POST' && route.path === '/merge-duplicates').handler
+  const processed = new Set()
+  for (const [iteration, remaining] of [12, 7, 2].entries()) {
+    calls = 0
+    const response = await preview(context({ scope: 'leading_zero' }))
+    const cohort = Math.min(5, remaining)
+    assert.equal(response.status, 200)
+    assert.equal(response.body.groupCount, remaining, 'preview counts include the whole remaining candidate set')
+    assert.equal(response.body.groups.length, remaining, 'examples are not silently truncated to the executable cohort')
+    assert.equal(response.body.duplicateProductCount, remaining)
+    assert.equal(response.body.mergeableDuplicateProductCount, remaining)
+    assert.equal(response.body.applyManifest.groups.length, cohort)
+    assert.equal(response.body.batchLimit, 25, 'request compatibility limit is unchanged')
+    assert.ok(calls <= 6, 'at most two complete graph read batches for the default cohort')
+    if (iteration === 0) {
+      const larger = response.body.groups.map(group => ({ keeper_id: group.canonicalId,
+        member_ids: [group.canonicalId, ...group.duplicates.map(row => row.id)].sort((a, b) => a - b) }))
+      const staleLarger = await apply(context({ body: { ...response.body.applyManifest, groups: larger } }))
+      assert.equal(staleLarger.status, 409, 'a larger legacy-sized request still reaches digest validation, not a new five-pair parser cap')
+      assert.match(staleLarger.body.error, /preview is stale/)
+      assert.equal(raw.prepare("SELECT COUNT(*) AS n FROM action_history WHERE scope='products'").get().n, 0,
+        'five-pair digest cannot authorize a wider request')
+    }
+    const approvedIds = response.body.applyManifest.groups.flatMap(g => g.member_ids.filter(id => id !== g.keeper_id))
+    assert.ok(approvedIds.every(id => !processed.has(id)), 'fresh cohort cannot reinclude completed pairs')
+    const untouchedBefore = raw.prepare('SELECT * FROM products ORDER BY id').all()
+      .filter(row => !response.body.applyManifest.groups.some(group => group.member_ids.includes(row.id)))
+    calls = 0
+    const result = await apply(context({ body: { ...response.body.applyManifest, client_request_id: `cohort-${iteration}` } }))
+    assert.equal(result.status, 200)
+    assert.equal(result.body.mergedProducts, cohort, JSON.stringify(result.body))
+    assert.equal(result.body.undoPendingCount, 0)
+    assert.equal(result.body.actionHistoryIds.length, cohort)
+    assert.equal(result.body.mergeOperationIds.length, cohort)
+    assert.equal(result.body.requiresFreshPreview, true)
+    for (const id of approvedIds) processed.add(id)
+    const untouchedAfter = raw.prepare('SELECT * FROM products ORDER BY id').all()
+      .filter(row => !response.body.applyManifest.groups.some(group => group.member_ids.includes(row.id)))
+    assert.deepEqual(untouchedAfter, untouchedBefore, 'POST never widens its reviewed five-pair cohort')
+    assert.equal(raw.prepare("SELECT COUNT(*) AS n FROM action_history WHERE scope='products'").get().n, processed.size)
+    console.log(JSON.stringify({ cohort, remainingBefore: remaining, postCalls: calls, receipts: result.body.actionHistoryIds.length }))
+  }
+  assert.equal(processed.size, 12)
+  assert.equal((await preview(context({ scope: 'leading_zero' }))).body.groupCount, 0)
+  raw.close()
 }
 
 async function concurrentGuard(label, mutate, prepare = () => {}) {

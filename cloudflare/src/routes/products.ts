@@ -3673,6 +3673,11 @@ type LeadingZeroApprovedGraph = {
 
 const LEADING_ZERO_MERGE_SCOPE = 'leading_zero'
 const LEADING_ZERO_MERGE_MANIFEST_VERSION = 1
+// Full preview counts remain visible. Prepare only a small executable cohort:
+// 25 complete graphs consume 625 statements before the first fold, exhausting
+// most of the existing request budget. Previously issued manifests up to the
+// request limit remain valid; this bound only selects newly reviewed cohorts.
+const LEADING_ZERO_PREVIEW_MANIFEST_MAX_PAIRS = 5
 
 function isLeadingZeroDuplicateGroup(group: DuplicateProductGroup): boolean {
   const members = [group.canonical, ...group.duplicates]
@@ -4140,7 +4145,7 @@ app.get('/merge-duplicates/preview', async (c) => {
     for (const previewGroup of previewGroups) {
       if (!previewGroup.mergeable) continue
       const group = groups.find((candidate) => candidate.canonical.id === previewGroup.canonicalId)
-      if (!group || duplicateCount + group.duplicates.length > MERGE_DUPLICATES_MAX_PRODUCTS_PER_REQUEST) break
+      if (!group || duplicateCount + group.duplicates.length > LEADING_ZERO_PREVIEW_MANIFEST_MAX_PAIRS) break
       manifestGroups.push(group)
       duplicateCount += group.duplicates.length
     }
