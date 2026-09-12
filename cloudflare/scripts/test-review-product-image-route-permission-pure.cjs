@@ -29,10 +29,25 @@ class ProductRemoveError extends Error {
   constructor(code, message, status = 409) { super(message); this.code = code; this.status = status }
 }
 
+function loadMoneyDependency(name) {
+  const filePath = path.join(srcRoot, 'lib', `${name}.ts`)
+  const loaded = { exports: {} }
+  const dependency = request => {
+    if (request === './importImageMatch') return { MAX_IMAGES_PER_PRODUCT: 3 }
+    const allowed = new Set(['./moneyPrecision', './db', './media', './batchCode', './searchMatch'])
+    if (allowed.has(request)) return loadMoneyDependency(request.slice(2))
+    throw new Error(`Unmapped money-policy dependency: ${request}`)
+  }
+  new Function('exports', 'require', 'module', compileTs(filePath))(loaded.exports, dependency, loaded)
+  return loaded.exports
+}
+const productWrites = loadMoneyDependency('productWrites')
+
 function loadRoute(state) {
   const filePath = path.join(srcRoot, 'routes', 'reviewQueue.ts')
   const requireAuth = async (c, next) => { c.set('user', c.env.TEST_USER); await next() }
   const stubs = {
+    '../lib/productWrites': productWrites,
     hono: { Hono },
     '../lib/auth': { requireAuth },
     '../lib/permissions': {

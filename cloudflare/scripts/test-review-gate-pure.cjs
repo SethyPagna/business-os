@@ -198,6 +198,7 @@ const branchWrites = loadReal('lib/branchWrites.ts', {
 })
 const branchRoleGuards = loadReal('lib/branchRoleGuards.ts', { './branchRoles': branchRoles })
 const productWrites = loadReal('lib/productWrites.ts', {
+  './moneyPrecision': loadReal('lib/moneyPrecision.ts'),
   ...dbStub,
   './media': { sanitizeMediaList: (list) => (Array.isArray(list) ? list : []) },
   './batchCode': batchCode,
@@ -251,6 +252,7 @@ const feesRoute = loadReal('routes/fees.ts', {
 })
 
 const reviewQueueRoute = loadReal('routes/reviewQueue.ts', {
+  '../lib/productWrites': productWrites,
   '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', CURRENT_USER); return next() } },
   '../lib/permissions': permissions,

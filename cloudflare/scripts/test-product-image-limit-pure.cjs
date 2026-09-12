@@ -38,6 +38,7 @@ function load(relativePath, stubs = {}) {
 
 const media = load('lib/media.ts')
 const productWrites = load('lib/productWrites.ts', {
+  './moneyPrecision': load('lib/moneyPrecision.ts'),
   './db': { getDb: () => { throw new Error('DB must not be touched by pure gallery validation') } },
   './media': media,
   './batchCode': { dateToBatchCode: () => '' },

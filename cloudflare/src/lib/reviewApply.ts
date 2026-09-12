@@ -21,7 +21,7 @@ import { getDb } from './db'
 import { audit } from './audit'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from './cache'
-import { insertRow, updateRow, defaultBranchId, syncProductImageGallery, seedBranchStockForNewProduct, seedInitialBatchForNewProduct } from './productWrites'
+import { insertRow, updateRow, defaultBranchId, syncProductImageGallery, seedBranchStockForNewProduct, seedInitialBatchForNewProduct, readProductMoneyPlan } from './productWrites'
 import { branchUpdateStatements } from './branchWrites'
 import { assertCanonicalBranchSetMutationAllowed } from './canonicalBranchIdentity'
 import { getActionTier } from './permissions'
@@ -131,6 +131,7 @@ registerApplier('fees', 'delete', 'fee', async (env, row, reviewer) => {
 // request body the requester originally sent, unchanged since queueing.
 registerApplier('products', 'create', 'product', async (env, row, reviewer) => {
   const body = JSON.parse(row.payload_json || '{}') as Record<string, unknown>
+  readProductMoneyPlan(body)
   await resolveProductImageFields(getDb(env), body)
   const name = String(body.name || '').trim()
   if (!name) throw new Error('Pending product create is missing a name')
@@ -176,6 +177,7 @@ registerApplier('products', 'update', 'product', async (env, row, reviewer) => {
   const id = row.entity_id
   if (id == null) throw new Error('Pending product update is missing its entity id')
   const body = JSON.parse(row.payload_json || '{}') as Record<string, unknown>
+  readProductMoneyPlan(body)
   const submittedImageFields = Object.prototype.hasOwnProperty.call(body, 'image_path')
     || Object.prototype.hasOwnProperty.call(body, 'image_gallery')
   if (submittedImageFields) {

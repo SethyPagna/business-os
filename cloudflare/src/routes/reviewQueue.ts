@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { hasProductMoneyPolicy, ProductMoneyWriteError } from '../lib/productWrites'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission, getActionTier, getPermissionTier } from '../lib/permissions'
 import { audit } from '../lib/audit'
@@ -103,6 +104,21 @@ app.post('/:id/resubmit', async (c) => {
     if (productRemovePendingPointer(existing)) {
       return c.json({ error: 'A product removal approval pointer cannot be edited. Submit a new removal request instead.' }, 400)
     }
+    if (existing.section === 'products' && existing.entity_type === 'product') {
+      let oldPayload: unknown
+      try { oldPayload = JSON.parse(existing.payload_json || '{}') } catch { oldPayload = null }
+      if (!hasProductMoneyPolicy(oldPayload) && hasProductMoneyPolicy(JSON.parse(payloadJson))) {
+        return c.json({ error: 'A product price plan must be created by a new product edit.', code: 'product_money_plan_immutable' }, 409)
+      }
+      if (hasProductMoneyPolicy(oldPayload)) {
+        const stable = (value: unknown): string => JSON.stringify(value, (_key, part) =>
+          part && typeof part === 'object' && !Array.isArray(part)
+            ? Object.fromEntries(Object.entries(part).sort(([a], [b]) => a.localeCompare(b))) : part)
+        if (stable(oldPayload) !== stable(JSON.parse(payloadJson))) {
+          return c.json({ error: 'A saved product price plan cannot be edited. Submit a new product edit; unchanged resubmission is allowed.', code: 'product_money_plan_immutable' }, 409)
+        }
+      }
+    }
   }
 
   const ok = await resubmitPendingAction(c.env, id, { requestedBy: Number(user.id), payloadJson, summary })
@@ -175,6 +191,7 @@ app.post('/:id/approve', async (c) => {
     const outcome = await applyApprovedPendingAction(c.env, row, { id: user.id, name: actorSnapshot(user) }, user)
     pendingActionMarkedAtomically = outcome.pendingActionMarkedAtomically
   } catch (err) {
+    if (err instanceof ProductMoneyWriteError) return c.json({ error: err.message, code: err.code }, err.status as 400 | 409)
     if (err instanceof NoReviewApplierError) {
       return c.json({ error: err.message, code: 'no_review_applier' }, 501)
     }

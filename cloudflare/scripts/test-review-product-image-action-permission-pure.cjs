@@ -40,6 +40,14 @@ const sqlBinding = loadTs('lib/sqlBinding.ts')
 const imagePermission = loadTs('lib/productImagePermission.ts', { './media': media, './sqlBinding': sqlBinding })
 const permissions = loadTs('lib/permissions.ts')
 const dbLib = loadTs('lib/db.ts')
+const realProductWrites = loadTs('lib/productWrites.ts', {
+  './db': dbLib,
+  './moneyPrecision': loadTs('lib/moneyPrecision.ts'),
+  './media': media,
+  './batchCode': loadTs('lib/batchCode.ts'),
+  './searchMatch': loadTs('lib/searchMatch.ts'),
+  './importImageMatch': { MAX_IMAGES_PER_PRODUCT: 3 },
+})
 const branchRoles = loadTs('lib/branchRoles.ts')
 const canonicalBranchIdentity = loadTs('lib/canonicalBranchIdentity.ts', {
   './db': dbLib,
@@ -97,6 +105,7 @@ function loadReviewApply(state, updateChanges = 1) {
     async batch() { return [] },
   }
   const productWrites = {
+    readProductMoneyPlan: realProductWrites.readProductMoneyPlan,
     insertRow: async (_env, _table, body) => { state.inserted.push({ ...body }); return 77 },
     updateRow: async (_env, _table, _id, body) => { state.updated.push({ ...body }); return updateChanges },
     defaultBranchId: async () => 1,
