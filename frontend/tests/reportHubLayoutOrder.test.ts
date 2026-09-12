@@ -55,6 +55,7 @@ const viewPicker = hub.slice(hub.indexOf('const viewPicker'), hub.indexOf('const
 assert.match(hub, /const views = useMemo\(\(\) => visibleReportViews\(perms\), \[perms\]\)/, 'report views remain derived from effective permissions')
 assert.match(hub, /const viewOptions = views\.map\(\(v\) => \(\{ value: v\.id, label: trh\(v\.labelKey, v\.fallback\) \}\)\)/, 'picker options preserve every permission-scoped view and its translated label')
 assert.match(viewPicker, /options=\{viewOptions\}/, 'the title picker receives the permission-scoped report options')
+assert.match(viewPicker, /style=\{\{ width: 'auto', flex: '1 1 0%' \}\}/, 'the title picker consumes all header space left by the fixed actions')
 assert.match(viewPicker, /onChange=\{\(value\) => \{ if \(isReportViewId\(value\)\) setViewId\(value\) \}\}/, 'every valid report option selects its corresponding report view')
 assert.match(reportControl, /\{viewPicker\}[\s\S]*\{filtersButton\}[\s\S]*trh\('show', 'Show'\)/, 'option title, Filters and Show are in one ordered row')
 assert.match(hub, /titleControl: reportControlRow/, 'all report types receive that same row')
@@ -74,6 +75,7 @@ assert.match(frameSource, /title=\{activeTitle\}/)
 // The desktop tier is untouched: sticky ControlRow plus the preset row.
 assert.match(hub, /<ControlRow className="reports-desktop-primary" sticky/)
 assert.equal((hub.match(/\{presetControls\}/g) || []).length, 2, 'both tiers offer the same presets')
+assert.match(hub, /showQuickRanges=\{false\}/, 'the picker does not repeat the external preset rail')
 
 // Both packs carry the handle's label.
 const en = JSON.parse(read('src/lang/en.json')) as Record<string, string>
