@@ -22,7 +22,16 @@ for (const { file, visibleRows } of tabs) {
   assert.match(source, /const toggleSectionSelection = \([^]*?\{\s*if \(!canBulkContactsRef\.current\) return/, `${file} refuses grouped-section selection calls`)
   assert.match(source, /const handleBulkDelete = async \(\) => \{\s*if \(!canBulkContactsRef\.current \|\|/, `${file} refuses direct bulk-delete calls`)
   assert.match(source, /\.\.\.\(canImportContacts \? \[\{ label: [^]*?!canImportContactsRef\.current[^]*?setModal\('import'\)[^]*?\}\] : \[\]\)/, `${file} omits Import unless both action gates allow it`)
-  assert.match(source, /\{\(canImportContacts \|\| canExportContacts\) \? \(\s*<LazyPortalMenu/, `${file} does not leave an empty Manage control`)
+  if (file === 'CustomersTab.tsx') {
+    assert.match(source, /\{\(canImportContacts \|\| canExportContacts \|\| canRestoreCustomerGender\) \? \(\s*<LazyPortalMenu/, 'Customers keeps Manage visible for its dedicated restoration action')
+    assert.match(source, /const permission = effectivePermissions\(user\)[^]*?const canRestoreCustomerGender = permission\.isAdmin\s*&& permission\.getPermissionTier\('contacts'\) === 'full'\s*&& permission\.can\('contacts', 'edit'\)/, 'gender restoration requires administrator identity and Full contacts edit authority')
+    assert.match(source, /const canRestoreCustomerGenderRef = useRef\(canRestoreCustomerGender\)\s*canRestoreCustomerGenderRef\.current = canRestoreCustomerGender/, 'restoration invocation rechecks current authority')
+    assert.match(source, /\.\.\.\(canRestoreCustomerGender \? \[\{[^]*?!canRestoreCustomerGenderRef\.current[^]*?setModal\('gender-restoration'\)[^]*?\}\] : \[\]\)/, 'Customers omits and refuses restoration when its exact gate is absent')
+    assert.match(source, /\{canRestoreCustomerGender && modal === 'gender-restoration' \? \(/, 'Customers refuses to mount restoration after authority is revoked')
+  } else {
+    assert.match(source, /\{\(canImportContacts \|\| canExportContacts\) \? \(\s*<LazyPortalMenu/, `${file} retains the original Import-or-Export Manage visibility`)
+    assert.doesNotMatch(source, /canRestoreCustomerGender|gender-restoration/, `${file} does not inherit the customer-only restoration action`)
+  }
   assert.match(source, /\{canBulkContacts && selectedIds\.size > 0 && canBulkDeleteContacts/, `${file} hides selected-action UI without bulk access`)
   assert.equal((source.match(/disabled: !canBulkContacts \|\| selectionModeActive/g) || []).length, 2, `${file} disables table and card long-press entry points`)
   assert.equal((source.match(/\.\.\.\(canBulkContacts && !selectionModeActive \? (?:row|card)LongPress : \{\}\)/g) || []).length, 2, `${file} does not attach long-press handlers without bulk access`)
