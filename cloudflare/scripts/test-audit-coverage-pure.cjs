@@ -59,10 +59,29 @@ for (const file of files) {
 // handler must contain at least one audit( call. Shifts is the one stronger
 // contract: its mutation and guarded audit INSERT share the same D1 batch, so
 // it is checked path-by-path below instead of being weakened to an async call.
+// POS has the same stronger same-batch contract for its sole mutation and is
+// likewise checked by an exact route-specific contract below.
 for (const { file, src } of withMutations) {
-  if (file === 'shifts.ts') continue
+  if (file === 'shifts.ts' || file === 'pos.ts') continue
   ok(src.includes('audit('), `${file} registers mutations and calls audit(`)
 }
+
+// POS currently has exactly one mutation: the address-presets CAS. Its
+// guarded settings write and audit INSERT share one D1 batch, and the audit
+// SELECT is conditioned on the newly generated revision. Counting mutation
+// registrations keeps this a narrow recognition of that route: adding any
+// second POS mutation fails until its audit behavior is explicitly covered.
+const pos = fs.readFileSync(path.join(routesDir, 'pos.ts'), 'utf8')
+const posMutations = [...pos.matchAll(/\bapp\.(post|patch|put|delete)\(/g)]
+ok(posMutations.length === 1 && posMutations[0][1] === 'put',
+  'pos.ts has only the explicitly covered address-presets mutation')
+const posAddressRoute = pos.slice(pos.indexOf("app.put('/address-presets'"), pos.indexOf('export default app'))
+ok(/db\.batch\(\[[\s\S]*INSERT INTO settings[\s\S]*INSERT INTO audit_logs/.test(posAddressRoute),
+  'pos.ts commits the address-presets CAS and audit in one batch')
+ok(/INSERT INTO audit_logs[\s\S]*WHERE EXISTS\(SELECT 1 FROM settings WHERE key=@key AND json_extract\(value,'\$\.revision'\)=@revision\)/.test(posAddressRoute),
+  'pos.ts audit is guarded by the winning address-presets revision')
+ok(/if \(changes !== 1\)[\s\S]*code: 'write_conflict'/.test(posAddressRoute),
+  'pos.ts reports a losing address-presets CAS as a write conflict')
 
 // Shifts deliberately does not call the generic async audit helper. Every
 // lifecycle write and its `WHERE changes()=1` audit INSERT must commit or roll
