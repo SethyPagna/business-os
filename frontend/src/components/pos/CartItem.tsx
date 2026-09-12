@@ -2,6 +2,7 @@ import { normalizePriceValue } from '../../utils/pricing.ts'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 import { computeCartLineSavings } from './posCore.ts'
 import AppSelect from '../shared/AppSelect'
+import ProductNameRail from '../shared/ProductNameRail.tsx'
 import { branchCanSell } from '../../utils/branchRoles.ts'
 
 type Translate = (key: string) => string | undefined
@@ -139,7 +140,9 @@ export default function CartItem({
     >
       <div className="mb-2 flex items-start justify-between gap-1.5">
         <div className="mr-1 min-w-0 flex-1">
-          <p {...getKhmerTextProps(item.name, 'leading-snug text-sm font-semibold text-gray-900 dark:text-white')}>{item.name}</p>
+          <div {...getKhmerTextProps(item.name, 'leading-snug text-sm font-semibold text-gray-900 dark:text-white')}>
+            <ProductNameRail name={item.name} />
+          </div>
           {/* The Wholesale tier tag, an on/off toggle (user): default
               selected/highlighted; deselecting only unhighlights the chip and
               drops the tag from the receipt -- the price never changes. Shown

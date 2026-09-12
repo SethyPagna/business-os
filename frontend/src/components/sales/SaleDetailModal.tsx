@@ -24,7 +24,8 @@ import {
 import { receiptTotalsFigures } from '../../utils/receiptTotals.ts'
 import { receiptLineFigures } from '../../utils/receiptLineMath.ts'
 import { saleLineEditorResult } from '../../utils/saleLineEditor.ts'
-import { balancedSaleItemNameLines, saleEditorInputWidth } from '../../utils/saleItemNameLayout.ts'
+import { saleEditorInputWidth } from '../../utils/saleItemNameLayout.ts'
+import ProductNameRail from '../shared/ProductNameRail.tsx'
 import CopyableId from '../shared/CopyableId.tsx'
 import { SaleCopyValue as EntityLink } from './SalesListSurface.tsx'
 import { DetailRow, DetailRowGroup, MoneyRow } from '../shared/DetailRows.tsx'
@@ -1805,7 +1806,6 @@ export default function SaleDetailModal({
                     const displayTotal = preview?.lineTotalUsd ?? lineUsd
                     const editingLine = canAmendThisSale && amendLineId === lineId && lineId > 0
                     const productName = String(item.product_name || item.name || '')
-                    const productNameLines = balancedSaleItemNameLines(productName)
                     return (
                       <Fragment key={`${item.product_id || item.id || index}-${index}`}>
                       <tr>
@@ -1814,11 +1814,9 @@ export default function SaleDetailModal({
                             {productName ? (
                               <EntityLink
                                 page="products"
-                                className="block max-w-full overflow-x-auto overflow-y-hidden whitespace-nowrap text-[11px] font-medium leading-[1.35] text-gray-900 [scrollbar-width:thin] [overscroll-behavior-inline:contain] [&::-webkit-scrollbar]:h-[3px] dark:text-white"
+                                className="block min-w-0 max-w-full text-[11px] font-medium leading-[1.35] text-gray-900 dark:text-white"
                               >
-                                <span className="inline-block min-w-full w-max">
-                                  {productNameLines.map((line, lineIndex) => <span key={lineIndex} className="block whitespace-nowrap">{line}</span>)}
-                                </span>
+                                <ProductNameRail name={productName} />
                               </EntityLink>
                             ) : null}
                           </div>
