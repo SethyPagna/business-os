@@ -930,13 +930,19 @@ export default function POS() {
 // Customer option picker shown after selecting a customer with multiple options
   const [customerOptionsList, setCustomerOptionsList] = useState<ContactOption[]>([])
   const [showOptionPicker,    setShowOptionPicker]    = useState(false)
-  const [showAddressPresets, setShowAddressPresets] = useState(false)
+  const [addressPresetTarget, setAddressPresetTarget] = useState<'order' | 'quick-customer' | null>(null)
   // Per held order, remember only the suffix this picker last applied. When
   // reopened, that exact suffix can be replaced while the cashier's typed
   // house/street prefix remains untouched. A manually changed address that no
   // longer ends with it is never stripped.
   const appliedAddressSuffixRef = useRef<Record<string, string>>({})
+  const quickCustomerAddressSuffixRef = useRef('')
   const [savingDelivery,   setSavingDelivery]   = useState(false)
+
+  const resetQuickCustomerAddressPreset = useCallback(() => {
+    quickCustomerAddressSuffixRef.current = ''
+    setAddressPresetTarget((target) => target === 'quick-customer' ? null : target)
+  }, [])
 
   useEffect(() => { setCustomerDuplicateCheck(null) }, [newCustomerForm.name, newCustomerForm.phone, newCustomerForm.address, newCustomerForm.membership_number])
   useEffect(() => { setDeliveryDuplicateCheck(null) }, [newDeliveryForm.name, newDeliveryForm.phone, newDeliveryForm.area])
@@ -1899,6 +1905,7 @@ export default function POS() {
       setShowAddCustomer(false)
       setCustomerDuplicateCheck(null)
       setNewCustomerForm({ name: '', membership_number: '', phone: '', address: '' })
+      resetQuickCustomerAddressPreset()
       // Re-read just the row that was created (server-side defaults, ids
       // and normalized fields), not the whole table.
       if (createdCustomer.id) {
@@ -1937,6 +1944,7 @@ export default function POS() {
       setShowAddCustomer(false)
       setCustomerDuplicateCheck(null)
       setNewCustomerForm({ name: '', membership_number: '', phone: '', address: '' })
+      resetQuickCustomerAddressPreset()
     } catch (error) {
       notify(getErrorMessage(error), 'error')
     } finally {
@@ -2901,7 +2909,8 @@ export default function POS() {
     setShowAddCustomer(false)
     setCustomerDuplicateCheck(null)
     setNewCustomerForm({ name: '', membership_number: '', phone: '', address: '' })
-  }, [])
+    resetQuickCustomerAddressPreset()
+  }, [resetQuickCustomerAddressPreset])
 
   const closeAddDeliveryModal = useCallback(() => {
     if (savingDeliveryRef.current) return
@@ -3529,7 +3538,7 @@ export default function POS() {
                     : <span className="text-gray-400">({t('optional')||'optional'})</span>}
                   <span className="ml-auto text-[10px] text-gray-400">{showCustomer ? t('hide') : t('show')}</span>
                 </button>
-                <button onClick={() => setShowAddCustomer(true)} className="ml-2 text-xs text-blue-500 hover:text-blue-700 font-medium whitespace-nowrap">{t('add_new')||'+ New'}</button>
+                <button onClick={() => { resetQuickCustomerAddressPreset(); setShowAddCustomer(true) }} className="ml-2 text-xs text-blue-500 hover:text-blue-700 font-medium whitespace-nowrap">{t('add_new')||'+ New'}</button>
               </div>
               {showCustomer && (
                 <div className="px-3 pb-3 space-y-2">
@@ -3565,7 +3574,7 @@ export default function POS() {
                         <label htmlFor="pos-customer-phone-inline" className="sr-only">{t('phone')}</label>
                         <input id="pos-customer-phone-inline" name="pos_customer_phone_inline" autoComplete="tel" className="input text-xs py-1" placeholder={t('phone')} value={active.customer.phone||''} onChange={e => patchActive({ customer: { ...active.customer, phone: e.target.value } })} />
                         <label htmlFor="pos-customer-address-inline" className="sr-only">{t('address')}</label>
-                        <input id="pos-customer-address-inline" name="pos_customer_address_inline" autoComplete="street-address" className="input cursor-pointer text-xs py-1" placeholder={t('address')} value={active.customer.address||''} onChange={e => patchActive({ customer: { ...active.customer, address: e.target.value } })} onClick={() => setShowAddressPresets(true)} aria-haspopup="dialog" />
+                        <input id="pos-customer-address-inline" name="pos_customer_address_inline" autoComplete="street-address" className="input cursor-pointer text-xs py-1" placeholder={t('address')} value={active.customer.address||''} onChange={e => patchActive({ customer: { ...active.customer, address: e.target.value } })} onClick={() => setAddressPresetTarget('order')} aria-haspopup="dialog" />
                       </div>
                       {/* Option picker appears inline when a customer has multiple options */}
                       {showOptionPicker && customerOptionsList.length > 0 && (
@@ -4013,6 +4022,7 @@ export default function POS() {
             handleCreateSeparateDelivery={handleCreateSeparateDelivery}
             handleUseExistingCustomer={handleUseExistingCustomer}
             handleUseExistingDelivery={handleUseExistingDelivery}
+            onOpenCustomerAddressPresets={() => setAddressPresetTarget('quick-customer')}
             clearCustomerDuplicateCheck={() => setCustomerDuplicateCheck(null)}
             clearDeliveryDuplicateCheck={() => setDeliveryDuplicateCheck(null)}
             newCustomerForm={newCustomerForm}
@@ -4029,17 +4039,22 @@ export default function POS() {
         </Suspense>
       ) : null}
 
-      {isActive && showAddressPresets ? (
+      {isActive && addressPresetTarget ? (
         <Suspense fallback={null}>
           <AddressPresetPicker
             actorKey={captureActorReadScope('pos:address-presets').authority}
-            currentAddress={active.customer.address || ''}
-            previousSuffix={appliedAddressSuffixRef.current[String(active.id)] || ''}
+            currentAddress={addressPresetTarget === 'quick-customer' ? newCustomerForm.address : (active.customer.address || '')}
+            previousSuffix={addressPresetTarget === 'quick-customer' ? quickCustomerAddressSuffixRef.current : (appliedAddressSuffixRef.current[String(active.id)] || '')}
             onApply={({ address, suffix }) => {
-              appliedAddressSuffixRef.current[String(active.id)] = suffix
-              patchActive({ customer: { ...active.customer, address } })
+              if (addressPresetTarget === 'quick-customer') {
+                quickCustomerAddressSuffixRef.current = suffix
+                setNewCustomerForm((form) => ({ ...form, address }))
+              } else {
+                appliedAddressSuffixRef.current[String(active.id)] = suffix
+                patchActive({ customer: { ...active.customer, address } })
+              }
             }}
-            onClose={() => setShowAddressPresets(false)}
+            onClose={() => setAddressPresetTarget(null)}
             t={t}
           />
         </Suspense>

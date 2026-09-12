@@ -32,6 +32,7 @@ type POSQuickAddModalsProps = {
   handleCreateSeparateDelivery: () => void
   handleUseExistingCustomer: (match: ContactDuplicateMatch) => void | Promise<void>
   handleUseExistingDelivery: (match: ContactDuplicateMatch) => void | Promise<void>
+  onOpenCustomerAddressPresets: () => void
   newCustomerForm: CustomerFormState
   newDeliveryForm: DeliveryFormState
   posCopy: PosCopy
@@ -95,6 +96,7 @@ export default function POSQuickAddModals({
   handleCreateSeparateDelivery,
   handleUseExistingCustomer,
   handleUseExistingDelivery,
+  onOpenCustomerAddressPresets,
   newCustomerForm,
   newDeliveryForm,
   posCopy,
@@ -129,7 +131,7 @@ export default function POSQuickAddModals({
             </div>
             <div>
               <label htmlFor="pos-quick-customer-address" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{t('address')}</label>
-              <input id="pos-quick-customer-address" name="pos_quick_customer_address" className="input" value={newCustomerForm.address} onChange={(event) => setNewCustomerForm((form) => ({ ...form, address: event.target.value }))} autoComplete="street-address" />
+              <input id="pos-quick-customer-address" name="pos_quick_customer_address" className="input cursor-pointer" value={newCustomerForm.address} onChange={(event) => setNewCustomerForm((form) => ({ ...form, address: event.target.value }))} onClick={onOpenCustomerAddressPresets} aria-haspopup="dialog" autoComplete="street-address" />
             </div>
           </div>
           <div>
