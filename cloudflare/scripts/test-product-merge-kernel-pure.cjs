@@ -9,7 +9,8 @@ function load(rel) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }, fileName,
   })
   const mod = { exports: {} }
-  new Function('module', 'exports', 'require', outputText)(mod, mod.exports, require)
+  new Function('module', 'exports', 'require', outputText)(mod, mod.exports,
+    (name) => name === './moneyPrecision' ? load('lib/moneyPrecision.ts') : require(name))
   return mod.exports
 }
 
@@ -34,8 +35,8 @@ assert.equal(cost([4, 4, 4, 5]).merged.cost_price_usd, 4.5, 'DISTINCT happens be
 assert.equal(cost([4, 5, 6]).merged.cost_price_usd, 5, 'whole-cluster mean is not pairwise 5.25')
 assert.equal(cost([0, 0]).merged.cost_price_usd, 0)
 assert.equal(cost([0, 4, 4]).merged.cost_price_usd, 4, 'zero is excluded when a recorded non-zero cost exists')
-assert.equal(cost([' 4.00001 ', '5.00002']).merged.cost_price_usd, 4.5001, 'round up once after the mean')
-assert.equal(cost([1.23454, 1.23455]).merged.cost_price_usd, 1.2346)
+assert.equal(cost([' 4.00001 ', '5.00002']).merged.cost_price_usd, 4.5, 'new calculations round nearest once after the mean')
+assert.equal(cost([1.23454, 1.23455]).merged.cost_price_usd, 1.2345)
 assert.equal(cost([130.6595, 130.6596]).merged.cost_price_usd, 130.6596, 'owner rounding rule never rounds a mean down')
 assert.deepEqual(parseMergeMoney(''), { kind: 'missing' })
 assert.equal(cost(['12oops']).issues[0].code, 'malformed')
@@ -56,6 +57,11 @@ const plannedRows = [
   { id: 3, updated_at: 'u3', cost_price_usd: 6, cost_price_khr: 6000 },
 ]
 const clusterPlan = createProductMergeClusterPlan('["tea","123"]', 1, plannedRows)
+assert.equal(clusterPlan.version, 2)
+const fractionalRows = [1, 1.0001, 1.0003].map((value, i) => ({ id: i + 1, cost_price_usd: value }))
+const legacyPlan = createProductMergeClusterPlan('legacy', 1, fractionalRows, 1)
+assert.equal(resolveProductMergeClusterPlanEconomics(parseProductMergeClusterPlan(JSON.parse(JSON.stringify(legacyPlan)))).merged.cost_price_usd, 1.0002, 'v1 persisted plans retain upward rounding')
+assert.equal(resolveProductMergeClusterPlanEconomics(createProductMergeClusterPlan('new', 1, fractionalRows)).merged.cost_price_usd, 1.0001, 'new v2 plans use nearest4')
 assert.deepEqual(parseProductMergeClusterPlan(JSON.parse(JSON.stringify(clusterPlan))), clusterPlan)
 assert.equal(resolveProductMergeClusterPlanEconomics(clusterPlan).merged.cost_price_usd, 5)
 const retryKeeper = { id: 1, updated_at: 'after-first-fold', cost_price_usd: 5, cost_price_khr: 5000 }

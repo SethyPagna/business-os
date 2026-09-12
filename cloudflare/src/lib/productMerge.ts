@@ -1,3 +1,5 @@
+import { meanMoney4, roundMoney4 } from './moneyPrecision'
+
 export const MERGE_COST_FIELDS = ['cost_price_usd', 'cost_price_khr'] as const
 export const MERGE_PRICE_FIELDS = [
   'selling_price_usd',
@@ -48,7 +50,7 @@ function roundMoneyUp(value: number, places: number): number {
   return Math.ceil(value * scale - 1e-9) / scale || 0
 }
 
-export function resolveProductMergeEconomics(rows: ReadonlyArray<Record<string, unknown>>): ProductMergeEconomics {
+export function resolveProductMergeEconomics(rows: ReadonlyArray<Record<string, unknown>>, legacyUp4 = false): ProductMergeEconomics {
   const merged: Partial<Record<MergeMoneyField, number>> = {}
   const distinctCosts: ProductMergeEconomics['distinctCosts'] = {}
   const issues: ProductMergeNumericIssue[] = []
@@ -62,6 +64,12 @@ export function resolveProductMergeEconomics(rows: ReadonlyArray<Record<string, 
         issues.push({ field, rowId: Number.isInteger(Number(row?.id)) ? Number(row.id) : null, value: row?.[field], code: parsed.code })
         continue
       }
+      if (!legacyUp4) {
+        try { roundMoney4(parsed.value) } catch {
+          issues.push({ field, rowId: Number.isInteger(Number(row?.id)) ? Number(row.id) : null, value: row?.[field], code: 'malformed' })
+          continue
+        }
+      }
       values.push(parsed.value)
     }
     if (!values.length) continue
@@ -72,7 +80,9 @@ export function resolveProductMergeEconomics(rows: ReadonlyArray<Record<string, 
       const positive = [...new Set(values.filter((value) => value > 0))]
       distinctCosts[field as typeof MERGE_COST_FIELDS[number]] = positive
       merged[field] = positive.length
-        ? roundMoneyUp(positive.reduce((sum, value) => sum + value, 0) / positive.length, 4)
+        ? legacyUp4
+          ? roundMoneyUp(positive.reduce((sum, value) => sum + value, 0) / positive.length, 4)
+          : meanMoney4(positive)
         : 0
     } else {
       merged[field] = Math.max(...values)
@@ -89,7 +99,7 @@ export type ProductMergeClusterPlanMember = {
 }
 
 export type ProductMergeClusterPlan = {
-  version: 1
+  version: 1 | 2
   identityKey: string
   keeperId: number
   memberIds: number[]
@@ -114,9 +124,10 @@ export function createProductMergeClusterPlan(
   identityKey: string,
   keeperId: number,
   rows: ReadonlyArray<Record<string, unknown>>,
+  version: 1 | 2 = 2,
 ): ProductMergeClusterPlan {
   if (!identityKey || !Number.isSafeInteger(keeperId) || keeperId <= 0) throw new Error('A merge cluster plan needs an identity and keeper.')
-  const economics = resolveProductMergeEconomics(rows)
+  const economics = resolveProductMergeEconomics(rows, version === 1)
   if (economics.issues.length) throw new Error(productMergeNumericError(economics.issues))
   const members = rows.map((row): ProductMergeClusterPlanMember => {
     const id = Number(row.id)
@@ -127,20 +138,20 @@ export function createProductMergeClusterPlan(
   }).sort((a, b) => a.id - b.id)
   const memberIds = members.map((member) => member.id)
   if (new Set(memberIds).size !== memberIds.length || !memberIds.includes(keeperId)) throw new Error('A merge cluster plan contains duplicate ids or omits its keeper.')
-  return { version: 1, identityKey, keeperId, memberIds, members }
+  return { version, identityKey, keeperId, memberIds, members }
 }
 
 export function parseProductMergeClusterPlan(value: unknown): ProductMergeClusterPlan | null {
   if (!value || typeof value !== 'object') return null
   const candidate = value as Partial<ProductMergeClusterPlan>
-  if (candidate.version !== 1 || typeof candidate.identityKey !== 'string' || !candidate.identityKey) return null
+  if ((candidate.version !== 1 && candidate.version !== 2) || typeof candidate.identityKey !== 'string' || !candidate.identityKey) return null
   if (!Number.isSafeInteger(candidate.keeperId) || Number(candidate.keeperId) <= 0 || !Array.isArray(candidate.members)) return null
   try {
     const rebuilt = createProductMergeClusterPlan(candidate.identityKey, Number(candidate.keeperId), candidate.members.map((member) => {
       if (!member || typeof member !== 'object') throw new Error('invalid member')
       const typed = member as ProductMergeClusterPlanMember
       return { id: typed.id, updated_at: typed.updated_at, ...(typed.money || {}) }
-    }))
+    }), candidate.version)
     if (!Array.isArray(candidate.memberIds) || candidate.memberIds.length !== rebuilt.memberIds.length) return null
     if (candidate.memberIds.some((id, index) => Number(id) !== rebuilt.memberIds[index])) return null
     return rebuilt
@@ -148,7 +159,8 @@ export function parseProductMergeClusterPlan(value: unknown): ProductMergeCluste
 }
 
 export function resolveProductMergeClusterPlanEconomics(plan: ProductMergeClusterPlan): ProductMergeEconomics {
-  return resolveProductMergeEconomics(plan.members.map((member) => ({ id: member.id, ...member.money })))
+  // A previously approved v1 plan must retain its original ceil4 economics.
+  return resolveProductMergeEconomics(plan.members.map((member) => ({ id: member.id, ...member.money })), plan.version === 1)
 }
 
 export function productMergePlanSourceMemberMatches(plan: ProductMergeClusterPlan, row: Record<string, unknown>): boolean {

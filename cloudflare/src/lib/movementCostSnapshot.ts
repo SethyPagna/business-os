@@ -1,3 +1,5 @@
+import { divideMoney4, roundMoney4, sumProductsMoney4 } from './moneyPrecision'
+
 export type MovementCostPair = {
   unitCostUsd: number | null
   unitCostKhr: number | null
@@ -15,7 +17,7 @@ const money = (value: unknown): number | null => {
   if (value == null || value === '') return null
   const parsed = typeof value === 'number' ? value : Number(value)
   if (!Number.isFinite(parsed) || parsed < 0) throw new RangeError('Movement costs must be finite non-negative numbers')
-  return parsed
+  return roundMoney4(parsed)
 }
 
 const finite = (value: number, message: string): number => {
@@ -24,11 +26,6 @@ const finite = (value: number, message: string): number => {
 }
 
 const add = (left: number, right: number): number => finite(left + right, 'Movement cost sum exceeds the supported range')
-const multiply = (left: number, right: number): number => finite(left * right, 'Movement cost total exceeds the supported range')
-const round4 = (value: number): number => {
-  const scaled = finite(value * 10_000, 'Movement cost rounding exceeds the supported range')
-  return finite(Math.round(scaled) / 10_000, 'Movement cost rounding exceeds the supported range')
-}
 
 function resolveCurrency(
   quantity: number,
@@ -38,21 +35,21 @@ function resolveCurrency(
 ): { unit: number | null; total: number | null } {
   const fallbackCost = money(fallback)
   let covered = 0
-  let total = 0
+  const terms: { amount: number; factor: number }[] = []
   for (const component of components) {
     const componentQuantity = Number(component.quantity)
     if (!(componentQuantity > 0)) continue
     const cost = money(component[field]) ?? fallbackCost
     if (cost == null) return { unit: null, total: null }
     covered = add(covered, componentQuantity)
-    total = add(total, multiply(componentQuantity, cost))
+    terms.push({ amount: cost, factor: componentQuantity })
   }
   if (covered + 0.000000001 < quantity) {
     if (fallbackCost == null) return { unit: null, total: null }
-    total = add(total, multiply(quantity - covered, fallbackCost))
+    terms.push({ amount: fallbackCost, factor: quantity - covered })
   }
-  const roundedTotal = round4(total)
-  return { unit: round4(finite(roundedTotal / quantity, 'Movement unit cost exceeds the supported range')), total: roundedTotal }
+  const roundedTotal = sumProductsMoney4(terms)
+  return { unit: divideMoney4(roundedTotal, quantity), total: roundedTotal }
 }
 
 /**

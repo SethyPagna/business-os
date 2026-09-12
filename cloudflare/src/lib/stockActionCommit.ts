@@ -1,4 +1,5 @@
 import type { D1Compat } from './db'
+import { roundMoney4, multiplyMoney4, sellingPriceCeilCent } from './moneyPrecision'
 import { dateToBatchCode, normalizeToIsoDate } from './batchCode'
 import { normalizeSearchText } from './searchMatch'
 import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, stockReceiptGateCode, stockReceiptGateMessage, type StockReceiptGateInput } from './stockReceiptGate'
@@ -126,11 +127,11 @@ function positiveInteger(value: unknown, field: string): number {
   return parsed
 }
 
-function optionalMoney(value: unknown): number | null {
+function optionalMoney(value: unknown, sellingDefault = false): number | null {
   if (value == null || value === '') return null
   const parsed = Number(value)
   if (!Number.isFinite(parsed) || parsed < 0) throw new Error('Price must be a non-negative finite number')
-  return Math.round(parsed * 100) / 100
+  return sellingDefault ? sellingPriceCeilCent(parsed) : roundMoney4(parsed)
 }
 
 function requiredMoney(value: unknown, field: string): number {
@@ -205,8 +206,8 @@ export async function ensureUnifiedStockProduct(db: D1Compat, input: UnifiedStoc
       productName,
       nameNormalized: normalizeSearchText(productName),
       barcode: String(input.barcode || '').trim() || null,
-      sellingPriceUsd: optionalMoney(input.sellingPriceUsd) ?? 0,
-      wholesalePriceUsd: optionalMoney(input.wholesalePriceUsd) ?? 0,
+      sellingPriceUsd: optionalMoney(input.sellingPriceUsd, true) ?? 0,
+      wholesalePriceUsd: optionalMoney(input.wholesalePriceUsd, true) ?? 0,
       costPriceUsd: optionalMoney(input.costPriceUsd) ?? 0,
       clientRequestId,
     })
@@ -283,12 +284,15 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
     freeGoods,
   })
   if (refusal) throw new Error(refusal)
+  const costPriceUsd = optionalMoney(input.costPriceUsd)
+  const totalCostUsd = costPriceUsd == null ? null : multiplyMoney4(costPriceUsd, quantity)
   const params = {
     jobId, actionKey, rowNumber, productId, productName, branchId, branchName,
     quantity, batchKey, lotCode, receivedAt, batchNumber, supplierName, supplierId,
-    sellingPriceUsd: optionalMoney(input.sellingPriceUsd),
-    wholesalePriceUsd: optionalMoney(input.wholesalePriceUsd),
-    costPriceUsd: optionalMoney(input.costPriceUsd),
+    sellingPriceUsd: optionalMoney(input.sellingPriceUsd, true),
+    wholesalePriceUsd: optionalMoney(input.wholesalePriceUsd, true),
+    costPriceUsd,
+    totalCostUsd,
     // The declaration is stamped into the words, not just the zero -- the
     // same appendReceiptNotes routes/batches.ts:218 uses for the interactive
     // wire, so a $0.00 accepted receipt reads as free goods on this wire too.
@@ -339,7 +343,7 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
       // source row recorded no price; COALESCE makes that contribute 0
       // instead of borrowing a sibling receipt's price.
       sql: `UPDATE product_batches SET received_quantity = COALESCE(received_quantity, 0) + @quantity,
-              received_cost_usd = COALESCE(received_cost_usd, 0) + (@quantity * COALESCE(@costPriceUsd, 0)),
+              received_cost_usd = COALESCE(received_cost_usd, 0) + COALESCE(@totalCostUsd, 0),
               received_branch_id = COALESCE(received_branch_id, @branchId)
             WHERE variant_product_id = @productId AND batch_key = @batchKey AND ${guard}`,
       params,
@@ -379,7 +383,7 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
                unit_cost_usd, total_cost_usd, reason, created_at, batch_id)
             SELECT @productId, @productName, @branchId, @branchName, 'add', @quantity,
               @costPriceUsd,
-              CASE WHEN @costPriceUsd IS NULL THEN NULL ELSE ROUND(@quantity * @costPriceUsd, 4) END,
+              @totalCostUsd,
               @reason, @receivedAt,
               (SELECT id FROM product_batches WHERE variant_product_id = @productId AND batch_key = @batchKey)
             WHERE ${guard}`,
@@ -720,7 +724,7 @@ export async function applyUnifiedStockSale(db: D1Compat, input: UnifiedStockSal
             WHERE ${guard}`,
       params: {
         ...common, ...line, costPriceUsd,
-        totalCostUsd: Math.round(costPriceUsd * line.quantity * 100) / 100,
+        totalCostUsd: multiplyMoney4(costPriceUsd, line.quantity),
         reason: `Unified stock import ${jobId}, group ${saleGroupKey}, row ${line.rowNumber}`,
         soldAt,
         // Full coverage required: a single allocation that covers only part

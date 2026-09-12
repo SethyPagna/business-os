@@ -69,7 +69,7 @@ import {
   findBlankHeaderIndexes,
   type ParsedCsvRow,
 } from './importCsv'
-import { parseImportNumericValue, normalizeImportMoney } from './importNumbers'
+import { parseImportNumericValue, normalizeImportMoney, normalizeImportSellingPrice } from './importNumbers'
 import { createMembershipNumberAllocator, membershipGlob } from './membershipNumber'
 import { buildImportedContactState, contactDisplayAddress } from './contactOptions'
 import { collectContactPhones, contactDuplicateWriteGuardStatement, formatContactOptionPhones, formatPhoneP8, normalizeContactName } from './contactDuplicates'
@@ -1624,8 +1624,8 @@ export async function classifyProducts(
       brand: brandParts[0] || null,
       brands: brandParts.length ? dedupeJoin(brandParts) : null,
       supplier: str(row.supplier) || null,
-      selling_price_usd: normalizeImportMoney(row.selling_price_usd ?? row.price_usd),
-      selling_price_khr: normalizeImportMoney(row.selling_price_khr ?? row.price_khr),
+      selling_price_usd: normalizeImportSellingPrice(row.selling_price_usd ?? row.price_usd),
+      selling_price_khr: normalizeImportSellingPrice(row.selling_price_khr ?? row.price_khr),
       // Accepts the current cost_price_usd/khr header, plus older
       // purchase_price_usd/khr and cost_usd/khr headers from files
       // exported before the product-cost fields were consolidated (see
@@ -1680,10 +1680,10 @@ export async function classifyProducts(
     const wholesaleUsdRaw = row.wholesale_price_usd ?? row.vip_price_usd ?? row.special_price_usd
     const wholesaleKhrRaw = row.wholesale_price_khr ?? row.vip_price_khr ?? row.special_price_khr
     data.wholesale_price_usd = wholesaleUsdRaw !== undefined && str(wholesaleUsdRaw) !== ''
-      ? normalizeImportMoney(wholesaleUsdRaw)
+      ? normalizeImportSellingPrice(wholesaleUsdRaw)
       : 0
     data.wholesale_price_khr = wholesaleKhrRaw !== undefined && str(wholesaleKhrRaw) !== ''
-      ? normalizeImportMoney(wholesaleKhrRaw)
+      ? normalizeImportSellingPrice(wholesaleKhrRaw)
       : 0
     data.out_of_stock_threshold = parseImportNumericValue(row.out_of_stock_threshold, 0, { allowNegative: false, field: 'out_of_stock_threshold' })
     data.discount_enabled = toBool01(row.discount_enabled ?? row.promotion_enabled ?? row.on_promotion, 0)
