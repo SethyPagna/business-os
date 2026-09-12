@@ -40,7 +40,9 @@ function executeCommonJs(filePath, output, stubs) {
 const permissionsPath = path.join(srcRoot, 'lib', 'permissions.ts')
 const permissions = executeCommonJs(permissionsPath, compileTs(permissionsPath), {})
 const productMergePath = path.join(srcRoot, 'lib', 'productMerge.ts')
-const productMerge = executeCommonJs(productMergePath, compileTs(productMergePath), {})
+const moneyPrecisionPath = path.join(srcRoot, 'lib', 'moneyPrecision.ts')
+const moneyPrecision = executeCommonJs(moneyPrecisionPath, compileTs(moneyPrecisionPath), {})
+const productMerge = executeCommonJs(productMergePath, compileTs(productMergePath), { './moneyPrecision': moneyPrecision })
 
 function permissiveModule() {
   return new Proxy({}, {

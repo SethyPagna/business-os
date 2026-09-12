@@ -41,7 +41,16 @@ const media = loadTs('lib/media.ts')
 const sqlBinding = loadTs('lib/sqlBinding.ts')
 const imagePermission = loadTs('lib/productImagePermission.ts', { './media': media, './sqlBinding': sqlBinding })
 const permissions = loadTs('lib/permissions.ts')
-const productMerge = loadTs('lib/productMerge.ts')
+const moneyPrecision = loadTs('lib/moneyPrecision.ts')
+const productMerge = loadTs('lib/productMerge.ts', { './moneyPrecision': moneyPrecision })
+const realProductWrites = loadTs('lib/productWrites.ts', {
+  './moneyPrecision': moneyPrecision,
+  './db': loadTs('lib/db.ts'),
+  './media': media,
+  './batchCode': loadTs('lib/batchCode.ts'),
+  './searchMatch': loadTs('lib/searchMatch.ts'),
+  './importImageMatch': { MAX_IMAGES_PER_PRODUCT: 3 },
+})
 
 function permissiveModule() {
   return new Proxy({}, {
@@ -99,6 +108,8 @@ function loadProductsRoute(state) {
     async batch() { state.dbWrites++; return [] },
   }
   const productWrites = {
+    prepareProductMoneyWrite: realProductWrites.prepareProductMoneyWrite,
+    ProductMoneyWriteError: realProductWrites.ProductMoneyWriteError,
     PRODUCT_SKIP_KEYS: new Set(),
     nowIso: () => '',
     tableColumns: async () => [],
