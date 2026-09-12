@@ -104,7 +104,7 @@ const vite = await createServer({
     configureServer(server) {
       server.middlewares.use('/mobile-section-fixture', async (_request, response) => {
         response.setHeader('content-type', 'text/html; charset=utf-8')
-        const html = '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div id="root"></div><script type="module" src="/@id/virtual:bos-mobile-section-fixture"></script></body></html>'
+        const html = '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div id="root"></div><script>window.addEventListener("error",function(event){document.body.dataset.fixtureError=String(event.error&&event.error.stack||event.message)});window.addEventListener("unhandledrejection",function(event){document.body.dataset.fixtureError=String(event.reason&&event.reason.stack||event.reason)})</script><script type="module" src="/@id/virtual:bos-mobile-section-fixture"></script></body></html>'
         response.end(await server.transformIndexHtml('/mobile-section-fixture', html))
       })
     },
@@ -121,10 +121,12 @@ const browser = spawn(browserPath, [
 ], { stdio: 'ignore' })
 const browserExit = new Promise<void>((resolve) => browser.once('exit', resolve))
 
-type CdpReply = { id?: number; result?: unknown; error?: { message?: string } }
+type CdpReply = { id?: number; result?: unknown; error?: { message?: string }; method?: string; params?: any }
+const COLD_START_TIMEOUT_MS = 60_000
 let socket: WebSocket | null = null
 let nextId = 0
 const pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void }>()
+const browserDiagnostics: string[] = []
 
 async function waitFor<T>(read: () => Promise<T | null>, timeoutMs = 15_000): Promise<T> {
   const deadline = Date.now() + timeoutMs
@@ -155,13 +157,18 @@ async function setViewport(width: number): Promise<void> {
 const owners = ['products', 'sales', 'branches', 'contacts', 'promotions', 'settings', 'review']
 
 try {
-  const target = await waitFor(async () => {
-    try {
-      const response = await fetch(`http://127.0.0.1:${debugPort}/json/list`)
-      const targets = await response.json() as Array<{ type?: string; url?: string; webSocketDebuggerUrl?: string }>
-      return targets.find((item) => item.type === 'page' && item.url?.includes('/mobile-section-fixture'))?.webSocketDebuggerUrl || null
-    } catch { return null }
-  })
+  let target: string
+  try {
+    target = await waitFor(async () => {
+      try {
+        const response = await fetch(`http://127.0.0.1:${debugPort}/json/list`)
+        const targets = await response.json() as Array<{ type?: string; url?: string; webSocketDebuggerUrl?: string }>
+        return targets.find((item) => item.type === 'page' && item.url?.includes('/mobile-section-fixture'))?.webSocketDebuggerUrl || null
+      } catch { return null }
+    }, COLD_START_TIMEOUT_MS)
+  } catch (error) {
+    throw new Error(`${error instanceof Error ? error.message : String(error)}; browser discovery failed (exit=${browser.exitCode ?? 'running'}, debugPort=${debugPort}, appPort=${appPort})`)
+  }
   socket = new WebSocket(target)
   await new Promise<void>((resolve, reject) => {
     socket!.addEventListener('open', () => resolve(), { once: true })
@@ -169,6 +176,11 @@ try {
   })
   socket.addEventListener('message', (event) => {
     const reply = JSON.parse(String(event.data)) as CdpReply
+    if (!reply.id && reply.method) {
+      if (reply.method === 'Runtime.exceptionThrown') browserDiagnostics.push(`exception: ${reply.params?.exceptionDetails?.text || 'unknown'}`)
+      if (reply.method === 'Log.entryAdded') browserDiagnostics.push(`log: ${reply.params?.entry?.level || 'unknown'} ${reply.params?.entry?.text || ''}`)
+      return
+    }
     if (!reply.id) return
     const waiter = pending.get(reply.id)
     if (!waiter) return
@@ -177,8 +189,14 @@ try {
     else waiter.resolve(reply.result)
   })
   await send('Runtime.enable')
+  await send('Log.enable')
   await setViewport(320)
-  await waitFor(async () => await evaluate<boolean>(`document.querySelector('[data-bos-mobile-header=inline]') !== null`) ? true : null)
+  try {
+    await waitFor(async () => await evaluate<boolean>(`document.querySelector('[data-bos-mobile-header=inline]') !== null`) ? true : null, COLD_START_TIMEOUT_MS)
+  } catch (error) {
+    const diagnostics = await evaluate(`JSON.stringify({ readyState: document.readyState, error: document.body.dataset.fixtureError, body: document.body.textContent, html: document.documentElement.outerHTML.slice(0, 1000), resources: performance.getEntriesByType('resource').map((entry) => ({ name: entry.name, duration: entry.duration, transferSize: entry.transferSize })) })`)
+    throw new Error(`${error instanceof Error ? error.message : String(error)}; browser=${JSON.stringify(browserDiagnostics)}; page=${diagnostics}`)
+  }
   await evaluate(`document.querySelector('button[aria-controls="mobile-nav-layer"]').click()`)
   await waitFor(async () => await evaluate<boolean>(`document.querySelector('[data-bos-nav-layer=pages]') !== null`) ? true : null)
 

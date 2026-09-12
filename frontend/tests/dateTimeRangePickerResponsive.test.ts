@@ -104,10 +104,12 @@ const browser = spawn(browserPath, [
 ], { stdio: 'ignore' })
 const browserExit = new Promise<void>((resolve) => browser.once('exit', resolve))
 
-type CdpReply = { id?: number; result?: unknown; error?: { message?: string } }
+type CdpReply = { id?: number; result?: unknown; error?: { message?: string }; method?: string; params?: any }
+const COLD_START_TIMEOUT_MS = 60_000
 let socket: WebSocket | null = null
 let nextId = 0
 const pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void }>()
+const browserDiagnostics: string[] = []
 
 async function waitFor<T>(read: () => Promise<T | null>, timeoutMs = 15_000): Promise<T> {
   const deadline = Date.now() + timeoutMs
@@ -136,13 +138,18 @@ async function setViewport(width: number, height: number): Promise<void> {
 }
 
 try {
-  const target = await waitFor(async () => {
-    try {
-      const response = await fetch(`http://127.0.0.1:${debugPort}/json/list`)
-      const targets = await response.json() as Array<{ type?: string; url?: string; webSocketDebuggerUrl?: string }>
-      return targets.find((item) => item.type === 'page' && item.url?.includes('/date-range-fixture'))?.webSocketDebuggerUrl || null
-    } catch { return null }
-  })
+  let target: string
+  try {
+    target = await waitFor(async () => {
+      try {
+        const response = await fetch(`http://127.0.0.1:${debugPort}/json/list`)
+        const targets = await response.json() as Array<{ type?: string; url?: string; webSocketDebuggerUrl?: string }>
+        return targets.find((item) => item.type === 'page' && item.url?.includes('/date-range-fixture'))?.webSocketDebuggerUrl || null
+      } catch { return null }
+    }, COLD_START_TIMEOUT_MS)
+  } catch (error) {
+    throw new Error(`${error instanceof Error ? error.message : String(error)}; browser discovery failed (exit=${browser.exitCode ?? 'running'}, debugPort=${debugPort}, appPort=${appPort})`)
+  }
   socket = new WebSocket(target)
   await new Promise<void>((resolve, reject) => {
     socket!.addEventListener('open', () => resolve(), { once: true })
@@ -150,6 +157,11 @@ try {
   })
   socket.addEventListener('message', (event) => {
     const reply = JSON.parse(String(event.data)) as CdpReply
+    if (!reply.id && reply.method) {
+      if (reply.method === 'Runtime.exceptionThrown') browserDiagnostics.push(`exception: ${reply.params?.exceptionDetails?.text || 'unknown'}`)
+      if (reply.method === 'Log.entryAdded') browserDiagnostics.push(`log: ${reply.params?.entry?.level || 'unknown'} ${reply.params?.entry?.text || ''}`)
+      return
+    }
     if (!reply.id) return
     const waiter = pending.get(reply.id)
     if (!waiter) return
@@ -158,11 +170,12 @@ try {
     else waiter.resolve(reply.result)
   })
   await send('Runtime.enable')
+  await send('Log.enable')
   try {
-    await waitFor(async () => await evaluate<boolean>('Boolean(document.querySelector("[data-stats-range-controls]"))') ? true : null)
+    await waitFor(async () => await evaluate<boolean>('Boolean(document.querySelector("[data-stats-range-controls]"))') ? true : null, COLD_START_TIMEOUT_MS)
   } catch (error) {
-    const diagnostics = await evaluate(`JSON.stringify({ error: document.body.dataset.fixtureError, body: document.body.textContent, html: document.documentElement.outerHTML.slice(0, 1000), resources: performance.getEntriesByType('resource').map((entry) => entry.name) })`)
-    throw new Error(`${error instanceof Error ? error.message : String(error)}: ${diagnostics}`)
+    const diagnostics = await evaluate(`JSON.stringify({ readyState: document.readyState, error: document.body.dataset.fixtureError, body: document.body.textContent, html: document.documentElement.outerHTML.slice(0, 1000), resources: performance.getEntriesByType('resource').map((entry) => ({ name: entry.name, duration: entry.duration, transferSize: entry.transferSize })) })`)
+    throw new Error(`${error instanceof Error ? error.message : String(error)}; browser=${JSON.stringify(browserDiagnostics)}; page=${diagnostics}`)
   }
 
   for (const width of [320, 360, 390]) {
