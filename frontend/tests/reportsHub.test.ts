@@ -694,7 +694,7 @@ test('the control row keeps every control at each width: nothing is dropped, not
   assert.ok(control.includes('{viewPicker}') && control.includes('{filtersButton}'), 'report option and Filters share one row')
   assert.ok(control.includes("trh('show', 'Show')"), 'Show shares the report option row')
   assert.ok(/titleControl: reportControlRow/.test(hub), 'every report view receives the same compound title row')
-  assert.match(hub, /const viewPicker = \(\s*<span className="reports-view-picker" title=\{selectedViewLabel\}>[\s\S]*?<AppSelect[\s\S]*?ariaLabel=\{`\$\{trh\('view', 'View'\)\}: \$\{selectedViewLabel\}`\}/, 'the fixed-width view picker retains keyboard semantics plus full selected-label tooltip and accessible name')
+  assert.match(hub, /const viewPicker = \(\s*<span className="reports-view-picker" style=\{\{ width: 'auto', flex: '1 1 0%' \}\} title=\{selectedViewLabel\}>[\s\S]*?<AppSelect[\s\S]*?ariaLabel=\{`\$\{trh\('view', 'View'\)\}: \$\{selectedViewLabel\}`\}/, 'the view picker consumes the header remainder while retaining keyboard semantics plus full selected-label tooltip and accessible name')
   assert.ok(/reports-mobile-primary">\{rangePicker\}/.test(hub), 'the compact primary row keeps only the range')
   assert.equal((hub.match(/titleControl: reportControlRow/g) || []).length, 1, 'the compound active title has one render reference')
   const frame = read('src/components/sales/reports/ReportFrame.tsx')
@@ -724,9 +724,10 @@ test('the control row keeps every control at each width: nothing is dropped, not
   // The date range is the widest control on a phone row; it only fits because
   // the trigger becomes a full-width field whose labels can truncate.
   assert.ok(hub.includes("triggerClassName={compact ? 'reports-mobile-range flex w-full min-w-0"), 'the range trigger goes full-width and shrinkable on phones')
+  assert.match(hub, /showQuickRanges=\{false\}/, 'Reports keeps its external quick-range rail without duplicating those presets inside the picker')
   const picker = read('src/components/shared/DateTimeRangePicker.tsx')
-  const spans = picker.match(/compactTriggerLabels \? 'shrink-0 whitespace-nowrap text-\[11px\]' : 'min-w-0 truncate'/g) || []
-  assert.equal(spans.length, 2, 'both endpoints retain shrinkable report labels and support untruncated compact toolbar labels')
+  assert.match(picker, /const triggerEndpoint = \(date: string, time: string\) => \([\s\S]*?grid min-w-0 justify-items-center whitespace-nowrap tabular-nums/, 'both picker endpoints share the shrinkable, fully visible trigger layout')
+  assert.match(picker, /\{triggerEndpoint\(startTriggerDate, value\.startTime \|\| '00:00'\)\}[\s\S]*?\{triggerEndpoint\(endTriggerDate, value\.endTime \|\| '23:59'\)\}/, 'the report trigger renders both complete endpoint labels through the shared layout')
 })
 
 // --- Part 586: density, and the Khmer line box ----------------------------

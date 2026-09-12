@@ -284,7 +284,7 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
   const viewOptions = views.map((v) => ({ value: v.id, label: trh(v.labelKey, v.fallback) }))
   const selectedViewLabel = String(viewOptions.find((option) => option.value === resolvedViewId)?.label ?? '')
   const viewPicker = (
-    <span className="reports-view-picker" title={selectedViewLabel}>
+    <span className="reports-view-picker" style={{ width: 'auto', flex: '1 1 0%' }} title={selectedViewLabel}>
       <AppSelect
         value={resolvedViewId || ''}
         options={viewOptions}
@@ -378,6 +378,7 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
       t={t}
       showTime={supportsTime}
       continuous
+      showQuickRanges={false}
       showCalendarIcon={false}
       triggerClassName={compact ? 'reports-mobile-range flex w-full min-w-0 items-center gap-2 rounded-md px-3 py-2' : undefined}
     />
