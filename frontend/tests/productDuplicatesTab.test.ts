@@ -53,12 +53,12 @@ test('N-row selections can open one durable paged review without replacing the l
 })
 
 test('independent removal is rendered only when the caller has product-delete authority', () => {
-  assert.match(src, /ProductDuplicatesTab\(\{ t, notify, canRemoveProduct \}/)
+  assert.match(src, /ProductDuplicatesTab\(\{ t, notify, canRemoveProduct, onMergeLeadingZero \}/)
   assert.match(src, /selected && canRemoveProduct \? \(/, 'the selected-row removal control is absent when deletion is unavailable')
   assert.match(src, /canRemoveProduct=\{canRemoveProduct\}/, 'every rendered cluster receives the same resolved delete capability')
   const products = readFileSync(join(here, '..', 'src', 'components', 'products', 'Products.tsx'), 'utf8')
   assert.match(products, /const canRemoveProduct = can\('products', 'delete'\)/)
-  assert.match(products, /<ProductDuplicatesTab t=\{t\} notify=\{notify\} canRemoveProduct=\{canRemoveProduct\}/)
+  assert.match(products, /<ProductDuplicatesTab\s+t=\{t\}\s+notify=\{notify\}\s+canRemoveProduct=\{canRemoveProduct\}\s+onMergeLeadingZero=\{openLeadingZeroMergeReview\}/)
 })
 
 test('global review freezes once, then reuses one apply receipt across bounded continuation', () => {

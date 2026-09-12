@@ -38,11 +38,13 @@ assert.equal(mergeDuplicateChunkCanContinueAutomatically({
 }), false, 'infrastructure interruption always requires manual resume')
 
 const previewLoaderStart = source.indexOf('const loadMergeDuplicatesPreview = async (signal: AbortSignal) => {')
-const previewLoaderEnd = source.indexOf('const handleMergeDuplicates = async () => {', previewLoaderStart)
+const previewLoaderEnd = source.indexOf('const handleLeadingZeroMerge = async () => {', previewLoaderStart)
 assert.ok(previewLoaderStart > 0 && previewLoaderEnd > previewLoaderStart, 'the preview loader exists as one bounded block')
 const previewLoader = source.slice(previewLoaderStart, previewLoaderEnd)
-assert.match(previewLoader, /validateMergeDuplicatesPreviewResponse\(\s*await productApi\.previewMergeDuplicates\(\{ signal \}\),?\s*\)/,
-  'a fresh scan must pass the raw response through strict validation')
+assert.match(previewLoader, /validateMergeDuplicatesPreviewResponse\(\s*await productApi\.previewMergeDuplicates\(\{ signal, \.\.\.\(mergeDuplicatesScope \? \{ scope: mergeDuplicatesScope \} : \{\}\) \}\),?\s*\)/,
+  'a fresh scan must pass the raw response through strict validation while preserving its selected scope')
+assert.match(previewLoader, /isActorReadScopeCurrent\(actorScope, false\)[\s\S]*previewGeneration !== leadingZeroPreviewGenerationRef\.current/,
+  'a preview may publish only for the same opaque actor authority and request generation')
 assert.doesNotMatch(previewLoader, /Number\(|Array\.isArray/,
   'the page cannot coerce malformed preview values into a confirmable shape')
 
@@ -111,8 +113,15 @@ assert.match(catchBlock, /catch \(reconciliationError\)/,
 assert.doesNotMatch(catchBlock, /productApi\.mergeDuplicates/,
   'unknown-outcome recovery never replays a merge write automatically')
 
-assert.match(source, /const active = mergeDuplicatesAbortRef\.current[\s\S]{0,100}active\?\.abort\(\)[\s\S]{0,120}setMergeDuplicatesReviewOpen\(false\)/,
-  'closing the modal aborts the active request and closes immediately')
+const modalCloseStart = source.indexOf('onClose={() => {', source.indexOf('<MergeDuplicatesReviewModal'))
+const modalCloseEnd = source.indexOf('onConfirm=', modalCloseStart)
+assert.ok(modalCloseStart > 0 && modalCloseEnd > modalCloseStart, 'the merge review close callback exists')
+const modalClose = source.slice(modalCloseStart, modalCloseEnd)
+assert.match(modalClose, /const active = mergeDuplicatesAbortRef\.current/)
+assert.match(modalClose, /leadingZeroRequestGenerationRef\.current \+= 1[\s\S]*leadingZeroPreviewGenerationRef\.current \+= 1/,
+  'closing invalidates both the write and preview generations before an old continuation can publish')
+assert.ok(modalClose.indexOf('active?.abort()') < modalClose.indexOf('setMergeDuplicatesReviewOpen(false)'),
+  'closing aborts the active request before closing immediately')
 assert.match(source, /mergeDuplicates: async \(options\)[\s\S]{0,260}merge\(options\)/,
   'the lazy ProductApi adapter forwards the request id and signal to the transport')
 
