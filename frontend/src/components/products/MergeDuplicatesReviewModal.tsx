@@ -82,6 +82,7 @@ interface MergeDuplicatesReviewModalProps {
   onLoadPreview: (signal: AbortSignal) => Promise<PreviewResult>
   recoveryNotice?: MergeDuplicatesRecoveryNotice | null
   working: boolean
+  scope?: 'leading_zero' | null
 }
 
 // Explains exactly what "Merge duplicate products" does, and (since part
@@ -90,7 +91,7 @@ interface MergeDuplicatesReviewModalProps {
 // (routes/products.ts), which reuses findDuplicateProductGroups without
 // acting on it. Each confirmed fold rechecks identity and source revisions in
 // its transaction; a changed case is refused and remains available to resume.
-export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLoadPreview, recoveryNotice, working }: MergeDuplicatesReviewModalProps) {
+export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLoadPreview, recoveryNotice, working, scope = null }: MergeDuplicatesReviewModalProps) {
   // t() returns the raw key itself (never undefined/empty) on a miss, so
   // `t(key) || fallback` never actually falls back -- same fix as
   // ProductDetailModal.tsx/ProductHistoryPreviewModal.tsx's T().
@@ -169,15 +170,19 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
   const canMerge = !recoveryNeedsPreview && !previewLoading && !previewError && mergeableDuplicateProductCount > 0
 
   return (
-    <Modal title={T('merge_duplicate_products', 'Merge duplicate products')} onClose={close} size="lg" unsavedChanges="read-only">
+    <Modal title={scope === 'leading_zero'
+      ? T('merge_leading_zero_products', 'Merge leading-zero barcode duplicates')
+      : T('merge_duplicate_products', 'Merge duplicate products')} onClose={close} size="lg" unsavedChanges="read-only">
       <div className="space-y-4 text-sm text-gray-700 dark:text-gray-300">
         <div className="flex items-start gap-3 rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-900/50 dark:bg-blue-950/20">
           <GitMerge className="mt-0.5 h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
           <p className="text-blue-800 dark:text-blue-300">
-            {T(
-              'merge_duplicates_summary',
-              'Scans every active product and folds branch-only duplicates -- rows that are identical in every identity field but landed in the catalog separately, usually from two import runs (e.g. one file per branch) that never saw each other -- into a single row.',
-            )}
+            {scope === 'leading_zero'
+              ? T('merge_leading_zero_summary', 'Only exact-name product pairs whose barcodes differ by leading zeros are eligible. Cross-name collisions, stock mismatches, changed links, and larger clusters remain quarantined.')
+              : T(
+                'merge_duplicates_summary',
+                'Scans every active product and folds branch-only duplicates -- rows that are identical in every identity field but landed in the catalog separately, usually from two import runs (e.g. one file per branch) that never saw each other -- into a single row.',
+              )}
           </p>
         </div>
 
@@ -444,7 +449,9 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
           >
             {working
               ? T('merge_duplicates_working', 'Merging...')
-              : T('merge_duplicates_confirm_count', 'Merge {products} product(s) now').replace('{products}', String(mergeableDuplicateProductCount))}
+              : scope === 'leading_zero'
+                ? T('merge_leading_zero_confirm', 'Merge reviewed leading-zero products').replace('{products}', String(mergeableDuplicateProductCount))
+                : T('merge_duplicates_confirm_count', 'Merge {products} product(s) now').replace('{products}', String(mergeableDuplicateProductCount))}
           </button>
           <button
             onClick={close}

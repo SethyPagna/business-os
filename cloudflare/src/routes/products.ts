@@ -3662,6 +3662,14 @@ async function readDuplicatePreviewCatalog(
 
 type DuplicateProductGroup = Awaited<ReturnType<typeof findDuplicateProductGroups>>[number]
 type LeadingZeroMergeManifestGroup = { keeper_id: number; member_ids: number[] }
+type LeadingZeroApprovedGraph = {
+  snapshot: ProductMergeCaseSnapshot
+  dependentLots: Map<number, ProductMergeLotSnapshot>
+  duplicateBatchRowsFull: ProductMergeCaseSnapshot['canonicalBatchRows']
+  duplicateBatchStockRows: Record<string, unknown>[]
+  saleAllocationRows: Array<{ id: number; batch_id: number }>
+  returnAllocationRows: Array<{ id: number; batch_id: number }>
+}
 
 const LEADING_ZERO_MERGE_SCOPE = 'leading_zero'
 const LEADING_ZERO_MERGE_MANIFEST_VERSION = 1
@@ -3714,6 +3722,7 @@ function hasCachedStockMismatch(group: DuplicateProductGroup, catalog: Duplicate
 function leadingZeroManifestState(
   groups: readonly DuplicateProductGroup[],
   catalog: DuplicatePreviewCatalog,
+  snapshots: Map<string, LeadingZeroApprovedGraph>,
 ): Record<string, unknown> {
   return {
     version: LEADING_ZERO_MERGE_MANIFEST_VERSION,
@@ -3722,6 +3731,7 @@ function leadingZeroManifestState(
       keeper_id: group.canonical.id,
       member_ids: [group.canonical.id, ...group.duplicates.map((member) => member.id)].sort((a, b) => a - b),
       identity_key: duplicateGroupIdentityKey(group),
+      graph: canonicalLeadingZeroGraphSnapshot(snapshots.get(productMergeCaseKey(group.canonical.id, group.duplicates[0].id))),
       members: [group.canonical, ...group.duplicates]
         .map((member) => {
           const money = catalog.moneyByProductId.get(member.id) || {}
@@ -3740,6 +3750,185 @@ function leadingZeroManifestState(
         .sort((a, b) => a.id - b.id),
     })),
   }
+}
+
+function canonicalLeadingZeroGraphSnapshot(value: LeadingZeroApprovedGraph | undefined): unknown {
+  if (!value) return null
+  const { snapshot, dependentLots } = value
+  const byId = <T extends { id?: unknown }>(rows: readonly T[]) => [...rows].sort((a, b) => Number(a.id) - Number(b.id))
+  const byBranch = <T extends { branch_id: number }>(rows: readonly T[]) => [...rows].sort((a, b) => Number(a.branch_id) - Number(b.branch_id))
+  return {
+    canonicalProduct: snapshot.canonicalProduct || null,
+    duplicateProduct: snapshot.duplicateProduct || null,
+    canonicalBatchRows: byId(snapshot.canonicalBatchRows),
+    canonicalBatchStockRows: byId(snapshot.canonicalBatchStockRows),
+    duplicateBatchRows: byId(value.duplicateBatchRowsFull),
+    duplicateBatchStockRows: byId(value.duplicateBatchStockRows),
+    saleAllocationRows: byId(value.saleAllocationRows),
+    returnAllocationRows: byId(value.returnAllocationRows),
+    canonicalStockBefore: byBranch(snapshot.canonicalStockBefore),
+    duplicateStockRows: byBranch(snapshot.duplicateStockRows),
+    canonicalImageRows: [...snapshot.canonicalImageRows].sort((a, b) => String(a.image_path).localeCompare(String(b.image_path))),
+    duplicateImageRows: [...snapshot.duplicateImageRows].sort((a, b) => String(a.image_path).localeCompare(String(b.image_path))),
+    reparentedByTable: [...snapshot.reparentedByTable].sort((a, b) => `${a.table}.${a.column}`.localeCompare(`${b.table}.${b.column}`))
+      .map((entry) => ({ ...entry, ids: [...entry.ids].sort((a, b) => a - b) })),
+    promotionRuleRows: byId(snapshot.promotionRuleRows.filter((row) => {
+      try {
+        return JSON.parse(String(row.product_ids || '[]'))
+          .some((id: unknown) => Number(id) === Number(snapshot.duplicateProduct?.id))
+      } catch { return false }
+    })),
+    childProductRows: byId(snapshot.childProductRows),
+    dependentLots: [...dependentLots].sort(([a], [b]) => a - b).map(([batchId, lot]) => ({
+      batchId,
+      duplicateStockRows: byBranch(lot.duplicateStockRows),
+      keeperStockBefore: byBranch(lot.keeperStockBefore),
+      saleAllocationIds: [...lot.saleAllocationIds].sort((a, b) => a - b),
+      returnAllocationIds: [...lot.returnAllocationIds].sort((a, b) => a - b),
+    })),
+  }
+}
+
+async function readLeadingZeroGraphSnapshots(
+  db: ReturnType<typeof getDb>,
+  groups: readonly DuplicateProductGroup[],
+): Promise<Map<string, LeadingZeroApprovedGraph>> {
+  const result = new Map<string, LeadingZeroApprovedGraph>()
+  for (const group of groups) {
+    if (group.duplicates.length !== 1) throw new Error('leading_zero_manifest_requires_pairs')
+    const duplicate = group.duplicates[0]
+    const snapshot = await readProductMergeCaseSnapshot(db, group.canonical.id, duplicate.id, MERGE_REPARENT_TABLES)
+    const dependentLots = await readProductMergeDependentLotSnapshots(db, snapshot, 'merge')
+    const duplicateBatchRowsFull = await db.prepare('SELECT * FROM product_batches WHERE variant_product_id=@id ORDER BY id')
+      .all<ProductMergeCaseSnapshot['canonicalBatchRows'][number]>({ id: duplicate.id })
+    const duplicateBatchStockRows = await db.prepare(`SELECT bbs.* FROM branch_batch_stock bbs
+      JOIN product_batches pb ON pb.id=bbs.batch_id WHERE pb.variant_product_id=@id ORDER BY bbs.id`)
+      .all<Record<string, unknown>>({ id: duplicate.id })
+    const saleAllocationRows = await db.prepare(`SELECT a.id,a.batch_id FROM sale_item_batch_allocations a JOIN product_batches pb ON pb.id=a.batch_id
+      WHERE pb.variant_product_id=@id ORDER BY a.id`).all<{ id: number; batch_id: number }>({ id: duplicate.id })
+    const returnAllocationRows = await db.prepare(`SELECT a.id,a.batch_id FROM return_item_batch_allocations a JOIN product_batches pb ON pb.id=a.batch_id
+      WHERE pb.variant_product_id=@id ORDER BY a.id`).all<{ id: number; batch_id: number }>({ id: duplicate.id })
+    result.set(productMergeCaseKey(group.canonical.id, duplicate.id), {
+      snapshot, dependentLots, duplicateBatchRowsFull, duplicateBatchStockRows, saleAllocationRows, returnAllocationRows,
+    })
+  }
+  return result
+}
+
+function exactIdSetAssertion(table: string, column: string, productId: number, ids: readonly number[]): AtomicMergeStatement {
+  return {
+    sql: `SELECT CASE WHEN (SELECT COUNT(*) FROM ${table} WHERE ${column}=@product)=json_array_length(json(@ids))
+      AND NOT EXISTS(SELECT 1 FROM json_each(json(@ids)) expected
+        WHERE NOT EXISTS(SELECT 1 FROM ${table} row WHERE row.${column}=@product AND row.id=CAST(expected.value AS INTEGER)))
+      THEN 1 ELSE json_extract('', '$') END AS leading_zero_link_guard`,
+    params: { product: productId, ids: JSON.stringify([...ids].sort((a, b) => a - b)) },
+  }
+}
+
+function batchAllocationAssertion(
+  table: 'sale_item_batch_allocations' | 'return_item_batch_allocations',
+  productId: number,
+  rows: readonly { id: number; batch_id: number }[],
+): AtomicMergeStatement {
+  return {
+    sql: `SELECT CASE WHEN (SELECT COUNT(*) FROM ${table} a JOIN product_batches pb ON pb.id=a.batch_id
+      WHERE pb.variant_product_id=@product)=json_array_length(json(@rows))
+      AND NOT EXISTS(SELECT 1 FROM json_each(json(@rows)) expected WHERE NOT EXISTS(
+        SELECT 1 FROM ${table} a JOIN product_batches pb ON pb.id=a.batch_id WHERE pb.variant_product_id=@product
+          AND a.id=json_extract(expected.value,'$.id') AND a.batch_id=json_extract(expected.value,'$.batch_id')))
+      THEN 1 ELSE json_extract('', '$') END AS leading_zero_allocation_guard`,
+    params: { product: productId, rows: JSON.stringify([...rows].sort((a, b) => a.id - b.id)) },
+  }
+}
+
+function leadingZeroScopeAtomicAssertions(
+  group: DuplicateProductGroup,
+  approved: LeadingZeroApprovedGraph,
+  cachedStockByProductId: Map<number, number>,
+): AtomicMergeStatement[] {
+  const duplicate = group.duplicates[0]
+  const snapshot = approved.snapshot
+  const productRows = [snapshot.canonicalProduct, snapshot.duplicateProduct].filter(Boolean) as ProductMergeCaseSnapshot['canonicalProduct'][]
+  const productState = productRows.map((row) => ({
+    id: row!.id, name: row!.name, barcode: row!.barcode, image_path: row!.image_path ?? null,
+    is_active: row!.is_active, updated_at: row!.updated_at, stock_quantity: cachedStockByProductId.get(row!.id) || 0,
+    ...Object.fromEntries([...MERGE_COST_FIELDS, ...MERGE_PRICE_FIELDS].map((field) => [field, row![field] ?? null])),
+  }))
+  const assertions: AtomicMergeStatement[] = [{
+    sql: `SELECT CASE WHEN
+      (SELECT COUNT(*) FROM products p WHERE p.is_active=1 AND COALESCE(p.is_group,0)=0
+        AND ${identityBarcodeKeySql('p.barcode')}=@folded)=json_array_length(json(@memberIds))
+      AND NOT EXISTS(SELECT 1 FROM json_each(json(@memberIds)) expected WHERE NOT EXISTS(
+        SELECT 1 FROM products p WHERE p.id=CAST(expected.value AS INTEGER) AND p.is_active=1
+          AND p.name_key=@nameKey AND ${identityBarcodeKeySql('p.barcode')}=@folded))
+      THEN 1 ELSE json_extract('', '$') END AS leading_zero_identity_guard`,
+    params: {
+      folded: identityBarcodeKey(group.canonical.barcode),
+      nameKey: normalizeProductGroupName(group.canonical.name),
+      memberIds: JSON.stringify([group.canonical.id, duplicate.id].sort((a, b) => a - b)),
+    },
+  }, {
+    sql: `SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM json_each(json(@rows)) expected WHERE NOT EXISTS(
+      SELECT 1 FROM products p WHERE p.id=json_extract(expected.value,'$.id')
+        AND p.name IS json_extract(expected.value,'$.name') AND p.barcode IS json_extract(expected.value,'$.barcode')
+        AND p.image_path IS json_extract(expected.value,'$.image_path') AND p.is_active IS json_extract(expected.value,'$.is_active')
+        AND p.updated_at IS json_extract(expected.value,'$.updated_at') AND p.stock_quantity IS json_extract(expected.value,'$.stock_quantity')
+        ${[...MERGE_COST_FIELDS, ...MERGE_PRICE_FIELDS].map((field) => `AND p.${field} IS json_extract(expected.value,'$.${field}')`).join('\n        ')}
+    )) THEN 1 ELSE json_extract('', '$') END AS leading_zero_product_guard`,
+    params: { rows: JSON.stringify(productState) },
+  }, {
+    sql: `SELECT CASE WHEN
+      NOT EXISTS(SELECT 1 FROM transfer_operation_members
+        WHERE source_product_id IN (@keeper,@duplicate) OR destination_product_id IN (@keeper,@duplicate))
+      AND NOT EXISTS(SELECT 1 FROM stock_session_members sm JOIN stock_session_operations so ON so.id=sm.operation_id
+        JOIN action_history sh ON sh.id=so.history_id
+        WHERE sm.product_id IN (@keeper,@duplicate) AND sh.status IN ('undoable','redoable'))
+      THEN 1 ELSE json_extract('', '$') END AS leading_zero_authority_guard`,
+    params: { keeper: group.canonical.id, duplicate: duplicate.id },
+  },
+  productConflictActionStockStateAssertion(group.canonical.id, snapshot.canonicalStockBefore),
+  productConflictActionStockStateAssertion(duplicate.id, snapshot.duplicateStockRows),
+  productConflictActionKeeperLotStateAssertion(group.canonical.id, snapshot),
+  productConflictActionKeeperLotStateAssertion(duplicate.id, {
+    ...snapshot,
+    canonicalBatchRows: approved.duplicateBatchRowsFull,
+    canonicalBatchStockRows: approved.duplicateBatchStockRows as ProductMergeCaseSnapshot['canonicalBatchStockRows'],
+  }),
+  {
+    sql: `SELECT CASE WHEN
+      (SELECT COUNT(*) FROM product_images WHERE product_id=@keeper)=json_array_length(json(@keeperImages))
+      AND (SELECT COUNT(*) FROM product_images WHERE product_id=@duplicate)=json_array_length(json(@duplicateImages))
+      AND NOT EXISTS(SELECT 1 FROM json_each(json(@keeperImages)) expected WHERE NOT EXISTS(
+        SELECT 1 FROM product_images pi WHERE pi.product_id=@keeper AND pi.image_path=json_extract(expected.value,'$.image_path')))
+      AND NOT EXISTS(SELECT 1 FROM json_each(json(@duplicateImages)) expected WHERE NOT EXISTS(
+        SELECT 1 FROM product_images pi WHERE pi.product_id=@duplicate AND pi.image_path=json_extract(expected.value,'$.image_path')
+          AND pi.sort_order IS json_extract(expected.value,'$.sort_order')))
+      THEN 1 ELSE json_extract('', '$') END AS leading_zero_image_guard`,
+    params: { keeper: group.canonical.id, duplicate: duplicate.id,
+      keeperImages: JSON.stringify(snapshot.canonicalImageRows), duplicateImages: JSON.stringify(snapshot.duplicateImageRows) },
+  },
+  exactIdSetAssertion('products', 'parent_id', duplicate.id, snapshot.childProductRows.map((row) => Number(row.id))),
+  ]
+  for (const { table, column } of MERGE_REPARENT_TABLES) {
+    const ids = snapshot.reparentedByTable.find((entry) => entry.table === table && entry.column === column)?.ids || []
+    assertions.push(exactIdSetAssertion(table, column, duplicate.id, ids))
+  }
+  const relevantPromotionRules = snapshot.promotionRuleRows.filter((row) => {
+    try { return JSON.parse(String(row.product_ids || '[]')).some((id: unknown) => Number(id) === duplicate.id) } catch { return false }
+  })
+  assertions.push({
+    sql: `SELECT CASE WHEN
+      (SELECT COUNT(*) FROM promotion_rules pr WHERE json_valid(pr.product_ids)
+        AND EXISTS(SELECT 1 FROM json_each(pr.product_ids) item WHERE CAST(item.value AS INTEGER)=@duplicate))=json_array_length(json(@rules))
+      AND NOT EXISTS(SELECT 1 FROM json_each(json(@rules)) expected WHERE NOT EXISTS(
+        SELECT 1 FROM promotion_rules pr WHERE pr.id=json_extract(expected.value,'$.id')
+          AND pr.product_ids IS json_extract(expected.value,'$.product_ids')))
+      THEN 1 ELSE json_extract('', '$') END AS leading_zero_promotion_guard`,
+    params: { duplicate: duplicate.id, rules: JSON.stringify(relevantPromotionRules) },
+  })
+  assertions.push(batchAllocationAssertion('sale_item_batch_allocations', duplicate.id, approved.saleAllocationRows))
+  assertions.push(batchAllocationAssertion('return_item_batch_allocations', duplicate.id, approved.returnAllocationRows))
+  return assertions
 }
 
 function parseLeadingZeroManifestGroups(value: unknown): LeadingZeroMergeManifestGroup[] | null {
@@ -3859,6 +4048,9 @@ app.get('/merge-duplicates/preview', async (c) => {
         }] : scope && hasCachedStockMismatch(group, previewCatalog) ? [{
           code: 'cached_stock_mismatch',
           error: 'Cached product stock does not match branch stock. Reconcile stock before merging this group.',
+        }] : scope && group.duplicates.length !== 1 ? [{
+          code: 'leading_zero_pair_manifest_required',
+          error: 'This leading-zero cluster has more than two rows and remains quarantined for a dedicated group review.',
         }] : []
       const mergeBlockers = scopedMergeBlockers.length ? scopedMergeBlockers : previewCatalog.planHistoryUnavailable ? [{
           code: 'merge_plan_history_unavailable',
@@ -3908,10 +4100,11 @@ app.get('/merge-duplicates/preview', async (c) => {
       duplicateCount += group.duplicates.length
     }
   }
+  const manifestSnapshots = scope ? await readLeadingZeroGraphSnapshots(db, manifestGroups) : new Map<string, LeadingZeroApprovedGraph>()
   const applyManifest = scope ? {
     scope,
     manifest_version: LEADING_ZERO_MERGE_MANIFEST_VERSION,
-    manifest_digest: await productConflictSha256(leadingZeroManifestState(manifestGroups, previewCatalog)),
+    manifest_digest: await productConflictSha256(leadingZeroManifestState(manifestGroups, previewCatalog, manifestSnapshots)),
     groups: [...manifestGroups].sort((a, b) => a.canonical.id - b.canonical.id).map((group) => ({
       keeper_id: group.canonical.id,
       member_ids: [group.canonical.id, ...group.duplicates.map((member) => member.id)].sort((a, b) => a - b),
@@ -4086,6 +4279,9 @@ app.post('/merge-duplicates', async (c) => {
   const requestStartedAt = Date.now()
   const detectedGroups = await findDuplicateProductGroups(db)
   let groups = detectedGroups
+  const scopedApprovedGraphs = new Map<number, LeadingZeroApprovedGraph>()
+  const scopedApprovedPlans = new Map<number, { plan: ProductMergeClusterPlan; resumed: boolean }>()
+  let scopedCatalogForAtomic: DuplicatePreviewCatalog | null = null
   if (scope) {
     const leadingZeroGroups = detectedGroups.filter(isLeadingZeroDuplicateGroup)
     const byKeeperId = new Map(leadingZeroGroups.map((group) => [group.canonical.id, group]))
@@ -4102,6 +4298,7 @@ app.post('/merge-duplicates', async (c) => {
       requestedGroups.push(group)
     }
     const scopedCatalog = await readDuplicatePreviewCatalog(db, requestedGroups)
+    scopedCatalogForAtomic = scopedCatalog
     const crossNameCollisionKeys = await readLeadingZeroCrossNameCollisionKeys(db, requestedGroups)
     if (requestedGroups.some((group) => crossNameCollisionKeys.has(identityBarcodeKey(group.canonical.barcode)))) {
       return c.json({ success: false, error: 'A folded barcode now belongs to more than one exact product name. Nothing was merged.' }, 409)
@@ -4109,9 +4306,27 @@ app.post('/merge-duplicates', async (c) => {
     if (requestedGroups.some((group) => hasCachedStockMismatch(group, scopedCatalog))) {
       return c.json({ success: false, error: 'Cached product stock no longer matches branch stock. Nothing was merged.' }, 409)
     }
-    const currentDigest = await productConflictSha256(leadingZeroManifestState(requestedGroups, scopedCatalog))
+    const scopedSnapshots = await readLeadingZeroGraphSnapshots(db, requestedGroups)
+    const currentDigest = await productConflictSha256(leadingZeroManifestState(requestedGroups, scopedCatalog, scopedSnapshots))
     if (currentDigest !== scopedManifestDigest) {
       return c.json({ success: false, error: 'The leading-zero merge preview is stale. Refresh it; nothing was merged.' }, 409)
+    }
+    for (const group of requestedGroups) {
+      const graph = scopedSnapshots.get(productMergeCaseKey(group.canonical.id, group.duplicates[0].id))
+      if (!graph) return c.json({ success: false, error: 'The leading-zero merge graph is incomplete. Nothing was merged.' }, 409)
+      scopedApprovedGraphs.set(group.canonical.id, graph)
+      const ids = [group.canonical.id, ...group.duplicates.map((member) => member.id)]
+      const moneyRows = ids.map((id) => scopedCatalog.moneyByProductId.get(id)).filter((row): row is Record<string, unknown> => !!row)
+      if (moneyRows.length !== ids.length) return c.json({ success: false, error: 'The leading-zero merge pricing is incomplete. Nothing was merged.' }, 409)
+      const identityKey = duplicateGroupIdentityKey(group)
+      const persistedPlan = selectAppliedBulkClusterPlan(
+        scopedCatalog.appliedPlansByKeeperId.get(group.canonical.id) || [], group.canonical.id, identityKey,
+        group.duplicates.map((member) => member.id),
+      )
+      scopedApprovedPlans.set(group.canonical.id, {
+        plan: persistedPlan || createProductMergeClusterPlan(identityKey, group.canonical.id, moneyRows),
+        resumed: Boolean(persistedPlan),
+      })
     }
     groups = requestedGroups
   }
@@ -4243,29 +4458,53 @@ app.post('/merge-duplicates', async (c) => {
       continue
     }
     const identityKey = JSON.stringify([normalizeProductGroupName(canonicalName), identityBarcodeKey(group.canonical.barcode)])
-    const persistedPlanLookup = await readAppliedBulkClusterPlan(db, canonicalId, identityKey, group.duplicates.map((dup) => dup.id))
-    if (persistedPlanLookup.unavailable) {
-      for (const dup of group.duplicates) refusals.push({
-        caseKey: productMergeCaseKey(canonicalId, dup.id), keeperId: canonicalId,
-        mergedId: dup.id, mergedName: dup.name, code: 'merge_plan_history_unavailable',
-        error: 'Saved merge-plan history could not be read within its safety limit. This whole group remains unchanged until the history is repaired or reconciled.',
-      })
-      continue
-    }
-    const persistedPlan = persistedPlanLookup.plan
     let clusterPlan: ProductMergeClusterPlan
-    if (persistedPlan) {
+    // Legacy path equivalence retained: resumedCluster: Boolean(persistedPlan).
+    // Scoped manifests carry that same fact in their approved-plan record.
+    let resumedCluster = false
+    if (scope) {
+      const approved = scopedApprovedPlans.get(canonicalId)
+      if (!approved) {
+        for (const dup of group.duplicates) refusals.push({ caseKey: productMergeCaseKey(canonicalId, dup.id), keeperId: canonicalId, mergedId: dup.id, mergedName: dup.name, code: 'merge_state_conflict', error: 'The approved leading-zero plan is unavailable; nothing was merged.' })
+        continue
+      }
       const currentById = new Map(moneyRows.map((row) => [Number(row.id), row]))
-      const hasOutsider = ids.some((id) => !persistedPlan.memberIds.includes(id))
-      const keeperMatches = productMergePlanKeeperMatches(persistedPlan, currentById.get(canonicalId) || {})
-      const sourcesMatch = group.duplicates.every((dup) => productMergePlanSourceMemberMatches(persistedPlan, currentById.get(dup.id) || {}))
+      const hasOutsider = ids.some((id) => !approved.plan.memberIds.includes(id))
+      const keeperMatches = approved.resumed
+        ? productMergePlanKeeperMatches(approved.plan, currentById.get(canonicalId) || {})
+        : productMergePlanSourceMemberMatches(approved.plan, currentById.get(canonicalId) || {})
+      const sourcesMatch = group.duplicates.every((dup) => productMergePlanSourceMemberMatches(approved.plan, currentById.get(dup.id) || {}))
       if (hasOutsider || !keeperMatches || !sourcesMatch) {
         for (const dup of group.duplicates) refusals.push({ caseKey: productMergeCaseKey(canonicalId, dup.id), keeperId: canonicalId, mergedId: dup.id, mergedName: dup.name, code: 'merge_cluster_plan_conflict', error: 'This partially saved identity group changed after its original plan. Review it before resuming; no further member was merged.' })
         continue
       }
-      clusterPlan = persistedPlan
+      clusterPlan = approved.plan
+      resumedCluster = approved.resumed
     } else {
-      clusterPlan = createProductMergeClusterPlan(identityKey, canonicalId, moneyRows)
+      const persistedPlanLookup = await readAppliedBulkClusterPlan(db, canonicalId, identityKey, group.duplicates.map((dup) => dup.id))
+      if (persistedPlanLookup.unavailable) {
+        for (const dup of group.duplicates) refusals.push({
+          caseKey: productMergeCaseKey(canonicalId, dup.id), keeperId: canonicalId,
+          mergedId: dup.id, mergedName: dup.name, code: 'merge_plan_history_unavailable',
+          error: 'Saved merge-plan history could not be read within its safety limit. This whole group remains unchanged until the history is repaired or reconciled.',
+        })
+        continue
+      }
+      const persistedPlan = persistedPlanLookup.plan
+      if (persistedPlan) {
+        const currentById = new Map(moneyRows.map((row) => [Number(row.id), row]))
+        const hasOutsider = ids.some((id) => !persistedPlan.memberIds.includes(id))
+        const keeperMatches = productMergePlanKeeperMatches(persistedPlan, currentById.get(canonicalId) || {})
+        const sourcesMatch = group.duplicates.every((dup) => productMergePlanSourceMemberMatches(persistedPlan, currentById.get(dup.id) || {}))
+        if (hasOutsider || !keeperMatches || !sourcesMatch) {
+          for (const dup of group.duplicates) refusals.push({ caseKey: productMergeCaseKey(canonicalId, dup.id), keeperId: canonicalId, mergedId: dup.id, mergedName: dup.name, code: 'merge_cluster_plan_conflict', error: 'This partially saved identity group changed after its original plan. Review it before resuming; no further member was merged.' })
+          continue
+        }
+        clusterPlan = persistedPlan
+        resumedCluster = true
+      } else {
+        clusterPlan = createProductMergeClusterPlan(identityKey, canonicalId, moneyRows)
+      }
     }
     const economics = resolveProductMergeClusterPlanEconomics(clusterPlan)
     if (economics.issues.length) {
@@ -4290,7 +4529,18 @@ app.post('/merge-duplicates', async (c) => {
           'bounded duplicate cleanup',
           'merge',
           economics,
-          { operationId, bulkClusterPlan: clusterPlan, resumedCluster: Boolean(persistedPlan) || mergedIds.length > 0 },
+          {
+            operationId,
+            bulkClusterPlan: clusterPlan,
+            resumedCluster: resumedCluster || mergedIds.length > 0,
+            ...(scope ? {
+              preparedSnapshot: scopedApprovedGraphs.get(canonicalId)?.snapshot,
+              preparedDependentLotSnapshots: scopedApprovedGraphs.get(canonicalId)?.dependentLots,
+              preStatements: scopedApprovedGraphs.has(canonicalId)
+                ? leadingZeroScopeAtomicAssertions(group, scopedApprovedGraphs.get(canonicalId)!, scopedCatalogForAtomic!.cachedStockByProductId)
+                : [],
+            } : {}),
+          },
         )
         if (result.actionHistoryId) actionHistoryIds.push(result.actionHistoryId)
         if (result.operationId) mergeOperationIds.push(result.operationId)

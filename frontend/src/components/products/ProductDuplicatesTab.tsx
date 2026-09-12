@@ -313,10 +313,11 @@ function ClusterCard({
   )
 }
 
-export default function ProductDuplicatesTab({ t, notify, canRemoveProduct }: {
+export default function ProductDuplicatesTab({ t, notify, canRemoveProduct, onMergeLeadingZero }: {
   t: TranslateFn
   notify: NotifyFn
   canRemoveProduct: boolean
+  onMergeLeadingZero?: () => void
 }) {
   const [clusters, setClusters] = useState<Cluster[]>([])
   const [loading, setLoading] = useState(false)
@@ -963,6 +964,17 @@ export default function ProductDuplicatesTab({ t, notify, canRemoveProduct }: {
           <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
           {t('refresh') || 'Refresh'}
         </button>
+        {onMergeLeadingZero && counts.leading_zero > 0 ? (
+          <button
+            type="button"
+            onClick={onMergeLeadingZero}
+            disabled={loading || bulkBusy}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+          >
+            <Merge className="h-3.5 w-3.5" />
+            {t('merge_leading_zero_products') || 'Merge leading-zero barcodes'}
+          </button>
+        ) : null}
       </div>
 
       {loading && !loaded ? (
