@@ -22,6 +22,15 @@ assert.equal(imports.normalizeImportCost4('0.00015'), 0.0002)
 assert.equal(imports.normalizeImportMoney('1.2345'), 1.24, 'legacy sale-import callers remain unchanged in StageA')
 assert.equal(imports.normalizeImportSellingPrice('1.2345'), 1.24)
 const { resolveMovementCostSnapshot: snapshot } = load('lib/movementCostSnapshot.ts')
+assert.deepEqual(snapshot({ quantity: 1e-10, fallbackUnitCostUsd: 12345678 }), {
+  unitCostUsd: 12345678, totalCostUsd: .0012, unitCostKhr: null, totalCostKhr: null,
+}, 'a tiny positive movement is still valued, and unknown currency remains NULL')
+assert.deepEqual(snapshot({ quantity: 1, components: [{ quantity: .9999999995, unitCostUsd: 0 }], fallbackUnitCostUsd: 1e11 }), {
+  unitCostUsd: 50, totalCostUsd: 50, unitCostKhr: null, totalCostKhr: null,
+}, 'every positive decimal remainder is valued exactly even below the old tolerance')
+assert.equal(snapshot({ quantity: 1, components: [{ quantity: .9999999995, unitCostUsd: 0 }] }).totalCostUsd, null, 'unpriced tiny remainder keeps currency unknown')
+assert.throws(() => snapshot({ quantity: 1, components: [{ quantity: 1.0000000001, unitCostUsd: 0 }] }), /cannot exceed/)
+assert.equal(snapshot({ quantity: .3, components: [{ quantity: .1, unitCostUsd: 1 }, { quantity: .2, unitCostUsd: 1 }] }).totalCostUsd, .3, 'exact decimal coverage does not falsely reject binary 0.1+0.2')
 assert.equal(snapshot({ quantity: .5, fallbackUnitCostUsd: .0003 }).totalCostUsd, .0002)
 assert.equal(snapshot({ quantity: .5, fallbackUnitCostUsd: .0001 }).unitCostUsd, .0001, 'authoritative unit is not back-calculated from rounded total')
 assert.equal(snapshot({ quantity: .5, fallbackUnitCostUsd: .0001 }).totalCostUsd, .0001)
