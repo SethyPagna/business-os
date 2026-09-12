@@ -348,12 +348,26 @@ runTest('the range picker exposes the exact ordered presets above the date field
   assert.match(source, /const applyQuickRange = \(preset: StatsPresetKey\) => \{[\s\S]*?const next = statsPresetRange\(preset\)[\s\S]*?onChange\(showTime \? next : \{ \.\.\.next, startTime: '', endTime: '' \}, preset\)/, 'a preset must return the complete canonical range with its exact identity')
   assert.match(source, /onClick=\{\(\) => applyQuickRange\(preset\.id\)\}/, 'each rendered preset must commit its own identity')
   assert.match(source, /onClick=\{\(\) => onChange\(\{ \.\.\.EMPTY_DATE_TIME_RANGE \}, 'all'\)\}/, 'Clear must return the complete empty range with all-time identity')
+  assert.match(source, /showQuickRanges = true/, 'direct picker callers retain the internal presets by default')
+  assert.match(source, /\{showQuickRanges \? <div[^>]*data-date-time-range-presets/, 'a host with external presets can explicitly suppress only the duplicate internal rail')
 
   const renderedPresets = source.indexOf('{quickRanges.map((preset) => (')
   const renderedStart = source.indexOf("{renderEndpointBox('start')}")
   const renderedEnd = source.indexOf("{renderEndpointBox('end')}")
   assert.ok(renderedPresets >= 0 && renderedPresets < renderedStart, 'presets must render above the Start field')
   assert.ok(renderedPresets < renderedEnd, 'presets must render above the End field')
+})
+
+runTest('the range panel is viewport-bound and offers separate month and year navigation', () => {
+  const source = read('components/shared/DateTimeRangePicker.tsx')
+  assert.match(source, /createPortal\([\s\S]*document\.body/, 'the panel must escape clipped and sticky report ancestors')
+  assert.match(source, /data-date-time-range-panel/)
+  assert.match(source, /className="fixed[^"\n]*overflow-y-auto[^"\n]*overscroll-contain/, 'a tall panel must scroll inside the visible viewport')
+  assert.match(source, /window\.addEventListener\('scroll', position, true\)/, 'the portaled panel follows a scrolling trigger')
+  assert.match(source, /panelRef\.current\?\.contains/, 'clicking the portaled panel must not trip the outside-click closer')
+  assert.match(source, /data-date-range-nav="previous-year"[\s\S]*data-date-range-nav="previous-month"[\s\S]*data-date-range-nav="next-month"[\s\S]*data-date-range-nav="next-year"/, 'double-year and single-month controls retain their visual order')
+  assert.match(source, /const stepViewYear = \(delta: number\) => setViewYear\(\(year\) => year \+ delta\)/)
+  assert.doesNotMatch(source, /aria-label="(?:Previous|Next) month"/, 'calendar navigation labels must use the language pack')
 })
 
 runTest('the normalizer and the field are both reachable from one place', () => {
