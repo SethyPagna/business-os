@@ -102,5 +102,106 @@ assert.match(productsSource, /previewMergeDuplicates\(\{ signal: controller\.sig
 assert.match(productsSource, /result\?\.interrupted \|\| Number\(result\?\.undoPendingCount/)
 assert.match(productsSource, /result\?\.refusals\?\.length/)
 assert.match(productsSource, /setMergeDuplicatesScope\(null\)/)
+assert.match(productsSource, /isActorReadScopeCurrent\(actorScope, false\)/)
+assert.match(productsSource, /requestGeneration === leadingZeroRequestGenerationRef\.current/)
+
+const productsAst = ts.createSourceFile('Products.tsx', productsSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+let leadingZeroHandlerSource = ''
+function findLeadingZeroHandler(node: ts.Node): void {
+  if (ts.isVariableDeclaration(node) && node.name.getText(productsAst) === 'handleLeadingZeroMerge') {
+    leadingZeroHandlerSource = node.initializer?.getText(productsAst) || ''
+  }
+  ts.forEachChild(node, findLeadingZeroHandler)
+}
+findLeadingZeroHandler(productsAst)
+assert.ok(leadingZeroHandlerSource)
+const compiledHandler = ts.transpileModule(`const handler = ${leadingZeroHandlerSource};`, {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+}).outputText
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (error: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
+function callbackHarness(writeReply: () => Promise<any>, refreshReply = async () => ({ ...validPreview, groups: [], applyManifest: { ...validPreview.applyManifest, groups: [] } })) {
+  let actor = 'admin-session'
+  const events: Array<[string, string, unknown?]> = []
+  const reads: string[] = []
+  const generationRef = { current: 0 }
+  const deps: Record<string, any> = {
+    mergeDuplicatesBusy: false,
+    leadingZeroWriteInFlightRef: { current: false },
+    mergeDuplicatesScope: 'leading_zero',
+    leadingZeroConfirmedGroupsRef: { current: new Map([[2, '1,2']]) },
+    leadingZeroManifestRef: { current: validPreview.applyManifest },
+    leadingZeroRequestGenerationRef: generationRef,
+    mergeDuplicatesAbortRef: { current: null },
+    AbortController,
+    captureActorReadScope: () => ({ authority: actor }),
+    isActorReadScopeCurrent: (scope: { authority: string }) => scope.authority === actor,
+    productApi: {
+      mergeDuplicates: writeReply,
+      previewMergeDuplicates: async () => { reads.push(actor); return refreshReply() },
+      invalidateProductReadCacheForReconciliation: async () => { events.push(['invalidate', actor]) },
+    },
+    validateMergeDuplicatesPreviewResponse: responseModule.validateMergeDuplicatesPreviewResponse,
+    t: () => '',
+    getErrorMessage: (error: Error) => error.message,
+    load: async () => { events.push(['load', actor]) },
+    notify: () => { events.push(['notify', actor]) },
+  }
+  for (const name of ['setMergeDuplicatesBusy', 'setMergeDuplicatesReviewOpen', 'setMergeDuplicatesScope', 'setMergeDuplicatesRecovery']) {
+    deps[name] = (value: unknown) => { events.push([name, actor, value]) }
+  }
+  const handler = new Function(...Object.keys(deps), `${compiledHandler}; return handler`)(...Object.values(deps)) as () => Promise<void>
+  return { handler, events, reads, generationRef, switchActor: () => { actor = 'employee-session' } }
+}
+
+{
+  const late = deferred<any>()
+  const harness = callbackHarness(() => late.promise)
+  const running = harness.handler()
+  harness.switchActor()
+  late.resolve({ success: true, mergedGroups: 1, mergedProducts: 1 })
+  await running
+  assert.deepEqual(harness.reads, [])
+  assert.deepEqual(harness.events.filter((event) => event[1] === 'employee-session'), [])
+}
+{
+  const late = deferred<any>()
+  const harness = callbackHarness(() => late.promise)
+  const running = harness.handler()
+  harness.switchActor()
+  late.reject(new Error('lost reply'))
+  await running
+  assert.deepEqual(harness.reads, [])
+  assert.deepEqual(harness.events.filter((event) => event[1] === 'employee-session'), [])
+}
+{
+  const latePreview = deferred<any>()
+  const harness = callbackHarness(async () => ({ success: true, mergedGroups: 1, mergedProducts: 1 }), () => latePreview.promise)
+  const running = harness.handler()
+  await new Promise((resolve) => setImmediate(resolve))
+  harness.switchActor()
+  latePreview.resolve({ ...validPreview, groups: [], applyManifest: { ...validPreview.applyManifest, groups: [] } })
+  await running
+  assert.deepEqual(harness.events.filter((event) => event[1] === 'employee-session'), [])
+}
+{
+  const late = deferred<any>()
+  const harness = callbackHarness(() => late.promise)
+  const running = harness.handler()
+  harness.generationRef.current += 1
+  late.resolve({ success: true, mergedGroups: 1, mergedProducts: 1 })
+  await running
+  assert.deepEqual(harness.reads, [])
+  assert.equal(harness.events.filter((event) => event[0] === 'setMergeDuplicatesBusy').length, 1)
+}
 
 console.log('leadingZeroMergeUi: all checks passed')

@@ -63,6 +63,7 @@ import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.
 import { createLongPressHandlers, createLongPressState, consumeLongPressClick } from '../../utils/longPress.ts'
 import type { LongPressState } from '../../utils/longPress.ts'
 import { isApiVersionMismatchError } from '../../api/http.ts'
+import { captureActorReadScope, isActorReadScopeCurrent } from '../../api/actorReadScope.ts'
 import { mergeDuplicateChunkCanContinueAutomatically, mergeDuplicateChunkRequiresManualResume } from './mergeDuplicatesRun.ts'
 import { getKhmerTextProps, withKhmerTextClass } from '../../utils/scriptTypography.ts'
 import {
@@ -983,6 +984,20 @@ function ProductsFullEditor() {
   const leadingZeroManifestRef = useRef<ValidatedLeadingZeroMergeManifest | null>(null)
   const leadingZeroConfirmedGroupsRef = useRef<Map<number, string> | null>(null)
   const leadingZeroWriteInFlightRef = useRef(false)
+  const leadingZeroRequestGenerationRef = useRef(0)
+  const leadingZeroPreviewGenerationRef = useRef(0)
+  const leadingZeroActorAuthority = captureActorReadScope('products:leading-zero-merge').authority
+  useEffect(() => {
+    leadingZeroRequestGenerationRef.current += 1
+    leadingZeroPreviewGenerationRef.current += 1
+    mergeDuplicatesAbortRef.current?.abort()
+    mergeDuplicatesAbortRef.current = null
+    leadingZeroWriteInFlightRef.current = false
+    setMergeDuplicatesBusy(false)
+    setMergeDuplicatesReviewOpen(false)
+    setMergeDuplicatesScope(null)
+    setMergeDuplicatesRecovery(null)
+  }, [leadingZeroActorAuthority])
   // Exact-duplicate (same real barcode + same name) flagging for the list
   // rows -- user spec item #3. Single source of truth is the server sweep
   // the Duplicates review tab already uses (see utils/exactDuplicateProducts).
@@ -1982,6 +1997,8 @@ function ProductsFullEditor() {
 
   const openLeadingZeroMergeReview = () => {
     if (mergeDuplicatesBusy) return
+    leadingZeroRequestGenerationRef.current += 1
+    leadingZeroPreviewGenerationRef.current += 1
     leadingZeroManifestRef.current = null
     leadingZeroConfirmedGroupsRef.current = null
     setMergeDuplicatesRecovery(null)
@@ -1998,9 +2015,14 @@ function ProductsFullEditor() {
   // there's one place (the ProductApi type above) that has to know the
   // transport layer exists.
   const loadMergeDuplicatesPreview = async (signal: AbortSignal) => {
+    const actorScope = captureActorReadScope('products:leading-zero-merge')
+    const previewGeneration = ++leadingZeroPreviewGenerationRef.current
     const preview = validateMergeDuplicatesPreviewResponse(
       await productApi.previewMergeDuplicates({ signal, ...(mergeDuplicatesScope ? { scope: mergeDuplicatesScope } : {}) }),
     )
+    if (!isActorReadScopeCurrent(actorScope, false) || previewGeneration !== leadingZeroPreviewGenerationRef.current) {
+      throw Object.assign(new Error('Preview belongs to an earlier account or request.'), { name: 'AbortError', code: 'stale_read_scope' })
+    }
     if (mergeDuplicatesScope === 'leading_zero') {
       leadingZeroManifestRef.current = preview.applyManifest || null
       if (!leadingZeroConfirmedGroupsRef.current) {
@@ -2019,6 +2041,13 @@ function ProductsFullEditor() {
     if (!initialAllowed || !manifest?.groups.length) return
     const controller = new AbortController()
     mergeDuplicatesAbortRef.current = controller
+    const actorScope = captureActorReadScope('products:leading-zero-merge')
+    const requestGeneration = ++leadingZeroRequestGenerationRef.current
+    const requestIsCurrent = () => (
+      requestGeneration === leadingZeroRequestGenerationRef.current
+      && mergeDuplicatesAbortRef.current === controller
+      && isActorReadScopeCurrent(actorScope, false)
+    )
     const requestId = `product-leading-zero-merge_${globalThis.crypto?.randomUUID?.() || `${Date.now()}_${Math.random().toString(36).slice(2)}`}`
     let mergedGroups = 0
     let mergedProducts = 0
@@ -2034,6 +2063,7 @@ function ProductsFullEditor() {
           throw new Error(t('merge_leading_zero_scope_changed') || 'The leading-zero candidate set changed. Review it again before continuing.')
         }
         const result = await productApi.mergeDuplicates({ requestId, signal: controller.signal, manifest }) as MergeDuplicateProductsResult | undefined
+        if (!requestIsCurrent()) return
         if (result?.success === false) throw new Error(result.error || 'Failed to merge leading-zero barcode duplicates')
         mergedGroups += Math.max(0, Number(result?.mergedGroups || 0))
         mergedProducts += Math.max(0, Number(result?.mergedProducts || 0))
@@ -2041,6 +2071,7 @@ function ProductsFullEditor() {
           notify(result?.error || result?.refusals?.[0]?.error
             || 'The safe merge stopped. Review the refreshed candidates before continuing.', 'error')
           await load(true)
+          if (!requestIsCurrent()) return
           setMergeDuplicatesReviewOpen(false)
           setMergeDuplicatesScope(null)
           return
@@ -2048,6 +2079,7 @@ function ProductsFullEditor() {
         const refreshed = validateMergeDuplicatesPreviewResponse(
           await productApi.previewMergeDuplicates({ signal: controller.signal, scope: 'leading_zero' }),
         )
+        if (!requestIsCurrent()) return
         if (refreshed.scope !== 'leading_zero' || !refreshed.applyManifest) {
           throw new Error('The server did not return a scoped leading-zero preview.')
         }
@@ -2060,17 +2092,22 @@ function ProductsFullEditor() {
           .replace('{groups}', String(mergedGroups)),
       )
       await load(true)
+      if (!requestIsCurrent()) return
       setMergeDuplicatesReviewOpen(false)
       setMergeDuplicatesScope(null)
     } catch (error) {
+      if (!requestIsCurrent()) return
       const detail = getErrorMessage(error, 'The leading-zero merge stopped')
       if (!controller.signal.aborted) notify(detail, 'error')
       await productApi.invalidateProductReadCacheForReconciliation().catch(() => undefined)
+      if (!requestIsCurrent()) return
       await load(true).catch(() => undefined)
+      if (!requestIsCurrent()) return
       setMergeDuplicatesRecovery({ requestId, mergedGroups, mergedProducts, detail })
       setMergeDuplicatesReviewOpen(false)
       setMergeDuplicatesScope(null)
     } finally {
+      if (!requestIsCurrent()) return
       leadingZeroWriteInFlightRef.current = false
       if (mergeDuplicatesAbortRef.current === controller) mergeDuplicatesAbortRef.current = null
       setMergeDuplicatesBusy(false)
@@ -5247,7 +5284,14 @@ function ProductsFullEditor() {
           t={t}
           onClose={() => {
             const active = mergeDuplicatesAbortRef.current
+            leadingZeroRequestGenerationRef.current += 1
+            leadingZeroPreviewGenerationRef.current += 1
             active?.abort()
+            if (active) {
+              mergeDuplicatesAbortRef.current = null
+              leadingZeroWriteInFlightRef.current = false
+              setMergeDuplicatesBusy(false)
+            }
             setMergeDuplicatesReviewOpen(false)
             if (active) void load(true)
           }}
