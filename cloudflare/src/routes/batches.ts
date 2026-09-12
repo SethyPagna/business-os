@@ -221,7 +221,7 @@ app.post('/', async (c) => {
     isStockIn: true,
     supplierName: body.supplier_name,
     lotSupplierName,
-    unitCostUsd: body.unit_cost_usd,
+    unitCostUsd,
     freeGoods,
   })
   if (receiptGate) return c.json({ error: stockReceiptGateMessage(receiptGate), code: receiptGate }, 400)

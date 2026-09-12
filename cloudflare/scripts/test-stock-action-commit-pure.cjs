@@ -223,6 +223,9 @@ function seedLot(sqlite, { supplierName = null, supplierId = null } = {}) {
 
   const negativeCost = setup()
   const fractionalCost = setup()
+  const roundedZero = setup()
+  await assert.rejects(() => subject.applyUnifiedStockAdd(roundedZero.db, { ...input, costPriceUsd: .00004 }), /free goods/i)
+  wroteNothing(roundedZero, 'rounded zero still requires free-goods declaration')
   await subject.applyUnifiedStockAdd(fractionalCost.db, { ...input, quantity: .5, costPriceUsd: .0003 })
   assert.deepStrictEqual(fractionalCost.sqlite.prepare('SELECT unit_cost_usd, total_cost_usd FROM inventory_movements').get(), {
     unit_cost_usd: .0003, total_cost_usd: .0002,

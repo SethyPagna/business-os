@@ -284,6 +284,15 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
     freeGoods,
   })
   if (refusal) throw new Error(refusal)
+  // A positive sub-tick input may quantize to zero. The persisted zero still
+  // needs the operator's free-goods declaration, just like an explicit zero.
+  const roundedRefusal = unifiedStockReceiptRefusal({
+    supplierName,
+    lotSupplierName: pre?.lot_supplier_name ?? null,
+    unitCostUsd: optionalMoney(sheetCostPriceUsd),
+    freeGoods,
+  })
+  if (roundedRefusal) throw new Error(roundedRefusal)
   const costPriceUsd = optionalMoney(input.costPriceUsd)
   const totalCostUsd = costPriceUsd == null ? null : multiplyMoney4(costPriceUsd, quantity)
   const params = {
