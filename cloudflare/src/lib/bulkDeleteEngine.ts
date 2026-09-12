@@ -125,19 +125,33 @@ export const ENTITY_CONFIGS: Record<BulkDeleteEntityType, EntityConfig> = {
         const placeholders = slice.map(() => '?').join(',')
         return db.prepare(`
           SELECT bs.product_id AS productId, bs.branch_id AS branchId, bs.quantity AS quantity,
-                 p.name AS productName, b.name AS branchName
+                 p.name AS productName,
+                 COALESCE(p.cost_price_usd, (
+                   SELECT SUM(bbs.quantity * pb.unit_cost_usd) / NULLIF(SUM(bbs.quantity), 0)
+                   FROM branch_batch_stock bbs
+                   JOIN product_batches pb ON pb.id = bbs.batch_id
+                   WHERE pb.variant_product_id = bs.product_id AND bbs.branch_id = bs.branch_id
+                     AND bbs.quantity > 0 AND pb.unit_cost_usd IS NOT NULL
+                 )) AS unitCostUsd,
+                 p.cost_price_khr AS unitCostKhr,
+                 b.name AS branchName
           FROM branch_stock bs
           LEFT JOIN products p ON p.id = bs.product_id
           LEFT JOIN branches b ON b.id = bs.branch_id
           WHERE bs.product_id IN (${placeholders}) AND bs.quantity > 0
-        `).all<{ productId: number; branchId: number; quantity: number; productName: string | null; branchName: string | null }>(slice)
+        `).all<{ productId: number; branchId: number; quantity: number; productName: string | null; branchName: string | null; unitCostUsd: number | null; unitCostKhr: number | null }>(slice)
       })
       return stockRows.map((row) => ({
-        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at)
-              VALUES (@productId, @productName, @branchId, @branchName, 'delete', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP)`,
+        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, user_id, user_name, created_at)
+              VALUES (@productId, @productName, @branchId, @branchName, 'delete', @quantity, @unitCostUsd, @unitCostKhr, @totalCostUsd, @totalCostKhr, @reason, @userId, @userName, CURRENT_TIMESTAMP)`,
         params: {
           productId: row.productId, productName: row.productName, branchId: row.branchId, branchName: row.branchName,
-          quantity: row.quantity, reason, userId: user.id, userName: actorSnapshot(user),
+          quantity: row.quantity,
+          unitCostUsd: row.unitCostUsd,
+          unitCostKhr: row.unitCostKhr,
+          totalCostUsd: row.unitCostUsd == null ? null : Number(row.unitCostUsd) * Number(row.quantity),
+          totalCostKhr: row.unitCostKhr == null ? null : Number(row.unitCostKhr) * Number(row.quantity),
+          reason, userId: user.id, userName: actorSnapshot(user),
         },
       }))
     },

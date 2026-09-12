@@ -20,6 +20,8 @@ const fs = require('fs')
 const path = require('path')
 const ts = require('typescript')
 const assert = require('assert')
+const { openDb } = require('./harness/d1compat.cjs')
+const { loadAll } = require('./harness/load_migrations.cjs')
 
 const sourcePath = path.join(__dirname, '..', 'src', 'lib', 'bulkDeleteEngine.ts')
 const source = fs.readFileSync(sourcePath, 'utf8')
@@ -142,6 +144,57 @@ const { buildCoreDeleteStatements, ENTITY_CONFIGS } = moduleObj.exports
     assert.deepStrictEqual(extra, [], `${entityType}'s buildExtraStatements must resolve to an empty array -- no branch-stock or related rows to log for contact tables`)
   }
   console.log('PASS customers/suppliers/delivery_contacts buildExtraStatements resolves to an empty array')
+
+  {
+    const selectedRows = [{
+      productId: 41, branchId: 2, quantity: 3, productName: 'Write-off item', branchName: 'Warehouse',
+      unitCostUsd: 0, unitCostKhr: 12000,
+    }]
+    const db = {
+      prepare(sql) {
+        assert.match(sql, /COALESCE\(p\.cost_price_usd,[\s\S]*?pb\.unit_cost_usd/)
+        assert.match(sql, /p\.cost_price_khr AS unitCostKhr/)
+        return { all: async () => selectedRows }
+      },
+    }
+    const statements = await ENTITY_CONFIGS.products.buildExtraStatements(db, [41], 'Bulk cleanup', { id: 7, name: 'Sok' })
+    assert.strictEqual(statements.length, 1)
+    assert.match(statements[0].sql, /unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr/)
+    assert.strictEqual(statements[0].params.unitCostUsd, 0, 'explicit catalogue zero stays zero')
+    assert.strictEqual(statements[0].params.totalCostUsd, 0)
+    assert.strictEqual(statements[0].params.unitCostKhr, 12000)
+    assert.strictEqual(statements[0].params.totalCostKhr, 36000)
+    selectedRows[0].unitCostKhr = 99000
+    assert.strictEqual(statements[0].params.unitCostKhr, 12000, 'the built statement keeps its plan-time primitive snapshot if the source changes before apply')
+
+    const rawDb = openDb(loadAll())
+    rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity) VALUES (41, 'Write-off item', 1, 3)").run()
+    rawDb.prepare("INSERT INTO branches (id, name, is_active, is_default) VALUES (2, 'Warehouse', 1, 1)").run()
+    await assert.rejects(
+      () => rawDb.batch([
+        statements[0],
+        { sql: 'INSERT INTO table_that_does_not_exist (id) VALUES (1)', params: {} },
+      ]),
+      /no such table/,
+      'a later failure in the delete chunk must fail its atomic batch',
+    )
+    assert.strictEqual(
+      rawDb.prepare('SELECT COUNT(*) AS count FROM inventory_movements WHERE product_id = 41').get().count,
+      0,
+      'the movement and its cost snapshot roll back with the failed delete chunk',
+    )
+
+    rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity, cost_price_usd) VALUES (42, 'Lot-valued item', 1, 4, NULL)").run()
+    rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (42, 2, 4)').run()
+    rawDb.prepare("INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, unit_cost_usd, is_active) VALUES (4201, 42, '42:a', 'a', '2026-01-01', 5, 1)").run()
+    rawDb.prepare("INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, unit_cost_usd, is_active) VALUES (4202, 42, '42:b', 'b', '2026-02-01', 7, 1)").run()
+    rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (4201, 2, 1)').run()
+    rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (4202, 2, 3)').run()
+    const lotFallback = await ENTITY_CONFIGS.products.buildExtraStatements(rawDb, [42], 'Bulk cleanup', { id: 7, name: 'Sok' })
+    assert.strictEqual(lotFallback[0].params.unitCostUsd, 6.5, 'blank product cost uses the plan-time quantity-weighted lot cost')
+    assert.strictEqual(lotFallback[0].params.totalCostUsd, 26)
+    console.log('PASS product bulk-delete write-off snapshots zero/nonzero costs and total in the same movement statement')
+  }
 
   {
     // ENTITY_PERMISSION_MAP in lib/permissions.ts must already map each of

@@ -1356,7 +1356,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
 // review errors, blank uses one canonical default, and Warehouse remains a
 // valid stock location.
 {
-  const { classifyInventory, validateResolvedImportBranches } = moduleObj.exports
+  const { classifyInventory, validateResolvedImportBranches, inventoryMovementCostSnapshot, applyAnalyzedInventoryCostSnapshots } = moduleObj.exports
   const product = { id: 1, sku: 'INV-1', barcode: 'BC-INV-1', name: 'Inventory Item', stock_quantity: 4, cost_price_usd: 1, cost_price_khr: 0 }
   const makeDb = (branches) => ({
     prepare: (sql) => ({ all: async () => String(sql).includes('FROM products') ? [product] : String(sql).includes('FROM branches') ? branches : [] }),
@@ -1375,6 +1375,43 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
   const blank = await classifyInventory(makeDb([{ id: 1, name: 'Shop', is_default: 1, is_active: 1 }]), input(undefined), 'add')
   assert.strictEqual(blank[0].action, 'create')
   assert.strictEqual(blank[0].data.branch_id, 1)
+  assert.strictEqual(blank[0].data.unit_cost_usd, 1, 'blank cost snapshots the product fallback during classification')
+  assert.strictEqual(blank[0].data.total_cost_usd, 2)
+  assert.strictEqual(blank[0].data.unit_cost_khr, 0, 'an existing zero fallback remains a recorded zero')
+
+  const explicitZero = await classifyInventory(
+    makeDb([{ id: 1, name: 'Shop', is_default: 1, is_active: 1 }]),
+    [{ ...input(undefined)[0], unit_cost_usd: '0', unit_cost_khr: '0' }],
+    'add',
+  )
+  assert.strictEqual(explicitZero[0].data.unit_cost_usd, 0, 'explicit zero must not fall through to the product cost')
+  assert.strictEqual(explicitZero[0].data.total_cost_usd, 0)
+  assert.strictEqual(explicitZero[0].data.cost_price_usd, 0, 'explicit zero retains the existing add-row product update semantics')
+
+  const frozen = inventoryMovementCostSnapshot({ fallbackUsd: 3.25, fallbackKhr: 13000, quantity: 4 })
+  product.cost_price_usd = 99
+  product.cost_price_khr = 400000
+  assert.deepStrictEqual(frozen, {
+    unitCostUsd: 3.25, unitCostKhr: 13000, totalCostUsd: 13, totalCostKhr: 52000,
+  }, 'the planned cost remains immutable when the catalogue changes before apply')
+
+  const remove = await classifyInventory(makeDb([{ id: 1, name: 'Shop', is_default: 1, is_active: 1 }]), input(undefined), 'remove')
+  assert.strictEqual(remove[0].data.unit_cost_usd, 99, 'non-receipt actions still snapshot their plan-time product cost')
+  assert.strictEqual(remove[0].data.total_cost_usd, 198)
+
+  const reviewed = { ...blank[0], data: { ...blank[0].data, unit_cost_usd: 1, unit_cost_khr: 0, total_cost_usd: 2, total_cost_khr: 0 } }
+  const reclassifiedAtApply = { ...blank[0], data: { ...blank[0].data, unit_cost_usd: 99, unit_cost_khr: 400000, total_cost_usd: 198, total_cost_khr: 800000 } }
+  const applied = applyAnalyzedInventoryCostSnapshots([reclassifiedAtApply], new Map([[1, reviewed]]))
+  assert.deepStrictEqual(
+    {
+      unit_cost_usd: applied[0].data.unit_cost_usd,
+      unit_cost_khr: applied[0].data.unit_cost_khr,
+      total_cost_usd: applied[0].data.total_cost_usd,
+      total_cost_khr: applied[0].data.total_cost_khr,
+    },
+    { unit_cost_usd: 1, unit_cost_khr: 0, total_cost_usd: 2, total_cost_khr: 0 },
+    'apply uses the analyzed immutable valuation, including zero, after a catalogue price change',
+  )
 
   const blankWithDuplicateRole = await classifyInventory(makeDb([
     { id: 1, name: 'Shop', is_default: 1, is_active: 1 },
@@ -1396,6 +1433,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
   )
 
   const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'importEngine.ts'), 'utf8')
+  assert.match(source, /INSERT INTO inventory_movements \(product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, created_at\)/, 'the movement insert carries the frozen plan costs in its own atomic row')
   const resolverBody = source.slice(source.indexOf('async function validateResolvedImportBranches'), source.indexOf('// Same-batch duplicate merge'))
   assert.ok(!/INSERT INTO branches|Main Branch|backfillBranchStockForNewBranch/.test(resolverBody), 'apply-time branch resolver must remain validation-only')
   console.log('PASS classifyInventory and apply branch validation never create unknown or synthetic branches')

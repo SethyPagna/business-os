@@ -2593,6 +2593,83 @@ export function getInventoryImportAction(policyJson: string | null | undefined):
   }
 }
 
+export interface InventoryMovementCostSnapshot {
+  unitCostUsd: number | null
+  unitCostKhr: number | null
+  totalCostUsd: number | null
+  totalCostKhr: number | null
+}
+
+// Resolve once while the import row is classified. The returned values travel
+// inside the persisted/apply plan, so a product price edit between review and
+// apply cannot rewrite the history that this action records. `undefined`
+// means the file left the cell blank and therefore uses the then-current
+// product fallback; numeric zero is an explicit, preserved value.
+export function inventoryMovementCostSnapshot(input: {
+  explicitUsd?: number
+  explicitKhr?: number
+  fallbackUsd?: number | null
+  fallbackKhr?: number | null
+  quantity: number
+}): InventoryMovementCostSnapshot {
+  const finiteOrNull = (value: unknown): number | null => {
+    if (value === null || value === undefined || value === '') return null
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  const unitCostUsd = input.explicitUsd !== undefined ? finiteOrNull(input.explicitUsd) : finiteOrNull(input.fallbackUsd)
+  const unitCostKhr = input.explicitKhr !== undefined ? finiteOrNull(input.explicitKhr) : finiteOrNull(input.fallbackKhr)
+  const magnitude = Math.abs(Number(input.quantity) || 0)
+  return {
+    unitCostUsd,
+    unitCostKhr,
+    totalCostUsd: unitCostUsd === null ? null : unitCostUsd * magnitude,
+    totalCostKhr: unitCostKhr === null ? null : unitCostKhr * magnitude,
+  }
+}
+
+const INVENTORY_MOVEMENT_COST_FIELDS = [
+  'unit_cost_usd', 'unit_cost_khr', 'total_cost_usd', 'total_cost_khr',
+] as const
+
+export function applyAnalyzedInventoryCostSnapshots(
+  results: ImportRowResult[],
+  analyzedByRow: Map<number, ImportRowResult>,
+): ImportRowResult[] {
+  return results.map((result) => {
+    if (result.action !== 'create') return result
+    const analyzed = analyzedByRow.get(result.rowNumber)
+    if (!analyzed || analyzed.action !== 'create') return result
+    const plannedData = analyzed.data as Record<string, unknown>
+    const nextData = { ...(result.data as Record<string, unknown>) }
+    for (const field of INVENTORY_MOVEMENT_COST_FIELDS) {
+      // Own-property presence distinguishes an intentionally planned NULL
+      // (cost was unavailable) from an old analyze row predating snapshots.
+      if (Object.prototype.hasOwnProperty.call(plannedData, field)) nextData[field] = plannedData[field]
+    }
+    return { ...result, data: nextData }
+  })
+}
+
+async function preserveAnalyzedInventoryCostSnapshots(
+  db: D1Compat,
+  jobId: string,
+  results: ImportRowResult[],
+): Promise<ImportRowResult[]> {
+  const rowNumbers = results.map((result) => Number(result.rowNumber)).filter((value) => Number.isSafeInteger(value))
+  if (!rowNumbers.length) return results
+  const analyzedByRow = new Map<number, ImportRowResult>()
+  for (const slice of chunkForBinding(rowNumbers, 1)) {
+    const { sql, params } = buildInClause('r', slice)
+    const rows = await db.staging.prepare(`
+      SELECT row_number, result_json FROM import_job_rows
+      WHERE job_id = @id AND phase = 'analyze' AND row_number IN (${sql})
+    `).all<{ row_number: number; result_json: string }>({ ...params, id: jobId })
+    for (const row of rows) analyzedByRow.set(Number(row.row_number), parsePolicyObject(row.result_json) as ImportRowResult)
+  }
+  return applyAnalyzedInventoryCostSnapshots(results, analyzedByRow)
+}
+
 export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inventoryAction?: InventoryImportAction | null): Promise<ImportRowResult[]> {
   const products = await db
     .prepare(`SELECT id, sku, barcode, name, stock_quantity, cost_price_usd, cost_price_khr FROM products`)
@@ -2753,6 +2830,25 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
       reason: str(row.reason) || 'import',
       created_at: movementDate,
     }
+    const normalizedExplicitCost = (value: unknown): number => {
+      const parsed = normalizeImportMoney(value)
+      return Object.is(parsed, -0) ? 0 : parsed
+    }
+    const explicitCostUsd = inventoryAction === 'add' && row.unit_cost_usd != null && str(row.unit_cost_usd) !== ''
+      ? normalizedExplicitCost(row.unit_cost_usd) : undefined
+    const explicitCostKhr = inventoryAction === 'add' && row.unit_cost_khr != null && str(row.unit_cost_khr) !== ''
+      ? normalizedExplicitCost(row.unit_cost_khr) : undefined
+    const movementCosts = inventoryMovementCostSnapshot({
+      explicitUsd: explicitCostUsd,
+      explicitKhr: explicitCostKhr,
+      fallbackUsd: product.cost_price_usd,
+      fallbackKhr: product.cost_price_khr,
+      quantity: Math.abs(signedQuantity),
+    })
+    data.unit_cost_usd = movementCosts.unitCostUsd
+    data.unit_cost_khr = movementCosts.unitCostKhr
+    data.total_cost_usd = movementCosts.totalCostUsd
+    data.total_cost_khr = movementCosts.totalCostKhr
     // 'add' only: an optional unit cost on the row updates the product's
     // cost price, same as receiving stock at a manual product edit
     // would -- blank cells leave the existing price untouched. 'remove'/
@@ -2760,10 +2856,8 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
     // recounting stock doesn't change what it's worth), so this never
     // fires for them regardless of what a raw API caller might send.
     if (inventoryAction === 'add') {
-      const costUsd = row.unit_cost_usd != null && str(row.unit_cost_usd) !== '' ? normalizeImportMoney(row.unit_cost_usd) : null
-      const costKhr = row.unit_cost_khr != null && str(row.unit_cost_khr) !== '' ? normalizeImportMoney(row.unit_cost_khr) : null
-      if (costUsd != null) data.cost_price_usd = costUsd
-      if (costKhr != null) data.cost_price_khr = costKhr
+      if (explicitCostUsd !== undefined) data.cost_price_usd = explicitCostUsd
+      if (explicitCostKhr !== undefined) data.cost_price_khr = explicitCostKhr
     }
     results.push({
       rowNumber: row._rowNumber,
@@ -5513,12 +5607,18 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     const rowImagePaths = authority.allowProductImageWrites && imageMatchCache
       ? await readRowImagePaths(db, jobId, windowRows)
       : deniedImagePaths
-    const results = job.type === 'products'
+    let results = job.type === 'products'
       ? await classifyProducts(db, windowRows, jobId, job.policy_json, rowImagePaths)
       : await classifyRows(db, job.type, windowRows, jobId, job.policy_json)
     for (const result of results) {
       const decision = decisions[String(result.rowNumber)]
       if (decision?.action === 'skip') result.action = 'skip'
+    }
+    if (job.type === 'inventory') {
+      // Identity/availability is still revalidated against live state, but
+      // historical valuation is the snapshot the operator reviewed. Do not
+      // let a catalogue edit between Analyze and Apply silently change it.
+      results = await preserveAnalyzedInventoryCostSnapshots(db, jobId, results)
     }
     if (['customers', 'suppliers', 'delivery_contacts'].includes(job.type)) {
       const unresolvedTarget = results.find((result) => result.action === 'error' && result.contactMatchTargetInvalid)
@@ -6242,7 +6342,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
         if (appliedRowGuards.has(`row:${r.rowNumber}`)) continue
         const group: Array<{ sql: string; params: Record<string, unknown> }> = [rowGuardStatement(r.rowNumber)]
         group.push({
-          sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, created_at) VALUES (@product_id, @product_name, @branch_id, @branch_name, @movement_type, @quantity, @reason, @created_at)`,
+          sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, created_at) VALUES (@product_id, @product_name, @branch_id, @branch_name, @movement_type, @quantity, @unit_cost_usd, @unit_cost_khr, @total_cost_usd, @total_cost_khr, @reason, @created_at)`,
           // Honor an imported date (classifyInventory's `movementDate`,
           // spread in via `d.created_at`) when the row supplied one;
           // `nowIso` is only the fallback for a blank/unparseable cell.
