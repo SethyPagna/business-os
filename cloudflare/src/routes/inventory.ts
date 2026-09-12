@@ -1644,6 +1644,8 @@ app.post('/adjust', async (c) => {
   let removedBatchQuantities: Array<{ batchId: number; quantity: number }> = []
   let removalCostByBatch = new Map<number, number | null>()
   let addMovementCost: ReturnType<typeof resolveMovementCostSnapshot> | null = null
+  let removeMovementCost: ReturnType<typeof resolveMovementCostSnapshot> | null = null
+  let capturedRemovalAllocations: Array<{ batchId: number; quantity: number }> | undefined
   if (type === 'add') {
     delta = quantity
   } else {
@@ -1659,24 +1661,34 @@ app.post('/adjust', async (c) => {
   if (useBatchLedger && type === 'remove') {
     const costRows = batchIdRequested != null
       ? await db.prepare(`
-          SELECT pb.id, pb.unit_cost_usd
+          SELECT pb.id, pb.unit_cost_usd, bbs.quantity AS available
           FROM product_batches pb
+          JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id AND bbs.branch_id=@branchId
           WHERE pb.id = @batchId AND pb.variant_product_id = @productId AND pb.is_active = 1
-        `).all<{ id: number; unit_cost_usd: number | null }>({ batchId: batchIdRequested, productId: targetProductId })
+        `).all<{ id: number; unit_cost_usd: number | null; available: number }>({ batchId: batchIdRequested, branchId, productId: targetProductId })
       : await db.prepare(`
-          SELECT pb.id, pb.unit_cost_usd
+          SELECT pb.id, pb.unit_cost_usd, bbs.quantity AS available
           FROM product_batches pb
           JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id AND bbs.branch_id = @branchId
           WHERE pb.variant_product_id = @productId AND pb.is_active = 1 AND bbs.quantity > 0
           ORDER BY (pb.expiry_date IS NULL), pb.expiry_date ASC, pb.received_at ASC, pb.id ASC
-        `).all<{ id: number; unit_cost_usd: number | null }>({ branchId, productId: targetProductId })
+        `).all<{ id: number; unit_cost_usd: number | null; available: number }>({ branchId, productId: targetProductId })
     removalCostByBatch = new Map(costRows.map((row) => [Number(row.id), row.unit_cost_usd ?? null]))
-    // Validate every captured cost and both fallbacks before removeStock* can
-    // write. Zero-quantity validation components do not claim allocation;
-    // the exact quantities returned by the shared remover are applied below.
-    resolveMovementCostSnapshot({
+    let unallocated = quantity
+    capturedRemovalAllocations = []
+    for (const row of costRows) {
+      if (unallocated <= 0) break
+      const take = batchIdRequested != null ? unallocated : Math.min(unallocated, Number(row.available) || 0)
+      if (!(take > 0)) continue
+      capturedRemovalAllocations.push({ batchId: Number(row.id), quantity: take })
+      unallocated -= take
+    }
+    removeMovementCost = resolveMovementCostSnapshot({
       quantity,
-      components: [...removalCostByBatch.values()].map((unitCostUsd) => ({ quantity: 0, unitCostUsd })),
+      components: capturedRemovalAllocations.map((allocation) => ({
+        quantity: allocation.quantity,
+        unitCostUsd: removalCostByBatch.get(allocation.batchId) ?? null,
+      })),
       fallbackUnitCostUsd: productCostSnapshot?.cost_price_usd ?? null,
       fallbackUnitCostKhr: productCostSnapshot?.cost_price_khr ?? null,
     })
@@ -1743,7 +1755,9 @@ app.post('/adjust', async (c) => {
       // provenance stock, see removeStockAcrossBatches) falls through to
       // the same plain decrement a batch-less product already used.
       try {
-        const drained = await removeStockAcrossBatches(db, { productId: targetProductId, branchId, quantity })
+        const drained = await removeStockAcrossBatches(db, {
+          productId: targetProductId, branchId, quantity, allocations: capturedRemovalAllocations,
+        })
         autoBatchDrainIds = drained.batchIds
         removedBatchQuantities = drained.batchQuantities.map((entry) => ({ batchId: entry.batchId, quantity: Math.abs(entry.quantity) }))
         // 0084: an auto-drain that ONE lot fully covered is attributable to
@@ -1776,7 +1790,7 @@ app.post('/adjust', async (c) => {
         unitCostUsd: removalCostByBatch.get(entry.batchId) ?? null,
       }))
     }
-    const movementCost = addMovementCost || resolveMovementCostSnapshot({
+    const movementCost = addMovementCost || removeMovementCost || resolveMovementCostSnapshot({
         quantity: Math.abs(delta),
         components: costComponents,
         fallbackUnitCostUsd: productCostSnapshot?.cost_price_usd ?? null,

@@ -18,7 +18,17 @@ const money = (value: unknown): number | null => {
   return parsed
 }
 
-const round4 = (value: number): number => Math.round(value * 10_000) / 10_000
+const finite = (value: number, message: string): number => {
+  if (!Number.isFinite(value)) throw new RangeError(message)
+  return value
+}
+
+const add = (left: number, right: number): number => finite(left + right, 'Movement cost sum exceeds the supported range')
+const multiply = (left: number, right: number): number => finite(left * right, 'Movement cost total exceeds the supported range')
+const round4 = (value: number): number => {
+  const scaled = finite(value * 10_000, 'Movement cost rounding exceeds the supported range')
+  return finite(Math.round(scaled) / 10_000, 'Movement cost rounding exceeds the supported range')
+}
 
 function resolveCurrency(
   quantity: number,
@@ -34,15 +44,15 @@ function resolveCurrency(
     if (!(componentQuantity > 0)) continue
     const cost = money(component[field]) ?? fallbackCost
     if (cost == null) return { unit: null, total: null }
-    covered += componentQuantity
-    total += componentQuantity * cost
+    covered = add(covered, componentQuantity)
+    total = add(total, multiply(componentQuantity, cost))
   }
   if (covered + 0.000000001 < quantity) {
     if (fallbackCost == null) return { unit: null, total: null }
-    total += (quantity - covered) * fallbackCost
+    total = add(total, multiply(quantity - covered, fallbackCost))
   }
   const roundedTotal = round4(total)
-  return { unit: round4(roundedTotal / quantity), total: roundedTotal }
+  return { unit: round4(finite(roundedTotal / quantity, 'Movement unit cost exceeds the supported range')), total: roundedTotal }
 }
 
 /**
@@ -72,7 +82,7 @@ export function resolveMovementCostSnapshot(input: {
     // because its row carried no quantity would make malformed plans latent.
     money(component.unitCostUsd)
     money(component.unitCostKhr)
-    covered += componentQuantity
+    covered = add(covered, componentQuantity)
   }
   if (covered > quantity + 0.000000001) throw new RangeError('Movement cost components cannot exceed the movement quantity')
   money(input.fallbackUnitCostUsd)
