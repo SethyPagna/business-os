@@ -24,7 +24,7 @@ import { compareCosts, normalizeProductGroupName } from '../lib/productDetailRul
 import type { CostVerdict, MergedCostOutlier } from '../lib/productDetailRule'
 import { buildAtomicMergeHistoryStatements, finalizeAtomicMergeHistory, mergeStateFingerprint, PRODUCT_MERGE_GROUP_ACTION_KIND, PRODUCT_MERGE_GROUP_CHILD_KIND, productMergeGroupPrefixFingerprint, registerMergeFold, registerProductMergeGroupRedo, recordSupplierBackfillSnapshot, MERGE_REPARENT_TABLES, type AtomicMergeKnownIds, type AtomicMergeStatement, type MergeReversal, type MergeStockDisposition } from '../lib/undoAppliers'
 import { createProductMergeClusterPlan, MERGE_COST_FIELDS, MERGE_PRICE_FIELDS, parseProductMergeClusterPlan, productMergeCaseKey, productMergeCasAssertion, productMergeNumericError, productMergePlanKeeperMatches, productMergePlanSourceMemberMatches, resolveProductMergeClusterPlanEconomics, resolveProductMergeEconomics, type ProductMergeClusterPlan, type ProductMergeEconomics, type ProductMergeNumericIssue } from '../lib/productMerge'
-import { PRODUCT_MERGE_READ_BATCH_MAX_STATEMENTS, readProductMergeCaseSnapshot, readProductMergeDependentLotSnapshots } from '../lib/productMergeSnapshot'
+import { PRODUCT_MERGE_READ_BATCH_MAX_STATEMENTS, readProductMergeCaseSnapshot, readProductMergeDependentLotSnapshots, planProductMergeCaseSnapshot, planProductMergeDependentLotSnapshots, runProductMergeReadBatch, type ProductMergeReadPlan } from '../lib/productMergeSnapshot'
 import type { ProductMergeCaseSnapshot, ProductMergeLotSnapshot } from '../lib/productMergeSnapshot'
 import {
   PRODUCT_CONFLICT_MERGE_MANIFEST_VERSION,
@@ -3789,27 +3789,72 @@ function canonicalLeadingZeroGraphSnapshot(value: LeadingZeroApprovedGraph | und
   }
 }
 
+// Pool independent read plans, but never split a case's original transaction.
+// Prefix result keys per plan; repeated local keys/parameter names cannot alias.
+// These are read-only phases, not the atomic mutation batch below.
+async function runLeadingZeroReadPlans<T>(
+  db: ReturnType<typeof getDb>,
+  plans: readonly ProductMergeReadPlan<T>[],
+): Promise<T[]> {
+  const results: T[] = []
+  let offset = 0
+  while (offset < plans.length) {
+    let end = offset
+    let statementCount = 0
+    while (end < plans.length) {
+      const size = plans[end].reads.length
+      if (size > PRODUCT_MERGE_READ_BATCH_MAX_STATEMENTS) throw new Error('leading_zero_read_plan_exceeds_limit')
+      if (statementCount + size > PRODUCT_MERGE_READ_BATCH_MAX_STATEMENTS) break
+      statementCount += size
+      end += 1
+    }
+    const batchPlans = plans.slice(offset, end)
+    const reads = batchPlans.flatMap((plan, index) => plan.reads.map((read) => ({ ...read, key: `${index}:${read.key}` })))
+    const rows = await runProductMergeReadBatch(db, reads)
+    for (const [index, plan] of batchPlans.entries()) {
+      results.push(plan.decode(new Map(plan.reads.map((read) => [read.key, rows.get(`${index}:${read.key}`) || []]))))
+    }
+    offset = end
+  }
+  return results
+}
+
 async function readLeadingZeroGraphSnapshots(
   db: ReturnType<typeof getDb>,
   groups: readonly DuplicateProductGroup[],
 ): Promise<Map<string, LeadingZeroApprovedGraph>> {
   const result = new Map<string, LeadingZeroApprovedGraph>()
-  for (const group of groups) {
+  const plans = groups.map((group): ProductMergeReadPlan<Omit<LeadingZeroApprovedGraph, 'dependentLots'>> => {
     if (group.duplicates.length !== 1) throw new Error('leading_zero_manifest_requires_pairs')
     const duplicate = group.duplicates[0]
-    const snapshot = await readProductMergeCaseSnapshot(db, group.canonical.id, duplicate.id, MERGE_REPARENT_TABLES)
-    const dependentLots = await readProductMergeDependentLotSnapshots(db, snapshot, 'merge')
-    const duplicateBatchRowsFull = await db.prepare('SELECT * FROM product_batches WHERE variant_product_id=@id ORDER BY id')
-      .all<ProductMergeCaseSnapshot['canonicalBatchRows'][number]>({ id: duplicate.id })
-    const duplicateBatchStockRows = await db.prepare(`SELECT bbs.* FROM branch_batch_stock bbs
-      JOIN product_batches pb ON pb.id=bbs.batch_id WHERE pb.variant_product_id=@id ORDER BY bbs.id`)
-      .all<Record<string, unknown>>({ id: duplicate.id })
-    const saleAllocationRows = await db.prepare(`SELECT a.id,a.batch_id FROM sale_item_batch_allocations a JOIN product_batches pb ON pb.id=a.batch_id
-      WHERE pb.variant_product_id=@id ORDER BY a.id`).all<{ id: number; batch_id: number }>({ id: duplicate.id })
-    const returnAllocationRows = await db.prepare(`SELECT a.id,a.batch_id FROM return_item_batch_allocations a JOIN product_batches pb ON pb.id=a.batch_id
-      WHERE pb.variant_product_id=@id ORDER BY a.id`).all<{ id: number; batch_id: number }>({ id: duplicate.id })
+    const plan = planProductMergeCaseSnapshot(group.canonical.id, duplicate.id, MERGE_REPARENT_TABLES)
+    const params = { id: duplicate.id }
+    return {
+      reads: [
+        ...plan.reads,
+        { key: 'duplicateBatchRowsFull', sql: 'SELECT * FROM product_batches WHERE variant_product_id=@id ORDER BY id', params },
+        { key: 'duplicateBatchStockRows', sql: `SELECT bbs.* FROM branch_batch_stock bbs
+          JOIN product_batches pb ON pb.id=bbs.batch_id WHERE pb.variant_product_id=@id ORDER BY bbs.id`, params },
+        { key: 'saleAllocationRows', sql: `SELECT a.id,a.batch_id FROM sale_item_batch_allocations a JOIN product_batches pb ON pb.id=a.batch_id
+          WHERE pb.variant_product_id=@id ORDER BY a.id`, params },
+        { key: 'returnAllocationRows', sql: `SELECT a.id,a.batch_id FROM return_item_batch_allocations a JOIN product_batches pb ON pb.id=a.batch_id
+          WHERE pb.variant_product_id=@id ORDER BY a.id`, params },
+      ],
+      decode: (rows) => ({
+        snapshot: plan.decode(rows),
+        duplicateBatchRowsFull: (rows.get('duplicateBatchRowsFull') || []) as ProductMergeCaseSnapshot['canonicalBatchRows'],
+        duplicateBatchStockRows: rows.get('duplicateBatchStockRows') || [],
+        saleAllocationRows: (rows.get('saleAllocationRows') || []) as Array<{ id: number; batch_id: number }>,
+        returnAllocationRows: (rows.get('returnAllocationRows') || []) as Array<{ id: number; batch_id: number }>,
+      }),
+    }
+  })
+  const graphs = await runLeadingZeroReadPlans(db, plans)
+  const dependentLots = await runLeadingZeroReadPlans(db, graphs.map(({ snapshot }) => planProductMergeDependentLotSnapshots(snapshot, 'merge')))
+  for (const [index, group] of groups.entries()) {
+    const duplicate = group.duplicates[0]
     result.set(productMergeCaseKey(group.canonical.id, duplicate.id), {
-      snapshot, dependentLots, duplicateBatchRowsFull, duplicateBatchStockRows, saleAllocationRows, returnAllocationRows,
+      ...graphs[index], dependentLots: dependentLots[index],
     })
   }
   return result
