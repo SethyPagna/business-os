@@ -7,6 +7,7 @@ import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import Modal from '../shared/Modal'
 import { costMoveRows } from './mergeConfirmationRule'
 import { createMergeDuplicatesPreviewRequestCoordinator } from './mergeDuplicatesPreviewRequest'
+import { captureActorReadScope, isActorReadScopeCurrent } from '../../api/actorReadScope.ts'
 
 type Translate = (key: string, fallback?: string) => string | undefined
 
@@ -119,20 +120,22 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
 
   const runPreview = () => {
     const request = previewRequestsRef.current!.begin()
+    const actorScope = captureActorReadScope('products:merge-duplicates-preview')
+    const requestIsCurrent = () => mountedRef.current && request.isCurrent() && isActorReadScopeCurrent(actorScope, false)
     setPreviewLoading(true)
     setPreviewError(null)
     onLoadPreview(request.signal)
       .then((result) => {
-        if (!mountedRef.current || !request.isCurrent()) return
+        if (!requestIsCurrent()) return
         setPreview(result)
         setAcknowledged(false)
         setRecoveryNeedsPreview(false)
       })
       .catch((error) => {
-        if (mountedRef.current && request.isCurrent()) setPreviewError(error?.message || 'Failed to load preview')
+        if (requestIsCurrent()) setPreviewError(error?.message || 'Failed to load preview')
       })
       .finally(() => {
-        if (mountedRef.current && request.finish()) setPreviewLoading(false)
+        if (requestIsCurrent() && request.finish()) setPreviewLoading(false)
       })
   }
 
