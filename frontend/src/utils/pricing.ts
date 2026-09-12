@@ -1,3 +1,5 @@
+import { roundMoney4, sellingPriceCeilCent } from './moneyPrecision.ts'
+
 type DiscountType = 'fixed' | 'percent'
 
 interface ProductDiscountInput {
@@ -31,6 +33,20 @@ export function roundUpToDecimals(value: unknown, decimals = 2): number {
 
 export function normalizePriceValue(value: unknown, fallback = 0): number {
   return roundUpToDecimals(toFiniteNumber(value, fallback), 2)
+}
+
+/** Internal cost/discount boundary. Never format an editable value to cents. */
+export function normalizeInternalMoney(value: unknown, fallback = 0): number {
+  return roundMoney4(toFiniteNumber(value, fallback))
+}
+
+/** New selling-price input policy, not a computed net-price policy. */
+export function normalizeSellingPrice(value: unknown, fallback = 0): number {
+  return sellingPriceCeilCent(toFiniteNumber(value, fallback))
+}
+
+export function editableMoneyValue(value: unknown, fallback = 0): string {
+  return String(normalizeInternalMoney(value, fallback))
 }
 
 export function formatPriceNumber(value: unknown): string {

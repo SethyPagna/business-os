@@ -16,7 +16,7 @@ import DateEntryInput from '../../shared/DateEntryInput.tsx'
 import SuggestionTextInput, { type SuggestionOption } from '../../shared/SuggestionTextInput.tsx'
 import { suggestionEmptyState } from '../../../utils/suggestionMatching.ts'
 import { MarginCard, DualPriceInput, parseNumericInput, sanitizeNumericInput } from '../shared/primitives'
-import { calculateProductDiscount, formatPriceNumber, normalizePriceValue } from '../../../utils/pricing.ts'
+import { calculateProductDiscount, editableMoneyValue, formatPriceNumber, normalizeInternalMoney, normalizePriceValue } from '../../../utils/pricing.ts'
 import RenameCascadeModal, { type RenameCascadeChoice, type RenameCascadeRequest } from '../../shared/RenameCascadeModal.tsx'
 import ConfirmDialog, { ConfirmDialogLayerContext, type ConfirmReviewItem } from '../../shared/ConfirmDialog.tsx'
 import { useMergeStockChoice } from '../useMergeStockChoice.tsx'
@@ -347,8 +347,8 @@ function buildGalleryImageName(productName: string, position: number, total: num
 }
 
 function editablePrice(value: unknown, fallback = 0): string {
-  if (value === '' || value === null || typeof value === 'undefined') return formatPriceNumber(fallback)
-  return formatPriceNumber(value)
+  if (value === '' || value === null || typeof value === 'undefined') return editableMoneyValue(fallback)
+  return editableMoneyValue(value)
 }
 
 export function productFormDraftBaseKey(productId: unknown, draftScope = 'standalone-create'): string {
@@ -1225,15 +1225,15 @@ export default function ProductForm({
       wholesale_price_khr: normalizePriceValue(parseNumericInput(form.wholesale_price_khr)),
       discount_enabled: form.discount_enabled ? 1 : 0,
       discount_type: form.discount_type === 'fixed' ? 'fixed' : 'percent',
-      discount_percent: normalizePriceValue(parseNumericInput(form.discount_percent)),
-      discount_amount_usd: normalizePriceValue(parseNumericInput(form.discount_amount_usd)),
-      discount_amount_khr: normalizePriceValue(parseNumericInput(form.discount_amount_khr)),
+      discount_percent: parseNumericInput(form.discount_percent),
+      discount_amount_usd: normalizeInternalMoney(parseNumericInput(form.discount_amount_usd)),
+      discount_amount_khr: normalizeInternalMoney(parseNumericInput(form.discount_amount_khr)),
       discount_label: String(form.discount_label || '').trim(),
       discount_badge_color: /^#[0-9a-f]{6}$/i.test(String(form.discount_badge_color || '')) ? String(form.discount_badge_color) : '#e11d48',
       discount_starts_at: form.discount_starts_at || null,
       discount_ends_at: form.discount_ends_at || null,
-      cost_price_usd: normalizePriceValue(parseNumericInput(form.cost_price_usd)),
-      cost_price_khr: normalizePriceValue(parseNumericInput(form.cost_price_khr)),
+      cost_price_usd: normalizeInternalMoney(parseNumericInput(form.cost_price_usd)),
+      cost_price_khr: normalizeInternalMoney(parseNumericInput(form.cost_price_khr)),
       stock_quantity: parseNumericInput(form.stock_quantity),
       ...(showReceivedDate ? { received_date: form.received_date || null } : {}),
       low_stock_threshold: parseNumericInput(form.low_stock_threshold, 10),
@@ -1787,7 +1787,7 @@ export default function ProductForm({
                   setField('cost_price_usd', value)
                   if (!String(form.cost_price_khr ?? '').trim()) {
                     const converted = parseNumericInput(value) * exchangeRate
-                    setField('cost_price_khr', value === '' ? '' : formatPriceNumber(converted))
+                    setField('cost_price_khr', value === '' ? '' : editableMoneyValue(converted))
                   }
                 }}
               onKhrChange={(value) => {
