@@ -16,7 +16,8 @@ import { getBranches } from '../../../api/branchTransport.ts'
 import { getInventoryReasons, saveInventoryReasons } from '../../../api/methods.ts'
 import { useDebouncedValue } from '../../../utils/useDebouncedValue.ts'
 import { beginSingleAction, finishSingleAction } from '../../../utils/actionGuards.ts'
-import { adjustBranchQuantity, isStockInSubmission, isStockReceiptCreditIncomplete, stockReceiptWire, stockAdjustBatchWire, stockReceiptGateCode, stockAdjustQuantityError, STOCK_ADJUST_QUANTITY_FALLBACKS, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../../utils/stockReceiptFields.ts'
+import { adjustBranchQuantity, isStockInSubmission, isStockReceiptCreditIncomplete, normalizeStockSetScope, scopedSetPreview, stockReceiptWire, stockAdjustBatchWire, stockReceiptGateCode, stockAdjustQuantityError, STOCK_ADJUST_QUANTITY_FALLBACKS, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS, type StockSetScope } from '../../../utils/stockReceiptFields.ts'
+import { createClientRequestId } from '../../../api/requestIds.ts'
 import {
   applyRowOutcome,
   browserStockStorage,
@@ -69,6 +70,9 @@ type AdjustForm = {
   cost_khr: InventoryFormValue
   barcode: string
   batch_id: InventoryId | ''
+  set_scope: StockSetScope
+  batch_quantity: InventoryFormValue | ''
+  batch_label: string
   received_date: string
   supplier_id: number | ''
   supplier_name: string
@@ -170,6 +174,7 @@ type AppContextSlice = {
 type PendingStockAdjust = {
   request: NonNullable<Parameters<typeof adjustStock>[0]>
   beforeQuantity: number
+  batchLabel: string
 }
 
 // All received-date defaults use the fixed Cambodia business calendar day.
@@ -340,6 +345,9 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
     cost_khr: 0,
     barcode: '',
     batch_id: '',
+    set_scope: 'lot',
+    batch_quantity: '',
+    batch_label: '',
     received_date: todayIsoDate(),
     supplier_id: '',
     supplier_name: '',
@@ -414,6 +422,9 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
       cost_khr: product.cost_price_khr || product.purchase_price_khr || 0,
       barcode: product.barcode || '',
       batch_id: picked?.batchId != null ? String(picked.batchId) : '',
+      set_scope: 'lot',
+      batch_quantity: '',
+      batch_label: '',
       received_date: todayIsoDate(),
       supplier_id: '',
       supplier_name: '',
@@ -435,6 +446,11 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
         reason: resume.reason || prev.reason,
         branch_id: resume.branchId != null ? String(resume.branchId) : prev.branch_id,
         batch_id: resume.batchId != null ? resume.batchId : prev.batch_id,
+        set_scope: normalizeStockSetScope((resume as Record<string, unknown>).setScope ?? prev.set_scope),
+        batch_quantity: Number.isFinite(Number((resume as Record<string, unknown>).expectedLotQuantity))
+          ? Number((resume as Record<string, unknown>).expectedLotQuantity)
+          : prev.batch_quantity,
+        batch_label: String((resume as Record<string, unknown>).batchLabel || prev.batch_label || ''),
         received_date: resume.receivedDate || prev.received_date,
       }))
     }
@@ -480,6 +496,18 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
     const product = selectedProduct
     if (!product) { notify('Select a product first', 'error'); return }
     if (adjustSaving) return
+    const ambiguousFailure = rows.find((row) => row.status === 'failed'
+      && row.failure
+      && ['offline', 'server', 'unknown'].includes(row.failure.kind))
+    if (ambiguousFailure) {
+      const frozen = (ambiguousFailure.request || {}) as Record<string, unknown>
+      setPendingAdjust({
+        request: ambiguousFailure.request as NonNullable<Parameters<typeof adjustStock>[0]>,
+        beforeQuantity: Number(frozen.setScope === 'lot' ? frozen.expectedLotQuantity : frozen.expectedBranchQuantity) || 0,
+        batchLabel: adjustForm.batch_label,
+      })
+      return
+    }
     const qty = parseFloat(String(adjustForm.quantity))
     // Same rule, same helper, as Inventory.handleAdjust and FastStockInModal:
     // a set may target 0 (an emptied branch), an add or a remove may not move 0.
@@ -495,6 +523,9 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
     )
     const selectedBranchStock = numericBranchId ? branchStockById.get(numericBranchId) : null
     const unlockPricing = adjustForm.type === 'add' && !adjustForm.pricingLocked
+    const setScope = normalizeStockSetScope(adjustForm.set_scope)
+    const scopedSet = adjustForm.type === 'set'
+    const selectedLotQuantity = Number(adjustForm.batch_quantity)
     if (!unlockPricing && (adjustForm.type === 'add' || adjustForm.type === 'remove') && numericBranchId) {
       if (adjustForm.batch_id === '') { notify(tr('select_batch_required', 'Select a received date first'), 'error'); return }
       if (adjustForm.type === 'remove' && adjustForm.batch_id === 'new') { notify(tr('select_batch_required', 'Select a received date first'), 'error'); return }
@@ -504,7 +535,20 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
     // that happens to agree. (It did not: for a branch with no branch_stock
     // row this answered 0 while the prop below answered the product total.)
     const currentQuantity = adjustBranchQuantity(product.branch_stock, numericBranchId, stockQtyOf(product))
-    const isStockIn = isStockInSubmission(adjustForm.type, qty, currentQuantity)
+    const setPreview = scopedSet
+      ? scopedSetPreview({ scope: setScope, targetQuantity: qty, lotQuantity: selectedLotQuantity, branchQuantity: currentQuantity })
+      : null
+    if (scopedSet) {
+      if (!numericBranchId || adjustForm.batch_id === '' || adjustForm.batch_id === 'new' || !Number.isFinite(selectedLotQuantity)) {
+        notify(tr('select_batch_required', 'Select a received date first'), 'error')
+        return
+      }
+      if (!setPreview?.valid) {
+        notify(tr('stock_set_lot_negative', 'This branch-total change would make the selected received date negative. Choose another received date or target.'), 'error')
+        return
+      }
+    }
+    const isStockIn = isStockInSubmission(adjustForm.type, qty, currentQuantity, adjustForm.set_scope)
     if (isStockIn && isStockReceiptCreditIncomplete(adjustForm)) {
       notify(tr('fast_stockin_credit_due', 'Not Paid supplier stock needs a due date'), 'error')
       return
@@ -524,6 +568,7 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
       unlockPricing,
       branchId: numericBranchId,
       batchId: adjustForm.batch_id,
+      setScope: adjustForm.set_scope,
     })
     // N14-D: the same rule routes/inventory.ts enforces (lib/stockReceiptGate.ts).
     // The sibling surface on this same shared form runs it identically.
@@ -549,11 +594,15 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
       userName: user?.name || user?.username,
       unlockPricing,
       batchId: batchWire.batchId,
+      setScope: scopedSet ? setScope : undefined,
+      expectedLotQuantity: scopedSet ? selectedLotQuantity : undefined,
+      expectedBranchQuantity: scopedSet ? currentQuantity : undefined,
+      client_request_id: createClientRequestId('stock-adjust'),
       // S4-16: a 'set' above the current figure has no batch picker but
       // always creates or date-matches a lot server-side, so it carries the
       // date, supplier and receipt fields exactly as an explicit add does.
       receivedDate: isStockIn
-          && (unlockPricing || adjustForm.type === 'set' || (Boolean(numericBranchId) && adjustForm.batch_id === 'new'))
+          && (unlockPricing || (Boolean(numericBranchId) && adjustForm.batch_id === 'new'))
           && adjustForm.received_date
         ? String(adjustForm.received_date)
         : undefined,
@@ -581,6 +630,10 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
       } : undefined,
     }
     if (adjustForm.type === 'remove') {
+      if (adjustForm.batch_id !== '' && adjustForm.batch_id !== 'new' && Number.isFinite(selectedLotQuantity) && qty > selectedLotQuantity) {
+        notify(`Cannot remove ${qty} - only ${selectedLotQuantity} available in the selected received date`, 'error')
+        return
+      }
       if (numericBranchId) {
         const available = Number(selectedBranchStock?.quantity || 0)
         if (available <= 0) { notify(tr('no_stock_in_branch', 'No stock in this branch to remove'), 'error'); return }
@@ -593,7 +646,11 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
     }
     // Part 563: don't write yet -- park the validated request and open the
     // review dialog. commitAdjust runs the actual write once confirmed.
-    setPendingAdjust({ request: adjustmentRequest, beforeQuantity: currentQuantity })
+    setPendingAdjust({
+      request: adjustmentRequest,
+      beforeQuantity: scopedSet && setScope === 'lot' ? selectedLotQuantity : currentQuantity,
+      batchLabel: adjustForm.batch_label,
+    })
     // Keep the row's identity across a retry: an edited-and-resubmitted failed
     // row stays the SAME rowId, so the outcome list never grows a phantom
     // duplicate and a committed row can never be re-entered.
@@ -606,7 +663,7 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
       }
       return [...prev.filter((row) => row.status === 'done'), createRow(adjustmentRequest)]
     })
-  }, [selectedProduct, adjustSaving, adjustForm, user, notify, tr])
+  }, [selectedProduct, adjustSaving, adjustForm, user, notify, tr, rows])
 
   // Persist the failed attempt so the Stock Change section can list it (and
   // reopen it prefilled) even if the operator navigates away. There is no
@@ -633,6 +690,11 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
         branchId,
         branchName: branchId ? String(branches.find((b) => Number(b.id) === branchId)?.name || branchId) : '',
         batchId: req.batchId ?? null,
+        setScope: req.setScope,
+        expectedLotQuantity: req.expectedLotQuantity,
+        expectedBranchQuantity: req.expectedBranchQuantity,
+        batchLabel: adjustForm.batch_label,
+        clientRequestId: String(req.client_request_id || ''),
         receivedDate: String(req.receivedDate || ''),
         reason: String(req.reason || ''),
         note: '',
@@ -640,7 +702,7 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
       }],
     })
     emitFailedAttemptsChanged()
-  }, [storage, userKey, selectedProduct, branches])
+  }, [storage, userKey, selectedProduct, branches, adjustForm.batch_label])
 
   const commitAdjust = useCallback(async () => {
     const adjustmentRequest = pendingAdjust?.request
@@ -778,13 +840,14 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
               // A stock adjustment may target either canonical branch --
               // the warehouse holds stock, it just never sells.
               intent="stock"
+              hideReceivedDates
               pickLabel={tr('select', 'Select')}
               onClose={() => setPicking(null)}
               onPick={(product, selection) => {
                 setPicking(null)
                 selectProduct(product as unknown as PickedProduct, {
                   branchId: selection.branchId,
-                  batchId: selection.batch?.batchId ?? null,
+                  batchId: null,
                 })
               }}
             />
@@ -820,6 +883,8 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
         type: req.type,
         quantity: req.quantity,
         beforeQuantity: pendingAdjust?.beforeQuantity,
+        setScope: req.setScope,
+        batchLabel: pendingAdjust?.batchLabel,
         unit: product.unit,
         tr,
       }),
@@ -892,7 +957,7 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
         t={t}
         tr={tr}
         // Transfer side is unused here (transferModal is null).
-        transferForm={{ from_branch_id: '', to_branch_id: '', quantity: '', reason: '' }}
+        transferForm={{ from_branch_id: '', to_branch_id: '', quantity: '', reason: '', batch_id: '', batch_quantity: '', batch_label: '' }}
         setTransferForm={() => {}}
         onTransfer={() => {}}
         onCloseTransfer={onClose}

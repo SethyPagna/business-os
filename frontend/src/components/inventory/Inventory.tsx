@@ -73,7 +73,8 @@ import { cloneHistorySnapshot } from '../../utils/historyHelpers.ts'
 import { buildTimeActionSections, toggleIdSet } from '../../utils/groupedRecords.ts'
 import { pruneSelectionToVisibleIds } from '../../utils/rowSelection.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
-import { adjustBranchQuantity, isStockInSubmission, isStockReceiptCreditIncomplete, stockReceiptWire, stockAdjustBatchWire, stockReceiptGateCode, stockAdjustQuantityError, STOCK_ADJUST_QUANTITY_FALLBACKS, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../utils/stockReceiptFields.ts'
+import { adjustBranchQuantity, isStockInSubmission, isStockReceiptCreditIncomplete, normalizeStockSetScope, scopedSetPreview, stockReceiptWire, stockAdjustBatchWire, stockReceiptGateCode, stockAdjustQuantityError, STOCK_ADJUST_QUANTITY_FALLBACKS, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS, type StockSetScope } from '../../utils/stockReceiptFields.ts'
+import { createClientRequestId } from '../../api/requestIds.ts'
 import { isApiVersionMismatchError } from '../../api/http.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import { branchCanBeTransferSource, branchCanTransferBetween } from '../../utils/branchRoles.ts'
@@ -172,6 +173,9 @@ type AdjustForm = {
   // Mirrors InventoryStockModals.tsx's own AdjustForm.batch_id -- see that
   // file's comment. Kept in sync as the same literal type ('' | 'new' | id).
   batch_id: InventoryId | ''
+  set_scope: StockSetScope
+  batch_quantity: InventoryFormValue | ''
+  batch_label: string
   // D5a: supplier attribution for the lot an add creates or fills --
   // mirrors InventoryStockModals.tsx's matching fields (the modal clears
   // both when an attributed lot is picked, so the payload builder here can
@@ -193,6 +197,9 @@ type TransferForm = {
   to_branch_id: InventoryId | ''
   quantity: InventoryFormValue
   reason: string
+  batch_id: InventoryId | ''
+  batch_quantity: InventoryFormValue | ''
+  batch_label: string
 }
 
 type InventoryAppContext = {
@@ -475,12 +482,12 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     pricingLocked: true,
     selling_price_usd: '', selling_price_khr: '', wholesale_price_usd: '', wholesale_price_khr: '',
     discount_enabled: false, discount_type: 'percent', discount_percent: '', discount_amount_usd: '',
-    cost_usd: 0, cost_khr: 0, barcode: '', batch_id: '', received_date: todayIsoDate(),
+    cost_usd: 0, cost_khr: 0, barcode: '', batch_id: '', set_scope: 'lot', batch_quantity: '', batch_label: '', received_date: todayIsoDate(),
     supplier_id: '', supplier_name: '',
     unit_cost_usd: '', free_goods: false, payment_status: 'paid', credit_due_date: '',
   })
   const [transferModal, setTransferModal] = useState<InventoryProduct | null>(null)
-  const [transferForm,  setTransferForm]  = useState<TransferForm>({ from_branch_id: '', to_branch_id: '', quantity: 1, reason: '' })
+  const [transferForm,  setTransferForm]  = useState<TransferForm>({ from_branch_id: '', to_branch_id: '', quantity: 1, reason: '', batch_id: '', batch_quantity: '', batch_label: '' })
   const [search,        setSearch]        = useState('')
   // AND/OR toggle restored (Aug 20 2026) -- no longer a standalone button
   // next to the search box (still gone, per the Aug 19 2026 UI request),
@@ -1209,6 +1216,9 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       ...current,
       from_branch_id: sourceBranchId,
       to_branch_id: defaultTransferDestinationBySourceId.get(String(sourceBranchId)) || '',
+      batch_id: '',
+      batch_quantity: '',
+      batch_label: '',
     }))
   }, [defaultTransferDestinationBySourceId])
   // The figure every adjust verdict is measured against -- receipt or removal,
@@ -1275,6 +1285,12 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     // locked (the default) is the fast add-to-this-row path, matching
     // this endpoint's behavior before the grouping feature existed.
     const unlockPricing = adjustForm.type === 'add' && !adjustForm.pricingLocked
+    const setScope = normalizeStockSetScope(adjustForm.set_scope)
+    const scopedSet = adjustForm.type === 'set'
+    const selectedLotQuantity = Number(adjustForm.batch_quantity)
+    const setPreview = scopedSet
+      ? scopedSetPreview({ scope: setScope, targetQuantity: qty, lotQuantity: selectedLotQuantity, branchQuantity: previousQuantity })
+      : null
     // Mandatory batch selection, every target incl. group containers --
     // D4b (matches InventoryStockModals.tsx's own `showBatchPicker`
     // derivation; an unlocked add always gets a fresh batch server-side so
@@ -1287,7 +1303,17 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       if (adjustForm.batch_id === '') { notify(tr('select_batch_required', 'Select a received date first'), 'error'); return }
       if (adjustForm.type === 'remove' && adjustForm.batch_id === 'new') { notify(tr('select_batch_required', 'Select a received date first'), 'error'); return }
     }
-    const isStockIn = isStockInSubmission(adjustForm.type, qty, previousQuantity)
+    if (scopedSet) {
+      if (!numericBranchId || adjustForm.batch_id === '' || adjustForm.batch_id === 'new' || !Number.isFinite(selectedLotQuantity)) {
+        notify(tr('select_batch_required', 'Select a received date first'), 'error')
+        return
+      }
+      if (!setPreview?.valid) {
+        notify(tr('stock_set_lot_negative', 'This branch-total change would make the selected received date negative. Choose another received date or target.'), 'error')
+        return
+      }
+    }
+    const isStockIn = isStockInSubmission(adjustForm.type, qty, previousQuantity, adjustForm.set_scope)
     if (isStockIn && isStockReceiptCreditIncomplete(adjustForm)) {
       notify(tr('fast_stockin_credit_due', 'Not Paid supplier stock needs a due date'), 'error')
       return
@@ -1312,6 +1338,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       unlockPricing,
       branchId: numericBranchId,
       batchId: adjustForm.batch_id,
+      setScope: adjustForm.set_scope,
     })
     // N14-D: the same rule routes/inventory.ts enforces (lib/stockReceiptGate.ts),
     // run here so the operator is told at the form rather than by a 400.
@@ -1337,6 +1364,10 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       userName: user?.name || user?.username,
       unlockPricing,
       batchId: batchWire.batchId,
+      setScope: scopedSet ? setScope : undefined,
+      expectedLotQuantity: scopedSet ? selectedLotQuantity : undefined,
+      expectedBranchQuantity: scopedSet ? previousQuantity : undefined,
+      client_request_id: createClientRequestId('stock-adjust'),
       // D4 (11.28): sent only when the date input was actually on screen
       // (InventoryStockModals.tsx's own visibility condition, recomputed
       // here) -- a value lingering from a hidden input must never re-date
@@ -1345,7 +1376,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       // (routes/inventory.ts converts it to an add of the difference), so it
       // carries the same date, supplier and receipt facts an add does.
       receivedDate: isStockIn
-          && (unlockPricing || adjustForm.type === 'set' || (Boolean(numericBranchId) && adjustForm.batch_id === 'new'))
+          && (unlockPricing || (Boolean(numericBranchId) && adjustForm.batch_id === 'new'))
           && adjustForm.received_date
         ? String(adjustForm.received_date)
         : undefined,
@@ -1377,6 +1408,10 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       } : undefined,
     }
     if (adjustForm.type === 'remove') {
+      if (adjustForm.batch_id !== '' && adjustForm.batch_id !== 'new' && Number.isFinite(selectedLotQuantity) && qty > selectedLotQuantity) {
+        notify(`Cannot remove ${qty} - only ${selectedLotQuantity} available in the selected received date`, 'error')
+        return
+      }
       if (numericBranchId) {
         const available = selectedBranchStock?.quantity || 0
         if (available <= 0) { notify(tr('no_stock_in_branch', 'No stock in this branch to remove'), 'error'); return }
@@ -1392,8 +1427,11 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       : adjustForm.type === 'remove'
         ? tr('confirm_remove_stock')
         : tr('confirm_add_stock')
+    const scopedSetConfirmation = scopedSet && setPreview
+      ? `\n${tr('stock_set_scope', 'Set quantity for')}: ${setScope === 'lot' ? tr('stock_set_scope_lot', 'Selected received date') : tr('stock_set_scope_branch', 'Branch total')}\n${tr('selected_received_date', 'Selected received date')}: ${adjustForm.batch_label}\n${tr('lot_quantity', 'Received-date quantity')}: ${setPreview.beforeLotQuantity} → ${setPreview.afterLotQuantity}\n${tr('branch_total', 'Branch total')}: ${setPreview.beforeBranchQuantity} → ${setPreview.afterBranchQuantity}`
+      : ''
     if (!beginSingleAction(adjustStockInFlightRef, { blocked: adjustSaving })) return
-    if (!window.confirm(adjustConfirmLabel)) {
+    if (!window.confirm(`${adjustConfirmLabel}${scopedSetConfirmation}`)) {
       finishSingleAction(adjustStockInFlightRef)
       return
     }
@@ -1418,7 +1456,10 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
         // (possibly 'new') batchId.
         const resolvedBatchId = (res as { batchId?: number | null } | null)?.batchId ?? null
         const inverseBatchId = resolvedBatchId != null ? resolvedBatchId : adjustmentRequest.batchId
-        actionHistory.pushAction({
+        // Scoped corrections are already registered in durable server action
+        // history. A second browser-only entry would offer a conflicting undo
+        // path and could replay a new client_request_id against stale stock.
+        if (!scopedSet) actionHistory.pushAction({
           label: `Adjust stock for ${previousSnapshot?.name || adjustModal?.name || 'product'}`,
           undo: async () => {
             // N14-D: an undo puts the branch back to the figure it held before.
@@ -1529,6 +1570,9 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       cost_khr: p.cost_price_khr || p.purchase_price_khr || 0,
       barcode: p.barcode || '',
       batch_id: '',
+      set_scope: 'lot',
+      batch_quantity: '',
+      batch_label: '',
       // Reset to today on every open -- a historical date from the last
       // adjustment must never silently carry into the next one (same
       // stale-draft rule ReceiveBatchModal documents for its own date).
@@ -1575,6 +1619,9 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       to_branch_id: defaultDestinationId !== defaultSourceId ? defaultDestinationId : '',
       quantity: 1,
       reason: '',
+      batch_id: '',
+      batch_quantity: '',
+      batch_label: '',
     })
   }
 
@@ -1752,6 +1799,15 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       notify(tr('invalid_quantity', 'Invalid quantity'), 'error')
       return
     }
+    const selectedLotQuantity = Number(transferForm.batch_quantity)
+    if (transferForm.batch_id === '' || !Number.isFinite(selectedLotQuantity)) {
+      notify(tr('transfer_pick_batch_first', 'Select a received date first'), 'error')
+      return
+    }
+    if (quantity > selectedLotQuantity) {
+      notify(tr('transfer_lot_stock_mismatch', 'Received-date stock does not match this branch. Refresh and check stock before transferring.'), 'error')
+      return
+    }
     if (!String(transferForm.reason || '').trim()) {
       notify(tr('transfer_reason_required', 'A transfer reason is required.'), 'error')
       return
@@ -1778,6 +1834,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       .replace('{product}', transferModal.name || '')
       .replace('{from}', fromBranch.name || '')
       .replace('{to}', toBranch.name || '')
+      + ` ${tr('selected_received_date', 'Selected received date')}: ${transferForm.batch_label}.`
     if (!window.confirm(confirmation)) {
       return
     }
@@ -1788,6 +1845,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
         fromBranchId: transferForm.from_branch_id,
         toBranchId: transferForm.to_branch_id,
         quantity,
+        batchId: Number(transferForm.batch_id),
         reason: transferForm.reason,
         userId: user?.id,
         userName: user?.name || user?.username,
