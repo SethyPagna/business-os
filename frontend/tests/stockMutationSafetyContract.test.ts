@@ -57,7 +57,7 @@ runTest('single branch transfer caps explicit lots by aggregate stock and retain
   const requestAt = transfer.indexOf('prepareTransferRun(user?.id', validationAt)
   assert.ok(validationAt > 0 && requestAt > validationAt, 'the aggregate-aware limit must reject before the single transfer request')
   assert.match(transfer, /batchId: selectedBatchId/)
-  assert.doesNotMatch(transfer, /transfer_pick_batch_first/)
+  assert.match(transfer, /transfer_pick_batch_first/, 'live multi-transfer must refuse a missing explicit lot')
   assert.doesNotMatch(transfer, /disabled=\{hasBatchLots && !selectedBatchId\}/)
   assert.match(transfer, /Automatic \(FIFO\)/)
   assert.match(transfer, /confirm_transfer_details/)
@@ -91,7 +91,7 @@ runTest('stock adjustments, transfers, and ledger edits retain review plus feedb
   const bulk = source('products/forms/BulkAddStockModal.tsx')
   const ledger = source('products/StockChangeSection.tsx')
 
-  assert.match(inventory, /window\.confirm\(adjustConfirmLabel\)/)
+  assert.match(inventory, /window\.confirm\(`\$\{adjustConfirmLabel\}\$\{scopedSetConfirmation\}`\)/)
   assert.match(inventory, /confirm_transfer_stock_details/)
   assert.match(inventory, /stock_transferred_details/)
   assert.match(inventory, /pendingTransfer \|\| !transferRetryReady \|\| !canTransferStock/)

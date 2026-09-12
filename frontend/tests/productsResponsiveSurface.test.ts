@@ -237,7 +237,7 @@ assert.doesNotMatch(transfer, /\{fromBranch && mode === 'multiple' \?/, 'the pic
 assert.match(transfer, /className=\{`modal-scroll min-w-0 space-y-4 p-4 sm:p-5/, 'one width-bounded iOS-safe scroll region, not flex-1 overflow-auto')
 assert.match(transfer, /grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3/, 'branch selects must stack before they clip their own names')
 assert.match(transfer, /sm:max-h-64 sm:overflow-auto/, 'the row list must not nest a second scroller inside the sheet on phones')
-assert.match(transfer, /flex flex-wrap items-center gap-x-3 gap-y-1\.5 px-3 py-2\.5 sm:flex-nowrap/, 'a row must restack rather than squeeze its quantity box away at 375px')
+assert.match(transfer, /flex flex-wrap items-center gap-x-3 gap-y-1\.5 px-3 py-2\.5 sm:px-4/, 'a row must keep wrapping for its explicit lot picker rather than squeeze quantity away')
 assert.match(posDetail, /aria-expanded=\{batchChoicesOpen\}/, 'POS batches must be collapsed behind one option button')
 assert.match(posDetail, /batchChoicesOpen \? <><div/, 'POS batch options must render only after the option button is expanded')
 assert.match(posDetail, /setSelectedBatchId\(batch\.id\); setSelectedUnlottedProductId\(null\); setSelectedDamagedLotId\(null\); setBatchChoicesOpen\(false\)/, 'choosing a POS batch must clear unrecorded/damaged intent and close its options')
