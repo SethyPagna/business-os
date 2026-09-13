@@ -11,9 +11,9 @@ export function readSaleMoneyCapability(signal: AbortSignal): Promise<boolean> {
 
 export function useSaleMoneyCapability(enabled: boolean, securityKey: string) {
   const scope = captureActorReadScope('sale-money-capability')
-  const key = `${enabled}:${securityKey}:${scope.authority}:${scope.revision}`
-  const currentKey = useRef(key); currentKey.current = key
   const [attempt, setAttempt] = useState(0)
+  const key = `${enabled}:${securityKey}:${scope.authority}:${scope.revision}:${attempt}`
+  const currentKey = useRef(key); currentKey.current = key
   const [state, setState] = useState<{ key: string; ready: boolean; failed: boolean; scope: ActorReadScope } | null>(null)
   useEffect(() => {
     if (!enabled) return
