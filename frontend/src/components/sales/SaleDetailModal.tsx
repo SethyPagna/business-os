@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { roundMoney2 } from '../../utils/moneyPrecision.ts'
+import { receiptRoundingDisplay } from '../../utils/receiptRoundingDisplay.ts'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import History from 'lucide-react/dist/esm/icons/history.js'
@@ -1138,8 +1138,8 @@ export default function SaleDetailModal({
       const staged = stagedLineFromSheetPick(candidate, { branchId }, 1)
       if (!staged) throw new Error('sale_item_pricing_invalid')
       replacementIntent = stagedLinePricingIntent({ ...staged, quantity }, savedExchangeRate)
-      removal = saleRemovalSubtotal(items as unknown as Record<string, unknown>[], sale as unknown as Record<string, unknown>, lineId)
-      replacementHeader = headerQuote(sumMoney4([removal.subtotalUsd, replacementIntent.pricing_quote.total_usd]))
+      removal = saleRemovalSubtotal(items as unknown as Record<string, unknown>[], sale as unknown as Record<string, unknown>, lineId, replacementIntent.pricing_quote.total_usd)
+      replacementHeader = headerQuote(removal.subtotalUsd)
     } catch {
       setAmendMutationError(t('money_precision_unavailable'))
       return
@@ -1320,6 +1320,7 @@ export default function SaleDetailModal({
   // apart -- receiptTotals.test.ts asserts the column reconciles to total_usd
   // on fixtures rather than a reader trusting that it does.
   const totals = receiptTotalsFigures(sale)
+  const roundingDisplay = totals.calculatedTotalUsd === null ? null : receiptRoundingDisplay(totals.roundingAdjustmentUsd, fmtUSD)
   const totalUsd = totals.totalUsd
   const totalKhr = totals.totalKhr
   const refundUsd = totals.refundUsd
@@ -2277,9 +2278,9 @@ export default function SaleDetailModal({
                       sub={refundKhr > 0 ? `-${fmtKHR(refundKhr)}` : null}
                     />
                   ) : null}
-                  {totals.calculatedTotalUsd !== null && totals.roundingAdjustmentUsd !== 0 ? <MoneyRow
-                    label={t('money_rounding_adjustment')}
-                    amount={`${totals.roundingAdjustmentUsd < 0 ? '-' : '+'}${fmtUSD(Math.abs(roundMoney2(totals.roundingAdjustmentUsd)))}`}
+                  {roundingDisplay ? <MoneyRow
+                    label={t(roundingDisplay.labelKey)}
+                    amount={roundingDisplay.amount}
                   /> : null}
                   <MoneyRow
                     label={t('total') || 'Total'}
