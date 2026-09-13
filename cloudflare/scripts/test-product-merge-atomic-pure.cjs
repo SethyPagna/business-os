@@ -85,6 +85,9 @@ function loadUndoAppliers(db) {
     return dependency.exports
   }
   stubs['./customerGenderRestoration'] = loadDependency(path.join(libDir, 'customerGenderRestoration.ts'))
+  // undoAppliers.ts now imports the exact sale money kernel; it depends only on
+  // moneyPrecision, so the dependency loader resolves it against the real lib.
+  stubs['./saleMoneyPrecision'] = loadDependency(path.join(libDir, 'saleMoneyPrecision.ts'))
   stubs['./productMergeLineage'] = loadDependency(path.join(libDir, 'productMergeLineage.ts'))
   stubs['./saleItemPricing'] = loadDependency(path.join(libDir, 'saleItemPricing.ts'))
   const source = fs.readFileSync(path.join(libDir, 'undoAppliers.ts'), 'utf8')

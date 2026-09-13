@@ -104,6 +104,11 @@ function loadUndoAppliers(d1) {
   }
   const stubs = {
     './customerGenderRestoration': loadActualDependency(path.join(LIB_DIR, 'customerGenderRestoration.ts')),
+    // undoAppliers.ts now imports the exact money kernels; Module._load only
+    // maps listed keys, so unlisted relative requests would resolve against this
+    // test file and fail.
+    './moneyPrecision': loadActualDependency(path.join(LIB_DIR, 'moneyPrecision.ts')),
+    './saleMoneyPrecision': loadActualDependency(path.join(LIB_DIR, 'saleMoneyPrecision.ts')),
     './actorSnapshot': loadRealActorSnapshot(),
     './productMerge': loadRealProductMerge(),
     // Bulk status replay is outside this suite; fail if it is invoked.

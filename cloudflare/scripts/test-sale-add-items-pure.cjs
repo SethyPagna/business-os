@@ -595,6 +595,8 @@ console.log('PASS 8b -- an unlotted oversell aborts on branch_stock itself, it i
   {
     const undoModule = compile('undoAppliers.ts', {
       './actorSnapshot': compile('actorSnapshot.ts'),
+      './moneyPrecision': moneyPrecision,
+      './saleMoneyPrecision': saleMoneyPrecision,
       './productMerge': productMerge,
       './productMergeLineage': productMergeLineage,
       './saleItemPricing': saleItemPricing,

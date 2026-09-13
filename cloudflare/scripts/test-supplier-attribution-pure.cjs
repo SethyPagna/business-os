@@ -89,7 +89,7 @@ const customerReturnEntitlement = loadReal('lib/customerReturnEntitlement.ts', {
   './moneyPrecision': moneyPrecision, './refundMoneyPrecision': refundMoneyPrecision,
   './saleItemPricing': saleItemPricing, './saleMoneyPrecision': saleMoneyPrecision,
 })
-const analyticsPrecision = { './reportMoneyPrecision': reportMoneyPrecision, './customerReturnEntitlement': customerReturnEntitlement, './refundMoneyPrecision': refundMoneyPrecision }
+const analyticsPrecision = { './saleMoneyPrecision': saleMoneyPrecision, './reportMoneyPrecision': reportMoneyPrecision, './customerReturnEntitlement': customerReturnEntitlement, './refundMoneyPrecision': refundMoneyPrecision }
 const productBatches = loadReal('lib/productBatches.ts', { './db': { getDb: () => db }, './batchCode': batchCode, './sqlBinding': sqlBinding, './moneyPrecision': moneyPrecision })
 const permissions = loadReal('lib/permissions.ts')
 const branchRoles = loadReal('lib/branchRoles.ts')

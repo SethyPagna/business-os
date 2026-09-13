@@ -125,8 +125,12 @@ const guardExports = {}
 new Function('exports', ts.transpileModule(guardDeclaration.getText(additionAst), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText)(guardExports)
+// undoAppliers.ts now imports the exact sale money kernel (depends only on
+// moneyPrecision, which loadModule already maps).
+const saleMoneyPrecisionKernel = loadModule('lib/saleMoneyPrecision.ts', require)
 const undoAppliers = loadModule('lib/undoAppliers.ts', (id) => {
   if (id === './actorSnapshot') return actorSnapshotKernel
+  if (id === './saleMoneyPrecision') return saleMoneyPrecisionKernel
   if (id === './productMerge') return productMergeKernel
   if (id === './productMergeLineage') return productMergeLineageKernel
   if (id === './saleItemPricing') return saleItemPricingKernel
