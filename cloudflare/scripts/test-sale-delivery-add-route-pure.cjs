@@ -134,6 +134,7 @@ function createFixture({ status = 'completed', isDelivery = 0, old = false, with
 
 function addDeliveryBody(stamp, suffix = 'base') {
   return {
+    money_precision_version: 1,
     kind: 'delivery_added',
     delivery_contact_id: 7,
     delivery_fee_usd: 2,
@@ -145,6 +146,16 @@ function addDeliveryBody(stamp, suffix = 'base') {
   }
 }
 
+// Precision v1 amendments are review-then-confirm: the first submission without
+// expected_header_quote is answered 409 sale_header_quote_conflict carrying the
+// exact header the server will write; the confirm resend echoes it back. The
+// idempotency, window, returns and stale-snapshot guards all run BEFORE that
+// review, so refusals below still use the bare draft body.
+async function reviewed(db, body, user = FULL_USER) {
+  const first = await request(db, '/101/amendments', 'POST', body, user)
+  if (first.status !== 409 || first.body.code !== 'sale_header_quote_conflict') return body
+  return { ...body, expected_header_quote: first.body.header_quote }
+}
 function counts(db) {
   return {
     amendments: get(db, "SELECT COUNT(*) AS n FROM sale_amendments WHERE sale_id=101").n,
@@ -205,7 +216,7 @@ async function assertRefused(fixtureOptions, expectedCode, label) {
   // driver snapshot, durable history and retry behavior.
   for (const status of ['completed', 'awaiting_delivery', 'awaiting_payment']) {
     const { db, stamp } = createFixture({ status })
-    const body = addDeliveryBody(stamp, status)
+    const body = await reviewed(db, addDeliveryBody(stamp, status))
     const before = counts(db)
     const first = await request(db, '/101/amendments', 'POST', body)
     assert.equal(first.status, 200, `${status}: ${JSON.stringify(first.body)}`)
@@ -263,6 +274,11 @@ async function assertRefused(fixtureOptions, expectedCode, label) {
       exchange_rate: 4000,
       total_usd: 10,
       total_khr: 40000,
+      // The precision core records the sale money lineage on every amendment
+      // snapshot (sales.ts precisionRecordMoney); this legacy sale is still v0.
+      money_precision_version: 0,
+      calculated_total_usd: null,
+      rounding_adjustment_usd: 0,
     })
     assert.equal(JSON.parse(ledger.after_json).delivery_contact_name, 'Dara Driver')
     const receipt = get(db, `SELECT actor_id,request_id,request_json,before_json,after_json,response_json
@@ -350,7 +366,8 @@ async function assertRefused(fixtureOptions, expectedCode, label) {
   ]) {
     const { db, stamp } = createFixture()
     const before = counts(db)
-    const raced = await request(racingDb(db, () => race.mutate(db)), '/101/amendments', 'POST', addDeliveryBody(stamp, `race-${race.label}`))
+    const raceBody = await reviewed(db, addDeliveryBody(stamp, `race-${race.label}`))
+    const raced = await request(racingDb(db, () => race.mutate(db)), '/101/amendments', 'POST', raceBody)
     assert.equal(raced.status, 409, `${race.label}: ${JSON.stringify(raced.body)}`)
     assert.equal(raced.body.code, 'write_conflict')
     assert.deepEqual(counts(db), before, `${race.label} race must roll back the delivery batch`)

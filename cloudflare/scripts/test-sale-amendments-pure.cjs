@@ -978,10 +978,17 @@ console.log('PASS 14 -- the detail summary describes the sale, not a moment in i
   assert.ok(/app\.post\('\/:id\/amendments'/.test(routes), 'the amendment endpoint must exist')
   assert.ok(/app\.get\('\/:id\/amendments'/.test(routes), 'the detail view needs a read endpoint')
   assert.ok(routes.includes("getActionTier(user, 'sales', 'amend')"), 'amendments must be gated on their own granular action')
-  const lineUpdateBlock = routes.slice(routes.indexOf("if (kind === 'line_updated')"), routes.indexOf('// --- increase /'))
-  assert.ok(lineUpdateBlock.includes('hasLayeredPriceEdit'), 'line_updated must distinguish the new layered POS price contract from legacy applied-price requests')
-  assert.ok(lineUpdateBlock.includes('planSaleLinePriceEdit({'), 'line_updated must delegate percent/fixed recomputation and claimed-price validation to the tested server kernel')
-  assert.ok(lineUpdateBlock.includes('priceLayersChanged'), 'a discount-only edit must be recognized even when the final applied price happens to stay unchanged')
+  // Precision v1 (4a2ce71b) replaced the layered price-edit kernel: a captured
+  // (v1) basket re-evaluates its immutable pricing pool and refuses any line
+  // quote the client did not review; a historical (pre-v1) basket goes through
+  // planHistoricalSaleLine. Both live in the block that opens at isLineUpdate and
+  // ends at the quantity-increase section.
+  const lineUpdateBlock = routes.slice(routes.indexOf("const isLineUpdate=kind==='line_updated'"), routes.indexOf('// --- increase /'))
+  assert.ok(lineUpdateBlock.length > 0, 'the line_updated block must exist between isLineUpdate and the increase section')
+  assert.ok(lineUpdateBlock.includes('evaluateCapturedPricingPool(pool,quantities)'), 'line_updated must recompute a captured basket through its immutable pricing pool, not a fresh catalog read')
+  assert.ok(lineUpdateBlock.includes("code:'sale_pricing_quote_conflict'"), 'line_updated must refuse a line quote the client did not review')
+  assert.ok(lineUpdateBlock.includes('planHistoricalSaleLine(original,body,nextQuantity,exchangeRate)'), 'line_updated on a historical basket must go through the historical pricing kernel at the recorded rate')
+  assert.ok(lineUpdateBlock.includes("target.manual.type=body.manual_discount_type===null?'none':body.manual_discount_type"), 'a discount-only edit must be applied to the captured line even when the applied price stays unchanged')
   assert.ok(routes.includes("base_price_usd: optional('base_price_usd')") && routes.includes("manual_discount_type: optional('manual_discount_type')"), 'idempotency digests must distinguish omitted layered fields from explicit clearing')
 
   // S4-24b is SUBSUMED, not duplicated: its endpoint writes a ledger entry, so
