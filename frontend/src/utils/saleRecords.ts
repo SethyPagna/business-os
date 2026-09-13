@@ -107,7 +107,7 @@ export function saleRecordKind(raw: unknown): SaleRecordKind {
 }
 
 /** How one before/after field should be rendered. */
-export type SaleRecordFieldFormat = 'money' | 'money_khr' | 'quantity' | 'status' | 'boolean' | 'text'
+export type SaleRecordFieldFormat = 'money' | 'money_4dp' | 'money_khr' | 'quantity' | 'status' | 'boolean' | 'text'
 
 /**
  * Field name -> how to render it, and what to call it.
@@ -122,6 +122,8 @@ export const SALE_RECORD_FIELD_RULES: Record<string, { key: string; format: Sale
   change_usd: { key: 'change', format: 'money' },
   change_khr: { key: 'change_khr', format: 'money_khr' },
   total_usd: { key: 'total', format: 'money' },
+  calculated_total_usd: { key: 'money_calculated_total', format: 'money_4dp' },
+  rounding_adjustment_usd: { key: 'money_rounding_adjustment', format: 'money_4dp' },
   quantity: { key: 'quantity', format: 'quantity' },
   unit_price_usd: { key: 'selling_price', format: 'money' },
   base_price_usd: { key: 'price', format: 'money' },
@@ -160,6 +162,9 @@ export const SALE_RECORD_FIELD_RULES: Record<string, { key: string; format: Sale
 /** Recovery records are intentionally narrow: operational metadata is not a sale detail. */
 const RECOVERED_SALE_ITEM_FIELDS = new Set(['item_count', 'stock_effect'])
 const CORRECTED_SALE_STOCK_FIELDS = new Set(['held_units', 'stock_effect'])
+// Version selects the snapshot contract; it is not itself a business-value
+// change. The two v1 amounts below make that contract visible with useful names.
+const SALE_RECORD_INTERNAL_FIELDS = new Set(['money_precision_version'])
 
 export interface SaleRecordFieldRow {
   field: string
@@ -198,6 +203,7 @@ export function saleRecordFieldRows(record: SaleRecord): SaleRecordFieldRow[] {
   if (!Array.isArray(record.changes)) return []
   return record.changes.flatMap((change) => {
     if (!change || typeof change.field !== 'string') return []
+    if (SALE_RECORD_INTERNAL_FIELDS.has(change.field)) return []
     if (record.kind === 'sale_items_recovered' && !RECOVERED_SALE_ITEM_FIELDS.has(change.field)) return []
     if (record.kind === 'sale_stock_corrected' && !CORRECTED_SALE_STOCK_FIELDS.has(change.field)) return []
     const before = normalizeValueState(change.before)

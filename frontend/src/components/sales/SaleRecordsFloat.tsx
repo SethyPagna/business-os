@@ -87,6 +87,8 @@ const FIELD_FALLBACKS: Record<string, string> = {
   change: 'Change',
   change_khr: 'Change (KHR)',
   total: 'Sale total',
+  money_calculated_total: 'Calculated total',
+  money_rounding_adjustment: 'Rounding adjustment',
   quantity: 'Quantity',
   selling_price: 'Selling price',
   price: 'Price',
@@ -151,6 +153,11 @@ export function SaleRecordChangeTable({ record, t, fmtUSD, fmtKHR }: SaleRecordC
     if (row.format === 'money') {
       const parsed = Number(value)
       return Number.isFinite(parsed) ? fmtUSD(parsed) : label('value_changed', 'Value changed')
+    }
+    if (row.format === 'money_4dp') {
+      const parsed = Number(value)
+      if (!Number.isFinite(parsed)) return label('value_changed', 'Value changed')
+      return parsed < 0 ? `-$${Math.abs(parsed).toFixed(4)}` : `$${parsed.toFixed(4)}`
     }
     if (row.format === 'money_khr') {
       const parsed = Number(value)
