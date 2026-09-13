@@ -96,6 +96,13 @@ export type CustomerReturnExpectedQuoteV1 = Omit<CustomerReturnQuoteV1,
   items: Array<Omit<CustomerReturnQuoteLine, 'refund_snapshot_json'>>
 }
 
+export type CustomerReturnRestorationV1 = RefundMoneyPrecisionV1 & {
+  id: number
+  sale_id: number
+  total_refund_khr: number
+  items: Array<{ sale_item_id: number | null; quantity: number; total_usd: number; refund_snapshot_json: string | null }>
+}
+
 function fail(code: string): never { throw new SaleMoneyContractError(code) }
 function positiveId(value: unknown, code: string): number {
   const number = Number(value)
@@ -243,6 +250,66 @@ export function canonicalCustomerReturnExpectedQuote(value: unknown): CustomerRe
   return { money_precision_version: 1, sale_id: saleId, sale_revision: Number(quote.sale_revision),
     calculated_refund_usd: header.calculated_refund_usd, rounding_adjustment_usd: header.rounding_adjustment_usd,
     total_refund_usd: header.total_refund_usd, total_refund_khr: canonicalMoney4(quote.total_refund_khr, true), items }
+}
+
+/** Validates a projected set of active v1 returns using only their immutable
+ * consumed-entitlement snapshots. This deliberately does not substitute
+ * mutable sale/catalog prices when a cancelled return is restored. */
+export function validateCustomerReturnRestorationCohortV1(returns: CustomerReturnRestorationV1[]): void {
+  if (returns.length > CUSTOMER_RETURN_MAX_LINES * 20) fail('customer_return_cohort_too_large')
+  const returnIds = new Set<number>()
+  const lines = new Map<number, {
+    sold: number; quantity: number; calculated: number; entitlement: number; payoutCap: number
+    identity: string
+  }>()
+  let saleId: number | null = null
+  let calculatedTotal = 0
+  let paidTotal = 0
+  let payoutCap: number | null = null
+  for (const row of returns) {
+    const id = positiveId(row.id, 'customer_return_cohort_invalid')
+    const rowSaleId = positiveId(row.sale_id, 'customer_return_cohort_invalid')
+    if (returnIds.has(id) || (saleId != null && saleId !== rowSaleId) || !row.items.length) fail('customer_return_cohort_invalid')
+    returnIds.add(id); saleId = rowSaleId
+    const header = validateRefundMoneySnapshot(row)
+    const itemIds = new Set<number>()
+    let headerCalculated = 0
+    let rate: number | null = null
+    for (const item of row.items) {
+      const snapshot = parseCustomerReturnRefundSnapshot(item.refund_snapshot_json)
+      if (!snapshot || snapshot.sale_id !== rowSaleId || snapshot.sale_item_id !== item.sale_item_id
+        || snapshot.return_quantity !== item.quantity || snapshot.calculated_refund_usd !== canonicalMoney4(item.total_usd, true)
+        || itemIds.has(snapshot.sale_item_id)) fail('customer_return_cohort_invalid')
+      itemIds.add(snapshot.sale_item_id)
+      if (rate != null && rate !== snapshot.exchange_rate) fail('customer_return_cohort_invalid')
+      rate = snapshot.exchange_rate
+      const identity = JSON.stringify({ line_key: snapshot.line_key, pool_key: snapshot.pool_key,
+        digest: snapshot.source_pricing_snapshot_digest, allocation: snapshot.receipt_allocation })
+      const aggregate = lines.get(snapshot.sale_item_id) || { sold: snapshot.sold_quantity, quantity: 0,
+        calculated: 0, entitlement: snapshot.net_entitlement_usd, payoutCap: snapshot.sale_product_payout_cap_usd, identity }
+      if (aggregate.sold !== snapshot.sold_quantity || aggregate.entitlement !== snapshot.net_entitlement_usd
+        || aggregate.payoutCap !== snapshot.sale_product_payout_cap_usd || aggregate.identity !== identity) fail('customer_return_cohort_invalid')
+      aggregate.quantity = addQuantity(aggregate.quantity, snapshot.return_quantity)
+      aggregate.calculated = sumMoney4([aggregate.calculated, snapshot.calculated_refund_usd])
+      if (payoutCap != null && payoutCap !== snapshot.sale_product_payout_cap_usd) fail('customer_return_cohort_invalid')
+      payoutCap = snapshot.sale_product_payout_cap_usd
+      lines.set(snapshot.sale_item_id, aggregate)
+      headerCalculated = sumMoney4([headerCalculated, snapshot.calculated_refund_usd])
+    }
+    if (headerCalculated !== header.calculated_refund_usd || rate == null
+      || canonicalMoney4(row.total_refund_khr, true) !== multiplyMoney4(header.total_refund_usd, rate)) fail('customer_return_cohort_invalid')
+    calculatedTotal = sumMoney4([calculatedTotal, header.calculated_refund_usd])
+    paidTotal = sumMoney4([paidTotal, header.total_refund_usd])
+  }
+  for (const aggregate of lines.values()) {
+    if (quantityGreater(aggregate.quantity, aggregate.sold)
+      || aggregate.calculated > prorateCustomerReturnMoney4(aggregate.entitlement, aggregate.quantity, aggregate.sold)) {
+      fail('money_precision_refund_cap_exceeded')
+    }
+  }
+  if (returns.length && (payoutCap == null || paidTotal > Math.min(payoutCap, roundMoney2(calculatedTotal)))) {
+    fail('money_precision_refund_cap_exceeded')
+  }
 }
 
 export function buildCustomerReturnQuoteV1(input: {

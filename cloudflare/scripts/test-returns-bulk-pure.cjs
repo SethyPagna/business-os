@@ -6,7 +6,9 @@ const ts = require('typescript')
 const Database = require('better-sqlite3')
 const root = path.join(__dirname, '..')
 const cache = new Map()
-const actual = new Set(['actorSnapshot','movementBranchName','db', 'permissions', 'saleRecords', 'saleRecordEvents', 'returnBulkAction'])
+const actual = new Set(['actorSnapshot','movementBranchName','db', 'permissions', 'saleRecords', 'saleRecordEvents',
+  'moneyPrecision', 'saleMoneyPrecision', 'refundMoneyPrecision', 'promotionRules', 'saleItemPricing',
+  'customerReturnEntitlement', 'returnBulkAction'])
 
 function load(rel) {
   if (cache.has(rel)) return cache.get(rel).exports
@@ -38,6 +40,7 @@ function fixture() {
   }
   let batches = 0
   let failAt = null
+  let beforeBatch = null
   const env = { DB: {
     prepare(text) {
       return { bind(...params) {
@@ -52,6 +55,7 @@ function fixture() {
     },
     async batch(statements) {
       batches += 1
+      if (beforeBatch) { const hook = beforeBatch; beforeBatch = null; await hook() }
       return sql.transaction(() => statements.map(statement => {
         if (failAt && statement.text.includes(failAt)) throw new Error('injected failure')
         const result = sql.prepare(statement.text).run(...statement.params)
@@ -59,7 +63,8 @@ function fixture() {
       }))()
     },
   } }
-  return { sql, env, batches: () => batches, fail: value => { failAt = value } }
+  return { sql, env, batches: () => batches, fail: value => { failAt = value },
+    beforeBatch: value => { beforeBatch = value } }
 }
 
 function seed(f) {
@@ -83,6 +88,32 @@ function seed(f) {
       VALUES(1,1,1,2),(3,2,1,3);
     UPDATE returns SET total_refund_usd=8,total_refund_khr=0 WHERE id=1;
   `)
+}
+
+function refundSnapshot(before, quantity, calculated, sold = 1) {
+  const after = before + quantity
+  return JSON.stringify({ version: 1, sale_id: 1, sale_item_id: 1, line_key: 'bulk-v1-line',
+    pool_key: 'bulk-v1-pool', source_sale_revision: 0, source_pricing_snapshot_digest: 'a'.repeat(64),
+    sold_quantity: sold, return_quantity: quantity, returned_quantity_before: before, returned_quantity_after: after,
+    receipt_allocation: { discount_usd: 0, membership_discount_usd: 0, tax_usd: 0, net_entitlement_usd: 10 },
+    net_entitlement_usd: 10, calculated_refund_before_usd: before * 10,
+    calculated_refund_after_usd: after * 10, calculated_refund_usd: calculated,
+    calculated_refund_khr: calculated * 4000, exchange_rate: 4000,
+    sale_product_entitlement_usd: 10, sale_product_payout_cap_usd: 10 })
+}
+
+function insertV1Return(f, { id, status, before, quantity, calculated }) {
+  f.sql.prepare(`INSERT INTO returns(id,return_number,sale_id,return_scope,status,return_type,branch_id,updated_at,
+    money_precision_version,calculated_refund_usd,rounding_adjustment_usd,total_refund_usd,total_refund_khr)
+    VALUES(@id,@number,1,'customer',@status,'refund',1,@stamp,1,@calculated,0,@calculated,@khr)`).run({
+    id, number: `V1-RET-${id}`, status, stamp: `v1-${id}`, calculated, khr: calculated * 4000,
+  })
+  f.sql.prepare(`INSERT INTO return_items(return_id,sale_item_id,product_id,product_name,quantity,total_usd,total_khr,
+    applied_price_usd,applied_price_khr,stock_action,branch_id,refund_snapshot_json)
+    VALUES(@id,1,1,'Customer product',@quantity,@calculated,@khr,@unit,@unitKhr,'none',1,@snapshot)`).run({
+    id, quantity, calculated, khr: calculated * 4000, unit: calculated / quantity,
+    unitKhr: calculated * 4000 / quantity, snapshot: refundSnapshot(before, quantity, calculated),
+  })
 }
 
 function request(f, ids, field, source, target, key) {
@@ -151,6 +182,32 @@ async function run() {
   await assert.rejects(() => helper.applyReturnBulkAction(f.env, blockedUser, request(f, [1], 'status', 'completed', 'cancelled', 'return-blocked-001')), /Bulk Returns access is required/)
   assert.equal(snapshot(f), blockedState)
   console.log('PASS explicit returns:bulk denial blocks a full-Returns user before writes')
+
+  f = fixture(); seed(f)
+  f.sql.exec("UPDATE returns SET sale_id=NULL WHERE id=1; UPDATE sale_items SET quantity=1 WHERE id=1")
+  insertV1Return(f, { id: 10, status: 'completed', before: 0, quantity: 0.6, calculated: 6 })
+  insertV1Return(f, { id: 11, status: 'cancelled', before: 0.6, quantity: 0.4, calculated: 4 })
+  const restoredV1 = await helper.applyReturnBulkAction(f.env, user,
+    request(f, [11], 'status', 'cancelled', 'completed', 'v1-restore-001'))
+  assert.equal(f.sql.prepare('SELECT status FROM returns WHERE id=11').get().status, 'completed')
+  await replay(f, restoredV1.actionHistoryId, 'undo', 0)
+  assert.equal(f.sql.prepare('SELECT status FROM returns WHERE id=11').get().status, 'cancelled')
+  insertV1Return(f, { id: 12, status: 'completed', before: 0, quantity: 0.4, calculated: 4 })
+  const beforeOverCapReplay = snapshot(f)
+  await assert.rejects(() => replay(f, restoredV1.actionHistoryId, 'redo', 1), /exact refund entitlement changed/i)
+  assert.equal(snapshot(f), beforeOverCapReplay, 'over-cap redo leaves returns, stock, history and generation untouched')
+  console.log('PASS v1 bulk restore and replay use stored entitlement snapshots and reject a cumulative over-cap redo atomically')
+
+  f = fixture(); seed(f)
+  f.sql.exec("UPDATE returns SET sale_id=NULL WHERE id=1; UPDATE sale_items SET quantity=1 WHERE id=1")
+  insertV1Return(f, { id: 10, status: 'completed', before: 0, quantity: 0.6, calculated: 6 })
+  insertV1Return(f, { id: 11, status: 'cancelled', before: 0.6, quantity: 0.4, calculated: 4 })
+  f.beforeBatch(() => insertV1Return(f, { id: 12, status: 'completed', before: 0, quantity: 0.4, calculated: 4 }))
+  await assert.rejects(() => helper.applyReturnBulkAction(f.env, user,
+    request(f, [11], 'status', 'cancelled', 'completed', 'v1-restore-race-001')), /changed|nothing/i)
+  assert.equal(f.sql.prepare('SELECT status FROM returns WHERE id=11').get().status, 'cancelled')
+  assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM return_bulk_operations WHERE request_id='v1-restore-race-001'").get().n, 0)
+  console.log('PASS v1 restore freezes the complete active return graph and rejects an interposed cohort change before writes')
 
   f = fixture(); seed(f)
   const method = await helper.applyReturnBulkAction(f.env, user, request(f, [1,2], 'return_type', 'refund', 'writeoff', 'return-method-001'))

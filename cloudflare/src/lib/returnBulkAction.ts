@@ -6,6 +6,7 @@ import { bumpVersion } from './cache'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { actorSnapshot } from './actorSnapshot'
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from './saleRecordEvents'
+import { validateCustomerReturnRestorationCohortV1, type CustomerReturnRestorationV1 } from './customerReturnEntitlement'
 
 export const RETURN_BULK_ACTION_KIND = 'return.fields.bulk'
 export const RETURN_BULK_LIMIT = 25
@@ -78,6 +79,7 @@ type Member = {
   returnNumber: string
   saleId: number | null
   saleRevision: number | null
+  moneyPrecisionVersion: number
   scope: 'customer' | 'supplier'
   before: { status: string; return_type: string; supplier_settlement: string }
   after: { status: string; return_type: string; supplier_settlement: string }
@@ -340,6 +342,69 @@ function permission(user: SessionUser): void {
   if (getActionTier(user, 'returns', 'bulk') !== 'full') fail('Bulk Returns access is required.', 403)
 }
 
+const ENTITLEMENT_GRAPH_MAX_BYTES = 1_500_000
+function entitlementGraphExpression(): string {
+  return `json_object(
+    'returns',COALESCE((SELECT json_group_array(json_object(
+      'id',id,'sale_id',sale_id,'status',status,'updated_at',updated_at,
+      'money_precision_version',money_precision_version,'calculated_refund_usd',calculated_refund_usd,
+      'rounding_adjustment_usd',rounding_adjustment_usd,'total_refund_usd',total_refund_usd,'total_refund_khr',total_refund_khr
+    )) FROM (SELECT id,sale_id,status,updated_at,money_precision_version,calculated_refund_usd,
+      rounding_adjustment_usd,total_refund_usd,total_refund_khr FROM returns
+      WHERE COALESCE(return_scope,'customer')='customer'
+        AND EXISTS(SELECT 1 FROM json_each(@entitlementSaleIds) ids WHERE CAST(ids.value AS INTEGER)=sale_id)
+      ORDER BY id)),json('[]')),
+    'items',COALESCE((SELECT json_group_array(json_object(
+      'id',id,'return_id',return_id,'sale_item_id',sale_item_id,'quantity',quantity,
+      'total_usd',total_usd,'refund_snapshot_json',refund_snapshot_json
+    )) FROM (SELECT ri.id,ri.return_id,ri.sale_item_id,ri.quantity,ri.total_usd,ri.refund_snapshot_json
+      FROM return_items ri JOIN returns r ON r.id=ri.return_id
+      WHERE COALESCE(r.return_scope,'customer')='customer'
+        AND EXISTS(SELECT 1 FROM json_each(@entitlementSaleIds) ids WHERE CAST(ids.value AS INTEGER)=r.sale_id)
+      ORDER BY ri.id)),json('[]'))
+  )`
+}
+
+async function v1EntitlementGuards(db: D1Compat, members: Member[], target: 'before' | 'after'): Promise<Statement[]> {
+  const changed = members.filter(member => member.changed && member.scope === 'customer'
+    && member.saleId && member.moneyPrecisionVersion === 1 && member.before.status !== member.after.status)
+  const saleIds = [...new Set(changed.map(member => member.saleId!))]
+  if (!saleIds.length) return []
+  const entitlementSaleIds = JSON.stringify(saleIds)
+  const graph = await db.prepare(`SELECT ${entitlementGraphExpression()} AS value`).get<{ value: string }>({ entitlementSaleIds })
+  const authorityJson = String(graph?.value || '')
+  if (!authorityJson || new TextEncoder().encode(authorityJson).byteLength > ENTITLEMENT_GRAPH_MAX_BYTES) {
+    fail('The exact refund history is too large to restore safely.', 400)
+  }
+  const parsed = JSON.parse(authorityJson) as { returns: Row[]; items: Row[] }
+  if (!Array.isArray(parsed.returns) || !Array.isArray(parsed.items) || parsed.items.length > 1_000) {
+    fail('The exact refund history is too large to restore safely.', 400)
+  }
+  const override = new Map(changed.map(member => [member.id, member[target].status]))
+  for (const saleId of saleIds) {
+    const headers = parsed.returns.filter(row => Number(row.sale_id) === saleId)
+    const cohort = (projected: boolean) => headers.filter(row => {
+      const status = projected ? override.get(Number(row.id)) ?? normalize(row.status, 'completed') : normalize(row.status, 'completed')
+      return status !== 'cancelled'
+    }).map(row => ({
+      id: Number(row.id), sale_id: saleId, money_precision_version: Number(row.money_precision_version) as 1,
+      calculated_refund_usd: Number(row.calculated_refund_usd), rounding_adjustment_usd: Number(row.rounding_adjustment_usd),
+      total_refund_usd: Number(row.total_refund_usd), total_refund_khr: Number(row.total_refund_khr),
+      items: parsed.items.filter(item => Number(item.return_id) === Number(row.id)).map(item => ({
+        sale_item_id: item.sale_item_id == null ? null : Number(item.sale_item_id), quantity: Number(item.quantity),
+        total_usd: Number(item.total_usd), refund_snapshot_json: item.refund_snapshot_json == null ? null : String(item.refund_snapshot_json),
+      })),
+    })) as CustomerReturnRestorationV1[]
+    try {
+      validateCustomerReturnRestorationCohortV1(cohort(false))
+      validateCustomerReturnRestorationCohortV1(cohort(true))
+    } catch {
+      fail('The exact refund entitlement changed. Review the return history before restoring it.', 409)
+    }
+  }
+  return [guard(`${entitlementGraphExpression()}=@entitlementAuthorityJson`, { entitlementSaleIds, entitlementAuthorityJson: authorityJson })]
+}
+
 async function buildMembers(db: D1Compat, request: BulkRequest): Promise<{ members: Member[]; guards: Statement[] }> {
   const ids = request.items.map((item) => item.id)
   const returns = await rowsForIds<Row>(db, ids, (marks) => `SELECT r.*,COALESCE(v.revision,0) AS write_revision,${movementFingerprint('r.id')} AS movement_fingerprint FROM returns r LEFT JOIN return_write_revisions v ON v.return_id=r.id WHERE r.id IN (${marks})`)
@@ -388,6 +453,7 @@ async function buildMembers(db: D1Compat, request: BulkRequest): Promise<{ membe
       returnNumber: String(row.return_number || expected.id),
       saleId: Number(row.sale_id) || null,
       saleRevision: null,
+      moneyPrecisionVersion: Number(row.money_precision_version) || 0,
       scope,
       before,
       after,
@@ -488,6 +554,7 @@ export async function applyReturnBulkAction(env: Env, user: SessionUser, raw: Ro
     return JSON.parse(String(previous.receipt_json)) as Row
   }
   const { members, guards } = await buildMembers(db, request)
+  guards.push(...await v1EntitlementGuards(db, members, 'after'))
   const operationId = crypto.randomUUID()
   const stamp = new Date().toISOString()
   const snapshot: Snapshot = { version: 1, operationId, field: request.field, members,
@@ -561,6 +628,7 @@ export async function replayReturnBulkAction(env: Env, user: SessionUser, direct
   const directionSign: 1 | -1 = direction === 'undo' ? -1 : 1
   const stamp = new Date().toISOString()
   const statements: Statement[] = [guard("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore') AND EXISTS(SELECT 1 FROM return_bulk_operations o JOIN action_history h ON h.id=o.history_id JOIN undo_snapshots s ON s.id=o.snapshot_id WHERE o.id=@operation AND o.generation=@generation AND h.id=@history AND h.status=@expectedStatus AND s.kind=@kind AND s.status=@snapshotStatus AND s.payload_json=@snapshot)", { operation: operation.id, generation, history: historyId, expectedStatus, kind: RETURN_BULK_ACTION_KIND, snapshotStatus, snapshot: operation.payload_json })]
+  statements.push(...await v1EntitlementGuards(db, snapshot.members, direction === 'undo' ? 'before' : 'after'))
   for (const member of snapshot.members.filter((candidate) => candidate.changed)) {
     statements.push(guard(`EXISTS(SELECT 1 FROM returns r JOIN return_bulk_members m ON m.return_id=r.id WHERE m.operation_id=@operation AND r.id=@id AND m.revision=COALESCE((SELECT revision FROM return_write_revisions WHERE return_id=r.id),0) AND m.stock_fingerprint=${movementFingerprint('r.id')} AND (m.sale_id IS NULL OR (EXISTS(SELECT 1 FROM sales WHERE id=m.sale_id) AND m.sale_revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=m.sale_id),0))))`, { operation: operation.id, id: member.id }))
   }

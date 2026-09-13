@@ -130,6 +130,11 @@ async function main() {
   }
   assert.deepEqual(payouts, [3.34, 3.33, 3.34])
   assert.equal(prior.reduce((sum, row) => sum + row.total_refund_usd, 0), 10.01)
+  const restorationCohort = prior.map(row => ({ ...row, sale_id: 1, total_refund_khr: row.total_refund_usd * 4000 }))
+  assert.doesNotThrow(() => m.validateCustomerReturnRestorationCohortV1(restorationCohort))
+  assert.throws(() => m.validateCustomerReturnRestorationCohortV1([
+    ...restorationCohort, { ...restorationCohort[0], id: 4 },
+  ]), /refund_cap_exceeded/, 'restoring stored snapshots cannot exceed the captured quantity or payout cap')
   assert.throws(() => m.buildCustomerReturnQuoteV1({ sale, requested: [{ sale_item_id: 1, quantity: 1 }], previous: prior }), /quantity_exceeded/)
   const tampered = JSON.parse(prior[0].items[0].refund_snapshot_json)
   tampered.calculated_refund_usd += 0.0001
