@@ -47,7 +47,7 @@ import { maybeRunScheduledImportRetention, cleanOrphanImportStaging } from './li
 import { maybeRunScheduledImageAudit } from './lib/imageAudit'
 import { maybeRunScheduledEphemeralRetention } from './lib/ephemeralRetention'
 import { reapStalledImportJobs } from './routes/importJobs'
-import { ReportMoneyPrecisionError } from './lib/reportMoneyPrecision'
+import { ReportMoneyPrecisionError, reportMoneyHttpError } from './lib/reportMoneyPrecision'
 
 export type Env = {
   DB: D1Database
@@ -156,25 +156,12 @@ const app = new Hono<{ Bindings: Env }>()
 // a bare string.
 app.onError((error, c) => {
   if (error instanceof ReportMoneyPrecisionError) {
-    if (error.code === 'snapshot_changed' || error.code === 'maintenance_restore') {
-      return c.json({
-        success: false,
-        error: 'Report snapshot changed; retry the request',
-        code: error.code,
-      }, 409)
-    }
-    if (error.code === 'too_many_rows') {
-      return c.json({
-        success: false,
-        error: 'Report is too large for one request',
-        code: error.code,
-      }, 413)
-    }
+    const mapped = reportMoneyHttpError(error)
     return c.json({
       success: false,
-      error: 'Report contains unsupported money data',
+      error: mapped.message,
       code: error.code,
-    }, 422)
+    }, mapped.status)
   }
   console.error('[worker] unhandled error', c.req.method, c.req.path, error)
   // Reported through waitUntil, never awaited: the response must not wait on
