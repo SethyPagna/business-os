@@ -1,4 +1,4 @@
-import { roundMoney4, roundMoney2, multiplyMoney4, percentageMoney4, sumMoney4, subtractMoney4, settlementRounding4 } from './moneyPrecision.ts'
+import { roundMoney4, roundMoney2, multiplyMoney4, percentageMoney4, sumMoney4, subtractDecimalSum, settlementRounding4 } from './moneyPrecision.ts'
 
 export type SaleMutationHeaderQuote = {
   version:1; exchange_rate:number; subtotal_usd:number; discount_usd:number;
@@ -14,6 +14,7 @@ export class SaleHeaderQuoteError extends Error {
 function money(value:unknown, nullable=false, recorded=false):number {
   if(nullable && value==null)return 0
   if(typeof value!=='number'||!Number.isFinite(value)||value<0||(!recorded&&roundMoney4(value)!==value))throw new SaleHeaderQuoteError()
+  roundMoney4(value) // Validate the kernel bound without replacing a recorded operand.
   return value
 }
 /** The existing amended-tax policy, shared verbatim with review UI. No current
@@ -26,9 +27,9 @@ export function quoteSaleMutationHeader(
   const recorded=Number(sale.money_precision_version)===0
   const subtotal=money(subtotalUsd,false,recorded),oldSubtotal=money(sale.subtotal_usd,true,recorded)
   const discount=money(sale.discount_usd,true,recorded),member=money(sale.membership_discount_usd,true,recorded),storedTax=money(sale.tax_usd,true,recorded)
-  const discounts=sumMoney4([discount,member])
-  if(discounts>subtotal||discounts>oldSubtotal)throw new SaleHeaderQuoteError()
-  const before=subtractMoney4(oldSubtotal,discounts),after=subtractMoney4(subtotal,discounts)
+  const exactBefore=subtractDecimalSum(oldSubtotal,[discount,member]),exactAfter=subtractDecimalSum(subtotal,[discount,member])
+  if(Number(exactBefore)<0||Number(exactAfter)<0)throw new SaleHeaderQuoteError()
+  const before=roundMoney4(exactBefore),after=roundMoney4(exactAfter)
   const rawPercent=Number(String(settings.tax_rate??'').trim()),percent=Number.isFinite(rawPercent)&&rawPercent>0?rawPercent:0
   const enabledText=String(settings.tax_enabled??'').trim().toLowerCase()
   const enabled=enabledText===''?percent>0:!['0','false','off','no'].includes(enabledText)
@@ -74,8 +75,7 @@ export function compareSaleHeaderQuote(expected:unknown,actual:SaleMutationHeade
     ||!['recomputed','no_tax_on_sale','tax_disabled','no_rate','rate_mismatch'].includes(String(row.tax_reason)))throw new SaleHeaderQuoteError()
   if(Number(row.exchange_rate)<=0||row.tax_recomputed!==(row.tax_reason==='recomputed'))throw new SaleHeaderQuoteError()
   try {
-    const net=subtractMoney4(Number(row.subtotal_usd),sumMoney4([Number(row.discount_usd),Number(row.membership_discount_usd)]))
-    if(net<0)throw new SaleHeaderQuoteError()
+    if(Number(subtractDecimalSum(Number(row.subtotal_usd),[Number(row.discount_usd),Number(row.membership_discount_usd)]))<0)throw new SaleHeaderQuoteError()
     const raw=sumMoney4([Number(row.subtotal_usd),-Number(row.discount_usd),-Number(row.membership_discount_usd),Number(row.tax_usd),row.is_delivery&&row.delivery_fee_paid_by==='customer'?Number(row.delivery_fee_usd):0])
     const rounded=settlementRounding4(raw)
     if(raw!==row.calculated_total_usd||rounded.payableTotal2!==row.total_usd||rounded.roundingAdjustment4!==row.rounding_adjustment_usd
