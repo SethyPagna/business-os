@@ -6554,5 +6554,7 @@
   "return_v1_session_changed": "Your session changed. Close and reopen this return before continuing.",
   "return_v1_storage_failed": "The original return request could not be saved safely. No new request was sent.",
   "return_v1_replacements_unsupported": "Create the replacement sale separately for this net-refund return.",
-  "return_v1_quote_loading": "Checking the net refund…"
+  "return_v1_quote_loading": "Checking the net refund…",
+  "sale_line_recovery_pending": "An earlier change to this sale needs confirmation. Its original request is saved; other changes remain paused.",
+  "sale_line_review_updated_total": "Review the updated total"
 }
