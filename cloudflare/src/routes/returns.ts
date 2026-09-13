@@ -643,6 +643,32 @@ async function recordReturnItemBatchAllocations(
   if (inserts.length) await db.batch(inserts)
 }
 
+// The SALE decides a return's money version -- never the request body. A
+// pre-v1 client (an offline queue, or a cached PWA shell that never reloaded)
+// posts a legacy return body with no money_precision_version. The legacy
+// branch prices such a body at gross line price x quantity: no sale-level
+// discount, no cumulative payout cap. Against a v1 sale that is wrong twice
+// over -- one whole-line return can be paid more than the sale's entire
+// payable, and the v0 row it writes then poisons the sale, because every later
+// v1 quote reads that legacy header and fails money_precision_invalid_legacy_shape
+// forever. Both create and edit therefore read the SALE's recorded version and
+// refuse with the same code POST /api/sales uses for a legacy body, so one
+// vocabulary covers "this client is too old to price this correctly".
+const MONEY_PRECISION_REVIEW_NEEDED = {
+  error: 'Keep this return and review it with the current app before recording it.',
+  code: 'money_precision_review_needed',
+} as const
+
+/** The sale's recorded money precision version, or null when there is no such
+ * sale (a manual return with no sale_id has no version to inherit). */
+async function saleMoneyPrecisionVersion(db: ReturnType<typeof getDb>, saleId: unknown): Promise<number | null> {
+  const id = Number(saleId)
+  if (!Number.isSafeInteger(id) || id <= 0) return null
+  const row = await db.prepare('SELECT money_precision_version FROM sales WHERE id=? LIMIT 1')
+    .get<{ money_precision_version: number | null }>([id])
+  return row ? Number(row.money_precision_version) || 0 : null
+}
+
 // Validate requested return quantities against what's actually returnable
 // (sold minus already-returned), mirroring assertReturnableItems in the
 // original. `excludeReturnId` lets an update re-validate without double
@@ -1273,6 +1299,21 @@ app.post('/', async (c) => {
       code: 'client_request_id_required', action: 'refresh_required',
     }, 400)
   }
+  // Read the idempotency receipt BEFORE the body is canonicalised so a replay
+  // of an already-recorded return still answers with what was recorded: the
+  // version gate below is about NEW writes, not about re-reading history.
+  const readReceipt = async () => db.prepare(`SELECT return_id,sale_id,request_digest,response_json
+    FROM return_create_receipts WHERE actor_id=? AND request_id=? LIMIT 1`)
+    .get<{ return_id: number; sale_id: number | null; request_digest: string; response_json: string }>([authenticatedActorId, clientRequestId])
+  const priorReceipt = await readReceipt()
+  // The sale decides. A body that is not explicitly v1 (absent, or 0) may not
+  // open a return against a v1 sale -- refused here, above canonicalisation, so
+  // an explicit 0 gets the same reviewable code as an absent one instead of the
+  // canonicaliser's generic 400.
+  if (!priorReceipt && body.money_precision_version !== 1
+    && (await saleMoneyPrecisionVersion(db, body.sale_id)) === 1) {
+    return c.json({ ...MONEY_PRECISION_REVIEW_NEEDED }, 409)
+  }
   let canonicalIntent: Record<string, unknown>
   try {
     canonicalIntent = canonicalReturnCreateIntent(body as Record<string, unknown>)
@@ -1282,10 +1323,6 @@ app.post('/', async (c) => {
   const requestJson = JSON.stringify(canonicalIntent)
   const requestDigest = await sha256Hex(requestJson)
   const requestedSaleId = Number(canonicalIntent.sale_id) || null
-  const readReceipt = async () => db.prepare(`SELECT return_id,sale_id,request_digest,response_json
-    FROM return_create_receipts WHERE actor_id=? AND request_id=? LIMIT 1`)
-    .get<{ return_id: number; sale_id: number | null; request_digest: string; response_json: string }>([authenticatedActorId, clientRequestId])
-  const priorReceipt = await readReceipt()
   if (priorReceipt) {
     if (priorReceipt.request_digest !== requestDigest || (priorReceipt.sale_id ?? null) !== requestedSaleId) {
       return c.json({ error: 'client_request_id was already used for different return data.', code: 'idempotency_conflict' }, 409)
@@ -1337,6 +1374,7 @@ app.post('/', async (c) => {
     customer_phone: string | null; customer_address: string | null; branch_id: number | null
     branch_name: string | null; exchange_rate: number | null; sale_status: string | null
     status_before_return: string | null; write_revision: number
+    sale_money_precision_version: number | null
   }
   let saleMeta: SaleMeta | null = null
   let soldLines: Array<{
@@ -1347,12 +1385,19 @@ app.post('/', async (c) => {
   if (requestedSaleId) {
     saleMeta = await db.prepare(`SELECT s.receipt_number,s.customer_id,s.customer_name,s.customer_phone,s.customer_address,
       s.branch_id,s.branch_name,s.exchange_rate,s.sale_status,s.status_before_return,
+      s.money_precision_version AS sale_money_precision_version,
       COALESCE(v.revision,0) AS write_revision
       FROM sales s LEFT JOIN sale_write_revisions v ON v.sale_id=s.id WHERE s.id=?`)
       .get<SaleMeta>([requestedSaleId]) || null
     if (!saleMeta) return c.json({ error: 'Original sale not found' }, 400)
     if (String(saleMeta.sale_status || 'completed') === 'cancelled') {
       return c.json({ error: 'This sale is cancelled -- un-cancel it before recording a return.' }, 400)
+    }
+    // Second, write-adjacent lock on the same rule, read from the sale row this
+    // handler already loads: no legacy-priced return row is inserted for a v1
+    // sale, whatever path reached here.
+    if (!isMoneyV1 && Number(saleMeta.sale_money_precision_version) === 1) {
+      return c.json({ ...MONEY_PRECISION_REVIEW_NEEDED }, 409)
     }
     soldLines = await db.prepare('SELECT id,product_id,product_name,quantity,branch_id,cost_price_usd,cost_price_khr FROM sale_items WHERE sale_id=? ORDER BY id')
       .all<typeof soldLines[number]>([requestedSaleId])
@@ -2511,6 +2556,13 @@ app.patch('/:id', async (c) => {
   if (Number(existing.money_precision_version) === 1) {
     return c.json({ error: 'Exact net-entitlement returns cannot be edited until the v1 edit flow is available.',
       code: 'customer_return_edit_v1_not_supported', action: 'review_required' }, 409)
+  }
+  // The sale decides here too. A v0 return row attached to a v1 sale can only
+  // be a legacy-shaped row recorded before that rule was enforced; the edit
+  // path below re-derives the refund on the legacy gross-price basis and writes
+  // total_refund_* back, which would restate exact money as legacy money.
+  if ((await saleMoneyPrecisionVersion(db, existing.sale_id)) === 1) {
+    return c.json({ ...MONEY_PRECISION_REVIEW_NEEDED }, 409)
   }
 
   const existingItems = await db.prepare('SELECT * FROM return_items WHERE return_id = ? ORDER BY id').all<{
