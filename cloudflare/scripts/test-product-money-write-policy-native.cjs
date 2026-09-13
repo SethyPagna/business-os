@@ -8,6 +8,7 @@ const { Hono } = require('hono')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 const src = path.resolve(__dirname, '../src')
+const frontendSrc = path.resolve(__dirname, '../../frontend/src')
 const database = openDb(loadAll(path.resolve(__dirname, '../migrations')))
 const raw = database.db
 let beforeProductUpdate = null, afterRead = null, beforeBatch = null, auditCount = 0
@@ -67,9 +68,24 @@ function load(relative) {
   new Function('require', 'module', 'exports', output)(localRequire, mod, mod.exports)
   cache.set(relative, mod.exports); return mod.exports
 }
+const frontendCache = new Map()
+function loadFrontend(relative) {
+  const filename = path.resolve(frontendSrc, relative)
+  if (frontendCache.has(filename)) return frontendCache.get(filename)
+  const mod = { exports: {} }; frontendCache.set(filename, mod.exports)
+  const output = ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS }, fileName: filename }).outputText
+  const localRequire = request => {
+    if (!request.startsWith('.')) return require(request)
+    const resolved = path.resolve(path.dirname(filename), request)
+    return loadFrontend(path.relative(frontendSrc, resolved))
+  }
+  new Function('require', 'module', 'exports', output)(localRequire, mod, mod.exports)
+  frontendCache.set(filename, mod.exports); return mod.exports
+}
 const products = load('routes/products.ts').default
 const reviews = load('routes/reviewQueue.ts').default
 const writer = load('lib/productWrites.ts')
+const frontendWriter = loadFrontend('components/products/helpers/productWriteHelpers.ts')
 const context = { waitUntil: () => {}, passThroughOnException: () => {} }
 const admin = { id: 1, username: 'admin', name: 'Admin', tier: 'full' }
 const requester = { id: 2, username: 'requester', name: 'Requester', tier: 'review' }
@@ -110,6 +126,15 @@ function seed(name = 'Existing') {
   raw.prepare('UPDATE products SET purchase_price_usd=2.345678 WHERE id=?').run(historic)
   assert.equal((await request(products, 'PUT', `/${historic}`, { purchase_price_usd: '2.3456780' })).status, 200)
   assert.equal(row(historic).purchase_price_usd, 2.345678, 'no-op text does not reprice an authoritative historical purchase cost')
+  const composedUnchanged = frontendWriter.buildProductBulkPricingUpdates({ purchase_price_usd: '2.345678' })
+  assert.deepEqual(composedUnchanged, { purchase_price_usd: '2.345678' }, 'frontend keeps absolute purchase input raw until the route reads the before-image')
+  assert.equal((await request(products, 'PUT', `/${historic}`, composedUnchanged)).status, 200)
+  assert.equal(row(historic).purchase_price_usd, 2.345678, 'actual frontend helper through Hono and SQLite preserves unchanged historical precision')
+  const composedNegative = frontendWriter.buildProductBulkPricingUpdates({ purchase_price_usd: '-0.00004' })
+  assert.deepEqual(composedNegative, { purchase_price_usd: '-0.00004' }, 'frontend must not quantize a raw negative into zero')
+  const composedNegativeBefore = row(historic)
+  assert.equal((await request(products, 'PUT', `/${historic}`, composedNegative)).status, 400)
+  assert.deepEqual(row(historic), composedNegativeBefore, 'actual frontend helper through Hono and SQLite rejects raw negative without a write')
   const nullable = seed('Nullable explicit zero')
   assert.equal((await request(products, 'PUT', `/${nullable}`, { cost_price_usd: 0, cost_price_khr: null })).status, 200)
   assert.equal(row(nullable).cost_price_usd, 0)
