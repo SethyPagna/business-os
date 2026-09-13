@@ -6544,5 +6544,7 @@
   "receipt_preview_card_note": "The app has fitted this card to one sheet. Printer scaling is separate.",
   "money_rounding_adjustment": "Rounding adjustment",
   "money_precision_unavailable": "Pricing update is not ready. Refresh, then try again.",
-  "money_receipt_unavailable": "Sale saved. Reload the receipt to confirm its saved totals."
+  "money_receipt_unavailable": "Sale saved. Reload the receipt to confirm its saved totals.",
+  "money_calculated_total": "Total before rounding",
+  "money_checkout_recovery_required": "Recover this checkout's receipt before submitting again. Do not rebuild its original request."
 }
