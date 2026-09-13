@@ -20,8 +20,8 @@ export const PRODUCT_MONEY_VERSION = 'product_money_policy_version'
 export const PRODUCT_MONEY_PLAN = '_product_money_write_plan'
 const PRODUCT_MONEY_FIELDS = ['cost_price_usd', 'cost_price_khr', 'selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr'] as const
 type ProductMoneyField = typeof PRODUCT_MONEY_FIELDS[number]
-type MoneyBefore = Record<ProductMoneyField, number | null> & { updated_at: string | null }
-type MoneyPlan = { version: 1; kind: 'create' | 'update'; product_id: number | null; before: MoneyBefore | null; after: Partial<Record<ProductMoneyField, number | null>> }
+type MoneyBefore = Record<ProductMoneyField, number | null> & { updated_at: string | null; name: string | null }
+type MoneyPlan = { version: 1; kind: 'create' | 'update'; product_id: number | null; before: MoneyBefore | null; after: Partial<Record<ProductMoneyField, number | null>>; group_rename: { from: string; to: string; members: Record<string, unknown>[]; target_members: Record<string, unknown>[] } | null }
 export class ProductMoneyWriteError extends Error {
   constructor(readonly code: string, message: string, readonly status = 409) { super(message); this.name = 'ProductMoneyWriteError' }
 }
@@ -30,6 +30,7 @@ function invalidMoneyPlan(): never {
 }
 const owns = (object: object, key: string) => Object.prototype.hasOwnProperty.call(object, key)
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+const groupSnapshotBytes = (source: unknown[], target: unknown[]) => new TextEncoder().encode(JSON.stringify([source, target])).byteLength
 function moneyInput(value: unknown): number | null {
   if (value == null || (typeof value === 'string' && value.trim() === '')) return null
   if ((typeof value !== 'number' && typeof value !== 'string') || !Number.isFinite(Number(value)) || Number(value) < 0) {
@@ -51,19 +52,40 @@ function nextMoney(field: ProductMoneyField, value: unknown, before?: number | n
   } catch { throw new ProductMoneyWriteError('product_money_invalid', 'The price is outside the supported range.', 400) }
 }
 export function readProductMoneyPlan(body: Record<string, unknown>): MoneyPlan | null {
+  if (!isRecord(body)) return invalidMoneyPlan()
   if (!owns(body, PRODUCT_MONEY_VERSION) && !owns(body, PRODUCT_MONEY_PLAN)) return null // historical queue/operation
   if (body[PRODUCT_MONEY_VERSION] !== 1) return invalidMoneyPlan()
   const raw = body[PRODUCT_MONEY_PLAN]
   if (!isRecord(raw) || raw.version !== 1 || (raw.kind !== 'create' && raw.kind !== 'update') || !isRecord(raw.after)) return invalidMoneyPlan()
-  if (Object.keys(raw).sort().join(',') !== 'after,before,kind,product_id,version') return invalidMoneyPlan()
+  if (Object.keys(raw).sort().join(',') !== 'after,before,group_rename,kind,product_id,version') return invalidMoneyPlan()
   if (raw.kind === 'create' ? raw.product_id !== null || raw.before !== null : !Number.isSafeInteger(raw.product_id) || Number(raw.product_id) <= 0 || !isRecord(raw.before)) return invalidMoneyPlan()
   if (raw.kind === 'update') {
     const before = raw.before as Record<string, unknown>
-    if (Object.keys(before).sort().join(',') !== [...PRODUCT_MONEY_FIELDS, 'updated_at'].sort().join(',')) return invalidMoneyPlan()
+    if (Object.keys(before).sort().join(',') !== [...PRODUCT_MONEY_FIELDS, 'updated_at', 'name'].sort().join(',')) return invalidMoneyPlan()
+    if (before.name !== null && typeof before.name !== 'string') return invalidMoneyPlan()
     if (!owns(before, 'updated_at') || (before.updated_at !== null && typeof before.updated_at !== 'string')) return invalidMoneyPlan()
     for (const field of PRODUCT_MONEY_FIELDS) if (!owns(before, field) || (before[field] !== null && (typeof before[field] !== 'number' || !Number.isFinite(before[field])))) return invalidMoneyPlan()
   }
-  if (!Object.keys(raw.after).length || Object.keys(raw.after).some(field => !(PRODUCT_MONEY_FIELDS as readonly string[]).includes(field))) return invalidMoneyPlan()
+  if (Object.keys(raw.after).some(field => !(PRODUCT_MONEY_FIELDS as readonly string[]).includes(field))) return invalidMoneyPlan()
+  if (raw.group_rename !== null) {
+    const group = raw.group_rename
+    if (raw.kind !== 'update' || !isRecord(group) || Object.keys(group).sort().join(',') !== 'from,members,target_members,to'
+      || typeof group.from !== 'string' || !group.from || typeof group.to !== 'string' || !group.to
+      || group.from !== String((raw.before as MoneyBefore).name || '').trim()
+      || group.to !== String(body.name || '').trim() || group.from.toLowerCase() === group.to.toLowerCase()
+      || Object.keys(raw.after).length) return invalidMoneyPlan()
+    if (!Array.isArray(group.members) || !group.members.length || !Array.isArray(group.target_members)
+      || group.members.length + group.target_members.length > 500 || groupSnapshotBytes(group.members, group.target_members) > 500_000) return invalidMoneyPlan()
+    const ids = new Set<number>()
+    for (const [members, key] of [[group.members, group.from.toLowerCase()], [group.target_members, group.to.toLowerCase()]] as const) for (const member of members) {
+      if (!isRecord(member) || !Number.isSafeInteger(member.id) || Number(member.id) <= 0 || ids.has(Number(member.id))
+        || member.is_active !== 1 || member.name_key !== key
+        || Object.entries(member).some(([key, value]) => !/^[a-z_][a-z_0-9]*$/i.test(key)
+          || (value !== null && typeof value !== 'string' && (typeof value !== 'number' || !Number.isFinite(value))))) return invalidMoneyPlan()
+      ids.add(Number(member.id))
+    }
+    if (!group.members.some(member => isRecord(member) && member.id === raw.product_id)) return invalidMoneyPlan()
+  }
   for (const field of PRODUCT_MONEY_FIELDS) {
     if (owns(body, field) !== owns(raw.after, field)) return invalidMoneyPlan()
     if (!owns(raw.after, field)) continue
@@ -74,19 +96,22 @@ export function readProductMoneyPlan(body: Record<string, unknown>): MoneyPlan |
   return raw as unknown as MoneyPlan
 }
 /** New HTTP requests only. Never call this when replaying an old queued plan. */
-export async function prepareProductMoneyWrite(env: Env, body: Record<string, unknown>, productId: number | null): Promise<void> {
+export async function prepareProductMoneyWrite(env: Env, body: Record<string, unknown>, productId: number | null, expectedUpdatedAt?: string | null): Promise<void> {
+  if (!isRecord(body)) throw new ProductMoneyWriteError('product_money_version_invalid', 'A product edit must be an object.', 400)
   if (owns(body, PRODUCT_MONEY_PLAN) || (owns(body, PRODUCT_MONEY_VERSION) && body[PRODUCT_MONEY_VERSION] !== 1)) {
     throw new ProductMoneyWriteError('product_money_version_invalid', 'Unsupported product price policy or client-supplied price plan.', 400)
   }
   const fields = PRODUCT_MONEY_FIELDS.filter(field => owns(body, field))
-  if (!fields.length) { delete body[PRODUCT_MONEY_VERSION]; return }
   let before: MoneyBefore | null = null
   let groupRename = false
   if (productId != null) {
     const current = await getDb(env).prepare(`SELECT ${PRODUCT_MONEY_FIELDS.join(',')}, updated_at, name FROM products WHERE id=@id`).get<MoneyBefore & { name: string | null }>({ id: productId })
     if (!current) throw new ProductMoneyWriteError('product_money_state_conflict', 'The product no longer exists.')
-    const { name, ...snapshot } = current
-    before = snapshot
+    const { name } = current
+    before = current
+    if (expectedUpdatedAt && String(current.updated_at || '').trim() !== expectedUpdatedAt) {
+      throw new ProductMoneyWriteError('product_money_state_conflict', 'The product changed after the editor loaded. Refresh and submit a new edit.')
+    }
     groupRename = body.__rename_scope === 'group' && body.name !== undefined && String(name || '').trim().toLowerCase() !== String(body.name).trim().toLowerCase()
   }
   const after: MoneyPlan['after'] = {}
@@ -95,15 +120,21 @@ export async function prepareProductMoneyWrite(env: Env, body: Record<string, un
     if (fields.some(field => after[field] !== before![field])) {
       throw new ProductMoneyWriteError('product_money_group_rename_requires_separate_save', 'Save changed prices separately from a product-group rename.', 400)
     }
-    // Equal form fields need no write. Leave the inherited group rename flow
-    // alone without creating a CAS conflict against its own updated_at change.
-    for (const field of fields) delete body[field]
-    delete body[PRODUCT_MONEY_VERSION]
-    return
+    for (const field of fields) { delete body[field]; delete after[field] }
   }
-  for (const field of fields) body[field] = after[field]
+  for (const field of Object.keys(after) as ProductMoneyField[]) body[field] = after[field]
+  let group: MoneyPlan['group_rename'] = null
+  if (groupRename) {
+    const from = String(before!.name || '').trim()
+    const to = String(body.name).trim()
+    const members = await getDb(env).prepare('SELECT * FROM products WHERE name_key=@key AND is_active=1 ORDER BY id LIMIT 501').all<Record<string, unknown>>({ key: from.toLowerCase() })
+    const target_members = await getDb(env).prepare('SELECT * FROM products WHERE name_key=@key AND is_active=1 ORDER BY id LIMIT 501').all<Record<string, unknown>>({ key: to.toLowerCase() })
+    if (members.length + target_members.length > 500 || groupSnapshotBytes(members, target_members) > 500_000) throw new ProductMoneyWriteError('product_group_plan_too_large', 'The product group is too large for a guarded rename.', 400)
+    group = { from, to, members, target_members }
+  }
   body[PRODUCT_MONEY_VERSION] = 1
-  body[PRODUCT_MONEY_PLAN] = { version: 1, kind: productId == null ? 'create' : 'update', product_id: productId, before, after } satisfies MoneyPlan
+  body[PRODUCT_MONEY_PLAN] = { version: 1, kind: productId == null ? 'create' : 'update', product_id: productId, before, after,
+    group_rename: group } satisfies MoneyPlan
   readProductMoneyPlan(body)
 }
 
@@ -241,11 +272,39 @@ export async function updateRow(env: Env, table: string, id: string | number, bo
   const keys = Object.keys(payload).filter((key) => columns.has(key))
   if (!keys.length) return 0
   const assignments = keys.map((key) => `"${key}" = ?`).join(', ')
-  const beforeKeys = [...PRODUCT_MONEY_FIELDS, 'updated_at'] as const
+  const beforeKeys = [...PRODUCT_MONEY_FIELDS, 'updated_at', 'name'] as const
   const guard = moneyPlan ? beforeKeys.map(field => ` AND "${field}" IS ?`).join('') : ''
-  const result = await env.DB.prepare(`UPDATE "${table}" SET ${assignments} WHERE id = ?${guard}`)
+  const statement = env.DB.prepare(`UPDATE "${table}" SET ${assignments} WHERE id = ?${guard}`)
     .bind(...keys.map((key) => payload[key]), id, ...(moneyPlan ? beforeKeys.map(field => moneyPlan.before![field]) : []))
-    .run()
+  let result
+  if (moneyPlan?.group_rename) {
+    // No rename or audit happens before target admission. A failed target CAS
+    // aborts the same batch before touching any sibling, including name-only races.
+    const group = moneyPlan.group_rename
+    const groupColumns = Object.keys(group.members[0])
+    if (groupColumns.length !== columns.size || groupColumns.some(key => !columns.has(key))
+      || [...group.members, ...group.target_members].some(member => Object.keys(member).sort().join(',') !== [...groupColumns].sort().join(','))) invalidMoneyPlan()
+    const guardGroup = (name: string, members: Record<string, unknown>[]) => env.DB.prepare(`SELECT CASE WHEN
+      (SELECT COUNT(*) FROM products WHERE name_key=? AND is_active=1)=?
+      AND NOT EXISTS (SELECT 1 FROM json_each(?) expected WHERE NOT EXISTS (
+        SELECT 1 FROM products p WHERE ${groupColumns.map(key => `p."${key}" IS json_extract(expected.value,'$.${key}')`).join(' AND ')}
+      )) THEN 1 ELSE json('product_money_state_conflict') END`)
+      .bind(name.toLowerCase(), members.length, JSON.stringify(members))
+    try {
+      const results = await env.DB.batch([
+        guardGroup(group.from, group.members),
+        guardGroup(group.to, group.target_members),
+        statement,
+        env.DB.prepare(`SELECT CASE WHEN changes() > 0 THEN 1 ELSE json('product_money_state_conflict') END`),
+        env.DB.prepare(`UPDATE products SET name = ?, updated_at = ? WHERE name_key = ? AND is_active = 1 AND id != ?`)
+          .bind(group.to, payload.updated_at, group.from.toLowerCase(), id),
+      ])
+      result = results[2]
+    } catch (error) {
+      if (/malformed JSON|product_money_state_conflict/i.test(String(error))) throw new ProductMoneyWriteError('product_money_state_conflict', 'The product changed before the group rename. Submit a new edit.')
+      throw error
+    }
+  } else result = await statement.run()
   if (moneyPlan && !result.meta?.changes) throw new ProductMoneyWriteError('product_money_state_conflict', 'The product changed after the price plan was prepared. Submit a new edit.')
   return result.meta?.changes || 0
 }
