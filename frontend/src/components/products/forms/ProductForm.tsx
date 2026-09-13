@@ -19,7 +19,6 @@ import { MarginCard, DualPriceInput, parseNumericInput, sanitizeNumericInput } f
 import { calculateProductDiscount, editableMoneyValue, formatPriceNumber, normalizeInternalMoney, normalizePriceValue } from '../../../utils/pricing.ts'
 import RenameCascadeModal, { type RenameCascadeChoice, type RenameCascadeRequest } from '../../shared/RenameCascadeModal.tsx'
 import ConfirmDialog, { ConfirmDialogLayerContext, type ConfirmReviewItem } from '../../shared/ConfirmDialog.tsx'
-import { useMergeStockChoice } from '../useMergeStockChoice.tsx'
 import { getRenameImpact, renameBrandEverywhere } from '../../../api/renameCascadeTransport.ts'
 import { classifyCreateMatches, type CreateMatchVerdict, type CreateMatchCandidate } from '../helpers/productCreateMatch.ts'
 import {
@@ -208,6 +207,7 @@ interface ProductFormProps {
   groupCandidates?: GroupCandidate[]
   onSave: (payload?: ProductSavePayload) => unknown | Promise<unknown>
   onClose: () => void
+  onReviewIdentityCollision?: (productIds: readonly [number, number]) => void
   // Optional -- only supplied by callers that already have a delete flow
   // wired (Products.tsx routes this through its DeleteConfirmModal, same
   // as every other delete entry point on that page). Omitted entirely
@@ -482,6 +482,7 @@ export default function ProductForm({
   onSave,
   onDelete,
   onClose,
+  onReviewIdentityCollision,
   onMinimize,
   createDefaults,
   draftScope,
@@ -877,7 +878,7 @@ export default function ProductForm({
   // Saving a rename/re-barcode into an existing twin is a merge decision, and
   // it goes through the SAME flow (and the same stock question) the Conflicts
   // review uses -- one answer to "the other row also has stock", everywhere.
-  const { mergeWithChoice, mergeStockChoiceDialog } = useMergeStockChoice(t)
+  const [identityCollision, setIdentityCollision] = useState<{ id: number; name: string | null } | null>(null)
   const [saveConfirmOpen, setSaveConfirmOpen] = useState(false)
   const saveConfirmResolveRef = useRef<((ok: boolean) => void) | null>(null)
   const askSaveConfirm = () => new Promise<boolean>((resolve) => {
@@ -1298,28 +1299,13 @@ export default function ProductForm({
         onClose,
       )
     } catch (error) {
-      // "Merge into it instead of creating a twin" used to be a dead end: the
-      // server's 409 arrived as a bare alert and the operator was left to find
-      // the Conflicts review by hand. Offer the merge right here instead --
-      // through the SAME shared flow the Conflicts tab uses, so a row that
-      // still holds stock is asked the same merge-or-write-off question rather
-      // than having it answered for it. Only on an EDIT: in create mode there
-      // is no saved row yet to fold into the twin.
+      // The rejected identity edit was never persisted. The ordinary exact-
+      // identity pair endpoint would therefore reject the original row again.
+      // Offer a reviewed identity resolution; retain this unsaved draft.
       const collision = duplicateCollisionFrom(error)
-      if (collision && product?.id) {
-        try {
-          const outcome = await mergeWithChoice({ id: collision.id, name: collision.name }, { id: Number(product.id), name: String(form.name || '') })
-          if (outcome === 'merged') {
-            clearCurrentProductDraft()
-            onClose()
-            return
-          }
-        } catch (mergeError) {
-          alert(getErrorMessage(mergeError, tr('failed', 'Failed', 'បរាជ័យ')))
-          return
-        }
-        // Cancelled the merge -- fall through to the message so the operator
-        // knows the save did not go through and can edit the name instead.
+      if (collision && product?.id && onReviewIdentityCollision) {
+        setIdentityCollision(collision)
+        return
       }
       alert(getErrorMessage(error, tr('failed', 'Failed', 'បរាជ័យ')))
     } finally {
@@ -1379,7 +1365,7 @@ export default function ProductForm({
     })
   } : undefined
   const childSurfaceOpen = Boolean(
-    filePickerOpen || scannerField || renameRequest || mergeStockChoiceDialog || saveConfirmOpen || createVerdictOpen || nameUnlockConfirmOpen,
+    filePickerOpen || scannerField || renameRequest || identityCollision || saveConfirmOpen || createVerdictOpen || nameUnlockConfirmOpen,
   )
   useEffect(() => {
     const dialog = productFormContentRef.current?.closest('[role="dialog"]')
@@ -2121,7 +2107,20 @@ export default function ProductForm({
       <RenameCascadeModal request={renameRequest} busy={saving} layer={modalLayer} t={(key, fallback) => t(key) || fallback || key} onChoose={handleRenameChoice} />
       {/* Saving into an existing twin offers the merge here; a twin that still
           holds stock is asked merge-or-write-off before anything is written. */}
-      {mergeStockChoiceDialog}
+      {identityCollision && product?.id && onReviewIdentityCollision ? (
+        <Modal title={t('product_collision_review_title') || 'Review product identity'} onClose={() => setIdentityCollision(null)} size="sm" layer={modalLayer} unsavedChanges="read-only">
+          <p className="text-sm">{t('product_collision_review_description') || 'This edit matches another saved product. Review both saved rows and choose the barcode to keep. Your unsaved edits are not applied by the review.'}</p>
+          <p className="mt-2 text-sm font-medium">{identityCollision.name || `#${identityCollision.id}`}</p>
+          <div className="mt-4 flex justify-end gap-2">
+            <button type="button" className="btn-secondary" onClick={() => setIdentityCollision(null)}>{t('cancel') || 'Cancel'}</button>
+            <button type="button" className="btn-primary" onClick={() => {
+              const productIds = [Number(product.id), identityCollision.id] as const
+              setIdentityCollision(null)
+              onReviewIdentityCollision(productIds)
+            }}>{t('selected_conflict_group_review_action') || 'Review selected actions'}</button>
+          </div>
+        </Modal>
+      ) : null}
       {saveConfirmOpen ? (
         <ConfirmDialog
           t={t}
