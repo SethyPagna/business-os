@@ -36,8 +36,12 @@ fs.writeFileSync(
   path.join(tmpDir, 'businessDateWindow.ts'),
   fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'businessDateWindow.ts'), 'utf8'),
 )
+const moneyPath = path.join(tmpDir, 'moneyPrecision.ts')
+const reportMoneyPath = path.join(tmpDir, 'reportMoneyPrecision.ts')
+fs.writeFileSync(moneyPath, fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'moneyPrecision.ts'), 'utf8'))
+fs.writeFileSync(reportMoneyPath, fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'reportMoneyPrecision.ts'), 'utf8'))
 const tscBin = path.join(__dirname, '..', 'node_modules', 'typescript', 'bin', 'tsc')
-execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath} ${path.join(tmpDir, 'businessDateWindow.ts')}`, {
+execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath} ${path.join(tmpDir, 'businessDateWindow.ts')} ${moneyPath} ${reportMoneyPath}`, {
   cwd: tmpDir,
   stdio: 'inherit',
 })

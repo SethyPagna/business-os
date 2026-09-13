@@ -51,12 +51,15 @@ function load(file, overrides={}) {
  return m.exports
 }
 const dates=load('lib/businessDateWindow.ts')
+const moneyPrecision=load('lib/moneyPrecision.ts')
+const reportMoneyPrecision=load('lib/reportMoneyPrecision.ts',{'./moneyPrecision':moneyPrecision})
 const saleTotals=load('lib/saleTotals.ts')
 const financialPrecision=load('lib/financialPrecision.ts')
 const nativeSaleChange=load('lib/nativeSaleChange.ts',{'./financialPrecision':financialPrecision,'./saleTotals':saleTotals})
-const analytics=load('lib/salesAnalytics.ts',{'./db':{getDb:()=>db},'./businessDateWindow':dates})
+const analytics=load('lib/salesAnalytics.ts',{'./db':{getDb:()=>db},'./businessDateWindow':dates,'./reportMoneyPrecision':reportMoneyPrecision})
 const app=load('routes/reports.ts',{
  '../lib/db':{getDb:()=>db},'../lib/businessDateWindow':dates,'../lib/salesAnalytics':analytics,
+ '../lib/reportMoneyPrecision':reportMoneyPrecision,
  '../lib/saleTotals':load('lib/saleTotals.ts'),
  '../lib/auth':{requireAuth:async(c,next)=>{
    const scope=c.req.header('scope')||'all'

@@ -33,8 +33,12 @@ fs.writeFileSync(tsPath, stripped)
 // pure dependency in so the isolated compile resolves and emits it.
 const winPath = path.join(tmpDir, 'businessDateWindow.ts')
 fs.writeFileSync(winPath, fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'businessDateWindow.ts'), 'utf8'))
+const moneyPath = path.join(tmpDir, 'moneyPrecision.ts')
+const reportMoneyPath = path.join(tmpDir, 'reportMoneyPrecision.ts')
+fs.writeFileSync(moneyPath, fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'moneyPrecision.ts'), 'utf8'))
+fs.writeFileSync(reportMoneyPath, fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'reportMoneyPrecision.ts'), 'utf8'))
 const tscBin = path.join(__dirname, '..', 'node_modules', 'typescript', 'bin', 'tsc')
-execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath} ${winPath}`, {
+execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath} ${winPath} ${moneyPath} ${reportMoneyPath}`, {
   cwd: tmpDir,
   stdio: 'inherit',
 })

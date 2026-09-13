@@ -41,8 +41,10 @@ fs.writeFileSync(path.join(tmpDir, 'salesAnalytics.ts'), kernelSrc)
 // salesAnalytics.ts imports ./businessDateWindow (the UTC+7 helpers); copy that
 // pure dependency in so the isolated strict compile resolves and emits it.
 fs.writeFileSync(path.join(tmpDir, 'businessDateWindow.ts'), fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'businessDateWindow.ts'), 'utf8'))
+fs.writeFileSync(path.join(tmpDir, 'moneyPrecision.ts'), fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'moneyPrecision.ts'), 'utf8'))
+fs.writeFileSync(path.join(tmpDir, 'reportMoneyPrecision.ts'), fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'reportMoneyPrecision.ts'), 'utf8'))
 const tscBin = path.join(cloudflareRoot, 'node_modules', 'typescript', 'bin', 'tsc')
-execSync(`node ${tscBin} --module commonjs --target es2022 --strict --skipLibCheck --outDir ${tmpDir} ${path.join(tmpDir, 'salesAnalytics.ts')} ${path.join(tmpDir, 'businessDateWindow.ts')}`, { cwd: tmpDir, stdio: 'inherit' })
+execSync(`node ${tscBin} --module commonjs --target es2022 --strict --skipLibCheck --outDir ${tmpDir} ${path.join(tmpDir, 'salesAnalytics.ts')} ${path.join(tmpDir, 'businessDateWindow.ts')} ${path.join(tmpDir, 'moneyPrecision.ts')} ${path.join(tmpDir, 'reportMoneyPrecision.ts')}`, { cwd: tmpDir, stdio: 'inherit' })
 
 // ---- real schema ----------------------------------------------------------
 const migrationSql = (file) => fs.readFileSync(path.join(cloudflareRoot, 'migrations', file), 'utf8')
