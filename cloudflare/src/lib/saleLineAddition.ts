@@ -851,6 +851,7 @@ export function planSaleLineRemoval(input: {
 // ---------------------------------------------------------------------------
 
 export type SaleMoneyRow = {
+  money_precision_version?: unknown
   discount_usd?: unknown
   membership_discount_usd?: unknown
   tax_usd?: unknown
@@ -873,10 +874,12 @@ export function recomputeSaleMoneyAfterLineChange(input: {
 }): SaleTotals & { subtotalUsd: number; subtotalKhr: number } {
   const sale = input.sale
   const exchangeRate = Number(input.exchangeRateOverride) || Number(sale.exchange_rate) || 4100
-  const money = input.moneyPrecisionVersion === 1 ? roundMoney4 : round2
+  const historical=input.moneyPrecisionVersion===1&&Number(sale.money_precision_version)===0
+  const money = historical ? (value:number)=>value : input.moneyPrecisionVersion === 1 ? roundMoney4 : round2
   const subtotalUsd = money(Number(input.subtotalUsd) || 0)
   const totals = computeSaleTotals({
     preserveRecordedTender: input.moneyPrecisionVersion === 1,
+    preserveRecordedBasketOperands: historical,
     moneyPrecisionVersion: input.moneyPrecisionVersion,
     subtotalUsd,
     discountUsd: money(Number(sale.discount_usd) || 0),
