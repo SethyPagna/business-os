@@ -1,0 +1,13 @@
+-- Additive customer-return entitlement provenance. Historical rows remain
+-- NULL and retain their legacy refund semantics; there is deliberately no
+-- UPDATE/backfill because an old unit-price refund cannot be reclassified as
+-- a net-paid entitlement without its original receipt allocation evidence.
+--
+-- PRE/POST: record COUNT(*), SUM(total_usd), SUM(total_khr) and a full-column
+-- fingerprint of return_items. After applying this migration every value in
+-- every old column must be unchanged and refund_snapshot_json must be NULL for
+-- every existing row.
+--
+-- RECOVERY: roll the application back without dropping this column. A schema
+-- rollback would discard immutable v1 refund provenance.
+ALTER TABLE return_items ADD COLUMN refund_snapshot_json TEXT;

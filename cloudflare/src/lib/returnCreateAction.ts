@@ -1,4 +1,6 @@
 import { assertSaleRecordBatchBounds } from './saleRecordEvents'
+import { subtractDecimalSum } from './moneyPrecision'
+import { canonicalCustomerReturnExpectedQuote, type CustomerReturnExpectedQuoteV1 } from './customerReturnEntitlement'
 
 export type ReturnCreateStatement = { sql: string; params: Record<string, unknown> }
 
@@ -36,6 +38,14 @@ type CanonicalReplacementItem = {
   quantity: number
   applied_price_usd: number | null
   applied_price_khr: number | null
+}
+
+type CanonicalV1Item = {
+  sale_item_id: number
+  quantity: number
+  stock_action: 'none' | 'restock' | 'damaged'
+  branch_id: number | null
+  batch_id: number | null
 }
 
 function positiveId(value: unknown): number | null {
@@ -110,11 +120,75 @@ function canonicalReplacementItem(value: unknown, index: number): CanonicalRepla
   }
 }
 
+function canonicalV1Item(value: unknown, index: number): CanonicalV1Item {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`Return item ${index + 1} must be an object`)
+  }
+  const item = value as Record<string, unknown>
+  if (typeof item.sale_item_id !== 'number' || !Number.isSafeInteger(item.sale_item_id) || item.sale_item_id <= 0
+    || typeof item.quantity !== 'number' || !Number.isFinite(item.quantity) || item.quantity <= 0) {
+    throw new Error(`Return item ${index + 1} needs one sale item and a positive quantity`)
+  }
+  const optionalId = (field: 'branch_id' | 'batch_id'): number | null => {
+    const value = item[field]
+    if (value == null || value === '') return null
+    if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
+      throw new Error(`Return item ${index + 1} has an invalid ${field}`)
+    }
+    return value
+  }
+  return { sale_item_id: item.sale_item_id, quantity: item.quantity, stock_action: canonicalStockAction(item),
+    branch_id: optionalId('branch_id'), batch_id: optionalId('batch_id') }
+}
+
+function canonicalReturnCreateIntentV1(body: Record<string, unknown>): Record<string, unknown> {
+  if (!Array.isArray(body.items) || body.items.length === 0) throw new Error('Return items required')
+  if (body.items.length > RETURN_CREATE_MAX_ITEMS) throw new Error(`Return at most ${RETURN_CREATE_MAX_ITEMS} items at a time`)
+  if (body.replacement_items != null && (!Array.isArray(body.replacement_items) || body.replacement_items.length)) {
+    throw new Error('Money precision v1 does not support replacement items')
+  }
+  if (typeof body.sale_id !== 'number' || !Number.isSafeInteger(body.sale_id) || body.sale_id <= 0) {
+    throw new Error('Money precision v1 requires an original sale')
+  }
+  const reason = boundedText(body.reason, 500)
+  if (!reason) throw new Error('Reason is required')
+  const items = body.items.map(canonicalV1Item)
+  const expected = canonicalCustomerReturnExpectedQuote(body.expected_quote)
+  if (expected.sale_id !== body.sale_id || expected.items.length !== items.length) {
+    throw new Error('The return quote does not match the requested sale items')
+  }
+  for (const [index, item] of items.entries()) {
+    const quoted = expected.items[index]
+    if (quoted.sale_item_id !== item.sale_item_id || subtractDecimalSum(quoted.quantity, [item.quantity]) !== '0') {
+      throw new Error('The return quote does not match the requested sale items')
+    }
+  }
+  return {
+    money_precision_version: 1,
+    sale_id: body.sale_id,
+    return_number: boundedText(body.return_number, 120),
+    receipt_number: boundedText(body.receipt_number, 120),
+    customer_id: positiveId(body.customer_id),
+    customer_name: boundedText(body.customer_name, 240),
+    branch_id: positiveId(body.branch_id),
+    reason,
+    return_type: boundedText(body.return_type, 120) || 'restock',
+    notes: boundedText(body.notes, 2000),
+    items,
+    expected_quote: expected satisfies CustomerReturnExpectedQuoteV1,
+    replacement_items: [],
+  }
+}
+
 // Only accepted client intent belongs in this digest input. Refund totals,
 // generated ids/numbers, current product/contact values, and every other
 // server-derived fact are deliberately excluded so an exact retry remains
 // stable after mutable database state changes.
 export function canonicalReturnCreateIntent(body: Record<string, unknown>): Record<string, unknown> {
+  if (body.money_precision_version !== undefined) {
+    if (body.money_precision_version !== 1) throw new Error('Unsupported return money precision version')
+    return canonicalReturnCreateIntentV1(body)
+  }
   if (!Array.isArray(body.items) || body.items.length === 0) throw new Error('Return items required')
   if (body.items.length > RETURN_CREATE_MAX_ITEMS) throw new Error(`Return at most ${RETURN_CREATE_MAX_ITEMS} items at a time`)
   const replacements = body.replacement_items == null ? [] : body.replacement_items
@@ -175,6 +249,33 @@ export function projectedSaleStatusForReturnCreate(
   }
   const fullyReturned = hasAny && saleItems.every((item) => (returnedByItem.get(item.id) || 0) >= Number(item.quantity))
   return fullyReturned ? 'returned' : hasAny ? 'partial_return' : (statusBeforeReturn || 'completed')
+}
+
+export function projectedSaleStatusForReturnCreateV1(
+  saleItems: Array<{ id: number; quantity: number }>,
+  committedReturnLines: Array<{ sale_item_id?: number | null; quantity: number }>,
+  requestLines: Array<{ sale_item_id?: number | null; quantity: number }>,
+  statusBeforeReturn: string | null,
+): string {
+  const saleItemIds = new Set(saleItems.map(item => Number(item.id)))
+  const quantitiesByItem = new Map<number, number[]>()
+  const allLines = [...committedReturnLines, ...requestLines]
+  for (const line of allLines) {
+    const saleItemId = Number(line.sale_item_id)
+    if (!Number.isSafeInteger(saleItemId) || !saleItemIds.has(saleItemId)) {
+      throw new Error('Sale item not found for this return')
+    }
+    const quantities = quantitiesByItem.get(saleItemId) || []
+    quantities.push(line.quantity)
+    quantitiesByItem.set(saleItemId, quantities)
+  }
+  let fullyReturned = allLines.length > 0
+  for (const item of saleItems) {
+    const remainder = subtractDecimalSum(item.quantity, quantitiesByItem.get(Number(item.id)) || [])
+    if (remainder.startsWith('-')) throw new Error('The return quantity exceeds the captured sale quantity')
+    if (remainder !== '0') fullyReturned = false
+  }
+  return fullyReturned ? 'returned' : allLines.length ? 'partial_return' : (statusBeforeReturn || 'completed')
 }
 
 export function assertReturnCreateCapacity(
