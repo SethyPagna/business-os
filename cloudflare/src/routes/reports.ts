@@ -214,7 +214,10 @@ export function gateTotals<T extends Record<string, unknown>>(row: T, isAdmin: b
   // repair is auditable rather than silent, so they leave by the same door.
   const {
     cost_usd, profit_usd, cost_missing_snapshot_lines, pending_cost_usd, pending_profit_usd,
-    unvalued_cost_usd, returned_cost_shortfall_usd, ...rest
+    unvalued_cost_usd, returned_cost_usd, returned_cost_shortfall_usd,
+    delivery_actual_cost_usd, delivery_actual_cost_count, delivery_margin_usd, delivery_net_usd,
+    recognized_delivery_cost_usd, pending_delivery_cost_usd, margin_pct,
+    money_precision_mode, money_complete, money_unknown_cost_lines, money_contributing_rows, ...rest
   } = row as Record<string, unknown>
   if (!isAdmin) return rest
   const revenue = num(rest.revenue_usd)
@@ -228,9 +231,17 @@ export function gateTotals<T extends Record<string, unknown>>(row: T, isAdmin: b
     pending_cost_usd: round2(num(pending_cost_usd)),
     pending_profit_usd: round2(num(pending_profit_usd)),
     unvalued_cost_usd: round2(num(unvalued_cost_usd)),
+    returned_cost_usd: round2(num(returned_cost_usd)),
     returned_cost_shortfall_usd: round2(num(returned_cost_shortfall_usd)),
+    delivery_actual_cost_usd: round2(num(delivery_actual_cost_usd)),
+    delivery_actual_cost_count: num(delivery_actual_cost_count),
+    delivery_margin_usd: round2(num(delivery_margin_usd)),
+    delivery_net_usd: round2(num(delivery_net_usd)),
+    recognized_delivery_cost_usd: round2(num(recognized_delivery_cost_usd)),
+    pending_delivery_cost_usd: round2(num(pending_delivery_cost_usd)),
     ...(diagnostic ? { money_precision_mode: diagnostic.precision_mode, money_complete: diagnostic.complete,
-      money_unknown_cost_lines: diagnostic.unknown_cost_lines, money_contributing_rows: diagnostic.contributing_rows } : {}),
+      money_unknown_cost_lines: diagnostic.unknown_cost_lines, money_contributing_rows: diagnostic.contributing_rows }
+      : money_precision_mode !== undefined ? { money_precision_mode, money_complete, money_unknown_cost_lines, money_contributing_rows } : {}),
   }
 }
 
