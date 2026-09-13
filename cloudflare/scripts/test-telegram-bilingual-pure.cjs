@@ -38,10 +38,18 @@ function loadReal(relPath, requireOverrides = {}) {
 }
 
 const lang = loadReal('lib/telegramLang.ts')
+const moneyPrecision = loadReal('lib/moneyPrecision.ts')
+const saleMoneyPrecision = loadReal('lib/saleMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
+const reportMoneyPrecision = loadReal('lib/reportMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
+const promotionRules = loadReal('lib/promotionRules.ts', { './moneyPrecision': moneyPrecision })
+const saleItemPricing = loadReal('lib/saleItemPricing.ts', { './moneyPrecision': moneyPrecision, './promotionRules': promotionRules })
+const refundMoneyPrecision = loadReal('lib/refundMoneyPrecision.ts', { './moneyPrecision': moneyPrecision, './saleMoneyPrecision': saleMoneyPrecision })
+const customerReturnEntitlement = loadReal('lib/customerReturnEntitlement.ts', { './moneyPrecision': moneyPrecision, './refundMoneyPrecision': refundMoneyPrecision, './saleItemPricing': saleItemPricing, './saleMoneyPrecision': saleMoneyPrecision })
+const analyticsPrecision = { './reportMoneyPrecision': reportMoneyPrecision, './customerReturnEntitlement': customerReturnEntitlement, './refundMoneyPrecision': refundMoneyPrecision }
 // lib/telegram.ts asks lib/saleTotals.ts who was billed for a delivery fee,
 // so the message and the stored total_usd cannot disagree about it. Loaded
 // REAL -- stubbing that rule here would test the stub, not the rule.
-const saleTotals = loadReal('lib/saleTotals.ts')
+const saleTotals = loadReal('lib/saleTotals.ts', { './moneyPrecision': moneyPrecision, './saleMoneyPrecision': saleMoneyPrecision })
 const financialPrecision = loadReal('lib/financialPrecision.ts')
 const nativeSaleChange = loadReal('lib/nativeSaleChange.ts', { './financialPrecision': financialPrecision, './saleTotals': saleTotals })
 const businessDateWindow = loadReal('lib/businessDateWindow.ts')
@@ -190,7 +198,7 @@ console.log(`PASS coverage: all ${new Set(scanned.map(([, name]) => name)).size}
 // --- 4. composed event payloads: both languages on every labelled line ------
 
 // lib/telegram.ts reads the sales kernel for the shift report (S4-7).
-const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './db': { getDb: () => { throw new Error('no DB in this test') } }, './businessDateWindow': businessDateWindow })
+const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './db': { getDb: () => { throw new Error('no DB in this test') } }, './businessDateWindow': businessDateWindow, ...analyticsPrecision })
 // Sep 6 2026: the owner's low-stock alert setting reaches this module through
 // lib/lowStockSettings.ts. The SQL builder is the REAL one -- the clauses
 // asserted below are the ones it composes -- while the settings READ answers
@@ -397,7 +405,7 @@ const stubDb = {
     }
   },
 }
-const stubAnalytics = loadReal('lib/salesAnalytics.ts', { './db': { getDb: () => stubDb }, './businessDateWindow': businessDateWindow })
+const stubAnalytics = loadReal('lib/salesAnalytics.ts', { './db': { getDb: () => stubDb }, './businessDateWindow': businessDateWindow, ...analyticsPrecision })
 const wired = loadReal('lib/telegram.ts', {
   './lowStockSettings': lowStockStub,
   './db': { getDb: () => stubDb },

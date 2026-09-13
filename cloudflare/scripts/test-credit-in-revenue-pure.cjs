@@ -58,12 +58,20 @@ const kernelStripped = ('// @ts-nocheck\n' + kernelSrc)
 fs.writeFileSync(path.join(tmpDir, 'salesAnalytics.ts'), kernelStripped)
 fs.writeFileSync(path.join(tmpDir, 'businessDateWindow.ts'),
   fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'businessDateWindow.ts'), 'utf8'))
+const kernelDependencies = [
+  'moneyPrecision.ts', 'reportMoneyPrecision.ts', 'customerReturnEntitlement.ts',
+  'refundMoneyPrecision.ts', 'saleItemPricing.ts', 'saleMoneyPrecision.ts', 'promotionRules.ts',
+]
+for (const file of kernelDependencies) {
+  fs.writeFileSync(path.join(tmpDir, file), fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', file), 'utf8'))
+}
 fs.writeFileSync(path.join(tmpDir, 'statsFormulas.ts'), '// @ts-nocheck\n'
   + fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'src', 'utils', 'statsFormulas.ts'), 'utf8'))
 execSync([
   `node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir}`,
   path.join(tmpDir, 'salesAnalytics.ts'),
   path.join(tmpDir, 'businessDateWindow.ts'),
+  ...kernelDependencies.map((file) => path.join(tmpDir, file)),
   path.join(tmpDir, 'statsFormulas.ts'),
 ].join(' '), { cwd: tmpDir, stdio: 'inherit' })
 const lib = require(path.join(tmpDir, 'salesAnalytics.js'))
@@ -78,7 +86,8 @@ db.exec(`
     tax_usd REAL, total_usd REAL,
     delivery_fee_usd REAL, delivery_fee_paid_by TEXT, is_delivery INTEGER,
     delivery_actual_cost_usd REAL, delivery_contact_id INTEGER, delivery_contact_name TEXT,
-    branch_id INTEGER, customer_id INTEGER, payment_method TEXT, customer_name TEXT,
+    branch_id INTEGER, branch_name TEXT, cashier_id INTEGER, cashier_name TEXT,
+    customer_id INTEGER, customer_name TEXT, customer_phone TEXT, payment_method TEXT,
     receipt_number TEXT, amount_paid_usd REAL, source_return_id INTEGER
   );
   CREATE TABLE sale_items (
@@ -115,7 +124,8 @@ const sale = (o) => insSale.run({
   payment_method: 'cash', receipt_number: String(o.id), ...o,
 })
 
-sale({ id: 1, created_at: AT(10), sale_status: 'completed', subtotal_usd: 100, discount_usd: 10, membership_discount_usd: 5, tax_usd: 8, total_usd: 93, delivery_fee_usd: 6, delivery_fee_paid_by: 'customer', is_delivery: 1, delivery_actual_cost_usd: 4 })
+// Saved payable includes the customer-paid delivery fee: 100 - 10 - 5 + 8 + 6 = 99.
+sale({ id: 1, created_at: AT(10), sale_status: 'completed', subtotal_usd: 100, discount_usd: 10, membership_discount_usd: 5, tax_usd: 8, total_usd: 99, delivery_fee_usd: 6, delivery_fee_paid_by: 'customer', is_delivery: 1, delivery_actual_cost_usd: 4 })
 sale({ id: 2, created_at: AT(11), sale_status: '',           subtotal_usd: 50,  discount_usd: 0,  membership_discount_usd: 0,  tax_usd: 4, total_usd: 54 })
 sale({ id: 3, created_at: AT(12), sale_status: null,         subtotal_usd: 40,  discount_usd: 5,  membership_discount_usd: 0,  tax_usd: 0, total_usd: 35, delivery_fee_usd: 3, delivery_fee_paid_by: 'store', is_delivery: 1 })
 // THE CREDIT SALE. Net 200-20 = 180; goods worth 50 at cost already gone.
@@ -194,26 +204,28 @@ check('collected cash is the ONE figure the credit stays out of',
 const flooredRow = db.prepare(`SELECT ${lib.netSaleExpr('')} AS net FROM (SELECT 10 AS subtotal_usd, 99 AS discount_usd, 0 AS membership_discount_usd)`).get()
 check('netSaleExpr floors a credit row at 0 rather than emitting a negative', flooredRow.net === 0)
 
-// ---- 6. The /stats header: same SQL the Sales page's "Credit" comes from ----
+// ---- 6. The /stats header delegates to the shared exact snapshot/reducer ----
 const salesTs = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'sales.ts'), 'utf8')
-const m = salesTs.match(/const totals = await db\.prepare\(`([\s\S]*?)`\)\.get</)
-assert.ok(m, 'could not locate the /stats revenue SELECT in routes/sales.ts')
-const dateClauseS = `date(s.created_at, '+7 hours') >= @startDate AND s.created_at >= date(@startDate, '-1 day') AND date(s.created_at, '+7 hours') <= @endDate AND s.created_at < date(@endDate, '+1 day')`
-// eslint-disable-next-line no-new-func -- the input is this repo's own source.
-const headerSql = new Function(
-  'recognizedExpr', 'netSaleExpr', 'netRefundExpr', 'awaitingExpr', 'CUSTOMER_REFUND_JOIN', 'where',
-  'return \`' + m[1] + '\`',
-)(lib.recognizedExpr, lib.netSaleExpr, lib.netRefundExpr, lib.awaitingExpr, lib.CUSTOMER_REFUND_JOIN, [dateClauseS])
-const stats = db.prepare(headerSql).get({ startDate: '2026-08-01', endDate: '2026-08-31' })
-const statsRevenue = Math.round((stats.revenue_usd || 0) * 100) / 100
-const statsCredit = Math.round((stats.pending_revenue_usd || 0) * 100) / 100
+const statsSnapshot = await lib.readSalesReportSnapshot({ __db: db }, {}, false, alias => ({
+  sql: `${alias}.id IN (SELECT matched_sale.id FROM sales matched_sale WHERE date(matched_sale.created_at, '+7 hours') >= @reportScope_startDate AND date(matched_sale.created_at, '+7 hours') <= @reportScope_endDate)`,
+  params: { reportScope_startDate: '2026-08-01', reportScope_endDate: '2026-08-31' },
+}))
+const statsTotals = lib.salesTotalsFromSnapshot(statsSnapshot)
+const statsRevenue = statsTotals.revenue_usd
+const statsCredit = statsTotals.pending_revenue_usd
+const statsBlock = salesTs.slice(salesTs.indexOf("app.get('/stats'"), salesTs.indexOf("app.get('/stats-strip'"))
 
 check(`/stats revenue_usd includes the credit sale (${statsRevenue} == ${IN.revenue}, not ${OUT.revenue})`,
   statsRevenue === IN.revenue && statsRevenue !== OUT.revenue)
 check(`/stats revenue_count counts the credit sale (5 non-cancelled, not 4)`,
-  Number(stats.revenue_count) === 5)
-check('/stats uses recognizedExpr for the headline, never collectedSaleExpr',
-  headerSql.includes("<> 'cancelled'") && !headerSql.includes("NOT IN ('cancelled', 'awaiting_payment')"))
+  statsSnapshot.sales.length === 5)
+check('/stats delegates money to the exact snapshot/reducer without a local aggregate',
+  statsBlock.includes('readSalesReportSnapshot(c.env,{},false')
+  && statsBlock.includes('salesTotalsFromSnapshot(snapshot)')
+  && statsBlock.includes('revenue_count: snapshot.sales.length')
+  && statsBlock.includes('revenue_usd: totals.revenue_usd')
+  && statsBlock.includes('pending_revenue_usd: totals.pending_revenue_usd')
+  && !/db\.prepare\([\s\S]*?(revenue_usd|pending_revenue_usd)/.test(statsBlock))
 check(`PARITY: the header's credit (${statsCredit}) == the kernel's credit (${kernel.pending_revenue_usd})`,
   statsCredit === kernel.pending_revenue_usd)
 check(`PARITY: the header's revenue (${statsRevenue}) == the kernel's revenue (${kernel.revenue_usd})`,
@@ -242,14 +254,13 @@ check('the frontend never produces a negative credit, however the row is shaped'
 // The stale comment is the actual failure mode here: a reader who trusts
 // "never folded into revenue" edits the query back to the pre-Sep-6 rule and
 // every check above goes red at once.
-const statsBlock = salesTs.slice(salesTs.indexOf("app.get('/stats'"), salesTs.indexOf("app.get('/stats-strip'"))
 const statsPreamble = salesTs.slice(Math.max(0, salesTs.indexOf("app.get('/stats'") - 1800), salesTs.indexOf("app.get('/stats'"))
 for (const [name, text] of [['preamble', statsPreamble], ['handler', statsBlock]]) {
   check(`the /stats ${name} no longer claims the credit is excluded from revenue`,
     !/never folded into revenue/i.test(text) && !/excluding cancelled\/awaiting_payment"\s*$/m.test(text))
 }
-check('the /stats handler says out loud that the credit is inside revenue',
-  /INSIDE revenue_usd|Credit is included because recognizedExpr/.test(statsBlock))
+check('the /stats handler delegates without maintaining another revenue/refund formula',
+  /no third revenue or\s*\/\/\s*refund formula is maintained in this route/.test(statsBlock))
 check('the sweep can see the sentence it forbids (positive control)',
   /never folded into revenue/i.test('reported separately as pending, never folded into revenue.'))
 

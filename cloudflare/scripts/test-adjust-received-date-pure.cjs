@@ -106,9 +106,21 @@ const canonicalBranchIdentity = loadReal('lib/canonicalBranchIdentity.ts', {
   './branchRoles': branchRoles,
 })
 const businessDateWindow = loadReal('lib/businessDateWindow.ts')
+const reportMoneyPrecision = loadReal('lib/reportMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
+const saleMoneyPrecision = loadReal('lib/saleMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
+const promotionRules = loadReal('lib/promotionRules.ts', { './moneyPrecision': moneyPrecision })
+const saleItemPricing = loadReal('lib/saleItemPricing.ts', { './moneyPrecision': moneyPrecision, './promotionRules': promotionRules })
+const refundMoneyPrecision = loadReal('lib/refundMoneyPrecision.ts', { './moneyPrecision': moneyPrecision, './saleMoneyPrecision': saleMoneyPrecision })
+const customerReturnEntitlement = loadReal('lib/customerReturnEntitlement.ts', {
+  './moneyPrecision': moneyPrecision, './refundMoneyPrecision': refundMoneyPrecision,
+  './saleItemPricing': saleItemPricing, './saleMoneyPrecision': saleMoneyPrecision,
+})
 const salesAnalytics = loadReal('lib/salesAnalytics.ts', {
   './db': { getDb: () => db },
   './businessDateWindow': businessDateWindow,
+  './reportMoneyPrecision': reportMoneyPrecision,
+  './customerReturnEntitlement': customerReturnEntitlement,
+  './refundMoneyPrecision': refundMoneyPrecision,
 })
 // routes/inventory.ts's per-product revenue/COGS SQL moved into this shared
 // ledger (audit sibling:F14); the REAL module, so the route builds real SQL.

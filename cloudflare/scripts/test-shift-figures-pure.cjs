@@ -122,10 +122,18 @@ const KERNEL = {
   delivery_usd: 14, pending_revenue_usd: 47.5, refund_usd: 8.75,
 }
 const businessDateWindow = load('lib/businessDateWindow.ts')
-const saleTotals = load('lib/saleTotals.ts')
+const moneyPrecision = load('lib/moneyPrecision.ts')
+const reportMoneyPrecision = load('lib/reportMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
+const promotionRules = load('lib/promotionRules.ts', { './moneyPrecision': moneyPrecision })
+const saleItemPricing = load('lib/saleItemPricing.ts', { './moneyPrecision': moneyPrecision, './promotionRules': promotionRules })
+const saleMoneyPrecision = load('lib/saleMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
+const refundMoneyPrecision = load('lib/refundMoneyPrecision.ts', { './moneyPrecision': moneyPrecision, './saleMoneyPrecision': saleMoneyPrecision })
+const customerReturnEntitlement = load('lib/customerReturnEntitlement.ts', { './moneyPrecision': moneyPrecision, './refundMoneyPrecision': refundMoneyPrecision, './saleItemPricing': saleItemPricing, './saleMoneyPrecision': saleMoneyPrecision })
+const analyticsPrecision = { './reportMoneyPrecision': reportMoneyPrecision, './customerReturnEntitlement': customerReturnEntitlement, './refundMoneyPrecision': refundMoneyPrecision }
+const saleTotals = load('lib/saleTotals.ts', { './moneyPrecision': moneyPrecision, './saleMoneyPrecision': saleMoneyPrecision })
 const financialPrecision = load('lib/financialPrecision.ts')
 const nativeSaleChange = load('lib/nativeSaleChange.ts', { './financialPrecision': financialPrecision, './saleTotals': saleTotals })
-const realAnalytics = load('lib/salesAnalytics.ts', { './db': { getDb: () => db }, './businessDateWindow': businessDateWindow })
+const realAnalytics = load('lib/salesAnalytics.ts', { './db': { getDb: () => db }, './businessDateWindow': businessDateWindow, ...analyticsPrecision })
 const analytics = {
   ...realAnalytics,
   getSalesTotals: async (_env, filters) => { seen.push(filters); return { ...KERNEL } },

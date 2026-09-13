@@ -33,11 +33,11 @@ const srcPath = path.join(cloudflareRoot, 'src', 'lib', 'saleTotals.ts')
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sale-totals-'))
 const tsPath = path.join(tmpDir, 'saleTotals.ts')
 fs.writeFileSync(tsPath, fs.readFileSync(srcPath, 'utf8'))
-for (const file of ['financialPrecision.ts', 'paymentMethodRegistry.ts', 'paymentSettlement.ts']) {
+for (const file of ['financialPrecision.ts', 'paymentMethodRegistry.ts', 'paymentSettlement.ts', 'moneyPrecision.ts', 'saleMoneyPrecision.ts']) {
   fs.writeFileSync(path.join(tmpDir, file), fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', file), 'utf8'))
 }
 const tscBin = path.join(cloudflareRoot, 'node_modules', 'typescript', 'bin', 'tsc')
-execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath} financialPrecision.ts paymentMethodRegistry.ts paymentSettlement.ts`, { cwd: tmpDir, stdio: 'inherit' })
+execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath} financialPrecision.ts paymentMethodRegistry.ts paymentSettlement.ts moneyPrecision.ts saleMoneyPrecision.ts`, { cwd: tmpDir, stdio: 'inherit' })
 const { computeSaleTotals, round2 } = require(path.join(tmpDir, 'saleTotals.js'))
 const { planSaleSettlement } = require(path.join(tmpDir, 'paymentSettlement.js'))
 
@@ -178,7 +178,12 @@ check('routes/sales.ts computes totals via computeSaleTotals, and no longer re-d
 
 check('round2 has exactly one definition in the codebase path under test', () => {
   assert.ok(!/^function round2/m.test(salesSrc), 'sales.ts should import round2, not redeclare it')
-  assert.ok(/round2 \} from '\.\.\/lib\/saleTotals'|computeSaleTotals, round2 \}/.test(salesSrc), 'sales.ts should import round2 from lib/saleTotals')
+  const saleTotalsImport = salesSrc.match(/import\s*\{([^}]+)\}\s*from\s*['"]\.\.\/lib\/saleTotals['"]/)
+  assert.ok(saleTotalsImport, 'sales.ts should import the shared saleTotals kernel')
+  assert.equal(saleTotalsImport[1].split(',').map((name) => name.trim()).filter((name) => name === 'round2').length, 1,
+    'sales.ts should import round2 exactly once from lib/saleTotals')
+  assert.equal((fs.readFileSync(srcPath, 'utf8').match(/export function round2\(/g) || []).length, 1,
+    'lib/saleTotals should export exactly one round2 definition')
 })
 
 // ---- Part 539/534: KHR change converts at the dedicated change rate ----

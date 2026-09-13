@@ -98,6 +98,7 @@ const productImagePermission = loadReal('lib/productImagePermission.ts', {
   './media': media,
   './sqlBinding': sqlBinding,
 })
+const promotionRules = loadReal('lib/promotionRules.ts')
 const batchCode = loadReal('lib/batchCode.ts')
 const searchMatch = loadReal('lib/searchMatch.ts')
 const productDetailRule = loadReal('lib/productDetailRule.ts')
@@ -145,6 +146,7 @@ const productDelete = loadReal('lib/productDelete.ts', {
 })
 const requestBodyGuard = loadReal('lib/requestBodyGuard.ts')
 const productsRoute = loadReal('routes/products.ts', {
+  '../lib/promotionRules': promotionRules,
   '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/db': { getDb: () => dbShim },
   '../lib/lowStockSettings': lowStockStub,

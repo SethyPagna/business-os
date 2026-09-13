@@ -103,7 +103,15 @@ async function main() {
   const dbModule = { getDb: () => d1(sqlite) }
   const businessDateWindow = loadReal('lib/businessDateWindow.ts')
   const financialPrecision = loadReal('lib/financialPrecision.ts')
-  const saleTotals = loadReal('lib/saleTotals.ts')
+  const moneyPrecision = loadReal('lib/moneyPrecision.ts')
+  const reportMoneyPrecision = loadReal('lib/reportMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
+  const promotionRules = loadReal('lib/promotionRules.ts', { './moneyPrecision': moneyPrecision })
+  const saleItemPricing = loadReal('lib/saleItemPricing.ts', { './moneyPrecision': moneyPrecision, './promotionRules': promotionRules })
+  const saleMoneyPrecision = loadReal('lib/saleMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
+  const refundMoneyPrecision = loadReal('lib/refundMoneyPrecision.ts', { './moneyPrecision': moneyPrecision, './saleMoneyPrecision': saleMoneyPrecision })
+  const customerReturnEntitlement = loadReal('lib/customerReturnEntitlement.ts', { './moneyPrecision': moneyPrecision, './refundMoneyPrecision': refundMoneyPrecision, './saleItemPricing': saleItemPricing, './saleMoneyPrecision': saleMoneyPrecision })
+  const analyticsPrecision = { './reportMoneyPrecision': reportMoneyPrecision, './customerReturnEntitlement': customerReturnEntitlement, './refundMoneyPrecision': refundMoneyPrecision }
+  const saleTotals = loadReal('lib/saleTotals.ts', { './moneyPrecision': moneyPrecision, './saleMoneyPrecision': saleMoneyPrecision })
   const nativeSaleChange = loadReal('lib/nativeSaleChange.ts', {
     './financialPrecision': financialPrecision,
     './saleTotals': saleTotals,
@@ -112,6 +120,7 @@ async function main() {
   const salesAnalytics = loadReal('lib/salesAnalytics.ts', {
     './db': dbModule,
     './businessDateWindow': businessDateWindow,
+    ...analyticsPrecision,
   })
   const shiftReconciliation = loadReal('lib/shiftReconciliation.ts', {
     './db': dbModule,

@@ -44,8 +44,10 @@ const stripped = ('// @ts-nocheck\n' + fs.readFileSync(srcPath, 'utf8'))
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'reports-additive-'))
 fs.writeFileSync(path.join(tmpDir, 'salesAnalytics.ts'), stripped)
 fs.writeFileSync(path.join(tmpDir, 'businessDateWindow.ts'), fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'businessDateWindow.ts'), 'utf8'))
+const analyticsDeps = ['moneyPrecision.ts', 'reportMoneyPrecision.ts', 'customerReturnEntitlement.ts', 'refundMoneyPrecision.ts', 'saleItemPricing.ts', 'saleMoneyPrecision.ts', 'promotionRules.ts']
+for (const file of analyticsDeps) fs.writeFileSync(path.join(tmpDir, file), fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', file), 'utf8'))
 const tscBin = path.join(__dirname, '..', 'node_modules', 'typescript', 'bin', 'tsc')
-execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${path.join(tmpDir, 'salesAnalytics.ts')} ${path.join(tmpDir, 'businessDateWindow.ts')}`, { stdio: 'inherit' })
+execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${path.join(tmpDir, 'salesAnalytics.ts')} ${path.join(tmpDir, 'businessDateWindow.ts')} ${analyticsDeps.map((file) => path.join(tmpDir, file)).join(' ')}`, { stdio: 'inherit' })
 const lib = require(path.join(tmpDir, 'salesAnalytics.js'))
 
 const db = new Database(':memory:')
@@ -56,7 +58,8 @@ db.exec(`
     total_usd REAL, total_khr REAL, delivery_fee_usd REAL, delivery_fee_paid_by TEXT,
     is_delivery INTEGER, delivery_actual_cost_usd REAL, delivery_contact_id INTEGER, delivery_contact_name TEXT,
     branch_id INTEGER, branch_name TEXT, customer_id INTEGER, customer_name TEXT, customer_phone TEXT,
-    cashier_id INTEGER, cashier_name TEXT, payment_method TEXT, amount_paid_usd REAL);
+    cashier_id INTEGER, cashier_name TEXT, payment_method TEXT, amount_paid_usd REAL,
+    source_return_id INTEGER);
   CREATE TABLE sale_items (id INTEGER PRIMARY KEY, sale_id INTEGER, quantity REAL, cost_price_usd REAL,
     total_usd REAL, branch_id INTEGER, product_id INTEGER, product_name TEXT,
     product_discount_usd REAL DEFAULT 0, manual_discount_usd REAL DEFAULT 0);
@@ -237,8 +240,10 @@ check('every day row carries the key, so a generic numeric roll-up carries it to
 const src = fs.readFileSync(srcPath, 'utf8')
 check('DeriveTotalsOptions.itemDiscountUsd is REQUIRED, so a new caller cannot silently report a zero line-discount',
   /\n  itemDiscountUsd: number\n/.test(src.replace(/\r/g, '')) && !/itemDiscountUsd\?: number/.test(src))
-check('and every kernel entry point passes it',
-  (src.match(/itemDiscountUsd:/g) || []).length >= 5)
+const deriveCalls = [...src.matchAll(/deriveTotals\([\s\S]{0,700}?itemDiscountUsd:/g)]
+check('every legacy deriveTotals entry point passes required item discount', deriveCalls.length === 3)
+check('the exact snapshot totals include item discounts in total discount',
+  /const totalDiscount = discount\.add\(m\.itemDiscount\)/.test(src))
 
 // Marker authority changes identity accounting only, never transaction money.
 db.prepare("INSERT INTO customers(id,name,phone,gender,is_anonymous) VALUES(12,'General','stale-phone','other',1),(13,'General','013','f',0),(14,'Walk-in','014','m',0)").run()

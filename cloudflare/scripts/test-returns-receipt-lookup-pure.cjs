@@ -76,6 +76,23 @@ function loadReal(relPath, requireOverrides = {}) {
 const batchCode = loadReal('lib/batchCode.ts')
 const sqlBinding = loadReal('lib/sqlBinding.ts')
 const moneyPrecision = loadReal('lib/moneyPrecision.ts')
+const saleMoneyPrecision = loadReal('lib/saleMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
+const promotionRules = loadReal('lib/promotionRules.ts', { './moneyPrecision': moneyPrecision })
+const saleItemPricing = loadReal('lib/saleItemPricing.ts', {
+  './moneyPrecision': moneyPrecision,
+  './promotionRules': promotionRules,
+})
+const refundMoneyPrecision = loadReal('lib/refundMoneyPrecision.ts', {
+  './moneyPrecision': moneyPrecision,
+  './saleMoneyPrecision': saleMoneyPrecision,
+})
+const customerReturnEntitlement = loadReal('lib/customerReturnEntitlement.ts', {
+  './moneyPrecision': moneyPrecision,
+  './refundMoneyPrecision': refundMoneyPrecision,
+  './saleItemPricing': saleItemPricing,
+  './saleMoneyPrecision': saleMoneyPrecision,
+})
+const productMergeLineage = loadReal('lib/productMergeLineage.ts')
 const productBatches = loadReal('lib/productBatches.ts', { './db': { getDb: () => db }, './batchCode': batchCode, './sqlBinding': sqlBinding, './moneyPrecision': moneyPrecision })
 const permissions = loadReal('lib/permissions.ts')
 const branchRolesKernel = loadReal('lib/branchRoles.ts')
@@ -84,9 +101,14 @@ const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: J
 
 // N13: the shared actor / branch kernels these routes now import.
 const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
-const saleCreationSnapshotKernel = loadReal('lib/saleCreationSnapshot.ts', { './actorSnapshot': actorSnapshotKernel })
+const saleCreationSnapshotKernel = loadReal('lib/saleCreationSnapshot.ts', {
+  './actorSnapshot': actorSnapshotKernel,
+  './saleMoneyPrecision': saleMoneyPrecision,
+})
 const returnCreateActionKernel = loadReal('lib/returnCreateAction.ts', {
   './saleRecordEvents': { assertSaleRecordBatchBounds: () => {} },
+  './moneyPrecision': moneyPrecision,
+  './customerReturnEntitlement': customerReturnEntitlement,
 })
 const returnsRoute = loadReal('routes/returns.ts', {
   '../lib/branchRoles': branchRolesKernel,
@@ -118,11 +140,17 @@ const returnsRoute = loadReal('routes/returns.ts', {
   '../lib/saleRecordEvents': { assertSaleRecordBatchBounds: () => {}, buildSaleRecordEventsInsert: () => ({ sql: 'SELECT 1', params: {} }), SaleRecordEventError: class SaleRecordEventError extends Error {}, sha256Hex: async () => '' },
   '../lib/searchMatch': { buildLikeAliasClause: () => '1=1', tokenizeSearchTermGroups: () => [], normalizeSearchText: (value) => String(value || '') },
   '../lib/productBatches': productBatches,
+  '../lib/saleMoneyPrecision': saleMoneyPrecision,
+  '../lib/customerReturnEntitlement': customerReturnEntitlement,
+  '../lib/productMergeLineage': productMergeLineage,
   '../lib/returnsStock': loadReal('lib/returnsStock.ts', { './db': { getDb: () => db }, './productBatches': productBatches, './sqlBinding': sqlBinding }),
   '../lib/receiptNumber': { uniqueBusinessDateTimeNumber: async (prefix) => `${prefix ? `${prefix}-` : ''}20260830-120000` },
   // Real money kernel -- the replacement sale derives its totals through the
   // same function routes/sales.ts uses, so it must be the real one here too.
-  '../lib/saleTotals': loadReal('lib/saleTotals.ts'),
+  '../lib/saleTotals': loadReal('lib/saleTotals.ts', {
+    './moneyPrecision': moneyPrecision,
+    './saleMoneyPrecision': saleMoneyPrecision,
+  }),
 })
 
 const app = returnsRoute.default

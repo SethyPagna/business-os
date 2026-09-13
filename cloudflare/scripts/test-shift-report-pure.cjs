@@ -73,7 +73,15 @@ function loadReal(relPath, requireOverrides = {}) {
 // Put another way: telegram.ts asks saleTotals who was billed for a delivery
 // fee, so the message and the stored total_usd cannot disagree about it.
 // Both lanes added this binding independently; keep exactly ONE.
-const saleTotals = loadReal('lib/saleTotals.ts')
+const moneyPrecision = loadReal('lib/moneyPrecision.ts')
+const reportMoneyPrecision = loadReal('lib/reportMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
+const promotionRules = loadReal('lib/promotionRules.ts', { './moneyPrecision': moneyPrecision })
+const saleItemPricing = loadReal('lib/saleItemPricing.ts', { './moneyPrecision': moneyPrecision, './promotionRules': promotionRules })
+const saleMoneyPrecision = loadReal('lib/saleMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
+const refundMoneyPrecision = loadReal('lib/refundMoneyPrecision.ts', { './moneyPrecision': moneyPrecision, './saleMoneyPrecision': saleMoneyPrecision })
+const customerReturnEntitlement = loadReal('lib/customerReturnEntitlement.ts', { './moneyPrecision': moneyPrecision, './refundMoneyPrecision': refundMoneyPrecision, './saleItemPricing': saleItemPricing, './saleMoneyPrecision': saleMoneyPrecision })
+const analyticsPrecision = { './reportMoneyPrecision': reportMoneyPrecision, './customerReturnEntitlement': customerReturnEntitlement, './refundMoneyPrecision': refundMoneyPrecision }
+const saleTotals = loadReal('lib/saleTotals.ts', { './moneyPrecision': moneyPrecision, './saleMoneyPrecision': saleMoneyPrecision })
 const financialPrecision = loadReal('lib/financialPrecision.ts')
 const nativeSaleChange = loadReal('lib/nativeSaleChange.ts', {
   './financialPrecision': financialPrecision,
@@ -84,7 +92,9 @@ const businessDateWindow = loadReal('lib/businessDateWindow.ts')
 const analytics = loadReal('lib/salesAnalytics.ts', {
   './db': { getDb: () => { throw new Error('no DB in this test') } },
   './businessDateWindow': businessDateWindow,
+  ...analyticsPrecision,
 })
+let mappingTotalsCalls = 0
 // Sep 6 2026: the owner's low-stock alert setting reaches this module through
 // lib/lowStockSettings.ts. The SQL builder is the REAL one -- the clauses
 // asserted below are the ones it composes -- while the settings READ answers
@@ -520,7 +530,7 @@ const stubDb = {
   },
 }
 const stubAnalytics = loadReal('lib/salesAnalytics.ts', {
-  './db': { getDb: () => stubDb }, './businessDateWindow': businessDateWindow,
+  './db': { getDb: () => stubDb }, './businessDateWindow': businessDateWindow, ...analyticsPrecision,
 })
 const wired = loadReal('lib/telegram.ts', {
   './lowStockSettings': lowStockStub,
@@ -558,8 +568,9 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
   assert.ok(/sale_amendments/.test(counts.sql), '"edited" is not counted from the amendment ledger')
   // The two breakdown queries the redesign dropped must not come back: they
   // were the longest part of the message and the owner asked for it short.
-  assert.ok(!statements.some((s) => /AS payment_method/.test(s.sql)), '/shift re-issued the payment-method breakdown query')
-  assert.ok(!statements.some((s) => /AS delivery_contact_name/.test(s.sql)), '/shift re-issued the delivery-contact breakdown query')
+  const groupedBreakdowns = statements.filter((statement) => /\bGROUP\s+BY\b/i.test(statement.sql))
+  assert.ok(!groupedBreakdowns.some((statement) => /\bpayment_method\b/i.test(statement.sql)), '/shift re-issued the payment-method breakdown query')
+  assert.ok(!groupedBreakdowns.some((statement) => /\bdelivery_contact_(?:id|name)\b/i.test(statement.sql)), '/shift re-issued the delivery-contact breakdown query')
   console.log(`PASS wiring: /shift issued ${statements.length} statements, ${windowed.length} of them window-bound, counts see cancelled receipts, no breakdown queries`)
 
   const shopWide = { ...CLOSED, scope_mode: 'shop_wide' }
@@ -582,8 +593,8 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
     './telegramLang': lang,
     './saleTotals': saleTotals,
     './nativeSaleChange': nativeSaleChange,
-    './salesAnalytics': loadReal('lib/salesAnalytics.ts', { './db': { getDb: () => emptyDb }, './businessDateWindow': businessDateWindow }),
-    './shiftReconciliation': reconciliationFor(() => emptyDb, loadReal('lib/salesAnalytics.ts', { './db': { getDb: () => emptyDb }, './businessDateWindow': businessDateWindow })),
+    './salesAnalytics': loadReal('lib/salesAnalytics.ts', { './db': { getDb: () => emptyDb }, './businessDateWindow': businessDateWindow, ...analyticsPrecision }),
+    './shiftReconciliation': reconciliationFor(() => emptyDb, loadReal('lib/salesAnalytics.ts', { './db': { getDb: () => emptyDb }, './businessDateWindow': businessDateWindow, ...analyticsPrecision })),
   })
   return wiredEmpty.telegramCommandReply({}, '/shift 03/09/2026', NOW)
 }).then((reply) => {
@@ -604,6 +615,10 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
   // which is exactly how this defect would reach the owner's phone.
   const kernelRow = {
     tx_count: 12,
+    cancelled_tx_count: 1,
+    revenue_usd: 210,
+    cost_usd: 120,
+    profit_usd: 92.5,
     gross_sales_usd: 218,
     store_discount_usd: 2,
     membership_discount_usd: 1,
@@ -649,6 +664,16 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
       }
     },
   }
+  const mappingAnalyticsReal = loadReal('lib/salesAnalytics.ts', {
+    './db': { getDb: () => mappingDb },
+    './businessDateWindow': businessDateWindow,
+    ...analyticsPrecision,
+  })
+  mappingTotalsCalls = 0
+  const mappingAnalytics = {
+    ...mappingAnalyticsReal,
+    getSalesTotals: async () => { mappingTotalsCalls += 1; return { ...kernelRow } },
+  }
   const wiredMapping = loadReal('lib/telegram.ts', {
     './lowStockSettings': lowStockStub,
     './db': { getDb: () => mappingDb },
@@ -656,11 +681,12 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
     './telegramLang': lang,
     './saleTotals': saleTotals,
     './nativeSaleChange': nativeSaleChange,
-    './salesAnalytics': loadReal('lib/salesAnalytics.ts', { './db': { getDb: () => mappingDb }, './businessDateWindow': businessDateWindow }),
-    './shiftReconciliation': reconciliationFor(() => mappingDb, loadReal('lib/salesAnalytics.ts', { './db': { getDb: () => mappingDb }, './businessDateWindow': businessDateWindow })),
+    './salesAnalytics': mappingAnalytics,
+    './shiftReconciliation': reconciliationFor(() => mappingDb, mappingAnalytics),
   })
   return wiredMapping.telegramCommandReply({}, '/shift 04/09/2026', NOW)
 }).then((reply) => {
+  assert.ok(mappingTotalsCalls >= 1, 'the mapped figure oracle must be consumed through getSalesTotals')
   const mapped = reply.split('\n')
   const mappedValue = (english) => {
     const found = mapped.find((line) => line.trimStart().startsWith(`${english}${SEP}`))

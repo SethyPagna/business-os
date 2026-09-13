@@ -48,6 +48,9 @@ function compile(file, stubs = {}) {
 
 const salesStatus = compile('salesStatus.ts')
 const moneyPrecision = compile('moneyPrecision.ts')
+const saleMoneyPrecision = compile('saleMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
+const promotionRules = compile('promotionRules.ts', { './moneyPrecision': moneyPrecision })
+const saleItemPricing = compile('saleItemPricing.ts', { './moneyPrecision': moneyPrecision, './promotionRules': promotionRules })
 const productBatches = compile('productBatches.ts', {
   './db': {},
   './batchCode': compile('batchCode.ts'),
@@ -55,7 +58,7 @@ const productBatches = compile('productBatches.ts', {
   './moneyPrecision': moneyPrecision,
 })
 const saleTransitions = compile('saleTransitions.ts', { './salesStatus': salesStatus, './productBatches': productBatches })
-const saleTotals = compile('saleTotals.ts')
+const saleTotals = compile('saleTotals.ts', { './moneyPrecision': moneyPrecision, './saleMoneyPrecision': saleMoneyPrecision })
 const financialPrecision = compile('financialPrecision.ts')
 const saleLineAddition = compile('saleLineAddition.ts', {
   './salesStatus': salesStatus,
@@ -63,6 +66,9 @@ const saleLineAddition = compile('saleLineAddition.ts', {
   './productBatches': productBatches,
   './saleTotals': saleTotals,
   './financialPrecision': financialPrecision,
+  './moneyPrecision': moneyPrecision,
+  './saleMoneyPrecision': saleMoneyPrecision,
+  './saleItemPricing': saleItemPricing,
 })
 const saleAmendments = compile('saleAmendments.ts', {
   './salesStatus': salesStatus,
@@ -71,9 +77,10 @@ const saleAmendments = compile('saleAmendments.ts', {
   './saleTotals': saleTotals,
   './financialPrecision': financialPrecision,
   './saleLineAddition': saleLineAddition,
+  './moneyPrecision': moneyPrecision,
 })
 const actorSnapshot = compile('actorSnapshot.ts')
-const saleCreationSnapshot = compile('saleCreationSnapshot.ts', { './actorSnapshot': actorSnapshot })
+const saleCreationSnapshot = compile('saleCreationSnapshot.ts', { './actorSnapshot': actorSnapshot, './saleMoneyPrecision': saleMoneyPrecision })
 const subject = compile('saleRecords.ts', {
   './saleAmendments': saleAmendments,
   './saleCreationSnapshot': saleCreationSnapshot,
@@ -1125,7 +1132,9 @@ runTest('the ledger kind 0129 ships is the one this module maps, not a name it i
 
 runTest('the public field vocabulary is exact and closed', () => {
   assert.deepStrictEqual(SALE_RECORD_FIELDS, [
-    'receipt_number', 'sale_status', 'items', 'total_usd', 'payment', 'delivery',
+    'receipt_number', 'sale_status', 'items', 'total_usd',
+    'money_precision_version', 'calculated_total_usd', 'rounding_adjustment_usd',
+    'payment', 'delivery',
     'customer', 'membership', 'item', 'quantity', 'unit_price_usd', 'removed_items', 'added_items',
     'delivery_fee_usd', 'actual_delivery_cost_usd', 'is_delivery', 'driver',
     'payment_method', 'payment_details', 'amount_paid_usd', 'amount_paid_khr',

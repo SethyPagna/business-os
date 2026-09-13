@@ -51,8 +51,10 @@ const tsPath = path.join(tmpDir, 'salesAnalytics.ts')
 fs.writeFileSync(tsPath, strippedKernel)
 const winPath = path.join(tmpDir, 'businessDateWindow.ts')
 fs.writeFileSync(winPath, fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'businessDateWindow.ts'), 'utf8'))
+const analyticsDeps = ['moneyPrecision.ts', 'reportMoneyPrecision.ts', 'customerReturnEntitlement.ts', 'refundMoneyPrecision.ts', 'saleItemPricing.ts', 'saleMoneyPrecision.ts', 'promotionRules.ts']
+for (const file of analyticsDeps) fs.writeFileSync(path.join(tmpDir, file), fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', file), 'utf8'))
 const tscBin = path.join(__dirname, '..', 'node_modules', 'typescript', 'bin', 'tsc')
-execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath} ${winPath}`, {
+execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath} ${winPath} ${analyticsDeps.join(' ')}`, {
   cwd: tmpDir,
   stdio: 'inherit',
 })
@@ -83,7 +85,9 @@ db.exec(`
     cashier_id INTEGER,
     cashier_name TEXT,
     payment_method TEXT,
-    receipt_number TEXT
+    receipt_number TEXT,
+    source_return_id INTEGER,
+    amount_paid_usd REAL DEFAULT 0
   );
   CREATE TABLE sale_items (
     id INTEGER PRIMARY KEY,
@@ -337,8 +341,9 @@ insRet.run(1, 3, 10, 'completed', 'customer', UTC(24, 8), 1) // customer refund 
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
     fileName: 'reports-views-pure.ts',
   })
+  check('real report diagnostic helper is available', typeof kernel.reportMoneyDiagnostic === 'function')
   const mod = { exports: {} }
-  new Function('exports', outputText)(mod.exports)
+  new Function('exports', 'reportMoneyDiagnostic', outputText)(mod.exports, kernel.reportMoneyDiagnostic)
   const { parseGranularity, gateTotals, gateProductRow, periodKeyFor, rollupPeriodRows } = mod.exports
 
   check('parseGranularity: week/month pass through, anything else is day', parseGranularity('week') === 'week' && parseGranularity(' Month ') === 'month' && parseGranularity('hour') === 'day' && parseGranularity(undefined) === 'day')

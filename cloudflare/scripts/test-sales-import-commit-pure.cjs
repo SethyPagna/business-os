@@ -19,6 +19,8 @@ function compileSubject() {
   let actorSnapshot
   let saleCreationSnapshot
   let anonymousCustomer
+  let moneyPrecision
+  let saleMoneyPrecision
   const localRequire = (request) => {
     if (request === './db') return {}
     if (request === './salesStatus') return { RETURN_STATUSES: new Set(['returned', 'partial_return']) }
@@ -30,6 +32,14 @@ function compileSubject() {
     if (request === './actorSnapshot') {
       actorSnapshot ||= compileLib('actorSnapshot', localRequire)
       return actorSnapshot
+    }
+    if (request === './moneyPrecision') {
+      moneyPrecision ||= compileLib('moneyPrecision', localRequire)
+      return moneyPrecision
+    }
+    if (request === './saleMoneyPrecision') {
+      saleMoneyPrecision ||= compileLib('saleMoneyPrecision', localRequire)
+      return saleMoneyPrecision
     }
     if (request === './saleCreationSnapshot') {
       saleCreationSnapshot ||= compileLib('saleCreationSnapshot', localRequire)

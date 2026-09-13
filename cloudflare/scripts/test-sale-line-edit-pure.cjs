@@ -14,7 +14,16 @@ function compile(file, stubs = {}) {
   return moduleObj.exports
 }
 
-const { planSaleLinePriceEdit } = compile('saleLineEdit.ts', { './saleTotals': compile('saleTotals.ts') })
+const moneyPrecision = compile('moneyPrecision.ts')
+const saleMoneyPrecision = compile('saleMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
+const saleTotals = compile('saleTotals.ts', {
+  './moneyPrecision': moneyPrecision,
+  './saleMoneyPrecision': saleMoneyPrecision,
+})
+const { planSaleLinePriceEdit } = compile('saleLineEdit.ts', {
+  './saleTotals': saleTotals,
+  './moneyPrecision': moneyPrecision,
+})
 
 assert.deepStrictEqual(planSaleLinePriceEdit({ basePriceUsd: 30, discountType: 'fixed', discountValue: 3, claimedManualDiscountUsd: 3, claimedAppliedPriceUsd: 27 }), {
   ok: true, basePriceUsd: 30, discountType: 'fixed', discountValue: 3, manualDiscountUsd: 3, appliedPriceUsd: 27,

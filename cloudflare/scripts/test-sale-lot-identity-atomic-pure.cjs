@@ -116,7 +116,23 @@ function routeDb(db, hooks = {}) {
 async function postSale(db, items, suffix, overrides = {}, hooks = {}) {
   const body = {
     branch_id: 1,
-    items,
+    money_precision_version: 1,
+    items: items.map((item, index) => {
+      const unitUsd = item.product_id === 11 ? 6 : 5
+      const totalUsd = unitUsd * Number(item.quantity)
+      return {
+        ...item,
+        client_line_key: `lot-line-${index}`,
+        pricing_source: 'selling',
+        pricing_quote: {
+          gross_usd: totalUsd,
+          product_discount_usd: 0,
+          manual_discount_usd: 0,
+          total_usd: totalUsd,
+          total_khr: totalUsd * 4000,
+        },
+      }
+    }),
     exchange_rate: 4000,
     payment_method: 'Cash',
     payment_currency: 'USD',
@@ -312,16 +328,17 @@ function counts(db) {
     assert.deepEqual(counts(db), before)
   }
 
-  // Historical state through migration 0153 could contain inactive-positive
-  // lots. The current writer must still count that known provenance and must
-  // not reclassify it as the unrecorded remainder merely because FIFO ignores
-  // inactive lots.
+  // A database through migration 0153 lacks the precision snapshot schema.
+  // Explicit-v1 checkout must fail at that readiness barrier without writes;
+  // the equivalent unlotted provenance refusal remains covered below on the
+  // fully migrated schema.
   {
     const db = fixture({ legacyThrough0153: true })
     const before = counts(db)
     run(db, 'UPDATE product_batches SET is_active=0 WHERE id=500')
     const result = await postSale(db, [{ product_id: 10, quantity: 4, branch_id: 1, unlotted_stock: true }], 'unlotted-inactive-known-lot')
-    assert.equal(result.status, 409, JSON.stringify(result.body))
+    assert.equal(result.status, 503, JSON.stringify(result.body))
+    assert.equal(result.body.code, 'money_precision_schema_not_ready')
     assert.deepEqual(counts(db), before)
   }
 

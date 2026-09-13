@@ -219,7 +219,9 @@ async function verifyRealSettlementRoute(migration) {
     // Current settlement queries and seed rows include the additive money
     // contract. Apply its exact migration while retaining the old pattern
     // CHECKs so the before/after 0156 regression remains meaningful.
-    await db.batch(split(fs.readFileSync(path.join(migrations, '0158_sale_return_money_precision.sql'), 'utf8')).map(sql => db.prepare(sql)))
+    for (const file of ['0158_sale_return_money_precision.sql', '0159_sale_item_pricing_snapshot.sql', '0160_customer_return_refund_snapshot.sql']) {
+      await db.batch(split(fs.readFileSync(path.join(migrations, file), 'utf8')).map(sql => db.prepare(sql)))
+    }
     const inserts = []
     for (const name of required) for (const row of f.sql.prepare(`SELECT * FROM ${name}`).all()) {
       const columns = Object.keys(row)

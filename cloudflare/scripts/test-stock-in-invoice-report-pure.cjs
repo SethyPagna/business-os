@@ -39,12 +39,16 @@ const batchCode = compile('batchCode.ts')
 const sqlBinding = compile('sqlBinding.ts')
 const searchMatch = compile('searchMatch.ts')
 const moneyPrecision = compile('moneyPrecision.ts')
+const saleMoneyPrecision = compile('saleMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
 const productBatches = compile('productBatches.ts', { './db': {}, './batchCode': batchCode, './sqlBinding': sqlBinding, './moneyPrecision': moneyPrecision })
 const stockReceiptGate = compile('stockReceiptGate.ts')
 const branchRoles = compile('branchRoles.ts')
 const branchRoleGuards = compile('branchRoleGuards.ts', { './branchRoles': branchRoles })
 const actorSnapshot = compile('actorSnapshot.ts')
-const saleCreationSnapshot = compile('saleCreationSnapshot.ts', { './actorSnapshot': actorSnapshot })
+const saleCreationSnapshot = compile('saleCreationSnapshot.ts', {
+  './actorSnapshot': actorSnapshot,
+  './saleMoneyPrecision': saleMoneyPrecision,
+})
 const stockActionCommit = compile('stockActionCommit.ts', {
   './db': {},
   './batchCode': batchCode,

@@ -58,10 +58,18 @@ function loadReal(relPath, requireOverrides = {}) {
 const noDb = { getDb: () => { throw new Error('no DB in this test') } }
 const businessDateWindow = loadReal('lib/businessDateWindow.ts')
 const telegramLang = loadReal('lib/telegramLang.ts')
-const saleTotals = loadReal('lib/saleTotals.ts')
+const moneyPrecision = loadReal('lib/moneyPrecision.ts')
+const reportMoneyPrecision = loadReal('lib/reportMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
+const promotionRules = loadReal('lib/promotionRules.ts', { './moneyPrecision': moneyPrecision })
+const saleItemPricing = loadReal('lib/saleItemPricing.ts', { './moneyPrecision': moneyPrecision, './promotionRules': promotionRules })
+const saleMoneyPrecision = loadReal('lib/saleMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
+const refundMoneyPrecision = loadReal('lib/refundMoneyPrecision.ts', { './moneyPrecision': moneyPrecision, './saleMoneyPrecision': saleMoneyPrecision })
+const customerReturnEntitlement = loadReal('lib/customerReturnEntitlement.ts', { './moneyPrecision': moneyPrecision, './refundMoneyPrecision': refundMoneyPrecision, './saleItemPricing': saleItemPricing, './saleMoneyPrecision': saleMoneyPrecision })
+const analyticsPrecision = { './reportMoneyPrecision': reportMoneyPrecision, './customerReturnEntitlement': customerReturnEntitlement, './refundMoneyPrecision': refundMoneyPrecision }
+const saleTotals = loadReal('lib/saleTotals.ts', { './moneyPrecision': moneyPrecision, './saleMoneyPrecision': saleMoneyPrecision })
 const financialPrecision = loadReal('lib/financialPrecision.ts')
 const nativeSaleChange = loadReal('lib/nativeSaleChange.ts', { './financialPrecision': financialPrecision, './saleTotals': saleTotals })
-const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './db': noDb, './businessDateWindow': businessDateWindow })
+const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './db': noDb, './businessDateWindow': businessDateWindow, ...analyticsPrecision })
 const lowStockRule = loadReal('lib/lowStockSettings.ts', { './db': noDb })
 const lowStockStub = { ...lowStockRule, loadLowStockConfig: async () => lowStockRule.DEFAULT_LOW_STOCK_CONFIG }
 // The drawer arithmetic is the REAL shared one (lib/shiftReconciliation.ts):

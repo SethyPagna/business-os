@@ -23,9 +23,14 @@ const stockReceiptGate = compile('stockReceiptGate.ts')
 const branchRoles = compile('branchRoles.ts')
 const branchRoleGuards = compile('branchRoleGuards.ts', { './branchRoles': branchRoles })
 const actorSnapshot = compile('actorSnapshot.ts')
-const saleCreationSnapshot = compile('saleCreationSnapshot.ts', { './actorSnapshot': actorSnapshot })
+const moneyPrecision = compile('moneyPrecision.ts')
+const saleMoneyPrecision = compile('saleMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
+const saleCreationSnapshot = compile('saleCreationSnapshot.ts', {
+  './actorSnapshot': actorSnapshot,
+  './saleMoneyPrecision': saleMoneyPrecision,
+})
 const subject = compile('stockActionCommit.ts', {
-  './moneyPrecision': compile('moneyPrecision.ts'),
+  './moneyPrecision': moneyPrecision,
   './db': {},
   './batchCode': batchCode,
   './searchMatch': searchMatch,

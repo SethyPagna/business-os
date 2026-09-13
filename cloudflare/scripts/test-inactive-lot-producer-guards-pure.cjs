@@ -36,6 +36,8 @@ function loadReal(relPath, requireOverrides = {}) {
   return moduleObj.exports
 }
 
+const saleMoneyPrecision = loadReal('lib/saleMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
+
 function setup() {
   const rawDb = openDb(loadAll())
   const db = {
@@ -112,7 +114,10 @@ const stockReceiptGate = loadReal('lib/stockReceiptGate.ts')
 const branchRoles = loadReal('lib/branchRoles.ts')
 const branchRoleGuards = loadReal('lib/branchRoleGuards.ts', { './branchRoles': branchRoles })
 const actorSnapshot = loadReal('lib/actorSnapshot.ts')
-const saleCreationSnapshot = loadReal('lib/saleCreationSnapshot.ts', { './actorSnapshot': actorSnapshot })
+const saleCreationSnapshot = loadReal('lib/saleCreationSnapshot.ts', {
+  './actorSnapshot': actorSnapshot,
+  './saleMoneyPrecision': saleMoneyPrecision,
+})
 const stockActionCommit = loadReal('lib/stockActionCommit.ts', {
   './db': {},
   './batchCode': batchCode,
