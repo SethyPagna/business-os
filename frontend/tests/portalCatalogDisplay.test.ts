@@ -20,6 +20,8 @@ const catalogSecondaryTabsSource = fs.readFileSync(new URL('../src/components/ca
 const publicCatalogPageSource = fs.readFileSync(new URL('../src/components/catalog/PublicCatalogPage.tsx', import.meta.url), 'utf8')
 const catalogPreviewSurfaceSource = fs.readFileSync(new URL('../src/components/catalog/CatalogPreviewSurface.tsx', import.meta.url), 'utf8')
 const catalogProductsSectionSource = fs.readFileSync(new URL('../src/components/catalog/CatalogProductsSection.tsx', import.meta.url), 'utf8')
+const catalogPaginationSource = fs.readFileSync(new URL('../src/components/catalog/catalogPagination.tsx', import.meta.url), 'utf8')
+const paginationControlsSource = fs.readFileSync(new URL('../src/components/shared/PaginationControls.tsx', import.meta.url), 'utf8')
 const portalFilterSource = fs.readFileSync(new URL('../src/components/catalog/PortalFilterCombobox.tsx', import.meta.url), 'utf8')
 const productDetailFlyoutSource = fs.readFileSync(new URL('../src/components/catalog/ProductDetailFlyout.tsx', import.meta.url), 'utf8')
 const catalogImagesSource = fs.readFileSync(new URL('../src/components/catalog/catalogImages.tsx', import.meta.url), 'utf8')
@@ -322,7 +324,6 @@ runTest('portal editor work leaves product filter popovers viewport-portalled', 
 })
 
 runTest('public product discovery uses a sticky unified search, responsive brand index, and explicit paging controls', () => {
-  const paginationSource = fs.readFileSync(new URL('../src/components/catalog/catalogPagination.tsx', import.meta.url), 'utf8')
   assert.match(catalogProductsSectionSource, /sticky top-16[\s\S]*focus-within:border-blue-400/,
     'search should stay sticky and use the same blue discovery accent as filters')
   assert.match(catalogProductsSectionSource, /copy\('jumpToBrand', 'Jump to brand'\)/,
@@ -339,14 +340,85 @@ runTest('public product discovery uses a sticky unified search, responsive brand
     'every breakpoint gets the same vertical brand rail, and the editor preview gets one too')
   assert.doesNotMatch(catalogProductsSectionSource, /max-h-\[min\(18rem,calc\(100vh-32rem\)\)\]/,
     'the desktop letter grid and its inner scroller are retired')
-  assert.match(paginationSource, /import PaginationControls from '\.\.\/shared\/PaginationControls'/,
+  assert.match(catalogPaginationSource, /import PaginationControls from '\.\.\/shared\/PaginationControls'/,
     'storefront paging should use the same current Back/Next control as the rest of the app')
-  assert.match(paginationSource, /export const CATALOG_DEFAULT_PAGE_SIZE = 50/,
+  assert.match(catalogPaginationSource, /export const CATALOG_DEFAULT_PAGE_SIZE = 50/,
     'the fixed storefront page size remains aligned with the server response contract')
-  assert.doesNotMatch(paginationSource, /\bonPageSizeChange\s*=|\bpageSizeOptions\s*=|\beditablePageSizeInput\s*=/,
+  assert.doesNotMatch(catalogPaginationSource, /\bonPageSizeChange\s*=|\bpageSizeOptions\s*=|\beditablePageSizeInput\s*=/,
     'the centred public pager must not grow a shopper-facing page-size control')
-  assert.match(paginationSource, /layout="centered"/,
+  assert.match(catalogPaginationSource, /layout="centered"/,
     'public paging remains one centred Back/page/Next control')
+})
+
+runTest('public catalog scrolls through the document and keeps its pager controls in the storefront order', () => {
+  // BOTH public entries, not just the one CatalogPage owns. index.tsx mounts
+  // PublicCatalogRoot -> PublicCatalogPage for every path on the customer
+  // host; App.tsx mounts <CatalogPage publicView /> for the in-app route. The
+  // marker is what main.css keys the document-scroll unlock off, so a route
+  // that forgets it ships a storefront the browser will not scroll. Each one
+  // also RESTORES the previous value instead of blindly removing it, so a
+  // StrictMode double-mount -- or a public route nested under a shell that
+  // already set the marker -- cannot leave the document stripped of it.
+  for (const [route, source] of [['PublicCatalogPage', publicCatalogPageSource], ['CatalogPage', catalogPageSource]]) {
+    // Named for BOTH elements on purpose. main.css keys the scroll unlock off
+    // html[data-public-portal] and the body growth off body[data-public-portal],
+    // so a route that stamps only one of them still ships a page that will not
+    // scroll -- and one loose wildcard match across the whole file would not
+    // notice the missing half.
+    assert.ok(source.includes("html.setAttribute('data-public-portal', 'true')"),
+      route + ' must stamp the document element with the public scroll marker')
+    assert.ok(source.includes("body.setAttribute('data-public-portal', 'true')"),
+      route + ' must stamp the body with the public scroll marker')
+    assert.ok(source.includes("const previousHtmlMarker = html.getAttribute('data-public-portal')")
+      && source.includes("const previousBodyMarker = body.getAttribute('data-public-portal')"),
+      route + ' must capture the previous marker values before overwriting them')
+    assert.ok(source.includes("if (previousHtmlMarker === null) html.removeAttribute('data-public-portal')")
+      && source.includes("if (previousBodyMarker === null) body.removeAttribute('data-public-portal')"),
+      route + ' must RESTORE the previous markers on unmount, not blindly remove them')
+  }
+  // Neither public root may declare a vertical scroller of its own: the
+  // document owns the one page scroll. storefrontScrollRoot.test.ts carries
+  // the full shell contract, including why 'overflow-x: clip' is the only
+  // overflow left on the preview surface.
+  assert.match(catalogPreviewSurfaceSource, /publicView \? 'min-h-screen w-full overflow-x-clip'/,
+    'the public surface must not create a nested vertical scroller')
+  assert.doesNotMatch(catalogPreviewSurfaceSource, /publicView \? \{[^}]*overflowY:\s*'auto'/,
+    'the content-height public root must not trap wheel/touch events in a second scroll owner')
+  assert.doesNotMatch(catalogPageSource, /publicView \? \{[^}]*overflowY:\s*'auto'/,
+    'legacy public-view wrappers must not trap wheel/touch events in a second scroll owner')
+  // Pager ORDER, on the one control both public paths mount: CatalogPage and
+  // PublicCatalogPage -> CatalogPreviewSurface both render
+  // CatalogProductsSection, which mounts CatalogPaginationControls above and
+  // below the grid. Asserting layout="centered" alone only proves which
+  // variant is asked for; this reads the variant's own branch so a reordering
+  // edit inside PaginationControls cannot silently move Back behind the page
+  // number on the storefront.
+  assert.match(catalogPaginationSource, /layout="centered"/)
+  const pagerBranchStart = paginationControlsSource.indexOf("if (layout === 'centered')")
+  const pagerBranchEnd = paginationControlsSource.indexOf('if (compact && rangeAsPageSize)')
+  assert.ok(pagerBranchStart >= 0 && pagerBranchEnd > pagerBranchStart, 'the dedicated storefront pager branch must exist')
+  const pagerBranch = paginationControlsSource.slice(pagerBranchStart, pagerBranchEnd)
+  // Anchored on the page FIELD, not on `aria-label={pageLabel}`: the branch's
+  // <nav> landmark is named from the same label and sits before Back, so that
+  // string finds the wrapper first and the order check passes on any layout.
+  const backAt = pagerBranch.indexOf('aria-label={backLabel}')
+  const pageFieldAt = pagerBranch.indexOf('inputMode="numeric"')
+  const totalPagesAt = pagerBranch.indexOf('/ {totalPages}')
+  const nextAt = pagerBranch.indexOf('aria-label={nextLabel}')
+  assert.ok(backAt > 0 && pageFieldAt > 0 && totalPagesAt > 0 && nextAt > 0,
+    'the storefront pager must keep a Back control, an editable page field, a total-page count and a Next control')
+  assert.ok(backAt < pageFieldAt, 'Back must precede the page indicator')
+  assert.ok(pageFieldAt < totalPagesAt, 'the page number must precede its total')
+  assert.ok(totalPagesAt < nextAt, 'the page indicator must precede Next')
+  const navAt = pagerBranch.indexOf('<nav ')
+  assert.ok(navAt >= 0 && navAt < backAt, 'the whole storefront pager must sit inside a landmark, not a bare div')
+  assert.ok(pagerBranch.slice(navAt, backAt).includes('aria-label={pageLabel}'),
+    'the pager landmark must carry an accessible name a screen-reader user can jump to')
+  // Both captions come from the shared pack keys with an English fallback --
+  // never the raw lowercase key, which is what a map's '|| key' fallback
+  // prints when the map has no entry for it.
+  assert.match(paginationControlsSource, /const backLabel = typeof t === 'function' \? \(t\('back'\) \|\| 'Back'\)/)
+  assert.match(paginationControlsSource, /const nextLabel = typeof t === 'function' \? \(t\('next'\) \|\| 'Next'\)/)
 })
 
 runTest('public product details keep every prepared section visible when its data is empty', () => {
