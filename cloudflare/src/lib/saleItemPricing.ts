@@ -237,13 +237,16 @@ export function capturedPricingMetadata(pool:CapturedPricingPool,lineKey:string,
   return {price_mode:capture.source,product_discount_type:type,product_discount_label:label}
 }
 
-export function validateCapturedSaleBasket(lines: readonly Record<string,unknown>[], header: Record<string,unknown>): SaleItemPricingSnapshot[] {
+export type CapturedProductIdentityBinding={sale_id:number;sale_item_id:number;captured_product_id:number;current_product_id:number}
+export function validateCapturedSaleBasket(lines: readonly Record<string,unknown>[], header: Record<string,unknown>, identityBindings:readonly CapturedProductIdentityBinding[]=[]): SaleItemPricingSnapshot[] {
   if (!lines.length || lines.length>MAX_PRICING_LINES) invalid()
   const snapshots=lines.map(line=>{
     const snapshot=parseSaleItemPricing(line.pricing_snapshot_json as string|null)
     if (!snapshot || snapshot.pool.exchange_rate!==header.exchange_rate) invalid()
     const capture=snapshot.pool.lines.find(row=>row.line_key===snapshot.line_key)
-    if (!capture || capture.product.id!==line.product_id || snapshot.quantities[snapshot.line_key]!==line.quantity) invalid()
+    const binding=identityBindings.filter(binding=>binding.sale_item_id===line.id&&binding.sale_id===header.id
+      &&binding.sale_id===line.sale_id&&binding.captured_product_id===capture?.product.id&&binding.current_product_id===line.product_id)
+    if (!capture || (capture.product.id!==line.product_id&&binding.length!==1) || snapshot.quantities[snapshot.line_key]!==line.quantity) invalid()
     for (const [key,value] of Object.entries(capturedPricingMetadata(snapshot.pool,snapshot.line_key,snapshot.amounts)))
       if ((line[key]??null)!==value) invalid()
     for (const field of ['total_usd','total_khr','base_price_usd','base_price_khr','applied_price_usd','applied_price_khr'] as const)
