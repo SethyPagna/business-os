@@ -225,6 +225,18 @@ export function allocateReceiptLines(context: ReceiptAllocationContext): Map<str
 /** A v1 parent never permits a partial/mixed snapshot cohort. This validates
  * saved line identity, quantities, pool membership and receipt inputs together,
  * not merely a self-consistent JSON document detached from its owning row. */
+export function capturedPricingMetadata(pool:CapturedPricingPool,lineKey:string,amounts:ExactLinePricing): {price_mode:PricingSource;product_discount_type:string|null;product_discount_label:string|null} {
+  const capture=pool.lines.find(line=>line.line_key===lineKey)
+  if (!capture) invalid()
+  if (amounts.product_discount_usd===0) return {price_mode:capture.source,product_discount_type:null,product_discount_label:null}
+  if (capture.source!=='promotion') invalid()
+  const rule=amounts.rule_id===null?null:pool.rules.find(rule=>rule.id===amounts.rule_id)
+  if (amounts.rule_id!==null && !rule) invalid()
+  const type=rule?.rule_type ?? (String(capture.product.discount_type||'percent').toLowerCase()==='fixed'?'fixed':'percent')
+  const label=String(rule?.title ?? capture.product.discount_label ?? '').trim() || null
+  return {price_mode:capture.source,product_discount_type:type,product_discount_label:label}
+}
+
 export function validateCapturedSaleBasket(lines: readonly Record<string,unknown>[], header: Record<string,unknown>): SaleItemPricingSnapshot[] {
   if (!lines.length || lines.length>MAX_PRICING_LINES) invalid()
   const snapshots=lines.map(line=>{
@@ -232,6 +244,8 @@ export function validateCapturedSaleBasket(lines: readonly Record<string,unknown
     if (!snapshot || snapshot.pool.exchange_rate!==header.exchange_rate) invalid()
     const capture=snapshot.pool.lines.find(row=>row.line_key===snapshot.line_key)
     if (!capture || capture.product.id!==line.product_id || snapshot.quantities[snapshot.line_key]!==line.quantity) invalid()
+    for (const [key,value] of Object.entries(capturedPricingMetadata(snapshot.pool,snapshot.line_key,snapshot.amounts)))
+      if ((line[key]??null)!==value) invalid()
     for (const field of ['total_usd','total_khr','base_price_usd','base_price_khr','applied_price_usd','applied_price_khr'] as const)
       if (line[field]!==snapshot.amounts[field]) invalid()
     if ((line.manual_discount_type ?? 'none')!==capture.manual.type || line.manual_discount_value!==capture.manual.value) invalid()
@@ -247,7 +261,11 @@ export function validateCapturedSaleBasket(lines: readonly Record<string,unknown
   if (allocation.discount_usd!==header.discount_usd || allocation.membership_discount_usd!==header.membership_discount_usd || allocation.tax_usd!==header.tax_usd
     || allocation.lines.length!==lines.length) invalid()
   for (const entry of allocation.lines) if (byKey.get(entry.line_key)?.amounts.total_usd!==entry.amount) invalid()
+  const poolContexts=new Map<string,string>()
   for (const snapshot of snapshots) {
+    const context=JSON.stringify({pool:snapshot.pool,quantities:snapshot.quantities})
+    if (poolContexts.has(snapshot.pool.pool_key) && poolContexts.get(snapshot.pool.pool_key)!==context) invalid()
+    poolContexts.set(snapshot.pool.pool_key,context)
     if (JSON.stringify(snapshot.allocation_context)!==JSON.stringify(allocation)) invalid()
     for (const member of snapshot.pool.lines) {
       const other=byKey.get(member.line_key)
@@ -262,7 +280,7 @@ export function materializeCapturedPricingRow(row: Record<string,unknown>, pool:
   const json=serializeSaleItemPricing(pool,quantities,lineKey,allocation), snapshot=parseSaleItemPricing(json)!
   const capture=pool.lines.find(line=>line.line_key===lineKey)!, amounts=snapshot.amounts, quantity=quantities[lineKey]
   const productDiscount=divideMoney4(amounts.product_discount_usd,quantity), manualDiscount=divideMoney4(amounts.manual_discount_usd,quantity)
-  return {...row,quantity,pricing_snapshot_json:json,
+  return {...row,...capturedPricingMetadata(pool,lineKey,amounts),quantity,pricing_snapshot_json:json,
     applied_price_usd:amounts.applied_price_usd,applied_price_khr:amounts.applied_price_khr,
     base_price_usd:amounts.base_price_usd,base_price_khr:amounts.base_price_khr,total_usd:amounts.total_usd,total_khr:amounts.total_khr,
     product_discount_usd:productDiscount,product_discount_khr:multiplyMoney4(productDiscount,pool.exchange_rate),
@@ -298,7 +316,7 @@ export function pricingSourceGuard(products: readonly Record<string,unknown>[], 
  * captured financial fields, after those plans, in that same transaction. */
 export function pricingRowsStatement(saleId:number, rows:readonly Record<string,unknown>[]):{sql:string;params:Record<string,unknown>} {
   const fields=['applied_price_usd','applied_price_khr','base_price_usd','base_price_khr','total_usd','total_khr',
-    'product_discount_usd','product_discount_khr','manual_discount_usd','manual_discount_khr','manual_discount_type','manual_discount_value','price_mode','pricing_snapshot_json']
+    'product_discount_usd','product_discount_khr','product_discount_type','product_discount_label','manual_discount_usd','manual_discount_khr','manual_discount_type','manual_discount_value','price_mode','pricing_snapshot_json']
   if (!rows.length || rows.length>MAX_PRICING_LINES || !Number.isSafeInteger(saleId) || saleId<=0) invalid()
   const ids=new Set<number>()
   const projected=rows.map(row=>{

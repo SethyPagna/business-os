@@ -58,7 +58,7 @@ import { computeSaleTotals, round2, type SaleTotals } from './saleTotals'
 import { financialCalculationValue } from './financialPrecision'
 import { divideMoney4, multiplyMoney4, roundMoney4, sumMoney4 } from './moneyPrecision'
 import { validateSaleMoneySnapshot, SaleMoneyContractError } from './saleMoneyPrecision'
-import { parseSaleItemPricing } from './saleItemPricing'
+import { capturedPricingMetadata, parseSaleItemPricing } from './saleItemPricing'
 
 export type StockStatement = { sql: string; params: Record<string, unknown> }
 
@@ -354,15 +354,16 @@ export function planSaleLineAddition(input: {
               sale_id, product_id, product_name, quantity, applied_price_usd, applied_price_khr,
               cost_price_usd, cost_price_khr, total_usd, total_khr, branch_id,
               price_mode, base_price_usd, base_price_khr, batch_id, batch_label, batch_expiry_date
-              ${pricing?', pricing_snapshot_json, product_discount_usd, product_discount_khr, manual_discount_type, manual_discount_value, manual_discount_usd, manual_discount_khr':''}
+              ${pricing?', pricing_snapshot_json, product_discount_type, product_discount_label, product_discount_usd, product_discount_khr, manual_discount_type, manual_discount_value, manual_discount_usd, manual_discount_khr':''}
             ) VALUES (
               @sale_id, @product_id, @product_name, @quantity, @applied_price_usd, @applied_price_khr,
               @cost_price_usd, @cost_price_khr, @total_usd, @total_khr, @branch_id,
               @price_mode, @base_price_usd, @base_price_khr, @batch_id, @batch_label, @batch_expiry_date
-              ${pricing?', @pricing_snapshot_json, @product_discount_usd, @product_discount_khr, @manual_discount_type, @manual_discount_value, @manual_discount_usd, @manual_discount_khr':''}
+              ${pricing?', @pricing_snapshot_json, @product_discount_type, @product_discount_label, @product_discount_usd, @product_discount_khr, @manual_discount_type, @manual_discount_value, @manual_discount_usd, @manual_discount_khr':''}
             )`,
       params: {
         ...(pricing ? {
+          ...capturedPricingMetadata(pricing.pool,pricing.line_key,pricing.amounts),
           pricing_snapshot_json:line.pricingSnapshotJson,
           product_discount_usd:divideMoney4(pricing.amounts.product_discount_usd,line.quantity),
           product_discount_khr:multiplyMoney4(divideMoney4(pricing.amounts.product_discount_usd,line.quantity),exchangeRate),

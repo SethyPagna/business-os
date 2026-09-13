@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { getDb } from '../lib/db'
-import { capturePricingProduct, evaluateCapturedPricingPool, materializeCapturedPricingRow, parseSaleItemPricing, pricingRowsStatement, pricingSourceGuard, serializeSaleItemPricing, validateCapturedSaleBasket, SaleItemPricingError, type CapturedPricingPool, type PricingSource } from '../lib/saleItemPricing'
+import { capturedPricingMetadata, capturePricingProduct, evaluateCapturedPricingPool, materializeCapturedPricingRow, parseSaleItemPricing, pricingRowsStatement, pricingSourceGuard, serializeSaleItemPricing, validateCapturedSaleBasket, SaleItemPricingError, type CapturedPricingPool, type PricingSource } from '../lib/saleItemPricing'
 import { normalizePromotionRule } from '../lib/promotionRules'
 import { chunkForBinding, selectInChunks } from '../lib/sqlBinding'
 import { requireAuth, type SessionUser } from '../lib/auth'
@@ -876,6 +876,7 @@ app.post('/', async (c) => {
     subtotalUsd += lineTotalUsd
     return {
       ...item,
+      ...capturedPricingMetadata(pricingPool,item.client_line_key!,exact),
       product_name: item.product_name || item.name || product?.name || `product #${item.product_id}`,
       unitPriceUsd,
       lineTotalUsd,
