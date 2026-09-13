@@ -226,6 +226,10 @@ function clearStorage(storage: Storage | null, preserveKeys: Set<string>): void 
     for (let index = 0; index < storage.length; index += 1) {
       const key = storage.key(index)
       if (!key || preserveKeys.has(key)) continue
+      // These exact frozen financial attempts outlive logout/runtime refresh.
+      // Do not parse, snapshot or restore them: malformed evidence and a newer
+      // cross-tab value must survive asynchronous cleanup byte-for-byte.
+      if (key.startsWith('businessos_pending_sale-add-items_v2:') || key.startsWith('businessos_pending_sale-amendment_v2:') || key.startsWith('businessos_pending_return_create_v1:')) continue
       if (isBusinessOsStorageKey(key)) toDelete.push(key)
     }
     toDelete.forEach((key) => storage.removeItem(key))

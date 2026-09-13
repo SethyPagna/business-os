@@ -331,6 +331,63 @@ export async function withSaleLineMutationLock<T>(actorId: unknown, entityId: un
   })
 }
 
+/** Caller must hold the sale lock and have an explicit, receipt-first server
+ * proof of no commit. This changes ONLY the reviewed header and request id;
+ * the original line/manual/lot intent and expected row version stay exact. */
+export function replaceReviewedSaleLineHeader(kind: SaleLineMutationKind, actorId: unknown, entityId: unknown,
+  oldBody: Record<string, unknown>, newBody: Record<string, unknown>, storage: SessionStore): void {
+  const actor = requireActorId(actorId), entity = normalizedScopePart(entityId), key = directMutationStorageKey(kind, actor, entity)
+  const pending = readPending(key, kind, actor, entity, storage)
+  const fixedIntent = (body: Record<string, unknown>) => { const { client_request_id: _id, expected_header_quote: _quote, ...rest } = body; return JSON.stringify(rest) }
+  if (!pending || JSON.stringify(pending.body) !== JSON.stringify(freezeDirectMutationBody(oldBody))
+    || newBody.client_request_id === oldBody.client_request_id || fixedIntent(oldBody) !== fixedIntent(newBody)) throw new DirectMutationPersistenceError('The saved request changed; its original intent was preserved.')
+  persistPending(key, buildPending(kind, actor, entity, newBody, null), storage)
+}
+
+/** One exact-body path for a fresh submission, explicit retry or reopened
+ * read-only recovery. Missing/denied receipt proof never changes the body. */
+export async function runSaleLineMutation<T>(options: {
+  kind: SaleLineMutationKind; actorId: string; entityId: string; storage: SessionStore;
+  body?: Record<string, unknown>; readOnly?: boolean; isCurrent: () => boolean;
+  readReceipt: (body: Record<string, unknown>) => Promise<{ committed: boolean; response?: Record<string, unknown> }>;
+  send: (body: Record<string, unknown>) => Promise<T>; isCommitted: (result: T) => boolean;
+  onPending?: (body: Record<string, unknown>) => void;
+}): Promise<{ committed: boolean; response?: Record<string, unknown>; result?: T; body: Record<string, unknown> }> {
+  const { kind, actorId, entityId, storage } = options
+  const admitted = await withSaleLineMutationLock(actorId, entityId, options.isCurrent, () => {
+    const opposite: SaleLineMutationKind = kind === 'sale-add-items' ? 'sale-amendment' : 'sale-add-items'
+    if (loadPendingDirectMutation(opposite, actorId, entityId, storage)) throw new DirectMutationPersistenceError('Another change to this sale is awaiting reconciliation.')
+    const prior = loadPendingDirectMutation(kind, actorId, entityId, storage)
+    if (prior) {
+      if (options.body && JSON.stringify(freezeDirectMutationBody(options.body)) !== JSON.stringify(prior.body)) throw new DirectMutationPersistenceError('Review the existing pending sale request before starting a different change.')
+      return { body: prior.body, retry: true }
+    }
+    if (!options.body || options.readOnly) throw new DirectMutationPersistenceError('No prepared sale request is available for recovery.')
+    return { body: savePendingDirectMutation(kind, actorId, entityId, options.body, storage)!.body, retry: false }
+  })
+  const current = () => { if (!options.isCurrent()) throw new DirectMutationPersistenceError('The session changed; the saved request remains available to its original owner.') }
+  current()
+  options.onPending?.(freezeDirectMutationBody(admitted.body))
+  const release = () => withSaleLineMutationLock(actorId, entityId, options.isCurrent,
+    () => releasePendingSaleLineMutation(kind, actorId, entityId, admitted.body, storage))
+  if (admitted.retry) {
+    const receipt = await options.readReceipt(freezeDirectMutationBody(admitted.body))
+    current()
+    if (receipt.committed === true && receipt.response) {
+      await release()
+      return { committed: true, response: receipt.response, body: admitted.body }
+    }
+    if (receipt.committed !== false) throw new DirectMutationPersistenceError('The sale receipt could not be verified. The original request remains frozen.')
+    if (options.readOnly) return { committed: false, body: admitted.body }
+  }
+  current()
+  const result = await options.send(freezeDirectMutationBody(admitted.body))
+  current()
+  const committed = options.isCommitted(result)
+  if (committed) await release()
+  return { committed, result, body: admitted.body }
+}
+
 /** True only when a write may have reached the server without a readable result. */
 export function directMutationOutcomeIsUnknown(error: unknown): boolean {
   const row = (error || {}) as { code?: unknown; status?: unknown; reason?: unknown; name?: unknown }
