@@ -317,6 +317,20 @@ export function releasePendingSaleLineMutation(kind: SaleLineMutationKind, actor
   persistPending(key, null, storage)
 }
 
+/** The storage check/reserve/release must be one origin-wide critical section.
+ * Hold only for local synchronous bookkeeping, never for a network request.
+ * Unsupported browsers refuse admission rather than use a racy check/set. */
+export async function withSaleLineMutationLock<T>(actorId: unknown, entityId: unknown,
+  isCurrent: () => boolean, action: () => T): Promise<T> {
+  const actor = requireActorId(actorId), entity = normalizedScopePart(entityId)
+  const locks = typeof navigator === 'undefined' ? undefined : navigator.locks
+  if (!entity || !locks?.request) throw new DirectMutationPersistenceError('Safe sale recovery is unavailable in this browser. No request was sent.')
+  return locks.request(`businessos-sale-line-mutation:${actor}:${entity}`, { mode: 'exclusive' }, () => {
+    if (!isCurrent()) throw new DirectMutationPersistenceError('The signed-in session changed. No new sale request was sent.')
+    return action()
+  })
+}
+
 /** True only when a write may have reached the server without a readable result. */
 export function directMutationOutcomeIsUnknown(error: unknown): boolean {
   const row = (error || {}) as { code?: unknown; status?: unknown; reason?: unknown; name?: unknown }

@@ -14,6 +14,7 @@ import {
   savePendingDirectMutation,
   savePendingDirectMutationSlot,
   releasePendingSaleLineMutation,
+  withSaleLineMutationLock,
 } from '../src/utils/directMutationRequest.ts'
 
 const require = createRequire(import.meta.url)
@@ -71,6 +72,27 @@ await test('new sale attempts preserve corrupt evidence and cannot overwrite unr
   const quota = new MemoryStorage(); quota.failWrites = true
   assert.throws(() => savePendingDirectMutation('sale-amendment', actor, entity, body, quota))
   assert.throws(() => savePendingDirectMutation('sale-add-items', actor, entity, { client_request_id: 'id-only' }, new MemoryStorage()))
+})
+
+await test('sale-line lock serializes competing reservation and rechecks actor after admission', async () => {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
+  let tail = Promise.resolve()
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { locks: { request: (_name: string, _options: unknown, action: () => unknown) => {
+    const next = tail.then(action); tail = next.then(() => undefined, () => undefined); return next
+  } } } })
+  try {
+    const storage = new MemoryStorage(), body = { client_request_id: 'one', money_precision_version: 1, expected_updated_at: 'before', expected_exchange_rate: 4000, kind: 'line_removed', expected_header_quote: {} }
+    const results = await Promise.allSettled(['one', 'two'].map(id => withSaleLineMutationLock('runtime:user7', 17, () => true,
+      () => savePendingDirectMutation('sale-amendment', 'runtime:user7', 17, { ...body, client_request_id: id }, storage))))
+    assert.equal(results.filter(result => result.status === 'fulfilled').length, 1)
+    assert.equal(loadPendingDirectMutation('sale-amendment', 'runtime:user7', 17, storage)!.body.client_request_id, 'one')
+    let wrote = false
+    await assert.rejects(withSaleLineMutationLock('runtime:user7', 17, () => false, () => { wrote = true }))
+    assert.equal(wrote, false)
+    Object.defineProperty(globalThis, 'navigator', { configurable: true, value: {} })
+    await assert.rejects(withSaleLineMutationLock('runtime:user7', 17, () => true, () => { wrote = true }))
+    assert.equal(wrote, false)
+  } finally { if (descriptor) Object.defineProperty(globalThis, 'navigator', descriptor); else Reflect.deleteProperty(globalThis, 'navigator') }
 })
 
 await test('pending bodies are frozen and scoped by actor plus entity', () => {
