@@ -14,7 +14,8 @@ assert.equal(rule({ save_usd: 0.0001 }).save_usd, 0.0001)
 const plain = { id: 7, selling_price_usd: 1, selling_price_khr: 4000 }
 const spread = evaluatePromotionPricing(plain, 3, [rule({ rule_type: 'quantity_save', min_quantity: 3, save_usd: 1 })], 4000, now, 1)
 assert.equal(spread.unit_price_usd, 0.6667)
-assert.equal(multiplyMoney4(spread.unit_price_usd, 3), 2.0001, 'canonical sale line uses priced unit4 times quantity, not an invented override')
+assert.equal(multiplyMoney4(spread.unit_price_usd, 3), 2.0001, 'rounded unit projection is not line authority')
+assert.equal(spread.line_total_usd, 2, 'exact line total remains authoritative')
 const mixed = evaluateCartPromotionAdjustments([
   { line_id: 'expensive', product: { ...plain, id: 8, selling_price_usd: 2 }, quantity: 1 },
   { line_id: 'cheap', product: plain, quantity: 1 },
@@ -42,4 +43,19 @@ for (const kind of ['percent_off', 'quantity_percent', 'fixed_off', 'quantity_sa
   assert.ok(result.unit_price_usd >= 0 && result.unit_price_usd <= 1, kind)
   assert.equal(Math.round(result.unit_price_usd * 10000), result.unit_price_usd * 10000, kind)
 }
+const cent = { id: 7, selling_price_usd: 0.01, selling_price_khr: 40 }
+for (const kind of ['percent_off', 'quantity_percent']) {
+  const benefit = rule({ rule_type: kind, min_quantity: 1, percent_off: 33.3333 })
+  const exact = evaluatePromotionPricing(cent, 3, [benefit], 4000, now, 1)
+  assert.equal(exact.line_discount_usd, 0.01, kind)
+  assert.equal(exact.line_total_usd, 0.02, kind)
+  assert.equal(evaluatePromotionPricing(cent, 3, [benefit], 4000, now, 0).line_total_usd, 0, 'legacy per-unit ceil behavior unchanged')
+}
+assert.equal(evaluatePromotionPricing({ ...cent, discount_enabled: 1, discount_type: 'percent', discount_percent: 33.3333 }, 3, [], 4000, now, 1).line_discount_usd, 0.01)
+assert.equal(evaluatePromotionPricing(cent, 0.015, [rule({ percent_off: 49.99 })], 4000, now, 1).line_discount_usd, 0.0001, 'original unit*quantity*percentage rounds once, not rounded gross or rounded unit savings')
+const threeHits = rule({ rule_type: 'next_item', min_quantity: 1, percent_off: 33.3333 })
+assert.equal(evaluatePromotionPricing(cent, 6, [threeHits], 4000, now, 1).line_discount_usd, 0.01, 'single-line next_item aggregates hit bases before rounding')
+const pooledHits = evaluateCartPromotionAdjustments([{ line_id: 'cheap', product: cent, quantity: 3 }, { line_id: 'expensive', product: { ...cent, id: 8, selling_price_usd: 1, selling_price_khr: 4000 }, quantity: 3 }], [threeHits], 4000, now, 1)
+assert.equal(pooledHits.get('cheap')!.line_discount_usd, 0.01, 'pooled next_item aggregates selected hit bases per receiving line')
+assert.equal(pooledHits.get('expensive')!.line_discount_usd, 0)
 console.log('PASS opt-in promotion v1: exact percent, fractional quantities, cheapest pairing, 100 lines and v0 defaults')

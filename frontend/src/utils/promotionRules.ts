@@ -11,7 +11,7 @@
 // for the plain per-product discount path; the semantics here are kept
 // identical to it (see the kernel's own comments).
 
-import { addMoney4, divideMoney4, multiplyMoney4, percentageMoney4, roundMoney4, sellingPriceCeilCent, subtractMoney4 } from './moneyPrecision.ts'
+import { addMoney4, divideMoney4, multiplyMoney4, percentageMoney4, percentageProductMoney4, roundMoney4, sellingPriceCeilCent, subtractMoney4, sumProductsMoney4, sumProductsPercentageMoney4 } from './moneyPrecision.ts'
 
 export type PromotionRuleType =
   | 'quantity_save'    // buy >= X items, save $Y off the line
@@ -276,6 +276,8 @@ export function evaluatePromotionPricing(
   moneyPrecisionVersion: 0 | 1 = 0,
 ): PromotionEvaluation {
   const { money, times, percent, less, divide } = promotionMoney(moneyPrecisionVersion)
+  const linePercent = (amount: number, quantity: number, pct: number) => moneyPrecisionVersion === 1
+    ? percentageProductMoney4(amount, quantity, pct) : times(percent(amount, pct), quantity)
   if (!product) return noPromotion({}, quantity, exchangeRate, moneyPrecisionVersion)
   const { sellingUsd, sellingKhr, qty } = evaluationOf(product, quantity, exchangeRate, moneyPrecisionVersion)
   const nowMs = nowMsOf(now)
@@ -305,7 +307,8 @@ export function evaluatePromotionPricing(
     }
     candidates.push({
       source: 'product_discount', rule: null,
-      lineDiscountUsd: times(perUnitUsd, qty), lineDiscountKhr: times(perUnitKhr, qty),
+      lineDiscountUsd: type === 'percent' ? linePercent(sellingUsd, qty, pct) : times(perUnitUsd, qty),
+      lineDiscountKhr: type === 'percent' ? linePercent(sellingKhr, qty, pct) : times(perUnitKhr, qty),
       percentOff: pct,
     })
   }
@@ -315,7 +318,7 @@ export function evaluatePromotionPricing(
     if (rule.rule_type === 'percent_off') {
       const perUnitUsd = percent(sellingUsd, rule.percent_off)
       const perUnitKhr = percent(sellingKhr, rule.percent_off)
-      candidates.push({ source: 'rule', rule, lineDiscountUsd: times(perUnitUsd, qty), lineDiscountKhr: times(perUnitKhr, qty), percentOff: rule.percent_off })
+      candidates.push({ source: 'rule', rule, lineDiscountUsd: linePercent(sellingUsd, qty, rule.percent_off), lineDiscountKhr: linePercent(sellingKhr, qty, rule.percent_off), percentOff: rule.percent_off })
     } else if (rule.rule_type === 'fixed_off') {
       const perUnitUsd = Math.min(rule.save_usd, sellingUsd)
       const perUnitKhr = Math.min(rule.save_khr || times(rule.save_usd, toFiniteNumber(exchangeRate, 0) || 4100), sellingKhr)
@@ -351,7 +354,7 @@ export function evaluatePromotionPricing(
     } else if (rule.rule_type === 'quantity_percent' && qty >= rule.min_quantity) {
       const perUnitUsd = percent(sellingUsd, rule.percent_off)
       const perUnitKhr = percent(sellingKhr, rule.percent_off)
-      candidates.push({ source: 'rule', rule, lineDiscountUsd: times(perUnitUsd, qty), lineDiscountKhr: times(perUnitKhr, qty), percentOff: rule.percent_off })
+      candidates.push({ source: 'rule', rule, lineDiscountUsd: linePercent(sellingUsd, qty, rule.percent_off), lineDiscountKhr: linePercent(sellingKhr, qty, rule.percent_off), percentOff: rule.percent_off })
     } else if (rule.rule_type === 'next_item') {
       // Per-LINE evaluation of "buy N get the next one off": every
       // complete group of (N+1) units on THIS line discounts one unit --
@@ -371,7 +374,8 @@ export function evaluatePromotionPricing(
         const lineTotal = sellingUsd * qty
         candidates.push({
           source: 'rule', rule,
-          lineDiscountUsd: times(perHitUsd, groups), lineDiscountKhr: times(perHitKhr, groups),
+          lineDiscountUsd: rule.percent_off > 0 ? linePercent(sellingUsd, groups, rule.percent_off) : times(perHitUsd, groups),
+          lineDiscountKhr: rule.percent_off > 0 ? linePercent(sellingKhr, groups, rule.percent_off) : times(perHitKhr, groups),
           percentOff: lineTotal > 0 ? Math.round(((perHitUsd * groups) / lineTotal) * 100) : 0,
         })
       }
@@ -615,6 +619,23 @@ function nextItemAllocations(
   // dearest items, never earns the cut on them.
   units.sort((a, b) => a.usd - b.usd || a.khr - b.khr)
   const hits = Math.floor(units.length / groupSize)
+  if (moneyPrecisionVersion === 1) {
+    // Allocate the same selected hits, but quantize once per receiving line.
+    // Summing already-rounded per-hit percentages loses sub-tick savings.
+    const grouped = new Map<string, Unit[]>()
+    for (const unit of units.slice(0, hits)) {
+      const bucket = grouped.get(unit.line_id) || []
+      bucket.push(unit)
+      grouped.set(unit.line_id, bucket)
+    }
+    for (const [lineId, selected] of grouped) {
+      const usd = selected.map(unit => ({ amount: rule.percent_off > 0 ? unit.usd : Math.min(rule.save_usd, unit.usd), factor: 1 }))
+      const khr = selected.map(unit => ({ amount: rule.percent_off > 0 ? unit.khr : Math.min(rule.save_khr || times(rule.save_usd, toFiniteNumber(exchangeRate, 0) || 4100), unit.khr), factor: 1 }))
+      out.set(lineId, { usd: rule.percent_off > 0 ? sumProductsPercentageMoney4(usd, rule.percent_off) : sumProductsMoney4(usd),
+        khr: rule.percent_off > 0 ? sumProductsPercentageMoney4(khr, rule.percent_off) : sumProductsMoney4(khr) })
+    }
+    return out
+  }
   for (let g = 0; g < hits; g++) {
     const cheapest = units[g]
     const cutUsd = rule.percent_off > 0 ? percent(cheapest.usd, rule.percent_off) : Math.min(rule.save_usd, cheapest.usd)
