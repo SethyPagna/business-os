@@ -143,6 +143,13 @@ import {
   localTimeRangeClause,
   localHourExpr,
 } from './businessDateWindow'
+import {
+  REPORT_MONEY_MAX_ROWS,
+  REPORT_MONEY_PAGE_SIZE,
+  ReportExactDecimal,
+  ReportMoneyPrecisionError,
+  type ReportMoneyPrecisionMode,
+} from './reportMoneyPrecision'
 
 export interface SalesFilters {
   startDate?: string | null
@@ -724,6 +731,491 @@ export function whereActiveSales(alias: string, f: SalesFilters) {
   return { sql: clauses.join(' AND '), params }
 }
 
+type ReportScalarRow = Record<string, unknown> & { id: number }
+
+export interface SalesReportSnapshot {
+  sales: ReportScalarRow[]
+  voidSales: ReportScalarRow[]
+  items: ReportScalarRow[]
+  returns: ReportScalarRow[]
+  returnItems: ReportScalarRow[]
+  deliveryFees: ReportScalarRow[]
+  precision_mode: ReportMoneyPrecisionMode
+  row_count: number
+}
+
+async function reportTableColumns(db: ReturnType<typeof getDb>, table: string): Promise<Set<string>> {
+  const rows = await db.prepare(`PRAGMA table_info(${table})`).all<Record<string, unknown>>()
+  return new Set((rows || []).map((row) => String(row.name || '')))
+}
+
+async function reportRestoreActive(db: ReturnType<typeof getDb>): Promise<boolean> {
+  const columns = await reportTableColumns(db, 'system_flags')
+  if (!columns.has('key') || !columns.has('value')) return false
+  const rows = await db.prepare("SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key")
+    .all<{ value: unknown }>()
+  return (rows || []).some((row) => {
+    const raw = String(row.value ?? '').trim()
+    if (raw.toLowerCase() === 'restore') return true
+    try { return String((JSON.parse(raw) as { mode?: unknown }).mode || '').toLowerCase() === 'restore' } catch { return false }
+  })
+}
+
+async function assertReportReadable(db: ReturnType<typeof getDb>): Promise<void> {
+  if (await reportRestoreActive(db)) throw new ReportMoneyPrecisionError('maintenance_restore')
+}
+
+async function reportKeysetRows(
+  db: ReturnType<typeof getDb>,
+  selectSql: string,
+  idExpr: string,
+  params: Record<string, unknown>,
+  rowBudget: { count: number },
+): Promise<ReportScalarRow[]> {
+  const output: ReportScalarRow[] = []
+  let afterId = 0
+  for (;;) {
+    const page = await db.prepare(`${selectSql} AND ${idExpr} > @reportAfterId ORDER BY ${idExpr} LIMIT @reportPageSize`)
+      .all<ReportScalarRow>({ ...params, reportAfterId: afterId, reportPageSize: REPORT_MONEY_PAGE_SIZE })
+    if (!page?.length) break
+    rowBudget.count += page.length
+    if (page.length > REPORT_MONEY_PAGE_SIZE || rowBudget.count > REPORT_MONEY_MAX_ROWS) {
+      throw new ReportMoneyPrecisionError('too_many_rows')
+    }
+    for (const row of page) {
+      const id = Number(row.id)
+      if (!Number.isSafeInteger(id) || id <= afterId) throw new ReportMoneyPrecisionError('unsupported_row')
+      afterId = id
+      output.push(row)
+    }
+    if (page.length < REPORT_MONEY_PAGE_SIZE) break
+  }
+  return output
+}
+
+function reportRowsEqual(left: readonly string[], right: readonly string[]): boolean {
+  if (left.length !== right.length) return false
+  for (let index = 0; index < left.length; index += 1) if (left[index] !== right[index]) return false
+  return true
+}
+
+function reportSnapshotScalars(snapshot: SalesReportSnapshot): string[] {
+  const rows = [`precision:${snapshot.precision_mode}`]
+  for (const [kind, values] of [
+    ['sales', snapshot.sales], ['void-sales', snapshot.voidSales], ['items', snapshot.items],
+    ['returns', snapshot.returns], ['return-items', snapshot.returnItems], ['delivery-fees', snapshot.deliveryFees],
+  ] as const) for (const value of values) rows.push(`${kind}:${JSON.stringify(value)}`)
+  return rows
+}
+
+async function readSalesReportPass(
+  env: Env,
+  f: SalesFilters & { contactId?: number | string | null },
+  includeDeliveryFees: boolean,
+): Promise<SalesReportSnapshot> {
+  const db = getDb(env)
+  const salesColumns = await reportTableColumns(db, 'sales')
+  const itemColumns = await reportTableColumns(db, 'sale_items')
+  const returnColumns = await reportTableColumns(db, 'returns')
+  const feeColumns = await reportTableColumns(db, 'fees')
+  const customerColumns = await reportTableColumns(db, 'customers')
+  const contactColumns = await reportTableColumns(db, 'delivery_contacts')
+  const preciseSales = salesColumns.has('money_precision_version')
+    && salesColumns.has('calculated_total_usd') && salesColumns.has('rounding_adjustment_usd')
+  const preciseReturns = returnColumns.has('money_precision_version')
+    && returnColumns.has('calculated_refund_usd') && returnColumns.has('rounding_adjustment_usd')
+  // Never name 0158 columns in SQL prepared against a pre-0158 database.
+  // Missing properties naturally select the version-0 exact-recorded path.
+  const salePrecision = preciseSales
+    ? ',s.money_precision_version,s.calculated_total_usd,s.rounding_adjustment_usd'
+    : ''
+  const returnPrecision = preciseReturns
+    ? ',r.money_precision_version,r.calculated_refund_usd,r.rounding_adjustment_usd'
+    : ''
+  const customerAnonymous = customerColumns.has('is_anonymous')
+    ? 'COALESCE((SELECT is_anonymous FROM customers WHERE customers.id=s.customer_id),0)'
+    : '0'
+  const itemColumn = (name: string, fallback: string) => itemColumns.has(name) ? `si.${name}` : `${fallback} AS ${name}`
+  const saleColumn = (name: string, fallback: string) => salesColumns.has(name) ? `s.${name}` : `${fallback} AS ${name}`
+  const linkedDeliveryFee = feeColumns.has('sale_id') && feeColumns.has('fee_type')
+    ? "EXISTS(SELECT 1 FROM fees WHERE fees.sale_id=s.id AND COALESCE(fees.fee_type,'')='delivery')" : '0'
+  const primary = whereActiveSales('s', f)
+  const voids = whereActiveSales('s', { ...f, status: 'cancelled' })
+  const rowBudget = { count: 0 }
+  const sales = await reportKeysetRows(db, `SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name,
+      s.cashier_id,s.cashier_name,s.customer_id,s.customer_name,s.customer_phone,s.receipt_number,s.payment_method,
+      ${customerAnonymous} AS customer_is_anonymous,
+      s.subtotal_usd,s.discount_usd,s.membership_discount_usd,s.tax_usd,s.total_usd,
+      s.delivery_fee_usd,s.delivery_fee_paid_by,s.delivery_actual_cost_usd,s.is_delivery,
+      s.source_return_id,s.amount_paid_usd${salePrecision},
+      ${saleColumn('delivery_contact_id','NULL')},${saleColumn('delivery_contact_name',"''")},
+      ${linkedDeliveryFee} AS delivery_has_linked_fee
+    FROM sales s WHERE ${primary.sql}`, 's.id', primary.params, rowBudget)
+  const voidSales = await reportKeysetRows(db, `SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name,
+      s.cashier_id,s.cashier_name,s.customer_id,s.customer_name,s.customer_phone,s.payment_method,
+      ${customerAnonymous} AS customer_is_anonymous
+    FROM sales s WHERE ${voids.sql}`, 's.id', voids.params, rowBudget)
+  const items = await reportKeysetRows(db, `SELECT si.id,si.sale_id,${itemColumn('product_id','NULL')},${itemColumn('product_name',"''")},si.quantity,
+      ${itemColumn('total_usd','0')},si.cost_price_usd,${itemColumn('product_discount_usd','0')},${itemColumn('manual_discount_usd','0')}
+    FROM sale_items si WHERE EXISTS(SELECT 1 FROM sales s WHERE s.id=si.sale_id AND ${primary.sql})`, 'si.id', primary.params, rowBudget)
+  const returns = await reportKeysetRows(db, `SELECT r.id,r.sale_id,r.total_refund_usd,r.status,r.return_scope${returnPrecision}
+    FROM returns r WHERE r.sale_id IS NOT NULL
+      AND COALESCE(r.status,'completed')<>'cancelled' AND COALESCE(r.return_scope,'customer')='customer'
+      AND EXISTS(SELECT 1 FROM sales s WHERE s.id=r.sale_id AND ${primary.sql})`, 'r.id', primary.params, rowBudget)
+  const returnItems = await reportKeysetRows(db, `SELECT ri.id,ri.return_id,ri.cost_price_usd,ri.quantity,ri.stock_action,ri.return_to_stock
+    FROM return_items ri WHERE EXISTS(SELECT 1 FROM returns r JOIN sales s ON s.id=r.sale_id
+      WHERE r.id=ri.return_id AND COALESCE(r.status,'completed')<>'cancelled'
+        AND COALESCE(r.return_scope,'customer')='customer' AND ${primary.sql})`, 'ri.id', primary.params, rowBudget)
+  let deliveryFees: ReportScalarRow[] = []
+  const deliveryFeeColumns = ['id', 'delivery_contact_id', 'amount_usd', 'amount_khr', 'created_at']
+  if (includeDeliveryFees && deliveryFeeColumns.every((name) => feeColumns.has(name))) {
+    const feeClauses = ['f.delivery_contact_id IS NOT NULL']
+    const feeParams: Record<string, unknown> = {}
+    const feeCreatedFrom = shiftWindowBound(f.createdFrom)
+    const feeCreatedTo = shiftWindowBound(f.createdTo)
+    if (feeCreatedFrom && feeCreatedTo) {
+      feeClauses.push('datetime(f.created_at) >= @feeCreatedFrom', 'datetime(f.created_at) < @feeCreatedTo')
+      feeParams.feeCreatedFrom = feeCreatedFrom
+      feeParams.feeCreatedTo = feeCreatedTo
+    } else {
+      if (f.startDate && feeColumns.has('fee_date')) { feeClauses.push('f.fee_date >= @feeStartDate'); feeParams.feeStartDate = f.startDate }
+      if (f.endDate && feeColumns.has('fee_date')) { feeClauses.push('f.fee_date <= @feeEndDate'); feeParams.feeEndDate = f.endDate }
+    }
+    if (f.branchId && feeColumns.has('branch_id')) { feeClauses.push('f.branch_id = @feeBranchId'); feeParams.feeBranchId = f.branchId }
+    const validTime = (value: unknown): value is string => typeof value === 'string' && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)
+    if (!feeCreatedFrom && !feeCreatedTo && validTime(f.startTime) && validTime(f.endTime)) {
+      feeClauses.push(localTimeRangeClause('f.created_at').replaceAll('@startTime', '@feeStartTime').replaceAll('@endTime', '@feeEndTime'))
+      feeParams.feeStartTime = f.startTime
+      feeParams.feeEndTime = f.endTime
+    }
+    if (f.contactId != null && f.contactId !== '') {
+      feeClauses.push('f.delivery_contact_id = @feeContactId')
+      feeParams.feeContactId = f.contactId
+    }
+    const contactName = feeColumns.has('delivery_contact_name')
+      ? "COALESCE(NULLIF(TRIM(f.delivery_contact_name),''),'')"
+      : contactColumns.has('id') && contactColumns.has('name') ? "COALESCE(NULLIF(TRIM(dc.name),''),'')" : "''"
+    const joinContacts = contactName.includes('dc.') ? 'LEFT JOIN delivery_contacts dc ON dc.id=f.delivery_contact_id' : ''
+    deliveryFees = await reportKeysetRows(db, `SELECT f.id,f.delivery_contact_id,${contactName} AS delivery_contact_name,
+        f.amount_usd,f.amount_khr,f.created_at
+      FROM fees f ${joinContacts} WHERE ${feeClauses.join(' AND ')}`, 'f.id', feeParams, rowBudget)
+  }
+  const legacy = !preciseSales || !preciseReturns
+    || sales.some((row) => Number(row.money_precision_version) === 0)
+    || returns.some((row) => Number(row.money_precision_version) === 0)
+  return {
+    sales, voidSales, items, returns, returnItems, deliveryFees,
+    precision_mode: legacy ? 'exact_recorded' : 'canonical_v1',
+    row_count: rowBudget.count,
+  }
+}
+
+/** Two complete ordered scalar passes are compared directly. A changed pass
+ * is discarded in full, retried once, and never leaks a partial aggregate. */
+export async function readSalesReportSnapshot(
+  env: Env,
+  f: SalesFilters & { contactId?: number | string | null },
+  includeDeliveryFees = false,
+): Promise<SalesReportSnapshot> {
+  const db = getDb(env)
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await assertReportReadable(db)
+    const first = await readSalesReportPass(env, f, includeDeliveryFees)
+    await assertReportReadable(db)
+    const second = await readSalesReportPass(env, f, includeDeliveryFees)
+    await assertReportReadable(db)
+    if (reportRowsEqual(reportSnapshotScalars(first), reportSnapshotScalars(second))) return first
+  }
+  throw new ReportMoneyPrecisionError('snapshot_changed')
+}
+
+const REPORT_EXACT_KEYS = [
+  'gross','storeDiscount','membershipDiscount','tax','delivery','storeDelivery','deliveryActual',
+  'recognizedNet','pendingRevenue','recognizedTax','recognizedDelivery','recognizedStoreDelivery','recognizedDeliveryCost',
+  'collected','refund','refundPaid','refundCharged','refundExcess','pendingGross','pendingStoreDiscount',
+  'pendingMembershipDiscount','pendingDelivery','pendingDeliveryCost','cost','pendingCost','returnedCost',
+  'itemDiscount','pendingItemDiscount','unvaluedCost',
+] as const
+type ReportExactKey = typeof REPORT_EXACT_KEYS[number]
+type ReportExactBucket = {
+  money: Record<ReportExactKey, ReportExactDecimal>
+  tx: number; pendingTx: number; deliveryActualCount: number; deliverySaleCount: number
+  cancelledTx: number; unvaluedTx: number; missingCostLines: number
+}
+
+function reportBucket(): ReportExactBucket {
+  return {
+    money: Object.fromEntries(REPORT_EXACT_KEYS.map((key) => [key, ReportExactDecimal.zero()])) as Record<ReportExactKey, ReportExactDecimal>,
+    tx: 0, pendingTx: 0, deliveryActualCount: 0, deliverySaleCount: 0, cancelledTx: 0, unvaluedTx: 0, missingCostLines: 0,
+  }
+}
+function reportAdd(bucket: ReportExactBucket, key: ReportExactKey, value: ReportExactDecimal): void {
+  bucket.money[key] = bucket.money[key].add(value)
+}
+function reportVersion(row: ReportScalarRow): 0 | 1 {
+  const version = Number(row.money_precision_version ?? 0)
+  if (version !== 0 && version !== 1) throw new ReportMoneyPrecisionError('unsupported_precision_version')
+  return version
+}
+function reportMoney(row: ReportScalarRow, key: string, version: 0 | 1, nullableZero = true): ReportExactDecimal {
+  const value = row[key]
+  if (value == null && nullableZero) return ReportExactDecimal.money(0, version)
+  if (typeof value !== 'string' && typeof value !== 'number') {
+    throw new ReportMoneyPrecisionError(version === 1 ? 'invalid_saved_money4' : 'invalid_recorded_decimal')
+  }
+  return ReportExactDecimal.money(value, version)
+}
+function reportStatus(row: ReportScalarRow): string { return String(row.sale_status || 'completed') }
+function reportRestocked(row: ReportScalarRow): boolean {
+  const action = String(row.stock_action || '').trim().toLowerCase()
+  return ['restock', 'damaged', 'none'].includes(action) ? action === 'restock' : Number(row.return_to_stock ?? 1) !== 0
+}
+
+type ReportSaleFacts = {
+  sale: ReportScalarRow; version: 0 | 1; recognized: boolean; awaiting: boolean; valued: boolean
+  net: ReportExactDecimal; adjustment: ReportExactDecimal; refund: ReportExactDecimal; refundPaid: ReportExactDecimal
+  refundExcess: ReportExactDecimal
+  delivery: ReportExactDecimal; deliveryActual: ReportExactDecimal; cost: ReportExactDecimal; returnedCost: ReportExactDecimal
+  itemDiscount: ReportExactDecimal; pendingCost: ReportExactDecimal; unvaluedCost: ReportExactDecimal; missingCostLines: number
+}
+
+function reportSaleFacts(snapshot: SalesReportSnapshot): ReportSaleFacts[] {
+  const items = new Map<number, ReportScalarRow[]>()
+  for (const row of snapshot.items) { const id = Number(row.sale_id); items.set(id, [...(items.get(id) || []), row]) }
+  const returns = new Map<number, ReportScalarRow[]>()
+  for (const row of snapshot.returns) { const id = Number(row.sale_id); returns.set(id, [...(returns.get(id) || []), row]) }
+  const returnItems = new Map<number, ReportScalarRow[]>()
+  for (const row of snapshot.returnItems) { const id = Number(row.return_id); returnItems.set(id, [...(returnItems.get(id) || []), row]) }
+  return snapshot.sales.map((sale) => {
+    const version = reportVersion(sale)
+    const subtotal = reportMoney(sale, 'subtotal_usd', version)
+    const storeDiscount = reportMoney(sale, 'discount_usd', version)
+    const membershipDiscount = reportMoney(sale, 'membership_discount_usd', version)
+    const rawNet = subtotal.subtract(storeDiscount).subtract(membershipDiscount)
+    const net = rawNet.max(ReportExactDecimal.zero())
+    const valued = subtotal.isPositive() && !rawNet.isNegative()
+    const recognized = reportStatus(sale) !== 'cancelled'
+    const awaiting = reportStatus(sale) === 'awaiting_payment'
+    let adjustment = ReportExactDecimal.zero()
+    if (version === 1) {
+      reportMoney(sale, 'calculated_total_usd', version, false)
+      reportMoney(sale, 'total_usd', version, false)
+      adjustment = reportMoney(sale, 'rounding_adjustment_usd', version, false)
+    }
+    let refundPaid = ReportExactDecimal.zero()
+    let returnedCost = ReportExactDecimal.zero()
+    let missingCostLines = 0
+    for (const returned of returns.get(Number(sale.id)) || []) {
+      const returnVersion = reportVersion(returned)
+      const payout = reportMoney(returned, 'total_refund_usd', returnVersion, false)
+      if (returnVersion === 1) {
+        reportMoney(returned, 'calculated_refund_usd', returnVersion, false)
+        reportMoney(returned, 'rounding_adjustment_usd', returnVersion, false)
+      }
+      refundPaid = refundPaid.add(payout)
+      for (const line of returnItems.get(Number(returned.id)) || []) {
+        const quantity = ReportExactDecimal.quantity(line.quantity as string | number)
+        if (line.cost_price_usd == null) { if (reportRestocked(line)) missingCostLines += 1; continue }
+        const unit = reportMoney(line, 'cost_price_usd', returnVersion, false)
+        if (unit.isNegative()) throw new ReportMoneyPrecisionError(returnVersion === 1 ? 'invalid_saved_money4' : 'invalid_recorded_decimal')
+        if (reportRestocked(line)) returnedCost = returnedCost.add(unit.multiply(quantity))
+      }
+    }
+    const basis = subtotal.isPositive() ? refundPaid.multiply(net).divide(subtotal) : refundPaid
+    const refund = net.min(basis)
+    const refundExcess = basis.subtract(net).max(ReportExactDecimal.zero())
+    let cost = ReportExactDecimal.zero(), pendingCost = ReportExactDecimal.zero(), unvaluedCost = ReportExactDecimal.zero()
+    let itemDiscount = ReportExactDecimal.zero()
+    for (const item of items.get(Number(sale.id)) || []) {
+      const quantity = ReportExactDecimal.quantity(item.quantity as string | number)
+      reportMoney(item, 'total_usd', version)
+      const discount = reportMoney(item, 'product_discount_usd', version).add(reportMoney(item, 'manual_discount_usd', version))
+      if (recognized) itemDiscount = itemDiscount.add(discount)
+      if (item.cost_price_usd == null) { if (recognized && valued) missingCostLines += 1; continue }
+      const unit = reportMoney(item, 'cost_price_usd', version, false)
+      if (unit.isNegative()) throw new ReportMoneyPrecisionError(version === 1 ? 'invalid_saved_money4' : 'invalid_recorded_decimal')
+      const lineCost = unit.multiply(quantity)
+      if (recognized && valued) cost = cost.add(lineCost)
+      if (recognized && !valued) unvaluedCost = unvaluedCost.add(lineCost)
+      if (awaiting) pendingCost = pendingCost.add(lineCost)
+    }
+    const delivery = String(sale.delivery_fee_paid_by || 'customer') === 'store'
+      ? ReportExactDecimal.zero() : reportMoney(sale, 'delivery_fee_usd', version)
+    const deliveryActual = Number(sale.delivery_has_linked_fee) !== 0
+      ? ReportExactDecimal.zero() : reportMoney(sale, 'delivery_actual_cost_usd', version)
+    return { sale, version, recognized, awaiting, valued, net, adjustment, refund, refundPaid, refundExcess, delivery, deliveryActual,
+      cost, returnedCost, itemDiscount, pendingCost, unvaluedCost, missingCostLines }
+  })
+}
+
+export type ReportMoneyReadDiagnostic = {
+  precision_mode: ReportMoneyPrecisionMode
+  complete: boolean
+  unknown_cost_lines: number
+  contributing_rows: number
+}
+const REPORT_MONEY_DIAGNOSTIC = Symbol('report-money-diagnostic')
+type WithReportDiagnostic = { [REPORT_MONEY_DIAGNOSTIC]?: ReportMoneyReadDiagnostic }
+export function reportMoneyDiagnostic(value: object): ReportMoneyReadDiagnostic | null {
+  return (value as WithReportDiagnostic)[REPORT_MONEY_DIAGNOSTIC] || null
+}
+function attachReportDiagnostic<T extends object>(value: T, diagnostic: ReportMoneyReadDiagnostic): T {
+  Object.defineProperty(value, REPORT_MONEY_DIAGNOSTIC, { value: diagnostic, enumerable: false })
+  return value
+}
+
+function aggregateReportSnapshot(
+  snapshot: SalesReportSnapshot,
+  bucketForSale: (sale: ReportScalarRow) => string,
+): Map<string, ReportExactBucket> {
+  const buckets = new Map<string, ReportExactBucket>()
+  const getBucket = (key: string) => { const found = buckets.get(key) || reportBucket(); buckets.set(key, found); return found }
+  for (const fact of reportSaleFacts(snapshot)) {
+    const { sale, version } = fact
+    const bucket = getBucket(bucketForSale(sale))
+    bucket.tx += 1
+    const subtotal = reportMoney(sale, 'subtotal_usd', version)
+    const storeDiscount = reportMoney(sale, 'discount_usd', version)
+    const membershipDiscount = reportMoney(sale, 'membership_discount_usd', version)
+    const tax = reportMoney(sale, 'tax_usd', version)
+    const deliveryFee = reportMoney(sale, 'delivery_fee_usd', version)
+    const storeDelivery = String(sale.delivery_fee_paid_by || 'customer') === 'store' ? deliveryFee : ReportExactDecimal.zero()
+    const rawActual = reportMoney(sale, 'delivery_actual_cost_usd', version)
+    reportAdd(bucket, 'gross', subtotal); reportAdd(bucket, 'storeDiscount', storeDiscount)
+    reportAdd(bucket, 'membershipDiscount', membershipDiscount); reportAdd(bucket, 'tax', tax)
+    reportAdd(bucket, 'delivery', fact.delivery); reportAdd(bucket, 'storeDelivery', storeDelivery)
+    reportAdd(bucket, 'deliveryActual', rawActual)
+    if (sale.delivery_actual_cost_usd != null) bucket.deliveryActualCount += 1
+    if (Number(sale.is_delivery) === 1) bucket.deliverySaleCount += 1
+    bucket.missingCostLines += fact.missingCostLines
+    if (!fact.recognized) continue
+    const recognizedNet = fact.net.add(fact.adjustment)
+    reportAdd(bucket, 'recognizedNet', recognizedNet); reportAdd(bucket, 'recognizedTax', tax)
+    reportAdd(bucket, 'recognizedDelivery', fact.delivery); reportAdd(bucket, 'recognizedStoreDelivery', storeDelivery)
+    reportAdd(bucket, 'recognizedDeliveryCost', fact.deliveryActual)
+    reportAdd(bucket, 'refund', fact.refund); reportAdd(bucket, 'refundCharged', fact.refundPaid)
+    reportAdd(bucket, 'refundExcess', fact.refundExcess); reportAdd(bucket, 'cost', fact.cost)
+    reportAdd(bucket, 'returnedCost', fact.valued ? fact.returnedCost : ReportExactDecimal.zero())
+    reportAdd(bucket, 'itemDiscount', fact.itemDiscount); reportAdd(bucket, 'unvaluedCost', fact.unvaluedCost)
+    if (!fact.valued) bucket.unvaluedTx += 1
+    const collected = reportStatus(sale) !== 'awaiting_payment'
+    if (collected) {
+      const payable = Number(sale.source_return_id || 0) !== 0
+        ? reportMoney(sale, 'amount_paid_usd', version) : reportMoney(sale, 'total_usd', version)
+      reportAdd(bucket, 'collected', payable.subtract(fact.refundPaid))
+      reportAdd(bucket, 'refundPaid', fact.refundPaid)
+    }
+    if (fact.awaiting) {
+      bucket.pendingTx += 1
+      reportAdd(bucket, 'pendingRevenue', recognizedNet); reportAdd(bucket, 'pendingGross', subtotal)
+      reportAdd(bucket, 'pendingStoreDiscount', storeDiscount); reportAdd(bucket, 'pendingMembershipDiscount', membershipDiscount)
+      reportAdd(bucket, 'pendingDelivery', fact.delivery); reportAdd(bucket, 'pendingDeliveryCost', fact.deliveryActual)
+      reportAdd(bucket, 'pendingCost', fact.pendingCost); reportAdd(bucket, 'pendingItemDiscount', fact.itemDiscount)
+    }
+  }
+  for (const sale of snapshot.voidSales) getBucket(bucketForSale(sale)).cancelledTx += 1
+  return buckets
+}
+
+function exactReportTotals(bucket: ReportExactBucket, snapshot: SalesReportSnapshot): SalesTotals {
+  const m = bucket.money
+  const zero = ReportExactDecimal.zero()
+  const discount = m.storeDiscount.add(m.membershipDiscount)
+  const totalDiscount = discount.add(m.itemDiscount)
+  const revenue = m.recognizedNet.subtract(m.refund)
+  const netCost = m.cost.subtract(m.returnedCost).max(zero)
+  const returnedCostShortfall = m.returnedCost.subtract(m.cost).max(zero)
+  const deliveryNet = m.recognizedDelivery.subtract(m.recognizedDeliveryCost)
+  const profit = revenue.subtract(netCost).add(deliveryNet)
+  const pendingProfit = m.pendingRevenue.subtract(m.pendingCost).add(m.pendingDelivery.subtract(m.pendingDeliveryCost))
+  const diagnostic: ReportMoneyReadDiagnostic = {
+    precision_mode: snapshot.precision_mode,
+    complete: bucket.missingCostLines === 0,
+    unknown_cost_lines: bucket.missingCostLines,
+    contributing_rows: snapshot.row_count,
+  }
+  return attachReportDiagnostic({
+    tx_count: bucket.tx,
+    gross_sales_usd: m.gross.toNumber(),
+    store_discount_usd: m.storeDiscount.toNumber(),
+    membership_discount_usd: m.membershipDiscount.toNumber(),
+    discount_usd: discount.toNumber(),
+    item_discount_usd: m.itemDiscount.toNumber(),
+    total_discount_usd: totalDiscount.toNumber(),
+    tax_usd: m.tax.toNumber(),
+    delivery_usd: m.delivery.toNumber(),
+    store_delivery_usd: m.storeDelivery.toNumber(),
+    delivery_actual_cost_usd: m.deliveryActual.toNumber(),
+    delivery_actual_cost_count: bucket.deliveryActualCount,
+    delivery_sale_count: bucket.deliverySaleCount,
+    delivery_margin_usd: m.delivery.subtract(m.deliveryActual).toNumber(),
+    delivery_net_usd: deliveryNet.toNumber(),
+    recognized_delivery_usd: m.recognizedDelivery.toNumber(),
+    recognized_delivery_cost_usd: m.recognizedDeliveryCost.toNumber(),
+    pending_tx_count: bucket.pendingTx,
+    pending_gross_sales_usd: m.pendingGross.toNumber(),
+    pending_store_discount_usd: m.pendingStoreDiscount.toNumber(),
+    pending_membership_discount_usd: m.pendingMembershipDiscount.toNumber(),
+    pending_delivery_usd: m.pendingDelivery.toNumber(),
+    pending_delivery_cost_usd: m.pendingDeliveryCost.toNumber(),
+    pending_cost_usd: m.pendingCost.toNumber(),
+    pending_profit_usd: pendingProfit.toNumber(),
+    pending_item_discount_usd: m.pendingItemDiscount.toNumber(),
+    cancelled_tx_count: bucket.cancelledTx,
+    returned_cost_usd: m.cost.min(m.returnedCost).toNumber(),
+    returned_cost_shortfall_usd: returnedCostShortfall.toNumber(),
+    unvalued_tx_count: bucket.unvaluedTx,
+    unvalued_cost_usd: m.unvaluedCost.toNumber(),
+    net_sales_usd: m.recognizedNet.toNumber(),
+    refund_usd: m.refund.toNumber(),
+    refund_charged_usd: m.refundCharged.toNumber(),
+    refund_excess_usd: m.refundExcess.toNumber(),
+    revenue_usd: revenue.toNumber(),
+    pending_revenue_usd: m.pendingRevenue.toNumber(),
+    collected_total_usd: m.collected.toNumber(),
+    cost_usd: netCost.toNumber(),
+    profit_usd: profit.toNumber(),
+    avg_order_usd: bucket.tx > 0 ? revenue.divide(ReportExactDecimal.recorded(String(bucket.tx))).toNumber() : 0,
+  }, diagnostic)
+}
+
+export async function getBusinessSummarySalesRows(env: Env, f: SalesFilters): Promise<Array<Record<string, unknown>>> {
+  const snapshot = await readSalesReportSnapshot(env, f)
+  return reportSaleFacts(snapshot).map((fact) => {
+    const sale = fact.sale; const version = fact.version
+    const revenue = fact.recognized ? fact.net.add(fact.adjustment).subtract(fact.refund) : ReportExactDecimal.zero()
+    const rawCost = fact.recognized && fact.valued ? fact.cost.subtract(fact.returnedCost) : ReportExactDecimal.zero()
+    const cost = rawCost.max(ReportExactDecimal.zero())
+    const delivery = fact.recognized ? fact.delivery : ReportExactDecimal.zero()
+    const deliveryActual = fact.recognized ? fact.deliveryActual : ReportExactDecimal.zero()
+    const payable = Number(sale.source_return_id || 0) !== 0
+      ? reportMoney(sale, 'amount_paid_usd', version) : reportMoney(sale, 'total_usd', version)
+    const collected = reportStatus(sale) === 'awaiting_payment' || !fact.recognized
+      ? ReportExactDecimal.zero() : payable.subtract(fact.refundPaid)
+    const raw = String(sale.created_at || '')
+    const parsed = new Date(/(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(raw) ? raw : `${raw.replace(' ', 'T')}Z`)
+    const row: Record<string, unknown> = {
+      id: Number(sale.id), cursor_at: raw, date: raw,
+      business_date: new Date(parsed.getTime() + 7 * 3_600_000).toISOString().slice(0, 10),
+      receipt_number: String(sale.receipt_number || ''), branch: String(sale.branch_name || ''), cashier: String(sale.cashier_name || ''),
+      customer: Number(sale.customer_is_anonymous) !== 0 ? '' : String(sale.customer_name || ''),
+      customer_phone: String(sale.customer_phone || ''), payment_method: String(sale.payment_method || ''), status: reportStatus(sale),
+      gross_sales_usd: reportMoney(sale, 'subtotal_usd', version).toNumber(),
+      store_discount_usd: reportMoney(sale, 'discount_usd', version).toNumber(),
+      membership_discount_usd: reportMoney(sale, 'membership_discount_usd', version).toNumber(),
+      tax_usd: reportMoney(sale, 'tax_usd', version).toNumber(), delivery_usd: fact.delivery.toNumber(),
+      refund_usd: fact.refund.toNumber(), net_revenue_usd: revenue.toNumber(),
+      pending_revenue_usd: fact.awaiting ? revenue.toNumber() : 0, collected_total_usd: collected.toNumber(),
+      cost_usd: cost.toNumber(), cost_before_floor_usd: rawCost.toNumber(), cost_missing_snapshot_lines: fact.missingCostLines,
+      gross_profit_usd: revenue.add(delivery).subtract(deliveryActual).subtract(cost).toNumber(),
+    }
+    return attachReportDiagnostic(row, {
+      precision_mode: snapshot.precision_mode, complete: fact.missingCostLines === 0,
+      unknown_cost_lines: fact.missingCostLines, contributing_rows: snapshot.row_count,
+    })
+  })
+}
+
 // Sale-header-level aggregate. Deliberately has NO join to sale_items --
 // joining would fan out one row per line item and inflate every SUM here by
 // however many items each sale has (the bug this file replaces).
@@ -1075,19 +1567,8 @@ function unionBuckets(levelKeys: Iterable<string>, cancelled: Map<string, number
 const VOID_ONLY_LEVEL: Record<string, number> = { tx_count: 0, recognized_net_usd: 0 }
 
 export async function getSalesTotals(env: Env, f: SalesFilters): Promise<SalesTotals> {
-  const [level, cost, returnedCostUsd, cancelled] = await Promise.all([
-    salesLevelTotals(env, f),
-    salesCost(env, f),
-    salesReturnedCost(env, f),
-    cancelledCountByBucket(env, f, null),
-  ])
-  return deriveTotals(level, cost.cost_usd, returnedCostUsd, {
-    costUsd: cost.pending_cost_usd,
-    itemDiscountUsd: cost.item_discount_usd,
-    pendingItemDiscountUsd: cost.pending_item_discount_usd,
-    cancelledTxCount: cancelled.get('') || 0,
-    unvaluedCostUsd: cost.unvalued_cost_usd,
-  })
+  const snapshot = await readSalesReportSnapshot(env, f)
+  return exactReportTotals(aggregateReportSnapshot(snapshot, () => '').get('') || reportBucket(), snapshot)
 }
 
 // Period-bucketed trend series (for the Dashboard revenue/cost/profit line
@@ -1095,6 +1576,29 @@ export async function getSalesTotals(env: Env, f: SalesFilters): Promise<SalesTo
 // queried and grouped separately, then merged by period key in JS -- same
 // fan-out-avoidance reasoning as getSalesTotals above, just bucketed.
 export async function getSalesPeriodSeries(env: Env, f: SalesFilters, granularity: 'day' | 'week' | 'month'): Promise<SalesPeriodRow[]> {
+  {
+    const snapshot = await readSalesReportSnapshot(env, f)
+    const bucketFor = (sale: ReportScalarRow): string => {
+      const raw = String(sale.created_at || '')
+      const parsed = new Date(/(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(raw) ? raw : `${raw.replace(' ', 'T')}Z`)
+      const local = new Date(parsed.getTime() + 7 * 60 * 60 * 1000)
+      const day = local.toISOString().slice(0, 10)
+      if (granularity === 'month') return day.slice(0, 7)
+      if (granularity === 'week') {
+        const dow = local.getUTCDay(); const back = dow === 0 ? 6 : dow - 1
+        return new Date(local.getTime() - back * 86_400_000).toISOString().slice(0, 10)
+      }
+      return day
+    }
+    return [...aggregateReportSnapshot(snapshot, bucketFor).entries()].map(([period, bucket]) => {
+      const totals = exactReportTotals(bucket, snapshot)
+      return { period, date: period, count: totals.tx_count, tx_count: totals.tx_count,
+        revenue_usd: totals.revenue_usd, gross_sales_usd: totals.gross_sales_usd, refund_usd: totals.refund_usd,
+        discount_usd: totals.discount_usd, item_discount_usd: totals.item_discount_usd,
+        total_discount_usd: totals.total_discount_usd, tax_usd: totals.tax_usd, delivery_usd: totals.delivery_usd,
+        cost_usd: totals.cost_usd, profit_usd: totals.profit_usd, cancelled_tx_count: totals.cancelled_tx_count }
+    }).sort((a, b) => a.period.localeCompare(b.period))
+  }
   const db = getDb(env)
   // Buckets are the LOCAL (UTC+7) day/week/month, matching the date window.
   const periodExprS = granularity === 'month' ? localMonthExpr('sales.created_at')
@@ -1271,10 +1775,88 @@ export async function getPaymentMethodBreakdown(env: Env, f: SalesFilters): Prom
 // merged per id in JS, so a renamed contact still shows as one line under
 // its latest name; unlinked deliveries group by their name snapshot alone
 // (imported history links by id where the contact exists -- T3).
+function deliveryContactTotalsFromSnapshot(
+  snapshot: SalesReportSnapshot,
+  f: SalesFilters & { contactId?: number | string | null },
+): DeliveryContactTotalsRow[] {
+  type ExactDelivery = Omit<DeliveryContactTotalsRow,
+    'charged_fee_usd' | 'absorbed_fee_usd' | 'paid_fee_usd' | 'receivable_fee_usd' | 'actual_cost_usd'
+    | 'linked_expense_usd' | 'linked_expense_khr' | 'margin_usd' | 'paid_by_method'> & {
+      charged: ReportExactDecimal; absorbed: ReportExactDecimal; paid: ReportExactDecimal; receivable: ReportExactDecimal
+      actual: ReportExactDecimal; expenseUsd: ReportExactDecimal; expenseKhr: ReportExactDecimal
+      methods: Map<string, { count: number; fee: ReportExactDecimal }>; _lastAt: string
+    }
+  const groups = new Map<string, ExactDelivery>()
+  const groupFor = (id: number | null, name: string) => {
+    const key = id == null ? `name:${name.toLowerCase()}` : `id:${id}`
+    let group = groups.get(key)
+    if (!group) {
+      group = { delivery_contact_id: id, delivery_contact_name: name, deliveries: 0, actual_cost_count: 0,
+        linked_expense_count: 0, last_delivery_at: null, last_expense_at: null,
+        charged: ReportExactDecimal.zero(), absorbed: ReportExactDecimal.zero(), paid: ReportExactDecimal.zero(),
+        receivable: ReportExactDecimal.zero(), actual: ReportExactDecimal.zero(), expenseUsd: ReportExactDecimal.zero(),
+        expenseKhr: ReportExactDecimal.zero(), methods: new Map(), _lastAt: '' }
+      groups.set(key, group)
+    }
+    return group
+  }
+  const requestedContact = f.contactId == null || f.contactId === '' ? null : Number(f.contactId)
+  for (const sale of snapshot.sales) {
+    if (Number(sale.is_delivery) !== 1) continue
+    const id = sale.delivery_contact_id == null ? null : Number(sale.delivery_contact_id)
+    if (requestedContact != null && id !== requestedContact) continue
+    const name = String(sale.delivery_contact_name || '').trim()
+    const group = groupFor(id, name)
+    const version = reportVersion(sale)
+    const fee = reportMoney(sale, 'delivery_fee_usd', version)
+    const customerFee = String(sale.delivery_fee_paid_by || 'customer') === 'store' ? ReportExactDecimal.zero() : fee
+    group.deliveries += 1
+    group.charged = group.charged.add(customerFee)
+    if (String(sale.delivery_fee_paid_by || 'customer') === 'store') group.absorbed = group.absorbed.add(fee)
+    if (reportStatus(sale) === 'awaiting_payment') group.receivable = group.receivable.add(customerFee)
+    else if (reportStatus(sale) !== 'cancelled') {
+      group.paid = group.paid.add(customerFee)
+      const method = String(sale.payment_method || '').trim() || 'Unknown'
+      const found = group.methods.get(method) || { count: 0, fee: ReportExactDecimal.zero() }
+      found.count += 1; found.fee = found.fee.add(customerFee); group.methods.set(method, found)
+    }
+    if (sale.delivery_actual_cost_usd != null) {
+      group.actual = group.actual.add(reportMoney(sale, 'delivery_actual_cost_usd', version, false))
+      group.actual_cost_count += 1
+    }
+    const createdAt = String(sale.created_at || '')
+    if (createdAt > group._lastAt) { group._lastAt = createdAt; group.last_delivery_at = createdAt || null; if (name) group.delivery_contact_name = name }
+  }
+  for (const fee of snapshot.deliveryFees) {
+    const id = Number(fee.delivery_contact_id)
+    const name = String(fee.delivery_contact_name || '').trim()
+    const group = groupFor(id, name)
+    group.linked_expense_count += 1
+    group.expenseUsd = group.expenseUsd.add(ReportExactDecimal.recorded(fee.amount_usd as string | number))
+    group.expenseKhr = group.expenseKhr.add(ReportExactDecimal.recorded(fee.amount_khr as string | number))
+    const createdAt = String(fee.created_at || '')
+    if (!group.last_expense_at || createdAt > group.last_expense_at) group.last_expense_at = createdAt || null
+    if (!group.delivery_contact_name && name) group.delivery_contact_name = name
+  }
+  return [...groups.values()].map((group) => ({
+    delivery_contact_id: group.delivery_contact_id, delivery_contact_name: group.delivery_contact_name,
+    deliveries: group.deliveries, charged_fee_usd: group.charged.toNumber(), absorbed_fee_usd: group.absorbed.toNumber(),
+    paid_fee_usd: group.paid.toNumber(), receivable_fee_usd: group.receivable.toNumber(), actual_cost_usd: group.actual.toNumber(),
+    actual_cost_count: group.actual_cost_count, linked_expense_count: group.linked_expense_count,
+    linked_expense_usd: group.expenseUsd.toNumber(), linked_expense_khr: group.expenseKhr.toNumber(),
+    margin_usd: group.charged.subtract(group.actual).toNumber(), last_delivery_at: group.last_delivery_at,
+    last_expense_at: group.last_expense_at, paid_by_method: [...group.methods.entries()].map(([payment_method, value]) => ({
+      payment_method, count: value.count, fee_usd: value.fee.toNumber(),
+    })).sort((a, b) => b.fee_usd - a.fee_usd || a.payment_method.localeCompare(b.payment_method)),
+  })).sort((a, b) => (b.deliveries + b.linked_expense_count) - (a.deliveries + a.linked_expense_count))
+}
+
 export async function getDeliveryContactTotals(
   env: Env,
   f: SalesFilters & { contactId?: number | string | null },
 ): Promise<DeliveryContactTotalsRow[]> {
+  const snapshot = await readSalesReportSnapshot(env, f, true)
+  if (snapshot) return deliveryContactTotalsFromSnapshot(snapshot, f)
   const db = getDb(env)
   const { sql: whereSql, params } = whereActiveSales('sales', f)
   const clauses = [whereSql, 'COALESCE(sales.is_delivery, 0) = 1']
@@ -1522,6 +2104,43 @@ export async function getSalesDayReport(
   opts: Pick<SalesFilters, 'branchId' | 'startTime' | 'endTime' | 'tzOffsetMinutes' | 'status' | 'paymentMethod'> = {},
 ): Promise<SalesDayReport> {
   const f: SalesFilters = { startDate: day, endDate: day, ...opts }
+  {
+    const snapshot = await readSalesReportSnapshot(env, f, true)
+    const facts = reportSaleFacts(snapshot)
+    const totals = exactReportTotals(aggregateReportSnapshot(snapshot, () => '').get('') || reportBucket(), snapshot)
+    const payment = new Map<string, { tx_count: number; collected: ReportExactDecimal; total: ReportExactDecimal }>()
+    let storeTx = 0, membershipTx = 0
+    for (const fact of facts) {
+      const sale = fact.sale; const version = fact.version
+      if (reportMoney(sale, 'discount_usd', version).isPositive()) storeTx += 1
+      if (reportMoney(sale, 'membership_discount_usd', version).isPositive()) membershipTx += 1
+      const method = String(sale.payment_method || '').trim() || 'Unknown'
+      const found = payment.get(method) || { tx_count: 0, collected: ReportExactDecimal.zero(), total: ReportExactDecimal.zero() }
+      found.tx_count += 1
+      const payable = reportMoney(sale, 'total_usd', version)
+      found.total = found.total.add(payable)
+      found.collected = found.collected.add(Number(sale.source_return_id || 0) !== 0 ? reportMoney(sale, 'amount_paid_usd', version) : payable)
+      payment.set(method, found)
+    }
+    const sales = facts.slice().sort((a, b) => String(b.sale.created_at).localeCompare(String(a.sale.created_at)) || Number(b.sale.id) - Number(a.sale.id))
+      .slice(0, 1000).map((fact) => {
+        const sale = fact.sale
+        const discount = reportMoney(sale, 'discount_usd', fact.version).add(reportMoney(sale, 'membership_discount_usd', fact.version))
+        const payable = Number(sale.source_return_id || 0) !== 0
+          ? reportMoney(sale, 'amount_paid_usd', fact.version) : reportMoney(sale, 'total_usd', fact.version)
+        return { id: Number(sale.id), receipt_number: String(sale.receipt_number || ''), created_at: String(sale.created_at || ''),
+          customer_name: Number(sale.customer_is_anonymous) !== 0 ? '' : String(sale.customer_name || ''),
+          payment_method: String(sale.payment_method || '').trim() || 'Unknown', sale_status: reportStatus(sale),
+          revenue_usd: fact.recognized ? fact.net.add(fact.adjustment).subtract(fact.refund).toNumber() : 0,
+          discount_usd: discount.toNumber(), collected_usd: payable.toNumber() }
+      })
+    return { date: day, totals,
+      payment_methods: [...payment.entries()].map(([payment_method, value]) => ({ payment_method, tx_count: value.tx_count,
+        collected_usd: value.collected.toNumber(), total_usd: value.total.toNumber() })).sort((a, b) => b.collected_usd - a.collected_usd),
+      delivery_contacts: deliveryContactTotalsFromSnapshot(snapshot, f),
+      discounts: { store_usd: totals.store_discount_usd, membership_usd: totals.membership_discount_usd,
+        store_tx_count: storeTx, membership_tx_count: membershipTx }, sales }
+  }
   const db = getDb(env)
   const { sql: whereSql, params } = whereActiveSales('sales', f)
   const [totals, paymentMethods, deliveryContacts, discountCounts, saleRows] = await Promise.all([
@@ -1833,6 +2452,26 @@ function salesGroupExprs(alias: string, groupBy: SalesGroupKey): { key: string; 
   }
 }
 
+function reportGroupIdentity(row: ReportScalarRow, groupBy: SalesGroupKey): { key: string; label: string; entity_id: number | null } {
+  const customerId = row.customer_id == null || Number(row.customer_is_anonymous) !== 0 ? null : Number(row.customer_id)
+  const rawDate = String(row.created_at || '')
+  const local = new Date(new Date(/(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(rawDate) ? rawDate : `${rawDate.replace(' ', 'T')}Z`).getTime() + 7 * 3_600_000)
+  if (groupBy === 'customer') return { key: customerId == null ? 'general' : `id:${customerId}`, label: customerId == null ? '' : String(row.customer_name || '').trim(), entity_id: customerId }
+  if (groupBy === 'cashier') {
+    const id = row.cashier_id == null ? null : Number(row.cashier_id)
+    const name = String(row.cashier_name || '').trim()
+    return { key: id == null ? `name:${name.toLowerCase()}` : `id:${id}`, label: name, entity_id: id }
+  }
+  if (groupBy === 'payment_method') {
+    const label = String(row.payment_method || '').trim() || 'Unknown'
+    return { key: label.toLowerCase(), label: String(row.payment_method || '').trim(), entity_id: null }
+  }
+  if (groupBy === 'hour') { const key = String(local.getUTCHours()).padStart(2, '0'); return { key, label: key, entity_id: null } }
+  if (groupBy === 'weekday') { const key = String(local.getUTCDay()); return { key, label: key, entity_id: null } }
+  const id = row.branch_id == null ? null : Number(row.branch_id)
+  return { key: String(id || 0), label: String(row.branch_name || ''), entity_id: id }
+}
+
 /**
  * Canonical SalesTotals per group. Same two-query shape as
  * getBusinessSummaryDayRows (sale level + item-level COGS, merged through
@@ -1840,6 +2479,34 @@ function salesGroupExprs(alias: string, groupBy: SalesGroupKey): { key: string; 
  * (desc) except hour/weekday which come back in clock order.
  */
 export async function getSalesGroupedTotals(env: Env, f: SalesFilters, groupBy: SalesGroupKey, limit = 500): Promise<SalesGroupedRow[]> {
+  {
+    const snapshot = await readSalesReportSnapshot(env, f)
+    const identity = (row: ReportScalarRow) => reportGroupIdentity(row, groupBy)
+    const metadata = new Map([...snapshot.sales, ...snapshot.voidSales].map((row) => [identity(row).key, identity(row)]))
+    const rows = [...aggregateReportSnapshot(snapshot, (sale) => identity(sale).key).entries()].map(([key, bucket]) => {
+      const totals = exactReportTotals(bucket, snapshot)
+      const meta = metadata.get(key) || { key, label: '', entity_id: null }
+      const row = { key, label: meta.label, entity_id: meta.entity_id,
+        cost_missing_snapshot_lines: bucket.missingCostLines, ...totals } as SalesGroupedRow
+      return attachReportDiagnostic(row, reportMoneyDiagnostic(totals)!)
+    })
+    const level = salesGroupExprs('sales', groupBy)
+    const joined = salesGroupExprs('s', groupBy)
+    if (groupBy === 'customer') {
+      const extra = await customerIdentityByGroup(env, f, level.key)
+      for (const row of rows) { const hit = extra.get(row.key) || { is_new: false, gender: '', phone: '' }; Object.assign(row, hit) }
+    } else if (groupBy === 'cashier') {
+      const extra = await cohortCountsByGroup(env, f, level.key)
+      for (const row of rows) Object.assign(row, extra.get(row.key) || { new_customer_count: 0, return_customer_count: 0, unregistered_count: 0, paid_tx_count: 0 })
+    } else if (groupBy === 'branch') {
+      const extra = await branchActivityByGroup(env, f, level.key, joined.key)
+      for (const row of rows) Object.assign(row, extra.get(row.key) || { customer_count: 0, items_sold_qty: 0 })
+    }
+    if (groupBy === 'hour' || groupBy === 'weekday') rows.sort((a, b) => a.key.localeCompare(b.key))
+    else rows.sort((a, b) => b.revenue_usd - a.revenue_usd || b.tx_count - a.tx_count || a.label.localeCompare(b.label))
+    const cap = Math.max(1, Math.min(2000, Math.trunc(limit) || 500))
+    return rows.slice(0, cap)
+  }
   const db = getDb(env)
   const level = salesGroupExprs('sales', groupBy)
   const joined = salesGroupExprs('s', groupBy)
@@ -1914,17 +2581,17 @@ export async function getSalesGroupedTotals(env: Env, f: SalesFilters, groupBy: 
     const cohorts = await cohortCountsByGroup(env, f, level.key)
     for (const row of rows) {
       const hit = cohorts.get(row.key)
-      row.new_customer_count = hit ? hit.new_customer_count : 0
-      row.return_customer_count = hit ? hit.return_customer_count : 0
-      row.unregistered_count = hit ? hit.unregistered_count : 0
-      row.paid_tx_count = hit ? hit.paid_tx_count : 0
+      row.new_customer_count = hit?.new_customer_count || 0
+      row.return_customer_count = hit?.return_customer_count || 0
+      row.unregistered_count = hit?.unregistered_count || 0
+      row.paid_tx_count = hit?.paid_tx_count || 0
     }
   } else if (groupBy === 'branch') {
     const activity = await branchActivityByGroup(env, f, level.key, joined.key)
     for (const row of rows) {
       const hit = activity.get(row.key)
-      row.customer_count = hit ? hit.customer_count : 0
-      row.items_sold_qty = hit ? hit.items_sold_qty : 0
+      row.customer_count = hit?.customer_count || 0
+      row.items_sold_qty = hit?.items_sold_qty || 0
     }
   }
   if (groupBy === 'hour' || groupBy === 'weekday') {
@@ -1968,6 +2635,61 @@ export interface ProductSalesRankingRow {
  * SalesFilters field through whereActiveSales.
  */
 export async function getProductSalesRanking(env: Env, f: SalesFilters, limit = 200): Promise<ProductSalesRankingRow[]> {
+  {
+    const snapshot = await readSalesReportSnapshot(env, f)
+    const saleById = new Map(snapshot.sales.map((sale) => [Number(sale.id), sale]))
+    const groups = new Map<string, { product_id: number | null; product_name: string; saleIds: Set<number>; qty: number;
+      lineSales: ReportExactDecimal; cost: ReportExactDecimal; missing: number }>()
+    for (const item of snapshot.items) {
+      const sale = saleById.get(Number(item.sale_id)); if (!sale || reportStatus(sale) === 'cancelled') continue
+      const productId = item.product_id == null ? null : Number(item.product_id)
+      const name = String(item.product_name || '')
+      const key = productId == null ? `name:${name.trim().toLowerCase()}` : `id:${productId}`
+      const group = groups.get(key) || { product_id: productId, product_name: name, saleIds: new Set<number>(), qty: 0,
+        lineSales: ReportExactDecimal.zero(), cost: ReportExactDecimal.zero(), missing: 0 }
+      const version = reportVersion(sale)
+      const quantity = ReportExactDecimal.quantity(item.quantity as string | number)
+      group.qty += Number(item.quantity)
+      group.saleIds.add(Number(sale.id))
+      group.lineSales = group.lineSales.add(reportMoney(item, 'total_usd', version))
+      if (item.cost_price_usd == null) group.missing += 1
+      else {
+        const unit = reportMoney(item, 'cost_price_usd', version, false)
+        if (unit.isNegative()) throw new ReportMoneyPrecisionError(version === 1 ? 'invalid_saved_money4' : 'invalid_recorded_decimal')
+        group.cost = group.cost.add(unit.multiply(quantity))
+      }
+      groups.set(key, group)
+    }
+    const db = getDb(env)
+    const productColumns = await reportTableColumns(db, 'products')
+    const categoryColumns = await reportTableColumns(db, 'categories')
+    const metadata = new Map<number, Record<string, unknown>>()
+    if (productColumns.has('id')) {
+      const categoryJoin = categoryColumns.has('id') && categoryColumns.has('name')
+        ? "LEFT JOIN categories cat ON lower(trim(cat.name))=lower(trim(COALESCE(p.category,''))) AND COALESCE(p.category,'')<>''" : ''
+      const categoryId = categoryJoin ? 'cat.id' : 'NULL'
+      const onHand = f.branchId
+        ? 'COALESCE((SELECT SUM(bs.quantity) FROM branch_stock bs WHERE bs.product_id=p.id AND bs.branch_id=@branchId),0)'
+        : 'COALESCE(p.stock_quantity,0)'
+      const rows = await db.prepare(`SELECT p.id,p.name,p.barcode,p.category,${categoryId} AS category_id,${onHand} AS on_hand_qty FROM products p ${categoryJoin}`)
+        .all<Record<string, unknown>>(f.branchId ? { branchId: f.branchId } : {})
+      for (const row of rows || []) metadata.set(Number(row.id), row)
+    }
+    const diagnostic = { precision_mode: snapshot.precision_mode, complete: true, unknown_cost_lines: 0, contributing_rows: snapshot.row_count }
+    const rows = [...groups.values()].map((group) => {
+      const meta = group.product_id == null ? null : metadata.get(group.product_id)
+      const row: ProductSalesRankingRow = {
+        product_id: group.product_id, product_name: String(meta?.name || group.product_name), sale_count: group.saleIds.size, qty: group.qty,
+        line_sales_usd: group.lineSales.toNumber(), cost_usd: group.cost.toNumber(),
+        profit_usd: group.lineSales.subtract(group.cost).toNumber(), cost_missing_snapshot_lines: group.missing,
+        category_id: meta?.category_id == null ? null : Number(meta.category_id), category_name: String(meta?.category || ''),
+        barcode: String(meta?.barcode || ''), on_hand_qty: num(meta?.on_hand_qty),
+      }
+      return attachReportDiagnostic(row, { ...diagnostic, complete: group.missing === 0, unknown_cost_lines: group.missing })
+    })
+    rows.sort((a, b) => b.line_sales_usd - a.line_sales_usd || b.qty - a.qty)
+    return rows.slice(0, Math.max(1, Math.min(1000, Math.trunc(limit) || 200)))
+  }
   const db = getDb(env)
   const { sql: whereSql, params } = whereActiveSales('s', f)
   const cap = Math.max(1, Math.min(1000, Math.trunc(limit) || 200))
@@ -2047,7 +2769,51 @@ export async function getProductSalesRanking(env: Env, f: SalesFilters, limit = 
 // changes cost_usd itself.
 export type BusinessSummaryDayRow = { date: string; cost_missing_snapshot_lines: number } & SalesTotals
 
+export async function getBusinessSummaryPeriodRows(env: Env, f: SalesFilters, granularity: 'day' | 'week' | 'month') {
+  const snapshot = await readSalesReportSnapshot(env, f)
+  const dayFor = (sale: ReportScalarRow) => {
+    const raw = String(sale.created_at || '')
+    const parsed = new Date(/(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(raw) ? raw : `${raw.replace(' ', 'T')}Z`)
+    return new Date(parsed.getTime() + 7 * 3_600_000).toISOString().slice(0, 10)
+  }
+  const periodFor = (sale: ReportScalarRow) => {
+    const day = dayFor(sale)
+    if (granularity === 'month') return day.slice(0, 7)
+    if (granularity === 'week') {
+      const date = new Date(`${day}T00:00:00Z`); const dow = date.getUTCDay(); const back = dow === 0 ? 6 : dow - 1
+      return new Date(date.getTime() - back * 86_400_000).toISOString().slice(0, 10)
+    }
+    return day
+  }
+  const daySets = new Map<string, Set<string>>()
+  for (const sale of [...snapshot.sales, ...snapshot.voidSales]) {
+    const key = periodFor(sale); const days = daySets.get(key) || new Set<string>(); days.add(dayFor(sale)); daySets.set(key, days)
+  }
+  return [...aggregateReportSnapshot(snapshot, periodFor).entries()].map(([period, bucket]) => {
+    const totals = exactReportTotals(bucket, snapshot); const diagnostic = reportMoneyDiagnostic(totals)!
+    const day = granularity === 'day' ? period : granularity === 'month' ? `${period}-01` : period
+    const from = new Date(`${day}T00:00:00Z`)
+    const to = granularity === 'month' ? new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth() + 1, 0))
+      : granularity === 'week' ? new Date(from.getTime() + 6 * 86_400_000) : from
+    return attachReportDiagnostic({ period, date_from: day, date_to: to.toISOString().slice(0, 10), days: daySets.get(period)?.size || 0,
+      cost_missing_snapshot_lines: diagnostic.unknown_cost_lines, ...totals }, diagnostic)
+  }).sort((a, b) => a.period.localeCompare(b.period))
+}
+
 export async function getBusinessSummaryDayRows(env: Env, f: SalesFilters): Promise<BusinessSummaryDayRow[]> {
+  {
+    const snapshot = await readSalesReportSnapshot(env, f)
+    const dateFor = (sale: ReportScalarRow) => {
+      const raw = String(sale.created_at || '')
+      const parsed = new Date(/(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(raw) ? raw : `${raw.replace(' ', 'T')}Z`)
+      return new Date(parsed.getTime() + 7 * 3_600_000).toISOString().slice(0, 10)
+    }
+    return [...aggregateReportSnapshot(snapshot, dateFor).entries()].map(([date, bucket]) => {
+      const totals = exactReportTotals(bucket, snapshot)
+      const diagnostic = reportMoneyDiagnostic(totals)!
+      return attachReportDiagnostic({ date, cost_missing_snapshot_lines: diagnostic.unknown_cost_lines, ...totals }, diagnostic)
+    }).sort((a, b) => a.date.localeCompare(b.date))
+  }
   const db = getDb(env)
   const periodExprS = localDateExpr('sales.created_at')
   const periodExprJoined = localDateExpr('s.created_at')
