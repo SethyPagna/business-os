@@ -92,6 +92,12 @@ async function main() {
     assert.equal(rule.identityBarcodeKey('03614274226546'), '3614274226546')
     assert.equal(rule.identityBarcodeKey('0'), '0')
     assert.notEqual(rule.identityBarcodeKey('0012'), rule.identityBarcodeKey('12'))
+    const exactCost = rule.resolveMergedCostDetail([
+      { cost_price_usd: 1.23455, cost_price_khr: null },
+      { cost_price_usd: 1.23465, cost_price_khr: null },
+    ])
+    assert.equal(exactCost.merged.cost_price_usd, 1.2346,
+      'the transpiled rule must execute its real module-relative moneyPrecision dependency')
   })
 
   check('it walks the SAME reparent list the merge itself walks', () => {

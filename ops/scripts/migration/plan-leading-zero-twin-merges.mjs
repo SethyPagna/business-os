@@ -51,31 +51,55 @@ export const repoRoot = path.join(here, '..', '..', '..')
 // --------------------------------------------------------------------------
 const cloudflareRequire = createRequire(path.join(repoRoot, 'cloudflare', 'package.json'))
 
+function loadCloudflareSourceModule(source, ts, cache = new Map()) {
+  const resolvedSource = path.resolve(source)
+  if (cache.has(resolvedSource)) return cache.get(resolvedSource).exports
+
+  const { outputText } = ts.transpileModule(fs.readFileSync(resolvedSource, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+    fileName: resolvedSource,
+  })
+  const mod = { exports: {} }
+  cache.set(resolvedSource, mod)
+  const moduleRequire = createRequire(resolvedSource)
+  const sourceRequire = (specifier) => {
+    if (!specifier.startsWith('.')) return moduleRequire(specifier)
+    const dependency = path.resolve(path.dirname(resolvedSource), specifier)
+    for (const candidate of [dependency, `${dependency}.ts`, path.join(dependency, 'index.ts')]) {
+      if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+        return candidate.endsWith('.ts')
+          ? loadCloudflareSourceModule(candidate, ts, cache)
+          : moduleRequire(candidate)
+      }
+    }
+    return moduleRequire(specifier)
+  }
+  new Function('module', 'exports', 'require', '__filename', '__dirname', outputText)(
+    mod, mod.exports, sourceRequire, resolvedSource, path.dirname(resolvedSource),
+  )
+  return mod.exports
+}
+
 export function loadProductDetailRule() {
   const ts = cloudflareRequire('typescript')
   const source = path.join(repoRoot, 'cloudflare', 'src', 'lib', 'productDetailRule.ts')
-  const { outputText } = ts.transpileModule(fs.readFileSync(source, 'utf8'), {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
-    fileName: source,
-  })
-  const mod = { exports: {} }
-  new Function('module', 'exports', 'require', outputText)(mod, mod.exports, cloudflareRequire)
+  const exports = loadCloudflareSourceModule(source, ts)
   for (const name of ['identityBarcodeKey', 'normalizeProductGroupName', 'resolveMergedCostDetail']) {
-    if (typeof mod.exports[name] !== 'function') {
+    if (typeof exports[name] !== 'function') {
       throw new Error(`productDetailRule.ts no longer exports ${name} -- this plan would use a rule the app does not`)
     }
   }
   // Positive control: an instrument that reports every pair the same way is
   // indistinguishable from a broken one, so prove the fold both folds and
   // refuses before trusting a single line of its output.
-  const { identityBarcodeKey } = mod.exports
+  const { identityBarcodeKey } = exports
   if (identityBarcodeKey('03614274226546') !== identityBarcodeKey('3614274226546')) {
     throw new Error('the loaded fold does not fold a leading zero -- refusing to plan')
   }
   if (identityBarcodeKey('0012') === identityBarcodeKey('12') || identityBarcodeKey('0') !== '0') {
     throw new Error('the loaded fold folds too much -- refusing to plan')
   }
-  return mod.exports
+  return exports
 }
 
 /** The ONE list the fold and the undo applier walk, read from its source. */
