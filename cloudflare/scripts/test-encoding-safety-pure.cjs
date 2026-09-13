@@ -28,6 +28,7 @@ function compileAt(absPath, stubs = {}) {
   const moduleObj = { exports: {} }
   const localRequire = (request) => {
     const key = request.replace(/\.ts$/, '')
+    if (key === './moneyPrecision') return compileAt(path.join(path.dirname(absPath), 'moneyPrecision.ts'))
     if (Object.prototype.hasOwnProperty.call(stubs, key)) return stubs[key]
     return require(request)
   }

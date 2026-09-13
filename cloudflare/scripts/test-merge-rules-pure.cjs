@@ -20,6 +20,8 @@ const fs = require('fs')
 const path = require('path')
 const assert = require('assert')
 const ts = require('typescript')
+// Load the actual dependency before any permissive per-module shim is active.
+const moneyPrecision = require('../src/lib/moneyPrecision.ts')
 const { DatabaseSync } = require('node:sqlite')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
@@ -39,7 +41,7 @@ function loadTs(relPath, requireShim) {
     fileName: sourcePath,
   })
   const mod = { exports: {} }
-  const req = (id) => (requireShim && requireShim[id] !== undefined ? requireShim[id] : require(id))
+  const req = (id) => id.replace(/\.ts$/, '') === './moneyPrecision' ? moneyPrecision : (requireShim && requireShim[id] !== undefined ? requireShim[id] : require(id))
   new Function('module', 'exports', 'require', outputText)(mod, mod.exports, req)
   return mod.exports
 }
@@ -140,8 +142,16 @@ const skii = resolveMergedCost([
   { cost_price_usd: 130.541696 },
   { cost_price_usd: 130.777307 },
 ])
-check('the real SK-II no-barcode pair averages to 130.6596 (rounded UP to 4dp)',
-  skii.cost_price_usd === 130.6596)
+// Current merge policy uses one exact rational mean, then nearest 4dp.
+// Legacy version-specific ceiling behavior is covered separately.
+const skiiSumMillionths = 130541696n + 130777307n
+const skiiNearestTicks = (skiiSumMillionths + 100n) / 200n
+check('the real SK-II no-barcode pair averages to 130.6595 (nearest 4dp)',
+  skiiNearestTicks === 1306595n && skii.cost_price_usd === Number(skiiNearestTicks) / 10000)
+for (const [upper, expected] of [[1.0000998, 1], [1.0001, 1.0001], [1.0001002, 1.0001]]) {
+  check(`exact mean around the half-tick boundary: (1 + ${upper}) / 2`,
+    resolveMergedCost([{ cost_price_usd: 1 }, { cost_price_usd: upper }]).cost_price_usd === expected)
+}
 
 // ---------------------------------------------------------------------------
 // Ruling 1 -- same name, BOTH barcodes empty, merges.

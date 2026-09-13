@@ -21,6 +21,8 @@ const fs = require('fs')
 const path = require('path')
 const assert = require('assert')
 const ts = require('typescript')
+// Load the actual dependency before any permissive per-module shim is active.
+const moneyPrecision = require('../src/lib/moneyPrecision.ts')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
@@ -40,7 +42,7 @@ function loadTs(relPath, requireShim) {
     fileName: sourcePath,
   })
   const mod = { exports: {} }
-  const req = (id) => (requireShim && requireShim[id] !== undefined ? requireShim[id] : require(id))
+  const req = (id) => id.replace(/\.ts$/, '') === './moneyPrecision' ? moneyPrecision : (requireShim && requireShim[id] !== undefined ? requireShim[id] : require(id))
   new Function('module', 'exports', 'require', outputText)(mod, mod.exports, req)
   return mod.exports
 }

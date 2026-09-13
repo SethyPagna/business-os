@@ -69,6 +69,8 @@ function loadReal(relPath) {
 // ./branchRoles and
 // ./productIdentity (which reaches ./productDetailRule for the barcode fold).
 const relMap = {
+  './moneyPrecision': () => loadReal('lib/moneyPrecision.ts'),
+  './moneyPrecision.ts': () => loadReal('lib/moneyPrecision.ts'),
   './sqlBinding': () => loadReal('lib/sqlBinding.ts'),
   './sqlBinding.ts': () => loadReal('lib/sqlBinding.ts'),
   './batchCode': () => loadReal('lib/batchCode.ts'),

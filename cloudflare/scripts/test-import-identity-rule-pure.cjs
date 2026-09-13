@@ -50,6 +50,7 @@ function transpile(abs) {
 }
 function makeRequire(fromDir) {
   return function localRequire(request) {
+    if (request === './moneyPrecision' || request === './moneyPrecision.ts') return loadReal('moneyPrecision')
     if (request.startsWith('.')) {
       const base = path.basename(request)
       if (REAL.has(base)) return loadReal(base)

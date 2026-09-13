@@ -21,6 +21,8 @@
 const fs = require('fs')
 const path = require('path')
 const ts = require('typescript')
+// Load the actual dependency before any permissive per-module shim is active.
+const moneyPrecision = require('../src/lib/moneyPrecision.ts')
 const assert = require('assert')
 const Database = require('better-sqlite3')
 
@@ -36,7 +38,7 @@ function transpile(relPath) {
 
 function loadModule(relPath, requireShim) {
   const module = { exports: {} }
-  new Function('exports', 'require', 'module', transpile(relPath))(module.exports, requireShim, module)
+  new Function('exports', 'require', 'module', transpile(relPath))(module.exports, (request) => ['./moneyPrecision', '../lib/moneyPrecision', './moneyPrecision.ts', '../lib/moneyPrecision.ts'].includes(request) ? moneyPrecision : requireShim(request), module)
   return module.exports
 }
 

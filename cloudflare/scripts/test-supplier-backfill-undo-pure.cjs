@@ -18,6 +18,8 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const ts = require('typescript')
+// Load the actual dependency before any permissive per-module shim is active.
+const moneyPrecision = require('../src/lib/moneyPrecision.ts')
 const Module = require('module')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
@@ -53,7 +55,7 @@ function loadUndoAppliers(d1) {
     fileName: 'productMerge.ts',
   })
   const productMergeModule = { exports: {} }
-  new Function('exports', 'require', 'module', productMergeOut)(productMergeModule.exports, require, productMergeModule)
+  new Function('exports', 'require', 'module', productMergeOut)(productMergeModule.exports, (request) => request === './moneyPrecision' ? moneyPrecision : require(request), productMergeModule)
   const stubs = {
     './actorSnapshot': actorModule.exports,
     './productMerge': productMergeModule.exports,
@@ -113,13 +115,36 @@ function loadUndoAppliers(d1) {
       productRemoveReplayStatements: () => [],
     },
   }
+  // Register the real newly imported undo branch, including its TS dependencies.
+  // Existing DB/effect adapters remain in force; no fake monetary exports.
+  const dependencyModules = new Map()
+  function loadDependency(filename) {
+    if (dependencyModules.has(filename)) return dependencyModules.get(filename).exports
+    const dependency = { exports: {} }
+    dependencyModules.set(filename, dependency)
+    const { outputText } = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+      fileName: filename,
+    })
+    const dependencyRequire = (request) => {
+      if (Object.prototype.hasOwnProperty.call(stubs, request)) return stubs[request]
+      if (request === './moneyPrecision' || request === './moneyPrecision.ts') return moneyPrecision
+      if (request.startsWith('.')) {
+        return loadDependency(path.resolve(path.dirname(filename), request.endsWith('.ts') ? request : request + '.ts'))
+      }
+      return require(request)
+    }
+    new Function('exports', 'require', 'module', outputText)(dependency.exports, dependencyRequire, dependency)
+    return dependency.exports
+  }
+  stubs['./customerGenderRestoration'] = loadDependency(path.join(LIB_DIR, 'customerGenderRestoration.ts'))
   const src = fs.readFileSync(path.join(LIB_DIR, 'undoAppliers.ts'), 'utf8')
   const { outputText } = ts.transpileModule(src, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
     fileName: 'undoAppliers.ts',
   })
   const original = Module._load
-  Module._load = (request, parent, isMain) =>
+  Module._load = (request, parent, isMain) => ['./moneyPrecision', '../lib/moneyPrecision', './moneyPrecision.ts', '../lib/moneyPrecision.ts'].includes(request) ? moneyPrecision :
     Object.prototype.hasOwnProperty.call(stubs, request) ? stubs[request] : original.call(Module, request, parent, isMain)
   const mod = { exports: {} }
   try {

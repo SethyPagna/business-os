@@ -38,6 +38,8 @@
 const fs = require('fs')
 const path = require('path')
 const ts = require('typescript')
+// Load the actual dependency before any permissive per-module shim is active.
+const moneyPrecision = require('../src/lib/moneyPrecision.ts')
 const assert = require('assert')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
@@ -56,6 +58,7 @@ function loadReal(relPath, deps = {}) {
   })
   const mod = { exports: {} }
   const req = (id) => {
+    if (id.replace(/\.ts$/, '') === './moneyPrecision') return moneyPrecision
     if (Object.prototype.hasOwnProperty.call(deps, id)) return deps[id]
     throw new Error(`unmapped require(${id}) from ${relPath}`)
   }

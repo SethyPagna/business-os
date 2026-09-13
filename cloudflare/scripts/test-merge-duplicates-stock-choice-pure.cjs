@@ -29,6 +29,8 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const ts = require('typescript')
+// Load the actual dependency before any permissive per-module shim is active.
+const moneyPrecision = require('../src/lib/moneyPrecision.ts')
 const Module = require('module')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
@@ -61,6 +63,7 @@ function loadTs(relPath, stubs) {
   })
   const original = Module._load
   Module._load = (request, parent, isMain) => {
+    if (['./moneyPrecision', '../lib/moneyPrecision', './moneyPrecision.ts', '../lib/moneyPrecision.ts'].includes(request)) return moneyPrecision
     if (Object.prototype.hasOwnProperty.call(stubs, request)) return stubs[request]
     if (request.startsWith('.') || request === 'hono') return permissive()
     return original.call(Module, request, parent, isMain)
