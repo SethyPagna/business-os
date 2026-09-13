@@ -22,6 +22,24 @@ async function loadReturnRoute() {
   return mod.exports
 }
 
+async function loadReturnHttpRoute() {
+  const bundle = await build({ entryPoints: [path.resolve(__dirname, '../src/routes/returns.ts')],
+    bundle: true, write: false, platform: 'node', format: 'cjs', target: 'es2022',
+    plugins: [{ name: 'quote-route-boundary', setup(buildApi) {
+      const virtual = new Map([
+        ['../lib/auth', `export const requireAuth=async(c,next)=>{const user=globalThis.__customerReturnQuoteUser;if(!user)return c.json({error:'Unauthorized'},401);c.set('user',user);return next()}`],
+        ['../lib/permissions', `export const getPermissionTier=(user,resource)=>user?.permissions?.[resource]||'none';export const getActionTier=(user,resource,action)=>user?.actions?.[resource+'.'+action]||'none'`],
+        ['../lib/db', `export const getDb=()=>globalThis.__customerReturnQuoteDb`],
+      ])
+      buildApi.onResolve({ filter: /^\.\.\/lib\/(auth|permissions|db)$/ }, args => ({ path: args.path, namespace: 'quote-boundary' }))
+      buildApi.onLoad({ filter: /.*/, namespace: 'quote-boundary' }, args => ({ contents: virtual.get(args.path), loader: 'ts' }))
+    } }],
+  })
+  const mod = { exports: {} }
+  new Function('module', 'exports', 'require', bundle.outputFiles[0].text)(mod, mod.exports, require)
+  return mod.exports.default
+}
+
 function pool(lines, rate = 4000, poolKey = 'pool-1') {
   return {
     version: 1, pool_key: poolKey, evaluation_time: '2026-09-13T00:00:00.000Z', exchange_rate: rate, rules: [],
@@ -118,6 +136,31 @@ async function main() {
   assert.throws(() => m.parseCustomerReturnRefundSnapshot(JSON.stringify(tampered)), /snapshot_invalid/)
   assert.throws(() => m.buildCustomerReturnQuoteV1({ sale, requested: [{ sale_item_id: 1, quantity: 1 }],
     previous: [{ ...prior[0], items: [{ ...prior[0].items[0], refund_snapshot_json: null }] }] }), /legacy_refund_review_needed/)
+
+  const fractional = [{ id: 31, key: 'fractional', price: 10, quantity: 0.3 }]
+  const fractionalContext = { version: 1, lines: [{ line_key: 'fractional', amount: 3 }],
+    discount_usd: 0, membership_discount_usd: 0, tax_usd: 0 }
+  const fractionalSale = source(m, fractional, fractionalContext, 3)
+  const fractionalFirst = m.buildCustomerReturnQuoteV1({ sale: fractionalSale,
+    requested: [{ sale_item_id: 31, quantity: 0.1 }], previous: [] })
+  const fractionalPrior = [{ id: 31, money_precision_version: 1,
+    calculated_refund_usd: fractionalFirst.calculated_refund_usd,
+    rounding_adjustment_usd: fractionalFirst.rounding_adjustment_usd,
+    total_refund_usd: fractionalFirst.total_refund_usd,
+    items: fractionalFirst.items.map(item => ({ sale_item_id: item.sale_item_id, quantity: item.quantity,
+      total_usd: item.total_usd, refund_snapshot_json: item.refund_snapshot_json })) }]
+  const fractionalSecond = m.buildCustomerReturnQuoteV1({ sale: fractionalSale,
+    requested: [{ sale_item_id: 31, quantity: 0.2 }], previous: fractionalPrior })
+  assert.equal(fractionalSecond.items[0].total_usd, 2)
+  assert.equal(m.parseCustomerReturnRefundSnapshot(fractionalSecond.items[0].refund_snapshot_json).returned_quantity_after, 0.3)
+
+  const duplicatePrior = [{ id: 88, money_precision_version: 1,
+    calculated_refund_usd: quote.items[1].total_usd * 2,
+    rounding_adjustment_usd: -0.0034, total_refund_usd: 19.33,
+    items: [quote.items[1], quote.items[1]].map(item => ({ sale_item_id: item.sale_item_id,
+      quantity: item.quantity, total_usd: item.total_usd, refund_snapshot_json: item.refund_snapshot_json })) }]
+  assert.throws(() => m.buildCustomerReturnQuoteV1({ sale: source(m, basket, context, 29),
+    requested: [{ sale_item_id: 2, quantity: 0.1 }], previous: duplicatePrior }), /customer_return_cohort_invalid/)
   console.log('PASS customer-return v1 pure entitlement: shared allocation across independent pools, exact cumulative residual, cap, malformed and legacy refusal')
 
   const migrationDir = path.resolve(__dirname, '../migrations')
@@ -151,8 +194,29 @@ async function main() {
   assert.equal(loadedQuote.calculated_refund_usd, 9.6667)
   assert.equal(loadedQuote.items[0].refund_snapshot_json.includes('source_pricing_snapshot_digest'), true)
   assert.equal(Object.hasOwn(route.publicCustomerReturnQuote(loadedQuote).items[0], 'refund_snapshot_json'), false)
+
+  const httpApp = await loadReturnHttpRoute()
+  globalThis.__customerReturnQuoteDb = compat
+  const quoteRequest = async (user, body) => {
+    globalThis.__customerReturnQuoteUser = user
+    const response = await httpApp.request('/quote', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body) }, {}, { waitUntil() {}, passThroughOnException() {} })
+    return { status: response.status, body: await response.json() }
+  }
+  const allowed = { permissions: { returns: 'full' }, actions: { 'returns.add': 'full', 'returns.view': 'full' } }
+  assert.equal((await quoteRequest({ ...allowed, actions: { ...allowed.actions, 'returns.view': 'none' } },
+    { sale_id: 2, items: [{ sale_item_id: 11, quantity: 1 }] })).status, 403)
+  assert.equal((await quoteRequest(allowed, null)).status, 400)
+  assert.equal((await quoteRequest(allowed, { sale_id: true, items: [{ sale_item_id: 11, quantity: 1 }] })).status, 400)
+  assert.equal((await quoteRequest(allowed, { sale_id: 2, items: [{ sale_item_id: [11], quantity: true }] })).status, 400)
+  assert.equal((await quoteRequest(allowed, { sale_id: 2, items: [{ sale_item_id: 11, quantity: 1 }], extra: true })).status, 400)
+  const httpQuote = await quoteRequest(allowed, { sale_id: 2, items: [{ sale_item_id: 11, quantity: 1 }] })
+  assert.equal(httpQuote.status, 200)
+  assert.equal(httpQuote.body.calculated_refund_usd, 9.6667)
+  delete globalThis.__customerReturnQuoteDb
+  delete globalThis.__customerReturnQuoteUser
   db.close()
-  console.log('PASS migration 0160 and actual quote loader: additive nullable provenance, exact legacy invariance, server snapshot hidden')
+  console.log('PASS migration 0160 and actual quote route: additive provenance, strict request/auth boundary, server snapshot hidden')
 }
 
 main().catch(error => { console.error(error); process.exitCode = 1 })

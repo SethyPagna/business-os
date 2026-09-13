@@ -1073,12 +1073,17 @@ app.get('/:id', async (c) => {
 // sold on it has been accounted for.
 app.post('/quote', async (c) => {
   const user = c.get('user')
-  if (getActionTier(user, 'returns', 'add') === 'none') {
+  if (getActionTier(user, 'returns', 'add') === 'none' || getActionTier(user, 'returns', 'view') === 'none') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
-  const body = await c.req.json<{ sale_id?: unknown; items?: unknown }>().catch(() => ({} as { sale_id?: unknown; items?: unknown }))
-  const saleId = Number(body.sale_id)
-  if (!Number.isSafeInteger(saleId) || saleId <= 0 || !Array.isArray(body.items)
+  const rawBody = await c.req.json<unknown>().catch(() => null)
+  const body = rawBody && typeof rawBody === 'object' && !Array.isArray(rawBody)
+    ? rawBody as Record<string, unknown> : null
+  if (!body || Object.keys(body).some((key) => !['sale_id', 'items'].includes(key))) {
+    return c.json({ error: 'Choose a sale and between 1 and 50 return lines.', code: 'customer_return_quote_invalid' }, 400)
+  }
+  const saleId = body.sale_id
+  if (typeof saleId !== 'number' || !Number.isSafeInteger(saleId) || saleId <= 0 || !Array.isArray(body.items)
     || body.items.length < 1 || body.items.length > 50) {
     return c.json({ error: 'Choose a sale and between 1 and 50 return lines.', code: 'customer_return_quote_invalid' }, 400)
   }
@@ -1089,10 +1094,10 @@ app.post('/quote', async (c) => {
     if (Object.keys(item).some((key) => !['sale_item_id', 'quantity'].includes(key))) {
       return c.json({ error: 'The return quote contains unsupported fields.', code: 'customer_return_quote_invalid' }, 400)
     }
-    const saleItemId = Number(item.sale_item_id)
-    const quantity = Number(item.quantity)
-    if (!Number.isSafeInteger(saleItemId) || saleItemId <= 0 || seen.has(saleItemId)
-      || !Number.isFinite(quantity) || quantity <= 0) {
+    const saleItemId = item.sale_item_id
+    const quantity = item.quantity
+    if (typeof saleItemId !== 'number' || !Number.isSafeInteger(saleItemId) || saleItemId <= 0 || seen.has(saleItemId)
+      || typeof quantity !== 'number' || !Number.isFinite(quantity) || quantity <= 0) {
       return c.json({ error: 'Each return quote line needs one unique sale item and a positive quantity.', code: 'customer_return_quote_invalid' }, 400)
     }
     seen.add(saleItemId)

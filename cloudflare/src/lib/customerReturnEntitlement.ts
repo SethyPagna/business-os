@@ -1,4 +1,4 @@
-import { divideMoney4, multiplyMoney4, roundMoney2, roundMoney4, subtractMoney4, sumMoney4 } from './moneyPrecision'
+import { divideMoney4, multiplyMoney4, roundMoney2, roundMoney4, subtractDecimalSum, subtractMoney4, sumMoney4 } from './moneyPrecision'
 import { validateRefundMoneySnapshot, type RefundMoneyPrecisionV1 } from './refundMoneyPrecision'
 import { parseSaleItemPricing, type ReceiptLineAllocation } from './saleItemPricing'
 import { canonicalMoney4, SaleMoneyContractError } from './saleMoneyPrecision'
@@ -87,6 +87,16 @@ function finitePositive(value: unknown, code: string): number {
   return number
 }
 function sameJson(left: unknown, right: unknown): boolean { return JSON.stringify(left) === JSON.stringify(right) }
+function quantityDifference(left: number, right: number): string {
+  try { return subtractDecimalSum(left, [right]) } catch { return fail('customer_return_quantity_invalid') }
+}
+function addQuantity(left: number, right: number): number {
+  try { return Number(subtractDecimalSum(left, [-right])) } catch { return fail('customer_return_quantity_invalid') }
+}
+function quantityGreater(left: number, right: number): boolean {
+  const difference = quantityDifference(left, right)
+  return difference !== '0' && !difference.startsWith('-')
+}
 
 type Fraction = { n: bigint; d: bigint }
 function gcd(left: bigint, right: bigint): bigint {
@@ -118,7 +128,7 @@ export function prorateCustomerReturnMoney4(amount: number, numerator: number, d
   const part = decimalFraction(numerator)
   const whole = decimalFraction(denominator)
   if (whole.n === 0n) fail('customer_return_quantity_invalid')
-  if (numerator > denominator) fail('customer_return_quantity_invalid')
+  if (quantityGreater(numerator, denominator)) fail('customer_return_quantity_invalid')
   const moneyUnits = BigInt(money.toFixed(4).replace('.', ''))
   const top = moneyUnits * part.n * whole.d
   const bottom = part.d * whole.n
@@ -144,7 +154,8 @@ export function parseCustomerReturnRefundSnapshot(json: string | null | undefine
   const beforeQty = Number(value.returned_quantity_before)
   const afterQty = Number(value.returned_quantity_after)
   if (!Number.isFinite(beforeQty) || beforeQty < 0 || !Number.isFinite(afterQty)
-    || afterQty !== beforeQty + quantity || afterQty > sold) fail('customer_return_snapshot_invalid')
+    || quantityDifference(afterQty, addQuantity(beforeQty, quantity)) !== '0'
+    || quantityGreater(afterQty, sold)) fail('customer_return_snapshot_invalid')
   for (const field of ['discount_usd', 'membership_discount_usd', 'tax_usd', 'net_entitlement_usd'] as const) {
     canonicalMoney4(value.receipt_allocation?.[field], true)
   }
@@ -223,22 +234,36 @@ export function buildCustomerReturnQuoteV1(input: {
     previousReturnIds.add(prior.id)
     validateRefundMoneySnapshot(prior)
     let headerCalculated = 0
+    const priorSaleItemIds = new Set<number>()
     for (const item of prior.items) {
       const snapshot = parseCustomerReturnRefundSnapshot(item.refund_snapshot_json)
       if (!snapshot || snapshot.sale_id !== saleId || snapshot.sale_item_id !== item.sale_item_id
         || snapshot.return_quantity !== item.quantity || snapshot.calculated_refund_usd !== canonicalMoney4(item.total_usd, true)) fail('customer_return_legacy_refund_review_needed')
+      if (priorSaleItemIds.has(snapshot.sale_item_id)) fail('customer_return_cohort_invalid')
+      priorSaleItemIds.add(snapshot.sale_item_id)
       const source = sourceById.get(snapshot.sale_item_id)
       if (!source || snapshot.line_key !== source.snapshot.line_key || snapshot.pool_key !== source.snapshot.pool.pool_key
         || snapshot.source_pricing_snapshot_digest !== source.row.pricing_snapshot_digest
         || !sameJson(snapshot.receipt_allocation, source.snapshot.receipt_allocation)) fail('customer_return_cohort_invalid')
       const aggregate = previousByLine.get(snapshot.sale_item_id) || { quantity: 0, calculated: 0 }
-      aggregate.quantity += item.quantity
+      if (quantityDifference(snapshot.returned_quantity_before, aggregate.quantity) !== '0'
+        || snapshot.calculated_refund_before_usd !== aggregate.calculated) fail('customer_return_cohort_invalid')
+      aggregate.quantity = addQuantity(aggregate.quantity, item.quantity)
       aggregate.calculated = sumMoney4([aggregate.calculated, snapshot.calculated_refund_usd])
+      if (quantityDifference(snapshot.returned_quantity_after, aggregate.quantity) !== '0'
+        || snapshot.calculated_refund_after_usd !== aggregate.calculated) fail('customer_return_cohort_invalid')
       previousByLine.set(snapshot.sale_item_id, aggregate)
       headerCalculated = sumMoney4([headerCalculated, snapshot.calculated_refund_usd])
     }
     if (headerCalculated !== prior.calculated_refund_usd) fail('customer_return_cohort_invalid')
     priorHeaders.push(prior)
+  }
+  for (const [saleItemId, aggregate] of previousByLine) {
+    const source = sourceById.get(saleItemId)
+    if (!source || quantityGreater(aggregate.quantity, source.row.quantity)
+      || aggregate.calculated !== prorateCustomerReturnMoney4(
+        source.snapshot.receipt_allocation.net_entitlement_usd, aggregate.quantity, source.row.quantity,
+      )) fail('customer_return_cohort_invalid')
   }
 
   const requestedIds = new Set<number>()
@@ -251,8 +276,8 @@ export function buildCustomerReturnQuoteV1(input: {
     const source = sourceById.get(saleItemId)
     if (!source) fail('customer_return_line_invalid')
     const before = previousByLine.get(saleItemId) || { quantity: 0, calculated: 0 }
-    const afterQuantity = before.quantity + quantity
-    if (afterQuantity > source.row.quantity) fail('customer_return_quantity_exceeded')
+    const afterQuantity = addQuantity(before.quantity, quantity)
+    if (quantityGreater(afterQuantity, source.row.quantity)) fail('customer_return_quantity_exceeded')
     const targetBefore = prorateCustomerReturnMoney4(source.snapshot.receipt_allocation.net_entitlement_usd, before.quantity, source.row.quantity)
     if (before.calculated > targetBefore) fail('customer_return_cohort_invalid')
     const targetAfter = prorateCustomerReturnMoney4(source.snapshot.receipt_allocation.net_entitlement_usd, afterQuantity, source.row.quantity)
