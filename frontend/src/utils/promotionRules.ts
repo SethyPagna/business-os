@@ -11,6 +11,8 @@
 // for the plain per-product discount path; the semantics here are kept
 // identical to it (see the kernel's own comments).
 
+import { addMoney4, divideMoney4, multiplyMoney4, percentageMoney4, roundMoney4, sellingPriceCeilCent, subtractMoney4 } from './moneyPrecision.ts'
+
 export type PromotionRuleType =
   | 'quantity_save'    // buy >= X items, save $Y off the line
   | 'percent_off'      // Z% off qualifying products
@@ -77,6 +79,19 @@ function money(value: unknown, fallback = 0): number {
   return roundUpToDecimals(toFiniteNumber(value, fallback), 2)
 }
 
+// Legacy callers remain unchanged. Only a newly versioned basket opts in.
+function promotionMoney(version: 0 | 1) {
+  return {
+    money: version === 1 ? (value: unknown, fallback = 0) => roundMoney4(toFiniteNumber(value, fallback)) : money,
+    selling: version === 1 ? (value: unknown) => sellingPriceCeilCent(toFiniteNumber(value)) : money,
+    times: (a: number, b: number) => version === 1 ? multiplyMoney4(a, b) : money(a * b),
+    percent: (a: number, b: number) => version === 1 ? percentageMoney4(a, b) : money(a * (b / 100)),
+    less: (a: number, b: number) => version === 1 ? Math.max(0, subtractMoney4(a, b)) : money(Math.max(0, a - b)),
+    plus: (a: number, b: number) => version === 1 ? addMoney4(a, b) : money(a + b),
+    divide: (a: number, b: number) => version === 1 ? divideMoney4(a, b) : money(a / b),
+  }
+}
+
 function normText(value: unknown): string {
   return String(value ?? '').trim()
 }
@@ -85,7 +100,8 @@ function lowerKey(value: unknown): string {
   return normText(value).toLowerCase()
 }
 
-export function normalizePromotionRule(row: Record<string, unknown> | null | undefined): PromotionRule | null {
+export function normalizePromotionRule(row: Record<string, unknown> | null | undefined, moneyPrecisionVersion: 0 | 1 = 0): PromotionRule | null {
+  const { money } = promotionMoney(moneyPrecisionVersion)
   if (!row) return null
   const id = Number(row.id)
   if (!Number.isFinite(id) || id <= 0) return null
@@ -226,20 +242,23 @@ function evaluationOf(
   product: ProductLike,
   quantity: number,
   exchangeRate: number,
+  moneyPrecisionVersion: 0 | 1 = 0,
 ): { sellingUsd: number; sellingKhr: number; qty: number } {
-  const sellingUsd = money(product?.selling_price_usd)
-  const sellingKhr = money(product?.selling_price_khr || sellingUsd * (toFiniteNumber(exchangeRate, 0) || 4100))
-  const qty = Math.max(1, toFiniteNumber(quantity, 1))
+  const { money, selling, times } = promotionMoney(moneyPrecisionVersion)
+  const sellingUsd = selling(product?.selling_price_usd)
+  const sellingKhr = money(product?.selling_price_khr || times(sellingUsd, toFiniteNumber(exchangeRate, 0) || 4100))
+  const qty = Math.max(moneyPrecisionVersion === 1 ? 0 : 1, toFiniteNumber(quantity, 1))
   return { sellingUsd, sellingKhr, qty }
 }
 
-function noPromotion(product: ProductLike, quantity: number, exchangeRate: number): PromotionEvaluation {
-  const { sellingUsd, sellingKhr, qty } = evaluationOf(product, quantity, exchangeRate)
+function noPromotion(product: ProductLike, quantity: number, exchangeRate: number, moneyPrecisionVersion: 0 | 1 = 0): PromotionEvaluation {
+  const { times } = promotionMoney(moneyPrecisionVersion)
+  const { sellingUsd, sellingKhr, qty } = evaluationOf(product, quantity, exchangeRate, moneyPrecisionVersion)
   return {
     active: false, source: null, rule_id: null, title: '', show_title: false,
     badge_color: DEFAULT_BADGE_COLOR, rule_type: null, percent_off: 0,
     unit_price_usd: sellingUsd, unit_price_khr: sellingKhr,
-    line_total_usd: money(sellingUsd * qty), line_total_khr: money(sellingKhr * qty),
+    line_total_usd: times(sellingUsd, qty), line_total_khr: times(sellingKhr, qty),
     line_discount_usd: 0, line_discount_khr: 0,
   }
 }
@@ -254,9 +273,11 @@ export function evaluatePromotionPricing(
   rules: readonly PromotionRule[] = [],
   exchangeRate = 4100,
   now: Date | string | number = new Date(),
+  moneyPrecisionVersion: 0 | 1 = 0,
 ): PromotionEvaluation {
-  if (!product) return noPromotion({}, quantity, exchangeRate)
-  const { sellingUsd, sellingKhr, qty } = evaluationOf(product, quantity, exchangeRate)
+  const { money, times, percent, less, divide } = promotionMoney(moneyPrecisionVersion)
+  if (!product) return noPromotion({}, quantity, exchangeRate, moneyPrecisionVersion)
+  const { sellingUsd, sellingKhr, qty } = evaluationOf(product, quantity, exchangeRate, moneyPrecisionVersion)
   const nowMs = nowMsOf(now)
 
   type Candidate = {
@@ -275,16 +296,16 @@ export function evaluatePromotionPricing(
     let pct = 0
     if (type === 'percent') {
       pct = Math.min(100, Math.max(0, toFiniteNumber(product.discount_percent)))
-      perUnitUsd = money(sellingUsd * (pct / 100))
-      perUnitKhr = money(sellingKhr * (pct / 100))
+      perUnitUsd = percent(sellingUsd, pct)
+      perUnitKhr = percent(sellingKhr, pct)
     } else {
       perUnitUsd = Math.min(money(product.discount_amount_usd), sellingUsd)
-      perUnitKhr = Math.min(money(product.discount_amount_khr || perUnitUsd * (toFiniteNumber(exchangeRate, 0) || 4100)), sellingKhr)
+      perUnitKhr = Math.min(money(product.discount_amount_khr || times(perUnitUsd, toFiniteNumber(exchangeRate, 0) || 4100)), sellingKhr)
       pct = sellingUsd > 0 ? Math.round((perUnitUsd / sellingUsd) * 100) : 0
     }
     candidates.push({
       source: 'product_discount', rule: null,
-      lineDiscountUsd: money(perUnitUsd * qty), lineDiscountKhr: money(perUnitKhr * qty),
+      lineDiscountUsd: times(perUnitUsd, qty), lineDiscountKhr: times(perUnitKhr, qty),
       percentOff: pct,
     })
   }
@@ -292,20 +313,20 @@ export function evaluatePromotionPricing(
   for (const rule of rules) {
     if (!isRuleActive(rule, nowMs) || !ruleAppliesToProduct(rule, product)) continue
     if (rule.rule_type === 'percent_off') {
-      const perUnitUsd = money(sellingUsd * (rule.percent_off / 100))
-      const perUnitKhr = money(sellingKhr * (rule.percent_off / 100))
-      candidates.push({ source: 'rule', rule, lineDiscountUsd: money(perUnitUsd * qty), lineDiscountKhr: money(perUnitKhr * qty), percentOff: rule.percent_off })
+      const perUnitUsd = percent(sellingUsd, rule.percent_off)
+      const perUnitKhr = percent(sellingKhr, rule.percent_off)
+      candidates.push({ source: 'rule', rule, lineDiscountUsd: times(perUnitUsd, qty), lineDiscountKhr: times(perUnitKhr, qty), percentOff: rule.percent_off })
     } else if (rule.rule_type === 'fixed_off') {
       const perUnitUsd = Math.min(rule.save_usd, sellingUsd)
-      const perUnitKhr = Math.min(rule.save_khr || money(rule.save_usd * (toFiniteNumber(exchangeRate, 0) || 4100)), sellingKhr)
+      const perUnitKhr = Math.min(rule.save_khr || times(rule.save_usd, toFiniteNumber(exchangeRate, 0) || 4100), sellingKhr)
       candidates.push({
         source: 'rule', rule,
-        lineDiscountUsd: money(perUnitUsd * qty), lineDiscountKhr: money(perUnitKhr * qty),
+        lineDiscountUsd: times(perUnitUsd, qty), lineDiscountKhr: times(perUnitKhr, qty),
         percentOff: sellingUsd > 0 ? Math.round((perUnitUsd / sellingUsd) * 100) : 0,
       })
     } else if (rule.rule_type === 'quantity_save' && qty >= rule.min_quantity) {
-      const lineUsd = Math.min(rule.save_usd, money(sellingUsd * qty))
-      const lineKhr = Math.min(rule.save_khr || money(rule.save_usd * (toFiniteNumber(exchangeRate, 0) || 4100)), money(sellingKhr * qty))
+      const lineUsd = Math.min(rule.save_usd, times(sellingUsd, qty))
+      const lineKhr = Math.min(rule.save_khr || times(rule.save_usd, toFiniteNumber(exchangeRate, 0) || 4100), times(sellingKhr, qty))
       const lineTotal = sellingUsd * qty
       candidates.push({
         source: 'rule', rule,
@@ -315,12 +336,12 @@ export function evaluatePromotionPricing(
     } else if (rule.rule_type === 'spend_save') {
       // Spend threshold: the USD threshold decides when set; otherwise the
       // KHR one. Benefit is a flat line saving, clamped at the line gross.
-      const grossUsd = money(sellingUsd * qty)
-      const grossKhr = money(sellingKhr * qty)
+      const grossUsd = times(sellingUsd, qty)
+      const grossKhr = times(sellingKhr, qty)
       const crossed = rule.min_spend_usd > 0 ? grossUsd >= rule.min_spend_usd : grossKhr >= rule.min_spend_khr
       if (crossed) {
         const lineUsd = Math.min(rule.save_usd, grossUsd)
-        const lineKhr = Math.min(rule.save_khr || money(rule.save_usd * (toFiniteNumber(exchangeRate, 0) || 4100)), grossKhr)
+        const lineKhr = Math.min(rule.save_khr || times(rule.save_usd, toFiniteNumber(exchangeRate, 0) || 4100), grossKhr)
         candidates.push({
           source: 'rule', rule,
           lineDiscountUsd: money(lineUsd), lineDiscountKhr: money(lineKhr),
@@ -328,9 +349,9 @@ export function evaluatePromotionPricing(
         })
       }
     } else if (rule.rule_type === 'quantity_percent' && qty >= rule.min_quantity) {
-      const perUnitUsd = money(sellingUsd * (rule.percent_off / 100))
-      const perUnitKhr = money(sellingKhr * (rule.percent_off / 100))
-      candidates.push({ source: 'rule', rule, lineDiscountUsd: money(perUnitUsd * qty), lineDiscountKhr: money(perUnitKhr * qty), percentOff: rule.percent_off })
+      const perUnitUsd = percent(sellingUsd, rule.percent_off)
+      const perUnitKhr = percent(sellingKhr, rule.percent_off)
+      candidates.push({ source: 'rule', rule, lineDiscountUsd: times(perUnitUsd, qty), lineDiscountKhr: times(perUnitKhr, qty), percentOff: rule.percent_off })
     } else if (rule.rule_type === 'next_item') {
       // Per-LINE evaluation of "buy N get the next one off": every
       // complete group of (N+1) units on THIS line discounts one unit --
@@ -343,21 +364,21 @@ export function evaluatePromotionPricing(
       const groupSize = rule.min_quantity + 1
       const groups = Math.floor(qty / groupSize)
       if (groups > 0) {
-        const perHitUsd = rule.percent_off > 0 ? money(sellingUsd * (rule.percent_off / 100)) : Math.min(rule.save_usd, sellingUsd)
+        const perHitUsd = rule.percent_off > 0 ? percent(sellingUsd, rule.percent_off) : Math.min(rule.save_usd, sellingUsd)
         const perHitKhr = rule.percent_off > 0
-          ? money(sellingKhr * (rule.percent_off / 100))
-          : Math.min(rule.save_khr || money(rule.save_usd * (toFiniteNumber(exchangeRate, 0) || 4100)), sellingKhr)
+          ? percent(sellingKhr, rule.percent_off)
+          : Math.min(rule.save_khr || times(rule.save_usd, toFiniteNumber(exchangeRate, 0) || 4100), sellingKhr)
         const lineTotal = sellingUsd * qty
         candidates.push({
           source: 'rule', rule,
-          lineDiscountUsd: money(perHitUsd * groups), lineDiscountKhr: money(perHitKhr * groups),
+          lineDiscountUsd: times(perHitUsd, groups), lineDiscountKhr: times(perHitKhr, groups),
           percentOff: lineTotal > 0 ? Math.round(((perHitUsd * groups) / lineTotal) * 100) : 0,
         })
       }
     }
   }
 
-  if (!candidates.length) return noPromotion(product, quantity, exchangeRate)
+  if (!candidates.length) return noPromotion(product, quantity, exchangeRate, moneyPrecisionVersion)
 
   let best = candidates[0]
   for (const candidate of candidates.slice(1)) {
@@ -366,14 +387,14 @@ export function evaluatePromotionPricing(
       || (candidate.lineDiscountUsd === best.lineDiscountUsd && candidate.lineDiscountKhr > best.lineDiscountKhr)
     ) best = candidate
   }
-  if (best.lineDiscountUsd <= 0 && best.lineDiscountKhr <= 0) return noPromotion(product, quantity, exchangeRate)
+  if (best.lineDiscountUsd <= 0 && best.lineDiscountKhr <= 0) return noPromotion(product, quantity, exchangeRate, moneyPrecisionVersion)
 
-  const grossUsd = money(sellingUsd * qty)
-  const grossKhr = money(sellingKhr * qty)
+  const grossUsd = times(sellingUsd, qty)
+  const grossKhr = times(sellingKhr, qty)
   const lineDiscountUsd = Math.min(best.lineDiscountUsd, grossUsd)
   const lineDiscountKhr = Math.min(best.lineDiscountKhr, grossKhr)
-  const lineTotalUsd = money(Math.max(0, grossUsd - lineDiscountUsd))
-  const lineTotalKhr = money(Math.max(0, grossKhr - lineDiscountKhr))
+  const lineTotalUsd = less(grossUsd, lineDiscountUsd)
+  const lineTotalKhr = less(grossKhr, lineDiscountKhr)
   return {
     active: true,
     source: best.source,
@@ -385,8 +406,8 @@ export function evaluatePromotionPricing(
     percent_off: Math.max(0, best.percentOff),
     // Per-unit derived FROM the line totals (line values are authoritative
     // so per_unit x qty can't leak cents past them).
-    unit_price_usd: money(lineTotalUsd / qty),
-    unit_price_khr: money(lineTotalKhr / qty),
+    unit_price_usd: divide(lineTotalUsd, qty),
+    unit_price_khr: divide(lineTotalKhr, qty),
     line_total_usd: lineTotalUsd,
     line_total_khr: lineTotalKhr,
     line_discount_usd: lineDiscountUsd,
@@ -572,14 +593,16 @@ function nextItemAllocations(
   lines: readonly PromotionCartLine[],
   rule: PromotionRule,
   exchangeRate: number,
+  moneyPrecisionVersion: 0 | 1 = 0,
 ): Map<string, { usd: number; khr: number }> {
+  const { money, selling, times, percent, plus } = promotionMoney(moneyPrecisionVersion)
   const out = new Map<string, { usd: number; khr: number }>()
   type Unit = { line_id: string; usd: number; khr: number }
   const units: Unit[] = []
   for (const line of lines) {
     if (!ruleAppliesToProduct(rule, line.product)) continue
-    const unitUsd = money(line.product?.selling_price_usd)
-    const unitKhr = money(line.product?.selling_price_khr || unitUsd * (toFiniteNumber(exchangeRate, 0) || 4100))
+    const unitUsd = selling(line.product?.selling_price_usd)
+    const unitKhr = money(line.product?.selling_price_khr || times(unitUsd, toFiniteNumber(exchangeRate, 0) || 4100))
     const qty = Math.max(0, Math.floor(toFiniteNumber(line.quantity, 0)))
     for (let i = 0; i < qty; i++) units.push({ line_id: line.line_id, usd: unitUsd, khr: unitKhr })
   }
@@ -594,13 +617,13 @@ function nextItemAllocations(
   const hits = Math.floor(units.length / groupSize)
   for (let g = 0; g < hits; g++) {
     const cheapest = units[g]
-    const cutUsd = rule.percent_off > 0 ? money(cheapest.usd * (rule.percent_off / 100)) : Math.min(rule.save_usd, cheapest.usd)
+    const cutUsd = rule.percent_off > 0 ? percent(cheapest.usd, rule.percent_off) : Math.min(rule.save_usd, cheapest.usd)
     const cutKhr = rule.percent_off > 0
-      ? money(cheapest.khr * (rule.percent_off / 100))
-      : Math.min(rule.save_khr || money(rule.save_usd * (toFiniteNumber(exchangeRate, 0) || 4100)), cheapest.khr)
+      ? percent(cheapest.khr, rule.percent_off)
+      : Math.min(rule.save_khr || times(rule.save_usd, toFiniteNumber(exchangeRate, 0) || 4100), cheapest.khr)
     const bucket = out.get(cheapest.line_id) || { usd: 0, khr: 0 }
-    bucket.usd = money(bucket.usd + cutUsd)
-    bucket.khr = money(bucket.khr + cutKhr)
+    bucket.usd = plus(bucket.usd, cutUsd)
+    bucket.khr = plus(bucket.khr, cutKhr)
     out.set(cheapest.line_id, bucket)
   }
   return out
@@ -611,21 +634,23 @@ export function evaluateCartPromotionAdjustments(
   rules: readonly PromotionRule[] = [],
   exchangeRate = 4100,
   now: Date | string | number = new Date(),
+  moneyPrecisionVersion: 0 | 1 = 0,
 ): Map<string, CartLineAdjustment> {
+  const { money, selling, times, less, divide } = promotionMoney(moneyPrecisionVersion)
   const result = new Map<string, CartLineAdjustment>()
   const activeRules = rules.filter((rule) => isRuleActive(rule, now))
   const perLineRules = activeRules.filter((rule) => rule.rule_type !== 'next_item')
   const nextItemRules = activeRules.filter((rule) => rule.rule_type === 'next_item')
-  const pairings = nextItemRules.map((rule) => ({ rule, allocation: nextItemAllocations(lines, rule, exchangeRate) }))
+  const pairings = nextItemRules.map((rule) => ({ rule, allocation: nextItemAllocations(lines, rule, exchangeRate, moneyPrecisionVersion) }))
 
   for (const line of lines) {
-    const qty = Math.max(1, toFiniteNumber(line.quantity, 1))
-    const sellingUsd = money(line.product?.selling_price_usd)
-    const sellingKhr = money(line.product?.selling_price_khr || sellingUsd * (toFiniteNumber(exchangeRate, 0) || 4100))
-    const grossUsd = money(sellingUsd * qty)
-    const grossKhr = money(sellingKhr * qty)
+    const qty = Math.max(moneyPrecisionVersion === 1 ? 0 : 1, toFiniteNumber(line.quantity, 1))
+    const sellingUsd = selling(line.product?.selling_price_usd)
+    const sellingKhr = money(line.product?.selling_price_khr || times(sellingUsd, toFiniteNumber(exchangeRate, 0) || 4100))
+    const grossUsd = times(sellingUsd, qty)
+    const grossKhr = times(sellingKhr, qty)
 
-    const perLine = evaluatePromotionPricing(line.product, qty, perLineRules, exchangeRate, now)
+    const perLine = evaluatePromotionPricing(line.product, qty, perLineRules, exchangeRate, now, moneyPrecisionVersion)
     let best: { usd: number; khr: number; rule: PromotionRule | null; fromProductDiscount: boolean } = perLine.active
       ? {
           usd: perLine.line_discount_usd,
@@ -652,8 +677,8 @@ export function evaluateCartPromotionAdjustments(
       rule_type: !active ? null : best.rule ? best.rule.rule_type : (best.fromProductDiscount ? 'product_discount' : null),
       label: !active ? '' : best.rule ? ruleLabel(best.rule) : (perLine.show_title ? perLine.title : ''),
       badge_color: best.rule ? best.rule.badge_color : (active ? perLine.badge_color : DEFAULT_BADGE_COLOR),
-      unit_price_usd: active ? money(Math.max(0, grossUsd - lineDiscountUsd) / qty) : sellingUsd,
-      unit_price_khr: active ? money(Math.max(0, grossKhr - lineDiscountKhr) / qty) : sellingKhr,
+      unit_price_usd: active ? divide(less(grossUsd, lineDiscountUsd), qty) : sellingUsd,
+      unit_price_khr: active ? divide(less(grossKhr, lineDiscountKhr), qty) : sellingKhr,
       line_discount_usd: active ? lineDiscountUsd : 0,
       line_discount_khr: active ? lineDiscountKhr : 0,
     })
