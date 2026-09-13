@@ -64,7 +64,40 @@ const h=harness.exports
  assert.equal(chain.bindings[0].captured_product_id,10);assert.equal(chain.bindings[0].current_product_id,30)
  pricing.validateCapturedSaleBasket(chained.lines,chained.sale,chain.bindings)
  f.raw.prepare("INSERT INTO undo_snapshots(kind,status,payload_json) VALUES('product.merge','applied',?)").run([JSON.stringify({dupId:30,keeperId:10,reparentedSaleItemIds:[chained.lines[0].id]})])
+ const cycleId=f.raw.prepare('SELECT MAX(id) AS id FROM undo_snapshots').get().id
  await assert.rejects(()=>lineage.resolveProductMergeLineage(f.route,saleId,chained.lines),'cycle/outgoing endpoint evidence refuses')
+ f.raw.prepare('UPDATE sales SET is_delivery=1 WHERE id=?').run([saleId])
+ const cost=await post({kind:'delivery_actual_cost_changed',money_precision_version:1,expected_exchange_rate:4000,client_request_id:'invalid-lineage-cost',delivery_actual_cost_usd:2})
+ assert.equal(cost.status,200,JSON.stringify(cost));assert.equal(cost.body.canonical_receipt_available,false)
+ assert.equal(Object.hasOwn(cost.body,'sale'),false,'cost-only success must not mint unvalidated identity binding')
+ f.raw.prepare('DELETE FROM undo_snapshots WHERE id=?').run([cycleId])
+ const addBody={money_precision_version:1,client_request_id:'lineage-add',expected_exchange_rate:4000,items:[{product_id:30,quantity:1,branch_id:1,batch_id:500,
+   client_line_key:'new-current-line',pricing_source:'selling',pricing_quote:{gross_usd:9.5,product_discount_usd:0,manual_discount_usd:0,total_usd:9.5,total_khr:38000}}]}
+ const add=async body=>{const response=await h.app.request(`/${saleId}/items`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)},{DB:f.route},h.executionCtx);return {status:response.status,body:await response.json()}}
+ const addQuote=await add(addBody);assert.equal(addQuote.body.code,'sale_header_quote_conflict')
+ const added=await add({...addBody,expected_header_quote:addQuote.body.header_quote});assert.equal(added.status,200,JSON.stringify(added))
+ const replay=async direction=>{
+   const history=f.raw.prepare('SELECT * FROM action_history WHERE id=?').get([added.body.actionHistoryId])
+   const payload=JSON.parse(history[direction==='undo'?'undo_payload':'redo_payload'])
+   return h.load('lib/undoAppliers.ts').resolveUndoApplier(payload).run(payload,{env:{DB:f.route},user:{...h.USER,permissions:'{"all":true}'},direction,historyId:history.id,generation:payload.generation})
+ }
+ const beforeUndo=JSON.stringify(read())
+ f.raw.prepare("UPDATE undo_snapshots SET status='reversed' WHERE id=?").run([snapshot.id])
+ await assert.rejects(()=>replay('undo'),/merge evidence/);assert.equal(JSON.stringify(read()),beforeUndo)
+ f.raw.prepare("UPDATE undo_snapshots SET status='applied' WHERE id=?").run([snapshot.id])
+ const replayBatch=f.route.batch.bind(f.route);let undoRaced=false
+ f.route.batch=async statements=>{
+   if(!undoRaced&&statements.some(statement=>/UPDATE action_history SET/.test(statement.sql))){undoRaced=true;f.raw.prepare("UPDATE undo_snapshots SET status='reversed' WHERE id=?").run([snapshot.id])}
+   return replayBatch(statements)
+ }
+ await assert.rejects(()=>replay('undo'));assert.equal(undoRaced,true);assert.equal(JSON.stringify(read()),beforeUndo)
+ f.route.batch=replayBatch;f.raw.prepare("UPDATE undo_snapshots SET status='applied' WHERE id=?").run([snapshot.id])
+ await replay('undo')
+ const beforeRedo=JSON.stringify(read())
+ f.raw.prepare("UPDATE undo_snapshots SET status='reversed' WHERE id=?").run([snapshot.id])
+ await assert.rejects(()=>replay('redo'),/merge evidence/);assert.equal(JSON.stringify(read()),beforeRedo)
+ f.raw.prepare("UPDATE undo_snapshots SET status='applied' WHERE id=?").run([snapshot.id])
+ await replay('redo')
  f.raw.db.close()
  console.log('PASS actual two folds, merged quantity amendment, unchanged capture, response binding, concurrent rollback and missing/duplicate/cyclic row-proof refusal')
 })().catch(error=>{console.error(error);process.exitCode=1})

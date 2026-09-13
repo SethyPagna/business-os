@@ -341,10 +341,10 @@ function canonicalSaleItemsSql() {
 
 function canonicalSaleIdentityBindingsSql(){
   return `(SELECT json_group_array(json_object('sale_id',i.sale_id,'sale_item_id',i.id,
-    'captured_product_id',json_extract(capture.value,'$.product.id'),'current_product_id',i.product_id))
-    FROM sale_items i,json_each(CASE WHEN json_valid(i.pricing_snapshot_json) THEN i.pricing_snapshot_json ELSE '{}' END,'$.pool.lines') capture
-    WHERE i.sale_id=s.id AND json_extract(capture.value,'$.line_key')=json_extract(i.pricing_snapshot_json,'$.line_key')
-      AND json_extract(capture.value,'$.product.id') IS NOT i.product_id)`
+    'captured_product_id',json_extract(proof.value,'$.captured_product_id'),'current_product_id',i.product_id))
+    FROM sale_items i,json_each(@validatedIdentityBindings) proof
+    WHERE i.sale_id=s.id AND i.id=json_extract(proof.value,'$.sale_item_id')
+      AND i.sale_id=json_extract(proof.value,'$.sale_id') AND i.product_id=json_extract(proof.value,'$.current_product_id'))`
 }
 
 /** Financial snapshot stored inside the mutation transaction, never reconstructed on retry. */
@@ -3336,6 +3336,7 @@ app.post('/:id/items', async (c) => {
         before: { money: moneyBefore, lines: lineMoneyBefore },
         after: { money: moneyAfter, lines: lineMoneyAfter },
         response: baseResponse, stamp: addItemsStamp,
+        identityBindings:precisionBasket.identityBindings,
       }),
       ...planUnlottedSaleLineGuards(plan.lines),
       ...statementsForPlan,
@@ -3377,7 +3378,7 @@ app.post('/:id/items', async (c) => {
               sale_revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@saleId),0),
               response_json=${canonicalMutationResponseSql("json_set(response_json,'$.undoActionId',last_insert_rowid(),'$.actionHistoryId',last_insert_rowid())")},updated_at=@stamp
               WHERE id=@operation`,
-        params: { operation: addItemsOperationId, saleId, stamp: addItemsStamp },
+        params: { operation: addItemsOperationId, saleId, stamp: addItemsStamp,validatedIdentityBindings:JSON.stringify(precisionBasket.identityBindings) },
       },
       {
         sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
@@ -3820,7 +3821,11 @@ app.post('/:id/amendments', async (c) => {
   if (!guard.ok) return c.json({ error: guard.error, code: guard.code }, 400)
 
   const movesStock = saleAmendmentMovesStock(sale)
-  const precisionBasket = kind === 'delivery_actual_cost_changed' ? null : await capturePrecisionBasket(db,sale as Record<string,unknown>)
+  let precisionBasket:Awaited<ReturnType<typeof capturePrecisionBasket>>|null=null
+  if(kind==='delivery_actual_cost_changed'){
+    try{precisionBasket=await capturePrecisionBasket(db,sale as Record<string,unknown>)}
+    catch(error){if(!(error instanceof SaleMoneyContractError||error instanceof SaleItemPricingError||error instanceof ProductMergeLineageError||error instanceof MoneyPrecisionError))throw error}
+  }else precisionBasket=await capturePrecisionBasket(db,sale as Record<string,unknown>)
   const stockSkipped = saleSkipsStock(sale)
   const note = String(body.notes || '').trim().slice(0, 500) || null
   const subtotalRow = await db
@@ -3979,6 +3984,7 @@ app.post('/:id/amendments', async (c) => {
           requestJson: amendmentCanonical,
           before: { money: moneyBeforeSnapshot, lines: lineMoneyBefore, delivery: recordBefore },
           after: { money: moneyAfterSnapshot, lines: lineMoneyAfterAtLatestRate, delivery: recordAfter },
+          identityBindings:precisionBasket!.identityBindings,
           response,
           stamp: mutationStamp,
         }),
@@ -4058,6 +4064,7 @@ app.post('/:id/amendments', async (c) => {
         { sql: 'DELETE FROM sale_bulk_guards', params: {} },
         amendmentSettingsGuard(moneySettings),
         saleRevisionGuard(saleId, Number(sale.write_revision)),
+        ...(precisionBasket?[precisionBasket.guard]:[]),
         ...costPlan.statements,
         amendmentEntryStatement({
           moneyPrecisionVersion: 1,
@@ -4083,6 +4090,8 @@ app.post('/:id/amendments', async (c) => {
           after: { money: moneyAfterWithCost, lines: lineMoneyAfterAtLatestRate },
           response,
           stamp: mutationStamp,
+          identityBindings:precisionBasket?.identityBindings??[],
+          canonicalAvailable:precisionBasket!==null,
         }),
         { sql: 'DELETE FROM sale_mutation_guards', params: {} },
         { sql: 'DELETE FROM sale_bulk_guards', params: {} },
@@ -4189,6 +4198,7 @@ app.post('/:id/amendments', async (c) => {
           requestJson: amendmentCanonical,
           before: { money: moneyBeforeSnapshot, lines: lineMoneyBefore },
           after: { money: moneyAfterSnapshot, lines: lineMoneyAfterAtLatestRate },
+          identityBindings:precisionBasket!.identityBindings,
           response,
           stamp: mutationStamp,
         }),
@@ -4613,6 +4623,7 @@ app.post('/:id/amendments', async (c) => {
         requestJson: amendmentCanonical,
         before: { money: moneyBeforeSnapshot, lines: lineMoneyBefore },
         after: { money: moneyAfterSnapshot, lines: lineMoneyAfterAtLatestRate },
+        identityBindings:precisionBasket!.identityBindings,
         response,
         stamp: mutationStamp,
       }),
@@ -4799,6 +4810,8 @@ function saleMutationReceiptStatement(input: {
   after: unknown
   response: Record<string, unknown>
   stamp: string
+  identityBindings: readonly import('../lib/saleItemPricing').CapturedProductIdentityBinding[]
+  canonicalAvailable?:boolean
 }): StatementList[number] {
   return {
     sql: `INSERT INTO sale_mutation_receipts(
@@ -4806,7 +4819,7 @@ function saleMutationReceiptStatement(input: {
             before_json,after_json,response_json,generation,sale_revision,updated_at
           ) VALUES(
             @operation,@actor,@saleId,@kind,@request,@digest,@requestJson,
-            @beforeJson,@afterJson,${canonicalMutationResponseSql('@responseJson')},0,
+            @beforeJson,@afterJson,${input.canonicalAvailable===false?"json_set(@responseJson,'$.canonical_receipt_available',json('false'))":canonicalMutationResponseSql('@responseJson')},0,
             COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@saleId),0),@stamp
           )`,
     params: {
@@ -4820,6 +4833,7 @@ function saleMutationReceiptStatement(input: {
       beforeJson: JSON.stringify(input.before),
       afterJson: JSON.stringify(input.after),
       responseJson: JSON.stringify(input.response),
+      validatedIdentityBindings:JSON.stringify(input.identityBindings),
       stamp: input.stamp,
     },
   }

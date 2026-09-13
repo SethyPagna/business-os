@@ -37,6 +37,8 @@ import { PRODUCT_REMOVE_ACTION_KIND, parseProductRemoveSnapshot, productRemovePl
   type ProductRemoveOperationRow } from './productDelete'
 
 export const SALE_ADD_ITEMS_ACTION_KIND = 'sale.add_items'
+import { resolveProductMergeLineage } from './productMergeLineage'
+import { validateCapturedSaleBasket } from './saleItemPricing'
 
 // Server-side undo/redo appliers (K1). The action_history store has always
 // held an undo_payload / redo_payload per recorded action, but historically
@@ -726,6 +728,28 @@ async function replayAtomicSaleAddItems(
     throw new UndoConflictError('This sale was edited after the items were added. Nothing was reversed.')
   }
 
+  const currentSale=await db.prepare('SELECT * FROM sales WHERE id=?').get<Record<string,unknown>>([saleId])
+  const currentLines=await db.prepare('SELECT * FROM sale_items WHERE sale_id=? ORDER BY id').all<Record<string,unknown>>([saleId])
+  if(!currentSale||!currentLines.length)throw new UndoConflictError('The recorded sale basket is unavailable.')
+  let lineage:{condition:string;params:Record<string,unknown>}={condition:'1=1',params:{}}
+  if(Number(currentSale.money_precision_version)===1||currentLines.every(line=>line.pricing_snapshot_json!=null)){
+    try{
+      const resolved=await resolveProductMergeLineage(db,saleId,currentLines)
+      if(Number(currentSale.money_precision_version)===1)validateCapturedSaleBasket(currentLines,currentSale,resolved.bindings)
+      lineage=resolved
+    }catch{throw new UndoConflictError('Recorded product merge evidence changed. Nothing was reversed.')}
+  }
+  const currentHeaderJson=JSON.stringify(currentSale),currentLinesJson=JSON.stringify(currentLines)
+  if(new TextEncoder().encode(currentHeaderJson+currentLinesJson).byteLength>500_000)throw new UndoConflictError('The recorded sale basket is too large to replay safely.')
+  const stateKeys=(row:Record<string,unknown>)=>Object.keys(row).map(key=>{
+    if(!/^[a-z][a-z0-9_]*$/.test(key))throw new UndoConflictError('The recorded sale basket shape is invalid.')
+    return key
+  })
+  const basketCondition=`EXISTS(SELECT 1 FROM sales current WHERE current.id=@saleId AND ${stateKeys(currentSale).map(key=>`current.${key} IS json_extract(@replaySale,'$.${key}')`).join(' AND ')})
+    AND (SELECT COUNT(*) FROM sale_items WHERE sale_id=@saleId)=json_array_length(@replayLines)
+    AND NOT EXISTS(SELECT 1 FROM json_each(@replayLines) expected WHERE NOT EXISTS(SELECT 1 FROM sale_items current WHERE current.sale_id=@saleId
+      AND ${stateKeys(currentLines[0]).map(key=>`current.${key} IS json_extract(expected.value,'$.${key}')`).join(' AND ')}))`
+
   const lines = reversal.lines || []
   if (!lines.length || lines.length > 25) throw new UndoConflictError('The saved added-items line set is invalid.')
   const guardParams: Record<string, unknown> = {
@@ -738,6 +762,7 @@ async function replayAtomicSaleAddItems(
     snapshotStatus: ctx.direction === 'undo' ? 'applied' : 'reversed',
     historyStatus: ctx.direction === 'undo' ? 'undoable' : 'redoable',
     saleStatus: reversal.saleStatus,
+    replaySale:currentHeaderJson,replayLines:currentLinesJson,...lineage.params,
   }
   const memberGuards: string[] = []
   const lineGuards: string[] = []
@@ -774,6 +799,7 @@ async function replayAtomicSaleAddItems(
         AND EXISTS(SELECT 1 FROM sale_mutation_members WHERE operation_id=@operation AND entity_kind='undo_snapshot' AND entity_id=@snapshot AND ordinal=0)
     )
     ${[...memberGuards, ...lineGuards].map((predicate) => `AND ${predicate}`).join('\n')}
+    AND (${basketCondition}) AND (${lineage.condition})
   `, guardParams)
   const stamp = new Date().toISOString()
   const statements: ReplayStatement[] = [
