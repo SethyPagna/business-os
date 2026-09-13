@@ -333,7 +333,7 @@ async function main() {
       total_usd,total_khr,base_price_usd,base_price_khr,applied_price_usd,applied_price_khr,
       product_discount_usd,product_discount_khr,manual_discount_usd,manual_discount_khr,
       manual_discount_type,manual_discount_value,price_mode,pricing_snapshot_json)
-      VALUES(@id,1,@product_id,'Widget',@quantity,1,@batch_id,2,8000,@total_usd,@total_khr,@base_price_usd,@base_price_khr,
+      VALUES(@id,1,@product_id,'Widget',@quantity,1,@batch_id,NULL,NULL,@total_usd,@total_khr,@base_price_usd,@base_price_khr,
         @applied_price_usd,@applied_price_khr,@product_discount_usd,@product_discount_khr,@manual_discount_usd,@manual_discount_khr,
         @manual_discount_type,@manual_discount_value,@price_mode,@pricing_snapshot_json)`).run({ ...pricing, batch_id: batch.batchId })
     rawDb.prepare(`INSERT INTO sale_item_batch_allocations(sale_item_id,batch_id,branch_id,quantity,released_quantity)
@@ -350,7 +350,8 @@ async function main() {
     assert.strictEqual(expectedQuote.total_refund_usd, 9.5)
     const body = { client_request_id: 'v1-customer-return', money_precision_version: 1, sale_id: 1,
       reason: 'Exact net entitlement', expected_quote: expectedQuote,
-      items: [{ sale_item_id: 1, product_id: 1, quantity: 1, stock_action: 'restock', branch_id: 1 }] }
+      items: [{ sale_item_id: 1, product_id: 1, quantity: 1, stock_action: 'restock', branch_id: 1,
+        cost_price_usd: 999, cost_price_khr: 3996000 }] }
     assert.deepStrictEqual(returnCreateActionKernel.canonicalReturnCreateIntent(body).expected_quote, expectedQuote)
 
     beforeBatchHook = async () => rawDb.prepare('UPDATE sales SET tax_usd=.6 WHERE id=1').run()
@@ -380,6 +381,13 @@ async function main() {
       ...postConflictExpectedQuote } = postConflictQuoteResponse.json
     const postConflictBody = { ...body, expected_quote: postConflictExpectedQuote }
 
+    const deniedUser = { id: 4, username: 'no-read', name: 'No Read',
+      permissions: JSON.stringify({ returns: 'full', 'returns:view': false }) }
+    const denied = await reqAs(deniedUser, 'POST', '/', { ...postConflictBody, client_request_id: 'v1-no-read' })
+    assert.strictEqual(denied.status, 403, JSON.stringify(denied.json))
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM returns').get().n, 0)
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM return_create_receipts').get().n, 0)
+
     failReturnCreatePostcommitRead = true
     const unknown = await req('POST', '/', postConflictBody)
     assert.strictEqual(unknown.status, 503, JSON.stringify(unknown.json))
@@ -392,16 +400,24 @@ async function main() {
       total_refund_usd,total_refund_khr FROM returns WHERE id=?`).get([created.json.id])
     assert.deepStrictEqual({ ...header }, { money_precision_version: 1, calculated_refund_usd: 9.5,
       rounding_adjustment_usd: 0, total_refund_usd: 9.5, total_refund_khr: 38000 })
-    const item = rawDb.prepare(`SELECT sale_item_id,quantity,applied_price_usd,total_usd,total_khr,refund_snapshot_json
+    const item = rawDb.prepare(`SELECT sale_item_id,quantity,applied_price_usd,cost_price_usd,cost_price_khr,total_usd,total_khr,refund_snapshot_json
       FROM return_items WHERE return_id=?`).get([created.json.id])
     assert.strictEqual(item.total_usd, 9.5)
     assert.strictEqual(item.total_khr, 38000)
+    assert.strictEqual(item.cost_price_usd, null, 'unknown captured sale cost stays unknown')
+    assert.strictEqual(item.cost_price_khr, null, 'posted cost cannot fill a missing captured sale cost')
     assert.strictEqual(customerReturnEntitlementKernel.parseCustomerReturnRefundSnapshot(item.refund_snapshot_json).net_entitlement_usd, 9.5)
+    const movement = rawDb.prepare(`SELECT unit_cost_usd,unit_cost_khr FROM inventory_movements
+      WHERE reference_id=? AND movement_type='return'`).get([created.json.id])
+    assert.deepStrictEqual({ ...movement }, { unit_cost_usd: null, unit_cost_khr: null })
     assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=? AND branch_id=1').get([batch.batchId]).quantity, 2)
     const retried = await req('POST', '/', postConflictBody)
     assert.deepStrictEqual(retried.json, created.json)
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM returns').get().n, 1)
     assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=? AND branch_id=1').get([batch.batchId]).quantity, 2)
+    const spoofedCostRetry = await req('POST', '/', { ...postConflictBody,
+      items: postConflictBody.items.map(row => ({ ...row, cost_price_usd: 777, cost_price_khr: 3108000 })) })
+    assert.deepStrictEqual(spoofedCostRetry.json, created.json, 'unhashed posted costs cannot alter authoritative persisted costs')
     const changedExpected = { ...refreshedExpectedQuote, calculated_refund_usd: 9.4, total_refund_usd: 9.4,
       total_refund_khr: 37600, items: refreshedExpectedQuote.items.map(row => ({ ...row, total_usd: 9.4, total_khr: 37600,
         applied_price_usd: 9.4, applied_price_khr: 37600 })) }
@@ -411,6 +427,51 @@ async function main() {
     const edit = await req('PATCH', `/${created.json.id}`, { reason: 'blocked v1 edit' })
     assert.strictEqual(edit.status, 409)
     assert.strictEqual(edit.json.code, 'customer_return_edit_v1_not_supported')
+  })
+
+  await check('v1 create keeps fractional sale capacity exact after a prior partial return', async () => {
+    seed()
+    const pricingPool = { version: 1, pool_key: 'fractional-return-pool', evaluation_time: '2026-09-13T00:00:00.000Z',
+      exchange_rate: 4000, rules: [], lines: [{ line_key: 'fractional-return-line', source: 'selling',
+        product: { id: 1, selling_price_usd: 10, selling_price_khr: 40000, wholesale_price_usd: null,
+          discount_enabled: false, discount_amount_usd: 0, discount_amount_khr: 0, discount_percent: 0 },
+        selling_price_input_usd: null, manual: { type: 'none', value: 0 } }] }
+    const allocation = { version: 1, lines: [{ line_key: 'fractional-return-line', amount: 3 }],
+      discount_usd: 0, membership_discount_usd: 0, tax_usd: 0 }
+    const pricing = saleItemPricingKernel.materializeCapturedPricingRow({ id: 1, product_id: 1 }, pricingPool,
+      { 'fractional-return-line': 0.3 }, 'fractional-return-line', allocation)
+    rawDb.prepare(`UPDATE sales SET receipt_number='FRACTIONAL-SALE',exchange_rate=4000,subtotal_usd=3,
+      discount_usd=0,membership_discount_usd=0,tax_usd=0,calculated_total_usd=3,rounding_adjustment_usd=0,
+      total_usd=3,money_precision_version=1,sale_status='completed',status_before_return=NULL WHERE id=1`).run()
+    rawDb.prepare(`INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity,branch_id,
+      total_usd,total_khr,base_price_usd,base_price_khr,applied_price_usd,applied_price_khr,
+      product_discount_usd,product_discount_khr,manual_discount_usd,manual_discount_khr,
+      manual_discount_type,manual_discount_value,price_mode,pricing_snapshot_json)
+      VALUES(@id,1,@product_id,'Widget',@quantity,1,@total_usd,@total_khr,@base_price_usd,@base_price_khr,
+        @applied_price_usd,@applied_price_khr,@product_discount_usd,@product_discount_khr,@manual_discount_usd,@manual_discount_khr,
+        @manual_discount_type,@manual_discount_value,@price_mode,@pricing_snapshot_json)`).run(pricing)
+    const priorQuote = await returnsRoute.customerReturnQuoteFromDb(db, 1, [{ sale_item_id: 1, quantity: 0.1 }])
+    rawDb.prepare(`INSERT INTO returns(id,sale_id,status,return_scope,money_precision_version,calculated_refund_usd,
+      rounding_adjustment_usd,total_refund_usd,total_refund_khr) VALUES(98,1,'completed','customer',1,@calculated,@rounding,@usd,@khr)`).run({
+      calculated: priorQuote.calculated_refund_usd, rounding: priorQuote.rounding_adjustment_usd,
+      usd: priorQuote.total_refund_usd, khr: priorQuote.total_refund_khr,
+    })
+    rawDb.prepare(`INSERT INTO return_items(return_id,sale_item_id,product_id,product_name,quantity,total_usd,total_khr,
+      applied_price_usd,applied_price_khr,stock_action,refund_snapshot_json)
+      VALUES(98,1,1,'Widget',.1,@usd,@khr,@appliedUsd,@appliedKhr,'none',@snapshot)`).run({
+      usd: priorQuote.items[0].total_usd, khr: priorQuote.items[0].total_khr,
+      appliedUsd: priorQuote.items[0].applied_price_usd, appliedKhr: priorQuote.items[0].applied_price_khr,
+      snapshot: priorQuote.items[0].refund_snapshot_json,
+    })
+    const quote = await req('POST', '/quote', { sale_id: 1, items: [{ sale_item_id: 1, quantity: 0.2 }] })
+    assert.strictEqual(quote.status, 200, JSON.stringify(quote.json))
+    const { customer_return_create_version: _create, customer_return_edit_version: _edit, ...expectedQuote } = quote.json
+    const created = await req('POST', '/', { client_request_id: 'v1-fractional-create', money_precision_version: 1,
+      sale_id: 1, reason: 'Fractional remainder', expected_quote: expectedQuote,
+      items: [{ sale_item_id: 1, quantity: 0.2, stock_action: 'none', branch_id: 1 }] })
+    assert.strictEqual(created.status, 200, JSON.stringify(created.json))
+    assert.strictEqual(rawDb.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status, 'returned')
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM returns WHERE sale_id=1').get().n, 2)
   })
 
   await check('legacy-sale event lots use the return business date and failed lot writes roll back create/edit/retry', async () => {

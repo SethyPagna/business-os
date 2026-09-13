@@ -1222,7 +1222,7 @@ app.post('/quote', async (c) => {
 app.post('/', async (c) => {
   const db = getDb(c.env)
   const user = c.get('user')
-  if (getActionTier(user, 'returns', 'add') === 'none') {
+  if (getActionTier(user, 'returns', 'add') === 'none' || getActionTier(user, 'returns', 'view') === 'none') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const authenticatedActorId = actorId(user)
@@ -1304,10 +1304,12 @@ app.post('/', async (c) => {
   const reason = String(canonicalIntent.reason)
   let returnItems = body.items
   const replacementInputs = Array.isArray(body.replacement_items) ? body.replacement_items : []
-  try {
-    await assertReturnableItems(db, requestedSaleId, body.items)
-  } catch (error) {
-    return c.json({ error: (error as Error).message }, 400)
+  if (!isMoneyV1) {
+    try {
+      await assertReturnableItems(db, requestedSaleId, body.items)
+    } catch (error) {
+      return c.json({ error: (error as Error).message }, 400)
+    }
   }
 
   const returnNumber = body.return_number?.trim() || await uniqueBusinessDateTimeNumber(
@@ -1345,8 +1347,8 @@ app.post('/', async (c) => {
         product_id: sold.product_id ?? item.product_id,
         product_name: sold.product_name ?? item.product_name,
         branch_id: sold.branch_id ?? item.branch_id,
-        cost_price_usd: sold.cost_price_usd ?? item.cost_price_usd,
-        cost_price_khr: sold.cost_price_khr ?? item.cost_price_khr,
+        cost_price_usd: isMoneyV1 ? sold.cost_price_usd : sold.cost_price_usd ?? item.cost_price_usd,
+        cost_price_khr: isMoneyV1 ? sold.cost_price_khr : sold.cost_price_khr ?? item.cost_price_khr,
       } : item
     })
     committedReturnLines = await db.prepare(`SELECT ri.sale_item_id,ri.product_id,ri.quantity
@@ -1791,6 +1793,12 @@ app.post('/', async (c) => {
     const itemBranchId = Number(item.branch_id || branchId) || null
     const productName = item.product_name?.trim() || (productId ? productMap.get(productId)?.name : null) || null
     const stockAction = normalizeStockAction(item)
+    const unitCostUsd = isMoneyV1
+      ? item.cost_price_usd == null ? null : Number(item.cost_price_usd)
+      : toNumber(item.cost_price_usd ?? item.unit_cost_usd)
+    const unitCostKhr = isMoneyV1
+      ? item.cost_price_khr == null ? null : Number(item.cost_price_khr)
+      : toNumber(item.cost_price_khr ?? item.unit_cost_khr)
     const plan = returnLotPlans[index] || { splits: [], plainQuantity: 0 }
     const returnReceivedDate = new Date(Date.parse(occurredAt) + 7 * 60 * 60 * 1000).toISOString().slice(0, 10)
     const fallbackReceive = plan.plainQuantity > 0 && productId && itemBranchId ? planReceiveBatchStock({
@@ -1820,8 +1828,8 @@ app.post('/', async (c) => {
               VALUES(@product_id,@product_name,@branch_id,'${DAMAGE_IN_MOVEMENT}',@quantity,@unit_cost_usd,@unit_cost_khr,@reason,${returnIdExpression},@user_id,@user_name,@batch_id)`,
         params: {
           product_id: productId, product_name: productName, branch_id: itemBranchId, quantity,
-          unit_cost_usd: toNumber(item.cost_price_usd ?? item.unit_cost_usd),
-          unit_cost_khr: toNumber(item.cost_price_khr ?? item.unit_cost_khr),
+          unit_cost_usd: unitCostUsd,
+          unit_cost_khr: unitCostKhr,
           reason: `Return (damaged): ${reason}`, user_id: authenticatedActorId, user_name: actorSnapshot(user),
           batch_id: originalBatchId, returnClientRequestId: clientRequestId,
         },
@@ -1840,7 +1848,7 @@ app.post('/', async (c) => {
       params: {
         returnClientRequestId: clientRequestId, sale_item_id: item.sale_item_id || null, product_id: productId,
         product_name: productName, quantity, applied_price_usd: refund.unitUsd, applied_price_khr: refund.unitKhr,
-        cost_price_usd: toNumber(item.cost_price_usd ?? item.unit_cost_usd), cost_price_khr: toNumber(item.cost_price_khr ?? item.unit_cost_khr),
+        cost_price_usd: unitCostUsd, cost_price_khr: unitCostKhr,
         total_usd: exactRefund?.total_usd ?? Number((refund.unitUsd * quantity).toFixed(2)),
         total_khr: exactRefund?.total_khr ?? Math.round(refund.unitKhr * quantity),
         refund_snapshot_json: exactRefund?.refund_snapshot_json ?? null,
@@ -1873,7 +1881,7 @@ app.post('/', async (c) => {
           VALUES(@product_id,@product_name,@branch_id,'return',@quantity,@unit_cost_usd,@unit_cost_khr,@reason,${returnIdExpression},@user_id,@user_name,${recordedBatchSql})`,
         params: {
           returnClientRequestId: clientRequestId, product_id: productId, product_name: productName, branch_id: itemBranchId,
-          quantity, unit_cost_usd: toNumber(item.cost_price_usd ?? item.unit_cost_usd), unit_cost_khr: toNumber(item.cost_price_khr ?? item.unit_cost_khr),
+          quantity, unit_cost_usd: unitCostUsd, unit_cost_khr: unitCostKhr,
           reason: `Return: ${reason}`, user_id: authenticatedActorId, user_name: actorSnapshot(user), batch_id: recordedBatchId, ...fallbackParams,
         },
       })
