@@ -81,6 +81,12 @@ for (const invalid of [{ subtotal_usd: 999 }, { total_khr: 999 }, { calculated_t
 // Run production callbacks with real pricing/header helpers. Only surrounding
 // state setters and transport are controlled; no copied financial arithmetic.
 const source = fs.readFileSync(new URL('../src/components/sales/SaleDetailModal.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+const auditSource = source.split('\n').find(line => line.includes("sub={`${t('money_calculated_total')}"))?.trim()
+assert.ok(auditSource)
+const auditExpression = transformSync(`const value = ${auditSource.slice(5, -1)}`, { loader: 'tsx' }).code
+const renderDetailAudit = new Function('totals', 't', `${auditExpression}; return value`)
+assert.equal(renderDetailAudit({ calculatedTotalUsd: 3.7036, roundingAdjustmentUsd: -.0036 }, (key: string) => key), 'money_calculated_total: USD 3.7036 · money_rounding_adjustment: USD -0.0036')
+assert.match(renderDetailAudit({ calculatedTotalUsd: 3.6964, roundingAdjustmentUsd: .0036 }, (key: string) => key), /USD \+0\.0036$/)
 function callback(name: string, env: Record<string, unknown>) {
   const start = source.indexOf(`  const ${name} = `), end = source.indexOf('\n  }\n', start) + 4
   assert.ok(start > 0 && end > start)

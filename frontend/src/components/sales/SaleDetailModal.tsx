@@ -2281,6 +2281,7 @@ export default function SaleDetailModal({
                   {roundingDisplay ? <MoneyRow
                     label={t(roundingDisplay.labelKey)}
                     amount={roundingDisplay.amount}
+                    sub={`${t('money_calculated_total')}: USD ${totals.calculatedTotalUsd!.toFixed(4)} · ${t('money_rounding_adjustment')}: USD ${totals.roundingAdjustmentUsd > 0 ? '+' : ''}${totals.roundingAdjustmentUsd.toFixed(4)}`}
                   /> : null}
                   <MoneyRow
                     label={t('total') || 'Total'}
