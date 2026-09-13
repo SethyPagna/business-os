@@ -300,7 +300,10 @@ await runTest('sale mutation reviews carry stable idempotency and exchange-rate 
   const sales = readFileSync(new URL('../src/components/sales/Sales.tsx', import.meta.url), 'utf8')
   const transport = readFileSync(new URL('../src/api/salesTransport.ts', import.meta.url), 'utf8')
 
-  assert.match(transport, /addSaleItems\([\s\S]*?review: \{ client_request_id: string; expected_exchange_rate: number; expected_updated_at\?: string \}/)
+  const addSignature = /export async function addSaleItems\(([\s\S]*?)\r?\n\): Promise<unknown>/.exec(transport)?.[1] || ''
+  assert.match(addSignature, /review: \{[^}]*client_request_id: string/, 'add-items review requires the stable request id')
+  assert.match(addSignature, /review: \{[^}]*expected_exchange_rate: number/, 'add-items review requires the reviewed rate')
+  assert.match(addSignature, /review: \{[^}]*expected_updated_at\?: string/, 'add-items review forwards the optional revision regardless of property order')
   assert.match(transport, /items,\s*notes,\s*\.\.\.review/, 'add-items sends the reviewed request id, rate, and revision')
   assert.match(transport, /interface SaleAmendmentRequest[\s\S]*?client_request_id: string[\s\S]*?expected_exchange_rate: number/, 'amendments require the same mutation envelope')
   assert.match(modal, /client_request_id: addRequestIdRef\.current[\s\S]*?expected_exchange_rate: mutationExchangeRate/, 'add-items retries the frozen review body')

@@ -18,12 +18,14 @@ import {
 const require = createRequire(import.meta.url)
 
 function loadTransport(relative: string, mocks: Record<string, unknown>): Record<string, (...args: any[]) => any> {
-  const source = readFileSync(new URL(relative, import.meta.url), 'utf8')
+  const sourceUrl = new URL(relative, import.meta.url)
+  const source = readFileSync(sourceUrl, 'utf8')
+  const sourceRequire = createRequire(sourceUrl)
   const compiled = transformSync(source, { loader: 'ts', format: 'cjs' }).code
   const mod = { exports: {} as Record<string, (...args: any[]) => any> }
   new Function('require', 'module', 'exports', compiled)((id: string) => {
     for (const [suffix, value] of Object.entries(mocks)) if (id.endsWith(suffix)) return value
-    return require(id)
+    return sourceRequire(id)
   }, mod, mod.exports)
   return mod.exports
 }

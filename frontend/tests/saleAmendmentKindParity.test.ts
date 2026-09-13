@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import ts from 'typescript'
 
 // The transport owns the shared amendment request shape. The modal still has
 // a compatible local construction shape, while Sales imports the transport
@@ -35,13 +36,19 @@ const sources: Record<string, string> = {
 }
 
 function amendmentKinds(source: string, where: string): string[] {
-  const match = /interface SaleAmendmentRequest \{\r?\n\s*kind: ([^\r\n]+)/.exec(source)
-  assert.ok(match, `${where} should declare interface SaleAmendmentRequest with a kind union`)
-  return (match as RegExpExecArray)[1]
-    .split('|')
-    .map((part) => part.trim().replace(/^'|'$/g, ''))
-    .filter(Boolean)
-    .sort()
+  const file = ts.createSourceFile(where, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  const declaration = file.statements.find((node): node is ts.InterfaceDeclaration => (
+    ts.isInterfaceDeclaration(node) && node.name.text === 'SaleAmendmentRequest'
+  ))
+  assert.ok(declaration, `${where} should declare interface SaleAmendmentRequest`)
+  const kind = declaration.members.find((member): member is ts.PropertySignature => (
+    ts.isPropertySignature(member) && ts.isIdentifier(member.name) && member.name.text === 'kind'
+  ))
+  assert.ok(kind?.type && ts.isUnionTypeNode(kind.type), `${where} should declare SaleAmendmentRequest.kind as a union`)
+  return kind.type.types.map((node) => {
+    assert.ok(ts.isLiteralTypeNode(node) && ts.isStringLiteral(node.literal), `${where} amendment kinds must be string literals`)
+    return node.literal.text
+  }).sort()
 }
 
 runTest('every SaleAmendmentRequest declaration knows the same amendment kinds', () => {
