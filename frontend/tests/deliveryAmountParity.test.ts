@@ -18,6 +18,7 @@
 // Run: node tests/deliveryAmountParity.test.ts
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import ts from 'typescript'
 import {
   DELIVERY_AMOUNT_ERROR_KEYS,
   MAX_DELIVERY_AMOUNT_USD,
@@ -44,24 +45,25 @@ const read = (relative: string): string =>
 const workerSource = read('../../cloudflare/src/lib/deliveryAmounts.ts')
 const browserSource = read('../src/utils/deliveryAmounts.ts')
 
-// The Worker copy, evaluated for real. Both files are plain functions with no
-// imports, so stripping the type annotations is enough to run one.
-const asRunnable = workerSource
-  .replace(/export type [\s\S]*?\n\n/g, '')
-  .replace(/: DeliveryAmountResult/g, '')
-  .replace(/: DeliveryAmountError/g, '')
-  .replace(/: Record<DeliveryAmountError, string>/g, '')
-  .replace(/: number \| null/g, '')
-  .replace(/: boolean/g, '')
-  .replace(/: string/g, '')
-  .replace(/\((\w+): unknown, (\w+): unknown\)/g, '($1, $2)')
-  .replace(/\((\w+): unknown\)/g, '($1)')
-  .replace(/export (function|const)/g, '$1')
-const worker = new Function(`${asRunnable}
-return { parseDeliveryAmountUsd, deliveryAmountCents, deliveryAmountChanged, MAX_DELIVERY_AMOUNT_USD, DELIVERY_AMOUNT_ERROR_MESSAGES }`)() as {
-  parseDeliveryAmountUsd: (raw: unknown) => { ok: boolean; usd?: number; code?: string }
+// Execute the actual Worker module and its own actual portable kernel. No
+// handwritten replacement math or frontend dependency stands in for either.
+function loadActualWorker(source: string, dependencies: Record<string, unknown> = {}): unknown {
+  const output = ts.transpileModule(source, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText
+  const module = { exports: {} }
+  const requireActual = (id: string): unknown => {
+    if (!Object.prototype.hasOwnProperty.call(dependencies, id)) throw new Error(`Unmapped Worker dependency: ${id}`)
+    return dependencies[id]
+  }
+  new Function('module', 'exports', 'require', output)(module, module.exports, requireActual)
+  return module.exports
+}
+const workerKernel = loadActualWorker(read('../../cloudflare/src/lib/moneyPrecision.ts'))
+const worker = loadActualWorker(workerSource, { './moneyPrecision': workerKernel }) as {
+  parseDeliveryAmountUsd: (raw: unknown, version?: 0 | 1) => { ok: boolean; usd?: number; code?: string }
   deliveryAmountCents: (value: unknown) => number | null
-  deliveryAmountChanged: (before: unknown, after: unknown) => boolean
+  deliveryAmountChanged: (before: unknown, after: unknown, version?: 0 | 1) => boolean
   MAX_DELIVERY_AMOUNT_USD: number
   DELIVERY_AMOUNT_ERROR_MESSAGES: Record<string, string>
 }
@@ -102,6 +104,35 @@ runTest('both copies agree on what counts as a change worth recording', () => {
 
 runTest('the ceiling is one number, not two', () => {
   assert.equal(MAX_DELIVERY_AMOUNT_USD, worker.MAX_DELIVERY_AMOUNT_USD)
+})
+
+runTest('explicit v1 matches both actual modules and leaves the default legacy policy unchanged', () => {
+  const inputs = [...INPUTS, '1.23455', '0.00005', '-0.00004', '0x10', '1e-25', '1.23456']
+  for (const input of inputs) {
+    assert.deepEqual(parseDeliveryAmountUsd(input, 0), parseDeliveryAmountUsd(input))
+    assert.deepEqual(worker.parseDeliveryAmountUsd(input, 0), worker.parseDeliveryAmountUsd(input))
+    assert.deepEqual(parseDeliveryAmountUsd(input, 1), worker.parseDeliveryAmountUsd(input, 1), String(input))
+  }
+  for (const before of inputs) for (const after of inputs) {
+    assert.equal(deliveryAmountChanged(before, after, 1), worker.deliveryAmountChanged(before, after, 1), `${String(before)} -> ${String(after)}`)
+  }
+  for (const parse of [parseDeliveryAmountUsd, worker.parseDeliveryAmountUsd]) {
+    assert.deepEqual(parse('1.23455', 1), { ok: true, usd: 1.2346 })
+    assert.deepEqual(parse('0.00005', 1), { ok: true, usd: 0.0001 })
+    assert.deepEqual(parse('-0.00004', 1), { ok: false, code: 'negative' })
+    assert.deepEqual(parse('0x10', 1), { ok: false, code: 'not_a_number' })
+    assert.deepEqual(parse('1e-25', 1), { ok: false, code: 'not_a_number' })
+    assert.deepEqual(parse('1000000.00001', 1), { ok: false, code: 'too_large' })
+    assert.deepEqual(parse('', 1), { ok: false, code: 'blank' })
+    assert.deepEqual(parse('0', 1), { ok: true, usd: 0 })
+  }
+  for (const changed of [deliveryAmountChanged, worker.deliveryAmountChanged]) {
+    assert.equal(changed(1.2301, 1.2349, 1), true)
+    assert.equal(changed(1.23456, 1.2346, 1), true, 'explicit historical correction must not normalize the before image')
+    assert.equal(changed(1.2346, 1.2346, 1), false)
+    assert.equal(changed(null, 0, 1), true)
+    assert.equal(changed(0, null, 1), true)
+  }
 })
 
 // The behaviour cases that actually separate a correct rule from a plausible
@@ -234,6 +265,8 @@ runTest('the two copies of the rule are the same text, not merely the same answe
     assert.ok(start > 0 && end > start, 'could not locate the shared core of the rule')
     const tail = source.slice(end)
     return (source.slice(start, end) + tail.slice(0, tail.indexOf('\n}') + 2))
+      // The package compilers require different suffix spelling, not different math.
+      .replace(/from '\.\/moneyPrecision\.ts'/g, "from './moneyPrecision'")
       .replace(/\/\*[\s\S]*?\*\//g, '')
       .replace(/\/\/[^\n]*/g, '')
       .replace(/\s+/g, ' ')
