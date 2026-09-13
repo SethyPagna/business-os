@@ -16,6 +16,24 @@ const MAX_MONEY = 100_000_000_000
 const moneyNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= MAX_MONEY
 const nonnegativeMoney = (value: unknown): value is number => moneyNumber(value) && value >= 0
 const plainRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
+/** Header evidence is presence-based, not proof that historical items captured
+ * promotion provenance. Shared by canonical receipt validation and display. */
+export function savedSaleRounding(value: { calculated_total_usd?: unknown; rounding_adjustment_usd?: unknown; total_usd?: unknown; money_precision_version?: unknown }): { calculatedTotalUsd: number | null; roundingAdjustmentUsd: number } {
+  const raw = value.calculated_total_usd, adjustment = value.rounding_adjustment_usd, total = value.total_usd
+  if (raw === undefined || raw === null) {
+    if (value.money_precision_version === 1 || (adjustment != null && adjustment !== 0)) throw new SaleMoneyUnavailableError()
+    return { calculatedTotalUsd: null, roundingAdjustmentUsd: 0 }
+  }
+  if (!nonnegativeMoney(raw) || !moneyNumber(adjustment) || !nonnegativeMoney(total)
+    || roundMoney4(raw) !== raw || roundMoney4(adjustment) !== adjustment
+    || roundMoney2(raw) !== total || subtractMoney4(total, raw) !== adjustment) throw new SaleMoneyUnavailableError()
+  return { calculatedTotalUsd: raw, roundingAdjustmentUsd: adjustment }
+}
+export function saleUsesSavedExchangeRate(value: Parameters<typeof savedSaleRounding>[0] | null | undefined): boolean {
+  if (!value) return false
+  if (value.money_precision_version === 1) return true
+  return savedSaleRounding(value).calculatedTotalUsd !== null
+}
 /** Read only from an authenticated canonical sale response. These bindings
  * are row-specific server evidence, never client mutation intent or aliases. */
 export function serverPricingIdentityBindings(value: unknown): CapturedProductIdentityBinding[] {
@@ -25,11 +43,11 @@ export function serverPricingIdentityBindings(value: unknown): CapturedProductId
     || Object.keys(row).length !== keys.length || keys.some(key => !Number.isSafeInteger(row[key]) || Number(row[key]) <= 0))) throw new SaleMoneyUnavailableError()
   return value as CapturedProductIdentityBinding[]
 }
-function validSaleLines(value: unknown): value is Record<string, unknown>[] {
+function validSaleLines(value: unknown, historical = false): value is Record<string, unknown>[] {
   return Array.isArray(value) && value.length > 0 && value.length <= 10_000 && value.every(line => plainRecord(line)
     && typeof line.quantity === 'number' && Number.isFinite(line.quantity) && line.quantity > 0 && line.quantity <= MAX_MONEY
-    && nonnegativeMoney(line.applied_price_usd ?? line.price_usd)
-    && (line.total_usd === undefined || nonnegativeMoney(line.total_usd)))
+    && (historical && line.applied_price_usd === null || nonnegativeMoney(line.applied_price_usd ?? line.price_usd))
+    && (line.total_usd === undefined || historical && line.total_usd === null || nonnegativeMoney(line.total_usd)))
 }
 
 /** A retry returns the saved wire body, including legacy bodies, byte-for-byte
@@ -100,10 +118,25 @@ export function canonicalSaleReceipt(value: unknown): Record<string, unknown> {
   const required = ['total_usd', 'subtotal_usd', 'discount_usd', 'membership_discount_usd', 'tax_usd', 'exchange_rate', 'amount_paid_usd', 'amount_paid_khr']
   if (required.some(key => !nonnegativeMoney(fields[key])) || !Number.isSafeInteger(source.id) || Number(source.id) <= 0 || Number(fields.exchange_rate) <= 0) throw new SaleMoneyUnavailableError()
   const items = typeof fields.items === 'string' ? (() => { try { return JSON.parse(fields.items as string) } catch { return null } })() : fields.items
-  if (!validSaleLines(items)) throw new SaleMoneyUnavailableError()
   const version = fields.money_precision_version ?? 0
   if (version !== 0 && version !== 1) throw new SaleMoneyUnavailableError()
-  if (version === 0 && ((fields.calculated_total_usd !== undefined && fields.calculated_total_usd !== null) || (fields.rounding_adjustment_usd !== undefined && fields.rounding_adjustment_usd !== null && fields.rounding_adjustment_usd !== 0))) throw new SaleMoneyUnavailableError()
+  if (!validSaleLines(items, version === 0)) throw new SaleMoneyUnavailableError()
+  const hasCalculatedTotal = fields.calculated_total_usd !== undefined && fields.calculated_total_usd !== null
+  // Financial rounding evidence and captured product-pricing provenance are
+  // independent. A reviewed historical edit can record the former without
+  // inventing the latter or rewriting untouched historical line operands.
+  savedSaleRounding({ ...fields, money_precision_version: version })
+  if (version === 0 && hasCalculatedTotal) {
+    const isDelivery = fields.is_delivery ?? 0, payer = fields.delivery_fee_paid_by ?? 'customer'
+    if (![0, 1, false, true].includes(isDelivery as number | boolean)
+      || (isDelivery && payer !== 'customer' && payer !== 'store')) throw new SaleMoneyUnavailableError()
+    const fee = fields.delivery_fee_usd ?? 0
+    if (!nonnegativeMoney(fee) || sumMoney4([Number(fields.subtotal_usd), -Number(fields.discount_usd),
+      -Number(fields.membership_discount_usd), Number(fields.tax_usd), isDelivery && payer === 'customer' ? fee : 0]) !== fields.calculated_total_usd) throw new SaleMoneyUnavailableError()
+    // Only the edited header payable is newly converted. Old component and
+    // child KHR snapshots remain historical evidence, not repair targets.
+    if (!nonnegativeMoney(fields.total_khr) || multiplyMoney4(Number(fields.total_usd), Number(fields.exchange_rate)) !== fields.total_khr) throw new SaleMoneyUnavailableError()
+  }
   if (version === 1) {
     if (['subtotal_khr', 'discount_khr', 'membership_discount_khr', 'tax_khr', 'total_khr', 'delivery_fee_usd', 'delivery_fee_khr', 'change_usd', 'change_khr'].some(key => !nonnegativeMoney(fields[key]))) throw new SaleMoneyUnavailableError()
     const raw = fields.calculated_total_usd, adjustment = fields.rounding_adjustment_usd, total = Number(fields.total_usd)
@@ -158,5 +191,5 @@ export function canonicalSaleReceipt(value: unknown): Record<string, unknown> {
   }
   // Do not synthesize a raw total for legacy receipts, including old retries.
   return JSON.parse(JSON.stringify({ ...source, ...fields, items, money_precision_version: version,
-    ...(version === 0 ? { calculated_total_usd: null, rounding_adjustment_usd: 0 } : {}) })) as Record<string, unknown>
+    ...(version === 0 && !hasCalculatedTotal ? { calculated_total_usd: null, rounding_adjustment_usd: 0 } : {}) })) as Record<string, unknown>
 }

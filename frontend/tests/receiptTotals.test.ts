@@ -21,6 +21,16 @@ import assert from 'node:assert/strict'
 import { receiptTotalsFigures, receiptTotalsFootingErrorUsd } from '../src/utils/receiptTotals.ts'
 
 const RATE = 4100
+const historicalEdited = { money_precision_version: 0, subtotal_usd: 1.2345, discount_usd: 0, membership_discount_usd: 0, tax_usd: 0,
+  total_usd: 1.23, calculated_total_usd: 1.2345, rounding_adjustment_usd: -.0045, exchange_rate: 4020, items: [] }
+const historicalFigures = receiptTotalsFigures(historicalEdited)
+assert.equal(historicalFigures.moneyPrecisionVersion, 0)
+assert.equal(historicalFigures.calculatedTotalUsd, 1.2345)
+assert.equal(historicalFigures.roundingAdjustmentUsd, -.0045)
+assert.equal(receiptTotalsFootingErrorUsd(historicalFigures), 0)
+assert.equal(receiptTotalsFigures({ ...historicalEdited, calculated_total_usd: null, rounding_adjustment_usd: 0 }).calculatedTotalUsd, null)
+assert.throws(() => receiptTotalsFigures({ ...historicalEdited, rounding_adjustment_usd: 0 }))
+assert.equal(receiptTotalsFootingErrorUsd(receiptTotalsFigures({ ...historicalEdited, subtotal_usd: 1.23455, calculated_total_usd: 1.2346, rounding_adjustment_usd: -.0046 })), 0, 'historical raw components round once before payable adjustment; do not fold residual into a second rounding')
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100
 
 // ---------------------------------------------------------------------------

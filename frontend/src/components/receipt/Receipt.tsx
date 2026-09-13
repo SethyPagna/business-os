@@ -451,7 +451,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   // Discount, per the owner’s Sep-4 photo) rather than folded into Subtotal
   // and Discount, so it is named rather than merely included -- and, unlike
   // before the Sep-4 line fix, it can no longer vanish from the totals.
-  const lineSavingsUsd = receiptLineSavingsUsd(items, showItemDiscount, exchangeRate, totals.moneyPrecisionVersion, sale)
+  const lineSavingsUsd = receiptLineSavingsUsd(items.filter(item => totals.moneyPrecisionVersion === 1 || (item.applied_price_usd !== null && item.total_usd !== null)), showItemDiscount, exchangeRate, totals.moneyPrecisionVersion, sale)
   // The lines now print their NET totals, so their sum IS sales.subtotal_usd
   // and Subtotal needs no adjustment. Discount goes back to meaning the
   // order-level cut alone.
@@ -632,6 +632,9 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
           // Every figure on this line comes from the shared calculation, so the
           // printed price and the Discount row can never disagree.
           const figures = receiptLineFigures(item, showItemDiscount, exchangeRate, totals.moneyPrecisionVersion, sale)
+          const unknownRecordedUnit = totals.moneyPrecisionVersion === 0 && item.applied_price_usd === null
+          const unknownRecordedTotal = totals.moneyPrecisionVersion === 0 && item.total_usd === null
+          const unknownRecordedKhr = totals.moneyPrecisionVersion === 0 && item.total_khr === null
           const qty = figures.qty
           // Price column = the SELLING unit price with the unit cut beside it.
           // Total column = what the line actually came to. 28.00 (-7.00) then
@@ -642,7 +645,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
           // Per-line discount = the line's LIST price minus what was actually
           // charged. Both come from receiptLineFigures above; see
           // utils/receiptLineMath for the derivation and its fallbacks.
-          const hasItemDiscount = figures.hasDiscount
+          const hasItemDiscount = !unknownRecordedUnit && !unknownRecordedTotal && figures.hasDiscount
           const unitSavingsUsd = figures.unitSavingsUsd
           // Price-tier tag printed beside the item name (user). Derived from
           // the persisted price_mode, so a wholesale line the cashier left
@@ -692,13 +695,13 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
                     ever broken across lines. */}
                 {showUnitPriceCol ? (
                   <div data-receipt-cell="price" style={itemNumericStyle} className="min-w-0 text-right leading-snug">
-                    <div className="whitespace-nowrap">{fmtUSD(unitUsd)}</div>
+                    <div className="whitespace-nowrap">{unknownRecordedUnit ? '—' : fmtUSD(unitUsd)}</div>
                     {hasItemDiscount ? <div className="whitespace-nowrap font-normal text-red-600">(-{fmtUSD(unitSavingsUsd)})</div> : null}
                   </div>
                 ) : null}
                 <div data-receipt-cell="line-total" style={itemNumericStyle} className="min-w-0 whitespace-nowrap text-right font-semibold leading-snug">
-                  <div>{fmtUSD(lineUsd)}</div>
-                  {tpl.show_item_khr && lineKhr > 0 ? <div className="text-[0.85em] font-normal text-gray-500">{fmtKHR(lineKhr)}</div> : null}
+                  <div>{unknownRecordedTotal ? '—' : fmtUSD(lineUsd)}</div>
+                  {tpl.show_item_khr && !unknownRecordedKhr && !unknownRecordedTotal && lineKhr > 0 ? <div className="text-[0.85em] font-normal text-gray-500">{fmtKHR(lineKhr)}</div> : null}
                 </div>
               </div>
               {tpl.item_separator && index < items.length - 1 ? <div aria-hidden="true" className="mt-1.5 border-t border-gray-200/80" /> : null}
@@ -754,7 +757,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
     ) : null,
     total: (
       <div key="total" className="my-2 border-y-2 border-black py-2">
-        {totals.moneyPrecisionVersion === 1 && totals.roundingAdjustmentUsd !== 0 ? <Row label={t?.('money_rounding_adjustment') || 'Rounding adjustment'} value={`${totals.roundingAdjustmentUsd < 0 ? '-' : '+'}${fmtUSD(Math.abs(roundMoney2(totals.roundingAdjustmentUsd)))}`} /> : null}
+        {totals.calculatedTotalUsd !== null && totals.roundingAdjustmentUsd !== 0 ? <Row label={t?.('money_rounding_adjustment') || 'Rounding adjustment'} value={`${totals.roundingAdjustmentUsd < 0 ? '-' : '+'}${fmtUSD(Math.abs(roundMoney2(totals.roundingAdjustmentUsd)))}`} /> : null}
         <Row label={labelFor(lang, 'total')} value={fmtUSD(totalUsd)} subValue={tpl.show_total_khr ? fmtKHR(totalKhr) : ''} bold />
       </div>
     ),
