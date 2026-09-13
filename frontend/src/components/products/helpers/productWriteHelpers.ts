@@ -362,7 +362,13 @@ export function buildProductBulkPricingUpdates(form: ProductBulkForm = {}): Prod
   ]) {
     if (!hasBulkFormValue(form[field])) continue
     updates[field] = field.startsWith('purchase_price_')
-      ? normalizeInternalMoney(form[field])
+      // Preserve the editor's decimal source until the server has loaded the
+      // authoritative before-image. Pre-quantizing here turns an unchanged
+      // historical value such as 2.345678 into a destructive 2.3457 update,
+      // and can turn a small raw negative into zero before server validation.
+      // Retain the legacy explicit-null => 0 behavior; normal inputs are the
+      // number/string supplied by the form and remain server-authoritative.
+      ? (form[field] === null ? 0 : form[field])
       : normalizePriceValue(form[field])
   }
   return updates
@@ -450,7 +456,10 @@ export function buildProductBulkPriceAdjustments(
     for (const field of fields) {
       const rawCurrent = toFiniteNumber(product?.[field], 0)
       const current = isPurchasePriceField(field) ? normalizeInternalMoney(rawCurrent) : normalizePriceValue(rawCurrent)
-      if (adjustment.skipZeroPriced && current === 0) continue
+      // "Unpriced" means the stored value is actually zero. A positive
+      // historical value below one four-decimal tick is still priced and must
+      // not disappear merely because its canonical comparison rounds to 0.
+      if (adjustment.skipZeroPriced && rawCurrent === 0) continue
       let next: number
       if (isPurchasePriceField(field)) {
         try {
@@ -467,7 +476,8 @@ export function buildProductBulkPriceAdjustments(
       }
       // Skip a field the adjustment does not actually move -- e.g. a
       // decrease against a price already at 0.
-      if (next === current) continue
+      if (next === current
+        && !(isPurchasePriceField(field) && adjustment.direction === 'decrease' && next === 0 && rawCurrent > 0)) continue
       updates[field] = next
     }
     if (Object.keys(updates).length) results.push({ id, updates })

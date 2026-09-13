@@ -168,6 +168,16 @@ const adjust = (over: Partial<BulkPriceAdjustment>): BulkPriceAdjustment => ({
     [{ id: 13, updates: { purchase_price_usd: 0 } }],
     'a negative result clamps to zero after exact four-decimal cost arithmetic',
   )
+  assert.deepEqual(
+    buildProductBulkPriceAdjustments([{ id: 14, purchase_price_usd: 0.000049 }], adjust({ amount: '.0001', fields: ['purchase_price_usd'], skipZeroPriced: true })),
+    [{ id: 14, updates: { purchase_price_usd: 0.0001 } }],
+    'skip-zero inspects the raw stored value, not its rounded four-decimal comparison value',
+  )
+  assert.deepEqual(
+    buildProductBulkPriceAdjustments([{ id: 15, purchase_price_usd: 0.000049 }], adjust({ direction: 'decrease', amount: '.0001', fields: ['purchase_price_usd'] })),
+    [{ id: 15, updates: { purchase_price_usd: 0 } }],
+    'an explicit decrease clears a positive sub-tick historical value even when both comparison values round to zero',
+  )
   console.log('PASS purchase-cost sub-tick no-op preservation and negative clamp')
 }
 

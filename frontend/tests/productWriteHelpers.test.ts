@@ -470,7 +470,7 @@ assert.deepEqual(
   {
     selling_price_usd: 10.12,
     wholesale_price_khr: 4000.01,
-    purchase_price_usd: 3,
+    purchase_price_usd: '3',
     purchase_price_khr: 0,
   },
   'bulk pricing updates normalize provided price fields and preserve existing null behavior',
@@ -484,10 +484,22 @@ assert.deepEqual(
   }),
   {
     selling_price_usd: 1.24,
-    purchase_price_usd: 1.2346,
-    purchase_price_khr: 4321.1235,
+    purchase_price_usd: '1.23455',
+    purchase_price_khr: '4321.12345',
   },
-  'absolute bulk edits keep selling ceil-cent policy but normalize internal purchase cost to nearest four decimals',
+  'absolute bulk edits keep selling ceil-cent policy but preserve purchase-cost decimal input for authoritative server comparison',
+)
+
+assert.deepEqual(
+  buildProductBulkPricingUpdates({
+    purchase_price_usd: '2.345678',
+    purchase_price_khr: '-0.00004',
+  }),
+  {
+    purchase_price_usd: '2.345678',
+    purchase_price_khr: '-0.00004',
+  },
+  'absolute purchase input is neither canonicalized nor clamped before server validation',
 )
 
 {
