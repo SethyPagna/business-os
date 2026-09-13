@@ -37,8 +37,12 @@ const moneyPath = path.join(tmpDir, 'moneyPrecision.ts')
 const reportMoneyPath = path.join(tmpDir, 'reportMoneyPrecision.ts')
 const customerReturnPath = path.join(tmpDir, 'customerReturnEntitlement.ts')
 const refundPrecisionPath = path.join(tmpDir, 'refundMoneyPrecision.ts')
+const saleMoneyPath = path.join(tmpDir, 'saleMoneyPrecision.ts')
 fs.writeFileSync(moneyPath, fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'moneyPrecision.ts'), 'utf8'))
 fs.writeFileSync(reportMoneyPath, fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'reportMoneyPrecision.ts'), 'utf8'))
+// salesAnalytics.ts (cc8b1e8d) recognizes reviewed legacy sale rounding through the
+// real sale money contract; it depends only on moneyPrecision, copied above.
+fs.writeFileSync(saleMoneyPath, fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'saleMoneyPrecision.ts'), 'utf8'))
 // This legacy formula harness does not invoke the scalar snapshot reader. Give
 // its newly imported return helper a fail-closed compile stub; the native
 // reader test loads and exercises the real helper and snapshots end to end.
@@ -51,7 +55,7 @@ fs.writeFileSync(refundPrecisionPath, `
 export function validateRefundMoneySnapshot(): never { throw new Error('reader_not_available_in_formula_harness') }
 `)
 const tscBin = path.join(__dirname, '..', 'node_modules', 'typescript', 'bin', 'tsc')
-execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath} ${winPath} ${moneyPath} ${reportMoneyPath} ${customerReturnPath} ${refundPrecisionPath}`, {
+execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath} ${winPath} ${moneyPath} ${reportMoneyPath} ${customerReturnPath} ${refundPrecisionPath} ${saleMoneyPath}`, {
   cwd: tmpDir,
   stdio: 'inherit',
 })

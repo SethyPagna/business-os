@@ -50,7 +50,10 @@ async function run() {
   const retry = await h.postSale(f.route,{client_request_id:body.client_request_id})
   assert.equal(retry.status,200); assert.equal(retry.body.duplicate,true)
   assert.deepEqual(h.creationState(f.raw),before)
-  const legacy = await h.postSale(f.route,h.request('unreceipted-legacy'))
+  // The shared harness request() now carries money_precision_version:1, so the
+  // legacy-client case must send the request without it.
+  const legacyBody = h.request('unreceipted-legacy'); delete legacyBody.money_precision_version
+  const legacy = await h.postSale(f.route,legacyBody)
   assert.equal(legacy.status,409); assert.equal(legacy.body.code,'money_precision_review_needed')
   assert.deepEqual(h.creationState(f.raw),before)
   const recovery = async () => {
