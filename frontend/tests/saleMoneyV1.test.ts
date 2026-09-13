@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import { buildSync } from 'esbuild'
+import { fileURLToPath } from 'node:url'
 import { saleLineEditorResult } from '../src/utils/saleLineEditor.ts'
 import { applyManualDiscount } from '../src/components/pos/posCore.ts'
 import { receiptTotalsFigures, receiptTotalsFootingErrorUsd } from '../src/utils/receiptTotals.ts'
@@ -80,6 +82,24 @@ assert.throws(() => canonicalSaleReceipt({ ...saved, change_usd: 999 }), SaleMon
 assert.throws(() => canonicalSaleReceipt({ ...saved, change_is_actual: 0, change_usd: 999 }), SaleMoneyUnavailableError, 'computed USD change must match current saved tender')
 const computed = { ...saved, amount_paid_usd: 2.23, change_usd: 1, change_khr: 4100, change_is_actual: 0, change_exchange_rate: null }
 assert.equal(canonicalSaleReceipt(computed).change_khr, 4100, 'computed change may use a distinct rate that was not captured; never substitute sale rate4000')
+assert.equal(canonicalSaleReceipt({ ...computed, change_exchange_rate: 4100 }).change_khr, 4100)
+assert.throws(() => canonicalSaleReceipt({ ...computed, change_exchange_rate: 4000 }), SaleMoneyUnavailableError, 'captured computed change rate proves KHR independently')
+for (const invalidRate of [0, -1, '', '4100', NaN]) assert.throws(() => canonicalSaleReceipt({ ...computed, change_exchange_rate: invalidRate }), SaleMoneyUnavailableError)
+// Execute the actual native backend helper, not a copied denomination formula.
+const nativeModule = { exports: {} as Record<string, (...args: any[]) => any> }
+const nativeCode = buildSync({ entryPoints: [fileURLToPath(new URL('../../cloudflare/src/lib/saleTotals.ts', import.meta.url))], bundle: true, platform: 'node', format: 'cjs', write: false }).outputFiles[0].text
+new Function('module', 'exports', nativeCode)(nativeModule, nativeModule.exports)
+const nativeBoundary = nativeModule.exports.computeSaleTotals({ subtotalUsd: 1, discountUsd: 0, membershipDiscountUsd: 0, taxUsd: 0, isDelivery: false, deliveryFeeUsd: 0, deliveryFeePaidBy: 'customer', exchangeRate: 4020, changeExchangeRate: 4020, rawAmountPaidUsd: 1, rawAmountPaidKhr: 20 })
+assert.equal(nativeBoundary.changeUsd, 0)
+assert.equal(nativeBoundary.changeKhr, 20)
+const boundaryReceipt = { ...saved, subtotal_usd: 1, subtotal_khr: 4020, total_usd: 1, total_khr: 4020, calculated_total_usd: 1, rounding_adjustment_usd: 0, exchange_rate: 4020, amount_paid_usd: 1, amount_paid_khr: 20, change_usd: nativeBoundary.changeUsd, change_khr: nativeBoundary.changeKhr, change_is_actual: 0, change_exchange_rate: 4020, items: [{ quantity: 1, applied_price_usd: 1, total_usd: 1 }] }
+assert.equal(canonicalSaleReceipt(boundaryReceipt).change_khr, 20, '20/4020 must not round to .005 before the cent boundary')
+assert.equal(canonicalSaleReceipt({ ...boundaryReceipt, change_exchange_rate: null }).change_usd, 0, 'missing historical rate retains exact USD proof without invented KHR proof')
+assert.throws(() => canonicalSaleReceipt({ ...boundaryReceipt, change_usd: 0.01 }), SaleMoneyUnavailableError)
+assert.throws(() => canonicalSaleReceipt({ ...boundaryReceipt, change_khr: 21 }), SaleMoneyUnavailableError)
+assert.equal(canonicalSaleReceipt({ ...boundaryReceipt, amount_paid_khr: 21, change_usd: 0.01, change_khr: 21 }).change_usd, 0.01, 'opposite side of the half-cent boundary')
+assert.equal(canonicalSaleReceipt({ ...boundaryReceipt, exchange_rate: 1_000_000, subtotal_khr: 1_000_000, total_khr: 1_000_000, amount_paid_khr: 1, change_khr: 1, change_exchange_rate: null }).change_khr, 1, 'sub-four-decimal surplus remains positive without fabricating its missing change rate')
+assert.throws(() => canonicalSaleReceipt({ ...boundaryReceipt, amount_paid_khr: 0, change_exchange_rate: null }), SaleMoneyUnavailableError, 'zero surplus cannot have nonzero computed KHR even without a saved change rate')
 const historicalSplit = { ...saved, change_is_actual: 1, change_exchange_rate: 4000, change_usd: 0.5, change_khr: 2000 }
 assert.equal(canonicalSaleReceipt(historicalSplit).change_khr, 2000, 'captured actual split change survives subsequent payment/basket edits')
 assert.equal(canonicalSaleReceipt({ ...historicalSplit, change_usd: 999 }).change_usd, 999, 'current basket cannot disprove a recorded historical change event without its original event basis')
