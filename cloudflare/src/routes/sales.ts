@@ -129,7 +129,7 @@ import {
 } from '../lib/saleTransitions'
 import { buildLikeAliasClause, tokenizeSearchTermGroups, normalizeSearchText } from '../lib/searchMatch'
 import { canonicalSaleItemMoney, computeSaleTotals, resolveChangeExchangeRate, round2, newSaleMoney4, assertCanonicalSaleChildren } from '../lib/saleTotals'
-import { roundMoney4, multiplyMoney4, divideMoney4, sumMoney4, subtractMoney4, sellingPriceCeilCent, MoneyPrecisionError } from '../lib/moneyPrecision'
+import { roundMoney4, multiplyMoney4, divideMoney4, sumMoney4, subtractMoney4, subtractDecimalSum, sellingPriceCeilCent, MoneyPrecisionError } from '../lib/moneyPrecision'
 import { canonicalMoney4, SaleMoneyContractError } from '../lib/saleMoneyPrecision'
 import { financialCalculationValue } from '../lib/financialPrecision'
 import { planNativeSaleChange, NativeSaleChangeValidationError } from '../lib/nativeSaleChange'
@@ -4227,7 +4227,9 @@ app.post('/:id/amendments', async (c) => {
     const currentQuantity=Number(line.quantity)
     const enteredQuantity=body.quantity===undefined?currentQuantity:Number(body.quantity)
     if (kind!=='line_updated' && (!Number.isFinite(enteredQuantity)||enteredQuantity<=0)) return c.json({error:'Enter a positive quantity change.'},400)
-    const nextQty=kind==='line_quantity_increased'?currentQuantity+enteredQuantity:kind==='line_quantity_decreased'?currentQuantity-enteredQuantity:enteredQuantity
+    const exactNextQuantity=kind==='line_quantity_increased'?subtractDecimalSum(currentQuantity,[-enteredQuantity]):kind==='line_quantity_decreased'?subtractDecimalSum(currentQuantity,[enteredQuantity]):String(enteredQuantity)
+    const nextQty=Number(exactNextQuantity)
+    if (subtractDecimalSum(nextQty,[exactNextQuantity])!=='0') throw new SaleItemPricingError()
     if (!Number.isFinite(nextQty) || nextQty<=0) return c.json({error:'Use Remove when a line should be taken off the sale.'},400)
     const quantityChanged=nextQty!==currentQuantity
     quantities[target.line_key]=nextQty
@@ -4252,7 +4254,9 @@ app.post('/:id/amendments', async (c) => {
     const workingLine = { ...line, applied_price_usd: nextPrice }
     let quantityPlan: AmendmentPlan | null = null
     if (quantityChanged) {
-      const quantityDelta = nextQty - currentQuantity
+      const exactDelta=subtractDecimalSum(nextQty,[currentQuantity])
+      const quantityDelta = Number(exactDelta)
+      if (subtractDecimalSum(quantityDelta,[exactDelta])!=='0') throw new SaleItemPricingError()
       if (quantityDelta > 0) {
         const lots = line.branch_id
           ? (await readFifoLotAvailabilityForCart(db, [{ productId: Number(line.product_id), branchId: line.branch_id }])).get(`${line.product_id}:${line.branch_id}`) || []

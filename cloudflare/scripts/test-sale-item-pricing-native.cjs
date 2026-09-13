@@ -220,6 +220,28 @@ async function actualRoute() {
   const refused=await h.app.request(`/${saved.body.sale.id}/amendments`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(conflictingReplacement)},{DB:f.route},h.executionCtx)
   assert.equal(refused.status,409,JSON.stringify(await refused.json()))
   assert.deepEqual(h.creationState(f.raw),replacementState,'cost race cannot partially remove the old line or change stock')
+  for(const [kind,quantity,total] of [['line_updated',0.1,1],['line_quantity_increased',0.2,3]]) {
+    const payload={kind,quantity,money_precision_version:1,client_request_id:'fractional-'+kind,expected_exchange_rate:4000,sale_item_id:replaced.sale.items[0].id,
+      pricing_quote:{gross_usd:total,product_discount_usd:0,manual_discount_usd:0,total_usd:total,total_khr:total*4000}}
+    const response=await h.app.request(`/${saved.body.sale.id}/amendments`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)},{DB:f.route},h.executionCtx)
+    const value=await response.json();assert.equal(response.status,200,JSON.stringify(value))
+    assert.equal(value.sale.items[0].quantity,total/10)
+    p.validateCapturedSaleBasket(value.sale.items,value.sale)
+  }
+  const fractionalState=h.creationState(f.raw)
+  const tinyResponse=await h.app.request(`/${saved.body.sale.id}/amendments`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({kind:'line_quantity_increased',quantity:1e-20,money_precision_version:1,client_request_id:'tiny-positive',expected_exchange_rate:4000,sale_item_id:replaced.sale.items[0].id})},{DB:f.route},h.executionCtx)
+  assert.equal(tinyResponse.status,409)
+  assert.deepEqual(h.creationState(f.raw),fractionalState,'positive quantity cannot disappear on decimal-to-Number conversion')
+  const coupled=setup()
+  coupled.raw.prepare('DELETE FROM promotion_rules').run()
+  coupled.raw.prepare("INSERT INTO promotion_rules(id,rule_type,min_quantity,percent_off,product_ids,scope_type,is_active) VALUES(2,'next_item',1,100,'[10]','products',1)").run()
+  const coupledCreate=await h.postSale(coupled.route,{...request(),client_request_id:'coupled-create',amount_paid_usd:10,items:['a','b'].map(key=>({product_id:10,quantity:1,branch_id:1,batch_id:500,client_line_key:key,pricing_source:'promotion',
+    pricing_quote:{gross_usd:10,product_discount_usd:key==='a'?10:0,manual_discount_usd:0,total_usd:key==='a'?0:10,total_khr:key==='a'?0:40000}}))})
+  assert.equal(coupledCreate.status,200,JSON.stringify(coupledCreate.body))
+  const removeSibling=await h.app.request(`/${coupledCreate.body.sale.id}/amendments`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({kind:'line_removed',money_precision_version:1,client_request_id:'remove-pool-sibling',expected_exchange_rate:4000,sale_item_id:coupledCreate.body.sale.items[1].id})},{DB:coupled.route},h.executionCtx)
+  const siblingResult=await removeSibling.json();assert.equal(removeSibling.status,200,JSON.stringify(siblingResult))
+  assert.equal(siblingResult.sale.items[0].total_usd,10,'removing qualifying sibling re-evaluates surviving free line')
+  p.validateCapturedSaleBasket(siblingResult.sale.items,siblingResult.sale)
   const legacyFingerprint={sale:{id:1},lines:[{id:1,total_usd:1}],amendmentHeadId:0}
   const actualFingerprint={sale:{id:1,money_precision_version:0,calculated_total_usd:null,rounding_adjustment_usd:0},lines:[{id:1,total_usd:1,pricing_snapshot_json:null}],amendmentHeadId:0}
   const matches=h.load('lib/undoAppliers.ts').sameSaleStateFingerprint
@@ -228,7 +250,7 @@ async function actualRoute() {
   assert.equal(matches(JSON.stringify(actualFingerprint),JSON.stringify(legacyFingerprint)),false)
   actualFingerprint.lines[0].pricing_snapshot_json=null; actualFingerprint.lines[0].total_usd=2
   assert.equal(matches(JSON.stringify(actualFingerprint),JSON.stringify(legacyFingerprint)),false)
-  f.raw.db.close(); race.raw.db.close()
+  f.raw.db.close(); race.raw.db.close(); coupled.raw.db.close()
   console.log('PASS actual Hono create exact29 snapshot, pre-policy retry, stale quote and concurrent rule rollback')
 }
 actualRoute().catch(error=>{console.error(error);process.exitCode=1})
