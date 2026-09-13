@@ -13,7 +13,7 @@ import { useModalClose } from '../shared/modalCloseContext.ts'
 import AppSelect from '../shared/AppSelect.tsx'
 import SearchInput from '../shared/SearchInput.tsx'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
-import { normalizePriceValue } from '../../utils/pricing.ts'
+import { nativeChangeAmounts, roundMoney2 } from '../../utils/moneyPrecision.ts'
 import {
   discardPendingFeeCreate,
   getFeeLabels,
@@ -141,6 +141,24 @@ export function feeToFormState(fee?: FeeRecord | null): FeeFormState {
   }
 }
 
+/** Physical expense denominations, not selling-price or internal cost policy.
+ * Unchanged historical fields are omitted from PUT, whose absence semantics
+ * preserve their stored precision. Frozen create retries never enter here. */
+export function feeFormMoney(form: Pick<FeeFormState, 'amount_usd' | 'amount_khr'>, fee?: Pick<FeeRecord, 'amount_usd' | 'amount_khr'> | null) {
+  try {
+    const usd = form.amount_usd.trim() || '0', khr = form.amount_khr.trim() || '0'
+    if (usd.startsWith('-') || khr.startsWith('-')) throw new Error('negative_amount')
+    const roundedUsd = roundMoney2(usd)
+    const roundedKhr = nativeChangeAmounts({ paidUsd: 0, paidKhr: khr, payableUsd: 0, exchangeRate: 1, changeExchangeRate: 1 }).changeKhr
+    const unchangedUsd = !!fee && Number(usd) === fee.amount_usd
+    const unchangedKhr = !!fee && Number(khr) === fee.amount_khr
+    return { valid: true, amountUsd: unchangedUsd ? fee!.amount_usd : roundedUsd,
+      amountKhr: unchangedKhr ? fee!.amount_khr : roundedKhr, unchangedUsd, unchangedKhr }
+  } catch {
+    return { valid: false, amountUsd: 0, amountKhr: 0, unchangedUsd: false, unchangedKhr: false }
+  }
+}
+
 type FeeFormProps = {
   fee?: FeeRecord | null
   actorId?: number | string | null
@@ -150,8 +168,8 @@ type FeeFormProps = {
   onSave: (payload: {
     fee_type: FeeType
     label: string | null
-    amount_usd: number
-    amount_khr: number
+    amount_usd?: number
+    amount_khr?: number
     fee_date: string
     sale_id: number | null
     branch_id: number | null
@@ -367,11 +385,11 @@ export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, o
     setForm((prev) => ({ ...prev, [key]: value }))
   }
 
-  const amountUsd = normalizePriceValue(form.amount_usd, 0)
-  const amountKhr = normalizePriceValue(form.amount_khr, 0)
+  const money = feeFormMoney(form, fee)
+  const { amountUsd, amountKhr } = money
   // At least one currency amount must be a real, positive number -- a
   // fee with both amounts at 0 isn't a meaningful record.
-  const amountsInvalid = amountUsd <= 0 && amountKhr <= 0
+  const amountsInvalid = !money.valid || (amountUsd <= 0 && amountKhr <= 0)
   const dateInvalid = !form.fee_date.trim()
 
   const branchOptions = (() => {
@@ -382,17 +400,17 @@ export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, o
   const handleSave = async () => {
     if (savingRef.current) return
     setTouched(true)
-    if (amountsInvalid || dateInvalid || !form.branch_id.trim()) return
+    if (!pendingCreate && (amountsInvalid || dateInvalid || !form.branch_id.trim())) return
     const saleId = form.sale_id.trim() ? Number(form.sale_id.trim()) : null
     const branchId = form.branch_id.trim() ? Number(form.branch_id.trim()) : null
     try {
       savingRef.current = true
       setSaving(true)
-      await onSave({
+      await onSave(pendingCreate ? pendingCreate.body : {
         fee_type: form.fee_type,
         label: form.label.trim() || null,
-        amount_usd: amountUsd,
-        amount_khr: amountKhr,
+        ...(!money.unchangedUsd ? { amount_usd: amountUsd } : {}),
+        ...(!money.unchangedKhr ? { amount_khr: amountKhr } : {}),
         fee_date: form.fee_date,
         sale_id: Number.isFinite(saleId as number) ? saleId : null,
         branch_id: Number.isFinite(branchId as number) ? branchId : null,
@@ -505,7 +523,7 @@ export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, o
             className="input"
             type="number"
             min="0"
-            step="0.01"
+            step="any"
             inputMode="decimal"
             value={form.amount_usd}
             onChange={(event) => set('amount_usd', event.target.value)}
@@ -522,7 +540,7 @@ export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, o
             className="input"
             type="number"
             min="0"
-            step="1"
+            step="any"
             inputMode="decimal"
             value={form.amount_khr}
             onChange={(event) => set('amount_khr', event.target.value)}
