@@ -5,7 +5,7 @@ import { saleLineEditorResult } from '../src/utils/saleLineEditor.ts'
 import { applyManualDiscount } from '../src/components/pos/posCore.ts'
 import { receiptTotalsFigures, receiptTotalsFootingErrorUsd } from '../src/utils/receiptTotals.ts'
 import { deliveryAmountChanged, parseDeliveryAmountUsd } from '../src/utils/deliveryAmounts.ts'
-import { settlementRounding4, sellingPriceCeilCent, subtractMoney4 } from '../src/utils/moneyPrecision.ts'
+import { settlementRounding4, sellingPriceCeilCent, subtractMoney4, divideMoney4, multiplyMoney4 } from '../src/utils/moneyPrecision.ts'
 import { serializeSaleItemPricing } from '../src/utils/saleItemPricing.ts'
 import { canonicalSaleReceipt, saleMoneyResponseFields, SaleMoneyUnavailableError, frozenSaleCheckoutBody, SaleCheckoutRecoveryRequiredError } from '../src/utils/saleMoneyV1.ts'
 
@@ -16,7 +16,7 @@ const version1 = saleLineEditorResult({ ...line, moneyPrecisionVersion: 1 })
 assert.equal(version1.ok && version1.basePriceUsd, 1.2345, 'derived promotion base is never re-ceiled')
 assert.equal(version1.ok && version1.manualDiscountValue, 12.3456)
 assert.equal(version1.ok && version1.manualDiscountUsd, 0.1524)
-assert.equal(version1.ok && version1.lineTotalUsd, 108.21)
+assert.equal(version1.ok && version1.lineTotalUsd, 108.2094, 'manual percent is rounded once on the original full line, not reconstructed from unit projections')
 const typed = saleLineEditorResult({ ...line, moneyPrecisionVersion: 1, sellingPriceInputUsd: '1.2345' })
 assert.equal(typed.ok && typed.basePriceUsd, 1.24)
 assert.equal(saleLineEditorResult({ ...line, moneyPrecisionVersion: 1, sellingPriceInputUsd: 'invalid' }).ok, false)
@@ -47,7 +47,10 @@ function withPricing(receipt: any): any {
   const allocation = { version: 1 as const, lines: receipt.items.map((item: any, i: number) => ({ line_key: `line-${i}`, amount: item.total_usd })), discount_usd: receipt.discount_usd, membership_discount_usd: receipt.membership_discount_usd, tax_usd: receipt.tax_usd }
   return { ...receipt, items: receipt.items.map((item: any, i: number) => {
     const json = serializeSaleItemPricing(pool, quantities, `line-${i}`, allocation)
-    return { ...item, product_id: i + 1, ...JSON.parse(json).amounts, pricing_snapshot_json: json }
+    const amounts = JSON.parse(json).amounts
+    return { ...item, product_id: i + 1, ...amounts, pricing_snapshot_json: json, price_mode: 'manual', product_discount_type: null, product_discount_label: null, manual_discount_type: 'fixed', manual_discount_value: pool.lines[i].manual.value,
+      product_discount_usd: divideMoney4(amounts.product_discount_usd, item.quantity), product_discount_khr: multiplyMoney4(divideMoney4(amounts.product_discount_usd, item.quantity), receipt.exchange_rate),
+      manual_discount_usd: divideMoney4(amounts.manual_discount_usd, item.quantity), manual_discount_khr: multiplyMoney4(divideMoney4(amounts.manual_discount_usd, item.quantity), receipt.exchange_rate) }
   }) }
 }
 const saved = { id: 17, subtotal_usd: 1.2345, discount_usd: 0, membership_discount_usd: 0, tax_usd: 0, exchange_rate: 4000, amount_paid_usd: 1.23, amount_paid_khr: 0, items: [{ quantity: 1, applied_price_usd: 1.2345, total_usd: 1.2345 }], money_precision_version: 1, calculated_total_usd: 1.2345, rounding_adjustment_usd: -0.0045, total_usd: 1.23, subtotal_khr: 4938, discount_khr: 0, membership_discount_khr: 0, tax_khr: 0, total_khr: 4920, delivery_fee_usd: 0, delivery_fee_khr: 0, change_usd: 0, change_khr: 0 }

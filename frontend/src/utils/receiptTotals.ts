@@ -172,7 +172,7 @@ export function receiptTotalsFigures(
   const discountUsd = num(sale.discount_usd ?? sale.discount)
   const membershipDiscountUsd = num(sale.membership_discount_usd)
   const itemDiscountUsd = money(
-    receiptLineSavingsUsd(parseItems(sale.items), options.showItemDiscount !== false, exchangeRate),
+    receiptLineSavingsUsd(parseItems(sale.items), options.showItemDiscount !== false, exchangeRate, version1 ? 1 : 0),
   )
   const taxUsd = num(sale.tax_usd ?? sale.tax)
 

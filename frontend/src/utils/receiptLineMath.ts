@@ -29,7 +29,17 @@
  * why nothing here touches total_usd or the tax base.
  */
 
+import { capturedDisplayPriceMode, capturedPricingMetadata, parseSaleItemPricing, SaleItemPricingError } from './saleItemPricing.ts'
+import { divideMoney4, multiplyMoney4, sumMoney4 } from './moneyPrecision.ts'
+
 export interface ReceiptLineInput {
+  product_id?: number | string | null
+  pricing_snapshot_json?: string | null
+  total_usd?: number | string | null
+  total_khr?: number | string | null
+  price_mode?: string | null
+  product_discount_type?: string | null
+  product_discount_label?: string | null
   quantity?: number | string | null
   applied_price_usd?: number | string | null
   applied_price_khr?: number | string | null
@@ -50,6 +60,9 @@ const num = (value: unknown): number => {
 }
 
 export interface ReceiptLineFigures {
+  displayPriceMode?: string
+  lineUsd: number
+  lineKhr: number
   qty: number
   chargedUnitUsd: number
   /** What the customer was actually charged in riel, per unit. */
@@ -76,7 +89,28 @@ export function receiptLineFigures(
   item: ReceiptLineInput,
   showItemDiscount: boolean,
   exchangeRate: number,
+  moneyPrecisionVersion: 0 | 1 = 0,
 ): ReceiptLineFigures {
+  if (moneyPrecisionVersion === 1) {
+    const snapshot = parseSaleItemPricing(item.pricing_snapshot_json)
+    if (!snapshot) throw new SaleItemPricingError()
+    const captured = snapshot.pool.lines.find(line => line.line_key === snapshot.line_key)
+    const qty = snapshot.quantities[snapshot.line_key]
+    const bound = (value: unknown, expected: number) => value != null && String(value).trim() !== '' && Number.isFinite(Number(value)) && Number(value) === expected
+    if (!captured || !bound(item.product_id, Number(captured.product.id)) || !bound(item.quantity, qty)
+      || snapshot.pool.exchange_rate !== exchangeRate
+      || !bound(item.total_usd, snapshot.amounts.total_usd) || !bound(item.total_khr, snapshot.amounts.total_khr)
+      || !bound(item.applied_price_usd, snapshot.amounts.applied_price_usd) || !bound(item.applied_price_khr, snapshot.amounts.applied_price_khr)) throw new SaleItemPricingError()
+    const metadata = capturedPricingMetadata(snapshot.pool, snapshot.line_key, snapshot.amounts)
+    if (item.price_mode !== metadata.price_mode || (item.product_discount_type ?? null) !== metadata.product_discount_type || (item.product_discount_label ?? null) !== metadata.product_discount_label) throw new SaleItemPricingError()
+    const savings = sumMoney4([snapshot.amounts.product_discount_usd, snapshot.amounts.manual_discount_usd])
+    const hasDiscount = showItemDiscount && savings > 0
+    const sellingUnitUsd = hasDiscount ? divideMoney4(snapshot.amounts.gross_usd, qty) : snapshot.amounts.applied_price_usd
+    return { qty, displayPriceMode: capturedDisplayPriceMode(snapshot), lineUsd: snapshot.amounts.total_usd, lineKhr: snapshot.amounts.total_khr,
+      chargedUnitUsd: snapshot.amounts.applied_price_usd, chargedUnitKhr: snapshot.amounts.applied_price_khr,
+      sellingUnitUsd, sellingUnitKhr: hasDiscount ? multiplyMoney4(sellingUnitUsd, exchangeRate) : snapshot.amounts.applied_price_khr,
+      hasDiscount, unitSavingsUsd: hasDiscount ? divideMoney4(savings, qty) : 0, savingsUsd: hasDiscount ? savings : 0 }
+  }
   const qty = num(item.quantity) || 1
   const chargedUnitUsd = num(item.applied_price_usd ?? item.price_usd ?? item.price)
   const chargedUnitKhr = num(item.applied_price_khr ?? item.price_khr)
@@ -127,6 +161,8 @@ export function receiptLineFigures(
   const chargedUnitKhrOut = chargedUnitKhr > 0 ? chargedUnitKhr : chargedUnitUsd * exchangeRate
 
   return {
+    lineUsd: chargedUnitUsd * qty,
+    lineKhr: chargedUnitKhrOut * qty,
     qty,
     chargedUnitUsd,
     chargedUnitKhr: chargedUnitKhrOut,
@@ -143,7 +179,9 @@ export function receiptLineSavingsUsd(
   items: ReceiptLineInput[],
   showItemDiscount: boolean,
   exchangeRate: number,
+  moneyPrecisionVersion: 0 | 1 = 0,
 ): number {
+  if (moneyPrecisionVersion === 1) return sumMoney4(items.map(item => receiptLineFigures(item, showItemDiscount, exchangeRate, 1).savingsUsd))
   return items.reduce(
     (sum, item) => sum + receiptLineFigures(item, showItemDiscount, exchangeRate).savingsUsd,
     0,

@@ -15,6 +15,7 @@ export type ManualPricing = { type: 'none' | 'fixed' | 'percent'; value: number 
 export type CapturedPricingLine = {
   line_key: string
   source: PricingSource
+  display_price_mode?: 'selling'|'wholesale'
   product: Record<string, unknown>
   selling_price_input_usd: number | null
   manual: ManualPricing
@@ -60,7 +61,11 @@ export function capturePricingProduct(row: Record<string,unknown>): Record<strin
   return Object.fromEntries(fields.filter(field=>Object.prototype.hasOwnProperty.call(row,field)).map(field=>[field,row[field]]))
 }
 
-function invalid(): never { throw new Error('sale_item_pricing_invalid') }
+export class SaleItemPricingError extends Error {
+  readonly code='sale_item_pricing_invalid'
+  constructor() { super('Captured item pricing needs review.'); this.name='SaleItemPricingError' }
+}
+function invalid(): never { throw new SaleItemPricingError() }
 function key(value: unknown): asserts value is string {
   if (typeof value !== 'string' || !/^[A-Za-z0-9_.:-]{1,200}$/.test(value)) invalid()
 }
@@ -110,6 +115,7 @@ export function evaluateCapturedPricingPool(pool: CapturedPricingPool, quantitie
   const prepared = lines.map(line => {
     key(line.line_key)
     if (seen.has(line.line_key) || !['selling','wholesale','promotion','manual'].includes(line.source)) invalid()
+    if (Object.prototype.hasOwnProperty.call(line,'display_price_mode')&&!['selling','wholesale'].includes(line.display_price_mode as string)) invalid()
     seen.add(line.line_key)
     if (!line.product || typeof line.product !== 'object' || !Number.isSafeInteger(line.product.id) || Number(line.product.id) <= 0) invalid()
     const quantity = quantities[line.line_key]
@@ -216,4 +222,77 @@ export function allocateReceiptLines(context: ReceiptAllocationContext): Map<str
   const taxes=allocateLineMoney4(tax,afterMember)
   return new Map(afterMember.map(line=>[line.line_key,{discount_usd:discounts.get(line.line_key)!,membership_discount_usd:memberships.get(line.line_key)!,
     tax_usd:taxes.get(line.line_key)!,net_entitlement_usd:sumMoney4([line.amount,taxes.get(line.line_key)!])}]))
+}
+
+/** A v1 parent never permits a partial/mixed snapshot cohort. This validates
+ * saved line identity, quantities, pool membership and receipt inputs together,
+ * not merely a self-consistent JSON document detached from its owning row. */
+export function capturedPricingMetadata(pool:CapturedPricingPool,lineKey:string,amounts:ExactLinePricing): {price_mode:PricingSource;product_discount_type:string|null;product_discount_label:string|null} {
+  const capture=pool.lines.find(line=>line.line_key===lineKey)
+  if (!capture) invalid()
+  if (amounts.product_discount_usd===0) return {price_mode:capture.source,product_discount_type:null,product_discount_label:null}
+  if (capture.source!=='promotion') invalid()
+  const rule=amounts.rule_id===null?null:pool.rules.find(rule=>rule.id===amounts.rule_id)
+  if (amounts.rule_id!==null && !rule) invalid()
+  const type=rule?.rule_type ?? (String(capture.product.discount_type||'percent').toLowerCase()==='fixed'?'fixed':'percent')
+  const label=String(rule?.title ?? capture.product.discount_label ?? '').trim() || null
+  return {price_mode:capture.source,product_discount_type:type,product_discount_label:label}
+}
+
+/** A presentation tag is never an input to pricing, discount or pool rules. */
+export function capturedDisplayPriceMode(snapshot:SaleItemPricingSnapshot):PricingSource {
+  const line=snapshot.pool.lines.find(line=>line.line_key===snapshot.line_key)
+  if(!line)invalid()
+  return line.display_price_mode??line.source
+}
+
+export function validateCapturedSaleBasket(lines: readonly Record<string,unknown>[], header: Record<string,unknown>): SaleItemPricingSnapshot[] {
+  if (!lines.length || lines.length>MAX_PRICING_LINES) invalid()
+  const snapshots=lines.map(line=>{
+    const snapshot=parseSaleItemPricing(line.pricing_snapshot_json as string|null)
+    if (!snapshot || snapshot.pool.exchange_rate!==header.exchange_rate) invalid()
+    const capture=snapshot.pool.lines.find(row=>row.line_key===snapshot.line_key)
+    if (!capture || capture.product.id!==line.product_id || snapshot.quantities[snapshot.line_key]!==line.quantity) invalid()
+    for (const [key,value] of Object.entries(capturedPricingMetadata(snapshot.pool,snapshot.line_key,snapshot.amounts)))
+      if ((line[key]??null)!==value) invalid()
+    for (const field of ['total_usd','total_khr','base_price_usd','base_price_khr','applied_price_usd','applied_price_khr'] as const)
+      if (line[field]!==snapshot.amounts[field]) invalid()
+    if ((line.manual_discount_type ?? 'none')!==capture.manual.type || line.manual_discount_value!==capture.manual.value) invalid()
+    for (const [field,amount] of [['product_discount_usd',snapshot.amounts.product_discount_usd],['manual_discount_usd',snapshot.amounts.manual_discount_usd]] as const) {
+      const unit=divideMoney4(amount,Number(line.quantity))
+      if (line[field]!==unit || line[field.replace('_usd','_khr')]!==multiplyMoney4(unit,snapshot.pool.exchange_rate)) invalid()
+    }
+    return snapshot
+  })
+  const byKey=new Map(snapshots.map(snapshot=>[snapshot.line_key,snapshot]))
+  if (byKey.size!==snapshots.length) invalid()
+  const allocation=snapshots[0].allocation_context
+  if (allocation.discount_usd!==header.discount_usd || allocation.membership_discount_usd!==header.membership_discount_usd || allocation.tax_usd!==header.tax_usd
+    || allocation.lines.length!==lines.length) invalid()
+  for (const entry of allocation.lines) if (byKey.get(entry.line_key)?.amounts.total_usd!==entry.amount) invalid()
+  const poolContexts=new Map<string,string>()
+  for (const snapshot of snapshots) {
+    const context=JSON.stringify({pool:snapshot.pool,quantities:snapshot.quantities})
+    if (poolContexts.has(snapshot.pool.pool_key) && poolContexts.get(snapshot.pool.pool_key)!==context) invalid()
+    poolContexts.set(snapshot.pool.pool_key,context)
+    if (JSON.stringify(snapshot.allocation_context)!==JSON.stringify(allocation)) invalid()
+    for (const member of snapshot.pool.lines) {
+      const other=byKey.get(member.line_key)
+      if (!other || JSON.stringify(other.pool)!==JSON.stringify(snapshot.pool) || JSON.stringify(other.quantities)!==JSON.stringify(snapshot.quantities)) invalid()
+    }
+  }
+  if (sumMoney4(snapshots.map(snapshot=>snapshot.amounts.total_usd))!==header.subtotal_usd) invalid()
+  return snapshots
+}
+
+export function materializeCapturedPricingRow(row: Record<string,unknown>, pool: CapturedPricingPool, quantities: Record<string,number>, lineKey:string, allocation:ReceiptAllocationContext): Record<string,unknown> {
+  const json=serializeSaleItemPricing(pool,quantities,lineKey,allocation), snapshot=parseSaleItemPricing(json)!
+  const capture=pool.lines.find(line=>line.line_key===lineKey)!, amounts=snapshot.amounts, quantity=quantities[lineKey]
+  const productDiscount=divideMoney4(amounts.product_discount_usd,quantity), manualDiscount=divideMoney4(amounts.manual_discount_usd,quantity)
+  return {...row,...capturedPricingMetadata(pool,lineKey,amounts),quantity,pricing_snapshot_json:json,
+    applied_price_usd:amounts.applied_price_usd,applied_price_khr:amounts.applied_price_khr,
+    base_price_usd:amounts.base_price_usd,base_price_khr:amounts.base_price_khr,total_usd:amounts.total_usd,total_khr:amounts.total_khr,
+    product_discount_usd:productDiscount,product_discount_khr:multiplyMoney4(productDiscount,pool.exchange_rate),
+    manual_discount_usd:manualDiscount,manual_discount_khr:multiplyMoney4(manualDiscount,pool.exchange_rate),
+    manual_discount_type:capture.manual.type==='none'?null:capture.manual.type,manual_discount_value:capture.manual.value,price_mode:capture.source}
 }

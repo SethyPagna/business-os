@@ -51,6 +51,8 @@ assert.deepEqual([...compare(paired, { b: 1, a: 1 })], [...expected], 'stable ke
 assert.equal(compare(paired, { a: 1, b: 2 }).get('b')!.total_usd, 20)
 const stored = frontend.serializeSaleItemPricing(pool, { a: 3 }, 'a', { version: 1, lines: [{ line_key: 'a', amount: 29 }], discount_usd: 0, membership_discount_usd: 0, tax_usd: 0 })
 const exactReceipt = { id: 1, money_precision_version: 1, exchange_rate: 4000, subtotal_usd: 29, subtotal_khr: 116000, discount_usd: 0, discount_khr: 0, membership_discount_usd: 0, membership_discount_khr: 0, tax_usd: 0, tax_khr: 0, total_usd: 29, total_khr: 116000, calculated_total_usd: 29, rounding_adjustment_usd: 0, delivery_fee_usd: 0, delivery_fee_khr: 0, amount_paid_usd: 29, amount_paid_khr: 0, change_usd: 0, change_khr: 0, items: [{ product_id: 7, quantity: 3, ...JSON.parse(stored).amounts, pricing_snapshot_json: stored }] }
+Object.assign(exactReceipt.items[0], { manual_discount_type: null, manual_discount_value: 0, product_discount_usd: 0.3333, product_discount_khr: 1333.2, manual_discount_usd: 0, manual_discount_khr: 0 })
+Object.assign(exactReceipt.items[0], frontend.capturedPricingMetadata(pool, 'a', JSON.parse(stored).amounts))
 assert.equal(canonicalSaleReceipt(exactReceipt).total_usd, 29, 'canonical receipt accepts exact line29 despite rounded unit9.6667')
 assert.throws(() => canonicalSaleReceipt({ ...exactReceipt, items: [{ ...exactReceipt.items[0], applied_price_usd: 999 }] }), SaleMoneyUnavailableError)
 pool.rules[0].save_usd = 999; pool.lines[0].product.selling_price_usd = 999
