@@ -6559,5 +6559,7 @@
   "sale_line_review_updated_total": "Review the updated total",
   "product_collision_review_title": "Review product identity",
   "product_collision_review_description": "This edit matches another saved product. Review both saved rows and choose the barcode to keep. Your unsaved edits are not applied by the review.",
-  "product_collision_review_unavailable": "No saved conflict group contains both products. Verify their identities before merging."
+  "product_collision_review_unavailable": "No saved conflict group contains both products. Verify their identities before merging.",
+  "sale_recorded_pricing": "Recorded pricing",
+  "sale_recorded_unit_fallback": "Line total derived from the recorded unit price and quantity."
 }
