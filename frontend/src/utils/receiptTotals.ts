@@ -45,7 +45,12 @@ import {
   type ReceiptLineInput,
 } from './receiptLineMath.ts'
 
+import { addMoney4, divideMoney4, roundMoney4, subtractMoney4, sumMoney4 } from './moneyPrecision.ts'
+
 export interface ReceiptTotalsSale extends ReceiptDeliveryInput {
+  money_precision_version?: number | null
+  calculated_total_usd?: number | string | null
+  rounding_adjustment_usd?: number | string | null
   items?: ReceiptLineInput[] | string | null
   exchange_rate?: number | string | null
   subtotal_usd?: number | string | null
@@ -89,6 +94,9 @@ export interface ReceiptTotalsOptions {
 }
 
 export interface ReceiptTotalsFigures {
+  moneyPrecisionVersion: 0 | 1
+  calculatedTotalUsd: number | null
+  roundingAdjustmentUsd: number
   /** The rate the sale was BOOKED at; the basis of every derived riel figure. */
   exchangeRate: number
   /** Sum of the NET line totals -- exactly what `sales.subtotal_usd` holds. */
@@ -156,12 +164,14 @@ export function receiptTotalsFigures(
   sale: ReceiptTotalsSale,
   options: ReceiptTotalsOptions = {},
 ): ReceiptTotalsFigures {
+  const version1 = sale.money_precision_version === 1
+  const money = version1 ? roundMoney4 : round2
   const exchangeRate = num(sale.exchange_rate) || options.fallbackExchangeRate || 4100
 
   const subtotalUsd = num(sale.subtotal_usd ?? sale.subtotal)
   const discountUsd = num(sale.discount_usd ?? sale.discount)
   const membershipDiscountUsd = num(sale.membership_discount_usd)
-  const itemDiscountUsd = round2(
+  const itemDiscountUsd = money(
     receiptLineSavingsUsd(parseItems(sale.items), options.showItemDiscount !== false, exchangeRate),
   )
   const taxUsd = num(sale.tax_usd ?? sale.tax)
@@ -176,10 +186,16 @@ export function receiptTotalsFigures(
   // Riel handed over is money handed over. Converted at the sale's own booked
   // rate -- the same term the Worker's computeSaleTotals uses to decide change,
   // so "still owed" and "change given" cannot disagree about one tender.
-  const paidTotalUsd = round2(paidUsd + (exchangeRate > 0 ? paidKhr / exchangeRate : 0))
-  const outstandingUsd = Math.max(0, round2(totalUsd - paidTotalUsd))
+  const paidTotalUsd = version1
+    ? addMoney4(paidUsd, exchangeRate > 0 ? divideMoney4(paidKhr, exchangeRate) : 0)
+    : round2(paidUsd + (exchangeRate > 0 ? paidKhr / exchangeRate : 0))
+  const outstandingUsd = Math.max(0, version1 ? subtractMoney4(totalUsd, paidTotalUsd) : round2(totalUsd - paidTotalUsd))
 
   return {
+    moneyPrecisionVersion: version1 ? 1 : 0,
+    // Absent legacy raw amounts are unknown, not reconstructed from today's math.
+    calculatedTotalUsd: version1 && sale.calculated_total_usd != null ? num(sale.calculated_total_usd) : null,
+    roundingAdjustmentUsd: version1 ? num(sale.rounding_adjustment_usd) : 0,
     exchangeRate,
     subtotalUsd,
     subtotalKhr: num(sale.subtotal_khr) || Math.round(subtotalUsd * exchangeRate),
@@ -189,7 +205,7 @@ export function receiptTotalsFigures(
     discountKhr: num(sale.discount_khr) || Math.round(discountUsd * exchangeRate),
     membershipDiscountUsd,
     membershipDiscountKhr: num(sale.membership_discount_khr) || Math.round(membershipDiscountUsd * exchangeRate),
-    totalDiscountUsd: round2(itemDiscountUsd + discountUsd + membershipDiscountUsd),
+    totalDiscountUsd: version1 ? sumMoney4([itemDiscountUsd, discountUsd, membershipDiscountUsd]) : round2(itemDiscountUsd + discountUsd + membershipDiscountUsd),
     taxUsd,
     taxKhr: num(sale.tax_khr) || Math.round(taxUsd * exchangeRate),
     delivery: receiptDeliveryFigures(sale, exchangeRate),
@@ -197,7 +213,7 @@ export function receiptTotalsFigures(
     totalKhr,
     refundUsd,
     refundKhr,
-    netTotalUsd: round2(totalUsd - refundUsd),
+    netTotalUsd: version1 ? subtractMoney4(totalUsd, refundUsd) : round2(totalUsd - refundUsd),
     netTotalKhr: Math.round(totalKhr - refundKhr),
     paidUsd,
     paidKhr,
@@ -219,6 +235,10 @@ export function receiptTotalsFigures(
  * shape of the column instead of being restated in every test file.
  */
 export function receiptTotalsFootingErrorUsd(figures: ReceiptTotalsFigures): number {
+  if (figures.moneyPrecisionVersion === 1) return sumMoney4([
+    figures.subtotalUsd, -figures.discountUsd, -figures.membershipDiscountUsd,
+    figures.taxUsd, figures.delivery.chargedUsd, figures.roundingAdjustmentUsd, -figures.totalUsd,
+  ])
   return round2(
     figures.subtotalUsd
     - figures.discountUsd

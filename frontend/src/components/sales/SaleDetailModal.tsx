@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { roundMoney2 } from '../../utils/moneyPrecision.ts'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import History from 'lucide-react/dist/esm/icons/history.js'
@@ -116,6 +117,9 @@ interface SaleLineItem {
 }
 
 interface SaleDetail {
+  money_precision_version?: number | null
+  calculated_total_usd?: number | string | null
+  rounding_adjustment_usd?: number | string | null
   id: string | number
   receipt_number?: string | null
   source_return_id?: number | string | null
@@ -2089,6 +2093,10 @@ export default function SaleDetailModal({
                       sub={refundKhr > 0 ? `-${fmtKHR(refundKhr)}` : null}
                     />
                   ) : null}
+                  {totals.moneyPrecisionVersion === 1 && totals.roundingAdjustmentUsd !== 0 ? <MoneyRow
+                    label={t('money_rounding_adjustment')}
+                    amount={`${totals.roundingAdjustmentUsd < 0 ? '-' : '+'}${fmtUSD(Math.abs(roundMoney2(totals.roundingAdjustmentUsd)))}`}
+                  /> : null}
                   <MoneyRow
                     label={t('total') || 'Total'}
                     strong

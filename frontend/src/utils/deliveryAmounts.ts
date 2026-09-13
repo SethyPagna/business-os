@@ -36,6 +36,7 @@ export type DeliveryAmountResult =
  * which is the realistic slip here -- is refused at the point of entry instead
  * of landing in the profit kernel as a million-dollar courier bill.
  */
+import { roundMoney4 } from './moneyPrecision.ts'
 export const MAX_DELIVERY_AMOUNT_USD = 1_000_000
 
 /**
@@ -46,7 +47,7 @@ export const MAX_DELIVERY_AMOUNT_USD = 1_000_000
  * ("nothing typed"), so the caller can leave a field alone rather than writing
  * a zero the person never chose.
  */
-export function parseDeliveryAmountUsd(raw: unknown): DeliveryAmountResult {
+export function parseDeliveryAmountUsd(raw: unknown, moneyPrecisionVersion: 0 | 1 = 0): DeliveryAmountResult {
   const text = typeof raw === 'string' ? raw.trim() : raw === null || raw === undefined ? '' : String(raw).trim()
   if (text === '') return { ok: false, code: 'blank' }
   const value = Number(text)
@@ -55,7 +56,7 @@ export function parseDeliveryAmountUsd(raw: unknown): DeliveryAmountResult {
   if (value > MAX_DELIVERY_AMOUNT_USD) return { ok: false, code: 'too_large' }
   // Round the way every other money value in this codebase rounds, so the
   // number the form shows is the number the ledger stores.
-  return { ok: true, usd: Math.round((value + Number.EPSILON) * 100) / 100 }
+  return { ok: true, usd: moneyPrecisionVersion === 1 ? roundMoney4(text) : Math.round((value + Number.EPSILON) * 100) / 100 }
 }
 
 /** Cents, or null for "no value recorded". Exported only for the parity test. */
@@ -80,7 +81,11 @@ export function deliveryAmountCents(value: unknown): number | null {
  * counts those apart so a near-empty column reads as missing data rather than
  * free delivery. So NULL -> 0 IS a change and gets a record.
  */
-export function deliveryAmountChanged(beforeUsd: unknown, afterUsd: unknown): boolean {
+export function deliveryAmountChanged(beforeUsd: unknown, afterUsd: unknown, moneyPrecisionVersion: 0 | 1 = 0): boolean {
+  if (moneyPrecisionVersion === 1) {
+    const amount = (value: unknown) => value == null || String(value).trim() === '' ? null : roundMoney4(String(value))
+    return amount(beforeUsd) !== amount(afterUsd)
+  }
   return deliveryAmountCents(beforeUsd) !== deliveryAmountCents(afterUsd)
 }
 
