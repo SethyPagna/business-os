@@ -1,5 +1,6 @@
 import { SYNC } from '../constants.ts'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
+import { saleMoneyResponseFields } from '../utils/saleMoneyV1.ts'
 import { withExpectedUpdatedAt, type ExpectedUpdatedAtPayload } from './expectedUpdatedAt.ts'
 import { apiFetch, cacheInvalidate, route } from './http.ts'
 import { getLocalDb } from './lazyLocalDb.ts'
@@ -50,6 +51,12 @@ export function createSale(payload: SalePayload): Promise<unknown> {
     null,
     true,
   )
+}
+
+/** An absent receipt is not permission to rebuild an uncertain request body. */
+export function recoverSaleCreateReceipt(clientRequestId: string, options: SalesReadOptions = {}): Promise<unknown> {
+  if (!String(clientRequestId).trim()) throw new Error('Sale receipt recovery requires the original client_request_id.')
+  return apiFetch('GET', `/api/sales/create-receipt?client_request_id=${encodeURIComponent(clientRequestId)}`, undefined, options.timeoutMs ?? 8000, { signal: options.signal })
 }
 
 export type BulkSaleCancelInput = { reason: string; note?: string; fee_usd?: number; fee_khr?: number; fee_note?: string }
@@ -189,6 +196,7 @@ export async function submitSaleStatusRequest(id: number | string, payload: Prep
     )
     const db = await getLocalDb()
     await db.table('sales').update(id, {
+      ...saleMoneyResponseFields(result),
       sale_status: payload.sale_status,
       updated_at: getResultTimestamp(result),
     }).catch(() => {})
@@ -247,6 +255,8 @@ export type SaleItemAddition = {
   product_id: number
   quantity: number
   applied_price_usd?: number
+  base_price_usd?: number
+  selling_price_input_usd?: number | string
   branch_id?: number | null
   batch_id?: number
   batch_label?: string
@@ -279,7 +289,7 @@ export async function addSaleItems(
   id: number | string,
   items: SaleItemAddition[] = [],
   notes = '',
-  review: { client_request_id: string; expected_exchange_rate: number; expected_updated_at?: string },
+  review: { client_request_id: string; expected_exchange_rate: number; expected_updated_at?: string; money_precision_version?: 1 },
 ): Promise<unknown> {
   if (!String(review?.client_request_id || '').trim()) {
     throw new Error("addSaleItems needs the caller's stable client_request_id; it must never be generated per request.")
@@ -299,9 +309,7 @@ export async function addSaleItems(
     ) as ResultRecord
     const db = await getLocalDb()
     await db.table('sales').update(id, {
-      subtotal_usd: result?.subtotalUsd,
-      total_usd: result?.totalUsd,
-      total_khr: result?.totalKhr,
+      ...saleMoneyResponseFields(result),
       updated_at: getResultTimestamp(result),
     }).catch(() => {})
     return result
@@ -311,6 +319,8 @@ export async function addSaleItems(
 }
 
 export interface SaleAmendmentRequest {
+  money_precision_version?: 1
+  selling_price_input_usd?: number | string
   kind: 'line_quantity_increased' | 'line_quantity_decreased' | 'line_removed' | 'line_updated' | 'line_replaced' | 'delivery_fee_changed' | 'delivery_actual_cost_changed' | 'delivery_added'
   sale_item_id?: number
   quantity?: number
@@ -360,9 +370,7 @@ export async function amendSale(id: number | string, request: SaleAmendmentReque
     ) as ResultRecord
     const db = await getLocalDb()
     await db.table('sales').update(id, {
-      subtotal_usd: result?.subtotalUsd,
-      total_usd: result?.totalUsd,
-      total_khr: result?.totalKhr,
+      ...saleMoneyResponseFields(result),
       ...(result?.isDelivery !== undefined ? { is_delivery: result.isDelivery } : {}),
       ...(result?.deliveryContactId !== undefined ? { delivery_contact_id: result.deliveryContactId } : {}),
       ...(result?.deliveryContactName !== undefined ? { delivery_contact_name: result.deliveryContactName } : {}),

@@ -1,0 +1,57 @@
+import assert from 'node:assert/strict'
+import { saleLineEditorResult } from '../src/utils/saleLineEditor.ts'
+import { applyManualDiscount } from '../src/components/pos/posCore.ts'
+import { receiptTotalsFigures, receiptTotalsFootingErrorUsd } from '../src/utils/receiptTotals.ts'
+import { deliveryAmountChanged, parseDeliveryAmountUsd } from '../src/utils/deliveryAmounts.ts'
+import { settlementRounding4 } from '../src/utils/moneyPrecision.ts'
+import { canonicalSaleReceipt, saleMoneyResponseFields, SaleMoneyUnavailableError, frozenSaleCheckoutBody, SaleCheckoutRecoveryRequiredError } from '../src/utils/saleMoneyV1.ts'
+
+const line = { quantity: 100, basePriceUsd: 1.2345, manualDiscountType: 'percent', manualDiscountValue: 12.3456, productDiscountUsd: 0.0001 }
+const legacy = saleLineEditorResult(line)
+assert.equal(legacy.ok && legacy.basePriceUsd, 1.23)
+const version1 = saleLineEditorResult({ ...line, moneyPrecisionVersion: 1 })
+assert.equal(version1.ok && version1.basePriceUsd, 1.2345, 'derived promotion base is never re-ceiled')
+assert.equal(version1.ok && version1.manualDiscountValue, 12.3456)
+assert.equal(version1.ok && version1.manualDiscountUsd, 0.1524)
+assert.equal(version1.ok && version1.lineTotalUsd, 108.21)
+const typed = saleLineEditorResult({ ...line, moneyPrecisionVersion: 1, sellingPriceInputUsd: '1.2345' })
+assert.equal(typed.ok && typed.basePriceUsd, 1.24)
+assert.equal(saleLineEditorResult({ ...line, moneyPrecisionVersion: 1, sellingPriceInputUsd: 'invalid' }).ok, false)
+assert.equal(saleLineEditorResult({ ...line, moneyPrecisionVersion: 1, sellingPriceInputUsd: '1.2345', manualDiscountType: 'fixed', manualDiscountValue: 1.235 }).ok, true)
+assert.equal(applyManualDiscount(0.0001, 0.4, 4000, 'percent', 49.99, 1).manual_discount_usd, 0)
+assert.equal(applyManualDiscount(0.0001, 0.4, 4000, 'percent', 50, 1).manual_discount_usd, 0.0001)
+assert.deepEqual(parseDeliveryAmountUsd('1.2345', 1), { ok: true, usd: 1.2345 })
+assert.equal(deliveryAmountChanged(1.2301, 1.2349, 1), true)
+assert.equal(deliveryAmountChanged(1.2301, 1.2349), false, 'legacy no-op semantics preserved')
+for (const raw of [1.2345, 1.235]) {
+  const rounding = settlementRounding4(raw)
+  const totals = receiptTotalsFigures({ money_precision_version: 1, subtotal_usd: raw, calculated_total_usd: raw, rounding_adjustment_usd: rounding.roundingAdjustment4, total_usd: rounding.payableTotal2, amount_paid_usd: rounding.payableTotal2 })
+  assert.equal(totals.totalUsd, rounding.payableTotal2)
+  assert.equal(totals.calculatedTotalUsd, raw)
+  assert.equal(totals.outstandingUsd, 0)
+  assert.equal(receiptTotalsFootingErrorUsd(totals), 0)
+}
+const oldReceipt = receiptTotalsFigures({ total_usd: 1.2345, subtotal_usd: 1.2345 })
+assert.equal(oldReceipt.totalUsd, 1.2345)
+assert.equal(oldReceipt.calculatedTotalUsd, null)
+assert.equal(oldReceipt.roundingAdjustmentUsd, 0)
+const saved = { id: 17, subtotal_usd: 1.2345, discount_usd: 0, membership_discount_usd: 0, tax_usd: 0, exchange_rate: 4000, amount_paid_usd: 1.23, amount_paid_khr: 0, items: [{ quantity: 1, applied_price_usd: 1.2345 }], money_precision_version: 1, calculated_total_usd: 1.2345, rounding_adjustment_usd: -0.0045, total_usd: 1.23 }
+assert.deepEqual(canonicalSaleReceipt({ id: 17, sale: saved }), saved, 'create envelope prints authoritative saved snapshot only')
+assert.deepEqual(saleMoneyResponseFields({ totalUsd: 1.23, total_usd: undefined, calculatedTotalUsd: 1.2345 }), { total_usd: 1.23, calculated_total_usd: 1.2345 })
+assert.deepEqual(saleMoneyResponseFields({ totalUsd: undefined }), {}, 'partial response cannot erase saved amounts')
+assert.throws(() => canonicalSaleReceipt({ id: 17, receiptNumber: 'R17' }), SaleMoneyUnavailableError, 'id alone cannot become a locally reconstructed receipt')
+assert.throws(() => canonicalSaleReceipt({ ...saved, rounding_adjustment_usd: 0 }), SaleMoneyUnavailableError)
+assert.throws(() => canonicalSaleReceipt({ ...saved, calculated_total_usd: null }), SaleMoneyUnavailableError)
+assert.equal(canonicalSaleReceipt({ ...saved, total_usd: 1.2345, money_precision_version: 0 }).total_usd, 1.2345, 'legacy saved amounts are not requantized')
+assert.equal(canonicalSaleReceipt({ ...saved, money_precision_version: 0 }).calculated_total_usd, null)
+const original = { client_request_id: 'request-1', money_precision_version: 1, items: [{ applied_price_usd: 1.2345 }], amount_paid_usd: 1.23 }
+const frozen = frozenSaleCheckoutBody('request-1', undefined, () => original)
+original.items[0].applied_price_usd = 20
+assert.equal((frozen.items as any[])[0].applied_price_usd, 1.2345)
+assert.equal(JSON.stringify(frozenSaleCheckoutBody('request-1', frozen, () => { throw new Error('must not rebuild retry') })), JSON.stringify(frozen))
+const oldBody = { client_request_id: 'legacy', total_usd: 1.234567, items: [] }
+assert.equal(JSON.stringify(frozenSaleCheckoutBody('legacy', oldBody)), JSON.stringify(oldBody), 'legacy exact retry remains unversioned and unrecalculated')
+assert.throws(() => frozenSaleCheckoutBody('id-only', undefined), SaleCheckoutRecoveryRequiredError, 'old pending id without original body requires read-only recovery')
+assert.throws(() => frozenSaleCheckoutBody('wrong-id', frozen), SaleCheckoutRecoveryRequiredError)
+assert.throws(() => frozenSaleCheckoutBody('new', undefined, () => ({ client_request_id: 'new' })), SaleCheckoutRecoveryRequiredError)
+console.log('PASS v1 line/receipt/delivery calculations and frozen v0 behavior')

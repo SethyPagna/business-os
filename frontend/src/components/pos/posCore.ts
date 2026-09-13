@@ -1,4 +1,5 @@
 import { calculateProductDiscount, normalizePriceValue } from '../../utils/pricing.ts'
+import { multiplyMoney4, percentageMoney4, roundMoney4, subtractMoney4 } from '../../utils/moneyPrecision.ts'
 import { evaluatePromotionPricing, evaluateCartPromotionAdjustments, type PromotionRule } from '../../utils/promotionRules.ts'
 import { buildProductGroups, compareProductsByNameBranchPriceBarcode } from '../../utils/productGrouping.ts'
 import type { ProductRecord as ProductGroupRecord } from '../../utils/productGrouping.ts'
@@ -122,7 +123,28 @@ export function applyManualDiscount(
   exchangeRate: number,
   type: ManualDiscountType | null | undefined,
   rawValue: number,
+  moneyPrecisionVersion: 0 | 1 = 0,
 ): ManualDiscountResult {
+  if (moneyPrecisionVersion === 1) {
+    const base = roundMoney4(basePriceUsd || 0)
+    const rateValid = Number.isFinite(exchangeRate) && exchangeRate > 0
+    if (base > 0 && !rateValid) throw new Error('A valid exchange rate is required for versioned line pricing.')
+    const hasUsdBasis = base > 0 && rateValid
+    const baseKhr = hasUsdBasis ? multiplyMoney4(base, exchangeRate) : roundMoney4(basePriceKhr || 0)
+    const activeType = type && Number.isFinite(rawValue) && rawValue > 0 ? type : null
+    const value = activeType === 'percent' ? Math.min(100, rawValue) : activeType === 'fixed' ? roundMoney4(Math.max(0, rawValue)) : 0
+    const discount = Math.min(base, activeType === 'percent' ? percentageMoney4(base, value) : value)
+    const applied = Math.max(0, subtractMoney4(base, discount))
+    const appliedKhr = hasUsdBasis ? multiplyMoney4(applied, exchangeRate) : baseKhr
+    return {
+      manual_discount_type: activeType,
+      manual_discount_value: value,
+      manual_discount_usd: subtractMoney4(base, applied),
+      manual_discount_khr: subtractMoney4(baseKhr, appliedKhr),
+      applied_price_usd: applied,
+      applied_price_khr: appliedKhr,
+    }
+  }
   const base = normalizePriceValue(basePriceUsd || 0, 0)
   // USD is the canonical price basis whenever it is present. A stale/zero
   // KHR value used to survive here, which made a perfectly valid USD-priced

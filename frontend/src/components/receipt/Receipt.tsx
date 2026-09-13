@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { roundMoney2 } from '../../utils/moneyPrecision.ts'
 import ArrowLeft from 'lucide-react/dist/esm/icons/arrow-left.js'
 import FileText from 'lucide-react/dist/esm/icons/file-text.js'
 import ImageDown from 'lucide-react/dist/esm/icons/image-down.js'
@@ -65,6 +66,9 @@ interface ReceiptItem {
 }
 
 interface ReceiptSale {
+  money_precision_version?: number | null
+  calculated_total_usd?: number | string | null
+  rounding_adjustment_usd?: number | string | null
   receiptNumber?: string | null
   receipt_number?: string | null
   created_at?: string | number | Date | null
@@ -744,6 +748,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
     ) : null,
     total: (
       <div key="total" className="my-2 border-y-2 border-black py-2">
+        {totals.moneyPrecisionVersion === 1 && totals.roundingAdjustmentUsd !== 0 ? <Row label={t?.('money_rounding_adjustment') || 'Rounding adjustment'} value={`${totals.roundingAdjustmentUsd < 0 ? '-' : '+'}${fmtUSD(Math.abs(roundMoney2(totals.roundingAdjustmentUsd)))}`} /> : null}
         <Row label={labelFor(lang, 'total')} value={fmtUSD(totalUsd)} subValue={tpl.show_total_khr ? fmtKHR(totalKhr) : ''} bold />
       </div>
     ),
