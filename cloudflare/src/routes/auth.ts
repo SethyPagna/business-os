@@ -9,7 +9,7 @@ import { encryptSecret, decryptSecret } from '../lib/secretCrypto'
 import { generateTotpSecret, verifyTotp } from '../lib/totp'
 import { isAdminControlUser } from '../lib/permissions'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
-import { MIN_PASSWORD_LENGTH, passwordTooShort, passwordMinLengthError } from '../lib/passwordPolicy'
+import { passwordTooShort, passwordMinLengthError } from '../lib/passwordPolicy'
 import { stripSensitiveSettings } from '../lib/settingsSensitive'
 // The OTP login-challenge binding -- see lib/otpChallenge.ts's comment for
 // the Part-77 finding it closes.

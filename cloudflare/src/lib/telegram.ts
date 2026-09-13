@@ -1,7 +1,6 @@
 import { getDb } from './db'
 import { loadLowStockConfig, lowStockThresholdSql } from './lowStockSettings'
 import { customerBilledDeliveryFeeUsd } from './saleTotals'
-import { resolveStoredNativeSaleChange } from './nativeSaleChange'
 import { BUSINESS_UTC_OFFSET_MINUTES, businessToday, localDateRangeClause } from './businessDateWindow'
 import {
   bi, label, labeled, localizeTelegramHeading, localizeTelegramLine, localizeTelegramValue,

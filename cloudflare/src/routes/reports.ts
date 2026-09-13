@@ -28,7 +28,7 @@ import {
   type SalesFilters,
 } from '../lib/salesAnalytics'
 import { ReportMoneyPrecisionError, reportMoneyHttpError } from '../lib/reportMoneyPrecision'
-import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr, localTimeRangeClause } from '../lib/businessDateWindow'
+import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr } from '../lib/businessDateWindow'
 import type { Env } from '../index'
 
 // Section 5 (Sep 2, 2026 RC): the "Business summary" Excel workbook the

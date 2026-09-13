@@ -100,7 +100,6 @@ import {
 } from './importBranchAuthority'
 import {
   normalizeImageMatchKey,
-  MAX_IMAGES_PER_PRODUCT,
   matchImagesToProducts,
   buildAutoRenamePlan,
   type UploadedImageRef,

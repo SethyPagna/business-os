@@ -25,9 +25,9 @@ import { maybeQueueForReview } from '../lib/reviewGate'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { findIdentityMatch, identityBarcodeKey, type ProductIdentityRow } from '../lib/productIdentity'
-import { buildIssueStateClauses, buildLikeAliasClause, runFuzzyFallbackMatch, tokenizeSearchTermGroups, tokenizeSearchWords } from '../lib/searchMatch'
+import { buildIssueStateClauses, buildLikeAliasClause, tokenizeSearchTermGroups, tokenizeSearchWords } from '../lib/searchMatch'
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/productSearchQuery'
-import { planReceiveBatchStock, receiveBatchStock, removeStockFromBatch, removeStockAcrossBatches, InsufficientBatchStockError, readFifoLotAvailability, allocateAcrossLots, decrementBatchStockStrictStatement, incrementBatchStockStatement, type ReceiptCostPreimage } from '../lib/productBatches'
+import { planReceiveBatchStock, receiveBatchStock, removeStockFromBatch, removeStockAcrossBatches, InsufficientBatchStockError, readFifoLotAvailability, allocateAcrossLots, type ReceiptCostPreimage } from '../lib/productBatches'
 import { applyMovementRevert, type RevertMovementRow } from '../lib/stockRevert'
 import { dateToBatchCode, normalizeTypedDate } from '../lib/batchCode'
 import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, stockReceiptGateCode, stockReceiptGateMessage } from '../lib/stockReceiptGate'
@@ -42,7 +42,6 @@ import {
   CANONICAL_BRANCH_CONFIGURATION_ERROR,
   CANONICAL_TRANSFER_BRANCHES_SQL,
   CanonicalBranchConfigurationError,
-  canonicalTransferAuthorityGuardStatement,
   isCanonicalTransferSelection,
   resolveCanonicalTransferPair,
   type CanonicalTransferBranchRow,
@@ -55,7 +54,7 @@ import { RESOLVED_BRANCH_NAME_COLUMN, movementBranchNameSql, withResolvedBranchN
 import { RESOLVED_ACTOR_NAME_COLUMN, movementActorNameSql, withResolvedActorName } from '../lib/movementActorName'
 import { movementReferenceSelectSql } from '../lib/movementReference'
 import { movementSearchHaystackSql } from '../lib/movementSearch'
-import { transferStockGuardStatement, transferLotGuardStatement, findTransferReceipt, normalizeTransferRequestId, transferIntentAuditStatement, transferReceiptResponse, transferReceiptStatement, transferRequestDigest } from '../lib/transferOperationReceipt'
+import { findTransferReceipt, normalizeTransferRequestId, transferReceiptResponse, transferRequestDigest } from '../lib/transferOperationReceipt'
 import { resolveMovementCostSnapshot, type MovementCostComponent } from '../lib/movementCostSnapshot'
 import { addMoney4, roundMoney4 } from '../lib/moneyPrecision'
 

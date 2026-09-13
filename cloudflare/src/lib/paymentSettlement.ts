@@ -3,7 +3,6 @@ import {
   actualUsdMinorUnits,
   actualUsdValue,
   financialCalculationUnits,
-  financialCalculationValue,
   type FinancialDecimalInput,
 } from './financialPrecision'
 import {

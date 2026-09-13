@@ -38,10 +38,8 @@ import {
   productConflictCaseKey,
   productConflictOperationId,
   productConflictSha256,
-  type ProductConflictApplyCase,
   type ProductConflictEligibilityRow,
   type ProductConflictPreviewCase,
-  type ProductConflictStockChoice,
 } from '../lib/productConflictMergeBatch'
 import {
   PRODUCT_CONFLICT_ACTION_PAGE_MAX,

@@ -78,7 +78,7 @@ import {
   type FifoLotTake,
 } from './productBatches'
 import { round2, newSaleMoney4 } from './saleTotals'
-import { roundMoney4, multiplyMoney4, subtractMoney4, subtractDecimalSum, sumMoney4, percentageMoney4 } from './moneyPrecision'
+import { multiplyMoney4, subtractMoney4, subtractDecimalSum, sumMoney4, percentageMoney4 } from './moneyPrecision'
 import { financialCalculationValue } from './financialPrecision'
 import { recomputeSaleMoneyAfterLineChange, type SaleMoneyRow, type StockStatement } from './saleLineAddition'
 

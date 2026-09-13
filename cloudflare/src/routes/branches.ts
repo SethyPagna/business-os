@@ -26,7 +26,6 @@ import { audit } from '../lib/audit'
 import { formatTransferTelegramLines, sendTelegramEvent } from '../lib/telegram'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { findIdentityMatch, findIdentityMatches, type ProductIdentityRow } from '../lib/productIdentity'
-import { decrementBatchStockStrictStatement, incrementBatchStockStatement, resolveDestinationBatch, readFifoLotAvailability, allocateAcrossLots } from '../lib/productBatches'
 import { branchUpdateStatements } from '../lib/branchWrites'
 import {
   CANONICAL_BRANCH_CONFIGURATION_CODE,
@@ -36,7 +35,6 @@ import {
   CANONICAL_TRANSFER_BRANCHES_SQL,
   CanonicalBranchConfigurationError,
   CanonicalBranchIdentityError,
-  canonicalTransferAuthorityGuardStatement,
   isCanonicalTransferSelection,
   prepareCanonicalBranchUpdate,
   resolveCanonicalTransferPair,
@@ -51,7 +49,7 @@ import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/pr
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { planTransferOperation } from '../lib/transferOperation'
-import { transferStockGuardStatement, transferLotGuardStatement, findTransferReceipt, normalizeTransferRequestId, transferIntentAuditStatement, transferReceiptResponse, transferReceiptStatement, transferRequestDigest } from '../lib/transferOperationReceipt'
+import { findTransferReceipt, normalizeTransferRequestId, transferReceiptResponse, transferRequestDigest } from '../lib/transferOperationReceipt'
 
 async function sha256Hex(input: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input))
