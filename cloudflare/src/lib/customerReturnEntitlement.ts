@@ -91,7 +91,14 @@ function quantityDifference(left: number, right: number): string {
   try { return subtractDecimalSum(left, [right]) } catch { return fail('customer_return_quantity_invalid') }
 }
 function addQuantity(left: number, right: number): number {
-  try { return Number(subtractDecimalSum(left, [-right])) } catch { return fail('customer_return_quantity_invalid') }
+  try {
+    const exact = subtractDecimalSum(left, [-right])
+    const stored = Number(exact)
+    // Quantities are persisted as SQLite/JSON numbers. Refuse a mathematically
+    // valid decimal sum if its exact value would disappear on that boundary.
+    if (!Number.isFinite(stored) || subtractDecimalSum(stored, [exact]) !== '0') fail('customer_return_quantity_invalid')
+    return stored
+  } catch { return fail('customer_return_quantity_invalid') }
 }
 function quantityGreater(left: number, right: number): boolean {
   const difference = quantityDifference(left, right)
@@ -232,6 +239,7 @@ export function buildCustomerReturnQuoteV1(input: {
   for (const prior of input.previous) {
     if (previousReturnIds.has(prior.id)) fail('customer_return_cohort_invalid')
     previousReturnIds.add(prior.id)
+    if (!prior.items.length) fail('customer_return_legacy_refund_review_needed')
     validateRefundMoneySnapshot(prior)
     let headerCalculated = 0
     const priorSaleItemIds = new Set<number>()

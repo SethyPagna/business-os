@@ -120,8 +120,8 @@ export async function customerReturnQuoteFromDb(
     )
   if (saleLines.length > CUSTOMER_RETURN_MAX_SALE_LINES) throw new SaleMoneyContractError('customer_return_sale_invalid')
   const previousRows = await db.prepare(`SELECT r.id AS return_id,r.money_precision_version,r.calculated_refund_usd,
-    r.rounding_adjustment_usd,r.total_refund_usd,ri.sale_item_id,ri.quantity,ri.total_usd,ri.refund_snapshot_json
-    FROM returns r JOIN return_items ri ON ri.return_id=r.id
+    r.rounding_adjustment_usd,r.total_refund_usd,ri.id AS return_item_id,ri.sale_item_id,ri.quantity,ri.total_usd,ri.refund_snapshot_json
+    FROM returns r LEFT JOIN return_items ri ON ri.return_id=r.id
     WHERE r.sale_id=@saleId AND COALESCE(r.return_scope,'customer')='customer'
       AND COALESCE(r.status,'completed')<>'cancelled'
       AND (@excludeReturnId IS NULL OR r.id<>@excludeReturnId)
@@ -143,11 +143,13 @@ export async function customerReturnQuoteFromDb(
       }
       previousById.set(id, prior)
     }
-    prior.items.push({
-      sale_item_id: row.sale_item_id == null ? null : Number(row.sale_item_id),
-      quantity: Number(row.quantity), total_usd: Number(row.total_usd),
-      refund_snapshot_json: row.refund_snapshot_json == null ? null : String(row.refund_snapshot_json),
-    })
+    if (row.return_item_id != null) {
+      prior.items.push({
+        sale_item_id: row.sale_item_id == null ? null : Number(row.sale_item_id),
+        quantity: Number(row.quantity), total_usd: Number(row.total_usd),
+        refund_snapshot_json: row.refund_snapshot_json == null ? null : String(row.refund_snapshot_json),
+      })
+    }
   }
   const exchangeRate = Number(sale.exchange_rate)
   const customerDeliveryFee = Number(sale.is_delivery) === 1 && String(sale.delivery_fee_paid_by || 'customer') === 'customer'

@@ -153,6 +153,19 @@ async function main() {
     requested: [{ sale_item_id: 31, quantity: 0.2 }], previous: fractionalPrior })
   assert.equal(fractionalSecond.items[0].total_usd, 2)
   assert.equal(m.parseCustomerReturnRefundSnapshot(fractionalSecond.items[0].refund_snapshot_json).returned_quantity_after, 0.3)
+  const fractionalComplete = [...fractionalPrior, { id: 32, money_precision_version: 1,
+    calculated_refund_usd: fractionalSecond.calculated_refund_usd,
+    rounding_adjustment_usd: fractionalSecond.rounding_adjustment_usd,
+    total_refund_usd: fractionalSecond.total_refund_usd,
+    items: fractionalSecond.items.map(item => ({ sale_item_id: item.sale_item_id, quantity: item.quantity,
+      total_usd: item.total_usd, refund_snapshot_json: item.refund_snapshot_json })) }]
+  assert.throws(() => m.buildCustomerReturnQuoteV1({ sale: fractionalSale,
+    requested: [{ sale_item_id: 31, quantity: 1e-20 }], previous: fractionalComplete }), /customer_return_quantity_invalid/)
+  const collapsedSnapshot = JSON.parse(fractionalSecond.items[0].refund_snapshot_json)
+  collapsedSnapshot.returned_quantity_before = 0.3
+  collapsedSnapshot.return_quantity = 1e-20
+  collapsedSnapshot.returned_quantity_after = 0.3
+  assert.throws(() => m.parseCustomerReturnRefundSnapshot(JSON.stringify(collapsedSnapshot)), /customer_return_snapshot_invalid|customer_return_quantity_invalid/)
 
   const duplicatePrior = [{ id: 88, money_precision_version: 1,
     calculated_refund_usd: quote.items[1].total_usd * 2,
@@ -194,6 +207,11 @@ async function main() {
   assert.equal(loadedQuote.calculated_refund_usd, 9.6667)
   assert.equal(loadedQuote.items[0].refund_snapshot_json.includes('source_pricing_snapshot_digest'), true)
   assert.equal(Object.hasOwn(route.publicCustomerReturnQuote(loadedQuote).items[0], 'refund_snapshot_json'), false)
+  db.prepare(`INSERT INTO returns(id,sale_id,status,return_scope,total_refund_usd)
+    VALUES(99,2,'completed','customer',1)`).run()
+  await assert.rejects(() => route.customerReturnQuoteFromDb(compat, 2, [{ sale_item_id: 11, quantity: 1 }]),
+    /customer_return_legacy_refund_review_needed|money_precision_snapshot_invalid/)
+  db.prepare('DELETE FROM returns WHERE id=99').run()
 
   const httpApp = await loadReturnHttpRoute()
   globalThis.__customerReturnQuoteDb = compat
