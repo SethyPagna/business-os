@@ -5295,16 +5295,23 @@ app.get('/', async (c) => {
       itemsBySale.get(row.sale_id)!.push(row)
     }
 
-  // GROUP BY sale_id, and every row for one sale lands in the chunk that
-  // holds that sale's id -- so a chunked aggregate is still a complete
-  // aggregate per sale, with no cross-chunk re-summing needed.
+    const returnColumns=await db.prepare('PRAGMA table_info(returns)').all<{name:string}>()
+    const returnVersion=returnColumns.some(row=>row.name==='money_precision_version')?'money_precision_version':'0 AS money_precision_version'
+    // Read recorded operands, never SQLite binary-money SUM. A bounded page
+    // must refuse excessive linked history rather than silently omit refunds.
     const refundRows = await selectInChunks(saleIds, 0, (chunk) => db.prepare(`
-      SELECT sale_id, COUNT(*) AS return_count, COALESCE(SUM(total_refund_usd), 0) AS refund_usd, COALESCE(SUM(total_refund_khr), 0) AS refund_khr
+      SELECT id,sale_id,total_refund_usd,total_refund_khr,${returnVersion}
       FROM returns
       WHERE sale_id IN (${chunk.map(() => '?').join(',')}) AND COALESCE(status, 'completed') != 'cancelled' AND COALESCE(return_scope, 'customer') = 'customer'
-      GROUP BY sale_id
-    `).all<{ sale_id: number; return_count: number; refund_usd: number; refund_khr: number }>(chunk))
-    const refundsBySale = new Map(refundRows.map((r) => [r.sale_id, r]))
+      ORDER BY id LIMIT ${REPORT_MONEY_MAX_ROWS+1}
+    `).all<Record<string,unknown>>(chunk))
+    if(refundRows.length>REPORT_MONEY_MAX_ROWS)throw new ReportMoneyPrecisionError('too_many_rows')
+    const refundsBySale=new Map<number,{count:number;usd:ReportExactDecimal;khr:ReportExactDecimal}>()
+    for(const row of refundRows){
+      const id=Number(row.sale_id),group=refundsBySale.get(id)??{count:0,usd:ReportExactDecimal.zero(),khr:ReportExactDecimal.zero()}
+      group.count++;group.usd=group.usd.add(stripMoney(row,'total_refund_usd'));group.khr=group.khr.add(stripMoney(row,'total_refund_khr'))
+      refundsBySale.set(id,group)
+    }
 
     // "Records n" on every row. ONE statement per chunk over three tables
     // rather than a query per sale -- a 500-row page would otherwise fire 500
@@ -5322,23 +5329,23 @@ app.get('/', async (c) => {
     return sales.map((sale) => {
       const { linked_driver_name, linked_driver_phone, ...snapshot } = sale
       const refund = refundsBySale.get(sale.id)
-      const refundUsd = refund?.refund_usd || 0
-      const refundKhr = refund?.refund_khr || 0
+      const refundUsd = refund?.usd??ReportExactDecimal.zero()
+      const refundKhr = refund?.khr??ReportExactDecimal.zero()
       return {
         ...snapshot,
         delivery_contact_name: String(sale.delivery_contact_name ?? '').trim() ? sale.delivery_contact_name : linked_driver_name ?? null,
         delivery_contact_phone: String(sale.delivery_contact_phone ?? '').trim() ? sale.delivery_contact_phone : linked_driver_phone ?? null,
         items: itemsBySale.get(sale.id) || [],
-        refund_usd: refundUsd,
-        refund_khr: refundKhr,
-        return_count: refund?.return_count || 0,
+        refund_usd: refundUsd.toNumber(4),
+        refund_khr: refundKhr.toNumber(4),
+        return_count: refund?.count || 0,
         // Never 0: a sale always has at least the fact that it happened, and
         // that is the record every later one is relative to.
         records_count: (recordsBySale.get(sale.id) || 0) + SALE_RECORDS_SELF_COUNT,
-        total_discount_usd: (sale.discount_usd || 0) + (sale.membership_discount_usd || 0),
-        total_discount_khr: (sale.discount_khr || 0) + (sale.membership_discount_khr || 0),
-        net_total_usd: (sale.total_usd || 0) - refundUsd,
-        net_total_khr: (sale.total_khr || 0) - refundKhr,
+        total_discount_usd: stripMoney(sale,'discount_usd').add(stripMoney(sale,'membership_discount_usd')).toNumber(4),
+        total_discount_khr: stripMoney(sale,'discount_khr').add(stripMoney(sale,'membership_discount_khr')).toNumber(4),
+        net_total_usd: stripMoney(sale,'total_usd').subtract(refundUsd).toNumber(4),
+        net_total_khr: stripMoney(sale,'total_khr').subtract(refundKhr).toNumber(4),
       }
     })
   })
@@ -5408,63 +5415,34 @@ app.get('/stats', async (c) => {
   const searchClause = buildSalesSearchWhere(query, params)
   if (searchClause) where.push(searchClause)
 
-  // ONE aggregate, not "read every matching row, then chunk a refund
-  // lookup over their ids". The old shape pulled the entire result set
-  // into the Worker and then issued a sequential D1 statement per 100
-  // sale ids (chunkForBinding caps an IN list at D1's 100 bound
-  // parameters), so the page's own unfiltered header -- the request the
-  // Sales page fires on load -- cost ~150 round trips against production's
-  // 14.9k receipts for three numbers SQLite computes in a single pass.
-  // Refunds join as a PRE-AGGREGATED derived table so a sale carrying two
-  // returns still subtracts once, exactly as the per-sale Map did.
-  //
-  // buildSalesSearchWhere's flat clause references `c.membership_number`,
-  // so this query needs the same customers join GET / already has --
-  // without it, a search including a membership-number term would silently
-  // 500 (unknown column c.membership_number) instead of just finding zero
-  // matches, and revenue stats would disagree with the list view for that
-  // exact query shape (the drift risk buildSalesSearchWhere exists to
-  // prevent in the first place).
-  //
-  // Revenue basis = NET SALES (subtotal net of both discounts), minus customer
-  // refunds -- the canonical definition (user directive Sep 1 2026). Tax and
-  // delivery fees are pass-through, NOT revenue, so total_usd (which folds tax
-  // in) is not the base here. Credit is included because recognizedExpr
-  // excludes only cancelled sales. pending_revenue_usd is a positive subset
-  // shown beside revenue, never subtracted from it.
-  //
-  // This header used to spell that definition out a SECOND time and carry a
-  // comment claiming it matched salesAnalytics.ts byte for byte. It stopped
-  // matching the moment the kernel began apportioning the refund onto the net
-  // basis (Sep 4 2026), and nothing would have said so -- the Sales page and the
-  // Dashboard would simply have shown two different revenues for the same
-  // filter. So it now interpolates the kernel's OWN exported fragments,
-  // including the refund subquery, and agreement is structural rather than
-  // asserted. The blank-status rule (both '' and NULL mean completed) lives in
-  // recognizedExpr with the rest of it.
+  // Preserve the list's complete cohort, but delegate financial policy and
+  // rounding to the exact shared reducer. Its bounded coherent keyset reads
+  // replace the former SQL floating-money aggregate; no third revenue or
+  // refund formula is maintained in this route.
   const cacheVersion = await getSalesReadCacheVersion(c.env)
   const payload = await cachedJsonResponse(c.req.raw, c.executionCtx, cacheVersion, SALES_READ_CACHE_TTL_SECONDS, async () => {
-    const totals = await db.prepare(`
-    SELECT
-      COUNT(*) AS total_count,
-      COALESCE(SUM(CASE WHEN ${recognizedExpr('s.')} THEN 1 ELSE 0 END), 0) AS revenue_count,
-      COALESCE(SUM(CASE WHEN ${recognizedExpr('s.')}
-        THEN ${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')} ELSE 0 END), 0) AS revenue_usd,
-      COALESCE(SUM(CASE WHEN ${awaitingExpr('s.')}
-        THEN ${netSaleExpr('s.')} ELSE 0 END), 0) AS pending_revenue_usd
-    FROM sales s
-    LEFT JOIN customers c ON c.id = s.customer_id
-    ${CUSTOMER_REFUND_JOIN}s.id
-    WHERE ${where.join(' AND ')}
-  `).get<{ total_count: number; revenue_count: number; revenue_usd: number; pending_revenue_usd: number }>(params)
-
-    const totalCount = Number(totals?.total_count) || 0
+    const scopedParams:Record<string,string|number|null>={}
+    const scopedWhere=where.join(' AND ').replace(/\bs\./g,'matched_sale.').replace(/@([A-Za-z][A-Za-z0-9_]*)/g,(_match,key:string)=>{
+      const value=params[key]
+      if(typeof value!=='string'&&typeof value!=='number'&&value!==null)throw new ReportMoneyPrecisionError('unsupported_row')
+      scopedParams[`reportScope_${key}`]=value
+      return `@reportScope_${key}`
+    })
+    // Preserve the list's rich, server-built predicates, including the LEFT
+    // customer join and item-branch search. The shared reader applies this
+    // immutable scope to every header/child query in both coherent passes.
+    const snapshot=await readSalesReportSnapshot(c.env,{},false,alias=>({
+      sql:`${alias}.id IN (SELECT matched_sale.id FROM sales matched_sale LEFT JOIN customers c ON c.id=matched_sale.customer_id WHERE ${scopedWhere})`,
+      params:scopedParams,
+    }))
+    const totals=salesTotalsFromSnapshot(snapshot)
+    const totalCount=snapshot.sales.length+snapshot.voidSales.length
     const listLimit = Math.max(1, Math.min(Number.parseInt(String(query.limit || '100'), 10) || 100, 200))
     return {
       total_count: totalCount,
-      revenue_count: Number(totals?.revenue_count) || 0,
-      revenue_usd: round2(Number(totals?.revenue_usd) || 0),
-      pending_revenue_usd: round2(Number(totals?.pending_revenue_usd) || 0),
+      revenue_count: snapshot.sales.length,
+      revenue_usd: totals.revenue_usd,
+      pending_revenue_usd: totals.pending_revenue_usd,
       // This now means "more pages exist", not "the data was discarded".
       truncated_in_list: totalCount > listLimit,
     }
