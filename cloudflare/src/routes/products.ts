@@ -153,7 +153,7 @@ import {
   normalizeMultiValue, validateProductImageGallery, validatePreservedProductImageGallery, ProductImageLimitError,
 } from '../lib/productWrites'
 import { actorSnapshot } from '../lib/actorSnapshot'
-import { prepareProductMoneyWrite, ProductMoneyWriteError } from '../lib/productWrites'
+import { prepareProductMoneyWrite, readProductMoneyPlan, ProductMoneyWriteError } from '../lib/productWrites'
 export {
   PRODUCT_SKIP_KEYS, nowIso, tableColumns, clampNegativeStockQuantity,
   cleanPayload, insertRow, updateRow, syncProductImageGallery, defaultBranchId,
@@ -1816,7 +1816,7 @@ app.put('/:id', async (c) => {
     }
   }
 
-  try { await prepareProductMoneyWrite(c.env, body, Number(id)) } catch (error) {
+  try { await prepareProductMoneyWrite(c.env, body, Number(id), expectedProductUpdatedAt) } catch (error) {
     if (error instanceof ProductMoneyWriteError) return c.json({ error: error.message, code: error.code }, error.status as 400 | 409)
     throw error
   }
@@ -1909,7 +1909,7 @@ app.put('/:id', async (c) => {
         renamedProductIds = [Number(id)].filter(Number.isFinite)
       }
     }
-    if (body.__rename_scope === 'group' && body.name !== undefined && current?.name) {
+    if (!readProductMoneyPlan(body) && body.__rename_scope === 'group' && body.name !== undefined && current?.name) {
       const fromName = String(current.name || '').trim()
       if (fromName && fromName.toLowerCase() !== nextName.toLowerCase()) {
         const carried = await applyRenameCarry(getDb(c.env), 'product_name', fromName, nextName, new Date().toISOString())
@@ -1956,6 +1956,9 @@ app.put('/:id', async (c) => {
     if (error instanceof ProductMoneyWriteError) return c.json({ error: error.message, code: error.code }, error.status as 400 | 409)
     throw error
   }
+  const appliedGroupRename = readProductMoneyPlan(body)?.group_rename
+  if (appliedGroupRename) await audit(c.env, user?.id ?? null, actorSnapshot(user), 'rename', 'product_group', id,
+    { from: appliedGroupRename.from, to: appliedGroupRename.to, rows: appliedGroupRename.members.length })
   // Real, latent gap this session found while wiring the image-only role's
   // gallery writes through this same handler: `image_gallery` is a virtual
   // key (see syncProductImageGallery's own comment) that updateRow's

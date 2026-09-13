@@ -10,14 +10,14 @@ const { loadAll } = require('./harness/load_migrations.cjs')
 const src = path.resolve(__dirname, '../src')
 const database = openDb(loadAll(path.resolve(__dirname, '../migrations')))
 const raw = database.db
-let beforeProductUpdate = null, auditCount = 0
+let beforeProductUpdate = null, afterRead = null, beforeBatch = null, auditCount = 0
 const DB = {
   prepare(sql) {
     let values = []
     const statement = {
       bind(...args) { values = args; return statement },
       async all() { return { results: raw.prepare(sql).all(...values) } },
-      async first() { return raw.prepare(sql).get(...values) ?? null },
+      async first() { const value = raw.prepare(sql).get(...values) ?? null; if (afterRead) afterRead(sql, value); return value },
       async run() {
         if (/^UPDATE "products" SET/.test(sql) && beforeProductUpdate) { const hook = beforeProductUpdate; beforeProductUpdate = null; hook() }
         const result = raw.prepare(sql).run(...values)
@@ -27,6 +27,7 @@ const DB = {
     return statement
   },
   async batch(statements) {
+    if (beforeBatch) { const hook = beforeBatch; beforeBatch = null; hook() }
     raw.exec('BEGIN IMMEDIATE')
     try { const results = []; for (const statement of statements) results.push(await statement.run()); raw.exec('COMMIT'); return results }
     catch (error) { raw.exec('ROLLBACK'); throw error }
@@ -141,6 +142,34 @@ function seed(name = 'Existing') {
   assert.equal(approved.status, 200, JSON.stringify(approved))
   assert.equal(row(id).selling_price_usd, 1.24)
   assert.equal(row(id).cost_price_usd, 1.2345)
+  const textOnly = await request(products, 'PUT', `/${id}`, { description: 'Review description only' }, requester)
+  const textPending = raw.prepare('SELECT * FROM pending_actions WHERE id=?').get(textOnly.body.pendingActionId)
+  const textPayload = JSON.parse(textPending.payload_json)
+  assert.equal(textPayload.product_money_policy_version, 1, 'every newly queued request is distinguishable from historical unversioned requests')
+  assert.deepEqual(textPayload._product_money_write_plan.after, {})
+  raw.prepare("UPDATE pending_actions SET status='rejected' WHERE id=?").run(textPending.id)
+  const textBefore = row(id)
+  for (const extra of [{ cost_price_usd: -.00004 }, { selling_price_usd: 1.23004 }]) {
+    const injection = await request(reviews, 'POST', `/${textPending.id}/resubmit`, { payload: { description: textPayload.description, ...extra } }, requester)
+    assert.equal(injection.status, 409)
+    assert.equal(injection.body.code, 'product_money_plan_immutable')
+    assert.deepEqual(row(id), textBefore)
+    assert.equal(raw.prepare('SELECT status FROM pending_actions WHERE id=?').get(textPending.id).status, 'rejected')
+  }
+  assert.equal((await request(reviews, 'POST', `/${textPending.id}/resubmit`, { payload: textPayload }, requester)).status, 200)
+  assert.equal((await request(reviews, 'POST', `/${textPending.id}/approve`, {})).status, 200)
+  assert.equal(row(id).cost_price_usd, textBefore.cost_price_usd)
+  assert.equal(row(id).selling_price_usd, textBefore.selling_price_usd)
+  const expectedId = seed('Expected revision')
+  raw.prepare("UPDATE products SET updated_at='editor revision' WHERE id=?").run(expectedId)
+  afterRead = sql => {
+    if (!/^SELECT updated_at FROM products/.test(sql)) return
+    afterRead = null
+    raw.prepare("UPDATE products SET cost_price_usd=99, updated_at='newer revision' WHERE id=?").run(expectedId)
+  }
+  const expectedRace = await request(products, 'PUT', `/${expectedId}`, { expectedUpdatedAt: 'editor revision', cost_price_usd: 2 })
+  assert.equal(expectedRace.status, 409)
+  assert.equal(row(expectedId).cost_price_usd, 99, 'snapshot may not adopt a newer revision than the supplied editor token')
   const stale = await request(products, 'PUT', `/${id}`, { cost_price_usd: 2 }, requester)
   raw.prepare('UPDATE products SET cost_price_usd=7 WHERE id=?').run(id)
   const staleRow = row(id)
@@ -173,6 +202,69 @@ function seed(name = 'Existing') {
   assert.equal(row(groupId).name, 'Group Renamed')
   assert.equal(row(groupId).selling_price_usd, 1.234567)
   assert.equal(row(groupId).cost_price_usd, 1.2345)
+  const groupRaceId = seed('Race Initial'), groupRaceSibling = seed('Race Concurrent')
+  const groupRaceAudit = auditCount
+  let groupRaceSiblingBefore = row(groupRaceSibling)
+  afterRead = sql => {
+    if (!/SELECT cost_price_usd,cost_price_khr/.test(sql)) return
+    afterRead = null
+    raw.prepare("UPDATE products SET name='Race Concurrent' WHERE id=?").run(groupRaceId)
+    groupRaceSiblingBefore = row(groupRaceSibling) // include only the concurrent writer's real trigger effects
+  }
+  const groupRace = await request(products, 'PUT', `/${groupRaceId}`, { name: 'Race Initial', __rename_scope: 'group', cost_price_usd: 2 })
+  assert.equal(groupRace.status, 409)
+  assert.equal(row(groupRaceId).name, 'Race Concurrent')
+  assert.equal(row(groupRaceId).cost_price_usd, 1.2345)
+  assert.deepEqual(row(groupRaceSibling), groupRaceSiblingBefore)
+  assert.equal(auditCount, groupRaceAudit, 'late identity read cannot publish a new group rename before rejected money CAS')
+  const atomicGroupId = seed('Atomic Group'), atomicSibling = seed('Atomic Group')
+  const atomicSiblingBefore = row(atomicSibling), atomicAudit = auditCount
+  beforeBatch = () => raw.prepare('UPDATE products SET cost_price_usd=99 WHERE id=?').run(atomicGroupId)
+  const atomicGroupRace = await request(products, 'PUT', `/${atomicGroupId}`, { name: 'Atomic Renamed', __rename_scope: 'group', cost_price_usd: 1.2345 })
+  assert.equal(atomicGroupRace.status, 409)
+  assert.equal(row(atomicGroupId).name, 'Atomic Group')
+  assert.equal(row(atomicGroupId).cost_price_usd, 99)
+  assert.deepEqual(row(atomicSibling), atomicSiblingBefore)
+  assert.equal(auditCount, atomicAudit)
+  for (const mutation of ['cost', 'description', 'membership', 'destination_cost', 'destination_membership']) {
+    const leader = seed(`Group ${mutation}`), sibling = seed(`Group ${mutation}`)
+    const destination = seed(`Renamed ${mutation}`)
+    raw.prepare('UPDATE products SET barcode=? WHERE id=?').run(`destination-${destination}`, destination)
+    let expectedLeader, expectedSibling, expectedDestination, expectedCount
+    const auditAtStart = auditCount
+    beforeBatch = () => {
+      if (mutation === 'cost') raw.prepare('UPDATE products SET cost_price_usd=44 WHERE id=?').run(sibling)
+      if (mutation === 'description') raw.prepare("UPDATE products SET description='concurrent' WHERE id=?").run(sibling)
+      if (mutation === 'membership') seed(`Group ${mutation}`)
+      if (mutation === 'destination_cost') raw.prepare('UPDATE products SET cost_price_usd=88 WHERE id=?').run(destination)
+      if (mutation === 'destination_membership') seed(`Renamed ${mutation}`)
+      expectedLeader = row(leader); expectedSibling = row(sibling)
+      expectedDestination = row(destination)
+      expectedCount = raw.prepare('SELECT COUNT(*) n FROM products').get().n
+    }
+    const conflict = await request(products, 'PUT', `/${leader}`, { name: `Renamed ${mutation}`, __rename_scope: 'group', cost_price_usd: 1.2345 })
+    assert.equal(conflict.status, 409, mutation)
+    assert.deepEqual(row(leader), expectedLeader, mutation)
+    assert.deepEqual(row(sibling), expectedSibling, mutation)
+    assert.deepEqual(row(destination), expectedDestination, mutation)
+    assert.equal(raw.prepare('SELECT COUNT(*) n FROM products').get().n, expectedCount)
+    assert.equal(auditCount, auditAtStart)
+  }
+  const reviewedGroup = await request(products, 'PUT', `/${atomicGroupId}`, { name: 'Reviewed Group', __rename_scope: 'group', cost_price_usd: 99 }, requester)
+  assert.equal(reviewedGroup.status, 202)
+  assert.equal(row(atomicGroupId).name, 'Atomic Group', 'review submission has no group side effects')
+  assert.deepEqual(row(atomicSibling), atomicSiblingBefore)
+  assert.equal(auditCount, atomicAudit)
+  assert.equal((await request(reviews, 'POST', `/${reviewedGroup.body.pendingActionId}/approve`, {})).status, 200)
+  assert.equal(row(atomicGroupId).name, 'Reviewed Group')
+  assert.equal(row(atomicSibling).name, 'Reviewed Group')
+  const oversized = seed('Oversized guarded group')
+  raw.prepare('UPDATE products SET description=? WHERE id=?').run('x'.repeat(500_001), oversized)
+  const oversizedBefore = row(oversized), oversizedAudit = auditCount
+  const oversizedResponse = await request(products, 'PUT', `/${oversized}`, { name: 'Oversized renamed', __rename_scope: 'group' })
+  assert.equal(oversizedResponse.body.code, 'product_group_plan_too_large')
+  assert.deepEqual(row(oversized), oversizedBefore)
+  assert.equal(auditCount, oversizedAudit)
   const invalid = { product_money_policy_version: 1, _product_money_write_plan: { version: 0 } }
   assert.throws(() => writer.readProductMoneyPlan(invalid), /invalid/)
   for (const mutate of [p => { p.product_money_policy_version = 0 }, p => { p._product_money_write_plan.extra = true }, p => { delete p._product_money_write_plan.before.updated_at }, p => { p.cost_price_usd = 100 }]) {

@@ -192,6 +192,9 @@ registerApplier('products', 'update', 'product', async (env, row, reviewer) => {
     }
   }
   const changes = await updateRow(env, 'products', id, body)
+  const appliedGroupRename = readProductMoneyPlan(body)?.group_rename
+  if (appliedGroupRename) await audit(env, reviewer.id, reviewer.name, 'rename', 'product_group', id,
+    { from: appliedGroupRename.from, to: appliedGroupRename.to, rows: appliedGroupRename.members.length })
   if (!changes && !('image_gallery' in body)) return
   if (!changes) {
     const existing = await getDb(env).prepare('SELECT id FROM products WHERE id = @id').get<{ id: number }>({ id })

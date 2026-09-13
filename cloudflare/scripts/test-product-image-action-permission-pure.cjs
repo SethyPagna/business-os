@@ -43,9 +43,9 @@ const imagePermission = loadTs('lib/productImagePermission.ts', { './media': med
 const permissions = loadTs('lib/permissions.ts')
 const moneyPrecision = loadTs('lib/moneyPrecision.ts')
 const productMerge = loadTs('lib/productMerge.ts', { './moneyPrecision': moneyPrecision })
-const realProductWrites = loadTs('lib/productWrites.ts', {
+const loadProductWrites = db => loadTs('lib/productWrites.ts', {
   './moneyPrecision': moneyPrecision,
-  './db': loadTs('lib/db.ts'),
+  './db': db,
   './media': media,
   './batchCode': loadTs('lib/batchCode.ts'),
   './searchMatch': loadTs('lib/searchMatch.ts'),
@@ -98,6 +98,10 @@ function loadProductsRoute(state) {
           return []
         },
         async get() {
+          if (/SELECT cost_price_usd,cost_price_khr/.test(sql)) return Object.fromEntries(
+            ['cost_price_usd', 'cost_price_khr', 'selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr', 'updated_at', 'name']
+              .map(key => [key, state.current[key] ?? null]),
+          )
           if (/SELECT image_path FROM products/i.test(sql)) return { image_path: state.current.image_path }
           if (/SELECT \* FROM products/i.test(sql)) return { ...state.current }
           return undefined
@@ -107,16 +111,24 @@ function loadProductsRoute(state) {
     },
     async batch() { state.dbWrites++; return [] },
   }
+  const realProductWrites = loadProductWrites({ getDb: () => db })
+  const persistableBody = body => {
+    assert.equal(realProductWrites.readProductMoneyPlan(body)?.version, 1, 'fresh image/nonmoney requests carry a validated immutable server policy')
+    // Preserve all supplied image/nonmoney keys in this fixture. Only the
+    // actual writer's server-metadata exclusions are removed from capture.
+    return realProductWrites.cleanPayload(body, new Set(Object.keys(body)))
+  }
   const productWrites = {
     prepareProductMoneyWrite: realProductWrites.prepareProductMoneyWrite,
     ProductMoneyWriteError: realProductWrites.ProductMoneyWriteError,
+    readProductMoneyPlan: realProductWrites.readProductMoneyPlan,
     PRODUCT_SKIP_KEYS: new Set(),
     nowIso: () => '',
     tableColumns: async () => [],
     clampNegativeStockQuantity: () => {},
     cleanPayload: (value) => value,
-    insertRow: async (_env, _table, body) => { state.inserted.push({ ...body }); return 77 },
-    updateRow: async (_env, _table, _id, body) => { state.updated.push({ ...body }); return 1 },
+    insertRow: async (_env, _table, body) => { state.inserted.push(persistableBody(body)); return 77 },
+    updateRow: async (_env, _table, _id, body) => { state.updated.push(persistableBody(body)); return 1 },
     syncProductImageGallery: async (_env, _id, gallery) => { state.synced.push([...gallery]); return [...gallery] },
     defaultBranchId: async () => 1,
     seedBranchStockForNewProduct: async () => {},
