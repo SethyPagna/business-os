@@ -164,12 +164,11 @@ test('a merge that changes nothing but the row count still needs no dialog', () 
   }), true)
 })
 
-test('there is ONE shared flow, and all three twin-resolving surfaces use it', () => {
+test('exact-identity twin surfaces use the shared stock choice flow', () => {
   assert.match(hook, /export function useMergeStockChoice/)
   for (const [label, src] of [
     ['Conflicts/duplicates tab', duplicatesTab],
     ['products list exact-duplicate resolver', productsPage],
-    ['product form collision path', productForm],
   ] as const) {
     assert.match(src, /useMergeStockChoice/, `${label} must route through the shared flow`)
     assert.match(src, /mergeWithChoice\(/, `${label} must merge through mergeWithChoice`)
@@ -184,7 +183,9 @@ test('there is ONE shared flow, and all three twin-resolving surfaces use it', (
 test('saving a product into an existing twin offers the merge instead of dead-ending', () => {
   assert.match(productForm, /duplicateCollisionFrom\(error\)/)
   assert.match(productForm, /'duplicate_product'/, 'the 409 the server sends is what opens the merge')
-  assert.match(productForm, /if \(outcome === 'merged'\)/)
+  assert.match(productForm, /setIdentityCollision\(collision\)/)
+  assert.match(productForm, /onReviewIdentityCollision\(productIds\)/)
+  assert.doesNotMatch(productForm, /mergeWithChoice\(/, 'a refused edit must not send the unchanged identity to the exact-pair endpoint')
 })
 
 test('the transport carries the answer and the server refusal keeps its breakdown', () => {

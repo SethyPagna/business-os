@@ -39,21 +39,21 @@ test('selected merge partitions candidates before requesting one combined previe
 })
 
 test('N-row selections can open one durable paged review without replacing the legacy pair merge', () => {
-  assert.match(src, /buildSelectedConflictGroupReviewRequest\(targets, createClientRequestId\('product-conflict-group-review'\), groupRemovalReasons\)/)
+  assert.match(src, /buildSelectedConflictGroupReviewRequest\(targets, createClientRequestId\('product-conflict-group-review'\), removalReasons\)/)
   assert.match(src, /createSelectedConflictGroupReview\(body, \{ signal: request\.signal \}\)/)
   assert.match(src, /setGroupReviewPages\(\[review\]\)/)
   assert.match(src, /getSelectedConflictGroupReviewPage\(current\.review_id, cursor, SELECTED_CONFLICT_GROUP_REVIEW_PAGE_LIMIT/)
   assert.match(src, /next\.draft_digest === current\.draft_digest[\s\S]*next\.page\.cursor !== cursor/, 'a mismatched page cannot be joined to a different or changed review')
   assert.match(src, /<SelectedConflictGroupReviewModal/)
   assert.match(src, /selected_conflict_group_review_action/)
-  assert.match(src, /selected_conflict_merge_exact_pairs/, 'the existing pair-only write remains separately available')
+  assert.doesNotMatch(src, /onClick=\{\(\) => void openSelectedMergeReview\(\)\}/, 'new selections use the durable group route; legacy receipt recovery remains available')
   assert.match(src, /Remove independently in the global review[\s\S]*Reason for removing this product/, 'independent removal is explicit and requires its own reason')
   assert.doesNotMatch(src, /selected_conflict_remove_unavailable/, 'the reviewed removal path is no longer presented as unavailable')
   assert.match(src, /groupReviewRequestRef[\s\S]*batchRequestRef/, 'read-only paging and legacy writes have independent cancellation ownership')
 })
 
 test('independent removal is rendered only when the caller has product-delete authority', () => {
-  assert.match(src, /ProductDuplicatesTab\(\{ t, notify, canRemoveProduct, onMergeLeadingZero \}/)
+  assert.match(src, /ProductDuplicatesTab\(\{ t, notify, canRemoveProduct, onMergeLeadingZero,/)
   assert.match(src, /selected && canRemoveProduct \? \(/, 'the selected-row removal control is absent when deletion is unavailable')
   assert.match(src, /canRemoveProduct=\{canRemoveProduct\}/, 'every rendered cluster receives the same resolved delete capability')
   const products = readFileSync(join(here, '..', 'src', 'components', 'products', 'Products.tsx'), 'utf8')
