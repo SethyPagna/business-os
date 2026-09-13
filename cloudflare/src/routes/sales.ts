@@ -131,6 +131,7 @@ import { buildLikeAliasClause, tokenizeSearchTermGroups, normalizeSearchText } f
 import { canonicalSaleItemMoney, computeSaleTotals, resolveChangeExchangeRate, round2, newSaleMoney4, assertCanonicalSaleChildren } from '../lib/saleTotals'
 import { roundMoney4, multiplyMoney4, divideMoney4, sumMoney4, subtractMoney4, subtractDecimalSum, sellingPriceCeilCent, MoneyPrecisionError } from '../lib/moneyPrecision'
 import { canonicalMoney4, SaleMoneyContractError } from '../lib/saleMoneyPrecision'
+import { quoteSaleMutationHeader, compareSaleHeaderQuote, SaleHeaderQuoteError } from '../lib/saleMutationHeaderQuote'
 import { financialCalculationValue } from '../lib/financialPrecision'
 import { planNativeSaleChange, NativeSaleChangeValidationError } from '../lib/nativeSaleChange'
 import { normalizeClientReceiptNumber, uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
@@ -1757,6 +1758,8 @@ app.post('/:id/status-receipt', async (c) => {
 
 export function saleLineReceiptCanonical(id: number, kind: 'add_items' | 'amendment', body: Record<string, unknown>): Record<string, unknown> {
   const shared = { notes: String(body.notes || '').trim().slice(0, 500) || null, expected_exchange_rate: body.expected_exchange_rate,
+    ...(Object.prototype.hasOwnProperty.call(body,'expected_header_quote') ? {expected_header_quote:body.expected_header_quote}:{}),
+    ...(Object.prototype.hasOwnProperty.call(body,'pricing_quote') ? {pricing_quote:body.pricing_quote}:{}),
     ...(Object.prototype.hasOwnProperty.call(body,'money_precision_version') ? { money_precision_version: body.money_precision_version } : {}),
     ...(Object.prototype.hasOwnProperty.call(body,'selling_price_input_usd') ? { selling_price_input_usd: body.selling_price_input_usd } : {}),
   }
@@ -3165,6 +3168,8 @@ app.post('/:id/items', async (c) => {
     taxPlan.outcome.taxUsd,
     Number(sale.delivery_fee_usd) || 0,
   )
+  const addHeaderConflict=reviewSaleHeaderQuote(body,sale,moneyAfter,moneySettings,taxPlan.outcome.taxUsd)
+  if(addHeaderConflict)return c.json(addHeaderConflict,409)
   const finalAllocation={version:1 as const,lines:[...existingPricing.map(line=>({line_key:line.line_key,amount:line.amounts.total_usd})),...provisionalAllocation.lines],
     discount_usd:Number(sale.discount_usd),membership_discount_usd:Number(sale.membership_discount_usd),tax_usd:taxPlan.outcome.taxUsd}
   for (const [index,line] of planned.entries()) line.pricingSnapshotJson=serializeSaleItemPricing(addedPool,addedQuantities,addedPool.lines[index].line_key,finalAllocation)
@@ -3392,6 +3397,7 @@ app.post('/:id/items', async (c) => {
   if (historyId > 0) response.actionHistoryId = response.undoActionId = historyId
   return c.json(response)
   } catch (error) {
+    if (error instanceof SaleHeaderQuoteError) return c.json({error:error.message,code:error.code},400)
     if (error instanceof SaleMoneyContractError || error instanceof MoneyPrecisionError || error instanceof SaleItemPricingError) return c.json({ error: error.message, code: error.code },409)
     throw error
   }
@@ -3699,7 +3705,7 @@ app.post('/:id/amendments', async (c) => {
       'kind', 'delivery_contact_id', 'delivery_fee_usd', 'delivery_actual_cost_usd',
       'notes', 'client_request_id', 'expected_exchange_rate', 'expected_updated_at', 'expectedUpdatedAt',
       'clientTime', 'deviceTz', 'deviceName',
-      'money_precision_version',
+      'money_precision_version', 'expected_header_quote',
     ])
     const unexpected = Object.keys(body).filter((key) => !allowed.has(key))
     if (unexpected.length) {
@@ -3877,6 +3883,8 @@ app.post('/:id/amendments', async (c) => {
     const moneyAfterSnapshot = amendmentMoneyAfter(
       sale, money, exchangeRate, mutationStamp, taxPlan.outcome.taxUsd, feeParsed.usd,
     )
+    const headerConflict=reviewSaleHeaderQuote(body,sale,moneyAfterSnapshot,moneySettings,taxPlan.outcome.taxUsd,{is_delivery:true,delivery_fee_usd:feeParsed.usd,delivery_fee_paid_by:'customer'})
+    if(headerConflict)return c.json(headerConflict,409)
     const recordBefore = {
       ...deliveryPlan.before,
       total_usd: totalBeforeUsd,
@@ -4120,6 +4128,8 @@ app.post('/:id/amendments', async (c) => {
       feeTaxPlan.outcome.taxUsd,
       feePlan.feeAfterUsd,
     )
+    const headerConflict=reviewSaleHeaderQuote(body,sale,moneyAfterSnapshot,moneySettings,feeTaxPlan.outcome.taxUsd,{delivery_fee_usd:feePlan.feeAfterUsd})
+    if(headerConflict)return c.json(headerConflict,409)
     const response = buildAmendmentResponsePayload({
       saleId, sale, money, exchangeRate, stockMoved: false, unitsMoved: 0, stockSkipped, tax: feeTaxPlan.outcome,
     }, mutationStamp)
@@ -4517,6 +4527,8 @@ app.post('/:id/amendments', async (c) => {
     taxPlan.outcome.taxUsd,
     Number(sale.delivery_fee_usd) || 0,
   )
+  const headerConflict=reviewSaleHeaderQuote(body,sale,moneyAfterSnapshot,moneySettings,taxPlan.outcome.taxUsd)
+  if(headerConflict)return c.json(headerConflict,409)
   if (capturedLineUpdate || kind==='line_removed' || kind==='line_replaced') {
     const allocation={version:1 as const,lines:pricingRowsAfter.map(row=>({line_key:parseSaleItemPricing(row.pricing_snapshot_json as string)!.line_key,amount:Number(row.total_usd)})),
       discount_usd:Number(sale.discount_usd),membership_discount_usd:Number(sale.membership_discount_usd),tax_usd:taxPlan.outcome.taxUsd}
@@ -4524,7 +4536,7 @@ app.post('/:id/amendments', async (c) => {
       const original=parseSaleItemPricing(row.pricing_snapshot_json as string)!, changed=repricedPools.get(original.pool.pool_key)
       return materializeCapturedPricingRow(row,changed?.pool??original.pool,changed?.quantities??original.quantities,original.line_key,allocation)
     })
-    validateCapturedSaleBasket(pricingRowsAfter,{...sale,...moneyAfterSnapshot})
+    validateCapturedSaleBasket(pricingRowsAfter,{...sale,...moneyAfterSnapshot,tax_usd:taxPlan.outcome.taxUsd})
     const existingPricingRows=pricingRowsAfter.filter(row=>Number(row.id)>0)
     if (existingPricingRows.length) statements.push(pricingRowsStatement(saleId,existingPricingRows))
     if (replacementLines) {
@@ -4623,6 +4635,7 @@ app.post('/:id/amendments', async (c) => {
 
   return c.json(await committedMutationResponse(db,mutationOperationId))
   } catch (error) {
+    if (error instanceof SaleHeaderQuoteError) return c.json({error:error.message,code:error.code},400)
     if (error instanceof SaleMoneyContractError || error instanceof MoneyPrecisionError || error instanceof SaleItemPricingError) return c.json({ error: error.message, code: error.code },409)
     throw error
   }
@@ -4706,6 +4719,14 @@ function amendmentMoneyBefore(sale: Record<string, unknown>) {
     delivery_fee_khr: nullableNumber(sale.delivery_fee_khr),
     membership_discount_khr: nullableNumber(sale.membership_discount_khr),
   }
+}
+
+function reviewSaleHeaderQuote(body:Record<string,unknown>,sale:Record<string,unknown>,after:Record<string,unknown>,settings:Awaited<ReturnType<typeof readAmendmentMoneySettings>>,taxUsd:number,
+  overrides:Parameters<typeof quoteSaleMutationHeader>[3]={}) {
+  const quote=quoteSaleMutationHeader(sale,Number(after.subtotal_usd),{tax_enabled:settings.taxEnabledRaw,tax_rate:settings.taxRateRaw},overrides)
+  if(quote.tax_usd!==taxUsd||(['subtotal_usd','exchange_rate','calculated_total_usd','rounding_adjustment_usd','total_usd','total_khr'] as const).some(key=>quote[key]!==after[key]))
+    throw new Error('Exact header quote disagrees with the guarded mutation plan')
+  return compareSaleHeaderQuote(body.expected_header_quote,quote)==='match'?null:{error:'Review the exact sale total before saving.',code:'sale_header_quote_conflict',header_quote:quote,proven_uncommitted:true}
 }
 
 function amendmentMoneyAfter(

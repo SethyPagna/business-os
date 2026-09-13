@@ -11,6 +11,19 @@ const harness = new Module(file,module); harness.filename=file; harness.paths=mo
 harness._compile(source.slice(0,boundary).replace('const overrides = {',"const overrides = { './db': { getDb: env => env.DB },")
   + '\nmodule.exports={fixture,request,postSale,creationState,app,executionCtx,USER,setUser(value){currentUser=value},load};',file)
 const h = harness.exports
+// Test client explicitly accepts only a definite, non-mutating header review
+// response, then keeps that exact quote frozen for retries. No runtime bypass.
+const requestActual=h.app.request.bind(h.app),reviewedBodies=new Map()
+h.app.request=async(url,init,env,ctx)=>{
+  if(init?.method!=='POST'||!/^\/\d+\/(items|amendments)$/.test(String(url)))return requestActual(url,init,env,ctx)
+  const body=JSON.parse(init.body),key=body.client_request_id
+  if(reviewedBodies.has(key))return requestActual(url,{...init,body:JSON.stringify({...body,expected_header_quote:reviewedBodies.get(key)})},env,ctx)
+  const first=await requestActual(url,init,env,ctx),review=await first.clone().json()
+  if(first.status!==409||review.code!=='sale_header_quote_conflict')return first
+  assert.equal(review.proven_uncommitted,true)
+  const frozen=JSON.stringify({...body,expected_header_quote:review.header_quote});reviewedBodies.set(key,review.header_quote)
+  return requestActual(url,{...init,body:frozen},env,ctx)
+}
 const kernel=h.load('lib/moneyPrecision.ts')
 function intent(key,base,quantity=1,fixed=0,rate=4000) {
   const gross=kernel.multiplyMoney4(base,quantity),manual=kernel.multiplyMoney4(fixed,quantity),total=kernel.subtractMoney4(gross,manual)

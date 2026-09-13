@@ -107,6 +107,19 @@ async function actualRoute() {
   const harness=new Module(file,module); harness.filename=file; harness.paths=module.paths
   harness._compile(source.slice(0,boundary).replace('const overrides = {',"const overrides = { './db': { getDb: env => env.DB },")+'\nmodule.exports={fixture,request,postSale,creationState,app,executionCtx,load,USER,setUser(value){currentUser=value}};',file)
   const h=harness.exports
+  // Exercise the explicit header-review round trip, preserving accepted bytes
+  // across retries. The separate header suite asserts missing/stale failures.
+  const requestActual=h.app.request.bind(h.app),reviewedBodies=new Map()
+  h.app.request=async(url,init,env,ctx)=>{
+    if(init?.method!=='POST'||!/^\/\d+\/(items|amendments)$/.test(String(url)))return requestActual(url,init,env,ctx)
+    const body=JSON.parse(init.body),key=body.client_request_id
+    if(reviewedBodies.has(key))return requestActual(url,{...init,body:JSON.stringify({...body,expected_header_quote:reviewedBodies.get(key)})},env,ctx)
+    const first=await requestActual(url,init,env,ctx),review=await first.clone().json()
+    if(first.status!==409||review.code!=='sale_header_quote_conflict')return first
+    assert.equal(review.proven_uncommitted,true)
+    const frozen=JSON.stringify({...body,expected_header_quote:review.header_quote});reviewedBodies.set(key,review.header_quote)
+    return requestActual(url,{...init,body:frozen},env,ctx)
+  }
   const request=()=>({...h.request('exact-line-route'),money_precision_version:1,amount_paid_usd:29,items:[{
     product_id:10,quantity:3,branch_id:1,batch_id:500,client_line_key:'route-a',pricing_source:'promotion',
     price_mode:'selling',product_discount_type:'spoofed',product_discount_label:'spoofed',
