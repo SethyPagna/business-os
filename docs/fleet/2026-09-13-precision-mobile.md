@@ -49,3 +49,9 @@ At dcabdc7c the first complete frontend chain was394/398: three obsolete layout/
 Backend scoped independent checks passed at dcabdc7c: kernel, movement costs, actual batch routes, cost writers, stock import,15 native transfer-cost cases and Worker typecheck. This does not certify settlement, refunds or report precision. Manual cost save/review versioning is the next identified end-to-end gap; server-owned plans must preserve old approvals and reject stale or downgraded changes.
 
 M3/M4 remain unimplemented. Proposed explicit calculated-total/rounding-adjustment/version columns are a reviewed local architecture only, not an applied migration. Existing sales payable semantics and saved KHR tender/rates must remain stable. Do not describe application-wide four-decimal calculations or settlement adjustments as finished.
+
+## Owner migration authorization and next gate
+
+Owner answered **Yes, after verification** to adding calculated-total, rounding-adjustment and precision-version fields to sales and returns. This authorizes the described additive production migration only after local verification; historical amounts must stay unchanged. No remote migration has run. The root goal now tracks precision/settlement/report parity, requested mobile fixes, independent verification and release provenance.
+
+The complete frontend chain at05aadd6f passed400/400 files with zero skips. Later SaleDetail/CartItem name changes and manual product-write policy require a fresh final gate. Candidatecd325d27 includes their initial versions, but independent product-write review found three blockers: fresh nonmoney review payloads could gain unvalidated money on resubmit; group rename side effects preceded a failed money CAS; and a stale expectedUpdatedAt could adopt a newer snapshot. Author repairs are underway with immutable policy markers on every new request and atomic source/destination group snapshots; do not deploy the initial version.
