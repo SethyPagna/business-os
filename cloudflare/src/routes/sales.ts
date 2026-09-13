@@ -37,6 +37,8 @@ import {
 } from '../lib/saleSettlementAction'
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from '../lib/saleRecordEvents'
 import { CUSTOMER_REFUND_JOIN, awaitingExpr, getCustomerSalesTotals, getDeliveryContactTotals, getPaymentMethodBreakdown, getSalesDayReport, getSalesPeriodSeries, getSalesTotals, netRefundExpr, netSaleExpr, recognizedExpr, saleStatusExpr } from '../lib/salesAnalytics'
+import { readSalesReportSnapshot, salesTotalsFromSnapshot, paymentMethodBreakdownFromSnapshot } from '../lib/salesAnalytics'
+import { ReportExactDecimal, ReportMoneyPrecisionError, REPORT_MONEY_MAX_ROWS, REPORT_MONEY_PAGE_SIZE } from '../lib/reportMoneyPrecision'
 import { allocateAcrossLots, decrementBatchStockStatement, decrementBatchStockStrictStatement, readFifoLotAvailabilityForCart, type FifoLotTake } from '../lib/productBatches'
 // S4-24b: adding lines to an EXISTING sale. The rules (which statuses accept
 // a line, how much stock moves, which lots, what happens to the totals) are
@@ -5493,6 +5495,30 @@ export function gateSalesCourierMoney(row:Record<string,unknown>,isAdmin:boolean
   return publicRow
 }
 
+async function readStripMoneyRows(db:ReturnType<typeof getDb>,table:'sales'|'returns',where:string,params:Record<string,unknown>) {
+  const columns=await db.prepare(`PRAGMA table_info(${table})`).all<{name:string}>()
+  const version=columns.some(row=>row.name==='money_precision_version')?'money_precision_version':'0 AS money_precision_version'
+  const amount=table==='sales'?'total_usd,sale_status':'total_refund_usd'
+  const rows:Record<string,unknown>[]=[]
+  let after=0
+  for(;;){
+    const page=await db.prepare(`SELECT id,${amount},${version} FROM ${table} WHERE ${where} AND id>@stripAfter ORDER BY id LIMIT ${REPORT_MONEY_PAGE_SIZE}`)
+      .all<Record<string,unknown>>({...params,stripAfter:after})
+    for(const row of page){
+      const id=Number(row.id)
+      if(!Number.isSafeInteger(id)||id<=after)throw new ReportMoneyPrecisionError('duplicate_row')
+      after=id;rows.push(row)
+      if(rows.length>REPORT_MONEY_MAX_ROWS)throw new ReportMoneyPrecisionError('too_many_rows')
+    }
+    if(page.length<REPORT_MONEY_PAGE_SIZE)return rows
+  }
+}
+function stripMoney(row:Record<string,unknown>,field:string):ReportExactDecimal {
+  const version=Number(row.money_precision_version??0)
+  if(version!==0&&version!==1)throw new ReportMoneyPrecisionError('unsupported_precision_version')
+  return ReportExactDecimal.money((version===0?(row[field]??0):row[field]) as number,version)
+}
+
 app.get('/stats-strip', async (c) => {
   if (!canReadSales(c.get('user'))) {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
@@ -5515,9 +5541,7 @@ app.get('/stats-strip', async (c) => {
     endTime: hasTimeRange ? endTime : null,
   }
   const rangeParams: Record<string, unknown> = { startDate, endDate }
-  // Status mix counts EVERY status (the kernel's whereActiveSales excludes
-  // cancelled/awaiting on purpose for money figures; the mix card exists
-  // precisely to show those too).
+  // Status mix includes cancelled sales, unlike recognized-money cohorts.
   const statusClauses = [localDateRangeClause('created_at')]
   if (hasTimeRange) {
     statusClauses.push(localTimeRangeClause('created_at'))
@@ -5527,17 +5551,6 @@ app.get('/stats-strip', async (c) => {
   if (query.branchId) { statusClauses.push('branch_id = @branchId'); rangeParams.branchId = query.branchId }
   const cacheVersion = await getSalesReadCacheVersion(c.env)
   const payload = await cachedJsonResponse(c.req.raw, c.executionCtx, cacheVersion, SALES_READ_CACHE_TTL_SECONDS, async () => {
-    const [totals, byPayment, byStatus, returnsRow] = await Promise.all([
-      getSalesTotals(c.env, filters),
-      getPaymentMethodBreakdown(c.env, filters),
-      db.prepare(`
-        SELECT COALESCE(NULLIF(TRIM(sale_status), ''), 'completed') AS sale_status,
-               COUNT(*) AS count, ROUND(COALESCE(SUM(total_usd), 0), 2) AS total_usd
-        FROM sales
-        WHERE ${statusClauses.join(' AND ')}
-        GROUP BY COALESCE(NULLIF(TRIM(sale_status), ''), 'completed')
-        ORDER BY count DESC
-      `).all<{ sale_status: string; count: number; total_usd: number }>(rangeParams),
     // RETURN-DATE ACTIVITY, not a revenue term. Every figure below is scoped
     // by the date the RETURN was created, which answers "what did the returns
     // desk do in this window". The kernel reverses a refund in the period of
@@ -5546,16 +5559,35 @@ app.get('/stats-strip', async (c) => {
     // subtract this from a revenue, profit or collected figure -- doing so
     // takes refunds off twice, on mismatched bases, and can drive a period
     // below zero. The sale-basis reversal is SalesTotals.refund_usd.
-      db.prepare(`
-        SELECT COUNT(*) AS count, ROUND(COALESCE(SUM(total_refund_usd), 0), 2) AS refund_usd
-        FROM returns
-        WHERE ${localDateRangeClause('created_at')}
+    const returnWhere=`${localDateRangeClause('created_at')}
           ${hasTimeRange ? `AND ${localTimeRangeClause('created_at')}` : ''}
           AND COALESCE(return_scope, 'customer') = 'customer'
           AND COALESCE(status, 'completed') <> 'cancelled'
-          ${query.branchId ? 'AND branch_id = @branchId' : ''}
-      `).get<{ count: number; refund_usd: number }>(rangeParams),
-    ])
+          ${query.branchId ? 'AND branch_id = @branchId' : ''}`
+    const readActivity=async()=>{
+      const status=await readStripMoneyRows(db,'sales',statusClauses.join(' AND '),rangeParams)
+      const returns=await readStripMoneyRows(db,'returns',returnWhere,rangeParams)
+      if(status.length+returns.length>REPORT_MONEY_MAX_ROWS)throw new ReportMoneyPrecisionError('too_many_rows')
+      return {status,returns}
+    }
+    // Both activity images enclose the shared reader's own coherent snapshot.
+    // Refuse mixed images rather than combining money from different reads.
+    const before=await readActivity()
+    const snapshot=await readSalesReportSnapshot(c.env,filters)
+    const after=await readActivity()
+    if(JSON.stringify(before)!==JSON.stringify(after))throw new ReportMoneyPrecisionError('snapshot_changed')
+    const totals=salesTotalsFromSnapshot(snapshot)
+    const byPayment=paymentMethodBreakdownFromSnapshot(snapshot)
+    const statuses=new Map<string,{count:number,total:ReportExactDecimal}>()
+    for(const row of before.status){
+      const status=String(row.sale_status??'').trim()||'completed'
+      const group=statuses.get(status)??{count:0,total:ReportExactDecimal.zero()}
+      group.count++;group.total=group.total.add(stripMoney(row,'total_usd'));statuses.set(status,group)
+    }
+    const byStatus=[...statuses].map(([sale_status,value])=>({sale_status,count:value.count,total_usd:value.total.toNumber()}))
+      .sort((a,b)=>b.count-a.count||a.sale_status.localeCompare(b.sale_status))
+    let refund=ReportExactDecimal.zero()
+    for(const row of before.returns)refund=refund.add(stripMoney(row,'total_refund_usd'))
     return {
       startDate,
       endDate,
@@ -5564,7 +5596,7 @@ app.get('/stats-strip', async (c) => {
       totals,
       by_payment: byPayment,
       by_status: byStatus || [],
-      returns: { count: Number(returnsRow?.count || 0), refund_usd: Number(returnsRow?.refund_usd || 0) },
+      returns: { count: before.returns.length, refund_usd: refund.toNumber() },
     }
   })
   return c.json({...payload,totals:gateSalesReportMoney(payload.totals as unknown as Record<string,unknown>,isAdminControlUser(c.get('user')))})

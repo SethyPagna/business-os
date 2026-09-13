@@ -22,6 +22,31 @@ const h=harness.exports
  const courier={charged_fee_usd:5,actual_cost_usd:2,actual_cost_count:1,linked_expense_count:1,linked_expense_usd:2,linked_expense_khr:0,last_expense_at:'private',margin_usd:3}
  assert.deepEqual(module.gateSalesCourierMoney(courier,false),{charged_fee_usd:5})
  assert.equal(module.gateSalesCourierMoney(courier,true),courier)
+ h.setUser({...h.USER,permissions:'{"all":true}'})
+ for(let index=0;index<3;index++){
+   f.raw.prepare("INSERT INTO sales(receipt_number,sale_status,total_usd,created_at,branch_id) VALUES(?,'cancelled',.0044,'2026-09-13 01:00:00',1)").run([`void-${index}`])
+   f.raw.prepare("INSERT INTO returns(return_number,total_refund_usd,created_at,branch_id) VALUES(?,.0044,'2026-09-13 01:00:00',1)").run([`activity-${index}`])
+ }
+ const exact=await get(paths[0])
+ assert.deepEqual(exact.by_status.find(row=>row.sale_status==='cancelled'),{sale_status:'cancelled',count:3,total_usd:.01})
+ assert.deepEqual(exact.returns,{count:3,refund_usd:.01})
+ assert.equal(exact.totals.revenue_usd,10,'independent return-date activity must not be subtracted from sale-basis revenue')
+ const precision=h.load('lib/reportMoneyPrecision.ts')
+ h.app.onError((error,c)=>{if(error instanceof precision.ReportMoneyPrecisionError){const mapped=precision.reportMoneyHttpError(error);return c.json({code:error.code},mapped.status)}throw error})
+ const prepare=f.route.prepare.bind(f.route);let activityReads=0
+ f.route.prepare=sql=>{
+   const statement=prepare(sql)
+   if(/SELECT id,total_refund_usd/.test(sql))return {...statement,all:params=>{
+     if(++activityReads===2)f.raw.prepare("UPDATE returns SET total_refund_usd=.0099 WHERE return_number='activity-0'").run()
+     return statement.all(params)
+   }}
+   return statement
+ }
+ const raced=await h.app.request(paths[0],{}, {DB:f.route},h.executionCtx)
+ assert.equal(raced.status,409);assert.deepEqual(await raced.json(),{code:'snapshot_changed'})
+ f.route.prepare=prepare
+ h.setUser({...h.USER,permissions:'{}'})
+ const denied=await h.app.request(paths[0],{}, {DB:f.route},h.executionCtx);assert.equal(denied.status,403)
  f.raw.db.close()
- console.log('PASS actual employee/admin sales report cost gates, courier projection and single adjustment recognition')
+ console.log('PASS actual employee/admin cost gates, exact status/return activity, independent refund cohort, coherent-read race refusal and adjustment recognition')
 })().catch(error=>{console.error(error);process.exitCode=1})
