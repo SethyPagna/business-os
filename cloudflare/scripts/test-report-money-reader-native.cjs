@@ -80,6 +80,25 @@ const filters = { startDate: '2026-09-01', endDate: '2026-09-30', branchId: 2 }
     'a caller can reuse the canonical totals reducer without a second report formula')
   assert.deepEqual(precise.paymentMethodBreakdownFromSnapshot(sharedSnapshot), await precise.getPaymentMethodBreakdown({}, filters),
     'payment grouping can reuse the same verified snapshot as totals')
+  let scopeCalls = 0
+  const scopedQueries = []
+  const scoped = kernel(preciseDb, (query) => { if (query.includes('@reportScope_saleId')) scopedQueries.push(query) })
+  const scopedSnapshot = await scoped.readSalesReportSnapshot({}, filters, false, (alias) => {
+    scopeCalls += 1
+    assert.equal(alias, 's')
+    return { sql: `(${alias}.id = @reportScope_saleId OR ${alias}.source_return_id = @reportScope_saleId)`,
+      params: { reportScope_saleId: 1 } }
+  })
+  assert.equal(scopeCalls, 1, 'scope callback is captured once for both complete passes')
+  assert.deepEqual(scopedSnapshot.sales.map((row) => row.id), [1])
+  assert.deepEqual(scopedSnapshot.items.map((row) => row.sale_id), [1])
+  for (const table of ['FROM sales s WHERE', 'FROM sale_items si WHERE EXISTS', 'FROM returns r WHERE', 'FROM return_items ri WHERE EXISTS']) {
+    assert.ok(scopedQueries.some((query) => query.includes(table)), `scope reaches ${table}`)
+  }
+  await assert.rejects(() => scoped.readSalesReportSnapshot({}, filters, false, () => ({ sql: 's.id=@status', params: { status: 1 } })),
+    (error) => error.code === 'unsupported_row', 'scope params must use the reserved namespace')
+  await assert.rejects(() => scoped.readSalesReportSnapshot({}, filters, false, () => ({ sql: 's.id=@reportScope_id', params: {} })),
+    (error) => error.code === 'unsupported_row', 'every scope placeholder must be bound')
   const periods = await precise.getBusinessSummaryPeriodRows({}, filters, 'month')
   assert.equal(periods[0].revenue_usd, total.revenue_usd, 'period reads the same recorded operands instead of summing displayed days')
   const series = await precise.getSalesPeriodSeries({}, filters, 'day')
