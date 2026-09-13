@@ -27,7 +27,7 @@
  * routes/sales.ts has always used -- changing money-rounding behavior is a
  * deliberate, separately-reviewed decision, not a refactor side effect.
  */
-import { roundMoney4, roundMoney2, sumMoney4, subtractMoney4, multiplyMoney4, divideMoney4, sellingPriceCeilCent } from './moneyPrecision'
+import { roundMoney4, roundMoney2, sumMoney4, subtractMoney4, multiplyMoney4, nativeChangeAmounts, sellingPriceCeilCent } from './moneyPrecision'
 import { buildSaleMoneyPrecision, canonicalMoney4, SaleMoneyContractError } from './saleMoneyPrecision'
 
 export function round2(n: number): number {
@@ -240,11 +240,12 @@ function computeSaleTotalsV1(input: SaleTotalsInput): SaleTotals {
     ? input.preserveRecordedTender ? Number(input.rawAmountPaidUsd) : roundMoney2(input.rawAmountPaidUsd as number) : financial.total_usd
   const amountPaidKhr = isSuppliedAmount(input.rawAmountPaidKhr)
     ? input.preserveRecordedTender ? Number(input.rawAmountPaidKhr) : Math.round(Number(input.rawAmountPaidKhr)) : 0
-  const changeExact4 = Math.max(0,sumMoney4([amountPaidUsd, divideMoney4(amountPaidKhr,rate), -financial.total_usd]))
+  const change = nativeChangeAmounts({paidUsd:amountPaidUsd,paidKhr:amountPaidKhr,payableUsd:financial.total_usd,
+    exchangeRate:rate,changeExchangeRate:resolveChangeExchangeRate(input.changeExchangeRate,rate)})
   return { customerDeliveryFeeUsd, totalUsd: financial.total_usd,
     calculatedTotalUsd: financial.calculated_total_usd, roundingAdjustmentUsd: financial.rounding_adjustment_usd, moneyPrecisionVersion: 1,
     totalKhr: multiplyMoney4(financial.total_usd,rate), amountPaidUsd, amountPaidKhr,
-    changeUsd: roundMoney2(changeExact4), changeKhr: Math.round(multiplyMoney4(changeExact4,resolveChangeExchangeRate(input.changeExchangeRate,rate))) }
+    changeUsd: change.changeUsd, changeKhr: change.changeKhr }
 }
 
 /** Whole-basket upgrade precondition. Unknown/higher-precision historical money

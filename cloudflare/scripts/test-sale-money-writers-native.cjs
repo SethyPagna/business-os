@@ -173,5 +173,34 @@ async function run() {
   assert.equal(rejectedLegacy.status,409,JSON.stringify(await rejectedLegacy.json()))
   assert.deepEqual(h.creationState(legacyDb.raw),beforeAmbiguous)
   console.log('PASS unknown captured cost stays NULL; ambiguous historical five-place price upgrade refuses')
+  const totalInput = {subtotalUsd:1,discountUsd:0,membershipDiscountUsd:0,taxUsd:0,isDelivery:false,
+    deliveryFeeUsd:0,deliveryFeePaidBy:'customer',exchangeRate:4020,rawAmountPaidUsd:1,rawAmountPaidKhr:20}
+  for (const version of [0,1]) {
+    const result = h.load('lib/saleTotals.ts').computeSaleTotals({...totalInput,moneyPrecisionVersion:version})
+    assert.equal(result.changeUsd,0);assert.equal(result.changeKhr,20)
+  }
+  const preciseChangeDb = h.fixture()
+  const changeBody = {...h.request('native-change'),money_precision_version:1,exchange_rate:4020,
+    amount_paid_usd:1,amount_paid_khr:20,
+    items:[{product_id:10,quantity:1,branch_id:1,batch_id:500,applied_price_usd:1}]}
+  const preciseChange = await h.postSale(preciseChangeDb.route,changeBody)
+  assert.equal(preciseChange.status,200,JSON.stringify(preciseChange.body))
+  assert.equal(preciseChange.body.sale.change_usd,0);assert.equal(preciseChange.body.sale.change_khr,20)
+  const settlement = h.load('lib/paymentSettlement.ts').planSaleSettlement({moneyPrecisionVersion:1,
+    configuredMethodsRaw:'["Cash"]',paymentDetailsRaw:[{method:'Cash',amount_usd:1,amount_khr:20}],
+    existingPaidUsd:0,existingPaidKhr:0,totalUsd:1,exchangeRate:4020})
+  assert.equal(settlement.changeUsd,0);assert.equal(settlement.changeKhr,20)
+  const actualChange = await h.postSale(preciseChangeDb.route,{...changeBody,client_request_id:'recorded-native-change',
+    change_is_actual:true,change_usd:0,change_khr:20})
+  assert.equal(actualChange.status,200,JSON.stringify(actualChange.body))
+  const actualAdd = await h.app.request(`/${actualChange.body.id}/items`,{method:'POST',headers:{'content-type':'application/json'},
+    body:JSON.stringify({money_precision_version:1,client_request_id:'actual-change-add',expected_exchange_rate:4020,
+      items:[{product_id:10,quantity:1,branch_id:1,batch_id:500,applied_price_usd:.1}]})},{DB:preciseChangeDb.route},h.executionCtx)
+  const actualAdded = await actualAdd.json()
+  assert.equal(actualAdd.status,200,JSON.stringify(actualAdded))
+  assert.equal(actualAdded.sale.change_is_actual,1)
+  assert.equal(actualAdded.sale.change_usd,0);assert.equal(actualAdded.sale.change_khr,20)
+  assert.equal(actualAdded.sale.change_exchange_rate,actualChange.body.sale.change_exchange_rate)
+  console.log('PASS exact native change USD1+KHR20 at4020 yields USD0/KHR20; legacy and recorded actual change preserved')
 }
 run().catch(error=>{console.error(error);process.exitCode=1})

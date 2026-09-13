@@ -13,7 +13,7 @@ import {
   paymentMethodKey,
 } from './paymentMethodRegistry'
 import { resolveChangeExchangeRate } from './saleTotals'
-import { subtractDecimalSum, weightedMeanMoney4 } from './moneyPrecision'
+import { nativeChangeAmounts } from './moneyPrecision'
 
 export const MAX_SETTLEMENT_TENDER_ROWS = 12
 
@@ -281,16 +281,16 @@ export function planSaleSettlement(input: {
   if (paidScaled < totalScaled) {
     fail('The payment does not cover the sale balance.', 'insufficient_payment')
   }
-  let overpayExactUsd: number
+  const overpayExactUsd = Math.max(0, paidCombinedUsd - totalUsd)
+  const changeRate = resolveChangeExchangeRate(input.changeExchangeRateRaw, rate)
+  let nativeChange: ReturnType<typeof nativeChangeAmounts> | null = null
   try {
-    overpayExactUsd = input.moneyPrecisionVersion === 1 ? Math.max(0,weightedMeanMoney4([
-      {amount:subtractDecimalSum(amountPaidUsd,[totalUsd]),factor:rate},
-      {amount:amountPaidKhr,factor:1},
-    ],rate)) : Math.max(0, paidCombinedUsd - totalUsd)
+    if (input.moneyPrecisionVersion === 1) nativeChange = nativeChangeAmounts({
+      paidUsd:amountPaidUsd,paidKhr:amountPaidKhr,payableUsd:totalUsd,exchangeRate:rate,changeExchangeRate:changeRate,
+    })
   } catch {
     fail('The converted payment exceeds the supported monetary range.', 'invalid_payment_amount')
   }
-  const changeRate = resolveChangeExchangeRate(input.changeExchangeRateRaw, rate)
   const distinctMethods: string[] = []
   const seen = new Set<string>()
   for (const detail of paymentDetails) {
@@ -307,8 +307,8 @@ export function planSaleSettlement(input: {
     paymentCurrency: paidUsdUnits > 0n && paidKhrUnits > 0n ? 'MIXED' : paidKhrUnits > 0n ? 'KHR' : 'USD',
     amountPaidUsd,
     amountPaidKhr,
-    changeUsd: actualUsdValue(overpayExactUsd),
-    changeKhr: actualKhrValue(overpayExactUsd * changeRate),
+    changeUsd: nativeChange ? nativeChange.changeUsd : actualUsdValue(overpayExactUsd),
+    changeKhr: nativeChange ? nativeChange.changeKhr : actualKhrValue(overpayExactUsd * changeRate),
     exchangeRate: rate,
     changeExchangeRate: changeRate,
   }
