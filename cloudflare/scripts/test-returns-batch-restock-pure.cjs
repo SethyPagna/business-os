@@ -382,7 +382,7 @@ async function main() {
     const postConflictBody = { ...body, expected_quote: postConflictExpectedQuote }
 
     const deniedUser = { id: 4, username: 'no-read', name: 'No Read',
-      permissions: JSON.stringify({ returns: 'full', 'returns:view': false }) }
+      permissions: JSON.stringify({ returns: true, 'returns:view': false }) }
     const denied = await reqAs(deniedUser, 'POST', '/', { ...postConflictBody, client_request_id: 'v1-no-read' })
     assert.strictEqual(denied.status, 403, JSON.stringify(denied.json))
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM returns').get().n, 0)
