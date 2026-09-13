@@ -162,6 +162,13 @@ function sumProducts(values: readonly { amount: DecimalInput; factor: DecimalInp
 export function sumProductsMoney4(values: readonly { amount: DecimalInput; factor: DecimalInput }[]): number {
   return output(sumProducts(values))
 }
+/** Percentage of an exact aggregate base, without rounding individual products
+ * or their sum first. Signed terms may cancel before the final money bound.
+ */
+export function sumProductsPercentageMoney4(values: readonly { amount: DecimalInput; factor: DecimalInput }[], percent: DecimalInput): number {
+  const total = sumProducts(values), p = decimal(percent)
+  return output(fraction(total.n * p.n, total.d * p.d * 100n))
+}
 /** Weighted unit cost uses the unrounded numerator, never the rounded total. */
 export function weightedMeanMoney4(values: readonly { amount: DecimalInput; factor: DecimalInput }[], totalWeight: DecimalInput): number {
   const total = sumProducts(values), weight = decimal(totalWeight)
