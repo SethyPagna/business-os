@@ -644,9 +644,15 @@ export function sameSaleStateFingerprint(currentJson: string, expectedJson: stri
   try {
     const current = JSON.parse(currentJson), expected = JSON.parse(expectedJson)
     if (!current?.sale || !expected?.sale || !samePrecisionCompatibleState(current.sale,expected.sale)) return false
-    // Only the sale's additive precision defaults may differ. Lines, amendment
-    // head and every other captured field retain their exact comparison.
-    return JSON.stringify({ ...current, sale: expected.sale }) === expectedJson
+    // Only absent legacy pricing provenance may project a newly added NULL.
+    // Non-NULL provenance and all other line fields remain exact conflicts.
+    if (!Array.isArray(current.lines) || !Array.isArray(expected.lines) || current.lines.length!==expected.lines.length) return false
+    const lines=current.lines.map((row:Record<string,unknown>,index:number)=>{
+      if (Object.prototype.hasOwnProperty.call(expected.lines[index],'pricing_snapshot_json')) return row
+      if (row.pricing_snapshot_json!==null) return row
+      const legacy={...row}; delete legacy.pricing_snapshot_json; return legacy
+    })
+    return JSON.stringify({ ...current, sale: expected.sale, lines }) === expectedJson
   } catch { return false }
 }
 

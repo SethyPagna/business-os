@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { getDb } from '../lib/db'
-import { capturePricingProduct, evaluateCapturedPricingPool, parseSaleItemPricing, pricingSourceGuard, serializeSaleItemPricing, validateCapturedSaleBasket, type CapturedPricingPool, type PricingSource } from '../lib/saleItemPricing'
+import { capturePricingProduct, evaluateCapturedPricingPool, materializeCapturedPricingRow, parseSaleItemPricing, pricingRowsStatement, pricingSourceGuard, serializeSaleItemPricing, validateCapturedSaleBasket, SaleItemPricingError, type CapturedPricingPool, type PricingSource } from '../lib/saleItemPricing'
 import { normalizePromotionRule } from '../lib/promotionRules'
 import { chunkForBinding, selectInChunks } from '../lib/sqlBinding'
 import { requireAuth, type SessionUser } from '../lib/auth'
@@ -1654,7 +1654,7 @@ app.post('/', async (c) => {
     itemCount: priced.length,
   })
   } catch (error) {
-    if (error instanceof SaleMoneyContractError || error instanceof MoneyPrecisionError) return c.json({ error: error.message, code: error.code }, 400)
+    if (error instanceof SaleMoneyContractError || error instanceof MoneyPrecisionError || error instanceof SaleItemPricingError) return c.json({ error: error.message, code: error.code }, 400)
     throw error
   }
 })
@@ -3391,7 +3391,7 @@ app.post('/:id/items', async (c) => {
   if (historyId > 0) response.actionHistoryId = response.undoActionId = historyId
   return c.json(response)
   } catch (error) {
-    if (error instanceof SaleMoneyContractError || error instanceof MoneyPrecisionError) return c.json({ error: error.message, code: error.code },409)
+    if (error instanceof SaleMoneyContractError || error instanceof MoneyPrecisionError || error instanceof SaleItemPricingError) return c.json({ error: error.message, code: error.code },409)
     throw error
   }
 })
@@ -3803,7 +3803,7 @@ app.post('/:id/amendments', async (c) => {
   const lineMoneyRowsBefore = await db.prepare(`
     SELECT id,applied_price_usd,applied_price_khr,total_usd,total_khr,
            product_discount_usd,product_discount_khr,base_price_usd,base_price_khr,
-           manual_discount_usd,manual_discount_khr
+           manual_discount_usd,manual_discount_khr,pricing_snapshot_json
     FROM sale_items WHERE sale_id=? ORDER BY id
   `).all<Record<string, unknown>>([saleId])
   const lineMoneyBefore = captureSaleLineKhrSnapshot(lineMoneyRowsBefore)
@@ -4209,67 +4209,46 @@ app.post('/:id/amendments', async (c) => {
   const groupId = crypto.randomUUID()
   let subtotalDeltaUsd = 0
   let unitsMoved = 0
+  let pricingRowsAfter=precisionBasket!.lines.map(row=>({...row}))
+  const repricedPools=new Map<string,{pool:CapturedPricingPool;quantities:Record<string,number>}>()
+  const capturedLineUpdate=kind==='line_updated'||kind==='line_quantity_increased'||kind==='line_quantity_decreased'
+  if (kind==='line_replaced') return c.json({error:'Captured-price replacement is not ready. Keep this sale unchanged.',code:'sale_pricing_mutation_not_ready'},409)
+  if (kind==='line_removed' && pricingRowsAfter.length<=1) return c.json({error:'Cancel the sale instead of removing its last priced line.',code:'sale_last_line_remove_refused'},409)
 
   // A single reviewed edit can change the line's quantity and its final
   // selling price. Quantity movement still uses the exact FIFO/stock plans
   // below; the price statement then rewrites the line's canonical charge and
   // clears stale discount metadata so totals and discount reporting cannot
   // disagree with the price the cashier explicitly entered.
-  if (kind === 'line_updated') {
-    const requestedPrice = Number(body.applied_price_usd)
-    if (!Number.isFinite(requestedPrice) || requestedPrice < 0) {
-      return c.json({ error: 'Selling price must be a non-negative number.' }, 400)
+  if (capturedLineUpdate) {
+    const originalSnapshot=parseSaleItemPricing(precisionBasket!.lines.find(row=>row.id===line.id)!.pricing_snapshot_json as string)!
+    const pool=structuredClone(originalSnapshot.pool), quantities={...originalSnapshot.quantities}
+    const target=pool.lines.find(row=>row.line_key===originalSnapshot.line_key)!
+    const currentQuantity=Number(line.quantity)
+    const enteredQuantity=body.quantity===undefined?currentQuantity:Number(body.quantity)
+    if (kind!=='line_updated' && (!Number.isFinite(enteredQuantity)||enteredQuantity<=0)) return c.json({error:'Enter a positive quantity change.'},400)
+    const nextQty=kind==='line_quantity_increased'?currentQuantity+enteredQuantity:kind==='line_quantity_decreased'?currentQuantity-enteredQuantity:enteredQuantity
+    if (!Number.isFinite(nextQty) || nextQty<=0) return c.json({error:'Use Remove when a line should be taken off the sale.'},400)
+    const quantityChanged=nextQty!==currentQuantity
+    quantities[target.line_key]=nextQty
+    if (body.selling_price_input_usd!==undefined) {
+      sellingPriceCeilCent(body.selling_price_input_usd as number)
+      target.source='manual'; target.selling_price_input_usd=body.selling_price_input_usd as number
     }
-    const hasLayeredPriceEdit = body.base_price_usd !== undefined
-      || body.manual_discount_type !== undefined
-      || body.manual_discount_value !== undefined
-      || body.manual_discount_usd !== undefined
-    const oldPrice = Number(line.applied_price_usd)
-    const oldBasePrice = Number(line.base_price_usd)
-    const oldDiscountType: 'percent' | 'fixed' | null = line.manual_discount_type === 'percent' || line.manual_discount_type === 'fixed'
-      ? line.manual_discount_type
-      : Number(line.manual_discount_usd) > 0 ? 'fixed' : null
-    const oldDiscountValue = oldDiscountType === 'percent'
-      ? Number(line.manual_discount_value) || 0
-      : Number(line.manual_discount_value) || Number(line.manual_discount_usd) || 0
-
-    let nextBasePrice = oldBasePrice
-    let nextDiscountType = oldDiscountType
-    let nextDiscountValue = oldDiscountValue
-    let nextManualDiscountUsd = Number(line.manual_discount_usd) || 0
-    let nextPrice = hasLayeredPriceEdit || requestedPrice === oldPrice ? newSaleMoney4(requestedPrice) : sellingPriceCeilCent((body.selling_price_input_usd ?? requestedPrice) as number)
-    if (hasLayeredPriceEdit) {
-      const pricePlan = planSaleLinePriceEdit({
-        moneyPrecisionVersion:1, sellingPriceInputUsd:body.selling_price_input_usd,
-        basePriceUsd: body.base_price_usd === undefined ? oldBasePrice : body.base_price_usd,
-        discountType: body.manual_discount_type === undefined ? oldDiscountType : body.manual_discount_type,
-        discountValue: body.manual_discount_value === undefined ? oldDiscountValue : body.manual_discount_value,
-        claimedManualDiscountUsd: body.manual_discount_usd,
-        claimedAppliedPriceUsd: body.applied_price_usd,
-      })
-      if (!pricePlan.ok) return c.json({ error: pricePlan.error }, 400)
-      nextBasePrice = pricePlan.basePriceUsd
-      nextDiscountType = pricePlan.discountType
-      nextDiscountValue = pricePlan.discountValue
-      nextManualDiscountUsd = pricePlan.manualDiscountUsd
-      nextPrice = pricePlan.appliedPriceUsd
+    if (body.manual_discount_type!==undefined) {
+      if (body.manual_discount_type!==null && body.manual_discount_type!=='fixed' && body.manual_discount_type!=='percent')
+        return c.json({error:'Invalid manual discount mode.'},400)
+      target.manual.type=body.manual_discount_type===null?'none':body.manual_discount_type
     }
-    const currentQuantity = Number(line.quantity) || 0
-    const nextQuantity = body.quantity === undefined || body.quantity === null || String(body.quantity).trim() === ''
-      ? currentQuantity
-      : Number(body.quantity)
-    if (!Number.isFinite(nextQuantity) || nextQuantity < 0) return c.json({ error: 'Quantity must be a non-negative number.' }, 400)
-    const nextQty = nextQuantity
-    if (nextQty <= 0) return c.json({ error: 'Use Remove when a line should be taken off the sale.' }, 400)
-    const quantityChanged = nextQty !== currentQuantity
-    const priceChanged = nextPrice !== oldPrice
-    const priceLayersChanged = hasLayeredPriceEdit && (
-      nextBasePrice !== oldBasePrice
-      || nextDiscountType !== oldDiscountType
-      || nextDiscountValue !== oldDiscountValue
-    )
-    if (!quantityChanged && !priceChanged && !priceLayersChanged) return c.json({ error: 'Enter a new quantity, selling price, or discount.' }, 400)
-
+    if (target.manual.type==='none') target.manual.value=0
+    else if (body.manual_discount_value!==undefined) target.manual.value=target.manual.type==='percent'?Number(body.manual_discount_value):newSaleMoney4(body.manual_discount_value)
+    const evaluated=evaluateCapturedPricingPool(pool,quantities), targetMoney=evaluated.get(target.line_key)!
+    const quote=body.pricing_quote as SaleItemInput['pricing_quote']
+    if (!quote || ['gross_usd','product_discount_usd','manual_discount_usd','total_usd','total_khr'].some(k=>quote[k as keyof typeof quote]!==targetMoney[k as keyof typeof quote]))
+      return c.json({error:'Review the recalculated captured-pricing pool.',code:'sale_pricing_quote_conflict',pricing_quotes:[...evaluated].map(([client_line_key,amounts])=>({client_line_key,...amounts}))},409)
+    if (!quantityChanged && JSON.stringify(target)===JSON.stringify(originalSnapshot.pool.lines.find(row=>row.line_key===target.line_key)))
+      return c.json({error:'Enter a new quantity, selling price, or discount.'},400)
+    const nextPrice=targetMoney.applied_price_usd
     const workingLine = { ...line, applied_price_usd: nextPrice }
     let quantityPlan: AmendmentPlan | null = null
     if (quantityChanged) {
@@ -4304,110 +4283,28 @@ app.post('/:id/amendments', async (c) => {
       unitsMoved += quantityPlan.unitsMoved
     }
 
-    const finalTotalUsd = multiplyMoney4(nextPrice,nextQty)
-    const finalTotalKhr = receiptKhrFromUsd(finalTotalUsd, exchangeRate) || 0
-    // A quantity-only edit must retain the line's existing discount facts.
-    // Editing the selling price is an explicit override, so it clears stale
-    // product/manual discount metadata rather than displaying a discount that
-    // no longer explains the entered price. This keeps a quantity change
-    // revenue-neutral while making a price change intentional and auditable.
-    const keepDiscounts = hasLayeredPriceEdit || !priceChanged
-    const nextProductDiscountUsd = keepDiscounts ? (Number(line.product_discount_usd) || 0) : 0
-    const nextProductDiscountKhr = keepDiscounts ? (Number(line.product_discount_khr) || 0) : 0
-    const nextManualDiscountType = hasLayeredPriceEdit ? nextDiscountType : keepDiscounts ? (line.manual_discount_type ?? null) : null
-    const nextManualDiscountValue = hasLayeredPriceEdit ? nextDiscountValue : keepDiscounts ? (Number(line.manual_discount_value) || 0) : 0
-    nextManualDiscountUsd = hasLayeredPriceEdit ? nextManualDiscountUsd : keepDiscounts ? (Number(line.manual_discount_usd) || 0) : 0
-    const nextManualDiscountKhr = keepDiscounts ? (Number(line.manual_discount_khr) || 0) : 0
-    const existingBasePriceUsd = line.base_price_usd == null ? null : Number(line.base_price_usd)
-    const existingBasePriceKhr = line.base_price_khr == null ? null : Number(line.base_price_khr)
-    const nextBasePriceUsd = hasLayeredPriceEdit
-      ? nextBasePrice
-      : keepDiscounts
-      ? (Number.isFinite(existingBasePriceUsd) ? existingBasePriceUsd : oldPrice + nextProductDiscountUsd + nextManualDiscountUsd)
-      : nextPrice
-    const nextBasePriceKhr = hasLayeredPriceEdit
-      ? (receiptKhrFromUsd(nextBasePriceUsd, exchangeRate) || 0)
-      : keepDiscounts
-      ? (Number.isFinite(existingBasePriceKhr) ? existingBasePriceKhr : receiptKhrFromUsd(nextBasePriceUsd, exchangeRate) || 0)
-      : receiptKhrFromUsd(nextPrice, exchangeRate) || 0
-    const normalizedManualDiscountKhr = hasLayeredPriceEdit ? (receiptKhrFromUsd(nextManualDiscountUsd, exchangeRate) || 0) : nextManualDiscountKhr
-    statements.push({
-      sql: `UPDATE sale_items SET
-              applied_price_usd=@price_usd, applied_price_khr=@price_khr,
-              base_price_usd=@base_price_usd, base_price_khr=@base_price_khr,
-              product_discount_usd=@product_discount_usd, product_discount_khr=@product_discount_khr,
-              manual_discount_type=@manual_discount_type, manual_discount_value=@manual_discount_value,
-              manual_discount_usd=@manual_discount_usd, manual_discount_khr=@manual_discount_khr,
-              price_mode=@price_mode, total_usd=@total_usd, total_khr=@total_khr
-            WHERE id=@id AND sale_id=@sale_id`,
-      params: {
-        id: line.id, sale_id: saleId, price_usd: nextPrice, price_khr: receiptKhrFromUsd(nextPrice, exchangeRate) || 0,
-        base_price_usd: nextBasePriceUsd, base_price_khr: nextBasePriceKhr,
-        product_discount_usd: nextProductDiscountUsd, product_discount_khr: nextProductDiscountKhr,
-        manual_discount_type: nextManualDiscountType, manual_discount_value: nextManualDiscountValue,
-        manual_discount_usd: nextManualDiscountUsd, manual_discount_khr: normalizedManualDiscountKhr,
-        price_mode: keepDiscounts ? (line.price_mode ?? 'selling') : 'selling',
-        total_usd: finalTotalUsd, total_khr: finalTotalKhr,
-      },
-    })
-    lineMoneyAfterAtLatestRate = lineMoneyAfterAtLatestRate.map((snapshot) => snapshot.id === line.id
-      ? {
-          ...snapshot,
-          applied_price_khr: receiptKhrFromUsd(nextPrice, exchangeRate),
-          total_khr: receiptKhrFromUsd(finalTotalUsd, exchangeRate),
-          product_discount_khr: nextProductDiscountKhr,
-          base_price_usd: nextBasePriceUsd,
-          base_price_khr: nextBasePriceKhr,
-          applied_price_usd: nextPrice,
-          total_usd: finalTotalUsd,
-          manual_discount_usd: nextManualDiscountUsd,
-          manual_discount_khr: normalizedManualDiscountKhr,
-        }
-      : snapshot)
-    subtotalDeltaUsd = subtractMoney4(finalTotalUsd,Number(line.total_usd))
-    ledgerEntries.push({
-      saleId,
-      kind: 'line_updated',
-      groupId,
-      saleItemId: line.id,
-      productId: line.product_id,
-      productName: line.product_name,
-      quantityBefore: currentQuantity,
-      quantityAfter: nextQty,
-      amountBeforeUsd: oldPrice,
-      amountAfterUsd: nextPrice,
-      totalBeforeUsd,
-      totalAfterUsd: 0,
-      unitsMoved,
-      stockSkipped,
-      note,
-      before: {
-        quantity: currentQuantity,
-        unit_price_usd: oldPrice,
-        base_price_usd: Number.isFinite(existingBasePriceUsd) ? existingBasePriceUsd : oldPrice,
-        product_discount_usd: Number(line.product_discount_usd) || 0,
-        manual_discount_type: line.manual_discount_type ?? null,
-        manual_discount_value: Number(line.manual_discount_value) || 0,
-        manual_discount_usd: Number(line.manual_discount_usd) || 0,
-        total_usd: Number(line.total_usd),
-      },
-      after: {
-        quantity: nextQty,
-        unit_price_usd: nextPrice,
-        base_price_usd: nextBasePriceUsd,
-        product_discount_usd: nextProductDiscountUsd,
-        manual_discount_type: nextManualDiscountType,
-        manual_discount_value: nextManualDiscountValue,
-        manual_discount_usd: nextManualDiscountUsd,
-        total_usd: finalTotalUsd,
-      },
-      userId: user?.id ?? null,
-      userName: actorSnapshot(user),
-    })
+
+    repricedPools.set(pool.pool_key,{pool,quantities})
+    for (const row of pricingRowsAfter) {
+      const prior=parseSaleItemPricing(row.pricing_snapshot_json as string)!
+      if (prior.pool.pool_key!==pool.pool_key) continue
+      const amounts=evaluated.get(prior.line_key)!
+      subtotalDeltaUsd=sumMoney4([subtotalDeltaUsd,subtractMoney4(amounts.total_usd,Number(row.total_usd))])
+      ledgerEntries.push({
+        saleId,kind:row.id===line.id&&kind==='line_quantity_increased'?'line_quantity_increased':row.id===line.id&&kind==='line_quantity_decreased'?'line_quantity_decreased':'line_updated',groupId,saleItemId:Number(row.id),productId:Number(row.product_id),productName:String(row.product_name||''),
+        quantityBefore:Number(row.quantity),quantityAfter:quantities[prior.line_key],
+        amountBeforeUsd:Number(row.applied_price_usd),amountAfterUsd:amounts.applied_price_usd,totalBeforeUsd,totalAfterUsd:0,
+        unitsMoved:row.id===line.id?unitsMoved:0,stockSkipped,note,
+        before:{quantity:row.quantity,total_usd:row.total_usd,unit_price_usd:row.applied_price_usd,pool_key:pool.pool_key},
+        after:{quantity:quantities[prior.line_key],total_usd:amounts.total_usd,unit_price_usd:amounts.applied_price_usd,pool_key:pool.pool_key},
+        userId:user?.id??null,userName:actorSnapshot(user),
+      })
+      row.quantity=quantities[prior.line_key]; row.total_usd=amounts.total_usd; row.total_khr=amounts.total_khr
+    }
   }
 
   // --- increase / the "add to existing" case, and the add half of a replace ---
-  const needsLots = kind === 'line_quantity_increased'
+  const needsLots = kind === 'line_quantity_increased' && !capturedLineUpdate
   if (needsLots) {
     const requested = Math.max(0, Number(body.quantity) || 0)
     if (!(requested > 0)) return c.json({ error: 'How many more units?' }, 400)
@@ -4443,10 +4340,8 @@ app.post('/:id/amendments', async (c) => {
   }
 
   // --- decrease / remove, and the remove half of a replace ---
-  if (kind === 'line_quantity_decreased' || kind === 'line_removed' || kind === 'line_replaced') {
-    const requested = kind === 'line_quantity_decreased'
-      ? Math.max(0, Number(body.quantity) || 0)
-      : Number(line.quantity) || 0
+  if (kind === 'line_removed' || kind === 'line_replaced') {
+    const requested = Number(line.quantity) || 0
     if (!(requested > 0)) return c.json({ error: 'How many units are coming off?' }, 400)
     if (requested > (Number(line.quantity) || 0)) {
       return c.json({ error: `This line only has ${line.quantity}.` }, 400)
@@ -4546,6 +4441,28 @@ app.post('/:id/amendments', async (c) => {
     })
   }
 
+  if (kind==='line_removed') {
+    const removed=parseSaleItemPricing(precisionBasket!.lines.find(row=>row.id===line.id)!.pricing_snapshot_json as string)!
+    const pool=structuredClone(removed.pool), quantities={...removed.quantities}
+    pool.lines=pool.lines.filter(member=>member.line_key!==removed.line_key); delete quantities[removed.line_key]
+    pricingRowsAfter=pricingRowsAfter.filter(row=>row.id!==line.id)
+    if (pool.lines.length) {
+      repricedPools.set(pool.pool_key,{pool,quantities})
+      const evaluated=evaluateCapturedPricingPool(pool,quantities)
+      for (const row of pricingRowsAfter) {
+        const prior=parseSaleItemPricing(row.pricing_snapshot_json as string)!
+        if (prior.pool.pool_key!==pool.pool_key) continue
+        const amounts=evaluated.get(prior.line_key)!
+        ledgerEntries.push({saleId,kind:'line_updated',groupId,saleItemId:Number(row.id),productId:Number(row.product_id),productName:String(row.product_name||''),
+          quantityBefore:Number(row.quantity),quantityAfter:Number(row.quantity),amountBeforeUsd:Number(row.applied_price_usd),amountAfterUsd:amounts.applied_price_usd,
+          totalBeforeUsd,totalAfterUsd:0,unitsMoved:0,stockSkipped,note,userId:user?.id??null,userName:actorSnapshot(user),
+          before:{total_usd:row.total_usd,pool_key:pool.pool_key},after:{total_usd:amounts.total_usd,pool_key:pool.pool_key}})
+        row.total_usd=amounts.total_usd; row.total_khr=amounts.total_khr
+      }
+    }
+    subtotalDeltaUsd=subtractMoney4(sumMoney4(pricingRowsAfter.map(row=>Number(row.total_usd))),subtotalBeforeUsd)
+  }
+
   // ---- Money. Subtotal is the sale's OWN lines re-summed and moved by this
   // amendment's delta, never the stored column carried forward, so a row whose
   // subtotal had drifted is corrected. Both discounts and the tender stay
@@ -4575,6 +4492,17 @@ app.post('/:id/amendments', async (c) => {
     taxPlan.outcome.taxUsd,
     Number(sale.delivery_fee_usd) || 0,
   )
+  if (capturedLineUpdate || kind==='line_removed') {
+    const allocation={version:1 as const,lines:pricingRowsAfter.map(row=>({line_key:parseSaleItemPricing(row.pricing_snapshot_json as string)!.line_key,amount:Number(row.total_usd)})),
+      discount_usd:Number(sale.discount_usd),membership_discount_usd:Number(sale.membership_discount_usd),tax_usd:taxPlan.outcome.taxUsd}
+    pricingRowsAfter=pricingRowsAfter.map(row=>{
+      const original=parseSaleItemPricing(row.pricing_snapshot_json as string)!, changed=repricedPools.get(original.pool.pool_key)
+      return materializeCapturedPricingRow(row,changed?.pool??original.pool,changed?.quantities??original.quantities,original.line_key,allocation)
+    })
+    validateCapturedSaleBasket(pricingRowsAfter,{...sale,...moneyAfterSnapshot})
+    statements.push(pricingRowsStatement(saleId,pricingRowsAfter))
+    lineMoneyAfterAtLatestRate=captureSaleLineKhrSnapshot(pricingRowsAfter)
+  }
 
   // Every ledger entry in this act ends at the sale's real new total; the
   // intermediate ones would be arithmetic nobody performed.
@@ -4655,7 +4583,7 @@ app.post('/:id/amendments', async (c) => {
 
   return c.json(await committedMutationResponse(db,mutationOperationId))
   } catch (error) {
-    if (error instanceof SaleMoneyContractError || error instanceof MoneyPrecisionError) return c.json({ error: error.message, code: error.code },409)
+    if (error instanceof SaleMoneyContractError || error instanceof MoneyPrecisionError || error instanceof SaleItemPricingError) return c.json({ error: error.message, code: error.code },409)
     throw error
   }
 })

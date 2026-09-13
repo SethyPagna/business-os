@@ -163,6 +163,43 @@ async function actualRoute() {
   const redoneHeader=f.raw.prepare('SELECT * FROM sales WHERE id=?').get([saved.body.sale.id])
   p.validateCapturedSaleBasket(redone,redoneHeader)
   assert.deepEqual(redone.map(line=>line.pricing_snapshot_json),added.sale.items.map(line=>line.pricing_snapshot_json))
+  const editBody={kind:'line_updated',money_precision_version:1,client_request_id:'captured-quantity-edit',expected_exchange_rate:4000,
+    sale_item_id:redone[0].id,quantity:2,pricing_quote:{gross_usd:20,product_discount_usd:0,manual_discount_usd:0,total_usd:20,total_khr:80000}}
+  const edit=async()=>{
+    const response=await h.app.request(`/${saved.body.sale.id}/amendments`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(editBody)},{DB:f.route},h.executionCtx)
+    return {status:response.status,body:await response.json()}
+  }
+  const edited=await edit()
+  assert.equal(edited.status,200,JSON.stringify(edited.body))
+  assert.equal(edited.body.sale.total_usd,30)
+  assert.equal(edited.body.sale.items[0].total_usd,20,'captured original threshold, not current save9 rule')
+  p.validateCapturedSaleBasket(edited.body.sale.items,edited.body.sale)
+  const editState=h.creationState(f.raw)
+  assert.deepEqual((await edit()).body,edited.body)
+  assert.deepEqual(h.creationState(f.raw),editState)
+  for (const [kind,total,discount] of [['line_quantity_increased',29,1],['line_quantity_decreased',20,0]]) {
+    const body={...editBody,kind,client_request_id:kind,quantity:1,pricing_quote:{gross_usd:total+discount,product_discount_usd:discount,manual_discount_usd:0,total_usd:total,total_khr:total*4000}}
+    const response=await h.app.request(`/${saved.body.sale.id}/amendments`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)},{DB:f.route},h.executionCtx)
+    const result=await response.json()
+    assert.equal(response.status,200,JSON.stringify(result))
+    assert.equal(result.sale.items[0].total_usd,total)
+    p.validateCapturedSaleBasket(result.sale.items,result.sale)
+  }
+  const removeBody={kind:'line_removed',money_precision_version:1,client_request_id:'captured-remove',expected_exchange_rate:4000,sale_item_id:redone[0].id}
+  const removeResponse=await h.app.request(`/${saved.body.sale.id}/amendments`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(removeBody)},{DB:f.route},h.executionCtx)
+  const removed=await removeResponse.json()
+  assert.equal(removeResponse.status,200,JSON.stringify(removed))
+  assert.equal(removed.sale.total_usd,10)
+  assert.equal(removed.sale.items.length,1)
+  p.validateCapturedSaleBasket(removed.sale.items,removed.sale)
+  const legacyFingerprint={sale:{id:1},lines:[{id:1,total_usd:1}],amendmentHeadId:0}
+  const actualFingerprint={sale:{id:1,money_precision_version:0,calculated_total_usd:null,rounding_adjustment_usd:0},lines:[{id:1,total_usd:1,pricing_snapshot_json:null}],amendmentHeadId:0}
+  const matches=h.load('lib/undoAppliers.ts').sameSaleStateFingerprint
+  assert.equal(matches(JSON.stringify(actualFingerprint),JSON.stringify(legacyFingerprint)),true)
+  actualFingerprint.lines[0].pricing_snapshot_json='{}'
+  assert.equal(matches(JSON.stringify(actualFingerprint),JSON.stringify(legacyFingerprint)),false)
+  actualFingerprint.lines[0].pricing_snapshot_json=null; actualFingerprint.lines[0].total_usd=2
+  assert.equal(matches(JSON.stringify(actualFingerprint),JSON.stringify(legacyFingerprint)),false)
   f.raw.db.close(); race.raw.db.close()
   console.log('PASS actual Hono create exact29 snapshot, pre-policy retry, stale quote and concurrent rule rollback')
 }

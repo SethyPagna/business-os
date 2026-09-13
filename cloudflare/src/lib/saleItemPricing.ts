@@ -60,7 +60,11 @@ export function capturePricingProduct(row: Record<string,unknown>): Record<strin
   return Object.fromEntries(fields.filter(field=>Object.prototype.hasOwnProperty.call(row,field)).map(field=>[field,row[field]]))
 }
 
-function invalid(): never { throw new Error('sale_item_pricing_invalid') }
+export class SaleItemPricingError extends Error {
+  readonly code='sale_item_pricing_invalid'
+  constructor() { super('Captured item pricing needs review.'); this.name='SaleItemPricingError' }
+}
+function invalid(): never { throw new SaleItemPricingError() }
 function key(value: unknown): asserts value is string {
   if (typeof value !== 'string' || !/^[A-Za-z0-9_.:-]{1,200}$/.test(value)) invalid()
 }
@@ -254,6 +258,18 @@ export function validateCapturedSaleBasket(lines: readonly Record<string,unknown
   return snapshots
 }
 
+export function materializeCapturedPricingRow(row: Record<string,unknown>, pool: CapturedPricingPool, quantities: Record<string,number>, lineKey:string, allocation:ReceiptAllocationContext): Record<string,unknown> {
+  const json=serializeSaleItemPricing(pool,quantities,lineKey,allocation), snapshot=parseSaleItemPricing(json)!
+  const capture=pool.lines.find(line=>line.line_key===lineKey)!, amounts=snapshot.amounts, quantity=quantities[lineKey]
+  const productDiscount=divideMoney4(amounts.product_discount_usd,quantity), manualDiscount=divideMoney4(amounts.manual_discount_usd,quantity)
+  return {...row,quantity,pricing_snapshot_json:json,
+    applied_price_usd:amounts.applied_price_usd,applied_price_khr:amounts.applied_price_khr,
+    base_price_usd:amounts.base_price_usd,base_price_khr:amounts.base_price_khr,total_usd:amounts.total_usd,total_khr:amounts.total_khr,
+    product_discount_usd:productDiscount,product_discount_khr:multiplyMoney4(productDiscount,pool.exchange_rate),
+    manual_discount_usd:manualDiscount,manual_discount_khr:multiplyMoney4(manualDiscount,pool.exchange_rate),
+    manual_discount_type:capture.manual.type==='none'?null:capture.manual.type,manual_discount_value:capture.manual.value,price_mode:capture.source}
+}
+
 /** Guard the exact authorized SELECT * capture, including newly inserted active
  * rules. Execute in the same batch BEFORE any sale/stock/audit mutation. The
  * caller must read all active rules (not just the winner or currently in-window
@@ -276,4 +292,23 @@ export function pricingSourceGuard(products: readonly Record<string,unknown>[], 
   const params={pricing_products:JSON.stringify(products),pricing_rules:JSON.stringify(activeRules),pricing_rule_count:activeRules.length}
   if (new TextEncoder().encode(params.pricing_products+params.pricing_rules).length>512_000) invalid()
   return {sql:`SELECT CASE WHEN ${productConflict} OR ${ruleConflict} OR (SELECT COUNT(*) FROM promotion_rules WHERE is_active=1)<>@pricing_rule_count THEN json_extract('sale_pricing_source_conflict','$') ELSE 1 END`,params}
+}
+
+/** Quantity/stock changes are separate guarded plans. This updates only the
+ * captured financial fields, after those plans, in that same transaction. */
+export function pricingRowsStatement(saleId:number, rows:readonly Record<string,unknown>[]):{sql:string;params:Record<string,unknown>} {
+  const fields=['applied_price_usd','applied_price_khr','base_price_usd','base_price_khr','total_usd','total_khr',
+    'product_discount_usd','product_discount_khr','manual_discount_usd','manual_discount_khr','manual_discount_type','manual_discount_value','price_mode','pricing_snapshot_json']
+  if (!rows.length || rows.length>MAX_PRICING_LINES || !Number.isSafeInteger(saleId) || saleId<=0) invalid()
+  const ids=new Set<number>()
+  const projected=rows.map(row=>{
+    if (!Number.isSafeInteger(row.id) || Number(row.id)<=0 || ids.has(Number(row.id)) || !parseSaleItemPricing(row.pricing_snapshot_json as string)) invalid()
+    ids.add(Number(row.id))
+    if (fields.some(field=>!Object.prototype.hasOwnProperty.call(row,field))) invalid()
+    return Object.fromEntries(['id',...fields].map(field=>[field,row[field]]))
+  })
+  const json=JSON.stringify(projected)
+  if (new TextEncoder().encode(json).length>500_000) invalid()
+  return {sql:`UPDATE sale_items SET ${fields.map(field=>`${field}=(SELECT json_extract(value,'$.${field}') FROM json_each(@pricing_rows) WHERE json_extract(value,'$.id')=sale_items.id)`).join(',')}
+    WHERE sale_id=@pricing_sale AND id IN (SELECT json_extract(value,'$.id') FROM json_each(@pricing_rows))`,params:{pricing_sale:saleId,pricing_rows:json}}
 }
