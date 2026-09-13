@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { evaluatePromotionPricing, evaluateCartPromotionAdjustments, normalizePromotionRule } from '../src/utils/promotionRules.ts'
 import { multiplyMoney4, sumMoney4 } from '../src/utils/moneyPrecision.ts'
+import { resolveCartPriceValues, repricePromotionCartLines } from '../src/components/pos/posCore.ts'
 
 const now = new Date('2026-09-13T00:00:00Z')
 const product = { id: 7, selling_price_usd: 1, selling_price_khr: 4000, discount_enabled: 1, discount_type: 'percent', discount_percent: 0.005 }
@@ -24,6 +25,13 @@ assert.equal(mixed.get('cheap')?.unit_price_usd, 0.8765)
 const lines = Array.from({ length: 100 }, (_, i) => ({ line_id: String(i), product, quantity: 1 }))
 const hundred = evaluateCartPromotionAdjustments(lines, [], 4000, now, 1)
 assert.equal(sumMoney4([...hundred.values()].map(line => line.unit_price_usd)), 99.99)
+const initial = resolveCartPriceValues(product, 'promotion', 4000, {}, [], 1)
+assert.equal(initial.base_price_usd, 0.9999)
+const cart = [{ ...product, ...initial, cart_line_id: 'p7', quantity: 1, manual_discount_type: 'fixed', manual_discount_value: 0.1234 }]
+const repriced = repricePromotionCartLines(cart, [], 4000, 1)
+assert.equal(repriced.cart[0].applied_price_usd, 0.8765, 'promotion refresh preserves independent manual discount')
+assert.equal(repricePromotionCartLines(repriced.cart, [], 4000, 1).changed, false, 'stable v1 cart does not create an effect loop')
+assert.equal(resolveCartPriceValues({ selling_price_usd: 1.2345 }, 'selling', 4000, {}, [], 1).base_price_usd, 1.24)
 for (const kind of ['percent_off', 'quantity_percent', 'fixed_off', 'quantity_save', 'spend_save', 'next_item']) {
   const benefit = rule({ rule_type: kind, percent_off: 12.3456, min_quantity: 1, min_spend_usd: 1, save_usd: 0.1234 })
   const result = evaluatePromotionPricing(plain, 4, [benefit], 4000, now, 1)

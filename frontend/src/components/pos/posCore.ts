@@ -1,5 +1,5 @@
 import { calculateProductDiscount, normalizePriceValue } from '../../utils/pricing.ts'
-import { multiplyMoney4, percentageMoney4, roundMoney4, subtractMoney4 } from '../../utils/moneyPrecision.ts'
+import { multiplyMoney4, percentageMoney4, roundMoney4, sellingPriceCeilCent, subtractMoney4 } from '../../utils/moneyPrecision.ts'
 import { evaluatePromotionPricing, evaluateCartPromotionAdjustments, type PromotionRule } from '../../utils/promotionRules.ts'
 import { buildProductGroups, compareProductsByNameBranchPriceBarcode } from '../../utils/productGrouping.ts'
 import type { ProductRecord as ProductGroupRecord } from '../../utils/productGrouping.ts'
@@ -392,7 +392,27 @@ export function resolveCartPriceValues(
   // shared kernel. Callers that don't pass them keep the pre-G1 behavior
   // exactly (kernel with no rules = the per-product discount math).
   promotionRules: readonly PromotionRule[] = [],
+  moneyPrecisionVersion: 0 | 1 = 0,
 ): CartPriceValues {
+  if (moneyPrecisionVersion === 1) {
+    const sellingUsd = sellingPriceCeilCent(Number(product?.selling_price_usd ?? 0))
+    const sellingKhr = roundMoney4(Number(product?.selling_price_khr ?? multiplyMoney4(sellingUsd, exchangeRate)))
+    if (priceMode === 'promotion') {
+      const evaluated = evaluatePromotionPricing(product || undefined, 1, promotionRules, exchangeRate, new Date(), 1)
+      return {
+        applied_price_usd: evaluated.unit_price_usd, applied_price_khr: evaluated.unit_price_khr,
+        base_price_usd: evaluated.unit_price_usd, base_price_khr: evaluated.unit_price_khr, price_mode: 'promotion',
+        product_discount_type: evaluated.rule_type === 'product_discount' ? String(product?.discount_type || 'percent') : String(evaluated.rule_type || 'percent'),
+        product_discount_label: evaluated.active && evaluated.show_title ? evaluated.title : '',
+        product_discount_usd: Math.max(0, subtractMoney4(sellingUsd, evaluated.unit_price_usd)),
+        product_discount_khr: Math.max(0, subtractMoney4(sellingKhr, evaluated.unit_price_khr)),
+      }
+    }
+    const wholesale = priceMode === 'wholesale' && (Number(product?.wholesale_price_usd) > 0 || Number(product?.wholesale_price_khr) > 0)
+    const usd = wholesale ? sellingPriceCeilCent(Number(product?.wholesale_price_usd ?? sellingUsd)) : sellingUsd
+    const khr = wholesale ? roundMoney4(Number(product?.wholesale_price_khr ?? multiplyMoney4(usd, exchangeRate))) : sellingKhr
+    return { applied_price_usd: usd, applied_price_khr: khr, base_price_usd: usd, base_price_khr: khr, price_mode: wholesale ? 'wholesale' : 'selling' }
+  }
   const usdToKhr = typeof converters.usdToKhr === 'function'
     ? converters.usdToKhr
     : ((value: unknown, rate: unknown) => normalizePriceValue((Number(value || 0) * Number(rate || 0)), 0))
@@ -468,8 +488,32 @@ export function repricePromotionCartLines(
   cart: readonly ProductRecord[] = [],
   promotionRules: readonly PromotionRule[] = [],
   exchangeRate = 0,
+  moneyPrecisionVersion: 0 | 1 = 0,
 ): { cart: ProductRecord[]; changed: boolean } {
   const list = Array.isArray(cart) ? cart : []
+  if (moneyPrecisionVersion === 1) {
+    const adjustments = evaluateCartPromotionAdjustments(list.filter(item => item.price_mode === 'promotion').map(item => ({ line_id: getCartLineId(item), product: item, quantity: Number(item.quantity) })), promotionRules, exchangeRate, new Date(), 1)
+    let changed = false
+    const next = list.map(item => {
+      if (item.price_mode !== 'promotion') return item
+      const adjustment = adjustments.get(getCartLineId(item))
+      if (!adjustment) return item
+      const baseUsd = adjustment.unit_price_usd, baseKhr = adjustment.unit_price_khr
+      const current = item as Record<string, unknown>
+      const manual = applyManualDiscount(baseUsd, baseKhr, exchangeRate, current.manual_discount_type, current.manual_discount_value, 1)
+      const fields = {
+        ...manual,
+        product_discount_type: adjustment.rule_type === 'product_discount' ? String(current.discount_type || 'percent') : String(adjustment.rule_type || 'percent'),
+        product_discount_label: adjustment.label,
+        product_discount_usd: Math.max(0, subtractMoney4(sellingPriceCeilCent(Number(item.selling_price_usd ?? 0)), baseUsd)),
+        product_discount_khr: Math.max(0, subtractMoney4(roundMoney4(Number(item.selling_price_khr ?? multiplyMoney4(Number(item.selling_price_usd ?? 0), exchangeRate))), baseKhr)),
+      }
+      if (Object.entries(fields).every(([key, value]) => Object.is(current[key], value))) return item
+      changed = true
+      return { ...item, ...fields } as ProductRecord
+    })
+    return { cart: changed ? next : [...cart], changed }
+  }
   const promoLines = list
     .filter((item) => String(item?.price_mode || 'selling') === 'promotion')
     .map((item) => ({
@@ -593,6 +637,7 @@ export function applyWholesaleAutoPricing(
   rule: WholesaleAutoRule = { enabled: false, minQuantity: WHOLESALE_AUTO_DEFAULT_MIN_QTY },
   exchangeRate = 0,
   converters: PriceConverters = {},
+  moneyPrecisionVersion: 0 | 1 = 0,
 ): { cart: ProductRecord[]; changed: boolean } {
   const list = Array.isArray(cart) ? cart : []
   let changed = false
@@ -614,7 +659,7 @@ export function applyWholesaleAutoPricing(
     // Covers the toggle being switched off, the threshold being raised, the
     // quantity falling back, and the product losing its wholesale price.
     if (autoApplied && (!rule.enabled || !overThreshold || !hasWholesalePrice(item))) {
-      const values = resolveCartPriceValues(item, 'selling', exchangeRate, converters)
+      const values = resolveCartPriceValues(item, 'selling', exchangeRate, converters, [], moneyPrecisionVersion)
       changed = true
       return {
         ...item,
@@ -635,7 +680,7 @@ export function applyWholesaleAutoPricing(
     const hasManualEdit = record.manual_discount_type != null && String(record.manual_discount_type || '') !== ''
     if (mode !== 'selling' || hasManualEdit || !overThreshold || !hasWholesalePrice(item)) return item
 
-    const values = resolveCartPriceValues(item, 'wholesale', exchangeRate, converters)
+    const values = resolveCartPriceValues(item, 'wholesale', exchangeRate, converters, [], moneyPrecisionVersion)
     // resolveCartPriceValues refuses 'wholesale' when there is no wholesale
     // price and hands back a selling-priced result; hasWholesalePrice already
     // guarantees otherwise, but check rather than stamp a line we did not
