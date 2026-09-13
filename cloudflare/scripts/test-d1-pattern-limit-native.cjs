@@ -216,6 +216,10 @@ async function verifyRealSettlementRoute(migration) {
   try {
     const db = await mf.getD1Database('DB')
     await db.batch(objects.filter(o => o.type === 'table').map(o => db.prepare(o.sql)))
+    // Current settlement queries and seed rows include the additive money
+    // contract. Apply its exact migration while retaining the old pattern
+    // CHECKs so the before/after 0156 regression remains meaningful.
+    await db.batch(split(fs.readFileSync(path.join(migrations, '0158_sale_return_money_precision.sql'), 'utf8')).map(sql => db.prepare(sql)))
     const inserts = []
     for (const name of required) for (const row of f.sql.prepare(`SELECT * FROM ${name}`).all()) {
       const columns = Object.keys(row)
