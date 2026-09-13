@@ -3,6 +3,7 @@ import { broadcast } from '../durable-objects/broadcastHub'
 import { getDb } from '../lib/db'
 import { capturedPricingMetadata, capturePricingProduct, evaluateCapturedPricingPool, materializeCapturedPricingRow, parseSaleItemPricing, pricingRowsStatement, pricingSourceGuard, serializeSaleItemPricing, validateCapturedSaleBasket, SaleItemPricingError, type CapturedPricingPool, type PricingSource } from '../lib/saleItemPricing'
 import { normalizePromotionRule } from '../lib/promotionRules'
+import { resolveProductMergeLineage, ProductMergeLineageError } from '../lib/productMergeLineage'
 import { chunkForBinding, selectInChunks } from '../lib/sqlBinding'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
@@ -338,6 +339,14 @@ function canonicalSaleItemsSql() {
     FROM (SELECT * FROM sale_items WHERE sale_id=s.id ORDER BY id) i)`
 }
 
+function canonicalSaleIdentityBindingsSql(){
+  return `(SELECT json_group_array(json_object('sale_id',i.sale_id,'sale_item_id',i.id,
+    'captured_product_id',json_extract(capture.value,'$.product.id'),'current_product_id',i.product_id))
+    FROM sale_items i,json_each(CASE WHEN json_valid(i.pricing_snapshot_json) THEN i.pricing_snapshot_json ELSE '{}' END,'$.pool.lines') capture
+    WHERE i.sale_id=s.id AND json_extract(capture.value,'$.line_key')=json_extract(i.pricing_snapshot_json,'$.line_key')
+      AND json_extract(capture.value,'$.product.id') IS NOT i.product_id)`
+}
+
 /** Financial snapshot stored inside the mutation transaction, never reconstructed on retry. */
 function canonicalMutationResponseSql(responseSql: string): string {
   const fields = ['id','receipt_number','sale_status','updated_at','exchange_rate','subtotal_usd','subtotal_khr',
@@ -347,7 +356,7 @@ function canonicalMutationResponseSql(responseSql: string): string {
     'change_exchange_rate','payment_method','payment_details','payment_currency','money_precision_version',
     'calculated_total_usd','rounding_adjustment_usd']
   return `(SELECT json_set(${responseSql},'$.sale',json_object(${fields.map(key => `'${key}',s.${key}`).join(',')},
-    'items',json(${canonicalSaleItemsSql()})), '$.moneyPrecisionVersion',s.money_precision_version,
+    'items',json(${canonicalSaleItemsSql()}),'pricing_identity_bindings',json(${canonicalSaleIdentityBindingsSql()})), '$.moneyPrecisionVersion',s.money_precision_version,
     '$.calculatedTotalUsd',s.calculated_total_usd,'$.roundingAdjustmentUsd',s.rounding_adjustment_usd)
     FROM sales s WHERE s.id=@saleId)`
 }
@@ -364,7 +373,14 @@ async function authoritativeSaleSnapshot(db: ReturnType<typeof getDb>, saleId: n
     FROM sales s WHERE s.id=?`).get<Record<string,unknown>>([saleId])
   if (!row) return null
   const { canonical_items, ...sale } = row
-  return { ...sale, items: JSON.parse(String(canonical_items || '[]')) }
+  const snapshot={ ...sale, items: JSON.parse(String(canonical_items || '[]')) }
+  if(Number(sale.money_precision_version)===1){
+    const lineage=await resolveProductMergeLineage(db,saleId,snapshot.items)
+    validateCapturedSaleBasket(snapshot.items,sale,lineage.bindings)
+    if(lineage.bindings.length)await db.prepare(`SELECT CASE WHEN ${lineage.condition} THEN 1 ELSE json_extract('', '$') END`).get(lineage.params)
+    return {...snapshot,pricing_identity_bindings:lineage.bindings}
+  }
+  return snapshot
 }
 
 app.get('/money-precision-capability', async (c) => {
@@ -3058,7 +3074,7 @@ app.post('/:id/items', async (c) => {
   const addedQuantities=Object.fromEntries(requested.map((line,index)=>[addedPool.lines[index].line_key,line.quantity]))
   const addedPricing=evaluateCapturedPricingPool(addedPool,addedQuantities)
   const provisionalAllocation={version:1 as const,lines:addedPool.lines.map(line=>({line_key:line.line_key,amount:addedPricing.get(line.line_key)!.total_usd})),discount_usd:0,membership_discount_usd:0,tax_usd:0}
-  const existingPricing=validateCapturedSaleBasket(precisionBasket.lines,sale)
+  const existingPricing=validateCapturedSaleBasket(precisionBasket.lines,sale,precisionBasket.identityBindings)
   if (addedPool.lines.some(line=>existingPricing.some(old=>old.line_key===line.line_key))) throw new SaleMoneyContractError('money_precision_invalid_snapshot')
   for (const [index,line] of addedPool.lines.entries()) {
     const quote=(rawItems[index] as SaleItemInput).pricing_quote, exact=addedPricing.get(line.line_key)!
@@ -3403,7 +3419,7 @@ app.post('/:id/items', async (c) => {
   return c.json(response)
   } catch (error) {
     if (error instanceof SaleHeaderQuoteError) return c.json({error:error.message,code:error.code},400)
-    if (error instanceof SaleMoneyContractError || error instanceof MoneyPrecisionError || error instanceof SaleItemPricingError) return c.json({ error: error.message, code: error.code },409)
+    if (error instanceof SaleMoneyContractError || error instanceof MoneyPrecisionError || error instanceof SaleItemPricingError || error instanceof ProductMergeLineageError) return c.json({ error: error.message, code: error.code },409)
     throw error
   }
 })
@@ -4542,7 +4558,7 @@ app.post('/:id/amendments', async (c) => {
       const original=parseSaleItemPricing(row.pricing_snapshot_json as string)!, changed=repricedPools.get(original.pool.pool_key)
       return materializeCapturedPricingRow(row,changed?.pool??original.pool,changed?.quantities??original.quantities,original.line_key,allocation)
     })
-    validateCapturedSaleBasket(pricingRowsAfter,{...sale,...moneyAfterSnapshot,tax_usd:taxPlan.outcome.taxUsd})
+    validateCapturedSaleBasket(pricingRowsAfter,{...sale,...moneyAfterSnapshot,tax_usd:taxPlan.outcome.taxUsd},precisionBasket!.identityBindings)
     const existingPricingRows=pricingRowsAfter.filter(row=>Number(row.id)>0)
     if (existingPricingRows.length) statements.push(pricingRowsStatement(saleId,existingPricingRows))
     if (replacementLines) {
@@ -4642,7 +4658,7 @@ app.post('/:id/amendments', async (c) => {
   return c.json(await committedMutationResponse(db,mutationOperationId))
   } catch (error) {
     if (error instanceof SaleHeaderQuoteError) return c.json({error:error.message,code:error.code},400)
-    if (error instanceof SaleMoneyContractError || error instanceof MoneyPrecisionError || error instanceof SaleItemPricingError) return c.json({ error: error.message, code: error.code },409)
+    if (error instanceof SaleMoneyContractError || error instanceof MoneyPrecisionError || error instanceof SaleItemPricingError || error instanceof ProductMergeLineageError) return c.json({ error: error.message, code: error.code },409)
     throw error
   }
 })
@@ -4669,7 +4685,8 @@ function canonicalSaleChildrenGuard(saleId: number | string): StatementList[numb
 async function capturePrecisionBasket(db: ReturnType<typeof getDb>, sale: Record<string,unknown>) {
   const lines = await db.prepare('SELECT * FROM sale_items WHERE sale_id=? ORDER BY id').all<Record<string,unknown>>([Number(sale.id)])
   assertCanonicalSaleChildren(lines)
-  validateCapturedSaleBasket(lines,sale)
+  const lineage=await resolveProductMergeLineage(db,Number(sale.id),lines)
+  validateCapturedSaleBasket(lines,sale,lineage.bindings)
   for (const key of ['subtotal_usd','discount_usd','membership_discount_usd','tax_usd','delivery_fee_usd']) canonicalMoney4(sale[key],true)
   if (Number(sale.money_precision_version) === 0 && await db.prepare('SELECT 1 AS found FROM returns WHERE sale_id=? LIMIT 1').get([Number(sale.id)]))
     throw new SaleMoneyContractError('money_precision_legacy_refund_review_needed')
@@ -4684,9 +4701,9 @@ async function capturePrecisionBasket(db: ReturnType<typeof getDb>, sale: Record
   const guard = saleMutationGuard(`EXISTS(SELECT 1 FROM sales s WHERE s.id=@precisionSale AND ${keys(header).map(key => `s.${key} IS json_extract(@precisionHeader,'$.${key}')`).join(' AND ')})
     AND (SELECT COUNT(*) FROM sale_items WHERE sale_id=@precisionSale)=json_array_length(@precisionLines)
     AND NOT EXISTS(SELECT 1 FROM json_each(@precisionLines) j WHERE NOT EXISTS(
-      SELECT 1 FROM sale_items i WHERE i.sale_id=@precisionSale AND ${keys(lines[0]).map(key => `i.${key} IS json_extract(j.value,'$.${key}')`).join(' AND ')}))`,
-    { precisionSale: Number(sale.id), precisionHeader: headerJson, precisionLines: lineJson }, 2)
-  return { lines, guard }
+      SELECT 1 FROM sale_items i WHERE i.sale_id=@precisionSale AND ${keys(lines[0]).map(key => `i.${key} IS json_extract(j.value,'$.${key}')`).join(' AND ')})) AND (${lineage.condition})`,
+    { precisionSale: Number(sale.id), precisionHeader: headerJson, precisionLines: lineJson,...lineage.params }, 2)
+  return { lines, guard,identityBindings:lineage.bindings }
 }
 
 function precisionRecordMoney(value: Record<string,unknown>): Record<string,unknown> {
@@ -5326,16 +5343,25 @@ app.get('/', async (c) => {
       for (const row of countRows) recordsBySale.set(Number(row.sale_id), Number(row.n) || 0)
     }
 
-    return sales.map((sale) => {
+    return Promise.all(sales.map(async(sale) => {
       const { linked_driver_name, linked_driver_phone, ...snapshot } = sale
       const refund = refundsBySale.get(sale.id)
       const refundUsd = refund?.usd??ReportExactDecimal.zero()
       const refundKhr = refund?.khr??ReportExactDecimal.zero()
+      const items=itemsBySale.get(sale.id)||[]
+      let pricingIdentity:Record<string,unknown>={}
+      if(Number(sale.money_precision_version)===1){
+        const lineage=await resolveProductMergeLineage(db,Number(sale.id),items as Record<string,unknown>[])
+        validateCapturedSaleBasket(items as Record<string,unknown>[],sale,lineage.bindings)
+        if(lineage.bindings.length)await db.prepare(`SELECT CASE WHEN ${lineage.condition} THEN 1 ELSE json_extract('', '$') END`).get(lineage.params)
+        pricingIdentity={pricing_identity_bindings:lineage.bindings}
+      }
       return {
         ...snapshot,
+        ...pricingIdentity,
         delivery_contact_name: String(sale.delivery_contact_name ?? '').trim() ? sale.delivery_contact_name : linked_driver_name ?? null,
         delivery_contact_phone: String(sale.delivery_contact_phone ?? '').trim() ? sale.delivery_contact_phone : linked_driver_phone ?? null,
-        items: itemsBySale.get(sale.id) || [],
+        items,
         refund_usd: refundUsd.toNumber(4),
         refund_khr: refundKhr.toNumber(4),
         return_count: refund?.count || 0,
@@ -5347,7 +5373,7 @@ app.get('/', async (c) => {
         net_total_usd: stripMoney(sale,'total_usd').subtract(refundUsd).toNumber(4),
         net_total_khr: stripMoney(sale,'total_khr').subtract(refundKhr).toNumber(4),
       }
-    })
+    }))
   })
 
   return c.json(payload.map(row=>projectOperationalSaleCosts(row as Record<string,unknown>,c.get('user'))))
