@@ -27,6 +27,10 @@ assert.equal(at(3).total_usd,29)
 assert.equal(at(3).applied_price_usd,9.6667)
 assert.equal(at(3).total_khr,116000,'USD authority, not conflicting catalogue KHR')
 assert.equal(at(2).total_usd,20,'captured threshold re-evaluates on quantity change')
+const tagged=structuredClone(pool);tagged.lines[0].display_price_mode='wholesale'
+assert.deepEqual([...p.evaluateCapturedPricingPool(tagged,{a:3})],[...p.evaluateCapturedPricingPool(pool,{a:3})],'display tag never changes exact pricing/source/manual/pool rule result')
+assert.equal(tagged.lines[0].source,'promotion');assert.deepEqual(tagged.rules,pool.rules)
+tagged.lines[0].display_price_mode='promotion';assert.throws(()=>at(3,tagged))
 const manual=structuredClone(pool); manual.lines[0].manual={type:'fixed',value:1}
 assert.equal(at(3,manual).total_usd,26,'fixed manual discount is per-unit after exact promotion')
 manual.lines[0].manual={type:'percent',value:12.3456}
@@ -123,6 +127,7 @@ async function actualRoute() {
   const request=()=>({...h.request('exact-line-route'),money_precision_version:1,amount_paid_usd:29,items:[{
     product_id:10,quantity:3,branch_id:1,batch_id:500,client_line_key:'route-a',pricing_source:'promotion',
     price_mode:'selling',product_discount_type:'spoofed',product_discount_label:'spoofed',
+    display_price_mode:'wholesale',
     pricing_quote:{gross_usd:30,product_discount_usd:1,manual_discount_usd:0,total_usd:29,total_khr:116000}
   }]})
   const setup=hooks=>{
@@ -139,6 +144,8 @@ async function actualRoute() {
   assert.equal(saved.body.sale.items[0].price_mode,'promotion')
   assert.equal(saved.body.sale.items[0].product_discount_type,'quantity_save')
   assert.equal(saved.body.sale.items[0].product_discount_label,null)
+  assert.equal(p.capturedDisplayPriceMode(p.parseSaleItemPricing(saved.body.sale.items[0].pricing_snapshot_json)),'wholesale')
+  assert.equal(p.parseSaleItemPricing(saved.body.sale.items[0].pricing_snapshot_json).pool.lines[0].source,'promotion')
   assert.equal(p.parseSaleItemPricing(saved.body.sale.items[0].pricing_snapshot_json).amounts.total_usd,29)
   p.validateCapturedSaleBasket(saved.body.sale.items,saved.body.sale)
   const wrongIdentity=structuredClone(saved.body.sale.items); wrongIdentity[0].product_id=11

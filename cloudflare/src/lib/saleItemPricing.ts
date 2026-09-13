@@ -15,6 +15,7 @@ export type ManualPricing = { type: 'none' | 'fixed' | 'percent'; value: number 
 export type CapturedPricingLine = {
   line_key: string
   source: PricingSource
+  display_price_mode?: 'selling'|'wholesale'
   product: Record<string, unknown>
   selling_price_input_usd: number | null
   manual: ManualPricing
@@ -114,6 +115,7 @@ export function evaluateCapturedPricingPool(pool: CapturedPricingPool, quantitie
   const prepared = lines.map(line => {
     key(line.line_key)
     if (seen.has(line.line_key) || !['selling','wholesale','promotion','manual'].includes(line.source)) invalid()
+    if (Object.prototype.hasOwnProperty.call(line,'display_price_mode')&&!['selling','wholesale'].includes(line.display_price_mode as string)) invalid()
     seen.add(line.line_key)
     if (!line.product || typeof line.product !== 'object' || !Number.isSafeInteger(line.product.id) || Number(line.product.id) <= 0) invalid()
     const quantity = quantities[line.line_key]
@@ -235,6 +237,13 @@ export function capturedPricingMetadata(pool:CapturedPricingPool,lineKey:string,
   const type=rule?.rule_type ?? (String(capture.product.discount_type||'percent').toLowerCase()==='fixed'?'fixed':'percent')
   const label=String(rule?.title ?? capture.product.discount_label ?? '').trim() || null
   return {price_mode:capture.source,product_discount_type:type,product_discount_label:label}
+}
+
+/** A presentation tag is never an input to pricing, discount or pool rules. */
+export function capturedDisplayPriceMode(snapshot:SaleItemPricingSnapshot):PricingSource {
+  const line=snapshot.pool.lines.find(line=>line.line_key===snapshot.line_key)
+  if(!line)invalid()
+  return line.display_price_mode??line.source
 }
 
 export function validateCapturedSaleBasket(lines: readonly Record<string,unknown>[], header: Record<string,unknown>): SaleItemPricingSnapshot[] {

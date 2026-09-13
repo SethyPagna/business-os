@@ -249,6 +249,7 @@ function appendLocalTimeRange(
 type SaleItemInput = {
   client_line_key?: string
   pricing_source?: PricingSource
+  display_price_mode?: 'selling'|'wholesale'
   pricing_quote?: { gross_usd:number; product_discount_usd:number; manual_discount_usd:number; total_usd:number; total_khr:number }
   selling_price_input_usd?: number
   product_id?: number
@@ -847,6 +848,7 @@ app.post('/', async (c) => {
         selling_price_usd:sellingPriceCeilCent(product.selling_price_usd),
         wholesale_price_usd:product.wholesale_price_usd == null ? null : sellingPriceCeilCent(Number(product.wholesale_price_usd))}
       return {line_key:item.client_line_key,source:item.pricing_source,product:capturedProduct,
+        ...(item.display_price_mode===undefined?{}:{display_price_mode:item.display_price_mode}),
         selling_price_input_usd:item.selling_price_input_usd ?? null,
         manual:{type:item.manual_discount_type == null ? 'none' : item.manual_discount_type as 'fixed'|'percent',
           value:item.manual_discount_type === 'percent' ? item.manual_discount_value ?? 0 : newSaleMoney4(item.manual_discount_value)}}
@@ -3047,6 +3049,7 @@ app.post('/:id/items', async (c) => {
       return {line_key:raw.client_line_key,source:raw.pricing_source!,product:{...capturePricingProduct(product),
         selling_price_usd:sellingPriceCeilCent(product.selling_price_usd),wholesale_price_usd:product.wholesale_price_usd==null?null:sellingPriceCeilCent(Number(product.wholesale_price_usd))},
         selling_price_input_usd:raw.selling_price_input_usd??null,
+        ...(raw.display_price_mode===undefined?{}:{display_price_mode:raw.display_price_mode}),
         manual:{type:raw.manual_discount_type==null?'none':raw.manual_discount_type as 'fixed'|'percent',
           value:raw.manual_discount_type==='percent'?raw.manual_discount_value??0:newSaleMoney4(raw.manual_discount_value)}}
     })}
@@ -4414,6 +4417,7 @@ app.post('/:id/amendments', async (c) => {
       line_key:replacement.client_line_key,source:replacement.pricing_source!,product:{...capturePricingProduct(product),selling_price_usd:sellingPriceCeilCent(product.selling_price_usd),
         wholesale_price_usd:product.wholesale_price_usd==null?null:sellingPriceCeilCent(Number(product.wholesale_price_usd))},
       selling_price_input_usd:replacement.selling_price_input_usd??null,
+      ...(replacement.display_price_mode===undefined?{}:{display_price_mode:replacement.display_price_mode}),
       manual:{type:replacement.manual_discount_type==null?'none':replacement.manual_discount_type as 'fixed'|'percent',value:replacement.manual_discount_type==='percent'?replacement.manual_discount_value??0:newSaleMoney4(replacement.manual_discount_value)}
     }]}
     const replacementQuantities={[replacement.client_line_key]:quantity}
@@ -5474,6 +5478,21 @@ app.get('/stats', async (c) => {
 // range+branch scoped only, NOT list-filter scoped: the strip answers "how
 // was this period", the list header keeps answering "what does this filter
 // match".
+// Match reports.ts' authority boundary without importing a route module. Apply
+// after shared cache reads: private cost fields must never depend on cache owner.
+export function gateSalesReportMoney(row:Record<string,unknown>,isAdmin:boolean):Record<string,unknown> {
+  if(isAdmin)return row
+  const {cost_usd,profit_usd,gross_profit_usd,pending_cost_usd,pending_profit_usd,unvalued_cost_usd,returned_cost_usd,
+    cost,gross_profit,delivery_actual_cost_usd,delivery_actual_cost_count,delivery_margin_usd,delivery_net_usd,recognized_delivery_cost_usd,pending_delivery_cost_usd,
+    returned_cost_shortfall_usd,cost_missing_snapshot_lines,margin_pct,money_precision_mode,money_complete,money_unknown_cost_lines,money_contributing_rows,...publicRow}=row
+  return publicRow
+}
+export function gateSalesCourierMoney(row:Record<string,unknown>,isAdmin:boolean):Record<string,unknown> {
+  if(isAdmin)return row
+  const {actual_cost_usd,actual_cost_count,linked_expense_count,linked_expense_usd,linked_expense_khr,last_expense_at,margin_usd,...publicRow}=row
+  return publicRow
+}
+
 app.get('/stats-strip', async (c) => {
   if (!canReadSales(c.get('user'))) {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
@@ -5548,7 +5567,7 @@ app.get('/stats-strip', async (c) => {
       returns: { count: Number(returnsRow?.count || 0), refund_usd: Number(returnsRow?.refund_usd || 0) },
     }
   })
-  return c.json(payload)
+  return c.json({...payload,totals:gateSalesReportMoney(payload.totals as unknown as Record<string,unknown>,isAdminControlUser(c.get('user')))})
 })
 
 // ---- Phase X (Part 395): the daily report ---------------------------------
@@ -5576,7 +5595,7 @@ app.get('/daily-report', async (c) => {
     endTime: query.endTime || null,
     tzOffsetMinutes: Number(query.tzOffsetMinutes) || 0,
   }, 'day')
-  return c.json({ startDate, endDate, days })
+  return c.json({ startDate, endDate, days:days.map(row=>gateSalesReportMoney(row as unknown as Record<string,unknown>,isAdminControlUser(c.get('user')))) })
 })
 
 // GET /api/sales/day-report?date&branchId -- the click-a-day drill: the
@@ -5601,7 +5620,10 @@ app.get('/day-report', async (c) => {
     endTime: query.endTime || null,
     tzOffsetMinutes: Number(query.tzOffsetMinutes) || 0,
   })
-  return c.json(report)
+  const isAdmin=isAdminControlUser(c.get('user'))
+  return c.json({...report,totals:gateSalesReportMoney(report.totals as unknown as Record<string,unknown>,isAdmin),
+    sales:report.sales.map(row=>gateSalesReportMoney(row as unknown as Record<string,unknown>,isAdmin)),
+    delivery_contacts:report.delivery_contacts.map(row=>gateSalesCourierMoney(row as unknown as Record<string,unknown>,isAdmin))})
 })
 
 // GET /api/sales/delivery-contact-report?startDate&endDate&branchId&contactId
@@ -5628,7 +5650,7 @@ app.get('/delivery-contact-report', async (c) => {
     endTime: query.endTime || null,
     tzOffsetMinutes: Number(query.tzOffsetMinutes) || 0,
   })
-  return c.json({ startDate, endDate, contacts })
+  return c.json({ startDate, endDate, contacts:contacts.map(row=>gateSalesCourierMoney(row as unknown as Record<string,unknown>,isAdminControlUser(c.get('user')))) })
 })
 
 // GET /api/sales/customer-report?customerId&startDate&endDate -- X4: the
@@ -5657,7 +5679,7 @@ app.get('/customer-report', async (c) => {
     endTime: query.endTime || null,
     tzOffsetMinutes: Number(query.tzOffsetMinutes) || 0,
   })
-  return c.json({ startDate, endDate, customerId, totals })
+  return c.json({ startDate, endDate, customerId, totals:gateSalesReportMoney(totals as unknown as Record<string,unknown>,isAdminControlUser(c.get('user'))) })
 })
 
 // GET /api/sales/export -- complete, snapshot-stable accounting export.

@@ -1,0 +1,27 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),Module=require('node:module')
+const file=path.join(__dirname,'test-sale-create-atomic-pure.cjs'),source=fs.readFileSync(file,'utf8'),boundary=source.indexOf(';(async () => {')
+assert.ok(boundary>0)
+const harness=new Module(file,module);harness.filename=file;harness.paths=module.paths
+harness._compile(source.slice(0,boundary).replace('const overrides = {',"const overrides = { './db': { getDb: env => env.DB },")+'\nmodule.exports={fixture,request,postSale,app,executionCtx,load,USER,setUser(value){currentUser=value}};',file)
+const h=harness.exports
+;(async()=>{
+ const f=h.fixture()
+ h.setUser({...h.USER,permissions:'{"all":true}'})
+ const created=await h.postSale(f.route,{...h.request('report-sale'),money_precision_version:1,items:[{product_id:10,quantity:1,branch_id:1,batch_id:500,client_line_key:'report-line',pricing_source:'manual',selling_price_input_usd:10,manual_discount_type:'fixed',manual_discount_value:.0044,
+   pricing_quote:{gross_usd:10,product_discount_usd:0,manual_discount_usd:.0044,total_usd:9.9956,total_khr:39982.4}}]})
+ assert.equal(created.status,200,JSON.stringify(created.body))
+ f.raw.prepare("UPDATE sales SET created_at='2026-09-13 01:00:00',is_delivery=1,delivery_actual_cost_usd=2 WHERE id=?").run([created.body.id])
+ const paths=['/stats-strip?startDate=2026-09-13&endDate=2026-09-13','/daily-report?startDate=2026-09-13&endDate=2026-09-13','/day-report?date=2026-09-13']
+ const get=async url=>{const response=await h.app.request(url,{}, {DB:f.route},h.executionCtx);const text=await response.text();assert.equal(response.status,200,text);return JSON.parse(text)}
+ const privateKeys=['cost_usd','profit_usd','pending_cost_usd','pending_profit_usd','delivery_actual_cost_usd','delivery_net_usd','delivery_margin_usd','recognized_delivery_cost_usd','pending_delivery_cost_usd','actual_cost_usd','linked_expense_usd','margin_usd']
+ const admin=await get(paths[0]);assert.equal(admin.totals.cost_usd,4);assert.equal(admin.totals.revenue_usd,10,'header adjustment recognized exactly once')
+ h.setUser({...h.USER,permissions:'{"sales":true}'})
+ const inspect=value=>{if(!value||typeof value!=='object')return;for(const key of privateKeys)assert.equal(Object.prototype.hasOwnProperty.call(value,key),false,key);for(const child of Object.values(value))inspect(child)}
+ for(const url of paths){const payload=await get(url);inspect(payload)}
+ const module=h.load('routes/sales.ts')
+ const courier={charged_fee_usd:5,actual_cost_usd:2,actual_cost_count:1,linked_expense_count:1,linked_expense_usd:2,linked_expense_khr:0,last_expense_at:'private',margin_usd:3}
+ assert.deepEqual(module.gateSalesCourierMoney(courier,false),{charged_fee_usd:5})
+ assert.equal(module.gateSalesCourierMoney(courier,true),courier)
+ f.raw.db.close()
+ console.log('PASS actual employee/admin sales report cost gates, courier projection and single adjustment recognition')
+})().catch(error=>{console.error(error);process.exitCode=1})
