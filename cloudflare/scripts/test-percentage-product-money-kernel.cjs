@@ -72,5 +72,44 @@ for (const { label, m } of modules) {
   rejects(['-1e11', '2', '100'], 'money_overflow')
   assert.equal(m.percentageMoney4('.01', '33.3333'), .0033, 'existing primitive unchanged')
   assert.equal(m.multiplyMoney4('.0001', '.5'), .0001, 'existing primitive unchanged')
+  const aggregateVectors = [
+    [[{ amount: '.01', factor: '1' }, { amount: '.01', factor: '2' }], '33.3333', .01],
+    [[{ amount: '.0001', factor: '.25' }, { amount: '.0001', factor: '.25' }], '50', 0],
+    [[{ amount: '.0001', factor: '.25' }, { amount: '.0001', factor: '.25' }], '99.999999999999999999999999', 0],
+    [[{ amount: '.0001', factor: '.25' }, { amount: '.0001', factor: '.25' }], '100', .0001],
+    [[{ amount: '.0001', factor: '.25' }, { amount: '.0001', factor: '.25' }], '100.000000000000000000000001', .0001],
+    [[{ amount: '.01', factor: '.01' }, { amount: '.01', factor: '.005' }], '33.3333', 0],
+    [[{ amount: '.01', factor: '.01' }, { amount: '.01', factor: '.0050001' }], '33.3333', .0001],
+    [[{ amount: '1e11', factor: '1e24' }, { amount: '-1e11', factor: '1e24' }, { amount: '.0001', factor: '1' }], '50', .0001],
+    [[{ amount: '1e11', factor: '1e24' }, { amount: '-1e11', factor: '1e24' }], '1e24', 0],
+    [[{ amount: '1', factor: '2' }, { amount: '1', factor: '-3' }], '-12.345', .1235],
+    [[], '100', 0],
+  ]
+  for (const [terms, percent, expected] of aggregateVectors) {
+    assert.equal(m.sumProductsPercentageMoney4(terms, percent), expected, `${label}: aggregate ${JSON.stringify([terms, percent])}`)
+    assert.equal(m.sumProductsPercentageMoney4([...terms].reverse(), percent), expected, 'exact cancellation is order independent')
+  }
+  assert.notEqual(m.percentageMoney4(m.sumProductsMoney4(aggregateVectors[1][0]), '50'), 0,
+    'positive control detects rounded aggregate before percentage')
+  for (let i = 0; i < 200; i++) {
+    const a = next(), q = next(), b = next(), r = next(), p = next()
+    // Two six-place products share one exact denominator; percentage is six-place.
+    const numerator = (a * q + b * r) * p
+    const magnitude = numerator < 0n ? -numerator : numerator
+    const ticks = (magnitude + 5_000_000_000_000_000n) / 10_000_000_000_000_000n
+    const expected = Number(ticks) * (numerator < 0n ? -1 : 1) / 10000 || 0
+    assert.equal(m.sumProductsPercentageMoney4([{ amount: text6(a), factor: text6(q) }, { amount: text6(b), factor: text6(r) }], text6(p)), expected)
+  }
+  const rejectsAggregate = (terms, percent, code) => assert.throws(() => m.sumProductsPercentageMoney4(terms, percent),
+    e => e instanceof m.MoneyPrecisionError && e.code === code)
+  assert.equal(m.sumProductsPercentageMoney4(Array.from({ length: 10000 }, () => ({ amount: '.0001', factor: '1' })), '1'), .01)
+  rejectsAggregate(Array.from({ length: 10001 }, () => ({ amount: '0', factor: '0' })), '0', 'too_many_terms')
+  rejectsAggregate([{ amount: '100000000000.000001', factor: '0' }], '0', 'money_overflow')
+  rejectsAggregate([{ amount: '1e11', factor: '2' }], '100', 'money_overflow')
+  for (const invalid of [null, undefined, true, '', 'bad', NaN, Infinity, '1e25']) {
+    rejectsAggregate([], invalid, 'invalid_decimal')
+    rejectsAggregate([{ amount: invalid, factor: '0' }], '0', 'invalid_decimal')
+    rejectsAggregate([{ amount: '0', factor: invalid }], '0', 'invalid_decimal')
+  }
 }
-console.log(`percentage product money kernel: ${modules.length} native/transpiled twin modes, ${vectors.length + generated.length} exact vectors each PASS`)
+console.log(`percentage product money kernel: ${modules.length} native/transpiled twin modes, ${vectors.length + generated.length} product + 211 aggregate exact vectors each, domain/bounds/10000-term guards PASS`)
