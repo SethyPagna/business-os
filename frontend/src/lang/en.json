@@ -6546,5 +6546,15 @@
   "money_precision_unavailable": "Pricing update is not ready. Refresh, then try again.",
   "money_receipt_unavailable": "Sale saved. Reload the receipt to confirm its saved totals.",
   "money_calculated_total": "Total before rounding",
-  "money_checkout_recovery_required": "Recover this checkout's receipt before submitting again. Do not rebuild its original request."
+  "money_checkout_recovery_required": "Recover this checkout's receipt before submitting again. Do not rebuild its original request.",
+  "return_v1_edit_unavailable": "This net-refund return cannot be edited in this version. Its saved refund remains unchanged.",
+  "return_v1_review_required": "Review the current server refund before confirming.",
+  "return_v1_unavailable": "Net-refund creation is unavailable on this server. No return was sent.",
+  "return_v1_pending": "An earlier return has an unknown outcome. Retry only the saved original request.",
+  "return_v1_session_changed": "Your session changed. Close and reopen this return before continuing.",
+  "return_v1_storage_failed": "The original return request could not be saved safely. No new request was sent.",
+  "return_v1_replacements_unsupported": "Create the replacement sale separately for this net-refund return.",
+  "return_v1_quote_loading": "Checking the net refund…",
+  "sale_line_recovery_pending": "An earlier change to this sale needs confirmation. Its original request is saved; other changes remain paused.",
+  "sale_line_review_updated_total": "Review the updated total"
 }
