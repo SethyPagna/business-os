@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { getDb } from '../lib/db'
-import { capturePricingProduct, evaluateCapturedPricingPool, pricingSourceGuard, serializeSaleItemPricing, type CapturedPricingPool, type PricingSource } from '../lib/saleItemPricing'
+import { capturePricingProduct, evaluateCapturedPricingPool, parseSaleItemPricing, pricingSourceGuard, serializeSaleItemPricing, validateCapturedSaleBasket, type CapturedPricingPool, type PricingSource } from '../lib/saleItemPricing'
 import { normalizePromotionRule } from '../lib/promotionRules'
 import { chunkForBinding, selectInChunks } from '../lib/sqlBinding'
 import { requireAuth, type SessionUser } from '../lib/auth'
@@ -49,6 +49,7 @@ import {
   guardSaleLineAddition,
   planSaleLineAddition,
   captureSaleLineKhrSnapshot,
+  saleLineKhrSnapshotStatement,
   rebaseSaleLineKhrSnapshot,
   rebaseSaleLineKhrStatement,
   resolveExplicitSaleLineBatches,
@@ -3006,8 +3007,8 @@ app.post('/:id/items', async (c) => {
   // ---- Current prices/costs, chunked for D1's parameter ceiling ----
   const productIds = [...new Set(requested.map((item) => item.productId))]
   const products = await selectInChunks(productIds, 0, (chunk) => db
-    .prepare(`SELECT id, name, selling_price_usd, cost_price_usd, cost_price_khr FROM products WHERE id IN (${chunk.map(() => '?').join(',')})`)
-    .all<{ id: number; name: string; selling_price_usd: number; cost_price_usd: number; cost_price_khr: number }>(chunk))
+    .prepare(`SELECT * FROM products WHERE id IN (${chunk.map(() => '?').join(',')})`)
+    .all<Record<string,unknown> & { id: number; name: string; selling_price_usd: number; cost_price_usd: number; cost_price_khr: number }>(chunk))
   const productMap = new Map(products.map((product) => [product.id, product]))
   for (const item of requested) {
     if (!productMap.has(item.productId)) {
@@ -3032,13 +3033,35 @@ app.post('/:id/items', async (c) => {
       .filter((item) => item.branchId)
       .map((item) => ({ productId: item.productId, branchId: item.branchId as number })),
   )
+  const addRuleRows=await db.prepare('SELECT * FROM promotion_rules WHERE is_active=1 ORDER BY id LIMIT 101').all<Record<string,unknown>>()
+  const addSourceGuard=pricingSourceGuard(products,addRuleRows)
+  const addedPool:CapturedPricingPool={version:1,pool_key:crypto.randomUUID(),evaluation_time:new Date().toISOString(),exchange_rate:exchangeRate,rules:[],
+    lines:requested.map((item,index)=>{
+      const raw=rawItems[index] as SaleItemInput, product=productMap.get(item.productId)!
+      if (!raw.client_line_key || !['selling','wholesale','manual'].includes(raw.pricing_source || ''))
+        throw new SaleMoneyContractError('money_precision_pricing_intent_required')
+      return {line_key:raw.client_line_key,source:raw.pricing_source!,product:{...capturePricingProduct(product),
+        selling_price_usd:sellingPriceCeilCent(product.selling_price_usd),wholesale_price_usd:product.wholesale_price_usd==null?null:sellingPriceCeilCent(Number(product.wholesale_price_usd))},
+        selling_price_input_usd:raw.selling_price_input_usd??null,
+        manual:{type:raw.manual_discount_type==null?'none':raw.manual_discount_type as 'fixed'|'percent',
+          value:raw.manual_discount_type==='percent'?raw.manual_discount_value??0:newSaleMoney4(raw.manual_discount_value)}}
+    })}
+  const addedQuantities=Object.fromEntries(requested.map((line,index)=>[addedPool.lines[index].line_key,line.quantity]))
+  const addedPricing=evaluateCapturedPricingPool(addedPool,addedQuantities)
+  const provisionalAllocation={version:1 as const,lines:addedPool.lines.map(line=>({line_key:line.line_key,amount:addedPricing.get(line.line_key)!.total_usd})),discount_usd:0,membership_discount_usd:0,tax_usd:0}
+  const existingPricing=validateCapturedSaleBasket(precisionBasket.lines,sale)
+  if (addedPool.lines.some(line=>existingPricing.some(old=>old.line_key===line.line_key))) throw new SaleMoneyContractError('money_precision_invalid_snapshot')
+  for (const [index,line] of addedPool.lines.entries()) {
+    const quote=(rawItems[index] as SaleItemInput).pricing_quote, exact=addedPricing.get(line.line_key)!
+    if (!quote || ['gross_usd','product_discount_usd','manual_discount_usd','total_usd','total_khr'].some(k=>quote[k as keyof typeof quote]!==exact[k as keyof typeof quote]))
+      return c.json({error:'Review the current added-item quote.',code:'sale_pricing_quote_conflict',pricing_quotes:[...addedPricing].map(([client_line_key,amounts])=>({client_line_key,...amounts}))},409)
+  }
   const candidateLines = requested.map((item,index) => {
     const product = productMap.get(item.productId)
-    const rawPrice = (rawItems[index] as Record<string,unknown>).applied_price_usd
-    const unitPriceUsd = rawPrice === undefined ? sellingPriceCeilCent(product?.selling_price_usd ?? 0) : newSaleMoney4(rawPrice)
-    const entered = (rawItems[index] as Record<string,unknown>).selling_price_input_usd
-    if (entered !== undefined && sellingPriceCeilCent(entered as number) !== unitPriceUsd) throw new SaleMoneyContractError('money_precision_selling_base_mismatch')
+    const lineKey=addedPool.lines[index].line_key
+    const unitPriceUsd=addedPricing.get(lineKey)!.applied_price_usd
     return {
+      pricingSnapshotJson:serializeSaleItemPricing(addedPool,addedQuantities,lineKey,provisionalAllocation),
       moneyPrecisionVersion: 1 as const,
       productId: item.productId,
       productName: product?.name || `product #${item.productId}`,
@@ -3064,7 +3087,7 @@ app.post('/:id/items', async (c) => {
     skipStock,
   )
 
-  const plan = planSaleLineAddition({
+  let plan = planSaleLineAddition({
     saleId,
     saleStatus,
     lines: planned,
@@ -3127,7 +3150,7 @@ app.post('/:id/items', async (c) => {
   const lineMoneyRowsBefore = await db.prepare(`
     SELECT id,applied_price_usd,applied_price_khr,total_usd,total_khr,
            product_discount_usd,product_discount_khr,base_price_usd,base_price_khr,
-           manual_discount_usd,manual_discount_khr
+           manual_discount_usd,manual_discount_khr,pricing_snapshot_json
     FROM sale_items WHERE sale_id=? ORDER BY id
   `).all<Record<string, unknown>>([saleId])
   const lineMoneyBefore = captureSaleLineKhrSnapshot(lineMoneyRowsBefore)
@@ -3141,6 +3164,14 @@ app.post('/:id/items', async (c) => {
     taxPlan.outcome.taxUsd,
     Number(sale.delivery_fee_usd) || 0,
   )
+  const finalAllocation={version:1 as const,lines:[...existingPricing.map(line=>({line_key:line.line_key,amount:line.amounts.total_usd})),...provisionalAllocation.lines],
+    discount_usd:Number(sale.discount_usd),membership_discount_usd:Number(sale.membership_discount_usd),tax_usd:taxPlan.outcome.taxUsd}
+  for (const [index,line] of planned.entries()) line.pricingSnapshotJson=serializeSaleItemPricing(addedPool,addedQuantities,addedPool.lines[index].line_key,finalAllocation)
+  plan=planSaleLineAddition({saleId,saleStatus,lines:planned,exchangeRate,userId:user?.id??null,userName:actorSnapshot(user)})
+  for (const row of lineMoneyAfter) {
+    const old=parseSaleItemPricing(row.pricing_snapshot_json)!
+    row.pricing_snapshot_json=serializeSaleItemPricing(old.pool,old.quantities,old.line_key,finalAllocation)
+  }
 
   // ---- The amendment ledger entries for this addition (S4-30).
   //
@@ -3213,6 +3244,7 @@ app.post('/:id/items', async (c) => {
     lineMoneyAfter,
     operationId: addItemsOperationId,
     lines: plan.lines.map((line) => ({
+      pricingSnapshotJson:line.pricingSnapshotJson,
       saleItemId: 0,
       productId: line.productId,
       productName: line.productName,
@@ -3270,6 +3302,7 @@ app.post('/:id/items', async (c) => {
       amendmentSettingsGuard(moneySettings),
       saleRevisionGuard(saleId, Number(sale.write_revision)),
       precisionBasket.guard,
+      addSourceGuard,
       saleMutationReceiptStatement({
         operationId: addItemsOperationId, actorId: Number(user.id), saleId, kind: 'add_items',
         requestId: addItemsRequestId, requestDigest: addItemsDigest, requestJson: addItemsCanonical,
@@ -3281,6 +3314,7 @@ app.post('/:id/items', async (c) => {
       ...statementsForPlan,
       ...buildOperationAllocationStatements(plan.lines, addItemsOperationId, addItemsStamp),
       ...taxPlan.statements,
+      saleLineKhrSnapshotStatement(saleId,lineMoneyAfter),
       canonicalSaleChildrenGuard(saleId),
       saleMoneyUpdateStatement(saleId, moneyAfter),
       ...ledgerStatements,
@@ -3334,6 +3368,10 @@ app.post('/:id/items', async (c) => {
     if (retry?.request_digest === addItemsDigest) return c.json(JSON.parse(retry.response_json) as Record<string, unknown>)
     if (retry) return c.json({ error: 'client_request_id was already used with different added items.', code: 'idempotency_conflict' }, 409)
     const message = (error as Error).message || ''
+    if (/malformed JSON/i.test(message)) {
+      try { await db.prepare(addSourceGuard.sql).get(addSourceGuard.params) }
+      catch { return c.json({error:'Pricing changed before the added items were saved.',code:'sale_pricing_quote_conflict'},409) }
+    }
     if (/CHECK constraint|constraint failed/i.test(message)) {
       return c.json({ error: 'The sale, stock, or monetary settings changed. Refresh and review the added items again.', code: 'write_conflict' }, 409)
     }
@@ -4635,6 +4673,8 @@ function canonicalSaleChildrenGuard(saleId: number | string): StatementList[numb
       ${keys.map(amount).join(' AND ')}
       AND (i.cost_price_usd IS NULL OR ${amount('cost_price_usd')}) AND (i.cost_price_khr IS NULL OR ${amount('cost_price_khr')})
       AND typeof(i.quantity) IN ('real','integer') AND i.quantity>0 AND i.quantity<=1.7976931348623157e308
+      AND i.pricing_snapshot_json IS NOT NULL AND json_valid(i.pricing_snapshot_json)=1
+      AND json_extract(i.pricing_snapshot_json,'$.version')=1
       AND (i.manual_discount_type IS NOT 'fixed' OR ${amount('manual_discount_value')})
     ),0))`,{ canonicalSale:saleId }, 3)
 }
@@ -4642,6 +4682,7 @@ function canonicalSaleChildrenGuard(saleId: number | string): StatementList[numb
 async function capturePrecisionBasket(db: ReturnType<typeof getDb>, sale: Record<string,unknown>) {
   const lines = await db.prepare('SELECT * FROM sale_items WHERE sale_id=? ORDER BY id').all<Record<string,unknown>>([Number(sale.id)])
   assertCanonicalSaleChildren(lines)
+  validateCapturedSaleBasket(lines,sale)
   for (const key of ['subtotal_usd','discount_usd','membership_discount_usd','tax_usd','delivery_fee_usd']) canonicalMoney4(sale[key],true)
   if (Number(sale.money_precision_version) === 0 && await db.prepare('SELECT 1 AS found FROM returns WHERE sale_id=? LIMIT 1').get([Number(sale.id)]))
     throw new SaleMoneyContractError('money_precision_legacy_refund_review_needed')

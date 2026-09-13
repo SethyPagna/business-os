@@ -218,6 +218,42 @@ export function allocateReceiptLines(context: ReceiptAllocationContext): Map<str
     tax_usd:taxes.get(line.line_key)!,net_entitlement_usd:sumMoney4([line.amount,taxes.get(line.line_key)!])}]))
 }
 
+/** A v1 parent never permits a partial/mixed snapshot cohort. This validates
+ * saved line identity, quantities, pool membership and receipt inputs together,
+ * not merely a self-consistent JSON document detached from its owning row. */
+export function validateCapturedSaleBasket(lines: readonly Record<string,unknown>[], header: Record<string,unknown>): SaleItemPricingSnapshot[] {
+  if (!lines.length || lines.length>MAX_PRICING_LINES) invalid()
+  const snapshots=lines.map(line=>{
+    const snapshot=parseSaleItemPricing(line.pricing_snapshot_json as string|null)
+    if (!snapshot || snapshot.pool.exchange_rate!==header.exchange_rate) invalid()
+    const capture=snapshot.pool.lines.find(row=>row.line_key===snapshot.line_key)
+    if (!capture || capture.product.id!==line.product_id || snapshot.quantities[snapshot.line_key]!==line.quantity) invalid()
+    for (const field of ['total_usd','total_khr','base_price_usd','base_price_khr','applied_price_usd','applied_price_khr'] as const)
+      if (line[field]!==snapshot.amounts[field]) invalid()
+    if ((line.manual_discount_type ?? 'none')!==capture.manual.type || line.manual_discount_value!==capture.manual.value) invalid()
+    for (const [field,amount] of [['product_discount_usd',snapshot.amounts.product_discount_usd],['manual_discount_usd',snapshot.amounts.manual_discount_usd]] as const) {
+      const unit=divideMoney4(amount,Number(line.quantity))
+      if (line[field]!==unit || line[field.replace('_usd','_khr')]!==multiplyMoney4(unit,snapshot.pool.exchange_rate)) invalid()
+    }
+    return snapshot
+  })
+  const byKey=new Map(snapshots.map(snapshot=>[snapshot.line_key,snapshot]))
+  if (byKey.size!==snapshots.length) invalid()
+  const allocation=snapshots[0].allocation_context
+  if (allocation.discount_usd!==header.discount_usd || allocation.membership_discount_usd!==header.membership_discount_usd || allocation.tax_usd!==header.tax_usd
+    || allocation.lines.length!==lines.length) invalid()
+  for (const entry of allocation.lines) if (byKey.get(entry.line_key)?.amounts.total_usd!==entry.amount) invalid()
+  for (const snapshot of snapshots) {
+    if (JSON.stringify(snapshot.allocation_context)!==JSON.stringify(allocation)) invalid()
+    for (const member of snapshot.pool.lines) {
+      const other=byKey.get(member.line_key)
+      if (!other || JSON.stringify(other.pool)!==JSON.stringify(snapshot.pool) || JSON.stringify(other.quantities)!==JSON.stringify(snapshot.quantities)) invalid()
+    }
+  }
+  if (sumMoney4(snapshots.map(snapshot=>snapshot.amounts.total_usd))!==header.subtotal_usd) invalid()
+  return snapshots
+}
+
 /** Guard the exact authorized SELECT * capture, including newly inserted active
  * rules. Execute in the same batch BEFORE any sale/stock/audit mutation. The
  * caller must read all active rules (not just the winner or currently in-window

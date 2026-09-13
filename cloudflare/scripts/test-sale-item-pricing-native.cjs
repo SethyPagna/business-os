@@ -105,7 +105,7 @@ async function actualRoute() {
   const source=fs.readFileSync(file,'utf8'), boundary=source.indexOf(';(async () => {')
   assert.ok(boundary>0)
   const harness=new Module(file,module); harness.filename=file; harness.paths=module.paths
-  harness._compile(source.slice(0,boundary)+'\nmodule.exports={fixture,request,postSale,creationState};',file)
+  harness._compile(source.slice(0,boundary).replace('const overrides = {',"const overrides = { './db': { getDb: env => env.DB },")+'\nmodule.exports={fixture,request,postSale,creationState,app,executionCtx,load,USER,setUser(value){currentUser=value}};',file)
   const h=harness.exports
   const request=()=>({...h.request('exact-line-route'),money_precision_version:1,amount_paid_usd:29,items:[{
     product_id:10,quantity:3,branch_id:1,batch_id:500,client_line_key:'route-a',pricing_source:'promotion',
@@ -123,6 +123,11 @@ async function actualRoute() {
   assert.equal(saved.body.sale.items[0].total_usd,29)
   assert.equal(saved.body.sale.items[0].applied_price_usd,9.6667)
   assert.equal(p.parseSaleItemPricing(saved.body.sale.items[0].pricing_snapshot_json).amounts.total_usd,29)
+  p.validateCapturedSaleBasket(saved.body.sale.items,saved.body.sale)
+  const wrongIdentity=structuredClone(saved.body.sale.items); wrongIdentity[0].product_id=11
+  assert.throws(()=>p.validateCapturedSaleBasket(wrongIdentity,saved.body.sale))
+  const missingSnapshot=structuredClone(saved.body.sale.items); missingSnapshot[0].pricing_snapshot_json=null
+  assert.throws(()=>p.validateCapturedSaleBasket(missingSnapshot,saved.body.sale))
   const after=h.creationState(f.raw)
   f.raw.prepare('UPDATE promotion_rules SET save_usd=9 WHERE id=1').run()
   const replay=await h.postSale(f.route,{client_request_id:'exact-line-route'})
@@ -137,6 +142,27 @@ async function actualRoute() {
   const conflict=await h.postSale(race.route,request())
   assert.equal(conflict.status,409,JSON.stringify(conflict.body)); assert.equal(conflict.body.code,'sale_pricing_quote_conflict')
   assert.deepEqual(h.creationState(race.raw),before)
+  h.setUser({...h.USER,permissions:'{"all":true}'})
+  const addResponse=await h.app.request(`/${saved.body.sale.id}/items`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({money_precision_version:1,client_request_id:'capture-add',expected_exchange_rate:4000,
+    items:[{product_id:10,quantity:1,branch_id:1,batch_id:500,client_line_key:'new-line',pricing_source:'selling',pricing_quote:{gross_usd:10,product_discount_usd:0,manual_discount_usd:0,total_usd:10,total_khr:40000}}]})},{DB:f.route},h.executionCtx)
+  const added=await addResponse.json()
+  assert.equal(addResponse.status,200,JSON.stringify(added))
+  assert.equal(added.sale.total_usd,39)
+  p.validateCapturedSaleBasket(added.sale.items,added.sale)
+  assert.notEqual(p.parseSaleItemPricing(added.sale.items[0].pricing_snapshot_json).pool.pool_key,p.parseSaleItemPricing(added.sale.items[1].pricing_snapshot_json).pool.pool_key)
+  const transition=async direction=>{
+    const history=f.raw.prepare('SELECT * FROM action_history WHERE id=?').get([added.actionHistoryId])
+    const payload=JSON.parse(history[direction==='undo'?'undo_payload':'redo_payload'])
+    await h.load('lib/undoAppliers.ts').resolveUndoApplier(payload).run(payload,{env:{DB:f.route},user:{...h.USER,permissions:'{"all":true}'},direction,historyId:history.id,generation:payload.generation})
+  }
+  await transition('undo')
+  const undone=f.raw.prepare('SELECT * FROM sale_items WHERE sale_id=? ORDER BY id').all([saved.body.sale.id])
+  assert.equal(undone.length,1); assert.equal(undone[0].pricing_snapshot_json,saved.body.sale.items[0].pricing_snapshot_json)
+  await transition('redo')
+  const redone=f.raw.prepare('SELECT * FROM sale_items WHERE sale_id=? ORDER BY id').all([saved.body.sale.id])
+  const redoneHeader=f.raw.prepare('SELECT * FROM sales WHERE id=?').get([saved.body.sale.id])
+  p.validateCapturedSaleBasket(redone,redoneHeader)
+  assert.deepEqual(redone.map(line=>line.pricing_snapshot_json),added.sale.items.map(line=>line.pricing_snapshot_json))
   f.raw.db.close(); race.raw.db.close()
   console.log('PASS actual Hono create exact29 snapshot, pre-policy retry, stale quote and concurrent rule rollback')
 }

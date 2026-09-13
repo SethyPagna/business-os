@@ -56,8 +56,9 @@ import {
 } from './productBatches'
 import { computeSaleTotals, round2, type SaleTotals } from './saleTotals'
 import { financialCalculationValue } from './financialPrecision'
-import { multiplyMoney4, roundMoney4, sumMoney4 } from './moneyPrecision'
+import { divideMoney4, multiplyMoney4, roundMoney4, sumMoney4 } from './moneyPrecision'
 import { validateSaleMoneySnapshot, SaleMoneyContractError } from './saleMoneyPrecision'
+import { parseSaleItemPricing } from './saleItemPricing'
 
 export type StockStatement = { sql: string; params: Record<string, unknown> }
 
@@ -134,6 +135,7 @@ export function saleStatusDeductsStock(status: string): boolean {
 // ---------------------------------------------------------------------------
 
 export type NewSaleLineInput = {
+  pricingSnapshotJson?: string
   moneyPrecisionVersion?: 0 | 1
   productId: number
   productName: string
@@ -274,7 +276,9 @@ export function allocateNewSaleLines(
       ...line,
       quantity,
       unitPriceUsd,
-      lineTotalUsd: line.moneyPrecisionVersion === 1 ? multiplyMoney4(unitPriceUsd,quantity) : round2(unitPriceUsd * quantity),
+      lineTotalUsd: line.moneyPrecisionVersion === 1
+        ? (parseSaleItemPricing(line.pricingSnapshotJson)?.amounts.total_usd ?? (()=>{throw new SaleMoneyContractError('money_precision_pricing_intent_required')})())
+        : round2(unitPriceUsd * quantity),
       heldUnits,
       takes,
       movementBatchId: takes.length === 1 && takes[0].quantity === quantity ? takes[0].batchId : null,
@@ -339,6 +343,10 @@ export function planSaleLineAddition(input: {
   let addedSubtotalUsd = 0
 
   for (const [lineIndex, line] of input.lines.entries()) {
+    const pricing=line.moneyPrecisionVersion===1 ? parseSaleItemPricing(line.pricingSnapshotJson) : null
+    if (line.moneyPrecisionVersion===1 && (!pricing || pricing.amounts.total_usd!==line.lineTotalUsd || pricing.quantities[pricing.line_key]!==line.quantity))
+      throw new SaleMoneyContractError('money_precision_pricing_intent_required')
+    const captured=pricing?.pool.lines.find(row=>row.line_key===pricing.line_key)
     addedSubtotalUsd += line.lineTotalUsd
     saleItemStatementIndexByLine[lineIndex] = statements.length
     statements.push({
@@ -346,12 +354,23 @@ export function planSaleLineAddition(input: {
               sale_id, product_id, product_name, quantity, applied_price_usd, applied_price_khr,
               cost_price_usd, cost_price_khr, total_usd, total_khr, branch_id,
               price_mode, base_price_usd, base_price_khr, batch_id, batch_label, batch_expiry_date
+              ${pricing?', pricing_snapshot_json, product_discount_usd, product_discount_khr, manual_discount_type, manual_discount_value, manual_discount_usd, manual_discount_khr':''}
             ) VALUES (
               @sale_id, @product_id, @product_name, @quantity, @applied_price_usd, @applied_price_khr,
               @cost_price_usd, @cost_price_khr, @total_usd, @total_khr, @branch_id,
               @price_mode, @base_price_usd, @base_price_khr, @batch_id, @batch_label, @batch_expiry_date
+              ${pricing?', @pricing_snapshot_json, @product_discount_usd, @product_discount_khr, @manual_discount_type, @manual_discount_value, @manual_discount_usd, @manual_discount_khr':''}
             )`,
       params: {
+        ...(pricing ? {
+          pricing_snapshot_json:line.pricingSnapshotJson,
+          product_discount_usd:divideMoney4(pricing.amounts.product_discount_usd,line.quantity),
+          product_discount_khr:multiplyMoney4(divideMoney4(pricing.amounts.product_discount_usd,line.quantity),exchangeRate),
+          manual_discount_type:captured!.manual.type==='none'?null:captured!.manual.type,
+          manual_discount_value:captured!.manual.value,
+          manual_discount_usd:divideMoney4(pricing.amounts.manual_discount_usd,line.quantity),
+          manual_discount_khr:multiplyMoney4(divideMoney4(pricing.amounts.manual_discount_usd,line.quantity),exchangeRate),
+        }:{}),
         sale_id: input.saleId,
         product_id: line.productId,
         product_name: line.productName,
@@ -363,10 +382,10 @@ export function planSaleLineAddition(input: {
         total_usd: line.lineTotalUsd,
         total_khr: convertedKhr(line.lineTotalUsd, exchangeRate,line.moneyPrecisionVersion),
         branch_id: line.branchId,
-        price_mode: 'selling',
+        price_mode: captured?.source ?? 'selling',
         // Same "no manual discount" default POST / uses: base = applied.
-        base_price_usd: line.unitPriceUsd,
-        base_price_khr: convertedKhr(line.unitPriceUsd, exchangeRate,line.moneyPrecisionVersion),
+        base_price_usd: pricing?.amounts.base_price_usd ?? line.unitPriceUsd,
+        base_price_khr: pricing?.amounts.base_price_khr ?? convertedKhr(line.unitPriceUsd, exchangeRate,line.moneyPrecisionVersion),
         // A single-lot line stamps its lot on the row, identical to an
         // explicit pick at checkout; a multi-lot split keeps NULL and the
         // detail lives in sale_item_batch_allocations.
@@ -471,6 +490,7 @@ export function buildAllocationStatements(
 // ---------------------------------------------------------------------------
 
 export type AddedSaleLineRecord = {
+  pricingSnapshotJson?: string
   moneyPrecisionVersion?: 0 | 1
   saleItemId: number
   productId: number
@@ -497,6 +517,7 @@ export type AddedSaleLineRecord = {
  */
 export function plannedLineFromRecord(record: AddedSaleLineRecord): PlannedSaleLine {
   return {
+    ...(record.pricingSnapshotJson===undefined?{}:{pricingSnapshotJson:record.pricingSnapshotJson}),
     ...(record.moneyPrecisionVersion === undefined ? {} : {moneyPrecisionVersion:record.moneyPrecisionVersion}),
     productId: record.productId,
     productName: record.productName || `product #${record.productId}`,
@@ -650,6 +671,7 @@ export function buildOperationAllocationStatements(
 }
 
 export type SaleLineKhrSnapshot = {
+  pricing_snapshot_json?: string | null
   id: number
   applied_price_khr: number | null
   total_khr: number | null
@@ -664,6 +686,7 @@ function nullableMoney(value: unknown): number | null {
 
 export function captureSaleLineKhrSnapshot(rows: Array<Record<string, unknown>>): SaleLineKhrSnapshot[] {
   return rows.map((row) => ({
+    ...(Object.prototype.hasOwnProperty.call(row,'pricing_snapshot_json')?{pricing_snapshot_json:row.pricing_snapshot_json as string|null}:{}),
     id: Number(row.id),
     applied_price_khr: nullableMoney(row.applied_price_khr),
     total_khr: nullableMoney(row.total_khr),
@@ -692,6 +715,11 @@ export function rebaseSaleLineKhrSnapshot(rows: Array<Record<string, unknown>>, 
 
 /** One bounded JSON parameter restores every snapshotted line exactly. */
 export function saleLineKhrSnapshotStatement(saleId: number | string, lines: SaleLineKhrSnapshot[]): StockStatement {
+  const pricing=lines.some(line=>Object.prototype.hasOwnProperty.call(line,'pricing_snapshot_json'))
+  if (pricing) for (const line of lines) {
+    if (!Object.prototype.hasOwnProperty.call(line,'pricing_snapshot_json')) throw new SaleMoneyContractError('money_precision_incomplete_snapshot')
+    parseSaleItemPricing(line.pricing_snapshot_json)
+  }
   return {
     sql: `UPDATE sale_items SET
             applied_price_khr=(SELECT json_extract(value,'$.applied_price_khr') FROM json_each(@lines) WHERE json_extract(value,'$.id')=sale_items.id),
@@ -699,6 +727,7 @@ export function saleLineKhrSnapshotStatement(saleId: number | string, lines: Sal
             product_discount_khr=(SELECT json_extract(value,'$.product_discount_khr') FROM json_each(@lines) WHERE json_extract(value,'$.id')=sale_items.id),
             base_price_khr=(SELECT json_extract(value,'$.base_price_khr') FROM json_each(@lines) WHERE json_extract(value,'$.id')=sale_items.id),
             manual_discount_khr=(SELECT json_extract(value,'$.manual_discount_khr') FROM json_each(@lines) WHERE json_extract(value,'$.id')=sale_items.id)
+            ${pricing?", pricing_snapshot_json=(SELECT json_extract(value,'$.pricing_snapshot_json') FROM json_each(@lines) WHERE json_extract(value,'$.id')=sale_items.id)":''}
           WHERE sale_id=@sale_id AND id IN (SELECT json_extract(value,'$.id') FROM json_each(@lines))`,
     params: { sale_id: saleId, lines: JSON.stringify(lines) },
   }
