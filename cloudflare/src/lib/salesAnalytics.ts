@@ -156,6 +156,7 @@ import {
   type CustomerReturnRefundSnapshotV1,
 } from './customerReturnEntitlement'
 import { validateRefundMoneySnapshot } from './refundMoneyPrecision'
+import { validateSaleMoneySnapshot } from './saleMoneyPrecision'
 
 export interface SalesFilters {
   startDate?: string | null
@@ -1028,6 +1029,22 @@ function reportMoney(row: ReportScalarRow, key: string, version: 0 | 1, nullable
   return ReportExactDecimal.money(value, version)
 }
 function reportStatus(row: ReportScalarRow): string { return String(row.sale_status || 'completed') }
+function reportHeaderAdjustment(row: ReportScalarRow, version: 0 | 1): ReportExactDecimal {
+  const owns = (key: string) => Object.prototype.hasOwnProperty.call(row, key)
+  if (!owns('money_precision_version') && !owns('calculated_total_usd') && !owns('rounding_adjustment_usd')) {
+    return ReportExactDecimal.zero()
+  }
+  try {
+    validateSaleMoneySnapshot({ money_precision_version: row.money_precision_version,
+      calculated_total_usd: row.calculated_total_usd, rounding_adjustment_usd: row.rounding_adjustment_usd,
+      total_usd: row.total_usd })
+  } catch { throw new ReportMoneyPrecisionError('unsupported_row') }
+  // Migration 0161 permits reviewed legacy sales to carry a durable raw/payable
+  // equation while retaining version 0 line/refund semantics. Presence of the
+  // validated raw value is the authority; untouched legacy rows remain NULL.
+  if (version === 0 && row.calculated_total_usd == null) return ReportExactDecimal.zero()
+  return reportMoney(row, 'rounding_adjustment_usd', version, false)
+}
 function reportRestocked(row: ReportScalarRow): boolean {
   const action = String(row.stock_action || '').trim().toLowerCase()
   return ['restock', 'damaged', 'none'].includes(action) ? action === 'restock' : Number(row.return_to_stock ?? 1) !== 0
@@ -1118,12 +1135,7 @@ function reportSaleFacts(snapshot: SalesReportSnapshot): ReportSaleFacts[] {
     const valued = subtotal.isPositive() && !rawNet.isNegative()
     const recognized = reportStatus(sale) !== 'cancelled'
     const awaiting = reportStatus(sale) === 'awaiting_payment'
-    let adjustment = ReportExactDecimal.zero()
-    if (version === 1) {
-      reportMoney(sale, 'calculated_total_usd', version, false)
-      reportMoney(sale, 'total_usd', version, false)
-      adjustment = reportMoney(sale, 'rounding_adjustment_usd', version, false)
-    }
+    const adjustment = reportHeaderAdjustment(sale, version)
     let refundPaid = ReportExactDecimal.zero()
     let legacyRefundPaid = ReportExactDecimal.zero()
     let returnedCost = ReportExactDecimal.zero()
