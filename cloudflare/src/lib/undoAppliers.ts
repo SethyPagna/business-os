@@ -2,6 +2,7 @@ import type { Env } from '../index'
 import type { SessionUser } from './auth'
 import { getDb } from './db'
 import { audit } from './audit'
+import { hasRecordedSaleMoneyPrecision } from './saleMoneyPrecision'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { branchUpdateStatements } from './branchWrites'
 import { getActionTier, getPermissionTier, type PermissionTier } from './permissions'
@@ -828,7 +829,7 @@ async function replayAtomicSaleAddItems(
       saleMoneyUpdateStatement(saleId, reversal.moneyBefore),
       ...(reversal.lineMoneyBefore ? [saleLineKhrSnapshotStatement(saleId, reversal.lineMoneyBefore)] : []),
       ...lines.map((line) => amendmentEntryStatement({
-        ...(reversal.moneyAfter.money_precision_version === 1 ? {moneyPrecisionVersion:1 as const,
+        ...(hasRecordedSaleMoneyPrecision(reversal.moneyAfter) ? {moneyPrecisionVersion:1 as const,
           before:salePrecisionLedgerFields(reversal.moneyAfter),after:salePrecisionLedgerFields(reversal.moneyBefore)} : {}),
         saleId, kind: 'line_removed', groupId: undoGroupId,
         saleItemId: line.saleItemId, productId: line.productId, productName: line.productName,
@@ -866,7 +867,7 @@ async function replayAtomicSaleAddItems(
       saleMoneyUpdateStatement(saleId, reversal.moneyAfter),
       ...(reversal.lineMoneyAfter ? [saleLineKhrSnapshotStatement(saleId, reversal.lineMoneyAfter)] : []),
       ...plan.lines.map((line) => amendmentEntryStatement({
-        ...(reversal.moneyAfter.money_precision_version === 1 ? {moneyPrecisionVersion:1 as const,
+        ...(hasRecordedSaleMoneyPrecision(reversal.moneyAfter) ? {moneyPrecisionVersion:1 as const,
           before:salePrecisionLedgerFields(reversal.moneyBefore),after:salePrecisionLedgerFields(reversal.moneyAfter)} : {}),
         saleId, kind: 'line_added', groupId: redoGroupId,
         productId: line.productId, productName: line.productName,
@@ -2297,7 +2298,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
             ? [saleLineKhrSnapshotStatement(saleId, reversal.lineMoneyBefore)]
             : []),
           ...(reversal.lines || []).map((line) => amendmentEntryStatement({
-            ...(reversal.moneyAfter.money_precision_version === 1 ? {moneyPrecisionVersion:1 as const,
+            ...(hasRecordedSaleMoneyPrecision(reversal.moneyAfter) ? {moneyPrecisionVersion:1 as const,
               before:salePrecisionLedgerFields(reversal.moneyAfter),after:salePrecisionLedgerFields(reversal.moneyBefore)} : {}),
             saleId,
             kind: 'line_removed',
@@ -2348,7 +2349,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
             ? [saleLineKhrSnapshotStatement(saleId, reversal.lineMoneyAfter)]
             : []),
           ...plan.lines.map((line) => amendmentEntryStatement({
-            ...(reversal.moneyAfter.money_precision_version === 1 ? {moneyPrecisionVersion:1 as const,
+            ...(hasRecordedSaleMoneyPrecision(reversal.moneyAfter) ? {moneyPrecisionVersion:1 as const,
               before:salePrecisionLedgerFields(reversal.moneyBefore),after:salePrecisionLedgerFields(reversal.moneyAfter)} : {}),
             saleId,
             kind: 'line_added',

@@ -181,6 +181,29 @@ assert.equal(helper.planHistoricalSaleLine({...historical,manual_discount_type:n
  assert.equal(deliverySaved.body.sale.money_precision_version,0);assert.equal(deliverySaved.body.sale.calculated_total_usd,9.5001)
  assert.equal(deliverySaved.body.sale.rounding_adjustment_usd,-.0001)
  assert.deepEqual(g.raw.prepare('SELECT * FROM sale_items WHERE sale_id=?').all([deliveryId]),deliveryLines)
+ g.raw.prepare('UPDATE sales SET subtotal_usd=19.00004 WHERE id=?').run([deliveryId])
+ g.raw.prepare('UPDATE sale_items SET total_usd=9.50006,applied_price_usd=9.50005 WHERE sale_id=?').run([deliveryId])
+ const rawLine=g.raw.prepare('SELECT * FROM sale_items WHERE sale_id=?').get([deliveryId])
+ const rawPlan=helper.planHistoricalSaleLine(rawLine,{},2,4000)
+ const rawBody={money_precision_version:1,kind:'line_updated',sale_item_id:rawLine.id,quantity:2,pricing_quote:rawPlan.quote,expected_exchange_rate:4000,client_request_id:'historical-once-only'}
+ const rawReview=await sendDelivery(rawBody)
+ assert.equal(rawReview.body.header_quote.subtotal_usd,28.5001)
+ assert.equal((await sendDelivery({...rawBody,expected_header_quote:rawReview.body.header_quote})).status,200)
+ const fractional={money_precision_version:1,expected_exchange_rate:4000,client_request_id:'historical-fractional-add',items:[{...plain('fractional'),quantity:.3333,pricing_quote:{gross_usd:3.1664,product_discount_usd:0,manual_discount_usd:0,total_usd:3.1664,total_khr:12665.6}}]}
+ const sendFractional=async payload=>{const r=await h.app.request(`/${deliveryId}/items`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)},{DB:g.route},h.executionCtx);return {status:r.status,body:await r.json()}}
+ const fractionalReview=await sendFractional(fractional)
+ const fractionalSaved=await sendFractional({...fractional,expected_header_quote:fractionalReview.body.header_quote})
+ assert.equal(fractionalSaved.status,200,JSON.stringify(fractionalSaved.body))
+ for(const direction of ['undo','redo']){
+  const record=g.raw.prepare('SELECT * FROM action_history WHERE id=?').get([fractionalSaved.body.actionHistoryId])
+  const payload=JSON.parse(record[direction==='undo'?'undo_payload':'redo_payload'])
+  await h.load('lib/undoAppliers.ts').resolveUndoApplier(payload).run(payload,{env:{DB:g.route},user:{...h.USER,permissions:'{"all":true}'},direction,historyId:record.id,generation:payload.generation})
+  const ledger=g.raw.prepare('SELECT * FROM sale_amendments WHERE sale_id=? AND via=? ORDER BY id DESC LIMIT 1').get([deliveryId,direction])
+  assert.equal(ledger[direction==='undo'?'quantity_before':'quantity_after'],.3333)
+  assert.equal(Math.abs(ledger.units_moved),.3333)
+  assert.equal(JSON.parse(ledger.before_json).money_precision_version,0)
+  assert.equal(JSON.parse(ledger.after_json).money_precision_version,0)
+ }
  g.raw.db.close()
  f.raw.db.close()
  console.log('PASS historical migration invariance/bounds; employee quantity/add/replace/remove/fee; NULL undo/redo; raw operands; savedFX settlement; fallback review; concurrency/permissions; receipt-first schema recovery')
