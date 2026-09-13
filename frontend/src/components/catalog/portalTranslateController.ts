@@ -320,9 +320,22 @@ export function requestPortalTranslateReload(reason = 'translate-change', minInt
   if (typeof window === 'undefined') return false
   const now = Date.now()
   const markerKey = `${PORTAL_TRANSLATE_RELOAD_KEY}:${reason}`
-  const lastReload = Number(window.sessionStorage?.getItem(markerKey) || 0)
+  // Touching window.sessionStorage throws (SecurityError) where site data is
+  // blocked; this runs inside an effect timer, so a throw here would surface
+  // as an uncaught error instead of the reload fallback. Without a readable
+  // marker, keep the rate limit conservative and skip the reload.
+  let lastReload = 0
+  try {
+    lastReload = Number(window.sessionStorage?.getItem(markerKey) || 0)
+  } catch {
+    return false
+  }
   if (now - lastReload <= minIntervalMs) return false
-  window.sessionStorage?.setItem(markerKey, String(now))
+  try {
+    window.sessionStorage?.setItem(markerKey, String(now))
+  } catch {
+    return false
+  }
   window.location.reload()
   return true
 }
