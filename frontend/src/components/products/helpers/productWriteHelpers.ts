@@ -1,4 +1,5 @@
-import { normalizePriceValue } from '../../../utils/pricing.ts'
+import { normalizeInternalMoney, normalizePriceValue } from '../../../utils/pricing.ts'
+import { addMoney4 } from '../../../utils/moneyPrecision.ts'
 import { normalizeProductGallery } from './productGalleryHelpers.ts'
 
 type StockAdjustmentType = 'add' | 'remove'
@@ -359,7 +360,10 @@ export function buildProductBulkPricingUpdates(form: ProductBulkForm = {}): Prod
     'purchase_price_usd',
     'purchase_price_khr',
   ]) {
-    if (hasBulkFormValue(form[field])) updates[field] = normalizePriceValue(form[field])
+    if (!hasBulkFormValue(form[field])) continue
+    updates[field] = field.startsWith('purchase_price_')
+      ? normalizeInternalMoney(form[field])
+      : normalizePriceValue(form[field])
   }
   return updates
 }
@@ -383,9 +387,9 @@ export function buildProductBulkPricingUpdates(form: ProductBulkForm = {}): Prod
 //   - Results are clamped at 0. A decrease bigger than the current price
 //     would otherwise produce a negative price, which is never a real
 //     intent and would corrupt totals downstream.
-//   - Money is rounded to 2 decimals for USD and to whole units for KHR
-//     (riel has no minor unit in practice here), so repeated adjustments
-//     cannot accumulate floating-point dust.
+//   - Selling/wholesale retains the existing catalogue display policy (USD
+//     cents, whole KHR for relative changes). Purchase price is internal
+//     cost, so it uses the four-decimal money kernel in both currencies.
 //   - A product whose every targeted field is skipped yields NO update at
 //     all, rather than an empty write. That keeps the "changed N products"
 //     count honest and avoids pointless round trips.
@@ -418,9 +422,13 @@ export interface BulkPriceAdjustmentResult {
   updates: ProductUpdates
 }
 
-function roundMoney(value: number, field: BulkPriceField): number {
+function roundCatalogPrice(value: number, field: BulkPriceField): number {
   if (field.endsWith('_khr')) return Math.round(value)
   return Math.round(value * 100) / 100
+}
+
+function isPurchasePriceField(field: BulkPriceField): field is 'purchase_price_usd' | 'purchase_price_khr' {
+  return field.startsWith('purchase_price_')
 }
 
 export function buildProductBulkPriceAdjustments(
@@ -440,9 +448,23 @@ export function buildProductBulkPriceAdjustments(
 
     const updates: ProductUpdates = {}
     for (const field of fields) {
-      const current = normalizePriceValue(product?.[field])
+      const rawCurrent = toFiniteNumber(product?.[field], 0)
+      const current = isPurchasePriceField(field) ? normalizeInternalMoney(rawCurrent) : normalizePriceValue(rawCurrent)
       if (adjustment.skipZeroPriced && current === 0) continue
-      const next = roundMoney(Math.max(0, current + delta), field)
+      let next: number
+      if (isPurchasePriceField(field)) {
+        try {
+          const moved = addMoney4(rawCurrent, delta)
+          next = moved < 0 ? 0 : moved
+        } catch {
+          // Invalid/out-of-range input is not a usable product update. The
+          // caller's existing "nothing to change" path keeps it out of the
+          // network instead of emitting Infinity or a partially priced row.
+          continue
+        }
+      } else {
+        next = roundCatalogPrice(Math.max(0, current + delta), field)
+      }
       // Skip a field the adjustment does not actually move -- e.g. a
       // decrease against a price already at 0.
       if (next === current) continue
