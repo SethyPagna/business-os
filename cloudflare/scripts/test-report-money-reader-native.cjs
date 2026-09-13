@@ -75,6 +75,11 @@ const filters = { startDate: '2026-09-01', endDate: '2026-09-30', branchId: 2 }
   assert.equal(days[1].pending_revenue_usd, 5)
   const total = await precise.getSalesTotals({}, filters)
   assert.equal(total.revenue_usd, 15.01)
+  const sharedSnapshot = await precise.readSalesReportSnapshot({}, filters)
+  assert.deepEqual(precise.salesTotalsFromSnapshot(sharedSnapshot), total,
+    'a caller can reuse the canonical totals reducer without a second report formula')
+  assert.deepEqual(precise.paymentMethodBreakdownFromSnapshot(sharedSnapshot), await precise.getPaymentMethodBreakdown({}, filters),
+    'payment grouping can reuse the same verified snapshot as totals')
   const periods = await precise.getBusinessSummaryPeriodRows({}, filters, 'month')
   assert.equal(periods[0].revenue_usd, total.revenue_usd, 'period reads the same recorded operands instead of summing displayed days')
   const series = await precise.getSalesPeriodSeries({}, filters, 'day')
