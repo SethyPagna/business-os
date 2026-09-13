@@ -50,3 +50,9 @@ export function validateSaleMoneySnapshot<T extends {
     || roundMoney2(raw) !== payable) throw new SaleMoneyContractError('money_precision_invalid_equation')
   return row
 }
+
+/** Monetary basis is independent from the availability of original item rules. */
+export function hasRecordedSaleMoneyPrecision(row:Parameters<typeof validateSaleMoneySnapshot>[0]):boolean {
+  validateSaleMoneySnapshot(row)
+  return row.money_precision_version===1 || row.calculated_total_usd!=null
+}
