@@ -55,6 +55,8 @@
 const fs = require('fs')
 const path = require('path')
 const ts = require('typescript')
+// Load the actual dependency before any permissive per-module shim is active.
+const moneyPrecision = require('../src/lib/moneyPrecision.ts')
 const assert = require('assert')
 const Module = require('module')
 const { openDb } = require('./harness/d1compat.cjs')
@@ -79,6 +81,7 @@ function loadReal(relPath, requireOverrides = {}) {
   const sourcePath = path.join(root, 'src', relPath)
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
+    if (['./moneyPrecision', '../lib/moneyPrecision', './moneyPrecision.ts', '../lib/moneyPrecision.ts'].includes(request)) return moneyPrecision
     if (request in requireOverrides) return requireOverrides[request]
     return originalLoad.call(this, request, parent, isMain)
   }

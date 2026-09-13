@@ -3,13 +3,15 @@ const fs = require('node:fs')
 const path = require('node:path')
 const Module = require('node:module')
 const ts = require('typescript')
+// Load the actual dependency before any permissive per-module shim is active.
+const moneyPrecision = require('../src/lib/moneyPrecision.ts')
 
 function loadTs(file, stubs = {}) {
   const { outputText } = ts.transpileModule(fs.readFileSync(file, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }, fileName: file,
   })
   const original = Module._load
-  Module._load = (request, parent, main) => Object.prototype.hasOwnProperty.call(stubs, request)
+  Module._load = (request, parent, main) => ['./moneyPrecision', '../lib/moneyPrecision', './moneyPrecision.ts', '../lib/moneyPrecision.ts'].includes(request) ? moneyPrecision : Object.prototype.hasOwnProperty.call(stubs, request)
     ? stubs[request] : original.call(Module, request, parent, main)
   const mod = { exports: {} }
   try { new Function('exports', 'require', 'module', outputText)(mod.exports, require, mod) }
