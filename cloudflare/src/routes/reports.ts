@@ -252,6 +252,15 @@ export function gateProductRow(row: Record<string, unknown>, isAdmin: boolean): 
   }
 }
 
+export function gateCourierRow(row: Record<string, unknown>, isAdmin: boolean): Record<string, unknown> {
+  if (isAdmin) return row
+  const {
+    actual_cost_usd, actual_cost_count, linked_expense_count, linked_expense_usd, linked_expense_khr,
+    last_expense_at, margin_usd, ...publicRow
+  } = row
+  return publicRow
+}
+
 const DAY_MS = 24 * 60 * 60 * 1000
 
 function ymd(d: Date): string {
@@ -359,7 +368,7 @@ app.get('/overview', async (c) => {
         pending_revenue_usd: r.pending_revenue_usd,
         collected_usd: r.collected_total_usd,
       })),
-      couriers,
+      couriers: couriers.map((row) => gateCourierRow(row as unknown as Record<string, unknown>, isAdmin)),
     }
   }
 
@@ -445,7 +454,7 @@ app.get('/grouped', async (c) => {
   if (by === 'product') {
     rows = (await getProductSalesRanking(c.env, f, limit)).map((r) => gateProductRow(r as unknown as Record<string, unknown>, isAdmin))
   } else if (by === 'courier') {
-    rows = await getDeliveryContactTotals(c.env, f)
+    rows = (await getDeliveryContactTotals(c.env, f)).map((row) => gateCourierRow(row as unknown as Record<string, unknown>, isAdmin))
   } else if ((SALES_GROUP_KEYS as readonly string[]).includes(by)) {
     rows = (await getSalesGroupedTotals(c.env, f, by as SalesGroupKey, limit)).map((r) => gateTotals(r as unknown as Record<string, unknown>, isAdmin))
   } else {
