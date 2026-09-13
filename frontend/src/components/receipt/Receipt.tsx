@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import { roundMoney2 } from '../../utils/moneyPrecision.ts'
+import { receiptRoundingDisplay } from '../../utils/receiptRoundingDisplay.ts'
 import ArrowLeft from 'lucide-react/dist/esm/icons/arrow-left.js'
 import FileText from 'lucide-react/dist/esm/icons/file-text.js'
 import ImageDown from 'lucide-react/dist/esm/icons/image-down.js'
@@ -419,6 +419,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
     showItemDiscount,
     fallbackExchangeRate: toNumber(appliedSettings.exchange_rate as number | string | undefined) || 4100,
   }), [appliedSettings.exchange_rate, sale, showItemDiscount])
+  const roundingDisplay = totals.calculatedTotalUsd === null ? null : receiptRoundingDisplay(totals.roundingAdjustmentUsd, fmtUSD)
   const exchangeRate = totals.exchangeRate
   const subtotalUsd = totals.subtotalUsd
   const discountUsd = totals.discountUsd
@@ -757,7 +758,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
     ) : null,
     total: (
       <div key="total" className="my-2 border-y-2 border-black py-2">
-        {totals.calculatedTotalUsd !== null && totals.roundingAdjustmentUsd !== 0 ? <Row label={t?.('money_rounding_adjustment') || 'Rounding adjustment'} value={`${totals.roundingAdjustmentUsd < 0 ? '-' : '+'}${fmtUSD(Math.abs(roundMoney2(totals.roundingAdjustmentUsd)))}`} /> : null}
+        {roundingDisplay ? <Row label={t?.(roundingDisplay.labelKey) || 'Rounding adjustment'} value={roundingDisplay.amount} /> : null}
         <Row label={labelFor(lang, 'total')} value={fmtUSD(totalUsd)} subValue={tpl.show_total_khr ? fmtKHR(totalKhr) : ''} bold />
       </div>
     ),

@@ -28,12 +28,15 @@ export function saleLineEditPreview(items: readonly Record<string, unknown>[], h
       pricing_quote: plan.quote, ...(baseline.derived ? { expected_recorded_line_total_usd: baseline.amount } : {}) } }
 }
 
-export function saleRemovalSubtotal(items: readonly Record<string, unknown>[], header: Record<string, unknown>, lineId: number): { subtotalUsd: number; recordedTotalDerived: boolean; expectedRecordedLineTotal?: number } {
-  if (header.money_precision_version === 1) return { subtotalUsd: capturedSaleRemovalSubtotal(items, header, lineId), recordedTotalDerived: false }
+export function saleRemovalSubtotal(items: readonly Record<string, unknown>[], header: Record<string, unknown>, lineId: number, replacementTotalUsd = 0): { subtotalUsd: number; recordedTotalDerived: boolean; expectedRecordedLineTotal?: number } {
+  if (!Number.isFinite(replacementTotalUsd) || replacementTotalUsd < 0) throw new HistoricalSalePricingError()
+  if (header.money_precision_version === 1) return { subtotalUsd: sumMoney4([capturedSaleRemovalSubtotal(items, header, lineId), replacementTotalUsd]), recordedTotalDerived: false }
   if (header.money_precision_version != null && header.money_precision_version !== 0) throw new HistoricalSalePricingError()
   const row = items.find(item => item.id === lineId)
   if (!row || typeof header.subtotal_usd !== 'number' || !Number.isFinite(header.subtotal_usd) || header.subtotal_usd < 0) throw new HistoricalSalePricingError()
-  const baseline = recordedHistoricalLineTotal(row), subtotalUsd = sumMoney4([header.subtotal_usd, -baseline.amount])
+  // Replacement must join this ORIGINAL expression, not add to an already
+  // rounded removal subtotal and lose a historical residual.
+  const baseline = recordedHistoricalLineTotal(row), subtotalUsd = sumMoney4([header.subtotal_usd, -baseline.amount, replacementTotalUsd])
   if (subtotalUsd < 0) throw new HistoricalSalePricingError()
   return { subtotalUsd, recordedTotalDerived: baseline.derived, ...(baseline.derived ? { expectedRecordedLineTotal: baseline.amount } : {}) }
 }

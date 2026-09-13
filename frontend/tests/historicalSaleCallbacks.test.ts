@@ -53,6 +53,9 @@ assert.equal(Object.hasOwn(edited.request, 'pricing_snapshot_json'), false)
 assert.equal(JSON.stringify(historicalSale), original)
 const residualHeader = { ...historicalSale, subtotal_usd: 2.46938 }
 assert.equal(saleLineEditPreview(historicalSale.items, residualHeader, 70, { quantity: 3 })!.subtotalUsd, 3.7039, 'saved header residual survives exact changed-line delta')
+const rawDeltaLine = { ...recordedLine, quantity: 1, applied_price_usd: 9.50005, total_usd: 9.50006 }
+assert.equal(saleLineEditPreview([rawDeltaLine], { ...historicalSale, subtotal_usd: 19.00004 }, 70, { quantity: 2 })!.subtotalUsd, 28.5001, 'whole old subtotal minus old raw line plus new line rounds once')
+assert.equal(saleRemovalSubtotal([{ ...recordedLine, total_usd: .50006 }], { ...historicalSale, subtotal_usd: 1.00004 }, 70, .50006).subtotalUsd, 1, 'replacement preserves original residual instead of rounding removal before adding')
 assert.equal(saleRemovalSubtotal(historicalSale.items, residualHeader, 70).subtotalUsd, .0003)
 assert.equal(saleLineEditPreview(historicalSale.items, historicalSale, 70, { quantity: 2 }), null, 'numeric no-op has no new quote/request')
 const nullTotalLine = { ...recordedLine, total_usd: null }
@@ -125,6 +128,12 @@ callback('stageReplacement', { ...env, replaceLineId: 70, toNumber: Number, save
 assert.equal(staged.at(-1).request.replacement.pricing_quote.total_usd, 2.48)
 assert.equal(staged.at(-1).request.expected_header_quote.subtotal_usd, 2.4803)
 assert.equal(staged.at(-1).request.replacement.pricing_quote.total_khr, 9969.6)
+const replacementResidualHeader = { ...header, subtotal_usd: 1, total_usd: 1 }
+callback('stageReplacement', { ...env, sale: replacementResidualHeader, items: [{ ...recordedLine, quantity: 1, applied_price_usd: 1, total_usd: 1.00005 }],
+  replaceLineId: 70, toNumber: Number, savedExchangeRate: 4020,
+  headerQuote: (subtotal: number) => quoteSaleMutationHeader(replacementResidualHeader, subtotal, { tax_enabled: '0', tax_rate: '0' }),
+  moneyCapability: { assertReady: () => {} }, stagedLineFromSheetPick, stagedLinePricingIntent, setAddQuery: () => {}, setAddCandidates: () => {} })({ id: 8, name: 'Replacement', selling_price_usd: .01, stock_quantity: 10 }, '2')
+assert.equal(staged.at(-1).request.expected_header_quote.subtotal_usd, .01, 'actual replacement combines complete expression before refusing a negative intermediate removal or rounding a half tie')
 callback('stageDeliveryFeeAmendment', { ...env, feeText: '1.2345', parseDeliveryAmountUsd, deliveryAmountChanged, DELIVERY_AMOUNT_ERROR_KEYS })(0)
 assert.equal(staged.at(-1).request.delivery_fee_usd, 1.2345)
 assert.equal(staged.at(-1).request.expected_header_quote.subtotal_usd, 2.46938, 'fee preview retains raw saved subtotal verbatim; no item sum')
@@ -201,7 +210,18 @@ new Function('require', 'module', 'exports', receiptBundle.outputFiles[0].text)(
   ? { useApp: () => ({ fmtUSD: (value: number) => `USD${value.toFixed(2)}`, fmtKHR: (value: number) => `KHR${value}`, khrSymbol: '៛', t: (key: string) => key }) }
   : requireActual(name), receiptModule, receiptModule.exports)
 const renderReceipt = (sale: unknown) => renderToStaticMarkup(React.createElement(receiptModule.exports.default, { sale, settings: {}, onClose: () => {} }))
-assert.match(renderReceipt(editedHistory), /money_rounding_adjustment/)
+assert.match(renderReceipt(editedHistory), /money_rounding_down/)
+assert.match(renderReceipt(editedHistory), /&lt; USD0\.01/)
+assert.doesNotMatch(renderReceipt(editedHistory), /-USD0\.00/)
+const upHtml = renderReceipt({ ...editedHistory, calculated_total_usd: 3.6964, rounding_adjustment_usd: .0036, subtotal_usd: 3.6964 })
+assert.match(upHtml, /money_rounding_up/)
+assert.match(upHtml, /&lt; USD0\.01/)
+assert.doesNotMatch(upHtml, /\+USD0\.00/)
+const zeroHtml = renderReceipt({ ...editedHistory, calculated_total_usd: 3.7, rounding_adjustment_usd: 0, subtotal_usd: 3.7 })
+assert.doesNotMatch(zeroHtml, /money_rounding_(?:up|down|adjustment)/)
+for (const adjustment of [-.006, .006]) assert.throws(() => renderReceipt({ ...editedHistory,
+  subtotal_usd: 3.7 - adjustment, calculated_total_usd: 3.7 - adjustment, rounding_adjustment_usd: adjustment }),
+  'six-mill adjustment cannot be a valid nearest-cent saved snapshot; actual receipt refuses it rather than inventing a payable')
 assert.match(renderReceipt(editedHistory), /USD3.70/)
 assert.doesNotMatch(renderReceipt(historicalSale), /money_rounding_adjustment/)
 const unknownHtml = renderReceipt({ ...historicalSale, items: [{ ...recordedLine, product_name: 'UNKNOWN LINE', applied_price_usd: null, total_usd: null, total_khr: null }] })
