@@ -39,7 +39,7 @@ export function planHistoricalSaleLine(row: Record<string, unknown>, body: Recor
   let total: number, gross: number, manual: number
   if (!priceChanged) {
     total = multiplyMoney4(oldApplied, nextQuantity)
-    gross = row.base_price_usd == null ? sumProductsMoney4([{amount:oldApplied,factor:nextQuantity},{amount:recordedManual,factor:nextQuantity}]) : multiplyMoney4(oldBase, nextQuantity)
+    gross = sumProductsMoney4([{amount:oldApplied,factor:nextQuantity},{amount:recordedManual,factor:nextQuantity}])
     manual = subtractMoney4(gross, total)
     if (manual < 0) throw new HistoricalSalePricingError()
   } else {
