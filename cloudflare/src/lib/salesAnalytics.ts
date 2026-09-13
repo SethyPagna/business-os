@@ -1749,7 +1749,28 @@ export interface SalesDayReport {
   sales: SalesDayRow[]
 }
 
+function paymentMethodBreakdownFromSnapshot(snapshot: SalesReportSnapshot): PaymentMethodBreakdownRow[] {
+  const methods = new Map<string, { tx_count: number; collected: ReportExactDecimal; total: ReportExactDecimal }>()
+  for (const fact of reportSaleFacts(snapshot)) {
+    const sale = fact.sale
+    const method = String(sale.payment_method || '').trim() || 'Unknown'
+    const found = methods.get(method) || { tx_count: 0, collected: ReportExactDecimal.zero(), total: ReportExactDecimal.zero() }
+    const payable = Number(sale.source_return_id || 0) !== 0
+      ? reportMoney(sale, 'amount_paid_usd', fact.version)
+      : reportMoney(sale, 'total_usd', fact.version)
+    found.tx_count += 1
+    found.total = found.total.add(reportMoney(sale, 'total_usd', fact.version))
+    if (fact.recognized && !fact.awaiting) found.collected = found.collected.add(payable.subtract(fact.refundPaid))
+    methods.set(method, found)
+  }
+  return [...methods.entries()].map(([payment_method, value]) => ({
+    payment_method, tx_count: value.tx_count, collected_usd: value.collected.toNumber(), total_usd: value.total.toNumber(),
+  })).sort((a, b) => b.collected_usd - a.collected_usd)
+}
+
 export async function getPaymentMethodBreakdown(env: Env, f: SalesFilters): Promise<PaymentMethodBreakdownRow[]> {
+  const snapshot = await readSalesReportSnapshot(env, f)
+  if (snapshot) return paymentMethodBreakdownFromSnapshot(snapshot)
   const db = getDb(env)
   const { sql: whereSql, params } = whereActiveSales('sales', f)
   const rows = await db.prepare(`
@@ -2108,19 +2129,12 @@ export async function getSalesDayReport(
     const snapshot = await readSalesReportSnapshot(env, f, true)
     const facts = reportSaleFacts(snapshot)
     const totals = exactReportTotals(aggregateReportSnapshot(snapshot, () => '').get('') || reportBucket(), snapshot)
-    const payment = new Map<string, { tx_count: number; collected: ReportExactDecimal; total: ReportExactDecimal }>()
+    const paymentMethods = paymentMethodBreakdownFromSnapshot(snapshot)
     let storeTx = 0, membershipTx = 0
     for (const fact of facts) {
       const sale = fact.sale; const version = fact.version
       if (reportMoney(sale, 'discount_usd', version).isPositive()) storeTx += 1
       if (reportMoney(sale, 'membership_discount_usd', version).isPositive()) membershipTx += 1
-      const method = String(sale.payment_method || '').trim() || 'Unknown'
-      const found = payment.get(method) || { tx_count: 0, collected: ReportExactDecimal.zero(), total: ReportExactDecimal.zero() }
-      found.tx_count += 1
-      const payable = reportMoney(sale, 'total_usd', version)
-      found.total = found.total.add(payable)
-      found.collected = found.collected.add(Number(sale.source_return_id || 0) !== 0 ? reportMoney(sale, 'amount_paid_usd', version) : payable)
-      payment.set(method, found)
     }
     const sales = facts.slice().sort((a, b) => String(b.sale.created_at).localeCompare(String(a.sale.created_at)) || Number(b.sale.id) - Number(a.sale.id))
       .slice(0, 1000).map((fact) => {
@@ -2128,15 +2142,15 @@ export async function getSalesDayReport(
         const discount = reportMoney(sale, 'discount_usd', fact.version).add(reportMoney(sale, 'membership_discount_usd', fact.version))
         const payable = Number(sale.source_return_id || 0) !== 0
           ? reportMoney(sale, 'amount_paid_usd', fact.version) : reportMoney(sale, 'total_usd', fact.version)
+        const collected = fact.recognized && !fact.awaiting ? payable.subtract(fact.refundPaid) : ReportExactDecimal.zero()
         return { id: Number(sale.id), receipt_number: String(sale.receipt_number || ''), created_at: String(sale.created_at || ''),
           customer_name: Number(sale.customer_is_anonymous) !== 0 ? '' : String(sale.customer_name || ''),
           payment_method: String(sale.payment_method || '').trim() || 'Unknown', sale_status: reportStatus(sale),
           revenue_usd: fact.recognized ? fact.net.add(fact.adjustment).subtract(fact.refund).toNumber() : 0,
-          discount_usd: discount.toNumber(), collected_usd: payable.toNumber() }
+          discount_usd: discount.toNumber(), collected_usd: collected.toNumber() }
       })
     return { date: day, totals,
-      payment_methods: [...payment.entries()].map(([payment_method, value]) => ({ payment_method, tx_count: value.tx_count,
-        collected_usd: value.collected.toNumber(), total_usd: value.total.toNumber() })).sort((a, b) => b.collected_usd - a.collected_usd),
+      payment_methods: paymentMethods,
       delivery_contacts: deliveryContactTotalsFromSnapshot(snapshot, f),
       discounts: { store_usd: totals.store_discount_usd, membership_usd: totals.membership_discount_usd,
         store_tx_count: storeTx, membership_tx_count: membershipTx }, sales }
