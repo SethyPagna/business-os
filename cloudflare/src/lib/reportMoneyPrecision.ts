@@ -107,6 +107,15 @@ export class ReportExactDecimal {
     return this
   }
   toText(places = 4): string { this.assertMoneyBound(); return unitsText(roundedUnits(this.value, places), places) }
+  /** Convert an exact persisted decimal quantity back to its JS/SQLite number
+   * representation without applying the monetary display precision. */
+  toExactNumber(): number {
+    const stored = Number(this.value.n) / Number(this.value.d)
+    if (!Number.isFinite(stored)) throw new ReportMoneyPrecisionError('invalid_quantity')
+    const roundTrip = new ReportExactDecimal(decimal(stored, false))
+    if (roundTrip.compare(this) !== 0) throw new ReportMoneyPrecisionError('invalid_quantity')
+    return stored
+  }
   toNumber(places = 2): number {
     const value = Number(this.toText(places))
     if (!Number.isFinite(value)) throw new ReportMoneyPrecisionError('aggregate_overflow')

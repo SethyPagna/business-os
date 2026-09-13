@@ -35,10 +35,23 @@ const winPath = path.join(tmpDir, 'businessDateWindow.ts')
 fs.writeFileSync(winPath, fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'businessDateWindow.ts'), 'utf8'))
 const moneyPath = path.join(tmpDir, 'moneyPrecision.ts')
 const reportMoneyPath = path.join(tmpDir, 'reportMoneyPrecision.ts')
+const customerReturnPath = path.join(tmpDir, 'customerReturnEntitlement.ts')
+const refundPrecisionPath = path.join(tmpDir, 'refundMoneyPrecision.ts')
 fs.writeFileSync(moneyPath, fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'moneyPrecision.ts'), 'utf8'))
 fs.writeFileSync(reportMoneyPath, fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'reportMoneyPrecision.ts'), 'utf8'))
+// This legacy formula harness does not invoke the scalar snapshot reader. Give
+// its newly imported return helper a fail-closed compile stub; the native
+// reader test loads and exercises the real helper and snapshots end to end.
+fs.writeFileSync(customerReturnPath, `
+export type CustomerReturnRefundSnapshotV1 = any
+export function parseCustomerReturnRefundSnapshot(): never { throw new Error('reader_not_available_in_formula_harness') }
+export function prorateCustomerReturnMoney4(): never { throw new Error('reader_not_available_in_formula_harness') }
+`)
+fs.writeFileSync(refundPrecisionPath, `
+export function validateRefundMoneySnapshot(): never { throw new Error('reader_not_available_in_formula_harness') }
+`)
 const tscBin = path.join(__dirname, '..', 'node_modules', 'typescript', 'bin', 'tsc')
-execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath} ${winPath} ${moneyPath} ${reportMoneyPath}`, {
+execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath} ${winPath} ${moneyPath} ${reportMoneyPath} ${customerReturnPath} ${refundPrecisionPath}`, {
   cwd: tmpDir,
   stdio: 'inherit',
 })

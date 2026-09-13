@@ -150,6 +150,12 @@ import {
   ReportMoneyPrecisionError,
   type ReportMoneyPrecisionMode,
 } from './reportMoneyPrecision'
+import {
+  parseCustomerReturnRefundSnapshot,
+  prorateCustomerReturnMoney4,
+  type CustomerReturnRefundSnapshotV1,
+} from './customerReturnEntitlement'
+import { validateRefundMoneySnapshot } from './refundMoneyPrecision'
 
 export interface SalesFilters {
   startDate?: string | null
@@ -864,6 +870,7 @@ async function readSalesReportPass(
   const salesColumns = await reportTableColumns(db, 'sales')
   const itemColumns = await reportTableColumns(db, 'sale_items')
   const returnColumns = await reportTableColumns(db, 'returns')
+  const returnItemColumns = await reportTableColumns(db, 'return_items')
   const feeColumns = await reportTableColumns(db, 'fees')
   const customerColumns = await reportTableColumns(db, 'customers')
   const contactColumns = await reportTableColumns(db, 'delivery_contacts')
@@ -909,7 +916,10 @@ async function readSalesReportPass(
     FROM returns r WHERE r.sale_id IS NOT NULL
       AND COALESCE(r.status,'completed')<>'cancelled' AND COALESCE(r.return_scope,'customer')='customer'
       AND EXISTS(SELECT 1 FROM sales s WHERE s.id=r.sale_id AND ${primary.sql})`, 'r.id', primary.params, rowBudget)
-  const returnItems = await reportKeysetRows(db, `SELECT ri.id,ri.return_id,ri.cost_price_usd,ri.quantity,ri.stock_action,ri.return_to_stock
+  const returnItemPrecision = returnItemColumns.has('refund_snapshot_json')
+    ? ',ri.sale_item_id,ri.total_usd,ri.refund_snapshot_json'
+    : ''
+  const returnItems = await reportKeysetRows(db, `SELECT ri.id,ri.return_id,ri.cost_price_usd,ri.quantity,ri.stock_action,ri.return_to_stock${returnItemPrecision}
     FROM return_items ri WHERE EXISTS(SELECT 1 FROM returns r JOIN sales s ON s.id=r.sale_id
       WHERE r.id=ri.return_id AND COALESCE(r.status,'completed')<>'cancelled'
         AND COALESCE(r.return_scope,'customer')='customer' AND ${primary.sql})`, 'ri.id', primary.params, rowBudget)
@@ -1031,6 +1041,66 @@ type ReportSaleFacts = {
   itemDiscount: ReportExactDecimal; pendingCost: ReportExactDecimal; unvaluedCost: ReportExactDecimal; missingCostLines: number
 }
 
+type V1RefundLine = { row: ReportScalarRow; snapshot: CustomerReturnRefundSnapshotV1 }
+
+function reportV1RefundReversal(
+  saleId: number,
+  returnedRows: ReportScalarRow[],
+  linesByReturn: Map<number, ReportScalarRow[]>,
+): { merchandise: ReportExactDecimal; tax: ReportExactDecimal } {
+  const bySaleItem = new Map<number, V1RefundLine[]>()
+  for (const returned of returnedRows) {
+    if (reportVersion(returned) !== 1) continue
+    const lines = linesByReturn.get(Number(returned.id)) || []
+    if (lines.length === 0) throw new ReportMoneyPrecisionError('unsupported_row')
+    let calculated = ReportExactDecimal.zero()
+    for (const row of lines) {
+      let parsed: CustomerReturnRefundSnapshotV1 | null = null
+      try { parsed = parseCustomerReturnRefundSnapshot(row.refund_snapshot_json as string | null | undefined) }
+      catch { throw new ReportMoneyPrecisionError('unsupported_row') }
+      if (!parsed || parsed.sale_id !== saleId || parsed.sale_item_id !== Number(row.sale_item_id)
+        || ReportExactDecimal.quantity(row.quantity as string | number).compare(ReportExactDecimal.quantity(parsed.return_quantity)) !== 0
+        || reportMoney(row, 'total_usd', 1, false).compare(ReportExactDecimal.money(parsed.calculated_refund_usd, 1)) !== 0) {
+        throw new ReportMoneyPrecisionError('unsupported_row')
+      }
+      calculated = calculated.add(ReportExactDecimal.money(parsed.calculated_refund_usd, 1))
+      bySaleItem.set(parsed.sale_item_id, [...(bySaleItem.get(parsed.sale_item_id) || []), { row, snapshot: parsed }])
+    }
+    if (calculated.compare(reportMoney(returned, 'calculated_refund_usd', 1, false)) !== 0) {
+      throw new ReportMoneyPrecisionError('unsupported_row')
+    }
+  }
+  let merchandise = ReportExactDecimal.zero(), tax = ReportExactDecimal.zero()
+  for (const cohort of bySaleItem.values()) {
+    const source = cohort[0].snapshot
+    let returnedQuantity = ReportExactDecimal.zero()
+    for (const { row, snapshot } of cohort) {
+      if (snapshot.sold_quantity !== source.sold_quantity
+        || snapshot.net_entitlement_usd !== source.net_entitlement_usd
+        || snapshot.receipt_allocation.tax_usd !== source.receipt_allocation.tax_usd
+        || snapshot.source_pricing_snapshot_digest !== source.source_pricing_snapshot_digest) {
+        throw new ReportMoneyPrecisionError('unsupported_row')
+      }
+      returnedQuantity = returnedQuantity.add(ReportExactDecimal.quantity(row.quantity as string | number))
+    }
+    if (returnedQuantity.compare(ReportExactDecimal.quantity(source.sold_quantity)) > 0) {
+      throw new ReportMoneyPrecisionError('unsupported_row')
+    }
+    const quantity = returnedQuantity.toExactNumber()
+    let entitlementValue: number, taxValue: number
+    try {
+      entitlementValue = prorateCustomerReturnMoney4(source.net_entitlement_usd, quantity, source.sold_quantity)
+      taxValue = prorateCustomerReturnMoney4(source.receipt_allocation.tax_usd, quantity, source.sold_quantity)
+    } catch { throw new ReportMoneyPrecisionError('unsupported_row') }
+    const entitlement = ReportExactDecimal.money(entitlementValue, 1)
+    const taxPart = ReportExactDecimal.money(taxValue, 1)
+    if (taxPart.isNegative() || taxPart.compare(entitlement) > 0) throw new ReportMoneyPrecisionError('unsupported_row')
+    tax = tax.add(taxPart)
+    merchandise = merchandise.add(entitlement.subtract(taxPart))
+  }
+  return { merchandise, tax }
+}
+
 function reportSaleFacts(snapshot: SalesReportSnapshot): ReportSaleFacts[] {
   const items = new Map<number, ReportScalarRow[]>()
   for (const row of snapshot.items) { const id = Number(row.sale_id); items.set(id, [...(items.get(id) || []), row]) }
@@ -1055,16 +1125,25 @@ function reportSaleFacts(snapshot: SalesReportSnapshot): ReportSaleFacts[] {
       adjustment = reportMoney(sale, 'rounding_adjustment_usd', version, false)
     }
     let refundPaid = ReportExactDecimal.zero()
+    let legacyRefundPaid = ReportExactDecimal.zero()
     let returnedCost = ReportExactDecimal.zero()
     let missingCostLines = 0
     for (const returned of returns.get(Number(sale.id)) || []) {
       const returnVersion = reportVersion(returned)
+      if (returnVersion === 1) {
+        try { validateRefundMoneySnapshot({ money_precision_version: returned.money_precision_version,
+          calculated_refund_usd: returned.calculated_refund_usd,
+          rounding_adjustment_usd: returned.rounding_adjustment_usd,
+          total_refund_usd: returned.total_refund_usd }) }
+        catch { throw new ReportMoneyPrecisionError('unsupported_row') }
+      }
       const payout = reportMoney(returned, 'total_refund_usd', returnVersion, false)
       if (returnVersion === 1) {
         reportMoney(returned, 'calculated_refund_usd', returnVersion, false)
         reportMoney(returned, 'rounding_adjustment_usd', returnVersion, false)
       }
       refundPaid = refundPaid.add(payout)
+      if (returnVersion === 0) legacyRefundPaid = legacyRefundPaid.add(payout)
       for (const line of returnItems.get(Number(returned.id)) || []) {
         const quantity = ReportExactDecimal.quantity(line.quantity as string | number)
         if (line.cost_price_usd == null) { if (reportRestocked(line)) missingCostLines += 1; continue }
@@ -1073,7 +1152,9 @@ function reportSaleFacts(snapshot: SalesReportSnapshot): ReportSaleFacts[] {
         if (reportRestocked(line)) returnedCost = returnedCost.add(unit.multiply(quantity))
       }
     }
-    const basis = subtotal.isPositive() ? refundPaid.multiply(net).divide(subtotal) : refundPaid
+    const v1Refund = reportV1RefundReversal(Number(sale.id), returns.get(Number(sale.id)) || [], returnItems)
+    const legacyBasis = subtotal.isPositive() ? legacyRefundPaid.multiply(net).divide(subtotal) : legacyRefundPaid
+    const basis = legacyBasis.add(v1Refund.merchandise)
     const refund = net.min(basis)
     const refundExcess = basis.subtract(net).max(ReportExactDecimal.zero())
     let cost = ReportExactDecimal.zero(), pendingCost = ReportExactDecimal.zero(), unvaluedCost = ReportExactDecimal.zero()

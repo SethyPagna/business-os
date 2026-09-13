@@ -32,7 +32,7 @@ function schema(db, precise) {
     CREATE TABLE sale_items(id INTEGER PRIMARY KEY,sale_id INTEGER,product_id INTEGER,product_name TEXT,quantity REAL,total_usd REAL,
       cost_price_usd REAL,product_discount_usd REAL DEFAULT 0,manual_discount_usd REAL DEFAULT 0);
     CREATE TABLE returns(id INTEGER PRIMARY KEY,sale_id INTEGER,status TEXT DEFAULT 'completed',return_scope TEXT DEFAULT 'customer',total_refund_usd REAL${precise ? ',money_precision_version INTEGER NOT NULL DEFAULT 0,calculated_refund_usd REAL,rounding_adjustment_usd REAL NOT NULL DEFAULT 0' : ''});
-    CREATE TABLE return_items(id INTEGER PRIMARY KEY,return_id INTEGER,cost_price_usd REAL,quantity REAL,stock_action TEXT,return_to_stock INTEGER);
+    CREATE TABLE return_items(id INTEGER PRIMARY KEY,return_id INTEGER,cost_price_usd REAL,quantity REAL,stock_action TEXT,return_to_stock INTEGER${precise ? ',sale_item_id INTEGER,total_usd REAL,refund_snapshot_json TEXT' : ''});
   `)
 }
 function adapter(sql, hook) {
@@ -115,6 +115,75 @@ const filters = { startDate: '2026-09-01', endDate: '2026-09-30', branchId: 2 }
   await assert.rejects(() => precise.getSalesTotals({}, filters), (error) => error.code === 'invalid_saved_money4')
   console.log('PASS malformed v1 scalar is refused')
 
+  const refundDb = new Database(':memory:'); schema(refundDb, true)
+  const refundKernel = kernel(refundDb)
+  const entitlement = load('src/lib/customerReturnEntitlement.ts')
+  assert.equal(entitlement.prorateCustomerReturnMoney4(1.2345, .3333, .9999), .4115,
+    'the reused entitlement kernel preserves fractional-quantity remainder at 4dp')
+  const refundSnapshot = ({ saleId, saleItemId, sold, quantity, before, allocation }) => {
+    const after = before + quantity
+    const beforeMoney = entitlement.prorateCustomerReturnMoney4(allocation.net_entitlement_usd, before, sold)
+    const afterMoney = entitlement.prorateCustomerReturnMoney4(allocation.net_entitlement_usd, after, sold)
+    const calculated = Number((afterMoney - beforeMoney).toFixed(4))
+    return JSON.stringify({ version: 1, sale_id: saleId, sale_item_id: saleItemId, line_key: `line-${saleItemId}`,
+      pool_key: `pool-${saleItemId}`, source_sale_revision: 1, source_pricing_snapshot_digest: 'a'.repeat(64),
+      sold_quantity: sold, return_quantity: quantity, returned_quantity_before: before, returned_quantity_after: after,
+      receipt_allocation: allocation, net_entitlement_usd: allocation.net_entitlement_usd,
+      calculated_refund_before_usd: beforeMoney, calculated_refund_after_usd: afterMoney,
+      calculated_refund_usd: calculated, calculated_refund_khr: calculated * 4000, exchange_rate: 4000,
+      sale_product_entitlement_usd: allocation.net_entitlement_usd, sale_product_payout_cap_usd: allocation.net_entitlement_usd })
+  }
+  const allocation = { discount_usd: 2, membership_discount_usd: 0, tax_usd: 1, net_entitlement_usd: 9 }
+  refundDb.exec(`
+    INSERT INTO sales(id,created_at,sale_status,branch_id,subtotal_usd,discount_usd,tax_usd,total_usd,money_precision_version,calculated_total_usd,rounding_adjustment_usd)
+      VALUES(1,'2026-09-03 01:00:00','completed',2,10,2,1,9,1,9,0),
+            (2,'2026-09-04 01:00:00','completed',2,10,2,1,9,0,NULL,0);
+    INSERT INTO sale_items(id,sale_id,quantity,total_usd,cost_price_usd) VALUES(11,1,1,10,1),(22,2,1,10,1);
+    INSERT INTO returns(id,sale_id,status,return_scope,total_refund_usd,money_precision_version,calculated_refund_usd,rounding_adjustment_usd)
+      VALUES(101,1,'completed','customer',3.01,1,3.0141,-.0041),(102,1,'completed','customer',5.99,1,5.9859,.0041),
+            (201,2,'completed','customer',5,0,NULL,0);
+  `)
+  const insertRefundLine = refundDb.prepare(`INSERT INTO return_items
+    (id,return_id,cost_price_usd,quantity,stock_action,return_to_stock,sale_item_id,total_usd,refund_snapshot_json)
+    VALUES(@id,@returnId,1,@quantity,'restock',1,11,@total,@snapshot)`)
+  insertRefundLine.run({ id: 1001, returnId: 101, quantity: .3349, total: 3.0141,
+    snapshot: refundSnapshot({ saleId: 1, saleItemId: 11, sold: 1, quantity: .3349, before: 0, allocation }) })
+  insertRefundLine.run({ id: 1002, returnId: 102, quantity: .6651, total: 5.9859,
+    snapshot: refundSnapshot({ saleId: 1, saleItemId: 11, sold: 1, quantity: .6651, before: .3349, allocation }) })
+  refundDb.exec(`INSERT INTO return_items(id,return_id,cost_price_usd,quantity,stock_action,return_to_stock)
+    VALUES(2001,201,1,1,'restock',1)`)
+  let refundTotals = await refundKernel.getSalesTotals({}, filters)
+  assert.equal(refundTotals.refund_usd, 12, 'v1 reverses merchandise 8 while v0 retains its 5*8/10=4 heuristic')
+  assert.equal(refundTotals.revenue_usd, 4, 'full v1 return removes all 8 recognized merchandise revenue')
+  assert.equal(refundTotals.tax_usd, 2, 'gross tax remains a separate gross disclosure and is not hidden in merchandise revenue')
+  assert.equal(refundTotals.collected_total_usd, 4, 'rounded actual payouts are subtracted once, independently of exact recognition reversal')
+  assert.equal((await refundKernel.getBusinessSummaryDayRows({}, filters)).reduce((sum, row) => sum + row.revenue_usd, 0), refundTotals.revenue_usd,
+    'v1 reversal is identical across day and whole-period reducers')
+  refundDb.exec(`UPDATE returns SET status='cancelled' WHERE id=101`)
+  const deleted = await refundKernel.getSalesTotals({}, filters)
+  assert.equal(deleted.refund_usd, 9.32, 'active fractional quantity is re-prorated exactly from immutable entitlement, then presented at 2dp')
+  refundDb.exec(`UPDATE returns SET status='completed' WHERE id=101`)
+  assert.equal((await refundKernel.getSalesTotals({}, filters)).refund_usd, 12, 'restoring the return restores the exact aggregate remainder')
+  refundDb.exec(`UPDATE returns SET rounding_adjustment_usd=0 WHERE id=101`)
+  await assert.rejects(() => refundKernel.getSalesTotals({}, filters), (error) => error.code === 'unsupported_row',
+    'v1 payout, calculated refund, and signed rounding adjustment must satisfy the saved header equation')
+  refundDb.exec(`UPDATE returns SET rounding_adjustment_usd=-.0041 WHERE id=101`)
+  refundDb.exec(`UPDATE return_items SET refund_snapshot_json=NULL WHERE id=1001`)
+  await assert.rejects(() => refundKernel.getSalesTotals({}, filters), (error) => error.code === 'unsupported_row',
+    'v1 missing snapshot evidence refuses instead of using the legacy payout heuristic')
+  refundDb.exec(`UPDATE return_items SET refund_snapshot_json='{}' WHERE id=1001`)
+  await assert.rejects(() => refundKernel.getSalesTotals({}, filters), (error) => error.code === 'unsupported_row',
+    'v1 malformed snapshot evidence refuses')
+  refundDb.prepare('UPDATE return_items SET refund_snapshot_json=? WHERE id=1001').run(
+    refundSnapshot({ saleId: 1, saleItemId: 11, sold: 1, quantity: .3349, before: 0, allocation }))
+  refundDb.exec(`INSERT INTO returns(id,sale_id,status,return_scope,total_refund_usd,money_precision_version,calculated_refund_usd,rounding_adjustment_usd)
+    VALUES(103,1,'completed','customer',3.01,1,3.0141,-.0041)`)
+  insertRefundLine.run({ id: 1003, returnId: 103, quantity: .3349, total: 3.0141,
+    snapshot: refundSnapshot({ saleId: 1, saleItemId: 11, sold: 1, quantity: .3349, before: 0, allocation }) })
+  await assert.rejects(() => refundKernel.getSalesTotals({}, filters), (error) => error.code === 'unsupported_row',
+    'active v1 returns cannot reverse more than the saved sold quantity')
+  console.log('PASS v1 immutable entitlement reversal, tax separation, fractional remainder, v0 mixture, lifecycle visibility, and strict evidence')
+
   const conflictDb = new Database(':memory:'); schema(conflictDb, true)
   conflictDb.exec(`INSERT INTO sales(id,created_at,sale_status,branch_id,subtotal_usd,total_usd,money_precision_version,calculated_total_usd,rounding_adjustment_usd)
     VALUES(1,'2026-09-01 01:00:00','completed',2,1,1,1,1,0)`)
@@ -148,5 +217,5 @@ const filters = { startDate: '2026-09-01', endDate: '2026-09-30', branchId: 2 }
   assert.equal(snapshot.row_count, 65_000)
   assert.ok(pageCalls >= 260, 'both passes page all contributing rows')
   console.log(`PASS native 15k headers + 50k items, row_count=${snapshot.row_count}, page_max=500, elapsed_ms=${elapsedMs.toFixed(1)} (local SQLite instrumentation; not D1 latency)`)
-  legacyDb.close(); preciseDb.close(); conflictDb.close(); largeDb.close()
+  legacyDb.close(); preciseDb.close(); refundDb.close(); conflictDb.close(); largeDb.close()
 })().catch((error) => { console.error(error); process.exitCode = 1 })
