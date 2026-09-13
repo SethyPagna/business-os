@@ -247,7 +247,8 @@ export function gateTotals<T extends Record<string, unknown>>(row: T, isAdmin: b
 
 export function gateProductRow(row: Record<string, unknown>, isAdmin: boolean): Record<string, unknown> {
   const diagnostic = reportMoneyDiagnostic(row)
-  const { cost_usd, profit_usd, cost_missing_snapshot_lines, ...rest } = row
+  const { cost_usd, profit_usd, cost_missing_snapshot_lines, margin_pct,
+    money_precision_mode, money_complete, money_unknown_cost_lines, money_contributing_rows, ...rest } = row
   if (!isAdmin) return rest
   const lineSales = num(rest.line_sales_usd)
   const profit = num(profit_usd)
@@ -258,8 +259,20 @@ export function gateProductRow(row: Record<string, unknown>, isAdmin: boolean): 
     cost_missing_snapshot_lines: num(cost_missing_snapshot_lines),
     margin_pct: lineSales > 0 ? round2((profit / lineSales) * 100) : null,
     ...(diagnostic ? { money_precision_mode: diagnostic.precision_mode, money_complete: diagnostic.complete,
-      money_unknown_cost_lines: diagnostic.unknown_cost_lines, money_contributing_rows: diagnostic.contributing_rows } : {}),
+      money_unknown_cost_lines: diagnostic.unknown_cost_lines, money_contributing_rows: diagnostic.contributing_rows }
+      : money_precision_mode !== undefined ? { money_precision_mode, money_complete, money_unknown_cost_lines, money_contributing_rows } : {}),
   }
+}
+
+export function gateBusinessSummarySaleRow(row: Record<string, unknown>, isAdmin: boolean): Record<string, unknown> {
+  const diagnostic = reportMoneyDiagnostic(row)
+  const { cost_usd, cost_before_floor_usd, cost_missing_snapshot_lines, gross_profit_usd,
+    money_precision_mode, money_complete, money_unknown_cost_lines, money_contributing_rows, ...publicRow } = row
+  if (!isAdmin) return publicRow
+  return { ...publicRow, cost_usd, cost_before_floor_usd, cost_missing_snapshot_lines, gross_profit_usd,
+    ...(diagnostic ? { money_precision_mode: diagnostic.precision_mode, money_complete: diagnostic.complete,
+      money_unknown_cost_lines: diagnostic.unknown_cost_lines, money_contributing_rows: diagnostic.contributing_rows }
+      : money_precision_mode !== undefined ? { money_precision_mode, money_complete, money_unknown_cost_lines, money_contributing_rows } : {}) }
 }
 
 export function gateCourierRow(row: Record<string, unknown>, isAdmin: boolean): Record<string, unknown> {
@@ -516,13 +529,7 @@ for (const kind of ['sales', 'returns', 'expenses'] as const) {
           : stamp(row) > afterStamp || (stamp(row) === afterStamp && num(row.id) > afterId))
       }
       const hasMore = rows.length > pageSize
-      const page = rows.slice(0, pageSize).map((row) => {
-        const diagnostic = reportMoneyDiagnostic(row)
-        const { cost_usd, cost_before_floor_usd, cost_missing_snapshot_lines, gross_profit_usd, ...publicRow } = row
-        return isAdmin ? { ...publicRow, cost_usd, cost_before_floor_usd, cost_missing_snapshot_lines, gross_profit_usd,
-          ...(diagnostic ? { money_precision_mode: diagnostic.precision_mode, money_complete: diagnostic.complete,
-            money_unknown_cost_lines: diagnostic.unknown_cost_lines, money_contributing_rows: diagnostic.contributing_rows } : {}) } : publicRow
-      })
+      const page = rows.slice(0, pageSize).map((row) => gateBusinessSummarySaleRow(row, isAdmin))
       const last = page[page.length - 1]
       return c.json({ rows: page, snapshot_max_id: snapshot, has_more: hasMore,
         next_cursor: hasMore && last ? { created_at: last.cursor_at || '', id: last.id } : null, is_admin: isAdmin })
