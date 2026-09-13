@@ -2,7 +2,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('n
 const file=path.join(__dirname,'test-sale-create-atomic-pure.cjs'),source=fs.readFileSync(file,'utf8'),boundary=source.indexOf(';(async () => {')
 assert.ok(boundary>0)
 const harness=new Module(file,module);harness.filename=file;harness.paths=module.paths
-harness._compile(source.slice(0,boundary).replace('const overrides = {',"const overrides = { './db': { getDb: env => env.DB },")+'\nmodule.exports={fixture,request,postSale,app,executionCtx,load,USER,setUser(value){currentUser=value}};',file)
+harness._compile(source.slice(0,boundary).replace('const overrides = {',"const overrides = { './db': { getDb: env => env.DB },")+'\nmodule.exports={fixture,request,postSale,app,executionCtx,load,USER,cache:overrides["../lib/cache"],setUser(value){currentUser=value}};',file)
 const h=harness.exports
 ;(async()=>{
  const f=h.fixture()
@@ -18,6 +18,29 @@ const h=harness.exports
  h.setUser({...h.USER,permissions:'{"sales":true}'})
  const inspect=value=>{if(!value||typeof value!=='object')return;for(const key of privateKeys)assert.equal(Object.prototype.hasOwnProperty.call(value,key),false,key);for(const child of Object.values(value))inspect(child)}
  for(const url of paths){const payload=await get(url);inspect(payload)}
+ const listUrl='/?startDate=2026-09-13&endDate=2026-09-13'
+ const assertList=async(permissions,admin,delivery)=>{
+   h.setUser({...h.USER,permissions:JSON.stringify(permissions)})
+   const rows=await get(listUrl),row=rows.find(row=>row.id===created.body.id)
+   assert.equal(Object.hasOwn(row,'delivery_actual_cost_usd'),delivery)
+   if(delivery)assert.equal(row.delivery_actual_cost_usd,2)
+   assert.equal(Object.hasOwn(row,'creation_snapshot_json'),admin)
+   assert.equal(Object.hasOwn(row.items[0],'cost_price_usd'),admin)
+   assert.equal(Object.hasOwn(row.items[0],'cost_price_khr'),admin)
+   assert.ok(row.items[0].pricing_snapshot_json,'public captured pricing remains available')
+ }
+ for(const [permissions,admin,delivery] of [[{all:true},true,true],[{sales:true},false,true],[{sales:'view'},false,false],[{sales:true,'sales:amend':false},false,false]])await assertList(permissions,admin,delivery)
+ const originalCache=h.cache.cachedJsonResponse,cacheEntries=new Map()
+ h.cache.cachedJsonResponse=async(request,_context,_key,_ttl,loader)=>{
+   if(!cacheEntries.has(request.url))cacheEntries.set(request.url,await loader())
+   return cacheEntries.get(request.url)
+ }
+ await assertList({all:true},true,true)
+ await assertList({sales:'view'},false,false)
+ await assertList({sales:true},false,true)
+ await assertList({sales:true,'sales:amend':false},false,false)
+ await assertList({all:true},true,true)
+ h.cache.cachedJsonResponse=originalCache
  const module=h.load('routes/sales.ts')
  const courier={charged_fee_usd:5,actual_cost_usd:2,actual_cost_count:1,linked_expense_count:1,linked_expense_usd:2,linked_expense_khr:0,last_expense_at:'private',margin_usd:3}
  assert.deepEqual(module.gateSalesCourierMoney(courier,false),{charged_fee_usd:5})

@@ -5350,8 +5350,25 @@ app.get('/', async (c) => {
     })
   })
 
-  return c.json(payload)
+  return c.json(payload.map(row=>projectOperationalSaleCosts(row as Record<string,unknown>,c.get('user'))))
 })
+
+/** Cache entries are actor-neutral. Apply current authority only after read. */
+export function projectOperationalSaleCosts(row:Record<string,unknown>,user:SessionUser):Record<string,unknown> {
+  if(isAdminControlUser(user))return row
+  const {creation_snapshot_json,items,...publicRow}=row
+  // The opaque historical envelope is not needed by the editor and must not
+  // become an alternative disclosure path. Never mutate the shared cache row.
+  if(getActionTier(user,'sales','amend')!=='full'){
+    delete publicRow.delivery_actual_cost_usd
+    delete publicRow.delivery_actual_cost_khr
+  }
+  return {...publicRow,items:Array.isArray(items)?items.map(item=>{
+    if(!item||typeof item!=='object'||Array.isArray(item))return item
+    const {cost_price_usd,cost_price_khr,...publicItem}=item as Record<string,unknown>
+    return publicItem
+  }):items}
+}
 
 // GET /api/sales/stats -- Sales page header revenue figure. The list
 // endpoint above caps results at `limit` (default 100, max 500), and
