@@ -89,8 +89,12 @@ for (const [name, source] of [['sale detail', saleDetail], ['return detail', ret
       for (const marker of ['data-sale-line-qty=""', 'data-sale-line-price=""', 'data-sale-line-total=""', 'data-sale-line-edit=""']) {
         assert.match(source, new RegExp(marker), `${marker} must identify its real table cell`)
       }
-      assert.match(source, /balancedSaleItemNameLines\(productName\)/, 'long product names must be split without dropping text')
-      assert.match(source, /data-sale-line-name=""[\s\S]{0,900}overflow-x-auto[\s\S]{0,900}productNameLines\.map/, 'the complete one-or-two-row name must own a horizontal scroller')
+      const rail = readFileSync(new URL('../src/components/shared/ProductNameRail.tsx', import.meta.url), 'utf8')
+      assert.match(source, /<ProductNameRail name=\{productName\} \/>/, 'sale lines must delegate the complete name to the shared rail')
+      assert.match(rail, /title=\{name\}/, 'the full product name must remain available without truncation')
+      assert.match(rail, /overflowX: 'auto'/, 'the full product name must own a horizontal scroller')
+      assert.match(rail, /height: '2lh'/, 'the product rail must expose two readable text lines')
+      assert.match(rail, /\{name\}<\/span>/, 'the rail must render the original full text')
       assert.doesNotMatch(source, /line-clamp-2[^\n]*product|data-sale-line-name=""[\s\S]{0,500}line-clamp-2/, 'the full product name must not be hidden by a visual clamp')
       const priceCell = source.slice(source.indexOf('data-sale-line-price=""'), source.indexOf('data-sale-line-total=""'))
       assert.match(priceCell, /<span className="inline-flex items-baseline gap-1">[\s\S]*?<span className="text-\[10px\]/, 'read-only price and discount share one compact line')
