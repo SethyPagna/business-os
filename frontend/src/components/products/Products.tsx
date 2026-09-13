@@ -870,6 +870,7 @@ function ProductsFullEditor() {
   // closed the modal without resetting it, and the next Add/Edit that
   // didn't pass a tab opened on the stale Stock section.
   const [formInitialTab, setFormInitialTab] = useState<ProductFormTab>('basic')
+  const [identityReviewProductIds, setIdentityReviewProductIds] = useState<readonly [number, number] | null>(null)
   // Minimized create flows restore here. Each modal's scoped draft repopulates
   // its own state, while this host rechecks the current action grant before it
   // reopens a write surface.
@@ -4950,6 +4951,8 @@ function ProductsFullEditor() {
               notify={notify}
               canRemoveProduct={canRemoveProduct}
               onMergeLeadingZero={openLeadingZeroMergeReview}
+              reviewProductIds={identityReviewProductIds}
+              onReviewProductIdsConsumed={() => setIdentityReviewProductIds(null)}
             />
           </Suspense>
         </div>
@@ -5161,6 +5164,10 @@ function ProductsFullEditor() {
             }))}
             initialTab={formInitialTab}
             onSave={(payload) => handleSaveWithGallery((payload || {}) as unknown as ProductRecord)}
+            onReviewIdentityCollision={canMergeDuplicates ? (productIds) => {
+              setIdentityReviewProductIds(productIds)
+              setActiveProductSection('duplicates')
+            } : undefined}
             onClose={()=>{setModal(null);setSelected(null);setFormInitialTab('basic')}}
             // S4-20: minimizing is silent otherwise -- the form just
             // vanishes, which reads as lost work. Say where it went.

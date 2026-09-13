@@ -2113,8 +2113,10 @@ export default function ProductForm({
           <p className="mt-2 text-sm font-medium">{identityCollision.name || `#${identityCollision.id}`}</p>
           <div className="mt-4 flex justify-end gap-2">
             <button type="button" className="btn-secondary" onClick={() => setIdentityCollision(null)}>{t('cancel') || 'Cancel'}</button>
-            <button type="button" className="btn-primary" onClick={() => {
+            <button type="button" className="btn-primary" disabled={imageUploading || !preserveAndMinimize} onClick={() => {
+              if (imageUploading || imageUploadInFlightRef.current || !preserveAndMinimize) return
               const productIds = [Number(product.id), identityCollision.id] as const
+              preserveAndMinimize()
               setIdentityCollision(null)
               onReviewIdentityCollision(productIds)
             }}>{t('selected_conflict_group_review_action') || 'Review selected actions'}</button>
