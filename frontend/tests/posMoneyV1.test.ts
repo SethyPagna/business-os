@@ -395,3 +395,24 @@ assert.ok(receiptHtml.includes('KHR116000'))
 assert.ok(!receiptHtml.includes('KHR116000.4'), 'actual Receipt uses exact saved line KHR, not rounded unit reconstruction')
 assert.throws(() => renderToStaticMarkup(React.createElement(receiptModule.exports.default, { sale: { ...receiptSale, items: [{ ...capturedRow, pricing_snapshot_json: null }] }, settings: {}, onClose: () => {} })))
 console.log('PASS actual Receipt static render: captured line totals and missing-proof refusal (not print geometry certification)')
+
+// Execute the production pending-summary render after a reload: the reviewed
+// durable quote, not today's recalculation, is what the operator will retry.
+const pendingRenderStart = detailSource.lastIndexOf('{(() => {', detailSource.indexOf('// Display the durable reviewed request'))
+const pendingRenderEnd = detailSource.indexOf('})()}', pendingRenderStart)
+const pendingRenderCode = transformSync(`const render = () => ${detailSource.slice(pendingRenderStart + 1, pendingRenderEnd + 4)};`, { loader: 'tsx' }).code
+const durableHeader = quoteSaleMutationHeader(saved, 2.2345, { tax_enabled: 'false', tax_rate: '0' })
+const renderPending = (actor: string, quote: unknown) => {
+  const env = { React, pendingLineMutation: { actor, body: { expected_header_quote: quote } }, lineMutationActor: 'actor-1', compareSaleHeaderQuote,
+    headerQuote: () => quoteSaleMutationHeader(saved, 999, { tax_enabled: 'false', tax_rate: '0' }),
+    t: (key: string) => key, fmtUSD: cartProps.fmtUSD, fmtKHR: cartProps.fmtKHR }
+  const render = new Function(...Object.keys(env), `${pendingRenderCode}; return render;`)(...Object.values(env))
+  return renderToStaticMarkup(render())
+}
+const pendingSummary = renderPending('actor-1', durableHeader)
+assert.ok(pendingSummary.includes('USD2.23'))
+assert.ok(!pendingSummary.includes('USD999.00'))
+assert.ok(pendingSummary.includes('money_rounding_adjustment'))
+assert.equal(renderPending('actor-2', durableHeader), '')
+assert.equal(renderPending('actor-1', { total_usd: 999 }), '')
+console.log('PASS actual reopened pending-summary render: durable quote, no current repricing, actor and malformed guards')

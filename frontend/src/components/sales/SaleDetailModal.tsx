@@ -1646,6 +1646,19 @@ export default function SaleDetailModal({
         {(pendingLineMutation?.actor === lineMutationActor || lineRecoveryError) ? (
           <div role="alert" className="border-b border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
             <p>{translateOr('sale_line_recovery_pending', 'An earlier change to this sale needs confirmation. Its original request is saved; other changes remain paused.', 'ការកែប្រែមុនលើការលក់នេះត្រូវការការបញ្ជាក់។ សំណើដើមត្រូវបានរក្សាទុក ហើយការកែប្រែផ្សេងទៀតត្រូវបានផ្អាក។')}</p>
+            {(() => {
+              // Display the durable reviewed request, never a fresh Settings
+              // calculation: a reload must not hide the amount Retry sends.
+              if (pendingLineMutation?.actor !== lineMutationActor) return null
+              const quote = pendingLineMutation.body.expected_header_quote as SaleMutationHeaderQuote | undefined
+              if (!quote) return null
+              try { compareSaleHeaderQuote(quote, headerQuote(quote.subtotal_usd)) } catch { return null }
+              return <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
+                <dt>{t('tax')}</dt><dd className="text-right">{fmtUSD(quote.tax_usd)}</dd>
+                <dt>{t('money_rounding_adjustment')}</dt><dd className="text-right">{fmtUSD(quote.rounding_adjustment_usd)}</dd>
+                <dt>{t('total')}</dt><dd className="text-right">{fmtUSD(quote.total_usd)} / {fmtKHR(quote.total_khr)}</dd>
+              </dl>
+            })()}
             {pendingLineMutation?.actor === lineMutationActor ? <button type="button" disabled={lineRecoveryBusy} className="mt-2 rounded border px-3 py-2 disabled:opacity-50" onClick={() => {
               void executeLineMutation(pendingLineMutation.kind).then(result => { if (result && typeof result === 'object' && 'committed' in result && result.committed) onClose() }).catch(() => {})
             }}>{lineRecoveryBusy ? t('loading') : t('retry')}</button> : null}
