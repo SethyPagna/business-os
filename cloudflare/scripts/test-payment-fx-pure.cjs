@@ -121,6 +121,27 @@ function request(key = 'settle-request-1') {
   }
 }
 
+// Precision v1 sale mutations are review-then-confirm: the first submission
+// without expected_header_quote is answered 409 sale_header_quote_conflict
+// carrying the exact header the server will write, and the confirm resend
+// echoes it back. Same pattern as test-historical-sale-edit-native.cjs. A first
+// answer that is not a quote conflict is left for the caller to assert on.
+// v1 add-items lines carry explicit pricing intent and the line quote the client
+// reviewed (pricing_source/selling_price_input_usd/pricing_quote, keyed by
+// client_line_key); Serum has no catalog price, so every line here is manual at
+// 2 USD per unit on the sale's recorded 4100 rate.
+const manualLine = (units, extra = {}) => ({
+  product_id: 1, quantity: units, client_line_key: `payment-fx-line-${units}`,
+  pricing_source: 'manual', selling_price_input_usd: 2,
+  pricing_quote: { gross_usd: 2 * units, product_discount_usd: 0, manual_discount_usd: 0, total_usd: 2 * units, total_khr: 2 * units * 4100 },
+  ...extra,
+})
+async function reviewed(f, path, body) {
+  const first = await f.call(path, body, 'POST')
+  if (first.status !== 409 || first.body.code !== 'sale_header_quote_conflict') return body
+  return { ...body, expected_header_quote: first.body.header_quote }
+}
+
 async function run() {
   const native = fixture(); seed(native)
   const nativeCreate = await native.call('/', {
@@ -436,27 +457,34 @@ async function run() {
     delivery_fee_khr=4100,total_usd=6,total_khr=24600,change_usd=1,change_khr=0,
     change_is_actual=1,change_exchange_rate=4000 WHERE id=1`).run()
   amended.sql.prepare("UPDATE sales SET updated_at='amend-v1' WHERE id=1").run()
-  const amendmentRequest = {
+  // Precision v1 (4a2ce71b): amendments and added lines keep the SALE'S recorded
+  // exchange rate (4100 here) instead of rebasing to the latest server rate, so
+  // the reviewed rate must equal the recorded one and KHR figures stay at 4100.
+  // The settings-race guard below is unchanged: a rate edit mid-request still
+  // rejects the whole mutation.
+  const amendmentDraft = {
+    money_precision_version: 1,
     kind: 'delivery_fee_changed',
     delivery_fee_usd: 2,
     expected_updated_at: 'amend-v1',
-    expected_exchange_rate: 4200,
+    expected_exchange_rate: 4100,
     client_request_id: 'amend-fee-request-1',
   }
+  const amendmentRequest = await reviewed(amended, '/1/amendments', amendmentDraft)
   const amendmentApplied = await amended.call('/1/amendments', amendmentRequest, 'POST')
   assert.equal(amendmentApplied.status, 200, JSON.stringify(amendmentApplied))
-  assert.equal(amendmentApplied.body.exchangeRate, 4200)
+  assert.equal(amendmentApplied.body.exchangeRate, 4100)
   assert.equal(amendmentApplied.body.totalUsd, 7)
-  assert.equal(amendmentApplied.body.totalKhr, 29400)
+  assert.equal(amendmentApplied.body.totalKhr, 28700)
   const amendedSale = amended.sql.prepare('SELECT * FROM sales WHERE id=1').get()
   const amendedLine = amended.sql.prepare('SELECT * FROM sale_items WHERE id=1').get()
-  assert.deepEqual([amendedSale.exchange_rate,amendedSale.delivery_fee_khr,amendedSale.total_khr,amendedLine.total_khr],[4200,8400,29400,21000])
+  assert.deepEqual([amendedSale.exchange_rate,amendedSale.delivery_fee_khr,amendedSale.total_khr,amendedLine.total_khr],[4100,8200,28700,20500])
   assert.deepEqual([amendedSale.change_usd,amendedSale.change_khr,amendedSale.change_is_actual,amendedSale.change_exchange_rate],[1,0,1,4000])
   assert.equal(amended.sql.prepare("SELECT COUNT(*) n FROM sale_mutation_receipts WHERE mutation_kind='amendment'").get().n, 1)
   amended.sql.prepare("UPDATE settings SET value='4300' WHERE key='exchange_rate'").run()
   assert.deepEqual(await amended.call('/1/amendments', amendmentRequest, 'POST'), amendmentApplied)
   assert.equal((await amended.call('/1/amendments', { ...amendmentRequest, delivery_fee_usd: 3 }, 'POST')).status, 409)
-  console.log('PASS amendment applies one latest server rate to header and lines and exact retry preserves the first outcome')
+  console.log('PASS amendment keeps the recorded sale rate on header and lines and exact retry preserves the first outcome')
 
   const amendmentRace = fixture(); seed(amendmentRace)
   amendmentRace.sql.prepare(`UPDATE sales SET sale_status='completed',is_delivery=1,delivery_fee_usd=1,
@@ -466,28 +494,30 @@ async function run() {
   assert.equal(amendmentConflict.status, 409, JSON.stringify(amendmentConflict))
   assert.equal(amendmentRace.sql.prepare('SELECT delivery_fee_usd FROM sales WHERE id=1').get().delivery_fee_usd, 1)
   assert.equal(amendmentRace.sql.prepare("SELECT COUNT(*) n FROM sale_mutation_receipts WHERE mutation_kind='amendment'").get().n, 0)
-  console.log('PASS amendment settings race rolls back fee, rate rebase, ledger, and receipt together')
+  console.log('PASS amendment settings race rolls back fee, ledger, and receipt together')
 
   const addition = fixture(); seed(addition)
   addition.sql.prepare('UPDATE sales SET change_usd=1,change_khr=0,change_is_actual=1,change_exchange_rate=4000 WHERE id=1').run()
   addition.sql.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_number,batch_key,is_active,received_at,lot_code)
     VALUES(501,1,1,'lot-501',1,'2026-01-01','LOT-501')`).run()
   addition.sql.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(501,1,8)').run()
-  const additionRequest = {
-    items: [{ product_id: 1, quantity: 1, applied_price_usd: 2 }],
+  const additionDraft = {
+    money_precision_version: 1,
+    items: [manualLine(1, { applied_price_usd: 2 })],
     expected_updated_at: 'sale-v1',
-    expected_exchange_rate: 4200,
+    expected_exchange_rate: 4100,
     client_request_id: 'add-items-request-1',
   }
+  const additionRequest = await reviewed(addition, '/1/items', additionDraft)
   const additionApplied = await addition.call('/1/items', additionRequest, 'POST')
   assert.equal(additionApplied.status, 200, JSON.stringify(additionApplied))
-  assert.equal(additionApplied.body.exchangeRate, 4200)
+  assert.equal(additionApplied.body.exchangeRate, 4100)
   assert.ok(additionApplied.body.actionHistoryId > 0)
   assert.equal(additionApplied.body.undoActionId, additionApplied.body.actionHistoryId)
   const addedSale = addition.sql.prepare('SELECT * FROM sales WHERE id=1').get()
-  assert.deepEqual([addedSale.exchange_rate,addedSale.subtotal_usd,addedSale.total_usd,addedSale.total_khr],[4200,7,7,29400])
+  assert.deepEqual([addedSale.exchange_rate,addedSale.subtotal_usd,addedSale.total_usd,addedSale.total_khr],[4100,7,7,28700])
   assert.deepEqual([addedSale.change_usd,addedSale.change_khr,addedSale.change_is_actual,addedSale.change_exchange_rate],[1,0,1,4000])
-  assert.deepEqual(addition.sql.prepare('SELECT total_khr FROM sale_items WHERE sale_id=1 ORDER BY id').all().map((r) => r.total_khr), [21000,8400])
+  assert.deepEqual(addition.sql.prepare('SELECT total_khr FROM sale_items WHERE sale_id=1 ORDER BY id').all().map((r) => r.total_khr), [20500,8200])
   assert.equal(addition.sql.prepare('SELECT COUNT(*) n FROM sale_item_batch_allocations').get().n, 1)
   assert.equal(addition.sql.prepare("SELECT COUNT(*) n FROM sale_mutation_members WHERE entity_kind='sale_item'").get().n, 1)
   assert.equal(addition.sql.prepare("SELECT COUNT(*) n FROM sale_mutation_receipts WHERE mutation_kind='add_items' AND history_id IS NOT NULL").get().n, 1)
@@ -495,11 +525,11 @@ async function run() {
   assert.ok(storedSnapshot.lines[0].saleItemId > 0)
   assert.ok(storedSnapshot.saleStateRevision > 0)
   assert.equal(storedSnapshot.moneyBefore.exchange_rate, 4100)
-  assert.equal(storedSnapshot.moneyAfter.exchange_rate, 4200)
+  assert.equal(storedSnapshot.moneyAfter.exchange_rate, 4100)
   addition.sql.prepare("UPDATE settings SET value='4300' WHERE key='exchange_rate'").run()
   assert.deepEqual(await addition.call('/1/items', additionRequest, 'POST'), additionApplied)
-  assert.equal((await addition.call('/1/items', { ...additionRequest, items: [{ product_id: 1, quantity: 2 }] }, 'POST')).status, 409)
-  console.log('PASS add-items atomically stores dynamic line/allocation/history ids, freezes latest rate, and retries exactly')
+  assert.equal((await addition.call('/1/items', { ...additionRequest, items: [manualLine(2, { applied_price_usd: 2 })] }, 'POST')).status, 409)
+  console.log('PASS add-items atomically stores dynamic line/allocation/history ids, keeps the recorded sale rate, and retries exactly')
 
   const additionRace = fixture(); seed(additionRace)
   additionRace.barrier(() => additionRace.sql.prepare("UPDATE settings SET value='4300' WHERE key='exchange_rate'").run())
@@ -515,29 +545,32 @@ async function run() {
     f.sql.exec("INSERT INTO product_batches(id,variant_product_id,batch_key,is_active,received_at) VALUES(501,1,'dated',1,'2026-01-01'); INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(501,1,5)")
     return f
   }
-  const unlottedRequest = { ...additionRequest, client_request_id: 'explicit-unlotted', items: [{ product_id: 1, quantity: 2, unlotted_stock: true }] }
+  const unlottedDraft = { ...additionDraft, client_request_id: 'explicit-unlotted', items: [manualLine(2, { unlotted_stock: true })] }
   for (const status of ['completed', 'awaiting_payment', 'awaiting_delivery']) {
     const f = unlottedFixture()
     f.sql.prepare('UPDATE sales SET sale_status=? WHERE id=1').run(status)
+    const unlottedRequest = await reviewed(f, '/1/items', unlottedDraft)
     const added = await f.call('/1/items', unlottedRequest, 'POST')
     assert.equal(added.status, 200, JSON.stringify(added))
     assert.equal(f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity, 6)
     assert.equal(f.sql.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=501').get().quantity, 5)
     assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM sale_item_batch_allocations').get().n, 0, 'explicit residual source never silently FIFO allocates')
     assert.deepEqual(await f.call('/1/items', unlottedRequest, 'POST'), added)
-    assert.equal((await f.call('/1/items', { ...unlottedRequest, items: [{ product_id: 1, quantity: 2, unlotted_stock: false }] }, 'POST')).status, 409, 'source choice is in the retry digest')
+    assert.equal((await f.call('/1/items', { ...unlottedRequest, items: [manualLine(2, { unlotted_stock: false })] }, 'POST')).status, 409, 'source choice is in the retry digest')
   }
   for (const invalid of [{ unlotted_stock: 'true' }, { unlotted_stock: true, batch_id: 501 }]) {
     const f = unlottedFixture()
-    assert.equal((await f.call('/1/items', { ...unlottedRequest, items: [{ product_id: 1, quantity: 1, ...invalid }] }, 'POST')).status, 400)
+    assert.equal((await f.call('/1/items', { ...unlottedDraft, items: [manualLine(1, invalid)] }, 'POST')).status, 400)
     assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM sale_items').get().n, 1)
   }
   const duplicateResidual = unlottedFixture()
-  assert.equal((await duplicateResidual.call('/1/items', { ...unlottedRequest, items: [...unlottedRequest.items, ...unlottedRequest.items] }, 'POST')).status, 409)
+  const duplicateDraft = { ...unlottedDraft, items: [unlottedDraft.items[0], { ...unlottedDraft.items[0], client_line_key: 'payment-fx-line-2-again' }] }
+  assert.equal((await duplicateResidual.call('/1/items', await reviewed(duplicateResidual, '/1/items', duplicateDraft), 'POST')).status, 409)
   assert.equal(duplicateResidual.sql.prepare('SELECT COUNT(*) n FROM sale_items').get().n, 1)
   const residualRace = unlottedFixture()
+  const residualRequest = await reviewed(residualRace, '/1/items', unlottedDraft)
   residualRace.barrier(() => residualRace.sql.prepare('UPDATE branch_stock SET quantity=6 WHERE product_id=1 AND branch_id=1').run())
-  assert.equal((await residualRace.call('/1/items', unlottedRequest, 'POST')).status, 409)
+  assert.equal((await residualRace.call('/1/items', residualRequest, 'POST')).status, 409)
   assert.equal(residualRace.sql.prepare('SELECT COUNT(*) n FROM sale_items').get().n, 1)
   assert.equal(residualRace.sql.prepare("SELECT COUNT(*) n FROM sale_mutation_receipts WHERE mutation_kind='add_items'").get().n, 0)
   console.log('PASS add-items explicit unlotted source: three stock-holding statuses, exact retry, strict flags, duplicate capacity, and atomic race rejection')
