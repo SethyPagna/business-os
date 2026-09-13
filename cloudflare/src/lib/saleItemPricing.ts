@@ -105,6 +105,7 @@ export function evaluateCapturedPricingPool(pool: CapturedPricingPool, quantitie
     if (units > MAX_PRICING_UNITS) invalid()
     if (!line.manual || !['none','fixed','percent'].includes(line.manual.type)) invalid()
     nonnegative(line.manual.value)
+    if (line.manual.type === 'fixed') canonical(line.manual.value)
     if ((line.manual.type === 'none' && line.manual.value !== 0) || (line.manual.type === 'percent' && line.manual.value > 100)) invalid()
     return { line_id: line.line_key, product: canonicalUsdProduct(line,rate), quantity }
   })

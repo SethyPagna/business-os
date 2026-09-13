@@ -92,3 +92,46 @@ const emptyRules=p.pricingSourceGuard(db.prepare('SELECT * FROM products').all()
 assert.throws(()=>db.prepare(emptyRules.sql).get(emptyRules.params),'expected empty rule capture is guarded too')
 db.close()
 console.log('PASS actual captured-pricing modules: exact residual/threshold/manual/FX, bounds/tamper, deterministic allocation and additive SQLite migration/rollback')
+
+// Execute the actual Hono sale route and its complete migration fixture.
+async function actualRoute() {
+  const Module=require('node:module'), file=path.join(__dirname,'test-sale-create-atomic-pure.cjs')
+  const source=fs.readFileSync(file,'utf8'), boundary=source.indexOf(';(async () => {')
+  assert.ok(boundary>0)
+  const harness=new Module(file,module); harness.filename=file; harness.paths=module.paths
+  harness._compile(source.slice(0,boundary)+'\nmodule.exports={fixture,request,postSale,creationState};',file)
+  const h=harness.exports
+  const request=()=>({...h.request('exact-line-route'),money_precision_version:1,amount_paid_usd:29,items:[{
+    product_id:10,quantity:3,branch_id:1,batch_id:500,client_line_key:'route-a',pricing_source:'promotion',
+    pricing_quote:{gross_usd:30,product_discount_usd:1,manual_discount_usd:0,total_usd:29,total_khr:116000}
+  }]})
+  const setup=hooks=>{
+    const f=h.fixture(hooks)
+    f.raw.prepare('UPDATE products SET selling_price_usd=10 WHERE id=10').run()
+    f.raw.prepare("INSERT INTO promotion_rules(id,rule_type,min_quantity,save_usd,product_ids,scope_type,is_active) VALUES(1,'quantity_save',3,1,'[10]','products',1)").run()
+    return f
+  }
+  const f=setup()
+  const saved=await h.postSale(f.route,request())
+  assert.equal(saved.status,200,JSON.stringify(saved.body))
+  assert.equal(saved.body.sale.items[0].total_usd,29)
+  assert.equal(saved.body.sale.items[0].applied_price_usd,9.6667)
+  assert.equal(p.parseSaleItemPricing(saved.body.sale.items[0].pricing_snapshot_json).amounts.total_usd,29)
+  const after=h.creationState(f.raw)
+  f.raw.prepare('UPDATE promotion_rules SET save_usd=9 WHERE id=1').run()
+  const replay=await h.postSale(f.route,{client_request_id:'exact-line-route'})
+  assert.equal(replay.status,200)
+  assert.equal(replay.body.sale.items[0].pricing_snapshot_json,saved.body.sale.items[0].pricing_snapshot_json)
+  assert.deepEqual(h.creationState(f.raw),after)
+  const stale=await h.postSale(f.route,{...request(),client_request_id:'stale-exact-quote'})
+  assert.equal(stale.status,409); assert.equal(stale.body.code,'sale_pricing_quote_conflict')
+  assert.deepEqual(h.creationState(f.raw),after)
+  const race=setup({beforeBatch(db){db.prepare('UPDATE promotion_rules SET save_usd=2 WHERE id=1').run()}})
+  const before=h.creationState(race.raw)
+  const conflict=await h.postSale(race.route,request())
+  assert.equal(conflict.status,409,JSON.stringify(conflict.body)); assert.equal(conflict.body.code,'sale_pricing_quote_conflict')
+  assert.deepEqual(h.creationState(race.raw),before)
+  f.raw.db.close(); race.raw.db.close()
+  console.log('PASS actual Hono create exact29 snapshot, pre-policy retry, stale quote and concurrent rule rollback')
+}
+actualRoute().catch(error=>{console.error(error);process.exitCode=1})
