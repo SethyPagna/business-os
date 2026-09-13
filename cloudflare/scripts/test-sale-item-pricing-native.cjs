@@ -32,8 +32,9 @@ manual.lines[0].manual={type:'percent',value:12.3456}
 assert.equal(at(3,manual).total_usd,25.4198)
 manual.lines[0].manual={type:'fixed',value:100}
 assert.equal(at(3,manual).total_usd,0)
-const stored=p.serializeSaleItemPricing(pool,{a:3},'a')
+const stored=p.serializeSaleItemPricing(pool,{a:3},'a',{version:1,lines:[{line_key:'a',amount:29}],discount_usd:1,membership_discount_usd:1,tax_usd:1})
 assert.equal(p.parseSaleItemPricing(stored).amounts.total_usd,29)
+assert.equal(p.parseSaleItemPricing(stored).receipt_allocation.net_entitlement_usd,28)
 assert.equal(p.parseSaleItemPricing(null),null)
 const tampered=JSON.parse(stored); tampered.amounts.total_usd=29.0001
 assert.throws(()=>p.parseSaleItemPricing(JSON.stringify(tampered)))
@@ -45,6 +46,10 @@ assert.equal(alloc.get('a'),.0001); assert.equal(alloc.get('b'),0)
 assert.deepEqual([...alloc],[...p.allocateLineMoney4(.0001,[{line_key:'a',amount:1},{line_key:'b',amount:1}])])
 assert.equal(p.allocateLineMoney4(1e11,[{line_key:'a',amount:1e11}]).get('a'),1e11)
 assert.throws(()=>p.allocateLineMoney4(1,[{line_key:'a',amount:0}]))
+assert.throws(()=>p.allocateReceiptLines({version:1,lines:[{line_key:'a',amount:1}],discount_usd:2,membership_discount_usd:0,tax_usd:0}))
+assert.throws(()=>p.allocateReceiptLines({version:1,lines:[{line_key:'a',amount:1}],discount_usd:1,membership_discount_usd:0,tax_usd:.01}))
+const allocated=p.allocateReceiptLines({version:1,lines:[{line_key:'a',amount:1},{line_key:'b',amount:2}],discount_usd:1,membership_discount_usd:1,tax_usd:.1})
+assert.equal(load('moneyPrecision').sumMoney4([...allocated.values()].map(line=>line.net_entitlement_usd)),1.1)
 const paired=structuredClone(pool)
 paired.rules=[rules.normalizePromotionRule({id:2,rule_type:'next_item',min_quantity:1,percent_off:100,product_ids:[7],scope_type:'products',is_active:1},1)]
 paired.lines.push({...structuredClone(paired.lines[0]),line_key:'b'})

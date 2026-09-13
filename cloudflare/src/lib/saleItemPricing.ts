@@ -45,7 +45,11 @@ export type SaleItemPricingSnapshot = {
   pool: CapturedPricingPool
   quantities: Record<string, number>
   amounts: ExactLinePricing
+  allocation_context: ReceiptAllocationContext
+  receipt_allocation: ReceiptLineAllocation
 }
+export type ReceiptAllocationContext = {version:1;lines:{line_key:string;amount:number}[];discount_usd:number;membership_discount_usd:number;tax_usd:number}
+export type ReceiptLineAllocation = {discount_usd:number;membership_discount_usd:number;tax_usd:number;net_entitlement_usd:number}
 
 function invalid(): never { throw new Error('sale_item_pricing_invalid') }
 function key(value: unknown): asserts value is string {
@@ -141,10 +145,12 @@ export function evaluateCapturedPricingPool(pool: CapturedPricingPool, quantitie
   return result
 }
 
-export function serializeSaleItemPricing(pool: CapturedPricingPool, quantities: Record<string,number>, lineKey: string): string {
+export function serializeSaleItemPricing(pool: CapturedPricingPool, quantities: Record<string,number>, lineKey: string, allocation: ReceiptAllocationContext): string {
   const amounts = evaluateCapturedPricingPool(pool,quantities).get(lineKey)
   if (!amounts) invalid()
-  const json = JSON.stringify({version:1,line_key:lineKey,pool,quantities,amounts} satisfies SaleItemPricingSnapshot)
+  const receiptAllocation=allocateReceiptLines(allocation).get(lineKey)
+  if (!receiptAllocation || allocation.lines.find(line=>line.line_key===lineKey)?.amount!==amounts.total_usd) invalid()
+  const json = JSON.stringify({version:1,line_key:lineKey,pool,quantities,amounts,allocation_context:allocation,receipt_allocation:receiptAllocation} satisfies SaleItemPricingSnapshot)
   if (new TextEncoder().encode(json).length > MAX_PRICING_SNAPSHOT_BYTES) invalid()
   return json
 }
@@ -158,6 +164,9 @@ export function parseSaleItemPricing(json: string | null | undefined): SaleItemP
   if (value?.version !== 1) invalid()
   const evaluated = evaluateCapturedPricingPool(value.pool,value.quantities).get(value.line_key)
   if (!evaluated || !value.amounts || Object.keys(evaluated).some(k => evaluated[k as keyof ExactLinePricing] !== value.amounts[k as keyof ExactLinePricing])) invalid()
+  const allocated=allocateReceiptLines(value.allocation_context).get(value.line_key)
+  if (!allocated || !value.receipt_allocation || value.allocation_context.lines.find(line=>line.line_key===value.line_key)?.amount!==evaluated.total_usd
+    || Object.keys(allocated).some(k=>allocated[k as keyof ReceiptLineAllocation]!==value.receipt_allocation[k as keyof ReceiptLineAllocation])) invalid()
   return value
 }
 
@@ -183,6 +192,21 @@ export function allocateLineMoney4(total: number, weights: readonly { line_key:s
   const result = new Map(rows.map(row => [row.key,roundMoney4(`${row.units/10000n}.${(row.units%10000n).toString().padStart(4,'0')}`)]))
   if (sumMoney4([...result.values()]) !== total || left !== 0n) invalid()
   return result
+}
+
+export function allocateReceiptLines(context: ReceiptAllocationContext): Map<string,ReceiptLineAllocation> {
+  if (!context || context.version!==1 || !Array.isArray(context.lines)) invalid()
+  const original=sumMoney4(context.lines.map(line=>canonical(line.amount)))
+  const discount=canonical(context.discount_usd), member=canonical(context.membership_discount_usd), tax=canonical(context.tax_usd)
+  if (discount>original) invalid()
+  const discounts=allocateLineMoney4(discount,context.lines)
+  const afterStore=context.lines.map(line=>({line_key:line.line_key,amount:subtractMoney4(line.amount,discounts.get(line.line_key)!)}))
+  if (member>sumMoney4(afterStore.map(line=>line.amount))) invalid()
+  const memberships=allocateLineMoney4(member,afterStore)
+  const afterMember=afterStore.map(line=>({line_key:line.line_key,amount:subtractMoney4(line.amount,memberships.get(line.line_key)!)}))
+  const taxes=allocateLineMoney4(tax,afterMember)
+  return new Map(afterMember.map(line=>[line.line_key,{discount_usd:discounts.get(line.line_key)!,membership_discount_usd:memberships.get(line.line_key)!,
+    tax_usd:taxes.get(line.line_key)!,net_entitlement_usd:sumMoney4([line.amount,taxes.get(line.line_key)!])}]))
 }
 
 /** Guard the exact authorized SELECT * capture, including newly inserted active

@@ -880,7 +880,7 @@ app.post('/', async (c) => {
       lineTotalUsd,
       canonicalMoney: money,
       canonicalDiscountValue: item.manual_discount_type === 'percent' ? item.manual_discount_value ?? 0 : newSaleMoney4(item.manual_discount_value),
-      pricing_snapshot_json:serializeSaleItemPricing(pricingPool,pricingQuantities,item.client_line_key!),
+      pricing_snapshot_json:'',
       product_discount_usd: divideMoney4(exact.product_discount_usd,item.quantity),
       product_discount_khr: multiplyMoney4(divideMoney4(exact.product_discount_usd,item.quantity),exchangeRate),
       costPriceUsd: product?.cost_price_usd == null ? null : newSaleMoney4(product.cost_price_usd),
@@ -891,6 +891,9 @@ app.post('/', async (c) => {
   const discountUsd = newSaleMoney4(body.discount_usd)
   const discountKhr = body.discount_khr === undefined ? multiplyMoney4(discountUsd,exchangeRate) : newSaleMoney4(body.discount_khr)
   const taxUsd = newSaleMoney4(body.tax_usd)
+  const allocationContext={version:1 as const,lines:priced.map(line=>({line_key:line.client_line_key!,amount:line.lineTotalUsd})),
+    discount_usd:discountUsd,membership_discount_usd:membershipDiscountUsd,tax_usd:taxUsd}
+  for (const line of priced) line.pricing_snapshot_json=serializeSaleItemPricing(pricingPool,pricingQuantities,line.client_line_key!,allocationContext)
 
   // Delivery scalars are resolved here, above the totals, because the
   // customer-paid portion of the fee is PART of the total. They used to be
