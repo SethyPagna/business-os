@@ -67,6 +67,7 @@ assert.equal(configEnv.paymentConfig.status, 'ready')
 
 const rows = [{ method: 'ABA', usd: '7', khr: '0' }]
 const hydration: any = {
+  savedMoneyVersion: 0, savedExchangeRate: 4000,
   paymentConfig: configEnv.paymentConfig, paymentConfigLoaded: true, statusSaving: false, pendingStatus: false,
   session: { configuredMethods: [], exchangeRate: 4100, rows, expectedUpdatedAt: 'reviewed-version' },
   setSettlementSession(update: any) { this.session = update(this.session) },
@@ -84,6 +85,11 @@ assert.deepEqual(hydration.session.configuredMethods, ['Cash', 'ABA'], 'uncertai
 hydration.pendingStatus = false; hydrateEffect.render()
 assert.deepEqual(hydration.session.configuredMethods, ['Cash'])
 assert.equal(hydration.session.rows, rows)
+hydration.savedMoneyVersion = 1
+hydration.savedExchangeRate = 4020
+hydrateEffect.render()
+assert.equal(hydration.session.exchangeRate, 4020, 'v1 hydration uses the saved sale rate, not latest settings')
+assert.equal(hydration.session.rows, rows, 'saved-rate selection preserves typed tender')
 
 const statusEnv: any = { detailScope: 'actor1:sale1', sale: { sale_status: 'awaiting_payment' }, statusSaving: false, pendingStatus: false, lastServerStatusRef: { current: 'actor1:sale1:awaiting_payment' }, selected: 'completed', setNewStatus(value: string) { this.selected = value } }
 statusEnv.setNewStatus = statusEnv.setNewStatus.bind(statusEnv)
@@ -117,6 +123,7 @@ let statusWrites = 0
 let closed = 0
 const statusRequest = deferred()
 const submitEnv: any = {
+  pendingLineMutation: null, lineMutationActor: 'actor1', lineRecoveryError: '',
   newStatus: 'completed', currentStatus: 'awaiting_payment', authReady: true, settlementFrozenRef: { current: false },
   needsPaymentEntry: true, paymentConfigReady: false, detailScope: 'actor1:sale1',
   detailScopeRef: { current: 'actor1:sale1' }, detailAliveRef: { current: true },

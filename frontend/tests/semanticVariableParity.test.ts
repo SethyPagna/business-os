@@ -6,6 +6,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { saleRecordFieldRows, type SaleRecord } from '../src/utils/saleRecords.ts'
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 const read = (rel: string): string => fs.readFileSync(path.join(ROOT, rel), 'utf8')
@@ -146,6 +147,11 @@ const fieldBlock = workerSaleRecords.match(/export const SALE_RECORD_FIELDS = \[
 assert.ok(fieldBlock, 'Worker sale-record field list must remain discoverable')
 const workerFields = [...fieldBlock![1].matchAll(/'([^']+)'/g)].map((match) => match[1])
 for (const field of workerFields) {
+  if (field === 'money_precision_version') {
+    const internal = { kind: 'created', changes: [{ field, before: { state: 'known_value', value: 0 }, after: { state: 'known_value', value: 1 } }] } as unknown as SaleRecord
+    assert.deepEqual(saleRecordFieldRows(internal), [], 'contract version is intentionally internal, not a generic Value changed row')
+    continue
+  }
   assert.match(recordRules, new RegExp(`\\b${field}: \\{`), `browser sale-record rule missing for Worker field ${field}`)
 }
 const frontendKindsBlock = recordRules.match(/export const SALE_RECORD_KINDS = \[([\s\S]*?)\] as const/)

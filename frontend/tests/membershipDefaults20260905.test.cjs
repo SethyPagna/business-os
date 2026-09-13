@@ -52,10 +52,12 @@ const handlerCode = ts.transpileModule(handlers.join('\n'), { compilerOptions: {
 function lifecycle(seed) {
   return new Function('normalizeOrder', 'createEmptyOrder', 'LAYOUT', 'seed', `
     let orders = seed, resolvedActiveId = seed[0].id;
-    const setOrders = value => { orders = typeof value === 'function' ? value(orders) : value };
+    const ordersRef = { current: orders };
+    const setOrders = value => { orders = typeof value === 'function' ? value(orders) : value; ordersRef.current = orders };
     const setActiveId = id => { resolvedActiveId = id };
     const setOrderCounter = () => {};
     const notify = () => {};
+    const t = key => key;
     ${handlerCode}
     return { addNewOrder, closeOrder, state: () => orders };
   `)(normalizeOrder, constants.createEmptyOrder, constants.LAYOUT, seed)
@@ -72,6 +74,12 @@ for (const setting of ['true', 'false']) {
   tabs.closeOrder(tabs.state()[1].id)
   assert.equal(tabs.state()[0].loyaltyAccrual, manual.loyaltyAccrual)
 }
+const uncertainOrder = normalizeOrder({ checkoutRequestId: 'frozen-request', loyaltyAccrual: false })
+const uncertainTabs = lifecycle([uncertainOrder])
+uncertainTabs.closeOrder(uncertainOrder.id)
+assert.equal(uncertainTabs.state()[0].checkoutRequestId, 'frozen-request', 'ordinary close cannot erase unresolved checkout or loyalty intent')
+uncertainTabs.closeOrder(uncertainOrder.id, true)
+assert.equal(uncertainTabs.state()[0].checkoutRequestId, '', 'known committed close starts a fresh order with the canonical empty request ID')
 async function offline() {
   const saleSource = fs.readFileSync(path.join(root, 'src/api/saleWriteTransport.ts'), 'utf8')
   const saleAst = ts.createSourceFile('sale.ts', saleSource, ts.ScriptTarget.Latest, true)

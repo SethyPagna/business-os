@@ -1,63 +1,36 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import './financialPrecision.test.ts'
+import { parsePosInternalAmount, posV1BasketTotals } from '../src/components/pos/posCore.ts'
+import { nativeChangeAmounts } from '../src/utils/moneyPrecision.ts'
 
-// Locks the Part-77 money fixes in POS.tsx (frontend audit):
-//
-// 1. Loyalty redemption value keeps CENTS precision. The old
-//    `Math.round(parseFloat(...))` turned a configured $0.50-per-step into
-//    $1 (double redemption value) and $0.25 into $0 -- while
-//    membership_points_redeemed was still sent, so the member's points were
-//    burned for a $0 discount.
-// 2. KHR amounts are whole riel end to end: the tax/total/change
-//    multiplications used to hand fractional riel to the checkout payload
-//    and the printed receipt.
-
-const pos = fs.readFileSync(new URL('../src/components/pos/POS.tsx', import.meta.url), 'utf8')
-
-let failed = 0
-function check(name: string, fn: () => void): void {
-  try {
-    fn()
-    console.log(`PASS ${name}`)
-  } catch (error) {
-    failed += 1
-    console.error(`FAIL ${name}`)
-    console.error(error)
-  }
+// Actual component declarations: v0 retains cents/whole-riel calculations;
+// v1 components remain4dp, only physical change uses native denominations.
+const pos = fs.readFileSync(new URL('../src/components/pos/POS.tsx', import.meta.url), 'utf8').replace(/\r/g, '')
+function declaration(name: string, env: Record<string, unknown>): number {
+  const start = pos.indexOf('  const ' + name + ' ')
+  assert.ok(start > 0, 'production declaration ' + name)
+  const end = pos.indexOf('\n  const ', start + 1)
+  const code = pos.slice(start, end)
+  return new Function(...Object.keys(env), code + '\n; return ' + name + ';')(...Object.values(env))
 }
-
-check('loyalty redeem USD step keeps cents precision, never whole-dollar rounding', () => {
-  const line = pos.split('\n').find((entry) => entry.includes('const redeemValueUsdStep ='))
-  assert.ok(line, 'expected the redeemValueUsdStep derivation')
-  assert.ok(line!.includes('* 100) / 100'), 'redeemValueUsdStep must round to cents (x*100)/100, not Math.round(x)')
-  assert.ok(line!.includes('Math.round((parseFloat'), 'the cents rounding must wrap the parsed setting')
-})
-
-check('KHR tax, total and change are whole riel', () => {
-  assert.match(pos, /const taxKhr\s+= Math\.round\(afterDiscKhr \* taxRate\)/, 'taxKhr must round')
-  assert.match(pos, /const totalKhr\s+= Math\.round\(afterDiscKhr \+ taxKhr \+ customerFeeKhr\)/, 'totalKhr must round')
-  // Part 534: change converts at its own dedicated rate, still whole riel.
-  assert.match(pos, /const changeKhr\s+= Math\.round\(changeUsd \* changeExchangeRate\)/, 'changeKhr must round (at the dedicated change rate)')
-})
-
-check('the checkout payload sends whole-riel subtotal and rounded KHR discounts', () => {
-  assert.match(pos, /subtotal_khr: Math\.round\(subtotalKhr\)/, 'payload subtotal_khr must be whole riel')
-  assert.match(pos, /const membershipDiscKhr = Math\.round\(/, 'membership KHR discount must round')
-  assert.match(pos, /: Math\.round\(parseFloat\(active\.discountKhr\) \|\| CURRENCY\.usdToKhr\(discUsd, exchangeRate\)\)/, 'fixed KHR discount must round')
-})
-
-// The behavior the cents fix protects, computed the way the component does:
-check('a $0.25-per-100-points config yields $0.25/step, not $0 (and $0.50 stays $0.50)', () => {
-  const stepFor = (configured: string): number => Math.max(0, Math.round((parseFloat(configured) || 1) * 100) / 100)
-  assert.equal(stepFor('0.25'), 0.25)
-  assert.equal(stepFor('0.5'), 0.5)
-  assert.equal(stepFor('1'), 1)
-  // 3 steps at $0.25 = $0.75 exactly, presented with toFixed(2) as the UI does
-  assert.equal((3 * stepFor('0.25')).toFixed(2), '0.75')
-})
-
-if (failed) {
-  process.exit(1)
+for (const [input, v0, v1] of [['0.25', .25, .25], ['0.50', .5, .5], ['1.2345', 1.23, 1.2345]] as const) {
+  const env = { settings: { customer_portal_redeem_value_usd: input }, asText: String, parsePosInternalAmount }
+  assert.equal(declaration('redeemValueUsdStep', { ...env, moneyVersion: 0 }), v0)
+  assert.equal(declaration('redeemValueUsdStep', { ...env, moneyVersion: 1 }), v1)
 }
-console.log('\nAll posMoneyRounding checks passed.')
+assert.equal(declaration('taxKhr', { moneyVersion: 0, afterDiscKhr: 101.5, taxRate: .1 }), 10)
+assert.equal(declaration('totalKhr', { moneyVersion: 0, afterDiscKhr: 101.5, taxKhr: 10, customerFeeKhr: 0 }), 112)
+assert.equal(declaration('changeKhr', { moneyVersion: 0, changeUsd: .005, changeExchangeRate: 4020 }), 20)
+const basket = posV1BasketTotals({ lines: [{ total_usd: 1.2345 }], exchangeRate: 4020, discountType: 'fixed', discountPercent: '', discountUsd: '0.0001', discountKhr: '', membershipUsd: '0.0001', membershipKhr: '', taxPercent: '10', feeUsd: '0', customerPaysFee: false })
+assert.equal(basket.discKhr, .402)
+assert.equal(basket.membershipDiscKhr, .402)
+assert.equal(basket.taxKhr, 496.068)
+assert.equal(declaration('taxKhr', { moneyVersion: 1, v1Basket: { totals: basket } }), basket.taxKhr)
+assert.equal(declaration('totalKhr', { moneyVersion: 1, v1Basket: { totals: basket } }), basket.totalKhr)
+const native = nativeChangeAmounts({ paidUsd: 1, paidKhr: 20, payableUsd: 1, exchangeRate: 4020, changeExchangeRate: 4020 })
+assert.deepEqual(native, { changeUsd: 0, changeKhr: 20, hasOverpayment: true })
+assert.equal(declaration('changeKhr', { moneyVersion: 1, computedNativeChange: native }), 20)
+assert.match(pos, /subtotal_usd: subtotalUsd, subtotal_khr: subtotalKhr/, 'v1 payload preserves internal components, not a whole-riel display conversion')
+await import('./posMoneyV1.test.ts') // actual checkout payload and frozen retry
+console.log('PASS actual POS declarations: legacy precision unchanged, v1 internal4 and native change')

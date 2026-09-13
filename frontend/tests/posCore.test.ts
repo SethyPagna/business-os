@@ -355,11 +355,12 @@ await runTest('Z2: USD discounts rebase a stale or empty KHR snapshot', () => {
   assert.equal(cleared.manual_discount_khr, 0)
 })
 
-await runTest('Z2 wiring: the cart input, updatePrice, and receipt are decoupled from the discount', () => {
+await runTest('Z2 wiring: the cart input, updatePrice, and receipt are decoupled from the discount', async () => {
+  await import('./posMoneyV1.test.ts') // real raw price update and receipt residual behavior
   const cartItem = fs.readFileSync(new URL('../src/components/pos/CartItem.tsx', import.meta.url), 'utf8')
   // The price inputs read the BASE price, not the (discounted) applied price.
-  assert.match(cartItem, /value=\{normalizePriceValue\(\(item\.base_price_usd \?\? item\.applied_price_usd\)/)
-  assert.match(cartItem, /value=\{normalizePriceValue\(\(item\.base_price_khr \?\? item\.applied_price_khr\)/)
+  assert.match(cartItem, /value=\{moneyPrecisionVersion === 1[^\n]*String\(item\.base_price_usd \?\? item\.applied_price_usd\) : normalizePriceValue\(\(item\.base_price_usd \?\? item\.applied_price_usd\)/)
+  assert.match(cartItem, /value=\{moneyPrecisionVersion === 1[^\n]*String\(item\.base_price_khr \?\? item\.applied_price_khr\) : normalizePriceValue\(\(item\.base_price_khr \?\? item\.applied_price_khr\)/)
 
   const pos = fs.readFileSync(new URL('../src/components/pos/POS.tsx', import.meta.url), 'utf8')
   // updatePrice sets the base price and re-applies the manual discount --
@@ -376,7 +377,7 @@ await runTest('Z2 wiring: the cart input, updatePrice, and receipt are decoupled
   // pattern-matching it, so this asserts the rule in its new home AND that the
   // component still consumes it -- together, what this lock was always after.
   assert.match(receipt, /import \{ receiptDeliveryFigures, receiptLineFigures, receiptLineSavingsUsd \} from '\.\.\/\.\.\/utils\/receiptLineMath'/)
-  assert.match(receipt, /const figures = receiptLineFigures\(item, showItemDiscount, exchangeRate\)/)
+  assert.match(receipt, /const figures = receiptLineFigures\(item, showItemDiscount, exchangeRate, totals.moneyPrecisionVersion, sale\)/)
   const lineMath = fs.readFileSync(new URL('../src/utils/receiptLineMath.ts', import.meta.url), 'utf8')
   assert.match(lineMath, /baseUnitUsd > 0\s*\n\s*\? baseUnitUsd \+ num\(item\.product_discount_usd\)/)
 })
