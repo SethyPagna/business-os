@@ -69,6 +69,8 @@ interface ReceiptItem {
 }
 
 interface ReceiptSale {
+  id?: number | string | null
+  pricing_identity_bindings?: unknown
   money_precision_version?: number | null
   calculated_total_usd?: number | string | null
   rounding_adjustment_usd?: number | string | null
@@ -449,7 +451,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   // Discount, per the owner’s Sep-4 photo) rather than folded into Subtotal
   // and Discount, so it is named rather than merely included -- and, unlike
   // before the Sep-4 line fix, it can no longer vanish from the totals.
-  const lineSavingsUsd = receiptLineSavingsUsd(items, showItemDiscount, exchangeRate, totals.moneyPrecisionVersion)
+  const lineSavingsUsd = receiptLineSavingsUsd(items, showItemDiscount, exchangeRate, totals.moneyPrecisionVersion, sale)
   // The lines now print their NET totals, so their sum IS sales.subtotal_usd
   // and Subtotal needs no adjustment. Discount goes back to meaning the
   // order-level cut alone.
@@ -629,7 +631,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
         {items.map((item, index) => {
           // Every figure on this line comes from the shared calculation, so the
           // printed price and the Discount row can never disagree.
-          const figures = receiptLineFigures(item, showItemDiscount, exchangeRate, totals.moneyPrecisionVersion)
+          const figures = receiptLineFigures(item, showItemDiscount, exchangeRate, totals.moneyPrecisionVersion, sale)
           const qty = figures.qty
           // Price column = the SELLING unit price with the unit cut beside it.
           // Total column = what the line actually came to. 28.00 (-7.00) then

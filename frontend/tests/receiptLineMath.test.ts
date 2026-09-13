@@ -228,7 +228,7 @@ const sale16433 = {
 {
   const src = fs.readFileSync(new URL('../src/components/receipt/Receipt.tsx', import.meta.url), 'utf8')
   assert.match(src, /import \{ receiptDeliveryFigures, receiptLineFigures, receiptLineSavingsUsd \} from '\.\.\/\.\.\/utils\/receiptLineMath'/)
-  assert.match(src, /const lineSavingsUsd = receiptLineSavingsUsd\(items, showItemDiscount, exchangeRate, totals.moneyPrecisionVersion\)/)
+  assert.match(src, /const lineSavingsUsd = receiptLineSavingsUsd\(items, showItemDiscount, exchangeRate, totals.moneyPrecisionVersion, sale\)/)
   // Subtotal and Discount are the STORED figures now: the lines are net, so
   // the per-line cut is reported on its own row instead of being folded in.
   assert.match(src, /const displayedSubtotalUsd = subtotalUsd$/m)

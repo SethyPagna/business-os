@@ -1,12 +1,13 @@
 import { addMoney4, divideMoney4, multiplyMoney4, percentageMoney4, percentageProductMoney4, roundMoney4, sellingPriceCeilCent, subtractMoney4, sumMoney4 } from './moneyPrecision.ts'
 import { evaluateCapturedPricingPool, validateCapturedSaleBasket } from './saleItemPricing.ts'
+import { serverPricingIdentityBindings } from './saleMoneyV1.ts'
 const round2 = (value: number): number => Math.round((value + Number.EPSILON) * 100) / 100
 
 /** Quantity edits replay original captured thresholds/time across the whole
  * pool. Current product/rule settings are deliberately not an input. */
 export function capturedSaleLineEdit(items: readonly Record<string, unknown>[], header: Record<string, unknown>, lineId: number,
   changes: { quantity: number; selling_price_input_usd?: number; manual_discount_type?: 'percent' | 'fixed' | null; manual_discount_value?: number }) {
-  const snapshots = validateCapturedSaleBasket(items, header)
+  const snapshots = validateCapturedSaleBasket(items, header, serverPricingIdentityBindings(header.pricing_identity_bindings))
   const index = items.findIndex(item => Number(item.id) === lineId)
   if (index < 0) throw new Error('sale_item_pricing_invalid')
   const snapshot = snapshots[index], pool = structuredClone(snapshot.pool)
@@ -27,7 +28,7 @@ export function capturedSaleLineEdit(items: readonly Record<string, unknown>[], 
 /** Removal/replacement changes the original pool before any new independent
  * replacement line is added. Never subtract a rounded unit projection. */
 export function capturedSaleRemovalSubtotal(items: readonly Record<string, unknown>[], header: Record<string, unknown>, lineId: number): number {
-  const snapshots = validateCapturedSaleBasket(items, header)
+  const snapshots = validateCapturedSaleBasket(items, header, serverPricingIdentityBindings(header.pricing_identity_bindings))
   const index = items.findIndex(item => Number(item.id) === lineId)
   if (index < 0) throw new Error('sale_item_pricing_invalid')
   const removed = snapshots[index], pool = structuredClone(removed.pool)

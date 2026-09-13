@@ -48,6 +48,8 @@ import {
 import { addMoney4, divideMoney4, roundMoney4, subtractMoney4, sumMoney4 } from './moneyPrecision.ts'
 
 export interface ReceiptTotalsSale extends ReceiptDeliveryInput {
+  id?: number | string | null
+  pricing_identity_bindings?: unknown
   money_precision_version?: number | null
   calculated_total_usd?: number | string | null
   rounding_adjustment_usd?: number | string | null
@@ -172,7 +174,7 @@ export function receiptTotalsFigures(
   const discountUsd = num(sale.discount_usd ?? sale.discount)
   const membershipDiscountUsd = num(sale.membership_discount_usd)
   const itemDiscountUsd = money(
-    receiptLineSavingsUsd(parseItems(sale.items), options.showItemDiscount !== false, exchangeRate, version1 ? 1 : 0),
+    receiptLineSavingsUsd(parseItems(sale.items), options.showItemDiscount !== false, exchangeRate, version1 ? 1 : 0, sale),
   )
   const taxUsd = num(sale.tax_usd ?? sale.tax)
 

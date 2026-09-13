@@ -416,8 +416,8 @@ export default function SaleDetailModal({
   const [pendingLineMutation, setPendingLineMutation] = useState<{ actor: string; kind: SaleLineMutationKind; body: Record<string, unknown> } | null>(null)
   const [lineRecoveryError, setLineRecoveryError] = useState('')
   const [lineRecoveryBusy, setLineRecoveryBusy] = useState(false)
-  const [lineHeaderConflict, setLineHeaderConflict] = useState<{ actor: string; kind: SaleLineMutationKind; body: Record<string, unknown>; quote: SaleMutationHeaderQuote } | null>(null)
-  const [lineReviewConfirm, setLineReviewConfirm] = useState<{ kind: SaleLineMutationKind; body: Record<string, unknown>; quote: SaleMutationHeaderQuote } | null>(null)
+  const [lineHeaderConflict, setLineHeaderConflict] = useState<{ actor: string; detail: string; scope: ReturnType<typeof captureActorReadScope>; kind: SaleLineMutationKind; body: Record<string, unknown>; quote: SaleMutationHeaderQuote } | null>(null)
+  const [lineReviewConfirm, setLineReviewConfirm] = useState<{ actor: string; detail: string; scope: ReturnType<typeof captureActorReadScope>; kind: SaleLineMutationKind; body: Record<string, unknown>; quote: SaleMutationHeaderQuote } | null>(null)
   const lineMutationActor = (() => {
     try { const runtimeUrl = new URL(getSyncServerUrl() || window.location.origin, window.location.origin)
       return `${window.location.origin}|${runtimeUrl.origin}${runtimeUrl.pathname}|${String(user?.id || '')}` }
@@ -921,7 +921,7 @@ export default function SaleDetailModal({
         && outcome.result.code === 'sale_header_quote_conflict' && outcome.result.proven_uncommitted === true) {
         const quote = outcome.result.header_quote as SaleMutationHeaderQuote
         if (quote && compareSaleHeaderQuote(quote, headerQuote(quote.subtotal_usd)) !== 'missing') {
-          setLineHeaderConflict({ actor: lineMutationActor, kind, body: outcome.body, quote: structuredClone(quote) })
+          setLineHeaderConflict({ actor: lineMutationActor, detail: requestDetail, scope, kind, body: outcome.body, quote: structuredClone(quote) })
           setAmendConfirm(null)
           setAddConfirmOpen(false)
         }
@@ -935,7 +935,7 @@ export default function SaleDetailModal({
 
   const reviewLineHeader = async (): Promise<void> => {
     const conflict = lineHeaderConflict
-    if (!conflict || conflict.actor !== lineMutationActor || lineWriteOwnerRef.current) return
+    if (!conflict || conflict.actor !== lineMutationActor || conflict.detail !== detailScope || !isActorReadScopeCurrent(conflict.scope) || lineWriteOwnerRef.current) return
     const scope = captureActorReadScope('sale-line-request'), requestDetail = detailScope
     const current = () => detailAliveRef.current && detailScopeRef.current === requestDetail && isActorReadScopeCurrent(scope)
     const newBody = { ...structuredClone(conflict.body), client_request_id: createSettlementRequestId(), expected_header_quote: structuredClone(conflict.quote) }
@@ -947,8 +947,18 @@ export default function SaleDetailModal({
       setLineHeaderConflict(null)
       setAmendConfirm(null)
       setAddConfirmOpen(false)
-      setLineReviewConfirm({ kind: conflict.kind, body: newBody, quote: conflict.quote })
+      setLineReviewConfirm({ actor: lineMutationActor, detail: requestDetail, scope, kind: conflict.kind, body: newBody, quote: conflict.quote })
     } catch { if (current()) setLineRecoveryError(t('money_checkout_recovery_required')) }
+  }
+
+  const retryLineMutationAndClose = async (kind: SaleLineMutationKind, body?: Record<string, unknown>, review = lineReviewConfirm): Promise<void> => {
+    const requestDetail = detailScope, scope = captureActorReadScope('sale-line-request')
+    const current = () => detailAliveRef.current && detailScopeRef.current === requestDetail && isActorReadScopeCurrent(scope)
+    if (!current() || (body && (!review || review.actor !== lineMutationActor || review.detail !== requestDetail || !isActorReadScopeCurrent(review.scope)))) return
+    try {
+      const result = await executeLineMutation(kind, body)
+      if (current() && result && typeof result === 'object' && 'committed' in result && result.committed) onClose()
+    } catch { /* The durable request and recovery notice remain available. */ }
   }
 
   useEffect(() => {
@@ -1660,7 +1670,7 @@ export default function SaleDetailModal({
               </dl>
             })()}
             {pendingLineMutation?.actor === lineMutationActor ? <button type="button" disabled={lineRecoveryBusy} className="mt-2 rounded border px-3 py-2 disabled:opacity-50" onClick={() => {
-              void executeLineMutation(pendingLineMutation.kind).then(result => { if (result && typeof result === 'object' && 'committed' in result && result.committed) onClose() }).catch(() => {})
+              void retryLineMutationAndClose(pendingLineMutation.kind)
             }}>{lineRecoveryBusy ? t('loading') : t('retry')}</button> : null}
             {lineHeaderConflict?.actor === lineMutationActor ? <button type="button" disabled={lineRecoveryBusy} className="ml-2 mt-2 rounded border px-3 py-2 disabled:opacity-50" onClick={() => { void reviewLineHeader() }}>{translateOr('sale_line_review_updated_total', 'Review the updated total', 'ពិនិត្យសរុបដែលបានធ្វើបច្ចុប្បន្នភាព')}</button> : null}
           </div>
@@ -1930,7 +1940,7 @@ export default function SaleDetailModal({
                   ) : items.map((item, index) => {
                     const qty = toNumber(item.quantity || item.qty || 1) || 1
                     const unitUsd = toNumber(item.applied_price_usd ?? item.price_usd ?? item.price)
-                    const lineFigures = receiptLineFigures(item, true, totals.exchangeRate, totals.moneyPrecisionVersion)
+                    const lineFigures = receiptLineFigures(item, true, totals.exchangeRate, totals.moneyPrecisionVersion, sale)
                     const storedLineUsd = Number(item.total_usd)
                     const lineUsd = totals.moneyPrecisionVersion === 1 ? lineFigures.lineUsd : Number.isFinite(storedLineUsd) ? storedLineUsd : unitUsd * qty
                     const baseUnitUsd = item.base_price_usd == null ? unitUsd + toNumber(item.manual_discount_usd) : toNumber(item.base_price_usd)
@@ -2878,13 +2888,13 @@ export default function SaleDetailModal({
               they change a receipt the customer already holds, and half of
               them move stock. One dialog for all five kinds, so no amendment
               can ever be the one that slipped through on a single click. */}
-          {lineReviewConfirm ? <ConfirmDialog t={t} title={translateOr('sale_line_review_updated_total', 'Review the updated total', 'ពិនិត្យសរុបដែលបានធ្វើបច្ចុប្បន្នភាព')}
+          {lineReviewConfirm?.actor === lineMutationActor && lineReviewConfirm.detail === detailScope && isActorReadScopeCurrent(lineReviewConfirm.scope) ? <ConfirmDialog t={t} title={translateOr('sale_line_review_updated_total', 'Review the updated total', 'ពិនិត្យសរុបដែលបានធ្វើបច្ចុប្បន្នភាព')}
             items={[
               { label: t('tax') || 'Tax', value: fmtUSD(lineReviewConfirm.quote.tax_usd) },
               { label: t('money_rounding_adjustment'), value: fmtUSD(lineReviewConfirm.quote.rounding_adjustment_usd) },
               { label: t('total') || 'Total', value: fmtUSD(lineReviewConfirm.quote.total_usd) },
             ]} working={lineRecoveryBusy} onClose={() => { if (!lineRecoveryBusy) setLineReviewConfirm(null) }}
-            onConfirm={() => { void executeLineMutation(lineReviewConfirm.kind, lineReviewConfirm.body).then(result => { if (result && typeof result === 'object' && 'committed' in result && result.committed) onClose() }).catch(() => {}) }} /> : null}
+            onConfirm={() => { void retryLineMutationAndClose(lineReviewConfirm.kind, lineReviewConfirm.body, lineReviewConfirm) }} /> : null}
           {amendConfirm ? (
             <ConfirmDialog
               t={t}

@@ -31,8 +31,11 @@
 
 import { capturedDisplayPriceMode, capturedPricingMetadata, parseSaleItemPricing, SaleItemPricingError } from './saleItemPricing.ts'
 import { divideMoney4, multiplyMoney4, sumMoney4 } from './moneyPrecision.ts'
+import { serverPricingIdentityBindings } from './saleMoneyV1.ts'
 
 export interface ReceiptLineInput {
+  id?: number | string | null
+  sale_id?: number | string | null
   product_id?: number | string | null
   pricing_snapshot_json?: string | null
   total_usd?: number | string | null
@@ -90,6 +93,7 @@ export function receiptLineFigures(
   showItemDiscount: boolean,
   exchangeRate: number,
   moneyPrecisionVersion: 0 | 1 = 0,
+  identityHeader: { id?: unknown; pricing_identity_bindings?: unknown } = {},
 ): ReceiptLineFigures {
   if (moneyPrecisionVersion === 1) {
     const snapshot = parseSaleItemPricing(item.pricing_snapshot_json)
@@ -97,7 +101,9 @@ export function receiptLineFigures(
     const captured = snapshot.pool.lines.find(line => line.line_key === snapshot.line_key)
     const qty = snapshot.quantities[snapshot.line_key]
     const bound = (value: unknown, expected: number) => value != null && String(value).trim() !== '' && Number.isFinite(Number(value)) && Number(value) === expected
-    if (!captured || !bound(item.product_id, Number(captured.product.id)) || !bound(item.quantity, qty)
+    const bindings = serverPricingIdentityBindings(identityHeader.pricing_identity_bindings).filter(binding => binding.sale_id === identityHeader.id
+      && binding.sale_id === item.sale_id && binding.sale_item_id === item.id && binding.captured_product_id === captured?.product.id && binding.current_product_id === item.product_id)
+    if (!captured || (!bound(item.product_id, Number(captured.product.id)) && bindings.length !== 1) || !bound(item.quantity, qty)
       || snapshot.pool.exchange_rate !== exchangeRate
       || !bound(item.total_usd, snapshot.amounts.total_usd) || !bound(item.total_khr, snapshot.amounts.total_khr)
       || !bound(item.applied_price_usd, snapshot.amounts.applied_price_usd) || !bound(item.applied_price_khr, snapshot.amounts.applied_price_khr)) throw new SaleItemPricingError()
@@ -180,8 +186,9 @@ export function receiptLineSavingsUsd(
   showItemDiscount: boolean,
   exchangeRate: number,
   moneyPrecisionVersion: 0 | 1 = 0,
+  identityHeader: { id?: unknown; pricing_identity_bindings?: unknown } = {},
 ): number {
-  if (moneyPrecisionVersion === 1) return sumMoney4(items.map(item => receiptLineFigures(item, showItemDiscount, exchangeRate, 1).savingsUsd))
+  if (moneyPrecisionVersion === 1) return sumMoney4(items.map(item => receiptLineFigures(item, showItemDiscount, exchangeRate, 1, identityHeader).savingsUsd))
   return items.reduce(
     (sum, item) => sum + receiptLineFigures(item, showItemDiscount, exchangeRate).savingsUsd,
     0,

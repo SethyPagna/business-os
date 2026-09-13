@@ -416,3 +416,49 @@ assert.ok(pendingSummary.includes('money_rounding_adjustment'))
 assert.equal(renderPending('actor-2', durableHeader), '')
 assert.equal(renderPending('actor-1', { total_usd: 999 }), '')
 console.log('PASS actual reopened pending-summary render: durable quote, no current repricing, actor and malformed guards')
+
+const identityBinding = { sale_id: 17, sale_item_id: 70, captured_product_id: 7, current_product_id: 20 }
+const mergedItem = { ...capturedRow, sale_id: 17, product_id: 20 }
+const mergedSale = { ...capturedSale, items: [mergedItem], pricing_identity_bindings: [identityBinding] }
+const mergedEdits: any[] = []
+actualDetailCallback('stageLineUpdate', { ...editEnv, sale: mergedSale, items: mergedSale.items, setAmendConfirm: (value: unknown) => mergedEdits.push(value) })(70, 3, 9.6667, null, 0, 0, 0.3333, 'Merged')
+assert.equal(mergedEdits[0].request.pricing_quote.total_usd, 20, 'merged row uses original captured product7 rule, not product20 catalogue')
+assert.equal(Object.hasOwn(mergedEdits[0].request, 'pricing_identity_bindings'), false, 'server lineage evidence is never mutation authority')
+assert.equal(mergedItem.pricing_snapshot_json, capturedRow.pricing_snapshot_json)
+const mergedReceipt = { ...receiptSale, items: [mergedItem], pricing_identity_bindings: [identityBinding] }
+const canonicalMerged = canonicalSaleReceipt(mergedReceipt)
+assert.equal(canonicalMerged.total_usd, 29)
+;(canonicalMerged.pricing_identity_bindings as any[])[0].current_product_id = 999
+assert.equal(identityBinding.current_product_id, 20, 'canonical lineage is detached from the response object')
+const mergedHtml = renderToStaticMarkup(React.createElement(receiptModule.exports.default, { sale: mergedReceipt, settings: {}, onClose: () => {} }))
+assert.ok(mergedHtml.includes('USD29.00') && mergedHtml.includes('KHR116000'))
+for (const bindings of [undefined, [{ ...identityBinding, sale_id: 18 }], [{ ...identityBinding, sale_item_id: 71 }], [{ ...identityBinding, captured_product_id: 8 }], [{ ...identityBinding, current_product_id: 21 }], [identityBinding, identityBinding], [{ ...identityBinding, current_product_id: '20' }]]) {
+  assert.throws(() => canonicalSaleReceipt({ ...mergedReceipt, pricing_identity_bindings: bindings }))
+  assert.throws(() => capturedSaleLineEdit([mergedItem], { ...mergedSale, pricing_identity_bindings: bindings }, 70, { quantity: 2 }))
+}
+console.log('PASS merged canonical receipt and actual edit callback: exact row binding, immutable capture, no client authority')
+
+let securityGeneration = 1, closeCount = 0, dispatchCount = 0
+const reviewState = { actor: 'actor-1', detail: 'security-1:17', scope: 1, kind: 'sale-amendment', body: { client_request_id: 'original' }, quote: durableHeader }
+let resolveReviewed!: (value: unknown) => void
+const reviewEnv: any = { detailScope: reviewState.detail, detailScopeRef: { current: reviewState.detail }, detailAliveRef: { current: true },
+  captureActorReadScope: () => securityGeneration, isActorReadScopeCurrent: (scope: number) => scope === securityGeneration,
+  lineMutationActor: 'actor-1', lineReviewConfirm: reviewState,
+  executeLineMutation: async () => { dispatchCount++; return await new Promise(resolve => { resolveReviewed = resolve }) }, onClose: () => { closeCount++ } }
+const confirmActual = actualDetailCallback('retryLineMutationAndClose', reviewEnv)
+const pendingConfirm = confirmActual('sale-amendment', reviewState.body, reviewState)
+await Promise.resolve()
+securityGeneration = 2
+resolveReviewed({ committed: true })
+await pendingConfirm
+assert.equal(closeCount, 0, 'late previous-session completion cannot close the new modal')
+await confirmActual('sale-amendment', reviewState.body, reviewState)
+assert.equal(dispatchCount, 1, 'stale retained dialog handler cannot dispatch the old body')
+const renderGuardText = detailSource.slice(detailSource.indexOf('{lineReviewConfirm?.actor'), detailSource.indexOf(' ? <ConfirmDialog', detailSource.indexOf('{lineReviewConfirm?.actor'))).slice(1)
+const renderGuard = new Function('lineReviewConfirm', 'lineMutationActor', 'detailScope', 'isActorReadScopeCurrent', `return ${renderGuardText}`)
+assert.equal(renderGuard(reviewState, 'actor-1', reviewState.detail, reviewEnv.isActorReadScopeCurrent), false, 'same actor changed session hides review synchronously before effects')
+securityGeneration = 1
+assert.equal(renderGuard(reviewState, 'actor-2', reviewState.detail, reviewEnv.isActorReadScopeCurrent), false)
+assert.equal(renderGuard(reviewState, 'actor-1', 'security-1:18', reviewEnv.isActorReadScopeCurrent), false)
+assert.equal(renderGuard(reviewState, 'actor-1', reviewState.detail, reviewEnv.isActorReadScopeCurrent), true)
+console.log('PASS actual review render/confirm: synchronous actor/session/sale guard and post-await close fence')
