@@ -29,6 +29,10 @@ exact.addPage([cost('line:1', '1.2345', '.3333')])
 assert.equal(exact.totals().cost_of_goods, '0.4115')
 const unrounded = new ReportMoneyAccumulator(); unrounded.addPage([cost('line:precise', '1.2345', '.33335')])
 assert.equal(unrounded.totals().cost_of_goods, '0.4115')
+for (const tiny of [1e-10, '1e-10']) {
+  const accumulator = new ReportMoneyAccumulator(); accumulator.addPage([cost(`tiny:${String(tiny)}:${typeof tiny}`, '1.2345', tiny)])
+  assert.equal(accumulator.totals().cost_of_goods, '0.0000')
+}
 
 const whole = new ReportMoneyAccumulator()
 whole.addPage([scalar('d1', 'sale_calculated_total', '1.2345')])
@@ -62,11 +66,13 @@ refusal('unsupported_precision_version', () => new ReportMoneyAccumulator().addP
 refusal('unsupported_row', () => new ReportMoneyAccumulator().addPage([{ ...scalar('channel', 'refund_payout', '1.0000'), channel: 'other' }]))
 refusal('invalid_quantity', () => new ReportMoneyAccumulator().addPage([cost('bad-q', '1.0000', 'Infinity')]))
 refusal('invalid_quantity', () => new ReportMoneyAccumulator().addPage([cost('unknown-bad-q', null, 'Infinity')]))
+for (const zero of [0, '0', '0e-10']) refusal('invalid_quantity', () => new ReportMoneyAccumulator().addPage([cost(`zero:${String(zero)}`, '1.0000', zero)]))
+refusal('invalid_saved_money4', () => new ReportMoneyAccumulator().addPage([cost('missing-cost', undefined, '1')]))
 refusal('invalid_saved_money4', () => new ReportMoneyAccumulator().addPage([cost('negative-cost', '-1.0000', '1')]))
 refusal('too_many_rows', () => new ReportMoneyAccumulator(1).addPage([scalar('a', 'refund_payout', 1), scalar('b', 'refund_payout', 1)]))
-refusal('aggregate_overflow', () => new ReportMoneyAccumulator().addPage([
-  scalar('max', 'refund_payout', '100000000000.0000'), scalar('more', 'refund_payout', '0.0001'),
-]))
+const samePageOverflow = new ReportMoneyAccumulator()
+samePageOverflow.addPage([scalar('max', 'refund_payout', '100000000000.0000'), scalar('more', 'refund_payout', '0.0001')])
+refusal('aggregate_overflow', () => samePageOverflow.totals())
 refusal('aggregate_overflow', () => new ReportMoneyAccumulator().addPage([cost('product-overflow', '100000000000.0000', '2')]))
 for (const ordered of [[['plus', '0.0001'], ['minus', '-0.0001']], [['minus', '-0.0001'], ['plus', '0.0001']]]) {
   const boundary = new ReportMoneyAccumulator()
@@ -74,6 +80,16 @@ for (const ordered of [[['plus', '0.0001'], ['minus', '-0.0001']], [['minus', '-
   boundary.addPage(ordered.map(([id, value]) => scalar(id, 'refund_payout', value)))
   assert.equal(boundary.totals().refund_payout, '100000000000.0000')
 }
+for (const ordered of [[['plus', '0.0001'], ['minus', '-0.0001']], [['minus', '-0.0001'], ['plus', '0.0001']]]) {
+  const boundary = new ReportMoneyAccumulator()
+  boundary.addPage([scalar('cross-base', 'refund_payout', '100000000000.0000')])
+  for (const [id, value] of ordered) boundary.addPage([scalar(`cross:${id}`, 'refund_payout', value)])
+  assert.equal(boundary.totals().refund_payout, '100000000000.0000')
+}
+const finalOverflow = new ReportMoneyAccumulator()
+finalOverflow.addPage([scalar('overflow-base', 'refund_payout', '100000000000.0000')])
+finalOverflow.addPage([scalar('overflow-extra', 'refund_payout', '0.0001')])
+refusal('aggregate_overflow', () => finalOverflow.totals())
 
 const atomic = new ReportMoneyAccumulator()
 refusal('invalid_saved_money4', () => atomic.addPage([scalar('valid', 'refund_payout', '1.0000'), scalar('bad', 'refund_payout', '1.00000')]))

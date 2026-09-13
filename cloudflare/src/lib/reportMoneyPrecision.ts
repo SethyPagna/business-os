@@ -77,11 +77,13 @@ function quantityText(value: DecimalInput): string {
   if (typeof value !== 'string' && typeof value !== 'number') throw new ReportMoneyPrecisionError('invalid_quantity')
   if (typeof value === 'number' && !Number.isFinite(value)) throw new ReportMoneyPrecisionError('invalid_quantity')
   const text = String(value).trim()
-  if (!/^(?:\d+(?:\.\d{1,24})?|\.\d{1,24})$/.test(text)) throw new ReportMoneyPrecisionError('invalid_quantity')
+  if (!(Number(text) > 0)) throw new ReportMoneyPrecisionError('invalid_quantity')
+  try { multiplyMoney4('0', text) } catch { throw new ReportMoneyPrecisionError('invalid_quantity') }
   return text
 }
 
 function money4Text(units: bigint): string {
+  if (units > MAX_ABS_UNITS || units < -MAX_ABS_UNITS) throw new ReportMoneyPrecisionError('aggregate_overflow')
   const negative = units < 0n
   const absolute = negative ? -units : units
   const text = `${negative ? '-' : ''}${absolute / UNITS_PER_USD}.${String(absolute % UNITS_PER_USD).padStart(4, '0')}`
@@ -125,13 +127,10 @@ export class ReportMoneyAccumulator {
 
     // Validate and stage the complete page before publishing any part of it.
     const staged: Array<{ id: string; channel?: ReportMoneyChannel; units?: bigint; issue?: ReportMoneyDiagnostic }> = []
-    const stagedDeltas: Record<ReportMoneyChannel, bigint> = {
-      sale_calculated_total: 0n, sale_rounding_adjustment: 0n, refund_payout: 0n, cancellation: 0n, cost_of_goods: 0n,
-    }
     for (const row of rows) {
       if (row.kind === 'item_cost') {
         quantityText(row.quantity)
-        if (row.cost_price_usd == null) {
+        if (row.cost_price_usd === null) {
           staged.push({ id: row.id, issue: { code: 'unknown_cost', row_id: row.id } })
           continue
         }
@@ -149,12 +148,7 @@ export class ReportMoneyAccumulator {
       } else {
         valueUnits = savedMoney4Units(row.value_usd)
       }
-      stagedDeltas[row.channel] += valueUnits
       staged.push({ id: row.id, channel: row.channel, units: valueUnits })
-    }
-    for (const channel of Object.keys(stagedDeltas) as ReportMoneyChannel[]) {
-      const next = this.units[channel] + stagedDeltas[channel]
-      if (next > MAX_ABS_UNITS || next < -MAX_ABS_UNITS) throw new ReportMoneyPrecisionError('aggregate_overflow')
     }
     for (const entry of staged) {
       this.seen.add(entry.id)
