@@ -101,6 +101,7 @@ const feeRoute = loadReal('routes/fees.ts', {
   '../lib/conflictControl': conflictControl,
   '../lib/actorSnapshot': actorSnapshot,
   '../lib/feeOperationReceipt': feeOperationReceipt,
+  '../lib/moneyPrecision': loadReal('lib/moneyPrecision.ts'),
   '../lib/reviewGate': { maybeQueueForReview: async () => null },
   '../lib/businessDateWindow': { businessToday: () => '2026-09-08' },
   '../lib/telegram': { sendTelegramEvent: async () => {}, telegramMoney: () => '' },
@@ -171,6 +172,30 @@ async function check(name, fn) {
 }
 
 async function main() {
+  await check('v1 metadata edits and one-currency edits preserve untouched historical precision', async () => {
+    sqlite.exec('UPDATE fees SET amount_usd=1.2345, amount_khr=20.49 WHERE id=1')
+    let result = await update({ fee_money_version: 1, label: 'metadata', expectedUpdatedAt: row().updated_at })
+    assert.equal(result.status, 200)
+    assert.equal(result.body.fee.amount_usd, 1.2345)
+    assert.equal(result.body.fee.amount_khr, 20.49)
+    result = await update({ fee_money_version: 1, amount_khr: '20.5', expectedUpdatedAt: row().updated_at })
+    assert.equal(result.status, 200)
+    assert.equal(result.body.fee.amount_usd, 1.2345)
+    assert.equal(result.body.fee.amount_khr, 21)
+  })
+  await check('v1 malformed supplied money and unknown versions produce no writes', async () => {
+    const before = row()
+    for (const body of [
+      ...['amount_usd','amount_khr'].flatMap(field => [null, '', '-0.000000001', 'NaN', true].map(value => ({ [field]: value }))),
+      { fee_money_version: null }, { fee_money_version: 0 }, { fee_money_version: '1' },
+    ]) {
+      assert.equal((await update({ fee_money_version: 1, ...body })).status, 400)
+      assert.deepEqual(row(), before)
+      assert.equal(feeUpdateRuns, 0)
+      assert.equal(audits.length, 0)
+      assert.equal(broadcasts.length, 0)
+    }
+  })
   await check('matching version updates the fee and emits one audit/broadcast', async () => {
     const result = await update({
       label: 'ordinary edit', amount_usd: 12,
@@ -206,6 +231,7 @@ async function main() {
     `).run()
     const result = await update({
       label: 'losing edit', amount_usd: 30,
+      fee_money_version: 1,
       expectedUpdatedAt: '2026-09-08T00:00:00.000Z',
     })
     assert.equal(result.status, 409, JSON.stringify(result.body))

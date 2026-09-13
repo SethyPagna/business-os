@@ -130,6 +130,7 @@ const route = loadReal('routes/fees.ts', {
   '../lib/batchCode': { normalizeTypedDate: (value) => String(value || '').slice(0, 10) || null },
   '../lib/actorSnapshot': actorSnapshot,
   '../lib/feeOperationReceipt': feeOperationReceipt,
+  '../lib/moneyPrecision': loadReal('lib/moneyPrecision.ts'),
   '../index': {},
 }).default
 
@@ -242,6 +243,52 @@ async function main() {
   assert.equal(broadcasts.length, 2, 'only the two distinct commits broadcast')
   assert.equal(telegrams.length, 2, 'only the two distinct commits send notifications')
 
+  const v1 = { ...normalBody, fee_money_version: 1, client_request_id: 'fee-money-v1-0001', amount_usd: '1.005', amount_khr: '20.5' }
+  const fresh = await create(v1)
+  assert.equal(fresh.status, 201, JSON.stringify(fresh.body))
+  assert.equal(fresh.body.fee.amount_usd, 1.01)
+  assert.equal(fresh.body.fee.amount_khr, 21)
+  const once = counts()
+  // Lost acknowledgement / double submit returns the same original receipt.
+  for (const result of await Promise.all([create(v1), create(v1)])) {
+    assert.equal(result.status, 200)
+    assert.deepEqual(result.body, fresh.body)
+  }
+  assert.deepEqual(counts(), once)
+  const versionConflict = await create({ ...v1, fee_money_version: undefined, amount_usd: 1.01, amount_khr: 21 })
+  assert.equal(versionConflict.status, 409)
+  assert.equal(versionConflict.body.code, 'idempotency_conflict')
+  assert.deepEqual(counts(), once)
+  for (const input of [
+    ...['amount_usd', 'amount_khr'].flatMap(field => [null, '', ' ', 'NaN', 'Infinity', true, {}, '-0.000000001', '100000000000.0001'].map(value => ({ [field]: value }))),
+    ...[null, 0, 2, '1', false].map(value => ({ fee_money_version: value })),
+    { amount_usd: '0.004999', amount_khr: '0.499999' },
+  ]) {
+    const result = await create({ ...v1, client_request_id: 'fee-money-invalid-0001', ...input })
+    assert.equal(result.status, 400, JSON.stringify(input))
+    assert.equal(result.body.code, 'invalid_fee_money')
+    assert.deepEqual(counts(), once)
+  }
+  const onlyKhr = { ...v1, client_request_id: 'fee-money-khr-only-0001', amount_usd: undefined, amount_khr: '20.499999' }
+  const khr = await create(onlyKhr)
+  assert.equal(khr.status, 201)
+  assert.equal(khr.body.fee.amount_usd, 0)
+  assert.equal(khr.body.fee.amount_khr, 20)
+  const old = { ...normalBody, client_request_id: 'fee-legacy-fraction-0001', amount_khr: 20.49 }
+  const oldCreated = await create(old)
+  assert.equal(oldCreated.status, 201, 'uncommitted old requests retain admission')
+  assert.equal(oldCreated.body.fee.amount_khr, 20.49)
+  const stored = raw.prepare('SELECT request_json FROM fee_operation_receipts WHERE request_id=?').get(old.client_request_id).request_json
+  assert.equal(stored, JSON.stringify({ fee_type: old.fee_type, label: old.label, amount_usd: old.amount_usd,
+    amount_khr: old.amount_khr, fee_date: old.fee_date, sale_id: old.sale_id, branch_id: old.branch_id,
+    delivery_contact_id: old.delivery_contact_id, notes: old.notes }), 'legacy canonical bytes do not gain a policy marker')
+  assert.deepEqual((await create(old)).body, oldCreated.body)
+  const beforeRace = counts()
+  const racing = { ...v1, client_request_id: 'fee-v1-concurrent-0001' }
+  const racers = await Promise.all([create(racing), create(racing)])
+  assert.deepEqual(racers.map(result => result.status).sort(), [200, 201])
+  assert.deepEqual(racers[0].body, racers[1].body)
+  assert.deepEqual(counts(), { fees: beforeRace.fees + 1, receipts: beforeRace.receipts + 1, audits: beforeRace.audits + 1 })
   raw.close()
   console.log('PASS fee route accepts explicit null courier, replays exactly, conflicts changed data, rejects malformed/nonexistent ids, and writes once')
 }

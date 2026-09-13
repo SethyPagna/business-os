@@ -1,6 +1,7 @@
 import { apiFetch, route } from './http.ts'
 import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
 import { dispatchResolvedSyncError } from '../utils/syncProblemLifecycle.ts'
+import { MoneyPrecisionError, nativeChangeAmounts, type DecimalInput } from '../utils/moneyPrecision.ts'
 
 // Frontend transport for the Fees page (cloudflare/src/routes/fees.ts).
 // No local/offline mirror -- same reasoning as notesTransport.ts: a failed
@@ -62,6 +63,7 @@ export type FeeListParams = {
 }
 
 export type FeePayload = {
+  fee_money_version?: 1
   fee_type?: FeeType | string
   label?: string | null
   amount_usd?: number
@@ -76,6 +78,7 @@ export type FeePayload = {
 }
 
 export type FeeCreateBody = {
+  fee_money_version?: 1
   fee_type: FeeType
   label: string | null
   amount_usd: number
@@ -158,6 +161,22 @@ function roundFeeMoney(value: unknown): number {
   return Math.round((nonNegative + Number.EPSILON) * 100) / 100
 }
 
+function feeMoneyVersion(payload: FeePayload): 1 | undefined {
+  if (!Object.prototype.hasOwnProperty.call(payload, 'fee_money_version')) return undefined
+  if (payload.fee_money_version !== 1) throw new MoneyPrecisionError('invalid_decimal')
+  return 1
+}
+
+function feeMoney(payload: FeePayload, currency: 'usd' | 'khr', version: 1 | undefined): number {
+  const key = currency === 'usd' ? 'amount_usd' : 'amount_khr'
+  if (!Object.prototype.hasOwnProperty.call(payload, key)) return 0
+  if (!version) return roundFeeMoney(payload[key])
+  const value = payload[key] as DecimalInput
+  const change = nativeChangeAmounts({ paidUsd: currency === 'usd' ? value : 0,
+    paidKhr: currency === 'khr' ? value : 0, payableUsd: 0, exchangeRate: 1, changeExchangeRate: 1 })
+  return currency === 'usd' ? change.changeUsd : change.changeKhr
+}
+
 function optionalFeeId(value: unknown): number | null {
   if (value == null || value === '') return null
   const numeric = Number(value)
@@ -167,6 +186,9 @@ function optionalFeeId(value: unknown): number | null {
 /** Match the normalized intent the Worker hashes; transient UI-only fields
  * and caller-supplied request IDs are deliberately excluded. */
 export function normalizeFeeCreateBody(payload: FeePayload): FeeCreateBody {
+  const version = feeMoneyVersion(payload)
+  const amountUsd = feeMoney(payload, 'usd', version), amountKhr = feeMoney(payload, 'khr', version)
+  if (version && amountUsd === 0 && amountKhr === 0) throw new MoneyPrecisionError('invalid_decimal')
   const type = String(payload.fee_type || '').trim().toLowerCase()
   const rawLabel = typeof payload.label === 'string' ? payload.label.trim().replace(/\s+/g, ' ') : ''
   const label = rawLabel.split(' ').slice(0, 6).join(' ').slice(0, 60).trim()
@@ -174,13 +196,14 @@ export function normalizeFeeCreateBody(payload: FeePayload): FeeCreateBody {
   return {
     fee_type: (['tax', 'delivery', 'change', 'expense', 'other'].includes(type) ? type : 'other') as FeeType,
     label: label || null,
-    amount_usd: roundFeeMoney(payload.amount_usd),
-    amount_khr: roundFeeMoney(payload.amount_khr),
+    amount_usd: amountUsd,
+    amount_khr: amountKhr,
     fee_date: String(payload.fee_date || '').trim(),
     sale_id: optionalFeeId(payload.sale_id),
     branch_id: optionalFeeId(payload.branch_id),
     delivery_contact_id: optionalFeeId(payload.delivery_contact_id),
     notes: notes ? notes.slice(0, 2000) : null,
+    ...(version ? { fee_money_version: version } : {}),
   }
 }
 
@@ -189,6 +212,18 @@ function readPendingFeeCreate(storage: FeeCreateStorage, actorId: string): Pendi
     const parsed = JSON.parse(storage.getItem(pendingFeeCreateStorageKey(actorId)) || 'null') as PendingFeeCreate | null
     const requestId = String(parsed?.client_request_id || '').trim()
     if (!parsed || parsed.actor_id !== actorId || !/^[A-Za-z0-9_-]{8,120}$/.test(requestId) || !parsed.body) return null
+    // Validate structure, not re-normalized text. Legacy trim-then-truncate
+    // notes can legitimately end in whitespace; retry must retain those bytes.
+    const body = parsed.body
+    const version = feeMoneyVersion(body)
+    const keys = ['fee_type','label','amount_usd','amount_khr','fee_date','sale_id','branch_id','delivery_contact_id','notes', ...(version ? ['fee_money_version'] : [])]
+    if (Object.keys(body).length !== keys.length || keys.some(key => !Object.prototype.hasOwnProperty.call(body,key))) return null
+    if (!['tax','delivery','change','expense','other'].includes(body.fee_type) || typeof body.fee_date !== 'string') return null
+    if ([body.label,body.notes].some(value => value !== null && typeof value !== 'string')) return null
+    if ([body.sale_id,body.branch_id,body.delivery_contact_id].some(value => value !== null && (!Number.isSafeInteger(value) || value <= 0))) return null
+    if ([body.amount_usd,body.amount_khr].some(value => typeof value !== 'number' || !Number.isFinite(value) || value < 0)) return null
+    if (version && (feeMoney(body,'usd',version) !== body.amount_usd || feeMoney(body,'khr',version) !== body.amount_khr
+      || (body.amount_usd === 0 && body.amount_khr === 0))) return null
     const syncProblem = parsed.sync_problem
     const normalizedProblem = syncProblem
       && syncProblem.actor_id === actorId
@@ -207,7 +242,7 @@ function readPendingFeeCreate(storage: FeeCreateStorage, actorId: string): Pendi
     return {
       actor_id: actorId,
       client_request_id: requestId,
-      body: normalizeFeeCreateBody(parsed.body),
+      body: parsed.body,
       ...(normalizedProblem ? { sync_problem: normalizedProblem } : {}),
     }
   } catch {
@@ -235,10 +270,17 @@ export function prepareFeeCreatePayload(
   const actorId = feeCreateActorId(actorIdValue)
   if (!actorId || !storage) throw new FeeCreatePersistenceError()
   try {
-    const body = normalizeFeeCreateBody(payload)
     const pending = readPendingFeeCreate(storage, actorId)
+    // The exact stored intent bypasses all fresh normalization, including
+    // legacy text normalization that is not necessarily idempotent at a cap.
+    if (pending && Object.keys(payload).filter(key => key !== 'client_request_id').length === Object.keys(pending.body).length
+      && Object.entries(pending.body).every(([key,value]) => (payload as unknown as Record<string, unknown>)[key] === value)) {
+      return { ...pending.body, client_request_id: pending.client_request_id }
+    }
+    const body = normalizeFeeCreateBody(payload)
     if (pending) {
-      if (JSON.stringify(pending.body) !== JSON.stringify(body)) throw new FeeCreatePendingRequestError(pending)
+      if (Object.keys(body).length !== Object.keys(pending.body).length
+        || Object.entries(body).some(([key, value]) => (pending.body as unknown as Record<string, unknown>)[key] !== value)) throw new FeeCreatePendingRequestError(pending)
       return { ...pending.body, client_request_id: pending.client_request_id }
     }
     const requestId = String(payload.client_request_id || createRequestId()).trim()
@@ -250,7 +292,7 @@ export function prepareFeeCreatePayload(
     if (storage.getItem(key) !== serialized) throw new Error('pending request read-back failed')
     return { ...body, client_request_id: requestId }
   } catch (error) {
-    if (error instanceof FeeCreatePersistenceError || error instanceof FeeCreatePendingRequestError) throw error
+    if (error instanceof FeeCreatePersistenceError || error instanceof FeeCreatePendingRequestError || error instanceof MoneyPrecisionError) throw error
     throw new FeeCreatePersistenceError()
   }
 }

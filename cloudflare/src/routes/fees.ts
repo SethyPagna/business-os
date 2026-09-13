@@ -23,6 +23,7 @@ import { sendTelegramEvent, telegramMoney } from '../lib/telegram'
 import { branchCanSell } from '../lib/branchRoles'
 import { normalizeTypedDate } from '../lib/batchCode'
 import { actorSnapshot } from '../lib/actorSnapshot'
+import { nativeChangeAmounts, type DecimalInput } from '../lib/moneyPrecision'
 import {
   canonicalFeeCreateRequest,
   feeCreateAuditStatement,
@@ -98,6 +99,26 @@ function round2(value: number): number {
 function toNumber(value: unknown, fallback = 0): number {
   const n = Number(value)
   return Number.isFinite(n) ? n : fallback
+}
+
+// Missing version is deliberately legacy-compatible, including frozen requests
+// that have not reached the server yet. It is not a fresh-input admission proof.
+function feeMoneyVersion(body: Record<string, unknown>): 1 | undefined {
+  if (!Object.prototype.hasOwnProperty.call(body, 'fee_money_version')) return undefined
+  if (body.fee_money_version !== 1) throw new Error('invalid_fee_money_version')
+  return 1
+}
+
+function feeMoney(body: Record<string, unknown>, currency: 'usd' | 'khr', version: 1 | undefined, fallback = 0): number {
+  const snake = `amount_${currency}`, camel = currency === 'usd' ? 'amountUsd' : 'amountKhr'
+  const present = Object.prototype.hasOwnProperty.call(body, snake) || Object.prototype.hasOwnProperty.call(body, camel)
+  if (!present) return fallback
+  if (!version) return round2(Math.max(toNumber(body[snake] ?? body[camel]), 0))
+  // Preserve explicit null/blank for strict validation rather than coalescing.
+  const value = (Object.prototype.hasOwnProperty.call(body, snake) ? body[snake] : body[camel]) as DecimalInput
+  const change = nativeChangeAmounts({ paidUsd: currency === 'usd' ? value : 0,
+    paidKhr: currency === 'khr' ? value : 0, payableUsd: 0, exchangeRate: 1, changeExchangeRate: 1 })
+  return currency === 'usd' ? change.changeUsd : change.changeKhr
 }
 
 function normalizeFeeType(value: unknown): FeeType {
@@ -471,8 +492,15 @@ app.post('/', async (c) => {
 
   const feeType = normalizeFeeType(body.fee_type ?? body.feeType)
   const label = normalizeFeeLabel(body.label)
-  const amountUsd = round2(Math.max(toNumber(body.amount_usd ?? body.amountUsd), 0))
-  const amountKhr = round2(Math.max(toNumber(body.amount_khr ?? body.amountKhr), 0))
+  let version: 1 | undefined, amountUsd: number, amountKhr: number
+  try {
+    version = feeMoneyVersion(body)
+    amountUsd = feeMoney(body, 'usd', version)
+    amountKhr = feeMoney(body, 'khr', version)
+    if (version && amountUsd === 0 && amountKhr === 0) throw new Error('fee_amount_required')
+  } catch {
+    return c.json({ error: 'Invalid expense money or policy version.', code: 'invalid_fee_money' }, 400)
+  }
   const feeDate = normalizeDate(body.fee_date ?? body.feeDate)
   const requestedSaleId = optionalPositiveId(body.sale_id)
   const requestedBranchId = optionalPositiveId(body.branch_id)
@@ -497,6 +525,7 @@ app.post('/', async (c) => {
   }
   const notes = normalizeText(body.notes, 2000)
   const intent: FeeCreateIntent = {
+    ...(version ? { fee_money_version: version } : {}),
     fee_type: feeType,
     label,
     amount_usd: amountUsd,
@@ -624,8 +653,14 @@ app.put('/:id', async (c) => {
 
   const feeType = body.fee_type !== undefined || body.feeType !== undefined ? normalizeFeeType(body.fee_type ?? body.feeType) : existing.fee_type
   const label = body.label !== undefined ? normalizeFeeLabel(body.label) : existing.label
-  const amountUsd = body.amount_usd !== undefined || body.amountUsd !== undefined ? round2(Math.max(toNumber(body.amount_usd ?? body.amountUsd), 0)) : existing.amount_usd
-  const amountKhr = body.amount_khr !== undefined || body.amountKhr !== undefined ? round2(Math.max(toNumber(body.amount_khr ?? body.amountKhr), 0)) : existing.amount_khr
+  let amountUsd: number, amountKhr: number
+  try {
+    const version = feeMoneyVersion(body)
+    amountUsd = feeMoney(body, 'usd', version, existing.amount_usd)
+    amountKhr = feeMoney(body, 'khr', version, existing.amount_khr)
+  } catch {
+    return c.json({ error: 'Invalid expense money or policy version.', code: 'invalid_fee_money' }, 400)
+  }
   const feeDate = body.fee_date !== undefined || body.feeDate !== undefined ? normalizeDate(body.fee_date ?? body.feeDate) : existing.fee_date
   let saleId: number | null
   let branchId: number
