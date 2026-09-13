@@ -15,6 +15,14 @@ export class ReportMoneyPrecisionError extends RangeError {
   constructor(readonly code: ReportMoneyRefusalCode) { super(code); this.name = 'ReportMoneyPrecisionError' }
 }
 
+export function reportMoneyHttpError(error: ReportMoneyPrecisionError): { status: 409 | 413 | 422; message: string } {
+  if (error.code === 'snapshot_changed' || error.code === 'maintenance_restore') {
+    return { status: 409, message: 'Report snapshot changed; retry the request' }
+  }
+  if (error.code === 'too_many_rows') return { status: 413, message: 'Report is too large for one request' }
+  return { status: 422, message: 'Report contains unsupported money data' }
+}
+
 function abs(value: bigint): bigint { return value < 0n ? -value : value }
 function gcd(left: bigint, right: bigint): bigint {
   while (right !== 0n) { const remainder = left % right; left = right; right = remainder }

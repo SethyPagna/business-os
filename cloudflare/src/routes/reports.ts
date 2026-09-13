@@ -27,7 +27,7 @@ import {
   reportMoneyDiagnostic,
   type SalesFilters,
 } from '../lib/salesAnalytics'
-import { ReportMoneyPrecisionError } from '../lib/reportMoneyPrecision'
+import { ReportMoneyPrecisionError, reportMoneyHttpError } from '../lib/reportMoneyPrecision'
 import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr, localTimeRangeClause } from '../lib/businessDateWindow'
 import type { Env } from '../index'
 
@@ -62,9 +62,8 @@ const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
 app.onError((error, c) => {
   if (error instanceof ReportMoneyPrecisionError) {
-    const conflict = error.code === 'snapshot_changed' || error.code === 'maintenance_restore'
-    return c.json({ error: conflict ? 'Report snapshot changed; retry the request' : 'Report contains unsupported money data',
-      code: error.code }, conflict ? 409 : 422)
+    const mapped = reportMoneyHttpError(error)
+    return c.json({ error: mapped.message, code: error.code }, mapped.status)
   }
   throw error
 })
