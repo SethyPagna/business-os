@@ -118,7 +118,11 @@ const found = offenders(FILES)
 check(`no refund aggregate anywhere is missing its scope predicate (${Object.keys(FILES).length} files swept; offenders: ${JSON.stringify(found)})`,
   found.length === 0)
 check('the sweep looked at real statements, not an empty set',
-  Object.values(FILES).reduce((n, s) => n + (s.match(/SUM\(total_refund_usd\)/g) || []).length, 0) >= 6)
+  Object.values(FILES).reduce((n, s) => n + (s.match(/SUM\(total_refund_usd\)/g) || []).length, 0) >= 4)
+check('sales list reads scoped non-cancelled customer return rows for exact-decimal accumulation',
+  /SELECT id,sale_id,total_refund_usd,total_refund_khr,[\s\S]*?FROM returns[\s\S]*?COALESCE\(status, 'completed'\) != 'cancelled'[\s\S]*?COALESCE\(return_scope, 'customer'\) = 'customer'/.test(FILES['routes/sales.ts']))
+check('sales list accumulates each saved refund through the exact money reader',
+  /for\s*\(const row of refundRows\)\s*\{[\s\S]*?\.add\(stripMoney\(row,'total_refund_usd'\)\)/.test(FILES['routes/sales.ts']))
 
 // SWEEP POSITIVE CONTROL: delete the predicate from a copy and re-sweep.
 const mutated = {

@@ -12,6 +12,7 @@ const actual = new Set(['actorSnapshot','movementBranchName',
   'productBatches','batchCode','salesStatus','conflictControl','searchMatch','financialPrecision',
   'paymentMethodRegistry','paymentSettlement','saleSettlementAction','saleLineAddition','saleAmendments',
   'nativeSaleChange','deliveryAmounts','saleRecords','saleRecordEvents','saleCreationSnapshot',
+  'moneyPrecision','saleMoneyPrecision','saleItemPricing','promotionRules','productMergeLineage','saleMutationHeaderQuote',
   'anonymousCustomer',
   'receiptNumber','clientTimestamp',
   // N21: routes/sales.ts resolves the display address through this kernel on
@@ -123,7 +124,11 @@ function request(key = 'settle-request-1') {
 async function run() {
   const native = fixture(); seed(native)
   const nativeCreate = await native.call('/', {
-    items: [{ product_id: 1, quantity: 1, applied_price_usd: 5, branch_id: 1 }],
+    money_precision_version: 1,
+    items: [{ product_id: 1, quantity: 1, applied_price_usd: 5, branch_id: 1,
+      client_line_key: 'native-change-create-line-1', pricing_source: 'manual',
+      selling_price_input_usd: 5,
+      pricing_quote: { gross_usd: 5, product_discount_usd: 0, manual_discount_usd: 0, total_usd: 5, total_khr: 21000 } }],
     branch_id: 1,
     payment_details: [{ method: 'ABA Bank', amount_usd: 6, amount_khr: 0 }],
     payment_currency: 'USD',
@@ -140,7 +145,11 @@ async function run() {
   assert.deepEqual(nativeStored, { change_usd: 1, change_khr: 0, change_is_actual: 1, change_exchange_rate: 4000 })
   const saleCountBeforeInvalid = native.sql.prepare('SELECT COUNT(*) n FROM sales').get().n
   const invalidNative = await native.call('/', {
-    items: [{ product_id: 1, quantity: 1, applied_price_usd: 5, branch_id: 1 }],
+    money_precision_version: 1,
+    items: [{ product_id: 1, quantity: 1, applied_price_usd: 5, branch_id: 1,
+      client_line_key: 'native-change-invalid-line-1', pricing_source: 'manual',
+      selling_price_input_usd: 5,
+      pricing_quote: { gross_usd: 5, product_discount_usd: 0, manual_discount_usd: 0, total_usd: 5, total_khr: 21000 } }],
     branch_id: 1, amount_paid_usd: 6, exchange_rate: 4200,
     change_is_actual: true, change_usd: 0, change_khr: 0,
     client_request_id: 'native-change-invalid-1',

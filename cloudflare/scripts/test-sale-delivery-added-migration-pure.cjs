@@ -21,17 +21,21 @@ function compile(file, stubs = {}) {
 }
 
 const salesStatus = compile('salesStatus.ts')
+const moneyPrecision = compile('moneyPrecision.ts')
+const saleMoneyPrecision = compile('saleMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
+const promotionRules = compile('promotionRules.ts', { './moneyPrecision': moneyPrecision })
+const saleItemPricing = compile('saleItemPricing.ts', { './moneyPrecision': moneyPrecision, './promotionRules': promotionRules })
 const productBatches = compile('productBatches.ts', {
   './db': {},
   './batchCode': compile('batchCode.ts'),
   './sqlBinding': compile('sqlBinding.ts'),
-  './moneyPrecision': compile('moneyPrecision.ts'),
+  './moneyPrecision': moneyPrecision,
 })
 const saleTransitions = compile('saleTransitions.ts', {
   './salesStatus': salesStatus,
   './productBatches': productBatches,
 })
-const saleTotals = compile('saleTotals.ts')
+const saleTotals = compile('saleTotals.ts', { './moneyPrecision': moneyPrecision, './saleMoneyPrecision': saleMoneyPrecision })
 const financialPrecision = compile('financialPrecision.ts')
 const saleLineAddition = compile('saleLineAddition.ts', {
   './salesStatus': salesStatus,
@@ -39,6 +43,9 @@ const saleLineAddition = compile('saleLineAddition.ts', {
   './productBatches': productBatches,
   './saleTotals': saleTotals,
   './financialPrecision': financialPrecision,
+  './moneyPrecision': moneyPrecision,
+  './saleMoneyPrecision': saleMoneyPrecision,
+  './saleItemPricing': saleItemPricing,
 })
 const saleAmendments = compile('saleAmendments.ts', {
   './salesStatus': salesStatus,
@@ -47,12 +54,19 @@ const saleAmendments = compile('saleAmendments.ts', {
   './saleTotals': saleTotals,
   './financialPrecision': financialPrecision,
   './saleLineAddition': saleLineAddition,
+  './moneyPrecision': moneyPrecision,
 })
 const businessDateWindow = compile('businessDateWindow.ts')
+const reportMoneyPrecision = compile('reportMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
+const refundMoneyPrecision = compile('refundMoneyPrecision.ts', { './moneyPrecision': moneyPrecision, './saleMoneyPrecision': saleMoneyPrecision })
+const customerReturnEntitlement = compile('customerReturnEntitlement.ts', { './moneyPrecision': moneyPrecision, './refundMoneyPrecision': refundMoneyPrecision, './saleItemPricing': saleItemPricing, './saleMoneyPrecision': saleMoneyPrecision })
 const analytics = compile('salesAnalytics.ts', {
   './db': {},
   '../index': {},
   './businessDateWindow': businessDateWindow,
+  './reportMoneyPrecision': reportMoneyPrecision,
+  './customerReturnEntitlement': customerReturnEntitlement,
+  './refundMoneyPrecision': refundMoneyPrecision,
 })
 
 const migration = (name) => fs.readFileSync(path.join(__dirname, '..', 'migrations', name), 'utf8')

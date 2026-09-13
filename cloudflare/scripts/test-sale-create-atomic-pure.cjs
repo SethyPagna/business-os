@@ -116,7 +116,23 @@ function fixture(hooks = {}) {
 function request(clientRequestId) {
   return {
     branch_id: 1,
-    items: [{ product_id: 10, quantity: 1, branch_id: 1, batch_id: 500, applied_price_usd: 9.5 }],
+    money_precision_version: 1,
+    items: [{
+      product_id: 10,
+      quantity: 1,
+      branch_id: 1,
+      batch_id: 500,
+      applied_price_usd: 9.5,
+      client_line_key: 'atomic-line',
+      pricing_source: 'selling',
+      pricing_quote: {
+        gross_usd: 9.5,
+        product_discount_usd: 0,
+        manual_discount_usd: 0,
+        total_usd: 9.5,
+        total_khr: 38000,
+      },
+    }],
     exchange_rate: 4000,
     payment_method: 'Cash',
     payment_currency: 'USD',
@@ -206,7 +222,7 @@ async function assertNativeD1TriggerMetadata() {
     assert.equal(created.status, 200, JSON.stringify(created.body))
     assert.match(f.raw.prepare('SELECT client_request_id FROM sales').get().client_request_id, /^server:/)
     assert.equal(f.raw.prepare('SELECT COUNT(*) AS n FROM sale_items').get().n, 1)
-    console.log('PASS legacy callers without a client request id remain supported through an internal atomic write key')
+    console.log('PASS explicit v1 callers without a client request id remain supported through an internal atomic write key')
   }
 
   {
@@ -252,6 +268,16 @@ async function assertNativeD1TriggerMetadata() {
       manual_discount_value: 3,
       manual_discount_usd: 3,
       manual_discount_khr: -12000,
+      client_line_key: 'discount-line',
+      pricing_source: 'manual',
+      selling_price_input_usd: 21,
+      pricing_quote: {
+        gross_usd: 21,
+        product_discount_usd: 0,
+        manual_discount_usd: 3,
+        total_usd: 18,
+        total_khr: 72000,
+      },
     }]
     staleKhr.amount_paid_usd = 18
     const created = await postSale(f.route, staleKhr)

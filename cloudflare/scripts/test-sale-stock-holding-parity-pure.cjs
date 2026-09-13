@@ -48,11 +48,15 @@ function compile(file, stubs = {}) {
 }
 
 const salesStatus = compile('salesStatus.ts')
+const moneyPrecision = compile('moneyPrecision.ts')
+const saleMoneyPrecision = compile('saleMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
+const promotionRules = compile('promotionRules.ts', { './moneyPrecision': moneyPrecision })
+const saleItemPricing = compile('saleItemPricing.ts', { './moneyPrecision': moneyPrecision, './promotionRules': promotionRules })
 const productBatches = compile('productBatches.ts', {
   './db': {},
   './batchCode': compile('batchCode.ts'),
   './sqlBinding': compile('sqlBinding.ts'),
-  './moneyPrecision': compile('moneyPrecision.ts'),
+  './moneyPrecision': moneyPrecision,
 })
 const saleTransitions = compile('saleTransitions.ts', {
   './salesStatus': salesStatus,
@@ -64,8 +68,11 @@ const saleLineAddition = compile('saleLineAddition.ts', {
   './saleTransitions': saleTransitions,
   './productBatches': productBatches,
   './db': {},
-  './saleTotals': compile('saleTotals.ts'),
+  './saleTotals': compile('saleTotals.ts', { './moneyPrecision': moneyPrecision, './saleMoneyPrecision': saleMoneyPrecision }),
   './financialPrecision': financialPrecision,
+  './moneyPrecision': moneyPrecision,
+  './saleMoneyPrecision': saleMoneyPrecision,
+  './saleItemPricing': saleItemPricing,
 })
 
 const { VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES, RETURN_STATUSES } = salesStatus

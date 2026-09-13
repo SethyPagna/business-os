@@ -42,6 +42,8 @@ const actual = new Set([
   'paymentSettlement', 'saleSettlementAction', 'saleLineAddition', 'saleAmendments',
   'nativeSaleChange', 'receiptNumber', 'clientTimestamp', 'branchRoleGuards', 'branchRoles',
   'contactOptions', 'saleCreationSnapshot', 'saleRecordEvents', 'saleRecords', 'anonymousCustomer',
+  'moneyPrecision', 'saleMoneyPrecision', 'saleItemPricing', 'promotionRules',
+  'productMergeLineage', 'saleMutationHeaderQuote', 'reportMoneyPrecision',
 ])
 function load(rel) {
   if (cache.has(rel)) return cache.get(rel).exports
@@ -119,7 +121,24 @@ function fixture(options = {}) {
   } }
   const executionCtx = { waitUntil() {}, passThroughOnException() {} }
   const call = async (url, body, method = 'PATCH') => {
-    const response = await sales.request(url, { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }, env, executionCtx)
+    const requestBody = method === 'POST' ? {
+      ...body,
+      money_precision_version: 1,
+      items: body.items.map((item) => ({
+        ...item,
+        client_line_key: 'address-line',
+        pricing_source: 'manual',
+        selling_price_input_usd: 5,
+        pricing_quote: {
+          gross_usd: 5,
+          product_discount_usd: 0,
+          manual_discount_usd: 0,
+          total_usd: 5,
+          total_khr: 21000,
+        },
+      })),
+    } : body
+    const response = await sales.request(url, { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(requestBody) }, env, executionCtx)
     return { status: response.status, body: await response.json() }
   }
   const read = async (url) => {

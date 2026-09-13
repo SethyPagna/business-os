@@ -40,8 +40,10 @@ const tsPath = path.join(tmpDir, 'salesAnalytics.ts')
 fs.writeFileSync(tsPath, stripped)
 const winPath = path.join(tmpDir, 'businessDateWindow.ts')
 fs.writeFileSync(winPath, fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'businessDateWindow.ts'), 'utf8'))
+const analyticsDeps = ['moneyPrecision.ts', 'reportMoneyPrecision.ts', 'customerReturnEntitlement.ts', 'refundMoneyPrecision.ts', 'saleItemPricing.ts', 'saleMoneyPrecision.ts', 'promotionRules.ts']
+for (const file of analyticsDeps) fs.writeFileSync(path.join(tmpDir, file), fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', file), 'utf8'))
 const tscBin = path.join(__dirname, '..', 'node_modules', 'typescript', 'bin', 'tsc')
-execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath} ${winPath}`, {
+execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath} ${winPath} ${analyticsDeps.join(' ')}`, {
   cwd: tmpDir,
   stdio: 'inherit',
 })
@@ -66,7 +68,11 @@ db.exec(`
     delivery_contact_id INTEGER,
     delivery_contact_name TEXT,
     branch_id INTEGER,
+    branch_name TEXT DEFAULT '',
     customer_id INTEGER,
+    customer_phone TEXT DEFAULT '',
+    cashier_id INTEGER,
+    cashier_name TEXT DEFAULT '',
     payment_method TEXT,
     customer_name TEXT,
     receipt_number TEXT,
@@ -148,7 +154,8 @@ const sale = (o) => insSale.run({
 })
 
 // S1 completed, has delivery (customer-paid) + a customer refund
-sale({ id: 1, created_at: AT(10), sale_status: 'completed', subtotal_usd: 100, discount_usd: 10, membership_discount_usd: 5, tax_usd: 8, total_usd: 93, delivery_fee_usd: 6, delivery_fee_paid_by: 'customer', is_delivery: 1, delivery_actual_cost_usd: 4 })
+// Saved payable includes customer-paid delivery: 100 - 10 - 5 + 8 + 6 = 99.
+sale({ id: 1, created_at: AT(10), sale_status: 'completed', subtotal_usd: 100, discount_usd: 10, membership_discount_usd: 5, tax_usd: 8, total_usd: 99, delivery_fee_usd: 6, delivery_fee_paid_by: 'customer', is_delivery: 1, delivery_actual_cost_usd: 4 })
 // S2 blank status ('' -> completed), plain
 sale({ id: 2, created_at: AT(11), sale_status: '', subtotal_usd: 50, discount_usd: 0, membership_discount_usd: 0, tax_usd: 4, total_usd: 54 })
 // S3 NULL status (-> completed), STORE-absorbed delivery (a cost, not collected)
@@ -263,47 +270,33 @@ const day15 = await lib.getSalesDayReport({ __db: db }, '2026-08-15', {})
 const day15Rows = Math.round(day15.sales.reduce((s, r) => s + r.revenue_usd, 0) * 100) / 100
 check('per-sale day-drill rows sum to the day total (S6: 60 net - 15 apportioned refund = 45)', day15Rows === 45 && day15.totals.revenue_usd === 45)
 
-// ---- 7. The REAL /stats SQL, EVALUATED from routes/sales.ts ----------------
-// This used to pull the SELECT out as literal text. It cannot any more, and
-// that is the improvement: the header no longer restates the revenue
-// definition, it interpolates the kernel's exported fragments. So the template
-// is extracted with its \${...} holes intact and evaluated against the
-// transpiled kernel -- the same objects the Worker passes in. A header that
-// stopped using the kernel's definition would no longer compile here.
+// ---- 7. The REAL shared /stats snapshot/reducer, EXECUTED ------------------
+// The route no longer maintains a header SELECT or a third money formula. Run
+// the shipped snapshot/reducer against this same fixture, then pin delegation.
 const salesTs = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'sales.ts'), 'utf8')
-const m = salesTs.match(/const totals = await db\.prepare\(`([\s\S]*?)`\)\.get</)
-assert.ok(m, 'could not locate the /stats revenue SELECT in routes/sales.ts -- did the query shape change?')
-const headerTemplate = m[1]
-
-check('the header takes its revenue definition FROM the kernel rather than restating it',
-  /\${netSaleExpr\('s\.'\)}/.test(headerTemplate)
-  && /\${recognizedExpr\('s\.'\)}/.test(headerTemplate)
-  && /\${netRefundExpr\('s\.', 'rf\.'\)}/.test(headerTemplate)
-  && /\${awaitingExpr\('s\.'\)}/.test(headerTemplate)
-  && /\${CUSTOMER_REFUND_JOIN}s\.id/.test(headerTemplate))
-check('the header no longer spells the net-sales subtraction out a second time',
-  !/COALESCE\(s\.subtotal_usd, 0\) - COALESCE\(s\.discount_usd, 0\)/.test(headerTemplate))
-check('the header no longer carries its own copy of the customer-refund subquery',
-  !/SELECT sale_id, SUM\(total_refund_usd\) AS refund_usd/.test(headerTemplate))
-check('the header no longer sums total_usd (which folds tax in)',
-  !/THEN COALESCE\(s\.total_usd, 0\)/.test(headerTemplate))
-
-// Same local-day (UTC+7) scope the kernel applies, on the `s` alias.
-const dateClauseS = `date(s.created_at, '+7 hours') >= @startDate AND s.created_at >= date(@startDate, '-1 day') AND date(s.created_at, '+7 hours') <= @endDate AND s.created_at < date(@endDate, '+1 day')`
-// eslint-disable-next-line no-new-func -- the input is this repo's own source.
-const headerSql = new Function(
-  'recognizedExpr', 'netSaleExpr', 'netRefundExpr', 'awaitingExpr', 'CUSTOMER_REFUND_JOIN', 'where',
-  'return \`' + headerTemplate + '\`',
-)(lib.recognizedExpr, lib.netSaleExpr, lib.netRefundExpr, lib.awaitingExpr, lib.CUSTOMER_REFUND_JOIN, [dateClauseS])
-const statsRow = db.prepare(headerSql).get({ startDate: '2026-08-01', endDate: '2026-08-31' })
-const statsRevenue = Math.round((statsRow.revenue_usd || 0) * 100) / 100
-const statsPending = Math.round((statsRow.pending_revenue_usd || 0) * 100) / 100
+const statsSnapshot = await lib.readSalesReportSnapshot({ __db: db }, {}, false, alias => ({
+  sql: `${alias}.id IN (SELECT matched_sale.id FROM sales matched_sale WHERE date(matched_sale.created_at, '+7 hours') >= @reportScope_startDate AND date(matched_sale.created_at, '+7 hours') <= @reportScope_endDate)`,
+  params: { reportScope_startDate: '2026-08-01', reportScope_endDate: '2026-08-31' },
+}))
+const statsTotals = lib.salesTotalsFromSnapshot(statsSnapshot)
+const statsRevenue = statsTotals.revenue_usd
+const statsPending = statsTotals.pending_revenue_usd
+const statsBlock = salesTs.match(/app\.get\('\/stats'[\s\S]*?\n\}\)/)?.[0] || ''
+check('the /stats route delegates to the shared exact snapshot and reducer',
+  /readSalesReportSnapshot\(c\.env,\{\},false/.test(statsBlock)
+  && /salesTotalsFromSnapshot\(snapshot\)/.test(statsBlock)
+  && /revenue_count: snapshot\.sales\.length/.test(statsBlock)
+  && /revenue_usd: totals\.revenue_usd/.test(statsBlock)
+  && /pending_revenue_usd: totals\.pending_revenue_usd/.test(statsBlock))
+check('the /stats route maintains no third money aggregate or formula',
+  !/db\.prepare/.test(statsBlock)
+  && /no third revenue or\s*\/\/\s*refund formula is maintained in this route/.test(statsBlock))
 
 // ---- 8. THE CONVERGENCE: header revenue == kernel revenue, to the cent ------
 check(`CONVERGENCE: /stats revenue (${statsRevenue}) == kernel revenue (${kernel.revenue_usd})`, statsRevenue === kernel.revenue_usd)
 check(`CONVERGENCE: /stats pending (${statsPending}) == kernel pending (${kernel.pending_revenue_usd})`, statsPending === kernel.pending_revenue_usd)
 check(`both surfaces equal the hand-computed net-sales revenue (${EXPECT.revenue})`, statsRevenue === EXPECT.revenue && kernel.revenue_usd === EXPECT.revenue)
-check(`CONVERGENCE: the header's refund is apportioned too -- the charged basis would have given ${230 - EXPECT.refundsChargedBasis}`,
+check(`CONVERGENCE: the shared snapshot's refund is apportioned too -- the charged basis would have given ${230 - EXPECT.refundsChargedBasis}`,
   statsRevenue !== 230 - EXPECT.refundsChargedBasis)
 
 // ---- 8b. THE THIRD SURFACE: the Sales page's own fallback ------------------
@@ -339,7 +332,7 @@ const oldFallback = listRows
   .filter((r) => !['cancelled', 'awaiting_payment'].includes(String(r.sale_status || 'completed')))
   .reduce((sum, r) => sum + (r.net_total_usd ?? r.total_usd ?? 0), 0)
 check(`POSITIVE CONTROL: the old fallback gave ${oldFallback} on these very rows, not ${EXPECT.revenue}`,
-  oldFallback === 202 && oldFallback !== EXPECT.revenue)
+  oldFallback === 208 && oldFallback !== EXPECT.revenue)
 
 // ---- 9. NO SIXTH COPY: sweep every route and lib for the raw refund --------
 // The double-minus is not a bug in one query, it is a phrasing that reads as

@@ -161,7 +161,8 @@ const batchUrls = ['/batches/tracked-product-ids', '/batches?productId=1&branchI
   for (const [section, url, action] of [['returns', '/returns', 'add'], ['fees', '/fees', 'add'], ['inventory', '/batches', 'adjust']]) {
     const options = { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }
     const response = await request(url, staff({ [section]: true }, { [`${section}:view`]: false }), options)
-    assert.equal(response.status, 400, `${url} must reach write validation`)
+    assert.equal(response.status, section === 'returns' ? 403 : 400,
+      `${url} must retain its effective view/write gate ordering`)
     assert.equal(reads, 0)
     const blocked = await request(url, staff({ [section]: true }, { [`${section}:view`]: false, [`${section}:${action}`]: false }), options)
     assert.equal(blocked.status, 403)

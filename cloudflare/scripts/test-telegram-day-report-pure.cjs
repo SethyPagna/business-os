@@ -52,7 +52,8 @@ db.exec(`
     delivery_fee_usd REAL, delivery_fee_paid_by TEXT, is_delivery INTEGER,
     delivery_actual_cost_usd REAL, delivery_contact_id INTEGER, delivery_contact_name TEXT,
     branch_id INTEGER, branch_name TEXT, customer_id INTEGER, customer_name TEXT, customer_phone TEXT,
-    cashier_id INTEGER, cashier_name TEXT, payment_method TEXT, amount_paid_usd REAL
+    cashier_id INTEGER, cashier_name TEXT, payment_method TEXT, amount_paid_usd REAL,
+    source_return_id INTEGER
   );
   CREATE TABLE sale_items (id INTEGER PRIMARY KEY, sale_id INTEGER, quantity REAL, cost_price_usd REAL,
     total_usd REAL, branch_id INTEGER, product_id INTEGER, product_name TEXT,
@@ -110,11 +111,19 @@ db.prepare('INSERT INTO return_items (id, return_id, quantity, cost_price_usd, r
 // ---- the real modules -------------------------------------------------------
 const dbShim = { getDb: () => db }
 const lang = loadReal('lib/telegramLang.ts')
-const saleTotals = loadReal('lib/saleTotals.ts')
+const moneyPrecision = loadReal('lib/moneyPrecision.ts')
+const reportMoneyPrecision = loadReal('lib/reportMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
+const promotionRules = loadReal('lib/promotionRules.ts', { './moneyPrecision': moneyPrecision })
+const saleItemPricing = loadReal('lib/saleItemPricing.ts', { './moneyPrecision': moneyPrecision, './promotionRules': promotionRules })
+const saleMoneyPrecision = loadReal('lib/saleMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
+const refundMoneyPrecision = loadReal('lib/refundMoneyPrecision.ts', { './moneyPrecision': moneyPrecision, './saleMoneyPrecision': saleMoneyPrecision })
+const customerReturnEntitlement = loadReal('lib/customerReturnEntitlement.ts', { './moneyPrecision': moneyPrecision, './refundMoneyPrecision': refundMoneyPrecision, './saleItemPricing': saleItemPricing, './saleMoneyPrecision': saleMoneyPrecision })
+const analyticsPrecision = { './reportMoneyPrecision': reportMoneyPrecision, './customerReturnEntitlement': customerReturnEntitlement, './refundMoneyPrecision': refundMoneyPrecision }
+const saleTotals = loadReal('lib/saleTotals.ts', { './moneyPrecision': moneyPrecision, './saleMoneyPrecision': saleMoneyPrecision })
 const financialPrecision = loadReal('lib/financialPrecision.ts')
 const nativeSaleChange = loadReal('lib/nativeSaleChange.ts', { './financialPrecision': financialPrecision, './saleTotals': saleTotals })
 const businessDateWindow = loadReal('lib/businessDateWindow.ts')
-const analytics = loadReal('lib/salesAnalytics.ts', { './db': dbShim, './businessDateWindow': businessDateWindow })
+const analytics = loadReal('lib/salesAnalytics.ts', { './db': dbShim, './businessDateWindow': businessDateWindow, ...analyticsPrecision })
 // Merged Sep 6 2026: telegram.ts now reads the owner's low-stock setting
 // through lib/lowStockSettings.ts and shares the drawer arithmetic through
 // lib/shiftReconciliation.ts (lowstock and shifts lanes). Both are the REAL

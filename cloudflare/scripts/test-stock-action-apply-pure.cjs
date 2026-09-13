@@ -48,6 +48,7 @@ const REAL = new Set([
   'importImageMatch', 'searchMatch',
   'branchRoles', 'branchRoleGuards',
   'actorSnapshot', 'saleCreationSnapshot',
+  'moneyPrecision', 'saleMoneyPrecision',
 ])
 
 // Functional stubs for the D1/Env/queue/cache/broadcast modules that can't

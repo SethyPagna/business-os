@@ -112,6 +112,12 @@ function wrapDb(sqlite) {
 // stubbing it would hide the very substitution the appliers depend on.
 const actorSnapshotKernel = loadModule('lib/actorSnapshot.ts', require)
 const productMergeKernel = loadModule('lib/productMerge.ts', require)
+const productMergeLineageKernel = loadModule('lib/productMergeLineage.ts', require)
+const promotionRulesKernel = loadModule('lib/promotionRules.ts', require)
+const saleItemPricingKernel = loadModule('lib/saleItemPricing.ts', (id) => {
+  if (id === './promotionRules') return promotionRulesKernel
+  return require(id)
+})
 const additionSource = fs.readFileSync(path.join(__dirname, '../src/lib/saleLineAddition.ts'), 'utf8')
 const additionAst = ts.createSourceFile('saleLineAddition.ts', additionSource, ts.ScriptTarget.Latest, true)
 const guardDeclaration = additionAst.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === 'planUnlottedSaleLineGuards')
@@ -122,6 +128,8 @@ new Function('exports', ts.transpileModule(guardDeclaration.getText(additionAst)
 const undoAppliers = loadModule('lib/undoAppliers.ts', (id) => {
   if (id === './actorSnapshot') return actorSnapshotKernel
   if (id === './productMerge') return productMergeKernel
+  if (id === './productMergeLineage') return productMergeLineageKernel
+  if (id === './saleItemPricing') return saleItemPricingKernel
   // The dedicated bulk test executes this applier with its actual Hono/SQL.
   if (id === './saleBulkStatus') return { replaySaleBulkStatus: async () => { throw new Error('Use the dedicated bulk fixture') } }
   if (id === './saleBulkUpdate') return {
@@ -298,6 +306,7 @@ function atomicSaleItemsFixture() {
   }
   const payload = { applier: 'sale.add_items', snapshot_id: 1, operation_id: reversal.operationId, generation: 0 }
   db.prepare("INSERT INTO sales(id,sale_status,total_usd) VALUES(77,'completed',15)").run()
+  db.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity,total_usd) VALUES(9,77,8,'Baseline',1,10)").run()
   db.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity,total_usd) VALUES(10,77,9,'Serum',1,5)").run()
   db.prepare('INSERT INTO sale_item_batch_allocations(sale_item_id,quantity) VALUES(10,1)').run()
   db.prepare('INSERT OR REPLACE INTO sale_write_revisions(sale_id,revision) VALUES(77,5)').run()
@@ -722,7 +731,7 @@ await check('sale.add_items atomically advances revision, receipt, snapshot, his
     const resolved = resolveUndoApplier(fixture.payload)
     assert.ok(resolved)
     await resolved.run(fixture.payload, { env: {}, user: atomicUser, direction: 'undo', historyId: 41, generation: 0 })
-    assert.equal(fixture.db.prepare('SELECT COUNT(*) n FROM sale_items').get().n, 0)
+    assert.equal(fixture.db.prepare('SELECT COUNT(*) n FROM sale_items').get().n, 1)
     assert.equal(fixture.db.prepare('SELECT COUNT(*) n FROM sale_item_batch_allocations').get().n, 0)
     assert.equal(fixture.db.prepare('SELECT status FROM action_history WHERE id=41').get().status, 'redoable')
     assert.equal(fixture.db.prepare('SELECT generation FROM sale_mutation_receipts').get().generation, 1)
@@ -741,7 +750,7 @@ await check('sale.add_items atomically advances revision, receipt, snapshot, his
 
     const redoPayload = JSON.parse(fixture.db.prepare('SELECT redo_payload FROM action_history WHERE id=41').get().redo_payload)
     await resolved.run(redoPayload, { env: {}, user: atomicUser, direction: 'redo', historyId: 41, generation: 1 })
-    const newLineId = fixture.db.prepare('SELECT id FROM sale_items').get().id
+    const newLineId = fixture.db.prepare('SELECT id FROM sale_items WHERE product_id=9').get().id
     assert.notEqual(newLineId, 10, 'redo must persist the newly inserted sale-item identity')
     assert.equal(fixture.db.prepare('SELECT sale_item_id FROM sale_item_batch_allocations').get().sale_item_id, newLineId)
     assert.equal(fixture.db.prepare("SELECT entity_id FROM sale_mutation_members WHERE entity_kind='sale_item'").get().entity_id, newLineId)
@@ -815,7 +824,7 @@ await check('sale.add_items rejects stale and boundary races without partial rep
       error => error?.statusCode === 409,
     )
     assert.equal(raced.db.prepare('SELECT total_usd FROM sales WHERE id=77').get().total_usd, 17, 'the adversarial concurrent write occurs')
-    assert.equal(raced.db.prepare('SELECT COUNT(*) n FROM sale_items').get().n, 1, 'guard race cannot remove the line')
+    assert.equal(raced.db.prepare('SELECT COUNT(*) n FROM sale_items').get().n, 2, 'guard race cannot remove the line')
     assert.equal(raced.db.prepare('SELECT status FROM action_history WHERE id=41').get().status, 'undoable')
     assert.equal(raced.db.prepare('SELECT status FROM undo_snapshots WHERE id=1').get().status, 'applied')
     assert.equal(raced.db.prepare('SELECT generation FROM sale_mutation_receipts').get().generation, 0)

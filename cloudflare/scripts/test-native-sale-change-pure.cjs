@@ -25,7 +25,12 @@ function loadReal(relPath, requireOverrides = {}) {
 }
 
 const precision = loadReal('lib/financialPrecision.ts')
-const saleTotals = loadReal('lib/saleTotals.ts')
+const moneyPrecision = loadReal('lib/moneyPrecision.ts')
+const saleMoneyPrecision = loadReal('lib/saleMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
+const saleTotals = loadReal('lib/saleTotals.ts', {
+  './moneyPrecision': moneyPrecision,
+  './saleMoneyPrecision': saleMoneyPrecision,
+})
 const nativeChange = loadReal('lib/nativeSaleChange.ts', {
   './financialPrecision': precision,
   './saleTotals': saleTotals,

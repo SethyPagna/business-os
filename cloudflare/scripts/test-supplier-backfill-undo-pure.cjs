@@ -138,6 +138,9 @@ function loadUndoAppliers(d1) {
     return dependency.exports
   }
   stubs['./customerGenderRestoration'] = loadDependency(path.join(LIB_DIR, 'customerGenderRestoration.ts'))
+  stubs['./productMergeLineage'] = loadDependency(path.join(LIB_DIR, 'productMergeLineage.ts'))
+  stubs['./promotionRules'] = loadDependency(path.join(LIB_DIR, 'promotionRules.ts'))
+  stubs['./saleItemPricing'] = loadDependency(path.join(LIB_DIR, 'saleItemPricing.ts'))
   const src = fs.readFileSync(path.join(LIB_DIR, 'undoAppliers.ts'), 'utf8')
   const { outputText } = ts.transpileModule(src, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },

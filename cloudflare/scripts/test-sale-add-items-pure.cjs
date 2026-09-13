@@ -53,6 +53,13 @@ function compile(file, stubs = {}) {
 
 const salesStatus = compile('salesStatus.ts')
 const moneyPrecision = compile('moneyPrecision.ts')
+const saleMoneyPrecision = compile('saleMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
+const promotionRules = compile('promotionRules.ts', { './moneyPrecision': moneyPrecision })
+const saleItemPricing = compile('saleItemPricing.ts', {
+  './moneyPrecision': moneyPrecision,
+  './promotionRules': promotionRules,
+})
+const productMergeLineage = compile('productMergeLineage.ts')
 const productMerge = compile('productMerge.ts', { './moneyPrecision': moneyPrecision })
 const productBatches = compile('productBatches.ts', {
   './db': {},
@@ -61,7 +68,10 @@ const productBatches = compile('productBatches.ts', {
   './moneyPrecision': moneyPrecision,
 })
 const saleTransitions = compile('saleTransitions.ts', { './salesStatus': salesStatus, './productBatches': productBatches })
-const saleTotals = compile('saleTotals.ts')
+const saleTotals = compile('saleTotals.ts', {
+  './moneyPrecision': moneyPrecision,
+  './saleMoneyPrecision': saleMoneyPrecision,
+})
 const financialPrecision = compile('financialPrecision.ts')
 const subject = compile('saleLineAddition.ts', {
   './salesStatus': salesStatus,
@@ -69,6 +79,9 @@ const subject = compile('saleLineAddition.ts', {
   './productBatches': productBatches,
   './saleTotals': saleTotals,
   './financialPrecision': financialPrecision,
+  './moneyPrecision': moneyPrecision,
+  './saleMoneyPrecision': saleMoneyPrecision,
+  './saleItemPricing': saleItemPricing,
 })
 
 const {
@@ -106,7 +119,8 @@ function setup() {
       quantity REAL, applied_price_usd REAL, applied_price_khr REAL, cost_price_usd REAL, cost_price_khr REAL,
       total_usd REAL, total_khr REAL, branch_id INTEGER, price_mode TEXT,
       base_price_usd REAL, base_price_khr REAL, product_discount_usd REAL, product_discount_khr REAL,
-      manual_discount_usd REAL, manual_discount_khr REAL, batch_id INTEGER, batch_label TEXT, batch_expiry_date TEXT);
+      manual_discount_usd REAL, manual_discount_khr REAL, batch_id INTEGER, batch_label TEXT, batch_expiry_date TEXT,
+      pricing_snapshot_json TEXT);
     CREATE TABLE sales (id INTEGER PRIMARY KEY, receipt_number TEXT, sale_status TEXT, branch_id INTEGER,
       exchange_rate REAL DEFAULT 4100, subtotal_usd REAL, subtotal_khr REAL, discount_usd REAL DEFAULT 0,
       discount_khr REAL, membership_discount_usd REAL DEFAULT 0, membership_discount_khr REAL,
@@ -115,6 +129,9 @@ function setup() {
       total_usd REAL, total_khr REAL, amount_paid_usd REAL DEFAULT 0, amount_paid_khr REAL DEFAULT 0,
       change_usd REAL DEFAULT 0, change_khr REAL DEFAULT 0, change_is_actual INTEGER DEFAULT 0,
       change_exchange_rate REAL, updated_at TEXT);
+    ALTER TABLE sales ADD COLUMN money_precision_version INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE sales ADD COLUMN calculated_total_usd REAL;
+    ALTER TABLE sales ADD COLUMN rounding_adjustment_usd REAL NOT NULL DEFAULT 0;
   `)
   const apply = (statements) => {
     const run = sqlite.transaction(() => statements.map(({ sql, params }) => sqlite.prepare(sql).run(params || {})))
@@ -579,6 +596,8 @@ console.log('PASS 8b -- an unlotted oversell aborts on branch_stock itself, it i
     const undoModule = compile('undoAppliers.ts', {
       './actorSnapshot': compile('actorSnapshot.ts'),
       './productMerge': productMerge,
+      './productMergeLineage': productMergeLineage,
+      './saleItemPricing': saleItemPricing,
       // Bulk status replay is outside this suite; fail if it is invoked.
       './saleBulkStatus': {
         replaySaleBulkStatus: () => { throw new Error('Unexpected bulk status replay in test-sale-add-items-pure.cjs') },

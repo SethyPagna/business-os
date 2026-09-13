@@ -55,9 +55,19 @@ const fakeDb = {
     }
   },
 }
+const moneyPrecision = loadReal('lib/moneyPrecision.ts')
+const reportMoneyPrecision = loadReal('lib/reportMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
+const promotionRules = loadReal('lib/promotionRules.ts', { './moneyPrecision': moneyPrecision })
+const saleItemPricing = loadReal('lib/saleItemPricing.ts', { './moneyPrecision': moneyPrecision, './promotionRules': promotionRules })
+const saleMoneyPrecision = loadReal('lib/saleMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
+const refundMoneyPrecision = loadReal('lib/refundMoneyPrecision.ts', { './moneyPrecision': moneyPrecision, './saleMoneyPrecision': saleMoneyPrecision })
+const customerReturnEntitlement = loadReal('lib/customerReturnEntitlement.ts', { './moneyPrecision': moneyPrecision, './refundMoneyPrecision': refundMoneyPrecision, './saleItemPricing': saleItemPricing, './saleMoneyPrecision': saleMoneyPrecision })
 const analytics = loadReal('lib/salesAnalytics.ts', {
   './db': { getDb: () => fakeDb },
   './businessDateWindow': loadReal('lib/businessDateWindow.ts'),
+  './reportMoneyPrecision': reportMoneyPrecision,
+  './customerReturnEntitlement': customerReturnEntitlement,
+  './refundMoneyPrecision': refundMoneyPrecision,
 })
 
 // --- 1. the bound converter -------------------------------------------------
@@ -87,14 +97,16 @@ console.log('PASS bound: ISO shift timestamps normalise to created_at shape; the
 
 const findClause = (needle) => captured.filter((s) => s.sql.includes(needle))
 
+async function main() {
 captured.length = 0
-analytics.getSalesTotals({}, {
+await analytics.getSalesTotals({}, {
   createdFrom: ISO,
   createdTo: '2026-09-04T11:00:00.000Z',
   cashierId: 7,
 })
-assert.ok(captured.length >= 2, `expected the header aggregate and the cost query, got ${captured.length}`)
-for (const statement of captured) {
+const cohortStatements = captured.filter((statement) => /@reportAfterId/.test(statement.sql) && /(?:FROM sales s|EXISTS\(SELECT 1 FROM sales s)/.test(statement.sql))
+assert.ok(cohortStatements.length >= 5, `expected the exact sales/items/returns keyset cohort, got ${cohortStatements.length}`)
+for (const statement of cohortStatements) {
   assert.match(statement.sql, /datetime\([^)]*created_at\) >= @createdFrom/, 'lower bound must normalize stored SQLite/ISO timestamps')
   assert.match(statement.sql, /datetime\([^)]*created_at\) < @createdTo/, 'upper bound must be normalized and EXCLUSIVE, or a boundary sale lands on two shifts')
   assert.ok(!statement.sql.includes('created_at <= @createdTo'), 'upper bound must not be inclusive')
@@ -102,23 +114,27 @@ for (const statement of captured) {
   assert.equal(statement.params.createdFrom, SQLITE, 'the bound must be normalised before binding, not passed through as ISO')
   assert.equal(statement.params.createdTo, '2026-09-04 11:00:00')
   assert.equal(statement.params.cashierId, 7)
+  assert.match(statement.sql, /> @reportAfterId/)
+  assert.match(statement.sql, /ORDER BY[\s\S]*LIMIT @reportPageSize/)
+  assert.equal(statement.params.reportAfterId, 0)
+  assert.equal(statement.params.reportPageSize, 500)
 }
 // The window is bound, never interpolated.
-for (const statement of captured) {
+for (const statement of cohortStatements) {
   assert.ok(!statement.sql.includes('2026-09-04'), 'a timestamp was interpolated into the SQL instead of bound')
 }
-console.log(`PASS filter: ${captured.length} shift-window statements carry a half-open bound pair and a bound cashier id`)
+console.log(`PASS filter: ${cohortStatements.length} shift-window cohort statements carry a half-open bound pair and a bound cashier id`)
 
 // A cashier id given as a string (a query parameter) still binds as a number,
 // so it matches an INTEGER column rather than never matching.
 captured.length = 0
-analytics.getSalesTotals({}, { cashierId: '7' })
-assert.strictEqual(captured[0].params.cashierId, 7)
+await analytics.getSalesTotals({}, { cashierId: '7' })
+assert.strictEqual(captured.find((statement) => /@reportAfterId/.test(statement.sql)).params.cashierId, 7)
 // Blank/absent scope must not emit the clause at all.
 for (const empty of [null, undefined, '']) {
   captured.length = 0
-  analytics.getSalesTotals({}, { cashierId: empty })
-  assert.ok(!captured[0].sql.includes('cashier_id'), `cashierId ${JSON.stringify(empty)} must not narrow the query`)
+  await analytics.getSalesTotals({}, { cashierId: empty })
+  assert.ok(!captured.filter((statement) => /@reportAfterId/.test(statement.sql)).some((statement) => /cashier_id\s*=\s*@cashierId/.test(statement.sql)), `cashierId ${JSON.stringify(empty)} must not narrow the query`)
 }
 console.log('PASS scope: a string cashier id binds as a number; an absent one adds no clause')
 
@@ -129,12 +145,12 @@ console.log('PASS scope: a string cashier id binds as a number; an absent one ad
 // the same call made through the plain day filter, with no shift keys.
 
 captured.length = 0
-analytics.getSalesTotals({}, { startDate: '2026-09-04', endDate: '2026-09-04', branchId: 2 })
+await analytics.getSalesTotals({}, { startDate: '2026-09-04', endDate: '2026-09-04', branchId: 2 })
 const dayOnly = captured.map((s) => s.sql)
 const dayOnlyParams = captured.map((s) => s.params)
 
 captured.length = 0
-analytics.getSalesTotals({}, {
+await analytics.getSalesTotals({}, {
   startDate: '2026-09-04', endDate: '2026-09-04', branchId: 2,
   createdFrom: null, createdTo: undefined, cashierId: '',
 })
@@ -146,3 +162,6 @@ for (const sql of dayOnly) {
 console.log(`PASS additive: ${dayOnly.length} day-ranged statements are unchanged when the shift keys are absent or null`)
 
 console.log('OK test-shift-window-filter-pure')
+}
+
+main().catch((error) => { console.error(error); process.exit(1) })

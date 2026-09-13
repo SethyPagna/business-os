@@ -16,11 +16,17 @@ function compileLib(name, localRequire) {
 }
 
 let actorSnapshot
+let moneyPrecision
+let saleMoneyPrecision
 const localRequire = (request) => {
   if (request === './actorSnapshot') return actorSnapshot
+  if (request === './moneyPrecision') return moneyPrecision
+  if (request === './saleMoneyPrecision') return saleMoneyPrecision
   return require(request)
 }
 actorSnapshot = compileLib('actorSnapshot', localRequire)
+moneyPrecision = compileLib('moneyPrecision', localRequire)
+saleMoneyPrecision = compileLib('saleMoneyPrecision', localRequire)
 const subject = compileLib('saleCreationSnapshot', localRequire)
 
 const sourceRoot = path.join(__dirname, '..', 'src')
