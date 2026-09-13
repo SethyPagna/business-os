@@ -1,4 +1,5 @@
 import { multiplyMoney4, nativeChangeAmounts, roundMoney2, roundMoney4, subtractMoney4, sumMoney4 } from './moneyPrecision.ts'
+import { parseSaleItemPricing, type SaleItemPricingSnapshot } from './saleItemPricing.ts'
 
 export const SALE_MONEY_VERSION = 1 as const
 export class SaleMoneyUnavailableError extends Error {
@@ -67,6 +68,43 @@ export function saleMoneyResponseFields(value: unknown): Record<string, unknown>
   return fields
 }
 
+function validateReceiptPricing(items: Record<string, unknown>[], fields: Record<string, unknown>): void {
+  try {
+    if (items.length > 200) throw new Error('pricing_bounds')
+    const byKey = new Map<string, { item: Record<string, unknown>; snapshot: SaleItemPricingSnapshot }>()
+    const pools = new Map<string, string>()
+    for (const item of items) {
+      if (typeof item.pricing_snapshot_json !== 'string') throw new Error('missing_pricing')
+      const snapshot = parseSaleItemPricing(item.pricing_snapshot_json)
+      if (!snapshot || byKey.has(snapshot.line_key) || snapshot.pool.exchange_rate !== fields.exchange_rate
+        || snapshot.quantities[snapshot.line_key] !== item.quantity) throw new Error('pricing_identity')
+      const captured = snapshot.pool.lines.find(line => line.line_key === snapshot.line_key)
+      if (!captured || captured.product.id !== item.product_id) throw new Error('pricing_product')
+      const poolJson = JSON.stringify({ pool: snapshot.pool, quantities: snapshot.quantities })
+      if (pools.has(snapshot.pool.pool_key) && pools.get(snapshot.pool.pool_key) !== poolJson) throw new Error('pricing_pool_identity')
+      pools.set(snapshot.pool.pool_key, poolJson)
+      for (const key of ['base_price_usd', 'base_price_khr', 'applied_price_usd', 'applied_price_khr', 'total_usd', 'total_khr'] as const)
+        if (item[key] !== snapshot.amounts[key]) throw new Error('pricing_amount')
+      byKey.set(snapshot.line_key, { item, snapshot })
+    }
+    for (const { snapshot } of byKey.values()) {
+      for (const member of snapshot.pool.lines) {
+        const sibling = byKey.get(member.line_key)
+        if (!sibling || JSON.stringify(sibling.snapshot.pool) !== JSON.stringify(snapshot.pool)
+          || JSON.stringify(sibling.snapshot.quantities) !== JSON.stringify(snapshot.quantities)) throw new Error('pricing_pool')
+      }
+      const allocation = snapshot.allocation_context
+      if (allocation.lines.length !== items.length || allocation.discount_usd !== fields.discount_usd
+        || allocation.membership_discount_usd !== fields.membership_discount_usd || allocation.tax_usd !== fields.tax_usd) throw new Error('pricing_allocation')
+      for (const line of allocation.lines) {
+        const sibling = byKey.get(line.line_key)
+        if (!sibling || line.amount !== sibling.item.total_usd
+          || JSON.stringify(sibling.snapshot.allocation_context) !== JSON.stringify(allocation)) throw new Error('pricing_allocation_member')
+      }
+    }
+  } catch { throw new SaleMoneyUnavailableError() }
+}
+
 /** No locally calculated fallback is a substitute for the saved receipt. */
 export function canonicalSaleReceipt(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object') throw new SaleMoneyUnavailableError()
@@ -89,10 +127,9 @@ export function canonicalSaleReceipt(value: unknown): Record<string, unknown> {
       || roundMoney2(Number(raw)) !== total || subtractMoney4(total, Number(raw)) !== Number(adjustment)) throw new SaleMoneyUnavailableError()
     if (required.filter(key => key !== 'exchange_rate').some(key => roundMoney4(Number(fields[key])) !== fields[key])) throw new SaleMoneyUnavailableError()
     if (items.some(line => !nonnegativeMoney(line.total_usd) || roundMoney4(line.total_usd) !== line.total_usd || roundMoney4(Number(line.applied_price_usd ?? line.price_usd)) !== (line.applied_price_usd ?? line.price_usd))) throw new SaleMoneyUnavailableError()
-    // Fail closed until the exact-line promotion provenance contract is
-    // integrated. Do not accept an arbitrary line total paired with a wildly
-    // different unit price as a canonical saved response.
-    if (items.some(line => multiplyMoney4(Number(line.applied_price_usd ?? line.price_usd), Number(line.quantity)) !== line.total_usd)) throw new SaleMoneyUnavailableError()
+    // Every v1 line requires the server's complete captured pricing proof.
+    // A rounded unit projection is never a replacement for its exact line.
+    validateReceiptPricing(items, fields)
     // Sum the saved authoritative LINE snapshots, not catalogue prices or
     // rounded display unit prices. Per-unit projection agreement is checked
     // separately by the backend's versioned line policy.

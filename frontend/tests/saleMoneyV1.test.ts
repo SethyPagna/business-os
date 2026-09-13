@@ -5,7 +5,8 @@ import { saleLineEditorResult } from '../src/utils/saleLineEditor.ts'
 import { applyManualDiscount } from '../src/components/pos/posCore.ts'
 import { receiptTotalsFigures, receiptTotalsFootingErrorUsd } from '../src/utils/receiptTotals.ts'
 import { deliveryAmountChanged, parseDeliveryAmountUsd } from '../src/utils/deliveryAmounts.ts'
-import { settlementRounding4 } from '../src/utils/moneyPrecision.ts'
+import { settlementRounding4, sellingPriceCeilCent, subtractMoney4 } from '../src/utils/moneyPrecision.ts'
+import { serializeSaleItemPricing } from '../src/utils/saleItemPricing.ts'
 import { canonicalSaleReceipt, saleMoneyResponseFields, SaleMoneyUnavailableError, frozenSaleCheckoutBody, SaleCheckoutRecoveryRequiredError } from '../src/utils/saleMoneyV1.ts'
 
 const line = { quantity: 100, basePriceUsd: 1.2345, manualDiscountType: 'percent', manualDiscountValue: 12.3456, productDiscountUsd: 0.0001 }
@@ -40,7 +41,23 @@ const oldReceipt = receiptTotalsFigures({ total_usd: 1.2345, subtotal_usd: 1.234
 assert.equal(oldReceipt.totalUsd, 1.2345)
 assert.equal(oldReceipt.calculatedTotalUsd, null)
 assert.equal(oldReceipt.roundingAdjustmentUsd, 0)
+function withPricing(receipt: any): any {
+  const pool = { version: 1 as const, pool_key: 'fixture-pool', evaluation_time: '2026-09-13T00:00:00.000Z', exchange_rate: receipt.exchange_rate, rules: [], lines: receipt.items.map((item: any, i: number) => ({ line_key: `line-${i}`, source: 'manual' as const, product: { id: i + 1, selling_price_usd: sellingPriceCeilCent(item.applied_price_usd) }, selling_price_input_usd: sellingPriceCeilCent(item.applied_price_usd), manual: { type: 'fixed' as const, value: subtractMoney4(sellingPriceCeilCent(item.applied_price_usd), item.applied_price_usd) } })) }
+  const quantities = Object.fromEntries(receipt.items.map((item: any, i: number) => [`line-${i}`, item.quantity]))
+  const allocation = { version: 1 as const, lines: receipt.items.map((item: any, i: number) => ({ line_key: `line-${i}`, amount: item.total_usd })), discount_usd: receipt.discount_usd, membership_discount_usd: receipt.membership_discount_usd, tax_usd: receipt.tax_usd }
+  return { ...receipt, items: receipt.items.map((item: any, i: number) => {
+    const json = serializeSaleItemPricing(pool, quantities, `line-${i}`, allocation)
+    return { ...item, product_id: i + 1, ...JSON.parse(json).amounts, pricing_snapshot_json: json }
+  }) }
+}
 const saved = { id: 17, subtotal_usd: 1.2345, discount_usd: 0, membership_discount_usd: 0, tax_usd: 0, exchange_rate: 4000, amount_paid_usd: 1.23, amount_paid_khr: 0, items: [{ quantity: 1, applied_price_usd: 1.2345, total_usd: 1.2345 }], money_precision_version: 1, calculated_total_usd: 1.2345, rounding_adjustment_usd: -0.0045, total_usd: 1.23, subtotal_khr: 4938, discount_khr: 0, membership_discount_khr: 0, tax_khr: 0, total_khr: 4920, delivery_fee_usd: 0, delivery_fee_khr: 0, change_usd: 0, change_khr: 0 }
+Object.assign(saved, withPricing(saved))
+for (const patch of [{ pricing_snapshot_json: null }, { pricing_snapshot_json: '{}' }, { product_id: 999 }, { quantity: 2 }, { base_price_usd: 999 }, { total_khr: 999 }])
+  assert.throws(() => canonicalSaleReceipt({ ...saved, items: [{ ...saved.items[0], ...patch }] }), SaleMoneyUnavailableError, 'v1 requires complete row-bound server pricing JSON')
+const multi = withPricing({ ...saved, items: [saved.items[0], saved.items[0]] })
+assert.throws(() => canonicalSaleReceipt({ ...saved, items: [multi.items[0]] }), SaleMoneyUnavailableError, 'a saved pool member cannot be dropped from the receipt')
+assert.throws(() => canonicalSaleReceipt({ ...saved, items: withPricing({ ...saved, exchange_rate: 4100 }).items }), SaleMoneyUnavailableError, 'captured saved FX is bound to header')
+assert.equal(canonicalSaleReceipt({ ...saved, money_precision_version: 0, calculated_total_usd: null, rounding_adjustment_usd: 0, items: [{ ...saved.items[0], pricing_snapshot_json: null }] }).money_precision_version, 0, 'v0 unknown provenance remains readable without synthetic backfill')
 assert.deepEqual(canonicalSaleReceipt({ id: 17, sale: saved }), saved, 'create envelope prints authoritative saved snapshot only')
 assert.deepEqual(saleMoneyResponseFields({ totalUsd: 1.23, total_usd: undefined, calculatedTotalUsd: 1.2345 }), { total_usd: 1.23, calculated_total_usd: 1.2345 })
 assert.deepEqual(saleMoneyResponseFields({ totalUsd: undefined }), {}, 'partial response cannot erase saved amounts')
@@ -70,6 +87,7 @@ const detached = canonicalSaleReceipt(saved)
 assert.notEqual(detached.items, saved.items)
 assert.notEqual((detached.items as unknown[])[0], saved.items[0])
 const delivered = { ...saved, subtotal_usd: 1, subtotal_khr: 4000, total_usd: 2, total_khr: 8000, calculated_total_usd: 2, rounding_adjustment_usd: 0, amount_paid_usd: 2, is_delivery: 1, delivery_fee_paid_by: 'customer', delivery_fee_usd: 1, delivery_fee_khr: 4000, items: [{ quantity: 1, applied_price_usd: 1, total_usd: 1 }] }
+Object.assign(delivered, withPricing(delivered))
 const camelDelivered = Object.fromEntries(Object.entries(delivered).map(([key, value]) => [key.replace(/_([a-z])/g, (_match, char) => char.toUpperCase()), value]))
 const fromSnake = canonicalSaleReceipt(delivered), fromCamel = canonicalSaleReceipt(camelDelivered)
 for (const key of Object.keys(delivered)) assert.deepEqual(fromCamel[key], fromSnake[key], `equivalent canonical delivery alias: ${key}`)
@@ -93,12 +111,13 @@ const nativeBoundary = nativeModule.exports.computeSaleTotals({ subtotalUsd: 1, 
 assert.equal(nativeBoundary.changeUsd, 0)
 assert.equal(nativeBoundary.changeKhr, 20)
 const boundaryReceipt = { ...saved, subtotal_usd: 1, subtotal_khr: 4020, total_usd: 1, total_khr: 4020, calculated_total_usd: 1, rounding_adjustment_usd: 0, exchange_rate: 4020, amount_paid_usd: 1, amount_paid_khr: 20, change_usd: nativeBoundary.changeUsd, change_khr: nativeBoundary.changeKhr, change_is_actual: 0, change_exchange_rate: 4020, items: [{ quantity: 1, applied_price_usd: 1, total_usd: 1 }] }
+Object.assign(boundaryReceipt, withPricing(boundaryReceipt))
 assert.equal(canonicalSaleReceipt(boundaryReceipt).change_khr, 20, '20/4020 must not round to .005 before the cent boundary')
 assert.equal(canonicalSaleReceipt({ ...boundaryReceipt, change_exchange_rate: null }).change_usd, 0, 'missing historical rate retains exact USD proof without invented KHR proof')
 assert.throws(() => canonicalSaleReceipt({ ...boundaryReceipt, change_usd: 0.01 }), SaleMoneyUnavailableError)
 assert.throws(() => canonicalSaleReceipt({ ...boundaryReceipt, change_khr: 21 }), SaleMoneyUnavailableError)
 assert.equal(canonicalSaleReceipt({ ...boundaryReceipt, amount_paid_khr: 21, change_usd: 0.01, change_khr: 21 }).change_usd, 0.01, 'opposite side of the half-cent boundary')
-assert.equal(canonicalSaleReceipt({ ...boundaryReceipt, exchange_rate: 1_000_000, subtotal_khr: 1_000_000, total_khr: 1_000_000, amount_paid_khr: 1, change_khr: 1, change_exchange_rate: null }).change_khr, 1, 'sub-four-decimal surplus remains positive without fabricating its missing change rate')
+assert.equal(canonicalSaleReceipt(withPricing({ ...boundaryReceipt, exchange_rate: 1_000_000, subtotal_khr: 1_000_000, total_khr: 1_000_000, amount_paid_khr: 1, change_khr: 1, change_exchange_rate: null })).change_khr, 1, 'sub-four-decimal surplus remains positive without fabricating its missing change rate')
 assert.throws(() => canonicalSaleReceipt({ ...boundaryReceipt, amount_paid_khr: 0, change_exchange_rate: null }), SaleMoneyUnavailableError, 'zero surplus cannot have nonzero computed KHR even without a saved change rate')
 const historicalSplit = { ...saved, change_is_actual: 1, change_exchange_rate: 4000, change_usd: 0.5, change_khr: 2000 }
 assert.equal(canonicalSaleReceipt(historicalSplit).change_khr, 2000, 'captured actual split change survives subsequent payment/basket edits')
