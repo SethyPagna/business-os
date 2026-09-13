@@ -418,7 +418,7 @@ assert.equal(renderPending('actor-1', { total_usd: 999 }), '')
 console.log('PASS actual reopened pending-summary render: durable quote, no current repricing, actor and malformed guards')
 
 const identityBinding = { sale_id: 17, sale_item_id: 70, captured_product_id: 7, current_product_id: 20 }
-const mergedItem = { ...capturedRow, sale_id: 17, product_id: 20 }
+const mergedItem: Record<string, unknown> = { ...capturedRow, sale_id: 17, product_id: 20 }
 const mergedSale = { ...capturedSale, items: [mergedItem], pricing_identity_bindings: [identityBinding] }
 const mergedEdits: any[] = []
 actualDetailCallback('stageLineUpdate', { ...editEnv, sale: mergedSale, items: mergedSale.items, setAmendConfirm: (value: unknown) => mergedEdits.push(value) })(70, 3, 9.6667, null, 0, 0, 0.3333, 'Merged')
