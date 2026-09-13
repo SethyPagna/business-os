@@ -547,8 +547,13 @@ function hexToRgba(hex: unknown, alpha: unknown): string {
 /** Read cached portal payload to reduce visible loading delays on hard reload. */
 function readPortalCache(): LegacyCatalogRecord | null {
   if (typeof window === 'undefined') return null
-  const stores = [window.sessionStorage, window.localStorage].filter(Boolean)
   try {
+    // Inside the guard, not above it: merely touching window.localStorage /
+    // sessionStorage throws where site data is blocked (Safari private mode,
+    // Chrome's "block all cookies"), and this runs in a useRef initializer
+    // during the first render. Same fix and same reasoning as
+    // PublicCatalogPage.tsx's copy of this reader.
+    const stores = [window.sessionStorage, window.localStorage].filter(Boolean)
     let raw = ''
     let sourceStore: Storage | null = null
     for (const store of stores) {
@@ -1268,15 +1273,28 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   ))
   const [editorDirty, setEditorDirty] = useState(false)
   const [editorSaving, setEditorSaving] = useState(false)
-  const [products, setProducts] = useState<CatalogProduct[]>(() => Array.isArray(cachedPortal?.products) ? cachedPortal.products : [])
-  const [portalProductTotal, setPortalProductTotal] = useState(() => Number(cachedPortal?.catalog?.total || cachedPortal?.products?.length || 0))
-  const [portalProductPage, setPortalProductPage] = useState(() => Number(cachedPortal?.catalog?.page || 1) || 1)
   // Same viewer-owned page size as the standalone storefront
   // (PublicCatalogPage.tsx): the in-app public route and the editor preview
   // mount the same pager, so the 20/50/100 choice has to behave identically on
   // both -- including outranking the server's own page size, which is fixed at
   // 50 for every bootstrap payload.
   const viewerPageSizeRef = useRef(readStoredCatalogPageSize())
+  // Whether the cached payload IS the page this viewer's size asks for; see
+  // PublicCatalogPage.tsx for the full reasoning. Short version: that payload
+  // is 50 product families ordered promoted/brand/name, the grid renders a
+  // browse payload A-Z by name, so no prefix of it is page 1 at another size.
+  // Seeding it anyway showed 50 cards under a pager that read "1 / total-over-
+  // 20", so the grid waits on the corrective search instead.
+  const seedMatchesViewerPageSize = !cachedPortal
+    || bootstrapPageSizeMatchesViewer(cachedPortal.catalog?.pageSize, viewerPageSizeRef.current)
+  const [products, setProducts] = useState<CatalogProduct[]>(() => (
+    seedMatchesViewerPageSize && Array.isArray(cachedPortal?.products) ? cachedPortal.products : []
+  ))
+  // Cleared by the first product payload cut at the viewer's size -- or by its
+  // failure, so an error is never hidden behind skeletons that never stop.
+  const [awaitingViewerSizedProducts, setAwaitingViewerSizedProducts] = useState(() => !seedMatchesViewerPageSize)
+  const [portalProductTotal, setPortalProductTotal] = useState(() => Number(cachedPortal?.catalog?.total || cachedPortal?.products?.length || 0))
+  const [portalProductPage, setPortalProductPage] = useState(() => Number(cachedPortal?.catalog?.page || 1) || 1)
   const [portalProductPageSize, setPortalProductPageSize] = useState(() => (
     viewerPageSizeRef.current || Number(cachedPortal?.catalog?.pageSize || CATALOG_DEFAULT_PAGE_SIZE) || CATALOG_DEFAULT_PAGE_SIZE
   ))
@@ -1782,12 +1800,20 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       const nextProducts = Array.isArray(portalProducts) ? portalProducts : []
 
       skipNextBootstrappedProductSearchRef.current = bootstrapPageSizeMatchesViewer(catalogPage?.pageSize, viewerPageSizeRef.current)
+      // The very same question decides the grid seed: this payload is only the
+      // grid's page when it was cut at the size the viewer actually browses at,
+      // which is exactly when the follow-up search is skipped.
+      const bootstrapMatchesViewer = skipNextBootstrappedProductSearchRef.current
       setConfig(nextConfig)
       setPortalConfigReady(true)
       setCategories(nextMeta.categories)
       setBrands(nextMeta.brands)
       setBranches(nextMeta.branches)
-      setProducts(nextProducts)
+      if (bootstrapMatchesViewer) setProducts(nextProducts)
+      // Only ever LOWERS the wait: this response and the corrective search
+      // race each other, and a slow bootstrap must not drop skeletons back
+      // over a grid the search has already filled at the viewer's size.
+      setAwaitingViewerSizedProducts((waiting) => waiting && !bootstrapMatchesViewer)
       if (catalogPage && typeof catalogPage === 'object') {
         setPortalProductTotal(Number(catalogPage.total || nextProducts.length || 0))
         setPortalProductPage(Number(catalogPage.page || 1) || 1)
@@ -1826,13 +1852,17 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     }
     const nextProducts = Array.isArray(portalProducts) ? portalProducts : []
 
+    // The editor preview mounts the same viewer-sized pager, so its grid is
+    // seeded on the same rule (the search below always refills it).
+    const bootstrapMatchesViewer = bootstrapPageSizeMatchesViewer(catalogPage?.pageSize, viewerPageSizeRef.current)
     setConfig(nextConfig)
     setPortalConfigReady(true)
     if (!editorDirty) setEditorDraft(buildDraft(nextConfig))
     setCategories(nextMeta.categories)
     setBrands(nextMeta.brands)
     setBranches(nextMeta.branches)
-    setProducts(nextProducts)
+    if (bootstrapMatchesViewer) setProducts(nextProducts)
+    setAwaitingViewerSizedProducts((waiting) => waiting && !bootstrapMatchesViewer)
     if (catalogPage && typeof catalogPage === 'object') {
       setPortalProductTotal(Number(catalogPage.total || nextProducts.length || 0))
       setPortalProductPage(Number(catalogPage.page || 1) || 1)
@@ -1952,6 +1982,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         }
         setPortalError('')
         setProducts(nextItems)
+        setAwaitingViewerSizedProducts(false)
         setPortalProductTotal(nextTotal)
         setPortalProductPage(responsePage)
         setPortalProductPageSize(responsePageSize)
@@ -1980,6 +2011,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       })
       .catch((error) => {
         if (!aliveRef.current || !isTrackedRequestCurrent(portalProductsRequestRef, requestId)) return
+        setAwaitingViewerSizedProducts(false)
         setPortalError(getCatalogErrorMessage(error, 'Portal product search failed'))
       })
       .finally(() => {
@@ -3182,7 +3214,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     initialFilter: portalProductInitial,
     setInitialFilter: setPortalProductInitial,
     refreshingProducts: portalProductRefreshing,
-    loadingProducts: loading && publicView && !products.length,
+    loadingProducts: (loading && publicView && !products.length) || awaitingViewerSizedProducts,
     categories,
     brands,
     branches,

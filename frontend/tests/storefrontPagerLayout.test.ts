@@ -63,8 +63,10 @@ runTest('the centred branch prints no summary, and leads with the per-page selec
   const branch = centeredBranch()
   assert.doesNotMatch(branch, /\{showingLabel\}/, 'the storefront pager must not render the Showing summary')
   assert.doesNotMatch(branch, /\{label\}/, 'the storefront pager must not render the "products" tail of the summary')
-  // Restored 2026-09-14 by the owner, reversing the 2026-09-07 removal: a
-  // native select, named from the translated per-page label, first in the row.
+  // Restored 2026-09-14 by the owner, reversing the 2026-09-07 removal: the
+  // shared PageSizeSelect (a native <select> is banned in components/ --
+  // tests/sourceSyntaxCheck.ts), named from the translated per-page label,
+  // first in the row.
   assert.match(branch, /ariaLabel=\{perPageLabel\}/, 'the size selector carries the translated per-page name')
   assert.ok(
     branch.indexOf('ariaLabel={perPageLabel}') < branch.indexOf('aria-label={backLabel}'),

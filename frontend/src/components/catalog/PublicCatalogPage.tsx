@@ -380,8 +380,16 @@ function normalizeFaqItems(input: unknown): Array<{ id: string | number; questio
 
 function readPortalCache(): LooseRecord | null {
   if (typeof window === 'undefined') return null
-  const stores = [window.sessionStorage, window.localStorage].filter(Boolean)
   try {
+    // Touching window.localStorage/sessionStorage THROWS (SecurityError)
+    // wherever site data is blocked -- Safari private mode, Chrome's "block
+    // all cookies" -- so the store list has to be built INSIDE this guard.
+    // Built outside it, the throw escaped a useRef initializer on the
+    // storefront's very first render, and PublicCatalogRoot.tsx has a
+    // Suspense boundary but no error boundary: the whole page rendered
+    // blank instead of simply loading without a cache. Same shape as
+    // catalogPagination.tsx's stored-page-size helpers.
+    const stores = [window.sessionStorage, window.localStorage].filter(Boolean)
     let raw = ''
     let sourceStore: Storage | null = null
     for (const store of stores) {
@@ -592,8 +600,31 @@ export default function PublicCatalogPage() {
   const publicPortalNavRef = useRef<HTMLElement>(null)
   const skipNextProductSearchRef = useRef(false)
 
+  // The shopper's own 20/50/100 choice, read once per mount. It OUTRANKS the
+  // server's page size: the bootstrap payload is always cut at the Worker's
+  // fixed 50 (routes/portal.ts), so without this ref every response would put
+  // a shopper who picked 20 straight back onto 50.
+  const viewerPageSizeRef = useRef(readStoredCatalogPageSize())
+  // Whether the payload already in hand (server-embedded bootstrap, or the
+  // cache) IS the page this shopper's size asks for. When it is not, nothing
+  // from it may seed the grid -- not even a prefix of it. That payload is the
+  // store's first 50 product families ordered promoted, then BRAND, then name
+  // (routes/portal.ts buildPortalCatalog -> familyOrderSql), while a browse
+  // payload is rendered A-Z by NAME (portalProductGrouping.ts), so its first
+  // 20 cards are the alphabetically first 20 of the first 50 by brand -- a
+  // page the server would never serve at pageSize 20. Seeding it whole is
+  // what put 50 cards under a pager reading "1 / total-over-20" until the
+  // corrective search landed; the grid holds its loading skeletons instead.
+  const seedMatchesViewerPageSize = !cachedPortal
+    || bootstrapPageSizeMatchesViewer(cachedPortal.catalog?.pageSize, viewerPageSizeRef.current)
+
   const [config, setConfig] = useState<PortalConfig>(() => ({ ...DEFAULT_PUBLIC_CONFIG, ...(cachedPortal?.config || {}) }))
-  const [products, setProducts] = useState<CatalogProduct[]>(() => mergePortalCatalogProducts(cachedPortal?.products))
+  const [products, setProducts] = useState<CatalogProduct[]>(() => (
+    seedMatchesViewerPageSize ? mergePortalCatalogProducts(cachedPortal?.products) : []
+  ))
+  // Cleared by the first product payload cut at the viewer's size -- or by its
+  // failure, so an error is never hidden behind skeletons that never stop.
+  const [awaitingViewerSizedProducts, setAwaitingViewerSizedProducts] = useState(() => !seedMatchesViewerPageSize)
   // G1: active promotion rules ride the catalog payload (and its cache).
   const [portalPromotionRules, setPortalPromotionRules] = useState<PromotionRule[]>(() => {
     const cached = (cachedPortal?.catalog as Record<string, unknown> | undefined)?.promotion_rules
@@ -601,11 +632,6 @@ export default function PublicCatalogPage() {
   })
   const [productTotal, setProductTotal] = useState(() => Number(cachedPortal?.catalog?.total || cachedPortal?.products?.length || 0))
   const [productPage, setProductPage] = useState(() => Number(cachedPortal?.catalog?.page || 1) || 1)
-  // The shopper's own 20/50/100 choice, read once per mount. It OUTRANKS the
-  // server's page size: the bootstrap payload is always cut at the Worker's
-  // fixed 50 (routes/portal.ts), so without this ref every response would put
-  // a shopper who picked 20 straight back onto 50.
-  const viewerPageSizeRef = useRef(readStoredCatalogPageSize())
   const [productPageSize, setProductPageSize] = useState(() => (
     viewerPageSizeRef.current || Number(cachedPortal?.catalog?.pageSize || CATALOG_DEFAULT_PAGE_SIZE) || CATALOG_DEFAULT_PAGE_SIZE
   ))
@@ -909,8 +935,15 @@ export default function PublicCatalogPage() {
         if (!aliveRef.current || !isTrackedRequestCurrent(requestRef, requestId)) return
         const next = normalizeBootstrapPayload(payload)
         const mergedProducts = mergePortalCatalogProducts(next.products)
+        // Same rule as the mount-time seed: this payload is only the grid's
+        // page when it was cut at the size the shopper actually browses at.
+        const bootstrapMatchesViewer = bootstrapPageSizeMatchesViewer(next.catalog.pageSize, viewerPageSizeRef.current)
         setConfig(next.config)
-        setProducts(mergedProducts)
+        if (bootstrapMatchesViewer) setProducts(mergedProducts)
+        // Only ever LOWERS the wait: this response and the corrective search
+        // race each other, and a slow bootstrap must not drop skeletons back
+        // over a grid the search has already filled at the viewer's size.
+        setAwaitingViewerSizedProducts((waiting) => waiting && !bootstrapMatchesViewer)
         setProductTotal(Number(next.catalog.total || next.products.length || 0))
         if (Array.isArray((next.catalog as Record<string, unknown>).promotion_rules)) {
           setPortalPromotionRules((next.catalog as Record<string, unknown>).promotion_rules as PromotionRule[])
@@ -923,7 +956,7 @@ export default function PublicCatalogPage() {
         setBranches(next.branches)
         setActiveTab((current) => resolvePortalActiveTab(next.config, copy, current))
         setPortalError('')
-        skipNextProductSearchRef.current = bootstrapPageSizeMatchesViewer(next.catalog.pageSize, viewerPageSizeRef.current)
+        skipNextProductSearchRef.current = bootstrapMatchesViewer
         writePortalCache({ config: next.config, categories: next.categories, brands: next.brands, branches: next.branches, products: mergedProducts, catalog: next.catalog })
       })
       .catch((error) => {
@@ -1003,6 +1036,7 @@ export default function PublicCatalogPage() {
           return
         }
         setProducts(nextItems)
+        setAwaitingViewerSizedProducts(false)
         setProductTotal(nextTotal)
         if (Array.isArray((data as Record<string, unknown>).promotion_rules)) {
           setPortalPromotionRules((data as Record<string, unknown>).promotion_rules as PromotionRule[])
@@ -1026,6 +1060,7 @@ export default function PublicCatalogPage() {
       })
       .catch((error) => {
         if (!aliveRef.current || !isTrackedRequestCurrent(productRequestRef, requestId)) return
+        setAwaitingViewerSizedProducts(false)
         setPortalError(getErrorMessage(error, 'Portal product search failed'))
       })
       .finally(() => {
@@ -1350,7 +1385,7 @@ export default function PublicCatalogPage() {
         initialFilter={productInitial}
         setInitialFilter={setProductInitial}
         refreshingProducts={refreshingProducts}
-        loadingProducts={loading}
+        loadingProducts={loading || awaitingViewerSizedProducts}
         categories={categories}
         brands={brands}
         branches={branches}

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import { transformSync } from 'esbuild'
 import {
   buildPortalHighlightBadges,
   buildPortalPricePresentation,
@@ -453,8 +454,11 @@ runTest('the public pager carries a 20/50/100 size selector before Back, wired e
   // Wired at BOTH pager mounts of the products section...
   assert.equal((catalogProductsSectionSource.match(/onPageSizeChange=\{updatePageSize\}/g) || []).length, 2,
     'the pagers above and below the grid must both change the page size')
-  assert.match(catalogProductsSectionSource, /per_page: copy\('perPage', 'Per page'\)/,
-    'the accessible name must resolve through the portal packs, which already translate perPage')
+  // Counted, not matched: with only one mount required, dropping the key from
+  // the other left every test AND verify:i18n green while that selector
+  // announced the raw key "per_page" to a screen reader.
+  assert.equal((catalogProductsSectionSource.match(/per_page: copy\('perPage', 'Per page'\)/g) || []).length, 2,
+    'BOTH pagers must resolve the accessible name through the portal packs, which already translate perPage')
   assert.doesNotMatch(catalogProductsSectionSource, /it is a Filters field now/,
     'the size control is on the pager row again, so the Filters-field note must not survive')
 
@@ -478,6 +482,107 @@ runTest('the public pager carries a 20/50/100 size selector before Back, wired e
       route + ' must not let a bootstrap payload overwrite the viewer choice')
     assert.match(source, /bootstrapPageSizeMatchesViewer\(/,
       route + ' must re-run the product search when the bootstrap page was cut at another size')
+  }
+})
+
+// The two portal cache readers are module-local functions inside component
+// files far too heavy to bundle whole, so each is lifted out by source slice
+// and compiled with esbuild: the REAL source runs, and `window` arrives as a
+// parameter, which is the only way to hand it one whose storage getters throw.
+function loadPortalCacheReader(source: string, keyConst: string, otherConsts: string[]) {
+  const lf = source.replace(/\r\n/g, '\n')
+  const start = lf.indexOf('function readPortalCache(')
+  assert.ok(start > 0, 'readPortalCache must still exist')
+  const end = lf.indexOf('\n}\n', start)
+  assert.ok(end > start, 'readPortalCache must still end at a top-level brace')
+  const declarations = [keyConst, ...otherConsts].map((name) => {
+    const declared = lf.match(new RegExp('^const ' + name + ' = .*$', 'm'))
+    assert.ok(declared, name + ' must still be a module constant')
+    return declared[0]
+  })
+  const compiled = transformSync(declarations.join('\n') + '\n' + lf.slice(start, end + 2), {
+    loader: 'ts',
+    format: 'esm',
+  }).code
+  const factory = new Function('window', compiled + '\nreturn readPortalCache')
+  const key = String(declarations[0].split(' = ')[1] || '').replace(/^'|'$/g, '')
+  return { key, read: (hostWindow: unknown) => (factory(hostWindow) as () => unknown)() }
+}
+
+runTest('both portal cache readers survive a browser that blocks site data', () => {
+  // Safari private mode and Chrome's "block all cookies" make the PROPERTY
+  // throw, not getItem -- so a reader that lists the stores outside its try
+  // throws out of a useRef initializer on the very first render. The
+  // storefront root has a Suspense boundary but no error boundary, so that
+  // rendered the whole page blank.
+  const blockedWindow = {}
+  for (const property of ['sessionStorage', 'localStorage']) {
+    Object.defineProperty(blockedWindow, property, {
+      configurable: true,
+      get() { throw new Error('SecurityError: The operation is insecure.') },
+    })
+  }
+
+  for (const [route, source, keyConst, otherConsts] of [
+    ['PublicCatalogPage', publicCatalogPageSource, 'PUBLIC_PORTAL_CACHE_KEY', ['PUBLIC_PORTAL_CACHE_MAX_AGE_MS', 'PUBLIC_PORTAL_CACHE_PRODUCT_LIMIT']],
+    ['CatalogPage', catalogPageSource, 'PORTAL_CACHE_KEY', ['PORTAL_CACHE_MAX_AGE_MS', 'PORTAL_CACHE_PRODUCT_LIMIT']],
+  ] as Array<[string, string, string, string[]]>) {
+    const { key, read } = loadPortalCacheReader(source, keyConst, otherConsts)
+    assert.equal(read(blockedWindow), null, route + ' must read blocked storage as "no cache", never throw')
+
+    // Positive control: same reader, same call, a storage that works. Without
+    // it this test would pass just as happily against a reader that returns
+    // null unconditionally.
+    const entries = new Map<string, string>([[key, JSON.stringify({
+      cachedAt: Date.now(),
+      products: [{ id: 7, name: 'Serum' }],
+    })]])
+    const store = {
+      getItem: (name: string) => entries.get(name) ?? null,
+      setItem: (name: string, value: string) => { entries.set(name, value) },
+      removeItem: (name: string) => { entries.delete(name) },
+    }
+    const cached = read({ sessionStorage: store, localStorage: store }) as { products?: unknown[] } | null
+    assert.equal(cached?.products?.length, 1, route + ' must still read a real cached payload')
+  }
+})
+
+runTest('neither public path seeds its grid from a payload cut at another page size', () => {
+  // The embedded/cached payload is page 1 at the Worker's fixed 50, ordered
+  // promoted/brand/name (routes/portal.ts buildPortalCatalog), while a browse
+  // payload renders A-Z by name -- so for a shopper on 20 it is neither page 1
+  // nor a prefix of it. Seeding it anyway put 50 cards under a pager that read
+  // "1 / total-over-20" for one round trip.
+  const seeded = ([
+    ['PublicCatalogPage', publicCatalogPageSource],
+    ['CatalogPage', catalogPageSource],
+  ] as Array<[string, string]>).filter(([, source]) => (
+    /const seedMatchesViewerPageSize = !cachedPortal/.test(source)
+    && /seedMatchesViewerPageSize (\?|&&)/.test(source)
+    && /useState\(\(\) => !seedMatchesViewerPageSize\)/.test(source)
+    && /if \(bootstrapMatchesViewer\) setProducts\(/.test(source)
+    && /setAwaitingViewerSizedProducts\(false\)/.test(source)
+    && /loadingProducts[:=] ?\{?\(?[^\r\n]*awaitingViewerSizedProducts/.test(source)
+  ))
+  assert.equal(seeded.length, 2,
+    'both public paths must gate the grid seed on the viewer page size and keep the skeletons up meanwhile')
+
+  for (const [route, source] of [
+    ['PublicCatalogPage', publicCatalogPageSource],
+    ['CatalogPage', catalogPageSource],
+  ]) {
+    assert.doesNotMatch(source, /slice\(0, ?viewerPageSize/,
+      route + ' must not seed a PREFIX either: the payload is ordered by brand, the grid by name')
+    // EVERY seed from a bootstrap payload, not just the first one found: both
+    // of CatalogPage's bootstrap paths (public route and editor preview) mount
+    // the same viewer-sized pager, so one gated site proves nothing about the
+    // other.
+    const bootstrapSeeds = source.match(/[^\r\n]*setProducts\((?:mergedProducts|nextProducts)\)[^\r\n]*/g) || []
+    assert.ok(bootstrapSeeds.length > 0, route + ' must still seed its grid from the bootstrap payload')
+    for (const seed of bootstrapSeeds) {
+      assert.match(seed, /if \(bootstrapMatchesViewer\) setProducts\(/,
+        route + ' seeds the grid from a bootstrap payload without checking its page size: ' + seed.trim())
+    }
   }
 })
 

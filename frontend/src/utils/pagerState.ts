@@ -37,8 +37,10 @@ export interface PagerState {
    * per-layout, by each layout, in PaginationControls:
    *
    *   - the admin layouts render on a single page, for the reason above;
-   *   - the storefront `centered` layout returns null on a single page because
-   *     its navigation row contains no action when both arrows are disabled. */
+   *   - the storefront `centered` layout returns null on a single page only
+   *     when it is NOT carrying the 20/50/100 page-size selector (a1d55f12):
+   *     with the selector the row still holds a real control, and without it
+   *     the row has no action left once both arrows are disabled. */
   visible: boolean
 }
 
