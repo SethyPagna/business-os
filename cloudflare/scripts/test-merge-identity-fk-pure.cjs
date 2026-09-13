@@ -114,9 +114,10 @@ function dbAdapter(d1) {
 
 function loadProductsRoute(d1) {
   const adapter = dbAdapter(d1)
-  const realDetailRule = loadTs(path.join('lib', 'productDetailRule.ts'), {})
+  const realMoneyPrecision = loadTs(path.join('lib', 'moneyPrecision.ts'), {})
+  const realDetailRule = loadTs(path.join('lib', 'productDetailRule.ts'), { './moneyPrecision': realMoneyPrecision })
   const realSqlBinding = loadTs(path.join('lib', 'sqlBinding.ts'), {})
-  const realProductMerge = loadTs(path.join('lib', 'productMerge.ts'), {})
+  const realProductMerge = loadTs(path.join('lib', 'productMerge.ts'), { './moneyPrecision': realMoneyPrecision })
   const realProductMergeSnapshot = loadTs(path.join('lib', 'productMergeSnapshot.ts'), { './db': {} })
   const realUndoAppliers = loadTs(path.join('lib', 'undoAppliers.ts'), {
     '../index': {}, './auth': {}, './db': { getDb: () => adapter }, './audit': { audit: async () => {} },
@@ -130,6 +131,7 @@ function loadProductsRoute(d1) {
     '../lib/audit': { audit: async () => {} },
     '../lib/undoAppliers': realUndoAppliers,
     '../lib/productDetailRule': realDetailRule,
+    '../lib/moneyPrecision': realMoneyPrecision,
     // The identity read compares barcodes through the shared fold and names
     // through the shared name rule. Both must be the REAL ones: a stub would
     // make "a leading zero is not a different barcode" test the stub.
@@ -147,7 +149,9 @@ function loadProductsRoute(d1) {
 // keeper?" is answered by promotionRules.ts itself and not by a re-implementation
 // of its parsing here.
 function loadPromotionRules() {
-  return loadTs(path.join('lib', 'promotionRules.ts'), {})
+  return loadTs(path.join('lib', 'promotionRules.ts'), {
+    './moneyPrecision': loadTs(path.join('lib', 'moneyPrecision.ts'), {}),
+  })
 }
 
 // --------------------------------------------------------------------------

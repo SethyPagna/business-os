@@ -46,7 +46,7 @@ function loadReal(relPath, requireOverrides = {}) {
   return moduleObj.exports
 }
 
-const kernel = loadReal('lib/promotionRules.ts')
+const kernel = loadReal('lib/promotionRules.ts', { './moneyPrecision': loadReal('lib/moneyPrecision.ts') })
 const sqlSide = loadReal('lib/promotionRulesSql.ts', { './promotionRules': kernel, './db': {} })
 
 let checks = 0
