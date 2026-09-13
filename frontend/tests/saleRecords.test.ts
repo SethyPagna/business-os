@@ -77,6 +77,23 @@ test('selling-price records have a typed money field', () => {
   ])
 })
 
+test('v1 precision snapshots expose exact audit-only money rows without inventing legacy values', () => {
+  const rows = saleRecordFieldRows({ id: 'sale:v1', kind: 'sale_created', changes: [
+    change('money_precision_version', none(), value(1)),
+    change('calculated_total_usd', none(), value(1.2345)),
+    change('rounding_adjustment_usd', none(), value(-0.0045)),
+  ] })
+  assert.deepEqual(rows.map((row) => [row.field, row.labelKey, row.format]), [
+    ['calculated_total_usd', 'money_calculated_total', 'money_4dp'],
+    ['rounding_adjustment_usd', 'money_rounding_adjustment', 'money_4dp'],
+  ])
+  assert.deepEqual(saleRecordFieldRows({ id: 'legacy', changes: [] }), [])
+  assert.deepEqual(saleRecordFieldRows({ id: 'legacy-null', changes: [
+    change('calculated_total_usd', none(), none()),
+    change('rounding_adjustment_usd', none(), none()),
+  ] }), [])
+})
+
 test('detail rows consume only tri-state changes and omit unchanged context', () => {
   const rows = saleRecordFieldRows(RECORDS[3])
   assert.deepEqual(rows.map((row) => row.field), ['payment_method', 'payment_details'])
