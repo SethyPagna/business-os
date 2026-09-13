@@ -41,7 +41,8 @@ function compile(file, stubs = {}) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
   }).outputText
   const moduleObj = { exports: {} }
-  const localRequire = (request) => Object.prototype.hasOwnProperty.call(stubs, request) ? stubs[request] : require(request)
+  const localRequire = (request) => Object.prototype.hasOwnProperty.call(stubs, request) ? stubs[request]
+    : ['./moneyPrecision','./saleMoneyPrecision'].includes(request) ? compile(`${request.slice(2)}.ts`) : require(request)
   new Function('exports', 'require', 'module', output)(moduleObj.exports, localRequire, moduleObj)
   return moduleObj.exports
 }
@@ -1123,7 +1124,8 @@ runTest('the ledger kind 0129 ships is the one this module maps, not a name it i
 
 runTest('the public field vocabulary is exact and closed', () => {
   assert.deepStrictEqual(SALE_RECORD_FIELDS, [
-    'receipt_number', 'sale_status', 'items', 'total_usd', 'payment', 'delivery',
+    'receipt_number', 'sale_status', 'items', 'total_usd',
+    'money_precision_version', 'calculated_total_usd', 'rounding_adjustment_usd', 'payment', 'delivery',
     'customer', 'membership', 'item', 'quantity', 'unit_price_usd', 'removed_items', 'added_items',
     'delivery_fee_usd', 'actual_delivery_cost_usd', 'is_delivery', 'driver',
     'payment_method', 'payment_details', 'amount_paid_usd', 'amount_paid_khr',

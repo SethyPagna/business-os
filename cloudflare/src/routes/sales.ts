@@ -125,7 +125,9 @@ import {
   type SaleItemAllocation,
 } from '../lib/saleTransitions'
 import { buildLikeAliasClause, tokenizeSearchTermGroups, normalizeSearchText } from '../lib/searchMatch'
-import { canonicalSaleItemMoney, computeSaleTotals, resolveChangeExchangeRate, round2 } from '../lib/saleTotals'
+import { canonicalSaleItemMoney, computeSaleTotals, resolveChangeExchangeRate, round2, newSaleMoney4, assertCanonicalSaleChildren } from '../lib/saleTotals'
+import { roundMoney4, multiplyMoney4, sumMoney4, subtractMoney4, sellingPriceCeilCent, MoneyPrecisionError } from '../lib/moneyPrecision'
+import { canonicalMoney4, SaleMoneyContractError } from '../lib/saleMoneyPrecision'
 import { financialCalculationValue } from '../lib/financialPrecision'
 import { planNativeSaleChange, NativeSaleChangeValidationError } from '../lib/nativeSaleChange'
 import { normalizeClientReceiptNumber, uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
@@ -306,6 +308,72 @@ async function saleMutationDigest(value: unknown): Promise<string> {
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
+async function saleMoneySchemaReady(db: ReturnType<typeof getDb>): Promise<boolean> {
+  const required = ['money_precision_version','calculated_total_usd','rounding_adjustment_usd']
+  const columns = await db.prepare('PRAGMA table_info(sales)').all<{ name: string }>()
+  const returns = await db.prepare('PRAGMA table_info(returns)').all<{ name: string }>()
+  return required.every(name => columns.some(column => column.name === name))
+    && ['money_precision_version','calculated_refund_usd','rounding_adjustment_usd'].every(name => returns.some(column => column.name === name))
+}
+
+function canonicalSaleItemsSql() {
+  const keys = ['id','sale_id','product_id','product_name','sku','quantity','unit','applied_price_usd','applied_price_khr',
+    'cost_price_usd','cost_price_khr','total_usd','total_khr','branch_id','price_mode','product_discount_type',
+    'product_discount_label','product_discount_usd','product_discount_khr','base_price_usd','base_price_khr',
+    'manual_discount_type','manual_discount_value','manual_discount_usd','manual_discount_khr','batch_id','batch_label','batch_expiry_date','damaged_lot_id','returned_quantity']
+  return `(SELECT json_group_array(json_object(${keys.map(key => `'${key}',i.${key}`).join(',')}))
+    FROM (SELECT * FROM sale_items WHERE sale_id=s.id ORDER BY id) i)`
+}
+
+/** Financial snapshot stored inside the mutation transaction, never reconstructed on retry. */
+function canonicalMutationResponseSql(responseSql: string): string {
+  const fields = ['id','receipt_number','sale_status','updated_at','exchange_rate','subtotal_usd','subtotal_khr',
+    'discount_usd','discount_khr','membership_discount_usd','membership_discount_khr','tax_usd','tax_khr',
+    'delivery_fee_usd','delivery_fee_khr','delivery_actual_cost_usd','delivery_actual_cost_khr','is_delivery',
+    'total_usd','total_khr','amount_paid_usd','amount_paid_khr','change_usd','change_khr','change_is_actual',
+    'change_exchange_rate','payment_method','payment_details','payment_currency','money_precision_version',
+    'calculated_total_usd','rounding_adjustment_usd']
+  return `(SELECT json_set(${responseSql},'$.sale',json_object(${fields.map(key => `'${key}',s.${key}`).join(',')},
+    'items',json(${canonicalSaleItemsSql()})), '$.moneyPrecisionVersion',s.money_precision_version,
+    '$.calculatedTotalUsd',s.calculated_total_usd,'$.roundingAdjustmentUsd',s.rounding_adjustment_usd)
+    FROM sales s WHERE s.id=@saleId)`
+}
+
+async function committedMutationResponse(db: ReturnType<typeof getDb>, operationId: string) {
+  const receipt = await db.prepare('SELECT response_json FROM sale_mutation_receipts WHERE id=?').get<{response_json:string}>([operationId])
+  if (!receipt) throw new Error('Committed mutation receipt is unavailable; recover using the same request identity.')
+  return JSON.parse(receipt.response_json) as Record<string,unknown>
+}
+
+/** A single SQL snapshot prevents a later edit mixing a header with older lines. */
+async function authoritativeSaleSnapshot(db: ReturnType<typeof getDb>, saleId: number): Promise<(Record<string,unknown> & { items: Record<string,unknown>[] }) | null> {
+  const row = await db.prepare(`SELECT s.*,${canonicalSaleItemsSql()} AS canonical_items
+    FROM sales s WHERE s.id=?`).get<Record<string,unknown>>([saleId])
+  if (!row) return null
+  const { canonical_items, ...sale } = row
+  return { ...sale, items: JSON.parse(String(canonical_items || '[]')) }
+}
+
+app.get('/money-precision-capability', async (c) => {
+  if (!hasAnyPermission(c.get('user'), ['pos','sales'])) return c.json({ error: 'Permission denied' }, 403)
+  return c.json({ money_precision_version: 1, schema_ready: await saleMoneySchemaReady(getDb(c.env)) })
+})
+
+app.get('/create-receipt', async (c) => {
+  c.header('Cache-Control','private, no-store')
+  const user = c.get('user')
+  if (!hasAnyPermission(user,['pos','sales'])) return c.json({ error: 'Permission denied' },403)
+  const requestId = c.req.query('client_request_id') || ''
+  if (!requestId || requestId !== normalizeClientRequestId(requestId)) return c.json({ error: 'A valid request identity is required.' },400)
+  const db = getDb(c.env)
+  const receipt = await db.prepare(`SELECT id FROM sales WHERE client_request_id=? AND client_request_id<>''
+    AND (cashier_id=? OR ?=1) LIMIT 1`).get<{ id:number }>([requestId,Number(user.id),isAdminControlUser(user)?1:0])
+  if (!receipt) return c.json({ committed: false })
+  const sale = await authoritativeSaleSnapshot(db,receipt.id)
+  if (!sale || !sale.items.length) return c.json({ committed: false, code: 'sale_incomplete' })
+  return c.json({ committed: true, response: { id:receipt.id, receiptNumber:sale.receipt_number, duplicate:true, sale } })
+})
+
 app.post('/', async (c) => {
   const db = getDb(c.env)
   // Real gap: this endpoint only checked requireAuth (any logged-in user).
@@ -322,6 +390,7 @@ app.post('/', async (c) => {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const body = await c.req.json<{
+    money_precision_version?: unknown
     items: SaleItemInput[]
     // Offline replays only: the sale's queue-time moment, honored with
     // bounded trust (lib/clientTimestamp.ts). Online checkouts omit it.
@@ -379,6 +448,7 @@ app.post('/', async (c) => {
     delivery_actual_cost_khr?: number | string | null
   }>()
 
+  try {
   const clientRequestId = normalizeClientRequestId(body.client_request_id)
   if (clientRequestId) {
     const existingSale = await db
@@ -400,9 +470,11 @@ app.post('/', async (c) => {
           code: 'sale_incomplete',
         }, 409)
       }
-      return c.json({ id: existingSale.id, receiptNumber: existingSale.receipt_number, duplicate: true })
+      return c.json({ id: existingSale.id, receiptNumber: existingSale.receipt_number, duplicate: true, sale: await authoritativeSaleSnapshot(db, existingSale.id) })
     }
   }
+  if (body.money_precision_version !== 1) return c.json({ error: 'Keep the original pending sale and review it with the current app before recording it.', code: 'money_precision_review_needed' }, 409)
+  if (!await saleMoneySchemaReady(db)) return c.json({ error: 'Sale precision schema is not ready.', code: 'money_precision_schema_not_ready' }, 503)
   // Every atomic create needs a stable identity that later statements in the
   // D1 batch can resolve before the auto-generated sale id is available to JS.
   // Current POS/offline clients provide client_request_id; the internal key
@@ -711,8 +783,8 @@ app.post('/', async (c) => {
   const saleCustomerAddress = anonymousCustomerSelected ? null : contactDisplayAddress(body.customer_address) || null
 
   const membershipPointsRedeemed = Math.max(0, Number(body.membership_points_redeemed) || 0)
-  let membershipDiscountUsd = round2(Math.max(0, Number(body.membership_discount_usd) || 0))
-  let membershipDiscountKhr = round2(Math.max(0, Number(body.membership_discount_khr) || 0))
+  let membershipDiscountUsd = newSaleMoney4(body.membership_discount_usd)
+  let membershipDiscountKhr = newSaleMoney4(body.membership_discount_khr)
 
   // The owner's membership-points master switch (user, Sep 4 2026), read as a
   // SETTING and never from the request -- a stale till that still shows the
@@ -749,15 +821,21 @@ app.post('/', async (c) => {
   let subtotalUsd = 0
   const priced = normalized.map((item) => {
     const product = productMap.get(item.product_id)
-    const requestedUnitPriceUsd = item.applied_price_usd ?? product?.selling_price_usd ?? 0
+    const requestedUnitPriceUsd = item.applied_price_usd ?? sellingPriceCeilCent(product?.selling_price_usd ?? 0)
     const money = canonicalSaleItemMoney({
       appliedPriceUsd: requestedUnitPriceUsd,
       appliedPriceKhr: item.applied_price_khr,
       basePriceUsd: item.base_price_usd,
       basePriceKhr: item.base_price_khr,
-    }, exchangeRate)
+      sellingPriceInputUsd: (item as unknown as Record<string,unknown>).selling_price_input_usd,
+    }, exchangeRate, 1)
+    const pricePlan = planSaleLinePriceEdit({ moneyPrecisionVersion:1,
+      basePriceUsd: money.basePriceUsd, discountType:item.manual_discount_type || null,
+      discountValue:item.manual_discount_value ?? 0,
+      claimedAppliedPriceUsd:money.appliedPriceUsd, claimedManualDiscountUsd:money.manualDiscountUsd })
+    if (!pricePlan.ok) throw new SaleMoneyContractError('money_precision_discount_mismatch')
     const unitPriceUsd = money.appliedPriceUsd
-    const lineTotalUsd = round2(unitPriceUsd * item.quantity)
+    const lineTotalUsd = multiplyMoney4(unitPriceUsd, item.quantity)
     subtotalUsd += lineTotalUsd
     return {
       ...item,
@@ -765,13 +843,17 @@ app.post('/', async (c) => {
       unitPriceUsd,
       lineTotalUsd,
       canonicalMoney: money,
-      costPriceUsd: Number(product?.cost_price_usd || 0),
-      costPriceKhr: Number(product?.cost_price_khr || 0),
+      canonicalDiscountValue: pricePlan.discountValue,
+      product_discount_usd: newSaleMoney4(item.product_discount_usd),
+      product_discount_khr: newSaleMoney4(item.product_discount_khr),
+      costPriceUsd: product?.cost_price_usd == null ? null : newSaleMoney4(product.cost_price_usd),
+      costPriceKhr: product?.cost_price_khr == null ? null : newSaleMoney4(product.cost_price_khr),
     }
   })
-  const discountUsd = round2(Number(body.discount_usd) || 0)
-  const discountKhr = round2(Number(body.discount_khr) || discountUsd * exchangeRate)
-  const taxUsd = round2(Number(body.tax_usd) || 0)
+  subtotalUsd = sumMoney4(priced.map(line => line.lineTotalUsd))
+  const discountUsd = newSaleMoney4(body.discount_usd)
+  const discountKhr = body.discount_khr === undefined ? multiplyMoney4(discountUsd,exchangeRate) : newSaleMoney4(body.discount_khr)
+  const taxUsd = newSaleMoney4(body.tax_usd)
 
   // Delivery scalars are resolved here, above the totals, because the
   // customer-paid portion of the fee is PART of the total. They used to be
@@ -780,24 +862,26 @@ app.post('/', async (c) => {
   // bugs that caused and why this arithmetic now lives in one pure,
   // directly-tested function instead of inline here.
   const isDelivery = Boolean(body.is_delivery)
-  const deliveryFeeUsd = round2(Number(body.delivery_fee_usd) || 0)
-  const deliveryFeeKhr = Math.round(Number(body.delivery_fee_khr) || deliveryFeeUsd * exchangeRate)
+  const deliveryFeeUsd = newSaleMoney4(body.delivery_fee_usd)
+  const deliveryFeeKhr = multiplyMoney4(deliveryFeeUsd,exchangeRate)
   const deliveryFeePaidBy = String(body.delivery_fee_paid_by || 'customer')
   // P6: what the delivery ACTUALLY cost the shop (courier money out) --
   // staff-only, never on receipts. NULL when not entered, so stats can
   // tell "recorded as zero" apart from "never recorded".
   const rawActualCost = Number(body.delivery_actual_cost_usd)
   const deliveryActualCostUsd = isDelivery && Number.isFinite(rawActualCost) && rawActualCost >= 0 && body.delivery_actual_cost_usd !== undefined && body.delivery_actual_cost_usd !== null && String(body.delivery_actual_cost_usd) !== ''
-    ? round2(rawActualCost)
+    ? newSaleMoney4(rawActualCost)
     : null
-  const deliveryActualCostKhr = deliveryActualCostUsd != null ? Math.round(Number(body.delivery_actual_cost_khr) || deliveryActualCostUsd * exchangeRate) : null
+  const deliveryActualCostKhr = deliveryActualCostUsd != null ? multiplyMoney4(deliveryActualCostUsd,exchangeRate) : null
 
   // Membership discount reduces the recorded total (previously dropped, so a
   // points-redeemed sale recorded more than the customer actually paid).
   const {
     totalUsd, totalKhr, amountPaidUsd, amountPaidKhr,
+    calculatedTotalUsd, roundingAdjustmentUsd,
     changeUsd: fallbackChangeUsd, changeKhr: fallbackChangeKhr,
   } = computeSaleTotals({
+    moneyPrecisionVersion: 1,
     subtotalUsd,
     discountUsd,
     membershipDiscountUsd,
@@ -886,6 +970,7 @@ app.post('/', async (c) => {
   let creationSnapshotJson: string
   try {
     creationSnapshotJson = buildSaleCreationSnapshot({
+      moneyPrecisionVersion: 1, calculatedTotalUsd, roundingAdjustmentUsd,
       origin: clientCreatedAt ? 'offline_replay' : 'pos',
       recordedAt: new Date().toISOString(),
       saleAt: clientCreatedAt,
@@ -935,6 +1020,7 @@ app.post('/', async (c) => {
         customer_id, customer_name, customer_phone, customer_address,
         payment_method, payment_details, payment_currency, exchange_rate,
         subtotal_usd, subtotal_khr, discount_usd, discount_khr, tax_usd, tax_khr, total_usd, total_khr,
+        money_precision_version, calculated_total_usd, rounding_adjustment_usd,
         amount_paid_usd, amount_paid_khr, change_usd, change_khr, change_is_actual, change_exchange_rate,
         membership_discount_usd, membership_discount_khr, membership_points_redeemed,
         is_delivery, delivery_contact_id, delivery_contact_name, delivery_contact_phone, delivery_contact_address,
@@ -945,6 +1031,7 @@ app.post('/', async (c) => {
         @customer_id, @customer_name, @customer_phone, @customer_address,
         @payment_method, @payment_details, @payment_currency, @exchange_rate,
         @subtotal_usd, @subtotal_khr, @discount_usd, @discount_khr, @tax_usd, @tax_khr, @total_usd, @total_khr,
+        1, @calculated_total_usd, @rounding_adjustment_usd,
         @amount_paid_usd, @amount_paid_khr, @change_usd, @change_khr, @change_is_actual, @change_exchange_rate,
         @membership_discount_usd, @membership_discount_khr, @membership_points_redeemed,
         @is_delivery, @delivery_contact_id, @delivery_contact_name, @delivery_contact_phone, @delivery_contact_address,
@@ -959,6 +1046,8 @@ app.post('/', async (c) => {
     `,
     params: {
       receipt_number: receiptNumber,
+      calculated_total_usd: calculatedTotalUsd,
+      rounding_adjustment_usd: roundingAdjustmentUsd,
       created_at: clientCreatedAt,
       client_request_id: saleWriteKey,
       // N13: the cashier snapshot is the AUTHENTICATED session's account, not
@@ -1015,7 +1104,7 @@ app.post('/', async (c) => {
         manual_discount_usd: item.canonicalMoney.manualDiscountUsd,
         manual_discount_khr: item.canonicalMoney.manualDiscountKhr,
         total_usd: item.lineTotalUsd,
-        total_khr: Math.round(item.lineTotalUsd * exchangeRate),
+        total_khr: multiplyMoney4(item.lineTotalUsd,exchangeRate),
         cost_price_usd: item.costPriceUsd,
         cost_price_khr: item.costPriceKhr,
         branch_id: item.branch_id,
@@ -1031,12 +1120,12 @@ app.post('/', async (c) => {
       // non-boolean values inherit the current setting. Persist that choice
       // so a later default change cannot retroactively change this sale.
       loyalty_accrual: (typeof body.loyalty_accrual === 'boolean' ? body.loyalty_accrual : loyaltyPointsEnabled) ? 1 : 0,
-      subtotal_usd: round2(subtotalUsd),
-      subtotal_khr: Math.round(subtotalUsd * exchangeRate),
+      subtotal_usd: subtotalUsd,
+      subtotal_khr: multiplyMoney4(subtotalUsd,exchangeRate),
       discount_usd: discountUsd,
       discount_khr: discountKhr,
       tax_usd: taxUsd,
-      tax_khr: Math.round(taxUsd * exchangeRate),
+      tax_khr: multiplyMoney4(taxUsd,exchangeRate),
       total_usd: totalUsd,
       total_khr: totalKhr,
       amount_paid_usd: amountPaidUsd,
@@ -1192,13 +1281,13 @@ app.post('/', async (c) => {
           cost_price_usd: item.costPriceUsd,
           cost_price_khr: item.costPriceKhr,
           total_usd: item.lineTotalUsd,
-          total_khr: Math.round(item.lineTotalUsd * exchangeRate),
+          total_khr: multiplyMoney4(item.lineTotalUsd,exchangeRate),
           branch_id: item.branch_id,
           price_mode: item.price_mode || 'selling',
           product_discount_type: item.product_discount_type || null,
           product_discount_label: item.product_discount_label || null,
-          product_discount_usd: Number(item.product_discount_usd) || 0,
-          product_discount_khr: Number(item.product_discount_khr) || 0,
+          product_discount_usd: newSaleMoney4(item.product_discount_usd),
+          product_discount_khr: newSaleMoney4(item.product_discount_khr),
           // The canonical helper has already resolved missing/legacy paired
           // prices and derived both manual discount currencies from USD. Do
           // not trust client KHR snapshots here: stale cached carts are one
@@ -1206,7 +1295,7 @@ app.post('/', async (c) => {
           base_price_usd: item.canonicalMoney.basePriceUsd,
           base_price_khr: item.canonicalMoney.basePriceKhr,
           manual_discount_type: item.manual_discount_type || null,
-          manual_discount_value: Number(item.manual_discount_value) || 0,
+          manual_discount_value: item.canonicalDiscountValue,
           manual_discount_usd: item.canonicalMoney.manualDiscountUsd,
           manual_discount_khr: item.canonicalMoney.manualDiscountKhr,
           batch_id: item.batch_id || null,
@@ -1359,7 +1448,11 @@ app.post('/', async (c) => {
         })
       }
     }
-    statements.push({
+    statements.push(
+      {sql:'DELETE FROM sale_mutation_guards',params:{}},
+      canonicalSaleChildrenGuard(saleWriteKey),
+      {sql:'DELETE FROM sale_mutation_guards',params:{}},
+      {
       sql: `SELECT CASE WHEN COALESCE((
               SELECT COUNT(*) FROM sale_items WHERE sale_id = (
                 SELECT id FROM sales
@@ -1449,7 +1542,7 @@ app.post('/', async (c) => {
     bumpVersion(c.env, 'sales'),
   ]))
   if (recoveredCommittedCreate) {
-    return c.json({ id: saleId, receiptNumber: resolvedReceiptNumber, duplicate: true })
+    return c.json({ id: saleId, receiptNumber: resolvedReceiptNumber, duplicate: true, sale: await authoritativeSaleSnapshot(db,saleId) })
   }
   // A method typed at the till joins the configured list (user, Sep 4 2026).
   // Off the response path: the sale is already recorded and must not be held
@@ -1494,7 +1587,11 @@ app.post('/', async (c) => {
   return c.json({
     id: saleId,
     receiptNumber,
-    subtotalUsd: round2(subtotalUsd),
+    sale: await authoritativeSaleSnapshot(db, saleId),
+    moneyPrecisionVersion: 1,
+    calculatedTotalUsd,
+    roundingAdjustmentUsd,
+    subtotalUsd,
     discountUsd,
     membershipDiscountUsd,
     membershipDiscountKhr,
@@ -1509,6 +1606,10 @@ app.post('/', async (c) => {
     saleStatus,
     itemCount: priced.length,
   })
+  } catch (error) {
+    if (error instanceof SaleMoneyContractError || error instanceof MoneyPrecisionError) return c.json({ error: error.message, code: error.code }, 400)
+    throw error
+  }
 })
 
 // PATCH /api/sales/:id/status -- change a sale's lifecycle status
@@ -1607,7 +1708,10 @@ app.post('/:id/status-receipt', async (c) => {
 })
 
 export function saleLineReceiptCanonical(id: number, kind: 'add_items' | 'amendment', body: Record<string, unknown>): Record<string, unknown> {
-  const shared = { notes: String(body.notes || '').trim().slice(0, 500) || null, expected_exchange_rate: body.expected_exchange_rate }
+  const shared = { notes: String(body.notes || '').trim().slice(0, 500) || null, expected_exchange_rate: body.expected_exchange_rate,
+    ...(Object.prototype.hasOwnProperty.call(body,'money_precision_version') ? { money_precision_version: body.money_precision_version } : {}),
+    ...(Object.prototype.hasOwnProperty.call(body,'selling_price_input_usd') ? { selling_price_input_usd: body.selling_price_input_usd } : {}),
+  }
   const optional = (key: string): { present: boolean; value: unknown } => ({
     present: Object.prototype.hasOwnProperty.call(body, key),
     value: Object.prototype.hasOwnProperty.call(body, key) ? body[key] : null,
@@ -1974,17 +2078,18 @@ app.patch('/:id/status', async (c) => {
       SELECT key,value FROM settings WHERE key IN ('exchange_rate','change_exchange_rate','pos_payment_methods')
     `).all<{ key: string; value: string }>()
     const settingMap = Object.fromEntries(settingRows.map((row) => [row.key, row.value]))
-    const latestRate = Number(settingMap.exchange_rate || 4100)
+    const latestRate = Number(sale.money_precision_version) === 1 ? Number(sale.exchange_rate) : Number(settingMap.exchange_rate || 4100)
     const reviewedRate = Number(body.expected_exchange_rate)
     if (!Number.isFinite(reviewedRate) || reviewedRate <= 0) {
       return c.json({ error: 'expected_exchange_rate is required to confirm the reviewed settlement.', code: 'expected_exchange_rate_required', current_exchange_rate: latestRate }, 400)
     }
-    if (!Number.isFinite(latestRate) || latestRate <= 0 || Math.abs(reviewedRate - latestRate) > 0.0000001) {
+    if (!Number.isFinite(latestRate) || latestRate <= 0 || (Number(sale.money_precision_version) === 1 ? reviewedRate !== latestRate : Math.abs(reviewedRate - latestRate) > 0.0000001)) {
       return c.json({ error: 'The exchange rate changed. Review the payment again.', code: 'exchange_rate_changed', current_exchange_rate: latestRate, current: { exchange_rate: latestRate } }, 409)
     }
     let settlementPlan
     try {
       settlementPlan = planSaleSettlement({
+        moneyPrecisionVersion: Number(sale.money_precision_version) === 1 ? 1 : 0,
         configuredMethodsRaw: settingMap.pos_payment_methods,
         paymentDetailsRaw: body.payment_details,
         existingPaidUsd: paymentCorrection ? 0 : sale.amount_paid_usd,
@@ -2720,6 +2825,7 @@ app.post('/:id/items', async (c) => {
     [key: string]: unknown
   }>().catch(() => ({} as Record<string, unknown>))
 
+  try {
   const addItemsRequestId = normalizeClientRequestId(body.client_request_id)
   if (!addItemsRequestId) return c.json({ error: 'client_request_id is required when adding sale items.', code: 'client_request_id_required' }, 400)
   const addItemsCanonical = JSON.stringify(saleLineReceiptCanonical(Number(id), 'add_items', body))
@@ -2731,6 +2837,8 @@ app.post('/:id/items', async (c) => {
     if (priorAddition.request_digest !== addItemsDigest) return c.json({ error: 'client_request_id was already used with different added items.', code: 'idempotency_conflict' }, 409)
     return c.json(JSON.parse(priorAddition.response_json) as Record<string, unknown>)
   }
+  if (body.money_precision_version !== 1) return c.json({ error: 'Preserve the pending request and review this basket with the current app.', code: 'money_precision_review_needed' },409)
+  if (!await saleMoneySchemaReady(db)) return c.json({ error: 'Sale precision schema is not ready.', code: 'money_precision_schema_not_ready' },503)
 
   const rawItems = Array.isArray(body.items) ? body.items : []
   if (!rawItems.length) return c.json({ error: 'Sale items required' }, 400)
@@ -2760,13 +2868,15 @@ app.post('/:id/items', async (c) => {
 
   const saleId = Number(sale.id)
   const saleStatus = String(sale.sale_status || 'completed')
+  const precisionBasket = await capturePrecisionBasket(db,sale)
   const moneySettings = await readAmendmentMoneySettings(db)
-  const exchangeRate = moneySettings.exchangeRate
+  const exchangeRate = Number(sale.exchange_rate)
+  if (!Number.isFinite(exchangeRate) || exchangeRate <= 0) throw new SaleMoneyContractError('money_precision_invalid_rate')
   const reviewedRate = Number(body.expected_exchange_rate)
   if (!Number.isFinite(reviewedRate) || reviewedRate <= 0) {
     return c.json({ error: 'expected_exchange_rate is required to confirm the reviewed item addition.', code: 'expected_exchange_rate_required', current: { exchange_rate: exchangeRate } }, 400)
   }
-  if (Math.abs(reviewedRate - exchangeRate) > 0.0000001) {
+  if (reviewedRate !== exchangeRate) {
     return c.json({ error: 'The exchange rate changed. Review the added items again.', code: 'exchange_rate_changed', current_exchange_rate: exchangeRate, current: { exchange_rate: exchangeRate } }, 409)
   }
 
@@ -2876,16 +2986,21 @@ app.post('/:id/items', async (c) => {
       .filter((item) => item.branchId)
       .map((item) => ({ productId: item.productId, branchId: item.branchId as number })),
   )
-  const candidateLines = requested.map((item) => {
+  const candidateLines = requested.map((item,index) => {
     const product = productMap.get(item.productId)
+    const rawPrice = (rawItems[index] as Record<string,unknown>).applied_price_usd
+    const unitPriceUsd = rawPrice === undefined ? sellingPriceCeilCent(product?.selling_price_usd ?? 0) : newSaleMoney4(rawPrice)
+    const entered = (rawItems[index] as Record<string,unknown>).selling_price_input_usd
+    if (entered !== undefined && sellingPriceCeilCent(entered as number) !== unitPriceUsd) throw new SaleMoneyContractError('money_precision_selling_base_mismatch')
     return {
+      moneyPrecisionVersion: 1 as const,
       productId: item.productId,
       productName: product?.name || `product #${item.productId}`,
       quantity: item.quantity,
       branchId: item.branchId,
-      unitPriceUsd: item.appliedPriceUsd ?? Number(product?.selling_price_usd || 0),
-      costPriceUsd: Number(product?.cost_price_usd || 0),
-      costPriceKhr: Number(product?.cost_price_khr || 0),
+      unitPriceUsd,
+      costPriceUsd: product?.cost_price_usd == null ? null : newSaleMoney4(product.cost_price_usd),
+      costPriceKhr: product?.cost_price_khr == null ? null : newSaleMoney4(product.cost_price_khr),
       batchId: item.batchId,
       batchLabel: item.batchLabel,
       batchExpiryDate: item.batchExpiryDate,
@@ -2943,8 +3058,8 @@ app.post('/:id/items', async (c) => {
   const existingSubtotalRow = await db
     .prepare('SELECT COALESCE(SUM(total_usd), 0) AS subtotal FROM sale_items WHERE sale_id = ?')
     .get<{ subtotal: number }>([saleId])
-  const subtotalBeforeUsd = Number(existingSubtotalRow?.subtotal) || 0
-  const subtotalAfterUsd = subtotalBeforeUsd + plan.addedSubtotalUsd
+  const subtotalBeforeUsd = sumMoney4(precisionBasket.lines.map(line => Number(line.total_usd)))
+  const subtotalAfterUsd = sumMoney4([subtotalBeforeUsd,plan.addedSubtotalUsd])
   const taxPlan = planAmendedTax({
     saleId,
     sale: sale as AmendableSaleRow,
@@ -2954,11 +3069,12 @@ app.post('/:id/items', async (c) => {
     exchangeRate,
   })
   const money = recomputeSaleMoneyAfterAmendment({
+    moneyPrecisionVersion: 1,
     sale: sale as AmendableSaleRow,
     subtotalUsd: subtotalAfterUsd,
     taxUsdOverride: taxPlan.taxUsdOverride,
     changeExchangeRate: moneySettings.changeExchangeRate,
-    exchangeRateOverride: moneySettings.exchangeRate,
+    exchangeRateOverride: exchangeRate,
   })
   const addItemsStamp = new Date().toISOString()
   const addItemsOperationId = crypto.randomUUID()
@@ -2969,7 +3085,7 @@ app.post('/:id/items', async (c) => {
     FROM sale_items WHERE sale_id=? ORDER BY id
   `).all<Record<string, unknown>>([saleId])
   const lineMoneyBefore = captureSaleLineKhrSnapshot(lineMoneyRowsBefore)
-  const lineMoneyAfter = rebaseSaleLineKhrSnapshot(lineMoneyRowsBefore, exchangeRate)
+  const lineMoneyAfter = captureSaleLineKhrSnapshot(lineMoneyRowsBefore)
   const moneyBefore = amendmentMoneyBefore(sale)
   const moneyAfter = amendmentMoneyAfter(
     sale,
@@ -2998,13 +3114,11 @@ app.post('/:id/items', async (c) => {
   //
   // One request is one act, so every line shares a group_id.
   const additionGroupId = crypto.randomUUID()
-  let runningTotalUsd = moneyBefore.total_usd
-  const ledgerStatements = plan.lines.map((line, lineIndex) => {
-    const isLast = lineIndex === plan.lines.length - 1
-    const totalBeforeUsd = runningTotalUsd
-    const totalAfterUsd = isLast ? moneyAfter.total_usd : round2(runningTotalUsd + line.lineTotalUsd)
-    runningTotalUsd = totalAfterUsd
+  const ledgerStatements = plan.lines.map((line) => {
+    const totalBeforeUsd = moneyBefore.total_usd
+    const totalAfterUsd = moneyAfter.total_usd
     return amendmentEntryStatement({
+      moneyPrecisionVersion: 1,
       saleId,
       kind: 'line_added',
       groupId: additionGroupId,
@@ -3012,6 +3126,8 @@ app.post('/:id/items', async (c) => {
       productName: line.productName,
       quantityBefore: 0,
       quantityAfter: line.quantity,
+      before: precisionRecordMoney(moneyBefore),
+      after: precisionRecordMoney(moneyAfter),
       totalBeforeUsd,
       totalAfterUsd,
       unitsMoved: -line.heldUnits || 0,
@@ -3059,6 +3175,7 @@ app.post('/:id/items', async (c) => {
       heldUnits: line.heldUnits,
       unitPriceUsd: line.unitPriceUsd,
       lineTotalUsd: line.lineTotalUsd,
+      moneyPrecisionVersion: 1 as const,
       costPriceUsd: line.costPriceUsd,
       costPriceKhr: line.costPriceKhr,
       takes: line.takes,
@@ -3106,6 +3223,7 @@ app.post('/:id/items', async (c) => {
       { sql: 'DELETE FROM sale_bulk_guards', params: {} },
       amendmentSettingsGuard(moneySettings),
       saleRevisionGuard(saleId, Number(sale.write_revision)),
+      precisionBasket.guard,
       saleMutationReceiptStatement({
         operationId: addItemsOperationId, actorId: Number(user.id), saleId, kind: 'add_items',
         requestId: addItemsRequestId, requestDigest: addItemsDigest, requestJson: addItemsCanonical,
@@ -3117,7 +3235,7 @@ app.post('/:id/items', async (c) => {
       ...statementsForPlan,
       ...buildOperationAllocationStatements(plan.lines, addItemsOperationId, addItemsStamp),
       ...taxPlan.statements,
-      rebaseSaleLineKhrStatement(saleId, exchangeRate),
+      canonicalSaleChildrenGuard(saleId),
       saleMoneyUpdateStatement(saleId, moneyAfter),
       ...ledgerStatements,
       {
@@ -3150,7 +3268,7 @@ app.post('/:id/items', async (c) => {
       {
         sql: `UPDATE sale_mutation_receipts SET history_id=last_insert_rowid(),generation=0,
               sale_revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@saleId),0),
-              response_json=json_set(response_json,'$.undoActionId',last_insert_rowid(),'$.actionHistoryId',last_insert_rowid()),updated_at=@stamp
+              response_json=${canonicalMutationResponseSql("json_set(response_json,'$.undoActionId',last_insert_rowid(),'$.actionHistoryId',last_insert_rowid())")},updated_at=@stamp
               WHERE id=@operation`,
         params: { operation: addItemsOperationId, saleId, stamp: addItemsStamp },
       },
@@ -3188,6 +3306,10 @@ app.post('/:id/items', async (c) => {
   const historyId = Number(batchResults[historyStatementIndex]?.meta?.last_row_id || 0)
   if (historyId > 0) response.actionHistoryId = response.undoActionId = historyId
   return c.json(response)
+  } catch (error) {
+    if (error instanceof SaleMoneyContractError || error instanceof MoneyPrecisionError) return c.json({ error: error.message, code: error.code },409)
+    throw error
+  }
 })
 
 // ---------------------------------------------------------------------------
@@ -3482,6 +3604,7 @@ app.post('/:id/amendments', async (c) => {
     [key: string]: unknown
   }>().catch(() => ({} as Record<string, unknown>))
 
+  try {
   const kind = String(body.kind || '')
   if (!AMENDMENT_REQUEST_KINDS.has(kind)) {
     return c.json({ error: `Unknown amendment "${kind}".` }, 400)
@@ -3491,6 +3614,7 @@ app.post('/:id/amendments', async (c) => {
       'kind', 'delivery_contact_id', 'delivery_fee_usd', 'delivery_actual_cost_usd',
       'notes', 'client_request_id', 'expected_exchange_rate', 'expected_updated_at', 'expectedUpdatedAt',
       'clientTime', 'deviceTz', 'deviceName',
+      'money_precision_version',
     ])
     const unexpected = Object.keys(body).filter((key) => !allowed.has(key))
     if (unexpected.length) {
@@ -3510,6 +3634,8 @@ app.post('/:id/amendments', async (c) => {
     if (priorAmendment.request_digest !== amendmentDigest) return c.json({ error: 'client_request_id was already used with different amendment data.', code: 'idempotency_conflict' }, 409)
     return c.json(JSON.parse(priorAmendment.response_json) as Record<string, unknown>)
   }
+  if (body.money_precision_version !== 1) return c.json({ error: 'Preserve the pending request and review this amendment with the current app.', code: 'money_precision_review_needed' },409)
+  if (!await saleMoneySchemaReady(db)) return c.json({ error: 'Sale precision schema is not ready.', code: 'money_precision_schema_not_ready' },503)
 
   const sale = await db.prepare('SELECT s.*,COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=s.id),0) AS write_revision FROM sales s WHERE s.id = ?').get<AmendableSaleRow & {
     id: number
@@ -3550,12 +3676,13 @@ app.post('/:id/amendments', async (c) => {
   const saleId = Number(sale.id)
   const saleStatus = String(sale.sale_status || 'completed')
   const moneySettings = await readAmendmentMoneySettings(db)
-  const exchangeRate = moneySettings.exchangeRate
+  const exchangeRate = Number(sale.exchange_rate)
+  if (!Number.isFinite(exchangeRate) || exchangeRate <= 0) throw new SaleMoneyContractError('money_precision_invalid_rate')
   const reviewedRate = Number(body.expected_exchange_rate)
   if (!Number.isFinite(reviewedRate) || reviewedRate <= 0) {
     return c.json({ error: 'expected_exchange_rate is required to confirm the reviewed amendment.', code: 'expected_exchange_rate_required', current: { exchange_rate: exchangeRate } }, 400)
   }
-  if (Math.abs(reviewedRate - exchangeRate) > 0.0000001) {
+  if (reviewedRate !== exchangeRate) {
     return c.json({ error: 'The exchange rate changed. Review the amendment again.', code: 'exchange_rate_changed', current_exchange_rate: exchangeRate, current: { exchange_rate: exchangeRate } }, 409)
   }
 
@@ -3581,13 +3708,14 @@ app.post('/:id/amendments', async (c) => {
   if (!guard.ok) return c.json({ error: guard.error, code: guard.code }, 400)
 
   const movesStock = saleAmendmentMovesStock(sale)
+  const precisionBasket = kind === 'delivery_actual_cost_changed' ? null : await capturePrecisionBasket(db,sale as Record<string,unknown>)
   const stockSkipped = saleSkipsStock(sale)
   const note = String(body.notes || '').trim().slice(0, 500) || null
   const subtotalRow = await db
     .prepare('SELECT COALESCE(SUM(total_usd), 0) AS subtotal FROM sale_items WHERE sale_id = ?')
     .get<{ subtotal: number }>([saleId])
-  const subtotalBeforeUsd = Number(subtotalRow?.subtotal) || 0
-  const totalBeforeUsd = round2(Number(sale.total_usd) || 0)
+  const subtotalBeforeUsd = precisionBasket ? sumMoney4(precisionBasket.lines.map(line => Number(line.total_usd))) : Number((sale as unknown as Record<string, unknown>).subtotal_usd)
+  const totalBeforeUsd = Number(sale.total_usd) || 0
   const lineMoneyRowsBefore = await db.prepare(`
     SELECT id,applied_price_usd,applied_price_khr,total_usd,total_khr,
            product_discount_usd,product_discount_khr,base_price_usd,base_price_khr,
@@ -3595,7 +3723,7 @@ app.post('/:id/amendments', async (c) => {
     FROM sale_items WHERE sale_id=? ORDER BY id
   `).all<Record<string, unknown>>([saleId])
   const lineMoneyBefore = captureSaleLineKhrSnapshot(lineMoneyRowsBefore)
-  let lineMoneyAfterAtLatestRate = rebaseSaleLineKhrSnapshot(lineMoneyRowsBefore, exchangeRate)
+  let lineMoneyAfterAtLatestRate = captureSaleLineKhrSnapshot(lineMoneyRowsBefore)
   const mutationStamp = new Date().toISOString()
   const mutationOperationId = crypto.randomUUID()
   const moneyBeforeSnapshot = amendmentMoneyBefore(sale)
@@ -3624,14 +3752,15 @@ app.post('/:id/amendments', async (c) => {
     if (costRaw !== null && costRaw !== undefined && typeof costRaw !== 'number' && typeof costRaw !== 'string') {
       return c.json({ error: 'Delivery amount must be a number.' }, 400)
     }
-    const feeParsed = parseDeliveryAmountUsd(feeRaw)
+    const feeParsed = parseDeliveryAmountUsd(feeRaw,1)
     if (!feeParsed.ok) return c.json({ error: DELIVERY_AMOUNT_ERROR_MESSAGES[feeParsed.code] }, 400)
-    const costParsed = parseDeliveryAmountUsd(costRaw)
+    const costParsed = parseDeliveryAmountUsd(costRaw,1)
     if (!costParsed.ok && costParsed.code !== 'blank') {
       return c.json({ error: DELIVERY_AMOUNT_ERROR_MESSAGES[costParsed.code] }, 400)
     }
     const actualCostUsd = costParsed.ok ? costParsed.usd : null
     const deliveryPlan = planDeliveryAddition({
+      moneyPrecisionVersion: 1,
       saleId,
       sale,
       contact: {
@@ -3650,6 +3779,7 @@ app.post('/:id/amendments', async (c) => {
       subtotalBeforeUsd, subtotalAfterUsd: subtotalBeforeUsd, exchangeRate,
     })
     const money = recomputeSaleMoneyAfterAmendment({
+      moneyPrecisionVersion: 1,
       sale,
       subtotalUsd: subtotalBeforeUsd,
       deliveryFeeUsdOverride: feeParsed.usd,
@@ -3707,19 +3837,21 @@ app.post('/:id/amendments', async (c) => {
         amendmentSettingsGuard(moneySettings),
         contactReferenceGuard,
         saleRevisionGuard(saleId, Number(sale.write_revision)),
+        precisionBasket!.guard,
         ...deliveryPlan.statements,
         ...taxPlan.statements,
-        rebaseSaleLineKhrStatement(saleId, exchangeRate),
+        canonicalSaleChildrenGuard(saleId),
         saleMoneyUpdateStatement(saleId, moneyAfterSnapshot),
         amendmentEntryStatement({
+          moneyPrecisionVersion: 1,
           saleId,
           kind: 'delivery_added',
           totalBeforeUsd,
           totalAfterUsd: money.totalUsd,
           stockSkipped,
           note,
-          before: recordBefore,
-          after: recordAfter,
+          before: {...recordBefore,...precisionRecordMoney(moneyBeforeSnapshot)},
+          after: {...recordAfter,...precisionRecordMoney(moneyAfterSnapshot)},
           userId: user?.id ?? null,
           userName: actorSnapshot(user),
         }),
@@ -3757,7 +3889,7 @@ app.post('/:id/amendments', async (c) => {
       outside_window: guard.outsideWindow,
       notes: note,
     })
-    return c.json(response)
+    return c.json(await committedMutationResponse(db,mutationOperationId))
   }
 
   // ---- The actual courier cost: a reporting-only amendment. It deliberately
@@ -3774,19 +3906,20 @@ app.post('/:id/amendments', async (c) => {
     // is the one refusal this field forgives: clearing the box is how a cost
     // recorded by mistake goes back to "not recorded", which is a different
     // fact from "the courier was free".
-    const costParsed = parseDeliveryAmountUsd(body.delivery_actual_cost_usd)
+    const costParsed = parseDeliveryAmountUsd(body.delivery_actual_cost_usd,1)
     if (!costParsed.ok && costParsed.code !== 'blank') {
       return c.json({ error: DELIVERY_AMOUNT_ERROR_MESSAGES[costParsed.code] }, 400)
     }
     const costUsd = costParsed.ok ? costParsed.usd : null
     const costPlan = planDeliveryActualCostChange({
+      moneyPrecisionVersion: 1,
       saleId,
       sale,
       newCostUsd: costUsd,
       exchangeRate,
       stamp: mutationStamp,
     })
-    if (!deliveryAmountChanged(costPlan.costBeforeUsd, costPlan.costAfterUsd)) {
+    if (!deliveryAmountChanged(costPlan.costBeforeUsd, costPlan.costAfterUsd,1)) {
       return c.json({ error: 'That is already the actual delivery cost on this sale.' }, 400)
     }
     const money = {
@@ -3813,6 +3946,7 @@ app.post('/:id/amendments', async (c) => {
         saleRevisionGuard(saleId, Number(sale.write_revision)),
         ...costPlan.statements,
         amendmentEntryStatement({
+          moneyPrecisionVersion: 1,
           saleId,
           kind: 'delivery_actual_cost_changed',
           amountBeforeUsd: costPlan.costBeforeUsd,
@@ -3854,7 +3988,7 @@ app.post('/:id/amendments', async (c) => {
       exchange_rate_before: sale.exchange_rate ?? null, exchange_rate_after: exchangeRate,
       outside_window: guard.outsideWindow, notes: note,
     })
-    return c.json(response)
+    return c.json(await committedMutationResponse(db,mutationOperationId))
   }
 
   // ---- The delivery fee: its own short path, because it touches no line and
@@ -3868,11 +4002,11 @@ app.post('/:id/amendments', async (c) => {
     // so "no value" would have to mean zero, and silently charging zero
     // because a box was empty is not a decision this route may make for
     // somebody.
-    const feeParsed = parseDeliveryAmountUsd(body.delivery_fee_usd)
+    const feeParsed = parseDeliveryAmountUsd(body.delivery_fee_usd,1)
     if (!feeParsed.ok) {
       return c.json({ error: DELIVERY_AMOUNT_ERROR_MESSAGES[feeParsed.code] }, 400)
     }
-    const feePlan = planDeliveryFeeChange({ saleId, sale, newFeeUsd: feeParsed.usd, exchangeRate })
+    const feePlan = planDeliveryFeeChange({ moneyPrecisionVersion:1, saleId, sale, newFeeUsd: feeParsed.usd, exchangeRate })
     if (feePlan.feeDeltaUsd === 0) {
       return c.json({ error: 'That is already the delivery fee on this sale.' }, 400)
     }
@@ -3885,6 +4019,7 @@ app.post('/:id/amendments', async (c) => {
       subtotalBeforeUsd, subtotalAfterUsd: subtotalBeforeUsd, exchangeRate,
     })
     const money = recomputeSaleMoneyAfterAmendment({
+      moneyPrecisionVersion: 1,
       sale,
       subtotalUsd: subtotalBeforeUsd,
       deliveryFeeUsdOverride: feePlan.feeAfterUsd,
@@ -3909,13 +4044,17 @@ app.post('/:id/amendments', async (c) => {
         { sql: 'DELETE FROM sale_bulk_guards', params: {} },
         amendmentSettingsGuard(moneySettings),
         saleRevisionGuard(saleId, Number(sale.write_revision)),
+        precisionBasket!.guard,
         ...feePlan.statements,
         ...feeTaxPlan.statements,
-        rebaseSaleLineKhrStatement(saleId, exchangeRate),
+        canonicalSaleChildrenGuard(saleId),
         saleMoneyUpdateStatement(saleId, moneyAfterSnapshot),
         amendmentEntryStatement({
+          moneyPrecisionVersion: 1,
           saleId,
           kind: 'delivery_fee_changed',
+          before: precisionRecordMoney(moneyBeforeSnapshot),
+          after: precisionRecordMoney(moneyAfterSnapshot),
           amountBeforeUsd: feePlan.feeBeforeUsd,
           amountAfterUsd: feePlan.feeAfterUsd,
           totalBeforeUsd,
@@ -3955,7 +4094,7 @@ app.post('/:id/amendments', async (c) => {
       exchange_rate_before: sale.exchange_rate ?? null, exchange_rate_after: exchangeRate,
       outside_window: guard.outsideWindow, notes: note,
     })
-    return c.json(response)
+    return c.json(await committedMutationResponse(db,mutationOperationId))
   }
 
   // ---- Every other kind acts on ONE existing line. ----
@@ -4001,22 +4140,23 @@ app.post('/:id/amendments', async (c) => {
       || body.manual_discount_type !== undefined
       || body.manual_discount_value !== undefined
       || body.manual_discount_usd !== undefined
-    const oldPrice = round2(Number(line.applied_price_usd) || 0)
-    const oldBasePrice = line.base_price_usd == null ? oldPrice + (Number(line.manual_discount_usd) || 0) : round2(Number(line.base_price_usd) || 0)
+    const oldPrice = Number(line.applied_price_usd)
+    const oldBasePrice = Number(line.base_price_usd)
     const oldDiscountType: 'percent' | 'fixed' | null = line.manual_discount_type === 'percent' || line.manual_discount_type === 'fixed'
       ? line.manual_discount_type
       : Number(line.manual_discount_usd) > 0 ? 'fixed' : null
     const oldDiscountValue = oldDiscountType === 'percent'
-      ? round2(Number(line.manual_discount_value) || 0)
-      : round2(Number(line.manual_discount_value) || Number(line.manual_discount_usd) || 0)
+      ? Number(line.manual_discount_value) || 0
+      : Number(line.manual_discount_value) || Number(line.manual_discount_usd) || 0
 
     let nextBasePrice = oldBasePrice
     let nextDiscountType = oldDiscountType
     let nextDiscountValue = oldDiscountValue
     let nextManualDiscountUsd = Number(line.manual_discount_usd) || 0
-    let nextPrice = round2(requestedPrice)
+    let nextPrice = hasLayeredPriceEdit || requestedPrice === oldPrice ? newSaleMoney4(requestedPrice) : sellingPriceCeilCent((body.selling_price_input_usd ?? requestedPrice) as number)
     if (hasLayeredPriceEdit) {
       const pricePlan = planSaleLinePriceEdit({
+        moneyPrecisionVersion:1, sellingPriceInputUsd:body.selling_price_input_usd,
         basePriceUsd: body.base_price_usd === undefined ? oldBasePrice : body.base_price_usd,
         discountType: body.manual_discount_type === undefined ? oldDiscountType : body.manual_discount_type,
         discountValue: body.manual_discount_value === undefined ? oldDiscountValue : body.manual_discount_value,
@@ -4035,14 +4175,14 @@ app.post('/:id/amendments', async (c) => {
       ? currentQuantity
       : Number(body.quantity)
     if (!Number.isFinite(nextQuantity) || nextQuantity < 0) return c.json({ error: 'Quantity must be a non-negative number.' }, 400)
-    const nextQty = round2(nextQuantity)
+    const nextQty = nextQuantity
     if (nextQty <= 0) return c.json({ error: 'Use Remove when a line should be taken off the sale.' }, 400)
-    const quantityChanged = Math.abs(nextQty - currentQuantity) > 0.000001
-    const priceChanged = Math.abs(nextPrice - oldPrice) > 0.000001
+    const quantityChanged = nextQty !== currentQuantity
+    const priceChanged = nextPrice !== oldPrice
     const priceLayersChanged = hasLayeredPriceEdit && (
-      Math.abs(nextBasePrice - oldBasePrice) > 0.000001
+      nextBasePrice !== oldBasePrice
       || nextDiscountType !== oldDiscountType
-      || Math.abs(nextDiscountValue - oldDiscountValue) > 0.000001
+      || nextDiscountValue !== oldDiscountValue
     )
     if (!quantityChanged && !priceChanged && !priceLayersChanged) return c.json({ error: 'Enter a new quantity, selling price, or discount.' }, 400)
 
@@ -4062,6 +4202,7 @@ app.post('/:id/amendments', async (c) => {
           }
         }
         quantityPlan = planLineQuantityIncrease({
+          moneyPrecisionVersion: 1,
           saleId, sale, line: workingLine, addedQuantity: quantityDelta, lots, exchangeRate,
           userId: user?.id ?? null, userName: actorSnapshot(user),
         })
@@ -4069,6 +4210,7 @@ app.post('/:id/amendments', async (c) => {
         const removed = Math.abs(quantityDelta)
         if (removed >= currentQuantity) return c.json({ error: 'Use Remove when a line should be taken off the sale.' }, 400)
         quantityPlan = planLineQuantityDecrease({
+          moneyPrecisionVersion: 1,
           saleId, sale, line: workingLine, removedQuantity: removed, allocations, exchangeRate,
           reason: `Quantity changed on sale #${saleId}`,
           userId: user?.id ?? null, userName: actorSnapshot(user),
@@ -4078,7 +4220,7 @@ app.post('/:id/amendments', async (c) => {
       unitsMoved += quantityPlan.unitsMoved
     }
 
-    const finalTotalUsd = round2(nextPrice * nextQty)
+    const finalTotalUsd = multiplyMoney4(nextPrice,nextQty)
     const finalTotalKhr = receiptKhrFromUsd(finalTotalUsd, exchangeRate) || 0
     // A quantity-only edit must retain the line's existing discount facts.
     // Editing the selling price is an explicit override, so it clears stale
@@ -4138,7 +4280,7 @@ app.post('/:id/amendments', async (c) => {
           manual_discount_khr: normalizedManualDiscountKhr,
         }
       : snapshot)
-    subtotalDeltaUsd = round2(finalTotalUsd - (Number(line.total_usd) || oldPrice * currentQuantity))
+    subtotalDeltaUsd = subtractMoney4(finalTotalUsd,Number(line.total_usd))
     ledgerEntries.push({
       saleId,
       kind: 'line_updated',
@@ -4163,7 +4305,7 @@ app.post('/:id/amendments', async (c) => {
         manual_discount_type: line.manual_discount_type ?? null,
         manual_discount_value: Number(line.manual_discount_value) || 0,
         manual_discount_usd: Number(line.manual_discount_usd) || 0,
-        total_usd: Number(line.total_usd) || round2(oldPrice * currentQuantity),
+        total_usd: Number(line.total_usd),
       },
       after: {
         quantity: nextQty,
@@ -4200,11 +4342,12 @@ app.post('/:id/amendments', async (c) => {
       }
     }
     const plan = planLineQuantityIncrease({
+      moneyPrecisionVersion: 1,
       saleId, sale, line, addedQuantity: requested, lots, exchangeRate,
       userId: user?.id ?? null, userName: actorSnapshot(user),
     })
     statements.push(...plan.statements)
-    subtotalDeltaUsd += plan.subtotalDeltaUsd
+    subtotalDeltaUsd = sumMoney4([subtotalDeltaUsd,plan.subtotalDeltaUsd])
     unitsMoved += plan.unitsMoved
     ledgerEntries.push({
       saleId, kind: 'line_quantity_increased', groupId,
@@ -4225,6 +4368,7 @@ app.post('/:id/amendments', async (c) => {
       return c.json({ error: `This line only has ${line.quantity}.` }, 400)
     }
     const plan = planLineQuantityDecrease({
+      moneyPrecisionVersion: 1,
       saleId, sale, line, removedQuantity: requested, allocations, exchangeRate,
       reason: kind === 'line_replaced'
         ? `Line replaced on sale #${saleId}`
@@ -4232,7 +4376,7 @@ app.post('/:id/amendments', async (c) => {
       userId: user?.id ?? null, userName: actorSnapshot(user),
     })
     statements.push(...plan.statements)
-    subtotalDeltaUsd += plan.subtotalDeltaUsd
+    subtotalDeltaUsd = sumMoney4([subtotalDeltaUsd,plan.subtotalDeltaUsd])
     unitsMoved += plan.unitsMoved
     ledgerEntries.push({
       saleId,
@@ -4267,7 +4411,7 @@ app.post('/:id/amendments', async (c) => {
       return c.json({ error: 'The sale header and replacement line must use the same Shop branch.' }, 400)
     }
     const rawPrice = Number(replacement.applied_price_usd)
-    const unitPriceUsd = Number.isFinite(rawPrice) && rawPrice >= 0 ? rawPrice : Number(product.selling_price_usd) || 0
+    const unitPriceUsd = replacement.applied_price_usd === undefined ? sellingPriceCeilCent(product.selling_price_usd ?? 0) : newSaleMoney4(rawPrice)
 
     const lotsByKey = branchId
       ? await readFifoLotAvailabilityForCart(db, [{ productId, branchId }])
@@ -4285,8 +4429,9 @@ app.post('/:id/amendments', async (c) => {
     // must never move a unit. The kernel now takes the fact, not a status
     // that happens to imply it.
     const plannedLines = allocateNewSaleLines([{
+      moneyPrecisionVersion: 1,
       productId, productName: product.name || `product #${productId}`, quantity, branchId,
-      unitPriceUsd, costPriceUsd: Number(product.cost_price_usd) || 0, costPriceKhr: Number(product.cost_price_khr) || 0,
+      unitPriceUsd, costPriceUsd: product.cost_price_usd == null ? null : newSaleMoney4(product.cost_price_usd), costPriceKhr: product.cost_price_khr == null ? null : newSaleMoney4(product.cost_price_khr),
       batchId: null, batchLabel: null, batchExpiryDate: null,
     }], lotsByKey, saleStatus, !movesStock)
 
@@ -4306,7 +4451,7 @@ app.post('/:id/amendments', async (c) => {
       exchangeRate, userId: user?.id ?? null, userName: actorSnapshot(user),
     })
     statements.push(...additionPlan.statements)
-    subtotalDeltaUsd += additionPlan.addedSubtotalUsd
+    subtotalDeltaUsd = sumMoney4([subtotalDeltaUsd,additionPlan.addedSubtotalUsd])
     unitsMoved += -additionPlan.deductedUnits || 0
     ledgerEntries.push({
       saleId, kind: 'line_added', groupId,
@@ -4325,12 +4470,13 @@ app.post('/:id/amendments', async (c) => {
   // TAX follows the new base when this sale was taxed at today's configured
   // rate, and is kept verbatim with a stated reason when it was not
   // (DECISION 4a in lib/saleAmendments.ts). ----
-  const subtotalAfterUsd = round2(subtotalBeforeUsd + subtotalDeltaUsd)
+  const subtotalAfterUsd = sumMoney4([subtotalBeforeUsd,subtotalDeltaUsd])
   const taxPlan = planAmendedTax({
     saleId, sale, settings: moneySettings.tax,
     subtotalBeforeUsd, subtotalAfterUsd, exchangeRate,
   })
   const money = recomputeSaleMoneyAfterAmendment({
+    moneyPrecisionVersion: 1,
     sale,
     subtotalUsd: subtotalAfterUsd,
     taxUsdOverride: taxPlan.taxUsdOverride,
@@ -4348,7 +4494,11 @@ app.post('/:id/amendments', async (c) => {
 
   // Every ledger entry in this act ends at the sale's real new total; the
   // intermediate ones would be arithmetic nobody performed.
-  for (const entry of ledgerEntries) entry.totalAfterUsd = money.totalUsd
+  for (const entry of ledgerEntries) {
+    entry.totalAfterUsd = money.totalUsd; entry.moneyPrecisionVersion = 1
+    entry.before = {...entry.before,...precisionRecordMoney(moneyBeforeSnapshot)}
+    entry.after = {...entry.after,...precisionRecordMoney(moneyAfterSnapshot)}
+  }
 
   const response = buildAmendmentResponsePayload({
     saleId, sale, money, exchangeRate, stockMoved: movesStock, unitsMoved, stockSkipped, tax: taxPlan.outcome,
@@ -4364,9 +4514,10 @@ app.post('/:id/amendments', async (c) => {
       { sql: 'DELETE FROM sale_bulk_guards', params: {} },
       amendmentSettingsGuard(moneySettings),
       saleRevisionGuard(saleId, Number(sale.write_revision)),
+      precisionBasket!.guard,
       ...statements,
       ...taxPlan.statements,
-      rebaseSaleLineKhrStatement(saleId, exchangeRate),
+      canonicalSaleChildrenGuard(saleId),
       saleMoneyUpdateStatement(saleId, moneyAfterSnapshot),
       ...ledgerEntries.map(amendmentEntryStatement),
       saleMutationReceiptStatement({
@@ -4405,7 +4556,7 @@ app.post('/:id/amendments', async (c) => {
     entries: ledgerEntries.map((entry) => entry.kind),
     units_moved: unitsMoved,
     stock_skipped: stockSkipped,
-    subtotal_before: round2(subtotalBeforeUsd),
+    subtotal_before: subtotalBeforeUsd,
     subtotal_after: money.subtotalUsd,
     total_before: totalBeforeUsd,
     total_after: money.totalUsd,
@@ -4418,10 +4569,56 @@ app.post('/:id/amendments', async (c) => {
     notes: note,
   })
 
-  return c.json(response)
+  return c.json(await committedMutationResponse(db,mutationOperationId))
+  } catch (error) {
+    if (error instanceof SaleMoneyContractError || error instanceof MoneyPrecisionError) return c.json({ error: error.message, code: error.code },409)
+    throw error
+  }
 })
 
 type StatementList = Array<{ sql: string; params: Record<string, unknown> }>
+
+function canonicalSaleChildrenGuard(saleId: number | string): StatementList[number] {
+  const identity = typeof saleId === 'string' ? '(SELECT id FROM sales WHERE client_request_id=@canonicalSale)' : '@canonicalSale'
+  const amount = (key: string) => `(typeof(i.${key}) IN ('real','integer') AND i.${key} BETWEEN 0 AND 100000000000
+    AND i.${key}=CAST(ROUND(i.${key}*10000) AS INTEGER)/10000.0)`
+  const keys = ['applied_price_usd','applied_price_khr','total_usd','total_khr','product_discount_usd','product_discount_khr',
+    'base_price_usd','base_price_khr','manual_discount_usd','manual_discount_khr']
+  return saleMutationGuard(`(SELECT COUNT(*) FROM sale_items WHERE sale_id=${identity}) BETWEEN 1 AND 200
+    AND NOT EXISTS(SELECT 1 FROM sale_items i WHERE i.sale_id=${identity} AND NOT COALESCE((
+      ${keys.map(amount).join(' AND ')}
+      AND (i.cost_price_usd IS NULL OR ${amount('cost_price_usd')}) AND (i.cost_price_khr IS NULL OR ${amount('cost_price_khr')})
+      AND typeof(i.quantity) IN ('real','integer') AND i.quantity>0 AND i.quantity<=1.7976931348623157e308
+      AND (i.manual_discount_type IS NOT 'fixed' OR ${amount('manual_discount_value')})
+    ),0))`,{ canonicalSale:saleId }, 3)
+}
+
+async function capturePrecisionBasket(db: ReturnType<typeof getDb>, sale: Record<string,unknown>) {
+  const lines = await db.prepare('SELECT * FROM sale_items WHERE sale_id=? ORDER BY id').all<Record<string,unknown>>([Number(sale.id)])
+  assertCanonicalSaleChildren(lines)
+  for (const key of ['subtotal_usd','discount_usd','membership_discount_usd','tax_usd','delivery_fee_usd']) canonicalMoney4(sale[key],true)
+  if (Number(sale.money_precision_version) === 0 && await db.prepare('SELECT 1 AS found FROM returns WHERE sale_id=? LIMIT 1').get([Number(sale.id)]))
+    throw new SaleMoneyContractError('money_precision_legacy_refund_review_needed')
+  const header = { ...sale }; delete header.write_revision
+  const headerJson = JSON.stringify(header), lineJson = JSON.stringify(lines)
+  if (new TextEncoder().encode(headerJson + lineJson).byteLength > 500_000)
+    throw new SaleMoneyContractError('money_precision_basket_review_needed')
+  const keys = (row: Record<string,unknown>) => Object.keys(row).map(key => {
+    if (!/^[a-z][a-z0-9_]*$/.test(key)) throw new SaleMoneyContractError('money_precision_invalid_snapshot')
+    return key
+  })
+  const guard = saleMutationGuard(`EXISTS(SELECT 1 FROM sales s WHERE s.id=@precisionSale AND ${keys(header).map(key => `s.${key} IS json_extract(@precisionHeader,'$.${key}')`).join(' AND ')})
+    AND (SELECT COUNT(*) FROM sale_items WHERE sale_id=@precisionSale)=json_array_length(@precisionLines)
+    AND NOT EXISTS(SELECT 1 FROM json_each(@precisionLines) j WHERE NOT EXISTS(
+      SELECT 1 FROM sale_items i WHERE i.sale_id=@precisionSale AND ${keys(lines[0]).map(key => `i.${key} IS json_extract(j.value,'$.${key}')`).join(' AND ')}))`,
+    { precisionSale: Number(sale.id), precisionHeader: headerJson, precisionLines: lineJson }, 2)
+  return { lines, guard }
+}
+
+function precisionRecordMoney(value: Record<string,unknown>): Record<string,unknown> {
+  return Object.fromEntries(['money_precision_version','calculated_total_usd','rounding_adjustment_usd']
+    .filter(key => Object.prototype.hasOwnProperty.call(value,key)).map(key => [key,value[key]]))
+}
 
 function nullableNumber(value: unknown): number | null {
   return value == null ? null : Number(value) || 0
@@ -4429,11 +4626,16 @@ function nullableNumber(value: unknown): number | null {
 
 function receiptKhrFromUsd(value: unknown, exchangeRate: number): number | null {
   if (value == null) return null
-  return financialCalculationValue(financialCalculationValue(Number(value) || 0) * financialCalculationValue(exchangeRate))
+  return multiplyMoney4(value as number,exchangeRate)
 }
 
 function amendmentMoneyBefore(sale: Record<string, unknown>) {
   return {
+    ...(sale.money_precision_version === undefined ? {} : {
+      money_precision_version: Number(sale.money_precision_version) as 0 | 1,
+      calculated_total_usd: sale.calculated_total_usd == null ? null : Number(sale.calculated_total_usd),
+      rounding_adjustment_usd: Number(sale.rounding_adjustment_usd),
+    }),
     exchange_rate: nullableNumber(sale.exchange_rate),
     updated_at: sale.updated_at == null ? null : String(sale.updated_at),
     subtotal_usd: Number(sale.subtotal_usd) || 0,
@@ -4453,13 +4655,22 @@ function amendmentMoneyBefore(sale: Record<string, unknown>) {
 
 function amendmentMoneyAfter(
   sale: Record<string, unknown>,
-  money: { subtotalUsd: number; subtotalKhr: number; totalUsd: number; totalKhr: number; changeUsd: number; changeKhr: number },
+  money: { subtotalUsd: number; subtotalKhr: number; totalUsd: number; totalKhr: number; changeUsd: number; changeKhr: number; moneyPrecisionVersion?: 1; calculatedTotalUsd?: number; roundingAdjustmentUsd?: number },
   exchangeRate: number,
   stamp: string,
   taxUsd: number,
   deliveryFeeUsd: number,
 ) {
   return {
+    ...(money.moneyPrecisionVersion === 1 ? {
+      money_precision_version: 1 as const,
+      calculated_total_usd: money.calculatedTotalUsd!,
+      rounding_adjustment_usd: money.roundingAdjustmentUsd!,
+    } : sale.money_precision_version === undefined ? {} : {
+      money_precision_version: Number(sale.money_precision_version) as 0 | 1,
+      calculated_total_usd: sale.calculated_total_usd == null ? null : Number(sale.calculated_total_usd),
+      rounding_adjustment_usd: Number(sale.rounding_adjustment_usd),
+    }),
     exchange_rate: exchangeRate,
     updated_at: stamp,
     subtotal_usd: money.subtotalUsd,
@@ -4496,7 +4707,7 @@ function saleMutationReceiptStatement(input: {
             before_json,after_json,response_json,generation,sale_revision,updated_at
           ) VALUES(
             @operation,@actor,@saleId,@kind,@request,@digest,@requestJson,
-            @beforeJson,@afterJson,@responseJson,0,
+            @beforeJson,@afterJson,${canonicalMutationResponseSql('@responseJson')},0,
             COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@saleId),0),@stamp
           )`,
     params: {
@@ -4565,7 +4776,7 @@ async function readAmendmentMoneySettings(db: ReturnType<typeof getDb>): Promise
     changeExchangeRateRaw: map.change_exchange_rate,
     taxEnabledRaw: map[TAX_ENABLED_SETTING_KEY],
     taxRateRaw: map[TAX_RATE_SETTING_KEY],
-    tax: resolveTaxSettings(map[TAX_ENABLED_SETTING_KEY], map[TAX_RATE_SETTING_KEY]),
+    tax: resolveTaxSettings(map[TAX_ENABLED_SETTING_KEY], map[TAX_RATE_SETTING_KEY], 1),
   }
 }
 
@@ -4588,17 +4799,18 @@ function planAmendedTax(input: {
   exchangeRate: number
 }): { outcome: AmendedTaxResult; taxUsdOverride: number | null; statements: StatementList } {
   const outcome = resolveAmendedTaxUsd({
+    moneyPrecisionVersion: 1,
     sale: input.sale,
-    taxableBaseBeforeUsd: taxableBaseUsd(input.sale, input.subtotalBeforeUsd),
-    taxableBaseAfterUsd: taxableBaseUsd(input.sale, input.subtotalAfterUsd),
+    taxableBaseBeforeUsd: taxableBaseUsd(input.sale, input.subtotalBeforeUsd, 1),
+    taxableBaseAfterUsd: taxableBaseUsd(input.sale, input.subtotalAfterUsd, 1),
     settings: input.settings,
   })
-  const storedTax = round2(Number(input.sale.tax_usd) || 0)
-  const moved = outcome.recomputed && Math.abs(outcome.taxUsd - storedTax) >= 0.005
+  const storedTax = Number(input.sale.tax_usd) || 0
+  const moved = outcome.recomputed && outcome.taxUsd !== storedTax
   return {
     outcome,
     taxUsdOverride: outcome.recomputed ? outcome.taxUsd : null,
-    statements: moved ? [saleTaxUpdateStatement(input.saleId, outcome.taxUsd, input.exchangeRate)] : [],
+    statements: moved ? [saleTaxUpdateStatement(input.saleId, outcome.taxUsd, input.exchangeRate, 1)] : [],
   }
 }
 

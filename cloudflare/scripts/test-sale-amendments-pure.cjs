@@ -55,7 +55,8 @@ function compile(file, stubs = {}) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
   }).outputText
   const moduleObj = { exports: {} }
-  const localRequire = (request) => Object.prototype.hasOwnProperty.call(stubs, request) ? stubs[request] : require(request)
+  const localRequire = (request) => Object.prototype.hasOwnProperty.call(stubs, request) ? stubs[request]
+    : ['./moneyPrecision','./saleMoneyPrecision'].includes(request) ? compile(`${request.slice(2)}.ts`) : require(request)
   new Function('exports', 'require', 'module', output)(moduleObj.exports, localRequire, moduleObj)
   return moduleObj.exports
 }

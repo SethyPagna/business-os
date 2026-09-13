@@ -24,7 +24,7 @@ import { amendmentEntryStatement } from './saleAmendments'
 import { replaySaleBulkStatus } from './saleBulkStatus'
 import { BULK_CUSTOMER_UPDATE_KIND, BULK_UPDATE_KIND, MULTI_CUSTOMER_UPDATE_KIND, SINGLE_CUSTOMER_UPDATE_KIND, replaySaleBulkUpdate } from './saleBulkUpdate'
 import { RETURN_BULK_ACTION_KIND, replayReturnBulkAction } from './returnBulkAction'
-import { SALE_SETTLEMENT_ACTION_KIND, replaySaleSettlementAction, saleMutationGuard } from './saleSettlementAction'
+import { SALE_SETTLEMENT_ACTION_KIND, replaySaleSettlementAction, saleMutationGuard, samePrecisionCompatibleState } from './saleSettlementAction'
 import { STOCK_SESSION_KIND, replayStockSession } from './stockSession'
 import { actorSnapshot } from './actorSnapshot'
 import { CUSTOMER_GENDER_RESTORATION_KIND, replayCustomerGenderRestoration } from './customerGenderRestoration'
@@ -639,6 +639,17 @@ async function saleStateFingerprint(db: ReturnType<typeof getDb>, saleId: number
   return JSON.stringify({ sale, lines, amendmentHeadId: Number(amendmentHead?.id) || 0 })
 }
 
+export function sameSaleStateFingerprint(currentJson: string, expectedJson: string): boolean {
+  if (currentJson === expectedJson) return true
+  try {
+    const current = JSON.parse(currentJson), expected = JSON.parse(expectedJson)
+    if (!current?.sale || !expected?.sale || !samePrecisionCompatibleState(current.sale,expected.sale)) return false
+    // Only the sale's additive precision defaults may differ. Lines, amendment
+    // head and every other captured field retain their exact comparison.
+    return JSON.stringify({ ...current, sale: expected.sale }) === expectedJson
+  } catch { return false }
+}
+
 type AtomicSaleAddItemsReversal = SaleAddItemsReversal & {
   operationId?: unknown
   saleStateRevision?: unknown
@@ -665,6 +676,11 @@ function saleAddItemsAuditStatement(
       details,
     },
   }
+}
+
+function salePrecisionLedgerFields(value: Record<string,unknown>): Record<string,unknown> {
+  return Object.fromEntries(['money_precision_version','calculated_total_usd','rounding_adjustment_usd']
+    .filter(key => Object.prototype.hasOwnProperty.call(value,key)).map(key => [key,value[key]]))
 }
 
 async function replayAtomicSaleAddItems(
@@ -774,6 +790,8 @@ async function replayAtomicSaleAddItems(
       saleMoneyUpdateStatement(saleId, reversal.moneyBefore),
       ...(reversal.lineMoneyBefore ? [saleLineKhrSnapshotStatement(saleId, reversal.lineMoneyBefore)] : []),
       ...lines.map((line) => amendmentEntryStatement({
+        ...(reversal.moneyAfter.money_precision_version === 1 ? {moneyPrecisionVersion:1 as const,
+          before:salePrecisionLedgerFields(reversal.moneyAfter),after:salePrecisionLedgerFields(reversal.moneyBefore)} : {}),
         saleId, kind: 'line_removed', groupId: undoGroupId,
         saleItemId: line.saleItemId, productId: line.productId, productName: line.productName,
         quantityBefore: line.quantity, quantityAfter: 0,
@@ -810,6 +828,8 @@ async function replayAtomicSaleAddItems(
       saleMoneyUpdateStatement(saleId, reversal.moneyAfter),
       ...(reversal.lineMoneyAfter ? [saleLineKhrSnapshotStatement(saleId, reversal.lineMoneyAfter)] : []),
       ...plan.lines.map((line) => amendmentEntryStatement({
+        ...(reversal.moneyAfter.money_precision_version === 1 ? {moneyPrecisionVersion:1 as const,
+          before:salePrecisionLedgerFields(reversal.moneyBefore),after:salePrecisionLedgerFields(reversal.moneyAfter)} : {}),
         saleId, kind: 'line_added', groupId: redoGroupId,
         productId: line.productId, productName: line.productName,
         quantityBefore: 0, quantityAfter: line.quantity,
@@ -2213,7 +2233,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
       } else if (ctx.direction === 'undo') {
         if (String(snap.status) !== 'applied') throw new Error('These added items have already been removed.')
         const savedFingerprint = (reversal as SaleAddItemsReversal & { saleStateFingerprint?: string }).saleStateFingerprint
-        if (savedFingerprint && await saleStateFingerprint(db, saleId) !== savedFingerprint) {
+        if (savedFingerprint && !sameSaleStateFingerprint(await saleStateFingerprint(db, saleId),savedFingerprint)) {
           throw new UndoConflictError('This sale was edited after the items were added, so this can no longer be undone safely.')
         }
         const removal = planSaleLineRemoval({
@@ -2239,6 +2259,8 @@ const APPLIERS: Record<string, UndoApplierDef> = {
             ? [saleLineKhrSnapshotStatement(saleId, reversal.lineMoneyBefore)]
             : []),
           ...(reversal.lines || []).map((line) => amendmentEntryStatement({
+            ...(reversal.moneyAfter.money_precision_version === 1 ? {moneyPrecisionVersion:1 as const,
+              before:salePrecisionLedgerFields(reversal.moneyAfter),after:salePrecisionLedgerFields(reversal.moneyBefore)} : {}),
             saleId,
             kind: 'line_removed',
             groupId: undoGroupId,
@@ -2288,6 +2310,8 @@ const APPLIERS: Record<string, UndoApplierDef> = {
             ? [saleLineKhrSnapshotStatement(saleId, reversal.lineMoneyAfter)]
             : []),
           ...plan.lines.map((line) => amendmentEntryStatement({
+            ...(reversal.moneyAfter.money_precision_version === 1 ? {moneyPrecisionVersion:1 as const,
+              before:salePrecisionLedgerFields(reversal.moneyBefore),after:salePrecisionLedgerFields(reversal.moneyAfter)} : {}),
             saleId,
             kind: 'line_added',
             groupId: redoGroupId,

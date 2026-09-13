@@ -13,6 +13,7 @@ import {
   paymentMethodKey,
 } from './paymentMethodRegistry'
 import { resolveChangeExchangeRate } from './saleTotals'
+import { subtractDecimalSum, weightedMeanMoney4 } from './moneyPrecision'
 
 export const MAX_SETTLEMENT_TENDER_ROWS = 12
 
@@ -99,6 +100,7 @@ export type SettlementPlan = {
 }
 
 export function planSaleSettlement(input: {
+  moneyPrecisionVersion?: 0 | 1
   configuredMethodsRaw: unknown
   paymentDetailsRaw: unknown
   existingPaidUsd: unknown
@@ -262,18 +264,32 @@ export function planSaleSettlement(input: {
   let rateUnits: bigint
   let totalUsdUnits: bigint
   try {
-    rateUnits = financialCalculationUnits(rate)
+    rateUnits = input.moneyPrecisionVersion === 1 ? 0n : financialCalculationUnits(rate)
     totalUsdUnits = financialCalculationUnits(totalUsd)
   } catch {
     fail('The sale total or current exchange rate is invalid.', 'invalid_payment_amount')
   }
   const paidCombinedUsd = amountPaidUsd + amountPaidKhr / rate
-  const paidScaled = paidUsdUnits * rateUnits + paidKhrUnits * 10_000n
-  const totalScaled = totalUsdUnits * rateUnits
+  // V1 rates are decimal ratios, not money: never quantize the rate to four places.
+  const rateShape = decimalShape(rate)!
+  const rateNumerator = input.moneyPrecisionVersion === 1
+    ? BigInt(rateShape.coefficient) * 10n ** BigInt(Math.max(0,-rateShape.decimalScale)) : rateUnits
+  const rateDenominator = input.moneyPrecisionVersion === 1
+    ? 10n ** BigInt(Math.max(0,rateShape.decimalScale)) : 10_000n
+  const paidScaled = paidUsdUnits * rateNumerator + paidKhrUnits * rateDenominator
+  const totalScaled = totalUsdUnits * rateNumerator
   if (paidScaled < totalScaled) {
     fail('The payment does not cover the sale balance.', 'insufficient_payment')
   }
-  const overpayExactUsd = Math.max(0, paidCombinedUsd - totalUsd)
+  let overpayExactUsd: number
+  try {
+    overpayExactUsd = input.moneyPrecisionVersion === 1 ? Math.max(0,weightedMeanMoney4([
+      {amount:subtractDecimalSum(amountPaidUsd,[totalUsd]),factor:rate},
+      {amount:amountPaidKhr,factor:1},
+    ],rate)) : Math.max(0, paidCombinedUsd - totalUsd)
+  } catch {
+    fail('The converted payment exceeds the supported monetary range.', 'invalid_payment_amount')
+  }
   const changeRate = resolveChangeExchangeRate(input.changeExchangeRateRaw, rate)
   const distinctMethods: string[] = []
   const seen = new Set<string>()

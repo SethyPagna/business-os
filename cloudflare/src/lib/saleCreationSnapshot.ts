@@ -1,5 +1,6 @@
 import type { ActorLike } from './actorSnapshot'
 import { actorId, actorSnapshot } from './actorSnapshot'
+import { validateSaleMoneySnapshot } from './saleMoneyPrecision'
 
 export const SALE_CREATION_SNAPSHOT_VERSION = 1 as const
 export const MAX_SALE_CREATION_SNAPSHOT_LINES = 200
@@ -28,6 +29,9 @@ export interface SaleCreationLineInput {
 }
 
 export interface SaleCreationSnapshotInput {
+  moneyPrecisionVersion?: 0 | 1
+  calculatedTotalUsd?: number | null
+  roundingAdjustmentUsd?: number
   origin: SaleCreationOrigin
   recordedAt: string
   saleAt?: unknown
@@ -61,6 +65,9 @@ export interface SaleCreationSnapshotInput {
 }
 
 export interface SaleCreationSnapshotV1 {
+  money_precision_version?: 0 | 1
+  calculated_total_usd?: number | null
+  rounding_adjustment_usd?: number
   version: typeof SALE_CREATION_SNAPSHOT_VERSION
   origin: SaleCreationOrigin
   recorded_at: string
@@ -161,6 +168,11 @@ export function buildSaleCreationSnapshot(input: SaleCreationSnapshotInput): str
     throw new SaleCreationSnapshotError('Sale creation snapshot sale_at is invalid.')
   }
   const snapshot: SaleCreationSnapshotV1 = {
+    ...(input.moneyPrecisionVersion === undefined ? {} : {
+      money_precision_version: input.moneyPrecisionVersion,
+      calculated_total_usd: input.calculatedTotalUsd ?? null,
+      rounding_adjustment_usd: input.roundingAdjustmentUsd ?? 0,
+    }),
     version: SALE_CREATION_SNAPSHOT_VERSION,
     origin: input.origin,
     recorded_at: recordedAt,
@@ -206,6 +218,7 @@ export function buildSaleCreationSnapshot(input: SaleCreationSnapshotInput): str
       },
     }),
   }
+  validateSaleMoneySnapshot(snapshot)
   const serialized = JSON.stringify(snapshot)
   if (utf8Bytes(serialized) > MAX_SALE_CREATION_SNAPSHOT_BYTES) {
     throw new SaleCreationSnapshotError('Sale creation snapshot exceeds the storage safety limit.')
@@ -231,5 +244,6 @@ export function parseSaleCreationSnapshot(value: unknown): SaleCreationSnapshotV
   if (!candidate.delivery || typeof candidate.delivery !== 'object' || Array.isArray(candidate.delivery)) return null
   if (candidate.payment_details !== null && !Array.isArray(candidate.payment_details)) return null
   if (!text(candidate.recorded_at) || !Number.isFinite(Date.parse(String(candidate.recorded_at)))) return null
+  try { validateSaleMoneySnapshot(candidate) } catch { return null }
   return candidate as SaleCreationSnapshotV1
 }

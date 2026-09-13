@@ -36,7 +36,9 @@ function transpile(relPath) {
 
 function loadModule(relPath, requireShim) {
   const module = { exports: {} }
-  new Function('exports', 'require', 'module', transpile(relPath))(module.exports, requireShim, module)
+  const actualPrecisionRequire = id => ['./moneyPrecision','./saleMoneyPrecision'].includes(id)
+    ? loadModule(`lib/${id.slice(2)}.ts`,require) : requireShim(id)
+  new Function('exports', 'require', 'module', transpile(relPath))(module.exports, actualPrecisionRequire, module)
   return module.exports
 }
 

@@ -46,7 +46,9 @@ function compile(file, stubs = {}) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
   }).outputText
   const moduleObj = { exports: {} }
-  const localRequire = (request) => Object.prototype.hasOwnProperty.call(stubs, request) ? stubs[request] : require(request)
+  const localRequire = (request) => Object.prototype.hasOwnProperty.call(stubs, request) ? stubs[request]
+    : ['./moneyPrecision','./saleMoneyPrecision','./customerGenderRestoration','./cache','./quotaGuard','./analytics'].includes(request)
+      ? compile(`${request.slice(2)}.ts`,stubs) : require(request)
   new Function('exports', 'require', 'module', output)(moduleObj.exports, localRequire, moduleObj)
   return moduleObj.exports
 }
@@ -113,7 +115,9 @@ function setup() {
       total_usd REAL, total_khr REAL, amount_paid_usd REAL DEFAULT 0, amount_paid_khr REAL DEFAULT 0,
       change_usd REAL DEFAULT 0, change_khr REAL DEFAULT 0, change_is_actual INTEGER DEFAULT 0,
       change_exchange_rate REAL, updated_at TEXT);
+    CREATE TABLE returns (id INTEGER PRIMARY KEY, total_refund_usd REAL);
   `)
+  sqlite.exec(fs.readFileSync(path.join(__dirname,'..','migrations','0158_sale_return_money_precision.sql'),'utf8'))
   const apply = (statements) => {
     const run = sqlite.transaction(() => statements.map(({ sql, params }) => sqlite.prepare(sql).run(params || {})))
     return run()
