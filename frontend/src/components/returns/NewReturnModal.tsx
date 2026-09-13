@@ -309,6 +309,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
   const [quote, setQuote] = useState<ReturnQuoteV1 | null>(null)
   const [quoteBusy, setQuoteBusy] = useState(false)
   const [pendingV1, setPendingV1] = useState<PendingReturnCreateV1 | null>(null)
+  const [reviewedPendingBody, setReviewedPendingBody] = useState<string | null>(null)
   const [pendingError, setPendingError] = useState('')
   const [pendingLoaded, setPendingLoaded] = useState(false)
   const [pendingQuoteRejected, setPendingQuoteRejected] = useState(false)
@@ -910,6 +911,8 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
       const transport = await loadReturnsTransport()
       if (!current()) return
       let pending = pendingV1 || transport.loadPendingReturnCreateV1(user?.id)
+      const recovery = pending ? transport.authorizeReturnCreateRecovery(user?.id, pending, reviewedPendingBody === pending.bodyJson) : undefined
+      setReviewedPendingBody(null)
       if (!pending) {
         if (!isV1Sale || !quote || reviewedIntentRef.current !== quoteIntent || pendingError) throw Object.assign(new Error('return_v1_review_required'), { code: 'return_v1_review_required' })
         if (replacements.length || !activeItems.length || !finalReason || itemsMissingLot.length) throw Object.assign(new Error('return_v1_review_required'), { code: 'return_v1_review_required' })
@@ -923,9 +926,9 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
         if (!current()) return
         setPendingV1(pending)
       }
-      const result = await withLoaderTimeout(() => transport.submitReturnCreateV1(user?.id, pending!), 'Create net return', RETURN_CREATE_TIMEOUT_MS)
+      const result = await withLoaderTimeout(() => transport.submitReturnCreateV1(user?.id, pending!, recovery), 'Create net return', RETURN_CREATE_TIMEOUT_MS)
       if (!current()) return
-      await transport.clearPendingReturnCreateV1(user?.id, pending)
+      await transport.clearPendingReturnCreateV1(user?.id, pending, recovery)
       if (!current()) return
       setPendingV1(null)
       notify(T('success', 'Return created successfully'), 'success')
@@ -944,20 +947,30 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
     }
   }
 
-  if (sessionStale) return createPortal(<div className="modal-viewport-safe fixed inset-0 z-[1050] flex items-center justify-center bg-black/50 p-4"><div role="dialog" aria-modal="true" className="w-full max-w-lg rounded-xl bg-white p-4 dark:bg-gray-800"><p role="status">{T('return_v1_session_changed', 'Your session changed. Close and reopen this return before continuing.')}</p><button className="btn-secondary mt-4 w-full" onClick={onClose}>{T('close', 'Close')}</button></div></div>, document.body)
+  if (sessionStale || !isActorReadScopeCurrent(lifecycle.current.scope, false)) return createPortal(<div className="modal-viewport-safe fixed inset-0 z-[1050] flex items-center justify-center bg-black/50 p-4"><div role="dialog" aria-modal="true" className="w-full max-w-lg rounded-xl bg-white p-4 dark:bg-gray-800"><p role="status">{T('return_v1_session_changed', 'Your session changed. Close and reopen this return before continuing.')}</p><button className="btn-secondary mt-4 w-full" onClick={onClose}>{T('close', 'Close')}</button></div></div>, document.body)
 
-  if (pendingV1) return createPortal(
+  const pendingReview = pendingV1 ? JSON.parse(pendingV1.bodyJson) as { return_number: string; reason?: string; expected_quote: ReturnQuoteV1; items: Array<{ sale_item_id: number; quantity: number; stock_action: string }> } : null
+  if (pendingV1 && pendingReview) return createPortal(
     <div className="modal-viewport-safe fixed inset-0 z-[1050] flex items-end justify-center bg-black/50 p-4 sm:items-center">
       <div role="dialog" aria-modal="true" aria-label={T('new_return', 'New Return')} className="w-full max-w-lg rounded-xl bg-white p-4 dark:bg-gray-800">
         <p role="status" className="mb-4 text-sm">{T('return_v1_pending', 'An earlier return has an unknown outcome. Retry only the saved original request.')}</p>
+        <div className="mb-3 max-h-64 overflow-auto rounded border p-3 text-sm">
+          <p className="break-all">{T('return_number', 'Return #')}: {pendingReview.return_number}</p>
+          <p>{T('refund_amount', 'Refund Amount')}: ${pendingReview.expected_quote.total_refund_usd.toFixed(2)} / {pendingReview.expected_quote.total_refund_khr}៛</p>
+          <p className="break-words">{T('reason', 'Reason')}: {pendingReview.reason}</p>
+          <ul className="mt-2 space-y-1">{pendingReview.items.map(item => <li key={item.sale_item_id}>#{item.sale_item_id} · {T('quantity', 'Quantity')}: {item.quantity} · {T('stock_action', 'Stock action')}: {T(item.stock_action, item.stock_action)}</li>)}</ul>
+        </div>
+        <details className="mb-3"><summary className="cursor-pointer text-sm">{T('details', 'Details')}</summary><pre tabIndex={0} className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded border p-2 text-xs">{JSON.stringify(JSON.parse(pendingV1.bodyJson), null, 2)}</pre></details>
+        <label className="mb-4 flex items-start gap-2 text-sm"><input type="checkbox" disabled={submitting} checked={reviewedPendingBody === pendingV1.bodyJson} onChange={event => setReviewedPendingBody(event.target.checked ? pendingV1.bodyJson : null)} />{T('confirm', 'Confirm')}: {T('retry_original_request', 'Retry original request')}</label>
         <div className="flex gap-2"><button type="button" disabled={submitting} onClick={onClose} className="btn-secondary flex-1">{T('close', 'Close')}</button>
-          <button type="button" disabled={submitting} onClick={submitNetReturn} className="btn-primary flex-1">{submitting ? T('submitting', 'Processing…') : T('retry_original_request', 'Retry original request')}</button></div>
+          <button type="button" disabled={submitting || reviewedPendingBody !== pendingV1.bodyJson} onClick={submitNetReturn} className="btn-primary flex-1">{submitting ? T('submitting', 'Processing…') : T('retry_original_request', 'Retry original request')}</button></div>
         {pendingQuoteRejected && <button type="button" disabled={submitting} className="btn-secondary mt-3 w-full" onClick={async () => {
           const scope = captureActorReadScope('returns'), generation = lifecycle.current.generation
           try {
             const transport = await loadReturnsTransport()
             if (!lifecycle.current.alive || lifecycle.current.generation !== generation || !isActorReadScopeCurrent(scope, false)) return
-            await transport.clearPendingReturnCreateV1(user?.id, pendingV1)
+            const recovery = transport.authorizeReturnCreateRecovery(user?.id, pendingV1, reviewedPendingBody === pendingV1.bodyJson)
+            await transport.clearPendingReturnCreateV1(user?.id, pendingV1, recovery)
             if (!lifecycle.current.alive || lifecycle.current.generation !== generation || !isActorReadScopeCurrent(scope, false)) return
             setPendingV1(null); setPendingQuoteRejected(false); setQuote(null); reviewedIntentRef.current = null
             setStep(foundSale ? 'items' : 'search')

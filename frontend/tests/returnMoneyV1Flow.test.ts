@@ -25,6 +25,7 @@ function setup(options: { restored?: boolean; storageFailure?: boolean; timeout?
   const pending = { bodyJson: '{"client_request_id":"original"}' }
   const transport = {
     loadPendingReturnCreateV1: () => options.restored ? pending : null,
+    authorizeReturnCreateRecovery: (_actor: unknown, actual: unknown, reviewed: boolean) => { assert.equal(actual, pending); if (!reviewed) throw Error('review required'); events.push('authorize'); return { original: pending } },
     prepareReturnCreateV1: () => { events.push('prepare'); if (options.storageFailure) throw Error('storage failure'); return pending },
     submitReturnCreateV1: (_actor: unknown, actual: unknown) => { assert.equal(actual, pending); events.push('POST'); return network.promise },
     clearPendingReturnCreateV1: () => { events.push('clear') },
@@ -34,7 +35,7 @@ function setup(options: { restored?: boolean; storageFailure?: boolean; timeout?
     sessionStale: false, lifecycle, beginSingleAction, finishSingleAction, submitInFlightRef: { current: false },
     captureActorReadScope: () => ({ authority }), isActorReadScopeCurrent: (scope: { authority: number }) => scope.authority === authority,
     setSubmitting: (value: boolean) => events.push('busy:' + value), loadReturnsTransport: async () => transport,
-    pendingV1: null, pendingLoaded: true, user: { id: 7 }, isV1Sale: true, quote: { sale_id: 11 }, reviewedIntentRef: { current: 'exact' }, quoteIntent: 'exact', pendingError: '',
+    pendingV1: null, pendingLoaded: true, reviewedPendingBody: options.restored ? pending.bodyJson : null, setReviewedPendingBody: () => {}, user: { id: 7 }, isV1Sale: true, quote: { sale_id: 11 }, reviewedIntentRef: { current: 'exact' }, quoteIntent: 'exact', pendingError: '',
     replacements: [], activeItems: [{ id: 3, returnQty: 1, stock_action: 'none', branch_id: 2 }], finalReason: 'reason', itemsMissingLot: [],
     notes: '', returnType: 'refund', foundSale: { id: 11, branch_id: 2 }, setPendingV1: (value: unknown) => events.push(value ? 'pending' : 'unpending'),
     withLoaderTimeout: async (fn: () => Promise<unknown>) => { const promise = fn(); if (options.timeout) { void promise.catch(() => {}); throw Error('timeout') } return promise }, RETURN_CREATE_TIMEOUT_MS: 1,
@@ -113,4 +114,15 @@ for (const bindings of [{ pendingLoaded: false, pendingError: '' }, { pendingLoa
 const exactQuantity = callback('../src/components/returns/NewReturnModal.tsx', 'exactReturnQuantity', { subtractDecimalSum })
 assert.equal(await exactQuantity(.3, [.1]), .2, 'Select All preserves the exact remaining fractional quantity')
 assert.throws(() => exactQuantity(.3, [-1e-20]), /return_v1_review_required/, 'unrepresentable quantity is not silently lost')
+{
+  const h = setup({ restored: true }); h.bindings.reviewedPendingBody = null
+  await h.handler()()
+  assert.ok(!h.events.includes('POST'), 'saved original must be explicitly reviewed before recovery')
+}
+{
+  const h = setup({ restored: true, timeout: true }); await h.handler()()
+  assert.ok(h.events.includes('authorize')); assert.ok(h.events.includes('POST')); assert.ok(!h.events.includes('clear'))
+  h.switchActor(); h.network.resolve({ id: 1 }); await new Promise(resolve => setTimeout(resolve, 0))
+  assert.ok(!h.events.includes('success')); assert.ok(!h.events.includes('clear'))
+}
 console.log('PASS actual return modal callbacks: one-flight, freeze-before-send, timeout/reopen, stale quote, actor changes at awaits, no late publications, v1 edit refuses legacy submit')

@@ -157,6 +157,26 @@ export function pendingReturnCreateSessionCurrent(pending: PendingReturnCreateV1
   const current = returnPendingScope(actorId)
   return pending.actor === current.actor && pending.origin === current.origin && pending.session === current.session
 }
+export type ReturnCreateRecovery = { scope: ActorReadScope; actor: string; origin: string; bodyJson: string }
+const returnRecoveryAuthorizations = new WeakSet<ReturnCreateRecovery>()
+// Ephemeral, explicit review authorization. Never rebind the durable envelope.
+export function authorizeReturnCreateRecovery(actorId: unknown, pending: PendingReturnCreateV1, reviewed: boolean): ReturnCreateRecovery {
+  const current = returnPendingScope(actorId)
+  if (reviewed !== true || pending.actor !== current.actor || pending.origin !== current.origin
+    || loadPendingReturnCreateV1(actorId)?.bodyJson !== pending.bodyJson) throw returnV1Error('return_v1_review_required')
+  const authorization = { scope: captureActorReadScope('returns'), actor: current.actor, origin: current.origin, bodyJson: pending.bodyJson }
+  returnRecoveryAuthorizations.add(authorization)
+  return authorization
+}
+function assertReturnCreateAdmission(actorId: unknown, pending: PendingReturnCreateV1, recovery?: ReturnCreateRecovery): void {
+  const current = returnPendingScope(actorId)
+  if (pending.actor !== current.actor || pending.origin !== current.origin) throw returnV1Error('return_v1_session_changed')
+  if (recovery) {
+    if (!returnRecoveryAuthorizations.has(recovery) || recovery.actor !== current.actor || recovery.origin !== current.origin
+      || recovery.bodyJson !== pending.bodyJson) throw returnV1Error('return_v1_session_changed')
+    assertActorReadScope(recovery.scope, false)
+  } else if (!pendingReturnCreateSessionCurrent(pending, actorId)) throw returnV1Error('return_v1_session_changed')
+}
 export async function prepareReturnCreateV1(actorId: unknown, payload: ReturnPayload, quote: ReturnQuoteV1): Promise<PendingReturnCreateV1> {
   const scope = captureActorReadScope('returns')
   const current = returnPendingScope(actorId)
@@ -178,7 +198,7 @@ export async function prepareReturnCreateV1(actorId: unknown, payload: ReturnPay
   return pending
   })
 }
-export async function clearPendingReturnCreateV1(actorId: unknown, pending: PendingReturnCreateV1): Promise<void> {
+export async function clearPendingReturnCreateV1(actorId: unknown, pending: PendingReturnCreateV1, recovery?: ReturnCreateRecovery): Promise<void> {
   const scope = captureActorReadScope('returns')
   const current = returnPendingScope(actorId)
   if (!navigator.locks?.request) throw returnV1Error('return_v1_storage_failed')
@@ -186,7 +206,8 @@ export async function clearPendingReturnCreateV1(actorId: unknown, pending: Pend
   assertActorReadScope(scope, false)
   const saved = loadPendingReturnCreateV1(actorId)
   if (!saved) return
-  if (saved.bodyJson !== pending.bodyJson || !pendingReturnCreateSessionCurrent(pending, actorId)) throw returnV1Error('return_v1_session_changed')
+  if (saved.bodyJson !== pending.bodyJson) throw returnV1Error('return_v1_session_changed')
+  assertReturnCreateAdmission(actorId, pending, recovery)
   try {
     window.localStorage.removeItem(current.key)
     if (window.localStorage.getItem(current.key) != null) throw new Error('readback')
@@ -194,11 +215,12 @@ export async function clearPendingReturnCreateV1(actorId: unknown, pending: Pend
   })
 }
 const returnCreateFlights = new Set<string>()
-export async function submitReturnCreateV1(actorId: unknown, pending: PendingReturnCreateV1): Promise<unknown> {
+export async function submitReturnCreateV1(actorId: unknown, pending: PendingReturnCreateV1, recovery?: ReturnCreateRecovery): Promise<unknown> {
   const scope: ActorReadScope = captureActorReadScope('returns')
   assertActorReadScope(scope, false)
   if (navigator.onLine === false) throw returnV1Error('return_v1_unavailable')
-  if (!pendingReturnCreateSessionCurrent(pending, actorId) || loadPendingReturnCreateV1(actorId)?.bodyJson !== pending.bodyJson) throw returnV1Error('return_v1_session_changed')
+  assertReturnCreateAdmission(actorId, pending, recovery)
+  if (loadPendingReturnCreateV1(actorId)?.bodyJson !== pending.bodyJson) throw returnV1Error('return_v1_session_changed')
   const body = pendingReturnCreateBody(pending)
   if (returnCreateFlights.has(body.client_request_id)) throw returnV1Error('return_v1_pending')
   returnCreateFlights.add(body.client_request_id)
@@ -207,11 +229,13 @@ export async function submitReturnCreateV1(actorId: unknown, pending: PendingRet
     if (!navigator.locks?.request) throw returnV1Error('return_v1_storage_failed')
     return await navigator.locks.request(current.key, async () => {
     assertActorReadScope(scope, false)
+    assertReturnCreateAdmission(actorId, pending, recovery)
     if (loadPendingReturnCreateV1(actorId)?.bodyJson !== pending.bodyJson) throw returnV1Error('return_v1_pending')
     // Fresh static capability, not a re-quote: an earlier attempt may have
     // already consumed the quantity and its exact receipt still must replay.
     const capability = await apiFetch('GET', '/api/returns/capabilities')
     assertActorReadScope(scope, false)
+    assertReturnCreateAdmission(actorId, pending, recovery)
     requireReturnCapability(capability)
     if (loadPendingReturnCreateV1(actorId)?.bodyJson !== pending.bodyJson) throw returnV1Error('return_v1_pending')
     let result: unknown
