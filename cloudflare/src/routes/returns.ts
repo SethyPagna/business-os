@@ -44,6 +44,7 @@ import {
   type CustomerReturnPrior, type CustomerReturnQuoteV1, type CustomerReturnSaleLine,
 } from '../lib/customerReturnEntitlement'
 import { canonicalMoney4, SaleMoneyContractError } from '../lib/saleMoneyPrecision'
+import { ProductMergeLineageError, resolveProductMergeLineage } from '../lib/productMergeLineage'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
@@ -113,7 +114,8 @@ export async function customerReturnQuotePlanFromDb(
   saleId: number,
   requested: CustomerReturnRequestedLine[],
   excludeReturnId: number | null = null,
-): Promise<{ quote: CustomerReturnQuoteV1; authority: CustomerReturnQuoteAuthority; authority_json: string }> {
+): Promise<{ quote: CustomerReturnQuoteV1; authority: CustomerReturnQuoteAuthority; authority_json: string;
+  lineage: Awaited<ReturnType<typeof resolveProductMergeLineage>> }> {
   const sale = await db.prepare(`SELECT s.id,s.money_precision_version,s.calculated_total_usd,s.total_usd,
     s.subtotal_usd,s.discount_usd,s.membership_discount_usd,s.tax_usd,
     s.exchange_rate,s.is_delivery,s.delivery_fee_usd,s.delivery_fee_paid_by,s.sale_status,s.status_before_return,
@@ -122,7 +124,7 @@ export async function customerReturnQuotePlanFromDb(
     .get<Record<string, unknown>>({ saleId })
   if (!sale) throw new SaleMoneyContractError('customer_return_sale_not_found')
   if (String(sale.sale_status || 'completed') === 'cancelled') throw new SaleMoneyContractError('customer_return_sale_invalid')
-  const saleLines = await db.prepare(`SELECT id,product_id,quantity,total_usd,total_khr,
+  const saleLines = await db.prepare(`SELECT id,sale_id,product_id,quantity,total_usd,total_khr,
     base_price_usd,base_price_khr,applied_price_usd,applied_price_khr,
     product_discount_usd,product_discount_khr,product_discount_type,product_discount_label,manual_discount_usd,manual_discount_khr,
     manual_discount_type,manual_discount_value,price_mode,pricing_snapshot_json
@@ -131,6 +133,13 @@ export async function customerReturnQuotePlanFromDb(
       { saleId, limit: CUSTOMER_RETURN_MAX_SALE_LINES + 1 },
     )
   if (saleLines.length > CUSTOMER_RETURN_MAX_SALE_LINES) throw new SaleMoneyContractError('customer_return_sale_invalid')
+  let lineage: Awaited<ReturnType<typeof resolveProductMergeLineage>>
+  try {
+    lineage = await resolveProductMergeLineage(db, saleId, saleLines)
+  } catch (error) {
+    if (error instanceof ProductMergeLineageError) throw new SaleMoneyContractError(error.code)
+    throw error
+  }
   const previousRows = await db.prepare(`SELECT r.id AS return_id,r.money_precision_version,r.calculated_refund_usd,
     r.rounding_adjustment_usd,r.total_refund_usd,r.status AS return_status,r.updated_at AS return_updated_at,
     ri.id AS return_item_id,ri.sale_item_id,ri.quantity,ri.total_usd,ri.refund_snapshot_json
@@ -192,7 +201,13 @@ export async function customerReturnQuotePlanFromDb(
     },
     requested,
     previous: [...previousById.values()],
+    productIdentityBindings: lineage.bindings,
   })
+  if (lineage.bindings.length) {
+    const coherent = await db.prepare(`SELECT CASE WHEN (${lineage.condition}) THEN 1 ELSE 0 END AS valid`)
+      .get<{ valid: number }>(lineage.params)
+    if (Number(coherent?.valid) !== 1) throw new SaleMoneyContractError('product_merge_lineage_conflict')
+  }
   const authority: CustomerReturnQuoteAuthority = {
     sale, sale_items: saleLines, prior_returns: [...priorReturns.values()], prior_items: priorItems,
   }
@@ -200,7 +215,7 @@ export async function customerReturnQuotePlanFromDb(
   if (new TextEncoder().encode(authorityJson).byteLength > CUSTOMER_RETURN_AUTHORITY_MAX_BYTES) {
     throw new SaleMoneyContractError('customer_return_authority_too_large')
   }
-  return { quote, authority, authority_json: authorityJson }
+  return { quote, authority, authority_json: authorityJson, lineage }
 }
 
 export async function customerReturnQuoteFromDb(
@@ -1214,7 +1229,7 @@ app.post('/quote', async (c) => {
       customer_return_create_version: 1, customer_return_edit_version: 0 })
   } catch (error) {
     if (error instanceof SaleMoneyContractError) {
-      const conflict = /legacy|cohort|sale_invalid|not_found|cap/.test(error.message)
+      const conflict = /legacy|cohort|sale_invalid|not_found|cap|lineage/.test(error.message)
       return c.json({ error: error.message, code: error.message, action: conflict ? 'review_required' : 'fix_request' }, conflict ? 409 : 400)
     }
     throw error
@@ -1643,6 +1658,7 @@ app.post('/', async (c) => {
     requestDigest, returnNumber, replacementClientRequestId,
     replacementReceiptNumber,
     customerReturnAuthorityJson: customerReturnV1Plan?.authority_json ?? null,
+    ...(customerReturnV1Plan?.lineage.params ?? {}),
   }
   const precondition = `
     NOT EXISTS(SELECT 1 FROM return_create_receipts WHERE actor_id=@actorId AND request_id=@requestId)
@@ -1693,7 +1709,8 @@ app.post('/', async (c) => {
           AND COALESCE(pb.lot_code,'')=json_extract(j.value,'$.lot_code')
           AND COALESCE(pb.expiry_date,'')=json_extract(j.value,'$.expiry_date')
           AND COALESCE(bbs.quantity,0)=json_extract(j.value,'$.before')))
-    AND (@customerReturnAuthorityJson IS NULL OR (${customerReturnAuthorityPredicate()}))
+    AND (@customerReturnAuthorityJson IS NULL OR ((${customerReturnAuthorityPredicate()})
+      AND (${customerReturnV1Plan?.lineage.condition ?? '1=1'})))
   `
   const statements: Array<{ sql: string; params: Record<string, unknown> }> = [
     returnCreateGuardStatement(operationId, 'precondition', precondition, commonGuardParams),

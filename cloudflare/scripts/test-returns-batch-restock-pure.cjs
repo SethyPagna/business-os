@@ -37,6 +37,7 @@ let corruptNextReturnCreateReceipt = false
 let corruptNextSaleRecordEvent = false
 let failReturnCreatePostcommitRead = false
 let failNextReturnCreateReceiptRead = false
+let beforeLineageCoherenceHook = null
 // Flatten node:sqlite's run() result the same way lib/db.ts's real
 // D1Compat.run() does (see test-pending-actions-pure.cjs's own comment for
 // why this matters) -- productBatches.ts and returns.ts both rely on
@@ -50,6 +51,11 @@ const db = {
         if (failNextReturnCreateReceiptRead && /FROM return_create_receipts/i.test(sql)) {
           failNextReturnCreateReceiptRead = false
           throw new Error('simulated postcommit receipt read failure')
+        }
+        if (beforeLineageCoherenceHook && /^SELECT CASE WHEN[\s\S]*undo_snapshots/i.test(sql.trim())) {
+          const hook = beforeLineageCoherenceHook
+          beforeLineageCoherenceHook = null
+          hook()
         }
         return stmt.get(params)
       },
@@ -148,6 +154,7 @@ const promotionRulesKernel = loadReal('lib/promotionRules.ts', { './moneyPrecisi
 const saleItemPricingKernel = loadReal('lib/saleItemPricing.ts', {
   './moneyPrecision': moneyPrecisionKernel, './promotionRules': promotionRulesKernel,
 })
+const productMergeLineageKernel = loadReal('lib/productMergeLineage.ts')
 const saleMoneyPrecisionKernel = loadReal('lib/saleMoneyPrecision.ts', { './moneyPrecision': moneyPrecisionKernel })
 const saleCreationSnapshotKernel = loadReal('lib/saleCreationSnapshot.ts', {
   './actorSnapshot': actorSnapshotKernel, './saleMoneyPrecision': saleMoneyPrecisionKernel,
@@ -207,6 +214,7 @@ const returnsRoute = loadReal('routes/returns.ts', {
   '../lib/saleRecordEvents': saleRecordEventsKernel,
   '../lib/returnCreateAction': returnCreateActionKernel,
   '../lib/customerReturnEntitlement': customerReturnEntitlementKernel,
+  '../lib/productMergeLineage': productMergeLineageKernel,
   '../lib/saleMoneyPrecision': saleMoneyPrecisionKernel,
   '../lib/searchMatch': { buildLikeAliasClause: () => '1=1', tokenizeSearchTermGroups: () => [], normalizeSearchText: (value) => String(value || '') },
   '../lib/productBatches': productBatches,
@@ -472,6 +480,70 @@ async function main() {
     assert.strictEqual(created.status, 200, JSON.stringify(created.json))
     assert.strictEqual(rawDb.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status, 'returned')
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM returns WHERE sale_id=1').get().n, 2)
+  })
+
+  await check('v1 return quote and create accept only guarded sale-item merge lineage across undo, redo and races', async () => {
+    seed()
+    const pricingPool = { version: 1, pool_key: 'merged-return-pool', evaluation_time: '2026-09-13T00:00:00.000Z',
+      exchange_rate: 4000, rules: [], lines: [{ line_key: 'merged-return-line', source: 'selling',
+        product: { id: 1, selling_price_usd: 10, selling_price_khr: 40000, wholesale_price_usd: null,
+          discount_enabled: false, discount_amount_usd: 0, discount_amount_khr: 0, discount_percent: 0 },
+        selling_price_input_usd: null, manual: { type: 'none', value: 0 } }] }
+    const allocation = { version: 1, lines: [{ line_key: 'merged-return-line', amount: 10 }],
+      discount_usd: 0, membership_discount_usd: 0, tax_usd: 0 }
+    const pricing = saleItemPricingKernel.materializeCapturedPricingRow({ id: 1, product_id: 1 }, pricingPool,
+      { 'merged-return-line': 1 }, 'merged-return-line', allocation)
+    rawDb.prepare(`UPDATE sales SET receipt_number='MERGED-V1-SALE',exchange_rate=4000,subtotal_usd=10,
+      discount_usd=0,membership_discount_usd=0,tax_usd=0,calculated_total_usd=10,rounding_adjustment_usd=0,
+      total_usd=10,money_precision_version=1,sale_status='completed',status_before_return=NULL WHERE id=1`).run()
+    rawDb.prepare(`INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity,branch_id,
+      total_usd,total_khr,base_price_usd,base_price_khr,applied_price_usd,applied_price_khr,
+      product_discount_usd,product_discount_khr,product_discount_type,product_discount_label,
+      manual_discount_usd,manual_discount_khr,manual_discount_type,manual_discount_value,price_mode,pricing_snapshot_json)
+      VALUES(@id,1,2,'Different Serum',@quantity,1,@total_usd,@total_khr,@base_price_usd,@base_price_khr,
+        @applied_price_usd,@applied_price_khr,@product_discount_usd,@product_discount_khr,@product_discount_type,@product_discount_label,
+        @manual_discount_usd,@manual_discount_khr,@manual_discount_type,@manual_discount_value,@price_mode,@pricing_snapshot_json)`).run(pricing)
+
+    const unproven = await req('POST', '/quote', { sale_id: 1, items: [{ sale_item_id: 1, quantity: 1 }] })
+    assert.strictEqual(unproven.status, 409, JSON.stringify(unproven.json))
+    assert.strictEqual(unproven.json.code, 'product_merge_lineage_conflict')
+    const evidence = rawDb.prepare(`INSERT INTO undo_snapshots(kind,status,payload_json)
+      VALUES('product.merge','applied',@payload) RETURNING id`).get({
+      payload: JSON.stringify({ dupId: 1, keeperId: 2, reparentedSaleItemIds: [1] }),
+    })
+    beforeLineageCoherenceHook = () => rawDb.prepare("UPDATE undo_snapshots SET status='reversed' WHERE id=?").run([evidence.id])
+    const racedQuote = await req('POST', '/quote', { sale_id: 1, items: [{ sale_item_id: 1, quantity: 1 }] })
+    assert.strictEqual(racedQuote.status, 409, JSON.stringify(racedQuote.json))
+    assert.strictEqual(racedQuote.json.code, 'product_merge_lineage_conflict')
+    rawDb.prepare("UPDATE undo_snapshots SET status='applied' WHERE id=?").run([evidence.id])
+    const quotedMerged = await req('POST', '/quote', { sale_id: 1, items: [{ sale_item_id: 1, quantity: 1 }] })
+    assert.strictEqual(quotedMerged.status, 200, JSON.stringify(quotedMerged.json))
+
+    rawDb.prepare("UPDATE undo_snapshots SET status='reversed' WHERE id=?").run([evidence.id])
+    rawDb.prepare('UPDATE sale_items SET product_id=1 WHERE id=1').run()
+    const quotedAfterUndo = await req('POST', '/quote', { sale_id: 1, items: [{ sale_item_id: 1, quantity: 1 }] })
+    assert.strictEqual(quotedAfterUndo.status, 200, JSON.stringify(quotedAfterUndo.json))
+    rawDb.prepare("UPDATE undo_snapshots SET status='applied' WHERE id=?").run([evidence.id])
+    rawDb.prepare('UPDATE sale_items SET product_id=2 WHERE id=1').run()
+    const quotedAfterRedo = await req('POST', '/quote', { sale_id: 1, items: [{ sale_item_id: 1, quantity: 1 }] })
+    assert.strictEqual(quotedAfterRedo.status, 200, JSON.stringify(quotedAfterRedo.json))
+    const { customer_return_create_version: _create, customer_return_edit_version: _edit, ...expectedQuote } = quotedAfterRedo.json
+    const body = { client_request_id: 'v1-merged-create', money_precision_version: 1, sale_id: 1,
+      reason: 'Merged product identity', expected_quote: expectedQuote,
+      items: [{ sale_item_id: 1, quantity: 1, stock_action: 'none', branch_id: 1 }] }
+
+    beforeBatchHook = async () => rawDb.prepare("UPDATE undo_snapshots SET status='reversed' WHERE id=?").run([evidence.id])
+    const raced = await req('POST', '/', body)
+    assert.strictEqual(raced.status, 409, JSON.stringify(raced.json))
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM returns').get().n, 0)
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM return_create_receipts').get().n, 0)
+    rawDb.prepare("UPDATE undo_snapshots SET status='applied' WHERE id=?").run([evidence.id])
+    const created = await req('POST', '/', body)
+    assert.strictEqual(created.status, 200, JSON.stringify(created.json))
+    const item = rawDb.prepare('SELECT product_id,refund_snapshot_json FROM return_items WHERE return_id=?').get([created.json.id])
+    assert.strictEqual(item.product_id, 2, 'the live keeper remains the return stock/report identity')
+    assert.strictEqual(JSON.parse(item.refund_snapshot_json).source_pricing_snapshot_digest,
+      await saleRecordEventsKernel.sha256Hex(pricing.pricing_snapshot_json), 'immutable captured pricing identity stays unchanged')
   })
 
   await check('legacy-sale event lots use the return business date and failed lot writes roll back create/edit/retry', async () => {

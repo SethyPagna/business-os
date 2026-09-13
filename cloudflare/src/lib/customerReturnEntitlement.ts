@@ -1,6 +1,7 @@
 import { divideMoney4, multiplyMoney4, roundMoney2, roundMoney4, subtractDecimalSum, subtractMoney4, sumMoney4 } from './moneyPrecision'
 import { validateRefundMoneySnapshot, type RefundMoneyPrecisionV1 } from './refundMoneyPrecision'
-import { validateCapturedSaleBasket, type ReceiptLineAllocation, type SaleItemPricingSnapshot } from './saleItemPricing'
+import { validateCapturedSaleBasket, type CapturedProductIdentityBinding, type ReceiptLineAllocation,
+  type SaleItemPricingSnapshot } from './saleItemPricing'
 import { canonicalMoney4, SaleMoneyContractError } from './saleMoneyPrecision'
 
 export const CUSTOMER_RETURN_REFUND_SNAPSHOT_VERSION = 1
@@ -331,6 +332,7 @@ export function buildCustomerReturnQuoteV1(input: {
   sale: CustomerReturnSource
   requested: Array<{ sale_item_id: number; quantity: number }>
   previous: CustomerReturnPrior[]
+  productIdentityBindings?: readonly CapturedProductIdentityBinding[]
 }): CustomerReturnQuoteV1 {
   const saleId = positiveId(input.sale.sale_id, 'customer_return_sale_invalid')
   if (input.sale.money_precision_version !== 1 || !Number.isSafeInteger(input.sale.sale_revision) || input.sale.sale_revision < 0
@@ -342,7 +344,9 @@ export function buildCustomerReturnQuoteV1(input: {
   let capturedSnapshots: SaleItemPricingSnapshot[]
   try {
     capturedSnapshots = validateCapturedSaleBasket(
-      input.sale.lines as unknown as readonly Record<string, unknown>[], input.sale as unknown as Record<string, unknown>,
+      input.sale.lines as unknown as readonly Record<string, unknown>[],
+      { ...input.sale as unknown as Record<string, unknown>, id: saleId },
+      input.productIdentityBindings,
     )
   } catch { return fail('customer_return_sale_invalid') }
   const sourceById = new Map<number, { row: CustomerReturnSaleLine; snapshot: SaleItemPricingSnapshot }>()
