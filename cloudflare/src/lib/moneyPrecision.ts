@@ -129,6 +129,14 @@ export function percentageMoney4(amount: DecimalInput, percent: DecimalInput): n
   const a = money(amount), factor = decimal(percent)
   return output(fraction(a.n * factor.n, a.d * factor.d * 100n))
 }
+/** Product percentage: preserve the original amount, quantity and percent until
+ * the sole nearest-4dp rounding. Signed generic arithmetic matches multiplyMoney4
+ * and percentageMoney4; callers enforce their business-specific nonnegative limits.
+ */
+export function percentageProductMoney4(amount: DecimalInput, quantity: DecimalInput, percent: DecimalInput): number {
+  const a = money(amount), q = decimal(quantity), p = decimal(percent)
+  return output(fraction(a.n * q.n * p.n, a.d * q.d * p.d * 100n))
+}
 /** Divisors/rates retain their own decimal precision; zero always rejects. */
 export function divideMoney4(amount: DecimalInput, divisor: DecimalInput): number {
   const a = money(amount), b = decimal(divisor)
