@@ -228,7 +228,16 @@ const sale16433 = {
 {
   const src = fs.readFileSync(new URL('../src/components/receipt/Receipt.tsx', import.meta.url), 'utf8')
   assert.match(src, /import \{ receiptDeliveryFigures, receiptLineFigures, receiptLineSavingsUsd \} from '\.\.\/\.\.\/utils\/receiptLineMath'/)
-  assert.match(src, /const lineSavingsUsd = receiptLineSavingsUsd\(items, showItemDiscount, exchangeRate, totals.moneyPrecisionVersion, sale\)/)
+  const savingsExpression = src.match(/const lineSavingsUsd = ([^\r\n]+)/)?.[1]
+  assert.ok(savingsExpression, 'receipt must derive its item savings through the shared line helper')
+  const receiptSavings = new Function('items', 'showItemDiscount', 'exchangeRate', 'totals', 'sale', 'receiptLineSavingsUsd', `return (${savingsExpression})`)
+  const known = { quantity: 2, base_price_usd: 10, applied_price_usd: 9, manual_discount_usd: 1, total_usd: 18 }
+  const unknownTotal = { ...known, total_usd: null }, unknownUnit = { ...known, applied_price_usd: null }
+  const sourceRows = [known, unknownTotal, unknownUnit], beforeRows = JSON.stringify(sourceRows)
+  assert.equal(receiptSavings([known], true, RATE, { moneyPrecisionVersion: 0 }, {}, receiptLineSavingsUsd), 2)
+  assert.equal(receiptSavings(sourceRows, true, RATE, { moneyPrecisionVersion: 0 }, {}, receiptLineSavingsUsd), 2, 'unknown recorded operands cannot manufacture savings')
+  assert.equal(receiptSavings(sourceRows, false, RATE, { moneyPrecisionVersion: 0 }, {}, receiptLineSavingsUsd), 0)
+  assert.equal(JSON.stringify(sourceRows), beforeRows, 'presentation never fills unknown source amounts')
   // Subtotal and Discount are the STORED figures now: the lines are net, so
   // the per-line cut is reported on its own row instead of being folded in.
   assert.match(src, /const displayedSubtotalUsd = subtotalUsd$/m)
