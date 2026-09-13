@@ -39,6 +39,11 @@ import {
   projectedSaleStatusForReturnCreate, replacementSaleIdSql, returnCreateGuardStatement,
   returnCreateIdSql, type ReturnCreateResponse,
 } from '../lib/returnCreateAction'
+import {
+  buildCustomerReturnQuoteV1, CUSTOMER_RETURN_MAX_SALE_LINES,
+  type CustomerReturnPrior, type CustomerReturnQuoteV1,
+} from '../lib/customerReturnEntitlement'
+import { canonicalMoney4, SaleMoneyContractError } from '../lib/saleMoneyPrecision'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
@@ -92,6 +97,90 @@ class ReplacementCustomerStateConflictError extends Error {
 const CUSTOMER_SCOPE = 'customer'
 const SUPPLIER_SCOPE = 'supplier'
 const RETURN_REASON_PRESETS_KEY = 'return_reason_presets'
+const CUSTOMER_RETURN_MAX_PRIOR_ITEMS = 1_000
+
+type CustomerReturnRequestedLine = { sale_item_id: number; quantity: number }
+
+export async function customerReturnQuoteFromDb(
+  db: ReturnType<typeof getDb>,
+  saleId: number,
+  requested: CustomerReturnRequestedLine[],
+  excludeReturnId: number | null = null,
+): Promise<CustomerReturnQuoteV1> {
+  const sale = await db.prepare(`SELECT s.id,s.money_precision_version,s.calculated_total_usd,s.total_usd,
+    s.exchange_rate,s.is_delivery,s.delivery_fee_usd,s.delivery_fee_paid_by,
+    COALESCE(v.revision,0) AS sale_revision
+    FROM sales s LEFT JOIN sale_write_revisions v ON v.sale_id=s.id WHERE s.id=@saleId`)
+    .get<Record<string, unknown>>({ saleId })
+  if (!sale) throw new SaleMoneyContractError('customer_return_sale_not_found')
+  const saleLines = await db.prepare(`SELECT id,product_id,quantity,total_usd,pricing_snapshot_json
+    FROM sale_items WHERE sale_id=@saleId ORDER BY id LIMIT @limit`)
+    .all<{ id: number; product_id: number | null; quantity: number; total_usd: number; pricing_snapshot_json: string | null }>(
+      { saleId, limit: CUSTOMER_RETURN_MAX_SALE_LINES + 1 },
+    )
+  if (saleLines.length > CUSTOMER_RETURN_MAX_SALE_LINES) throw new SaleMoneyContractError('customer_return_sale_invalid')
+  const previousRows = await db.prepare(`SELECT r.id AS return_id,r.money_precision_version,r.calculated_refund_usd,
+    r.rounding_adjustment_usd,r.total_refund_usd,ri.sale_item_id,ri.quantity,ri.total_usd,ri.refund_snapshot_json
+    FROM returns r JOIN return_items ri ON ri.return_id=r.id
+    WHERE r.sale_id=@saleId AND COALESCE(r.return_scope,'customer')='customer'
+      AND COALESCE(r.status,'completed')<>'cancelled'
+      AND (@excludeReturnId IS NULL OR r.id<>@excludeReturnId)
+    ORDER BY r.id,ri.id LIMIT @limit`)
+    .all<Record<string, unknown>>({ saleId, excludeReturnId, limit: CUSTOMER_RETURN_MAX_PRIOR_ITEMS + 1 })
+  if (previousRows.length > CUSTOMER_RETURN_MAX_PRIOR_ITEMS) throw new SaleMoneyContractError('customer_return_cohort_too_large')
+  const previousById = new Map<number, CustomerReturnPrior>()
+  for (const row of previousRows) {
+    const id = Number(row.return_id)
+    let prior = previousById.get(id)
+    if (!prior) {
+      prior = {
+        id,
+        money_precision_version: Number(row.money_precision_version) as 1,
+        calculated_refund_usd: Number(row.calculated_refund_usd),
+        rounding_adjustment_usd: Number(row.rounding_adjustment_usd),
+        total_refund_usd: Number(row.total_refund_usd),
+        items: [],
+      }
+      previousById.set(id, prior)
+    }
+    prior.items.push({
+      sale_item_id: row.sale_item_id == null ? null : Number(row.sale_item_id),
+      quantity: Number(row.quantity), total_usd: Number(row.total_usd),
+      refund_snapshot_json: row.refund_snapshot_json == null ? null : String(row.refund_snapshot_json),
+    })
+  }
+  const exchangeRate = Number(sale.exchange_rate)
+  const customerDeliveryFee = Number(sale.is_delivery) === 1 && String(sale.delivery_fee_paid_by || 'customer') === 'customer'
+    ? canonicalMoney4(sale.delivery_fee_usd ?? 0, true) : 0
+  return buildCustomerReturnQuoteV1({
+    sale: {
+      sale_id: Number(sale.id), sale_revision: Number(sale.sale_revision),
+      money_precision_version: Number(sale.money_precision_version),
+      calculated_total_usd: sale.calculated_total_usd == null ? null : Number(sale.calculated_total_usd),
+      total_usd: Number(sale.total_usd), exchange_rate: exchangeRate,
+      customer_delivery_fee_usd: customerDeliveryFee,
+      lines: await Promise.all(saleLines.map(async (line) => ({
+        ...line,
+        pricing_snapshot_digest: await sha256Hex(String(line.pricing_snapshot_json ?? '')),
+      }))),
+    },
+    requested,
+    previous: [...previousById.values()],
+  })
+}
+
+export function publicCustomerReturnQuote(quote: CustomerReturnQuoteV1) {
+  return {
+    money_precision_version: quote.money_precision_version,
+    sale_id: quote.sale_id,
+    sale_revision: quote.sale_revision,
+    calculated_refund_usd: quote.calculated_refund_usd,
+    rounding_adjustment_usd: quote.rounding_adjustment_usd,
+    total_refund_usd: quote.total_refund_usd,
+    total_refund_khr: quote.total_refund_khr,
+    items: quote.items.map(({ refund_snapshot_json: _snapshot, ...line }) => line),
+  }
+}
 
 type ReturnReasonPresets = {
   customer: string[]
@@ -982,6 +1071,45 @@ app.get('/:id', async (c) => {
 // for any item with return_to_stock !== false, and rolling the parent
 // sale's sale_status to 'partial_return' or 'returned' once everything
 // sold on it has been accounted for.
+app.post('/quote', async (c) => {
+  const user = c.get('user')
+  if (getActionTier(user, 'returns', 'add') === 'none') {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
+  const body = await c.req.json<{ sale_id?: unknown; items?: unknown }>().catch(() => ({} as { sale_id?: unknown; items?: unknown }))
+  const saleId = Number(body.sale_id)
+  if (!Number.isSafeInteger(saleId) || saleId <= 0 || !Array.isArray(body.items)
+    || body.items.length < 1 || body.items.length > 50) {
+    return c.json({ error: 'Choose a sale and between 1 and 50 return lines.', code: 'customer_return_quote_invalid' }, 400)
+  }
+  const requested: CustomerReturnRequestedLine[] = []
+  const seen = new Set<number>()
+  for (const raw of body.items) {
+    const item = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : {}
+    if (Object.keys(item).some((key) => !['sale_item_id', 'quantity'].includes(key))) {
+      return c.json({ error: 'The return quote contains unsupported fields.', code: 'customer_return_quote_invalid' }, 400)
+    }
+    const saleItemId = Number(item.sale_item_id)
+    const quantity = Number(item.quantity)
+    if (!Number.isSafeInteger(saleItemId) || saleItemId <= 0 || seen.has(saleItemId)
+      || !Number.isFinite(quantity) || quantity <= 0) {
+      return c.json({ error: 'Each return quote line needs one unique sale item and a positive quantity.', code: 'customer_return_quote_invalid' }, 400)
+    }
+    seen.add(saleItemId)
+    requested.push({ sale_item_id: saleItemId, quantity })
+  }
+  c.header('Cache-Control', 'no-store')
+  try {
+    return c.json(publicCustomerReturnQuote(await customerReturnQuoteFromDb(getDb(c.env), saleId, requested)))
+  } catch (error) {
+    if (error instanceof SaleMoneyContractError) {
+      const conflict = /legacy|cohort|sale_invalid|not_found|cap/.test(error.message)
+      return c.json({ error: error.message, code: error.message, action: conflict ? 'review_required' : 'fix_request' }, conflict ? 409 : 400)
+    }
+    throw error
+  }
+})
+
 app.post('/', async (c) => {
   const db = getDb(c.env)
   const user = c.get('user')
