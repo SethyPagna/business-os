@@ -185,6 +185,16 @@ export function sellingPriceCeilCent(value: DecimalInput): number {
   if (parsed.n < 0n) throw new MoneyPrecisionError('negative_selling_price')
   return output(parsed, 2, 'ceil')
 }
+/** Convert a nonnegative selling amount by a positive exact divisor, then
+ * apply the selling-price ceiling directly to the rational quotient. */
+export function sellingPriceDivideCeilCent(amount: DecimalInput, divisor: DecimalInput): number {
+  const parsed = money(amount)
+  if (parsed.n < 0n) throw new MoneyPrecisionError('negative_selling_price')
+  const rate = decimal(divisor)
+  if (rate.n === 0n) throw new MoneyPrecisionError('division_by_zero')
+  if (rate.n < 0n) throw new MoneyPrecisionError('invalid_decimal')
+  return output(fraction(parsed.n * rate.d, parsed.d * rate.n), 2, 'ceil')
+}
 export type SettlementRounding4 = {
   internalTotal4: number
   payableTotal2: number
