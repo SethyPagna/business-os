@@ -8,8 +8,10 @@
 // Every one of those is a property of the SHARED PaginationControls' DEFAULT
 // branch, which catalogPagination.tsx reached by passing no layout at all.
 // This test pins the storefront's own shape instead: one centred single-line
-// navigation pill, mounted symmetrically above AND below the grid, with no
-// page-size selector and no summary row anywhere.
+// pill, mounted symmetrically above AND below the grid, with no summary row
+// anywhere. The pill leads with a compact page-size selector -- restored by
+// the owner on 2026-09-14, after the 2026-09-07 decision to drop it -- and it
+// is the FIRST control in the row, ahead of Back.
 //
 // It is a source-shape test on purpose -- the storefront pager is JSX with no
 // pure kernel to call, and the defect was entirely "which branch renders".
@@ -57,11 +59,17 @@ runTest('the shared control offers a centred storefront layout without changing 
   assert.match(pagination, /layout = 'default',/, "the default must stay 'default' so all 28 admin consumers are untouched")
 })
 
-runTest("the centred branch prints no summary or per-page control", () => {
+runTest('the centred branch prints no summary, and leads with the per-page selector', () => {
   const branch = centeredBranch()
   assert.doesNotMatch(branch, /\{showingLabel\}/, 'the storefront pager must not render the Showing summary')
   assert.doesNotMatch(branch, /\{label\}/, 'the storefront pager must not render the "products" tail of the summary')
-  assert.doesNotMatch(branch, /perPageLabel|<PageSizeSelect/, 'the centered navigation row has no page-size selector')
+  // Restored 2026-09-14 by the owner, reversing the 2026-09-07 removal: a
+  // native select, named from the translated per-page label, first in the row.
+  assert.match(branch, /ariaLabel=\{perPageLabel\}/, 'the size selector carries the translated per-page name')
+  assert.ok(
+    branch.indexOf('ariaLabel={perPageLabel}') < branch.indexOf('aria-label={backLabel}'),
+    'the size selector comes BEFORE Back: [20/50/100] [Back] [page / total] [Next]',
+  )
 })
 
 runTest('the centred page field grows with its digits and keeps a 40px floor', () => {
@@ -157,8 +165,10 @@ runTest('the shared control takes arrow state from the kernel and hides centered
   const branch = centeredBranch()
   assert.match(branch, /disabled=\{backDisabled\}/, 'so a single-page storefront pill shows a dead Back')
   assert.match(branch, /disabled=\{nextDisabled\}/, 'and a dead Next')
-  assert.match(branch, /if \(totalPages <= 1\) return null/, 'the centered layout has no useful one-page action')
-  assert.doesNotMatch(branch, /<PageSizeSelect/, 'the centered layout never renders a page-size selector')
+  // NAVIGATION has no useful one-page action -- but the size selector does,
+  // so the pill survives a single page whenever it carries one.
+  assert.match(branch, /if \(totalPages <= 1 && !showPageSizeSelect\) return null/, 'a one-page pill is dropped only when it is pure navigation')
+  assert.match(branch, /<PageSizeSelect/, 'the storefront reuses the shared page-size control')
 })
 
 runTest('both pager mounts translate Back and Next instead of leaking the raw keys', () => {

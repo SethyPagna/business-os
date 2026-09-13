@@ -556,7 +556,13 @@ assert.match(catalogPage, /import\('\.\/portalLanguagePacks\.ts'\)/, 'public cat
 assert.match(catalogPage, /import\('\.\/portalContentI18n\.ts'\)/, 'public catalog should lazy-load content localization only for non-English language intent')
 assert.match(catalogPagination, /<PaginationControls/, 'public catalog pagination should use the shared responsive control')
 assert.match(catalogPagination, /layout="centered"/, 'public catalog pagination should use the compact centered pager')
-assert.doesNotMatch(catalogPagination, /\n\s+(?:onPageSizeChange|pageSizeOptions|editablePageSizeInput)=/, 'public catalog pagination should not render a page-size selector')
+// Reversed by the owner on 2026-09-14: the shopper-facing size selector is
+// back on the centred pager, so forwarding it is required rather than
+// forbidden. It adds no startup weight -- PaginationControls already imports
+// PageSizeSelect statically for every admin list, and the storefront pager
+// travels in the product-grid chunk, not the shell.
+assert.match(catalogPagination, /\n\s+onPageSizeChange=\{onPageSizeChange\}/, 'public catalog pagination should forward the shopper page-size handler')
+assert.doesNotMatch(catalogPagination, /\n\s+editablePageSizeInput=/, 'the storefront must not offer a free-text page size')
 assert.match(paginationControls, /flex flex-col gap-2[^"]*sm:flex-row/, 'shared pagination should stack on narrow mobile cards and return to one row on larger screens')
 assert.match(viteConfig, /ResetData\.tsx'\)\) return 'backup-reset-tools'/, 'destructive Backup reset panels should have an action-only chunk')
 assert.match(viteConfig, /OtpModal\.tsx'\)\) return 'settings-otp-modal'/, 'Settings OTP setup/disable modal should have an action-only chunk')
@@ -2165,10 +2171,22 @@ assert.match(
   /if \(publicView\) \{[\s\S]*getCatalogApi\(\)\.getPortalBootstrap\(\)[\s\S]*const meta = bootstrapResult\?\.meta \|\| null[\s\S]*const catalogPage = bootstrapResult\?\.catalog \|\| null/,
   'public catalog first-load should use the single bootstrap payload for config, metadata, and first products',
 )
+// Still one request for a first visit -- but the skip is now a QUESTION, not
+// a constant: bootstrapPageSizeMatchesViewer returns true whenever the
+// viewer has no stored 20/50/100 choice, which is every first visit and
+// everyone who never touched the pager. A viewer who DID choose gets one
+// search instead of the skip, because the bootstrap page was cut at the
+// store's size and is not the page they asked for -- that is the one request
+// that answers them, not a duplicate of one that already did.
 assert.match(
   catalogPage,
-  /skipNextBootstrappedProductSearchRef\.current = true[\s\S]*if \(publicView && skipNextBootstrappedProductSearchRef\.current\) \{[\s\S]*skipNextBootstrappedProductSearchRef\.current = false[\s\S]*return undefined/,
+  /skipNextBootstrappedProductSearchRef\.current = bootstrapPageSizeMatchesViewer\([\s\S]*if \(publicView && skipNextBootstrappedProductSearchRef\.current\) \{[\s\S]*skipNextBootstrappedProductSearchRef\.current = false[\s\S]*return undefined/,
   'public catalog should not duplicate the bootstrapped first product page with an immediate search request',
+)
+assert.match(
+  catalogPagination,
+  /if \(!viewerPageSize\) return true/,
+  'a viewer with no stored page size must keep the single-request first load',
 )
 assert.doesNotMatch(
   catalogPage,

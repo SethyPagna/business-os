@@ -343,9 +343,14 @@ runTest('public product discovery uses a sticky unified search, responsive brand
   assert.match(catalogPaginationSource, /import PaginationControls from '\.\.\/shared\/PaginationControls'/,
     'storefront paging should use the same current Back/Next control as the rest of the app')
   assert.match(catalogPaginationSource, /export const CATALOG_DEFAULT_PAGE_SIZE = 50/,
-    'the fixed storefront page size remains aligned with the server response contract')
-  assert.doesNotMatch(catalogPaginationSource, /\bonPageSizeChange\s*=|\bpageSizeOptions\s*=|\beditablePageSizeInput\s*=/,
-    'the centred public pager must not grow a shopper-facing page-size control')
+    'the default storefront page size remains aligned with the server response contract')
+  // Reverses the 2026-09-07 removal of the shopper-facing size control
+  // (owner decision, 2026-09-14): the selector is back, with exactly three
+  // sizes, handed straight to the shared pager.
+  assert.match(catalogPaginationSource, /export const CATALOG_PAGE_SIZE_OPTIONS: number\[\] = \[20, 50, 100\]/,
+    'the shopper picks between exactly 20, 50 and 100 products a page')
+  assert.match(catalogPaginationSource, /onPageSizeChange=\{onPageSizeChange\}[\s\S]*pageSizeOptions=\{pageSizeOptions\}/,
+    'the centred public pager must forward the size handler and the option list')
   assert.match(catalogPaginationSource, /layout="centered"/,
     'public paging remains one centred Back/page/Next control')
 })
@@ -401,12 +406,15 @@ runTest('public catalog scrolls through the document and keeps its pager control
   // Anchored on the page FIELD, not on `aria-label={pageLabel}`: the branch's
   // <nav> landmark is named from the same label and sits before Back, so that
   // string finds the wrapper first and the order check passes on any layout.
+  const pageSizeSelectAt = pagerBranch.indexOf('ariaLabel={perPageLabel}')
   const backAt = pagerBranch.indexOf('aria-label={backLabel}')
   const pageFieldAt = pagerBranch.indexOf('inputMode="numeric"')
   const totalPagesAt = pagerBranch.indexOf('/ {totalPages}')
   const nextAt = pagerBranch.indexOf('aria-label={nextLabel}')
   assert.ok(backAt > 0 && pageFieldAt > 0 && totalPagesAt > 0 && nextAt > 0,
     'the storefront pager must keep a Back control, an editable page field, a total-page count and a Next control')
+  assert.ok(pageSizeSelectAt > 0 && pageSizeSelectAt < backAt,
+    'the page-size selector must sit BEFORE Back: [20/50/100] [Back] [page / total] [Next] (owner, 2026-09-14)')
   assert.ok(backAt < pageFieldAt, 'Back must precede the page indicator')
   assert.ok(pageFieldAt < totalPagesAt, 'the page number must precede its total')
   assert.ok(totalPagesAt < nextAt, 'the page indicator must precede Next')
@@ -419,6 +427,58 @@ runTest('public catalog scrolls through the document and keeps its pager control
   // prints when the map has no entry for it.
   assert.match(paginationControlsSource, /const backLabel = typeof t === 'function' \? \(t\('back'\) \|\| 'Back'\)/)
   assert.match(paginationControlsSource, /const nextLabel = typeof t === 'function' \? \(t\('next'\) \|\| 'Next'\)/)
+})
+
+runTest('the public pager carries a 20/50/100 size selector before Back, wired end to end on both public paths', () => {
+  const pagerBranch = paginationControlsSource.slice(
+    paginationControlsSource.indexOf("if (layout === 'centered')"),
+    paginationControlsSource.indexOf('if (compact && rangeAsPageSize)'),
+  )
+  // The shared PageSizeSelect, the same control the admin pagers use -- a
+  // native <select> is banned in components/ (tests/sourceSyntaxCheck.ts).
+  assert.match(pagerBranch, /<PageSizeSelect[\s\S]{0,600}ariaLabel=\{perPageLabel\}/,
+    'the selector must be the shared control, named from the translated per-page label')
+  assert.match(pagerBranch, /options=\{sizeOptions\}/,
+    'the selector must offer the caller\'s sizes, plus any off-menu configured one')
+  assert.match(pagerBranch, /allowCustom=\{false\}/,
+    'the storefront must not let a shopper type an unbounded page size')
+  assert.match(paginationControlsSource, /const perPageLabel = typeof t === 'function' \? \(t\('per_page'\) \|\| 'per page'\)/,
+    'the per-page name comes from the shared pack key with an English fallback, never the raw key')
+  // A one-page result still has a size to change. Hiding the whole pill on
+  // totalPages <= 1 is exactly how the previous in-pill chooser became
+  // unreachable for a shopper who had narrowed the catalogue right down.
+  assert.match(pagerBranch, /if \(totalPages <= 1 && !showPageSizeSelect\) return null/,
+    'a one-page result must keep the pill when it carries the size selector')
+
+  // Wired at BOTH pager mounts of the products section...
+  assert.equal((catalogProductsSectionSource.match(/onPageSizeChange=\{updatePageSize\}/g) || []).length, 2,
+    'the pagers above and below the grid must both change the page size')
+  assert.match(catalogProductsSectionSource, /per_page: copy\('perPage', 'Per page'\)/,
+    'the accessible name must resolve through the portal packs, which already translate perPage')
+  assert.doesNotMatch(catalogProductsSectionSource, /it is a Filters field now/,
+    'the size control is on the pager row again, so the Filters-field note must not survive')
+
+  // ...and fed identically by BOTH public paths: the viewer's choice outranks
+  // the server's page size, resets to page 1, and is remembered per browser.
+  for (const [route, source, handler] of [
+    ['PublicCatalogPage', publicCatalogPageSource, 'changeProductPageSize'],
+    ['CatalogPage', catalogPageSource, 'changePortalProductPageSize'],
+  ]) {
+    assert.match(source, new RegExp('setProductPageSize[=:] ?\\{?' + handler),
+      route + ' must hand the products section a page-size handler')
+    const body = source.slice(source.indexOf('const ' + handler + ' = (nextSize: number) => {'))
+    assert.ok(body.startsWith('const ' + handler), route + ' must define that handler')
+    const handlerBody = body.slice(0, body.indexOf('\n  }'))
+    assert.match(handlerBody, /writeStoredCatalogPageSize\(size\)/, route + ' must persist the choice for the next visit')
+    assert.match(handlerBody, /viewerPageSizeRef\.current = size/, route + ' must make the choice outrank later server payloads')
+    assert.match(handlerBody, /Page\(1\)/, route + ' must return to page 1 when the page size changes')
+    assert.match(source, /viewerPageSizeRef = useRef\(readStoredCatalogPageSize\(\)\)/,
+      route + ' must read the stored viewer size before the server tells it one')
+    assert.match(source, /if \(!viewerPageSizeRef\.current\) set(Portal)?ProductPageSize\(Number\(/,
+      route + ' must not let a bootstrap payload overwrite the viewer choice')
+    assert.match(source, /bootstrapPageSizeMatchesViewer\(/,
+      route + ' must re-run the product search when the bootstrap page was cut at another size')
+  }
 })
 
 runTest('public product details keep every prepared section visible when its data is empty', () => {

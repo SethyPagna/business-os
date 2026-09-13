@@ -102,6 +102,9 @@ type CatalogProductsSectionProps = {
   productPage?: number | string | null
   productPageSize?: number | string | null
   setProductPage?: (page: number) => void
+  // Server-paged parents own the page size, so the pager's 20/50/100 selector
+  // is only offered when one of them hands down a setter.
+  setProductPageSize?: (pageSize: number) => void
   initialOptions?: InitialOption[]
   initialFilter?: string
   setInitialFilter?: InitialFilterSetter
@@ -207,6 +210,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
     productPage,
     productPageSize,
     setProductPage,
+    setProductPageSize,
     initialOptions: serverInitialOptions,
     initialFilter: controlledInitialFilter,
     setInitialFilter: setControlledInitialFilter,
@@ -255,13 +259,19 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
     onToggleWishlist,
   } = props
   const [page, setPage] = useState(1)
-  const pageSize = CATALOG_DEFAULT_PAGE_SIZE
+  const [pageSize, setPageSize] = useState(CATALOG_DEFAULT_PAGE_SIZE)
   const [localInitialFilter, setLocalInitialFilter] = useState('all')
   const filterPanelRef = useRef<HTMLDivElement | null>(null)
   const effectivePage = serverPaged ? Number(productPage || 1) : page
   const effectivePageSize = serverPaged ? Number(productPageSize || CATALOG_DEFAULT_PAGE_SIZE) : pageSize
   const effectiveInitialFilter = serverPaged ? (controlledInitialFilter || 'all') : localInitialFilter
   const updatePage = serverPaged ? setProductPage : setPage
+  // A new page size re-cuts the list, so page 1 is the only page still
+  // guaranteed to exist -- the server-paged parents reset it the same way.
+  const updatePageSize = serverPaged ? setProductPageSize : (nextSize: number) => {
+    setPageSize(nextSize)
+    setPage(1)
+  }
   const updateInitialFilter = serverPaged ? setControlledInitialFilter : setLocalInitialFilter
 
   useEffect(() => {
@@ -304,13 +314,13 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
   // 100/page who narrowed to 12 products had no way back short of reloading
   // the site.
   //
-  // The chooser has since left the pill for the Filters panel, so a
-  // single-page result no longer needs a pager to reach it -- and the pill
-  // stopped rendering on one page. That rule is NOT re-implemented here:
-  // this stays "is there anything to page", and the `centered` layout returns
-  // null on totalPages <= 1 itself (PaginationControls). One rule, one place;
-  // duplicating the count gate here is exactly how the two mounts came to
-  // disagree in the first place.
+  // The chooser is back inside the pill (owner, 2026-09-14) and reachable on
+  // a single page again, because the `centered` layout keeps the pill when a
+  // size selector is present and only hides it when the pill would be pure
+  // navigation. That rule is NOT re-implemented here: this stays "is there
+  // anything to page at all", and PaginationControls owns the single-page
+  // question. One rule, one place; duplicating the count gate here is exactly
+  // how the two mounts came to disagree in the first place.
   const showPager = pagerState(effectivePage, totalProducts, effectivePageSize, CATALOG_DEFAULT_PAGE_SIZE).visible
   const visiblePromotionItems = useMemo(
     () => Array.isArray(promotionItems)
@@ -710,9 +720,11 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
           map's `|| key` fallback was printing the raw lowercase keys "back"
           and "next" as the button captions in every language.
 
-          No per-page entry any more, in the map or on the row: the owner
-          struck that control off this row and it is a Filters field now
-          (renderFilterFields above), which localises its own label. */}
+          `perPage` joins them for the same reason: the page-size selector is
+          back ON this row (owner, 2026-09-14), first in the pill, and every
+          portal language pack already translates that key -- so it must be
+          mapped here or the select's accessible name would read "per_page".
+          It is NOT a Filters field; renderFilterFields above carries none. */}
       {showPager ? (
         <CatalogPaginationControls
           className="mb-4"
@@ -725,8 +737,10 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
             of: copy('of', 'of'),
             back: copy('back', 'Back'),
             next: copy('next', 'Next'),
+            per_page: copy('perPage', 'Per page'),
           })[key] || key}
           onPageChange={updatePage}
+          onPageSizeChange={updatePageSize}
         />
       ) : null}
 
@@ -996,8 +1010,10 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
             of: copy('of', 'of'),
             back: copy('back', 'Back'),
             next: copy('next', 'Next'),
+            per_page: copy('perPage', 'Per page'),
           })[key] || key}
           onPageChange={updatePage}
+          onPageSizeChange={updatePageSize}
         />
       ) : null}
 

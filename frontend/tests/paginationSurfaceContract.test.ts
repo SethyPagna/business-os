@@ -134,6 +134,22 @@ check('every inventoried paginated surface is reachable from the app', () => {
   )
 })
 
+check('the storefront pager offers the same 20/50/100 sizes as the admin pager', () => {
+  const catalogPagination = read('frontend/src/components/catalog/catalogPagination.tsx')
+  const controls = read('frontend/src/components/shared/PaginationControls.tsx')
+  const sharedOptions = controls.match(/export const PAGE_SIZE_OPTIONS: number\[\] = \[([^\]]+)\]/)
+  const catalogOptions = catalogPagination.match(/export const CATALOG_PAGE_SIZE_OPTIONS: number\[\] = \[([^\]]+)\]/)
+  assert.ok(sharedOptions && catalogOptions, 'both pagers must declare their option list as a named constant')
+  assert.strictEqual(catalogOptions[1].replace(/\s/g, ''), '20,50,100', 'the owner picked 20/50/100 for the storefront (2026-09-14)')
+  assert.strictEqual(
+    catalogOptions[1].replace(/\s/g, ''),
+    sharedOptions[1].replace(/\s/g, ''),
+    'storefront and admin page sizes stay the same three -- one server cap (100) serves both',
+  )
+  assert.match(catalogPagination, /export const CATALOG_DEFAULT_PAGE_SIZE = 50/, 'the storefront default stays 50')
+  assert.match(catalogPagination, /onPageSizeChange=\{onPageSizeChange\}/, 'the storefront pager must forward the size handler')
+})
+
 check('no page-local Previous/Next paginator remains', () => {
   const manualPagerLabel = /(tr|t)\('previous'|>Previous<|>Next<|(tr|t)\('next'/
   const manualPagerButtons = (source: string): string[] =>

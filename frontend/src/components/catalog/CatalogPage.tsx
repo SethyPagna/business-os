@@ -29,7 +29,7 @@ import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAct
 import { SectionShell } from './catalogUi'
 import CatalogPreviewSurface from './CatalogPreviewSurface'
 import PortalFooter from './legal/LegalPages.tsx'
-import { CATALOG_DEFAULT_PAGE_SIZE } from './catalogPagination'
+import { bootstrapPageSizeMatchesViewer, CATALOG_DEFAULT_PAGE_SIZE, normalizeCatalogPageSize, readStoredCatalogPageSize, writeStoredCatalogPageSize } from './catalogPagination'
 import {
   createAboutBlock,
   createPromoItem,
@@ -1271,7 +1271,15 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   const [products, setProducts] = useState<CatalogProduct[]>(() => Array.isArray(cachedPortal?.products) ? cachedPortal.products : [])
   const [portalProductTotal, setPortalProductTotal] = useState(() => Number(cachedPortal?.catalog?.total || cachedPortal?.products?.length || 0))
   const [portalProductPage, setPortalProductPage] = useState(() => Number(cachedPortal?.catalog?.page || 1) || 1)
-  const [portalProductPageSize, setPortalProductPageSize] = useState(() => Number(cachedPortal?.catalog?.pageSize || CATALOG_DEFAULT_PAGE_SIZE) || CATALOG_DEFAULT_PAGE_SIZE)
+  // Same viewer-owned page size as the standalone storefront
+  // (PublicCatalogPage.tsx): the in-app public route and the editor preview
+  // mount the same pager, so the 20/50/100 choice has to behave identically on
+  // both -- including outranking the server's own page size, which is fixed at
+  // 50 for every bootstrap payload.
+  const viewerPageSizeRef = useRef(readStoredCatalogPageSize())
+  const [portalProductPageSize, setPortalProductPageSize] = useState(() => (
+    viewerPageSizeRef.current || Number(cachedPortal?.catalog?.pageSize || CATALOG_DEFAULT_PAGE_SIZE) || CATALOG_DEFAULT_PAGE_SIZE
+  ))
   const [portalProductInitial, setPortalProductInitial] = useState('all')
   const [portalProductInitials, setPortalProductInitials] = useState<PortalInitialOption[]>(() => normalizePortalInitialOptions(cachedPortal?.catalog?.initials))
   const [portalProductRefreshing, setPortalProductRefreshing] = useState(false)
@@ -1773,7 +1781,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       }
       const nextProducts = Array.isArray(portalProducts) ? portalProducts : []
 
-      skipNextBootstrappedProductSearchRef.current = true
+      skipNextBootstrappedProductSearchRef.current = bootstrapPageSizeMatchesViewer(catalogPage?.pageSize, viewerPageSizeRef.current)
       setConfig(nextConfig)
       setPortalConfigReady(true)
       setCategories(nextMeta.categories)
@@ -1783,7 +1791,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       if (catalogPage && typeof catalogPage === 'object') {
         setPortalProductTotal(Number(catalogPage.total || nextProducts.length || 0))
         setPortalProductPage(Number(catalogPage.page || 1) || 1)
-        setPortalProductPageSize(Number(catalogPage.pageSize || CATALOG_DEFAULT_PAGE_SIZE) || CATALOG_DEFAULT_PAGE_SIZE)
+        if (!viewerPageSizeRef.current) setPortalProductPageSize(Number(catalogPage.pageSize || CATALOG_DEFAULT_PAGE_SIZE) || CATALOG_DEFAULT_PAGE_SIZE)
         setPortalProductInitials(normalizePortalInitialOptions(catalogPage.initials))
       }
       setActiveTab((current) => resolveVisibleTab(current, nextConfig))
@@ -1828,7 +1836,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     if (catalogPage && typeof catalogPage === 'object') {
       setPortalProductTotal(Number(catalogPage.total || nextProducts.length || 0))
       setPortalProductPage(Number(catalogPage.page || 1) || 1)
-      setPortalProductPageSize(Number(catalogPage.pageSize || CATALOG_DEFAULT_PAGE_SIZE) || CATALOG_DEFAULT_PAGE_SIZE)
+      if (!viewerPageSizeRef.current) setPortalProductPageSize(Number(catalogPage.pageSize || CATALOG_DEFAULT_PAGE_SIZE) || CATALOG_DEFAULT_PAGE_SIZE)
       setPortalProductInitials(normalizePortalInitialOptions(catalogPage.initials))
     }
     setActiveTab((current) => resolveVisibleTab(current, nextConfig))
@@ -1887,6 +1895,17 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   useEffect(() => {
     setPortalProductPage(1)
   }, [brandFilter, branchFilter, categoryFilter, portalProductInitial, portalSearchQuery, stockFilter])
+
+  // The viewer's 20/50/100 choice from the pager -- identical to the
+  // standalone storefront's handler, including the page-1 reset and the
+  // per-browser persistence, so both public paths behave the same way.
+  const changePortalProductPageSize = (nextSize: number) => {
+    const size = normalizeCatalogPageSize(nextSize)
+    viewerPageSizeRef.current = size
+    writeStoredCatalogPageSize(size)
+    setPortalProductPageSize(size)
+    setPortalProductPage(1)
+  }
 
   useEffect(() => {
     if (!isPageActive || !previewConfig.showCatalog || (publicView && !portalConfigReady)) return undefined
@@ -3158,6 +3177,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     productPage: portalProductPage,
     productPageSize: portalProductPageSize,
     setProductPage: setPortalProductPage,
+    setProductPageSize: changePortalProductPageSize,
     initialOptions: portalProductInitials,
     initialFilter: portalProductInitial,
     setInitialFilter: setPortalProductInitial,

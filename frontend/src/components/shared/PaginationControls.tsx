@@ -58,10 +58,11 @@ export interface PaginationControlsProps {
   // three-part admin row -- a "Showing 1-50 of 3,555 products" summary on the
   // left, then a labelled per-page column and the pager pushed to the right
   // edge -- is what a shopper was being shown above and below the product
-  // grid. This variant drops the summary and page-size selector, keeps an
-  // editable page number between visible Back/Next controls, and centres the
-  // whole thing. 'default' stays the default, so every admin consumer of this
-  // control renders exactly as before.
+  // grid. This variant drops the summary, keeps an editable page number
+  // between visible Back/Next controls, and centres the whole thing. It shows
+  // a page-size selector only when the caller passes onPageSizeChange, and
+  // puts it FIRST, before Back. 'default' stays the default, so every admin
+  // consumer of this control renders exactly as before.
   layout?: 'default' | 'centered'
 }
 
@@ -152,14 +153,21 @@ export default function PaginationControls({
   if (!state.visible) return null
 
   if (layout === 'centered') {
-    // Storefront pager: ONE centred pill, "< Back  1 / 72  Next >", mounted
+    // Storefront pager: ONE centred pill, "20 < Back  1 / 72  Next >", mounted
     // identically above and below the grid.
     //
-    // The centered layout has no page-size selector. Its row stays focused on
-    // page navigation: visible Back/Next labels, an editable page field, and
-    // the total page count. All controls keep a 40px hit area and an inset
-    // keyboard focus ring so the rounded pill does not clip the indicator.
+    // Order is the owner's (2026-09-14): the page-size selector sits BEFORE
+    // Back, then the editable page field, the total page count and Next. All
+    // controls keep a 40px hit area and an inset keyboard focus ring so the
+    // rounded pill does not clip the indicator.
     const focusRingClass = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500'
+    const showPageSizeSelect = typeof onPageSizeChange === 'function'
+    // A configured size that is not on the menu (the store's own 50 while the
+    // menu offers 20/50/100 is the common case, but a future config could be
+    // 30) still has to appear in it: PageSizeSelect marks nothing selected for
+    // an off-menu value, so the pager would offer 20/50/100 with none of them
+    // highlighted while the grid held 30.
+    const sizeOptions = pageSizeOptions.includes(safePageSize) ? pageSizeOptions : [...pageSizeOptions, safePageSize].sort((a, b) => a - b)
     const arrowButtonClass = `inline-flex h-10 shrink-0 items-center gap-0.5 px-3 text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:bg-transparent disabled:text-slate-300 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white dark:disabled:text-slate-600 ${focusRingClass}`
     const countClass = 'h-10 shrink-0 whitespace-nowrap px-2 text-xs font-semibold leading-10 text-slate-500 dark:text-slate-400'
     // The page box takes its width from what it prints. `ch` is the width of
@@ -176,10 +184,15 @@ export default function PaginationControls({
     // flex child told it may collapse below its content is the one thing that
     // could undo the floor.
     const pageDigits = Math.max(1, String(editablePageInput ? pageDraft : safePage).length)
-    // Centered navigation has no useful action on a single page. Keep this
-    // rule local: admin layouts still use `state.visible === total > 0` and
-    // may carry controls that remain useful when both arrows are disabled.
-    if (totalPages <= 1) return null
+    // Centered NAVIGATION has no useful action on a single page -- but the
+    // size selector does: a shopper who narrowed to 12 products on 20/page
+    // must still be able to go back to 100, and hiding the whole pill is
+    // exactly how the earlier in-pill chooser became unreachable. So the
+    // single-page early return only applies when this pill is navigation and
+    // nothing else. Keep the rule local: admin layouts still use
+    // `state.visible === total > 0` and may carry controls that remain useful
+    // when both arrows are disabled.
+    if (totalPages <= 1 && !showPageSizeSelect) return null
     // A LANDMARK, not a bare div. This row is the storefront's whole
     // navigation between pages of the catalogue, and as a `<div>` it appeared
     // in no landmark list, so the one control a screen-reader user most needs
@@ -200,9 +213,38 @@ export default function PaginationControls({
     return (
       <nav className={`flex w-full justify-center ${className}`} aria-label={pageLabel}>
         <div className="inline-flex max-w-full items-center rounded-full border border-slate-300 bg-white text-xs font-semibold text-slate-800 shadow-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100">
+          {showPageSizeSelect ? (
+            // The same control the other two branches use, not a native OS
+            // dropdown: components/ may not ship one (tests/sourceSyntaxCheck.ts
+            // bans it repo-wide, naming page-size menus), and a square platform
+            // picker inside a rounded pill is exactly what that rule exists to
+            // prevent. `allowCustom={false}` keeps the storefront to the
+            // three offered sizes, so a shopper cannot ask for 5,000 products
+            // in one request.
+            //
+            // Digits only on the trigger. The row is already four controls
+            // wide at 320px, and "per page" spelled out in Khmer would wrap
+            // the pill; the words live in the accessible name instead, where
+            // the storefront packs already translate them.
+            <PageSizeSelect
+              value={safePageSize}
+              options={sizeOptions}
+              onChange={(nextValue) => onPageSizeChange?.(nextValue)}
+              ariaLabel={perPageLabel}
+              allowCustom={false}
+              className="shrink-0"
+              // `!text-xs` because Tailwind resolves conflicts by CSS order,
+              // not by the order classes appear here: the trigger's own
+              // `text-sm` would otherwise outrank a plain `text-xs` and print
+              // the size two pixels larger than the page number beside it.
+              buttonClassName="h-10 gap-1 rounded-l-full rounded-r-none border-0 border-r border-slate-200 bg-white px-3 py-0 !text-xs font-semibold text-slate-800 shadow-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+              menuClassName="min-w-[6rem]"
+              optionClassName="text-xs"
+            />
+          ) : null}
           <button
             type="button"
-            className={`${arrowButtonClass} rounded-l-full`}
+            className={`${arrowButtonClass} ${showPageSizeSelect ? '' : 'rounded-l-full'}`}
             disabled={backDisabled}
             onClick={() => onPageChange?.(safePage - 1)}
             aria-label={backLabel}

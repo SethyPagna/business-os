@@ -38,7 +38,7 @@ import { aggregateInitialOptions } from '../../utils/initials.ts'
 import { deriveMessengerLink, deriveTelegramLink, derivePhoneCallLink, deriveWhatsappLink, deriveInstagramLink, resolveMessengerLink } from '../../utils/socialLinks.ts'
 import CatalogPreviewSurface from './CatalogPreviewSurface'
 import type { ProductDetailViewState } from './ProductDetailFlyout'
-import { CATALOG_DEFAULT_PAGE_SIZE } from './catalogPagination'
+import { bootstrapPageSizeMatchesViewer, CATALOG_DEFAULT_PAGE_SIZE, normalizeCatalogPageSize, readStoredCatalogPageSize, writeStoredCatalogPageSize } from './catalogPagination'
 import { getPortalGridClass, getPortalMobileGridClass, buildPortalPricePresentation, resolvePortalStockStatus } from './portalCatalogDisplay.ts'
 import type { PromotionRule } from '../../utils/promotionRules.ts'
 import { collapsePortalProductGroups, mergePortalCatalogProducts } from './portalProductGrouping.ts'
@@ -601,7 +601,14 @@ export default function PublicCatalogPage() {
   })
   const [productTotal, setProductTotal] = useState(() => Number(cachedPortal?.catalog?.total || cachedPortal?.products?.length || 0))
   const [productPage, setProductPage] = useState(() => Number(cachedPortal?.catalog?.page || 1) || 1)
-  const [productPageSize, setProductPageSize] = useState(() => Number(cachedPortal?.catalog?.pageSize || CATALOG_DEFAULT_PAGE_SIZE) || CATALOG_DEFAULT_PAGE_SIZE)
+  // The shopper's own 20/50/100 choice, read once per mount. It OUTRANKS the
+  // server's page size: the bootstrap payload is always cut at the Worker's
+  // fixed 50 (routes/portal.ts), so without this ref every response would put
+  // a shopper who picked 20 straight back onto 50.
+  const viewerPageSizeRef = useRef(readStoredCatalogPageSize())
+  const [productPageSize, setProductPageSize] = useState(() => (
+    viewerPageSizeRef.current || Number(cachedPortal?.catalog?.pageSize || CATALOG_DEFAULT_PAGE_SIZE) || CATALOG_DEFAULT_PAGE_SIZE
+  ))
   const [productInitial, setProductInitial] = useState('all')
   const [productInitials, setProductInitials] = useState<PortalInitialOption[]>(() => normalizePortalInitialOptions(cachedPortal?.catalog?.initials))
   const [categories, setCategories] = useState<CatalogOption[]>(() => normalizeCatalogOptions(cachedPortal?.categories))
@@ -890,7 +897,7 @@ export default function PublicCatalogPage() {
 
   useEffect(() => {
     if (embeddedPortalRef.current && reloadToken === 0) {
-      skipNextProductSearchRef.current = true
+      skipNextProductSearchRef.current = bootstrapPageSizeMatchesViewer(embeddedPortalRef.current.catalog?.pageSize, viewerPageSizeRef.current)
       writePortalCache({ ...embeddedPortalRef.current, products: mergePortalCatalogProducts(embeddedPortalRef.current.products) })
       setLoading(false)
       return undefined
@@ -909,14 +916,14 @@ export default function PublicCatalogPage() {
           setPortalPromotionRules((next.catalog as Record<string, unknown>).promotion_rules as PromotionRule[])
         }
         setProductPage(Number(next.catalog.page || 1) || 1)
-        setProductPageSize(Number(next.catalog.pageSize || CATALOG_DEFAULT_PAGE_SIZE) || CATALOG_DEFAULT_PAGE_SIZE)
+        if (!viewerPageSizeRef.current) setProductPageSize(Number(next.catalog.pageSize || CATALOG_DEFAULT_PAGE_SIZE) || CATALOG_DEFAULT_PAGE_SIZE)
         setProductInitials(normalizePortalInitialOptions(next.catalog.initials))
         setCategories(next.categories)
         setBrands(next.brands)
         setBranches(next.branches)
         setActiveTab((current) => resolvePortalActiveTab(next.config, copy, current))
         setPortalError('')
-        skipNextProductSearchRef.current = true
+        skipNextProductSearchRef.current = bootstrapPageSizeMatchesViewer(next.catalog.pageSize, viewerPageSizeRef.current)
         writePortalCache({ config: next.config, categories: next.categories, brands: next.brands, branches: next.branches, products: mergedProducts, catalog: next.catalog })
       })
       .catch((error) => {
@@ -935,6 +942,18 @@ export default function PublicCatalogPage() {
   useEffect(() => {
     setProductPage(1)
   }, [brandFilter, branchFilter, categoryFilter, deferredSearch, productInitial, promoOnly, stockFilter])
+
+  // The shopper's 20/50/100 choice from the pager. Kept in the ref as well as
+  // in state so every later bootstrap keeps deferring to it, persisted for the
+  // next visit, and back to page 1 because re-cutting the list is the one
+  // thing that can leave the current page number out of range.
+  const changeProductPageSize = (nextSize: number) => {
+    const size = normalizeCatalogPageSize(nextSize)
+    viewerPageSizeRef.current = size
+    writeStoredCatalogPageSize(size)
+    setProductPageSize(size)
+    setProductPage(1)
+  }
 
   useEffect(() => {
     if (!config.showCatalog) return undefined
@@ -1326,6 +1345,7 @@ export default function PublicCatalogPage() {
         productPage={productPage}
         productPageSize={productPageSize}
         setProductPage={setProductPage}
+        setProductPageSize={changeProductPageSize}
         initialOptions={productInitials}
         initialFilter={productInitial}
         setInitialFilter={setProductInitial}
