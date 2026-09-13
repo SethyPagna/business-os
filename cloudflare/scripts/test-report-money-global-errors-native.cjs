@@ -22,7 +22,7 @@ const routeNames = new Set([
   './routes/promotions','./routes/backups','./routes/lookups','./routes/contacts','./routes/inventory','./routes/compat',
   './routes/ai','./routes/importJobs','./routes/returns','./routes/system','./routes/notifications','./routes/organizations',
   './routes/actionHistory','./routes/runtime','./routes/users','./routes/devices','./routes/notes','./routes/batches',
-  './routes/fees','./routes/telegram','./routes/reviewQueue','./routes/shifts','./routes/reports','./routes/pos',
+  './routes/fees','./routes/telegram','./routes/reviewQueue','./routes/shifts','./routes/pos',
 ])
 
 const harmless = new Proxy(() => undefined, { get: () => harmless, apply: () => undefined })
@@ -37,7 +37,31 @@ Module._load = function(request, parent, isMain) {
   if (routeNames.has(request) && parent?.filename === path.join(root, 'src', 'index.ts')) {
     return { __esModule: true, default: emptyRoute() }
   }
+  if (request === './routes/reports' && parent?.filename === path.join(root, 'src', 'index.ts')) {
+    return originalLoad.call(this, path.join(root, 'src', 'routes', 'reports.ts'), parent, isMain)
+  }
   if (request === './routes/sync') return { createSyncRoute: emptyRoute }
+  if (request === '../lib/auth') return {
+    requireAuth: async (c, next) => {
+      c.set('user', { id: 1, role: 'admin', permissions: { all: true } })
+      return next()
+    },
+  }
+  if (request === '../lib/permissions') return { getActionTier: () => 'full', isAdminControlUser: () => true }
+  if (request === '../lib/db') return { getDb: () => ({}) }
+  if (request === '../lib/saleTotals') return { round2: (value) => Math.round(Number(value) * 100) / 100 }
+  if (request === '../lib/businessDateWindow') return new Proxy({}, { get: () => harmless })
+  if (request === '../lib/salesAnalytics') {
+    const { ReportMoneyPrecisionError } = originalLoad.call(this, path.join(root, 'src', 'lib', 'reportMoneyPrecision.ts'), parent, isMain)
+    return new Proxy({
+      getSalesTotals: async () => { throw new ReportMoneyPrecisionError('too_many_rows') },
+      SALES_GROUP_KEYS: ['branch'],
+      reportMoneyDiagnostic: () => null,
+    }, { get: (target, key) => key in target ? target[key] : harmless })
+  }
+  if (request === '../lib/reportMoneyPrecision') {
+    return originalLoad.call(this, path.join(root, 'src', 'lib', 'reportMoneyPrecision.ts'), parent, isMain)
+  }
   if (request === './lib/coreDataInvariants') return { ensureCoreDataInvariantsOnce: async () => {} }
   if (request === './lib/maintenance') return { getMaintenance: async () => null, isMaintenanceGatedRequest: () => false }
   if (request === './lib/errorReporting') return { reportError: async () => {} }
@@ -69,6 +93,14 @@ async function main() {
     assert.equal(JSON.stringify(body).includes('cost'), false, 'typed refusal must not leak report values')
   }
 
+  const child = await worker.fetch(new Request('http://local/api/reports/overview'), {}, {
+    waitUntil() {}, passThroughOnException() {}, props: {},
+  })
+  assert.equal(child.status, 413, 'the reports child handler must share the global capacity mapping')
+  const childBody = await child.json()
+  assert.equal(childBody.code, 'too_many_rows')
+  assert.equal(JSON.stringify(childBody).includes('cost'), false)
+
   const ordinary = await worker.fetch(new Request('http://local/api/sales/ordinary'), {}, {
     waitUntil() {}, passThroughOnException() {}, props: {},
   })
@@ -77,7 +109,7 @@ async function main() {
     success: false,
     error: 'Something went wrong processing that request. Please try again.',
   })
-  console.log('PASS global worker routing maps report precision refusals to 409/413/422 and preserves ordinary 500')
+  console.log('PASS global and /api/reports child routing share 409/413/422 mappings and preserve ordinary 500')
 }
 
 main().finally(() => { Module._load = originalLoad }).catch((error) => {
