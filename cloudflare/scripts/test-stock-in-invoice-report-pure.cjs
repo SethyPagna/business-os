@@ -38,7 +38,8 @@ function compile(file, stubs = {}) {
 const batchCode = compile('batchCode.ts')
 const sqlBinding = compile('sqlBinding.ts')
 const searchMatch = compile('searchMatch.ts')
-const productBatches = compile('productBatches.ts', { './db': {}, './batchCode': batchCode, './sqlBinding': sqlBinding })
+const moneyPrecision = compile('moneyPrecision.ts')
+const productBatches = compile('productBatches.ts', { './db': {}, './batchCode': batchCode, './sqlBinding': sqlBinding, './moneyPrecision': moneyPrecision })
 const stockReceiptGate = compile('stockReceiptGate.ts')
 const branchRoles = compile('branchRoles.ts')
 const branchRoleGuards = compile('branchRoleGuards.ts', { './branchRoles': branchRoles })
@@ -51,6 +52,7 @@ const stockActionCommit = compile('stockActionCommit.ts', {
   './stockReceiptGate': stockReceiptGate,
   './branchRoleGuards': branchRoleGuards,
   './saleCreationSnapshot': saleCreationSnapshot,
+  './moneyPrecision': moneyPrecision,
 })
 
 const migrationsDir = path.join(__dirname, '..', 'migrations')

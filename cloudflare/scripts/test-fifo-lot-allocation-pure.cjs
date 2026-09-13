@@ -51,7 +51,7 @@ function loadReal(relPath, requireOverrides = {}) {
 }
 
 const batchCode = loadReal('lib/batchCode.ts')
-const productBatches = loadReal('lib/productBatches.ts', { './db': { getDb: () => db }, './batchCode': batchCode, './sqlBinding': loadReal('lib/sqlBinding.ts') })
+const productBatches = loadReal('lib/productBatches.ts', { './db': { getDb: () => db }, './batchCode': batchCode, './sqlBinding': loadReal('lib/sqlBinding.ts'), './moneyPrecision': loadReal('lib/moneyPrecision.ts') })
 const { allocateAcrossLots, readFifoLotAvailability } = productBatches
 
 let passed = 0

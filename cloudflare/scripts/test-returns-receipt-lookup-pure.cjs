@@ -75,7 +75,8 @@ function loadReal(relPath, requireOverrides = {}) {
 
 const batchCode = loadReal('lib/batchCode.ts')
 const sqlBinding = loadReal('lib/sqlBinding.ts')
-const productBatches = loadReal('lib/productBatches.ts', { './db': { getDb: () => db }, './batchCode': batchCode, './sqlBinding': sqlBinding })
+const moneyPrecision = loadReal('lib/moneyPrecision.ts')
+const productBatches = loadReal('lib/productBatches.ts', { './db': { getDb: () => db }, './batchCode': batchCode, './sqlBinding': sqlBinding, './moneyPrecision': moneyPrecision })
 const permissions = loadReal('lib/permissions.ts')
 const branchRolesKernel = loadReal('lib/branchRoles.ts')
 

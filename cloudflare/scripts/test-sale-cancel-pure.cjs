@@ -49,6 +49,7 @@ const productBatches = compile('productBatches.ts', {
   './db': {},
   './batchCode': compile('batchCode.ts'),
   './sqlBinding': compile('sqlBinding.ts'),
+  './moneyPrecision': compile('moneyPrecision.ts'),
 })
 const subject = compile('saleTransitions.ts', { './salesStatus': salesStatus, './productBatches': productBatches })
 const {

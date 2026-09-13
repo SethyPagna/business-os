@@ -478,6 +478,87 @@ async function main() {
     })
   })
 
+  await check('new session costs normalize once, persist exact totals, and replay equivalent canonical input', async () => {
+    const f = fixture()
+    const request = receiveRequest('stock-precision-001', 3)
+    request.items[0].unit_cost_usd = 1.23455
+    const first = await commitStockSession(f.env, user, request)
+    assert.equal(first.totalCostUsd, 3.7038)
+    assert.equal(first.items[0].unitCostUsd, 1.2346)
+    assert.deepEqual(f.sql.prepare('SELECT unit_cost_usd,total_cost_usd FROM inventory_movements').get(), {
+      unit_cost_usd: 1.2346, total_cost_usd: 3.7038,
+    })
+    assert.deepEqual(f.sql.prepare('SELECT unit_cost_usd,received_cost_usd FROM product_batches').get(), {
+      unit_cost_usd: 1.2346, received_cost_usd: 3.7038,
+    })
+    assert.equal(f.sql.prepare('SELECT unit_cost_usd FROM stock_session_members').get().unit_cost_usd, 1.2346)
+    const stored = JSON.parse(f.sql.prepare('SELECT request_json FROM stock_session_operations').get().request_json)
+    assert.equal(stored.items[0].unit_cost_usd, 1.2346)
+
+    const equivalent = receiveRequest('stock-precision-001', 3)
+    equivalent.items[0].unit_cost_usd = 1.23456
+    const replayed = await commitStockSession(f.env, user, equivalent)
+    assert.equal(replayed.replayed, true)
+    assert.equal(replayed.operationId, first.operationId)
+    assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n, 1)
+
+    const history = f.sql.prepare('SELECT undo_payload,redo_payload FROM action_history WHERE id=?').get(first.actionHistoryId)
+    await replayStockSession(f.env, user, 'undo', first.actionHistoryId, 0, JSON.parse(history.undo_payload))
+    assert.deepEqual(f.sql.prepare('SELECT movement_type,unit_cost_usd,total_cost_usd FROM inventory_movements ORDER BY id DESC LIMIT 1').get(), {
+      movement_type: 'remove', unit_cost_usd: 1.2346, total_cost_usd: -3.7038,
+    })
+    await replayStockSession(f.env, user, 'redo', first.actionHistoryId, 1, { ...JSON.parse(history.redo_payload), generation: 1 })
+    assert.deepEqual(f.sql.prepare('SELECT movement_type,unit_cost_usd,total_cost_usd FROM inventory_movements ORDER BY id DESC LIMIT 1').get(), {
+      movement_type: 'add', unit_cost_usd: 1.2346, total_cost_usd: 3.7038,
+    })
+  })
+
+  await check('normalized zero and overflowing session totals fail before durable writes', async () => {
+    for (const [cost, freeGoods, expectedSuccess] of [
+      [0.00004, false, false], [0.00004, true, true], [-0.00004, true, false], [1e9, false, false],
+    ]) {
+      const f = fixture()
+      const request = receiveRequest(`stock-cost-boundary-${String(cost).replace(/\W/g, '')}-${freeGoods}`, 1e9)
+      request.items[0].unit_cost_usd = cost
+      request.items[0].free_goods = freeGoods
+      if (expectedSuccess) {
+        request.items[0].quantity = 1
+        const receipt = await commitStockSession(f.env, user, request)
+        assert.equal(receipt.items[0].unitCostUsd, 0)
+        assert.equal(receipt.totalCostUsd, 0)
+      } else {
+        await assert.rejects(() => commitStockSession(f.env, user, request), (error) => error instanceof StockSessionError && error.statusCode === 400)
+        for (const key of ['operations', 'members', 'movements', 'audits', 'history', 'snapshots']) assert.equal(receiptState(f.sql)[key], 0, `${cost}/${freeGoods}/${key}`)
+      }
+    }
+  })
+
+  await check('a committed legacy raw-cost request replays before the new normalization gate', async () => {
+    const f = fixture()
+    const requestId = 'legacy-cost-replay-001'
+    const legacyCanonical = {
+      client_request_id: requestId, mode: 'stock_in', items: [{
+        line_id: 'line-001', kind: 'receive', product_id: 1, product: null, batch_id: null,
+        branch_id: 1, quantity: 1, supplier_id: null, supplier_name: 'Fixture Supplier',
+        received_date: '2026-09-05', expiry_date: null, notes: null, unit_cost_usd: 0.00004,
+        free_goods: false, payment_status: null, credit_due_date: null,
+      }],
+    }
+    f.sql.prepare(`INSERT INTO stock_session_operations(id,actor_id,request_id,mode,request_json,receipt_json)
+      VALUES(?,?,?,?,?,?)`).run('legacy-operation', user.id, requestId, 'stock_in', JSON.stringify(legacyCanonical), JSON.stringify({
+        success: true, replayed: false, operationId: 'legacy-operation', clientRequestId: requestId,
+        actionHistoryId: 1, snapshotId: 1, memberCount: 1, createdCount: 0, receivedCount: 1,
+        totalQuantity: 1, totalCostUsd: 0.00004, items: [],
+      }))
+    const raw = receiveRequest(requestId, 1)
+    raw.items[0].unit_cost_usd = 0.00004
+    const receipt = await commitStockSession(f.env, user, raw)
+    assert.equal(receipt.replayed, true)
+    assert.equal(receipt.operationId, 'legacy-operation')
+    assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM stock_session_operations').get().n, 1)
+    assert.equal(f.sql.prepare('SELECT stock_quantity FROM products WHERE id=1').get().stock_quantity, 0)
+  })
+
   await check('same actor and request id with changed canonical payload conflicts', async () => {
     const f = fixture()
     await commitStockSession(f.env, user, receiveRequest('stock-request-002', 5))
@@ -527,13 +608,14 @@ async function main() {
       client_request_id: 'stock-request-003', mode: 'stock_in',
       defaults: { branch_id: 1, received_date: '2026-09-05', supplier_name: 'Counter supplier' },
       items: [{ line_id: 'line-new', kind: 'create_receive', quantity: 3, unit_cost_usd: 4,
-        product: { name: 'New Cream', barcode: 'CREAM-1', cost_price_usd: 4, selling_price_usd: 7, stock_quantity: 3, branch_id: 1, tag_label: 'New' } }],
+        product: { name: 'New Cream', barcode: 'CREAM-1', cost_price_usd: 4.12345, cost_price_khr: 5.00005, selling_price_usd: 7, stock_quantity: 3, branch_id: 1, tag_label: 'New' } }],
     })
     assert.equal(receipt.replayed, false)
     assert.equal(receipt.createdCount, 1)
     assert.equal(receipt.items[0].createdProduct, true)
     const created = f.sql.prepare("SELECT id,stock_quantity,cost_price_usd,purchase_price_usd FROM products WHERE name='New Cream'").get()
-    assert.deepEqual(created, { id: 2, stock_quantity: 3, cost_price_usd: 4, purchase_price_usd: 0 })
+    assert.deepEqual(created, { id: 2, stock_quantity: 3, cost_price_usd: 4.1235, purchase_price_usd: 0 })
+    assert.equal(f.sql.prepare("SELECT cost_price_khr FROM products WHERE name='New Cream'").get().cost_price_khr, 5.0001)
     assert.equal(f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=2 AND branch_id=1').get().quantity, 3)
     assert.equal(f.sql.prepare('SELECT received_quantity FROM product_batches WHERE variant_product_id=2').get().received_quantity, 3)
     assert.equal(f.sql.prepare('SELECT COUNT(*) count FROM stock_session_operations').get().count, 1)
