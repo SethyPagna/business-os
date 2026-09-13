@@ -298,6 +298,12 @@ async function bundleRuntime(tempDir) {
 
 async function createHarness(bundlePath) {
   const mf = new Miniflare({
+    // Miniflare names the module by path.relative(modulesRoot, scriptPath) and
+    // modulesRoot defaults to process.cwd(); workerd refuses any '..' segment,
+    // so running this file from scripts/ (the documented sweep form) failed at
+    // runtime start. Root the module at the temp bundle's own directory so the
+    // module name is bare and the working directory no longer matters.
+    modulesRoot: path.dirname(bundlePath),
     modules: true,
     scriptPath: bundlePath,
     compatibilityDate: '2026-07-01',
