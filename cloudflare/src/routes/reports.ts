@@ -5,6 +5,8 @@ import { getActionTier, isAdminControlUser } from '../lib/permissions'
 import { round2 } from '../lib/saleTotals'
 import {
   getBusinessSummaryDayRows,
+  getBusinessSummaryPeriodRows,
+  getBusinessSummarySalesRows,
   getSalesTotals,
   getDeliveryContactTotals,
   getSalesGroupedTotals,
@@ -22,8 +24,10 @@ import {
   CUSTOMER_REFUND_JOIN,
   whereActiveSales, netRefundExpr, collectedSaleExpr, deliveryActualCostExpr, RESTOCKED_RETURN_LINE,
   shiftWindowBound,
+  reportMoneyDiagnostic,
   type SalesFilters,
 } from '../lib/salesAnalytics'
+import { ReportMoneyPrecisionError, reportMoneyHttpError } from '../lib/reportMoneyPrecision'
 import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr, localTimeRangeClause } from '../lib/businessDateWindow'
 import type { Env } from '../index'
 
@@ -56,6 +60,13 @@ import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
+app.onError((error, c) => {
+  if (error instanceof ReportMoneyPrecisionError) {
+    const mapped = reportMoneyHttpError(error)
+    return c.json({ error: mapped.message, code: error.code }, mapped.status)
+  }
+  throw error
+})
 
 function canReadSales(user: SessionUser): boolean {
   return getActionTier(user, 'sales', 'view') !== 'none'
@@ -190,6 +201,7 @@ function filterError(error: unknown): string {
  * buildDaySummaryRow / buildSaleReportRow above).
  */
 export function gateTotals<T extends Record<string, unknown>>(row: T, isAdmin: boolean): Record<string, unknown> {
+  const diagnostic = reportMoneyDiagnostic(row)
   // pending_cost_usd / pending_profit_usd (S4R3-6) are the awaiting-payment
   // cohort's COGS and profit -- the same class of admin-only money as
   // cost_usd / profit_usd, so they leave with them. The rest of the pending
@@ -202,7 +214,10 @@ export function gateTotals<T extends Record<string, unknown>>(row: T, isAdmin: b
   // repair is auditable rather than silent, so they leave by the same door.
   const {
     cost_usd, profit_usd, cost_missing_snapshot_lines, pending_cost_usd, pending_profit_usd,
-    unvalued_cost_usd, returned_cost_shortfall_usd, ...rest
+    unvalued_cost_usd, returned_cost_usd, returned_cost_shortfall_usd,
+    delivery_actual_cost_usd, delivery_actual_cost_count, delivery_margin_usd, delivery_net_usd,
+    recognized_delivery_cost_usd, pending_delivery_cost_usd, margin_pct,
+    money_precision_mode, money_complete, money_unknown_cost_lines, money_contributing_rows, ...rest
   } = row as Record<string, unknown>
   if (!isAdmin) return rest
   const revenue = num(rest.revenue_usd)
@@ -216,12 +231,24 @@ export function gateTotals<T extends Record<string, unknown>>(row: T, isAdmin: b
     pending_cost_usd: round2(num(pending_cost_usd)),
     pending_profit_usd: round2(num(pending_profit_usd)),
     unvalued_cost_usd: round2(num(unvalued_cost_usd)),
+    returned_cost_usd: round2(num(returned_cost_usd)),
     returned_cost_shortfall_usd: round2(num(returned_cost_shortfall_usd)),
+    delivery_actual_cost_usd: round2(num(delivery_actual_cost_usd)),
+    delivery_actual_cost_count: num(delivery_actual_cost_count),
+    delivery_margin_usd: round2(num(delivery_margin_usd)),
+    delivery_net_usd: round2(num(delivery_net_usd)),
+    recognized_delivery_cost_usd: round2(num(recognized_delivery_cost_usd)),
+    pending_delivery_cost_usd: round2(num(pending_delivery_cost_usd)),
+    ...(diagnostic ? { money_precision_mode: diagnostic.precision_mode, money_complete: diagnostic.complete,
+      money_unknown_cost_lines: diagnostic.unknown_cost_lines, money_contributing_rows: diagnostic.contributing_rows }
+      : money_precision_mode !== undefined ? { money_precision_mode, money_complete, money_unknown_cost_lines, money_contributing_rows } : {}),
   }
 }
 
 export function gateProductRow(row: Record<string, unknown>, isAdmin: boolean): Record<string, unknown> {
-  const { cost_usd, profit_usd, cost_missing_snapshot_lines, ...rest } = row
+  const diagnostic = reportMoneyDiagnostic(row)
+  const { cost_usd, profit_usd, cost_missing_snapshot_lines, margin_pct,
+    money_precision_mode, money_complete, money_unknown_cost_lines, money_contributing_rows, ...rest } = row
   if (!isAdmin) return rest
   const lineSales = num(rest.line_sales_usd)
   const profit = num(profit_usd)
@@ -231,7 +258,30 @@ export function gateProductRow(row: Record<string, unknown>, isAdmin: boolean): 
     profit_usd: round2(profit),
     cost_missing_snapshot_lines: num(cost_missing_snapshot_lines),
     margin_pct: lineSales > 0 ? round2((profit / lineSales) * 100) : null,
+    ...(diagnostic ? { money_precision_mode: diagnostic.precision_mode, money_complete: diagnostic.complete,
+      money_unknown_cost_lines: diagnostic.unknown_cost_lines, money_contributing_rows: diagnostic.contributing_rows }
+      : money_precision_mode !== undefined ? { money_precision_mode, money_complete, money_unknown_cost_lines, money_contributing_rows } : {}),
   }
+}
+
+export function gateBusinessSummarySaleRow(row: Record<string, unknown>, isAdmin: boolean): Record<string, unknown> {
+  const diagnostic = reportMoneyDiagnostic(row)
+  const { cost_usd, cost_before_floor_usd, cost_missing_snapshot_lines, gross_profit_usd,
+    money_precision_mode, money_complete, money_unknown_cost_lines, money_contributing_rows, ...publicRow } = row
+  if (!isAdmin) return publicRow
+  return { ...publicRow, cost_usd, cost_before_floor_usd, cost_missing_snapshot_lines, gross_profit_usd,
+    ...(diagnostic ? { money_precision_mode: diagnostic.precision_mode, money_complete: diagnostic.complete,
+      money_unknown_cost_lines: diagnostic.unknown_cost_lines, money_contributing_rows: diagnostic.contributing_rows }
+      : money_precision_mode !== undefined ? { money_precision_mode, money_complete, money_unknown_cost_lines, money_contributing_rows } : {}) }
+}
+
+export function gateCourierRow(row: Record<string, unknown>, isAdmin: boolean): Record<string, unknown> {
+  if (isAdmin) return row
+  const {
+    actual_cost_usd, actual_cost_count, linked_expense_count, linked_expense_usd, linked_expense_khr,
+    last_expense_at, margin_usd, ...publicRow
+  } = row
+  return publicRow
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -341,7 +391,7 @@ app.get('/overview', async (c) => {
         pending_revenue_usd: r.pending_revenue_usd,
         collected_usd: r.collected_total_usd,
       })),
-      couriers,
+      couriers: couriers.map((row) => gateCourierRow(row as unknown as Record<string, unknown>, isAdmin)),
     }
   }
 
@@ -405,8 +455,8 @@ app.get('/periods', async (c) => {
   try { f = parseViewFilters(query) } catch (error) { return c.json({ error: filterError(error) }, 400) }
   const granularity = parseGranularity(query.granularity)
   const isAdmin = isAdminControlUser(user)
-  const dayRows = await getBusinessSummaryDayRows(c.env, f)
-  const rows = rollupPeriodRows(dayRows, granularity).map((r) => gateTotals(r as unknown as Record<string, unknown>, isAdmin))
+  const periodRows = await getBusinessSummaryPeriodRows(c.env, f, granularity)
+  const rows = periodRows.map((r) => gateTotals(r as unknown as Record<string, unknown>, isAdmin))
   return c.json({ granularity, is_admin: isAdmin, filters: f, rows })
 })
 
@@ -427,7 +477,7 @@ app.get('/grouped', async (c) => {
   if (by === 'product') {
     rows = (await getProductSalesRanking(c.env, f, limit)).map((r) => gateProductRow(r as unknown as Record<string, unknown>, isAdmin))
   } else if (by === 'courier') {
-    rows = await getDeliveryContactTotals(c.env, f)
+    rows = (await getDeliveryContactTotals(c.env, f)).map((row) => gateCourierRow(row as unknown as Record<string, unknown>, isAdmin))
   } else if ((SALES_GROUP_KEYS as readonly string[]).includes(by)) {
     rows = (await getSalesGroupedTotals(c.env, f, by as SalesGroupKey, limit)).map((r) => gateTotals(r as unknown as Record<string, unknown>, isAdmin))
   } else {
@@ -449,6 +499,41 @@ for (const kind of ['sales', 'returns', 'expenses'] as const) {
     let f: SalesFilters
     try { f = parseViewFilters(query) } catch (error) { return c.json({ error: filterError(error) }, 400) }
     const pageSize = clampInt(query.pageSize, 250, 1, 500)
+    if ((kind as string) === 'sales') {
+      const requestedSnapshot = query.snapshotMaxId != null && query.snapshotMaxId !== ''
+        ? clampInt(query.snapshotMaxId, 0, 0, Number.MAX_SAFE_INTEGER) : null
+      if (requestedSnapshot === 0) return c.json({ rows: [], snapshot_max_id: 0, has_more: false, next_cursor: null })
+      if (requestedSnapshot != null) f.maxSaleId = requestedSnapshot
+      let rows = await getBusinessSummarySalesRows(c.env, f)
+      const snapshot = requestedSnapshot ?? rows.reduce((maximum, row) => Math.max(maximum, num(row.id)), 0)
+      if (!snapshot) return c.json({ rows: [], snapshot_max_id: 0, has_more: false, next_cursor: null })
+      if (query.q?.trim()) {
+        const search = query.q.trim().toLowerCase()
+        rows = rows.filter((row) => ['receipt_number','customer','customer_phone','cashier','branch','payment_method']
+          .some((key) => String(row[key] || '').toLowerCase().includes(search)))
+      }
+      const stamp = (row: Record<string, unknown>) => {
+        const raw = String(row.cursor_at || '')
+        const value = new Date(/(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(raw) ? raw : `${raw.replace(' ', 'T')}Z`).getTime()
+        return Number.isFinite(value) ? value : 0
+      }
+      const descending = query.order === 'desc'
+      rows.sort((left, right) => (descending ? stamp(right) - stamp(left) : stamp(left) - stamp(right))
+        || (descending ? num(right.id) - num(left.id) : num(left.id) - num(right.id)))
+      const afterId = Number(query.afterId)
+      if (Number.isSafeInteger(afterId) && afterId > 0) {
+        const afterRaw = String(query.afterCreatedAt || '')
+        const afterStamp = new Date(/(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(afterRaw) ? afterRaw : `${afterRaw.replace(' ', 'T')}Z`).getTime()
+        rows = rows.filter((row) => descending
+          ? stamp(row) < afterStamp || (stamp(row) === afterStamp && num(row.id) < afterId)
+          : stamp(row) > afterStamp || (stamp(row) === afterStamp && num(row.id) > afterId))
+      }
+      const hasMore = rows.length > pageSize
+      const page = rows.slice(0, pageSize).map((row) => gateBusinessSummarySaleRow(row, isAdmin))
+      const last = page[page.length - 1]
+      return c.json({ rows: page, snapshot_max_id: snapshot, has_more: hasMore,
+        next_cursor: hasMore && last ? { created_at: last.cursor_at || '', id: last.id } : null, is_admin: isAdmin })
+    }
     const table = kind === 'expenses' ? 'fees' : kind
     const alias = kind === 'sales' ? 's' : kind === 'returns' ? 'r' : 'f'
     const active = kind === 'sales' ? whereActiveSales('s', f) : { sql: '1=1', params: {} }

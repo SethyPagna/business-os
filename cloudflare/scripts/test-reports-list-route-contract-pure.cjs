@@ -11,7 +11,7 @@ CREATE TABLE sales(id INTEGER PRIMARY KEY, created_at TEXT, sale_status TEXT, br
  cashier_name TEXT, cashier_id INTEGER, customer_id INTEGER, customer_name TEXT, customer_phone TEXT, receipt_number TEXT, payment_method TEXT,
  subtotal_usd REAL, discount_usd REAL DEFAULT 0, membership_discount_usd REAL DEFAULT 0, tax_usd REAL DEFAULT 0,
  total_usd REAL, delivery_fee_usd REAL DEFAULT 0, delivery_fee_paid_by TEXT DEFAULT 'customer', delivery_actual_cost_usd REAL,
- is_delivery INTEGER DEFAULT 0, source_return_id INTEGER, amount_paid_usd REAL);
+ is_delivery INTEGER DEFAULT 0, delivery_contact_id INTEGER, delivery_contact_name TEXT, source_return_id INTEGER, amount_paid_usd REAL);
 CREATE TABLE sale_items(id INTEGER PRIMARY KEY, sale_id INTEGER, cost_price_usd REAL, quantity REAL);
 CREATE TABLE returns(id INTEGER PRIMARY KEY, sale_id INTEGER, created_at TEXT, branch_id INTEGER, return_number TEXT,
  receipt_number TEXT, customer_id INTEGER, customer_name TEXT, return_scope TEXT DEFAULT 'customer', return_type TEXT, reason TEXT,
@@ -26,6 +26,7 @@ INSERT INTO sales(id,created_at,sale_status,branch_id,branch_name,cashier_name,c
  (2,'2026-09-04T03:00:00.000Z','awaiting_payment',2,'Shop','Za',7,'Bob','0456','R2','Cash',200,0,205,5,1,1),
  (3,'2026-09-04 04:00:00','cancelled',2,'Shop','Za',7,'Void','','R3','Cash',900,0,900,0,NULL,0),
  (4,'2026-09-04 03:00:00','completed',3,'Warehouse','Other',8,'Other','','R4','ABA',500,0,500,0,NULL,0);
+UPDATE sales SET delivery_contact_id=7,delivery_contact_name='Grab' WHERE id=1;
 INSERT INTO sale_items VALUES(1,1,60,1),(2,2,120,1),(3,3,800,1);
 INSERT INTO returns(id,sale_id,created_at,branch_id,return_number,receipt_number,customer_name,total_refund_usd) VALUES(1,1,'2026-09-04 05:00:00',2,'RET1','R1','Alice',23);
 INSERT INTO returns(id,sale_id,created_at,branch_id,return_number,receipt_number,customer_name,total_refund_usd) VALUES
@@ -51,12 +52,15 @@ function load(file, overrides={}) {
  return m.exports
 }
 const dates=load('lib/businessDateWindow.ts')
+const moneyPrecision=load('lib/moneyPrecision.ts')
+const reportMoneyPrecision=load('lib/reportMoneyPrecision.ts',{'./moneyPrecision':moneyPrecision})
 const saleTotals=load('lib/saleTotals.ts')
 const financialPrecision=load('lib/financialPrecision.ts')
 const nativeSaleChange=load('lib/nativeSaleChange.ts',{'./financialPrecision':financialPrecision,'./saleTotals':saleTotals})
-const analytics=load('lib/salesAnalytics.ts',{'./db':{getDb:()=>db},'./businessDateWindow':dates})
-const app=load('routes/reports.ts',{
+const analytics=load('lib/salesAnalytics.ts',{'./db':{getDb:()=>db},'./businessDateWindow':dates,'./reportMoneyPrecision':reportMoneyPrecision})
+const reportsModule=load('routes/reports.ts',{
  '../lib/db':{getDb:()=>db},'../lib/businessDateWindow':dates,'../lib/salesAnalytics':analytics,
+ '../lib/reportMoneyPrecision':reportMoneyPrecision,
  '../lib/saleTotals':load('lib/saleTotals.ts'),
  '../lib/auth':{requireAuth:async(c,next)=>{
    const scope=c.req.header('scope')||'all'
@@ -64,7 +68,8 @@ const app=load('routes/reports.ts',{
    await next()
  }},
  '../lib/permissions':load('lib/permissions.ts'),
-}).default
+})
+const app=reportsModule.default
 const base='http://local/business-summary/'
 async function get(kind,query='',scope='all'){const res=await app.request(base+kind+'?startDate=2026-09-04&endDate=2026-09-04&branchId=2&'+query,{headers:{scope}},{});return {status:res.status,body:await res.json()}}
 async function overview(query='',scope='all'){const res=await app.request('http://local/overview?startDate=2026-09-04&endDate=2026-09-04&branchId=2&'+query,{headers:{scope}},{});return {status:res.status,body:await res.json()}}
@@ -91,6 +96,18 @@ async function overview(query='',scope='all'){const res=await app.request('http:
  assert.equal(paid.net_revenue_usd,77);assert.equal(paid.refund_usd,23);assert.equal(paid.cost_usd,50);assert.equal(paid.gross_profit_usd,35);assert.equal(paid.collected_total_usd,92)
  assert.equal(credit.net_revenue_usd,200);assert.equal(credit.pending_revenue_usd,200);assert.equal(credit.collected_total_usd,0);assert.equal(credit.gross_profit_usd,84)
  const nonadmin=await get('sales','','sales');assert.ok(!('cost_usd' in nonadmin.body.rows[0]));assert.ok(!('cost_before_floor_usd' in nonadmin.body.rows[0]));assert.ok(!('gross_profit_usd' in nonadmin.body.rows[0]))
+ const courierFixture={delivery_contact_id:7,delivery_contact_name:'Grab',deliveries:2,charged_fee_usd:3,absorbed_fee_usd:1,
+  paid_fee_usd:2,receivable_fee_usd:1,paid_by_method:[],actual_cost_usd:4,actual_cost_count:2,
+  linked_expense_count:1,linked_expense_usd:4,linked_expense_khr:0,last_delivery_at:'2026-09-04',last_expense_at:'2026-09-04',margin_usd:-1}
+ const employeeCourier=reportsModule.gateCourierRow(courierFixture,false)
+ for(const key of ['actual_cost_usd','actual_cost_count','linked_expense_count','linked_expense_usd','linked_expense_khr','last_expense_at','margin_usd'])
+  assert.ok(!(key in employeeCourier),`employee courier row strips ${key}`)
+ assert.deepEqual(reportsModule.gateCourierRow(courierFixture,true),courierFixture,'admin courier row retains cost, linked expense, and margin')
+ const employeeOverview=await overview('','sales')
+ const employeeOverviewCourier=employeeOverview.body.sales.couriers.find(row=>row.delivery_contact_id===7)
+ assert.ok(employeeOverviewCourier,'employee overview includes the courier activity row')
+ for(const key of ['actual_cost_usd','actual_cost_count','linked_expense_count','linked_expense_usd','linked_expense_khr','last_expense_at','margin_usd'])
+  assert.ok(!(key in employeeOverviewCourier),`employee overview courier strips ${key}`)
  assert.equal((await get('sales','','fees')).status,403);assert.equal((await get('returns','','sales')).status,403);assert.equal((await get('expenses','','sales')).status,403)
  assert.deepEqual((await get('sales','q=Alice')).body.rows.map(r=>r.id),[1])
  assert.deepEqual((await get('sales','status=awaiting_payment&paymentMethod=Cash&startTime=09:30&endTime=10:30')).body.rows.map(r=>r.id),[2])

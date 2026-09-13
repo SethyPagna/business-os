@@ -41,8 +41,10 @@ fs.writeFileSync(path.join(tmpDir, 'salesAnalytics.ts'), kernelSrc)
 // salesAnalytics.ts imports ./businessDateWindow (the UTC+7 helpers); copy that
 // pure dependency in so the isolated strict compile resolves and emits it.
 fs.writeFileSync(path.join(tmpDir, 'businessDateWindow.ts'), fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'businessDateWindow.ts'), 'utf8'))
+fs.writeFileSync(path.join(tmpDir, 'moneyPrecision.ts'), fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'moneyPrecision.ts'), 'utf8'))
+fs.writeFileSync(path.join(tmpDir, 'reportMoneyPrecision.ts'), fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'reportMoneyPrecision.ts'), 'utf8'))
 const tscBin = path.join(cloudflareRoot, 'node_modules', 'typescript', 'bin', 'tsc')
-execSync(`node ${tscBin} --module commonjs --target es2022 --strict --skipLibCheck --outDir ${tmpDir} ${path.join(tmpDir, 'salesAnalytics.ts')} ${path.join(tmpDir, 'businessDateWindow.ts')}`, { cwd: tmpDir, stdio: 'inherit' })
+execSync(`node ${tscBin} --module commonjs --target es2022 --strict --skipLibCheck --outDir ${tmpDir} ${path.join(tmpDir, 'salesAnalytics.ts')} ${path.join(tmpDir, 'businessDateWindow.ts')} ${path.join(tmpDir, 'moneyPrecision.ts')} ${path.join(tmpDir, 'reportMoneyPrecision.ts')}`, { cwd: tmpDir, stdio: 'inherit' })
 
 // ---- real schema ----------------------------------------------------------
 const migrationSql = (file) => fs.readFileSync(path.join(cloudflareRoot, 'migrations', file), 'utf8')
@@ -142,6 +144,14 @@ seed({ receipt: 'R7', method: 'Cash', subtotal: 11, total: 11, at: '2026-08-27T0
 rawSeedExchange({ receipt: 'R8', total: 20, paid: 0, returnId: 501 })
 rawSeedExchange({ receipt: 'R9', total: 30, paid: 6, returnId: 502 })
 
+// Collected money is a settled-cash cohort: awaiting credit contributes zero,
+// and a completed receipt's customer refund leaves the till exactly once.
+const COLLECTED_DAY = '2026-08-25'
+const settledId = Number(seed({ receipt: 'R10', method: 'Card', subtotal: 50, total: 50, at: `${COLLECTED_DAY}T10:00:00.000Z` }).lastInsertRowid)
+seed({ receipt: 'R11', method: 'Card', subtotal: 70, total: 70, status: 'awaiting_payment', at: `${COLLECTED_DAY}T11:00:00.000Z` })
+db.prepare(`INSERT INTO returns(sale_id,total_refund_usd,status,return_scope,created_at)
+  VALUES(? ,8,'completed','customer',?)`).run(settledId, `${COLLECTED_DAY}T12:00:00.000Z`)
+
 const env = { DB: {} }
 
 ;(async () => {
@@ -177,6 +187,18 @@ const env = { DB: {} }
     'and their goods value is still reported (20 + 30)')
   ok(exchange.collected_usd === 6,
     'but collected is only the $6 one customer actually topped up -- not 50')
+
+  const collectedMethods = await kernel.getPaymentMethodBreakdown(env, { startDate: COLLECTED_DAY, endDate: COLLECTED_DAY })
+  const collectedCard = collectedMethods.find((m) => m.payment_method === 'Card')
+  ok(collectedCard.tx_count === 2 && collectedCard.total_usd === 120 && collectedCard.collected_usd === 42,
+    'exact payment breakdown excludes awaiting credit and subtracts the settled refund once')
+  const collectedDay = await kernel.getSalesDayReport(env, COLLECTED_DAY)
+  const settled = collectedDay.sales.find((sale) => sale.receipt_number === 'R10')
+  const awaiting = collectedDay.sales.find((sale) => sale.receipt_number === 'R11')
+  ok(collectedDay.totals.collected_total_usd === 42 && collectedDay.payment_methods[0].collected_usd === 42,
+    'day totals and payment methods share the same collected-money basis')
+  ok(settled.collected_usd === 42 && awaiting.collected_usd === 0,
+    'per-sale collected subtracts refunds and never treats awaiting credit as cash')
 
   // ---- delivery contacts --------------------------------------------------
   const couriers = await kernel.getDeliveryContactTotals(env, { startDate: D, endDate: D })

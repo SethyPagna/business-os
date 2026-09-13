@@ -47,6 +47,7 @@ import { maybeRunScheduledImportRetention, cleanOrphanImportStaging } from './li
 import { maybeRunScheduledImageAudit } from './lib/imageAudit'
 import { maybeRunScheduledEphemeralRetention } from './lib/ephemeralRetention'
 import { reapStalledImportJobs } from './routes/importJobs'
+import { ReportMoneyPrecisionError, reportMoneyHttpError } from './lib/reportMoneyPrecision'
 
 export type Env = {
   DB: D1Database
@@ -154,6 +155,14 @@ const app = new Hono<{ Bindings: Env }>()
 // the frontend can actually parse and show a sane message for, instead of
 // a bare string.
 app.onError((error, c) => {
+  if (error instanceof ReportMoneyPrecisionError) {
+    const mapped = reportMoneyHttpError(error)
+    return c.json({
+      success: false,
+      error: mapped.message,
+      code: error.code,
+    }, mapped.status)
+  }
   console.error('[worker] unhandled error', c.req.method, c.req.path, error)
   // Reported through waitUntil, never awaited: the response must not wait on
   // a third-party POST, and on the free plan's 10ms CPU budget it must not
