@@ -1179,6 +1179,12 @@ function exactReportTotals(bucket: ReportExactBucket, snapshot: SalesReportSnaps
   }, diagnostic)
 }
 
+/** Reuse the canonical reducer when one caller needs several views of the
+ * same verified snapshot. No second read and no parallel report formula. */
+export function salesTotalsFromSnapshot(snapshot: SalesReportSnapshot): SalesTotals {
+  return exactReportTotals(aggregateReportSnapshot(snapshot, () => '').get('') || reportBucket(), snapshot)
+}
+
 export async function getBusinessSummarySalesRows(env: Env, f: SalesFilters): Promise<Array<Record<string, unknown>>> {
   const snapshot = await readSalesReportSnapshot(env, f)
   return reportSaleFacts(snapshot).map((fact) => {
@@ -1749,7 +1755,7 @@ export interface SalesDayReport {
   sales: SalesDayRow[]
 }
 
-function paymentMethodBreakdownFromSnapshot(snapshot: SalesReportSnapshot): PaymentMethodBreakdownRow[] {
+export function paymentMethodBreakdownFromSnapshot(snapshot: SalesReportSnapshot): PaymentMethodBreakdownRow[] {
   const methods = new Map<string, { tx_count: number; collected: ReportExactDecimal; total: ReportExactDecimal }>()
   for (const fact of reportSaleFacts(snapshot)) {
     const sale = fact.sale
