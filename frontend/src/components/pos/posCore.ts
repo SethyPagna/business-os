@@ -1,11 +1,91 @@
 import { calculateProductDiscount, normalizePriceValue } from '../../utils/pricing.ts'
-import { multiplyMoney4, percentageMoney4, roundMoney4, sellingPriceCeilCent, subtractMoney4 } from '../../utils/moneyPrecision.ts'
+import { divideMoney4, multiplyMoney4, percentageMoney4, roundMoney2, roundMoney4, sellingPriceCeilCent, settlementRounding4, subtractMoney4, sumMoney4 } from '../../utils/moneyPrecision.ts'
 import { evaluatePromotionPricing, evaluateCartPromotionAdjustments, type PromotionRule } from '../../utils/promotionRules.ts'
+import { capturePricingProduct, evaluateCapturedPricingPool, type CapturedPricingPool, type ExactLinePricing, type PricingSource } from '../../utils/saleItemPricing.ts'
 import { buildProductGroups, compareProductsByNameBranchPriceBarcode } from '../../utils/productGrouping.ts'
 import type { ProductRecord as ProductGroupRecord } from '../../utils/productGrouping.ts'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
 import { todayStr } from '../../utils/dateHelpers.ts'
 import { lotCodeToIsoDate } from '../../utils/batchLabel.ts'
+
+/** Raw draft text is retained by the input; only valid nonnegative decimals
+ * enter a v1 calculation. In particular a sub-tick negative cannot become 0. */
+export function parsePosInternalAmount(value: unknown): number {
+  const text = String(value ?? '').trim()
+  if (!text) return 0
+  if (text.startsWith('-')) throw new Error('invalid_money_input')
+  return roundMoney4(text)
+}
+
+/** Physical tender is a different boundary from internal line accounting.
+ * This helper is only for a new POS submission, never saved payment rows. */
+export function posV1Tender(rows: readonly { method: string; usd: string; khr: string }[]) {
+  const details = rows.map(row => {
+    parsePosInternalAmount(row.usd); parsePosInternalAmount(row.khr)
+    return { method: row.method.trim(), amount_usd: roundMoney2(row.usd.trim() || '0'), amount_khr: Math.round(Number(row.khr.trim() || '0')) }
+  })
+  return { details, paidUsd: sumMoney4(details.map(row => row.amount_usd)), paidKhr: sumMoney4(details.map(row => row.amount_khr)) }
+}
+
+/** New-cart preview only. A saved/frozen checkout never enters this helper. */
+export function posV1BasketTotals(input: {
+  lines: readonly { total_usd: number }[]; exchangeRate: number;
+  discountType: string; discountPercent: unknown; discountUsd: unknown; discountKhr: unknown;
+  membershipUsd: unknown; membershipKhr: unknown; taxPercent: unknown;
+  feeUsd: unknown; customerPaysFee: boolean;
+}) {
+  if (!(input.exchangeRate > 0) || !Number.isFinite(input.exchangeRate)) throw new Error('invalid_money_input')
+  const fromPair = (usd: unknown, khr: unknown) => {
+    const usdValue = parsePosInternalAmount(usd), khrValue = parsePosInternalAmount(khr)
+    return String(usd ?? '').trim() !== '' ? usdValue : divideMoney4(khrValue, input.exchangeRate)
+  }
+  const subtotalUsd = sumMoney4(input.lines.map(line => line.total_usd))
+  const percent = String(input.discountPercent ?? '').trim() || '0'
+  if (input.discountType === 'percent' && (percent.startsWith('-') || !Number.isFinite(Number(percent)) || Number(percent) > 100)) throw new Error('invalid_money_input')
+  const discUsd = input.discountType === 'percent' ? percentageMoney4(subtotalUsd, percent) : fromPair(input.discountUsd, input.discountKhr)
+  const membershipDiscUsd = fromPair(input.membershipUsd, input.membershipKhr)
+  const afterDiscUsd = subtractMoney4(subtractMoney4(subtotalUsd, discUsd), membershipDiscUsd)
+  if (afterDiscUsd < 0) throw new Error('invalid_money_input')
+  const taxPercent = String(input.taxPercent ?? '').trim() || '0'
+  if (taxPercent.startsWith('-') || !Number.isFinite(Number(taxPercent)) || (afterDiscUsd === 0 && Number(taxPercent) > 0)) throw new Error('invalid_money_input')
+  const taxUsd = percentageMoney4(afterDiscUsd, taxPercent)
+  const feeUsd = parsePosInternalAmount(input.feeUsd)
+  const calculatedTotalUsd = sumMoney4([afterDiscUsd, taxUsd, input.customerPaysFee ? feeUsd : 0])
+  const rounding = settlementRounding4(calculatedTotalUsd)
+  return { subtotalUsd, discUsd, membershipDiscUsd, afterDiscUsd, taxUsd, feeUsd, calculatedTotalUsd, rounding,
+    totalUsd: rounding.payableTotal2, totalKhr: multiplyMoney4(rounding.payableTotal2, input.exchangeRate),
+    subtotalKhr: multiplyMoney4(subtotalUsd, input.exchangeRate), discKhr: multiplyMoney4(discUsd, input.exchangeRate),
+    membershipDiscKhr: multiplyMoney4(membershipDiscUsd, input.exchangeRate), taxKhr: multiplyMoney4(taxUsd, input.exchangeRate), feeKhr: multiplyMoney4(feeUsd, input.exchangeRate) }
+}
+
+/** Display an unresolved attempt's own quote; never treat it as a saved receipt
+ * and never evaluate it against current catalogue/settings. */
+export function frozenPosPreview(body: Record<string, unknown>) {
+  if (body.money_precision_version !== 1 || !Array.isArray(body.items) || !body.items.length) throw new Error('money_checkout_recovery_required')
+  const money = (value: unknown) => {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || roundMoney4(value) !== value) throw new Error('money_checkout_recovery_required')
+    return value
+  }
+  const rate = Number(body.exchange_rate)
+  if (!(rate > 0) || !Number.isFinite(rate)) throw new Error('money_checkout_recovery_required')
+  const lines = new Map<string, { total_usd: number; total_khr: number; manual_discount_usd: number }>()
+  for (const item of body.items as Record<string, unknown>[]) {
+    const key = String(item.client_line_key || ''), quote = item.pricing_quote as Record<string, unknown> | undefined
+    if (!key || lines.has(key) || !quote) throw new Error('money_checkout_recovery_required')
+    const total = money(quote.total_usd), khr = money(quote.total_khr), manual = money(quote.manual_discount_usd)
+    if (subtractMoney4(subtractMoney4(money(quote.gross_usd), money(quote.product_discount_usd)), manual) !== total || multiplyMoney4(total, rate) !== khr) throw new Error('money_checkout_recovery_required')
+    lines.set(key, { total_usd: total, total_khr: khr, manual_discount_usd: manual })
+  }
+  const subtotalUsd = money(body.subtotal_usd), discUsd = money(body.discount_usd), membershipDiscUsd = money(body.membership_discount_usd), taxUsd = money(body.tax_usd), feeUsd = money(body.delivery_fee_usd)
+  if (sumMoney4([...lines.values()].map(line => line.total_usd)) !== subtotalUsd) throw new Error('money_checkout_recovery_required')
+  const afterDiscUsd = subtractMoney4(subtractMoney4(subtotalUsd, discUsd), membershipDiscUsd)
+  if (afterDiscUsd < 0) throw new Error('money_checkout_recovery_required')
+  const calculatedTotalUsd = sumMoney4([afterDiscUsd, taxUsd, Number(body.is_delivery) && body.delivery_fee_paid_by === 'customer' ? feeUsd : 0])
+  const rounding = settlementRounding4(calculatedTotalUsd), totalUsd = money(body.total_usd), totalKhr = money(body.total_khr)
+  if (rounding.payableTotal2 !== totalUsd || multiplyMoney4(totalUsd, rate) !== totalKhr) throw new Error('money_checkout_recovery_required')
+  return { lines, totals: { subtotalUsd, discUsd, membershipDiscUsd, taxUsd, feeUsd, afterDiscUsd, calculatedTotalUsd, rounding, totalUsd, totalKhr,
+    subtotalKhr: money(body.subtotal_khr), discKhr: money(body.discount_khr), membershipDiscKhr: money(body.membership_discount_khr), taxKhr: money(body.tax_khr), feeKhr: money(body.delivery_fee_khr) } }
+}
 
 export type ProductRecord = ProductGroupRecord & {
   id?: unknown
@@ -484,6 +564,41 @@ export function resolveCartPriceValues(
 // instance when nothing changed so callers can patch state without
 // render loops. Lines in other price modes (selling/special, manual
 // price edits) are never touched and never join the pairing pool.
+export type SaleCartLineQuote = ExactLinePricing & {
+  client_line_key: string
+  pricing_source: PricingSource
+  display_price_mode?: 'selling' | 'wholesale'
+  selling_price_input_usd?: number
+  pricing_quote: Pick<ExactLinePricing, 'gross_usd' | 'product_discount_usd' | 'manual_discount_usd' | 'total_usd' | 'total_khr'>
+}
+
+/** A client quote is expectation only. The server captures its own authorized
+ * source/rule pool and refuses a mismatch; this object is never stored as proof. */
+export function quoteSaleCartLines(cart: readonly ProductRecord[], rules: readonly PromotionRule[], exchangeRate: number, now: Date | string | number = new Date()): Map<string, SaleCartLineQuote> {
+  if (!cart.length) return new Map()
+  const lines = cart.map(item => {
+    const record = item as Record<string, unknown>
+    const product = record.pricing_product && typeof record.pricing_product === 'object' ? record.pricing_product as Record<string, unknown> : record
+    const explicit = record.selling_price_input_usd
+    const source: PricingSource = explicit != null ? 'manual' : record.price_mode === 'promotion' ? 'promotion' : record.price_mode === 'wholesale' ? 'wholesale' : 'selling'
+    return { line_key: getCartLineId(item), source, product: { ...capturePricingProduct({ ...product, id: Number(record.id) }),
+      selling_price_usd: sellingPriceCeilCent(Number(product.selling_price_usd)),
+      wholesale_price_usd: product.wholesale_price_usd == null ? null : sellingPriceCeilCent(Number(product.wholesale_price_usd)) },
+      selling_price_input_usd: explicit == null ? null : Number(explicit),
+      ...(record.display_price_mode === 'selling' || record.display_price_mode === 'wholesale' ? { display_price_mode: record.display_price_mode as 'selling' | 'wholesale' } : {}),
+      manual: { type: (record.manual_discount_type === 'percent' || record.manual_discount_type === 'fixed' ? record.manual_discount_type : 'none') as 'none' | 'percent' | 'fixed', value: Number(record.manual_discount_value ?? 0) } }
+  })
+  const pool: CapturedPricingPool = { version: 1, pool_key: 'client-quote', evaluation_time: new Date(now instanceof Date ? now.getTime() : now).toISOString(), exchange_rate: exchangeRate, rules: [...rules], lines }
+  const amounts = evaluateCapturedPricingPool(pool, Object.fromEntries(cart.map(item => [getCartLineId(item), Number((item as Record<string, unknown>).quantity)])))
+  return new Map(lines.map(line => {
+    const amount = amounts.get(line.line_key)!
+    return [line.line_key, { ...amount, client_line_key: line.line_key, pricing_source: line.source,
+      ...(line.display_price_mode === 'selling' || line.display_price_mode === 'wholesale' ? { display_price_mode: line.display_price_mode } : {}),
+      ...(line.selling_price_input_usd == null ? {} : { selling_price_input_usd: line.selling_price_input_usd }),
+      pricing_quote: { gross_usd: amount.gross_usd, product_discount_usd: amount.product_discount_usd, manual_discount_usd: amount.manual_discount_usd, total_usd: amount.total_usd, total_khr: amount.total_khr } }]
+  }))
+}
+
 export function repricePromotionCartLines(
   cart: readonly ProductRecord[] = [],
   promotionRules: readonly PromotionRule[] = [],
@@ -492,26 +607,23 @@ export function repricePromotionCartLines(
 ): { cart: ProductRecord[]; changed: boolean } {
   const list = Array.isArray(cart) ? cart : []
   if (moneyPrecisionVersion === 1) {
-    const adjustments = evaluateCartPromotionAdjustments(list.filter(item => item.price_mode === 'promotion').map(item => ({ line_id: getCartLineId(item), product: item, quantity: Number(item.quantity) })), promotionRules, exchangeRate, new Date(), 1)
+    let quotes: Map<string, SaleCartLineQuote>
+    try { quotes = quoteSaleCartLines(list, promotionRules, exchangeRate) }
+    catch { return { cart: [...list], changed: false } }
     let changed = false
     const next = list.map(item => {
-      if (item.price_mode !== 'promotion') return item
-      const adjustment = adjustments.get(getCartLineId(item))
-      if (!adjustment) return item
-      const baseUsd = adjustment.unit_price_usd, baseKhr = adjustment.unit_price_khr
-      const current = item as Record<string, unknown>
-      const manualType = current.manual_discount_type === 'percent' || current.manual_discount_type === 'fixed' ? current.manual_discount_type : null
-      const manual = applyManualDiscount(baseUsd, baseKhr, exchangeRate, manualType, Number(current.manual_discount_value ?? 0), 1)
+      const quote = quotes.get(getCartLineId(item))!
+      const qty = Number((item as Record<string, unknown>).quantity)
       const fields = {
-        ...manual,
-        base_price_usd: baseUsd,
-        base_price_khr: baseKhr,
-        product_discount_type: adjustment.rule_type === 'product_discount' ? String(current.discount_type || 'percent') : String(adjustment.rule_type || 'percent'),
-        product_discount_label: adjustment.label,
-        product_discount_usd: Math.max(0, subtractMoney4(sellingPriceCeilCent(Number(item.selling_price_usd ?? 0)), baseUsd)),
-        product_discount_khr: Math.max(0, subtractMoney4(roundMoney4(Number(item.selling_price_khr ?? multiplyMoney4(Number(item.selling_price_usd ?? 0), exchangeRate))), baseKhr)),
+        base_price_usd: quote.base_price_usd, base_price_khr: quote.base_price_khr,
+        applied_price_usd: quote.applied_price_usd, applied_price_khr: quote.applied_price_khr,
+        product_discount_usd: divideMoney4(quote.product_discount_usd, qty),
+        product_discount_khr: multiplyMoney4(divideMoney4(quote.product_discount_usd, qty), exchangeRate),
+        manual_discount_usd: divideMoney4(quote.manual_discount_usd, qty),
+        manual_discount_khr: multiplyMoney4(divideMoney4(quote.manual_discount_usd, qty), exchangeRate),
+        total_usd: quote.total_usd, total_khr: quote.total_khr,
       }
-      if (Object.entries(fields).every(([key, value]) => Object.is(current[key], value))) return item
+      if (Object.entries(fields).every(([key, value]) => Object.is((item as Record<string, unknown>)[key], value))) return item
       changed = true
       return { ...item, ...fields } as ProductRecord
     })

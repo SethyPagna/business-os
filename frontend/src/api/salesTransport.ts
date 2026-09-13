@@ -1,6 +1,7 @@
 import { SYNC } from '../constants.ts'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 import { saleMoneyResponseFields } from '../utils/saleMoneyV1.ts'
+import type { SaleMutationHeaderQuote } from '../utils/saleMutationHeaderQuote.ts'
 import { withExpectedUpdatedAt, type ExpectedUpdatedAtPayload } from './expectedUpdatedAt.ts'
 import { apiFetch, cacheInvalidate, route } from './http.ts'
 import { getLocalDb } from './lazyLocalDb.ts'
@@ -289,12 +290,12 @@ export async function addSaleItems(
   id: number | string,
   items: SaleItemAddition[] = [],
   notes = '',
-  review: { client_request_id: string; expected_exchange_rate: number; expected_updated_at?: string; money_precision_version?: 1 },
+  review: { client_request_id: string; expected_exchange_rate: number; expected_updated_at?: string; money_precision_version?: 1; expected_header_quote?: SaleMutationHeaderQuote },
 ): Promise<unknown> {
   if (!String(review?.client_request_id || '').trim()) {
     throw new Error("addSaleItems needs the caller's stable client_request_id; it must never be generated per request.")
   }
-  const body = await withExpectedUpdatedAt('sales', id, {
+  const body = review.money_precision_version === 1 ? structuredClone({ items, notes, ...review }) : await withExpectedUpdatedAt('sales', id, {
     ...getDevicePayload(),
     items,
     notes,
@@ -314,11 +315,13 @@ export async function addSaleItems(
     }).catch(() => {})
     return result
   } catch (error) {
-    attachAttempted(error, { items, notes })
+    attachAttempted(error, structuredClone(body))
   }
 }
 
 export interface SaleAmendmentRequest {
+  expected_header_quote?: SaleMutationHeaderQuote
+  pricing_quote?: { gross_usd: number; product_discount_usd: number; manual_discount_usd: number; total_usd: number; total_khr: number }
   money_precision_version?: 1
   selling_price_input_usd?: number | string
   kind: 'line_quantity_increased' | 'line_quantity_decreased' | 'line_removed' | 'line_updated' | 'line_replaced' | 'delivery_fee_changed' | 'delivery_actual_cost_changed' | 'delivery_added'
@@ -357,7 +360,7 @@ export async function amendSale(id: number | string, request: SaleAmendmentReque
   if (!String(request?.client_request_id || '').trim()) {
     throw new Error("amendSale needs the caller's stable client_request_id; it must never be generated per request.")
   }
-  const body = await withExpectedUpdatedAt('sales', id, {
+  const body = request.money_precision_version === 1 ? structuredClone(request) : await withExpectedUpdatedAt('sales', id, {
     ...getDevicePayload(),
     ...request,
   })

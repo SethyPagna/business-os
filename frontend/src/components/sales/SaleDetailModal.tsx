@@ -5,7 +5,10 @@ import X from 'lucide-react/dist/esm/icons/x.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import History from 'lucide-react/dist/esm/icons/history.js'
 import { searchProducts } from '../../api/methods.ts'
-import { getSaleDeliveryOptions } from '../../api/salesTransport.ts'
+import { getSaleDeliveryOptions, getSaleLineReceipt } from '../../api/salesTransport.ts'
+import { captureActorReadScope, isActorReadScopeCurrent } from '../../api/actorReadScope.ts'
+import { getSyncServerUrl } from '../../api/httpState.ts'
+import { loadPendingDirectMutation, runSaleLineMutation, replaceReviewedSaleLineHeader, withSaleLineMutationLock, type SaleLineMutationKind } from '../../utils/directMutationRequest.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
 import { fmtDateOnly, fmtDateTime24, fmtTime } from '../../utils/formatters.ts'
@@ -24,7 +27,10 @@ import {
 } from '../../utils/saleAmendments.ts'
 import { receiptTotalsFigures } from '../../utils/receiptTotals.ts'
 import { receiptLineFigures } from '../../utils/receiptLineMath.ts'
-import { saleLineEditorResult } from '../../utils/saleLineEditor.ts'
+import { capturedSaleLineEdit, capturedSaleRemovalSubtotal } from '../../utils/saleLineEditor.ts'
+import { quoteSaleMutationHeader, compareSaleHeaderQuote, type SaleMutationHeaderQuote } from '../../utils/saleMutationHeaderQuote.ts'
+import { useSaleMoneyCapability } from './useSaleMoneyCapability.ts'
+import { multiplyMoney4, roundMoney4, sellingPriceCeilCent, settlementRounding4, subtractMoney4, sumMoney4 } from '../../utils/moneyPrecision.ts'
 import { saleEditorInputWidth } from '../../utils/saleItemNameLayout.ts'
 import ProductNameRail from '../shared/ProductNameRail.tsx'
 import CopyableId from '../shared/CopyableId.tsx'
@@ -37,6 +43,7 @@ import {
   stagedAddLineKey,
   stagedLineBatchCaption,
   stagedLineFromSheetPick,
+  stagedLinePricingIntent,
   type SaleAddCandidate,
   type SaleAddSheetSelection,
   type StagedAddLine,
@@ -207,6 +214,10 @@ type AddProductCandidate = SaleAddCandidate
 // api/salesTransport.ts's SaleAmendmentRequest -- one shape, so the button and
 // the request cannot drift.
 interface SaleAmendmentRequest {
+  expected_header_quote?: SaleMutationHeaderQuote
+  pricing_quote?: { gross_usd: number; product_discount_usd: number; manual_discount_usd: number; total_usd: number; total_khr: number }
+  money_precision_version?: 1
+  selling_price_input_usd?: number | string
   kind: 'line_quantity_increased' | 'line_quantity_decreased' | 'line_removed' | 'line_updated' | 'line_replaced' | 'delivery_fee_changed' | 'delivery_actual_cost_changed' | 'delivery_added'
   sale_item_id?: number
   quantity?: number
@@ -218,7 +229,7 @@ interface SaleAmendmentRequest {
   delivery_fee_usd?: number
   delivery_actual_cost_usd?: number | string | null
   delivery_contact_id?: number
-  replacement?: { product_id: number; quantity: number; applied_price_usd?: number; branch_id?: number | null }
+  replacement?: { product_id: number; quantity: number; applied_price_usd?: number; branch_id?: number | null } & Partial<ReturnType<typeof stagedLinePricingIntent>>
   notes?: string
 }
 
@@ -241,8 +252,8 @@ function deliveryContactRows(payload: unknown): DeliveryContactOption[] {
   )).map((row) => ({ ...row, id: Number(row.id) }))
 }
 
-type SaleMutationReview = { client_request_id: string; expected_exchange_rate: number; expected_updated_at?: string }
-type SaleMutationUiResult = boolean | { exchangeRateChanged: number } | { mutationError: string }
+type SaleMutationReview = { client_request_id: string; expected_exchange_rate: number; expected_updated_at?: string; money_precision_version?: 1; expected_header_quote?: SaleMutationHeaderQuote }
+type SaleMutationUiResult = boolean | { exchangeRateChanged: number } | { mutationError: string; code?: string; header_quote?: unknown; proven_uncommitted?: boolean } | { committed: true; response: unknown }
 
 // Nothing here draws a product card. Both product searches on this screen --
 // adding items, and replacing a line -- mount components/pos/ProductCard.tsx,
@@ -393,11 +404,25 @@ export default function SaleDetailModal({
   }, [pendingStatus, statusRecoveryOwner?.actorId, statusRecoveryOwner?.requestId, statusRecoveryOwner?.problem.errorId, statusRecoveryOwner?.problem.channel, statusRecoveryOwner?.problem.code])
   const { navigateTo, user, authReady } = useApp() as { navigateTo?: (page: string, anchor?: string) => void; user?: SaleSecurityUser | null; authReady: boolean }
   const securityFingerprint = saleSecurityFingerprint(user, authReady)
+  const moneyCapability = useSaleMoneyCapability(Boolean(sale && user && authReady), securityFingerprint)
+  const savedMoneyVersion = sale?.money_precision_version === 1 ? 1 : 0
+  const savedExchangeRate = Number(sale?.exchange_rate)
   const securityGenerationRef = useRef({ fingerprint: securityFingerprint, generation: 0 })
   const detailScope = `${advanceSaleSecurityScope(securityGenerationRef.current, securityFingerprint)}:${sale?.id ?? ''}`
   const detailScopeRef = useRef(detailScope)
   detailScopeRef.current = detailScope
   const detailAliveRef = useRef(true)
+  const lineWriteOwnerRef = useRef<symbol | null>(null)
+  const [pendingLineMutation, setPendingLineMutation] = useState<{ actor: string; kind: SaleLineMutationKind; body: Record<string, unknown> } | null>(null)
+  const [lineRecoveryError, setLineRecoveryError] = useState('')
+  const [lineRecoveryBusy, setLineRecoveryBusy] = useState(false)
+  const [lineHeaderConflict, setLineHeaderConflict] = useState<{ actor: string; kind: SaleLineMutationKind; body: Record<string, unknown>; quote: SaleMutationHeaderQuote } | null>(null)
+  const [lineReviewConfirm, setLineReviewConfirm] = useState<{ kind: SaleLineMutationKind; body: Record<string, unknown>; quote: SaleMutationHeaderQuote } | null>(null)
+  const lineMutationActor = (() => {
+    try { const runtimeUrl = new URL(getSyncServerUrl() || window.location.origin, window.location.origin)
+      return `${window.location.origin}|${runtimeUrl.origin}${runtimeUrl.pathname}|${String(user?.id || '')}` }
+    catch { return '' }
+  })()
   useEffect(() => { detailAliveRef.current = true; return () => { detailAliveRef.current = false } }, [])
   const [newStatus, setNewStatus] = useState(sale?.sale_status || 'completed')
   const [statusNotes, setStatusNotes] = useState('')
@@ -410,7 +435,7 @@ export default function SaleDetailModal({
   const settlementSnapshot = (selectedSale: SaleDetail | null | undefined) => {
     const rawSettings = settings && typeof settings === 'object' ? settings as Record<string, unknown> : {}
     const configuredMethods = configuredSettlementMethods(rawSettings.pos_payment_methods)
-    const exchangeRateValue = Number(rawSettings.exchange_rate)
+    const exchangeRateValue = Number(selectedSale?.money_precision_version === 1 ? selectedSale.exchange_rate : rawSettings.exchange_rate)
     const exchangeRate = Number.isFinite(exchangeRateValue) && exchangeRateValue > 0 ? exchangeRateValue : 4100
     const rows = initialSettlementRows({
       paymentDetails: selectedSale?.payment_details,
@@ -438,13 +463,13 @@ export default function SaleDetailModal({
   const [settlementSession, setSettlementSession] = useState(() => settlementSnapshot(sale))
   const paymentConfigReady = paymentConfigLoaded && !!paymentConfig.value &&
     JSON.stringify(settlementSession.configuredMethods) === JSON.stringify(paymentConfig.value.configuredMethods) &&
-    settlementSession.exchangeRate === paymentConfig.value.exchangeRate
+    settlementSession.exchangeRate === (savedMoneyVersion === 1 ? savedExchangeRate : paymentConfig.value.exchangeRate)
   const [settlementRows, setSettlementRows] = useState<SettlementRow[]>(settlementSession.rows)
   const settlementBaselineRef = useRef<SettlementRow[]>(settlementSession.rows)
   const settlementRequestIdRef = useRef(createSettlementRequestId())
   const addRequestIdRef = useRef(createSettlementRequestId())
   const amendRequestIdRef = useRef(createSettlementRequestId())
-  const [mutationExchangeRate, setMutationExchangeRate] = useState(settlementSession.exchangeRate)
+  const [mutationExchangeRate, setMutationExchangeRate] = useState(savedExchangeRate)
   const settlementFrozenRef = useRef(false)
   settlementFrozenRef.current = statusSaving || pendingStatus
   const [addMutationError, setAddMutationError] = useState('')
@@ -480,6 +505,7 @@ export default function SaleDetailModal({
   const [addLines, setAddLines] = useState<StagedAddLine[]>([])
   const [addSaving, setAddSaving] = useState(false)
   const [addConfirmOpen, setAddConfirmOpen] = useState(false)
+  const [addReviewedHeader, setAddReviewedHeader] = useState<SaleMutationHeaderQuote | null>(null)
   // ONE step, and it is the POS's. WHICH row of the family, at WHICH branch,
   // with WHICH received date is the shared option sheet's question on every
   // surface (components/shared/ProductOptionSheet.tsx mounts the POS's own
@@ -618,8 +644,8 @@ export default function SaleDetailModal({
     if (!paymentConfigLoaded || !paymentConfig.value || statusSaving || pendingStatus) return
     // Eligibility and rate may hydrate after open. Never replace typed tender
     // rows, baseline, or request identity here; pending requests stay exact.
-    setSettlementSession((current) => ({ ...current, ...paymentConfig.value }))
-  }, [paymentConfig, paymentConfigLoaded, statusSaving, pendingStatus])
+    setSettlementSession((current) => ({ ...current, ...paymentConfig.value, ...(savedMoneyVersion === 1 ? { exchangeRate: savedExchangeRate } : {}) }))
+  }, [paymentConfig, paymentConfigLoaded, statusSaving, pendingStatus, savedMoneyVersion, savedExchangeRate])
 
   const lastServerStatusRef = useRef(`${detailScope}:${sale?.sale_status || 'completed'}`)
   useEffect(() => {
@@ -638,7 +664,7 @@ export default function SaleDetailModal({
     settlementRequestIdRef.current = createSettlementRequestId()
     addRequestIdRef.current = createSettlementRequestId()
     amendRequestIdRef.current = createSettlementRequestId()
-    setMutationExchangeRate(next.exchangeRate)
+    setMutationExchangeRate(Number(sale?.exchange_rate))
     setAddMutationError('')
     setAmendMutationError('')
     setActualCostEditing(false)
@@ -792,7 +818,7 @@ export default function SaleDetailModal({
   // Qty and Unit price boxes on the staged row below are where either is
   // changed, the same place a POS cart line is changed.
   const stageAddLineFromPick = (picked: AddProductCandidate, selection: SaleAddSheetSelection): void => {
-    const line = stagedLineFromSheetPick(picked, selection)
+    const line = stagedLineFromSheetPick(picked, selection, 1)
     if (!line) return
     setAddQuery('')
     setAddCandidates([])
@@ -857,21 +883,113 @@ export default function SaleDetailModal({
   // even though the server correctly deducted/restored the delta.
   const amendStockMoves = !Number(sale?.stock_skipped || 0)
 
+  const headerQuote = (subtotal: number, overrides: Parameters<typeof quoteSaleMutationHeader>[3] = {}): SaleMutationHeaderQuote => {
+    const raw = settings && typeof settings === 'object' ? settings as Record<string, unknown> : {}
+    return quoteSaleMutationHeader(sale as unknown as Record<string, unknown>, subtotal, { tax_enabled: raw.tax_enabled, tax_rate: raw.tax_rate }, overrides)
+  }
+
+  const executeLineMutation = async (kind: SaleLineMutationKind, body?: Record<string, unknown>, readOnly = false): Promise<SaleMutationUiResult> => {
+    if (lineWriteOwnerRef.current) return false
+    const owner = Symbol('sale-line-request'), scope = captureActorReadScope('sale-line-request'), requestDetail = detailScope
+    const current = () => detailAliveRef.current && detailScopeRef.current === requestDetail && isActorReadScopeCurrent(scope)
+    if (!authReady || !user?.id || !sale || !lineMutationActor || !current()) return false
+    lineWriteOwnerRef.current = owner
+    setLineRecoveryBusy(true)
+    try {
+      const outcome = await runSaleLineMutation({ kind, actorId: lineMutationActor, entityId: String(sale.id), storage: window.localStorage, body, readOnly, isCurrent: current,
+        readReceipt: frozen => getSaleLineReceipt(sale.id, kind === 'sale-add-items' ? 'add_items' : 'amendment', frozen),
+        send: async frozen => {
+          if (!current()) return false
+          moneyCapability.assertReady()
+          if (kind === 'sale-amendment') return onAmend ? await onAmend(sale.id, frozen as unknown as SaleAmendmentRequest & SaleMutationReview) : false
+          const { items: frozenItems, notes: _notes, ...review } = frozen
+          return onAddItems ? await onAddItems(sale.id, frozenItems as Parameters<NonNullable<typeof onAddItems>>[1], review as SaleMutationReview) : false
+        },
+        isCommitted: result => result === true || (!!result && typeof result === 'object' && 'committed' in result && result.committed === true),
+        onPending: frozen => { if (current()) setPendingLineMutation({ actor: lineMutationActor, kind, body: frozen }) },
+      })
+      if (!current()) return false
+      if (outcome.committed) {
+        setPendingLineMutation(null)
+        setLineRecoveryError('')
+        setLineHeaderConflict(null)
+        setLineReviewConfirm(null)
+        window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
+        return { committed: true, response: outcome.response ?? (outcome.result && typeof outcome.result === 'object' && 'response' in outcome.result ? outcome.result.response : outcome.result) }
+      }
+      if (outcome.result && typeof outcome.result === 'object' && 'code' in outcome.result
+        && outcome.result.code === 'sale_header_quote_conflict' && outcome.result.proven_uncommitted === true) {
+        const quote = outcome.result.header_quote as SaleMutationHeaderQuote
+        if (quote && compareSaleHeaderQuote(quote, headerQuote(quote.subtotal_usd)) !== 'missing') {
+          setLineHeaderConflict({ actor: lineMutationActor, kind, body: outcome.body, quote: structuredClone(quote) })
+          setAmendConfirm(null)
+          setAddConfirmOpen(false)
+        }
+      }
+      return outcome.result ?? false
+    } catch (error) {
+      if (current()) setLineRecoveryError(t('money_checkout_recovery_required'))
+      throw error
+    } finally { if (lineWriteOwnerRef.current === owner) { lineWriteOwnerRef.current = null; if (current()) setLineRecoveryBusy(false) } }
+  }
+
+  const reviewLineHeader = async (): Promise<void> => {
+    const conflict = lineHeaderConflict
+    if (!conflict || conflict.actor !== lineMutationActor || lineWriteOwnerRef.current) return
+    const scope = captureActorReadScope('sale-line-request'), requestDetail = detailScope
+    const current = () => detailAliveRef.current && detailScopeRef.current === requestDetail && isActorReadScopeCurrent(scope)
+    const newBody = { ...structuredClone(conflict.body), client_request_id: createSettlementRequestId(), expected_header_quote: structuredClone(conflict.quote) }
+    try {
+      await withSaleLineMutationLock(lineMutationActor, String(sale?.id), current,
+        () => replaceReviewedSaleLineHeader(conflict.kind, lineMutationActor, String(sale?.id), conflict.body, newBody, window.localStorage))
+      if (!current()) return
+      setPendingLineMutation({ actor: lineMutationActor, kind: conflict.kind, body: newBody })
+      setLineHeaderConflict(null)
+      setAmendConfirm(null)
+      setAddConfirmOpen(false)
+      setLineReviewConfirm({ kind: conflict.kind, body: newBody, quote: conflict.quote })
+    } catch { if (current()) setLineRecoveryError(t('money_checkout_recovery_required')) }
+  }
+
+  useEffect(() => {
+    setPendingLineMutation(null)
+    setLineRecoveryError('')
+    setLineRecoveryBusy(false)
+    setLineHeaderConflict(null)
+    setLineReviewConfirm(null)
+    lineWriteOwnerRef.current = null
+    if (!authReady || !user?.id || !sale?.id || !lineMutationActor) return
+    try {
+      for (const kind of ['sale-add-items', 'sale-amendment'] as const) {
+        const pending = loadPendingDirectMutation(kind, lineMutationActor, String(sale.id), window.localStorage)
+        if (!pending) continue
+        setPendingLineMutation({ actor: lineMutationActor, kind, body: pending.body })
+        // Reopen only reads the exact receipt. A false/missing result never
+        // submits; the operator must press Retry for that original body.
+        void executeLineMutation(kind, undefined, true).catch(() => {})
+        break
+      }
+    } catch { setLineRecoveryError(t('money_checkout_recovery_required')) }
+  }, [lineMutationActor, detailScope])
+
   const submitAmendment = async (request: SaleAmendmentRequest): Promise<void> => {
     if (!onAmend || !sale) return
+    const requestScope = detailScope
     setAmendSaving(true)
     try {
-      const result = await onAmend(sale.id, {
+      moneyCapability.assertReady()
+      if (!(savedExchangeRate > 0)) throw new Error('money_precision_unavailable')
+      const result = await executeLineMutation('sale-amendment', {
         ...request,
+        money_precision_version: 1,
         client_request_id: amendRequestIdRef.current,
-        expected_exchange_rate: mutationExchangeRate,
+        expected_exchange_rate: savedExchangeRate,
         expected_updated_at: settlementSession.expectedUpdatedAt,
       })
+      if (!detailAliveRef.current || detailScopeRef.current !== requestScope) return
       const changedRate = result && typeof result === 'object' ? Number((result as { exchangeRateChanged?: unknown }).exchangeRateChanged) : NaN
       const mutationError = result && typeof result === 'object' ? String((result as { mutationError?: unknown }).mutationError || '') : ''
       if (Number.isFinite(changedRate) && changedRate > 0) {
-        setMutationExchangeRate(changedRate)
-        amendRequestIdRef.current = createSettlementRequestId()
         setAmendMutationError(translateOr('sale_mutation_rate_changed', 'The exchange rate changed. Review the updated KHR rate, then confirm again.', 'អត្រាប្តូរប្រាក់បានផ្លាស់ប្តូរ។ សូមពិនិត្យអត្រា KHR ថ្មី ហើយបញ្ជាក់ម្តងទៀត។'))
       } else if (mutationError) {
         // A replacement line the Worker refuses because its branch is the
@@ -893,8 +1011,10 @@ export default function SaleDetailModal({
         setAmendConfirm(null)
         setAmendReloadToken((token) => token + 1)
       }
+    } catch (error) {
+      if (detailAliveRef.current && detailScopeRef.current === requestScope) setAmendMutationError(error instanceof Error && error.message === 'money_precision_unavailable' ? t('money_precision_unavailable') : String((error as Error)?.message || error))
     } finally {
-      setAmendSaving(false)
+      if (detailAliveRef.current && detailScopeRef.current === requestScope) setAmendSaving(false)
     }
   }
 
@@ -940,57 +1060,38 @@ export default function SaleDetailModal({
 
   /** Stage quantity and final selling-price edits as one atomic amendment. */
   const stageLineUpdate = (lineId: number, currentQuantity: number, currentBasePrice: number, currentDiscountType: 'percent' | 'fixed' | null, currentDiscountValue: number, currentManualDiscount: number, productDiscount: number, name: string): void => {
-    const preview = saleLineEditorResult({
-      quantity: amendQtyText,
-      basePriceUsd: amendPriceText,
-      manualDiscountType: amendDiscountType,
-      manualDiscountValue: amendDiscountText,
-      productDiscountUsd: productDiscount,
-    })
-    if (!preview.ok && preview.code === 'quantity') {
-      setAmendMutationError(translateOr('amend_quantity_positive', 'Quantity must be greater than zero. Use Remove to delete a line.', 'ចំនួនត្រូវធំជាងសូន្យ។ សូមប្រើ ដកចេញ ដើម្បីលុបជួរ។'))
+    if (Number(amendQtyText) === currentQuantity && Number(amendPriceText) === currentBasePrice && amendDiscountType === currentDiscountType && Number(amendDiscountText) === currentDiscountValue) {
+      setAmendMutationError(translateOr('amend_no_change', 'Enter a new quantity, price, or discount.'))
       return
     }
-    if (!preview.ok && preview.code === 'price') {
-      setAmendMutationError(translateOr('amend_price_nonnegative', 'Selling price must be zero or more.', 'តម្លៃលក់ត្រូវសូន្យ ឬខ្ពស់ជាងនេះ។'))
-      return
+    try {
+      if ([amendQtyText, amendPriceText, amendDiscountText].some(value => value.trim().startsWith('-')) || !amendQtyText.trim() || !amendPriceText.trim()) throw new Error('sale_item_pricing_invalid')
+      const preview = capturedSaleLineEdit(items as unknown as Record<string, unknown>[], sale as unknown as Record<string, unknown>, lineId, {
+        quantity: Number(amendQtyText),
+        ...(Number(amendPriceText) !== currentBasePrice ? { selling_price_input_usd: Number(amendPriceText) } : {}),
+        ...(amendDiscountType !== currentDiscountType ? { manual_discount_type: amendDiscountType } : {}),
+        ...(Number(amendDiscountText) !== currentDiscountValue ? { manual_discount_value: Number(amendDiscountText) } : {}),
+      })
+      amendRequestIdRef.current = createSettlementRequestId()
+      setAmendMutationError('')
+      setAmendConfirm({
+        request: { ...preview.request, expected_header_quote: headerQuote(preview.subtotalUsd) },
+        title: translateOr('amend_line_update_title', 'Update this item?', 'ធ្វើបច្ចុប្បន្នភាពទំនិញនេះ?'),
+        summary: `${name}: ${currentQuantity} → ${preview.quantity} · ${fmtUSD(currentBasePrice)} → ${fmtUSD(preview.basePriceUsd)} · ${translateOr('discount', 'Discount', 'បញ្ចុះតម្លៃ')} ${fmtUSD(currentManualDiscount)} → ${fmtUSD(preview.manualDiscountUsd)} · ${translateOr('total', 'Total', 'សរុប')} ${fmtUSD(preview.lineTotalUsd)}`,
+      })
+    } catch {
+      setAmendMutationError(t('money_precision_unavailable'))
     }
-    if (!preview.ok) {
-      setAmendMutationError(preview.code === 'discount_exceeds_price'
-        ? translateOr('discount_exceeds_price', 'Discount cannot be more than the price.', 'ការបញ្ចុះតម្លៃមិនអាចលើសតម្លៃបានទេ។')
-        : translateOr('discount_nonnegative', 'Discount must be zero or more.', 'ការបញ្ចុះតម្លៃត្រូវសូន្យ ឬខ្ពស់ជាងនេះ។'))
-      return
-    }
-    if (Math.abs(preview.quantity - currentQuantity) < 0.000001
-      && Math.abs(preview.basePriceUsd - currentBasePrice) < 0.000001
-      && preview.manualDiscountType === currentDiscountType
-      && Math.abs(preview.manualDiscountValue - currentDiscountValue) < 0.000001) {
-      setAmendMutationError(translateOr('amend_no_change', 'Enter a new quantity, price, or discount.', 'សូមបញ្ចូលចំនួន តម្លៃ ឬការបញ្ចុះតម្លៃថ្មី។'))
-      return
-    }
-    amendRequestIdRef.current = createSettlementRequestId()
-    setAmendMutationError('')
-    setAmendConfirm({
-      request: {
-        kind: 'line_updated',
-        sale_item_id: lineId,
-        quantity: preview.quantity,
-        base_price_usd: preview.basePriceUsd,
-        manual_discount_type: preview.manualDiscountType,
-        manual_discount_value: preview.manualDiscountValue,
-        manual_discount_usd: preview.manualDiscountUsd,
-        applied_price_usd: preview.appliedPriceUsd,
-      },
-      title: translateOr('amend_line_update_title', 'Update this item?', 'ធ្វើបច្ចុប្បន្នភាពទំនិញនេះ?'),
-      summary: `${name}: ${currentQuantity} → ${preview.quantity} · ${fmtUSD(currentBasePrice)} → ${fmtUSD(preview.basePriceUsd)} · ${translateOr('discount', 'Discount', 'បញ្ចុះតម្លៃ')} ${fmtUSD(currentManualDiscount)} → ${fmtUSD(preview.manualDiscountUsd)} · ${translateOr('total', 'Total', 'សរុប')} ${fmtUSD(preview.lineTotalUsd)}`,
-    })
   }
 
   const stageRemoval = (lineId: number, currentQuantity: number, name: string): void => {
+    let expectedHeader: SaleMutationHeaderQuote
+    try { expectedHeader = headerQuote(capturedSaleRemovalSubtotal(items as unknown as Record<string, unknown>[], sale as unknown as Record<string, unknown>, lineId)) }
+    catch { setAmendMutationError(t('money_precision_unavailable')); return }
     amendRequestIdRef.current = createSettlementRequestId()
     setAmendMutationError('')
     setAmendConfirm({
-      request: { kind: 'line_removed', sale_item_id: lineId },
+      request: { kind: 'line_removed', sale_item_id: lineId, expected_header_quote: expectedHeader },
       title: translateOr('amend_remove_title', 'Take this off the sale?', 'ដកចេញពីការលក់នេះ?'),
       summary: `${name} × ${currentQuantity}`,
     })
@@ -1010,6 +1111,18 @@ export default function SaleDetailModal({
     const replacementBranchId = branchId != null && String(branchId) !== '' && Number.isFinite(Number(branchId))
       ? Number(branchId)
       : null
+    let replacementIntent: ReturnType<typeof stagedLinePricingIntent>
+    let replacementHeader: SaleMutationHeaderQuote
+    try {
+      moneyCapability.assertReady()
+      const staged = stagedLineFromSheetPick(candidate, { branchId }, 1)
+      if (!staged) throw new Error('sale_item_pricing_invalid')
+      replacementIntent = stagedLinePricingIntent({ ...staged, quantity }, savedExchangeRate)
+      replacementHeader = headerQuote(sumMoney4([capturedSaleRemovalSubtotal(items as unknown as Record<string, unknown>[], sale as unknown as Record<string, unknown>, lineId), replacementIntent.pricing_quote.total_usd]))
+    } catch {
+      setAmendMutationError(t('money_precision_unavailable'))
+      return
+    }
     setAddQuery('')
     setAddCandidates([])
     amendRequestIdRef.current = createSettlementRequestId()
@@ -1017,10 +1130,12 @@ export default function SaleDetailModal({
     setAmendConfirm({
       request: {
         kind: 'line_replaced',
+        expected_header_quote: replacementHeader,
         sale_item_id: lineId,
         replacement: {
           product_id: productId,
           quantity,
+          ...replacementIntent,
           ...(replacementBranchId != null ? { branch_id: replacementBranchId } : {}),
         },
       },
@@ -1038,20 +1153,23 @@ export default function SaleDetailModal({
   // is the one thing a form is never allowed to do. The typed text is left
   // alone on every refusal, so the failed action keeps the form.
   const stageDeliveryFeeAmendment = (currentFeeUsd: number): void => {
-    const parsed = parseDeliveryAmountUsd(feeText)
+    const parsed = parseDeliveryAmountUsd(feeText, 1)
     if (!parsed.ok) {
       setAmendMutationError(t(DELIVERY_AMOUNT_ERROR_KEYS[parsed.code]) || DELIVERY_AMOUNT_ERROR_KEYS[parsed.code])
       return
     }
     const next = parsed.usd
-    if (!deliveryAmountChanged(currentFeeUsd, next)) {
+    if (!deliveryAmountChanged(currentFeeUsd, next, 1)) {
       setAmendMutationError(translateOr('delivery_amount_unchanged', 'That is already the amount on this sale.', 'នេះជាចំនួនដែលមានស្រាប់លើការលក់នេះ។'))
       return
     }
+    let expectedHeader: SaleMutationHeaderQuote
+    try { expectedHeader = headerQuote(Number(sale?.subtotal_usd), { delivery_fee_usd: next }) }
+    catch { setAmendMutationError(t('money_precision_unavailable')); return }
     amendRequestIdRef.current = createSettlementRequestId()
     setAmendMutationError('')
     setAmendConfirm({
-      request: { kind: 'delivery_fee_changed', delivery_fee_usd: next },
+      request: { kind: 'delivery_fee_changed', delivery_fee_usd: next, expected_header_quote: expectedHeader },
       title: translateOr('amend_fee_title', 'Correct the delivery fee?', 'កែថ្លៃដឹកជញ្ជូន?'),
       summary: `${fmtUSD(currentFeeUsd)} → ${fmtUSD(next)}`,
     })
@@ -1062,13 +1180,13 @@ export default function SaleDetailModal({
     // recorded" -- clearing a cost entered by mistake, which is a different
     // fact from a courier who worked for free. The route agrees, by asking the
     // same module the same question.
-    const parsed = parseDeliveryAmountUsd(actualCostText)
+    const parsed = parseDeliveryAmountUsd(actualCostText, 1)
     if (!parsed.ok && parsed.code !== 'blank') {
       setAmendMutationError(t(DELIVERY_AMOUNT_ERROR_KEYS[parsed.code]) || DELIVERY_AMOUNT_ERROR_KEYS[parsed.code])
       return
     }
     const next = parsed.ok ? parsed.usd : null
-    if (!deliveryAmountChanged(currentCostUsd, next)) {
+    if (!deliveryAmountChanged(currentCostUsd, next, 1)) {
       setAmendMutationError(translateOr('delivery_amount_unchanged', 'That is already the amount on this sale.', 'នេះជាចំនួនដែលមានស្រាប់លើការលក់នេះ។'))
       return
     }
@@ -1086,22 +1204,26 @@ export default function SaleDetailModal({
       setAmendMutationError(translateOr('delivery_driver_required', 'Choose a delivery driver for this sale.', 'សូមជ្រើសរើសអ្នកដឹកជញ្ជូនសម្រាប់ការលក់នេះ។'))
       return
     }
-    const fee = parseDeliveryAmountUsd(feeText)
+    const fee = parseDeliveryAmountUsd(feeText, 1)
     if (!fee.ok) {
       setAmendMutationError(t(DELIVERY_AMOUNT_ERROR_KEYS[fee.code]) || DELIVERY_AMOUNT_ERROR_KEYS[fee.code])
       return
     }
-    const cost = parseDeliveryAmountUsd(actualCostText)
+    const cost = parseDeliveryAmountUsd(actualCostText, 1)
     if (!cost.ok && cost.code !== 'blank') {
       setAmendMutationError(t(DELIVERY_AMOUNT_ERROR_KEYS[cost.code]) || DELIVERY_AMOUNT_ERROR_KEYS[cost.code])
       return
     }
     const actualCost = cost.ok ? cost.usd : null
+    let expectedHeader: SaleMutationHeaderQuote
+    try { expectedHeader = headerQuote(Number(sale?.subtotal_usd), { is_delivery: true, delivery_fee_usd: fee.usd }) }
+    catch { setAmendMutationError(t('money_precision_unavailable')); return }
     amendRequestIdRef.current = createSettlementRequestId()
     setAmendMutationError('')
     setAmendConfirm({
       request: {
         kind: 'delivery_added',
+        expected_header_quote: expectedHeader,
         delivery_contact_id: deliveryContact.id,
         delivery_fee_usd: fee.usd,
         delivery_actual_cost_usd: actualCost,
@@ -1114,7 +1236,7 @@ export default function SaleDetailModal({
   const settlementDirty = sale?.sale_status === 'awaiting_payment'
     && (newStatus === 'completed' || newStatus === 'awaiting_delivery')
     && !settlementRowsEqual(settlementRows, settlementBaselineRef.current)
-  const saleWriteBusy = statusSaving || addSaving || amendSaving
+  const saleWriteBusy = statusSaving || addSaving || amendSaving || lineRecoveryBusy
   const baseCloseGuard = useCloseGuard({ dirty: settlementDirty || addLines.length > 0 || amendLineId !== null || feeEditing || actualCostEditing || deliveryAdding || !!statusNotes.trim() }, () => { if (!saleWriteBusy) onClose() })
   const closeGuard = { ...baseCloseGuard, requestClose: () => { if (!saleWriteBusy) baseCloseGuard.requestClose() } }
 
@@ -1293,16 +1415,17 @@ export default function SaleDetailModal({
     setAddQuery(value)
   }
   const searchProgressLabel = `${t('showing') || 'Showing'} ${addSearchVisible} ${t('of') || 'of'} ${addSearchTotal} ${t('products') || 'products'}`
-  const addedSubtotalUsd = Math.round(addLines.reduce((sum, line) => sum + line.unitPriceUsd * line.quantity, 0) * 100) / 100
-  // Every other money field is frozen by the server (see
-  // lib/saleLineAddition.ts's decision 3), so the new total is exactly the
-  // old total plus what is being added -- which is what makes this preview
-  // safe to show before the write.
-  const projectedTotalUsd = Math.round((totalUsd + addedSubtotalUsd) * 100) / 100
+  const addedSubtotalUsd = sumMoney4(addLines.map(line => multiplyMoney4(line.unitPriceUsd, line.quantity)))
+  const addHeaderQuote = (() => {
+    if (addConfirmOpen && addReviewedHeader) return addReviewedHeader
+    try { return headerQuote(sumMoney4([Number(sale.subtotal_usd), addedSubtotalUsd])) }
+    catch { return null }
+  })()
+  const projectedTotalUsd = addHeaderQuote?.total_usd ?? null
   // Same shape as outstandingUsd above -- one definition of "still owed"
   // on this screen, so the projection cannot disagree with the figure it is
   // projecting from.
-  const projectedOutstandingUsd = Math.max(0, Math.round((projectedTotalUsd - totals.paidTotalUsd) * 100) / 100)
+  const projectedOutstandingUsd = projectedTotalUsd == null ? null : Math.max(0, Math.round((projectedTotalUsd - totals.paidTotalUsd) * 100) / 100)
   // Every status accepted by POST /:id/items now holds stock (including
   // awaiting_payment); only the sticky migration flag keeps a sale outside
   // the stock ledger. A branchless stock_skipped sale is therefore valid,
@@ -1314,12 +1437,16 @@ export default function SaleDetailModal({
 
   const submitAddItems = async (): Promise<void> => {
     if (!onAddItems || !addLines.length || addHasStockError) return
+    const requestScope = detailScope
     setAddSaving(true)
     try {
-      const result = await onAddItems(sale.id, addLines.map((line) => ({
+      moneyCapability.assertReady()
+      if (!(savedExchangeRate > 0)) throw new Error('money_precision_unavailable')
+      if (!addReviewedHeader) throw new Error('money_precision_unavailable')
+      const result = await executeLineMutation('sale-add-items', { items: addLines.map((line) => ({
         product_id: line.productId,
         quantity: line.quantity,
-        applied_price_usd: line.unitPriceUsd,
+        ...stagedLinePricingIntent(line, savedExchangeRate),
         // The shelf the sheet resolved. Without it the Worker inherited the
         // sale's own branch, which is not necessarily the branch whose
         // quantity -- and whose lots -- the operator was reading.
@@ -1328,19 +1455,20 @@ export default function SaleDetailModal({
         ...(line.batchLabel ? { batch_label: line.batchLabel } : {}),
         ...(line.batchExpiryDate ? { batch_expiry_date: line.batchExpiryDate } : {}),
         ...(line.unlottedStock ? { unlotted_stock: true } : {}),
-      })), {
+      })), notes: '',
+        money_precision_version: 1,
+        expected_header_quote: addReviewedHeader,
         client_request_id: addRequestIdRef.current,
-        expected_exchange_rate: mutationExchangeRate,
+        expected_exchange_rate: savedExchangeRate,
         expected_updated_at: settlementSession.expectedUpdatedAt,
       })
+      if (!detailAliveRef.current || detailScopeRef.current !== requestScope) return
       const changedRate = result && typeof result === 'object' ? Number((result as { exchangeRateChanged?: unknown }).exchangeRateChanged) : NaN
       const mutationError = result && typeof result === 'object' ? String((result as { mutationError?: unknown }).mutationError || '') : ''
       // The caller raises its own success/failure notice (it is the one that
       // knows whether stock actually moved), so this only clears the form and
       // steps out of the way on success.
       if (Number.isFinite(changedRate) && changedRate > 0) {
-        setMutationExchangeRate(changedRate)
-        addRequestIdRef.current = createSettlementRequestId()
         setAddMutationError(translateOr('sale_mutation_rate_changed', 'The exchange rate changed. Review the updated KHR rate, then confirm again.', 'អត្រាប្តូរប្រាក់បានផ្លាស់ប្តូរ។ សូមពិនិត្យអត្រា KHR ថ្មី ហើយបញ្ជាក់ម្តងទៀត។'))
       } else if (mutationError) {
         setAddMutationError(localizeBranchRuleError(mutationError, t))
@@ -1349,12 +1477,15 @@ export default function SaleDetailModal({
         setAddConfirmOpen(false)
         onClose()
       }
+    } catch (error) {
+      if (detailAliveRef.current && detailScopeRef.current === requestScope) setAddMutationError(error instanceof Error && error.message === 'money_precision_unavailable' ? t('money_precision_unavailable') : String((error as Error)?.message || error))
     } finally {
-      setAddSaving(false)
+      if (detailAliveRef.current && detailScopeRef.current === requestScope) setAddSaving(false)
     }
   }
 
   const handleStatusUpdate = async (): Promise<void> => {
+    if (pendingLineMutation?.actor === lineMutationActor || lineRecoveryError) return
     if (!authReady || !onStatusChange || newStatus === currentStatus || settlementFrozenRef.current) return
     if (needsPaymentEntry && !paymentConfigReady) return
     const requestScope = detailScope
@@ -1412,6 +1543,7 @@ export default function SaleDetailModal({
         ? String((result as { settlementError?: unknown }).settlementError || '')
         : ''
       if (Number.isFinite(changedRate) && changedRate > 0) {
+        if (savedMoneyVersion === 1) { setPayError(t('money_precision_unavailable')); return }
         setSettlementSession((current) => ({ ...current, exchangeRate: changedRate }))
         setPaymentConfigReload((value) => value + 1)
         settlementRequestIdRef.current = createSettlementRequestId()
@@ -1511,7 +1643,16 @@ export default function SaleDetailModal({
             straight down. Every KHR figure now sits inside its own row's
             amount cell instead of floating underneath as an unlabelled
             right-aligned line. */}
-        <div className="modal-scroll space-y-4 p-4">
+        {(pendingLineMutation?.actor === lineMutationActor || lineRecoveryError) ? (
+          <div role="alert" className="border-b border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
+            <p>{translateOr('sale_line_recovery_pending', 'An earlier change to this sale needs confirmation. Its original request is saved; other changes remain paused.', 'ការកែប្រែមុនលើការលក់នេះត្រូវការការបញ្ជាក់។ សំណើដើមត្រូវបានរក្សាទុក ហើយការកែប្រែផ្សេងទៀតត្រូវបានផ្អាក។')}</p>
+            {pendingLineMutation?.actor === lineMutationActor ? <button type="button" disabled={lineRecoveryBusy} className="mt-2 rounded border px-3 py-2 disabled:opacity-50" onClick={() => {
+              void executeLineMutation(pendingLineMutation.kind).then(result => { if (result && typeof result === 'object' && 'committed' in result && result.committed) onClose() }).catch(() => {})
+            }}>{lineRecoveryBusy ? t('loading') : t('retry')}</button> : null}
+            {lineHeaderConflict?.actor === lineMutationActor ? <button type="button" disabled={lineRecoveryBusy} className="ml-2 mt-2 rounded border px-3 py-2 disabled:opacity-50" onClick={() => { void reviewLineHeader() }}>{translateOr('sale_line_review_updated_total', 'Review the updated total', 'ពិនិត្យសរុបដែលបានធ្វើបច្ចុប្បន្នភាព')}</button> : null}
+          </div>
+        ) : null}
+        <div inert={pendingLineMutation?.actor === lineMutationActor || !!lineRecoveryError} className="modal-scroll space-y-4 p-4">
           <div className="grid gap-4 md:grid-cols-2">
             <SectionCard title={t('sale') || 'Sale'}>
               <DetailRowGroup>
@@ -1776,8 +1917,9 @@ export default function SaleDetailModal({
                   ) : items.map((item, index) => {
                     const qty = toNumber(item.quantity || item.qty || 1) || 1
                     const unitUsd = toNumber(item.applied_price_usd ?? item.price_usd ?? item.price)
+                    const lineFigures = receiptLineFigures(item, true, totals.exchangeRate, totals.moneyPrecisionVersion)
                     const storedLineUsd = Number(item.total_usd)
-                    const lineUsd = Number.isFinite(storedLineUsd) ? storedLineUsd : unitUsd * qty
+                    const lineUsd = totals.moneyPrecisionVersion === 1 ? lineFigures.lineUsd : Number.isFinite(storedLineUsd) ? storedLineUsd : unitUsd * qty
                     const baseUnitUsd = item.base_price_usd == null ? unitUsd + toNumber(item.manual_discount_usd) : toNumber(item.base_price_usd)
                     const productDiscountUsd = toNumber(item.product_discount_usd)
                     const manualDiscountUsd = toNumber(item.manual_discount_usd)
@@ -1788,7 +1930,6 @@ export default function SaleDetailModal({
                     const manualDiscountValue = manualDiscountType === 'percent'
                       ? storedDiscountValue
                       : (storedDiscountValue > 0 ? storedDiscountValue : manualDiscountUsd)
-                    const lineFigures = receiptLineFigures(item, true, totals.exchangeRate)
                     // The sale_items row id, which every amendment addresses.
                     // A legacy row without one gets no controls rather than a
                     // button that would 404 -- the sale is still fully
@@ -1800,9 +1941,14 @@ export default function SaleDetailModal({
                       : item.batch_id
                         ? `#${item.batch_id}`
                         : ''
-                    const editor = amendLineId === lineId
-                      ? saleLineEditorResult({ quantity: amendQtyText, basePriceUsd: amendPriceText, manualDiscountType: amendDiscountType, manualDiscountValue: amendDiscountText, productDiscountUsd })
-                      : null
+                    const editor = amendLineId === lineId ? (() => {
+                      try { return capturedSaleLineEdit(items as unknown as Record<string, unknown>[], sale as unknown as Record<string, unknown>, lineId, {
+                        quantity: Number(amendQtyText),
+                        ...(Number(amendPriceText) !== baseUnitUsd ? { selling_price_input_usd: Number(amendPriceText) } : {}),
+                        ...(amendDiscountType !== manualDiscountType ? { manual_discount_type: amendDiscountType } : {}),
+                        ...(Number(amendDiscountText) !== manualDiscountValue ? { manual_discount_value: Number(amendDiscountText) } : {}),
+                      }) } catch { return null }
+                    })() : null
                     const preview = editor?.ok ? editor : null
                     const displayQty = preview?.quantity ?? qty
                     const displayPrice = preview?.sellingPriceUsd ?? lineFigures.sellingUnitUsd
@@ -2304,7 +2450,7 @@ export default function SaleDetailModal({
                                 const text = event.target.value
                                 setAddLines((current) => current.map((row) => (
                                   stagedLineKey(row) === stagedLineKey(line)
-                                    ? { ...row, priceText: text, unitPriceUsd: toNumber(text) }
+                                    ? { ...row, priceText: text, sellingPriceInputUsd: text, unitPriceUsd: text.trim() !== '' && Number.isFinite(Number(text)) && Number(text) >= 0 ? sellingPriceCeilCent(text) : row.unitPriceUsd }
                                     : row
                                 )))
                               }}
@@ -2337,13 +2483,13 @@ export default function SaleDetailModal({
                         value={fmtUSD(addedSubtotalUsd)}
                       />
                       <DetailRow
-                        label={translateOr('add_items_new_total', 'New total', 'សរុបថ្មី')}
-                        value={fmtUSD(projectedTotalUsd)}
+                        label={t('total') || 'Total'}
+                        value={projectedTotalUsd == null ? '—' : fmtUSD(projectedTotalUsd)}
                       />
-                      {outstandingUsd > 0 || projectedOutstandingUsd > 0 ? (
+                      {outstandingUsd > 0 || (projectedOutstandingUsd ?? 0) > 0 ? (
                         <DetailRow
                           label={translateOr('add_items_new_due', 'New amount due', 'ចំនួនត្រូវបង់ថ្មី')}
-                          value={fmtUSD(projectedOutstandingUsd)}
+                          value={projectedOutstandingUsd == null ? '—' : fmtUSD(projectedOutstandingUsd)}
                         />
                       ) : null}
                     </DetailRowGroup>
@@ -2364,6 +2510,8 @@ export default function SaleDetailModal({
                     onClick={() => {
                       addRequestIdRef.current = createSettlementRequestId()
                       setAddMutationError('')
+                      if (!addHeaderQuote) { setAddMutationError(t('money_precision_unavailable')); return }
+                      setAddReviewedHeader(structuredClone(addHeaderQuote))
                       setAddConfirmOpen(true)
                     }}
                   >
@@ -2683,15 +2831,15 @@ export default function SaleDetailModal({
               items={[
                 ...addLines.map((line): ConfirmReviewItem => ({
                   label: line.name,
-                  value: `${line.quantity} × ${fmtUSD(line.unitPriceUsd)} = ${fmtUSD(line.unitPriceUsd * line.quantity)}`,
+                  value: `${line.quantity} × ${fmtUSD(line.unitPriceUsd)} = ${fmtUSD(multiplyMoney4(line.unitPriceUsd, line.quantity))}`,
                 })),
                 {
                   label: translateOr('add_items_added_subtotal', 'Added subtotal', 'សរុបរងបន្ថែម'),
                   value: fmtUSD(addedSubtotalUsd),
                 },
                 {
-                  label: translateOr('add_items_new_total', 'New total', 'សរុបថ្មី'),
-                  value: fmtUSD(projectedTotalUsd),
+                  label: t('total') || 'Total',
+                  value: projectedTotalUsd == null ? '—' : fmtUSD(projectedTotalUsd),
                 },
                 {
                   label: t('stock') || 'Stock',
@@ -2717,6 +2865,13 @@ export default function SaleDetailModal({
               they change a receipt the customer already holds, and half of
               them move stock. One dialog for all five kinds, so no amendment
               can ever be the one that slipped through on a single click. */}
+          {lineReviewConfirm ? <ConfirmDialog t={t} title={translateOr('sale_line_review_updated_total', 'Review the updated total', 'ពិនិត្យសរុបដែលបានធ្វើបច្ចុប្បន្នភាព')}
+            items={[
+              { label: t('tax') || 'Tax', value: fmtUSD(lineReviewConfirm.quote.tax_usd) },
+              { label: t('money_rounding_adjustment'), value: fmtUSD(lineReviewConfirm.quote.rounding_adjustment_usd) },
+              { label: t('total') || 'Total', value: fmtUSD(lineReviewConfirm.quote.total_usd) },
+            ]} working={lineRecoveryBusy} onClose={() => { if (!lineRecoveryBusy) setLineReviewConfirm(null) }}
+            onConfirm={() => { void executeLineMutation(lineReviewConfirm.kind, lineReviewConfirm.body).then(result => { if (result && typeof result === 'object' && 'committed' in result && result.committed) onClose() }).catch(() => {}) }} /> : null}
           {amendConfirm ? (
             <ConfirmDialog
               t={t}
@@ -2724,6 +2879,11 @@ export default function SaleDetailModal({
               message={sale.receipt_number ? `#${sale.receipt_number}` : undefined}
               items={[
                 { label: translateOr('amend_change', 'Change', 'ការកែប្រែ'), value: amendConfirm.summary },
+                ...(amendConfirm.request.expected_header_quote ? [
+                  { label: t('tax') || 'Tax', value: fmtUSD(amendConfirm.request.expected_header_quote.tax_usd) },
+                  { label: t('money_rounding_adjustment'), value: fmtUSD(amendConfirm.request.expected_header_quote.rounding_adjustment_usd) },
+                  { label: t('total') || 'Total', value: fmtUSD(amendConfirm.request.expected_header_quote.total_usd) },
+                ] : []),
                 {
                   label: t('stock') || 'Stock',
                   value: amendStockMoves
