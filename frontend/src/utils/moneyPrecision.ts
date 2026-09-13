@@ -81,8 +81,8 @@ export function subtractDecimalSum(total: DecimalInput, values: readonly Decimal
   if (restored.n * result.d !== result.n * restored.d) throw new MoneyPrecisionError('invalid_decimal')
   return text
 }
-function units(value: Fraction, places: 2 | 4, mode: 'nearest' | 'ceil'): bigint {
-  const scaled = value.n * (places === 4 ? 10_000n : 100n)
+function units(value: Fraction, places: 0 | 2 | 4, mode: 'nearest' | 'ceil'): bigint {
+  const scaled = value.n * (places === 4 ? 10_000n : places === 2 ? 100n : 1n)
   let rounded = scaled / value.d
   const remainder = scaled % value.d
   if (mode === 'ceil') {
@@ -92,14 +92,14 @@ function units(value: Fraction, places: 2 | 4, mode: 'nearest' | 'ceil'): bigint
   }
   return rounded
 }
-function output(value: Fraction, places: 2 | 4 = 4, mode: 'nearest' | 'ceil' = 'nearest'): number {
+function output(value: Fraction, places: 0 | 2 | 4 = 4, mode: 'nearest' | 'ceil' = 'nearest'): number {
   bounded(value)
   const result = units(value, places, mode)
-  const units4 = places === 4 ? result : result * 100n
+  const units4 = places === 4 ? result : result * (places === 2 ? 100n : 10_000n)
   if (abs(units4) > MAX_UNITS4) throw new MoneyPrecisionError('money_overflow')
   // The bound leaves Number spacing smaller than a four-decimal tick, but do
   // not rely on that fact alone: prove the actual JSON-number decimal roundtrip.
-  const numeric = Number(result) / (places === 4 ? 10_000 : 100) || 0
+  const numeric = Number(result) / (places === 4 ? 10_000 : places === 2 ? 100 : 1) || 0
   const restored = decimal(numeric)
   if (restored.n * 10_000n !== units4 * restored.d) throw new MoneyPrecisionError('money_overflow')
   return numeric
@@ -180,4 +180,44 @@ export function settlementRounding4(value: DecimalInput): SettlementRounding4 {
   const internalTotal4 = roundMoney4(value)
   const payableTotal2 = roundMoney2(internalTotal4)
   return { internalTotal4, payableTotal2, roundingAdjustment4: subtractMoney4(payableTotal2, internalTotal4) }
+}
+
+
+export type NativeChangeAmountsInput = {
+  paidUsd: DecimalInput
+  paidKhr: DecimalInput
+  payableUsd: DecimalInput
+  exchangeRate: DecimalInput
+  changeExchangeRate: DecimalInput
+}
+export type NativeChangeAmountsResult = {
+  changeUsd: number
+  changeKhr: number
+  hasOverpayment: boolean
+}
+/** Physical change alternatives, NOT internal four-decimal accounting values.
+ * Both denominations derive independently from the same exact surplus:
+ * paidUsd + paidKhr / exchangeRate - payableUsd. Never round that surplus first.
+ * The boolean reports exact overpayment even if both displayed amounts are zero.
+ * Tender and payable amounts must be nonnegative before any rounding. Rates
+ * must be positive exact decimals; all inputs retain the kernel's resource bounds.
+ */
+export function nativeChangeAmounts({
+  paidUsd, paidKhr, payableUsd, exchangeRate, changeExchangeRate,
+}: NativeChangeAmountsInput): NativeChangeAmountsResult {
+  const usd = money(paidUsd), khr = money(paidKhr), payable = money(payableUsd)
+  if (usd.n < 0n || khr.n < 0n || payable.n < 0n) throw new MoneyPrecisionError('invalid_decimal')
+  const rate = decimal(exchangeRate), changeRate = decimal(changeExchangeRate)
+  for (const value of [rate, changeRate]) {
+    if (value.n === 0n) throw new MoneyPrecisionError('division_by_zero')
+    if (value.n < 0n) throw new MoneyPrecisionError('invalid_decimal')
+  }
+  const converted = fraction(khr.n * rate.d, khr.d * rate.n)
+  const surplus = plus(plus(usd, converted), { n: -payable.n, d: payable.d })
+  if (surplus.n <= 0n) return { changeUsd: 0, changeKhr: 0, hasOverpayment: false }
+  return {
+    changeUsd: output(surplus, 2),
+    changeKhr: output(fraction(surplus.n * changeRate.n, surplus.d * changeRate.d), 0),
+    hasOverpayment: true,
+  }
 }
