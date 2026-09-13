@@ -4259,6 +4259,7 @@ app.post('/:id/amendments', async (c) => {
   const ledgerEntries: Array<Parameters<typeof amendmentEntryStatement>[0]> = []
   const groupId = crypto.randomUUID()
   let subtotalDeltaUsd = 0
+  let historicalSubtotalTerms: number[] | null = null
   let unitsMoved = 0
   let pricingRowsAfter=precisionBasket!.lines.map(row=>({...row}))
   const repricedPools=new Map<string,{pool:CapturedPricingPool;quantities:Record<string,number>}>()
@@ -4296,7 +4297,7 @@ app.post('/:id/amendments', async (c) => {
     statements.push({sql:`UPDATE sale_items SET ${changedFields.map(key=>`${key}=@${key}`).join(',')} WHERE id=@itemId AND sale_id=@saleId`,
       params:{...Object.fromEntries(changedFields.map(key=>[key,historical.row[key]])),itemId:line.id,saleId}})
     pricingRowsAfter=pricingRowsAfter.map(row=>row.id===line.id?historical.row:row)
-    subtotalDeltaUsd=subtractMoney4(Number(historical.row.total_usd),historicalBaseline!.amount)
+    historicalSubtotalTerms=[subtotalBeforeUsd,-historicalBaseline!.amount,Number(historical.row.total_usd)]
     ledgerEntries.push({saleId,kind:kind as 'line_updated',groupId,saleItemId:line.id,productId:line.product_id,productName:line.product_name,
       quantityBefore:currentQuantity,quantityAfter:nextQuantity,amountBeforeUsd:Number(line.applied_price_usd),amountAfterUsd:Number(historical.row.applied_price_usd),
       totalBeforeUsd,totalAfterUsd:0,unitsMoved,stockSkipped,note,before:original,after:historical.row,userId:user?.id??null,userName:actorSnapshot(user)})
@@ -4576,19 +4577,20 @@ app.post('/:id/amendments', async (c) => {
       }
     }
     }
-    subtotalDeltaUsd=historicalBasket?subtractMoney4(sumMoney4(pricingRowsAfter.filter(row=>Number(row.id)===0).map(row=>Number(row.total_usd))),historicalBaseline!.amount)
-      :subtractMoney4(sumMoney4(pricingRowsAfter.map(row=>Number(row.total_usd))),subtotalBeforeUsd)
+    if(historicalBasket)historicalSubtotalTerms=[subtotalBeforeUsd,-historicalBaseline!.amount,...pricingRowsAfter.filter(row=>Number(row.id)===0).map(row=>Number(row.total_usd))]
+    else subtotalDeltaUsd=subtractMoney4(sumMoney4(pricingRowsAfter.map(row=>Number(row.total_usd))),subtotalBeforeUsd)
   }
 
-  // ---- Money. Subtotal is the sale's OWN lines re-summed and moved by this
-  // amendment's delta, never the stored column carried forward, so a row whose
-  // subtotal had drifted is corrected. Both discounts and the tender stay
+  // ---- Money. Captured baskets use their authoritative line totals. Recorded
+  // historical baskets retain the saved header residual: sum the original
+  // header, removed charge, and replacement charge before rounding once.
+  // Both discounts and the tender stay
   // FROZEN by S4-24b's recompute, which is CALLED here rather than
   // re-implemented, so an amendment cannot round differently from a checkout.
   // TAX follows the new base when this sale was taxed at today's configured
   // rate, and is kept verbatim with a stated reason when it was not
   // (DECISION 4a in lib/saleAmendments.ts). ----
-  const subtotalAfterUsd = sumMoney4([subtotalBeforeUsd,subtotalDeltaUsd])
+  const subtotalAfterUsd = sumMoney4(historicalSubtotalTerms??[subtotalBeforeUsd,subtotalDeltaUsd])
   const taxPlan = planAmendedTax({
     saleId, sale, settings: moneySettings.tax,
     subtotalBeforeUsd, subtotalAfterUsd, exchangeRate,
