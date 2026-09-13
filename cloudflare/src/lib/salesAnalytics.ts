@@ -744,6 +744,52 @@ export interface SalesReportSnapshot {
   row_count: number
 }
 
+export type SalesReportScalarScopeValue = string | number | null
+export type SalesReportScalarScope = (saleAlias: string) => {
+  sql: string
+  params: Record<string, SalesReportScalarScopeValue>
+}
+
+type CapturedSalesReportScalarScope = { sql: string; params: Record<string, SalesReportScalarScopeValue> }
+
+function captureSalesReportScalarScope(scope?: SalesReportScalarScope): CapturedSalesReportScalarScope | null {
+  if (!scope) return null
+  const captured = scope('s')
+  if (!captured || typeof captured.sql !== 'string' || !captured.sql.trim()
+    || captured.sql.includes(';') || captured.sql.includes('--') || captured.sql.includes('/*') || captured.sql.includes('?')) {
+    throw new ReportMoneyPrecisionError('unsupported_row')
+  }
+  const params = captured.params
+  if (!params || typeof params !== 'object' || Array.isArray(params)) throw new ReportMoneyPrecisionError('unsupported_row')
+  const keys = Object.keys(params).sort()
+  if (keys.some((key) => !/^reportScope_[A-Za-z][A-Za-z0-9_]*$/.test(key))) {
+    throw new ReportMoneyPrecisionError('unsupported_row')
+  }
+  for (const key of keys) {
+    const value = params[key]
+    if (value !== null && typeof value !== 'string' && (typeof value !== 'number' || !Number.isFinite(value))) {
+      throw new ReportMoneyPrecisionError('unsupported_row')
+    }
+  }
+  const placeholders = [...new Set([...captured.sql.matchAll(/@([A-Za-z_][A-Za-z0-9_]*)/g)].map((match) => match[1]))].sort()
+  if (placeholders.length !== keys.length || placeholders.some((key, index) => key !== keys[index])
+    || /(?:^|[^A-Za-z0-9_])[:$][A-Za-z_]/.test(captured.sql)) {
+    throw new ReportMoneyPrecisionError('unsupported_row')
+  }
+  return Object.freeze({ sql: captured.sql.trim(), params: Object.freeze({ ...params }) })
+}
+
+function applySalesReportScalarScope<T extends { sql: string; params: Record<string, unknown> }>(
+  base: T,
+  scope: CapturedSalesReportScalarScope | null,
+): T {
+  if (!scope) return base
+  if (Object.keys(scope.params).some((key) => Object.hasOwn(base.params, key))) {
+    throw new ReportMoneyPrecisionError('unsupported_row')
+  }
+  return { ...base, sql: `(${base.sql}) AND (${scope.sql})`, params: { ...base.params, ...scope.params } }
+}
+
 async function reportTableColumns(db: ReturnType<typeof getDb>, table: string): Promise<Set<string>> {
   const rows = await db.prepare(`PRAGMA table_info(${table})`).all<Record<string, unknown>>()
   return new Set((rows || []).map((row) => String(row.name || '')))
@@ -812,6 +858,7 @@ async function readSalesReportPass(
   env: Env,
   f: SalesFilters & { contactId?: number | string | null },
   includeDeliveryFees: boolean,
+  scalarScope: CapturedSalesReportScalarScope | null,
 ): Promise<SalesReportSnapshot> {
   const db = getDb(env)
   const salesColumns = await reportTableColumns(db, 'sales')
@@ -839,8 +886,8 @@ async function readSalesReportPass(
   const saleColumn = (name: string, fallback: string) => salesColumns.has(name) ? `s.${name}` : `${fallback} AS ${name}`
   const linkedDeliveryFee = feeColumns.has('sale_id') && feeColumns.has('fee_type')
     ? "EXISTS(SELECT 1 FROM fees WHERE fees.sale_id=s.id AND COALESCE(fees.fee_type,'')='delivery')" : '0'
-  const primary = whereActiveSales('s', f)
-  const voids = whereActiveSales('s', { ...f, status: 'cancelled' })
+  const primary = applySalesReportScalarScope(whereActiveSales('s', f), scalarScope)
+  const voids = applySalesReportScalarScope(whereActiveSales('s', { ...f, status: 'cancelled' }), scalarScope)
   const rowBudget = { count: 0 }
   const sales = await reportKeysetRows(db, `SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name,
       s.cashier_id,s.cashier_name,s.customer_id,s.customer_name,s.customer_phone,s.receipt_number,s.payment_method,
@@ -916,13 +963,18 @@ export async function readSalesReportSnapshot(
   env: Env,
   f: SalesFilters & { contactId?: number | string | null },
   includeDeliveryFees = false,
+  scalarScope?: SalesReportScalarScope,
 ): Promise<SalesReportSnapshot> {
   const db = getDb(env)
+  // Capture a code-generated scope exactly once. Both passes and every child
+  // EXISTS consume the same immutable SQL/params, so a stateful callback
+  // cannot silently change the cohort between reads.
+  const capturedScope = captureSalesReportScalarScope(scalarScope)
   for (let attempt = 0; attempt < 2; attempt += 1) {
     await assertReportReadable(db)
-    const first = await readSalesReportPass(env, f, includeDeliveryFees)
+    const first = await readSalesReportPass(env, f, includeDeliveryFees, capturedScope)
     await assertReportReadable(db)
-    const second = await readSalesReportPass(env, f, includeDeliveryFees)
+    const second = await readSalesReportPass(env, f, includeDeliveryFees, capturedScope)
     await assertReportReadable(db)
     if (reportRowsEqual(reportSnapshotScalars(first), reportSnapshotScalars(second))) return first
   }
