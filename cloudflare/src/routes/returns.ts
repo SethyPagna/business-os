@@ -124,7 +124,7 @@ export async function customerReturnQuotePlanFromDb(
   if (String(sale.sale_status || 'completed') === 'cancelled') throw new SaleMoneyContractError('customer_return_sale_invalid')
   const saleLines = await db.prepare(`SELECT id,product_id,quantity,total_usd,total_khr,
     base_price_usd,base_price_khr,applied_price_usd,applied_price_khr,
-    product_discount_usd,product_discount_khr,manual_discount_usd,manual_discount_khr,
+    product_discount_usd,product_discount_khr,product_discount_type,product_discount_label,manual_discount_usd,manual_discount_khr,
     manual_discount_type,manual_discount_value,price_mode,pricing_snapshot_json
     FROM sale_items WHERE sale_id=@saleId ORDER BY id LIMIT @limit`)
     .all<Record<string, unknown>>(
@@ -250,6 +250,8 @@ function customerReturnAuthorityPredicate(param = '@customerReturnAuthorityJson'
         AND si.base_price_usd IS json_extract(j.value,'$.base_price_usd') AND si.base_price_khr IS json_extract(j.value,'$.base_price_khr')
         AND si.applied_price_usd IS json_extract(j.value,'$.applied_price_usd') AND si.applied_price_khr IS json_extract(j.value,'$.applied_price_khr')
         AND si.product_discount_usd IS json_extract(j.value,'$.product_discount_usd') AND si.product_discount_khr IS json_extract(j.value,'$.product_discount_khr')
+        AND si.product_discount_type IS json_extract(j.value,'$.product_discount_type')
+        AND si.product_discount_label IS json_extract(j.value,'$.product_discount_label')
         AND si.manual_discount_usd IS json_extract(j.value,'$.manual_discount_usd') AND si.manual_discount_khr IS json_extract(j.value,'$.manual_discount_khr')
         AND si.manual_discount_type IS json_extract(j.value,'$.manual_discount_type') AND si.manual_discount_value IS json_extract(j.value,'$.manual_discount_value')
         AND si.price_mode IS json_extract(j.value,'$.price_mode') AND si.pricing_snapshot_json IS json_extract(j.value,'$.pricing_snapshot_json')))

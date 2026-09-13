@@ -205,11 +205,11 @@ async function main() {
     const row = m.materializeCapturedPricingRow({ id: line.id, product_id: line.id }, routePool, routeQuantities, line.key, routeContext)
     db.prepare(`INSERT INTO sale_items(id,sale_id,product_id,quantity,total_usd,total_khr,
       base_price_usd,base_price_khr,applied_price_usd,applied_price_khr,
-      product_discount_usd,product_discount_khr,manual_discount_usd,manual_discount_khr,
+      product_discount_usd,product_discount_khr,product_discount_type,product_discount_label,manual_discount_usd,manual_discount_khr,
       manual_discount_type,manual_discount_value,price_mode,pricing_snapshot_json)
       VALUES(@id,2,@product_id,@quantity,@total_usd,@total_khr,
         @base_price_usd,@base_price_khr,@applied_price_usd,@applied_price_khr,
-        @product_discount_usd,@product_discount_khr,@manual_discount_usd,@manual_discount_khr,
+        @product_discount_usd,@product_discount_khr,@product_discount_type,@product_discount_label,@manual_discount_usd,@manual_discount_khr,
         @manual_discount_type,@manual_discount_value,@price_mode,@pricing_snapshot_json)`).run(row)
   }
   const compat = { prepare(sql) { return { get: async params => db.prepare(sql).get(params), all: async params => db.prepare(sql).all(params) } } }
