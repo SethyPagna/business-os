@@ -1,25 +1,17 @@
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
-const ts = require('typescript')
+const { buildSync } = require('esbuild')
 const Database = require('better-sqlite3')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
 const root = path.join(__dirname, '..')
 const source = fs.readFileSync(path.join(root, 'src/lib/returnCreateAction.ts'), 'utf8')
-const output = ts.transpileModule(source, {
-  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
-}).outputText
+const output = buildSync({ stdin: { contents: source, resolveDir: path.join(root, 'src/lib'), loader: 'ts' },
+  bundle: true, write: false, platform: 'node', format: 'cjs', target: 'es2022',
+}).outputFiles[0].text
 const moduleObj = { exports: {} }
-new Function('exports', 'require', 'module', output)(moduleObj.exports, (request) => {
-  if (request === './saleRecordEvents') {
-    return { assertSaleRecordBatchBounds: (count, request, eventBytes) => {
-      if (Buffer.byteLength(JSON.stringify(request), 'utf8') + eventBytes > 512000) throw new Error('combined too large')
-      if (count > 500) throw new Error('too many statements')
-    } }
-  }
-  return require(request)
-}, moduleObj)
+new Function('exports', 'require', 'module', output)(moduleObj.exports, require, moduleObj)
 const subject = moduleObj.exports
 
 const canonical = subject.canonicalReturnCreateIntent({
@@ -31,6 +23,32 @@ assert.equal(canonical.sale_id, 4)
 assert.equal(canonical.reason, 'wrong size')
 assert.equal(canonical.items[0].stock_action, 'none')
 assert(!Object.hasOwn(canonical, 'total_refund_usd'), 'server-derived/posted refund totals are outside the digest')
+assert.deepEqual(canonical, {
+  sale_id: 4, return_number: null, receipt_number: null, customer_id: null, customer_name: null,
+  branch_id: null, reason: 'wrong size', return_type: 'restock', notes: null, exchange_rate: null,
+  items: [{ sale_item_id: 8, product_id: 9, product_name: null, quantity: 2,
+    applied_price_usd: 3.5, applied_price_khr: 0, cost_price_usd: 0, cost_price_khr: 0,
+    stock_action: 'none', branch_id: null, batch_id: null }],
+  replacement_items: [{ product_id: 10, product_name: null, branch_id: null, batch_id: null,
+    quantity: 1, applied_price_usd: null, applied_price_khr: null }], replacement_payment_method: 'Cash',
+}, 'absent-version v0 canonical bytes retain the legacy shape')
+
+const expectedQuote = { money_precision_version: 1, sale_id: 4, sale_revision: 7,
+  calculated_refund_usd: 1, rounding_adjustment_usd: 0, total_refund_usd: 1, total_refund_khr: 4000,
+  items: [{ sale_item_id: 8, quantity: 1, total_usd: 1, total_khr: 4000,
+    applied_price_usd: 1, applied_price_khr: 4000 }] }
+const canonicalV1 = subject.canonicalReturnCreateIntent({ money_precision_version: 1, sale_id: 4,
+  reason: ' exact refund ', items: [{ sale_item_id: 8, product_id: 99, product_name: 'untrusted', quantity: 1,
+    applied_price_usd: 999, cost_price_usd: 999, stock_action: 'restock', branch_id: 2, batch_id: 3 }],
+  expected_quote: expectedQuote })
+assert.deepEqual(canonicalV1.items, [{ sale_item_id: 8, quantity: 1, stock_action: 'restock', branch_id: 2, batch_id: 3 }])
+assert.deepEqual(canonicalV1.expected_quote, expectedQuote)
+assert.equal(Object.hasOwn(canonicalV1.items[0], 'applied_price_usd'), false, 'client price is outside v1 intent')
+assert.throws(() => subject.canonicalReturnCreateIntent({ money_precision_version: 0, reason: 'x', items: [{ quantity: 1 }] }), /unsupported/i)
+assert.throws(() => subject.canonicalReturnCreateIntent({ money_precision_version: 1, sale_id: 4, reason: 'x',
+  items: [{ sale_item_id: 8, quantity: 1 }], replacement_items: [{ product_id: 2, quantity: 1 }], expected_quote: expectedQuote }), /replacement/i)
+assert.throws(() => subject.canonicalReturnCreateIntent({ money_precision_version: 1, sale_id: 4, reason: 'x',
+  items: [{ sale_item_id: 9, quantity: 1 }], expected_quote: expectedQuote }), /does not match/i)
 assert.throws(() => subject.canonicalReturnCreateIntent({ reason: 'x', items: [] }), /items required/i)
 assert.throws(() => subject.canonicalReturnCreateIntent({ reason: 'x'.repeat(501), items: [{ quantity: 1 }] }), /500 UTF-8 bytes/)
 
@@ -44,6 +62,15 @@ assert.equal(subject.projectedSaleStatusForReturnCreate(
   [{ id: 1, product_id: 5, quantity: 2 }], [], [{ sale_item_id: 1, quantity: 1 }], 'completed',
 ), 'partial_return')
 assert.equal(subject.projectedSaleStatusForReturnCreate([], [], [], 'awaiting_payment'), 'awaiting_payment')
+assert.equal(subject.projectedSaleStatusForReturnCreateV1(
+  [{ id: 1, quantity: 0.3 }], [{ sale_item_id: 1, quantity: 0.1 }], [{ sale_item_id: 1, quantity: 0.2 }], 'completed',
+), 'returned', 'v1 status uses exact decimal coverage instead of a binary-float epsilon')
+assert.equal(subject.projectedSaleStatusForReturnCreateV1(
+  [{ id: 1, quantity: 0.3 }], [], [{ sale_item_id: 1, quantity: 0.2 }], 'completed',
+), 'partial_return')
+assert.throws(() => subject.projectedSaleStatusForReturnCreateV1(
+  [{ id: 1, quantity: 0.3 }], [{ sale_item_id: 1, quantity: 0.3 }], [{ sale_item_id: 1, quantity: 1e-20 }], 'completed',
+), /exceeds/i, 'a positive exact excess cannot disappear in Number addition')
 assert.doesNotThrow(() => subject.assertReturnCreateCapacity(
   [{ id: 1, product_id: 5, product_name: 'A', quantity: 2 }, { id: 2, product_id: 5, product_name: 'A', quantity: 1 }],
   [{ sale_item_id: 1, quantity: 1 }], [{ sale_item_id: 1, quantity: 1 }, { product_id: 5, quantity: 1 }],
@@ -65,7 +92,7 @@ assert.match(subject.replacementSaleIdSql(), /client_request_id=@replacementClie
 assert.throws(() => subject.assertReturnCreatePlanBounds(Array.from({ length: 501 }, () => ({ sql: 'SELECT 1', params: {} })), canonical, 0), /fewer items/)
 assert.doesNotThrow(() => subject.assertReturnCreatePlanBounds(Array.from({ length: 500 }, () => ({ sql: 'SELECT 1', params: {} })), canonical, 0))
 assert.throws(() => subject.assertReturnCreatePlanBounds([{ sql: 'SELECT 1', params: Object.fromEntries(Array.from({ length: 101 }, (_, i) => [`p${i}`, i])) }], canonical, 0), /too many inputs/)
-assert.throws(() => subject.assertReturnCreatePlanBounds([{ sql: 'SELECT 1', params: {} }], { value: 'x'.repeat(500000) }, 20000), /combined too large/)
+assert.throws(() => subject.assertReturnCreatePlanBounds([{ sql: 'SELECT 1', params: {} }], { value: 'x'.repeat(500000) }, 20000), /too large|fewer records/)
 
 const migration = fs.readFileSync(path.join(root, 'migrations/0142_return_create_receipts.sql'), 'utf8')
 assert(!migration.includes('\r'), '0142 trigger SQL must remain LF-only')

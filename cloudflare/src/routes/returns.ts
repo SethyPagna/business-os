@@ -36,7 +36,7 @@ import { contactDisplayAddress } from '../lib/contactOptions'
 import { isAnonymousCustomer } from '../lib/anonymousCustomer'
 import {
   assertReturnCreateCapacity, assertReturnCreatePlanBounds, canonicalReturnCreateIntent,
-  projectedSaleStatusForReturnCreate, replacementSaleIdSql, returnCreateGuardStatement,
+  projectedSaleStatusForReturnCreate, projectedSaleStatusForReturnCreateV1, replacementSaleIdSql, returnCreateGuardStatement,
   returnCreateIdSql, type ReturnCreateResponse,
 } from '../lib/returnCreateAction'
 import {
@@ -98,22 +98,30 @@ const CUSTOMER_SCOPE = 'customer'
 const SUPPLIER_SCOPE = 'supplier'
 const RETURN_REASON_PRESETS_KEY = 'return_reason_presets'
 const CUSTOMER_RETURN_MAX_PRIOR_ITEMS = 1_000
+const CUSTOMER_RETURN_AUTHORITY_MAX_BYTES = 1_500_000
 
 type CustomerReturnRequestedLine = { sale_item_id: number; quantity: number }
+type CustomerReturnQuoteAuthority = {
+  sale: Record<string, unknown>
+  sale_items: Record<string, unknown>[]
+  prior_returns: Record<string, unknown>[]
+  prior_items: Record<string, unknown>[]
+}
 
-export async function customerReturnQuoteFromDb(
+export async function customerReturnQuotePlanFromDb(
   db: ReturnType<typeof getDb>,
   saleId: number,
   requested: CustomerReturnRequestedLine[],
   excludeReturnId: number | null = null,
-): Promise<CustomerReturnQuoteV1> {
+): Promise<{ quote: CustomerReturnQuoteV1; authority: CustomerReturnQuoteAuthority; authority_json: string }> {
   const sale = await db.prepare(`SELECT s.id,s.money_precision_version,s.calculated_total_usd,s.total_usd,
     s.subtotal_usd,s.discount_usd,s.membership_discount_usd,s.tax_usd,
-    s.exchange_rate,s.is_delivery,s.delivery_fee_usd,s.delivery_fee_paid_by,
+    s.exchange_rate,s.is_delivery,s.delivery_fee_usd,s.delivery_fee_paid_by,s.sale_status,s.status_before_return,
     COALESCE(v.revision,0) AS sale_revision
     FROM sales s LEFT JOIN sale_write_revisions v ON v.sale_id=s.id WHERE s.id=@saleId`)
     .get<Record<string, unknown>>({ saleId })
   if (!sale) throw new SaleMoneyContractError('customer_return_sale_not_found')
+  if (String(sale.sale_status || 'completed') === 'cancelled') throw new SaleMoneyContractError('customer_return_sale_invalid')
   const saleLines = await db.prepare(`SELECT id,product_id,quantity,total_usd,total_khr,
     base_price_usd,base_price_khr,applied_price_usd,applied_price_khr,
     product_discount_usd,product_discount_khr,manual_discount_usd,manual_discount_khr,
@@ -124,7 +132,8 @@ export async function customerReturnQuoteFromDb(
     )
   if (saleLines.length > CUSTOMER_RETURN_MAX_SALE_LINES) throw new SaleMoneyContractError('customer_return_sale_invalid')
   const previousRows = await db.prepare(`SELECT r.id AS return_id,r.money_precision_version,r.calculated_refund_usd,
-    r.rounding_adjustment_usd,r.total_refund_usd,ri.id AS return_item_id,ri.sale_item_id,ri.quantity,ri.total_usd,ri.refund_snapshot_json
+    r.rounding_adjustment_usd,r.total_refund_usd,r.status AS return_status,r.updated_at AS return_updated_at,
+    ri.id AS return_item_id,ri.sale_item_id,ri.quantity,ri.total_usd,ri.refund_snapshot_json
     FROM returns r LEFT JOIN return_items ri ON ri.return_id=r.id
     WHERE r.sale_id=@saleId AND COALESCE(r.return_scope,'customer')='customer'
       AND COALESCE(r.status,'completed')<>'cancelled'
@@ -133,6 +142,8 @@ export async function customerReturnQuoteFromDb(
     .all<Record<string, unknown>>({ saleId, excludeReturnId, limit: CUSTOMER_RETURN_MAX_PRIOR_ITEMS + 1 })
   if (previousRows.length > CUSTOMER_RETURN_MAX_PRIOR_ITEMS) throw new SaleMoneyContractError('customer_return_cohort_too_large')
   const previousById = new Map<number, CustomerReturnPrior>()
+  const priorReturns = new Map<number, Record<string, unknown>>()
+  const priorItems: Record<string, unknown>[] = []
   for (const row of previousRows) {
     const id = Number(row.return_id)
     let prior = previousById.get(id)
@@ -146,6 +157,11 @@ export async function customerReturnQuoteFromDb(
         items: [],
       }
       previousById.set(id, prior)
+      priorReturns.set(id, {
+        id, money_precision_version: row.money_precision_version,
+        calculated_refund_usd: row.calculated_refund_usd, rounding_adjustment_usd: row.rounding_adjustment_usd,
+        total_refund_usd: row.total_refund_usd, status: row.return_status, updated_at: row.return_updated_at,
+      })
     }
     if (row.return_item_id != null) {
       prior.items.push({
@@ -153,12 +169,14 @@ export async function customerReturnQuoteFromDb(
         quantity: Number(row.quantity), total_usd: Number(row.total_usd),
         refund_snapshot_json: row.refund_snapshot_json == null ? null : String(row.refund_snapshot_json),
       })
+      priorItems.push({ id: row.return_item_id, return_id: id, sale_item_id: row.sale_item_id,
+        quantity: row.quantity, total_usd: row.total_usd, refund_snapshot_json: row.refund_snapshot_json })
     }
   }
   const exchangeRate = Number(sale.exchange_rate)
   const customerDeliveryFee = Number(sale.is_delivery) === 1 && String(sale.delivery_fee_paid_by || 'customer') === 'customer'
     ? canonicalMoney4(sale.delivery_fee_usd ?? 0, true) : 0
-  return buildCustomerReturnQuoteV1({
+  const quote = buildCustomerReturnQuoteV1({
     sale: {
       sale_id: Number(sale.id), sale_revision: Number(sale.sale_revision),
       money_precision_version: Number(sale.money_precision_version),
@@ -175,6 +193,20 @@ export async function customerReturnQuoteFromDb(
     requested,
     previous: [...previousById.values()],
   })
+  const authority: CustomerReturnQuoteAuthority = {
+    sale, sale_items: saleLines, prior_returns: [...priorReturns.values()], prior_items: priorItems,
+  }
+  const authorityJson = JSON.stringify(authority)
+  if (new TextEncoder().encode(authorityJson).byteLength > CUSTOMER_RETURN_AUTHORITY_MAX_BYTES) {
+    throw new SaleMoneyContractError('customer_return_authority_too_large')
+  }
+  return { quote, authority, authority_json: authorityJson }
+}
+
+export async function customerReturnQuoteFromDb(
+  db: ReturnType<typeof getDb>, saleId: number, requested: CustomerReturnRequestedLine[], excludeReturnId: number | null = null,
+): Promise<CustomerReturnQuoteV1> {
+  return (await customerReturnQuotePlanFromDb(db, saleId, requested, excludeReturnId)).quote
 }
 
 export function publicCustomerReturnQuote(quote: CustomerReturnQuoteV1) {
@@ -188,6 +220,61 @@ export function publicCustomerReturnQuote(quote: CustomerReturnQuoteV1) {
     total_refund_khr: quote.total_refund_khr,
     items: quote.items.map(({ refund_snapshot_json: _snapshot, ...line }) => line),
   }
+}
+
+function customerReturnAuthorityPredicate(param = '@customerReturnAuthorityJson'): string {
+  return `
+    EXISTS(SELECT 1 FROM sales s LEFT JOIN sale_write_revisions v ON v.sale_id=s.id
+      WHERE s.id=json_extract(${param},'$.sale.id')
+        AND s.money_precision_version IS json_extract(${param},'$.sale.money_precision_version')
+        AND s.calculated_total_usd IS json_extract(${param},'$.sale.calculated_total_usd')
+        AND s.total_usd IS json_extract(${param},'$.sale.total_usd')
+        AND s.subtotal_usd IS json_extract(${param},'$.sale.subtotal_usd')
+        AND s.discount_usd IS json_extract(${param},'$.sale.discount_usd')
+        AND s.membership_discount_usd IS json_extract(${param},'$.sale.membership_discount_usd')
+        AND s.tax_usd IS json_extract(${param},'$.sale.tax_usd')
+        AND s.exchange_rate IS json_extract(${param},'$.sale.exchange_rate')
+        AND s.is_delivery IS json_extract(${param},'$.sale.is_delivery')
+        AND s.delivery_fee_usd IS json_extract(${param},'$.sale.delivery_fee_usd')
+        AND s.delivery_fee_paid_by IS json_extract(${param},'$.sale.delivery_fee_paid_by')
+        AND s.sale_status IS json_extract(${param},'$.sale.sale_status')
+        AND s.status_before_return IS json_extract(${param},'$.sale.status_before_return')
+        AND COALESCE(v.revision,0)=json_extract(${param},'$.sale.sale_revision'))
+    AND (SELECT COUNT(*) FROM sale_items WHERE sale_id=json_extract(${param},'$.sale.id'))
+      =json_array_length(${param},'$.sale_items')
+    AND NOT EXISTS(SELECT 1 FROM json_each(${param},'$.sale_items') j WHERE NOT EXISTS(
+      SELECT 1 FROM sale_items si WHERE si.id=json_extract(j.value,'$.id')
+        AND si.sale_id=json_extract(${param},'$.sale.id')
+        AND si.product_id IS json_extract(j.value,'$.product_id') AND si.quantity IS json_extract(j.value,'$.quantity')
+        AND si.total_usd IS json_extract(j.value,'$.total_usd') AND si.total_khr IS json_extract(j.value,'$.total_khr')
+        AND si.base_price_usd IS json_extract(j.value,'$.base_price_usd') AND si.base_price_khr IS json_extract(j.value,'$.base_price_khr')
+        AND si.applied_price_usd IS json_extract(j.value,'$.applied_price_usd') AND si.applied_price_khr IS json_extract(j.value,'$.applied_price_khr')
+        AND si.product_discount_usd IS json_extract(j.value,'$.product_discount_usd') AND si.product_discount_khr IS json_extract(j.value,'$.product_discount_khr')
+        AND si.manual_discount_usd IS json_extract(j.value,'$.manual_discount_usd') AND si.manual_discount_khr IS json_extract(j.value,'$.manual_discount_khr')
+        AND si.manual_discount_type IS json_extract(j.value,'$.manual_discount_type') AND si.manual_discount_value IS json_extract(j.value,'$.manual_discount_value')
+        AND si.price_mode IS json_extract(j.value,'$.price_mode') AND si.pricing_snapshot_json IS json_extract(j.value,'$.pricing_snapshot_json')))
+    AND (SELECT COUNT(*) FROM returns r WHERE r.sale_id=json_extract(${param},'$.sale.id')
+      AND COALESCE(r.return_scope,'customer')='customer' AND COALESCE(r.status,'completed')<>'cancelled')
+      =json_array_length(${param},'$.prior_returns')
+    AND NOT EXISTS(SELECT 1 FROM json_each(${param},'$.prior_returns') j WHERE NOT EXISTS(
+      SELECT 1 FROM returns r WHERE r.id=json_extract(j.value,'$.id') AND r.sale_id=json_extract(${param},'$.sale.id')
+        AND r.money_precision_version IS json_extract(j.value,'$.money_precision_version')
+        AND r.calculated_refund_usd IS json_extract(j.value,'$.calculated_refund_usd')
+        AND r.rounding_adjustment_usd IS json_extract(j.value,'$.rounding_adjustment_usd')
+        AND r.total_refund_usd IS json_extract(j.value,'$.total_refund_usd')
+        AND r.status IS json_extract(j.value,'$.status') AND r.updated_at IS json_extract(j.value,'$.updated_at')
+        AND COALESCE(r.return_scope,'customer')='customer' AND COALESCE(r.status,'completed')<>'cancelled'))
+    AND (SELECT COUNT(*) FROM return_items ri JOIN returns r ON r.id=ri.return_id
+      WHERE r.sale_id=json_extract(${param},'$.sale.id') AND COALESCE(r.return_scope,'customer')='customer'
+        AND COALESCE(r.status,'completed')<>'cancelled')=json_array_length(${param},'$.prior_items')
+    AND NOT EXISTS(SELECT 1 FROM json_each(${param},'$.prior_items') j WHERE NOT EXISTS(
+      SELECT 1 FROM return_items ri JOIN returns r ON r.id=ri.return_id
+      WHERE ri.id=json_extract(j.value,'$.id') AND ri.return_id=json_extract(j.value,'$.return_id')
+        AND r.sale_id=json_extract(${param},'$.sale.id') AND COALESCE(r.return_scope,'customer')='customer'
+        AND COALESCE(r.status,'completed')<>'cancelled'
+        AND ri.sale_item_id IS json_extract(j.value,'$.sale_item_id') AND ri.quantity IS json_extract(j.value,'$.quantity')
+        AND ri.total_usd IS json_extract(j.value,'$.total_usd') AND ri.refund_snapshot_json IS json_extract(j.value,'$.refund_snapshot_json')))
+  `
 }
 
 type ReturnReasonPresets = {
@@ -1058,6 +1145,14 @@ app.post('/bulk', async (c) => {
   }
 })
 
+app.get('/capabilities', (c) => {
+  if (getActionTier(c.get('user'), 'returns', 'add') === 'none') {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
+  c.header('Cache-Control', 'no-store')
+  return c.json({ customer_return_create_version: 1, customer_return_edit_version: 0 })
+})
+
 // GET /api/returns/:id
 app.get('/:id', async (c) => {
   const db = getDb(c.env)
@@ -1113,7 +1208,8 @@ app.post('/quote', async (c) => {
   }
   c.header('Cache-Control', 'no-store')
   try {
-    return c.json(publicCustomerReturnQuote(await customerReturnQuoteFromDb(getDb(c.env), saleId, requested)))
+    return c.json({ ...publicCustomerReturnQuote(await customerReturnQuoteFromDb(getDb(c.env), saleId, requested)),
+      customer_return_create_version: 1, customer_return_edit_version: 0 })
   } catch (error) {
     if (error instanceof SaleMoneyContractError) {
       const conflict = /legacy|cohort|sale_invalid|not_found|cap/.test(error.message)
@@ -1148,6 +1244,8 @@ app.post('/', async (c) => {
     client_request_id?: string
     replacement_items?: Array<{ product_id: number; product_name?: string; branch_id?: number; batch_id?: number; quantity: number; applied_price_usd?: number; applied_price_khr?: number }>
     replacement_payment_method?: string
+    money_precision_version?: unknown
+    expected_quote?: unknown
   }>()
 
   const rawRequestId = String(body.client_request_id ?? '').trim()
@@ -1181,6 +1279,26 @@ app.post('/', async (c) => {
     .get<{ id: number }>([clientRequestId])
   if (occupiedRequest) {
     return c.json({ error: 'client_request_id is already owned by another return.', code: 'idempotency_conflict' }, 409)
+  }
+
+  const isMoneyV1 = canonicalIntent.money_precision_version === 1
+  let customerReturnV1Plan: Awaited<ReturnType<typeof customerReturnQuotePlanFromDb>> | null = null
+  if (isMoneyV1) {
+    try {
+      customerReturnV1Plan = await customerReturnQuotePlanFromDb(db, requestedSaleId!,
+        (canonicalIntent.items as Array<{ sale_item_id: number; quantity: number }>).map(item => ({
+          sale_item_id: item.sale_item_id, quantity: item.quantity,
+        })))
+      if (JSON.stringify(publicCustomerReturnQuote(customerReturnV1Plan.quote)) !== JSON.stringify(canonicalIntent.expected_quote)) {
+        return c.json({ error: 'The refund quote changed. Review it before recording the return.',
+          code: 'customer_return_quote_stale', action: 'review_required' }, 409)
+      }
+    } catch (error) {
+      if (error instanceof SaleMoneyContractError) {
+        return c.json({ error: error.message, code: error.message, action: 'review_required' }, 409)
+      }
+      throw error
+    }
   }
 
   const reason = String(canonicalIntent.reason)
@@ -1236,15 +1354,26 @@ app.post('/', async (c) => {
       WHERE r.sale_id=? AND COALESCE(r.status,'completed')!='cancelled'
         AND COALESCE(r.return_scope,'customer')='customer' ORDER BY r.id,ri.id`)
       .all<{ sale_item_id: number | null; product_id: number | null; quantity: number }>([requestedSaleId])
-    try {
-      assertReturnCreateCapacity(soldLines, committedReturnLines, returnItems)
-    } catch (error) {
-      return c.json({ error: (error as Error).message }, 400)
+    if (!isMoneyV1) {
+      try {
+        assertReturnCreateCapacity(soldLines, committedReturnLines, returnItems)
+      } catch (error) {
+        return c.json({ error: (error as Error).message }, 400)
+      }
     }
   }
-  const projectedStatus = saleMeta
-    ? projectedSaleStatusForReturnCreate(soldLines, committedReturnLines, returnItems, saleMeta.status_before_return)
-    : null
+  let projectedStatus: string | null = null
+  if (saleMeta) {
+    if (isMoneyV1) {
+      try {
+        projectedStatus = projectedSaleStatusForReturnCreateV1(soldLines, committedReturnLines, returnItems, saleMeta.status_before_return)
+      } catch (error) {
+        return c.json({ error: (error as Error).message, code: 'customer_return_quote_stale', action: 'review_required' }, 409)
+      }
+    } else {
+      projectedStatus = projectedSaleStatusForReturnCreate(soldLines, committedReturnLines, returnItems, saleMeta.status_before_return)
+    }
+  }
   const beforeSaleStatus = saleMeta ? String(saleMeta.sale_status || 'completed') : null
 
   const branchId = Number(body.branch_id || saleMeta?.branch_id || replacementInputs[0]?.branch_id) || null
@@ -1298,12 +1427,18 @@ app.post('/', async (c) => {
   const returnSaleItemIds = returnItems.map((item) => Number(item.sale_item_id)).filter((id) => Number.isSafeInteger(id) && id > 0)
   const saleItemBatchInfo = await fetchSaleItemBatchInfo(db, returnSaleItemIds)
   const saleItemAllocations = await fetchSaleItemAllocations(db, returnSaleItemIds)
-  const refundPrices = returnItems.map((item) => resolveRefundUnitPrice({
-    saleLine: item.sale_item_id ? saleItemBatchInfo.get(Number(item.sale_item_id)) || null : null,
-    postedUsd: toNumber(item.applied_price_usd), postedKhr: toNumber(item.applied_price_khr),
-  }))
-  const totalRefundUsd = Number(returnItems.reduce((sum, item, index) => sum + refundPrices[index].unitUsd * Number(item.quantity), 0).toFixed(2))
-  const totalRefundKhr = Math.round(returnItems.reduce((sum, item, index) => sum + refundPrices[index].unitKhr * Number(item.quantity), 0))
+  const v1QuoteBySaleItem = new Map(customerReturnV1Plan?.quote.items.map(item => [item.sale_item_id, item]) || [])
+  const refundPrices = returnItems.map((item) => {
+    const exact = v1QuoteBySaleItem.get(Number(item.sale_item_id))
+    return exact ? { unitUsd: exact.applied_price_usd, unitKhr: exact.applied_price_khr } : resolveRefundUnitPrice({
+      saleLine: item.sale_item_id ? saleItemBatchInfo.get(Number(item.sale_item_id)) || null : null,
+      postedUsd: toNumber(item.applied_price_usd), postedKhr: toNumber(item.applied_price_khr),
+    })
+  })
+  const totalRefundUsd = customerReturnV1Plan?.quote.total_refund_usd
+    ?? Number(returnItems.reduce((sum, item, index) => sum + refundPrices[index].unitUsd * Number(item.quantity), 0).toFixed(2))
+  const totalRefundKhr = customerReturnV1Plan?.quote.total_refund_khr
+    ?? Math.round(returnItems.reduce((sum, item, index) => sum + refundPrices[index].unitKhr * Number(item.quantity), 0))
 
   const returnLotPlans: Array<{ splits: Array<{ batchId: number; quantity: number }>; plainQuantity: number }> = []
   for (const item of returnItems) {
@@ -1503,6 +1638,7 @@ app.post('/', async (c) => {
     guardJson, receiptId, actorId: authenticatedActorId, requestId: clientRequestId,
     requestDigest, returnNumber, replacementClientRequestId,
     replacementReceiptNumber,
+    customerReturnAuthorityJson: customerReturnV1Plan?.authority_json ?? null,
   }
   const precondition = `
     NOT EXISTS(SELECT 1 FROM return_create_receipts WHERE actor_id=@actorId AND request_id=@requestId)
@@ -1553,6 +1689,7 @@ app.post('/', async (c) => {
           AND COALESCE(pb.lot_code,'')=json_extract(j.value,'$.lot_code')
           AND COALESCE(pb.expiry_date,'')=json_extract(j.value,'$.expiry_date')
           AND COALESCE(bbs.quantity,0)=json_extract(j.value,'$.before')))
+    AND (@customerReturnAuthorityJson IS NULL OR (${customerReturnAuthorityPredicate()}))
   `
   const statements: Array<{ sql: string; params: Record<string, unknown> }> = [
     returnCreateGuardStatement(operationId, 'precondition', precondition, commonGuardParams),
@@ -1563,11 +1700,13 @@ app.post('/', async (c) => {
     sql: `INSERT INTO returns(
       return_number,client_request_id,sale_id,receipt_number,cashier_id,cashier_name,
       customer_id,customer_name,branch_id,branch_name,return_scope,reason,return_type,
-      notes,total_refund_usd,total_refund_khr,exchange_rate,status,search_normalized
+      notes,total_refund_usd,total_refund_khr,exchange_rate,status,search_normalized,
+      money_precision_version,calculated_refund_usd,rounding_adjustment_usd
     ) VALUES(
       @return_number,@returnClientRequestId,@sale_id,@receipt_number,@cashier_id,@cashier_name,
       @customer_id,@customer_name,@branch_id,@branch_name,'customer',@reason,@return_type,
-      @notes,@total_refund_usd,@total_refund_khr,@exchange_rate,'completed',@search_normalized
+      @notes,@total_refund_usd,@total_refund_khr,@exchange_rate,'completed',@search_normalized,
+      @money_precision_version,@calculated_refund_usd,@rounding_adjustment_usd
     )`,
     params: {
       return_number: returnNumber, returnClientRequestId: clientRequestId, sale_id: requestedSaleId,
@@ -1578,7 +1717,12 @@ app.post('/', async (c) => {
       branch_id: branchId, branch_name: branchName, reason,
       return_type: String(canonicalIntent.return_type), notes: canonicalIntent.notes,
       total_refund_usd: totalRefundUsd, total_refund_khr: totalRefundKhr,
-      exchange_rate: toNumber(body.exchange_rate || saleMeta?.exchange_rate, 4100),
+      exchange_rate: customerReturnV1Plan
+        ? Number(customerReturnV1Plan.authority.sale.exchange_rate)
+        : toNumber(body.exchange_rate || saleMeta?.exchange_rate, 4100),
+      money_precision_version: isMoneyV1 ? 1 : 0,
+      calculated_refund_usd: customerReturnV1Plan?.quote.calculated_refund_usd ?? null,
+      rounding_adjustment_usd: customerReturnV1Plan?.quote.rounding_adjustment_usd ?? 0,
       search_normalized: normalizeSearchText([
         returnNumber, body.receipt_number || saleMeta?.receipt_number, actorSnapshot(user),
         body.customer_name || saleMeta?.customer_name, branchName, reason, canonicalIntent.return_type, canonicalIntent.notes,
@@ -1687,16 +1831,19 @@ app.post('/', async (c) => {
     const splits = plan.splits
     const recordedBatchId = splits.length === 1 && splits[0].quantity === quantity ? splits[0].batchId : null
     const refund = refundPrices[index]
+    const exactRefund = v1QuoteBySaleItem.get(Number(item.sale_item_id))
     statements.push({
       sql: `INSERT INTO return_items(return_id,sale_item_id,product_id,product_name,quantity,applied_price_usd,applied_price_khr,
-        cost_price_usd,cost_price_khr,total_usd,total_khr,return_to_stock,stock_action,branch_id,batch_id)
+        cost_price_usd,cost_price_khr,total_usd,total_khr,return_to_stock,stock_action,branch_id,batch_id,refund_snapshot_json)
         VALUES(${returnIdExpression},@sale_item_id,@product_id,@product_name,@quantity,@applied_price_usd,@applied_price_khr,
-        @cost_price_usd,@cost_price_khr,@total_usd,@total_khr,@return_to_stock,@stock_action,@branch_id,${recordedBatchSql})`,
+        @cost_price_usd,@cost_price_khr,@total_usd,@total_khr,@return_to_stock,@stock_action,@branch_id,${recordedBatchSql},@refund_snapshot_json)`,
       params: {
         returnClientRequestId: clientRequestId, sale_item_id: item.sale_item_id || null, product_id: productId,
         product_name: productName, quantity, applied_price_usd: refund.unitUsd, applied_price_khr: refund.unitKhr,
         cost_price_usd: toNumber(item.cost_price_usd ?? item.unit_cost_usd), cost_price_khr: toNumber(item.cost_price_khr ?? item.unit_cost_khr),
-        total_usd: Number((refund.unitUsd * quantity).toFixed(2)), total_khr: Math.round(refund.unitKhr * quantity),
+        total_usd: exactRefund?.total_usd ?? Number((refund.unitUsd * quantity).toFixed(2)),
+        total_khr: exactRefund?.total_khr ?? Math.round(refund.unitKhr * quantity),
+        refund_snapshot_json: exactRefund?.refund_snapshot_json ?? null,
         return_to_stock: stockAction === 'restock' ? 1 : 0, stock_action: stockAction,
         branch_id: itemBranchId, batch_id: recordedBatchId, ...fallbackParams,
       },
@@ -1846,6 +1993,16 @@ app.post('/', async (c) => {
     replacement_items: replacementLines.length, sale_allocations: saleAllocationCount,
     movements: movementCount, event: eventBytes > 0 ? 1 : 0,
     status: projectedStatus, branch_stock: branchSnapshots, batch_stock: batchSnapshots,
+    v1_header: customerReturnV1Plan ? {
+      money_precision_version: 1,
+      calculated_refund_usd: customerReturnV1Plan.quote.calculated_refund_usd,
+      rounding_adjustment_usd: customerReturnV1Plan.quote.rounding_adjustment_usd,
+      total_refund_usd: customerReturnV1Plan.quote.total_refund_usd,
+      total_refund_khr: customerReturnV1Plan.quote.total_refund_khr,
+    } : null,
+    v1_items: customerReturnV1Plan?.quote.items.map(item => ({ sale_item_id: item.sale_item_id,
+      quantity: item.quantity, applied_price_usd: item.applied_price_usd, applied_price_khr: item.applied_price_khr,
+      total_usd: item.total_usd, total_khr: item.total_khr, refund_snapshot_json: item.refund_snapshot_json })) || [],
   }
   const expectedJson = JSON.stringify(expected)
   const postcondition = `
@@ -1862,6 +2019,20 @@ app.post('/', async (c) => {
     AND (SELECT COUNT(*) FROM sale_record_events WHERE source_kind='return_create' AND source_id=@receiptId
       AND generation=0)=json_extract(@expectedJson,'$.event')
     AND EXISTS(SELECT 1 FROM audit_logs WHERE entity='return_create' AND entity_id=@receiptId)
+    AND (json_type(@expectedJson,'$.v1_header')='null' OR EXISTS(SELECT 1 FROM returns r
+      WHERE r.id=${returnIdExpression}
+        AND r.money_precision_version=json_extract(@expectedJson,'$.v1_header.money_precision_version')
+        AND r.calculated_refund_usd=json_extract(@expectedJson,'$.v1_header.calculated_refund_usd')
+        AND r.rounding_adjustment_usd=json_extract(@expectedJson,'$.v1_header.rounding_adjustment_usd')
+        AND r.total_refund_usd=json_extract(@expectedJson,'$.v1_header.total_refund_usd')
+        AND r.total_refund_khr=json_extract(@expectedJson,'$.v1_header.total_refund_khr')))
+    AND NOT EXISTS(SELECT 1 FROM json_each(@expectedJson,'$.v1_items') j WHERE NOT EXISTS(
+      SELECT 1 FROM return_items ri WHERE ri.return_id=${returnIdExpression}
+        AND ri.sale_item_id=json_extract(j.value,'$.sale_item_id') AND ri.quantity=json_extract(j.value,'$.quantity')
+        AND ri.applied_price_usd=json_extract(j.value,'$.applied_price_usd')
+        AND ri.applied_price_khr=json_extract(j.value,'$.applied_price_khr')
+        AND ri.total_usd=json_extract(j.value,'$.total_usd') AND ri.total_khr=json_extract(j.value,'$.total_khr')
+        AND ri.refund_snapshot_json=json_extract(j.value,'$.refund_snapshot_json')))
     AND (json_type(@expectedJson,'$.status')='null' OR COALESCE((SELECT sale_status FROM sales WHERE id=@saleId),'completed')=json_extract(@expectedJson,'$.status'))
     AND NOT EXISTS(SELECT 1 FROM json_each(@expectedJson,'$.branch_stock') j
       WHERE COALESCE((SELECT quantity FROM branch_stock WHERE product_id=json_extract(j.value,'$.product_id')
@@ -1903,7 +2074,15 @@ app.post('/', async (c) => {
     }
   }
 
-  const committed = await readReceipt()
+  let committed: Awaited<ReturnType<typeof readReceipt>>
+  try {
+    committed = await readReceipt()
+  } catch {
+    return c.json({
+      error: 'The result could not be confirmed. Keep this return open and retry the same request.',
+      code: 'unknown_outcome', action: 'retry_same_request',
+    }, 503)
+  }
   if (!committed || committed.request_digest !== requestDigest) {
     return c.json({ error: 'The result could not be confirmed. Retry the same request.', code: 'unknown_outcome', action: 'retry_same_request' }, 503)
   }
@@ -2301,6 +2480,10 @@ app.patch('/:id', async (c) => {
   if (!existing) return c.json({ error: 'Return not found' }, 404)
   if (normalizeScope(existing.return_scope, CUSTOMER_SCOPE) !== CUSTOMER_SCOPE) {
     return c.json({ error: 'Supplier returns cannot be edited from this form yet.' }, 400)
+  }
+  if (Number(existing.money_precision_version) === 1) {
+    return c.json({ error: 'Exact net-entitlement returns cannot be edited until the v1 edit flow is available.',
+      code: 'customer_return_edit_v1_not_supported', action: 'review_required' }, 409)
   }
 
   const existingItems = await db.prepare('SELECT * FROM return_items WHERE return_id = ? ORDER BY id').all<{

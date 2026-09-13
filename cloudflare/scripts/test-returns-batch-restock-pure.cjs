@@ -35,6 +35,8 @@ let beforeBatchHook = null
 let corruptNextReturnReceipt = false
 let corruptNextReturnCreateReceipt = false
 let corruptNextSaleRecordEvent = false
+let failReturnCreatePostcommitRead = false
+let failNextReturnCreateReceiptRead = false
 // Flatten node:sqlite's run() result the same way lib/db.ts's real
 // D1Compat.run() does (see test-pending-actions-pure.cjs's own comment for
 // why this matters) -- productBatches.ts and returns.ts both rely on
@@ -44,7 +46,13 @@ const db = {
   prepare(sql) {
     const stmt = rawDb.prepare(sql)
     return {
-      get: (params) => stmt.get(params),
+      get: (params) => {
+        if (failNextReturnCreateReceiptRead && /FROM return_create_receipts/i.test(sql)) {
+          failNextReturnCreateReceiptRead = false
+          throw new Error('simulated postcommit receipt read failure')
+        }
+        return stmt.get(params)
+      },
       all: (params) => stmt.all(params) ?? [],
       run: (params) => {
         const r = stmt.run(params)
@@ -80,6 +88,10 @@ const db = {
       }
     }
     const results = await rawDb.batch(items)
+    if (failReturnCreatePostcommitRead && items.some((item) => /INSERT INTO return_create_receipts/i.test(item.sql))) {
+      failReturnCreatePostcommitRead = false
+      failNextReturnCreateReceiptRead = true
+    }
     return results.map((r) => ({ changes: r.meta?.changes ?? 0, lastInsertRowid: Number(r.meta?.last_row_id ?? 0) }))
   },
   async transaction(fn) { return fn(this) },
@@ -129,15 +141,33 @@ let auditCalls = []
 
 // N13: the shared actor / branch kernels these routes now import.
 const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
-const saleCreationSnapshotKernel = loadReal('lib/saleCreationSnapshot.ts', { './actorSnapshot': actorSnapshotKernel })
 const branchRolesKernel = loadReal('lib/branchRoles.ts')
 const anonymousCustomerKernel = loadReal('lib/anonymousCustomer.ts')
+const moneyPrecisionKernel = loadReal('lib/moneyPrecision.ts')
+const promotionRulesKernel = loadReal('lib/promotionRules.ts', { './moneyPrecision': moneyPrecisionKernel })
+const saleItemPricingKernel = loadReal('lib/saleItemPricing.ts', {
+  './moneyPrecision': moneyPrecisionKernel, './promotionRules': promotionRulesKernel,
+})
+const saleMoneyPrecisionKernel = loadReal('lib/saleMoneyPrecision.ts', { './moneyPrecision': moneyPrecisionKernel })
+const saleCreationSnapshotKernel = loadReal('lib/saleCreationSnapshot.ts', {
+  './actorSnapshot': actorSnapshotKernel, './saleMoneyPrecision': saleMoneyPrecisionKernel,
+})
+const refundMoneyPrecisionKernel = loadReal('lib/refundMoneyPrecision.ts', {
+  './moneyPrecision': moneyPrecisionKernel, './saleMoneyPrecision': saleMoneyPrecisionKernel,
+})
+const customerReturnEntitlementKernel = loadReal('lib/customerReturnEntitlement.ts', {
+  './moneyPrecision': moneyPrecisionKernel, './refundMoneyPrecision': refundMoneyPrecisionKernel,
+  './saleItemPricing': saleItemPricingKernel, './saleMoneyPrecision': saleMoneyPrecisionKernel,
+})
 const saleRecordsContract = {
   SALE_RECORD_KINDS: ['sale_created', 'status_changed', 'item_added', 'item_removed', 'item_quantity_changed', 'items_replaced', 'driver_changed', 'delivery_fee_changed', 'delivery_cost_changed', 'delivery_added', 'customer_changed', 'membership_changed', 'payment_changed', 'payment_settled', 'cancelled', 'legacy_sale_change'],
   SALE_RECORD_FIELDS: ['receipt_number', 'sale_status', 'items', 'total_usd', 'payment', 'delivery', 'customer', 'membership', 'item', 'quantity', 'removed_items', 'added_items', 'delivery_fee_usd', 'actual_delivery_cost_usd', 'is_delivery', 'driver', 'payment_method', 'payment_details', 'amount_paid_usd', 'amount_paid_khr', 'change_usd', 'change_khr', 'cancel_reason', 'cancel_note'],
 }
 const saleRecordEventsKernel = loadReal('lib/saleRecordEvents.ts', { './saleRecords': saleRecordsContract })
-const returnCreateActionKernel = loadReal('lib/returnCreateAction.ts', { './saleRecordEvents': saleRecordEventsKernel })
+const returnCreateActionKernel = loadReal('lib/returnCreateAction.ts', {
+  './saleRecordEvents': saleRecordEventsKernel, './moneyPrecision': moneyPrecisionKernel,
+  './customerReturnEntitlement': customerReturnEntitlementKernel,
+})
 const saleBulkStatusKernel = {
   bulkAssertion: (predicate, params = {}) => ({ sql: `INSERT INTO sale_bulk_guards(guard_value) SELECT CASE WHEN (${predicate}) THEN 1 ELSE 0 END`, params }),
   saleRevisionGuard: (id, revision) => ({
@@ -176,6 +206,8 @@ const returnsRoute = loadReal('routes/returns.ts', {
   '../lib/saleBulkStatus': saleBulkStatusKernel,
   '../lib/saleRecordEvents': saleRecordEventsKernel,
   '../lib/returnCreateAction': returnCreateActionKernel,
+  '../lib/customerReturnEntitlement': customerReturnEntitlementKernel,
+  '../lib/saleMoneyPrecision': saleMoneyPrecisionKernel,
   '../lib/searchMatch': { buildLikeAliasClause: () => '1=1', tokenizeSearchTermGroups: () => [], normalizeSearchText: (value) => String(value || '') },
   '../lib/productBatches': productBatches,
   // K2 (Part 410): real, pure -- the three-way stock_action + Replace
@@ -196,7 +228,9 @@ const returnsRoute = loadReal('routes/returns.ts', {
   } },
   // Real money kernel -- the replacement sale derives its totals through the
   // same function routes/sales.ts uses, so it must be the real one here too.
-  '../lib/saleTotals': loadReal('lib/saleTotals.ts'),
+  '../lib/saleTotals': loadReal('lib/saleTotals.ts', {
+    './moneyPrecision': moneyPrecisionKernel, './saleMoneyPrecision': saleMoneyPrecisionKernel,
+  }),
 })
 
 const app = returnsRoute.default
@@ -279,6 +313,106 @@ async function reqAs(user, method, url, body) {
 }
 
 async function main() {
+  await check('v1 customer return writes exact net entitlement, snapshots and stock under one stale-graph guard', async () => {
+    seed()
+    const batch = await productBatches.receiveBatchStock(db, { productId: 1, branchId: 1, quantity: 2, lotCode: 'V1-LOT' })
+    await productBatches.removeStockFromBatch(db, { batchId: batch.batchId, productId: 1, branchId: 1, quantity: 1 })
+    const pricingPool = { version: 1, pool_key: 'return-v1-pool', evaluation_time: '2026-09-13T00:00:00.000Z',
+      exchange_rate: 4000, rules: [], lines: [{ line_key: 'return-v1-line', source: 'selling',
+        product: { id: 1, selling_price_usd: 10, selling_price_khr: 40000, wholesale_price_usd: null,
+          discount_enabled: false, discount_amount_usd: 0, discount_amount_khr: 0, discount_percent: 0 },
+        selling_price_input_usd: null, manual: { type: 'none', value: 0 } }] }
+    const allocation = { version: 1, lines: [{ line_key: 'return-v1-line', amount: 10 }],
+      discount_usd: 1, membership_discount_usd: 0, tax_usd: 0.5 }
+    const pricing = saleItemPricingKernel.materializeCapturedPricingRow({ id: 1, product_id: 1 }, pricingPool,
+      { 'return-v1-line': 1 }, 'return-v1-line', allocation)
+    rawDb.prepare(`UPDATE sales SET receipt_number='V1-SALE',exchange_rate=4000,subtotal_usd=10,discount_usd=1,
+      membership_discount_usd=0,tax_usd=.5,calculated_total_usd=9.5,rounding_adjustment_usd=0,total_usd=9.5,
+      money_precision_version=1,sale_status='completed',status_before_return=NULL WHERE id=1`).run()
+    rawDb.prepare(`INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity,branch_id,batch_id,cost_price_usd,cost_price_khr,
+      total_usd,total_khr,base_price_usd,base_price_khr,applied_price_usd,applied_price_khr,
+      product_discount_usd,product_discount_khr,manual_discount_usd,manual_discount_khr,
+      manual_discount_type,manual_discount_value,price_mode,pricing_snapshot_json)
+      VALUES(@id,1,@product_id,'Widget',@quantity,1,@batch_id,2,8000,@total_usd,@total_khr,@base_price_usd,@base_price_khr,
+        @applied_price_usd,@applied_price_khr,@product_discount_usd,@product_discount_khr,@manual_discount_usd,@manual_discount_khr,
+        @manual_discount_type,@manual_discount_value,@price_mode,@pricing_snapshot_json)`).run({ ...pricing, batch_id: batch.batchId })
+    rawDb.prepare(`INSERT INTO sale_item_batch_allocations(sale_item_id,batch_id,branch_id,quantity,released_quantity)
+      VALUES(1,?,1,1,0)`).run([batch.batchId])
+
+    const capability = await req('GET', '/capabilities')
+    assert.strictEqual(capability.status, 200)
+    assert.deepStrictEqual(capability.json, { customer_return_create_version: 1, customer_return_edit_version: 0 })
+    const quoteResponse = await req('POST', '/quote', { sale_id: 1, items: [{ sale_item_id: 1, quantity: 1 }] })
+    assert.strictEqual(quoteResponse.status, 200, JSON.stringify(quoteResponse.json))
+    assert.strictEqual(quoteResponse.json.customer_return_create_version, 1)
+    const { customer_return_create_version: _create, customer_return_edit_version: _edit, ...expectedQuote } = quoteResponse.json
+    assert.strictEqual(expectedQuote.calculated_refund_usd, 9.5)
+    assert.strictEqual(expectedQuote.total_refund_usd, 9.5)
+    const body = { client_request_id: 'v1-customer-return', money_precision_version: 1, sale_id: 1,
+      reason: 'Exact net entitlement', expected_quote: expectedQuote,
+      items: [{ sale_item_id: 1, product_id: 1, quantity: 1, stock_action: 'restock', branch_id: 1 }] }
+    assert.deepStrictEqual(returnCreateActionKernel.canonicalReturnCreateIntent(body).expected_quote, expectedQuote)
+
+    beforeBatchHook = async () => rawDb.prepare('UPDATE sales SET tax_usd=.6 WHERE id=1').run()
+    const stale = await req('POST', '/', body)
+    assert.strictEqual(stale.status, 409, JSON.stringify(stale.json))
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM returns').get().n, 0)
+    assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity, 1)
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM return_create_receipts').get().n, 0)
+    rawDb.prepare('UPDATE sales SET tax_usd=.5 WHERE id=1').run()
+
+    const refreshedQuoteResponse = await req('POST', '/quote', { sale_id: 1, items: [{ sale_item_id: 1, quantity: 1 }] })
+    const { customer_return_create_version: _freshCreate, customer_return_edit_version: _freshEdit,
+      ...refreshedExpectedQuote } = refreshedQuoteResponse.json
+    const refreshedBody = { ...body, expected_quote: refreshedExpectedQuote }
+    beforeBatchHook = async () => rawDb.prepare(`INSERT INTO returns(id,sale_id,status,return_scope,total_refund_usd)
+      VALUES(99,1,'completed','customer',0)`).run()
+    const priorGraphStale = await req('POST', '/', refreshedBody)
+    assert.strictEqual(priorGraphStale.status, 409, JSON.stringify(priorGraphStale.json))
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM returns WHERE id<>99').get().n, 0)
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM return_create_receipts').get().n, 0)
+    assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity, 1)
+    rawDb.prepare('DELETE FROM returns WHERE id=99').run()
+
+    const postConflictQuoteResponse = await req('POST', '/quote', { sale_id: 1, items: [{ sale_item_id: 1, quantity: 1 }] })
+    assert.strictEqual(postConflictQuoteResponse.status, 200, JSON.stringify(postConflictQuoteResponse.json))
+    const { customer_return_create_version: _postConflictCreate, customer_return_edit_version: _postConflictEdit,
+      ...postConflictExpectedQuote } = postConflictQuoteResponse.json
+    const postConflictBody = { ...body, expected_quote: postConflictExpectedQuote }
+
+    failReturnCreatePostcommitRead = true
+    const unknown = await req('POST', '/', postConflictBody)
+    assert.strictEqual(unknown.status, 503, JSON.stringify(unknown.json))
+    assert.strictEqual(unknown.json.code, 'unknown_outcome')
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM returns').get().n, 1, 'unknown response retains committed receipt')
+    assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=? AND branch_id=1').get([batch.batchId]).quantity, 2)
+    const created = await req('POST', '/', postConflictBody)
+    assert.strictEqual(created.status, 200, JSON.stringify(created.json))
+    const header = rawDb.prepare(`SELECT money_precision_version,calculated_refund_usd,rounding_adjustment_usd,
+      total_refund_usd,total_refund_khr FROM returns WHERE id=?`).get([created.json.id])
+    assert.deepStrictEqual({ ...header }, { money_precision_version: 1, calculated_refund_usd: 9.5,
+      rounding_adjustment_usd: 0, total_refund_usd: 9.5, total_refund_khr: 38000 })
+    const item = rawDb.prepare(`SELECT sale_item_id,quantity,applied_price_usd,total_usd,total_khr,refund_snapshot_json
+      FROM return_items WHERE return_id=?`).get([created.json.id])
+    assert.strictEqual(item.total_usd, 9.5)
+    assert.strictEqual(item.total_khr, 38000)
+    assert.strictEqual(customerReturnEntitlementKernel.parseCustomerReturnRefundSnapshot(item.refund_snapshot_json).net_entitlement_usd, 9.5)
+    assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=? AND branch_id=1').get([batch.batchId]).quantity, 2)
+    const retried = await req('POST', '/', postConflictBody)
+    assert.deepStrictEqual(retried.json, created.json)
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM returns').get().n, 1)
+    assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=? AND branch_id=1').get([batch.batchId]).quantity, 2)
+    const changedExpected = { ...refreshedExpectedQuote, calculated_refund_usd: 9.4, total_refund_usd: 9.4,
+      total_refund_khr: 37600, items: refreshedExpectedQuote.items.map(row => ({ ...row, total_usd: 9.4, total_khr: 37600,
+        applied_price_usd: 9.4, applied_price_khr: 37600 })) }
+    const reused = await req('POST', '/', { ...postConflictBody, expected_quote: changedExpected })
+    assert.strictEqual(reused.status, 409)
+    assert.strictEqual(reused.json.code, 'idempotency_conflict')
+    const edit = await req('PATCH', `/${created.json.id}`, { reason: 'blocked v1 edit' })
+    assert.strictEqual(edit.status, 409)
+    assert.strictEqual(edit.json.code, 'customer_return_edit_v1_not_supported')
+  })
+
   await check('legacy-sale event lots use the return business date and failed lot writes roll back create/edit/retry', async () => {
     seed()
     rawDb.prepare('INSERT INTO sale_items(id,sale_id,product_id,quantity,batch_id) VALUES(1,1,1,5,NULL)').run()

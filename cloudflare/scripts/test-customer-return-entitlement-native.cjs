@@ -225,10 +225,10 @@ async function main() {
 
   const httpApp = await loadReturnHttpRoute()
   globalThis.__customerReturnQuoteDb = compat
-  const quoteRequest = async (user, body) => {
+  const quoteRequest = async (user, body, method = 'POST', url = '/quote') => {
     globalThis.__customerReturnQuoteUser = user
-    const response = await httpApp.request('/quote', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body) }, {}, { waitUntil() {}, passThroughOnException() {} })
+    const response = await httpApp.request(url, { method, headers: { 'Content-Type': 'application/json' },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }) }, {}, { waitUntil() {}, passThroughOnException() {} })
     return { status: response.status, body: await response.json() }
   }
   const allowed = { permissions: { returns: 'full' }, actions: { 'returns.add': 'full', 'returns.view': 'full' } }
@@ -241,6 +241,15 @@ async function main() {
   const httpQuote = await quoteRequest(allowed, { sale_id: 2, items: [{ sale_item_id: 11, quantity: 1 }] })
   assert.equal(httpQuote.status, 200)
   assert.equal(httpQuote.body.calculated_refund_usd, 9.6667)
+  assert.equal(httpQuote.body.customer_return_create_version, 1)
+  assert.equal(httpQuote.body.customer_return_edit_version, 0)
+  const capability = await quoteRequest(allowed, undefined, 'GET', '/capabilities')
+  assert.deepEqual(capability, { status: 200,
+    body: { customer_return_create_version: 1, customer_return_edit_version: 0 } })
+  assert.equal((await quoteRequest({ ...allowed, actions: { ...allowed.actions, 'returns.add': 'none' } },
+    undefined, 'GET', '/capabilities')).status, 403)
+  assert.equal((await quoteRequest({ ...allowed, actions: { ...allowed.actions, 'returns.view': 'none' } },
+    undefined, 'GET', '/capabilities')).status, 403)
   delete globalThis.__customerReturnQuoteDb
   delete globalThis.__customerReturnQuoteUser
   db.close()

@@ -91,6 +91,11 @@ export type CustomerReturnQuoteV1 = RefundMoneyPrecisionV1 & {
   items: CustomerReturnQuoteLine[]
 }
 
+export type CustomerReturnExpectedQuoteV1 = Omit<CustomerReturnQuoteV1,
+  'product_entitlement_usd' | 'product_payout_cap_usd' | 'items'> & {
+  items: Array<Omit<CustomerReturnQuoteLine, 'refund_snapshot_json'>>
+}
+
 function fail(code: string): never { throw new SaleMoneyContractError(code) }
 function positiveId(value: unknown, code: string): number {
   const number = Number(value)
@@ -103,6 +108,11 @@ function finitePositive(value: unknown, code: string): number {
   return number
 }
 function sameJson(left: unknown, right: unknown): boolean { return JSON.stringify(left) === JSON.stringify(right) }
+function exactObject(value: unknown, keys: readonly string[], code: string): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || JSON.stringify(Object.keys(value as Record<string, unknown>).sort()) !== JSON.stringify([...keys].sort())) fail(code)
+  return value as Record<string, unknown>
+}
 function quantityDifference(left: number, right: number): string {
   try { return subtractDecimalSum(left, [right]) } catch { return fail('customer_return_quantity_invalid') }
 }
@@ -197,6 +207,42 @@ export function parseCustomerReturnRefundSnapshot(json: string | null | undefine
     fail('customer_return_snapshot_invalid')
   }
   return value
+}
+
+export function canonicalCustomerReturnExpectedQuote(value: unknown): CustomerReturnExpectedQuoteV1 {
+  const quote = exactObject(value, [
+    'money_precision_version', 'sale_id', 'sale_revision', 'calculated_refund_usd', 'rounding_adjustment_usd',
+    'total_refund_usd', 'total_refund_khr', 'items',
+  ], 'customer_return_expected_quote_invalid')
+  if (quote.money_precision_version !== 1 || typeof quote.sale_id !== 'number'
+    || typeof quote.sale_revision !== 'number' || !Number.isSafeInteger(quote.sale_revision) || quote.sale_revision < 0
+    || !Array.isArray(quote.items) || quote.items.length < 1 || quote.items.length > CUSTOMER_RETURN_MAX_LINES) {
+    fail('customer_return_expected_quote_invalid')
+  }
+  const saleId = positiveId(quote.sale_id, 'customer_return_expected_quote_invalid')
+  const header = validateRefundMoneySnapshot({ money_precision_version: 1 as const,
+    calculated_refund_usd: canonicalMoney4(quote.calculated_refund_usd, true),
+    rounding_adjustment_usd: canonicalMoney4(quote.rounding_adjustment_usd),
+    total_refund_usd: canonicalMoney4(quote.total_refund_usd, true) })
+  const seen = new Set<number>()
+  const items = quote.items.map((value) => {
+    const item = exactObject(value, [
+      'sale_item_id', 'quantity', 'total_usd', 'total_khr', 'applied_price_usd', 'applied_price_khr',
+    ], 'customer_return_expected_quote_invalid')
+    if (typeof item.sale_item_id !== 'number' || typeof item.quantity !== 'number') fail('customer_return_expected_quote_invalid')
+    const saleItemId = positiveId(item.sale_item_id, 'customer_return_expected_quote_invalid')
+    const quantity = finitePositive(item.quantity, 'customer_return_expected_quote_invalid')
+    if (seen.has(saleItemId)) fail('customer_return_expected_quote_invalid')
+    seen.add(saleItemId)
+    return { sale_item_id: saleItemId, quantity,
+      total_usd: canonicalMoney4(item.total_usd, true), total_khr: canonicalMoney4(item.total_khr, true),
+      applied_price_usd: canonicalMoney4(item.applied_price_usd, true),
+      applied_price_khr: canonicalMoney4(item.applied_price_khr, true) }
+  })
+  if (sumMoney4(items.map(item => item.total_usd)) !== header.calculated_refund_usd) fail('customer_return_expected_quote_invalid')
+  return { money_precision_version: 1, sale_id: saleId, sale_revision: Number(quote.sale_revision),
+    calculated_refund_usd: header.calculated_refund_usd, rounding_adjustment_usd: header.rounding_adjustment_usd,
+    total_refund_usd: header.total_refund_usd, total_refund_khr: canonicalMoney4(quote.total_refund_khr, true), items }
 }
 
 export function buildCustomerReturnQuoteV1(input: {
