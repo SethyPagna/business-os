@@ -67,7 +67,7 @@ const analytics = loadReal('lib/salesAnalytics.ts', {
   './businessDateWindow': loadReal('lib/businessDateWindow.ts'),
   './reportMoneyPrecision': reportMoneyPrecision,
   './customerReturnEntitlement': customerReturnEntitlement,
-  './refundMoneyPrecision': refundMoneyPrecision,
+  './refundMoneyPrecision': refundMoneyPrecision, './saleMoneyPrecision': saleMoneyPrecision,
 })
 
 // --- 1. the bound converter -------------------------------------------------

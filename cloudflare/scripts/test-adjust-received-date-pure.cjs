@@ -120,7 +120,7 @@ const salesAnalytics = loadReal('lib/salesAnalytics.ts', {
   './businessDateWindow': businessDateWindow,
   './reportMoneyPrecision': reportMoneyPrecision,
   './customerReturnEntitlement': customerReturnEntitlement,
-  './refundMoneyPrecision': refundMoneyPrecision,
+  './refundMoneyPrecision': refundMoneyPrecision, './saleMoneyPrecision': saleMoneyPrecision,
 })
 // routes/inventory.ts's per-product revenue/COGS SQL moved into this shared
 // ledger (audit sibling:F14); the REAL module, so the route builds real SQL.
