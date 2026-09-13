@@ -183,3 +183,27 @@ export function allocateLineMoney4(total: number, weights: readonly { line_key:s
   if (sumMoney4([...result.values()]) !== total || left !== 0n) invalid()
   return result
 }
+
+/** Guard the exact authorized SELECT * capture, including newly inserted active
+ * rules. Execute in the same batch BEFORE any sale/stock/audit mutation. The
+ * caller must read all active rules (not just the winner or currently in-window
+ * rules); omission would make a newly applicable discount invisible. */
+export function pricingSourceGuard(products: readonly Record<string,unknown>[], activeRules: readonly Record<string,unknown>[]): {sql:string;params:Record<string,unknown>} {
+  if (!products.length || products.length > MAX_PRICING_LINES || activeRules.length > MAX_PRICING_RULES) invalid()
+  if (activeRules.some(row => row.is_active !== 1)) invalid()
+  const make = (rows:readonly Record<string,unknown>[],table:string,param:string) => {
+    if (!rows.length) return '0'
+    const keys=Object.keys(rows[0]).sort(), ids=new Set<number>()
+    if (!keys.includes('id') || keys.some(name => !/^[a-z][a-z0-9_]*$/.test(name))) invalid()
+    for (const row of rows) {
+      if (!Number.isSafeInteger(row.id) || Number(row.id)<=0 || ids.has(Number(row.id))
+        || JSON.stringify(Object.keys(row).sort()) !== JSON.stringify(keys)) invalid()
+      ids.add(Number(row.id))
+    }
+    return `EXISTS (SELECT 1 FROM json_each(@${param}) expected LEFT JOIN ${table} current ON current.id=json_extract(expected.value,'$.id') WHERE current.id IS NULL OR ${keys.map(name => `current.${name} IS NOT json_extract(expected.value,'$.${name}')`).join(' OR ')})`
+  }
+  const productConflict=make(products,'products','pricing_products'), ruleConflict=make(activeRules,'promotion_rules','pricing_rules')
+  const params={pricing_products:JSON.stringify(products),pricing_rules:JSON.stringify(activeRules),pricing_rule_count:activeRules.length}
+  if (new TextEncoder().encode(params.pricing_products+params.pricing_rules).length>512_000) invalid()
+  return {sql:`SELECT CASE WHEN ${productConflict} OR ${ruleConflict} OR (SELECT COUNT(*) FROM promotion_rules WHERE is_active=1)<>@pricing_rule_count THEN json_extract('sale_pricing_source_conflict','$') ELSE 1 END`,params}
+}
