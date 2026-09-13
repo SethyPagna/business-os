@@ -22,9 +22,9 @@ async function loadReturnRoute() {
   return mod.exports
 }
 
-function pool(lines, rate = 4000) {
+function pool(lines, rate = 4000, poolKey = 'pool-1') {
   return {
-    version: 1, pool_key: 'pool-1', evaluation_time: '2026-09-13T00:00:00.000Z', exchange_rate: rate, rules: [],
+    version: 1, pool_key: poolKey, evaluation_time: '2026-09-13T00:00:00.000Z', exchange_rate: rate, rules: [],
     lines: lines.map(line => ({ line_key: line.key, source: 'selling',
       product: { id: line.id, selling_price_usd: line.price, selling_price_khr: line.price * rate,
         wholesale_price_usd: null, discount_enabled: false, discount_amount_usd: 0,
@@ -65,6 +65,37 @@ async function main() {
   assert.deepEqual(quote.items.map(line => [line.sale_item_id, line.total_usd]), [[2, 19.3333], [1, 9.6667]])
   quote.items.forEach(line => assert.equal(m.parseCustomerReturnRefundSnapshot(line.refund_snapshot_json).calculated_refund_usd, line.total_usd))
 
+  // Ordinary products added later can have an independent captured pricing pool.
+  // Receipt-level discount/tax allocation is shared by the complete basket, while
+  // each pricing pool must still contain every one of its own member lines.
+  const independentBasket = [
+    { id: 21, key: 'pool-a-1', price: 10, quantity: 1 },
+    { id: 22, key: 'pool-a-2', price: 20, quantity: 1 },
+    { id: 23, key: 'pool-b-1', price: 5, quantity: 1 },
+  ]
+  const independentContext = { version: 1,
+    lines: independentBasket.map(line => ({ line_key: line.key, amount: line.price })),
+    discount_usd: 3.5, membership_discount_usd: 0, tax_usd: 0 }
+  const poolA = pool(independentBasket.slice(0, 2), 4000, 'pool-a')
+  const poolB = pool(independentBasket.slice(2), 4000, 'pool-b')
+  const independentRows = independentBasket.map(line => {
+    const pricingPool = line.id === 23 ? poolB : poolA
+    const quantities = Object.fromEntries(pricingPool.lines.map(candidate => [candidate.line_key, 1]))
+    const pricing = m.serializeSaleItemPricing(pricingPool, quantities, line.key, independentContext)
+    return { id: line.id, product_id: line.id, quantity: line.quantity,
+      total_usd: m.parseSaleItemPricing(pricing).amounts.total_usd,
+      pricing_snapshot_json: pricing, pricing_snapshot_digest: String(line.id).padStart(64, '0') }
+  })
+  const independentSale = { sale_id: 2, sale_revision: 3, money_precision_version: 1,
+    calculated_total_usd: 31.5, total_usd: 31.5, exchange_rate: 4000,
+    customer_delivery_fee_usd: 0, lines: independentRows }
+  const independentQuote = m.buildCustomerReturnQuoteV1({ sale: independentSale,
+    requested: independentBasket.map(line => ({ sale_item_id: line.id, quantity: 1 })), previous: [] })
+  assert.equal(independentQuote.product_entitlement_usd, 31.5)
+  assert.deepEqual(independentQuote.items.map(line => line.sale_item_id), [21, 22, 23])
+  assert.throws(() => m.buildCustomerReturnQuoteV1({ sale: { ...independentSale, lines: independentRows.filter(row => row.id !== 22) },
+    requested: [{ sale_item_id: 21, quantity: 1 }], previous: [] }), /customer_return_sale_invalid/)
+
   const one = [{ id: 1, key: 'A', price: 10.01, quantity: 3 }]
   const oneContext = { version: 1, lines: [{ line_key: 'A', amount: 30.03 }],
     discount_usd: 20.025, membership_discount_usd: 0, tax_usd: 0 }
@@ -87,7 +118,7 @@ async function main() {
   assert.throws(() => m.parseCustomerReturnRefundSnapshot(JSON.stringify(tampered)), /snapshot_invalid/)
   assert.throws(() => m.buildCustomerReturnQuoteV1({ sale, requested: [{ sale_item_id: 1, quantity: 1 }],
     previous: [{ ...prior[0], items: [{ ...prior[0].items[0], refund_snapshot_json: null }] }] }), /legacy_refund_review_needed/)
-  console.log('PASS customer-return v1 pure entitlement: basket allocation, exact cumulative residual, cap, malformed and legacy refusal')
+  console.log('PASS customer-return v1 pure entitlement: shared allocation across independent pools, exact cumulative residual, cap, malformed and legacy refusal')
 
   const migrationDir = path.resolve(__dirname, '../migrations')
   const beforeMigrations = fs.readdirSync(migrationDir).filter(name => name.endsWith('.sql') && name < '0160').sort()
