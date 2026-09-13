@@ -11,11 +11,19 @@ const harness = new Module(file,module); harness.filename=file; harness.paths=mo
 harness._compile(source.slice(0,boundary).replace('const overrides = {',"const overrides = { './db': { getDb: env => env.DB },")
   + '\nmodule.exports={fixture,request,postSale,creationState,app,executionCtx,USER,setUser(value){currentUser=value},load};',file)
 const h = harness.exports
+const kernel=h.load('lib/moneyPrecision.ts')
+function intent(key,base,quantity=1,fixed=0,rate=4000) {
+  const gross=kernel.multiplyMoney4(base,quantity),manual=kernel.multiplyMoney4(fixed,quantity),total=kernel.subtractMoney4(gross,manual)
+  return {product_id:10,quantity,branch_id:1,batch_id:500,client_line_key:key,pricing_source:'manual',selling_price_input_usd:base,
+    manual_discount_type:fixed?'fixed':null,manual_discount_value:fixed,pricing_quote:{gross_usd:gross,product_discount_usd:0,manual_discount_usd:manual,total_usd:total,total_khr:kernel.multiplyMoney4(total,rate)}}
+}
+const originalRequest=h.request
+h.request=id=>({...originalRequest(id),items:[intent(id+'-line',9.5)]})
 async function run() {
   const f = h.fixture()
   f.raw.prepare('UPDATE products SET cost_price_usd=1.2345 WHERE id=10').run()
   const body = { ...h.request('precision-new'), money_precision_version:1, discount_usd:.0001,
-    items:[{product_id:10,quantity:1,branch_id:1,batch_id:500,base_price_usd:1.24,selling_price_input_usd:1.23004,applied_price_usd:1.2345,manual_discount_type:'fixed',manual_discount_value:.0055}] }
+    items:[{...intent('precision-line',1.24,1,.0055),selling_price_input_usd:1.23004}] }
   const result = await h.postSale(f.route,body)
   assert.equal(result.status,200,JSON.stringify(result.body))
   const sale = result.body.sale
@@ -52,7 +60,7 @@ async function run() {
     return {status:response.status,body:await response.json()}
   }
   const added = await add({money_precision_version:1,client_request_id:'add-precise',expected_exchange_rate:4000,
-    items:[{product_id:10,quantity:.5,applied_price_usd:.0001,branch_id:1,batch_id:500}]})
+    items:[intent('add-line',1,.5,.9998)]})
   assert.equal(added.status,200,JSON.stringify(added.body))
   assert.equal(added.body.sale.money_precision_version,1)
   assert.equal(added.body.sale.items.length,2)
@@ -81,7 +89,8 @@ async function run() {
   }
   const editBody = {money_precision_version:1,client_request_id:'edit-precise',expected_exchange_rate:4000,
     kind:'line_updated',sale_item_id:sale.items[0].id,quantity:2,applied_price_usd:1.2345,
-    base_price_usd:1.24,manual_discount_type:'fixed',manual_discount_value:.0055,manual_discount_usd:.0055}
+    base_price_usd:1.24,manual_discount_type:'fixed',manual_discount_value:.0055,manual_discount_usd:.0055,
+    pricing_quote:intent('edit',1.24,2,.0055).pricing_quote}
   const edited = await amendment(editBody)
   assert.equal(edited.status,200,JSON.stringify(edited.body))
   assert.equal(edited.body.sale.calculated_total_usd,2.469)
@@ -95,7 +104,7 @@ async function run() {
   console.log('PASS actual versioned edit, canonical transactional receipt and exact retry')
   const waiting = await h.postSale(f.route,{...h.request('waiting-precise'),money_precision_version:1,
     sale_status:'awaiting_payment',amount_paid_usd:0,amount_paid_khr:0,payment_details:[],
-    items:[{product_id:10,quantity:1,branch_id:1,batch_id:500,applied_price_usd:1.2345}]})
+    items:[intent('waiting-line',1.24,1,.0055)]})
   assert.equal(waiting.status,200,JSON.stringify(waiting.body))
   const waitingId = waiting.body.id
   const savedHeader = f.raw.prepare('SELECT * FROM sales WHERE id=@id').get({id:waitingId})
@@ -130,7 +139,7 @@ async function run() {
   mutateBeforeBatch=true
   const rejected = await h.app.request('/1/items',{method:'POST',headers:{'content-type':'application/json'},
     body:JSON.stringify({money_precision_version:1,client_request_id:'race-add',expected_exchange_rate:4000,
-      items:[{product_id:10,quantity:1,branch_id:1,batch_id:500,applied_price_usd:1}]})},{DB:raced.route},h.executionCtx)
+      items:[intent('race-add-line',1)]})},{DB:raced.route},h.executionCtx)
   assert.equal(rejected.status,409,JSON.stringify(await rejected.json()))
   assert.equal(raced.raw.prepare('SELECT COUNT(*) AS n FROM sale_items').get().n,1)
   assert.equal(raced.raw.prepare('SELECT cost_price_usd FROM sale_items').get().cost_price_usd,8.7654)
@@ -144,7 +153,7 @@ async function run() {
   const legacyHeader = legacyDb.raw.prepare('SELECT * FROM sales WHERE id=1').get()
   const upgradeResponse = await h.app.request('/1/items',{method:'POST',headers:{'content-type':'application/json'},
     body:JSON.stringify({money_precision_version:1,client_request_id:'upgrade-add',expected_exchange_rate:4000,
-      items:[{product_id:10,quantity:.5,branch_id:1,batch_id:500,applied_price_usd:.0001}]})},{DB:legacyDb.route},h.executionCtx)
+      items:[intent('upgrade-line',1,.5,.9998)]})},{DB:legacyDb.route},h.executionCtx)
   const upgrade = await upgradeResponse.json()
   assert.equal(upgradeResponse.status,200,JSON.stringify(upgrade))
   const undoHistory = legacyDb.raw.prepare('SELECT * FROM action_history WHERE id=@id').get({id:upgrade.actionHistoryId})
@@ -154,10 +163,10 @@ async function run() {
   assert.deepEqual(legacyDb.raw.prepare('SELECT * FROM sales WHERE id=1').get(),legacyHeader)
   const fingerprint = h.load('lib/undoAppliers.ts').sameSaleStateFingerprint
   const {money_precision_version,calculated_total_usd,rounding_adjustment_usd,...oldHeader} = legacyHeader
-  const oldFingerprint = JSON.stringify({sale:oldHeader,items:[]})
-  assert.equal(fingerprint(JSON.stringify({sale:legacyHeader,items:[]}),oldFingerprint),true)
-  assert.equal(fingerprint(JSON.stringify({sale:{...legacyHeader,customer_name:'changed'},items:[]}),oldFingerprint),false)
-  assert.equal(fingerprint(JSON.stringify({sale:{...legacyHeader,money_precision_version:1},items:[]}),oldFingerprint),false)
+  const oldFingerprint = JSON.stringify({sale:oldHeader,lines:[],amendmentHeadId:0})
+  assert.equal(fingerprint(JSON.stringify({sale:legacyHeader,lines:[],amendmentHeadId:0}),oldFingerprint),true)
+  assert.equal(fingerprint(JSON.stringify({sale:{...legacyHeader,customer_name:'changed'},lines:[],amendmentHeadId:0}),oldFingerprint),false)
+  assert.equal(fingerprint(JSON.stringify({sale:{...legacyHeader,money_precision_version:1},lines:[],amendmentHeadId:0}),oldFingerprint),false)
   assert.throws(()=>h.load('lib/saleLineAddition.ts').saleMoneyUpdateStatement(1,{total_usd:1,calculated_total_usd:null}),/incomplete/)
   console.log('PASS v0 upgrade undo restores full header; old fingerprint permits only absent default precision fields')
   legacyDb.raw.prepare('UPDATE products SET cost_price_usd=NULL,cost_price_khr=NULL WHERE id=10').run()
@@ -169,7 +178,7 @@ async function run() {
   const beforeAmbiguous = h.creationState(legacyDb.raw)
   const rejectedLegacy = await h.app.request('/1/items',{method:'POST',headers:{'content-type':'application/json'},
     body:JSON.stringify({money_precision_version:1,client_request_id:'ambiguous-upgrade',expected_exchange_rate:4000,
-      items:[{product_id:10,quantity:1,branch_id:1,batch_id:500,applied_price_usd:1}]})},{DB:legacyDb.route},h.executionCtx)
+      items:[intent('ambiguous-line',1)]})},{DB:legacyDb.route},h.executionCtx)
   assert.equal(rejectedLegacy.status,409,JSON.stringify(await rejectedLegacy.json()))
   assert.deepEqual(h.creationState(legacyDb.raw),beforeAmbiguous)
   console.log('PASS unknown captured cost stays NULL; ambiguous historical five-place price upgrade refuses')
@@ -182,7 +191,7 @@ async function run() {
   const preciseChangeDb = h.fixture()
   const changeBody = {...h.request('native-change'),money_precision_version:1,exchange_rate:4020,
     amount_paid_usd:1,amount_paid_khr:20,
-    items:[{product_id:10,quantity:1,branch_id:1,batch_id:500,applied_price_usd:1}]}
+    items:[intent('native-line',1,1,0,4020)]}
   const preciseChange = await h.postSale(preciseChangeDb.route,changeBody)
   assert.equal(preciseChange.status,200,JSON.stringify(preciseChange.body))
   assert.equal(preciseChange.body.sale.change_usd,0);assert.equal(preciseChange.body.sale.change_khr,20)
@@ -195,7 +204,7 @@ async function run() {
   assert.equal(actualChange.status,200,JSON.stringify(actualChange.body))
   const actualAdd = await h.app.request(`/${actualChange.body.id}/items`,{method:'POST',headers:{'content-type':'application/json'},
     body:JSON.stringify({money_precision_version:1,client_request_id:'actual-change-add',expected_exchange_rate:4020,
-      items:[{product_id:10,quantity:1,branch_id:1,batch_id:500,applied_price_usd:.1}]})},{DB:preciseChangeDb.route},h.executionCtx)
+      items:[intent('actual-add-line',.1,1,0,4020)]})},{DB:preciseChangeDb.route},h.executionCtx)
   const actualAdded = await actualAdd.json()
   assert.equal(actualAdd.status,200,JSON.stringify(actualAdded))
   assert.equal(actualAdded.sale.change_is_actual,1)

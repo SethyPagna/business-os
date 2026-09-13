@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
-const ts = require('../../frontend/node_modules/typescript')
+const ts = require('typescript')
 const backend = path.resolve(__dirname, '../src/lib/promotionRules.ts')
 const frontend = process.argv[2] ? path.resolve(process.argv[2]) : path.resolve(__dirname, '../../frontend/src/utils/promotionRules.ts')
 function load(file) {
@@ -24,6 +24,22 @@ const sourceBody = file => {
 }
 assert.equal(sourceBody(frontend), sourceBody(backend), 'imports and entire executable promotion twins remain byte-equivalent')
 const front = load(frontend), back = load(backend)
+for (const kernel of [front,back]) {
+  const product={id:7,selling_price_usd:.01,selling_price_khr:.01}
+  for (const type of ['percent_off','quantity_percent']) {
+    const rule=kernel.normalizePromotionRule({id:90,scope_type:'products',product_ids:[7],rule_type:type,min_quantity:3,percent_off:33.3333,is_active:1},1)
+    const result=kernel.evaluatePromotionPricing(product,3,[rule],1,'2026-09-13',1)
+    assert.equal(result.line_discount_usd,.01)
+    assert.equal(result.line_total_usd,.02)
+  }
+  const productDiscount=kernel.evaluatePromotionPricing({...product,discount_enabled:1,discount_type:'percent',discount_percent:33.3333},3,[],1,'2026-09-13',1)
+  assert.equal(productDiscount.line_discount_usd,.01)
+  const fraction=kernel.evaluatePromotionPricing({...product,discount_enabled:1,discount_type:'percent',discount_percent:49.99},.015,[],1,'2026-09-13',1)
+  assert.equal(fraction.line_discount_usd,.0001,'raw product percentage rounds once, not rounded gross then percent')
+  const next=kernel.normalizePromotionRule({id:91,scope_type:'products',product_ids:[7],rule_type:'next_item',min_quantity:1,percent_off:33.3333,is_active:1},1)
+  const pooled=kernel.evaluateCartPromotionAdjustments([{line_id:'a',product,quantity:6}],[next],1,'2026-09-13',1).get('a')
+  assert.equal(pooled.line_discount_usd,.01,'three eligible hits aggregate before percentage rounding')
+}
 const now = '2026-09-13T00:00:00.000Z'
 const product = { id: 7, selling_price_usd: 0.01, selling_price_khr: 0.01 }
 const rawRule = overrides => ({ id: 1, title: 'Fixture', is_active: 1, scope_type: 'products', product_ids: '[7,8]', rule_type: 'percent_off', percent_off: 1.5, ...overrides })

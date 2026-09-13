@@ -19,6 +19,7 @@ export const SALE_SETTLEMENT_ACTION_KIND = 'sale.settlement'
 /** Migration compatibility for exactly the three appended fields, not generic
  * expected-key projection: every other new/changed field still conflicts. */
 export function samePrecisionCompatibleState(current: object, expected: object): boolean {
+  if (JSON.stringify(current)===JSON.stringify(expected)) return true
   const present = (row: object, key: string) => Object.prototype.hasOwnProperty.call(row,key)
   const keys = ['money_precision_version','calculated_total_usd','rounding_adjustment_usd']
   const value = current as Record<string,unknown>

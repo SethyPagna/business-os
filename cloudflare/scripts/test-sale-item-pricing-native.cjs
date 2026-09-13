@@ -17,6 +17,7 @@ function load(name) {
   cache.set(name,module.exports); return module.exports
 }
 const p=load('saleItemPricing'), rules=load('promotionRules')
+assert.deepEqual(p.capturePricingProduct({id:7,selling_price_usd:10,notes:'private',supplier_id:99,cost_price_usd:4}),{id:7,selling_price_usd:10})
 const rule=rules.normalizePromotionRule({id:1,rule_type:'quantity_save',min_quantity:3,save_usd:1,product_ids:[7],scope_type:'products',is_active:1},1)
 const pool={version:1,pool_key:'pool-1',evaluation_time:'2026-09-13T00:00:00.000Z',exchange_rate:4000,rules:[rule],lines:[{
   line_key:'a',source:'promotion',product:{id:7,selling_price_usd:10,selling_price_khr:1},selling_price_input_usd:null,manual:{type:'none',value:0}
@@ -104,7 +105,7 @@ async function actualRoute() {
   const source=fs.readFileSync(file,'utf8'), boundary=source.indexOf(';(async () => {')
   assert.ok(boundary>0)
   const harness=new Module(file,module); harness.filename=file; harness.paths=module.paths
-  harness._compile(source.slice(0,boundary)+'\nmodule.exports={fixture,request,postSale,creationState};',file)
+  harness._compile(source.slice(0,boundary).replace('const overrides = {',"const overrides = { './db': { getDb: env => env.DB },")+'\nmodule.exports={fixture,request,postSale,creationState,app,executionCtx,load,USER,setUser(value){currentUser=value}};',file)
   const h=harness.exports
   const request=()=>({...h.request('exact-line-route'),money_precision_version:1,amount_paid_usd:29,items:[{
     product_id:10,quantity:3,branch_id:1,batch_id:500,client_line_key:'route-a',pricing_source:'promotion',
@@ -122,6 +123,11 @@ async function actualRoute() {
   assert.equal(saved.body.sale.items[0].total_usd,29)
   assert.equal(saved.body.sale.items[0].applied_price_usd,9.6667)
   assert.equal(p.parseSaleItemPricing(saved.body.sale.items[0].pricing_snapshot_json).amounts.total_usd,29)
+  p.validateCapturedSaleBasket(saved.body.sale.items,saved.body.sale)
+  const wrongIdentity=structuredClone(saved.body.sale.items); wrongIdentity[0].product_id=11
+  assert.throws(()=>p.validateCapturedSaleBasket(wrongIdentity,saved.body.sale))
+  const missingSnapshot=structuredClone(saved.body.sale.items); missingSnapshot[0].pricing_snapshot_json=null
+  assert.throws(()=>p.validateCapturedSaleBasket(missingSnapshot,saved.body.sale))
   const after=h.creationState(f.raw)
   f.raw.prepare('UPDATE promotion_rules SET save_usd=9 WHERE id=1').run()
   const replay=await h.postSale(f.route,{client_request_id:'exact-line-route'})
@@ -136,7 +142,115 @@ async function actualRoute() {
   const conflict=await h.postSale(race.route,request())
   assert.equal(conflict.status,409,JSON.stringify(conflict.body)); assert.equal(conflict.body.code,'sale_pricing_quote_conflict')
   assert.deepEqual(h.creationState(race.raw),before)
-  f.raw.db.close(); race.raw.db.close()
+  h.setUser({...h.USER,permissions:'{"all":true}'})
+  const addResponse=await h.app.request(`/${saved.body.sale.id}/items`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({money_precision_version:1,client_request_id:'capture-add',expected_exchange_rate:4000,
+    items:[{product_id:10,quantity:1,branch_id:1,batch_id:500,client_line_key:'new-line',pricing_source:'selling',pricing_quote:{gross_usd:10,product_discount_usd:0,manual_discount_usd:0,total_usd:10,total_khr:40000}}]})},{DB:f.route},h.executionCtx)
+  const added=await addResponse.json()
+  assert.equal(addResponse.status,200,JSON.stringify(added))
+  assert.equal(added.sale.total_usd,39)
+  p.validateCapturedSaleBasket(added.sale.items,added.sale)
+  assert.notEqual(p.parseSaleItemPricing(added.sale.items[0].pricing_snapshot_json).pool.pool_key,p.parseSaleItemPricing(added.sale.items[1].pricing_snapshot_json).pool.pool_key)
+  const transition=async direction=>{
+    const history=f.raw.prepare('SELECT * FROM action_history WHERE id=?').get([added.actionHistoryId])
+    const payload=JSON.parse(history[direction==='undo'?'undo_payload':'redo_payload'])
+    await h.load('lib/undoAppliers.ts').resolveUndoApplier(payload).run(payload,{env:{DB:f.route},user:{...h.USER,permissions:'{"all":true}'},direction,historyId:history.id,generation:payload.generation})
+  }
+  await transition('undo')
+  const undone=f.raw.prepare('SELECT * FROM sale_items WHERE sale_id=? ORDER BY id').all([saved.body.sale.id])
+  assert.equal(undone.length,1); assert.equal(undone[0].pricing_snapshot_json,saved.body.sale.items[0].pricing_snapshot_json)
+  await transition('redo')
+  const redone=f.raw.prepare('SELECT * FROM sale_items WHERE sale_id=? ORDER BY id').all([saved.body.sale.id])
+  const redoneHeader=f.raw.prepare('SELECT * FROM sales WHERE id=?').get([saved.body.sale.id])
+  p.validateCapturedSaleBasket(redone,redoneHeader)
+  assert.deepEqual(redone.map(line=>line.pricing_snapshot_json),added.sale.items.map(line=>line.pricing_snapshot_json))
+  const editBody={kind:'line_updated',money_precision_version:1,client_request_id:'captured-quantity-edit',expected_exchange_rate:4000,
+    sale_item_id:redone[0].id,quantity:2,pricing_quote:{gross_usd:20,product_discount_usd:0,manual_discount_usd:0,total_usd:20,total_khr:80000}}
+  const edit=async()=>{
+    const response=await h.app.request(`/${saved.body.sale.id}/amendments`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(editBody)},{DB:f.route},h.executionCtx)
+    return {status:response.status,body:await response.json()}
+  }
+  const edited=await edit()
+  assert.equal(edited.status,200,JSON.stringify(edited.body))
+  assert.equal(edited.body.sale.total_usd,30)
+  assert.equal(edited.body.sale.items[0].total_usd,20,'captured original threshold, not current save9 rule')
+  p.validateCapturedSaleBasket(edited.body.sale.items,edited.body.sale)
+  const editState=h.creationState(f.raw)
+  assert.deepEqual((await edit()).body,edited.body)
+  assert.deepEqual(h.creationState(f.raw),editState)
+  for (const [kind,total,discount] of [['line_quantity_increased',29,1],['line_quantity_decreased',20,0]]) {
+    const body={...editBody,kind,client_request_id:kind,quantity:1,pricing_quote:{gross_usd:total+discount,product_discount_usd:discount,manual_discount_usd:0,total_usd:total,total_khr:total*4000}}
+    const response=await h.app.request(`/${saved.body.sale.id}/amendments`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)},{DB:f.route},h.executionCtx)
+    const result=await response.json()
+    assert.equal(response.status,200,JSON.stringify(result))
+    assert.equal(result.sale.items[0].total_usd,total)
+    p.validateCapturedSaleBasket(result.sale.items,result.sale)
+  }
+  const removeBody={kind:'line_removed',money_precision_version:1,client_request_id:'captured-remove',expected_exchange_rate:4000,sale_item_id:redone[0].id}
+  const removeResponse=await h.app.request(`/${saved.body.sale.id}/amendments`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(removeBody)},{DB:f.route},h.executionCtx)
+  const removed=await removeResponse.json()
+  assert.equal(removeResponse.status,200,JSON.stringify(removed))
+  assert.equal(removed.sale.total_usd,10)
+  assert.equal(removed.sale.items.length,1)
+  p.validateCapturedSaleBasket(removed.sale.items,removed.sale)
+  const replaceBody={kind:'line_replaced',money_precision_version:1,client_request_id:'captured-replace',expected_exchange_rate:4000,sale_item_id:removed.sale.items[0].id,
+    replacement:{product_id:10,quantity:2,branch_id:1,client_line_key:'replacement-line',pricing_source:'selling',pricing_quote:{gross_usd:20,product_discount_usd:0,manual_discount_usd:0,total_usd:20,total_khr:80000}}}
+  const replaceResponse=await h.app.request(`/${saved.body.sale.id}/amendments`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(replaceBody)},{DB:f.route},h.executionCtx)
+  const replaced=await replaceResponse.json()
+  assert.equal(replaceResponse.status,200,JSON.stringify(replaced))
+  assert.equal(replaced.sale.total_usd,20)
+  assert.equal(replaced.sale.items.length,1)
+  assert.notEqual(replaced.sale.items[0].id,removed.sale.items[0].id)
+  p.validateCapturedSaleBasket(replaced.sale.items,replaced.sale)
+  const replacementReceipt=JSON.parse(f.raw.prepare("SELECT after_json FROM sale_mutation_receipts WHERE request_id='captured-replace'").get().after_json)
+  assert.equal(replacementReceipt.lines[0].id,replaced.sale.items[0].id)
+  assert.equal(replacementReceipt.lines[0].pricing_snapshot_json,replaced.sale.items[0].pricing_snapshot_json)
+  assert.equal(f.raw.prepare('SELECT SUM(quantity-released_quantity) AS quantity FROM sale_item_batch_allocations WHERE sale_item_id=?').get([replaced.sale.items[0].id]).quantity,2)
+  const replacementState=h.creationState(f.raw)
+  const replaceRetry=await h.app.request(`/${saved.body.sale.id}/amendments`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(replaceBody)},{DB:f.route},h.executionCtx)
+  assert.equal(replaceRetry.status,200)
+  assert.deepEqual(await replaceRetry.json(),replaced)
+  assert.deepEqual(h.creationState(f.raw),replacementState)
+  const originalBatch=f.route.batch
+  f.route.batch=async statements=>{
+    f.route.batch=originalBatch
+    f.raw.prepare('UPDATE products SET cost_price_usd=99 WHERE id=10').run()
+    return originalBatch(statements)
+  }
+  const conflictingReplacement={...replaceBody,client_request_id:'replacement-cost-race',sale_item_id:replaced.sale.items[0].id,replacement:{...replaceBody.replacement,client_line_key:'replacement-race'}}
+  const refused=await h.app.request(`/${saved.body.sale.id}/amendments`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(conflictingReplacement)},{DB:f.route},h.executionCtx)
+  assert.equal(refused.status,409,JSON.stringify(await refused.json()))
+  assert.deepEqual(h.creationState(f.raw),replacementState,'cost race cannot partially remove the old line or change stock')
+  for(const [kind,quantity,total] of [['line_updated',0.1,1],['line_quantity_increased',0.2,3]]) {
+    const payload={kind,quantity,money_precision_version:1,client_request_id:'fractional-'+kind,expected_exchange_rate:4000,sale_item_id:replaced.sale.items[0].id,
+      pricing_quote:{gross_usd:total,product_discount_usd:0,manual_discount_usd:0,total_usd:total,total_khr:total*4000}}
+    const response=await h.app.request(`/${saved.body.sale.id}/amendments`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)},{DB:f.route},h.executionCtx)
+    const value=await response.json();assert.equal(response.status,200,JSON.stringify(value))
+    assert.equal(value.sale.items[0].quantity,total/10)
+    p.validateCapturedSaleBasket(value.sale.items,value.sale)
+  }
+  const fractionalState=h.creationState(f.raw)
+  const tinyResponse=await h.app.request(`/${saved.body.sale.id}/amendments`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({kind:'line_quantity_increased',quantity:1e-20,money_precision_version:1,client_request_id:'tiny-positive',expected_exchange_rate:4000,sale_item_id:replaced.sale.items[0].id})},{DB:f.route},h.executionCtx)
+  assert.equal(tinyResponse.status,409)
+  assert.deepEqual(h.creationState(f.raw),fractionalState,'positive quantity cannot disappear on decimal-to-Number conversion')
+  const coupled=setup()
+  coupled.raw.prepare('DELETE FROM promotion_rules').run()
+  coupled.raw.prepare("INSERT INTO promotion_rules(id,rule_type,min_quantity,percent_off,product_ids,scope_type,is_active) VALUES(2,'next_item',1,100,'[10]','products',1)").run()
+  const coupledCreate=await h.postSale(coupled.route,{...request(),client_request_id:'coupled-create',amount_paid_usd:10,items:['a','b'].map(key=>({product_id:10,quantity:1,branch_id:1,batch_id:500,client_line_key:key,pricing_source:'promotion',
+    pricing_quote:{gross_usd:10,product_discount_usd:key==='a'?10:0,manual_discount_usd:0,total_usd:key==='a'?0:10,total_khr:key==='a'?0:40000}}))})
+  assert.equal(coupledCreate.status,200,JSON.stringify(coupledCreate.body))
+  const removeSibling=await h.app.request(`/${coupledCreate.body.sale.id}/amendments`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({kind:'line_removed',money_precision_version:1,client_request_id:'remove-pool-sibling',expected_exchange_rate:4000,sale_item_id:coupledCreate.body.sale.items[1].id})},{DB:coupled.route},h.executionCtx)
+  const siblingResult=await removeSibling.json();assert.equal(removeSibling.status,200,JSON.stringify(siblingResult))
+  assert.equal(siblingResult.sale.items[0].total_usd,10,'removing qualifying sibling re-evaluates surviving free line')
+  p.validateCapturedSaleBasket(siblingResult.sale.items,siblingResult.sale)
+  const legacyFingerprint={sale:{id:1},lines:[{id:1,total_usd:1}],amendmentHeadId:0}
+  const actualFingerprint={sale:{id:1,money_precision_version:0,calculated_total_usd:null,rounding_adjustment_usd:0},lines:[{id:1,total_usd:1,pricing_snapshot_json:null}],amendmentHeadId:0}
+  const matches=h.load('lib/undoAppliers.ts').sameSaleStateFingerprint
+  assert.equal(matches(JSON.stringify(actualFingerprint),JSON.stringify(legacyFingerprint)),true)
+  actualFingerprint.lines[0].pricing_snapshot_json='{}'
+  assert.equal(matches(JSON.stringify(actualFingerprint),JSON.stringify(legacyFingerprint)),false)
+  actualFingerprint.lines[0].pricing_snapshot_json=null; actualFingerprint.lines[0].total_usd=2
+  assert.equal(matches(JSON.stringify(actualFingerprint),JSON.stringify(legacyFingerprint)),false)
+  f.raw.db.close(); race.raw.db.close(); coupled.raw.db.close()
   console.log('PASS actual Hono create exact29 snapshot, pre-policy retry, stale quote and concurrent rule rollback')
 }
 actualRoute().catch(error=>{console.error(error);process.exitCode=1})
