@@ -33,6 +33,7 @@
 //   routes/inventory.ts's disclosure comment.
 import type { D1Compat } from './db'
 import { dateToBatchCode, normalizeTypedDate } from './batchCode'
+import { addMoney4, multiplyMoney4, roundMoney4 } from './moneyPrecision'
 import { buildInClause, selectInChunks } from './sqlBinding'
 
 export type ProductBatchRow = {
@@ -112,16 +113,22 @@ export async function attachBatchCounts(db: D1Compat, items: Array<Record<string
 // rule the insert/top-up paths already applied inline (finite and >= 0),
 // pulled out so the quantity write and the money write can never disagree
 // about whether this particular receipt carried a price.
-function unitCostForReceipt(value: unknown): number | null {
+function unitCostForReceipt(value: unknown, preserveHistoricalPrecision = false): number | null {
+  if (value == null) return null
   const cost = Number(value)
-  return Number.isFinite(cost) && cost >= 0 ? cost : null
+  if (!Number.isFinite(cost) || cost < 0) throw new Error('Unit cost must be a non-negative finite number')
+  return preserveHistoricalPrecision ? cost : roundMoney4(cost)
 }
 
 // This receipt's own money: its quantity at its own unit cost, or null
 // when no price was recorded for it.
-function receiptCostUsd(unitCost: unknown, quantity: number): number | null {
-  const cost = unitCostForReceipt(unitCost)
-  return cost === null ? null : Number(quantity) * cost
+function receiptCostUsd(unitCost: number | null, quantity: number): number | null {
+  return unitCost === null ? null : multiplyMoney4(unitCost, quantity)
+}
+
+export type ReceiptCostPreimage = {
+  batchExists: boolean
+  receivedCostUsd: number | null
 }
 
 export type StockWriteStatement = {
@@ -143,6 +150,14 @@ export type ReceiveBatchPlanInput = {
   unitCostUsd?: number | null
   paymentStatus?: 'paid' | 'credit' | null
   creditDueDate?: string | null
+  /** Internal only: retain an already-recorded catalog/lot snapshot verbatim. */
+  preserveHistoricalUnitCost?: boolean
+  /**
+   * Required whenever a receipt records a unit cost. It freezes the current
+   * cumulative lot total so the planner can add exactly in JS and guard that
+   * preimage inside the same D1 batch instead of relying on SQLite REAL math.
+   */
+  receiptCostPreimage?: ReceiptCostPreimage
   /** Internal provenance key, e.g. a return event; never an operator lot code. */
   provenanceKey?: string
 }
@@ -173,8 +188,16 @@ export function planReceiveBatchStock(input: ReceiveBatchPlanInput): ReceiveBatc
   const receivedAt = normalizeTypedDate(input.receivedDate) || new Date().toISOString().slice(0, 10)
   const lotCode = dateToBatchCode(receivedAt) as string
   const batchKey = input.provenanceKey ? ` event:${input.provenanceKey}` : lotCode
-  const unitCostUsd = unitCostForReceipt(input.unitCostUsd)
+  const unitCostUsd = unitCostForReceipt(input.unitCostUsd, input.preserveHistoricalUnitCost === true)
   const receivedCost = receiptCostUsd(unitCostUsd, quantity)
+  if (unitCostUsd !== null && !input.receiptCostPreimage) {
+    throw new Error('A receipt cost preimage is required before recording priced stock')
+  }
+  const receivedCostAfter = receivedCost === null
+    ? null
+    : input.receiptCostPreimage?.batchExists
+      ? addMoney4(input.receiptCostPreimage.receivedCostUsd ?? 0, receivedCost)
+      : receivedCost
   const paymentStatus = input.paymentStatus === 'paid' || input.paymentStatus === 'credit' ? input.paymentStatus : null
   const params: Record<string, unknown> = {
     productId: Number.isSafeInteger(productId) && productId > 0 ? productId : null,
@@ -196,6 +219,9 @@ export function planReceiveBatchStock(input: ReceiveBatchPlanInput): ReceiveBatc
     paymentStatus,
     creditDueDate: paymentStatus === 'credit' ? (input.creditDueDate || null) : null,
     receivedCostUsd: receivedCost,
+    receivedCostBefore: input.receiptCostPreimage?.receivedCostUsd ?? null,
+    receivedCostAfter,
+    receivedCostBatchExists: input.receiptCostPreimage?.batchExists ? 1 : 0,
   }
   const productIdSql = productClientRequestId
     ? `(SELECT id FROM products WHERE client_request_id = @productClientRequestId AND client_request_id <> '')`
@@ -214,7 +240,7 @@ export function planReceiveBatchStock(input: ReceiveBatchPlanInput): ReceiveBatc
           payment_status = COALESCE(payment_status, @paymentStatus),
           received_quantity = COALESCE(received_quantity, 0) + @quantity,
           received_cost_usd = CASE WHEN @receivedCostUsd IS NULL THEN received_cost_usd
-            ELSE COALESCE(received_cost_usd, 0) + @receivedCostUsd END,
+            ELSE @receivedCostAfter END,
           received_branch_id = COALESCE(received_branch_id, @receivedBranchId),
           updated_at = CURRENT_TIMESTAMP
         WHERE id = @batchId AND variant_product_id = ${productIdSql}`,
@@ -241,7 +267,7 @@ export function planReceiveBatchStock(input: ReceiveBatchPlanInput): ReceiveBatc
           payment_status = COALESCE(payment_status, @paymentStatus),
           received_quantity = COALESCE(received_quantity, 0) + excluded.received_quantity,
           received_cost_usd = CASE WHEN excluded.received_cost_usd IS NULL THEN product_batches.received_cost_usd
-            ELSE COALESCE(product_batches.received_cost_usd, 0) + excluded.received_cost_usd END,
+            ELSE @receivedCostAfter END,
           received_branch_id = COALESCE(product_batches.received_branch_id, excluded.received_branch_id),
           updated_at = CURRENT_TIMESTAMP`,
         params,
@@ -257,6 +283,21 @@ export function planReceiveBatchStock(input: ReceiveBatchPlanInput): ReceiveBatc
     receivedAt,
     params,
     statements: [
+      ...(receivedCost === null ? [] : [{
+        sql: `INSERT INTO stock_session_guards(guard_value) SELECT CASE
+          WHEN @receivedCostBatchExists = 1 THEN EXISTS(
+            SELECT 1 FROM product_batches WHERE variant_product_id = ${productIdSql}
+              AND ((@batchId IS NOT NULL AND id = @batchId)
+                OR (@batchId IS NULL AND batch_key = @batchKey))
+              AND received_cost_usd IS @receivedCostBefore
+          )
+          ELSE NOT EXISTS(
+            SELECT 1 FROM product_batches WHERE variant_product_id = ${productIdSql}
+              AND ((@batchId IS NOT NULL AND id = @batchId)
+                OR (@batchId IS NULL AND batch_key = @batchKey))
+          ) END`,
+        params,
+      }]),
       metadata,
       {
         sql: `INSERT INTO branch_batch_stock (batch_id, branch_id, quantity)
@@ -445,18 +486,30 @@ export async function receiveBatchStock(db: D1Compat, input: {
   unitCostUsd?: number | null
   paymentStatus?: 'paid' | 'credit' | null
   creditDueDate?: string | null
+  provenanceKey?: string
+  preserveHistoricalUnitCost?: boolean
 }): Promise<{ batchId: number; created: boolean; batchNumber: number | null; lotCode: string }> {
-  const plan = planReceiveBatchStock(input)
-  if (input.batchId != null) {
-    const explicit = await db.prepare(
-      'SELECT id FROM product_batches WHERE id = @id AND variant_product_id = @productId',
-    ).get<{ id: number }>({ id: input.batchId, productId: input.productId })
-    if (!explicit) throw new Error('Selected received date does not belong to this product')
-  }
-  const before = await db.prepare(
-    'SELECT id FROM product_batches WHERE variant_product_id = @productId AND batch_key = @batchKey',
-  ).get<{ id: number }>({ productId: input.productId, batchKey: plan.batchKey })
-  await db.batch(plan.statements)
+  const receivedAt = normalizeTypedDate(input.receivedDate) || new Date().toISOString().slice(0, 10)
+  const batchKey = input.provenanceKey ? ` event:${input.provenanceKey}` : dateToBatchCode(receivedAt) as string
+  const before = input.batchId != null
+    ? await db.prepare(
+      'SELECT id,received_cost_usd FROM product_batches WHERE id = @id AND variant_product_id = @productId',
+    ).get<{ id: number; received_cost_usd: number | null }>({ id: input.batchId, productId: input.productId })
+    : await db.prepare(
+      'SELECT id,received_cost_usd FROM product_batches WHERE variant_product_id = @productId AND batch_key = @batchKey',
+    ).get<{ id: number; received_cost_usd: number | null }>({ productId: input.productId, batchKey })
+  if (input.batchId != null && !before) throw new Error('Selected received date does not belong to this product')
+  const hasEnteredCost = input.unitCostUsd != null
+  const plan = planReceiveBatchStock({
+    ...input,
+    receiptCostPreimage: hasEnteredCost
+      ? { batchExists: Boolean(before), receivedCostUsd: before?.received_cost_usd ?? null }
+      : undefined,
+  })
+  await db.batch([
+    ...plan.statements,
+    ...(hasEnteredCost ? [{ sql: 'DELETE FROM stock_session_guards', params: {} }] : []),
+  ])
   const batch = await db.prepare(
     `SELECT id, batch_number, lot_code FROM product_batches
       WHERE variant_product_id = @productId AND

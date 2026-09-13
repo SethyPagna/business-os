@@ -94,7 +94,8 @@ const batchCode = loadReal('lib/batchCode.ts')
 // real module has to be in the stub map like every other real dependency.
 const stockReceiptGate = loadReal('lib/stockReceiptGate.ts')
 const sqlBinding = loadReal('lib/sqlBinding.ts')
-const productDetailRule = loadReal('lib/productDetailRule.ts')
+const moneyPrecision = loadReal('lib/moneyPrecision.ts')
+const productDetailRule = loadReal('lib/productDetailRule.ts', { './moneyPrecision': moneyPrecision })
 // REAL, not stubbed -- see the header. This is the module that decides
 // whether a barcode already belongs to another child row.
 const productIdentity = loadReal('lib/productIdentity.ts', {
@@ -105,6 +106,7 @@ const productBatches = loadReal('lib/productBatches.ts', {
   './db': { getDb: () => db },
   './batchCode': batchCode,
   './sqlBinding': sqlBinding,
+  './moneyPrecision': moneyPrecision,
 })
 const permissions = loadReal('lib/permissions.ts')
 const branchRoles = loadReal('lib/branchRoles.ts')
@@ -142,7 +144,8 @@ const movementSearchKernel = loadReal('lib/movementSearch.ts', {
   './movementBranchName': movementBranchNameKernel,
 })
 const inventoryRoute = loadReal('routes/inventory.ts', {
-  '../lib/movementCostSnapshot': loadReal('lib/movementCostSnapshot.ts'),
+  '../lib/moneyPrecision': moneyPrecision,
+  '../lib/movementCostSnapshot': loadReal('lib/movementCostSnapshot.ts', { './moneyPrecision': moneyPrecision }),
   // inventory.ts imports this TypeScript-only helper; load it through the
   // harness rather than asking Node to resolve a non-existent .js sibling.
   '../lib/transferOperationReceipt': loadReal('lib/transferOperationReceipt.ts'),

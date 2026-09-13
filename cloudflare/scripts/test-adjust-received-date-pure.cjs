@@ -75,9 +75,14 @@ function loadReal(relPath, requireOverrides = {}) {
     return originalLoad.call(this, request, parent, isMain)
   }
   const moduleObj = { exports: {} }
-  new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)(
-    moduleObj.exports, require, moduleObj, sourcePath, path.dirname(sourcePath),
-  )
+  try {
+    new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)(
+      moduleObj.exports, require, moduleObj, sourcePath, path.dirname(sourcePath),
+    )
+  } catch (error) {
+    error.message = `${error.message} (while loading ${relPath})`
+    throw error
+  }
   Module._load = originalLoad
   return moduleObj.exports
 }
@@ -90,7 +95,9 @@ const batchCode = loadReal('lib/batchCode.ts')
 // real module has to be in the stub map like every other real dependency.
 const stockReceiptGate = loadReal('lib/stockReceiptGate.ts')
 const sqlBinding = loadReal('lib/sqlBinding.ts')
-const productBatches = loadReal('lib/productBatches.ts', { './db': { getDb: () => db }, './batchCode': batchCode, './sqlBinding': sqlBinding })
+const moneyPrecision = loadReal('lib/moneyPrecision.ts')
+const productBatches = loadReal('lib/productBatches.ts', { './db': { getDb: () => db }, './batchCode': batchCode, './moneyPrecision': moneyPrecision, './sqlBinding': sqlBinding })
+const productDetailRule = loadReal('lib/productDetailRule.ts', { './moneyPrecision': moneyPrecision })
 const permissions = loadReal('lib/permissions.ts')
 const branchRoles = loadReal('lib/branchRoles.ts')
 const canonicalBranchIdentity = loadReal('lib/canonicalBranchIdentity.ts', {
@@ -109,7 +116,7 @@ const productSalesLedger = loadReal('lib/productSalesLedger.ts', { './salesAnaly
 // this override the transpiled module's './conflictControl' require resolves
 // against scripts/ and the whole test file dies at load time.
 const conflictControl = loadReal('lib/conflictControl.ts')
-const movementCostSnapshot = loadReal('lib/movementCostSnapshot.ts')
+const movementCostSnapshot = loadReal('lib/movementCostSnapshot.ts', { './moneyPrecision': moneyPrecision })
 let capturedRevertMovement = null
 
 const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ inventory: true }) }
@@ -162,6 +169,7 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/productBatches': productBatches,
   '../lib/batchCode': batchCode,
   '../lib/stockReceiptGate': stockReceiptGate,
+  '../lib/moneyPrecision': moneyPrecision,
   '../lib/sqlBinding': sqlBinding,
   '../lib/familyPagination': { paginateProductFamilies: async () => ({ items: [], total: 0, page: 1, pageCount: 0 }) },
   '../lib/familyStockStats': { getFamilyStockStats: async () => ({}) },
@@ -178,7 +186,7 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   // and stubbing the comparison would make the test agree with itself.
   '../lib/productIdentity': {
     findIdentityMatch: async () => null,
-    identityBarcodeKey: require('./harness/identity_barcode_key.cjs'),
+    identityBarcodeKey: productDetailRule.identityBarcodeKey,
   },
   // routes/products.ts + inventory.ts now build their search tail from the
   // one shared implementation (lib/productSearchQuery.ts). These tests
@@ -215,6 +223,7 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
     return { ok: true, revertType: 'remove', quantity: Number(movement.quantity), usedBatchId: null, movementId: Number(movement.id) }
   } },
   '../lib/movementCostSnapshot': movementCostSnapshot,
+  '../lib/moneyPrecision': moneyPrecision,
 })
 
 const app = inventoryRoute.default
@@ -232,6 +241,7 @@ const batchesRoute = loadReal('routes/batches.ts', {
   '../lib/productBatches': productBatches,
   '../lib/batchCode': batchCode,
   '../lib/stockReceiptGate': stockReceiptGate,
+  '../lib/moneyPrecision': moneyPrecision,
   // K2 Part 416: routes/batches.ts gained the damaged-lots POS lookup;
   // these tests exercise receive/adjust, so an empty stub is honest.
   '../lib/returnsStock': { listOpenDamagedLots: async () => [] },
@@ -303,7 +313,90 @@ async function main() {
     assert.strictEqual(lotQty.quantity, 8)
   })
 
+  await check('new receipt costs use nearest-four units and exact quantity totals, including cumulative lot top-ups', async () => {
+    seed()
+    const first = await req('POST', '/adjust', {
+      productId: 1, type: 'add', supplierName: 'Fixture Supplier', unitCostUsd: 1.23455,
+      quantity: 3, reason: 'precision receipt', branchId: 1, batchId: 'new', receivedDate: '2026-09-13',
+    })
+    assert.strictEqual(first.status, 200, JSON.stringify(first.json))
+    assert.deepStrictEqual({ ...rawDb.prepare('SELECT unit_cost_usd,received_cost_usd FROM product_batches WHERE id=?').get([first.json.batchId]) }, {
+      unit_cost_usd: 1.2346, received_cost_usd: 3.7038,
+    })
+    assert.deepStrictEqual({ ...rawDb.prepare('SELECT unit_cost_usd,total_cost_usd FROM inventory_movements ORDER BY id DESC LIMIT 1').get() }, {
+      unit_cost_usd: 1.2346, total_cost_usd: 3.7038,
+    })
+    const second = await req('POST', '/adjust', {
+      productId: 1, type: 'add', unitCostUsd: 0.1, quantity: 0.2,
+      reason: 'fractional top-up', branchId: 1, batchId: first.json.batchId, receivedDate: '2026-09-13',
+    })
+    assert.strictEqual(second.status, 200, JSON.stringify(second.json))
+    assert.strictEqual(rawDb.prepare('SELECT received_cost_usd FROM product_batches WHERE id=?').get([first.json.batchId]).received_cost_usd, 3.7238)
+    assert.strictEqual(rawDb.prepare('SELECT total_cost_usd FROM inventory_movements ORDER BY id DESC LIMIT 1').get().total_cost_usd, 0.02)
+  })
+
+  await check('rounded-zero, negative, nonfinite and overflowing receipt costs fail before stock writes', async () => {
+    for (const cost of [0.00004, -0.00004, '-0.00004', 'not-a-number', 1e308]) {
+      seed()
+      const response = await req('POST', '/adjust', {
+        productId: 1, type: 'add', supplierName: 'Fixture Supplier', unitCostUsd: cost,
+        quantity: 1, reason: 'invalid receipt cost', branchId: 1, batchId: 'new', receivedDate: '2026-09-13',
+      })
+      assert.strictEqual(response.status, 400, String(cost))
+      assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM product_batches').get().n, 0, String(cost))
+      assert.strictEqual(rawDb.prepare('SELECT stock_quantity FROM products WHERE id=1').get().stock_quantity, 0, String(cost))
+      assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n, 0, String(cost))
+    }
+    seed()
+    const free = await req('POST', '/adjust', {
+      productId: 1, type: 'add', supplierName: 'Fixture Supplier', unitCostUsd: 0.00004, freeGoods: true,
+      quantity: 1, reason: 'declared sample', branchId: 1, batchId: 'new', receivedDate: '2026-09-13',
+    })
+    assert.strictEqual(free.status, 200, JSON.stringify(free.json))
+    assert.deepStrictEqual({ ...rawDb.prepare('SELECT unit_cost_usd,received_cost_usd FROM product_batches').get() }, { unit_cost_usd: 0, received_cost_usd: 0 })
+    assert.deepStrictEqual({ ...rawDb.prepare('SELECT unit_cost_usd,total_cost_usd FROM inventory_movements').get() }, { unit_cost_usd: 0, total_cost_usd: 0 })
+  })
+
+  await check('priced lot top-up guards its captured cumulative cost before every stock write', async () => {
+    seed()
+    const first = await req('POST', '/adjust', {
+      productId: 1, type: 'add', supplierName: 'Fixture Supplier', unitCostUsd: 1,
+      quantity: 2, reason: 'first receipt', branchId: 1, batchId: 'new', receivedDate: '2026-09-13',
+    })
+    assert.strictEqual(first.status, 200, JSON.stringify(first.json))
+    const before = {
+      product: rawDb.prepare('SELECT stock_quantity FROM products WHERE id=1').get().stock_quantity,
+      branch: rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity,
+      lot: rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=? AND branch_id=1').get([first.json.batchId]).quantity,
+      received: rawDb.prepare('SELECT received_quantity FROM product_batches WHERE id=?').get([first.json.batchId]).received_quantity,
+      movements: rawDb.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n,
+    }
+    beforeDbBatchHook = async () => {
+      beforeDbBatchHook = null
+      rawDb.prepare('UPDATE product_batches SET received_cost_usd=99 WHERE id=?').run([first.json.batchId])
+    }
+    const raced = await req('POST', '/adjust', {
+      productId: 1, type: 'add', unitCostUsd: 2, quantity: 1,
+      reason: 'stale top-up', branchId: 1, batchId: first.json.batchId, receivedDate: '2026-09-13',
+    })
+    assert.strictEqual(raced.status, 400, JSON.stringify(raced.json))
+    assert.deepStrictEqual({
+      product: rawDb.prepare('SELECT stock_quantity FROM products WHERE id=1').get().stock_quantity,
+      branch: rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity,
+      lot: rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=? AND branch_id=1').get([first.json.batchId]).quantity,
+      received: rawDb.prepare('SELECT received_quantity FROM product_batches WHERE id=?').get([first.json.batchId]).received_quantity,
+      movements: rawDb.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n,
+    }, before, 'only the injected competing cost edit survives; receipt stock and ledger writes do not')
+    assert.strictEqual(rawDb.prepare('SELECT received_cost_usd FROM product_batches WHERE id=?').get([first.json.batchId]).received_cost_usd, 99)
+  })
+
   await check("an explicit-batch top-up with a DIFFERENT date never rewrites the lot's own received_at (first attribution sticks)", async () => {
+    seed()
+    const initial = await req('POST', '/adjust', {
+      productId: 1, type: 'add', supplierName: 'Fixture Supplier', unitCostUsd: 2, quantity: 8,
+      reason: 'initial receipt', branchId: 1, batchId: 'new', receivedDate: '2025-03-15',
+    })
+    assert.strictEqual(initial.status, 200, JSON.stringify(initial.json))
     const before = batchRows()[0]
     const { status, json } = await req('POST', '/adjust', {
       productId: 1, type: 'add', supplierName: 'Fixture Supplier', unitCostUsd: 2, quantity: 2, reason: 'Top-up', branchId: 1,
@@ -502,6 +595,37 @@ async function main() {
     assert.strictEqual(movement.product_id, json.productId)
   })
 
+  await check('unlock-pricing normalizes only explicit new costs and preserves omitted historical source costs', async () => {
+    seed()
+    rawDb.prepare('UPDATE products SET cost_price_usd=2.345678,cost_price_khr=123.456789,selling_price_usd=4 WHERE id=1').run()
+    const explicit = await req('POST', '/adjust', {
+      productId: 1, type: 'add', supplierName: 'Fixture Supplier', unitCostUsd: 1,
+      quantity: 1, reason: 'explicit new costs', branchId: 1, unlockPricing: true, receivedDate: '2026-09-10',
+      pricing: { selling_price_usd: 4, cost_usd: 1.23455, cost_khr: 0.00005, barcode: 'B-EXPLICIT' },
+    })
+    assert.strictEqual(explicit.status, 200, JSON.stringify(explicit.json))
+    assert.deepStrictEqual({ ...rawDb.prepare('SELECT cost_price_usd,cost_price_khr FROM products WHERE id=?').get([explicit.json.productId]) }, {
+      cost_price_usd: 1.2346, cost_price_khr: 0.0001,
+    })
+    const omitted = await req('POST', '/adjust', {
+      productId: 1, type: 'add', supplierName: 'Fixture Supplier', unitCostUsd: 1,
+      quantity: 1, reason: 'inherit historical costs', branchId: 1, unlockPricing: true, receivedDate: '2026-09-11',
+      pricing: { selling_price_usd: 4, barcode: 'B-INHERITED' },
+    })
+    assert.strictEqual(omitted.status, 200, JSON.stringify(omitted.json))
+    assert.deepStrictEqual({ ...rawDb.prepare('SELECT cost_price_usd,cost_price_khr FROM products WHERE id=?').get([omitted.json.productId]) }, {
+      cost_price_usd: 2.345678, cost_price_khr: 123.456789,
+    })
+    const countBefore = rawDb.prepare('SELECT COUNT(*) n FROM products').get().n
+    const denied = await req('POST', '/adjust', {
+      productId: 1, type: 'add', supplierName: 'Fixture Supplier', unitCostUsd: 1,
+      quantity: 1, reason: 'negative explicit cost', branchId: 1, unlockPricing: true, receivedDate: '2026-09-12',
+      pricing: { selling_price_usd: 4, cost_usd: -0.00004, barcode: 'B-DENIED' },
+    })
+    assert.strictEqual(denied.status, 400)
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM products').get().n, countBefore)
+  })
+
   await check('same barcode + same batch shares the option and preserves each receipt cost', async () => {
     seed()
     rawDb.prepare('UPDATE products SET cost_price_usd = 1, purchase_price_usd = 1, selling_price_usd = 4 WHERE id = 1').run()
@@ -550,6 +674,22 @@ async function main() {
       ],
       'zero is an explicit action fact; blank correction uses the product cost captured before the write',
     )
+  })
+
+  await check('an omitted correction cost preserves the captured historical unit while extending it exactly', async () => {
+    seed()
+    rawDb.prepare('UPDATE products SET cost_price_usd=2.345678 WHERE id=1').run()
+    const correction = await req('POST', '/adjust', {
+      productId: 1, type: 'add', attribution: 'correction', quantity: 2,
+      reason: 'historical precision correction', branchId: 1, batchId: 'new', receivedDate: '2026-08-03',
+    })
+    assert.strictEqual(correction.status, 200, JSON.stringify(correction.json))
+    assert.deepStrictEqual({ ...rawDb.prepare('SELECT unit_cost_usd,received_cost_usd FROM product_batches').get() }, {
+      unit_cost_usd: 2.345678, received_cost_usd: 4.6914,
+    })
+    assert.deepStrictEqual({ ...rawDb.prepare('SELECT unit_cost_usd,total_cost_usd FROM inventory_movements').get() }, {
+      unit_cost_usd: 2.345678, total_cost_usd: 4.6914,
+    })
   })
 
   await check('remove snapshots the quantity-weighted FIFO lot cost and catalog KHR fallback', async () => {

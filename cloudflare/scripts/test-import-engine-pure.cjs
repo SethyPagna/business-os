@@ -171,6 +171,16 @@ new Function('exports', 'require', 'module', '__filename', '__dirname', productD
   productDescriptionSectionsSourcePath, path.dirname(productDescriptionSectionsSourcePath),
 )
 
+const moneyPrecisionSourcePath = path.join(__dirname, '..', 'src', 'lib', 'moneyPrecision.ts')
+const { outputText: moneyPrecisionOutputText } = ts.transpileModule(fs.readFileSync(moneyPrecisionSourcePath, 'utf8'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+  fileName: 'moneyPrecision.ts',
+})
+const moneyPrecisionModule = { exports: {} }
+new Function('exports', 'require', 'module', '__filename', '__dirname', moneyPrecisionOutputText)(
+  moneyPrecisionModule.exports, require, moneyPrecisionModule, moneyPrecisionSourcePath, path.dirname(moneyPrecisionSourcePath),
+)
+
 const productDetailRuleSourcePath = path.join(__dirname, '..', 'src', 'lib', 'productDetailRule.ts')
 const { outputText: productDetailRuleOutputText } = ts.transpileModule(fs.readFileSync(productDetailRuleSourcePath, 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
@@ -178,7 +188,11 @@ const { outputText: productDetailRuleOutputText } = ts.transpileModule(fs.readFi
 })
 const productDetailRuleModuleObj = { exports: {} }
 new Function('exports', 'require', 'module', '__filename', '__dirname', productDetailRuleOutputText)(
-  productDetailRuleModuleObj.exports, require, productDetailRuleModuleObj, productDetailRuleSourcePath, path.dirname(productDetailRuleSourcePath),
+  productDetailRuleModuleObj.exports,
+  (request) => request === './moneyPrecision' ? moneyPrecisionModule.exports : require(request),
+  productDetailRuleModuleObj,
+  productDetailRuleSourcePath,
+  path.dirname(productDetailRuleSourcePath),
 )
 const { resolveMergedPricing } = productDetailRuleModuleObj.exports
 
@@ -239,6 +253,7 @@ const mediaModule = loadPureSibling('media')
 const productImagePermissionModule = loadPureSibling('productImagePermission', (request) => {
   if (request === './media') return mediaModule
   if (request === './sqlBinding') return sqlBindingModuleObj.exports
+  if (request === './moneyPrecision') return moneyPrecisionModule.exports
   if (request === './db') return {}
   return require(request)
 })
@@ -248,6 +263,7 @@ function requireForProductBatches(request) {
   if (request === './productDescriptionSections') return productDescriptionSectionsModuleObj.exports
   if (request === './batchCode') return batchCodeModuleObj.exports
   if (request === './sqlBinding') return sqlBindingModuleObj.exports
+  if (request === './moneyPrecision') return moneyPrecisionModule.exports
   return require(request)
 }
 productBatchesWrapper(productBatchesModuleObj.exports, requireForProductBatches, productBatchesModuleObj, productBatchesSourcePath, path.dirname(productBatchesSourcePath))
@@ -267,7 +283,13 @@ const { outputText: importNumbersOutputText } = ts.transpileModule(importNumbers
 })
 const importNumbersModuleObj = { exports: {} }
 const importNumbersWrapper = new Function('exports', 'require', 'module', '__filename', '__dirname', importNumbersOutputText)
-importNumbersWrapper(importNumbersModuleObj.exports, require, importNumbersModuleObj, importNumbersSourcePath, path.dirname(importNumbersSourcePath))
+importNumbersWrapper(
+  importNumbersModuleObj.exports,
+  (request) => request === './moneyPrecision' ? moneyPrecisionModule.exports : require(request),
+  importNumbersModuleObj,
+  importNumbersSourcePath,
+  path.dirname(importNumbersSourcePath),
+)
 
 // searchMatch.ts is pure (no D1/Env dependency) and importEngine.ts now
 // calls its normalizeSearchText/compactSearchText directly at write time

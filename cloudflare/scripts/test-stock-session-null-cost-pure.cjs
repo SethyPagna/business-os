@@ -52,9 +52,14 @@ function fixture() {
     INSERT INTO products(id,name,barcode,cost_price_usd,stock_quantity,is_active) VALUES(1,'Serum','SER-1',2,0,1);
     INSERT INTO stock_session_operations(id,actor_id,request_id,mode,request_json,generation)
       VALUES('op-1',7,'req-1','stock_in','{}',0);
-    INSERT INTO stock_session_members(operation_id,line_id,command_kind,product_id,product_created,branch_id,quantity,unit_cost_usd)
-      VALUES('op-1','never-recorded','receive',1,0,1,3,NULL),
-             ('op-1','declared-free','receive',1,0,1,2,0);
+    INSERT INTO inventory_movements(id,product_id,product_name,branch_id,branch_name,movement_type,quantity,unit_cost_usd,total_cost_usd,reason)
+      VALUES(100,1,'Serum',1,'Shop','add',3,NULL,NULL,'original'),
+            (101,1,'Serum',1,'Shop','add',2,0,0,'original'),
+            (102,1,'Serum',1,'Shop','add',4,1.234567,3.70001,'original');
+    INSERT INTO stock_session_members(operation_id,line_id,command_kind,product_id,product_created,branch_id,movement_id,quantity,unit_cost_usd)
+      VALUES('op-1','never-recorded','receive',1,0,1,100,3,NULL),
+             ('op-1','declared-free','receive',1,0,1,101,2,0),
+             ('op-1','legacy-snapshot','receive',1,0,1,102,4,1.234567);
   `)
   return sql
 }
@@ -77,9 +82,9 @@ check('lib/stockSession.ts still has exactly its two movement writers', () => {
 
 check('the commit writer keeps an unrecorded cost unrecorded and a declared zero at zero', () => {
   const sql = fixture()
-  run(sql, writers[0], { reason: 'Stock-in session op-1', actor: 7, actorName: 'Stock User', operationId: 'op-1', lineId: 'never-recorded' })
-  run(sql, writers[0], { reason: 'Stock-in session op-1', actor: 7, actorName: 'Stock User', operationId: 'op-1', lineId: 'declared-free' })
-  assert.deepEqual(sql.prepare('SELECT unit_cost_usd,total_cost_usd FROM inventory_movements ORDER BY id').all(), [
+  run(sql, writers[0], { reason: 'Stock-in session op-1', actor: 7, actorName: 'Stock User', operationId: 'op-1', lineId: 'never-recorded', totalCostUsd: null })
+  run(sql, writers[0], { reason: 'Stock-in session op-1', actor: 7, actorName: 'Stock User', operationId: 'op-1', lineId: 'declared-free', totalCostUsd: 0 })
+  assert.deepEqual(sql.prepare('SELECT unit_cost_usd,total_cost_usd FROM inventory_movements WHERE id > 102 ORDER BY id').all(), [
     { unit_cost_usd: null, total_cost_usd: null },
     { unit_cost_usd: 0, total_cost_usd: 0 },
   ])
@@ -90,7 +95,8 @@ check('the undo/redo writer keeps the same distinction, in both directions', () 
     const sql = fixture()
     run(sql, writers[1], { id: 'op-1', movement, sign, reason: `Stock session op-1 ${direction} generation 1`, actor: 7, name: 'Stock User' })
     // Both members land in one statement, so order by the quantity that names them.
-    assert.deepEqual(sql.prepare('SELECT movement_type,quantity,unit_cost_usd,total_cost_usd FROM inventory_movements ORDER BY abs(quantity) DESC').all(), [
+    assert.deepEqual(sql.prepare("SELECT movement_type,quantity,unit_cost_usd,total_cost_usd FROM inventory_movements WHERE reason LIKE 'Stock session op-1 %' ORDER BY abs(quantity) DESC").all(), [
+      { movement_type: movement, quantity: 4 * sign, unit_cost_usd: 1.234567, total_cost_usd: 3.70001 * sign },
       { movement_type: movement, quantity: 3 * sign, unit_cost_usd: null, total_cost_usd: null },
       { movement_type: movement, quantity: 2 * sign, unit_cost_usd: 0, total_cost_usd: 0 },
     ], direction)

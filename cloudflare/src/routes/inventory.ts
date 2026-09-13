@@ -57,6 +57,7 @@ import { movementReferenceSelectSql } from '../lib/movementReference'
 import { movementSearchHaystackSql } from '../lib/movementSearch'
 import { transferStockGuardStatement, transferLotGuardStatement, findTransferReceipt, normalizeTransferRequestId, transferIntentAuditStatement, transferReceiptResponse, transferReceiptStatement, transferRequestDigest } from '../lib/transferOperationReceipt'
 import { resolveMovementCostSnapshot, type MovementCostComponent } from '../lib/movementCostSnapshot'
+import { roundMoney4 } from '../lib/moneyPrecision'
 
 // Inventory routes, ported from backend/src/routes/inventory.ts.
 //
@@ -86,6 +87,13 @@ import { resolveMovementCostSnapshot, type MovementCostComponent } from '../lib/
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
+
+function explicitReceiptMoney4(value: unknown, field: string): number {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed < 0) throw new Error(`${field} must be a non-negative finite number`)
+  try { return roundMoney4(typeof value === 'string' ? value : parsed) }
+  catch { throw new Error(`${field} is out of range`) }
+}
 // Legacy gates every single inventory endpoint (reads and writes alike)
 // behind requirePermission('inventory') -- this Worker only checked
 // requireAuth (any logged-in user), a real gap since inventory data/actions
@@ -1421,7 +1429,11 @@ app.post('/adjust', async (c) => {
   // resolve to a sibling variant. Preserve all receipt/session metadata so
   // choosing a variant does not make that line disappear from its session.
   const expiryDate = body.expiryDate != null ? String(body.expiryDate).trim() || null : null
-  const unitCostUsd = body.unitCostUsd != null && Number.isFinite(Number(body.unitCostUsd)) ? Number(body.unitCostUsd) : null
+  let unitCostUsd: number | null = null
+  if (body.unitCostUsd != null) {
+    try { unitCostUsd = explicitReceiptMoney4(body.unitCostUsd, 'Unit cost') }
+    catch (error) { return c.json({ error: error instanceof Error ? error.message : 'Invalid unit cost' }, 400) }
+  }
   const paymentStatus = body.paymentStatus === 'paid' || body.paymentStatus === 'credit' ? body.paymentStatus : null
   const creditDueDate = body.creditDueDate != null ? String(body.creditDueDate).trim() || null : null
   const sessionId = Number.isSafeInteger(Number(body.sessionId)) && Number(body.sessionId) > 0 ? Number(body.sessionId) : null
@@ -1530,6 +1542,14 @@ app.post('/adjust', async (c) => {
   if (unlockPricing) {
     const pricing = body.pricing as Record<string, unknown>
     const source = product as StockRowFields
+    let explicitCostUsd: number | null = null
+    let explicitCostKhr: number | null = null
+    try {
+      explicitCostUsd = pricing.cost_usd != null ? explicitReceiptMoney4(pricing.cost_usd, 'USD cost') : null
+      explicitCostKhr = pricing.cost_khr != null ? explicitReceiptMoney4(pricing.cost_khr, 'KHR cost') : null
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : 'Invalid pricing cost' }, 400)
+    }
     // The discounted tier arrives as wholesale_price_usd/khr only. The retired
     // special_price_* spelling is NOT accepted as an alias, deliberately: a
     // stale PWA till tab renders that field from its own cached product row,
@@ -1550,8 +1570,8 @@ app.post('/adjust', async (c) => {
       discountPercent: pricing.discount_percent != null ? Number(pricing.discount_percent) || 0 : Number(source.discount_percent) || 0,
       discountAmountUsd: pricing.discount_amount_usd != null ? Number(pricing.discount_amount_usd) || 0 : Number(source.discount_amount_usd) || 0,
       discountAmountKhr: pricing.discount_amount_khr != null ? Number(pricing.discount_amount_khr) || 0 : Number(source.discount_amount_khr) || 0,
-      costUsd: pricing.cost_usd != null ? Number(pricing.cost_usd) || 0 : Number(source.cost_price_usd) || 0,
-      costKhr: pricing.cost_khr != null ? Number(pricing.cost_khr) || 0 : Number(source.cost_price_khr) || 0,
+      costUsd: explicitCostUsd ?? (Number(source.cost_price_usd) || 0),
+      costKhr: explicitCostKhr ?? (Number(source.cost_price_khr) || 0),
       barcode: pricing.barcode != null ? (String(pricing.barcode).trim() || null) : source.barcode,
     }
     const resolved = await resolveAddStockTarget(c.env, source, overrides)
@@ -1723,6 +1743,7 @@ app.post('/adjust', async (c) => {
         supplierId,
         supplierName,
         unitCostUsd: receiptUnitCostUsd,
+        preserveHistoricalUnitCost: unitCostUsd == null,
         paymentStatus,
         creditDueDate,
       })

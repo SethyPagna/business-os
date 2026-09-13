@@ -38,13 +38,18 @@ function loadModule(relPath, requireShim) {
 
 const batchCode = loadModule('lib/batchCode.ts', require)
 const sqlBinding = loadModule('lib/sqlBinding.ts', require)
+const moneyPrecision = loadModule('lib/moneyPrecision.ts', require)
 const productBatches = loadModule('lib/productBatches.ts', (id) => {
   if (id === './batchCode') return batchCode
   if (id === './sqlBinding') return sqlBinding
+  if (id === './moneyPrecision') return moneyPrecision
   return require(id)
 })
 const { readFifoLotAvailability, allocateAcrossLots, decrementBatchStockStrictStatement, incrementBatchStockStatement } = productBatches
-const movementCostSnapshot = loadModule('lib/movementCostSnapshot.ts', require)
+const movementCostSnapshot = loadModule('lib/movementCostSnapshot.ts', (id) => {
+  if (id === './moneyPrecision') return moneyPrecision
+  return require(id)
+})
 const roles = loadModule('lib/branchRoles.ts', require)
 const branchGuards = loadModule('lib/branchRoleGuards.ts', (id) => {
   if (id === './branchRoles') return roles
@@ -67,6 +72,7 @@ let routeWaits = []
 const noop = () => null
 const asyncNoop = async () => null
 const inventoryRoute = loadModule('routes/inventory.ts', (id) => {
+  if (id === '../lib/moneyPrecision') return moneyPrecision
   if (id === 'hono') return require('hono')
   if (id === '../lib/db') return { getDb: () => wrapDb(routeDb) }
   if (id === '../lib/auth') return {
@@ -89,9 +95,9 @@ const inventoryRoute = loadModule('routes/inventory.ts', (id) => {
   if (id === '../lib/canonicalBranchIdentity') return canonicalIdentity
   if (id === '../lib/actorSnapshot') return { actorSnapshot: (user) => user?.name || null }
   if (id === '../lib/operationWriteReadiness') return loadModule('lib/operationWriteReadiness.ts', require)
-  if (id === '../lib/movementCostSnapshot') return loadModule('lib/movementCostSnapshot.ts', require)
+  if (id === '../lib/movementCostSnapshot') return movementCostSnapshot
   if (id === '../lib/transferOperation') return loadModule('lib/transferOperation.ts', (dep) => {
-    if (dep === './movementCostSnapshot') return loadModule('lib/movementCostSnapshot.ts', require)
+    if (dep === './movementCostSnapshot') return movementCostSnapshot
     if (dep === './db') return { getDb: () => wrapDb(routeDb) }
     if (dep === './permissions') return { getActionTier: user => user?.tier || 'none' }
     if (dep === './actorSnapshot') return { actorSnapshot: user => user?.name || null }

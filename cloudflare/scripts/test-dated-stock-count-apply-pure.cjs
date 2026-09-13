@@ -90,6 +90,8 @@ const relMap = {
   // D1's 100-bound-parameter limit, so a stub would test the stub.
   './sqlBinding': () => loadReal('lib/sqlBinding.ts'),
   './sqlBinding.ts': () => loadReal('lib/sqlBinding.ts'),
+  './moneyPrecision': () => loadReal('lib/moneyPrecision.ts'),
+  './moneyPrecision.ts': () => loadReal('lib/moneyPrecision.ts'),
   './db': () => ({}),
   './db.ts': () => ({}),
   './datedStockCountImport': () => ({}),

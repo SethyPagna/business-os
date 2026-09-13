@@ -25,6 +25,7 @@ const productBatches = compile('productBatches.ts', {
   './db': {},
   './batchCode': compile('batchCode.ts'),
   './sqlBinding': compile('sqlBinding.ts'),
+  './moneyPrecision': compile('moneyPrecision.ts'),
 })
 const saleTransitions = compile('saleTransitions.ts', {
   './salesStatus': salesStatus,

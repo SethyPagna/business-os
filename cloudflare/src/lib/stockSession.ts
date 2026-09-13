@@ -15,6 +15,7 @@ import { buildInClause, chunkForBinding, D1_MAX_BOUND_PARAMS } from './sqlBindin
 import { bumpVersion } from './cache'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { actorSnapshot } from './actorSnapshot'
+import { multiplyMoney4, roundMoney4, sumMoney4 } from './moneyPrecision'
 
 export const STOCK_SESSION_KIND = 'stock.session'
 export const STOCK_SESSION_MAX_LINES = 25
@@ -340,6 +341,48 @@ function parseRequest(rawValue: unknown, maxImages: number): StockSessionRequest
   return canonical
 }
 
+// Preserve the legacy parser byte-for-byte for the first idempotency lookup:
+// operations committed before nearest-4 receipt money can contain a raw cost
+// in request_json and must remain exactly replayable. Only a genuinely new
+// operation (or a retry matching the normalized request) reaches this step.
+function normalizeNewRequestMoney(request: StockSessionRequest): StockSessionRequest {
+  const items = request.items.map((line): CanonicalLine => {
+    let unitCostUsd = line.unit_cost_usd
+    try {
+      unitCostUsd = unitCostUsd == null ? null : roundMoney4(unitCostUsd)
+      if (unitCostUsd != null && line.quantity > 0) multiplyMoney4(unitCostUsd, line.quantity)
+    } catch {
+      fail('unit_cost_usd is out of range.', 400, 'invalid_request')
+    }
+    const gate = stockReceiptGateCode({
+      isStockIn: line.quantity > 0,
+      supplierName: line.supplier_name,
+      unitCostUsd,
+      freeGoods: line.free_goods,
+      lotAttributionDeferred: line.batch_id != null,
+    })
+    if (gate) fail(stockReceiptGateMessage(gate) as string, 400, gate)
+    let product = line.product
+    if (product) {
+      product = { ...product }
+      for (const field of ['cost_price_usd', 'cost_price_khr'] as const) {
+        if (!(field in product)) continue
+        try { product[field] = roundMoney4(product[field] as number) }
+        catch { fail(`${field} is out of range.`, 400, 'invalid_request') }
+      }
+    }
+    return {
+      ...line,
+      product,
+      unit_cost_usd: unitCostUsd,
+      notes: line.free_goods && unitCostUsd === 0
+        ? appendReceiptNotes(line.notes, [FREE_GOODS_REASON_NOTE])
+        : line.notes,
+    }
+  })
+  return { ...request, items }
+}
+
 async function rowsIn<T>(db: D1Compat, values: readonly unknown[], column: string, select: string): Promise<T[]> {
   const unique = [...new Set(values)]
   const rows: T[] = []
@@ -491,7 +534,7 @@ function parseStoredReceipt(row: Row, replayed: boolean): StockSessionReceipt {
 }
 
 export async function commitStockSession(env: Env, user: SessionUser, raw: unknown): Promise<StockSessionReceipt> {
-  const request = parseRequest(raw, isAdminControlUser(user) ? ADMIN_MAX_IMAGES_PER_PRODUCT : MAX_IMAGES_PER_PRODUCT)
+  let request = parseRequest(raw, isAdminControlUser(user) ? ADMIN_MAX_IMAGES_PER_PRODUCT : MAX_IMAGES_PER_PRODUCT)
   const requiresInventoryAdjust = request.items.some((line) => line.quantity > 0)
   const requiresProductImage = stockSessionChangesProductImages(request)
   if (requiresInventoryAdjust) {
@@ -512,6 +555,7 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
   const previous = await db.prepare('SELECT request_json,receipt_json FROM stock_session_operations WHERE actor_id=@actor AND request_id=@request')
     .get<Row>({ actor: user.id, request: request.client_request_id })
   if (previous?.request_json === submittedCanonical) return parseStoredReceipt(previous, true)
+  request = normalizeNewRequestMoney(request)
   // Resolve a legacy encoded alias to the stored DB identity before the
   // idempotency fingerprint. Exact `%20`/`%25` identities always win, while a
   // retry from fixed frontend code remains the same semantic operation.
@@ -688,6 +732,8 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
   const statements: StockWriteStatement[] = [
     assertion("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore')"),
   ]
+  const receiptTotalCostUsd = sumMoney4(request.items.flatMap((line) =>
+    line.unit_cost_usd == null || line.quantity <= 0 ? [] : [multiplyMoney4(line.unit_cost_usd, line.quantity)]))
   for (const row of products) statements.push(revisionAssertion('product', String(row.id), 'EXISTS(SELECT 1 FROM products WHERE id=@id AND is_active=1)', { id: row.id }, rev('product', row.id)))
   for (const row of branches) statements.push(revisionAssertion('branch', String(row.id), 'EXISTS(SELECT 1 FROM branches WHERE id=@id AND is_active=1)', { id: row.id }, rev('branch', row.id)))
   for (const row of suppliers) statements.push(revisionAssertion('supplier', String(row.id), 'EXISTS(SELECT 1 FROM suppliers WHERE id=@id)', { id: row.id }, rev('supplier', row.id)))
@@ -768,6 +814,14 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
       notes: line.notes, batchId: line.batch_id, supplierId: line.supplier_id,
       supplierName: line.supplier_name, unitCostUsd: line.unit_cost_usd,
       paymentStatus: line.payment_status, creditDueDate: line.credit_due_date,
+      receiptCostPreimage: line.unit_cost_usd == null ? undefined : (() => {
+        const batch = line.kind === 'receive'
+          ? line.batch_id != null
+            ? explicitBatchMap.get(line.batch_id)
+            : dateBatchMap.get(`${line.product_id}:${receivedBatchKey(line.received_date)}`)
+          : null
+        return { batchExists: Boolean(batch), receivedCostUsd: batch?.received_cost_usd == null ? null : Number(batch.received_cost_usd) }
+      })(),
     })
     statements.push(...plan.statements)
     statements.push({ sql: `INSERT INTO stock_session_members(operation_id,line_id,command_kind,product_id,product_created,branch_id,batch_id,quantity,unit_cost_usd)
@@ -782,9 +836,9 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
     // old string are covered by STOCK_RECEIPT_MOVEMENT_TYPES until migration
     // 0128 normalises them.
     statements.push({ sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,unit_cost_usd,unit_cost_khr,total_cost_usd,total_cost_khr,reason,reference_id,user_id,user_name,batch_id)
-      SELECT m.product_id,p.name,m.branch_id,b.name,'add',m.quantity,m.unit_cost_usd,0,CASE WHEN m.unit_cost_usd IS NULL THEN NULL ELSE m.unit_cost_usd*m.quantity END,0,@reason,o.rowid,@actor,@actorName,m.batch_id
+      SELECT m.product_id,p.name,m.branch_id,b.name,'add',m.quantity,m.unit_cost_usd,0,CASE WHEN m.unit_cost_usd IS NULL THEN NULL ELSE @totalCostUsd END,0,@reason,o.rowid,@actor,@actorName,m.batch_id
       FROM stock_session_members m JOIN products p ON p.id=m.product_id JOIN branches b ON b.id=m.branch_id JOIN stock_session_operations o ON o.id=m.operation_id
-      WHERE m.operation_id=@operationId AND m.line_id=@lineId`, params: { reason: `Stock-in session ${operationId}`, actor: user.id, actorName: actorSnapshot(user), operationId, lineId: line.line_id } })
+      WHERE m.operation_id=@operationId AND m.line_id=@lineId`, params: { reason: `Stock-in session ${operationId}`, actor: user.id, actorName: actorSnapshot(user), operationId, lineId: line.line_id, totalCostUsd: plan.params.receivedCostUsd } })
     statements.push({ sql: 'UPDATE stock_session_members SET movement_id=last_insert_rowid() WHERE operation_id=@operationId AND line_id=@lineId', params: { operationId, lineId: line.line_id } })
   }
   statements.push({ sql: `UPDATE stock_session_operations SET receipt_json=json_object(
@@ -793,7 +847,7 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
       'createdCount',(SELECT COUNT(*) FROM stock_session_members WHERE operation_id=id AND product_created=1),
       'receivedCount',(SELECT COUNT(*) FROM stock_session_members WHERE operation_id=id AND command_kind='receive'),
       'totalQuantity',(SELECT COALESCE(SUM(quantity),0) FROM stock_session_members WHERE operation_id=id),
-      'totalCostUsd',(SELECT COALESCE(SUM(quantity*COALESCE(unit_cost_usd,0)),0) FROM stock_session_members WHERE operation_id=id),
+      'totalCostUsd',@totalCostUsd,
       'items',json((SELECT json_group_array(json(item)) FROM (SELECT json_object(
         'lineId',m.line_id,'kind',m.command_kind,'productId',m.product_id,'productName',p.name,
         'createdProduct',json(CASE m.product_created WHEN 1 THEN 'true' ELSE 'false' END),'branchId',m.branch_id,
@@ -801,7 +855,7 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
         'quantity',m.quantity,'unitCostUsd',m.unit_cost_usd) item
         FROM stock_session_members m JOIN products p ON p.id=m.product_id LEFT JOIN product_batches pb ON pb.id=m.batch_id
         WHERE m.operation_id=stock_session_operations.id ORDER BY m.line_id))))
-    WHERE id=@id`, params: { id: operationId } })
+    WHERE id=@id`, params: { id: operationId, totalCostUsd: receiptTotalCostUsd } })
   statements.push({ sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
     SELECT @actor,@name,'stock_session_create','stock_session',id,receipt_json,'stock_session_operations',id,receipt_json
     FROM stock_session_operations WHERE id=@id`, params: { actor: user.id, name: actorSnapshot(user), id: operationId } })
@@ -1003,8 +1057,12 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
     }
   }
   statements.push({ sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,unit_cost_usd,unit_cost_khr,total_cost_usd,total_cost_khr,reason,reference_id,user_id,user_name,batch_id)
-    SELECT m.product_id,p.name,m.branch_id,b.name,@movement,m.quantity*@sign,m.unit_cost_usd,0,CASE WHEN m.unit_cost_usd IS NULL THEN NULL ELSE m.quantity*m.unit_cost_usd*@sign END,0,@reason,o.rowid,@actor,@name,m.batch_id
-    FROM stock_session_members m JOIN products p ON p.id=m.product_id JOIN branches b ON b.id=m.branch_id JOIN stock_session_operations o ON o.id=m.operation_id
+    SELECT m.product_id,p.name,m.branch_id,b.name,@movement,m.quantity*@sign,original.unit_cost_usd,original.unit_cost_khr,
+      CASE WHEN original.total_cost_usd IS NULL THEN NULL ELSE original.total_cost_usd*@sign END,
+      CASE WHEN original.total_cost_khr IS NULL THEN NULL ELSE original.total_cost_khr*@sign END,
+      @reason,o.rowid,@actor,@name,m.batch_id
+    FROM stock_session_members m JOIN products p ON p.id=m.product_id JOIN branches b ON b.id=m.branch_id
+      JOIN stock_session_operations o ON o.id=m.operation_id JOIN inventory_movements original ON original.id=m.movement_id
     WHERE m.operation_id=@id AND m.quantity>0`, params: { id: op.id, movement: direction === 'undo' ? 'remove' : 'add', sign: direction === 'undo' ? -1 : 1, reason: `Stock session ${op.id} ${direction} generation ${generation + 1}`, actor: user.id, name: actorSnapshot(user) } })
   statements.push({ sql: 'UPDATE stock_session_operations SET generation=generation+1 WHERE id=@id', params: { id: op.id } })
   statements.push({ sql: 'UPDATE undo_snapshots SET status=@status,updated_at=CURRENT_TIMESTAMP WHERE id=@snapshot', params: { status: direction === 'undo' ? 'reversed' : 'applied', snapshot: op.snapshot_id } })
