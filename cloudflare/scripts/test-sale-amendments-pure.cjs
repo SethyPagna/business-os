@@ -61,10 +61,12 @@ function compile(file, stubs = {}) {
 }
 
 const salesStatus = compile('salesStatus.ts')
+const moneyPrecision = compile('moneyPrecision.ts')
 const productBatches = compile('productBatches.ts', {
   './db': {},
   './batchCode': compile('batchCode.ts'),
   './sqlBinding': compile('sqlBinding.ts'),
+  './moneyPrecision': moneyPrecision,
 })
 const saleTransitions = compile('saleTransitions.ts', { './salesStatus': salesStatus, './productBatches': productBatches })
 const saleTotals = compile('saleTotals.ts')

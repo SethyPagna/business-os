@@ -559,6 +559,29 @@ async function main() {
     assert.equal(f.sql.prepare('SELECT stock_quantity FROM products WHERE id=1').get().stock_quantity, 0)
   })
 
+  await check('a legacy raw-cost request with an encoded image alias replays before normalization', async () => {
+    const f = fixture()
+    const requestId = 'legacy-cost-image-replay-001'
+    const raw = zeroCreateRequest(requestId, 'Legacy image cream')
+    raw.items[0].product.cost_price_usd = 1.234567
+    raw.items[0].product.image_path = '/uploads/a%20b.png'
+    raw.items[0].product.image_gallery = ['/uploads/a%20b.png']
+    f.sql.prepare("INSERT INTO file_assets(original_name,stored_name,public_path,mime_type,media_type,byte_size) VALUES(?,?,?,?, 'image', 10)")
+      .run('a b.png', 'a b.png', '/uploads/a b.png', 'image/png')
+
+    const first = await commitStockSession(f.env, user, raw)
+    const stored = JSON.parse(f.sql.prepare('SELECT request_json FROM stock_session_operations WHERE id=?').get(first.operationId).request_json)
+    assert.equal(stored.items[0].product.image_path, '/uploads/a b.png')
+    stored.items[0].product.cost_price_usd = 1.234567
+    f.sql.prepare('UPDATE stock_session_operations SET request_json=? WHERE id=?').run(JSON.stringify(stored), first.operationId)
+    const productCount = f.sql.prepare('SELECT COUNT(*) n FROM products').get().n
+    const receipt = await commitStockSession(f.env, user, raw)
+    assert.equal(receipt.replayed, true)
+    assert.equal(receipt.operationId, first.operationId)
+    assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM stock_session_operations').get().n, 1)
+    assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM products').get().n, productCount)
+  })
+
   await check('same actor and request id with changed canonical payload conflicts', async () => {
     const f = fixture()
     await commitStockSession(f.env, user, receiveRequest('stock-request-002', 5))

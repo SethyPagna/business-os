@@ -29,7 +29,7 @@ import { buildIssueStateClauses, buildLikeAliasClause, runFuzzyFallbackMatch, to
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/productSearchQuery'
 import { receiveBatchStock, removeStockFromBatch, removeStockAcrossBatches, InsufficientBatchStockError, readFifoLotAvailability, allocateAcrossLots, decrementBatchStockStrictStatement, incrementBatchStockStatement } from '../lib/productBatches'
 import { applyMovementRevert, type RevertMovementRow } from '../lib/stockRevert'
-import { normalizeTypedDate } from '../lib/batchCode'
+import { dateToBatchCode, normalizeTypedDate } from '../lib/batchCode'
 import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, stockReceiptGateCode, stockReceiptGateMessage } from '../lib/stockReceiptGate'
 import { parseDatedStockCountEntries, buildDatedStockCountPlan } from '../lib/datedStockCountRoute'
 import { applyDatedStockCountPlan } from '../lib/datedStockCountApply'
@@ -57,7 +57,7 @@ import { movementReferenceSelectSql } from '../lib/movementReference'
 import { movementSearchHaystackSql } from '../lib/movementSearch'
 import { transferStockGuardStatement, transferLotGuardStatement, findTransferReceipt, normalizeTransferRequestId, transferIntentAuditStatement, transferReceiptResponse, transferReceiptStatement, transferRequestDigest } from '../lib/transferOperationReceipt'
 import { resolveMovementCostSnapshot, type MovementCostComponent } from '../lib/movementCostSnapshot'
-import { roundMoney4 } from '../lib/moneyPrecision'
+import { addMoney4, roundMoney4 } from '../lib/moneyPrecision'
 
 // Inventory routes, ported from backend/src/routes/inventory.ts.
 //
@@ -1263,6 +1263,7 @@ async function resolveAddStockTarget(
     costUsd: number; costKhr: number
     barcode: string | null
   },
+  preflightReceiptCost: (target: Pick<ProductIdentityRow, 'id' | 'cost_price_usd' | 'cost_price_khr'>) => void | Promise<void>,
 ): Promise<{ productId: number; created: boolean }> {
   const db = getDb(env)
   const candidate: ProductIdentityRow = {
@@ -1315,6 +1316,7 @@ async function resolveAddStockTarget(
   // zero is the SAME code, and forking a row on it is how the twins got into
   // the catalogue in the first place.
   if (identityBarcodeKey(overrides.barcode) === identityBarcodeKey(source.barcode)) {
+    await preflightReceiptCost(source)
     return { productId: source.id, created: false }
   }
 
@@ -1322,7 +1324,10 @@ async function resolveAddStockTarget(
   // child row in the same name group may already carry it, in which case
   // the stock belongs there rather than on a third row.
   const match = await findIdentityMatch(db, candidate)
-  if (match) return { productId: match.id, created: false }
+  if (match) {
+    await preflightReceiptCost(match)
+    return { productId: match.id, created: false }
+  }
 
   // No existing row has this exact combination -- create a new sibling
   // row (same name, so it still groups with the source in every view
@@ -1330,6 +1335,7 @@ async function resolveAddStockTarget(
   // share a name with no is_group/parent_id set at all" comment) carrying
   // the edited pricing, and mirror it into the source's parent, if any.
   const cost = mirrorCostFields(overrides.costUsd, overrides.costKhr)
+  await preflightReceiptCost({ id: 0, cost_price_usd: overrides.costUsd, cost_price_khr: overrides.costKhr })
   const insertPayload = {
     name: source.name,
     sku: null,
@@ -1539,6 +1545,8 @@ app.post('/adjust', async (c) => {
   let targetProductId = productId
   let targetProductName = product.name
   let createdSibling = false
+  let preflightAddMovementCost: ReturnType<typeof resolveMovementCostSnapshot> | null = null
+  let applyMergedPricing: (() => Promise<void>) | null = null
   if (unlockPricing) {
     const pricing = body.pricing as Record<string, unknown>
     const source = product as StockRowFields
@@ -1574,19 +1582,45 @@ app.post('/adjust', async (c) => {
       costKhr: explicitCostKhr ?? (Number(source.cost_price_khr) || 0),
       barcode: pricing.barcode != null ? (String(pricing.barcode).trim() || null) : source.barcode,
     }
-    const resolved = await resolveAddStockTarget(c.env, source, overrides)
+    let resolved: Awaited<ReturnType<typeof resolveAddStockTarget>>
+    try {
+      resolved = await resolveAddStockTarget(c.env, source, overrides, async (target) => {
+        const targetCostUsd = target.cost_price_usd ?? null
+        const targetCostKhr = target.cost_price_khr ?? null
+        preflightAddMovementCost = resolveMovementCostSnapshot({
+          quantity,
+          components: [{
+            quantity,
+            unitCostUsd: unitCostUsd ?? targetCostUsd,
+            unitCostKhr: unitCostUsd === 0 && freeGoods ? 0 : targetCostKhr,
+          }],
+          fallbackUnitCostUsd: targetCostUsd,
+          fallbackUnitCostKhr: targetCostKhr,
+        })
+        if (target.id > 0 && preflightAddMovementCost.totalCostUsd != null) {
+          const batchKey = dateToBatchCode(receivedDate || new Date().toISOString().slice(0, 10)) as string
+          const existingLot = await db.prepare(
+            'SELECT received_cost_usd FROM product_batches WHERE variant_product_id=@productId AND batch_key=@batchKey',
+          ).get<{ received_cost_usd: number | null }>({ productId: target.id, batchKey })
+          if (existingLot) addMoney4(existingLot.received_cost_usd ?? 0, preflightAddMovementCost.totalCostUsd)
+        }
+      })
+    } catch (error) {
+      if (error instanceof RangeError) return c.json({ error: 'Movement cost is out of range' }, 400)
+      throw error
+    }
     targetProductId = resolved.productId
     createdSibling = resolved.created
     if (!createdSibling) {
       // Selling/wholesale price is mergeable data: an explicit unlocked receipt
       // may raise it, but never lower it. Cost remains untouched here.
-      await db.prepare(`UPDATE products SET
+      applyMergedPricing = async () => { await db.prepare(`UPDATE products SET
           selling_price_usd = MAX(COALESCE(selling_price_usd, 0), @sellingUsd),
           selling_price_khr = MAX(COALESCE(selling_price_khr, 0), @sellingKhr),
           wholesale_price_usd = MAX(COALESCE(wholesale_price_usd, 0), @wholesaleUsd),
           wholesale_price_khr = MAX(COALESCE(wholesale_price_khr, 0), @wholesaleKhr),
           updated_at = CURRENT_TIMESTAMP
-        WHERE id = @id`).run({ id: targetProductId, ...overrides })
+        WHERE id = @id`).run({ id: targetProductId, ...overrides }) }
     }
     if (createdSibling) {
       const created = await db.prepare('SELECT id, name FROM products WHERE id = @id').get<{ id: number; name: string }>({ id: targetProductId })
@@ -1663,7 +1697,7 @@ app.post('/adjust', async (c) => {
   let lotCode: string | null = null
   let removedBatchQuantities: Array<{ batchId: number; quantity: number }> = []
   let removalCostByBatch = new Map<number, number | null>()
-  let addMovementCost: ReturnType<typeof resolveMovementCostSnapshot> | null = null
+  let addMovementCost: ReturnType<typeof resolveMovementCostSnapshot> | null = preflightAddMovementCost
   let removeMovementCost: ReturnType<typeof resolveMovementCostSnapshot> | null = null
   let capturedRemovalAllocations: Array<{ batchId: number; quantity: number }> | undefined
   if (type === 'add') {
@@ -1678,6 +1712,7 @@ app.post('/adjust', async (c) => {
   // the correct historical boundary, this prevents a concurrent lot metadata
   // edit (or a test hook between the decrement and movement INSERT) from
   // changing the cost recorded for stock that was already removed.
+  try {
   if (useBatchLedger && type === 'remove') {
     const costRows = batchIdRequested != null
       ? await db.prepare(`
@@ -1712,13 +1747,17 @@ app.post('/adjust', async (c) => {
       fallbackUnitCostUsd: productCostSnapshot?.cost_price_usd ?? null,
       fallbackUnitCostKhr: productCostSnapshot?.cost_price_khr ?? null,
     })
-  } else if (type === 'add') {
+  } else if (type === 'add' && !addMovementCost) {
     addMovementCost = resolveMovementCostSnapshot({
       quantity,
       components: [{ quantity, unitCostUsd: receiptUnitCostUsd, unitCostKhr: unitCostUsd === 0 && freeGoods ? 0 : null }],
       fallbackUnitCostUsd: productCostSnapshot?.cost_price_usd ?? null,
       fallbackUnitCostKhr: productCostSnapshot?.cost_price_khr ?? null,
     })
+  }
+  } catch (error) {
+    if (error instanceof RangeError) return c.json({ error: 'Movement cost is out of range' }, 400)
+    throw error
   }
 
   if (useBatchLedger && type === 'add') {
@@ -1792,6 +1831,12 @@ app.post('/adjust', async (c) => {
   } else if (delta !== 0) {
     await applyStockDelta(c.env, targetProductId, branchId, delta)
   }
+
+  // An unlocked receipt may also raise catalog selling tiers. Defer this
+  // independent catalog write until the received-cost guard has accepted the
+  // stock batch, so an overflowing or stale receipt cannot leave prices
+  // changed while its stock/movement is rejected.
+  if (applyMergedPricing) await applyMergedPricing()
 
   if (delta !== 0) {
     let costComponents: MovementCostComponent[] = []

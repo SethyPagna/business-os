@@ -52,11 +52,13 @@ function compile(file, stubs = {}) {
 }
 
 const salesStatus = compile('salesStatus.ts')
-const productMerge = compile('productMerge.ts')
+const moneyPrecision = compile('moneyPrecision.ts')
+const productMerge = compile('productMerge.ts', { './moneyPrecision': moneyPrecision })
 const productBatches = compile('productBatches.ts', {
   './db': {},
   './batchCode': compile('batchCode.ts'),
   './sqlBinding': compile('sqlBinding.ts'),
+  './moneyPrecision': moneyPrecision,
 })
 const saleTransitions = compile('saleTransitions.ts', { './salesStatus': salesStatus, './productBatches': productBatches })
 const saleTotals = compile('saleTotals.ts')
@@ -593,6 +595,10 @@ console.log('PASS 8b -- an unlotted oversell aborts on branch_stock itself, it i
       './stockSession': {
         STOCK_SESSION_ACTION_KIND: 'stock.session',
         replayStockSessionAction: () => { throw new Error('Unexpected stock session replay in test-sale-add-items-pure.cjs') },
+      },
+      './customerGenderRestoration': {
+        CUSTOMER_GENDER_RESTORATION_KIND: 'customer.gender_restore',
+        replayCustomerGenderRestoration: () => { throw new Error('Unexpected customer gender restoration replay in test-sale-add-items-pure.cjs') },
       },
       './saleSettlementAction': {
         SALE_SETTLEMENT_ACTION_KIND: 'sale.settlement',
