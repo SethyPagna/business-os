@@ -23,6 +23,12 @@ assert.equal(oldFeeQuote.total_usd, 20.23)
 assert.equal(oldFeeQuote.rounding_adjustment_usd, -.0045)
 assert.equal(frontend.compareSaleHeaderQuote(oldFeeQuote, oldFeeQuote), 'match')
 assert.throws(() => frontend.compareSaleHeaderQuote({ ...oldFeeQuote, discount_usd: .00004 }, oldFeeQuote), 'unaltered historical source precision is allowed only against exact authoritative component')
+const tinyHeader = { ...historical, subtotal_usd: .00007, discount_usd: .00003, membership_discount_usd: .00003, is_delivery: 0 }
+const tinyQuote = frontend.quoteSaleMutationHeader(tinyHeader, tinyHeader.subtotal_usd, { tax_enabled: '0', tax_rate: '0' })
+assert.deepEqual(tinyQuote, backend.quoteSaleMutationHeader(tinyHeader, tinyHeader.subtotal_usd, { tax_enabled: '0', tax_rate: '0' }))
+assert.equal(tinyQuote.calculated_total_usd, 0, 'subtract original discount operands before one four-decimal rounding')
+assert.equal(frontend.compareSaleHeaderQuote(tinyQuote, tinyQuote), 'match')
+assert.throws(() => frontend.quoteSaleMutationHeader({ ...tinyHeader, subtotal_usd: .00005 }, .00005, { tax_enabled: '0', tax_rate: '0' }), 'negative exact entitlement cannot disappear through rounding')
 const saved = { subtotal_usd: 10, discount_usd: 1, membership_discount_usd: 0, tax_usd: 0.9, exchange_rate: 4020, is_delivery: 0, delivery_fee_usd: 1.2345, delivery_fee_paid_by: 'customer' }
 let count = 0
 for (const subtotal of [1, 1.2345, 10, 20.0001, 1000]) {
