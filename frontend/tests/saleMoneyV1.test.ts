@@ -67,6 +67,25 @@ for (const change of [
 const detached = canonicalSaleReceipt(saved)
 assert.notEqual(detached.items, saved.items)
 assert.notEqual((detached.items as unknown[])[0], saved.items[0])
+const delivered = { ...saved, subtotal_usd: 1, subtotal_khr: 4000, total_usd: 2, total_khr: 8000, calculated_total_usd: 2, rounding_adjustment_usd: 0, amount_paid_usd: 2, is_delivery: 1, delivery_fee_paid_by: 'customer', delivery_fee_usd: 1, delivery_fee_khr: 4000, items: [{ quantity: 1, applied_price_usd: 1, total_usd: 1 }] }
+const camelDelivered = Object.fromEntries(Object.entries(delivered).map(([key, value]) => [key.replace(/_([a-z])/g, (_match, char) => char.toUpperCase()), value]))
+const fromSnake = canonicalSaleReceipt(delivered), fromCamel = canonicalSaleReceipt(camelDelivered)
+for (const key of Object.keys(delivered)) assert.deepEqual(fromCamel[key], fromSnake[key], `equivalent canonical delivery alias: ${key}`)
+assert.throws(() => canonicalSaleReceipt({ ...delivered, delivery_fee_khr: 999 }), SaleMoneyUnavailableError)
+assert.throws(() => canonicalSaleReceipt({ ...camelDelivered, deliveryFeeKhr: 999 }), SaleMoneyUnavailableError)
+assert.throws(() => canonicalSaleReceipt({ ...delivered, is_delivery: '0' }), SaleMoneyUnavailableError)
+const storePaid = { ...delivered, delivery_fee_paid_by: 'store', total_usd: 1, total_khr: 4000, calculated_total_usd: 1, amount_paid_usd: 1 }
+assert.equal(canonicalSaleReceipt(storePaid).total_usd, 1, 'store-paid fee does not enter customer footing')
+assert.throws(() => canonicalSaleReceipt({ ...saved, change_usd: 999 }), SaleMoneyUnavailableError, 'unmarked nonzero change lacks durable intent')
+assert.throws(() => canonicalSaleReceipt({ ...saved, change_is_actual: 0, change_usd: 999 }), SaleMoneyUnavailableError, 'computed USD change must match current saved tender')
+const computed = { ...saved, amount_paid_usd: 2.23, change_usd: 1, change_khr: 4100, change_is_actual: 0, change_exchange_rate: null }
+assert.equal(canonicalSaleReceipt(computed).change_khr, 4100, 'computed change may use a distinct rate that was not captured; never substitute sale rate4000')
+const historicalSplit = { ...saved, change_is_actual: 1, change_exchange_rate: 4000, change_usd: 0.5, change_khr: 2000 }
+assert.equal(canonicalSaleReceipt(historicalSplit).change_khr, 2000, 'captured actual split change survives subsequent payment/basket edits')
+assert.equal(canonicalSaleReceipt({ ...historicalSplit, change_usd: 999 }).change_usd, 999, 'current basket cannot disprove a recorded historical change event without its original event basis')
+assert.throws(() => canonicalSaleReceipt({ ...historicalSplit, change_exchange_rate: null }), SaleMoneyUnavailableError)
+assert.throws(() => canonicalSaleReceipt({ ...historicalSplit, change_usd: 0.001 }), SaleMoneyUnavailableError)
+assert.throws(() => canonicalSaleReceipt({ ...historicalSplit, change_khr: 2000.1 }), SaleMoneyUnavailableError)
 
 
 console.log('PASS v1 line/receipt/delivery calculations and frozen v0 behavior')

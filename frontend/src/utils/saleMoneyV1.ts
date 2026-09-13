@@ -1,4 +1,4 @@
-import { multiplyMoney4, roundMoney2, roundMoney4, subtractMoney4, sumMoney4 } from './moneyPrecision.ts'
+import { divideMoney4, multiplyMoney4, roundMoney2, roundMoney4, subtractMoney4, sumMoney4 } from './moneyPrecision.ts'
 
 export const SALE_MONEY_VERSION = 1 as const
 export class SaleMoneyUnavailableError extends Error {
@@ -51,6 +51,8 @@ const aliases = {
   subtotal_usd: 'subtotalUsd', subtotal_khr: 'subtotalKhr', total_usd: 'totalUsd', total_khr: 'totalKhr',
   discount_usd: 'discountUsd', discount_khr: 'discountKhr', membership_discount_usd: 'membershipDiscountUsd', membership_discount_khr: 'membershipDiscountKhr',
   tax_usd: 'taxUsd', tax_khr: 'taxKhr', delivery_fee_usd: 'deliveryFeeUsd', delivery_fee_khr: 'deliveryFeeKhr',
+  is_delivery: 'isDelivery', delivery_fee_paid_by: 'deliveryFeePaidBy',
+  change_is_actual: 'changeIsActual', change_exchange_rate: 'changeExchangeRate',
   amount_paid_usd: 'amountPaidUsd', amount_paid_khr: 'amountPaidKhr', change_usd: 'changeUsd', change_khr: 'changeKhr', exchange_rate: 'exchangeRate', items: 'items',
 } as const
 
@@ -95,13 +97,33 @@ export function canonicalSaleReceipt(value: unknown): Record<string, unknown> {
     // rounded display unit prices. Per-unit projection agreement is checked
     // separately by the backend's versioned line policy.
     if (sumMoney4(items.map(line => Number(line.total_usd))) !== fields.subtotal_usd) throw new SaleMoneyUnavailableError()
-    const fee = source.delivery_fee_usd ?? 0
+    const fee = fields.delivery_fee_usd
     if (!nonnegativeMoney(fee)) throw new SaleMoneyUnavailableError()
-    const customerFee = source.is_delivery && source.delivery_fee_paid_by !== 'store' ? fee : 0
-    const afterDiscount = Math.max(0, subtractMoney4(subtractMoney4(Number(fields.subtotal_usd), Number(fields.discount_usd)), Number(fields.membership_discount_usd)))
-    if (sumMoney4([afterDiscount, Number(fields.tax_usd), customerFee]) !== raw) throw new SaleMoneyUnavailableError()
-    for (const [usd, khr] of [['subtotal_usd', 'subtotal_khr'], ['discount_usd', 'discount_khr'], ['membership_discount_usd', 'membership_discount_khr'], ['tax_usd', 'tax_khr'], ['total_usd', 'total_khr']]) {
+    const isDelivery = fields.is_delivery ?? 0
+    if (![0, 1, false, true].includes(isDelivery as number | boolean)) throw new SaleMoneyUnavailableError()
+    const payer = fields.delivery_fee_paid_by ?? 'customer'
+    if (isDelivery && payer !== 'customer' && payer !== 'store') throw new SaleMoneyUnavailableError()
+    const customerFee = isDelivery && payer === 'customer' ? fee : 0
+    if (sumMoney4([Number(fields.subtotal_usd), -Number(fields.discount_usd), -Number(fields.membership_discount_usd), Number(fields.tax_usd), customerFee]) !== raw) throw new SaleMoneyUnavailableError()
+    for (const [usd, khr] of [['subtotal_usd', 'subtotal_khr'], ['discount_usd', 'discount_khr'], ['membership_discount_usd', 'membership_discount_khr'], ['tax_usd', 'tax_khr'], ['total_usd', 'total_khr'], ['delivery_fee_usd', 'delivery_fee_khr']]) {
       if (fields[khr] !== undefined && (!nonnegativeMoney(fields[khr]) || multiplyMoney4(Number(fields[usd]), Number(fields.exchange_rate)) !== fields[khr])) throw new SaleMoneyUnavailableError()
+    }
+    const actualChange = fields.change_is_actual
+    if (!Number.isSafeInteger(fields.change_khr)) throw new SaleMoneyUnavailableError()
+    if (actualChange !== undefined && actualChange !== 0 && actualChange !== 1) throw new SaleMoneyUnavailableError()
+    if (actualChange === undefined && (fields.change_usd !== 0 || fields.change_khr !== 0)) throw new SaleMoneyUnavailableError()
+    if (actualChange === 1) {
+      // Physical change can predate a later basket/payment amendment. The
+      // durable intent/rate establishes its meaning; current tender cannot
+      // re-prove that historical event. Check denominations, never reprice it.
+      if (!nonnegativeMoney(fields.change_exchange_rate) || fields.change_exchange_rate <= 0
+        || roundMoney2(Number(fields.change_usd)) !== fields.change_usd || !Number.isSafeInteger(fields.change_khr)) throw new SaleMoneyUnavailableError()
+    } else {
+      const overpaid4 = Math.max(0, sumMoney4([Number(fields.amount_paid_usd), divideMoney4(Number(fields.amount_paid_khr), Number(fields.exchange_rate)), -total]))
+      if (roundMoney2(overpaid4) !== fields.change_usd || (overpaid4 === 0 && fields.change_khr !== 0)) throw new SaleMoneyUnavailableError()
+      // Computed KHR used the dedicated change-rate setting, which old rows
+      // did not capture (change_exchange_rate is null). Do not substitute the
+      // sale FX rate or pretend that these are two additive cash movements.
     }
   }
   // Do not synthesize a raw total for legacy receipts, including old retries.
