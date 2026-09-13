@@ -255,7 +255,7 @@ export function canonicalCustomerReturnExpectedQuote(value: unknown): CustomerRe
 /** Validates a projected set of active v1 returns using only their immutable
  * consumed-entitlement snapshots. This deliberately does not substitute
  * mutable sale/catalog prices when a cancelled return is restored. */
-export function validateCustomerReturnRestorationCohortV1(returns: CustomerReturnRestorationV1[]): void {
+function validateCustomerReturnRestorationV1(returns: CustomerReturnRestorationV1[], enforceCohortCaps: boolean): void {
   if (returns.length > CUSTOMER_RETURN_MAX_LINES * 20) fail('customer_return_cohort_too_large')
   const returnIds = new Set<number>()
   const lines = new Map<number, {
@@ -301,15 +301,30 @@ export function validateCustomerReturnRestorationCohortV1(returns: CustomerRetur
     calculatedTotal = sumMoney4([calculatedTotal, header.calculated_refund_usd])
     paidTotal = sumMoney4([paidTotal, header.total_refund_usd])
   }
-  for (const aggregate of lines.values()) {
-    if (quantityGreater(aggregate.quantity, aggregate.sold)
-      || aggregate.calculated > prorateCustomerReturnMoney4(aggregate.entitlement, aggregate.quantity, aggregate.sold)) {
+  if (enforceCohortCaps) {
+    for (const aggregate of lines.values()) {
+      if (quantityGreater(aggregate.quantity, aggregate.sold)
+        || aggregate.calculated > prorateCustomerReturnMoney4(aggregate.entitlement, aggregate.quantity, aggregate.sold)) {
+        fail('money_precision_refund_cap_exceeded')
+      }
+    }
+    if (returns.length && (payoutCap == null
+      || paidTotal > Math.min(payoutCap, roundMoney2(calculatedTotal)))) {
       fail('money_precision_refund_cap_exceeded')
     }
   }
-  if (returns.length && (payoutCap == null || paidTotal > Math.min(payoutCap, roundMoney2(calculatedTotal)))) {
-    fail('money_precision_refund_cap_exceeded')
-  }
+}
+
+/** Validates one selected immutable return without applying cumulative line or
+ * cent-settlement caps in isolation. A later return can legitimately carry the
+ * cohort's four-place and cent residuals, so only the full projected cohort may
+ * enforce those caps. Each snapshot still proves its own before/after delta. */
+export function validateCustomerReturnRestorationMemberV1(row: CustomerReturnRestorationV1): void {
+  validateCustomerReturnRestorationV1([row], false)
+}
+
+export function validateCustomerReturnRestorationCohortV1(returns: CustomerReturnRestorationV1[]): void {
+  validateCustomerReturnRestorationV1(returns, true)
 }
 
 export function buildCustomerReturnQuoteV1(input: {

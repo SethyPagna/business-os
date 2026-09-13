@@ -30,6 +30,8 @@ function load(rel) {
 }
 
 const helper = load('lib/returnBulkAction.ts')
+const moneyPrecision = load('lib/moneyPrecision.ts')
+const returnEntitlement = load('lib/customerReturnEntitlement.ts')
 const user = { id: 1, name: 'Admin', username: 'admin', role_code: 'admin', permissions: { all: true } }
 
 function fixture() {
@@ -90,29 +92,34 @@ function seed(f) {
   `)
 }
 
-function refundSnapshot(before, quantity, calculated, sold = 1) {
-  const after = before + quantity
+function refundSnapshot(before, quantity, calculated, sold = 1, entitlement = 10, payoutCap = 10) {
+  const after = Number(moneyPrecision.subtractDecimalSum(before, [-quantity]))
   return JSON.stringify({ version: 1, sale_id: 1, sale_item_id: 1, line_key: 'bulk-v1-line',
     pool_key: 'bulk-v1-pool', source_sale_revision: 0, source_pricing_snapshot_digest: 'a'.repeat(64),
     sold_quantity: sold, return_quantity: quantity, returned_quantity_before: before, returned_quantity_after: after,
-    receipt_allocation: { discount_usd: 0, membership_discount_usd: 0, tax_usd: 0, net_entitlement_usd: 10 },
-    net_entitlement_usd: 10, calculated_refund_before_usd: before * 10,
-    calculated_refund_after_usd: after * 10, calculated_refund_usd: calculated,
-    calculated_refund_khr: calculated * 4000, exchange_rate: 4000,
-    sale_product_entitlement_usd: 10, sale_product_payout_cap_usd: 10 })
+    receipt_allocation: { discount_usd: 0, membership_discount_usd: 0, tax_usd: 0, net_entitlement_usd: entitlement },
+    net_entitlement_usd: entitlement,
+    calculated_refund_before_usd: returnEntitlement.prorateCustomerReturnMoney4(entitlement, before, sold),
+    calculated_refund_after_usd: returnEntitlement.prorateCustomerReturnMoney4(entitlement, after, sold),
+    calculated_refund_usd: calculated,
+    calculated_refund_khr: moneyPrecision.multiplyMoney4(calculated, 4000), exchange_rate: 4000,
+    sale_product_entitlement_usd: entitlement, sale_product_payout_cap_usd: payoutCap })
 }
 
-function insertV1Return(f, { id, status, before, quantity, calculated }) {
+function insertV1Return(f, { id, status, before, quantity, calculated, sold = 1,
+  entitlement = 10, payoutCap = 10, total = calculated }) {
   f.sql.prepare(`INSERT INTO returns(id,return_number,sale_id,return_scope,status,return_type,branch_id,updated_at,
     money_precision_version,calculated_refund_usd,rounding_adjustment_usd,total_refund_usd,total_refund_khr)
-    VALUES(@id,@number,1,'customer',@status,'refund',1,@stamp,1,@calculated,0,@calculated,@khr)`).run({
-    id, number: `V1-RET-${id}`, status, stamp: `v1-${id}`, calculated, khr: calculated * 4000,
+    VALUES(@id,@number,1,'customer',@status,'refund',1,@stamp,1,@calculated,@rounding,@total,@khr)`).run({
+    id, number: `V1-RET-${id}`, status, stamp: `v1-${id}`, calculated,
+    khr: total * 4000, total, rounding: moneyPrecision.subtractMoney4(total, calculated),
   })
   f.sql.prepare(`INSERT INTO return_items(return_id,sale_item_id,product_id,product_name,quantity,total_usd,total_khr,
     applied_price_usd,applied_price_khr,stock_action,branch_id,refund_snapshot_json)
     VALUES(@id,1,1,'Customer product',@quantity,@calculated,@khr,@unit,@unitKhr,'none',1,@snapshot)`).run({
-    id, quantity, calculated, khr: calculated * 4000, unit: calculated / quantity,
-    unitKhr: calculated * 4000 / quantity, snapshot: refundSnapshot(before, quantity, calculated),
+    id, quantity, calculated, khr: moneyPrecision.multiplyMoney4(calculated, 4000), unit: calculated / quantity,
+    unitKhr: moneyPrecision.divideMoney4(moneyPrecision.multiplyMoney4(calculated, 4000), quantity),
+    snapshot: refundSnapshot(before, quantity, calculated, sold, entitlement, payoutCap),
   })
 }
 
@@ -208,6 +215,84 @@ async function run() {
   assert.equal(f.sql.prepare('SELECT status FROM returns WHERE id=11').get().status, 'cancelled')
   assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM return_bulk_operations WHERE request_id='v1-restore-race-001'").get().n, 0)
   console.log('PASS v1 restore freezes the complete active return graph and rejects an interposed cohort change before writes')
+
+  f = fixture(); seed(f)
+  f.sql.prepare(`UPDATE returns SET money_precision_version=1,calculated_refund_usd=8,
+    rounding_adjustment_usd=0,total_refund_usd=8,total_refund_khr=32000 WHERE id=1`).run()
+  const beforeMalformedCancellation = snapshot(f)
+  await assert.rejects(() => helper.applyReturnBulkAction(f.env, user,
+    request(f, [1], 'status', 'completed', 'cancelled', 'malformed-v1-cancel-001')), /exact refund entitlement changed/i)
+  assert.equal(snapshot(f), beforeMalformedCancellation,
+    'a selected v1 return without immutable item authority cannot move stock or create history even when cancelling')
+  console.log('PASS selected v1 cancellation requires its own immutable refund snapshot before stock or history writes')
+
+  f = fixture(); seed(f)
+  f.sql.exec("UPDATE returns SET sale_id=NULL WHERE id=1; UPDATE sale_items SET quantity=1 WHERE id=1; UPDATE sales SET sale_status='partial_return' WHERE id=1")
+  insertV1Return(f, { id: 10, status: 'completed', before: 0, quantity: 0.5, calculated: 0.0049,
+    entitlement: 0.0098, payoutCap: 0.01, total: 0 })
+  insertV1Return(f, { id: 11, status: 'cancelled', before: 0.5, quantity: 0.5, calculated: 0.0049,
+    entitlement: 0.0098, payoutCap: 0.01, total: 0.01 })
+  const centResidual = await helper.applyReturnBulkAction(f.env, user,
+    request(f, [11], 'status', 'cancelled', 'completed', 'cent-residual-restore-001'))
+  assert.equal(f.sql.prepare('SELECT status FROM returns WHERE id=11').get().status, 'completed')
+  assert.equal(f.sql.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status, 'returned')
+  await replay(f, centResidual.actionHistoryId, 'undo', 0)
+  await replay(f, centResidual.actionHistoryId, 'redo', 1)
+  assert.equal(f.sql.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status, 'returned')
+  console.log('PASS selected-member validation preserves a valid later return carrying the cohort cent residual')
+
+  f = fixture(); seed(f)
+  f.sql.exec("UPDATE returns SET sale_id=NULL WHERE id=1; UPDATE sale_items SET quantity=3 WHERE id=1; UPDATE sales SET sale_status='partial_return' WHERE id=1")
+  insertV1Return(f, { id: 10, status: 'completed', before: 0, quantity: 1, calculated: 0.0033,
+    sold: 3, entitlement: 0.01, payoutCap: 0.01, total: 0 })
+  insertV1Return(f, { id: 11, status: 'cancelled', before: 1, quantity: 1, calculated: 0.0034,
+    sold: 3, entitlement: 0.01, payoutCap: 0.01, total: 0.01 })
+  const fourPlaceResidual = await helper.applyReturnBulkAction(f.env, user,
+    request(f, [11], 'status', 'cancelled', 'completed', 'four-place-residual-restore-001'))
+  assert.equal(f.sql.prepare('SELECT status FROM returns WHERE id=11').get().status, 'completed')
+  assert.equal(f.sql.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status, 'partial_return')
+  await replay(f, fourPlaceResidual.actionHistoryId, 'undo', 0)
+  await replay(f, fourPlaceResidual.actionHistoryId, 'redo', 1)
+  assert.equal(f.sql.prepare('SELECT status FROM returns WHERE id=11').get().status, 'completed')
+  console.log('PASS selected-member validation preserves a valid later return carrying the cohort four-place residual')
+
+  f = fixture(); seed(f)
+  f.sql.exec("UPDATE returns SET sale_id=NULL WHERE id=1; UPDATE sale_items SET quantity=1 WHERE id=1")
+  insertV1Return(f, { id: 10, status: 'completed', before: 0, quantity: 1, calculated: 10 })
+  f.sql.exec(`INSERT INTO returns(id,return_number,sale_id,return_scope,status,return_type,branch_id,updated_at,total_refund_usd)
+    VALUES(11,'LEGACY-RET-11',1,'customer','cancelled','refund',1,'legacy-11',8);
+    INSERT INTO return_items(return_id,sale_item_id,product_id,product_name,quantity,total_usd,stock_action,branch_id)
+    VALUES(11,1,1,'Customer product',1,8,'none',1);`)
+  const beforeLegacyRestore = snapshot(f)
+  await assert.rejects(() => helper.applyReturnBulkAction(f.env, user,
+    request(f, [11], 'status', 'cancelled', 'completed', 'legacy-into-v1-001')), /exact refund entitlement changed/i)
+  assert.equal(snapshot(f), beforeLegacyRestore, 'legacy restoration cannot bypass an active v1 payout cap')
+  f.sql.prepare("UPDATE returns SET status='cancelled' WHERE id=10").run()
+  const beforeMixedGroup = snapshot(f)
+  await assert.rejects(() => helper.applyReturnBulkAction(f.env, user,
+    request(f, [10,11], 'status', 'cancelled', 'completed', 'mixed-restore-001')), /exact refund entitlement changed/i)
+  assert.equal(snapshot(f), beforeMixedGroup, 'one grouped request cannot restore legacy and v1 payouts together')
+  console.log('PASS legacy and mixed restoration cannot enter a v1 sale entitlement cohort or create an unreplayable history row')
+
+  f = fixture(); seed(f)
+  f.sql.exec("UPDATE returns SET sale_id=NULL WHERE id=1; UPDATE sale_items SET quantity=0.8 WHERE id=1; UPDATE sales SET sale_status='partial_return' WHERE id=1")
+  insertV1Return(f, { id: 10, status: 'completed', before: 0, quantity: 0.1, calculated: 1.25, sold: 0.8 })
+  insertV1Return(f, { id: 11, status: 'cancelled', before: 0.1, quantity: 0.7, calculated: 8.75, sold: 0.8 })
+  const fractional = await helper.applyReturnBulkAction(f.env, user,
+    request(f, [11], 'status', 'cancelled', 'completed', 'fractional-restore-001'))
+  assert.equal(f.sql.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status, 'returned')
+  assert.deepEqual(saleRecordEvents(f, fractional.operationId).map(event => [event.generation, event.via,
+    event.changes[0].before.value, event.changes[0].after.value]), [[0, 'apply', 'partial_return', 'returned']])
+  await replay(f, fractional.actionHistoryId, 'undo', 0)
+  assert.equal(f.sql.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status, 'partial_return')
+  await replay(f, fractional.actionHistoryId, 'redo', 1)
+  assert.equal(f.sql.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status, 'returned')
+  assert.deepEqual(saleRecordEvents(f, fractional.operationId).map(event => [event.generation, event.via,
+    event.changes[0].before.value, event.changes[0].after.value]), [
+    [0, 'apply', 'partial_return', 'returned'], [1, 'undo', 'returned', 'partial_return'],
+    [2, 'redo', 'partial_return', 'returned'],
+  ])
+  console.log('PASS exact decimal return quantities set full-return status consistently through apply, undo and redo')
 
   f = fixture(); seed(f)
   const method = await helper.applyReturnBulkAction(f.env, user, request(f, [1,2], 'return_type', 'refund', 'writeoff', 'return-method-001'))

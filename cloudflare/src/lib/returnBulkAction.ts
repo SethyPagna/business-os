@@ -6,7 +6,9 @@ import { bumpVersion } from './cache'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { actorSnapshot } from './actorSnapshot'
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from './saleRecordEvents'
-import { validateCustomerReturnRestorationCohortV1, type CustomerReturnRestorationV1 } from './customerReturnEntitlement'
+import { validateCustomerReturnRestorationCohortV1, validateCustomerReturnRestorationMemberV1,
+  type CustomerReturnRestorationV1 } from './customerReturnEntitlement'
+import { subtractDecimalSum } from './moneyPrecision'
 
 export const RETURN_BULK_ACTION_KIND = 'return.fields.bulk'
 export const RETURN_BULK_LIMIT = 25
@@ -255,7 +257,8 @@ function memberStatements(member: Member, direction: 1 | -1, user: SessionUser, 
   ]
 }
 
-function saleStatusStatement(saleId: number, stamp: string): Statement {
+function saleStatusStatement(saleId: number, stamp: string, exactStatus?: string): Statement {
+  if (exactStatus) return { sql: 'UPDATE sales SET sale_status=@status,updated_at=@stamp WHERE id=@saleId', params: { saleId, stamp, status: exactStatus } }
   return {
     sql: `UPDATE sales SET sale_status = CASE
             WHEN NOT EXISTS(SELECT 1 FROM returns r WHERE r.sale_id=@saleId AND COALESCE(r.status,'completed')!='cancelled' AND COALESCE(r.return_scope,'customer')='customer') THEN COALESCE(status_before_return,'completed')
@@ -365,11 +368,13 @@ function entitlementGraphExpression(): string {
   )`
 }
 
-async function v1EntitlementGuards(db: D1Compat, members: Member[], target: 'before' | 'after'): Promise<Statement[]> {
+async function v1EntitlementGuards(db: D1Compat, members: Member[], target: 'before' | 'after'): Promise<{
+  guards: Statement[]; saleStatuses: SaleStatusSnapshot[]
+}> {
   const changed = members.filter(member => member.changed && member.scope === 'customer'
-    && member.saleId && member.moneyPrecisionVersion === 1 && member.before.status !== member.after.status)
+    && member.saleId && member.before.status !== member.after.status)
   const saleIds = [...new Set(changed.map(member => member.saleId!))]
-  if (!saleIds.length) return []
+  if (!saleIds.length) return { guards: [], saleStatuses: [] }
   const entitlementSaleIds = JSON.stringify(saleIds)
   const graph = await db.prepare(`SELECT ${entitlementGraphExpression()} AS value`).get<{ value: string }>({ entitlementSaleIds })
   const authorityJson = String(graph?.value || '')
@@ -381,12 +386,15 @@ async function v1EntitlementGuards(db: D1Compat, members: Member[], target: 'bef
     fail('The exact refund history is too large to restore safely.', 400)
   }
   const override = new Map(changed.map(member => [member.id, member[target].status]))
+  const saleLines = await db.prepare(`SELECT s.id AS sale_id,s.sale_status,s.status_before_return,
+    si.id AS sale_item_id,si.quantity FROM sales s JOIN sale_items si ON si.sale_id=s.id
+    WHERE EXISTS(SELECT 1 FROM json_each(@saleIds) ids WHERE CAST(ids.value AS INTEGER)=s.id)
+    ORDER BY s.id,si.id`).all<Row>({ saleIds: entitlementSaleIds })
+  const exactStatuses: SaleStatusSnapshot[] = []
   for (const saleId of saleIds) {
     const headers = parsed.returns.filter(row => Number(row.sale_id) === saleId)
-    const cohort = (projected: boolean) => headers.filter(row => {
-      const status = projected ? override.get(Number(row.id)) ?? normalize(row.status, 'completed') : normalize(row.status, 'completed')
-      return status !== 'cancelled'
-    }).map(row => ({
+    if (!headers.some(row => Number(row.money_precision_version) === 1)) continue
+    const materialize = (rows: Row[]) => rows.map(row => ({
       id: Number(row.id), sale_id: saleId, money_precision_version: Number(row.money_precision_version) as 1,
       calculated_refund_usd: Number(row.calculated_refund_usd), rounding_adjustment_usd: Number(row.rounding_adjustment_usd),
       total_refund_usd: Number(row.total_refund_usd), total_refund_khr: Number(row.total_refund_khr),
@@ -395,14 +403,46 @@ async function v1EntitlementGuards(db: D1Compat, members: Member[], target: 'bef
         total_usd: Number(item.total_usd), refund_snapshot_json: item.refund_snapshot_json == null ? null : String(item.refund_snapshot_json),
       })),
     })) as CustomerReturnRestorationV1[]
+    const cohort = (projected: boolean) => materialize(headers.filter(row => {
+      const status = projected ? override.get(Number(row.id)) ?? normalize(row.status, 'completed') : normalize(row.status, 'completed')
+      return status !== 'cancelled'
+    }))
+    const projected = cohort(true)
     try {
-      validateCustomerReturnRestorationCohortV1(cohort(false))
-      validateCustomerReturnRestorationCohortV1(cohort(true))
+      // A transition may remove an aggregate-invalid historical cohort, but a
+      // selected v1 member itself must always have intact immutable authority.
+      for (const row of materialize(headers.filter(row => override.has(Number(row.id))
+        && Number(row.money_precision_version) === 1))) validateCustomerReturnRestorationMemberV1(row)
+      if (projected.length) {
+        validateCustomerReturnRestorationCohortV1(projected)
+      }
     } catch {
       fail('The exact refund entitlement changed. Review the return history before restoring it.', 409)
     }
+    const activeIds = new Set(projected.map(row => row.id))
+    const returned = new Map<number, number[]>()
+    for (const item of parsed.items.filter(item => activeIds.has(Number(item.return_id)))) {
+      const id = Number(item.sale_item_id)
+      if (!Number.isSafeInteger(id) || id <= 0) fail('The exact refund entitlement changed. Review the return history before restoring it.', 409)
+      const quantities = returned.get(id) || []
+      quantities.push(Number(item.quantity)); returned.set(id, quantities)
+    }
+    const lines = saleLines.filter(row => Number(row.sale_id) === saleId)
+    if (!lines.length) fail('The exact refund entitlement changed. Review the return history before restoring it.', 409)
+    let fullyReturned = projected.length > 0
+    try {
+      for (const line of lines) {
+        const remainder = subtractDecimalSum(Number(line.quantity), returned.get(Number(line.sale_item_id)) || [])
+        if (remainder.startsWith('-')) fail('The exact refund entitlement changed. Review the return history before restoring it.', 409)
+        if (remainder !== '0') fullyReturned = false
+      }
+    } catch { fail('The exact refund entitlement changed. Review the return history before restoring it.', 409) }
+    const sale = lines[0]
+    exactStatuses.push({ saleId, before: normalize(sale.sale_status, 'completed'),
+      after: !projected.length ? normalize(sale.status_before_return, 'completed') : fullyReturned ? 'returned' : 'partial_return' })
   }
-  return [guard(`${entitlementGraphExpression()}=@entitlementAuthorityJson`, { entitlementSaleIds, entitlementAuthorityJson: authorityJson })]
+  return { guards: [guard(`${entitlementGraphExpression()}=@entitlementAuthorityJson`, { entitlementSaleIds, entitlementAuthorityJson: authorityJson })],
+    saleStatuses: exactStatuses }
 }
 
 async function buildMembers(db: D1Compat, request: BulkRequest): Promise<{ members: Member[]; guards: Statement[] }> {
@@ -554,11 +594,14 @@ export async function applyReturnBulkAction(env: Env, user: SessionUser, raw: Ro
     return JSON.parse(String(previous.receipt_json)) as Row
   }
   const { members, guards } = await buildMembers(db, request)
-  guards.push(...await v1EntitlementGuards(db, members, 'after'))
+  const entitlement = await v1EntitlementGuards(db, members, 'after')
+  guards.push(...entitlement.guards)
   const operationId = crypto.randomUUID()
   const stamp = new Date().toISOString()
+  const ordinarySaleStatuses = request.field === 'status' ? await saleStatusSnapshots(db, members) : []
+  const exactBySale = new Map(entitlement.saleStatuses.map(status => [status.saleId, status]))
   const snapshot: Snapshot = { version: 1, operationId, field: request.field, members,
-    saleStatuses: request.field === 'status' ? await saleStatusSnapshots(db, members) : [] }
+    saleStatuses: ordinarySaleStatuses.map(status => exactBySale.get(status.saleId) || status) }
   const changedIds = members.filter((member) => member.changed).map((member) => member.id)
   const unchangedIds = members.filter((member) => !member.changed).map((member) => member.id)
   const receipt = {
@@ -582,7 +625,9 @@ export async function applyReturnBulkAction(env: Env, user: SessionUser, raw: Ro
     { sql: 'INSERT INTO return_bulk_operations(id,actor_id,request_id,request_json,receipt_json) VALUES(@id,@actor,@request,@canonical,@receipt)', params: { id: operationId, actor: user.id, request: request.client_request_id, canonical, receipt: JSON.stringify(receipt) } },
   ]
   for (const member of members) statements.push(...memberStatements(member, 1, user, stamp))
-  for (const saleId of [...new Set(members.filter((member) => member.changed && member.updateSale && member.saleId).map((member) => member.saleId!))]) statements.push(saleStatusStatement(saleId, stamp))
+  for (const saleId of [...new Set(members.filter((member) => member.changed && member.updateSale && member.saleId).map((member) => member.saleId!))]) {
+    statements.push(saleStatusStatement(saleId, stamp, exactBySale.get(saleId)?.after))
+  }
   const recordEvents = returnSaleRecordEvents(snapshot, 0, 'apply', user, stamp)
   if (recordEvents) statements.push(recordEvents.statement)
   statements.push({ sql: 'INSERT INTO undo_snapshots(kind,payload_json,created_by_id,created_by_name) VALUES(@kind,@payload,@actor,@name)', params: { kind: RETURN_BULK_ACTION_KIND, payload: JSON.stringify(snapshot), actor: user.id, name: actorSnapshot(user) } })
@@ -628,12 +673,16 @@ export async function replayReturnBulkAction(env: Env, user: SessionUser, direct
   const directionSign: 1 | -1 = direction === 'undo' ? -1 : 1
   const stamp = new Date().toISOString()
   const statements: Statement[] = [guard("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore') AND EXISTS(SELECT 1 FROM return_bulk_operations o JOIN action_history h ON h.id=o.history_id JOIN undo_snapshots s ON s.id=o.snapshot_id WHERE o.id=@operation AND o.generation=@generation AND h.id=@history AND h.status=@expectedStatus AND s.kind=@kind AND s.status=@snapshotStatus AND s.payload_json=@snapshot)", { operation: operation.id, generation, history: historyId, expectedStatus, kind: RETURN_BULK_ACTION_KIND, snapshotStatus, snapshot: operation.payload_json })]
-  statements.push(...await v1EntitlementGuards(db, snapshot.members, direction === 'undo' ? 'before' : 'after'))
+  const replayEntitlement = await v1EntitlementGuards(db, snapshot.members, direction === 'undo' ? 'before' : 'after')
+  statements.push(...replayEntitlement.guards)
   for (const member of snapshot.members.filter((candidate) => candidate.changed)) {
     statements.push(guard(`EXISTS(SELECT 1 FROM returns r JOIN return_bulk_members m ON m.return_id=r.id WHERE m.operation_id=@operation AND r.id=@id AND m.revision=COALESCE((SELECT revision FROM return_write_revisions WHERE return_id=r.id),0) AND m.stock_fingerprint=${movementFingerprint('r.id')} AND (m.sale_id IS NULL OR (EXISTS(SELECT 1 FROM sales WHERE id=m.sale_id) AND m.sale_revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=m.sale_id),0))))`, { operation: operation.id, id: member.id }))
   }
   for (const member of snapshot.members) statements.push(...memberStatements(member, directionSign, user, stamp))
-  for (const saleId of [...new Set(snapshot.members.filter((member) => member.changed && member.updateSale && member.saleId).map((member) => member.saleId!))]) statements.push(saleStatusStatement(saleId, stamp))
+  const replayExact = new Map(replayEntitlement.saleStatuses.map(status => [status.saleId, status]))
+  for (const saleId of [...new Set(snapshot.members.filter((member) => member.changed && member.updateSale && member.saleId).map((member) => member.saleId!))]) {
+    statements.push(saleStatusStatement(saleId, stamp, replayExact.get(saleId)?.after))
+  }
   const nextGeneration = Number(generation) + 1
   const recordEvents = returnSaleRecordEvents(snapshot, nextGeneration, direction, user, stamp)
   if (recordEvents) statements.push(recordEvents.statement)
