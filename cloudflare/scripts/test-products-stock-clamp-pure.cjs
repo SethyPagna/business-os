@@ -44,7 +44,14 @@ function extractConst(name) {
   return match[0]
 }
 
-const combinedSource = extractConst('PRODUCT_SKIP_KEYS') + '\n'
+function extractMoneyKey(name) {
+  const match = source.match(new RegExp(`^export const ${name} = [^\\n]+$`, 'm'))
+  if (!match) throw new Error(`${name} not found in productWrites.ts -- source may have changed`)
+  return match[0]
+}
+
+const combinedSource = extractMoneyKey('PRODUCT_MONEY_VERSION') + '\n'
+  + extractMoneyKey('PRODUCT_MONEY_PLAN') + '\n' + extractConst('PRODUCT_SKIP_KEYS') + '\n'
   + extractFunction('clampNegativeStockQuantity') + '\n' + extractFunction('cleanPayload')
 const { outputText } = ts.transpileModule(combinedSource, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
@@ -52,7 +59,7 @@ const { outputText } = ts.transpileModule(combinedSource, {
 })
 const moduleObj = { exports: {} }
 new Function('exports', outputText)(moduleObj.exports)
-const { clampNegativeStockQuantity, cleanPayload } = moduleObj.exports
+const { clampNegativeStockQuantity, cleanPayload, PRODUCT_MONEY_VERSION, PRODUCT_MONEY_PLAN } = moduleObj.exports
 
 let passed = 0
 function check(name, fn) {
@@ -104,6 +111,12 @@ check('cleanPayload still drops non-column keys and normalizes booleans as befor
   assert.strictEqual(out.is_active, 1)
   assert.strictEqual('not_a_column' in out, false)
   assert.strictEqual('id' in out, false) // PRODUCT_SKIP_KEYS-equivalent isn't part of this extract, but 'id' isn't in columns either way here
+})
+
+check('cleanPayload drops actual internal money-plan keys even when present in columns', () => {
+  const out = cleanPayload({ name: 'Widget', [PRODUCT_MONEY_VERSION]: 2, [PRODUCT_MONEY_PLAN]: { after: {} } },
+    new Set([...columns, PRODUCT_MONEY_VERSION, PRODUCT_MONEY_PLAN]))
+  assert.deepStrictEqual(out, { name: 'Widget' })
 })
 
 console.log(`\n${passed} check(s) passed.`)
