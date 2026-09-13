@@ -357,6 +357,61 @@ async function main() {
     assert.deepStrictEqual({ ...rawDb.prepare('SELECT unit_cost_usd,total_cost_usd FROM inventory_movements').get() }, { unit_cost_usd: 0, total_cost_usd: 0 })
   })
 
+  await check('movement-cost overflow is refused before unlocked pricing can create or update a product', async () => {
+    const durableState = () => ({
+      products: rawDb.prepare('SELECT id,name,barcode,selling_price_usd,cost_price_usd,cost_price_khr,stock_quantity FROM products ORDER BY id').all(),
+      branchStock: rawDb.prepare('SELECT * FROM branch_stock ORDER BY product_id,branch_id').all(),
+      batches: rawDb.prepare('SELECT * FROM product_batches ORDER BY id').all(),
+      lotStock: rawDb.prepare('SELECT * FROM branch_batch_stock ORDER BY batch_id,branch_id').all(),
+      movements: rawDb.prepare('SELECT * FROM inventory_movements ORDER BY id').all(),
+    })
+    const cases = [
+      {
+        label: 'explicit USD total', unitCostUsd: 1e9, quantity: 1e9,
+        pricing: { selling_price_usd: 4, cost_usd: 1, cost_khr: 0, barcode: 'OVERFLOW-USD' },
+      },
+      {
+        label: 'new sibling KHR fallback total', unitCostUsd: 1, quantity: 1e9,
+        pricing: { selling_price_usd: 4, cost_usd: 1, cost_khr: 1e9, barcode: 'OVERFLOW-KHR' },
+      },
+    ]
+    for (const item of cases) {
+      seed()
+      const before = durableState()
+      const response = await req('POST', '/adjust', {
+        productId: 1, type: 'add', supplierName: 'Fixture Supplier', reason: item.label,
+        branchId: 1, receivedDate: '2026-09-13', unlockPricing: true, ...item,
+      })
+      assert.strictEqual(response.status, 400, `${item.label}: ${JSON.stringify(response.json)}`)
+      assert.deepStrictEqual(durableState(), before, `${item.label} must precede the sibling/pricing write`)
+    }
+
+    seed()
+    const before = durableState()
+    const locked = await req('POST', '/adjust', {
+      productId: 1, type: 'add', supplierName: 'Fixture Supplier', unitCostUsd: 1e9,
+      quantity: 1e9, reason: 'locked overflow', branchId: 1, receivedDate: '2026-09-13',
+    })
+    assert.strictEqual(locked.status, 400, JSON.stringify(locked.json))
+    assert.deepStrictEqual(durableState(), before, 'locked pricing overflow is also a clean client error with no writes')
+
+    seed()
+    const initial = await req('POST', '/adjust', {
+      productId: 1, type: 'add', supplierName: 'Fixture Supplier', unitCostUsd: 1e11,
+      quantity: 1, reason: 'maximum lot cost', branchId: 1, receivedDate: '2026-09-13',
+    })
+    assert.strictEqual(initial.status, 200, JSON.stringify(initial.json))
+    rawDb.prepare('UPDATE products SET selling_price_usd=0 WHERE id=1').run()
+    const beforeTopUp = durableState()
+    const topUp = await req('POST', '/adjust', {
+      productId: 1, type: 'add', supplierName: 'Fixture Supplier', unitCostUsd: 1,
+      quantity: 1, reason: 'overflowing cumulative top-up', branchId: 1, receivedDate: '2026-09-13',
+      unlockPricing: true, pricing: { selling_price_usd: 99, cost_usd: 1, cost_khr: 0, barcode: 'B123' },
+    })
+    assert.strictEqual(topUp.status, 400, JSON.stringify(topUp.json))
+    assert.deepStrictEqual(durableState(), beforeTopUp, 'cumulative overflow must precede the unlocked catalog-price update')
+  })
+
   await check('priced lot top-up guards its captured cumulative cost before every stock write', async () => {
     seed()
     const first = await req('POST', '/adjust', {

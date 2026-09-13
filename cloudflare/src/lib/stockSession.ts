@@ -555,11 +555,15 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
   const previous = await db.prepare('SELECT request_json,receipt_json FROM stock_session_operations WHERE actor_id=@actor AND request_id=@request')
     .get<Row>({ actor: user.id, request: request.client_request_id })
   if (previous?.request_json === submittedCanonical) return parseStoredReceipt(previous, true)
-  request = normalizeNewRequestMoney(request)
   // Resolve a legacy encoded alias to the stored DB identity before the
-  // idempotency fingerprint. Exact `%20`/`%25` identities always win, while a
-  // retry from fixed frontend code remains the same semantic operation.
+  // idempotency fingerprint, while the legacy raw money is still intact.
+  // Operations committed before nearest-four normalization stored that exact
+  // raw money together with the resolved asset path, so this comparison must
+  // precede normalization or an otherwise exact retry would conflict.
   await resolveSessionImagePaths(db, request)
+  const resolvedLegacyCanonical = JSON.stringify(request)
+  if (previous?.request_json === resolvedLegacyCanonical) return parseStoredReceipt(previous, true)
+  request = normalizeNewRequestMoney(request)
   const canonical = JSON.stringify(request)
   if (previous) {
     if (previous.request_json !== canonical) fail('client_request_id was already used with different data.', 409, 'idempotency_conflict')
