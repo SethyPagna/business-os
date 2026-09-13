@@ -500,7 +500,8 @@ export function repricePromotionCartLines(
       if (!adjustment) return item
       const baseUsd = adjustment.unit_price_usd, baseKhr = adjustment.unit_price_khr
       const current = item as Record<string, unknown>
-      const manual = applyManualDiscount(baseUsd, baseKhr, exchangeRate, current.manual_discount_type, current.manual_discount_value, 1)
+      const manualType = current.manual_discount_type === 'percent' || current.manual_discount_type === 'fixed' ? current.manual_discount_type : null
+      const manual = applyManualDiscount(baseUsd, baseKhr, exchangeRate, manualType, Number(current.manual_discount_value ?? 0), 1)
       const fields = {
         ...manual,
         product_discount_type: adjustment.rule_type === 'product_discount' ? String(current.discount_type || 'percent') : String(adjustment.rule_type || 'percent'),
