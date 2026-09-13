@@ -480,8 +480,8 @@ type ReturnItemInput = {
   quantity: number
   applied_price_usd?: number
   applied_price_khr?: number
-  cost_price_usd?: number
-  cost_price_khr?: number
+  cost_price_usd?: number | null
+  cost_price_khr?: number | null
   unit_cost_usd?: number
   unit_cost_khr?: number
   return_to_stock?: boolean
