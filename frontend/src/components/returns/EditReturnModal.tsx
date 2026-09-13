@@ -55,6 +55,8 @@ interface ExistingReturnItem extends Omit<EditableReturnItem, 'returnQty'> {}
 
 interface ExistingReturn {
   id: number | string
+  money_precision_version?: number | string | null
+  total_refund_usd?: number | string | null
   return_number?: string | null
   reason?: string | null
   return_type?: ReturnType | null
@@ -201,6 +203,9 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
   }
 
   const handleSubmit = async (): Promise<void> => {
+    // Temporary create-only checkpoint: never reprice a v1 return through the
+    // legacy edit request. Its original pending requests remain untouched.
+    if (Number(ret.money_precision_version) === 1) return
     if (!finalReason.trim()) { notify(T('return_reason','Please provide a reason'), 'error'); return }
     if (!beginSingleAction(submitInFlightRef)) return
     setSubmitting(true)
@@ -283,6 +288,17 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
   const closeIfIdle = () => {
     if (!submitting) closeGuard.requestClose()
   }
+
+  if (Number(ret.money_precision_version) === 1) return createPortal(
+    <div className="modal-viewport-safe fixed inset-0 z-[1050] flex items-end justify-center bg-black/50 sm:items-center sm:p-4">
+      <div role="dialog" aria-modal="true" aria-label={T('edit_return', 'Edit Return')} className="modal-panel-safe w-full rounded-t-2xl bg-white p-4 dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl">
+        <h2 className="text-lg font-bold">{T('edit_return', 'Edit Return')}</h2>
+        <p className="my-4 text-sm" role="status">{T('return_v1_edit_unavailable', 'This net-refund return cannot be edited in this version. Its saved refund remains unchanged.')}</p>
+        <div className="mb-4 flex justify-between"><span>{T('refund', 'Refund')}</span><span>{fmtUSD(toNumber(ret.total_refund_usd))}</span></div>
+        <button type="button" className="btn-secondary w-full" onClick={onClose}>{T('close', 'Close')}</button>
+      </div>
+    </div>, document.body,
+  )
 
   return createPortal(
     <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center sm:p-4" onClick={closeIfIdle}>

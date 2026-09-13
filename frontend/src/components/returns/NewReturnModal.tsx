@@ -25,6 +25,9 @@ import { normalizeReturnReasonList } from './helpers/returnReasonPresets.ts'
 import { useReturnReasonPresets } from './helpers/useReturnReasonPresets.ts'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
 import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
+import { captureActorReadScope, isActorReadScopeCurrent } from '../../api/actorReadScope.ts'
+import type { PendingReturnCreateV1, ReturnQuoteV1 } from '../../api/returnsTransport.ts'
+import { subtractDecimalSum } from '../../utils/moneyPrecision.ts'
 
 const RETURN_SALE_SEARCH_TIMEOUT_MS = 12000
 // Long enough that a fast typist does not fire a request per keystroke, short
@@ -135,6 +138,7 @@ interface ReceiptSuggestion {
 }
 
 interface SaleRow {
+  money_precision_version?: number | string | null
   id?: number | string | null
   receipt_number?: string | null
   customer_name?: string | null
@@ -274,6 +278,13 @@ function getSaleItemKey(item: SaleItemRow): string {
   return String(item.id || `p_${item.product_id}`)
 }
 
+function exactReturnQuantity(total: number, parts: number[]): number {
+  const exact = subtractDecimalSum(total, parts)
+  const quantity = Number(exact)
+  if (!Number.isFinite(quantity) || subtractDecimalSum(quantity, [exact]) !== '0') throw new Error('return_v1_review_required')
+  return quantity
+}
+
 export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, initialReceiptQuery }: NewReturnModalProps) {
   const { user, t } = useApp()
   const T = (key: string, fallback: string): string => {
@@ -295,6 +306,15 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
   const [returnType,    setReturnType]    = useState<ReturnType>('restock')
   const [notes,         setNotes]         = useState('')
   const [submitting,    setSubmitting]    = useState(false)
+  const [quote, setQuote] = useState<ReturnQuoteV1 | null>(null)
+  const [quoteBusy, setQuoteBusy] = useState(false)
+  const [pendingV1, setPendingV1] = useState<PendingReturnCreateV1 | null>(null)
+  const [pendingError, setPendingError] = useState('')
+  const [pendingLoaded, setPendingLoaded] = useState(false)
+  const [pendingQuoteRejected, setPendingQuoteRejected] = useState(false)
+  const [sessionStale, setSessionStale] = useState(false)
+  const lifecycle = useRef({ alive: true, generation: 0, scope: captureActorReadScope('returns') })
+  const currentAuthority = captureActorReadScope('returns').authority
   const searchRequestRef = useRef(0)
   const searchInFlightRef = useRef(false)
   const submitInFlightRef = useRef(false)
@@ -321,6 +341,30 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
   const [replacementSearching, setReplacementSearching] = useState(false)
   const [replacementSearched, setReplacementSearched] = useState(false)
   const isKnownReason = RETURN_REASONS.includes(reason)
+  useEffect(() => {
+    lifecycle.current.alive = true
+    return () => { lifecycle.current.alive = false; lifecycle.current.generation++ }
+  }, [])
+  useEffect(() => {
+    if (!isActorReadScopeCurrent(lifecycle.current.scope, false)) {
+      lifecycle.current.generation++
+      invalidateTrackedRequest(searchRequestRef)
+      invalidateTrackedRequest(suggestRequestRef)
+      setSessionStale(true)
+      setFoundSale(null); setSelectedItems([]); setSuggestions([]); setQuote(null); setPendingV1(null)
+      return
+    }
+    const generation = lifecycle.current.generation
+    const scope = captureActorReadScope('returns')
+    void loadReturnsTransport().then(transport => {
+      if (!lifecycle.current.alive || lifecycle.current.generation !== generation || !isActorReadScopeCurrent(scope, false)) return
+      setPendingV1(transport.loadPendingReturnCreateV1(user?.id))
+      setPendingError('')
+      setPendingLoaded(true)
+    }).catch(() => {
+      if (lifecycle.current.alive && lifecycle.current.generation === generation && isActorReadScopeCurrent(scope, false)) setPendingError('return_v1_storage_failed')
+    })
+  }, [user?.id, currentAuthority])
   useEffect(() => {
     if (!reason || reason === OTHER_LABEL || isKnownReason) return
     setCustomReason((current) => current || reason)
@@ -516,7 +560,9 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
             if ((ret.status || 'completed') === 'cancelled') return
             ;(ret.items || []).forEach((ri) => {
               const key = ri.sale_item_id || `p_${ri.product_id}`
-              alreadyReturned[key] = (alreadyReturned[key] || 0) + toNumber(ri.quantity)
+              alreadyReturned[key] = Number(found.money_precision_version) === 1
+                ? exactReturnQuantity(alreadyReturned[key] || 0, [-toNumber(ri.quantity)])
+                : (alreadyReturned[key] || 0) + toNumber(ri.quantity)
             })
           })
         } catch (error) {
@@ -532,7 +578,9 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
         setSelectedItems(items.map((item) => {
           const key = getSaleItemKey(item)
           const alreadyQty = alreadyReturned[key] || 0
-          const remaining = Math.max(0, toNumber(item.quantity) - alreadyQty)
+          const remaining = Math.max(0, Number(found.money_precision_version) === 1
+            ? exactReturnQuantity(toNumber(item.quantity), [alreadyQty])
+            : toNumber(item.quantity) - alreadyQty)
           return {
             ...item,
             alreadyQty,
@@ -684,10 +732,17 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
   const clearAll  = () => setSelectedItems((prev) => prev.map((it) => ({ ...it, included: false, returnQty: 0 })))
 
   const activeItems    = selectedItems.filter((it) => it.included && (it.returnQty || 0) > 0)
-  const totalRefund    = activeItems.reduce((s, it) => s + toNumber(it.applied_price_usd) * it.returnQty, 0)
-  const totalRefundKhr = activeItems.reduce((s, it) => s + toNumber(it.applied_price_khr) * it.returnQty, 0)
+  const isV1Sale = Number(foundSale?.money_precision_version) === 1
+  const unsupportedMoneyVersion = foundSale?.money_precision_version != null && ![0, 1].includes(Number(foundSale.money_precision_version))
+  const totalRefund    = isV1Sale ? (quote?.total_refund_usd ?? 0) : activeItems.reduce((s, it) => s + toNumber(it.applied_price_usd) * it.returnQty, 0)
+  const totalRefundKhr = isV1Sale ? (quote?.total_refund_khr ?? 0) : activeItems.reduce((s, it) => s + toNumber(it.applied_price_khr) * it.returnQty, 0)
   const replacementTotalUsd = replacements.reduce((s, line) => s + line.price_usd * line.quantity, 0)
   const finalReason    = reason === OTHER_LABEL ? customReason.trim() : reason
+  const quoteIntent = JSON.stringify([foundSale?.id, activeItems.map(it => [it.id, it.returnQty, it.stock_action, it.pickedBatchId]), finalReason, notes, returnType, replacements])
+  const quoteIntentRef = useRef(quoteIntent)
+  quoteIntentRef.current = quoteIntent
+  const reviewedIntentRef = useRef<string | null>(null)
+  useEffect(() => { setQuote(null); reviewedIntentRef.current = null }, [quoteIntent])
 
   // Every line that still owes an answer about WHICH lot. Restock is the only
   // action that puts units back on a shelf, so it is the only one that needs
@@ -702,6 +757,12 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
   const replacementsMissingLot = replacements.filter((line) => line.batches.length > 0 && line.batch_id == null)
 
   const handleSubmit = async () => {
+    if (!pendingLoaded || pendingError) return
+    if (sessionStale || !isActorReadScopeCurrent(lifecycle.current.scope, false)) return
+    if (pendingV1 || isV1Sale || unsupportedMoneyVersion) {
+      await submitNetReturn()
+      return
+    }
     if (!activeItems.length) { notify(T('select_items_to_return','Select at least one item to return.'), 'error'); return }
     if (!finalReason) { notify(T('return_reason','Please provide a return reason.'), 'error'); return }
     if (itemsMissingLot.length || replacementsMissingLot.length) {
@@ -805,15 +866,106 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
     if (!submitting) closeGuard.requestClose()
   }
 
-  const reviewReturn = () => {
+  const reviewReturn = async () => {
+    if (!pendingLoaded || pendingError) return
     if (!activeItems.length) { notify(T('select_items_to_return', 'Select at least one item to return.'), 'error'); return }
     if (!finalReason) { notify(T('return_reason', 'Please provide a return reason.'), 'error'); return }
     if (itemsMissingLot.length || replacementsMissingLot.length) {
       notify(T('lot_required', 'Pick the received date for every line first — stock never goes back to, or comes out of, unspecified stock.'), 'error')
       return
     }
+    if (pendingV1 || sessionStale || unsupportedMoneyVersion) return
+    if (isV1Sale) {
+      if (replacements.length) { notify(T('return_v1_replacements_unsupported', 'Create the replacement sale separately for this net-refund return.'), 'error'); return }
+      if (pendingError) { notify(T(pendingError, 'The original return request could not be saved safely. No new request was sent.'), 'error'); return }
+      if (!beginSingleAction(submitInFlightRef)) return
+      const generation = lifecycle.current.generation
+      const scope = captureActorReadScope('returns')
+      const intent = quoteIntent
+      const current = () => lifecycle.current.alive && lifecycle.current.generation === generation && isActorReadScopeCurrent(scope, false) && quoteIntentRef.current === intent
+      setQuoteBusy(true)
+      try {
+        const transport = await loadReturnsTransport()
+        if (!current()) return
+        const next = await withLoaderTimeout(() => transport.getReturnQuoteV1(Number(foundSale?.id), activeItems.map(it => ({ sale_item_id: Number(it.id), quantity: it.returnQty }))), 'Return quote', RETURN_HISTORY_LOOKUP_TIMEOUT_MS)
+        if (!current()) return
+        setQuote(next); reviewedIntentRef.current = intent; setStep('confirm')
+      } catch (error) {
+        if (current()) { setQuote(null); notify(T((error as { code?: string })?.code || 'return_v1_review_required', getLoaderErrorMessage(error)), 'error') }
+      } finally {
+        finishSingleAction(submitInFlightRef)
+        if (lifecycle.current.alive && lifecycle.current.generation === generation && isActorReadScopeCurrent(scope, false)) setQuoteBusy(false)
+      }
+      return
+    }
     setStep('confirm')
   }
+
+  const submitNetReturn = async () => {
+    if (sessionStale || !isActorReadScopeCurrent(lifecycle.current.scope, false) || !beginSingleAction(submitInFlightRef)) return
+    const scope = captureActorReadScope('returns'), generation = lifecycle.current.generation
+    const current = () => lifecycle.current.alive && lifecycle.current.generation === generation && isActorReadScopeCurrent(scope, false)
+    setSubmitting(true)
+    try {
+      const transport = await loadReturnsTransport()
+      if (!current()) return
+      let pending = pendingV1 || transport.loadPendingReturnCreateV1(user?.id)
+      if (!pending) {
+        if (!isV1Sale || !quote || reviewedIntentRef.current !== quoteIntent || pendingError) throw Object.assign(new Error('return_v1_review_required'), { code: 'return_v1_review_required' })
+        if (replacements.length || !activeItems.length || !finalReason || itemsMissingLot.length) throw Object.assign(new Error('return_v1_review_required'), { code: 'return_v1_review_required' })
+        pending = await transport.prepareReturnCreateV1(user?.id, {
+          reason: finalReason, return_type: returnType, notes: notes || null,
+          branch_id: foundSale?.branch_id || null,
+          items: activeItems.map(it => ({ sale_item_id: Number(it.id), product_id: it.product_id, quantity: it.returnQty,
+            stock_action: it.stock_action, return_to_stock: it.stock_action === 'restock', branch_id: it.branch_id || foundSale?.branch_id || null,
+            ...(it.pickedBatchId != null ? { batch_id: it.pickedBatchId } : {}) })),
+        }, quote)
+        if (!current()) return
+        setPendingV1(pending)
+      }
+      const result = await withLoaderTimeout(() => transport.submitReturnCreateV1(user?.id, pending!), 'Create net return', RETURN_CREATE_TIMEOUT_MS)
+      if (!current()) return
+      await transport.clearPendingReturnCreateV1(user?.id, pending)
+      if (!current()) return
+      setPendingV1(null)
+      notify(T('success', 'Return created successfully'), 'success')
+      for (const channel of ['returns', 'inventory', 'sales']) window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel } }))
+      await Promise.resolve(onSuccess?.(result))
+      if (current()) onClose()
+    } catch (error) {
+      if (!current()) return
+      // Unknown, permission and capability failures never rewrite/remove the
+      // frozen request: an earlier timed-out attempt could already be committed.
+      setPendingQuoteRejected((error as { returnV1QuoteRejected?: boolean })?.returnV1QuoteRejected === true)
+      notify(T((error as { code?: string })?.code || 'return_v1_pending', getLoaderErrorMessage(error)), 'error')
+    } finally {
+      finishSingleAction(submitInFlightRef)
+      if (current()) setSubmitting(false)
+    }
+  }
+
+  if (sessionStale) return createPortal(<div className="modal-viewport-safe fixed inset-0 z-[1050] flex items-center justify-center bg-black/50 p-4"><div role="dialog" aria-modal="true" className="w-full max-w-lg rounded-xl bg-white p-4 dark:bg-gray-800"><p role="status">{T('return_v1_session_changed', 'Your session changed. Close and reopen this return before continuing.')}</p><button className="btn-secondary mt-4 w-full" onClick={onClose}>{T('close', 'Close')}</button></div></div>, document.body)
+
+  if (pendingV1) return createPortal(
+    <div className="modal-viewport-safe fixed inset-0 z-[1050] flex items-end justify-center bg-black/50 p-4 sm:items-center">
+      <div role="dialog" aria-modal="true" aria-label={T('new_return', 'New Return')} className="w-full max-w-lg rounded-xl bg-white p-4 dark:bg-gray-800">
+        <p role="status" className="mb-4 text-sm">{T('return_v1_pending', 'An earlier return has an unknown outcome. Retry only the saved original request.')}</p>
+        <div className="flex gap-2"><button type="button" disabled={submitting} onClick={onClose} className="btn-secondary flex-1">{T('close', 'Close')}</button>
+          <button type="button" disabled={submitting} onClick={submitNetReturn} className="btn-primary flex-1">{submitting ? T('submitting', 'Processing…') : T('retry_original_request', 'Retry original request')}</button></div>
+        {pendingQuoteRejected && <button type="button" disabled={submitting} className="btn-secondary mt-3 w-full" onClick={async () => {
+          const scope = captureActorReadScope('returns'), generation = lifecycle.current.generation
+          try {
+            const transport = await loadReturnsTransport()
+            if (!lifecycle.current.alive || lifecycle.current.generation !== generation || !isActorReadScopeCurrent(scope, false)) return
+            await transport.clearPendingReturnCreateV1(user?.id, pendingV1)
+            if (!lifecycle.current.alive || lifecycle.current.generation !== generation || !isActorReadScopeCurrent(scope, false)) return
+            setPendingV1(null); setPendingQuoteRejected(false); setQuote(null); reviewedIntentRef.current = null
+            setStep(foundSale ? 'items' : 'search')
+          } catch (error) { if (lifecycle.current.alive && lifecycle.current.generation === generation && isActorReadScopeCurrent(scope, false)) notify(getLoaderErrorMessage(error), 'error') }
+        }}>{T('return_v1_review_required', 'Review the current server refund before confirming.')}</button>}
+      </div>
+    </div>, document.body,
+  )
 
   return createPortal(
     <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center sm:p-4" onClick={closeIfIdle}>
@@ -837,6 +989,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
         </div>
 
         <div className="modal-scroll p-4 space-y-4">
+          {pendingError && <p role="alert" className="text-sm text-red-600">{T('return_v1_storage_failed', 'The original return request could not be saved safely. No new request was sent.')}</p>}
 
           {/* Step 1 — Find Sale */}
           {step === 'search' && (
@@ -1060,7 +1213,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                                   ))}
                                 </div>
                                 <span className="text-xs font-semibold text-blue-600 dark:text-blue-400 flex-shrink-0">
-                                  {fmtUSD(toNumber(item.applied_price_usd) * (item.returnQty || 0))}
+                                  {isV1Sale ? '—' : fmtUSD(toNumber(item.applied_price_usd) * (item.returnQty || 0))}
                                 </span>
                               </div>
                               {item.stock_action === 'damaged' && (
@@ -1115,7 +1268,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                           ? <span className="text-orange-500 ml-1 font-normal">({T('status_partial_return','partial')})</span>
                           : null}
                       </span>
-                      <span className="text-blue-700 dark:text-blue-300">{fmtUSD(totalRefund)} {T('refund','refund')}</span>
+                      <span className="text-blue-700 dark:text-blue-300">{isV1Sale && !quote ? T('return_v1_review_required', 'Review the current server refund before confirming.') : <>{fmtUSD(totalRefund)} {T('refund','refund')}</>}</span>
                     </div>
                   )}
                 </div>
@@ -1361,7 +1514,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                       </span>
                     </div>
                     <span className="font-medium text-gray-900 dark:text-white flex-shrink-0">
-                      {fmtUSD(toNumber(it.applied_price_usd) * it.returnQty)}
+                      {fmtUSD(isV1Sale ? (quote?.items.find(line => line.sale_item_id === Number(it.id))?.total_usd ?? 0) : toNumber(it.applied_price_usd) * it.returnQty)}
                     </span>
                   </div>
                 ))}
@@ -1401,8 +1554,8 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
         {step === 'items' ? (
           <div className="flex flex-shrink-0 gap-2 border-t border-gray-200 p-4 dark:border-gray-700">
             <button onClick={() => setStep('search')} className="btn-secondary text-sm flex-1">← {T('back','Back')}</button>
-            <button onClick={reviewReturn} className="btn-primary text-sm flex-1">
-              {T('confirm','Review')} → {activeItems.length} {T('items','item(s)')}
+            <button onClick={reviewReturn} disabled={!pendingLoaded || !!pendingError || quoteBusy || unsupportedMoneyVersion} className="btn-primary text-sm flex-1 disabled:opacity-50">
+              {quoteBusy ? T('return_v1_quote_loading', 'Checking the net refund…') : T('confirm','Review')} → {activeItems.length} {T('items','item(s)')}
               {activeItems.length < selectedItems.filter((it) => (it.remaining ?? toNumber(it.quantity)) > 0).length
                 ? ` (${T('status_partial_return','partial')})` : ''}
             </button>
@@ -1411,7 +1564,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
         {step === 'confirm' ? (
           <div className="flex flex-shrink-0 gap-2 border-t border-gray-200 p-4 dark:border-gray-700">
             <button onClick={() => setStep('items')} className="btn-secondary text-sm flex-1">← {T('back','Back')}</button>
-            <button onClick={handleSubmit} disabled={submitting}
+            <button onClick={handleSubmit} disabled={!pendingLoaded || !!pendingError || submitting || (isV1Sale && (!quote || reviewedIntentRef.current !== quoteIntent))}
               className="btn-primary text-sm flex-1 disabled:opacity-50">
               {submitting ? `⏳ ${T('submitting','Processing…')}` : `✅ ${T('submit_return','Confirm Return')}`}
             </button>
