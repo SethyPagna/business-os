@@ -37,6 +37,9 @@ type TranslateFn = (key: string) => string | undefined
 type MoneyFormatter = (value: number | string) => string
 
 interface ReceiptItem {
+  pricing_snapshot_json?: string | null
+  total_usd?: number | string | null
+  total_khr?: number | string | null
   id?: number | string | null
   product_id?: number | string | null
   product_name?: string | null
@@ -66,6 +69,8 @@ interface ReceiptItem {
 }
 
 interface ReceiptSale {
+  id?: number | string | null
+  pricing_identity_bindings?: unknown
   money_precision_version?: number | null
   calculated_total_usd?: number | string | null
   rounding_adjustment_usd?: number | string | null
@@ -446,7 +451,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   // Discount, per the owner’s Sep-4 photo) rather than folded into Subtotal
   // and Discount, so it is named rather than merely included -- and, unlike
   // before the Sep-4 line fix, it can no longer vanish from the totals.
-  const lineSavingsUsd = receiptLineSavingsUsd(items, showItemDiscount, exchangeRate)
+  const lineSavingsUsd = receiptLineSavingsUsd(items, showItemDiscount, exchangeRate, totals.moneyPrecisionVersion, sale)
   // The lines now print their NET totals, so their sum IS sales.subtotal_usd
   // and Subtotal needs no adjustment. Discount goes back to meaning the
   // order-level cut alone.
@@ -626,14 +631,14 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
         {items.map((item, index) => {
           // Every figure on this line comes from the shared calculation, so the
           // printed price and the Discount row can never disagree.
-          const figures = receiptLineFigures(item, showItemDiscount, exchangeRate)
+          const figures = receiptLineFigures(item, showItemDiscount, exchangeRate, totals.moneyPrecisionVersion, sale)
           const qty = figures.qty
           // Price column = the SELLING unit price with the unit cut beside it.
           // Total column = what the line actually came to. 28.00 (-7.00) then
           // 21.00, which is the owner’s photo read left to right.
           const unitUsd = figures.sellingUnitUsd
-          const lineUsd = figures.chargedUnitUsd * qty
-          const lineKhr = figures.chargedUnitKhr * qty
+          const lineUsd = figures.lineUsd
+          const lineKhr = figures.lineKhr
           // Per-line discount = the line's LIST price minus what was actually
           // charged. Both come from receiptLineFigures above; see
           // utils/receiptLineMath for the derivation and its fallbacks.
@@ -653,7 +658,8 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
           // checked: zero sale_items rows carry price_mode='special', only
           // 'custom' and 'selling'. This branch exists so an unreprinted or
           // imported old row can never resurrect the deleted VIP wording.)
-          const tierTag = (item.price_mode === 'wholesale' || item.price_mode === 'special')
+          const displayMode = figures.displayPriceMode ?? item.price_mode
+          const tierTag = (displayMode === 'wholesale' || displayMode === 'special')
             ? (lang === 'km' ? 'បោះដុំ' : 'Wholesale')
             : ''
           return (

@@ -15,6 +15,8 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { receiptDeliveryFigures, receiptLineFigures, receiptLineSavingsUsd } from '../src/utils/receiptLineMath.ts'
+import { materializeCapturedPricingRow, type CapturedPricingPool } from '../src/utils/saleItemPricing.ts'
+import { normalizePromotionRule } from '../src/utils/promotionRules.ts'
 
 const RATE = 4100
 const round2 = (n: number) => Math.round(n * 100) / 100
@@ -226,7 +228,7 @@ const sale16433 = {
 {
   const src = fs.readFileSync(new URL('../src/components/receipt/Receipt.tsx', import.meta.url), 'utf8')
   assert.match(src, /import \{ receiptDeliveryFigures, receiptLineFigures, receiptLineSavingsUsd \} from '\.\.\/\.\.\/utils\/receiptLineMath'/)
-  assert.match(src, /const lineSavingsUsd = receiptLineSavingsUsd\(items, showItemDiscount, exchangeRate\)/)
+  assert.match(src, /const lineSavingsUsd = receiptLineSavingsUsd\(items, showItemDiscount, exchangeRate, totals.moneyPrecisionVersion, sale\)/)
   // Subtotal and Discount are the STORED figures now: the lines are net, so
   // the per-line cut is reported on its own row instead of being folded in.
   assert.match(src, /const displayedSubtotalUsd = subtotalUsd$/m)
@@ -253,8 +255,8 @@ const sale16433 = {
   assert.match(src, /const unitSavingsUsd = figures\.unitSavingsUsd/)
   assert.match(src, /\(-\{fmtUSD\(unitSavingsUsd\)\}\)/)
   // Total column = the NET line, matching the photo’s 21.00.
-  assert.match(src, /const lineUsd = figures\.chargedUnitUsd \* qty/)
-  assert.match(src, /const lineKhr = figures\.chargedUnitKhr \* qty/)
+  assert.match(src, /const lineUsd = figures\.lineUsd/)
+  assert.match(src, /const lineKhr = figures\.lineKhr/)
   // The two named discount rows. The qty TOTAL that used to print under the
   // table is gone (N33, owner, Sep 6 2026: "no need say total items"); its
   // absence is pinned by rendering the receipt, in receiptCompactRows.test.ts.
@@ -371,4 +373,28 @@ const sale16433 = {
   assert.equal(receiptDeliveryFigures({ delivery_fee_usd: 0, delivery_fee_paid_by: 'store' }, RATE).printsAsFree, false)
 }
 
-console.log('receiptLineMath: four columns, selling price with the unit cut, net line total, Item + Total Discount rows, an absorbed delivery fee prints Free, total unchanged')
+{
+  function capturedLine(price: number, qty: number, rule: Record<string, unknown>, net: number) {
+    const pool: CapturedPricingPool = { version: 1, pool_key: 'receipt-pool', evaluation_time: '2026-09-13T00:00:00.000Z', exchange_rate: 4020,
+      rules: [normalizePromotionRule({ id: 1, product_ids: [7], scope_type: 'products', is_active: 1, ...rule }, 1)!],
+      lines: [{ line_key: 'line', source: 'promotion', product: { id: 7, selling_price_usd: price }, selling_price_input_usd: null, manual: { type: 'none', value: 0 } }] }
+    return materializeCapturedPricingRow({ product_id: 7 }, pool, { line: qty }, 'line', { version: 1, lines: [{ line_key: 'line', amount: net }], discount_usd: 0, membership_discount_usd: 0, tax_usd: 0 })
+  }
+  const row = capturedLine(10, 3, { rule_type: 'quantity_save', min_quantity: 3, save_usd: 1 }, 29)
+  const exact = receiptLineFigures(row, true, 4020, 1)
+  assert.equal(exact.lineUsd, 29)
+  assert.equal(exact.lineKhr, 116580)
+  assert.equal(exact.savingsUsd, 1)
+  assert.notEqual(exact.chargedUnitUsd * exact.qty, exact.lineUsd)
+  assert.notEqual(exact.chargedUnitKhr * exact.qty, exact.lineKhr)
+  const fractional = capturedLine(0.01, 3, { rule_type: 'percent_off', percent: 33.3333, percent_off: 33.3333 }, 0.02)
+  assert.equal(receiptLineFigures(fractional, true, 4020, 1).savingsUsd, 0.01)
+  assert.equal(receiptLineFigures(fractional, true, 4020, 1).lineKhr, 80.4)
+  assert.equal(receiptLineSavingsUsd(Array.from({ length: 100 }, () => row), true, 4020, 1), 100)
+  assert.equal(receiptLineFigures(row, false, 4020, 1).lineUsd, 29)
+  for (const changed of [{ pricing_snapshot_json: null }, { total_usd: 29.0001 }, { total_khr: 999 }, { quantity: 2 }, { product_id: 8 }]) {
+    assert.throws(() => receiptLineFigures({ ...row, ...changed }, true, 4020, 1), 'missing/mismatched v1 proof never falls back to unit reconstruction')
+  }
+  assert.throws(() => receiptLineFigures(row, true, 4000, 1), 'current settings FX cannot replace captured FX')
+}
+console.log('receiptLineMath: legacy columns unchanged; v1 captured exact USD/KHR totals and savings, residual/fraction/100-line and missing-proof guards pass')

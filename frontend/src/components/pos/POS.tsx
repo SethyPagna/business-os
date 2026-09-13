@@ -51,6 +51,11 @@ import {
   findMatchingCartLineIndex,
   applyManualDiscount,
   repricePromotionCartLines,
+  quoteSaleCartLines,
+  posV1BasketTotals,
+  parsePosInternalAmount,
+  posV1Tender,
+  frozenPosPreview,
   resolveWholesaleAutoRule,
   applyWholesaleAutoPricing,
   isSaleRecorded,
@@ -91,7 +96,11 @@ import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import { contactDisplayAddress } from '../contacts/contactOptionUtils.ts'
 import { filterSelectableCustomerRows, isAnonymousCustomerIdentity, isSelectableCustomerIdentity, resolveSelectableCustomerById } from '../../utils/customerIdentity.ts'
 import type { BatchSelection } from '../../api/batchesTransport.ts'
-import { captureActorReadScope } from '../../api/actorReadScope.ts'
+import { captureActorReadScope, isActorReadScopeCurrent, assertActorSessionDispatchAllowed } from '../../api/actorReadScope.ts'
+import { useSaleMoneyCapability } from '../sales/useSaleMoneyCapability.ts'
+import { saleSecurityFingerprint } from '../sales/saleSettlementConfig.ts'
+import { canonicalSaleReceipt, frozenSaleCheckoutBody, SaleCheckoutRecoveryRequiredError } from '../../utils/saleMoneyV1.ts'
+import { divideMoney4, multiplyMoney4, nativeChangeAmounts, roundMoney2, roundMoney4, sellingPriceCeilCent, sellingPriceDivideCeilCent } from '../../utils/moneyPrecision.ts'
 const Receipt = lazyRetry(() => import('../receipt/Receipt'), 'pos-receipt')
 const ImageGalleryLightbox = lazyRetry(() => import('../shared/ImageGalleryLightbox'), 'pos-image-gallery-lightbox')
 const FilterPanel = lazyRetry(() => import('./FilterPanel'), 'pos-filter-panel')
@@ -259,6 +268,7 @@ type ProductRecord = Record<string, unknown> & {
   out_of_stock_threshold?: string | number
   parent_id?: string | number | null
   price_mode?: string
+  display_price_mode?: 'selling' | 'wholesale'
   product_discount_khr?: number
   product_discount_label?: string
   product_discount_type?: string | null
@@ -354,6 +364,9 @@ type DeliveryFormState = {
 type PosOrder = Record<string, unknown> & {
   cart: CartLineRecord[]
   checkoutRequestId: string
+  money_precision_version?: 0 | 1
+  checkoutPayload?: Record<string, unknown>
+  checkoutReviewRequestId?: string
   customPayment?: boolean
   customer: CustomerRecord & {
     _baseCustomer?: CustomerRecord
@@ -476,7 +489,7 @@ let productReadTransportPromise: Promise<typeof import('../../api/productReadTra
 let lookupTransportPromise: Promise<typeof import('../../api/lookupTransport.ts')> | null = null
 let contactReadTransportPromise: Promise<typeof import('../../api/contactReadTransport.ts')> | null = null
 let contactWriteTransportPromise: Promise<typeof import('../../api/contactWriteTransport.ts')> | null = null
-let saleWriteTransportPromise: Promise<typeof import('../../api/saleWriteTransport.ts')> | null = null
+let saleWriteTransportPromise: Promise<typeof import('../../api/salesTransport.ts')> | null = null
 
 function getProductReadTransport(): Promise<typeof import('../../api/productReadTransport.ts')> {
   if (!productReadTransportPromise) productReadTransportPromise = import('../../api/productReadTransport.ts')
@@ -498,8 +511,8 @@ function getContactWriteTransport(): Promise<typeof import('../../api/contactWri
   return contactWriteTransportPromise
 }
 
-function getSaleWriteTransport(): Promise<typeof import('../../api/saleWriteTransport.ts')> {
-  if (!saleWriteTransportPromise) saleWriteTransportPromise = import('../../api/saleWriteTransport.ts')
+function getSaleWriteTransport(): Promise<typeof import('../../api/salesTransport.ts')> {
+  if (!saleWriteTransportPromise) saleWriteTransportPromise = import('../../api/salesTransport.ts')
   return saleWriteTransportPromise
 }
 
@@ -618,8 +631,9 @@ export function resolveOrderLoyaltyAccrual(override: unknown, setting: unknown):
   return typeof override === 'boolean' ? override : !['0', 'false', 'no', 'off'].includes(String(setting ?? 'true').trim().toLowerCase())
 }
 
-async function createPosSale(payload: Record<string, unknown>): Promise<SaleResult> {
+async function createPosSale(payload: Record<string, unknown>, scope = captureActorReadScope('pos-checkout')): Promise<SaleResult> {
   const { createSale } = await getSaleWriteTransport()
+  assertActorSessionDispatchAllowed(scope)
   return createSale(payload) as Promise<SaleResult>
 }
 
@@ -667,7 +681,8 @@ function paymentMethodSummary(details: PaymentDetail[]): string {
 }
 
 export default function POS() {
-  const { t, user, authReady, notify, settings, fmtUSD, fmtKHR, usdSymbol, khrSymbol, exchangeRate } = useApp() as AppContextValue
+  const { t, user, authReady, notify, settings, fmtUSD, fmtKHR, usdSymbol, khrSymbol, exchangeRate: currentExchangeRate } = useApp() as AppContextValue
+  const moneyCapability = useSaleMoneyCapability(Boolean(user && authReady), saleSecurityFingerprint(user, authReady))
   // Settings > Stock Alerts. The till colours its grid and answers its stock
   // pills by the owner's number, offline included (the config rides the
   // settings map, which the offline snapshot already carries).
@@ -696,6 +711,7 @@ export default function POS() {
   // search/bootstrap responses carry them) -- POS offline inherits the
   // last cached payload's rules the same way it inherits its products.
   const [promotionRules,   setPromotionRules]   = useState<PromotionRule[]>([])
+  const [promotionReadVersion, setPromotionReadVersion] = useState<0 | 1 | null>(null)
   const [categories,       setCategories]       = useState<CategoryRecord[]>([])
   const [branches,         setBranches]         = useState<BranchRecord[]>([])
   const [customers,        setCustomers]        = useState<CustomerRecord[]>([])
@@ -813,6 +829,13 @@ export default function POS() {
   // The currently visible order. Derived, not stored separately.
   const resolvedActiveId = activeId && orders.find(o => o.id === activeId) ? activeId : orders[0]?.id
   const active = orders.find(o => o.id === resolvedActiveId) || orders[0] || normalizeOrder({}, 1)
+  const moneyVersion = active.money_precision_version === 1 ? 1 : 0
+  const exchangeRate = active.checkoutRequestId && typeof active.checkoutPayload?.exchange_rate === 'number' && active.checkoutPayload.exchange_rate > 0 ? active.checkoutPayload.exchange_rate : currentExchangeRate
+  // New capable carts need the unrounded v1 rule inputs before their first
+  // item is quoted. An existing legacy cart keeps its original read policy.
+  const catalogMoneyVersion = moneyCapability.ready && (moneyVersion === 1 || active.cart.length === 0) ? 1 : 0
+  const catalogMoneyVersionRef = useRef(catalogMoneyVersion)
+  catalogMoneyVersionRef.current = catalogMoneyVersion
   const ordersRef = useRef(orders)
   ordersRef.current = orders
   const branchBatchValidationRef = useRef(new Map<string, number>())
@@ -854,7 +877,7 @@ export default function POS() {
 
   /** Apply a partial update to the active order. Mirrors React's setState signature. */
   const patchActive = useCallback((patch: Partial<PosOrder>) => {
-    setOrders(prev => prev.map(o => o.id === resolvedActiveId ? { ...o, ...patch } : o))
+    setOrders(prev => prev.map(o => o.id === resolvedActiveId && !o.checkoutRequestId ? { ...o, ...patch } : o))
   }, [resolvedActiveId])
 
   // A marker can arrive from the bounded offline mirror when this tab is
@@ -883,16 +906,22 @@ export default function POS() {
     setOrderCounter(nextNum + 1)
   }
 
-  const closeOrder = (orderId: string) => {
-    if (orders.length === 1) {
+  const closeOrder = (orderId: string, committed = false) => {
+    const currentOrders = ordersRef.current
+    if (!currentOrders.some(order => order.id === orderId)) return
+    if (!committed && currentOrders.find(order => order.id === orderId)?.checkoutRequestId) {
+      notify(t('money_checkout_recovery_required'), 'error')
+      return
+    }
+    if (currentOrders.length === 1) {
       const reset = normalizeOrder({}, 1)
       setOrders([reset])
       setActiveId(reset.id)
       setOrderCounter(2)
       return
     }
-    const idx = orders.findIndex(o => o.id === orderId)
-    const remaining = orders.filter(o => o.id !== orderId)
+    const idx = currentOrders.findIndex(o => o.id === orderId)
+    const remaining = currentOrders.filter(o => o.id !== orderId)
     // Renumber labels sequentially so tabs always show Order 1, 2, 3...
     const renumbered = remaining.map((o, i) => ({ ...o, label: `Order ${i + 1}` }))
     setOrders(renumbered)
@@ -1189,7 +1218,9 @@ export default function POS() {
   // Math.round here turned a configured $0.50-per-step into $1 (double the
   // redemption value) and $0.25 into $0 -- the member's points were still
   // burned (membership_points_redeemed is sent regardless) for a $0 discount.
-  const redeemValueUsdStep = Math.max(0, Math.round((parseFloat(asText(settings.customer_portal_redeem_value_usd || '1')) || 1) * 100) / 100)
+  const redeemValueUsdStep = moneyVersion === 1
+    ? (() => { try { return parsePosInternalAmount(settings.customer_portal_redeem_value_usd ?? '1') } catch { return NaN } })()
+    : Math.max(0, Math.round((parseFloat(asText(settings.customer_portal_redeem_value_usd || '1')) || 1) * 100) / 100)
   const rawRedeemValueKhrStep = Math.max(0, Math.round(parseFloat(asText(settings.customer_portal_redeem_value_khr || String(exchangeRate))) || exchangeRate))
   const redeemValueKhrStep = rawRedeemValueKhrStep === 0 ? 0 : Math.max(1000, Math.ceil(rawRedeemValueKhrStep / 1000) * 1000)
   // Change (money handed back to the customer) converts at its OWN exchange
@@ -1354,10 +1385,12 @@ export default function POS() {
           // cannot escalate: without the `pos` permission this is refused
           // outright rather than silently downgraded.
           surface: 'pos',
+          money_precision_version: catalogMoneyVersion,
         } satisfies QueryParams
         const metadataScope = JSON.stringify([
           productQuery.branchId, productQuery.brand, productQuery.category,
           productQuery.supplier, productQuery.stockState, productQuery.groupState,
+          productQuery.money_precision_version,
         ])
         const scopeChanged = catalogMetadataScopeRef.current !== metadataScope
         const shouldLoadMetadata = Boolean(options.forceMetadata || !catalogMetadataLoadedRef.current || scopeChanged)
@@ -1375,13 +1408,16 @@ export default function POS() {
           label,
           POS_CATALOG_LOAD_TIMEOUT_MS,
         )
-        if (!isTrackedRequestCurrent(catalogRequestRef, requestId)) return null
+        if (!isTrackedRequestCurrent(catalogRequestRef, requestId) || catalogMoneyVersionRef.current !== catalogMoneyVersion) return null
         const payloadRecord = isPlainRecord(productPayload) ? productPayload : {}
         const prods = Array.isArray(payloadRecord.items)
           ? payloadRecord.items as ProductRecord[]
           : (Array.isArray(productPayload) ? productPayload : [])
         applyCatalogProducts(prods)
-        if (Array.isArray(payloadRecord.promotion_rules)) setPromotionRules(payloadRecord.promotion_rules as PromotionRule[])
+        if (Array.isArray(payloadRecord.promotion_rules)) {
+          setPromotionRules(payloadRecord.promotion_rules as PromotionRule[])
+          setPromotionReadVersion(catalogMoneyVersion)
+        }
         setProductTotal(Number(payloadRecord.total ?? prods.length) || 0)
         setCatalogLoadError('')
         catalogLoadedOnceRef.current = true
@@ -1421,7 +1457,7 @@ export default function POS() {
     })
     catalogLoadPromiseRef.current = wrappedPromise
     return wrappedPromise
-  }, [applyBranchMetadata, applyCatalogProducts, applyProductFilterMeta, branchFilter, brandFilter, categoryFilter, debouncedProductSearch, groupFilter, initialFilter, productPage, productPageSize, searchMode, stockFilter, supplierFilter])
+  }, [applyBranchMetadata, applyCatalogProducts, applyProductFilterMeta, branchFilter, brandFilter, categoryFilter, debouncedProductSearch, groupFilter, initialFilter, productPage, productPageSize, searchMode, stockFilter, supplierFilter, catalogMoneyVersion])
 
   useEffect(() => {
     latestLoadCatalogRef.current = loadCatalogData
@@ -2447,6 +2483,14 @@ export default function POS() {
 
 // Cart mutations
   function addToCart(product: ProductRecord, priceMode = 'selling', batchSelection?: BatchSelection, branchIdOverride?: string | number | null, damagedSelection?: { damagedLotId: number; quantity: number; label: string }) {
+    if (active.checkoutRequestId) return notify(t('money_checkout_recovery_required'), 'error')
+    // An empty basket with no request is a new purchase. Existing persisted
+    // legacy baskets are never silently repriced or stamped during hydration.
+    const version = active.money_precision_version === 1 || active.cart.length === 0 ? 1 : 0
+    if (version === 1) {
+      try { moneyCapability.assertReady() } catch { moneyCapability.retry(); return notify(t('money_precision_unavailable'), 'error') }
+      if (promotionReadVersion !== 1) { void loadCatalogData('POS pricing data', { forceMetadata: true }); return notify(t('money_precision_unavailable'), 'error') }
+    }
     // An explicit branch from the detail sheet WINS. The sheet resolves its
     // own branch for the Branch step, the stock figure and the lot list, so
     // re-deriving a different one here (highest-stock, or the branch filter)
@@ -2475,7 +2519,7 @@ export default function POS() {
     const assignedBranchId = saleBranch.branchId
     const priceValues = resolveCartPriceValues(product, priceMode, exchangeRate, {
       usdToKhr: (value: unknown, rate: unknown) => CURRENCY.usdToKhr(Number(value || 0), Number(rate || 0)),
-    }, promotionRules)
+    }, promotionRules, version)
     // Batch-tracked products are capped by the picked lot's own remaining
     // stock, not the product's overall stock -- a different lot for the
     // same product/branch/price is a separate cart line (see
@@ -2536,7 +2580,7 @@ export default function POS() {
         } : {}),
       } as CartLineRecord]
     }
-    patchActive({ cart: newCart })
+    patchActive({ cart: newCart, money_precision_version: version })
     // Clear + refocus the search only on desktop -- both exist for the
     // barcode-scanner workflow (scan -> item added -> search cleared ->
     // ready for the next scan without touching the keyboard). On mobile
@@ -2572,10 +2616,12 @@ export default function POS() {
   // kernel (repricePromotionCartLines is pure and returns changed=false
   // when prices already agree, so this settles immediately).
   useEffect(() => {
-    const { cart, changed } = repricePromotionCartLines(active.cart, promotionRules, exchangeRate)
+    if (active.checkoutRequestId) return
+    if (moneyVersion === 1 && promotionReadVersion !== 1) return
+    const { cart, changed } = repricePromotionCartLines(active.cart, promotionRules, exchangeRate, moneyVersion)
     if (changed) patchActive({ cart: cart as CartLineRecord[] })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active.cart, promotionRules, exchangeRate])
+  }, [active.cart, promotionRules, exchangeRate, moneyVersion, promotionReadVersion])
 
   // "Wholesale only > N" (the automation migration 0093 deferred). Same shape
   // and same reasoning as the promotion pass above: the decision depends on a
@@ -2587,13 +2633,19 @@ export default function POS() {
   // allowed to move (plain 'selling', no manual price edit) and only reverses
   // its own work, so it never fights the promotion pass or the cashier.
   useEffect(() => {
-    const { cart, changed } = applyWholesaleAutoPricing(active.cart, wholesaleAutoRule, exchangeRate)
+    if (active.checkoutRequestId) return
+    const { cart, changed } = applyWholesaleAutoPricing(active.cart, wholesaleAutoRule, exchangeRate, {}, moneyVersion)
     if (changed) patchActive({ cart: cart as CartLineRecord[] })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active.cart, wholesaleAutoRule, exchangeRate])
 
   const updatePrice = (cartLineId: string | number, field: 'usd' | 'khr', rawValue: string) => {
-    const num = normalizePriceValue(rawValue, 0)
+    if (moneyVersion === 1) {
+      try { if (!rawValue.trim()) throw new Error('invalid_money_input'); parsePosInternalAmount(rawValue) }
+      catch { notify(t('money_precision_unavailable'), 'error'); return }
+    }
+    const num = moneyVersion === 1 ? Number(rawValue || 0) : normalizePriceValue(rawValue, 0)
+    if (!Number.isFinite(num) || num < 0) return
     patchActive({
       cart: active.cart.map((item) => {
         if (getCartLineId(item) !== cartLineId) return item
@@ -2604,11 +2656,14 @@ export default function POS() {
         // discounted price. (Previously typing a price silently CREATED a
         // fixed discount == base − typed, which is exactly what conflated the
         // price field with the discount.)
-        const newBaseUsd = field === 'usd' ? num : normalizePriceValue(CURRENCY.khrToUsd(num, exchangeRate), 0)
-        const newBaseKhr = field === 'khr' ? num : normalizePriceValue(CURRENCY.usdToKhr(num, exchangeRate), 0)
-        const result = applyManualDiscount(newBaseUsd, newBaseKhr, exchangeRate, item.manual_discount_type || null, item.manual_discount_value || 0)
+        const sellingInputUsd = moneyVersion === 1 ? field === 'usd' ? sellingPriceCeilCent(rawValue || 0) : sellingPriceDivideCeilCent(rawValue || 0, exchangeRate)
+          : field === 'usd' ? num : normalizePriceValue(CURRENCY.khrToUsd(num, exchangeRate), 0)
+        const newBaseUsd = moneyVersion === 1 ? sellingPriceCeilCent(sellingInputUsd) : sellingInputUsd
+        const newBaseKhr = moneyVersion === 1 ? multiplyMoney4(newBaseUsd, exchangeRate) : field === 'khr' ? num : normalizePriceValue(CURRENCY.usdToKhr(num, exchangeRate), 0)
+        const result = applyManualDiscount(newBaseUsd, newBaseKhr, exchangeRate, item.manual_discount_type || null, item.manual_discount_value || 0, moneyVersion)
         return {
           ...item,
+          ...(moneyVersion === 1 ? { selling_price_input_usd: sellingInputUsd, price_mode: 'selling', wholesale_auto_optout: true, product_discount_usd: 0, product_discount_khr: 0, product_discount_label: '' } : {}),
           base_price_usd: newBaseUsd,
           base_price_khr: newBaseKhr,
           applied_price_usd: result.applied_price_usd,
@@ -2645,16 +2700,22 @@ export default function POS() {
   // discount type at all". Passing type: null (the Clear button) still
   // clears it, since `type` itself is null in that call.
   const updateDiscount = (cartLineId: string | number, type: ManualDiscountType | null, rawValue: string) => {
-    const value = normalizePriceValue(rawValue, 0)
+    let value: number
+    try {
+      if (moneyVersion === 1) parsePosInternalAmount(rawValue)
+      value = moneyVersion === 1 ? type === 'percent' ? Number(rawValue || 0) : roundMoney4(rawValue.trim() || '0') : normalizePriceValue(rawValue, 0)
+    } catch { notify(t('money_precision_unavailable'), 'error'); return }
+    if (!Number.isFinite(value) || value < 0) return
     patchActive({
       cart: active.cart.map((item) => {
         if (getCartLineId(item) !== cartLineId) return item
-        const baseUsd = normalizePriceValue(item.base_price_usd ?? item.applied_price_usd, 0)
-        const suppliedBaseKhr = normalizePriceValue(item.base_price_khr ?? item.applied_price_khr, 0)
+        const money = moneyVersion === 1 ? (value: unknown) => roundMoney4(Number(value ?? 0)) : normalizePriceValue
+        const baseUsd = money(item.base_price_usd ?? item.applied_price_usd)
+        const suppliedBaseKhr = money(item.base_price_khr ?? item.applied_price_khr)
         const baseKhr = baseUsd > 0 && exchangeRate > 0
-          ? normalizePriceValue(baseUsd * exchangeRate, 0)
+          ? moneyVersion === 1 ? multiplyMoney4(baseUsd, exchangeRate) : normalizePriceValue(baseUsd * exchangeRate, 0)
           : suppliedBaseKhr
-        const result = applyManualDiscount(baseUsd, baseKhr, exchangeRate, type, value)
+        const result = applyManualDiscount(baseUsd, baseKhr, exchangeRate, type, value, moneyVersion)
         return {
           ...item,
           // Preserve the resolved canonical base alongside the applied price.
@@ -2694,7 +2755,8 @@ export default function POS() {
     patchActive({
       cart: active.cart.map((item) => {
         if (getCartLineId(item) !== cartLineId) return item
-        const nextMode = String(item.price_mode || 'selling') === 'wholesale' ? 'selling' : 'wholesale'
+        const nextMode = String(item.display_price_mode ?? item.price_mode ?? 'selling') === 'wholesale' ? 'selling' : 'wholesale'
+        if (moneyVersion === 1) return { ...item, display_price_mode: nextMode, wholesale_auto: false, wholesale_auto_optout: true }
         return { ...item, price_mode: nextMode, wholesale_auto: false, wholesale_auto_optout: true }
       }),
     })
@@ -2779,6 +2841,32 @@ export default function POS() {
   }
 
 // Totals derived from the active order
+  const pendingPreview = useMemo(() => {
+    if (!active.checkoutRequestId || moneyVersion !== 1) return null
+    try { return frozenPosPreview(active.checkoutPayload || {}) } catch { return null }
+  }, [active.checkoutRequestId, active.checkoutPayload, moneyVersion])
+  const pricedCart = useMemo(() => {
+    if (moneyVersion !== 1) return { quotes: null, error: null }
+    if (active.checkoutRequestId) return { quotes: null, error: null }
+    if (promotionReadVersion !== 1) return { quotes: null, error: new Error('money_precision_unavailable') }
+    try { return { quotes: quoteSaleCartLines(active.cart, promotionRules, exchangeRate), error: null } }
+    catch (error) { return { quotes: null, error } }
+  }, [active.cart, active.checkoutRequestId, promotionRules, exchangeRate, moneyVersion, promotionReadVersion])
+  const v1Basket = useMemo(() => {
+    if (moneyVersion !== 1) return { totals: null, error: null }
+    try {
+      if (active.checkoutRequestId) {
+        if (!pendingPreview) throw new SaleCheckoutRecoveryRequiredError()
+        return { totals: pendingPreview.totals, error: null }
+      }
+      if (pricedCart.error || !pricedCart.quotes) throw new Error('money_precision_unavailable')
+      return { totals: posV1BasketTotals({ lines: [...pricedCart.quotes.values()], exchangeRate,
+        discountType: active.discountType, discountPercent: active.discountPercent, discountUsd: active.discountUsd, discountKhr: active.discountKhr,
+        membershipUsd: active.membershipDiscountUsd, membershipKhr: active.membershipDiscountKhr,
+        taxPercent: taxRate > 0 ? settings.tax_rate : 0, feeUsd: active.deliveryFeeUsd,
+        customerPaysFee: active.isDelivery && active.deliveryFeePaidBy === DELIVERY_FEE_PAYER.CUSTOMER }), error: null }
+    } catch (error) { return { totals: null, error } }
+  }, [active.checkoutRequestId, pendingPreview, active.discountType, active.discountPercent, active.discountUsd, active.discountKhr, active.membershipDiscountUsd, active.membershipDiscountKhr, active.deliveryFeeUsd, active.isDelivery, active.deliveryFeePaidBy, pricedCart, moneyVersion, exchangeRate, taxRate, settings.tax_rate])
   const cartTotals = useMemo(() => {
     let subtotalUsd = 0
     let subtotalKhr = 0
@@ -2793,11 +2881,11 @@ export default function POS() {
     }
 
     return {
-      subtotalUsd,
-      subtotalKhr,
+      subtotalUsd: moneyVersion === 1 ? v1Basket.totals?.subtotalUsd ?? 0 : subtotalUsd,
+      subtotalKhr: moneyVersion === 1 ? v1Basket.totals?.subtotalKhr ?? 0 : subtotalKhr,
       branchIds: Array.from(branchIds),
     }
-  }, [active.cart])
+  }, [active.cart, moneyVersion, v1Basket])
 
   const subtotalUsd = cartTotals.subtotalUsd
   const subtotalKhr = cartTotals.subtotalKhr
@@ -2808,19 +2896,18 @@ export default function POS() {
   // without doing the math by hand. Percent mode is derived off the cart
   // subtotal so it stays correct as items are added/removed.
   const discountPercentValue = Math.min(100, Math.max(0, parseFloat(active.discountPercent) || 0))
-  const discUsd = active.discountType === 'percent'
-    ? normalizePriceValue(subtotalUsd * (discountPercentValue / 100), 0)
-    : parseFloat(active.discountUsd) || 0
+  const discUsd = moneyVersion === 1 ? v1Basket.totals?.discUsd ?? 0 : active.discountType === 'percent'
+    ? normalizePriceValue(subtotalUsd * (discountPercentValue / 100), 0) : parseFloat(active.discountUsd) || 0
   // KHR amounts are whole riel end to end (Part-77, money audit): the tax
   // and change multiplications below used to hand fractional riel to the
   // checkout payload and the printed receipt. usdToKhr already rounds; the
   // operator-typed KHR fields are rounded here too so a stray decimal never
   // rides through.
-  const discKhr = active.discountType === 'percent'
+  const discKhr = moneyVersion === 1 ? v1Basket.totals?.discKhr ?? 0 : active.discountType === 'percent'
     ? normalizePriceValue(subtotalKhr * (discountPercentValue / 100), 0)
     : Math.round(parseFloat(active.discountKhr) || CURRENCY.usdToKhr(discUsd, exchangeRate))
-  const membershipDiscUsd = parseFloat(active.membershipDiscountUsd) || 0
-  const membershipDiscKhr = Math.round(parseFloat(active.membershipDiscountKhr) || CURRENCY.usdToKhr(membershipDiscUsd, exchangeRate))
+  const membershipDiscUsd = moneyVersion === 1 ? v1Basket.totals?.membershipDiscUsd ?? 0 : parseFloat(active.membershipDiscountUsd) || 0
+  const membershipDiscKhr = moneyVersion === 1 ? v1Basket.totals?.membershipDiscKhr ?? 0 : Math.round(parseFloat(active.membershipDiscountKhr) || CURRENCY.usdToKhr(membershipDiscUsd, exchangeRate))
   const membershipRedeemUnits = Math.max(0, parseInt(active.membershipRedeemUnits || '0', 10) || 0)
   // ONE rule, ONE implementation. This used to be `balance / redeemPointsStep`
   // computed here, which is the same arithmetic the Worker does -- and that is
@@ -2835,32 +2922,47 @@ export default function POS() {
     ? Math.max(0, Math.floor(serverRedeemableUnits))
     : Math.max(0, Math.floor((membershipInfo?.points?.balance || 0) / redeemPointsStep))
 
-  const afterDiscUsd = Math.max(0, subtotalUsd - discUsd - membershipDiscUsd)
+  const afterDiscUsd = Math.max(0, moneyVersion === 1 ? v1Basket.totals?.afterDiscUsd ?? 0 : subtotalUsd - discUsd - membershipDiscUsd)
   const afterDiscKhr = Math.max(0, subtotalKhr - discKhr - membershipDiscKhr)
 
-  const taxUsd       = afterDiscUsd * taxRate
-  const taxKhr       = Math.round(afterDiscKhr * taxRate)
+  const taxUsd       = moneyVersion === 1 ? v1Basket.totals?.taxUsd ?? 0 : afterDiscUsd * taxRate
+  const taxKhr       = moneyVersion === 1 ? v1Basket.totals?.taxKhr ?? 0 : Math.round(afterDiscKhr * taxRate)
 
-  const feeUsd       = parseFloat(active.deliveryFeeUsd) || 0
-  const feeKhr       = CURRENCY.usdToKhr(feeUsd, exchangeRate)
+  const feeUsd       = moneyVersion === 1 ? v1Basket.totals?.feeUsd ?? 0 : parseFloat(active.deliveryFeeUsd) || 0
+  const feeKhr       = moneyVersion === 1 ? v1Basket.totals?.feeKhr ?? 0 : CURRENCY.usdToKhr(feeUsd, exchangeRate)
 
   // Delivery fee is only added to the customer's bill when THEY are the payer
   const customerFeeUsd = active.isDelivery && active.deliveryFeePaidBy === DELIVERY_FEE_PAYER.CUSTOMER ? feeUsd : 0
   const customerFeeKhr = active.isDelivery && active.deliveryFeePaidBy === DELIVERY_FEE_PAYER.CUSTOMER ? feeKhr : 0
 
-  const totalUsd     = afterDiscUsd + taxUsd + customerFeeUsd
-  const totalKhr     = Math.round(afterDiscKhr + taxKhr + customerFeeKhr)
+  const calculatedTotalUsd = moneyVersion === 1 ? v1Basket.totals?.calculatedTotalUsd ?? 0 : afterDiscUsd + taxUsd + customerFeeUsd
+  const basketRounding = moneyVersion === 1 ? v1Basket.totals?.rounding ?? null : null
+  const totalUsd     = basketRounding?.payableTotal2 ?? calculatedTotalUsd
+  const totalKhr     = moneyVersion === 1 ? v1Basket.totals?.totalKhr ?? 0 : Math.round(afterDiscKhr + taxKhr + customerFeeKhr)
 
   const activePaymentDetails = active.paymentDetails.length
     ? active.paymentDetails
     : [{ id: 'legacy-payment', method: active.paymentMethod || 'Cash', usd: active.paidUsd, khr: active.paidKhr }]
-  const paidUsdNum   = activePaymentDetails.reduce((sum, detail) => sum + (parseFloat(detail.usd) || 0), 0)
-  const paidKhrNum   = activePaymentDetails.reduce((sum, detail) => sum + (parseFloat(detail.khr) || 0), 0)
+  const newNativeTender = (() => {
+    if (moneyVersion !== 1) return null
+    try { return posV1Tender(activePaymentDetails) } catch { return null }
+  })()
+  const paidUsdNum   = moneyVersion === 1 ? newNativeTender?.paidUsd ?? 0 : activePaymentDetails.reduce((sum, detail) => sum + (parseFloat(detail.usd) || 0), 0)
+  const paidKhrNum   = moneyVersion === 1 ? newNativeTender?.paidKhr ?? 0 : activePaymentDetails.reduce((sum, detail) => sum + (parseFloat(detail.khr) || 0), 0)
   const totalPaid    = paidUsdNum + paidKhrNum / exchangeRate
-  const changeUsd    = totalPaid - totalUsd
+  const computedNativeChange = (() => {
+    if (moneyVersion !== 1) return null
+    if (active.checkoutRequestId) {
+      const usd = active.checkoutPayload?.change_usd, khr = active.checkoutPayload?.change_khr
+      return typeof usd === 'number' && typeof khr === 'number' && Number.isFinite(usd) && Number.isFinite(khr) && usd >= 0 && khr >= 0 ? { changeUsd: usd, changeKhr: khr } : null
+    }
+    try { return nativeChangeAmounts({ paidUsd: paidUsdNum, paidKhr: paidKhrNum, payableUsd: totalUsd, exchangeRate, changeExchangeRate }) }
+    catch { return null }
+  })()
+  const changeUsd    = moneyVersion === 1 && computedNativeChange && totalPaid >= totalUsd ? computedNativeChange.changeUsd : totalPaid - totalUsd
   // Change uses the dedicated change rate (see changeExchangeRate above); the
   // main rate still governs the amount owed and the customer's KHR payment.
-  const changeKhr    = Math.round(changeUsd * changeExchangeRate)
+  const changeKhr    = moneyVersion === 1 && computedNativeChange ? computedNativeChange.changeKhr : Math.round(changeUsd * changeExchangeRate)
 
   // Physical-cash cashier figures (business rule, Aug 31 2026): the whole-100៛
   // notes actually collected from / handed back to the customer. Display-only
@@ -2873,13 +2975,30 @@ export default function POS() {
   const cashCollectKhr = cashierCollectKhr(totalKhr, { isCashPayment, isWalkIn: isWalkInSale })
   const cashChangeKhr = cashierChangeKhr(changeKhr)
 
-  const handleDiscountUsd = (v: string) => patchActive({ discountType: 'fixed', discountUsd: v, discountKhr: String(CURRENCY.usdToKhr(parseFloat(v) || 0, exchangeRate)) })
-  const handleDiscountKhr = (v: string) => patchActive({ discountType: 'fixed', discountKhr: v, discountUsd: String(CURRENCY.khrToUsd(parseFloat(v) || 0, exchangeRate)) })
+  const handleDiscountUsd = (v: string) => {
+    if (moneyVersion !== 1) return patchActive({ discountType: 'fixed', discountUsd: v, discountKhr: String(CURRENCY.usdToKhr(parseFloat(v) || 0, exchangeRate)) })
+    let khr = ''
+    try { khr = v.trim() ? String(multiplyMoney4(parsePosInternalAmount(v), exchangeRate)) : '' } catch { /* Keep invalid text visible for correction. */ }
+    patchActive({ discountType: 'fixed', discountUsd: v, discountKhr: khr })
+  }
+  const handleDiscountKhr = (v: string) => {
+    if (moneyVersion !== 1) return patchActive({ discountType: 'fixed', discountKhr: v, discountUsd: String(CURRENCY.khrToUsd(parseFloat(v) || 0, exchangeRate)) })
+    let usd = ''
+    try { usd = v.trim() ? String(divideMoney4(parsePosInternalAmount(v), exchangeRate)) : '' } catch { /* Keep invalid text visible for correction. */ }
+    patchActive({ discountType: 'fixed', discountKhr: v, discountUsd: usd })
+  }
   const handleDiscountPercent = (v: string) => patchActive({ discountType: 'percent', discountPercent: v })
   const handleDiscountType = (type: 'fixed' | 'percent') => patchActive({ discountType: type })
   const handleMembershipUnits = (value: string) => {
     const rawUnits = Math.max(0, parseInt(value || '0', 10) || 0)
     const units = Math.min(rawUnits, maxMembershipUnits)
+    if (moneyVersion === 1) {
+      try {
+        const usd = multiplyMoney4(redeemValueUsdStep, units)
+        patchActive({ membershipRedeemUnits: units ? String(units) : '', membershipDiscountUsd: units ? String(usd) : '', membershipDiscountKhr: units ? String(multiplyMoney4(usd, exchangeRate)) : '' })
+      } catch { notify(t('money_precision_unavailable'), 'error') }
+      return
+    }
     patchActive({
       membershipRedeemUnits: units ? String(units) : '',
       membershipDiscountUsd: units ? String((units * redeemValueUsdStep).toFixed(2)) : '',
@@ -2920,6 +3039,56 @@ export default function POS() {
   }, [])
 
   const handleCheckout = async (saleStatus = 'completed') => {
+    if (loading || checkoutInFlightRef.current) return
+    const checkoutScope = captureActorReadScope('pos-checkout')
+    const orderKey = String(resolvedActiveId || 'pos-order')
+    const finishRecorded = (result: unknown) => {
+      if (!isActorReadScopeCurrent(checkoutScope)) return
+      try {
+        const receipt = canonicalSaleReceipt(result)
+        setReceiptQueue(queue => [...queue, receipt])
+        checkoutRequestIdsRef.current.delete(orderKey)
+        if (resolvedActiveId) closeOrder(resolvedActiveId, true)
+        void loadCatalogData('POS catalog after checkout')
+        window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
+        window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
+      } catch {
+        // A confirmed commit with an incomplete snapshot is not a new sale.
+        // Keep the exact pending request for receipt recovery; never print the
+        // locally calculated request as if it were the saved receipt.
+        notify(t('money_receipt_unavailable'), 'error')
+      }
+    }
+    const pendingId = String(active.checkoutRequestId || checkoutRequestIdsRef.current.get(orderKey) || '').trim()
+    if (pendingId) {
+      checkoutInFlightRef.current = true; setLoading(true)
+      try {
+        const transport = await getSaleWriteTransport()
+        assertActorSessionDispatchAllowed(checkoutScope)
+        const proof = await transport.recoverSaleCreateReceipt(pendingId) as { committed?: boolean; response?: unknown }
+        if (!isActorReadScopeCurrent(checkoutScope)) return
+        if (proof.committed === true) { finishRecorded(proof.response); return }
+        // No receipt cannot reconstruct an old id-only request, and a lookup
+        // failure is never permission to create a fresh checkout identity.
+        if (proof.committed !== false || !active.checkoutPayload) throw new SaleCheckoutRecoveryRequiredError()
+        const frozen = frozenSaleCheckoutBody(pendingId, active.checkoutPayload)
+        const result = await withLoaderTimeout(() => createPosSale(frozen, checkoutScope), 'Retry POS sale', POS_CHECKOUT_TIMEOUT_MS)
+        if (!isActorReadScopeCurrent(checkoutScope)) return
+        if (isSaleRecorded(result)) finishRecorded(result)
+        else notify(localizeBranchRuleError(result.error, t) || t('error'), 'error')
+      } catch (error) {
+        if (isActorReadScopeCurrent(checkoutScope)) {
+          if ((error as { code?: string })?.code === 'sale_pricing_quote_conflict') setOrders(previous => previous.map(order => order.id === resolvedActiveId && order.checkoutRequestId === pendingId ? { ...order, checkoutReviewRequestId: pendingId } : order))
+          notify(getErrorMessage(error) === 'money_checkout_recovery_required' ? t('money_checkout_recovery_required') : getErrorMessage(error, t('error')), 'error')
+        }
+      } finally { checkoutInFlightRef.current = false; setLoading(false) }
+      return
+    }
+    if (moneyVersion !== 1) return notify(t('money_precision_unavailable'), 'error')
+    if (v1Basket.error || !v1Basket.totals) return notify(t('money_precision_unavailable'), 'error')
+    if (!newNativeTender) return notify(t('money_precision_unavailable'), 'error')
+    if (!computedNativeChange) return notify(t('money_precision_unavailable'), 'error')
+    try { moneyCapability.assertReady() } catch { moneyCapability.retry(); return notify(t('money_precision_unavailable'), 'error') }
     if (active.cart.length === 0)        return notify(t('cart_empty'), 'error')
     // Guardrail: a genuinely broken line (non-positive/NaN quantity, negative/
     // NaN price) or a negative grand total must never be submitted. A $0 line
@@ -2960,6 +3129,9 @@ export default function POS() {
     checkoutInFlightRef.current = true
     setLoading(true)
 
+    let submittedRequestId: string | null = null
+    try {
+    if (pricedCart.error || !pricedCart.quotes || pricedCart.quotes.size !== active.cart.length) throw new Error('money_precision_unavailable')
     const saleBranchId = cartTotals.branchIds.length === 1 ? cartTotals.branchIds[0] : null
 
     // Y2: ONE client_request_id per order until a checkout SUCCEEDS. The
@@ -2969,27 +3141,26 @@ export default function POS() {
     // instead of creating a second one. A fresh id per click (the old
     // behavior, generated inside the transport) made every retry a
     // potential duplicate sale.
-    const orderKey = String(resolvedActiveId || 'pos-order')
     let clientRequestId = String(active.checkoutRequestId || '').trim() || checkoutRequestIdsRef.current.get(orderKey)
     if (!clientRequestId) {
       clientRequestId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
         ? `sale_${crypto.randomUUID()}`
         : `sale_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
-      checkoutRequestIdsRef.current.set(orderKey, clientRequestId)
       // Persist before the network request starts. If iOS kills the process
       // after the server commits but before the response arrives, relaunching
       // and retrying the restored order reuses this exact idempotency key.
-      const durableOrders = orders.map((order) => (
-        order.id === resolvedActiveId ? { ...order, checkoutRequestId: clientRequestId as string } : order
-      ))
-      writePosDraft(posOrdersStorageKey, JSON.stringify(durableOrders))
-      setOrders(durableOrders)
     }
 
     // Y10: with no payment typed on an awaiting-payment sale, record NO
     // payment method -- "Cash" here would be a fabrication; the method is
     // chosen later when the sale is completed on the Sales page.
     const hasPaymentInput = paidUsdNum > 0 || paidKhrNum > 0
+    if (active.changeIsActual === true) {
+      // Validate the original text before denomination rounding can erase a
+      // sub-tick negative. Saved/frozen requests bypass this new-input path.
+      parsePosInternalAmount(active.changeGivenUsd)
+      parsePosInternalAmount(active.changeGivenKhr)
+    }
 
     const device = getClientDeviceInfo()
     const checkoutCustomer: CustomerRecord = isSelectableCustomerIdentity(active.customer)
@@ -2997,6 +3168,7 @@ export default function POS() {
       : { ...EMPTY_CUSTOMER }
     const saleData = {
       client_request_id: clientRequestId,
+      money_precision_version: 1,
       cashier_id:   user?.id || null,
       // Store the USERNAME as the cashier display (cashier_id is the real link).
       // Keeps new sales consistent with historical ones and with the rename
@@ -3026,15 +3198,22 @@ export default function POS() {
         product_discount_khr: i.product_discount_khr || 0,
         base_price_usd:    i.base_price_usd ?? i.applied_price_usd,
         base_price_khr:    i.base_price_khr ?? i.applied_price_khr,
+        ...(i.selling_price_input_usd !== undefined ? { selling_price_input_usd: i.selling_price_input_usd } : {}),
         manual_discount_type:  i.manual_discount_type  || null,
         manual_discount_value: i.manual_discount_value || 0,
         manual_discount_usd:   i.manual_discount_usd   || 0,
         manual_discount_khr:   i.manual_discount_khr   || 0,
-        cost_price_usd:    i.cost_price_usd    || i.purchase_price_usd    || 0,
-        cost_price_khr:    i.cost_price_khr    || i.purchase_price_khr    || 0,
-        purchase_price_usd: i.purchase_price_usd || 0,
-        purchase_price_khr: i.purchase_price_khr || 0,
-        total:     i.applied_price_usd * i.quantity,
+        cost_price_usd:    i.cost_price_usd ?? i.purchase_price_usd ?? null,
+        cost_price_khr:    i.cost_price_khr ?? i.purchase_price_khr ?? null,
+        purchase_price_usd: i.purchase_price_usd ?? null,
+        purchase_price_khr: i.purchase_price_khr ?? null,
+        total:     pricedCart.quotes!.get(getCartLineId(i))!.total_usd,
+        // Server compares the exact line quote before storing its own snapshot.
+        client_line_key: pricedCart.quotes!.get(getCartLineId(i))!.client_line_key,
+        pricing_source: pricedCart.quotes!.get(getCartLineId(i))!.pricing_source,
+        pricing_quote: pricedCart.quotes!.get(getCartLineId(i))!.pricing_quote,
+        total_usd: pricedCart.quotes!.get(getCartLineId(i))!.total_usd,
+        total_khr: pricedCart.quotes!.get(getCartLineId(i))!.total_khr,
         branch_id: i.branch_id || null,
         batch_id:          i.batch_id || null,
         batch_label:       i.batch_label || null,
@@ -3042,7 +3221,7 @@ export default function POS() {
         unlotted_stock:     i.unlotted_stock === true,
         damaged_lot_id:    i.damaged_lot_id || null,
       })),
-      subtotal_usd: subtotalUsd, subtotal_khr: Math.round(subtotalKhr),
+      subtotal_usd: subtotalUsd, subtotal_khr: subtotalKhr,
       discount_usd: discUsd,    discount_khr: discKhr,
       membership_discount_usd: isSelectableCustomerIdentity(active.customer) ? membershipDiscUsd : 0,
       membership_discount_khr: isSelectableCustomerIdentity(active.customer) ? membershipDiscKhr : 0,
@@ -3051,11 +3230,7 @@ export default function POS() {
       tax_usd:      taxUsd,     tax_khr:      taxKhr,
       total_usd:    totalUsd,   total_khr:    totalKhr,
       payment_method:   saleStatus === 'awaiting_payment' && !hasPaymentInput ? '' : paymentMethodSummary(activePaymentDetails),
-      payment_details: saleStatus === 'awaiting_payment' && !hasPaymentInput ? [] : activePaymentDetails.map((detail) => ({
-        method: detail.method.trim() || 'Cash',
-        amount_usd: parseFloat(detail.usd) || 0,
-        amount_khr: parseFloat(detail.khr) || 0,
-      })),
+      payment_details: saleStatus === 'awaiting_payment' && !hasPaymentInput ? [] : newNativeTender.details,
       payment_currency: (paidUsdNum > 0 && paidKhrNum > 0) ? 'MIXED' : paidKhrNum > 0 ? 'KHR' : 'USD',
       amount_paid_usd: paidUsdNum,
       amount_paid_khr: paidKhrNum,
@@ -3063,7 +3238,7 @@ export default function POS() {
       // back. Explicit zero counts; the computed-fill shortcut keeps the
       // canonical dual fallback and deliberately sends no intent marker.
       change_usd: active.changeIsActual === true
-        ? Math.max(0, Math.round((parseFloat(active.changeGivenUsd) || 0) * 100) / 100)
+        ? roundMoney2(active.changeGivenUsd.trim() || '0')
         : Math.max(0, changeUsd),
       change_khr: active.changeIsActual === true
         ? Math.max(0, cashierChangeKhr(parseFloat(active.changeGivenKhr) || 0))
@@ -3087,26 +3262,31 @@ export default function POS() {
       device_name: device.deviceName || null,
     }
 
-    try {
+      moneyCapability.assertReady()
+      assertActorSessionDispatchAllowed(checkoutScope)
+      const frozen = frozenSaleCheckoutBody(clientRequestId, undefined, () => saleData)
+      submittedRequestId = clientRequestId
+      const durableOrders = ordersRef.current.map(order => order.id === resolvedActiveId ? { ...order, checkoutRequestId: clientRequestId, checkoutPayload: frozen } : order)
+      const serialized = JSON.stringify(durableOrders)
+      writePosDraft(posOrdersStorageKey, serialized)
+      if (localStorage.getItem(posOrdersStorageKey) !== serialized && sessionStorage.getItem(posOrdersStorageKey) !== serialized) throw new SaleCheckoutRecoveryRequiredError()
+      assertActorSessionDispatchAllowed(checkoutScope)
+      checkoutRequestIdsRef.current.set(orderKey, clientRequestId)
+      ordersRef.current = durableOrders
+      setOrders(durableOrders)
       const result = await withLoaderTimeout(
-        () => createPosSale(saleData),
+        () => createPosSale(frozen, checkoutScope),
         'Create POS sale',
         POS_CHECKOUT_TIMEOUT_MS,
       )
+      if (!isActorReadScopeCurrent(checkoutScope)) return
       // The server returns the sale itself ({ id, receiptNumber, ... }) with no
       // top-level success flag, so the old raw success-flag check treated every
       // committed online sale as a failure -- an error toast, no receipt, the
       // order left open, while the sale had in fact landed. isSaleRecorded reads
       // the real signal: an id (or an explicit success) and no error.
       if (isSaleRecorded(result)) {
-        checkoutRequestIdsRef.current.delete(orderKey)
-        const receiptNumber = result.receiptNumber || result.receipt_number || businessDateTimeId()
-        setReceiptQueue(q => [...q, { ...saleData, id: result.id, receiptNumber, created_at: new Date().toISOString() }])
-        if (resolvedActiveId) closeOrder(resolvedActiveId)
-        void loadCatalogData('POS catalog after checkout')
-        // Trigger local inventory refresh immediately
-        window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
-        window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
+        finishRecorded(result)
       } else {
         // A warehouse line refused by the Worker reads back as the pack
         // sentence the sheet's greyed pill shows, not as the server's
@@ -3115,6 +3295,8 @@ export default function POS() {
         notify(localizeBranchRuleError(result.error, t) || t('error'), 'error')
       }
     } catch (e) {
+      if (!isActorReadScopeCurrent(checkoutScope)) return
+      if (submittedRequestId && (e as { code?: string })?.code === 'sale_pricing_quote_conflict') setOrders(previous => previous.map(order => order.id === resolvedActiveId && order.checkoutRequestId === submittedRequestId ? { ...order, checkoutReviewRequestId: submittedRequestId! } : order))
       // Y2: a timeout is NOT a confirmed failure -- the request keeps
       // running server-side and may commit. Say so, and say that retrying
       // is safe (the stable client_request_id makes the retry return the
@@ -3127,6 +3309,60 @@ export default function POS() {
       } else {
         notify(localizeBranchRuleError(getErrorMessage(e, t('error') || 'Error'), t), 'error')
       }
+    } finally {
+      checkoutInFlightRef.current = false
+      setLoading(false)
+    }
+  }
+
+  const reviewCheckoutPrices = async () => {
+    const orderId = resolvedActiveId, order = ordersRef.current.find(entry => entry.id === orderId)
+    if (loading || checkoutInFlightRef.current || !order?.checkoutRequestId || order.checkoutReviewRequestId !== order.checkoutRequestId) return
+    const requestId = order.checkoutRequestId, scope = captureActorReadScope('pos-price-review')
+    checkoutInFlightRef.current = true
+    setLoading(true)
+    try {
+      const transport = await getSaleWriteTransport()
+      assertActorSessionDispatchAllowed(scope)
+      const proof = await transport.recoverSaleCreateReceipt(requestId) as { committed?: boolean; response?: unknown }
+      if (!isActorReadScopeCurrent(scope)) return
+      if (proof.committed === true) {
+        const receipt = canonicalSaleReceipt(proof.response)
+        setReceiptQueue(previous => [...previous, receipt as SaleResult])
+        closeOrder(orderId, true)
+        return
+      }
+      if (proof.committed !== false) throw new SaleCheckoutRecoveryRequiredError()
+      const { getProductsByIds } = await import('../../api/productReadTransport.ts')
+      assertActorSessionDispatchAllowed(scope)
+      moneyCapability.assertReady()
+      const response = await getProductsByIds(order.cart.map(item => item.id), { surface: 'pos', money_precision_version: 1, metadata: '1', pricing_review: Date.now() }) as { items?: ProductRecord[]; promotion_rules?: PromotionRule[] }
+      if (!isActorReadScopeCurrent(scope)) return
+      if (!Array.isArray(response.items) || !Array.isArray(response.promotion_rules)) throw new Error('money_precision_unavailable')
+      const byId = new Map(response.items.map(item => [Number(item.id), item]))
+      const cart = order.cart.map(item => {
+        const fresh = byId.get(Number(item.id))
+        if (!fresh) throw new Error('money_precision_unavailable')
+        // Refresh pricing context only: lot, quantity, manual override and
+        // branch intent remain exactly what the cashier chose.
+        return { ...item, pricing_product: fresh }
+      })
+      quoteSaleCartLines(cart, response.promotion_rules, exchangeRate)
+      const current = ordersRef.current.find(entry => entry.id === orderId)
+      if (current?.checkoutRequestId !== requestId || current.checkoutReviewRequestId !== requestId) throw new SaleCheckoutRecoveryRequiredError()
+      assertActorSessionDispatchAllowed(scope)
+      const next = ordersRef.current.map(entry => entry.id === orderId ? { ...entry, cart, checkoutRequestId: '', checkoutPayload: undefined, checkoutReviewRequestId: undefined } : entry)
+      const serialized = JSON.stringify(next)
+      writePosDraft(posOrdersStorageKey, serialized)
+      if (localStorage.getItem(posOrdersStorageKey) !== serialized && sessionStorage.getItem(posOrdersStorageKey) !== serialized) throw new SaleCheckoutRecoveryRequiredError()
+      assertActorSessionDispatchAllowed(scope)
+      checkoutRequestIdsRef.current.delete(orderId)
+      ordersRef.current = next
+      setPromotionRules(response.promotion_rules)
+      setPromotionReadVersion(1)
+      setOrders(next)
+    } catch (error) {
+      if (isActorReadScopeCurrent(scope)) notify(getErrorMessage(error, t('money_precision_unavailable')), 'error')
     } finally {
       checkoutInFlightRef.current = false
       setLoading(false)
@@ -3475,6 +3711,7 @@ export default function POS() {
                 </div>
               ) : (
                 <>
+                  {active.checkoutRequestId ? <div role="status" className="px-3 py-2 text-xs text-amber-800 dark:text-amber-300"><p>{t('money_checkout_recovery_required')}</p>{active.checkoutReviewRequestId === active.checkoutRequestId ? <button type="button" className="btn-secondary mt-2" disabled={loading} onClick={reviewCheckoutPrices}>{posCopy('Review prices', 'ពិនិត្យតម្លៃ')}</button> : null}</div> : null}
                   <div className="flex items-center justify-between px-3 pt-2 pb-1">
                     <span className="text-xs text-gray-400 font-medium">
                       {(active.cart.length === 1 ? (t('pos_item_line') || '{count} item') : (t('pos_item_lines') || '{count} items')).replace('{count}', String(active.cart.length))}
@@ -3484,7 +3721,7 @@ export default function POS() {
                     <button onClick={() => patchActive({ cart: [] })} className="text-xs text-red-500 hover:underline">{t('clear_cart')}</button>
                   </div>
                   {active.cart.map(item => (
-                    <CartItem key={item.cart_line_id || `${item.id}-${item.price_mode || 'selling'}-${item.branch_id || 'none'}`} item={item} branches={branches} t={t}
+                    <CartItem key={item.cart_line_id || `${item.id}-${item.price_mode || 'selling'}-${item.branch_id || 'none'}`} item={item} branches={branches} t={t} moneyPrecisionVersion={moneyVersion} pricingQuote={(active.checkoutRequestId ? pendingPreview?.lines : pricedCart.quotes)?.get(getCartLineId(item))}
                       onQtyChange={updateQty} onPriceChange={updatePrice} onDiscountChange={updateDiscount}
                       onBranchChange={updateItemBranch} onToggleTierTag={toggleTierTag}
                       onRemove={id => patchActive({ cart: active.cart.filter(i => getCartLineId(i) !== id) })}
@@ -3810,6 +4047,7 @@ export default function POS() {
             <div className="border-t border-gray-200 dark:border-gray-700 px-3 pt-3 pb-2 space-y-3">
               {/* Order summary */}
               <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-2.5 space-y-1 text-xs">
+                {moneyVersion === 1 && v1Basket.error && active.cart.length > 0 ? <div role="alert" className="text-red-600">{t('money_precision_unavailable')}</div> : null}
                 <div className="flex justify-between text-gray-500"><span>{t('subtotal')}</span><span>{fmtUSD(subtotalUsd)}</span></div>
                 {discUsd > 0 && <div className="flex justify-between text-red-500"><span>{t('discount')}</span><span>-{fmtUSD(discUsd)}</span></div>}
                 {membershipDiscUsd > 0 && <div className="flex justify-between text-emerald-600"><span>{posCopy('Membership discount', 'បញ្ចុះតម្លៃសមាជិក')}</span><span>-{fmtUSD(membershipDiscUsd)}</span></div>}
@@ -3820,11 +4058,12 @@ export default function POS() {
                     <span>{active.deliveryFeePaidBy === DELIVERY_FEE_PAYER.CUSTOMER ? `+${fmtUSD(feeUsd)}` : `${fmtUSD(feeUsd)} included`}</span>
                   </div>
                 )}
+                {basketRounding && basketRounding.roundingAdjustment4 !== 0 ? <div className="flex justify-between text-gray-500"><span>{t('money_rounding_adjustment')}</span><span>{basketRounding.roundingAdjustment4 < 0 ? '-' : '+'}{fmtUSD(Math.abs(roundMoney2(basketRounding.roundingAdjustment4)))}</span></div> : null}
                 <div className="flex justify-between font-bold text-gray-900 dark:text-white text-sm border-t border-gray-200 dark:border-gray-600 pt-1.5 mt-1">
                   <span>{t('total')}</span>
                   {/* One row (user, Aug 28): USD with the KHR beside it, not stacked. */}
                   <span className="text-right">
-                    {fmtUSD(totalUsd)} <span className="text-xs font-normal text-gray-400">({fmtKHR(totalKhr)})</span>
+                    {moneyVersion === 1 && v1Basket.error ? '—' : <>{fmtUSD(totalUsd)} <span className="text-xs font-normal text-gray-400">({fmtKHR(totalKhr)})</span></>}
                   </span>
                 </div>
                 {/* Physical-cash figure: rounded up to 100៛ for a non-cash

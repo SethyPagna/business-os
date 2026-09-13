@@ -235,8 +235,8 @@ interface SaleItemAddition {
 // that passes the callback stopped compiling against the modal that receives
 // it. A shape declared once cannot be updated in two places out of three.
 
-type SaleMutationReview = { client_request_id: string; expected_exchange_rate: number; expected_updated_at?: string }
-type SaleMutationUiResult = boolean | { exchangeRateChanged: number } | { mutationError: string }
+type SaleMutationReview = { client_request_id: string; expected_exchange_rate: number; expected_updated_at?: string; money_precision_version?: 1; expected_header_quote?: import('../../utils/saleMutationHeaderQuote.ts').SaleMutationHeaderQuote }
+type SaleMutationUiResult = boolean | { exchangeRateChanged: number } | { mutationError: string; code?: string; header_quote?: unknown; proven_uncommitted?: boolean } | { committed: true; response: unknown }
 type SaleStatusUiResult = boolean | { exchangeRateChanged: number } | { settlementError: string } | { statusUpdatedAt: string }
 
 function statusReplayExtra(request: PreparedSaleStatusRequest): Record<string, unknown> | null {
@@ -1351,6 +1351,8 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // closure dies on reload, while the server row's Undo survives it. The
   // history bar is refreshed so that row appears immediately.
   const handleAddSaleItems = async (saleId: number | string, items: SaleItemAddition[], review: SaleMutationReview): Promise<SaleMutationUiResult> => {
+    const requestSecurity = statusSecurityRef.current
+    const isCurrent = () => aliveRef.current && statusSecurityRef.current === requestSecurity
     if (!canAddSaleItems) {
       notify?.(translateOr('perm_view_only_action', 'View only: you do not have permission to change sales.'), 'error')
       return false
@@ -1363,6 +1365,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         'Add items to sale',
         SALES_ADD_ITEMS_MUTATION_TIMEOUT_MS,
       ) as { addedLines?: number; stockMoved?: boolean } | null
+      if (!isCurrent()) return false
       const added = Number(result?.addedLines || items.length)
       // The outcome names what actually happened to STOCK, because that is
       // the part a shopkeeper cannot see from the receipt.
@@ -1372,13 +1375,19 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
           : (translateOr('sale_items_added_no_stock', 'Added {n} item(s) to the sale. Stock moves when the sale is completed.') || '').replace('{n}', String(added)),
       )
       await loadSales(true)
+      if (!isCurrent()) return false
       void loadSalesStats()
       actionHistory.refreshServerItems()
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'products' } }))
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
-      return true
+      return { committed: true, response: result }
     } catch (error) {
+      if (!isCurrent()) return false
+      if (error && typeof error === 'object' && (error as { code?: unknown }).code === 'sale_header_quote_conflict') {
+        const conflict = error as { header_quote?: unknown; proven_uncommitted?: unknown }
+        return { mutationError: getErrorMessage(error, 'sale_header_quote_conflict'), code: 'sale_header_quote_conflict', header_quote: conflict.header_quote, proven_uncommitted: conflict.proven_uncommitted === true }
+      }
       if (error && typeof error === 'object' && (error as { code?: unknown }).code === 'exchange_rate_changed') {
         const current = (error as { current?: unknown }).current
         const exchangeRateChanged = current && typeof current === 'object' ? Number((current as { exchange_rate?: unknown }).exchange_rate) : NaN
@@ -1389,6 +1398,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
           () => getSaleLineReceipt(numericId, 'add_items', { items, notes: '', ...review }),
           (attempt) => new Promise((resolve) => window.setTimeout(resolve, 250 * (attempt + 1))),
         )
+        if (!isCurrent()) return false
         if (receipt) {
           dispatchResolvedSyncError({
             errorId: (error as { syncErrorId?: string }).syncErrorId,
@@ -1396,7 +1406,9 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
             code: (error as { code?: string }).code || 'write_outcome_unknown',
           })
           await loadSales(true)
+          if (!isCurrent()) return false
           const committedSale = await readAuthoritativeSale(numericId, (row) => mutationVersionAtLeast(row.updated_at, receipt.updated_at))
+          if (!isCurrent()) return false
           if (committedSale) {
             salesRef.current = salesRef.current.map((row) => Number(row.id) === numericId ? committedSale : row)
             setSales(salesRef.current)
@@ -1408,7 +1420,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
           window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'products' } }))
           window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
           notify(translateOr('sale_items_added', 'Items were added to the sale.'))
-          return true
+          return { committed: true, response: committedSale || receipt }
         }
       }
       if (isWriteConflict(error)) {
@@ -1425,6 +1437,8 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // a client-side history entry would be a second, weaker record of the same
   // act, and its undo closure would die on reload.
   const handleAmendSale = async (saleId: number | string, request: SaleAmendmentRequest): Promise<SaleMutationUiResult> => {
+    const requestSecurity = statusSecurityRef.current
+    const isCurrent = () => aliveRef.current && statusSecurityRef.current === requestSecurity
     if (!canAmendSales) {
       notify?.(translateOr('perm_view_only_action', 'View only: you do not have permission to change sales.'), 'error')
       return false
@@ -1438,6 +1452,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         'Amend sale',
         SALES_ADD_ITEMS_MUTATION_TIMEOUT_MS,
       ) as { stockMoved?: boolean; unitsMoved?: number; stockSkipped?: boolean } | null
+      if (!isCurrent()) return false
       // The outcome names what actually happened to STOCK, because that is the
       // part a shopkeeper cannot see from the receipt -- and a stock-skipped
       // sale says so explicitly rather than looking like a silent no-op.
@@ -1450,13 +1465,19 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
             : translateOr('sale_amended', 'Sale updated.'),
       )
       await loadSales(true)
+      if (!isCurrent()) return false
       void loadSalesStats()
       actionHistory.refreshServerItems()
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'products' } }))
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
-      return true
+      return { committed: true, response: result }
     } catch (error) {
+      if (!isCurrent()) return false
+      if (error && typeof error === 'object' && (error as { code?: unknown }).code === 'sale_header_quote_conflict') {
+        const conflict = error as { header_quote?: unknown; proven_uncommitted?: unknown }
+        return { mutationError: getErrorMessage(error, 'sale_header_quote_conflict'), code: 'sale_header_quote_conflict', header_quote: conflict.header_quote, proven_uncommitted: conflict.proven_uncommitted === true }
+      }
       if (error && typeof error === 'object' && (error as { code?: unknown }).code === 'exchange_rate_changed') {
         const current = (error as { current?: unknown }).current
         const exchangeRateChanged = current && typeof current === 'object' ? Number((current as { exchange_rate?: unknown }).exchange_rate) : NaN
@@ -1464,6 +1485,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       }
       if (directMutationOutcomeIsUnknown(error)) {
         const applied = await resolveUnknownSaleWrite(numericId, request, 'amendment', error)
+        if (!isCurrent()) return false
         if (applied) {
           notify(translateOr('sale_amended', 'Sale updated.'))
           return true

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { transformSync } from 'esbuild'
+import ts from 'typescript'
 import {
   DIRECT_MUTATION_MAX_PENDING,
   DIRECT_MUTATION_RECONCILE_AFTER_MS,
@@ -13,6 +14,10 @@ import {
   pendingDirectMutationForScope,
   savePendingDirectMutation,
   savePendingDirectMutationSlot,
+  releasePendingSaleLineMutation,
+  withSaleLineMutationLock,
+  runSaleLineMutation,
+  replaceReviewedSaleLineHeader,
 } from '../src/utils/directMutationRequest.ts'
 
 const require = createRequire(import.meta.url)
@@ -48,6 +53,119 @@ async function test(name: string, fn: () => unknown | Promise<unknown>): Promise
   try { await fn(); console.log(`PASS ${name}`) }
   catch (error) { failed += 1; console.error(`FAIL ${name}`); console.error(error) }
 }
+
+await test('new sale attempts preserve corrupt evidence and cannot overwrite unresolved requests', () => {
+  const storage = new MemoryStorage(), actor = 'origin-runtime:user7', entity = '17'
+  const body = { client_request_id: 'request-a', money_precision_version: 1, expected_updated_at: 'before', expected_exchange_rate: 4000,
+    kind: 'line_removed', sale_item_id: 70, expected_header_quote: { version: 1 } }
+  savePendingDirectMutation('sale-amendment', actor, entity, body, storage)
+  assert.deepEqual(loadPendingDirectMutation('sale-amendment', actor, entity, storage)!.body, body)
+  assert.equal(loadPendingDirectMutation('sale-amendment', 'origin-runtime:user8', entity, storage), null)
+  assert.equal(loadPendingDirectMutation('sale-amendment', 'other-runtime:user7', entity, storage), null)
+  assert.throws(() => savePendingDirectMutation('sale-amendment', actor, entity, { ...body, client_request_id: 'request-b' }, storage))
+  assert.throws(() => savePendingDirectMutation('sale-amendment', actor, entity, null, storage))
+  assert.throws(() => releasePendingSaleLineMutation('sale-amendment', actor, entity, { ...body, client_request_id: 'request-b' }, storage))
+  assert.throws(() => replaceReviewedSaleLineHeader('sale-amendment', actor, entity, body, { ...body, client_request_id: 'request-b', sale_item_id: 71 }, storage))
+  storage.failWrites = true
+  assert.throws(() => replaceReviewedSaleLineHeader('sale-amendment', actor, entity, body, { ...body, client_request_id: 'request-b' }, storage))
+  assert.deepEqual(loadPendingDirectMutation('sale-amendment', actor, entity, storage)!.body, body)
+  storage.failWrites = false
+  releasePendingSaleLineMutation('sale-amendment', actor, entity, body, storage)
+  const key = directMutationStorageKey('sale-amendment', actor, entity)
+  for (const invalid of ['{broken', JSON.stringify({ version: 2, kind: 'sale-amendment', actorId: actor, entityId: entity, createdAt: 1, reconcileAfter: 2, body: { client_request_id: 'orphan' } })]) {
+    storage.setItem(key, invalid)
+    assert.throws(() => loadPendingDirectMutation('sale-amendment', actor, entity, storage))
+    assert.throws(() => savePendingDirectMutation('sale-amendment', actor, entity, body, storage))
+    assert.equal(storage.getItem(key), invalid)
+  }
+  const quota = new MemoryStorage(); quota.failWrites = true
+  assert.throws(() => savePendingDirectMutation('sale-amendment', actor, entity, body, quota))
+  assert.throws(() => savePendingDirectMutation('sale-add-items', actor, entity, { client_request_id: 'id-only' }, new MemoryStorage()))
+})
+
+await test('sale-line lock serializes competing reservation and rechecks actor after admission', async () => {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
+  let tail = Promise.resolve()
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { locks: { request: (_name: string, _options: unknown, action: () => unknown) => {
+    const next = tail.then(action); tail = next.then(() => undefined, () => undefined); return next
+  } } } })
+  try {
+    const storage = new MemoryStorage(), body = { client_request_id: 'one', money_precision_version: 1, expected_updated_at: 'before', expected_exchange_rate: 4000, kind: 'line_removed', expected_header_quote: {} }
+    const results = await Promise.allSettled(['one', 'two'].map(id => withSaleLineMutationLock('runtime:user7', 17, () => true,
+      () => savePendingDirectMutation('sale-amendment', 'runtime:user7', 17, { ...body, client_request_id: id }, storage))))
+    assert.equal(results.filter(result => result.status === 'fulfilled').length, 1)
+    assert.equal(loadPendingDirectMutation('sale-amendment', 'runtime:user7', 17, storage)!.body.client_request_id, 'one')
+    let wrote = false
+    await assert.rejects(withSaleLineMutationLock('runtime:user7', 17, () => false, () => { wrote = true }))
+    assert.equal(wrote, false)
+    Object.defineProperty(globalThis, 'navigator', { configurable: true, value: {} })
+    await assert.rejects(withSaleLineMutationLock('runtime:user7', 17, () => true, () => { wrote = true }))
+    assert.equal(wrote, false)
+  } finally { if (descriptor) Object.defineProperty(globalThis, 'navigator', descriptor); else Reflect.deleteProperty(globalThis, 'navigator') }
+})
+
+await test('actual sale runner retains lost acknowledgement, reopens read-only, retries exact and fences late actors', async () => {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { locks: { request: async (_name: string, _options: unknown, action: () => unknown) => action() } } })
+  try {
+    const storage = new MemoryStorage(), sent: unknown[] = []
+    const body = { client_request_id: 'lost-ack', money_precision_version: 1, expected_updated_at: 'original', expected_exchange_rate: 4000, kind: 'line_removed', sale_item_id: 1, expected_header_quote: {} }
+    let current = true
+    const options = { kind: 'sale-amendment' as const, actorId: 'runtime:actor7', entityId: '17', storage, isCurrent: () => current,
+      readReceipt: async () => ({ committed: false }), send: async (payload: Record<string, unknown>) => { sent.push(payload); throw new Error('lost acknowledgement') }, isCommitted: (result: unknown) => result === true }
+    await assert.rejects(runSaleLineMutation({ ...options, body }))
+    assert.deepEqual(loadPendingDirectMutation('sale-amendment', options.actorId, '17', storage)!.body, body)
+    assert.equal((await runSaleLineMutation({ ...options, readOnly: true })).committed, false)
+    assert.equal(sent.length, 1, 'reopen probe must be read-only')
+    await assert.rejects(runSaleLineMutation({ ...options, readReceipt: async () => { throw new Error('403') } }))
+    assert.equal(sent.length, 1, 'denied proof never falls through to write')
+    await assert.rejects(runSaleLineMutation({ ...options, body: { ...body, expected_updated_at: 'new' } }))
+    const result = await runSaleLineMutation({ ...options, send: async payload => { sent.push(payload); return true } })
+    assert.equal(result.committed, true); assert.deepEqual(sent[1], body)
+    assert.equal(loadPendingDirectMutation('sale-amendment', options.actorId, '17', storage), null)
+    await assert.rejects(runSaleLineMutation({ ...options, body, send: async () => { current = false; return true } }))
+    assert.ok(loadPendingDirectMutation('sale-amendment', options.actorId, '17', storage), 'late actor success cannot erase original owner recovery')
+    current = true
+    const recovered = await runSaleLineMutation({ ...options, readOnly: true, readReceipt: async () => ({ committed: true, response: { totalUsd: 29 } }) })
+    assert.deepEqual(recovered.response, { totalUsd: 29 }); assert.equal(sent.length, 2)
+  } finally { if (descriptor) Object.defineProperty(globalThis, 'navigator', descriptor); else Reflect.deleteProperty(globalThis, 'navigator') }
+})
+
+await test('actual full runtime reset preserves exact sale/return-create evidence across logout and account changes', async () => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'window')
+  const runtime = { exports: {} as { resetClientRuntimeState: (options: Record<string, unknown>) => Promise<void> } }
+  let cleanup: () => Promise<void> = async () => {}
+  const source = readFileSync(new URL('../src/platform/runtime/clientRuntime.ts', import.meta.url), 'utf8')
+  const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
+  new Function('require', 'module', 'exports', compiled)((id: string) => {
+    if (id === '../../constants.ts') return require('../src/constants.ts')
+    if (id === '../../api/localDb.ts') return { resetLocalMirrorDb: () => cleanup(), resetLocalMirrorDbPreservingOfflineWork: () => cleanup(), clearLocalMirrorTables: () => cleanup() }
+    throw new Error(`unexpected runtime dependency ${id}`)
+  }, runtime, runtime.exports)
+  try {
+    for (const options of [{ clearAuth: true, preserveOfflineWork: true, preserveUiDrafts: true }, {}, { preserveOfflineWork: true }]) {
+      const localStorage = new MemoryStorage(), sessionStorage = new MemoryStorage()
+      Object.defineProperty(globalThis, 'window', { configurable: true, value: { localStorage, sessionStorage } })
+      const protectedKeys = ['businessos_pending_sale-add-items_v2:origin:7:17', 'businessos_pending_sale-amendment_v2:origin:8:17', 'businessos_pending_return_create_v1:origin:7']
+      for (const store of [localStorage, sessionStorage]) {
+        for (const key of protectedKeys) store.setItem(key, '{malformed-but-preserved')
+        store.setItem('businessos_private_cache', 'private')
+      }
+      let finish!: () => void, entered!: () => void
+      const enteredPromise = new Promise<void>(resolve => { entered = resolve })
+      cleanup = async () => { entered(); await new Promise<void>(resolve => { finish = resolve }) }
+      const reset = runtime.exports.resetClientRuntimeState({ ...options, preserveServiceWorker: true })
+      await enteredPromise
+      localStorage.setItem(protectedKeys[0], 'newer-cross-tab-evidence')
+      finish(); await reset
+      assert.equal(localStorage.getItem(protectedKeys[0]), 'newer-cross-tab-evidence', 'async cleanup must not resurrect a snapshot')
+      for (const key of protectedKeys.slice(1)) assert.equal(localStorage.getItem(key), '{malformed-but-preserved')
+      for (const key of protectedKeys) assert.equal(sessionStorage.getItem(key), '{malformed-but-preserved')
+      assert.equal(localStorage.getItem('businessos_private_cache'), null)
+      assert.equal(sessionStorage.getItem('businessos_private_cache'), null)
+    }
+  } finally { if (original) Object.defineProperty(globalThis, 'window', original); else Reflect.deleteProperty(globalThis, 'window') }
+})
 
 await test('pending bodies are frozen and scoped by actor plus entity', () => {
   const storage = new MemoryStorage()

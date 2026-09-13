@@ -225,9 +225,10 @@ const addSearchEffect = detail.slice(
 )
 assert.ok(addSearchEffect.length > 100, 'add-items search effect not found')
 assert.doesNotMatch(addSearchEffect, /setAddSheetGroup|setAddLines|stagedLineFromSheetPick/)
-assert.equal((detail.match(/stagedLineFromSheetPick\(/g) || []).length, 1, 'exactly one call site')
+assert.equal((detail.match(/stagedLineFromSheetPick\(/g) || []).length, 2, 'only explicit add and replacement choices may capture a line')
 assert.match(detail, /<ProductOptionSheet[\s\S]{0,1400}onPick=\{\(picked, selection\) => \{[\s\S]{0,300}stageAddLineFromPick\(/)
-assert.match(detail, /const stageAddLineFromPick = [\s\S]{0,400}stagedLineFromSheetPick\(picked, selection\)/)
+assert.match(detail, /const stageAddLineFromPick = [\s\S]{0,400}stagedLineFromSheetPick\(picked, selection, 1\)/)
+assert.match(detail, /const stageReplacement = [\s\S]{0,1300}stagedLineFromSheetPick\(candidate, \{ branchId \}, 1\)/)
 // The results grid only OPENS the sheet; it never commits a pick.
 assert.match(detail, /onOpen=\{\(\) => setAddSheetGroup\(candidate\)\}/)
 
@@ -240,7 +241,7 @@ assert.match(addLineRules, /import \{ branchStockQuantity, type BranchStockRow \
 // POS behaviour: a pick adds ONE unit at the row's own selling price, and a
 // repeat pick bumps the quantity instead of duplicating the row.
 assert.match(addLineRules, /quantity: 1,/)
-assert.match(addLineRules, /unitPriceUsd: price,/)
+assert.match(addLineRules, /unitPriceUsd: moneyPrecisionVersion === 1 \? sellingPriceCeilCent\(price\) : price,/)
 assert.match(addLineRules, /priceText: price > 0 \? String\(price\) : '0'/)
 assert.match(addLineRules, /quantity: merged\[index\]\.quantity \+ next\.quantity/)
 // The cap is the shelf the sheet was read at, narrowed by the picked lot --
@@ -251,11 +252,14 @@ assert.match(posSheet, /branchStockQuantity\(variant, branchId\) \?\? 0/)
 assert.ok(en.no_stock_in_branch && km.no_stock_in_branch)
 assert.ok(en.not_enough_stock && km.not_enough_stock)
 assert.ok(en.add && km.add)
-assert.match(detail, /unitPriceUsd: toNumber\(text\)/)
+assert.match(detail, /sellingPriceInputUsd: text, unitPriceUsd:[^\n]*sellingPriceCeilCent\(text\)/)
 assert.match(detail, /batch_id: line\.batchId/)
 assert.match(detail, /batch_label: line\.batchLabel/)
 assert.match(detail, /batch_expiry_date: line\.batchExpiryDate/)
-assert.match(detail, /applied_price_usd: line\.unitPriceUsd/)
+assert.match(detail, /\.\.\.stagedLinePricingIntent\(line, savedExchangeRate\)/)
+// Runtime coverage of these two named choices and their actual submit/confirm
+// callbacks includes exact pricing quotes, branch/lot and refusal invariants.
+await import('./posMoneyV1.test.ts')
 // 7b. The staged lot caption prints ONE date. `line.batchLabel` is
 //     batchDisplayLabel's answer, which for a lot with no custom code already
 //     IS the received date (local, day-first); the caption appended the raw

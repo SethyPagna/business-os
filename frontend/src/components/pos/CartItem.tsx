@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { normalizePriceValue } from '../../utils/pricing.ts'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 import { computeCartLineSavings } from './posCore.ts'
@@ -17,6 +18,7 @@ interface CartLineItem {
   quantity: number
   branch_id?: string | number | null
   price_mode?: string
+  display_price_mode?: 'selling' | 'wholesale'
   product_discount_label?: string | null
   applied_price_usd: number
   applied_price_khr: number
@@ -57,6 +59,8 @@ interface BranchOption {
 }
 
 interface CartItemProps {
+  pricingQuote?: { total_usd: number; total_khr: number; manual_discount_usd: number }
+  moneyPrecisionVersion?: 0 | 1
   item: CartLineItem
   branches: BranchOption[]
   t?: Translate
@@ -111,8 +115,21 @@ export default function CartItem({
   usdSymbol,
   khrSymbol,
   showItemDiscount = true,
+  moneyPrecisionVersion = 0,
+  pricingQuote,
 }: CartItemProps) {
   const lineId = item.cart_line_id || item.id
+  const [moneyDraft, setMoneyDraft] = useState<{ field: 'usd' | 'khr' | 'discount'; text: string; original: string } | null>(null)
+  const beginMoneyEdit = (field: 'usd' | 'khr' | 'discount', value: number) => {
+    if (moneyPrecisionVersion === 1) setMoneyDraft({ field, text: String(value), original: String(value) })
+  }
+  const commitMoneyEdit = () => {
+    if (!moneyDraft) return
+    const draft = moneyDraft; setMoneyDraft(null)
+    if (draft.text === draft.original) return
+    if (draft.field === 'discount') onDiscountChange(lineId, item.manual_discount_type ?? 'fixed', draft.text)
+    else onPriceChange(lineId, draft.field, draft.text)
+  }
   // Wholesale is the only discounted tier a line can be marked with since the
   // 2026-09-04 ruling deleted the "VIP" tier -- it was the wholesale price
   // misnamed, and migration 0111 moved its values into wholesale_price_*. The
@@ -120,7 +137,7 @@ export default function CartItem({
   // unhighlighted) after the marker is switched off, and it uses the shared
   // wholesale_price key so it matches the POS grid/detail sheet.
   const hasWholesalePrice = Number(item.wholesale_price_usd || 0) > 0 || Number(item.wholesale_price_khr || 0) > 0
-  const wholesaleTagActive = item.price_mode === 'wholesale'
+  const wholesaleTagActive = (item.display_price_mode ?? item.price_mode) === 'wholesale'
   const promotionPriceLabel = item.product_discount_label || translate(t, 'promotion_price', 'Discount price')
   const savings = showItemDiscount ? computeCartLineSavings(item) : null
 
@@ -236,9 +253,10 @@ export default function CartItem({
           <input
             className="w-10 border-x border-gray-200 bg-transparent py-1 text-center text-xs text-gray-900 dark:border-gray-600 dark:text-white"
             type="number"
-            min="1"
+            min={moneyPrecisionVersion === 1 ? '0' : '1'}
+            step={moneyPrecisionVersion === 1 ? 'any' : '1'}
             value={item.quantity}
-            onChange={(event) => onQtyChange(lineId, Number.parseInt(event.target.value, 10) || 1)}
+            onChange={(event) => onQtyChange(lineId, moneyPrecisionVersion === 1 ? Number(event.target.value) : Number.parseInt(event.target.value, 10) || 1)}
           />
           <button type="button" className="flex h-7 w-7 items-center justify-center text-sm text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700" onClick={() => onQtyChange(lineId, item.quantity + 1)}>+</button>
         </div>
@@ -252,8 +270,10 @@ export default function CartItem({
             className="input w-full py-1 pl-5 text-xs"
             type="number"
             step="any"
-            value={normalizePriceValue((item.base_price_usd ?? item.applied_price_usd) || 0).toFixed(2)}
-            onChange={(event) => onPriceChange(lineId, 'usd', event.target.value)}
+            value={moneyPrecisionVersion === 1 ? moneyDraft?.field === 'usd' ? moneyDraft.text : String(item.base_price_usd ?? item.applied_price_usd) : normalizePriceValue((item.base_price_usd ?? item.applied_price_usd) || 0).toFixed(2)}
+            onFocus={() => beginMoneyEdit('usd', item.base_price_usd ?? item.applied_price_usd)}
+            onChange={(event) => moneyPrecisionVersion === 1 ? setMoneyDraft(current => ({ field: 'usd', text: event.target.value, original: current?.original ?? String(item.base_price_usd ?? item.applied_price_usd) })) : onPriceChange(lineId, 'usd', event.target.value)}
+            onBlur={commitMoneyEdit}
           />
         </div>
         <div className="relative min-w-[70px] flex-1">
@@ -263,8 +283,10 @@ export default function CartItem({
             step="any"
             // KHR is a whole-riel currency everywhere else in the app --
             // showing 4100.00 here was the one decimal-riel holdout.
-            value={normalizePriceValue((item.base_price_khr ?? item.applied_price_khr) || 0).toFixed(0)}
-            onChange={(event) => onPriceChange(lineId, 'khr', event.target.value)}
+            value={moneyPrecisionVersion === 1 ? moneyDraft?.field === 'khr' ? moneyDraft.text : String(item.base_price_khr ?? item.applied_price_khr) : normalizePriceValue((item.base_price_khr ?? item.applied_price_khr) || 0).toFixed(0)}
+            onFocus={() => beginMoneyEdit('khr', item.base_price_khr ?? item.applied_price_khr)}
+            onChange={(event) => moneyPrecisionVersion === 1 ? setMoneyDraft(current => ({ field: 'khr', text: event.target.value, original: current?.original ?? String(item.base_price_khr ?? item.applied_price_khr) })) : onPriceChange(lineId, 'khr', event.target.value)}
+            onBlur={commitMoneyEdit}
           />
           <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">{khrSymbol}</span>
         </div>
@@ -295,8 +317,10 @@ export default function CartItem({
           step="any"
           disabled={!item.manual_discount_type}
           placeholder={item.manual_discount_type === 'percent' ? '0%' : '0.00'}
-          value={item.manual_discount_type ? String(item.manual_discount_value ?? '') : ''}
-          onChange={(event) => onDiscountChange(lineId, item.manual_discount_type ?? 'fixed', event.target.value)}
+          value={moneyPrecisionVersion === 1 && moneyDraft?.field === 'discount' ? moneyDraft.text : item.manual_discount_type ? String(item.manual_discount_value ?? '') : ''}
+          onFocus={() => beginMoneyEdit('discount', item.manual_discount_value ?? 0)}
+          onChange={(event) => moneyPrecisionVersion === 1 ? setMoneyDraft(current => ({ field: 'discount', text: event.target.value, original: current?.original ?? String(item.manual_discount_value ?? 0) })) : onDiscountChange(lineId, item.manual_discount_type ?? 'fixed', event.target.value)}
+          onBlur={commitMoneyEdit}
         />
         {item.manual_discount_type ? (
           <button
@@ -313,11 +337,11 @@ export default function CartItem({
       <div className="flex items-baseline justify-between">
         <span className="text-xs text-gray-400">{translate(t, 'line', 'Line')}</span>
         <div className="text-right">
-          <span className="text-sm font-bold text-blue-600">{fmtUSD(item.applied_price_usd * item.quantity)}</span>
-          {item.applied_price_khr > 0 ? <div className="text-xs text-gray-400">{fmtKHR(item.applied_price_khr * item.quantity)}</div> : null}
-          {item.manual_discount_usd ? (
+          <span className="text-sm font-bold text-blue-600">{moneyPrecisionVersion === 1 ? pricingQuote ? fmtUSD(pricingQuote.total_usd) : '—' : fmtUSD(item.applied_price_usd * item.quantity)}</span>
+          {(moneyPrecisionVersion === 1 ? pricingQuote && pricingQuote.total_khr > 0 : item.applied_price_khr > 0) ? <div className="text-xs text-gray-400">{fmtKHR(moneyPrecisionVersion === 1 ? pricingQuote!.total_khr : item.applied_price_khr * item.quantity)}</div> : null}
+          {(moneyPrecisionVersion === 1 ? pricingQuote?.manual_discount_usd : item.manual_discount_usd) ? (
             <div {...getKhmerTextProps(translate(t, 'discount', 'Discount'), 'text-[10px] font-medium text-amber-600 dark:text-amber-400')}>
-              -{fmtUSD(item.manual_discount_usd * item.quantity)} {translate(t, 'discount', 'discount')}
+              -{fmtUSD(moneyPrecisionVersion === 1 ? pricingQuote!.manual_discount_usd : (item.manual_discount_usd || 0) * item.quantity)} {translate(t, 'discount', 'discount')}
             </div>
           ) : null}
         </div>

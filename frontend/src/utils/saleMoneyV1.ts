@@ -1,4 +1,5 @@
 import { multiplyMoney4, nativeChangeAmounts, roundMoney2, roundMoney4, subtractMoney4, sumMoney4 } from './moneyPrecision.ts'
+import { validateCapturedSaleBasket, type CapturedProductIdentityBinding } from './saleItemPricing.ts'
 
 export const SALE_MONEY_VERSION = 1 as const
 export class SaleMoneyUnavailableError extends Error {
@@ -15,6 +16,15 @@ const MAX_MONEY = 100_000_000_000
 const moneyNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= MAX_MONEY
 const nonnegativeMoney = (value: unknown): value is number => moneyNumber(value) && value >= 0
 const plainRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
+/** Read only from an authenticated canonical sale response. These bindings
+ * are row-specific server evidence, never client mutation intent or aliases. */
+export function serverPricingIdentityBindings(value: unknown): CapturedProductIdentityBinding[] {
+  if (value === undefined) return []
+  const keys = ['sale_id', 'sale_item_id', 'captured_product_id', 'current_product_id']
+  if (!Array.isArray(value) || value.length > 10_000 || value.some(row => !plainRecord(row)
+    || Object.keys(row).length !== keys.length || keys.some(key => !Number.isSafeInteger(row[key]) || Number(row[key]) <= 0))) throw new SaleMoneyUnavailableError()
+  return value as CapturedProductIdentityBinding[]
+}
 function validSaleLines(value: unknown): value is Record<string, unknown>[] {
   return Array.isArray(value) && value.length > 0 && value.length <= 10_000 && value.every(line => plainRecord(line)
     && typeof line.quantity === 'number' && Number.isFinite(line.quantity) && line.quantity > 0 && line.quantity <= MAX_MONEY
@@ -47,6 +57,7 @@ export function frozenSaleCheckoutBody(
   return JSON.parse(serialized) as Record<string, unknown>
 }
 const aliases = {
+  pricing_identity_bindings: 'pricingIdentityBindings',
   money_precision_version: 'moneyPrecisionVersion', calculated_total_usd: 'calculatedTotalUsd', rounding_adjustment_usd: 'roundingAdjustmentUsd',
   subtotal_usd: 'subtotalUsd', subtotal_khr: 'subtotalKhr', total_usd: 'totalUsd', total_khr: 'totalKhr',
   discount_usd: 'discountUsd', discount_khr: 'discountKhr', membership_discount_usd: 'membershipDiscountUsd', membership_discount_khr: 'membershipDiscountKhr',
@@ -65,6 +76,18 @@ export function saleMoneyResponseFields(value: unknown): Record<string, unknown>
     else if (Object.prototype.hasOwnProperty.call(source, camel) && source[camel] !== undefined) fields[snake] = source[camel]
   }
   return fields
+}
+
+function validateReceiptPricing(items: Record<string, unknown>[], fields: Record<string, unknown>): void {
+  try {
+    const snapshots = validateCapturedSaleBasket(items, fields, serverPricingIdentityBindings(fields.pricing_identity_bindings))
+    const pools = new Map<string, string>()
+    for (const snapshot of snapshots) {
+      const poolJson = JSON.stringify({ pool: snapshot.pool, quantities: snapshot.quantities })
+      if (pools.has(snapshot.pool.pool_key) && pools.get(snapshot.pool.pool_key) !== poolJson) throw new Error('pricing_pool_identity')
+      pools.set(snapshot.pool.pool_key, poolJson)
+    }
+  } catch { throw new SaleMoneyUnavailableError() }
 }
 
 /** No locally calculated fallback is a substitute for the saved receipt. */
@@ -89,10 +112,9 @@ export function canonicalSaleReceipt(value: unknown): Record<string, unknown> {
       || roundMoney2(Number(raw)) !== total || subtractMoney4(total, Number(raw)) !== Number(adjustment)) throw new SaleMoneyUnavailableError()
     if (required.filter(key => key !== 'exchange_rate').some(key => roundMoney4(Number(fields[key])) !== fields[key])) throw new SaleMoneyUnavailableError()
     if (items.some(line => !nonnegativeMoney(line.total_usd) || roundMoney4(line.total_usd) !== line.total_usd || roundMoney4(Number(line.applied_price_usd ?? line.price_usd)) !== (line.applied_price_usd ?? line.price_usd))) throw new SaleMoneyUnavailableError()
-    // Fail closed until the exact-line promotion provenance contract is
-    // integrated. Do not accept an arbitrary line total paired with a wildly
-    // different unit price as a canonical saved response.
-    if (items.some(line => multiplyMoney4(Number(line.applied_price_usd ?? line.price_usd), Number(line.quantity)) !== line.total_usd)) throw new SaleMoneyUnavailableError()
+    // Every v1 line requires the server's complete captured pricing proof.
+    // A rounded unit projection is never a replacement for its exact line.
+    validateReceiptPricing(items, { ...fields, id: source.id })
     // Sum the saved authoritative LINE snapshots, not catalogue prices or
     // rounded display unit prices. Per-unit projection agreement is checked
     // separately by the backend's versioned line policy.

@@ -31,6 +31,7 @@
 import { branchStockQuantity, type BranchStockRow } from '../pos/productSheetState.ts'
 import { formatBatchReceivedDate } from '../../utils/batchLabel.ts'
 import { fmtDateOnly } from '../../utils/formatters.ts'
+import { multiplyMoney4, sellingPriceCeilCent } from '../../utils/moneyPrecision.ts'
 
 export type SaleAddCandidate = Record<string, unknown> & {
   id?: number | string | null
@@ -48,6 +49,9 @@ export type SaleAddCandidate = Record<string, unknown> & {
 }
 
 export type StagedAddLine = {
+  clientLineKey?: string
+  originalSellingPriceUsd?: number
+  sellingPriceInputUsd?: number | string
   productId: number
   name: string
   quantity: number
@@ -121,6 +125,7 @@ export function stagedAddLineKey(line: Pick<StagedAddLine, 'productId' | 'branch
 export function stagedLineFromSheetPick(
   picked: SaleAddCandidate,
   selection: SaleAddSheetSelection,
+  moneyPrecisionVersion: 0 | 1 = 0,
 ): StagedAddLine | null {
   const productId = Number(picked?.id)
   if (!Number.isFinite(productId) || productId <= 0) return null
@@ -139,12 +144,13 @@ export function stagedLineFromSheetPick(
   const price = toNumber(picked.selling_price_usd)
 
   return {
+    ...(moneyPrecisionVersion === 1 ? { originalSellingPriceUsd: price, clientLineKey: `add:${productId}:${branchId || 0}:${batch && !unlottedStock ? batch.batchId : 0}:${Date.now()}:${Math.random().toString(36).slice(2, 9)}` } : {}),
     productId,
     name: String(picked.__displayName || picked.name || `#${productId}`),
     // POS behaviour: one tap adds one unit. The staged row's Qty box is
     // where more are asked for, exactly as the cart line is in the POS.
     quantity: 1,
-    unitPriceUsd: price,
+    unitPriceUsd: moneyPrecisionVersion === 1 ? sellingPriceCeilCent(price) : price,
     priceText: price > 0 ? String(price) : '0',
     stockQuantity,
     barcode: String(picked.barcode || ''),
@@ -224,6 +230,23 @@ export function mergeStagedAddLine(
     quantity: merged[index].quantity + next.quantity,
     unitPriceUsd: merged[index].unitPriceUsd,
     priceText: merged[index].priceText,
+    sellingPriceInputUsd: merged[index].sellingPriceInputUsd,
+    originalSellingPriceUsd: merged[index].originalSellingPriceUsd,
+    clientLineKey: merged[index].clientLineKey,
   }
   return merged
+}
+
+/** Plain additions form a new pool; they never reprice an existing promotion.
+ * The server compares this expectation with its current authorized product. */
+export function stagedLinePricingIntent(line: StagedAddLine, exchangeRate: number) {
+  if (!line.clientLineKey || !(line.quantity > 0) || !Number.isFinite(line.quantity) || !(exchangeRate > 0) || !Number.isFinite(exchangeRate)) throw new Error('money_precision_unavailable')
+  const explicit = line.sellingPriceInputUsd
+  const raw = explicit ?? line.originalSellingPriceUsd
+  if (raw == null || String(raw).trim() === '' || Number(raw) < 0) throw new Error('money_precision_unavailable')
+  const unit = sellingPriceCeilCent(raw), total = multiplyMoney4(unit, line.quantity)
+  return { client_line_key: line.clientLineKey, pricing_source: explicit === undefined ? 'selling' as const : 'manual' as const,
+    ...(explicit === undefined ? {} : { selling_price_input_usd: Number(explicit) }),
+    applied_price_usd: unit, base_price_usd: unit, manual_discount_type: null, manual_discount_value: 0,
+    pricing_quote: { gross_usd: total, product_discount_usd: 0, manual_discount_usd: 0, total_usd: total, total_khr: multiplyMoney4(total, exchangeRate) } }
 }
