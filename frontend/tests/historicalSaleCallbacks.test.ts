@@ -211,5 +211,10 @@ const unknownRow = unknownHtml.slice(unknownStart, unknownHtml.indexOf('data-rec
 assert.match(unknownRow, /—/)
 assert.doesNotMatch(unknownRow, /USD0\.00|KHR0/)
 assert.equal((unknownRow.match(/—/g) || []).length, 2, 'unknown unit and total are individually marked, not reconstructed')
+const knownDiscountHtml = renderReceipt({ ...historicalSale, subtotal_usd: 18, total_usd: 18, items: [{ ...recordedLine,
+  product_name: 'KNOWN DISCOUNT', base_price_usd: 10, applied_price_usd: 9, manual_discount_usd: 1, manual_discount_type: 'fixed', manual_discount_value: 1, total_usd: 18, total_khr: 72360 }] })
+const knownStart = knownDiscountHtml.indexOf('KNOWN DISCOUNT')
+const knownRow = knownDiscountHtml.slice(knownStart, knownDiscountHtml.indexOf('data-receipt-line="true"', knownStart))
+assert.match(knownRow, /USD10\.00[\s\S]*\(-USD1\.00\)[\s\S]*USD18\.00/, 'unknown guards preserve known selling price, adjacent unit saving and charged line total')
 assert.equal(JSON.stringify(historicalSale), original)
 console.log('PASS actual Receipt static render: historical present rounding visible, untouched NULL metadata stays absent; physical print geometry not certified')
