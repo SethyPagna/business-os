@@ -30,7 +30,8 @@ async function runTest(name: string, fn: TestCallback): Promise<void> {
   }
 }
 
-await runTest('POS checkout keeps client, API, and backend duplicate guards', () => {
+await runTest('POS checkout keeps client, API, and backend duplicate guards', async () => {
+  await import('./posMoneyV1.test.ts') // execute production checkout and duplicate/lost-ack recovery
   const pos = readFrontend('src/components/pos/POS.tsx')
   const methods = readFrontend('src/api/methods.ts')
   const saleWriteTransport = readFrontend('src/api/saleWriteTransport.ts')
@@ -40,7 +41,7 @@ await runTest('POS checkout keeps client, API, and backend duplicate guards', ()
   assert.match(pos, /if \(loading \|\| checkoutInFlightRef\.current\) return/)
   assert.match(pos, /checkoutInFlightRef\.current = true[\s\S]*setLoading\(true\)/)
   assert.match(pos, /const POS_CHECKOUT_TIMEOUT_MS = 45000/)
-  assert.match(pos, /withLoaderTimeout\(\s*\(\) => createPosSale\(saleData\)[\s\S]*'Create POS sale',\s*POS_CHECKOUT_TIMEOUT_MS,\s*\)/)
+  assert.match(pos, /withLoaderTimeout\(\s*\(\) => createPosSale\(frozen, checkoutScope\)[\s\S]*'Create POS sale',\s*POS_CHECKOUT_TIMEOUT_MS,\s*\)/)
   assert.match(pos, /finally \{[\s\S]*checkoutInFlightRef\.current = false[\s\S]*setLoading\(false\)/)
 
   assert.match(methods, /export async function createSale\(d\) \{[\s\S]*loadSaleWriteTransport\(\)/)
@@ -52,7 +53,7 @@ await runTest('POS checkout keeps client, API, and backend duplicate guards', ()
   assert.match(salesTransport, /skipWriteDedupe: true/)
 
   assert.match(salesRoute, /function normalizeClientRequestId\(value: unknown\)/)
-  assert.match(salesRoute, /const existingSale = await db[\s\S]*WHERE client_request_id = \?[\s\S]*if \(existingSale\) \{[\s\S]*sale_incomplete[\s\S]*return c\.json\(\{ id: existingSale\.id, receiptNumber: existingSale\.receipt_number, duplicate: true \}\)/)
+  assert.match(salesRoute, /const existingSale = await db[\s\S]*WHERE client_request_id = \?[\s\S]*if \(existingSale\) \{[\s\S]*sale_incomplete[\s\S]*return c\.json\(\{ id: existingSale\.id, receiptNumber: existingSale\.receipt_number, duplicate: true, sale: await authoritativeSaleSnapshot\(db, existingSale\.id\) \}\)/)
   assert.match(salesRoute, /INSERT INTO sales \([\s\S]*receipt_number, client_request_id/)
 })
 

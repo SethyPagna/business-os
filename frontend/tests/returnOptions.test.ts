@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import './returnMoneyV1Flow.test.ts'
+import './returnMoneyV1Transport.test.ts'
 import { readFileSync } from 'node:fs'
 import {
   STOCK_ACTION_OPTIONS, normalizeStockAction, stockActionOption,
@@ -152,7 +154,8 @@ runTest('no surface offers "any stock" -- a lot is named or the product has none
 runTest('the refund is the ORIGINAL sale line price, resolved on the server', () => {
   assert.match(backendKernelSource, /export function resolveRefundUnitPrice/)
   const routeSource = readFileSync(new URL('../../cloudflare/src/routes/returns.ts', import.meta.url), 'utf8')
-  assert.match(routeSource, /const refundPrices = returnItems\.map\(\(item\) => resolveRefundUnitPrice\(/)
+  assert.match(routeSource, /const refundPrices = returnItems\.map\(\(item\) => \{[\s\S]*?const exact = v1QuoteBySaleItem\.get\(Number\(item\.sale_item_id\)\)[\s\S]*?return exact \? \{ unitUsd: exact\.applied_price_usd, unitKhr: exact\.applied_price_khr \} : resolveRefundUnitPrice\(/)
+  assert.match(routeSource, /const totalRefundUsd = customerReturnV1Plan\?\.quote\.total_refund_usd\s*\?\?/, 'v1 refunds use the authoritative net entitlement, not a rounded unit projection')
   // the header's refund total is derived, never taken from the payload
   assert.match(routeSource, /total_refund_usd: totalRefundUsd,/)
   assert.doesNotMatch(routeSource, /total_refund_usd: body\.total_refund_usd \|\| 0/)

@@ -692,7 +692,9 @@ assert.doesNotMatch(pos, /portalTransport\.ts|lookupPortalMembership|from ['"]\.
 const membershipLookupTransport = contactReadTransport.match(/export function lookupCustomerMembership\(membershipNumber: string\): Promise<unknown> \{[\s\S]*?\n\}/)?.[0] || ''
 assert.match(membershipLookupTransport, /return apiFetch\('GET', `\/api\/customers\/membership\/\$\{encodeURIComponent\(membershipNumber\.trim\(\)\)\}`\)/, 'membership lookup must use authenticated apiFetch and encode the exact membership ID path segment')
 assert.doesNotMatch(membershipLookupTransport, /readContacts|readLocalContacts|mirror|[Cc]ache|\.catch\(|try\s*\{/, 'membership balances must not use contact-list caches, local mirrors, or swallow authorization and network failures')
-assert.match(pos, /let saleWriteTransportPromise: Promise<typeof import\('\.\.\/\.\.\/api\/saleWriteTransport\.ts'\)> \| null = null[\s\S]*function getSaleWriteTransport\(\): Promise<typeof import\('\.\.\/\.\.\/api\/saleWriteTransport\.ts'\)>/, 'POS checkout should lazy-load the narrow sale write transport only on Done intent')
+assert.match(pos, /let saleWriteTransportPromise: Promise<typeof import\('\.\.\/\.\.\/api\/salesTransport\.ts'\)> \| null = null[\s\S]*function getSaleWriteTransport\(\): Promise<typeof import\('\.\.\/\.\.\/api\/salesTransport\.ts'\)>/, 'v1 checkout/recovery lazy-loads the exact direct transport, never legacy offline enrichment')
+assert.match(pos, /saleWriteTransportPromise = import\('\.\.\/\.\.\/api\/salesTransport\.ts'\)/, 'the versioned transport remains an intent-time dynamic import')
+assert.doesNotMatch(pos, /^import\s+[^\n]*from ['"]\.\.\/\.\.\/api\/salesTransport\.ts['"]/m, 'the direct transport must not become an eager route import')
 assert.doesNotMatch(pos, /api\.getProductBootstrap|api\.searchProducts|api\.getProductFilters|api\.getCategories|api\.getCustomers|api\.getDeliveryContacts|api\.lookupPortalMembership|api\.createCustomer|api\.createDeliveryContact|api\.createSale|getPosApi|missingPosApiMethod/, 'POS product, category, customer, delivery, membership reads, quick contact creates, and sale checkout should not wake app-api-methods during catalog, option, add, or checkout flows')
 assert.doesNotMatch(contactReadTransport, /import .*['"]\.\/(?:localMirrors|lazyLocalDb)\.ts['"]/, 'POS contact reads should not statically import mirror or IndexedDB helpers')
 assert.match(contactReadTransport, /await import\('\.\/lazyLocalDb\.ts'\)/, 'POS contact read offline fallback should load IndexedDB only after network failure')
@@ -3386,7 +3388,7 @@ assert.match(
 )
 assert.match(
   pos,
-  /withLoaderTimeout\(\s*\(\) => createPosSale\(saleData\),\s*'Create POS sale',\s*POS_CHECKOUT_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => createPosSale\(frozen, checkoutScope\),\s*'Create POS sale',\s*POS_CHECKOUT_TIMEOUT_MS,\s*\)/,
   'POS checkout should timeout slow sale creation',
 )
 const membershipLoadHandler = pos.match(/const loadMembershipInfo = useCallback\(async \([\s\S]*?\}, \[posCopy\]\)/)?.[0] || ''

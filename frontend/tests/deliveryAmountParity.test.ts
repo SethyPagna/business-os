@@ -180,9 +180,9 @@ runTest('the Worker route validates BOTH delivery money fields through the modul
   const route = read('../../cloudflare/src/routes/sales.ts')
   assert.match(route, /from '\.\.\/lib\/deliveryAmounts'/, 'routes/sales.ts must import the shared rule')
   const feeBranch = route.slice(route.indexOf("if (kind === 'delivery_fee_changed')"))
-  assert.match(feeBranch.slice(0, 1400), /parseDeliveryAmountUsd\(body\.delivery_fee_usd\)/, 'the fee branch must parse through the shared rule')
+  assert.match(feeBranch.slice(0, 1400), /parseDeliveryAmountUsd\(body\.delivery_fee_usd,\s*1\)/, 'the fee branch must explicitly select the shared four-decimal v1 rule')
   const costBranch = route.slice(route.indexOf("if (kind === 'delivery_actual_cost_changed')"))
-  assert.match(costBranch.slice(0, 1800), /parseDeliveryAmountUsd\(body\.delivery_actual_cost_usd\)/, 'the courier-cost branch must parse through the shared rule')
+  assert.match(costBranch.slice(0, 1800), /parseDeliveryAmountUsd\(body\.delivery_actual_cost_usd,\s*1\)/, 'the courier-cost branch must explicitly select the shared four-decimal v1 rule')
   assert.doesNotMatch(feeBranch.slice(0, 1400), /Number\(body\.delivery_fee_usd\)/, 'the fee branch must not keep a second, private copy of the rule')
 })
 
