@@ -745,10 +745,16 @@ async function replayAtomicSaleAddItems(
     if(!/^[a-z][a-z0-9_]*$/.test(key))throw new UndoConflictError('The recorded sale basket shape is invalid.')
     return key
   })
-  const basketCondition=`EXISTS(SELECT 1 FROM sales current WHERE current.id=@saleId AND ${stateKeys(currentSale).map(key=>`current.${key} IS json_extract(@replaySale,'$.${key}')`).join(' AND ')})
+  const all=(terms:readonly string[]):string=>{
+    if(!terms.length)return '1=1'
+    if(terms.length===1)return terms[0]
+    const middle=Math.floor(terms.length/2)
+    return `(${all(terms.slice(0,middle))} AND ${all(terms.slice(middle))})`
+  }
+  const basketCondition=`EXISTS(SELECT 1 FROM sales current WHERE current.id=@saleId AND ${all(stateKeys(currentSale).map(key=>`current.${key} IS json_extract(@replaySale,'$.${key}')`))})
     AND (SELECT COUNT(*) FROM sale_items WHERE sale_id=@saleId)=json_array_length(@replayLines)
     AND NOT EXISTS(SELECT 1 FROM json_each(@replayLines) expected WHERE NOT EXISTS(SELECT 1 FROM sale_items current WHERE current.sale_id=@saleId
-      AND ${stateKeys(currentLines[0]).map(key=>`current.${key} IS json_extract(expected.value,'$.${key}')`).join(' AND ')}))`
+      AND ${all(stateKeys(currentLines[0]).map(key=>`current.${key} IS json_extract(expected.value,'$.${key}')`))}))`
 
   const lines = reversal.lines || []
   if (!lines.length || lines.length > 25) throw new UndoConflictError('The saved added-items line set is invalid.')

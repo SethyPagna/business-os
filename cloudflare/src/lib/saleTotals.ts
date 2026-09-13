@@ -118,6 +118,7 @@ function isSuppliedAmount(value: unknown): boolean {
 
 export type SaleTotalsInput = {
   preserveRecordedTender?: boolean
+  preserveRecordedBasketOperands?: boolean
   moneyPrecisionVersion?: 0 | 1
   subtotalUsd: number
   discountUsd: number
@@ -228,10 +229,15 @@ export function newSaleMoney4(value: unknown, fallback = 0): number {
 function computeSaleTotalsV1(input: SaleTotalsInput): SaleTotals {
   const rate = Number(input.exchangeRate)
   if (!Number.isFinite(rate) || rate <= 0) throw new SaleMoneyContractError('money_precision_invalid_rate')
-  const customerDeliveryFeeUsd = input.isDelivery && input.deliveryFeePaidBy === 'customer' ? newSaleMoney4(input.deliveryFeeUsd) : 0
+  const operand=(value:unknown)=>{
+    if(!input.preserveRecordedBasketOperands)return newSaleMoney4(value)
+    if(typeof value!=='number'||!Number.isFinite(value)||value<0)throw new SaleMoneyContractError('money_precision_invalid_snapshot')
+    return value
+  }
+  const customerDeliveryFeeUsd = input.isDelivery && input.deliveryFeePaidBy === 'customer' ? operand(input.deliveryFeeUsd) : 0
   const financial = buildSaleMoneyPrecision(sumMoney4([
-    newSaleMoney4(input.subtotalUsd), -newSaleMoney4(input.discountUsd),
-    -newSaleMoney4(input.membershipDiscountUsd), newSaleMoney4(input.taxUsd), customerDeliveryFeeUsd,
+    operand(input.subtotalUsd), -operand(input.discountUsd),
+    -operand(input.membershipDiscountUsd), operand(input.taxUsd), customerDeliveryFeeUsd,
   ]))
   // Tender is actual native money, not basket revenue. Preserve denomination.
   if (isSuppliedAmount(input.rawAmountPaidUsd)) newSaleMoney4(input.rawAmountPaidUsd)

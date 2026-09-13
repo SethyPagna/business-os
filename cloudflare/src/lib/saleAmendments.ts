@@ -976,7 +976,9 @@ export function resolveAmendedTaxUsd(input: {
   taxableBaseAfterUsd: number
   settings: TaxSettings
 }): AmendedTaxResult {
-  const storedTax = input.moneyPrecisionVersion === 1 ? newSaleMoney4(input.sale.tax_usd) : round2(Number(input.sale.tax_usd) || 0)
+  const historical=input.moneyPrecisionVersion===1&&Number(input.sale.money_precision_version)===0
+  const storedTax = historical?Number(input.sale.tax_usd??0):input.moneyPrecisionVersion === 1 ? newSaleMoney4(input.sale.tax_usd) : round2(Number(input.sale.tax_usd) || 0)
+  if(!Number.isFinite(storedTax)||storedTax<0)throw new Error('Invalid recorded tax amount')
   if (storedTax <= 0) return { taxUsd: 0, recomputed: false, reason: 'no_tax_on_sale' }
   if (!input.settings.enabled) return { taxUsd: storedTax, recomputed: false, reason: 'tax_disabled' }
   const rate = Number(input.settings.rate) || 0

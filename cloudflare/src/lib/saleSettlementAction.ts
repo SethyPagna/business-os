@@ -5,6 +5,7 @@ import { bumpVersion } from './cache'
 import { getDb, type D1Compat } from './db'
 import { financialCalculationValue } from './financialPrecision'
 import type { SettlementPlan } from './paymentSettlement'
+import { hasRecordedSaleMoneyPrecision } from './saleMoneyPrecision'
 import { normalizeSearchText } from './searchMatch'
 import { actorSnapshot } from './actorSnapshot'
 import {
@@ -213,6 +214,7 @@ export function buildSaleSettlementAfterState(
   plan: SettlementPlan,
 ): SaleSettlementState {
   const rate = plan.exchangeRate
+  const recordedMoney=hasRecordedSaleMoneyPrecision({...before,total_usd:sale.total_usd})
   return {
     ...(before.money_precision_version === undefined ? {} : {
       money_precision_version: before.money_precision_version,
@@ -220,13 +222,13 @@ export function buildSaleSettlementAfterState(
       rounding_adjustment_usd: before.rounding_adjustment_usd,
     }),
     sale_status: targetStatus,
-    exchange_rate: before.money_precision_version === 1 ? before.exchange_rate : rate,
-    subtotal_khr: before.money_precision_version === 1 ? before.subtotal_khr : khr(sale.subtotal_usd, rate),
-    discount_khr: before.money_precision_version === 1 ? before.discount_khr : khr(sale.discount_usd, rate),
-    tax_khr: before.money_precision_version === 1 ? before.tax_khr : khr(sale.tax_usd, rate),
-    total_khr: before.money_precision_version === 1 ? before.total_khr : khr(sale.total_usd, rate),
-    delivery_fee_khr: before.money_precision_version === 1 ? before.delivery_fee_khr : khr(sale.delivery_fee_usd, rate),
-    membership_discount_khr: before.money_precision_version === 1 ? before.membership_discount_khr : khr(sale.membership_discount_usd, rate),
+    exchange_rate: recordedMoney ? before.exchange_rate : rate,
+    subtotal_khr: recordedMoney ? before.subtotal_khr : khr(sale.subtotal_usd, rate),
+    discount_khr: recordedMoney ? before.discount_khr : khr(sale.discount_usd, rate),
+    tax_khr: recordedMoney ? before.tax_khr : khr(sale.tax_usd, rate),
+    total_khr: recordedMoney ? before.total_khr : khr(sale.total_usd, rate),
+    delivery_fee_khr: recordedMoney ? before.delivery_fee_khr : khr(sale.delivery_fee_usd, rate),
+    membership_discount_khr: recordedMoney ? before.membership_discount_khr : khr(sale.membership_discount_usd, rate),
     payment_method: plan.paymentMethod,
     payment_details: plan.paymentDetailsJson,
     payment_currency: plan.paymentCurrency,
@@ -244,7 +246,7 @@ export function buildSaleSettlementAfterState(
       sale.branch_name,
       plan.paymentMethod,
     ].filter(Boolean).join(' ')),
-    lines: before.money_precision_version === 1 ? before.lines.map(line => ({...line})) : lineRows.map((line) => ({
+    lines: recordedMoney ? before.lines.map(line => ({...line})) : lineRows.map((line) => ({
       id: Number(line.id),
       applied_price_khr: khr(line.applied_price_usd, rate),
       total_khr: khr(line.total_usd, rate),

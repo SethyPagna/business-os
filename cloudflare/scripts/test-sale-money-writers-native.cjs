@@ -187,14 +187,23 @@ async function run() {
   assert.equal(unknownCost.status,200,JSON.stringify(unknownCost.body))
   assert.equal(unknownCost.body.sale.items[0].cost_price_usd,null)
   assert.equal(unknownCost.body.sale.items[0].cost_price_khr,null)
-  legacyDb.raw.prepare('UPDATE sale_items SET applied_price_usd=1.23456 WHERE sale_id=1').run()
-  const beforeAmbiguous = h.creationState(legacyDb.raw)
-  const rejectedLegacy = await h.app.request('/1/items',{method:'POST',headers:{'content-type':'application/json'},
+  legacyDb.raw.prepare('UPDATE sale_items SET applied_price_usd=1.23456,pricing_snapshot_json=NULL WHERE sale_id=1').run()
+  const originalHistoricalLine=legacyDb.raw.prepare('SELECT * FROM sale_items WHERE sale_id=1').get()
+  const recordedLegacy = await h.app.request('/1/items',{method:'POST',headers:{'content-type':'application/json'},
     body:JSON.stringify({money_precision_version:1,client_request_id:'ambiguous-upgrade',expected_exchange_rate:4000,
       items:[intent('ambiguous-line',1)]})},{DB:legacyDb.route},h.executionCtx)
-  assert.equal(rejectedLegacy.status,409,JSON.stringify(await rejectedLegacy.json()))
-  assert.deepEqual(h.creationState(legacyDb.raw),beforeAmbiguous)
-  console.log('PASS unknown captured cost stays NULL; ambiguous historical five-place price upgrade refuses')
+  const recordedBody=await recordedLegacy.json()
+  assert.equal(recordedLegacy.status,200,JSON.stringify(recordedBody))
+  assert.equal(recordedBody.sale.money_precision_version,0)
+  assert.deepEqual(legacyDb.raw.prepare('SELECT * FROM sale_items WHERE id=@id').get({id:originalHistoricalLine.id}),originalHistoricalLine)
+  const missingCapturedId=unknownCost.body.sale.id
+  legacyDb.raw.prepare('UPDATE sale_items SET pricing_snapshot_json=NULL WHERE sale_id=@id').run({id:missingCapturedId})
+  const beforeMissingCapture=h.creationState(legacyDb.raw)
+  const rejectedCaptured=await h.app.request(`/${missingCapturedId}/items`,{method:'POST',headers:{'content-type':'application/json'},
+    body:JSON.stringify({money_precision_version:1,client_request_id:'missing-v1-capture',expected_exchange_rate:4000,items:[intent('missing-capture-line',1)]})},{DB:legacyDb.route},h.executionCtx)
+  assert.equal(rejectedCaptured.status,409)
+  assert.deepEqual(h.creationState(legacyDb.raw),beforeMissingCapture)
+  console.log('PASS legacy add preserves unknown/five-place snapshots; parent v1 still refuses missing capture')
   const totalInput = {subtotalUsd:1,discountUsd:0,membershipDiscountUsd:0,taxUsd:0,isDelivery:false,
     deliveryFeeUsd:0,deliveryFeePaidBy:'customer',exchangeRate:4020,rawAmountPaidUsd:1,rawAmountPaidKhr:20}
   for (const version of [0,1]) {
