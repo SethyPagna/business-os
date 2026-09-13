@@ -1,4 +1,4 @@
-import { divideMoney4, multiplyMoney4, roundMoney2, roundMoney4, subtractMoney4, sumMoney4 } from './moneyPrecision.ts'
+import { multiplyMoney4, nativeChangeAmounts, roundMoney2, roundMoney4, subtractMoney4, sumMoney4 } from './moneyPrecision.ts'
 
 export const SALE_MONEY_VERSION = 1 as const
 export class SaleMoneyUnavailableError extends Error {
@@ -119,11 +119,19 @@ export function canonicalSaleReceipt(value: unknown): Record<string, unknown> {
       if (!nonnegativeMoney(fields.change_exchange_rate) || fields.change_exchange_rate <= 0
         || roundMoney2(Number(fields.change_usd)) !== fields.change_usd || !Number.isSafeInteger(fields.change_khr)) throw new SaleMoneyUnavailableError()
     } else {
-      const overpaid4 = Math.max(0, sumMoney4([Number(fields.amount_paid_usd), divideMoney4(Number(fields.amount_paid_khr), Number(fields.exchange_rate)), -total]))
-      if (roundMoney2(overpaid4) !== fields.change_usd || (overpaid4 === 0 && fields.change_khr !== 0)) throw new SaleMoneyUnavailableError()
+      const changeRate = fields.change_exchange_rate
+      const hasChangeRate = changeRate !== undefined && changeRate !== null
+      if (hasChangeRate && (!nonnegativeMoney(changeRate) || changeRate <= 0)) throw new SaleMoneyUnavailableError()
+      // Native denominations are rounded directly from the exact tender
+      // surplus, never from an intermediate four-decimal USD conversion.
+      const change = nativeChangeAmounts({ paidUsd: Number(fields.amount_paid_usd), paidKhr: Number(fields.amount_paid_khr),
+        payableUsd: total, exchangeRate: Number(fields.exchange_rate), changeExchangeRate: hasChangeRate ? Number(changeRate) : 1 })
+      if (change.changeUsd !== fields.change_usd || (!change.hasOverpayment && fields.change_khr !== 0)
+        || (hasChangeRate && change.changeKhr !== fields.change_khr)) throw new SaleMoneyUnavailableError()
       // Computed KHR used the dedicated change-rate setting, which old rows
       // did not capture (change_exchange_rate is null). Do not substitute the
       // sale FX rate or pretend that these are two additive cash movements.
+      // The placeholder rate above has no authority: its KHR result is ignored.
     }
   }
   // Do not synthesize a raw total for legacy receipts, including old retries.
