@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { getDb } from '../lib/db'
-import { evaluateCapturedPricingPool, pricingSourceGuard, serializeSaleItemPricing, type CapturedPricingPool, type PricingSource } from '../lib/saleItemPricing'
+import { capturePricingProduct, evaluateCapturedPricingPool, pricingSourceGuard, serializeSaleItemPricing, type CapturedPricingPool, type PricingSource } from '../lib/saleItemPricing'
 import { normalizePromotionRule } from '../lib/promotionRules'
 import { chunkForBinding, selectInChunks } from '../lib/sqlBinding'
 import { requireAuth, type SessionUser } from '../lib/auth'
@@ -841,7 +841,7 @@ app.post('/', async (c) => {
         throw new SaleMoneyContractError('money_precision_pricing_intent_required')
       // Original raw catalogue fields remain in the source CAS. The snapshot
       // explicitly captures the fresh selling-cent policy at its input boundary.
-      const capturedProduct={...product,
+      const capturedProduct={...capturePricingProduct(product),
         selling_price_usd:sellingPriceCeilCent(product.selling_price_usd),
         wholesale_price_usd:product.wholesale_price_usd == null ? null : sellingPriceCeilCent(Number(product.wholesale_price_usd))}
       return {line_key:item.client_line_key,source:item.pricing_source,product:capturedProduct,

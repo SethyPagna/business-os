@@ -17,6 +17,7 @@ function load(name) {
   cache.set(name,module.exports); return module.exports
 }
 const p=load('saleItemPricing'), rules=load('promotionRules')
+assert.deepEqual(p.capturePricingProduct({id:7,selling_price_usd:10,notes:'private',supplier_id:99,cost_price_usd:4}),{id:7,selling_price_usd:10})
 const rule=rules.normalizePromotionRule({id:1,rule_type:'quantity_save',min_quantity:3,save_usd:1,product_ids:[7],scope_type:'products',is_active:1},1)
 const pool={version:1,pool_key:'pool-1',evaluation_time:'2026-09-13T00:00:00.000Z',exchange_rate:4000,rules:[rule],lines:[{
   line_key:'a',source:'promotion',product:{id:7,selling_price_usd:10,selling_price_khr:1},selling_price_input_usd:null,manual:{type:'none',value:0}

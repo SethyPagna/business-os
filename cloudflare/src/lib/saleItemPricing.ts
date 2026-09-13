@@ -51,6 +51,15 @@ export type SaleItemPricingSnapshot = {
 export type ReceiptAllocationContext = {version:1;lines:{line_key:string;amount:number}[];discount_usd:number;membership_discount_usd:number;tax_usd:number}
 export type ReceiptLineAllocation = {discount_usd:number;membership_discount_usd:number;tax_usd:number;net_entitlement_usd:number}
 
+/** Persist only evaluator inputs. Full SELECT * rows belong exclusively to the
+ * transaction guard, never to cashier-visible pricing response snapshots. */
+export function capturePricingProduct(row: Record<string,unknown>): Record<string,unknown> {
+  const fields=['id','category','categories','brand','brands','selling_price_usd','selling_price_khr','wholesale_price_usd',
+    'discount_enabled','discount_type','discount_percent','discount_amount_usd','discount_amount_khr','discount_starts_at','discount_ends_at',
+    'discount_label','discount_badge_color']
+  return Object.fromEntries(fields.filter(field=>Object.prototype.hasOwnProperty.call(row,field)).map(field=>[field,row[field]]))
+}
+
 function invalid(): never { throw new Error('sale_item_pricing_invalid') }
 function key(value: unknown): asserts value is string {
   if (typeof value !== 'string' || !/^[A-Za-z0-9_.:-]{1,200}$/.test(value)) invalid()
