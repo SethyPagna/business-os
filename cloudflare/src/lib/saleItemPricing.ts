@@ -307,6 +307,14 @@ export function materializeCapturedPricingRow(row: Record<string,unknown>, pool:
 export function pricingSourceGuard(products: readonly Record<string,unknown>[], activeRules: readonly Record<string,unknown>[]): {sql:string;params:Record<string,unknown>} {
   if (!products.length || products.length > MAX_PRICING_LINES || activeRules.length > MAX_PRICING_RULES) invalid()
   if (activeRules.some(row => row.is_active !== 1)) invalid()
+  // D1 limits expression depth to 100. Keep every captured column comparison
+  // but balance the boolean AST instead of growing a left-deep OR chain.
+  const any=(terms:readonly string[]):string=>{
+    if(!terms.length)return '0'
+    if(terms.length===1)return terms[0]
+    const midpoint=Math.floor(terms.length/2)
+    return `(${any(terms.slice(0,midpoint))} OR ${any(terms.slice(midpoint))})`
+  }
   const make = (rows:readonly Record<string,unknown>[],table:string,param:string) => {
     if (!rows.length) return '0'
     const keys=Object.keys(rows[0]).sort(), ids=new Set<number>()
@@ -316,7 +324,7 @@ export function pricingSourceGuard(products: readonly Record<string,unknown>[], 
         || JSON.stringify(Object.keys(row).sort()) !== JSON.stringify(keys)) invalid()
       ids.add(Number(row.id))
     }
-    return `EXISTS (SELECT 1 FROM json_each(@${param}) expected LEFT JOIN ${table} current ON current.id=json_extract(expected.value,'$.id') WHERE current.id IS NULL OR ${keys.map(name => `current.${name} IS NOT json_extract(expected.value,'$.${name}')`).join(' OR ')})`
+    return `EXISTS (SELECT 1 FROM json_each(@${param}) expected LEFT JOIN ${table} current ON current.id=json_extract(expected.value,'$.id') WHERE ${any(['current.id IS NULL',...keys.map(name => `current.${name} IS NOT json_extract(expected.value,'$.${name}')`)])})`
   }
   const productConflict=make(products,'products','pricing_products'), ruleConflict=make(activeRules,'promotion_rules','pricing_rules')
   const params={pricing_products:JSON.stringify(products),pricing_rules:JSON.stringify(activeRules),pricing_rule_count:activeRules.length}
