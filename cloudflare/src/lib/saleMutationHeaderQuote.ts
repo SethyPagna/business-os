@@ -11,9 +11,9 @@ export class SaleHeaderQuoteError extends Error {
   readonly code='sale_header_quote_invalid'
   constructor(){super('The exact header quote is invalid.');this.name='SaleHeaderQuoteError'}
 }
-function money(value:unknown, nullable=false):number {
+function money(value:unknown, nullable=false, recorded=false):number {
   if(nullable && value==null)return 0
-  if(typeof value!=='number'||!Number.isFinite(value)||value<0||roundMoney4(value)!==value)throw new SaleHeaderQuoteError()
+  if(typeof value!=='number'||!Number.isFinite(value)||value<0||(!recorded&&roundMoney4(value)!==value))throw new SaleHeaderQuoteError()
   return value
 }
 /** The existing amended-tax policy, shared verbatim with review UI. No current
@@ -23,8 +23,9 @@ export function quoteSaleMutationHeader(
   settings:{tax_enabled:unknown;tax_rate:unknown},
   overrides:{is_delivery?:boolean;delivery_fee_usd?:number;delivery_fee_paid_by?:'customer'|'store'}={},
 ):SaleMutationHeaderQuote {
-  const subtotal=money(subtotalUsd),oldSubtotal=money(sale.subtotal_usd,true)
-  const discount=money(sale.discount_usd,true),member=money(sale.membership_discount_usd,true),storedTax=money(sale.tax_usd,true)
+  const recorded=Number(sale.money_precision_version)===0
+  const subtotal=money(subtotalUsd,false,recorded),oldSubtotal=money(sale.subtotal_usd,true,recorded)
+  const discount=money(sale.discount_usd,true,recorded),member=money(sale.membership_discount_usd,true,recorded),storedTax=money(sale.tax_usd,true,recorded)
   const discounts=sumMoney4([discount,member])
   if(discounts>subtotal||discounts>oldSubtotal)throw new SaleHeaderQuoteError()
   const before=subtractMoney4(oldSubtotal,discounts),after=subtractMoney4(subtotal,discounts)
@@ -43,8 +44,8 @@ export function quoteSaleMutationHeader(
   const isDelivery=overrides.is_delivery??Boolean(Number(sale.is_delivery)||0)
   const payer=overrides.delivery_fee_paid_by??String(sale.delivery_fee_paid_by||'customer')
   if(typeof isDelivery!=='boolean'||!['customer','store'].includes(payer))throw new SaleHeaderQuoteError()
-  const delivery=money(overrides.delivery_fee_usd??sale.delivery_fee_usd,true)
-  const raw=sumMoney4([after,tax,isDelivery&&payer==='customer'?delivery:0])
+  const delivery=money(overrides.delivery_fee_usd??sale.delivery_fee_usd,true,recorded&&overrides.delivery_fee_usd===undefined)
+  const raw=sumMoney4([subtotal,-discount,-member,tax,isDelivery&&payer==='customer'?delivery:0])
   const rounded=settlementRounding4(raw)
   return {version:1,exchange_rate:rate,subtotal_usd:subtotal,discount_usd:discount,membership_discount_usd:member,tax_usd:tax,
     delivery_fee_usd:delivery,is_delivery:isDelivery,delivery_fee_paid_by:payer as 'customer'|'store',
@@ -64,7 +65,8 @@ export function compareSaleHeaderQuote(expected:unknown,actual:SaleMutationHeade
     if(typeof value!==typeof target)throw new SaleHeaderQuoteError()
     if(typeof value==='number'&&(!Number.isFinite(value)||(key!=='rounding_adjustment_usd'&&value<0)))throw new SaleHeaderQuoteError()
     if(typeof value==='number'&&key!=='version'&&key!=='exchange_rate') {
-      try {if(roundMoney4(value)!==value||(key==='total_usd'&&roundMoney2(value)!==value))throw new SaleHeaderQuoteError()}
+      const recordedComponent=['subtotal_usd','discount_usd','membership_discount_usd','tax_usd','delivery_fee_usd'].includes(key)&&value===target
+      try {if((!recordedComponent&&roundMoney4(value)!==value)||(key==='total_usd'&&roundMoney2(value)!==value))throw new SaleHeaderQuoteError()}
       catch {throw new SaleHeaderQuoteError()}
     }
   }
@@ -74,7 +76,7 @@ export function compareSaleHeaderQuote(expected:unknown,actual:SaleMutationHeade
   try {
     const net=subtractMoney4(Number(row.subtotal_usd),sumMoney4([Number(row.discount_usd),Number(row.membership_discount_usd)]))
     if(net<0)throw new SaleHeaderQuoteError()
-    const raw=sumMoney4([net,Number(row.tax_usd),row.is_delivery&&row.delivery_fee_paid_by==='customer'?Number(row.delivery_fee_usd):0])
+    const raw=sumMoney4([Number(row.subtotal_usd),-Number(row.discount_usd),-Number(row.membership_discount_usd),Number(row.tax_usd),row.is_delivery&&row.delivery_fee_paid_by==='customer'?Number(row.delivery_fee_usd):0])
     const rounded=settlementRounding4(raw)
     if(raw!==row.calculated_total_usd||rounded.payableTotal2!==row.total_usd||rounded.roundingAdjustment4!==row.rounding_adjustment_usd
       ||multiplyMoney4(rounded.payableTotal2,Number(row.exchange_rate))!==row.total_khr)throw new SaleHeaderQuoteError()
