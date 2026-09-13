@@ -13,17 +13,19 @@ import {
   pendingDirectMutationForScope,
   savePendingDirectMutation,
   savePendingDirectMutationSlot,
+  releasePendingSaleLineMutation,
 } from '../src/utils/directMutationRequest.ts'
 
 const require = createRequire(import.meta.url)
 
 function loadTransport(relative: string, mocks: Record<string, unknown>): Record<string, (...args: any[]) => any> {
+  const moduleRequire = createRequire(new URL(relative, import.meta.url))
   const source = readFileSync(new URL(relative, import.meta.url), 'utf8')
   const compiled = transformSync(source, { loader: 'ts', format: 'cjs' }).code
   const mod = { exports: {} as Record<string, (...args: any[]) => any> }
   new Function('require', 'module', 'exports', compiled)((id: string) => {
     for (const [suffix, value] of Object.entries(mocks)) if (id.endsWith(suffix)) return value
-    return require(id)
+    return moduleRequire(id)
   }, mod, mod.exports)
   return mod.exports
 }
@@ -46,6 +48,30 @@ async function test(name: string, fn: () => unknown | Promise<unknown>): Promise
   try { await fn(); console.log(`PASS ${name}`) }
   catch (error) { failed += 1; console.error(`FAIL ${name}`); console.error(error) }
 }
+
+await test('new sale attempts preserve corrupt evidence and cannot overwrite unresolved requests', () => {
+  const storage = new MemoryStorage(), actor = 'origin-runtime:user7', entity = '17'
+  const body = { client_request_id: 'request-a', money_precision_version: 1, expected_updated_at: 'before', expected_exchange_rate: 4000,
+    kind: 'line_removed', sale_item_id: 70, expected_header_quote: { version: 1 } }
+  savePendingDirectMutation('sale-amendment', actor, entity, body, storage)
+  assert.deepEqual(loadPendingDirectMutation('sale-amendment', actor, entity, storage)!.body, body)
+  assert.equal(loadPendingDirectMutation('sale-amendment', 'origin-runtime:user8', entity, storage), null)
+  assert.equal(loadPendingDirectMutation('sale-amendment', 'other-runtime:user7', entity, storage), null)
+  assert.throws(() => savePendingDirectMutation('sale-amendment', actor, entity, { ...body, client_request_id: 'request-b' }, storage))
+  assert.throws(() => savePendingDirectMutation('sale-amendment', actor, entity, null, storage))
+  assert.throws(() => releasePendingSaleLineMutation('sale-amendment', actor, entity, { ...body, client_request_id: 'request-b' }, storage))
+  releasePendingSaleLineMutation('sale-amendment', actor, entity, body, storage)
+  const key = directMutationStorageKey('sale-amendment', actor, entity)
+  for (const invalid of ['{broken', JSON.stringify({ version: 2, kind: 'sale-amendment', actorId: actor, entityId: entity, createdAt: 1, reconcileAfter: 2, body: { client_request_id: 'orphan' } })]) {
+    storage.setItem(key, invalid)
+    assert.throws(() => loadPendingDirectMutation('sale-amendment', actor, entity, storage))
+    assert.throws(() => savePendingDirectMutation('sale-amendment', actor, entity, body, storage))
+    assert.equal(storage.getItem(key), invalid)
+  }
+  const quota = new MemoryStorage(); quota.failWrites = true
+  assert.throws(() => savePendingDirectMutation('sale-amendment', actor, entity, body, quota))
+  assert.throws(() => savePendingDirectMutation('sale-add-items', actor, entity, { client_request_id: 'id-only' }, new MemoryStorage()))
+})
 
 await test('pending bodies are frozen and scoped by actor plus entity', () => {
   const storage = new MemoryStorage()
