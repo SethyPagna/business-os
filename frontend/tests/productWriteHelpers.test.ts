@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
 import {
   buildDeletedProductIdSet,
   buildDefinedProductUpdates,
@@ -474,6 +475,26 @@ assert.deepEqual(
   },
   'bulk pricing updates normalize provided price fields and preserve existing null behavior',
 )
+
+assert.deepEqual(
+  buildProductBulkPricingUpdates({
+    selling_price_usd: '1.23001',
+    purchase_price_usd: '1.23455',
+    purchase_price_khr: '4321.12345',
+  }),
+  {
+    selling_price_usd: 1.24,
+    purchase_price_usd: 1.2346,
+    purchase_price_khr: 4321.1235,
+  },
+  'absolute bulk edits keep selling ceil-cent policy but normalize internal purchase cost to nearest four decimals',
+)
+
+{
+  const productsSource = fs.readFileSync(new URL('../src/components/products/Products.tsx', import.meta.url), 'utf8')
+  assert.match(productsSource, /purchase_price_usd[^>]*>[\s\S]{0,240}?step="0\.0001"/)
+  assert.match(productsSource, /purchase_price_khr[^>]*>[\s\S]{0,240}?step="0\.0001"/)
+}
 
 assert.equal(
   getDefaultProductRestoreBranchId([{ id: 1 }, { id: '2', is_default: true }]),

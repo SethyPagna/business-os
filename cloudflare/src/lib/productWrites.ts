@@ -18,10 +18,12 @@ import { roundMoney4, sellingPriceCeilCent, subtractDecimalSum } from './moneyPr
 
 export const PRODUCT_MONEY_VERSION = 'product_money_policy_version'
 export const PRODUCT_MONEY_PLAN = '_product_money_write_plan'
-const PRODUCT_MONEY_FIELDS = ['cost_price_usd', 'cost_price_khr', 'selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr'] as const
-type ProductMoneyField = typeof PRODUCT_MONEY_FIELDS[number]
+const PRODUCT_MONEY_FIELDS_V1 = ['cost_price_usd', 'cost_price_khr', 'selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr'] as const
+const PRODUCT_MONEY_FIELDS_V2 = [...PRODUCT_MONEY_FIELDS_V1, 'purchase_price_usd', 'purchase_price_khr'] as const
+const LATEST_PRODUCT_MONEY_POLICY_VERSION = 2 as const
+type ProductMoneyField = typeof PRODUCT_MONEY_FIELDS_V2[number]
 type MoneyBefore = Record<ProductMoneyField, number | null> & { updated_at: string | null; name: string | null }
-type MoneyPlan = { version: 1; kind: 'create' | 'update'; product_id: number | null; before: MoneyBefore | null; after: Partial<Record<ProductMoneyField, number | null>>; group_rename: { from: string; to: string; members: Record<string, unknown>[]; target_members: Record<string, unknown>[] } | null }
+type MoneyPlan = { version: 1 | 2; kind: 'create' | 'update'; product_id: number | null; before: Partial<MoneyBefore> | null; after: Partial<Record<ProductMoneyField, number | null>>; group_rename: { from: string; to: string; members: Record<string, unknown>[]; target_members: Record<string, unknown>[] } | null }
 export class ProductMoneyWriteError extends Error {
   constructor(readonly code: string, message: string, readonly status = 409) { super(message); this.name = 'ProductMoneyWriteError' }
 }
@@ -37,6 +39,9 @@ function moneyInput(value: unknown): number | null {
     throw new ProductMoneyWriteError('product_money_invalid', 'Prices must be finite non-negative numbers.', 400)
   }
   return Number(value)
+}
+function moneyFields(version: MoneyPlan['version']): readonly ProductMoneyField[] {
+  return version === 1 ? PRODUCT_MONEY_FIELDS_V1 : PRODUCT_MONEY_FIELDS_V2
 }
 function nextMoney(field: ProductMoneyField, value: unknown, before?: number | null): number | null {
   const parsed = moneyInput(value)
@@ -54,19 +59,25 @@ function nextMoney(field: ProductMoneyField, value: unknown, before?: number | n
 export function readProductMoneyPlan(body: Record<string, unknown>): MoneyPlan | null {
   if (!isRecord(body)) return invalidMoneyPlan()
   if (!owns(body, PRODUCT_MONEY_VERSION) && !owns(body, PRODUCT_MONEY_PLAN)) return null // historical queue/operation
-  if (body[PRODUCT_MONEY_VERSION] !== 1) return invalidMoneyPlan()
+  const version = body[PRODUCT_MONEY_VERSION]
+  if (version !== 1 && version !== 2) return invalidMoneyPlan()
   const raw = body[PRODUCT_MONEY_PLAN]
-  if (!isRecord(raw) || raw.version !== 1 || (raw.kind !== 'create' && raw.kind !== 'update') || !isRecord(raw.after)) return invalidMoneyPlan()
+  if (!isRecord(raw) || raw.version !== version || (raw.kind !== 'create' && raw.kind !== 'update') || !isRecord(raw.after)) return invalidMoneyPlan()
+  const fields = moneyFields(version)
+  // Version 1 predates purchase-price ownership. It remains readable only
+  // in its exact six-field shape; purchase fields may never hitch a ride
+  // outside that frozen plan and bypass its before-image guard.
+  if (version === 1 && (owns(body, 'purchase_price_usd') || owns(body, 'purchase_price_khr'))) return invalidMoneyPlan()
   if (Object.keys(raw).sort().join(',') !== 'after,before,group_rename,kind,product_id,version') return invalidMoneyPlan()
   if (raw.kind === 'create' ? raw.product_id !== null || raw.before !== null : !Number.isSafeInteger(raw.product_id) || Number(raw.product_id) <= 0 || !isRecord(raw.before)) return invalidMoneyPlan()
   if (raw.kind === 'update') {
     const before = raw.before as Record<string, unknown>
-    if (Object.keys(before).sort().join(',') !== [...PRODUCT_MONEY_FIELDS, 'updated_at', 'name'].sort().join(',')) return invalidMoneyPlan()
+    if (Object.keys(before).sort().join(',') !== [...fields, 'updated_at', 'name'].sort().join(',')) return invalidMoneyPlan()
     if (before.name !== null && typeof before.name !== 'string') return invalidMoneyPlan()
     if (!owns(before, 'updated_at') || (before.updated_at !== null && typeof before.updated_at !== 'string')) return invalidMoneyPlan()
-    for (const field of PRODUCT_MONEY_FIELDS) if (!owns(before, field) || (before[field] !== null && (typeof before[field] !== 'number' || !Number.isFinite(before[field])))) return invalidMoneyPlan()
+    for (const field of fields) if (!owns(before, field) || (before[field] !== null && (typeof before[field] !== 'number' || !Number.isFinite(before[field])))) return invalidMoneyPlan()
   }
-  if (Object.keys(raw.after).some(field => !(PRODUCT_MONEY_FIELDS as readonly string[]).includes(field))) return invalidMoneyPlan()
+  if (Object.keys(raw.after).some(field => !fields.includes(field as ProductMoneyField))) return invalidMoneyPlan()
   if (raw.group_rename !== null) {
     const group = raw.group_rename
     if (raw.kind !== 'update' || !isRecord(group) || Object.keys(group).sort().join(',') !== 'from,members,target_members,to'
@@ -86,7 +97,7 @@ export function readProductMoneyPlan(body: Record<string, unknown>): MoneyPlan |
     }
     if (!group.members.some(member => isRecord(member) && member.id === raw.product_id)) return invalidMoneyPlan()
   }
-  for (const field of PRODUCT_MONEY_FIELDS) {
+  for (const field of fields) {
     if (owns(body, field) !== owns(raw.after, field)) return invalidMoneyPlan()
     if (!owns(raw.after, field)) continue
     const after = raw.after[field]
@@ -98,14 +109,14 @@ export function readProductMoneyPlan(body: Record<string, unknown>): MoneyPlan |
 /** New HTTP requests only. Never call this when replaying an old queued plan. */
 export async function prepareProductMoneyWrite(env: Env, body: Record<string, unknown>, productId: number | null, expectedUpdatedAt?: string | null): Promise<void> {
   if (!isRecord(body)) throw new ProductMoneyWriteError('product_money_version_invalid', 'A product edit must be an object.', 400)
-  if (owns(body, PRODUCT_MONEY_PLAN) || (owns(body, PRODUCT_MONEY_VERSION) && body[PRODUCT_MONEY_VERSION] !== 1)) {
+  if (owns(body, PRODUCT_MONEY_PLAN) || owns(body, PRODUCT_MONEY_VERSION)) {
     throw new ProductMoneyWriteError('product_money_version_invalid', 'Unsupported product price policy or client-supplied price plan.', 400)
   }
-  const fields = PRODUCT_MONEY_FIELDS.filter(field => owns(body, field))
+  const fields = PRODUCT_MONEY_FIELDS_V2.filter(field => owns(body, field))
   let before: MoneyBefore | null = null
   let groupRename = false
   if (productId != null) {
-    const current = await getDb(env).prepare(`SELECT ${PRODUCT_MONEY_FIELDS.join(',')}, updated_at, name FROM products WHERE id=@id`).get<MoneyBefore & { name: string | null }>({ id: productId })
+    const current = await getDb(env).prepare(`SELECT ${PRODUCT_MONEY_FIELDS_V2.join(',')}, updated_at, name FROM products WHERE id=@id`).get<MoneyBefore & { name: string | null }>({ id: productId })
     if (!current) throw new ProductMoneyWriteError('product_money_state_conflict', 'The product no longer exists.')
     const { name } = current
     before = current
@@ -132,8 +143,8 @@ export async function prepareProductMoneyWrite(env: Env, body: Record<string, un
     if (members.length + target_members.length > 500 || groupSnapshotBytes(members, target_members) > 500_000) throw new ProductMoneyWriteError('product_group_plan_too_large', 'The product group is too large for a guarded rename.', 400)
     group = { from, to, members, target_members }
   }
-  body[PRODUCT_MONEY_VERSION] = 1
-  body[PRODUCT_MONEY_PLAN] = { version: 1, kind: productId == null ? 'create' : 'update', product_id: productId, before, after,
+  body[PRODUCT_MONEY_VERSION] = LATEST_PRODUCT_MONEY_POLICY_VERSION
+  body[PRODUCT_MONEY_PLAN] = { version: LATEST_PRODUCT_MONEY_POLICY_VERSION, kind: productId == null ? 'create' : 'update', product_id: productId, before, after,
     group_rename: group } satisfies MoneyPlan
   readProductMoneyPlan(body)
 }
@@ -272,7 +283,7 @@ export async function updateRow(env: Env, table: string, id: string | number, bo
   const keys = Object.keys(payload).filter((key) => columns.has(key))
   if (!keys.length) return 0
   const assignments = keys.map((key) => `"${key}" = ?`).join(', ')
-  const beforeKeys = [...PRODUCT_MONEY_FIELDS, 'updated_at', 'name'] as const
+  const beforeKeys = moneyPlan ? [...moneyFields(moneyPlan.version), 'updated_at', 'name'] as const : []
   const guard = moneyPlan ? beforeKeys.map(field => ` AND "${field}" IS ?`).join('') : ''
   const statement = env.DB.prepare(`UPDATE "${table}" SET ${assignments} WHERE id = ?${guard}`)
     .bind(...keys.map((key) => payload[key]), id, ...(moneyPlan ? beforeKeys.map(field => moneyPlan.before![field]) : []))

@@ -99,7 +99,7 @@ function loadProductsRoute(state) {
         },
         async get() {
           if (/SELECT cost_price_usd,cost_price_khr/.test(sql)) return Object.fromEntries(
-            ['cost_price_usd', 'cost_price_khr', 'selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr', 'updated_at', 'name']
+            ['cost_price_usd', 'cost_price_khr', 'selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr', 'purchase_price_usd', 'purchase_price_khr', 'updated_at', 'name']
               .map(key => [key, state.current[key] ?? null]),
           )
           if (/SELECT image_path FROM products/i.test(sql)) return { image_path: state.current.image_path }
@@ -113,7 +113,7 @@ function loadProductsRoute(state) {
   }
   const realProductWrites = loadProductWrites({ getDb: () => db })
   const persistableBody = body => {
-    assert.equal(realProductWrites.readProductMoneyPlan(body)?.version, 1, 'fresh image/nonmoney requests carry a validated immutable server policy')
+    assert.equal(realProductWrites.readProductMoneyPlan(body)?.version, 2, 'fresh image/nonmoney requests carry the current validated immutable server policy')
     // Preserve all supplied image/nonmoney keys in this fixture. Only the
     // actual writer's server-metadata exclusions are removed from capture.
     return realProductWrites.cleanPayload(body, new Set(Object.keys(body)))

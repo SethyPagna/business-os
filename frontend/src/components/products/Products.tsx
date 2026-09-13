@@ -4661,9 +4661,9 @@ function ProductsFullEditor() {
             <div><label className="text-xs text-gray-500 block mb-1">{tr('wholesale_price_khr_full', 'Wholesale (KHR)', 'តម្លៃបោះដុំ (KHR)')}</label>
               <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.wholesale_price_khr??''} onChange={e=>setBulkEditForm(f=>({...f,wholesale_price_khr:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} /></div>
             <div><label className="text-xs text-gray-500 block mb-1">{tr('purchase_price_usd', 'Purchase price (USD)')}</label>
-              <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.purchase_price_usd??''} onChange={e=>setBulkEditForm(f=>({...f,purchase_price_usd:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} /></div>
+              <input className="input text-xs py-1" type="number" step="0.0001" min="0" value={bulkEditForm.purchase_price_usd??''} onChange={e=>setBulkEditForm(f=>({...f,purchase_price_usd:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} /></div>
             <div><label className="text-xs text-gray-500 block mb-1">{tr('purchase_price_khr', 'Purchase price (KHR)')}</label>
-              <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.purchase_price_khr??''} onChange={e=>setBulkEditForm(f=>({...f,purchase_price_khr:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} /></div>
+              <input className="input text-xs py-1" type="number" step="0.0001" min="0" value={bulkEditForm.purchase_price_khr??''} onChange={e=>setBulkEditForm(f=>({...f,purchase_price_khr:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} /></div>
           </div>
           <p className="text-xs text-gray-400 mt-1">{tr('bulk_price_khr_auto_note', 'KHR prices will auto-calculate at current exchange rate')}</p>
           <button disabled={bulkActionBusy} className="btn-primary mt-3 px-4 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-60" onClick={async () => {
