@@ -44,12 +44,13 @@ const db = {
   },
   async batch(items) {
     if (beforeDbBatchHook) await beforeDbBatchHook(items)
-    const results = []
-    for (const item of items) {
-      const stmt = rawDb.prepare(item.sql)
-      const r = stmt.run(item.params || {})
-      results.push({ changes: r.meta?.changes ?? 0, lastInsertRowid: Number(r.meta?.last_row_id ?? 0) })
-    }
+    // Exercise D1's actual atomic batch contract. A later assertion/trigger
+    // failure must roll back every earlier statement in the same receipt.
+    const rawResults = await rawDb.batch(items)
+    const results = rawResults.map((r) => ({
+      changes: r.meta?.changes ?? 0,
+      lastInsertRowid: Number(r.meta?.last_row_id ?? 0),
+    }))
     if (afterDbBatchHook) await afterDbBatchHook(items)
     return results
   },
@@ -410,6 +411,38 @@ async function main() {
     })
     assert.strictEqual(topUp.status, 400, JSON.stringify(topUp.json))
     assert.deepStrictEqual(durableState(), beforeTopUp, 'cumulative overflow must precede the unlocked catalog-price update')
+  })
+
+  await check('unlocked existing-target receipt, pricing and movement roll back together and retry once', async () => {
+    seed()
+    const body = {
+      productId: 1, type: 'add', supplierName: 'Fixture Supplier', unitCostUsd: 1,
+      quantity: 1, reason: 'atomic unlocked receipt', branchId: 1, receivedDate: '2026-09-13',
+      unlockPricing: true, pricing: { selling_price_usd: 99, cost_usd: 1, cost_khr: 0, barcode: 'B123' },
+    }
+    const durableState = () => ({
+      products: rawDb.prepare('SELECT id,barcode,selling_price_usd,stock_quantity FROM products ORDER BY id').all(),
+      branchStock: rawDb.prepare('SELECT * FROM branch_stock ORDER BY product_id,branch_id').all(),
+      batches: rawDb.prepare('SELECT id,received_quantity,received_cost_usd FROM product_batches ORDER BY id').all(),
+      lotStock: rawDb.prepare('SELECT * FROM branch_batch_stock ORDER BY batch_id,branch_id').all(),
+      movements: rawDb.prepare('SELECT * FROM inventory_movements ORDER BY id').all(),
+    })
+    const before = durableState()
+    rawDb.exec(`CREATE TEMP TRIGGER fail_unlocked_price BEFORE UPDATE OF selling_price_usd ON products
+      BEGIN SELECT RAISE(ABORT, 'injected unlocked price failure'); END;`)
+    const failed = await req('POST', '/adjust', body)
+    assert.ok(failed.status >= 400, JSON.stringify(failed.json))
+    assert.deepStrictEqual(durableState(), before, 'catalog trigger failure rolls back stock, lot, price and movement together')
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM stock_session_guards').get().n, 0)
+
+    rawDb.exec('DROP TRIGGER fail_unlocked_price')
+    const retried = await req('POST', '/adjust', body)
+    assert.strictEqual(retried.status, 200, JSON.stringify(retried.json))
+    assert.strictEqual(rawDb.prepare('SELECT stock_quantity FROM products WHERE id=1').get().stock_quantity, 1)
+    assert.strictEqual(rawDb.prepare('SELECT selling_price_usd FROM products WHERE id=1').get().selling_price_usd, 99)
+    assert.strictEqual(rawDb.prepare('SELECT SUM(quantity) quantity FROM branch_batch_stock').get().quantity, 1)
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n, 1)
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM stock_session_guards').get().n, 0)
   })
 
   await check('priced lot top-up guards its captured cumulative cost before every stock write', async () => {
