@@ -504,6 +504,8 @@ export function repricePromotionCartLines(
       const manual = applyManualDiscount(baseUsd, baseKhr, exchangeRate, manualType, Number(current.manual_discount_value ?? 0), 1)
       const fields = {
         ...manual,
+        base_price_usd: baseUsd,
+        base_price_khr: baseKhr,
         product_discount_type: adjustment.rule_type === 'product_discount' ? String(current.discount_type || 'percent') : String(adjustment.rule_type || 'percent'),
         product_discount_label: adjustment.label,
         product_discount_usd: Math.max(0, subtractMoney4(sellingPriceCeilCent(Number(item.selling_price_usd ?? 0)), baseUsd)),

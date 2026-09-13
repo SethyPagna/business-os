@@ -31,6 +31,10 @@ const cart = [{ ...product, ...initial, cart_line_id: 'p7', quantity: 1, manual_
 const repriced = repricePromotionCartLines(cart, [], 4000, 1)
 assert.equal(repriced.cart[0].applied_price_usd, 0.8765, 'promotion refresh preserves independent manual discount')
 assert.equal(repricePromotionCartLines(repriced.cart, [], 4000, 1).changed, false, 'stable v1 cart does not create an effect loop')
+const ten = repricePromotionCartLines([{ ...product, selling_price_usd: 10, selling_price_khr: 40000, discount_percent: 10, price_mode: 'promotion', quantity: 1, applied_price_usd: 10, base_price_usd: 10, applied_price_khr: 40000, base_price_khr: 40000 }], [], 4000, 1)
+assert.equal(ten.cart[0].base_price_usd, 9, 'repricing updates the canonical post-promotion base, not only applied price')
+assert.equal(ten.cart[0].base_price_khr, 36000)
+assert.equal(repricePromotionCartLines(ten.cart, [], 4000, 1).changed, false)
 assert.equal(resolveCartPriceValues({ selling_price_usd: 1.2345 }, 'selling', 4000, {}, [], 1).base_price_usd, 1.24)
 for (const kind of ['percent_off', 'quantity_percent', 'fixed_off', 'quantity_save', 'spend_save', 'next_item']) {
   const benefit = rule({ rule_type: kind, percent_off: 12.3456, min_quantity: 1, min_spend_usd: 1, save_usd: 0.1234 })
