@@ -27,7 +27,7 @@ import { bumpVersion } from '../lib/cache'
 import { findIdentityMatch, identityBarcodeKey, type ProductIdentityRow } from '../lib/productIdentity'
 import { buildIssueStateClauses, buildLikeAliasClause, runFuzzyFallbackMatch, tokenizeSearchTermGroups, tokenizeSearchWords } from '../lib/searchMatch'
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/productSearchQuery'
-import { receiveBatchStock, removeStockFromBatch, removeStockAcrossBatches, InsufficientBatchStockError, readFifoLotAvailability, allocateAcrossLots, decrementBatchStockStrictStatement, incrementBatchStockStatement } from '../lib/productBatches'
+import { planReceiveBatchStock, receiveBatchStock, removeStockFromBatch, removeStockAcrossBatches, InsufficientBatchStockError, readFifoLotAvailability, allocateAcrossLots, decrementBatchStockStrictStatement, incrementBatchStockStatement, type ReceiptCostPreimage } from '../lib/productBatches'
 import { applyMovementRevert, type RevertMovementRow } from '../lib/stockRevert'
 import { dateToBatchCode, normalizeTypedDate } from '../lib/batchCode'
 import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, stockReceiptGateCode, stockReceiptGateMessage } from '../lib/stockReceiptGate'
@@ -1546,7 +1546,8 @@ app.post('/adjust', async (c) => {
   let targetProductName = product.name
   let createdSibling = false
   let preflightAddMovementCost: ReturnType<typeof resolveMovementCostSnapshot> | null = null
-  let applyMergedPricing: (() => Promise<void>) | null = null
+  let unlockedReceiptCostPreimage: ReceiptCostPreimage | undefined
+  let mergedPricingStatement: { sql: string; params: Record<string, unknown> } | null = null
   if (unlockPricing) {
     const pricing = body.pricing as Record<string, unknown>
     const source = product as StockRowFields
@@ -1602,7 +1603,14 @@ app.post('/adjust', async (c) => {
           const existingLot = await db.prepare(
             'SELECT received_cost_usd FROM product_batches WHERE variant_product_id=@productId AND batch_key=@batchKey',
           ).get<{ received_cost_usd: number | null }>({ productId: target.id, batchKey })
+          unlockedReceiptCostPreimage = { batchExists: Boolean(existingLot), receivedCostUsd: existingLot?.received_cost_usd ?? null }
           if (existingLot) addMoney4(existingLot.received_cost_usd ?? 0, preflightAddMovementCost.totalCostUsd)
+        } else if (target.id > 0) {
+          const batchKey = dateToBatchCode(receivedDate || new Date().toISOString().slice(0, 10)) as string
+          const existingLot = await db.prepare(
+            'SELECT received_cost_usd FROM product_batches WHERE variant_product_id=@productId AND batch_key=@batchKey',
+          ).get<{ received_cost_usd: number | null }>({ productId: target.id, batchKey })
+          unlockedReceiptCostPreimage = { batchExists: Boolean(existingLot), receivedCostUsd: existingLot?.received_cost_usd ?? null }
         }
       })
     } catch (error) {
@@ -1614,13 +1622,13 @@ app.post('/adjust', async (c) => {
     if (!createdSibling) {
       // Selling/wholesale price is mergeable data: an explicit unlocked receipt
       // may raise it, but never lower it. Cost remains untouched here.
-      applyMergedPricing = async () => { await db.prepare(`UPDATE products SET
+      mergedPricingStatement = { sql: `UPDATE products SET
           selling_price_usd = MAX(COALESCE(selling_price_usd, 0), @sellingUsd),
           selling_price_khr = MAX(COALESCE(selling_price_khr, 0), @sellingKhr),
           wholesale_price_usd = MAX(COALESCE(wholesale_price_usd, 0), @wholesaleUsd),
           wholesale_price_khr = MAX(COALESCE(wholesale_price_khr, 0), @wholesaleKhr),
           updated_at = CURRENT_TIMESTAMP
-        WHERE id = @id`).run({ id: targetProductId, ...overrides }) }
+        WHERE id = @id`, params: { id: targetProductId, ...overrides } }
     }
     if (createdSibling) {
       const created = await db.prepare('SELECT id, name FROM products WHERE id = @id').get<{ id: number; name: string }>({ id: targetProductId })
@@ -1699,6 +1707,7 @@ app.post('/adjust', async (c) => {
   let removalCostByBatch = new Map<number, number | null>()
   let addMovementCost: ReturnType<typeof resolveMovementCostSnapshot> | null = preflightAddMovementCost
   let removeMovementCost: ReturnType<typeof resolveMovementCostSnapshot> | null = null
+  let movementWrittenAtomically = false
   let capturedRemovalAllocations: Array<{ batchId: number; quantity: number }> | undefined
   if (type === 'add') {
     delta = quantity
@@ -1762,6 +1771,56 @@ app.post('/adjust', async (c) => {
 
   if (useBatchLedger && type === 'add') {
     try {
+      if (unlockPricing && !createdSibling && mergedPricingStatement && addMovementCost) {
+        const plan = planReceiveBatchStock({
+          productId: targetProductId,
+          branchId,
+          quantity,
+          receivedDate,
+          expiryDate,
+          supplierId,
+          supplierName,
+          unitCostUsd: receiptUnitCostUsd,
+          preserveHistoricalUnitCost: unitCostUsd == null,
+          paymentStatus,
+          creditDueDate,
+          receiptCostPreimage: receiptUnitCostUsd == null ? undefined : unlockedReceiptCostPreimage,
+        })
+        await db.batch([
+          ...plan.statements,
+          mergedPricingStatement,
+          {
+            sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity,
+              unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name, created_at, batch_id)
+            VALUES (@productId, @productName, @branchId, @branchName, 'add', @quantity,
+              @unitCostUsd, @unitCostKhr, @totalCostUsd, @totalCostKhr,
+              @reason, @referenceId, @userId, @userName, CURRENT_TIMESTAMP,
+              (SELECT id FROM product_batches WHERE variant_product_id=@productId AND batch_key=@batchKey))`,
+            params: {
+              productId: targetProductId,
+              productName: targetProductName,
+              branchId,
+              branchName: branch?.name || null,
+              quantity: Math.abs(delta),
+              ...addMovementCost,
+              reason: appendReceiptNotes(reason, reasonNotes),
+              referenceId: sessionId,
+              userId: user?.id ?? null,
+              userName: actorSnapshot(user),
+              batchKey: plan.batchKey,
+            },
+          },
+          ...(receiptUnitCostUsd == null ? [] : [{ sql: 'DELETE FROM stock_session_guards', params: {} }]),
+        ])
+        const received = await db.prepare(
+          'SELECT id,batch_number,lot_code FROM product_batches WHERE variant_product_id=@productId AND batch_key=@batchKey',
+        ).get<{ id: number; batch_number: number | null; lot_code: string }>({ productId: targetProductId, batchKey: plan.batchKey })
+        if (!received) throw new Error('Received stock batch was not found after commit')
+        batchNumber = received.batch_number
+        resolvedBatchId = received.id
+        lotCode = received.lot_code
+        movementWrittenAtomically = true
+      } else {
       const received = await receiveBatchStock(db, {
         productId: targetProductId,
         branchId,
@@ -1789,6 +1848,7 @@ app.post('/adjust', async (c) => {
       batchNumber = received.batchNumber
       resolvedBatchId = received.batchId
       lotCode = received.lotCode
+      }
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : 'Failed to receive stock' }, 400)
     }
@@ -1832,13 +1892,7 @@ app.post('/adjust', async (c) => {
     await applyStockDelta(c.env, targetProductId, branchId, delta)
   }
 
-  // An unlocked receipt may also raise catalog selling tiers. Defer this
-  // independent catalog write until the received-cost guard has accepted the
-  // stock batch, so an overflowing or stale receipt cannot leave prices
-  // changed while its stock/movement is rejected.
-  if (applyMergedPricing) await applyMergedPricing()
-
-  if (delta !== 0) {
+  if (delta !== 0 && !movementWrittenAtomically) {
     let costComponents: MovementCostComponent[] = []
     if (type === 'add') {
       // An entered receipt cost, including an explicit free-goods zero, is
