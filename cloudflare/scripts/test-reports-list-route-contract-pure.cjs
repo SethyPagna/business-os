@@ -44,11 +44,24 @@ const db = { prepare(query) {
  const bind = (params = {}) => { const values=[]; const text=query.replace(/@(\w+)/g, (_,key) => { values.push(params[key] ?? null); return '?' }); return { stmt:sql.prepare(text), values } }
  return { get(params){ const b=bind(params); return b.stmt.get(...b.values) }, all(params){const b=bind(params);return b.stmt.all(...b.values)} }
 } }
+const moduleCache = new Map()
 function load(file, overrides={}) {
  const filePath=path.join(root,'src',file)
+ if (moduleCache.has(filePath)) return moduleCache.get(filePath)
  const output=ts.transpileModule(fs.readFileSync(filePath,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText
  const m={exports:{}}
- new Function('require','module','exports',output)((name)=>name in overrides?overrides[name]:require(name),m,m.exports)
+ moduleCache.set(filePath,m.exports)
+ const localRequire=(name)=>{
+  if (name in overrides) return overrides[name]
+  if (name.startsWith('.')) {
+   const resolved=path.resolve(path.dirname(filePath),name)
+   const relative=path.relative(path.join(root,'src'),resolved).replace(/\\/g,'/')
+   return load(relative.endsWith('.ts')?relative:`${relative}.ts`,overrides)
+  }
+  return require(name)
+ }
+ new Function('require','module','exports',output)(localRequire,m,m.exports)
+ moduleCache.set(filePath,m.exports)
  return m.exports
 }
 const dates=load('lib/businessDateWindow.ts')

@@ -38,10 +38,20 @@ fs.writeFileSync(
 )
 const moneyPath = path.join(tmpDir, 'moneyPrecision.ts')
 const reportMoneyPath = path.join(tmpDir, 'reportMoneyPrecision.ts')
+const customerReturnPath = path.join(tmpDir, 'customerReturnEntitlement.ts')
+const refundMoneyPath = path.join(tmpDir, 'refundMoneyPrecision.ts')
 fs.writeFileSync(moneyPath, fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'moneyPrecision.ts'), 'utf8'))
 fs.writeFileSync(reportMoneyPath, fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'reportMoneyPrecision.ts'), 'utf8'))
+fs.writeFileSync(customerReturnPath, `
+export type CustomerReturnRefundSnapshotV1 = any
+export function parseCustomerReturnRefundSnapshot(): never { throw new Error('reader_not_available_in_formula_harness') }
+export function prorateCustomerReturnMoney4(): never { throw new Error('reader_not_available_in_formula_harness') }
+`)
+fs.writeFileSync(refundMoneyPath, `
+export function validateRefundMoneySnapshot(): never { throw new Error('reader_not_available_in_formula_harness') }
+`)
 const tscBin = path.join(__dirname, '..', 'node_modules', 'typescript', 'bin', 'tsc')
-execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath} ${path.join(tmpDir, 'businessDateWindow.ts')} ${moneyPath} ${reportMoneyPath}`, {
+execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath} ${path.join(tmpDir, 'businessDateWindow.ts')} ${moneyPath} ${reportMoneyPath} ${customerReturnPath} ${refundMoneyPath}`, {
   cwd: tmpDir,
   stdio: 'inherit',
 })
