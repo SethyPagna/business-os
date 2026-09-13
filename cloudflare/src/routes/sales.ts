@@ -3681,7 +3681,7 @@ app.post('/:id/amendments', async (c) => {
     delivery_fee_usd?: number
     delivery_actual_cost_usd?: number | string | null
     delivery_contact_id?: number
-    replacement?: { product_id?: number; quantity?: number; applied_price_usd?: number; branch_id?: number }
+    replacement?: SaleItemInput
     notes?: string
     client_request_id?: string
     expected_exchange_rate?: number | string
@@ -4212,7 +4212,7 @@ app.post('/:id/amendments', async (c) => {
   let pricingRowsAfter=precisionBasket!.lines.map(row=>({...row}))
   const repricedPools=new Map<string,{pool:CapturedPricingPool;quantities:Record<string,number>}>()
   const capturedLineUpdate=kind==='line_updated'||kind==='line_quantity_increased'||kind==='line_quantity_decreased'
-  if (kind==='line_replaced') return c.json({error:'Captured-price replacement is not ready. Keep this sale unchanged.',code:'sale_pricing_mutation_not_ready'},409)
+  let replacementLines: ReturnType<typeof allocateNewSaleLines> | null = null
   if (kind==='line_removed' && pricingRowsAfter.length<=1) return c.json({error:'Cancel the sale instead of removing its last priced line.',code:'sale_last_line_remove_refused'},409)
 
   // A single reviewed edit can change the line's quantity and its final
@@ -4374,23 +4374,40 @@ app.post('/:id/amendments', async (c) => {
   // share one group_id so the detail view can render them as the single act
   // the cashier performed. ---
   if (kind === 'line_replaced') {
-    const replacement: { product_id?: number; quantity?: number; applied_price_usd?: number; branch_id?: number } =
-      (body.replacement && typeof body.replacement === 'object') ? body.replacement : {}
+    const replacement: Partial<SaleItemInput> =
+      (body.replacement && typeof body.replacement === 'object') ? body.replacement : {quantity:0}
     const productId = Number(replacement.product_id)
     const quantity = Math.max(0, Number(replacement.quantity) || 0)
     if (!Number.isFinite(productId) || productId <= 0) return c.json({ error: 'Which product is replacing it?' }, 400)
     if (!(quantity > 0)) return c.json({ error: 'How many of the replacement?' }, 400)
 
-    const product = await db.prepare('SELECT id, name, selling_price_usd, cost_price_usd, cost_price_khr FROM products WHERE id = ?')
-      .get<{ id: number; name: string; selling_price_usd: number; cost_price_usd: number; cost_price_khr: number }>([productId])
+    const product = await db.prepare('SELECT * FROM products WHERE id = ?')
+      .get<Record<string,unknown> & { id: number; name: string; selling_price_usd: number; cost_price_usd: number; cost_price_khr: number }>([productId])
     if (!product) return c.json({ error: `Product #${productId} no longer exists.` }, 400)
 
     const branchId = Number(replacement.branch_id ?? saleHeaderBranchId)
     if (!Number.isSafeInteger(branchId) || branchId <= 0 || branchId !== saleHeaderBranchId) {
       return c.json({ error: 'The sale header and replacement line must use the same Shop branch.' }, 400)
     }
-    const rawPrice = Number(replacement.applied_price_usd)
-    const unitPriceUsd = replacement.applied_price_usd === undefined ? sellingPriceCeilCent(product.selling_price_usd ?? 0) : newSaleMoney4(rawPrice)
+    if (!replacement.client_line_key || !['selling','wholesale','manual'].includes(replacement.pricing_source || ''))
+      throw new SaleMoneyContractError('money_precision_pricing_intent_required')
+    if (precisionBasket!.lines.some(row=>parseSaleItemPricing(row.pricing_snapshot_json as string)!.line_key===replacement.client_line_key))
+      throw new SaleItemPricingError()
+    const replacementRules=await db.prepare('SELECT * FROM promotion_rules WHERE is_active=1 ORDER BY id LIMIT 101').all<Record<string,unknown>>()
+    statements.unshift(pricingSourceGuard([product],replacementRules))
+    const replacementPool:CapturedPricingPool={version:1,pool_key:crypto.randomUUID(),evaluation_time:new Date().toISOString(),exchange_rate:exchangeRate,rules:[],lines:[{
+      line_key:replacement.client_line_key,source:replacement.pricing_source!,product:{...capturePricingProduct(product),selling_price_usd:sellingPriceCeilCent(product.selling_price_usd),
+        wholesale_price_usd:product.wholesale_price_usd==null?null:sellingPriceCeilCent(Number(product.wholesale_price_usd))},
+      selling_price_input_usd:replacement.selling_price_input_usd??null,
+      manual:{type:replacement.manual_discount_type==null?'none':replacement.manual_discount_type as 'fixed'|'percent',value:replacement.manual_discount_type==='percent'?replacement.manual_discount_value??0:newSaleMoney4(replacement.manual_discount_value)}
+    }]}
+    const replacementQuantities={[replacement.client_line_key]:quantity}
+    const replacementPricing=evaluateCapturedPricingPool(replacementPool,replacementQuantities).get(replacement.client_line_key)!
+    const quote=replacement.pricing_quote
+    if (!quote || (['gross_usd','product_discount_usd','manual_discount_usd','total_usd','total_khr'] as const).some(key=>quote[key]!==replacementPricing[key]))
+      return c.json({error:'Replacement pricing changed. Review the authoritative quote.',code:'sale_pricing_quote_conflict',quotes:{[replacement.client_line_key]:replacementPricing}},409)
+    const replacementJson=serializeSaleItemPricing(replacementPool,replacementQuantities,replacement.client_line_key,{version:1,lines:[{line_key:replacement.client_line_key,amount:replacementPricing.total_usd}],discount_usd:0,membership_discount_usd:0,tax_usd:0})
+    const unitPriceUsd = replacementPricing.applied_price_usd
 
     const lotsByKey = branchId
       ? await readFifoLotAvailabilityForCart(db, [{ productId, branchId }])
@@ -4409,6 +4426,7 @@ app.post('/:id/amendments', async (c) => {
     // that happens to imply it.
     const plannedLines = allocateNewSaleLines([{
       moneyPrecisionVersion: 1,
+      pricingSnapshotJson:replacementJson,
       productId, productName: product.name || `product #${productId}`, quantity, branchId,
       unitPriceUsd, costPriceUsd: product.cost_price_usd == null ? null : newSaleMoney4(product.cost_price_usd), costPriceKhr: product.cost_price_khr == null ? null : newSaleMoney4(product.cost_price_khr),
       batchId: null, batchLabel: null, batchExpiryDate: null,
@@ -4429,7 +4447,9 @@ app.post('/:id/amendments', async (c) => {
       saleId, saleStatus, lines: plannedLines,
       exchangeRate, userId: user?.id ?? null, userName: actorSnapshot(user),
     })
-    statements.push(...additionPlan.statements)
+    replacementLines=plannedLines
+    pricingRowsAfter.push(materializeCapturedPricingRow({id:0,product_id:productId,product_name:product.name,quantity,branch_id:branchId,cost_price_usd:plannedLines[0].costPriceUsd,cost_price_khr:plannedLines[0].costPriceKhr},
+      replacementPool,replacementQuantities,replacement.client_line_key,parseSaleItemPricing(replacementJson)!.allocation_context))
     subtotalDeltaUsd = sumMoney4([subtotalDeltaUsd,additionPlan.addedSubtotalUsd])
     unitsMoved += -additionPlan.deductedUnits || 0
     ledgerEntries.push({
@@ -4441,7 +4461,7 @@ app.post('/:id/amendments', async (c) => {
     })
   }
 
-  if (kind==='line_removed') {
+  if (kind==='line_removed' || kind==='line_replaced') {
     const removed=parseSaleItemPricing(precisionBasket!.lines.find(row=>row.id===line.id)!.pricing_snapshot_json as string)!
     const pool=structuredClone(removed.pool), quantities={...removed.quantities}
     pool.lines=pool.lines.filter(member=>member.line_key!==removed.line_key); delete quantities[removed.line_key]
@@ -4492,7 +4512,7 @@ app.post('/:id/amendments', async (c) => {
     taxPlan.outcome.taxUsd,
     Number(sale.delivery_fee_usd) || 0,
   )
-  if (capturedLineUpdate || kind==='line_removed') {
+  if (capturedLineUpdate || kind==='line_removed' || kind==='line_replaced') {
     const allocation={version:1 as const,lines:pricingRowsAfter.map(row=>({line_key:parseSaleItemPricing(row.pricing_snapshot_json as string)!.line_key,amount:Number(row.total_usd)})),
       discount_usd:Number(sale.discount_usd),membership_discount_usd:Number(sale.membership_discount_usd),tax_usd:taxPlan.outcome.taxUsd}
     pricingRowsAfter=pricingRowsAfter.map(row=>{
@@ -4500,7 +4520,19 @@ app.post('/:id/amendments', async (c) => {
       return materializeCapturedPricingRow(row,changed?.pool??original.pool,changed?.quantities??original.quantities,original.line_key,allocation)
     })
     validateCapturedSaleBasket(pricingRowsAfter,{...sale,...moneyAfterSnapshot})
-    statements.push(pricingRowsStatement(saleId,pricingRowsAfter))
+    const existingPricingRows=pricingRowsAfter.filter(row=>Number(row.id)>0)
+    if (existingPricingRows.length) statements.push(pricingRowsStatement(saleId,existingPricingRows))
+    if (replacementLines) {
+      replacementLines[0].pricingSnapshotJson=String(pricingRowsAfter.find(row=>Number(row.id)===0)!.pricing_snapshot_json)
+      const finalPlan=planSaleLineAddition({saleId,saleStatus,lines:replacementLines,exchangeRate,userId:user?.id??null,userName:actorSnapshot(user)})
+      statements.push(...planUnlottedSaleLineGuards(finalPlan.lines))
+      for (const [index,statement] of finalPlan.statements.entries()) {
+        statements.push(statement)
+        const ordinal=finalPlan.saleItemStatementIndexByLine.indexOf(index)
+        if (ordinal>=0) statements.push({sql:`INSERT INTO sale_mutation_members(operation_id,entity_kind,entity_id,ordinal) VALUES(@operation,'sale_item',last_insert_rowid(),@ordinal)`,params:{operation:mutationOperationId,ordinal}})
+      }
+      statements.push(...buildOperationAllocationStatements(finalPlan.lines,mutationOperationId,mutationStamp))
+    }
     lineMoneyAfterAtLatestRate=captureSaleLineKhrSnapshot(pricingRowsAfter)
   }
 
@@ -4545,6 +4577,9 @@ app.post('/:id/amendments', async (c) => {
         response,
         stamp: mutationStamp,
       }),
+      ...(replacementLines ? [{sql:`UPDATE sale_mutation_receipts SET after_json=json_set(after_json,@path,
+        (SELECT entity_id FROM sale_mutation_members WHERE operation_id=@operation AND entity_kind='sale_item' AND ordinal=0)) WHERE id=@operation`,
+        params:{operation:mutationOperationId,path:`$.lines[${lineMoneyAfterAtLatestRate.findIndex(row=>row.id===0)}].id`}}] : []),
       { sql: 'DELETE FROM sale_mutation_guards', params: {} },
       { sql: 'DELETE FROM sale_bulk_guards', params: {} },
     ])
@@ -4555,7 +4590,7 @@ app.post('/:id/amendments', async (c) => {
     if (retry?.request_digest === amendmentDigest) return c.json(JSON.parse(retry.response_json) as Record<string, unknown>)
     if (retry) return c.json({ error: 'client_request_id was already used with different amendment data.', code: 'idempotency_conflict' }, 409)
     const message = (error as Error).message || ''
-    if (/CHECK constraint|constraint failed/i.test(message)) {
+    if (/CHECK constraint|constraint failed|malformed JSON/i.test(message)) {
       return c.json({ error: 'The sale, stock, or monetary settings changed. Refresh and review this amendment again.', code: 'write_conflict' }, 409)
     }
     return c.json({ error: `Failed to amend this sale: ${message}` }, 500)

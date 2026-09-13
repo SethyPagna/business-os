@@ -192,6 +192,34 @@ async function actualRoute() {
   assert.equal(removed.sale.total_usd,10)
   assert.equal(removed.sale.items.length,1)
   p.validateCapturedSaleBasket(removed.sale.items,removed.sale)
+  const replaceBody={kind:'line_replaced',money_precision_version:1,client_request_id:'captured-replace',expected_exchange_rate:4000,sale_item_id:removed.sale.items[0].id,
+    replacement:{product_id:10,quantity:2,branch_id:1,client_line_key:'replacement-line',pricing_source:'selling',pricing_quote:{gross_usd:20,product_discount_usd:0,manual_discount_usd:0,total_usd:20,total_khr:80000}}}
+  const replaceResponse=await h.app.request(`/${saved.body.sale.id}/amendments`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(replaceBody)},{DB:f.route},h.executionCtx)
+  const replaced=await replaceResponse.json()
+  assert.equal(replaceResponse.status,200,JSON.stringify(replaced))
+  assert.equal(replaced.sale.total_usd,20)
+  assert.equal(replaced.sale.items.length,1)
+  assert.notEqual(replaced.sale.items[0].id,removed.sale.items[0].id)
+  p.validateCapturedSaleBasket(replaced.sale.items,replaced.sale)
+  const replacementReceipt=JSON.parse(f.raw.prepare("SELECT after_json FROM sale_mutation_receipts WHERE request_id='captured-replace'").get().after_json)
+  assert.equal(replacementReceipt.lines[0].id,replaced.sale.items[0].id)
+  assert.equal(replacementReceipt.lines[0].pricing_snapshot_json,replaced.sale.items[0].pricing_snapshot_json)
+  assert.equal(f.raw.prepare('SELECT SUM(quantity-released_quantity) AS quantity FROM sale_item_batch_allocations WHERE sale_item_id=?').get([replaced.sale.items[0].id]).quantity,2)
+  const replacementState=h.creationState(f.raw)
+  const replaceRetry=await h.app.request(`/${saved.body.sale.id}/amendments`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(replaceBody)},{DB:f.route},h.executionCtx)
+  assert.equal(replaceRetry.status,200)
+  assert.deepEqual(await replaceRetry.json(),replaced)
+  assert.deepEqual(h.creationState(f.raw),replacementState)
+  const originalBatch=f.route.batch
+  f.route.batch=async statements=>{
+    f.route.batch=originalBatch
+    f.raw.prepare('UPDATE products SET cost_price_usd=99 WHERE id=10').run()
+    return originalBatch(statements)
+  }
+  const conflictingReplacement={...replaceBody,client_request_id:'replacement-cost-race',sale_item_id:replaced.sale.items[0].id,replacement:{...replaceBody.replacement,client_line_key:'replacement-race'}}
+  const refused=await h.app.request(`/${saved.body.sale.id}/amendments`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(conflictingReplacement)},{DB:f.route},h.executionCtx)
+  assert.equal(refused.status,409,JSON.stringify(await refused.json()))
+  assert.deepEqual(h.creationState(f.raw),replacementState,'cost race cannot partially remove the old line or change stock')
   const legacyFingerprint={sale:{id:1},lines:[{id:1,total_usd:1}],amendmentHeadId:0}
   const actualFingerprint={sale:{id:1,money_precision_version:0,calculated_total_usd:null,rounding_adjustment_usd:0},lines:[{id:1,total_usd:1,pricing_snapshot_json:null}],amendmentHeadId:0}
   const matches=h.load('lib/undoAppliers.ts').sameSaleStateFingerprint
