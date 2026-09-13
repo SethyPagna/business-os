@@ -27,6 +27,7 @@ export function planHistoricalSaleLine(row: Record<string, unknown>, body: Recor
     : nonnegative(row.manual_discount_value == null || row.manual_discount_value === 0 ? recordedManual : row.manual_discount_value)
   const baseInput = body.selling_price_input_usd === undefined ? body.base_price_usd : sellingPriceCeilCent(body.selling_price_input_usd as number)
   const base = baseInput === undefined ? oldBase : nonnegative(baseInput)
+  if(base!==oldBase&&body.selling_price_input_usd===undefined)throw new HistoricalSalePricingError()
   const type = body.manual_discount_type === undefined ? oldType : body.manual_discount_type
   if (type !== null && type !== 'fixed' && type !== 'percent') throw new HistoricalSalePricingError()
   const value = type === null ? 0 : body.manual_discount_value === undefined ? oldValue : nonnegative(body.manual_discount_value)
