@@ -1,7 +1,42 @@
 import { addMoney4, divideMoney4, multiplyMoney4, percentageMoney4, percentageProductMoney4, roundMoney4, sellingPriceCeilCent, subtractMoney4, sumMoney4 } from './moneyPrecision.ts'
 import { evaluateCapturedPricingPool, validateCapturedSaleBasket } from './saleItemPricing.ts'
 import { serverPricingIdentityBindings } from './saleMoneyV1.ts'
+import { planHistoricalSaleLine, recordedHistoricalLineTotal, HistoricalSalePricingError } from './historicalSalePricing.ts'
 const round2 = (value: number): number => Math.round((value + Number.EPSILON) * 100) / 100
+
+/** Parent version selects pricing authority. Request version1 means reviewed
+ * protocol, not permission to fabricate a captured pool for an old sale. */
+export function saleLineEditPreview(items: readonly Record<string, unknown>[], header: Record<string, unknown>, lineId: number,
+  changes: { quantity: number; selling_price_input_usd?: number; manual_discount_type?: 'percent' | 'fixed' | null; manual_discount_value?: number }) {
+  if (header.money_precision_version === 1) return { ...capturedSaleLineEdit(items, header, lineId, changes), pricingBasis: 'captured' as const, recordedTotalDerived: false }
+  if (header.money_precision_version != null && header.money_precision_version !== 0) throw new HistoricalSalePricingError()
+  const row = items.find(item => item.id === lineId)
+  if (!row || typeof header.subtotal_usd !== 'number' || !Number.isFinite(header.subtotal_usd) || header.subtotal_usd < 0) throw new HistoricalSalePricingError()
+  const plan = planHistoricalSaleLine(row, changes, changes.quantity, Number(header.exchange_rate))
+  if (!plan.changed || !plan.quote) return null
+  const baseline = recordedHistoricalLineTotal(row)
+  const subtotalUsd = sumMoney4([header.subtotal_usd, -baseline.amount, plan.quote.total_usd])
+  if (subtotalUsd < 0) throw new HistoricalSalePricingError()
+  const base = plan.row.base_price_usd == null ? sumMoney4([Number(plan.row.applied_price_usd), Number(plan.row.manual_discount_usd ?? 0)]) : Number(plan.row.base_price_usd)
+  const productDiscount = Number(plan.row.product_discount_usd ?? 0)
+  if (!Number.isFinite(productDiscount) || productDiscount < 0) throw new HistoricalSalePricingError()
+  return { ok: true as const, pricingBasis: 'recorded' as const, recordedTotalDerived: baseline.derived,
+    quantity: changes.quantity, basePriceUsd: base, appliedPriceUsd: Number(plan.row.applied_price_usd),
+    sellingPriceUsd: addMoney4(base, productDiscount), manualDiscountUsd: Number(plan.row.manual_discount_usd ?? 0),
+    totalDiscountUsd: addMoney4(productDiscount, Number(plan.row.manual_discount_usd ?? 0)), lineTotalUsd: plan.quote.total_usd, subtotalUsd,
+    request: { kind: 'line_updated' as const, money_precision_version: 1 as const, sale_item_id: lineId, ...changes,
+      pricing_quote: plan.quote, ...(baseline.derived ? { expected_recorded_line_total_usd: baseline.amount } : {}) } }
+}
+
+export function saleRemovalSubtotal(items: readonly Record<string, unknown>[], header: Record<string, unknown>, lineId: number): { subtotalUsd: number; recordedTotalDerived: boolean; expectedRecordedLineTotal?: number } {
+  if (header.money_precision_version === 1) return { subtotalUsd: capturedSaleRemovalSubtotal(items, header, lineId), recordedTotalDerived: false }
+  if (header.money_precision_version != null && header.money_precision_version !== 0) throw new HistoricalSalePricingError()
+  const row = items.find(item => item.id === lineId)
+  if (!row || typeof header.subtotal_usd !== 'number' || !Number.isFinite(header.subtotal_usd) || header.subtotal_usd < 0) throw new HistoricalSalePricingError()
+  const baseline = recordedHistoricalLineTotal(row), subtotalUsd = sumMoney4([header.subtotal_usd, -baseline.amount])
+  if (subtotalUsd < 0) throw new HistoricalSalePricingError()
+  return { subtotalUsd, recordedTotalDerived: baseline.derived, ...(baseline.derived ? { expectedRecordedLineTotal: baseline.amount } : {}) }
+}
 
 /** Quantity edits replay original captured thresholds/time across the whole
  * pool. Current product/rule settings are deliberately not an input. */

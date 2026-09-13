@@ -26,8 +26,9 @@ import {
   type SaleAmendmentRow,
 } from '../../utils/saleAmendments.ts'
 import { receiptTotalsFigures } from '../../utils/receiptTotals.ts'
+import { saleUsesSavedExchangeRate } from '../../utils/saleMoneyV1.ts'
 import { receiptLineFigures } from '../../utils/receiptLineMath.ts'
-import { capturedSaleLineEdit, capturedSaleRemovalSubtotal } from '../../utils/saleLineEditor.ts'
+import { saleLineEditPreview, saleRemovalSubtotal } from '../../utils/saleLineEditor.ts'
 import { quoteSaleMutationHeader, compareSaleHeaderQuote, type SaleMutationHeaderQuote } from '../../utils/saleMutationHeaderQuote.ts'
 import { useSaleMoneyCapability } from './useSaleMoneyCapability.ts'
 import { multiplyMoney4, roundMoney4, sellingPriceCeilCent, settlementRounding4, subtractMoney4, sumMoney4 } from '../../utils/moneyPrecision.ts'
@@ -214,6 +215,7 @@ type AddProductCandidate = SaleAddCandidate
 // api/salesTransport.ts's SaleAmendmentRequest -- one shape, so the button and
 // the request cannot drift.
 interface SaleAmendmentRequest {
+  expected_recorded_line_total_usd?: number
   expected_header_quote?: SaleMutationHeaderQuote
   pricing_quote?: { gross_usd: number; product_discount_usd: number; manual_discount_usd: number; total_usd: number; total_khr: number }
   money_precision_version?: 1
@@ -404,8 +406,9 @@ export default function SaleDetailModal({
   }, [pendingStatus, statusRecoveryOwner?.actorId, statusRecoveryOwner?.requestId, statusRecoveryOwner?.problem.errorId, statusRecoveryOwner?.problem.channel, statusRecoveryOwner?.problem.code])
   const { navigateTo, user, authReady } = useApp() as { navigateTo?: (page: string, anchor?: string) => void; user?: SaleSecurityUser | null; authReady: boolean }
   const securityFingerprint = saleSecurityFingerprint(user, authReady)
-  const moneyCapability = useSaleMoneyCapability(Boolean(sale && user && authReady), securityFingerprint)
+  const moneyCapability = useSaleMoneyCapability(Boolean(sale && user && authReady), securityFingerprint, sale?.money_precision_version !== 1)
   const savedMoneyVersion = sale?.money_precision_version === 1 ? 1 : 0
+  const usesSavedExchangeRate = saleUsesSavedExchangeRate(sale)
   const savedExchangeRate = Number(sale?.exchange_rate)
   const securityGenerationRef = useRef({ fingerprint: securityFingerprint, generation: 0 })
   const detailScope = `${advanceSaleSecurityScope(securityGenerationRef.current, securityFingerprint)}:${sale?.id ?? ''}`
@@ -435,7 +438,7 @@ export default function SaleDetailModal({
   const settlementSnapshot = (selectedSale: SaleDetail | null | undefined) => {
     const rawSettings = settings && typeof settings === 'object' ? settings as Record<string, unknown> : {}
     const configuredMethods = configuredSettlementMethods(rawSettings.pos_payment_methods)
-    const exchangeRateValue = Number(selectedSale?.money_precision_version === 1 ? selectedSale.exchange_rate : rawSettings.exchange_rate)
+    const exchangeRateValue = Number(saleUsesSavedExchangeRate(selectedSale) ? selectedSale?.exchange_rate : rawSettings.exchange_rate)
     const exchangeRate = Number.isFinite(exchangeRateValue) && exchangeRateValue > 0 ? exchangeRateValue : 4100
     const rows = initialSettlementRows({
       paymentDetails: selectedSale?.payment_details,
@@ -463,7 +466,7 @@ export default function SaleDetailModal({
   const [settlementSession, setSettlementSession] = useState(() => settlementSnapshot(sale))
   const paymentConfigReady = paymentConfigLoaded && !!paymentConfig.value &&
     JSON.stringify(settlementSession.configuredMethods) === JSON.stringify(paymentConfig.value.configuredMethods) &&
-    settlementSession.exchangeRate === (savedMoneyVersion === 1 ? savedExchangeRate : paymentConfig.value.exchangeRate)
+    settlementSession.exchangeRate === (usesSavedExchangeRate ? savedExchangeRate : paymentConfig.value.exchangeRate)
   const [settlementRows, setSettlementRows] = useState<SettlementRow[]>(settlementSession.rows)
   const settlementBaselineRef = useRef<SettlementRow[]>(settlementSession.rows)
   const settlementRequestIdRef = useRef(createSettlementRequestId())
@@ -644,8 +647,8 @@ export default function SaleDetailModal({
     if (!paymentConfigLoaded || !paymentConfig.value || statusSaving || pendingStatus) return
     // Eligibility and rate may hydrate after open. Never replace typed tender
     // rows, baseline, or request identity here; pending requests stay exact.
-    setSettlementSession((current) => ({ ...current, ...paymentConfig.value, ...(savedMoneyVersion === 1 ? { exchangeRate: savedExchangeRate } : {}) }))
-  }, [paymentConfig, paymentConfigLoaded, statusSaving, pendingStatus, savedMoneyVersion, savedExchangeRate])
+    setSettlementSession((current) => ({ ...current, ...paymentConfig.value, ...(usesSavedExchangeRate ? { exchangeRate: savedExchangeRate } : {}) }))
+  }, [paymentConfig, paymentConfigLoaded, statusSaving, pendingStatus, usesSavedExchangeRate, savedExchangeRate])
 
   const lastServerStatusRef = useRef(`${detailScope}:${sale?.sale_status || 'completed'}`)
   useEffect(() => {
@@ -901,6 +904,10 @@ export default function SaleDetailModal({
         send: async frozen => {
           if (!current()) return false
           moneyCapability.assertReady()
+          if (sale.money_precision_version !== 1 && frozen.kind !== 'delivery_actual_cost_changed') {
+            await moneyCapability.assertFreshReady()
+            if (!current()) return false
+          }
           if (kind === 'sale-amendment') return onAmend ? await onAmend(sale.id, frozen as unknown as SaleAmendmentRequest & SaleMutationReview) : false
           const { items: frozenItems, notes: _notes, ...review } = frozen
           return onAddItems ? await onAddItems(sale.id, frozenItems as Parameters<NonNullable<typeof onAddItems>>[1], review as SaleMutationReview) : false
@@ -1033,7 +1040,7 @@ export default function SaleDetailModal({
     setAmendLineId(lineId)
     setReplaceLineId(null)
     setAmendQtyText(String(currentQuantity))
-    setAmendPriceText(String(currentBasePrice))
+    setAmendPriceText(Number.isFinite(currentBasePrice) ? String(currentBasePrice) : '')
     setAmendDiscountType(currentDiscountType)
     setAmendDiscountText(String(currentDiscountValue))
     setAmendMutationError('')
@@ -1076,18 +1083,19 @@ export default function SaleDetailModal({
     }
     try {
       if ([amendQtyText, amendPriceText, amendDiscountText].some(value => value.trim().startsWith('-')) || !amendQtyText.trim() || !amendPriceText.trim()) throw new Error('sale_item_pricing_invalid')
-      const preview = capturedSaleLineEdit(items as unknown as Record<string, unknown>[], sale as unknown as Record<string, unknown>, lineId, {
+      const preview = saleLineEditPreview(items as unknown as Record<string, unknown>[], sale as unknown as Record<string, unknown>, lineId, {
         quantity: Number(amendQtyText),
-        ...(Number(amendPriceText) !== currentBasePrice ? { selling_price_input_usd: Number(amendPriceText) } : {}),
+        ...(Number(amendPriceText) !== currentBasePrice ? { selling_price_input_usd: sellingPriceCeilCent(amendPriceText) } : {}),
         ...(amendDiscountType !== currentDiscountType ? { manual_discount_type: amendDiscountType } : {}),
         ...(Number(amendDiscountText) !== currentDiscountValue ? { manual_discount_value: Number(amendDiscountText) } : {}),
       })
+      if (!preview) { setAmendMutationError(translateOr('amend_no_change', 'Enter a new quantity, price, or discount.')); return }
       amendRequestIdRef.current = createSettlementRequestId()
       setAmendMutationError('')
       setAmendConfirm({
         request: { ...preview.request, expected_header_quote: headerQuote(preview.subtotalUsd) },
         title: translateOr('amend_line_update_title', 'Update this item?', 'ធ្វើបច្ចុប្បន្នភាពទំនិញនេះ?'),
-        summary: `${name}: ${currentQuantity} → ${preview.quantity} · ${fmtUSD(currentBasePrice)} → ${fmtUSD(preview.basePriceUsd)} · ${translateOr('discount', 'Discount', 'បញ្ចុះតម្លៃ')} ${fmtUSD(currentManualDiscount)} → ${fmtUSD(preview.manualDiscountUsd)} · ${translateOr('total', 'Total', 'សរុប')} ${fmtUSD(preview.lineTotalUsd)}`,
+        summary: `${preview.pricingBasis === 'recorded' ? `${translateOr('sale_recorded_pricing', 'Recorded pricing', 'តម្លៃដែលបានកត់ត្រា')} · ` : ''}${name}: ${currentQuantity} → ${preview.quantity} · ${fmtUSD(currentBasePrice)} → ${fmtUSD(preview.basePriceUsd)} · ${translateOr('discount', 'Discount', 'បញ្ចុះតម្លៃ')} ${fmtUSD(currentManualDiscount)} → ${fmtUSD(preview.manualDiscountUsd)} · ${translateOr('total', 'Total', 'សរុប')} ${fmtUSD(preview.lineTotalUsd)}${preview.recordedTotalDerived ? ` · ${translateOr('sale_recorded_unit_fallback', 'Line total derived from the recorded unit price and quantity.', 'សរុបបន្ទាត់គណនាពីតម្លៃឯកតា និងបរិមាណដែលបានកត់ត្រា។')}` : ''}`,
       })
     } catch {
       setAmendMutationError(t('money_precision_unavailable'))
@@ -1096,14 +1104,15 @@ export default function SaleDetailModal({
 
   const stageRemoval = (lineId: number, currentQuantity: number, name: string): void => {
     let expectedHeader: SaleMutationHeaderQuote
-    try { expectedHeader = headerQuote(capturedSaleRemovalSubtotal(items as unknown as Record<string, unknown>[], sale as unknown as Record<string, unknown>, lineId)) }
+    let removal: ReturnType<typeof saleRemovalSubtotal>
+    try { removal = saleRemovalSubtotal(items as unknown as Record<string, unknown>[], sale as unknown as Record<string, unknown>, lineId); expectedHeader = headerQuote(removal.subtotalUsd) }
     catch { setAmendMutationError(t('money_precision_unavailable')); return }
     amendRequestIdRef.current = createSettlementRequestId()
     setAmendMutationError('')
     setAmendConfirm({
-      request: { kind: 'line_removed', sale_item_id: lineId, expected_header_quote: expectedHeader },
+      request: { kind: 'line_removed', sale_item_id: lineId, expected_header_quote: expectedHeader, ...(removal.recordedTotalDerived ? { expected_recorded_line_total_usd: removal.expectedRecordedLineTotal } : {}) },
       title: translateOr('amend_remove_title', 'Take this off the sale?', 'ដកចេញពីការលក់នេះ?'),
-      summary: `${name} × ${currentQuantity}`,
+      summary: `${name} × ${currentQuantity}${removal.recordedTotalDerived ? ` · ${translateOr('sale_recorded_unit_fallback', 'Line total derived from the recorded unit price and quantity.', 'សរុបបន្ទាត់គណនាពីតម្លៃឯកតា និងបរិមាណដែលបានកត់ត្រា។')}` : ''}`,
     })
   }
 
@@ -1123,12 +1132,14 @@ export default function SaleDetailModal({
       : null
     let replacementIntent: ReturnType<typeof stagedLinePricingIntent>
     let replacementHeader: SaleMutationHeaderQuote
+    let removal: ReturnType<typeof saleRemovalSubtotal>
     try {
       moneyCapability.assertReady()
       const staged = stagedLineFromSheetPick(candidate, { branchId }, 1)
       if (!staged) throw new Error('sale_item_pricing_invalid')
       replacementIntent = stagedLinePricingIntent({ ...staged, quantity }, savedExchangeRate)
-      replacementHeader = headerQuote(sumMoney4([capturedSaleRemovalSubtotal(items as unknown as Record<string, unknown>[], sale as unknown as Record<string, unknown>, lineId), replacementIntent.pricing_quote.total_usd]))
+      removal = saleRemovalSubtotal(items as unknown as Record<string, unknown>[], sale as unknown as Record<string, unknown>, lineId)
+      replacementHeader = headerQuote(sumMoney4([removal.subtotalUsd, replacementIntent.pricing_quote.total_usd]))
     } catch {
       setAmendMutationError(t('money_precision_unavailable'))
       return
@@ -1141,6 +1152,7 @@ export default function SaleDetailModal({
       request: {
         kind: 'line_replaced',
         expected_header_quote: replacementHeader,
+        ...(removal.recordedTotalDerived ? { expected_recorded_line_total_usd: removal.expectedRecordedLineTotal } : {}),
         sale_item_id: lineId,
         replacement: {
           product_id: productId,
@@ -1150,7 +1162,7 @@ export default function SaleDetailModal({
         },
       },
       title: translateOr('amend_replace_title', 'Replace this product?', 'ជំនួសផលិតផលនេះ?'),
-      summary: `${line?.product_name || line?.name || ''} → ${candidate?.name || `#${productId}`} × ${quantity}`,
+      summary: `${line?.product_name || line?.name || ''} → ${candidate?.name || `#${productId}`} × ${quantity}${removal.recordedTotalDerived ? ` · ${translateOr('sale_recorded_unit_fallback', 'Line total derived from the recorded unit price and quantity.', 'សរុបបន្ទាត់គណនាពីតម្លៃឯកតា និងបរិមាណដែលបានកត់ត្រា។')}` : ''}`,
     })
   }
 
@@ -1553,7 +1565,7 @@ export default function SaleDetailModal({
         ? String((result as { settlementError?: unknown }).settlementError || '')
         : ''
       if (Number.isFinite(changedRate) && changedRate > 0) {
-        if (savedMoneyVersion === 1) { setPayError(t('money_precision_unavailable')); return }
+        if (usesSavedExchangeRate) { setPayError(t('money_precision_unavailable')); return }
         setSettlementSession((current) => ({ ...current, exchangeRate: changedRate }))
         setPaymentConfigReload((value) => value + 1)
         settlementRequestIdRef.current = createSettlementRequestId()
@@ -1939,11 +1951,13 @@ export default function SaleDetailModal({
                     </tr>
                   ) : items.map((item, index) => {
                     const qty = toNumber(item.quantity || item.qty || 1) || 1
+                    const unknownRecordedUnit = savedMoneyVersion === 0 && item.applied_price_usd === null
+                    const unknownRecordedTotal = savedMoneyVersion === 0 && item.total_usd === null
                     const unitUsd = toNumber(item.applied_price_usd ?? item.price_usd ?? item.price)
                     const lineFigures = receiptLineFigures(item, true, totals.exchangeRate, totals.moneyPrecisionVersion, sale)
                     const storedLineUsd = Number(item.total_usd)
                     const lineUsd = totals.moneyPrecisionVersion === 1 ? lineFigures.lineUsd : Number.isFinite(storedLineUsd) ? storedLineUsd : unitUsd * qty
-                    const baseUnitUsd = item.base_price_usd == null ? unitUsd + toNumber(item.manual_discount_usd) : toNumber(item.base_price_usd)
+                    const baseUnitUsd = unknownRecordedUnit ? NaN : item.base_price_usd == null ? unitUsd + toNumber(item.manual_discount_usd) : toNumber(item.base_price_usd)
                     const productDiscountUsd = toNumber(item.product_discount_usd)
                     const manualDiscountUsd = toNumber(item.manual_discount_usd)
                     const manualDiscountType: 'percent' | 'fixed' | null = item.manual_discount_type === 'percent' || item.manual_discount_type === 'fixed'
@@ -1965,9 +1979,9 @@ export default function SaleDetailModal({
                         ? `#${item.batch_id}`
                         : ''
                     const editor = amendLineId === lineId ? (() => {
-                      try { return capturedSaleLineEdit(items as unknown as Record<string, unknown>[], sale as unknown as Record<string, unknown>, lineId, {
+                      try { return saleLineEditPreview(items as unknown as Record<string, unknown>[], sale as unknown as Record<string, unknown>, lineId, {
                         quantity: Number(amendQtyText),
-                        ...(Number(amendPriceText) !== baseUnitUsd ? { selling_price_input_usd: Number(amendPriceText) } : {}),
+                        ...(Number(amendPriceText) !== baseUnitUsd ? { selling_price_input_usd: sellingPriceCeilCent(amendPriceText) } : {}),
                         ...(amendDiscountType !== manualDiscountType ? { manual_discount_type: amendDiscountType } : {}),
                         ...(Number(amendDiscountText) !== manualDiscountValue ? { manual_discount_value: Number(amendDiscountText) } : {}),
                       }) } catch { return null }
@@ -2020,9 +2034,9 @@ export default function SaleDetailModal({
                               <input id={`amend-discount-${lineId}`} aria-label={t('discount') || 'Discount'} type="number" min="0" step="0.01" inputMode="decimal" disabled={amendSaving} value={amendDiscountText} onChange={(event) => { if (!amendDiscountType) setAmendDiscountType('fixed'); setAmendDiscountText(event.target.value) }} style={{ width: saleEditorInputWidth(amendDiscountText) }} className="h-7 min-w-10 rounded border border-amber-300 bg-white px-1 py-0.5 text-right text-[11px] dark:border-amber-700 dark:bg-gray-800" />
                               <button type="button" disabled={amendSaving} aria-label={translateOr('clear_discount', 'Clear discount', 'លុបការបញ្ចុះតម្លៃ')} onClick={() => { setAmendDiscountType(null); setAmendDiscountText('0') }} className="rounded px-1 py-0.5">×</button>
                             </div>
-                          </div> : <span className="inline-flex items-baseline gap-1">{fmtUSD(displayPrice)}{displayDiscount > 0 ? <span className="text-[10px] text-amber-700 dark:text-amber-400">(-{fmtUSD(displayDiscount)})</span> : null}</span>}
+                          </div> : <span className="inline-flex items-baseline gap-1">{unknownRecordedUnit ? '—' : fmtUSD(displayPrice)}{!unknownRecordedUnit && !unknownRecordedTotal && displayDiscount > 0 ? <span className="text-[10px] text-amber-700 dark:text-amber-400">(-{fmtUSD(displayDiscount)})</span> : null}</span>}
                         </td>
-                        <td data-sale-line-total="" className="whitespace-nowrap px-1.5 py-1.5 text-right align-top text-[11px] font-semibold tabular-nums sm:px-2">{fmtUSD(displayTotal)}</td>
+                        <td data-sale-line-total="" className="whitespace-nowrap px-1.5 py-1.5 text-right align-top text-[11px] font-semibold tabular-nums sm:px-2">{unknownRecordedTotal && !preview ? '—' : fmtUSD(displayTotal)}</td>
                         <td data-sale-line-edit="" className="whitespace-nowrap px-1.5 py-1.5 text-right align-top sm:px-2">
                           {canAmendThisSale && lineId > 0 && !editingLine ? (
                             <button type="button" disabled={amendSaving} onClick={() => startAmendLine(lineId, qty, baseUnitUsd, manualDiscountType, manualDiscountValue)} className="min-h-7 shrink-0 rounded px-1.5 py-0.5 text-[11px] font-semibold text-blue-700 hover:bg-blue-50 disabled:opacity-50 dark:text-blue-300 dark:hover:bg-blue-950/30">
@@ -2034,6 +2048,7 @@ export default function SaleDetailModal({
                       {editingLine ? (
                         <tr className="bg-gray-50 dark:bg-gray-900/40">
                           <td colSpan={5} className="px-1.5 py-2 sm:px-2">
+                            {savedMoneyVersion === 0 ? <p className="mb-1 text-xs text-gray-600 dark:text-gray-300">{translateOr('sale_recorded_pricing', 'Recorded pricing', 'តម្លៃដែលបានកត់ត្រា')}{preview?.recordedTotalDerived ? ` · ${translateOr('sale_recorded_unit_fallback', 'Line total derived from the recorded unit price and quantity.', 'សរុបបន្ទាត់គណនាពីតម្លៃឯកតា និងបរិមាណដែលបានកត់ត្រា។')}` : ''}</p> : null}
                             <div className="flex flex-wrap items-center gap-2">
                               <button
                                 type="button"
@@ -2262,7 +2277,7 @@ export default function SaleDetailModal({
                       sub={refundKhr > 0 ? `-${fmtKHR(refundKhr)}` : null}
                     />
                   ) : null}
-                  {totals.moneyPrecisionVersion === 1 && totals.roundingAdjustmentUsd !== 0 ? <MoneyRow
+                  {totals.calculatedTotalUsd !== null && totals.roundingAdjustmentUsd !== 0 ? <MoneyRow
                     label={t('money_rounding_adjustment')}
                     amount={`${totals.roundingAdjustmentUsd < 0 ? '-' : '+'}${fmtUSD(Math.abs(roundMoney2(totals.roundingAdjustmentUsd)))}`}
                   /> : null}

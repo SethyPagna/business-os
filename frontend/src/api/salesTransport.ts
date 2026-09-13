@@ -320,6 +320,7 @@ export async function addSaleItems(
 }
 
 export interface SaleAmendmentRequest {
+  expected_recorded_line_total_usd?: number
   expected_header_quote?: SaleMutationHeaderQuote
   pricing_quote?: { gross_usd: number; product_discount_usd: number; manual_discount_usd: number; total_usd: number; total_khr: number }
   money_precision_version?: 1

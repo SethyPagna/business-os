@@ -9,7 +9,7 @@ import { getCartLineId, isSaleRecorded, quoteSaleCartLines, posV1BasketTotals, p
 import { canonicalSaleReceipt, frozenSaleCheckoutBody, SaleCheckoutRecoveryRequiredError } from '../src/utils/saleMoneyV1.ts'
 import { materializeCapturedPricingRow, serializeSaleItemPricing } from '../src/utils/saleItemPricing.ts'
 import { normalizePromotionRule } from '../src/utils/promotionRules.ts'
-import { capturedSaleLineEdit, capturedSaleRemovalSubtotal } from '../src/utils/saleLineEditor.ts'
+import { capturedSaleLineEdit, saleLineEditPreview, saleRemovalSubtotal } from '../src/utils/saleLineEditor.ts'
 import { quoteSaleMutationHeader } from '../src/utils/saleMutationHeaderQuote.ts'
 import { compareSaleHeaderQuote } from '../src/utils/saleMutationHeaderQuote.ts'
 import { runSaleLineMutation, loadPendingDirectMutation, withSaleLineMutationLock, replaceReviewedSaleLineHeader } from '../src/utils/directMutationRequest.ts'
@@ -26,7 +26,7 @@ const original = { client_request_id: 'request-1', money_precision_version: 1, i
 const frozen = frozenSaleCheckoutBody('request-1', undefined, () => original)
 const capturedPool = { version: 1 as const, pool_key: 'original-pool', evaluation_time: '2026-09-13T00:00:00.000Z', exchange_rate: 4000, rules: [normalizePromotionRule({ id: 1, rule_type: 'quantity_save', min_quantity: 3, save_usd: 1, product_ids: [7], scope_type: 'products', is_active: 1 }, 1)!], lines: [{ line_key: 'original-line', source: 'promotion' as const, product: { id: 7, selling_price_usd: 10 }, selling_price_input_usd: null, manual: { type: 'none' as const, value: 0 } }] }
 const capturedRow = materializeCapturedPricingRow({ id: 70, product_id: 7 }, capturedPool, { 'original-line': 3 }, 'original-line', { version: 1, lines: [{ line_key: 'original-line', amount: 29 }], discount_usd: 0, membership_discount_usd: 0, tax_usd: 0 })
-const capturedSale = { id: 17, items: [capturedRow], exchange_rate: 4000, subtotal_usd: 29, discount_usd: 0, membership_discount_usd: 0, tax_usd: 0 }
+const capturedSale = { id: 17, money_precision_version: 1, items: [capturedRow], exchange_rate: 4000, subtotal_usd: 29, discount_usd: 0, membership_discount_usd: 0, tax_usd: 0 }
 const cart = [{ id: 7, cart_line_id: 'original-line', price_mode: 'promotion', quantity: 3, selling_price_usd: 10, selling_price_khr: 1, applied_price_usd: 9.6667, applied_price_khr: 38666.8 }]
 const quotes = quoteSaleCartLines(cart, capturedPool.rules, 4000, capturedPool.evaluation_time)
 assert.deepEqual(quotes.get('original-line')!.pricing_quote, { gross_usd: 30, product_discount_usd: 1, manual_discount_usd: 0, total_usd: 29, total_khr: 116000 })
@@ -155,7 +155,7 @@ function actualDetailCallback(name: string, env: Record<string, unknown>) {
 const edits: any[] = [], editErrors: string[] = []
 const editEnv = {
   amendQtyText: '2', amendPriceText: '9.6667', amendDiscountType: null, amendDiscountText: '0',
-  items: [capturedRow], sale: capturedSale, capturedSaleLineEdit,
+  items: [capturedRow], sale: capturedSale, saleLineEditPreview, sellingPriceCeilCent,
   headerQuote: (subtotal: number) => quoteSaleMutationHeader(capturedSale, subtotal, { tax_enabled: '0', tax_rate: '0' }),
   amendRequestIdRef: { current: '' }, createSettlementRequestId: () => 'edit-request',
   setAmendMutationError: (value: string) => editErrors.push(value), setAmendConfirm: (value: unknown) => edits.push(value),
@@ -176,7 +176,7 @@ assert.equal(editErrors.at(-1), 'money_precision_unavailable')
 const replacements: any[] = []
 actualDetailCallback('stageReplacement', {
   replaceLineId: 70, items: [capturedRow], toNumber: Number,
-  sale: capturedSale, capturedSaleRemovalSubtotal, sumMoney4, headerQuote: editEnv.headerQuote,
+  sale: capturedSale, saleRemovalSubtotal, sumMoney4, headerQuote: editEnv.headerQuote,
   moneyCapability: { assertReady: () => {} }, savedExchangeRate: 4000, stagedLineFromSheetPick, stagedLinePricingIntent,
   setAddQuery: () => {}, setAddCandidates: () => {}, amendRequestIdRef: { current: '' }, createSettlementRequestId: () => 'replace-request',
   setAmendMutationError: (value: string) => editErrors.push(value), setAmendConfirm: (value: unknown) => replacements.push(value),
@@ -261,7 +261,7 @@ try {
   let receipt = { committed: false } as { committed: boolean; response?: Record<string, unknown> }
   const env: Record<string, any> = {
     lineWriteOwnerRef: { current: null }, captureActorReadScope: () => ({}), isActorReadScopeCurrent: () => true,
-    detailScope: 'scope', detailScopeRef: { current: 'scope' }, detailAliveRef: { current: true }, authReady: true, user: { id: 7 }, sale: { id: 17 }, lineMutationActor: 'origin-runtime:actor7',
+    detailScope: 'scope', detailScopeRef: { current: 'scope' }, detailAliveRef: { current: true }, authReady: true, user: { id: 7 }, sale: { id: 17, money_precision_version: 1 }, lineMutationActor: 'origin-runtime:actor7',
     setLineRecoveryBusy: () => {}, setPendingLineMutation: (value: unknown) => pending.push(value), setLineRecoveryError: (value: unknown) => errors.push(value),
     runSaleLineMutation, getSaleLineReceipt: async () => receipt, window: { localStorage: storage, dispatchEvent: () => {} }, CustomEvent: class {},
     moneyCapability: { assertReady: () => {} }, onAmend: async (_id: unknown, body: unknown) => { sends.push(body); throw new Error('lost acknowledgement') }, onAddItems: undefined,

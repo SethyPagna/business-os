@@ -46,6 +46,7 @@ import {
 } from './receiptLineMath.ts'
 
 import { addMoney4, divideMoney4, roundMoney4, subtractMoney4, sumMoney4 } from './moneyPrecision.ts'
+import { savedSaleRounding } from './saleMoneyV1.ts'
 
 export interface ReceiptTotalsSale extends ReceiptDeliveryInput {
   id?: number | string | null
@@ -174,7 +175,7 @@ export function receiptTotalsFigures(
   const discountUsd = num(sale.discount_usd ?? sale.discount)
   const membershipDiscountUsd = num(sale.membership_discount_usd)
   const itemDiscountUsd = money(
-    receiptLineSavingsUsd(parseItems(sale.items), options.showItemDiscount !== false, exchangeRate, version1 ? 1 : 0, sale),
+    receiptLineSavingsUsd(parseItems(sale.items).filter(item => version1 || (item.applied_price_usd !== null && item.total_usd !== null)), options.showItemDiscount !== false, exchangeRate, version1 ? 1 : 0, sale),
   )
   const taxUsd = num(sale.tax_usd ?? sale.tax)
 
@@ -196,8 +197,9 @@ export function receiptTotalsFigures(
   return {
     moneyPrecisionVersion: version1 ? 1 : 0,
     // Absent legacy raw amounts are unknown, not reconstructed from today's math.
-    calculatedTotalUsd: version1 && sale.calculated_total_usd != null ? num(sale.calculated_total_usd) : null,
-    roundingAdjustmentUsd: version1 ? num(sale.rounding_adjustment_usd) : 0,
+    ...(sale.calculated_total_usd == null && version1
+      ? { calculatedTotalUsd: null, roundingAdjustmentUsd: num(sale.rounding_adjustment_usd) }
+      : savedSaleRounding(sale)),
     exchangeRate,
     subtotalUsd,
     subtotalKhr: num(sale.subtotal_khr) || Math.round(subtotalUsd * exchangeRate),
@@ -237,6 +239,11 @@ export function receiptTotalsFigures(
  * shape of the column instead of being restated in every test file.
  */
 export function receiptTotalsFootingErrorUsd(figures: ReceiptTotalsFigures): number {
+  if (figures.calculatedTotalUsd !== null) {
+    const raw = sumMoney4([figures.subtotalUsd, -figures.discountUsd, -figures.membershipDiscountUsd, figures.taxUsd, figures.delivery.chargedUsd])
+    const rawError = subtractMoney4(raw, figures.calculatedTotalUsd)
+    return rawError || sumMoney4([figures.calculatedTotalUsd, figures.roundingAdjustmentUsd, -figures.totalUsd])
+  }
   if (figures.moneyPrecisionVersion === 1) return sumMoney4([
     figures.subtotalUsd, -figures.discountUsd, -figures.membershipDiscountUsd,
     figures.taxUsd, figures.delivery.chargedUsd, figures.roundingAdjustmentUsd, -figures.totalUsd,

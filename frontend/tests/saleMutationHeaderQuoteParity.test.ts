@@ -12,6 +12,17 @@ assert.equal(normalize(fs.readFileSync(path.resolve(here, '../src/utils/saleMuta
 const module = { exports: {} as typeof frontend }
 new Function('module', 'exports', buildSync({ entryPoints: [backendFile], bundle: true, platform: 'node', format: 'cjs', write: false }).outputFiles[0].text)(module, module.exports)
 const backend = module.exports
+const historical = { money_precision_version: 0, subtotal_usd: 19.00004, discount_usd: .00003, membership_discount_usd: 0,
+  tax_usd: 0, exchange_rate: 4020, is_delivery: 1, delivery_fee_paid_by: 'customer', delivery_fee_usd: 0 }
+const oldFeeQuote = frontend.quoteSaleMutationHeader(historical, historical.subtotal_usd, { tax_enabled: '0', tax_rate: '0' }, { delivery_fee_usd: 1.2345 })
+assert.deepEqual(oldFeeQuote, backend.quoteSaleMutationHeader(historical, historical.subtotal_usd, { tax_enabled: '0', tax_rate: '0' }, { delivery_fee_usd: 1.2345 }))
+assert.equal(oldFeeQuote.subtotal_usd, 19.00004)
+assert.equal(oldFeeQuote.discount_usd, .00003)
+assert.equal(oldFeeQuote.calculated_total_usd, 20.2345)
+assert.equal(oldFeeQuote.total_usd, 20.23)
+assert.equal(oldFeeQuote.rounding_adjustment_usd, -.0045)
+assert.equal(frontend.compareSaleHeaderQuote(oldFeeQuote, oldFeeQuote), 'match')
+assert.throws(() => frontend.compareSaleHeaderQuote({ ...oldFeeQuote, discount_usd: .00004 }, oldFeeQuote), 'unaltered historical source precision is allowed only against exact authoritative component')
 const saved = { subtotal_usd: 10, discount_usd: 1, membership_discount_usd: 0, tax_usd: 0.9, exchange_rate: 4020, is_delivery: 0, delivery_fee_usd: 1.2345, delivery_fee_paid_by: 'customer' }
 let count = 0
 for (const subtotal of [1, 1.2345, 10, 20.0001, 1000]) {
