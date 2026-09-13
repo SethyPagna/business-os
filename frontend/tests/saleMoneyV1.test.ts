@@ -21,6 +21,9 @@ assert.equal(saleLineEditorResult({ ...line, moneyPrecisionVersion: 1, sellingPr
 assert.equal(applyManualDiscount(0.0001, 0.4, 4000, 'percent', 49.99, 1).manual_discount_usd, 0)
 assert.equal(applyManualDiscount(0.0001, 0.4, 4000, 'percent', 50, 1).manual_discount_usd, 0.0001)
 assert.deepEqual(parseDeliveryAmountUsd('1.2345', 1), { ok: true, usd: 1.2345 })
+assert.deepEqual(parseDeliveryAmountUsd('0x10', 1), { ok: false, code: 'not_a_number' })
+assert.deepEqual(parseDeliveryAmountUsd('1e-25', 1), { ok: false, code: 'not_a_number' })
+assert.equal(deliveryAmountChanged(1.23456, 1.2346, 1), true, 'explicit edit compares exact historical before value')
 assert.equal(deliveryAmountChanged(1.2301, 1.2349, 1), true)
 assert.equal(deliveryAmountChanged(1.2301, 1.2349), false, 'legacy no-op semantics preserved')
 for (const raw of [1.2345, 1.235]) {

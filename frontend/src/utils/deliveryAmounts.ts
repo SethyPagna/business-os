@@ -56,7 +56,9 @@ export function parseDeliveryAmountUsd(raw: unknown, moneyPrecisionVersion: 0 | 
   if (value > MAX_DELIVERY_AMOUNT_USD) return { ok: false, code: 'too_large' }
   // Round the way every other money value in this codebase rounds, so the
   // number the form shows is the number the ledger stores.
-  return { ok: true, usd: moneyPrecisionVersion === 1 ? roundMoney4(text) : Math.round((value + Number.EPSILON) * 100) / 100 }
+  try {
+    return { ok: true, usd: moneyPrecisionVersion === 1 ? roundMoney4(text) : Math.round((value + Number.EPSILON) * 100) / 100 }
+  } catch { return { ok: false, code: 'not_a_number' } }
 }
 
 /** Cents, or null for "no value recorded". Exported only for the parity test. */
@@ -83,8 +85,10 @@ export function deliveryAmountCents(value: unknown): number | null {
  */
 export function deliveryAmountChanged(beforeUsd: unknown, afterUsd: unknown, moneyPrecisionVersion: 0 | 1 = 0): boolean {
   if (moneyPrecisionVersion === 1) {
-    const amount = (value: unknown) => value == null || String(value).trim() === '' ? null : roundMoney4(String(value))
-    return amount(beforeUsd) !== amount(afterUsd)
+    const before = beforeUsd == null || String(beforeUsd).trim() === '' ? null : Number(beforeUsd)
+    const after = afterUsd == null || String(afterUsd).trim() === '' ? null : parseDeliveryAmountUsd(afterUsd, 1)
+    if (after !== null && !after.ok) return false
+    return before !== (after === null ? null : after.usd)
   }
   return deliveryAmountCents(beforeUsd) !== deliveryAmountCents(afterUsd)
 }
