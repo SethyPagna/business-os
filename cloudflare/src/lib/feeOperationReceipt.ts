@@ -3,6 +3,7 @@ import type { D1Compat } from './db'
 export const FEE_REQUEST_ID_PATTERN = /^[A-Za-z0-9_-]{8,120}$/
 
 export type FeeCreateIntent = {
+  fee_money_version?: 1
   fee_type: string
   label: string | null
   amount_usd: number
@@ -40,6 +41,8 @@ export function canonicalFeeCreateRequest(intent: FeeCreateIntent): string {
     branch_id: intent.branch_id,
     delivery_contact_id: intent.delivery_contact_id,
     notes: intent.notes,
+    // Never add a default marker: pre-upgrade receipt bytes are immutable.
+    ...(intent.fee_money_version === 1 ? { fee_money_version: 1 } : {}),
   })
 }
 

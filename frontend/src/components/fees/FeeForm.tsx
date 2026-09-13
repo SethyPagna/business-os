@@ -166,6 +166,7 @@ type FeeFormProps = {
    *  a recurring reason ("Boost", "ទឹកភ្លើង") is picked, not retyped. */
   labelSuggestions?: string[]
   onSave: (payload: {
+    fee_money_version?: 1
     fee_type: FeeType
     label: string | null
     amount_usd?: number
@@ -407,6 +408,7 @@ export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, o
       savingRef.current = true
       setSaving(true)
       await onSave(pendingCreate ? pendingCreate.body : {
+        fee_money_version: 1,
         fee_type: form.fee_type,
         label: form.label.trim() || null,
         ...(!money.unchangedUsd ? { amount_usd: amountUsd } : {}),

@@ -102,16 +102,16 @@ const retried = await submitAmounts('invalid', '-5', null, { client_request_id: 
 assert.equal(retried[0], frozenBody, 'actual retry forwards original body, not the displayed/re-normalized form')
 assert.equal(JSON.stringify(retried[0]), frozenJson)
 const transportSource = read('../src/api/feesTransport.ts')
-const normalizeFeeCreateBody = new Function(`${extractFunction(transportSource, 'roundFeeMoney')}\n${extractFunction(transportSource, 'optionalFeeId')}\n${extractFunction(transportSource, 'normalizeFeeCreateBody')}; return normalizeFeeCreateBody`)()
+const { normalizeFeeCreateBody } = await import('../src/api/feesTransport.ts')
+assert.equal((await submitAmounts('1', '20'))[0].fee_money_version, 1, 'fresh actual submit opts into backend denomination policy')
+assert.equal(Object.hasOwn(retried[0], 'fee_money_version'), false, 'legacy actual retry never gains a version marker')
 assert.equal(normalizeFeeCreateBody((await submitAmounts('1.2301', '1.5'))[0]).amount_usd, 1.23, 'actual create transport preserves prepared cent amount')
 assert.equal(normalizeFeeCreateBody((await submitAmounts('10.075', '1.5'))[0]).amount_usd, 10.08)
 assert.equal(normalizeFeeCreateBody((await submitAmounts('1', '1.5'))[0]).amount_khr, 2)
 assert.equal(JSON.stringify(normalizeFeeCreateBody(frozenBody)), frozenJson, 'existing legacy request normalization/digest representation is unchanged')
 const backendFees = read('../../cloudflare/src/routes/fees.ts')
-const updateUsd = backendFees.match(/const amountUsd = body\.amount_usd !== undefined[^\n]+/)![0]
-const updateKhr = backendFees.match(/const amountKhr = body\.amount_khr !== undefined[^\n]+/)![0]
-const nativeUpdateMoney = new Function('body', 'existing', 'toNumber', `${extractFunction(backendFees, 'round2')}\n${updateUsd}\n${updateKhr}\nreturn { amount_usd: amountUsd, amount_khr: amountKhr }`)
-assert.deepEqual(nativeUpdateMoney(noOp, historical, Number), historical, 'actual backend PUT absence branches preserve historical money on no-op/metadata edit')
-assert.deepEqual(nativeUpdateMoney(edited, historical, Number), { amount_usd: 1.23, amount_khr: 20.25 })
+const nativeUpdateMoney = new Function('body', 'existing', 'toNumber', 'nativeChangeAmounts', `${extractFunction(backendFees, 'round2')}\n${extractFunction(backendFees, 'feeMoneyVersion')}\n${extractFunction(backendFees, 'feeMoney')}\nconst version=feeMoneyVersion(body); return { amount_usd: feeMoney(body,'usd',version,existing.amount_usd), amount_khr: feeMoney(body,'khr',version,existing.amount_khr) }`)
+assert.deepEqual(nativeUpdateMoney(noOp, historical, Number, nativeChangeAmounts), historical, 'actual backend PUT absence branches preserve historical money on no-op/metadata edit')
+assert.deepEqual(nativeUpdateMoney(edited, historical, Number, nativeChangeAmounts), { amount_usd: 1.23, amount_khr: 20.25 })
 
 console.log('PASS fee picker, exact recovery and busy modal lifecycle contract')

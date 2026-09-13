@@ -20,6 +20,8 @@ const intent = {
   delivery_contact_id: null, notes: 'counter',
 }
 const canonical = subject.canonicalFeeCreateRequest(intent)
+assert.equal(canonical, JSON.stringify(intent), 'unversioned canonical bytes remain unchanged')
+assert.notEqual(canonical, subject.canonicalFeeCreateRequest({ ...intent, fee_money_version: 1 }), 'policy version is receipt identity even when amounts match')
 assert.equal(canonical, subject.canonicalFeeCreateRequest({ ...intent }), 'equal intent has byte-identical canonical JSON')
 assert.notEqual(canonical, subject.canonicalFeeCreateRequest({ ...intent, amount_usd: 3 }), 'changed money changes canonical JSON')
 assert.equal(subject.normalizeFeeRequestId(' fee_req_123456 '), 'fee_req_123456')
