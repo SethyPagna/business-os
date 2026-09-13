@@ -8,6 +8,17 @@ export const CUSTOMER_RETURN_REFUND_SNAPSHOT_VERSION = 1
 export const CUSTOMER_RETURN_MAX_LINES = 50
 export const CUSTOMER_RETURN_MAX_SALE_LINES = 200
 export const CUSTOMER_RETURN_REFUND_SNAPSHOT_BYTES = 16_384
+/** Cancelling one member of a return cohort leaves that member's four-place
+ * rounding residue with the surviving returns: the survivors were quoted
+ * against a cumulative chain that still contained it, so the active cohort's
+ * summed four-place refund can sit a few 0.0001 units above the prorated target
+ * for the quantity that is still actively returned. Refund accounting must
+ * tolerate that residue -- otherwise a sale can never accept another return
+ * once an earlier partial return is cancelled -- while still refusing anything
+ * larger, which is corruption rather than rounding. Half a cent is the bound:
+ * every payout settles in cents, so a tolerated residue can never turn into a
+ * cent of refund on its own. */
+export const CUSTOMER_RETURN_COHORT_RESIDUAL_ALLOWANCE_USD = 0.005
 
 export type CustomerReturnSaleLine = {
   id: number
@@ -304,8 +315,13 @@ function validateCustomerReturnRestorationV1(returns: CustomerReturnRestorationV
   }
   if (enforceCohortCaps) {
     for (const aggregate of lines.values()) {
+      // The projected cohort may have lost a cancelled member whose residue the
+      // survivors still carry, so the bound is the prorated target for the
+      // actively returned quantity plus that bounded residue -- never more.
       if (quantityGreater(aggregate.quantity, aggregate.sold)
-        || aggregate.calculated > prorateCustomerReturnMoney4(aggregate.entitlement, aggregate.quantity, aggregate.sold)) {
+        || aggregate.calculated > sumMoney4([
+          prorateCustomerReturnMoney4(aggregate.entitlement, aggregate.quantity, aggregate.sold),
+          CUSTOMER_RETURN_COHORT_RESIDUAL_ALLOWANCE_USD])) {
         fail('money_precision_refund_cap_exceeded')
       }
     }
@@ -382,13 +398,15 @@ export function buildCustomerReturnQuoteV1(input: {
       if (!source || snapshot.line_key !== source.snapshot.line_key || snapshot.pool_key !== source.snapshot.pool.pool_key
         || snapshot.source_pricing_snapshot_digest !== source.row.pricing_snapshot_digest
         || !sameJson(snapshot.receipt_allocation, source.snapshot.receipt_allocation)) fail('customer_return_cohort_invalid')
+      // Active returns are accumulated as a SET, not as an unbroken chain from
+      // zero. Cancelling an earlier partial return removes it from this cohort,
+      // which permanently breaks any before/after chain the survivors recorded;
+      // requiring that chain here refused every later return on the sale. Each
+      // snapshot still proves its own before/after arithmetic in
+      // parseCustomerReturnRefundSnapshot; the cohort caps below bound the set.
       const aggregate = previousByLine.get(snapshot.sale_item_id) || { quantity: 0, calculated: 0 }
-      if (quantityDifference(snapshot.returned_quantity_before, aggregate.quantity) !== '0'
-        || snapshot.calculated_refund_before_usd !== aggregate.calculated) fail('customer_return_cohort_invalid')
       aggregate.quantity = addQuantity(aggregate.quantity, item.quantity)
       aggregate.calculated = sumMoney4([aggregate.calculated, snapshot.calculated_refund_usd])
-      if (quantityDifference(snapshot.returned_quantity_after, aggregate.quantity) !== '0'
-        || snapshot.calculated_refund_after_usd !== aggregate.calculated) fail('customer_return_cohort_invalid')
       previousByLine.set(snapshot.sale_item_id, aggregate)
       headerCalculated = sumMoney4([headerCalculated, snapshot.calculated_refund_usd])
     }
@@ -398,9 +416,9 @@ export function buildCustomerReturnQuoteV1(input: {
   for (const [saleItemId, aggregate] of previousByLine) {
     const source = sourceById.get(saleItemId)
     if (!source || quantityGreater(aggregate.quantity, source.row.quantity)
-      || aggregate.calculated !== prorateCustomerReturnMoney4(
+      || aggregate.calculated > sumMoney4([prorateCustomerReturnMoney4(
         source.snapshot.receipt_allocation.net_entitlement_usd, aggregate.quantity, source.row.quantity,
-      )) fail('customer_return_cohort_invalid')
+      ), CUSTOMER_RETURN_COHORT_RESIDUAL_ALLOWANCE_USD])) fail('customer_return_cohort_invalid')
   }
 
   const requestedIds = new Set<number>()
@@ -416,9 +434,16 @@ export function buildCustomerReturnQuoteV1(input: {
     const afterQuantity = addQuantity(before.quantity, quantity)
     if (quantityGreater(afterQuantity, source.row.quantity)) fail('customer_return_quantity_exceeded')
     const targetBefore = prorateCustomerReturnMoney4(source.snapshot.receipt_allocation.net_entitlement_usd, before.quantity, source.row.quantity)
-    if (before.calculated > targetBefore) fail('customer_return_cohort_invalid')
+    if (before.calculated > sumMoney4([targetBefore, CUSTOMER_RETURN_COHORT_RESIDUAL_ALLOWANCE_USD])) fail('customer_return_cohort_invalid')
+    // An active cohort that carries a cancelled member's residue already holds
+    // slightly more than this quantity's prorated target. Consume only the
+    // target: the new line is never paid a share the cohort already holds, and
+    // never rewrites what the surviving snapshots recorded. A cohort that is
+    // BELOW its target (the ordinary four-place/cent residual) is consumed
+    // exactly as before, so the next line still carries that residual forward.
+    const consumed = Math.min(before.calculated, targetBefore)
     const targetAfter = prorateCustomerReturnMoney4(source.snapshot.receipt_allocation.net_entitlement_usd, afterQuantity, source.row.quantity)
-    const calculated = subtractMoney4(targetAfter, before.calculated)
+    const calculated = subtractMoney4(targetAfter, consumed)
     const snapshot: CustomerReturnRefundSnapshotV1 = {
       version: 1, sale_id: saleId, sale_item_id: saleItemId, line_key: source.snapshot.line_key,
       pool_key: source.snapshot.pool.pool_key, source_sale_revision: input.sale.sale_revision,
@@ -427,7 +452,7 @@ export function buildCustomerReturnQuoteV1(input: {
       returned_quantity_before: before.quantity, returned_quantity_after: afterQuantity,
       receipt_allocation: source.snapshot.receipt_allocation,
       net_entitlement_usd: source.snapshot.receipt_allocation.net_entitlement_usd,
-      calculated_refund_before_usd: before.calculated, calculated_refund_after_usd: targetAfter,
+      calculated_refund_before_usd: consumed, calculated_refund_after_usd: targetAfter,
       calculated_refund_usd: calculated, calculated_refund_khr: multiplyMoney4(calculated, rate), exchange_rate: rate,
       sale_product_entitlement_usd: productEntitlement, sale_product_payout_cap_usd: payoutCap,
     }
