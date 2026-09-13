@@ -77,7 +77,8 @@ import {
   type FifoLotAvailability,
   type FifoLotTake,
 } from './productBatches'
-import { round2 } from './saleTotals'
+import { round2, newSaleMoney4 } from './saleTotals'
+import { roundMoney4, multiplyMoney4, subtractMoney4, subtractDecimalSum, sumMoney4, percentageMoney4 } from './moneyPrecision'
 import { financialCalculationValue } from './financialPrecision'
 import { recomputeSaleMoneyAfterLineChange, type SaleMoneyRow, type StockStatement } from './saleLineAddition'
 
@@ -344,6 +345,7 @@ export function amendmentHeldUnits(sale: AmendableSaleRow, quantity: number): nu
 // The line as it exists now, and its lot attribution.
 // ---------------------------------------------------------------------------
 export type ExistingSaleLine = {
+  total_usd?: number | null
   id: number
   product_id: number | null
   product_name: string | null
@@ -391,6 +393,7 @@ export type AmendmentPlan = {
 // appended for the new units, rather than a fresh line being inserted.
 // ---------------------------------------------------------------------------
 export function planLineQuantityIncrease(input: {
+  moneyPrecisionVersion?: 0 | 1
   saleId: number | string
   sale: AmendableSaleRow
   line: ExistingSaleLine
@@ -403,7 +406,7 @@ export function planLineQuantityIncrease(input: {
   const added = Math.max(0, Number(input.addedQuantity) || 0)
   const line = input.line
   const quantityBefore = Number(line.quantity) || 0
-  const quantityAfter = round2(quantityBefore + added)
+  const quantityAfter = input.moneyPrecisionVersion === 1 ? Number(subtractDecimalSum(quantityBefore, [-added])) : round2(quantityBefore + added)
   const unitPrice = Number(line.applied_price_usd) || 0
   const exchangeRate = Number(input.exchangeRate) || 4100
   const movesStock = saleAmendmentMovesStock(input.sale)
@@ -419,7 +422,7 @@ export function planLineQuantityIncrease(input: {
 
   // The line row first, so a reader of `statements` sees the sale change and
   // then the shelf change, in that order, exactly as the addition path does.
-  statements.push(lineQuantityUpdateStatement(line, quantityAfter, unitPrice, exchangeRate))
+  statements.push(lineQuantityUpdateStatement(line, quantityAfter, unitPrice, exchangeRate, input.moneyPrecisionVersion))
 
   if (line.branch_id && heldUnits > 0) {
     for (const take of takes) {
@@ -476,7 +479,7 @@ export function planLineQuantityIncrease(input: {
     unitsMoved: -heldUnits || 0,
     quantityBefore,
     quantityAfter,
-    subtotalDeltaUsd: round2(unitPrice * added),
+    subtotalDeltaUsd: input.moneyPrecisionVersion === 1 ? subtractMoney4(multiplyMoney4(unitPrice,quantityAfter), Number(line.total_usd)) : round2(unitPrice * added),
     takes,
   }
 }
@@ -506,6 +509,7 @@ export function planLineQuantityIncrease(input: {
 // rides branch_stock, exactly as it does everywhere else.
 // ---------------------------------------------------------------------------
 export function planLineQuantityDecrease(input: {
+  moneyPrecisionVersion?: 0 | 1
   saleId: number | string
   sale: AmendableSaleRow
   line: ExistingSaleLine
@@ -521,7 +525,7 @@ export function planLineQuantityDecrease(input: {
   const line = input.line
   const quantityBefore = Number(line.quantity) || 0
   const removed = Math.min(quantityBefore, Math.max(0, Number(input.removedQuantity) || 0))
-  const quantityAfter = round2(quantityBefore - removed)
+  const quantityAfter = input.moneyPrecisionVersion === 1 ? Number(subtractDecimalSum(quantityBefore,[removed])) : round2(quantityBefore - removed)
   const isFullRemoval = quantityAfter <= 0
   const unitPrice = Number(line.applied_price_usd) || 0
   const exchangeRate = Number(input.exchangeRate) || 4100
@@ -610,7 +614,7 @@ export function planLineQuantityDecrease(input: {
       params: { id: line.id, sale_id: input.saleId },
     })
   } else {
-    statements.push(lineQuantityUpdateStatement(line, quantityAfter, unitPrice, exchangeRate))
+    statements.push(lineQuantityUpdateStatement(line, quantityAfter, unitPrice, exchangeRate, input.moneyPrecisionVersion))
   }
 
   return {
@@ -618,7 +622,7 @@ export function planLineQuantityDecrease(input: {
     unitsMoved: totalReturned,
     quantityBefore,
     quantityAfter,
-    subtotalDeltaUsd: round2(-unitPrice * removed),
+    subtotalDeltaUsd: input.moneyPrecisionVersion === 1 ? subtractMoney4(multiplyMoney4(unitPrice,quantityAfter),Number(line.total_usd)) : round2(-unitPrice * removed),
     takes,
   }
 }
@@ -628,15 +632,16 @@ function lineQuantityUpdateStatement(
   quantity: number,
   unitPriceUsd: number,
   exchangeRate: number,
+  moneyPrecisionVersion: 0 | 1 = 0,
 ): StockStatement {
-  const totalUsd = round2(unitPriceUsd * quantity)
+  const totalUsd = moneyPrecisionVersion === 1 ? multiplyMoney4(unitPriceUsd,quantity) : round2(unitPriceUsd * quantity)
   return {
     sql: `UPDATE sale_items SET quantity = @quantity, total_usd = @total_usd, total_khr = @total_khr WHERE id = @id`,
     params: {
       id: line.id,
       quantity,
       total_usd: totalUsd,
-      total_khr: calculatedKhr(totalUsd, exchangeRate),
+      total_khr: moneyPrecisionVersion === 1 ? multiplyMoney4(totalUsd,exchangeRate) : calculatedKhr(totalUsd, exchangeRate),
     },
   }
 }
@@ -697,26 +702,27 @@ export function guardDeliveryFeeAmendment(sale: AmendableSaleRow): DeliveryFeeGu
 }
 
 export function planDeliveryFeeChange(input: {
+  moneyPrecisionVersion?: 0 | 1
   saleId: number | string
   sale: AmendableSaleRow
   newFeeUsd: number
   exchangeRate: number
 }): { statements: StockStatement[]; feeBeforeUsd: number; feeAfterUsd: number; feeDeltaUsd: number } {
   const exchangeRate = Number(input.exchangeRate) || 4100
-  const feeBeforeUsd = round2(Number(input.sale.delivery_fee_usd) || 0)
-  const feeAfterUsd = round2(Math.max(0, Number(input.newFeeUsd) || 0))
+  const feeBeforeUsd = input.moneyPrecisionVersion === 1 ? Number(input.sale.delivery_fee_usd) : round2(Number(input.sale.delivery_fee_usd) || 0)
+  const feeAfterUsd = input.moneyPrecisionVersion === 1 ? newSaleMoney4(input.newFeeUsd) : round2(Math.max(0, Number(input.newFeeUsd) || 0))
   return {
     statements: [{
       sql: `UPDATE sales SET delivery_fee_usd = @fee_usd, delivery_fee_khr = @fee_khr, updated_at = CURRENT_TIMESTAMP WHERE id = @sale_id`,
       params: {
         sale_id: input.saleId,
         fee_usd: feeAfterUsd,
-        fee_khr: calculatedKhr(feeAfterUsd, exchangeRate),
+        fee_khr: input.moneyPrecisionVersion === 1 ? multiplyMoney4(feeAfterUsd,exchangeRate) : calculatedKhr(feeAfterUsd, exchangeRate),
       },
     }],
     feeBeforeUsd,
     feeAfterUsd,
-    feeDeltaUsd: round2(feeAfterUsd - feeBeforeUsd),
+    feeDeltaUsd: input.moneyPrecisionVersion === 1 ? subtractMoney4(feeAfterUsd,feeBeforeUsd) : round2(feeAfterUsd - feeBeforeUsd),
   }
 }
 
@@ -740,6 +746,7 @@ export function planDeliveryFeeChange(input: {
  * path has no money statement to save it, so it takes the stamp directly.
  */
 export function planDeliveryActualCostChange(input: {
+  moneyPrecisionVersion?: 0 | 1
   saleId: number | string
   sale: AmendableSaleRow
   newCostUsd: number | null
@@ -749,9 +756,9 @@ export function planDeliveryActualCostChange(input: {
   const exchangeRate = Number(input.exchangeRate) || 4100
   const rawBefore = input.sale.delivery_actual_cost_usd
   const parsedBefore = rawBefore === null || rawBefore === undefined || String(rawBefore).trim() === '' ? null : Number(rawBefore)
-  const costBeforeUsd = parsedBefore !== null && Number.isFinite(parsedBefore) && parsedBefore >= 0 ? round2(parsedBefore) : null
-  const costAfterUsd = input.newCostUsd === null ? null : round2(Math.max(0, Number(input.newCostUsd) || 0))
-  const costDeltaUsd = round2((costAfterUsd ?? 0) - (costBeforeUsd ?? 0))
+  const costBeforeUsd = input.moneyPrecisionVersion === 1 ? parsedBefore : parsedBefore !== null && Number.isFinite(parsedBefore) && parsedBefore >= 0 ? round2(parsedBefore) : null
+  const costAfterUsd = input.newCostUsd === null ? null : input.moneyPrecisionVersion === 1 ? newSaleMoney4(input.newCostUsd) : round2(Math.max(0, Number(input.newCostUsd) || 0))
+  const costDeltaUsd = input.moneyPrecisionVersion === 1 ? subtractMoney4(costAfterUsd ?? 0,costBeforeUsd ?? 0) : round2((costAfterUsd ?? 0) - (costBeforeUsd ?? 0))
   // No fallback to CURRENT_TIMESTAMP: a fallback is how the two values drifted
   // apart in the first place, and a blank stamp would null the column outright.
   const stamp = String(input.stamp || '').trim()
@@ -762,7 +769,7 @@ export function planDeliveryActualCostChange(input: {
       params: {
         sale_id: input.saleId,
         cost_usd: costAfterUsd,
-        cost_khr: costAfterUsd === null ? null : calculatedKhr(costAfterUsd, exchangeRate),
+        cost_khr: costAfterUsd === null ? null : input.moneyPrecisionVersion === 1 ? multiplyMoney4(costAfterUsd,exchangeRate) : calculatedKhr(costAfterUsd, exchangeRate),
         stamp,
       },
     }],
@@ -800,6 +807,7 @@ export function guardDeliveryAddition(sale: AmendableSaleRow): DeliveryFeeGuardR
  * sale-money kernel. This plan never emits inventory statements.
  */
 export function planDeliveryAddition(input: {
+  moneyPrecisionVersion?: 0 | 1
   saleId: number | string
   sale: AmendableSaleRow
   contact: DeliveryContactSnapshot
@@ -811,12 +819,12 @@ export function planDeliveryAddition(input: {
   const exchangeRate = Number(input.exchangeRate) || 4100
   const rawFeeUsd = Number(input.feeUsd)
   if (!Number.isFinite(rawFeeUsd) || rawFeeUsd < 0) throw new Error('Delivery fee must be a non-negative number')
-  const feeUsd = round2(rawFeeUsd)
+  const feeUsd = input.moneyPrecisionVersion === 1 ? newSaleMoney4(rawFeeUsd) : round2(rawFeeUsd)
   const rawActualCostUsd = input.actualCostUsd === null ? null : Number(input.actualCostUsd)
   if (rawActualCostUsd !== null && (!Number.isFinite(rawActualCostUsd) || rawActualCostUsd < 0)) {
     throw new Error('Actual delivery cost must be a non-negative number or null')
   }
-  const actualCostUsd = rawActualCostUsd === null ? null : round2(rawActualCostUsd)
+  const actualCostUsd = rawActualCostUsd === null ? null : input.moneyPrecisionVersion === 1 ? newSaleMoney4(rawActualCostUsd) : round2(rawActualCostUsd)
   const stamp = String(input.stamp || '').trim()
   if (!stamp) throw new Error('planDeliveryAddition needs the mutation stamp the response reports as updated_at')
   const before = {
@@ -825,12 +833,12 @@ export function planDeliveryAddition(input: {
     delivery_contact_name: input.sale.delivery_contact_name ?? null,
     delivery_contact_phone: input.sale.delivery_contact_phone ?? null,
     delivery_contact_address: input.sale.delivery_contact_address ?? null,
-    delivery_fee_usd: numberOrNull(input.sale.delivery_fee_usd),
-    delivery_fee_khr: numberOrNull((input.sale as Record<string, unknown>).delivery_fee_khr),
+    delivery_fee_usd: numberOrNull(input.sale.delivery_fee_usd,input.moneyPrecisionVersion),
+    delivery_fee_khr: numberOrNull((input.sale as Record<string, unknown>).delivery_fee_khr,input.moneyPrecisionVersion),
     delivery_fee_paid_by: (input.sale as Record<string, unknown>).delivery_fee_paid_by ?? null,
-    delivery_actual_cost_usd: numberOrNull(input.sale.delivery_actual_cost_usd),
-    delivery_actual_cost_khr: numberOrNull(input.sale.delivery_actual_cost_khr),
-    exchange_rate: numberOrNull((input.sale as Record<string, unknown>).exchange_rate),
+    delivery_actual_cost_usd: numberOrNull(input.sale.delivery_actual_cost_usd,input.moneyPrecisionVersion),
+    delivery_actual_cost_khr: numberOrNull(input.sale.delivery_actual_cost_khr,input.moneyPrecisionVersion),
+    exchange_rate: numberOrNull((input.sale as Record<string, unknown>).exchange_rate,input.moneyPrecisionVersion),
   }
   const after = {
     is_delivery: true,
@@ -839,10 +847,10 @@ export function planDeliveryAddition(input: {
     delivery_contact_phone: input.contact.phone,
     delivery_contact_address: input.contact.address,
     delivery_fee_usd: feeUsd,
-    delivery_fee_khr: calculatedKhr(feeUsd, exchangeRate),
+    delivery_fee_khr: input.moneyPrecisionVersion === 1 ? multiplyMoney4(feeUsd,exchangeRate) : calculatedKhr(feeUsd, exchangeRate),
     delivery_fee_paid_by: 'customer',
     delivery_actual_cost_usd: actualCostUsd,
-    delivery_actual_cost_khr: actualCostUsd === null ? null : calculatedKhr(actualCostUsd, exchangeRate),
+    delivery_actual_cost_khr: actualCostUsd === null ? null : input.moneyPrecisionVersion === 1 ? multiplyMoney4(actualCostUsd,exchangeRate) : calculatedKhr(actualCostUsd, exchangeRate),
     exchange_rate: exchangeRate,
   }
   return {
@@ -867,9 +875,9 @@ export function planDeliveryAddition(input: {
         contact_phone: input.contact.phone,
         contact_address: input.contact.address,
         fee_usd: feeUsd,
-        fee_khr: calculatedKhr(feeUsd, exchangeRate),
+        fee_khr: input.moneyPrecisionVersion === 1 ? multiplyMoney4(feeUsd,exchangeRate) : calculatedKhr(feeUsd, exchangeRate),
         cost_usd: actualCostUsd,
-        cost_khr: actualCostUsd === null ? null : calculatedKhr(actualCostUsd, exchangeRate),
+        cost_khr: actualCostUsd === null ? null : input.moneyPrecisionVersion === 1 ? multiplyMoney4(actualCostUsd,exchangeRate) : calculatedKhr(actualCostUsd, exchangeRate),
         stamp,
       },
     }],
@@ -923,7 +931,7 @@ export function planDeliveryAddition(input: {
 export const TAX_ENABLED_SETTING_KEY = 'tax_enabled'
 export const TAX_RATE_SETTING_KEY = 'tax_rate'
 
-export type TaxSettings = { enabled: boolean; rate: number }
+export type TaxSettings = { enabled: boolean; rate: number; percent?: number }
 
 /**
  * `rawEnabled` and `rawRate` are the raw `settings.value` strings (or
@@ -932,7 +940,7 @@ export type TaxSettings = { enabled: boolean; rate: number }
  * The rate is a PERCENT in storage ("10" means 10%), matching what the
  * Settings screen collects and what POS divides by 100.
  */
-export function resolveTaxSettings(rawEnabled: unknown, rawRate: unknown): TaxSettings {
+export function resolveTaxSettings(rawEnabled: unknown, rawRate: unknown, moneyPrecisionVersion: 0 | 1 = 0): TaxSettings {
   const percent = Number(String(rawRate ?? '').trim())
   const rate = Number.isFinite(percent) && percent > 0 ? percent / 100 : 0
   const enabledText = String(rawEnabled ?? '').trim().toLowerCase()
@@ -941,11 +949,12 @@ export function resolveTaxSettings(rawEnabled: unknown, rawRate: unknown): TaxSe
   const enabled = enabledText === ''
     ? rate > 0
     : !(enabledText === '0' || enabledText === 'false' || enabledText === 'off' || enabledText === 'no')
-  return { enabled, rate }
+  return { enabled, rate, ...(moneyPrecisionVersion === 1 ? {percent: Number.isFinite(percent) && percent > 0 ? percent : 0} : {}) }
 }
 
 /** The base tax is charged on: subtotal less both discounts, floored at 0. */
-export function taxableBaseUsd(sale: AmendableSaleRow, subtotalUsd: number): number {
+export function taxableBaseUsd(sale: AmendableSaleRow, subtotalUsd: number, moneyPrecisionVersion: 0 | 1 = 0): number {
+  if (moneyPrecisionVersion === 1) return Math.max(0,sumMoney4([subtotalUsd,-Number(sale.discount_usd || 0),-Number(sale.membership_discount_usd || 0)]))
   const base = (Number(subtotalUsd) || 0)
     - (Number(sale.discount_usd) || 0)
     - (Number(sale.membership_discount_usd) || 0)
@@ -959,6 +968,7 @@ export type AmendedTaxResult = {
 }
 
 export function resolveAmendedTaxUsd(input: {
+  moneyPrecisionVersion?: 0 | 1
   sale: AmendableSaleRow
   /** The taxable base BEFORE the amendment (from the sale's stored subtotal). */
   taxableBaseBeforeUsd: number
@@ -966,11 +976,18 @@ export function resolveAmendedTaxUsd(input: {
   taxableBaseAfterUsd: number
   settings: TaxSettings
 }): AmendedTaxResult {
-  const storedTax = round2(Number(input.sale.tax_usd) || 0)
+  const storedTax = input.moneyPrecisionVersion === 1 ? newSaleMoney4(input.sale.tax_usd) : round2(Number(input.sale.tax_usd) || 0)
   if (storedTax <= 0) return { taxUsd: 0, recomputed: false, reason: 'no_tax_on_sale' }
   if (!input.settings.enabled) return { taxUsd: storedTax, recomputed: false, reason: 'tax_disabled' }
   const rate = Number(input.settings.rate) || 0
   if (rate <= 0) return { taxUsd: storedTax, recomputed: false, reason: 'no_rate' }
+  if (input.moneyPrecisionVersion === 1) {
+    const percent = input.settings.percent
+    if (percent === undefined) throw new Error('V1 tax requires the original percent, not a money-rounded rate.')
+    if (percentageMoney4(input.taxableBaseBeforeUsd,percent) !== storedTax)
+      return {taxUsd:storedTax,recomputed:false,reason:'rate_mismatch'}
+    return {taxUsd:percentageMoney4(input.taxableBaseAfterUsd,percent),recomputed:true,reason:'recomputed'}
+  }
   const expected = round2((Number(input.taxableBaseBeforeUsd) || 0) * rate)
   // One cent of tolerance: the stored amount went through the same round2 the
   // till used, so anything further out is a different rate, not float drift.
@@ -992,14 +1009,14 @@ export function resolveAmendedTaxUsd(input: {
  * would change their behaviour silently. The caller appends this only when
  * resolveAmendedTaxUsd said `recomputed`.
  */
-export function saleTaxUpdateStatement(saleId: number | string, taxUsd: number, exchangeRate: number): StockStatement {
-  const usd = round2(Math.max(0, Number(taxUsd) || 0))
+export function saleTaxUpdateStatement(saleId: number | string, taxUsd: number, exchangeRate: number, moneyPrecisionVersion: 0 | 1 = 0): StockStatement {
+  const usd = moneyPrecisionVersion === 1 ? newSaleMoney4(taxUsd) : round2(Math.max(0, Number(taxUsd) || 0))
   return {
     sql: `UPDATE sales SET tax_usd = @tax_usd, tax_khr = @tax_khr, updated_at = CURRENT_TIMESTAMP WHERE id = @sale_id`,
     params: {
       sale_id: saleId,
       tax_usd: usd,
-      tax_khr: calculatedKhr(usd, Number(exchangeRate) || 4100),
+      tax_khr: moneyPrecisionVersion === 1 ? multiplyMoney4(usd,exchangeRate) : calculatedKhr(usd, Number(exchangeRate) || 4100),
     },
   }
 }
@@ -1018,6 +1035,7 @@ export function saleTaxUpdateStatement(saleId: number | string, taxUsd: number, 
 // by mutating the sale row, so nothing downstream sees a half-updated object.
 // ---------------------------------------------------------------------------
 export function recomputeSaleMoneyAfterAmendment(input: {
+  moneyPrecisionVersion?: 0 | 1
   sale: AmendableSaleRow
   subtotalUsd: number
   /** Set only by a delivery_fee_changed amendment; otherwise the stored fee. */
@@ -1045,6 +1063,7 @@ export function recomputeSaleMoneyAfterAmendment(input: {
   }
   const sale = Object.keys(overrides).length === 0 ? input.sale : { ...input.sale, ...overrides }
   return recomputeSaleMoneyAfterLineChange({
+    moneyPrecisionVersion: input.moneyPrecisionVersion,
     sale,
     subtotalUsd: input.subtotalUsd,
     changeExchangeRate: input.changeExchangeRate,
@@ -1103,6 +1122,7 @@ export function amendedSaleKeepsReceiptNumber(): true {
 // happened. One trail, one story, no silent gaps.
 // ---------------------------------------------------------------------------
 export type AmendmentEntry = {
+  moneyPrecisionVersion?: 0 | 1
   saleId: number | string
   kind: AmendmentKind
   groupId?: string | null
@@ -1132,10 +1152,11 @@ export type AmendmentEntry = {
  * than taken from the caller, so a caller cannot record "1 -> 2, delta -5".
  */
 export function amendmentEntryStatement(entry: AmendmentEntry): StockStatement {
-  const quantityBefore = numberOrNull(entry.quantityBefore)
-  const quantityAfter = numberOrNull(entry.quantityAfter)
-  const amountBefore = numberOrNull(entry.amountBeforeUsd)
-  const amountAfter = numberOrNull(entry.amountAfterUsd)
+  const precise = entry.moneyPrecisionVersion === 1
+  const quantityBefore = numberOrNull(entry.quantityBefore,entry.moneyPrecisionVersion)
+  const quantityAfter = numberOrNull(entry.quantityAfter,entry.moneyPrecisionVersion)
+  const amountBefore = numberOrNull(entry.amountBeforeUsd,entry.moneyPrecisionVersion)
+  const amountAfter = numberOrNull(entry.amountAfterUsd,entry.moneyPrecisionVersion)
   return {
     sql: `INSERT INTO sale_amendments (
             sale_id, group_id, kind, sale_item_id, product_id, product_name,
@@ -1161,13 +1182,13 @@ export function amendmentEntryStatement(entry: AmendmentEntry): StockStatement {
       product_name: entry.productName ?? null,
       quantity_before: quantityBefore,
       quantity_after: quantityAfter,
-      quantity_delta: quantityBefore === null || quantityAfter === null ? null : round2(quantityAfter - quantityBefore),
+      quantity_delta: quantityBefore === null || quantityAfter === null ? null : precise ? Number(subtractDecimalSum(quantityAfter,[quantityBefore])) : round2(quantityAfter - quantityBefore),
       amount_before_usd: amountBefore,
       amount_after_usd: amountAfter,
-      amount_delta_usd: amountBefore === null || amountAfter === null ? null : round2(amountAfter - amountBefore),
-      total_before_usd: round2(Number(entry.totalBeforeUsd) || 0),
-      total_after_usd: round2(Number(entry.totalAfterUsd) || 0),
-      units_moved: round2(Number(entry.unitsMoved) || 0) || 0,
+      amount_delta_usd: amountBefore === null || amountAfter === null ? null : precise ? subtractMoney4(amountAfter,amountBefore) : round2(amountAfter - amountBefore),
+      total_before_usd: precise ? Number(entry.totalBeforeUsd) : round2(Number(entry.totalBeforeUsd) || 0),
+      total_after_usd: precise ? Number(entry.totalAfterUsd) : round2(Number(entry.totalAfterUsd) || 0),
+      units_moved: precise ? Number(entry.unitsMoved || 0) : round2(Number(entry.unitsMoved) || 0) || 0,
       stock_skipped: entry.stockSkipped ? 1 : 0,
       via: entry.via || 'amend',
       reverses_amendment_id: entry.reversesAmendmentId ?? null,
@@ -1181,10 +1202,10 @@ export function amendmentEntryStatement(entry: AmendmentEntry): StockStatement {
   }
 }
 
-function numberOrNull(value: unknown): number | null {
+function numberOrNull(value: unknown, moneyPrecisionVersion: 0 | 1 = 0): number | null {
   if (value === null || value === undefined) return null
   const parsed = Number(value)
-  return Number.isFinite(parsed) ? round2(parsed) : null
+  return Number.isFinite(parsed) ? moneyPrecisionVersion === 1 ? parsed : round2(parsed) : null
 }
 
 /** The kind that reverses a kind, for a compensating entry. */

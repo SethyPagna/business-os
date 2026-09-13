@@ -1,0 +1,40 @@
+// Actual Hono product reads against the complete local migrated SQLite schema.
+const assert=require('node:assert/strict')
+const fs=require('node:fs'),path=require('node:path'),Module=require('node:module')
+const file=path.join(__dirname,'test-sale-create-atomic-pure.cjs')
+const source=fs.readFileSync(file,'utf8'), boundary=source.indexOf(';(async () => {')
+assert.ok(boundary>0)
+const harness=new Module(file,module);harness.filename=file;harness.paths=module.paths
+harness._compile(source.slice(0,boundary).replace('const overrides = {',"const overrides = { './db': { getDb: env => env.DB },")+'\nmodule.exports={fixture,load,executionCtx,USER,setUser(value){currentUser=value}};',file)
+const h=harness.exports,app=h.load('routes/products.ts').default
+;(async()=>{
+  h.setUser({...h.USER,permissions:'{"all":true}'})
+  const f=h.fixture()
+  f.raw.prepare("INSERT INTO promotion_rules(id,rule_type,min_quantity,save_usd,product_ids,scope_type,is_active,min_spend_usd) VALUES(1,'quantity_save',3,1.2345,'[10]','products',1,2.3456)").run()
+  const get=async suffix=>{
+    const response=await app.request('/search?page=1&pageSize=10&surface=pos'+suffix,{}, {DB:f.route},h.executionCtx)
+    return {status:response.status,body:await response.json()}
+  }
+  const legacy=await get(''),explicitLegacy=await get('&money_precision_version=0'),precise=await get('&money_precision_version=1')
+  assert.equal(legacy.status,200,JSON.stringify(legacy.body))
+  assert.equal(precise.status,200,JSON.stringify(precise.body))
+  assert.deepEqual(explicitLegacy.body,legacy.body)
+  assert.equal(legacy.body.promotion_rules[0].save_usd,1.24,'legacy ceiling policy remains unchanged')
+  assert.equal(precise.body.promotion_rules[0].save_usd,1.2345)
+  assert.equal(precise.body.promotion_rules[0].min_spend_usd,2.3456)
+  const kernel=h.load('lib/promotionRules.ts'),product=f.raw.prepare('SELECT * FROM products WHERE id=10').get()
+  const rawRules=f.raw.prepare('SELECT * FROM promotion_rules WHERE is_active=1 ORDER BY id').all().map(row=>kernel.normalizePromotionRule(row,1))
+  const at=new Date('2026-09-13T00:00:00Z')
+  assert.deepEqual(kernel.evaluatePromotionPricing(product,3,precise.body.promotion_rules,4000,at,1),kernel.evaluatePromotionPricing(product,3,rawRules,4000,at,1),'read quote equals raw server-rule v1 evaluation')
+  assert.deepEqual({...precise.body,promotion_rules:[]},{...legacy.body,promotion_rules:[]},'items, pagination and read projections unchanged')
+  for(const invalid of ['2','-1','','true','01']) assert.equal((await get('&money_precision_version='+invalid)).status,400)
+  const bootstrap=await app.request('/bootstrap?surface=pos&metadata=0&money_precision_version=1',{}, {DB:f.route},h.executionCtx)
+  assert.equal(bootstrap.status,200)
+  assert.deepEqual((await bootstrap.json()).promotion_rules,precise.body.promotion_rules)
+  const invalidBootstrap=await app.request('/bootstrap?surface=pos&money_precision_version=2',{}, {DB:f.route},h.executionCtx)
+  assert.equal(invalidBootstrap.status,400)
+  h.setUser({...h.USER,permissions:'{}'})
+  assert.equal((await get('&money_precision_version=1')).status,403)
+  f.raw.db.close()
+  console.log('PASS actual product search legacy/default parity, opt-in4 rules, strict version and permission gates')
+})().catch(error=>{console.error(error);process.exitCode=1})

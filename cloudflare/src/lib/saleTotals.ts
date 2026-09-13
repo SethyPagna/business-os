@@ -27,11 +27,15 @@
  * routes/sales.ts has always used -- changing money-rounding behavior is a
  * deliberate, separately-reviewed decision, not a refactor side effect.
  */
+import { roundMoney4, roundMoney2, sumMoney4, subtractMoney4, multiplyMoney4, nativeChangeAmounts, sellingPriceCeilCent } from './moneyPrecision'
+import { buildSaleMoneyPrecision, canonicalMoney4, SaleMoneyContractError } from './saleMoneyPrecision'
+
 export function round2(n: number): number {
   return Math.round((n + Number.EPSILON) * 100) / 100
 }
 
 export type CanonicalSaleItemMoneyInput = {
+  sellingPriceInputUsd?: unknown
   appliedPriceUsd?: unknown
   appliedPriceKhr?: unknown
   basePriceUsd?: unknown
@@ -57,9 +61,22 @@ export type CanonicalSaleItemMoney = {
 export function canonicalSaleItemMoney(
   input: CanonicalSaleItemMoneyInput,
   exchangeRate: unknown,
+  moneyPrecisionVersion: 0 | 1 = 0,
 ): CanonicalSaleItemMoney {
   const rateValue = Number(exchangeRate)
   const rate = Number.isFinite(rateValue) && rateValue > 0 ? rateValue : 4100
+  if (moneyPrecisionVersion === 1) {
+    const appliedPriceUsd = newSaleMoney4(input.appliedPriceUsd)
+    const basePriceUsd = input.basePriceUsd == null ? appliedPriceUsd : newSaleMoney4(input.basePriceUsd)
+    if (input.sellingPriceInputUsd !== undefined && sellingPriceCeilCent(input.sellingPriceInputUsd as number) !== basePriceUsd)
+      throw new SaleMoneyContractError('money_precision_selling_base_mismatch')
+    if (appliedPriceUsd > basePriceUsd) throw new SaleMoneyContractError('money_precision_discount_mismatch')
+    const appliedPriceKhr = multiplyMoney4(appliedPriceUsd, rate)
+    const basePriceKhr = multiplyMoney4(basePriceUsd, rate)
+    return { appliedPriceUsd, appliedPriceKhr, basePriceUsd, basePriceKhr,
+      manualDiscountUsd: subtractMoney4(basePriceUsd, appliedPriceUsd),
+      manualDiscountKhr: subtractMoney4(basePriceKhr, appliedPriceKhr) }
+  }
   const appliedRaw = Number(input.appliedPriceUsd)
   const appliedPriceUsd = Number.isFinite(appliedRaw) ? round2(Math.max(0, appliedRaw)) : 0
   const baseRaw = Number(input.basePriceUsd)
@@ -100,6 +117,8 @@ function isSuppliedAmount(value: unknown): boolean {
 }
 
 export type SaleTotalsInput = {
+  preserveRecordedTender?: boolean
+  moneyPrecisionVersion?: 0 | 1
   subtotalUsd: number
   discountUsd: number
   membershipDiscountUsd: number
@@ -122,6 +141,9 @@ export type SaleTotalsInput = {
 }
 
 export type SaleTotals = {
+  moneyPrecisionVersion?: 1
+  calculatedTotalUsd?: number
+  roundingAdjustmentUsd?: number
   /** The delivery fee actually billed to the customer (0 when store-paid). */
   customerDeliveryFeeUsd: number
   totalUsd: number
@@ -154,6 +176,7 @@ export function customerBilledDeliveryFeeUsd(isDelivery: boolean, feeUsd: unknow
 }
 
 export function computeSaleTotals(input: SaleTotalsInput): SaleTotals {
+  if (input.moneyPrecisionVersion === 1) return computeSaleTotalsV1(input)
   const exchangeRate = Number(input.exchangeRate) || 4100
 
   const deliveryFeeUsd = round2(Number(input.deliveryFeeUsd) || 0)
@@ -192,6 +215,56 @@ export function computeSaleTotals(input: SaleTotalsInput): SaleTotals {
   const changeKhr = Math.round(changeUsdExact * resolveChangeExchangeRate(input.changeExchangeRate, exchangeRate))
 
   return { customerDeliveryFeeUsd, totalUsd, totalKhr, amountPaidUsd, amountPaidKhr, changeUsd, changeKhr }
+}
+
+/** New explicit-v1 inputs only. Never pass historical snapshots here. */
+export function newSaleMoney4(value: unknown, fallback = 0): number {
+  if (value === undefined) return fallback
+  if ((typeof value !== 'number' && typeof value !== 'string') || String(value).trim() === '' || Number(value) < 0)
+    throw new SaleMoneyContractError('money_precision_invalid_amount')
+  return roundMoney4(value)
+}
+
+function computeSaleTotalsV1(input: SaleTotalsInput): SaleTotals {
+  const rate = Number(input.exchangeRate)
+  if (!Number.isFinite(rate) || rate <= 0) throw new SaleMoneyContractError('money_precision_invalid_rate')
+  const customerDeliveryFeeUsd = input.isDelivery && input.deliveryFeePaidBy === 'customer' ? newSaleMoney4(input.deliveryFeeUsd) : 0
+  const financial = buildSaleMoneyPrecision(sumMoney4([
+    newSaleMoney4(input.subtotalUsd), -newSaleMoney4(input.discountUsd),
+    -newSaleMoney4(input.membershipDiscountUsd), newSaleMoney4(input.taxUsd), customerDeliveryFeeUsd,
+  ]))
+  // Tender is actual native money, not basket revenue. Preserve denomination.
+  if (isSuppliedAmount(input.rawAmountPaidUsd)) newSaleMoney4(input.rawAmountPaidUsd)
+  if (isSuppliedAmount(input.rawAmountPaidKhr)) newSaleMoney4(input.rawAmountPaidKhr)
+  const amountPaidUsd = isSuppliedAmount(input.rawAmountPaidUsd)
+    ? input.preserveRecordedTender ? Number(input.rawAmountPaidUsd) : roundMoney2(input.rawAmountPaidUsd as number) : financial.total_usd
+  const amountPaidKhr = isSuppliedAmount(input.rawAmountPaidKhr)
+    ? input.preserveRecordedTender ? Number(input.rawAmountPaidKhr) : Math.round(Number(input.rawAmountPaidKhr)) : 0
+  const change = nativeChangeAmounts({paidUsd:amountPaidUsd,paidKhr:amountPaidKhr,payableUsd:financial.total_usd,
+    exchangeRate:rate,changeExchangeRate:resolveChangeExchangeRate(input.changeExchangeRate,rate)})
+  return { customerDeliveryFeeUsd, totalUsd: financial.total_usd,
+    calculatedTotalUsd: financial.calculated_total_usd, roundingAdjustmentUsd: financial.rounding_adjustment_usd, moneyPrecisionVersion: 1,
+    totalKhr: multiplyMoney4(financial.total_usd,rate), amountPaidUsd, amountPaidKhr,
+    changeUsd: change.changeUsd, changeKhr: change.changeKhr }
+}
+
+/** Whole-basket upgrade precondition. Unknown/higher-precision historical money
+ * must be reviewed, never silently rounded merely to label a parent v1. */
+export function assertCanonicalSaleChildren(lines: readonly Record<string, unknown>[]): void {
+  if (!lines.length || lines.length > 200) throw new SaleMoneyContractError('money_precision_basket_review_needed')
+  const amounts = ['applied_price_usd','applied_price_khr','cost_price_usd','cost_price_khr','total_usd','total_khr',
+    'product_discount_usd','product_discount_khr','base_price_usd','base_price_khr','manual_discount_usd','manual_discount_khr']
+  for (const row of lines) {
+    if (typeof row.quantity !== 'number' || !Number.isFinite(row.quantity) || row.quantity <= 0)
+      throw new SaleMoneyContractError('money_precision_basket_review_needed')
+    for (const key of amounts) {
+      if ((key === 'cost_price_usd' || key === 'cost_price_khr') && row[key] === null) continue
+      if (row[key] == null) throw new SaleMoneyContractError('money_precision_basket_review_needed')
+      canonicalMoney4(row[key], true)
+    }
+    // Fixed discounts are money; percentages retain their original precision.
+    if (row.manual_discount_type === 'fixed') canonicalMoney4(row.manual_discount_value, true)
+  }
 }
 
 /**

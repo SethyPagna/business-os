@@ -77,6 +77,7 @@ import { broadcast } from '../durable-objects/broadcastHub'
 import { createBulkDeleteJob, getBulkDeleteJob, reapStalledBulkDeleteJobs } from '../lib/bulkDeleteEngine'
 import { ADMIN_MAX_IMAGES_PER_PRODUCT, MAX_IMAGES_PER_PRODUCT } from '../lib/importImageMatch'
 import { loadActivePromotionRules, productPromotedSql, productDiscountActiveSql, anyRuleAppliesSql, singleRuleAppliesSql } from '../lib/promotionRulesSql'
+import { normalizePromotionRule, isRuleActive, type PromotionRule } from '../lib/promotionRules'
 import {
   computeRenameImpact,
   applyRenameCarry,
@@ -658,7 +659,10 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
   // shared kernel (lib/promotionRules.ts); their scope + the per-product
   // discount condition are expressed in SQL so the ordering and the promo
   // filters hold across server-side pagination, not just the loaded page.
-  const promotionRules = await loadActivePromotionRules(db)
+  const promotionRules = query.money_precision_version==='1'
+    ? (await db.prepare('SELECT * FROM promotion_rules WHERE is_active = 1 ORDER BY id ASC').all<Record<string,unknown>>())
+      .map(row=>normalizePromotionRule(row,1)).filter((rule):rule is PromotionRule=>Boolean(rule && isRuleActive(rule)))
+    : await loadActivePromotionRules(db)
   const promotedRankSql = `CASE WHEN ${productPromotedSql(promotionRules, params)} THEN 1 ELSE 0 END`
   const promoFilter = String(query.promo || '').trim().toLowerCase()
   if (promoFilter === 'promoted') {
@@ -1007,6 +1011,8 @@ app.get('/search', async (c) => {
   const surface = parseProductReadSurface(query.surface)
   const denial = productSurfaceDenialReason(user, surface)
   if (denial) return c.json({ error: denial }, 403)
+  if (query.money_precision_version!==undefined && !['0','1'].includes(query.money_precision_version))
+    return c.json({error:'Unsupported product pricing read version.',code:'money_precision_version_invalid'},400)
 
   const version = await getVersionWithFallback(c.env, 'products')
   const payload = await cachedJsonResponse(c.req.raw, c.executionCtx, version, 20, async () => {
@@ -1034,6 +1040,8 @@ app.get('/bootstrap', async (c) => {
   const surface = parseProductReadSurface(query.surface)
   const denial = productSurfaceDenialReason(user, surface)
   if (denial) return c.json({ error: denial }, 403)
+  if (query.money_precision_version!==undefined && !['0','1'].includes(query.money_precision_version))
+    return c.json({error:'Unsupported product pricing read version.',code:'money_precision_version_invalid'},400)
   const db = getDb(c.env)
   const includeFilterMetadata = shouldLoadProductBootstrapMetadata(query.metadata)
   // POS.tsx's loadCatalogData() reads this endpoint's response as

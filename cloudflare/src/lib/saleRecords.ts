@@ -113,6 +113,9 @@ export const SALE_RECORD_FIELDS = [
   'sale_status',
   'items',
   'total_usd',
+  'money_precision_version',
+  'calculated_total_usd',
+  'rounding_adjustment_usd',
   'payment',
   'delivery',
   'customer',
@@ -248,6 +251,9 @@ export function parseDetails(raw: unknown): Record<string, unknown> | null {
 // Source 1: the sale itself.
 // ---------------------------------------------------------------------------
 export interface SaleRecordSaleRow {
+  money_precision_version?: unknown
+  calculated_total_usd?: unknown
+  rounding_adjustment_usd?: unknown
   id: number | string
   created_at?: unknown
   cashier_name?: unknown
@@ -388,6 +394,7 @@ export function saleCreatedRecordFromSnapshot(
     before: null,
     after: {
       receipt_number: text(snapshot.receipt_number),
+      ...precisionRecordFields(snapshot as unknown as Record<string,unknown>),
       sale_status: text(snapshot.sale_status),
       products: snapshot.products.map((item) => ({
         product: text(item.product),
@@ -468,6 +475,9 @@ export function saleCreatedRecord(sale: SaleRecordSaleRow): SaleRecord {
 }
 
 const CREATION_SNAPSHOT_FIELDS = [
+  'money_precision_version',
+  'calculated_total_usd',
+  'rounding_adjustment_usd',
   'sale_status',
   'total_usd',
   'payment_method',
@@ -479,6 +489,9 @@ const CREATION_SNAPSHOT_FIELDS = [
 ] as const
 
 const LEGACY_AMBIGUOUS_CREATION_FIELDS = [
+  'money_precision_version',
+  'calculated_total_usd',
+  'rounding_adjustment_usd',
   'sale_status',
   'payment_method',
   'payment_details',
@@ -736,6 +749,8 @@ export function ledgerRecord(row: SaleRecordLedgerRow): SaleRecord {
   // so the detail view can always answer "and what did the customer owe?".
   before.total_usd = numberOrNull(row.total_before_usd)
   after.total_usd = numberOrNull(row.total_after_usd)
+  Object.assign(before,precisionRecordFields(beforeSnapshot))
+  Object.assign(after,precisionRecordFields(afterSnapshot))
   return {
     id: `amendment:${row.id}`,
     source: 'ledger',
@@ -1377,6 +1392,12 @@ function itemValue(record: SaleRecord, snapshot: Record<string, unknown>): Recor
     ? null : { sale_item_id: saleItemId, product_id: productId, name, sku, unit_price_usd: unitPrice, line_total_usd: lineTotal }
 }
 
+const PRECISION_RECORD_FIELDS = ['money_precision_version','calculated_total_usd','rounding_adjustment_usd'] as const
+function precisionRecordFields(snapshot: Record<string,unknown> | null): Record<string,unknown> {
+  return Object.fromEntries(PRECISION_RECORD_FIELDS.filter(key => snapshot && Object.prototype.hasOwnProperty.call(snapshot,key))
+    .map(key => [key,snapshot![key]]))
+}
+
 function publicRecord(record: SaleRecord): SaleRecord {
   if (record.changes !== undefined) {
     const { before: _before, after: _after, unknown_before_fields: _ub, unknown_after_fields: _ua, ...publicFields } = record
@@ -1385,6 +1406,13 @@ function publicRecord(record: SaleRecord): SaleRecord {
   const changes: SaleRecordChange[] = []
   const beforeNone = state(null)
   const after = record.after || {}
+  // Only durable captured fields establish precision facts; the current sale
+  // row cannot retroactively establish a historical raw total.
+  if (PRECISION_RECORD_FIELDS.some(key => Object.prototype.hasOwnProperty.call(after,key))) {
+    for (const field of PRECISION_RECORD_FIELDS) addChange(changes,field,
+      record.kind === 'sale_created' ? beforeNone : Object.prototype.hasOwnProperty.call(record.before || {},field) ? fieldState(record,'before',field) : state(null,true),
+      Object.prototype.hasOwnProperty.call(after,field) ? fieldState(record,'after',field) : state(null,true),record.kind === 'sale_created')
+  }
   if (record.kind === 'sale_created') {
     for (const field of ['receipt_number', 'sale_status', 'products', 'total_usd'] as const) {
       const publicField = field === 'products' ? 'items' : field
@@ -1486,8 +1514,8 @@ function replacementRecord(rows: SaleRecordLedgerRow[]): SaleRecord {
     via: text(first.via) || 'amend',
     subject: null,
     summary: 'Items replaced',
-    before: { removed_items: removed.map(item), added_items: null, total_usd: numberOrNull(first.total_before_usd) },
-    after: { removed_items: null, added_items: added.map(item), total_usd: numberOrNull(rows[rows.length - 1].total_after_usd) },
+    before: { removed_items: removed.map(item), added_items: null, total_usd: numberOrNull(first.total_before_usd), ...precisionRecordFields(parseDetails(first.before_json)) },
+    after: { removed_items: null, added_items: added.map(item), total_usd: numberOrNull(rows[rows.length - 1].total_after_usd), ...precisionRecordFields(parseDetails(rows[rows.length - 1].after_json)) },
   }
 }
 

@@ -56,6 +56,9 @@ import {
 } from './productBatches'
 import { computeSaleTotals, round2, type SaleTotals } from './saleTotals'
 import { financialCalculationValue } from './financialPrecision'
+import { divideMoney4, multiplyMoney4, roundMoney4, sumMoney4 } from './moneyPrecision'
+import { validateSaleMoneySnapshot, SaleMoneyContractError } from './saleMoneyPrecision'
+import { capturedPricingMetadata, parseSaleItemPricing } from './saleItemPricing'
 
 export type StockStatement = { sql: string; params: Record<string, unknown> }
 
@@ -132,13 +135,15 @@ export function saleStatusDeductsStock(status: string): boolean {
 // ---------------------------------------------------------------------------
 
 export type NewSaleLineInput = {
+  pricingSnapshotJson?: string
+  moneyPrecisionVersion?: 0 | 1
   productId: number
   productName: string
   quantity: number
   branchId: number | null
   unitPriceUsd: number
-  costPriceUsd: number
-  costPriceKhr: number
+  costPriceUsd: number | null
+  costPriceKhr: number | null
   /** An explicit lot pick, when the caller had a picker. Null = FIFO. */
   batchId?: number | null
   batchLabel?: string | null
@@ -271,7 +276,9 @@ export function allocateNewSaleLines(
       ...line,
       quantity,
       unitPriceUsd,
-      lineTotalUsd: round2(unitPriceUsd * quantity),
+      lineTotalUsd: line.moneyPrecisionVersion === 1
+        ? (parseSaleItemPricing(line.pricingSnapshotJson)?.amounts.total_usd ?? (()=>{throw new SaleMoneyContractError('money_precision_pricing_intent_required')})())
+        : round2(unitPriceUsd * quantity),
       heldUnits,
       takes,
       movementBatchId: takes.length === 1 && takes[0].quantity === quantity ? takes[0].batchId : null,
@@ -336,6 +343,10 @@ export function planSaleLineAddition(input: {
   let addedSubtotalUsd = 0
 
   for (const [lineIndex, line] of input.lines.entries()) {
+    const pricing=line.moneyPrecisionVersion===1 ? parseSaleItemPricing(line.pricingSnapshotJson) : null
+    if (line.moneyPrecisionVersion===1 && (!pricing || pricing.amounts.total_usd!==line.lineTotalUsd || pricing.quantities[pricing.line_key]!==line.quantity))
+      throw new SaleMoneyContractError('money_precision_pricing_intent_required')
+    const captured=pricing?.pool.lines.find(row=>row.line_key===pricing.line_key)
     addedSubtotalUsd += line.lineTotalUsd
     saleItemStatementIndexByLine[lineIndex] = statements.length
     statements.push({
@@ -343,27 +354,39 @@ export function planSaleLineAddition(input: {
               sale_id, product_id, product_name, quantity, applied_price_usd, applied_price_khr,
               cost_price_usd, cost_price_khr, total_usd, total_khr, branch_id,
               price_mode, base_price_usd, base_price_khr, batch_id, batch_label, batch_expiry_date
+              ${pricing?', pricing_snapshot_json, product_discount_type, product_discount_label, product_discount_usd, product_discount_khr, manual_discount_type, manual_discount_value, manual_discount_usd, manual_discount_khr':''}
             ) VALUES (
               @sale_id, @product_id, @product_name, @quantity, @applied_price_usd, @applied_price_khr,
               @cost_price_usd, @cost_price_khr, @total_usd, @total_khr, @branch_id,
               @price_mode, @base_price_usd, @base_price_khr, @batch_id, @batch_label, @batch_expiry_date
+              ${pricing?', @pricing_snapshot_json, @product_discount_type, @product_discount_label, @product_discount_usd, @product_discount_khr, @manual_discount_type, @manual_discount_value, @manual_discount_usd, @manual_discount_khr':''}
             )`,
       params: {
+        ...(pricing ? {
+          ...capturedPricingMetadata(pricing.pool,pricing.line_key,pricing.amounts),
+          pricing_snapshot_json:line.pricingSnapshotJson,
+          product_discount_usd:divideMoney4(pricing.amounts.product_discount_usd,line.quantity),
+          product_discount_khr:multiplyMoney4(divideMoney4(pricing.amounts.product_discount_usd,line.quantity),exchangeRate),
+          manual_discount_type:captured!.manual.type==='none'?null:captured!.manual.type,
+          manual_discount_value:captured!.manual.value,
+          manual_discount_usd:divideMoney4(pricing.amounts.manual_discount_usd,line.quantity),
+          manual_discount_khr:multiplyMoney4(divideMoney4(pricing.amounts.manual_discount_usd,line.quantity),exchangeRate),
+        }:{}),
         sale_id: input.saleId,
         product_id: line.productId,
         product_name: line.productName,
         quantity: line.quantity,
         applied_price_usd: line.unitPriceUsd,
-        applied_price_khr: convertedKhr(line.unitPriceUsd, exchangeRate),
+        applied_price_khr: convertedKhr(line.unitPriceUsd, exchangeRate,line.moneyPrecisionVersion),
         cost_price_usd: line.costPriceUsd,
         cost_price_khr: line.costPriceKhr,
         total_usd: line.lineTotalUsd,
-        total_khr: convertedKhr(line.lineTotalUsd, exchangeRate),
+        total_khr: convertedKhr(line.lineTotalUsd, exchangeRate,line.moneyPrecisionVersion),
         branch_id: line.branchId,
-        price_mode: 'selling',
+        price_mode: captured?.source ?? 'selling',
         // Same "no manual discount" default POST / uses: base = applied.
-        base_price_usd: line.unitPriceUsd,
-        base_price_khr: convertedKhr(line.unitPriceUsd, exchangeRate),
+        base_price_usd: pricing?.amounts.base_price_usd ?? line.unitPriceUsd,
+        base_price_khr: pricing?.amounts.base_price_khr ?? convertedKhr(line.unitPriceUsd, exchangeRate,line.moneyPrecisionVersion),
         // A single-lot line stamps its lot on the row, identical to an
         // explicit pick at checkout; a multi-lot split keeps NULL and the
         // detail lives in sale_item_batch_allocations.
@@ -422,7 +445,7 @@ export function planSaleLineAddition(input: {
     saleItemStatementIndexByLine,
     deductions: [...deductionMap.values()],
     deductedUnits,
-    addedSubtotalUsd: round2(addedSubtotalUsd),
+    addedSubtotalUsd: input.lines.some(line => line.moneyPrecisionVersion === 1) ? sumMoney4(input.lines.map(line => line.lineTotalUsd)) : round2(addedSubtotalUsd),
   }
 }
 
@@ -468,6 +491,8 @@ export function buildAllocationStatements(
 // ---------------------------------------------------------------------------
 
 export type AddedSaleLineRecord = {
+  pricingSnapshotJson?: string
+  moneyPrecisionVersion?: 0 | 1
   saleItemId: number
   productId: number
   productName: string | null
@@ -477,8 +502,8 @@ export type AddedSaleLineRecord = {
   heldUnits: number
   unitPriceUsd: number
   lineTotalUsd: number
-  costPriceUsd: number
-  costPriceKhr: number
+  costPriceUsd: number | null
+  costPriceKhr: number | null
   takes: FifoLotTake[]
 }
 
@@ -493,6 +518,8 @@ export type AddedSaleLineRecord = {
  */
 export function plannedLineFromRecord(record: AddedSaleLineRecord): PlannedSaleLine {
   return {
+    ...(record.pricingSnapshotJson===undefined?{}:{pricingSnapshotJson:record.pricingSnapshotJson}),
+    ...(record.moneyPrecisionVersion === undefined ? {} : {moneyPrecisionVersion:record.moneyPrecisionVersion}),
     productId: record.productId,
     productName: record.productName || `product #${record.productId}`,
     quantity: record.quantity,
@@ -513,6 +540,9 @@ export function plannedLineFromRecord(record: AddedSaleLineRecord): PlannedSaleL
 }
 
 export type SaleMoneySnapshot = {
+  money_precision_version?: 0 | 1
+  calculated_total_usd?: number | null
+  rounding_adjustment_usd?: number
   exchange_rate?: number | null
   updated_at?: string | null
   subtotal_usd: number
@@ -551,10 +581,18 @@ export type SaleAddItemsReversal = {
 
 /** The one UPDATE that writes a money snapshot back onto the sale row. */
 export function saleMoneyUpdateStatement(saleId: number | string, money: SaleMoneySnapshot): StockStatement {
+  const hasPrecision = Object.prototype.hasOwnProperty.call(money, 'money_precision_version')
+  const anyPrecision = ['money_precision_version','calculated_total_usd','rounding_adjustment_usd'].some(key => Object.prototype.hasOwnProperty.call(money,key))
+  if (anyPrecision && (!hasPrecision || !Object.prototype.hasOwnProperty.call(money, 'calculated_total_usd') || !Object.prototype.hasOwnProperty.call(money, 'rounding_adjustment_usd')))
+    throw new SaleMoneyContractError('money_precision_incomplete_snapshot')
+  validateSaleMoneySnapshot(money)
   return {
     sql: `UPDATE sales SET exchange_rate = CASE WHEN @has_exchange_rate=1 THEN @exchange_rate ELSE exchange_rate END,
             subtotal_usd = @subtotal_usd, subtotal_khr = @subtotal_khr,
             total_usd = @total_usd, total_khr = @total_khr,
+            money_precision_version = CASE WHEN @has_precision=1 THEN @money_precision_version WHEN money_precision_version=0 THEN 0 ELSE json('money_precision_incompatible_snapshot') END,
+            calculated_total_usd = CASE WHEN @has_precision=1 THEN @calculated_total_usd ELSE calculated_total_usd END,
+            rounding_adjustment_usd = CASE WHEN @has_precision=1 THEN @rounding_adjustment_usd ELSE rounding_adjustment_usd END,
             change_usd = @change_usd, change_khr = @change_khr,
             change_is_actual = CASE WHEN @has_change_is_actual=1 THEN @change_is_actual ELSE change_is_actual END,
             change_exchange_rate = CASE WHEN @has_change_exchange_rate=1 THEN @change_exchange_rate ELSE change_exchange_rate END,
@@ -566,6 +604,10 @@ export function saleMoneyUpdateStatement(saleId: number | string, money: SaleMon
           WHERE id = @sale_id`,
     params: {
       sale_id: saleId,
+      has_precision: hasPrecision ? 1 : 0,
+      money_precision_version: money.money_precision_version ?? 0,
+      calculated_total_usd: money.calculated_total_usd ?? null,
+      rounding_adjustment_usd: money.rounding_adjustment_usd ?? 0,
       has_exchange_rate: Object.prototype.hasOwnProperty.call(money, 'exchange_rate') ? 1 : 0,
       exchange_rate: money.exchange_rate ?? null,
       updated_at: money.updated_at ?? null,
@@ -630,6 +672,7 @@ export function buildOperationAllocationStatements(
 }
 
 export type SaleLineKhrSnapshot = {
+  pricing_snapshot_json?: string | null
   id: number
   applied_price_khr: number | null
   total_khr: number | null
@@ -644,6 +687,7 @@ function nullableMoney(value: unknown): number | null {
 
 export function captureSaleLineKhrSnapshot(rows: Array<Record<string, unknown>>): SaleLineKhrSnapshot[] {
   return rows.map((row) => ({
+    ...(Object.prototype.hasOwnProperty.call(row,'pricing_snapshot_json')?{pricing_snapshot_json:row.pricing_snapshot_json as string|null}:{}),
     id: Number(row.id),
     applied_price_khr: nullableMoney(row.applied_price_khr),
     total_khr: nullableMoney(row.total_khr),
@@ -653,8 +697,9 @@ export function captureSaleLineKhrSnapshot(rows: Array<Record<string, unknown>>)
   }))
 }
 
-function convertedKhr(value: unknown, rate: number): number | null {
+function convertedKhr(value: unknown, rate: number, moneyPrecisionVersion: 0 | 1 = 0): number | null {
   if (value == null) return null
+  if (moneyPrecisionVersion === 1) return multiplyMoney4(value as number,rate)
   return financialCalculationValue(financialCalculationValue(value as number) * financialCalculationValue(rate))
 }
 
@@ -671,6 +716,11 @@ export function rebaseSaleLineKhrSnapshot(rows: Array<Record<string, unknown>>, 
 
 /** One bounded JSON parameter restores every snapshotted line exactly. */
 export function saleLineKhrSnapshotStatement(saleId: number | string, lines: SaleLineKhrSnapshot[]): StockStatement {
+  const pricing=lines.some(line=>Object.prototype.hasOwnProperty.call(line,'pricing_snapshot_json'))
+  if (pricing) for (const line of lines) {
+    if (!Object.prototype.hasOwnProperty.call(line,'pricing_snapshot_json')) throw new SaleMoneyContractError('money_precision_incomplete_snapshot')
+    parseSaleItemPricing(line.pricing_snapshot_json)
+  }
   return {
     sql: `UPDATE sale_items SET
             applied_price_khr=(SELECT json_extract(value,'$.applied_price_khr') FROM json_each(@lines) WHERE json_extract(value,'$.id')=sale_items.id),
@@ -678,6 +728,7 @@ export function saleLineKhrSnapshotStatement(saleId: number | string, lines: Sal
             product_discount_khr=(SELECT json_extract(value,'$.product_discount_khr') FROM json_each(@lines) WHERE json_extract(value,'$.id')=sale_items.id),
             base_price_khr=(SELECT json_extract(value,'$.base_price_khr') FROM json_each(@lines) WHERE json_extract(value,'$.id')=sale_items.id),
             manual_discount_khr=(SELECT json_extract(value,'$.manual_discount_khr') FROM json_each(@lines) WHERE json_extract(value,'$.id')=sale_items.id)
+            ${pricing?", pricing_snapshot_json=(SELECT json_extract(value,'$.pricing_snapshot_json') FROM json_each(@lines) WHERE json_extract(value,'$.id')=sale_items.id)":''}
           WHERE sale_id=@sale_id AND id IN (SELECT json_extract(value,'$.id') FROM json_each(@lines))`,
     params: { sale_id: saleId, lines: JSON.stringify(lines) },
   }
@@ -812,6 +863,7 @@ export type SaleMoneyRow = {
 }
 
 export function recomputeSaleMoneyAfterLineChange(input: {
+  moneyPrecisionVersion?: 0 | 1
   sale: SaleMoneyRow
   /** SUM(sale_items.total_usd) for the sale AFTER the write. */
   subtotalUsd: number
@@ -821,14 +873,17 @@ export function recomputeSaleMoneyAfterLineChange(input: {
 }): SaleTotals & { subtotalUsd: number; subtotalKhr: number } {
   const sale = input.sale
   const exchangeRate = Number(input.exchangeRateOverride) || Number(sale.exchange_rate) || 4100
-  const subtotalUsd = round2(Number(input.subtotalUsd) || 0)
+  const money = input.moneyPrecisionVersion === 1 ? roundMoney4 : round2
+  const subtotalUsd = money(Number(input.subtotalUsd) || 0)
   const totals = computeSaleTotals({
+    preserveRecordedTender: input.moneyPrecisionVersion === 1,
+    moneyPrecisionVersion: input.moneyPrecisionVersion,
     subtotalUsd,
-    discountUsd: round2(Number(sale.discount_usd) || 0),
-    membershipDiscountUsd: round2(Number(sale.membership_discount_usd) || 0),
-    taxUsd: round2(Number(sale.tax_usd) || 0),
+    discountUsd: money(Number(sale.discount_usd) || 0),
+    membershipDiscountUsd: money(Number(sale.membership_discount_usd) || 0),
+    taxUsd: money(Number(sale.tax_usd) || 0),
     isDelivery: Boolean(Number(sale.is_delivery) || 0),
-    deliveryFeeUsd: round2(Number(sale.delivery_fee_usd) || 0),
+    deliveryFeeUsd: money(Number(sale.delivery_fee_usd) || 0),
     deliveryFeePaidBy: String(sale.delivery_fee_paid_by || 'customer'),
     exchangeRate,
     changeExchangeRate: input.changeExchangeRate,
@@ -840,8 +895,8 @@ export function recomputeSaleMoneyAfterLineChange(input: {
   })
   return {
     ...totals,
-    totalKhr: convertedKhr(totals.totalUsd, exchangeRate) ?? 0,
+    totalKhr: input.moneyPrecisionVersion === 1 ? totals.totalKhr : convertedKhr(totals.totalUsd, exchangeRate) ?? 0,
     subtotalUsd,
-    subtotalKhr: convertedKhr(subtotalUsd, exchangeRate) ?? 0,
+    subtotalKhr: convertedKhr(subtotalUsd, exchangeRate,input.moneyPrecisionVersion) ?? 0,
   }
 }

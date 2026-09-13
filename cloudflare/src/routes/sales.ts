@@ -1,6 +1,9 @@
 import { Hono, type Context } from 'hono'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { getDb } from '../lib/db'
+import { capturedPricingMetadata, capturePricingProduct, evaluateCapturedPricingPool, materializeCapturedPricingRow, parseSaleItemPricing, pricingRowsStatement, pricingSourceGuard, serializeSaleItemPricing, validateCapturedSaleBasket, SaleItemPricingError, type CapturedPricingPool, type PricingSource } from '../lib/saleItemPricing'
+import { normalizePromotionRule } from '../lib/promotionRules'
+import { resolveProductMergeLineage, ProductMergeLineageError } from '../lib/productMergeLineage'
 import { chunkForBinding, selectInChunks } from '../lib/sqlBinding'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
@@ -35,6 +38,8 @@ import {
 } from '../lib/saleSettlementAction'
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from '../lib/saleRecordEvents'
 import { CUSTOMER_REFUND_JOIN, awaitingExpr, getCustomerSalesTotals, getDeliveryContactTotals, getPaymentMethodBreakdown, getSalesDayReport, getSalesPeriodSeries, getSalesTotals, netRefundExpr, netSaleExpr, recognizedExpr, saleStatusExpr } from '../lib/salesAnalytics'
+import { readSalesReportSnapshot, salesTotalsFromSnapshot, paymentMethodBreakdownFromSnapshot } from '../lib/salesAnalytics'
+import { ReportExactDecimal, ReportMoneyPrecisionError, REPORT_MONEY_MAX_ROWS, REPORT_MONEY_PAGE_SIZE } from '../lib/reportMoneyPrecision'
 import { allocateAcrossLots, decrementBatchStockStatement, decrementBatchStockStrictStatement, readFifoLotAvailabilityForCart, type FifoLotTake } from '../lib/productBatches'
 // S4-24b: adding lines to an EXISTING sale. The rules (which statuses accept
 // a line, how much stock moves, which lots, what happens to the totals) are
@@ -47,6 +52,7 @@ import {
   guardSaleLineAddition,
   planSaleLineAddition,
   captureSaleLineKhrSnapshot,
+  saleLineKhrSnapshotStatement,
   rebaseSaleLineKhrSnapshot,
   rebaseSaleLineKhrStatement,
   resolveExplicitSaleLineBatches,
@@ -125,7 +131,10 @@ import {
   type SaleItemAllocation,
 } from '../lib/saleTransitions'
 import { buildLikeAliasClause, tokenizeSearchTermGroups, normalizeSearchText } from '../lib/searchMatch'
-import { canonicalSaleItemMoney, computeSaleTotals, resolveChangeExchangeRate, round2 } from '../lib/saleTotals'
+import { canonicalSaleItemMoney, computeSaleTotals, resolveChangeExchangeRate, round2, newSaleMoney4, assertCanonicalSaleChildren } from '../lib/saleTotals'
+import { roundMoney4, multiplyMoney4, divideMoney4, sumMoney4, subtractMoney4, subtractDecimalSum, sellingPriceCeilCent, MoneyPrecisionError } from '../lib/moneyPrecision'
+import { canonicalMoney4, SaleMoneyContractError } from '../lib/saleMoneyPrecision'
+import { quoteSaleMutationHeader, compareSaleHeaderQuote, SaleHeaderQuoteError } from '../lib/saleMutationHeaderQuote'
 import { financialCalculationValue } from '../lib/financialPrecision'
 import { planNativeSaleChange, NativeSaleChangeValidationError } from '../lib/nativeSaleChange'
 import { normalizeClientReceiptNumber, uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
@@ -241,6 +250,11 @@ function appendLocalTimeRange(
 // lib/importEngine.ts's sales import so a third copy doesn't drift too.
 
 type SaleItemInput = {
+  client_line_key?: string
+  pricing_source?: PricingSource
+  display_price_mode?: 'selling'|'wholesale'
+  pricing_quote?: { gross_usd:number; product_discount_usd:number; manual_discount_usd:number; total_usd:number; total_khr:number }
+  selling_price_input_usd?: number
   product_id?: number
   id?: number
   product_name?: string
@@ -306,6 +320,89 @@ async function saleMutationDigest(value: unknown): Promise<string> {
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
+async function saleMoneySchemaReady(db: ReturnType<typeof getDb>): Promise<boolean> {
+  const required = ['money_precision_version','calculated_total_usd','rounding_adjustment_usd']
+  const columns = await db.prepare('PRAGMA table_info(sales)').all<{ name: string }>()
+  const returns = await db.prepare('PRAGMA table_info(returns)').all<{ name: string }>()
+  const items = await db.prepare('PRAGMA table_info(sale_items)').all<{ name: string }>()
+  return required.every(name => columns.some(column => column.name === name))
+    && ['money_precision_version','calculated_refund_usd','rounding_adjustment_usd'].every(name => returns.some(column => column.name === name))
+    && items.some(column => column.name === 'pricing_snapshot_json')
+}
+
+function canonicalSaleItemsSql() {
+  const keys = ['id','sale_id','product_id','product_name','sku','quantity','unit','applied_price_usd','applied_price_khr',
+    'cost_price_usd','cost_price_khr','total_usd','total_khr','branch_id','price_mode','product_discount_type',
+    'product_discount_label','product_discount_usd','product_discount_khr','base_price_usd','base_price_khr',
+    'manual_discount_type','manual_discount_value','manual_discount_usd','manual_discount_khr','batch_id','batch_label','batch_expiry_date','damaged_lot_id','returned_quantity','pricing_snapshot_json']
+  return `(SELECT json_group_array(json_object(${keys.map(key => `'${key}',i.${key}`).join(',')}))
+    FROM (SELECT * FROM sale_items WHERE sale_id=s.id ORDER BY id) i)`
+}
+
+function canonicalSaleIdentityBindingsSql(){
+  return `(SELECT json_group_array(json_object('sale_id',i.sale_id,'sale_item_id',i.id,
+    'captured_product_id',json_extract(proof.value,'$.captured_product_id'),'current_product_id',i.product_id))
+    FROM sale_items i,json_each(@validatedIdentityBindings) proof
+    WHERE i.sale_id=s.id AND i.id=json_extract(proof.value,'$.sale_item_id')
+      AND i.sale_id=json_extract(proof.value,'$.sale_id') AND i.product_id=json_extract(proof.value,'$.current_product_id'))`
+}
+
+/** Financial snapshot stored inside the mutation transaction, never reconstructed on retry. */
+function canonicalMutationResponseSql(responseSql: string): string {
+  const fields = ['id','receipt_number','sale_status','updated_at','exchange_rate','subtotal_usd','subtotal_khr',
+    'discount_usd','discount_khr','membership_discount_usd','membership_discount_khr','tax_usd','tax_khr',
+    'delivery_fee_usd','delivery_fee_khr','delivery_actual_cost_usd','delivery_actual_cost_khr','is_delivery',
+    'total_usd','total_khr','amount_paid_usd','amount_paid_khr','change_usd','change_khr','change_is_actual',
+    'change_exchange_rate','payment_method','payment_details','payment_currency','money_precision_version',
+    'calculated_total_usd','rounding_adjustment_usd']
+  return `(SELECT json_set(${responseSql},'$.sale',json_object(${fields.map(key => `'${key}',s.${key}`).join(',')},
+    'items',json(${canonicalSaleItemsSql()}),'pricing_identity_bindings',json(${canonicalSaleIdentityBindingsSql()})), '$.moneyPrecisionVersion',s.money_precision_version,
+    '$.calculatedTotalUsd',s.calculated_total_usd,'$.roundingAdjustmentUsd',s.rounding_adjustment_usd)
+    FROM sales s WHERE s.id=@saleId)`
+}
+
+async function committedMutationResponse(db: ReturnType<typeof getDb>, operationId: string) {
+  const receipt = await db.prepare('SELECT response_json FROM sale_mutation_receipts WHERE id=?').get<{response_json:string}>([operationId])
+  if (!receipt) throw new Error('Committed mutation receipt is unavailable; recover using the same request identity.')
+  return JSON.parse(receipt.response_json) as Record<string,unknown>
+}
+
+/** A single SQL snapshot prevents a later edit mixing a header with older lines. */
+async function authoritativeSaleSnapshot(db: ReturnType<typeof getDb>, saleId: number): Promise<(Record<string,unknown> & { items: Record<string,unknown>[] }) | null> {
+  const row = await db.prepare(`SELECT s.*,${canonicalSaleItemsSql()} AS canonical_items
+    FROM sales s WHERE s.id=?`).get<Record<string,unknown>>([saleId])
+  if (!row) return null
+  const { canonical_items, ...sale } = row
+  const snapshot={ ...sale, items: JSON.parse(String(canonical_items || '[]')) }
+  if(Number(sale.money_precision_version)===1){
+    const lineage=await resolveProductMergeLineage(db,saleId,snapshot.items)
+    validateCapturedSaleBasket(snapshot.items,sale,lineage.bindings)
+    if(lineage.bindings.length)await db.prepare(`SELECT CASE WHEN ${lineage.condition} THEN 1 ELSE json_extract('', '$') END`).get(lineage.params)
+    return {...snapshot,pricing_identity_bindings:lineage.bindings}
+  }
+  return snapshot
+}
+
+app.get('/money-precision-capability', async (c) => {
+  if (!hasAnyPermission(c.get('user'), ['pos','sales'])) return c.json({ error: 'Permission denied' }, 403)
+  return c.json({ money_precision_version: 1, schema_ready: await saleMoneySchemaReady(getDb(c.env)) })
+})
+
+app.get('/create-receipt', async (c) => {
+  c.header('Cache-Control','private, no-store')
+  const user = c.get('user')
+  if (!hasAnyPermission(user,['pos','sales'])) return c.json({ error: 'Permission denied' },403)
+  const requestId = c.req.query('client_request_id') || ''
+  if (!requestId || requestId !== normalizeClientRequestId(requestId)) return c.json({ error: 'A valid request identity is required.' },400)
+  const db = getDb(c.env)
+  const receipt = await db.prepare(`SELECT id FROM sales WHERE client_request_id=? AND client_request_id<>''
+    AND (cashier_id=? OR ?=1) LIMIT 1`).get<{ id:number }>([requestId,Number(user.id),isAdminControlUser(user)?1:0])
+  if (!receipt) return c.json({ committed: false })
+  const sale = await authoritativeSaleSnapshot(db,receipt.id)
+  if (!sale || !sale.items.length) return c.json({ committed: false, code: 'sale_incomplete' })
+  return c.json({ committed: true, response: { id:receipt.id, receiptNumber:sale.receipt_number, duplicate:true, sale } })
+})
+
 app.post('/', async (c) => {
   const db = getDb(c.env)
   // Real gap: this endpoint only checked requireAuth (any logged-in user).
@@ -322,6 +419,7 @@ app.post('/', async (c) => {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const body = await c.req.json<{
+    money_precision_version?: unknown
     items: SaleItemInput[]
     // Offline replays only: the sale's queue-time moment, honored with
     // bounded trust (lib/clientTimestamp.ts). Online checkouts omit it.
@@ -379,6 +477,7 @@ app.post('/', async (c) => {
     delivery_actual_cost_khr?: number | string | null
   }>()
 
+  try {
   const clientRequestId = normalizeClientRequestId(body.client_request_id)
   if (clientRequestId) {
     const existingSale = await db
@@ -400,9 +499,11 @@ app.post('/', async (c) => {
           code: 'sale_incomplete',
         }, 409)
       }
-      return c.json({ id: existingSale.id, receiptNumber: existingSale.receipt_number, duplicate: true })
+      return c.json({ id: existingSale.id, receiptNumber: existingSale.receipt_number, duplicate: true, sale: await authoritativeSaleSnapshot(db, existingSale.id) })
     }
   }
+  if (body.money_precision_version !== 1) return c.json({ error: 'Keep the original pending sale and review it with the current app before recording it.', code: 'money_precision_review_needed' }, 409)
+  if (!await saleMoneySchemaReady(db)) return c.json({ error: 'Sale precision schema is not ready.', code: 'money_precision_schema_not_ready' }, 503)
   // Every atomic create needs a stable identity that later statements in the
   // D1 batch can resolve before the auto-generated sale id is available to JS.
   // Current POS/offline clients provide client_request_id; the internal key
@@ -473,8 +574,8 @@ app.post('/', async (c) => {
   // failure mode is a rejected checkout, not a degraded one.
   const productIds = [...new Set(normalized.map((i) => i.product_id))]
   const products = await selectInChunks(productIds, 0, (chunk) => db
-    .prepare(`SELECT id, name, selling_price_usd, selling_price_khr, cost_price_usd, cost_price_khr FROM products WHERE id IN (${chunk.map(() => '?').join(',')})`)
-    .all<{ id: number; name: string; selling_price_usd: number; selling_price_khr: number; cost_price_usd: number; cost_price_khr: number }>(chunk))
+    .prepare(`SELECT * FROM products WHERE id IN (${chunk.map(() => '?').join(',')})`)
+    .all<Record<string,unknown> & { id: number; name: string; selling_price_usd: number; selling_price_khr: number; cost_price_usd: number; cost_price_khr: number }>(chunk))
   const productMap = new Map(products.map((p) => [p.id, p]))
 
   // D1's batch() is atomic but cannot branch mid-batch (see lib/db.ts) --
@@ -711,8 +812,8 @@ app.post('/', async (c) => {
   const saleCustomerAddress = anonymousCustomerSelected ? null : contactDisplayAddress(body.customer_address) || null
 
   const membershipPointsRedeemed = Math.max(0, Number(body.membership_points_redeemed) || 0)
-  let membershipDiscountUsd = round2(Math.max(0, Number(body.membership_discount_usd) || 0))
-  let membershipDiscountKhr = round2(Math.max(0, Number(body.membership_discount_khr) || 0))
+  let membershipDiscountUsd = newSaleMoney4(body.membership_discount_usd)
+  let membershipDiscountKhr = newSaleMoney4(body.membership_discount_khr)
 
   // The owner's membership-points master switch (user, Sep 4 2026), read as a
   // SETTING and never from the request -- a stale till that still shows the
@@ -746,32 +847,76 @@ app.post('/', async (c) => {
   }
 
   // ---- 3. Calculate totals (pure computation, no I/O) ----
+  // Capture complete active-rule membership, not only the displayed winner.
+  // Source CAS below rejects concurrent product/rule changes before any write.
+  const pricingRuleRows = await db.prepare('SELECT * FROM promotion_rules WHERE is_active=1 ORDER BY id LIMIT 101').all<Record<string,unknown>>()
+  if (pricingRuleRows.length > 100) return c.json({error:'Too many active promotion rules to capture safely.',code:'sale_item_pricing_limit'},409)
+  const capturedRules = pricingRuleRows.map(row => normalizePromotionRule(row,1))
+  if (capturedRules.some(rule => !rule)) return c.json({error:'Promotion configuration needs review.',code:'sale_item_pricing_invalid'},409)
+  const pricingPool: CapturedPricingPool = {
+    version:1,pool_key:crypto.randomUUID(),evaluation_time:new Date().toISOString(),exchange_rate:exchangeRate,
+    rules:capturedRules as CapturedPricingPool['rules'],
+    lines:normalized.map(item => {
+      const product=productMap.get(item.product_id)
+      if (!product || typeof item.client_line_key !== 'string' || !item.pricing_source)
+        throw new SaleMoneyContractError('money_precision_pricing_intent_required')
+      // Original raw catalogue fields remain in the source CAS. The snapshot
+      // explicitly captures the fresh selling-cent policy at its input boundary.
+      const capturedProduct={...capturePricingProduct(product),
+        selling_price_usd:sellingPriceCeilCent(product.selling_price_usd),
+        wholesale_price_usd:product.wholesale_price_usd == null ? null : sellingPriceCeilCent(Number(product.wholesale_price_usd))}
+      return {line_key:item.client_line_key,source:item.pricing_source,product:capturedProduct,
+        ...(item.display_price_mode===undefined?{}:{display_price_mode:item.display_price_mode}),
+        selling_price_input_usd:item.selling_price_input_usd ?? null,
+        manual:{type:item.manual_discount_type == null ? 'none' : item.manual_discount_type as 'fixed'|'percent',
+          value:item.manual_discount_type === 'percent' ? item.manual_discount_value ?? 0 : newSaleMoney4(item.manual_discount_value)}}
+    }),
+  }
+  const pricingQuantities=Object.fromEntries(normalized.map(item=>[item.client_line_key!,item.quantity]))
+  const exactPricing=evaluateCapturedPricingPool(pricingPool,pricingQuantities)
+  const capturedSourceGuard=pricingSourceGuard(products,pricingRuleRows)
+  for (const item of normalized) {
+    const exact=exactPricing.get(item.client_line_key!)!
+    const quote=item.pricing_quote
+    if (!quote || ['gross_usd','product_discount_usd','manual_discount_usd','total_usd','total_khr'].some(name =>
+      quote[name as keyof typeof quote] !== exact[name as keyof typeof quote])) {
+      return c.json({error:'Pricing changed. Review the current quote before saving.',code:'sale_pricing_quote_conflict',
+        pricing_quotes:normalized.map(line=>({client_line_key:line.client_line_key,...exactPricing.get(line.client_line_key!)}))},409)
+    }
+  }
   let subtotalUsd = 0
   const priced = normalized.map((item) => {
     const product = productMap.get(item.product_id)
-    const requestedUnitPriceUsd = item.applied_price_usd ?? product?.selling_price_usd ?? 0
-    const money = canonicalSaleItemMoney({
-      appliedPriceUsd: requestedUnitPriceUsd,
-      appliedPriceKhr: item.applied_price_khr,
-      basePriceUsd: item.base_price_usd,
-      basePriceKhr: item.base_price_khr,
-    }, exchangeRate)
+    const exact=exactPricing.get(item.client_line_key!)!
+    const manualUnit=divideMoney4(exact.manual_discount_usd,item.quantity)
+    const money={basePriceUsd:exact.base_price_usd,basePriceKhr:exact.base_price_khr,
+      appliedPriceUsd:exact.applied_price_usd,appliedPriceKhr:exact.applied_price_khr,
+      manualDiscountUsd:manualUnit,manualDiscountKhr:multiplyMoney4(manualUnit,exchangeRate)}
     const unitPriceUsd = money.appliedPriceUsd
-    const lineTotalUsd = round2(unitPriceUsd * item.quantity)
+    const lineTotalUsd = exact.total_usd
     subtotalUsd += lineTotalUsd
     return {
       ...item,
+      ...capturedPricingMetadata(pricingPool,item.client_line_key!,exact),
       product_name: item.product_name || item.name || product?.name || `product #${item.product_id}`,
       unitPriceUsd,
       lineTotalUsd,
       canonicalMoney: money,
-      costPriceUsd: Number(product?.cost_price_usd || 0),
-      costPriceKhr: Number(product?.cost_price_khr || 0),
+      canonicalDiscountValue: item.manual_discount_type === 'percent' ? item.manual_discount_value ?? 0 : newSaleMoney4(item.manual_discount_value),
+      pricing_snapshot_json:'',
+      product_discount_usd: divideMoney4(exact.product_discount_usd,item.quantity),
+      product_discount_khr: multiplyMoney4(divideMoney4(exact.product_discount_usd,item.quantity),exchangeRate),
+      costPriceUsd: product?.cost_price_usd == null ? null : newSaleMoney4(product.cost_price_usd),
+      costPriceKhr: product?.cost_price_khr == null ? null : newSaleMoney4(product.cost_price_khr),
     }
   })
-  const discountUsd = round2(Number(body.discount_usd) || 0)
-  const discountKhr = round2(Number(body.discount_khr) || discountUsd * exchangeRate)
-  const taxUsd = round2(Number(body.tax_usd) || 0)
+  subtotalUsd = sumMoney4(priced.map(line => line.lineTotalUsd))
+  const discountUsd = newSaleMoney4(body.discount_usd)
+  const discountKhr = body.discount_khr === undefined ? multiplyMoney4(discountUsd,exchangeRate) : newSaleMoney4(body.discount_khr)
+  const taxUsd = newSaleMoney4(body.tax_usd)
+  const allocationContext={version:1 as const,lines:priced.map(line=>({line_key:line.client_line_key!,amount:line.lineTotalUsd})),
+    discount_usd:discountUsd,membership_discount_usd:membershipDiscountUsd,tax_usd:taxUsd}
+  for (const line of priced) line.pricing_snapshot_json=serializeSaleItemPricing(pricingPool,pricingQuantities,line.client_line_key!,allocationContext)
 
   // Delivery scalars are resolved here, above the totals, because the
   // customer-paid portion of the fee is PART of the total. They used to be
@@ -780,24 +925,26 @@ app.post('/', async (c) => {
   // bugs that caused and why this arithmetic now lives in one pure,
   // directly-tested function instead of inline here.
   const isDelivery = Boolean(body.is_delivery)
-  const deliveryFeeUsd = round2(Number(body.delivery_fee_usd) || 0)
-  const deliveryFeeKhr = Math.round(Number(body.delivery_fee_khr) || deliveryFeeUsd * exchangeRate)
+  const deliveryFeeUsd = newSaleMoney4(body.delivery_fee_usd)
+  const deliveryFeeKhr = multiplyMoney4(deliveryFeeUsd,exchangeRate)
   const deliveryFeePaidBy = String(body.delivery_fee_paid_by || 'customer')
   // P6: what the delivery ACTUALLY cost the shop (courier money out) --
   // staff-only, never on receipts. NULL when not entered, so stats can
   // tell "recorded as zero" apart from "never recorded".
   const rawActualCost = Number(body.delivery_actual_cost_usd)
   const deliveryActualCostUsd = isDelivery && Number.isFinite(rawActualCost) && rawActualCost >= 0 && body.delivery_actual_cost_usd !== undefined && body.delivery_actual_cost_usd !== null && String(body.delivery_actual_cost_usd) !== ''
-    ? round2(rawActualCost)
+    ? newSaleMoney4(rawActualCost)
     : null
-  const deliveryActualCostKhr = deliveryActualCostUsd != null ? Math.round(Number(body.delivery_actual_cost_khr) || deliveryActualCostUsd * exchangeRate) : null
+  const deliveryActualCostKhr = deliveryActualCostUsd != null ? multiplyMoney4(deliveryActualCostUsd,exchangeRate) : null
 
   // Membership discount reduces the recorded total (previously dropped, so a
   // points-redeemed sale recorded more than the customer actually paid).
   const {
     totalUsd, totalKhr, amountPaidUsd, amountPaidKhr,
+    calculatedTotalUsd, roundingAdjustmentUsd,
     changeUsd: fallbackChangeUsd, changeKhr: fallbackChangeKhr,
   } = computeSaleTotals({
+    moneyPrecisionVersion: 1,
     subtotalUsd,
     discountUsd,
     membershipDiscountUsd,
@@ -886,6 +1033,7 @@ app.post('/', async (c) => {
   let creationSnapshotJson: string
   try {
     creationSnapshotJson = buildSaleCreationSnapshot({
+      moneyPrecisionVersion: 1, calculatedTotalUsd, roundingAdjustmentUsd,
       origin: clientCreatedAt ? 'offline_replay' : 'pos',
       recordedAt: new Date().toISOString(),
       saleAt: clientCreatedAt,
@@ -935,6 +1083,7 @@ app.post('/', async (c) => {
         customer_id, customer_name, customer_phone, customer_address,
         payment_method, payment_details, payment_currency, exchange_rate,
         subtotal_usd, subtotal_khr, discount_usd, discount_khr, tax_usd, tax_khr, total_usd, total_khr,
+        money_precision_version, calculated_total_usd, rounding_adjustment_usd,
         amount_paid_usd, amount_paid_khr, change_usd, change_khr, change_is_actual, change_exchange_rate,
         membership_discount_usd, membership_discount_khr, membership_points_redeemed,
         is_delivery, delivery_contact_id, delivery_contact_name, delivery_contact_phone, delivery_contact_address,
@@ -945,6 +1094,7 @@ app.post('/', async (c) => {
         @customer_id, @customer_name, @customer_phone, @customer_address,
         @payment_method, @payment_details, @payment_currency, @exchange_rate,
         @subtotal_usd, @subtotal_khr, @discount_usd, @discount_khr, @tax_usd, @tax_khr, @total_usd, @total_khr,
+        1, @calculated_total_usd, @rounding_adjustment_usd,
         @amount_paid_usd, @amount_paid_khr, @change_usd, @change_khr, @change_is_actual, @change_exchange_rate,
         @membership_discount_usd, @membership_discount_khr, @membership_points_redeemed,
         @is_delivery, @delivery_contact_id, @delivery_contact_name, @delivery_contact_phone, @delivery_contact_address,
@@ -959,6 +1109,8 @@ app.post('/', async (c) => {
     `,
     params: {
       receipt_number: receiptNumber,
+      calculated_total_usd: calculatedTotalUsd,
+      rounding_adjustment_usd: roundingAdjustmentUsd,
       created_at: clientCreatedAt,
       client_request_id: saleWriteKey,
       // N13: the cashier snapshot is the AUTHENTICATED session's account, not
@@ -1015,7 +1167,7 @@ app.post('/', async (c) => {
         manual_discount_usd: item.canonicalMoney.manualDiscountUsd,
         manual_discount_khr: item.canonicalMoney.manualDiscountKhr,
         total_usd: item.lineTotalUsd,
-        total_khr: Math.round(item.lineTotalUsd * exchangeRate),
+        total_khr: multiplyMoney4(item.lineTotalUsd,exchangeRate),
         cost_price_usd: item.costPriceUsd,
         cost_price_khr: item.costPriceKhr,
         branch_id: item.branch_id,
@@ -1031,12 +1183,12 @@ app.post('/', async (c) => {
       // non-boolean values inherit the current setting. Persist that choice
       // so a later default change cannot retroactively change this sale.
       loyalty_accrual: (typeof body.loyalty_accrual === 'boolean' ? body.loyalty_accrual : loyaltyPointsEnabled) ? 1 : 0,
-      subtotal_usd: round2(subtotalUsd),
-      subtotal_khr: Math.round(subtotalUsd * exchangeRate),
+      subtotal_usd: subtotalUsd,
+      subtotal_khr: multiplyMoney4(subtotalUsd,exchangeRate),
       discount_usd: discountUsd,
       discount_khr: discountKhr,
       tax_usd: taxUsd,
-      tax_khr: Math.round(taxUsd * exchangeRate),
+      tax_khr: multiplyMoney4(taxUsd,exchangeRate),
       total_usd: totalUsd,
       total_khr: totalKhr,
       amount_paid_usd: amountPaidUsd,
@@ -1072,6 +1224,7 @@ app.post('/', async (c) => {
   let resolvedReceiptNumber = receiptNumber
   try {
     const statements: Array<{ sql: string; params: Record<string, unknown> }> = [
+      capturedSourceGuard,
       ...(redemptionGuard ? [redemptionGuard] : []),
       saleInsertStatement,
       {
@@ -1166,7 +1319,7 @@ app.post('/', async (c) => {
                 cost_price_usd, cost_price_khr, total_usd, total_khr, branch_id,
                 price_mode, product_discount_type, product_discount_label, product_discount_usd, product_discount_khr,
                 base_price_usd, base_price_khr, manual_discount_type, manual_discount_value, manual_discount_usd, manual_discount_khr,
-                batch_id, batch_label, batch_expiry_date, damaged_lot_id
+                batch_id, batch_label, batch_expiry_date, damaged_lot_id, pricing_snapshot_json
               )
               VALUES (
                 CASE WHEN EXISTS (SELECT 1 FROM current_line) THEN (
@@ -1180,7 +1333,7 @@ app.post('/', async (c) => {
                 (SELECT batch_id FROM current_line),
                 (SELECT lot_code FROM current_line),
                 (SELECT expiry_date FROM current_line),
-                @damaged_lot_id
+                @damaged_lot_id, @pricing_snapshot_json
               )`,
         params: {
           sale_write_key: saleWriteKey,
@@ -1192,13 +1345,13 @@ app.post('/', async (c) => {
           cost_price_usd: item.costPriceUsd,
           cost_price_khr: item.costPriceKhr,
           total_usd: item.lineTotalUsd,
-          total_khr: Math.round(item.lineTotalUsd * exchangeRate),
+          total_khr: multiplyMoney4(item.lineTotalUsd,exchangeRate),
           branch_id: item.branch_id,
           price_mode: item.price_mode || 'selling',
           product_discount_type: item.product_discount_type || null,
           product_discount_label: item.product_discount_label || null,
-          product_discount_usd: Number(item.product_discount_usd) || 0,
-          product_discount_khr: Number(item.product_discount_khr) || 0,
+          product_discount_usd: newSaleMoney4(item.product_discount_usd),
+          product_discount_khr: newSaleMoney4(item.product_discount_khr),
           // The canonical helper has already resolved missing/legacy paired
           // prices and derived both manual discount currencies from USD. Do
           // not trust client KHR snapshots here: stale cached carts are one
@@ -1206,11 +1359,12 @@ app.post('/', async (c) => {
           base_price_usd: item.canonicalMoney.basePriceUsd,
           base_price_khr: item.canonicalMoney.basePriceKhr,
           manual_discount_type: item.manual_discount_type || null,
-          manual_discount_value: Number(item.manual_discount_value) || 0,
+          manual_discount_value: item.canonicalDiscountValue,
           manual_discount_usd: item.canonicalMoney.manualDiscountUsd,
           manual_discount_khr: item.canonicalMoney.manualDiscountKhr,
           batch_id: item.batch_id || null,
           damaged_lot_id: item.damaged_lot_id || null,
+          pricing_snapshot_json:item.pricing_snapshot_json,
         },
       })
       // Persist exact lot lineage immediately after this line and before the
@@ -1359,7 +1513,11 @@ app.post('/', async (c) => {
         })
       }
     }
-    statements.push({
+    statements.push(
+      {sql:'DELETE FROM sale_mutation_guards',params:{}},
+      canonicalSaleChildrenGuard(saleWriteKey),
+      {sql:'DELETE FROM sale_mutation_guards',params:{}},
+      {
       sql: `SELECT CASE WHEN COALESCE((
               SELECT COUNT(*) FROM sale_items WHERE sale_id = (
                 SELECT id FROM sales
@@ -1412,6 +1570,10 @@ app.post('/', async (c) => {
           code: 'sale_incomplete',
         }, 409)
       }
+      if (/malformed JSON/i.test(message)) {
+        try { await db.prepare(capturedSourceGuard.sql).get(capturedSourceGuard.params) }
+        catch { return c.json({error:'Pricing changed before the sale was saved. Review the current quote.',code:'sale_pricing_quote_conflict'},409) }
+      }
       if (redemptionGuard && /malformed JSON/i.test(message)) {
         return c.json({ error: 'Membership points or checkout state changed before the sale was recorded. Refresh and try again.', code: 'loyalty_redemption_conflict' }, 409)
       }
@@ -1449,7 +1611,7 @@ app.post('/', async (c) => {
     bumpVersion(c.env, 'sales'),
   ]))
   if (recoveredCommittedCreate) {
-    return c.json({ id: saleId, receiptNumber: resolvedReceiptNumber, duplicate: true })
+    return c.json({ id: saleId, receiptNumber: resolvedReceiptNumber, duplicate: true, sale: await authoritativeSaleSnapshot(db,saleId) })
   }
   // A method typed at the till joins the configured list (user, Sep 4 2026).
   // Off the response path: the sale is already recorded and must not be held
@@ -1494,7 +1656,11 @@ app.post('/', async (c) => {
   return c.json({
     id: saleId,
     receiptNumber,
-    subtotalUsd: round2(subtotalUsd),
+    sale: await authoritativeSaleSnapshot(db, saleId),
+    moneyPrecisionVersion: 1,
+    calculatedTotalUsd,
+    roundingAdjustmentUsd,
+    subtotalUsd,
     discountUsd,
     membershipDiscountUsd,
     membershipDiscountKhr,
@@ -1509,6 +1675,10 @@ app.post('/', async (c) => {
     saleStatus,
     itemCount: priced.length,
   })
+  } catch (error) {
+    if (error instanceof SaleMoneyContractError || error instanceof MoneyPrecisionError || error instanceof SaleItemPricingError) return c.json({ error: error.message, code: error.code }, 400)
+    throw error
+  }
 })
 
 // PATCH /api/sales/:id/status -- change a sale's lifecycle status
@@ -1607,7 +1777,12 @@ app.post('/:id/status-receipt', async (c) => {
 })
 
 export function saleLineReceiptCanonical(id: number, kind: 'add_items' | 'amendment', body: Record<string, unknown>): Record<string, unknown> {
-  const shared = { notes: String(body.notes || '').trim().slice(0, 500) || null, expected_exchange_rate: body.expected_exchange_rate }
+  const shared = { notes: String(body.notes || '').trim().slice(0, 500) || null, expected_exchange_rate: body.expected_exchange_rate,
+    ...(Object.prototype.hasOwnProperty.call(body,'expected_header_quote') ? {expected_header_quote:body.expected_header_quote}:{}),
+    ...(Object.prototype.hasOwnProperty.call(body,'pricing_quote') ? {pricing_quote:body.pricing_quote}:{}),
+    ...(Object.prototype.hasOwnProperty.call(body,'money_precision_version') ? { money_precision_version: body.money_precision_version } : {}),
+    ...(Object.prototype.hasOwnProperty.call(body,'selling_price_input_usd') ? { selling_price_input_usd: body.selling_price_input_usd } : {}),
+  }
   const optional = (key: string): { present: boolean; value: unknown } => ({
     present: Object.prototype.hasOwnProperty.call(body, key),
     value: Object.prototype.hasOwnProperty.call(body, key) ? body[key] : null,
@@ -1974,17 +2149,18 @@ app.patch('/:id/status', async (c) => {
       SELECT key,value FROM settings WHERE key IN ('exchange_rate','change_exchange_rate','pos_payment_methods')
     `).all<{ key: string; value: string }>()
     const settingMap = Object.fromEntries(settingRows.map((row) => [row.key, row.value]))
-    const latestRate = Number(settingMap.exchange_rate || 4100)
+    const latestRate = Number(sale.money_precision_version) === 1 ? Number(sale.exchange_rate) : Number(settingMap.exchange_rate || 4100)
     const reviewedRate = Number(body.expected_exchange_rate)
     if (!Number.isFinite(reviewedRate) || reviewedRate <= 0) {
       return c.json({ error: 'expected_exchange_rate is required to confirm the reviewed settlement.', code: 'expected_exchange_rate_required', current_exchange_rate: latestRate }, 400)
     }
-    if (!Number.isFinite(latestRate) || latestRate <= 0 || Math.abs(reviewedRate - latestRate) > 0.0000001) {
+    if (!Number.isFinite(latestRate) || latestRate <= 0 || (Number(sale.money_precision_version) === 1 ? reviewedRate !== latestRate : Math.abs(reviewedRate - latestRate) > 0.0000001)) {
       return c.json({ error: 'The exchange rate changed. Review the payment again.', code: 'exchange_rate_changed', current_exchange_rate: latestRate, current: { exchange_rate: latestRate } }, 409)
     }
     let settlementPlan
     try {
       settlementPlan = planSaleSettlement({
+        moneyPrecisionVersion: Number(sale.money_precision_version) === 1 ? 1 : 0,
         configuredMethodsRaw: settingMap.pos_payment_methods,
         paymentDetailsRaw: body.payment_details,
         existingPaidUsd: paymentCorrection ? 0 : sale.amount_paid_usd,
@@ -2720,6 +2896,7 @@ app.post('/:id/items', async (c) => {
     [key: string]: unknown
   }>().catch(() => ({} as Record<string, unknown>))
 
+  try {
   const addItemsRequestId = normalizeClientRequestId(body.client_request_id)
   if (!addItemsRequestId) return c.json({ error: 'client_request_id is required when adding sale items.', code: 'client_request_id_required' }, 400)
   const addItemsCanonical = JSON.stringify(saleLineReceiptCanonical(Number(id), 'add_items', body))
@@ -2731,6 +2908,8 @@ app.post('/:id/items', async (c) => {
     if (priorAddition.request_digest !== addItemsDigest) return c.json({ error: 'client_request_id was already used with different added items.', code: 'idempotency_conflict' }, 409)
     return c.json(JSON.parse(priorAddition.response_json) as Record<string, unknown>)
   }
+  if (body.money_precision_version !== 1) return c.json({ error: 'Preserve the pending request and review this basket with the current app.', code: 'money_precision_review_needed' },409)
+  if (!await saleMoneySchemaReady(db)) return c.json({ error: 'Sale precision schema is not ready.', code: 'money_precision_schema_not_ready' },503)
 
   const rawItems = Array.isArray(body.items) ? body.items : []
   if (!rawItems.length) return c.json({ error: 'Sale items required' }, 400)
@@ -2760,13 +2939,15 @@ app.post('/:id/items', async (c) => {
 
   const saleId = Number(sale.id)
   const saleStatus = String(sale.sale_status || 'completed')
+  const precisionBasket = await capturePrecisionBasket(db,sale)
   const moneySettings = await readAmendmentMoneySettings(db)
-  const exchangeRate = moneySettings.exchangeRate
+  const exchangeRate = Number(sale.exchange_rate)
+  if (!Number.isFinite(exchangeRate) || exchangeRate <= 0) throw new SaleMoneyContractError('money_precision_invalid_rate')
   const reviewedRate = Number(body.expected_exchange_rate)
   if (!Number.isFinite(reviewedRate) || reviewedRate <= 0) {
     return c.json({ error: 'expected_exchange_rate is required to confirm the reviewed item addition.', code: 'expected_exchange_rate_required', current: { exchange_rate: exchangeRate } }, 400)
   }
-  if (Math.abs(reviewedRate - exchangeRate) > 0.0000001) {
+  if (reviewedRate !== exchangeRate) {
     return c.json({ error: 'The exchange rate changed. Review the added items again.', code: 'exchange_rate_changed', current_exchange_rate: exchangeRate, current: { exchange_rate: exchangeRate } }, 409)
   }
 
@@ -2850,8 +3031,8 @@ app.post('/:id/items', async (c) => {
   // ---- Current prices/costs, chunked for D1's parameter ceiling ----
   const productIds = [...new Set(requested.map((item) => item.productId))]
   const products = await selectInChunks(productIds, 0, (chunk) => db
-    .prepare(`SELECT id, name, selling_price_usd, cost_price_usd, cost_price_khr FROM products WHERE id IN (${chunk.map(() => '?').join(',')})`)
-    .all<{ id: number; name: string; selling_price_usd: number; cost_price_usd: number; cost_price_khr: number }>(chunk))
+    .prepare(`SELECT * FROM products WHERE id IN (${chunk.map(() => '?').join(',')})`)
+    .all<Record<string,unknown> & { id: number; name: string; selling_price_usd: number; cost_price_usd: number; cost_price_khr: number }>(chunk))
   const productMap = new Map(products.map((product) => [product.id, product]))
   for (const item of requested) {
     if (!productMap.has(item.productId)) {
@@ -2876,16 +3057,44 @@ app.post('/:id/items', async (c) => {
       .filter((item) => item.branchId)
       .map((item) => ({ productId: item.productId, branchId: item.branchId as number })),
   )
-  const candidateLines = requested.map((item) => {
+  const addRuleRows=await db.prepare('SELECT * FROM promotion_rules WHERE is_active=1 ORDER BY id LIMIT 101').all<Record<string,unknown>>()
+  const addSourceGuard=pricingSourceGuard(products,addRuleRows)
+  const addedPool:CapturedPricingPool={version:1,pool_key:crypto.randomUUID(),evaluation_time:new Date().toISOString(),exchange_rate:exchangeRate,rules:[],
+    lines:requested.map((item,index)=>{
+      const raw=rawItems[index] as SaleItemInput, product=productMap.get(item.productId)!
+      if (!raw.client_line_key || !['selling','wholesale','manual'].includes(raw.pricing_source || ''))
+        throw new SaleMoneyContractError('money_precision_pricing_intent_required')
+      return {line_key:raw.client_line_key,source:raw.pricing_source!,product:{...capturePricingProduct(product),
+        selling_price_usd:sellingPriceCeilCent(product.selling_price_usd),wholesale_price_usd:product.wholesale_price_usd==null?null:sellingPriceCeilCent(Number(product.wholesale_price_usd))},
+        selling_price_input_usd:raw.selling_price_input_usd??null,
+        ...(raw.display_price_mode===undefined?{}:{display_price_mode:raw.display_price_mode}),
+        manual:{type:raw.manual_discount_type==null?'none':raw.manual_discount_type as 'fixed'|'percent',
+          value:raw.manual_discount_type==='percent'?raw.manual_discount_value??0:newSaleMoney4(raw.manual_discount_value)}}
+    })}
+  const addedQuantities=Object.fromEntries(requested.map((line,index)=>[addedPool.lines[index].line_key,line.quantity]))
+  const addedPricing=evaluateCapturedPricingPool(addedPool,addedQuantities)
+  const provisionalAllocation={version:1 as const,lines:addedPool.lines.map(line=>({line_key:line.line_key,amount:addedPricing.get(line.line_key)!.total_usd})),discount_usd:0,membership_discount_usd:0,tax_usd:0}
+  const existingPricing=validateCapturedSaleBasket(precisionBasket.lines,sale,precisionBasket.identityBindings)
+  if (addedPool.lines.some(line=>existingPricing.some(old=>old.line_key===line.line_key))) throw new SaleMoneyContractError('money_precision_invalid_snapshot')
+  for (const [index,line] of addedPool.lines.entries()) {
+    const quote=(rawItems[index] as SaleItemInput).pricing_quote, exact=addedPricing.get(line.line_key)!
+    if (!quote || ['gross_usd','product_discount_usd','manual_discount_usd','total_usd','total_khr'].some(k=>quote[k as keyof typeof quote]!==exact[k as keyof typeof quote]))
+      return c.json({error:'Review the current added-item quote.',code:'sale_pricing_quote_conflict',pricing_quotes:[...addedPricing].map(([client_line_key,amounts])=>({client_line_key,...amounts}))},409)
+  }
+  const candidateLines = requested.map((item,index) => {
     const product = productMap.get(item.productId)
+    const lineKey=addedPool.lines[index].line_key
+    const unitPriceUsd=addedPricing.get(lineKey)!.applied_price_usd
     return {
+      pricingSnapshotJson:serializeSaleItemPricing(addedPool,addedQuantities,lineKey,provisionalAllocation),
+      moneyPrecisionVersion: 1 as const,
       productId: item.productId,
       productName: product?.name || `product #${item.productId}`,
       quantity: item.quantity,
       branchId: item.branchId,
-      unitPriceUsd: item.appliedPriceUsd ?? Number(product?.selling_price_usd || 0),
-      costPriceUsd: Number(product?.cost_price_usd || 0),
-      costPriceKhr: Number(product?.cost_price_khr || 0),
+      unitPriceUsd,
+      costPriceUsd: product?.cost_price_usd == null ? null : newSaleMoney4(product.cost_price_usd),
+      costPriceKhr: product?.cost_price_khr == null ? null : newSaleMoney4(product.cost_price_khr),
       batchId: item.batchId,
       batchLabel: item.batchLabel,
       batchExpiryDate: item.batchExpiryDate,
@@ -2903,7 +3112,7 @@ app.post('/:id/items', async (c) => {
     skipStock,
   )
 
-  const plan = planSaleLineAddition({
+  let plan = planSaleLineAddition({
     saleId,
     saleStatus,
     lines: planned,
@@ -2943,8 +3152,8 @@ app.post('/:id/items', async (c) => {
   const existingSubtotalRow = await db
     .prepare('SELECT COALESCE(SUM(total_usd), 0) AS subtotal FROM sale_items WHERE sale_id = ?')
     .get<{ subtotal: number }>([saleId])
-  const subtotalBeforeUsd = Number(existingSubtotalRow?.subtotal) || 0
-  const subtotalAfterUsd = subtotalBeforeUsd + plan.addedSubtotalUsd
+  const subtotalBeforeUsd = sumMoney4(precisionBasket.lines.map(line => Number(line.total_usd)))
+  const subtotalAfterUsd = sumMoney4([subtotalBeforeUsd,plan.addedSubtotalUsd])
   const taxPlan = planAmendedTax({
     saleId,
     sale: sale as AmendableSaleRow,
@@ -2954,22 +3163,23 @@ app.post('/:id/items', async (c) => {
     exchangeRate,
   })
   const money = recomputeSaleMoneyAfterAmendment({
+    moneyPrecisionVersion: 1,
     sale: sale as AmendableSaleRow,
     subtotalUsd: subtotalAfterUsd,
     taxUsdOverride: taxPlan.taxUsdOverride,
     changeExchangeRate: moneySettings.changeExchangeRate,
-    exchangeRateOverride: moneySettings.exchangeRate,
+    exchangeRateOverride: exchangeRate,
   })
   const addItemsStamp = new Date().toISOString()
   const addItemsOperationId = crypto.randomUUID()
   const lineMoneyRowsBefore = await db.prepare(`
     SELECT id,applied_price_usd,applied_price_khr,total_usd,total_khr,
            product_discount_usd,product_discount_khr,base_price_usd,base_price_khr,
-           manual_discount_usd,manual_discount_khr
+           manual_discount_usd,manual_discount_khr,pricing_snapshot_json
     FROM sale_items WHERE sale_id=? ORDER BY id
   `).all<Record<string, unknown>>([saleId])
   const lineMoneyBefore = captureSaleLineKhrSnapshot(lineMoneyRowsBefore)
-  const lineMoneyAfter = rebaseSaleLineKhrSnapshot(lineMoneyRowsBefore, exchangeRate)
+  const lineMoneyAfter = captureSaleLineKhrSnapshot(lineMoneyRowsBefore)
   const moneyBefore = amendmentMoneyBefore(sale)
   const moneyAfter = amendmentMoneyAfter(
     sale,
@@ -2979,6 +3189,16 @@ app.post('/:id/items', async (c) => {
     taxPlan.outcome.taxUsd,
     Number(sale.delivery_fee_usd) || 0,
   )
+  const addHeaderConflict=reviewSaleHeaderQuote(body,sale,moneyAfter,moneySettings,taxPlan.outcome.taxUsd)
+  if(addHeaderConflict)return c.json(addHeaderConflict,409)
+  const finalAllocation={version:1 as const,lines:[...existingPricing.map(line=>({line_key:line.line_key,amount:line.amounts.total_usd})),...provisionalAllocation.lines],
+    discount_usd:Number(sale.discount_usd),membership_discount_usd:Number(sale.membership_discount_usd),tax_usd:taxPlan.outcome.taxUsd}
+  for (const [index,line] of planned.entries()) line.pricingSnapshotJson=serializeSaleItemPricing(addedPool,addedQuantities,addedPool.lines[index].line_key,finalAllocation)
+  plan=planSaleLineAddition({saleId,saleStatus,lines:planned,exchangeRate,userId:user?.id??null,userName:actorSnapshot(user)})
+  for (const row of lineMoneyAfter) {
+    const old=parseSaleItemPricing(row.pricing_snapshot_json)!
+    row.pricing_snapshot_json=serializeSaleItemPricing(old.pool,old.quantities,old.line_key,finalAllocation)
+  }
 
   // ---- The amendment ledger entries for this addition (S4-30).
   //
@@ -2998,13 +3218,11 @@ app.post('/:id/items', async (c) => {
   //
   // One request is one act, so every line shares a group_id.
   const additionGroupId = crypto.randomUUID()
-  let runningTotalUsd = moneyBefore.total_usd
-  const ledgerStatements = plan.lines.map((line, lineIndex) => {
-    const isLast = lineIndex === plan.lines.length - 1
-    const totalBeforeUsd = runningTotalUsd
-    const totalAfterUsd = isLast ? moneyAfter.total_usd : round2(runningTotalUsd + line.lineTotalUsd)
-    runningTotalUsd = totalAfterUsd
+  const ledgerStatements = plan.lines.map((line) => {
+    const totalBeforeUsd = moneyBefore.total_usd
+    const totalAfterUsd = moneyAfter.total_usd
     return amendmentEntryStatement({
+      moneyPrecisionVersion: 1,
       saleId,
       kind: 'line_added',
       groupId: additionGroupId,
@@ -3012,6 +3230,8 @@ app.post('/:id/items', async (c) => {
       productName: line.productName,
       quantityBefore: 0,
       quantityAfter: line.quantity,
+      before: precisionRecordMoney(moneyBefore),
+      after: precisionRecordMoney(moneyAfter),
       totalBeforeUsd,
       totalAfterUsd,
       unitsMoved: -line.heldUnits || 0,
@@ -3051,6 +3271,7 @@ app.post('/:id/items', async (c) => {
     lineMoneyAfter,
     operationId: addItemsOperationId,
     lines: plan.lines.map((line) => ({
+      pricingSnapshotJson:line.pricingSnapshotJson,
       saleItemId: 0,
       productId: line.productId,
       productName: line.productName,
@@ -3059,6 +3280,7 @@ app.post('/:id/items', async (c) => {
       heldUnits: line.heldUnits,
       unitPriceUsd: line.unitPriceUsd,
       lineTotalUsd: line.lineTotalUsd,
+      moneyPrecisionVersion: 1 as const,
       costPriceUsd: line.costPriceUsd,
       costPriceKhr: line.costPriceKhr,
       takes: line.takes,
@@ -3106,18 +3328,22 @@ app.post('/:id/items', async (c) => {
       { sql: 'DELETE FROM sale_bulk_guards', params: {} },
       amendmentSettingsGuard(moneySettings),
       saleRevisionGuard(saleId, Number(sale.write_revision)),
+      precisionBasket.guard,
+      addSourceGuard,
       saleMutationReceiptStatement({
         operationId: addItemsOperationId, actorId: Number(user.id), saleId, kind: 'add_items',
         requestId: addItemsRequestId, requestDigest: addItemsDigest, requestJson: addItemsCanonical,
         before: { money: moneyBefore, lines: lineMoneyBefore },
         after: { money: moneyAfter, lines: lineMoneyAfter },
         response: baseResponse, stamp: addItemsStamp,
+        identityBindings:precisionBasket.identityBindings,
       }),
       ...planUnlottedSaleLineGuards(plan.lines),
       ...statementsForPlan,
       ...buildOperationAllocationStatements(plan.lines, addItemsOperationId, addItemsStamp),
       ...taxPlan.statements,
-      rebaseSaleLineKhrStatement(saleId, exchangeRate),
+      saleLineKhrSnapshotStatement(saleId,lineMoneyAfter),
+      canonicalSaleChildrenGuard(saleId),
       saleMoneyUpdateStatement(saleId, moneyAfter),
       ...ledgerStatements,
       {
@@ -3150,9 +3376,9 @@ app.post('/:id/items', async (c) => {
       {
         sql: `UPDATE sale_mutation_receipts SET history_id=last_insert_rowid(),generation=0,
               sale_revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@saleId),0),
-              response_json=json_set(response_json,'$.undoActionId',last_insert_rowid(),'$.actionHistoryId',last_insert_rowid()),updated_at=@stamp
+              response_json=${canonicalMutationResponseSql("json_set(response_json,'$.undoActionId',last_insert_rowid(),'$.actionHistoryId',last_insert_rowid())")},updated_at=@stamp
               WHERE id=@operation`,
-        params: { operation: addItemsOperationId, saleId, stamp: addItemsStamp },
+        params: { operation: addItemsOperationId, saleId, stamp: addItemsStamp,validatedIdentityBindings:JSON.stringify(precisionBasket.identityBindings) },
       },
       {
         sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
@@ -3170,6 +3396,10 @@ app.post('/:id/items', async (c) => {
     if (retry?.request_digest === addItemsDigest) return c.json(JSON.parse(retry.response_json) as Record<string, unknown>)
     if (retry) return c.json({ error: 'client_request_id was already used with different added items.', code: 'idempotency_conflict' }, 409)
     const message = (error as Error).message || ''
+    if (/malformed JSON/i.test(message)) {
+      try { await db.prepare(addSourceGuard.sql).get(addSourceGuard.params) }
+      catch { return c.json({error:'Pricing changed before the added items were saved.',code:'sale_pricing_quote_conflict'},409) }
+    }
     if (/CHECK constraint|constraint failed/i.test(message)) {
       return c.json({ error: 'The sale, stock, or monetary settings changed. Refresh and review the added items again.', code: 'write_conflict' }, 409)
     }
@@ -3188,6 +3418,11 @@ app.post('/:id/items', async (c) => {
   const historyId = Number(batchResults[historyStatementIndex]?.meta?.last_row_id || 0)
   if (historyId > 0) response.actionHistoryId = response.undoActionId = historyId
   return c.json(response)
+  } catch (error) {
+    if (error instanceof SaleHeaderQuoteError) return c.json({error:error.message,code:error.code},400)
+    if (error instanceof SaleMoneyContractError || error instanceof MoneyPrecisionError || error instanceof SaleItemPricingError || error instanceof ProductMergeLineageError) return c.json({ error: error.message, code: error.code },409)
+    throw error
+  }
 })
 
 // ---------------------------------------------------------------------------
@@ -3475,13 +3710,14 @@ app.post('/:id/amendments', async (c) => {
     delivery_fee_usd?: number
     delivery_actual_cost_usd?: number | string | null
     delivery_contact_id?: number
-    replacement?: { product_id?: number; quantity?: number; applied_price_usd?: number; branch_id?: number }
+    replacement?: SaleItemInput
     notes?: string
     client_request_id?: string
     expected_exchange_rate?: number | string
     [key: string]: unknown
   }>().catch(() => ({} as Record<string, unknown>))
 
+  try {
   const kind = String(body.kind || '')
   if (!AMENDMENT_REQUEST_KINDS.has(kind)) {
     return c.json({ error: `Unknown amendment "${kind}".` }, 400)
@@ -3491,6 +3727,7 @@ app.post('/:id/amendments', async (c) => {
       'kind', 'delivery_contact_id', 'delivery_fee_usd', 'delivery_actual_cost_usd',
       'notes', 'client_request_id', 'expected_exchange_rate', 'expected_updated_at', 'expectedUpdatedAt',
       'clientTime', 'deviceTz', 'deviceName',
+      'money_precision_version', 'expected_header_quote',
     ])
     const unexpected = Object.keys(body).filter((key) => !allowed.has(key))
     if (unexpected.length) {
@@ -3510,6 +3747,8 @@ app.post('/:id/amendments', async (c) => {
     if (priorAmendment.request_digest !== amendmentDigest) return c.json({ error: 'client_request_id was already used with different amendment data.', code: 'idempotency_conflict' }, 409)
     return c.json(JSON.parse(priorAmendment.response_json) as Record<string, unknown>)
   }
+  if (body.money_precision_version !== 1) return c.json({ error: 'Preserve the pending request and review this amendment with the current app.', code: 'money_precision_review_needed' },409)
+  if (!await saleMoneySchemaReady(db)) return c.json({ error: 'Sale precision schema is not ready.', code: 'money_precision_schema_not_ready' },503)
 
   const sale = await db.prepare('SELECT s.*,COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=s.id),0) AS write_revision FROM sales s WHERE s.id = ?').get<AmendableSaleRow & {
     id: number
@@ -3550,12 +3789,13 @@ app.post('/:id/amendments', async (c) => {
   const saleId = Number(sale.id)
   const saleStatus = String(sale.sale_status || 'completed')
   const moneySettings = await readAmendmentMoneySettings(db)
-  const exchangeRate = moneySettings.exchangeRate
+  const exchangeRate = Number(sale.exchange_rate)
+  if (!Number.isFinite(exchangeRate) || exchangeRate <= 0) throw new SaleMoneyContractError('money_precision_invalid_rate')
   const reviewedRate = Number(body.expected_exchange_rate)
   if (!Number.isFinite(reviewedRate) || reviewedRate <= 0) {
     return c.json({ error: 'expected_exchange_rate is required to confirm the reviewed amendment.', code: 'expected_exchange_rate_required', current: { exchange_rate: exchangeRate } }, 400)
   }
-  if (Math.abs(reviewedRate - exchangeRate) > 0.0000001) {
+  if (reviewedRate !== exchangeRate) {
     return c.json({ error: 'The exchange rate changed. Review the amendment again.', code: 'exchange_rate_changed', current_exchange_rate: exchangeRate, current: { exchange_rate: exchangeRate } }, 409)
   }
 
@@ -3581,21 +3821,26 @@ app.post('/:id/amendments', async (c) => {
   if (!guard.ok) return c.json({ error: guard.error, code: guard.code }, 400)
 
   const movesStock = saleAmendmentMovesStock(sale)
+  let precisionBasket:Awaited<ReturnType<typeof capturePrecisionBasket>>|null=null
+  if(kind==='delivery_actual_cost_changed'){
+    try{precisionBasket=await capturePrecisionBasket(db,sale as Record<string,unknown>)}
+    catch(error){if(!(error instanceof SaleMoneyContractError||error instanceof SaleItemPricingError||error instanceof ProductMergeLineageError||error instanceof MoneyPrecisionError))throw error}
+  }else precisionBasket=await capturePrecisionBasket(db,sale as Record<string,unknown>)
   const stockSkipped = saleSkipsStock(sale)
   const note = String(body.notes || '').trim().slice(0, 500) || null
   const subtotalRow = await db
     .prepare('SELECT COALESCE(SUM(total_usd), 0) AS subtotal FROM sale_items WHERE sale_id = ?')
     .get<{ subtotal: number }>([saleId])
-  const subtotalBeforeUsd = Number(subtotalRow?.subtotal) || 0
-  const totalBeforeUsd = round2(Number(sale.total_usd) || 0)
+  const subtotalBeforeUsd = precisionBasket ? sumMoney4(precisionBasket.lines.map(line => Number(line.total_usd))) : Number((sale as unknown as Record<string, unknown>).subtotal_usd)
+  const totalBeforeUsd = Number(sale.total_usd) || 0
   const lineMoneyRowsBefore = await db.prepare(`
     SELECT id,applied_price_usd,applied_price_khr,total_usd,total_khr,
            product_discount_usd,product_discount_khr,base_price_usd,base_price_khr,
-           manual_discount_usd,manual_discount_khr
+           manual_discount_usd,manual_discount_khr,pricing_snapshot_json
     FROM sale_items WHERE sale_id=? ORDER BY id
   `).all<Record<string, unknown>>([saleId])
   const lineMoneyBefore = captureSaleLineKhrSnapshot(lineMoneyRowsBefore)
-  let lineMoneyAfterAtLatestRate = rebaseSaleLineKhrSnapshot(lineMoneyRowsBefore, exchangeRate)
+  let lineMoneyAfterAtLatestRate = captureSaleLineKhrSnapshot(lineMoneyRowsBefore)
   const mutationStamp = new Date().toISOString()
   const mutationOperationId = crypto.randomUUID()
   const moneyBeforeSnapshot = amendmentMoneyBefore(sale)
@@ -3624,14 +3869,15 @@ app.post('/:id/amendments', async (c) => {
     if (costRaw !== null && costRaw !== undefined && typeof costRaw !== 'number' && typeof costRaw !== 'string') {
       return c.json({ error: 'Delivery amount must be a number.' }, 400)
     }
-    const feeParsed = parseDeliveryAmountUsd(feeRaw)
+    const feeParsed = parseDeliveryAmountUsd(feeRaw,1)
     if (!feeParsed.ok) return c.json({ error: DELIVERY_AMOUNT_ERROR_MESSAGES[feeParsed.code] }, 400)
-    const costParsed = parseDeliveryAmountUsd(costRaw)
+    const costParsed = parseDeliveryAmountUsd(costRaw,1)
     if (!costParsed.ok && costParsed.code !== 'blank') {
       return c.json({ error: DELIVERY_AMOUNT_ERROR_MESSAGES[costParsed.code] }, 400)
     }
     const actualCostUsd = costParsed.ok ? costParsed.usd : null
     const deliveryPlan = planDeliveryAddition({
+      moneyPrecisionVersion: 1,
       saleId,
       sale,
       contact: {
@@ -3650,6 +3896,7 @@ app.post('/:id/amendments', async (c) => {
       subtotalBeforeUsd, subtotalAfterUsd: subtotalBeforeUsd, exchangeRate,
     })
     const money = recomputeSaleMoneyAfterAmendment({
+      moneyPrecisionVersion: 1,
       sale,
       subtotalUsd: subtotalBeforeUsd,
       deliveryFeeUsdOverride: feeParsed.usd,
@@ -3662,6 +3909,8 @@ app.post('/:id/amendments', async (c) => {
     const moneyAfterSnapshot = amendmentMoneyAfter(
       sale, money, exchangeRate, mutationStamp, taxPlan.outcome.taxUsd, feeParsed.usd,
     )
+    const headerConflict=reviewSaleHeaderQuote(body,sale,moneyAfterSnapshot,moneySettings,taxPlan.outcome.taxUsd,{is_delivery:true,delivery_fee_usd:feeParsed.usd,delivery_fee_paid_by:'customer'})
+    if(headerConflict)return c.json(headerConflict,409)
     const recordBefore = {
       ...deliveryPlan.before,
       total_usd: totalBeforeUsd,
@@ -3707,19 +3956,21 @@ app.post('/:id/amendments', async (c) => {
         amendmentSettingsGuard(moneySettings),
         contactReferenceGuard,
         saleRevisionGuard(saleId, Number(sale.write_revision)),
+        precisionBasket!.guard,
         ...deliveryPlan.statements,
         ...taxPlan.statements,
-        rebaseSaleLineKhrStatement(saleId, exchangeRate),
+        canonicalSaleChildrenGuard(saleId),
         saleMoneyUpdateStatement(saleId, moneyAfterSnapshot),
         amendmentEntryStatement({
+          moneyPrecisionVersion: 1,
           saleId,
           kind: 'delivery_added',
           totalBeforeUsd,
           totalAfterUsd: money.totalUsd,
           stockSkipped,
           note,
-          before: recordBefore,
-          after: recordAfter,
+          before: {...recordBefore,...precisionRecordMoney(moneyBeforeSnapshot)},
+          after: {...recordAfter,...precisionRecordMoney(moneyAfterSnapshot)},
           userId: user?.id ?? null,
           userName: actorSnapshot(user),
         }),
@@ -3733,6 +3984,7 @@ app.post('/:id/amendments', async (c) => {
           requestJson: amendmentCanonical,
           before: { money: moneyBeforeSnapshot, lines: lineMoneyBefore, delivery: recordBefore },
           after: { money: moneyAfterSnapshot, lines: lineMoneyAfterAtLatestRate, delivery: recordAfter },
+          identityBindings:precisionBasket!.identityBindings,
           response,
           stamp: mutationStamp,
         }),
@@ -3757,7 +4009,7 @@ app.post('/:id/amendments', async (c) => {
       outside_window: guard.outsideWindow,
       notes: note,
     })
-    return c.json(response)
+    return c.json(await committedMutationResponse(db,mutationOperationId))
   }
 
   // ---- The actual courier cost: a reporting-only amendment. It deliberately
@@ -3774,19 +4026,20 @@ app.post('/:id/amendments', async (c) => {
     // is the one refusal this field forgives: clearing the box is how a cost
     // recorded by mistake goes back to "not recorded", which is a different
     // fact from "the courier was free".
-    const costParsed = parseDeliveryAmountUsd(body.delivery_actual_cost_usd)
+    const costParsed = parseDeliveryAmountUsd(body.delivery_actual_cost_usd,1)
     if (!costParsed.ok && costParsed.code !== 'blank') {
       return c.json({ error: DELIVERY_AMOUNT_ERROR_MESSAGES[costParsed.code] }, 400)
     }
     const costUsd = costParsed.ok ? costParsed.usd : null
     const costPlan = planDeliveryActualCostChange({
+      moneyPrecisionVersion: 1,
       saleId,
       sale,
       newCostUsd: costUsd,
       exchangeRate,
       stamp: mutationStamp,
     })
-    if (!deliveryAmountChanged(costPlan.costBeforeUsd, costPlan.costAfterUsd)) {
+    if (!deliveryAmountChanged(costPlan.costBeforeUsd, costPlan.costAfterUsd,1)) {
       return c.json({ error: 'That is already the actual delivery cost on this sale.' }, 400)
     }
     const money = {
@@ -3811,8 +4064,10 @@ app.post('/:id/amendments', async (c) => {
         { sql: 'DELETE FROM sale_bulk_guards', params: {} },
         amendmentSettingsGuard(moneySettings),
         saleRevisionGuard(saleId, Number(sale.write_revision)),
+        ...(precisionBasket?[precisionBasket.guard]:[]),
         ...costPlan.statements,
         amendmentEntryStatement({
+          moneyPrecisionVersion: 1,
           saleId,
           kind: 'delivery_actual_cost_changed',
           amountBeforeUsd: costPlan.costBeforeUsd,
@@ -3835,6 +4090,8 @@ app.post('/:id/amendments', async (c) => {
           after: { money: moneyAfterWithCost, lines: lineMoneyAfterAtLatestRate },
           response,
           stamp: mutationStamp,
+          identityBindings:precisionBasket?.identityBindings??[],
+          canonicalAvailable:precisionBasket!==null,
         }),
         { sql: 'DELETE FROM sale_mutation_guards', params: {} },
         { sql: 'DELETE FROM sale_bulk_guards', params: {} },
@@ -3854,7 +4111,7 @@ app.post('/:id/amendments', async (c) => {
       exchange_rate_before: sale.exchange_rate ?? null, exchange_rate_after: exchangeRate,
       outside_window: guard.outsideWindow, notes: note,
     })
-    return c.json(response)
+    return c.json(await committedMutationResponse(db,mutationOperationId))
   }
 
   // ---- The delivery fee: its own short path, because it touches no line and
@@ -3868,11 +4125,11 @@ app.post('/:id/amendments', async (c) => {
     // so "no value" would have to mean zero, and silently charging zero
     // because a box was empty is not a decision this route may make for
     // somebody.
-    const feeParsed = parseDeliveryAmountUsd(body.delivery_fee_usd)
+    const feeParsed = parseDeliveryAmountUsd(body.delivery_fee_usd,1)
     if (!feeParsed.ok) {
       return c.json({ error: DELIVERY_AMOUNT_ERROR_MESSAGES[feeParsed.code] }, 400)
     }
-    const feePlan = planDeliveryFeeChange({ saleId, sale, newFeeUsd: feeParsed.usd, exchangeRate })
+    const feePlan = planDeliveryFeeChange({ moneyPrecisionVersion:1, saleId, sale, newFeeUsd: feeParsed.usd, exchangeRate })
     if (feePlan.feeDeltaUsd === 0) {
       return c.json({ error: 'That is already the delivery fee on this sale.' }, 400)
     }
@@ -3885,6 +4142,7 @@ app.post('/:id/amendments', async (c) => {
       subtotalBeforeUsd, subtotalAfterUsd: subtotalBeforeUsd, exchangeRate,
     })
     const money = recomputeSaleMoneyAfterAmendment({
+      moneyPrecisionVersion: 1,
       sale,
       subtotalUsd: subtotalBeforeUsd,
       deliveryFeeUsdOverride: feePlan.feeAfterUsd,
@@ -3900,6 +4158,8 @@ app.post('/:id/amendments', async (c) => {
       feeTaxPlan.outcome.taxUsd,
       feePlan.feeAfterUsd,
     )
+    const headerConflict=reviewSaleHeaderQuote(body,sale,moneyAfterSnapshot,moneySettings,feeTaxPlan.outcome.taxUsd,{delivery_fee_usd:feePlan.feeAfterUsd})
+    if(headerConflict)return c.json(headerConflict,409)
     const response = buildAmendmentResponsePayload({
       saleId, sale, money, exchangeRate, stockMoved: false, unitsMoved: 0, stockSkipped, tax: feeTaxPlan.outcome,
     }, mutationStamp)
@@ -3909,13 +4169,17 @@ app.post('/:id/amendments', async (c) => {
         { sql: 'DELETE FROM sale_bulk_guards', params: {} },
         amendmentSettingsGuard(moneySettings),
         saleRevisionGuard(saleId, Number(sale.write_revision)),
+        precisionBasket!.guard,
         ...feePlan.statements,
         ...feeTaxPlan.statements,
-        rebaseSaleLineKhrStatement(saleId, exchangeRate),
+        canonicalSaleChildrenGuard(saleId),
         saleMoneyUpdateStatement(saleId, moneyAfterSnapshot),
         amendmentEntryStatement({
+          moneyPrecisionVersion: 1,
           saleId,
           kind: 'delivery_fee_changed',
+          before: precisionRecordMoney(moneyBeforeSnapshot),
+          after: precisionRecordMoney(moneyAfterSnapshot),
           amountBeforeUsd: feePlan.feeBeforeUsd,
           amountAfterUsd: feePlan.feeAfterUsd,
           totalBeforeUsd,
@@ -3934,6 +4198,7 @@ app.post('/:id/amendments', async (c) => {
           requestJson: amendmentCanonical,
           before: { money: moneyBeforeSnapshot, lines: lineMoneyBefore },
           after: { money: moneyAfterSnapshot, lines: lineMoneyAfterAtLatestRate },
+          identityBindings:precisionBasket!.identityBindings,
           response,
           stamp: mutationStamp,
         }),
@@ -3955,7 +4220,7 @@ app.post('/:id/amendments', async (c) => {
       exchange_rate_before: sale.exchange_rate ?? null, exchange_rate_after: exchangeRate,
       outside_window: guard.outsideWindow, notes: note,
     })
-    return c.json(response)
+    return c.json(await committedMutationResponse(db,mutationOperationId))
   }
 
   // ---- Every other kind acts on ONE existing line. ----
@@ -3986,70 +4251,54 @@ app.post('/:id/amendments', async (c) => {
   const groupId = crypto.randomUUID()
   let subtotalDeltaUsd = 0
   let unitsMoved = 0
+  let pricingRowsAfter=precisionBasket!.lines.map(row=>({...row}))
+  const repricedPools=new Map<string,{pool:CapturedPricingPool;quantities:Record<string,number>}>()
+  const capturedLineUpdate=kind==='line_updated'||kind==='line_quantity_increased'||kind==='line_quantity_decreased'
+  let replacementLines: ReturnType<typeof allocateNewSaleLines> | null = null
+  if (kind==='line_removed' && pricingRowsAfter.length<=1) return c.json({error:'Cancel the sale instead of removing its last priced line.',code:'sale_last_line_remove_refused'},409)
 
   // A single reviewed edit can change the line's quantity and its final
   // selling price. Quantity movement still uses the exact FIFO/stock plans
   // below; the price statement then rewrites the line's canonical charge and
   // clears stale discount metadata so totals and discount reporting cannot
   // disagree with the price the cashier explicitly entered.
-  if (kind === 'line_updated') {
-    const requestedPrice = Number(body.applied_price_usd)
-    if (!Number.isFinite(requestedPrice) || requestedPrice < 0) {
-      return c.json({ error: 'Selling price must be a non-negative number.' }, 400)
+  if (capturedLineUpdate) {
+    const originalSnapshot=parseSaleItemPricing(precisionBasket!.lines.find(row=>row.id===line.id)!.pricing_snapshot_json as string)!
+    const pool=structuredClone(originalSnapshot.pool), quantities={...originalSnapshot.quantities}
+    const target=pool.lines.find(row=>row.line_key===originalSnapshot.line_key)!
+    const currentQuantity=Number(line.quantity)
+    const enteredQuantity=body.quantity===undefined?currentQuantity:Number(body.quantity)
+    if (kind!=='line_updated' && (!Number.isFinite(enteredQuantity)||enteredQuantity<=0)) return c.json({error:'Enter a positive quantity change.'},400)
+    const exactNextQuantity=kind==='line_quantity_increased'?subtractDecimalSum(currentQuantity,[-enteredQuantity]):kind==='line_quantity_decreased'?subtractDecimalSum(currentQuantity,[enteredQuantity]):String(enteredQuantity)
+    const nextQty=Number(exactNextQuantity)
+    if (subtractDecimalSum(nextQty,[exactNextQuantity])!=='0') throw new SaleItemPricingError()
+    if (!Number.isFinite(nextQty) || nextQty<=0) return c.json({error:'Use Remove when a line should be taken off the sale.'},400)
+    const quantityChanged=nextQty!==currentQuantity
+    quantities[target.line_key]=nextQty
+    if (body.selling_price_input_usd!==undefined) {
+      sellingPriceCeilCent(body.selling_price_input_usd as number)
+      target.source='manual'; target.selling_price_input_usd=body.selling_price_input_usd as number
     }
-    const hasLayeredPriceEdit = body.base_price_usd !== undefined
-      || body.manual_discount_type !== undefined
-      || body.manual_discount_value !== undefined
-      || body.manual_discount_usd !== undefined
-    const oldPrice = round2(Number(line.applied_price_usd) || 0)
-    const oldBasePrice = line.base_price_usd == null ? oldPrice + (Number(line.manual_discount_usd) || 0) : round2(Number(line.base_price_usd) || 0)
-    const oldDiscountType: 'percent' | 'fixed' | null = line.manual_discount_type === 'percent' || line.manual_discount_type === 'fixed'
-      ? line.manual_discount_type
-      : Number(line.manual_discount_usd) > 0 ? 'fixed' : null
-    const oldDiscountValue = oldDiscountType === 'percent'
-      ? round2(Number(line.manual_discount_value) || 0)
-      : round2(Number(line.manual_discount_value) || Number(line.manual_discount_usd) || 0)
-
-    let nextBasePrice = oldBasePrice
-    let nextDiscountType = oldDiscountType
-    let nextDiscountValue = oldDiscountValue
-    let nextManualDiscountUsd = Number(line.manual_discount_usd) || 0
-    let nextPrice = round2(requestedPrice)
-    if (hasLayeredPriceEdit) {
-      const pricePlan = planSaleLinePriceEdit({
-        basePriceUsd: body.base_price_usd === undefined ? oldBasePrice : body.base_price_usd,
-        discountType: body.manual_discount_type === undefined ? oldDiscountType : body.manual_discount_type,
-        discountValue: body.manual_discount_value === undefined ? oldDiscountValue : body.manual_discount_value,
-        claimedManualDiscountUsd: body.manual_discount_usd,
-        claimedAppliedPriceUsd: body.applied_price_usd,
-      })
-      if (!pricePlan.ok) return c.json({ error: pricePlan.error }, 400)
-      nextBasePrice = pricePlan.basePriceUsd
-      nextDiscountType = pricePlan.discountType
-      nextDiscountValue = pricePlan.discountValue
-      nextManualDiscountUsd = pricePlan.manualDiscountUsd
-      nextPrice = pricePlan.appliedPriceUsd
+    if (body.manual_discount_type!==undefined) {
+      if (body.manual_discount_type!==null && body.manual_discount_type!=='fixed' && body.manual_discount_type!=='percent')
+        return c.json({error:'Invalid manual discount mode.'},400)
+      target.manual.type=body.manual_discount_type===null?'none':body.manual_discount_type
     }
-    const currentQuantity = Number(line.quantity) || 0
-    const nextQuantity = body.quantity === undefined || body.quantity === null || String(body.quantity).trim() === ''
-      ? currentQuantity
-      : Number(body.quantity)
-    if (!Number.isFinite(nextQuantity) || nextQuantity < 0) return c.json({ error: 'Quantity must be a non-negative number.' }, 400)
-    const nextQty = round2(nextQuantity)
-    if (nextQty <= 0) return c.json({ error: 'Use Remove when a line should be taken off the sale.' }, 400)
-    const quantityChanged = Math.abs(nextQty - currentQuantity) > 0.000001
-    const priceChanged = Math.abs(nextPrice - oldPrice) > 0.000001
-    const priceLayersChanged = hasLayeredPriceEdit && (
-      Math.abs(nextBasePrice - oldBasePrice) > 0.000001
-      || nextDiscountType !== oldDiscountType
-      || Math.abs(nextDiscountValue - oldDiscountValue) > 0.000001
-    )
-    if (!quantityChanged && !priceChanged && !priceLayersChanged) return c.json({ error: 'Enter a new quantity, selling price, or discount.' }, 400)
-
+    if (target.manual.type==='none') target.manual.value=0
+    else if (body.manual_discount_value!==undefined) target.manual.value=target.manual.type==='percent'?Number(body.manual_discount_value):newSaleMoney4(body.manual_discount_value)
+    const evaluated=evaluateCapturedPricingPool(pool,quantities), targetMoney=evaluated.get(target.line_key)!
+    const quote=body.pricing_quote as SaleItemInput['pricing_quote']
+    if (!quote || ['gross_usd','product_discount_usd','manual_discount_usd','total_usd','total_khr'].some(k=>quote[k as keyof typeof quote]!==targetMoney[k as keyof typeof quote]))
+      return c.json({error:'Review the recalculated captured-pricing pool.',code:'sale_pricing_quote_conflict',pricing_quotes:[...evaluated].map(([client_line_key,amounts])=>({client_line_key,...amounts}))},409)
+    if (!quantityChanged && JSON.stringify(target)===JSON.stringify(originalSnapshot.pool.lines.find(row=>row.line_key===target.line_key)))
+      return c.json({error:'Enter a new quantity, selling price, or discount.'},400)
+    const nextPrice=targetMoney.applied_price_usd
     const workingLine = { ...line, applied_price_usd: nextPrice }
     let quantityPlan: AmendmentPlan | null = null
     if (quantityChanged) {
-      const quantityDelta = nextQty - currentQuantity
+      const exactDelta=subtractDecimalSum(nextQty,[currentQuantity])
+      const quantityDelta = Number(exactDelta)
+      if (subtractDecimalSum(quantityDelta,[exactDelta])!=='0') throw new SaleItemPricingError()
       if (quantityDelta > 0) {
         const lots = line.branch_id
           ? (await readFifoLotAvailabilityForCart(db, [{ productId: Number(line.product_id), branchId: line.branch_id }])).get(`${line.product_id}:${line.branch_id}`) || []
@@ -4062,6 +4311,7 @@ app.post('/:id/amendments', async (c) => {
           }
         }
         quantityPlan = planLineQuantityIncrease({
+          moneyPrecisionVersion: 1,
           saleId, sale, line: workingLine, addedQuantity: quantityDelta, lots, exchangeRate,
           userId: user?.id ?? null, userName: actorSnapshot(user),
         })
@@ -4069,6 +4319,7 @@ app.post('/:id/amendments', async (c) => {
         const removed = Math.abs(quantityDelta)
         if (removed >= currentQuantity) return c.json({ error: 'Use Remove when a line should be taken off the sale.' }, 400)
         quantityPlan = planLineQuantityDecrease({
+          moneyPrecisionVersion: 1,
           saleId, sale, line: workingLine, removedQuantity: removed, allocations, exchangeRate,
           reason: `Quantity changed on sale #${saleId}`,
           userId: user?.id ?? null, userName: actorSnapshot(user),
@@ -4078,110 +4329,28 @@ app.post('/:id/amendments', async (c) => {
       unitsMoved += quantityPlan.unitsMoved
     }
 
-    const finalTotalUsd = round2(nextPrice * nextQty)
-    const finalTotalKhr = receiptKhrFromUsd(finalTotalUsd, exchangeRate) || 0
-    // A quantity-only edit must retain the line's existing discount facts.
-    // Editing the selling price is an explicit override, so it clears stale
-    // product/manual discount metadata rather than displaying a discount that
-    // no longer explains the entered price. This keeps a quantity change
-    // revenue-neutral while making a price change intentional and auditable.
-    const keepDiscounts = hasLayeredPriceEdit || !priceChanged
-    const nextProductDiscountUsd = keepDiscounts ? (Number(line.product_discount_usd) || 0) : 0
-    const nextProductDiscountKhr = keepDiscounts ? (Number(line.product_discount_khr) || 0) : 0
-    const nextManualDiscountType = hasLayeredPriceEdit ? nextDiscountType : keepDiscounts ? (line.manual_discount_type ?? null) : null
-    const nextManualDiscountValue = hasLayeredPriceEdit ? nextDiscountValue : keepDiscounts ? (Number(line.manual_discount_value) || 0) : 0
-    nextManualDiscountUsd = hasLayeredPriceEdit ? nextManualDiscountUsd : keepDiscounts ? (Number(line.manual_discount_usd) || 0) : 0
-    const nextManualDiscountKhr = keepDiscounts ? (Number(line.manual_discount_khr) || 0) : 0
-    const existingBasePriceUsd = line.base_price_usd == null ? null : Number(line.base_price_usd)
-    const existingBasePriceKhr = line.base_price_khr == null ? null : Number(line.base_price_khr)
-    const nextBasePriceUsd = hasLayeredPriceEdit
-      ? nextBasePrice
-      : keepDiscounts
-      ? (Number.isFinite(existingBasePriceUsd) ? existingBasePriceUsd : oldPrice + nextProductDiscountUsd + nextManualDiscountUsd)
-      : nextPrice
-    const nextBasePriceKhr = hasLayeredPriceEdit
-      ? (receiptKhrFromUsd(nextBasePriceUsd, exchangeRate) || 0)
-      : keepDiscounts
-      ? (Number.isFinite(existingBasePriceKhr) ? existingBasePriceKhr : receiptKhrFromUsd(nextBasePriceUsd, exchangeRate) || 0)
-      : receiptKhrFromUsd(nextPrice, exchangeRate) || 0
-    const normalizedManualDiscountKhr = hasLayeredPriceEdit ? (receiptKhrFromUsd(nextManualDiscountUsd, exchangeRate) || 0) : nextManualDiscountKhr
-    statements.push({
-      sql: `UPDATE sale_items SET
-              applied_price_usd=@price_usd, applied_price_khr=@price_khr,
-              base_price_usd=@base_price_usd, base_price_khr=@base_price_khr,
-              product_discount_usd=@product_discount_usd, product_discount_khr=@product_discount_khr,
-              manual_discount_type=@manual_discount_type, manual_discount_value=@manual_discount_value,
-              manual_discount_usd=@manual_discount_usd, manual_discount_khr=@manual_discount_khr,
-              price_mode=@price_mode, total_usd=@total_usd, total_khr=@total_khr
-            WHERE id=@id AND sale_id=@sale_id`,
-      params: {
-        id: line.id, sale_id: saleId, price_usd: nextPrice, price_khr: receiptKhrFromUsd(nextPrice, exchangeRate) || 0,
-        base_price_usd: nextBasePriceUsd, base_price_khr: nextBasePriceKhr,
-        product_discount_usd: nextProductDiscountUsd, product_discount_khr: nextProductDiscountKhr,
-        manual_discount_type: nextManualDiscountType, manual_discount_value: nextManualDiscountValue,
-        manual_discount_usd: nextManualDiscountUsd, manual_discount_khr: normalizedManualDiscountKhr,
-        price_mode: keepDiscounts ? (line.price_mode ?? 'selling') : 'selling',
-        total_usd: finalTotalUsd, total_khr: finalTotalKhr,
-      },
-    })
-    lineMoneyAfterAtLatestRate = lineMoneyAfterAtLatestRate.map((snapshot) => snapshot.id === line.id
-      ? {
-          ...snapshot,
-          applied_price_khr: receiptKhrFromUsd(nextPrice, exchangeRate),
-          total_khr: receiptKhrFromUsd(finalTotalUsd, exchangeRate),
-          product_discount_khr: nextProductDiscountKhr,
-          base_price_usd: nextBasePriceUsd,
-          base_price_khr: nextBasePriceKhr,
-          applied_price_usd: nextPrice,
-          total_usd: finalTotalUsd,
-          manual_discount_usd: nextManualDiscountUsd,
-          manual_discount_khr: normalizedManualDiscountKhr,
-        }
-      : snapshot)
-    subtotalDeltaUsd = round2(finalTotalUsd - (Number(line.total_usd) || oldPrice * currentQuantity))
-    ledgerEntries.push({
-      saleId,
-      kind: 'line_updated',
-      groupId,
-      saleItemId: line.id,
-      productId: line.product_id,
-      productName: line.product_name,
-      quantityBefore: currentQuantity,
-      quantityAfter: nextQty,
-      amountBeforeUsd: oldPrice,
-      amountAfterUsd: nextPrice,
-      totalBeforeUsd,
-      totalAfterUsd: 0,
-      unitsMoved,
-      stockSkipped,
-      note,
-      before: {
-        quantity: currentQuantity,
-        unit_price_usd: oldPrice,
-        base_price_usd: Number.isFinite(existingBasePriceUsd) ? existingBasePriceUsd : oldPrice,
-        product_discount_usd: Number(line.product_discount_usd) || 0,
-        manual_discount_type: line.manual_discount_type ?? null,
-        manual_discount_value: Number(line.manual_discount_value) || 0,
-        manual_discount_usd: Number(line.manual_discount_usd) || 0,
-        total_usd: Number(line.total_usd) || round2(oldPrice * currentQuantity),
-      },
-      after: {
-        quantity: nextQty,
-        unit_price_usd: nextPrice,
-        base_price_usd: nextBasePriceUsd,
-        product_discount_usd: nextProductDiscountUsd,
-        manual_discount_type: nextManualDiscountType,
-        manual_discount_value: nextManualDiscountValue,
-        manual_discount_usd: nextManualDiscountUsd,
-        total_usd: finalTotalUsd,
-      },
-      userId: user?.id ?? null,
-      userName: actorSnapshot(user),
-    })
+
+    repricedPools.set(pool.pool_key,{pool,quantities})
+    for (const row of pricingRowsAfter) {
+      const prior=parseSaleItemPricing(row.pricing_snapshot_json as string)!
+      if (prior.pool.pool_key!==pool.pool_key) continue
+      const amounts=evaluated.get(prior.line_key)!
+      subtotalDeltaUsd=sumMoney4([subtotalDeltaUsd,subtractMoney4(amounts.total_usd,Number(row.total_usd))])
+      ledgerEntries.push({
+        saleId,kind:row.id===line.id&&kind==='line_quantity_increased'?'line_quantity_increased':row.id===line.id&&kind==='line_quantity_decreased'?'line_quantity_decreased':'line_updated',groupId,saleItemId:Number(row.id),productId:Number(row.product_id),productName:String(row.product_name||''),
+        quantityBefore:Number(row.quantity),quantityAfter:quantities[prior.line_key],
+        amountBeforeUsd:Number(row.applied_price_usd),amountAfterUsd:amounts.applied_price_usd,totalBeforeUsd,totalAfterUsd:0,
+        unitsMoved:row.id===line.id?unitsMoved:0,stockSkipped,note,
+        before:{quantity:row.quantity,total_usd:row.total_usd,unit_price_usd:row.applied_price_usd,pool_key:pool.pool_key},
+        after:{quantity:quantities[prior.line_key],total_usd:amounts.total_usd,unit_price_usd:amounts.applied_price_usd,pool_key:pool.pool_key},
+        userId:user?.id??null,userName:actorSnapshot(user),
+      })
+      row.quantity=quantities[prior.line_key]; row.total_usd=amounts.total_usd; row.total_khr=amounts.total_khr
+    }
   }
 
   // --- increase / the "add to existing" case, and the add half of a replace ---
-  const needsLots = kind === 'line_quantity_increased'
+  const needsLots = kind === 'line_quantity_increased' && !capturedLineUpdate
   if (needsLots) {
     const requested = Math.max(0, Number(body.quantity) || 0)
     if (!(requested > 0)) return c.json({ error: 'How many more units?' }, 400)
@@ -4200,11 +4369,12 @@ app.post('/:id/amendments', async (c) => {
       }
     }
     const plan = planLineQuantityIncrease({
+      moneyPrecisionVersion: 1,
       saleId, sale, line, addedQuantity: requested, lots, exchangeRate,
       userId: user?.id ?? null, userName: actorSnapshot(user),
     })
     statements.push(...plan.statements)
-    subtotalDeltaUsd += plan.subtotalDeltaUsd
+    subtotalDeltaUsd = sumMoney4([subtotalDeltaUsd,plan.subtotalDeltaUsd])
     unitsMoved += plan.unitsMoved
     ledgerEntries.push({
       saleId, kind: 'line_quantity_increased', groupId,
@@ -4216,15 +4386,14 @@ app.post('/:id/amendments', async (c) => {
   }
 
   // --- decrease / remove, and the remove half of a replace ---
-  if (kind === 'line_quantity_decreased' || kind === 'line_removed' || kind === 'line_replaced') {
-    const requested = kind === 'line_quantity_decreased'
-      ? Math.max(0, Number(body.quantity) || 0)
-      : Number(line.quantity) || 0
+  if (kind === 'line_removed' || kind === 'line_replaced') {
+    const requested = Number(line.quantity) || 0
     if (!(requested > 0)) return c.json({ error: 'How many units are coming off?' }, 400)
     if (requested > (Number(line.quantity) || 0)) {
       return c.json({ error: `This line only has ${line.quantity}.` }, 400)
     }
     const plan = planLineQuantityDecrease({
+      moneyPrecisionVersion: 1,
       saleId, sale, line, removedQuantity: requested, allocations, exchangeRate,
       reason: kind === 'line_replaced'
         ? `Line replaced on sale #${saleId}`
@@ -4232,7 +4401,7 @@ app.post('/:id/amendments', async (c) => {
       userId: user?.id ?? null, userName: actorSnapshot(user),
     })
     statements.push(...plan.statements)
-    subtotalDeltaUsd += plan.subtotalDeltaUsd
+    subtotalDeltaUsd = sumMoney4([subtotalDeltaUsd,plan.subtotalDeltaUsd])
     unitsMoved += plan.unitsMoved
     ledgerEntries.push({
       saleId,
@@ -4251,23 +4420,41 @@ app.post('/:id/amendments', async (c) => {
   // share one group_id so the detail view can render them as the single act
   // the cashier performed. ---
   if (kind === 'line_replaced') {
-    const replacement: { product_id?: number; quantity?: number; applied_price_usd?: number; branch_id?: number } =
-      (body.replacement && typeof body.replacement === 'object') ? body.replacement : {}
+    const replacement: Partial<SaleItemInput> =
+      (body.replacement && typeof body.replacement === 'object') ? body.replacement : {quantity:0}
     const productId = Number(replacement.product_id)
     const quantity = Math.max(0, Number(replacement.quantity) || 0)
     if (!Number.isFinite(productId) || productId <= 0) return c.json({ error: 'Which product is replacing it?' }, 400)
     if (!(quantity > 0)) return c.json({ error: 'How many of the replacement?' }, 400)
 
-    const product = await db.prepare('SELECT id, name, selling_price_usd, cost_price_usd, cost_price_khr FROM products WHERE id = ?')
-      .get<{ id: number; name: string; selling_price_usd: number; cost_price_usd: number; cost_price_khr: number }>([productId])
+    const product = await db.prepare('SELECT * FROM products WHERE id = ?')
+      .get<Record<string,unknown> & { id: number; name: string; selling_price_usd: number; cost_price_usd: number; cost_price_khr: number }>([productId])
     if (!product) return c.json({ error: `Product #${productId} no longer exists.` }, 400)
 
     const branchId = Number(replacement.branch_id ?? saleHeaderBranchId)
     if (!Number.isSafeInteger(branchId) || branchId <= 0 || branchId !== saleHeaderBranchId) {
       return c.json({ error: 'The sale header and replacement line must use the same Shop branch.' }, 400)
     }
-    const rawPrice = Number(replacement.applied_price_usd)
-    const unitPriceUsd = Number.isFinite(rawPrice) && rawPrice >= 0 ? rawPrice : Number(product.selling_price_usd) || 0
+    if (!replacement.client_line_key || !['selling','wholesale','manual'].includes(replacement.pricing_source || ''))
+      throw new SaleMoneyContractError('money_precision_pricing_intent_required')
+    if (precisionBasket!.lines.some(row=>parseSaleItemPricing(row.pricing_snapshot_json as string)!.line_key===replacement.client_line_key))
+      throw new SaleItemPricingError()
+    const replacementRules=await db.prepare('SELECT * FROM promotion_rules WHERE is_active=1 ORDER BY id LIMIT 101').all<Record<string,unknown>>()
+    statements.unshift(pricingSourceGuard([product],replacementRules))
+    const replacementPool:CapturedPricingPool={version:1,pool_key:crypto.randomUUID(),evaluation_time:new Date().toISOString(),exchange_rate:exchangeRate,rules:[],lines:[{
+      line_key:replacement.client_line_key,source:replacement.pricing_source!,product:{...capturePricingProduct(product),selling_price_usd:sellingPriceCeilCent(product.selling_price_usd),
+        wholesale_price_usd:product.wholesale_price_usd==null?null:sellingPriceCeilCent(Number(product.wholesale_price_usd))},
+      selling_price_input_usd:replacement.selling_price_input_usd??null,
+      ...(replacement.display_price_mode===undefined?{}:{display_price_mode:replacement.display_price_mode}),
+      manual:{type:replacement.manual_discount_type==null?'none':replacement.manual_discount_type as 'fixed'|'percent',value:replacement.manual_discount_type==='percent'?replacement.manual_discount_value??0:newSaleMoney4(replacement.manual_discount_value)}
+    }]}
+    const replacementQuantities={[replacement.client_line_key]:quantity}
+    const replacementPricing=evaluateCapturedPricingPool(replacementPool,replacementQuantities).get(replacement.client_line_key)!
+    const quote=replacement.pricing_quote
+    if (!quote || (['gross_usd','product_discount_usd','manual_discount_usd','total_usd','total_khr'] as const).some(key=>quote[key]!==replacementPricing[key]))
+      return c.json({error:'Replacement pricing changed. Review the authoritative quote.',code:'sale_pricing_quote_conflict',quotes:{[replacement.client_line_key]:replacementPricing}},409)
+    const replacementJson=serializeSaleItemPricing(replacementPool,replacementQuantities,replacement.client_line_key,{version:1,lines:[{line_key:replacement.client_line_key,amount:replacementPricing.total_usd}],discount_usd:0,membership_discount_usd:0,tax_usd:0})
+    const unitPriceUsd = replacementPricing.applied_price_usd
 
     const lotsByKey = branchId
       ? await readFifoLotAvailabilityForCart(db, [{ productId, branchId }])
@@ -4285,8 +4472,10 @@ app.post('/:id/amendments', async (c) => {
     // must never move a unit. The kernel now takes the fact, not a status
     // that happens to imply it.
     const plannedLines = allocateNewSaleLines([{
+      moneyPrecisionVersion: 1,
+      pricingSnapshotJson:replacementJson,
       productId, productName: product.name || `product #${productId}`, quantity, branchId,
-      unitPriceUsd, costPriceUsd: Number(product.cost_price_usd) || 0, costPriceKhr: Number(product.cost_price_khr) || 0,
+      unitPriceUsd, costPriceUsd: product.cost_price_usd == null ? null : newSaleMoney4(product.cost_price_usd), costPriceKhr: product.cost_price_khr == null ? null : newSaleMoney4(product.cost_price_khr),
       batchId: null, batchLabel: null, batchExpiryDate: null,
     }], lotsByKey, saleStatus, !movesStock)
 
@@ -4305,8 +4494,10 @@ app.post('/:id/amendments', async (c) => {
       saleId, saleStatus, lines: plannedLines,
       exchangeRate, userId: user?.id ?? null, userName: actorSnapshot(user),
     })
-    statements.push(...additionPlan.statements)
-    subtotalDeltaUsd += additionPlan.addedSubtotalUsd
+    replacementLines=plannedLines
+    pricingRowsAfter.push(materializeCapturedPricingRow({id:0,product_id:productId,product_name:product.name,quantity,branch_id:branchId,cost_price_usd:plannedLines[0].costPriceUsd,cost_price_khr:plannedLines[0].costPriceKhr},
+      replacementPool,replacementQuantities,replacement.client_line_key,parseSaleItemPricing(replacementJson)!.allocation_context))
+    subtotalDeltaUsd = sumMoney4([subtotalDeltaUsd,additionPlan.addedSubtotalUsd])
     unitsMoved += -additionPlan.deductedUnits || 0
     ledgerEntries.push({
       saleId, kind: 'line_added', groupId,
@@ -4317,6 +4508,28 @@ app.post('/:id/amendments', async (c) => {
     })
   }
 
+  if (kind==='line_removed' || kind==='line_replaced') {
+    const removed=parseSaleItemPricing(precisionBasket!.lines.find(row=>row.id===line.id)!.pricing_snapshot_json as string)!
+    const pool=structuredClone(removed.pool), quantities={...removed.quantities}
+    pool.lines=pool.lines.filter(member=>member.line_key!==removed.line_key); delete quantities[removed.line_key]
+    pricingRowsAfter=pricingRowsAfter.filter(row=>row.id!==line.id)
+    if (pool.lines.length) {
+      repricedPools.set(pool.pool_key,{pool,quantities})
+      const evaluated=evaluateCapturedPricingPool(pool,quantities)
+      for (const row of pricingRowsAfter) {
+        const prior=parseSaleItemPricing(row.pricing_snapshot_json as string)!
+        if (prior.pool.pool_key!==pool.pool_key) continue
+        const amounts=evaluated.get(prior.line_key)!
+        ledgerEntries.push({saleId,kind:'line_updated',groupId,saleItemId:Number(row.id),productId:Number(row.product_id),productName:String(row.product_name||''),
+          quantityBefore:Number(row.quantity),quantityAfter:Number(row.quantity),amountBeforeUsd:Number(row.applied_price_usd),amountAfterUsd:amounts.applied_price_usd,
+          totalBeforeUsd,totalAfterUsd:0,unitsMoved:0,stockSkipped,note,userId:user?.id??null,userName:actorSnapshot(user),
+          before:{total_usd:row.total_usd,pool_key:pool.pool_key},after:{total_usd:amounts.total_usd,pool_key:pool.pool_key}})
+        row.total_usd=amounts.total_usd; row.total_khr=amounts.total_khr
+      }
+    }
+    subtotalDeltaUsd=subtractMoney4(sumMoney4(pricingRowsAfter.map(row=>Number(row.total_usd))),subtotalBeforeUsd)
+  }
+
   // ---- Money. Subtotal is the sale's OWN lines re-summed and moved by this
   // amendment's delta, never the stored column carried forward, so a row whose
   // subtotal had drifted is corrected. Both discounts and the tender stay
@@ -4325,12 +4538,13 @@ app.post('/:id/amendments', async (c) => {
   // TAX follows the new base when this sale was taxed at today's configured
   // rate, and is kept verbatim with a stated reason when it was not
   // (DECISION 4a in lib/saleAmendments.ts). ----
-  const subtotalAfterUsd = round2(subtotalBeforeUsd + subtotalDeltaUsd)
+  const subtotalAfterUsd = sumMoney4([subtotalBeforeUsd,subtotalDeltaUsd])
   const taxPlan = planAmendedTax({
     saleId, sale, settings: moneySettings.tax,
     subtotalBeforeUsd, subtotalAfterUsd, exchangeRate,
   })
   const money = recomputeSaleMoneyAfterAmendment({
+    moneyPrecisionVersion: 1,
     sale,
     subtotalUsd: subtotalAfterUsd,
     taxUsdOverride: taxPlan.taxUsdOverride,
@@ -4345,10 +4559,39 @@ app.post('/:id/amendments', async (c) => {
     taxPlan.outcome.taxUsd,
     Number(sale.delivery_fee_usd) || 0,
   )
+  const headerConflict=reviewSaleHeaderQuote(body,sale,moneyAfterSnapshot,moneySettings,taxPlan.outcome.taxUsd)
+  if(headerConflict)return c.json(headerConflict,409)
+  if (capturedLineUpdate || kind==='line_removed' || kind==='line_replaced') {
+    const allocation={version:1 as const,lines:pricingRowsAfter.map(row=>({line_key:parseSaleItemPricing(row.pricing_snapshot_json as string)!.line_key,amount:Number(row.total_usd)})),
+      discount_usd:Number(sale.discount_usd),membership_discount_usd:Number(sale.membership_discount_usd),tax_usd:taxPlan.outcome.taxUsd}
+    pricingRowsAfter=pricingRowsAfter.map(row=>{
+      const original=parseSaleItemPricing(row.pricing_snapshot_json as string)!, changed=repricedPools.get(original.pool.pool_key)
+      return materializeCapturedPricingRow(row,changed?.pool??original.pool,changed?.quantities??original.quantities,original.line_key,allocation)
+    })
+    validateCapturedSaleBasket(pricingRowsAfter,{...sale,...moneyAfterSnapshot,tax_usd:taxPlan.outcome.taxUsd},precisionBasket!.identityBindings)
+    const existingPricingRows=pricingRowsAfter.filter(row=>Number(row.id)>0)
+    if (existingPricingRows.length) statements.push(pricingRowsStatement(saleId,existingPricingRows))
+    if (replacementLines) {
+      replacementLines[0].pricingSnapshotJson=String(pricingRowsAfter.find(row=>Number(row.id)===0)!.pricing_snapshot_json)
+      const finalPlan=planSaleLineAddition({saleId,saleStatus,lines:replacementLines,exchangeRate,userId:user?.id??null,userName:actorSnapshot(user)})
+      statements.push(...planUnlottedSaleLineGuards(finalPlan.lines))
+      for (const [index,statement] of finalPlan.statements.entries()) {
+        statements.push(statement)
+        const ordinal=finalPlan.saleItemStatementIndexByLine.indexOf(index)
+        if (ordinal>=0) statements.push({sql:`INSERT INTO sale_mutation_members(operation_id,entity_kind,entity_id,ordinal) VALUES(@operation,'sale_item',last_insert_rowid(),@ordinal)`,params:{operation:mutationOperationId,ordinal}})
+      }
+      statements.push(...buildOperationAllocationStatements(finalPlan.lines,mutationOperationId,mutationStamp))
+    }
+    lineMoneyAfterAtLatestRate=captureSaleLineKhrSnapshot(pricingRowsAfter)
+  }
 
   // Every ledger entry in this act ends at the sale's real new total; the
   // intermediate ones would be arithmetic nobody performed.
-  for (const entry of ledgerEntries) entry.totalAfterUsd = money.totalUsd
+  for (const entry of ledgerEntries) {
+    entry.totalAfterUsd = money.totalUsd; entry.moneyPrecisionVersion = 1
+    entry.before = {...entry.before,...precisionRecordMoney(moneyBeforeSnapshot)}
+    entry.after = {...entry.after,...precisionRecordMoney(moneyAfterSnapshot)}
+  }
 
   const response = buildAmendmentResponsePayload({
     saleId, sale, money, exchangeRate, stockMoved: movesStock, unitsMoved, stockSkipped, tax: taxPlan.outcome,
@@ -4364,9 +4607,10 @@ app.post('/:id/amendments', async (c) => {
       { sql: 'DELETE FROM sale_bulk_guards', params: {} },
       amendmentSettingsGuard(moneySettings),
       saleRevisionGuard(saleId, Number(sale.write_revision)),
+      precisionBasket!.guard,
       ...statements,
       ...taxPlan.statements,
-      rebaseSaleLineKhrStatement(saleId, exchangeRate),
+      canonicalSaleChildrenGuard(saleId),
       saleMoneyUpdateStatement(saleId, moneyAfterSnapshot),
       ...ledgerEntries.map(amendmentEntryStatement),
       saleMutationReceiptStatement({
@@ -4379,9 +4623,13 @@ app.post('/:id/amendments', async (c) => {
         requestJson: amendmentCanonical,
         before: { money: moneyBeforeSnapshot, lines: lineMoneyBefore },
         after: { money: moneyAfterSnapshot, lines: lineMoneyAfterAtLatestRate },
+        identityBindings:precisionBasket!.identityBindings,
         response,
         stamp: mutationStamp,
       }),
+      ...(replacementLines ? [{sql:`UPDATE sale_mutation_receipts SET after_json=json_set(after_json,@path,
+        (SELECT entity_id FROM sale_mutation_members WHERE operation_id=@operation AND entity_kind='sale_item' AND ordinal=0)) WHERE id=@operation`,
+        params:{operation:mutationOperationId,path:`$.lines[${lineMoneyAfterAtLatestRate.findIndex(row=>row.id===0)}].id`}}] : []),
       { sql: 'DELETE FROM sale_mutation_guards', params: {} },
       { sql: 'DELETE FROM sale_bulk_guards', params: {} },
     ])
@@ -4392,7 +4640,7 @@ app.post('/:id/amendments', async (c) => {
     if (retry?.request_digest === amendmentDigest) return c.json(JSON.parse(retry.response_json) as Record<string, unknown>)
     if (retry) return c.json({ error: 'client_request_id was already used with different amendment data.', code: 'idempotency_conflict' }, 409)
     const message = (error as Error).message || ''
-    if (/CHECK constraint|constraint failed/i.test(message)) {
+    if (/CHECK constraint|constraint failed|malformed JSON/i.test(message)) {
       return c.json({ error: 'The sale, stock, or monetary settings changed. Refresh and review this amendment again.', code: 'write_conflict' }, 409)
     }
     return c.json({ error: `Failed to amend this sale: ${message}` }, 500)
@@ -4405,7 +4653,7 @@ app.post('/:id/amendments', async (c) => {
     entries: ledgerEntries.map((entry) => entry.kind),
     units_moved: unitsMoved,
     stock_skipped: stockSkipped,
-    subtotal_before: round2(subtotalBeforeUsd),
+    subtotal_before: subtotalBeforeUsd,
     subtotal_after: money.subtotalUsd,
     total_before: totalBeforeUsd,
     total_after: money.totalUsd,
@@ -4418,10 +4666,61 @@ app.post('/:id/amendments', async (c) => {
     notes: note,
   })
 
-  return c.json(response)
+  return c.json(await committedMutationResponse(db,mutationOperationId))
+  } catch (error) {
+    if (error instanceof SaleHeaderQuoteError) return c.json({error:error.message,code:error.code},400)
+    if (error instanceof SaleMoneyContractError || error instanceof MoneyPrecisionError || error instanceof SaleItemPricingError || error instanceof ProductMergeLineageError) return c.json({ error: error.message, code: error.code },409)
+    throw error
+  }
 })
 
 type StatementList = Array<{ sql: string; params: Record<string, unknown> }>
+
+function canonicalSaleChildrenGuard(saleId: number | string): StatementList[number] {
+  const identity = typeof saleId === 'string' ? '(SELECT id FROM sales WHERE client_request_id=@canonicalSale)' : '@canonicalSale'
+  const amount = (key: string) => `(typeof(i.${key}) IN ('real','integer') AND i.${key} BETWEEN 0 AND 100000000000
+    AND i.${key}=CAST(ROUND(i.${key}*10000) AS INTEGER)/10000.0)`
+  const keys = ['applied_price_usd','applied_price_khr','total_usd','total_khr','product_discount_usd','product_discount_khr',
+    'base_price_usd','base_price_khr','manual_discount_usd','manual_discount_khr']
+  return saleMutationGuard(`(SELECT COUNT(*) FROM sale_items WHERE sale_id=${identity}) BETWEEN 1 AND 200
+    AND NOT EXISTS(SELECT 1 FROM sale_items i WHERE i.sale_id=${identity} AND NOT COALESCE((
+      ${keys.map(amount).join(' AND ')}
+      AND (i.cost_price_usd IS NULL OR ${amount('cost_price_usd')}) AND (i.cost_price_khr IS NULL OR ${amount('cost_price_khr')})
+      AND typeof(i.quantity) IN ('real','integer') AND i.quantity>0 AND i.quantity<=1.7976931348623157e308
+      AND i.pricing_snapshot_json IS NOT NULL AND json_valid(i.pricing_snapshot_json)=1
+      AND json_extract(i.pricing_snapshot_json,'$.version')=1
+      AND (i.manual_discount_type IS NOT 'fixed' OR ${amount('manual_discount_value')})
+    ),0))`,{ canonicalSale:saleId }, 3)
+}
+
+async function capturePrecisionBasket(db: ReturnType<typeof getDb>, sale: Record<string,unknown>) {
+  const lines = await db.prepare('SELECT * FROM sale_items WHERE sale_id=? ORDER BY id').all<Record<string,unknown>>([Number(sale.id)])
+  assertCanonicalSaleChildren(lines)
+  const lineage=await resolveProductMergeLineage(db,Number(sale.id),lines)
+  validateCapturedSaleBasket(lines,sale,lineage.bindings)
+  for (const key of ['subtotal_usd','discount_usd','membership_discount_usd','tax_usd','delivery_fee_usd']) canonicalMoney4(sale[key],true)
+  if (Number(sale.money_precision_version) === 0 && await db.prepare('SELECT 1 AS found FROM returns WHERE sale_id=? LIMIT 1').get([Number(sale.id)]))
+    throw new SaleMoneyContractError('money_precision_legacy_refund_review_needed')
+  const header = { ...sale }; delete header.write_revision
+  const headerJson = JSON.stringify(header), lineJson = JSON.stringify(lines)
+  if (new TextEncoder().encode(headerJson + lineJson).byteLength > 500_000)
+    throw new SaleMoneyContractError('money_precision_basket_review_needed')
+  const keys = (row: Record<string,unknown>) => Object.keys(row).map(key => {
+    if (!/^[a-z][a-z0-9_]*$/.test(key)) throw new SaleMoneyContractError('money_precision_invalid_snapshot')
+    return key
+  })
+  const guard = saleMutationGuard(`EXISTS(SELECT 1 FROM sales s WHERE s.id=@precisionSale AND ${keys(header).map(key => `s.${key} IS json_extract(@precisionHeader,'$.${key}')`).join(' AND ')})
+    AND (SELECT COUNT(*) FROM sale_items WHERE sale_id=@precisionSale)=json_array_length(@precisionLines)
+    AND NOT EXISTS(SELECT 1 FROM json_each(@precisionLines) j WHERE NOT EXISTS(
+      SELECT 1 FROM sale_items i WHERE i.sale_id=@precisionSale AND ${keys(lines[0]).map(key => `i.${key} IS json_extract(j.value,'$.${key}')`).join(' AND ')})) AND (${lineage.condition})`,
+    { precisionSale: Number(sale.id), precisionHeader: headerJson, precisionLines: lineJson,...lineage.params }, 2)
+  return { lines, guard,identityBindings:lineage.bindings }
+}
+
+function precisionRecordMoney(value: Record<string,unknown>): Record<string,unknown> {
+  return Object.fromEntries(['money_precision_version','calculated_total_usd','rounding_adjustment_usd']
+    .filter(key => Object.prototype.hasOwnProperty.call(value,key)).map(key => [key,value[key]]))
+}
 
 function nullableNumber(value: unknown): number | null {
   return value == null ? null : Number(value) || 0
@@ -4429,11 +4728,16 @@ function nullableNumber(value: unknown): number | null {
 
 function receiptKhrFromUsd(value: unknown, exchangeRate: number): number | null {
   if (value == null) return null
-  return financialCalculationValue(financialCalculationValue(Number(value) || 0) * financialCalculationValue(exchangeRate))
+  return multiplyMoney4(value as number,exchangeRate)
 }
 
 function amendmentMoneyBefore(sale: Record<string, unknown>) {
   return {
+    ...(sale.money_precision_version === undefined ? {} : {
+      money_precision_version: Number(sale.money_precision_version) as 0 | 1,
+      calculated_total_usd: sale.calculated_total_usd == null ? null : Number(sale.calculated_total_usd),
+      rounding_adjustment_usd: Number(sale.rounding_adjustment_usd),
+    }),
     exchange_rate: nullableNumber(sale.exchange_rate),
     updated_at: sale.updated_at == null ? null : String(sale.updated_at),
     subtotal_usd: Number(sale.subtotal_usd) || 0,
@@ -4451,15 +4755,32 @@ function amendmentMoneyBefore(sale: Record<string, unknown>) {
   }
 }
 
+function reviewSaleHeaderQuote(body:Record<string,unknown>,sale:Record<string,unknown>,after:Record<string,unknown>,settings:Awaited<ReturnType<typeof readAmendmentMoneySettings>>,taxUsd:number,
+  overrides:Parameters<typeof quoteSaleMutationHeader>[3]={}) {
+  const quote=quoteSaleMutationHeader(sale,Number(after.subtotal_usd),{tax_enabled:settings.taxEnabledRaw,tax_rate:settings.taxRateRaw},overrides)
+  if(quote.tax_usd!==taxUsd||(['subtotal_usd','exchange_rate','calculated_total_usd','rounding_adjustment_usd','total_usd','total_khr'] as const).some(key=>quote[key]!==after[key]))
+    throw new Error('Exact header quote disagrees with the guarded mutation plan')
+  return compareSaleHeaderQuote(body.expected_header_quote,quote)==='match'?null:{error:'Review the exact sale total before saving.',code:'sale_header_quote_conflict',header_quote:quote,proven_uncommitted:true}
+}
+
 function amendmentMoneyAfter(
   sale: Record<string, unknown>,
-  money: { subtotalUsd: number; subtotalKhr: number; totalUsd: number; totalKhr: number; changeUsd: number; changeKhr: number },
+  money: { subtotalUsd: number; subtotalKhr: number; totalUsd: number; totalKhr: number; changeUsd: number; changeKhr: number; moneyPrecisionVersion?: 1; calculatedTotalUsd?: number; roundingAdjustmentUsd?: number },
   exchangeRate: number,
   stamp: string,
   taxUsd: number,
   deliveryFeeUsd: number,
 ) {
   return {
+    ...(money.moneyPrecisionVersion === 1 ? {
+      money_precision_version: 1 as const,
+      calculated_total_usd: money.calculatedTotalUsd!,
+      rounding_adjustment_usd: money.roundingAdjustmentUsd!,
+    } : sale.money_precision_version === undefined ? {} : {
+      money_precision_version: Number(sale.money_precision_version) as 0 | 1,
+      calculated_total_usd: sale.calculated_total_usd == null ? null : Number(sale.calculated_total_usd),
+      rounding_adjustment_usd: Number(sale.rounding_adjustment_usd),
+    }),
     exchange_rate: exchangeRate,
     updated_at: stamp,
     subtotal_usd: money.subtotalUsd,
@@ -4489,6 +4810,8 @@ function saleMutationReceiptStatement(input: {
   after: unknown
   response: Record<string, unknown>
   stamp: string
+  identityBindings: readonly import('../lib/saleItemPricing').CapturedProductIdentityBinding[]
+  canonicalAvailable?:boolean
 }): StatementList[number] {
   return {
     sql: `INSERT INTO sale_mutation_receipts(
@@ -4496,7 +4819,7 @@ function saleMutationReceiptStatement(input: {
             before_json,after_json,response_json,generation,sale_revision,updated_at
           ) VALUES(
             @operation,@actor,@saleId,@kind,@request,@digest,@requestJson,
-            @beforeJson,@afterJson,@responseJson,0,
+            @beforeJson,@afterJson,${input.canonicalAvailable===false?"json_set(@responseJson,'$.canonical_receipt_available',json('false'))":canonicalMutationResponseSql('@responseJson')},0,
             COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@saleId),0),@stamp
           )`,
     params: {
@@ -4510,6 +4833,7 @@ function saleMutationReceiptStatement(input: {
       beforeJson: JSON.stringify(input.before),
       afterJson: JSON.stringify(input.after),
       responseJson: JSON.stringify(input.response),
+      validatedIdentityBindings:JSON.stringify(input.identityBindings),
       stamp: input.stamp,
     },
   }
@@ -4565,7 +4889,7 @@ async function readAmendmentMoneySettings(db: ReturnType<typeof getDb>): Promise
     changeExchangeRateRaw: map.change_exchange_rate,
     taxEnabledRaw: map[TAX_ENABLED_SETTING_KEY],
     taxRateRaw: map[TAX_RATE_SETTING_KEY],
-    tax: resolveTaxSettings(map[TAX_ENABLED_SETTING_KEY], map[TAX_RATE_SETTING_KEY]),
+    tax: resolveTaxSettings(map[TAX_ENABLED_SETTING_KEY], map[TAX_RATE_SETTING_KEY], 1),
   }
 }
 
@@ -4588,17 +4912,18 @@ function planAmendedTax(input: {
   exchangeRate: number
 }): { outcome: AmendedTaxResult; taxUsdOverride: number | null; statements: StatementList } {
   const outcome = resolveAmendedTaxUsd({
+    moneyPrecisionVersion: 1,
     sale: input.sale,
-    taxableBaseBeforeUsd: taxableBaseUsd(input.sale, input.subtotalBeforeUsd),
-    taxableBaseAfterUsd: taxableBaseUsd(input.sale, input.subtotalAfterUsd),
+    taxableBaseBeforeUsd: taxableBaseUsd(input.sale, input.subtotalBeforeUsd, 1),
+    taxableBaseAfterUsd: taxableBaseUsd(input.sale, input.subtotalAfterUsd, 1),
     settings: input.settings,
   })
-  const storedTax = round2(Number(input.sale.tax_usd) || 0)
-  const moved = outcome.recomputed && Math.abs(outcome.taxUsd - storedTax) >= 0.005
+  const storedTax = Number(input.sale.tax_usd) || 0
+  const moved = outcome.recomputed && outcome.taxUsd !== storedTax
   return {
     outcome,
     taxUsdOverride: outcome.recomputed ? outcome.taxUsd : null,
-    statements: moved ? [saleTaxUpdateStatement(input.saleId, outcome.taxUsd, input.exchangeRate)] : [],
+    statements: moved ? [saleTaxUpdateStatement(input.saleId, outcome.taxUsd, input.exchangeRate, 1)] : [],
   }
 }
 
@@ -5001,16 +5326,23 @@ app.get('/', async (c) => {
       itemsBySale.get(row.sale_id)!.push(row)
     }
 
-  // GROUP BY sale_id, and every row for one sale lands in the chunk that
-  // holds that sale's id -- so a chunked aggregate is still a complete
-  // aggregate per sale, with no cross-chunk re-summing needed.
+    const returnColumns=await db.prepare('PRAGMA table_info(returns)').all<{name:string}>()
+    const returnVersion=returnColumns.some(row=>row.name==='money_precision_version')?'money_precision_version':'0 AS money_precision_version'
+    // Read recorded operands, never SQLite binary-money SUM. A bounded page
+    // must refuse excessive linked history rather than silently omit refunds.
     const refundRows = await selectInChunks(saleIds, 0, (chunk) => db.prepare(`
-      SELECT sale_id, COUNT(*) AS return_count, COALESCE(SUM(total_refund_usd), 0) AS refund_usd, COALESCE(SUM(total_refund_khr), 0) AS refund_khr
+      SELECT id,sale_id,total_refund_usd,total_refund_khr,${returnVersion}
       FROM returns
       WHERE sale_id IN (${chunk.map(() => '?').join(',')}) AND COALESCE(status, 'completed') != 'cancelled' AND COALESCE(return_scope, 'customer') = 'customer'
-      GROUP BY sale_id
-    `).all<{ sale_id: number; return_count: number; refund_usd: number; refund_khr: number }>(chunk))
-    const refundsBySale = new Map(refundRows.map((r) => [r.sale_id, r]))
+      ORDER BY id LIMIT ${REPORT_MONEY_MAX_ROWS+1}
+    `).all<Record<string,unknown>>(chunk))
+    if(refundRows.length>REPORT_MONEY_MAX_ROWS)throw new ReportMoneyPrecisionError('too_many_rows')
+    const refundsBySale=new Map<number,{count:number;usd:ReportExactDecimal;khr:ReportExactDecimal}>()
+    for(const row of refundRows){
+      const id=Number(row.sale_id),group=refundsBySale.get(id)??{count:0,usd:ReportExactDecimal.zero(),khr:ReportExactDecimal.zero()}
+      group.count++;group.usd=group.usd.add(stripMoney(row,'total_refund_usd'));group.khr=group.khr.add(stripMoney(row,'total_refund_khr'))
+      refundsBySale.set(id,group)
+    }
 
     // "Records n" on every row. ONE statement per chunk over three tables
     // rather than a query per sale -- a 500-row page would otherwise fire 500
@@ -5025,32 +5357,58 @@ app.get('/', async (c) => {
       for (const row of countRows) recordsBySale.set(Number(row.sale_id), Number(row.n) || 0)
     }
 
-    return sales.map((sale) => {
+    return Promise.all(sales.map(async(sale) => {
       const { linked_driver_name, linked_driver_phone, ...snapshot } = sale
       const refund = refundsBySale.get(sale.id)
-      const refundUsd = refund?.refund_usd || 0
-      const refundKhr = refund?.refund_khr || 0
+      const refundUsd = refund?.usd??ReportExactDecimal.zero()
+      const refundKhr = refund?.khr??ReportExactDecimal.zero()
+      const items=itemsBySale.get(sale.id)||[]
+      let pricingIdentity:Record<string,unknown>={}
+      if(Number(sale.money_precision_version)===1){
+        const lineage=await resolveProductMergeLineage(db,Number(sale.id),items as Record<string,unknown>[])
+        validateCapturedSaleBasket(items as Record<string,unknown>[],sale,lineage.bindings)
+        if(lineage.bindings.length)await db.prepare(`SELECT CASE WHEN ${lineage.condition} THEN 1 ELSE json_extract('', '$') END`).get(lineage.params)
+        pricingIdentity={pricing_identity_bindings:lineage.bindings}
+      }
       return {
         ...snapshot,
+        ...pricingIdentity,
         delivery_contact_name: String(sale.delivery_contact_name ?? '').trim() ? sale.delivery_contact_name : linked_driver_name ?? null,
         delivery_contact_phone: String(sale.delivery_contact_phone ?? '').trim() ? sale.delivery_contact_phone : linked_driver_phone ?? null,
-        items: itemsBySale.get(sale.id) || [],
-        refund_usd: refundUsd,
-        refund_khr: refundKhr,
-        return_count: refund?.return_count || 0,
+        items,
+        refund_usd: refundUsd.toNumber(4),
+        refund_khr: refundKhr.toNumber(4),
+        return_count: refund?.count || 0,
         // Never 0: a sale always has at least the fact that it happened, and
         // that is the record every later one is relative to.
         records_count: (recordsBySale.get(sale.id) || 0) + SALE_RECORDS_SELF_COUNT,
-        total_discount_usd: (sale.discount_usd || 0) + (sale.membership_discount_usd || 0),
-        total_discount_khr: (sale.discount_khr || 0) + (sale.membership_discount_khr || 0),
-        net_total_usd: (sale.total_usd || 0) - refundUsd,
-        net_total_khr: (sale.total_khr || 0) - refundKhr,
+        total_discount_usd: stripMoney(sale,'discount_usd').add(stripMoney(sale,'membership_discount_usd')).toNumber(4),
+        total_discount_khr: stripMoney(sale,'discount_khr').add(stripMoney(sale,'membership_discount_khr')).toNumber(4),
+        net_total_usd: stripMoney(sale,'total_usd').subtract(refundUsd).toNumber(4),
+        net_total_khr: stripMoney(sale,'total_khr').subtract(refundKhr).toNumber(4),
       }
-    })
+    }))
   })
 
-  return c.json(payload)
+  return c.json(payload.map(row=>projectOperationalSaleCosts(row as Record<string,unknown>,c.get('user'))))
 })
+
+/** Cache entries are actor-neutral. Apply current authority only after read. */
+export function projectOperationalSaleCosts(row:Record<string,unknown>,user:SessionUser):Record<string,unknown> {
+  if(isAdminControlUser(user))return row
+  const {creation_snapshot_json,items,...publicRow}=row
+  // The opaque historical envelope is not needed by the editor and must not
+  // become an alternative disclosure path. Never mutate the shared cache row.
+  if(getActionTier(user,'sales','amend')!=='full'){
+    delete publicRow.delivery_actual_cost_usd
+    delete publicRow.delivery_actual_cost_khr
+  }
+  return {...publicRow,items:Array.isArray(items)?items.map(item=>{
+    if(!item||typeof item!=='object'||Array.isArray(item))return item
+    const {cost_price_usd,cost_price_khr,...publicItem}=item as Record<string,unknown>
+    return publicItem
+  }):items}
+}
 
 // GET /api/sales/stats -- Sales page header revenue figure. The list
 // endpoint above caps results at `limit` (default 100, max 500), and
@@ -5114,63 +5472,34 @@ app.get('/stats', async (c) => {
   const searchClause = buildSalesSearchWhere(query, params)
   if (searchClause) where.push(searchClause)
 
-  // ONE aggregate, not "read every matching row, then chunk a refund
-  // lookup over their ids". The old shape pulled the entire result set
-  // into the Worker and then issued a sequential D1 statement per 100
-  // sale ids (chunkForBinding caps an IN list at D1's 100 bound
-  // parameters), so the page's own unfiltered header -- the request the
-  // Sales page fires on load -- cost ~150 round trips against production's
-  // 14.9k receipts for three numbers SQLite computes in a single pass.
-  // Refunds join as a PRE-AGGREGATED derived table so a sale carrying two
-  // returns still subtracts once, exactly as the per-sale Map did.
-  //
-  // buildSalesSearchWhere's flat clause references `c.membership_number`,
-  // so this query needs the same customers join GET / already has --
-  // without it, a search including a membership-number term would silently
-  // 500 (unknown column c.membership_number) instead of just finding zero
-  // matches, and revenue stats would disagree with the list view for that
-  // exact query shape (the drift risk buildSalesSearchWhere exists to
-  // prevent in the first place).
-  //
-  // Revenue basis = NET SALES (subtotal net of both discounts), minus customer
-  // refunds -- the canonical definition (user directive Sep 1 2026). Tax and
-  // delivery fees are pass-through, NOT revenue, so total_usd (which folds tax
-  // in) is not the base here. Credit is included because recognizedExpr
-  // excludes only cancelled sales. pending_revenue_usd is a positive subset
-  // shown beside revenue, never subtracted from it.
-  //
-  // This header used to spell that definition out a SECOND time and carry a
-  // comment claiming it matched salesAnalytics.ts byte for byte. It stopped
-  // matching the moment the kernel began apportioning the refund onto the net
-  // basis (Sep 4 2026), and nothing would have said so -- the Sales page and the
-  // Dashboard would simply have shown two different revenues for the same
-  // filter. So it now interpolates the kernel's OWN exported fragments,
-  // including the refund subquery, and agreement is structural rather than
-  // asserted. The blank-status rule (both '' and NULL mean completed) lives in
-  // recognizedExpr with the rest of it.
+  // Preserve the list's complete cohort, but delegate financial policy and
+  // rounding to the exact shared reducer. Its bounded coherent keyset reads
+  // replace the former SQL floating-money aggregate; no third revenue or
+  // refund formula is maintained in this route.
   const cacheVersion = await getSalesReadCacheVersion(c.env)
   const payload = await cachedJsonResponse(c.req.raw, c.executionCtx, cacheVersion, SALES_READ_CACHE_TTL_SECONDS, async () => {
-    const totals = await db.prepare(`
-    SELECT
-      COUNT(*) AS total_count,
-      COALESCE(SUM(CASE WHEN ${recognizedExpr('s.')} THEN 1 ELSE 0 END), 0) AS revenue_count,
-      COALESCE(SUM(CASE WHEN ${recognizedExpr('s.')}
-        THEN ${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')} ELSE 0 END), 0) AS revenue_usd,
-      COALESCE(SUM(CASE WHEN ${awaitingExpr('s.')}
-        THEN ${netSaleExpr('s.')} ELSE 0 END), 0) AS pending_revenue_usd
-    FROM sales s
-    LEFT JOIN customers c ON c.id = s.customer_id
-    ${CUSTOMER_REFUND_JOIN}s.id
-    WHERE ${where.join(' AND ')}
-  `).get<{ total_count: number; revenue_count: number; revenue_usd: number; pending_revenue_usd: number }>(params)
-
-    const totalCount = Number(totals?.total_count) || 0
+    const scopedParams:Record<string,string|number|null>={}
+    const scopedWhere=where.join(' AND ').replace(/\bs\./g,'matched_sale.').replace(/@([A-Za-z][A-Za-z0-9_]*)/g,(_match,key:string)=>{
+      const value=params[key]
+      if(typeof value!=='string'&&typeof value!=='number'&&value!==null)throw new ReportMoneyPrecisionError('unsupported_row')
+      scopedParams[`reportScope_${key}`]=value
+      return `@reportScope_${key}`
+    })
+    // Preserve the list's rich, server-built predicates, including the LEFT
+    // customer join and item-branch search. The shared reader applies this
+    // immutable scope to every header/child query in both coherent passes.
+    const snapshot=await readSalesReportSnapshot(c.env,{},false,alias=>({
+      sql:`${alias}.id IN (SELECT matched_sale.id FROM sales matched_sale LEFT JOIN customers c ON c.id=matched_sale.customer_id WHERE ${scopedWhere})`,
+      params:scopedParams,
+    }))
+    const totals=salesTotalsFromSnapshot(snapshot)
+    const totalCount=snapshot.sales.length+snapshot.voidSales.length
     const listLimit = Math.max(1, Math.min(Number.parseInt(String(query.limit || '100'), 10) || 100, 200))
     return {
       total_count: totalCount,
-      revenue_count: Number(totals?.revenue_count) || 0,
-      revenue_usd: round2(Number(totals?.revenue_usd) || 0),
-      pending_revenue_usd: round2(Number(totals?.pending_revenue_usd) || 0),
+      revenue_count: snapshot.sales.length,
+      revenue_usd: totals.revenue_usd,
+      pending_revenue_usd: totals.pending_revenue_usd,
       // This now means "more pages exist", not "the data was discarded".
       truncated_in_list: totalCount > listLimit,
     }
@@ -5186,6 +5515,45 @@ app.get('/stats', async (c) => {
 // range+branch scoped only, NOT list-filter scoped: the strip answers "how
 // was this period", the list header keeps answering "what does this filter
 // match".
+// Match reports.ts' authority boundary without importing a route module. Apply
+// after shared cache reads: private cost fields must never depend on cache owner.
+export function gateSalesReportMoney(row:Record<string,unknown>,isAdmin:boolean):Record<string,unknown> {
+  if(isAdmin)return row
+  const {cost_usd,profit_usd,gross_profit_usd,pending_cost_usd,pending_profit_usd,unvalued_cost_usd,returned_cost_usd,
+    cost,gross_profit,delivery_actual_cost_usd,delivery_actual_cost_count,delivery_margin_usd,delivery_net_usd,recognized_delivery_cost_usd,pending_delivery_cost_usd,
+    returned_cost_shortfall_usd,cost_missing_snapshot_lines,margin_pct,money_precision_mode,money_complete,money_unknown_cost_lines,money_contributing_rows,...publicRow}=row
+  return publicRow
+}
+export function gateSalesCourierMoney(row:Record<string,unknown>,isAdmin:boolean):Record<string,unknown> {
+  if(isAdmin)return row
+  const {actual_cost_usd,actual_cost_count,linked_expense_count,linked_expense_usd,linked_expense_khr,last_expense_at,margin_usd,...publicRow}=row
+  return publicRow
+}
+
+async function readStripMoneyRows(db:ReturnType<typeof getDb>,table:'sales'|'returns',where:string,params:Record<string,unknown>) {
+  const columns=await db.prepare(`PRAGMA table_info(${table})`).all<{name:string}>()
+  const version=columns.some(row=>row.name==='money_precision_version')?'money_precision_version':'0 AS money_precision_version'
+  const amount=table==='sales'?'total_usd,sale_status':'total_refund_usd'
+  const rows:Record<string,unknown>[]=[]
+  let after=0
+  for(;;){
+    const page=await db.prepare(`SELECT id,${amount},${version} FROM ${table} WHERE ${where} AND id>@stripAfter ORDER BY id LIMIT ${REPORT_MONEY_PAGE_SIZE}`)
+      .all<Record<string,unknown>>({...params,stripAfter:after})
+    for(const row of page){
+      const id=Number(row.id)
+      if(!Number.isSafeInteger(id)||id<=after)throw new ReportMoneyPrecisionError('duplicate_row')
+      after=id;rows.push(row)
+      if(rows.length>REPORT_MONEY_MAX_ROWS)throw new ReportMoneyPrecisionError('too_many_rows')
+    }
+    if(page.length<REPORT_MONEY_PAGE_SIZE)return rows
+  }
+}
+function stripMoney(row:Record<string,unknown>,field:string):ReportExactDecimal {
+  const version=Number(row.money_precision_version??0)
+  if(version!==0&&version!==1)throw new ReportMoneyPrecisionError('unsupported_precision_version')
+  return ReportExactDecimal.money((version===0?(row[field]??0):row[field]) as number,version)
+}
+
 app.get('/stats-strip', async (c) => {
   if (!canReadSales(c.get('user'))) {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
@@ -5208,9 +5576,7 @@ app.get('/stats-strip', async (c) => {
     endTime: hasTimeRange ? endTime : null,
   }
   const rangeParams: Record<string, unknown> = { startDate, endDate }
-  // Status mix counts EVERY status (the kernel's whereActiveSales excludes
-  // cancelled/awaiting on purpose for money figures; the mix card exists
-  // precisely to show those too).
+  // Status mix includes cancelled sales, unlike recognized-money cohorts.
   const statusClauses = [localDateRangeClause('created_at')]
   if (hasTimeRange) {
     statusClauses.push(localTimeRangeClause('created_at'))
@@ -5220,17 +5586,6 @@ app.get('/stats-strip', async (c) => {
   if (query.branchId) { statusClauses.push('branch_id = @branchId'); rangeParams.branchId = query.branchId }
   const cacheVersion = await getSalesReadCacheVersion(c.env)
   const payload = await cachedJsonResponse(c.req.raw, c.executionCtx, cacheVersion, SALES_READ_CACHE_TTL_SECONDS, async () => {
-    const [totals, byPayment, byStatus, returnsRow] = await Promise.all([
-      getSalesTotals(c.env, filters),
-      getPaymentMethodBreakdown(c.env, filters),
-      db.prepare(`
-        SELECT COALESCE(NULLIF(TRIM(sale_status), ''), 'completed') AS sale_status,
-               COUNT(*) AS count, ROUND(COALESCE(SUM(total_usd), 0), 2) AS total_usd
-        FROM sales
-        WHERE ${statusClauses.join(' AND ')}
-        GROUP BY COALESCE(NULLIF(TRIM(sale_status), ''), 'completed')
-        ORDER BY count DESC
-      `).all<{ sale_status: string; count: number; total_usd: number }>(rangeParams),
     // RETURN-DATE ACTIVITY, not a revenue term. Every figure below is scoped
     // by the date the RETURN was created, which answers "what did the returns
     // desk do in this window". The kernel reverses a refund in the period of
@@ -5239,16 +5594,35 @@ app.get('/stats-strip', async (c) => {
     // subtract this from a revenue, profit or collected figure -- doing so
     // takes refunds off twice, on mismatched bases, and can drive a period
     // below zero. The sale-basis reversal is SalesTotals.refund_usd.
-      db.prepare(`
-        SELECT COUNT(*) AS count, ROUND(COALESCE(SUM(total_refund_usd), 0), 2) AS refund_usd
-        FROM returns
-        WHERE ${localDateRangeClause('created_at')}
+    const returnWhere=`${localDateRangeClause('created_at')}
           ${hasTimeRange ? `AND ${localTimeRangeClause('created_at')}` : ''}
           AND COALESCE(return_scope, 'customer') = 'customer'
           AND COALESCE(status, 'completed') <> 'cancelled'
-          ${query.branchId ? 'AND branch_id = @branchId' : ''}
-      `).get<{ count: number; refund_usd: number }>(rangeParams),
-    ])
+          ${query.branchId ? 'AND branch_id = @branchId' : ''}`
+    const readActivity=async()=>{
+      const status=await readStripMoneyRows(db,'sales',statusClauses.join(' AND '),rangeParams)
+      const returns=await readStripMoneyRows(db,'returns',returnWhere,rangeParams)
+      if(status.length+returns.length>REPORT_MONEY_MAX_ROWS)throw new ReportMoneyPrecisionError('too_many_rows')
+      return {status,returns}
+    }
+    // Both activity images enclose the shared reader's own coherent snapshot.
+    // Refuse mixed images rather than combining money from different reads.
+    const before=await readActivity()
+    const snapshot=await readSalesReportSnapshot(c.env,filters)
+    const after=await readActivity()
+    if(JSON.stringify(before)!==JSON.stringify(after))throw new ReportMoneyPrecisionError('snapshot_changed')
+    const totals=salesTotalsFromSnapshot(snapshot)
+    const byPayment=paymentMethodBreakdownFromSnapshot(snapshot)
+    const statuses=new Map<string,{count:number,total:ReportExactDecimal}>()
+    for(const row of before.status){
+      const status=String(row.sale_status??'').trim()||'completed'
+      const group=statuses.get(status)??{count:0,total:ReportExactDecimal.zero()}
+      group.count++;group.total=group.total.add(stripMoney(row,'total_usd'));statuses.set(status,group)
+    }
+    const byStatus=[...statuses].map(([sale_status,value])=>({sale_status,count:value.count,total_usd:value.total.toNumber()}))
+      .sort((a,b)=>b.count-a.count||a.sale_status.localeCompare(b.sale_status))
+    let refund=ReportExactDecimal.zero()
+    for(const row of before.returns)refund=refund.add(stripMoney(row,'total_refund_usd'))
     return {
       startDate,
       endDate,
@@ -5257,10 +5631,10 @@ app.get('/stats-strip', async (c) => {
       totals,
       by_payment: byPayment,
       by_status: byStatus || [],
-      returns: { count: Number(returnsRow?.count || 0), refund_usd: Number(returnsRow?.refund_usd || 0) },
+      returns: { count: before.returns.length, refund_usd: refund.toNumber() },
     }
   })
-  return c.json(payload)
+  return c.json({...payload,totals:gateSalesReportMoney(payload.totals as unknown as Record<string,unknown>,isAdminControlUser(c.get('user')))})
 })
 
 // ---- Phase X (Part 395): the daily report ---------------------------------
@@ -5288,7 +5662,7 @@ app.get('/daily-report', async (c) => {
     endTime: query.endTime || null,
     tzOffsetMinutes: Number(query.tzOffsetMinutes) || 0,
   }, 'day')
-  return c.json({ startDate, endDate, days })
+  return c.json({ startDate, endDate, days:days.map(row=>gateSalesReportMoney(row as unknown as Record<string,unknown>,isAdminControlUser(c.get('user')))) })
 })
 
 // GET /api/sales/day-report?date&branchId -- the click-a-day drill: the
@@ -5313,7 +5687,10 @@ app.get('/day-report', async (c) => {
     endTime: query.endTime || null,
     tzOffsetMinutes: Number(query.tzOffsetMinutes) || 0,
   })
-  return c.json(report)
+  const isAdmin=isAdminControlUser(c.get('user'))
+  return c.json({...report,totals:gateSalesReportMoney(report.totals as unknown as Record<string,unknown>,isAdmin),
+    sales:report.sales.map(row=>gateSalesReportMoney(row as unknown as Record<string,unknown>,isAdmin)),
+    delivery_contacts:report.delivery_contacts.map(row=>gateSalesCourierMoney(row as unknown as Record<string,unknown>,isAdmin))})
 })
 
 // GET /api/sales/delivery-contact-report?startDate&endDate&branchId&contactId
@@ -5340,7 +5717,7 @@ app.get('/delivery-contact-report', async (c) => {
     endTime: query.endTime || null,
     tzOffsetMinutes: Number(query.tzOffsetMinutes) || 0,
   })
-  return c.json({ startDate, endDate, contacts })
+  return c.json({ startDate, endDate, contacts:contacts.map(row=>gateSalesCourierMoney(row as unknown as Record<string,unknown>,isAdminControlUser(c.get('user')))) })
 })
 
 // GET /api/sales/customer-report?customerId&startDate&endDate -- X4: the
@@ -5369,7 +5746,7 @@ app.get('/customer-report', async (c) => {
     endTime: query.endTime || null,
     tzOffsetMinutes: Number(query.tzOffsetMinutes) || 0,
   })
-  return c.json({ startDate, endDate, customerId, totals })
+  return c.json({ startDate, endDate, customerId, totals:gateSalesReportMoney(totals as unknown as Record<string,unknown>,isAdminControlUser(c.get('user'))) })
 })
 
 // GET /api/sales/export -- complete, snapshot-stable accounting export.

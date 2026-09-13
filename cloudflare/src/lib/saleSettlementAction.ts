@@ -16,6 +16,22 @@ import type { SaleRecordChange, SaleRecordValueState } from './saleRecords'
 
 export const SALE_SETTLEMENT_ACTION_KIND = 'sale.settlement'
 
+/** Migration compatibility for exactly the three appended fields, not generic
+ * expected-key projection: every other new/changed field still conflicts. */
+export function samePrecisionCompatibleState(current: object, expected: object): boolean {
+  if (JSON.stringify(current)===JSON.stringify(expected)) return true
+  const present = (row: object, key: string) => Object.prototype.hasOwnProperty.call(row,key)
+  const keys = ['money_precision_version','calculated_total_usd','rounding_adjustment_usd']
+  const value = current as Record<string,unknown>
+  if (keys.every(key => !present(expected,key))) {
+    if (!(value.money_precision_version === 0 && value.calculated_total_usd === null && value.rounding_adjustment_usd === 0)) return false
+    const legacy = { ...value }
+    for (const key of keys) delete legacy[key]
+    return JSON.stringify(legacy) === JSON.stringify(expected)
+  }
+  return JSON.stringify(current) === JSON.stringify(expected)
+}
+
 type Statement = { sql: string; params: Record<string, unknown> }
 
 export type SaleSettlementLineMoney = {
@@ -28,6 +44,9 @@ export type SaleSettlementLineMoney = {
 }
 
 export type SaleSettlementState = {
+  money_precision_version?: number
+  calculated_total_usd?: number | null
+  rounding_adjustment_usd?: number
   sale_status: string | null
   exchange_rate: number | null
   subtotal_khr: number | null
@@ -138,7 +157,8 @@ export async function readSaleSettlementState(db: D1Compat, saleId: number): Pro
     SELECT sale_status,exchange_rate,subtotal_khr,discount_khr,tax_khr,total_khr,
            delivery_fee_khr,membership_discount_khr,payment_method,payment_details,
            payment_currency,amount_paid_usd,amount_paid_khr,change_usd,change_khr,
-           change_is_actual,change_exchange_rate,search_normalized
+           change_is_actual,change_exchange_rate,search_normalized,
+           money_precision_version,calculated_total_usd,rounding_adjustment_usd
     FROM sales WHERE id=@id
   `).get<Record<string, unknown>>({ id: saleId })
   if (!sale) return null
@@ -148,6 +168,9 @@ export async function readSaleSettlementState(db: D1Compat, saleId: number): Pro
     FROM sale_items WHERE sale_id=@id ORDER BY id
   `).all<Record<string, unknown>>({ id: saleId })
   return {
+    money_precision_version: Number(sale.money_precision_version),
+    calculated_total_usd: nullableNumber(sale.calculated_total_usd),
+    rounding_adjustment_usd: nullableNumber(sale.rounding_adjustment_usd) ?? 0,
     sale_status: sale.sale_status == null ? null : String(sale.sale_status),
     exchange_rate: nullableNumber(sale.exchange_rate),
     subtotal_khr: nullableNumber(sale.subtotal_khr),
@@ -191,14 +214,19 @@ export function buildSaleSettlementAfterState(
 ): SaleSettlementState {
   const rate = plan.exchangeRate
   return {
+    ...(before.money_precision_version === undefined ? {} : {
+      money_precision_version: before.money_precision_version,
+      calculated_total_usd: before.calculated_total_usd,
+      rounding_adjustment_usd: before.rounding_adjustment_usd,
+    }),
     sale_status: targetStatus,
-    exchange_rate: rate,
-    subtotal_khr: khr(sale.subtotal_usd, rate),
-    discount_khr: khr(sale.discount_usd, rate),
-    tax_khr: khr(sale.tax_usd, rate),
-    total_khr: khr(sale.total_usd, rate),
-    delivery_fee_khr: khr(sale.delivery_fee_usd, rate),
-    membership_discount_khr: khr(sale.membership_discount_usd, rate),
+    exchange_rate: before.money_precision_version === 1 ? before.exchange_rate : rate,
+    subtotal_khr: before.money_precision_version === 1 ? before.subtotal_khr : khr(sale.subtotal_usd, rate),
+    discount_khr: before.money_precision_version === 1 ? before.discount_khr : khr(sale.discount_usd, rate),
+    tax_khr: before.money_precision_version === 1 ? before.tax_khr : khr(sale.tax_usd, rate),
+    total_khr: before.money_precision_version === 1 ? before.total_khr : khr(sale.total_usd, rate),
+    delivery_fee_khr: before.money_precision_version === 1 ? before.delivery_fee_khr : khr(sale.delivery_fee_usd, rate),
+    membership_discount_khr: before.money_precision_version === 1 ? before.membership_discount_khr : khr(sale.membership_discount_usd, rate),
     payment_method: plan.paymentMethod,
     payment_details: plan.paymentDetailsJson,
     payment_currency: plan.paymentCurrency,
@@ -216,7 +244,7 @@ export function buildSaleSettlementAfterState(
       sale.branch_name,
       plan.paymentMethod,
     ].filter(Boolean).join(' ')),
-    lines: lineRows.map((line) => ({
+    lines: before.money_precision_version === 1 ? before.lines.map(line => ({...line})) : lineRows.map((line) => ({
       id: Number(line.id),
       applied_price_khr: khr(line.applied_price_usd, rate),
       total_khr: khr(line.total_usd, rate),
@@ -247,9 +275,9 @@ export function saleSettlementStateStatements(saleId: number, state: SaleSettlem
   }))]
 }
 
-export function saleMutationGuard(predicate: string, params: Record<string, unknown>): Statement {
+export function saleMutationGuard(predicate: string, params: Record<string, unknown>, guardId: 1 | 2 | 3 = 1): Statement {
   return {
-    sql: `INSERT INTO sale_mutation_guards(id,guard_value) SELECT 1,CASE WHEN ${predicate} THEN 1 ELSE 0 END`,
+    sql: `INSERT INTO sale_mutation_guards(id,guard_value) SELECT ${guardId},CASE WHEN ${predicate} THEN 1 ELSE 0 END`,
     params,
   }
 }
@@ -313,7 +341,7 @@ export async function replaySaleSettlementAction(
   const expected = direction === 'undo' ? after : before
   const target = direction === 'undo' ? before : after
   const current = await readSaleSettlementState(db, saleId)
-  if (!current || JSON.stringify(current) !== JSON.stringify(expected)) {
+  if (!current || !samePrecisionCompatibleState(current, expected)) {
     throw new SaleSettlementReplayConflict('This sale was edited after the settlement. Refresh before reversing it.')
   }
   const expectedHistoryStatus = direction === 'undo' ? 'undoable' : 'redoable'
