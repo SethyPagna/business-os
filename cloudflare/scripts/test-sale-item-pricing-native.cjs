@@ -109,6 +109,7 @@ async function actualRoute() {
   const h=harness.exports
   const request=()=>({...h.request('exact-line-route'),money_precision_version:1,amount_paid_usd:29,items:[{
     product_id:10,quantity:3,branch_id:1,batch_id:500,client_line_key:'route-a',pricing_source:'promotion',
+    price_mode:'selling',product_discount_type:'spoofed',product_discount_label:'spoofed',
     pricing_quote:{gross_usd:30,product_discount_usd:1,manual_discount_usd:0,total_usd:29,total_khr:116000}
   }]})
   const setup=hooks=>{
@@ -122,12 +123,17 @@ async function actualRoute() {
   assert.equal(saved.status,200,JSON.stringify(saved.body))
   assert.equal(saved.body.sale.items[0].total_usd,29)
   assert.equal(saved.body.sale.items[0].applied_price_usd,9.6667)
+  assert.equal(saved.body.sale.items[0].price_mode,'promotion')
+  assert.equal(saved.body.sale.items[0].product_discount_type,'quantity_save')
+  assert.equal(saved.body.sale.items[0].product_discount_label,null)
   assert.equal(p.parseSaleItemPricing(saved.body.sale.items[0].pricing_snapshot_json).amounts.total_usd,29)
   p.validateCapturedSaleBasket(saved.body.sale.items,saved.body.sale)
   const wrongIdentity=structuredClone(saved.body.sale.items); wrongIdentity[0].product_id=11
   assert.throws(()=>p.validateCapturedSaleBasket(wrongIdentity,saved.body.sale))
   const missingSnapshot=structuredClone(saved.body.sale.items); missingSnapshot[0].pricing_snapshot_json=null
   assert.throws(()=>p.validateCapturedSaleBasket(missingSnapshot,saved.body.sale))
+  const wrongMetadata=structuredClone(saved.body.sale.items);wrongMetadata[0].price_mode='selling'
+  assert.throws(()=>p.validateCapturedSaleBasket(wrongMetadata,saved.body.sale))
   const after=h.creationState(f.raw)
   f.raw.prepare('UPDATE promotion_rules SET save_usd=9 WHERE id=1').run()
   const replay=await h.postSale(f.route,{client_request_id:'exact-line-route'})
@@ -150,6 +156,11 @@ async function actualRoute() {
   assert.equal(added.sale.total_usd,39)
   p.validateCapturedSaleBasket(added.sale.items,added.sale)
   assert.notEqual(p.parseSaleItemPricing(added.sale.items[0].pricing_snapshot_json).pool.pool_key,p.parseSaleItemPricing(added.sale.items[1].pricing_snapshot_json).pool.pool_key)
+  const aliasedPools=structuredClone(added.sale.items)
+  const aliased=JSON.parse(aliasedPools[1].pricing_snapshot_json)
+  aliased.pool.pool_key=JSON.parse(aliasedPools[0].pricing_snapshot_json).pool.pool_key
+  aliasedPools[1].pricing_snapshot_json=JSON.stringify(aliased)
+  assert.throws(()=>p.validateCapturedSaleBasket(aliasedPools,added.sale),'disjoint contexts may not share one pool identity')
   const transition=async direction=>{
     const history=f.raw.prepare('SELECT * FROM action_history WHERE id=?').get([added.actionHistoryId])
     const payload=JSON.parse(history[direction==='undo'?'undo_payload':'redo_payload'])
@@ -242,6 +253,17 @@ async function actualRoute() {
   const siblingResult=await removeSibling.json();assert.equal(removeSibling.status,200,JSON.stringify(siblingResult))
   assert.equal(siblingResult.sale.items[0].total_usd,10,'removing qualifying sibling re-evaluates surviving free line')
   p.validateCapturedSaleBasket(siblingResult.sale.items,siblingResult.sale)
+  assert.equal(siblingResult.sale.items[0].product_discount_type,null,'lost promotion clears stale discount metadata')
+  for(const [source,price] of [['selling',9.5],['wholesale',8],['manual',7.5]]) {
+    const metadataDb=h.fixture();metadataDb.raw.prepare('UPDATE products SET wholesale_price_usd=8 WHERE id=10').run()
+    const result=await h.postSale(metadataDb.route,{...h.request('metadata-'+source),money_precision_version:1,items:[{product_id:10,quantity:1,branch_id:1,batch_id:500,
+      client_line_key:source,pricing_source:source,...(source==='manual'?{selling_price_input_usd:7.5}:{}),price_mode:'promotion',product_discount_type:'spoof',product_discount_label:'spoof',
+      pricing_quote:{gross_usd:price,product_discount_usd:0,manual_discount_usd:0,total_usd:price,total_khr:price*4000}}]})
+    assert.equal(result.status,200,JSON.stringify(result.body));p.validateCapturedSaleBasket(result.body.sale.items,result.body.sale)
+    assert.equal(result.body.sale.items[0].price_mode,source)
+    assert.equal(result.body.sale.items[0].product_discount_type,null);assert.equal(result.body.sale.items[0].product_discount_label,null)
+    metadataDb.raw.db.close()
+  }
   const legacyFingerprint={sale:{id:1},lines:[{id:1,total_usd:1}],amendmentHeadId:0}
   const actualFingerprint={sale:{id:1,money_precision_version:0,calculated_total_usd:null,rounding_adjustment_usd:0},lines:[{id:1,total_usd:1,pricing_snapshot_json:null}],amendmentHeadId:0}
   const matches=h.load('lib/undoAppliers.ts').sameSaleStateFingerprint
