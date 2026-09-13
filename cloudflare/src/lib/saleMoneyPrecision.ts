@@ -36,12 +36,16 @@ export function validateSaleMoneySnapshot<T extends {
   rounding_adjustment_usd?: unknown; total_usd?: unknown
 }>(row: T): T {
   const version = row.money_precision_version
-  if (version === undefined || version === 0) {
+  const fields=['calculated_total_usd','rounding_adjustment_usd'] as const
+  if(fields.some(key=>Object.prototype.hasOwnProperty.call(row,key)) &&
+    (!Object.prototype.hasOwnProperty.call(row,'money_precision_version')||fields.some(key=>!Object.prototype.hasOwnProperty.call(row,key))))
+    throw new SaleMoneyContractError('money_precision_incomplete_snapshot')
+  if (version === undefined || (version === 0 && row.calculated_total_usd == null)) {
     if (row.calculated_total_usd != null || (row.rounding_adjustment_usd !== undefined && row.rounding_adjustment_usd !== 0))
       throw new SaleMoneyContractError('money_precision_invalid_legacy_shape')
     return row
   }
-  if (version !== 1) throw new SaleMoneyContractError('money_precision_unsupported_version')
+  if (version !== 1 && version !== 0) throw new SaleMoneyContractError('money_precision_unsupported_version')
   const raw = canonicalMoney4(row.calculated_total_usd, true)
   const adjustment = canonicalMoney4(row.rounding_adjustment_usd)
   const payable = canonicalMoney4(row.total_usd, true)
