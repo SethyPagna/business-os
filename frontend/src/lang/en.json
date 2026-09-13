@@ -6556,5 +6556,8 @@
   "return_v1_replacements_unsupported": "Create the replacement sale separately for this net-refund return.",
   "return_v1_quote_loading": "Checking the net refund…",
   "sale_line_recovery_pending": "An earlier change to this sale needs confirmation. Its original request is saved; other changes remain paused.",
-  "sale_line_review_updated_total": "Review the updated total"
+  "sale_line_review_updated_total": "Review the updated total",
+  "product_collision_review_title": "Review product identity",
+  "product_collision_review_description": "This edit matches another saved product. Review both saved rows and choose the barcode to keep. Your unsaved edits are not applied by the review.",
+  "product_collision_review_unavailable": "No saved conflict group contains both products. Verify their identities before merging."
 }
