@@ -1,6 +1,6 @@
 import { divideMoney4, multiplyMoney4, roundMoney2, roundMoney4, subtractDecimalSum, subtractMoney4, sumMoney4 } from './moneyPrecision'
 import { validateRefundMoneySnapshot, type RefundMoneyPrecisionV1 } from './refundMoneyPrecision'
-import { parseSaleItemPricing, type ReceiptLineAllocation } from './saleItemPricing'
+import { validateCapturedSaleBasket, type ReceiptLineAllocation, type SaleItemPricingSnapshot } from './saleItemPricing'
 import { canonicalMoney4, SaleMoneyContractError } from './saleMoneyPrecision'
 
 export const CUSTOMER_RETURN_REFUND_SNAPSHOT_VERSION = 1
@@ -13,6 +13,18 @@ export type CustomerReturnSaleLine = {
   product_id: number | null
   quantity: number
   total_usd: number
+  total_khr: number
+  base_price_usd: number
+  base_price_khr: number
+  applied_price_usd: number
+  applied_price_khr: number
+  product_discount_usd: number
+  product_discount_khr: number
+  manual_discount_usd: number
+  manual_discount_khr: number
+  manual_discount_type: string | null
+  manual_discount_value: number
+  price_mode: string | null
   pricing_snapshot_json: string | null
   pricing_snapshot_digest: string
 }
@@ -23,6 +35,10 @@ export type CustomerReturnSource = {
   money_precision_version: number
   calculated_total_usd: number | null
   total_usd: number
+  subtotal_usd: number
+  discount_usd: number
+  membership_discount_usd: number
+  tax_usd: number
   exchange_rate: number
   customer_delivery_fee_usd: number
   lines: CustomerReturnSaleLine[]
@@ -195,37 +211,18 @@ export function buildCustomerReturnQuoteV1(input: {
   const rate = finitePositive(input.sale.exchange_rate, 'customer_return_sale_invalid')
   const saleTotal = canonicalMoney4(input.sale.total_usd, true)
   if (roundMoney2(saleTotal) !== saleTotal) fail('customer_return_sale_invalid')
-  const sourceById = new Map<number, { row: CustomerReturnSaleLine; snapshot: NonNullable<ReturnType<typeof parseSaleItemPricing>> }>()
-  let sharedContext: unknown = null
-  const lineKeys = new Set<string>()
-  const pools = new Map<string, { pool: unknown; quantities: unknown; members: Set<string> }>()
-  for (const row of input.sale.lines) {
+  let capturedSnapshots: SaleItemPricingSnapshot[]
+  try {
+    capturedSnapshots = validateCapturedSaleBasket(
+      input.sale.lines as unknown as readonly Record<string, unknown>[], input.sale as unknown as Record<string, unknown>,
+    )
+  } catch { return fail('customer_return_sale_invalid') }
+  const sourceById = new Map<number, { row: CustomerReturnSaleLine; snapshot: SaleItemPricingSnapshot }>()
+  for (const [index, row] of input.sale.lines.entries()) {
     const id = positiveId(row.id, 'customer_return_sale_invalid')
     if (sourceById.has(id) || !/^[0-9a-f]{64}$/.test(row.pricing_snapshot_digest)) fail('customer_return_sale_invalid')
-    const snapshot = parseSaleItemPricing(row.pricing_snapshot_json)
-    if (!snapshot || snapshot.quantities[snapshot.line_key] !== row.quantity
-      || snapshot.amounts.total_usd !== canonicalMoney4(row.total_usd, true)
-      || lineKeys.has(snapshot.line_key)) fail('customer_return_sale_invalid')
-    if (sharedContext == null) sharedContext = snapshot.allocation_context
-    if (!sameJson(sharedContext, snapshot.allocation_context) || snapshot.pool.exchange_rate !== rate) fail('customer_return_sale_invalid')
-    const capturedPool = pools.get(snapshot.pool.pool_key)
-    if (capturedPool && (!sameJson(capturedPool.pool, snapshot.pool) || !sameJson(capturedPool.quantities, snapshot.quantities))) {
-      fail('customer_return_sale_invalid')
-    }
-    const pool = capturedPool || { pool: snapshot.pool, quantities: snapshot.quantities, members: new Set<string>() }
-    pool.members.add(snapshot.line_key)
-    pools.set(snapshot.pool.pool_key, pool)
-    lineKeys.add(snapshot.line_key)
+    const snapshot = capturedSnapshots[index]
     sourceById.set(id, { row, snapshot })
-  }
-  const contextLines = (sharedContext as { lines?: unknown[] } | null)?.lines
-  if (!Array.isArray(contextLines) || contextLines.length !== sourceById.size) fail('customer_return_sale_invalid')
-  for (const captured of pools.values()) {
-    const expected = (captured.pool as { lines?: Array<{ line_key?: unknown }> }).lines
-    if (!Array.isArray(expected) || expected.length !== captured.members.size
-      || expected.some(line => typeof line.line_key !== 'string' || !captured.members.has(line.line_key))) {
-      fail('customer_return_sale_invalid')
-    }
   }
   const productEntitlement = sumMoney4([...sourceById.values()].map(({ snapshot }) => snapshot.receipt_allocation.net_entitlement_usd))
   const customerDelivery = canonicalMoney4(input.sale.customer_delivery_fee_usd, true)

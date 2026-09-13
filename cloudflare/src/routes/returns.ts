@@ -41,7 +41,7 @@ import {
 } from '../lib/returnCreateAction'
 import {
   buildCustomerReturnQuoteV1, CUSTOMER_RETURN_MAX_SALE_LINES,
-  type CustomerReturnPrior, type CustomerReturnQuoteV1,
+  type CustomerReturnPrior, type CustomerReturnQuoteV1, type CustomerReturnSaleLine,
 } from '../lib/customerReturnEntitlement'
 import { canonicalMoney4, SaleMoneyContractError } from '../lib/saleMoneyPrecision'
 
@@ -108,14 +108,18 @@ export async function customerReturnQuoteFromDb(
   excludeReturnId: number | null = null,
 ): Promise<CustomerReturnQuoteV1> {
   const sale = await db.prepare(`SELECT s.id,s.money_precision_version,s.calculated_total_usd,s.total_usd,
+    s.subtotal_usd,s.discount_usd,s.membership_discount_usd,s.tax_usd,
     s.exchange_rate,s.is_delivery,s.delivery_fee_usd,s.delivery_fee_paid_by,
     COALESCE(v.revision,0) AS sale_revision
     FROM sales s LEFT JOIN sale_write_revisions v ON v.sale_id=s.id WHERE s.id=@saleId`)
     .get<Record<string, unknown>>({ saleId })
   if (!sale) throw new SaleMoneyContractError('customer_return_sale_not_found')
-  const saleLines = await db.prepare(`SELECT id,product_id,quantity,total_usd,pricing_snapshot_json
+  const saleLines = await db.prepare(`SELECT id,product_id,quantity,total_usd,total_khr,
+    base_price_usd,base_price_khr,applied_price_usd,applied_price_khr,
+    product_discount_usd,product_discount_khr,manual_discount_usd,manual_discount_khr,
+    manual_discount_type,manual_discount_value,price_mode,pricing_snapshot_json
     FROM sale_items WHERE sale_id=@saleId ORDER BY id LIMIT @limit`)
-    .all<{ id: number; product_id: number | null; quantity: number; total_usd: number; pricing_snapshot_json: string | null }>(
+    .all<Record<string, unknown>>(
       { saleId, limit: CUSTOMER_RETURN_MAX_SALE_LINES + 1 },
     )
   if (saleLines.length > CUSTOMER_RETURN_MAX_SALE_LINES) throw new SaleMoneyContractError('customer_return_sale_invalid')
@@ -159,10 +163,12 @@ export async function customerReturnQuoteFromDb(
       sale_id: Number(sale.id), sale_revision: Number(sale.sale_revision),
       money_precision_version: Number(sale.money_precision_version),
       calculated_total_usd: sale.calculated_total_usd == null ? null : Number(sale.calculated_total_usd),
-      total_usd: Number(sale.total_usd), exchange_rate: exchangeRate,
+      total_usd: Number(sale.total_usd), subtotal_usd: Number(sale.subtotal_usd),
+      discount_usd: Number(sale.discount_usd), membership_discount_usd: Number(sale.membership_discount_usd),
+      tax_usd: Number(sale.tax_usd), exchange_rate: exchangeRate,
       customer_delivery_fee_usd: customerDeliveryFee,
       lines: await Promise.all(saleLines.map(async (line) => ({
-        ...line,
+        ...line as CustomerReturnSaleLine,
         pricing_snapshot_digest: await sha256Hex(String(line.pricing_snapshot_json ?? '')),
       }))),
     },

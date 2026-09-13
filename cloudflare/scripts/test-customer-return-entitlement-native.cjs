@@ -55,14 +55,15 @@ function source(m, definitions, allocation, saleTotal, delivery = 0) {
   const pricingPool = pool(definitions)
   const quantities = Object.fromEntries(definitions.map(line => [line.key, line.quantity]))
   const rows = definitions.map(line => {
-    const pricing = m.serializeSaleItemPricing(pricingPool, quantities, line.key, allocation)
-    return { id: line.id, product_id: line.id, quantity: line.quantity,
-      total_usd: m.parseSaleItemPricing(pricing).amounts.total_usd,
-      pricing_snapshot_json: pricing, pricing_snapshot_digest: String(line.id).padStart(64, '0') }
+    return { ...m.materializeCapturedPricingRow({ id: line.id, product_id: line.id }, pricingPool, quantities, line.key, allocation),
+      pricing_snapshot_digest: String(line.id).padStart(64, '0') }
   })
   const product = rows.reduce((sum, row) => sum + m.parseSaleItemPricing(row.pricing_snapshot_json).receipt_allocation.net_entitlement_usd, 0)
   return { sale_id: 1, sale_revision: 7, money_precision_version: 1,
     calculated_total_usd: +(product + delivery).toFixed(4), total_usd: saleTotal,
+    subtotal_usd: rows.reduce((sum, row) => sum + row.total_usd, 0),
+    discount_usd: allocation.discount_usd, membership_discount_usd: allocation.membership_discount_usd,
+    tax_usd: allocation.tax_usd,
     exchange_rate: 4000, customer_delivery_fee_usd: delivery, lines: rows }
 }
 
@@ -99,13 +100,12 @@ async function main() {
   const independentRows = independentBasket.map(line => {
     const pricingPool = line.id === 23 ? poolB : poolA
     const quantities = Object.fromEntries(pricingPool.lines.map(candidate => [candidate.line_key, 1]))
-    const pricing = m.serializeSaleItemPricing(pricingPool, quantities, line.key, independentContext)
-    return { id: line.id, product_id: line.id, quantity: line.quantity,
-      total_usd: m.parseSaleItemPricing(pricing).amounts.total_usd,
-      pricing_snapshot_json: pricing, pricing_snapshot_digest: String(line.id).padStart(64, '0') }
+    return { ...m.materializeCapturedPricingRow({ id: line.id, product_id: line.id }, pricingPool, quantities, line.key, independentContext),
+      pricing_snapshot_digest: String(line.id).padStart(64, '0') }
   })
   const independentSale = { sale_id: 2, sale_revision: 3, money_precision_version: 1,
-    calculated_total_usd: 31.5, total_usd: 31.5, exchange_rate: 4000,
+    calculated_total_usd: 31.5, total_usd: 31.5, subtotal_usd: 35,
+    discount_usd: 3.5, membership_discount_usd: 0, tax_usd: 0, exchange_rate: 4000,
     customer_delivery_fee_usd: 0, lines: independentRows }
   const independentQuote = m.buildCustomerReturnQuoteV1({ sale: independentSale,
     requested: independentBasket.map(line => ({ sale_item_id: line.id, quantity: 1 })), previous: [] })
@@ -198,10 +198,20 @@ async function main() {
   const routePool = pool(routeBasket)
   const routeQuantities = Object.fromEntries(routeBasket.map(line => [line.key, line.quantity]))
   db.prepare(`INSERT INTO sales(id,total_usd,money_precision_version,calculated_total_usd,rounding_adjustment_usd,
-    exchange_rate,is_delivery,delivery_fee_usd,delivery_fee_paid_by) VALUES(2,29,1,29,0,4000,0,0,'customer')`).run()
-  for (const line of routeBasket) db.prepare(`INSERT INTO sale_items(id,sale_id,product_id,quantity,total_usd,pricing_snapshot_json)
-    VALUES(?,?,?,1,?,?)`).run(line.id, 2, line.id, line.price,
-      m.serializeSaleItemPricing(routePool, routeQuantities, line.key, routeContext))
+    subtotal_usd,discount_usd,membership_discount_usd,tax_usd,
+    exchange_rate,is_delivery,delivery_fee_usd,delivery_fee_paid_by)
+    VALUES(2,29,1,29,0,30,3,0,2,4000,0,0,'customer')`).run()
+  for (const line of routeBasket) {
+    const row = m.materializeCapturedPricingRow({ id: line.id, product_id: line.id }, routePool, routeQuantities, line.key, routeContext)
+    db.prepare(`INSERT INTO sale_items(id,sale_id,product_id,quantity,total_usd,total_khr,
+      base_price_usd,base_price_khr,applied_price_usd,applied_price_khr,
+      product_discount_usd,product_discount_khr,manual_discount_usd,manual_discount_khr,
+      manual_discount_type,manual_discount_value,price_mode,pricing_snapshot_json)
+      VALUES(@id,2,@product_id,@quantity,@total_usd,@total_khr,
+        @base_price_usd,@base_price_khr,@applied_price_usd,@applied_price_khr,
+        @product_discount_usd,@product_discount_khr,@manual_discount_usd,@manual_discount_khr,
+        @manual_discount_type,@manual_discount_value,@price_mode,@pricing_snapshot_json)`).run(row)
+  }
   const compat = { prepare(sql) { return { get: async params => db.prepare(sql).get(params), all: async params => db.prepare(sql).all(params) } } }
   const loadedQuote = await route.customerReturnQuoteFromDb(compat, 2, [{ sale_item_id: 11, quantity: 1 }])
   assert.equal(loadedQuote.calculated_refund_usd, 9.6667)
