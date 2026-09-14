@@ -110,6 +110,91 @@ touches D1, never pushes secrets, and never deploys. Use this after
 pulling in a change to confirm it actually installs, typechecks, passes
 its tests, and builds, before deciding to cut a release.
 
+## Free vs paid deploy
+
+This repo ships **two** wrangler configs for the **same** Worker:
+
+| | config | deploy command | one-command release |
+| --- | --- | --- | --- |
+| Workers **Paid** (current) | `cloudflare/wrangler.toml` | `npm run deploy` / `npm run deploy:full` | `run\full-automation.bat` |
+| Workers **Free** | `cloudflare/wrangler.free.toml` | `npm run deploy:free` / `npm run deploy:full:free` | `run\full-automation.bat -Plan free` |
+
+They are not two environments and not two Workers: same Worker name, same D1
+database ids, same R2 bucket, same KV namespace, same queues, same Durable
+Objects, same routes, same crons. Exactly one of them is deployed at a time,
+and deploying the other one replaces it. Nothing about your data moves.
+
+### What actually differs
+
+Four things, each marked `DIFF n of 4` at its site in `wrangler.free.toml`:
+
+1. **No `[limits]` block.** `cpu_ms` / `subrequests` are Paid-only keys;
+   a config carrying them fails a Free deploy outright with error 100328.
+   This single incompatibility is the reason the second file exists.
+2. **`business-os-import` consumer `max_batch_size` 5 -> 1.**
+3. **`business-os-media` consumer `max_batch_size` 5 -> 1.**
+   Both consumers do real per-message CPU inside one invocation, and Free
+   budgets 10 ms of CPU per *invocation*, so a batch of 5 repacks five
+   chunks of work into one budget.
+4. **`[vars] PLAN_TIER` `"paid"` -> `"free"`.**
+
+`cloudflare/scripts/test-wrangler-config-drift-pure.cjs` fails if any other
+key drifts between the two files, in either direction. Edit `wrangler.toml`
+and you edit `wrangler.free.toml` in the same commit; that test is how you
+find out you did not.
+
+### What `PLAN_TIER` changes inside the app
+
+`cloudflare/src/lib/planTier.ts` is the only file that reads it, and the only
+place either plan's numbers are written down. It resolves the tier once per
+isolate and hands every plan-sensitive call site a limit from one table:
+import chunk rows, import preflight rows, stock-action units and rows,
+stock-action and historical-sales concurrency, bulk-delete chunk size, backup
+asset count, whether the 6-hourly scheduled backup runs at all, images deleted
+per reset, import-job retention depth, ephemeral delete batch, and the catalog
+integrity scan ceiling. Free is smaller on every one of them.
+
+Two operations are **refused** on free rather than run in a degraded shape,
+because a half-done version of either is worse than not starting:
+
+- the automatic 6-hourly **scheduled backup** (retention still runs; manual
+  backups still work),
+- **reset with images**, which would otherwise delete part of the R2 files
+  and stop at the subrequest ceiling.
+
+An unset or unrecognised `PLAN_TIER` resolves to **paid**. That is deliberate:
+the default must be the configuration that has been running in production, so
+a config that forgot the var does not silently halve every ceiling.
+
+### Where to see which one is live
+
+- `GET /api/runtime/version` -> `tier`
+- `GET /api/system/integration-doctor` -> `item.runtime.tier` (and
+  `item.runtime.quotas`, whose ceilings are themselves per-plan)
+- `GET /api/auth/bootstrap` -> `system.runtime.plan`
+
+### Switching plans
+
+1. Change the account plan in the Cloudflare dashboard first. The config is
+   not what puts the account on a plan; it is what survives being on one.
+2. Deploy the matching config (`run\full-automation.bat -Plan free`, or
+   `npm run deploy:free`). `-Plan` changes **only** the deploy step: the
+   gate, the frontend build, both remote D1 migrations and the secret sync
+   are identical either way.
+3. Confirm with `/api/runtime/version`.
+
+Going back to paid is the same run without `-Plan` (or with `-Plan paid`).
+
+### Known free-plan limits this does NOT solve
+
+- **D1 writes.** Free allows 100k rows written per day. A bulk historical
+  re-import is well above that; split it across days or do it on paid.
+- **D1 size.** Free caps a database at 500 MB (paid: 10 GB). Check the live
+  size before switching.
+- **Nothing here is measured on a real free account.** The numbers in
+  `planTier.ts` are sized from Cloudflare's published ceilings, deliberately
+  conservative, not from a profiled free deployment.
+
 ## Database migrations
 
 Migrations live in `cloudflare/migrations/`. To add one, create the next

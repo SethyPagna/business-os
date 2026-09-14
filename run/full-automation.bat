@@ -9,6 +9,12 @@ REM  D1 databases -> sync secrets -> wrangler deploy -> live
 REM  health check against the real Workers URL. Intended for cutting a new
 REM  release and deploying it in one command. See
 REM  ops\scripts\powershell\full-automation.ps1 for the implementation.
+REM
+REM  Arguments are forwarded verbatim (%* on the powershell line below), so
+REM  the .ps1 parameters work from here unchanged:
+REM    run\full-automation.bat              deploys wrangler.toml      (paid)
+REM    run\full-automation.bat -Plan free   deploys wrangler.free.toml (free)
+REM  Only the deploy step differs; see DEPLOY.md "Free vs paid deploy".
 REM ==========================================================================
 
 if defined BUSINESS_OS_REPO_ROOT (
