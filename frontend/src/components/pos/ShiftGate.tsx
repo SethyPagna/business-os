@@ -534,11 +534,12 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
                 { label: closed ? t('shift_closed_at') : t('shift_ends_at'), value: fmtDateTime24(closed?.closed_at || now) },
                 { label: closed ? t('shift_duration') : t('shift_open_for'), value: formatShiftDuration(shift.opened_at, parseServerTimestampMs(closed?.closed_at) || now, t) },
                 { label: t('shift_opened_with'), value: shiftCountedPairText(shift.opening_float_usd, shift.opening_float_khr, fmtUSD, fmtKHR) },
-                // The after half of the before/after: what was counted into
-                // the drawer against what it opened with, on the same cell
-                // shape so the two are read as one comparison.
-                !!closed && { label: t('shift_counted_close'), value: shiftCountedPairText(closed.closing_counted_usd, closed.closing_counted_khr, fmtUSD, fmtKHR) },
+                // The rest of the chain, in the order the drawer moved: the
+                // extra change put in when the float ran out, then what was
+                // counted out of it at the close -- on the same cell shape as
+                // "Opened with" so the three are read as one comparison.
                 !!closed && { label: t('shift_recon_additional_cash'), value: `+ ${shiftCountedPairText(closed.additional_cash_usd ?? 0, closed.additional_cash_khr ?? 0, fmtUSD, fmtKHR)}` },
+                !!closed && { label: t('shift_counted_close'), value: shiftCountedPairText(closed.closing_counted_usd, closed.closing_counted_khr, fmtUSD, fmtKHR) },
                 !!closed?.closing_note && { label: t('note'), value: closed.closing_note },
               ]}
               />
@@ -556,17 +557,23 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
 
             {!closed && (
               <>
+                {/* Opening float -> additional change used -> closing count,
+                    the order the drawer actually moves in and the order the
+                    cashier knows the figures: the extra change was put in and
+                    spent before the final count is taken, so it is asked for
+                    first and carries the focus. Neither figure changes the
+                    other -- the server's one reconciliation reads both. */}
                 <ShiftCountPair
                   dense autoFocus disabled={busy || pending}
-                  label={t('shift_counted_cash')} usdLabel={t('shift_counted_usd')} khrLabel={t('shift_counted_khr')}
-                  hint={t('shift_registered_cash_hint')}
-                  usd={countedUsd} khr={countedKhr} onUsd={setCountedUsd} onKhr={setCountedKhr}
-                />
-                <ShiftCountPair
-                  dense disabled={busy || pending}
                   label={t('shift_additional_cash')} usdLabel={t('shift_additional_usd')} khrLabel={t('shift_additional_khr')}
                   hint={t('shift_additional_cash_hint')}
                   usd={additionalUsd} khr={additionalKhr} onUsd={setAdditionalUsd} onKhr={setAdditionalKhr}
+                />
+                <ShiftCountPair
+                  dense disabled={busy || pending}
+                  label={t('shift_counted_cash')} usdLabel={t('shift_counted_usd')} khrLabel={t('shift_counted_khr')}
+                  hint={t('shift_registered_cash_hint')}
+                  usd={countedUsd} khr={countedKhr} onUsd={setCountedUsd} onKhr={setCountedKhr}
                 />
                 {shift?.reconciliation && (
                   <ShiftFactStrip accent facts={[

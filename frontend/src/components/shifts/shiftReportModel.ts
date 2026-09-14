@@ -37,6 +37,31 @@ export function shiftFiguresOf(shift: Shift): ShiftFiguresShape | null {
   return (shift as ShiftWithFigures).figures ?? null
 }
 
+export type ShiftRegisteredRow = { key: string; fallback: string; usd: number | null; khr: number | null; added?: true }
+
+/**
+ * The registration block in the owner's reading order: the change float the
+ * drawer opened with, the extra change put in mid-shift when that float ran
+ * out, then what was left at the end. One order for every surface that prints
+ * it (the report figures, the Reports CSV/print export), so the app cannot
+ * show the additional after the closing count on one screen and before it on
+ * another. Report-only, like every figure here.
+ *
+ * The additional row appears only when some was actually added: a shift that
+ * never needed more change has nothing to say on that line.
+ */
+export function shiftRegisteredRows(shift: Shift): ShiftRegisteredRow[] {
+  const registered = shiftRegisteredCash(shift)
+  const additional = shiftFiguresOf(shift)?.additional_cash
+  return [
+    { key: 'shift_registered_open', fallback: 'OPEN', usd: registered.open.usd, khr: registered.open.khr },
+    ...(additional && (additional.usd || additional.khr)
+      ? [{ key: 'shift_recon_additional_cash', fallback: 'Additional change used', usd: additional.usd, khr: additional.khr, added: true as const }]
+      : []),
+    { key: 'shift_registered_end', fallback: 'END', usd: registered.end.usd, khr: registered.end.khr },
+  ]
+}
+
 /** An uncounted currency stays unknown instead of being printed as zero. */
 export function shiftCountText(value: number | null | undefined, format: (input: unknown) => string): string {
   return value == null ? '—' : format(value)
