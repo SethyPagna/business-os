@@ -878,7 +878,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
 
   const detailCosts = detail ? recordedMovementCosts(detail) : null
   const detailShowsReceiptAccounting = detail ? showReceiptAccounting(detail.movement_type) : false
-  const detailCanRevert = detail ? isRevertibleStockMovement(detail.movement_type) : false
+  const detailCanRevert = detail ? isRevertibleStockMovement(detail.movement_type, detail.reference_id) : false
 
   return (
     <div className="space-y-3">

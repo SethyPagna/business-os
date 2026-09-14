@@ -1,4 +1,5 @@
 import ProductNameRail from '../shared/ProductNameRail'
+import StockConditionTagRow from './StockConditionTagRow'
 import { useEffect, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react'
 import { createPortal } from 'react-dom'
 import X from 'lucide-react/dist/esm/icons/x.js'
@@ -103,6 +104,12 @@ type AdjustForm = {
   free_goods: boolean
   payment_status: string
   credit_due_date: string
+  // P3-L6: the condition the units are being filed under. '' is the
+  // untagged default -- a remove destroys the units, an add receives them
+  // as ordinary sellable stock. A tag makes the remove KEEP them inside the
+  // product group as a non-sellable tagged row, and makes the add receive
+  // straight into that row (the supplier purchase is recorded either way).
+  condition_tag: string
 }
 
 type TransferForm = {
@@ -458,6 +465,21 @@ export default function InventoryStockModals({
                   </div>
                 ) : null}
               </div>
+              {/* P3-L6: the keep-or-destroy / sellable-or-tagged choice, ONE
+                  compact row directly under the quantity it applies to, on
+                  small and large screens alike. Never offered for a 'set':
+                  a set is a target figure whose direction is decided
+                  server-side, so it has no quantity of its own to tag (the
+                  route refuses a tag on a set for the same reason). */}
+              {adjustForm.type === 'remove' || adjustForm.type === 'add' ? (
+                <StockConditionTagRow
+                  mode={adjustForm.type === 'remove' ? 'remove' : 'add'}
+                  value={adjustForm.condition_tag || ''}
+                  onChange={(next) => setAdjustForm((current) => ({ ...current, condition_tag: next }))}
+                  tr={tr}
+                  id="inventory-adjust-condition-tag"
+                />
+              ) : null}
               {adjustForm.type === 'add' ? (
                 <div className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
                   <div className="flex items-center justify-between gap-2">
