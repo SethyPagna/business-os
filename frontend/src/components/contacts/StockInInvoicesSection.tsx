@@ -110,11 +110,14 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
   const [data, setData] = useState<ReportPayload | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [expanded, setExpanded] = useState<Record<string, LinesState>>({})
+  const [lineCache, setLineCache] = useState<Record<string, LinesState>>({})
   // P3-2: the invoice group whose detail float is open (user: "i meant float
   // when clicked on the invoice rows click to view details and sections").
-  // Its product lines still live in `expanded`, keyed by group -- the float
-  // renders that slot, so the loader/pager below is unchanged.
+  // Its product lines live in `lineCache`, keyed by group -- the float renders
+  // that slot, so the loader/pager below is unchanged. There is no inline
+  // expand any more: a row opens the float and nothing else (owner: "the
+  // invoice is doing click to expand. instead it should be click to open view
+  // detail float"), so the cache is named for what it is.
   const [detailGroup, setDetailGroup] = useState<InvoiceGroup | null>(null)
   const aliveRef = useRef(true)
   const requestRef = useRef(0)
@@ -148,7 +151,7 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
         // A filter change makes the open group's line set stale (the branch
         // filter also scopes lines), so the cache is dropped and the float
         // closes with it rather than showing lines from the old filter.
-        setExpanded({})
+        setLineCache({})
         setDetailGroup(null)
       })
       .catch((err: unknown) => {
@@ -163,7 +166,7 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
 
   const loadLines = useCallback((group: InvoiceGroup, linePage: number) => {
     const key = groupKeyOf(group)
-    setExpanded((current) => ({
+    setLineCache((current) => ({
       ...current,
       [key]: {
         lines: current[key]?.lines || [],
@@ -190,7 +193,7 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
           window.setTimeout(() => loadLines(group, nextPage), 0)
           return
         }
-        setExpanded((current) => (current[key] ? {
+        setLineCache((current) => (current[key] ? {
           ...current,
           [key]: {
             lines: Array.isArray(payload.lines) ? payload.lines : [],
@@ -204,7 +207,7 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
       })
       .catch((err: unknown) => {
         if (!aliveRef.current) return
-        setExpanded((current) => (current[key] ? {
+        setLineCache((current) => (current[key] ? {
           ...current,
           [key]: {
             ...current[key],
@@ -221,7 +224,7 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
   // shows its rows immediately instead of flashing a loader.
   const openGroup = (group: InvoiceGroup) => {
     setDetailGroup(group)
-    if (!expanded[groupKeyOf(group)]) loadLines(group, 1)
+    if (!lineCache[groupKeyOf(group)]) loadLines(group, 1)
   }
 
   const totals = data?.totals || {}
@@ -403,7 +406,7 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
       )}
 
       {detailGroup ? (() => {
-        const linesState = expanded[groupKeyOf(detailGroup)]
+        const linesState = lineCache[groupKeyOf(detailGroup)]
         const linePages = linesState ? Math.max(1, Math.ceil(linesState.total / linesState.pageSize)) : 1
         return (
           <InvoiceDetailFloat

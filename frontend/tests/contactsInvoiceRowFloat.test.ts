@@ -196,4 +196,41 @@ for (const file of ['ApInvoicesSection.tsx', 'ArInvoicesSection.tsx', 'SupplierP
 // had, the sweep above would be matching something other than the mobile split.
 assert.doesNotMatch(read('StockInInvoicesSection.tsx'), /md:hidden/, 'positive control: Stock-In rows already wrap and need no card mirror')
 
+// A row opens the float and does NOTHING else. The owner asked for this
+// twice -- "the invoice is doing click to expand. instead it should be click
+// to open view detail float" -- so the inline expanded region is gone, not
+// merely hidden beside the float: no aria-expanded on the row, no second
+// place that renders the same lines, and no `expanded` open/closed state
+// left to drift out of sync with what the float shows.
+for (const file of ['StockInInvoicesSection.tsx', 'ApInvoicesSection.tsx', 'ArInvoicesSection.tsx', 'SupplierPurchasesModal.tsx']) {
+  const source = read(file)
+  assert.doesNotMatch(source, /aria-expanded/, `${file}: a row announces a dialog, never an expanded region`)
+  assert.doesNotMatch(source, /const \[expanded, setExpanded\]/, `${file}: no inline expand state survives`)
+  assert.doesNotMatch(source, /toggleGroup|toggleRow|toggleInvoice/, `${file}: a row has no toggle -- it opens the float`)
+  // The invoice LINES may only be rendered inside the float. Measured against
+  // the float GUARD rather than the element, because Stock-In computes its
+  // line state inside the guard before reaching the element. AP/AR's own
+  // ledger table is not invoice lines, which is why only line markers count.
+  const float = source.indexOf('<InvoiceDetailFloat')
+  const guard = source.search(/\{detail\w* \? /)
+  assert.ok(float >= 0 && guard >= 0 && guard < float, `${file}: renders the shared float behind its own slot guard`)
+  for (const marker of ['linesState', '.lines.map(']) {
+    const at = source.indexOf(marker)
+    if (at < 0) continue
+    assert.ok(at > guard, `${file}: "${marker}" renders the invoice's lines outside the float -- the inline expand is back`)
+  }
+}
+
+// Positive control: the float itself is what holds the lines, so the Stock-In
+// lines table and its pager must genuinely be inside it (an assertion that
+// only ever says "no inline block" would pass on a section with no lines at
+// all).
+{
+  const stockIn = read('StockInInvoicesSection.tsx')
+  const float = stockIn.indexOf('<InvoiceDetailFloat')
+  assert.ok(stockIn.indexOf('data-invoice-ledger-scroll') > float, 'the Stock-In lines table is the float\'s content')
+  assert.ok(stockIn.indexOf('loadLines(detailGroup, nextPage)') > float, 'and its line pager pages the lines inside the float')
+  assert.match(stockIn, /const \[lineCache, setLineCache\]/, 'the per-group line cache is named for what it is, not for an expand that no longer exists')
+}
+
 console.log(`PASS ${surfaces.length} invoice lists open the shared float from a row click and clear it on close`)
