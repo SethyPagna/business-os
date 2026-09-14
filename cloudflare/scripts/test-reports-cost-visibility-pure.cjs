@@ -119,6 +119,24 @@ assert.equal(Object.hasOwn(admin, 'margin_pct'), true)
     'the transaction count stays public -- the checks above discriminate')
 }
 
+// routes/compat.ts's /api/compat/analytics and /api/compat/dashboard/startup
+// are a THIRD door for the same cost_usd/profit_usd/removal-loss block
+// (getSalesTotals is their source too). F1 (Sep 15 2026): this endpoint used
+// to run its OWN five-key-only strip (gateRemovalLosses) that never touched
+// cost_usd / profit_usd, so any role holding only the 'dashboard' permission
+// -- not 'reports' or 'sales' -- still received COGS and profit on the
+// Dashboard. Pin that it reuses THIS gate instead of a second bespoke one, so
+// the two surfaces cannot drift apart again.
+{
+  const compatSource = fs.readFileSync(path.join(root, 'src', 'routes', 'compat.ts'), 'utf8')
+  assert.match(compatSource, /import \{ gateTotals \} from '\.\/reports'/,
+    'routes/compat.ts must reuse reports.ts gateTotals, not a second bespoke gate')
+  assert.match(compatSource, /totals: gateTotals\(/, 'dashboardAnalytics totals must be gated through gateTotals')
+  assert.match(compatSource, /prevTotals: gateTotals\(/, 'dashboardAnalytics prevTotals must be gated through gateTotals')
+  assert.equal(/function gateRemovalLosses/.test(compatSource), false,
+    'the old five-key-only gate must be retired, not left beside gateTotals as a second door')
+}
+
 for (const input of [productSensitive, JSON.parse(JSON.stringify(productSensitive))]) {
   const employee = reports.gateProductRow({ line_sales_usd: 20, ...input }, false)
   for (const key of Object.keys(productSensitive)) assert.equal(Object.hasOwn(employee, key), false, `product ${key} hidden`)

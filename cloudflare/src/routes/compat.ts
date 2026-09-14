@@ -17,6 +17,7 @@ import { getFamilyStockAlertPage, getFamilyStockStats, type FamilyStockAlertStat
 import { loadLowStockConfig } from '../lib/lowStockSettings'
 import { businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localHourExpr, localTimeRangeClause } from '../lib/businessDateWindow'
 import { actorSnapshot } from '../lib/actorSnapshot'
+import { gateTotals } from './reports'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: any } }>()
 const DASHBOARD_STOCK_ALERT_PAGE_SIZE = 10
@@ -357,27 +358,6 @@ async function dashboardSummary(env: Env, query: Record<string, string>) {
   }
 }
 
-/**
- * The removal-loss block is COST money (stock priced at what it cost), so it
- * follows the same admin-only rule reports.ts's gateTotals applies -- and it
- * is STRIPPED, not zeroed, so a non-admin client cannot tell "hidden" from
- * "no losses". revenue_after_losses_usd goes with it: leaving it beside the
- * canonical revenue would hand back the loss by subtraction.
- *
- * Scoped to the five new keys on purpose. cost_usd / profit_usd have shipped
- * on this endpoint ungated since before this lane and narrowing them here
- * would silently change the Dashboard for non-admin roles; that exposure is
- * reported separately rather than widened or quietly fixed here.
- */
-function gateRemovalLosses(totals: Record<string, unknown>, isAdmin: boolean): Record<string, unknown> {
-  if (isAdmin) return totals
-  const {
-    removal_loss_usd, removal_loss_qty, removal_loss_unvalued_rows,
-    revenue_after_losses_usd, profit_after_losses_usd, ...rest
-  } = totals
-  return rest
-}
-
 async function dashboardAnalytics(env: Env, query: Record<string, string>, isAdmin: boolean) {
   const db = getDb(env)
   const range = dateRange(query)
@@ -508,8 +488,14 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>, isAdm
     `).all(analyticsParams),
   ])
   return {
-    totals: gateRemovalLosses((totals || {}) as unknown as Record<string, unknown>, isAdmin),
-    prevTotals: gateRemovalLosses((prevTotals || {}) as unknown as Record<string, unknown>, isAdmin),
+    // cost_usd / profit_usd and the removal-loss pair are the SAME admin-only
+    // money reports.ts's gateTotals already gates -- reused rather than
+    // re-implemented so the two surfaces cannot drift apart (F1, Sep 15
+    // 2026: this endpoint previously ran its own five-key strip and left
+    // cost_usd / profit_usd ungated, so a non-admin dashboard permission
+    // still saw COGS and profit).
+    totals: gateTotals((totals || {}) as unknown as Record<string, unknown>, isAdmin),
+    prevTotals: gateTotals((prevTotals || {}) as unknown as Record<string, unknown>, isAdmin),
     periodReturns: periodReturns || {},
     periodSupplierReturns: periodSupplierReturns || {},
     periodData: periodData || [],
