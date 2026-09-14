@@ -93,7 +93,11 @@ INSERT INTO inventory_movements
   ( 8,1,2,'remove',        7, 0.00,  0.00,'Dated stock count import', NULL,9,'2026-09-10 06:00:00',NULL),
   ( 9,2,2,'remove',        2, 0.00,  0.00,'Broken, removed entirely', NULL,9,'2026-09-10 07:00:00',77),
   (10,3,2,'remove',        6, 0.00,  0.00,'No cost anywhere',   NULL, 9,'2026-09-10 08:00:00',NULL),
-  (11,1,2,'remove',      100, 2.50,250.00,'Next month',         NULL, 9,'2026-10-02 03:00:00',NULL);
+  (11,1,2,'remove',      100, 2.50,250.00,'Next month',         NULL, 9,'2026-10-02 03:00:00',NULL),
+  -- Writers the condition-tag lane named (p3/tag, Sep 14 2026). Both are
+  -- removals in the ledger and NEITHER is a loss here:
+  (12,1,2,'write_off',     8, 0.00,  0.00,'Removed product Widget',   NULL,9,'2026-09-10 09:00:00',NULL),
+  (13,1,2,'adjustment',   -4, 0.00,  0.00,'Merged duplicate into #1', NULL,9,'2026-09-10 09:30:00',NULL);
 `)
 
 // The business-day clause, byte-copied from lib/businessDateWindow.ts's
@@ -123,6 +127,31 @@ function readRows(params = { startDate: '2026-09-10', endDate: '2026-09-10', bra
   ok('SQL: a negative-quantity stock-session undo (#7) is excluded')
   ok('SQL: a dated stock-count import removal (#8) is excluded')
   ok('SQL: a removal outside the window (#11) is excluded')
+  ok('SQL: a product-deletion write_off (#12) is excluded -- its undo writes a plain "add", with no revert marker to exclude it by, so counting it would over-report every undone deletion as a permanent loss')
+  ok('SQL: a duplicate-merge adjustment (#13) is excluded -- a negative-quantity catalog cleanup, not destroyed goods')
+
+  // The set is ONE constant so an owner ruling moves the boundary in one edit,
+  // and the two types above are outside it by NAME, not by accident.
+  assert.deepEqual([...lib.REMOVAL_LOSS_MOVEMENT_TYPES], ['remove'])
+  for (const type of ['write_off', 'adjustment', 'damage_out', 'transfer_out', 'sale']) {
+    assert.equal(lib.REMOVAL_LOSS_MOVEMENT_TYPES.includes(type), false, `${type} is not a removal loss`)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 1b. Valuation happens at READ time. Several removal writers book no cost
+//     columns at all, and inventory_movements.unit_cost_usd is DEFAULT 0 since
+//     migration 0001 -- so a stored 0 is ABSENCE, not free goods. #9 is such a
+//     row and must be priced from its lot, not counted as $0.00.
+// ---------------------------------------------------------------------------
+{
+  const row = readRows().find((r) => Number(r.id) === 9)
+  assert.ok(row, '#9 is selected')
+  assert.equal(Number(row.unit_cost_usd), 0, 'the movement itself carries no cost')
+  assert.equal(Number(row.total_cost_usd), 0)
+  assert.equal(Number(row.fallback_unit_cost_usd), 4, 'the lot price is read at query time')
+  assert.equal(lib.removalRowLossUsd(row), 8, '2 units x the $4.00 lot cost -- never zero')
+  ok('a cost-column-less removal is valued from its lot at read time, not booked at $0.00')
 }
 
 // ---------------------------------------------------------------------------

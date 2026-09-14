@@ -48,6 +48,32 @@
  *                             until that undo carries a marker; over-counting
  *                             the owner's losses is worse than omitting a
  *                             class they did not name.
+ *   'adjustment'              duplicate-product merge write-off
+ *                             (routes/products.ts, the `writeOffStock` branch)
+ *                             -- a NEGATIVE-quantity row cleaning up a phantom
+ *                             duplicate catalog row, not destroyed goods.
+ *                             Excluded twice over: wrong type, and the
+ *                             `quantity > 0` guard below.
+ *
+ * On the condition-tag transition table (p3/tag, Sep 14 2026): a tagged HOLD
+ * writes 'damage_out' and is correctly NOT a loss here; a direct removal writes
+ * 'remove' and IS; disposing a held row writes 'write_off'. That last one
+ * cannot simply be added to the set above, because 'write_off' is ALSO
+ * productDelete.ts's type and productDelete's undo has no 'revert:' marker --
+ * adding it today would permanently over-count every undone product deletion.
+ * Adding 'write_off' therefore needs a discriminator between the two writers
+ * first (a reference_id on the dispose row would be enough); that is named as
+ * an owner/lane ruling, not silently assumed.
+ *
+ * VALUATION IS AT READ TIME, not at write time. Several removal writers book
+ * no cost columns at all (productDelete.ts, datedStockCountApply.ts, the
+ * products.ts merge write-off), and `inventory_movements.unit_cost_usd` is
+ * DEFAULT 0 since migration 0001, so a stored 0 means ABSENCE, not free goods.
+ * removalRowLossUsd therefore treats 0 as missing and falls through to
+ * COALESCE(product_batches.unit_cost_usd, products.cost_price_usd) -- see
+ * REMOVAL_LOSS_SELECT below. Nothing needs cost columns added at write time,
+ * and a row that is uncostable everywhere is counted in `unvalued_rows` rather
+ * than being silently valued at zero.
  */
 export const REMOVAL_LOSS_MOVEMENT_TYPES = ['remove'] as const
 
