@@ -910,7 +910,11 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   const exportReceiptVariant = async (printTools: ReceiptPrintModule, mode: ReceiptExportMode, variant: ReceiptVariant, previewWindow?: Window | null) => {
     const target = variant === 'compact' ? compactPrintRef.current : printRef.current
     const variantSettings = variant === 'compact' ? compactPrintSettings : fullPrintSettings
-    if (!target) return
+    if (!target) {
+      // Nothing to print: do not leave the blank tab opened in the tap behind.
+      try { previewWindow?.close?.() } catch { /* already closed */ }
+      return
+    }
     const title = variantTitle(variant)
     if (mode === 'image') {
       await printTools.downloadReceiptImage(target, {
@@ -951,6 +955,9 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
       const printTools = await loadReceiptPrintModule()
       await exportReceiptVariant(printTools, mode, variant, previewWindow)
     } catch (error) {
+      // printReceipt closes the window on ITS failures; a failed module load
+      // happens before it ever sees the window, so close it here.
+      try { previewWindow?.close?.() } catch { /* already closed */ }
       window.alert(getErrorMessage(error, t?.('unable_generate_receipt_pdf') || 'Unable to generate receipt PDF'))
     } finally {
       setPdfBusy('')
