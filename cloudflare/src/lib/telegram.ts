@@ -936,7 +936,10 @@ export function telegramMoney(usd: unknown, khr: unknown): string { return money
 //   Discount / Net Total / Paid / Delivery driver.
 // Pure and exported so scripts/test-telegram-messages-pure.cjs pins the exact
 // shape; routes/sales.ts only assembles the input from values it already holds.
-export type TelegramSaleItem = { name: string; quantity: number; unitPriceUsd: number; basePriceUsd?: number | null; lineTotalUsd: number }
+// promotionLabel: the promotion's title as captured on the sale line
+// (product_discount_label), printed inside the cut's parentheses so the
+// line names the offer as well as the amount: "(−$0.20 Summer sale)".
+export type TelegramSaleItem = { name: string; quantity: number; unitPriceUsd: number; basePriceUsd?: number | null; lineTotalUsd: number; promotionLabel?: string | null }
 export type TelegramSaleSummary = {
   status: string; createdAt?: string | null; receiptNumber: string; cashier?: string | null
   customer?: string | null; phone?: string | null; branch?: string | null
@@ -1006,7 +1009,8 @@ export function formatSaleTelegramLines(sale: TelegramSaleSummary): string[] {
       ? round2(Math.max(0, round2(grossUnitPrice * quantity) - netLineTotal))
       : 0
     const displayedUnitPrice = lineDiscount > 0 ? grossUnitPrice : netUnitPrice
-    return `• ${cleanLine(item.name, 100)} ${quantity} × ${usd(displayedUnitPrice)}${lineDiscount ? ` (−${usd(lineDiscount)})` : ''} = ${usd(netLineTotal)}`
+    const promotionLabel = lineDiscount > 0 ? cleanLine(item.promotionLabel, 40) : ''
+    return `• ${cleanLine(item.name, 100)} ${quantity} × ${usd(displayedUnitPrice)}${lineDiscount ? ` (−${usd(lineDiscount)}${promotionLabel ? ` ${promotionLabel}` : ''})` : ''} = ${usd(netLineTotal)}`
   })
   const deliveryFee = Number(sale.deliveryFeeUsd) || 0
   // Who paid it comes from the ONE rule that produced total_usd

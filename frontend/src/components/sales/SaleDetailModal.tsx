@@ -104,6 +104,9 @@ interface SaleLineItem {
   base_price_khr?: number | string | null
   product_discount_usd?: number | string | null
   product_discount_khr?: number | string | null
+  // The promotion's title as captured on the line at sale time; named
+  // beside the cut so staff can see which offer produced it.
+  product_discount_label?: string | null
   manual_discount_usd?: number | string | null
   manual_discount_khr?: number | string | null
   manual_discount_type?: string | null
@@ -2035,7 +2038,7 @@ export default function SaleDetailModal({
                               <input id={`amend-discount-${lineId}`} aria-label={t('discount') || 'Discount'} type="number" min="0" step="0.01" inputMode="decimal" disabled={amendSaving} value={amendDiscountText} onChange={(event) => { if (!amendDiscountType) setAmendDiscountType('fixed'); setAmendDiscountText(event.target.value) }} style={{ width: saleEditorInputWidth(amendDiscountText) }} className="h-7 min-w-10 rounded border border-amber-300 bg-white px-1 py-0.5 text-right text-[11px] dark:border-amber-700 dark:bg-gray-800" />
                               <button type="button" disabled={amendSaving} aria-label={translateOr('clear_discount', 'Clear discount', 'លុបការបញ្ចុះតម្លៃ')} onClick={() => { setAmendDiscountType(null); setAmendDiscountText('0') }} className="rounded px-1 py-0.5">×</button>
                             </div>
-                          </div> : <span className="inline-flex items-baseline gap-1">{unknownRecordedUnit ? '—' : fmtUSD(displayPrice)}{!unknownRecordedUnit && !unknownRecordedTotal && displayDiscount > 0 ? <span className="text-[10px] text-amber-700 dark:text-amber-400">(-{fmtUSD(displayDiscount)})</span> : null}</span>}
+                          </div> : <span className="inline-flex items-baseline gap-1">{unknownRecordedUnit ? '—' : fmtUSD(displayPrice)}{!unknownRecordedUnit && !unknownRecordedTotal && displayDiscount > 0 ? <span className="text-[10px] text-amber-700 dark:text-amber-400">(-{fmtUSD(displayDiscount)}{item.product_discount_label ? ` ${item.product_discount_label}` : ''})</span> : null}</span>}
                         </td>
                         <td data-sale-line-total="" className="whitespace-nowrap px-1.5 py-1.5 text-right align-top text-[11px] font-semibold tabular-nums sm:px-2">{unknownRecordedTotal && !preview ? '—' : fmtUSD(displayTotal)}</td>
                         <td data-sale-line-edit="" className="whitespace-nowrap px-1.5 py-1.5 text-right align-top sm:px-2">

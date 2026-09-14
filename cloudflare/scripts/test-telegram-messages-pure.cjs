@@ -78,8 +78,8 @@ const lines = telegram.formatSaleTelegramLines({
   status: 'paid', createdAt: '2026-09-03T03:04:05.000Z', receiptNumber: '20260903-100405', cashier: 'Za',
   customer: 'Sok Dara', phone: '012 345 678', branch: 'Shop',
   items: [
-    { name: 'Coca Cola 330ml', quantity: 2, unitPriceUsd: 0.5, basePriceUsd: 0.6, lineTotalUsd: 1 },
-    { name: 'Rice 5kg', quantity: 1, unitPriceUsd: 7.25, basePriceUsd: 7.25, lineTotalUsd: 7.25 },
+    { name: 'Coca Cola 330ml', quantity: 2, unitPriceUsd: 0.5, basePriceUsd: 0.6, lineTotalUsd: 1, promotionLabel: 'Summer sale' },
+    { name: 'Rice 5kg', quantity: 1, unitPriceUsd: 7.25, basePriceUsd: 7.25, lineTotalUsd: 7.25, promotionLabel: 'Ignored: no cut on this line' },
   ],
   exchangeRate: 4100, isDelivery: true, deliveryFeeUsd: 1.5, deliveryPaidBy: 'customer',
   driver: { name: 'Tuk Tuk Dara', phone: '099 111 222' },
@@ -94,7 +94,9 @@ assert.deepEqual(lines, [
   'Customer: Sok Dara',
   'Tel: 012 345 678',
   'Branch: Shop',
-  '• Coca Cola 330ml 2 × $0.60 (−$0.20) = $1.00',
+  // P3-L3: the promotion is named inside the cut's parentheses; a label on
+  // a line with no cut prints nothing (the offer did not apply).
+  '• Coca Cola 330ml 2 × $0.60 (−$0.20 Summer sale) = $1.00',
   '• Rice 5kg 1 × $7.25 = $7.25',
   'Delivery service: $1.50',
   'Total: $9.75',

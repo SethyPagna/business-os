@@ -1637,7 +1637,7 @@ app.post('/', async (c) => {
       customer: saleCustomerName,
       phone: saleCustomerPhone,
       branch: branchRow?.name || null,
-      items: priced.map((item) => ({ name: item.product_name, quantity: item.quantity, unitPriceUsd: item.unitPriceUsd, basePriceUsd: Number(item.base_price_usd) || null, lineTotalUsd: item.lineTotalUsd })),
+      items: priced.map((item) => ({ name: item.product_name, quantity: item.quantity, unitPriceUsd: item.unitPriceUsd, basePriceUsd: Number(item.base_price_usd) || null, lineTotalUsd: item.lineTotalUsd, promotionLabel: item.product_discount_label || null })),
       exchangeRate,
       isDelivery,
       deliveryFeeUsd,

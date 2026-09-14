@@ -677,6 +677,14 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
                         take extra space) -- a tiny marker beside the title, like
                         the SKU chip, not its own line. */}
                     {tierTag ? <span className="ml-1 text-[10px] font-semibold text-emerald-700">{tierTag}</span> : null}
+                    {/* The promotion that produced the cut, captured on the
+                        line at sale time (product_discount_label -- the rule's
+                        title, only when the rule shows it). Same tiny inline
+                        marker as the tier tag, in the savings colour, so the
+                        customer can read WHICH offer the "(-$x)" below is;
+                        beside the name and not in the Price cell, because that
+                        cell's width is pinned to one figure (N33 above). */}
+                    {hasItemDiscount && item.product_discount_label ? <span className="ml-1 text-[10px] font-semibold text-red-600">{item.product_discount_label}</span> : null}
                     {tpl.show_item_sku && item.sku ? <span className="ml-1 text-[10px] text-gray-500">[{item.sku}]</span> : null}
                   </div>
                 </div>

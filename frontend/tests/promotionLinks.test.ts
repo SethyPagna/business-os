@@ -91,4 +91,19 @@ for (const good of ['https://example.com/promo', 'http://example.com', '/?legal=
   assert.equal(safeLinkUrl(good), good, `${good} passes unchanged`)
 }
 
+// The promotion is NAMED beside its amount wherever a sale line prints a
+// cut: the sale line already carries product_discount_label (the rule's
+// title, captured at sale time by capturedPricingMetadata), and none of the
+// three surfaces rendered it.
+const receipt = read('src/components/receipt/Receipt.tsx')
+assert.match(receipt, /\{hasItemDiscount && item\.product_discount_label \? <span className="ml-1 text-\[10px\] font-semibold text-red-600">\{item\.product_discount_label\}<\/span> : null\}/, 'the receipt prints the promotion as a tag beside the name, only when the line has a cut')
+const modal = read('src/components/sales/SaleDetailModal.tsx')
+assert.match(modal, /product_discount_label\?: string \| null/, 'the modal line type carries the label')
+assert.match(modal, /\(-\{fmtUSD\(displayDiscount\)\}\{item\.product_discount_label \? ` \$\{item\.product_discount_label\}` : ''\}\)/, 'the modal names it inside the cut parentheses')
+const telegram = read('../cloudflare/src/lib/telegram.ts')
+assert.match(telegram, /promotionLabel\?: string \| null/, 'the Telegram item carries it')
+assert.match(telegram, /const promotionLabel = lineDiscount > 0 \? cleanLine\(item\.promotionLabel, 40\) : ''/, 'and prints it only with a cut')
+const sales = read('../cloudflare/src/routes/sales.ts')
+assert.match(sales, /promotionLabel: item\.product_discount_label \|\| null/, 'routes/sales.ts passes the captured label through')
+
 console.log('promotionLinks tests passed')
