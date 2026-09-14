@@ -31,6 +31,13 @@
     max-width: 100%;
     overflow-x: hidden;
     touch-action: pan-x pan-y;
+    /* iOS/Android WebKit flash a translucent grey box over any tapped element
+       with a click handler, including whole table rows and cards. The app
+       already gives every tappable surface its own `active:` state, so the
+       default highlight only ever arrives as a second, differently-shaped and
+       differently-timed flash on top of it. Inherited, so one declaration on
+       <html> covers the whole app and both portals. */
+    -webkit-tap-highlight-color: transparent;
   }
   body {
     margin: 0;
