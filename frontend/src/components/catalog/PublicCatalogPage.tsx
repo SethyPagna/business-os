@@ -648,8 +648,9 @@ export default function PublicCatalogPage() {
   const [brandFilter, setBrandFilter] = useState<string[]>([])
   const [branchFilter, setBranchFilter] = useState<string[]>([])
   const [stockFilter, setStockFilter] = useState<string[]>([])
-  // G1b: the storefront's single promo facet -- "show only deals".
-  const [promoOnly, setPromoOnly] = useState(false)
+  // G1b: the storefront's promo facet -- '' (off), 'promoted' (the "only
+  // deals" toggle) or 'rule:<id>' (a campaign chip on the promo strip).
+  const [promoFacet, setPromoFacet] = useState('')
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [loading, setLoading] = useState(() => !(cachedPortal?.config || cachedPortal?.products?.length))
   const [refreshingProducts, setRefreshingProducts] = useState(false)
@@ -972,7 +973,7 @@ export default function PublicCatalogPage() {
 
   useEffect(() => {
     setProductPage(1)
-  }, [brandFilter, branchFilter, categoryFilter, deferredSearch, productInitial, promoOnly, stockFilter])
+  }, [brandFilter, branchFilter, categoryFilter, deferredSearch, productInitial, promoFacet, stockFilter])
 
   // The shopper's 20/50/100 choice from the pager. Kept in the ref as well as
   // in state so every later bootstrap keeps deferring to it, persisted for the
@@ -1006,7 +1007,7 @@ export default function PublicCatalogPage() {
       // buildPortalProductFilters), but dropping it here as well keeps a
       // stale selection from ever being sent in the first place.
       stockState: config.showStockStatus === false ? '' : stockFilter.join(','),
-      promo: promoOnly ? 'promoted' : '',
+      promo: promoFacet,
       initial: productInitial,
     }
     withLoaderTimeout(() => getCatalogApi().searchPortalCatalogProducts?.(params) || Promise.reject(new Error('Portal product search API unavailable')), 'Portal product search', PUBLIC_PORTAL_PRODUCT_SEARCH_TIMEOUT_MS)
@@ -1068,7 +1069,7 @@ export default function PublicCatalogPage() {
     return () => {
       invalidateTrackedRequest(productRequestRef)
     }
-  }, [brandFilter, branchFilter, categoryFilter, config.showCatalog, config.showStockStatus, deferredSearch, loading, productInitial, productPage, productPageSize, products.length, promoOnly, stockFilter])
+  }, [brandFilter, branchFilter, categoryFilter, config.showCatalog, config.showStockStatus, deferredSearch, loading, productInitial, productPage, productPageSize, products.length, promoFacet, stockFilter])
 
   // Re-arm on mount, not just tear down: React 18 StrictMode (dev) runs
   // mount -> cleanup (simulated unmount) -> mount again on the SAME refs.
@@ -1102,7 +1103,7 @@ export default function PublicCatalogPage() {
   const versionedBusinessLogo = withAssetVersion(displayConfig.businessLogo, displayConfig.businessLogo || displayConfig.businessName)
   const versionedBusinessCover = withAssetVersion(displayConfig.businessCover, displayConfig.businessCover || displayConfig.businessName)
   const selectedStockBranch = branchFilter[0] || 'all'
-  const portalActiveFilterCount = categoryFilter.length + brandFilter.length + branchFilter.length + (displayConfig.showStockStatus === false ? 0 : stockFilter.length) + (productInitial === 'all' ? 0 : 1) + (promoOnly ? 1 : 0)
+  const portalActiveFilterCount = categoryFilter.length + brandFilter.length + branchFilter.length + (displayConfig.showStockStatus === false ? 0 : stockFilter.length) + (productInitial === 'all' ? 0 : 1) + (promoFacet ? 1 : 0)
   const publicFaqItems = normalizeFaqItems(displayConfig.faqItems)
   const mapEmbedUrl = displayConfig.showGoogleMap && activeTab === 'about' ? normalizeGoogleMapsEmbed(displayConfig.googleMapsEmbed || '') : ''
   const socialLinks = [
@@ -1193,7 +1194,7 @@ export default function PublicCatalogPage() {
     setBrandFilter([])
     setBranchFilter([])
     setStockFilter([])
-    setPromoOnly(false)
+    setPromoFacet('')
     setProductInitial('all')
   }
   const openProductGallery = (product: CatalogProduct, startIndex = 0) => {
@@ -1366,6 +1367,30 @@ export default function PublicCatalogPage() {
     setProductDetailView({ open: true, product, gallery, status, pricePresentation, showPrices: !!displayConfig.showPrices })
   }
   const closeProductDetailView = () => setProductDetailView((prev) => ({ ...prev, open: false }))
+  // The announcement strip and the promotion cards link to a product by id.
+  // It is usually not on the loaded page, and there is no public by-id
+  // route on purpose (it would be a second copy of the visibility, stock
+  // and redaction rules), so it goes through the same search endpoint with
+  // productId. A product that no longer answers (deleted, hidden, out of
+  // stock with out-of-stock hidden) falls back to searching its name, so
+  // the tap always does something visible.
+  const openProductById = (productId: number, productName: string) => {
+    const loaded = products.find((product) => Number(product.id) === productId)
+    if (loaded) {
+      openProductDetail(loaded)
+      return
+    }
+    withLoaderTimeout(() => getCatalogApi().searchPortalCatalogProducts?.({ productId, pageSize: 1 }) || Promise.reject(new Error('Portal product search API unavailable')), 'Portal product lookup', PUBLIC_PORTAL_PRODUCT_SEARCH_TIMEOUT_MS)
+      .then((result) => {
+        if (!aliveRef.current) return
+        const [product] = mergePortalCatalogProducts(((result || {}) as LooseRecord).items)
+        if (product) openProductDetail(product)
+        else setSearch(productName)
+      })
+      .catch(() => {
+        if (aliveRef.current) setSearch(productName)
+      })
+  }
 
   const catalogSection = displayConfig.showCatalog ? (
     <Suspense fallback={<div className="portal-empty-card">{copy('catalogLoading', 'Loading products...')}</div>}>
@@ -1401,8 +1426,8 @@ export default function PublicCatalogPage() {
         branchFilter={branchFilter}
         setBranchFilter={setBranchFilter}
         stockFilter={stockFilter}
-        promoOnly={promoOnly}
-        setPromoOnly={setPromoOnly}
+        promoFacet={promoFacet}
+        setPromoFacet={setPromoFacet}
         setStockFilter={setStockFilter}
         toggleFilterValue={toggleFilterValue}
         toggleFilterValues={toggleFilterValues}
@@ -1418,6 +1443,7 @@ export default function PublicCatalogPage() {
         normalizeProductGallery={normalizeProductGallery}
         openProductGallery={openProductGallery}
         openProductDetail={openProductDetail}
+        openProductById={openProductById}
         openPortalImage={openPortalImage}
         formatPortalPrice={formatPortalPrice}
         replaceVars={(template: string, values: Record<string, string | number>) => replaceVars(template, values)}
@@ -1438,7 +1464,7 @@ export default function PublicCatalogPage() {
 
   const promotionsSection = activeTab === 'products' ? (
     <Suspense fallback={null}>
-      <PortalPromotionsBanner copy={copy} onOpenImage={openPortalImage} />
+      <PortalPromotionsBanner copy={copy} onOpenImage={openPortalImage} onOpenProduct={openProductById} />
     </Suspense>
   ) : null
 

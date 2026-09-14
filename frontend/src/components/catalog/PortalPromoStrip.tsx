@@ -24,7 +24,7 @@ import {
 type PortalProduct = Record<string, unknown> & { id: number | string; name?: string }
 
 type StripItem =
-  | { kind: 'rule'; key: string; label: string; color: string }
+  | { kind: 'rule'; key: string; ruleId: number; label: string; color: string }
   | { kind: 'product'; key: string; product: PortalProduct; label: string; priceText: string; color: string }
 
 const MAX_PRODUCT_ITEMS = 12
@@ -36,12 +36,19 @@ export default function PortalPromoStrip({
   copy,
   formatPrice,
   openProductDetail,
+  promoFacet = '',
+  setPromoFacet,
 }: {
   products?: PortalProduct[]
   promotionRules?: PromotionRule[]
   copy: (key: string, fallback?: string) => string
   formatPrice: (usd: unknown, khr: unknown) => string
   openProductDetail?: (product: PortalProduct) => void
+  // The campaign chip narrows the grid to that rule's products (search
+  // param promo=rule:<id>); tapping the pressed chip clears it. Optional so
+  // a surface without server-side search renders the chips inert.
+  promoFacet?: string
+  setPromoFacet?: (value: string) => void
 }) {
   const trackRef = useRef<HTMLDivElement | null>(null)
   const pausedRef = useRef(false)
@@ -57,7 +64,7 @@ export default function PortalPromoStrip({
       if (!rule.show_title) continue
       const label = rule.title || promotionAutoLabel(rule)
       if (!label) continue
-      out.push({ kind: 'rule', key: `rule-${rule.id}`, label, color: rule.badge_color || '#e11d48' })
+      out.push({ kind: 'rule', key: `rule-${rule.id}`, ruleId: rule.id, label, color: rule.badge_color || '#e11d48' })
     }
     let taken = 0
     for (const product of products) {
@@ -136,9 +143,17 @@ export default function PortalPromoStrip({
           // so the old `text-white` on it was a coin flip: white on a pale
           // yellow chip is ~1.1:1 and the label disappears. Pick the better
           // ink and nudge the chip itself only as far as AA actually needs.
-          <span
+          // Pressed = the grid is narrowed to this campaign; the ring is the
+          // only extra mark so the merchant colour still reads as the chip.
+          <button
             key={item.key}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold shadow-sm"
+            type="button"
+            disabled={!setPromoFacet}
+            aria-pressed={promoFacet === `rule:${item.ruleId}`}
+            onClick={() => setPromoFacet?.(promoFacet === `rule:${item.ruleId}` ? '' : `rule:${item.ruleId}`)}
+            className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold shadow-sm ${
+              promoFacet === `rule:${item.ruleId}` ? 'ring-2 ring-slate-900 ring-offset-1 dark:ring-neutral-100' : ''
+            }`}
             style={{
               backgroundColor: ensureAccessibleSurface(item.color, 'text', PORTAL_MERCHANT_COLOR_DEFAULTS.promoRuleChip).background,
               color: ensureAccessibleSurface(item.color, 'text', PORTAL_MERCHANT_COLOR_DEFAULTS.promoRuleChip).color,
@@ -146,7 +161,7 @@ export default function PortalPromoStrip({
           >
             <BadgePercent className="h-3.5 w-3.5" aria-hidden="true" />
             {item.label}
-          </span>
+          </button>
         ) : (
           <button
             key={item.key}
