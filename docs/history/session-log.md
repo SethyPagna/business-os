@@ -19307,3 +19307,100 @@ also explicit gates. Other transfer/adjustment/minimize/pagination/security/4dp/
 barcode/full-reference tasks remain tracked, not complete. No whole-goal success
 claim; native goal stays paused/incomplete. Full evidence and recovery notes in
 docs/fleet/2026-09-05-production-usability.md.
+
+## Part 611 (Sep 14 2026, Claude Fable coordinator)  precision v1 release: takeover, refutation, fixes, gates, deploy
+
+Ask (owner): read CLAUDE_HANDOFF.md and AGENTS.md, verify the Codex checkpoint, finish
+the remaining integration and tests, deploy only after verification. Rulings taken by
+AskUserQuestion: apply 01580161 during the deploy with backup bookmark and pre/post
+assertions; include the N55N57 wave; reproduce and fix the return-cancel gap first;
+push the candidate branch and leave main; storefront pager keeps the selector, before
+Back; Codex paused, Claude sole writer; proceed automatically when green. Mid-way the
+owner made the session supervisor/manager/finalizer: it investigates, refutes and
+checks itself, distributes implementation to mixed-model subagents in isolated
+worktrees, and every release must add tests for the error classes seen before (blank
+page, runtime errors, glitches, slowness, wrong calculations, zombie code, orphans).
+
+Work, in commit order on codex/precision-final-candidate-20260914 after c27c7748:
+cbbec41e bf19f957 ace422a9 ac80f73b bad260dd dadccb08 (Worker harness: 22 loader
+gaps for the saleMoneyPrecision kernel, Miniflare cwd, v1 contracts in
+sale-add-items / delivery-add / amendments locks); e663de8b (N56/N57 portal locks;
+message over-claims N55, whose coverage is the pre-existing barcodeScannerState test);
+0ea7bcb4 fix(returns) sale returnable after a cancelled partial return + native
+sequence test; a1d55f12 feat(portal) page-size selector [20/50/100][Back][page /
+total][Next], persisted per viewer (reverses the 2026-09-07 removal by owner
+decision); 1defc523 fix(portal) blank storefront on blocked site data (pre-existing
+since 0d41b6f4: the store list sat outside the try) and the one-round-trip over-fill
+when stored size != bootstrap size (skeletons held, no prefix seeded  the bootstrap
+order promoted/brand/name is not the A-Z browse order); 7e082a62 fix(portal)
+translate-reload marker guarded; 2bc6d86d test(frontend) startupResilience (20),
+storefrontPagerScenarios (12), performanceBudgets (8); a34799f8 chore(worker) 44
+unreferenced imports removed + zombie-import gate (205 files, empty allowlist);
+a332a8cf test(worker) seeded money-invariant fuzz; 4b4b078d test(worker)
+orphan-record gate (200 relations / 170 tables, 11 writers, 2 permanent positive
+controls) + ops/scripts/audit/orphan-audit.sql; 139fcbf8 fix(returns) the SALE
+decides a return's money version.
+
+The refutation that blocked the release: the Fable adversarial backend lane (real
+routers on Miniflare/D1) showed that POST /api/returns with a body lacking
+money_precision_version  what every pre-release cached client sends  was accepted
+on a v1 sale, priced on the legacy gross path (3 x 10.01 line, 40.04 sale discount,
+payable 20.02: paid 30.03), written as a v0 row, after which every v1 quote on that
+sale answered money_precision_invalid_legacy_shape forever. Root: returnCreateAction
+validated the version only when present; returns.ts chose isMoneyV1 from the request.
+Fix (opus lane, isolated worktree): two locks on create (before canonicalisation with
+the idempotency receipt hoisted so replays still replay; write-adjacent on the sale
+row the handler loads) and one on edit, all 409 money_precision_review_needed, the
+code POST /api/sales already uses. Writer audit: only two INSERT INTO returns exist
+(customer create, supplier return without a sale); bulk cancel/restore, undo
+appliers, returnsStock and the name-snapshot writers touch no money or version. New
+native test test-customer-return-legacy-body-v1-sale-native.cjs proven red on the
+2bc6d86d source (200 !== 409, row 30.03 written) and green after. The coordinator
+re-ran the original attack probe against the fixed tree: S9a/S9b/S9c 409 with
+nothing paid, S9d v1 quote 200. Production could not have been hit: the v1 columns
+did not exist there until this release's migrations.
+
+Certification of 139fcbf8 in fresh detached worktrees: frontend tree identical to
+2bc6d86d, whose gate was 418/418 + verify:i18n + build/postbuild; build from the
+final tip passes (28 chunks / 804,175 bytes catalog closure, 36-chunk public
+preload, 261 chunks zero cycles). Worker: tsc clean; 390 runs (388 scripts + 2
+F57_NATIVE_D1 variants): 388 green, 2 red  test-sale-customer-safety-native and
+test-sale-return-money-precision-native, both logs ending in PASS lines with no
+failure text (silent workerd death under sweep contention); isolated PowerShell
+reruns exit 0 in 69 s and 13 s. Recorded as such, not counted green silently. The
+cf-gate loop prints RED(0) because $? is read after the counter assignment  a
+harness cosmetic; the exit codes come from the reruns.
+
+Production sequence (authorised): branch pushed (origin tip = 139fcbf8);
+d1-assert pre; wrangler migrations list showed exactly 01580161 pending (0157
+exists only on an unmerged stock-lot branch; production tail was 0156); npm run
+migrate:remote applied all four (ids 153156); d1-assert post identical
+fingerprints, columns and triggers present, legacy rows untouched, snapshots null;
+frontend built from the tip in the candidate worktree (three frontend/public/*.js
+line-ending-only diffs restored before stamping, content diff 0); npm run deploy
+from the clean tree -> Worker f5b89429-6109-4627-87ff-a868292e4225 at 100%,
+/api/runtime/version revision 139fcbf8faa4 sourceHash e07b68d574d2a4cf on both
+hosts; storefront and admin shells 200 with root and bootstrap; portal search
+pageSize 20/50/100 honoured and 500 capped to 100; bootstrap 50 products. The
+in-app browser was denied external navigation in this session, so the visual smoke
+is HTTP-level only.
+
+Findings documented, not fixed (owner rulings or later lanes): old cached clients
+get 409 money_precision_review_needed on new sales and returns  the offline queue
+keeps the row and the server message, stops draining, and the sale is re-keyed in
+the updated app; the code has no en/km entry so the server sentence shows; admin
+catalog preview shares the shopper page-size key and shows the selector;
+zero-result search hides the pager; PageSizeSelect lacks arrow-key roving; middle
+return of a sub-cent cohort can be refused by the payout guard; sale-id/return-id
+collision in inventory_movements.reference_id can false-409 return create;
+sale_amendments.sale_item_id dangles by design; trg_sale_items_ai mints a revision
+row for a missing sale; v0 zero-discount basket records -0; a v1 quote on a
+null-snapshot line answers product_merge_lineage_conflict (misleading code);
+noUnusedLocals blocked by 28 further unused locals; error boundary text is
+hard-coded English. Rollback of the Worker after v1 rows exist is application-only.
+Not certified here: physical iOS/PWA, camera, printer.
+
+Scratchpad evidence (session f12ec59a): final-139fcbf8-logs/ (tsc, per-script logs,
+summary.txt), d1-pre-final.txt, d1-post-final.txt, d1-migrate-remote.txt,
+deploy-139fcbf8.log, fe-build-139fcbf8.log, vb-logs/attack3-on-139fcbf8.log,
+release-ledger.md.

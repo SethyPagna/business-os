@@ -300,3 +300,19 @@ Remaining: F46 combined conflict review/execution and truthful saved run/undo st
 Production remains c2eb9d57/Worker3931ea55,100%. Next isolated release includes F53 permission-refresh coalescing and session-generation isolation (independent review PASS); F54 HTTP invalidation/in-flight ownership and authoritative server-cache precedence (69 focused checks plus512 independent timing schedules); U05 selected positive profit headline stays green in both themes. Source b2299a2b is integrated, not deployed. Existing callbacks that write persistent queryCache/IndexedDB and already-started caller results are outside F54's proven shared-HTTP-cache boundary. No backend source or migration changes in this follow-up.
 
 F46 is NOT in this candidate. Schema/backup/reset are independently approved locally; backend/UI parity still active. Required corrections: actionable-only manifest with blocked cases shown separately, exact same-request manual resume, changed-value markers after re-preview, complete image counts/primary indication. No incomplete F46 runtime or migration0136 is deployed. U13–U15 mobile Sales layouts are active separately.
+
+## September 14 precision release LIVE
+
+| Item | State | Evidence |
+| --- | --- | --- |
+| Money precision v1 (sales, add items, amendments, returns entitlement) | **Deployed**  Worker f5b89429, commit 139fcbf8 | Migrations 01580161 applied to production D1 (ids 153156), schema-only, pre/post fingerprints identical; rollback after v1 rows is application-only. |
+| Return-cancel gap (sale returnable after a cancelled partial return) | **Deployed** | 0ea7bcb4 + native sequence test. |
+| Legacy return body on a v1 sale overpaid (adversarial finding) | **Deployed** fix | 139fcbf8: the sale decides the money version; 409 money_precision_review_needed on create and edit; red/green proof; attack probe re-run clean. Could not have fired in production before this release. |
+| Storefront pager selector [20/50/100] [Back] [page / total] [Next] | **Deployed** (owner reversal of the Sep 7 removal) | a1d55f12; live pageSize 20/50/100 honoured, 500 capped to 100. |
+| Storefront blank page on blocked site data; over-fill glitch | **Deployed** fixes | 1defc523, 7e082a62. |
+| N55N57 wave | **Deployed** | N56/N57 locks e663de8b; N55 coverage pre-existing. |
+| Regression gates (blank page, runtime errors, pager glitches, performance budgets, zombie imports, money fuzz, orphans) | **Done**, in the release | 2bc6d86d, a34799f8, a332a8cf, 4b4b078d. |
+| Old cached clients after this release | **Owner ruling needed** | 409 money_precision_review_needed on new sales/returns; queued sale kept, must be re-keyed after restart; no en/km entry for the code. |
+| Admin catalog preview sharing the shopper page-size key; zero-result pager hidden; PageSizeSelect arrow keys | **Owner ruling needed** | Flagged by the frontend adversarial lane; pre-existing except the shared key. |
+| Sale-id/return-id collision false 409 on return create; sub-cent middle-return cancellation refused; misleading lineage code on null-snapshot lines | **Not yet** (documented) | Orphan gate and Fable lane findings; all fail closed. |
+| Physical iOS/PWA, camera, printer smoke | **Not certified** | Cannot be exercised from this workstation. |
