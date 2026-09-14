@@ -1,3 +1,21 @@
+## September 14 iOS PWA program LIVE
+
+| Item | State | Evidence |
+| --- | --- | --- |
+| Scanner button opens the camera in one tap | **Deployed** — Worker d972a943-659e-4210-a1c9-58afc7436c0f, commit 4b20bd68 | 8e6371cb, c2185071; `e2e/scanner.spec.ts` "one tap on the scan button starts the camera" green on both Chromium projects (WebKit has no camera in Playwright). |
+| iOS PWA storage boundaries, root error boundary, one crash reporter | **Deployed** | 494549a3, ba00dcee, 16f7897c; `startupResilience`, `iosInstallAndPersistence`. |
+| iOS keyboard/viewport layout, 16px focus-zoom floor, modal caps via `--app-vh` | **Deployed** | f77da6f8, 142356e2, f7d193e7, 108391bb; `iosLayoutGuards`; `e2e/ios-layout.spec.ts`. |
+| Service-worker update probe, scoped failed-install cleanup, print surfaces | **Deployed** | 6bc719df, cbbdd22b; `e2e/pwa-update.spec.ts`. |
+| iOS install hint + persistence surviving logout on a shared till | **Deployed** | a2031b77, 64ff7ef6. |
+| Admin-document rewrite degrades to the untouched asset | **Deployed** | 166fd63f; `test-admin-host-document-rewrite-pure`. |
+| Playwright integration/system suite as runnable files | **Done**, in the release | `frontend/e2e/` + README; `npm run test:e2e*`; system tier through a real local Worker + D1 (`e2e/system/pos-sale.spec.ts`). |
+| Free vs paid plan split (deploy-time choice, runtime fallback) | **Done**; paid **Deployed**, free variant **not deployed** (owner's choice per deploy) | 810a2cab..f159e9ff, a8589ca0, 4df59bc6, 97dae6cb, 4b20bd68; `npm run deploy:free`, `dry-run:free|paid`; drift test locks the two configs to four differences. |
+| Cross-cutting risk pass (conflicts, duplicates, cache/memory/security, same device other accounts, old vs new data, deploy-time update) | **Done** | bos-verify reviews of 142356e2 and f159e9ff; fixes 166fd63f, 64ff7ef6, cbbdd22b, ba00dcee; deferred items listed in progress.md. |
+| Harness-reproduced product defects (admin boot on blocked storage, bootstrap prefetch rejection, pagination inputs <16px, account-handover storage/401/fence) | **Not yet** — `test.fixme` in `frontend/e2e`, README "Expected red" | Each fixme names the deciding lines. |
+| `utils/safeStorage.ts` consolidation; advisory-stack anchor; `Vary: Accept`; `last_error_code` migration; free import path executed by a test | **Not yet** (next checkpoint) | Recorded in progress.md. |
+| Free-account measurement deploy; live D1 size read; bulk re-import on free | **Owner ruling needed** | See progress.md. |
+| Physical iOS/PWA, camera, printer smoke | **Not certified** | Cannot be exercised from this workstation; the WebKit project stands in for the iPhone contract only where Playwright can. |
+
 ## Evidence reconciliation and remaining-work status — September 10
 
 The production merge ledger is reconciled: the verified postflight records **166** applied product merges (history IDs 369–534, 166 audits, zero pending fingerprints) in addition to the **8** earlier proven merges, for **174 proven merges total**. Older register paragraphs that say “eight completed cases” describe the pre-cleanup checkpoint and are stale. The old cleanup preview reported 1,774 eligible and 19 quarantined groups, but that preview is not current evidence; a fresh authenticated preview is required before any further merge. No merge is running now.
